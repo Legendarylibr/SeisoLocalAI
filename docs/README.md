@@ -1,12 +1,13 @@
 # Seiso documentation
 
-Choose your platform, install, then run Forge or the CLI. All commands below assume you are in the **repository root** with your virtualenv activated.
+Choose your platform, install, then run Forge or the CLI.
 
 ## Startup paths
 
 | Mode | Commands | URL |
 |------|----------|-----|
-| **Forge (production)** | `cd forge-ui && npm install && npm run build` then `seiso forge` | http://127.0.0.1:8765 |
+| **Install + start (Linux / macOS)** | `curl -fsSL https://raw.githubusercontent.com/seiso-ai/seiso/main/scripts/install.sh \| bash` then `~/Seiso/scripts/start.sh` | http://127.0.0.1:8765 |
+| **Forge (production)** | `./scripts/install.sh` then `./scripts/start.sh` — or `cd forge-ui && npm install && npm run build` then `seiso forge` | http://127.0.0.1:8765 |
 | **Forge (UI dev)** | Terminal 1: `seiso forge` · Terminal 2: `cd forge-ui && npm run dev` | http://127.0.0.1:5173 (API proxied to :8765) |
 | **CLI training** | `seiso train --config configs/example_lora.yaml` | — |
 | **CLI chat** | `seiso chat --model <id-or-path> --prompt "..."` | — |
@@ -46,7 +47,14 @@ Data directory defaults to `~/.seiso` (override with `SEISO_DATA_DIR`). See [ins
 ## Quick commands
 
 ```bash
-# Full stack (Linux NVIDIA)
+# One-shot install + start (Linux / macOS)
+curl -fsSL https://raw.githubusercontent.com/seiso-ai/seiso/main/scripts/install.sh | bash
+~/Seiso/scripts/start.sh
+
+# From a clone
+./scripts/install.sh && ./scripts/start.sh
+
+# Full stack (Linux NVIDIA, manual)
 pip install -e ".[forge,train,cuda,dev]"
 
 # Build UI (required before first Forge launch, or when UI changes)
@@ -75,5 +83,5 @@ Seiso/
 ├── data/            # Sample dataset (example_lora.yaml)
 ├── deploy/          # Caddy, nginx, systemd, HTTPS env example
 ├── docs/            # This documentation
-└── scripts/         # CI runner, precheck, dependency locks
+└── scripts/         # install.sh, start.sh, CI runner, dependency locks
 ```

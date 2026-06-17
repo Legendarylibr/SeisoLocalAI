@@ -1,4 +1,4 @@
-"""Tool/MCP result sanitization — data-only envelope for LLM context."""
+"""Tool result sanitization — data-only envelope for LLM context."""
 
 from __future__ import annotations
 

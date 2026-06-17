@@ -2,7 +2,6 @@ forge/api/routes/export.py:227: error: Argument "token" to "precheck_hub_export"
 forge/api/routes/inference.py:151: error: Returning Any from function declared to return "dict[str, Any]"  [no-any-return]
 forge/api/routes/openai.py:71: error: Returning Any from function declared to return "str"  [no-any-return]
 forge/api/routes/training.py:225: error: Returning Any from function declared to return "dict[Any, Any]"  [no-any-return]
-forge/mcp/client.py:56: error: Returning Any from function declared to return "list[dict[Any, Any]]"  [no-any-return]
 forge/orchestrators/base.py:12: error: Module "enum" has no attribute "StrEnum"  [attr-defined]
 forge/orchestrators/base.py:139: error: Incompatible types in assignment (expression has type "str", variable has type "JobStatus")  [assignment]
 forge/orchestrators/base.py:163: error: Incompatible types in assignment (expression has type "str", variable has type "JobStatus")  [assignment]

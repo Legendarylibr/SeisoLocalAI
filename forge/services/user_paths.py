@@ -4,9 +4,24 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from seiso.security import SecurityError, safe_join
+from seiso.security import SecurityError, assert_within, safe_join
 
 _USER_SCOPED_ROOTS = frozenset({"uploads", "knowledge", "artifacts", "sandbox", "models", "checkpoints", "exports"})
+_SHARED_CACHE_ROOTS = frozenset({"hf_cache"})
+
+
+def _logical_path(source: Path) -> Path:
+    """Absolute path of *source* without following its final symlink component."""
+    source = source.expanduser()
+    if source.is_absolute():
+        parent = source.parent
+    else:
+        parent = source.absolute().parent
+    if parent == Path("."):
+        parent_resolved = Path.cwd().resolve()
+    else:
+        parent_resolved = parent.resolve()
+    return parent_resolved / source.name
 
 
 def user_dir(sandbox_root: Path, user_id: str, category: str) -> Path:
@@ -49,33 +64,62 @@ def assert_user_training_config(sandbox_root: Path, user_id: str, config: dict) 
         assert_user_path(sandbox_root, user_id, resume)
 
 
+def _assert_resolved_scope(
+    base: Path,
+    user_id: str,
+    logical: Path,
+    resolved: Path,
+) -> None:
+    """Ensure resolved target is authorized for this user (blocks symlink escapes)."""
+    rel = resolved.relative_to(base)
+    if not rel.parts:
+        raise SecurityError("Invalid path")
+
+    root = rel.parts[0]
+    if root in _USER_SCOPED_ROOTS:
+        if len(rel.parts) >= 2 and rel.parts[1] == user_id:
+            return
+        raise SecurityError(f"Path must be under {root}/{user_id}/")
+
+    if root in _SHARED_CACHE_ROOTS:
+        log_rel = logical.relative_to(base)
+        if log_rel.parts and log_rel.parts[0] == "models" and len(log_rel.parts) >= 2 and log_rel.parts[1] == user_id:
+            return
+        raise SecurityError("Shared cache paths are only reachable via your model inventory")
+
+    raise SecurityError(f"Access denied to path root: {root!r}")
+
+
 def assert_user_path(sandbox_root: Path, user_id: str, target: str | Path) -> Path:
     """Path must be inside sandbox and under an allowed root scoped to user_id.
 
-    Inventory symlinks are checked at their logical location under the user tree,
-    then resolved for inference file access.
+    Inventory symlinks are checked at their logical location under the user tree;
+    the resolved target must remain inside the sandbox (no host-path escapes).
     """
-    source = Path(target).expanduser()
-    logical = source.absolute()
     base = sandbox_root.resolve()
+    source = Path(target).expanduser()
+    logical = _logical_path(source)
+
     try:
-        rel = logical.relative_to(base)
+        log_rel = logical.relative_to(base)
     except ValueError as exc:
         raise SecurityError(f"Path must be inside {base}") from exc
-    if not rel.parts:
+    if not log_rel.parts:
         raise SecurityError("Invalid path")
-    root = rel.parts[0]
-    if root not in _USER_SCOPED_ROOTS:
-        raise SecurityError(f"Access denied to path root: {root!r}")
-    if len(rel.parts) < 2 or rel.parts[1] != user_id:
-        raise SecurityError(f"Path must be under {root}/{user_id}/")
+    log_root = log_rel.parts[0]
+    if log_root not in _USER_SCOPED_ROOTS:
+        raise SecurityError(f"Access denied to path root: {log_root!r}")
+    if len(log_rel.parts) < 2 or log_rel.parts[1] != user_id:
+        raise SecurityError(f"Path must be under {log_root}/{user_id}/")
     if not (source.exists() or source.is_symlink()):
         raise SecurityError(f"Model path not found: {source}")
-    resolved = source.resolve()
+
+    resolved = assert_within(base, source.resolve())
     if source.is_symlink() and not resolved.exists():
         raise SecurityError(
             f"Model cache link is broken — re-download from Hub: {logical.name}"
         )
+    _assert_resolved_scope(base, user_id, logical, resolved)
     return resolved
 
 

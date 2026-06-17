@@ -194,7 +194,7 @@ def test_export_lora_copies_and_writes_sidecar(tmp_path: Path):
     ckpt = sandbox / "checkpoints" / "run1"
     ckpt.mkdir(parents=True)
     (ckpt / "adapter_config.json").write_text('{"r": 16}')
-    (ckpt / "adapter_model.bin").write_text("weights")
+    (ckpt / "adapter_model.safetensors").write_text("weights")
 
     out = sandbox / "exports" / "job1"
     results = export_checkpoint(
@@ -207,6 +207,7 @@ def test_export_lora_copies_and_writes_sidecar(tmp_path: Path):
     )
     assert results["lora"].is_dir()
     assert (results["lora"] / "adapter_config.json").is_file()
+    assert (results["lora"] / "adapter_model.safetensors").is_file()
     assert (results["lora"] / "seiso_export_metadata.json").is_file()
 
 
@@ -310,7 +311,7 @@ def test_auto_export_after_training_uses_suggested_profile(tmp_path: Path):
     ckpt = sandbox / "checkpoints" / "run1"
     ckpt.mkdir(parents=True)
     (ckpt / "adapter_config.json").write_text('{"r": 8}')
-    (ckpt / "weights.bin").write_text("x")
+    (ckpt / "adapter_model.safetensors").write_text("x")
 
     out = sandbox / "exports" / "auto"
     results = auto_export_after_training(ckpt, out, {}, sandbox_root=sandbox)

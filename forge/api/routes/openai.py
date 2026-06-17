@@ -36,14 +36,19 @@ class ChatCompletionRequest(BaseModel):
     tools: list[dict] | None = None
 
 
+_UNTRUSTED_OPENAI_ROLES = frozenset({"tool", "function", "system"})
+
+
 def _resolve_payload(body: ChatCompletionRequest, model_path: str | None) -> dict[str, Any]:
     messages = []
     for m in body.messages:
         role = m.role.lower()
-        if role in ("tool", "function"):
+        if role in _UNTRUSTED_OPENAI_ROLES:
             raise HTTPException(400, f"Untrusted message role: {m.role}")
         content = m.content if isinstance(m.content, str) else json.dumps(m.content)
         messages.append({"role": m.role, "content": content})
+    if not any(m["role"].lower() == "user" for m in messages):
+        raise HTTPException(400, "At least one user message is required")
     return {
         "model_path": model_path,
         "messages": messages,

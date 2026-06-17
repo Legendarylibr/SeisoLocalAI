@@ -31,3 +31,28 @@ def test_assert_user_path_rejects_path_outside_user_tree(tmp_path: Path):
 
     with pytest.raises(SecurityError, match="Path must be under"):
         assert_user_path(tmp_path, "user-1", outsider)
+
+
+def test_assert_user_path_rejects_symlink_escape(tmp_path: Path):
+    user_id = "user-1"
+    uploads = tmp_path / "uploads" / user_id
+    uploads.mkdir(parents=True)
+    link = uploads / "evil.txt"
+    link.symlink_to("/etc/passwd")
+
+    with pytest.raises(SecurityError, match="outside sandbox"):
+        assert_user_path(tmp_path, user_id, link)
+
+
+def test_assert_user_path_rejects_cross_user_symlink(tmp_path: Path):
+    user_id = "user-a"
+    victim = tmp_path / "models" / "user-b" / "secret.gguf"
+    victim.parent.mkdir(parents=True)
+    victim.write_bytes(b"secret")
+
+    link = tmp_path / "models" / user_id / "stolen.gguf"
+    link.parent.mkdir(parents=True)
+    link.symlink_to(victim)
+
+    with pytest.raises(SecurityError, match="Path must be under"):
+        assert_user_path(tmp_path, user_id, link)

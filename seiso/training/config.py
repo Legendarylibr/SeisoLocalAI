@@ -61,6 +61,7 @@ class TrainConfig(BaseModel):
     multi_gpu: bool = False
     use_triton: bool = True
     use_fused_ce: bool = True
+    use_fused_lora: bool = True
     use_rslora: bool = False
     train_on_responses_only: bool = True
     packing: bool = False
@@ -83,8 +84,10 @@ class TrainConfig(BaseModel):
 def run_training(config: TrainConfig, *, on_metric=None) -> Path:
     """Execute training job; returns output checkpoint directory."""
     from seiso.models.hf_env import configure_hf_hub_cache
+    from seiso.security.nvidia_boundary import enforce_nvidia_secure_boundary
     from seiso.training.trainer import SeisoTrainer
 
     configure_hf_hub_cache()
+    enforce_nvidia_secure_boundary(context="training")
     trainer = SeisoTrainer(config, on_metric=on_metric)
     return trainer.run()

@@ -188,21 +188,6 @@ async def test_inference_chat_e2e(app, auth_client, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_mcp_blocks_system_paths(app, auth_client, enable_tools):
-    client, _token, headers, _tmp = auth_client
-    res = await client.post(
-        "/api/mcp/servers",
-        headers=headers,
-        json={
-            "name": "bad-fs",
-            "command": "npx",
-            "args": ["@modelcontextprotocol/server-filesystem@1.0.0", "/etc"],
-        },
-    )
-    assert res.status_code == 400
-
-
-@pytest.mark.asyncio
 async def test_dataset_sandbox_blocks_outside_path(tmp_path):
     pytest.importorskip("datasets")
     from seiso.security import SecurityError

@@ -108,10 +108,12 @@ async def start_training(
         user_id=user_id,
         inventory=inventory,
     )
+    original_model_id = str(body.config.get("model_id", ""))
     training_config = {**body.config, "model_id": resolved_model_id}
-    if local_path:
-        training_config.setdefault("extra", {})
-        training_config["extra"]["resolved_model_path"] = local_path
+    training_config.setdefault("extra", {})
+    if local_path or resolved_model_id != original_model_id:
+        training_config["extra"]["resolved_model_path"] = local_path or resolved_model_id
+        training_config["extra"]["original_model_id"] = original_model_id
 
     job_id = str(uuid.uuid4())
     await db.create_training_job(user_id, training_config, body.project_id, job_id=job_id)

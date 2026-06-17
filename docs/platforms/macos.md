@@ -13,6 +13,15 @@
 
 ## Install
 
+**Recommended** — automated install (Python 3.10+, Node.js 18+, git):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/seiso-ai/seiso/main/scripts/install.sh | bash
+~/Seiso/scripts/start.sh
+```
+
+Manual:
+
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -U pip
@@ -22,6 +31,8 @@ pip install -e ".[forge,train,mlx,dev]"
 ## Start Forge
 
 ```bash
+~/Seiso/scripts/start.sh
+# or from a clone:
 cd forge-ui && npm install && npm run build && cd ..
 seiso forge
 ```

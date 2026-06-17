@@ -8,6 +8,7 @@ Seiso patches compatible model layers during training for lower memory bandwidth
 |-----------|--------------|--------|----------|
 | RMSNorm | `LlamaRMSNorm`, `Qwen2RMSNorm`, … | CUDA stripe | Triton |
 | SwiGLU MLP | `LlamaMLP`, `Qwen2MLP`, … | CUDA | Triton |
+| LoRA delta | PEFT `Linear` adapters (rank ≤ 64) | CUDA | PyTorch |
 | Cross-entropy | `FusedSFTTrainer.compute_loss` | CUDA | Triton |
 
 ## Enable
@@ -17,6 +18,7 @@ Seiso patches compatible model layers during training for lower memory bandwidth
 ```yaml
 use_triton: true    # master switch for fused RMSNorm + MLP
 use_fused_ce: true
+use_fused_lora: true   # CUDA / WSL2 only; fused low-rank delta
 ```
 
 **Python:**
@@ -34,9 +36,9 @@ release_training_memory(model)
 ## Backend selection
 
 ```
-NVIDIA  → native CUDA (.cu JIT) → Triton → PyTorch
-AMD     → Triton → PyTorch
-macOS   → PyTorch only
+NVIDIA / WSL2  → native CUDA (.cu JIT, SM-targeted) → Triton → PyTorch
+AMD            → Triton → PyTorch
+macOS          → PyTorch only
 ```
 
 Inspect at runtime:

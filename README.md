@@ -19,6 +19,31 @@ Runs on Windows, Linux, WSL, and macOS. See **[docs/](docs/README.md)** for per-
 
 ## Quick start
 
+### Linux & macOS (recommended)
+
+Install Python 3.10+, [Node.js 18+](https://nodejs.org/), and git, then run:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/seiso-ai/seiso/main/scripts/install.sh | bash
+~/Seiso/scripts/start.sh
+```
+
+Open **http://127.0.0.1:8765** — complete onboarding to create your local admin account.
+
+Options:
+
+```bash
+# Custom install location
+SEISO_INSTALL_DIR=~/code/Seiso curl -fsSL https://raw.githubusercontent.com/seiso-ai/seiso/main/scripts/install.sh | bash
+
+# Install and start Forge immediately
+SEISO_START=1 curl -fsSL https://raw.githubusercontent.com/seiso-ai/seiso/main/scripts/install.sh | bash
+```
+
+The installer clones to `~/Seiso` by default, creates a venv, installs platform extras (CUDA on Linux + NVIDIA, MLX on macOS), builds the Forge UI, and copies `.env.example` → `.env`. See [docs/install.md](docs/install.md) for manual install and Windows.
+
+### Manual install (from a clone)
+
 ```bash
 # Install — see docs/install.md for platform extras
 pip install -e ".[forge,train,dev]"
@@ -39,7 +64,7 @@ seiso forge
 seiso train --config configs/example_lora.yaml
 ```
 
-Open **http://127.0.0.1:8765** — complete onboarding to create your local admin account. For UI hot reload during development, see [docs/forge.md](docs/forge.md).
+For UI hot reload during development, see [docs/forge.md](docs/forge.md).
 
 ### Local CI
 
@@ -82,7 +107,7 @@ Backend orchestrators spawn isolated workers with SSE log streaming:
 
 | Module | Role |
 |--------|------|
-| `forge/orchestrators/inference` | Local inference, tools, MCP, providers |
+| `forge/orchestrators/inference` | Local inference, tools, providers |
 | `forge/orchestrators/training` | QLoRA training jobs, multi-GPU via torchrun |
 | `forge/orchestrators/export` | Merge LoRA, GGUF, Hub upload |
 | `forge/orchestrators/recipes` | Recipe jobs, HF dataset ops |
@@ -114,7 +139,6 @@ Inference vs training differ on macOS — MLX is inference-only; training uses P
 - **Multi-GPU** — torchrun distributed workers; rank-0 checkpoint writes
 - **Tool calling** — web search, sandboxed code execution, artifact writes
 - **Providers** — OpenAI, Anthropic, Ollama, vLLM routing
-- **MCP** — connect stdio MCP servers; tools auto-register in chat
 - **Recipe Studio** — visual `@xyflow/react` canvas → backend graph executor
 - **Model compression** — distill, MLP prune, recovery fine-tune, GPTQ/AWQ, speculative decoding ([codellama-compress](https://github.com/Legendarylibrorg/codellama-compress))
 - **RL quantization** — adaptive GGUF quant policy via reinforcement learning
@@ -148,7 +172,7 @@ Deploy configs: [`deploy/`](deploy/) · Guide: [docs/deployment/reverse-proxy.md
 
 | Variable | Enables |
 |----------|---------|
-| `SEISO_ALLOW_TOOLS=true` | Web search, artifact writes, MCP server create/connect |
+| `SEISO_ALLOW_TOOLS=true` | Web search, artifact writes |
 | `SEISO_ALLOW_CODE_EXEC=true` | Sandboxed `execute_code` tool (also requires per-request flag) |
 | `SEISO_ALLOW_OPENAI_TOOLS=true` | OpenAI-compatible `/v1/chat/completions` tool calling |
 
@@ -169,19 +193,10 @@ Outbound calls to OpenAI, Anthropic, Ollama, and vLLM providers are hardened:
 - **DNS pinning** — hostname is resolved and validated immediately before connect; the socket layer is forced to the validated IP to close DNS-rebinding windows
 - Local Ollama/vLLM limited to ports `11434` and `8000`/`8001`
 
-### MCP hardening
-
-When `SEISO_ALLOW_TOOLS=true`:
-
-- Per-user server pools (max 8 servers per user)
-- Ownership validated on inference connect
-- Blocked env keys: `PATH`, proxies, `PYTHON*`, `LD_*`, `DYLD_*`, `NODE_*`, `SSL_*`
-- Inline exec args blocked (`python3 -c`, `-e`, `-m`); unpinned `npx -y` rejected
-
 ### Auth & rate limits
 
-- Signed session tokens; rate limiting disabled on localhost-only mode (default)
-- When `SEISO_ALLOW_REMOTE=true`: global limit (`SEISO_RATE_LIMIT`, default 120/min per IP) and login throttling (10 attempts/minute per IP)
+- Signed session tokens; login throttling (10 attempts/minute per IP) always enabled
+- Global API rate limiting when `SEISO_ALLOW_REMOTE=true` (`SEISO_RATE_LIMIT`, default 120/min per IP)
 - Job and resource ownership enforced on all streaming endpoints
 
 ### Database (local-only, zero retention)
@@ -190,7 +205,7 @@ When `SEISO_ALLOW_TOOLS=true`:
 |---------|---------|---------|
 | `SEISO_DB_EPHEMERAL=true` | on | In-memory SQLite — all metadata wiped on restart |
 | `SEISO_DB_EPHEMERAL=false` | — | Opt-in persistence to `{SEISO_DATA_DIR}/forge.db` |
-| `SEISO_DB_ENCRYPTION_KEY` | auto | AES-256-GCM key for sensitive fields (chat, provider configs, MCP env) |
+| `SEISO_DB_ENCRYPTION_KEY` | auto | AES-256-GCM key for sensitive fields (chat, provider configs) |
 
 Sensitive columns are encrypted at the application layer (same AES-256-GCM pattern as [Web-app-practice](https://github.com/Legendarylibr/Web-app-practice)). When ephemeral, a fresh session key is generated each run; the legacy `forge.db` file is removed on startup.
 

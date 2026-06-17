@@ -19,5 +19,6 @@ use_rslora: false
 packing: false
 use_triton: true
 use_fused_ce: true
+use_fused_lora: true
 seed: 42
 save_steps: 50

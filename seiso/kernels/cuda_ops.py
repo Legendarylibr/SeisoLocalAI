@@ -25,6 +25,36 @@ def _torch_cuda_available() -> bool:
         return False
 
 
+def _cuda_compile_flags() -> tuple[list[str], list[str]]:
+    """Host and device compile flags tuned for native SM arch and WSL2 JIT."""
+    platform = detect_gpu()
+    extra_cflags = ["-O3", "-std=c++17"]
+    extra_cuda_cflags = [
+        "-O3",
+        "--use_fast_math",
+        "-std=c++17",
+        "-U__CUDA_NO_HALF_OPERATORS__",
+        "-U__CUDA_NO_HALF_CONVERSIONS__",
+        "-U__CUDA_NO_BFLOAT16_CONVERSIONS__",
+        "-U__CUDA_NO_BFLOAT16_OPERATORS__",
+        "-Xptxas",
+        "-O3",
+    ]
+
+    cc = platform.cuda_compute_capability
+    if cc is not None:
+        major, minor = cc
+        arch = f"compute_{major}{minor}"
+        sm = f"sm_{major}{minor}"
+        extra_cuda_cflags.append(f"-gencode=arch={arch},code={sm}")
+
+    if platform.is_wsl2:
+        # WSL2: parallel nvcc threads + lineinfo for profiling on Windows hosts.
+        extra_cuda_cflags.extend(["--threads", "0", "-lineinfo"])
+
+    return extra_cflags, extra_cuda_cflags
+
+
 @lru_cache(maxsize=1)
 def is_cuda_available() -> bool:
     """True when native CUDA extension loaded (NVIDIA GPUs only)."""
@@ -49,6 +79,7 @@ def _load_extension() -> Any | None:
     try:
         from torch.utils.cpp_extension import load
 
+        cflags, cuda_cflags = _cuda_compile_flags()
         _EXT = load(
             name="seiso_cuda_kernels",
             sources=[
@@ -59,19 +90,13 @@ def _load_extension() -> Any | None:
                 str(_CUDA_DIR / "fused_cross_entropy.cu"),
             ],
             extra_include_paths=[str(_CUDA_DIR / "include"), str(_CUDA_DIR)],
-            extra_cflags=["-O3", "-std=c++17"],
-            extra_cuda_cflags=[
-                "-O3",
-                "--use_fast_math",
-                "-std=c++17",
-                "-U__CUDA_NO_HALF_OPERATORS__",
-                "-U__CUDA_NO_HALF_CONVERSIONS__",
-                "-U__CUDA_NO_BFLOAT16_CONVERSIONS__",
-                "-U__CUDA_NO_BFLOAT16_OPERATORS__",
-            ],
+            extra_cflags=cflags,
+            extra_cuda_cflags=cuda_cflags,
             verbose=False,
         )
-        logger.info("Seiso native CUDA kernels loaded (stripe RMSNorm)")
+        plat = detect_gpu()
+        target = "WSL2 CUDA" if plat.is_wsl2 else "native CUDA"
+        logger.info("Seiso %s fused kernels loaded (SM %s)", target, plat.cuda_compute_capability)
         return _EXT
     except Exception as exc:  # noqa: BLE001
         _EXT_ERROR = str(exc)
@@ -112,18 +137,20 @@ def fused_swiglu(gate, up):
 
 
 def fused_lora_delta(x, lora_A, lora_B, base=None, scale: float = 1.0):
-    """Fused low-rank delta: ``base + scale * B @ (A @ x)``."""
+    """Fused low-rank delta: ``base + scale * B @ (A @ x)`` for 1D or 2D inputs."""
 
     if not x.is_cuda:
-        delta = scale * (lora_B @ (lora_A @ x))
+        hidden = x @ lora_A.t()
+        delta = scale * (hidden @ lora_B.t())
         return base + delta if base is not None else delta
 
     ext = _load_extension()
-    if ext is not None and x.dim() == 1 and lora_A.size(0) <= 64:
+    rank = lora_A.size(0)
+    if ext is not None and rank <= 64 and x.dim() in (1, 2):
         return ext.fused_lora_delta(x, lora_A, lora_B, base, scale)
 
-    hidden = lora_A @ x
-    delta = scale * (lora_B @ hidden)
+    hidden = x @ lora_A.t()
+    delta = scale * (hidden @ lora_B.t())
     return base + delta if base is not None else delta
 
 

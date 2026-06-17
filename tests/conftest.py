@@ -51,7 +51,7 @@ def user_path(data_dir: Path, user_id: str, category: str, *parts: str) -> Path:
 
 @pytest.fixture
 def enable_tools(monkeypatch):
-    """Enable tool/MCP features and reload settings."""
+    """Enable agent tool features and reload settings."""
     monkeypatch.setenv("SEISO_ALLOW_TOOLS", "true")
     clear_dependency_caches()
     yield

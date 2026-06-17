@@ -8,7 +8,9 @@ from collections.abc import Callable
 from typing import Any
 
 from seiso.kernels.dispatch import (
+    active_backend,
     estimate_vram_savings_pct,
+    fused_lora_delta,
     fused_rms_norm,
     fused_swiglu,
     kernel_metadata,
@@ -155,4 +157,95 @@ def apply_training_kernels(
             backend,
             platform.device_name,
         )
+    return meta
+
+
+def _is_peft_lora_linear(module: Any) -> bool:
+    return (
+        hasattr(module, "lora_A")
+        and hasattr(module, "lora_B")
+        and hasattr(module, "base_layer")
+        and hasattr(module, "scaling")
+    )
+
+
+def apply_fused_lora_kernels(model: Any, *, max_rank: int = 64) -> dict[str, Any]:
+    """
+    Patch PEFT LoRA linear layers with fused CUDA low-rank delta kernels.
+
+    Active on NVIDIA CUDA and WSL2 paths when rank <= max_rank.
+    """
+    meta = {
+        "fused_lora_enabled": False,
+        "lora_patched": 0,
+        "lora_skipped": 0,
+    }
+    platform = detect_gpu()
+    if not platform.uses_optimized_cuda_kernels or active_backend() != "cuda":
+        return meta
+
+    try:
+        import torch.nn.functional as F
+    except ImportError:
+        return meta
+
+    patched = 0
+    skipped = 0
+
+    for _name, module in model.named_modules():
+        if not _is_peft_lora_linear(module):
+            continue
+        if getattr(module, "use_dora", False):
+            skipped += 1
+            continue
+        if hasattr(module, "_seiso_orig_forward"):
+            continue
+
+        def _fused_lora_forward(self, x, *args, **kwargs):
+            if self.disable_adapters:
+                return self.base_layer(x, *args, **kwargs)
+
+            result = self.base_layer(x, *args, **kwargs)
+            if not self.active_adapters:
+                return result
+
+            for active_adapter in self.active_adapters:
+                if active_adapter not in self.lora_A:
+                    continue
+                lora_a = self.lora_A[active_adapter]
+                lora_b = self.lora_B[active_adapter]
+                dropout = self.lora_dropout[active_adapter]
+                scaling = self.scaling[active_adapter]
+                rank = lora_a.weight.size(0)
+
+                x_mod = x
+                if hasattr(self, "_cast_input_dtype"):
+                    x_mod = self._cast_input_dtype(x_mod, lora_a.weight.dtype)
+                if dropout > 0 and self.training:
+                    x_mod = F.dropout(x_mod, p=dropout)
+
+                if (
+                    x_mod.is_cuda
+                    and rank <= max_rank
+                    and x_mod.dim() >= 2
+                    and active_backend() == "cuda"
+                ):
+                    flat = x_mod.reshape(-1, x_mod.shape[-1])
+                    delta = fused_lora_delta(flat, lora_a.weight, lora_b.weight, scale=scaling)
+                    delta = delta.reshape(*x_mod.shape[:-1], delta.shape[-1])
+                    result = result + delta.to(result.dtype)
+                else:
+                    result = result + lora_b(lora_a(x_mod)) * scaling
+
+            return result
+
+        _patch_forward(model, module, _fused_lora_forward)
+        patched += 1
+
+    meta["fused_lora_enabled"] = patched > 0
+    meta["lora_patched"] = patched
+    meta["lora_skipped"] = skipped
+    if patched:
+        target = "WSL2 CUDA" if platform.is_wsl2 else "CUDA"
+        logger.info("Fused LoRA: %d layers patched (%s path)", patched, target)
     return meta

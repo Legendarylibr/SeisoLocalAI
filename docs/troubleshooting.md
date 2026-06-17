@@ -42,7 +42,24 @@ cd forge-ui && npm install && npm run build && cd ..
 seiso forge
 ```
 
+Or run `./scripts/start.sh` — it builds the UI automatically if `forge-ui/dist` is missing.
+
 For UI development, run `seiso forge` in one terminal and `cd forge-ui && npm run dev` in another — browse http://127.0.0.1:5173. See [forge.md](forge.md).
+
+## Install script fails
+
+**Symptom:** `curl ... | bash` exits with missing Python, Node, or git.
+
+**Fix:**
+- Python 3.10+: `python3 --version`
+- Node.js 18+: `node --version` and `npm --version` ([nodejs.org](https://nodejs.org/))
+- git: `git --version`
+- Custom path: `SEISO_INSTALL_DIR=~/code/Seiso curl -fsSL .../scripts/install.sh | bash`
+- Re-run from a clone: `./scripts/install.sh`
+
+**Symptom:** `Seiso not found` when running `start.sh`.
+
+**Fix:** Run the installer first, or set `SEISO_INSTALL_DIR` to your clone path.
 
 ## Port in use
 

@@ -4,6 +4,15 @@ Full Seiso support: fused CUDA kernels, QLoRA, multi-GPU, Forge UI.
 
 ## Install
 
+**Recommended** — automated install (Python 3.10+, Node.js 18+, git):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/seiso-ai/seiso/main/scripts/install.sh | bash
+~/Seiso/scripts/start.sh
+```
+
+Manual:
+
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -U pip
@@ -18,6 +27,8 @@ Requirements:
 ## Start Forge
 
 ```bash
+~/Seiso/scripts/start.sh
+# or from a clone:
 cd forge-ui && npm install && npm run build && cd ..
 seiso forge
 ```
@@ -26,15 +37,17 @@ Open **http://127.0.0.1:8765** — complete onboarding, then use **Training Stud
 
 ## Train (CLI)
 
+Approve GPU training on bare Linux hosts (gates native kernel JIT):
+
 ```bash
+export SEISO_NVIDIA_HOST_VENV_ACK=1   # or use Docker / VM tier
 seiso train --config configs/example_lora.yaml
 ```
-
-Config flags for kernels:
 
 ```yaml
 use_triton: true      # enables fused RMSNorm + SwiGLU MLP (CUDA native on NVIDIA)
 use_fused_ce: true    # fused cross-entropy in SFTTrainer
+use_fused_lora: true  # fused LoRA delta (CUDA / WSL2, rank ≤ 64)
 ```
 
 ## Benchmark kernels
@@ -57,7 +70,8 @@ See [../training/multi-gpu.md](../training/multi-gpu.md).
 
 | Layer | Backend |
 |-------|---------|
-| RMSNorm + MLP | Native CUDA (stripe) → Triton → PyTorch |
+| RMSNorm + MLP | Native CUDA (stripe, SM-targeted) → Triton → PyTorch |
+| LoRA delta | Native CUDA (batched) → PyTorch |
 | Cross-entropy | Native CUDA → Triton → PyTorch |
 
 See [../training/kernels.md](../training/kernels.md).

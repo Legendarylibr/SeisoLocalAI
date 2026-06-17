@@ -78,8 +78,7 @@ def export_checkpoint(
     for fmt in options.formats:
         if fmt == ExportFormat.LORA:
             dest = out_root / "lora"
-            if ckpt.exists():
-                shutil.copytree(ckpt, dest, dirs_exist_ok=True)
+            _export_lora_adapter(ckpt, dest, log)
             _write_export_sidecar(dest, ckpt, fmt, kind)
             results[fmt.value] = dest
             log(f"LoRA adapter exported to {dest}")
@@ -87,7 +86,7 @@ def export_checkpoint(
         elif fmt == ExportFormat.MERGED:
             dest = out_root / "merged"
             dest.mkdir(parents=True, exist_ok=True)
-            _merge_lora(ckpt, dest, log)
+            merge_lora_checkpoint(ckpt, dest, log)
             _write_export_sidecar(dest, ckpt, fmt, kind)
             results[fmt.value] = dest
 
@@ -204,32 +203,132 @@ def _select_hub_folder(out_root: Path, formats: list[ExportFormat]) -> Path:
     return out_root
 
 
-def _merge_lora(checkpoint: Path, dest: Path, log: Callable[[str], None]) -> None:
+def _load_training_manifest(checkpoint: Path) -> dict:
+    manifest_path = checkpoint / "seiso_manifest.json"
+    if not manifest_path.is_file():
+        return {}
+    try:
+        return json.loads(manifest_path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _resolve_merge_base_model(checkpoint: Path) -> str:
+    """Resolve base model path/id for LoRA merge — prefers local cached weights."""
+    adapter_config = checkpoint / "adapter_config.json"
+    if adapter_config.is_file():
+        try:
+            cfg = json.loads(adapter_config.read_text())
+            for key in ("base_model_name_or_path", "seiso_original_base_model"):
+                value = cfg.get(key)
+                if isinstance(value, str) and value.strip():
+                    candidate = Path(value).expanduser()
+                    if candidate.is_dir() and (candidate / "config.json").is_file():
+                        return str(candidate.resolve())
+        except (OSError, json.JSONDecodeError):
+            pass
+
+    manifest = _load_training_manifest(checkpoint)
+    for key in ("resolved_model_path", "base_model_path", "model_id", "original_model_id"):
+        value = manifest.get(key)
+        if not isinstance(value, str) or not value.strip():
+            continue
+        candidate = Path(value).expanduser()
+        if candidate.is_dir() and (candidate / "config.json").is_file():
+            return str(candidate.resolve())
+        if not candidate.is_dir():
+            return value
+
+    if adapter_config.is_file():
+        try:
+            cfg = json.loads(adapter_config.read_text())
+            base_id = cfg.get("base_model_name_or_path", "")
+            if isinstance(base_id, str) and base_id.strip():
+                return base_id.strip()
+        except (OSError, json.JSONDecodeError):
+            pass
+
+    raise ValueError(
+        f"Cannot resolve base model for merge from {checkpoint}. "
+        "Ensure seiso_manifest.json or adapter_config.json includes a local base path."
+    )
+
+
+def validate_lora_checkpoint(checkpoint: Path) -> None:
+    """Raise when a LoRA checkpoint is missing required adapter artifacts."""
+    adapter_config = checkpoint / "adapter_config.json"
+    if not adapter_config.is_file():
+        raise ValueError(f"LoRA checkpoint missing adapter_config.json: {checkpoint}")
+
+    weight_names = (
+        "adapter_model.safetensors",
+        "adapter_model.bin",
+        "adapter_model.pt",
+    )
+    if not any((checkpoint / name).is_file() for name in weight_names):
+        nested = list(checkpoint.glob("**/adapter_model.safetensors")) + list(
+            checkpoint.glob("**/adapter_model.bin")
+        )
+        if not nested:
+            raise ValueError(f"LoRA checkpoint missing adapter weights: {checkpoint}")
+
+
+def _export_lora_adapter(checkpoint: Path, dest: Path, log: Callable[[str], None]) -> None:
+    """Copy a validated LoRA adapter tree for standalone use."""
+    validate_lora_checkpoint(checkpoint)
+    if dest.exists():
+        shutil.rmtree(dest)
+    shutil.copytree(checkpoint, dest)
+    readme = dest / "README.md"
+    if not readme.is_file():
+        manifest = _load_training_manifest(checkpoint)
+        base = manifest.get("original_model_id") or manifest.get("model_id") or "base model"
+        quant = manifest.get("quant", "unknown")
+        readme.write_text(
+            f"# LoRA adapter\n\n"
+            f"Fine-tuned adapter exported from Seiso.\n\n"
+            f"- **Base model:** `{base}`\n"
+            f"- **Quantization during training:** {quant}\n\n"
+            f"Load with PEFT:\n\n"
+            f"```python\n"
+            f"from peft import PeftModel\n"
+            f"from transformers import AutoModelForCausalLM\n\n"
+            f'model = AutoModelForCausalLM.from_pretrained("{base}")\n'
+            f'model = PeftModel.from_pretrained(model, "{dest}")\n'
+            f"```\n",
+            encoding="utf-8",
+        )
+    log(f"Validated LoRA adapter ({checkpoint.name})")
+
+
+def merge_lora_checkpoint(checkpoint: Path, dest: Path, log: Callable[[str], None]) -> None:
     """Merge LoRA weights into base model when PEFT adapter present."""
     adapter_config = checkpoint / "adapter_config.json"
     if adapter_config.exists():
         log("Merging LoRA adapter into base weights...")
-        try:
-            import json
+        from peft import PeftModel
+        from transformers import AutoModelForCausalLM, AutoTokenizer
 
-            from peft import PeftModel
-            from transformers import AutoModelForCausalLM, AutoTokenizer
-
-            cfg = json.loads(adapter_config.read_text())
-            base_id = cfg.get("base_model_name_or_path", "")
-            model = AutoModelForCausalLM.from_pretrained(base_id, device_map="cpu")
-            model = PeftModel.from_pretrained(model, str(checkpoint))
-            merged = model.merge_and_unload()
-            merged.save_pretrained(str(dest))
-            tok = AutoTokenizer.from_pretrained(str(checkpoint))
-            tok.save_pretrained(str(dest))
-            log(f"Merged model saved to {dest}")
-        except Exception as exc:
-            log(f"Merge failed, copying checkpoint: {exc}")
-            shutil.copytree(checkpoint, dest, dirs_exist_ok=True)
-    else:
+        base_id = _resolve_merge_base_model(checkpoint)
+        log(f"Loading base model: {base_id}")
+        model = AutoModelForCausalLM.from_pretrained(base_id, device_map="cpu", low_cpu_mem_usage=True)
+        model = PeftModel.from_pretrained(model, str(checkpoint))
+        merged = model.merge_and_unload()
+        merged.save_pretrained(str(dest))
+        tok_path = checkpoint if (checkpoint / "tokenizer_config.json").is_file() else base_id
+        tok = AutoTokenizer.from_pretrained(str(tok_path))
+        tok.save_pretrained(str(dest))
+        log(f"Merged model saved to {dest}")
+    elif (checkpoint / "config.json").is_file():
         shutil.copytree(checkpoint, dest, dirs_exist_ok=True)
-        log(f"Copied checkpoint to {dest}")
+        log(f"Copied full checkpoint to {dest}")
+    else:
+        raise ValueError(f"Checkpoint is neither a LoRA adapter nor a full model: {checkpoint}")
+
+
+def _merge_lora(checkpoint: Path, dest: Path, log: Callable[[str], None]) -> None:
+    """Backward-compatible alias for merge_lora_checkpoint."""
+    merge_lora_checkpoint(checkpoint, dest, log)
 
 
 def _push_hub(

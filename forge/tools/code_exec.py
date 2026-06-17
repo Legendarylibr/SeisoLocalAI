@@ -168,6 +168,21 @@ _BLOCKED_ATTRS = frozenset(
 _TIMEOUT_SEC = 15
 _MAX_OUTPUT = 16_000
 _MAX_CODE_LEN = 8_000
+_MAX_RSS_BYTES = 256 * 1024 * 1024
+_MAX_OPEN_FDS = 32
+
+
+def _subprocess_limits() -> None:
+    """Apply resource limits in the code-exec child process (Unix only)."""
+    import resource
+
+    try:
+        resource.setrlimit(resource.RLIMIT_CPU, (_TIMEOUT_SEC, _TIMEOUT_SEC + 5))
+        resource.setrlimit(resource.RLIMIT_AS, (_MAX_RSS_BYTES, _MAX_RSS_BYTES))
+        if hasattr(resource, "RLIMIT_NOFILE"):
+            resource.setrlimit(resource.RLIMIT_NOFILE, (_MAX_OPEN_FDS, _MAX_OPEN_FDS))
+    except (OSError, ValueError):
+        pass
 
 
 class _CodeValidator(ast.NodeVisitor):
@@ -266,14 +281,21 @@ def execute_code(code: str, sandbox_root: str | None = None, user_id: str | None
     except OSError:
         pass
 
+    run_kwargs: dict = {
+        "capture_output": True,
+        "text": True,
+        "timeout": _TIMEOUT_SEC,
+        "cwd": str(base),
+        "env": {"PYTHONPATH": "", "PATH": "/usr/bin:/bin", "HOME": str(base)},
+        "start_new_session": True,
+    }
+    if os.name == "posix":
+        run_kwargs["preexec_fn"] = _subprocess_limits
+
     try:
         proc = subprocess.run(
             [sys.executable, "-I", "-S", str(script)],
-            capture_output=True,
-            text=True,
-            timeout=_TIMEOUT_SEC,
-            cwd=str(base),
-            env={"PYTHONPATH": "", "PATH": "/usr/bin:/bin", "HOME": str(base)},
+            **run_kwargs,
         )
         out = (proc.stdout or proc.stderr or "").strip()[:_MAX_OUTPUT]
         return json.dumps({"stdout": out, "exit_code": proc.returncode})

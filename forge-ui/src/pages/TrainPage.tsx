@@ -32,6 +32,12 @@ export function TrainPage() {
   const [trainResponsesOnly, setTrainResponsesOnly] = useState(true);
   const [useRsLora, setUseRsLora] = useState(false);
   const [packing, setPacking] = useState(false);
+  const [exportOnComplete, setExportOnComplete] = useState(true);
+  const [exportProfile, setExportProfile] = useState("lora_bundle");
+  const [exportQuants, setExportQuants] = useState<string[]>(["q4_k_m", "q8_0", "f16"]);
+  const [exportProfiles, setExportProfiles] = useState<
+    { id: string; formats: string[]; default_gguf_quants: string[] }[]
+  >([]);
   const [logs, setLogs] = useState<string[]>([]);
   const [activeJob, setActiveJob] = useState<string | null>(null);
   const [jobStatus, setJobStatus] = useState<string | null>(null);
@@ -52,6 +58,7 @@ export function TrainPage() {
     api.catalog("", undefined, undefined).then((r) => setCatalog(r.models)).catch(console.error);
     api.listTrainingJobs().then(setJobs).catch(console.error);
     api.listTrainingModels().then((r) => setLocalModels(r.models)).catch(console.error);
+    api.listExportProfiles().then(setExportProfiles).catch(console.error);
     if (pendingModel) setModelId(pendingModel);
   }, [pendingModel]);
 
@@ -71,6 +78,27 @@ export function TrainPage() {
     setHwApplied(true);
   }, [hw, hwApplied, pendingModel]);
 
+  useEffect(() => {
+    if (method === "full") setExportProfile("full_bundle");
+    else if (method === "lora") setExportProfile("lora_bundle");
+  }, [method]);
+
+  useEffect(() => {
+    if (!exportProfiles.length) return;
+    const prof = exportProfiles.find((p) => p.id === exportProfile);
+    if (prof?.default_gguf_quants?.length) {
+      setExportQuants(prof.default_gguf_quants);
+    }
+  }, [exportProfile, exportProfiles]);
+
+  const toggleExportQuant = (quant: string) => {
+    setExportQuants((prev) =>
+      prev.includes(quant) ? prev.filter((q) => q !== quant) : [...prev, quant],
+    );
+  };
+
+  const GGUF_QUANT_OPTIONS = ["q2_k", "q3_k_m", "q4_k_m", "q5_k_m", "q6_k", "q8_0", "f16"];
+
   const start = async () => {
     setStarting(true);
     setLogs([]);
@@ -78,6 +106,14 @@ export function TrainPage() {
     setSystemMetrics([]);
     setJobStatus("running");
     try {
+      const exportPayload =
+        exportOnComplete && method !== "embedding"
+          ? {
+              profile: exportProfile,
+              gguf_quantizations: exportQuants.length ? exportQuants : undefined,
+            }
+          : undefined;
+
       const res = await api.startTraining(
         {
           model_id: modelId,
@@ -101,6 +137,7 @@ export function TrainPage() {
           output_dir: "./outputs",
         },
         multiGpu,
+        exportPayload,
       );
       setActiveJob(res.job_id);
       setMetricsOpen(true);
@@ -288,6 +325,54 @@ export function TrainPage() {
               {" "}Fused cross-entropy
             </label>
           </div>
+          {method !== "embedding" && (
+            <div className="export-on-complete-section" style={{ marginTop: "1rem" }}>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={exportOnComplete}
+                  onChange={(e) => setExportOnComplete(e.target.checked)}
+                />
+                {" "}Export LoRA + merged + GGUF when training completes
+              </label>
+              {exportOnComplete && (
+                <>
+                  <label style={{ marginTop: "0.5rem" }}>Export profile</label>
+                  <select value={exportProfile} onChange={(e) => setExportProfile(e.target.value)}>
+                    {exportProfiles.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.id} ({p.formats.join(", ")})
+                      </option>
+                    ))}
+                    {!exportProfiles.length && (
+                      <>
+                        <option value="lora_bundle">lora_bundle</option>
+                        <option value="lora_adapter">lora_adapter</option>
+                        <option value="full_bundle">full_bundle</option>
+                      </>
+                    )}
+                  </select>
+                  {(exportProfile.includes("gguf") || exportProfile.includes("bundle")) && (
+                    <>
+                      <label style={{ marginTop: "0.5rem" }}>GGUF quantizations</label>
+                      <div className="checkbox-group">
+                        {GGUF_QUANT_OPTIONS.map((q) => (
+                          <label key={q}>
+                            <input
+                              type="checkbox"
+                              checked={exportQuants.includes(q)}
+                              onChange={() => toggleExportQuant(q)}
+                            />
+                            {" "}{q}
+                          </label>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </>
+              )}
+            </div>
+          )}
           <button className="btn btn-primary btn-lg" onClick={start} disabled={starting}>
             {starting ? "Starting…" : "Start training"}
           </button>

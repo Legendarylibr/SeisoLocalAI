@@ -45,8 +45,12 @@ def training_capabilities() -> dict[str, Any]:
     kernel_backend = "none"
     if has_cuda_gpu:
         kernel_backend = "cuda" if cuda_ext_ok else ("triton" if triton_ok else "pytorch")
+
     elif has_rocm_gpu and triton_ok:
         kernel_backend = "triton"
+
+    wsl2 = gpu.is_wsl2
+    fused_lora_available = has_cuda_gpu and cuda_ext_ok
 
     mps_ok = False
     try:
@@ -81,7 +85,10 @@ def training_capabilities() -> dict[str, Any]:
         "supports_mlx_inference": mlx_ok and system == "Darwin",
         "fused_kernels_available": fused_kernels,
         "fused_ce_available": fused_kernels,
+        "fused_lora_available": fused_lora_available,
         "kernel_backend": kernel_backend,
+        "wsl2": wsl2,
+        "optimized_cuda_path": has_cuda_gpu and cuda_ext_ok,
         "multi_gpu_available": has_cuda_gpu and gpu.device_count > 1,
         "vendor": gpu.vendor.value,
         "gpu_count": gpu.device_count,

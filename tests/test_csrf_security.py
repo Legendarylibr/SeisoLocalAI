@@ -74,6 +74,24 @@ async def test_bearer_auth_bypasses_csrf(app):
 
 
 @pytest.mark.asyncio
+async def test_csrf_blocks_v1_without_header(app):
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        reg = await client.post(
+            "/api/auth/register",
+            json={"password": "securepass1"},
+        )
+        assert reg.status_code == 201
+
+        res = await client.post(
+            "/v1/chat/completions",
+            json={"model": "default", "messages": [{"role": "user", "content": "hi"}]},
+        )
+        assert res.status_code == 403
+        assert "CSRF" in res.json()["detail"]
+
+
+@pytest.mark.asyncio
 async def test_cookie_session_auth(app):
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:

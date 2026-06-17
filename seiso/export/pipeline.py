@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from seiso.export.formats import ExportFormat, ExportOptions, export_checkpoint
+from seiso.export.gguf import normalize_gguf_quants
 from seiso.export.hub_precheck import HubPrecheckResult, precheck_hub_export
 from seiso.export.model_card import HubModelMetadata, metadata_from_manifest
 from seiso.export.profiles import (
@@ -65,7 +66,9 @@ def prepare_export(
     kind = detect_checkpoint_kind(checkpoint)
     prof = resolve_profile(profile) if profile else None
     resolved_formats = resolve_formats(formats=formats, profile=profile, checkpoint=checkpoint)
-    quants = list(gguf_quantizations or (default_gguf_quants(prof) if prof else ["q4_k_m", "q8_0"]))
+    quants = normalize_gguf_quants(
+        gguf_quantizations or (default_gguf_quants(prof) if prof else ["q4_k_m", "q8_0"])
+    )
 
     meta = hub_metadata
     if meta and (checkpoint / "seiso_manifest.json").is_file():

@@ -57,7 +57,7 @@ SEISO_PORT=8766 seiso forge
 | `/image-compress` | Image Compress | Stable Diffusion distill / prune / quant pipeline |
 | `/rl-quant` | RL Quant | Adaptive GGUF quantization policy training |
 | `/recipes` | Recipe Studio | Visual graph editor for data/recipe jobs |
-| `/integrations` | Integrations | External providers (OpenAI, Anthropic, Ollama, vLLM) and MCP servers |
+| `/integrations` | Integrations | External providers (OpenAI, Anthropic, Ollama, vLLM) |
 | `/settings` | Settings | HF token, hardware info, security toggles |
 
 Knowledge-base ingest and retrieve are **API-only** (`/api/knowledge/...`); there is no dedicated UI page.
@@ -77,7 +77,6 @@ Knowledge-base ingest and retrieve are **API-only** (`/api/knowledge/...`); ther
 | `/api/recipes` | Recipe graph execution |
 | `/api/knowledge` | RAG ingest and retrieve |
 | `/api/providers` | External LLM provider configs |
-| `/api/mcp-servers` | MCP server pool management |
 | `/api/system` | Hardware detection, metrics |
 | `/health` | Liveness check |
 | `/v1/chat/completions` | OpenAI-compatible chat (no `/api` prefix) |
@@ -100,7 +99,7 @@ Copy `.env.example` to `.env` in the repo root. Key settings:
 | `SEISO_CORS_ORIGINS` | `http://127.0.0.1:8765,http://localhost:5173` | Allowed browser origins |
 | `SEISO_HF_TOKEN` | — | Hugging Face token for gated models |
 | `SEISO_DB_EPHEMERAL` | `true` | In-memory SQLite (wiped on restart) |
-| `SEISO_ALLOW_TOOLS` | `false` | Web search, artifacts, MCP create/connect |
+| `SEISO_ALLOW_TOOLS` | `false` | Web search, artifacts |
 | `SEISO_ALLOW_CODE_EXEC` | `false` | Sandboxed `execute_code` tool |
 | `SEISO_ALLOW_OPENAI_TOOLS` | `false` | Tool calling on `/v1/chat/completions` |
 

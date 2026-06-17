@@ -27,6 +27,7 @@ void launch_fused_lora_delta(
     const T* A,
     const T* B,
     T* out,
+    int rows,
     int in_dim,
     int out_dim,
     int rank,

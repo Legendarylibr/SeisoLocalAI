@@ -42,6 +42,9 @@ class TrainingOrchestrator(Orchestrator):
         config.use_fused_ce = bool(
             payload.get("use_fused_ce", config.extra.get("use_fused_ce", config.use_fused_ce))
         )
+        config.use_fused_lora = bool(
+            payload.get("use_fused_lora", config.extra.get("use_fused_lora", config.use_fused_lora))
+        )
 
         layout = detect_gpus()
         self._emit_log(job_id, f"Starting training: {config.model_id}")

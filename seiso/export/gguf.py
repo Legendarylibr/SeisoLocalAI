@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import os
+import shutil
 import subprocess
 import tempfile
 from collections.abc import Callable
@@ -12,6 +14,111 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 DEFAULT_QUANTS = ("q4_k_m", "q8_0", "f16")
+
+# llama.cpp convert_hf_to_gguf --outtype values supported by Seiso export.
+SUPPORTED_GGUF_QUANTS = frozenset(
+    {
+        "f32",
+        "f16",
+        "bf16",
+        "q8_0",
+        "tq1_0",
+        "tq2_0",
+        "q4_0",
+        "q4_1",
+        "q5_0",
+        "q5_1",
+        "q2_k",
+        "q3_k_s",
+        "q3_k_m",
+        "q3_k_l",
+        "q4_k_s",
+        "q4_k_m",
+        "q5_k_s",
+        "q5_k_m",
+        "q6_k",
+        "iq2_xxs",
+        "iq2_xs",
+        "iq3_xxs",
+        "iq1_s",
+        "iq4_nl",
+        "iq3_s",
+        "iq2_s",
+        "iq4_xs",
+        "iq3_m",
+        "q2_k_s",
+        "q3_k",
+        "q4_k",
+        "q5_k",
+        "q6_k",
+    }
+)
+
+_LABEL_ALIASES = {
+    "Q2_K": "q2_k",
+    "Q3_K_S": "q3_k_s",
+    "Q3_K_M": "q3_k_m",
+    "Q3_K_L": "q3_k_l",
+    "Q4_K_S": "q4_k_s",
+    "Q4_K_M": "q4_k_m",
+    "Q5_K_S": "q5_k_s",
+    "Q5_K_M": "q5_k_m",
+    "Q6_K": "q6_k",
+    "Q8_0": "q8_0",
+    "F16": "f16",
+    "F32": "f32",
+    "BF16": "bf16",
+}
+
+
+def normalize_gguf_quant(label: str) -> str:
+    """Normalize a GGUF quant label to llama.cpp --outtype form."""
+    raw = label.strip()
+    upper = raw.upper().replace("-", "_")
+    if upper in _LABEL_ALIASES:
+        return _LABEL_ALIASES[upper]
+    lowered = raw.lower().replace("-", "_")
+    return lowered
+
+
+def normalize_gguf_quants(quantizations: list[str] | tuple[str, ...]) -> list[str]:
+    """Normalize and deduplicate GGUF quant labels, falling back when unknown."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for label in quantizations:
+        quant = normalize_gguf_quant(label)
+        if quant not in SUPPORTED_GGUF_QUANTS:
+            logger.warning("Unknown GGUF quant %r — using as-is (may fail at convert time)", label)
+        if quant not in seen:
+            seen.add(quant)
+            out.append(quant)
+    return out or ["q4_k_m"]
+
+
+def resolve_gguf_converter() -> list[list[str]]:
+    """Return candidate llama.cpp HF→GGUF converter command prefixes (most preferred first)."""
+    candidates: list[list[str]] = []
+
+    llama_cpp_dir = os.environ.get("LLAMA_CPP_DIR", "").strip()
+    if llama_cpp_dir:
+        script = Path(llama_cpp_dir) / "convert_hf_to_gguf.py"
+        if script.is_file():
+            py = shutil.which("python3") or shutil.which("python") or "python3"
+            candidates.append([py, str(script)])
+
+    for name in ("convert_hf_to_gguf", "convert-hf-to-gguf"):
+        if path := shutil.which(name):
+            candidates.append([path])
+
+    repo_root = Path(__file__).resolve().parents[2]
+    vendored = repo_root / "third_party" / "llama.cpp" / "convert_hf_to_gguf.py"
+    if vendored.is_file():
+        py = shutil.which("python3") or shutil.which("python") or "python3"
+        cmd = [py, str(vendored)]
+        if cmd not in candidates:
+            candidates.append(cmd)
+
+    return candidates
 
 
 def write_ollama_modelfile(
@@ -44,23 +151,36 @@ def write_ollama_modelfile(
 
 def convert_hf_dir_to_gguf(source: Path, dest: Path, quant: str, log: Callable[[str], None]) -> bool:
     """Convert a merged HF model directory to GGUF."""
+    quant = normalize_gguf_quant(quant)
     if dest.exists():
         dest.unlink()
 
-    commands = [
-        ["convert_hf_to_gguf", str(source), "--outfile", str(dest), "--outtype", quant],
-        ["python3", "-m", "llama_cpp.llama_cpp", "convert", str(source), str(dest)],
-    ]
-    for cmd in commands:
-        try:
-            subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=7200)
-            if dest.exists() and dest.stat().st_size > 0:
-                log(f"GGUF written: {dest}")
-                return True
-        except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
-            continue
+    converters = resolve_gguf_converter()
+    if not converters:
+        log(
+            "GGUF conversion unavailable — install llama.cpp and add convert_hf_to_gguf to PATH, "
+            "or set LLAMA_CPP_DIR to a llama.cpp checkout"
+        )
+        return False
 
-    log(f"GGUF conversion failed for {quant} — install llama.cpp convert_hf_to_gguf")
+    errors: list[str] = []
+    for prefix in converters:
+        cmd = [*prefix, str(source), "--outfile", str(dest), "--outtype", quant]
+        try:
+            result = subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=7200)
+            if dest.exists() and dest.stat().st_size > 0:
+                log(f"GGUF written: {dest} ({quant})")
+                return True
+            errors.append(f"{cmd[0]}: output file missing or empty")
+        except FileNotFoundError:
+            errors.append(f"{cmd[0]}: not found")
+        except subprocess.TimeoutExpired:
+            errors.append(f"{cmd[0]}: timed out")
+        except subprocess.CalledProcessError as exc:
+            detail = (exc.stderr or exc.stdout or str(exc)).strip()
+            errors.append(f"{cmd[0]}: {detail[:300]}")
+
+    log(f"GGUF conversion failed for {quant}: {'; '.join(errors[:3])}")
     return False
 
 
@@ -74,6 +194,7 @@ def export_gguf_from_checkpoint(
 ) -> dict[str, Path]:
     """Merge LoRA checkpoint if needed, convert quantizations, write Ollama Modelfiles."""
     output_root.mkdir(parents=True, exist_ok=True)
+    quants = normalize_gguf_quants(quantizations)
 
     def log(msg: str) -> None:
         logger.info(msg)
@@ -81,26 +202,31 @@ def export_gguf_from_checkpoint(
             on_log(msg)
 
     if merged_dir is not None and merged_dir.exists():
-        results = _export_quants(merged_dir, output_root, quantizations, checkpoint.name, log)
+        results = _export_quants(merged_dir, output_root, quants, checkpoint.name, log)
     else:
         with tempfile.TemporaryDirectory(prefix="seiso-gguf-") as tmp:
             merged = Path(tmp) / "merged"
             merged.mkdir()
-            from seiso.export.formats import _merge_lora
+            from seiso.export.formats import merge_lora_checkpoint
 
-            _merge_lora(checkpoint, merged, log)
-            results = _export_quants(merged, output_root, quantizations, checkpoint.name, log)
+            merge_lora_checkpoint(checkpoint, merged, log)
+            results = _export_quants(merged, output_root, quants, checkpoint.name, log)
 
-    if results:
-        first = next(iter(quantizations), "q4_k_m")
-        log(f"Ollama: ollama create {checkpoint.name} -f {output_root / first / 'Modelfile'}")
+    if not results:
+        raise RuntimeError(
+            f"GGUF export produced no artifacts for quants: {', '.join(quants)}. "
+            "Install llama.cpp convert_hf_to_gguf or set LLAMA_CPP_DIR."
+        )
+
+    first = next(iter(quants), "q4_k_m")
+    log(f"Ollama: ollama create {checkpoint.name} -f {output_root / first / 'Modelfile'}")
     return results
 
 
 def _export_quants(
     merged: Path,
     output_root: Path,
-    quantizations: list[str] | tuple[str, ...],
+    quantizations: list[str],
     model_name: str,
     log: Callable[[str], None],
 ) -> dict[str, Path]:
@@ -148,5 +274,5 @@ def export_gguf(
             log(f"Merge failed: {exc}")
             return []
 
-        paths = _export_quants(merged, output_dir, quantizations, output_dir.name, log)
+        paths = _export_quants(merged, output_dir, normalize_gguf_quants(quantizations), output_dir.name, log)
         return list(paths.values())

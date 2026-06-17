@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from seiso.kernels.hooks import apply_training_kernels
+from seiso.kernels.hooks import apply_fused_lora_kernels, apply_training_kernels
 from seiso.kernels.lifecycle import release_training_memory
 from seiso.models.seiso_model import SeisoModel
 from seiso.security import resolve_data_dir
@@ -42,6 +42,7 @@ class SeisoTrainer:
         multi_gpu = bool(cfg.multi_gpu or cfg.extra.get("multi_gpu", False)) and layout.use_ddp
         use_triton = cfg.use_triton
         use_fused_ce = cfg.use_fused_ce
+        use_fused_lora = cfg.use_fused_lora
 
         logger.info(
             "Training %s | method=%s quant=%s | world_size=%d",
@@ -66,6 +67,9 @@ class SeisoTrainer:
 
         if cfg.method == TrainMethod.LORA:
             model = self._apply_lora(model)
+            if use_fused_lora:
+                lora_meta = apply_fused_lora_kernels(model, max_rank=64)
+                self._kernel_meta.update(lora_meta)
         elif cfg.method == TrainMethod.FULL and cfg.quant in (QuantMode.INT4, QuantMode.INT8):
             logger.warning("Full fine-tune with quantization — consider LoRA for memory efficiency")
 
@@ -150,18 +154,26 @@ class SeisoTrainer:
         out = cfg.output_dir / f"checkpoint-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}"
         trainer.save_model(str(out))
         tokenizer.save_pretrained(str(out))
+        if cfg.method == TrainMethod.LORA:
+            self._patch_adapter_metadata(out)
         self._write_manifest(out, layout, multi_gpu, detected_fmt.value)
         release_training_memory(model)
         logger.info("Training complete: %s", out)
         return out
 
+    def _resolve_load_model_id(self) -> str:
+        """Prefer cached local snapshot path for offline merge/export after training."""
+        cfg = self.config
+        return str(cfg.extra.get("resolved_model_path") or cfg.model_id)
+
     def _load_model(self):
         cfg = self.config
         load_4bit = cfg.quant == QuantMode.INT4
         load_8bit = cfg.quant == QuantMode.INT8
+        model_ref = self._resolve_load_model_id()
 
         self._loaded = SeisoModel.from_pretrained(
-            cfg.model_id,
+            model_ref,
             max_seq_length=cfg.max_seq_length,
             load_in_4bit=load_4bit,
             load_in_8bit=load_8bit,
@@ -169,7 +181,7 @@ class SeisoTrainer:
         )
         model, tokenizer = self._loaded.model, self._loaded.tokenizer
 
-        if cfg.quant == QuantMode.INT4:
+        if cfg.method == TrainMethod.LORA and cfg.quant in (QuantMode.INT4, QuantMode.INT8):
             try:
                 from peft import prepare_model_for_kbit_training
 
@@ -178,7 +190,10 @@ class SeisoTrainer:
                 )
                 self._loaded.model = model
             except ImportError:
-                pass
+                logger.warning(
+                    "prepare_model_for_kbit_training unavailable — install peft>=0.11; "
+                    "QLoRA may train without k-bit preparation"
+                )
 
         return model, tokenizer
 
@@ -191,7 +206,7 @@ class SeisoTrainer:
             lora_dropout=cfg.lora_dropout,
             use_gradient_checkpointing=cfg.gradient_checkpointing,
             use_rslora=cfg.use_rslora,
-            model_id=cfg.model_id,
+            model_id=self._resolve_load_model_id(),
         )
         if self._loaded:
             self._loaded.model = model
@@ -334,13 +349,39 @@ class SeisoTrainer:
         except ImportError:
             gc.collect()
 
+    def _patch_adapter_metadata(self, out: Path) -> None:
+        """Ensure adapter_config.json points at the local base for offline merge/export."""
+        adapter_cfg_path = out / "adapter_config.json"
+        if not adapter_cfg_path.is_file():
+            return
+        try:
+            adapter_cfg = json.loads(adapter_cfg_path.read_text())
+        except (OSError, json.JSONDecodeError):
+            return
+
+        base_path = self._resolve_load_model_id()
+        original_id = str(self.config.extra.get("original_model_id") or self.config.model_id)
+        adapter_cfg["base_model_name_or_path"] = base_path
+        adapter_cfg["seiso_original_base_model"] = original_id
+        adapter_cfg["seiso_quant_mode"] = self.config.quant.value
+        adapter_cfg_path.write_text(json.dumps(adapter_cfg, indent=2))
+
     def _write_manifest(self, out: Path, layout, multi_gpu: bool, dataset_format: str) -> None:
+        cfg = self.config
+        base_path = self._resolve_load_model_id()
+        original_id = str(cfg.extra.get("original_model_id") or cfg.model_id)
         manifest = {
-            "model_id": self.config.model_id,
-            "method": self.config.method.value,
-            "quant": self.config.quant.value,
+            "model_id": original_id,
+            "original_model_id": original_id,
+            "base_model_path": base_path,
+            "resolved_model_path": cfg.extra.get("resolved_model_path") or base_path,
+            "method": cfg.method.value,
+            "quant": cfg.quant.value,
+            "lora_r": cfg.lora_r,
+            "lora_alpha": cfg.lora_alpha,
+            "use_rslora": cfg.use_rslora,
             "dataset_format": dataset_format,
-            "train_on_responses_only": self.config.train_on_responses_only,
+            "train_on_responses_only": cfg.train_on_responses_only,
             "multi_gpu": multi_gpu,
             "world_size": layout.world_size,
             "kernels": self._kernel_meta,

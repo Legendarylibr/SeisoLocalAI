@@ -11,3 +11,4 @@ def test_train_config_from_dict():
     assert cfg.method == TrainMethod.LORA
     assert cfg.quant == QuantMode.INT4
     assert cfg.lora_r == 16
+    assert cfg.use_fused_lora is True

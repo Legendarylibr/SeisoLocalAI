@@ -17,7 +17,6 @@ from forge.db.crypto import decrypt_field, encrypt_field
 ENCRYPTED_COLUMNS: dict[str, tuple[str, ...]] = {
     "chat_messages": ("content", "metadata_json"),
     "providers": ("config_json",),
-    "mcp_servers": ("env_json",),
 }
 
 SCHEMA = """
@@ -161,17 +160,6 @@ CREATE TABLE IF NOT EXISTS providers (
     created_at TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS mcp_servers (
-    id TEXT PRIMARY KEY,
-    user_id TEXT NOT NULL,
-    name TEXT NOT NULL,
-    command TEXT NOT NULL,
-    args_json TEXT DEFAULT '[]',
-    env_json TEXT DEFAULT '{}',
-    enabled INTEGER DEFAULT 1,
-    created_at TEXT NOT NULL
-);
-
 CREATE INDEX IF NOT EXISTS idx_models_user ON local_models(user_id);
 CREATE INDEX IF NOT EXISTS idx_threads_user ON chat_threads(user_id);
 CREATE INDEX IF NOT EXISTS idx_jobs_user ON training_jobs(user_id);
@@ -182,7 +170,6 @@ CREATE INDEX IF NOT EXISTS idx_image_compress_jobs_user ON image_compress_jobs(u
 CREATE INDEX IF NOT EXISTS idx_rl_quant_jobs_user ON rl_quant_jobs(user_id);
 CREATE INDEX IF NOT EXISTS idx_recipe_jobs_user ON recipe_jobs(user_id);
 CREATE INDEX IF NOT EXISTS idx_providers_user ON providers(user_id);
-CREATE INDEX IF NOT EXISTS idx_mcp_servers_user ON mcp_servers(user_id);
 CREATE INDEX IF NOT EXISTS idx_knowledge_bases_user ON knowledge_bases(user_id);
 """
 
@@ -609,61 +596,6 @@ class Database:
             cur = await conn.execute(
                 "DELETE FROM providers WHERE id = ? AND user_id = ?",
                 (provider_id, user_id),
-            )
-            await conn.commit()
-            return cur.rowcount > 0
-
-    # --- MCP servers ---
-
-    async def list_mcp_servers(self, user_id: str) -> list[dict]:
-        async with self._conn() as conn, conn.execute(
-            "SELECT * FROM mcp_servers WHERE user_id = ? ORDER BY created_at DESC",
-            (user_id,),
-        ) as cur:
-            return [self._decrypt_row("mcp_servers", dict(r)) for r in await cur.fetchall()]
-
-    async def create_mcp_server(
-        self,
-        user_id: str,
-        name: str,
-        command: str,
-        args: list | None = None,
-        env: dict | None = None,
-    ) -> dict:
-        mid = str(uuid.uuid4())
-        now = _now()
-        enc_env = self._enc(json.dumps(env or {}))
-        async with self._conn() as conn:
-            await conn.execute(
-                """INSERT INTO mcp_servers
-                   (id, user_id, name, command, args_json, env_json, enabled, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, 1, ?)""",
-                (mid, user_id, name, command, json.dumps(args or []), enc_env, now),
-            )
-            await conn.commit()
-        return {
-            "id": mid,
-            "name": name,
-            "command": command,
-            "args": args or [],
-            "env": env or {},
-            "enabled": True,
-            "created_at": now,
-        }
-
-    async def get_mcp_server(self, server_id: str, user_id: str) -> dict | None:
-        async with self._conn() as conn, conn.execute(
-            "SELECT * FROM mcp_servers WHERE id = ? AND user_id = ?",
-            (server_id, user_id),
-        ) as cur:
-            row = await cur.fetchone()
-            return self._decrypt_row("mcp_servers", dict(row)) if row else None
-
-    async def delete_mcp_server(self, server_id: str, user_id: str) -> bool:
-        async with self._conn() as conn:
-            cur = await conn.execute(
-                "DELETE FROM mcp_servers WHERE id = ? AND user_id = ?",
-                (server_id, user_id),
             )
             await conn.commit()
             return cur.rowcount > 0

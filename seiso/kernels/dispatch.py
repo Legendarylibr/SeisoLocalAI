@@ -86,7 +86,8 @@ def fused_lora_delta(x, lora_A, lora_B, base=None, scale: float = 1.0):
     """Fused low-rank delta when native CUDA is available."""
 
     if not getattr(x, "is_cuda", False):
-        delta = scale * (lora_B @ (lora_A @ x))
+        hidden = x @ lora_A.t()
+        delta = scale * (hidden @ lora_B.t())
         return base + delta if base is not None else delta
 
     backend = active_backend()
@@ -95,8 +96,8 @@ def fused_lora_delta(x, lora_A, lora_B, base=None, scale: float = 1.0):
 
         return cuda_lora(x, lora_A, lora_B, base=base, scale=scale)
 
-    hidden = lora_A @ x
-    delta = scale * (lora_B @ hidden)
+    hidden = x @ lora_A.t()
+    delta = scale * (hidden @ lora_B.t())
     return base + delta if base is not None else delta
 
 
@@ -113,13 +114,26 @@ def kernel_metadata() -> dict:
     """Runtime kernel stack info for manifests and UI."""
     platform: GpuPlatform = detect_gpu()
     backend = active_backend()
+    boundary: dict = {}
+    try:
+        from seiso.security.nvidia_boundary import nvidia_boundary_report
+
+        boundary = nvidia_boundary_report()
+    except ImportError:
+        pass
     return {
         "vendor": platform.vendor.value,
         "device_name": platform.device_name,
         "device_count": platform.device_count,
         "kernel_backend": backend,
         "native_cuda": platform.supports_native_cuda and backend == "cuda",
+        "optimized_cuda_path": platform.uses_optimized_cuda_kernels and backend == "cuda",
+        "wsl2": platform.is_wsl2,
+        "cuda_compute_capability": (
+            list(platform.cuda_compute_capability) if platform.cuda_compute_capability else None
+        ),
         "triton": platform.supports_triton,
+        "nvidia_boundary": boundary,
     }
 
 

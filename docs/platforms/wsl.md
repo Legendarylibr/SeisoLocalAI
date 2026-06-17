@@ -19,6 +19,17 @@ pip install -e ".[forge,train,cuda,dev]"
 
 Follow [linux-nvidia.md](linux-nvidia.md) for training, kernels, and multi-GPU.
 
+## Secure GPU training
+
+Before starting CUDA training inside WSL2, acknowledge the GPU boundary:
+
+```bash
+export SEISO_NVIDIA_WSL_ACK=1
+seiso train --config configs/example_lora.yaml
+```
+
+This gates native kernel JIT and driver access. Prefer WSL2 over bare Windows for fused CUDA kernels (RMSNorm, SwiGLU, LoRA, cross-entropy).
+
 ## Access Forge from Windows browser
 
 ```bash

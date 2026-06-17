@@ -37,28 +37,3 @@ async def test_provider_crud(authed_client):
 
     delete = await authed_client.delete(f"/api/providers/{pid}")
     assert delete.status_code == 200
-
-
-@pytest.mark.asyncio
-async def test_mcp_server_crud(authed_client, enable_tools):
-    create = await authed_client.post(
-        "/api/mcp/servers",
-        json={"name": "test", "command": "npx", "args": ["@scope/pkg@1.0.0"]},
-    )
-    assert create.status_code == 201
-    sid = create.json()["id"]
-
-    listing = await authed_client.get("/api/mcp/servers")
-    assert len(listing.json()) == 1
-
-    delete = await authed_client.delete(f"/api/mcp/servers/{sid}")
-    assert delete.status_code == 200
-
-
-@pytest.mark.asyncio
-async def test_mcp_rejects_unknown_command(authed_client, enable_tools):
-    res = await authed_client.post(
-        "/api/mcp/servers",
-        json={"name": "bad", "command": "/bin/bash", "args": []},
-    )
-    assert res.status_code == 400

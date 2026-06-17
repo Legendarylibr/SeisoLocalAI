@@ -109,19 +109,34 @@ torch::Tensor fused_lora_delta(
   check_cuda(x, "x");
   check_cuda(A, "A");
   check_cuda(B, "B");
-  TORCH_CHECK(x.dim() == 1, "x must be 1D");
+  TORCH_CHECK(x.dim() == 1 || x.dim() == 2, "x must be 1D or 2D");
   TORCH_CHECK(A.dim() == 2 && B.dim() == 2, "A and B must be 2D");
-  const int in_dim = static_cast<int>(x.size(0));
+
+  int rows = 1;
+  int in_dim = 0;
+  if (x.dim() == 1) {
+    in_dim = static_cast<int>(x.size(0));
+  } else {
+    rows = static_cast<int>(x.size(0));
+    in_dim = static_cast<int>(x.size(1));
+  }
+
   const int rank = static_cast<int>(A.size(0));
   const int out_dim = static_cast<int>(B.size(0));
   TORCH_CHECK(A.size(1) == in_dim, "A in_dim mismatch");
   TORCH_CHECK(B.size(1) == rank, "B rank mismatch");
   TORCH_CHECK(rank > 0 && rank <= 64, "rank must be in (0, 64]");
 
-  torch::Tensor out = base.has_value() ? torch::empty_like(*base) : torch::empty({out_dim}, x.options());
+  torch::Tensor out;
   if (base.has_value()) {
     check_cuda(*base, "base");
-    TORCH_CHECK(base->dim() == 1 && base->size(0) == out_dim, "base shape mismatch");
+    TORCH_CHECK(base->sizes() == x.sizes() || (x.dim() == 1 && base->dim() == 1 && base->size(0) == out_dim),
+                "base shape mismatch");
+    out = torch::empty_like(*base);
+  } else if (x.dim() == 1) {
+    out = torch::empty({out_dim}, x.options());
+  } else {
+    out = torch::empty({rows, out_dim}, x.options());
   }
 
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
@@ -135,6 +150,7 @@ torch::Tensor fused_lora_delta(
         A.data_ptr<T>(),
         B.data_ptr<T>(),
         out.data_ptr<T>(),
+        rows,
         in_dim,
         out_dim,
         rank,

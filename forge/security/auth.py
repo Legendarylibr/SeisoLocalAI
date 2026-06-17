@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import secrets
 import time
-from collections import defaultdict
+from collections import OrderedDict, defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
@@ -19,7 +19,7 @@ bearer_scheme = HTTPBearer(auto_error=False)
 
 ALGORITHM = "HS256"
 _MAX_REVOKED_JTIS = 10_000
-_revoked_jtis: set[str] = set()
+_revoked_jtis: OrderedDict[str, None] = OrderedDict()
 
 
 def hash_password(password: str) -> str:
@@ -52,9 +52,11 @@ def revoke_access_token(token: str, settings: ForgeSettings) -> None:
         payload = jwt.decode(token, settings.secret_key, algorithms=[ALGORITHM])
         jti = payload.get("jti")
         if jti:
-            _revoked_jtis.add(str(jti))
-            if len(_revoked_jtis) > _MAX_REVOKED_JTIS:
-                _revoked_jtis.clear()
+            key = str(jti)
+            _revoked_jtis[key] = None
+            _revoked_jtis.move_to_end(key)
+            while len(_revoked_jtis) > _MAX_REVOKED_JTIS:
+                _revoked_jtis.popitem(last=False)
     except JWTError:
         pass
 

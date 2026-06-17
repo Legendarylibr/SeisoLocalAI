@@ -180,10 +180,18 @@ export const api = {
     }),
   getMessages: (threadId: string) =>
     request<ChatMessage[]>(`/inference/threads/${threadId}/messages`),
-  startTraining: (config: Record<string, unknown>, multi_gpu = false) =>
+  startTraining: (
+    config: Record<string, unknown>,
+    multi_gpu = false,
+    export_on_complete?: {
+      profile?: string;
+      formats?: string[];
+      gguf_quantizations?: string[];
+    },
+  ) =>
     request<{ job_id: string; status: string }>("/training/jobs", {
       method: "POST",
-      body: JSON.stringify({ config, multi_gpu }),
+      body: JSON.stringify({ config, multi_gpu, export_on_complete }),
     }),
   listTrainingJobs: () => request<TrainingJob[]>("/training/jobs"),
   listTrainingModels: () => request<{ models: TrainableModel[]; total: number }>("/training/models"),
