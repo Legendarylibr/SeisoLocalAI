@@ -102,14 +102,24 @@ export function RLQuantPage() {
       badge={<span className="trust-badge trust-badge-dim">REINFORCE · multiseed sweeps</span>}
     >
       <div className="train-layout">
-        <div className="card research-config-card">
+        <div className="card studio-card">
+          <div className="studio-card-head">
+            <span className="studio-card-icon" aria-hidden>①</span>
+            <div className="studio-card-head-text">
+              <div className="studio-card-title">Experiment config</div>
+              <div className="studio-card-desc">Preset, backends, inputs, and reward weights</div>
+            </div>
+          </div>
+
           <FormSection title="Experiment preset" hint="Reproducible configs with logged artifacts.">
-            <label>Preset</label>
-            <select value={preset} onChange={(e) => setPreset(e.target.value)}>
-              {presetList.map((p) => (
-                <option key={p.id} value={p.id}>{p.label}</option>
-              ))}
-            </select>
+            <div className="form-field">
+              <label>Preset</label>
+              <select value={preset} onChange={(e) => setPreset(e.target.value)}>
+                {presetList.map((p) => (
+                  <option key={p.id} value={p.id}>{p.label}</option>
+                ))}
+              </select>
+            </div>
             {PRESET_HINTS[preset] && <p className="field-hint">{PRESET_HINTS[preset]}</p>}
             {selectedPreset && (
               <p className="field-hint">
@@ -120,11 +130,11 @@ export function RLQuantPage() {
 
           <FormSection title="Training budget" collapsible defaultOpen>
             <div className="option-grid">
-              <div>
+              <div className="form-field">
                 <label>Training episodes</label>
                 <input type="number" min={8} value={trainingEpisodes} onChange={(e) => setTrainingEpisodes(+e.target.value)} />
               </div>
-              <div>
+              <div className="form-field">
                 <label>Evaluation episodes</label>
                 <input type="number" min={4} value={evaluationEpisodes} onChange={(e) => setEvaluationEpisodes(+e.target.value)} />
               </div>
@@ -132,76 +142,130 @@ export function RLQuantPage() {
           </FormSection>
 
           <FormSection title="Backends" collapsible>
-            <label>Measure backend</label>
-            <select value={backend} onChange={(e) => setBackend(e.target.value)}>
-              <option value="simulator">Simulator (no GPU)</option>
-              <option value="llama_cpp">llama.cpp (GGUF path required)</option>
-            </select>
-
-            <label>Policy trainer</label>
-            <select value={trainingBackend} onChange={(e) => setTrainingBackend(e.target.value)}>
-              <option value="stdlib">Stdlib REINFORCE</option>
-              <option value="pytorch">PyTorch / CUDA</option>
-            </select>
+            <div className="form-field">
+              <label>Measure backend</label>
+              <select value={backend} onChange={(e) => setBackend(e.target.value)}>
+                <option value="simulator">Simulator (no GPU)</option>
+                <option value="llama_cpp">llama.cpp (GGUF path required)</option>
+              </select>
+            </div>
+            <div className="form-field">
+              <label>Policy trainer</label>
+              <select value={trainingBackend} onChange={(e) => setTrainingBackend(e.target.value)}>
+                <option value="stdlib">Stdlib REINFORCE</option>
+                <option value="pytorch">PyTorch / CUDA</option>
+              </select>
+            </div>
           </FormSection>
 
           <FormSection title="Inputs" collapsible defaultOpen={false}>
-            <label>Fine-tune checkpoint</label>
-            <input value={checkpoint} onChange={(e) => setCheckpoint(e.target.value)} placeholder="~/.seiso/checkpoints/…" />
-
-            <label>GGUF path (llama.cpp)</label>
-            <input value={ggufPath} onChange={(e) => setGgufPath(e.target.value)} placeholder="models/model-q4.gguf" />
-
-            <label>Link training job ID</label>
-            <input value={linkTrainingJob} onChange={(e) => setLinkTrainingJob(e.target.value)} placeholder="uuid from Train page" />
+            <div className="form-field">
+              <label>Fine-tune checkpoint</label>
+              <input value={checkpoint} onChange={(e) => setCheckpoint(e.target.value)} placeholder="~/.seiso/checkpoints/…" />
+            </div>
+            <div className="form-field">
+              <label>GGUF path (llama.cpp)</label>
+              <input value={ggufPath} onChange={(e) => setGgufPath(e.target.value)} placeholder="models/model-q4.gguf" />
+            </div>
+            <div className="form-field">
+              <label>Link training job ID</label>
+              <input value={linkTrainingJob} onChange={(e) => setLinkTrainingJob(e.target.value)} placeholder="uuid from Train page" />
+            </div>
           </FormSection>
 
-          <div className="checkbox-group">
-            <label>
-              <input type="checkbox" checked={ggufExport} onChange={(e) => setGgufExport(e.target.checked)} />
-              Export GGUF after recommendation
-            </label>
-            <label>
-              <input type="checkbox" checked={moeEnabled} onChange={(e) => setMoeEnabled(e.target.checked)} />
-              MoE expert variants
-            </label>
-          </div>
+          <FormSection title="Export options" hint="Optional GGUF export and MoE variants." collapsible defaultOpen>
+            <div className="studio-checkbox-grid">
+              <label className="studio-checkbox-item">
+                <input type="checkbox" checked={ggufExport} onChange={(e) => setGgufExport(e.target.checked)} />
+                Export GGUF after recommendation
+              </label>
+              <label className="studio-checkbox-item">
+                <input type="checkbox" checked={moeEnabled} onChange={(e) => setMoeEnabled(e.target.checked)} />
+                MoE expert variants
+              </label>
+            </div>
+          </FormSection>
 
           <FormSection title="Reward engineering" hint="Tune the multi-objective reward surface." collapsible>
             <RewardWeights weights={reward} onChange={(w) => setReward({ ...reward, ...w })} />
           </FormSection>
-
-          <button className="btn btn-primary btn-lg studio-action-bar-standalone" onClick={start} disabled={starting}>
-            {starting ? "Starting…" : "Run RL quant pipeline"}
-          </button>
         </div>
 
-        <div className="card research-config-card">
+        <div className="card studio-card">
+          <div className="studio-card-head">
+            <span className="studio-card-icon" aria-hidden>②</span>
+            <div className="studio-card-head-text">
+              <div className="studio-card-title">Live output</div>
+              <div className="studio-card-desc">Streaming logs and recommendation artifacts</div>
+              {activeJob && (
+                <div className="studio-card-meta">
+                  <span className="mono studio-job-id">{activeJob.slice(0, 8)}…</span>
+                </div>
+              )}
+            </div>
+          </div>
           <LogStream
-            title={activeJob ? `Job log (${activeJob.slice(0, 8)}…)` : "Job log"}
             logs={logs}
+            emptyMessage="Run the RL quant pipeline to stream logs here."
             tall
           />
           {recommendation && (
-            <div className="artifact-section">
-              <h3 className="section-title">Recommendation artifact</h3>
-              <ArtifactViewer data={recommendation} />
+            <div className="studio-artifact-section">
+              <div className="form-section-head">
+                <h3 className="form-section-title">Recommendation artifact</h3>
+                <p className="form-section-hint">Policy output from the completed sweep</p>
+              </div>
+              <div className="studio-artifact-panel">
+                <ArtifactViewer data={recommendation} />
+              </div>
             </div>
           )}
         </div>
       </div>
 
-      <div className="card">
-        <h3 className="section-title">Recent experiments</h3>
+      <div className="card studio-card studio-run-card">
+        <div className="studio-card-head studio-card-head-inline">
+          <span className="studio-card-icon" aria-hidden>▶</span>
+          <div className="studio-card-head-text">
+            <div className="studio-card-title">Run pipeline</div>
+            <div className="studio-card-desc">
+              Starts a local REINFORCE sweep and streams metrics to the log panel.
+            </div>
+          </div>
+        </div>
+        <div className="studio-action-bar studio-action-bar-flush">
+          <button className="btn btn-primary btn-lg" onClick={start} disabled={starting}>
+            {starting ? "Starting…" : "Run RL quant pipeline"}
+          </button>
+        </div>
+      </div>
+
+      <div className="card studio-card">
+        <div className="studio-card-head">
+          <span className="studio-card-icon" aria-hidden>③</span>
+          <div className="studio-card-head-text">
+            <div className="studio-card-title">Recent experiments</div>
+            <div className="studio-card-desc">Past RL quant jobs on this machine</div>
+            {jobs.length > 0 && (
+              <div className="studio-card-meta">
+                <span className="badge badge-dim">{jobs.length} job{jobs.length === 1 ? "" : "s"}</span>
+              </div>
+            )}
+          </div>
+        </div>
         <DataTable
           columns={[
             {
               key: "id",
               header: "ID",
               mono: true,
-              render: (j) => j.id.slice(0, 8),
+              render: (j) => `${j.id.slice(0, 8)}…`,
             },
-            { key: "status", header: "Status" },
+            {
+              key: "status",
+              header: "Status",
+              render: (j) => <span className={`badge badge-${j.status}`}>{j.status}</span>,
+            },
             {
               key: "gguf_quants",
               header: "GGUF quants",
@@ -215,9 +279,9 @@ export function RLQuantPage() {
           ]}
           rows={jobs}
           getRowKey={(j) => j.id}
-          emptyMessage="No RL quant jobs yet."
+          emptyMessage="No RL quant jobs yet — configure settings above and run the pipeline."
         />
-        <p className="field-hint" style={{ marginTop: "0.75rem" }}>
+        <p className="field-hint studio-field-hint">
           Completed job IDs can be used on the Export page for RL-recommended GGUF quantizations.
         </p>
       </div>

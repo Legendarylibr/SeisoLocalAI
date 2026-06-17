@@ -81,10 +81,10 @@ function Guard({ children, fullBleed = false }: { children: React.ReactNode; ful
   if (!user && !needsOnboarding) return <AuthPage />;
   if (needsOnboarding && !user) return <AuthPage />;
   if (checkingHfPrompt) return <PageLoading />;
-  if (showHfPrompt) return <HfTokenPrompt onDone={dismissHfPrompt} />;
   return (
     <Layout fullBleed={fullBleed}>
       <Suspense fallback={<PageLoading />}>{children}</Suspense>
+      {showHfPrompt && <HfTokenPrompt onDone={dismissHfPrompt} />}
     </Layout>
   );
 }
