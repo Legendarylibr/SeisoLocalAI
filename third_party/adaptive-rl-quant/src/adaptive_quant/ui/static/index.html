@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Adaptive RL Quantization</title>
+    <link rel="stylesheet" href="/static/app.css" />
+  </head>
+  <body>
+    <div class="backdrop"></div>
+    <div class="shell">
+      <header class="hero">
+        <div class="hero-copy">
+          <p class="eyebrow">Post-install launcher</p>
+          <h1>Adaptive RL Quantization</h1>
+          <p class="lede">
+            Configure and run every workflow from one dashboard — tune RL rewards, trainers,
+            PyTorch settings, sweeps, multiseed, CUDA install, and environment options.
+          </p>
+        </div>
+        <div class="hero-status" id="readiness-card">
+          <span class="status-pill" id="readiness-pill">Checking…</span>
+          <p id="readiness-detail">Loading environment status…</p>
+        </div>
+      </header>
+
+      <section class="grid status-grid" id="status-grid"></section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <div>
+            <h2>Configure &amp; run</h2>
+            <p>Select a workflow, tune RL hyperparameters and reward weights, then run.</p>
+          </div>
+          <button class="ghost" id="refresh-btn" type="button">Refresh</button>
+        </div>
+
+        <div class="configure-grid">
+          <label class="field">
+            <span>Workflow</span>
+            <select id="workflow-select"></select>
+          </label>
+          <p class="workflow-description muted" id="workflow-description"></p>
+          <div class="preset-row" id="workflow-presets"></div>
+          <div class="form-grid" id="workflow-fields"></div>
+          <div id="workflow-field-groups" class="field-groups"></div>
+
+          <details class="env-details" open>
+            <summary>Environment &amp; NVIDIA settings</summary>
+            <div class="form-grid" id="environment-fields"></div>
+          </details>
+
+          <div class="run-row">
+            <code class="command-preview" id="command-preview">—</code>
+            <button class="primary-run" id="run-btn" type="button">Run configured workflow</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <div>
+            <h2>Interactive chat &amp; continuous RL</h2>
+            <p>
+              Pick a Hugging Face GGUF route or local model, download if needed, then train via
+              llama.cpp or the simulator. Chat tasks queue to
+              <code>outputs/chat_tasks.jsonl</code>.
+            </p>
+          </div>
+          <div class="chat-toolbar">
+            <button class="ghost" id="chat-download-model-btn" type="button">Download selected</button>
+            <button class="ghost" id="chat-reset-btn" type="button">Reset session</button>
+          </div>
+        </div>
+        <div class="chat-grid chat-search-row">
+          <label class="field field-wide">
+            <span>Search Hugging Face GGUF repos</span>
+            <input id="chat-hf-search" type="search" placeholder="e.g. Llama 3.1 8B GGUF" />
+          </label>
+          <button class="ghost" id="chat-hf-search-btn" type="button">Search</button>
+        </div>
+        <ul class="hf-search-results muted" id="chat-hf-results"></ul>
+        <div class="chat-grid">
+          <label class="field">
+            <span>Interaction mode</span>
+            <select id="chat-backend"></select>
+          </label>
+          <label class="field field-wide">
+            <span>Model (Hugging Face routes &amp; local GGUF)</span>
+            <select id="chat-model">
+              <option value="">Simulator only</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Local model (llama.cpp)</span>
+            <select id="chat-model">
+              <option value="">Simulator only</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Hardware profile</span>
+            <select id="chat-hardware">
+              <option value="gpu">gpu</option>
+              <option value="cpu">cpu</option>
+              <option value="low_resource">low_resource</option>
+            </select>
+          </label>
+        </div>
+        <div class="chat-log" id="chat-log"></div>
+        <form class="chat-compose" id="chat-form">
+          <textarea
+            id="chat-input"
+            rows="3"
+            placeholder="Enter a prompt to evaluate with RL or generate via llama.cpp…"
+          ></textarea>
+          <div class="chat-actions">
+            <label class="field field-check">
+              <input type="checkbox" id="chat-append-task" checked />
+              <span>Queue for continuous JSONL stream</span>
+            </label>
+            <button class="ghost" id="chat-run-continuous-btn" type="button">
+              Run continuous on queue
+            </button>
+            <button class="primary-run" type="submit">Send</button>
+          </div>
+        </form>
+        <p class="muted chat-meta" id="chat-meta">Loading chat config…</p>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <div>
+            <h2>Quick actions</h2>
+            <p>One-click shortcuts that pre-fill the form above.</p>
+          </div>
+        </div>
+        <div class="actions" id="actions"></div>
+      </section>
+
+      <section class="panel split">
+        <div>
+          <div class="panel-head compact">
+            <h2>Activity log</h2>
+            <span class="muted" id="active-job-label">No active job</span>
+          </div>
+          <pre class="log" id="log-output">Waiting for a command…</pre>
+        </div>
+        <aside class="sidebar">
+          <h3>GPU &amp; NVIDIA</h3>
+          <div id="gpu-panel" class="info-stack"></div>
+          <h3>Recent jobs</h3>
+          <ul class="job-list" id="job-list"></ul>
+          <h3>Outputs</h3>
+          <div id="outputs-panel" class="info-stack"></div>
+        </aside>
+      </section>
+
+      <footer class="footer">
+        <span>Local only · <code id="repo-root">—</code></span>
+        <span id="git-line">—</span>
+      </footer>
+    </div>
+    <script src="/static/app.js"></script>
+  </body>
+</html>

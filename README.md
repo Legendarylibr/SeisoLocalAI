@@ -40,6 +40,7 @@ Open **http://127.0.0.1:8765** — complete onboarding to create your local admi
 | `seiso train` | Train from config/checkpoint |
 | `seiso chat` | Terminal chat with local models |
 | `seiso export` | Export merged/GGUF/LoRA + Hub push |
+| `seiso compress run` | Code Llama compression pipeline (distill → prune → finetune → export) |
 | `seiso inference` | One-shot inference |
 
 ## Architecture
@@ -61,6 +62,8 @@ Backend orchestrators spawn isolated workers with SSE log streaming:
 | `forge/orchestrators/export` | Merge LoRA, GGUF, Hub upload |
 | `forge/orchestrators/recipes` | Recipe jobs, HF dataset ops |
 | `forge/orchestrators/knowledge` | RAG ingest and retrieve (API only) |
+| `forge/orchestrators/compress` | Distillation, pruning, fine-tune, export bundle jobs |
+| `forge/orchestrators/rl_quant` | Adaptive RL quantization policy training |
 
 ## Platform support
 
@@ -83,6 +86,8 @@ Backend orchestrators spawn isolated workers with SSE log streaming:
 - **Providers** — OpenAI, Anthropic, Ollama, vLLM routing
 - **MCP** — connect stdio MCP servers; tools auto-register in chat
 - **Recipe Studio** — visual `@xyflow/react` canvas → backend graph executor
+- **Model compression** — distill, MLP prune, recovery fine-tune, GPTQ/AWQ, speculative decoding ([codellama-compress](https://github.com/Legendarylibrorg/codellama-compress))
+- **RL quantization** — adaptive GGUF quant policy via reinforcement learning
 
 ## Development
 
@@ -140,6 +145,16 @@ When `SEISO_ALLOW_TOOLS=true`:
 
 - Signed session tokens; login rate-limited to 10 attempts/minute per IP
 - Job and resource ownership enforced on all streaming endpoints
+
+### Database (local-only, zero retention)
+
+| Setting | Default | Purpose |
+|---------|---------|---------|
+| `SEISO_DB_EPHEMERAL=true` | on | In-memory SQLite — all metadata wiped on restart |
+| `SEISO_DB_EPHEMERAL=false` | — | Opt-in persistence to `{SEISO_DATA_DIR}/forge.db` |
+| `SEISO_DB_ENCRYPTION_KEY` | auto | AES-256-GCM key for sensitive fields (chat, provider configs, MCP env) |
+
+Sensitive columns are encrypted at the application layer (same AES-256-GCM pattern as [Web-app-practice](https://github.com/Legendarylibr/Web-app-practice)). When ephemeral, a fresh session key is generated each run; the legacy `forge.db` file is removed on startup.
 
 ### Recommended production checklist
 

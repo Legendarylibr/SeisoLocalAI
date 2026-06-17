@@ -5,12 +5,13 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from forge.api.routes import auth, export, inference, knowledge, mcp_servers, models, openai, providers, recipes, training
+from forge.api.deps import clear_dependency_caches, get_db
+from forge.api.routes import auth, autodefense, compress, export, image_compress, inference, knowledge, mcp_servers, models, openai, providers, recipes, rl_quant, training
 from forge.api.routes import settings as settings_routes
 from forge.config import get_settings
 
@@ -21,6 +22,9 @@ async def lifespan(app: FastAPI):
     settings.ensure_dirs()
     settings.write_runtime_config()
     yield
+    db = get_db()
+    await db.close()
+    clear_dependency_caches()
 
 
 def create_app() -> FastAPI:
@@ -39,23 +43,37 @@ def create_app() -> FastAPI:
         allow_origins=cfg.cors_origin_list,
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-        allow_headers=["Authorization", "Content-Type"],
+        allow_headers=["Authorization", "Content-Type", "X-CSRF-Token"],
     )
 
     @app.middleware("http")
     async def security_headers(request: Request, call_next):
         from forge.security.auth import RateLimiter
+        from forge.security.csrf import validate_csrf
 
         if not hasattr(app.state, "rate_limiter"):
-            app.state.rate_limiter = RateLimiter(cfg.rate_limit)
+            app.state.rate_limiter = RateLimiter(get_settings().rate_limit)
         client = request.client.host if request.client else "unknown"
         if request.url.path not in ("/health", "/api/health", "/auth/status", "/api/auth/status"):
-            app.state.rate_limiter.check(client)
-        response = await call_next(request)
+            try:
+                app.state.rate_limiter.check(client)
+            except HTTPException as exc:
+                return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
+        if not validate_csrf(request):
+            return JSONResponse({"detail": "CSRF validation failed"}, status_code=403)
+        response: Response = await call_next(request)
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "connect-src 'self'; "
+            "style-src 'self' 'unsafe-inline'; "
+            "script-src 'self'; "
+            "img-src 'self' data: blob:; "
+            "frame-ancestors 'none'"
+        )
         return response
 
     prefix = "/api"
@@ -64,10 +82,14 @@ def create_app() -> FastAPI:
     app.include_router(inference.router, prefix=prefix)
     app.include_router(training.router, prefix=prefix)
     app.include_router(export.router, prefix=prefix)
+    app.include_router(rl_quant.router, prefix=prefix)
+    app.include_router(compress.router, prefix=prefix)
+    app.include_router(image_compress.router, prefix=prefix)
     app.include_router(recipes.router, prefix=prefix)
     app.include_router(knowledge.router, prefix=prefix)
     app.include_router(providers.router, prefix=prefix)
     app.include_router(mcp_servers.router, prefix=prefix)
+    app.include_router(autodefense.router, prefix=prefix)
     app.include_router(settings_routes.router, prefix=prefix)
     app.include_router(openai.router)  # /v1/chat/completions — no /api prefix (OpenAI compat)
 

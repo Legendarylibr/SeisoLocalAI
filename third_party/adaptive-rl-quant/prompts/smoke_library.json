@@ -1,0 +1,24 @@
+{
+  "prompts": [
+    {
+      "prompt_id": "simple_qa",
+      "domain": "qa",
+      "text": "What is the capital of France?"
+    },
+    {
+      "prompt_id": "short_code",
+      "domain": "code",
+      "text": "Write a Python function that reverses a list."
+    },
+    {
+      "prompt_id": "math_reasoning",
+      "domain": "reasoning",
+      "text": "Solve step by step: if a train travels 60 miles in 45 minutes, what is the average speed?"
+    },
+    {
+      "prompt_id": "low_complexity",
+      "domain": "wellness",
+      "text": "List three benefits of daily exercise."
+    }
+  ]
+}

@@ -35,6 +35,16 @@ async def _openai_compatible(
     *,
     provider_type: str = "openai",
 ) -> str:
+    if provider_type == "ollama":
+        from forge.providers.ollama import chat_completion as ollama_chat
+
+        return await ollama_chat(
+            messages,
+            model=config.get("model", "llama3.2"),
+            max_tokens=max_tokens,
+            base_url=config.get("base_url", ""),
+        )
+
     endpoint = resolve_pinned_endpoint(config.get("base_url", ""), provider_type=provider_type)
     model = config.get("model", "gpt-4o-mini")
     api_key = config.get("api_key", "")
@@ -43,8 +53,12 @@ async def _openai_compatible(
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
 
+    path = "/chat/completions"
+    if provider_type == "vllm" and not endpoint.base_url.rstrip("/").endswith("/v1"):
+        path = "/v1/chat/completions"
+
     payload = {"model": model, "messages": messages, "max_tokens": max_tokens}
-    resp = await pinned_post(endpoint, "/chat/completions", headers=headers, json=payload)
+    resp = await pinned_post(endpoint, path, headers=headers, json=payload)
     resp.raise_for_status()
     data = resp.json()
     return data["choices"][0]["message"]["content"]

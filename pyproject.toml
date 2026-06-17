@@ -57,6 +57,33 @@ forge = [
   "sse-starlette>=2.1",
   "cryptography>=42",
 ]
+llamacpp = [
+  "llama-cpp-python>=0.3",
+]
+rl-quant = []
+compress = []
+compress-quant = [
+  "auto-gptq>=0.7.1",
+  "autoawq>=0.2.9",
+]
+compress-eval = [
+  "lm-eval[hf]>=0.4.12",
+]
+image-compress = [
+  "torch>=2.2",
+  "torchvision>=0.17",
+  "diffusers>=0.30",
+  "transformers>=4.40",
+  "accelerate>=0.30",
+  "pillow>=10.0",
+  "lpips>=0.1.4",
+  "gradio>=4.0",
+]
+image-compress-onnx = [
+  "optimum>=1.20",
+  "onnx>=1.16",
+  "onnxruntime>=1.18",
+]
 dev = [
   "pytest>=8.2",
   "pytest-asyncio>=0.23",
@@ -87,6 +114,7 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = ["slow: long-running integration tests"]
 
 [tool.mypy]
 python_version = "3.10"

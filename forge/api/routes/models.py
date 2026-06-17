@@ -16,7 +16,7 @@ from forge.orchestrators.inference import InferenceOrchestrator
 from forge.security.auth import get_current_user_id
 from seiso.models.catalog import get_families, search_catalog
 from forge.services.user_paths import assert_user_path, user_dir
-from seiso.security import SecurityError
+from seiso.security import SecurityError, sanitize_filename
 
 router = APIRouter(prefix="/models", tags=["models"])
 

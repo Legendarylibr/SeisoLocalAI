@@ -18,6 +18,7 @@ from forge.security.auth import (
     hash_password,
     verify_password,
 )
+from forge.security.csrf import clear_csrf_cookie, generate_csrf_token, set_csrf_cookie
 
 _login_limiter = LoginRateLimiter()
 
@@ -43,13 +44,12 @@ class AuthResponse(BaseModel):
 
 class OnboardingStatus(BaseModel):
     needs_onboarding: bool
-    user_count: int
 
 
 @router.get("/status", response_model=OnboardingStatus)
 async def onboarding_status(db: Annotated[Database, Depends(get_db)]) -> OnboardingStatus:
     count = await db.user_count()
-    return OnboardingStatus(needs_onboarding=count == 0, user_count=count)
+    return OnboardingStatus(needs_onboarding=count == 0)
 
 
 @router.post("/register", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
@@ -69,6 +69,7 @@ async def register(
 
     user = await db.create_user(body.email, hash_password(body.password), body.display_name)
     token = create_access_token(user["id"], settings)
+    csrf = generate_csrf_token()
     response.set_cookie(
         "seiso_token",
         token,
@@ -77,6 +78,7 @@ async def register(
         secure=settings.allow_remote,
         max_age=settings.session_hours * 3600,
     )
+    set_csrf_cookie(response, csrf, secure=settings.allow_remote)
     audit_event("auth_register", user_id=user["id"], email=body.email)
     return AuthResponse(
         access_token=token,
@@ -100,6 +102,7 @@ async def login(
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid credentials")
 
     token = create_access_token(user["id"], settings)
+    csrf = generate_csrf_token()
     response.set_cookie(
         "seiso_token",
         token,
@@ -108,6 +111,7 @@ async def login(
         secure=settings.allow_remote,
         max_age=settings.session_hours * 3600,
     )
+    set_csrf_cookie(response, csrf, secure=settings.allow_remote)
     audit_event("auth_login", user_id=user["id"], email=body.email)
     return AuthResponse(
         access_token=token,
@@ -118,6 +122,7 @@ async def login(
 @router.post("/logout")
 async def logout(response: Response) -> dict[str, str]:
     response.delete_cookie("seiso_token")
+    clear_csrf_cookie(response)
     return {"status": "ok"}
 
 

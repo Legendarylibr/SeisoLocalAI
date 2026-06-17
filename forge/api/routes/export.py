@@ -17,6 +17,7 @@ from forge.orchestrators.export import ExportOrchestrator
 from forge.security.audit import audit_event
 from forge.security.auth import get_current_user_id
 from forge.services.user_paths import assert_user_path
+from forge.services.jobs import assert_job_owner
 from seiso.security import SecurityError
 
 router = APIRouter(prefix="/export", tags=["export"])
@@ -27,6 +28,10 @@ class ExportStartRequest(BaseModel):
     formats: list[str] = Field(default_factory=lambda: ["merged"])
     gguf_quantizations: list[str] = Field(default_factory=lambda: ["q4_k_m"])
     hub_repo: str | None = None
+    rl_quant_job_id: str | None = Field(
+        default=None,
+        description="Apply GGUF quants from a completed RL quant recommendation job",
+    )
 
 
 class ExportJobResponse(BaseModel):
@@ -56,10 +61,28 @@ async def start_export(
         raise HTTPException(403, str(exc)) from exc
 
     job_id = str(uuid.uuid4())
-    await db.create_export_job(user_id, body.model_dump(), job_id=job_id)
+    config = body.model_dump()
+    gguf_quants = list(body.gguf_quantizations)
+
+    if body.rl_quant_job_id:
+        rl_job = await db.get_rl_quant_job(body.rl_quant_job_id, user_id)
+        if not rl_job:
+            raise HTTPException(404, "RL quant job not found")
+        if rl_job.get("status") != "completed":
+            raise HTTPException(400, "RL quant job is not completed")
+        stored = rl_job.get("gguf_quants_json") or "[]"
+        import json as _json
+
+        parsed = _json.loads(stored)
+        if parsed:
+            gguf_quants = parsed
+        config["rl_quant_job_id"] = body.rl_quant_job_id
+
+    await db.create_export_job(user_id, config, job_id=job_id)
     orchestrator.create_job(job_id=job_id, user_id=user_id)
     payload = {
         **body.model_dump(),
+        "gguf_quantizations": gguf_quants,
         "user_id": user_id,
         "output_dir": str(settings.data_dir / "exports" / user_id / job_id),
         "hub_token": settings.hf_token or None,
@@ -75,6 +98,16 @@ async def start_export(
                     job.status.value,
                     output_paths=job.result.get("outputs"),
                 )
+                if job.status.value == "completed" and job.result.get("outputs"):
+                    from forge.services.model_registry import register_export_outputs
+
+                    await register_export_outputs(
+                        db,
+                        user_id=user_id,
+                        data_dir=settings.data_dir,
+                        outputs=job.result["outputs"],
+                        job_id=job_id,
+                    )
         except Exception:
             await db.update_export_job_status(job_id, "failed")
             raise

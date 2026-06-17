@@ -75,7 +75,7 @@ export function TrainPage() {
   return (
     <div className="train-page">
       <h1 className="page-title">Training Studio</h1>
-      <p className="page-sub">QLoRA 4-bit, TRL SFTTrainer, train-on-responses-only, GGUF + Ollama export.</p>
+          <p className="page-sub">QLoRA 4-bit, TRL SFTTrainer — then run <a href="/rl-quant">RL Quant</a> for adaptive GGUF export.</p>
 
       <div className="train-layout">
         <div className="card">

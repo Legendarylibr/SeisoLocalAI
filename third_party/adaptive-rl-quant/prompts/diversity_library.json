@@ -1,0 +1,44 @@
+{
+  "prompts": [
+    {
+      "prompt_id": "simple_qa",
+      "domain": "qa",
+      "text": "What is the capital of France?"
+    },
+    {
+      "prompt_id": "short_code",
+      "domain": "code",
+      "text": "Write a Python function that reverses a list."
+    },
+    {
+      "prompt_id": "math_reasoning",
+      "domain": "reasoning",
+      "text": "Solve step by step: if a train travels 60 miles in 45 minutes, what is the average speed?"
+    },
+    {
+      "prompt_id": "sql_generation",
+      "domain": "code",
+      "text": "Generate a SQL query to compute monthly revenue grouped by product category and region."
+    },
+    {
+      "prompt_id": "legal_summary",
+      "domain": "legal",
+      "text": "Summarize the main obligations in a contract termination clause with emphasis on notice periods and indemnification."
+    },
+    {
+      "prompt_id": "biomed_explanation",
+      "domain": "biomed",
+      "text": "Explain how mRNA vaccines trigger immune responses and note two limitations of the platform."
+    },
+    {
+      "prompt_id": "creative_long",
+      "domain": "creative",
+      "text": "Write an atmospheric scene where a stranded pilot discovers an abandoned weather station on Europa."
+    },
+    {
+      "prompt_id": "very_complex",
+      "domain": "systems",
+      "text": "Design a fault-tolerant serving stack for a multilingual assistant under strict privacy and mixed CPU/GPU deployment."
+    }
+  ]
+}

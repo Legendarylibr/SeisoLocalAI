@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from "react";
-import { api, AuthUser, getToken, setToken } from "@/lib/api";
+import { api, AuthUser, clearLegacyToken } from "@/lib/api";
 
 type AuthState = {
   user: AuthUser | null;
@@ -18,16 +18,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [needsOnboarding, setNeedsOnboarding] = useState(false);
 
   useEffect(() => {
+    clearLegacyToken();
     (async () => {
       try {
         const status = await api.authStatus();
         setNeedsOnboarding(status.needs_onboarding);
-        if (getToken() && !status.needs_onboarding) {
-          const me = await api.me();
-          setUser(me);
+        if (!status.needs_onboarding) {
+          try {
+            const me = await api.me();
+            setUser(me);
+          } catch {
+            setUser(null);
+          }
         }
       } catch {
-        setToken(null);
+        setUser(null);
       } finally {
         setLoading(false);
       }
@@ -36,21 +41,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = async (email: string, password: string) => {
     const res = await api.login(email, password);
-    setToken(res.access_token);
     setUser(res.user);
     setNeedsOnboarding(false);
   };
 
   const register = async (email: string, password: string, name?: string) => {
     const res = await api.register(email, password, name);
-    setToken(res.access_token);
     setUser(res.user);
     setNeedsOnboarding(false);
   };
 
   const logout = async () => {
     await api.logout();
-    setToken(null);
     setUser(null);
   };
 

@@ -6,10 +6,12 @@ import json
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field, field_validator
+from pydantic import Field, PrivateAttr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from seiso.security import generate_secret_key, resolve_data_dir
+
+from forge.db.crypto import generate_encryption_key, resolve_encryption_key
 
 
 class ForgeSettings(BaseSettings):
@@ -33,11 +35,21 @@ class ForgeSettings(BaseSettings):
     allow_openai_tools: bool = False
     allow_tools: bool = False
     allow_code_exec: bool = False
+    ollama_base_url: str = "http://127.0.0.1:11434"
+    db_ephemeral: bool = True
+    db_encryption_key: str = ""
+    autodefense_enabled: bool = False
+    autodefense_url: str = "http://127.0.0.1:8000"
+    autodefense_api_key: str = ""
+    autodefense_timeout: float = Field(default=10.0, ge=1.0, le=120.0)
+    autodefense_fail_open: bool = True
 
     @field_validator("data_dir", mode="before")
     @classmethod
     def _expand_data_dir(cls, v: object) -> Path:
         return Path(str(v)).expanduser()
+
+    _session_db_key: bytes | None = PrivateAttr(default=None)
 
     def model_post_init(self, __context: object) -> None:
         self.data_dir = resolve_data_dir(self.data_dir)
@@ -50,12 +62,32 @@ class ForgeSettings(BaseSettings):
                 key_file.write_text(self.secret_key)
                 key_file.chmod(0o600)
 
+        self._session_db_key = self._resolve_db_encryption_key()
+
+        if self.db_ephemeral:
+            legacy_db = self.data_dir / "forge.db"
+            if legacy_db.exists():
+                legacy_db.unlink()
+
         if not self.allow_remote:
             self.host = "127.0.0.1"
 
+    def _resolve_db_encryption_key(self) -> bytes:
+        if self.db_encryption_key:
+            return resolve_encryption_key(self.db_encryption_key)
+        if self.db_ephemeral:
+            return generate_encryption_key()
+        key_file = self.data_dir / ".db_encryption_key"
+        if key_file.exists():
+            return resolve_encryption_key(key_file.read_text().strip())
+        key = generate_encryption_key()
+        key_file.write_bytes(key)
+        key_file.chmod(0o600)
+        return key
+
     def ensure_dirs(self) -> None:
         """Create data subdirectories once at startup."""
-        for name in ("models", "checkpoints", "exports", "knowledge", "sandbox", "artifacts", "recipes", "uploads"):
+        for name in ("models", "checkpoints", "exports", "knowledge", "sandbox", "artifacts", "recipes", "uploads", "rl_quant", "compress", "image_compress"):
             (self.data_dir / name).mkdir(parents=True, exist_ok=True)
 
     @property
@@ -65,6 +97,12 @@ class ForgeSettings(BaseSettings):
     @property
     def db_path(self) -> Path:
         return self.data_dir / "forge.db"
+
+    @property
+    def db_encryption_key_bytes(self) -> bytes:
+        if self._session_db_key is None:
+            raise RuntimeError("Database encryption key is not initialized")
+        return self._session_db_key
 
     @property
     def models_dir(self) -> Path:

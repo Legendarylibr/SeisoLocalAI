@@ -8,16 +8,17 @@ from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
 from typing import Any
 
+from seiso.inference.backends import (
+    BACKEND_LLAMACPP,
+    BACKEND_MLX,
+    BACKEND_TORCH,
+    _is_gguf_path,
+    prepare_model_path,
+    resolve_gguf_file,
+    resolve_local_backend,
+)
 from seiso.inference.model_pool import get_model_pool
 from seiso.models.chat_format import format_messages_for_prompt
-from seiso.models.loader import Backend, detect_backend
-
-
-def _is_gguf_path(model_path: str) -> bool:
-    path = Path(model_path)
-    if path.suffix.lower() == ".gguf":
-        return True
-    return path.is_dir() and any(path.glob("*.gguf"))
 
 
 class LocalInferenceRunner:
@@ -37,14 +38,15 @@ class LocalInferenceRunner:
         if not model_path:
             raise ValueError("model_path or model_id required")
 
-        await self._ensure_model_switch(model_path)
+        route, resolved_path = self._resolve_route(payload, model_path)
+        await self._ensure_model_switch(resolved_path)
 
         loop = asyncio.get_running_loop()
         queue: asyncio.Queue[str | None] = asyncio.Queue()
 
         def producer() -> None:
             try:
-                for token in self._iter_tokens(payload, model_path):
+                for token in self._iter_tokens(payload, resolved_path, route):
                     loop.call_soon_threadsafe(queue.put_nowait, token)
             finally:
                 loop.call_soon_threadsafe(queue.put_nowait, None)
@@ -69,18 +71,20 @@ class LocalInferenceRunner:
             loop = asyncio.get_running_loop()
             await loop.run_in_executor(None, self._pool.unload_all)
 
-    def _resolve_route(self, model_path: str) -> str:
-        if _is_gguf_path(model_path):
-            return "llama"
-        backend = detect_backend()
-        if backend == Backend.MLX:
-            return "mlx"
-        if backend == Backend.TORCH:
-            return "torch"
-        return "llama" if _is_gguf_path(model_path) else "torch"
+    def _resolve_route(self, payload: dict[str, Any], model_path: str) -> tuple[str, str]:
+        backend = resolve_local_backend(
+            model_path=model_path,
+            model_format=payload.get("model_format"),
+            requested=payload.get("inference_backend"),
+        )
+        resolved = prepare_model_path(model_path, backend)
+        if backend == BACKEND_MLX:
+            return "mlx", resolved
+        if backend == BACKEND_TORCH:
+            return "torch", resolved
+        return "llama", resolved
 
-    def _iter_tokens(self, payload: dict[str, Any], model_path: str) -> Iterator[str]:
-        route = self._resolve_route(model_path)
+    def _iter_tokens(self, payload: dict[str, Any], model_path: str, route: str) -> Iterator[str]:
         if route == "mlx":
             yield from self._mlx_stream(payload, model_path)
         elif route == "torch":

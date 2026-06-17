@@ -1,0 +1,124 @@
+from __future__ import annotations
+
+import os
+import platform
+import subprocess
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+from shutil import disk_usage
+from typing import Any
+
+from .config import save_json
+
+
+def new_run_dir(root: Path = Path("output/runs"), run_id: str | None = None) -> Path:
+    from .security import assert_safe_run_id
+
+    root = root.resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    if run_id is None:
+        ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        run_id = ts
+    else:
+        assert_safe_run_id(run_id)
+    run_dir = root / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    return run_dir
+
+
+def write_text(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+
+
+def _run_cmd(cmd: list[str]) -> str:
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        out = (r.stdout or "") + (("\n" + r.stderr) if r.stderr else "")
+        return out.strip() + "\n"
+    except Exception as e:  # pragma: no cover
+        return f"ERROR running {cmd!r}: {e}\n"
+
+
+def write_env_report(run_dir: Path) -> None:
+    try:
+        import torch
+    except Exception:  # pragma: no cover - depends on optional runtime deps
+        torch = None  # type: ignore[assignment]
+
+    env: dict[str, Any] = {
+        "python": sys.version,
+        "platform": platform.platform(),
+        "executable": sys.executable,
+        "torch": getattr(torch, "__version__", None) if torch is not None else None,
+        "cuda_available": bool(torch is not None and torch.cuda.is_available()),
+    }
+    if torch is not None and torch.cuda.is_available():
+        env["cuda_device_name"] = torch.cuda.get_device_name(0)
+        env["cuda_capability"] = ".".join(map(str, torch.cuda.get_device_capability(0)))
+    save_json(run_dir / "env.json", env)
+
+    write_text(run_dir / "pip_freeze.txt", _run_cmd([sys.executable, "-m", "pip", "freeze"]))
+
+    if sys.platform.startswith("linux"):
+        write_text(run_dir / "nvidia-smi.txt", _run_cmd(["nvidia-smi"]))
+
+    save_json(run_dir / "git_state.json", _git_state())
+
+
+def _git_state() -> dict[str, Any]:
+    sha = os.environ.get("GITHUB_SHA")
+    if sha:
+        return {"sha": sha, "dirty": None}
+    sha_out = _run_cmd(["git", "rev-parse", "HEAD"]).strip()
+    dirty_out = _run_cmd(["git", "status", "--porcelain"]).strip()
+    return {"sha": sha_out or None, "dirty": bool(dirty_out)}
+
+
+def save_effective_config(run_dir: Path, cfg: Any) -> None:
+    save_json(run_dir / "config.json", cfg)
+
+
+def safe_symlink(src: Path, dst: Path) -> None:
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    if dst.exists() or dst.is_symlink():
+        return
+    try:
+        dst.symlink_to(src, target_is_directory=src.is_dir())
+    except Exception:
+        # Fall back silently; symlinks can be restricted on some filesystems.
+        pass
+
+
+def dir_size_bytes(path: Path) -> int:
+    if not path.exists():
+        return 0
+    total = 0
+    for p in path.rglob("*"):
+        try:
+            if p.is_file() and not p.is_symlink():
+                total += p.stat().st_size
+        except OSError:
+            continue
+    return total
+
+
+def assert_disk_budget(
+    *,
+    root: Path,
+    min_free_gb: float | None = None,
+    max_dir_gb: float | None = None,
+    dir_path: Path | None = None,
+) -> None:
+    usage = disk_usage(str(root))
+    free_gb = usage.free / (1024**3)
+    if min_free_gb is not None and free_gb < min_free_gb:
+        raise RuntimeError(f"Low disk space: {free_gb:.1f}GB free (< {min_free_gb}GB)")
+
+    if max_dir_gb is not None and dir_path is not None:
+        size_gb = dir_size_bytes(dir_path) / (1024**3)
+        if size_gb > max_dir_gb:
+            raise RuntimeError(
+                f"Output too large: {size_gb:.1f}GB in {dir_path} (> {max_dir_gb}GB)"
+            )

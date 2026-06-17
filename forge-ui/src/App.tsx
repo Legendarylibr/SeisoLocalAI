@@ -6,6 +6,9 @@ import { HubPage } from "@/pages/HubPage";
 import { ChatPage } from "@/pages/ChatPage";
 import { TrainPage } from "@/pages/TrainPage";
 import { ExportPage } from "@/pages/ExportPage";
+import { RLQuantPage } from "@/pages/RLQuantPage";
+import { CompressPage } from "@/pages/CompressPage";
+import { ImageCompressPage } from "@/pages/ImageCompressPage";
 import { RecipesPage } from "@/pages/RecipesPage";
 import { IntegrationsPage } from "@/pages/IntegrationsPage";
 import { SettingsPage } from "@/pages/SettingsPage";
@@ -27,6 +30,9 @@ export function App() {
           <Route path="/chat" element={<Guard><ChatPage /></Guard>} />
           <Route path="/train" element={<Guard><TrainPage /></Guard>} />
           <Route path="/export" element={<Guard><ExportPage /></Guard>} />
+          <Route path="/rl-quant" element={<Guard><RLQuantPage /></Guard>} />
+          <Route path="/compress" element={<Guard><CompressPage /></Guard>} />
+          <Route path="/image-compress" element={<Guard><ImageCompressPage /></Guard>} />
           <Route path="/recipes" element={<Guard><RecipesPage /></Guard>} />
           <Route path="/integrations" element={<Guard><IntegrationsPage /></Guard>} />
           <Route path="/settings" element={<Guard><SettingsPage /></Guard>} />

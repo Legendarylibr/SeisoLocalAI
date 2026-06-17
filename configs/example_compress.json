@@ -1,0 +1,33 @@
+{
+  "pipeline": {
+    "stages": ["distill", "prune", "finetune", "evaluate", "export"],
+    "distill_steps": 1000,
+    "finetune_steps": 500,
+    "prune_ratio": 0.25
+  },
+  "distill": {
+    "teacher_model": "codellama/CodeLlama-13b-hf",
+    "student_model": "codellama/CodeLlama-7b-hf",
+    "steps": 1000,
+    "temperature": 2.0,
+    "alpha": 0.5
+  },
+  "finetune": {
+    "steps": 500
+  },
+  "prune": {
+    "ratio": 0.25,
+    "method": "magnitude"
+  },
+  "dataset": {
+    "name": "bigcode/starcoderdata",
+    "config": "python",
+    "streaming": true,
+    "max_train_samples": null
+  },
+  "determinism": {
+    "seed": 42,
+    "deterministic": true,
+    "hash_run_id": true
+  }
+}

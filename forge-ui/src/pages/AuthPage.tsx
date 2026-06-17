@@ -7,7 +7,7 @@ export function AuthPage() {
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
   const [error, setError] = useState("");
-  const [mode, setMode] = useState<"login" | "register">(needsOnboarding ? "register" : "login");
+  const mode = needsOnboarding ? "register" : "login";
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -23,47 +23,47 @@ export function AuthPage() {
   return (
     <div className="auth-page">
       <div className="card auth-card">
-        <h1 className="page-title">Seiso Forge</h1>
+        <div className="auth-brand">
+          <span className="brand-mark">◈</span>
+          <h1 className="page-title" style={{ margin: 0 }}>Seiso Forge</h1>
+        </div>
         <p className="page-sub">
           {needsOnboarding
-            ? "Create your local admin account to get started."
+            ? "Create your local admin account. This instance allows one user — your data stays on this machine."
             : "Sign in to your local workspace."}
         </p>
         <form onSubmit={submit}>
           {mode === "register" && (
             <>
               <label>Display name</label>
-              <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Optional" />
+              <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Optional" autoComplete="name" />
             </>
           )}
           <label>Email</label>
-          <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} />
-          <label>Password (min 8 chars)</label>
+          <input
+            type="email"
+            required
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            autoComplete="email"
+          />
+          <label>Password (min 8 characters)</label>
           <input
             type="password"
             required
             minLength={8}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
+            autoComplete={mode === "register" ? "new-password" : "current-password"}
           />
-          {error && <p style={{ color: "var(--danger)", marginBottom: "0.75rem" }}>{error}</p>}
-          <button type="submit" className="btn btn-primary" style={{ width: "100%" }}>
+          {error && <p className="auth-error">{error}</p>}
+          <button type="submit" className="btn btn-primary auth-submit">
             {mode === "register" ? "Create account" : "Sign in"}
           </button>
         </form>
-        {!needsOnboarding && (
-          <p style={{ marginTop: "1rem", fontSize: "0.85rem", color: "var(--muted)" }}>
-            {mode === "login" ? "First time? " : "Have an account? "}
-            <button
-              type="button"
-              className="btn"
-              style={{ padding: 0, border: "none", background: "none", color: "var(--accent)" }}
-              onClick={() => setMode(mode === "login" ? "register" : "login")}
-            >
-              {mode === "login" ? "Register" : "Sign in"}
-            </button>
-          </p>
-        )}
+        <p className="auth-footnote">
+          Sessions are secured with HttpOnly cookies and CSRF tokens — nothing sensitive is stored in localStorage.
+        </p>
       </div>
     </div>
   );

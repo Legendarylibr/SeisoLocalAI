@@ -130,5 +130,102 @@ def inference_cmd(
     console.print(reply)
 
 
+compress_app = typer.Typer(
+    name="compress",
+    help="Code Llama compression pipeline (distill, prune, finetune, export).",
+    no_args_is_help=True,
+)
+app.add_typer(compress_app, name="compress")
+
+
+@compress_app.command("run")
+def compress_run(
+    preset: str = typer.Option(
+        "smoke", help="smoke | full | distill_only | prune_recover | quantize"
+    ),
+    model_dir: str | None = typer.Option(
+        None, help="Starting model dir for prune/finetune presets"
+    ),
+    teacher_model: str = typer.Option("codellama/CodeLlama-13b-hf"),
+    student_model: str = typer.Option("codellama/CodeLlama-7b-hf"),
+    distill_steps: int | None = typer.Option(None),
+    finetune_steps: int | None = typer.Option(None),
+    prune_ratio: float | None = typer.Option(None),
+    seed: int = typer.Option(42),
+) -> None:
+    """Run compression pipeline from CLI."""
+    from forge.config import get_settings
+    from seiso.compress.runner import run_compress_job
+
+    settings = get_settings()
+    job_id = "cli"
+    user_id = "local"
+    payload: dict = {
+        "preset": preset,
+        "teacher_model": teacher_model,
+        "student_model": student_model,
+        "seed": seed,
+    }
+    if model_dir:
+        payload["model_dir"] = model_dir
+    if distill_steps is not None:
+        payload["distill_steps"] = distill_steps
+    if finetune_steps is not None:
+        payload["finetune_steps"] = finetune_steps
+    if prune_ratio is not None:
+        payload["prune_ratio"] = prune_ratio
+
+    console.print(f"[bold]Compression pipeline[/] preset={preset}")
+    result = run_compress_job(
+        job_id=job_id,
+        user_id=user_id,
+        data_dir=settings.data_dir,
+        payload=payload,
+        on_log=lambda m: console.print(m),
+    )
+    console.print(f"[green]Done:[/] {result.get('run_dir')}")
+
+
+@compress_app.command("manifest-verify")
+def compress_manifest_verify(
+    run_dir: str = typer.Option(..., help="Run directory with manifest.json"),
+) -> None:
+    """Verify hash-chained manifest for a compression run."""
+    from seiso.compress.bootstrap import require_codellama_compress
+
+    require_codellama_compress()
+    from codellama_compress.replay import verify_manifest
+
+    report = verify_manifest(Path(run_dir))
+    console.print(report)
+    if not report.get("ok"):
+        raise typer.Exit(1)
+
+
+@compress_app.command("speculative")
+def compress_speculative(
+    target_model: str = typer.Option(...),
+    draft_model: str = typer.Option(...),
+    prompt: str = typer.Option("def fibonacci(n):"),
+    max_new_tokens: int = typer.Option(256),
+    num_speculative_tokens: int = typer.Option(5),
+) -> None:
+    """Run speculative decoding with draft + target models."""
+    from seiso.compress.bootstrap import require_codellama_compress
+
+    require_codellama_compress()
+    from codellama_compress.speculative import speculative_generate
+
+    text, stats = speculative_generate(
+        prompt=prompt,
+        target_model=target_model,
+        draft_model=draft_model,
+        max_new_tokens=max_new_tokens,
+        num_speculative_tokens=num_speculative_tokens,
+    )
+    console.print(text)
+    console.print(stats.to_dict())
+
+
 if __name__ == "__main__":
     app()

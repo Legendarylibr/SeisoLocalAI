@@ -68,6 +68,16 @@ async def start_training(
                     job.status.value,
                     checkpoint_path=job.result.get("checkpoint_path"),
                 )
+                if job.status.value == "completed" and job.result.get("checkpoint_path"):
+                    from forge.services.model_registry import register_training_checkpoint
+
+                    await register_training_checkpoint(
+                        db,
+                        user_id=user_id,
+                        data_dir=settings.data_dir,
+                        checkpoint_path=job.result["checkpoint_path"],
+                        job_id=job_id,
+                    )
         except Exception as exc:
             await db.update_job_status(job_id, "failed")
             raise exc

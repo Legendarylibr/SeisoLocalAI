@@ -1,16 +1,29 @@
-import { useState } from "react";
-import { api, subscribeSSE } from "@/lib/api";
+import { useEffect, useState } from "react";
+import { api, RLQuantJob, subscribeSSE } from "@/lib/api";
 
 export function ExportPage() {
   const [checkpoint, setCheckpoint] = useState("");
   const [formats, setFormats] = useState(["merged", "gguf"]);
   const [hubRepo, setHubRepo] = useState("");
+  const [rlQuantJobId, setRlQuantJobId] = useState("");
+  const [rlJobs, setRlJobs] = useState<RLQuantJob[]>([]);
   const [logs, setLogs] = useState<string[]>([]);
+
+  useEffect(() => {
+    api.listRLQuantJobs().then(setRlJobs).catch(console.error);
+  }, []);
+
+  const completedRlJobs = rlJobs.filter((j) => j.status === "completed" && j.gguf_quants?.length);
 
   const start = async () => {
     if (!checkpoint.trim()) return;
     setLogs([]);
-    const res = await api.startExport(checkpoint, formats, hubRepo || undefined);
+    const res = await api.startExport(
+      checkpoint,
+      formats,
+      hubRepo || undefined,
+      rlQuantJobId || undefined,
+    );
     subscribeSSE(`/export/jobs/${res.job_id}/stream`, (event, data) => {
       if (event === "log" || event === "result") setLogs((l) => [...l, data]);
     });
@@ -23,7 +36,9 @@ export function ExportPage() {
   return (
     <div>
       <h1 className="page-title">Export</h1>
-      <p className="page-sub">Merge LoRA, quantize GGUF (q4_k_m, q8_0), generate Ollama Modelfile.</p>
+      <p className="page-sub">
+        Merge LoRA, quantize GGUF, generate Ollama Modelfile — or apply RL-recommended quants from RL Quant jobs.
+      </p>
 
       <div className="card">
         <label>Checkpoint path</label>
@@ -41,6 +56,15 @@ export function ExportPage() {
             </button>
           ))}
         </div>
+        <label>RL quant job (optional — overrides GGUF quants)</label>
+        <select value={rlQuantJobId} onChange={(e) => setRlQuantJobId(e.target.value)}>
+          <option value="">Manual / default quants</option>
+          {completedRlJobs.map((j) => (
+            <option key={j.id} value={j.id}>
+              {j.id.slice(0, 8)} — {j.gguf_quants.join(", ")}
+            </option>
+          ))}
+        </select>
         <label>Hub repo (optional)</label>
         <input value={hubRepo} onChange={(e) => setHubRepo(e.target.value)} placeholder="username/model-name" />
         <button className="btn btn-primary" onClick={start}>Start export</button>

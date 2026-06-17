@@ -1,0 +1,159 @@
+"""CSRF protection, cookie auth, and rate limiting tests."""
+
+from __future__ import annotations
+
+import pytest
+from httpx import ASGITransport, AsyncClient
+
+from forge.api.deps import clear_dependency_caches
+from forge.main import create_app
+
+
+@pytest.fixture
+def app():
+    return create_app()
+
+
+def _csrf_headers(client) -> dict[str, str]:
+    """Extract CSRF token from client cookies for double-submit header."""
+    token = client.cookies.get("seiso_csrf")
+    assert token, "CSRF cookie should be set on login/register"
+    return {"X-CSRF-Token": token}
+
+
+@pytest.mark.asyncio
+async def test_csrf_blocks_cookie_mutation_without_header(app):
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        reg = await client.post(
+            "/api/auth/register",
+            json={"email": "admin@local.dev", "password": "securepass1"},
+        )
+        assert reg.status_code == 201
+
+        # Cookie session without CSRF header should be rejected
+        res = await client.post("/api/inference/threads", json={"title": "test"})
+        assert res.status_code == 403
+        assert "CSRF" in res.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_csrf_allows_cookie_mutation_with_header(app):
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        reg = await client.post(
+            "/api/auth/register",
+            json={"email": "admin@local.dev", "password": "securepass1"},
+        )
+        assert reg.status_code == 201
+
+        res = await client.post(
+            "/api/inference/threads",
+            json={"title": "test"},
+            headers=_csrf_headers(client),
+        )
+        assert res.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_bearer_auth_bypasses_csrf(app):
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        reg = await client.post(
+            "/api/auth/register",
+            json={"email": "admin@local.dev", "password": "securepass1"},
+        )
+        token = reg.json()["access_token"]
+
+        res = await client.post(
+            "/api/inference/threads",
+            json={"title": "bearer"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert res.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_cookie_session_auth(app):
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        reg = await client.post(
+            "/api/auth/register",
+            json={"email": "cookie@local.dev", "password": "securepass1"},
+        )
+        assert reg.status_code == 201
+        assert client.cookies.get("seiso_token")
+        assert client.cookies.get("seiso_csrf")
+
+        me = await client.get("/api/auth/me")
+        assert me.status_code == 200
+        assert me.json()["email"] == "cookie@local.dev"
+
+
+@pytest.mark.asyncio
+async def test_login_rate_limit(app, monkeypatch):
+    monkeypatch.setenv("SEISO_RATE_LIMIT", "1000")
+    clear_dependency_caches()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        await client.post(
+            "/api/auth/register",
+            json={"email": "admin@local.dev", "password": "securepass1"},
+        )
+
+        for _ in range(10):
+            res = await client.post(
+                "/api/auth/login",
+                json={"email": "admin@local.dev", "password": "wrong"},
+            )
+            assert res.status_code == 401
+
+        res = await client.post(
+            "/api/auth/login",
+            json={"email": "admin@local.dev", "password": "wrong"},
+        )
+        assert res.status_code == 429
+
+
+@pytest.mark.asyncio
+async def test_global_rate_limit(monkeypatch):
+    monkeypatch.setenv("SEISO_RATE_LIMIT", "3")
+    clear_dependency_caches()
+    app = create_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        for _ in range(3):
+            res = await client.get("/api/models")
+            assert res.status_code == 401
+
+        res = await client.get("/api/models")
+        assert res.status_code == 429
+
+
+@pytest.mark.asyncio
+async def test_auth_status_no_user_count_leak(app):
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        status = await client.get("/api/auth/status")
+        assert status.status_code == 200
+        data = status.json()
+        assert "needs_onboarding" in data
+        assert "user_count" not in data
+
+
+@pytest.mark.asyncio
+async def test_settings_includes_security_posture(app):
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        reg = await client.post(
+            "/api/auth/register",
+            json={"email": "admin@local.dev", "password": "securepass1"},
+        )
+        token = reg.json()["access_token"]
+
+        res = await client.get("/api/settings", headers={"Authorization": f"Bearer {token}"})
+        assert res.status_code == 200
+        sec = res.json()["security"]
+        assert sec["bind_localhost"] is True
+        assert sec["db_encrypted"] is True
+        assert sec["allow_tools"] is False

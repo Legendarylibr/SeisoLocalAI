@@ -11,6 +11,14 @@ from typing import Any, AsyncIterator
 
 import aiosqlite
 
+from forge.db.crypto import decrypt_field, encrypt_field
+
+ENCRYPTED_COLUMNS: dict[str, tuple[str, ...]] = {
+    "chat_messages": ("content", "metadata_json"),
+    "providers": ("config_json",),
+    "mcp_servers": ("env_json",),
+}
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY,
@@ -58,6 +66,47 @@ CREATE TABLE IF NOT EXISTS export_jobs (
     status TEXT NOT NULL,
     config_json TEXT NOT NULL,
     output_paths_json TEXT DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS rl_quant_jobs (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    config_json TEXT NOT NULL,
+    output_dir TEXT,
+    recommendation_path TEXT,
+    recommendation_json TEXT DEFAULT '{}',
+    gguf_quants_json TEXT DEFAULT '[]',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS compress_jobs (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    config_json TEXT NOT NULL,
+    output_dir TEXT,
+    run_dir TEXT,
+    model_dir TEXT,
+    stages_json TEXT DEFAULT '[]',
+    stage_results_json TEXT DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS image_compress_jobs (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    config_json TEXT NOT NULL,
+    output_dir TEXT,
+    run_dir TEXT,
+    model_dir TEXT,
+    stages_json TEXT DEFAULT '[]',
+    stage_results_json TEXT DEFAULT '{}',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -133,22 +182,69 @@ def _now() -> str:
 
 
 class Database:
-    def __init__(self, path: Path) -> None:
+    def __init__(
+        self,
+        path: Path,
+        *,
+        encryption_key: bytes,
+        ephemeral: bool = True,
+    ) -> None:
         self.path = path
+        self._encryption_key = encryption_key
+        self._ephemeral = ephemeral
         self._initialized = False
+        self._conn_holder: aiosqlite.Connection | None = None
+        if ephemeral:
+            self._dsn = f"file:seiso_{uuid.uuid4().hex}?mode=memory&cache=shared"
+        else:
+            self._dsn = str(path)
 
-    @asynccontextmanager
-    async def _conn(self) -> AsyncIterator[aiosqlite.Connection]:
-        conn = await aiosqlite.connect(self.path)
-        conn.row_factory = aiosqlite.Row
-        try:
+    def _enc(self, value: str) -> str:
+        return encrypt_field(value, self._encryption_key)
+
+    def _dec(self, value: str) -> str:
+        return decrypt_field(value, self._encryption_key)
+
+    def _decrypt_row(self, table: str, row: dict[str, Any]) -> dict[str, Any]:
+        out = dict(row)
+        for column in ENCRYPTED_COLUMNS.get(table, ()):
+            if column in out and out[column] is not None:
+                out[column] = self._dec(str(out[column]))
+        return out
+
+    async def _configure(self, conn: aiosqlite.Connection) -> None:
+        await conn.execute("PRAGMA busy_timeout = 5000")
+        await conn.execute("PRAGMA foreign_keys = ON")
+        await conn.execute("PRAGMA temp_store = MEMORY")
+        if not self._ephemeral:
+            await conn.execute("PRAGMA journal_mode = WAL")
+            await conn.execute("PRAGMA synchronous = NORMAL")
+
+    async def _ensure_conn(self) -> aiosqlite.Connection:
+        if self._conn_holder is None:
+            if self._ephemeral:
+                conn = await aiosqlite.connect(self._dsn, uri=True)
+            else:
+                self.path.parent.mkdir(parents=True, exist_ok=True)
+                conn = await aiosqlite.connect(self._dsn)
+            conn.row_factory = aiosqlite.Row
+            await self._configure(conn)
             if not self._initialized:
                 await conn.executescript(SCHEMA)
                 await conn.commit()
                 self._initialized = True
-            yield conn
-        finally:
-            await conn.close()
+            self._conn_holder = conn
+        return self._conn_holder
+
+    async def close(self) -> None:
+        if self._conn_holder is not None:
+            await self._conn_holder.close()
+            self._conn_holder = None
+        self._initialized = False
+
+    @asynccontextmanager
+    async def _conn(self) -> AsyncIterator[aiosqlite.Connection]:
+        yield await self._ensure_conn()
 
     async def user_count(self) -> int:
         async with self._conn() as conn:
@@ -309,11 +405,13 @@ class Database:
     async def add_message(self, thread_id: str, role: str, content: str, metadata: dict | None = None) -> dict:
         mid = str(uuid.uuid4())
         now = _now()
+        enc_content = self._enc(content)
+        enc_metadata = self._enc(json.dumps(metadata or {}))
         async with self._conn() as conn:
             await conn.execute(
                 """INSERT INTO chat_messages (id, thread_id, role, content, metadata_json, created_at)
                    VALUES (?, ?, ?, ?, ?, ?)""",
-                (mid, thread_id, role, content, json.dumps(metadata or {}), now),
+                (mid, thread_id, role, enc_content, enc_metadata, now),
             )
             await conn.execute(
                 "UPDATE chat_threads SET updated_at = ? WHERE id = ?", (now, thread_id)
@@ -327,7 +425,7 @@ class Database:
                 "SELECT * FROM chat_messages WHERE thread_id = ? ORDER BY created_at ASC",
                 (thread_id,),
             ) as cur:
-                return [dict(r) for r in await cur.fetchall()]
+                return [self._decrypt_row("chat_messages", dict(r)) for r in await cur.fetchall()]
 
     # --- Providers ---
 
@@ -337,18 +435,19 @@ class Database:
                 "SELECT * FROM providers WHERE user_id = ? ORDER BY created_at DESC",
                 (user_id,),
             ) as cur:
-                return [dict(r) for r in await cur.fetchall()]
+                return [self._decrypt_row("providers", dict(r)) for r in await cur.fetchall()]
 
     async def create_provider(
         self, user_id: str, name: str, provider_type: str, config: dict
     ) -> dict:
         pid = str(uuid.uuid4())
         now = _now()
+        enc_config = self._enc(json.dumps(config))
         async with self._conn() as conn:
             await conn.execute(
                 """INSERT INTO providers (id, user_id, name, provider_type, config_json, created_at)
                    VALUES (?, ?, ?, ?, ?, ?)""",
-                (pid, user_id, name, provider_type, json.dumps(config), now),
+                (pid, user_id, name, provider_type, enc_config, now),
             )
             await conn.commit()
         return {"id": pid, "name": name, "provider_type": provider_type, "config": config, "created_at": now}
@@ -360,7 +459,7 @@ class Database:
                 (provider_id, user_id),
             ) as cur:
                 row = await cur.fetchone()
-                return dict(row) if row else None
+                return self._decrypt_row("providers", dict(row)) if row else None
 
     async def delete_provider(self, provider_id: str, user_id: str) -> bool:
         async with self._conn() as conn:
@@ -379,7 +478,7 @@ class Database:
                 "SELECT * FROM mcp_servers WHERE user_id = ? ORDER BY created_at DESC",
                 (user_id,),
             ) as cur:
-                return [dict(r) for r in await cur.fetchall()]
+                return [self._decrypt_row("mcp_servers", dict(r)) for r in await cur.fetchall()]
 
     async def create_mcp_server(
         self,
@@ -391,12 +490,13 @@ class Database:
     ) -> dict:
         mid = str(uuid.uuid4())
         now = _now()
+        enc_env = self._enc(json.dumps(env or {}))
         async with self._conn() as conn:
             await conn.execute(
                 """INSERT INTO mcp_servers
                    (id, user_id, name, command, args_json, env_json, enabled, created_at)
                    VALUES (?, ?, ?, ?, ?, ?, 1, ?)""",
-                (mid, user_id, name, command, json.dumps(args or []), json.dumps(env or {}), now),
+                (mid, user_id, name, command, json.dumps(args or []), enc_env, now),
             )
             await conn.commit()
         return {
@@ -416,7 +516,7 @@ class Database:
                 (server_id, user_id),
             ) as cur:
                 row = await cur.fetchone()
-                return dict(row) if row else None
+                return self._decrypt_row("mcp_servers", dict(row)) if row else None
 
     async def delete_mcp_server(self, server_id: str, user_id: str) -> bool:
         async with self._conn() as conn:
@@ -477,6 +577,203 @@ class Database:
         async with self._conn() as conn:
             async with conn.execute(
                 "SELECT * FROM export_jobs WHERE user_id = ? ORDER BY created_at DESC",
+                (user_id,),
+            ) as cur:
+                return [dict(r) for r in await cur.fetchall()]
+
+    # --- RL quant jobs ---
+
+    async def create_rl_quant_job(self, user_id: str, config: dict, job_id: str | None = None) -> dict:
+        jid = job_id or str(uuid.uuid4())
+        now = _now()
+        async with self._conn() as conn:
+            await conn.execute(
+                """INSERT INTO rl_quant_jobs
+                   (id, user_id, status, config_json, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (jid, user_id, "pending", json.dumps(config), now, now),
+            )
+            await conn.commit()
+        return {"id": jid, "status": "pending", "config": config, "created_at": now}
+
+    async def get_rl_quant_job(self, job_id: str, user_id: str) -> dict | None:
+        async with self._conn() as conn:
+            async with conn.execute(
+                "SELECT * FROM rl_quant_jobs WHERE id = ? AND user_id = ?",
+                (job_id, user_id),
+            ) as cur:
+                row = await cur.fetchone()
+                return dict(row) if row else None
+
+    async def update_rl_quant_job_status(
+        self,
+        job_id: str,
+        status: str,
+        *,
+        output_dir: str | None = None,
+        recommendation_path: str | None = None,
+        recommendation_json: dict | None = None,
+        gguf_quants: list[str] | None = None,
+    ) -> None:
+        now = _now()
+        async with self._conn() as conn:
+            await conn.execute(
+                """UPDATE rl_quant_jobs SET status = ?, updated_at = ?,
+                   output_dir = COALESCE(?, output_dir),
+                   recommendation_path = COALESCE(?, recommendation_path),
+                   recommendation_json = COALESCE(?, recommendation_json),
+                   gguf_quants_json = COALESCE(?, gguf_quants_json)
+                   WHERE id = ?""",
+                (
+                    status,
+                    now,
+                    output_dir,
+                    recommendation_path,
+                    json.dumps(recommendation_json) if recommendation_json is not None else None,
+                    json.dumps(gguf_quants) if gguf_quants is not None else None,
+                    job_id,
+                ),
+            )
+            await conn.commit()
+
+    async def list_rl_quant_jobs(self, user_id: str) -> list[dict]:
+        async with self._conn() as conn:
+            async with conn.execute(
+                "SELECT * FROM rl_quant_jobs WHERE user_id = ? ORDER BY created_at DESC",
+                (user_id,),
+            ) as cur:
+                return [dict(r) for r in await cur.fetchall()]
+
+    # --- Compression jobs ---
+
+    async def create_compress_job(self, user_id: str, config: dict, job_id: str | None = None) -> dict:
+        jid = job_id or str(uuid.uuid4())
+        now = _now()
+        async with self._conn() as conn:
+            await conn.execute(
+                """INSERT INTO compress_jobs
+                   (id, user_id, status, config_json, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (jid, user_id, "pending", json.dumps(config), now, now),
+            )
+            await conn.commit()
+        return {"id": jid, "status": "pending", "config": config, "created_at": now}
+
+    async def get_compress_job(self, job_id: str, user_id: str) -> dict | None:
+        async with self._conn() as conn:
+            async with conn.execute(
+                "SELECT * FROM compress_jobs WHERE id = ? AND user_id = ?",
+                (job_id, user_id),
+            ) as cur:
+                row = await cur.fetchone()
+                return dict(row) if row else None
+
+    async def update_compress_job_status(
+        self,
+        job_id: str,
+        status: str,
+        *,
+        output_dir: str | None = None,
+        run_dir: str | None = None,
+        model_dir: str | None = None,
+        stages: list[str] | None = None,
+        stage_results: dict | None = None,
+    ) -> None:
+        now = _now()
+        async with self._conn() as conn:
+            await conn.execute(
+                """UPDATE compress_jobs SET status = ?, updated_at = ?,
+                   output_dir = COALESCE(?, output_dir),
+                   run_dir = COALESCE(?, run_dir),
+                   model_dir = COALESCE(?, model_dir),
+                   stages_json = COALESCE(?, stages_json),
+                   stage_results_json = COALESCE(?, stage_results_json)
+                   WHERE id = ?""",
+                (
+                    status,
+                    now,
+                    output_dir,
+                    run_dir,
+                    model_dir,
+                    json.dumps(stages) if stages is not None else None,
+                    json.dumps(stage_results) if stage_results is not None else None,
+                    job_id,
+                ),
+            )
+            await conn.commit()
+
+    async def list_compress_jobs(self, user_id: str) -> list[dict]:
+        async with self._conn() as conn:
+            async with conn.execute(
+                "SELECT * FROM compress_jobs WHERE user_id = ? ORDER BY created_at DESC",
+                (user_id,),
+            ) as cur:
+                return [dict(r) for r in await cur.fetchall()]
+
+    # --- Image compression jobs ---
+
+    async def create_image_compress_job(
+        self, user_id: str, config: dict, job_id: str | None = None
+    ) -> dict:
+        jid = job_id or str(uuid.uuid4())
+        now = _now()
+        async with self._conn() as conn:
+            await conn.execute(
+                """INSERT INTO image_compress_jobs
+                   (id, user_id, status, config_json, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (jid, user_id, "pending", json.dumps(config), now, now),
+            )
+            await conn.commit()
+        return {"id": jid, "status": "pending", "config": config, "created_at": now}
+
+    async def get_image_compress_job(self, job_id: str, user_id: str) -> dict | None:
+        async with self._conn() as conn:
+            async with conn.execute(
+                "SELECT * FROM image_compress_jobs WHERE id = ? AND user_id = ?",
+                (job_id, user_id),
+            ) as cur:
+                row = await cur.fetchone()
+                return dict(row) if row else None
+
+    async def update_image_compress_job_status(
+        self,
+        job_id: str,
+        status: str,
+        *,
+        output_dir: str | None = None,
+        run_dir: str | None = None,
+        model_dir: str | None = None,
+        stages: list[str] | None = None,
+        stage_results: dict | None = None,
+    ) -> None:
+        now = _now()
+        async with self._conn() as conn:
+            await conn.execute(
+                """UPDATE image_compress_jobs SET status = ?, updated_at = ?,
+                   output_dir = COALESCE(?, output_dir),
+                   run_dir = COALESCE(?, run_dir),
+                   model_dir = COALESCE(?, model_dir),
+                   stages_json = COALESCE(?, stages_json),
+                   stage_results_json = COALESCE(?, stage_results_json)
+                   WHERE id = ?""",
+                (
+                    status,
+                    now,
+                    output_dir,
+                    run_dir,
+                    model_dir,
+                    json.dumps(stages) if stages is not None else None,
+                    json.dumps(stage_results) if stage_results is not None else None,
+                    job_id,
+                ),
+            )
+            await conn.commit()
+
+    async def list_image_compress_jobs(self, user_id: str) -> list[dict]:
+        async with self._conn() as conn:
+            async with conn.execute(
+                "SELECT * FROM image_compress_jobs WHERE user_id = ? ORDER BY created_at DESC",
                 (user_id,),
             ) as cur:
                 return [dict(r) for r in await cur.fetchall()]
