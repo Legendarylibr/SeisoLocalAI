@@ -10,9 +10,8 @@ import tempfile
 import textwrap
 from pathlib import Path
 
-from seiso.security import resolve_data_dir
-
 from forge.security.audit import audit_event
+from seiso.security import resolve_data_dir
 
 _BLOCKED_MODULES = frozenset(
     {

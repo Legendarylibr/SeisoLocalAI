@@ -7,11 +7,12 @@ import json
 import uuid
 from abc import ABC, abstractmethod
 from collections import defaultdict
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, AsyncIterator
+from typing import Any
 
 MAX_LOG_LINES = 2000
 MAX_METRIC_POINTS = 5000

@@ -21,6 +21,38 @@ def _chat_path(endpoint) -> str:
     return "/v1/chat/completions"
 
 
+async def ensure_model_available(model: str, base_url: str = "") -> str:
+    """Return a local Ollama tag matching ``model`` or raise if missing."""
+    names = [m["name"] for m in await list_models(base_url) if m.get("name")]
+    if model in names:
+        return model
+    base = model.split(":")[0]
+    for name in names:
+        if name.split(":")[0] == base:
+            return name
+    raise ValueError(
+        f"Ollama model {model!r} is not available locally. "
+        "Run `ollama pull` or create the model from your GGUF, then retry."
+    )
+
+
+async def warm_model(model: str, base_url: str = "") -> None:
+    """Load ``model`` into the Ollama runtime with a tiny generation."""
+    tag = await ensure_model_available(model, base_url)
+    endpoint = _endpoint(base_url)
+    base = endpoint.base_url.rstrip("/")
+    url = f"{base}/api/chat" if not base.endswith("/v1") else f"{base.rsplit('/v1', 1)[0]}/api/chat"
+    payload = {
+        "model": tag,
+        "messages": [{"role": "user", "content": "ping"}],
+        "stream": False,
+        "options": {"num_predict": 1},
+    }
+    async with pinned_async_client(endpoint, timeout=300.0) as client:
+        resp = await client.post(url, json=payload)
+        resp.raise_for_status()
+
+
 async def list_models(base_url: str = "") -> list[dict[str, Any]]:
     """Return models from Ollama ``GET /api/tags``."""
     endpoint = _endpoint(base_url)

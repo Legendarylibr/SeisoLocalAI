@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 import uuid
 from typing import Annotated, Any
@@ -12,7 +11,7 @@ from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
 from forge.api.deps import get_db, get_rl_quant_orchestrator
-from forge.api.routes._stream import job_log_event_gen
+from forge.api.routes._stream import job_log_event_gen, spawn_background
 from forge.config import ForgeSettings, get_settings
 from forge.db.store import Database
 from forge.orchestrators.rl_quant import RLQuantOrchestrator
@@ -145,9 +144,8 @@ async def start_rl_quant(
                     )
         except Exception:
             await db.update_rl_quant_job_status(job_id, "failed")
-            raise
 
-    asyncio.create_task(_run())
+    spawn_background(_run())
     audit_event("rl_quant_start", user_id=user_id, job_id=job_id, preset=body.preset)
     return RLQuantJobResponse(job_id=job_id, status="pending")
 

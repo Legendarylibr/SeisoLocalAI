@@ -6,9 +6,9 @@ import gc
 import json
 import logging
 import os
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
-from collections.abc import Callable
 from typing import Any
 
 from seiso.kernels.hooks import apply_training_kernels

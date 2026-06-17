@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   ReactFlow,
   Background,
@@ -60,11 +60,26 @@ export function RecipeCanvas({ onChange }: Props) {
   const [nodes, setNodes, onNodesChange] = useNodesState(INITIAL_NODES);
   const [edges, setEdges, onEdgesChange] = useEdgesState(INITIAL_EDGES);
   const [name, setName] = useState("Custom recipe");
+  const [importPath, setImportPath] = useState("");
 
   const onConnect = useCallback(
     (conn: Connection) => setEdges((eds) => addEdge(conn, eds)),
     [setEdges],
   );
+
+  const toRecipe = useCallback((): RecipeGraph => {
+    const recipeNodes = nodes.map((n) => ({
+      id: n.id,
+      type: (n.data.nodeType as string) || "transform",
+      config: buildConfig(n.id, (n.data.nodeType as string) || "transform", nodes, edges, importPath),
+    }));
+    const recipeEdges = edges.map((e) => ({ source: e.source, target: e.target }));
+    return { name, nodes: recipeNodes, edges: recipeEdges };
+  }, [nodes, edges, name, importPath]);
+
+  useEffect(() => {
+    onChange?.(toRecipe());
+  }, [onChange, toRecipe]);
 
   const addNode = (type: string) => {
     const id = `${type}_${Date.now()}`;
@@ -79,28 +94,23 @@ export function RecipeCanvas({ onChange }: Props) {
     ]);
   };
 
-  const toRecipe = (): RecipeGraph => {
-    const recipeNodes = nodes.map((n) => ({
-      id: n.id,
-      type: (n.data.nodeType as string) || "transform",
-      config: buildConfig(n.id, (n.data.nodeType as string) || "transform", nodes, edges),
-    }));
-    const recipeEdges = edges.map((e) => ({ source: e.source, target: e.target }));
-    const graph = { name, nodes: recipeNodes, edges: recipeEdges };
-    onChange?.(graph);
-    return graph;
-  };
-
   return (
     <div className="recipe-canvas-wrap">
       <div className="recipe-toolbar">
         <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Recipe name" />
+        <input
+          value={importPath}
+          onChange={(e) => setImportPath(e.target.value)}
+          placeholder="Import file path (absolute, under uploads/…)"
+          title="Absolute path to a file in your uploads folder"
+          style={{ minWidth: "16rem" }}
+        />
         {NODE_TYPES_LIST.map((t) => (
           <button key={t} type="button" className="btn" onClick={() => addNode(t)}>
             + {t}
           </button>
         ))}
-        <button type="button" className="btn btn-primary" onClick={() => toRecipe()}>
+        <button type="button" className="btn btn-primary" onClick={() => onChange?.(toRecipe())}>
           Serialize
         </button>
       </div>
@@ -128,13 +138,14 @@ function buildConfig(
   nodeType: string,
   _nodes: Node[],
   edges: Edge[],
+  importPath: string,
 ): Record<string, unknown> {
   const incoming = edges.find((e) => e.target === nodeId);
   const source = incoming?.source;
 
   switch (nodeType) {
     case "import":
-      return { path: "data/input.txt", format: "txt" };
+      return { path: importPath, format: "txt" };
     case "transform":
       return { source, template: "Instruction: {text}\nOutput:" };
     case "filter":
@@ -148,13 +159,13 @@ function buildConfig(
   }
 }
 
-export function recipeFromCanvas(name: string, nodes: Node[], edges: Edge[]): RecipeGraph {
+export function recipeFromCanvas(name: string, nodes: Node[], edges: Edge[], importPath = ""): RecipeGraph {
   return {
     name,
     nodes: nodes.map((n) => ({
       id: n.id,
       type: (n.data.nodeType as string) || "transform",
-      config: buildConfig(n.id, (n.data.nodeType as string) || "transform", nodes, edges),
+      config: buildConfig(n.id, (n.data.nodeType as string) || "transform", nodes, edges, importPath),
     })),
     edges: edges.map((e) => ({ source: e.source, target: e.target })),
   };

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import contextlib
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 
@@ -21,6 +23,15 @@ def _reset_caches(monkeypatch, tmp_path):
     clear_dependency_caches()
     yield
     clear_dependency_caches()
+
+
+@pytest.fixture(autouse=True)
+async def _close_db_after_test():
+    yield
+    with contextlib.suppress(Exception):
+        db = get_db()
+        if db._conn_holder is not None:
+            await db.close()
 
 
 @pytest.fixture

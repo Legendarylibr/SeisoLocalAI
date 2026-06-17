@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api, CatalogModel, subscribeSSE, SystemMetrics, TrainableModel, TrainingJob, TrainingMetricPoint } from "@/lib/api";
 import { HfDatasetPicker } from "@/components/HfDatasetPicker";
+import { StudioPageShell } from "@/components/StudioPageShell";
 import { TrainingMetricsDashboard } from "@/components/TrainingMetricsDashboard";
 import { useHardwareProfile } from "@/hooks/useHardware";
 
@@ -39,6 +40,13 @@ export function TrainPage() {
   const [metricsOpen, setMetricsOpen] = useState(false);
   const [starting, setStarting] = useState(false);
   const [hwApplied, setHwApplied] = useState(false);
+  const sseAbortRef = useRef<(() => void) | null>(null);
+
+  useEffect(() => {
+    return () => {
+      sseAbortRef.current?.();
+    };
+  }, []);
 
   useEffect(() => {
     api.catalog("", undefined, undefined).then((r) => setCatalog(r.models)).catch(console.error);
@@ -96,26 +104,31 @@ export function TrainPage() {
       );
       setActiveJob(res.job_id);
       setMetricsOpen(true);
-      subscribeSSE(`/training/jobs/${res.job_id}/stream`, (event, data) => {
-        if (event === "log") setLogs((l) => [...l, data]);
-        if (event === "error") setLogs((l) => [...l, `ERROR: ${data}`]);
-        if (event === "metric") {
-          try {
-            const point = JSON.parse(data) as TrainingMetricPoint & SystemMetrics;
-            if (point.type === "system") {
-              setSystemMetrics((prev) => [...prev.slice(-499), point as SystemMetrics]);
-            } else {
-              setTrainingMetrics((prev) => [...prev.slice(-1999), point]);
+      sseAbortRef.current?.();
+      sseAbortRef.current = subscribeSSE(
+        `/training/jobs/${res.job_id}/stream`,
+        (event, data) => {
+          if (event === "log") setLogs((l) => [...l, data]);
+          if (event === "error") setLogs((l) => [...l, `ERROR: ${data}`]);
+          if (event === "metric") {
+            try {
+              const point = JSON.parse(data) as TrainingMetricPoint & SystemMetrics;
+              if (point.type === "system") {
+                setSystemMetrics((prev) => [...prev.slice(-499), point as SystemMetrics]);
+              } else {
+                setTrainingMetrics((prev) => [...prev.slice(-1999), point]);
+              }
+            } catch {
+              /* ignore malformed metric payloads */
             }
-          } catch {
-            /* ignore malformed metric payloads */
           }
-        }
-        if (event === "status") {
-          setJobStatus(data);
-          api.listTrainingJobs().then(setJobs);
-        }
-      });
+          if (event === "status") {
+            setJobStatus(data);
+            api.listTrainingJobs().then(setJobs);
+          }
+        },
+        (err) => setLogs((l) => [...l, `ERROR: ${err.message}`]),
+      );
       api.listTrainingJobs().then(setJobs);
     } finally {
       setStarting(false);
@@ -126,7 +139,18 @@ export function TrainPage() {
   const cachedRepoIds = new Set(localModels.map((m) => m.repo_id).filter(Boolean) as string[]);
 
   return (
-    <div className="train-page">
+    <StudioPageShell
+      title="Training Studio"
+      subtitle="QLoRA 4-bit, TRL SFTTrainer — settings below are pre-filled from local hardware detection (nothing leaves this machine)."
+      banner={
+        hw?.training_defaults ? (
+          <div className="hw-inline-banner card">
+            <span className="trust-badge">{hw.tier_label}</span>
+            <span className="muted-text">{hw.training_defaults.note}</span>
+          </div>
+        ) : undefined
+      }
+    >
       <TrainingMetricsDashboard
         jobId={activeJob}
         open={metricsOpen}
@@ -136,20 +160,15 @@ export function TrainPage() {
         status={jobStatus}
       />
 
-      <h1 className="page-title">Training Studio</h1>
-      <p className="page-sub">
-        QLoRA 4-bit, TRL SFTTrainer — settings below are pre-filled from local hardware detection (nothing leaves this machine).
-      </p>
-      {hw?.training_defaults && (
-        <div className="hw-inline-banner card">
-          <span className="trust-badge">{hw.tier_label}</span>
-          <span className="muted-text">{hw.training_defaults.note}</span>
-        </div>
-      )}
-
       <div className="train-layout">
-        <div className="card">
-          <h3 className="section-title">Model & data</h3>
+        <div className="card studio-card">
+          <div className="studio-card-head">
+            <span className="studio-card-icon" aria-hidden>①</span>
+            <div className="studio-card-head-text">
+              <div className="studio-card-title">Model & data</div>
+              <div className="studio-card-desc">Base checkpoint and training dataset</div>
+            </div>
+          </div>
           <label>Base model (HF repo ID)</label>
           <input list="train-models" value={modelId} onChange={(e) => setModelId(e.target.value)} />
           <datalist id="train-models">
@@ -181,8 +200,14 @@ export function TrainPage() {
           </select>
         </div>
 
-        <div className="card">
-          <h3 className="section-title">Training method</h3>
+        <div className="card studio-card">
+          <div className="studio-card-head">
+            <span className="studio-card-icon" aria-hidden>②</span>
+            <div className="studio-card-head-text">
+              <div className="studio-card-title">Training method</div>
+              <div className="studio-card-desc">LoRA rank, batch size, and optimization flags</div>
+            </div>
+          </div>
           <div className="option-grid">
             <label>Method</label>
             <select value={method} onChange={(e) => setMethod(e.target.value)}>
@@ -307,6 +332,6 @@ export function TrainPage() {
           </table>
         )}
       </div>
-    </div>
+    </StudioPageShell>
   );
 }

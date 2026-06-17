@@ -4,7 +4,8 @@ import { api, CatalogModel, HardwareSummary, LocalModel } from "@/lib/api";
 import { chatPath, chatPathForLocalModel } from "@/lib/chatModel";
 import { HardwareFitBadge } from "@/components/HardwareFitBadge";
 import { PageHeader } from "@/components/PageHeader";
-import { IconClose, IconSearch } from "@/components/Icons";
+import { Tabs } from "@/components/Tabs";
+import { IconClose, IconGlobe, IconHardDrive, IconSearch } from "@/components/Icons";
 
 const FAMILY_LABELS: Record<string, string> = {
   llama: "Llama",
@@ -134,6 +135,7 @@ export function HubPage() {
       <PageHeader
         title="Model Hub"
         subtitle="Newest models first, ranked for your hardware when possible. Detection stays on this machine — nothing is uploaded."
+        group="Models"
       />
 
       {hwSummary && (
@@ -156,17 +158,31 @@ export function HubPage() {
 
       {toast && <div className="toast">{toast}</div>}
 
-      <div className="tabs">
-        <button className={`tab ${tab === "catalog" ? "active" : ""}`} onClick={() => setTab("catalog")}>
-          Catalog ({total})
-        </button>
-        <button className={`tab ${tab === "local" ? "active" : ""}`} onClick={() => setTab("local")}>
-          Local ({local.length})
-        </button>
-      </div>
+      <Tabs
+        className="hub-tab-bar"
+        aria-label="Model sources"
+        value={tab}
+        onChange={setTab}
+        items={[
+          {
+            id: "catalog",
+            label: "Catalog",
+            description: "Browse Hugging Face — ranked for your GPU",
+            icon: <IconGlobe size={16} />,
+            count: total,
+          },
+          {
+            id: "local",
+            label: "Local library",
+            description: "Models downloaded and ready on disk",
+            icon: <IconHardDrive size={16} />,
+            count: local.length,
+          },
+        ]}
+      />
 
       {tab === "catalog" && (
-        <>
+        <div className="hub-tab-panel">
           <div className="card filters hub-filters">
             <div className="hub-search-wrap">
               <span className="hub-search-icon" aria-hidden>
@@ -252,12 +268,6 @@ export function HubPage() {
                     </p>
                   ) : null}
                   {m.hardware_note && <p className="model-hw-note">{m.hardware_note}</p>}
-                  <div className="model-tags">
-                    <span className="badge">{m.task}</span>
-                    {m.tags.map((t) => (
-                      <span key={t} className="badge badge-dim">{t}</span>
-                    ))}
-                  </div>
                   <div className="model-actions">
                     <button
                       className="btn btn-primary"
@@ -278,11 +288,21 @@ export function HubPage() {
               ))}
             </div>
           )}
-        </>
+        </div>
       )}
 
       {tab === "local" && (
-        <div className="card">
+        <div className="hub-tab-panel">
+          <div className="card">
+            <div className="card-head">
+              <span className="card-head-icon" aria-hidden>
+                <IconHardDrive size={18} />
+              </span>
+              <div className="card-head-text">
+                <h3>Local models</h3>
+                <p>Cached weights on this machine — chat with GGUF or fine-tune safetensors snapshots.</p>
+              </div>
+            </div>
           {local.length === 0 ? (
             <div className="empty-state">
               <p>No local models yet.</p>
@@ -291,23 +311,22 @@ export function HubPage() {
               </button>
             </div>
           ) : (
-            <table>
-              <thead>
-                <tr><th>Name</th><th>Format</th><th>Source</th><th>Size</th><th></th></tr>
-              </thead>
-              <tbody>
-                {local.map((m) => (
-                  <tr key={m.id}>
-                    <td>{m.name}</td>
-                    <td><span className="badge">{m.format || "—"}</span></td>
-                    <td className="muted-cell">{m.source}</td>
-                    <td>{fmtSize(m.size_bytes)}</td>
-                    <td>
+            <div className="local-models-grid">
+              {local.map((m) => (
+                <div key={m.id} className="local-model-row">
+                  <div className="local-model-main">
+                    <div className="local-model-name">{m.name}</div>
+                    <div className="local-model-meta">
+                      <span className="badge">{m.format || "—"}</span>
+                      <span>{m.source}</span>
+                      <span>{fmtSize(m.size_bytes)}</span>
+                    </div>
+                  </div>
+                  <div className="local-model-actions">
                       {m.format === "gguf" && (
                         <button
                           type="button"
-                          className="btn"
-                          style={{ padding: "0.25rem 0.5rem", fontSize: "0.78rem" }}
+                          className="btn btn-primary"
                           onClick={() => navigate(chatPathForLocalModel(m))}
                         >
                           Chat
@@ -317,18 +336,17 @@ export function HubPage() {
                         <button
                           type="button"
                           className="btn"
-                          style={{ padding: "0.25rem 0.5rem", fontSize: "0.78rem" }}
                           onClick={() => navigate(`/train?model=${encodeURIComponent(m.source!.slice(3))}`)}
                         >
                           Train
                         </button>
                       )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                  </div>
+                </div>
+              ))}
+            </div>
           )}
+          </div>
         </div>
       )}
     </div>

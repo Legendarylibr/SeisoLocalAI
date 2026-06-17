@@ -16,8 +16,8 @@ from forge.db.store import Database
 from forge.orchestrators.inference import InferenceOrchestrator
 from forge.security.auth import get_current_user_id
 from forge.security.autodefense import DefenseBlockedError, defense_enabled, scan_output
-from forge.services.hardware import hardware_profile
 from forge.services.download_progress import estimate_load_eta_seconds
+from forge.services.hardware import hardware_profile
 from forge.services.inference_models import list_inference_options, resolve_chat_target
 from forge.services.mcp_access import validate_mcp_server_ids
 from forge.services.models import resolve_model_path
@@ -166,8 +166,42 @@ async def preload_model_stream(
 ):
     ctx = await _resolve_preload_context(db, user_id, settings, body.model_id, body.inference_backend)
     if ctx.get("ollama_only"):
+        ollama_model = ctx["response"].get("ollama_model") or ctx["response"].get("active_model")
+        size_bytes = int(ctx.get("size_bytes") or 0)
+        eta = estimate_load_eta_seconds(size_bytes) if size_bytes else 8
+
         async def ollama_gen():
-            yield {"event": "complete", "data": json.dumps(ctx["response"])}
+            from forge.providers.ollama import warm_model
+
+            yield {
+                "event": "progress",
+                "data": json.dumps(
+                    {
+                        "phase": "loading",
+                        "label": f"Loading {ollama_model} in Ollama",
+                        "percent": 20,
+                        "eta_seconds": eta,
+                        "model_name": ollama_model,
+                        "backend": BACKEND_OLLAMA,
+                    }
+                ),
+            }
+            try:
+                await warm_model(ollama_model, settings.ollama_base_url)
+            except Exception as exc:
+                yield {"event": "error", "data": str(exc)}
+                return
+            yield {
+                "event": "complete",
+                "data": json.dumps(
+                    {
+                        **ctx["response"],
+                        "status": "loaded",
+                        "backend": BACKEND_OLLAMA,
+                        "model_name": ollama_model,
+                    }
+                ),
+            }
 
         return EventSourceResponse(ollama_gen())
 

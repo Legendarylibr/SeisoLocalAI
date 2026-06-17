@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import json
 import uuid
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, AsyncIterator
+from typing import Any
 
 import aiosqlite
 
@@ -286,30 +287,27 @@ class Database:
         }
 
     async def get_user_by_display_name(self, display_name: str) -> dict | None:
-        async with self._conn() as conn:
-            async with conn.execute(
-                "SELECT * FROM users WHERE lower(display_name) = ?",
-                (display_name.strip().lower(),),
-            ) as cur:
-                row = await cur.fetchone()
-                return dict(row) if row else None
+        async with self._conn() as conn, conn.execute(
+            "SELECT * FROM users WHERE lower(display_name) = ?",
+            (display_name.strip().lower(),),
+        ) as cur:
+            row = await cur.fetchone()
+            return dict(row) if row else None
 
     async def get_sole_user(self) -> dict | None:
         """Return the single local user, if any (Forge allows one account per instance)."""
-        async with self._conn() as conn:
-            async with conn.execute(
-                "SELECT * FROM users ORDER BY created_at ASC LIMIT 1"
-            ) as cur:
-                row = await cur.fetchone()
-                return dict(row) if row else None
+        async with self._conn() as conn, conn.execute(
+            "SELECT * FROM users ORDER BY created_at ASC LIMIT 1"
+        ) as cur:
+            row = await cur.fetchone()
+            return dict(row) if row else None
 
     async def get_user_by_email(self, email: str) -> dict | None:
-        async with self._conn() as conn:
-            async with conn.execute(
-                "SELECT * FROM users WHERE email = ?", (email.lower(),)
-            ) as cur:
-                row = await cur.fetchone()
-                return dict(row) if row else None
+        async with self._conn() as conn, conn.execute(
+            "SELECT * FROM users WHERE email = ?", (email.lower(),)
+        ) as cur:
+            row = await cur.fetchone()
+            return dict(row) if row else None
 
     async def get_user_by_id(self, user_id: str) -> dict | None:
         async with self._conn() as conn:
@@ -330,13 +328,12 @@ class Database:
                 return [dict(r) for r in rows]
 
     async def get_model(self, model_id: str, user_id: str) -> dict | None:
-        async with self._conn() as conn:
-            async with conn.execute(
-                "SELECT * FROM local_models WHERE id = ? AND (user_id = ? OR user_id IS NULL)",
-                (model_id, user_id),
-            ) as cur:
-                row = await cur.fetchone()
-                return dict(row) if row else None
+        async with self._conn() as conn, conn.execute(
+            "SELECT * FROM local_models WHERE id = ? AND (user_id = ? OR user_id IS NULL)",
+            (model_id, user_id),
+        ) as cur:
+            row = await cur.fetchone()
+            return dict(row) if row else None
 
     async def add_model(self, **fields: Any) -> dict:
         mid = str(uuid.uuid4())
@@ -412,22 +409,20 @@ class Database:
         return {"id": jid, "status": "pending", "config": config, "created_at": now}
 
     async def get_thread_for_user(self, thread_id: str, user_id: str) -> dict | None:
-        async with self._conn() as conn:
-            async with conn.execute(
-                "SELECT * FROM chat_threads WHERE id = ? AND user_id = ?",
-                (thread_id, user_id),
-            ) as cur:
-                row = await cur.fetchone()
-                return dict(row) if row else None
+        async with self._conn() as conn, conn.execute(
+            "SELECT * FROM chat_threads WHERE id = ? AND user_id = ?",
+            (thread_id, user_id),
+        ) as cur:
+            row = await cur.fetchone()
+            return dict(row) if row else None
 
     async def get_training_job(self, job_id: str, user_id: str) -> dict | None:
-        async with self._conn() as conn:
-            async with conn.execute(
-                "SELECT * FROM training_jobs WHERE id = ? AND user_id = ?",
-                (job_id, user_id),
-            ) as cur:
-                row = await cur.fetchone()
-                return dict(row) if row else None
+        async with self._conn() as conn, conn.execute(
+            "SELECT * FROM training_jobs WHERE id = ? AND user_id = ?",
+            (job_id, user_id),
+        ) as cur:
+            row = await cur.fetchone()
+            return dict(row) if row else None
 
     async def update_job_status(
         self,
@@ -464,12 +459,11 @@ class Database:
             await conn.commit()
 
     async def list_training_jobs(self, user_id: str) -> list[dict]:
-        async with self._conn() as conn:
-            async with conn.execute(
-                "SELECT * FROM training_jobs WHERE user_id = ? ORDER BY created_at DESC",
-                (user_id,),
-            ) as cur:
-                return [dict(r) for r in await cur.fetchall()]
+        async with self._conn() as conn, conn.execute(
+            "SELECT * FROM training_jobs WHERE user_id = ? ORDER BY created_at DESC",
+            (user_id,),
+        ) as cur:
+            return [dict(r) for r in await cur.fetchall()]
 
     async def create_thread(self, user_id: str, title: str, model_id: str | None = None) -> dict:
         tid = str(uuid.uuid4())
@@ -493,12 +487,11 @@ class Database:
             return int(row[0]) if row else 0
 
     async def list_threads(self, user_id: str) -> list[dict]:
-        async with self._conn() as conn:
-            async with conn.execute(
-                "SELECT * FROM chat_threads WHERE user_id = ? ORDER BY updated_at DESC",
-                (user_id,),
-            ) as cur:
-                return [dict(r) for r in await cur.fetchall()]
+        async with self._conn() as conn, conn.execute(
+            "SELECT * FROM chat_threads WHERE user_id = ? ORDER BY updated_at DESC",
+            (user_id,),
+        ) as cur:
+            return [dict(r) for r in await cur.fetchall()]
 
     async def delete_thread(self, thread_id: str, user_id: str) -> bool:
         async with self._conn() as conn:
@@ -542,22 +535,20 @@ class Database:
         return {"id": mid, "thread_id": thread_id, "role": role, "content": content, "created_at": now}
 
     async def get_messages(self, thread_id: str) -> list[dict]:
-        async with self._conn() as conn:
-            async with conn.execute(
-                "SELECT * FROM chat_messages WHERE thread_id = ? ORDER BY created_at ASC",
-                (thread_id,),
-            ) as cur:
-                return [self._decrypt_row("chat_messages", dict(r)) for r in await cur.fetchall()]
+        async with self._conn() as conn, conn.execute(
+            "SELECT * FROM chat_messages WHERE thread_id = ? ORDER BY created_at ASC",
+            (thread_id,),
+        ) as cur:
+            return [self._decrypt_row("chat_messages", dict(r)) for r in await cur.fetchall()]
 
     # --- Providers ---
 
     async def list_providers(self, user_id: str) -> list[dict]:
-        async with self._conn() as conn:
-            async with conn.execute(
-                "SELECT * FROM providers WHERE user_id = ? ORDER BY created_at DESC",
-                (user_id,),
-            ) as cur:
-                return [self._decrypt_row("providers", dict(r)) for r in await cur.fetchall()]
+        async with self._conn() as conn, conn.execute(
+            "SELECT * FROM providers WHERE user_id = ? ORDER BY created_at DESC",
+            (user_id,),
+        ) as cur:
+            return [self._decrypt_row("providers", dict(r)) for r in await cur.fetchall()]
 
     async def create_provider(
         self, user_id: str, name: str, provider_type: str, config: dict
@@ -575,13 +566,12 @@ class Database:
         return {"id": pid, "name": name, "provider_type": provider_type, "config": config, "created_at": now}
 
     async def get_provider(self, provider_id: str, user_id: str) -> dict | None:
-        async with self._conn() as conn:
-            async with conn.execute(
-                "SELECT * FROM providers WHERE id = ? AND user_id = ?",
-                (provider_id, user_id),
-            ) as cur:
-                row = await cur.fetchone()
-                return self._decrypt_row("providers", dict(row)) if row else None
+        async with self._conn() as conn, conn.execute(
+            "SELECT * FROM providers WHERE id = ? AND user_id = ?",
+            (provider_id, user_id),
+        ) as cur:
+            row = await cur.fetchone()
+            return self._decrypt_row("providers", dict(row)) if row else None
 
     async def delete_provider(self, provider_id: str, user_id: str) -> bool:
         async with self._conn() as conn:
@@ -595,12 +585,11 @@ class Database:
     # --- MCP servers ---
 
     async def list_mcp_servers(self, user_id: str) -> list[dict]:
-        async with self._conn() as conn:
-            async with conn.execute(
-                "SELECT * FROM mcp_servers WHERE user_id = ? ORDER BY created_at DESC",
-                (user_id,),
-            ) as cur:
-                return [self._decrypt_row("mcp_servers", dict(r)) for r in await cur.fetchall()]
+        async with self._conn() as conn, conn.execute(
+            "SELECT * FROM mcp_servers WHERE user_id = ? ORDER BY created_at DESC",
+            (user_id,),
+        ) as cur:
+            return [self._decrypt_row("mcp_servers", dict(r)) for r in await cur.fetchall()]
 
     async def create_mcp_server(
         self,
@@ -632,13 +621,12 @@ class Database:
         }
 
     async def get_mcp_server(self, server_id: str, user_id: str) -> dict | None:
-        async with self._conn() as conn:
-            async with conn.execute(
-                "SELECT * FROM mcp_servers WHERE id = ? AND user_id = ?",
-                (server_id, user_id),
-            ) as cur:
-                row = await cur.fetchone()
-                return self._decrypt_row("mcp_servers", dict(row)) if row else None
+        async with self._conn() as conn, conn.execute(
+            "SELECT * FROM mcp_servers WHERE id = ? AND user_id = ?",
+            (server_id, user_id),
+        ) as cur:
+            row = await cur.fetchone()
+            return self._decrypt_row("mcp_servers", dict(row)) if row else None
 
     async def delete_mcp_server(self, server_id: str, user_id: str) -> bool:
         async with self._conn() as conn:
@@ -665,13 +653,12 @@ class Database:
         return {"id": jid, "status": "pending", "config": config, "created_at": now}
 
     async def get_export_job(self, job_id: str, user_id: str) -> dict | None:
-        async with self._conn() as conn:
-            async with conn.execute(
-                "SELECT * FROM export_jobs WHERE id = ? AND user_id = ?",
-                (job_id, user_id),
-            ) as cur:
-                row = await cur.fetchone()
-                return dict(row) if row else None
+        async with self._conn() as conn, conn.execute(
+            "SELECT * FROM export_jobs WHERE id = ? AND user_id = ?",
+            (job_id, user_id),
+        ) as cur:
+            row = await cur.fetchone()
+            return dict(row) if row else None
 
     async def update_export_job_status(
         self,
@@ -696,12 +683,11 @@ class Database:
             await conn.commit()
 
     async def list_export_jobs(self, user_id: str) -> list[dict]:
-        async with self._conn() as conn:
-            async with conn.execute(
-                "SELECT * FROM export_jobs WHERE user_id = ? ORDER BY created_at DESC",
-                (user_id,),
-            ) as cur:
-                return [dict(r) for r in await cur.fetchall()]
+        async with self._conn() as conn, conn.execute(
+            "SELECT * FROM export_jobs WHERE user_id = ? ORDER BY created_at DESC",
+            (user_id,),
+        ) as cur:
+            return [dict(r) for r in await cur.fetchall()]
 
     # --- RL quant jobs ---
 
@@ -719,13 +705,12 @@ class Database:
         return {"id": jid, "status": "pending", "config": config, "created_at": now}
 
     async def get_rl_quant_job(self, job_id: str, user_id: str) -> dict | None:
-        async with self._conn() as conn:
-            async with conn.execute(
-                "SELECT * FROM rl_quant_jobs WHERE id = ? AND user_id = ?",
-                (job_id, user_id),
-            ) as cur:
-                row = await cur.fetchone()
-                return dict(row) if row else None
+        async with self._conn() as conn, conn.execute(
+            "SELECT * FROM rl_quant_jobs WHERE id = ? AND user_id = ?",
+            (job_id, user_id),
+        ) as cur:
+            row = await cur.fetchone()
+            return dict(row) if row else None
 
     async def update_rl_quant_job_status(
         self,
@@ -759,12 +744,11 @@ class Database:
             await conn.commit()
 
     async def list_rl_quant_jobs(self, user_id: str) -> list[dict]:
-        async with self._conn() as conn:
-            async with conn.execute(
-                "SELECT * FROM rl_quant_jobs WHERE user_id = ? ORDER BY created_at DESC",
-                (user_id,),
-            ) as cur:
-                return [dict(r) for r in await cur.fetchall()]
+        async with self._conn() as conn, conn.execute(
+            "SELECT * FROM rl_quant_jobs WHERE user_id = ? ORDER BY created_at DESC",
+            (user_id,),
+        ) as cur:
+            return [dict(r) for r in await cur.fetchall()]
 
     # --- Compression jobs ---
 
@@ -782,13 +766,12 @@ class Database:
         return {"id": jid, "status": "pending", "config": config, "created_at": now}
 
     async def get_compress_job(self, job_id: str, user_id: str) -> dict | None:
-        async with self._conn() as conn:
-            async with conn.execute(
-                "SELECT * FROM compress_jobs WHERE id = ? AND user_id = ?",
-                (job_id, user_id),
-            ) as cur:
-                row = await cur.fetchone()
-                return dict(row) if row else None
+        async with self._conn() as conn, conn.execute(
+            "SELECT * FROM compress_jobs WHERE id = ? AND user_id = ?",
+            (job_id, user_id),
+        ) as cur:
+            row = await cur.fetchone()
+            return dict(row) if row else None
 
     async def update_compress_job_status(
         self,
@@ -825,12 +808,11 @@ class Database:
             await conn.commit()
 
     async def list_compress_jobs(self, user_id: str) -> list[dict]:
-        async with self._conn() as conn:
-            async with conn.execute(
-                "SELECT * FROM compress_jobs WHERE user_id = ? ORDER BY created_at DESC",
-                (user_id,),
-            ) as cur:
-                return [dict(r) for r in await cur.fetchall()]
+        async with self._conn() as conn, conn.execute(
+            "SELECT * FROM compress_jobs WHERE user_id = ? ORDER BY created_at DESC",
+            (user_id,),
+        ) as cur:
+            return [dict(r) for r in await cur.fetchall()]
 
     # --- Image compression jobs ---
 
@@ -850,13 +832,12 @@ class Database:
         return {"id": jid, "status": "pending", "config": config, "created_at": now}
 
     async def get_image_compress_job(self, job_id: str, user_id: str) -> dict | None:
-        async with self._conn() as conn:
-            async with conn.execute(
-                "SELECT * FROM image_compress_jobs WHERE id = ? AND user_id = ?",
-                (job_id, user_id),
-            ) as cur:
-                row = await cur.fetchone()
-                return dict(row) if row else None
+        async with self._conn() as conn, conn.execute(
+            "SELECT * FROM image_compress_jobs WHERE id = ? AND user_id = ?",
+            (job_id, user_id),
+        ) as cur:
+            row = await cur.fetchone()
+            return dict(row) if row else None
 
     async def update_image_compress_job_status(
         self,
@@ -893,9 +874,8 @@ class Database:
             await conn.commit()
 
     async def list_image_compress_jobs(self, user_id: str) -> list[dict]:
-        async with self._conn() as conn:
-            async with conn.execute(
-                "SELECT * FROM image_compress_jobs WHERE user_id = ? ORDER BY created_at DESC",
-                (user_id,),
-            ) as cur:
-                return [dict(r) for r in await cur.fetchall()]
+        async with self._conn() as conn, conn.execute(
+            "SELECT * FROM image_compress_jobs WHERE user_id = ? ORDER BY created_at DESC",
+            (user_id,),
+        ) as cur:
+            return [dict(r) for r in await cur.fetchall()]

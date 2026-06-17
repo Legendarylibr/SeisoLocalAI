@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 import uuid
 from typing import Annotated, Any
@@ -12,7 +11,7 @@ from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
 from forge.api.deps import get_db, get_image_compress_orchestrator
-from forge.api.routes._stream import job_log_event_gen
+from forge.api.routes._stream import job_log_event_gen, spawn_background
 from forge.config import ForgeSettings, get_settings
 from forge.db.store import Database
 from forge.orchestrators.image_compress import ImageCompressOrchestrator
@@ -139,9 +138,8 @@ async def start_image_compress(
                     )
         except Exception:
             await db.update_image_compress_job_status(job_id, "failed")
-            raise
 
-    asyncio.create_task(_run())
+    spawn_background(_run())
     audit_event("image_compress_start", user_id=user_id, job_id=job_id, preset=body.preset)
     return ImageCompressJobResponse(job_id=job_id, status="pending")
 

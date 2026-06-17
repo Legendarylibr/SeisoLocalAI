@@ -8,7 +8,8 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 try:
-    from trl import SFTConfig, SFTTrainer as _SFTTrainer
+    from trl import SFTConfig
+    from trl import SFTTrainer as _SFTTrainer
 except ImportError:
     _SFTTrainer = None  # type: ignore[misc, assignment]
     SFTConfig = None  # type: ignore[misc, assignment]

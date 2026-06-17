@@ -21,14 +21,16 @@ def test_configure_hf_hub_cache_sets_env(monkeypatch, tmp_path):
     assert cache == tmp_path / "hf_cache"
     assert Path(cache).is_dir()
     assert os.environ["HUGGINGFACE_HUB_CACHE"] == str(cache)
-    assert os.environ["HF_HUB_DOWNLOAD_TIMEOUT"] == "300"
-    assert os.environ["HF_HUB_NUM_THREADS"] == "8"
+    assert os.environ["HF_HUB_DOWNLOAD_TIMEOUT"] == "600"
+    assert os.environ["HF_HUB_NUM_THREADS"] in ("8", "12")
 
 
 def test_hf_transfer_stack_reports_backend():
     info = hf_transfer_stack()
     assert "backend" in info
     assert "xet_available" in info
+    assert "num_threads" in info
+    assert "hints" in info
     assert info["backend"] in ("hf_xet", "http")
 
 

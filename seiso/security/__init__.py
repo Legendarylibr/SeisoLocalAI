@@ -5,8 +5,8 @@ from __future__ import annotations
 import os
 import re
 import secrets
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable
 
 # Characters forbidden in user-supplied path segments
 _UNSAFE_SEGMENT = re.compile(r"[\x00<>:\"|?*]")

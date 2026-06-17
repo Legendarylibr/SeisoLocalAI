@@ -6,8 +6,8 @@ from pathlib import Path
 from typing import Any
 
 from forge.db.store import Database
-from forge.services.user_paths import assert_user_path
 from forge.services.inference_models import backend_for_path
+from forge.services.user_paths import assert_user_path
 from seiso.security import sanitize_filename
 
 

@@ -7,7 +7,6 @@ from forge.services.hardware import (
     estimate_chat_vram_gb,
     preferred_inference_backend,
     training_defaults,
-    vram_headroom_mb,
 )
 
 
@@ -48,7 +47,11 @@ def test_enrich_catalog_ranks_priority_first():
 
 
 def test_format_catalog_note_shows_download_and_runtime():
-    from forge.services.hardware import HardwareTier, _format_catalog_note, estimate_gguf_download_bytes
+    from forge.services.hardware import (
+        HardwareTier,
+        _format_catalog_note,
+        estimate_gguf_download_bytes,
+    )
 
     note = _format_catalog_note(
         est_vram_gb=2.9,

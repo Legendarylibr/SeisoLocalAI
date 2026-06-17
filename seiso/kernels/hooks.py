@@ -4,9 +4,15 @@ from __future__ import annotations
 
 import logging
 import types
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
-from seiso.kernels.dispatch import estimate_vram_savings_pct, fused_rms_norm, fused_swiglu, kernel_metadata
+from seiso.kernels.dispatch import (
+    estimate_vram_savings_pct,
+    fused_rms_norm,
+    fused_swiglu,
+    kernel_metadata,
+)
 from seiso.kernels.lifecycle import register_patch, restore_kernel_patches
 from seiso.kernels.platform import detect_gpu
 

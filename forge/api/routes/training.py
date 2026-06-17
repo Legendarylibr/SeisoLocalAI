@@ -13,13 +13,14 @@ from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
 from forge.api.deps import get_db, get_training_orchestrator
+from forge.api.routes._stream import spawn_background
 from forge.config import ForgeSettings, get_settings
 from forge.db.store import Database
 from forge.orchestrators.training import TrainingOrchestrator
 from forge.security.audit import audit_event
 from forge.security.auth import get_current_user_id
-from forge.services.jobs import assert_job_owner
 from forge.services.hf_hub import search_huggingface_datasets
+from forge.services.jobs import assert_job_owner
 from forge.services.models import list_trainable_models, resolve_training_model_id
 from forge.services.user_paths import assert_user_training_config
 from seiso.models.hf_env import configure_hf_hub_cache
@@ -147,7 +148,10 @@ async def start_training(
                     metrics=metrics_payload,
                 )
                 if job.status.value == "completed" and job.result.get("checkpoint_path"):
-                    from forge.services.model_registry import register_export_outputs, register_training_checkpoint
+                    from forge.services.model_registry import (
+                        register_export_outputs,
+                        register_training_checkpoint,
+                    )
 
                     await register_training_checkpoint(
                         db,
@@ -158,7 +162,11 @@ async def start_training(
                     )
 
                     if body.export_on_complete:
-                        from forge.api.routes.export import HubPublishRequest, _hub_metadata_from_request, _resolve_token
+                        from forge.api.routes.export import (
+                            HubPublishRequest,
+                            _hub_metadata_from_request,
+                            _resolve_token,
+                        )
                         from seiso.export.pipeline import auto_export_after_training
 
                         export_cfg = dict(body.export_on_complete)
@@ -194,11 +202,10 @@ async def start_training(
                             outputs={k: str(v) for k, v in outputs.items()},
                             job_id=f"train-{job_id}",
                         )
-        except Exception as exc:
+        except Exception:
             await db.update_job_status(job_id, "failed")
-            raise exc
 
-    asyncio.create_task(_run())
+    spawn_background(_run())
     audit_event("training_start", user_id=user_id, job_id=job_id, model_id=body.config.get("model_id"))
     return TrainingJobResponse(job_id=job_id, status="pending")
 

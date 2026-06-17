@@ -37,7 +37,6 @@ def active_backend() -> str:
 
 def fused_rms_norm(x, weight, eps: float = 1e-6, residual=None):
     """``rms_norm(x + residual) * weight`` via best available backend."""
-    import torch
 
     if not getattr(x, "is_cuda", False):
         return _pytorch_rms_norm(x, weight, eps, residual)
@@ -85,7 +84,6 @@ def fused_cross_entropy_loss(logits, labels, *, ignore_index: int = -100):
 
 def fused_lora_delta(x, lora_A, lora_B, base=None, scale: float = 1.0):
     """Fused low-rank delta when native CUDA is available."""
-    import torch
 
     if not getattr(x, "is_cuda", False):
         delta = scale * (lora_B @ (lora_A @ x))

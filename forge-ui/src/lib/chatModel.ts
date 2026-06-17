@@ -132,14 +132,18 @@ export function preloadWithProgress(
   modelId: string,
   backend: string,
   onProgress?: ModelProgressHandler,
-): Promise<void> {
+): Promise<string> {
   return new Promise((resolve, reject) => {
     const { promise } = api.streamPreloadModel(
       modelId,
       backend,
       {
         onProgress: (data) => onProgress?.(progressFromPreloadEvent(data)),
-        onComplete: () => resolve(),
+        onComplete: (data) => {
+          const resolvedBackend =
+            typeof data.backend === "string" && data.backend ? data.backend : backend;
+          resolve(resolvedBackend);
+        },
         onError: (msg) => {
           onProgress?.(null);
           reject(new Error(msg));
@@ -151,6 +155,15 @@ export function preloadWithProgress(
       if (!(err instanceof DOMException && err.name === "AbortError")) reject(err);
     });
   });
+}
+
+export function isChatModelReady(
+  modelId: string | null,
+  backend: string,
+  loadedModelId: string | null,
+  loadedBackend: string | null,
+): boolean {
+  return !!(modelId && loadedModelId === modelId && loadedBackend === backend);
 }
 
 export async function bootstrapChatModels(
@@ -183,9 +196,10 @@ export async function bootstrapChatModels(
   const selected = models.find((m) => m.id === selectedId) ?? null;
   const backend = resolveInferenceBackend(selected, options.hwProfile ?? null);
 
+  let loadedBackend = backend;
   if (options.preload !== false && selectedId && selected && !options.providerActive) {
-    await preloadWithProgress(selectedId, backend, options.onProgress);
+    loadedBackend = await preloadWithProgress(selectedId, backend, options.onProgress);
   }
 
-  return { models, selectedId, backend, selected };
+  return { models, selectedId, backend: loadedBackend, selected };
 }

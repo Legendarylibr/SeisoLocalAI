@@ -15,7 +15,7 @@ def test_training_capabilities_shape():
 
 def test_training_loader_skips_mlx(monkeypatch):
     pytest = __import__("pytest")
-    torch = pytest.importorskip("torch")
+    pytest.importorskip("torch")
     from unittest.mock import MagicMock, patch
 
     from seiso.models.loader import LoadOptions, ModelKind, load_model

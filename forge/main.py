@@ -11,7 +11,23 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from forge.api.deps import clear_dependency_caches, get_db
-from forge.api.routes import auth, autodefense, compress, export, image_compress, inference, knowledge, mcp_servers, models, openai, providers, recipes, rl_quant, system, training
+from forge.api.routes import (
+    auth,
+    autodefense,
+    compress,
+    export,
+    image_compress,
+    inference,
+    knowledge,
+    mcp_servers,
+    models,
+    openai,
+    providers,
+    recipes,
+    rl_quant,
+    system,
+    training,
+)
 from forge.api.routes import settings as settings_routes
 from forge.config import get_settings
 from seiso.models.hf_env import configure_hf_hub_cache

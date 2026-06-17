@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, RLQuantJob, RLQuantPreset, subscribeSSE } from "@/lib/api";
+import { StudioPageShell } from "@/components/StudioPageShell";
 
 const DEFAULT_REWARD = {
   alpha_latency: 0.02,
@@ -76,13 +77,10 @@ export function RLQuantPage() {
   const selectedPreset = presets.find((p) => p.id === preset);
 
   return (
-    <div>
-      <h1 className="page-title">RL Quantization</h1>
-      <p className="page-sub">
-        Adaptive quantization via reinforcement learning and reward engineering (llama.cpp / simulator).
-        Train a policy, get a GGUF quant recommendation, then export or chat.
-      </p>
-
+    <StudioPageShell
+      title="RL Quantization"
+      subtitle="Adaptive quantization via reinforcement learning and reward engineering (llama.cpp / simulator). Train a policy, get a GGUF quant recommendation, then export or chat."
+    >
       <div className="train-layout">
         <div className="card">
           <label>Preset</label>
@@ -192,6 +190,6 @@ export function RLQuantPage() {
           Use a completed job ID on the Export page to apply RL-recommended GGUF quantizations.
         </p>
       </div>
-    </div>
+    </StudioPageShell>
   );
 }

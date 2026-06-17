@@ -6,7 +6,11 @@ from pathlib import Path
 
 import pytest
 
-from seiso.rl_quant.bootstrap import ensure_adaptive_quant_importable, require_adaptive_quant, vendor_root
+from seiso.rl_quant.bootstrap import (
+    ensure_adaptive_quant_importable,
+    require_adaptive_quant,
+    vendor_root,
+)
 from seiso.rl_quant.config_builder import build_framework_config
 from seiso.rl_quant.recommendation import recommendation_to_gguf_quants
 

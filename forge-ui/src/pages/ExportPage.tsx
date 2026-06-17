@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, ExportJob, HubPublishFields, PublishableModel, RLQuantJob, subscribeSSE } from "@/lib/api";
+import { StudioPageShell } from "@/components/StudioPageShell";
 
 function emptyHub(): HubPublishFields {
   return { username: "", model_name: "", author: "", license: "apache-2.0", description: "", use_cli: false };
@@ -164,12 +165,10 @@ export function ExportPage() {
   };
 
   return (
-    <div>
-      <h1 className="page-title">Export &amp; Publish</h1>
-      <p className="page-sub">
-        Merge LoRA, quantize GGUF, download locally, or publish Seiso-created outputs to Hugging Face.
-      </p>
-
+    <StudioPageShell
+      title="Export & Publish"
+      subtitle="Merge LoRA, quantize GGUF, download locally, or publish Seiso-created outputs to Hugging Face."
+    >
       <div className="card">
         <h3 className="section-title">Export checkpoint</h3>
         <label>Checkpoint path (training output)</label>
@@ -332,6 +331,6 @@ export function ExportPage() {
           <div className="log-panel">{logs.join("\n")}</div>
         </div>
       )}
-    </div>
+    </StudioPageShell>
   );
 }

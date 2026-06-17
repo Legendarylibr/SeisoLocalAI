@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from forge.config import get_settings
 from forge.mcp.client import McpManager
@@ -13,7 +13,12 @@ from forge.providers.ollama import chat_completion as ollama_chat_completion
 from forge.providers.ollama import stream_chat_completion as ollama_stream_chat
 from forge.providers.router import chat_completion
 from forge.security.audit import audit_event
-from forge.security.autodefense import DefenseBlockedError, defense_enabled, scan_messages, scan_output
+from forge.security.autodefense import (
+    DefenseBlockedError,
+    defense_enabled,
+    scan_messages,
+    scan_output,
+)
 from forge.tools.registry import ToolSpec, build_default_registry
 from forge.tools.sanitize import wrap_tool_result
 from seiso.inference.backends import BACKEND_OLLAMA

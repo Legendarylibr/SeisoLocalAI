@@ -94,8 +94,50 @@ def test_pick_gguf_file_prefers_active_moe_quant():
 def test_resolve_gguf_repo_raises_when_missing(monkeypatch):
     monkeypatch.setattr(hf_hub, "repo_has_gguf", lambda *_a, **_k: False)
     monkeypatch.setattr(hf_hub, "search_huggingface_gguf_repos", lambda **_k: [])
+    hf_hub._GGUF_REPO_CACHE.clear()
     try:
         hf_hub.resolve_gguf_repo("org/NoGgufModel")
         assert False, "expected ValueError"
     except ValueError as exc:
         assert "No GGUF quant repo found" in str(exc)
+
+
+def test_resolve_gguf_repo_uses_cache(monkeypatch):
+    hf_hub._GGUF_REPO_CACHE.clear()
+    calls = {"n": 0}
+
+    def _has_gguf(repo_id, **_) -> bool:
+        calls["n"] += 1
+        return repo_id == "meta-llama/Llama-3.1-8B-Instruct"
+
+    monkeypatch.setattr(hf_hub, "repo_has_gguf", _has_gguf)
+    first = hf_hub.resolve_gguf_repo("meta-llama/Llama-3.1-8B-Instruct")
+    second = hf_hub.resolve_gguf_repo("meta-llama/Llama-3.1-8B-Instruct")
+    assert first == second == "meta-llama/Llama-3.1-8B-Instruct"
+    assert calls["n"] == 1
+
+
+def test_download_gguf_skips_size_lookup_when_total_known(monkeypatch, tmp_path):
+    size_calls = {"n": 0}
+
+    def _size(*_a, **_k):
+        size_calls["n"] += 1
+        return 123
+
+    monkeypatch.setattr(hf_hub, "get_gguf_file_size_bytes", _size)
+
+    cached = tmp_path / "model.gguf"
+    cached.write_bytes(b"gguf")
+    monkeypatch.setattr(hf_hub, "_with_download_retries", lambda _fn, **_k: str(cached.resolve()))
+
+    progress_events: list[dict] = []
+    hf_hub.download_gguf(
+        "mirror/Model-GGUF",
+        cache_dir=tmp_path,
+        token=None,
+        filename="Model-Q4_K_M.gguf",
+        total_bytes=5_000_000_000,
+        on_progress=progress_events.append,
+    )
+    assert size_calls["n"] == 0
+    assert progress_events == []

@@ -8,8 +8,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from forge.api.deps import get_inference_orchestrator
-from forge.api.deps import get_db
+from forge.api.deps import get_db, get_inference_orchestrator
 from forge.config import ForgeSettings, get_settings
 from forge.db.store import Database
 from forge.mcp.client import McpServer

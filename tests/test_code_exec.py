@@ -2,7 +2,7 @@
 
 import json
 
-from forge.tools.code_exec import execute_code, _validate_code
+from forge.tools.code_exec import _validate_code, execute_code
 
 
 def test_blocks_os_import():

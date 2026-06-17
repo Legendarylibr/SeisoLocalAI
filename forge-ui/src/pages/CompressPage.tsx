@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, CompressJob, CompressPreset, subscribeSSE } from "@/lib/api";
+import { StudioPageShell } from "@/components/StudioPageShell";
 
 const FALLBACK_PRESETS: CompressPreset[] = [
   { id: "smoke", label: "Smoke", stages: ["distill", "prune", "finetune", "evaluate", "export"] },
@@ -114,15 +115,19 @@ export function CompressPage() {
   };
 
   return (
-    <div>
-      <h1 className="page-title">Model Compression</h1>
-      <p className="page-sub">
-        Code Llama compression pipeline: distillation, MLP pruning, recovery fine-tune, evaluation,
-        and export bundles (vLLM/Docker/GGUF scripts). Hash-chained manifests for reproducibility.
-      </p>
-
+    <StudioPageShell
+      title="Model Compression"
+      subtitle="Code Llama compression pipeline: distillation, MLP pruning, recovery fine-tune, evaluation, and export bundles (vLLM/Docker/GGUF scripts). Hash-chained manifests for reproducibility."
+    >
       <div className="train-layout">
-        <div className="card compress-config-card">
+        <div className="card compress-config-card studio-card">
+          <div className="studio-card-head">
+            <span className="studio-card-icon" aria-hidden>⚙</span>
+            <div className="studio-card-head-text">
+              <div className="studio-card-title">Pipeline configuration</div>
+              <div className="studio-card-desc">Presets, stages, models, and training parameters</div>
+            </div>
+          </div>
           <h3 className="section-title">Pipeline</h3>
           <label>Preset</label>
           <select value={preset} onChange={(e) => setPreset(e.target.value)}>
@@ -311,6 +316,6 @@ export function CompressPage() {
           </table>
         )}
       </div>
-    </div>
+    </StudioPageShell>
   );
 }

@@ -354,6 +354,58 @@ export function IconDownload({ size = defaults.size, className, strokeWidth = de
   );
 }
 
+export function IconGlobe({ size = defaults.size, className, strokeWidth = defaults.strokeWidth }: IconProps) {
+  return (
+    <Svg size={size} className={className}>
+      <circle cx="12" cy="12" r="7.5" stroke="currentColor" strokeWidth={strokeWidth} />
+      <path d="M4.5 12H19.5" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" />
+      <path d="M12 4.5C9.8 7.8 9.8 16.2 12 19.5C14.2 16.2 14.2 7.8 12 4.5Z" stroke="currentColor" strokeWidth={strokeWidth} strokeLinejoin="round" />
+    </Svg>
+  );
+}
+
+export function IconHardDrive({ size = defaults.size, className, strokeWidth = defaults.strokeWidth }: IconProps) {
+  return (
+    <Svg size={size} className={className}>
+      <rect x="4.5" y="6.5" width="15" height="11" rx="2" stroke="currentColor" strokeWidth={strokeWidth} />
+      <path d="M4.5 11H19.5" stroke="currentColor" strokeWidth={strokeWidth} />
+      <circle cx="8" cy="14.5" r="0.85" fill="currentColor" />
+      <circle cx="11" cy="14.5" r="0.85" fill="currentColor" />
+    </Svg>
+  );
+}
+
+export function IconPlug({ size = defaults.size, className, strokeWidth = defaults.strokeWidth }: IconProps) {
+  return (
+    <Svg size={size} className={className}>
+      <path d="M9 4.5V8.5" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" />
+      <path d="M15 4.5V8.5" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" />
+      <path d="M7.5 8.5H16.5V11.5C16.5 14.5 14.5 16.5 12 16.5C9.5 16.5 7.5 14.5 7.5 11.5V8.5Z" stroke="currentColor" strokeWidth={strokeWidth} strokeLinejoin="round" />
+      <path d="M12 16.5V19.5" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" />
+    </Svg>
+  );
+}
+
+export function IconServer({ size = defaults.size, className, strokeWidth = defaults.strokeWidth }: IconProps) {
+  return (
+    <Svg size={size} className={className}>
+      <rect x="4.5" y="5" width="15" height="5.5" rx="1.5" stroke="currentColor" strokeWidth={strokeWidth} />
+      <rect x="4.5" y="13.5" width="15" height="5.5" rx="1.5" stroke="currentColor" strokeWidth={strokeWidth} />
+      <circle cx="8" cy="7.75" r="0.75" fill="currentColor" />
+      <circle cx="8" cy="16.25" r="0.75" fill="currentColor" />
+    </Svg>
+  );
+}
+
+export function IconUser({ size = defaults.size, className, strokeWidth = defaults.strokeWidth }: IconProps) {
+  return (
+    <Svg size={size} className={className}>
+      <circle cx="12" cy="8.5" r="3" stroke="currentColor" strokeWidth={strokeWidth} />
+      <path d="M6 18.5C6.8 15.2 9.1 13.5 12 13.5C14.9 13.5 17.2 15.2 18 18.5" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" />
+    </Svg>
+  );
+}
+
 export type NavIconName =
   | "dashboard"
   | "hub"

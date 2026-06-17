@@ -20,7 +20,13 @@ from seiso.security import sanitize_filename
 
 _HF_API = "https://huggingface.co/api"
 _GGUF_ARTIFACT_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
-_GGUF_ARTIFACT_TTL_S = 3600.0
+_GGUF_ARTIFACT_TTL_S = 86_400.0  # 24h — mirror filenames rarely change
+_GGUF_REPO_CACHE: dict[str, tuple[float, str]] = {}
+_GGUF_REPO_TTL_S = 86_400.0
+_REPO_GGUF_CACHE: dict[str, tuple[float, bool]] = {}
+_REPO_GGUF_TTL_S = 3_600.0
+_FILE_SIZE_CACHE: dict[str, tuple[float, int]] = {}
+_FILE_SIZE_TTL_S = 86_400.0
 _DOWNLOAD_RETRIES = 3
 _DOWNLOAD_RETRY_BACKOFF_S = 2.0
 
@@ -136,11 +142,18 @@ def _list_repo_files(repo_id: str, *, token: str | None, revision: str) -> list[
 
 
 def repo_has_gguf(repo_id: str, *, token: str | None = None, revision: str = "main") -> bool:
+    cache_key = f"{repo_id}:{revision}"
+    now = time.time()
+    cached = _REPO_GGUF_CACHE.get(cache_key)
+    if cached and now - cached[0] < _REPO_GGUF_TTL_S:
+        return cached[1]
     try:
         files = _list_repo_files(repo_id, token=token, revision=revision)
+        has_gguf = any(f.lower().endswith(".gguf") for f in files)
     except Exception:
-        return False
-    return any(f.lower().endswith(".gguf") for f in files)
+        has_gguf = False
+    _REPO_GGUF_CACHE[cache_key] = (now, has_gguf)
+    return has_gguf
 
 
 def _gguf_mirror_candidates(repo_id: str) -> list[str]:
@@ -278,11 +291,19 @@ def get_gguf_file_size_bytes(
     revision: str = "main",
 ) -> int:
     """Return on-disk byte size for a single Hub file (uses HF metadata API)."""
+    cache_key = f"{repo_id}:{filename}:{revision}"
+    now = time.time()
+    cached = _FILE_SIZE_CACHE.get(cache_key)
+    if cached and now - cached[0] < _FILE_SIZE_TTL_S:
+        return cached[1]
+
     from huggingface_hub import get_hf_file_metadata, hf_hub_url
 
     url = hf_hub_url(repo_id, filename, repo_type="model", revision=revision)
     meta = get_hf_file_metadata(url, token=token)
-    return int(meta.size or 0)
+    size_bytes = int(meta.size or 0)
+    _FILE_SIZE_CACHE[cache_key] = (now, size_bytes)
+    return size_bytes
 
 
 def resolve_gguf_artifact(
@@ -336,7 +357,14 @@ def resolve_gguf_repo(
     if entry and entry.gguf_repo:
         return entry.gguf_repo
 
+    cache_key = f"{repo_id}:{revision}"
+    now = time.time()
+    cached = _GGUF_REPO_CACHE.get(cache_key)
+    if cached and now - cached[0] < _GGUF_REPO_TTL_S:
+        return cached[1]
+
     if repo_has_gguf(repo_id, token=token, revision=revision):
+        _GGUF_REPO_CACHE[cache_key] = (now, repo_id)
         return repo_id
 
     mirror = _first_repo_with_gguf(
@@ -345,6 +373,7 @@ def resolve_gguf_repo(
         revision=revision,
     )
     if mirror:
+        _GGUF_REPO_CACHE[cache_key] = (now, mirror)
         return mirror
 
     model_name = repo_id.split("/")[-1]
@@ -356,6 +385,7 @@ def resolve_gguf_repo(
     ]
     resolved = _first_repo_with_gguf(search_candidates, token=token, revision=revision)
     if resolved:
+        _GGUF_REPO_CACHE[cache_key] = (now, resolved)
         return resolved
 
     raise ValueError(
@@ -374,6 +404,7 @@ def download_gguf(
     entry: CatalogEntry | None = None,
     inventory_repo_id: str | None = None,
     on_progress: ProgressCallback | None = None,
+    total_bytes: int | None = None,
 ) -> dict[str, Any]:
     from huggingface_hub import hf_hub_download
 
@@ -387,7 +418,7 @@ def download_gguf(
         if not filename:
             raise ValueError(f"No GGUF files found in {repo_id}")
 
-    if on_progress:
+    if on_progress and (total_bytes is None or total_bytes <= 0):
         try:
             total_bytes = get_gguf_file_size_bytes(repo_id, filename, token=token, revision=revision)
         except Exception:

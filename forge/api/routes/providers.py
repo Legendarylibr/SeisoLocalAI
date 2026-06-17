@@ -13,8 +13,8 @@ from forge.db.store import Database
 from forge.providers.router import mask_config
 from forge.security.audit import audit_event
 from forge.security.auth import get_current_user_id
-from seiso.security import SecurityError
 from forge.security.url_policy import validate_provider_base_url
+from seiso.security import SecurityError
 
 router = APIRouter(prefix="/providers", tags=["providers"])
 

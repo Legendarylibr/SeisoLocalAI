@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, HardwareProfile, GuideStep, SystemMetrics } from "@/lib/api";
 import { chatPath } from "@/lib/chatModel";
@@ -50,6 +50,14 @@ export function DashboardPage() {
     api.guide(goal).then((r) => setSteps(r.steps)).catch(console.error);
   }, [goal]);
 
+  const activeGoal = GOALS.find((g) => g.id === goal) ?? GOALS[0];
+  const goalPath = useMemo(() => {
+    if (activeGoal.id === "chat" || activeGoal.id === "inference") {
+      return chatPath({ repo: hw?.recommended_chat_repo ?? null });
+    }
+    return activeGoal.path;
+  }, [activeGoal, hw?.recommended_chat_repo]);
+
   const vramTotal = hw?.gpus[0]?.vram_total_mb;
   const vramUsed = hw?.gpus[0]?.vram_used_mb;
 
@@ -58,6 +66,7 @@ export function DashboardPage() {
       <PageHeader
         title="Dashboard"
         subtitle="Hardware-aware guidance — everything stays on this machine, nothing is sent elsewhere."
+        group="Overview"
         badge={
           <div className="header-badges">
             <span className="trust-badge">
@@ -134,31 +143,35 @@ export function DashboardPage() {
         </div>
         <div className="goal-grid">
           {GOALS.map((g) => (
-            <Link
+            <button
               key={g.id}
-              to={g.id === "chat" || g.id === "inference" ? chatPath({ repo: hw?.recommended_chat_repo ?? null }) : g.path}
+              type="button"
               className={`goal-card${goal === g.id ? " goal-card-active" : ""}`}
               onClick={() => setGoal(g.id)}
+              aria-pressed={goal === g.id}
             >
+              {goal === g.id && <span className="goal-card-check" aria-hidden>✓</span>}
               <span className="goal-icon-wrap">
                 <g.Icon size={20} />
               </span>
               <span className="goal-label">{g.label}</span>
               <span className="goal-desc">{g.desc}</span>
-              <span className="goal-go">
-                Open
-                <IconChevronRight size={14} />
-              </span>
-            </Link>
+            </button>
           ))}
         </div>
       </section>
 
       {steps.length > 0 && (
         <section className="card guide-section">
-          <div className="section-head">
-            <h2 className="section-title">Recommended next steps</h2>
-            <p className="section-desc">Tailored for your selected goal.</p>
+          <div className="guide-section-head">
+            <div className="section-head">
+              <h2 className="section-title">Recommended next steps</h2>
+              <p className="section-desc">Tailored for <strong>{activeGoal.label}</strong> on your hardware.</p>
+            </div>
+            <Link to={goalPath} className="btn btn-primary guide-cta">
+              Open {activeGoal.label}
+              <IconChevronRight size={14} />
+            </Link>
           </div>
           <ol className="guide-list">
             {steps.map((s, i) => (

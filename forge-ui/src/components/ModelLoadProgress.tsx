@@ -1,5 +1,10 @@
-import { useEffect, useRef, useState } from "react";
-import { ModelProgressState, formatEta } from "@/lib/modelProgress";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  ModelProgressState,
+  formatDownloadProgress,
+  formatEta,
+  formatSpeedBps,
+} from "@/lib/modelProgress";
 
 type Props = {
   progress: ModelProgressState | null;
@@ -7,17 +12,27 @@ type Props = {
   compact?: boolean;
 };
 
+const STALL_SECONDS = 8;
+
 function useLiveProgress(progress: ModelProgressState) {
-  const [now, setNow] = useState(() => Date.now());
+  const isDownload = progress.phase === "download";
+  const [, setTick] = useState(0);
   const etaAnchor = useRef({ eta: progress.etaSeconds ?? 0, at: Date.now() });
   const creepAnchor = useRef({
     percent: progress.percent,
     at: Date.now(),
     duration: Math.max(progress.etaSeconds ?? 60, 1),
   });
+  const lastBytesAt = useRef(Date.now());
+  const prevBytesDone = useRef(progress.bytesDone ?? 0);
+
+  if ((progress.bytesDone ?? 0) > prevBytesDone.current) {
+    lastBytesAt.current = Date.now();
+    prevBytesDone.current = progress.bytesDone ?? 0;
+  }
 
   useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), 1000);
+    const id = setInterval(() => setTick((t) => t + 1), 1000);
     return () => clearInterval(id);
   }, []);
 
@@ -40,10 +55,14 @@ function useLiveProgress(progress: ModelProgressState) {
     }
   }, [progress.percent, progress.etaSeconds]);
 
+  const now = Date.now();
   const elapsed = (now - creepAnchor.current.at) / 1000;
   const etaElapsed = (now - etaAnchor.current.at) / 1000;
 
-  const hasLiveDownload = progress.phase === "download" && progress.percent > 0;
+  const hasByteTracker =
+    isDownload && progress.totalBytes != null && progress.totalBytes > 0;
+
+  const hasLiveDownload = isDownload && (progress.bytesDone ?? 0) > 0;
   const liveEta = progress.etaSeconds != null
     ? hasLiveDownload
       ? progress.etaSeconds
@@ -51,7 +70,7 @@ function useLiveProgress(progress: ModelProgressState) {
     : null;
 
   const timePct =
-    progress.etaSeconds != null && progress.percent < 98
+    !isDownload && progress.etaSeconds != null && progress.percent < 98
       ? Math.min(
           98,
           creepAnchor.current.percent +
@@ -60,9 +79,17 @@ function useLiveProgress(progress: ModelProgressState) {
         )
       : progress.percent;
 
-  const displayPct = Math.min(100, Math.max(progress.percent, timePct));
+  const displayPct = isDownload
+    ? progress.percent
+    : Math.min(100, Math.max(progress.percent, timePct));
 
-  return { liveEta, displayPct };
+  const stalled =
+    hasByteTracker &&
+    progress.percent < 100 &&
+    (progress.bytesDone ?? 0) > 0 &&
+    now - lastBytesAt.current >= STALL_SECONDS * 1000;
+
+  return { liveEta, displayPct, hasByteTracker, stalled };
 }
 
 export function ModelLoadProgress({ progress, modelName, compact = false }: Props) {
@@ -79,15 +106,36 @@ type ViewProps = {
 };
 
 function ModelLoadProgressView({ progress, modelName, compact = false }: ViewProps) {
-  const { liveEta, displayPct } = useLiveProgress(progress);
+  const { liveEta, displayPct, hasByteTracker, stalled } = useLiveProgress(progress);
   const pct = Math.min(100, Math.max(0, displayPct));
+  const bytesDone = progress.bytesDone ?? 0;
+  const totalBytes = progress.totalBytes ?? 0;
+  const speedLabel = formatSpeedBps(progress.speedBps ?? 0);
+  const progressLabel = useMemo(
+    () => (hasByteTracker ? formatDownloadProgress(bytesDone, totalBytes) : ""),
+    [hasByteTracker, bytesDone, totalBytes],
+  );
 
   return (
-    <div className={`model-load-progress${compact ? " model-load-progress-compact" : ""}`}>
+    <div
+      className={`model-load-progress${compact ? " model-load-progress-compact" : ""}${
+        hasByteTracker ? " model-load-progress-download" : ""
+      }`}
+    >
       <div className="model-load-progress-header">
         <span className="model-load-progress-label">{progress.label}</span>
         <span className="model-load-progress-eta">{formatEta(liveEta)}</span>
       </div>
+      {hasByteTracker && (
+        <div className="model-load-progress-bytes">
+          <span className="model-load-progress-bytes-count">{progressLabel}</span>
+          {speedLabel ? (
+            <span className="model-load-progress-bytes-speed">{speedLabel}</span>
+          ) : stalled ? (
+            <span className="model-load-progress-bytes-stalled">Waiting for data…</span>
+          ) : null}
+        </div>
+      )}
       <div
         className="model-load-progress-track"
         role="progressbar"
@@ -102,7 +150,7 @@ function ModelLoadProgressView({ progress, modelName, compact = false }: ViewPro
         <p className="model-load-progress-model muted-text">Active: {modelName}</p>
       )}
       {!compact && pct > 0 && (
-        <p className="model-load-progress-pct muted-text">{Math.round(pct)}%</p>
+        <p className="model-load-progress-pct muted-text">{pct.toFixed(hasByteTracker ? 1 : 0)}%</p>
       )}
     </div>
   );

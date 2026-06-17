@@ -85,7 +85,6 @@ def fused_rms_norm(x, weight, eps: float = 1e-6, residual=None):
 
     Falls back to Triton then PyTorch when extension unavailable.
     """
-    import torch
 
     if not x.is_cuda:
         return _pytorch_rms_norm(x, weight, eps, residual)
@@ -114,7 +113,6 @@ def fused_swiglu(gate, up):
 
 def fused_lora_delta(x, lora_A, lora_B, base=None, scale: float = 1.0):
     """Fused low-rank delta: ``base + scale * B @ (A @ x)``."""
-    import torch
 
     if not x.is_cuda:
         delta = scale * (lora_B @ (lora_A @ x))

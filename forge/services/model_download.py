@@ -134,6 +134,7 @@ def _sync_download_artifacts(
         entry=entry,
         inventory_repo_id=catalog_repo,
         on_progress=on_progress,
+        total_bytes=total_bytes if total_bytes > 0 else None,
     )
     cached = Path(info["path"])
     inv = link_inventory(inventory_dir, info["inventory_name"], cached)

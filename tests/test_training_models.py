@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from forge.services.models import list_trainable_models, resolve_training_model_id
 from seiso.models.hf_env import configure_hf_hub_cache, resolve_hf_cache_dir
 

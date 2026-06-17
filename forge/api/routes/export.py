@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 import uuid
 from pathlib import Path
@@ -14,6 +13,7 @@ from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
 from forge.api.deps import get_db, get_export_orchestrator
+from forge.api.routes._stream import spawn_background
 from forge.config import ForgeSettings, get_settings
 from forge.db.store import Database
 from forge.orchestrators.export import ExportOrchestrator
@@ -268,9 +268,8 @@ async def start_export(
                     )
         except Exception:
             await db.update_export_job_status(job_id, "failed")
-            raise
 
-    asyncio.create_task(_run())
+    spawn_background(_run())
     audit_event("export_start", user_id=user_id, job_id=job_id, formats=body.formats)
     return ExportJobResponse(job_id=job_id, status="pending")
 
@@ -339,7 +338,10 @@ async def publish_to_hub(
         formats=meta.export_formats or None,
     )
     if not precheck.ok:
-        assert_hub_precheck_ok(precheck)
+        try:
+            assert_hub_precheck_ok(precheck)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
 
     logs: list[str] = []
 

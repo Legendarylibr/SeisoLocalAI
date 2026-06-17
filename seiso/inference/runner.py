@@ -19,6 +19,15 @@ from seiso.models.chat_format import format_messages_for_prompt
 
 logger = logging.getLogger(__name__)
 
+_STREAM_DONE = object()
+
+
+class _StreamError:
+    __slots__ = ("exc",)
+
+    def __init__(self, exc: BaseException) -> None:
+        self.exc = exc
+
 
 class LocalInferenceRunner:
     """Runs chat against local MLX, PyTorch, or llama.cpp with VRAM management."""
@@ -42,7 +51,7 @@ class LocalInferenceRunner:
         await self._ensure_model_switch(resolved_path)
 
         loop = asyncio.get_running_loop()
-        queue: asyncio.Queue[str | None] = asyncio.Queue()
+        queue: asyncio.Queue[str | object] = asyncio.Queue()
 
         def should_stop() -> bool:
             return not self._pool.is_generation_active(generation_id)
@@ -55,9 +64,9 @@ class LocalInferenceRunner:
                     loop.call_soon_threadsafe(queue.put_nowait, token)
             except Exception as exc:
                 if not should_stop():
-                    logger.warning("Local inference stream error: %s", exc)
+                    loop.call_soon_threadsafe(queue.put_nowait, _StreamError(exc))
             finally:
-                loop.call_soon_threadsafe(queue.put_nowait, None)
+                loop.call_soon_threadsafe(queue.put_nowait, _STREAM_DONE)
 
         threading.Thread(target=producer, daemon=True).start()
 
@@ -65,9 +74,11 @@ class LocalInferenceRunner:
             if should_stop():
                 break
             item = await queue.get()
-            if item is None:
+            if item is _STREAM_DONE:
                 break
-            yield item
+            if isinstance(item, _StreamError):
+                raise item.exc
+            yield str(item)
 
     async def unload(self) -> dict:
         loop = asyncio.get_running_loop()

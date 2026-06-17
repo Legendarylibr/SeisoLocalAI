@@ -8,6 +8,8 @@ export type ModelProgressState = {
   modelName?: string;
   indeterminate?: boolean;
   totalBytes?: number;
+  bytesDone?: number;
+  speedBps?: number;
 };
 
 const DEFAULT_DOWNLOAD_SPEED_BPS = 8 * 1024 * 1024; // 8 MiB/s
@@ -61,6 +63,26 @@ export function formatBytes(n: number): string {
   return `${n} B`;
 }
 
+/** Byte counts for live download tracking — two decimal GB when size is large. */
+export function formatDownloadBytes(n: number, referenceBytes = n): string {
+  if (referenceBytes >= GIB || n >= GIB) return `${(n / GIB).toFixed(2)} GB`;
+  if (referenceBytes >= MIB || n >= MIB) return `${(n / MIB).toFixed(1)} MB`;
+  if (referenceBytes >= KIB || n >= KIB) return `${(n / KIB).toFixed(0)} KB`;
+  return `${n} B`;
+}
+
+export function formatDownloadProgress(bytesDone: number, totalBytes: number): string {
+  return `${formatDownloadBytes(bytesDone, totalBytes)} / ${formatDownloadBytes(totalBytes, totalBytes)}`;
+}
+
+export function formatSpeedBps(speedBps: number): string {
+  if (speedBps <= 0) return "";
+  if (speedBps >= GIB) return `${(speedBps / GIB).toFixed(2)} GB/s`;
+  if (speedBps >= MIB) return `${(speedBps / MIB).toFixed(1)} MB/s`;
+  if (speedBps >= KIB) return `${(speedBps / KIB).toFixed(0)} KB/s`;
+  return `${Math.round(speedBps)} B/s`;
+}
+
 export function progressFromDownloadEvent(data: Record<string, unknown>): ModelProgressState {
   const phase = typeof data.phase === "string" ? data.phase : "download";
   const total = typeof data.total_bytes === "number" ? data.total_bytes : 0;
@@ -89,6 +111,7 @@ export function progressFromDownloadEvent(data: Record<string, unknown>): ModelP
       percent: 0,
       etaSeconds: computeDownloadEta(total, 0, 0),
       totalBytes: total,
+      bytesDone: 0,
       indeterminate: false,
     };
   }
@@ -99,13 +122,13 @@ export function progressFromDownloadEvent(data: Record<string, unknown>): ModelP
       : total > 0
         ? roundPercent(bytes, total)
         : 0;
-  const sizeLabel = total > 0 ? `${formatBytes(bytes)} / ${formatBytes(total)}` : "Downloading…";
-  const speedLabel = speed > 0 ? ` · ${formatBytes(speed)}/s` : "";
-  const repoLabel = repoId ? ` · ${repoId.split("/").pop()}` : "";
+  const repoLabel = repoId ? repoId.split("/").pop() : null;
   const label =
     typeof data.label === "string" && data.label
-      ? `${data.label}${total > 0 ? ` · ${sizeLabel}${speedLabel}` : ""}`
-      : `Downloading model${repoLabel} · ${sizeLabel}${speedLabel}`;
+      ? data.label
+      : repoLabel
+        ? `Downloading ${repoLabel}`
+        : "Downloading model";
 
   const etaSeconds =
     serverEta ??
@@ -118,13 +141,15 @@ export function progressFromDownloadEvent(data: Record<string, unknown>): ModelP
     percent,
     etaSeconds,
     totalBytes: total > 0 ? total : undefined,
+    bytesDone: total > 0 ? bytes : undefined,
+    speedBps: speed > 0 ? speed : undefined,
     indeterminate: false,
   };
 }
 
 function roundPercent(bytes: number, total: number): number {
   if (total <= 0) return 0;
-  return Math.min(100, Math.max(0, Math.round((100 * bytes) / total)));
+  return Math.min(100, Math.max(0, Math.round((1000 * bytes) / total) / 10));
 }
 
 export function initialDownloadProgress(repo: string, totalBytes?: number): ModelProgressState {
@@ -136,6 +161,7 @@ export function initialDownloadProgress(repo: string, totalBytes?: number): Mode
     percent: 0,
     etaSeconds,
     totalBytes,
+    bytesDone: totalBytes ? 0 : undefined,
     modelName: shortName,
     indeterminate: false,
   };

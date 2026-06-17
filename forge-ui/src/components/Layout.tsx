@@ -6,34 +6,34 @@ import { SeisoLogoMark } from "@/components/SeisoLogo";
 import { useAuth } from "@/hooks/useAuth";
 import "../styles.css";
 
-type NavItem = { to: string; label: string; icon: NavIconName; end?: boolean };
+type NavItem = { to: string; label: string; icon: NavIconName; desc?: string; end?: boolean };
 
 const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
   {
     label: "Overview",
-    items: [{ to: "/", label: "Dashboard", icon: "dashboard", end: true }],
+    items: [{ to: "/", label: "Dashboard", icon: "dashboard", desc: "Hardware & workflows", end: true }],
   },
   {
     label: "Models",
     items: [
-      { to: "/hub", label: "Hub", icon: "hub" },
-      { to: "/chat", label: "Chat", icon: "chat" },
+      { to: "/hub", label: "Hub", icon: "hub", desc: "Browse & download" },
+      { to: "/chat", label: "Chat", icon: "chat", desc: "Local inference" },
     ],
   },
   {
     label: "Studio",
     items: [
-      { to: "/train", label: "Train/Finetune", icon: "train" },
-      { to: "/rl-quant", label: "RL Quant", icon: "quant" },
-      { to: "/compress", label: "Compress", icon: "compress" },
-      { to: "/image-compress", label: "Image", icon: "image" },
-      { to: "/export", label: "Export", icon: "export" },
-      { to: "/recipes", label: "Recipes", icon: "recipes" },
+      { to: "/train", label: "Train/Finetune", icon: "train", desc: "LoRA & QLoRA" },
+      { to: "/rl-quant", label: "RL Quant", icon: "quant", desc: "Reward-guided quant" },
+      { to: "/compress", label: "Compress", icon: "compress", desc: "Distill & prune" },
+      { to: "/image-compress", label: "Image", icon: "image", desc: "Vision models" },
+      { to: "/export", label: "Export", icon: "export", desc: "Publish to Hub" },
+      { to: "/recipes", label: "Recipes", icon: "recipes", desc: "Visual pipelines" },
     ],
   },
   {
     label: "Platform",
-    items: [{ to: "/integrations", label: "Integrations", icon: "integrations" }],
+    items: [{ to: "/integrations", label: "Integrations", icon: "integrations", desc: "Providers & MCP" }],
   },
 ];
 
@@ -85,7 +85,7 @@ export function Layout({ children, fullBleed = false }: { children: React.ReactN
             <div key={group.label} className="nav-group">
               <div className="nav-group-label">{group.label}</div>
               <nav>
-                {group.items.map(({ to, label, icon, end }) => (
+                {group.items.map(({ to, label, icon, desc, end }) => (
                   <NavLink
                     key={to}
                     to={to}
@@ -95,7 +95,10 @@ export function Layout({ children, fullBleed = false }: { children: React.ReactN
                     <span className="nav-link-icon">
                       <NavIcon name={icon} size={16} />
                     </span>
-                    <span className="nav-link-label">{label}</span>
+                    <span className="nav-link-text">
+                      <span className="nav-link-label">{label}</span>
+                      {desc && <span className="nav-link-desc">{desc}</span>}
+                    </span>
                   </NavLink>
                 ))}
               </nav>

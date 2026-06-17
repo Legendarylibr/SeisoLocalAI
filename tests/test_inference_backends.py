@@ -14,9 +14,9 @@ from seiso.inference.backends import (
     available_backends,
     match_ollama_name,
     recommend_backend,
+    resolve_gguf_file,
     resolve_local_backend,
 )
-from seiso.inference.backends import resolve_gguf_file
 
 
 def test_gguf_recommends_llamacpp(tmp_path: Path):
@@ -117,3 +117,26 @@ def test_resolve_chat_target_ollama_without_tag_raises():
     }
     with pytest.raises(ValueError, match="not available in Ollama"):
         resolve_chat_target(option, model_id="local-2", ollama_model=None, inference_backend="ollama")
+
+
+@pytest.mark.asyncio
+async def test_local_inference_stream_propagates_errors(monkeypatch):
+    from seiso.inference.runner import LocalInferenceRunner
+
+    async def _noop_switch(_path: str) -> None:
+        return None
+
+    runner = LocalInferenceRunner()
+    monkeypatch.setattr(runner, "_ensure_model_switch", _noop_switch)
+    monkeypatch.setattr(runner, "_resolve_route", lambda _payload, _path: ("llama", "/tmp/fake.gguf"))
+    monkeypatch.setattr(runner._pool, "bump_generation", lambda: 1)
+    monkeypatch.setattr(runner._pool, "is_generation_active", lambda _gen: True)
+
+    def _boom(*_args, **_kwargs):
+        raise RuntimeError("model load failed")
+
+    monkeypatch.setattr(runner, "_iter_tokens", _boom)
+
+    with pytest.raises(RuntimeError, match="model load failed"):
+        async for _token in runner.stream({"model_path": "/tmp/fake.gguf"}):
+            pass

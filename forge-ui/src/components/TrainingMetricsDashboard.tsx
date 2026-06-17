@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { SystemMetrics, TrainingMetricPoint } from "@/lib/api";
+import { SystemMetrics, TrainingMetricPoint, api } from "@/lib/api";
 import { IconClose } from "@/components/Icons";
 
 type Props = {
@@ -93,6 +93,8 @@ export function TrainingMetricsDashboard({
   status,
 }: Props) {
   const [now, setNow] = useState(Date.now());
+  const [hydratedTraining, setHydratedTraining] = useState<TrainingMetricPoint[]>([]);
+  const [hydratedSystem, setHydratedSystem] = useState<SystemMetrics[]>([]);
 
   useEffect(() => {
     if (!open) return;
@@ -100,9 +102,27 @@ export function TrainingMetricsDashboard({
     return () => clearInterval(id);
   }, [open]);
 
+  useEffect(() => {
+    if (!open || !jobId) return;
+    let cancelled = false;
+    api.getTrainingMetrics(jobId)
+      .then((payload) => {
+        if (cancelled) return;
+        setHydratedTraining(payload.training ?? []);
+        setHydratedSystem(payload.system ?? []);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [open, jobId]);
+
+  const mergedTraining = trainingPoints.length ? trainingPoints : hydratedTraining;
+  const mergedSystem = systemPoints.length ? systemPoints : hydratedSystem;
+
   const training = useMemo(
-    () => trainingPoints.filter((p) => p.type === "training" || p.type === "eval"),
-    [trainingPoints],
+    () => mergedTraining.filter((p) => p.type === "training" || p.type === "eval"),
+    [mergedTraining],
   );
   const losses = training.map((p) => p.loss ?? p.eval_loss).filter((v): v is number => v != null);
   const evalLosses = training.map((p) => p.eval_loss).filter((v): v is number => v != null);
@@ -111,7 +131,7 @@ export function TrainingMetricsDashboard({
 
   const latestTraining = [...training].reverse().find((p) => p.loss != null) ?? training.at(-1);
   const latestEval = [...training].reverse().find((p) => p.eval_loss != null);
-  const latestSystem = systemPoints.at(-1);
+  const latestSystem = mergedSystem.at(-1);
 
   const steps = latestTraining?.step ?? training.at(-1)?.step ?? 0;
   const epoch = latestTraining?.epoch ?? training.at(-1)?.epoch;

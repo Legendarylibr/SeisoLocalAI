@@ -6,10 +6,10 @@ import enum
 import json
 import logging
 import shutil
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable
 
 from huggingface_hub import HfApi
 

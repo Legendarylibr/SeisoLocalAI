@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from forge.security.mcp_env import is_blocked_env_key, mcp_subprocess_env
-from forge.security.url_policy import validate_provider_base_url, resolve_pinned_endpoint
 from forge.security.http_client import _PinnedGetaddrinfo
+from forge.security.mcp_env import is_blocked_env_key, mcp_subprocess_env
+from forge.security.url_policy import resolve_pinned_endpoint, validate_provider_base_url
 from forge.tools.code_exec import _validate_code
 from forge.tools.registry import parse_tool_calls
 from forge.tools.sanitize import wrap_tool_result

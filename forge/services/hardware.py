@@ -77,8 +77,8 @@ def _ram_gb() -> float:
     except ImportError:
         pass
     try:
-        page_size = getattr(__import__("os"), "sysconf")("SC_PAGE_SIZE")
-        phys_pages = getattr(__import__("os"), "sysconf")("SC_PHYS_PAGES")
+        page_size = __import__("os").sysconf("SC_PAGE_SIZE")
+        phys_pages = __import__("os").sysconf("SC_PHYS_PAGES")
         return round((page_size * phys_pages) / (1024**3), 1)
     except (AttributeError, OSError, ValueError):
         return 0.0
@@ -267,7 +267,6 @@ class GuideStep:
 
 def build_guidance(goal: str, *, backend: Backend, gpus: list[dict[str, Any]], ram_gb: float) -> list[GuideStep]:
     """Hardware-aware next steps — no cloud, no data collection."""
-    vram_free = _vram_headroom_mb(gpus)
     vram_total = max((g.get("vram_total_mb") or 0) for g in gpus) if gpus else 0
     steps: list[GuideStep] = []
 
@@ -395,7 +394,6 @@ def classify_tier(profile: dict[str, Any]) -> HardwareTier:
         backend = Backend.TORCH if raw_backend in ("cuda", "rocm") else Backend.CPU
     gpus = profile.get("gpus") or []
     vram_total = max((g.get("vram_total_mb") or 0) for g in gpus) if gpus else 0
-    ram = float(profile.get("ram_gb") or 0)
 
     if backend == Backend.MLX and not vram_total:
         return HardwareTier.APPLE_UNIFIED
@@ -453,7 +451,6 @@ def assess_hardware_fit(
     """Return fit label + short note — never leaves the machine."""
     headroom_mb = vram_headroom_mb(profile)
     est_mb = int(est_vram_gb * 1024)
-    budget_mb = effective_budget_mb(profile)
     tier = classify_tier(profile)
 
     if mode == "train":

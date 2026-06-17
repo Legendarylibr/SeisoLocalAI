@@ -2,10 +2,8 @@
 
 from pathlib import Path
 
-import pytest
-
 from forge.services.hf_auth import hf_auth_status, resolve_hf_token, save_user_hf_token
-from forge.services.publishable import PUSHABLE_SOURCES, is_pushable_model
+from forge.services.publishable import is_pushable_model
 from seiso.export.model_card import HubModelMetadata, render_readme, write_hub_artifacts
 
 

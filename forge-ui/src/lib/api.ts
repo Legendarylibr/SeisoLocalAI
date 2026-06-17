@@ -32,6 +32,26 @@ export function clearLegacyToken() {
 
 const MUTATING = new Set(["POST", "PUT", "DELETE", "PATCH"]);
 
+function formatApiError(detail: unknown, fallback = "Request failed"): string {
+  if (typeof detail === "string" && detail.trim()) return detail;
+  if (Array.isArray(detail)) {
+    const parts = detail
+      .map((item) => {
+        if (typeof item === "string") return item;
+        if (item && typeof item === "object" && "msg" in item) {
+          return String((item as { msg?: unknown }).msg ?? "");
+        }
+        return "";
+      })
+      .filter(Boolean);
+    if (parts.length) return parts.join("; ");
+  }
+  if (detail && typeof detail === "object" && "msg" in detail) {
+    return String((detail as { msg?: unknown }).msg ?? fallback);
+  }
+  return fallback;
+}
+
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const method = (init.method || "GET").toUpperCase();
   const headers: Record<string, string> = {
@@ -46,7 +66,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const res = await fetch(`${API}${path}`, { ...init, headers, credentials: "include" });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(err.detail || "Request failed");
+    throw new Error(formatApiError(err.detail, res.statusText || "Request failed"));
   }
   return res.json() as Promise<T>;
 }
@@ -352,6 +372,9 @@ export type HfHubStatus = {
     xet_available: boolean;
     xet_version: string | null;
     high_performance: boolean;
+    num_threads: string;
+    download_timeout_s: string;
+    hints: string[];
     hint: string | null;
   };
   cache_dir: string;
@@ -678,11 +701,11 @@ export function streamPostSSE(
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: res.statusText }));
-      throw new Error(err.detail || "Request failed");
+      throw new Error(formatApiError(err.detail, res.statusText || "Request failed"));
     }
 
     const reader = res.body?.getReader();
-    if (!reader) return;
+    if (!reader) throw new Error("Streaming response unavailable");
     const decoder = new TextDecoder();
     let buffer = "";
 
@@ -713,29 +736,63 @@ export function streamPostSSE(
   return { promise, abort: () => controller.abort() };
 }
 
-export function subscribeSSE(path: string, onEvent: (event: string, data: string) => void): () => void {
+export function subscribeSSE(
+  path: string,
+  onEvent: (event: string, data: string) => void,
+  onError?: (err: Error) => void,
+): () => void {
   const controller = new AbortController();
-  fetch(`${API}${path}`, { credentials: "include", signal: controller.signal }).then(async (res) => {
+
+  void (async () => {
+    let res: Response;
+    try {
+      res = await fetch(`${API}${path}`, { credentials: "include", signal: controller.signal });
+    } catch (err) {
+      if (!controller.signal.aborted) {
+        onError?.(err instanceof Error ? err : new Error("SSE connection failed"));
+      }
+      return;
+    }
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: res.statusText }));
+      onError?.(new Error(formatApiError(err.detail, res.statusText || "SSE request failed")));
+      return;
+    }
+
     const reader = res.body?.getReader();
-    if (!reader) return;
+    if (!reader) {
+      onError?.(new Error("SSE stream unavailable"));
+      return;
+    }
+
     const decoder = new TextDecoder();
     let buffer = "";
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const parts = buffer.split("\n\n");
-      buffer = parts.pop() || "";
-      for (const block of parts) {
-        let event = "message";
-        let data = "";
-        for (const line of block.split("\n")) {
-          if (line.startsWith("event:")) event = line.slice(6).trim();
-          if (line.startsWith("data:")) data = line.slice(5).trim();
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const parts = buffer.split("\n\n");
+        buffer = parts.pop() || "";
+        for (const block of parts) {
+          let event = "message";
+          let data = "";
+          for (const line of block.split("\n")) {
+            if (line.startsWith("event:")) event = line.slice(6).trim();
+            if (line.startsWith("data:")) data = line.slice(5).trim();
+          }
+          if (data) onEvent(event, data);
         }
-        if (data) onEvent(event, data);
       }
+    } catch (err) {
+      if (!controller.signal.aborted) {
+        onError?.(err instanceof Error ? err : new Error("SSE stream failed"));
+      }
+    } finally {
+      reader.cancel().catch(() => {});
     }
-  });
+  })();
+
   return () => controller.abort();
 }

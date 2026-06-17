@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api, ChatMessage, ChatThread, HardwareProfile, InferenceModelOption, SecurityPosture, streamChat } from "@/lib/api";
-import { bootstrapChatModels, ensureHubChatModel, fetchInferenceModels, needsHubDownload, preloadWithProgress, resolveInferenceBackend } from "@/lib/chatModel";
+import { bootstrapChatModels, ensureHubChatModel, fetchInferenceModels, isChatModelReady, needsHubDownload, preloadWithProgress, resolveInferenceBackend } from "@/lib/chatModel";
 import { ModelProgressState, initialDownloadProgress, initialLoadProgress } from "@/lib/modelProgress";
 import { ChatModelPicker } from "@/components/ChatModelPicker";
 import { HardwareFitBadge } from "@/components/HardwareFitBadge";
@@ -47,7 +47,8 @@ export function ChatPage() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [useTools, setUseTools] = useState(false);
   const [allowCodeExec, setAllowCodeExec] = useState(false);
-  const [mcpIds] = useState<string[]>([]);
+  const [mcpServers, setMcpServers] = useState<Array<{ id: string; name: string }>>([]);
+  const [selectedMcpIds, setSelectedMcpIds] = useState<string[]>([]);
   const [providerId, setProviderId] = useState("");
   const [selection, setSelection] = useState("");
   const [inferenceBackend, setInferenceBackend] = useState("llamacpp");
@@ -58,6 +59,7 @@ export function ChatPage() {
   const [switchingModel, setSwitchingModel] = useState(false);
   const [loadProgress, setLoadProgress] = useState<ModelProgressState | null>(null);
   const [loadedModelId, setLoadedModelId] = useState<string | null>(null);
+  const [loadedBackend, setLoadedBackend] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const streamAbortRef = useRef<(() => void) | null>(null);
   const streamTextRef = useRef("");
@@ -95,6 +97,11 @@ export function ChatPage() {
     return threads.filter((t) => t.title.toLowerCase().includes(q));
   }, [threads, threadSearch]);
 
+  const modelReady = useMemo(
+    () => isChatModelReady(selection, effectiveBackend, loadedModelId, loadedBackend),
+    [selection, effectiveBackend, loadedModelId, loadedBackend],
+  );
+
   const refreshModels = useCallback(async () => {
     const r = await api.listInferenceModels();
     setModels(r.models);
@@ -121,16 +128,25 @@ export function ChatPage() {
       userPickedBackendRef.current = false;
       const backend = backendOverride || resolveInferenceBackend(next, hwProfile);
       setInferenceBackend(backend);
-      if (providerId) return;
+      if (providerId) return backend;
       setLoadProgress(initialLoadProgress(next.name, next.size_bytes));
-      await preloadWithProgress(modelId, backend, setLoadProgress);
+      const loaded = await preloadWithProgress(modelId, backend, setLoadProgress);
       setLoadedModelId(modelId);
+      setLoadedBackend(loaded);
+      return loaded;
     },
     [providerId, hwProfile],
   );
 
   const handleModelChange = async (modelId: string) => {
-    if (modelId === selection) return;
+    const next = models.find((m) => m.id === modelId);
+    const targetBackend = resolveInferenceBackend(next ?? null, hwProfile, inferenceBackend);
+    if (
+      modelId === selection &&
+      isChatModelReady(modelId, targetBackend, loadedModelId, loadedBackend)
+    ) {
+      return;
+    }
     setSwitchingModel(true);
     setError(null);
     setLoadProgress(null);
@@ -141,6 +157,7 @@ export function ChatPage() {
       try {
         await api.cancelInference();
         setLoadedModelId(null);
+        setLoadedBackend(null);
       } catch {
         /* best-effort VRAM release */
       }
@@ -148,6 +165,8 @@ export function ChatPage() {
     try {
       await activateModel(modelId, models);
     } catch (e) {
+      setLoadedModelId(null);
+      setLoadedBackend(null);
       setError(e instanceof Error ? e.message : "Failed to load model into inference engine");
     } finally {
       setSwitchingModel(false);
@@ -173,6 +192,7 @@ export function ChatPage() {
       try {
         await api.cancelInference();
         setLoadedModelId(null);
+        setLoadedBackend(null);
       } catch {
         /* best-effort VRAM release */
       }
@@ -183,6 +203,8 @@ export function ChatPage() {
       setModels(refreshed);
       await activateModel(modelId, refreshed);
     } catch (e) {
+      setLoadedModelId(null);
+      setLoadedBackend(null);
       setError(e instanceof Error ? e.message : "Failed to download model from Hugging Face");
     } finally {
       setSwitchingModel(false);
@@ -208,9 +230,16 @@ export function ChatPage() {
       if (next) {
         try {
           setLoadProgress(initialLoadProgress(next.name, next.size_bytes));
-          await preloadWithProgress(selection, resolveInferenceBackend(next, hwProfile, inferenceBackend), setLoadProgress);
+          const loaded = await preloadWithProgress(
+            selection,
+            resolveInferenceBackend(next, hwProfile, inferenceBackend),
+            setLoadProgress,
+          );
           setLoadedModelId(selection);
+          setLoadedBackend(loaded);
         } catch {
+          setLoadedModelId(null);
+          setLoadedBackend(null);
           /* best-effort */
         } finally {
           setLoadProgress(null);
@@ -229,10 +258,19 @@ export function ChatPage() {
 
   useEffect(() => {
     api.listThreads().then(setThreads).catch(console.error);
-    api.hardware().then(setHwProfile).catch(() => {});
     api.listProviders().then(setProviders).catch(() => {});
     api.settings().then((s) => setSecurity(s.security)).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (!toolsAvailable) return;
+    api.listMcpServers()
+      .then((servers) => {
+        setMcpServers(servers.map((s) => ({ id: s.id, name: s.name })));
+        setSelectedMcpIds((prev) => prev.filter((id) => servers.some((s) => s.id === id)));
+      })
+      .catch(() => {});
+  }, [toolsAvailable]);
 
   useEffect(() => {
     let cancelled = false;
@@ -240,8 +278,17 @@ export function ChatPage() {
     const bootstrap = async () => {
       setSwitchingModel(true);
       setError(null);
+      setLoadedModelId(null);
+      setLoadedBackend(null);
       try {
-        const initialModels = (await api.listInferenceModels()).models;
+        const [hw, initialModelsResp] = await Promise.all([
+          api.hardware().catch(() => null),
+          api.listInferenceModels(),
+        ]);
+        if (cancelled) return;
+        if (hw) setHwProfile(hw);
+
+        const initialModels = initialModelsResp.models;
         const target = { modelId: pendingModel, repo: pendingRepo, downloadBytes: pendingDownloadBytes };
         if (needsHubDownload(initialModels, target) && pendingRepo) {
           setLoadProgress(initialDownloadProgress(pendingRepo, pendingDownloadBytes));
@@ -254,17 +301,24 @@ export function ChatPage() {
           providerActive: !!providerId,
           onProgress: setLoadProgress,
           initialModels,
-          hwProfile,
+          hwProfile: hw,
         });
         if (cancelled) return;
         setModels(result.models);
         if (result.selectedId) {
           setSelection(result.selectedId);
           setInferenceBackend(result.backend);
-          if (!providerId) setLoadedModelId(result.selectedId);
+          if (!providerId) {
+            setLoadedModelId(result.selectedId);
+            setLoadedBackend(result.backend);
+          }
         }
       } catch (e) {
-        if (!cancelled) setError(e instanceof Error ? e.message : "Failed to load models");
+        if (!cancelled) {
+          setLoadedModelId(null);
+          setLoadedBackend(null);
+          setError(e instanceof Error ? e.message : "Failed to load models");
+        }
       } finally {
         if (!cancelled) {
           setSwitchingModel(false);
@@ -279,14 +333,6 @@ export function ChatPage() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingModel, pendingRepo, pendingDownloadBytes]);
-
-  useEffect(() => {
-    if (!selected || providerId || userPickedBackendRef.current) return;
-    const resolved = resolveInferenceBackend(selected, hwProfile);
-    if (resolved !== inferenceBackend) {
-      setInferenceBackend(resolved);
-    }
-  }, [selected?.id, hwProfile, providerId, selected, inferenceBackend]);
 
   useEffect(() => {
     if (active && !messagesByThread[active]) loadMessages(active).catch(console.error);
@@ -329,7 +375,10 @@ export function ChatPage() {
       delete copy[threadId];
       return copy;
     });
-    if (active === threadId) setActive(openTabs.find((t) => t.threadId !== threadId)?.threadId ?? null);
+    if (active === threadId) {
+      const remaining = openTabs.filter((t) => t.threadId !== threadId);
+      setActive(remaining.length ? remaining[remaining.length - 1].threadId : null);
+    }
   };
 
   const send = async () => {
@@ -342,9 +391,18 @@ export function ChatPage() {
       setError("Wait for the model to finish loading.");
       return;
     }
-    if (!providerId && selected?.kind !== "ollama" && loadedModelId !== selection) {
-      setError("Model is still loading into VRAM — wait a moment and try again.");
-      return;
+    if (!providerId && !modelReady && selection) {
+      setSwitchingModel(true);
+      setError(null);
+      try {
+        await activateModel(selection, models);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Failed to load model into inference engine");
+        return;
+      } finally {
+        setSwitchingModel(false);
+        setLoadProgress(null);
+      }
     }
     const content = input.trim();
     setInput("");
@@ -367,12 +425,19 @@ export function ChatPage() {
       ],
     }));
 
+    let priorMessages = messagesByThread[threadId!] ?? [];
+    if (priorMessages.length === 0 && threads.some((t) => t.id === threadId)) {
+      priorMessages = await api.getMessages(threadId!);
+      setMessagesByThread((prev) => ({ ...prev, [threadId!]: priorMessages }));
+    }
+
     const history = [
-      ...(messagesByThread[threadId!] ?? []).map((m) => ({ role: m.role, content: m.content })),
+      ...priorMessages.map((m) => ({ role: m.role, content: m.content })),
       { role: "user", content },
     ];
 
     const isOllamaOnly = selected?.kind === "ollama";
+    const usingOllama = !providerId && effectiveBackend === "ollama";
     let assistantText = "";
     streamTextRef.current = "";
     streamThreadRef.current = threadId;
@@ -400,6 +465,11 @@ export function ChatPage() {
     };
 
     try {
+      const mcpIds = useTools && toolsAvailable ? selectedMcpIds : [];
+      if (mcpIds.length) {
+        await Promise.all(mcpIds.map((id) => api.connectMcp(id).catch(() => undefined)));
+      }
+
       const { promise, abort } = streamChat(
         {
           thread_id: threadId,
@@ -407,10 +477,10 @@ export function ChatPage() {
           stream: true,
           tools: useTools && toolsAvailable,
           allow_code_exec: allowCodeExec && codeExecAvailable,
-          mcp_server_ids: useTools && toolsAvailable ? mcpIds : [],
+          mcp_server_ids: mcpIds,
           provider_id: providerId || null,
-          model_id: providerId || isOllamaOnly ? null : selection || null,
-          ollama_model: isOllamaOnly ? selected?.ollama_model : null,
+          model_id: providerId || (usingOllama && isOllamaOnly) ? null : selection || null,
+          ollama_model: usingOllama || isOllamaOnly ? selected?.ollama_model : null,
           inference_backend: providerId ? "auto" : effectiveBackend,
         },
         {
@@ -604,6 +674,22 @@ export function ChatPage() {
             <input type="checkbox" checked={useTools} disabled={!toolsAvailable} onChange={(e) => setUseTools(e.target.checked)} />
             Tools
           </label>
+          {useTools && toolsAvailable && mcpServers.length > 0 && (
+            <select
+              className="chat-engine-select"
+              multiple
+              value={selectedMcpIds}
+              onChange={(e) => {
+                const ids = Array.from(e.target.selectedOptions).map((o) => o.value);
+                setSelectedMcpIds(ids);
+              }}
+              title="MCP servers (connect in Integrations first)"
+            >
+              {mcpServers.map((s) => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </select>
+          )}
           {switchingModel && !loadProgress && (
             <span className="chat-vram-hint">Preparing model…</span>
           )}
@@ -663,8 +749,8 @@ export function ChatPage() {
                 className={`chat-tab${active === tab.threadId ? " active" : ""}`}
                 onClick={() => setActive(tab.threadId)}
               >
-                {tab.title.slice(0, 24)}
-                <span className="chat-tab-close" onClick={(e) => closeTab(tab.threadId, e)} aria-hidden>
+                <span className="chat-tab-title">{tab.title.slice(0, 24)}</span>
+                <span className="chat-tab-close" onClick={(e) => closeTab(tab.threadId, e)} aria-label="Close tab">
                   <IconClose size={12} />
                 </span>
               </button>

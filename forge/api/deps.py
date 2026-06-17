@@ -7,8 +7,8 @@ from functools import lru_cache
 from forge.config import get_settings
 from forge.db.store import Database
 from forge.orchestrators.compress import CompressOrchestrator
-from forge.orchestrators.image_compress import ImageCompressOrchestrator
 from forge.orchestrators.export import ExportOrchestrator
+from forge.orchestrators.image_compress import ImageCompressOrchestrator
 from forge.orchestrators.inference import InferenceOrchestrator
 from forge.orchestrators.knowledge import KnowledgeOrchestrator
 from forge.orchestrators.recipes import RecipeOrchestrator

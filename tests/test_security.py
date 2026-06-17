@@ -1,7 +1,8 @@
 """Security path validation tests."""
 
-import pytest
 from pathlib import Path
+
+import pytest
 
 from seiso.security import SecurityError, assert_within, safe_join, sanitize_filename
 

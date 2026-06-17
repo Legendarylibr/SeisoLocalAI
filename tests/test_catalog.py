@@ -1,6 +1,6 @@
 """Tests for HF model catalog."""
 
-from seiso.models.catalog import diversify_by_family, get_families, get_by_repo, search_catalog
+from seiso.models.catalog import diversify_by_family, get_by_repo, get_families, search_catalog
 
 
 def test_catalog_has_popular_models():

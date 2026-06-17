@@ -9,9 +9,8 @@ from pathlib import Path
 from pydantic import Field, PrivateAttr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from seiso.security import generate_secret_key, resolve_data_dir
-
 from forge.db.crypto import generate_encryption_key, resolve_encryption_key
+from seiso.security import generate_secret_key, resolve_data_dir
 
 
 class ForgeSettings(BaseSettings):

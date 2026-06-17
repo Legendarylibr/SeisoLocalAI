@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, ImageCompressJob, ImageCompressPreset, subscribeSSE } from "@/lib/api";
+import { StudioPageShell } from "@/components/StudioPageShell";
 
 export function ImageCompressPage() {
   const [jobs, setJobs] = useState<ImageCompressJob[]>([]);
@@ -61,13 +62,10 @@ export function ImageCompressPage() {
   const selectedPreset = presets.find((p) => p.id === preset);
 
   return (
-    <div>
-      <h1 className="page-title">Image Model Compression</h1>
-      <p className="page-sub">
-        Stable Diffusion compression pipeline: progressive distillation, structured pruning,
-        recovery fine-tuning, INT8 quantisation, and export. Quality tracked via CLIP/LPIPS/SSIM.
-      </p>
-
+    <StudioPageShell
+      title="Image Model Compression"
+      subtitle="Stable Diffusion compression pipeline: progressive distillation, structured pruning, recovery fine-tuning, INT8 quantisation, and export. Quality tracked via CLIP/LPIPS/SSIM."
+    >
       <div className="train-layout">
         <div className="card">
           <label>Preset</label>
@@ -169,6 +167,6 @@ export function ImageCompressPage() {
           </tbody>
         </table>
       </div>
-    </div>
+    </StudioPageShell>
   );
 }

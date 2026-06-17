@@ -44,7 +44,6 @@ async def test_export_job_cross_user(app):
             "/api/auth/register",
             json={"password": "securepass1"},
         )
-        headers_a = {"Authorization": f"Bearer {reg.json()['access_token']}"}
 
         from forge.api.deps import get_db
 

@@ -1,4 +1,4 @@
-from seiso.training.config import TrainConfig, TrainMethod, QuantMode
+from seiso.training.config import QuantMode, TrainConfig, TrainMethod
 
 
 def test_train_config_from_dict():
