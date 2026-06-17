@@ -10,6 +10,7 @@
 #   SEISO_BRANCH        Branch to clone (default: main)
 #   SEISO_SKIP_UI=1     Skip forge-ui npm build
 #   SEISO_START=1       Run scripts/start.sh when install finishes
+#   SEISO_NO_BANNER=1   Skip terminal ASCII banner
 #
 # Recommended (verify before run):
 #   curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/install.sh -o install.sh
@@ -24,6 +25,28 @@ BRANCH="${SEISO_BRANCH:-main}"
 log() { printf '==> %s\n' "$*"; }
 warn() { printf 'warning: %s\n' "$*" >&2; }
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
+
+show_python_banner() {
+  [[ "${SEISO_NO_BANNER:-0}" == "1" ]] && return 0
+  cat <<'EOF'
+
+  ┌──────────────────────────────────────┐
+  │         Seiso · installer            │
+  └──────────────────────────────────────┘
+
+            ###       ###
+          ##   ##   ##   ##
+         ##               ##
+         ##      ###      ##
+         ##     ## ##     ##
+          ##             ##
+           ##           ##
+            ###       ###
+
+              python powered
+
+EOF
+}
 
 need_cmd() {
   command -v "$1" >/dev/null 2>&1 || die "Missing required command: $1"
@@ -116,11 +139,14 @@ maybe_install_flash_attn() {
 }
 
 main() {
-  local root extras venv_py
+  local root extras venv_py py_ver
+  show_python_banner
   uname -s | grep -Eq '^(Linux|Darwin)$' || die "This installer supports Linux and macOS only"
 
   need_cmd python3
   python_version_ok || die "Python 3.10+ is required ($(python3 --version 2>&1 || echo unknown))"
+  py_ver="$(python3 --version 2>&1 || true)"
+  log "Using $py_ver"
   need_cmd git
 
   root="$(resolve_root)"
