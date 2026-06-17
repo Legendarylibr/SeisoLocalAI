@@ -7,7 +7,7 @@ import re
 
 import httpx
 
-_USER_AGENT = "Seiso-Forge/0.1 (local-first; +https://github.com/seiso-ai/seiso)"
+_USER_AGENT = "Seiso-Forge/0.1 (local-first; +https://github.com/Legendarylibr/SeisoLocalAI)"
 
 
 def web_search(query: str, max_results: int = 5) -> str:

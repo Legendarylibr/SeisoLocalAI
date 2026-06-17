@@ -6,7 +6,7 @@
 #   SEISO_INSTALL_DIR=~/Seiso ./scripts/start.sh
 #
 # One-liner after install:
-#   curl -fsSL https://raw.githubusercontent.com/seiso-ai/seiso/main/scripts/start.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/start.sh | bash
 set -euo pipefail
 
 INSTALL_DIR="${SEISO_INSTALL_DIR:-$HOME/Seiso}"
@@ -24,7 +24,7 @@ resolve_root() {
     return
   fi
   die "Seiso not found. Run the installer first:
-  curl -fsSL https://raw.githubusercontent.com/seiso-ai/seiso/main/scripts/install.sh | bash"
+  curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/install.sh | bash"
 }
 
 main() {
