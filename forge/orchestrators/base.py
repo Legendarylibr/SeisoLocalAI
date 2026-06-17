@@ -10,9 +10,10 @@ from collections import defaultdict
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from enum import StrEnum
 from pathlib import Path
 from typing import Any
+
+from seiso.compat import StrEnum
 
 MAX_LOG_LINES = 2000
 MAX_METRIC_POINTS = 5000

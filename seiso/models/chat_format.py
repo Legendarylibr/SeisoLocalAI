@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any, cast
+
 
 def format_messages_for_prompt(
     messages: list[dict],
@@ -11,18 +13,18 @@ def format_messages_for_prompt(
 ) -> str:
     """Render chat messages to a single prompt string."""
     if hasattr(tokenizer, "apply_chat_template"):
-        return tokenizer.apply_chat_template(
+        return cast(str, tokenizer.apply_chat_template(
             messages,
             tokenize=False,
             add_generation_prompt=add_generation_prompt,
-        )
+        ))
     parts = [f"{m.get('role', 'user').upper()}: {m.get('content', '')}" for m in messages]
     if add_generation_prompt:
         parts.append("ASSISTANT:")
     return "\n".join(parts)
 
 
-def extract_messages(sample: dict, fmt) -> list[dict]:
+def extract_messages(sample: dict[str, Any], fmt) -> list[dict[str, Any]]:
     """Extract normalized message list from a training sample."""
     from seiso.training.config import DatasetFormat
 
@@ -48,6 +50,6 @@ def extract_messages(sample: dict, fmt) -> list[dict]:
         return messages
 
     if fmt == DatasetFormat.CHAT:
-        return sample.get("messages", [])
+        return cast(list[dict[str, Any]], sample.get("messages", []))
 
     return [{"role": "user", "content": sample.get("text") or sample.get("content") or str(sample)}]

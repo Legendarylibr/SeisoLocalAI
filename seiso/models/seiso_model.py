@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from seiso.models.loader import LoadOptions, ModelKind, load_model
 from seiso.models.lora_targets import get_lora_target_modules, modules_exist_in_model
@@ -82,7 +82,7 @@ class SeisoModel:
         target_modules: list[str] | None = None,
         lora_alpha: int | None = None,
         lora_dropout: float = 0.0,
-        bias: str = "none",
+        bias: Literal["none", "all", "lora_only"] = "none",
         use_gradient_checkpointing: bool = True,
         use_rslora: bool = False,
         model_id: str = "",

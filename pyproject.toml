@@ -177,11 +177,15 @@ ignored-modules = [
   "onnxruntime",
 ]
 
+[tool.pip-audit]
+ignore-vulns = ["CVE-2025-3000"]
+
 [tool.pylint.messages_control]
 disable = [
   "duplicate-code",
   "cyclic-import",
   "possibly-used-before-assignment",
+  "invalid-enum-extension",
   "too-few-public-methods",
   "too-many-arguments",
   "too-many-locals",

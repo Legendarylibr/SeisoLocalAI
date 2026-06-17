@@ -98,7 +98,7 @@ class RecipeOrchestrator(Orchestrator):
             rows = outputs.get(source_id, [])
             n = min(config.get("count", 100), len(rows))
             seed = int(config.get("seed", payload.get("seed", 42)))
-            rng = random.Random(seed)
+            rng = random.Random(seed)  # nosec B311 - deterministic sampling from user-provided seed
             return rng.sample(rows, n) if n < len(rows) else list(rows)
 
         if ntype == "output":

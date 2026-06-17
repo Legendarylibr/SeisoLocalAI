@@ -115,7 +115,7 @@ def probe_hf_hub(*, token: str | None = None, timeout: float = 15.0) -> HfConnec
 
     api = HfApi()
     started = time.monotonic()
-    token_warning: str | None = None
+    warning_message: str | None = None
     token_invalid = False
 
     if token:
@@ -132,7 +132,7 @@ def probe_hf_hub(*, token: str | None = None, timeout: float = 15.0) -> HfConnec
         except HfHubHTTPError as exc:
             if exc.response is not None and exc.response.status_code in (401, 403):
                 token_invalid = True
-                token_warning = (
+                warning_message = (
                     "Saved Hugging Face token was rejected — public downloads still work, "
                     "but gated models need a valid token in Settings or `hf auth login`."
                 )
@@ -148,7 +148,7 @@ def probe_hf_hub(*, token: str | None = None, timeout: float = 15.0) -> HfConnec
     anon = _probe_hf_hub_anonymous(api, timeout=timeout, started=started)
     if token_invalid:
         anon.token_invalid = True
-        anon.warning = token_warning
+        anon.warning = warning_message
         if anon.reachable and anon.anonymous_ok:
             anon.error = None
     return anon
