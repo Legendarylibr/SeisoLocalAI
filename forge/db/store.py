@@ -266,10 +266,9 @@ class Database:
         yield await self._ensure_conn()
 
     async def user_count(self) -> int:
-        async with self._conn() as conn:
-            async with conn.execute("SELECT COUNT(*) AS c FROM users") as cur:
-                row = await cur.fetchone()
-                return int(row["c"]) if row else 0
+        async with self._conn() as conn, conn.execute("SELECT COUNT(*) AS c FROM users") as cur:
+            row = await cur.fetchone()
+            return int(row["c"]) if row else 0
 
     async def create_first_user(
         self,
@@ -350,10 +349,11 @@ class Database:
             return dict(row) if row else None
 
     async def get_user_by_id(self, user_id: str) -> dict | None:
-        async with self._conn() as conn:
-            async with conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)) as cur:
-                row = await cur.fetchone()
-                return dict(row) if row else None
+        async with self._conn() as conn, conn.execute(
+            "SELECT * FROM users WHERE id = ?", (user_id,)
+        ) as cur:
+            row = await cur.fetchone()
+            return dict(row) if row else None
 
     async def list_models(self, user_id: str | None = None) -> list[dict]:
         async with self._conn() as conn:
@@ -399,13 +399,12 @@ class Database:
         return {"id": mid, **fields, "created_at": now}
 
     async def get_model_by_source(self, user_id: str, source: str) -> dict | None:
-        async with self._conn() as conn:
-            async with conn.execute(
-                "SELECT * FROM local_models WHERE user_id = ? AND source = ? ORDER BY created_at DESC LIMIT 1",
-                (user_id, source),
-            ) as cur:
-                row = await cur.fetchone()
-                return dict(row) if row else None
+        async with self._conn() as conn, conn.execute(
+            "SELECT * FROM local_models WHERE user_id = ? AND source = ? ORDER BY created_at DESC LIMIT 1",
+            (user_id, source),
+        ) as cur:
+            row = await cur.fetchone()
+            return dict(row) if row else None
 
     async def upsert_model(self, user_id: str, source: str, **fields: Any) -> dict:
         existing = await self.get_model_by_source(user_id, source)

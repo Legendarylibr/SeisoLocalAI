@@ -9,9 +9,9 @@ import subprocess
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
-from enum import StrEnum
 from typing import Any
 
+from seiso.compat import StrEnum
 from seiso.models.catalog import _parse_param_size
 from seiso.models.loader import Backend, detect_backend
 
@@ -604,8 +604,8 @@ def enrich_catalog_models(
 
     enriched.sort(
         key=lambda m: (
-            -m.get("hardware_fit_rank", 0),
             -(m.get("priority") or 0),
+            -m.get("hardware_fit_rank", 0),
             m.get("name", ""),
         )
     )

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import enum
+import contextlib
 import json
 import logging
 import shutil
@@ -10,9 +10,11 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from huggingface_hub import HfApi
 
+from seiso.compat import StrEnum
 from seiso.export.hub_precheck import assert_hub_precheck_ok, precheck_hub_export
 from seiso.export.model_card import HubModelMetadata, metadata_from_manifest, write_hub_artifacts
 from seiso.security import assert_within
@@ -20,7 +22,7 @@ from seiso.security import assert_within
 logger = logging.getLogger(__name__)
 
 
-class ExportFormat(enum.StrEnum):
+class ExportFormat(StrEnum):
     MERGED = "merged"
     BASE = "base"
     FULL = "full"
@@ -86,7 +88,7 @@ def export_checkpoint(
         elif fmt == ExportFormat.MERGED:
             dest = out_root / "merged"
             dest.mkdir(parents=True, exist_ok=True)
-            merge_lora_checkpoint(ckpt, dest, log)
+            _merge_lora(ckpt, dest, log)
             _write_export_sidecar(dest, ckpt, fmt, kind)
             results[fmt.value] = dest
 
@@ -186,10 +188,8 @@ def _write_export_sidecar(dest: Path, ckpt: Path, fmt: ExportFormat, kind: str) 
     }
     manifest = ckpt / "seiso_manifest.json"
     if manifest.is_file():
-        try:
+        with contextlib.suppress(OSError, json.JSONDecodeError):
             payload["training_manifest"] = json.loads(manifest.read_text())
-        except (OSError, json.JSONDecodeError):
-            pass
     (dest / "seiso_export_metadata.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
@@ -205,6 +205,21 @@ def _select_hub_folder(out_root: Path, formats: list[ExportFormat]) -> Path:
             if child.is_dir() and (child.name in {"q4_k_m", "q8_0", "f16"} or child.name.startswith("gguf-")):
                 return child
     return out_root
+
+
+@dataclass(frozen=True)
+class _MergeDeps:
+    auto_model: Any
+    auto_tokenizer: Any
+    peft_model: Any
+
+
+def _load_merge_deps() -> _MergeDeps:
+    """Lazy-load merge dependencies so tests can patch this single entry point."""
+    from peft import PeftModel
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+
+    return _MergeDeps(AutoModelForCausalLM, AutoTokenizer, PeftModel)
 
 
 def _load_training_manifest(checkpoint: Path) -> dict:
@@ -310,17 +325,16 @@ def merge_lora_checkpoint(checkpoint: Path, dest: Path, log: Callable[[str], Non
     adapter_config = checkpoint / "adapter_config.json"
     if adapter_config.exists():
         log("Merging LoRA adapter into base weights...")
-        from peft import PeftModel
-        from transformers import AutoModelForCausalLM, AutoTokenizer
+        deps = _load_merge_deps()
 
         base_id = _resolve_merge_base_model(checkpoint)
         log(f"Loading base model: {base_id}")
-        model = AutoModelForCausalLM.from_pretrained(base_id, device_map="cpu", low_cpu_mem_usage=True)
-        model = PeftModel.from_pretrained(model, str(checkpoint))
+        model = deps.auto_model.from_pretrained(base_id, device_map="cpu", low_cpu_mem_usage=True, revision="main")  # nosec B615: revision pinned
+        model = deps.peft_model.from_pretrained(model, str(checkpoint))
         merged = model.merge_and_unload()
         merged.save_pretrained(str(dest))
         tok_path = checkpoint if (checkpoint / "tokenizer_config.json").is_file() else base_id
-        tok = AutoTokenizer.from_pretrained(str(tok_path))
+        tok = deps.auto_tokenizer.from_pretrained(str(tok_path), revision="main")  # nosec B615: revision pinned
         tok.save_pretrained(str(dest))
         log(f"Merged model saved to {dest}")
     elif (checkpoint / "config.json").is_file():

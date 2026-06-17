@@ -248,9 +248,11 @@ def search_huggingface_datasets(*, query: str, limit: int = 12) -> list[dict[str
         }
     )
     url = f"{_HF_API}/datasets?{params}"
+    if not url.startswith("https://"):
+        return []
     request = urllib.request.Request(url, headers={"User-Agent": "seiso-forge/1.0"})
     try:
-        with urllib.request.urlopen(request, timeout=15.0) as response:
+        with urllib.request.urlopen(request, timeout=15.0) as response:  # nosec B310: only https://huggingface.co URLs
             payload = json.loads(response.read().decode("utf-8"))
     except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError):
         return []
@@ -289,9 +291,11 @@ def search_huggingface_gguf_repos(*, query: str, limit: int = 8) -> list[dict[st
         }
     )
     url = f"{_HF_API}/models?{params}"
+    if not url.startswith("https://"):
+        return []
     request = urllib.request.Request(url, headers={"User-Agent": "seiso-forge/1.0"})
     try:
-        with urllib.request.urlopen(request, timeout=15.0) as response:
+        with urllib.request.urlopen(request, timeout=15.0) as response:  # nosec B310: only https://huggingface.co URLs
             payload = json.loads(response.read().decode("utf-8"))
     except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError):
         return []
@@ -524,7 +528,7 @@ def download_gguf(
         cached_paths.append(
             Path(
                 _with_download_retries(
-                    lambda kwargs=download_kwargs: hf_hub_download(**kwargs),
+                    lambda kwargs=download_kwargs: hf_hub_download(**kwargs),  # nosec B615: revision pinned in download_kwargs
                     repo_id=repo_id,
                 )
             )
@@ -587,7 +591,7 @@ def download_training_snapshot(
     if on_progress:
         snapshot_kwargs["tqdm_class"] = make_tqdm_class(on_progress)
     path = _with_download_retries(
-        lambda: snapshot_download(**snapshot_kwargs),
+        lambda: snapshot_download(**snapshot_kwargs),  # nosec B615: revision pinned in snapshot_kwargs
         repo_id=repo_id,
     )
     root = Path(path)

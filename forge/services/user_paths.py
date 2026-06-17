@@ -13,14 +13,8 @@ _SHARED_CACHE_ROOTS = frozenset({"hf_cache"})
 def _logical_path(source: Path) -> Path:
     """Absolute path of *source* without following its final symlink component."""
     source = source.expanduser()
-    if source.is_absolute():
-        parent = source.parent
-    else:
-        parent = source.absolute().parent
-    if parent == Path("."):
-        parent_resolved = Path.cwd().resolve()
-    else:
-        parent_resolved = parent.resolve()
+    parent = source.parent if source.is_absolute() else source.absolute().parent
+    parent_resolved = Path.cwd().resolve() if parent == Path(".") else parent.resolve()
     return parent_resolved / source.name
 
 

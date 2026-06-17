@@ -15,8 +15,8 @@ from forge.api.deps import get_db, get_inference_orchestrator
 from forge.config import ForgeSettings, get_settings
 from forge.db.store import Database
 from forge.orchestrators.inference import InferenceOrchestrator
-from forge.security.openai_auth import get_openai_user_id
 from forge.security.autodefense import defense_enabled, scan_output
+from forge.security.openai_auth import get_openai_user_id
 from forge.services.models import resolve_model_path
 
 router = APIRouter(tags=["openai"])

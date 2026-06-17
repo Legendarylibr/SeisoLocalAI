@@ -79,14 +79,14 @@ def bench_cross_entropy(rows: int, vocab: int, dtype: str) -> None:
     labels[::17] = -100
 
     def pytorch():
-        l = logits.detach().clone().requires_grad_(True)
-        out = torch.nn.functional.cross_entropy(l, labels, ignore_index=-100)
+        local_logits = logits.detach().clone().requires_grad_(True)
+        out = torch.nn.functional.cross_entropy(local_logits, labels, ignore_index=-100)
         out.backward()
         return out
 
     def fused():
-        l = logits.detach().clone().requires_grad_(True)
-        out = fused_cross_entropy_loss(l, labels)
+        local_logits = logits.detach().clone().requires_grad_(True)
+        out = fused_cross_entropy_loss(local_logits, labels)
         out.backward()
         return out
 

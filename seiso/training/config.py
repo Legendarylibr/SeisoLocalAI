@@ -2,28 +2,29 @@
 
 from __future__ import annotations
 
-import enum
 from pathlib import Path
 from typing import Any
 
 import yaml
 from pydantic import BaseModel, Field, field_validator
 
+from seiso.compat import StrEnum
 
-class TrainMethod(enum.StrEnum):
+
+class TrainMethod(StrEnum):
     LORA = "lora"
     FULL = "full"
     EMBEDDING = "embedding"
 
 
-class QuantMode(enum.StrEnum):
+class QuantMode(StrEnum):
     NONE = "none"
     INT4 = "4bit"
     INT8 = "8bit"
     INT16 = "16bit"
 
 
-class DatasetFormat(enum.StrEnum):
+class DatasetFormat(StrEnum):
     AUTO = "auto"
     TEXT = "text"
     ALPACA = "alpaca"

@@ -9,7 +9,6 @@ from typing import Any
 
 from forge.db.store import Database
 from forge.providers.ollama import list_models as list_ollama_models
-from forge.services.hf_connectivity import check_inference_runtime
 from forge.services.hardware import (
     HardwareTier,
     assess_inference_option_fit,
@@ -18,6 +17,7 @@ from forge.services.hardware import (
     preferred_inference_backend,
     vram_headroom_mb,
 )
+from forge.services.hf_connectivity import check_inference_runtime
 from seiso.inference.backends import (
     BACKEND_LLAMACPP,
     BACKEND_MLX,

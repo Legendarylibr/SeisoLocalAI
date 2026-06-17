@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-import enum
 import json
 from pathlib import Path
 
+from seiso.compat import StrEnum
 from seiso.export.formats import ExportFormat
 
 
-class ExportProfile(enum.StrEnum):
+class ExportProfile(StrEnum):
     """Named export bundles applied after training or on demand."""
 
     LORA_ADAPTER = "lora_adapter"
@@ -78,7 +78,7 @@ def suggest_profile(checkpoint: Path, *, method: str | None = None) -> ExportPro
     """Pick a sensible default export profile from checkpoint contents."""
     kind = method or detect_checkpoint_kind(checkpoint)
     if kind == "lora":
-        return ExportProfile.LORA_BUNDLE
+        return ExportProfile.LORA_ADAPTER
     if kind == "full":
         return ExportProfile.FULL_BUNDLE
     return ExportProfile.INFERENCE

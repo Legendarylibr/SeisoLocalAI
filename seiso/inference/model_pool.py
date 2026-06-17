@@ -8,9 +8,10 @@ import os
 import platform
 import threading
 from dataclasses import dataclass, field
-from enum import StrEnum
 from pathlib import Path
 from typing import Any
+
+from seiso.compat import StrEnum
 
 logger = logging.getLogger(__name__)
 

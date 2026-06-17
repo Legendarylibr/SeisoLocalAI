@@ -455,7 +455,7 @@ async def test_jwt_revocation_retained_until_expiry(monkeypatch):
         auth_mod.revoke_access_token(token, settings)
 
     for token in tokens:
-        with pytest.raises(Exception):
+        with pytest.raises(auth_mod.InvalidTokenError):
             auth_mod.decode_token(token, settings)
 
     # Prune should not resurrect revoked tokens before JWT exp.

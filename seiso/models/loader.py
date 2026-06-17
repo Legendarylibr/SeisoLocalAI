@@ -2,22 +2,23 @@
 
 from __future__ import annotations
 
-import enum
 import logging
 from dataclasses import dataclass
 from typing import Any
 
+from seiso.compat import StrEnum
+
 logger = logging.getLogger(__name__)
 
 
-class ModelKind(enum.StrEnum):
+class ModelKind(StrEnum):
     TEXT = "text"
     VISION = "vision"
     AUDIO = "audio"
     EMBEDDING = "embedding"
 
 
-class Backend(enum.StrEnum):
+class Backend(StrEnum):
     TORCH = "torch"
     MLX = "mlx"
     CPU = "cpu"
@@ -34,6 +35,14 @@ class LoadOptions:
     trust_remote_code: bool = False
     device_map: str = "auto"
     use_flash_attention: bool = True
+    revision: str | None = None
+
+
+def load_mlx(options: LoadOptions) -> tuple[Any, Any]:
+    """Load a model via MLX (lazy import to avoid unconditional dependency)."""
+    from seiso.models.mlx_loader import load_mlx as _load_mlx
+
+    return _load_mlx(options)
 
 
 def detect_backend() -> Backend:
@@ -89,8 +98,6 @@ def load_model(options: LoadOptions, *, for_training: bool = False) -> tuple[Any
     logger.info("Loading %s via %s", options.model_id, backend.value)
 
     if backend == Backend.MLX:
-        from seiso.models.mlx_loader import load_mlx
-
         return load_mlx(options)
 
     from seiso.models.torch_loader import load_torch

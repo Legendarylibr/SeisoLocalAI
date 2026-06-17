@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
-from enum import StrEnum
+
+from seiso.compat import StrEnum
 
 
 class ModelFamily(StrEnum):
@@ -287,11 +288,10 @@ def _entry_to_dict(e: CatalogEntry) -> dict:
 def _matches_task(entry: CatalogEntry, task: str) -> bool:
     """Task filter — chat includes general instruct models tagged for code use."""
     task_l = task.lower()
-    if entry.task.value == task_l:
-        return True
-    if task_l == "chat" and entry.task == ModelTask.CODE and "popular" in entry.tags:
-        return True
-    return False
+    return (
+        entry.task.value == task_l
+        or (task_l == "chat" and entry.task == ModelTask.CODE and "popular" in entry.tags)
+    )
 
 
 def search_catalog(

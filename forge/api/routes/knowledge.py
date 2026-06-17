@@ -100,7 +100,7 @@ async def create_base(
 async def upload_file(
     user_id: Annotated[str, Depends(get_current_user_id)],
     settings: Annotated[ForgeSettings, Depends(get_settings)],
-    file: UploadFile = File(...),
+    file: Annotated[UploadFile, File(...)],
 ) -> dict:
     try:
         uploads = safe_join(settings.data_dir, "uploads", user_id)
