@@ -1,4 +1,0 @@
-{
-  "typescript.tsdk": "forge-ui/node_modules/typescript/lib",
-  "typescript.enablePromptUseWorkspaceTsdk": true
-}

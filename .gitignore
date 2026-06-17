@@ -18,8 +18,11 @@ forge-ui/.vite/
 .coverage
 htmlcov/
 .mypy_cache/
+.pytest_cache/
 .ruff_cache/
-pytest_cache/
+*.tsbuildinfo
+.cursor/
+.vscode/
 .DS_Store
 *.gguf
 *.safetensors
