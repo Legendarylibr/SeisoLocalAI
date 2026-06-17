@@ -208,3 +208,40 @@ async def test_local_inference_stream_propagates_errors(monkeypatch):
     with pytest.raises(RuntimeError, match="model load failed"):
         async for _token in runner.stream({"model_path": "/tmp/fake.gguf"}):
             pass
+
+
+@pytest.mark.asyncio
+async def test_list_inference_options_filters_to_installed_backends(monkeypatch, tmp_path):
+    from forge.db.crypto import generate_encryption_key
+    from forge.db.store import Database
+    from forge.services import inference_models
+    from forge.services.hf_connectivity import InferenceRuntimeStatus
+
+    model_path = tmp_path / "model-q4.gguf"
+    model_path.write_bytes(b"gguf")
+
+    db = Database(tmp_path / "forge.db", encryption_key=generate_encryption_key(), ephemeral=True)
+    await db.add_model(
+        user_id="u1",
+        name="Model Q4",
+        path=str(model_path),
+        source="hf:org/Model",
+        format="gguf",
+        size_bytes=model_path.stat().st_size,
+    )
+
+    async def empty_ollama_names(*_args, **_kwargs):
+        return set()
+
+    monkeypatch.setattr(inference_models, "_ollama_names", empty_ollama_names)
+    monkeypatch.setattr(
+        inference_models,
+        "check_inference_runtime",
+        lambda: InferenceRuntimeStatus(llamacpp=True, mlx=False, torch=False),
+    )
+
+    options = await inference_models.list_inference_options(db, "u1", hardware_aware=False)
+
+    assert options[0]["id"]
+    assert options[0]["backends"] == [BACKEND_LLAMACPP]
+    assert options[0]["default_backend"] == BACKEND_LLAMACPP

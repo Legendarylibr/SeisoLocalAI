@@ -104,6 +104,53 @@ def test_probe_hf_hub_anonymous_ok(monkeypatch):
     assert result.anonymous_ok
 
 
+def test_probe_hf_hub_invalid_token_falls_back_to_anonymous(monkeypatch):
+    class FakeApi:
+        def whoami(self, token=None):
+            raise FakeHfHubHTTPError()
+
+        def model_info(self, repo_id, timeout=None):
+            assert repo_id == "gpt2"
+            return {"id": repo_id}
+
+    class FakeHfHubHTTPError(Exception):
+        response = type("R", (), {"status_code": 401})()
+
+    import types
+
+    hub_mod = types.ModuleType("huggingface_hub")
+    hub_mod.HfApi = FakeApi
+    utils_mod = types.ModuleType("huggingface_hub.utils")
+    utils_mod.HfHubHTTPError = FakeHfHubHTTPError
+    monkeypatch.setitem(__import__("sys").modules, "huggingface_hub", hub_mod)
+    monkeypatch.setitem(__import__("sys").modules, "huggingface_hub.utils", utils_mod)
+
+    result = hf_connectivity.probe_hf_hub(token="hf_bad")
+    assert result.reachable
+    assert result.token_invalid
+    assert result.anonymous_ok
+    assert result.warning
+
+
+def test_assert_hub_ready_allows_invalid_token_when_anonymous_ok(monkeypatch):
+    monkeypatch.setattr(
+        hf_connectivity,
+        "check_inference_runtime",
+        lambda: hf_connectivity.InferenceRuntimeStatus(huggingface_hub=True),
+    )
+    monkeypatch.setattr(
+        hf_connectivity,
+        "probe_hf_hub",
+        lambda **_: hf_connectivity.HfConnectivityResult(
+            reachable=True,
+            anonymous_ok=True,
+            token_invalid=True,
+            warning="bad token",
+        ),
+    )
+    hf_connectivity.assert_hub_ready_for_download()
+
+
 def test_assert_hub_ready_raises_when_unreachable(monkeypatch):
     monkeypatch.setattr(
         hf_connectivity,

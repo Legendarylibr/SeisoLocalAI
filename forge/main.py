@@ -94,7 +94,11 @@ def create_app() -> FastAPI:
             "connect-src 'self'; "
             "style-src 'self' 'unsafe-inline'; "
             "script-src 'self'; "
+            "script-src-elem 'self'; "
+            "script-src-attr 'none'; "
             "img-src 'self' data: blob:; "
+            "font-src 'self'; "
+            "worker-src 'self' blob:; "
             "frame-ancestors 'none'"
         )
         response.headers["Cross-Origin-Opener-Policy"] = "same-origin"

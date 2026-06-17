@@ -107,13 +107,25 @@ export function needsHubDownload(list: InferenceModelOption[], target: ChatNavTa
   return !!(target.repo && !inventoryHasTarget(list, target));
 }
 
+async function resolveChatDownloadVariant(): Promise<"gguf" | "safetensors"> {
+  try {
+    const status = await api.hfStatus();
+    const { llamacpp, mlx, torch } = status.runtime;
+    if (!llamacpp && (mlx || torch)) return "safetensors";
+    return "gguf";
+  } catch {
+    return "gguf";
+  }
+}
+
 async function downloadChatModel(
   repo: string,
   onProgress?: ModelProgressHandler,
   options: { signal?: AbortSignal; downloadBytes?: number | null } = {},
 ): Promise<string> {
   throwIfAborted(options.signal);
-  return streamHubModelDownload(repo, "gguf", onProgress, {
+  const variant = await resolveChatDownloadVariant();
+  return streamHubModelDownload(repo, variant, onProgress, {
     signal: options.signal,
     downloadBytes: options.downloadBytes ?? undefined,
   });

@@ -33,7 +33,7 @@ async def test_perform_gguf_download_registers_llamacpp_inventory(monkeypatch, t
     cached.write_bytes(b"gguf-bytes")
 
     monkeypatch.setattr(model_download, "assert_hub_ready_for_download", lambda **_kwargs: None)
-    monkeypatch.setattr(model_download, "resolve_hf_token", lambda **_kwargs: (None, "none"))
+    monkeypatch.setattr(model_download, "resolve_hf_token_for_download", lambda **_kwargs: (None, "none"))
     monkeypatch.setattr(model_download, "get_by_repo", lambda _repo: None)
     monkeypatch.setattr(
         model_download,

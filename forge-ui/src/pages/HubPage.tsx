@@ -75,7 +75,7 @@ export function HubPage() {
     refreshLocal();
     api.hfStatus().then((s) => {
       setHubReady(s.ready_for_download);
-      setHubError(s.connectivity.error);
+      setHubError(s.connectivity.error || s.connectivity.warning || null);
     }).catch(() => setHubReady(null));
   }, []);
 

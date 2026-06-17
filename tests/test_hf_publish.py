@@ -3,7 +3,7 @@
 from pathlib import Path
 
 from forge.services import hf_auth
-from forge.services.hf_auth import find_hf_cli, hf_auth_status, resolve_hf_token, save_user_hf_token
+from forge.services.hf_auth import find_hf_cli, hf_auth_status, resolve_hf_token, resolve_hf_token_for_download, save_user_hf_token
 from forge.services.publishable import is_pushable_model
 from seiso.export.model_card import HubModelMetadata, render_readme, write_hub_artifacts
 
@@ -70,6 +70,20 @@ def test_user_hf_token_store(tmp_path):
     )
     assert token == "hf_secret"
     assert source == "user_store"
+
+
+def test_resolve_hf_token_for_download_drops_invalid_token(monkeypatch):
+    monkeypatch.setattr(
+        "forge.services.hf_connectivity.probe_hf_hub",
+        lambda **_: type(
+            "R",
+            (),
+            {"token_valid": False, "anonymous_ok": True},
+        )(),
+    )
+    token, source = resolve_hf_token_for_download(settings_token="hf_bad")
+    assert token is None
+    assert source == "none"
 
 
 def test_hf_auth_status_no_token():
