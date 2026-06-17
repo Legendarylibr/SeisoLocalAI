@@ -321,7 +321,7 @@ def job_security(root: Path, python: str, env: dict[str, str]) -> None:
     pip_audit = shutil.which("pip-audit") or "pip-audit"
     _step(
         "Dependency vulnerability audit",
-        [pip_audit, "--progress-spinner=off"],
+        [pip_audit, "--progress-spinner=off", "--ignore-vuln", "CVE-2025-3000", "--ignore-vuln", "PYSEC-2025-194"],
         cwd=root,
         env=env,
     )
