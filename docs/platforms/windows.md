@@ -22,7 +22,7 @@ pip install -e ".[forge,train,dev]"
 
 Install PyTorch with CUDA from [pytorch.org](https://pytorch.org/get-started/locally/) if the default wheel is CPU-only.
 
-Triton and flash-attn from `[cuda]` extra are **Linux-only** in pyproject — on Windows, fused kernels use **native CUDA JIT** when `nvcc` is available.
+Triton from `[cuda]` is **Linux-only** in pyproject. Flash Attention is optional (`[flash-attn]` or `./scripts/install_flash_attn.sh`). On Windows, fused kernels use **native CUDA JIT** when `nvcc` is available.
 
 ## Start Forge
 
