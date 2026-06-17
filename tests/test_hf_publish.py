@@ -2,7 +2,8 @@
 
 from pathlib import Path
 
-from forge.services.hf_auth import hf_auth_status, resolve_hf_token, save_user_hf_token
+from forge.services import hf_auth
+from forge.services.hf_auth import find_hf_cli, hf_auth_status, resolve_hf_token, save_user_hf_token
 from forge.services.publishable import is_pushable_model
 from seiso.export.model_card import HubModelMetadata, render_readme, write_hub_artifacts
 
@@ -74,3 +75,18 @@ def test_user_hf_token_store(tmp_path):
 def test_hf_auth_status_no_token():
     status = hf_auth_status()
     assert status.token_configured is False or status.token_sources
+
+
+def test_find_hf_cli_checks_active_python_bin(monkeypatch, tmp_path):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    python = bin_dir / "python"
+    python.write_text("", encoding="utf-8")
+    hf = bin_dir / "hf"
+    hf.write_text("#!/bin/sh\n", encoding="utf-8")
+
+    monkeypatch.setattr(hf_auth.sys, "executable", str(python))
+    monkeypatch.setenv("HF_CLI", "")
+    monkeypatch.setattr(hf_auth.shutil, "which", lambda _name: None)
+
+    assert find_hf_cli() == str(hf)

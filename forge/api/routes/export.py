@@ -44,7 +44,7 @@ class HubPublishRequest(BaseModel):
     description: str = Field(default="", max_length=4000)
     tags: list[str] = Field(default_factory=list)
     hf_token: str | None = Field(default=None, description="Per-request HF API token")
-    use_cli: bool = Field(default=False, description="Prefer huggingface-cli cached login token")
+    use_cli: bool = Field(default=False, description="Prefer cached `hf auth login` token")
 
 
 class ExportStartRequest(BaseModel):
@@ -148,7 +148,7 @@ async def precheck_hub_export_route(
     if not token:
         raise HTTPException(
             400,
-            "Hugging Face token required. Enter an API token, save one in Settings, set SEISO_HF_TOKEN, or run `huggingface-cli login`.",
+            "Hugging Face token required. Enter an API token, save one in Settings, set SEISO_HF_TOKEN, or run `hf auth login`.",
         )
     result = precheck_hub_export(
         repo_id=meta.repo_id,
@@ -193,7 +193,7 @@ async def start_export(
     if hub_repo and not hub_token:
         raise HTTPException(
             400,
-            "Hugging Face token required. Enter an API token, save one in Settings, set SEISO_HF_TOKEN, or run `huggingface-cli login`.",
+            "Hugging Face token required. Enter an API token, save one in Settings, set SEISO_HF_TOKEN, or run `hf auth login`.",
         )
 
     job_id = str(uuid.uuid4())
@@ -291,7 +291,7 @@ async def publish_to_hub(
     if not token:
         raise HTTPException(
             400,
-            "Hugging Face token required. Enter an API token, save one in Settings, set SEISO_HF_TOKEN, or run `huggingface-cli login`.",
+            "Hugging Face token required. Enter an API token, save one in Settings, set SEISO_HF_TOKEN, or run `hf auth login`.",
         )
 
     meta = _hub_metadata_from_request(body.hub)
