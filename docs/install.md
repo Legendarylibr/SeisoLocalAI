@@ -37,8 +37,9 @@ Complete guide to installing Seiso on every supported platform.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/install.sh | bash
-~/Seiso/scripts/start.sh
 ```
+
+Forge starts automatically when install finishes. Open **http://127.0.0.1:8765** and create your local admin password.
 
 **Verify before running (recommended):**
 
@@ -58,6 +59,7 @@ bash install.sh
    - **macOS** → `[forge,train,mlx,dev]`
 4. **Copies** `.env.example` → `.env` if missing
 5. **Builds** the Forge UI (`forge-ui/dist`)
+6. **Starts** Forge (unless `SEISO_START=0`)
 
 ### Installer options
 
@@ -67,11 +69,13 @@ bash install.sh
 | `SEISO_REPO_URL` | `https://github.com/Legendarylibr/SeisoLocalAI.git` | Git remote |
 | `SEISO_BRANCH` | `main` | Branch to clone |
 | `SEISO_SKIP_UI=1` | off | Skip `npm run build` |
-| `SEISO_START=1` | off | Start Forge when install finishes |
+| `SEISO_START=0` | on (starts Forge) | Set to `0` to install without launching Forge |
+| `SEISO_NO_BANNER=1` | off | Skip install animation |
+| `SEISO_VERBOSE=1` | off | Show full pip/npm output |
 
 ```bash
-# Custom location + immediate start
-SEISO_INSTALL_DIR=~/code/Seiso SEISO_START=1 \
+# Custom location
+SEISO_INSTALL_DIR=~/code/Seiso \
   curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/install.sh | bash
 ```
 
@@ -81,7 +85,6 @@ Run from the repository root:
 
 ```bash
 ./scripts/install.sh
-./scripts/start.sh
 ```
 
 First launch: open **http://127.0.0.1:8765** and create your local admin password.

@@ -1,31 +1,41 @@
 #!/usr/bin/env bash
 # Install Seiso on Linux or macOS — clone (if needed), venv, pip extras, Forge UI build.
 #
-# One-liner (Linux / macOS):
+# One-liner (Linux / macOS) — installs and starts Forge:
 #   curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/install.sh | bash
 #
 # Options (env vars):
 #   SEISO_INSTALL_DIR   Install location (default: ~/Seiso)
 #   SEISO_REPO_URL      Git remote (default: https://github.com/Legendarylibr/SeisoLocalAI.git)
 #   SEISO_BRANCH        Branch to clone (default: main)
+#   SEISO_START=0       Install only — do not launch Forge when finished (default: start)
 #   SEISO_SKIP_UI=1     Skip forge-ui npm build
-#   SEISO_START=1       Run scripts/start.sh when install finishes
 #   SEISO_NO_BANNER=1   Skip glitch install TUI
 #   SEISO_VERBOSE=1     Show full pip/npm output (no TUI overlay)
-#
-# Recommended (verify before run):
-#   curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/install.sh -o install.sh
-#   shasum -a 256 install.sh    # compare with published hash in docs/install.md
-#   bash install.sh
+#   SEISO_SKIP_FLASH_ATTN=0  Try optional Flash Attention during install (NVIDIA Linux)
 set -euo pipefail
 
 REPO_URL="${SEISO_REPO_URL:-https://github.com/Legendarylibr/SeisoLocalAI.git}"
 INSTALL_DIR="${SEISO_INSTALL_DIR:-$HOME/Seiso}"
 BRANCH="${SEISO_BRANCH:-main}"
+SEISO_START="${SEISO_START:-1}"
+SEISO_SKIP_FLASH_ATTN="${SEISO_SKIP_FLASH_ATTN:-1}"
+FORGE_URL="http://127.0.0.1:8765"
 
 log() { printf '==> %s\n' "$*"; }
 warn() { printf 'warning: %s\n' "$*" >&2; }
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
+
+quiet_install_output() {
+  [[ "${SEISO_VERBOSE:-0}" == "1" ]] && return 1
+  [[ "${SEISO_NO_BANNER:-0}" == "1" ]] && return 1
+  [[ -t 1 ]] || return 1
+  return 0
+}
+
+log_unless_quiet() {
+  quiet_install_output || log "$@"
+}
 
 install_tui_enabled() {
   local root="$1"
@@ -49,19 +59,25 @@ install_tui_outro() {
 }
 
 run_with_install_tui() {
-  local root="$1" label="$2" logfile="$3"
-  shift 3
+  local root="$1" logfile="$2"
+  shift 2
   if install_tui_enabled "$root"; then
-    "$@" >"$logfile" 2>&1 &
+    : >"$logfile"
+    "$@" >>"$logfile" 2>&1 &
     local job_pid=$!
-    if ! python3 "$root/scripts/install_tui.py" during --wait-pid "$job_pid" --log "$logfile" --label "$label"; then
-      warn "$label failed — see $logfile"
+    if ! python3 "$root/scripts/install_tui.py" during --wait-pid "$job_pid"; then
+      warn "Install failed — see $logfile"
       tail -30 "$logfile" >&2 || true
       return 1
     fi
     return 0
   fi
   "$@"
+}
+
+pre_clone_hint() {
+  quiet_install_output || return 0
+  printf '\n\033[1mSeisoLocalAI\033[0m · fetching repository...\n\n'
 }
 
 need_cmd() {
@@ -110,13 +126,18 @@ resolve_root() {
   fi
   need_cmd git
   if [[ ! -d "$INSTALL_DIR/.git" ]]; then
-    log "Cloning Seiso into $INSTALL_DIR"
-    git clone --depth 1 --branch "$BRANCH" "$REPO_URL" "$INSTALL_DIR"
+    pre_clone_hint
+    if quiet_install_output; then
+      git clone --depth 1 --branch "$BRANCH" "$REPO_URL" "$INSTALL_DIR" >/dev/null 2>&1
+    else
+      log "Cloning Seiso into $INSTALL_DIR"
+      git clone --depth 1 --branch "$BRANCH" "$REPO_URL" "$INSTALL_DIR"
+    fi
   else
-    log "Updating existing clone in $INSTALL_DIR"
-    git -C "$INSTALL_DIR" fetch --depth 1 origin "$BRANCH"
-    git -C "$INSTALL_DIR" checkout "$BRANCH"
-    git -C "$INSTALL_DIR" pull --ff-only origin "$BRANCH" || true
+    log_unless_quiet "Updating existing clone in $INSTALL_DIR"
+    git -C "$INSTALL_DIR" fetch --depth 1 origin "$BRANCH" >/dev/null 2>&1
+    git -C "$INSTALL_DIR" checkout "$BRANCH" >/dev/null 2>&1
+    git -C "$INSTALL_DIR" pull --ff-only origin "$BRANCH" >/dev/null 2>&1 || true
   fi
   printf '%s\n' "$INSTALL_DIR"
 }
@@ -124,132 +145,75 @@ resolve_root() {
 warn_windows_mount() {
   local root="$1"
   [[ "$root" == /mnt/* ]] || return 0
-  cat <<EOF >&2
-
-warning: Seiso is on a Windows drive mount ($root).
-CUDA wheel builds (flash-attn) often fail there with pyproject.toml / setup.py errors.
-
-Recommended: install on the Linux filesystem instead:
-  SEISO_INSTALL_DIR=~/Seiso curl -fsSL .../scripts/install.sh | bash
-
-EOF
+  warn "Install path is on a Windows mount ($root). Use SEISO_INSTALL_DIR=~/Seiso on WSL."
 }
 
-maybe_install_flash_attn() {
-  local root="$1"
-  [[ "${SEISO_SKIP_FLASH_ATTN:-0}" == "1" ]] && {
-    log "Skipping Flash Attention (SEISO_SKIP_FLASH_ATTN=1)"
-    return 0
-  }
-  if [[ "$root" == /mnt/* ]]; then
-    log "Skipping Flash Attention on Windows mount ($root)"
-    log "Optional later: clone to ~/Seiso and run $root/scripts/install_flash_attn.sh"
-    return 0
-  fi
-  if [[ -x "$root/scripts/install_flash_attn.sh" ]]; then
-    log "Installing optional Flash Attention 2 (safe to skip on failure)"
-    if ! bash "$root/scripts/install_flash_attn.sh"; then
-      warn "Flash Attention install failed — Seiso will use PyTorch SDPA instead"
+run_install_worker() {
+  local root="$1" extras="$2"
+  # shellcheck disable=SC1091
+  source "$root/.venv/bin/activate"
+  python -m pip install -U pip wheel setuptools
+  pip install -e "${root}[${extras}]"
+  if [[ "${SEISO_SKIP_FLASH_ATTN}" != "1" && "$extras" == *cuda* && "$root" != /mnt/* ]]; then
+    if [[ -x "$root/scripts/install_flash_attn.sh" ]]; then
+      bash "$root/scripts/install_flash_attn.sh" || true
     fi
+  fi
+  if [[ "${SEISO_SKIP_UI:-0}" != "1" ]]; then
+    (cd "$root/forge-ui" && npm install && npm run build)
   fi
 }
 
 main() {
-  local root extras venv_py py_ver install_log ui_log
+  local root extras install_log
   uname -s | grep -Eq '^(Linux|Darwin)$' || die "This installer supports Linux and macOS only"
 
   need_cmd python3
   python_version_ok || die "Python 3.10+ is required ($(python3 --version 2>&1 || echo unknown))"
-  py_ver="$(python3 --version 2>&1 || true)"
-  log "Using $py_ver"
   need_cmd git
 
   root="$(resolve_root)"
   install_tui_intro "$root"
-  if ! install_tui_enabled "$root"; then
-    log "Using repository at $root"
-  fi
+  log_unless_quiet "Using repository at $root"
   warn_windows_mount "$root"
 
   if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
-    die "Node.js and npm are required to build the Forge UI. Install Node 18+ from https://nodejs.org/"
+    die "Node.js 18+ is required — install from https://nodejs.org/ then re-run this script"
   fi
 
   extras="$(detect_platform_extras)"
-  if ! install_tui_enabled "$root"; then
-    log "Installing Python extras: [$extras]"
-  fi
-
-  venv_py="$root/.venv/bin/python"
-  if [[ ! -x "$venv_py" ]]; then
-    log "Creating virtualenv at $root/.venv"
-    python3 -m venv "$root/.venv"
-  fi
-
-  # shellcheck disable=SC1091
-  source "$root/.venv/bin/activate"
-  python -m pip install -U pip wheel setuptools
+  log_unless_quiet "Installing Python extras: [$extras]"
 
   install_log="$root/.seiso-install.log"
-  if ! run_with_install_tui "$root" "pip · seiso core" "$install_log" \
-    pip install -e "${root}[${extras}]"; then
-    die "Python install failed"
-  fi
-
-  if [[ "$extras" == *cuda* ]]; then
-    maybe_install_flash_attn "$root"
+  if [[ ! -x "$root/.venv/bin/python" ]]; then
+    log_unless_quiet "Creating virtualenv at $root/.venv"
+    python3 -m venv "$root/.venv"
   fi
 
   if [[ ! -f "$root/.env" && -f "$root/.env.example" ]]; then
     cp "$root/.env.example" "$root/.env"
-    log "Created $root/.env from .env.example"
+    log_unless_quiet "Created $root/.env from .env.example"
   fi
 
-  if [[ "${SEISO_SKIP_UI:-0}" != "1" ]]; then
-    ui_log="$root/.seiso-install-ui.log"
-    if ! run_with_install_tui "$root" "npm · forge ui" "$ui_log" \
-      bash -c "cd \"$root/forge-ui\" && npm install && npm run build"; then
-      die "Forge UI build failed"
-    fi
-  elif ! install_tui_enabled "$root"; then
-    log "Skipping Forge UI build (SEISO_SKIP_UI=1)"
+  export SEISO_SKIP_UI="${SEISO_SKIP_UI:-0}"
+  export SEISO_SKIP_FLASH_ATTN
+
+  if ! run_with_install_tui "$root" "$install_log" \
+    bash -c "$(declare -f run_install_worker); run_install_worker \"$root\" \"$extras\""; then
+    die "Install failed"
   fi
 
   install_tui_outro "$root"
 
-  cat <<EOF
-
-Seiso is installed at: $root
-
-Start Forge:
-  $root/scripts/start.sh
-
-Or manually:
-  source $root/.venv/bin/activate
-  seiso forge
-
-Then open http://127.0.0.1:8765 and complete onboarding.
-
-Platform guide: $root/docs/platforms/
-EOF
-
-  if [[ "${SEISO_START:-0}" == "1" ]]; then
-    log "Starting Forge (SEISO_START=1)"
+  if [[ "$SEISO_START" == "1" ]]; then
+    export SEISO_INSTALL_JUST_RAN=1
     exec "$root/scripts/start.sh"
   fi
 
-  if command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi >/dev/null 2>&1; then
-    cat <<EOF
-
-Linux NVIDIA detected:
-  - CUDA extras were installed ([cuda] — Triton; flash-attn is optional).
-  - Optional Flash Attention: $root/scripts/install_flash_attn.sh
-  - Before GPU training, set ONE of these in $root/.env:
-      SEISO_NVIDIA_HOST_VENV_ACK=1   # bare-metal Linux
-      SEISO_NVIDIA_WSL_ACK=1         # WSL2 only
-  - See $root/docs/platforms/linux-nvidia.md
-
-EOF
+  if install_tui_enabled "$root"; then
+    printf '\n%s\n\n' "$FORGE_URL"
+  else
+    printf '\nOpen %s and complete onboarding.\n\n' "$FORGE_URL"
   fi
 }
 

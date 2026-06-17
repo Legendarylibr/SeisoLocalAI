@@ -57,7 +57,11 @@ main() {
     set +a
   fi
 
-  log "Starting Seiso Forge at http://${SEISO_HOST:-127.0.0.1}:${SEISO_PORT:-8765}"
+  if [[ "${SEISO_INSTALL_JUST_RAN:-0}" == "1" ]]; then
+    log "Starting Forge — open http://${SEISO_HOST:-127.0.0.1}:${SEISO_PORT:-8765}"
+  else
+    log "Starting Forge at http://${SEISO_HOST:-127.0.0.1}:${SEISO_PORT:-8765}"
+  fi
   exec seiso forge
 }
 
