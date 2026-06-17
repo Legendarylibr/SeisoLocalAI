@@ -58,8 +58,12 @@ detect_platform_extras() {
 
 resolve_root() {
   if [[ -n "${BASH_SOURCE[0]:-}" && -f "${BASH_SOURCE[0]}" ]]; then
-    cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd
-    return
+    local candidate
+    candidate="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+    if [[ -f "$candidate/pyproject.toml" && -d "$candidate/seiso_cli" ]]; then
+      printf '%s\n' "$candidate"
+      return
+    fi
   fi
   if [[ -d "$INSTALL_DIR/seiso_cli" && -f "$INSTALL_DIR/pyproject.toml" ]]; then
     printf '%s\n' "$INSTALL_DIR"
