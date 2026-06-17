@@ -46,7 +46,13 @@ def _read_cli_token() -> str | None:
     hf_home = os.environ.get("HF_HOME", "").strip()
     if hf_home:
         candidates.append(Path(hf_home).expanduser() / "token")
-    candidates.append(Path.home() / ".cache" / "huggingface" / "token")
+    home = Path.home()
+    candidates.extend(
+        [
+            home / ".cache" / "huggingface" / "token",
+            home / ".huggingface" / "token",
+        ]
+    )
     for path in candidates:
         if path.is_file():
             token = path.read_text(encoding="utf-8").strip()
@@ -120,6 +126,35 @@ def resolve_hf_token(
         return cli_token, "cli_cache"
 
     return None, "none"
+
+
+def resolve_hf_token_for_download(
+    *,
+    request_token: str | None = None,
+    user_id: str | None = None,
+    data_dir: Path | None = None,
+    encryption_key: bytes | None = None,
+    settings_token: str | None = None,
+) -> tuple[str | None, TokenSource]:
+    """Resolve an HF token for Hub downloads, dropping credentials that fail whoami."""
+    token, source = resolve_hf_token(
+        request_token=request_token,
+        user_id=user_id,
+        data_dir=data_dir,
+        encryption_key=encryption_key,
+        settings_token=settings_token,
+    )
+    if not token:
+        return None, "none"
+
+    from forge.services.hf_connectivity import probe_hf_hub
+
+    result = probe_hf_hub(token=token)
+    if result.token_valid:
+        return token, source
+    if result.anonymous_ok:
+        return None, "none"
+    return token, source
 
 
 def hf_auth_status(

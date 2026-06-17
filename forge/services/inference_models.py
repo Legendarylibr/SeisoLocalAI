@@ -9,6 +9,7 @@ from typing import Any
 
 from forge.db.store import Database
 from forge.providers.ollama import list_models as list_ollama_models
+from forge.services.hf_connectivity import check_inference_runtime
 from forge.services.hardware import (
     HardwareTier,
     assess_inference_option_fit,
@@ -19,7 +20,9 @@ from forge.services.hardware import (
 )
 from seiso.inference.backends import (
     BACKEND_LLAMACPP,
+    BACKEND_MLX,
     BACKEND_OLLAMA,
+    BACKEND_TORCH,
     available_backends,
     match_ollama_name,
     recommend_backend,
@@ -80,6 +83,22 @@ def _source_label(source: str | None) -> str:
     return SOURCE_LABELS.get(raw, raw)
 
 
+def _installed_backends() -> dict[str, bool]:
+    runtime = check_inference_runtime()
+    return {
+        BACKEND_LLAMACPP: runtime.llamacpp,
+        BACKEND_MLX: runtime.mlx,
+        BACKEND_TORCH: runtime.torch,
+        BACKEND_OLLAMA: True,
+    }
+
+
+def _filter_installed_backends(backends: list[str]) -> list[str]:
+    installed = _installed_backends()
+    filtered = [b for b in backends if installed.get(b, False)]
+    return filtered or backends
+
+
 async def _ollama_names(base_url: str = "") -> set[str]:
     global _ollama_cache, _ollama_cache_key, _ollama_cache_ts
 
@@ -118,10 +137,12 @@ async def list_inference_options(
 
     for row in await db.list_models(user_id):
         metadata = json.loads(row.get("metadata_json") or "{}")
-        backends = available_backends(
-            model_path=row["path"],
-            model_format=row.get("format"),
-            ollama_names=ollama_tags,
+        backends = _filter_installed_backends(
+            available_backends(
+                model_path=row["path"],
+                model_format=row.get("format"),
+                ollama_names=ollama_tags,
+            )
         )
         ollama_match = match_ollama_name(
             model_path=row["path"],

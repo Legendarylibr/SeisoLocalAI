@@ -147,6 +147,12 @@ export function SettingsPage() {
                         : "No"}
                     </td>
                   </tr>
+                  {hfStatus.connectivity.warning && (
+                    <tr>
+                      <td>Token warning</td>
+                      <td className="muted-text">{hfStatus.connectivity.warning}</td>
+                    </tr>
+                  )}
                   {hfStatus.connectivity.error && (
                     <tr>
                       <td>Hub error</td>
@@ -176,6 +182,16 @@ export function SettingsPage() {
                   <tr>
                     <td>Ready to download</td>
                     <td>{hfStatus.ready_for_download ? "Yes" : "No"}</td>
+                  </tr>
+                  <tr>
+                    <td>Local chat runtime</td>
+                    <td>
+                      {hfStatus.ready_for_local_chat
+                        ? "Ready"
+                        : hfStatus.ready_for_gguf_chat
+                          ? "Ready (GGUF)"
+                          : "Missing inference engine"}
+                    </td>
                   </tr>
                   <tr>
                     <td>GGUF chat runtime</td>

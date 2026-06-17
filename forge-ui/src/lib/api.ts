@@ -381,17 +381,20 @@ export type HfAuthInfo = {
   token_configured: boolean;
   token_sources: string[];
   user_token_saved: boolean;
+  token_invalid?: boolean;
 };
 
 export type HfHubStatus = {
-  auth: HfAuthInfo & { token_source: string };
+  auth: HfAuthInfo & { token_source: string; token_invalid?: boolean };
   connectivity: {
     reachable: boolean;
     latency_ms: number | null;
     token_valid: boolean;
+    token_invalid?: boolean;
     token_username: string | null;
     anonymous_ok: boolean;
     error: string | null;
+    warning?: string | null;
   };
   transfer: {
     backend: string;
@@ -413,6 +416,7 @@ export type HfHubStatus = {
   };
   ready_for_download: boolean;
   ready_for_gguf_chat: boolean;
+  ready_for_local_chat?: boolean;
 };
 
 export type InferenceModelOption = {

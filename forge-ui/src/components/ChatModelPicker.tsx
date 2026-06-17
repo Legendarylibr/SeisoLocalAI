@@ -44,7 +44,7 @@ export function ChatModelPicker({
   const refreshCatalog = useCallback((q: string) => {
     setCatalogLoading(true);
     api
-      .catalog(q, undefined, undefined, false)
+      .catalog(q, undefined, "chat", false)
       .then((r) => setCatalog(r.models))
       .catch(() => setCatalog([]))
       .finally(() => setCatalogLoading(false));

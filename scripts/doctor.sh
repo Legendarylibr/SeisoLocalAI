@@ -191,6 +191,14 @@ try:
     if transfer.get("hint"):
         line("INFO", transfer["hint"])
     line("OK" if status["runtime"]["huggingface_hub"] else "FAIL", "Forge can inspect Hugging Face runtime")
+    auth = status["auth"]
+    conn = status["connectivity"]
+    if auth.get("token_configured") and conn.get("token_invalid"):
+        line("WARN", "Configured Hugging Face token was rejected — public downloads still work")
+    elif auth.get("token_configured") and conn.get("token_valid"):
+        line("OK", f"Hugging Face token valid for {conn.get('token_username') or 'user'}")
+    line("OK" if status.get("ready_for_download") else "FAIL", f"Hub ready for download: {status.get('ready_for_download')}")
+    line("OK" if status.get("ready_for_local_chat") else "WARN", f"Local chat runtime ready: {status.get('ready_for_local_chat')}")
     line("OK" if status["auth"]["cli_available"] else "WARN", f"HF CLI visible to Forge: {status['auth']['cli_binary'] or 'no'}")
     if os.environ.get("SEISO_DOCTOR_NETWORK") == "1":
         conn = status["connectivity"]

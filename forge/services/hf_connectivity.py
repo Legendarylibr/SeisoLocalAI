@@ -18,18 +18,22 @@ class HfConnectivityResult:
     reachable: bool
     latency_ms: int | None = None
     token_valid: bool = False
+    token_invalid: bool = False
     token_username: str | None = None
     anonymous_ok: bool = False
     error: str | None = None
+    warning: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "reachable": self.reachable,
             "latency_ms": self.latency_ms,
             "token_valid": self.token_valid,
+            "token_invalid": self.token_invalid,
             "token_username": self.token_username,
             "anonymous_ok": self.anonymous_ok,
             "error": self.error,
+            "warning": self.warning,
         }
 
 
@@ -79,12 +83,26 @@ def check_inference_runtime() -> InferenceRuntimeStatus:
     return status
 
 
+def _probe_hf_hub_anonymous(api: Any, *, timeout: float, started: float) -> HfConnectivityResult:
+    """Anonymous reachability check — public models work without credentials."""
+    try:
+        api.model_info("gpt2", timeout=timeout)
+        latency_ms = int((time.monotonic() - started) * 1000)
+        return HfConnectivityResult(
+            reachable=True,
+            latency_ms=latency_ms,
+            anonymous_ok=True,
+        )
+    except Exception as exc:
+        return HfConnectivityResult(reachable=False, error=_format_hub_error(exc))
+
+
 def probe_hf_hub(*, token: str | None = None, timeout: float = 15.0) -> HfConnectivityResult:
     """
     Verify Hub reachability using the standard HfApi probe.
 
-    With a token, validates credentials via whoami(). Without a token, fetches
-    public model metadata (gpt2) as an anonymous connectivity check.
+    With a token, validates credentials via whoami(). When the token is invalid,
+    still probes anonymous access so public model downloads can proceed.
     """
     try:
         from huggingface_hub import HfApi
@@ -97,6 +115,8 @@ def probe_hf_hub(*, token: str | None = None, timeout: float = 15.0) -> HfConnec
 
     api = HfApi()
     started = time.monotonic()
+    token_warning: str | None = None
+    token_invalid = False
 
     if token:
         try:
@@ -110,32 +130,28 @@ def probe_hf_hub(*, token: str | None = None, timeout: float = 15.0) -> HfConnec
                 anonymous_ok=True,
             )
         except HfHubHTTPError as exc:
-            latency_ms = int((time.monotonic() - started) * 1000)
             if exc.response is not None and exc.response.status_code in (401, 403):
-                return HfConnectivityResult(
-                    reachable=True,
-                    latency_ms=latency_ms,
-                    token_valid=False,
-                    error="Hugging Face token rejected — update it in Settings or run `hf auth login`",
+                token_invalid = True
+                token_warning = (
+                    "Saved Hugging Face token was rejected — public downloads still work, "
+                    "but gated models need a valid token in Settings or `hf auth login`."
                 )
-            return HfConnectivityResult(
-                reachable=False,
-                latency_ms=latency_ms,
-                error=_format_hub_error(exc),
-            )
+            else:
+                return HfConnectivityResult(
+                    reachable=False,
+                    latency_ms=int((time.monotonic() - started) * 1000),
+                    error=_format_hub_error(exc),
+                )
         except Exception as exc:
             return HfConnectivityResult(reachable=False, error=_format_hub_error(exc))
 
-    try:
-        api.model_info("gpt2", timeout=timeout)
-        latency_ms = int((time.monotonic() - started) * 1000)
-        return HfConnectivityResult(
-            reachable=True,
-            latency_ms=latency_ms,
-            anonymous_ok=True,
-        )
-    except Exception as exc:
-        return HfConnectivityResult(reachable=False, error=_format_hub_error(exc))
+    anon = _probe_hf_hub_anonymous(api, timeout=timeout, started=started)
+    if token_invalid:
+        anon.token_invalid = True
+        anon.warning = token_warning
+        if anon.reachable and anon.anonymous_ok:
+            anon.error = None
+    return anon
 
 
 def _format_hub_error(exc: Exception) -> str:
@@ -179,6 +195,9 @@ def build_hf_status(
         and (connectivity.anonymous_ok or connectivity.token_valid)
     )
     ready_for_gguf_chat = ready_for_download and runtime.llamacpp
+    ready_for_local_chat = ready_for_download and (
+        runtime.llamacpp or runtime.mlx or runtime.torch
+    )
 
     return {
         "auth": {
@@ -188,6 +207,7 @@ def build_hf_status(
             "token_configured": auth.token_configured,
             "token_sources": auth.token_sources,
             "token_source": token_source,
+            "token_invalid": connectivity.token_invalid,
         },
         "connectivity": connectivity.to_dict(),
         "transfer": transfer,
@@ -201,6 +221,7 @@ def build_hf_status(
         },
         "ready_for_download": ready_for_download,
         "ready_for_gguf_chat": ready_for_gguf_chat,
+        "ready_for_local_chat": ready_for_local_chat,
     }
 
 
@@ -227,8 +248,8 @@ def assert_hub_ready_for_download(
     result = probe_hf_hub(token=token)
     if not result.reachable:
         raise ValueError(result.error or "Cannot reach Hugging Face Hub")
-    if token and not result.token_valid:
+    if not result.anonymous_ok and not result.token_valid:
         raise ValueError(
             result.error
-            or "Hugging Face token is invalid — save a new token in Settings or run `hf auth login`"
+            or "Cannot reach Hugging Face Hub — check your network connection"
         )

@@ -9,8 +9,8 @@ from typing import Any
 
 from forge.db.store import Database
 from forge.services.download_progress import ProgressCallback
-from forge.services.hf_auth import resolve_hf_token
-from forge.services.hf_connectivity import assert_hub_ready_for_download
+from forge.services.hf_auth import resolve_hf_token_for_download
+from forge.services.hf_connectivity import assert_hub_ready_for_download, check_inference_runtime
 from forge.services.hf_hub import (
     download_gguf,
     download_training_snapshot,
@@ -62,14 +62,20 @@ def _sync_download_artifacts(
 ) -> dict[str, Any]:
     """Blocking Hugging Face download — safe to run in a thread pool."""
     if variant == "auto":
-        variant = "gguf"
+        runtime = check_inference_runtime()
+        if runtime.llamacpp:
+            variant = "gguf"
+        elif runtime.mlx or runtime.torch:
+            variant = "safetensors"
+        else:
+            variant = "gguf"
     assert_hub_ready_for_download(
         user_id=user_id,
         data_dir=data_dir,
         encryption_key=db_encryption_key,
         settings_token=settings_hf_token or None,
     )
-    token, _ = resolve_hf_token(
+    token, _ = resolve_hf_token_for_download(
         user_id=user_id,
         data_dir=data_dir,
         encryption_key=db_encryption_key,
