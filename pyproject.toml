@@ -110,8 +110,8 @@ seiso-train-worker = "seiso.training.worker:main"
 seiso-bench-kernels = "seiso.kernels.benchmark:main"
 
 [project.urls]
-Homepage = "https://github.com/seiso-ai/seiso"
-Documentation = "https://github.com/seiso-ai/seiso#readme"
+Homepage = "https://github.com/Legendarylibr/SeisoLocalAI"
+Documentation = "https://github.com/Legendarylibr/SeisoLocalAI#readme"
 
 [tool.hatch.build.targets.wheel]
 packages = ["seiso", "seiso_cli", "forge"]

@@ -12,7 +12,7 @@ Forge and training work on Windows 10/11 with NVIDIA GPUs. Use PowerShell 7+.
 ## Install
 
 ```bash
-git clone https://github.com/seiso-ai/seiso.git Seiso
+git clone https://github.com/Legendarylibr/SeisoLocalAI.git Seiso
 cd Seiso
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1

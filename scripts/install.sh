@@ -2,17 +2,17 @@
 # Install Seiso on Linux or macOS — clone (if needed), venv, pip extras, Forge UI build.
 #
 # One-liner (Linux / macOS):
-#   curl -fsSL https://raw.githubusercontent.com/seiso-ai/seiso/main/scripts/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/install.sh | bash
 #
 # Options (env vars):
 #   SEISO_INSTALL_DIR   Install location (default: ~/Seiso)
-#   SEISO_REPO_URL      Git remote (default: https://github.com/seiso-ai/seiso.git)
+#   SEISO_REPO_URL      Git remote (default: https://github.com/Legendarylibr/SeisoLocalAI.git)
 #   SEISO_BRANCH        Branch to clone (default: main)
 #   SEISO_SKIP_UI=1     Skip forge-ui npm build
 #   SEISO_START=1       Run scripts/start.sh when install finishes
 set -euo pipefail
 
-REPO_URL="${SEISO_REPO_URL:-https://github.com/seiso-ai/seiso.git}"
+REPO_URL="${SEISO_REPO_URL:-https://github.com/Legendarylibr/SeisoLocalAI.git}"
 INSTALL_DIR="${SEISO_INSTALL_DIR:-$HOME/Seiso}"
 BRANCH="${SEISO_BRANCH:-main}"
 

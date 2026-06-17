@@ -1,0 +1,168 @@
+# Getting started
+
+This guide walks you from a fresh machine to your first chat, training run, and export in Seiso Forge.
+
+**Time:** ~30–60 minutes (excluding model downloads).
+
+## What you need
+
+| Requirement | Minimum | Recommended |
+|-------------|---------|-------------|
+| Python | 3.10+ | 3.11+ |
+| Node.js | 18+ | 20 LTS |
+| RAM | 16 GB | 32 GB+ |
+| GPU | Optional (CPU works for small models) | NVIDIA 12 GB+ VRAM for QLoRA |
+| Disk | 20 GB free | 100 GB+ for multiple models |
+| OS | Linux, macOS, WSL2, Windows | Linux + NVIDIA |
+
+## Step 1 — Install
+
+### Linux & macOS (fastest)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/install.sh | bash
+~/Seiso/scripts/start.sh
+```
+
+### From a git clone
+
+```bash
+git clone https://github.com/Legendarylibr/SeisoLocalAI.git Seiso
+cd Seiso
+./scripts/install.sh
+./scripts/start.sh
+```
+
+See [install.md](install.md) for Windows, AMD ROCm, and manual pip extras.
+
+## Step 2 — Onboarding
+
+1. Open **http://127.0.0.1:8765**
+2. Create your local admin username and password
+3. Optionally paste a [Hugging Face token](https://huggingface.co/settings/tokens) in **Settings** for gated models and faster downloads
+
+Seiso binds to `127.0.0.1` by default. Your credentials stay on your machine.
+
+## Step 3 — Download a model
+
+1. Go to **Model Hub** (`/hub`)
+2. Browse the curated catalog (~46 models: Llama, Mistral, Qwen, Gemma, and more)
+3. Click **Download** on a model sized for your hardware (start with 1–3B for training, 7B+ for chat if you have VRAM)
+4. Watch live download progress in the UI
+
+Models are stored under `~/.seiso/models/` (override with `SEISO_DATA_DIR`).
+
+## Step 4 — Chat with a local model
+
+1. Open **Chat** (`/chat`)
+2. Select a downloaded model or a GGUF/Ollama backend
+3. Send a message — responses stream in real time
+
+**Backend auto-selection:**
+
+| Your hardware | Typical backend |
+|---------------|-----------------|
+| macOS Apple Silicon | MLX (with `[mlx]` extra) |
+| NVIDIA GPU + GGUF on disk | llama.cpp |
+| NVIDIA GPU + safetensors | PyTorch 4-bit |
+| CPU only | GGUF or Ollama |
+
+Details: [inference/backends.md](inference/backends.md).
+
+### Connect external tools (Cursor, Continue, etc.)
+
+With Forge running, point any OpenAI-compatible client at:
+
+```text
+Base URL: http://127.0.0.1:8765/v1
+API key:  (any non-empty string — auth uses Forge session or local config)
+```
+
+```bash
+curl http://127.0.0.1:8765/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "meta-llama/Llama-3.2-3B-Instruct",
+    "messages": [{"role": "user", "content": "Hello from Seiso"}]
+  }'
+```
+
+## Step 5 — Fine-tune with Training Studio
+
+1. Open **Training Studio** (`/train`)
+2. Settings are pre-filled from hardware detection (quant method, fused kernels, batch size hints)
+3. Pick a base model and dataset (upload JSONL or use `data/sample.jsonl`)
+4. Click **Start training** — logs stream over SSE
+
+**CLI equivalent:**
+
+```bash
+source .venv/bin/activate
+seiso train --config configs/example_lora.yaml
+```
+
+On Linux NVIDIA bare metal, approve native CUDA kernel JIT before training:
+
+```bash
+export SEISO_NVIDIA_HOST_VENV_ACK=1
+seiso train --config configs/example_lora.yaml
+```
+
+Checkpoints land in `{SEISO_DATA_DIR}/checkpoints/{user_id}/` with a `seiso_manifest.json` describing kernel and quant settings.
+
+Platform notes: [training/quickstart.md](training/quickstart.md) · [platforms/](platforms/).
+
+## Step 6 — Export and deploy
+
+1. Open **Export** (`/export`)
+2. Select a training checkpoint
+3. Choose formats: merged safetensors, LoRA adapter, GGUF quantizations
+4. Optionally publish to Hugging Face Hub with model card preflight
+
+**CLI equivalent:**
+
+```bash
+seiso export --checkpoint ~/.seiso/checkpoints/<user>/<run>/checkpoint-<ts> \
+  --formats merged,gguf --profile inference
+```
+
+GGUF export requires `llama.cpp` (set `LLAMA_CPP_DIR` or install system `convert_hf_to_gguf`).
+
+## Step 7 — Explore advanced features
+
+| Feature | Where | Guide |
+|---------|-------|-------|
+| Model compression (distill → prune → quant) | `/compress` | [compression.md](compression.md) |
+| Stable Diffusion compression | `/image-compress` | [compression.md](compression.md) |
+| RL adaptive GGUF quantization | `/rl-quant` | [compression.md](compression.md) |
+| Visual recipe graphs | `/recipes` | [forge.md](forge.md) |
+| External providers (OpenAI, Ollama, vLLM) | `/integrations` | [forge.md](forge.md) |
+| Multi-GPU training | Training Studio checkbox | [training/multi-gpu.md](training/multi-gpu.md) |
+| Fused GPU kernels | Training config / Studio | [training/kernels.md](training/kernels.md) |
+| HTTPS / LAN access | `deploy/` + `.env` | [deployment/reverse-proxy.md](deployment/reverse-proxy.md) |
+
+## Data directory layout
+
+Default: `~/.seiso` (set `SEISO_DATA_DIR` to change).
+
+```
+~/.seiso/
+├── models/           # Downloaded HF snapshots and GGUF files
+├── checkpoints/      # Training outputs (per user)
+├── exports/          # Merged / GGUF / LoRA exports
+├── compress/         # LLM compression run artifacts
+├── image_compress/   # SD compression outputs
+├── rl_quant/         # RL quant policy outputs
+├── knowledge/        # RAG vector stores (API)
+├── uploads/          # User-uploaded datasets and files
+├── artifacts/        # Tool-generated files
+├── hf_cache/         # Hugging Face hub cache
+└── sandbox/          # Sandboxed code-exec workspace
+```
+
+## Next steps
+
+- **Developers:** [CI_LOCAL.md](CI_LOCAL.md) · run `make ci-fast`
+- **Problems:** [troubleshooting.md](troubleshooting.md)
+- **Full CLI:** [cli.md](cli.md)
+- **Security hardening:** [README.md](../README.md#security) and [forge.md](forge.md)

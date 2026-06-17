@@ -7,7 +7,7 @@ Full Seiso support: fused CUDA kernels, QLoRA, multi-GPU, Forge UI.
 **Recommended** — automated install (Python 3.10+, Node.js 18+, git):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/seiso-ai/seiso/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/install.sh | bash
 ~/Seiso/scripts/start.sh
 ```
 
