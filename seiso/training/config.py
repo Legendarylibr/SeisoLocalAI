@@ -58,6 +58,7 @@ class TrainConfig(BaseModel):
     lr_scheduler: str = "cosine"
     resume_from: Path | None = None
     seed: int = 42
+    deterministic: bool = True
     multi_gpu: bool = False
     use_triton: bool = True
     use_fused_ce: bool = True

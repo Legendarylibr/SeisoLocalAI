@@ -353,10 +353,26 @@ export function IconUser({ size = defaults.size, className, strokeWidth = defaul
   );
 }
 
+export function IconKnowledge({ size = defaults.size, className, strokeWidth = defaults.strokeWidth }: IconProps) {
+  return (
+    <Svg size={size} className={className}>
+      <path
+        d="M5.5 5.5H18.5C19.6 5.5 20.5 6.4 20.5 7.5V16.5C20.5 17.6 19.6 18.5 18.5 18.5H5.5C4.4 18.5 3.5 17.6 3.5 16.5V7.5C3.5 6.4 4.4 5.5 5.5 5.5Z"
+        stroke="currentColor"
+        strokeWidth={strokeWidth}
+        strokeLinejoin="round"
+      />
+      <path d="M8 8.5H16M8 12H14M8 15.5H12" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" />
+      <circle cx="16.5" cy="14" r="2.5" stroke="currentColor" strokeWidth={strokeWidth} />
+    </Svg>
+  );
+}
+
 export type NavIconName =
   | "dashboard"
   | "hub"
   | "chat"
+  | "knowledge"
   | "train"
   | "quant"
   | "compress"
@@ -369,6 +385,7 @@ const NAV_ICONS: Record<NavIconName, FC<IconProps>> = {
   dashboard: IconDashboard,
   hub: IconHub,
   chat: IconChat,
+  knowledge: IconKnowledge,
   train: IconTrain,
   quant: IconQuant,
   compress: IconCompress,

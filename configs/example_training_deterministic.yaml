@@ -1,0 +1,16 @@
+model_id: meta-llama/Llama-3.2-1B
+dataset: data/sample.jsonl
+output_dir: ./outputs/research-run
+method: lora
+quant: 4bit
+epochs: 1
+batch_size: 2
+learning_rate: 2.0e-4
+max_seq_length: 2048
+seed: 42
+deterministic: true
+eval_steps: 50
+eval_split_ratio: 0.05
+logging_steps: 10
+gradient_checkpointing: true
+train_on_responses_only: true

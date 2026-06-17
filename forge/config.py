@@ -27,6 +27,7 @@ class ForgeSettings(BaseSettings):
     secret_key: str = ""
     allow_remote: bool = False
     trust_proxy: bool = False
+    trusted_proxy_ips: str = ""
     secure_cookies: bool = False
     cors_origins: str = "http://127.0.0.1:8765,http://localhost:5173"
     hf_token: str = ""
@@ -36,6 +37,7 @@ class ForgeSettings(BaseSettings):
     allow_openai_tools: bool = False
     allow_tools: bool = False
     allow_code_exec: bool = False
+    inference_api_key: str = ""
     ollama_base_url: str = "http://127.0.0.1:11434"
     db_ephemeral: bool = True
     db_encryption_key: str = ""
@@ -73,6 +75,23 @@ class ForgeSettings(BaseSettings):
         if not self.allow_remote:
             self.host = "127.0.0.1"
 
+        if not self.inference_api_key:
+            key_file = self.data_dir / ".inference_api_key"
+            if key_file.exists():
+                self.inference_api_key = key_file.read_text().strip()
+            else:
+                import secrets
+
+                self.inference_api_key = f"seiso_sk_{secrets.token_urlsafe(32)}"
+                key_file.write_text(self.inference_api_key)
+                key_file.chmod(0o600)
+
+        from forge.security.startup import validate_security_settings
+        from forge.security.token_revocation import configure_revocation_store
+
+        configure_revocation_store(self.data_dir)
+        validate_security_settings(self)
+
     def _resolve_db_encryption_key(self) -> bytes:
         if self.db_encryption_key:
             return resolve_encryption_key(self.db_encryption_key)
@@ -100,6 +119,10 @@ class ForgeSettings(BaseSettings):
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
+    @property
+    def trusted_proxy_ip_list(self) -> list[str]:
+        return [ip.strip() for ip in self.trusted_proxy_ips.split(",") if ip.strip()]
 
     @property
     def cookie_secure(self) -> bool:

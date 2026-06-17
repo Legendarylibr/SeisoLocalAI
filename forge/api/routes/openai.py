@@ -15,7 +15,7 @@ from forge.api.deps import get_db, get_inference_orchestrator
 from forge.config import ForgeSettings, get_settings
 from forge.db.store import Database
 from forge.orchestrators.inference import InferenceOrchestrator
-from forge.security.auth import get_current_user_id
+from forge.security.openai_auth import get_openai_user_id
 from forge.security.autodefense import defense_enabled, scan_output
 from forge.services.models import resolve_model_path
 
@@ -64,9 +64,18 @@ async def _resolve_openai_model_path(
     db: Database,
     settings: ForgeSettings,
 ) -> str:
-    model_id = None if body.model in ("default", "seiso") else body.model
+    if body.model in ("default", "seiso"):
+        models = await db.list_models(user_id)
+        for row in models:
+            path = await resolve_model_path(
+                db, user_id, model_id=row["id"], model_path=None, data_dir=settings.data_dir
+            )
+            if path:
+                return path
+        raise HTTPException(400, "No local model available — download from Hub")
+
     path = await resolve_model_path(
-        db, user_id, model_id=model_id, model_path=None, data_dir=settings.data_dir
+        db, user_id, model_id=body.model, model_path=None, data_dir=settings.data_dir
     )
     if path:
         return path
@@ -75,7 +84,7 @@ async def _resolve_openai_model_path(
 
 @router.get("/v1/models")
 async def list_models(
-    user_id: Annotated[str, Depends(get_current_user_id)],
+    user_id: Annotated[str, Depends(get_openai_user_id)],
     db: Annotated[Database, Depends(get_db)],
 ) -> dict:
     models = await db.list_models(user_id)
@@ -96,7 +105,7 @@ async def list_models(
 @router.post("/v1/chat/completions")
 async def chat_completions(
     body: ChatCompletionRequest,
-    user_id: Annotated[str, Depends(get_current_user_id)],
+    user_id: Annotated[str, Depends(get_openai_user_id)],
     db: Annotated[Database, Depends(get_db)],
     orchestrator: Annotated[InferenceOrchestrator, Depends(get_inference_orchestrator)],
     settings: Annotated[ForgeSettings, Depends(get_settings)],

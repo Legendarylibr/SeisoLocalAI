@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
 from forge.api.deps import get_db, get_training_orchestrator
-from forge.api.routes._stream import spawn_background
+from forge.api.routes._stream import job_failure_message, spawn_background
 from forge.config import ForgeSettings, get_settings
 from forge.db.store import Database
 from forge.orchestrators.training import TrainingOrchestrator
@@ -48,8 +48,14 @@ def _serialize_metrics_payload(
     points: list[dict[str, Any]],
     summary: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    from seiso.security.hardware_privacy import sanitize_system_metric_point
+
     training = [p for p in points if p.get("type") in ("training", "eval")]
-    system = [p for p in points if p.get("type") == "system"]
+    system = [
+        sanitize_system_metric_point(p)
+        for p in points
+        if p.get("type") == "system"
+    ]
     return {
         "summary": summary or {},
         "training": training[-2000:],
@@ -204,8 +210,12 @@ async def start_training(
                             outputs={k: str(v) for k, v in outputs.items()},
                             job_id=f"train-{job_id}",
                         )
-        except Exception:
-            await db.update_job_status(job_id, "failed")
+        except Exception as exc:
+            await db.update_job_status(
+                job_id,
+                "failed",
+                error_text=job_failure_message(orchestrator, job_id, exc),
+            )
 
     spawn_background(_run())
     audit_event("training_start", user_id=user_id, job_id=job_id, model_id=body.config.get("model_id"))

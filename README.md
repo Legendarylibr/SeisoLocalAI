@@ -278,10 +278,12 @@ Point Cursor, Continue, or any OpenAI client at Forge while it is running:
 
 ```text
 Base URL: http://127.0.0.1:8765/v1
+API key:  Inference key from ~/.seiso/.inference_api_key (or session JWT from Forge login)
 ```
 
 ```bash
 curl http://127.0.0.1:8765/v1/chat/completions \
+  -H "Authorization: Bearer $(cat ~/.seiso/.inference_api_key)" \
   -H "Content-Type: application/json" \
   -d '{
     "model": "meta-llama/Llama-3.2-3B-Instruct",
@@ -317,8 +319,11 @@ Seiso is **secure by default** for single-user localhost use. Review every flag 
 | Setting | Default | Purpose |
 |---------|---------|---------|
 | `SEISO_ALLOW_REMOTE=false` | off | Binds Forge to `127.0.0.1` only |
-| `SEISO_ALLOW_REMOTE=true` | — | Allows LAN/WAN binding; enables rate limits |
-| `SEISO_TRUST_PROXY=true` | — | Honor `X-Forwarded-*` from reverse proxy |
+| `SEISO_ALLOW_REMOTE=true` | — | Allows LAN/WAN binding; requires `SEISO_REMOTE_ACK=1` |
+| `SEISO_REMOTE_ACK=1` | — | Required acknowledgement to bind beyond localhost |
+| `SEISO_REMOTE_DANGEROUS_ACK=1` | — | Required for remote + tools/code-exec/openai-tools |
+| `SEISO_TRUST_PROXY=true` | — | Honor `X-Forwarded-*` only from `SEISO_TRUSTED_PROXY_IPS` |
+| `SEISO_TRUSTED_PROXY_IPS` | — | Comma-separated proxy IPs/CIDRs (e.g. `127.0.0.1,::1`) |
 | `SEISO_SECURE_COOKIES=true` | — | Secure cookies when TLS is terminated upstream |
 
 Deploy configs: [`deploy/`](deploy/) · Guide: [docs/deployment/reverse-proxy.md](docs/deployment/reverse-proxy.md)

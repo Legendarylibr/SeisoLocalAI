@@ -140,6 +140,11 @@ def build_pipeline_config(
         "eval_inference_steps": int(
             payload.get("eval_inference_steps", preset.get("eval_inference_steps", 6))
         ),
+        "seed": int(payload.get("seed", preset.get("seed", 42))),
+        "deterministic": bool(payload.get("deterministic", preset.get("deterministic", True))),
+        "enforce_quality_thresholds": bool(
+            payload.get("enforce_quality_thresholds", preset.get("enforce_quality_thresholds", False))
+        ),
     }
 
     if model_dir := payload.get("model_dir"):

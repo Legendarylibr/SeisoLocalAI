@@ -84,6 +84,13 @@ class PipelineConfig:
     max_lpips_increase: float = field(default_factory=lambda: _env_float("MAX_LPIPS_INCREASE", 0.15))
     min_ssim_retention: float = field(default_factory=lambda: _env_float("MIN_SSIM_RETENTION", 0.85))
 
+    # Reproducibility
+    seed: int = field(default_factory=lambda: _env_int("SEED", 42))
+    deterministic: bool = field(default_factory=lambda: _env_bool("DETERMINISTIC", True))
+    enforce_quality_thresholds: bool = field(
+        default_factory=lambda: _env_bool("ENFORCE_QUALITY_THRESHOLDS", False)
+    )
+
     # Server
     server_host: str = field(default_factory=lambda: _env("SERVER_HOST", "0.0.0.0"))
     server_port: int = field(default_factory=lambda: _env_int("SERVER_PORT", 8080))

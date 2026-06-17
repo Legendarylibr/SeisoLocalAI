@@ -93,8 +93,10 @@ Copy `.env.example` to `.env` in the repo root. Key settings:
 | `SEISO_PORT` | `8765` | HTTP port |
 | `SEISO_DATA_DIR` | `~/.seiso` | Models, checkpoints, exports, uploads |
 | `SEISO_SECRET_KEY` | auto | Session signing key |
-| `SEISO_ALLOW_REMOTE` | `false` | Bind `0.0.0.0` and enable rate limits |
-| `SEISO_TRUST_PROXY` | `false` | Honor `X-Forwarded-*` from reverse proxy |
+| `SEISO_ALLOW_REMOTE` | `false` | Bind `0.0.0.0` (requires `SEISO_REMOTE_ACK=1`) |
+| `SEISO_TRUST_PROXY` | `false` | Honor `X-Forwarded-*` from `SEISO_TRUSTED_PROXY_IPS` only |
+| `SEISO_TRUSTED_PROXY_IPS` | — | Comma-separated proxy IPs (e.g. `127.0.0.1,::1`) |
+| `SEISO_INFERENCE_API_KEY` | auto | Scoped key for `/v1` only (`~/.seiso/.inference_api_key`) |
 | `SEISO_SECURE_COOKIES` | `false` | `Secure` cookies when TLS is terminated upstream |
 | `SEISO_CORS_ORIGINS` | `http://127.0.0.1:8765,http://localhost:5173` | Allowed browser origins |
 | `SEISO_HF_TOKEN` | — | Hugging Face token for gated models |

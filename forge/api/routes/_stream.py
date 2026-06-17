@@ -13,6 +13,16 @@ from forge.orchestrators.base import Orchestrator
 logger = logging.getLogger(__name__)
 
 
+def job_failure_message(orchestrator: Orchestrator, job_id: str, exc: BaseException | None = None) -> str:
+    """Best-effort failure text for DB persistence."""
+    job = orchestrator.get_job(job_id)
+    if job and job.error:
+        return str(job.error)
+    if exc is not None:
+        return str(exc)
+    return "Job failed"
+
+
 def spawn_background(coro: Awaitable[Any]) -> asyncio.Task[Any]:
     """Run a coroutine in the background; log failures instead of re-raising."""
 

@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
 from forge.api.deps import get_db, get_rl_quant_orchestrator
-from forge.api.routes._stream import job_log_event_gen, spawn_background
+from forge.api.routes._stream import job_failure_message, job_log_event_gen, spawn_background
 from forge.config import ForgeSettings, get_settings
 from forge.db.store import Database
 from forge.orchestrators.rl_quant import RLQuantOrchestrator
@@ -129,6 +129,7 @@ async def start_rl_quant(
                     recommendation_path=(job.result or {}).get("recommendation_path"),
                     recommendation_json=rec,
                     gguf_quants=gguf_quants,
+                    error_text=job.error if job.status.value == "failed" else None,
                 )
                 exported = (job.result or {}).get("summary", {})
                 gguf_path = None
@@ -144,8 +145,12 @@ async def start_rl_quant(
                         outputs={"gguf_rl": str(gguf_path)},
                         job_id=job_id,
                     )
-        except Exception:
-            await db.update_rl_quant_job_status(job_id, "failed")
+        except Exception as exc:
+            await db.update_rl_quant_job_status(
+                job_id,
+                "failed",
+                error_text=job_failure_message(orchestrator, job_id, exc),
+            )
 
     spawn_background(_run())
     audit_event("rl_quant_start", user_id=user_id, job_id=job_id, preset=body.preset)

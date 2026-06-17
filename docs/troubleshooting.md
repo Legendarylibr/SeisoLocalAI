@@ -61,6 +61,39 @@ For UI development, run `seiso forge` in one terminal and `cd forge-ui && npm ru
 
 **Fix:** Run the installer first, or set `SEISO_INSTALL_DIR` to your clone path.
 
+## Forge refuses to start (remote / proxy settings)
+
+**Symptom:** `RuntimeError: SEISO_ALLOW_REMOTE=true requires explicit acknowledgement`
+
+**Fix:** Only enable remote if intentional:
+```bash
+export SEISO_ALLOW_REMOTE=true
+export SEISO_REMOTE_ACK=1
+```
+
+**Symptom:** `SEISO_TRUST_PROXY=true requires SEISO_TRUSTED_PROXY_IPS`
+
+**Fix:** Set proxy allowlist to your reverse proxy address:
+```bash
+export SEISO_TRUSTED_PROXY_IPS=127.0.0.1,::1
+```
+
+**Symptom:** Remote + tools/code-exec blocked at startup
+
+**Fix:** Do not combine unless you accept the risk, then:
+```bash
+export SEISO_REMOTE_DANGEROUS_ACK=1
+```
+
+## OpenAI `/v1` returns 401
+
+Use the inference-scoped key (not your admin password):
+```bash
+cat ~/.seiso/.inference_api_key
+# Authorization: Bearer seiso_sk_...
+```
+Or log in via Forge and use the session JWT.
+
 ## Port in use
 
 ```bash

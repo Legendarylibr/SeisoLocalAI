@@ -11,7 +11,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from seiso.kernels.hooks import apply_fused_lora_kernels, apply_training_kernels
+from seiso.research.provenance import (
+    apply_determinism,
+    sha256_file,
+    write_json,
+)
 from seiso.kernels.lifecycle import release_training_memory
 from seiso.models.seiso_model import SeisoModel
 from seiso.security import resolve_data_dir
@@ -21,7 +25,7 @@ from seiso.training.datasets import (
     load_training_dataset,
     prepare_tokenized_dataset,
 )
-from seiso.training.multi_gpu import configure_training_args, detect_gpus, gpu_stats
+from seiso.training.multi_gpu import configure_training_args, detect_gpus
 from seiso.training.sft import build_sft_trainer
 
 logger = logging.getLogger(__name__)
@@ -38,6 +42,11 @@ class SeisoTrainer:
 
     def run(self) -> Path:
         cfg = self.config
+        apply_determinism(cfg.seed, deterministic=cfg.deterministic)
+        write_json(
+            cfg.output_dir / "train_config_snapshot.json",
+            cfg.model_dump(mode="json"),
+        )
         layout = detect_gpus()
         multi_gpu = bool(cfg.multi_gpu or cfg.extra.get("multi_gpu", False)) and layout.use_ddp
         use_triton = cfg.use_triton
@@ -308,8 +317,10 @@ class SeisoTrainer:
     def _train_embedding(self) -> Path:
         from sentence_transformers import InputExample, SentenceTransformer, losses
         from torch.utils.data import DataLoader
+        import torch
 
         cfg = self.config
+        apply_determinism(cfg.seed, deterministic=cfg.deterministic)
         from seiso.security import resolve_data_dir
 
         raw = load_training_dataset(cfg.dataset, sandbox_root=resolve_data_dir())
@@ -324,7 +335,9 @@ class SeisoTrainer:
             raise ValueError("Embedding dataset needs anchor/query + positive/answer columns")
 
         model = SentenceTransformer(cfg.model_id)
-        loader = DataLoader(examples, shuffle=True, batch_size=cfg.batch_size)
+        g = torch.Generator()
+        g.manual_seed(cfg.seed)
+        loader = DataLoader(examples, shuffle=True, batch_size=cfg.batch_size, generator=g)
         loss = losses.MultipleNegativesRankingLoss(model)
         out = cfg.output_dir / f"embed-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}"
         model.fit(
@@ -370,6 +383,15 @@ class SeisoTrainer:
         cfg = self.config
         base_path = self._resolve_load_model_id()
         original_id = str(cfg.extra.get("original_model_id") or cfg.model_id)
+        dataset_path = str(cfg.dataset)
+        dataset_hash: str | None = None
+        ds_path = Path(cfg.dataset)
+        if ds_path.is_file():
+            try:
+                dataset_hash = sha256_file(ds_path)
+            except (OSError, ValueError):
+                pass
+
         manifest = {
             "model_id": original_id,
             "original_model_id": original_id,
@@ -377,15 +399,28 @@ class SeisoTrainer:
             "resolved_model_path": cfg.extra.get("resolved_model_path") or base_path,
             "method": cfg.method.value,
             "quant": cfg.quant.value,
+            "epochs": cfg.epochs,
+            "batch_size": cfg.batch_size,
+            "learning_rate": cfg.learning_rate,
+            "max_seq_length": cfg.max_seq_length,
+            "gradient_accumulation_steps": cfg.gradient_accumulation_steps,
+            "gradient_checkpointing": cfg.gradient_checkpointing,
+            "eval_split_ratio": cfg.eval_split_ratio,
+            "eval_steps": cfg.eval_steps,
+            "lr_scheduler": cfg.lr_scheduler,
+            "seed": cfg.seed,
+            "deterministic": cfg.deterministic,
+            "dataset": dataset_path,
+            "dataset_hash_sha256": dataset_hash,
             "lora_r": cfg.lora_r,
             "lora_alpha": cfg.lora_alpha,
             "use_rslora": cfg.use_rslora,
             "dataset_format": dataset_format,
             "train_on_responses_only": cfg.train_on_responses_only,
+            "packing": cfg.packing,
             "multi_gpu": multi_gpu,
             "world_size": layout.world_size,
             "kernels": self._kernel_meta,
-            "gpu_stats": gpu_stats(),
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
-        (out / "seiso_manifest.json").write_text(json.dumps(manifest, indent=2))
+        write_json(out / "seiso_manifest.json", manifest)

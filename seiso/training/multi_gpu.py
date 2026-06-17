@@ -70,7 +70,9 @@ def launch_worker_command(config_path: str, nproc: int) -> list[str]:
 
 
 def gpu_stats() -> list[dict]:
-    """Return per-GPU utilization snapshot for SSE metrics."""
+    """Return per-GPU utilization snapshot for SSE metrics (no device names)."""
+    from seiso.security.hardware_privacy import sanitize_gpu_stats
+
     stats: list[dict] = []
     try:
         import torch
@@ -84,7 +86,6 @@ def gpu_stats() -> list[dict]:
             stats.append(
                 {
                     "index": i,
-                    "name": props.name,
                     "total_bytes": props.total_memory,
                     "allocated_bytes": allocated,
                     "reserved_bytes": reserved,
@@ -93,4 +94,4 @@ def gpu_stats() -> list[dict]:
             )
     except ImportError:
         pass
-    return stats
+    return sanitize_gpu_stats(stats)

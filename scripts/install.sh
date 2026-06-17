@@ -10,6 +10,11 @@
 #   SEISO_BRANCH        Branch to clone (default: main)
 #   SEISO_SKIP_UI=1     Skip forge-ui npm build
 #   SEISO_START=1       Run scripts/start.sh when install finishes
+#
+# Recommended (verify before run):
+#   curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/install.sh -o install.sh
+#   shasum -a 256 install.sh    # compare with published hash in docs/install.md
+#   bash install.sh
 set -euo pipefail
 
 REPO_URL="${SEISO_REPO_URL:-https://github.com/Legendarylibr/SeisoLocalAI.git}"
@@ -134,6 +139,19 @@ EOF
   if [[ "${SEISO_START:-0}" == "1" ]]; then
     log "Starting Forge (SEISO_START=1)"
     exec "$root/scripts/start.sh"
+  fi
+
+  if command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi >/dev/null 2>&1; then
+    cat <<EOF
+
+Linux NVIDIA detected:
+  - CUDA extras were installed ([cuda]).
+  - Before GPU training, set ONE of these in $root/.env:
+      SEISO_NVIDIA_HOST_VENV_ACK=1   # bare-metal Linux
+      SEISO_NVIDIA_WSL_ACK=1         # WSL2 only
+  - See $root/docs/platforms/linux-nvidia.md
+
+EOF
   fi
 }
 

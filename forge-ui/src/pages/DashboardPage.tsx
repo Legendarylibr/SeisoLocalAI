@@ -12,13 +12,49 @@ import {
   IconCpu,
   IconMemory,
   IconGpu,
+  IconQuant,
+  IconRecipes,
+  IconKnowledge,
 } from "@/components/Icons";
+import { PipelineStrip } from "@/components/research/PipelineStrip";
 
 const GOALS = [
   { id: "chat", label: "Chat", path: "/chat", Icon: IconChat, desc: "Run models locally with encrypted session memory" },
   { id: "train", label: "Train/Finetune", path: "/train", Icon: IconTrain, desc: "Fine-tune with LoRA on your hardware" },
   { id: "compress", label: "Compress", path: "/compress", Icon: IconCompress, desc: "Quantize and shrink models" },
   { id: "inference", label: "Local LLM Inference", path: "/chat", Icon: IconInference, desc: "Chat with local GGUF, Ollama, or MLX engines" },
+] as const;
+
+const RESEARCH_PIPELINES = [
+  {
+    id: "rl-quant",
+    title: "RL Quantization",
+    desc: "Reward-guided adaptive GGUF quantization with reproducible sweeps.",
+    path: "/rl-quant",
+    tag: "Research",
+    Icon: IconQuant,
+  },
+  {
+    id: "compress",
+    title: "Code Compression",
+    desc: "Distill → prune → recover → GPTQ/AWQ with lm-eval benchmarks.",
+    path: "/compress",
+    Icon: IconCompress,
+  },
+  {
+    id: "recipes",
+    title: "Recipe Studio",
+    desc: "Visual data pipelines for dataset prep and experiment prep.",
+    path: "/recipes",
+    Icon: IconRecipes,
+  },
+  {
+    id: "knowledge",
+    title: "Knowledge Base",
+    desc: "Local RAG corpus with on-device chunking and retrieval.",
+    path: "/knowledge",
+    Icon: IconKnowledge,
+  },
 ] as const;
 
 export function DashboardPage() {
@@ -134,6 +170,14 @@ export function DashboardPage() {
           )}
         </div>
       )}
+
+      <section className="research-section">
+        <div className="section-head">
+          <h2 className="section-title">Research pipelines</h2>
+          <p className="section-desc">Reproducible compression, quantization, and retrieval workflows — all local.</p>
+        </div>
+        <PipelineStrip pipelines={[...RESEARCH_PIPELINES]} />
+      </section>
 
       <section className="goal-section">
         <div className="section-head">

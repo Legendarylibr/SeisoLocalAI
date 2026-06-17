@@ -111,6 +111,7 @@ async def test_cookie_session_auth(app):
 @pytest.mark.asyncio
 async def test_login_rate_limit(monkeypatch):
     monkeypatch.setenv("SEISO_ALLOW_REMOTE", "true")
+    monkeypatch.setenv("SEISO_REMOTE_ACK", "1")
     monkeypatch.setenv("SEISO_RATE_LIMIT", "1000")
     clear_dependency_caches()
     app = create_app()
@@ -138,6 +139,7 @@ async def test_login_rate_limit(monkeypatch):
 @pytest.mark.asyncio
 async def test_global_rate_limit(monkeypatch):
     monkeypatch.setenv("SEISO_ALLOW_REMOTE", "true")
+    monkeypatch.setenv("SEISO_REMOTE_ACK", "1")
     monkeypatch.setenv("SEISO_RATE_LIMIT", "3")
     clear_dependency_caches()
     app = create_app()

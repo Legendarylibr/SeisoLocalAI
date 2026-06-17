@@ -40,6 +40,14 @@ curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scr
 ~/Seiso/scripts/start.sh
 ```
 
+**Verify before running (recommended):**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/install.sh -o install.sh
+shasum -a 256 install.sh
+bash install.sh
+```
+
 ### What the installer does
 
 1. **Clones** Seiso to `~/Seiso` (override with `SEISO_INSTALL_DIR`)
