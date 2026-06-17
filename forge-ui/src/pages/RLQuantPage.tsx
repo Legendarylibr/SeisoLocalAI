@@ -1,6 +1,11 @@
 import { useEffect, useState } from "react";
 import { api, RLQuantJob, RLQuantPreset, subscribeSSE } from "@/lib/api";
 import { StudioPageShell } from "@/components/StudioPageShell";
+import { FormSection } from "@/components/research/FormSection";
+import { RewardWeights } from "@/components/research/RewardWeights";
+import { ArtifactViewer } from "@/components/research/ArtifactViewer";
+import { DataTable } from "@/components/research/DataTable";
+import { LogStream } from "@/components/research/LogStream";
 
 const DEFAULT_REWARD = {
   alpha_latency: 0.02,
@@ -8,6 +13,12 @@ const DEFAULT_REWARD = {
   gamma_perplexity: 0.85,
   delta_memory: 0.002,
   epsilon_instability: 1.0,
+};
+
+const PRESET_HINTS: Record<string, string> = {
+  minimal: "Fast smoke run — simulator backend, few episodes.",
+  reproducible: "Fixed seeds and logged artifacts for paper-grade reproducibility.",
+  post_train: "Post fine-tune checkpoint — links training output to quant recommendation.",
 };
 
 export function RLQuantPage() {
@@ -74,120 +85,140 @@ export function RLQuantPage() {
     }
   };
 
-  const selectedPreset = presets.find((p) => p.id === preset);
+  const presetList = presets.length
+    ? presets
+    : [
+        { id: "minimal", label: "Minimal", backend: "simulator", training_backend: "stdlib" },
+        { id: "reproducible", label: "Reproducible", backend: "simulator", training_backend: "stdlib" },
+        { id: "post_train", label: "Post-train", backend: "simulator", training_backend: "stdlib" },
+      ];
+
+  const selectedPreset = presetList.find((p) => p.id === preset);
 
   return (
     <StudioPageShell
       title="RL Quantization"
-      subtitle="Adaptive quantization via reinforcement learning and reward engineering (llama.cpp / simulator). Train a policy, get a GGUF quant recommendation, then export or chat."
+      subtitle="Adaptive quantization via reinforcement learning — train a reward-guided policy, evaluate on simulator or llama.cpp, export GGUF with recommended quant levels."
+      badge={<span className="trust-badge trust-badge-dim">REINFORCE · multiseed sweeps</span>}
     >
       <div className="train-layout">
-        <div className="card">
-          <label>Preset</label>
-          <select value={preset} onChange={(e) => setPreset(e.target.value)}>
-            {(presets.length ? presets : [{ id: "minimal", label: "Minimal" }, { id: "reproducible", label: "Reproducible" }, { id: "post_train", label: "Post-train" }]).map((p) => (
-              <option key={p.id} value={p.id}>{p.label}</option>
-            ))}
-          </select>
+        <div className="card research-config-card">
+          <FormSection title="Experiment preset" hint="Reproducible configs with logged artifacts.">
+            <label>Preset</label>
+            <select value={preset} onChange={(e) => setPreset(e.target.value)}>
+              {presetList.map((p) => (
+                <option key={p.id} value={p.id}>{p.label}</option>
+              ))}
+            </select>
+            {PRESET_HINTS[preset] && <p className="field-hint">{PRESET_HINTS[preset]}</p>}
+            {selectedPreset && (
+              <p className="field-hint">
+                Backend {selectedPreset.backend} · trainer {selectedPreset.training_backend}
+              </p>
+            )}
+          </FormSection>
 
-          <label>Training episodes</label>
-          <input type="number" min={8} value={trainingEpisodes} onChange={(e) => setTrainingEpisodes(+e.target.value)} />
-
-          <label>Evaluation episodes</label>
-          <input type="number" min={4} value={evaluationEpisodes} onChange={(e) => setEvaluationEpisodes(+e.target.value)} />
-
-          <label>Measure backend</label>
-          <select value={backend} onChange={(e) => setBackend(e.target.value)}>
-            <option value="simulator">Simulator (default, no GPU)</option>
-            <option value="llama_cpp">llama.cpp (GGUF path required)</option>
-          </select>
-
-          <label>Policy trainer</label>
-          <select value={trainingBackend} onChange={(e) => setTrainingBackend(e.target.value)}>
-            <option value="stdlib">Stdlib REINFORCE (research default)</option>
-            <option value="pytorch">PyTorch / CUDA (optional)</option>
-          </select>
-
-          <label>Fine-tune checkpoint (optional)</label>
-          <input value={checkpoint} onChange={(e) => setCheckpoint(e.target.value)} placeholder="~/.seiso/checkpoints/…" />
-
-          <label>GGUF path for llama.cpp backend (optional)</label>
-          <input value={ggufPath} onChange={(e) => setGgufPath(e.target.value)} placeholder="models/model-q4.gguf" />
-
-          <label>Link training job ID (optional)</label>
-          <input value={linkTrainingJob} onChange={(e) => setLinkTrainingJob(e.target.value)} placeholder="uuid from Train page" />
-
-          <label style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
-            <input type="checkbox" checked={ggufExport} onChange={(e) => setGgufExport(e.target.checked)} />
-            Export GGUF after recommendation (llama.cpp quantize)
-          </label>
-          <label style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
-            <input type="checkbox" checked={moeEnabled} onChange={(e) => setMoeEnabled(e.target.checked)} />
-            MoE expert variants
-          </label>
-
-          <h3 style={{ marginTop: "1rem" }}>Reward weights</h3>
-          {Object.entries(reward).map(([key, val]) => (
-            <div key={key}>
-              <label>{key}</label>
-              <input
-                type="number"
-                step="0.001"
-                value={val}
-                onChange={(e) => setReward((r) => ({ ...r, [key]: +e.target.value }))}
-              />
+          <FormSection title="Training budget" collapsible defaultOpen>
+            <div className="option-grid">
+              <div>
+                <label>Training episodes</label>
+                <input type="number" min={8} value={trainingEpisodes} onChange={(e) => setTrainingEpisodes(+e.target.value)} />
+              </div>
+              <div>
+                <label>Evaluation episodes</label>
+                <input type="number" min={4} value={evaluationEpisodes} onChange={(e) => setEvaluationEpisodes(+e.target.value)} />
+              </div>
             </div>
-          ))}
+          </FormSection>
 
-          {selectedPreset && (
-            <p className="page-sub" style={{ marginTop: "0.75rem" }}>
-              {selectedPreset.label}: backend {selectedPreset.backend}, trainer {selectedPreset.training_backend}
-            </p>
-          )}
+          <FormSection title="Backends" collapsible>
+            <label>Measure backend</label>
+            <select value={backend} onChange={(e) => setBackend(e.target.value)}>
+              <option value="simulator">Simulator (no GPU)</option>
+              <option value="llama_cpp">llama.cpp (GGUF path required)</option>
+            </select>
 
-          <button className="btn btn-primary" style={{ marginTop: "1rem" }} onClick={start} disabled={starting}>
+            <label>Policy trainer</label>
+            <select value={trainingBackend} onChange={(e) => setTrainingBackend(e.target.value)}>
+              <option value="stdlib">Stdlib REINFORCE</option>
+              <option value="pytorch">PyTorch / CUDA</option>
+            </select>
+          </FormSection>
+
+          <FormSection title="Inputs" collapsible defaultOpen={false}>
+            <label>Fine-tune checkpoint</label>
+            <input value={checkpoint} onChange={(e) => setCheckpoint(e.target.value)} placeholder="~/.seiso/checkpoints/…" />
+
+            <label>GGUF path (llama.cpp)</label>
+            <input value={ggufPath} onChange={(e) => setGgufPath(e.target.value)} placeholder="models/model-q4.gguf" />
+
+            <label>Link training job ID</label>
+            <input value={linkTrainingJob} onChange={(e) => setLinkTrainingJob(e.target.value)} placeholder="uuid from Train page" />
+          </FormSection>
+
+          <div className="checkbox-group">
+            <label>
+              <input type="checkbox" checked={ggufExport} onChange={(e) => setGgufExport(e.target.checked)} />
+              Export GGUF after recommendation
+            </label>
+            <label>
+              <input type="checkbox" checked={moeEnabled} onChange={(e) => setMoeEnabled(e.target.checked)} />
+              MoE expert variants
+            </label>
+          </div>
+
+          <FormSection title="Reward engineering" hint="Tune the multi-objective reward surface." collapsible>
+            <RewardWeights weights={reward} onChange={(w) => setReward({ ...reward, ...w })} />
+          </FormSection>
+
+          <button className="btn btn-primary btn-lg" onClick={start} disabled={starting}>
             {starting ? "Starting…" : "Run RL quant pipeline"}
           </button>
         </div>
 
-        <div className="card">
-          <h3>Job log {activeJob ? `(${activeJob.slice(0, 8)}…)` : ""}</h3>
-          <div className="log-panel">{logs.join("\n") || "Logs appear here during training."}</div>
+        <div className="card research-config-card">
+          <LogStream
+            title={activeJob ? `Job log (${activeJob.slice(0, 8)}…)` : "Job log"}
+            logs={logs}
+            tall
+          />
           {recommendation && (
-            <div style={{ marginTop: "1rem" }}>
-              <h3>Recommendation</h3>
-              <pre className="log-panel" style={{ fontSize: "0.8rem" }}>
-                {JSON.stringify(recommendation, null, 2)}
-              </pre>
+            <div className="artifact-section">
+              <h3 className="section-title">Recommendation artifact</h3>
+              <ArtifactViewer data={recommendation} />
             </div>
           )}
         </div>
       </div>
 
-      <div className="card" style={{ marginTop: "1rem" }}>
-        <h3>Recent jobs</h3>
-        <table style={{ width: "100%", fontSize: "0.9rem" }}>
-          <thead>
-            <tr>
-              <th align="left">ID</th>
-              <th align="left">Status</th>
-              <th align="left">GGUF quants</th>
-              <th align="left">Created</th>
-            </tr>
-          </thead>
-          <tbody>
-            {jobs.map((j) => (
-              <tr key={j.id}>
-                <td><code>{j.id.slice(0, 8)}</code></td>
-                <td>{j.status}</td>
-                <td>{j.gguf_quants?.join(", ") || "—"}</td>
-                <td>{j.created_at?.slice(0, 19)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        <p className="page-sub" style={{ marginTop: "0.75rem" }}>
-          Use a completed job ID on the Export page to apply RL-recommended GGUF quantizations.
+      <div className="card">
+        <h3 className="section-title">Recent experiments</h3>
+        <DataTable
+          columns={[
+            {
+              key: "id",
+              header: "ID",
+              mono: true,
+              render: (j) => j.id.slice(0, 8),
+            },
+            { key: "status", header: "Status" },
+            {
+              key: "gguf_quants",
+              header: "GGUF quants",
+              render: (j) => j.gguf_quants?.join(", ") || "—",
+            },
+            {
+              key: "created_at",
+              header: "Created",
+              render: (j) => j.created_at?.slice(0, 19) ?? "—",
+            },
+          ]}
+          rows={jobs}
+          getRowKey={(j) => j.id}
+          emptyMessage="No RL quant jobs yet."
+        />
+        <p className="field-hint" style={{ marginTop: "0.75rem" }}>
+          Completed job IDs can be used on the Export page for RL-recommended GGUF quantizations.
         </p>
       </div>
     </StudioPageShell>

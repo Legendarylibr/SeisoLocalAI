@@ -75,11 +75,12 @@ With Forge running, point any OpenAI-compatible client at:
 
 ```text
 Base URL: http://127.0.0.1:8765/v1
-API key:  (any non-empty string — auth uses Forge session or local config)
+API key:  Inference key from ~/.seiso/.inference_api_key (scoped to /v1 only; not full admin access)
 ```
 
 ```bash
 curl http://127.0.0.1:8765/v1/chat/completions \
+  -H "Authorization: Bearer $(cat ~/.seiso/.inference_api_key)" \
   -H "Content-Type: application/json" \
   -d '{
     "model": "meta-llama/Llama-3.2-3B-Instruct",

@@ -137,7 +137,12 @@ _BLOCKED_MODULES = frozenset(
         "imp",
     }
 )
-_BLOCKED_NAMES = frozenset({"eval", "exec", "compile", "open", "__import__", "breakpoint", "getattr", "setattr"})
+_BLOCKED_NAMES = frozenset({
+    "eval", "exec", "compile", "open", "__import__", "breakpoint", "getattr", "setattr",
+    "delattr", "hasattr", "type", "object", "classmethod", "staticmethod", "super",
+    "vars", "input", "globals", "locals", "memoryview", "bytearray", "bytes",
+    "help", "dir", "property", "__build_class__",
+})
 _BLOCKED_ATTRS = frozenset(
     {
         "gi_frame",
@@ -185,6 +190,81 @@ def _subprocess_limits() -> None:
         pass
 
 
+def _windows_job_limits() -> int | None:
+    """Return a Windows job handle with process memory cap, or None if unavailable."""
+    if os.name != "nt":
+        return None
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+        job = kernel32.CreateJobObjectW(None, None)
+        if not job:
+            return None
+
+        class IO_COUNTERS(ctypes.Structure):
+            _fields_ = [
+                ("ReadOperationCount", ctypes.c_ulonglong),
+                ("WriteOperationCount", ctypes.c_ulonglong),
+                ("OtherOperationCount", ctypes.c_ulonglong),
+                ("ReadTransferCount", ctypes.c_ulonglong),
+                ("WriteTransferCount", ctypes.c_ulonglong),
+                ("OtherTransferCount", ctypes.c_ulonglong),
+            ]
+
+        class JOBOBJECT_BASIC_LIMIT_INFORMATION(ctypes.Structure):
+            _fields_ = [
+                ("PerProcessUserTimeLimit", wintypes.LARGE_INTEGER),
+                ("PerJobUserTimeLimit", wintypes.LARGE_INTEGER),
+                ("LimitFlags", wintypes.DWORD),
+                ("MinimumWorkingSetSize", ctypes.c_size_t),
+                ("MaximumWorkingSetSize", ctypes.c_size_t),
+                ("ActiveProcessLimit", wintypes.DWORD),
+                ("Affinity", ctypes.c_size_t),
+                ("PriorityClass", wintypes.DWORD),
+                ("SchedulingClass", wintypes.DWORD),
+            ]
+
+        class JOBOBJECT_EXTENDED_LIMIT_INFORMATION(ctypes.Structure):
+            _fields_ = [
+                ("BasicLimitInformation", JOBOBJECT_BASIC_LIMIT_INFORMATION),
+                ("IoInfo", IO_COUNTERS),
+                ("ProcessMemoryLimit", ctypes.c_size_t),
+                ("JobMemoryLimit", ctypes.c_size_t),
+                ("PeakProcessMemoryUsed", ctypes.c_size_t),
+                ("PeakJobMemoryUsed", ctypes.c_size_t),
+            ]
+
+        info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION()
+        info.BasicLimitInformation.LimitFlags = 0x100  # JOB_OBJECT_LIMIT_PROCESS_MEMORY
+        info.ProcessMemoryLimit = _MAX_RSS_BYTES
+        JobObjectExtendedLimitInformation = 9
+        kernel32.SetInformationJobObject(
+            job,
+            JobObjectExtendedLimitInformation,
+            ctypes.byref(info),
+            ctypes.sizeof(info),
+        )
+        return int(job)
+    except (AttributeError, OSError, ValueError):
+        return None
+
+
+def _assign_windows_job(proc: subprocess.Popen[str], job_handle: int | None) -> None:
+    if os.name != "nt" or not job_handle:
+        return
+    try:
+        import ctypes
+
+        ctypes.windll.kernel32.AssignProcessToJobObject(  # type: ignore[attr-defined]
+            job_handle,
+            int(proc._handle),  # noqa: SLF001
+        )
+    except (AttributeError, OSError, ValueError):
+        pass
+
+
 class _CodeValidator(ast.NodeVisitor):
     def __init__(self) -> None:
         self.errors: list[str] = []
@@ -200,6 +280,11 @@ class _CodeValidator(ast.NodeVisitor):
             root = node.module.split(".")[0]
             if root in _BLOCKED_MODULES:
                 self.errors.append(f"Import blocked: {node.module}")
+
+    def visit_Name(self, node: ast.Name) -> None:
+        if isinstance(node.ctx, ast.Load) and node.id in _BLOCKED_NAMES:
+            self.errors.append(f"Name blocked: {node.id}")
+        self.generic_visit(node)
 
     def visit_Call(self, node: ast.Call) -> None:
         if isinstance(node.func, ast.Name) and node.func.id in _BLOCKED_NAMES:
@@ -282,24 +367,45 @@ def execute_code(code: str, sandbox_root: str | None = None, user_id: str | None
         pass
 
     run_kwargs: dict = {
-        "capture_output": True,
+        "stdout": subprocess.PIPE,
+        "stderr": subprocess.PIPE,
         "text": True,
-        "timeout": _TIMEOUT_SEC,
         "cwd": str(base),
-        "env": {"PYTHONPATH": "", "PATH": "/usr/bin:/bin", "HOME": str(base)},
+        "env": {
+            "PYTHONPATH": "",
+            "PATH": os.environ.get("PATH", ""),
+            "HOME": str(base),
+            "SystemRoot": os.environ.get("SystemRoot", ""),
+        },
         "start_new_session": True,
     }
     if os.name == "posix":
         run_kwargs["preexec_fn"] = _subprocess_limits
+        run_kwargs["env"]["PATH"] = "/usr/bin:/bin"
 
+    py_args = [sys.executable, "-I", "-S"]
+    if sys.version_info >= (3, 11):
+        py_args.append("-P")
+    py_args.append(str(script))
+
+    job_handle = _windows_job_limits()
     try:
-        proc = subprocess.run(
-            [sys.executable, "-I", "-S", str(script)],
-            **run_kwargs,
-        )
-        out = (proc.stdout or proc.stderr or "").strip()[:_MAX_OUTPUT]
+        proc = subprocess.Popen(py_args, **run_kwargs)
+        _assign_windows_job(proc, job_handle)
+        try:
+            stdout, stderr = proc.communicate(timeout=_TIMEOUT_SEC)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.communicate()
+            return json.dumps({"error": f"Timeout after {_TIMEOUT_SEC}s"})
+        out = (stdout or stderr or "").strip()[:_MAX_OUTPUT]
         return json.dumps({"stdout": out, "exit_code": proc.returncode})
-    except subprocess.TimeoutExpired:
-        return json.dumps({"error": f"Timeout after {_TIMEOUT_SEC}s"})
     finally:
+        if job_handle and os.name == "nt":
+            try:
+                import ctypes
+
+                ctypes.windll.kernel32.CloseHandle(job_handle)  # type: ignore[attr-defined]
+            except (AttributeError, OSError):
+                pass
         script.unlink(missing_ok=True)

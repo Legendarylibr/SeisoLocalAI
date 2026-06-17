@@ -56,6 +56,7 @@ CREATE TABLE IF NOT EXISTS training_jobs (
     config_json TEXT NOT NULL,
     checkpoint_path TEXT,
     metrics_json TEXT DEFAULT '{}',
+    error_text TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -66,6 +67,7 @@ CREATE TABLE IF NOT EXISTS export_jobs (
     status TEXT NOT NULL,
     config_json TEXT NOT NULL,
     output_paths_json TEXT DEFAULT '{}',
+    error_text TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -79,6 +81,7 @@ CREATE TABLE IF NOT EXISTS rl_quant_jobs (
     recommendation_path TEXT,
     recommendation_json TEXT DEFAULT '{}',
     gguf_quants_json TEXT DEFAULT '[]',
+    error_text TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -93,6 +96,7 @@ CREATE TABLE IF NOT EXISTS compress_jobs (
     model_dir TEXT,
     stages_json TEXT DEFAULT '[]',
     stage_results_json TEXT DEFAULT '{}',
+    error_text TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -107,6 +111,7 @@ CREATE TABLE IF NOT EXISTS image_compress_jobs (
     model_dir TEXT,
     stages_json TEXT DEFAULT '[]',
     stage_results_json TEXT DEFAULT '{}',
+    error_text TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -173,6 +178,14 @@ CREATE INDEX IF NOT EXISTS idx_providers_user ON providers(user_id);
 CREATE INDEX IF NOT EXISTS idx_knowledge_bases_user ON knowledge_bases(user_id);
 """
 
+_JOB_ERROR_TABLES = (
+    "training_jobs",
+    "export_jobs",
+    "rl_quant_jobs",
+    "compress_jobs",
+    "image_compress_jobs",
+)
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -217,6 +230,13 @@ class Database:
             await conn.execute("PRAGMA journal_mode = WAL")
             await conn.execute("PRAGMA synchronous = NORMAL")
 
+    async def _migrate_schema(self, conn: aiosqlite.Connection) -> None:
+        for table in _JOB_ERROR_TABLES:
+            async with conn.execute(f"PRAGMA table_info({table})") as cur:
+                cols = {row[1] for row in await cur.fetchall()}
+            if "error_text" not in cols:
+                await conn.execute(f"ALTER TABLE {table} ADD COLUMN error_text TEXT")
+
     async def _ensure_conn(self) -> aiosqlite.Connection:
         if self._conn_holder is None:
             if self._ephemeral:
@@ -228,6 +248,8 @@ class Database:
             await self._configure(conn)
             if not self._initialized:
                 await conn.executescript(SCHEMA)
+                await conn.commit()
+                await self._migrate_schema(conn)
                 await conn.commit()
                 self._initialized = True
             self._conn_holder = conn
@@ -449,16 +471,25 @@ class Database:
         *,
         checkpoint_path: str | None = None,
         metrics: dict | None = None,
+        error_text: str | None = None,
     ) -> None:
         now = _now()
         async with self._conn() as conn:
-            if checkpoint_path or metrics is not None:
+            if checkpoint_path or metrics is not None or error_text is not None:
                 await conn.execute(
                     """UPDATE training_jobs SET status = ?, updated_at = ?,
                        checkpoint_path = COALESCE(?, checkpoint_path),
-                       metrics_json = COALESCE(?, metrics_json)
+                       metrics_json = COALESCE(?, metrics_json),
+                       error_text = COALESCE(?, error_text)
                        WHERE id = ?""",
-                    (status, now, checkpoint_path, json.dumps(metrics or {}), job_id),
+                    (
+                        status,
+                        now,
+                        checkpoint_path,
+                        json.dumps(metrics or {}) if metrics is not None else None,
+                        error_text,
+                        job_id,
+                    ),
                 )
             else:
                 await conn.execute(
@@ -629,14 +660,23 @@ class Database:
         status: str,
         *,
         output_paths: dict | None = None,
+        error_text: str | None = None,
     ) -> None:
         now = _now()
         async with self._conn() as conn:
-            if output_paths is not None:
+            if output_paths is not None or error_text is not None:
                 await conn.execute(
                     """UPDATE export_jobs SET status = ?, updated_at = ?,
-                       output_paths_json = ? WHERE id = ?""",
-                    (status, now, json.dumps(output_paths), job_id),
+                       output_paths_json = COALESCE(?, output_paths_json),
+                       error_text = COALESCE(?, error_text)
+                       WHERE id = ?""",
+                    (
+                        status,
+                        now,
+                        json.dumps(output_paths) if output_paths is not None else None,
+                        error_text,
+                        job_id,
+                    ),
                 )
             else:
                 await conn.execute(
@@ -684,6 +724,7 @@ class Database:
         recommendation_path: str | None = None,
         recommendation_json: dict | None = None,
         gguf_quants: list[str] | None = None,
+        error_text: str | None = None,
     ) -> None:
         now = _now()
         async with self._conn() as conn:
@@ -692,7 +733,8 @@ class Database:
                    output_dir = COALESCE(?, output_dir),
                    recommendation_path = COALESCE(?, recommendation_path),
                    recommendation_json = COALESCE(?, recommendation_json),
-                   gguf_quants_json = COALESCE(?, gguf_quants_json)
+                   gguf_quants_json = COALESCE(?, gguf_quants_json),
+                   error_text = COALESCE(?, error_text)
                    WHERE id = ?""",
                 (
                     status,
@@ -701,6 +743,7 @@ class Database:
                     recommendation_path,
                     json.dumps(recommendation_json) if recommendation_json is not None else None,
                     json.dumps(gguf_quants) if gguf_quants is not None else None,
+                    error_text,
                     job_id,
                 ),
             )
@@ -746,6 +789,7 @@ class Database:
         model_dir: str | None = None,
         stages: list[str] | None = None,
         stage_results: dict | None = None,
+        error_text: str | None = None,
     ) -> None:
         now = _now()
         async with self._conn() as conn:
@@ -755,7 +799,8 @@ class Database:
                    run_dir = COALESCE(?, run_dir),
                    model_dir = COALESCE(?, model_dir),
                    stages_json = COALESCE(?, stages_json),
-                   stage_results_json = COALESCE(?, stage_results_json)
+                   stage_results_json = COALESCE(?, stage_results_json),
+                   error_text = COALESCE(?, error_text)
                    WHERE id = ?""",
                 (
                     status,
@@ -765,6 +810,7 @@ class Database:
                     model_dir,
                     json.dumps(stages) if stages is not None else None,
                     json.dumps(stage_results) if stage_results is not None else None,
+                    error_text,
                     job_id,
                 ),
             )
@@ -812,6 +858,7 @@ class Database:
         model_dir: str | None = None,
         stages: list[str] | None = None,
         stage_results: dict | None = None,
+        error_text: str | None = None,
     ) -> None:
         now = _now()
         async with self._conn() as conn:
@@ -821,7 +868,8 @@ class Database:
                    run_dir = COALESCE(?, run_dir),
                    model_dir = COALESCE(?, model_dir),
                    stages_json = COALESCE(?, stages_json),
-                   stage_results_json = COALESCE(?, stage_results_json)
+                   stage_results_json = COALESCE(?, stage_results_json),
+                   error_text = COALESCE(?, error_text)
                    WHERE id = ?""",
                 (
                     status,
@@ -831,6 +879,7 @@ class Database:
                     model_dir,
                     json.dumps(stages) if stages is not None else None,
                     json.dumps(stage_results) if stage_results is not None else None,
+                    error_text,
                     job_id,
                 ),
             )

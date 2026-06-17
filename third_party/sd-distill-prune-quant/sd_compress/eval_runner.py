@@ -55,7 +55,9 @@ def evaluate_stage(
 
     baseline = _baseline_metrics(config)
     if baseline is None:
-        return {}
+        raise ValueError(
+            f"Baseline metrics required for stage '{stage}'. Run the baseline stage first."
+        )
 
     device = select_device()
     eval_dir = stage_eval_dir(config.output_dir, stage)
@@ -97,7 +99,7 @@ def evaluate_stage(
     for i, prompt in enumerate(tqdm(baseline["prompts"], desc=f"eval:{stage}")):
         baseline_img = Image.open(baseline["images"][i])
         start = time.time()
-        generator = torch.Generator(device=device).manual_seed(42 + i) if device != "mps" else None
+        generator = torch.Generator(device=device).manual_seed(config.seed + i)
         with torch.inference_mode():
             gen_image = pipe(
                 prompt,

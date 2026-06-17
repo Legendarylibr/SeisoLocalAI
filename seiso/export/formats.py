@@ -174,11 +174,15 @@ def _write_export_sidecar(dest: Path, ckpt: Path, fmt: ExportFormat, kind: str) 
     """Write seiso_export_metadata.json alongside exported artifacts."""
     if not dest.is_dir():
         return
+    from seiso.research.provenance import directory_checksum_manifest, git_commit_optional
+
     payload = {
         "format": fmt.value,
         "checkpoint_kind": kind,
         "source_checkpoint": str(ckpt),
         "exported_at": datetime.now(timezone.utc).isoformat(),
+        "git_commit": git_commit_optional(),
+        "file_checksums_sha256": directory_checksum_manifest(dest, max_files=100),
     }
     manifest = ckpt / "seiso_manifest.json"
     if manifest.is_file():

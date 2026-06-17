@@ -92,10 +92,20 @@ def training_capabilities() -> dict[str, Any]:
         "multi_gpu_available": has_cuda_gpu and gpu.device_count > 1,
         "vendor": gpu.vendor.value,
         "gpu_count": gpu.device_count,
-        "device_name": gpu.device_name,
+        "device_label": _gpu_label(gpu),
         "recommended_quant": "4bit" if supports_bnb and (has_cuda_gpu or has_rocm_gpu) else "16bit",
         "install_extra": _install_extra(system, has_cuda_gpu, has_rocm_gpu, mlx_ok),
     }
+
+
+def _gpu_label(gpu) -> str:
+    if gpu.device_count <= 0:
+        return "cpu"
+    if gpu.vendor == GpuVendor.NVIDIA:
+        return "nvidia_gpu"
+    if gpu.vendor == GpuVendor.AMD:
+        return "amd_gpu"
+    return "gpu"
 
 
 def _install_extra(system: str, nvidia: bool, rocm: bool, mlx: bool) -> str:

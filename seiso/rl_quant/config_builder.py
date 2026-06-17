@@ -46,6 +46,11 @@ def build_framework_config(
     else:
         base = named_preset(str(payload.get("preset", "reproducible")))
 
+    preset = str(payload.get("preset", "")).lower()
+    write_report = payload.get("write_research_report")
+    if write_report is None:
+        write_report = preset not in {"minimal", "smoke"}
+
     overrides: dict[str, Any] = {
         **_artifact_paths(output_root, run_name),
         "training_episodes": int(payload.get("training_episodes", base.training_episodes)),
@@ -53,11 +58,10 @@ def build_framework_config(
         "seed": int(payload.get("seed", base.seed)),
         "backend": str(payload.get("backend", base.backend)),
         "training_backend": str(payload.get("training_backend", base.training_backend)),
-        "write_research_report": bool(payload.get("write_research_report", False)),
+        "write_research_report": bool(write_report),
         "llama_cpp_gguf_export_enabled": bool(payload.get("gguf_export", False)),
     }
 
-    preset = str(payload.get("preset", "")).lower()
     if preset in {"post_train", "posttrain"}:
         overrides["prompt_library_path"] = str(_VENDOR_ROOT / "prompts" / "post_train_library.json")
     elif payload.get("prompt_library"):

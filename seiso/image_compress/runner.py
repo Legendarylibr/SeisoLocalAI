@@ -8,6 +8,13 @@ from typing import Any
 
 from seiso.image_compress.bootstrap import require_sd_compress
 from seiso.image_compress.config_builder import build_pipeline_config
+from seiso.research.provenance import (
+    apply_determinism,
+    collect_env_report,
+    directory_checksum_manifest,
+    write_json,
+    write_run_provenance,
+)
 
 
 def _latest_model_dir(config: Any) -> str:
@@ -16,6 +23,16 @@ def _latest_model_dir(config: Any) -> str:
         if path.is_dir() and any(path.iterdir()):
             return str(path)
     raise FileNotFoundError("No model artifacts found in run output")
+
+
+def _check_quality_threshold(config: Any, result: dict[str, Any], stage: str) -> None:
+    if not getattr(config, "enforce_quality_thresholds", False) or not result:
+        return
+    clip_ret = result.get("clip_retention", 1.0)
+    if clip_ret < config.min_clip_retention:
+        raise ValueError(
+            f"{stage}: CLIP retention {clip_ret:.3f} below threshold {config.min_clip_retention}"
+        )
 
 
 def run_image_compress_job(
@@ -51,6 +68,7 @@ def run_image_compress_job(
     )
     config = cfg_blob["config"]
     stages = cfg_blob["stages"]
+    seed = int(payload.get("seed", getattr(config, "seed", 42)))
 
     configure_logging(str(payload.get("log_level", "INFO")))
 
@@ -58,6 +76,17 @@ def run_image_compress_job(
         LOGGER.info(msg)
         if on_log:
             on_log(msg)
+
+    apply_determinism(seed, deterministic=bool(getattr(config, "deterministic", True)))
+    output_root = Path(cfg_blob["output_root"])
+    write_run_provenance(
+        output_root,
+        pipeline="image_compress",
+        config={**config.to_dict(), "stages": stages, "preset": cfg_blob["preset"]},
+        seed=seed,
+    )
+    env_path = output_root / "env_report.json"
+    write_json(env_path, collect_env_report())
 
     config.dump()
     env = report_torch_environment()
@@ -88,6 +117,7 @@ def run_image_compress_job(
         elif stage == "evaluate_distilled":
             result = evaluate_stage(config, "distilled", config.distill_dir)
             stage_results["evaluate_distilled"] = result
+            _check_quality_threshold(config, result, stage)
 
         elif stage == "prune":
             prune_all(config)
@@ -101,6 +131,7 @@ def run_image_compress_job(
                 compute_model_size=True,
             )
             stage_results["evaluate_pruned"] = result
+            _check_quality_threshold(config, result, stage)
 
         elif stage == "finetune":
             finetune_after_pruning(config)
@@ -109,6 +140,7 @@ def run_image_compress_job(
         elif stage == "evaluate_finetuned":
             result = evaluate_stage(config, "finetuned", config.finetune_dir)
             stage_results["evaluate_finetuned"] = result
+            _check_quality_threshold(config, result, stage)
 
         elif stage == "quantize":
             quantize(config)
@@ -122,6 +154,7 @@ def run_image_compress_job(
                 compute_model_size=True,
             )
             stage_results["evaluate_quantized"] = result
+            _check_quality_threshold(config, result, stage)
 
         elif stage == "optimize":
             install_runtime_helpers(config)
@@ -156,10 +189,17 @@ def run_image_compress_job(
 
     _log("Image compression pipeline complete")
 
+    checksum_path = output_root / "artifact_checksums.json"
+    model_path = Path(model_dir)
+    checksums = directory_checksum_manifest(model_path) if model_path.is_dir() else {}
+    write_json(checksum_path, checksums)
+
     return {
         "run_dir": str(Path(config.output_dir).resolve()),
         "output_root": cfg_blob["output_root"],
         "stages": stages,
         "stage_results": stage_results,
         "model_dir": model_dir,
+        "provenance_path": str(output_root / "seiso_run_provenance.json"),
+        "checksum_manifest": str(checksum_path),
     }

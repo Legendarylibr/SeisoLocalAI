@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import csv
 import json
+import random
 from pathlib import Path
 from typing import Any
 
@@ -29,6 +30,10 @@ class RecipeOrchestrator(Orchestrator):
         edges = recipe.get("edges", [])
         self._emit_log(job_id, f"Executing recipe: {recipe.get('name', job_id)} ({len(nodes)} nodes)")
 
+        recipe_snapshot_path = safe_join(self.sandbox_root, "recipes", user_id, job_id, "recipe_snapshot.json")
+        recipe_snapshot_path.parent.mkdir(parents=True, exist_ok=True)
+        recipe_snapshot_path.write_text(json.dumps(recipe, indent=2), encoding="utf-8")
+
         # Topological execution of node graph
         outputs: dict[str, Any] = {}
         for node in self._order_nodes(nodes, edges):
@@ -48,7 +53,7 @@ class RecipeOrchestrator(Orchestrator):
                 f.write(json.dumps(row) + "\n")
 
         self._emit_log(job_id, f"Recipe output: {out_path}")
-        return {"output_path": str(out_path), "row_count": len(outputs.get("_final", []))}
+        return {"output_path": str(out_path), "row_count": len(outputs.get("_final", [])), "recipe_snapshot": str(recipe_snapshot_path)}
 
     async def _run_node(
         self,
@@ -92,7 +97,9 @@ class RecipeOrchestrator(Orchestrator):
             source_id = config.get("source")
             rows = outputs.get(source_id, [])
             n = min(config.get("count", 100), len(rows))
-            return rows[:n]
+            seed = int(config.get("seed", payload.get("seed", 42)))
+            rng = random.Random(seed)
+            return rng.sample(rows, n) if n < len(rows) else list(rows)
 
         if ntype == "output":
             source_id = config.get("source")

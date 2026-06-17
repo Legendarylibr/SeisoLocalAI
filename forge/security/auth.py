@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import secrets
 import time
-from collections import OrderedDict, defaultdict
+from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
@@ -14,12 +14,11 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 
 from forge.config import ForgeSettings, get_settings
+from forge.security.token_revocation import is_jti_revoked, revoke_jti
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
 ALGORITHM = "HS256"
-_MAX_REVOKED_JTIS = 10_000
-_revoked_jtis: OrderedDict[str, None] = OrderedDict()
 
 
 def hash_password(password: str) -> str:
@@ -51,12 +50,9 @@ def revoke_access_token(token: str, settings: ForgeSettings) -> None:
     try:
         payload = jwt.decode(token, settings.secret_key, algorithms=[ALGORITHM])
         jti = payload.get("jti")
-        if jti:
-            key = str(jti)
-            _revoked_jtis[key] = None
-            _revoked_jtis.move_to_end(key)
-            while len(_revoked_jtis) > _MAX_REVOKED_JTIS:
-                _revoked_jtis.popitem(last=False)
+        exp = payload.get("exp")
+        if jti and exp is not None:
+            revoke_jti(str(jti), float(exp))
     except JWTError:
         pass
 
@@ -65,7 +61,7 @@ def decode_token(token: str, settings: ForgeSettings) -> str:
     try:
         payload = jwt.decode(token, settings.secret_key, algorithms=[ALGORITHM])
         jti = payload.get("jti")
-        if jti and str(jti) in _revoked_jtis:
+        if jti and is_jti_revoked(str(jti)):
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Token revoked")
         sub = payload.get("sub")
         if not sub:
@@ -82,7 +78,6 @@ async def get_current_user_id(
 ) -> str:
     if creds and creds.credentials:
         return decode_token(creds.credentials, settings)
-    # Cookie fallback for browser sessions
     cookie = request.cookies.get("seiso_token")
     if cookie:
         return decode_token(cookie, settings)

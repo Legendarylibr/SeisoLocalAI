@@ -443,27 +443,26 @@ async def test_openai_rejects_system_role(app, auth_client):
 
 
 @pytest.mark.asyncio
-async def test_jwt_revocation_uses_lru_not_full_clear(monkeypatch):
+async def test_jwt_revocation_retained_until_expiry(monkeypatch):
     from forge.config import get_settings
     from forge.security import auth as auth_mod
+    from forge.security.token_revocation import clear_revocations_for_tests, is_jti_revoked
 
-    monkeypatch.setattr(auth_mod, "_MAX_REVOKED_JTIS", 3)
-    auth_mod._revoked_jtis.clear()
-
+    clear_revocations_for_tests()
     settings = get_settings()
-    tokens = [auth_mod.create_access_token(f"user-{i}", settings) for i in range(4)]
-    for token in tokens[:3]:
+    tokens = [auth_mod.create_access_token(f"user-{i}", settings) for i in range(5)]
+    for token in tokens:
         auth_mod.revoke_access_token(token, settings)
-    assert len(auth_mod._revoked_jtis) == 3
 
-    auth_mod.revoke_access_token(tokens[3], settings)
-    assert len(auth_mod._revoked_jtis) == 3
+    for token in tokens:
+        with pytest.raises(Exception):
+            auth_mod.decode_token(token, settings)
 
-    # Oldest revocation (tokens[0]) evicted — still decodable
-    auth_mod.decode_token(tokens[0], settings)
-    # Middle revocation retained
-    with pytest.raises(Exception):
-        auth_mod.decode_token(tokens[1], settings)
+    # Prune should not resurrect revoked tokens before JWT exp.
+    from jose import jwt
+
+    payload = jwt.decode(tokens[0], settings.secret_key, algorithms=[auth_mod.ALGORITHM])
+    assert is_jti_revoked(str(payload["jti"]))
 
 
 @pytest.mark.asyncio
@@ -486,3 +485,62 @@ async def test_jwt_revoked_after_logout(app, auth_client):
 
     me = await client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
     assert me.status_code == 401
+
+
+def test_remote_access_requires_ack(monkeypatch, tmp_path):
+    monkeypatch.setenv("SEISO_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("SEISO_SECRET_KEY", "test-secret-key-for-jwt-signing-32b")
+    monkeypatch.setenv("SEISO_ALLOW_REMOTE", "true")
+    monkeypatch.delenv("SEISO_REMOTE_ACK", raising=False)
+    from forge.api.deps import clear_dependency_caches
+
+    clear_dependency_caches()
+    with pytest.raises(RuntimeError, match="SEISO_REMOTE_ACK"):
+        from forge.config import ForgeSettings
+
+        ForgeSettings()
+
+
+def test_trust_proxy_requires_allowlist(monkeypatch, tmp_path):
+    monkeypatch.setenv("SEISO_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("SEISO_SECRET_KEY", "test-secret-key-for-jwt-signing-32b")
+    monkeypatch.setenv("SEISO_TRUST_PROXY", "true")
+    monkeypatch.delenv("SEISO_TRUSTED_PROXY_IPS", raising=False)
+    from forge.api.deps import clear_dependency_caches
+
+    clear_dependency_caches()
+    with pytest.raises(RuntimeError, match="SEISO_TRUSTED_PROXY_IPS"):
+        from forge.config import ForgeSettings
+
+        ForgeSettings()
+
+
+@pytest.mark.asyncio
+async def test_inference_api_key_scoped_to_openai(app, auth_client, tmp_path):
+    from forge.config import get_settings
+
+    settings = get_settings()
+    assert settings.inference_api_key
+    client, _token, _headers, _tmp = auth_client
+    res = await client.post(
+        "/v1/chat/completions",
+        headers={"Authorization": f"Bearer {settings.inference_api_key}"},
+        json={
+            "model": "default",
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream": False,
+        },
+    )
+    assert res.status_code in {400, 500}
+
+    admin = await client.get("/api/auth/me", headers={"Authorization": f"Bearer {settings.inference_api_key}"})
+    assert admin.status_code == 401
+
+
+def test_web_search_strips_unsafe_urls():
+    from forge.tools.web_search import _sanitize_result_url
+
+    assert _sanitize_result_url("https://example.com/path") == "https://example.com/path"
+    assert _sanitize_result_url("javascript:alert(1)") == ""
+    assert _sanitize_result_url("http://127.0.0.1/admin") == ""
+    assert _sanitize_result_url("file:///etc/passwd") == ""

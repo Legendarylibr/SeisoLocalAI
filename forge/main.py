@@ -88,12 +88,17 @@ def create_app() -> FastAPI:
         response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; "
+            "base-uri 'self'; "
+            "object-src 'none'; "
+            "form-action 'self'; "
             "connect-src 'self'; "
             "style-src 'self' 'unsafe-inline'; "
             "script-src 'self'; "
             "img-src 'self' data: blob:; "
             "frame-ancestors 'none'"
         )
+        response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
+        response.headers["Cross-Origin-Resource-Policy"] = "same-origin"
         return response
 
     prefix = "/api"

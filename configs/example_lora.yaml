@@ -21,4 +21,5 @@ use_triton: true
 use_fused_ce: true
 use_fused_lora: true
 seed: 42
+deterministic: true
 save_steps: 50

@@ -12,6 +12,7 @@ from httpx import ASGITransport, AsyncClient
 from forge.api.deps import clear_dependency_caches, get_db
 from forge.main import create_app
 from forge.security.auth import create_access_token, hash_password
+from forge.security.token_revocation import clear_revocations_for_tests
 
 
 @pytest.fixture(autouse=True)
@@ -20,6 +21,7 @@ def _reset_caches(monkeypatch, tmp_path):
     monkeypatch.setenv("SEISO_SECRET_KEY", "test-secret-key-for-jwt-signing-32b")
     monkeypatch.setenv("SEISO_DB_ENCRYPTION_KEY", "01" * 32)
     monkeypatch.setenv("SEISO_DB_EPHEMERAL", "false")
+    clear_revocations_for_tests()
     clear_dependency_caches()
     yield
     clear_dependency_caches()

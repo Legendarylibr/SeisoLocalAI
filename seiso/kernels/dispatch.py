@@ -123,7 +123,11 @@ def kernel_metadata() -> dict:
         pass
     return {
         "vendor": platform.vendor.value,
-        "device_name": platform.device_name,
+        "device_label": (
+            "nvidia_gpu"
+            if platform.vendor.value == "nvidia"
+            else "amd_gpu" if platform.vendor.value == "amd" else "cpu"
+        ),
         "device_count": platform.device_count,
         "kernel_backend": backend,
         "native_cuda": platform.supports_native_cuda and backend == "cuda",

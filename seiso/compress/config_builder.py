@@ -151,7 +151,12 @@ def build_pipeline_config(
             "port": int(payload.get("export_port", 8000)),
         },
         "model_dir": model_dir,
-        "env_report": bool(payload.get("env_report", False)),
+        "env_report": bool(
+            payload.get(
+                "env_report",
+                preset_name not in {"smoke"} and bool(payload.get("deterministic", True)),
+            )
+        ),
         "min_free_gb": payload.get("min_free_gb"),
         "max_run_dir_gb": payload.get("max_run_dir_gb"),
     }

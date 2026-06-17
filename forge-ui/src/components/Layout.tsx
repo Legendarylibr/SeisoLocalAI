@@ -18,6 +18,7 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
     items: [
       { to: "/hub", label: "Hub", icon: "hub", desc: "Browse & download" },
       { to: "/chat", label: "Chat", icon: "chat", desc: "Local inference" },
+      { to: "/knowledge", label: "Knowledge", icon: "knowledge", desc: "Local RAG corpus" },
     ],
   },
   {

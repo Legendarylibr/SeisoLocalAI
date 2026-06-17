@@ -93,12 +93,11 @@ class TrainingOrchestrator(Orchestrator):
 
         stats = gpu_stats()
         if stats:
-            self._emit_log(job_id, f"GPU stats: {json.dumps(stats)}")
+            self._emit_log(job_id, f"GPU utilization snapshot: {len(stats)} device(s)")
 
         self._emit_log(job_id, f"Checkpoint saved: {checkpoint}")
         return {
             "checkpoint_path": str(checkpoint),
-            "gpu_stats": stats,
             "metrics_summary": metrics_summary,
         }
 

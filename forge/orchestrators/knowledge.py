@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from seiso.research.provenance import sha256_file
 import hashlib
 import json
 from pathlib import Path
@@ -44,6 +45,7 @@ class KnowledgeOrchestrator(Orchestrator):
         kb_dir.mkdir(parents=True, exist_ok=True)
 
         text = source.read_text(encoding="utf-8", errors="replace")
+        source_hash = sha256_file(source)
         chunks = self._chunk(text)
         self._emit_log(job_id, f"Ingested {source.name}: {len(chunks)} chunks")
         audit_event("kb_ingest", user_id=user_id, kb_id=kb_id, source=str(source.name), chunks=len(chunks))
@@ -55,6 +57,8 @@ class KnowledgeOrchestrator(Orchestrator):
                     "id": hashlib.sha256(f"{kb_id}:{i}:{chunk[:32]}".encode()).hexdigest()[:16],
                     "text": chunk,
                     "source": str(source.name),
+                    "source_path": str(source),
+                    "source_sha256": source_hash,
                     "chunk_index": i,
                 }
                 f.write(json.dumps(record) + "\n")

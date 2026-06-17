@@ -15,6 +15,7 @@ const CompressPage = lazy(() => import("@/pages/CompressPage").then((m) => ({ de
 const ImageCompressPage = lazy(() =>
   import("@/pages/ImageCompressPage").then((m) => ({ default: m.ImageCompressPage })),
 );
+const KnowledgePage = lazy(() => import("@/pages/KnowledgePage").then((m) => ({ default: m.KnowledgePage })));
 const RecipesPage = lazy(() => import("@/pages/RecipesPage").then((m) => ({ default: m.RecipesPage })));
 const IntegrationsPage = lazy(() =>
   import("@/pages/IntegrationsPage").then((m) => ({ default: m.IntegrationsPage })),
@@ -68,6 +69,7 @@ export function App() {
           <Route path="/rl-quant" element={<Guard><RLQuantPage /></Guard>} />
           <Route path="/compress" element={<Guard><CompressPage /></Guard>} />
           <Route path="/image-compress" element={<Guard><ImageCompressPage /></Guard>} />
+          <Route path="/knowledge" element={<Guard><KnowledgePage /></Guard>} />
           <Route path="/recipes" element={<Guard><RecipesPage /></Guard>} />
           <Route path="/integrations" element={<Guard><IntegrationsPage /></Guard>} />
           <Route path="/settings" element={<Guard><SettingsPage /></Guard>} />

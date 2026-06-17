@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
 from forge.api.deps import get_db, get_export_orchestrator
-from forge.api.routes._stream import spawn_background
+from forge.api.routes._stream import job_failure_message, spawn_background
 from forge.config import ForgeSettings, get_settings
 from forge.db.store import Database
 from forge.orchestrators.export import ExportOrchestrator
@@ -255,6 +255,7 @@ async def start_export(
                     job_id,
                     job.status.value,
                     output_paths=job.result.get("outputs"),
+                    error_text=job.error if job.status.value == "failed" else None,
                 )
                 if job.status.value == "completed" and job.result.get("outputs"):
                     from forge.services.model_registry import register_export_outputs
@@ -266,8 +267,12 @@ async def start_export(
                         outputs=job.result["outputs"],
                         job_id=job_id,
                     )
-        except Exception:
-            await db.update_export_job_status(job_id, "failed")
+        except Exception as exc:
+            await db.update_export_job_status(
+                job_id,
+                "failed",
+                error_text=job_failure_message(orchestrator, job_id, exc),
+            )
 
     spawn_background(_run())
     audit_event("export_start", user_id=user_id, job_id=job_id, formats=body.formats)
