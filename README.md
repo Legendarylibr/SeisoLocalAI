@@ -97,10 +97,10 @@ Full command reference: [docs/cli.md](docs/cli.md) · Documentation index: [docs
 
 ```
 Seiso/
-├── seiso/           # Core library (Apache-2.0)
+├── seiso/           # Core library
 ├── seiso_cli/       # CLI entrypoints
 ├── forge/           # FastAPI backend + orchestrators
-└── forge-ui/        # React/TypeScript frontend (AGPL-3.0)
+└── forge-ui/        # React/TypeScript frontend
 ```
 
 Backend orchestrators spawn isolated workers with SSE log streaming:
@@ -130,8 +130,7 @@ Inference vs training differ on macOS — MLX is inference-only; training uses P
 
 ## Licensing
 
-- **Apache-2.0** — `seiso/` core package and CLI
-- **AGPL-3.0** — `forge-ui/` web components
+Seiso is licensed under the **GNU General Public License v3.0 (GPL-3.0)**. See [LICENSE](LICENSE).
 
 ## Features
 

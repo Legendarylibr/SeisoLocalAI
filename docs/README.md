@@ -75,10 +75,10 @@ seiso-bench-kernels --op all
 
 ```
 Seiso/
-├── seiso/           # Core library (Apache-2.0)
+├── seiso/           # Core library (GPL-3.0)
 ├── seiso_cli/       # CLI entrypoints (`seiso`, `seiso-bench-kernels`)
 ├── forge/           # FastAPI backend + orchestrators
-├── forge-ui/        # React/TypeScript frontend (AGPL-3.0)
+├── forge-ui/        # React/TypeScript frontend (GPL-3.0)
 ├── configs/         # Example training/compression configs
 ├── data/            # Sample dataset (example_lora.yaml)
 ├── deploy/          # Caddy, nginx, systemd, HTTPS env example
