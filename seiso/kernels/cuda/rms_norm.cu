@@ -1,7 +1,7 @@
 /**
- * Seiso "Stripe" RMSNorm — native CUDA, architecturally unlike Unsloth/Triton.
+ * Seiso "Stripe" RMSNorm — native CUDA with warp-stripe reduction.
  *
- * Design choices (intentionally different):
+ * Design choices:
  *   - One CTA per row; columns striped across WARPS (not threads) for coalescing.
  *   - Variance reduced via warp-shuffles only — no block-wide shared-memory tree.
  *   - Optional fused residual add in the same pass (no extra global read/write).

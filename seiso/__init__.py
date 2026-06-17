@@ -3,7 +3,7 @@
 __version__ = "0.1.0"
 
 from seiso.export.formats import ExportFormat, export_checkpoint
-from seiso.models.fast_model import FastModel, resolve_dtype
+from seiso.models.seiso_model import SeisoModel, resolve_dtype
 from seiso.models.loader import ModelKind, load_model
 from seiso.training.config import TrainConfig
 
@@ -11,7 +11,7 @@ __all__ = [
     "__version__",
     "ModelKind",
     "load_model",
-    "FastModel",
+    "SeisoModel",
     "resolve_dtype",
     "TrainConfig",
     "ExportFormat",

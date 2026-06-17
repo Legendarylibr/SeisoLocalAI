@@ -3,10 +3,7 @@
 from __future__ import annotations
 
 import gc
-import logging
 from typing import Any
-
-logger = logging.getLogger(__name__)
 
 # model_id -> weakref to model (for validation) + list of modules patched
 _PATCH_REGISTRY: dict[int, list[Any]] = {}
@@ -47,13 +44,6 @@ def restore_kernel_patches(model: Any | None = None) -> int:
                 restored += 1
     _PATCH_REGISTRY.clear()
     return restored
-
-
-def clear_kernel_patches(model: Any | None = None) -> None:
-    """Backward-compatible alias — restores patches and clears registry."""
-    n = restore_kernel_patches(model)
-    if n:
-        logger.debug("Restored %d fused-kernel module forwards", n)
 
 
 def release_training_memory(model: Any | None = None, *, sync: bool = True) -> None:

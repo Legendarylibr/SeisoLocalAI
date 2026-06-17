@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -215,15 +216,21 @@ def _validate_code(code: str) -> str | None:
     return None
 
 
-def execute_code(code: str, sandbox_root: str | None = None) -> str:
+def execute_code(code: str, sandbox_root: str | None = None, user_id: str | None = None) -> str:
     """Run user code in isolated subprocess with AST pre-check."""
     err = _validate_code(code)
     if err:
         return json.dumps({"error": err})
 
-    audit_event("code_exec", code_len=len(code))
+    audit_event("code_exec", code_len=len(code), user_id=user_id)
 
-    base = Path(sandbox_root) if sandbox_root else resolve_data_dir() / "sandbox"
+    root = Path(sandbox_root) if sandbox_root else resolve_data_dir()
+    if user_id:
+        from forge.services.user_paths import user_dir
+
+        base = user_dir(root, user_id, "sandbox")
+    else:
+        base = root / "sandbox"
     base.mkdir(parents=True, exist_ok=True)
 
     wrapped = textwrap.dedent(
@@ -254,6 +261,10 @@ def execute_code(code: str, sandbox_root: str | None = None) -> str:
     with tempfile.NamedTemporaryFile(mode="w", suffix=".py", dir=base, delete=False) as f:
         f.write(wrapped)
         script = Path(f.name)
+    try:
+        os.chmod(script, 0o600)
+    except OSError:
+        pass
 
     try:
         proc = subprocess.run(

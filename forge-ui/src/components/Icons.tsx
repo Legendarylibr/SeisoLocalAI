@@ -20,26 +20,6 @@ function Svg({ size, className, children }: { size: number; className?: string; 
   );
 }
 
-export function BrandMark({ size = 22, className }: IconProps) {
-  return (
-    <Svg size={size} className={className}>
-      <path
-        d="M12 2.5L19.5 7.25V16.75L12 21.5L4.5 16.75V7.25L12 2.5Z"
-        stroke="currentColor"
-        strokeWidth={1.5}
-        strokeLinejoin="round"
-      />
-      <path
-        d="M12 7.5V16.5M8.25 9.75L12 7.5L15.75 9.75M8.25 14.25L12 16.5L15.75 14.25"
-        stroke="currentColor"
-        strokeWidth={1.5}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </Svg>
-  );
-}
-
 export function IconDashboard({ size = defaults.size, className, strokeWidth = defaults.strokeWidth }: IconProps) {
   return (
     <Svg size={size} className={className}>
@@ -153,20 +133,6 @@ export function IconIntegrations({ size = defaults.size, className, strokeWidth 
   );
 }
 
-export function IconSettings({ size = defaults.size, className, strokeWidth = defaults.strokeWidth }: IconProps) {
-  return (
-    <Svg size={size} className={className}>
-      <circle cx="12" cy="12" r="2.75" stroke="currentColor" strokeWidth={strokeWidth} />
-      <path
-        d="M12 3.5V5.5M12 18.5V20.5M20.5 12H18.5M5.5 12H3.5M18.36 5.64L16.95 7.05M7.05 16.95L5.64 18.36M18.36 18.36L16.95 16.95M7.05 7.05L5.64 5.64"
-        stroke="currentColor"
-        strokeWidth={strokeWidth}
-        strokeLinecap="round"
-      />
-    </Svg>
-  );
-}
-
 export function IconShield({ size = defaults.size, className, strokeWidth = defaults.strokeWidth }: IconProps) {
   return (
     <Svg size={size} className={className}>
@@ -274,15 +240,6 @@ export function IconPlus({ size = defaults.size, className, strokeWidth = defaul
   );
 }
 
-export function IconPanelLeft({ size = defaults.size, className, strokeWidth = defaults.strokeWidth }: IconProps) {
-  return (
-    <Svg size={size} className={className}>
-      <rect x="4.5" y="4.5" width="15" height="15" rx="2" stroke="currentColor" strokeWidth={strokeWidth} />
-      <path d="M9.5 4.5V19.5" stroke="currentColor" strokeWidth={strokeWidth} />
-    </Svg>
-  );
-}
-
 export function IconCpu({ size = defaults.size, className, strokeWidth = defaults.strokeWidth }: IconProps) {
   return (
     <Svg size={size} className={className}>
@@ -340,16 +297,6 @@ export function IconAlert({ size = defaults.size, className, strokeWidth = defau
       <path d="M12 4.5L20.5 18.5H3.5L12 4.5Z" stroke="currentColor" strokeWidth={strokeWidth} strokeLinejoin="round" />
       <path d="M12 10V13.5" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" />
       <circle cx="12" cy="16" r="0.75" fill="currentColor" />
-    </Svg>
-  );
-}
-
-export function IconDownload({ size = defaults.size, className, strokeWidth = defaults.strokeWidth }: IconProps) {
-  return (
-    <Svg size={size} className={className}>
-      <path d="M12 4.5V14" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" />
-      <path d="M8.5 11L12 14.5L15.5 11" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M5.5 18.5H18.5" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" />
     </Svg>
   );
 }
@@ -416,8 +363,7 @@ export type NavIconName =
   | "image"
   | "export"
   | "recipes"
-  | "integrations"
-  | "settings";
+  | "integrations";
 
 const NAV_ICONS: Record<NavIconName, FC<IconProps>> = {
   dashboard: IconDashboard,
@@ -430,7 +376,6 @@ const NAV_ICONS: Record<NavIconName, FC<IconProps>> = {
   export: IconExport,
   recipes: IconRecipes,
   integrations: IconIntegrations,
-  settings: IconSettings,
 };
 
 export function NavIcon({ name, ...props }: IconProps & { name: NavIconName }) {

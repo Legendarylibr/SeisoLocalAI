@@ -9,7 +9,6 @@ import {
 type Props = {
   progress: ModelProgressState | null;
   modelName?: string | null;
-  compact?: boolean;
 };
 
 const STALL_SECONDS = 8;
@@ -92,20 +91,19 @@ function useLiveProgress(progress: ModelProgressState) {
   return { liveEta, displayPct, hasByteTracker, stalled };
 }
 
-export function ModelLoadProgress({ progress, modelName, compact = false }: Props) {
+export function ModelLoadProgress({ progress, modelName }: Props) {
   if (!progress) return null;
   return (
-    <ModelLoadProgressView progress={progress} modelName={modelName} compact={compact} />
+    <ModelLoadProgressView progress={progress} modelName={modelName} />
   );
 }
 
 type ViewProps = {
   progress: ModelProgressState;
   modelName?: string | null;
-  compact?: boolean;
 };
 
-function ModelLoadProgressView({ progress, modelName, compact = false }: ViewProps) {
+function ModelLoadProgressView({ progress, modelName }: ViewProps) {
   const { liveEta, displayPct, hasByteTracker, stalled } = useLiveProgress(progress);
   const pct = Math.min(100, Math.max(0, displayPct));
   const bytesDone = progress.bytesDone ?? 0;
@@ -118,9 +116,7 @@ function ModelLoadProgressView({ progress, modelName, compact = false }: ViewPro
 
   return (
     <div
-      className={`model-load-progress${compact ? " model-load-progress-compact" : ""}${
-        hasByteTracker ? " model-load-progress-download" : ""
-      }`}
+      className={`model-load-progress${hasByteTracker ? " model-load-progress-download" : ""}`}
     >
       <div className="model-load-progress-header">
         <span className="model-load-progress-label">{progress.label}</span>
@@ -146,10 +142,10 @@ function ModelLoadProgressView({ progress, modelName, compact = false }: ViewPro
       >
         <div className="model-load-progress-fill" style={{ width: `${pct}%` }} />
       </div>
-      {!compact && modelName && progress.phase === "ready" && (
+      {modelName && progress.phase === "ready" && (
         <p className="model-load-progress-model muted-text">Active: {modelName}</p>
       )}
-      {!compact && pct > 0 && (
+      {pct > 0 && (
         <p className="model-load-progress-pct muted-text">{pct.toFixed(hasByteTracker ? 1 : 0)}%</p>
       )}
     </div>

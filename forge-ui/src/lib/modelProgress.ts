@@ -27,7 +27,7 @@ export function formatEta(seconds: number | null | undefined): string {
   return `${mins}:${pad(secs)}`;
 }
 
-export function guessDownloadSpeedBps(): number {
+function guessDownloadSpeedBps(): number {
   const conn = (navigator as Navigator & { connection?: { downlink?: number } }).connection;
   if (typeof conn?.downlink === "number" && conn.downlink > 0) {
     return (conn.downlink * 1_000_000) / 8;

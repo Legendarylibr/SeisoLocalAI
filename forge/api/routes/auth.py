@@ -60,11 +60,10 @@ async def register(
     db: Annotated[Database, Depends(get_db)],
     settings: Annotated[ForgeSettings, Depends(get_settings)],
 ) -> AuthResponse:
-    count = await db.user_count()
-    if count > 0:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Registration closed — user already exists")
-
-    user = await db.create_user(hash_password(body.password), DEFAULT_DISPLAY_NAME)
+    try:
+        user = await db.create_first_user(hash_password(body.password), DEFAULT_DISPLAY_NAME)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
     token = create_access_token(user["id"], settings)
     csrf = generate_csrf_token()
     response.set_cookie(
@@ -91,8 +90,7 @@ async def login(
     db: Annotated[Database, Depends(get_db)],
     settings: Annotated[ForgeSettings, Depends(get_settings)],
 ) -> AuthResponse:
-    if settings.rate_limit_enabled:
-        _login_limiter.check(client_ip(request))
+    _login_limiter.check(client_ip(request))
     user = await db.get_sole_user()
     if not user or not verify_password(body.password, user["password_hash"]):
         audit_event("auth_login_failed")

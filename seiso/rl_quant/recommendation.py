@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import json
 import re
-from pathlib import Path
 from typing import Any
 
 _BIT_TO_SEISO = {
@@ -66,7 +64,3 @@ def _normalize_quant_label(label: str) -> str:
     if upper in _LABEL_TO_SEISO:
         return _LABEL_TO_SEISO[upper]
     return label.strip().lower()
-
-
-def load_recommendation_file(path: Path) -> dict[str, Any]:
-    return json.loads(path.read_text(encoding="utf-8"))

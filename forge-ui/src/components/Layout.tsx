@@ -33,7 +33,7 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
   },
   {
     label: "Platform",
-    items: [{ to: "/integrations", label: "Integrations", icon: "integrations", desc: "Providers & MCP" }],
+    items: [{ to: "/integrations", label: "Integrations", icon: "integrations", desc: "External LLM providers" }],
   },
 ];
 

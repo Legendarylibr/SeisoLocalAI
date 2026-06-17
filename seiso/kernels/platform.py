@@ -77,7 +77,3 @@ def is_nvidia() -> bool:
 
 def is_amd() -> bool:
     return detect_gpu().vendor == GpuVendor.AMD
-
-
-def is_gpu_available() -> bool:
-    return detect_gpu().device_count > 0

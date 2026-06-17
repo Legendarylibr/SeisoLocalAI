@@ -33,9 +33,3 @@ __all__ = [
     "release_training_memory",
     "restore_kernel_patches",
 ]
-
-
-def benchmark_main():
-    from seiso.kernels.benchmark import main
-
-    return main()

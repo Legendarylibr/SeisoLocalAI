@@ -39,6 +39,9 @@ class ChatCompletionRequest(BaseModel):
 def _resolve_payload(body: ChatCompletionRequest, model_path: str | None) -> dict[str, Any]:
     messages = []
     for m in body.messages:
+        role = m.role.lower()
+        if role in ("tool", "function"):
+            raise HTTPException(400, f"Untrusted message role: {m.role}")
         content = m.content if isinstance(m.content, str) else json.dumps(m.content)
         messages.append({"role": m.role, "content": content})
     return {
@@ -57,17 +60,11 @@ async def _resolve_openai_model_path(
     settings: ForgeSettings,
 ) -> str:
     model_id = None if body.model in ("default", "seiso") else body.model
-    try:
-        path = await resolve_model_path(
-            db, user_id, model_id=model_id, model_path=None, data_dir=settings.data_dir
-        )
-    except HTTPException:
-        path = None
+    path = await resolve_model_path(
+        db, user_id, model_id=model_id, model_path=None, data_dir=settings.data_dir
+    )
     if path:
         return path
-    inv = await db.list_models(user_id)
-    if inv:
-        return inv[0]["path"]
     raise HTTPException(400, "No local model available — download from Hub")
 
 

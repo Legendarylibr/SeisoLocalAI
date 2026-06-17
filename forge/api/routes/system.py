@@ -5,17 +5,12 @@ from __future__ import annotations
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Query
-from pydantic import BaseModel, Field
 
 from forge.security.auth import get_current_user_id
 from forge.services.hardware import build_guidance, hardware_profile, hardware_summary, live_metrics
 from seiso.models.loader import Backend
 
 router = APIRouter(prefix="/system", tags=["system"])
-
-
-class GuidanceRequest(BaseModel):
-    goal: str = Field(default="chat", pattern="^(chat|train|compress|code|explore)$")
 
 
 @router.get("/hardware")

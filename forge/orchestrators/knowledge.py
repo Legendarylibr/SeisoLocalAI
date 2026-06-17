@@ -19,6 +19,7 @@ class KnowledgeOrchestrator(Orchestrator):
 
     CHUNK_SIZE = 512
     CHUNK_OVERLAP = 64
+    MAX_INGEST_BYTES = 50 * 1024 * 1024
 
     async def execute(self, job_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         action = payload.get("action", "ingest")
@@ -36,6 +37,9 @@ class KnowledgeOrchestrator(Orchestrator):
         user_id = payload["user_id"]
         kb_id = payload["knowledge_base_id"]
         source = assert_ingest_source(self.sandbox_root, user_id, payload["source_path"])
+        size = source.stat().st_size
+        if size > self.MAX_INGEST_BYTES:
+            raise ValueError(f"Source file exceeds {self.MAX_INGEST_BYTES // (1024 * 1024)} MiB ingest limit")
         kb_dir = self._kb_dir(user_id, kb_id)
         kb_dir.mkdir(parents=True, exist_ok=True)
 

@@ -892,30 +892,6 @@ th { color: var(--muted); font-weight: 500; font-size: 0.78rem; text-transform: 
 .card .section-title:first-child { margin-top: 0; }
 
 /* ── Hub / catalog ── */
-/* Legacy tab classes — kept for backwards compat */
-.tabs {
-  display: flex;
-  gap: 0.35rem;
-  margin-bottom: 1rem;
-  flex-wrap: wrap;
-}
-
-.tab {
-  padding: 0.45rem 1rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--text-secondary);
-  cursor: pointer;
-  font-size: 0.88rem;
-  font-family: inherit;
-  font-weight: 500;
-  transition: background var(--transition), color var(--transition);
-}
-
-.tab:hover { background: var(--surface-hover); color: var(--text); }
-.tab.active { background: var(--accent-soft); color: var(--accent); border-color: rgba(78, 205, 192, 0.25); }
-
 /* ── Unified tab bar ── */
 .tab-bar {
   display: flex;
@@ -2416,10 +2392,6 @@ th { color: var(--muted); font-weight: 500; font-size: 0.78rem; text-transform: 
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
-}
-
-.model-load-progress-compact {
-  margin-top: 0.65rem;
 }
 
 .model-load-progress-header {

@@ -19,7 +19,7 @@ function postureItems(s: SecurityPosture): Item[] {
     {
       label: "Encrypted storage",
       ok: s.db_encrypted,
-      detail: "Chat, provider keys, and MCP env encrypted at rest (AES-256-GCM)",
+      detail: "Chat and provider keys encrypted at rest (AES-256-GCM)",
     },
     {
       label: "HttpOnly session",
@@ -30,7 +30,7 @@ function postureItems(s: SecurityPosture): Item[] {
       label: "Agent tools",
       ok: !s.allow_tools,
       detail: s.allow_tools
-        ? "Web search, artifacts, and MCP are enabled"
+        ? "Web search and artifacts are enabled"
         : "Disabled by default (SEISO_ALLOW_TOOLS=false)",
       warn: s.allow_tools,
     },
@@ -60,19 +60,13 @@ function postureItems(s: SecurityPosture): Item[] {
   ];
 }
 
-export function SecurityShield({
-  security,
-  compact = false,
-}: {
-  security: SecurityPosture;
-  compact?: boolean;
-}) {
+export function SecurityShield({ security }: { security: SecurityPosture }) {
   const items = postureItems(security);
   const score = items.filter((i) => i.ok && !i.warn).length;
   const total = items.length;
 
   return (
-    <div className={`security-shield${compact ? " security-shield-compact" : ""}`}>
+    <div className="security-shield">
       <div className="security-shield-header">
         <span className="security-shield-icon" aria-hidden>
           <IconShield size={22} />

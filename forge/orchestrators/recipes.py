@@ -38,7 +38,10 @@ class RecipeOrchestrator(Orchestrator):
             result = await self._run_node(node, outputs, payload)
             outputs[nid] = result
 
-        out_path = safe_join(self.sandbox_root, "recipes", job_id, "output.jsonl")
+        user_id = payload.get("user_id")
+        if not user_id:
+            raise PermissionError("user_id required for recipe output")
+        out_path = safe_join(self.sandbox_root, "recipes", user_id, job_id, "output.jsonl")
         out_path.parent.mkdir(parents=True, exist_ok=True)
         with out_path.open("w") as f:
             for row in outputs.get("_final", []):

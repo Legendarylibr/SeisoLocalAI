@@ -163,7 +163,6 @@ def _gguf_mirror_candidates(repo_id: str) -> list[str]:
     mirrors = [
         f"bartowski/{model_name}-GGUF",
         f"bartowski/{title}-GGUF",
-        f"unsloth/{model_name}-GGUF",
         f"QuantFactory/{model_name}-GGUF",
         f"QuantFactory/{title}-GGUF",
         f"lmstudio-community/{model_name}-GGUF",
@@ -495,7 +494,7 @@ def download_training_snapshot(
         "repo_id": repo_id,
         "format": "safetensors",
         "cache_dir": str(cache_dir),
-        "size_bytes": _dir_size(root),
+        "size_bytes": dir_size(root),
     }
 
 
@@ -513,7 +512,7 @@ def link_inventory(inventory_dir: Path, inventory_name: str, target: Path) -> Pa
     return link
 
 
-def _dir_size(path: Path) -> int:
+def dir_size(path: Path) -> int:
     if path.is_file():
         return path.stat().st_size
     return sum(f.stat().st_size for f in path.rglob("*") if f.is_file())

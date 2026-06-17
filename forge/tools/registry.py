@@ -117,7 +117,7 @@ def build_default_registry(
                 },
                 handler=lambda code: wrap_tool_result(
                     "execute_code",
-                    execute_code(code, sandbox_root=sandbox_root),
+                    execute_code(code, sandbox_root=sandbox_root, user_id=user_id),
                 ),
             )
         )

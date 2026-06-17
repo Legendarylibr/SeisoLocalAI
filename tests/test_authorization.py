@@ -3,13 +3,7 @@
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from forge.main import create_app
 from tests.conftest import make_second_user
-
-
-@pytest.fixture
-def app():
-    return create_app()
 
 
 @pytest.mark.asyncio
@@ -40,7 +34,7 @@ async def test_thread_cross_user_idor(app):
 async def test_export_job_cross_user(app):
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        reg = await client.post(
+        await client.post(
             "/api/auth/register",
             json={"password": "securepass1"},
         )

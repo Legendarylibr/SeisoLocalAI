@@ -20,6 +20,7 @@ from forge.orchestrators.inference import InferenceOrchestrator
 from forge.security.auth import get_current_user_id
 from forge.services.hardware import enrich_catalog_models, hardware_profile, hardware_summary
 from forge.services.hf_auth import resolve_hf_token
+from forge.services.hf_hub import dir_size
 from forge.services.model_download import perform_model_download
 from forge.services.publishable import is_pushable_model
 from forge.services.user_paths import assert_user_path
@@ -155,20 +156,27 @@ async def scan_folder(
         raise HTTPException(400, "Path is not a directory")
 
     found: list[dict] = []
-    for root, _, files in os.walk(folder):
+    for root, _, files in os.walk(folder, followlinks=False):
         for fname in files:
-            if fname.endswith((".gguf", ".safetensors", ".bin")):
-                fpath = Path(root) / fname
-                fmt = fpath.suffix.lstrip(".")
-                entry = await db.add_model(
-                    user_id=user_id,
-                    name=sanitize_filename(fname),
-                    path=str(fpath),
-                    source="scan",
-                    format=fmt,
-                    size_bytes=fpath.stat().st_size,
-                )
-                found.append(entry)
+            if not fname.endswith((".gguf", ".safetensors", ".bin")):
+                continue
+            fpath = Path(root) / fname
+            if fpath.is_symlink():
+                continue
+            try:
+                validated = assert_user_path(settings.data_dir, user_id, fpath)
+            except SecurityError:
+                continue
+            fmt = validated.suffix.lstrip(".")
+            entry = await db.add_model(
+                user_id=user_id,
+                name=sanitize_filename(validated.name),
+                path=str(validated),
+                source="scan",
+                format=fmt,
+                size_bytes=validated.stat().st_size,
+            )
+            found.append(entry)
     return found
 
 
@@ -248,16 +256,6 @@ async def download_model_stream(
     return EventSourceResponse(event_gen())
 
 
-def _dir_size(path: Path) -> int:
-    total = 0
-    if path.is_file():
-        return path.stat().st_size
-    for f in path.rglob("*"):
-        if f.is_file():
-            total += f.stat().st_size
-    return total
-
-
 @router.post("/local")
 async def register_local(
     body: LocalModelCreate,
@@ -277,5 +275,5 @@ async def register_local(
         path=str(path),
         source=body.source or "manual",
         format=body.format or path.suffix.lstrip("."),
-        size_bytes=path.stat().st_size if path.is_file() else _dir_size(path),
+        size_bytes=path.stat().st_size if path.is_file() else dir_size(path),
     )

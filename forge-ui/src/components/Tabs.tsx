@@ -1,6 +1,6 @@
 import { useId } from "react";
 
-export type TabItem<T extends string> = {
+type TabItem<T extends string> = {
   id: T;
   label: string;
   description?: string;
@@ -68,33 +68,6 @@ export function Tabs<T extends string>({
           </button>
         );
       })}
-    </div>
-  );
-}
-
-export function TabPanel<T extends string>({
-  tabId,
-  activeTab,
-  value,
-  children,
-  className = "",
-}: {
-  tabId: string;
-  activeTab: T;
-  value: T;
-  children: React.ReactNode;
-  className?: string;
-}) {
-  if (activeTab !== value) return null;
-
-  return (
-    <div
-      role="tabpanel"
-      id={`${tabId}-panel`}
-      aria-labelledby={tabId}
-      className={`tab-panel${className ? ` ${className}` : ""}`}
-    >
-      {children}
     </div>
   );
 }

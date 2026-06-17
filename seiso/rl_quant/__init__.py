@@ -6,13 +6,12 @@ from seiso.rl_quant.bootstrap import (
     vendor_root,
 )
 from seiso.rl_quant.config_builder import build_framework_config
-from seiso.rl_quant.recommendation import load_recommendation_file, recommendation_to_gguf_quants
+from seiso.rl_quant.recommendation import recommendation_to_gguf_quants
 from seiso.rl_quant.runner import run_rl_quant_job
 
 __all__ = [
     "build_framework_config",
     "ensure_adaptive_quant_importable",
-    "load_recommendation_file",
     "recommendation_to_gguf_quants",
     "require_adaptive_quant",
     "run_rl_quant_job",

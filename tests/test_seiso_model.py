@@ -1,7 +1,7 @@
-"""Tests for FastModel API."""
+"""Tests for SeisoModel API."""
 
 from seiso.export.gguf import write_ollama_modelfile
-from seiso.models.fast_model import resolve_dtype
+from seiso.models.seiso_model import resolve_dtype
 
 
 def test_resolve_dtype_default():

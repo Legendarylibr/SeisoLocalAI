@@ -44,11 +44,13 @@ def validate_csrf(request: Request) -> bool:
     if request.method not in ("POST", "PUT", "DELETE", "PATCH"):
         return True
     path = request.url.path
-    if not path.startswith("/api") or path in CSRF_EXEMPT_PATHS:
+    if path in CSRF_EXEMPT_PATHS:
         return True
     # Bearer-authenticated API clients are not vulnerable to browser CSRF.
     auth = request.headers.get("authorization", "")
     if auth.lower().startswith("bearer "):
+        return True
+    if not (path.startswith("/api") or path.startswith("/v1")):
         return True
     cookie_token = request.cookies.get(CSRF_COOKIE)
     header_token = request.headers.get(CSRF_HEADER)

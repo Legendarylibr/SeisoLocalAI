@@ -16,7 +16,7 @@ export type SecurityPosture = {
 };
 
 /** Read CSRF double-submit cookie set by the server on login/register. */
-export function getCsrfToken(): string | null {
+function getCsrfToken(): string | null {
   const match = document.cookie.match(/(?:^|;\s*)seiso_csrf=([^;]*)/);
   return match ? decodeURIComponent(match[1]) : null;
 }
@@ -171,14 +171,7 @@ export const api = {
         error: (data) => handlers.onError?.(data),
       },
     ),
-  vramStatus: () => request<{ active_model: string | null; backend: string | null }>("/models/vram"),
-  unloadVram: () => request<{ active_model: string | null }>("/models/vram/unload", { method: "POST" }),
   cancelInference: () => request<{ active_model: string | null }>("/inference/cancel", { method: "POST" }),
-  preloadModel: (model_id: string, inference_backend = "auto") =>
-    request<{ status: string; backend?: string; active_model?: string | null; path?: string | null }>(
-      "/inference/preload",
-      { method: "POST", body: JSON.stringify({ model_id, inference_backend }) },
-    ),
   listThreads: () => request<ChatThread[]>("/inference/threads"),
   createThread: (title: string, model_id?: string) =>
     request<ChatThread>("/inference/threads", {
@@ -288,17 +281,7 @@ export const api = {
   createProvider: (body: { name: string; provider_type: string; config: Record<string, unknown> }) =>
     request("/providers", { method: "POST", body: JSON.stringify(body) }),
   deleteProvider: (id: string) => request(`/providers/${id}`, { method: "DELETE" }),
-  listMcpServers: () =>
-    request<Array<{ id: string; name: string; command: string; args: string[]; enabled: boolean }>>("/mcp/servers"),
-  createMcpServer: (body: { name: string; command: string; args: string[] }) =>
-    request("/mcp/servers", { method: "POST", body: JSON.stringify(body) }),
-  connectMcp: (id: string) => request<{ connected: boolean; tools: string[] }>(`/mcp/servers/${id}/connect`, { method: "POST" }),
-  deleteMcpServer: (id: string) => request(`/mcp/servers/${id}`, { method: "DELETE" }),
   deleteThread: (id: string) => request<{ status: string }>(`/inference/threads/${id}`, { method: "DELETE" }),
-  chatSession: () =>
-    request<{ thread_count: number; memory_encrypted: boolean; clears_on_logout: boolean; local_only: boolean }>(
-      "/inference/session",
-    ),
   hardware: () => request<HardwareProfile>("/system/hardware"),
   metrics: () => request<SystemMetrics>("/system/metrics"),
   guide: (goal: string) =>
@@ -674,7 +657,7 @@ export function streamChat(
 }
 
 /** Stream SSE from a POST endpoint (cookie session + CSRF). Returns abort handle. */
-export function streamPostSSE(
+function streamPostSSE(
   path: string,
   body: Record<string, unknown>,
   handlers: Record<string, (data: string) => void>,

@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 import re
 import secrets
-from collections.abc import Iterable
 from pathlib import Path
 
 # Characters forbidden in user-supplied path segments
@@ -69,7 +68,3 @@ def sanitize_filename(name: str, max_len: int = 255) -> str:
     cleaned = re.sub(r"[^\w.\- ]", "_", name.strip())
     cleaned = cleaned.strip(". ") or "unnamed"
     return cleaned[:max_len]
-
-
-def allowed_extensions(exts: Iterable[str], path: Path) -> bool:
-    return path.suffix.lower() in {e.lower() if e.startswith(".") else f".{e.lower()}" for e in exts}

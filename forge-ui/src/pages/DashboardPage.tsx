@@ -90,7 +90,6 @@ export function DashboardPage() {
             <div className="hw-card-icon"><IconMemory size={18} /></div>
             <div className="hw-card-label">Memory</div>
             <div className="hw-card-value">{hw.ram_gb} GB RAM</div>
-            <div className="hw-card-meta">{hw.disk_free_gb} GB disk free</div>
           </div>
           <div className="card hw-card">
             <div className="hw-card-icon"><IconInference size={18} /></div>

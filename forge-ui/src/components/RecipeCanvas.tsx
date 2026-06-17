@@ -158,15 +158,3 @@ function buildConfig(
       return { source };
   }
 }
-
-export function recipeFromCanvas(name: string, nodes: Node[], edges: Edge[], importPath = ""): RecipeGraph {
-  return {
-    name,
-    nodes: nodes.map((n) => ({
-      id: n.id,
-      type: (n.data.nodeType as string) || "transform",
-      config: buildConfig(n.id, (n.data.nodeType as string) || "transform", nodes, edges, importPath),
-    })),
-    edges: edges.map((e) => ({ source: e.source, target: e.target })),
-  };
-}

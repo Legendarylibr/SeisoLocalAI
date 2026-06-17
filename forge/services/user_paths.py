@@ -77,3 +77,20 @@ def assert_user_path(sandbox_root: Path, user_id: str, target: str | Path) -> Pa
             f"Model cache link is broken — re-download from Hub: {logical.name}"
         )
     return resolved
+
+
+def assert_llama_cpp_binary(target: str | Path) -> Path:
+    """Ensure llama.cpp binary path is an existing regular file in allowed locations."""
+    source = Path(target).expanduser()
+    if not source.is_absolute():
+        raise SecurityError("llama_cpp_binary must be an absolute path")
+    if source.is_symlink():
+        raise SecurityError("llama_cpp_binary cannot be a symlink")
+    resolved = source.resolve()
+    if not resolved.is_file():
+        raise SecurityError("llama_cpp_binary must point to an existing file")
+    allowed = ("/usr/", "/opt/", "/bin/", "/sbin/", "/Users/", "/home/")
+    path_str = str(resolved)
+    if not any(path_str.startswith(prefix) for prefix in allowed):
+        raise SecurityError("llama_cpp_binary is outside allowed system locations")
+    return resolved

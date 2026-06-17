@@ -47,8 +47,6 @@ export function ChatPage() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [useTools, setUseTools] = useState(false);
   const [allowCodeExec, setAllowCodeExec] = useState(false);
-  const [mcpServers, setMcpServers] = useState<Array<{ id: string; name: string }>>([]);
-  const [selectedMcpIds, setSelectedMcpIds] = useState<string[]>([]);
   const [providerId, setProviderId] = useState("");
   const [selection, setSelection] = useState("");
   const [inferenceBackend, setInferenceBackend] = useState("llamacpp");
@@ -263,16 +261,6 @@ export function ChatPage() {
   }, []);
 
   useEffect(() => {
-    if (!toolsAvailable) return;
-    api.listMcpServers()
-      .then((servers) => {
-        setMcpServers(servers.map((s) => ({ id: s.id, name: s.name })));
-        setSelectedMcpIds((prev) => prev.filter((id) => servers.some((s) => s.id === id)));
-      })
-      .catch(() => {});
-  }, [toolsAvailable]);
-
-  useEffect(() => {
     let cancelled = false;
 
     const bootstrap = async () => {
@@ -465,11 +453,6 @@ export function ChatPage() {
     };
 
     try {
-      const mcpIds = useTools && toolsAvailable ? selectedMcpIds : [];
-      if (mcpIds.length) {
-        await Promise.all(mcpIds.map((id) => api.connectMcp(id).catch(() => undefined)));
-      }
-
       const { promise, abort } = streamChat(
         {
           thread_id: threadId,
@@ -477,7 +460,6 @@ export function ChatPage() {
           stream: true,
           tools: useTools && toolsAvailable,
           allow_code_exec: allowCodeExec && codeExecAvailable,
-          mcp_server_ids: mcpIds,
           provider_id: providerId || null,
           model_id: providerId || (usingOllama && isOllamaOnly) ? null : selection || null,
           ollama_model: usingOllama || isOllamaOnly ? selected?.ollama_model : null,
@@ -629,6 +611,7 @@ export function ChatPage() {
                   try {
                     await api.cancelInference();
                     setLoadedModelId(null);
+                    setLoadedBackend(null);
                   } catch {
                     /* ignore */
                   }
@@ -638,14 +621,19 @@ export function ChatPage() {
                 if (selection && !providerId) {
                   const model = models.find((m) => m.id === selection);
                   try {
+                    setSwitchingModel(true);
                     setLoadProgress(
                       initialLoadProgress(model?.name || "model", model?.size_bytes ?? 0),
                     );
-                    await preloadWithProgress(selection, next, setLoadProgress);
+                    const loaded = await preloadWithProgress(selection, next, setLoadProgress);
                     setLoadedModelId(selection);
-                  } catch {
-                    /* best-effort */
+                    setLoadedBackend(loaded);
+                  } catch (e) {
+                    setLoadedModelId(null);
+                    setLoadedBackend(null);
+                    setError(e instanceof Error ? e.message : "Failed to load model into inference engine");
                   } finally {
+                    setSwitchingModel(false);
                     setLoadProgress(null);
                   }
                 }
@@ -674,22 +662,6 @@ export function ChatPage() {
             <input type="checkbox" checked={useTools} disabled={!toolsAvailable} onChange={(e) => setUseTools(e.target.checked)} />
             Tools
           </label>
-          {useTools && toolsAvailable && mcpServers.length > 0 && (
-            <select
-              className="chat-engine-select"
-              multiple
-              value={selectedMcpIds}
-              onChange={(e) => {
-                const ids = Array.from(e.target.selectedOptions).map((o) => o.value);
-                setSelectedMcpIds(ids);
-              }}
-              title="MCP servers (connect in Integrations first)"
-            >
-              {mcpServers.map((s) => (
-                <option key={s.id} value={s.id}>{s.name}</option>
-              ))}
-            </select>
-          )}
           {switchingModel && !loadProgress && (
             <span className="chat-vram-hint">Preparing model…</span>
           )}
@@ -726,8 +698,10 @@ export function ChatPage() {
                     {selected.backend_labels?.[effectiveBackend] || BACKEND_LABELS[effectiveBackend] || effectiveBackend}
                   </span>
                 )}
-                {loadedModelId === selection && !effectiveLoadProgress && (
-                  <span className="chat-model-status-ready">Loaded in VRAM</span>
+                {modelReady && !effectiveLoadProgress && (
+                  <span className="chat-model-status-ready">
+                    Loaded in {BACKEND_LABELS[effectiveBackend] || effectiveBackend}
+                  </span>
                 )}
               </div>
             )}

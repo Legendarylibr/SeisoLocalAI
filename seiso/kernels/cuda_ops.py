@@ -149,12 +149,3 @@ def _pytorch_rms_norm(x, weight, eps: float, residual):
         x = x + residual
     var = x.pow(2).mean(dim=-1, keepdim=True)
     return x * torch.rsqrt(var + eps) * weight
-
-
-def estimate_vram_savings_pct(use_cuda: bool, use_4bit: bool) -> float:
-    savings = 0.0
-    if use_4bit:
-        savings += 55.0
-    if use_cuda:
-        savings += 24.0
-    return min(savings, 78.0)

@@ -1,4 +1,4 @@
-"""FastModel API for Seiso Core — load, LoRA, export."""
+"""SeisoModel — load, LoRA, and export via Seiso Core loaders and export pipeline."""
 
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ def resolve_dtype(dtype: str | None = None) -> str | None:
 
 
 @dataclass
-class FastModelConfig:
+class SeisoModelConfig:
     model_id: str
     max_seq_length: int = 2048
     load_in_4bit: bool = True
@@ -38,8 +38,8 @@ class FastModelConfig:
     use_flash_attention: bool = True
 
 
-class FastModel:
-    """High-level API: from_pretrained → get_peft_model → train → save merged/GGUF."""
+class SeisoModel:
+    """High-level training handle: load → attach LoRA → train → export merged/GGUF."""
 
     def __init__(self, model: Any, tokenizer: Any, *, max_seq_length: int) -> None:
         self.model = model
@@ -57,7 +57,7 @@ class FastModel:
         load_in_8bit: bool = False,
         trust_remote_code: bool = False,
         use_flash_attention: bool = True,
-    ) -> FastModel:
+    ) -> SeisoModel:
         dtype = resolve_dtype(dtype)
         opts = LoadOptions(
             model_id=model_name,
@@ -74,7 +74,7 @@ class FastModel:
         return cls(model, tokenizer, max_seq_length=max_seq_length)
 
     @classmethod
-    def get_peft_model(
+    def attach_lora(
         cls,
         model: Any,
         *,
@@ -84,7 +84,6 @@ class FastModel:
         lora_dropout: float = 0.0,
         bias: str = "none",
         use_gradient_checkpointing: bool = True,
-        random_state: int = 3407,
         use_rslora: bool = False,
         model_id: str = "",
     ) -> Any:
@@ -127,8 +126,8 @@ class FastModel:
             model.config.use_cache = True
         return model
 
-    def save_pretrained_merged(self, save_directory: str | Path, *, safe_serialization: bool = True) -> Path:
-        """Merge LoRA into base weights and save."""
+    def export_merged(self, save_directory: str | Path, *, safe_serialization: bool = True) -> Path:
+        """Merge LoRA into base weights and write a Hugging Face checkpoint."""
         dest = Path(save_directory)
         dest.mkdir(parents=True, exist_ok=True)
 
@@ -142,13 +141,13 @@ class FastModel:
         self.tokenizer.save_pretrained(str(dest))
         return dest
 
-    def save_pretrained_gguf(
+    def export_gguf(
         self,
         save_directory: str | Path,
         *,
         quantization_method: str | list[str] = "q4_k_m",
     ) -> list[Path]:
-        """Export GGUF quant(s) and Ollama Modelfile."""
+        """Export GGUF quant(s) and Ollama Modelfile via Seiso's export pipeline."""
         from seiso.export.gguf import export_gguf
 
         quants = [quantization_method] if isinstance(quantization_method, str) else list(quantization_method)

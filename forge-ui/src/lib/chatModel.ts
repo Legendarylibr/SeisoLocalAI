@@ -1,9 +1,9 @@
 import { api, HardwareProfile, InferenceModelOption, LocalModel } from "@/lib/api";
 import { ModelProgressState, initialDownloadProgress, progressFromDownloadEvent, progressFromPreloadEvent } from "@/lib/modelProgress";
 
-export type ChatNavTarget = { modelId?: string | null; repo?: string | null; downloadBytes?: number | null };
+type ChatNavTarget = { modelId?: string | null; repo?: string | null; downloadBytes?: number | null };
 
-export type ModelProgressHandler = (progress: ModelProgressState | null) => void;
+type ModelProgressHandler = (progress: ModelProgressState | null) => void;
 
 export function chatPath(target: ChatNavTarget = {}): string {
   const params = new URLSearchParams();
@@ -16,7 +16,7 @@ export function chatPath(target: ChatNavTarget = {}): string {
   return qs ? `/chat?${qs}` : "/chat";
 }
 
-export function repoFromSource(source: string | null | undefined): string | null {
+function repoFromSource(source: string | null | undefined): string | null {
   if (!source?.startsWith("hf:")) return null;
   return source.slice(3);
 }
@@ -55,7 +55,7 @@ export function resolveInferenceBackend(
   return available[0];
 }
 
-export function pickInferenceModel(list: InferenceModelOption[], target: ChatNavTarget): string {
+function pickInferenceModel(list: InferenceModelOption[], target: ChatNavTarget): string {
   return (
     (target.modelId && list.find((m) => m.id === target.modelId)?.id) ||
     (target.repo && list.find((m) => m.source === `hf:${target.repo}`)?.id) ||

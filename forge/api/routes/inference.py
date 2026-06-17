@@ -18,8 +18,8 @@ from forge.security.auth import get_current_user_id
 from forge.security.autodefense import DefenseBlockedError, defense_enabled, scan_output
 from forge.services.download_progress import estimate_load_eta_seconds
 from forge.services.hardware import hardware_profile
+from forge.services.chat_messages import build_trusted_messages
 from forge.services.inference_models import list_inference_options, resolve_chat_target
-from forge.services.mcp_access import validate_mcp_server_ids
 from forge.services.models import resolve_model_path
 from seiso.inference.backends import BACKEND_OLLAMA
 
@@ -37,7 +37,6 @@ class ChatRequest(BaseModel):
     stream: bool = True
     tools: bool = False
     allow_code_exec: bool = False
-    mcp_server_ids: list[str] = Field(default_factory=list)
     provider_id: str | None = None
     defense: bool | None = Field(
         default=None,
@@ -288,7 +287,11 @@ async def _resolve_preload_context(
             "ollama_model": selected.get("ollama_model"),
             "active_model": selected.get("ollama_model"),
         }
-        return {"ollama_only": True, "response": response}
+        return {
+            "ollama_only": True,
+            "response": response,
+            "size_bytes": int(selected.get("size_bytes") or 0),
+        }
 
     try:
         target = resolve_chat_target(
@@ -308,7 +311,11 @@ async def _resolve_preload_context(
             "ollama_model": target.get("ollama_model"),
             "active_model": target.get("ollama_model"),
         }
-        return {"ollama_only": True, "response": response}
+        return {
+            "ollama_only": True,
+            "response": response,
+            "size_bytes": int(selected.get("size_bytes") or 0),
+        }
 
     path = target.get("model_path")
     if not path:
@@ -374,11 +381,16 @@ async def chat(
         raise HTTPException(400, "AutoDefense is not enabled on this server (SEISO_AUTODEFENSE_ENABLED)")
 
     job_id = orchestrator.create_job(user_id=user_id)
-    payload = body.model_dump()
+    payload = body.model_dump(exclude={"messages"})
     payload["user_id"] = user_id
 
-    if body.tools and body.mcp_server_ids:
-        await validate_mcp_server_ids(db, orchestrator.mcp, user_id, body.mcp_server_ids)
+    trusted_messages, _user_content = await build_trusted_messages(
+        db,
+        thread_id=body.thread_id,
+        client_messages=body.messages,
+        persist_user=bool(body.thread_id),
+    )
+    payload["messages"] = trusted_messages
 
     if body.provider_id:
         prov = await db.get_provider(body.provider_id, user_id)
@@ -443,11 +455,6 @@ async def chat(
                 payload["model_path"] = path
         else:
             raise HTTPException(400, "Select a model from inventory or provide model_path")
-
-    if body.thread_id and body.messages:
-        last = body.messages[-1]
-        if last.get("role") == "user":
-            await db.add_message(body.thread_id, "user", last["content"])
 
     if body.stream:
         can_stream_local = not body.tools and not body.provider_id

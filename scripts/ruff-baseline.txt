@@ -84,7 +84,7 @@ seiso/kernels/dispatch.py:40:12: F401 `torch` imported but unused
 seiso/kernels/dispatch.py:88:12: F401 `torch` imported but unused
 seiso/kernels/hooks.py:3:1: I001 Import block is un-sorted or un-formatted
 seiso/kernels/hooks.py:7:1: UP035 Import from `collections.abc` instead: `Callable`
-seiso/models/fast_model.py:3:1: I001 Import block is un-sorted or un-formatted
+seiso/models/seiso_model.py:3:1: I001 Import block is un-sorted or un-formatted
 seiso/rl_quant/__init__.py:3:1: I001 Import block is un-sorted or un-formatted
 seiso/security/__init__.py:9:1: UP035 Import from `collections.abc` instead: `Iterable`
 seiso/training/metrics.py:10:1: UP035 Import from `collections.abc` instead: `Callable`
@@ -99,7 +99,7 @@ tests/test_catalog.py:3:34: F401 `seiso.models.catalog.get_families` imported bu
 tests/test_code_exec.py:3:1: I001 Import block is un-sorted or un-formatted
 tests/test_export.py:19:96: F401 `seiso.export.pipeline.run_export_plan` imported but unused
 tests/test_export.py:3:1: I001 Import block is un-sorted or un-formatted
-tests/test_fast_model.py:3:1: I001 Import block is un-sorted or un-formatted
+tests/test_seiso_model.py:3:1: I001 Import block is un-sorted or un-formatted
 tests/test_hardware.py:10:5: F401 `forge.services.hardware.vram_headroom_mb` imported but unused
 tests/test_hf_hub.py:3:1: I001 Import block is un-sorted or un-formatted
 tests/test_hf_hub.py:5:21: F401 `pathlib.Path` imported but unused

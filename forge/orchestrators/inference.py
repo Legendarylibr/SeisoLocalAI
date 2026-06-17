@@ -1,4 +1,4 @@
-"""Inference orchestrator — local, provider, tools, MCP."""
+"""Inference orchestrator — local, provider, and tools."""
 
 from __future__ import annotations
 
@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import Any
 
 from forge.config import get_settings
-from forge.mcp.client import McpManager
 from forge.orchestrators.base import Orchestrator
 from forge.providers.ollama import chat_completion as ollama_chat_completion
 from forge.providers.ollama import stream_chat_completion as ollama_stream_chat
@@ -19,8 +18,7 @@ from forge.security.autodefense import (
     scan_messages,
     scan_output,
 )
-from forge.tools.registry import ToolSpec, build_default_registry
-from forge.tools.sanitize import wrap_tool_result
+from forge.tools.registry import build_default_registry
 from seiso.inference.backends import BACKEND_OLLAMA
 from seiso.inference.runner import LocalInferenceRunner
 
@@ -30,7 +28,6 @@ class InferenceOrchestrator(Orchestrator):
 
     def __init__(self, sandbox_root) -> None:
         super().__init__(sandbox_root)
-        self.mcp = McpManager()
         self._runner = LocalInferenceRunner()
 
     async def execute(self, job_id: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -39,7 +36,6 @@ class InferenceOrchestrator(Orchestrator):
         allow_code_exec = payload.get("allow_code_exec", False)
         provider = payload.get("provider")
         user_id = payload.get("user_id") or (self.get_job(job_id).user_id if self.get_job(job_id) else None)
-        mcp_server_ids: list[str] = payload.get("mcp_server_ids", [])
         use_defense = defense_enabled(settings := get_settings(), request_flag=payload.get("defense"))
         session_id = payload.get("thread_id") or job_id
         defense_meta: dict[str, Any] | None = None
@@ -75,16 +71,11 @@ class InferenceOrchestrator(Orchestrator):
                 raise PermissionError("Tools are disabled on this server")
             if allow_code_exec and not settings.allow_code_exec:
                 raise PermissionError("Code execution is disabled on this server")
-            if mcp_server_ids:
-                for sid in mcp_server_ids:
-                    if not self.mcp.get(user_id, sid):
-                        raise PermissionError(f"MCP server not connected: {sid}")
             registry = build_default_registry(
                 str(self.sandbox_root),
                 allow_code_exec=allow_code_exec and settings.allow_code_exec,
                 user_id=user_id,
             )
-            await self._register_mcp_tools(registry, user_id, mcp_server_ids, on_log)
             reply, _ = await self._tool_loop(payload, messages, registry, on_log, user_id=user_id)
             backend = "local+tools"
         else:
@@ -189,45 +180,6 @@ class InferenceOrchestrator(Orchestrator):
             return await self._local_chat(p)
 
         return await run_agent_loop_async(generate, messages, registry, on_log=on_log, user_id=user_id)
-
-    async def _register_mcp_tools(
-        self,
-        registry,
-        user_id: str,
-        server_ids: list[str],
-        on_log: Callable[[str], None],
-    ) -> None:
-        for sid in server_ids:
-            srv = self.mcp.get(user_id, sid)
-            if not srv:
-                raise PermissionError(f"MCP server not connected: {sid}")
-            try:
-                for t in await srv.list_tools():
-                    name = f"mcp_{sid[:8]}_{t['name']}"
-                    tool_name = t["name"]
-
-                    async def mcp_handler(
-                        server_id: str = sid,
-                        tn: str = tool_name,
-                        uid: str = user_id,
-                        **kwargs: Any,
-                    ) -> str:
-                        audit_event("mcp_tool_call", user_id=uid, server_id=server_id, tool=tn)
-                        raw = await self.mcp.call(uid, server_id, tn, kwargs)
-                        return wrap_tool_result(f"mcp:{server_id}:{tn}", raw)
-
-                    registry.register(
-                        ToolSpec(
-                            name=name,
-                            description=t.get("description", f"MCP tool {tool_name}"),
-                            parameters=t.get("inputSchema", {"type": "object", "properties": {}}),
-                            handler=lambda **kw: "",
-                            async_handler=mcp_handler,
-                        )
-                    )
-            except Exception as exc:
-                on_log(f"MCP tool registration failed: {exc}")
-                raise
 
     async def _provider_chat(
         self,

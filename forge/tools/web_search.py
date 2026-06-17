@@ -13,7 +13,7 @@ _USER_AGENT = "Seiso-Forge/0.1 (local-first; +https://github.com/seiso-ai/seiso)
 def web_search(query: str, max_results: int = 5) -> str:
     url = "https://lite.duckduckgo.com/lite/"
     try:
-        with httpx.Client(timeout=15.0, follow_redirects=True) as client:
+        with httpx.Client(timeout=15.0, follow_redirects=False) as client:
             resp = client.post(
                 url,
                 data={"q": query},

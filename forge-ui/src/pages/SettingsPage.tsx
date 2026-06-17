@@ -295,7 +295,7 @@ export function SettingsPage() {
               </div>
               <div className="env-hint">
                 <code>SEISO_ALLOW_TOOLS=false</code>
-                <span>Disable web search, artifacts, MCP</span>
+                <span>Disable web search and artifacts</span>
               </div>
               <div className="env-hint">
                 <code>SEISO_ALLOW_CODE_EXEC=false</code>

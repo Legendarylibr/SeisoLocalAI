@@ -19,7 +19,6 @@ from forge.api.routes import (
     image_compress,
     inference,
     knowledge,
-    mcp_servers,
     models,
     openai,
     providers,
@@ -109,7 +108,6 @@ def create_app() -> FastAPI:
     app.include_router(recipes.router, prefix=prefix)
     app.include_router(knowledge.router, prefix=prefix)
     app.include_router(providers.router, prefix=prefix)
-    app.include_router(mcp_servers.router, prefix=prefix)
     app.include_router(autodefense.router, prefix=prefix)
     app.include_router(system.router, prefix=prefix)
     app.include_router(settings_routes.router, prefix=prefix)

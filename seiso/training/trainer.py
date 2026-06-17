@@ -13,7 +13,7 @@ from typing import Any
 
 from seiso.kernels.hooks import apply_training_kernels
 from seiso.kernels.lifecycle import release_training_memory
-from seiso.models.fast_model import FastModel
+from seiso.models.seiso_model import SeisoModel
 from seiso.security import resolve_data_dir
 from seiso.training.config import QuantMode, TrainConfig, TrainMethod
 from seiso.training.datasets import (
@@ -32,7 +32,7 @@ class SeisoTrainer:
         self.config = config
         self.config.output_dir.mkdir(parents=True, exist_ok=True)
         self._kernel_meta: dict = {}
-        self._fast: FastModel | None = None
+        self._loaded: SeisoModel | None = None
         self._on_metric = on_metric
         self._metrics_callback = None
 
@@ -69,7 +69,7 @@ class SeisoTrainer:
         elif cfg.method == TrainMethod.FULL and cfg.quant in (QuantMode.INT4, QuantMode.INT8):
             logger.warning("Full fine-tune with quantization — consider LoRA for memory efficiency")
 
-        FastModel.for_training(model)
+        SeisoModel.for_training(model)
 
         ds_fmt = cfg.dataset_format
         sandbox = resolve_data_dir()
@@ -160,14 +160,14 @@ class SeisoTrainer:
         load_4bit = cfg.quant == QuantMode.INT4
         load_8bit = cfg.quant == QuantMode.INT8
 
-        self._fast = FastModel.from_pretrained(
+        self._loaded = SeisoModel.from_pretrained(
             cfg.model_id,
             max_seq_length=cfg.max_seq_length,
             load_in_4bit=load_4bit,
             load_in_8bit=load_8bit,
             dtype="float16" if cfg.quant == QuantMode.INT16 else None,
         )
-        model, tokenizer = self._fast.model, self._fast.tokenizer
+        model, tokenizer = self._loaded.model, self._loaded.tokenizer
 
         if cfg.quant == QuantMode.INT4:
             try:
@@ -176,7 +176,7 @@ class SeisoTrainer:
                 model = prepare_model_for_kbit_training(
                     model, use_gradient_checkpointing=cfg.gradient_checkpointing
                 )
-                self._fast.model = model
+                self._loaded.model = model
             except ImportError:
                 pass
 
@@ -184,18 +184,17 @@ class SeisoTrainer:
 
     def _apply_lora(self, model):
         cfg = self.config
-        model = FastModel.get_peft_model(
+        model = SeisoModel.attach_lora(
             model,
             r=cfg.lora_r,
             lora_alpha=cfg.lora_alpha,
             lora_dropout=cfg.lora_dropout,
             use_gradient_checkpointing=cfg.gradient_checkpointing,
-            random_state=cfg.seed,
             use_rslora=cfg.use_rslora,
             model_id=cfg.model_id,
         )
-        if self._fast:
-            self._fast.model = model
+        if self._loaded:
+            self._loaded.model = model
         return model
 
     @staticmethod

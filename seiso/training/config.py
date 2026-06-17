@@ -57,7 +57,7 @@ class TrainConfig(BaseModel):
     eval_split_ratio: float = Field(default=0.05, ge=0, le=0.5)
     lr_scheduler: str = "cosine"
     resume_from: Path | None = None
-    seed: int = 3407
+    seed: int = 42
     multi_gpu: bool = False
     use_triton: bool = True
     use_fused_ce: bool = True

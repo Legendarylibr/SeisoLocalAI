@@ -18,6 +18,7 @@ from forge.config import ForgeSettings, get_settings
 bearer_scheme = HTTPBearer(auto_error=False)
 
 ALGORITHM = "HS256"
+_MAX_REVOKED_JTIS = 10_000
 _revoked_jtis: set[str] = set()
 
 
@@ -52,6 +53,8 @@ def revoke_access_token(token: str, settings: ForgeSettings) -> None:
         jti = payload.get("jti")
         if jti:
             _revoked_jtis.add(str(jti))
+            if len(_revoked_jtis) > _MAX_REVOKED_JTIS:
+                _revoked_jtis.clear()
     except JWTError:
         pass
 

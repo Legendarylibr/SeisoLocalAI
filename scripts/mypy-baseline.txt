@@ -204,7 +204,7 @@ seiso/models/catalog.py:97: error: Argument 3 to "CatalogEntry" has incompatible
 seiso/models/catalog.py:97: error: Argument 5 to "CatalogEntry" has incompatible type "str"; expected "ModelTask"  [arg-type]
 seiso/models/chat_format.py:14: error: Returning Any from function declared to return "str"  [no-any-return]
 seiso/models/chat_format.py:51: error: Returning Any from function declared to return "list[dict[Any, Any]]"  [no-any-return]
-seiso/models/fast_model.py:64: error: Argument "kind" to "LoadOptions" has incompatible type "str"; expected "ModelKind"  [arg-type]
+seiso/models/seiso_model.py:64: error: Argument "kind" to "LoadOptions" has incompatible type "str"; expected "ModelKind"  [arg-type]
 seiso/models/loader.py:13: error: Name "enum.StrEnum" is not defined  [name-defined]
 seiso/models/loader.py:20: error: Name "enum.StrEnum" is not defined  [name-defined]
 seiso/models/loader.py:29: error: Incompatible types in assignment (expression has type "str", variable has type "ModelKind")  [assignment]
