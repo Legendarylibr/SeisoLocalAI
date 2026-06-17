@@ -1,0 +1,94 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "seiso"
+version = "0.1.0"
+description = "Seiso — local AI platform for running, training, and fine-tuning open models"
+readme = "README.md"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.10"
+authors = [{ name = "Seiso Contributors" }]
+keywords = ["llm", "fine-tuning", "lora", "local-ai", "mlx", "gguf"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+  "httpx>=0.27",
+  "pydantic>=2.6",
+  "pydantic-settings>=2.2",
+  "pyyaml>=6.0",
+  "safetensors>=0.4",
+  "huggingface-hub>=0.23",
+  "numpy>=1.26",
+  "tqdm>=4.66",
+  "rich>=13.7",
+  "typer>=0.12",
+]
+
+[project.optional-dependencies]
+train = [
+  "torch>=2.2",
+  "transformers>=4.40",
+  "datasets>=2.19",
+  "peft>=0.11",
+  "accelerate>=0.30",
+  "bitsandbytes>=0.43; platform_system != 'Darwin'",
+  "trl>=0.8",
+  "sentence-transformers>=3.0",
+]
+cuda = [
+  "triton>=2.2; platform_system == 'Linux'",
+  "flash-attn>=2.5; platform_system == 'Linux'",
+]
+forge = [
+  "fastapi>=0.111",
+  "uvicorn[standard]>=0.29",
+  "python-multipart>=0.0.9",
+  "python-jose[cryptography]>=3.3",
+  "bcrypt>=4.1",
+  "email-validator>=2.1",
+  "aiosqlite>=0.20",
+  "sse-starlette>=2.1",
+  "cryptography>=42",
+]
+dev = [
+  "pytest>=8.2",
+  "pytest-asyncio>=0.23",
+  "ruff>=0.4",
+  "mypy>=1.10",
+  "httpx>=0.27",
+  "datasets>=2.19",
+]
+
+[project.scripts]
+seiso = "seiso_cli.main:app"
+seiso-train-worker = "seiso.training.worker:main"
+
+[project.urls]
+Homepage = "https://github.com/seiso-ai/seiso"
+Documentation = "https://github.com/seiso-ai/seiso#readme"
+
+[tool.hatch.build.targets.wheel]
+packages = ["seiso", "seiso_cli", "forge"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+ignore_missing_imports = true

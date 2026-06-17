@@ -1,0 +1,166 @@
+"""Base orchestrator — subprocess workers with SSE log streaming."""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import uuid
+from abc import ABC, abstractmethod
+from collections import defaultdict
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from enum import StrEnum
+from pathlib import Path
+from typing import Any, AsyncIterator
+
+MAX_LOG_LINES = 2000
+MAX_JOBS = 500
+
+
+class JobStatus(StrEnum):
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+@dataclass
+class JobRecord:
+    id: str
+    kind: str
+    user_id: str | None = None
+    status: JobStatus = JobStatus.PENDING
+    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    result: dict[str, Any] = field(default_factory=dict)
+    error: str | None = None
+
+
+class Orchestrator(ABC):
+    """Spawns isolated worker processes and streams logs via SSE."""
+
+    kind: str = "base"
+
+    def __init__(self, sandbox_root: Path) -> None:
+        self.sandbox_root = sandbox_root
+        self._jobs: dict[str, JobRecord] = {}
+        self._log_buffers: dict[str, list[str]] = defaultdict(list)
+        self._subscribers: dict[str, list[asyncio.Queue[str | None]]] = defaultdict(list)
+        self._tasks: dict[str, asyncio.Task[None]] = {}
+        self._subprocesses: dict[str, asyncio.subprocess.Process] = {}
+
+    def create_job(self, job_id: str | None = None, user_id: str | None = None) -> str:
+        if len(self._jobs) >= MAX_JOBS:
+            self._evict_oldest_job()
+        jid = job_id or str(uuid.uuid4())
+        self._jobs[jid] = JobRecord(id=jid, kind=self.kind, user_id=user_id)
+        return jid
+
+    def get_job(self, job_id: str) -> JobRecord | None:
+        return self._jobs.get(job_id)
+
+    def register_subprocess(self, job_id: str, proc: asyncio.subprocess.Process) -> None:
+        self._subprocesses[job_id] = proc
+
+    def _evict_oldest_job(self) -> None:
+        finished = [
+            (jid, j)
+            for jid, j in self._jobs.items()
+            if j.status in (JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED)
+        ]
+        if not finished:
+            return
+        finished.sort(key=lambda x: x[1].created_at)
+        jid, _ = finished[0]
+        self._jobs.pop(jid, None)
+        self._log_buffers.pop(jid, None)
+        self._tasks.pop(jid, None)
+        self._subprocesses.pop(jid, None)
+
+    def _emit_log(self, job_id: str, line: str) -> None:
+        buf = self._log_buffers[job_id]
+        buf.append(line)
+        if len(buf) > MAX_LOG_LINES:
+            del buf[: len(buf) - MAX_LOG_LINES]
+        for q in self._subscribers.get(job_id, []):
+            q.put_nowait(line)
+
+    def _finish_logs(self, job_id: str) -> None:
+        for q in self._subscribers.get(job_id, []):
+            q.put_nowait(None)
+
+    async def stream_logs(self, job_id: str) -> AsyncIterator[str]:
+        """SSE-compatible log stream for a job."""
+        queue: asyncio.Queue[str | None] = asyncio.Queue()
+        self._subscribers[job_id].append(queue)
+        for line in self._log_buffers.get(job_id, []):
+            yield line
+        while True:
+            msg = await queue.get()
+            if msg is None:
+                break
+            yield msg
+
+    async def start(self, job_id: str, payload: dict[str, Any]) -> None:
+        if job_id not in self._jobs:
+            raise KeyError(f"Unknown job: {job_id}")
+        rec = self._jobs[job_id]
+        rec.status = JobStatus.RUNNING
+
+        async def _wrapper() -> None:
+            try:
+                await self._run(job_id, payload)
+            except Exception as exc:
+                import logging
+
+                logging.getLogger(__name__).exception("Job %s failed: %s", job_id, exc)
+
+        self._tasks[job_id] = asyncio.create_task(_wrapper())
+
+    async def wait_for(self, job_id: str) -> JobRecord | None:
+        """Block until the job task finishes (or was never started)."""
+        task = self._tasks.get(job_id)
+        if task:
+            await task
+        return self.get_job(job_id)
+
+    async def _run(self, job_id: str, payload: dict[str, Any]) -> None:
+        rec = self._jobs[job_id]
+        try:
+            result = await self.execute(job_id, payload)
+            rec.result = result
+            rec.status = JobStatus.COMPLETED
+        except asyncio.CancelledError:
+            rec.status = JobStatus.CANCELLED
+            self._emit_log(job_id, "Job cancelled")
+            raise
+        except Exception as exc:
+            rec.status = JobStatus.FAILED
+            rec.error = str(exc)
+            self._emit_log(job_id, f"ERROR: {exc}")
+        finally:
+            self._subprocesses.pop(job_id, None)
+            self._finish_logs(job_id)
+
+    async def cancel(self, job_id: str) -> bool:
+        proc = self._subprocesses.get(job_id)
+        if proc and proc.returncode is None:
+            proc.terminate()
+            try:
+                await asyncio.wait_for(proc.wait(), timeout=5)
+            except asyncio.TimeoutError:
+                proc.kill()
+        task = self._tasks.get(job_id)
+        if task and not task.done():
+            task.cancel()
+            return True
+        return proc is not None
+
+    @abstractmethod
+    async def execute(self, job_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        ...
+
+    def snapshot(self) -> str:
+        return json.dumps(
+            {jid: {"status": j.status, "kind": j.kind, "error": j.error} for jid, j in self._jobs.items()}
+        )

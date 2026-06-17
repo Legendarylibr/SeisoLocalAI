@@ -1,0 +1,100 @@
+"""RAG / knowledge base orchestrator."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+from pathlib import Path
+from typing import Any
+
+from forge.orchestrators.base import Orchestrator
+from forge.security.audit import audit_event
+from forge.services.knowledge_paths import assert_ingest_source
+from forge.tools.sanitize import wrap_tool_result
+from seiso.security import safe_join
+
+
+class KnowledgeOrchestrator(Orchestrator):
+    kind = "knowledge"
+
+    CHUNK_SIZE = 512
+    CHUNK_OVERLAP = 64
+
+    async def execute(self, job_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        action = payload.get("action", "ingest")
+
+        if action == "ingest":
+            return await self._ingest(job_id, payload)
+        if action == "retrieve":
+            return await self._retrieve(job_id, payload)
+        raise ValueError(f"Unknown action: {action}")
+
+    def _kb_dir(self, user_id: str, kb_id: str) -> Path:
+        return safe_join(self.sandbox_root, "knowledge", user_id, kb_id)
+
+    async def _ingest(self, job_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        user_id = payload["user_id"]
+        kb_id = payload["knowledge_base_id"]
+        source = assert_ingest_source(self.sandbox_root, user_id, payload["source_path"])
+        kb_dir = self._kb_dir(user_id, kb_id)
+        kb_dir.mkdir(parents=True, exist_ok=True)
+
+        text = source.read_text(encoding="utf-8", errors="replace")
+        chunks = self._chunk(text)
+        self._emit_log(job_id, f"Ingested {source.name}: {len(chunks)} chunks")
+        audit_event("kb_ingest", user_id=user_id, kb_id=kb_id, source=str(source.name), chunks=len(chunks))
+
+        index_path = kb_dir / "index.jsonl"
+        with index_path.open("a") as f:
+            for i, chunk in enumerate(chunks):
+                record = {
+                    "id": hashlib.sha256(f"{kb_id}:{i}:{chunk[:32]}".encode()).hexdigest()[:16],
+                    "text": chunk,
+                    "source": str(source.name),
+                    "chunk_index": i,
+                }
+                f.write(json.dumps(record) + "\n")
+
+        return {"chunk_count": len(chunks), "index_path": str(index_path)}
+
+    async def _retrieve(self, job_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        user_id = payload["user_id"]
+        kb_id = payload["knowledge_base_id"]
+        query = payload["query"]
+        top_k = payload.get("top_k", 5)
+        kb_dir = self._kb_dir(user_id, kb_id)
+        index_path = kb_dir / "index.jsonl"
+
+        if not index_path.exists():
+            return {"results": []}
+
+        chunks: list[dict] = []
+        with index_path.open() as f:
+            for line in f:
+                chunks.append(json.loads(line))
+
+        q_tokens = set(query.lower().split())
+        scored = []
+        for c in chunks:
+            t_tokens = set(c["text"].lower().split())
+            score = len(q_tokens & t_tokens) / max(len(q_tokens), 1)
+            scored.append((score, c))
+        scored.sort(key=lambda x: x[0], reverse=True)
+
+        results = []
+        for _, c in scored[:top_k]:
+            results.append({**c, "text": wrap_tool_result(f"kb:{kb_id}", c["text"])})
+        self._emit_log(job_id, f"Retrieved {len(results)} chunks for query")
+        return {"results": results}
+
+    def _chunk(self, text: str) -> list[str]:
+        words = text.split()
+        chunks = []
+        i = 0
+        step = max(self.CHUNK_SIZE - self.CHUNK_OVERLAP, 1)
+        while i < len(words):
+            chunk = " ".join(words[i : i + self.CHUNK_SIZE])
+            if chunk.strip():
+                chunks.append(chunk)
+            i += step
+        return chunks
