@@ -120,6 +120,74 @@ def test_resolve_chat_target_ollama_without_tag_raises():
 
 
 @pytest.mark.asyncio
+async def test_chat_route_keeps_local_gguf_ollama_on_ollama(monkeypatch, tmp_path):
+    from forge.api.routes import inference as inference_route
+
+    class FakeDb:
+        async def get_thread_for_user(self, *_args, **_kwargs):
+            return None
+
+    class FakeOrchestrator:
+        def create_job(self, **_kwargs):
+            return "job-1"
+
+        async def start(self, job_id, payload):
+            assert job_id == "job-1"
+            assert payload["inference_backend"] == BACKEND_OLLAMA
+            assert payload["ollama_model"] == "export-q4:latest"
+            assert not payload.get("model_path")
+
+        async def wait_for(self, _job_id):
+            class Job:
+                status = type("Status", (), {"value": "completed"})()
+                result = {"content": "ok", "backend": BACKEND_OLLAMA}
+
+            return Job()
+
+    async def fake_list_inference_options(*_args, **_kwargs):
+        return [
+            {
+                "id": "local-1",
+                "kind": "local",
+                "name": "export-q4",
+                "path": str(tmp_path / "export-q4.gguf"),
+                "format": "gguf",
+                "default_backend": BACKEND_LLAMACPP,
+                "backends": [BACKEND_LLAMACPP, BACKEND_OLLAMA],
+                "ollama_model": "export-q4:latest",
+            }
+        ]
+
+    monkeypatch.setattr(inference_route, "list_inference_options", fake_list_inference_options)
+
+    body = inference_route.ChatRequest(
+        model_id="local-1",
+        inference_backend=BACKEND_OLLAMA,
+        messages=[{"role": "user", "content": "hello"}],
+        stream=False,
+    )
+    result = await inference_route.chat(
+        body=body,
+        user_id="u1",
+        db=FakeDb(),
+        orchestrator=FakeOrchestrator(),
+        settings=type(
+            "Settings",
+            (),
+            {
+                "allow_tools": False,
+                "allow_code_exec": False,
+                "autodefense_enabled": False,
+                "ollama_base_url": "http://127.0.0.1:11434",
+                "data_dir": tmp_path,
+            },
+        )(),
+    )
+
+    assert result["backend"] == BACKEND_OLLAMA
+
+
+@pytest.mark.asyncio
 async def test_local_inference_stream_propagates_errors(monkeypatch):
     from seiso.inference.runner import LocalInferenceRunner
 

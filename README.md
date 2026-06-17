@@ -72,6 +72,15 @@ curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scr
 
 That installs Seiso, builds the UI, and starts Forge. Open **http://127.0.0.1:8765** and create your local admin password.
 
+If setup does not behave as expected, run:
+
+```bash
+~/Seiso/scripts/doctor.sh
+~/Seiso/scripts/doctor.sh --network
+```
+
+Catalog chat downloads are local GGUF files for llama.cpp and usually need 2-8 GB each; larger models can need 10-30+ GB. Ollama models live in Ollama's own store, so use `ollama pull` or `ollama create` when you want the Ollama path.
+
 **Options:**
 
 ```bash
@@ -97,6 +106,7 @@ pip install -e ".[forge,train,cuda,dev]"         # Linux NVIDIA
 pip install -e ".[forge,train,mlx,dev]"          # macOS Apple Silicon
 
 cd forge-ui && npm install && npm run build && cd ..
+seiso doctor
 seiso forge
 ```
 

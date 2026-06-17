@@ -50,7 +50,6 @@ SUPPORTED_GGUF_QUANTS = frozenset(
         "q3_k",
         "q4_k",
         "q5_k",
-        "q6_k",
     }
 )
 
@@ -167,7 +166,7 @@ def convert_hf_dir_to_gguf(source: Path, dest: Path, quant: str, log: Callable[[
     for prefix in converters:
         cmd = [*prefix, str(source), "--outfile", str(dest), "--outtype", quant]
         try:
-            result = subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=7200)
+            subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=7200)
             if dest.exists() and dest.stat().st_size > 0:
                 log(f"GGUF written: {dest} ({quant})")
                 return True

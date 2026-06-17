@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +25,26 @@ from seiso.security import sanitize_filename
 def _emit_progress(on_progress: ProgressCallback | None, payload: dict[str, Any]) -> None:
     if on_progress:
         on_progress(payload)
+
+
+def _format_gib(size_bytes: int) -> str:
+    return f"{size_bytes / (1024 ** 3):.1f} GB"
+
+
+def _assert_disk_space_for_download(cache_dir: Path, total_bytes: int) -> None:
+    """Fail early when the target cache filesystem cannot hold the resolved artifact."""
+    if total_bytes <= 0:
+        return
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    free_bytes = shutil.disk_usage(cache_dir).free
+    # Hugging Face may need temp/partial files while resuming, so keep a small cushion.
+    required_bytes = int(total_bytes * 1.05)
+    if free_bytes < required_bytes:
+        raise ValueError(
+            "Not enough free disk space for model download. "
+            f"Need about {_format_gib(required_bytes)} in {cache_dir}, "
+            f"but only {_format_gib(free_bytes)} is free."
+        )
 
 
 def _sync_download_artifacts(
@@ -111,6 +132,7 @@ def _sync_download_artifacts(
     gguf_repo = artifact["gguf_repo"]
     gguf_file = artifact["filename"]
     total_bytes = int(artifact.get("size_bytes") or 0)
+    _assert_disk_space_for_download(cache_dir, total_bytes)
     initial_eta = int(total_bytes / (8 * 1024 * 1024)) if total_bytes > 0 else None
     _emit_progress(
         on_progress,

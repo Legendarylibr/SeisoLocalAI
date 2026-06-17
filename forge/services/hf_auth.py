@@ -28,7 +28,7 @@ def find_hf_cli() -> str | None:
     override = os.environ.get("HF_CLI", "").strip()
     if override and Path(override).exists():
         return override
-    venv_bin = Path(sys.executable).resolve().parent
+    venv_bin = Path(sys.executable).parent
     for name in ("hf", "huggingface-cli"):
         candidate = venv_bin / name
         if candidate.exists():

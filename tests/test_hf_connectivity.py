@@ -16,13 +16,31 @@ from seiso.security import SecurityError
 def test_configure_hf_hub_cache_sets_env(monkeypatch, tmp_path):
     monkeypatch.delenv("HUGGINGFACE_HUB_CACHE", raising=False)
     monkeypatch.delenv("HF_HUB_DOWNLOAD_TIMEOUT", raising=False)
+    monkeypatch.delenv("HF_HUB_ETAG_TIMEOUT", raising=False)
     monkeypatch.delenv("HF_HUB_NUM_THREADS", raising=False)
     cache = configure_hf_hub_cache(tmp_path)
     assert cache == tmp_path / "hf_cache"
     assert Path(cache).is_dir()
     assert os.environ["HUGGINGFACE_HUB_CACHE"] == str(cache)
     assert os.environ["HF_HUB_DOWNLOAD_TIMEOUT"] == "600"
+    assert os.environ["HF_HUB_ETAG_TIMEOUT"] == "30"
     assert os.environ["HF_HUB_NUM_THREADS"] in ("8", "12")
+
+
+def test_configure_hf_hub_cache_preserves_user_transfer_settings(monkeypatch, tmp_path):
+    custom_cache = tmp_path / "custom-cache"
+    monkeypatch.setenv("HUGGINGFACE_HUB_CACHE", str(custom_cache))
+    monkeypatch.setenv("HF_HUB_DOWNLOAD_TIMEOUT", "900")
+    monkeypatch.setenv("HF_HUB_ETAG_TIMEOUT", "45")
+    monkeypatch.setenv("HF_HUB_NUM_THREADS", "4")
+
+    cache = configure_hf_hub_cache(tmp_path)
+
+    assert cache == custom_cache
+    assert os.environ["HUGGINGFACE_HUB_CACHE"] == str(custom_cache)
+    assert os.environ["HF_HUB_DOWNLOAD_TIMEOUT"] == "900"
+    assert os.environ["HF_HUB_ETAG_TIMEOUT"] == "45"
+    assert os.environ["HF_HUB_NUM_THREADS"] == "4"
 
 
 def test_hf_transfer_stack_reports_backend():

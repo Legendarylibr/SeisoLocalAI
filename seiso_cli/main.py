@@ -44,6 +44,34 @@ def forge(
 
 
 @app.command()
+def doctor(
+    network: bool = typer.Option(False, "--network", help="Also probe huggingface.co reachability"),
+) -> None:
+    """Diagnose install, runtime, and Hugging Face setup."""
+    import importlib.util
+    import shutil
+    import subprocess
+    import sys
+
+    root = Path(__file__).resolve().parents[1]
+    script = root / "scripts" / "doctor.sh"
+    if script.is_file():
+        args = [str(script)]
+        if network:
+            args.append("--network")
+        raise typer.Exit(subprocess.call(args))
+
+    console.print("[bold]Seiso Doctor[/]")
+    console.print(f"Python: {sys.version.split()[0]}")
+    for command in ("git", "node", "npm", "hf"):
+        found = shutil.which(command)
+        console.print(f"{command}: {found or '[yellow]missing[/]'}")
+    for module in ("huggingface_hub", "hf_xet", "fastapi", "uvicorn", "torch", "llama_cpp", "mlx_lm"):
+        present = importlib.util.find_spec(module) is not None
+        console.print(f"{module}: {'[green]found[/]' if present else '[yellow]missing[/]'}")
+
+
+@app.command()
 def train(
     config: str = typer.Option(..., "--config", "-c", help="Training YAML config"),
 ) -> None:

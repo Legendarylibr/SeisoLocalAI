@@ -80,8 +80,10 @@ def test_hf_auth_status_no_token():
 def test_find_hf_cli_checks_active_python_bin(monkeypatch, tmp_path):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
+    target_python = tmp_path / "python-real"
+    target_python.write_text("", encoding="utf-8")
     python = bin_dir / "python"
-    python.write_text("", encoding="utf-8")
+    python.symlink_to(target_python)
     hf = bin_dir / "hf"
     hf.write_text("#!/bin/sh\n", encoding="utf-8")
 

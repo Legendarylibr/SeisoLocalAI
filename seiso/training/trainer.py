@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import gc
 import json
 import logging
@@ -11,13 +12,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from seiso.kernels.hooks import apply_fused_lora_kernels, apply_training_kernels
+from seiso.kernels.lifecycle import release_training_memory
+from seiso.models.seiso_model import SeisoModel
 from seiso.research.provenance import (
     apply_determinism,
     sha256_file,
     write_json,
 )
-from seiso.kernels.lifecycle import release_training_memory
-from seiso.models.seiso_model import SeisoModel
 from seiso.security import resolve_data_dir
 from seiso.training.config import QuantMode, TrainConfig, TrainMethod
 from seiso.training.datasets import (
@@ -296,7 +298,7 @@ class SeisoTrainer:
             "optim": optim,
             "lr_scheduler_type": cfg.lr_scheduler,
             "dataloader_pin_memory": True,
-            "remove_unused_columns": False if dataset_text_field else True,
+            "remove_unused_columns": not dataset_text_field,
             "load_best_model_at_end": eval_ds is not None,
         }
         args_dict = configure_training_args(base, layout, multi_gpu)
@@ -315,9 +317,9 @@ class SeisoTrainer:
         )
 
     def _train_embedding(self) -> Path:
+        import torch
         from sentence_transformers import InputExample, SentenceTransformer, losses
         from torch.utils.data import DataLoader
-        import torch
 
         cfg = self.config
         apply_determinism(cfg.seed, deterministic=cfg.deterministic)
@@ -387,10 +389,8 @@ class SeisoTrainer:
         dataset_hash: str | None = None
         ds_path = Path(cfg.dataset)
         if ds_path.is_file():
-            try:
+            with contextlib.suppress(OSError, ValueError):
                 dataset_hash = sha256_file(ds_path)
-            except (OSError, ValueError):
-                pass
 
         manifest = {
             "model_id": original_id,

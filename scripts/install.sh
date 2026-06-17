@@ -200,7 +200,7 @@ main() {
 
   if ! run_with_install_tui "$root" "$install_log" \
     bash -c "$(declare -f run_install_worker); run_install_worker \"$root\" \"$extras\""; then
-    die "Install failed"
+    die "Install failed. Run $root/scripts/doctor.sh for a guided diagnosis."
   fi
 
   install_tui_outro "$root"
@@ -211,9 +211,13 @@ main() {
   fi
 
   if install_tui_enabled "$root"; then
-    printf '\n%s\n\n' "$FORGE_URL"
+    printf '\n%s\nDoctor: %s/scripts/doctor.sh\n\n' "$FORGE_URL" "$root"
   else
     printf '\nOpen %s and complete onboarding.\n\n' "$FORGE_URL"
+    printf 'Model storage: GGUF downloads go to ~/.seiso/hf_cache and load with llama.cpp.\n'
+    printf 'Typical GGUF downloads are 2-8 GB each; larger models can be 10-30+ GB.\n'
+    printf 'Ollama uses its own store — use ollama pull/create for Ollama models.\n'
+    printf 'Need help? Run: %s/scripts/doctor.sh\n\n' "$root"
   fi
 }
 
