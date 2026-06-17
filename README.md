@@ -1,9 +1,11 @@
 # Seiso Local AI
 
+[![CI](https://github.com/Legendarylibr/SeisoLocalAI/actions/workflows/ci.yml/badge.svg)](https://github.com/Legendarylibr/SeisoLocalAI/actions/workflows/ci.yml)
+
 **Seiso** is a free, local-first AI workspace for running, fine-tuning, quantizing, compressing, and deploying open models on your own hardware. No cloud required — download models, chat, train, export, and ship to Hugging Face Hub from a single interface.
 
 **Repository:** [github.com/Legendarylibr/SeisoLocalAI](https://github.com/Legendarylibr/SeisoLocalAI)  
-**License:** [GPL-3.0](LICENSE)  
+**License:** [GPL-3.0](LICENSE) · **Contributing:** [CONTRIBUTING.md](CONTRIBUTING.md)  
 **Docs:** [docs/README.md](docs/README.md)
 
 ---

@@ -106,7 +106,7 @@ main() {
   python -m pip install -U pip wheel setuptools
 
   log "Installing Seiso (editable) — this may take several minutes"
-  pip install -e "$root/.[$extras]"
+  pip install -e "${root}[${extras}]"
 
   if [[ ! -f "$root/.env" && -f "$root/.env.example" ]]; then
     cp "$root/.env.example" "$root/.env"
