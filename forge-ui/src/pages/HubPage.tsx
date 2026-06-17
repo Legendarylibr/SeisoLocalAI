@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { api, CatalogModel, HardwareSummary, LocalModel } from "@/lib/api";
 import { chatPath, chatPathForLocalModel } from "@/lib/chatModel";
 import { trainPath } from "@/lib/hubDownload";
 import { HardwareFitBadge } from "@/components/HardwareFitBadge";
+import { ModelCardSkeleton } from "@/components/ModelCardSkeleton";
 import { PageHeader } from "@/components/PageHeader";
+import { StatusCallout } from "@/components/StatusCallout";
 import { Tabs } from "@/components/Tabs";
 import { IconClose, IconGlobe, IconHardDrive, IconSearch } from "@/components/Icons";
 
@@ -40,6 +42,13 @@ const QUICK_FILTERS = [
   { label: "GLM", task: "", q: "glm", fitsOnly: false },
 ] as const;
 
+const TASK_LABELS: Record<string, string> = {
+  chat: "Chat",
+  code: "Code",
+  vision: "Vision",
+  embedding: "Embedding",
+};
+
 export function HubPage() {
   const navigate = useNavigate();
   const [local, setLocal] = useState<LocalModel[]>([]);
@@ -56,10 +65,12 @@ export function HubPage() {
   const [tab, setTab] = useState<"catalog" | "local">("catalog");
   const [hubReady, setHubReady] = useState<boolean | null>(null);
   const [hubError, setHubError] = useState<string | null>(null);
+  const [catalogLoading, setCatalogLoading] = useState(true);
 
   const refreshLocal = () => api.listModels().then(setLocal).catch(console.error);
 
   const refreshCatalog = useCallback(() => {
+    setCatalogLoading(true);
     api
       .catalog(search, family || undefined, task || undefined, fitsOnly)
       .then((r) => {
@@ -68,7 +79,8 @@ export function HubPage() {
         setTotal(r.total);
         if (r.hardware_summary) setHwSummary(r.hardware_summary);
       })
-      .catch(console.error);
+      .catch(console.error)
+      .finally(() => setCatalogLoading(false));
   }, [search, family, task, fitsOnly]);
 
   useEffect(() => {
@@ -109,11 +121,12 @@ export function HubPage() {
 
   const activeFilters = useMemo(() => {
     const parts: string[] = [];
+    if (fitsOnly) parts.push("fits your hardware");
     if (search) parts.push(`"${search}"`);
     if (family) parts.push(FAMILY_LABELS[family] || family);
-    if (task) parts.push(task);
+    if (task) parts.push(TASK_LABELS[task] || task);
     return parts;
-  }, [search, family, task]);
+  }, [search, family, task, fitsOnly]);
 
   const fmtSize = (n: number) => {
     const gib = 1024 ** 3;
@@ -139,20 +152,22 @@ export function HubPage() {
       )}
 
       {hubReady === false && (
-        <div className="card" style={{ borderColor: "var(--warn, #c9a227)", marginBottom: "1rem" }}>
-          <strong>Hugging Face Hub not ready</strong>
-          <p className="muted-text" style={{ marginTop: "0.35rem" }}>
-            {hubError || "Check network connectivity and install dependencies from Settings."}
-          </p>
-        </div>
+        <StatusCallout
+          tone="warn"
+          title="Hugging Face Hub not ready"
+          action={
+            <Link to="/settings?tab=huggingface" className="btn btn-sm">
+              Open settings
+            </Link>
+          }
+        >
+          {hubError || "Check network connectivity and install dependencies from Settings."}
+        </StatusCallout>
       )}
       {hubReady === true && (
-        <div className="card" style={{ borderColor: "var(--ok, #3fb950)", marginBottom: "1rem" }}>
-          <strong>Public Hugging Face downloads are ready</strong>
-          <p className="muted-text" style={{ marginTop: "0.35rem" }}>
-            No token is needed for public GGUF models. Tokens are only required for gated/private repos and publishing.
-          </p>
-        </div>
+        <StatusCallout tone="success" title="Public downloads ready">
+          No token needed for public GGUF models. Add a Hugging Face token in Settings only for gated repos or publishing.
+        </StatusCallout>
       )}
 
       <Tabs
@@ -225,14 +240,28 @@ export function HubPage() {
               </select>
             </div>
             <p className="hub-results-meta">
-              {total} model{total === 1 ? "" : "s"}
-              {activeFilters.length > 0 && <> · filtered by {activeFilters.join(" · ")}</>}
+              {catalogLoading ? "Searching catalog…" : (
+                <>
+                  {total} model{total === 1 ? "" : "s"}
+                  {activeFilters.length > 0 && <> · filtered by {activeFilters.join(" · ")}</>}
+                </>
+              )}
             </p>
           </div>
 
-          {catalog.length === 0 ? (
+          {catalogLoading && catalog.length === 0 ? (
+            <div className="model-grid" aria-busy="true" aria-label="Loading models">
+              {Array.from({ length: 6 }, (_, i) => (
+                <ModelCardSkeleton key={i} />
+              ))}
+            </div>
+          ) : catalog.length === 0 ? (
             <div className="card empty-state">
-              <p>No models match your search.</p>
+              <div className="empty-state-icon" aria-hidden>
+                <IconSearch size={28} />
+              </div>
+              <p className="empty-state-title">No models match your search</p>
+              <p className="empty-state-desc">Try clearing filters or browsing a different family.</p>
               <button
                 type="button"
                 className="btn"
@@ -248,34 +277,48 @@ export function HubPage() {
             </div>
           ) : (
             <div className="model-grid">
-              {catalog.map((m) => (
-                <div key={m.repo_id} className={`model-card${m.featured ? " model-card-featured" : ""}`}>
+              {catalog.map((m) => {
+                const unavailable = m.download_available === false;
+                return (
+                <div
+                  key={m.repo_id}
+                  className={`model-card${m.featured ? " model-card-featured" : ""}${unavailable ? " model-card-unavailable" : ""}`}
+                >
                   <div className="model-card-header">
                     <span className={`family-tag family-${m.family}`}>{FAMILY_LABELS[m.family] || m.family}</span>
+                    {m.task && <span className="task-tag">{TASK_LABELS[m.task] || m.task}</span>}
                     <span className="params-tag">{m.params}</span>
                     {m.featured && <span className="badge badge-featured">Featured</span>}
                     <HardwareFitBadge fit={m.hardware_fit} label={m.hardware_fit_label} />
                   </div>
                   <h3 className="model-name">{m.name}</h3>
-                  <p className="model-repo">{m.repo_id}</p>
+                  <p className="model-repo" title={m.repo_id}>{m.repo_id}</p>
                   {m.download_bytes ? (
                     <p className="model-download-size muted-text">
-                      {m.download_bytes_estimated ? "~" : ""}{fmtSize(m.download_bytes)} GGUF download · llama.cpp · {m.quant}
-                      {m.gguf_repo && m.gguf_repo !== m.repo_id ? ` · via ${m.gguf_repo.split("/").pop()}` : ""}
+                      <span className="model-meta-pill">GGUF</span>
+                      {m.download_bytes_estimated ? "~" : ""}{fmtSize(m.download_bytes)}
+                      <span className="model-meta-sep">·</span>
+                      {m.quant}
+                      {m.gguf_repo && m.gguf_repo !== m.repo_id ? (
+                        <>
+                          <span className="model-meta-sep">·</span>
+                          via {m.gguf_repo.split("/").pop()}
+                        </>
+                      ) : null}
                     </p>
                   ) : null}
-                  {m.hardware_note && <p className="model-hw-note">{m.hardware_note}</p>}
-                  {m.download_available === false && (
-                    <p className="model-hw-note">
+                  {m.hardware_note && !unavailable && <p className="model-hw-note">{m.hardware_note}</p>}
+                  {unavailable && (
+                    <p className="model-unavailable-note">
                       {m.download_error
                         ? m.download_error
-                        : "Public GGUF mirror not available right now. Try another model or retry after the anonymous Hub rate limit resets."}
+                        : "Mirror unavailable — try again later or pick another model."}
                     </p>
                   )}
                   <div className="model-actions">
                     <button
                       className="btn btn-primary"
-                      disabled={downloading === m.repo_id || m.download_available === false}
+                      disabled={downloading === m.repo_id || unavailable}
                       onClick={() => openChat(m.repo_id, m.download_bytes)}
                       title="Download public GGUF to local cache and open chat"
                     >
@@ -283,7 +326,7 @@ export function HubPage() {
                     </button>
                     <button
                       className="btn"
-                      disabled={downloading === m.repo_id || m.download_available === false}
+                      disabled={downloading === m.repo_id || unavailable}
                       onClick={() => openTrain(m.repo_id, m.download_bytes)}
                       title="Download safetensors snapshot and open Training Studio"
                     >
@@ -291,7 +334,8 @@ export function HubPage() {
                     </button>
                   </div>
                 </div>
-              ))}
+              );
+              })}
             </div>
           )}
         </div>

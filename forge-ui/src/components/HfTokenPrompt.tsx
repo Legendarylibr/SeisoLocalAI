@@ -32,27 +32,21 @@ export function HfTokenPrompt({ onDone }: HfTokenPromptProps) {
   };
 
   return (
-    <div className="auth-page">
-      <div className="auth-atmosphere" aria-hidden>
-        <div className="auth-orb auth-orb-a" />
-        <div className="auth-orb auth-orb-b" />
-        <div className="auth-grid" />
-      </div>
-
-      <div className="auth-layout hf-token-layout">
-        <div className="card auth-card matte-glow hf-token-card">
-          <div className="card-head">
-            <span className="card-head-icon" aria-hidden>
-              <IconGlobe size={18} />
-            </span>
-            <div className="card-head-text">
-              <h3>Hugging Face Hub</h3>
-              <p>
-                Add a token now for gated models, higher anonymous rate limits, and publishing.
-                Public downloads still work without one.
-              </p>
-            </div>
+    <div className="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="hf-token-prompt-title">
+      <button type="button" className="modal-backdrop" onClick={onDone} aria-label="Dismiss" />
+      <div className="modal-panel card matte-glow hf-token-card">
+        <div className="card-head">
+          <span className="card-head-icon" aria-hidden>
+            <IconGlobe size={18} />
+          </span>
+          <div className="card-head-text">
+            <h3 id="hf-token-prompt-title">Connect Hugging Face</h3>
+            <p>
+              Optional — add a token for gated models, higher rate limits, and publishing.
+              Public GGUF downloads work without one.
+            </p>
           </div>
+        </div>
 
           {status && (
             <table className="status-table">
@@ -103,8 +97,11 @@ export function HfTokenPrompt({ onDone }: HfTokenPromptProps) {
             </button>
           </div>
 
-          {message && <p className="muted-text hf-token-message">{message}</p>}
-        </div>
+          {message && (
+            <p className={`hf-token-message${message.includes("saved") ? " hf-token-message-ok" : " hf-token-message-err"}`}>
+              {message}
+            </p>
+          )}
       </div>
     </div>
   );

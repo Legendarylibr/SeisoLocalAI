@@ -5,6 +5,9 @@ import { initialDownloadProgress, ModelProgressState } from "@/lib/modelProgress
 import { ensureTrainHubModel, fetchTrainableModels, isTrainModelCached } from "@/lib/trainModel";
 import { HfDatasetPicker } from "@/components/HfDatasetPicker";
 import { ModelLoadProgress } from "@/components/ModelLoadProgress";
+import { FormSection } from "@/components/research/FormSection";
+import { DataTable } from "@/components/research/DataTable";
+import { LogStream } from "@/components/research/LogStream";
 import { StudioPageShell } from "@/components/StudioPageShell";
 import { TrainingMetricsDashboard } from "@/components/TrainingMetricsDashboard";
 import { useHardwareProfile } from "@/hooks/useHardware";
@@ -158,6 +161,20 @@ export function TrainPage() {
 
   const GGUF_QUANT_OPTIONS = ["q2_k", "q3_k_m", "q4_k_m", "q5_k_m", "q6_k", "q8_0", "f16"];
 
+  const jobStatusBadge = (status: string) => (
+    <span className={`badge badge-${status}`}>{status}</span>
+  );
+
+  const trainingModelLabel = (job: TrainingJob) => {
+    try {
+      const cfg = JSON.parse(job.config_json) as { model_id?: string };
+      const id = cfg.model_id;
+      return id ? id.split("/").pop() || id : "—";
+    } catch {
+      return "—";
+    }
+  };
+
   const ensureModelCached = async () => {
     const models = await fetchTrainableModels();
     if (isTrainModelCached(models, modelId)) return;
@@ -278,11 +295,25 @@ export function TrainPage() {
       />
 
       {(loadProgress || downloadingModel) && (
-        <div className="card">
+        <div className="card studio-card studio-download-card">
+          <div className="studio-card-head">
+            <span className="studio-card-icon" aria-hidden>↓</span>
+            <div className="studio-card-head-text">
+              <div className="studio-card-title">Downloading base model</div>
+              <div className="studio-card-desc">Fetching safetensors snapshot from Hugging Face Hub</div>
+            </div>
+          </div>
           <ModelLoadProgress progress={loadProgress} modelName={modelId.split("/").pop()} />
         </div>
       )}
-      {downloadError && <p className="chat-error studio-error">{downloadError}</p>}
+      {downloadError && (
+        <div className="status-callout status-callout-error studio-error-callout" role="alert">
+          <div className="status-callout-body">
+            <strong className="status-callout-title">Download failed</strong>
+            <div className="status-callout-text">{downloadError}</div>
+          </div>
+        </div>
+      )}
 
       <div className="train-layout">
         <div className="card studio-card">
@@ -293,8 +324,10 @@ export function TrainPage() {
               <div className="studio-card-desc">Base checkpoint and training dataset</div>
             </div>
           </div>
-          <label>Base model (HF repo ID)</label>
-          <input list="train-models" value={modelId} onChange={(e) => setModelId(e.target.value)} />
+          <div className="form-field">
+            <label>Base model (HF repo ID)</label>
+            <input list="train-models" value={modelId} onChange={(e) => setModelId(e.target.value)} />
+          </div>
           <datalist id="train-models">
             {localModels.map((m) => (
               <option key={m.id} value={m.repo_id || m.path}>
@@ -333,46 +366,50 @@ export function TrainPage() {
             <span className="studio-card-icon" aria-hidden>②</span>
             <div className="studio-card-head-text">
               <div className="studio-card-title">Training method</div>
-              <div className="studio-card-desc">LoRA rank, batch size, and optimization flags</div>
+              <div className="studio-card-desc">Hyperparameters, LoRA, and optimization flags</div>
             </div>
           </div>
-          <div className="option-grid">
-            <div className="form-field">
-              <label>Method</label>
-              <select value={method} onChange={(e) => setMethod(e.target.value)}>
-                <option value="lora">LoRA / QLoRA</option>
-                <option value="full">Full fine-tune</option>
-                <option value="embedding">Embedding</option>
-              </select>
+
+          <FormSection title="Hyperparameters" hint="Method, quantization, and core training knobs.">
+            <div className="option-grid">
+              <div className="form-field">
+                <label>Method</label>
+                <select value={method} onChange={(e) => setMethod(e.target.value)}>
+                  <option value="lora">LoRA / QLoRA</option>
+                  <option value="full">Full fine-tune</option>
+                  <option value="embedding">Embedding</option>
+                </select>
+              </div>
+              <div className="form-field">
+                <label>Quantization</label>
+                <select value={quant} onChange={(e) => setQuant(e.target.value)}>
+                  <option value="4bit">4-bit (QLoRA)</option>
+                  <option value="8bit">8-bit</option>
+                  <option value="16bit">16-bit FP16</option>
+                  <option value="none">None (full precision)</option>
+                </select>
+              </div>
             </div>
-            <div className="form-field">
-              <label>Quantization</label>
-              <select value={quant} onChange={(e) => setQuant(e.target.value)}>
-                <option value="4bit">4-bit (QLoRA)</option>
-                <option value="8bit">8-bit</option>
-                <option value="16bit">16-bit FP16</option>
-                <option value="none">None (full precision)</option>
-              </select>
+            <div className="slider-row">
+              <label>Epochs: {epochs}</label>
+              <input type="range" min={1} max={10} value={epochs} onChange={(e) => setEpochs(+e.target.value)} />
             </div>
-          </div>
-          <div className="slider-row">
-            <label>Epochs: {epochs}</label>
-            <input type="range" min={1} max={10} value={epochs} onChange={(e) => setEpochs(+e.target.value)} />
-          </div>
-          <div className="slider-row">
-            <label>Batch size: {batchSize}</label>
-            <input type="range" min={1} max={16} value={batchSize} onChange={(e) => setBatchSize(+e.target.value)} />
-          </div>
-          <div className="slider-row">
-            <label>Max seq length: {maxSeq}</label>
-            <input type="range" min={512} max={8192} step={256} value={maxSeq} onChange={(e) => setMaxSeq(+e.target.value)} />
-          </div>
-          <div className="slider-row">
-            <label>Learning rate: {lr.toExponential(1)}</label>
-            <input type="range" min={-6} max={-3} step={0.1} value={Math.log10(lr)} onChange={(e) => setLr(10 ** +e.target.value)} />
-          </div>
+            <div className="slider-row">
+              <label>Batch size: {batchSize}</label>
+              <input type="range" min={1} max={16} value={batchSize} onChange={(e) => setBatchSize(+e.target.value)} />
+            </div>
+            <div className="slider-row">
+              <label>Max seq length: {maxSeq}</label>
+              <input type="range" min={512} max={8192} step={256} value={maxSeq} onChange={(e) => setMaxSeq(+e.target.value)} />
+            </div>
+            <div className="slider-row">
+              <label>Learning rate: {lr.toExponential(1)}</label>
+              <input type="range" min={-6} max={-3} step={0.1} value={Math.log10(lr)} onChange={(e) => setLr(10 ** +e.target.value)} />
+            </div>
+          </FormSection>
+
           {method === "lora" && (
-            <>
+            <FormSection title="LoRA settings" hint="Rank, alpha, and gradient accumulation.">
               <div className="option-grid">
                 <div className="form-field">
                   <label>LoRA rank (r): {loraR}</label>
@@ -387,50 +424,74 @@ export function TrainPage() {
                 <label>Grad accumulation: {gradAccum}</label>
                 <input type="range" min={1} max={32} value={gradAccum} onChange={(e) => setGradAccum(+e.target.value)} />
               </div>
-            </>
+            </FormSection>
           )}
-          <div className="checkbox-group">
-            <label><input type="checkbox" checked={gradCkpt} onChange={(e) => setGradCkpt(e.target.checked)} /> Gradient checkpointing</label>
-            <label><input type="checkbox" checked={trainResponsesOnly} onChange={(e) => setTrainResponsesOnly(e.target.checked)} /> Train on responses only</label>
-            <label><input type="checkbox" checked={useRsLora} onChange={(e) => setUseRsLora(e.target.checked)} /> Rank-stabilized LoRA (rsLoRA)</label>
-            <label><input type="checkbox" checked={packing} onChange={(e) => setPacking(e.target.checked)} /> Sequence packing</label>
-            <label>
-              <input
-                type="checkbox"
-                checked={multiGpu}
-                onChange={(e) => setMultiGpu(e.target.checked)}
-                disabled={hw?.training_defaults?.multi_gpu_available === false}
-              />
-              {" "}Multi-GPU
-            </label>
-            <label title={hw?.training_defaults?.kernel_backend ? `Backend: ${hw.training_defaults.kernel_backend}` : undefined}>
-              <input
-                type="checkbox"
-                checked={useFusedKernels}
-                onChange={(e) => setUseFusedKernels(e.target.checked)}
-                disabled={hw?.training_defaults?.use_fused_kernels === false}
-              />
-              {" "}Fused kernels (RMSNorm + SwiGLU)
-            </label>
-            <label>
-              <input
-                type="checkbox"
-                checked={useFusedCe}
-                onChange={(e) => setUseFusedCe(e.target.checked)}
-                disabled={hw?.training_defaults?.use_fused_ce === false}
-              />
-              {" "}Fused cross-entropy
-            </label>
-          </div>
+
+          <FormSection title="Optimization" hint="Memory and throughput trade-offs." collapsible defaultOpen>
+            <div className="studio-checkbox-grid">
+              <label className="studio-checkbox-item">
+                <input type="checkbox" checked={gradCkpt} onChange={(e) => setGradCkpt(e.target.checked)} />
+                Gradient checkpointing
+              </label>
+              <label className="studio-checkbox-item">
+                <input type="checkbox" checked={trainResponsesOnly} onChange={(e) => setTrainResponsesOnly(e.target.checked)} />
+                Train on responses only
+              </label>
+              <label className="studio-checkbox-item">
+                <input type="checkbox" checked={useRsLora} onChange={(e) => setUseRsLora(e.target.checked)} />
+                Rank-stabilized LoRA (rsLoRA)
+              </label>
+              <label className="studio-checkbox-item">
+                <input type="checkbox" checked={packing} onChange={(e) => setPacking(e.target.checked)} />
+                Sequence packing
+              </label>
+              <label className="studio-checkbox-item">
+                <input
+                  type="checkbox"
+                  checked={multiGpu}
+                  onChange={(e) => setMultiGpu(e.target.checked)}
+                  disabled={hw?.training_defaults?.multi_gpu_available === false}
+                />
+                Multi-GPU
+              </label>
+              <label
+                className="studio-checkbox-item"
+                title={hw?.training_defaults?.kernel_backend ? `Backend: ${hw.training_defaults.kernel_backend}` : undefined}
+              >
+                <input
+                  type="checkbox"
+                  checked={useFusedKernels}
+                  onChange={(e) => setUseFusedKernels(e.target.checked)}
+                  disabled={hw?.training_defaults?.use_fused_kernels === false}
+                />
+                Fused kernels (RMSNorm + SwiGLU)
+              </label>
+              <label className="studio-checkbox-item">
+                <input
+                  type="checkbox"
+                  checked={useFusedCe}
+                  onChange={(e) => setUseFusedCe(e.target.checked)}
+                  disabled={hw?.training_defaults?.use_fused_ce === false}
+                />
+                Fused cross-entropy
+              </label>
+            </div>
+          </FormSection>
+
           {method !== "embedding" && (
-            <div className="export-on-complete-section">
-              <label>
+            <FormSection
+              title="Post-training export"
+              hint="Bundle LoRA, merged weights, and GGUF quants when the run finishes."
+              collapsible
+              defaultOpen={exportOnComplete}
+            >
+              <label className="studio-checkbox-item studio-checkbox-item-standalone">
                 <input
                   type="checkbox"
                   checked={exportOnComplete}
                   onChange={(e) => setExportOnComplete(e.target.checked)}
                 />
-                {" "}Export LoRA + merged + GGUF when training completes
+                Export when training completes
               </label>
               {exportOnComplete && (
                 <>
@@ -452,66 +513,119 @@ export function TrainPage() {
                     </select>
                   </div>
                   {(exportProfile.includes("gguf") || exportProfile.includes("bundle")) && (
-                    <>
+                    <div className="form-field">
                       <label>GGUF quantizations</label>
-                      <div className="checkbox-group checkbox-group-inline">
+                      <div className="studio-checkbox-grid studio-checkbox-grid-compact">
                         {GGUF_QUANT_OPTIONS.map((q) => (
-                          <label key={q}>
+                          <label key={q} className="studio-checkbox-item">
                             <input
                               type="checkbox"
                               checked={exportQuants.includes(q)}
                               onChange={() => toggleExportQuant(q)}
                             />
-                            {" "}{q}
+                            {q}
                           </label>
                         ))}
                       </div>
-                    </>
+                    </div>
                   )}
                 </>
               )}
-            </div>
+            </FormSection>
           )}
-          <div className="studio-action-bar">
-            <button className="btn btn-primary btn-lg" onClick={start} disabled={starting || downloadingModel}>
-              {starting ? "Starting…" : downloadingModel ? "Downloading model…" : "Start training"}
-            </button>
-            {activeJob && (
-              <button type="button" className="btn" onClick={() => setMetricsOpen(true)}>
-                View metrics
-              </button>
-            )}
-          </div>
         </div>
       </div>
 
-      {logs.length > 0 && (
-        <div className="card">
-          <h3 className="section-title">
-            Live log {activeJob && <span className="badge">{activeJob.slice(0, 8)}</span>}
-          </h3>
-          <div className="log-panel log-panel-tall">{logs.join("\n")}</div>
+      <div className="card studio-card studio-run-card">
+        <div className="studio-card-head studio-card-head-inline">
+          <span className="studio-card-icon" aria-hidden>▶</span>
+          <div className="studio-card-head-text">
+            <div className="studio-card-title">Run training</div>
+            <div className="studio-card-desc">
+              Downloads the base model if needed, then starts a local QLoRA job on this machine.
+            </div>
+            {activeJob && jobStatus && (
+              <div className="studio-card-meta">
+                <span className={`badge badge-${jobStatus}`}>{jobStatus}</span>
+              </div>
+            )}
+          </div>
         </div>
-      )}
+        <div className="studio-action-bar studio-action-bar-flush">
+          <button className="btn btn-primary btn-lg" onClick={start} disabled={starting || downloadingModel}>
+            {starting ? "Starting…" : downloadingModel ? "Downloading model…" : "Start training"}
+          </button>
+          {activeJob && (
+            <button type="button" className="btn" onClick={() => setMetricsOpen(true)}>
+              View metrics
+            </button>
+          )}
+        </div>
+      </div>
 
-      <div className="card">
-        <h3 className="section-title">Training history</h3>
-        {jobs.length === 0 ? (
-          <p className="muted-text">No training jobs yet.</p>
-        ) : (
-          <table>
-            <thead><tr><th>Job</th><th>Status</th><th>Created</th></tr></thead>
-            <tbody>
-              {jobs.map((j) => (
-                <tr key={j.id}>
-                  <td className="mono">{j.id.slice(0, 8)}…</td>
-                  <td><span className={`badge badge-${j.status}`}>{j.status}</span></td>
-                  <td className="muted-cell">{new Date(j.created_at).toLocaleString()}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+      <div className="train-layout studio-monitor-layout">
+        <div className="card studio-card">
+          <div className="studio-card-head">
+            <span className="studio-card-icon" aria-hidden>③</span>
+            <div className="studio-card-head-text">
+              <div className="studio-card-title">Live output</div>
+              <div className="studio-card-desc">Streaming logs from the active training job</div>
+              {activeJob && (
+                <div className="studio-card-meta">
+                  <span className="mono studio-job-id">{activeJob.slice(0, 8)}…</span>
+                </div>
+              )}
+            </div>
+          </div>
+          <LogStream
+            logs={logs}
+            emptyMessage="Start a training run to stream logs here."
+            tall
+          />
+        </div>
+
+        <div className="card studio-card">
+          <div className="studio-card-head">
+            <span className="studio-card-icon" aria-hidden>④</span>
+            <div className="studio-card-head-text">
+              <div className="studio-card-title">Training history</div>
+              <div className="studio-card-desc">Past jobs on this machine</div>
+              {jobs.length > 0 && (
+                <div className="studio-card-meta">
+                  <span className="badge badge-dim">{jobs.length} job{jobs.length === 1 ? "" : "s"}</span>
+                </div>
+              )}
+            </div>
+          </div>
+          <DataTable
+            columns={[
+              {
+                key: "id",
+                header: "Job",
+                mono: true,
+                render: (j) => `${j.id.slice(0, 8)}…`,
+              },
+              {
+                key: "status",
+                header: "Status",
+                render: (j) => jobStatusBadge(j.status),
+              },
+              {
+                key: "model",
+                header: "Model",
+                render: (j) => trainingModelLabel(j),
+              },
+              {
+                key: "created_at",
+                header: "Created",
+                render: (j) => new Date(j.created_at).toLocaleString(),
+              },
+            ]}
+            rows={jobs}
+            getRowKey={(j) => j.id}
+            emptyMessage="No training jobs yet — configure settings above and start your first run."
+          />
+        </div>
       </div>
     </StudioPageShell>
   );
