@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { api, CatalogModel, subscribeSSE, SystemMetrics, TrainableModel, TrainingJob, TrainingMetricPoint } from "@/lib/api";
+import { api, subscribeSSE, SystemMetrics, TrainableModel, TrainingJob, TrainingMetricPoint } from "@/lib/api";
 import { initialDownloadProgress, ModelProgressState } from "@/lib/modelProgress";
 import { ensureTrainHubModel, fetchTrainableModels, isTrainModelCached } from "@/lib/trainModel";
+import { HfBaseModelPicker } from "@/components/HfBaseModelPicker";
 import { HfDatasetPicker } from "@/components/HfDatasetPicker";
 import { ModelLoadProgress } from "@/components/ModelLoadProgress";
 import { FormSection } from "@/components/research/FormSection";
@@ -24,7 +25,6 @@ export function TrainPage() {
     return Number.isFinite(n) && n > 0 ? n : undefined;
   })();
   const [jobs, setJobs] = useState<TrainingJob[]>([]);
-  const [catalog, setCatalog] = useState<CatalogModel[]>([]);
   const [localModels, setLocalModels] = useState<TrainableModel[]>([]);
   const [modelId, setModelId] = useState("meta-llama/Llama-3.2-1B-Instruct");
   const [dataset, setDataset] = useState("HuggingFaceH4/no_robots");
@@ -72,7 +72,6 @@ export function TrainPage() {
   }, []);
 
   useEffect(() => {
-    api.catalog("", undefined, undefined).then((r) => setCatalog(r.models)).catch(console.error);
     api.listTrainingJobs().then(setJobs).catch(console.error);
     api.listTrainingModels().then((r) => setLocalModels(r.models)).catch(console.error);
     api.listExportProfiles().then(setExportProfiles).catch(console.error);
@@ -269,9 +268,6 @@ export function TrainPage() {
     }
   };
 
-  const chatModels = catalog.filter((m) => m.task === "chat" || m.task === "code");
-  const cachedRepoIds = new Set(localModels.map((m) => m.repo_id).filter(Boolean) as string[]);
-
   return (
     <StudioPageShell
       title="Training Studio"
@@ -325,21 +321,14 @@ export function TrainPage() {
             </div>
           </div>
           <div className="form-field">
-            <label>Base model (HF repo ID)</label>
-            <input list="train-models" value={modelId} onChange={(e) => setModelId(e.target.value)} />
+            <label>Base model</label>
+            <HfBaseModelPicker
+              value={modelId}
+              localModels={localModels}
+              disabled={downloadingModel}
+              onChange={setModelId}
+            />
           </div>
-          <datalist id="train-models">
-            {localModels.map((m) => (
-              <option key={m.id} value={m.repo_id || m.path}>
-                {m.name} (cached locally)
-              </option>
-            ))}
-            {chatModels.map((m) => (
-              <option key={m.repo_id} value={m.repo_id}>
-                {m.name}{cachedRepoIds.has(m.repo_id) ? " · cached" : ""}
-              </option>
-            ))}
-          </datalist>
           {localModels.length > 0 && (
             <p className="muted-text studio-field-hint">
               {localModels.length} safetensors snapshot{localModels.length === 1 ? "" : "s"} ready on disk — training uses cached weights automatically.
