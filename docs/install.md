@@ -237,6 +237,19 @@ See [forge.md](forge.md) for pages, API routes, and environment variables.
 5. Download a model from **Model Hub**
 6. Try **Chat** or **Training Studio**
 
+If anything looks off, run the install doctor:
+
+```bash
+./scripts/doctor.sh
+./scripts/doctor.sh --network   # also checks huggingface.co reachability
+```
+
+Model storage notes:
+
+- Catalog chat downloads fetch a GGUF file into Seiso's Hugging Face cache (`~/.seiso/hf_cache` by default) and register a local inventory link for llama.cpp.
+- The Hub page shows the expected GGUF download size, usually 2-8 GB for small/medium Q4 models and 10-30+ GB for larger models.
+- Ollama keeps its own model store. Seiso lists and chats with models already available in Ollama, but Hugging Face catalog downloads are not automatically imported into Ollama. Use `ollama pull` or `ollama create` for that path.
+
 Walkthrough: [getting-started.md](getting-started.md)
 
 ---
@@ -266,6 +279,7 @@ Or re-run the installer (idempotent):
 
 ```bash
 source .venv/bin/activate
+seiso doctor                   # guided install/runtime check
 seiso forge                    # should bind 127.0.0.1:8765
 pytest tests/ -q               # run test suite
 make ci-fast                   # lint + types + test + security
@@ -303,5 +317,6 @@ rm -rf ~/.seiso
 | CUDA kernels fail | Install CUDA toolkit; check `nvcc --version` |
 | QLoRA fails on macOS | Use `quant: 16bit` in config |
 | Install script can't find repo | Set `SEISO_INSTALL_DIR` or clone manually |
+| Model downloads fail | Run `./scripts/doctor.sh --network`, then `source .venv/bin/activate && hf auth login` for gated models |
 
 Full guide: [troubleshooting.md](troubleshooting.md)

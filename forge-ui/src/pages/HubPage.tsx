@@ -121,7 +121,7 @@ export function HubPage() {
     <div className="hub-page">
       <PageHeader
         title="Model Hub"
-        subtitle="Newest models first, ranked for your hardware when possible. Detection stays on this machine — nothing is uploaded."
+        subtitle="Download GGUF models to Seiso's local cache for llama.cpp, or use separately pulled Ollama models from Chat. Detection stays on this machine."
         group="Models"
       />
 
@@ -248,7 +248,7 @@ export function HubPage() {
                   <p className="model-repo">{m.repo_id}</p>
                   {m.download_bytes ? (
                     <p className="model-download-size muted-text">
-                      {m.download_bytes_estimated ? "~" : ""}{fmtSize(m.download_bytes)} download · {m.quant}
+                      {m.download_bytes_estimated ? "~" : ""}{fmtSize(m.download_bytes)} GGUF download · llama.cpp · {m.quant}
                       {m.gguf_repo && m.gguf_repo !== m.repo_id ? ` · via ${m.gguf_repo.split("/").pop()}` : ""}
                     </p>
                   ) : null}
@@ -259,7 +259,7 @@ export function HubPage() {
                       disabled={downloading === m.repo_id}
                       onClick={() => openChat(m.repo_id, m.download_bytes)}
                     >
-                      {downloading === m.repo_id && downloadAction === "chat" ? "Opening chat…" : "Download and chat"}
+                      {downloading === m.repo_id && downloadAction === "chat" ? "Opening chat…" : "Download GGUF and chat"}
                     </button>
                     <button
                       className="btn"

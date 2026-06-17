@@ -30,6 +30,9 @@ class RecipeOrchestrator(Orchestrator):
         edges = recipe.get("edges", [])
         self._emit_log(job_id, f"Executing recipe: {recipe.get('name', job_id)} ({len(nodes)} nodes)")
 
+        user_id = payload.get("user_id")
+        if not user_id:
+            raise PermissionError("user_id required for recipe output")
         recipe_snapshot_path = safe_join(self.sandbox_root, "recipes", user_id, job_id, "recipe_snapshot.json")
         recipe_snapshot_path.parent.mkdir(parents=True, exist_ok=True)
         recipe_snapshot_path.write_text(json.dumps(recipe, indent=2), encoding="utf-8")
@@ -43,9 +46,6 @@ class RecipeOrchestrator(Orchestrator):
             result = await self._run_node(node, outputs, payload)
             outputs[nid] = result
 
-        user_id = payload.get("user_id")
-        if not user_id:
-            raise PermissionError("user_id required for recipe output")
         out_path = safe_join(self.sandbox_root, "recipes", user_id, job_id, "output.jsonl")
         out_path.parent.mkdir(parents=True, exist_ok=True)
         with out_path.open("w") as f:
@@ -114,10 +114,10 @@ class RecipeOrchestrator(Orchestrator):
         if suffix in (".csv", "csv"):
             with path.open() as f:
                 return list(csv.DictReader(f))
-        if suffix in (".json", ".jsonl"):
+        if suffix in (".json", "json", ".jsonl", "jsonl"):
             rows = []
             with path.open() as f:
-                if suffix == ".jsonl":
+                if suffix in (".jsonl", "jsonl"):
                     for line in f:
                         rows.append(json.loads(line))
                 else:

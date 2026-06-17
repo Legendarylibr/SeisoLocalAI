@@ -1,4 +1,4 @@
-from seiso.kernels.platform import GpuVendor, detect_gpu
+from seiso.kernels.platform import GpuPlatform, GpuVendor, detect_gpu
 from seiso.kernels.triton_ops import estimate_vram_savings_pct, is_triton_available
 
 
@@ -17,7 +17,7 @@ def test_vram_estimate_triton():
     assert estimate_vram_savings_pct(False, False) == 0
 
 
-def test_dispatch_and_patch_restore():
+def test_dispatch_and_patch_restore(monkeypatch):
     pytest = __import__("pytest")
     torch = pytest.importorskip("torch")
     from torch import nn
@@ -25,6 +25,11 @@ def test_dispatch_and_patch_restore():
     from seiso.kernels.dispatch import active_backend, fused_rms_norm, kernel_metadata
     from seiso.kernels.hooks import apply_training_kernels, clear_kernel_patches
     from seiso.kernels.lifecycle import restore_kernel_patches
+
+    monkeypatch.setattr(
+        "seiso.kernels.hooks.detect_gpu",
+        lambda: GpuPlatform(GpuVendor.NVIDIA, "test-gpu", 1, True, False),
+    )
 
     meta = kernel_metadata()
     assert meta["kernel_backend"] in ("cuda", "triton", "pytorch")

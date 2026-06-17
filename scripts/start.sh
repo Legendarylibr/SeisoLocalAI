@@ -35,7 +35,7 @@ main() {
   local root ui_dist
   root="$(resolve_root)"
 
-  [[ -x "$root/.venv/bin/seiso" ]] || die "Virtualenv missing at $root/.venv — run $root/scripts/install.sh"
+  [[ -x "$root/.venv/bin/seiso" ]] || die "Virtualenv missing at $root/.venv — run $root/scripts/install.sh or $root/scripts/doctor.sh"
 
   ui_dist="$root/forge-ui/dist/index.html"
   if [[ ! -f "$ui_dist" ]]; then
@@ -43,7 +43,7 @@ main() {
     if command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1; then
       (cd "$root/forge-ui" && npm install && npm run build)
     else
-      die "Forge UI is not built and Node.js/npm are unavailable. Run: $root/scripts/install.sh"
+      die "Forge UI is not built and Node.js/npm are unavailable. Run: $root/scripts/doctor.sh"
     fi
   fi
 

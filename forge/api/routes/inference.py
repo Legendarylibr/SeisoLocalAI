@@ -16,9 +16,9 @@ from forge.db.store import Database
 from forge.orchestrators.inference import InferenceOrchestrator
 from forge.security.auth import get_current_user_id
 from forge.security.autodefense import DefenseBlockedError, defense_enabled, scan_output
+from forge.services.chat_messages import build_trusted_messages
 from forge.services.download_progress import estimate_load_eta_seconds
 from forge.services.hardware import hardware_profile
-from forge.services.chat_messages import build_trusted_messages
 from forge.services.inference_models import list_inference_options, resolve_chat_target
 from forge.services.models import resolve_model_path
 from seiso.inference.backends import BACKEND_OLLAMA
@@ -182,6 +182,7 @@ async def preload_model_stream(
                         "eta_seconds": eta,
                         "model_name": ollama_model,
                         "backend": BACKEND_OLLAMA,
+                        "size_bytes": size_bytes,
                     }
                 ),
             }
@@ -242,6 +243,7 @@ async def preload_model_stream(
                     "model_id": body.model_id,
                     "model_name": ctx["model_name"],
                     "backend": ctx["backend"],
+                    "size_bytes": size_bytes,
                 }
             ),
         }
@@ -437,7 +439,7 @@ async def chat(
             payload["model_format"] = target.get("model_format")
             payload["ollama_base_url"] = settings.ollama_base_url
 
-            if target.get("inference_backend") == BACKEND_OLLAMA and not target.get("model_path"):
+            if target.get("inference_backend") == BACKEND_OLLAMA:
                 if not payload.get("ollama_model"):
                     raise HTTPException(400, "Select an Ollama model")
             else:

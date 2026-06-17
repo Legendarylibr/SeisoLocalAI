@@ -6,7 +6,7 @@ import secrets
 from typing import Annotated
 
 from fastapi import Depends, HTTPException, Request, status
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi.security import HTTPAuthorizationCredentials
 
 from forge.api.deps import get_db
 from forge.config import ForgeSettings, get_settings
