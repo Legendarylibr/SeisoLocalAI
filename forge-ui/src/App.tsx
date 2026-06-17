@@ -10,13 +10,9 @@ import { api } from "@/lib/api";
 const DashboardPage = lazy(() => import("@/pages/DashboardPage").then((m) => ({ default: m.DashboardPage })));
 const HubPage = lazy(() => import("@/pages/HubPage").then((m) => ({ default: m.HubPage })));
 const ChatPage = lazy(() => import("@/pages/ChatPage").then((m) => ({ default: m.ChatPage })));
-const TrainPage = lazy(() => import("@/pages/TrainPage").then((m) => ({ default: m.TrainPage })));
 const ExportPage = lazy(() => import("@/pages/ExportPage").then((m) => ({ default: m.ExportPage })));
 const RLQuantPage = lazy(() => import("@/pages/RLQuantPage").then((m) => ({ default: m.RLQuantPage })));
 const CompressPage = lazy(() => import("@/pages/CompressPage").then((m) => ({ default: m.CompressPage })));
-const ImageCompressPage = lazy(() =>
-  import("@/pages/ImageCompressPage").then((m) => ({ default: m.ImageCompressPage })),
-);
 const KnowledgePage = lazy(() => import("@/pages/KnowledgePage").then((m) => ({ default: m.KnowledgePage })));
 const RecipesPage = lazy(() => import("@/pages/RecipesPage").then((m) => ({ default: m.RecipesPage })));
 const IntegrationsPage = lazy(() =>
@@ -97,11 +93,9 @@ export function App() {
           <Route path="/" element={<Guard><DashboardPage /></Guard>} />
           <Route path="/hub" element={<Guard><HubPage /></Guard>} />
           <Route path="/chat" element={<Guard fullBleed><ChatPage /></Guard>} />
-          <Route path="/train" element={<Guard><TrainPage /></Guard>} />
           <Route path="/export" element={<Guard><ExportPage /></Guard>} />
           <Route path="/rl-quant" element={<Guard><RLQuantPage /></Guard>} />
           <Route path="/compress" element={<Guard><CompressPage /></Guard>} />
-          <Route path="/image-compress" element={<Guard><ImageCompressPage /></Guard>} />
           <Route path="/knowledge" element={<Guard><KnowledgePage /></Guard>} />
           <Route path="/recipes" element={<Guard><RecipesPage /></Guard>} />
           <Route path="/integrations" element={<Guard><IntegrationsPage /></Guard>} />
