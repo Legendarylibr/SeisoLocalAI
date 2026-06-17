@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import tempfile
 import time
@@ -83,10 +84,8 @@ class TrainingOrchestrator(Orchestrator):
         finally:
             stop_poll.set()
             poll_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await poll_task
-            except asyncio.CancelledError:
-                pass
             persist = self._on_metrics_persist.pop(job_id, None)
             if persist:
                 await persist(job_id, self.get_metrics(job_id), metrics_summary)

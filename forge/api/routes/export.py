@@ -224,7 +224,7 @@ async def start_export(
             hub_metadata.quantizations = gguf_quants
         precheck = precheck_hub_export(
             repo_id=hub_repo,
-            token=hub_token,
+            token=hub_token or "",
             metadata=hub_metadata,
             formats=[f.value for f in resolved_formats],
         )

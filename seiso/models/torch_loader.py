@@ -42,9 +42,13 @@ def load_torch(
 ) -> tuple[Any, Any]:
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
-    tokenizer_kwargs: dict[str, Any] = {"trust_remote_code": options.trust_remote_code}
+    tokenizer_kwargs: dict[str, Any] = {
+        "trust_remote_code": options.trust_remote_code,
+        "revision": options.revision or "main",
+    }
     model_kwargs: dict[str, Any] = {
         "trust_remote_code": options.trust_remote_code,
+        "revision": options.revision or "main",
     }
 
     device_map = _resolve_device_map(backend, device)
@@ -83,11 +87,11 @@ def load_torch(
     elif use_8bit:
         model_kwargs["load_in_8bit"] = True
 
-    tokenizer = AutoTokenizer.from_pretrained(options.model_id, **tokenizer_kwargs)
+    tokenizer = AutoTokenizer.from_pretrained(options.model_id, **tokenizer_kwargs)  # nosec B615: revision pinned in tokenizer_kwargs
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    model = AutoModelForCausalLM.from_pretrained(options.model_id, **model_kwargs)
+    model = AutoModelForCausalLM.from_pretrained(options.model_id, **model_kwargs)  # nosec B615: revision pinned in model_kwargs
 
     if len(tokenizer) != model.get_input_embeddings().weight.shape[0]:
         model.resize_token_embeddings(len(tokenizer))

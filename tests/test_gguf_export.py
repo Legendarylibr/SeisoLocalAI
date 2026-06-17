@@ -74,10 +74,8 @@ def test_resolve_merge_base_model_from_manifest(tmp_path: Path):
     assert _resolve_merge_base_model(ckpt) == str(base.resolve())
 
 
-@patch("transformers.AutoTokenizer")
-@patch("peft.PeftModel")
-@patch("transformers.AutoModelForCausalLM")
-def test_merge_lora_uses_local_base(mock_auto, mock_peft, mock_tok, tmp_path: Path):
+@patch("seiso.export.formats._load_merge_deps")
+def test_merge_lora_uses_local_base(mock_deps, tmp_path: Path):
     base = tmp_path / "base"
     base.mkdir()
     (base / "config.json").write_text("{}")
@@ -93,9 +91,10 @@ def test_merge_lora_uses_local_base(mock_auto, mock_peft, mock_tok, tmp_path: Pa
     merged = tmp_path / "merged"
     merged.mkdir()
 
-    mock_model = mock_auto.from_pretrained.return_value
-    mock_peft.from_pretrained.return_value.merge_and_unload.return_value = mock_model
+    deps = mock_deps.return_value
+    mock_model = deps.auto_model.from_pretrained.return_value
+    deps.peft_model.from_pretrained.return_value.merge_and_unload.return_value = mock_model
 
     merge_lora_checkpoint(ckpt, merged, lambda _msg: None)
-    mock_auto.from_pretrained.assert_called_once()
-    assert mock_auto.from_pretrained.call_args[0][0] == str(base.resolve())
+    deps.auto_model.from_pretrained.assert_called_once()
+    assert deps.auto_model.from_pretrained.call_args[0][0] == str(base.resolve())

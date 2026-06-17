@@ -19,7 +19,11 @@ from forge.security.audit import audit_event
 from forge.security.auth import get_current_user_id
 from forge.services.jobs import assert_job_owner
 from forge.services.model_registry import register_export_outputs
-from forge.services.user_paths import assert_user_config_file, assert_user_path, assert_llama_cpp_binary
+from forge.services.user_paths import (
+    assert_llama_cpp_binary,
+    assert_user_config_file,
+    assert_user_path,
+)
 from seiso.rl_quant.recommendation import recommendation_to_gguf_quants
 from seiso.security import SecurityError
 

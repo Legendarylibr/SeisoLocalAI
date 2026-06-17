@@ -3,7 +3,13 @@
 from pathlib import Path
 
 from forge.services import hf_auth
-from forge.services.hf_auth import find_hf_cli, hf_auth_status, resolve_hf_token, resolve_hf_token_for_download, save_user_hf_token
+from forge.services.hf_auth import (
+    find_hf_cli,
+    hf_auth_status,
+    resolve_hf_token,
+    resolve_hf_token_for_download,
+    save_user_hf_token,
+)
 from forge.services.publishable import is_pushable_model
 from seiso.export.model_card import HubModelMetadata, render_readme, write_hub_artifacts
 

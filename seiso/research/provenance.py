@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
@@ -112,10 +113,8 @@ def apply_determinism(seed: int, *, deterministic: bool = True) -> None:
         if deterministic:
             torch.backends.cudnn.deterministic = True
             torch.backends.cudnn.benchmark = False
-            try:
+            with contextlib.suppress(Exception):
                 torch.use_deterministic_algorithms(True, warn_only=True)
-            except Exception:
-                pass
     except ImportError:
         pass
 

@@ -251,7 +251,8 @@ async def download_model_stream(
 
     async def event_gen():
         nonlocal stream_open
-        task = asyncio.create_task(run_download())
+        download_task = asyncio.create_task(run_download())
+        _ = download_task  # silence ruff F841; task is awaited/cancelled below
         started_at = time.monotonic()
         last_progress: dict[str, Any] | None = None
         try:

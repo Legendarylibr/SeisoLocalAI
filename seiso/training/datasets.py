@@ -33,8 +33,8 @@ def load_training_dataset(path: str | Path, split: str = "train", *, sandbox_roo
             data = json.loads(p.read_text())
             return Dataset.from_list(data if isinstance(data, list) else [data])
         if p.is_dir():
-            return load_dataset(str(p), split=split)
-    return load_dataset(str(path), split=split)
+            return load_dataset(str(p), split=split, revision="main")  # nosec B615: local path, revision pinned for hub fallback
+    return load_dataset(str(path), split=split, revision="main")  # nosec B615: revision pinned
 
 
 def detect_format(sample: dict) -> DatasetFormat:

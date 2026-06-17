@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-import enum
 import os
 from dataclasses import dataclass
 from functools import lru_cache
 
+from seiso.compat import StrEnum
 
-class GpuVendor(enum.StrEnum):
+
+class GpuVendor(StrEnum):
     NVIDIA = "nvidia"
     AMD = "amd"
     CPU = "cpu"
@@ -19,7 +20,8 @@ def detect_wsl2() -> bool:
     if os.environ.get("WSL_INTEROP") or os.environ.get("WSL_DISTRO_NAME"):
         return True
     try:
-        version = open("/proc/version", encoding="utf-8").read().lower()
+        with open("/proc/version", encoding="utf-8") as f:
+            version = f.read().lower()
     except OSError:
         return False
     return "microsoft" in version or "wsl2" in version

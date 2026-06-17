@@ -9,7 +9,11 @@ from seiso.kernels.dispatch import (
     fused_swiglu,
     kernel_metadata,
 )
-from seiso.kernels.hooks import apply_fused_lora_kernels, apply_training_kernels, clear_kernel_patches
+from seiso.kernels.hooks import (
+    apply_fused_lora_kernels,
+    apply_training_kernels,
+    clear_kernel_patches,
+)
 from seiso.kernels.lifecycle import release_training_memory, restore_kernel_patches
 from seiso.kernels.platform import GpuPlatform, GpuVendor, detect_gpu, is_amd, is_nvidia
 from seiso.kernels.triton_ops import is_triton_available

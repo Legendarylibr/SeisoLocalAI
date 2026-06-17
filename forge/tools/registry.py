@@ -2,16 +2,17 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any, Union
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
-ToolHandler = Union[Callable[..., Any], Callable[..., Awaitable[Any]]]
+ToolHandler = Callable[..., Any] | Callable[..., Awaitable[Any]]
 
 TOOL_CALL_OPEN = "<tool_call>"
 TOOL_CALL_CLOSE = "</tool_call>"
@@ -152,10 +153,7 @@ def _write_artifact(filename: str, content: str, sandbox_root: str | None, user_
         return json.dumps({"error": f"Content exceeds {_MAX_ARTIFACT_BYTES} bytes"})
 
     root = Path(sandbox_root) if sandbox_root else resolve_data_dir()
-    if user_id:
-        base = user_dir(root, user_id, "artifacts")
-    else:
-        base = root / "artifacts"
+    base = user_dir(root, user_id, "artifacts") if user_id else root / "artifacts"
     base.mkdir(parents=True, exist_ok=True)
     path = safe_join(base, sanitize_filename(filename))
     path.write_text(content)
@@ -204,10 +202,8 @@ def parse_tool_calls(text: str) -> list[dict[str, Any]]:
         blob = text[json_start:close]
         obj_text = _extract_json_object(blob)
         if obj_text:
-            try:
+            with contextlib.suppress(json.JSONDecodeError):
                 calls.append(json.loads(obj_text))
-            except json.JSONDecodeError:
-                pass
         pos = close + len(TOOL_CALL_CLOSE)
     return calls
 

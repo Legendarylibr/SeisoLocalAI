@@ -35,7 +35,8 @@ class InferenceOrchestrator(Orchestrator):
         use_tools = payload.get("tools", False)
         allow_code_exec = payload.get("allow_code_exec", False)
         provider = payload.get("provider")
-        user_id = payload.get("user_id") or (self.get_job(job_id).user_id if self.get_job(job_id) else None)
+        job = self.get_job(job_id)
+        user_id = payload.get("user_id") or (job.user_id if job else None)
         use_defense = defense_enabled(settings := get_settings(), request_flag=payload.get("defense"))
         session_id = payload.get("thread_id") or job_id
         defense_meta: dict[str, Any] | None = None

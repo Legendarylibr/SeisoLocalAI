@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import contextlib
 import json
 import os
 import subprocess
@@ -361,10 +362,8 @@ def execute_code(code: str, sandbox_root: str | None = None, user_id: str | None
     with tempfile.NamedTemporaryFile(mode="w", suffix=".py", dir=base, delete=False) as f:
         f.write(wrapped)
         script = Path(f.name)
-    try:
+    with contextlib.suppress(OSError):
         os.chmod(script, 0o600)
-    except OSError:
-        pass
 
     run_kwargs: dict = {
         "stdout": subprocess.PIPE,
@@ -375,7 +374,7 @@ def execute_code(code: str, sandbox_root: str | None = None, user_id: str | None
             "PYTHONPATH": "",
             "PATH": os.environ.get("PATH", ""),
             "HOME": str(base),
-            "SystemRoot": os.environ.get("SystemRoot", ""),
+            "SYSTEMROOT": os.environ.get("SYSTEMROOT", ""),
         },
         "start_new_session": True,
     }

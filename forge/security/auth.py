@@ -57,18 +57,22 @@ def revoke_access_token(token: str, settings: ForgeSettings) -> None:
         pass
 
 
+class InvalidTokenError(Exception):
+    """Raised when a token cannot be decoded or has been revoked."""
+
+
 def decode_token(token: str, settings: ForgeSettings) -> str:
     try:
         payload = jwt.decode(token, settings.secret_key, algorithms=[ALGORITHM])
         jti = payload.get("jti")
         if jti and is_jti_revoked(str(jti)):
-            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Token revoked")
+            raise InvalidTokenError("Token revoked")
         sub = payload.get("sub")
         if not sub:
-            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid token")
+            raise InvalidTokenError("Invalid token")
         return str(sub)
     except JWTError as exc:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid or expired token") from exc
+        raise InvalidTokenError("Invalid or expired token") from exc
 
 
 async def get_current_user_id(
@@ -76,11 +80,14 @@ async def get_current_user_id(
     creds: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
     settings: Annotated[ForgeSettings, Depends(get_settings)],
 ) -> str:
-    if creds and creds.credentials:
-        return decode_token(creds.credentials, settings)
-    cookie = request.cookies.get("seiso_token")
-    if cookie:
-        return decode_token(cookie, settings)
+    try:
+        if creds and creds.credentials:
+            return decode_token(creds.credentials, settings)
+        cookie = request.cookies.get("seiso_token")
+        if cookie:
+            return decode_token(cookie, settings)
+    except InvalidTokenError as exc:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, str(exc)) from exc
     raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Authentication required")
 
 

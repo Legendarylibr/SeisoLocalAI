@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from seiso.research.provenance import sha256_file
 import hashlib
 import json
 from pathlib import Path
@@ -12,6 +11,7 @@ from forge.orchestrators.base import Orchestrator
 from forge.security.audit import audit_event
 from forge.services.knowledge_paths import assert_ingest_source
 from forge.tools.sanitize import wrap_tool_result
+from seiso.research.provenance import sha256_file
 from seiso.security import safe_join
 
 
