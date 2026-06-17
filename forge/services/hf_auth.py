@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -27,6 +28,11 @@ def find_hf_cli() -> str | None:
     override = os.environ.get("HF_CLI", "").strip()
     if override and Path(override).exists():
         return override
+    venv_bin = Path(sys.executable).resolve().parent
+    for name in ("hf", "huggingface-cli"):
+        candidate = venv_bin / name
+        if candidate.exists():
+            return str(candidate)
     for name in ("hf", "huggingface-cli"):
         path = shutil.which(name)
         if path:

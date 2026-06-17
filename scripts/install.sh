@@ -10,6 +10,8 @@
 #   SEISO_BRANCH        Branch to clone (default: main)
 #   SEISO_SKIP_UI=1     Skip forge-ui npm build
 #   SEISO_START=1       Run scripts/start.sh when install finishes
+#   SEISO_NO_BANNER=1   Skip glitch install TUI
+#   SEISO_VERBOSE=1     Show full pip/npm output (no TUI overlay)
 #
 # Recommended (verify before run):
 #   curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/install.sh -o install.sh
@@ -24,6 +26,43 @@ BRANCH="${SEISO_BRANCH:-main}"
 log() { printf '==> %s\n' "$*"; }
 warn() { printf 'warning: %s\n' "$*" >&2; }
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
+
+install_tui_enabled() {
+  local root="$1"
+  [[ "${SEISO_NO_BANNER:-0}" == "1" ]] && return 1
+  [[ "${SEISO_VERBOSE:-0}" == "1" ]] && return 1
+  [[ -t 1 ]] || return 1
+  [[ -f "$root/scripts/install_tui.py" ]] || return 1
+  return 0
+}
+
+install_tui_intro() {
+  local root="$1"
+  install_tui_enabled "$root" || return 0
+  python3 "$root/scripts/install_tui.py" intro
+}
+
+install_tui_outro() {
+  local root="$1"
+  install_tui_enabled "$root" || return 0
+  python3 "$root/scripts/install_tui.py" outro
+}
+
+run_with_install_tui() {
+  local root="$1" label="$2" logfile="$3"
+  shift 3
+  if install_tui_enabled "$root"; then
+    "$@" >"$logfile" 2>&1 &
+    local job_pid=$!
+    if ! python3 "$root/scripts/install_tui.py" during --wait-pid "$job_pid" --log "$logfile" --label "$label"; then
+      warn "$label failed — see $logfile"
+      tail -30 "$logfile" >&2 || true
+      return 1
+    fi
+    return 0
+  fi
+  "$@"
+}
 
 need_cmd() {
   command -v "$1" >/dev/null 2>&1 || die "Missing required command: $1"
@@ -116,15 +155,20 @@ maybe_install_flash_attn() {
 }
 
 main() {
-  local root extras venv_py
+  local root extras venv_py py_ver install_log ui_log
   uname -s | grep -Eq '^(Linux|Darwin)$' || die "This installer supports Linux and macOS only"
 
   need_cmd python3
   python_version_ok || die "Python 3.10+ is required ($(python3 --version 2>&1 || echo unknown))"
+  py_ver="$(python3 --version 2>&1 || true)"
+  log "Using $py_ver"
   need_cmd git
 
   root="$(resolve_root)"
-  log "Using repository at $root"
+  install_tui_intro "$root"
+  if ! install_tui_enabled "$root"; then
+    log "Using repository at $root"
+  fi
   warn_windows_mount "$root"
 
   if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
@@ -132,7 +176,9 @@ main() {
   fi
 
   extras="$(detect_platform_extras)"
-  log "Installing Python extras: [$extras]"
+  if ! install_tui_enabled "$root"; then
+    log "Installing Python extras: [$extras]"
+  fi
 
   venv_py="$root/.venv/bin/python"
   if [[ ! -x "$venv_py" ]]; then
@@ -144,8 +190,11 @@ main() {
   source "$root/.venv/bin/activate"
   python -m pip install -U pip wheel setuptools
 
-  log "Installing Seiso (editable) — this may take several minutes"
-  pip install -e "${root}[${extras}]"
+  install_log="$root/.seiso-install.log"
+  if ! run_with_install_tui "$root" "pip · seiso core" "$install_log" \
+    pip install -e "${root}[${extras}]"; then
+    die "Python install failed"
+  fi
 
   if [[ "$extras" == *cuda* ]]; then
     maybe_install_flash_attn "$root"
@@ -157,11 +206,16 @@ main() {
   fi
 
   if [[ "${SEISO_SKIP_UI:-0}" != "1" ]]; then
-    log "Building Forge UI"
-    (cd "$root/forge-ui" && npm install && npm run build)
-  else
+    ui_log="$root/.seiso-install-ui.log"
+    if ! run_with_install_tui "$root" "npm · forge ui" "$ui_log" \
+      bash -c "cd \"$root/forge-ui\" && npm install && npm run build"; then
+      die "Forge UI build failed"
+    fi
+  elif ! install_tui_enabled "$root"; then
     log "Skipping Forge UI build (SEISO_SKIP_UI=1)"
   fi
+
+  install_tui_outro "$root"
 
   cat <<EOF
 

@@ -55,6 +55,14 @@ def test_probe_hf_hub_missing_package(monkeypatch):
     assert "huggingface_hub" in (result.error or "").lower()
 
 
+def test_dep_status_handles_runtime_import_failures(monkeypatch):
+    def fail_find_spec(_name):
+        raise RuntimeError("No Metal device available")
+
+    monkeypatch.setattr(hf_connectivity, "find_spec", fail_find_spec)
+    assert hf_connectivity._dep_status("mlx_lm") is False
+
+
 def test_probe_hf_hub_anonymous_ok(monkeypatch):
     class FakeApi:
         def model_info(self, repo_id, timeout=None):

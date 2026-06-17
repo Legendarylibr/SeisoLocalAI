@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from importlib.util import find_spec
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -54,9 +55,8 @@ class InferenceRuntimeStatus:
 
 def _dep_status(module: str) -> bool:
     try:
-        __import__(module)
-        return True
-    except ImportError:
+        return find_spec(module) is not None
+    except Exception:
         return False
 
 
