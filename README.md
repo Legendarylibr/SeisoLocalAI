@@ -83,11 +83,15 @@ Catalog chat downloads are local GGUF files for llama.cpp and usually need 2-8 G
 
 **Options:**
 
-```bash
-# Custom install location
-SEISO_INSTALL_DIR=~/code/Seiso curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/install.sh | bash
+Custom install location:
 
-# Install only — don't start Forge automatically
+```bash
+SEISO_INSTALL_DIR=~/code/Seiso curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/install.sh | bash
+```
+
+Install only, without starting Forge automatically:
+
+```bash
 SEISO_START=0 curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/install.sh | bash
 ```
 
@@ -95,17 +99,35 @@ The installer clones to `~/Seiso`, creates a venv, installs platform extras (CUD
 
 ### Manual install (all platforms)
 
+The commands below assume a fresh clone at `~/Seiso`. Paste the commands only, not explanatory text.
+
+Base install:
+
 ```bash
-git clone https://github.com/Legendarylibr/SeisoLocalAI.git Seiso && cd Seiso
-python3 -m venv .venv && source .venv/bin/activate
-pip install -U pip
+git clone https://github.com/Legendarylibr/SeisoLocalAI.git ~/Seiso
+cd ~/Seiso
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -U pip wheel setuptools
+pip install -e ".[forge,train,dev]"
+cd forge-ui
+npm install
+npm run build
+cd ..
+seiso doctor
+seiso forge
+```
 
-# Pick your platform extras:
-pip install -e ".[forge,train,dev]"              # base
-pip install -e ".[forge,train,cuda,dev]"         # Linux NVIDIA
-pip install -e ".[forge,train,mlx,dev]"          # macOS Apple Silicon
+macOS Apple Silicon with MLX:
 
-cd forge-ui && npm install && npm run build && cd ..
+```bash
+cd ~/Seiso
+source .venv/bin/activate
+pip install -e ".[forge,train,mlx,dev]"
+cd forge-ui
+npm install
+npm run build
+cd ..
 seiso doctor
 seiso forge
 ```

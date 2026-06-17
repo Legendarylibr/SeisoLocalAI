@@ -456,6 +456,8 @@ export type CatalogModel = {
   priority?: number;
   download_bytes?: number;
   download_bytes_estimated?: boolean;
+  download_available?: boolean;
+  download_error?: string;
   gguf_repo?: string;
   gguf_file?: string;
   hardware_fit?: "ideal" | "good" | "tight" | "unlikely";

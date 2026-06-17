@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import time
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -20,6 +21,7 @@ from forge.orchestrators.inference import InferenceOrchestrator
 from forge.security.auth import get_current_user_id
 from forge.services.hardware import enrich_catalog_models, hardware_profile, hardware_summary
 from forge.services.hf_auth import resolve_hf_token
+from forge.services.hf_cache_inventory import sync_hf_cache_inventory
 from forge.services.hf_hub import dir_size
 from forge.services.model_download import perform_model_download
 from forge.services.publishable import is_pushable_model
@@ -65,7 +67,7 @@ async def model_catalog(
         hf_token, _ = resolve_hf_token(
             user_id=user_id,
             data_dir=settings.data_dir,
-            encryption_key=settings.db_encryption_key_bytes,
+            encryption_key=settings.hf_token_encryption_key,
             settings_token=settings.hf_token or None,
         )
         models = enrich_catalog_models(
@@ -105,7 +107,14 @@ async def unload_vram(
 async def list_models(
     user_id: Annotated[str, Depends(get_current_user_id)],
     db: Annotated[Database, Depends(get_db)],
+    settings: Annotated[ForgeSettings, Depends(get_settings)],
 ) -> list[dict]:
+    await sync_hf_cache_inventory(
+        db,
+        user_id,
+        data_dir=settings.data_dir,
+        hf_cache_dir=settings.hf_cache_dir,
+    )
     models = await db.list_models(user_id)
     for m in models:
         m["pushable"] = is_pushable_model(m)
@@ -194,7 +203,7 @@ async def download_model(
             data_dir=settings.data_dir,
             hf_cache_dir=settings.hf_cache_dir,
             settings_hf_token=settings.hf_token,
-            db_encryption_key=settings.db_encryption_key_bytes,
+            db_encryption_key=settings.hf_token_encryption_key,
             repo_id=body.repo_id,
             filename=body.filename,
             revision=body.revision,
@@ -213,9 +222,11 @@ async def download_model_stream(
 ):
     loop = asyncio.get_running_loop()
     queue: asyncio.Queue[tuple[str, Any]] = asyncio.Queue()
+    stream_open = True
 
     def on_progress(payload: dict[str, Any]) -> None:
-        loop.call_soon_threadsafe(queue.put_nowait, ("progress", payload))
+        if stream_open:
+            loop.call_soon_threadsafe(queue.put_nowait, ("progress", payload))
 
     async def run_download() -> None:
         try:
@@ -225,23 +236,59 @@ async def download_model_stream(
                 data_dir=settings.data_dir,
                 hf_cache_dir=settings.hf_cache_dir,
                 settings_hf_token=settings.hf_token,
-                db_encryption_key=settings.db_encryption_key_bytes,
+                db_encryption_key=settings.hf_token_encryption_key,
                 repo_id=body.repo_id,
                 filename=body.filename,
                 revision=body.revision,
                 variant=body.variant,
                 on_progress=on_progress,
             )
-            await queue.put(("complete", result))
+            if stream_open:
+                await queue.put(("complete", result))
         except Exception as exc:
-            await queue.put(("error", str(exc)))
+            if stream_open:
+                await queue.put(("error", str(exc)))
 
     async def event_gen():
+        nonlocal stream_open
         task = asyncio.create_task(run_download())
+        started_at = time.monotonic()
+        last_progress: dict[str, Any] | None = None
         try:
             while True:
-                kind, payload = await queue.get()
+                try:
+                    kind, payload = await asyncio.wait_for(queue.get(), timeout=2.0)
+                except asyncio.TimeoutError:
+                    elapsed = time.monotonic() - started_at
+                    if last_progress is not None:
+                        heartbeat = dict(last_progress)
+                        heartbeat["heartbeat"] = True
+                        heartbeat["elapsed_seconds"] = int(elapsed)
+                        if int(heartbeat.get("bytes") or 0) <= 0 and heartbeat.get("phase") == "download":
+                            heartbeat["label"] = (
+                                heartbeat.get("label")
+                                or f"Downloading {body.repo_id} from Hugging Face"
+                            )
+                            heartbeat["waiting_for_first_byte"] = True
+                        yield {"event": "progress", "data": json.dumps(heartbeat)}
+                    elif elapsed >= 4:
+                        yield {
+                            "event": "progress",
+                            "data": json.dumps(
+                                {
+                                    "phase": "resolving",
+                                    "label": f"Resolving Hugging Face download for {body.repo_id}",
+                                    "repo_id": body.repo_id,
+                                    "percent": 0,
+                                    "elapsed_seconds": int(elapsed),
+                                    "heartbeat": True,
+                                }
+                            ),
+                        }
+                    continue
                 if kind == "progress":
+                    if isinstance(payload, dict):
+                        last_progress = payload
                     yield {"event": "progress", "data": json.dumps(payload)}
                 elif kind == "complete":
                     yield {"event": "complete", "data": json.dumps(payload)}
@@ -250,8 +297,7 @@ async def download_model_stream(
                     yield {"event": "error", "data": str(payload)}
                     break
         finally:
-            if not task.done():
-                task.cancel()
+            stream_open = False
 
     return EventSourceResponse(event_gen())
 

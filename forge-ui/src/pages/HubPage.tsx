@@ -77,6 +77,10 @@ export function HubPage() {
       setHubReady(s.ready_for_download);
       setHubError(s.connectivity.error || s.connectivity.warning || null);
     }).catch(() => setHubReady(null));
+    return () => {
+      setDownloading(null);
+      setDownloadAction(null);
+    };
   }, []);
 
   useEffect(() => {
@@ -139,6 +143,14 @@ export function HubPage() {
           <strong>Hugging Face Hub not ready</strong>
           <p className="muted-text" style={{ marginTop: "0.35rem" }}>
             {hubError || "Check network connectivity and install dependencies from Settings."}
+          </p>
+        </div>
+      )}
+      {hubReady === true && (
+        <div className="card" style={{ borderColor: "var(--ok, #3fb950)", marginBottom: "1rem" }}>
+          <strong>Public Hugging Face downloads are ready</strong>
+          <p className="muted-text" style={{ marginTop: "0.35rem" }}>
+            No token is needed for public GGUF models. Tokens are only required for gated/private repos and publishing.
           </p>
         </div>
       )}
@@ -253,20 +265,29 @@ export function HubPage() {
                     </p>
                   ) : null}
                   {m.hardware_note && <p className="model-hw-note">{m.hardware_note}</p>}
+                  {m.download_available === false && (
+                    <p className="model-hw-note">
+                      {m.download_error
+                        ? m.download_error
+                        : "Public GGUF mirror not available right now. Try another model or retry after the anonymous Hub rate limit resets."}
+                    </p>
+                  )}
                   <div className="model-actions">
                     <button
                       className="btn btn-primary"
-                      disabled={downloading === m.repo_id}
+                      disabled={downloading === m.repo_id || m.download_available === false}
                       onClick={() => openChat(m.repo_id, m.download_bytes)}
+                      title="Download public GGUF to local cache and open chat"
                     >
-                      {downloading === m.repo_id && downloadAction === "chat" ? "Opening chat…" : "Download GGUF and chat"}
+                      {downloading === m.repo_id && downloadAction === "chat" ? "Opening…" : "Chat with GGUF"}
                     </button>
                     <button
                       className="btn"
-                      disabled={downloading === m.repo_id}
+                      disabled={downloading === m.repo_id || m.download_available === false}
                       onClick={() => openTrain(m.repo_id, m.download_bytes)}
+                      title="Download safetensors snapshot and open Training Studio"
                     >
-                      {downloading === m.repo_id && downloadAction === "train" ? "Opening training…" : "Train/Finetune"}
+                      {downloading === m.repo_id && downloadAction === "train" ? "Opening…" : "Fine-tune"}
                     </button>
                   </div>
                 </div>

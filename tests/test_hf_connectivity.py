@@ -7,7 +7,9 @@ from pathlib import Path
 
 import pytest
 
+from forge.config import ForgeSettings
 from forge.services import hf_connectivity, hf_hub
+from forge.services.hf_auth import load_user_hf_token, resolve_hf_token, save_user_hf_token
 from forge.services.user_paths import assert_user_path
 from seiso.models.hf_env import configure_hf_hub_cache, hf_transfer_stack, resolve_hf_cache_dir
 from seiso.security import SecurityError
@@ -15,32 +17,51 @@ from seiso.security import SecurityError
 
 def test_configure_hf_hub_cache_sets_env(monkeypatch, tmp_path):
     monkeypatch.delenv("HUGGINGFACE_HUB_CACHE", raising=False)
+    monkeypatch.delenv("HF_HOME", raising=False)
+    monkeypatch.delenv("HF_XET_CACHE", raising=False)
     monkeypatch.delenv("HF_HUB_DOWNLOAD_TIMEOUT", raising=False)
     monkeypatch.delenv("HF_HUB_ETAG_TIMEOUT", raising=False)
     monkeypatch.delenv("HF_HUB_NUM_THREADS", raising=False)
+    monkeypatch.delenv("HF_XET_HIGH_PERFORMANCE", raising=False)
+    monkeypatch.setattr("seiso.models.hf_env._xet_available", lambda: True)
     cache = configure_hf_hub_cache(tmp_path)
     assert cache == tmp_path / "hf_cache"
     assert Path(cache).is_dir()
+    assert os.environ["HF_HOME"] == str(tmp_path / "hf_home")
     assert os.environ["HUGGINGFACE_HUB_CACHE"] == str(cache)
+    assert os.environ["HF_XET_CACHE"] == str(tmp_path / "hf_xet_cache")
+    assert (tmp_path / "hf_xet_cache").is_dir()
+    assert (tmp_path / "hf_home" / "xet" / "logs").is_dir()
     assert os.environ["HF_HUB_DOWNLOAD_TIMEOUT"] == "600"
     assert os.environ["HF_HUB_ETAG_TIMEOUT"] == "30"
-    assert os.environ["HF_HUB_NUM_THREADS"] in ("8", "12")
+    assert os.environ["HF_HUB_NUM_THREADS"] == "16"
+    assert os.environ["HF_XET_HIGH_PERFORMANCE"] == "1"
 
 
 def test_configure_hf_hub_cache_preserves_user_transfer_settings(monkeypatch, tmp_path):
     custom_cache = tmp_path / "custom-cache"
+    custom_home = tmp_path / "custom-home"
+    custom_xet = tmp_path / "custom-xet"
     monkeypatch.setenv("HUGGINGFACE_HUB_CACHE", str(custom_cache))
+    monkeypatch.setenv("HF_HOME", str(custom_home))
+    monkeypatch.setenv("HF_XET_CACHE", str(custom_xet))
     monkeypatch.setenv("HF_HUB_DOWNLOAD_TIMEOUT", "900")
     monkeypatch.setenv("HF_HUB_ETAG_TIMEOUT", "45")
     monkeypatch.setenv("HF_HUB_NUM_THREADS", "4")
+    monkeypatch.setenv("HF_XET_HIGH_PERFORMANCE", "0")
 
     cache = configure_hf_hub_cache(tmp_path)
 
     assert cache == custom_cache
+    assert os.environ["HF_HOME"] == str(custom_home)
     assert os.environ["HUGGINGFACE_HUB_CACHE"] == str(custom_cache)
+    assert os.environ["HF_XET_CACHE"] == str(custom_xet)
+    assert custom_xet.is_dir()
+    assert (custom_home / "xet" / "logs").is_dir()
     assert os.environ["HF_HUB_DOWNLOAD_TIMEOUT"] == "900"
     assert os.environ["HF_HUB_ETAG_TIMEOUT"] == "45"
     assert os.environ["HF_HUB_NUM_THREADS"] == "4"
+    assert os.environ["HF_XET_HIGH_PERFORMANCE"] == "0"
 
 
 def test_hf_transfer_stack_reports_backend():
@@ -79,6 +100,35 @@ def test_dep_status_handles_runtime_import_failures(monkeypatch):
 
     monkeypatch.setattr(hf_connectivity, "find_spec", fail_find_spec)
     assert hf_connectivity._dep_status("mlx_lm") is False
+
+
+def test_resolve_hf_token_ignores_env_placeholder(monkeypatch):
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+    monkeypatch.delenv("HUGGING_FACE_HUB_TOKEN", raising=False)
+
+    token, source = resolve_hf_token(settings_token="# optional: paste token here")
+
+    assert token is None
+    assert source == "none"
+
+
+def test_user_hf_token_uses_stable_settings_key(tmp_path):
+    first = ForgeSettings(data_dir=tmp_path)
+    save_user_hf_token(
+        first.data_dir,
+        "u1",
+        "hf_test_token",
+        encryption_key=first.hf_token_encryption_key,
+    )
+
+    second = ForgeSettings(data_dir=tmp_path)
+    token = load_user_hf_token(
+        second.data_dir,
+        "u1",
+        encryption_key=second.hf_token_encryption_key,
+    )
+
+    assert token == "hf_test_token"
 
 
 def test_probe_hf_hub_anonymous_ok(monkeypatch):

@@ -78,7 +78,21 @@ def test_resolve_hf_token_for_download_drops_invalid_token(monkeypatch):
         lambda **_: type(
             "R",
             (),
-            {"token_valid": False, "anonymous_ok": True},
+            {"token_valid": False, "token_invalid": True, "anonymous_ok": True},
+        )(),
+    )
+    token, source = resolve_hf_token_for_download(settings_token="hf_bad")
+    assert token is None
+    assert source == "none"
+
+
+def test_resolve_hf_token_for_download_drops_invalid_token_when_anonymous_down(monkeypatch):
+    monkeypatch.setattr(
+        "forge.services.hf_connectivity.probe_hf_hub",
+        lambda **_: type(
+            "R",
+            (),
+            {"token_valid": False, "token_invalid": True, "anonymous_ok": False},
         )(),
     )
     token, source = resolve_hf_token_for_download(settings_token="hf_bad")

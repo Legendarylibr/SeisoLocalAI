@@ -95,7 +95,7 @@ export function ChatPage() {
   const waitingForModel = switchingModel || !!loadProgress;
   const effectiveLoadProgress =
     loadProgress ??
-    (switchingModel && hasNavTarget && pendingRepo && needsHubDownload(models, navTarget)
+    (switchingModel && models.length > 0 && hasNavTarget && pendingRepo && needsHubDownload(models, navTarget)
       ? initialDownloadProgress(pendingRepo, pendingDownloadBytes)
       : null);
   const selectedFit = selected?.hardware_fit;
@@ -322,6 +322,9 @@ export function ChatPage() {
         setLoadedModelId(null);
         setLoadedBackend(null);
         setError(e instanceof Error ? e.message : "Failed to load models");
+        if (pendingRepo) {
+          setSearchParams({}, { replace: true });
+        }
       } finally {
         if (bootstrapGen === bootstrapGenRef.current) {
           setSwitchingModel(false);
@@ -796,7 +799,17 @@ export function ChatPage() {
               <div ref={bottomRef} />
             </div>
           )}
-          {error && <p className="chat-error">{error}</p>}
+          {error && (
+            <p className="chat-error">
+              {error}
+              {(error.includes("gated") || error.includes("Access denied") || error.toLowerCase().includes("token")) && (
+                <>
+                  {" "}
+                  <a href="/settings?tab=huggingface">Open Hugging Face settings</a>
+                </>
+              )}
+            </p>
+          )}
           {selected?.hardware_fit === "unlikely" && !providerId && (
             <p className="chat-hw-warn">{selected.hardware_note || "This model may exceed available memory on your machine."}</p>
           )}

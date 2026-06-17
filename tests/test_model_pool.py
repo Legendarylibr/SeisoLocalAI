@@ -1,6 +1,8 @@
 """Tests for VRAM model pool."""
 
-from seiso.inference.model_pool import ModelPool
+import platform
+
+from seiso.inference.model_pool import ModelPool, llama_load_kwargs
 
 
 def test_pool_singleton():
@@ -30,3 +32,26 @@ def test_cancel_and_unload_clears_active():
     pool = ModelPool.get()
     pool.cancel_and_unload()
     assert pool.active_key is None
+
+
+def test_llama_load_kwargs_are_tuned_and_overrideable(monkeypatch):
+    monkeypatch.setenv("SEISO_LLAMA_THREADS", "6")
+    monkeypatch.setenv("SEISO_LLAMA_GPU_LAYERS", "4")
+    monkeypatch.setenv("SEISO_LLAMA_USE_MMAP", "false")
+
+    kwargs = llama_load_kwargs(2048)
+
+    assert kwargs["n_ctx"] == 2048
+    assert kwargs["n_threads"] == 6
+    assert kwargs["n_threads_batch"] == 6
+    assert kwargs["n_gpu_layers"] == 4
+    assert kwargs["use_mmap"] is False
+    assert kwargs["verbose"] is False
+
+
+def test_llama_load_kwargs_default_metal_offload_on_apple_silicon(monkeypatch):
+    monkeypatch.delenv("SEISO_LLAMA_GPU_LAYERS", raising=False)
+    monkeypatch.setattr(platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(platform, "machine", lambda: "arm64")
+
+    assert llama_load_kwargs(4096)["n_gpu_layers"] == -1

@@ -28,6 +28,14 @@ def _xet_available() -> bool:
         return False
 
 
+def default_hub_num_threads() -> str:
+    return "16" if _xet_available() else "8"
+
+
+def default_hub_download_timeout() -> str:
+    return "600"
+
+
 def hf_transfer_stack() -> dict[str, Any]:
     """
     Report the active Hub transfer backend.
@@ -48,8 +56,10 @@ def hf_transfer_stack() -> dict[str, Any]:
         "yes",
         "on",
     }
-    num_threads = os.environ.get("HF_HUB_NUM_THREADS", "8").strip()
-    download_timeout = os.environ.get("HF_HUB_DOWNLOAD_TIMEOUT", "300").strip()
+    num_threads = os.environ.get("HF_HUB_NUM_THREADS", default_hub_num_threads()).strip()
+    download_timeout = os.environ.get("HF_HUB_DOWNLOAD_TIMEOUT", default_hub_download_timeout()).strip()
+    hf_home = os.environ.get("HF_HOME", "").strip()
+    xet_cache = os.environ.get("HF_XET_CACHE", "").strip()
     hints: list[str] = []
     if not xet_available:
         hints.append("Install hf-xet for faster parallel downloads: pip install hf-xet")
@@ -62,6 +72,8 @@ def hf_transfer_stack() -> dict[str, Any]:
         "high_performance": high_perf,
         "num_threads": num_threads,
         "download_timeout_s": download_timeout,
+        "hf_home": hf_home or None,
+        "xet_cache": xet_cache or None,
         "hints": hints,
         "hint": hints[0] if hints else None,
     }
@@ -75,14 +87,27 @@ def configure_hf_hub_cache(data_dir: Path | None = None) -> Path:
     - Longer timeouts for multi-GB model files on slow links
     - Parallel snapshot shard downloads (HF_HUB_NUM_THREADS)
     - hf_xet when installed (Rust-backed chunk transfers — no custom Rust needed)
+    - Xet cache/log state under the Seiso data dir instead of the user's global cache
     """
-    cache = resolve_hf_cache_dir(data_dir)
+    root = resolve_data_dir(data_dir)
+    hf_home = Path(os.environ.get("HF_HOME", root / "hf_home")).expanduser()
+    os.environ.setdefault("HF_HOME", str(hf_home))
+    if raw_cache := os.environ.get("HUGGINGFACE_HUB_CACHE"):
+        cache = Path(raw_cache).expanduser()
+    else:
+        cache = root / "hf_cache"
     cache.mkdir(parents=True, exist_ok=True)
     os.environ.setdefault("HUGGINGFACE_HUB_CACHE", str(cache))
+    xet_cache = Path(os.environ.get("HF_XET_CACHE", root / "hf_xet_cache")).expanduser()
+    xet_cache.mkdir(parents=True, exist_ok=True)
+    os.environ.setdefault("HF_XET_CACHE", str(xet_cache))
+    # hf-xet writes logs under HF_HOME/xet/logs; create it early so failures are actionable.
+    (hf_home / "xet" / "logs").mkdir(parents=True, exist_ok=True)
     # Generous defaults for large GGUF / safetensors downloads
     os.environ.setdefault("HF_HUB_DOWNLOAD_TIMEOUT", "600")
     os.environ.setdefault("HF_HUB_ETAG_TIMEOUT", "30")
-    # More parallel shard downloads when hf-xet is available
-    default_threads = "12" if _xet_available() else "8"
-    os.environ.setdefault("HF_HUB_NUM_THREADS", default_threads)
+    # More parallel shard downloads when hf-xet is available.
+    os.environ.setdefault("HF_HUB_NUM_THREADS", default_hub_num_threads())
+    if _xet_available():
+        os.environ.setdefault("HF_XET_HIGH_PERFORMANCE", "1")
     return cache

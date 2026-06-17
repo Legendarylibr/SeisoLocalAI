@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from forge.config import ForgeSettings, get_settings
@@ -71,10 +71,10 @@ async def get_app_settings(
     auth = hf_auth_status(
         user_id=user_id,
         data_dir=settings.data_dir,
-        encryption_key=settings.db_encryption_key_bytes,
+        encryption_key=settings.hf_token_encryption_key,
         settings_token=settings.hf_token or None,
     )
-    user_saved = bool(load_user_hf_token(settings.data_dir, user_id, encryption_key=settings.db_encryption_key_bytes))
+    user_saved = bool(load_user_hf_token(settings.data_dir, user_id, encryption_key=settings.hf_token_encryption_key))
     return SettingsView(
         host=settings.host,
         port=settings.port,
@@ -113,11 +113,30 @@ async def save_hf_token(
     user_id: Annotated[str, Depends(get_current_user_id)],
     settings: Annotated[ForgeSettings, Depends(get_settings)],
 ) -> dict[str, str]:
+    from forge.services.hf_auth import _normalize_token
+    from forge.services.hf_connectivity import probe_hf_hub
+
+    token = _normalize_token(body.token)
+    if not token:
+        raise HTTPException(status_code=400, detail="Invalid Hugging Face token format.")
+
+    result = probe_hf_hub(token=token)
+    if not result.reachable:
+        raise HTTPException(
+            status_code=400,
+            detail=result.error or "Cannot reach Hugging Face Hub to validate token.",
+        )
+    if result.token_invalid:
+        raise HTTPException(
+            status_code=400,
+            detail="Hugging Face rejected this token — generate a new one at huggingface.co/settings/tokens.",
+        )
+
     save_user_hf_token(
         settings.data_dir,
         user_id,
-        body.token,
-        encryption_key=settings.db_encryption_key_bytes,
+        token,
+        encryption_key=settings.hf_token_encryption_key,
     )
     return {"status": "saved"}
 
@@ -142,7 +161,7 @@ async def hf_hub_status(
     return build_hf_status(
         user_id=user_id,
         data_dir=settings.data_dir,
-        encryption_key=settings.db_encryption_key_bytes,
+        encryption_key=settings.hf_token_encryption_key,
         settings_token=settings.hf_token or None,
         probe=True,
     )

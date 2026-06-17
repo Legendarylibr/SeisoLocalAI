@@ -282,7 +282,7 @@ export function TrainPage() {
           <ModelLoadProgress progress={loadProgress} modelName={modelId.split("/").pop()} />
         </div>
       )}
-      {downloadError && <p className="chat-error">{downloadError}</p>}
+      {downloadError && <p className="chat-error studio-error">{downloadError}</p>}
 
       <div className="train-layout">
         <div className="card studio-card">
@@ -308,20 +308,24 @@ export function TrainPage() {
             ))}
           </datalist>
           {localModels.length > 0 && (
-            <p className="muted-text" style={{ marginTop: "0.35rem" }}>
+            <p className="muted-text studio-field-hint">
               {localModels.length} safetensors snapshot{localModels.length === 1 ? "" : "s"} ready on disk — training uses cached weights automatically.
             </p>
           )}
-          <label>Dataset</label>
-          <HfDatasetPicker value={dataset} onChange={setDataset} />
-          <label>Dataset format</label>
-          <select value={datasetFormat} onChange={(e) => setDatasetFormat(e.target.value)}>
-            <option value="auto">Auto-detect</option>
-            <option value="chat">Chat / messages</option>
-            <option value="alpaca">Alpaca (instruction/output)</option>
-            <option value="sharegpt">ShareGPT conversations</option>
-            <option value="text">Plain text</option>
-          </select>
+          <div className="form-field">
+            <label>Dataset</label>
+            <HfDatasetPicker value={dataset} onChange={setDataset} />
+          </div>
+          <div className="form-field">
+            <label>Dataset format</label>
+            <select value={datasetFormat} onChange={(e) => setDatasetFormat(e.target.value)}>
+              <option value="auto">Auto-detect</option>
+              <option value="chat">Chat / messages</option>
+              <option value="alpaca">Alpaca (instruction/output)</option>
+              <option value="sharegpt">ShareGPT conversations</option>
+              <option value="text">Plain text</option>
+            </select>
+          </div>
         </div>
 
         <div className="card studio-card">
@@ -333,19 +337,23 @@ export function TrainPage() {
             </div>
           </div>
           <div className="option-grid">
-            <label>Method</label>
-            <select value={method} onChange={(e) => setMethod(e.target.value)}>
-              <option value="lora">LoRA / QLoRA</option>
-              <option value="full">Full fine-tune</option>
-              <option value="embedding">Embedding</option>
-            </select>
-            <label>Quantization</label>
-            <select value={quant} onChange={(e) => setQuant(e.target.value)}>
-              <option value="4bit">4-bit (QLoRA)</option>
-              <option value="8bit">8-bit</option>
-              <option value="16bit">16-bit FP16</option>
-              <option value="none">None (full precision)</option>
-            </select>
+            <div className="form-field">
+              <label>Method</label>
+              <select value={method} onChange={(e) => setMethod(e.target.value)}>
+                <option value="lora">LoRA / QLoRA</option>
+                <option value="full">Full fine-tune</option>
+                <option value="embedding">Embedding</option>
+              </select>
+            </div>
+            <div className="form-field">
+              <label>Quantization</label>
+              <select value={quant} onChange={(e) => setQuant(e.target.value)}>
+                <option value="4bit">4-bit (QLoRA)</option>
+                <option value="8bit">8-bit</option>
+                <option value="16bit">16-bit FP16</option>
+                <option value="none">None (full precision)</option>
+              </select>
+            </div>
           </div>
           <div className="slider-row">
             <label>Epochs: {epochs}</label>
@@ -366,17 +374,19 @@ export function TrainPage() {
           {method === "lora" && (
             <>
               <div className="option-grid">
-                <div>
+                <div className="form-field">
                   <label>LoRA rank (r): {loraR}</label>
                   <input type="range" min={4} max={128} step={4} value={loraR} onChange={(e) => setLoraR(+e.target.value)} />
                 </div>
-                <div>
+                <div className="form-field">
                   <label>LoRA alpha: {loraAlpha}</label>
                   <input type="range" min={8} max={256} step={8} value={loraAlpha} onChange={(e) => setLoraAlpha(+e.target.value)} />
                 </div>
               </div>
-              <label>Grad accumulation: {gradAccum}</label>
-              <input type="range" min={1} max={32} value={gradAccum} onChange={(e) => setGradAccum(+e.target.value)} />
+              <div className="slider-row">
+                <label>Grad accumulation: {gradAccum}</label>
+                <input type="range" min={1} max={32} value={gradAccum} onChange={(e) => setGradAccum(+e.target.value)} />
+              </div>
             </>
           )}
           <div className="checkbox-group">
@@ -413,7 +423,7 @@ export function TrainPage() {
             </label>
           </div>
           {method !== "embedding" && (
-            <div className="export-on-complete-section" style={{ marginTop: "1rem" }}>
+            <div className="export-on-complete-section">
               <label>
                 <input
                   type="checkbox"
@@ -424,25 +434,27 @@ export function TrainPage() {
               </label>
               {exportOnComplete && (
                 <>
-                  <label style={{ marginTop: "0.5rem" }}>Export profile</label>
-                  <select value={exportProfile} onChange={(e) => setExportProfile(e.target.value)}>
-                    {exportProfiles.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.id} ({p.formats.join(", ")})
-                      </option>
-                    ))}
-                    {!exportProfiles.length && (
-                      <>
-                        <option value="lora_bundle">lora_bundle</option>
-                        <option value="lora_adapter">lora_adapter</option>
-                        <option value="full_bundle">full_bundle</option>
-                      </>
-                    )}
-                  </select>
+                  <div className="form-field">
+                    <label>Export profile</label>
+                    <select value={exportProfile} onChange={(e) => setExportProfile(e.target.value)}>
+                      {exportProfiles.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.id} ({p.formats.join(", ")})
+                        </option>
+                      ))}
+                      {!exportProfiles.length && (
+                        <>
+                          <option value="lora_bundle">lora_bundle</option>
+                          <option value="lora_adapter">lora_adapter</option>
+                          <option value="full_bundle">full_bundle</option>
+                        </>
+                      )}
+                    </select>
+                  </div>
                   {(exportProfile.includes("gguf") || exportProfile.includes("bundle")) && (
                     <>
-                      <label style={{ marginTop: "0.5rem" }}>GGUF quantizations</label>
-                      <div className="checkbox-group">
+                      <label>GGUF quantizations</label>
+                      <div className="checkbox-group checkbox-group-inline">
                         {GGUF_QUANT_OPTIONS.map((q) => (
                           <label key={q}>
                             <input
@@ -460,19 +472,16 @@ export function TrainPage() {
               )}
             </div>
           )}
-          <button className="btn btn-primary btn-lg" onClick={start} disabled={starting || downloadingModel}>
-            {starting ? "Starting…" : downloadingModel ? "Downloading model…" : "Start training"}
-          </button>
-          {activeJob && (
-            <button
-              type="button"
-              className="btn"
-              style={{ marginLeft: "0.75rem", marginTop: "0.5rem", width: "auto" }}
-              onClick={() => setMetricsOpen(true)}
-            >
-              Open metrics dashboard
+          <div className="studio-action-bar">
+            <button className="btn btn-primary btn-lg" onClick={start} disabled={starting || downloadingModel}>
+              {starting ? "Starting…" : downloadingModel ? "Downloading model…" : "Start training"}
             </button>
-          )}
+            {activeJob && (
+              <button type="button" className="btn" onClick={() => setMetricsOpen(true)}>
+                View metrics
+              </button>
+            )}
+          </div>
         </div>
       </div>
 

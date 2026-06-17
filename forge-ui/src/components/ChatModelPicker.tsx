@@ -84,7 +84,7 @@ export function ChatModelPicker({
   }, [models, q]);
 
   const hubModels = useMemo(
-    () => catalog.filter((c) => !downloadedRepos.has(c.repo_id)),
+    () => catalog.filter((c) => !downloadedRepos.has(c.repo_id) && c.download_available !== false),
     [catalog, downloadedRepos],
   );
 

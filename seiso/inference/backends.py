@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from seiso.models.loader import Backend, detect_backend
@@ -13,6 +14,7 @@ BACKEND_OLLAMA = "ollama"
 BACKEND_MLX = "mlx"
 BACKEND_TORCH = "torch"
 BACKEND_AUTO = "auto"
+_GGUF_SHARD_RE = re.compile(r"^(?P<prefix>.+)-(?P<index>\d{5})-of-(?P<total>\d{5})\.gguf$", re.I)
 
 
 def _is_gguf_path(model_path: str) -> bool:
@@ -28,7 +30,15 @@ def resolve_gguf_file(model_path: str) -> Path:
     if path.is_file() and path.suffix.lower() == ".gguf":
         return path.resolve()
     if path.is_dir():
-        candidates = sorted(path.glob("*.gguf"), key=lambda p: p.stat().st_size, reverse=True)
+        candidates = sorted(path.glob("*.gguf"))
+        first_shards = [
+            p
+            for p in candidates
+            if (match := _GGUF_SHARD_RE.match(p.name)) and match.group("index") == "00001"
+        ]
+        if first_shards:
+            return first_shards[0].resolve()
+        candidates = sorted(candidates, key=lambda p: p.stat().st_size, reverse=True)
         if candidates:
             return candidates[0].resolve()
     raise ValueError(f"No GGUF file found at {model_path}")

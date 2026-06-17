@@ -24,6 +24,14 @@ function useLiveProgress(progress: ModelProgressState) {
   });
   const lastBytesAt = useRef(Date.now());
   const prevBytesDone = useRef(progress.bytesDone ?? 0);
+  const progressKey = `${progress.phase}:${progress.label}:${progress.totalBytes ?? 0}`;
+  const prevProgressKey = useRef(progressKey);
+
+  if (progressKey !== prevProgressKey.current) {
+    prevProgressKey.current = progressKey;
+    lastBytesAt.current = Date.now();
+    prevBytesDone.current = progress.bytesDone ?? 0;
+  }
 
   if ((progress.bytesDone ?? 0) > prevBytesDone.current) {
     lastBytesAt.current = Date.now();
@@ -85,7 +93,6 @@ function useLiveProgress(progress: ModelProgressState) {
   const stalled =
     hasByteTracker &&
     progress.percent < 100 &&
-    (progress.bytesDone ?? 0) > 0 &&
     now - lastBytesAt.current >= STALL_SECONDS * 1000;
 
   return { liveEta, displayPct, hasByteTracker, stalled };
@@ -128,7 +135,9 @@ function ModelLoadProgressView({ progress, modelName }: ViewProps) {
           {speedLabel ? (
             <span className="model-load-progress-bytes-speed">{speedLabel}</span>
           ) : stalled ? (
-            <span className="model-load-progress-bytes-stalled">Waiting for data…</span>
+            <span className="model-load-progress-bytes-stalled">
+              {bytesDone > 0 ? "Waiting for more data…" : "Waiting for first data…"}
+            </span>
           ) : null}
         </div>
       )}

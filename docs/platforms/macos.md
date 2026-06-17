@@ -23,17 +23,33 @@ curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scr
 Manual:
 
 ```bash
-python3 -m venv .venv && source .venv/bin/activate
-pip install -U pip
+git clone https://github.com/Legendarylibr/SeisoLocalAI.git ~/Seiso
+cd ~/Seiso
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -U pip wheel setuptools
 pip install -e ".[forge,train,mlx,dev]"
+cd forge-ui
+npm install
+npm run build
+cd ..
 ```
 
 ## Start Forge
 
 ```bash
 ~/Seiso/scripts/start.sh
-# or from a clone:
-cd forge-ui && npm install && npm run build && cd ..
+```
+
+Or from an existing clone:
+
+```bash
+cd ~/Seiso
+source .venv/bin/activate
+cd forge-ui
+npm install
+npm run build
+cd ..
 seiso forge
 ```
 

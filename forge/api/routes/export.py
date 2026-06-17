@@ -110,7 +110,7 @@ def _resolve_token(
         request_token=hub.hf_token,
         user_id=user_id,
         data_dir=settings.data_dir,
-        encryption_key=settings.db_encryption_key_bytes,
+        encryption_key=settings.hf_token_encryption_key,
         settings_token=settings.hf_token or None,
         prefer_cli=hub.use_cli,
     )

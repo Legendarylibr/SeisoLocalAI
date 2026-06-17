@@ -29,12 +29,18 @@ _FILE_SIZE_CACHE: dict[str, tuple[float, int]] = {}
 _FILE_SIZE_TTL_S = 86_400.0
 _DOWNLOAD_RETRIES = 3
 _DOWNLOAD_RETRY_BACKOFF_S = 2.0
+_GGUF_SHARD_RE = re.compile(
+    r"^(?P<prefix>.+)-(?P<index>\d{5})-of-(?P<total>\d{5})\.gguf$",
+    re.I,
+)
 
 T = TypeVar("T")
 
 
 def _snapshot_max_workers() -> int:
-    raw = os.environ.get("HF_HUB_NUM_THREADS", "8").strip()
+    from seiso.models.hf_env import default_hub_num_threads
+
+    raw = os.environ.get("HF_HUB_NUM_THREADS", default_hub_num_threads()).strip()
     try:
         return max(1, min(int(raw), 16))
     except ValueError:
@@ -51,6 +57,12 @@ def _format_hub_download_error(exc: Exception, *, repo_id: str) -> str:
         )
     if "404" in msg or "not found" in lowered:
         return f"Model repo not found on Hugging Face Hub: {repo_id}"
+    if "429" in msg or "rate limit" in lowered or "too many requests" in lowered:
+        return (
+            f"Hugging Face anonymous API rate limit reached while downloading {repo_id}. "
+            "Public models do not require a token, but anonymous requests are throttled. "
+            "Wait a few minutes and retry, or add a free HF token for higher limits."
+        )
     if "connection" in lowered or "network" in lowered or "resolve" in lowered:
         return f"Cannot reach huggingface.co while downloading {repo_id}. Check your network."
     if "timeout" in lowered or "timed out" in lowered:
@@ -96,6 +108,16 @@ def _pick_gguf_file(
     preferred_quant: str = "Q4_K_M",
     repo_id: str = "",
 ) -> str | None:
+    files = _pick_gguf_files(files, preferred_quant=preferred_quant, repo_id=repo_id)
+    return files[0] if files else None
+
+
+def _pick_gguf_files(
+    files: list[str],
+    *,
+    preferred_quant: str = "Q4_K_M",
+    repo_id: str = "",
+) -> list[str]:
     ggufs = [
         f
         for f in files
@@ -104,7 +126,7 @@ def _pick_gguf_file(
         and not f.lower().startswith("mmproj")
     ]
     if not ggufs:
-        return None
+        return []
     preferred_quant = preferred_quant.upper()
 
     def quant_matches(candidates: list[str]) -> list[str]:
@@ -124,15 +146,49 @@ def _pick_gguf_file(
         active = moe_match.group(0).lower()
         active_hits = [f for f in pool if active in f.lower().replace("_", "-")]
         if active_hits:
-            return sorted(active_hits, key=len)[0]
+            pool = active_hits
 
-    return sorted(pool, key=len)[0]
+    shard_groups: dict[tuple[str, str], list[str]] = {}
+    for filename in pool:
+        name = Path(filename).name
+        match = _GGUF_SHARD_RE.match(name)
+        if not match:
+            continue
+        key = (str(Path(filename).parent / match.group("prefix")), match.group("total"))
+        shard_groups.setdefault(key, []).append(filename)
+    complete_groups: list[list[str]] = []
+    for (_prefix, total), group in shard_groups.items():
+        try:
+            expected = int(total)
+        except ValueError:
+            continue
+        if len(group) == expected:
+            complete_groups.append(sorted(group))
+    if complete_groups:
+        return sorted(complete_groups, key=lambda group: (len(group), len(group[0]), group[0]))[0]
+
+    non_sharded = [filename for filename in pool if not _GGUF_SHARD_RE.match(Path(filename).name)]
+    if non_sharded:
+        return [sorted(non_sharded, key=len)[0]]
+    return []
 
 
 def _inventory_name(repo_id: str, filename: str) -> Path:
     """Stable symlink path under user models inventory."""
     safe_repo = sanitize_filename(repo_id.replace("/", "--"))
     return Path(safe_repo) / sanitize_filename(Path(filename).name)
+
+
+def _inventory_name_for_files(repo_id: str, filenames: list[str]) -> Path:
+    if len(filenames) == 1:
+        return _inventory_name(repo_id, filenames[0])
+    first = Path(filenames[0])
+    match = _GGUF_SHARD_RE.match(first.name)
+    name = match.group("prefix") if match else first.stem
+    if first.parent != Path("."):
+        name = f"{first.parent.name}-{name}"
+    safe_repo = sanitize_filename(repo_id.replace("/", "--"))
+    return Path(safe_repo) / sanitize_filename(name)
 
 
 def _list_repo_files(repo_id: str, *, token: str | None, revision: str) -> list[str]:
@@ -326,17 +382,25 @@ def resolve_gguf_artifact(
     gguf_repo = resolve_gguf_repo(catalog_repo_id, token=token, revision=revision, entry=entry)
     quant = entry.quant if entry else "Q4_K_M"
 
+    filenames: list[str]
     if not filename:
         files = _list_repo_files(gguf_repo, token=token, revision=revision)
-        filename = _pick_gguf_file(files, preferred_quant=quant, repo_id=catalog_repo_id)
-        if not filename:
+        filenames = _pick_gguf_files(files, preferred_quant=quant, repo_id=catalog_repo_id)
+        if not filenames:
             raise ValueError(f"No GGUF files found in {gguf_repo}")
+        filename = filenames[0]
+    else:
+        filenames = [filename]
 
-    size_bytes = get_gguf_file_size_bytes(gguf_repo, filename, token=token, revision=revision)
+    size_bytes = sum(
+        get_gguf_file_size_bytes(gguf_repo, item, token=token, revision=revision)
+        for item in filenames
+    )
     info: dict[str, Any] = {
         "catalog_repo": catalog_repo_id,
         "gguf_repo": gguf_repo,
         "filename": filename,
+        "filenames": filenames,
         "size_bytes": size_bytes,
         "quant": quant,
     }
@@ -400,6 +464,7 @@ def download_gguf(
     token: str | None,
     revision: str = "main",
     filename: str | None = None,
+    filenames: list[str] | None = None,
     entry: CatalogEntry | None = None,
     inventory_repo_id: str | None = None,
     on_progress: ProgressCallback | None = None,
@@ -411,15 +476,23 @@ def download_gguf(
     quant = entry.quant if entry else "Q4_K_M"
     inv_repo = inventory_repo_id or repo_id
 
-    if not filename:
+    if filenames:
+        filename = filenames[0]
+    elif not filename:
         files = _list_repo_files(repo_id, token=token, revision=revision)
-        filename = _pick_gguf_file(files, preferred_quant=quant, repo_id=inv_repo)
-        if not filename:
+        filenames = _pick_gguf_files(files, preferred_quant=quant, repo_id=inv_repo)
+        if not filenames:
             raise ValueError(f"No GGUF files found in {repo_id}")
+        filename = filenames[0]
+    else:
+        filenames = [filename]
 
     if on_progress and (total_bytes is None or total_bytes <= 0):
         try:
-            total_bytes = get_gguf_file_size_bytes(repo_id, filename, token=token, revision=revision)
+            total_bytes = sum(
+                get_gguf_file_size_bytes(repo_id, item, token=token, revision=revision)
+                for item in filenames
+            )
         except Exception:
             total_bytes = 0
         if total_bytes > 0:
@@ -437,30 +510,59 @@ def download_gguf(
             )
 
     cache_dir.mkdir(parents=True, exist_ok=True)
-    download_kwargs: dict[str, Any] = {
-        "repo_id": repo_id,
-        "filename": filename,
-        "revision": revision,
-        "token": token,
-        "cache_dir": str(cache_dir),
-    }
-    if on_progress:
-        download_kwargs["tqdm_class"] = make_tqdm_class(on_progress)
-    cached_path = Path(
-        _with_download_retries(
-            lambda: hf_hub_download(**download_kwargs),
-            repo_id=repo_id,
+    cached_paths: list[Path] = []
+    for item in filenames:
+        download_kwargs: dict[str, Any] = {
+            "repo_id": repo_id,
+            "filename": item,
+            "revision": revision,
+            "token": token,
+            "cache_dir": str(cache_dir),
+        }
+        if on_progress:
+            download_kwargs["tqdm_class"] = make_tqdm_class(on_progress)
+        cached_paths.append(
+            Path(
+                _with_download_retries(
+                    lambda kwargs=download_kwargs: hf_hub_download(**kwargs),
+                    repo_id=repo_id,
+                )
+            )
         )
-    )
+
+    cached_target = cached_paths[0] if len(cached_paths) == 1 else cached_paths[0].parent
 
     return {
-        "path": str(cached_path.resolve()),
+        "path": str(cached_target.resolve()),
+        "paths": [str(path.resolve()) for path in cached_paths],
         "filename": filename,
+        "filenames": filenames,
         "format": "gguf",
         "repo_id": repo_id,
         "cache_dir": str(cache_dir),
-        "inventory_name": str(_inventory_name(inv_repo, filename)),
+        "inventory_name": str(_inventory_name_for_files(inv_repo, filenames)),
     }
+
+
+def estimate_snapshot_download_bytes(
+    repo_id: str,
+    *,
+    token: str | None = None,
+    revision: str = "main",
+) -> int:
+    """Estimate bytes needed for a training snapshot (excludes GGUF, markdown, original/)."""
+    from huggingface_hub import HfApi
+
+    info = HfApi().model_info(repo_id, revision=revision, token=token)
+    total = 0
+    for sibling in info.siblings or []:
+        name = sibling.rfilename
+        if name.endswith(".gguf") or name.endswith(".md") or name.endswith(".h5"):
+            continue
+        if name.startswith("original/"):
+            continue
+        total += int(getattr(sibling, "size", None) or 0)
+    return total
 
 
 def download_training_snapshot(

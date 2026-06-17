@@ -19,6 +19,7 @@ from forge.security.autodefense import DefenseBlockedError, defense_enabled, sca
 from forge.services.chat_messages import build_trusted_messages
 from forge.services.download_progress import estimate_load_eta_seconds
 from forge.services.hardware import hardware_profile
+from forge.services.hf_cache_inventory import sync_hf_cache_inventory
 from forge.services.inference_models import list_inference_options, resolve_chat_target
 from forge.services.models import resolve_model_path
 from seiso.inference.backends import BACKEND_OLLAMA
@@ -80,6 +81,12 @@ async def inference_models(
     """Unified model dropdown: HF Hub inventory, CLI paths, fine-tune/export outputs, Ollama."""
     from forge.services.hardware import hardware_summary
 
+    await sync_hf_cache_inventory(
+        db,
+        user_id,
+        data_dir=settings.data_dir,
+        hf_cache_dir=settings.hf_cache_dir,
+    )
     options = await list_inference_options(db, user_id, ollama_base_url=settings.ollama_base_url)
     profile = hardware_profile()
     return {
