@@ -35,9 +35,10 @@ SEISO_CORS_ORIGINS=https://forge.example.com
 | `SEISO_SECURE_COOKIES` | Marks cookies `Secure` when TLS is terminated by the proxy (without opening LAN bind) |
 | `SEISO_CORS_ORIGINS` | Must include your **https://** public URL |
 
-Start Forge:
+Start Forge (from repo root, after building the UI):
 
 ```bash
+cd forge-ui && npm install && npm run build && cd ..
 seiso forge
 ```
 

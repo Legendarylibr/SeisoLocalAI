@@ -22,6 +22,7 @@ pip install -e ".[forge,train,mlx,dev]"
 ## Start Forge
 
 ```bash
+cd forge-ui && npm install && npm run build && cd ..
 seiso forge
 ```
 
@@ -59,5 +60,5 @@ use_fused_ce: false
 ## Build Forge UI
 
 ```bash
-cd forge-ui && npm install && npm run build
+cd forge-ui && npm install && npm run build && cd ..
 ```

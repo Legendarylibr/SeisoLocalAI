@@ -67,7 +67,12 @@ async def model_catalog(
             encryption_key=settings.db_encryption_key_bytes,
             settings_token=settings.hf_token or None,
         )
-        models = enrich_catalog_models(models, profile, token=hf_token)
+        models = enrich_catalog_models(
+            models,
+            profile,
+            token=hf_token,
+            diversify=not q.strip() and not family and not task,
+        )
     if fits_only:
         models = [m for m in models if m.get("hardware_fit") in ("ideal", "good")]
     return {

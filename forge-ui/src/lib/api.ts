@@ -257,6 +257,8 @@ export const api = {
       body: JSON.stringify({ token }),
     }),
   clearHfToken: () => request<{ status: string }>("/settings/hf-token", { method: "DELETE" }),
+  hfStatus: () =>
+    request<HfHubStatus>("/settings/hf-status"),
   runRecipe: (recipe: Record<string, unknown>) =>
     request<{ job_id: string }>("/recipes/jobs", {
       method: "POST",
@@ -335,6 +337,35 @@ export type HfAuthInfo = {
   user_token_saved: boolean;
 };
 
+export type HfHubStatus = {
+  auth: HfAuthInfo & { token_source: string };
+  connectivity: {
+    reachable: boolean;
+    latency_ms: number | null;
+    token_valid: boolean;
+    token_username: string | null;
+    anonymous_ok: boolean;
+    error: string | null;
+  };
+  transfer: {
+    backend: string;
+    xet_available: boolean;
+    xet_version: string | null;
+    high_performance: boolean;
+    hint: string | null;
+  };
+  cache_dir: string;
+  runtime: {
+    llamacpp: boolean;
+    mlx: boolean;
+    torch: boolean;
+    huggingface_hub: boolean;
+    install_hints: string[];
+  };
+  ready_for_download: boolean;
+  ready_for_gguf_chat: boolean;
+};
+
 export type InferenceModelOption = {
   id: string;
   kind: "local" | "ollama";
@@ -371,6 +402,7 @@ export type CatalogModel = {
   featured?: boolean;
   priority?: number;
   download_bytes?: number;
+  download_bytes_estimated?: boolean;
   gguf_repo?: string;
   gguf_file?: string;
   hardware_fit?: "ideal" | "good" | "tight" | "unlikely";

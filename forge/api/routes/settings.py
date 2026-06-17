@@ -129,3 +129,20 @@ async def delete_hf_token(
 ) -> dict[str, str]:
     clear_user_hf_token(settings.data_dir, user_id)
     return {"status": "cleared"}
+
+
+@router.get("/settings/hf-status")
+async def hf_hub_status(
+    user_id: Annotated[str, Depends(get_current_user_id)],
+    settings: Annotated[ForgeSettings, Depends(get_settings)],
+) -> dict:
+    """Probe Hugging Face Hub connectivity, auth, transfer stack, and inference deps."""
+    from forge.services.hf_connectivity import build_hf_status
+
+    return build_hf_status(
+        user_id=user_id,
+        data_dir=settings.data_dir,
+        encryption_key=settings.db_encryption_key_bytes,
+        settings_token=settings.hf_token or None,
+        probe=True,
+    )

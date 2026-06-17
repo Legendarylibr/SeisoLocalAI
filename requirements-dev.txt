@@ -1,0 +1,13 @@
+# Development-only dependencies (see docs/CI_LOCAL.md).
+# Install: pip install -r requirements-dev.txt
+# Or:      pip install -e ".[dev]" && pip install -r requirements-dev.txt
+
+ruff>=0.4
+mypy>=1.10
+pylint>=3.2
+bandit[toml]>=1.7
+detect-secrets>=1.5
+pip-audit>=2.7
+pre-commit>=3.7
+pytest>=8.2
+pytest-asyncio>=0.23

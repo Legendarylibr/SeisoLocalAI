@@ -580,6 +580,21 @@ label {
   z-index: 0;
 }
 
+.auth-bg-figure {
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  transform: translateX(-50%);
+  max-width: min(520px, 70vw);
+  max-height: 85vh;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  opacity: 0.035;
+  filter: grayscale(1);
+  mask-image: radial-gradient(ellipse 55% 65% at 50% 60%, black 15%, transparent 72%);
+}
+
 .auth-orb {
   position: absolute;
   border-radius: 50%;
@@ -1851,6 +1866,12 @@ th { color: var(--muted); font-weight: 500; font-size: 0.78rem; text-transform: 
   padding: 0.4rem 0.6rem;
 }
 
+.chat-provider-label {
+  font-size: 0.82rem;
+  padding: 0.4rem 0.15rem;
+  white-space: nowrap;
+}
+
 .chat-refresh-models {
   border: 1px solid var(--border);
   background: var(--surface-raised);
@@ -1949,26 +1970,16 @@ th { color: var(--muted); font-weight: 500; font-size: 0.78rem; text-transform: 
   position: relative;
 }
 
-.model-load-progress-track.indeterminate .model-load-progress-fill {
-  width: 35% !important;
-  animation: model-progress-indeterminate 1.2s ease-in-out infinite;
-}
-
 .model-load-progress-fill {
   height: 100%;
   border-radius: 999px;
   background: linear-gradient(90deg, var(--accent-dim), var(--accent));
-  transition: width 0.2s ease;
+  transition: width 1.4s linear;
 }
 
 .model-load-progress-pct {
   font-size: 0.7rem;
   text-align: right;
-}
-
-@keyframes model-progress-indeterminate {
-  0% { transform: translateX(-100%); }
-  100% { transform: translateX(320%); }
 }
 
 .chat-tools-toggle {

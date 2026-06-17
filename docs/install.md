@@ -1,13 +1,21 @@
 # Installation
 
+All commands assume the **repository root** as the working directory.
+
 ## Base install
 
 ```bash
-git clone <repo-url> Seiso && cd Seiso
+git clone https://github.com/seiso-ai/seiso.git Seiso && cd Seiso
 python3 -m venv .venv
 source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -U pip
 pip install -e ".[forge,train,dev]"
+```
+
+Optional: copy environment defaults and set your Hugging Face token:
+
+```bash
+cp .env.example .env
 ```
 
 ## Optional extras
@@ -16,9 +24,13 @@ pip install -e ".[forge,train,dev]"
 |-------|---------|-----------|
 | Forge web server | `.[forge]` | All |
 | Training (PyTorch, TRL, PEFT) | `.[train]` | All |
-| NVIDIA fused kernels + Triton | `.[cuda]` | **Linux only** (in `pyproject.toml`) |
+| NVIDIA fused kernels + Triton | `.[cuda]` | **Linux only** |
 | MLX chat inference | `.[mlx]` | **macOS only** |
 | GGUF via llama.cpp | `.[llamacpp]` | All (build may need CMake) |
+| GPTQ/AWQ (LLM compress) | `.[compress-quant]` | CUDA recommended |
+| lm-eval (LLM compress) | `.[compress-eval]` | All |
+| SD image compression | `.[image-compress]` | CUDA/MPS/CPU |
+| SD ONNX export | `.[image-compress-onnx]` | All |
 | Dev tests / lint | `.[dev]` | All |
 
 ### Recommended per platform
@@ -39,21 +51,44 @@ pip install -e ".[forge,train,dev]"
 # Install CUDA PyTorch from https://pytorch.org/get-started/locally/
 ```
 
-## Frontend (Forge UI dev)
+## Frontend (Forge UI)
+
+Forge serves the built UI from `forge-ui/dist`. Build before your first launch:
 
 ```bash
-cd forge-ui && npm install && npm run build
+cd forge-ui && npm install && npm run build && cd ..
 ```
 
-Forge serves `forge-ui/dist` when present. For UI development:
+For UI development with hot reload (API must still be running):
 
 ```bash
-cd forge-ui && npm run dev   # Vite on :5173, API proxy to Forge
+# Terminal 1
+seiso forge
+
+# Terminal 2
+cd forge-ui && npm run dev   # Vite on :5173, proxies /api to :8765
 ```
+
+See [forge.md](forge.md) for pages, API routes, and environment variables.
+
+## First launch
+
+```bash
+seiso forge
+```
+
+1. Open **http://127.0.0.1:8765**
+2. Complete onboarding — create your local admin password
+3. Use the Dashboard or sidebar to reach Chat, Training Studio, Export, etc.
+
+If the UI is blank, rebuild: `cd forge-ui && npm run build`.
 
 ## Verify
 
 ```bash
+make ci-fast          # lint + types + test + security (see CI_LOCAL.md)
 pytest tests/ -q
-seiso forge   # should bind 127.0.0.1:8765
+seiso forge           # should bind 127.0.0.1:8765
 ```
+
+For local CI dev dependencies: `pip install -r requirements-dev.txt` (see [CI_LOCAL.md](CI_LOCAL.md)).

@@ -375,7 +375,6 @@ class Database:
         if not existing:
             return await self.add_model(user_id=user_id, source=source, **fields)
 
-        now = _now()
         async with self._conn() as conn:
             await conn.execute(
                 """UPDATE local_models

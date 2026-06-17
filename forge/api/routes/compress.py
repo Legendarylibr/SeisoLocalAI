@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
 from forge.api.deps import get_compress_orchestrator, get_db
+from forge.api.routes._stream import job_log_event_gen
 from forge.config import ForgeSettings, get_settings
 from forge.db.store import Database
 from forge.orchestrators.compress import CompressOrchestrator
@@ -161,16 +162,7 @@ async def stream_compress(
         raise HTTPException(404, "Job not found")
     assert_job_owner(orchestrator, job_id, user_id)
 
-    async def event_gen():
-        async for line in orchestrator.stream_logs(job_id):
-            yield {"event": "log", "data": line}
-        j = orchestrator.get_job(job_id)
-        if j and j.error:
-            yield {"event": "error", "data": j.error}
-        if j and j.result:
-            yield {"event": "result", "data": json.dumps(j.result, default=str)}
-
-    return EventSourceResponse(event_gen())
+    return EventSourceResponse(job_log_event_gen(orchestrator, job_id))
 
 
 @router.get("/presets")

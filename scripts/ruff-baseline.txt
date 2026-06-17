@@ -1,0 +1,114 @@
+forge/api/deps.py:3:1: I001 Import block is un-sorted or un-formatted
+forge/api/deps.py:7:26: F401 `forge.config.ForgeSettings` imported but unused
+forge/api/routes/export.py:31:34: F401 `seiso.export.formats.ExportFormat` imported but unused
+forge/api/routes/inference.py:3:1: I001 Import block is un-sorted or un-formatted
+forge/api/routes/mcp_servers.py:3:1: I001 Import block is un-sorted or un-formatted
+forge/api/routes/models.py:3:1: I001 Import block is un-sorted or un-formatted
+forge/api/routes/openai.py:5:8: F401 `asyncio` imported but unused
+forge/api/routes/providers.py:3:1: I001 Import block is un-sorted or un-formatted
+forge/api/routes/system.py:12:42: F401 `seiso.models.loader.detect_backend` imported but unused
+forge/api/routes/training.py:150:21: I001 Import block is un-sorted or un-formatted
+forge/api/routes/training.py:161:25: I001 Import block is un-sorted or un-formatted
+forge/api/routes/training.py:3:1: I001 Import block is un-sorted or un-formatted
+forge/config.py:3:1: I001 Import block is un-sorted or un-formatted
+forge/db/store.py:10:1: UP035 Import from `collections.abc` instead: `AsyncIterator`
+forge/db/store.py:259:9: SIM117 Use a single `with` statement with multiple contexts instead of nested `with` statements
+forge/db/store.py:289:9: SIM117 Use a single `with` statement with multiple contexts instead of nested `with` statements
+forge/db/store.py:299:9: SIM117 Use a single `with` statement with multiple contexts instead of nested `with` statements
+forge/db/store.py:307:9: SIM117 Use a single `with` statement with multiple contexts instead of nested `with` statements
+forge/db/store.py:315:9: SIM117 Use a single `with` statement with multiple contexts instead of nested `with` statements
+forge/db/store.py:333:9: SIM117 Use a single `with` statement with multiple contexts instead of nested `with` statements
+forge/db/store.py:365:9: SIM117 Use a single `with` statement with multiple contexts instead of nested `with` statements
+forge/db/store.py:378:9: F841 Local variable `now` is assigned to but never used
+forge/db/store.py:416:9: SIM117 Use a single `with` statement with multiple contexts instead of nested `with` statements
+forge/db/store.py:425:9: SIM117 Use a single `with` statement with multiple contexts instead of nested `with` statements
+forge/db/store.py:468:9: SIM117 Use a single `with` statement with multiple contexts instead of nested `with` statements
+forge/db/store.py:497:9: SIM117 Use a single `with` statement with multiple contexts instead of nested `with` statements
+forge/db/store.py:546:9: SIM117 Use a single `with` statement with multiple contexts instead of nested `with` statements
+forge/db/store.py:556:9: SIM117 Use a single `with` statement with multiple contexts instead of nested `with` statements
+forge/db/store.py:579:9: SIM117 Use a single `with` statement with multiple contexts instead of nested `with` statements
+forge/db/store.py:599:9: SIM117 Use a single `with` statement with multiple contexts instead of nested `with` statements
+forge/db/store.py:636:9: SIM117 Use a single `with` statement with multiple contexts instead of nested `with` statements
+forge/db/store.py:669:9: SIM117 Use a single `with` statement with multiple contexts instead of nested `with` statements
+forge/db/store.py:700:9: SIM117 Use a single `with` statement with multiple contexts instead of nested `with` statements
+forge/db/store.py:723:9: SIM117 Use a single `with` statement with multiple contexts instead of nested `with` statements
+forge/db/store.py:763:9: SIM117 Use a single `with` statement with multiple contexts instead of nested `with` statements
+forge/db/store.py:786:9: SIM117 Use a single `with` statement with multiple contexts instead of nested `with` statements
+forge/db/store.py:829:9: SIM117 Use a single `with` statement with multiple contexts instead of nested `with` statements
+forge/db/store.py:854:9: SIM117 Use a single `with` statement with multiple contexts instead of nested `with` statements
+forge/db/store.py:897:9: SIM117 Use a single `with` statement with multiple contexts instead of nested `with` statements
+forge/main.py:3:1: I001 Import block is un-sorted or un-formatted
+forge/orchestrators/base.py:14:1: UP035 Import from `collections.abc` instead: `AsyncIterator`
+forge/orchestrators/inference.py:21:33: F401 `seiso.models.loader.detect_backend` imported but unused
+forge/orchestrators/inference.py:3:1: I001 Import block is un-sorted or un-formatted
+forge/orchestrators/inference.py:7:1: UP035 Import from `collections.abc` instead: `Callable`
+forge/orchestrators/recipes.py:127:9: F841 Local variable `node_map` is assigned to but never used
+forge/orchestrators/training.py:83:13: SIM105 Use `contextlib.suppress(asyncio.CancelledError)` instead of `try`-`except`-`pass`
+forge/providers/ollama.py:83:5: SIM117 Use a single `with` statement with multiple contexts instead of nested `with` statements
+forge/providers/router.py:5:8: F401 `json` imported but unused
+forge/services/hardware.py:11:36: F401 `dataclasses.field` imported but unused
+forge/services/hardware.py:270:5: F841 Local variable `vram_free` is assigned to but never used
+forge/services/hardware.py:383:5: F841 Local variable `ram` is assigned to but never used
+forge/services/hardware.py:441:5: F841 Local variable `budget_mb` is assigned to but never used
+forge/services/hardware.py:80:21: B009 Do not call `getattr` with a constant attribute value. It is not any safer than normal property access.
+forge/services/hardware.py:81:22: B009 Do not call `getattr` with a constant attribute value. It is not any safer than normal property access.
+forge/services/hf_hub.py:19:33: F401 `seiso.models.hf_env.resolve_hf_cache_dir` imported but unused
+forge/services/inference_models.py:8:21: F401 `pathlib.Path` imported but unused
+forge/services/model_registry.py:3:1: I001 Import block is un-sorted or un-formatted
+forge/services/user_paths.py:7:43: F401 `seiso.security.assert_within` imported but unused
+forge/tools/agent_loop.py:6:1: UP035 Import from `collections.abc` instead: `Awaitable`, `Callable`
+forge/tools/agent_loop.py:6:20: F401 `typing.Any` imported but unused
+forge/tools/code_exec.py:3:1: I001 Import block is un-sorted or un-formatted
+forge/tools/registry.py:13:15: UP007 Use `X | Y` for type annotations
+forge/tools/registry.py:154:5: SIM108 Use ternary operator `base = user_dir(root, user_id, "artifacts") if user_id else root / "artifacts"` instead of `if`-`else`-block
+forge/tools/registry.py:206:13: SIM105 Use `contextlib.suppress(json.JSONDecodeError)` instead of `try`-`except`-`pass`
+forge/tools/registry.py:88:5: I001 Import block is un-sorted or un-formatted
+forge/tools/registry.py:9:1: UP035 Import from `collections.abc` instead: `Awaitable`, `Callable`
+forge/tools/web_search.py:7:8: F401 `urllib.parse` imported but unused
+seiso/__init__.py:5:1: I001 Import block is un-sorted or un-formatted
+seiso/export/__init__.py:1:1: I001 Import block is un-sorted or un-formatted
+seiso/export/formats.py:12:1: UP035 Import from `collections.abc` instead: `Callable`
+seiso/export/formats.py:186:9: SIM105 Use `contextlib.suppress(OSError, json.JSONDecodeError)` instead of `try`-`except`-`pass`
+seiso/export/formats.py:18:43: F401 `seiso.security.safe_join` imported but unused
+seiso/export/gguf.py:10:1: UP035 Import from `collections.abc` instead: `Callable`
+seiso/export/gguf.py:6:8: F401 `shutil` imported but unused
+seiso/export/hub_precheck.py:7:1: UP035 Import from `collections.abc` instead: `Callable`
+seiso/export/pipeline.py:7:1: UP035 Import from `collections.abc` instead: `Callable`
+seiso/image_compress/config_builder.py:8:44: F401 `seiso.image_compress.bootstrap._VENDOR_ROOT` imported but unused
+seiso/inference/runner.py:12:5: F401 `seiso.inference.backends.BACKEND_LLAMACPP` imported but unused
+seiso/kernels/benchmark.py:82:9: E741 Ambiguous variable name: `l`
+seiso/kernels/benchmark.py:88:9: E741 Ambiguous variable name: `l`
+seiso/kernels/cuda_ops.py:117:12: F401 `torch` imported but unused
+seiso/kernels/cuda_ops.py:88:12: F401 `torch` imported but unused
+seiso/kernels/dispatch.py:40:12: F401 `torch` imported but unused
+seiso/kernels/dispatch.py:88:12: F401 `torch` imported but unused
+seiso/kernels/hooks.py:3:1: I001 Import block is un-sorted or un-formatted
+seiso/kernels/hooks.py:7:1: UP035 Import from `collections.abc` instead: `Callable`
+seiso/models/fast_model.py:3:1: I001 Import block is un-sorted or un-formatted
+seiso/rl_quant/__init__.py:3:1: I001 Import block is un-sorted or un-formatted
+seiso/security/__init__.py:9:1: UP035 Import from `collections.abc` instead: `Iterable`
+seiso/training/metrics.py:10:1: UP035 Import from `collections.abc` instead: `Callable`
+seiso/training/sft.py:11:5: I001 Import block is un-sorted or un-formatted
+seiso/training/trainer.py:276:38: SIM211 Use `not ...` instead of `False if ... else True`
+seiso/training/trainer.py:3:1: I001 Import block is un-sorted or un-formatted
+seiso_cli/main.py:106:5: I001 Import block is un-sorted or un-formatted
+seiso_cli/main.py:107:39: F401 `seiso.export.pipeline.auto_export_after_training` imported but unused
+tests/test_authorization.py:47:9: F841 Local variable `headers_a` is assigned to but never used
+tests/test_catalog.py:3:1: I001 Import block is un-sorted or un-formatted
+tests/test_catalog.py:3:34: F401 `seiso.models.catalog.get_families` imported but unused
+tests/test_code_exec.py:3:1: I001 Import block is un-sorted or un-formatted
+tests/test_export.py:19:96: F401 `seiso.export.pipeline.run_export_plan` imported but unused
+tests/test_export.py:3:1: I001 Import block is un-sorted or un-formatted
+tests/test_fast_model.py:3:1: I001 Import block is un-sorted or un-formatted
+tests/test_hardware.py:10:5: F401 `forge.services.hardware.vram_headroom_mb` imported but unused
+tests/test_hf_hub.py:3:1: I001 Import block is un-sorted or un-formatted
+tests/test_hf_hub.py:5:21: F401 `pathlib.Path` imported but unused
+tests/test_hf_publish.py:5:8: F401 `pytest` imported but unused
+tests/test_hf_publish.py:8:40: F401 `forge.services.publishable.PUSHABLE_SOURCES` imported but unused
+tests/test_inference_backends.py:3:1: I001 Import block is un-sorted or un-formatted
+tests/test_platform_training.py:18:5: F841 Local variable `torch` is assigned to but never used
+tests/test_redteam_fixes.py:3:1: I001 Import block is un-sorted or un-formatted
+tests/test_rl_quant.py:3:1: I001 Import block is un-sorted or un-formatted
+tests/test_security.py:3:1: I001 Import block is un-sorted or un-formatted
+tests/test_training_config.py:1:1: I001 Import block is un-sorted or un-formatted
+tests/test_training_models.py:7:8: F401 `pytest` imported but unused

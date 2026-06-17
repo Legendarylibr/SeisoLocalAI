@@ -34,6 +34,7 @@ export function ExportPage() {
   const [lastExportJobId, setLastExportJobId] = useState("");
   const [profile, setProfile] = useState("");
   const [profiles, setProfiles] = useState<{ id: string; formats: string[] }[]>([]);
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     api.listRLQuantJobs().then(setRlJobs).catch(console.error);

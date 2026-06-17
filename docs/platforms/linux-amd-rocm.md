@@ -28,6 +28,7 @@ Seiso detects AMD via `torch.version.hip` in `seiso.kernels.platform.detect_gpu(
 ## Start & train
 
 ```bash
+cd forge-ui && npm install && npm run build && cd ..
 seiso forge
 # or
 seiso train --config configs/example_lora.yaml

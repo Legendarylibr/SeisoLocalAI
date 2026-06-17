@@ -5,13 +5,20 @@ from __future__ import annotations
 import json
 import logging
 import time
-from pathlib import Path
 from typing import Any
 
 from forge.db.store import Database
 from forge.providers.ollama import list_models as list_ollama_models
-from forge.services.hardware import assess_inference_option_fit, hardware_profile
+from forge.services.hardware import (
+    HardwareTier,
+    assess_inference_option_fit,
+    classify_tier,
+    hardware_profile,
+    preferred_inference_backend,
+    vram_headroom_mb,
+)
 from seiso.inference.backends import (
+    BACKEND_LLAMACPP,
     BACKEND_OLLAMA,
     available_backends,
     match_ollama_name,
@@ -41,6 +48,29 @@ SOURCE_LABELS = {
     "export": "Export output",
     "ollama": "Ollama",
 }
+
+
+def _pick_default_backend(
+    backends: list[str],
+    profile: dict[str, Any] | None,
+) -> str:
+    """Hardware-aware default when a model supports multiple inference engines."""
+    if not backends:
+        return BACKEND_LLAMACPP
+    if len(backends) == 1:
+        return backends[0]
+    if profile:
+        preferred = preferred_inference_backend(profile)
+        if preferred in backends:
+            return preferred
+        if BACKEND_OLLAMA in backends and BACKEND_LLAMACPP in backends:
+            tier = classify_tier(profile)
+            if tier in (HardwareTier.CPU_ONLY, HardwareTier.EDGE):
+                return BACKEND_LLAMACPP
+            if vram_headroom_mb(profile) >= 8000:
+                return BACKEND_OLLAMA
+            return BACKEND_LLAMACPP
+    return backends[0]
 
 
 def _source_label(source: str | None) -> str:
@@ -106,7 +136,7 @@ async def list_inference_options(
             "source_label": _source_label(row.get("source")),
             "format": row.get("format"),
             "path": row["path"],
-            "default_backend": backends[0],
+            "default_backend": _pick_default_backend(backends, profile),
             "backends": backends,
             "backend_labels": {b: BACKEND_LABELS.get(b, b) for b in backends},
             "ollama_model": ollama_match,

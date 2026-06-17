@@ -1,0 +1,33 @@
+# Install: pre-commit install
+# Run all: pre-commit run --all-files
+repos:
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.5.0
+    hooks:
+      - id: detect-secrets
+        args: ["--baseline", ".secrets.baseline"]
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.11.12
+    hooks:
+      - id: ruff
+        args: ["--fix"]
+      - id: ruff-format
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.15.0
+    hooks:
+      - id: mypy
+        additional_dependencies: [pydantic>=2.6, pydantic-settings>=2.2]
+        args: ["seiso", "forge", "seiso_cli"]
+  - repo: local
+    hooks:
+      - id: bandit
+        name: bandit
+        entry: bandit -r seiso forge seiso_cli -l -c pyproject.toml
+        language: system
+        pass_filenames: false
+      - id: pytest-fast
+        name: pytest (not slow)
+        entry: pytest tests/ -q -m "not slow"
+        language: system
+        pass_filenames: false
+        stages: [pre-push]

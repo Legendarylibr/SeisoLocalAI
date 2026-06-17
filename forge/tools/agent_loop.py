@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Awaitable, Callable
+from typing import Awaitable, Callable
 
 from forge.security.audit import audit_event
 from forge.tools.registry import ToolRegistry, parse_tool_calls, tools_system_prompt

@@ -23,6 +23,16 @@ pip install -e ".[mlx]"
 
 Models must be MLX-compatible (or converted). Chat route `mlx` in inference API.
 
+## OpenAI-compatible endpoint
+
+With Forge running (`seiso forge`), external tools can call:
+
+```text
+POST http://127.0.0.1:8765/v1/chat/completions
+```
+
+Set `SEISO_ALLOW_OPENAI_TOOLS=true` to enable tool calling on this endpoint. See [forge.md](../forge.md).
+
 ## Training vs inference
 
 Training **never** uses MLX — `load_model(..., for_training=True)` forces PyTorch (CUDA, ROCm, MPS, or CPU).

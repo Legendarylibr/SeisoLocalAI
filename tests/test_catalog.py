@@ -1,6 +1,6 @@
 """Tests for HF model catalog."""
 
-from seiso.models.catalog import get_families, search_catalog, get_by_repo
+from seiso.models.catalog import diversify_by_family, get_families, get_by_repo, search_catalog
 
 
 def test_catalog_has_popular_models():
@@ -30,10 +30,19 @@ def test_catalog_has_popular_models():
     assert "HuggingFaceTB/SmolLM2-1.7B-Instruct" not in repos
     assert "deepseek-ai/deepseek-coder-6.7b-instruct" not in repos
     assert "meta-llama/Llama-4-Scout-17B-16E-Instruct" in repos
+    assert "meta-llama/Llama-4-Maverick-17B-128E-Instruct" in repos
     assert "meta-llama/Llama-3.3-70B-Instruct" not in repos
     assert "mistralai/Mistral-Small-4-119B-2603" in repos
     assert "mistralai/Mistral-Small-Instruct-2409" not in repos
     assert "deepseek-ai/DeepSeek-R1-0528" in repos
+    assert "ibm-granite/granite-4.0-h-small" in repos
+    assert "allenai/Olmo-3-7B-Instruct" in repos
+
+
+def test_catalog_covers_major_brands():
+    families = set(get_families())
+    for brand in ("llama", "qwen", "gemma", "mistral", "deepseek", "phi", "kimi", "glm", "ibm", "olmo"):
+        assert brand in families
 
 
 def test_catalog_search():
@@ -62,3 +71,17 @@ def test_catalog_search_ranks_exact_match():
     results = search_catalog("qwen 3.6")
     assert results[0]["repo_id"].startswith("Qwen/")
     assert "3.6" in results[0]["name"] or "3.6" in results[0]["repo_id"]
+
+
+def test_catalog_chat_includes_qwen_36():
+    results = search_catalog(task="chat")
+    repos = {m["repo_id"] for m in results}
+    assert "Qwen/Qwen3.6-35B-A3B" in repos
+    assert "meta-llama/Llama-4-Scout-17B-16E-Instruct" in repos
+
+
+def test_diversify_by_family_interleaves_brands():
+    models = search_catalog()
+    diversified = diversify_by_family(models[:24])
+    first_families = [m["family"] for m in diversified[:12]]
+    assert len(set(first_families)) >= 6

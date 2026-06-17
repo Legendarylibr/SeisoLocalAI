@@ -28,7 +28,7 @@ from forge.services.publishable import (
     list_publishable_models,
 )
 from forge.services.user_paths import assert_user_path
-from seiso.export.formats import ExportFormat, publish_folder_to_hub
+from seiso.export.formats import publish_folder_to_hub
 from seiso.export.model_card import HubModelMetadata
 from seiso.security import SecurityError
 

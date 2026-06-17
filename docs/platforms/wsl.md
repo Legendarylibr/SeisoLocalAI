@@ -22,6 +22,7 @@ Follow [linux-nvidia.md](linux-nvidia.md) for training, kernels, and multi-GPU.
 ## Access Forge from Windows browser
 
 ```bash
+cd forge-ui && npm install && npm run build && cd ..
 seiso forge
 ```
 

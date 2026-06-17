@@ -16,10 +16,13 @@ Full guide: [docs/deployment/reverse-proxy.md](../docs/deployment/reverse-proxy.
 
 ## Quick start (Caddy on host)
 
+From the repository root:
+
 ```bash
 cp deploy/env.https.example .env
 # Edit SEISO_CORS_ORIGINS and deploy/caddy/Caddyfile domain
 
+cd forge-ui && npm install && npm run build && cd ..
 seiso forge
 
 # Install Caddy, then:

@@ -18,10 +18,11 @@ Requirements:
 ## Start Forge
 
 ```bash
+cd forge-ui && npm install && npm run build && cd ..
 seiso forge
 ```
 
-Open **http://127.0.0.1:8765** — complete onboarding, then use **Training Studio**.
+Open **http://127.0.0.1:8765** — complete onboarding, then use **Training Studio** (`/train`).
 
 ## Train (CLI)
 

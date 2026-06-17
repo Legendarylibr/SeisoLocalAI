@@ -18,7 +18,6 @@ from forge.tools.registry import ToolSpec, build_default_registry
 from forge.tools.sanitize import wrap_tool_result
 from seiso.inference.backends import BACKEND_OLLAMA
 from seiso.inference.runner import LocalInferenceRunner
-from seiso.models.loader import detect_backend
 
 
 class InferenceOrchestrator(Orchestrator):

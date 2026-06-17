@@ -94,7 +94,7 @@ class ForgeSettings(BaseSettings):
 
     @property
     def hf_cache_dir(self) -> Path:
-        from forge.services.hf_hub import resolve_hf_cache_dir
+        from seiso.models.hf_env import resolve_hf_cache_dir
 
         return resolve_hf_cache_dir(self.data_dir)
 

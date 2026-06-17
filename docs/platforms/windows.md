@@ -11,8 +11,8 @@ Forge and training work on Windows 10/11 with NVIDIA GPUs. Use PowerShell 7+.
 
 ## Install
 
-```powershell
-git clone <repo-url> Seiso
+```bash
+git clone https://github.com/seiso-ai/seiso.git Seiso
 cd Seiso
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
@@ -27,6 +27,7 @@ Triton and flash-attn from `[cuda]` extra are **Linux-only** in pyproject — on
 ## Start Forge
 
 ```powershell
+cd forge-ui; npm install; npm run build; cd ..
 seiso forge
 ```
 

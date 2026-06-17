@@ -124,7 +124,6 @@ class RecipeOrchestrator(Orchestrator):
             deps[e["target"]].add(e["source"])
         ordered: list[dict] = []
         done: set[str] = set()
-        node_map = {n["id"]: n for n in nodes}
         while len(ordered) < len(nodes):
             progressed = False
             for n in nodes:

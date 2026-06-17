@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
+from seiso.vendor.bootstrap import ensure_vendor_importable, require_vendor_package
+
 _VENDOR_ROOT = Path(__file__).resolve().parents[2] / "third_party" / "codellama-compress"
-_VENDOR_SRC = _VENDOR_ROOT / "src"
 
 
 def vendor_root() -> Path:
@@ -14,18 +14,13 @@ def vendor_root() -> Path:
 
 
 def ensure_codellama_compress_importable() -> Path:
-    root = str(_VENDOR_SRC.resolve())
-    if root not in sys.path:
-        sys.path.insert(0, root)
-    return _VENDOR_SRC
+    return ensure_vendor_importable(_VENDOR_ROOT)
 
 
 def require_codellama_compress() -> None:
-    ensure_codellama_compress_importable()
-    try:
-        import codellama_compress  # noqa: F401
-    except ImportError as exc:
-        raise RuntimeError(
-            "Code Llama compression vendor missing. "
-            "Expected third_party/codellama-compress/src/codellama_compress"
-        ) from exc
+    require_vendor_package(
+        _VENDOR_ROOT,
+        "codellama_compress",
+        src_subdir="src",
+        missing_hint="Expected third_party/codellama-compress/src/codellama_compress",
+    )

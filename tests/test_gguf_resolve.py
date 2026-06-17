@@ -71,14 +71,24 @@ def test_resolve_gguf_artifact_composes_mirror_file_and_size(monkeypatch):
     monkeypatch.setattr(
         hf_hub,
         "_list_repo_files",
-        lambda *_a, **_k: ["Model-Q4_K_M.gguf", "Model-Q8_0.gguf"],
+        lambda *_a, **_k: ["Model-Q4_K_M.gguf", "Model-Q8_0.gguf", "mmproj-Q6_K.gguf"],
     )
     monkeypatch.setattr(hf_hub, "get_gguf_file_size_bytes", lambda *_a, **_k: 5_000_000_000)
 
-    artifact = hf_hub.resolve_gguf_artifact("org/Model", entry=Entry(), use_cache=False)
+    artifact = hf_hub.resolve_gguf_artifact("org/Qwen3.6-35B-A3B", entry=Entry(), use_cache=False)
     assert artifact["gguf_repo"] == "mirror/Model-GGUF"
     assert artifact["filename"] == "Model-Q4_K_M.gguf"
     assert artifact["size_bytes"] == 5_000_000_000
+
+
+def test_pick_gguf_file_prefers_active_moe_quant():
+    files = [
+        "Qwen3.6-35B-Q4_K_M.gguf",
+        "Qwen3.6-35B-A3B-Q4_K_M.gguf",
+        "mmproj-Q6_K.gguf",
+    ]
+    picked = hf_hub._pick_gguf_file(files, preferred_quant="Q4_K_M", repo_id="Qwen/Qwen3.6-35B-A3B")
+    assert picked == "Qwen3.6-35B-A3B-Q4_K_M.gguf"
 
 
 def test_resolve_gguf_repo_raises_when_missing(monkeypatch):

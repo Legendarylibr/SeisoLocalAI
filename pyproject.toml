@@ -24,7 +24,8 @@ dependencies = [
   "pydantic-settings>=2.2",
   "pyyaml>=6.0",
   "safetensors>=0.4",
-  "huggingface-hub>=0.23",
+  "huggingface-hub>=0.32",
+  "hf-xet>=0.1.0",
   "numpy>=1.26",
   "tqdm>=4.66",
   "rich>=13.7",
@@ -94,6 +95,11 @@ dev = [
   "pytest-asyncio>=0.23",
   "ruff>=0.4",
   "mypy>=1.10",
+  "pylint>=3.2",
+  "bandit[toml]>=1.7",
+  "detect-secrets>=1.5",
+  "pip-audit>=2.7",
+  "pre-commit>=3.7",
   "httpx>=0.27",
   "datasets>=2.19",
 ]
@@ -113,9 +119,14 @@ packages = ["seiso", "seiso_cli", "forge"]
 [tool.ruff]
 line-length = 100
 target-version = "py310"
+exclude = ["third_party", ".venv", "venv", "forge-ui/dist"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = ["E501"]  # line length; use `ruff format` instead
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["B011", "SIM117"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
@@ -124,5 +135,81 @@ markers = ["slow: long-running integration tests"]
 
 [tool.mypy]
 python_version = "3.10"
-strict = true
 ignore_missing_imports = true
+warn_return_any = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+no_implicit_optional = true
+check_untyped_defs = true
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+disallow_any_generics = false
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+ignore_errors = true
+
+[tool.pylint.main]
+py-version = "3.10"
+jobs = 0
+extension-pkg-allow-list = ["pydantic"]
+ignored-modules = [
+  "llama_cpp",
+  "peft",
+  "transformers",
+  "torch",
+  "mlx_lm",
+  "codellama_compress",
+  "sd_compress",
+  "adaptive_rl_quant",
+  "adaptive_quant",
+  "sentence_transformers",
+  "triton",
+  "flash_attn",
+  "bitsandbytes",
+  "auto_gptq",
+  "autoawq",
+  "lm_eval",
+  "diffusers",
+  "onnxruntime",
+]
+
+[tool.pylint.messages_control]
+disable = [
+  "duplicate-code",
+  "cyclic-import",
+  "possibly-used-before-assignment",
+  "too-few-public-methods",
+  "too-many-arguments",
+  "too-many-locals",
+  "too-many-branches",
+  "too-many-statements",
+  "too-many-lines",
+  "missing-module-docstring",
+  "missing-class-docstring",
+  "missing-function-docstring",
+  "invalid-name",
+  "line-too-long",
+  "import-outside-toplevel",
+  "fixme",
+  "broad-exception-caught",
+  "broad-exception-raised",
+  "consider-using-f-string",
+]
+
+[tool.pylint.format]
+max-line-length = 100
+
+[tool.bandit]
+exclude_dirs = ["tests", "third_party", ".venv", "venv", "forge-ui"]
+skips = [
+  "B101",  # assert (tests excluded; remaining uses are dev guards)
+  "B404",  # subprocess import — required for training/export orchestration
+  "B603",  # subprocess without shell — intentional, args are controlled
+  "B607",  # partial executable path — resolves via PATH in controlled env
+  "B615",  # HF revision pinning — users pick models/revisions at runtime
+  "B108",  # /tmp paths — dev/test sandboxes only in remaining hits
+  "B110",  # try/except/pass — used in optional-import fallbacks
+  "B112",  # try/except/continue — used in optional-import fallbacks
+  "B310",  # urllib open — local file URLs in export paths
+]

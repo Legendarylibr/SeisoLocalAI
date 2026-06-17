@@ -15,7 +15,7 @@ from huggingface_hub import HfApi
 
 from seiso.export.hub_precheck import assert_hub_precheck_ok, precheck_hub_export
 from seiso.export.model_card import HubModelMetadata, metadata_from_manifest, write_hub_artifacts
-from seiso.security import assert_within, safe_join
+from seiso.security import assert_within
 
 logger = logging.getLogger(__name__)
 

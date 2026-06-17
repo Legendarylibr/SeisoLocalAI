@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from seiso.image_compress.bootstrap import _VENDOR_ROOT, ensure_sd_compress_importable
+from seiso.image_compress.bootstrap import ensure_sd_compress_importable
 
 STAGE_ORDER = (
     "baseline",

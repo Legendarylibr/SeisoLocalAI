@@ -10,7 +10,7 @@ type ChatModelPickerProps = {
   switching?: boolean;
   modelLabel: (m: InferenceModelOption) => string;
   onSelectLocal: (modelId: string) => void | Promise<void>;
-  onSelectCatalog: (repoId: string) => void | Promise<void>;
+  onSelectCatalog: (repoId: string, downloadBytes?: number) => void | Promise<void>;
 };
 
 export function ChatModelPicker({
@@ -101,9 +101,9 @@ export function ChatModelPicker({
     void onSelectLocal(modelId);
   };
 
-  const pickCatalog = (repoId: string) => {
+  const pickCatalog = (repoId: string, downloadBytes?: number) => {
     setOpen(false);
-    void onSelectCatalog(repoId);
+    void onSelectCatalog(repoId, downloadBytes);
   };
 
   const empty =
@@ -192,12 +192,16 @@ export function ChatModelPicker({
                     type="button"
                     role="option"
                     className="chat-model-picker-option chat-model-picker-option-hub"
-                    onClick={() => pickCatalog(m.repo_id)}
+                    onClick={() => pickCatalog(m.repo_id, m.download_bytes)}
                   >
                     <span className="chat-model-picker-option-name">{m.name}</span>
                     <span className="chat-model-picker-option-meta">
                       {m.repo_id}
-                      {m.download_bytes ? ` · ${formatBytes(m.download_bytes)} download` : m.params ? ` · ${m.params}` : ""}
+                      {m.download_bytes
+                        ? ` · ${m.download_bytes_estimated ? "~" : ""}${formatBytes(m.download_bytes)} download`
+                        : m.params
+                          ? ` · ${m.params}`
+                          : ""}
                       {m.hardware_fit_label ? ` · ${m.hardware_fit_label}` : ""}
                     </span>
                   </button>

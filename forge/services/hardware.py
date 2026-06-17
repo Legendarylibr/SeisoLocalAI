@@ -8,7 +8,7 @@ import shutil
 import subprocess
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
@@ -357,19 +357,34 @@ def _active_params_b(params: str, tags: tuple[str, ...] | list[str], repo_id: st
     return raw
 
 
+def _quant_bytes_per_param_b(quant: str) -> float:
+    quant_u = quant.upper()
+    if "Q8" in quant_u or "F16" in quant_u or "BF16" in quant_u:
+        return 1.1
+    if "Q5" in quant_u:
+        return 0.75
+    if "Q4" in quant_u or "IQ4" in quant_u:
+        return 0.55
+    return 0.65
+
+
 def estimate_chat_vram_gb(params: str, *, quant: str = "Q4_K_M", tags: tuple[str, ...] | list[str] = (), repo_id: str = "") -> float:
     """Rough GGUF chat VRAM — conservative, for fit labels only."""
     params_b = _active_params_b(params, tags, repo_id)
-    quant_u = quant.upper()
-    if "Q8" in quant_u or "F16" in quant_u:
-        per_b = 1.1
-    elif "Q5" in quant_u:
-        per_b = 0.75
-    elif "Q4" in quant_u:
-        per_b = 0.55
-    else:
-        per_b = 0.65
-    return round(params_b * per_b + 1.2, 2)
+    return round(params_b * _quant_bytes_per_param_b(quant) + 1.2, 2)
+
+
+def estimate_gguf_download_bytes(
+    params: str,
+    *,
+    quant: str = "Q4_K_M",
+    tags: tuple[str, ...] | list[str] = (),
+    repo_id: str = "",
+) -> int:
+    """Estimate on-disk GGUF size from active params and quant (fallback when Hub metadata unavailable)."""
+    params_b = _active_params_b(params, tags, repo_id)
+    gb = params_b * _quant_bytes_per_param_b(quant) + 0.4
+    return int(max(gb, 0.25) * 1024**3)
 
 
 def classify_tier(profile: dict[str, Any]) -> HardwareTier:
@@ -509,13 +524,14 @@ def enrich_catalog_models(
     *,
     token: str | None = None,
     fetch_sizes: bool = True,
+    diversify: bool = False,
 ) -> list[dict[str, Any]]:
     from forge.services.hf_hub import resolve_gguf_artifact
-    from seiso.models.catalog import get_by_repo
+    from seiso.models.catalog import diversify_by_family, get_by_repo
 
     download_info: dict[str, dict[str, Any]] = {}
     if models and fetch_sizes:
-        workers = min(6, len(models))
+        workers = min(8, len(models))
 
         def fetch_info(repo_id: str) -> tuple[str, dict[str, Any] | None]:
             try:
@@ -542,12 +558,27 @@ def enrich_catalog_models(
         row = {**m, **fit}
         info = download_info.get(m["repo_id"])
         if info and info.get("size_bytes"):
-            row["download_bytes"] = int(info["size_bytes"])
+            download_bytes = int(info["size_bytes"])
+            row["download_bytes"] = download_bytes
+            row["download_bytes_estimated"] = False
             row["gguf_repo"] = info["gguf_repo"]
             row["gguf_file"] = info["filename"]
+        elif m.get("task") != "embedding":
+            download_bytes = estimate_gguf_download_bytes(
+                m["params"],
+                quant=m.get("quant", "Q4_K_M"),
+                tags=m.get("tags", ()),
+                repo_id=m.get("repo_id", ""),
+            )
+            row["download_bytes"] = download_bytes
+            row["download_bytes_estimated"] = True
+        else:
+            download_bytes = 0
+
+        if download_bytes > 0:
             row["hardware_note"] = _format_catalog_note(
                 est_vram_gb=fit["est_vram_mb"] / 1024,
-                download_bytes=int(info["size_bytes"]),
+                download_bytes=download_bytes,
                 headroom_gb=headroom_gb,
                 fit=fit["hardware_fit"],
                 tier=tier,
@@ -561,6 +592,8 @@ def enrich_catalog_models(
             m.get("name", ""),
         )
     )
+    if diversify:
+        enriched = diversify_by_family(enriched)
     return enriched
 
 
@@ -658,11 +691,15 @@ def training_defaults(profile: dict[str, Any]) -> dict[str, Any]:
 def recommended_catalog_repo(profile: dict[str, Any], *, task: str = "chat") -> str | None:
     from seiso.models.catalog import search_catalog
 
-    models = enrich_catalog_models(search_catalog(task=task), profile)
+    models = search_catalog(task=task) if task else search_catalog()
+    models = enrich_catalog_models(models, profile, fetch_sizes=False, diversify=True)
     for m in models:
-        if m.get("hardware_fit") in ("ideal", "good"):
+        if m.get("hardware_fit") in ("ideal", "good") and m.get("task") != "embedding":
             return m["repo_id"]
-    return models[0]["repo_id"] if models else None
+    for m in models:
+        if m.get("task") != "embedding":
+            return m["repo_id"]
+    return None
 
 
 def enrich_profile(profile: dict[str, Any]) -> dict[str, Any]:

@@ -29,6 +29,9 @@ pip install -e ".[forge,train,cuda,dev]"
 # macOS (MLX chat)
 pip install -e ".[forge,train,mlx,dev]"
 
+# Build UI (first time or after UI changes)
+cd forge-ui && npm install && npm run build && cd ..
+
 # Launch Forge (web UI + API)
 seiso forge
 
@@ -36,7 +39,18 @@ seiso forge
 seiso train --config configs/example_lora.yaml
 ```
 
-Open **http://127.0.0.1:8765** — complete onboarding to create your local admin account.
+Open **http://127.0.0.1:8765** — complete onboarding to create your local admin account. For UI hot reload during development, see [docs/forge.md](docs/forge.md).
+
+### Local CI
+
+Before opening PRs, run the quality gate:
+
+```bash
+make ci-fast    # lint + types + test + security
+make ci         # full gate (+ frontend build + optional import smokes)
+```
+
+See **[docs/CI_LOCAL.md](docs/CI_LOCAL.md)** for all jobs (Ruff, Pylint, Mypy, Bandit, detect-secrets, pip-audit, pytest, forge-ui build).
 
 ## CLI
 
@@ -47,10 +61,12 @@ Open **http://127.0.0.1:8765** — complete onboarding to create your local admi
 | `seiso chat` | Terminal chat with local models |
 | `seiso export` | Export merged/GGUF/LoRA + Hub push |
 | `seiso compress run` | Code Llama compression pipeline (distill → prune → finetune → export) |
+| `seiso compress manifest-verify` | Verify hash-chained compression run manifest |
+| `seiso compress speculative` | Speculative decoding with draft + target models |
 | `seiso inference` | One-shot inference |
 | `seiso-bench-kernels` | Benchmark fused GPU kernels (NVIDIA / ROCm) |
 
-Full command reference: [docs/README.md](docs/README.md)
+Full command reference: [docs/cli.md](docs/cli.md) · Documentation index: [docs/README.md](docs/README.md)
 
 ## Architecture
 
@@ -106,9 +122,12 @@ Inference vs training differ on macOS — MLX is inference-only; training uses P
 ## Development
 
 ```bash
+make ci-fast    # lint + types + test + security
 pytest tests/
 cd forge-ui && npm install && npm run typecheck
 ```
+
+See [docs/CI_LOCAL.md](docs/CI_LOCAL.md) and [docs/forge.md](docs/forge.md) for the full quality gate and UI dev workflow.
 
 ## Security
 
@@ -123,7 +142,7 @@ Seiso is **secure by default** for single-user localhost use. Multi-user or remo
 | `SEISO_TRUST_PROXY=true` | — | Trust `X-Forwarded-*` from reverse proxy (rate limits, client IP) |
 | `SEISO_SECURE_COOKIES=true` | — | `Secure` cookies when TLS is terminated by a reverse proxy |
 
-Deploy configs: [`deploy/`](../deploy/) · Guide: [docs/deployment/reverse-proxy.md](docs/deployment/reverse-proxy.md)
+Deploy configs: [`deploy/`](deploy/) · Guide: [docs/deployment/reverse-proxy.md](docs/deployment/reverse-proxy.md)
 
 ### Opt-in capabilities (all default **off**)
 

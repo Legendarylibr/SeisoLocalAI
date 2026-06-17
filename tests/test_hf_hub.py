@@ -1,6 +1,7 @@
 """Tests for Hugging Face Hub download helpers."""
 
-from forge.services.hf_hub import _pick_gguf_file, resolve_hf_cache_dir
+from forge.services.hf_hub import _pick_gguf_file
+from seiso.models.hf_env import resolve_hf_cache_dir
 from pathlib import Path
 
 

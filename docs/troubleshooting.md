@@ -35,7 +35,14 @@ Install Triton manually: `pip install triton` with ROCm PyTorch.
 
 ## Forge UI blank
 
-Build frontend: `cd forge-ui && npm install && npm run build`
+Build frontend from the repo root:
+
+```bash
+cd forge-ui && npm install && npm run build && cd ..
+seiso forge
+```
+
+For UI development, run `seiso forge` in one terminal and `cd forge-ui && npm run dev` in another — browse http://127.0.0.1:5173. See [forge.md](forge.md).
 
 ## Port in use
 
@@ -49,6 +56,7 @@ Forge runs HTTP on localhost by default. For HTTPS access, terminate TLS with Ca
 
 ```bash
 cp deploy/env.https.example .env   # set SEISO_CORS_ORIGINS to your https:// domain
+cd forge-ui && npm install && npm run build && cd ..
 seiso forge
 # then configure deploy/caddy/Caddyfile or deploy/nginx/seiso-forge.conf
 ```

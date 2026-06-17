@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api } from "@/lib/api";
+import { api, HfHubStatus } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
 import { SecurityShield } from "@/components/SecurityShield";
 import { PageHeader } from "@/components/PageHeader";
@@ -9,8 +9,12 @@ export function SettingsPage() {
   const [settings, setSettings] = useState<Awaited<ReturnType<typeof api.settings>> | null>(null);
   const [hfToken, setHfToken] = useState("");
   const [hfMsg, setHfMsg] = useState("");
+  const [hfStatus, setHfStatus] = useState<HfHubStatus | null>(null);
 
-  const refresh = () => api.settings().then(setSettings).catch(console.error);
+  const refresh = () => {
+    api.settings().then(setSettings).catch(console.error);
+    api.hfStatus().then(setHfStatus).catch(console.error);
+  };
 
   useEffect(() => {
     refresh();
@@ -68,9 +72,59 @@ export function SettingsPage() {
         <div className="card">
           <h3 className="section-title">Hugging Face</h3>
           <p className="muted-text" style={{ marginBottom: "0.75rem" }}>
-            Required to publish Seiso export outputs. You can also set <code>SEISO_HF_TOKEN</code> or run{" "}
+            Required for gated models and publishing exports. Public downloads work without a token.
+            You can also set <code>SEISO_HF_TOKEN</code> or run{" "}
             <code>huggingface-cli login</code> / <code>hf auth login</code>.
           </p>
+          {hfStatus && (
+            <table style={{ marginBottom: "0.75rem" }}>
+              <tbody>
+                <tr>
+                  <td>Hub reachable</td>
+                  <td>
+                    {hfStatus.connectivity.reachable
+                      ? `Yes${hfStatus.connectivity.latency_ms != null ? ` (${hfStatus.connectivity.latency_ms} ms)` : ""}`
+                      : "No"}
+                  </td>
+                </tr>
+                {hfStatus.connectivity.error && (
+                  <tr>
+                    <td>Hub error</td>
+                    <td className="muted-text">{hfStatus.connectivity.error}</td>
+                  </tr>
+                )}
+                <tr>
+                  <td>Transfer backend</td>
+                  <td>
+                    {hfStatus.transfer.xet_available
+                      ? `hf_xet (Rust)${hfStatus.transfer.high_performance ? ", high performance" : ""}`
+                      : "HTTP (install hf-xet for faster downloads)"}
+                  </td>
+                </tr>
+                <tr>
+                  <td>Cache dir</td>
+                  <td className="mono">{hfStatus.cache_dir}</td>
+                </tr>
+                <tr>
+                  <td>Ready to download</td>
+                  <td>{hfStatus.ready_for_download ? "Yes" : "No"}</td>
+                </tr>
+                <tr>
+                  <td>GGUF chat runtime</td>
+                  <td>{hfStatus.ready_for_gguf_chat ? "Ready" : "Missing llama.cpp"}</td>
+                </tr>
+              </tbody>
+            </table>
+          )}
+          {hfStatus && hfStatus.runtime.install_hints.length > 0 && (
+            <div className="env-hints" style={{ marginBottom: "0.75rem" }}>
+              {hfStatus.runtime.install_hints.map((hint) => (
+                <div className="env-hint" key={hint}>
+                  <code>{hint}</code>
+                </div>
+              ))}
+            </div>
+          )}
           <table style={{ marginBottom: "0.75rem" }}>
             <tbody>
               <tr>

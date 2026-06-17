@@ -3,11 +3,12 @@
 ## Forge (web UI)
 
 ```bash
+cd forge-ui && npm install && npm run build && cd ..
 seiso forge
 ```
 
 1. Open **http://127.0.0.1:8765** and sign in
-2. Go to **Training Studio**
+2. Go to **Training Studio** (`/train`)
 3. Settings are pre-filled from local hardware detection
 4. Click **Start training** — logs stream over SSE
 
@@ -48,4 +49,4 @@ Checkpoints land in `output_dir/checkpoint-<timestamp>/` with `seiso_manifest.js
 
 \* bitsandbytes on ROCm depends on your PyTorch build.
 
-See [kernels.md](kernels.md) and [../platforms/](../platforms/).
+See [kernels.md](kernels.md) and the [platform guides](../README.md#platform-guides).

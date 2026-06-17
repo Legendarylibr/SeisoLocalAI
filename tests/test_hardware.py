@@ -48,7 +48,7 @@ def test_enrich_catalog_ranks_priority_first():
 
 
 def test_format_catalog_note_shows_download_and_runtime():
-    from forge.services.hardware import HardwareTier, _format_catalog_note
+    from forge.services.hardware import HardwareTier, _format_catalog_note, estimate_gguf_download_bytes
 
     note = _format_catalog_note(
         est_vram_gb=2.9,
@@ -59,6 +59,9 @@ def test_format_catalog_note_shows_download_and_runtime():
     )
     assert "Download ~19.7 GB" in note
     assert "Runtime ~2.9 GB est." in note
+
+    moe_est = estimate_gguf_download_bytes("35B", tags=("moe",), repo_id="Qwen/Qwen3.6-35B-A3B")
+    assert 1.5 * 1024**3 < moe_est < 3.5 * 1024**3
 
 
 def test_training_defaults_conservative_on_edge():

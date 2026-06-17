@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
 from forge.api.deps import get_db, get_rl_quant_orchestrator
+from forge.api.routes._stream import job_log_event_gen
 from forge.config import ForgeSettings, get_settings
 from forge.db.store import Database
 from forge.orchestrators.rl_quant import RLQuantOrchestrator
@@ -162,19 +163,13 @@ async def stream_rl_quant(
         raise HTTPException(404, "Job not found")
     assert_job_owner(orchestrator, job_id, user_id)
 
-    async def event_gen():
-        async for line in orchestrator.stream_logs(job_id):
-            yield {"event": "log", "data": line}
-        j = orchestrator.get_job(job_id)
-        if j and j.error:
-            yield {"event": "error", "data": j.error}
-        if j and j.result:
-            rec = j.result.get("recommendation")
-            if rec:
-                yield {"event": "recommendation", "data": json.dumps(rec)}
-            yield {"event": "result", "data": json.dumps(j.result, default=str)}
+    def _recommendation_events(result: dict) -> list[dict[str, str]]:
+        rec = result.get("recommendation")
+        if rec:
+            return [{"event": "recommendation", "data": json.dumps(rec)}]
+        return []
 
-    return EventSourceResponse(event_gen())
+    return EventSourceResponse(job_log_event_gen(orchestrator, job_id, before_result=_recommendation_events))
 
 
 @router.get("/presets")

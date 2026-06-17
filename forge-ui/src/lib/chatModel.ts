@@ -1,7 +1,7 @@
-import { api, InferenceModelOption, LocalModel } from "@/lib/api";
+import { api, HardwareProfile, InferenceModelOption, LocalModel } from "@/lib/api";
 import { ModelProgressState, initialDownloadProgress, progressFromDownloadEvent, progressFromPreloadEvent } from "@/lib/modelProgress";
 
-export type ChatNavTarget = { modelId?: string | null; repo?: string | null };
+export type ChatNavTarget = { modelId?: string | null; repo?: string | null; downloadBytes?: number | null };
 
 export type ModelProgressHandler = (progress: ModelProgressState | null) => void;
 
@@ -9,6 +9,9 @@ export function chatPath(target: ChatNavTarget = {}): string {
   const params = new URLSearchParams();
   if (target.modelId) params.set("model", target.modelId);
   if (target.repo) params.set("repo", target.repo);
+  if (target.downloadBytes && target.downloadBytes > 0) {
+    params.set("bytes", String(target.downloadBytes));
+  }
   const qs = params.toString();
   return qs ? `/chat?${qs}` : "/chat";
 }
@@ -23,6 +26,33 @@ export function chatPathForLocalModel(model: LocalModel): string {
     modelId: model.id,
     repo: repoFromSource(model.source),
   });
+}
+
+/** Pick Ollama vs llama.cpp (or MLX/torch) from model availability and hardware profile. */
+export function resolveInferenceBackend(
+  model: InferenceModelOption | null,
+  hwProfile: HardwareProfile | null,
+  override?: string,
+): string {
+  if (!model) return "llamacpp";
+  const available = model.backends?.length ? model.backends : [model.default_backend || "llamacpp"];
+  if (available.length === 1) return available[0];
+  if (override && override !== "auto" && available.includes(override)) return override;
+
+  const preferred = hwProfile?.preferred_inference_backend;
+  if (preferred && available.includes(preferred)) return preferred;
+
+  if (available.includes("ollama") && available.includes("llamacpp")) {
+    const tier = hwProfile?.tier;
+    if (tier === "cpu_only" || tier === "edge") return "llamacpp";
+    const headroom = hwProfile?.vram_headroom_mb ?? 0;
+    return headroom >= 8000 ? "ollama" : "llamacpp";
+  }
+
+  if (model.default_backend && available.includes(model.default_backend)) {
+    return model.default_backend;
+  }
+  return available[0];
 }
 
 export function pickInferenceModel(list: InferenceModelOption[], target: ChatNavTarget): string {
@@ -57,7 +87,13 @@ function streamDownload(
       {
         onProgress: (data) => onProgress?.(progressFromDownloadEvent(data)),
         onComplete: (data) => {
-          resolve(String(data.model_id || ""));
+          const modelId = String(data.model_id || "");
+          if (!modelId) {
+            onProgress?.(null);
+            reject(new Error("Download completed without model id"));
+            return;
+          }
+          resolve(modelId);
         },
         onError: (msg) => {
           onProgress?.(null);
@@ -73,15 +109,20 @@ function streamDownload(
   });
 }
 
+export async function fetchInferenceModels(): Promise<InferenceModelOption[]> {
+  return (await api.listInferenceModels()).models;
+}
+
 /** Ensure a catalog repo is in inventory; download GGUF mirror when missing. */
 export async function ensureHubChatModel(
   repo: string,
   onProgress?: ModelProgressHandler,
+  downloadBytes?: number,
 ): Promise<string> {
   const initial = await api.listInferenceModels();
   const existing = initial.models.find((m) => m.source === `hf:${repo}`);
   if (existing) return existing.id;
-  onProgress?.(initialDownloadProgress(repo));
+  onProgress?.(initialDownloadProgress(repo, downloadBytes));
   const modelId = await streamDownload(repo, "gguf", onProgress);
   if (!modelId) throw new Error("Download completed without model id");
   return modelId;
@@ -98,10 +139,7 @@ export function preloadWithProgress(
       backend,
       {
         onProgress: (data) => onProgress?.(progressFromPreloadEvent(data)),
-        onComplete: () => {
-          onProgress?.(null);
-          resolve();
-        },
+        onComplete: () => resolve(),
         onError: (msg) => {
           onProgress?.(null);
           reject(new Error(msg));
@@ -122,6 +160,7 @@ export async function bootstrapChatModels(
     providerActive?: boolean;
     onProgress?: ModelProgressHandler;
     initialModels?: InferenceModelOption[];
+    hwProfile?: HardwareProfile | null;
   } = {},
 ): Promise<{
   models: InferenceModelOption[];
@@ -129,17 +168,20 @@ export async function bootstrapChatModels(
   backend: string;
   selected: InferenceModelOption | null;
 }> {
-  let models = options.initialModels ?? (await api.listInferenceModels()).models;
+  let models = options.initialModels ?? (await fetchInferenceModels());
+  let downloadedId: string | undefined;
 
   if (target.repo && !inventoryHasTarget(models, target)) {
-    options.onProgress?.(initialDownloadProgress(target.repo));
-    await streamDownload(target.repo, "gguf", options.onProgress);
-    models = (await api.listInferenceModels()).models;
+    options.onProgress?.(initialDownloadProgress(target.repo, target.downloadBytes ?? undefined));
+    downloadedId = await streamDownload(target.repo, "gguf", options.onProgress);
+    models = await fetchInferenceModels();
   }
 
-  const selectedId = pickInferenceModel(models, target);
+  const selectedId =
+    (downloadedId && models.find((m) => m.id === downloadedId)?.id) ||
+    pickInferenceModel(models, target);
   const selected = models.find((m) => m.id === selectedId) ?? null;
-  const backend = selected?.default_backend || "auto";
+  const backend = resolveInferenceBackend(selected, options.hwProfile ?? null);
 
   if (options.preload !== false && selectedId && selected && !options.providerActive) {
     await preloadWithProgress(selectedId, backend, options.onProgress);

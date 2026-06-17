@@ -104,7 +104,7 @@ def export_cmd(
 ) -> None:
     """Export checkpoint to merged/GGUF/LoRA/full fine-tune."""
     from forge.config import get_settings
-    from seiso.export.pipeline import auto_export_after_training, prepare_export, profile_catalog, run_export_plan
+    from seiso.export.pipeline import prepare_export, profile_catalog, run_export_plan
 
     settings = get_settings()
     ckpt = Path(checkpoint)

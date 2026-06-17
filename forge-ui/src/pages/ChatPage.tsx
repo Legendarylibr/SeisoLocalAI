@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api, ChatMessage, ChatThread, HardwareProfile, InferenceModelOption, SecurityPosture, streamChat } from "@/lib/api";
-import { bootstrapChatModels, ensureHubChatModel, needsHubDownload, preloadWithProgress } from "@/lib/chatModel";
-import { ModelProgressState, initialDownloadProgress } from "@/lib/modelProgress";
+import { bootstrapChatModels, ensureHubChatModel, fetchInferenceModels, needsHubDownload, preloadWithProgress, resolveInferenceBackend } from "@/lib/chatModel";
+import { ModelProgressState, initialDownloadProgress, initialLoadProgress } from "@/lib/modelProgress";
 import { ChatModelPicker } from "@/components/ChatModelPicker";
 import { HardwareFitBadge } from "@/components/HardwareFitBadge";
 import { ModelLoadProgress } from "@/components/ModelLoadProgress";
@@ -18,7 +18,6 @@ import {
 } from "@/components/Icons";
 
 const BACKEND_LABELS: Record<string, string> = {
-  auto: "Auto",
   llamacpp: "llama.cpp",
   ollama: "Ollama",
   mlx: "MLX",
@@ -31,6 +30,12 @@ export function ChatPage() {
   const [searchParams] = useSearchParams();
   const pendingModel = searchParams.get("model");
   const pendingRepo = searchParams.get("repo");
+  const pendingDownloadBytes = (() => {
+    const raw = searchParams.get("bytes");
+    if (!raw) return undefined;
+    const n = Number(raw);
+    return Number.isFinite(n) && n > 0 ? n : undefined;
+  })();
   const [threads, setThreads] = useState<ChatThread[]>([]);
   const [openTabs, setOpenTabs] = useState<OpenTab[]>([]);
   const [active, setActive] = useState<string | null>(null);
@@ -45,7 +50,7 @@ export function ChatPage() {
   const [mcpIds] = useState<string[]>([]);
   const [providerId, setProviderId] = useState("");
   const [selection, setSelection] = useState("");
-  const [inferenceBackend, setInferenceBackend] = useState("auto");
+  const [inferenceBackend, setInferenceBackend] = useState("llamacpp");
   const [models, setModels] = useState<InferenceModelOption[]>([]);
   const [providers, setProviders] = useState<Array<{ id: string; name: string; provider_type: string }>>([]);
   const [security, setSecurity] = useState<SecurityPosture | null>(null);
@@ -58,6 +63,7 @@ export function ChatPage() {
   const streamTextRef = useRef("");
   const streamFlushRef = useRef<number | null>(null);
   const streamThreadRef = useRef<string | null>(null);
+  const userPickedBackendRef = useRef(false);
 
   const messages = active ? messagesByThread[active] ?? [] : [];
 
@@ -71,13 +77,17 @@ export function ChatPage() {
   const effectiveLoadProgress =
     loadProgress ??
     (switchingModel && pendingRepo && needsHubDownload(models, { repo: pendingRepo })
-      ? initialDownloadProgress(pendingRepo)
+      ? initialDownloadProgress(pendingRepo, pendingDownloadBytes)
       : null);
   const selectedFit = selected?.hardware_fit;
   const backendOptions = useMemo(() => {
-    if (!selected || providerId) return ["auto"];
-    return Array.from(new Set(["auto", ...selected.backends]));
+    if (!selected || providerId) return [];
+    return selected.backends ?? [];
   }, [selected, providerId]);
+  const effectiveBackend = useMemo(
+    () => resolveInferenceBackend(selected, hwProfile, inferenceBackend),
+    [selected, hwProfile, inferenceBackend],
+  );
 
   const filteredThreads = useMemo(() => {
     const q = threadSearch.toLowerCase();
@@ -94,32 +104,29 @@ export function ChatPage() {
     }
     const pick = r.models.find((m) => m.hardware_fit === "ideal" || m.hardware_fit === "good")?.id || r.models[0]?.id;
     if (pick) {
+      const model = r.models.find((m) => m.id === pick);
       setSelection(pick);
-      setInferenceBackend(r.models.find((m) => m.id === pick)?.default_backend || "auto");
+      setInferenceBackend(resolveInferenceBackend(model ?? null, hwProfile));
     }
     return r.models;
-  }, [selection]);
+  }, [selection, hwProfile]);
 
   const activateModel = useCallback(
     async (modelId: string, list: InferenceModelOption[], backendOverride?: string) => {
       const next = list.find((m) => m.id === modelId);
-      if (!next) return;
+      if (!next) {
+        throw new Error("Model not found in inventory after download");
+      }
       setSelection(modelId);
-      const backend = backendOverride || next.default_backend || "auto";
+      userPickedBackendRef.current = false;
+      const backend = backendOverride || resolveInferenceBackend(next, hwProfile);
       setInferenceBackend(backend);
       if (providerId) return;
-      setLoadProgress({
-        phase: "loading",
-        label: `Loading ${next.name} into inference engine`,
-        percent: 10,
-        etaSeconds: null,
-        modelName: next.name,
-        indeterminate: true,
-      });
+      setLoadProgress(initialLoadProgress(next.name, next.size_bytes));
       await preloadWithProgress(modelId, backend, setLoadProgress);
       setLoadedModelId(modelId);
     },
-    [providerId],
+    [providerId, hwProfile],
   );
 
   const handleModelChange = async (modelId: string) => {
@@ -148,15 +155,17 @@ export function ChatPage() {
     }
   };
 
-  const handleCatalogSelect = async (repoId: string) => {
-    if (models.some((m) => m.source === `hf:${repoId}`)) {
-      const existing = models.find((m) => m.source === `hf:${repoId}`);
-      if (existing) await handleModelChange(existing.id);
+  const handleCatalogSelect = async (repoId: string, downloadBytes?: number) => {
+    const inventory = await fetchInferenceModels();
+    const existing = inventory.find((m) => m.source === `hf:${repoId}`);
+    if (existing) {
+      setModels(inventory);
+      await handleModelChange(existing.id);
       return;
     }
     setSwitchingModel(true);
     setError(null);
-    setLoadProgress(initialDownloadProgress(repoId));
+    setLoadProgress(initialDownloadProgress(repoId, downloadBytes));
     streamAbortRef.current?.();
     streamAbortRef.current = null;
     if (streaming) setStreaming(false);
@@ -169,8 +178,9 @@ export function ChatPage() {
       }
     }
     try {
-      const modelId = await ensureHubChatModel(repoId, setLoadProgress);
-      const refreshed = await refreshModels();
+      const modelId = await ensureHubChatModel(repoId, setLoadProgress, downloadBytes);
+      const refreshed = await fetchInferenceModels();
+      setModels(refreshed);
       await activateModel(modelId, refreshed);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to download model from Hugging Face");
@@ -197,15 +207,8 @@ export function ChatPage() {
       const next = models.find((m) => m.id === selection);
       if (next) {
         try {
-          setLoadProgress({
-            phase: "loading",
-            label: `Loading ${next.name} into inference engine`,
-            percent: 10,
-            etaSeconds: null,
-            modelName: next.name,
-            indeterminate: true,
-          });
-          await preloadWithProgress(selection, next.default_backend || inferenceBackend, setLoadProgress);
+          setLoadProgress(initialLoadProgress(next.name, next.size_bytes));
+          await preloadWithProgress(selection, resolveInferenceBackend(next, hwProfile, inferenceBackend), setLoadProgress);
           setLoadedModelId(selection);
         } catch {
           /* best-effort */
@@ -239,9 +242,9 @@ export function ChatPage() {
       setError(null);
       try {
         const initialModels = (await api.listInferenceModels()).models;
-        const target = { modelId: pendingModel, repo: pendingRepo };
+        const target = { modelId: pendingModel, repo: pendingRepo, downloadBytes: pendingDownloadBytes };
         if (needsHubDownload(initialModels, target) && pendingRepo) {
-          setLoadProgress(initialDownloadProgress(pendingRepo));
+          setLoadProgress(initialDownloadProgress(pendingRepo, pendingDownloadBytes));
         } else {
           setLoadProgress(null);
         }
@@ -251,6 +254,7 @@ export function ChatPage() {
           providerActive: !!providerId,
           onProgress: setLoadProgress,
           initialModels,
+          hwProfile,
         });
         if (cancelled) return;
         setModels(result.models);
@@ -274,7 +278,15 @@ export function ChatPage() {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendingModel, pendingRepo]);
+  }, [pendingModel, pendingRepo, pendingDownloadBytes]);
+
+  useEffect(() => {
+    if (!selected || providerId || userPickedBackendRef.current) return;
+    const resolved = resolveInferenceBackend(selected, hwProfile);
+    if (resolved !== inferenceBackend) {
+      setInferenceBackend(resolved);
+    }
+  }, [selected?.id, hwProfile, providerId, selected, inferenceBackend]);
 
   useEffect(() => {
     if (active && !messagesByThread[active]) loadMessages(active).catch(console.error);
@@ -324,6 +336,14 @@ export function ChatPage() {
     if (!input.trim() || streaming) return;
     if (!providerId && !selection) {
       setError("Select a model from the dropdown or download one from the Hub.");
+      return;
+    }
+    if (!providerId && waitingForModel) {
+      setError("Wait for the model to finish loading.");
+      return;
+    }
+    if (!providerId && selected?.kind !== "ollama" && loadedModelId !== selection) {
+      setError("Model is still loading into VRAM — wait a moment and try again.");
       return;
     }
     const content = input.trim();
@@ -391,7 +411,7 @@ export function ChatPage() {
           provider_id: providerId || null,
           model_id: providerId || isOllamaOnly ? null : selection || null,
           ollama_model: isOllamaOnly ? selected?.ollama_model : null,
-          inference_backend: providerId ? "auto" : inferenceBackend,
+          inference_backend: providerId ? "auto" : effectiveBackend,
         },
         {
           onEvent: (event, data) => {
@@ -544,17 +564,13 @@ export function ChatPage() {
                   }
                 }
                 setInferenceBackend(next);
+                userPickedBackendRef.current = true;
                 if (selection && !providerId) {
                   const model = models.find((m) => m.id === selection);
                   try {
-                    setLoadProgress({
-                      phase: "loading",
-                      label: `Loading ${model?.name || "model"} with ${BACKEND_LABELS[next] || next}`,
-                      percent: 10,
-                      etaSeconds: null,
-                      modelName: model?.name,
-                      indeterminate: true,
-                    });
+                    setLoadProgress(
+                      initialLoadProgress(model?.name || "model", model?.size_bytes ?? 0),
+                    );
                     await preloadWithProgress(selection, next, setLoadProgress);
                     setLoadedModelId(selection);
                   } catch {
@@ -566,20 +582,24 @@ export function ChatPage() {
               }}
             >
               {backendOptions.map((b) => (
-                <option key={b} value={b}>{BACKEND_LABELS[b] || b}</option>
+                <option key={b} value={b}>{selected.backend_labels?.[b] || BACKEND_LABELS[b] || b}</option>
               ))}
             </select>
           )}
-          <select
-            className="chat-provider-select"
-            value={providerId}
-            onChange={(e) => void handleProviderChange(e.target.value)}
-          >
-            <option value="">Local</option>
-            {providers.map((p) => (
-              <option key={p.id} value={p.id}>{p.name}</option>
-            ))}
-          </select>
+          {providers.length > 0 ? (
+            <select
+              className="chat-provider-select"
+              value={providerId}
+              onChange={(e) => void handleProviderChange(e.target.value)}
+            >
+              <option value="">Local</option>
+              {providers.map((p) => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </select>
+          ) : (
+            <span className="chat-provider-label muted-text">Local</span>
+          )}
           <label className="chat-tools-toggle">
             <input type="checkbox" checked={useTools} disabled={!toolsAvailable} onChange={(e) => setUseTools(e.target.checked)} />
             Tools
@@ -617,7 +637,7 @@ export function ChatPage() {
                 )}
                 {selected && (
                   <span className="chat-model-status-engine muted-text">
-                    {BACKEND_LABELS[inferenceBackend] || inferenceBackend}
+                    {selected.backend_labels?.[effectiveBackend] || BACKEND_LABELS[effectiveBackend] || effectiveBackend}
                   </span>
                 )}
                 {loadedModelId === selection && !effectiveLoadProgress && (
@@ -713,7 +733,13 @@ export function ChatPage() {
                 }
               }}
             />
-            <button type="button" className="chat-send-btn" onClick={send} disabled={streaming || !input.trim()} aria-label="Send message">
+            <button
+              type="button"
+              className="chat-send-btn"
+              onClick={send}
+              disabled={streaming || waitingForModel || !input.trim()}
+              aria-label="Send message"
+            >
               <IconSend size={16} />
             </button>
           </div>

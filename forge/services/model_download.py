@@ -9,6 +9,7 @@ from typing import Any
 from forge.db.store import Database
 from forge.services.download_progress import ProgressCallback
 from forge.services.hf_auth import resolve_hf_token
+from forge.services.hf_connectivity import assert_hub_ready_for_download
 from forge.services.hf_hub import (
     download_gguf,
     download_training_snapshot,
@@ -41,6 +42,12 @@ def _sync_download_artifacts(
     """Blocking Hugging Face download — safe to run in a thread pool."""
     if variant == "auto":
         variant = "gguf"
+    assert_hub_ready_for_download(
+        user_id=user_id,
+        data_dir=data_dir,
+        encryption_key=db_encryption_key,
+        settings_token=settings_hf_token or None,
+    )
     token, _ = resolve_hf_token(
         user_id=user_id,
         data_dir=data_dir,
@@ -104,6 +111,7 @@ def _sync_download_artifacts(
     gguf_repo = artifact["gguf_repo"]
     gguf_file = artifact["filename"]
     total_bytes = int(artifact.get("size_bytes") or 0)
+    initial_eta = int(total_bytes / (8 * 1024 * 1024)) if total_bytes > 0 else None
     _emit_progress(
         on_progress,
         {
@@ -113,7 +121,7 @@ def _sync_download_artifacts(
             "total_bytes": total_bytes,
             "bytes": 0,
             "percent": 0,
-            "eta_seconds": None,
+            "eta_seconds": initial_eta,
             "speed_bps": 0,
         },
     )

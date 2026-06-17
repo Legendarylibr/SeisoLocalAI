@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
-from forge.config import ForgeSettings, get_settings
+from forge.config import get_settings
 from forge.db.store import Database
 from forge.orchestrators.compress import CompressOrchestrator
 from forge.orchestrators.image_compress import ImageCompressOrchestrator

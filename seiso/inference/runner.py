@@ -9,7 +9,6 @@ from collections.abc import AsyncIterator, Callable, Iterator
 from typing import Any
 
 from seiso.inference.backends import (
-    BACKEND_LLAMACPP,
     BACKEND_MLX,
     BACKEND_TORCH,
     prepare_model_path,

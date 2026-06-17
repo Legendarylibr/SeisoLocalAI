@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 
 from forge.security.auth import get_current_user_id
 from forge.services.hardware import build_guidance, hardware_profile, hardware_summary, live_metrics
-from seiso.models.loader import Backend, detect_backend
+from seiso.models.loader import Backend
 
 router = APIRouter(prefix="/system", tags=["system"])
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from seiso.security import SecurityError, assert_within, safe_join
+from seiso.security import SecurityError, safe_join
 
 _USER_SCOPED_ROOTS = frozenset({"uploads", "knowledge", "artifacts", "sandbox", "models", "checkpoints", "exports"})
 
@@ -71,4 +71,9 @@ def assert_user_path(sandbox_root: Path, user_id: str, target: str | Path) -> Pa
         raise SecurityError(f"Path must be under {root}/{user_id}/")
     if not (source.exists() or source.is_symlink()):
         raise SecurityError(f"Model path not found: {source}")
-    return source.resolve()
+    resolved = source.resolve()
+    if source.is_symlink() and not resolved.exists():
+        raise SecurityError(
+            f"Model cache link is broken — re-download from Hub: {logical.name}"
+        )
+    return resolved

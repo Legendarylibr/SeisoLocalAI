@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { SeisoLogoMark } from "@/components/SeisoLogo";
 import { IconLock } from "@/components/Icons";
+import authBgUrl from "@/assets/auth-bg.png";
 
 export function AuthPage() {
   const { needsOnboarding, login, register } = useAuth();
@@ -23,6 +24,7 @@ export function AuthPage() {
   return (
     <div className="auth-page">
       <div className="auth-atmosphere" aria-hidden>
+        <img src={authBgUrl} alt="" className="auth-bg-figure" draggable={false} />
         <div className="auth-orb auth-orb-a" />
         <div className="auth-orb auth-orb-b" />
         <div className="auth-grid" />

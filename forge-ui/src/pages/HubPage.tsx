@@ -16,6 +16,9 @@ const FAMILY_LABELS: Record<string, string> = {
   kimi: "Kimi",
   minimax: "MiniMax",
   nemotron: "Nemotron",
+  glm: "GLM",
+  ibm: "IBM Granite",
+  olmo: "Olmo",
   llava: "Vision",
   other: "Other",
 };
@@ -25,11 +28,14 @@ const QUICK_FILTERS = [
   { label: "Featured", task: "", q: "new", fitsOnly: false },
   { label: "Chat", task: "chat", q: "", fitsOnly: false },
   { label: "Code", task: "code", q: "", fitsOnly: false },
-  { label: "7B", task: "", q: "7b", fitsOnly: false },
-  { label: "Qwen 3.6", task: "", q: "qwen3.6", fitsOnly: false },
-  { label: "Kimi", task: "", q: "kimi", fitsOnly: false },
-  { label: "Gemma 4", task: "", q: "gemma4", fitsOnly: false },
   { label: "Llama", task: "", q: "llama", fitsOnly: false },
+  { label: "Gemma 4", task: "", q: "gemma4", fitsOnly: false },
+  { label: "Qwen 3.6", task: "", q: "qwen3.6", fitsOnly: false },
+  { label: "DeepSeek", task: "", q: "deepseek", fitsOnly: false },
+  { label: "Mistral", task: "", q: "mistral", fitsOnly: false },
+  { label: "Kimi", task: "", q: "kimi", fitsOnly: false },
+  { label: "Phi", task: "", q: "phi", fitsOnly: false },
+  { label: "GLM", task: "", q: "glm", fitsOnly: false },
 ] as const;
 
 export function HubPage() {
@@ -47,6 +53,8 @@ export function HubPage() {
   const [downloadAction, setDownloadAction] = useState<"chat" | "train" | null>(null);
   const [tab, setTab] = useState<"catalog" | "local">("catalog");
   const [toast, setToast] = useState<string | null>(null);
+  const [hubReady, setHubReady] = useState<boolean | null>(null);
+  const [hubError, setHubError] = useState<string | null>(null);
 
   const showToast = (msg: string) => {
     setToast(msg);
@@ -69,6 +77,10 @@ export function HubPage() {
 
   useEffect(() => {
     refreshLocal();
+    api.hfStatus().then((s) => {
+      setHubReady(s.ready_for_download);
+      setHubError(s.connectivity.error);
+    }).catch(() => setHubReady(null));
   }, []);
 
   useEffect(() => {
@@ -76,8 +88,8 @@ export function HubPage() {
     return () => clearTimeout(t);
   }, [refreshCatalog]);
 
-  const openChat = (repoId: string) => {
-    navigate(chatPath({ repo: repoId }));
+  const openChat = (repoId: string, downloadBytes?: number) => {
+    navigate(chatPath({ repo: repoId, downloadBytes }));
   };
 
   const openTrain = async (repoId: string) => {
@@ -130,6 +142,15 @@ export function HubPage() {
           <span className="muted-text">
             ~{Math.round(hwSummary.vram_headroom_mb / 1024)} GB {hwSummary.memory_headroom_label || "memory"} free · prefers {hwSummary.preferred_inference_backend_label || hwSummary.preferred_inference_backend}
           </span>
+        </div>
+      )}
+
+      {hubReady === false && (
+        <div className="card" style={{ borderColor: "var(--warn, #c9a227)", marginBottom: "1rem" }}>
+          <strong>Hugging Face Hub not ready</strong>
+          <p className="muted-text" style={{ marginTop: "0.35rem" }}>
+            {hubError || "Check network connectivity and install dependencies from Settings."}
+          </p>
         </div>
       )}
 
@@ -226,7 +247,7 @@ export function HubPage() {
                   <p className="model-repo">{m.repo_id}</p>
                   {m.download_bytes ? (
                     <p className="model-download-size muted-text">
-                      {fmtSize(m.download_bytes)} download · {m.quant}
+                      {m.download_bytes_estimated ? "~" : ""}{fmtSize(m.download_bytes)} download · {m.quant}
                       {m.gguf_repo && m.gguf_repo !== m.repo_id ? ` · via ${m.gguf_repo.split("/").pop()}` : ""}
                     </p>
                   ) : null}
@@ -241,7 +262,7 @@ export function HubPage() {
                     <button
                       className="btn btn-primary"
                       disabled={downloading === m.repo_id && downloadAction === "train"}
-                      onClick={() => openChat(m.repo_id)}
+                      onClick={() => openChat(m.repo_id, m.download_bytes)}
                     >
                       Download and chat
                     </button>

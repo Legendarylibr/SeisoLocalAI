@@ -9,33 +9,118 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 from forge.services.download_progress import ProgressCallback, make_tqdm_class
 from seiso.models.catalog import CatalogEntry, get_by_repo
-from seiso.models.hf_env import resolve_hf_cache_dir
 from seiso.security import sanitize_filename
 
 _HF_API = "https://huggingface.co/api"
 _GGUF_ARTIFACT_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 _GGUF_ARTIFACT_TTL_S = 3600.0
+_DOWNLOAD_RETRIES = 3
+_DOWNLOAD_RETRY_BACKOFF_S = 2.0
+
+T = TypeVar("T")
 
 
-def _pick_gguf_file(files: list[str], *, preferred_quant: str = "Q4_K_M") -> str | None:
-    ggufs = [f for f in files if f.lower().endswith(".gguf")]
+def _snapshot_max_workers() -> int:
+    raw = os.environ.get("HF_HUB_NUM_THREADS", "8").strip()
+    try:
+        return max(1, min(int(raw), 16))
+    except ValueError:
+        return 8
+
+
+def _format_hub_download_error(exc: Exception, *, repo_id: str) -> str:
+    msg = str(exc).strip() or exc.__class__.__name__
+    lowered = msg.lower()
+    if "401" in msg or "403" in msg or "gated" in lowered or "authorized" in lowered:
+        return (
+            f"Access denied for {repo_id}. This model may be gated — "
+            "save a Hugging Face token in Settings or run `hf auth login`."
+        )
+    if "404" in msg or "not found" in lowered:
+        return f"Model repo not found on Hugging Face Hub: {repo_id}"
+    if "connection" in lowered or "network" in lowered or "resolve" in lowered:
+        return f"Cannot reach huggingface.co while downloading {repo_id}. Check your network."
+    if "timeout" in lowered or "timed out" in lowered:
+        return f"Download timed out for {repo_id}. Retry or set HF_HUB_DOWNLOAD_TIMEOUT higher."
+    return f"Hub download failed for {repo_id}: {msg}"
+
+
+def _with_download_retries(fn: Callable[[], T], *, repo_id: str) -> T:
+    """Retry transient Hub download failures with exponential backoff."""
+    last_exc: Exception | None = None
+    for attempt in range(_DOWNLOAD_RETRIES):
+        try:
+            return fn()
+        except Exception as exc:
+            last_exc = exc
+            msg = str(exc).lower()
+            if any(code in str(exc) for code in ("401", "403", "404")):
+                break
+            if attempt + 1 >= _DOWNLOAD_RETRIES:
+                break
+            if not any(
+                hint in msg
+                for hint in (
+                    "timeout",
+                    "timed out",
+                    "connection",
+                    "network",
+                    "temporar",
+                    "503",
+                    "502",
+                    "429",
+                )
+            ):
+                break
+            time.sleep(_DOWNLOAD_RETRY_BACKOFF_S * (2**attempt))
+    assert last_exc is not None
+    raise ValueError(_format_hub_download_error(last_exc, repo_id=repo_id)) from last_exc
+
+
+def _pick_gguf_file(
+    files: list[str],
+    *,
+    preferred_quant: str = "Q4_K_M",
+    repo_id: str = "",
+) -> str | None:
+    ggufs = [
+        f
+        for f in files
+        if f.lower().endswith(".gguf")
+        and "mmproj" not in f.lower()
+        and not f.lower().startswith("mmproj")
+    ]
     if not ggufs:
         return None
     preferred_quant = preferred_quant.upper()
-    for f in ggufs:
-        if preferred_quant in f.upper():
-            return f
-    for hint in ("Q4_K_M", "Q5_K_M", "Q4_0", "Q8_0"):
-        for f in ggufs:
-            if hint in f.upper():
-                return f
-    return sorted(ggufs, key=len)[0]
+
+    def quant_matches(candidates: list[str]) -> list[str]:
+        exact = [f for f in candidates if preferred_quant in f.upper()]
+        if exact:
+            return exact
+        for hint in ("Q4_K_M", "Q5_K_M", "Q4_0", "Q8_0", "IQ4_XS"):
+            matched = [f for f in candidates if hint in f.upper()]
+            if matched:
+                return matched
+        return candidates
+
+    pool = quant_matches(ggufs)
+
+    moe_match = re.search(r"a(\d+(?:\.\d+)?)b", repo_id, re.I)
+    if moe_match:
+        active = moe_match.group(0).lower()
+        active_hits = [f for f in pool if active in f.lower().replace("_", "-")]
+        if active_hits:
+            return sorted(active_hits, key=len)[0]
+
+    return sorted(pool, key=len)[0]
 
 
 def _inventory_name(repo_id: str, filename: str) -> Path:
@@ -65,11 +150,14 @@ def _gguf_mirror_candidates(repo_id: str) -> list[str]:
     mirrors = [
         f"bartowski/{model_name}-GGUF",
         f"bartowski/{title}-GGUF",
+        f"unsloth/{model_name}-GGUF",
         f"QuantFactory/{model_name}-GGUF",
         f"QuantFactory/{title}-GGUF",
         f"lmstudio-community/{model_name}-GGUF",
         f"lmstudio-community/{title}-GGUF",
     ]
+    if "Qwen" in repo_id:
+        mirrors.insert(2, f"bartowski/Qwen_{model_name}-GGUF")
     seen: set[str] = set()
     ordered: list[str] = []
     for candidate in mirrors:
@@ -220,7 +308,7 @@ def resolve_gguf_artifact(
 
     if not filename:
         files = _list_repo_files(gguf_repo, token=token, revision=revision)
-        filename = _pick_gguf_file(files, preferred_quant=quant)
+        filename = _pick_gguf_file(files, preferred_quant=quant, repo_id=catalog_repo_id)
         if not filename:
             raise ValueError(f"No GGUF files found in {gguf_repo}")
 
@@ -295,7 +383,7 @@ def download_gguf(
 
     if not filename:
         files = _list_repo_files(repo_id, token=token, revision=revision)
-        filename = _pick_gguf_file(files, preferred_quant=quant)
+        filename = _pick_gguf_file(files, preferred_quant=quant, repo_id=inv_repo)
         if not filename:
             raise ValueError(f"No GGUF files found in {repo_id}")
 
@@ -328,7 +416,12 @@ def download_gguf(
     }
     if on_progress:
         download_kwargs["tqdm_class"] = make_tqdm_class(on_progress)
-    cached_path = Path(hf_hub_download(**download_kwargs))
+    cached_path = Path(
+        _with_download_retries(
+            lambda: hf_hub_download(**download_kwargs),
+            repo_id=repo_id,
+        )
+    )
 
     return {
         "path": str(cached_path.resolve()),
@@ -357,10 +450,14 @@ def download_training_snapshot(
         "token": token,
         "cache_dir": str(cache_dir),
         "ignore_patterns": ["*.md", "*.h5", "original/*", "*.gguf"],
+        "max_workers": _snapshot_max_workers(),
     }
     if on_progress:
         snapshot_kwargs["tqdm_class"] = make_tqdm_class(on_progress)
-    path = snapshot_download(**snapshot_kwargs)
+    path = _with_download_retries(
+        lambda: snapshot_download(**snapshot_kwargs),
+        repo_id=repo_id,
+    )
     root = Path(path)
     return {
         "path": str(root.resolve()),
