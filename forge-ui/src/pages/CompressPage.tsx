@@ -266,7 +266,7 @@ export function CompressPage() {
             />
           </details>
 
-          <button className="btn btn-primary btn-lg" style={{ marginTop: "1rem" }} onClick={start} disabled={starting}>
+          <button className="btn btn-primary btn-lg studio-action-bar-standalone" onClick={start} disabled={starting}>
             {starting ? "Starting…" : "Run compression pipeline"}
           </button>
         </div>

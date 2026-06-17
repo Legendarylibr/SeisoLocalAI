@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { api, HfHubStatus } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
 import { SecurityShield } from "@/components/SecurityShield";
@@ -10,7 +11,14 @@ type SettingsTab = "account" | "huggingface" | "server" | "hardening";
 
 export function SettingsPage() {
   const { logout } = useAuth();
-  const [tab, setTab] = useState<SettingsTab>("account");
+  const [searchParams] = useSearchParams();
+  const [tab, setTab] = useState<SettingsTab>(() => {
+    const requested = searchParams.get("tab");
+    if (requested === "huggingface" || requested === "server" || requested === "hardening" || requested === "account") {
+      return requested;
+    }
+    return "account";
+  });
   const [settings, setSettings] = useState<Awaited<ReturnType<typeof api.settings>> | null>(null);
   const [hfToken, setHfToken] = useState("");
   const [hfMsg, setHfMsg] = useState("");
@@ -153,6 +161,12 @@ export function SettingsPage() {
                       <td className="muted-text">{hfStatus.connectivity.warning}</td>
                     </tr>
                   )}
+                  {hfStatus.auth.token_invalid && (
+                    <tr>
+                      <td>Token status</td>
+                      <td className="muted-text">Saved token is invalid — update it below or run <code>hf auth login</code>.</td>
+                    </tr>
+                  )}
                   {hfStatus.connectivity.error && (
                     <tr>
                       <td>Hub error</td>
@@ -181,7 +195,13 @@ export function SettingsPage() {
                   </tr>
                   <tr>
                     <td>Ready to download</td>
-                    <td>{hfStatus.ready_for_download ? "Yes" : "No"}</td>
+                    <td>
+                      {hfStatus.ready_for_download
+                        ? hfStatus.connectivity.token_valid
+                          ? "Yes (authenticated)"
+                          : "Yes (public models, no token)"
+                        : "No"}
+                    </td>
                   </tr>
                   <tr>
                     <td>Local chat runtime</td>
@@ -224,8 +244,8 @@ export function SettingsPage() {
             <table className="status-table">
               <tbody>
                 <tr>
-                  <td>Auth ready</td>
-                  <td>{settings.hf_configured ? "Yes" : "No"}</td>
+                  <td>Token configured</td>
+                  <td>{settings.hf_configured ? "Yes" : "No — public downloads still work"}</td>
                 </tr>
                 <tr>
                   <td>CLI available</td>

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import gc
 import logging
+import os
+import platform
 import threading
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -11,6 +13,52 @@ from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.environ.get(name, "").strip().lower()
+    if not raw:
+        return default
+    return raw in {"1", "true", "yes", "on"}
+
+
+def _default_llama_threads() -> int:
+    cpus = os.cpu_count() or 4
+    # Leave a little headroom for the UI/server event loop.
+    return max(2, min(cpus - 2 if cpus > 4 else cpus, 12))
+
+
+def _default_llama_gpu_layers() -> int:
+    if platform.system() == "Darwin" and platform.machine() in {"arm64", "aarch64"}:
+        return -1
+    return 0
+
+
+def llama_load_kwargs(n_ctx: int) -> dict[str, Any]:
+    """Tuned llama.cpp defaults for faster preload/first token, overrideable by env."""
+    n_threads = _env_int("SEISO_LLAMA_THREADS", _default_llama_threads())
+    n_batch = _env_int("SEISO_LLAMA_BATCH", 512)
+    return {
+        "n_ctx": n_ctx,
+        "n_threads": n_threads,
+        "n_threads_batch": _env_int("SEISO_LLAMA_THREADS_BATCH", n_threads),
+        "n_batch": n_batch,
+        "n_ubatch": _env_int("SEISO_LLAMA_UBATCH", min(n_batch, 512)),
+        "n_gpu_layers": _env_int("SEISO_LLAMA_GPU_LAYERS", _default_llama_gpu_layers()),
+        "use_mmap": _env_bool("SEISO_LLAMA_USE_MMAP", True),
+        "use_mlock": _env_bool("SEISO_LLAMA_USE_MLOCK", False),
+        "verbose": _env_bool("SEISO_LLAMA_VERBOSE", False),
+    }
 
 
 class BackendKind(StrEnum):
@@ -88,7 +136,7 @@ class ModelPool:
         def loader(path: str):
             from llama_cpp import Llama
 
-            return Llama(model_path=path, n_ctx=n_ctx, verbose=False)
+            return Llama(model_path=path, **llama_load_kwargs(n_ctx))
 
         return self.switch(model_path, BackendKind.LLAMA, loader)
 

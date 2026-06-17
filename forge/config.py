@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from functools import lru_cache
 from pathlib import Path
@@ -143,6 +144,12 @@ class ForgeSettings(BaseSettings):
         if self._session_db_key is None:
             raise RuntimeError("Database encryption key is not initialized")
         return self._session_db_key
+
+    @property
+    def hf_token_encryption_key(self) -> bytes:
+        """Stable key for HF token files, independent of ephemeral DB mode."""
+        material = f"seiso:hf-token:{self.secret_key}".encode()
+        return hashlib.sha256(material).digest()
 
     @property
     def models_dir(self) -> Path:

@@ -223,12 +223,13 @@ def live_metrics() -> dict[str, Any]:
         )
         _cpu_percent_primed = True
         ram_used_pct = round(psutil.virtual_memory().percent, 1)
-        temps = psutil.sensors_temperatures()
+        sensors_temperatures = getattr(psutil, "sensors_temperatures", None)
+        temps = sensors_temperatures() if sensors_temperatures else {}
         for key in ("coretemp", "cpu_thermal", "TC0P", "TH0x"):
             if key in temps and temps[key]:
                 cpu_temp = round(temps[key][0].current, 1)
                 break
-    except ImportError:
+    except (ImportError, AttributeError):
         pass
 
     gpus = detect_gpus()
@@ -527,25 +528,31 @@ def enrich_catalog_models(
     from seiso.models.catalog import diversify_by_family, get_by_repo
 
     download_info: dict[str, dict[str, Any]] = {}
+    download_errors: dict[str, str] = {}
     if models and fetch_sizes:
-        workers = min(8, len(models))
+        # Anonymous HF API is aggressively rate-limited. Resolve only the visible
+        # front of the catalog unless a token is configured.
+        candidates = models if token else models[:16]
+        workers = min(3 if token else 2, len(candidates))
 
-        def fetch_info(repo_id: str) -> tuple[str, dict[str, Any] | None]:
+        def fetch_info(repo_id: str) -> tuple[str, dict[str, Any] | None, str | None]:
             try:
                 return repo_id, resolve_gguf_artifact(
                     repo_id,
                     entry=get_by_repo(repo_id),
                     token=token,
-                )
-            except Exception:
-                return repo_id, None
+                ), None
+            except Exception as exc:
+                return repo_id, None, str(exc)
 
         with ThreadPoolExecutor(max_workers=workers) as pool:
-            futures = {pool.submit(fetch_info, m["repo_id"]): m["repo_id"] for m in models}
+            futures = {pool.submit(fetch_info, m["repo_id"]): m["repo_id"] for m in candidates}
             for future in as_completed(futures):
-                repo_id, info = future.result()
+                repo_id, info, error = future.result()
                 if info:
                     download_info[repo_id] = info
+                elif error:
+                    download_errors[repo_id] = error
 
     headroom_gb = round(vram_headroom_mb(profile) / 1024, 1)
     tier = classify_tier(profile)
@@ -556,10 +563,21 @@ def enrich_catalog_models(
         info = download_info.get(m["repo_id"])
         if info and info.get("size_bytes"):
             download_bytes = int(info["size_bytes"])
+            actual_fit = assess_hardware_fit(
+                round(download_bytes / (1024**3) + 0.8, 2),
+                profile,
+                mode="chat",
+            )
+            row.update(actual_fit)
             row["download_bytes"] = download_bytes
             row["download_bytes_estimated"] = False
             row["gguf_repo"] = info["gguf_repo"]
             row["gguf_file"] = info["filename"]
+            row["download_available"] = True
+        elif m["repo_id"] in download_errors:
+            download_bytes = 0
+            row["download_available"] = False
+            row["download_error"] = download_errors[m["repo_id"]]
         elif m.get("task") != "embedding":
             download_bytes = estimate_gguf_download_bytes(
                 m["params"],
@@ -569,8 +587,10 @@ def enrich_catalog_models(
             )
             row["download_bytes"] = download_bytes
             row["download_bytes_estimated"] = True
+            row["download_available"] = True
         else:
             download_bytes = 0
+            row["download_available"] = False
 
         if download_bytes > 0:
             row["hardware_note"] = _format_catalog_note(
@@ -584,13 +604,21 @@ def enrich_catalog_models(
 
     enriched.sort(
         key=lambda m: (
-            -(m.get("priority") or 0),
             -m.get("hardware_fit_rank", 0),
+            -(m.get("priority") or 0),
             m.get("name", ""),
         )
     )
     if diversify:
         enriched = diversify_by_family(enriched)
+        indexed = list(enumerate(enriched))
+        indexed.sort(
+            key=lambda m: (
+                -m[1].get("hardware_fit_rank", 0),
+                m[0],
+            )
+        )
+        enriched = [m for _, m in indexed]
     return enriched
 
 

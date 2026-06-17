@@ -9,6 +9,7 @@ import pytest
 from forge.db.crypto import generate_encryption_key
 from forge.db.store import Database
 from forge.services import model_download
+from forge.services.hf_cache_inventory import sync_hf_cache_inventory
 
 
 def test_disk_space_guard_allows_unknown_size(tmp_path):
@@ -24,6 +25,42 @@ def test_disk_space_guard_raises_when_cache_disk_too_small(monkeypatch, tmp_path
 
     with pytest.raises(ValueError, match="Need about 4.9 GB"):
         model_download._assert_disk_space_for_download(tmp_path, 5_000_000_000)
+
+
+def test_disk_space_guard_checks_xet_cache(monkeypatch, tmp_path):
+    cache = tmp_path / "hf_cache"
+    xet_cache = tmp_path / "hf_xet_cache"
+    monkeypatch.setenv("HF_XET_CACHE", str(xet_cache))
+
+    def fake_disk_usage(path):
+        free = 10_000_000_000
+        if path == xet_cache.resolve():
+            free = 1_000_000_000
+        return SimpleNamespace(free=free)
+
+    monkeypatch.setattr(model_download.shutil, "disk_usage", fake_disk_usage)
+
+    with pytest.raises(ValueError, match="hf_xet_cache"):
+        model_download._assert_disk_space_for_download(cache, 5_000_000_000)
+
+
+def test_cached_download_rejects_incomplete_gguf(tmp_path):
+    cached = tmp_path / "model-Q4_K_M.gguf"
+    cached.write_bytes(b"partial")
+
+    result = model_download._cached_download_result_if_usable(
+        {
+            "id": "m1",
+            "path": str(cached),
+            "format": "gguf",
+            "size_bytes": 10_000,
+            "metadata_json": "{}",
+        },
+        repo_id="org/Model",
+        variant="gguf",
+    )
+
+    assert result is None
 
 
 @pytest.mark.asyncio
@@ -74,3 +111,184 @@ async def test_perform_gguf_download_registers_llamacpp_inventory(monkeypatch, t
     assert rows[0]["source"] == "hf:org/Model"
     assert rows[0]["size_bytes"] == cached.stat().st_size
     assert (tmp_path / "models" / "u1" / "org--Model" / "model-q4.gguf").is_symlink()
+
+
+@pytest.mark.asyncio
+async def test_perform_download_returns_cached_inventory_without_redownload(monkeypatch, tmp_path):
+    cached = tmp_path / "hf_cache" / "model-q4.gguf"
+    cached.parent.mkdir()
+    cached.write_bytes(b"gguf-bytes")
+    inv = tmp_path / "models" / "u1" / "org--Model" / "model-q4.gguf"
+    inv.parent.mkdir(parents=True)
+    inv.symlink_to(cached)
+
+    db = Database(tmp_path / "forge.db", encryption_key=generate_encryption_key(), ephemeral=True)
+    row = await db.add_model(
+        user_id="u1",
+        source="hf:org/Model",
+        name="model-q4.gguf",
+        path=str(inv),
+        format="gguf",
+        size_bytes=cached.stat().st_size,
+        metadata={"repo_id": "org/Model", "cache_dir": str(tmp_path / "hf_cache")},
+    )
+
+    monkeypatch.setattr(
+        model_download,
+        "_sync_download_artifacts",
+        lambda **_kwargs: pytest.fail("download should not run"),
+    )
+
+    result = await model_download.perform_model_download(
+        user_id="u1",
+        db=db,
+        data_dir=tmp_path,
+        hf_cache_dir=tmp_path / "hf_cache",
+        settings_hf_token=None,
+        db_encryption_key=generate_encryption_key(),
+        repo_id="org/Model",
+        variant="gguf",
+    )
+
+    assert result["cached"] is True
+    assert result["model_id"] == row["id"]
+
+
+@pytest.mark.asyncio
+async def test_sync_hf_cache_inventory_registers_cached_gguf(tmp_path):
+    snapshot = tmp_path / "hf_cache" / "models--org--Model-GGUF" / "snapshots" / "abc"
+    snapshot.mkdir(parents=True)
+    gguf = snapshot / "model-Q4_K_M.gguf"
+    gguf.write_bytes(b"gguf-bytes")
+
+    db = Database(tmp_path / "forge.db", encryption_key=generate_encryption_key(), ephemeral=True)
+    count = await sync_hf_cache_inventory(
+        db,
+        "u1",
+        data_dir=tmp_path,
+        hf_cache_dir=tmp_path / "hf_cache",
+    )
+
+    rows = await db.list_models("u1")
+    assert count == 1
+    assert rows[0]["source"] == "hf:org/Model-GGUF"
+    assert rows[0]["format"] == "gguf"
+    assert (tmp_path / "models" / "u1" / "org--Model-GGUF" / "model-Q4_K_M.gguf").is_symlink()
+
+
+def test_resolve_download_variant_prefers_safetensors_without_llamacpp(monkeypatch):
+    monkeypatch.setattr(
+        model_download,
+        "check_inference_runtime",
+        lambda: SimpleNamespace(llamacpp=False, mlx=True, torch=False),
+    )
+    assert model_download.resolve_download_variant("auto") == "safetensors"
+
+
+def test_resolve_download_variant_prefers_gguf_with_llamacpp(monkeypatch):
+    monkeypatch.setattr(
+        model_download,
+        "check_inference_runtime",
+        lambda: SimpleNamespace(llamacpp=True, mlx=True, torch=True),
+    )
+    assert model_download.resolve_download_variant("auto") == "gguf"
+
+
+def test_cached_download_rejects_gguf_when_safetensors_requested(tmp_path):
+    cached = tmp_path / "model-Q4_K_M.gguf"
+    cached.write_bytes(b"x" * 100)
+
+    result = model_download._cached_download_result_if_usable(
+        {
+            "id": "m1",
+            "path": str(cached),
+            "format": "gguf",
+            "size_bytes": 100,
+            "metadata_json": "{}",
+        },
+        repo_id="org/Model",
+        variant="safetensors",
+    )
+
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_perform_download_auto_skips_gguf_cache_when_safetensors_preferred(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        model_download,
+        "check_inference_runtime",
+        lambda: SimpleNamespace(llamacpp=False, mlx=True, torch=False),
+    )
+    monkeypatch.setattr(
+        model_download,
+        "_sync_download_artifacts",
+        lambda **_kwargs: {
+            "variant": "safetensors",
+            "source": "hf:org/Model",
+            "name": "Model",
+            "path": str(tmp_path / "models" / "u1" / "org--Model"),
+            "format": "safetensors",
+            "size_bytes": 1000,
+            "metadata": {"repo_id": "org/Model"},
+            "downloaded": [str(tmp_path / "snap")],
+            "repo_id": "org/Model",
+            "cache_dir": str(tmp_path / "hf_cache"),
+        },
+    )
+
+    cached = tmp_path / "hf_cache" / "model-q4.gguf"
+    cached.parent.mkdir()
+    cached.write_bytes(b"gguf-bytes")
+    inv = tmp_path / "models" / "u1" / "org--Model" / "model-q4.gguf"
+    inv.parent.mkdir(parents=True)
+    inv.symlink_to(cached)
+
+    db = Database(tmp_path / "forge.db", encryption_key=generate_encryption_key(), ephemeral=True)
+    await db.add_model(
+        user_id="u1",
+        source="hf:org/Model",
+        name="model-q4.gguf",
+        path=str(inv),
+        format="gguf",
+        size_bytes=cached.stat().st_size,
+        metadata={"repo_id": "org/Model"},
+    )
+
+    result = await model_download.perform_model_download(
+        user_id="u1",
+        db=db,
+        data_dir=tmp_path,
+        hf_cache_dir=tmp_path / "hf_cache",
+        settings_hf_token=None,
+        db_encryption_key=generate_encryption_key(),
+        repo_id="org/Model",
+        variant="auto",
+    )
+
+    assert result["variant"] == "safetensors"
+    assert "cached" not in result
+
+
+@pytest.mark.asyncio
+async def test_sync_hf_cache_inventory_registers_cached_safetensors(tmp_path):
+    snapshot = tmp_path / "hf_cache" / "models--org--Model" / "snapshots" / "abc"
+    snapshot.mkdir(parents=True)
+    weights = snapshot / "model.safetensors"
+    weights.write_bytes(b"weights")
+
+    db = Database(tmp_path / "forge.db", encryption_key=generate_encryption_key(), ephemeral=True)
+    count = await sync_hf_cache_inventory(
+        db,
+        "u1",
+        data_dir=tmp_path,
+        hf_cache_dir=tmp_path / "hf_cache",
+    )
+
+    rows = await db.list_models("u1")
+    assert count == 1
+    assert rows[0]["source"] == "hf:org/Model"
+    assert rows[0]["format"] == "safetensors"
+    link = tmp_path / "models" / "u1" / "org--Model"
+    assert link.is_symlink()
+    assert link.resolve() == snapshot.resolve()

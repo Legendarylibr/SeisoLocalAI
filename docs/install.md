@@ -73,10 +73,10 @@ bash install.sh
 | `SEISO_NO_BANNER=1` | off | Skip install animation |
 | `SEISO_VERBOSE=1` | off | Show full pip/npm output |
 
+Custom location:
+
 ```bash
-# Custom location
-SEISO_INSTALL_DIR=~/code/Seiso \
-  curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/install.sh | bash
+SEISO_INSTALL_DIR=~/code/Seiso curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/install.sh | bash
 ```
 
 ### Already cloned?
@@ -93,27 +93,38 @@ First launch: open **http://127.0.0.1:8765** and create your local admin passwor
 
 ## Manual install (all platforms)
 
-All commands assume the **repository root** as working directory.
+The commands below assume a fresh clone at `~/Seiso`. If you cloned somewhere else, replace `~/Seiso` with your repository path.
+
+Base install:
 
 ```bash
-git clone https://github.com/Legendarylibr/SeisoLocalAI.git Seiso && cd Seiso
+git clone https://github.com/Legendarylibr/SeisoLocalAI.git ~/Seiso
+cd ~/Seiso
 python3 -m venv .venv
-source .venv/bin/activate          # Windows: .venv\Scripts\activate
+source .venv/bin/activate
 pip install -U pip wheel setuptools
 pip install -e ".[forge,train,dev]"
 ```
+
+On Windows, activate the virtualenv with `.venv\Scripts\activate` instead of `source .venv/bin/activate`.
 
 Optional environment file:
 
 ```bash
 cp .env.example .env
-# Edit SEISO_HF_TOKEN for gated models
 ```
+
+Edit `.env` and set `SEISO_HF_TOKEN` only if you need gated Hugging Face models.
 
 Build the UI and launch:
 
 ```bash
-cd forge-ui && npm install && npm run build && cd ..
+cd ~/Seiso
+source .venv/bin/activate
+cd forge-ui
+npm install
+npm run build
+cd ..
 seiso forge
 ```
 
@@ -136,7 +147,12 @@ Optional Flash Attention 2 (Linux native filesystem only — not `/mnt/c/...` in
 
 ```bash
 ./scripts/install_flash_attn.sh
-# or: pip install -e ".[flash-attn]" --no-build-isolation
+```
+
+Alternative Flash Attention install:
+
+```bash
+pip install -e ".[flash-attn]" --no-build-isolation
 ```
 
 Seiso works without flash-attn (PyTorch SDPA fallback).
@@ -158,6 +174,8 @@ Full guide: [platforms/linux-amd-rocm.md](platforms/linux-amd-rocm.md)
 ### macOS Apple Silicon
 
 ```bash
+cd ~/Seiso
+source .venv/bin/activate
 pip install -e ".[forge,train,mlx,dev]"
 ```
 
@@ -169,10 +187,14 @@ Full guide: [platforms/macos.md](platforms/macos.md)
 
 ```powershell
 pip install -e ".[forge,train,dev]"
-# Install CUDA PyTorch from https://pytorch.org/get-started/locally/
-cd forge-ui; npm install; npm run build; cd ..
+cd forge-ui
+npm install
+npm run build
+cd ..
 seiso forge
 ```
+
+Install the CUDA PyTorch wheel from [pytorch.org](https://pytorch.org/get-started/locally/) when you want GPU training.
 
 Full guide: [platforms/windows.md](platforms/windows.md)
 
@@ -216,12 +238,17 @@ Or use `./scripts/install.sh` / `./scripts/start.sh` (auto-builds if missing).
 
 ### UI development (hot reload)
 
-```bash
-# Terminal 1 — API
-seiso forge
+Terminal 1, API:
 
-# Terminal 2 — Vite dev server (:5173, proxies /api → :8765)
-cd forge-ui && npm run dev
+```bash
+seiso forge
+```
+
+Terminal 2, Vite dev server on `:5173`:
+
+```bash
+cd forge-ui
+npm run dev
 ```
 
 See [forge.md](forge.md) for pages, API routes, and environment variables.
@@ -241,8 +268,10 @@ If anything looks off, run the install doctor:
 
 ```bash
 ./scripts/doctor.sh
-./scripts/doctor.sh --network   # also checks huggingface.co reachability
+./scripts/doctor.sh --network
 ```
+
+The `--network` option also checks `huggingface.co` reachability.
 
 Model storage notes:
 
@@ -259,13 +288,18 @@ Walkthrough: [getting-started.md](getting-started.md)
 From an existing clone:
 
 ```bash
-cd ~/Seiso   # or your SEISO_INSTALL_DIR
+cd ~/Seiso
 git pull origin main
 source .venv/bin/activate
 pip install -U pip
-pip install -e ".[forge,train,cuda,dev]"   # adjust extras for your platform
-cd forge-ui && npm install && npm run build && cd ..
+pip install -e ".[forge,train,cuda,dev]"
+cd forge-ui
+npm install
+npm run build
+cd ..
 ```
+
+Adjust the extras for your platform, for example `.[forge,train,mlx,dev]` on Apple Silicon.
 
 Or re-run the installer (idempotent):
 
@@ -279,11 +313,13 @@ Or re-run the installer (idempotent):
 
 ```bash
 source .venv/bin/activate
-seiso doctor                   # guided install/runtime check
-seiso forge                    # should bind 127.0.0.1:8765
-pytest tests/ -q               # run test suite
-make ci-fast                   # lint + types + test + security
+seiso doctor
+seiso forge
+pytest tests/ -q
+make ci-fast
 ```
+
+`seiso forge` should bind `127.0.0.1:8765`; `make ci-fast` runs lint, type checks, tests, and security checks.
 
 Dev dependencies: `pip install -r requirements-dev.txt` ([CI_LOCAL.md](CI_LOCAL.md))
 
@@ -297,11 +333,15 @@ python -c "from seiso.training.platform_caps import training_capabilities; impor
 
 ## Uninstall
 
-```bash
-# Remove install directory
-rm -rf ~/Seiso
+Remove the install directory:
 
-# Remove user data (models, checkpoints, exports)
+```bash
+rm -rf ~/Seiso
+```
+
+Remove user data, including models, checkpoints, and exports:
+
+```bash
 rm -rf ~/.seiso
 ```
 

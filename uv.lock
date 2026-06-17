@@ -4712,7 +4712,6 @@ compress-quant = [
     { name = "autoawq" },
 ]
 cuda = [
-    { name = "flash-attn", marker = "sys_platform == 'linux'" },
     { name = "triton", marker = "sys_platform == 'linux'" },
 ]
 dev = [
@@ -4727,6 +4726,9 @@ dev = [
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "ruff" },
+]
+flash-attn = [
+    { name = "flash-attn", marker = "sys_platform == 'linux'" },
 ]
 forge = [
     { name = "aiosqlite" },
@@ -4789,7 +4791,7 @@ requires-dist = [
     { name = "diffusers", marker = "extra == 'image-compress'", specifier = ">=0.30" },
     { name = "email-validator", marker = "extra == 'forge'", specifier = ">=2.1" },
     { name = "fastapi", marker = "extra == 'forge'", specifier = ">=0.111" },
-    { name = "flash-attn", marker = "sys_platform == 'linux' and extra == 'cuda'", specifier = ">=2.5" },
+    { name = "flash-attn", marker = "sys_platform == 'linux' and extra == 'flash-attn'", specifier = ">=2.5" },
     { name = "gradio", marker = "extra == 'image-compress'", specifier = ">=4.0" },
     { name = "hf-xet", specifier = ">=0.1.0" },
     { name = "httpx", specifier = ">=0.27" },
@@ -4832,7 +4834,7 @@ requires-dist = [
     { name = "typer", specifier = ">=0.12" },
     { name = "uvicorn", extras = ["standard"], marker = "extra == 'forge'", specifier = ">=0.29" },
 ]
-provides-extras = ["train", "mlx", "cuda", "forge", "llamacpp", "rl-quant", "compress", "compress-quant", "compress-eval", "image-compress", "image-compress-onnx", "dev"]
+provides-extras = ["train", "mlx", "cuda", "flash-attn", "forge", "llamacpp", "rl-quant", "compress", "compress-quant", "compress-eval", "image-compress", "image-compress-onnx", "dev"]
 
 [[package]]
 name = "semantic-version"

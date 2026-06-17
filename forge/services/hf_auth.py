@@ -23,6 +23,23 @@ class HfAuthStatus:
     token_sources: list[str]
 
 
+def _normalize_token(value: str | None) -> str | None:
+    """Return a usable HF token, ignoring placeholders commonly left in .env files."""
+    if not value:
+        return None
+    token = value.strip().strip("\"'")
+    lowered = token.lower()
+    if (
+        not token
+        or token.startswith("#")
+        or lowered in {"none", "null", "optional", "your_token_here", "<your-token>"}
+        or lowered.startswith("optional")
+        or lowered.startswith("set ")
+    ):
+        return None
+    return token
+
+
 def find_hf_cli() -> str | None:
     """Return path to `hf` or legacy `huggingface-cli` if installed."""
     override = os.environ.get("HF_CLI", "").strip()
@@ -55,7 +72,7 @@ def _read_cli_token() -> str | None:
     )
     for path in candidates:
         if path.is_file():
-            token = path.read_text(encoding="utf-8").strip()
+            token = _normalize_token(path.read_text(encoding="utf-8"))
             if token:
                 return token
     return None
@@ -86,7 +103,7 @@ def load_user_hf_token(data_dir: Path, user_id: str, *, encryption_key: bytes) -
     if not raw:
         return None
     try:
-        return decrypt_field(raw, encryption_key).strip()
+        return _normalize_token(decrypt_field(raw, encryption_key))
     except Exception:
         return None
 
@@ -106,18 +123,22 @@ def resolve_hf_token(
         if cli_token:
             return cli_token, "cli_cache"
 
-    if request_token and request_token.strip():
-        return request_token.strip(), "request"
+    request_token = _normalize_token(request_token)
+    if request_token:
+        return request_token, "request"
 
     if user_id and data_dir and encryption_key:
         stored = load_user_hf_token(data_dir, user_id, encryption_key=encryption_key)
         if stored:
             return stored, "user_store"
 
-    if settings_token and settings_token.strip():
-        return settings_token.strip(), "env_seiso"
+    settings_token = _normalize_token(settings_token)
+    if settings_token:
+        return settings_token, "env_seiso"
 
-    env_hf = os.environ.get("HF_TOKEN", "").strip() or os.environ.get("HUGGING_FACE_HUB_TOKEN", "").strip()
+    env_hf = _normalize_token(os.environ.get("HF_TOKEN")) or _normalize_token(
+        os.environ.get("HUGGING_FACE_HUB_TOKEN")
+    )
     if env_hf:
         return env_hf, "env_hf"
 
@@ -152,7 +173,7 @@ def resolve_hf_token_for_download(
     result = probe_hf_hub(token=token)
     if result.token_valid:
         return token, source
-    if result.anonymous_ok:
+    if result.token_invalid or result.anonymous_ok:
         return None, "none"
     return token, source
 
@@ -176,15 +197,6 @@ def hf_auth_status(
     )
     if source != "none":
         sources.append(source)
-
-    user_has = bool(
-        user_id
-        and data_dir
-        and encryption_key
-        and load_user_hf_token(data_dir, user_id, encryption_key=encryption_key)
-    )
-    if user_has and "user_store" not in sources:
-        sources.append("user_store")
 
     return HfAuthStatus(
         cli_available=cli is not None,

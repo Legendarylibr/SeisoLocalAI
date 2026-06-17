@@ -171,7 +171,7 @@ export function RLQuantPage() {
             <RewardWeights weights={reward} onChange={(w) => setReward({ ...reward, ...w })} />
           </FormSection>
 
-          <button className="btn btn-primary btn-lg" onClick={start} disabled={starting}>
+          <button className="btn btn-primary btn-lg studio-action-bar-standalone" onClick={start} disabled={starting}>
             {starting ? "Starting…" : "Run RL quant pipeline"}
           </button>
         </div>
