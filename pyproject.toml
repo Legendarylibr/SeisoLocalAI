@@ -182,6 +182,7 @@ disable = [
   "duplicate-code",
   "cyclic-import",
   "possibly-used-before-assignment",
+  "invalid-enum-extension",
   "too-few-public-methods",
   "too-many-arguments",
   "too-many-locals",

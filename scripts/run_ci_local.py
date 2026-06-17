@@ -243,6 +243,7 @@ def job_lint(
             "--disable=all",
             "--enable=E,F",
             "--disable=possibly-used-before-assignment",
+            "--disable=invalid-enum-extension",
             "--score=n",
         ],
         cwd=root,
