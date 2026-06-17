@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, CatalogModel, HardwareSummary, LocalModel } from "@/lib/api";
 import { chatPath, chatPathForLocalModel } from "@/lib/chatModel";
+import { trainPath } from "@/lib/hubDownload";
 import { HardwareFitBadge } from "@/components/HardwareFitBadge";
 import { PageHeader } from "@/components/PageHeader";
 import { Tabs } from "@/components/Tabs";
@@ -53,14 +54,8 @@ export function HubPage() {
   const [downloading, setDownloading] = useState<string | null>(null);
   const [downloadAction, setDownloadAction] = useState<"chat" | "train" | null>(null);
   const [tab, setTab] = useState<"catalog" | "local">("catalog");
-  const [toast, setToast] = useState<string | null>(null);
   const [hubReady, setHubReady] = useState<boolean | null>(null);
   const [hubError, setHubError] = useState<string | null>(null);
-
-  const showToast = (msg: string) => {
-    setToast(msg);
-    setTimeout(() => setToast(null), 4000);
-  };
 
   const refreshLocal = () => api.listModels().then(setLocal).catch(console.error);
 
@@ -90,23 +85,15 @@ export function HubPage() {
   }, [refreshCatalog]);
 
   const openChat = (repoId: string, downloadBytes?: number) => {
+    setDownloading(repoId);
+    setDownloadAction("chat");
     navigate(chatPath({ repo: repoId, downloadBytes }));
   };
 
-  const openTrain = async (repoId: string) => {
+  const openTrain = (repoId: string, downloadBytes?: number) => {
     setDownloading(repoId);
     setDownloadAction("train");
-    try {
-      await api.downloadModel(repoId, undefined, "safetensors");
-      await refreshLocal();
-      showToast(`Model cached for training`);
-      navigate(`/train?model=${encodeURIComponent(repoId)}`);
-    } catch (e) {
-      showToast(e instanceof Error ? e.message : "Download failed");
-    } finally {
-      setDownloading(null);
-      setDownloadAction(null);
-    }
+    navigate(trainPath(repoId, downloadBytes));
   };
 
   const applyQuickFilter = (q: string, t: string, fits: boolean) => {
@@ -155,8 +142,6 @@ export function HubPage() {
           </p>
         </div>
       )}
-
-      {toast && <div className="toast">{toast}</div>}
 
       <Tabs
         className="hub-tab-bar"
@@ -271,17 +256,17 @@ export function HubPage() {
                   <div className="model-actions">
                     <button
                       className="btn btn-primary"
-                      disabled={downloading === m.repo_id && downloadAction === "train"}
+                      disabled={downloading === m.repo_id}
                       onClick={() => openChat(m.repo_id, m.download_bytes)}
                     >
-                      Download and chat
+                      {downloading === m.repo_id && downloadAction === "chat" ? "Opening chat…" : "Download and chat"}
                     </button>
                     <button
                       className="btn"
                       disabled={downloading === m.repo_id}
-                      onClick={() => openTrain(m.repo_id)}
+                      onClick={() => openTrain(m.repo_id, m.download_bytes)}
                     >
-                      {downloading === m.repo_id && downloadAction === "train" ? "Caching…" : "Train/Finetune"}
+                      {downloading === m.repo_id && downloadAction === "train" ? "Opening training…" : "Train/Finetune"}
                     </button>
                   </div>
                 </div>

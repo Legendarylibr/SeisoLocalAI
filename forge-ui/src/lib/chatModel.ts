@@ -1,9 +1,38 @@
 import { api, HardwareProfile, InferenceModelOption, LocalModel } from "@/lib/api";
-import { ModelProgressState, initialDownloadProgress, progressFromDownloadEvent, progressFromPreloadEvent } from "@/lib/modelProgress";
+import { inventoryHasRepo, streamHubModelDownload, ModelProgressHandler } from "@/lib/hubDownload";
+import { progressFromPreloadEvent } from "@/lib/modelProgress";
 
 type ChatNavTarget = { modelId?: string | null; repo?: string | null; downloadBytes?: number | null };
 
-type ModelProgressHandler = (progress: ModelProgressState | null) => void;
+type BootstrapOptions = {
+  preload?: boolean;
+  providerActive?: boolean;
+  onProgress?: ModelProgressHandler;
+  initialModels?: InferenceModelOption[];
+  hwProfile?: HardwareProfile | null;
+  signal?: AbortSignal;
+};
+
+function throwIfAborted(signal?: AbortSignal) {
+  if (signal?.aborted) {
+    throw new DOMException("Aborted", "AbortError");
+  }
+}
+
+function bindAbort<T>(
+  signal: AbortSignal | undefined,
+  abort: () => void,
+  promise: Promise<T>,
+): Promise<T> {
+  if (!signal) return promise;
+  if (signal.aborted) {
+    abort();
+    return Promise.reject(new DOMException("Aborted", "AbortError"));
+  }
+  const onAbort = () => abort();
+  signal.addEventListener("abort", onAbort, { once: true });
+  return promise.finally(() => signal.removeEventListener("abort", onAbort));
+}
 
 export function chatPath(target: ChatNavTarget = {}): string {
   const params = new URLSearchParams();
@@ -55,20 +84,22 @@ export function resolveInferenceBackend(
   return available[0];
 }
 
-function pickInferenceModel(list: InferenceModelOption[], target: ChatNavTarget): string {
+export function pickInferenceModel(list: InferenceModelOption[], target: ChatNavTarget = {}): string {
   return (
     (target.modelId && list.find((m) => m.id === target.modelId)?.id) ||
     (target.repo && list.find((m) => m.source === `hf:${target.repo}`)?.id) ||
-    (target.repo &&
-      list.find((m) => m.name.toLowerCase().includes(target.repo!.split("/").pop()?.toLowerCase() || ""))?.id) ||
     list.find((m) => m.hardware_fit === "ideal" || m.hardware_fit === "good")?.id ||
     (list.length ? list[0].id : "")
   );
 }
 
+export function hasChatNavTarget(target: ChatNavTarget): boolean {
+  return !!(target.modelId || target.repo);
+}
+
 function inventoryHasTarget(list: InferenceModelOption[], target: ChatNavTarget): boolean {
   if (target.modelId && list.some((m) => m.id === target.modelId)) return true;
-  if (target.repo && list.some((m) => m.source === `hf:${target.repo}`)) return true;
+  if (target.repo && inventoryHasRepo(list, target.repo)) return true;
   return false;
 }
 
@@ -76,36 +107,15 @@ export function needsHubDownload(list: InferenceModelOption[], target: ChatNavTa
   return !!(target.repo && !inventoryHasTarget(list, target));
 }
 
-function streamDownload(
+async function downloadChatModel(
   repo: string,
-  variant: "gguf" | "safetensors",
   onProgress?: ModelProgressHandler,
+  options: { signal?: AbortSignal; downloadBytes?: number | null } = {},
 ): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const { promise } = api.streamDownloadModel(
-      repo,
-      {
-        onProgress: (data) => onProgress?.(progressFromDownloadEvent(data)),
-        onComplete: (data) => {
-          const modelId = String(data.model_id || "");
-          if (!modelId) {
-            onProgress?.(null);
-            reject(new Error("Download completed without model id"));
-            return;
-          }
-          resolve(modelId);
-        },
-        onError: (msg) => {
-          onProgress?.(null);
-          reject(new Error(msg));
-        },
-      },
-      variant,
-    );
-    promise.catch((err) => {
-      onProgress?.(null);
-      if (!(err instanceof DOMException && err.name === "AbortError")) reject(err);
-    });
+  throwIfAborted(options.signal);
+  return streamHubModelDownload(repo, "gguf", onProgress, {
+    signal: options.signal,
+    downloadBytes: options.downloadBytes ?? undefined,
   });
 }
 
@@ -118,23 +128,24 @@ export async function ensureHubChatModel(
   repo: string,
   onProgress?: ModelProgressHandler,
   downloadBytes?: number,
+  signal?: AbortSignal,
 ): Promise<string> {
+  throwIfAborted(signal);
   const initial = await api.listInferenceModels();
   const existing = initial.models.find((m) => m.source === `hf:${repo}`);
   if (existing) return existing.id;
-  onProgress?.(initialDownloadProgress(repo, downloadBytes));
-  const modelId = await streamDownload(repo, "gguf", onProgress);
-  if (!modelId) throw new Error("Download completed without model id");
-  return modelId;
+  return downloadChatModel(repo, onProgress, { signal, downloadBytes });
 }
 
 export function preloadWithProgress(
   modelId: string,
   backend: string,
   onProgress?: ModelProgressHandler,
+  signal?: AbortSignal,
 ): Promise<string> {
+  throwIfAborted(signal);
   return new Promise((resolve, reject) => {
-    const { promise } = api.streamPreloadModel(
+    const { promise, abort } = api.streamPreloadModel(
       modelId,
       backend,
       {
@@ -150,7 +161,7 @@ export function preloadWithProgress(
         },
       },
     );
-    promise.catch((err) => {
+    bindAbort(signal, abort, promise).catch((err) => {
       onProgress?.(null);
       if (!(err instanceof DOMException && err.name === "AbortError")) reject(err);
     });
@@ -168,26 +179,25 @@ export function isChatModelReady(
 
 export async function bootstrapChatModels(
   target: ChatNavTarget,
-  options: {
-    preload?: boolean;
-    providerActive?: boolean;
-    onProgress?: ModelProgressHandler;
-    initialModels?: InferenceModelOption[];
-    hwProfile?: HardwareProfile | null;
-  } = {},
+  options: BootstrapOptions = {},
 ): Promise<{
   models: InferenceModelOption[];
   selectedId: string;
   backend: string;
   selected: InferenceModelOption | null;
 }> {
+  throwIfAborted(options.signal);
   let models = options.initialModels ?? (await fetchInferenceModels());
+  throwIfAborted(options.signal);
   let downloadedId: string | undefined;
 
   if (target.repo && !inventoryHasTarget(models, target)) {
-    options.onProgress?.(initialDownloadProgress(target.repo, target.downloadBytes ?? undefined));
-    downloadedId = await streamDownload(target.repo, "gguf", options.onProgress);
+    downloadedId = await downloadChatModel(target.repo, options.onProgress, {
+      signal: options.signal,
+      downloadBytes: target.downloadBytes,
+    });
     models = await fetchInferenceModels();
+    throwIfAborted(options.signal);
   }
 
   const selectedId =
@@ -198,7 +208,31 @@ export async function bootstrapChatModels(
 
   let loadedBackend = backend;
   if (options.preload !== false && selectedId && selected && !options.providerActive) {
-    loadedBackend = await preloadWithProgress(selectedId, backend, options.onProgress);
+    loadedBackend = await preloadWithProgress(selectedId, backend, options.onProgress, options.signal);
+  }
+
+  return { models, selectedId, backend: loadedBackend, selected };
+}
+
+/** Load chat inventory and pick a default model when opening /chat without Hub params. */
+export async function initializeChatSession(
+  options: BootstrapOptions = {},
+): Promise<{
+  models: InferenceModelOption[];
+  selectedId: string;
+  backend: string;
+  selected: InferenceModelOption | null;
+}> {
+  throwIfAborted(options.signal);
+  const models = options.initialModels ?? (await fetchInferenceModels());
+  throwIfAborted(options.signal);
+  const selectedId = pickInferenceModel(models, {});
+  const selected = models.find((m) => m.id === selectedId) ?? null;
+  const backend = resolveInferenceBackend(selected, options.hwProfile ?? null);
+
+  let loadedBackend = backend;
+  if (options.preload !== false && selectedId && selected && !options.providerActive) {
+    loadedBackend = await preloadWithProgress(selectedId, backend, options.onProgress, options.signal);
   }
 
   return { models, selectedId, backend: loadedBackend, selected };

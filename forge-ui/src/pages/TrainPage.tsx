@@ -1,15 +1,25 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api, CatalogModel, subscribeSSE, SystemMetrics, TrainableModel, TrainingJob, TrainingMetricPoint } from "@/lib/api";
+import { initialDownloadProgress, ModelProgressState } from "@/lib/modelProgress";
+import { ensureTrainHubModel, fetchTrainableModels, isTrainModelCached } from "@/lib/trainModel";
 import { HfDatasetPicker } from "@/components/HfDatasetPicker";
+import { ModelLoadProgress } from "@/components/ModelLoadProgress";
 import { StudioPageShell } from "@/components/StudioPageShell";
 import { TrainingMetricsDashboard } from "@/components/TrainingMetricsDashboard";
 import { useHardwareProfile } from "@/hooks/useHardware";
 
 export function TrainPage() {
   const { profile: hw } = useHardwareProfile();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const pendingModel = searchParams.get("model");
+  const pendingDownload = searchParams.get("download") === "1";
+  const pendingDownloadBytes = (() => {
+    const raw = searchParams.get("bytes");
+    if (!raw) return undefined;
+    const n = Number(raw);
+    return Number.isFinite(n) && n > 0 ? n : undefined;
+  })();
   const [jobs, setJobs] = useState<TrainingJob[]>([]);
   const [catalog, setCatalog] = useState<CatalogModel[]>([]);
   const [localModels, setLocalModels] = useState<TrainableModel[]>([]);
@@ -45,7 +55,11 @@ export function TrainPage() {
   const [systemMetrics, setSystemMetrics] = useState<SystemMetrics[]>([]);
   const [metricsOpen, setMetricsOpen] = useState(false);
   const [starting, setStarting] = useState(false);
+  const [downloadingModel, setDownloadingModel] = useState(false);
+  const [loadProgress, setLoadProgress] = useState<ModelProgressState | null>(null);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
   const [hwApplied, setHwApplied] = useState(false);
+  const downloadGenRef = useRef(0);
   const sseAbortRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
@@ -61,6 +75,51 @@ export function TrainPage() {
     api.listExportProfiles().then(setExportProfiles).catch(console.error);
     if (pendingModel) setModelId(pendingModel);
   }, [pendingModel]);
+
+  const refreshLocalModels = useCallback(
+    () => api.listTrainingModels().then((r) => setLocalModels(r.models)).catch(console.error),
+    [],
+  );
+
+  useEffect(() => {
+    if (!pendingModel || !pendingDownload) return;
+
+    const downloadGen = ++downloadGenRef.current;
+    let cancelled = false;
+
+    const run = async () => {
+      setDownloadingModel(true);
+      setDownloadError(null);
+      setLoadProgress(initialDownloadProgress(pendingModel, pendingDownloadBytes));
+      try {
+        const models = await fetchTrainableModels();
+        if (cancelled) return;
+        if (isTrainModelCached(models, pendingModel)) {
+          setModelId(pendingModel);
+          setSearchParams({ model: pendingModel }, { replace: true });
+          return;
+        }
+        await ensureTrainHubModel(pendingModel, setLoadProgress, pendingDownloadBytes);
+        if (cancelled) return;
+        await refreshLocalModels();
+        setModelId(pendingModel);
+        setSearchParams({ model: pendingModel }, { replace: true });
+      } catch (e) {
+        if (cancelled) return;
+        setDownloadError(e instanceof Error ? e.message : "Failed to download model from Hugging Face");
+      } finally {
+        if (downloadGen === downloadGenRef.current) {
+          setDownloadingModel(false);
+          setLoadProgress(null);
+        }
+      }
+    };
+
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [pendingModel, pendingDownload, pendingDownloadBytes, refreshLocalModels, setSearchParams]);
 
   useEffect(() => {
     if (!hw || hwApplied || pendingModel) return;
@@ -99,13 +158,31 @@ export function TrainPage() {
 
   const GGUF_QUANT_OPTIONS = ["q2_k", "q3_k_m", "q4_k_m", "q5_k_m", "q6_k", "q8_0", "f16"];
 
+  const ensureModelCached = async () => {
+    const models = await fetchTrainableModels();
+    if (isTrainModelCached(models, modelId)) return;
+    setDownloadingModel(true);
+    setDownloadError(null);
+    setLoadProgress(initialDownloadProgress(modelId));
+    try {
+      await ensureTrainHubModel(modelId, setLoadProgress);
+      await refreshLocalModels();
+    } finally {
+      setDownloadingModel(false);
+      setLoadProgress(null);
+    }
+  };
+
   const start = async () => {
     setStarting(true);
     setLogs([]);
     setTrainingMetrics([]);
     setSystemMetrics([]);
     setJobStatus("running");
+    setDownloadError(null);
     try {
+      await ensureModelCached();
+
       const exportPayload =
         exportOnComplete && method !== "embedding"
           ? {
@@ -167,6 +244,9 @@ export function TrainPage() {
         (err) => setLogs((l) => [...l, `ERROR: ${err.message}`]),
       );
       api.listTrainingJobs().then(setJobs);
+    } catch (e) {
+      setDownloadError(e instanceof Error ? e.message : "Failed to prepare model for training");
+      setJobStatus(null);
     } finally {
       setStarting(false);
     }
@@ -196,6 +276,13 @@ export function TrainPage() {
         systemPoints={systemMetrics}
         status={jobStatus}
       />
+
+      {(loadProgress || downloadingModel) && (
+        <div className="card">
+          <ModelLoadProgress progress={loadProgress} modelName={modelId.split("/").pop()} />
+        </div>
+      )}
+      {downloadError && <p className="chat-error">{downloadError}</p>}
 
       <div className="train-layout">
         <div className="card studio-card">
@@ -373,8 +460,8 @@ export function TrainPage() {
               )}
             </div>
           )}
-          <button className="btn btn-primary btn-lg" onClick={start} disabled={starting}>
-            {starting ? "Starting…" : "Start training"}
+          <button className="btn btn-primary btn-lg" onClick={start} disabled={starting || downloadingModel}>
+            {starting ? "Starting…" : downloadingModel ? "Downloading model…" : "Start training"}
           </button>
           {activeJob && (
             <button
