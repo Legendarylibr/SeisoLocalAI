@@ -1,5 +1,7 @@
 # Seiso Local AI
 
+WIP (only been three hours of work so far)
+
 **Seiso** is a free, local-first AI workspace for running, fine-tuning, quantizing, compressing, and deploying open models on your own hardware. No cloud required — download models, chat, train, export, and ship to Hugging Face Hub from a single interface.
 
 **Repository:** [github.com/Legendarylibr/SeisoLocalAI](https://github.com/Legendarylibr/SeisoLocalAI)  
