@@ -69,7 +69,7 @@ class FastModel:
             trust_remote_code=trust_remote_code,
             use_flash_attention=use_flash_attention,
         )
-        model, tokenizer = load_model(opts)
+        model, tokenizer = load_model(opts, for_training=True)
         logger.info("Loaded %s", model_name)
         return cls(model, tokenizer, max_seq_length=max_seq_length)
 

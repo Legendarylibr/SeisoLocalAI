@@ -27,18 +27,18 @@ async def test_onboarding_flow(app):
 
         reg = await client.post(
             "/api/auth/register",
-            json={"email": "admin@local.dev", "password": "securepass1", "display_name": "Admin"},
+            json={"password": "securepass1"},
         )
         assert reg.status_code == 201
         token = reg.json()["access_token"]
 
         me = await client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
         assert me.status_code == 200
-        assert me.json()["email"] == "admin@local.dev"
+        assert me.json()["display_name"] == "Admin"
 
         reg2 = await client.post(
             "/api/auth/register",
-            json={"email": "other@local.dev", "password": "securepass2"},
+            json={"password": "securepass2"},
         )
         assert reg2.status_code == 403
 

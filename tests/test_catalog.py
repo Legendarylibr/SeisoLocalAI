@@ -7,8 +7,33 @@ def test_catalog_has_popular_models():
     all_models = search_catalog()
     assert len(all_models) >= 40
     repos = {m["repo_id"] for m in all_models}
-    assert "meta-llama/Llama-3.2-1B-Instruct" in repos
-    assert "Qwen/Qwen2.5-7B-Instruct" in repos
+    assert "Qwen/Qwen3.6-35B-A3B" in repos
+    assert "Qwen/Qwen3.5-4B" in repos
+    assert "Qwen/Qwen2.5-7B-Instruct" not in repos
+    assert "Qwen/Qwen3-8B" not in repos
+    assert "moonshotai/Kimi-K2.7-Code" in repos
+    assert "moonshotai/Kimi-K2.5" in repos
+    assert "moonshotai/Kimi-K2-Thinking" in repos
+    assert "nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-BF16" in repos
+    assert "zai-org/GLM-5" in repos
+    assert "MiniMaxAI/MiniMax-M2.7" in repos
+    assert "Qwen/Qwen3-VL-2B-Instruct" in repos
+    assert "google/gemma-4-12B-it" in repos
+    assert "google/gemma-4-E2B-it" in repos
+    assert "MiniMaxAI/MiniMax-M3" in repos
+    assert "mistralai/Devstral-Small-2507" in repos
+    assert "google/gemma-3-27b-it" not in repos
+    assert "mistralai/Mixtral-8x7B-Instruct-v0.1" not in repos
+    assert "mistralai/Mistral-7B-Instruct-v0.3" not in repos
+    assert "deepseek-ai/DeepSeek-V3" not in repos
+    assert "deepseek-ai/DeepSeek-R1" not in repos
+    assert "HuggingFaceTB/SmolLM2-1.7B-Instruct" not in repos
+    assert "deepseek-ai/deepseek-coder-6.7b-instruct" not in repos
+    assert "meta-llama/Llama-4-Scout-17B-16E-Instruct" in repos
+    assert "meta-llama/Llama-3.3-70B-Instruct" not in repos
+    assert "mistralai/Mistral-Small-4-119B-2603" in repos
+    assert "mistralai/Mistral-Small-Instruct-2409" not in repos
+    assert "deepseek-ai/DeepSeek-R1-0528" in repos
 
 
 def test_catalog_search():
@@ -25,3 +50,15 @@ def test_get_by_repo():
     entry = get_by_repo("microsoft/phi-4")
     assert entry is not None
     assert entry.family.value == "phi"
+
+
+def test_catalog_priority_order():
+    results = search_catalog()
+    assert results[0]["priority"] >= results[-1]["priority"]
+    assert results[0]["repo_id"] == "moonshotai/Kimi-K2.7-Code"
+
+
+def test_catalog_search_ranks_exact_match():
+    results = search_catalog("qwen 3.6")
+    assert results[0]["repo_id"].startswith("Qwen/")
+    assert "3.6" in results[0]["name"] or "3.6" in results[0]["repo_id"]

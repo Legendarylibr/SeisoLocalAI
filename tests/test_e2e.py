@@ -37,7 +37,7 @@ async def test_openai_chat_with_inventory_model(app, auth_client, monkeypatch):
     from forge.api.deps import get_db
 
     db = get_db()
-    users = await db.get_user_by_email("admin@local.dev")
+    users = await db.get_user_by_display_name("Admin")
     model_file = user_path(tmp_path, users["id"], "models", "test-model", "model.gguf")
     model_file.write_text("fake")
 
@@ -70,10 +70,16 @@ async def test_openai_chat_with_inventory_model(app, auth_client, monkeypatch):
 @pytest.mark.asyncio
 async def test_training_job_e2e(app, auth_client, monkeypatch):
     client, _token, headers, data_dir = auth_client
-    dataset = data_dir / "train.jsonl"
+    from forge.api.deps import get_db
+
+    db = get_db()
+    user = await db.get_user_by_display_name("Admin")
+    dataset = user_path(data_dir, user["id"], "uploads", "train.jsonl")
     dataset.write_text('{"messages":[{"role":"user","content":"hi"},{"role":"assistant","content":"hey"}]}\n')
 
-    def fake_run_training(config):
+    def fake_run_training(config, on_metric=None):
+        if on_metric:
+            on_metric({"type": "training", "step": 1, "loss": 1.5, "reward": -1.5, "epoch": 0.1})
         out = Path(config.output_dir) / "checkpoint-e2e"
         out.mkdir(parents=True, exist_ok=True)
         (out / "adapter_config.json").write_text('{"base_model_name_or_path": "test/model"}')
@@ -120,7 +126,7 @@ async def test_export_lora_e2e(app, auth_client):
     from forge.api.deps import get_db
 
     db = get_db()
-    user = await db.get_user_by_email("admin@local.dev")
+    user = await db.get_user_by_display_name("Admin")
     ckpt = user_path(data_dir, user["id"], "checkpoints", "run1")
     (ckpt / "adapter_config.json").write_text('{"r": 16}')
     (ckpt / "adapter_model.bin").write_text("fake-weights")
@@ -158,7 +164,7 @@ async def test_inference_chat_e2e(app, auth_client, monkeypatch):
     from forge.api.deps import get_db
 
     db = get_db()
-    user = await db.get_user_by_email("admin@local.dev")
+    user = await db.get_user_by_display_name("Admin")
     model_path = user_path(data_dir, user["id"], "models", "model.gguf")
     model_path.write_text("fake")
     model = await db.add_model(user_id=user["id"], name="Local", path=str(model_path), format="gguf")

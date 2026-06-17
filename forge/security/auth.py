@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import secrets
 import time
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
@@ -17,6 +18,7 @@ from forge.config import ForgeSettings, get_settings
 bearer_scheme = HTTPBearer(auto_error=False)
 
 ALGORITHM = "HS256"
+_revoked_jtis: set[str] = set()
 
 
 def hash_password(password: str) -> str:
@@ -34,13 +36,32 @@ def create_access_token(
     hours: int | None = None,
 ) -> str:
     expire = datetime.now(timezone.utc) + timedelta(hours=hours or settings.session_hours)
-    payload = {"sub": subject, "exp": expire, "iat": datetime.now(timezone.utc)}
+    payload = {
+        "sub": subject,
+        "exp": expire,
+        "iat": datetime.now(timezone.utc),
+        "jti": secrets.token_hex(16),
+    }
     return jwt.encode(payload, settings.secret_key, algorithm=ALGORITHM)
+
+
+def revoke_access_token(token: str, settings: ForgeSettings) -> None:
+    """Invalidate a JWT so it cannot be reused after logout."""
+    try:
+        payload = jwt.decode(token, settings.secret_key, algorithms=[ALGORITHM])
+        jti = payload.get("jti")
+        if jti:
+            _revoked_jtis.add(str(jti))
+    except JWTError:
+        pass
 
 
 def decode_token(token: str, settings: ForgeSettings) -> str:
     try:
         payload = jwt.decode(token, settings.secret_key, algorithms=[ALGORITHM])
+        jti = payload.get("jti")
+        if jti and str(jti) in _revoked_jtis:
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Token revoked")
         sub = payload.get("sub")
         if not sub:
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid token")

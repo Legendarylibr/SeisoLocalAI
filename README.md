@@ -7,7 +7,7 @@
 | **Seiso Forge** | Web UI + backend API for chat, training, export, recipes, and knowledge bases |
 | **Seiso Core** | Python library + CLI for programmatic training, export, and inference |
 
-Runs on Windows, Linux, WSL, and macOS (NVIDIA GPU, Apple MLX, CPU for select flows).
+Runs on Windows, Linux, WSL, and macOS. See **[docs/](docs/README.md)** for per-platform install and startup.
 
 ## Core value
 
@@ -20,8 +20,14 @@ Runs on Windows, Linux, WSL, and macOS (NVIDIA GPU, Apple MLX, CPU for select fl
 ## Quick start
 
 ```bash
-# Install core + forge server
+# Install — see docs/install.md for platform extras
 pip install -e ".[forge,train,dev]"
+
+# Linux NVIDIA (fused CUDA kernels)
+pip install -e ".[forge,train,cuda,dev]"
+
+# macOS (MLX chat)
+pip install -e ".[forge,train,mlx,dev]"
 
 # Launch Forge (web UI + API)
 seiso forge
@@ -42,6 +48,9 @@ Open **http://127.0.0.1:8765** — complete onboarding to create your local admi
 | `seiso export` | Export merged/GGUF/LoRA + Hub push |
 | `seiso compress run` | Code Llama compression pipeline (distill → prune → finetune → export) |
 | `seiso inference` | One-shot inference |
+| `seiso-bench-kernels` | Benchmark fused GPU kernels (NVIDIA / ROCm) |
+
+Full command reference: [docs/README.md](docs/README.md)
 
 ## Architecture
 
@@ -67,11 +76,16 @@ Backend orchestrators spawn isolated workers with SSE log streaming:
 
 ## Platform support
 
-| Platform | Chat | Train | GGUF/MLX inference |
-|----------|------|-------|--------------------|
-| NVIDIA GPU | ✓ | ✓ | ✓ |
-| macOS (MLX) | ✓ | ✓ | ✓ |
-| CPU | ✓ | limited | GGUF via llama.cpp |
+| Platform | Chat | Train | Fused kernels | Notes |
+|----------|------|-------|---------------|-------|
+| Linux + NVIDIA | ✓ | ✓ QLoRA | ✓ CUDA | [docs](docs/platforms/linux-nvidia.md) |
+| Linux + AMD ROCm | ✓ | ✓ | ✓ Triton | [docs](docs/platforms/linux-amd-rocm.md) |
+| Windows + NVIDIA | ✓ | ✓ QLoRA | ✓ CUDA JIT | [docs](docs/platforms/windows.md) |
+| WSL2 + NVIDIA | ✓ | ✓ | ✓ CUDA + Triton | [docs](docs/platforms/wsl.md) |
+| macOS Apple Silicon | ✓ MLX | ✓ 16-bit LoRA | — | [docs](docs/platforms/macos.md) |
+| CPU | ✓ GGUF/Ollama | limited | — | |
+
+Inference vs training differ on macOS — MLX is inference-only; training uses PyTorch MPS/CPU.
 
 ## Licensing
 
@@ -80,7 +94,7 @@ Backend orchestrators spawn isolated workers with SSE log streaming:
 
 ## Features
 
-- **Triton kernels** — fused RMSNorm patching during training (`pip install -e ".[train,cuda]"`)
+- **Fused GPU kernels** — RMSNorm, SwiGLU MLP, cross-entropy ([docs/training/kernels.md](docs/training/kernels.md); `pip install -e ".[train,cuda]"` on Linux NVIDIA)
 - **Multi-GPU** — torchrun distributed workers; rank-0 checkpoint writes
 - **Tool calling** — web search, sandboxed code execution, artifact writes
 - **Providers** — OpenAI, Anthropic, Ollama, vLLM routing
@@ -106,6 +120,10 @@ Seiso is **secure by default** for single-user localhost use. Multi-user or remo
 |---------|---------|---------|
 | `SEISO_ALLOW_REMOTE=false` | off | Binds Forge to `127.0.0.1` only |
 | `SEISO_ALLOW_REMOTE=true` | — | Allows LAN/WAN binding; sets secure session cookies |
+| `SEISO_TRUST_PROXY=true` | — | Trust `X-Forwarded-*` from reverse proxy (rate limits, client IP) |
+| `SEISO_SECURE_COOKIES=true` | — | `Secure` cookies when TLS is terminated by a reverse proxy |
+
+Deploy configs: [`deploy/`](../deploy/) · Guide: [docs/deployment/reverse-proxy.md](docs/deployment/reverse-proxy.md)
 
 ### Opt-in capabilities (all default **off**)
 
@@ -143,7 +161,8 @@ When `SEISO_ALLOW_TOOLS=true`:
 
 ### Auth & rate limits
 
-- Signed session tokens; login rate-limited to 10 attempts/minute per IP
+- Signed session tokens; rate limiting disabled on localhost-only mode (default)
+- When `SEISO_ALLOW_REMOTE=true`: global limit (`SEISO_RATE_LIMIT`, default 120/min per IP) and login throttling (10 attempts/minute per IP)
 - Job and resource ownership enforced on all streaming endpoints
 
 ### Database (local-only, zero retention)

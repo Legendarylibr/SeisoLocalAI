@@ -19,7 +19,7 @@ from forge.security.audit import audit_event
 from forge.security.auth import get_current_user_id
 from forge.services.jobs import assert_job_owner
 from forge.services.model_registry import register_export_outputs
-from forge.services.user_paths import assert_user_path
+from forge.services.user_paths import assert_user_config_file, assert_user_path
 from seiso.rl_quant.recommendation import recommendation_to_gguf_quants
 from seiso.security import SecurityError
 
@@ -100,12 +100,14 @@ async def start_rl_quant(
         if train_job.get("checkpoint_path"):
             config["checkpoint_path"] = train_job["checkpoint_path"]
 
-    for path_key in ("checkpoint_path", "gguf_path"):
-        if config.get(path_key):
-            try:
+    try:
+        if body.config_file:
+            assert_user_config_file(settings.data_dir, user_id, body.config_file)
+        for path_key in ("checkpoint_path", "gguf_path"):
+            if config.get(path_key):
                 assert_user_path(settings.data_dir, user_id, config[path_key])
-            except SecurityError as exc:
-                raise HTTPException(403, str(exc)) from exc
+    except SecurityError as exc:
+        raise HTTPException(403, str(exc)) from exc
 
     await db.create_rl_quant_job(user_id, config, job_id=job_id)
     orchestrator.create_job(job_id=job_id, user_id=user_id)

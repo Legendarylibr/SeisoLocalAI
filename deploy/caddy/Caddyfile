@@ -1,0 +1,17 @@
+# Replace forge.example.com with your domain.
+# Caddy obtains and renews Let's Encrypt certificates automatically.
+
+forge.example.com {
+	encode gzip
+
+	reverse_proxy 127.0.0.1:8765 {
+		# SSE: training logs, chat streaming, model downloads
+		flush_interval -1
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+	}
+}

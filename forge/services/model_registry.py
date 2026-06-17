@@ -102,7 +102,7 @@ async def register_export_outputs(
                 model_format=fmt,
                 metadata=meta,
             )
-        elif key in {"merged", "lora"} or path.is_dir():
+        elif key in {"merged", "lora", "full", "base"} or path.is_dir():
             entry = await register_model_path(
                 db,
                 user_id=user_id,

@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, AsyncIterator
 
 MAX_LOG_LINES = 2000
+MAX_METRIC_POINTS = 5000
 MAX_JOBS = 500
 
 
@@ -45,7 +46,9 @@ class Orchestrator(ABC):
         self.sandbox_root = sandbox_root
         self._jobs: dict[str, JobRecord] = {}
         self._log_buffers: dict[str, list[str]] = defaultdict(list)
+        self._metric_buffers: dict[str, list[dict[str, Any]]] = defaultdict(list)
         self._subscribers: dict[str, list[asyncio.Queue[str | None]]] = defaultdict(list)
+        self._metric_subscribers: dict[str, list[asyncio.Queue[dict[str, Any] | None]]] = defaultdict(list)
         self._tasks: dict[str, asyncio.Task[None]] = {}
         self._subprocesses: dict[str, asyncio.subprocess.Process] = {}
 
@@ -74,6 +77,7 @@ class Orchestrator(ABC):
         jid, _ = finished[0]
         self._jobs.pop(jid, None)
         self._log_buffers.pop(jid, None)
+        self._metric_buffers.pop(jid, None)
         self._tasks.pop(jid, None)
         self._subprocesses.pop(jid, None)
 
@@ -85,9 +89,36 @@ class Orchestrator(ABC):
         for q in self._subscribers.get(job_id, []):
             q.put_nowait(line)
 
+    def _emit_metric(self, job_id: str, metric: dict[str, Any]) -> None:
+        buf = self._metric_buffers[job_id]
+        buf.append(metric)
+        if len(buf) > MAX_METRIC_POINTS:
+            del buf[: len(buf) - MAX_METRIC_POINTS]
+        for q in self._metric_subscribers.get(job_id, []):
+            q.put_nowait(metric)
+
+    def get_metrics(self, job_id: str) -> list[dict[str, Any]]:
+        return list(self._metric_buffers.get(job_id, []))
+
+    def _finish_metrics(self, job_id: str) -> None:
+        for q in self._metric_subscribers.get(job_id, []):
+            q.put_nowait(None)
+
+    async def stream_metrics(self, job_id: str) -> AsyncIterator[dict[str, Any]]:
+        queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
+        self._metric_subscribers[job_id].append(queue)
+        for point in self._metric_buffers.get(job_id, []):
+            yield point
+        while True:
+            msg = await queue.get()
+            if msg is None:
+                break
+            yield msg
+
     def _finish_logs(self, job_id: str) -> None:
         for q in self._subscribers.get(job_id, []):
             q.put_nowait(None)
+        self._finish_metrics(job_id)
 
     async def stream_logs(self, job_id: str) -> AsyncIterator[str]:
         """SSE-compatible log stream for a job."""

@@ -122,7 +122,7 @@ async def test_chat_defense_blocks_input(app, autodefense_auth_client):
     from forge.api.deps import get_db
 
     db = get_db()
-    user = await db.get_user_by_email("admin@local.dev")
+    user = await db.get_user_by_display_name("Admin")
     assert user is not None
     from tests.conftest import user_path
 

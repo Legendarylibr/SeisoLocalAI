@@ -16,10 +16,52 @@ def user_dir(sandbox_root: Path, user_id: str, category: str) -> Path:
     return safe_join(sandbox_root, category, user_id)
 
 
+def is_local_filesystem_path(target: str | Path) -> bool:
+    """True when *target* refers to a host path rather than a HF hub ID."""
+    p = Path(target).expanduser()
+    if p.is_absolute():
+        return True
+    if p.exists():
+        return True
+    s = str(target)
+    return s.startswith(("./", "../", "~/"))
+
+
+def assert_user_config_file(sandbox_root: Path, user_id: str, config_file: str) -> None:
+    """Vendor preset filenames or absolute paths under the user's data tree only."""
+    path = Path(config_file).expanduser()
+    if path.is_absolute():
+        assert_user_path(sandbox_root, user_id, path)
+        return
+    if "/" in config_file or "\\" in config_file or path.parts != (config_file,):
+        raise SecurityError(
+            "config_file must be a preset filename or an absolute path under your data directory"
+        )
+
+
+def assert_user_training_config(sandbox_root: Path, user_id: str, config: dict) -> None:
+    """Validate local dataset and checkpoint paths are scoped to the requesting user."""
+    dataset = config.get("dataset")
+    if dataset and is_local_filesystem_path(dataset):
+        assert_user_path(sandbox_root, user_id, dataset)
+    resume = config.get("resume_from")
+    if resume:
+        assert_user_path(sandbox_root, user_id, resume)
+
+
 def assert_user_path(sandbox_root: Path, user_id: str, target: str | Path) -> Path:
-    """Path must be inside sandbox and under an allowed root scoped to user_id."""
-    source = assert_within(sandbox_root, Path(target).expanduser())
-    rel = source.relative_to(sandbox_root.resolve())
+    """Path must be inside sandbox and under an allowed root scoped to user_id.
+
+    Inventory symlinks are checked at their logical location under the user tree,
+    then resolved for inference file access.
+    """
+    source = Path(target).expanduser()
+    logical = source.absolute()
+    base = sandbox_root.resolve()
+    try:
+        rel = logical.relative_to(base)
+    except ValueError as exc:
+        raise SecurityError(f"Path must be inside {base}") from exc
     if not rel.parts:
         raise SecurityError("Invalid path")
     root = rel.parts[0]
@@ -27,4 +69,6 @@ def assert_user_path(sandbox_root: Path, user_id: str, target: str | Path) -> Pa
         raise SecurityError(f"Access denied to path root: {root!r}")
     if len(rel.parts) < 2 or rel.parts[1] != user_id:
         raise SecurityError(f"Path must be under {root}/{user_id}/")
-    return source
+    if not (source.exists() or source.is_symlink()):
+        raise SecurityError(f"Model path not found: {source}")
+    return source.resolve()

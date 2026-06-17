@@ -174,6 +174,15 @@ CREATE TABLE IF NOT EXISTS mcp_servers (
 CREATE INDEX IF NOT EXISTS idx_models_user ON local_models(user_id);
 CREATE INDEX IF NOT EXISTS idx_threads_user ON chat_threads(user_id);
 CREATE INDEX IF NOT EXISTS idx_jobs_user ON training_jobs(user_id);
+CREATE INDEX IF NOT EXISTS idx_messages_thread ON chat_messages(thread_id);
+CREATE INDEX IF NOT EXISTS idx_export_jobs_user ON export_jobs(user_id);
+CREATE INDEX IF NOT EXISTS idx_compress_jobs_user ON compress_jobs(user_id);
+CREATE INDEX IF NOT EXISTS idx_image_compress_jobs_user ON image_compress_jobs(user_id);
+CREATE INDEX IF NOT EXISTS idx_rl_quant_jobs_user ON rl_quant_jobs(user_id);
+CREATE INDEX IF NOT EXISTS idx_recipe_jobs_user ON recipe_jobs(user_id);
+CREATE INDEX IF NOT EXISTS idx_providers_user ON providers(user_id);
+CREATE INDEX IF NOT EXISTS idx_mcp_servers_user ON mcp_servers(user_id);
+CREATE INDEX IF NOT EXISTS idx_knowledge_bases_user ON knowledge_bases(user_id);
 """
 
 
@@ -252,16 +261,47 @@ class Database:
                 row = await cur.fetchone()
                 return int(row["c"]) if row else 0
 
-    async def create_user(self, email: str, password_hash: str, display_name: str | None) -> dict:
+    async def create_user(
+        self,
+        password_hash: str,
+        display_name: str,
+        *,
+        email: str | None = None,
+    ) -> dict:
         uid = str(uuid.uuid4())
         now = _now()
+        normalized_name = display_name.strip()
+        resolved_email = (email or f"{uid}@local.seiso").lower()
         async with self._conn() as conn:
             await conn.execute(
                 "INSERT INTO users (id, email, password_hash, display_name, created_at) VALUES (?, ?, ?, ?, ?)",
-                (uid, email.lower(), password_hash, display_name, now),
+                (uid, resolved_email, password_hash, normalized_name, now),
             )
             await conn.commit()
-        return {"id": uid, "email": email.lower(), "display_name": display_name, "created_at": now}
+        return {
+            "id": uid,
+            "email": resolved_email,
+            "display_name": normalized_name,
+            "created_at": now,
+        }
+
+    async def get_user_by_display_name(self, display_name: str) -> dict | None:
+        async with self._conn() as conn:
+            async with conn.execute(
+                "SELECT * FROM users WHERE lower(display_name) = ?",
+                (display_name.strip().lower(),),
+            ) as cur:
+                row = await cur.fetchone()
+                return dict(row) if row else None
+
+    async def get_sole_user(self) -> dict | None:
+        """Return the single local user, if any (Forge allows one account per instance)."""
+        async with self._conn() as conn:
+            async with conn.execute(
+                "SELECT * FROM users ORDER BY created_at ASC LIMIT 1"
+            ) as cur:
+                row = await cur.fetchone()
+                return dict(row) if row else None
 
     async def get_user_by_email(self, email: str) -> dict | None:
         async with self._conn() as conn:
@@ -289,6 +329,15 @@ class Database:
                 rows = await cur.fetchall()
                 return [dict(r) for r in rows]
 
+    async def get_model(self, model_id: str, user_id: str) -> dict | None:
+        async with self._conn() as conn:
+            async with conn.execute(
+                "SELECT * FROM local_models WHERE id = ? AND (user_id = ? OR user_id IS NULL)",
+                (model_id, user_id),
+            ) as cur:
+                row = await cur.fetchone()
+                return dict(row) if row else None
+
     async def add_model(self, **fields: Any) -> dict:
         mid = str(uuid.uuid4())
         now = _now()
@@ -311,6 +360,38 @@ class Database:
             )
             await conn.commit()
         return {"id": mid, **fields, "created_at": now}
+
+    async def get_model_by_source(self, user_id: str, source: str) -> dict | None:
+        async with self._conn() as conn:
+            async with conn.execute(
+                "SELECT * FROM local_models WHERE user_id = ? AND source = ? ORDER BY created_at DESC LIMIT 1",
+                (user_id, source),
+            ) as cur:
+                row = await cur.fetchone()
+                return dict(row) if row else None
+
+    async def upsert_model(self, user_id: str, source: str, **fields: Any) -> dict:
+        existing = await self.get_model_by_source(user_id, source)
+        if not existing:
+            return await self.add_model(user_id=user_id, source=source, **fields)
+
+        now = _now()
+        async with self._conn() as conn:
+            await conn.execute(
+                """UPDATE local_models
+                   SET name = ?, path = ?, format = ?, size_bytes = ?, metadata_json = ?
+                   WHERE id = ?""",
+                (
+                    fields["name"],
+                    fields["path"],
+                    fields.get("format"),
+                    fields.get("size_bytes", 0),
+                    json.dumps(fields.get("metadata", {})),
+                    existing["id"],
+                ),
+            )
+            await conn.commit()
+        return {**existing, **fields, "id": existing["id"], "user_id": user_id, "source": source}
 
     async def create_training_job(
         self,
@@ -374,6 +455,15 @@ class Database:
                 )
             await conn.commit()
 
+    async def update_training_metrics(self, job_id: str, metrics: dict) -> None:
+        now = _now()
+        async with self._conn() as conn:
+            await conn.execute(
+                "UPDATE training_jobs SET metrics_json = ?, updated_at = ? WHERE id = ?",
+                (json.dumps(metrics), now, job_id),
+            )
+            await conn.commit()
+
     async def list_training_jobs(self, user_id: str) -> list[dict]:
         async with self._conn() as conn:
             async with conn.execute(
@@ -394,6 +484,15 @@ class Database:
             await conn.commit()
         return {"id": tid, "title": title, "model_id": model_id, "created_at": now}
 
+    async def count_threads(self, user_id: str) -> int:
+        async with self._conn() as conn:
+            cur = await conn.execute(
+                "SELECT COUNT(*) FROM chat_threads WHERE user_id = ?",
+                (user_id,),
+            )
+            row = await cur.fetchone()
+            return int(row[0]) if row else 0
+
     async def list_threads(self, user_id: str) -> list[dict]:
         async with self._conn() as conn:
             async with conn.execute(
@@ -401,6 +500,30 @@ class Database:
                 (user_id,),
             ) as cur:
                 return [dict(r) for r in await cur.fetchall()]
+
+    async def delete_thread(self, thread_id: str, user_id: str) -> bool:
+        async with self._conn() as conn:
+            cur = await conn.execute(
+                "SELECT id FROM chat_threads WHERE id = ? AND user_id = ?",
+                (thread_id, user_id),
+            )
+            if not await cur.fetchone():
+                return False
+            await conn.execute("DELETE FROM chat_messages WHERE thread_id = ?", (thread_id,))
+            await conn.execute("DELETE FROM chat_threads WHERE id = ?", (thread_id,))
+            await conn.commit()
+            return True
+
+    async def purge_user_chat(self, user_id: str) -> int:
+        """Remove all chat threads and encrypted messages for a user (session end)."""
+        async with self._conn() as conn:
+            await conn.execute(
+                "DELETE FROM chat_messages WHERE thread_id IN (SELECT id FROM chat_threads WHERE user_id = ?)",
+                (user_id,),
+            )
+            cur = await conn.execute("DELETE FROM chat_threads WHERE user_id = ?", (user_id,))
+            await conn.commit()
+            return cur.rowcount
 
     async def add_message(self, thread_id: str, role: str, content: str, metadata: dict | None = None) -> dict:
         mid = str(uuid.uuid4())

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Annotated, Any
 
@@ -15,6 +16,8 @@ from forge.db.store import Database
 from forge.orchestrators.inference import InferenceOrchestrator
 from forge.security.auth import get_current_user_id
 from forge.security.autodefense import DefenseBlockedError, defense_enabled, scan_output
+from forge.services.hardware import hardware_profile
+from forge.services.download_progress import estimate_load_eta_seconds
 from forge.services.inference_models import list_inference_options, resolve_chat_target
 from forge.services.mcp_access import validate_mcp_server_ids
 from forge.services.models import resolve_model_path
@@ -47,6 +50,11 @@ class ThreadCreate(BaseModel):
     model_id: str | None = None
 
 
+class PreloadRequest(BaseModel):
+    model_id: str
+    inference_backend: str = Field(default="auto", description="auto | llamacpp | ollama | mlx | torch")
+
+
 @router.post("/threads")
 async def create_thread(
     body: ThreadCreate,
@@ -71,8 +79,42 @@ async def inference_models(
     settings: Annotated[ForgeSettings, Depends(get_settings)],
 ) -> dict[str, Any]:
     """Unified model dropdown: HF Hub inventory, CLI paths, fine-tune/export outputs, Ollama."""
+    from forge.services.hardware import hardware_summary
+
     options = await list_inference_options(db, user_id, ollama_base_url=settings.ollama_base_url)
-    return {"models": options, "total": len(options)}
+    profile = hardware_profile()
+    return {
+        "models": options,
+        "total": len(options),
+        "hardware_summary": hardware_summary(profile),
+        "preferred_inference_backend": profile.get("preferred_inference_backend"),
+        "local_only": True,
+    }
+
+
+@router.delete("/threads/{thread_id}")
+async def delete_thread(
+    thread_id: str,
+    user_id: Annotated[str, Depends(get_current_user_id)],
+    db: Annotated[Database, Depends(get_db)],
+) -> dict[str, str]:
+    if not await db.delete_thread(thread_id, user_id):
+        raise HTTPException(404, "Thread not found")
+    return {"status": "deleted"}
+
+
+@router.get("/session")
+async def chat_session_info(
+    user_id: Annotated[str, Depends(get_current_user_id)],
+    db: Annotated[Database, Depends(get_db)],
+) -> dict:
+    thread_count = await db.count_threads(user_id)
+    return {
+        "thread_count": thread_count,
+        "memory_encrypted": True,
+        "clears_on_logout": True,
+        "local_only": True,
+    }
 
 
 @router.get("/threads/{thread_id}/messages")
@@ -84,6 +126,197 @@ async def get_thread_messages(
     if not await db.get_thread_for_user(thread_id, user_id):
         raise HTTPException(404, "Thread not found")
     return await db.get_messages(thread_id)
+
+
+@router.post("/cancel")
+async def cancel_inference(
+    user_id: Annotated[str, Depends(get_current_user_id)],
+    orchestrator: Annotated[InferenceOrchestrator, Depends(get_inference_orchestrator)],
+) -> dict:
+    """Abort in-flight generation and unload the active local model from VRAM."""
+    return await orchestrator._runner.cancel_and_unload()
+
+
+@router.post("/preload")
+async def preload_model(
+    body: PreloadRequest,
+    user_id: Annotated[str, Depends(get_current_user_id)],
+    db: Annotated[Database, Depends(get_db)],
+    orchestrator: Annotated[InferenceOrchestrator, Depends(get_inference_orchestrator)],
+    settings: Annotated[ForgeSettings, Depends(get_settings)],
+) -> dict[str, Any]:
+    """Load a selected inventory model into the local inference engine."""
+    ctx = await _resolve_preload_context(db, user_id, settings, body.model_id, body.inference_backend)
+    if ctx.get("ollama_only"):
+        return ctx["response"]
+
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, lambda: _warm_local_model(orchestrator._runner, ctx["payload"]))
+    status = orchestrator._runner._pool.status()
+    return {"status": "loaded", "backend": ctx["backend"], **status}
+
+
+@router.post("/preload/stream")
+async def preload_model_stream(
+    body: PreloadRequest,
+    user_id: Annotated[str, Depends(get_current_user_id)],
+    db: Annotated[Database, Depends(get_db)],
+    orchestrator: Annotated[InferenceOrchestrator, Depends(get_inference_orchestrator)],
+    settings: Annotated[ForgeSettings, Depends(get_settings)],
+):
+    ctx = await _resolve_preload_context(db, user_id, settings, body.model_id, body.inference_backend)
+    if ctx.get("ollama_only"):
+        async def ollama_gen():
+            yield {"event": "complete", "data": json.dumps(ctx["response"])}
+
+        return EventSourceResponse(ollama_gen())
+
+    runner = orchestrator._runner
+    pool = runner._pool
+    target_path = ctx["payload"]["model_path"]
+    size_bytes = ctx.get("size_bytes", 0)
+    eta = estimate_load_eta_seconds(size_bytes)
+    loop = asyncio.get_running_loop()
+
+    async def event_gen():
+        active_path = pool.status().get("path")
+        switching = bool(
+            active_path
+            and pool.normalize_path(active_path) != pool.normalize_path(target_path)
+        )
+        if switching:
+            yield {
+                "event": "progress",
+                "data": json.dumps(
+                    {
+                        "phase": "unloading",
+                        "label": "Releasing previous model from VRAM",
+                        "percent": 5,
+                        "eta_seconds": 2,
+                    }
+                ),
+            }
+            await loop.run_in_executor(None, pool.cancel_and_unload)
+
+        yield {
+            "event": "progress",
+            "data": json.dumps(
+                {
+                    "phase": "loading",
+                    "label": f"Loading {ctx['model_name']} into inference engine",
+                    "percent": 15,
+                    "eta_seconds": eta,
+                    "model_id": body.model_id,
+                    "model_name": ctx["model_name"],
+                    "backend": ctx["backend"],
+                }
+            ),
+        }
+        try:
+            await loop.run_in_executor(None, lambda: _warm_local_model(runner, ctx["payload"]))
+        except Exception as exc:
+            yield {"event": "error", "data": str(exc)}
+            return
+
+        status = pool.status()
+        yield {
+            "event": "complete",
+            "data": json.dumps(
+                {
+                    "status": "loaded",
+                    "backend": ctx["backend"],
+                    "model_id": body.model_id,
+                    "model_name": ctx["model_name"],
+                    **status,
+                }
+            ),
+        }
+
+    return EventSourceResponse(event_gen())
+
+
+async def _resolve_preload_context(
+    db: Database,
+    user_id: str,
+    settings: ForgeSettings,
+    model_id: str,
+    inference_backend: str,
+) -> dict[str, Any]:
+    options = await list_inference_options(db, user_id, ollama_base_url=settings.ollama_base_url)
+    selected = next((o for o in options if o["id"] == model_id), None)
+    if not selected:
+        raise HTTPException(404, "Model not found in inventory")
+
+    if selected.get("kind") == "ollama":
+        response = {
+            "status": "ready",
+            "backend": BACKEND_OLLAMA,
+            "ollama_model": selected.get("ollama_model"),
+            "active_model": selected.get("ollama_model"),
+        }
+        return {"ollama_only": True, "response": response}
+
+    try:
+        target = resolve_chat_target(
+            selected,
+            model_id=model_id,
+            ollama_model=None,
+            inference_backend=inference_backend,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+    backend = target.get("inference_backend", inference_backend)
+    if backend == BACKEND_OLLAMA:
+        response = {
+            "status": "ready",
+            "backend": BACKEND_OLLAMA,
+            "ollama_model": target.get("ollama_model"),
+            "active_model": target.get("ollama_model"),
+        }
+        return {"ollama_only": True, "response": response}
+
+    path = target.get("model_path")
+    if not path:
+        path = await resolve_model_path(
+            db,
+            user_id,
+            model_id=model_id,
+            model_path=None,
+            data_dir=settings.data_dir,
+        )
+    if not path:
+        raise HTTPException(400, "Model path not found")
+
+    payload = {
+        "model_path": path,
+        "model_format": target.get("model_format") or selected.get("format"),
+        "inference_backend": backend,
+        "messages": [{"role": "user", "content": "ping"}],
+        "max_tokens": 1,
+    }
+    return {
+        "payload": payload,
+        "backend": backend,
+        "model_name": selected.get("name") or model_id,
+        "size_bytes": int(selected.get("size_bytes") or 0),
+    }
+
+
+def _warm_local_model(runner, payload: dict[str, Any]) -> None:
+    model_path = payload["model_path"]
+    route, resolved_path = runner._resolve_route(payload, model_path)
+    pool = runner._pool
+    norm = pool.normalize_path(resolved_path)
+    active_path = pool.status().get("path")
+    if active_path and pool.normalize_path(active_path) != norm:
+        pool.cancel_and_unload()
+    if route == "mlx":
+        pool.get_mlx(resolved_path)
+    elif route == "torch":
+        pool.get_torch(resolved_path)
+    else:
+        pool.get_llama(resolved_path, n_ctx=payload.get("n_ctx", 4096))
 
 
 @router.post("/chat")
@@ -190,6 +423,7 @@ async def chat(
             if can_stream_local:
                 parts: list[str] = []
                 backend_label = payload.get("inference_backend") or "local"
+                cancelled = False
                 try:
                     orchestrator._emit_log(job_id, f"Streaming inference ({backend_label})")
                     async for token in orchestrator.stream_local(payload):
@@ -216,6 +450,12 @@ async def chat(
                         yield {"event": "defense", "data": json.dumps(exc.result.to_dict())}
                 except Exception as exc:
                     yield {"event": "error", "data": str(exc)}
+                except asyncio.CancelledError:
+                    cancelled = True
+                    raise
+                finally:
+                    if cancelled:
+                        await orchestrator._runner.cancel_and_unload()
                 return
 
             await orchestrator.start(job_id, payload)

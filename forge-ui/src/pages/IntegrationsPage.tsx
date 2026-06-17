@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, SecurityPosture } from "@/lib/api";
+import { PageHeader } from "@/components/PageHeader";
+import { IconAlert } from "@/components/Icons";
 
 type Provider = { id: string; name: string; provider_type: string; config: Record<string, unknown> };
 type McpServer = { id: string; name: string; command: string; args: string[]; enabled: boolean };
@@ -45,12 +47,16 @@ export function IntegrationsPage() {
 
   return (
     <div>
-      <h1 className="page-title">Integrations</h1>
-      <p className="page-sub">External LLM providers and MCP servers — keys encrypted at rest.</p>
+      <PageHeader
+        title="Integrations"
+        subtitle="External LLM providers and MCP servers — keys encrypted at rest."
+      />
 
       {security && !security.allow_tools && (
         <div className="security-banner">
-          <span className="security-banner-icon" aria-hidden>!</span>
+          <span className="security-banner-icon" aria-hidden>
+            <IconAlert size={14} />
+          </span>
           <div>
             <strong>MCP requires tools to be enabled</strong>
             <p>

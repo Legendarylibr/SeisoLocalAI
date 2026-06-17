@@ -1,0 +1,20 @@
+[Unit]
+Description=Seiso Forge (local AI platform)
+After=network.target
+
+[Service]
+Type=simple
+User=seiso
+Group=seiso
+WorkingDirectory=/opt/seiso
+EnvironmentFile=/opt/seiso/.env
+ExecStart=/opt/seiso/.venv/bin/seiso forge
+Restart=on-failure
+RestartSec=5
+
+# Forge listens on 127.0.0.1 only; pair with Caddy/nginx for HTTPS.
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

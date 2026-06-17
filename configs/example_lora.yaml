@@ -18,5 +18,6 @@ train_on_responses_only: true
 use_rslora: false
 packing: false
 use_triton: true
+use_fused_ce: true
 seed: 3407
 save_steps: 50

@@ -1,0 +1,91 @@
+"""Tests for GGUF repo resolution before Hub chat downloads."""
+
+from __future__ import annotations
+
+from forge.services import hf_hub
+
+
+def test_gguf_mirror_candidates_include_bartowski():
+    candidates = hf_hub._gguf_mirror_candidates("Qwen/Qwen3.6-27B")
+    assert any("Qwen3.6-27B" in c for c in candidates)
+
+
+def test_resolve_gguf_repo_uses_explicit_gguf_repo(monkeypatch):
+    class Entry:
+        gguf_repo = "bartowski/Custom-GGUF"
+        quant = "Q4_K_M"
+
+    resolved = hf_hub.resolve_gguf_repo("Qwen/Qwen3.6-27B", entry=Entry())
+    assert resolved == "bartowski/Custom-GGUF"
+
+
+def test_resolve_gguf_repo_falls_back_to_mirror(monkeypatch):
+    monkeypatch.setattr(hf_hub, "repo_has_gguf", lambda repo_id, **_: repo_id.endswith("-GGUF"))
+    resolved = hf_hub.resolve_gguf_repo("meta-llama/Llama-3.1-8B-Instruct")
+    assert resolved.endswith("-GGUF")
+
+
+def test_search_huggingface_datasets_parses_api_response(monkeypatch):
+    payload = [
+        {
+            "id": "HuggingFaceH4/no_robots",
+            "downloads": 12345,
+            "tags": ["sft", "chat"],
+        }
+    ]
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            import json
+
+            return json.dumps(payload).encode("utf-8")
+
+    monkeypatch.setattr(hf_hub.urllib.request, "urlopen", lambda *_a, **_k: FakeResponse())
+    rows = hf_hub.search_huggingface_datasets(query="no_robots", limit=5)
+    assert rows == [
+        {
+            "repo_id": "HuggingFaceH4/no_robots",
+            "name": "no_robots",
+            "downloads": 12345,
+            "tags": ["sft", "chat"],
+        }
+    ]
+
+
+def test_search_huggingface_datasets_empty_query():
+    assert hf_hub.search_huggingface_datasets(query="  ") == []
+
+
+def test_resolve_gguf_artifact_composes_mirror_file_and_size(monkeypatch):
+    class Entry:
+        gguf_repo = None
+        quant = "Q4_K_M"
+
+    monkeypatch.setattr(hf_hub, "resolve_gguf_repo", lambda *_a, **_k: "mirror/Model-GGUF")
+    monkeypatch.setattr(
+        hf_hub,
+        "_list_repo_files",
+        lambda *_a, **_k: ["Model-Q4_K_M.gguf", "Model-Q8_0.gguf"],
+    )
+    monkeypatch.setattr(hf_hub, "get_gguf_file_size_bytes", lambda *_a, **_k: 5_000_000_000)
+
+    artifact = hf_hub.resolve_gguf_artifact("org/Model", entry=Entry(), use_cache=False)
+    assert artifact["gguf_repo"] == "mirror/Model-GGUF"
+    assert artifact["filename"] == "Model-Q4_K_M.gguf"
+    assert artifact["size_bytes"] == 5_000_000_000
+
+
+def test_resolve_gguf_repo_raises_when_missing(monkeypatch):
+    monkeypatch.setattr(hf_hub, "repo_has_gguf", lambda *_a, **_k: False)
+    monkeypatch.setattr(hf_hub, "search_huggingface_gguf_repos", lambda **_k: [])
+    try:
+        hf_hub.resolve_gguf_repo("org/NoGgufModel")
+        assert False, "expected ValueError"
+    except ValueError as exc:
+        assert "No GGUF quant repo found" in str(exc)

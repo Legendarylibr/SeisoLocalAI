@@ -1,11 +1,19 @@
 import { useEffect, useState } from "react";
-import { api, CatalogModel, subscribeSSE, TrainingJob } from "@/lib/api";
+import { useSearchParams } from "react-router-dom";
+import { api, CatalogModel, subscribeSSE, SystemMetrics, TrainableModel, TrainingJob, TrainingMetricPoint } from "@/lib/api";
+import { HfDatasetPicker } from "@/components/HfDatasetPicker";
+import { TrainingMetricsDashboard } from "@/components/TrainingMetricsDashboard";
+import { useHardwareProfile } from "@/hooks/useHardware";
 
 export function TrainPage() {
+  const { profile: hw } = useHardwareProfile();
+  const [searchParams] = useSearchParams();
+  const pendingModel = searchParams.get("model");
   const [jobs, setJobs] = useState<TrainingJob[]>([]);
   const [catalog, setCatalog] = useState<CatalogModel[]>([]);
+  const [localModels, setLocalModels] = useState<TrainableModel[]>([]);
   const [modelId, setModelId] = useState("meta-llama/Llama-3.2-1B-Instruct");
-  const [dataset, setDataset] = useState("./data/sample.jsonl");
+  const [dataset, setDataset] = useState("HuggingFaceH4/no_robots");
   const [method, setMethod] = useState("lora");
   const [quant, setQuant] = useState("4bit");
   const [datasetFormat, setDatasetFormat] = useState("auto");
@@ -17,23 +25,50 @@ export function TrainPage() {
   const [loraAlpha, setLoraAlpha] = useState(32);
   const [gradAccum, setGradAccum] = useState(4);
   const [multiGpu, setMultiGpu] = useState(false);
-  const [useTriton, setUseTriton] = useState(true);
+  const [useFusedKernels, setUseFusedKernels] = useState(true);
+  const [useFusedCe, setUseFusedCe] = useState(true);
   const [gradCkpt, setGradCkpt] = useState(true);
   const [trainResponsesOnly, setTrainResponsesOnly] = useState(true);
   const [useRsLora, setUseRsLora] = useState(false);
   const [packing, setPacking] = useState(false);
   const [logs, setLogs] = useState<string[]>([]);
   const [activeJob, setActiveJob] = useState<string | null>(null);
+  const [jobStatus, setJobStatus] = useState<string | null>(null);
+  const [trainingMetrics, setTrainingMetrics] = useState<TrainingMetricPoint[]>([]);
+  const [systemMetrics, setSystemMetrics] = useState<SystemMetrics[]>([]);
+  const [metricsOpen, setMetricsOpen] = useState(false);
   const [starting, setStarting] = useState(false);
+  const [hwApplied, setHwApplied] = useState(false);
 
   useEffect(() => {
     api.catalog("", undefined, undefined).then((r) => setCatalog(r.models)).catch(console.error);
     api.listTrainingJobs().then(setJobs).catch(console.error);
-  }, []);
+    api.listTrainingModels().then((r) => setLocalModels(r.models)).catch(console.error);
+    if (pendingModel) setModelId(pendingModel);
+  }, [pendingModel]);
+
+  useEffect(() => {
+    if (!hw || hwApplied || pendingModel) return;
+    const d = hw.training_defaults;
+    if (!d) return;
+    setBatchSize(d.batch_size);
+    setGradAccum(d.gradient_accumulation_steps);
+    setMaxSeq(d.max_seq_length);
+    setQuant(d.quant);
+    setMethod(d.method);
+    setGradCkpt(d.gradient_checkpointing);
+    if (d.use_fused_kernels != null) setUseFusedKernels(d.use_fused_kernels);
+    if (d.use_fused_ce != null) setUseFusedCe(d.use_fused_ce);
+    if (hw.recommended_train_repo) setModelId(hw.recommended_train_repo);
+    setHwApplied(true);
+  }, [hw, hwApplied, pendingModel]);
 
   const start = async () => {
     setStarting(true);
     setLogs([]);
+    setTrainingMetrics([]);
+    setSystemMetrics([]);
+    setJobStatus("running");
     try {
       const res = await api.startTraining(
         {
@@ -50,7 +85,8 @@ export function TrainPage() {
           lora_alpha: loraAlpha,
           gradient_accumulation_steps: gradAccum,
           gradient_checkpointing: gradCkpt,
-          use_triton: useTriton,
+          use_triton: useFusedKernels,
+          use_fused_ce: useFusedCe,
           train_on_responses_only: trainResponsesOnly,
           use_rslora: useRsLora,
           packing,
@@ -59,10 +95,26 @@ export function TrainPage() {
         multiGpu,
       );
       setActiveJob(res.job_id);
+      setMetricsOpen(true);
       subscribeSSE(`/training/jobs/${res.job_id}/stream`, (event, data) => {
         if (event === "log") setLogs((l) => [...l, data]);
         if (event === "error") setLogs((l) => [...l, `ERROR: ${data}`]);
-        if (event === "status") api.listTrainingJobs().then(setJobs);
+        if (event === "metric") {
+          try {
+            const point = JSON.parse(data) as TrainingMetricPoint & SystemMetrics;
+            if (point.type === "system") {
+              setSystemMetrics((prev) => [...prev.slice(-499), point as SystemMetrics]);
+            } else {
+              setTrainingMetrics((prev) => [...prev.slice(-1999), point]);
+            }
+          } catch {
+            /* ignore malformed metric payloads */
+          }
+        }
+        if (event === "status") {
+          setJobStatus(data);
+          api.listTrainingJobs().then(setJobs);
+        }
       });
       api.listTrainingJobs().then(setJobs);
     } finally {
@@ -71,11 +123,29 @@ export function TrainPage() {
   };
 
   const chatModels = catalog.filter((m) => m.task === "chat" || m.task === "code");
+  const cachedRepoIds = new Set(localModels.map((m) => m.repo_id).filter(Boolean) as string[]);
 
   return (
     <div className="train-page">
+      <TrainingMetricsDashboard
+        jobId={activeJob}
+        open={metricsOpen}
+        onClose={() => setMetricsOpen(false)}
+        trainingPoints={trainingMetrics}
+        systemPoints={systemMetrics}
+        status={jobStatus}
+      />
+
       <h1 className="page-title">Training Studio</h1>
-          <p className="page-sub">QLoRA 4-bit, TRL SFTTrainer — then run <a href="/rl-quant">RL Quant</a> for adaptive GGUF export.</p>
+      <p className="page-sub">
+        QLoRA 4-bit, TRL SFTTrainer — settings below are pre-filled from local hardware detection (nothing leaves this machine).
+      </p>
+      {hw?.training_defaults && (
+        <div className="hw-inline-banner card">
+          <span className="trust-badge">{hw.tier_label}</span>
+          <span className="muted-text">{hw.training_defaults.note}</span>
+        </div>
+      )}
 
       <div className="train-layout">
         <div className="card">
@@ -83,12 +153,24 @@ export function TrainPage() {
           <label>Base model (HF repo ID)</label>
           <input list="train-models" value={modelId} onChange={(e) => setModelId(e.target.value)} />
           <datalist id="train-models">
+            {localModels.map((m) => (
+              <option key={m.id} value={m.repo_id || m.path}>
+                {m.name} (cached locally)
+              </option>
+            ))}
             {chatModels.map((m) => (
-              <option key={m.repo_id} value={m.repo_id}>{m.name}</option>
+              <option key={m.repo_id} value={m.repo_id}>
+                {m.name}{cachedRepoIds.has(m.repo_id) ? " · cached" : ""}
+              </option>
             ))}
           </datalist>
-          <label>Dataset path or HF dataset ID</label>
-          <input value={dataset} onChange={(e) => setDataset(e.target.value)} placeholder="./data/train.jsonl" />
+          {localModels.length > 0 && (
+            <p className="muted-text" style={{ marginTop: "0.35rem" }}>
+              {localModels.length} safetensors snapshot{localModels.length === 1 ? "" : "s"} ready on disk — training uses cached weights automatically.
+            </p>
+          )}
+          <label>Dataset</label>
+          <HfDatasetPicker value={dataset} onChange={setDataset} />
           <label>Dataset format</label>
           <select value={datasetFormat} onChange={(e) => setDatasetFormat(e.target.value)}>
             <option value="auto">Auto-detect</option>
@@ -153,12 +235,47 @@ export function TrainPage() {
             <label><input type="checkbox" checked={trainResponsesOnly} onChange={(e) => setTrainResponsesOnly(e.target.checked)} /> Train on responses only</label>
             <label><input type="checkbox" checked={useRsLora} onChange={(e) => setUseRsLora(e.target.checked)} /> Rank-stabilized LoRA (rsLoRA)</label>
             <label><input type="checkbox" checked={packing} onChange={(e) => setPacking(e.target.checked)} /> Sequence packing</label>
-            <label><input type="checkbox" checked={multiGpu} onChange={(e) => setMultiGpu(e.target.checked)} /> Multi-GPU</label>
-            <label><input type="checkbox" checked={useTriton} onChange={(e) => setUseTriton(e.target.checked)} /> Triton kernels</label>
+            <label>
+              <input
+                type="checkbox"
+                checked={multiGpu}
+                onChange={(e) => setMultiGpu(e.target.checked)}
+                disabled={hw?.training_defaults?.multi_gpu_available === false}
+              />
+              {" "}Multi-GPU
+            </label>
+            <label title={hw?.training_defaults?.kernel_backend ? `Backend: ${hw.training_defaults.kernel_backend}` : undefined}>
+              <input
+                type="checkbox"
+                checked={useFusedKernels}
+                onChange={(e) => setUseFusedKernels(e.target.checked)}
+                disabled={hw?.training_defaults?.use_fused_kernels === false}
+              />
+              {" "}Fused kernels (RMSNorm + SwiGLU)
+            </label>
+            <label>
+              <input
+                type="checkbox"
+                checked={useFusedCe}
+                onChange={(e) => setUseFusedCe(e.target.checked)}
+                disabled={hw?.training_defaults?.use_fused_ce === false}
+              />
+              {" "}Fused cross-entropy
+            </label>
           </div>
           <button className="btn btn-primary btn-lg" onClick={start} disabled={starting}>
             {starting ? "Starting…" : "Start training"}
           </button>
+          {activeJob && (
+            <button
+              type="button"
+              className="btn"
+              style={{ marginLeft: "0.75rem", marginTop: "0.5rem", width: "auto" }}
+              onClick={() => setMetricsOpen(true)}
+            >
+              Open metrics dashboard
+            </button>
+          )}
         </div>
       </div>
 

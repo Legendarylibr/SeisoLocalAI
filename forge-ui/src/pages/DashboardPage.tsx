@@ -1,0 +1,186 @@
+import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
+import { api, HardwareProfile, GuideStep, SystemMetrics } from "@/lib/api";
+import { chatPath } from "@/lib/chatModel";
+import { PageHeader } from "@/components/PageHeader";
+import {
+  IconChat,
+  IconTrain,
+  IconCompress,
+  IconInference,
+  IconChevronRight,
+  IconCpu,
+  IconMemory,
+  IconGpu,
+} from "@/components/Icons";
+
+const GOALS = [
+  { id: "chat", label: "Chat", path: "/chat", Icon: IconChat, desc: "Run models locally with encrypted session memory" },
+  { id: "train", label: "Train/Finetune", path: "/train", Icon: IconTrain, desc: "Fine-tune with LoRA on your hardware" },
+  { id: "compress", label: "Compress", path: "/compress", Icon: IconCompress, desc: "Quantize and shrink models" },
+  { id: "inference", label: "Local LLM Inference", path: "/chat", Icon: IconInference, desc: "Chat with local GGUF, Ollama, or MLX engines" },
+] as const;
+
+export function DashboardPage() {
+  const [hw, setHw] = useState<HardwareProfile | null>(null);
+  const [metrics, setMetrics] = useState<SystemMetrics | null>(null);
+  const [goal, setGoal] = useState<string>("chat");
+  const [steps, setSteps] = useState<GuideStep[]>([]);
+
+  useEffect(() => {
+    api.hardware().then(setHw).catch(console.error);
+    let id: ReturnType<typeof setInterval> | null = null;
+    const poll = () => {
+      if (document.hidden) return;
+      api.metrics().then(setMetrics).catch(() => {});
+    };
+    poll();
+    id = setInterval(poll, 3000);
+    const onVisibility = () => {
+      if (!document.hidden) poll();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      if (id) clearInterval(id);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, []);
+
+  useEffect(() => {
+    api.guide(goal).then((r) => setSteps(r.steps)).catch(console.error);
+  }, [goal]);
+
+  const vramTotal = hw?.gpus[0]?.vram_total_mb;
+  const vramUsed = hw?.gpus[0]?.vram_used_mb;
+
+  return (
+    <div className="dashboard">
+      <PageHeader
+        title="Dashboard"
+        subtitle="Hardware-aware guidance — everything stays on this machine, nothing is sent elsewhere."
+        badge={
+          <div className="header-badges">
+            <span className="trust-badge">
+              <span className="live-dot" />
+              Local only
+            </span>
+            {hw?.tier_label && <span className="trust-badge trust-badge-dim">{hw.tier_label}</span>}
+          </div>
+        }
+      />
+
+      {hw && (
+        <div className="hw-grid">
+          <div className="card hw-card hw-card-accent">
+            <div className="hw-card-icon"><IconCpu size={18} /></div>
+            <div className="hw-card-label">Processor</div>
+            <div className="hw-card-value">{hw.cpu_brand}</div>
+            <div className="hw-card-meta">{hw.cpu_cores} cores · {hw.arch}</div>
+          </div>
+          <div className="card hw-card">
+            <div className="hw-card-icon"><IconMemory size={18} /></div>
+            <div className="hw-card-label">Memory</div>
+            <div className="hw-card-value">{hw.ram_gb} GB RAM</div>
+            <div className="hw-card-meta">{hw.disk_free_gb} GB disk free</div>
+          </div>
+          <div className="card hw-card">
+            <div className="hw-card-icon"><IconInference size={18} /></div>
+            <div className="hw-card-label">Inference backend</div>
+            <div className="hw-card-value">{hw.backend.toUpperCase()}</div>
+            <div className="hw-card-meta">{hw.platform}</div>
+          </div>
+          {hw.gpus.length > 0 ? (
+            hw.gpus.map((g, i) => (
+              <div key={i} className="card hw-card">
+                <div className="hw-card-icon"><IconGpu size={18} /></div>
+                <div className="hw-card-label">GPU {hw.gpus.length > 1 ? i + 1 : ""}</div>
+                <div className="hw-card-value">{g.name}</div>
+                <div className="hw-card-meta">
+                  {g.vram_total_mb ? `${Math.round(g.vram_total_mb / 1024)} GB VRAM` : "Unified memory"}
+                </div>
+              </div>
+            ))
+          ) : (
+            <div className="card hw-card">
+              <div className="hw-card-icon"><IconGpu size={18} /></div>
+              <div className="hw-card-label">GPU</div>
+              <div className="hw-card-value">CPU / unified</div>
+              <div className="hw-card-meta">Use small models or Ollama</div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {metrics && (
+        <div className="card live-metrics-bar">
+          <span className="live-dot" />
+          <span className="live-metric">CPU <strong>{metrics.cpu_util_pct ?? "—"}%</strong></span>
+          <span className="live-metric">RAM <strong>{metrics.ram_used_pct}%</strong></span>
+          {metrics.gpus[0] && (
+            <>
+              <span className="live-metric">GPU <strong>{metrics.gpus[0].utilization_pct ?? "—"}%</strong></span>
+              {metrics.gpus[0].temperature_c != null && (
+                <span className="live-metric">{metrics.gpus[0].temperature_c}°C</span>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
+      <section className="goal-section">
+        <div className="section-head">
+          <h2 className="section-title">What do you want to do?</h2>
+          <p className="section-desc">Pick a workflow — recommendations adapt to your hardware.</p>
+        </div>
+        <div className="goal-grid">
+          {GOALS.map((g) => (
+            <Link
+              key={g.id}
+              to={g.id === "chat" || g.id === "inference" ? chatPath({ repo: hw?.recommended_chat_repo ?? null }) : g.path}
+              className={`goal-card${goal === g.id ? " goal-card-active" : ""}`}
+              onClick={() => setGoal(g.id)}
+            >
+              <span className="goal-icon-wrap">
+                <g.Icon size={20} />
+              </span>
+              <span className="goal-label">{g.label}</span>
+              <span className="goal-desc">{g.desc}</span>
+              <span className="goal-go">
+                Open
+                <IconChevronRight size={14} />
+              </span>
+            </Link>
+          ))}
+        </div>
+      </section>
+
+      {steps.length > 0 && (
+        <section className="card guide-section">
+          <div className="section-head">
+            <h2 className="section-title">Recommended next steps</h2>
+            <p className="section-desc">Tailored for your selected goal.</p>
+          </div>
+          <ol className="guide-list">
+            {steps.map((s, i) => (
+              <li key={i}>
+                <Link to={s.path} className="guide-link">
+                  <span className="guide-step-num">{String(i + 1).padStart(2, "0")}</span>
+                  <span className="guide-link-body">
+                    <strong>{s.title}</strong>
+                    <span>{s.detail}</span>
+                  </span>
+                  <IconChevronRight size={16} className="guide-link-arrow" />
+                </Link>
+              </li>
+            ))}
+          </ol>
+          {vramTotal != null && vramTotal > 0 && (
+            <p className="muted-text guide-vram">
+              VRAM headroom: ~{Math.max(0, Math.round((vramTotal - (vramUsed ?? 0)) / 1024))} GB available
+            </p>
+          )}
+        </section>
+      )}
+    </div>
+  );
+}

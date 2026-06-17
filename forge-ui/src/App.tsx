@@ -1,24 +1,58 @@
+import { lazy, Suspense } from "react";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { AuthProvider, useAuth } from "@/hooks/useAuth";
 import { Layout } from "@/components/Layout";
+import { SeisoLogoMark } from "@/components/SeisoLogo";
 import { AuthPage } from "@/pages/AuthPage";
-import { HubPage } from "@/pages/HubPage";
-import { ChatPage } from "@/pages/ChatPage";
-import { TrainPage } from "@/pages/TrainPage";
-import { ExportPage } from "@/pages/ExportPage";
-import { RLQuantPage } from "@/pages/RLQuantPage";
-import { CompressPage } from "@/pages/CompressPage";
-import { ImageCompressPage } from "@/pages/ImageCompressPage";
-import { RecipesPage } from "@/pages/RecipesPage";
-import { IntegrationsPage } from "@/pages/IntegrationsPage";
-import { SettingsPage } from "@/pages/SettingsPage";
 
-function Guard({ children }: { children: React.ReactNode }) {
+const DashboardPage = lazy(() => import("@/pages/DashboardPage").then((m) => ({ default: m.DashboardPage })));
+const HubPage = lazy(() => import("@/pages/HubPage").then((m) => ({ default: m.HubPage })));
+const ChatPage = lazy(() => import("@/pages/ChatPage").then((m) => ({ default: m.ChatPage })));
+const TrainPage = lazy(() => import("@/pages/TrainPage").then((m) => ({ default: m.TrainPage })));
+const ExportPage = lazy(() => import("@/pages/ExportPage").then((m) => ({ default: m.ExportPage })));
+const RLQuantPage = lazy(() => import("@/pages/RLQuantPage").then((m) => ({ default: m.RLQuantPage })));
+const CompressPage = lazy(() => import("@/pages/CompressPage").then((m) => ({ default: m.CompressPage })));
+const ImageCompressPage = lazy(() =>
+  import("@/pages/ImageCompressPage").then((m) => ({ default: m.ImageCompressPage })),
+);
+const RecipesPage = lazy(() => import("@/pages/RecipesPage").then((m) => ({ default: m.RecipesPage })));
+const IntegrationsPage = lazy(() =>
+  import("@/pages/IntegrationsPage").then((m) => ({ default: m.IntegrationsPage })),
+);
+const SettingsPage = lazy(() => import("@/pages/SettingsPage").then((m) => ({ default: m.SettingsPage })));
+
+function PageLoading() {
+  return (
+    <div className="app-loading">
+      <div className="app-loading-mark">
+        <SeisoLogoMark className="brand-logo-img app-loading-logo" />
+      </div>
+      <div className="app-loading-bar" aria-hidden />
+      <p className="app-loading-text">Seiso Local AI</p>
+    </div>
+  );
+}
+
+function Guard({ children, fullBleed = false }: { children: React.ReactNode; fullBleed?: boolean }) {
   const { user, loading, needsOnboarding } = useAuth();
-  if (loading) return <div className="auth-page">Loading…</div>;
+  if (loading) {
+    return (
+      <div className="app-loading">
+        <div className="app-loading-mark">
+          <SeisoLogoMark className="brand-logo-img app-loading-logo" />
+        </div>
+        <div className="app-loading-bar" aria-hidden />
+        <p className="app-loading-text">Seiso Local AI</p>
+      </div>
+    );
+  }
   if (!user && !needsOnboarding) return <AuthPage />;
   if (needsOnboarding && !user) return <AuthPage />;
-  return <Layout>{children}</Layout>;
+  return (
+    <Layout fullBleed={fullBleed}>
+      <Suspense fallback={<PageLoading />}>{children}</Suspense>
+    </Layout>
+  );
 }
 
 export function App() {
@@ -26,8 +60,9 @@ export function App() {
     <AuthProvider>
       <BrowserRouter>
         <Routes>
-          <Route path="/" element={<Guard><HubPage /></Guard>} />
-          <Route path="/chat" element={<Guard><ChatPage /></Guard>} />
+          <Route path="/" element={<Guard><DashboardPage /></Guard>} />
+          <Route path="/hub" element={<Guard><HubPage /></Guard>} />
+          <Route path="/chat" element={<Guard fullBleed><ChatPage /></Guard>} />
           <Route path="/train" element={<Guard><TrainPage /></Guard>} />
           <Route path="/export" element={<Guard><ExportPage /></Guard>} />
           <Route path="/rl-quant" element={<Guard><RLQuantPage /></Guard>} />

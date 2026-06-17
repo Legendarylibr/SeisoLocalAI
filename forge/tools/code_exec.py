@@ -16,6 +16,12 @@ from forge.security.audit import audit_event
 
 _BLOCKED_MODULES = frozenset(
     {
+        "operator",
+        "_operator",
+        "functools",
+        "_functools",
+        "copy",
+        "weakref",
         "os",
         "subprocess",
         "socket",
@@ -223,7 +229,7 @@ def execute_code(code: str, sandbox_root: str | None = None) -> str:
 
     wrapped = textwrap.dedent(
         f"""
-        import json, sys, math, re, statistics, datetime, collections, itertools, functools
+        import json, sys, math, re, statistics, datetime, collections, itertools
         _SAFE_BUILTINS = {{
             "print": print, "len": len, "range": range, "enumerate": enumerate,
             "zip": zip, "map": map, "filter": filter, "sorted": sorted, "sum": sum,

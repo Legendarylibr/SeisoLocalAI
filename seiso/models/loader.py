@@ -37,7 +37,7 @@ class LoadOptions:
 
 
 def detect_backend() -> Backend:
-    """Pick the best available backend for the current platform."""
+    """Pick the best available backend for inference."""
     try:
         import torch
 
@@ -56,11 +56,35 @@ def detect_backend() -> Backend:
     return Backend.CPU
 
 
-def load_model(options: LoadOptions) -> tuple[Any, Any]:
+def detect_training_device() -> str:
+    """Resolve PyTorch device string for training (never MLX)."""
+    try:
+        import torch
+    except ImportError:
+        return "cpu"
+
+    if torch.cuda.is_available():
+        return "cuda"
+    if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        return "mps"
+    return "cpu"
+
+
+def load_model(options: LoadOptions, *, for_training: bool = False) -> tuple[Any, Any]:
     """
     Load model + tokenizer/processor.
     Returns (model, tokenizer) — actual types depend on backend.
+
+    Training always uses PyTorch (CUDA, ROCm, MPS, or CPU) — never MLX.
     """
+    if for_training:
+        from seiso.models.torch_loader import load_torch
+
+        device = detect_training_device()
+        backend = Backend.TORCH if device in ("cuda", "mps") else Backend.CPU
+        logger.info("Loading %s for training via torch (%s)", options.model_id, device)
+        return load_torch(options, backend=backend, device=device)
+
     backend = detect_backend()
     logger.info("Loading %s via %s", options.model_id, backend.value)
 

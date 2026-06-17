@@ -8,7 +8,8 @@ from typing import Any
 
 from forge.orchestrators.base import Orchestrator
 from forge.services.user_paths import assert_user_path
-from seiso.export.formats import ExportFormat, ExportOptions, export_checkpoint
+from seiso.export.model_card import HubModelMetadata
+from seiso.export.pipeline import prepare_export, run_export_plan
 from seiso.security import SecurityError
 
 
@@ -24,16 +25,9 @@ class ExportOrchestrator(Orchestrator):
         except SecurityError as exc:
             raise PermissionError(str(exc)) from exc
 
-        formats = [ExportFormat(f) for f in payload.get("formats", ["merged"])]
-        options = ExportOptions(
-            checkpoint=checkpoint,
-            output_dir=Path(payload.get("output_dir", self.sandbox_root / "exports" / user_id / job_id)),
-            formats=formats,
-            gguf_quantizations=payload.get("gguf_quantizations", ["q4_k_m"]),
-            hub_repo=payload.get("hub_repo"),
-            hub_token=payload.get("hub_token"),
-            sandbox_root=self.sandbox_root,
-        )
+        hub_meta_raw = payload.get("hub_metadata")
+        hub_metadata = HubModelMetadata(**hub_meta_raw) if hub_meta_raw else None
+        output_dir = Path(payload.get("output_dir", self.sandbox_root / "exports" / user_id / job_id))
 
         self._emit_log(job_id, f"Exporting checkpoint: {checkpoint.name}")
 
@@ -42,10 +36,35 @@ class ExportOrchestrator(Orchestrator):
         def on_log(msg: str) -> None:
             self._emit_log(job_id, msg)
 
+        plan = prepare_export(
+            checkpoint=checkpoint,
+            output_dir=output_dir,
+            formats=payload.get("formats"),
+            profile=payload.get("profile"),
+            gguf_quantizations=payload.get("gguf_quantizations"),
+            hub_repo=payload.get("hub_repo"),
+            hub_token=payload.get("hub_token"),
+            hub_metadata=hub_metadata,
+            on_log=on_log,
+        )
+
+        if plan.precheck and not plan.precheck.ok:
+            from seiso.export.hub_precheck import assert_hub_precheck_ok
+
+            assert_hub_precheck_ok(plan.precheck)
+
+        for warning in plan.warnings:
+            self._emit_log(job_id, f"Warning: {warning}")
+
         results = await loop.run_in_executor(
             None,
-            lambda: export_checkpoint(options, on_log=on_log),
+            lambda: run_export_plan(
+                plan,
+                hub_token=payload.get("hub_token"),
+                sandbox_root=self.sandbox_root,
+                on_log=on_log,
+            ),
         )
         paths = {k: str(v) for k, v in results.items()}
         self._emit_log(job_id, "Export complete")
-        return {"outputs": paths}
+        return {"outputs": paths, "profile": plan.profile, "checkpoint_kind": plan.checkpoint_kind}

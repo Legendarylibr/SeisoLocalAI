@@ -11,14 +11,16 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from forge.api.deps import clear_dependency_caches, get_db
-from forge.api.routes import auth, autodefense, compress, export, image_compress, inference, knowledge, mcp_servers, models, openai, providers, recipes, rl_quant, training
+from forge.api.routes import auth, autodefense, compress, export, image_compress, inference, knowledge, mcp_servers, models, openai, providers, recipes, rl_quant, system, training
 from forge.api.routes import settings as settings_routes
 from forge.config import get_settings
+from seiso.models.hf_env import configure_hf_hub_cache
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
+    configure_hf_hub_cache(settings.data_dir)
     settings.ensure_dirs()
     settings.write_runtime_config()
     yield
@@ -30,7 +32,7 @@ async def lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     cfg = get_settings()
     app = FastAPI(
-        title="Seiso Forge",
+        title="Seiso",
         description="Local AI platform API",
         version="0.1.0",
         lifespan=lifespan,
@@ -49,16 +51,19 @@ def create_app() -> FastAPI:
     @app.middleware("http")
     async def security_headers(request: Request, call_next):
         from forge.security.auth import RateLimiter
+        from forge.security.client_ip import client_ip
         from forge.security.csrf import validate_csrf
 
-        if not hasattr(app.state, "rate_limiter"):
-            app.state.rate_limiter = RateLimiter(get_settings().rate_limit)
-        client = request.client.host if request.client else "unknown"
-        if request.url.path not in ("/health", "/api/health", "/auth/status", "/api/auth/status"):
-            try:
-                app.state.rate_limiter.check(client)
-            except HTTPException as exc:
-                return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
+        settings = get_settings()
+        if settings.rate_limit_enabled:
+            if not hasattr(app.state, "rate_limiter"):
+                app.state.rate_limiter = RateLimiter(settings.rate_limit)
+            client = client_ip(request)
+            if request.url.path not in ("/health", "/api/health", "/auth/status", "/api/auth/status"):
+                try:
+                    app.state.rate_limiter.check(client)
+                except HTTPException as exc:
+                    return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
         if not validate_csrf(request):
             return JSONResponse({"detail": "CSRF validation failed"}, status_code=403)
         response: Response = await call_next(request)
@@ -90,6 +95,7 @@ def create_app() -> FastAPI:
     app.include_router(providers.router, prefix=prefix)
     app.include_router(mcp_servers.router, prefix=prefix)
     app.include_router(autodefense.router, prefix=prefix)
+    app.include_router(system.router, prefix=prefix)
     app.include_router(settings_routes.router, prefix=prefix)
     app.include_router(openai.router)  # /v1/chat/completions — no /api prefix (OpenAI compat)
 

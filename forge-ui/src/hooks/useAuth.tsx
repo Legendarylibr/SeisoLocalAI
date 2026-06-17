@@ -5,8 +5,8 @@ type AuthState = {
   user: AuthUser | null;
   loading: boolean;
   needsOnboarding: boolean;
-  login: (email: string, password: string) => Promise<void>;
-  register: (email: string, password: string, name?: string) => Promise<void>;
+  login: (password: string) => Promise<void>;
+  register: (password: string) => Promise<void>;
   logout: () => Promise<void>;
 };
 
@@ -39,14 +39,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     })();
   }, []);
 
-  const login = async (email: string, password: string) => {
-    const res = await api.login(email, password);
+  const login = async (password: string) => {
+    const res = await api.login(password);
     setUser(res.user);
     setNeedsOnboarding(false);
   };
 
-  const register = async (email: string, password: string, name?: string) => {
-    const res = await api.register(email, password, name);
+  const register = async (password: string) => {
+    const res = await api.register(password);
     setUser(res.user);
     setNeedsOnboarding(false);
   };

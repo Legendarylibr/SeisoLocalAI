@@ -27,7 +27,7 @@ async def test_csrf_blocks_cookie_mutation_without_header(app):
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         reg = await client.post(
             "/api/auth/register",
-            json={"email": "admin@local.dev", "password": "securepass1"},
+            json={"password": "securepass1"},
         )
         assert reg.status_code == 201
 
@@ -43,7 +43,7 @@ async def test_csrf_allows_cookie_mutation_with_header(app):
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         reg = await client.post(
             "/api/auth/register",
-            json={"email": "admin@local.dev", "password": "securepass1"},
+            json={"password": "securepass1"},
         )
         assert reg.status_code == 201
 
@@ -61,7 +61,7 @@ async def test_bearer_auth_bypasses_csrf(app):
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         reg = await client.post(
             "/api/auth/register",
-            json={"email": "admin@local.dev", "password": "securepass1"},
+            json={"password": "securepass1"},
         )
         token = reg.json()["access_token"]
 
@@ -79,7 +79,7 @@ async def test_cookie_session_auth(app):
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         reg = await client.post(
             "/api/auth/register",
-            json={"email": "cookie@local.dev", "password": "securepass1"},
+            json={"password": "securepass1"},
         )
         assert reg.status_code == 201
         assert client.cookies.get("seiso_token")
@@ -87,36 +87,39 @@ async def test_cookie_session_auth(app):
 
         me = await client.get("/api/auth/me")
         assert me.status_code == 200
-        assert me.json()["email"] == "cookie@local.dev"
+        assert me.json()["display_name"] == "Admin"
 
 
 @pytest.mark.asyncio
-async def test_login_rate_limit(app, monkeypatch):
+async def test_login_rate_limit(monkeypatch):
+    monkeypatch.setenv("SEISO_ALLOW_REMOTE", "true")
     monkeypatch.setenv("SEISO_RATE_LIMIT", "1000")
     clear_dependency_caches()
+    app = create_app()
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         await client.post(
             "/api/auth/register",
-            json={"email": "admin@local.dev", "password": "securepass1"},
+            json={"password": "securepass1"},
         )
 
         for _ in range(10):
             res = await client.post(
                 "/api/auth/login",
-                json={"email": "admin@local.dev", "password": "wrong"},
+                json={"password": "wrong"},
             )
             assert res.status_code == 401
 
         res = await client.post(
             "/api/auth/login",
-            json={"email": "admin@local.dev", "password": "wrong"},
+            json={"password": "wrong"},
         )
         assert res.status_code == 429
 
 
 @pytest.mark.asyncio
 async def test_global_rate_limit(monkeypatch):
+    monkeypatch.setenv("SEISO_ALLOW_REMOTE", "true")
     monkeypatch.setenv("SEISO_RATE_LIMIT", "3")
     clear_dependency_caches()
     app = create_app()
@@ -147,7 +150,7 @@ async def test_settings_includes_security_posture(app):
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         reg = await client.post(
             "/api/auth/register",
-            json={"email": "admin@local.dev", "password": "securepass1"},
+            json={"password": "securepass1"},
         )
         token = reg.json()["access_token"]
 
@@ -157,3 +160,18 @@ async def test_settings_includes_security_posture(app):
         assert sec["bind_localhost"] is True
         assert sec["db_encrypted"] is True
         assert sec["allow_tools"] is False
+        assert sec["rate_limit_enabled"] is False
+
+
+@pytest.mark.asyncio
+async def test_no_rate_limit_on_localhost(monkeypatch):
+    monkeypatch.setenv("SEISO_ALLOW_REMOTE", "false")
+    monkeypatch.setenv("SEISO_RATE_LIMIT", "3")
+    clear_dependency_caches()
+    app = create_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        for _ in range(10):
+            res = await client.get("/api/models")
+            assert res.status_code == 401
+            assert res.status_code != 429

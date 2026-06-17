@@ -1,46 +1,126 @@
-import { NavLink } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { NavLink, useLocation } from "react-router-dom";
+import { SystemMonitor } from "@/components/SystemMonitor";
+import { IconMenu, NavIcon, type NavIconName } from "@/components/Icons";
+import { SeisoLogoMark } from "@/components/SeisoLogo";
+import { useAuth } from "@/hooks/useAuth";
 import "../styles.css";
 
-const NAV = [
-  { to: "/", label: "Hub", end: true },
-  { to: "/chat", label: "Chat" },
-  { to: "/train", label: "Train" },
-  { to: "/rl-quant", label: "RL Quant" },
-  { to: "/compress", label: "Compress" },
-  { to: "/image-compress", label: "Image Compress" },
-  { to: "/export", label: "Export" },
-  { to: "/recipes", label: "Recipes" },
-  { to: "/integrations", label: "Integrations" },
-  { to: "/settings", label: "Settings" },
+type NavItem = { to: string; label: string; icon: NavIconName; end?: boolean };
+
+const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
+  {
+    label: "Overview",
+    items: [{ to: "/", label: "Dashboard", icon: "dashboard", end: true }],
+  },
+  {
+    label: "Models",
+    items: [
+      { to: "/hub", label: "Hub", icon: "hub" },
+      { to: "/chat", label: "Chat", icon: "chat" },
+    ],
+  },
+  {
+    label: "Studio",
+    items: [
+      { to: "/train", label: "Train/Finetune", icon: "train" },
+      { to: "/rl-quant", label: "RL Quant", icon: "quant" },
+      { to: "/compress", label: "Compress", icon: "compress" },
+      { to: "/image-compress", label: "Image", icon: "image" },
+      { to: "/export", label: "Export", icon: "export" },
+      { to: "/recipes", label: "Recipes", icon: "recipes" },
+    ],
+  },
+  {
+    label: "Platform",
+    items: [{ to: "/integrations", label: "Integrations", icon: "integrations" }],
+  },
 ];
 
-export function Layout({ children }: { children: React.ReactNode }) {
+export function Layout({ children, fullBleed = false }: { children: React.ReactNode; fullBleed?: boolean }) {
+  const location = useLocation();
+  const { logout } = useAuth();
+  const isChat = location.pathname === "/chat";
+  const [navOpen, setNavOpen] = useState(false);
+
+  useEffect(() => {
+    setNavOpen(false);
+  }, [location.pathname]);
+
   return (
-    <div className="layout">
-      <aside className="sidebar">
-        <div className="brand">
-          <span className="brand-mark">◈</span>
-          <span>Seiso Forge</span>
+    <div className={`layout${fullBleed ? " layout-fullbleed" : ""}`}>
+      <button
+        type="button"
+        className="nav-toggle"
+        onClick={() => setNavOpen((v) => !v)}
+        aria-label="Toggle navigation"
+      >
+        <IconMenu size={18} />
+      </button>
+
+      <button
+        type="button"
+        className={`sidebar-backdrop${navOpen ? " visible" : ""}`}
+        onClick={() => setNavOpen(false)}
+        aria-label="Close navigation"
+      />
+
+      <aside className={`sidebar${navOpen ? " sidebar-open" : ""}`}>
+        <div className="sidebar-mascot" aria-hidden>
+          <SeisoLogoMark className="sidebar-mascot-img" />
         </div>
-        <nav>
-          {NAV.map(({ to, label, end }) => (
-            <NavLink
-              key={to}
-              to={to}
-              end={end}
-              className={({ isActive }) => (isActive ? "active-nav" : undefined)}
-            >
-              {label}
-            </NavLink>
+
+        <NavLink to="/" className="brand sidebar-elevated" style={{ textDecoration: "none", color: "inherit" }}>
+          <span className="brand-mark">
+            <SeisoLogoMark className="brand-logo-img" />
+          </span>
+          <span className="brand-text">
+            <span className="brand-name">Seiso</span>
+            <span className="brand-tagline">Local AI platform</span>
+          </span>
+        </NavLink>
+
+        <div className="sidebar-nav sidebar-elevated">
+          {NAV_GROUPS.map((group) => (
+            <div key={group.label} className="nav-group">
+              <div className="nav-group-label">{group.label}</div>
+              <nav>
+                {group.items.map(({ to, label, icon, end }) => (
+                  <NavLink
+                    key={to}
+                    to={to}
+                    end={end}
+                    className={({ isActive }) => `nav-link${isActive ? " active-nav" : ""}`}
+                  >
+                    <span className="nav-link-icon">
+                      <NavIcon name={icon} size={16} />
+                    </span>
+                    <span className="nav-link-label">{label}</span>
+                  </NavLink>
+                ))}
+              </nav>
+            </div>
           ))}
-        </nav>
-        <div className="sidebar-foot">
-          <NavLink to="/settings" className="security-link">
-            <span aria-hidden>◈</span> Security
+        </div>
+
+        <div className="sidebar-foot sidebar-elevated">
+          <NavLink
+            to="/settings"
+            className={({ isActive }) => `sidebar-foot-link${isActive ? " active-nav" : ""}`}
+          >
+            Settings
           </NavLink>
+          <span className="sidebar-foot-sep" aria-hidden>
+            /
+          </span>
+          <button type="button" className="sidebar-foot-link sidebar-foot-btn" onClick={() => logout()}>
+            Sign out
+          </button>
         </div>
       </aside>
-      <main className="content">{children}</main>
+
+      <main className={`content${isChat ? " content-chat" : ""}`}>{children}</main>
+      <SystemMonitor />
     </div>
   );
 }

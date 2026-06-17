@@ -22,7 +22,7 @@ def forge(
     port: int | None = typer.Option(None, help="Port (default: 8765)"),
     reload: bool = typer.Option(False, help="Dev auto-reload"),
 ) -> None:
-    """Launch Seiso Forge web server (UI + API)."""
+    """Launch Seiso web server (UI + API)."""
     import uvicorn
 
     from forge.config import get_settings
@@ -30,7 +30,7 @@ def forge(
     settings = get_settings()
     bind_host = host or settings.host
     bind_port = port or settings.port
-    console.print(f"[bold green]Seiso Forge[/] → http://{bind_host}:{bind_port}")
+    console.print(f"[bold green]Seiso[/] → http://{bind_host}:{bind_port}")
     uvicorn.run(
         "forge.main:create_app",
         factory=True,
@@ -38,6 +38,8 @@ def forge(
         port=bind_port,
         reload=reload,
         log_level="info",
+        proxy_headers=settings.trust_proxy,
+        forwarded_allow_ips="127.0.0.1,::1" if settings.trust_proxy else None,
     )
 
 
@@ -95,24 +97,42 @@ def chat(
 @app.command()
 def export_cmd(
     checkpoint: str = typer.Option(..., help="Checkpoint directory"),
-    formats: str = typer.Option("merged", help="Comma-separated: merged,lora,gguf"),
+    formats: str = typer.Option("merged", help="Comma-separated: merged,lora,full,gguf"),
+    profile: str | None = typer.Option(None, help="Export profile: lora_bundle, full_bundle, inference, ..."),
     hub_repo: str | None = typer.Option(None, help="Hugging Face repo to push"),
+    precheck_only: bool = typer.Option(False, help="Run Hub precheck without exporting"),
 ) -> None:
-    """Export checkpoint to merged/GGUF/LoRA."""
+    """Export checkpoint to merged/GGUF/LoRA/full fine-tune."""
     from forge.config import get_settings
-    from seiso.export.formats import ExportFormat, ExportOptions, export_checkpoint
+    from seiso.export.pipeline import auto_export_after_training, prepare_export, profile_catalog, run_export_plan
 
-    fmt_list = [ExportFormat(f.strip()) for f in formats.split(",")]
     settings = get_settings()
-    opts = ExportOptions(
-        checkpoint=Path(checkpoint),
-        output_dir=settings.exports_dir,
+    ckpt = Path(checkpoint)
+    fmt_list = [f.strip() for f in formats.split(",")] if not profile else None
+
+    if profile and profile == "list":
+        for entry in profile_catalog():
+            console.print(f"  [cyan]{entry['id']}[/] → {', '.join(entry['formats'])}")
+        return
+
+    plan = prepare_export(
+        checkpoint=ckpt,
+        output_dir=settings.exports_dir / ckpt.name,
         formats=fmt_list,
+        profile=profile,
         hub_repo=hub_repo,
         hub_token=settings.hf_token or None,
-        sandbox_root=settings.data_dir,
+        on_log=lambda m: console.print(m),
     )
-    results = export_checkpoint(opts, on_log=lambda m: console.print(m))
+
+    if precheck_only:
+        if plan.precheck:
+            console.print(plan.precheck.to_dict())
+        else:
+            console.print("No Hub precheck requested (set --hub-repo)")
+        return
+
+    results = run_export_plan(plan, hub_token=settings.hf_token or None, sandbox_root=settings.data_dir)
     for k, v in results.items():
         console.print(f"  [green]{k}[/] → {v}")
 

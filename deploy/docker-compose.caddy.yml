@@ -1,0 +1,26 @@
+# Run Caddy in Docker while Seiso Forge runs on the host.
+#
+#   cp deploy/env.https.example .env   # edit domain + CORS
+#   seiso forge                        # host, port 8765
+#   cd deploy && docker compose -f docker-compose.caddy.yml up -d
+#
+# Edit caddy/Caddyfile domain before starting.
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./caddy/Caddyfile.docker:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  caddy_data:
+  caddy_config:

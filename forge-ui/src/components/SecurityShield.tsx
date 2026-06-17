@@ -1,4 +1,5 @@
 import { SecurityPosture } from "@/lib/api";
+import { IconShield } from "@/components/Icons";
 
 type Item = {
   label: string;
@@ -51,8 +52,10 @@ function postureItems(s: SecurityPosture): Item[] {
     },
     {
       label: "Rate limiting",
-      ok: true,
-      detail: `${s.rate_limit} requests/min per IP`,
+      ok: !s.rate_limit_enabled || s.rate_limit > 0,
+      detail: s.rate_limit_enabled
+        ? `${s.rate_limit} requests/min per IP`
+        : "Disabled for localhost-only mode",
     },
   ];
 }
@@ -71,7 +74,9 @@ export function SecurityShield({
   return (
     <div className={`security-shield${compact ? " security-shield-compact" : ""}`}>
       <div className="security-shield-header">
-        <span className="security-shield-icon" aria-hidden>◈</span>
+        <span className="security-shield-icon" aria-hidden>
+          <IconShield size={22} />
+        </span>
         <div>
           <div className="security-shield-title">Security posture</div>
           <div className="security-shield-score">

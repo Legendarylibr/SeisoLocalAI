@@ -17,6 +17,7 @@ from forge.config import ForgeSettings, get_settings
 from forge.db.store import Database
 from forge.orchestrators.inference import InferenceOrchestrator
 from forge.security.auth import get_current_user_id
+from forge.security.autodefense import defense_enabled, scan_output
 from forge.services.models import resolve_model_path
 
 router = APIRouter(tags=["openai"])
@@ -112,10 +113,13 @@ async def chat_completions(
     use_local_stream = body.stream and not body.tools
 
     if use_local_stream:
+        use_defense = defense_enabled(settings)
 
         async def sse_stream():
+            parts: list[str] = []
             try:
                 async for token in orchestrator.stream_local(payload):
+                    parts.append(token)
                     chunk = {
                         "id": completion_id,
                         "object": "chat.completion.chunk",
@@ -124,6 +128,24 @@ async def chat_completions(
                         "choices": [{"index": 0, "delta": {"content": token}, "finish_reason": None}],
                     }
                     yield f"data: {json.dumps(chunk)}\n\n"
+                if use_defense and parts:
+                    content, _ = await scan_output(
+                        payload.get("messages", []),
+                        "".join(parts),
+                        session_id=payload.get("thread_id"),
+                        user_id=user_id,
+                        settings=settings,
+                    )
+                    if content != "".join(parts):
+                        # Defense sanitized output — emit replacement as final delta
+                        chunk = {
+                            "id": completion_id,
+                            "object": "chat.completion.chunk",
+                            "created": created,
+                            "model": body.model,
+                            "choices": [{"index": 0, "delta": {"content": content}, "finish_reason": None}],
+                        }
+                        yield f"data: {json.dumps(chunk)}\n\n"
                 final = {
                     "id": completion_id,
                     "object": "chat.completion.chunk",

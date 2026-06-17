@@ -19,7 +19,7 @@ from forge.security.audit import audit_event
 from forge.security.auth import get_current_user_id
 from forge.services.jobs import assert_job_owner
 from forge.services.model_registry import register_export_outputs
-from forge.services.user_paths import assert_user_path
+from forge.services.user_paths import assert_user_config_file, assert_user_path
 from seiso.compress.config_builder import PRESETS, STAGE_ORDER
 from seiso.security import SecurityError
 
@@ -56,6 +56,8 @@ class CompressStartRequest(BaseModel):
     seed: int = 42
     deterministic: bool = True
     export_model_name: str = "seiso-compressed"
+    calibration_samples: int | None = None
+    max_train_samples: int | None = None
     link_training_job_id: str | None = None
 
 
@@ -104,11 +106,13 @@ async def start_compress(
             if config.get("preset") == "smoke":
                 config["preset"] = "prune_recover"
 
-    if config.get("model_dir"):
-        try:
+    try:
+        if body.config_file:
+            assert_user_config_file(settings.data_dir, user_id, body.config_file)
+        if config.get("model_dir"):
             assert_user_path(settings.data_dir, user_id, config["model_dir"])
-        except SecurityError as exc:
-            raise HTTPException(403, str(exc)) from exc
+    except SecurityError as exc:
+        raise HTTPException(403, str(exc)) from exc
 
     await db.create_compress_job(user_id, config, job_id=job_id)
     orchestrator.create_job(job_id=job_id, user_id=user_id)

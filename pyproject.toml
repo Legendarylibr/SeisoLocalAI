@@ -42,10 +42,15 @@ train = [
   "trl>=0.8",
   "sentence-transformers>=3.0",
 ]
+mlx = [
+  "mlx-lm>=0.19; platform_system == 'Darwin'",
+]
 cuda = [
   "triton>=2.2; platform_system == 'Linux'",
   "flash-attn>=2.5; platform_system == 'Linux'",
 ]
+# AMD ROCm: install PyTorch ROCm wheel + triton; native .cu kernels are NVIDIA-only.
+# Seiso auto-selects Triton on AMD via seiso.kernels.platform.detect_gpu().
 forge = [
   "fastapi>=0.111",
   "uvicorn[standard]>=0.29",
@@ -96,6 +101,7 @@ dev = [
 [project.scripts]
 seiso = "seiso_cli.main:app"
 seiso-train-worker = "seiso.training.worker:main"
+seiso-bench-kernels = "seiso.kernels.benchmark:main"
 
 [project.urls]
 Homepage = "https://github.com/seiso-ai/seiso"

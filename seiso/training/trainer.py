@@ -8,9 +8,11 @@ import logging
 import os
 from datetime import datetime, timezone
 from pathlib import Path
+from collections.abc import Callable
 from typing import Any
 
-from seiso.kernels.hooks import apply_training_kernels, clear_kernel_patches
+from seiso.kernels.hooks import apply_training_kernels
+from seiso.kernels.lifecycle import release_training_memory
 from seiso.models.fast_model import FastModel
 from seiso.security import resolve_data_dir
 from seiso.training.config import QuantMode, TrainConfig, TrainMethod
@@ -26,17 +28,20 @@ logger = logging.getLogger(__name__)
 
 
 class SeisoTrainer:
-    def __init__(self, config: TrainConfig) -> None:
+    def __init__(self, config: TrainConfig, *, on_metric: Callable[[dict[str, Any]], None] | None = None) -> None:
         self.config = config
         self.config.output_dir.mkdir(parents=True, exist_ok=True)
         self._kernel_meta: dict = {}
         self._fast: FastModel | None = None
+        self._on_metric = on_metric
+        self._metrics_callback = None
 
     def run(self) -> Path:
         cfg = self.config
         layout = detect_gpus()
         multi_gpu = bool(cfg.multi_gpu or cfg.extra.get("multi_gpu", False)) and layout.use_ddp
         use_triton = cfg.use_triton
+        use_fused_ce = cfg.use_fused_ce
 
         logger.info(
             "Training %s | method=%s quant=%s | world_size=%d",
@@ -56,7 +61,8 @@ class SeisoTrainer:
 
         model, tokenizer = self._load_model()
         if use_triton:
-            self._kernel_meta = apply_training_kernels(model, use_triton=True)
+            self._kernel_meta = apply_training_kernels(model, use_cuda=True, use_triton=True)
+            self._kernel_meta["fused_ce"] = use_fused_ce
 
         if cfg.method == TrainMethod.LORA:
             model = self._apply_lora(model)
@@ -108,6 +114,16 @@ class SeisoTrainer:
                 eval_ds = tokenized_eval
             data_collator = self._make_collator(tokenizer)
 
+        from seiso.training.metrics import build_metrics_callback
+
+        emit_stdout = multi_gpu or bool(os.environ.get("SEISO_EMIT_METRICS_STDOUT"))
+        metrics_cb = build_metrics_callback(
+            cfg.output_dir,
+            on_metric=self._on_metric,
+            emit_stdout=emit_stdout,
+        )
+        self._metrics_callback = metrics_cb
+
         trainer = self._build_trainer(
             model,
             tokenizer,
@@ -117,6 +133,7 @@ class SeisoTrainer:
             multi_gpu,
             data_collator=data_collator,
             dataset_text_field=dataset_text_field,
+            callbacks=[metrics_cb],
         )
 
         if cfg.resume_from:
@@ -126,8 +143,7 @@ class SeisoTrainer:
 
         is_main = int(os.environ.get("LOCAL_RANK", os.environ.get("RANK", "0"))) == 0
         if not is_main:
-            clear_kernel_patches()
-            self._cleanup_gpu(model)
+            release_training_memory(model)
             logger.info("Non-main rank finished training (no checkpoint write)")
             return cfg.output_dir
 
@@ -135,8 +151,7 @@ class SeisoTrainer:
         trainer.save_model(str(out))
         tokenizer.save_pretrained(str(out))
         self._write_manifest(out, layout, multi_gpu, detected_fmt.value)
-        clear_kernel_patches()
-        self._cleanup_gpu(model)
+        release_training_memory(model)
         logger.info("Training complete: %s", out)
         return out
 
@@ -222,12 +237,18 @@ class SeisoTrainer:
         *,
         data_collator=None,
         dataset_text_field: str | None = None,
+        callbacks=None,
     ):
         cfg = self.config
         import torch
 
-        use_bf16 = torch.cuda.is_available() and torch.cuda.is_bf16_supported() and cfg.quant != QuantMode.INT16
-        use_fp16 = cfg.quant == QuantMode.INT16 and not use_bf16
+        use_bf16 = False
+        use_fp16 = False
+        if torch.cuda.is_available():
+            use_bf16 = torch.cuda.is_bf16_supported() and cfg.quant != QuantMode.INT16
+            use_fp16 = cfg.quant == QuantMode.INT16 and not use_bf16
+        elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            use_fp16 = cfg.quant == QuantMode.INT16
         optim = "paged_adamw_8bit" if cfg.quant == QuantMode.INT4 else "adamw_torch"
 
         base = {
@@ -266,6 +287,8 @@ class SeisoTrainer:
             packing=cfg.packing,
             dataset_text_field=dataset_text_field,
             data_collator=data_collator,
+            use_fused_ce=cfg.use_fused_ce,
+            callbacks=callbacks,
         )
 
     def _train_embedding(self) -> Path:

@@ -1,0 +1,8 @@
+# Wrap an HTTP-only OpenAI-compatible API with HTTPS so Seiso accepts it as a provider.
+# Use provider base_url: https://llm-proxy.example.com/v1
+#
+# Does NOT bypass private-IP / SSRF rules — the proxy hostname must resolve to a public IP.
+
+llm-proxy.example.com {
+	reverse_proxy http://upstream-api-host:8080
+}

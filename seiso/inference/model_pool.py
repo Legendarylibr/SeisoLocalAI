@@ -38,6 +38,7 @@ class ModelPool:
 
     def __init__(self) -> None:
         self._active: LoadedModel | None = None
+        self._generation = 0
 
     @classmethod
     def get(cls) -> ModelPool:
@@ -54,6 +55,21 @@ class ModelPool:
     @staticmethod
     def normalize_path(model_path: str) -> str:
         return str(Path(model_path).expanduser().resolve())
+
+    def bump_generation(self) -> int:
+        """Invalidate in-flight streams (e.g. before loading another model)."""
+        with self._lock:
+            self._generation += 1
+            return self._generation
+
+    def is_generation_active(self, generation_id: int) -> bool:
+        with self._lock:
+            return generation_id == self._generation
+
+    def cancel_and_unload(self) -> None:
+        """Stop lagging streams and release VRAM/RAM."""
+        self.bump_generation()
+        self.unload_all()
 
     def switch(self, model_path: str, backend: BackendKind, loader_fn) -> Any:
         """Load model_path, unloading any previously active model first."""
@@ -102,15 +118,18 @@ class ModelPool:
 
     def unload_all(self) -> None:
         """Release all loaded models and clear GPU memory."""
-        if not self._active:
-            return
+        with self._lock:
+            if not self._active:
+                return
+            backend = self._active.backend
+            key = self._active.key
+            handle = self._active.handle
+            self._active = None
 
-        backend = self._active.backend
-        key = self._active.key
         logger.info("Unloading model from VRAM: %s", key)
 
         if backend == BackendKind.LLAMA:
-            llm = self._active.handle
+            llm = handle
             try:
                 if hasattr(llm, "close"):
                     llm.close()
@@ -119,17 +138,24 @@ class ModelPool:
             del llm
 
         elif backend in (BackendKind.MLX, BackendKind.TORCH):
-            handle = self._active.handle
             if isinstance(handle, tuple):
                 del handle
             else:
                 del handle
 
-        self._active = None
         self._free_memory()
 
     def _free_memory(self) -> None:
         gc.collect()
+        try:
+            import mlx.core as mx
+
+            if hasattr(mx, "metal") and hasattr(mx.metal, "clear_cache"):
+                mx.metal.clear_cache()
+        except ImportError:
+            pass
+        except Exception:
+            pass
         try:
             import torch
 

@@ -1,5 +1,10 @@
-import { useCallback, useEffect, useState } from "react";
-import { api, CatalogModel, LocalModel } from "@/lib/api";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { api, CatalogModel, HardwareSummary, LocalModel } from "@/lib/api";
+import { chatPath, chatPathForLocalModel } from "@/lib/chatModel";
+import { HardwareFitBadge } from "@/components/HardwareFitBadge";
+import { PageHeader } from "@/components/PageHeader";
+import { IconClose, IconSearch } from "@/components/Icons";
 
 const FAMILY_LABELS: Record<string, string> = {
   llama: "Llama",
@@ -8,18 +13,38 @@ const FAMILY_LABELS: Record<string, string> = {
   phi: "Phi",
   mistral: "Mistral",
   deepseek: "DeepSeek",
+  kimi: "Kimi",
+  minimax: "MiniMax",
+  nemotron: "Nemotron",
   llava: "Vision",
   other: "Other",
 };
 
+const QUICK_FILTERS = [
+  { label: "Fits your GPU", task: "", q: "", fitsOnly: true },
+  { label: "Featured", task: "", q: "new", fitsOnly: false },
+  { label: "Chat", task: "chat", q: "", fitsOnly: false },
+  { label: "Code", task: "code", q: "", fitsOnly: false },
+  { label: "7B", task: "", q: "7b", fitsOnly: false },
+  { label: "Qwen 3.6", task: "", q: "qwen3.6", fitsOnly: false },
+  { label: "Kimi", task: "", q: "kimi", fitsOnly: false },
+  { label: "Gemma 4", task: "", q: "gemma4", fitsOnly: false },
+  { label: "Llama", task: "", q: "llama", fitsOnly: false },
+] as const;
+
 export function HubPage() {
+  const navigate = useNavigate();
   const [local, setLocal] = useState<LocalModel[]>([]);
   const [catalog, setCatalog] = useState<CatalogModel[]>([]);
   const [families, setFamilies] = useState<string[]>([]);
+  const [total, setTotal] = useState(0);
   const [search, setSearch] = useState("");
   const [family, setFamily] = useState("");
   const [task, setTask] = useState("");
+  const [fitsOnly, setFitsOnly] = useState(false);
+  const [hwSummary, setHwSummary] = useState<HardwareSummary | null>(null);
   const [downloading, setDownloading] = useState<string | null>(null);
+  const [downloadAction, setDownloadAction] = useState<"chat" | "train" | null>(null);
   const [tab, setTab] = useState<"catalog" | "local">("catalog");
   const [toast, setToast] = useState<string | null>(null);
 
@@ -32,50 +57,87 @@ export function HubPage() {
 
   const refreshCatalog = useCallback(() => {
     api
-      .catalog(search, family || undefined, task || undefined)
+      .catalog(search, family || undefined, task || undefined, fitsOnly)
       .then((r) => {
         setCatalog(r.models);
         setFamilies(r.families);
+        setTotal(r.total);
+        if (r.hardware_summary) setHwSummary(r.hardware_summary);
       })
       .catch(console.error);
-  }, [search, family, task]);
+  }, [search, family, task, fitsOnly]);
 
   useEffect(() => {
     refreshLocal();
   }, []);
 
   useEffect(() => {
-    const t = setTimeout(refreshCatalog, 200);
+    const t = setTimeout(refreshCatalog, 180);
     return () => clearTimeout(t);
   }, [refreshCatalog]);
 
-  const download = async (repoId: string, variant: "safetensors" | "gguf" = "gguf") => {
+  const openChat = (repoId: string) => {
+    navigate(chatPath({ repo: repoId }));
+  };
+
+  const openTrain = async (repoId: string) => {
     setDownloading(repoId);
+    setDownloadAction("train");
     try {
-      await api.downloadModel(repoId, undefined, variant);
+      await api.downloadModel(repoId, undefined, "safetensors");
       await refreshLocal();
-      showToast(`Downloaded ${repoId}`);
-      setTab("local");
+      showToast(`Model cached for training`);
+      navigate(`/train?model=${encodeURIComponent(repoId)}`);
     } catch (e) {
       showToast(e instanceof Error ? e.message : "Download failed");
     } finally {
       setDownloading(null);
+      setDownloadAction(null);
     }
   };
 
-  const fmtSize = (n: number) =>
-    n > 1e9 ? `${(n / 1e9).toFixed(1)} GB` : n > 1e6 ? `${(n / 1e6).toFixed(1)} MB` : `${n} B`;
+  const applyQuickFilter = (q: string, t: string, fits: boolean) => {
+    setSearch(q);
+    setTask(t);
+    setFamily("");
+    setFitsOnly(fits);
+  };
+
+  const activeFilters = useMemo(() => {
+    const parts: string[] = [];
+    if (search) parts.push(`"${search}"`);
+    if (family) parts.push(FAMILY_LABELS[family] || family);
+    if (task) parts.push(task);
+    return parts;
+  }, [search, family, task]);
+
+  const fmtSize = (n: number) => {
+    const gib = 1024 ** 3;
+    const mib = 1024 ** 2;
+    return n >= gib ? `${(n / gib).toFixed(1)} GB` : n >= mib ? `${(n / mib).toFixed(1)} MB` : `${n} B`;
+  };
 
   return (
-    <div>
-      <h1 className="page-title">Model Hub</h1>
-      <p className="page-sub">Browse 40+ popular Hugging Face models. Download for chat (GGUF) or training (safetensors).</p>
+    <div className="hub-page">
+      <PageHeader
+        title="Model Hub"
+        subtitle="Newest models first, ranked for your hardware when possible. Detection stays on this machine — nothing is uploaded."
+      />
+
+      {hwSummary && (
+        <div className="hw-inline-banner card">
+          <span className="trust-badge">{hwSummary.tier_label}</span>
+          <span className="muted-text">
+            ~{Math.round(hwSummary.vram_headroom_mb / 1024)} GB {hwSummary.memory_headroom_label || "memory"} free · prefers {hwSummary.preferred_inference_backend_label || hwSummary.preferred_inference_backend}
+          </span>
+        </div>
+      )}
 
       {toast && <div className="toast">{toast}</div>}
 
       <div className="tabs">
         <button className={`tab ${tab === "catalog" ? "active" : ""}`} onClick={() => setTab("catalog")}>
-          Catalog ({catalog.length})
+          Catalog ({total})
         </button>
         <button className={`tab ${tab === "local" ? "active" : ""}`} onClick={() => setTab("local")}>
           Local ({local.length})
@@ -84,13 +146,35 @@ export function HubPage() {
 
       {tab === "catalog" && (
         <>
-          <div className="card filters">
-            <input
-              className="search-input"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search models… (Llama, Qwen, DeepSeek, code…)"
-            />
+          <div className="card filters hub-filters">
+            <div className="hub-search-wrap">
+              <span className="hub-search-icon" aria-hidden>
+                <IconSearch size={16} />
+              </span>
+              <input
+                className="hub-search-input"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search by name, family, size (e.g. qwen 7b coder)…"
+              />
+              {search && (
+                <button type="button" className="hub-search-clear" onClick={() => setSearch("")} aria-label="Clear">
+                  <IconClose size={14} />
+                </button>
+              )}
+            </div>
+            <div className="hub-quick-filters">
+              {QUICK_FILTERS.map((f) => (
+                <button
+                  key={f.label}
+                  type="button"
+                  className={`hub-chip${search === f.q && task === f.task && fitsOnly === f.fitsOnly ? " active" : ""}`}
+                  onClick={() => applyQuickFilter(f.q, f.task, f.fitsOnly)}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
             <div className="filter-row">
               <select value={family} onChange={(e) => setFamily(e.target.value)}>
                 <option value="">All families</option>
@@ -106,42 +190,73 @@ export function HubPage() {
                 <option value="embedding">Embedding</option>
               </select>
             </div>
+            <p className="hub-results-meta">
+              {total} model{total === 1 ? "" : "s"}
+              {activeFilters.length > 0 && <> · filtered by {activeFilters.join(" · ")}</>}
+            </p>
           </div>
 
-          <div className="model-grid">
-            {catalog.map((m) => (
-              <div key={m.repo_id} className="model-card">
-                <div className="model-card-header">
-                  <span className={`family-tag family-${m.family}`}>{FAMILY_LABELS[m.family] || m.family}</span>
-                  <span className="params-tag">{m.params}</span>
+          {catalog.length === 0 ? (
+            <div className="card empty-state">
+              <p>No models match your search.</p>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => {
+                  setSearch("");
+                  setFamily("");
+                  setTask("");
+                  setFitsOnly(false);
+                }}
+              >
+                Clear filters
+              </button>
+            </div>
+          ) : (
+            <div className="model-grid">
+              {catalog.map((m) => (
+                <div key={m.repo_id} className={`model-card${m.featured ? " model-card-featured" : ""}`}>
+                  <div className="model-card-header">
+                    <span className={`family-tag family-${m.family}`}>{FAMILY_LABELS[m.family] || m.family}</span>
+                    <span className="params-tag">{m.params}</span>
+                    {m.featured && <span className="badge badge-featured">Featured</span>}
+                    <HardwareFitBadge fit={m.hardware_fit} label={m.hardware_fit_label} />
+                  </div>
+                  <h3 className="model-name">{m.name}</h3>
+                  <p className="model-repo">{m.repo_id}</p>
+                  {m.download_bytes ? (
+                    <p className="model-download-size muted-text">
+                      {fmtSize(m.download_bytes)} download · {m.quant}
+                      {m.gguf_repo && m.gguf_repo !== m.repo_id ? ` · via ${m.gguf_repo.split("/").pop()}` : ""}
+                    </p>
+                  ) : null}
+                  {m.hardware_note && <p className="model-hw-note">{m.hardware_note}</p>}
+                  <div className="model-tags">
+                    <span className="badge">{m.task}</span>
+                    {m.tags.map((t) => (
+                      <span key={t} className="badge badge-dim">{t}</span>
+                    ))}
+                  </div>
+                  <div className="model-actions">
+                    <button
+                      className="btn btn-primary"
+                      disabled={downloading === m.repo_id && downloadAction === "train"}
+                      onClick={() => openChat(m.repo_id)}
+                    >
+                      Download and chat
+                    </button>
+                    <button
+                      className="btn"
+                      disabled={downloading === m.repo_id}
+                      onClick={() => openTrain(m.repo_id)}
+                    >
+                      {downloading === m.repo_id && downloadAction === "train" ? "Caching…" : "Train/Finetune"}
+                    </button>
+                  </div>
                 </div>
-                <h3 className="model-name">{m.name}</h3>
-                <p className="model-repo">{m.repo_id}</p>
-                <div className="model-tags">
-                  <span className="badge">{m.task}</span>
-                  {m.tags.map((t) => (
-                    <span key={t} className="badge badge-dim">{t}</span>
-                  ))}
-                </div>
-                <div className="model-actions">
-                  <button
-                    className="btn btn-primary"
-                    disabled={downloading === m.repo_id}
-                    onClick={() => download(m.repo_id, "gguf")}
-                  >
-                    {downloading === m.repo_id ? "…" : "Chat (GGUF)"}
-                  </button>
-                  <button
-                    className="btn"
-                    disabled={downloading === m.repo_id}
-                    onClick={() => download(m.repo_id, "safetensors")}
-                  >
-                    Train
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </>
       )}
 
@@ -150,12 +265,14 @@ export function HubPage() {
           {local.length === 0 ? (
             <div className="empty-state">
               <p>No local models yet.</p>
-              <button className="btn btn-primary" onClick={() => setTab("catalog")}>Browse catalog</button>
+              <button className="btn btn-primary" type="button" onClick={() => setTab("catalog")}>
+                Browse catalog
+              </button>
             </div>
           ) : (
             <table>
               <thead>
-                <tr><th>Name</th><th>Format</th><th>Source</th><th>Size</th></tr>
+                <tr><th>Name</th><th>Format</th><th>Source</th><th>Size</th><th></th></tr>
               </thead>
               <tbody>
                 {local.map((m) => (
@@ -164,6 +281,28 @@ export function HubPage() {
                     <td><span className="badge">{m.format || "—"}</span></td>
                     <td className="muted-cell">{m.source}</td>
                     <td>{fmtSize(m.size_bytes)}</td>
+                    <td>
+                      {m.format === "gguf" && (
+                        <button
+                          type="button"
+                          className="btn"
+                          style={{ padding: "0.25rem 0.5rem", fontSize: "0.78rem" }}
+                          onClick={() => navigate(chatPathForLocalModel(m))}
+                        >
+                          Chat
+                        </button>
+                      )}
+                      {m.source?.startsWith("hf:") && m.format === "safetensors" && (
+                        <button
+                          type="button"
+                          className="btn"
+                          style={{ padding: "0.25rem 0.5rem", fontSize: "0.78rem" }}
+                          onClick={() => navigate(`/train?model=${encodeURIComponent(m.source!.slice(3))}`)}
+                        >
+                          Train
+                        </button>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>

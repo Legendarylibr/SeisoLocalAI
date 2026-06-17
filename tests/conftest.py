@@ -17,6 +17,7 @@ def _reset_caches(monkeypatch, tmp_path):
     monkeypatch.setenv("SEISO_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("SEISO_SECRET_KEY", "test-secret-key-for-jwt-signing-32b")
     monkeypatch.setenv("SEISO_DB_ENCRYPTION_KEY", "01" * 32)
+    monkeypatch.setenv("SEISO_DB_EPHEMERAL", "false")
     clear_dependency_caches()
     yield
     clear_dependency_caches()
@@ -66,7 +67,7 @@ async def autodefense_auth_client(app, tmp_path, monkeypatch):
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         reg = await client.post(
             "/api/auth/register",
-            json={"email": "admin@local.dev", "password": "securepass1", "display_name": "Admin"},
+            json={"password": "securepass1"},
         )
         assert reg.status_code == 201
         token = reg.json()["access_token"]
@@ -81,7 +82,7 @@ async def auth_client(app, tmp_path):
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         reg = await client.post(
             "/api/auth/register",
-            json={"email": "admin@local.dev", "password": "securepass1", "display_name": "Admin"},
+            json={"password": "securepass1"},
         )
         assert reg.status_code == 201
         token = reg.json()["access_token"]
@@ -94,6 +95,6 @@ async def make_second_user(email: str = "b@local.dev", password: str = "securepa
     from forge.config import get_settings
 
     db = get_db()
-    user = await db.create_user(email, hash_password(password), "User B")
+    user = await db.create_user(hash_password(password), "User B", email=email)
     token = create_access_token(user["id"], get_settings())
     return user["id"], token

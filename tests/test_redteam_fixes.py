@@ -130,7 +130,7 @@ async def test_inference_tools_disabled_by_default(app, auth_client):
     from forge.api.deps import get_db
 
     db = get_db()
-    user = await db.get_user_by_email("admin@local.dev")
+    user = await db.get_user_by_display_name("Admin")
     model_path = user_path(data_dir, user["id"], "models", "model.gguf")
     model_path.write_text("fake")
     model = await db.add_model(user_id=user["id"], name="Local", path=str(model_path), format="gguf")
@@ -215,7 +215,7 @@ async def test_mcp_rejects_path_env(app, auth_client, enable_tools):
     )
     assert res.status_code == 201
     db = get_db()
-    user = await db.get_user_by_email("admin@local.dev")
+    user = await db.get_user_by_display_name("Admin")
     rows = await db.list_mcp_servers(user["id"])
     stored_env = json.loads(rows[0]["env_json"])
     assert "PATH" not in stored_env
@@ -265,7 +265,7 @@ async def test_code_exec_disabled_without_server_flag(app, auth_client, enable_t
     from forge.api.deps import get_db
 
     db = get_db()
-    user = await db.get_user_by_email("admin@local.dev")
+    user = await db.get_user_by_display_name("Admin")
     model_path = user_path(data_dir, user["id"], "models", "model.gguf")
     model_path.write_text("fake")
     model = await db.add_model(user_id=user["id"], name="Local", path=str(model_path), format="gguf")
@@ -290,7 +290,7 @@ async def test_cross_user_model_path_rejected(app, auth_client):
     from forge.api.deps import get_db
 
     db = get_db()
-    user_a = await db.get_user_by_email("admin@local.dev")
+    user_a = await db.get_user_by_display_name("Admin")
     victim_model = user_path(data_dir, user_a["id"], "models", "secret.gguf")
     victim_model.write_text("fake")
 
@@ -320,7 +320,7 @@ async def test_knowledge_bases_scoped_per_user(app, auth_client):
     from forge.api.deps import get_db
 
     db = get_db()
-    user = await db.get_user_by_email("admin@local.dev")
+    user = await db.get_user_by_display_name("Admin")
     doc = user_path(data_dir, user["id"], "uploads", "doc.txt")
     doc.write_text("secret alpha beta gamma")
 
@@ -349,7 +349,7 @@ async def test_knowledge_ingest_blocks_other_user_index(app, auth_client):
     from forge.api.deps import get_db
 
     db = get_db()
-    user_a = await db.get_user_by_email("admin@local.dev")
+    user_a = await db.get_user_by_display_name("Admin")
     doc = user_path(data_dir, user_a["id"], "uploads", "doc.txt")
     doc.write_text("private corpus")
 
@@ -393,7 +393,7 @@ async def test_export_rejects_other_user_checkpoint(app, auth_client):
     from forge.api.deps import get_db
 
     db = get_db()
-    user_a = await db.get_user_by_email("admin@local.dev")
+    user_a = await db.get_user_by_display_name("Admin")
     ckpt = user_path(data_dir, user_a["id"], "checkpoints", "run1")
     (ckpt / "adapter_config.json").write_text("{}")
 
@@ -406,3 +406,94 @@ async def test_export_rejects_other_user_checkpoint(app, auth_client):
         json={"checkpoint": str(ckpt), "formats": ["lora"]},
     )
     assert res.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_training_rejects_cross_user_dataset(app, auth_client):
+    client, _token, headers, data_dir = auth_client
+    from forge.api.deps import get_db
+
+    db = get_db()
+    user_a = await db.get_user_by_display_name("Admin")
+    victim = user_path(data_dir, user_a["id"], "uploads", "train.jsonl")
+    victim.write_text('{"messages":[{"role":"user","content":"secret"}]}\n')
+
+    _, token_b = await make_second_user("train@local.dev")
+    headers_b = {"Authorization": f"Bearer {token_b}"}
+
+    res = await client.post(
+        "/api/training/jobs",
+        headers=headers_b,
+        json={
+            "config": {
+                "model_id": "meta-llama/Llama-3.2-1B-Instruct",
+                "dataset": str(victim),
+                "method": "lora",
+                "epochs": 1,
+            },
+        },
+    )
+    assert res.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_training_rejects_outside_uploads(app, auth_client):
+    client, _token, headers, data_dir = auth_client
+    outside = data_dir / "train.jsonl"
+    outside.write_text('{"text":"nope"}\n')
+
+    res = await client.post(
+        "/api/training/jobs",
+        headers=headers,
+        json={
+            "config": {
+                "model_id": "meta-llama/Llama-3.2-1B-Instruct",
+                "dataset": str(outside),
+                "method": "lora",
+                "epochs": 1,
+            },
+        },
+    )
+    assert res.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_compress_rejects_host_config_file(app, auth_client):
+    client, _token, headers, _tmp = auth_client
+    res = await client.post(
+        "/api/compress/jobs",
+        headers=headers,
+        json={"preset": "smoke", "config_file": "/etc/passwd"},
+    )
+    assert res.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_rl_quant_rejects_host_config_file(app, auth_client):
+    client, _token, headers, _tmp = auth_client
+    res = await client.post(
+        "/api/rl-quant/jobs",
+        headers=headers,
+        json={"preset": "minimal", "config_file": "/etc/passwd"},
+    )
+    assert res.status_code == 403
+
+
+def test_code_exec_blocks_operator_attrgetter():
+    err = _validate_code(
+        "import operator\n"
+        "cls = operator.attrgetter('__class__', '__bases__')(42)\n"
+        "subs = cls.__subclasses__()"
+    )
+    assert err is not None
+    assert "operator" in err or "blocked" in err.lower()
+
+
+@pytest.mark.asyncio
+async def test_jwt_revoked_after_logout(app, auth_client):
+    client, token, headers, _tmp = auth_client
+    logout = await client.post("/api/auth/logout", headers=headers)
+    assert logout.status_code == 200
+
+    me = await client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
+    assert me.status_code == 401

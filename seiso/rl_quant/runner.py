@@ -42,13 +42,24 @@ def run_rl_quant_job(
     summary = pipeline.run()
     _log("RL quantization pipeline complete")
 
-    recommendation_path = summary.get("recommendation") or config.recommendation_path()
-    recommendation: dict[str, Any] | None = None
-    if recommendation_path and Path(str(recommendation_path)).is_file():
-        import json
+    artifacts = summary.get("artifacts") if isinstance(summary.get("artifacts"), dict) else {}
+    raw_rec = summary.get("recommendation")
+    recommendation: dict[str, Any] | None = raw_rec if isinstance(raw_rec, dict) else None
+    recommendation_path: str | Path | None = None
+    if isinstance(artifacts.get("recommendation"), str):
+        recommendation_path = artifacts["recommendation"]
+    elif isinstance(raw_rec, str):
+        recommendation_path = raw_rec
+    else:
+        recommendation_path = config.recommendation_path()
 
-        recommendation = json.loads(Path(str(recommendation_path)).read_text(encoding="utf-8"))
-        _log(f"Recommendation written: {recommendation_path}")
+    if recommendation is None and recommendation_path:
+        path = Path(str(recommendation_path))
+        if path.is_file():
+            import json
+
+            recommendation = json.loads(path.read_text(encoding="utf-8"))
+            _log(f"Recommendation written: {recommendation_path}")
 
     return {
         "summary": summary,

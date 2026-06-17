@@ -27,6 +27,8 @@ class ForgeSettings(BaseSettings):
     data_dir: Path = Field(default=Path("~/.seiso"))
     secret_key: str = ""
     allow_remote: bool = False
+    trust_proxy: bool = False
+    secure_cookies: bool = False
     cors_origins: str = "http://127.0.0.1:8765,http://localhost:5173"
     hf_token: str = ""
     rate_limit: int = Field(default=120, ge=1)
@@ -87,12 +89,28 @@ class ForgeSettings(BaseSettings):
 
     def ensure_dirs(self) -> None:
         """Create data subdirectories once at startup."""
-        for name in ("models", "checkpoints", "exports", "knowledge", "sandbox", "artifacts", "recipes", "uploads", "rl_quant", "compress", "image_compress"):
+        for name in ("models", "checkpoints", "exports", "knowledge", "sandbox", "artifacts", "recipes", "uploads", "rl_quant", "compress", "image_compress", "hf_cache", "hf_tokens"):
             (self.data_dir / name).mkdir(parents=True, exist_ok=True)
+
+    @property
+    def hf_cache_dir(self) -> Path:
+        from forge.services.hf_hub import resolve_hf_cache_dir
+
+        return resolve_hf_cache_dir(self.data_dir)
 
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
+    @property
+    def cookie_secure(self) -> bool:
+        """Set Secure on session/CSRF cookies (HTTPS reverse proxy or remote bind)."""
+        return self.allow_remote or self.secure_cookies
+
+    @property
+    def rate_limit_enabled(self) -> bool:
+        """Rate limits apply only when remote access is enabled."""
+        return self.allow_remote
 
     @property
     def db_path(self) -> Path:

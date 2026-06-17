@@ -1,0 +1,96 @@
+"""Hardware fit heuristics — local-only, no network."""
+
+from forge.services.hardware import (
+    assess_catalog_fit,
+    classify_tier,
+    enrich_catalog_models,
+    estimate_chat_vram_gb,
+    preferred_inference_backend,
+    training_defaults,
+    vram_headroom_mb,
+)
+
+
+def test_estimate_chat_vram_scales_with_params():
+    small = estimate_chat_vram_gb("3B")
+    large = estimate_chat_vram_gb("70B")
+    assert small < large
+    assert small < 5
+
+
+def test_moe_uses_active_params():
+    full = estimate_chat_vram_gb("30B", tags=())
+    moe = estimate_chat_vram_gb("35B", tags=("moe",), repo_id="Qwen/Qwen3.6-35B-A3B")
+    assert moe < full
+
+
+def test_classify_tier_cpu_when_no_gpu():
+    tier = classify_tier({"backend": "cpu", "gpus": [], "ram_gb": 16})
+    assert tier.value == "cpu_only"
+
+
+def test_enrich_catalog_ranks_priority_first():
+    profile = {
+        "backend": "cpu",
+        "gpus": [],
+        "ram_gb": 16,
+        "platform": "linux",
+        "arch": "x86_64",
+    }
+    models = [
+        {"repo_id": "big", "name": "Big", "params": "70B", "quant": "Q4_K_M", "tags": [], "priority": 90, "task": "chat"},
+        {"repo_id": "small", "name": "Small", "params": "1B", "quant": "Q4_K_M", "tags": [], "priority": 50, "task": "chat"},
+    ]
+    ranked = enrich_catalog_models(models, profile, fetch_sizes=False)
+    assert ranked[0]["params"] == "70B"
+    assert ranked[0]["priority"] == 90
+    assert ranked[1]["hardware_fit"] in ("ideal", "good")
+
+
+def test_format_catalog_note_shows_download_and_runtime():
+    from forge.services.hardware import HardwareTier, _format_catalog_note
+
+    note = _format_catalog_note(
+        est_vram_gb=2.9,
+        download_bytes=int(19.7 * 1024**3),
+        headroom_gb=9.6,
+        fit="ideal",
+        tier=HardwareTier.APPLE_UNIFIED,
+    )
+    assert "Download ~19.7 GB" in note
+    assert "Runtime ~2.9 GB est." in note
+
+
+def test_training_defaults_conservative_on_edge():
+    profile = {"backend": "cuda", "gpus": [{"vram_total_mb": 6000, "vram_used_mb": 1000}], "ram_gb": 16}
+    defaults = training_defaults(profile)
+    assert defaults["batch_size"] >= 1
+    assert defaults["gradient_accumulation_steps"] >= 8
+
+
+def test_preferred_backend_cpu_only_is_llamacpp():
+    profile = {"backend": "cpu", "gpus": [], "ram_gb": 16}
+    assert preferred_inference_backend(profile) == "llamacpp"
+
+
+def test_preferred_backend_apple_tight_memory_is_llamacpp(monkeypatch):
+    profile = {"backend": "mlx", "gpus": [], "ram_gb": 16}
+    monkeypatch.setattr("forge.services.hardware.vram_headroom_mb", lambda _p: 10240)
+    assert classify_tier(profile).value == "apple_unified"
+    assert preferred_inference_backend(profile) == "llamacpp"
+
+
+def test_preferred_backend_apple_plenty_is_mlx(monkeypatch):
+    profile = {"backend": "mlx", "gpus": [], "ram_gb": 64}
+    monkeypatch.setattr("forge.services.hardware.vram_headroom_mb", lambda _p: 20480)
+    assert preferred_inference_backend(profile) == "mlx"
+
+
+def test_low_memory_apple_marks_large_models_tight(monkeypatch):
+    profile = {"backend": "mlx", "gpus": [], "ram_gb": 16}
+    monkeypatch.setattr("forge.services.hardware.vram_headroom_mb", lambda _p: 10240)
+    fit = assess_catalog_fit(
+        {"params": "7B", "quant": "Q4_K_M", "tags": [], "repo_id": "x", "task": "chat"},
+        profile,
+    )
+    assert fit["hardware_fit"] == "tight"

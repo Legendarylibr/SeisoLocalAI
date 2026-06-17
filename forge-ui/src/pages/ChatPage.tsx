@@ -1,5 +1,21 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { api, ChatMessage, ChatThread, InferenceModelOption, SecurityPosture, streamChat } from "@/lib/api";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
+import { api, ChatMessage, ChatThread, HardwareProfile, InferenceModelOption, SecurityPosture, streamChat } from "@/lib/api";
+import { bootstrapChatModels, ensureHubChatModel, needsHubDownload, preloadWithProgress } from "@/lib/chatModel";
+import { ModelProgressState, initialDownloadProgress } from "@/lib/modelProgress";
+import { ChatModelPicker } from "@/components/ChatModelPicker";
+import { HardwareFitBadge } from "@/components/HardwareFitBadge";
+import { ModelLoadProgress } from "@/components/ModelLoadProgress";
+import {
+  IconAssistant,
+  IconChevronLeft,
+  IconChevronRight,
+  IconClose,
+  IconLock,
+  IconPlus,
+  IconRefresh,
+  IconSend,
+} from "@/components/Icons";
 
 const BACKEND_LABELS: Record<string, string> = {
   auto: "Auto",
@@ -9,121 +25,362 @@ const BACKEND_LABELS: Record<string, string> = {
   torch: "PyTorch",
 };
 
+type OpenTab = { threadId: string; title: string };
+
 export function ChatPage() {
+  const [searchParams] = useSearchParams();
+  const pendingModel = searchParams.get("model");
+  const pendingRepo = searchParams.get("repo");
   const [threads, setThreads] = useState<ChatThread[]>([]);
+  const [openTabs, setOpenTabs] = useState<OpenTab[]>([]);
   const [active, setActive] = useState<string | null>(null);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [messagesByThread, setMessagesByThread] = useState<Record<string, ChatMessage[]>>({});
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
-  const [logs, setLogs] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [threadSearch, setThreadSearch] = useState("");
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [useTools, setUseTools] = useState(false);
   const [allowCodeExec, setAllowCodeExec] = useState(false);
-  const [mcpIds, setMcpIds] = useState<string[]>([]);
-  const [providerId, setProviderId] = useState<string>("");
-  const [selection, setSelection] = useState<string>("");
-  const [inferenceBackend, setInferenceBackend] = useState<string>("auto");
+  const [mcpIds] = useState<string[]>([]);
+  const [providerId, setProviderId] = useState("");
+  const [selection, setSelection] = useState("");
+  const [inferenceBackend, setInferenceBackend] = useState("auto");
   const [models, setModels] = useState<InferenceModelOption[]>([]);
   const [providers, setProviders] = useState<Array<{ id: string; name: string; provider_type: string }>>([]);
-  const [mcpServers, setMcpServers] = useState<Array<{ id: string; name: string }>>([]);
   const [security, setSecurity] = useState<SecurityPosture | null>(null);
-  const [toolsExpanded, setToolsExpanded] = useState(false);
+  const [hwProfile, setHwProfile] = useState<HardwareProfile | null>(null);
+  const [switchingModel, setSwitchingModel] = useState(false);
+  const [loadProgress, setLoadProgress] = useState<ModelProgressState | null>(null);
+  const [loadedModelId, setLoadedModelId] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const streamAbortRef = useRef<(() => void) | null>(null);
+  const streamTextRef = useRef("");
+  const streamFlushRef = useRef<number | null>(null);
+  const streamThreadRef = useRef<string | null>(null);
 
-  const [vramModel, setVramModel] = useState<string | null>(null);
+  const messages = active ? messagesByThread[active] ?? [] : [];
 
-  const selected = useMemo(
-    () => models.find((m) => m.id === selection) ?? null,
-    [models, selection],
-  );
-
+  const selected = useMemo(() => models.find((m) => m.id === selection) ?? null, [models, selection]);
+  const pendingModelLabel = useMemo(() => {
+    if (!pendingRepo) return null;
+    return pendingRepo.split("/").pop() || pendingRepo;
+  }, [pendingRepo]);
+  const showModelStatus = !providerId && !!(loadProgress || switchingModel || pendingRepo || selected);
+  const waitingForModel = switchingModel || !!loadProgress;
+  const effectiveLoadProgress =
+    loadProgress ??
+    (switchingModel && pendingRepo && needsHubDownload(models, { repo: pendingRepo })
+      ? initialDownloadProgress(pendingRepo)
+      : null);
+  const selectedFit = selected?.hardware_fit;
   const backendOptions = useMemo(() => {
     if (!selected || providerId) return ["auto"];
-    const opts = new Set<string>(["auto", ...selected.backends]);
-    return Array.from(opts);
+    return Array.from(new Set(["auto", ...selected.backends]));
   }, [selected, providerId]);
+
+  const filteredThreads = useMemo(() => {
+    const q = threadSearch.toLowerCase();
+    if (!q) return threads;
+    return threads.filter((t) => t.title.toLowerCase().includes(q));
+  }, [threads, threadSearch]);
+
+  const refreshModels = useCallback(async () => {
+    const r = await api.listInferenceModels();
+    setModels(r.models);
+    if (selection) {
+      const still = r.models.find((m) => m.id === selection);
+      if (still) return r.models;
+    }
+    const pick = r.models.find((m) => m.hardware_fit === "ideal" || m.hardware_fit === "good")?.id || r.models[0]?.id;
+    if (pick) {
+      setSelection(pick);
+      setInferenceBackend(r.models.find((m) => m.id === pick)?.default_backend || "auto");
+    }
+    return r.models;
+  }, [selection]);
+
+  const activateModel = useCallback(
+    async (modelId: string, list: InferenceModelOption[], backendOverride?: string) => {
+      const next = list.find((m) => m.id === modelId);
+      if (!next) return;
+      setSelection(modelId);
+      const backend = backendOverride || next.default_backend || "auto";
+      setInferenceBackend(backend);
+      if (providerId) return;
+      setLoadProgress({
+        phase: "loading",
+        label: `Loading ${next.name} into inference engine`,
+        percent: 10,
+        etaSeconds: null,
+        modelName: next.name,
+        indeterminate: true,
+      });
+      await preloadWithProgress(modelId, backend, setLoadProgress);
+      setLoadedModelId(modelId);
+    },
+    [providerId],
+  );
+
+  const handleModelChange = async (modelId: string) => {
+    if (modelId === selection) return;
+    setSwitchingModel(true);
+    setError(null);
+    setLoadProgress(null);
+    streamAbortRef.current?.();
+    streamAbortRef.current = null;
+    if (streaming) setStreaming(false);
+    if (!providerId) {
+      try {
+        await api.cancelInference();
+        setLoadedModelId(null);
+      } catch {
+        /* best-effort VRAM release */
+      }
+    }
+    try {
+      await activateModel(modelId, models);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load model into inference engine");
+    } finally {
+      setSwitchingModel(false);
+      setLoadProgress(null);
+    }
+  };
+
+  const handleCatalogSelect = async (repoId: string) => {
+    if (models.some((m) => m.source === `hf:${repoId}`)) {
+      const existing = models.find((m) => m.source === `hf:${repoId}`);
+      if (existing) await handleModelChange(existing.id);
+      return;
+    }
+    setSwitchingModel(true);
+    setError(null);
+    setLoadProgress(initialDownloadProgress(repoId));
+    streamAbortRef.current?.();
+    streamAbortRef.current = null;
+    if (streaming) setStreaming(false);
+    if (!providerId) {
+      try {
+        await api.cancelInference();
+        setLoadedModelId(null);
+      } catch {
+        /* best-effort VRAM release */
+      }
+    }
+    try {
+      const modelId = await ensureHubChatModel(repoId, setLoadProgress);
+      const refreshed = await refreshModels();
+      await activateModel(modelId, refreshed);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to download model from Hugging Face");
+    } finally {
+      setSwitchingModel(false);
+      setLoadProgress(null);
+    }
+  };
+
+  const handleProviderChange = async (nextProvider: string) => {
+    if (nextProvider === providerId) return;
+    streamAbortRef.current?.();
+    streamAbortRef.current = null;
+    if (streaming) setStreaming(false);
+    if (!nextProvider && providerId) {
+      try {
+        await api.cancelInference();
+      } catch {
+        /* ignore */
+      }
+    }
+    setProviderId(nextProvider);
+    if (!nextProvider && selection) {
+      const next = models.find((m) => m.id === selection);
+      if (next) {
+        try {
+          setLoadProgress({
+            phase: "loading",
+            label: `Loading ${next.name} into inference engine`,
+            percent: 10,
+            etaSeconds: null,
+            modelName: next.name,
+            indeterminate: true,
+          });
+          await preloadWithProgress(selection, next.default_backend || inferenceBackend, setLoadProgress);
+          setLoadedModelId(selection);
+        } catch {
+          /* best-effort */
+        } finally {
+          setLoadProgress(null);
+        }
+      }
+    }
+  };
 
   const toolsAvailable = security?.allow_tools ?? false;
   const codeExecAvailable = security?.allow_code_exec ?? false;
 
-  useEffect(() => {
-    api.listThreads().then(setThreads).catch(console.error);
-    api.listInferenceModels().then((r) => {
-      setModels(r.models);
-      if (r.models.length && !selection) {
-        setSelection(r.models[0].id);
-        setInferenceBackend("auto");
-      }
-    }).catch(console.error);
-    api.listProviders().then(setProviders).catch(() => {});
-    api.listMcpServers().then((s) => setMcpServers(s.map(({ id, name }) => ({ id, name })))).catch(() => {});
-    api.settings().then((s) => setSecurity(s.security)).catch(() => {});
-    api.vramStatus().then((s) => setVramModel(s.active_model)).catch(() => {});
+  const loadMessages = useCallback(async (threadId: string) => {
+    const msgs = await api.getMessages(threadId);
+    setMessagesByThread((prev) => ({ ...prev, [threadId]: msgs }));
   }, []);
 
-  const switchModel = async (newSelection: string) => {
-    if (newSelection === selection) return;
-    setSelection(newSelection);
-    setInferenceBackend("auto");
-    setProviderId("");
-    try {
-      await api.unloadVram();
-      setVramModel(null);
-    } catch {
-      /* ignore */
+  useEffect(() => {
+    api.listThreads().then(setThreads).catch(console.error);
+    api.hardware().then(setHwProfile).catch(() => {});
+    api.listProviders().then(setProviders).catch(() => {});
+    api.settings().then((s) => setSecurity(s.security)).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const bootstrap = async () => {
+      setSwitchingModel(true);
+      setError(null);
+      try {
+        const initialModels = (await api.listInferenceModels()).models;
+        const target = { modelId: pendingModel, repo: pendingRepo };
+        if (needsHubDownload(initialModels, target) && pendingRepo) {
+          setLoadProgress(initialDownloadProgress(pendingRepo));
+        } else {
+          setLoadProgress(null);
+        }
+
+        const result = await bootstrapChatModels(target, {
+          preload: !providerId,
+          providerActive: !!providerId,
+          onProgress: setLoadProgress,
+          initialModels,
+        });
+        if (cancelled) return;
+        setModels(result.models);
+        if (result.selectedId) {
+          setSelection(result.selectedId);
+          setInferenceBackend(result.backend);
+          if (!providerId) setLoadedModelId(result.selectedId);
+        }
+      } catch (e) {
+        if (!cancelled) setError(e instanceof Error ? e.message : "Failed to load models");
+      } finally {
+        if (!cancelled) {
+          setSwitchingModel(false);
+          setLoadProgress(null);
+        }
+      }
+    };
+
+    void bootstrap();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingModel, pendingRepo]);
+
+  useEffect(() => {
+    if (active && !messagesByThread[active]) loadMessages(active).catch(console.error);
+  }, [active, messagesByThread, loadMessages]);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: streaming ? "auto" : "smooth" });
+  }, [messages, active, streaming]);
+
+  const openThread = (t: ChatThread) => {
+    setActive(t.id);
+    if (!openTabs.find((tab) => tab.threadId === t.id)) {
+      setOpenTabs((prev) => [...prev, { threadId: t.id, title: t.title }]);
     }
   };
 
-  useEffect(() => {
-    if (active) api.getMessages(active).then(setMessages).catch(console.error);
-  }, [active]);
-
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, logs]);
+  const closeTab = (threadId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setOpenTabs((prev) => prev.filter((t) => t.threadId !== threadId));
+    if (active === threadId) {
+      const remaining = openTabs.filter((t) => t.threadId !== threadId);
+      setActive(remaining.length ? remaining[remaining.length - 1].threadId : null);
+    }
+  };
 
   const newThread = async () => {
     const t = await api.createThread("New chat");
     setThreads((prev) => [t, ...prev]);
-    setActive(t.id);
-    setMessages([]);
+    openThread(t);
+    setMessagesByThread((prev) => ({ ...prev, [t.id]: [] }));
   };
 
-  const toggleMcp = (id: string) => {
-    setMcpIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  const deleteThread = async (threadId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    await api.deleteThread(threadId);
+    setThreads((prev) => prev.filter((t) => t.id !== threadId));
+    setOpenTabs((prev) => prev.filter((t) => t.threadId !== threadId));
+    setMessagesByThread((prev) => {
+      const copy = { ...prev };
+      delete copy[threadId];
+      return copy;
+    });
+    if (active === threadId) setActive(openTabs.find((t) => t.threadId !== threadId)?.threadId ?? null);
   };
 
   const send = async () => {
     if (!input.trim() || streaming) return;
+    if (!providerId && !selection) {
+      setError("Select a model from the dropdown or download one from the Hub.");
+      return;
+    }
     const content = input.trim();
     setInput("");
     setStreaming(true);
-    setLogs([]);
     setError(null);
 
     let threadId = active;
     if (!threadId) {
-      const t = await api.createThread(content.slice(0, 40));
+      const t = await api.createThread(content.slice(0, 48));
       threadId = t.id;
-      setActive(threadId);
       setThreads((prev) => [t, ...prev]);
+      openThread(t);
     }
 
-    setMessages((prev) => [
+    setMessagesByThread((prev) => ({
       ...prev,
-      { id: crypto.randomUUID(), role: "user", content, created_at: new Date().toISOString() },
-    ]);
+      [threadId!]: [
+        ...(prev[threadId!] ?? []),
+        { id: crypto.randomUUID(), role: "user", content, created_at: new Date().toISOString() },
+      ],
+    }));
 
     const history = [
-      ...messages.map((m) => ({ role: m.role, content: m.content })),
+      ...(messagesByThread[threadId!] ?? []).map((m) => ({ role: m.role, content: m.content })),
       { role: "user", content },
     ];
 
     const isOllamaOnly = selected?.kind === "ollama";
     let assistantText = "";
+    streamTextRef.current = "";
+    streamThreadRef.current = threadId;
+
+    const flushStreamText = () => {
+      streamFlushRef.current = null;
+      const text = streamTextRef.current;
+      const tid = streamThreadRef.current;
+      if (!tid) return;
+      setMessagesByThread((prev) => {
+        const list = [...(prev[tid] ?? [])];
+        const last = list[list.length - 1];
+        if (last?.role === "assistant") {
+          list[list.length - 1] = { ...last, content: text };
+        } else {
+          list.push({
+            id: crypto.randomUUID(),
+            role: "assistant",
+            content: text,
+            created_at: new Date().toISOString(),
+          });
+        }
+        return { ...prev, [tid]: list };
+      });
+    };
 
     try {
-      await streamChat(
+      const { promise, abort } = streamChat(
         {
           thread_id: threadId,
           messages: history,
@@ -138,220 +395,317 @@ export function ChatPage() {
         },
         {
           onEvent: (event, data) => {
-            if (event === "log") setLogs((l) => [...l, data]);
             if (event === "error") setError(data);
             if (event === "token" || event === "message") {
               if (event === "message") assistantText = data;
               else assistantText += data;
-              setMessages((prev) => {
-                const copy = [...prev];
-                const last = copy[copy.length - 1];
-                if (last?.role === "assistant") {
-                  copy[copy.length - 1] = { ...last, content: assistantText };
-                } else {
-                  copy.push({
-                    id: crypto.randomUUID(),
-                    role: "assistant",
-                    content: assistantText,
-                    created_at: new Date().toISOString(),
-                  });
-                }
-                return copy;
-              });
+              streamTextRef.current = assistantText;
+              if (streamFlushRef.current === null) {
+                streamFlushRef.current = window.requestAnimationFrame(flushStreamText);
+              }
             }
           },
         },
       );
+      streamAbortRef.current = abort;
+      await promise;
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Request failed");
+      if (!(e instanceof DOMException && e.name === "AbortError")) {
+        setError(e instanceof Error ? e.message : "Request failed");
+      }
     } finally {
+      if (streamFlushRef.current !== null) {
+        window.cancelAnimationFrame(streamFlushRef.current);
+        streamFlushRef.current = null;
+      }
+      if (streamTextRef.current) flushStreamText();
+      streamThreadRef.current = null;
+      streamAbortRef.current = null;
       setStreaming(false);
     }
   };
 
   const modelLabel = (m: InferenceModelOption) => {
     const engine = m.backend_labels[m.default_backend] || m.default_backend;
-    const fmt = m.format ? ` · ${m.format}` : "";
-    return `${m.name} (${m.source_label}${fmt} · ${engine})`;
+    const fit = m.hardware_fit_label ? ` · ${m.hardware_fit_label}` : "";
+    return `${m.name} · ${engine}${fit}`;
   };
 
   return (
-    <div>
-      <h1 className="page-title">Chat</h1>
-      <p className="page-sub">
-        Local and provider models with optional agent tools — gated by your server security settings.
-      </p>
-
-      <div className="card chat-controls">
-        <div style={{ minWidth: "260px", flex: 1 }}>
-          <label>Model</label>
-          <select
-            value={selection}
-            onChange={(e) => switchModel(e.target.value)}
-            disabled={!!providerId}
-            style={{ margin: 0 }}
+    <div className={`chat-app${sidebarOpen ? " chat-sidebar-open" : ""}`}>
+      <button
+        type="button"
+        className="chat-sidebar-backdrop"
+        onClick={() => setSidebarOpen(false)}
+        aria-label="Close chat sidebar"
+        tabIndex={sidebarOpen ? 0 : -1}
+      />
+      <aside className="chat-sidebar" aria-hidden={!sidebarOpen}>
+        <div className={`chat-sidebar-header${waitingForModel ? " chat-sidebar-header-loading" : ""}`}>
+          {!waitingForModel && (
+            <button type="button" className="chat-new-btn" onClick={newThread}>
+              <IconPlus size={16} />
+              <span>New chat</span>
+            </button>
+          )}
+          <button
+            type="button"
+            className="chat-sidebar-collapse"
+            onClick={() => setSidebarOpen(false)}
+            aria-label="Collapse chat sidebar"
+            title="Collapse sidebar"
           >
-            {models.length === 0 && <option value="">No models — download from Hub or run export</option>}
-            {models.map((m) => (
-              <option key={m.id} value={m.id}>{modelLabel(m)}</option>
-            ))}
-          </select>
+            <IconChevronLeft size={18} strokeWidth={2.25} />
+          </button>
         </div>
-        {selected && backendOptions.length > 1 && !providerId && (
-          <div style={{ minWidth: "160px" }}>
-            <label>Engine</label>
+        <input
+          className="chat-search"
+          placeholder="Search chats…"
+          value={threadSearch}
+          onChange={(e) => setThreadSearch(e.target.value)}
+        />
+        <div className="chat-thread-list">
+          {filteredThreads.map((t) => (
+            <div
+              key={t.id}
+              className={`chat-thread-item${active === t.id ? " active" : ""}`}
+              onClick={() => openThread(t)}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => e.key === "Enter" && openThread(t)}
+            >
+              <span className="chat-thread-title">{t.title}</span>
+              <button
+                type="button"
+                className="chat-thread-delete"
+                onClick={(e) => deleteThread(t.id, e)}
+                aria-label="Delete chat"
+              >
+                <IconClose size={14} />
+              </button>
+            </div>
+          ))}
+        </div>
+        <div className="chat-session-badge">
+          <IconLock size={12} className="session-lock" />
+          Encrypted session memory
+          <span className="muted-text"> · clears on sign out</span>
+        </div>
+      </aside>
+
+      <main className="chat-main">
+        <header className="chat-topbar">
+          <button
+            type="button"
+            className="chat-sidebar-toggle"
+            onClick={() => setSidebarOpen((v) => !v)}
+            aria-label={sidebarOpen ? "Collapse chat sidebar" : "Expand chat sidebar"}
+            title={sidebarOpen ? "Collapse sidebar" : "Expand sidebar"}
+          >
+            {sidebarOpen ? (
+              <IconChevronLeft size={18} strokeWidth={2.25} />
+            ) : (
+              <IconChevronRight size={18} strokeWidth={2.25} />
+            )}
+          </button>
+          <ChatModelPicker
+            models={models}
+            selection={selection}
+            disabled={!!providerId || switchingModel}
+            switching={switchingModel}
+            modelLabel={modelLabel}
+            onSelectLocal={handleModelChange}
+            onSelectCatalog={handleCatalogSelect}
+          />
+          <button
+            type="button"
+            className="chat-refresh-models"
+            onClick={refreshModels}
+            title="Refresh model list"
+            aria-label="Refresh models"
+          >
+            <IconRefresh size={15} />
+          </button>
+          {selected && backendOptions.length > 1 && !providerId && (
             <select
+              className="chat-engine-select"
               value={inferenceBackend}
-              onChange={(e) => setInferenceBackend(e.target.value)}
-              style={{ margin: 0 }}
+              onChange={async (e) => {
+                const next = e.target.value;
+                if (next !== inferenceBackend) {
+                  streamAbortRef.current?.();
+                  streamAbortRef.current = null;
+                  if (streaming) setStreaming(false);
+                  try {
+                    await api.cancelInference();
+                    setLoadedModelId(null);
+                  } catch {
+                    /* ignore */
+                  }
+                }
+                setInferenceBackend(next);
+                if (selection && !providerId) {
+                  const model = models.find((m) => m.id === selection);
+                  try {
+                    setLoadProgress({
+                      phase: "loading",
+                      label: `Loading ${model?.name || "model"} with ${BACKEND_LABELS[next] || next}`,
+                      percent: 10,
+                      etaSeconds: null,
+                      modelName: model?.name,
+                      indeterminate: true,
+                    });
+                    await preloadWithProgress(selection, next, setLoadProgress);
+                    setLoadedModelId(selection);
+                  } catch {
+                    /* best-effort */
+                  } finally {
+                    setLoadProgress(null);
+                  }
+                }
+              }}
             >
               {backendOptions.map((b) => (
-                <option key={b} value={b}>{BACKEND_LABELS[b] || selected.backend_labels[b] || b}</option>
+                <option key={b} value={b}>{BACKEND_LABELS[b] || b}</option>
               ))}
             </select>
-          </div>
-        )}
-        <div style={{ minWidth: "200px" }}>
-          <label>Provider (optional)</label>
+          )}
           <select
+            className="chat-provider-select"
             value={providerId}
-            onChange={(e) => setProviderId(e.target.value)}
-            style={{ margin: 0 }}
+            onChange={(e) => void handleProviderChange(e.target.value)}
           >
-            <option value="">Local engines</option>
+            <option value="">Local</option>
             {providers.map((p) => (
-              <option key={p.id} value={p.id}>{p.name} ({p.provider_type})</option>
+              <option key={p.id} value={p.id}>{p.name}</option>
             ))}
           </select>
-        </div>
-        {vramModel && (
-          <span className="vram-indicator" title="Model loaded in VRAM">
-            VRAM: {vramModel.split(":").pop()?.slice(0, 30)}…
-          </span>
-        )}
-      </div>
+          <label className="chat-tools-toggle">
+            <input type="checkbox" checked={useTools} disabled={!toolsAvailable} onChange={(e) => setUseTools(e.target.checked)} />
+            Tools
+          </label>
+          {switchingModel && !loadProgress && (
+            <span className="chat-vram-hint">Preparing model…</span>
+          )}
+          {streaming && !providerId && (
+            <span className="chat-vram-hint muted-text">Generating — switch model anytime</span>
+          )}
+          {selected && selectedFit && !providerId && (
+            <HardwareFitBadge fit={selectedFit} label={selected.hardware_fit_label} />
+          )}
+          {hwProfile?.tier_label && !providerId && (
+            <span className="chat-hw-tier muted-text" title={hwProfile.privacy}>{hwProfile.tier_label}</span>
+          )}
+          {useTools && codeExecAvailable && (
+            <label className="chat-tools-toggle chat-tools-warn">
+              <input type="checkbox" checked={allowCodeExec} onChange={(e) => setAllowCodeExec(e.target.checked)} />
+              Code
+            </label>
+          )}
+        </header>
 
-      <div className="card tools-panel">
-        <button
-          type="button"
-          className="tools-panel-toggle"
-          onClick={() => setToolsExpanded((v) => !v)}
-          aria-expanded={toolsExpanded}
-        >
-          <span className="tools-panel-icon">{toolsExpanded ? "▾" : "▸"}</span>
-          <span>Agent tools</span>
-          {!toolsAvailable && <span className="badge badge-dim">Server disabled</span>}
-          {useTools && toolsAvailable && <span className="badge">Active</span>}
-        </button>
-
-        {toolsExpanded && (
-          <div className="tools-panel-body">
-            {!toolsAvailable ? (
-              <p className="muted-text">
-                Tools are off on this server. Set <code>SEISO_ALLOW_TOOLS=true</code> in your environment and restart to enable web search, artifacts, and MCP.
-              </p>
-            ) : (
-              <>
-                <label className="tool-check">
-                  <input
-                    type="checkbox"
-                    checked={useTools}
-                    onChange={(e) => {
-                      setUseTools(e.target.checked);
-                      if (!e.target.checked) setAllowCodeExec(false);
-                    }}
-                  />
-                  <span>
-                    <strong>Enable tools</strong>
-                    <span className="muted-text"> — web search, artifact writes, MCP integrations</span>
+        {showModelStatus && (
+          <div className="chat-model-status">
+            {(selected || pendingRepo) && (
+              <div className="chat-model-status-selected">
+                <span className="chat-model-status-label">
+                  {effectiveLoadProgress?.phase === "download" ? "Downloading from Hugging Face" : "Selected model"}
+                </span>
+                <span className="chat-model-status-name">{selected?.name || pendingModelLabel}</span>
+                {pendingRepo && (
+                  <span className="chat-model-status-engine muted-text">{pendingRepo}</span>
+                )}
+                {selected && (
+                  <span className="chat-model-status-engine muted-text">
+                    {BACKEND_LABELS[inferenceBackend] || inferenceBackend}
                   </span>
-                </label>
-
-                {useTools && codeExecAvailable && (
-                  <label className="tool-check tool-check-warn">
-                    <input
-                      type="checkbox"
-                      checked={allowCodeExec}
-                      onChange={(e) => setAllowCodeExec(e.target.checked)}
-                    />
-                    <span>
-                      <strong>Allow code execution</strong>
-                      <span className="muted-text"> — sandboxed Python (requires explicit opt-in)</span>
-                    </span>
-                  </label>
                 )}
-
-                {useTools && !codeExecAvailable && (
-                  <p className="muted-text tool-hint">
-                    Code execution is disabled. Set <code>SEISO_ALLOW_CODE_EXEC=true</code> to enable.
-                  </p>
+                {loadedModelId === selection && !effectiveLoadProgress && (
+                  <span className="chat-model-status-ready">Loaded in VRAM</span>
                 )}
-
-                {useTools && mcpServers.length > 0 && (
-                  <div className="mcp-picker">
-                    <div className="muted-text" style={{ marginBottom: "0.35rem", fontSize: "0.85rem" }}>MCP servers</div>
-                    {mcpServers.map((s) => (
-                      <label key={s.id} className="tool-check">
-                        <input
-                          type="checkbox"
-                          checked={mcpIds.includes(s.id)}
-                          onChange={() => toggleMcp(s.id)}
-                        />
-                        <span>{s.name}</span>
-                      </label>
-                    ))}
-                  </div>
-                )}
-
-                {useTools && mcpServers.length === 0 && (
-                  <p className="muted-text tool-hint">
-                    No MCP servers configured — add them in Integrations (sidebar).
-                  </p>
-                )}
-              </>
+              </div>
+            )}
+            {effectiveLoadProgress && (
+              <ModelLoadProgress
+                progress={effectiveLoadProgress}
+                modelName={selected?.name || pendingModelLabel}
+              />
             )}
           </div>
         )}
-      </div>
 
-      <div className="chat-layout">
-        <div className="card thread-list">
-          <button className="btn btn-primary" style={{ width: "100%", marginBottom: "0.75rem" }} onClick={newThread}>
-            + New thread
-          </button>
-          {threads.map((t) => (
-            <button
-              key={t.id}
-              className="btn"
-              style={{
-                width: "100%",
-                marginBottom: "0.35rem",
-                textAlign: "left",
-                borderColor: active === t.id ? "var(--accent)" : undefined,
-              }}
-              onClick={() => setActive(t.id)}
-            >
-              {t.title}
-            </button>
-          ))}
+        {openTabs.length > 1 && (
+          <div className="chat-tabs">
+            {openTabs.map((tab) => (
+              <button
+                key={tab.threadId}
+                type="button"
+                className={`chat-tab${active === tab.threadId ? " active" : ""}`}
+                onClick={() => setActive(tab.threadId)}
+              >
+                {tab.title.slice(0, 24)}
+                <span className="chat-tab-close" onClick={(e) => closeTab(tab.threadId, e)} aria-hidden>
+                  <IconClose size={12} />
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        <div className="chat-messages-wrap">
+          {!active && messages.length === 0 ? (
+            <div className="chat-empty">
+              <div className="chat-empty-icon">
+                <IconAssistant size={32} />
+              </div>
+              <h2>How can I help you today?</h2>
+              {waitingForModel ? (
+                <p className="muted-text">Model loading — chat will be ready shortly.</p>
+              ) : (
+                <>
+                  <p>Start a new chat — your conversation is encrypted locally until you sign out.</p>
+                  <button type="button" className="btn btn-primary" onClick={newThread}>New chat</button>
+                </>
+              )}
+            </div>
+          ) : (
+            <div className="chat-messages">
+              {messages.map((m) => (
+                <div key={m.id} className={`chat-bubble chat-bubble-${m.role}`}>
+                  <div className="chat-avatar">
+                    {m.role === "user" ? (
+                      <span className="chat-avatar-text">You</span>
+                    ) : (
+                      <IconAssistant size={14} />
+                    )}
+                  </div>
+                  <div className="chat-bubble-content">{m.content}</div>
+                </div>
+              ))}
+              {streaming && messages[messages.length - 1]?.role !== "assistant" && (
+                <div className="chat-bubble chat-bubble-assistant">
+                  <div className="chat-avatar">
+                    <IconAssistant size={14} />
+                  </div>
+                  <div className="chat-bubble-content chat-typing"><span /><span /><span /></div>
+                </div>
+              )}
+              <div ref={bottomRef} />
+            </div>
+          )}
+          {error && <p className="chat-error">{error}</p>}
+          {selected?.hardware_fit === "unlikely" && !providerId && (
+            <p className="chat-hw-warn">{selected.hardware_note || "This model may exceed available memory on your machine."}</p>
+          )}
         </div>
 
-        <div className="card" style={{ display: "flex", flexDirection: "column" }}>
-          <div className="messages">
-            {messages.map((m) => (
-              <div key={m.id} className={`msg msg-${m.role}`}>
-                {m.content}
-              </div>
-            ))}
-            <div ref={bottomRef} />
-          </div>
-          {logs.length > 0 && <div className="log-panel">{logs.join("\n")}</div>}
-          {error && <p className="chat-error">{error}</p>}
-          <div className="composer">
+        <footer className="chat-composer-wrap">
+          <div className="chat-composer">
             <textarea
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder="Message…"
+              placeholder="Message Seiso…"
+              rows={1}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
@@ -359,12 +713,13 @@ export function ChatPage() {
                 }
               }}
             />
-            <button className="btn btn-primary" onClick={send} disabled={streaming}>
-              {streaming ? "…" : "Send"}
+            <button type="button" className="chat-send-btn" onClick={send} disabled={streaming || !input.trim()} aria-label="Send message">
+              <IconSend size={16} />
             </button>
           </div>
-        </div>
-      </div>
+          <p className="chat-composer-hint">Shift+Enter for new line · Memory encrypted in local DB</p>
+        </footer>
+      </main>
     </div>
   );
 }

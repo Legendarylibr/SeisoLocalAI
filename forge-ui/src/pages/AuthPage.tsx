@@ -1,11 +1,11 @@
 import { useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
+import { SeisoLogoMark } from "@/components/SeisoLogo";
+import { IconLock } from "@/components/Icons";
 
 export function AuthPage() {
   const { needsOnboarding, login, register } = useAuth();
-  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [name, setName] = useState("");
   const [error, setError] = useState("");
   const mode = needsOnboarding ? "register" : "login";
 
@@ -13,8 +13,8 @@ export function AuthPage() {
     e.preventDefault();
     setError("");
     try {
-      if (mode === "register") await register(email, password, name || undefined);
-      else await login(email, password);
+      if (mode === "register") await register(password);
+      else await login(password);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Auth failed");
     }
@@ -22,48 +22,71 @@ export function AuthPage() {
 
   return (
     <div className="auth-page">
-      <div className="card auth-card">
-        <div className="auth-brand">
-          <span className="brand-mark">◈</span>
-          <h1 className="page-title" style={{ margin: 0 }}>Seiso Forge</h1>
+      <div className="auth-atmosphere" aria-hidden>
+        <div className="auth-orb auth-orb-a" />
+        <div className="auth-orb auth-orb-b" />
+        <div className="auth-grid" />
+      </div>
+
+      <div className="auth-layout">
+        <div className="auth-aside">
+          <div className="auth-aside-brand">
+            <span className="brand-mark brand-mark-lg">
+              <SeisoLogoMark className="brand-logo-img" />
+            </span>
+            <h1 className="auth-aside-title">Seiso Local AI</h1>
+          </div>
+          <p className="auth-aside-copy">
+            A local-first AI workspace. Models, training, and chat stay on your machine — encrypted, private, and under your control.
+          </p>
+          <ul className="auth-feature-list">
+            <li>
+              <IconLock size={15} />
+              <span>HttpOnly sessions with CSRF protection</span>
+            </li>
+            <li>
+              <IconLock size={15} />
+              <span>Encrypted storage for chat and API keys</span>
+            </li>
+            <li>
+              <IconLock size={15} />
+              <span>No telemetry — nothing leaves this device</span>
+            </li>
+          </ul>
         </div>
-        <p className="page-sub">
-          {needsOnboarding
-            ? "Create your local admin account. This instance allows one user — your data stays on this machine."
-            : "Sign in to your local workspace."}
-        </p>
-        <form onSubmit={submit}>
-          {mode === "register" && (
-            <>
-              <label>Display name</label>
-              <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Optional" autoComplete="name" />
-            </>
-          )}
-          <label>Email</label>
-          <input
-            type="email"
-            required
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            autoComplete="email"
-          />
-          <label>Password (min 8 characters)</label>
-          <input
-            type="password"
-            required
-            minLength={8}
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            autoComplete={mode === "register" ? "new-password" : "current-password"}
-          />
-          {error && <p className="auth-error">{error}</p>}
-          <button type="submit" className="btn btn-primary auth-submit">
-            {mode === "register" ? "Create account" : "Sign in"}
-          </button>
-        </form>
-        <p className="auth-footnote">
-          Sessions are secured with HttpOnly cookies and CSRF tokens — nothing sensitive is stored in localStorage.
-        </p>
+
+        <div className="card auth-card matte-glow">
+          <div className="auth-card-header">
+            <h2 className="auth-card-title">
+              {mode === "register" ? "Create your password" : "Welcome back"}
+            </h2>
+            <p className="auth-card-sub">
+              {needsOnboarding
+                ? "One account per machine. Set a password to secure this instance."
+                : "Enter your password to unlock the workspace."}
+            </p>
+          </div>
+          <form onSubmit={submit} className="auth-form">
+            <label htmlFor="auth-password">
+              {mode === "register" ? "Password (min 8 characters)" : "Password"}
+            </label>
+            <input
+              id="auth-password"
+              type="password"
+              required
+              minLength={mode === "register" ? 8 : 1}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete={mode === "register" ? "new-password" : "current-password"}
+              autoFocus
+              placeholder="Enter password"
+            />
+            {error && <p className="auth-error" role="alert">{error}</p>}
+            <button type="submit" className="btn btn-primary auth-submit">
+              {mode === "register" ? "Set password and continue" : "Sign in"}
+            </button>
+          </form>
+        </div>
       </div>
     </div>
   );

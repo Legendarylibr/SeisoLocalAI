@@ -40,7 +40,7 @@ async def test_resolve_encryption_key_hex():
 
 @pytest.mark.asyncio
 async def test_chat_messages_encrypted_at_rest(db: Database):
-    user = await db.create_user("u@local.dev", "hashed", "User")
+    user = await db.create_user("hashed", "User", email="u@local.dev")
     thread = await db.create_thread(user["id"], "Test")
     await db.add_message(thread["id"], "user", "secret prompt", {"tool": "x"})
 
@@ -61,7 +61,7 @@ async def test_chat_messages_encrypted_at_rest(db: Database):
 
 @pytest.mark.asyncio
 async def test_provider_config_encrypted_at_rest(db: Database):
-    user = await db.create_user("u@local.dev", "hashed", "User")
+    user = await db.create_user("hashed", "User", email="u@local.dev")
     await db.create_provider(user["id"], "OpenAI", "openai", {"api_key": "sk-test"})
 
     conn = await db._ensure_conn()
@@ -76,7 +76,7 @@ async def test_provider_config_encrypted_at_rest(db: Database):
 
 @pytest.mark.asyncio
 async def test_ephemeral_db_wiped_on_close(db: Database):
-    await db.create_user("u@local.dev", "hashed", "User")
+    await db.create_user("hashed", "User", email="u@local.dev")
     assert await db.user_count() == 1
     await db.close()
 

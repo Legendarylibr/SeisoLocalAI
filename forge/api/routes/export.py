@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import uuid
-from typing import Annotated
+from pathlib import Path
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
@@ -16,27 +19,152 @@ from forge.db.store import Database
 from forge.orchestrators.export import ExportOrchestrator
 from forge.security.audit import audit_event
 from forge.security.auth import get_current_user_id
-from forge.services.user_paths import assert_user_path
+from forge.services.hf_auth import resolve_hf_token
 from forge.services.jobs import assert_job_owner
+from forge.services.publishable import (
+    assert_pushable_checkpoint,
+    assert_pushable_model,
+    assert_pushable_path,
+    list_publishable_models,
+)
+from forge.services.user_paths import assert_user_path
+from seiso.export.formats import ExportFormat, publish_folder_to_hub
+from seiso.export.model_card import HubModelMetadata
 from seiso.security import SecurityError
 
 router = APIRouter(prefix="/export", tags=["export"])
 
 
+class HubPublishRequest(BaseModel):
+    username: str = Field(min_length=1, max_length=128)
+    model_name: str = Field(min_length=1, max_length=128)
+    author: str = Field(min_length=1, max_length=256)
+    license: str = Field(default="apache-2.0", max_length=64)
+    base_model: str | None = Field(default=None, max_length=256)
+    description: str = Field(default="", max_length=4000)
+    tags: list[str] = Field(default_factory=list)
+    hf_token: str | None = Field(default=None, description="Per-request HF API token")
+    use_cli: bool = Field(default=False, description="Prefer huggingface-cli cached login token")
+
+
 class ExportStartRequest(BaseModel):
     checkpoint: str
     formats: list[str] = Field(default_factory=lambda: ["merged"])
+    profile: str | None = Field(
+        default=None,
+        description="Export profile: lora_adapter, lora_bundle, full_finetune, full_bundle, inference, gguf_only, hub_ready",
+    )
     gguf_quantizations: list[str] = Field(default_factory=lambda: ["q4_k_m"])
-    hub_repo: str | None = None
+    hub: HubPublishRequest | None = None
+    hub_repo: str | None = Field(default=None, description="Deprecated — use hub.username + hub.model_name")
     rl_quant_job_id: str | None = Field(
         default=None,
         description="Apply GGUF quants from a completed RL quant recommendation job",
     )
 
 
+class PublishToHubRequest(BaseModel):
+    model_id: str | None = None
+    output_path: str | None = None
+    export_job_id: str | None = None
+    hub: HubPublishRequest
+
+
 class ExportJobResponse(BaseModel):
     job_id: str
     status: str
+
+
+def _hub_metadata_from_request(hub: HubPublishRequest, *, job_id: str | None = None, source: str | None = None) -> HubModelMetadata:
+    return HubModelMetadata(
+        username=hub.username.strip(),
+        model_name=hub.model_name.strip(),
+        author=hub.author.strip(),
+        license=hub.license.strip() or "apache-2.0",
+        base_model=hub.base_model.strip() if hub.base_model else None,
+        description=hub.description,
+        tags=hub.tags,
+        seiso_job_id=job_id,
+        seiso_source=source,
+    )
+
+
+def _resolve_hub_repo(body: ExportStartRequest) -> tuple[str | None, HubModelMetadata | None]:
+    if body.hub:
+        meta = _hub_metadata_from_request(body.hub)
+        meta.validate()
+        return meta.repo_id, meta
+    if body.hub_repo:
+        return body.hub_repo.strip(), None
+    return None, None
+
+
+def _resolve_token(
+    settings: ForgeSettings,
+    user_id: str,
+    hub: HubPublishRequest | None,
+) -> str | None:
+    if not hub:
+        return settings.hf_token or None
+    token, _ = resolve_hf_token(
+        request_token=hub.hf_token,
+        user_id=user_id,
+        data_dir=settings.data_dir,
+        encryption_key=settings.db_encryption_key_bytes,
+        settings_token=settings.hf_token or None,
+        prefer_cli=hub.use_cli,
+    )
+    return token
+
+
+@router.get("/profiles")
+async def export_profiles() -> list[dict]:
+    from seiso.export.pipeline import profile_catalog
+
+    return profile_catalog()
+
+
+class HubPrecheckRequest(BaseModel):
+    hub: HubPublishRequest
+    formats: list[str] = Field(default_factory=lambda: ["merged"])
+    profile: str | None = None
+    gguf_quantizations: list[str] = Field(default_factory=lambda: ["q4_k_m"])
+
+
+@router.post("/precheck")
+async def precheck_hub_export_route(
+    body: HubPrecheckRequest,
+    user_id: Annotated[str, Depends(get_current_user_id)],
+    settings: Annotated[ForgeSettings, Depends(get_settings)],
+) -> dict:
+    """Validate Hub repo availability and model card before starting export."""
+    from seiso.export.hub_precheck import precheck_hub_export
+
+    meta = _hub_metadata_from_request(body.hub)
+    meta.validate()
+    if body.profile or "gguf" in [f.lower() for f in body.formats]:
+        meta.quantizations = list(body.gguf_quantizations)
+    token = _resolve_token(settings, user_id, body.hub)
+    if not token:
+        raise HTTPException(
+            400,
+            "Hugging Face token required. Enter an API token, save one in Settings, set SEISO_HF_TOKEN, or run `huggingface-cli login`.",
+        )
+    result = precheck_hub_export(
+        repo_id=meta.repo_id,
+        token=token,
+        metadata=meta,
+        formats=body.formats,
+    )
+    return result.to_dict()
+
+
+@router.get("/publishable")
+async def publishable_outputs(
+    user_id: Annotated[str, Depends(get_current_user_id)],
+    db: Annotated[Database, Depends(get_db)],
+) -> list[dict]:
+    return await list_publishable_models(db, user_id)
 
 
 @router.get("/jobs")
@@ -56,9 +184,17 @@ async def start_export(
     settings: Annotated[ForgeSettings, Depends(get_settings)],
 ) -> ExportJobResponse:
     try:
-        assert_user_path(settings.data_dir, user_id, body.checkpoint)
-    except SecurityError as exc:
-        raise HTTPException(403, str(exc)) from exc
+        await assert_pushable_checkpoint(db, data_dir=settings.data_dir, user_id=user_id, checkpoint=body.checkpoint)
+    except (SecurityError, ValueError) as exc:
+        raise HTTPException(403 if isinstance(exc, SecurityError) else 400, str(exc)) from exc
+
+    hub_repo, hub_metadata = _resolve_hub_repo(body)
+    hub_token = _resolve_token(settings, user_id, body.hub)
+    if hub_repo and not hub_token:
+        raise HTTPException(
+            400,
+            "Hugging Face token required. Enter an API token, save one in Settings, set SEISO_HF_TOKEN, or run `huggingface-cli login`.",
+        )
 
     job_id = str(uuid.uuid4())
     config = body.model_dump()
@@ -71,21 +207,43 @@ async def start_export(
         if rl_job.get("status") != "completed":
             raise HTTPException(400, "RL quant job is not completed")
         stored = rl_job.get("gguf_quants_json") or "[]"
-        import json as _json
-
-        parsed = _json.loads(stored)
+        parsed = json.loads(stored)
         if parsed:
             gguf_quants = parsed
         config["rl_quant_job_id"] = body.rl_quant_job_id
 
+    if hub_repo and hub_metadata:
+        from seiso.export.hub_precheck import assert_hub_precheck_ok, precheck_hub_export
+        from seiso.export.profiles import resolve_formats
+
+        resolved_formats = resolve_formats(
+            formats=body.formats if not body.profile else None,
+            profile=body.profile,
+        )
+        if any(f.value == "gguf" for f in resolved_formats):
+            hub_metadata.quantizations = gguf_quants
+        precheck = precheck_hub_export(
+            repo_id=hub_repo,
+            token=hub_token,
+            metadata=hub_metadata,
+            formats=[f.value for f in resolved_formats],
+        )
+        if not precheck.ok:
+            try:
+                assert_hub_precheck_ok(precheck)
+            except ValueError as exc:
+                raise HTTPException(400, str(exc)) from exc
+
     await db.create_export_job(user_id, config, job_id=job_id)
     orchestrator.create_job(job_id=job_id, user_id=user_id)
-    payload = {
+    payload: dict[str, Any] = {
         **body.model_dump(),
         "gguf_quantizations": gguf_quants,
         "user_id": user_id,
         "output_dir": str(settings.data_dir / "exports" / user_id / job_id),
-        "hub_token": settings.hf_token or None,
+        "hub_repo": hub_repo,
+        "hub_token": hub_token,
+        "hub_metadata": hub_metadata.__dict__ if hub_metadata else None,
     }
 
     async def _run() -> None:
@@ -115,6 +273,126 @@ async def start_export(
     asyncio.create_task(_run())
     audit_event("export_start", user_id=user_id, job_id=job_id, formats=body.formats)
     return ExportJobResponse(job_id=job_id, status="pending")
+
+
+@router.post("/publish")
+async def publish_to_hub(
+    body: PublishToHubRequest,
+    user_id: Annotated[str, Depends(get_current_user_id)],
+    db: Annotated[Database, Depends(get_db)],
+    settings: Annotated[ForgeSettings, Depends(get_settings)],
+) -> dict[str, str]:
+    """Publish a completed Seiso export output to Hugging Face."""
+    token = _resolve_token(settings, user_id, body.hub)
+    if not token:
+        raise HTTPException(
+            400,
+            "Hugging Face token required. Enter an API token, save one in Settings, set SEISO_HF_TOKEN, or run `huggingface-cli login`.",
+        )
+
+    meta = _hub_metadata_from_request(body.hub)
+    meta.validate()
+    repo_id = meta.repo_id
+
+    folder: Path | None = None
+    job_id: str | None = None
+    source = "export"
+
+    if body.model_id:
+        model = await assert_pushable_model(db, model_id=body.model_id, user_id=user_id)
+        folder = Path(model["path"])
+        meta_raw = json.loads(model.get("metadata_json") or "{}")
+        job_id = meta_raw.get("job_id")
+        source = model.get("source") or "export"
+    elif body.export_job_id:
+        job = await db.get_export_job(body.export_job_id, user_id)
+        if not job or job.get("status") != "completed":
+            raise HTTPException(400, "Export job not found or not completed")
+        outputs = json.loads(job.get("output_paths_json") or "{}")
+        if not outputs:
+            raise HTTPException(400, "Export job has no outputs")
+        preferred = next((v for k, v in outputs.items() if "gguf" in k.lower()), None)
+        if not preferred:
+            preferred = outputs.get("merged") or next(iter(outputs.values()))
+        folder = Path(preferred)
+        job_id = body.export_job_id
+    elif body.output_path:
+        try:
+            folder = await assert_pushable_path(db, data_dir=settings.data_dir, user_id=user_id, target=body.output_path)
+        except (SecurityError, ValueError) as exc:
+            raise HTTPException(403 if isinstance(exc, SecurityError) else 400, str(exc)) from exc
+    else:
+        raise HTTPException(400, "Provide model_id, export_job_id, or output_path")
+
+    if folder.is_file():
+        folder = folder.parent
+
+    meta.seiso_job_id = job_id
+    meta.seiso_source = source
+
+    from seiso.export.hub_precheck import assert_hub_precheck_ok, precheck_hub_export
+
+    precheck = precheck_hub_export(
+        repo_id=repo_id,
+        token=token,
+        metadata=meta,
+        formats=meta.export_formats or None,
+    )
+    if not precheck.ok:
+        assert_hub_precheck_ok(precheck)
+
+    logs: list[str] = []
+
+    def on_log(msg: str) -> None:
+        logs.append(msg)
+
+    try:
+        publish_folder_to_hub(folder, repo_id=repo_id, token=token, metadata=meta, on_log=on_log, skip_precheck=True)
+    except Exception as exc:
+        raise HTTPException(500, f"Hugging Face upload failed: {exc}") from exc
+
+    audit_event("hf_publish", user_id=user_id, repo_id=repo_id, path=str(folder))
+    return {"repo_id": repo_id, "path": str(folder), "log": "\n".join(logs)}
+
+
+@router.get("/outputs/{job_id}/download")
+async def download_export_output(
+    job_id: str,
+    user_id: Annotated[str, Depends(get_current_user_id)],
+    db: Annotated[Database, Depends(get_db)],
+    settings: Annotated[ForgeSettings, Depends(get_settings)],
+    key: str = "gguf",
+):
+    """Download a GGUF or other export artifact from a completed export job."""
+    job = await db.get_export_job(job_id, user_id)
+    if not job or job.get("status") != "completed":
+        raise HTTPException(404, "Export job not found or not completed")
+
+    outputs = json.loads(job.get("output_paths_json") or "{}")
+    target_raw = outputs.get(key)
+    if not target_raw:
+        for k, v in outputs.items():
+            if key.lower() in k.lower():
+                target_raw = v
+                break
+    if not target_raw:
+        raise HTTPException(404, f"Output key {key!r} not found")
+
+    try:
+        path = assert_user_path(settings.data_dir, user_id, target_raw)
+    except SecurityError as exc:
+        raise HTTPException(403, str(exc)) from exc
+
+    if path.is_dir():
+        ggufs = sorted(path.glob("*.gguf"))
+        if not ggufs:
+            raise HTTPException(404, "No GGUF file in output directory")
+        path = ggufs[0]
+
+    if not path.is_file():
+        raise HTTPException(404, "File not found")
+
+    return FileResponse(path, filename=path.name, media_type="application/octet-stream")
 
 
 @router.get("/jobs/{job_id}/stream")

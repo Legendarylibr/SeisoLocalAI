@@ -2,20 +2,28 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
 import os
 from pathlib import Path
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
+from sse_starlette.sse import EventSourceResponse
 
 from forge.api.deps import get_db, get_inference_orchestrator
 from forge.config import ForgeSettings, get_settings
 from forge.db.store import Database
 from forge.orchestrators.inference import InferenceOrchestrator
 from forge.security.auth import get_current_user_id
+from forge.services.model_download import perform_model_download
+from forge.services.user_paths import assert_user_path
+from forge.services.hardware import enrich_catalog_models, hardware_profile, hardware_summary
+from forge.services.hf_auth import resolve_hf_token
+from forge.services.publishable import is_pushable_model
 from seiso.models.catalog import get_families, search_catalog
-from forge.services.user_paths import assert_user_path, user_dir
 from seiso.security import SecurityError, sanitize_filename
 
 router = APIRouter(prefix="/models", tags=["models"])
@@ -42,14 +50,32 @@ class LocalModelCreate(BaseModel):
 @router.get("/catalog")
 async def model_catalog(
     user_id: Annotated[str, Depends(get_current_user_id)],
+    settings: Annotated[ForgeSettings, Depends(get_settings)],
     q: str = Query("", description="Search query"),
     family: str | None = Query(None),
     task: str | None = Query(None),
+    hardware_aware: bool = Query(True, description="Rank and annotate by local hardware fit"),
+    fits_only: bool = Query(False, description="Show only ideal/good fits for this machine"),
 ) -> dict:
+    models = search_catalog(q, family, task)
+    profile = hardware_profile()
+    hf_token: str | None = None
+    if hardware_aware:
+        hf_token, _ = resolve_hf_token(
+            user_id=user_id,
+            data_dir=settings.data_dir,
+            encryption_key=settings.db_encryption_key_bytes,
+            settings_token=settings.hf_token or None,
+        )
+        models = enrich_catalog_models(models, profile, token=hf_token)
+    if fits_only:
+        models = [m for m in models if m.get("hardware_fit") in ("ideal", "good")]
     return {
-        "models": search_catalog(q, family, task),
+        "models": models,
         "families": get_families(),
-        "total": len(search_catalog(q, family, task)),
+        "total": len(models),
+        "hardware_summary": hardware_summary(profile),
+        "local_only": True,
     }
 
 
@@ -66,7 +92,7 @@ async def unload_vram(
     user_id: Annotated[str, Depends(get_current_user_id)],
     orchestrator: Annotated[InferenceOrchestrator, Depends(get_inference_orchestrator)],
 ) -> dict:
-    return await orchestrator._runner.unload()
+    return await orchestrator._runner.cancel_and_unload()
 
 
 @router.get("")
@@ -74,7 +100,39 @@ async def list_models(
     user_id: Annotated[str, Depends(get_current_user_id)],
     db: Annotated[Database, Depends(get_db)],
 ) -> list[dict]:
-    return await db.list_models(user_id)
+    models = await db.list_models(user_id)
+    for m in models:
+        m["pushable"] = is_pushable_model(m)
+    return models
+
+
+@router.get("/{model_id}/download")
+async def download_local_model(
+    model_id: str,
+    user_id: Annotated[str, Depends(get_current_user_id)],
+    db: Annotated[Database, Depends(get_db)],
+    settings: Annotated[ForgeSettings, Depends(get_settings)],
+):
+    """Download a local GGUF or other model file to the browser."""
+    model = await db.get_model(model_id, user_id)
+    if not model:
+        raise HTTPException(404, "Model not found")
+    try:
+        path = assert_user_path(settings.data_dir, user_id, model["path"])
+    except SecurityError as exc:
+        raise HTTPException(403, str(exc)) from exc
+
+    if path.is_dir():
+        ggufs = sorted(path.glob("*.gguf"))
+        if ggufs:
+            path = ggufs[0]
+        else:
+            raise HTTPException(404, "No downloadable file in model directory")
+
+    if not path.is_file():
+        raise HTTPException(404, "File not found")
+
+    return FileResponse(path, filename=path.name, media_type="application/octet-stream")
 
 
 @router.post("/scan")
@@ -116,60 +174,73 @@ async def download_model(
     db: Annotated[Database, Depends(get_db)],
     settings: Annotated[ForgeSettings, Depends(get_settings)],
 ) -> dict[str, Any]:
-    from huggingface_hub import hf_hub_download, list_repo_files, snapshot_download
-
-    token = settings.hf_token or None
-    dest_dir = user_dir(settings.data_dir, user_id, "models") / sanitize_filename(body.repo_id.replace("/", "--"))
-    dest_dir.mkdir(parents=True, exist_ok=True)
-
-    if body.variant == "safetensors" or (body.variant == "auto" and not body.filename):
-        # Full model snapshot for training
-        path = snapshot_download(
-            repo_id=body.repo_id,
-            local_dir=str(dest_dir),
-            token=token,
-            revision=body.revision,
-            ignore_patterns=["*.md", "*.h5", "original/*"],
-        )
-        await db.add_model(
+    try:
+        return await perform_model_download(
             user_id=user_id,
-            name=body.repo_id.split("/")[-1],
-            path=path,
-            source=f"hf:{body.repo_id}",
-            format="safetensors",
-            size_bytes=_dir_size(Path(path)),
-        )
-        return {"downloaded": [path], "repo_id": body.repo_id, "variant": "safetensors"}
-
-    if body.filename:
-        files = [body.filename]
-    else:
-        files = [
-            f
-            for f in list_repo_files(body.repo_id, token=token)
-            if f.endswith((".gguf", ".safetensors", ".bin"))
-        ][:5]
-
-    downloaded: list[str] = []
-    for fname in files:
-        path = hf_hub_download(
+            db=db,
+            data_dir=settings.data_dir,
+            hf_cache_dir=settings.hf_cache_dir,
+            settings_hf_token=settings.hf_token,
+            db_encryption_key=settings.db_encryption_key_bytes,
             repo_id=body.repo_id,
-            filename=fname,
+            filename=body.filename,
             revision=body.revision,
-            local_dir=str(dest_dir),
-            token=token,
+            variant=body.variant,
         )
-        downloaded.append(path)
-        await db.add_model(
-            user_id=user_id,
-            name=fname,
-            path=path,
-            source=f"hf:{body.repo_id}",
-            format=Path(fname).suffix.lstrip("."),
-            size_bytes=Path(path).stat().st_size,
-        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
-    return {"downloaded": downloaded, "repo_id": body.repo_id}
+
+@router.post("/download/stream")
+async def download_model_stream(
+    body: ModelDownloadRequest,
+    user_id: Annotated[str, Depends(get_current_user_id)],
+    db: Annotated[Database, Depends(get_db)],
+    settings: Annotated[ForgeSettings, Depends(get_settings)],
+):
+    loop = asyncio.get_running_loop()
+    queue: asyncio.Queue[tuple[str, Any]] = asyncio.Queue()
+
+    def on_progress(payload: dict[str, Any]) -> None:
+        loop.call_soon_threadsafe(queue.put_nowait, ("progress", payload))
+
+    async def run_download() -> None:
+        try:
+            result = await perform_model_download(
+                user_id=user_id,
+                db=db,
+                data_dir=settings.data_dir,
+                hf_cache_dir=settings.hf_cache_dir,
+                settings_hf_token=settings.hf_token,
+                db_encryption_key=settings.db_encryption_key_bytes,
+                repo_id=body.repo_id,
+                filename=body.filename,
+                revision=body.revision,
+                variant=body.variant,
+                on_progress=on_progress,
+            )
+            await queue.put(("complete", result))
+        except Exception as exc:
+            await queue.put(("error", str(exc)))
+
+    async def event_gen():
+        task = asyncio.create_task(run_download())
+        try:
+            while True:
+                kind, payload = await queue.get()
+                if kind == "progress":
+                    yield {"event": "progress", "data": json.dumps(payload)}
+                elif kind == "complete":
+                    yield {"event": "complete", "data": json.dumps(payload)}
+                    break
+                elif kind == "error":
+                    yield {"event": "error", "data": str(payload)}
+                    break
+        finally:
+            if not task.done():
+                task.cancel()
+
+    return EventSourceResponse(event_gen())
 
 
 def _dir_size(path: Path) -> int:
