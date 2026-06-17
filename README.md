@@ -64,14 +64,13 @@ Runs on **Windows**, **Linux**, **WSL2**, and **macOS**. See [docs/platforms/](d
 
 ### Linux & macOS (recommended)
 
-Install **Python 3.10+**, **[Node.js 18+](https://nodejs.org/)**, and **git**, then:
+Install **Python 3.10+**, **[Node.js 18+](https://nodejs.org/)**, and **git**, then run one command:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/install.sh | bash
-~/Seiso/scripts/start.sh
 ```
 
-Open **http://127.0.0.1:8765** and complete onboarding (create your local admin password).
+That installs Seiso, builds the UI, and starts Forge. Open **http://127.0.0.1:8765** and create your local admin password.
 
 **Options:**
 
@@ -79,8 +78,8 @@ Open **http://127.0.0.1:8765** and complete onboarding (create your local admin 
 # Custom install location
 SEISO_INSTALL_DIR=~/code/Seiso curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/install.sh | bash
 
-# Install and start Forge immediately
-SEISO_START=1 curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/install.sh | bash
+# Install only — don't start Forge automatically
+SEISO_START=0 curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/install.sh | bash
 ```
 
 The installer clones to `~/Seiso`, creates a venv, installs platform extras (CUDA on Linux + NVIDIA, MLX on macOS), builds the Forge UI, and copies `.env.example` → `.env`.

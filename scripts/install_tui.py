@@ -8,10 +8,11 @@ import os
 import random
 import shutil
 import signal
-import subprocess
 import sys
 import time
 from typing import Iterable
+
+BRAND = "SeisoLocalAI"
 
 # Rain palette (cold, glitchy)
 C_SKY = "\033[38;5;24m"
@@ -19,14 +20,12 @@ C_RAIN = "\033[38;5;39m"
 C_GLITCH = "\033[38;5;45m"
 C_MUTE = "\033[38;5;238m"
 C_PERSON = "\033[38;5;252m"
-C_WARN = "\033[38;5;208m"
 
 # Sun palette (warm, hopeful)
 C_SUN = "\033[38;5;220m"
 C_GLOW = "\033[38;5;228m"
 C_WARM = "\033[38;5;214m"
 C_GRASS = "\033[38;5;82m"
-C_SKY_CLEAR = "\033[38;5;117m"
 
 RESET = "\033[0m"
 HIDE = "\033[?25l"
@@ -36,7 +35,7 @@ BOLD = "\033[1m"
 DIM = "\033[2m"
 INV = "\033[7m"
 
-GLITCH_CHARS = "▓▒░█╔╗╚╝║═@#$%&*~^/\\|<>"
+GLITCH_CHARS = "▓▒░█@#$%&*~^/\\|<>"
 
 RAIN_SCENES = [
     r"""
@@ -117,7 +116,7 @@ def _glitch_text(text: str, intensity: float) -> str:
             out.append(random.choice(GLITCH_CHARS))
     line = "".join(out)
     if random.random() < intensity * 0.35:
-        shift = random.randint(-3, 3)
+        shift = random.randint(-2, 2)
         if shift > 0:
             line = " " * shift + line
         elif shift < 0:
@@ -125,46 +124,44 @@ def _glitch_text(text: str, intensity: float) -> str:
     return line
 
 
+def _flash_brand(frame: int, glitch: float) -> str:
+    colors = (C_RAIN, C_GLITCH, C_GLOW, C_SUN, C_WARM)
+    text = BRAND
+    if frame % 4 == 0:
+        text = text.upper()
+    if frame % 7 != 0:
+        text = _glitch_text(text, glitch * 0.45)
+    color = colors[frame % len(colors)]
+    cols, _ = _size()
+    pad = max(0, (cols - len(BRAND)) // 2)
+    flash = " " * pad + text
+    if frame % 6 < 3:
+        return f"{INV}{color}{BOLD}{flash}{RESET}"
+    return f"{color}{BOLD}{flash}{RESET}"
+
+
 def _draw(
     body: str,
     *,
-    title: str,
     subtitle: str,
-    footer: str,
+    brand_line: str,
     glitch: float,
     invert_flash: bool = False,
 ) -> None:
     cols, _ = _size()
     bar = "═" * min(cols - 2, 58)
-    head = f"{C_GLITCH}{BOLD}▛▀▀ {title} ▀▀▜{RESET}"
     sub = f"{DIM}{subtitle}{RESET}"
-    foot = f"{C_WARN if glitch > 0.2 else C_GLOW}{footer}{RESET}"
 
-    lines = [_glitch_text(_fmt(body), glitch) for body in [body]]
-    art = lines[0].strip("\n").splitlines()
+    art = _glitch_text(_fmt(body), glitch).strip("\n").splitlines()
 
-    buf = [CLEAR, head, sub, ""]
+    buf = [CLEAR, brand_line, "", sub, ""]
     buf.extend(art)
-    buf.extend(["", foot, f"{C_MUTE}{bar}{RESET}"])
+    buf.extend(["", brand_line, f"{C_MUTE}{bar}{RESET}"])
     if invert_flash:
-        buf.append(f"{INV}{C_GLITCH} SIGNAL CORRUPT ░▒▓ RESET... {RESET}")
+        buf.append(f"{INV}{C_GLITCH} ░▒▓ SIGNAL ░▒▓ {RESET}")
 
     sys.stdout.write("\n".join(buf) + "\n")
     sys.stdout.flush()
-
-
-def _tail_log(path: str, max_lines: int = 2) -> str:
-    try:
-        with open(path, encoding="utf-8", errors="replace") as fh:
-            lines = fh.readlines()
-    except OSError:
-        return "working..."
-    if not lines:
-        return "starting..."
-    last = lines[-1].strip()
-    if len(last) > 64:
-        last = last[:61] + "..."
-    return last or "working..."
 
 
 def cmd_intro(_: argparse.Namespace) -> int:
@@ -173,12 +170,12 @@ def cmd_intro(_: argparse.Namespace) -> int:
     sys.stdout.write(HIDE)
     try:
         for i in range(6):
+            glitch = 0.15 + (i % 3) * 0.08
             _draw(
                 RAIN_SCENES[i % len(RAIN_SCENES)],
-                title="SEISO INSTALL",
-                subtitle="signal locked · rain on the wire",
-                footer="initializing glitch buffer...",
-                glitch=0.15 + (i % 3) * 0.08,
+                subtitle="rain on the wire",
+                brand_line=_flash_brand(i, glitch),
+                glitch=glitch,
                 invert_flash=i == 2,
             )
             time.sleep(0.12)
@@ -190,19 +187,19 @@ def cmd_intro(_: argparse.Namespace) -> int:
 
 def cmd_during(args: argparse.Namespace) -> int:
     if not _tty():
-        return subprocess.call(["wait", str(args.wait_pid)]) if args.wait_pid else 0
+        if args.wait_pid:
+            _, status = os.waitpid(args.wait_pid, 0)
+            return os.waitstatus_to_exitcode(status)
+        return 0
 
     sys.stdout.write(HIDE)
-    proc = None
-    if args.wait_pid:
+    proc = args.wait_pid
+    if proc:
         try:
-            os.kill(args.wait_pid, 0)
+            os.kill(proc, 0)
         except OSError:
             return 0
-        proc = args.wait_pid
 
-    log_path = args.log or ""
-    label = args.label or "installing"
     frame = 0
     try:
         while True:
@@ -212,12 +209,10 @@ def cmd_during(args: argparse.Namespace) -> int:
                 except OSError:
                     break
             glitch = 0.12 + (frame % 5) * 0.05 + random.random() * 0.08
-            detail = _tail_log(log_path) if log_path else label
             _draw(
                 RAIN_SCENES[frame % len(RAIN_SCENES)],
-                title="SEISO INSTALL",
-                subtitle=f"{label} · someone waits in the rain",
-                footer=f"▸ {detail}",
+                subtitle="installing · someone waits in the rain",
+                brand_line=_flash_brand(frame, glitch),
                 glitch=glitch,
                 invert_flash=frame % 17 == 0,
             )
@@ -238,35 +233,30 @@ def cmd_outro(_: argparse.Namespace) -> int:
         return 0
     sys.stdout.write(HIDE)
     try:
-        # Rain fading — less glitch each frame
         for i in range(8):
+            glitch = max(0.02, 0.35 - i * 0.04)
             _draw(
                 RAIN_SCENES[(7 - i) % len(RAIN_SCENES)],
-                title="SEISO INSTALL",
                 subtitle="clouds breaking · static clearing",
-                footer="almost there...",
-                glitch=max(0.02, 0.35 - i * 0.04),
-                invert_flash=False,
+                brand_line=_flash_brand(i, glitch),
+                glitch=glitch,
             )
             time.sleep(0.08)
 
-        # Sun burst
         for i in range(10):
-            body = SUN_SCENE
-            if i < 3:
-                body = RAIN_SCENES[0] + "\n" + SUN_SCENE
+            body = SUN_SCENE if i >= 3 else RAIN_SCENES[0] + "\n" + SUN_SCENE
+            glitch = max(0.0, 0.12 - i * 0.012)
             _draw(
                 body,
-                title="SEISO READY",
                 subtitle="optimism · sunlight · clear signal",
-                footer="the storm stopped — you're good to go",
-                glitch=max(0.0, 0.12 - i * 0.012),
+                brand_line=_flash_brand(i + 20, glitch),
+                glitch=glitch,
                 invert_flash=i == 1,
             )
             time.sleep(0.11)
 
         sys.stdout.write(
-            f"\n{C_SUN}{BOLD}✦ Seiso installed — open http://127.0.0.1:8765 ✦{RESET}\n\n"
+            f"\n{C_SUN}{BOLD}✦ {BRAND} ready ✦{RESET}\n\n"
         )
         sys.stdout.flush()
     finally:
@@ -284,8 +274,6 @@ def main(argv: Iterable[str] | None = None) -> int:
 
     p_during = sub.add_parser("during")
     p_during.add_argument("--wait-pid", type=int, required=True)
-    p_during.add_argument("--log", default="")
-    p_during.add_argument("--label", default="installing")
     p_during.set_defaults(func=cmd_during)
 
     p_outro = sub.add_parser("outro")
