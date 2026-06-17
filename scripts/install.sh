@@ -22,6 +22,7 @@ INSTALL_DIR="${SEISO_INSTALL_DIR:-$HOME/Seiso}"
 BRANCH="${SEISO_BRANCH:-main}"
 
 log() { printf '==> %s\n' "$*"; }
+warn() { printf 'warning: %s\n' "$*" >&2; }
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 
 need_cmd() {
@@ -77,6 +78,39 @@ resolve_root() {
   printf '%s\n' "$INSTALL_DIR"
 }
 
+warn_windows_mount() {
+  local root="$1"
+  [[ "$root" == /mnt/* ]] || return 0
+  cat <<EOF >&2
+
+warning: Seiso is on a Windows drive mount ($root).
+CUDA wheel builds (flash-attn) often fail there with pyproject.toml / setup.py errors.
+
+Recommended: install on the Linux filesystem instead:
+  SEISO_INSTALL_DIR=~/Seiso curl -fsSL .../scripts/install.sh | bash
+
+EOF
+}
+
+maybe_install_flash_attn() {
+  local root="$1"
+  [[ "${SEISO_SKIP_FLASH_ATTN:-0}" == "1" ]] && {
+    log "Skipping Flash Attention (SEISO_SKIP_FLASH_ATTN=1)"
+    return 0
+  }
+  if [[ "$root" == /mnt/* ]]; then
+    log "Skipping Flash Attention on Windows mount ($root)"
+    log "Optional later: clone to ~/Seiso and run $root/scripts/install_flash_attn.sh"
+    return 0
+  fi
+  if [[ -x "$root/scripts/install_flash_attn.sh" ]]; then
+    log "Installing optional Flash Attention 2 (safe to skip on failure)"
+    if ! bash "$root/scripts/install_flash_attn.sh"; then
+      warn "Flash Attention install failed — Seiso will use PyTorch SDPA instead"
+    fi
+  fi
+}
+
 main() {
   local root extras venv_py
   uname -s | grep -Eq '^(Linux|Darwin)$' || die "This installer supports Linux and macOS only"
@@ -87,6 +121,7 @@ main() {
 
   root="$(resolve_root)"
   log "Using repository at $root"
+  warn_windows_mount "$root"
 
   if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
     die "Node.js and npm are required to build the Forge UI. Install Node 18+ from https://nodejs.org/"
@@ -107,6 +142,10 @@ main() {
 
   log "Installing Seiso (editable) — this may take several minutes"
   pip install -e "${root}[${extras}]"
+
+  if [[ "$extras" == *cuda* ]]; then
+    maybe_install_flash_attn "$root"
+  fi
 
   if [[ ! -f "$root/.env" && -f "$root/.env.example" ]]; then
     cp "$root/.env.example" "$root/.env"
@@ -145,7 +184,8 @@ EOF
     cat <<EOF
 
 Linux NVIDIA detected:
-  - CUDA extras were installed ([cuda]).
+  - CUDA extras were installed ([cuda] — Triton; flash-attn is optional).
+  - Optional Flash Attention: $root/scripts/install_flash_attn.sh
   - Before GPU training, set ONE of these in $root/.env:
       SEISO_NVIDIA_HOST_VENV_ACK=1   # bare-metal Linux
       SEISO_NVIDIA_WSL_ACK=1         # WSL2 only

@@ -61,6 +61,20 @@ For UI development, run `seiso forge` in one terminal and `cd forge-ui && npm ru
 
 **Fix:** Run the installer first, or set `SEISO_INSTALL_DIR` to your clone path.
 
+## Flash Attention / flash-attn wheel build fails
+
+**Symptom:** `pip install` fails building `flash-attn`, or errors about missing `pyproject.toml` / `setup.py` on `C:\` or `/mnt/c/...`.
+
+**Cause:** The repo or pip build temp dir is on a **Windows filesystem** (common in WSL when the clone lives under `/mnt/c/Users/...`). CUDA extension builds need a Linux-native path.
+
+**Fix:**
+1. Install on the Linux filesystem: `SEISO_INSTALL_DIR=~/Seiso` then re-run `./scripts/install.sh`
+2. Skip flash-attn during install: `SEISO_SKIP_FLASH_ATTN=1 ./scripts/install.sh`
+3. After a successful main install on `~/Seiso`, optionally run `./scripts/install_flash_attn.sh`
+4. Ensure CUDA toolkit (`nvcc --version`) and PyTorch CUDA match your driver ([pytorch.org](https://pytorch.org/get-started/locally/))
+
+Seiso does **not** require flash-attn — training and chat fall back to PyTorch SDPA when it is missing.
+
 ## Forge refuses to start (remote / proxy settings)
 
 **Symptom:** `RuntimeError: SEISO_ALLOW_REMOTE=true requires explicit acknowledgement`

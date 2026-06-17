@@ -24,6 +24,16 @@ Requirements:
 - CUDA toolkit (`nvcc`) for JIT-compiled fused kernels (first training run compiles)
 - PyTorch CUDA wheel (installed automatically via `torch` dependency)
 
+### Optional: Flash Attention 2
+
+Not required. Install after the main editable install when the repo lives on the **Linux filesystem** (e.g. `~/Seiso`), not on a Windows mount (`/mnt/c/...` in WSL):
+
+```bash
+./scripts/install_flash_attn.sh
+```
+
+Skip during install: `SEISO_SKIP_FLASH_ATTN=1 ./scripts/install.sh`
+
 ## Start Forge
 
 ```bash

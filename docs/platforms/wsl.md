@@ -10,11 +10,18 @@ Treat WSL2 as **Linux** for Seiso. This is the recommended Windows path for full
 
 ## Install (inside WSL)
 
+**Use the Linux home directory**, not a Windows path. Building CUDA wheels on `/mnt/c/...` often fails (missing `pyproject.toml` / `setup.py` on C:).
+
 ```bash
-cd /mnt/c/Users/<you>/Seiso   # or clone into ~/Seiso
+curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/install.sh | bash
+# installs to ~/Seiso by default
+
+# Or from an existing clone under ~:
+cd ~/Seiso
 python3 -m venv .venv && source .venv/bin/activate
 pip install -U pip
 pip install -e ".[forge,train,cuda,dev]"
+./scripts/install_flash_attn.sh   # optional
 ```
 
 Follow [linux-nvidia.md](linux-nvidia.md) for training, kernels, and multi-GPU.

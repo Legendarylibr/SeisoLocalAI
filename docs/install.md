@@ -129,6 +129,15 @@ Requirements:
 - CUDA toolkit (`nvcc`) for JIT-compiled fused kernels
 - PyTorch CUDA wheel (installed via `torch` dependency)
 
+Optional Flash Attention 2 (Linux native filesystem only — not `/mnt/c/...` in WSL):
+
+```bash
+./scripts/install_flash_attn.sh
+# or: pip install -e ".[flash-attn]" --no-build-isolation
+```
+
+Seiso works without flash-attn (PyTorch SDPA fallback).
+
 Full guide: [platforms/linux-nvidia.md](platforms/linux-nvidia.md)
 
 ### Linux + AMD ROCm
@@ -178,7 +187,8 @@ Full guide: [platforms/wsl.md](platforms/wsl.md)
 |-------|-------------------|-----------|
 | `forge` | FastAPI, uvicorn, auth, SQLite, SSE | All |
 | `train` | PyTorch, TRL, PEFT, bitsandbytes | All |
-| `cuda` | Triton, flash-attn | **Linux NVIDIA only** |
+| `cuda` | Triton fused-kernel support | **Linux NVIDIA only** |
+| `flash-attn` | Flash Attention 2 (optional; build from source) | **Linux NVIDIA only** |
 | `mlx` | mlx-lm | **macOS only** |
 | `llamacpp` | llama-cpp-python (GGUF inference) | All |
 | `compress-quant` | auto-gptq, autoawq | CUDA recommended |
