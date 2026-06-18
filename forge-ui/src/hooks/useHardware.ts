@@ -1,18 +1,7 @@
-import { useEffect, useState } from "react";
-import { api, HardwareProfile } from "@/lib/api";
+import { useHardwareProfileContext } from "@/context/HardwareProfileContext";
 
-/** One-shot local hardware profile — never leaves the machine. */
+/** Cached local hardware profile — fetched once per authenticated session. */
 export function useHardwareProfile() {
-  const [profile, setProfile] = useState<HardwareProfile | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    api
-      .hardware()
-      .then(setProfile)
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, []);
-
+  const { profile, loading } = useHardwareProfileContext();
   return { profile, loading };
 }

@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, CatalogModel, InferenceModelOption } from "@/lib/api";
 import { formatBytes } from "@/lib/modelProgress";
-import { IconChevronDown, IconClose, IconSearch } from "@/components/Icons";
+import { HubComboboxSearch } from "@/components/HubComboboxSearch";
+import { IconChevronDown } from "@/components/Icons";
+import { useHubCombobox } from "@/hooks/useHubCombobox";
 
 type ChatModelPickerProps = {
   models: InferenceModelOption[];
@@ -22,12 +24,9 @@ export function ChatModelPicker({
   onSelectLocal,
   onSelectCatalog,
 }: ChatModelPickerProps) {
-  const [open, setOpen] = useState(false);
-  const [search, setSearch] = useState("");
+  const { open, setOpen, search, setSearch, rootRef, searchRef } = useHubCombobox();
   const [catalog, setCatalog] = useState<CatalogModel[]>([]);
   const [catalogLoading, setCatalogLoading] = useState(false);
-  const rootRef = useRef<HTMLDivElement>(null);
-  const searchRef = useRef<HTMLInputElement>(null);
 
   const selected = useMemo(() => models.find((m) => m.id === selection) ?? null, [models, selection]);
 
@@ -55,22 +54,6 @@ export function ChatModelPicker({
     const t = setTimeout(() => refreshCatalog(search), search ? 180 : 0);
     return () => clearTimeout(t);
   }, [open, search, refreshCatalog]);
-
-  useEffect(() => {
-    if (!open) return;
-    const onDoc = (e: MouseEvent) => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("click", onDoc);
-    return () => document.removeEventListener("click", onDoc);
-  }, [open]);
-
-  useEffect(() => {
-    if (open) {
-      setSearch("");
-      requestAnimationFrame(() => searchRef.current?.focus());
-    }
-  }, [open]);
 
   const q = search.toLowerCase().trim();
   const filteredLocal = useMemo(() => {
@@ -128,35 +111,13 @@ export function ChatModelPicker({
 
       {open && (
         <div className="chat-model-picker-menu" role="listbox">
-          <div className="chat-model-picker-search">
-            <span className="chat-model-picker-search-icon" aria-hidden>
-              <IconSearch size={15} />
-            </span>
-            <input
-              ref={searchRef}
-              type="search"
-              className="chat-model-picker-search-input"
-              placeholder="Search local & Hugging Face models…"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Escape") {
-                  e.preventDefault();
-                  setOpen(false);
-                }
-              }}
-            />
-            {search && (
-              <button
-                type="button"
-                className="chat-model-picker-search-clear"
-                onClick={() => setSearch("")}
-                aria-label="Clear search"
-              >
-                <IconClose size={14} />
-              </button>
-            )}
-          </div>
+          <HubComboboxSearch
+            searchRef={searchRef}
+            value={search}
+            placeholder="Search local & Hugging Face models…"
+            onChange={setSearch}
+            onEscape={() => setOpen(false)}
+          />
 
           <div className="chat-model-picker-list">
             {filteredLocal.length > 0 && (

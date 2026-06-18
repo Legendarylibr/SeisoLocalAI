@@ -63,117 +63,178 @@ Runs on **Windows**, **Linux**, **WSL2**, and **macOS**. See [docs/platforms/](d
 
 ## Quick start
 
-### Linux & macOS (recommended)
+**Forge URL (all platforms):** [http://127.0.0.1:8765](http://127.0.0.1:8765)  
+On first launch, create your local admin password in the browser tab that opens.
 
-Install **Python 3.10+**, **[Node.js 18+](https://nodejs.org/)**, and **git**, then run one command:
+### Paths on your system
+
+Seiso uses two directories. Override either with environment variables when needed.
+
+| Purpose | Linux / macOS / WSL | Windows (native) | Override |
+|---------|---------------------|------------------|----------|
+| **Repository** (clone, venv, scripts) | `$HOME/Seiso` | `%USERPROFILE%\Seiso` | `SEISO_INSTALL_DIR` |
+| **User data** (models, checkpoints, exports) | `$HOME/.seiso` | `%USERPROFILE%\.seiso` | `SEISO_DATA_DIR` |
+
+In config files and Python, `~/.seiso` expands correctly on every OS. In shell commands, use the column for your platform — do not paste Unix `~/` paths into PowerShell.
+
+### Linux, macOS, and WSL2 (recommended)
+
+One command installs missing system tools (Python, Node, git when possible), clones the repo, builds the UI, and **starts Forge automatically** (browser opens when ready):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/install.sh | bash
 ```
 
-That installs Seiso, builds the UI, and starts Forge. Open **http://127.0.0.1:8765** and create your local admin password.
+What the installer does:
 
-If setup does not behave as expected, run:
+1. Clones to `$HOME/Seiso` (or `SEISO_INSTALL_DIR`)
+2. Creates `.venv` and installs platform extras (CUDA on Linux + NVIDIA, MLX on macOS, GGUF via `llamacpp`)
+3. Copies `.env.example` → `.env` if missing
+4. Builds `forge-ui/dist`
+5. Runs `seiso forge` and opens the browser
 
-```bash
-~/Seiso/scripts/doctor.sh
-~/Seiso/scripts/doctor.sh --network
-```
-
-Catalog chat downloads are local GGUF files for llama.cpp and usually need 2-8 GB each; larger models can need 10-30+ GB. Ollama models live in Ollama's own store, so use `ollama pull` or `ollama create` when you want the Ollama path.
-
-**Options:**
-
-Custom install location:
-
-```bash
-SEISO_INSTALL_DIR=~/code/Seiso curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/install.sh | bash
-```
-
-Install only, without starting Forge automatically:
+**Install only** (no auto-start):
 
 ```bash
 SEISO_START=0 curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/install.sh | bash
 ```
 
-The installer clones to `~/Seiso`, creates a venv, installs platform extras (CUDA on Linux + NVIDIA, MLX on macOS), builds the Forge UI, and copies `.env.example` → `.env`.
-
-### Manual install (all platforms)
-
-The commands below assume a fresh clone at `~/Seiso`. Paste the commands only, not explanatory text.
-
-**Requirements:** Python 3.10+, [Node.js 18+](https://nodejs.org/) (20 LTS recommended), and git.
-
-Base install:
+**Custom install location:**
 
 ```bash
-git clone https://github.com/Legendarylibr/SeisoLocalAI.git ~/Seiso
-cd ~/Seiso
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -U pip wheel setuptools
-pip install -e ".[forge,train,dev]"
-cd forge-ui
-npm ci
-npm run build
-cd ..
-seiso doctor
-seiso forge
+SEISO_INSTALL_DIR="$HOME/code/Seiso" curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/install.sh | bash
 ```
 
-macOS Apple Silicon with MLX:
+**Already cloned?** From the repository root:
 
 ```bash
-cd ~/Seiso
-source .venv/bin/activate
-pip install -e ".[forge,train,mlx,dev]"
-cd forge-ui
-npm ci
-npm run build
-cd ..
-seiso doctor
-seiso forge
+./scripts/install.sh          # install / upgrade deps + build UI; starts Forge by default
+SEISO_START=0 ./scripts/install.sh   # install only
 ```
 
-Linux + NVIDIA (adds Triton for fused kernels):
+### Starting Forge after install
 
-```bash
-cd ~/Seiso
-source .venv/bin/activate
-pip install -e ".[forge,train,cuda,dev]"
-cd forge-ui
-npm ci
-npm run build
-cd ..
-seiso doctor
-seiso forge
-```
+| Situation | Linux / macOS / WSL | Notes |
+|-----------|---------------------|-------|
+| **First install** | Handled by `install.sh` — no extra step | Browser opens at `http://127.0.0.1:8765` |
+| **Later sessions** | `"$SEISO_INSTALL_DIR/scripts/start.sh"` or `"$HOME/Seiso/scripts/start.sh"` | Re-checks deps, builds UI if missing, opens browser |
+| **One-liner restart** | `curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/start.sh \| bash` | Bootstraps install if repo is missing |
+| **Manual** | `cd "$HOME/Seiso" && source .venv/bin/activate && seiso forge` | Add `--open` to launch the browser |
+| **Custom port** | `SEISO_PORT=8766 seiso forge` | Or set in `.env` |
 
-Optional compression pipelines (install on top of the base stack):
+Stop Forge with `Ctrl+C` in the terminal where it is running.
 
-```bash
-pip install -e ".[compress-quant,compress-eval]"           # Code Llama GPTQ/AWQ (Linux NVIDIA)
-pip install -e ".[image-compress,image-compress-onnx]"     # Stable Diffusion pipeline
-```
+### Windows (native PowerShell)
 
-Full install guide: **[docs/install.md](docs/install.md)**  
-First-run walkthrough: **[docs/getting-started.md](docs/getting-started.md)**
-
-### Windows
+There is no Windows installer script — use manual steps. **WSL2 + NVIDIA** is recommended on Windows for full CUDA/Triton support ([docs/platforms/wsl.md](docs/platforms/wsl.md)).
 
 ```powershell
-git clone https://github.com/Legendarylibr/SeisoLocalAI.git Seiso
-cd Seiso
+git clone https://github.com/Legendarylibr/SeisoLocalAI.git "$env:USERPROFILE\Seiso"
+cd "$env:USERPROFILE\Seiso"
 python -m venv .venv
-.venv\Scripts\activate
+.\.venv\Scripts\Activate.ps1
 pip install -U pip wheel setuptools
 pip install -e ".[forge,train,dev]"
+Copy-Item .env.example .env -ErrorAction SilentlyContinue
 cd forge-ui; npm ci; npm run build; cd ..
 seiso doctor
 seiso forge
 ```
 
-See [docs/platforms/windows.md](docs/platforms/windows.md) for CUDA PyTorch and build tools.
+**Start Forge on later sessions:**
+
+```powershell
+cd "$env:USERPROFILE\Seiso"
+.\.venv\Scripts\Activate.ps1
+seiso forge
+```
+
+Open **http://127.0.0.1:8765** in your browser. See [docs/platforms/windows.md](docs/platforms/windows.md) for CUDA PyTorch and MSVC build tools.
+
+### Manual install (all platforms)
+
+**Requirements:** Python 3.10+, [Node.js 18+](https://nodejs.org/) (20 LTS recommended), and git.
+
+Replace `REPO` with your clone path: `$HOME/Seiso` (Unix), `%USERPROFILE%\Seiso` (Windows), or any directory you prefer.
+
+<details>
+<summary><strong>Linux / macOS / WSL — base install</strong></summary>
+
+```bash
+git clone https://github.com/Legendarylibr/SeisoLocalAI.git "$HOME/Seiso"
+cd "$HOME/Seiso"
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -U pip wheel setuptools
+pip install -e ".[forge,train,dev]"
+cp -n .env.example .env
+cd forge-ui && npm ci && npm run build && cd ..
+seiso doctor
+seiso forge
+```
+
+**macOS Apple Silicon** — add MLX for fast chat:
+
+```bash
+pip install -e ".[forge,train,mlx,dev]"
+```
+
+**Linux + NVIDIA** — add Triton fused kernels:
+
+```bash
+pip install -e ".[forge,train,cuda,dev]"
+```
+
+</details>
+
+<details>
+<summary><strong>Windows — base install</strong></summary>
+
+```powershell
+git clone https://github.com/Legendarylibr/SeisoLocalAI.git "$env:USERPROFILE\Seiso"
+cd "$env:USERPROFILE\Seiso"
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -U pip wheel setuptools
+pip install -e ".[forge,train,dev]"
+if (-not (Test-Path .env)) { Copy-Item .env.example .env }
+cd forge-ui; npm ci; npm run build; cd ..
+seiso doctor
+seiso forge
+```
+
+</details>
+
+Optional compression pipelines (install on top of the base stack, from an activated venv):
+
+```bash
+pip install -e ".[compress-quant,compress-eval]"       # Code Llama GPTQ/AWQ (Linux NVIDIA)
+pip install -e ".[image-compress,image-compress-onnx]" # Stable Diffusion pipeline
+```
+
+### Diagnose problems
+
+If install or start fails, **doctor runs automatically**. Run it manually anytime:
+
+```bash
+# Linux / macOS / WSL — adjust path if SEISO_INSTALL_DIR differs
+"$HOME/Seiso/scripts/doctor.sh"
+"$HOME/Seiso/scripts/doctor.sh" --network
+```
+
+```powershell
+# Windows — from repo root with venv active
+cd "$env:USERPROFILE\Seiso"
+.\.venv\Scripts\Activate.ps1
+seiso doctor
+```
+
+### Model download sizes
+
+Catalog chat downloads are local GGUF files for llama.cpp and usually need 2–8 GB each; larger models can need 10–30+ GB. Weights land in your Hugging Face cache (`SEISO_DATA_DIR/hf_cache` by default). Ollama models live in Ollama's own store — use `ollama pull` or `ollama create` for that path.
+
+Full install guide: **[docs/install.md](docs/install.md)**  
+First-run walkthrough: **[docs/getting-started.md](docs/getting-started.md)**
 
 ---
 
@@ -318,11 +379,17 @@ Three integrated pipelines ([compression.md](docs/compression.md)):
 
 ## Data & storage
 
-All user data lives under **`~/.seiso`** by default (`SEISO_DATA_DIR`):
+All user data lives under **`SEISO_DATA_DIR`** (default below):
+
+| OS | Default data directory |
+|----|------------------------|
+| Linux / macOS / WSL | `$HOME/.seiso` |
+| Windows | `%USERPROFILE%\.seiso` |
 
 ```
-~/.seiso/
-├── models/           # Downloaded model weights
+{SEISO_DATA_DIR}/
+├── hf_cache/         # Hugging Face hub cache (downloaded weights)
+├── models/           # Per-user inventory links to cached weights
 ├── checkpoints/      # Training outputs (per user)
 ├── exports/          # Merged / GGUF / LoRA exports
 ├── compress/         # LLM compression artifacts
@@ -330,7 +397,6 @@ All user data lives under **`~/.seiso`** by default (`SEISO_DATA_DIR`):
 ├── rl_quant/         # RL quant outputs
 ├── uploads/          # Datasets and user files
 ├── knowledge/        # RAG stores
-├── hf_cache/         # Hugging Face cache
 └── sandbox/          # Sandboxed code-exec workspace
 ```
 
@@ -344,18 +410,30 @@ Point Cursor, Continue, or any OpenAI client at Forge while it is running:
 
 ```text
 Base URL: http://127.0.0.1:8765/v1
-API key:  Inference key from ~/.seiso/.inference_api_key (or session JWT from Forge login)
+API key:  Inference key from SEISO_DATA_DIR/.inference_api_key
+          (Linux/macOS/WSL: $HOME/.seiso/.inference_api_key
+           Windows: %USERPROFILE%\.seiso\.inference_api_key)
 ```
 
 ```bash
+# Linux / macOS / WSL
 curl http://127.0.0.1:8765/v1/chat/completions \
-  -H "Authorization: Bearer $(cat ~/.seiso/.inference_api_key)" \
+  -H "Authorization: Bearer $(cat "$HOME/.seiso/.inference_api_key")" \
   -H "Content-Type: application/json" \
   -d '{
     "model": "meta-llama/Llama-3.2-3B-Instruct",
     "messages": [{"role": "user", "content": "Explain QLoRA in one paragraph."}],
     "stream": true
   }'
+```
+
+```powershell
+# Windows PowerShell
+$key = Get-Content "$env:USERPROFILE\.seiso\.inference_api_key" -Raw
+curl.exe http://127.0.0.1:8765/v1/chat/completions `
+  -H "Authorization: Bearer $($key.Trim())" `
+  -H "Content-Type: application/json" `
+  -d '{"model":"meta-llama/Llama-3.2-3B-Instruct","messages":[{"role":"user","content":"Explain QLoRA in one paragraph."}],"stream":true}'
 ```
 
 Set `SEISO_ALLOW_OPENAI_TOOLS=true` for tool calling on this endpoint.

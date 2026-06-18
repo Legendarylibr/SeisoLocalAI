@@ -115,6 +115,7 @@ export type InferenceModelOption = {
   hardware_fit_label?: string;
   hardware_note?: string;
   est_vram_mb?: number;
+  metadata?: Record<string, unknown>;
 };
 
 export type CatalogDataset = {
@@ -137,6 +138,7 @@ export type CatalogModel = {
   download_bytes?: number;
   download_bytes_estimated?: boolean;
   download_available?: boolean;
+  download_mirror_verified?: boolean;
   download_error?: string;
   gguf_repo?: string;
   gguf_file?: string;

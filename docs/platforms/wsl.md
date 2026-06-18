@@ -14,10 +14,10 @@ Treat WSL2 as **Linux** for Seiso. This is the recommended Windows path for full
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/install.sh | bash
-# installs to ~/Seiso by default
+# installs to $HOME/Seiso by default
 
-# Or from an existing clone under ~:
-cd ~/Seiso
+# Or from an existing clone under $HOME:
+cd "$HOME/Seiso"
 python3 -m venv .venv && source .venv/bin/activate
 pip install -U pip
 pip install -e ".[forge,train,cuda,dev]"
@@ -48,7 +48,7 @@ Browse to **http://127.0.0.1:8765** from Windows (WSL forwards localhost by defa
 
 ## Data paths
 
-- Seiso data: `~/.seiso` inside WSL
+- Seiso data: `$HOME/.seiso` inside WSL (not on `/mnt/c/...`)
 - Mount Windows datasets: `/mnt/c/Users/.../data/train.jsonl`
 
 Use WSL paths in dataset fields, not `C:\...` strings.

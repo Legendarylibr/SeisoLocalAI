@@ -155,6 +155,48 @@ async def test_perform_download_returns_cached_inventory_without_redownload(monk
 
 
 @pytest.mark.asyncio
+async def test_find_inventory_for_catalog_repo_matches_metadata(monkeypatch, tmp_path):
+    cached = tmp_path / "hf_cache" / "model-q4.gguf"
+    cached.parent.mkdir()
+    cached.write_bytes(b"gguf-bytes")
+    inv = tmp_path / "models" / "u1" / "mirror--Model-GGUF" / "model-q4.gguf"
+    inv.parent.mkdir(parents=True)
+    inv.symlink_to(cached)
+
+    db = Database(tmp_path / "forge.db", encryption_key=generate_encryption_key(), ephemeral=True)
+    await db.add_model(
+        user_id="u1",
+        source="hf:mirror/Model-GGUF",
+        name="model-q4.gguf",
+        path=str(inv),
+        format="gguf",
+        size_bytes=cached.stat().st_size,
+        metadata={"repo_id": "org/Model", "gguf_repo": "mirror/Model-GGUF"},
+    )
+
+    found = await model_download.find_inventory_for_catalog_repo(db, "u1", "org/Model")
+    assert found is not None
+    assert found["source"] == "hf:mirror/Model-GGUF"
+
+    monkeypatch.setattr(
+        model_download,
+        "_sync_download_artifacts",
+        lambda **_kwargs: pytest.fail("download should not run"),
+    )
+    result = await model_download.perform_model_download(
+        user_id="u1",
+        db=db,
+        data_dir=tmp_path,
+        hf_cache_dir=tmp_path / "hf_cache",
+        settings_hf_token=None,
+        db_encryption_key=generate_encryption_key(),
+        repo_id="org/Model",
+        variant="gguf",
+    )
+    assert result["cached"] is True
+
+
+@pytest.mark.asyncio
 async def test_sync_hf_cache_inventory_registers_cached_gguf(tmp_path):
     snapshot = tmp_path / "hf_cache" / "models--org--Model-GGUF" / "snapshots" / "abc"
     snapshot.mkdir(parents=True)

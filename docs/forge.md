@@ -4,15 +4,37 @@ Forge is Seiso's local web server: React UI, REST API under `/api`, and an OpenA
 
 ## Start Forge
 
-From the repository root with your virtualenv active:
+**URL (all platforms):** http://127.0.0.1:8765
+
+### Linux / macOS / WSL
+
+From an existing clone (recommended helpers):
 
 ```bash
-# First time (or after UI changes): build the frontend
-cd forge-ui && npm install && npm run build && cd ..
+"$HOME/Seiso/scripts/start.sh"     # later sessions — checks deps, builds UI if needed
+# or after manual install:
+cd "$HOME/Seiso" && source .venv/bin/activate && seiso forge
+```
 
-# Launch API + built UI
+First time or after UI changes, build the frontend:
+
+```bash
+cd "$HOME/Seiso/forge-ui" && npm ci && npm run build && cd ..
 seiso forge
 ```
+
+Add `--open` to launch your browser automatically.
+
+### Windows (PowerShell)
+
+```powershell
+cd "$env:USERPROFILE\Seiso"
+.\.venv\Scripts\Activate.ps1
+cd forge-ui; npm ci; npm run build; cd ..
+seiso forge
+```
+
+On later sessions, skip the UI build unless `forge-ui/dist` is missing or you changed frontend code.
 
 Open **http://127.0.0.1:8765**. On first run, complete onboarding to create your local admin password.
 
@@ -91,12 +113,12 @@ Copy `.env.example` to `.env` in the repo root. Key settings:
 |----------|---------|---------|
 | `SEISO_HOST` | `127.0.0.1` | Bind address (forced to localhost unless remote allowed) |
 | `SEISO_PORT` | `8765` | HTTP port |
-| `SEISO_DATA_DIR` | `~/.seiso` | Models, checkpoints, exports, uploads |
+| `SEISO_DATA_DIR` | `~/.seiso` (expands on all OSes) | Models, checkpoints, exports, uploads |
 | `SEISO_SECRET_KEY` | auto | Session signing key |
 | `SEISO_ALLOW_REMOTE` | `false` | Bind `0.0.0.0` (requires `SEISO_REMOTE_ACK=1`) |
 | `SEISO_TRUST_PROXY` | `false` | Honor `X-Forwarded-*` from `SEISO_TRUSTED_PROXY_IPS` only |
 | `SEISO_TRUSTED_PROXY_IPS` | — | Comma-separated proxy IPs (e.g. `127.0.0.1,::1`) |
-| `SEISO_INFERENCE_API_KEY` | auto | Scoped key for `/v1` only (`~/.seiso/.inference_api_key`) |
+| `SEISO_INFERENCE_API_KEY` | auto | Scoped key for `/v1` only (file: `{SEISO_DATA_DIR}/.inference_api_key`) |
 | `SEISO_SECURE_COOKIES` | `false` | `Secure` cookies when TLS is terminated upstream |
 | `SEISO_CORS_ORIGINS` | `http://127.0.0.1:8765,http://localhost:5173` | Allowed browser origins |
 | `SEISO_HF_TOKEN` | — | Hugging Face token for gated models |

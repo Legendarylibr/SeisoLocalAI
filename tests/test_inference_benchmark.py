@@ -4,12 +4,11 @@ from __future__ import annotations
 
 import pytest
 
-from seiso.inference.tuning import (
+from seiso.inference.benchmark import (
     BASELINE_ENV,
     InferenceBenchResult,
     _estimate_tokens,
     compare_inference_profiles,
-    estimate_llama_n_ctx,
 )
 
 

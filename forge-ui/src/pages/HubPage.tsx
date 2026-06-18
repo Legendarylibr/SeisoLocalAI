@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api, CatalogModel, HardwareSummary, LocalModel } from "@/lib/api";
+import { usePlatformSettings } from "@/context/PlatformSettingsContext";
 import { chatPath, chatPathForLocalModel } from "@/lib/chatModel";
 import { trainPath } from "@/lib/hubDownload";
 import { HardwareFitBadge } from "@/components/HardwareFitBadge";
@@ -51,6 +52,11 @@ const TASK_LABELS: Record<string, string> = {
 
 export function HubPage() {
   const navigate = useNavigate();
+  const { hfStatus } = usePlatformSettings();
+  const hubReady = hfStatus ? hfStatus.ready_for_download : null;
+  const hubError = hfStatus
+    ? hfStatus.connectivity.error || hfStatus.connectivity.warning || null
+    : null;
   const [local, setLocal] = useState<LocalModel[]>([]);
   const [catalog, setCatalog] = useState<CatalogModel[]>([]);
   const [families, setFamilies] = useState<string[]>([]);
@@ -63,8 +69,6 @@ export function HubPage() {
   const [downloading, setDownloading] = useState<string | null>(null);
   const [downloadAction, setDownloadAction] = useState<"chat" | "train" | null>(null);
   const [tab, setTab] = useState<"catalog" | "local">("catalog");
-  const [hubReady, setHubReady] = useState<boolean | null>(null);
-  const [hubError, setHubError] = useState<string | null>(null);
   const [catalogLoading, setCatalogLoading] = useState(true);
 
   const refreshLocal = () => api.listModels().then(setLocal).catch(console.error);
@@ -85,10 +89,6 @@ export function HubPage() {
 
   useEffect(() => {
     refreshLocal();
-    api.hfStatus().then((s) => {
-      setHubReady(s.ready_for_download);
-      setHubError(s.connectivity.error || s.connectivity.warning || null);
-    }).catch(() => setHubReady(null));
     return () => {
       setDownloading(null);
       setDownloadAction(null);
@@ -278,11 +278,12 @@ export function HubPage() {
           ) : (
             <div className="model-grid">
               {catalog.map((m) => {
-                const unavailable = m.download_available === false;
+                const embeddingOnly = m.download_available === false;
+                const mirrorUnverified = m.download_mirror_verified === false && !!m.download_error;
                 return (
                 <div
                   key={m.repo_id}
-                  className={`model-card${m.featured ? " model-card-featured" : ""}${unavailable ? " model-card-unavailable" : ""}`}
+                  className={`model-card${m.featured ? " model-card-featured" : ""}${embeddingOnly ? " model-card-unavailable" : ""}`}
                 >
                   <div className="model-card-header">
                     <span className={`family-tag family-${m.family}`}>{FAMILY_LABELS[m.family] || m.family}</span>
@@ -307,18 +308,21 @@ export function HubPage() {
                       ) : null}
                     </p>
                   ) : null}
-                  {m.hardware_note && !unavailable && <p className="model-hw-note">{m.hardware_note}</p>}
-                  {unavailable && (
+                  {m.hardware_note && !embeddingOnly && <p className="model-hw-note">{m.hardware_note}</p>}
+                  {mirrorUnverified && (
+                    <p className="model-mirror-warn">
+                      Mirror not pre-verified: {m.download_error} You can still try downloading.
+                    </p>
+                  )}
+                  {embeddingOnly && (
                     <p className="model-unavailable-note">
-                      {m.download_error
-                        ? m.download_error
-                        : "Mirror unavailable — try again later or pick another model."}
+                      Embedding models are not supported for direct chat download.
                     </p>
                   )}
                   <div className="model-actions">
                     <button
                       className="btn btn-primary"
-                      disabled={downloading === m.repo_id || unavailable}
+                      disabled={downloading === m.repo_id || embeddingOnly}
                       onClick={() => openChat(m.repo_id, m.download_bytes)}
                       title="Download public GGUF to local cache and open chat"
                     >
@@ -326,7 +330,7 @@ export function HubPage() {
                     </button>
                     <button
                       className="btn"
-                      disabled={downloading === m.repo_id || unavailable}
+                      disabled={downloading === m.repo_id || embeddingOnly}
                       onClick={() => openTrain(m.repo_id, m.download_bytes)}
                       title="Download safetensors snapshot and open Training Studio"
                     >

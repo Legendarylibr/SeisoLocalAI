@@ -54,7 +54,7 @@ For UI development, run `seiso forge` in one terminal and `cd forge-ui && npm ru
 - Python 3.10+: `python3 --version`
 - Node.js 18+: `node --version` and `npm --version` ([nodejs.org](https://nodejs.org/))
 - git: `git --version`
-- Custom path: `SEISO_INSTALL_DIR=~/code/Seiso curl -fsSL .../scripts/install.sh | bash`
+- Custom path: `SEISO_INSTALL_DIR="$HOME/code/Seiso" curl …/install.sh | bash`
 - Re-run from a clone: `./scripts/install.sh`
 
 **Symptom:** `Seiso not found` when running `start.sh`.
@@ -68,9 +68,9 @@ For UI development, run `seiso forge` in one terminal and `cd forge-ui && npm ru
 **Cause:** The repo or pip build temp dir is on a **Windows filesystem** (common in WSL when the clone lives under `/mnt/c/Users/...`). CUDA extension builds need a Linux-native path.
 
 **Fix:**
-1. Install on the Linux filesystem: `SEISO_INSTALL_DIR=~/Seiso` then re-run `./scripts/install.sh`
+1. Install on the Linux filesystem: `SEISO_INSTALL_DIR="$HOME/Seiso"` then re-run `./scripts/install.sh`
 2. Skip flash-attn during install: `SEISO_SKIP_FLASH_ATTN=1 ./scripts/install.sh`
-3. After a successful main install on `~/Seiso`, optionally run `./scripts/install_flash_attn.sh`
+3. After a successful main install on `$HOME/Seiso`, optionally run `./scripts/install_flash_attn.sh`
 4. Ensure CUDA toolkit (`nvcc --version`) and PyTorch CUDA match your driver ([pytorch.org](https://pytorch.org/get-started/locally/))
 
 Seiso does **not** require flash-attn — training and chat fall back to PyTorch SDPA when it is missing.
@@ -102,10 +102,19 @@ export SEISO_REMOTE_DANGEROUS_ACK=1
 ## OpenAI `/v1` returns 401
 
 Use the inference-scoped key (not your admin password):
+
 ```bash
-cat ~/.seiso/.inference_api_key
-# Authorization: Bearer seiso_sk_...
+# Linux / macOS / WSL
+cat "$HOME/.seiso/.inference_api_key"
 ```
+
+```powershell
+# Windows
+Get-Content "$env:USERPROFILE\.seiso\.inference_api_key"
+```
+
+Use header: `Authorization: Bearer seiso_sk_...`
+
 Or log in via Forge and use the session JWT.
 
 ## Port in use
@@ -135,4 +144,4 @@ python -c "from seiso.training.platform_caps import training_capabilities; impor
 
 ## Reset Seiso data
 
-Default data dir: `~/.seiso` (override with `SEISO_DATA_DIR`).
+Default data dir: `$HOME/.seiso` on Linux/macOS/WSL, `%USERPROFILE%\.seiso` on Windows (override with `SEISO_DATA_DIR`).

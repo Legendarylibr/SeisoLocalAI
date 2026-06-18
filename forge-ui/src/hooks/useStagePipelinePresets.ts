@@ -2,15 +2,23 @@ import { useEffect, useState } from "react";
 
 type StagePreset = { id: string; label: string; stages: string[] };
 
+type PresetsResponse = {
+  presets: StagePreset[];
+  stages: string[];
+  help: Record<string, string>;
+  defaults?: Record<string, string>;
+};
+
 export function useStagePipelinePresets(
   fallbackPresets: StagePreset[],
   fallbackStages: string[],
-  loadPresets: () => Promise<{ presets: StagePreset[]; stages: string[]; help: Record<string, string> }>,
+  loadPresets: () => Promise<PresetsResponse>,
   initialPreset = fallbackPresets[0]?.id ?? "smoke",
 ) {
   const [presets, setPresets] = useState<StagePreset[]>([]);
   const [allStages, setAllStages] = useState<string[]>(fallbackStages);
   const [stageHelp, setStageHelp] = useState<Record<string, string>>({});
+  const [defaults, setDefaults] = useState<Record<string, string>>({});
   const [preset, setPreset] = useState(initialPreset);
   const [selectedStages, setSelectedStages] = useState<string[]>(
     fallbackPresets[0]?.stages.length ? fallbackPresets[0].stages : fallbackStages,
@@ -24,6 +32,7 @@ export function useStagePipelinePresets(
         setPresets(r.presets);
         setAllStages(r.stages.length ? r.stages : fallbackStages);
         setStageHelp(r.help);
+        setDefaults(r.defaults ?? {});
       })
       .catch(console.error);
     // Load presets once on mount; loader is stable for each page.
@@ -50,5 +59,6 @@ export function useStagePipelinePresets(
     stageHelp,
     selectedStages,
     toggleStage,
+    defaults,
   };
 }

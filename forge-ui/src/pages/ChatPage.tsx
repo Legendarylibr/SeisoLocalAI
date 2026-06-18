@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { api, ChatMessage, ChatThread, HardwareProfile, InferenceModelOption, SecurityPosture, streamChat } from "@/lib/api";
+import { api, ChatMessage, ChatThread, InferenceModelOption, streamChat } from "@/lib/api";
+import { usePlatformSettings } from "@/context/PlatformSettingsContext";
 import { bootstrapChatModels, CHAT_BACKEND_STORAGE_KEY, CHAT_MODEL_STORAGE_KEY, hasChatNavTarget, initializeChatSession, isChatModelReady, needsHubDownload, preloadWithProgress, resolveInferenceBackend } from "@/lib/chatModel";
+import { useHardwareProfile } from "@/hooks/useHardware";
 import { writeStoredModel } from "@/lib/modelSelection";
 import { ModelProgressState, initialDownloadProgress, initialLoadProgress } from "@/lib/modelProgress";
 import { ChatModelPicker } from "@/components/ChatModelPicker";
@@ -58,8 +60,9 @@ export function ChatPage() {
   const [inferenceBackend, setInferenceBackend] = useState("llamacpp");
   const [models, setModels] = useState<InferenceModelOption[]>([]);
   const [providers, setProviders] = useState<Array<{ id: string; name: string; provider_type: string }>>([]);
-  const [security, setSecurity] = useState<SecurityPosture | null>(null);
-  const [hwProfile, setHwProfile] = useState<HardwareProfile | null>(null);
+  const { settings } = usePlatformSettings();
+  const security = settings?.security ?? null;
+  const { profile: hwProfile } = useHardwareProfile();
   const [switchingModel, setSwitchingModel] = useState(false);
   const [loadProgress, setLoadProgress] = useState<ModelProgressState | null>(null);
   const [loadedModelId, setLoadedModelId] = useState<string | null>(null);
@@ -242,7 +245,6 @@ export function ChatPage() {
   useEffect(() => {
     api.listThreads().then(setThreads).catch(console.error);
     api.listProviders().then(setProviders).catch(() => {});
-    api.settings().then((s) => setSecurity(s.security)).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -274,12 +276,10 @@ export function ChatPage() {
       setLoadedModelId(null);
       setLoadedBackend(null);
       try {
-        const [hw, initialModelsResp] = await Promise.all([
-          api.hardware().catch(() => null),
+        const [initialModelsResp] = await Promise.all([
           api.listInferenceModels(),
         ]);
         if (cancelled) return;
-        if (hw) setHwProfile(hw);
 
         const initialModels = initialModelsResp.models;
         const commonOptions = {
@@ -287,7 +287,7 @@ export function ChatPage() {
           providerActive: !!providerId,
           onProgress: setLoadProgress,
           initialModels,
-          hwProfile: hw,
+          hwProfile,
         };
 
         if (pendingRepo) {
@@ -325,9 +325,6 @@ export function ChatPage() {
         setLoadedModelId(null);
         setLoadedBackend(null);
         setError(e instanceof Error ? e.message : "Failed to load models");
-        if (pendingRepo) {
-          setSearchParams({}, { replace: true });
-        }
       } finally {
         if (bootstrapGen === bootstrapGenRef.current) {
           setSwitchingModel(false);

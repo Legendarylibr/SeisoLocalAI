@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
-import { api, HfHubStatus } from "@/lib/api";
+import { useState } from "react";
+import { api } from "@/lib/api";
+import { usePlatformSettings } from "@/context/PlatformSettingsContext";
 import { IconGlobe } from "@/components/Icons";
 
 type HfTokenPromptProps = {
@@ -7,14 +8,10 @@ type HfTokenPromptProps = {
 };
 
 export function HfTokenPrompt({ onDone }: HfTokenPromptProps) {
+  const { hfStatus, refresh } = usePlatformSettings();
   const [token, setToken] = useState("");
-  const [status, setStatus] = useState<HfHubStatus | null>(null);
   const [message, setMessage] = useState("");
   const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    api.hfStatus().then(setStatus).catch(() => setStatus(null));
-  }, []);
 
   const save = async () => {
     if (!token.trim()) return;
@@ -22,6 +19,7 @@ export function HfTokenPrompt({ onDone }: HfTokenPromptProps) {
     setMessage("");
     try {
       await api.saveHfToken(token.trim());
+      await refresh();
       setMessage("Hugging Face token saved.");
       onDone();
     } catch (err) {
@@ -48,22 +46,22 @@ export function HfTokenPrompt({ onDone }: HfTokenPromptProps) {
           </div>
         </div>
 
-          {status && (
+          {hfStatus && (
             <table className="status-table">
               <tbody>
                 <tr>
                   <td>Hub reachable</td>
                   <td>
-                    {status.connectivity.reachable
-                      ? `Yes${status.connectivity.latency_ms != null ? ` (${status.connectivity.latency_ms} ms)` : ""}`
+                    {hfStatus.connectivity.reachable
+                      ? `Yes${hfStatus.connectivity.latency_ms != null ? ` (${hfStatus.connectivity.latency_ms} ms)` : ""}`
                       : "No"}
                   </td>
                 </tr>
                 <tr>
                   <td>Ready to download</td>
                   <td>
-                    {status.ready_for_download
-                      ? status.connectivity.token_valid
+                    {hfStatus.ready_for_download
+                      ? hfStatus.connectivity.token_valid
                         ? "Yes (authenticated)"
                         : "Yes (public models, no token)"
                       : "No"}
@@ -71,7 +69,7 @@ export function HfTokenPrompt({ onDone }: HfTokenPromptProps) {
                 </tr>
                 <tr>
                   <td>Cache dir</td>
-                  <td className="mono">{status.cache_dir}</td>
+                  <td className="mono">{hfStatus.cache_dir}</td>
                 </tr>
               </tbody>
             </table>

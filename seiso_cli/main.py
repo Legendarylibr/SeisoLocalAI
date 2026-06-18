@@ -21,16 +21,32 @@ def forge(
     host: str | None = typer.Option(None, help="Bind host (default: 127.0.0.1)"),
     port: int | None = typer.Option(None, help="Port (default: 8765)"),
     reload: bool = typer.Option(False, help="Dev auto-reload"),
+    open_browser: bool = typer.Option(
+        False,
+        "--open/--no-open",
+        help="Open Forge in the system browser when /health is ready",
+    ),
 ) -> None:
     """Launch Seiso web server (UI + API)."""
+    import os
+
     import uvicorn
 
     from forge.config import get_settings
+    from forge.launch import schedule_browser_open
 
     settings = get_settings()
     bind_host = host or settings.host
     bind_port = port or settings.port
-    console.print(f"[bold green]Seiso[/] → http://{bind_host}:{bind_port}")
+    forge_url = f"http://{bind_host}:{bind_port}"
+    should_open = open_browser or os.environ.get("SEISO_OPEN_BROWSER", "").strip() in {
+        "1",
+        "true",
+        "yes",
+    }
+    if should_open:
+        schedule_browser_open(forge_url)
+    console.print(f"[bold green]Seiso[/] → {forge_url}")
     uvicorn.run(
         "forge.main:create_app",
         factory=True,

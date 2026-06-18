@@ -402,3 +402,11 @@ def get_by_repo(repo_id: str) -> CatalogEntry | None:
         if e.repo_id == repo_id:
             return e
     return None
+
+
+def get_by_gguf_mirror(mirror_repo: str) -> CatalogEntry | None:
+    """Map a GGUF mirror repo back to its catalog base model."""
+    for entry in CATALOG:
+        if entry.gguf_repo == mirror_repo:
+            return entry
+    return None

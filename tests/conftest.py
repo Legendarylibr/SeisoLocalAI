@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 from pathlib import Path
 
@@ -33,6 +34,8 @@ async def _close_db_after_test():
         db = get_db()
         if db._conn_holder is not None:
             await db.close()
+            # Let aiosqlite worker thread finish before pytest closes the event loop.
+            await asyncio.sleep(0.05)
 
 
 @pytest.fixture

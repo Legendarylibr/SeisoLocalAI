@@ -1,5 +1,5 @@
-import { useCallback, useState } from "react";
-import { subscribeSSE } from "@/lib/api";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { appendBoundedLog, subscribeSSE } from "@/lib/api/sse";
 
 type StreamHandlers = {
   onLog?: (line: string) => void;
@@ -12,23 +12,31 @@ export function usePipelineJobStream() {
   const [logs, setLogs] = useState<string[]>([]);
   const [result, setResult] = useState<Record<string, unknown> | null>(null);
   const [activeJob, setActiveJob] = useState<string | null>(null);
+  const abortRef = useRef<(() => void) | null>(null);
 
-  const resetStream = useCallback(() => {
-    setLogs([]);
-    setResult(null);
+  const stopStream = useCallback(() => {
+    abortRef.current?.();
+    abortRef.current = null;
   }, []);
 
+  const resetStream = useCallback(() => {
+    stopStream();
+    setLogs([]);
+    setResult(null);
+  }, [stopStream]);
+
   const watchJob = useCallback((streamPath: string, jobId: string, handlers: StreamHandlers = {}) => {
+    stopStream();
     setActiveJob(jobId);
-    subscribeSSE(streamPath, (event, data) => {
+    abortRef.current = subscribeSSE(streamPath, (event, data) => {
       handlers.onEvent?.(event, data);
       if (event === "log") {
-        setLogs((prev) => [...prev, data]);
+        setLogs((prev) => appendBoundedLog(prev, data));
         handlers.onLog?.(data);
       }
       if (event === "error") {
         const line = `ERROR: ${data}`;
-        setLogs((prev) => [...prev, line]);
+        setLogs((prev) => appendBoundedLog(prev, line));
         handlers.onError?.(data);
       }
       if (event === "result") {
@@ -40,7 +48,9 @@ export function usePipelineJobStream() {
         }
       }
     });
-  }, []);
+  }, [stopStream]);
 
-  return { logs, result, activeJob, resetStream, watchJob };
+  useEffect(() => () => stopStream(), [stopStream]);
+
+  return { logs, result, activeJob, resetStream, watchJob, stopStream };
 }

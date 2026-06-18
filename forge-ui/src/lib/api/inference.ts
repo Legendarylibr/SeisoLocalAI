@@ -1,16 +1,17 @@
 import { request } from "./client";
 import { streamPostSSE } from "./sse";
+import { cachedGet } from "./getCache";
 import type { ChatMessage, ChatThread, HardwareSummary, InferenceModelOption } from "./types";
 
 export const inferenceApi = {
   listInferenceModels: () =>
-    request<{
+    cachedGet<{
       models: InferenceModelOption[];
       total: number;
       hardware_summary?: HardwareSummary;
       preferred_inference_backend?: string;
       local_only?: boolean;
-    }>("/inference/models"),
+    }>("/inference/models", 60_000),
   streamPreloadModel: (
     model_id: string,
     inference_backend: string,

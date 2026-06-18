@@ -1,5 +1,43 @@
 import { API, formatApiError, getCsrfToken, request } from "./client";
 
+const MAX_SSE_LOG_LINES = 2000;
+
+function parseSSEBlock(block: string): { event: string; data: string } | null {
+  let event = "message";
+  let data = "";
+  for (const line of block.split("\n")) {
+    if (line.startsWith("event:")) event = line.slice(6).trim();
+    if (line.startsWith("data:")) data = line.slice(5).trim();
+  }
+  return data ? { event, data } : null;
+}
+
+async function consumeSSEStream(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  onBlock: (event: string, data: string) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  const decoder = new TextDecoder();
+  let buffer = "";
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const blocks = buffer.split("\n\n");
+      buffer = blocks.pop() || "";
+      for (const block of blocks) {
+        const parsed = parseSSEBlock(block);
+        if (parsed) onBlock(parsed.event, parsed.data);
+      }
+    }
+  } catch (err) {
+    if (!signal?.aborted) throw err;
+  } finally {
+    reader.cancel().catch(() => {});
+  }
+}
+
 /** Stream SSE from a POST endpoint (cookie session + CSRF). Returns abort handle. */
 export function streamPostSSE(
   path: string,
@@ -33,31 +71,14 @@ export function streamPostSSE(
 
     const reader = res.body?.getReader();
     if (!reader) throw new Error("Streaming response unavailable");
-    const decoder = new TextDecoder();
-    let buffer = "";
 
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const blocks = buffer.split("\n\n");
-        buffer = blocks.pop() || "";
-        for (const block of blocks) {
-          let event = "message";
-          let data = "";
-          for (const line of block.split("\n")) {
-            if (line.startsWith("event:")) event = line.slice(6).trim();
-            if (line.startsWith("data:")) data = line.slice(5).trim();
-          }
-          if (data && handlers[event]) handlers[event](data);
-        }
-      }
-    } catch (err) {
-      if (!controller.signal.aborted) throw err;
-    } finally {
-      reader.cancel().catch(() => {});
-    }
+    await consumeSSEStream(
+      reader,
+      (event, data) => {
+        if (handlers[event]) handlers[event](data);
+      },
+      controller.signal,
+    );
   })();
 
   return { promise, abort: () => controller.abort() };
@@ -93,31 +114,12 @@ export function subscribeSSE(
       return;
     }
 
-    const decoder = new TextDecoder();
-    let buffer = "";
     try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const parts = buffer.split("\n\n");
-        buffer = parts.pop() || "";
-        for (const block of parts) {
-          let event = "message";
-          let data = "";
-          for (const line of block.split("\n")) {
-            if (line.startsWith("event:")) event = line.slice(6).trim();
-            if (line.startsWith("data:")) data = line.slice(5).trim();
-          }
-          if (data) onEvent(event, data);
-        }
-      }
+      await consumeSSEStream(reader, onEvent, controller.signal);
     } catch (err) {
       if (!controller.signal.aborted) {
         onError?.(err instanceof Error ? err : new Error("SSE stream failed"));
       }
-    } finally {
-      reader.cancel().catch(() => {});
     }
   })();
 
@@ -159,31 +161,8 @@ export function streamChat(
 
     const reader = res.body?.getReader();
     if (!reader) return;
-    const decoder = new TextDecoder();
-    let buffer = "";
 
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const blocks = buffer.split("\n\n");
-        buffer = blocks.pop() || "";
-        for (const block of blocks) {
-          let event = "message";
-          let data = "";
-          for (const line of block.split("\n")) {
-            if (line.startsWith("event:")) event = line.slice(6).trim();
-            if (line.startsWith("data:")) data = line.slice(5).trim();
-          }
-          if (data) handlers.onEvent(event, data);
-        }
-      }
-    } catch (err) {
-      if (!controller.signal.aborted) throw err;
-    } finally {
-      reader.cancel().catch(() => {});
-    }
+    await consumeSSEStream(reader, handlers.onEvent, controller.signal);
   })();
 
   return {
@@ -193,4 +172,10 @@ export function streamChat(
       request<{ active_model: string | null }>("/inference/cancel", { method: "POST" }).catch(() => {});
     },
   };
+}
+
+/** Append a log line with a bounded buffer (matches server MAX_LOG_LINES). */
+export function appendBoundedLog(prev: string[], line: string): string[] {
+  const next = [...prev, line];
+  return next.length > MAX_SSE_LOG_LINES ? next.slice(-MAX_SSE_LOG_LINES) : next;
 }

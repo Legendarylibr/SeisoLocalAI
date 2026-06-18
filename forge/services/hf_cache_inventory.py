@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -13,7 +15,7 @@ from forge.services.hf_hub import (
     link_inventory,
 )
 from forge.services.user_paths import user_dir
-from seiso.models.catalog import CATALOG, CatalogEntry
+from seiso.models.catalog import CATALOG, CatalogEntry, get_by_gguf_mirror
 from seiso.security import sanitize_filename
 
 
@@ -26,10 +28,13 @@ def _repo_id_from_cache_dir(path: Path) -> str | None:
 
 
 def _catalog_entry_for_cached_repo(repo_id: str) -> CatalogEntry | None:
-    for entry in CATALOG:
-        if entry.repo_id == repo_id or entry.gguf_repo == repo_id:
-            return entry
-    return None
+    direct = next((entry for entry in CATALOG if entry.repo_id == repo_id), None)
+    if direct:
+        return direct
+    mirror = get_by_gguf_mirror(repo_id)
+    if mirror:
+        return mirror
+    return next((entry for entry in CATALOG if entry.gguf_repo == repo_id), None)
 
 
 def _display_name_for_shards(filename: str) -> str:
@@ -139,6 +144,18 @@ def _snapshot_record(
     }
 
 
+_SYNC_TTL_SEC = 30.0
+
+
+@dataclass
+class _SyncState:
+    synced_at: float
+    cache_mtime: float
+
+
+_sync_states: dict[str, _SyncState] = {}
+
+
 async def sync_hf_cache_inventory(
     db: Database,
     user_id: str,
@@ -148,6 +165,22 @@ async def sync_hf_cache_inventory(
 ) -> int:
     """Register completed HF cache snapshots without copying blobs."""
     if not hf_cache_dir.is_dir():
+        return 0
+
+    try:
+        cache_mtime = hf_cache_dir.stat().st_mtime
+        cache_key = f"{user_id}:{hf_cache_dir.resolve()}"
+    except OSError:
+        cache_mtime = 0.0
+        cache_key = f"{user_id}:{hf_cache_dir}"
+
+    now = time.monotonic()
+    state = _sync_states.get(cache_key)
+    if (
+        state is not None
+        and now - state.synced_at < _SYNC_TTL_SEC
+        and state.cache_mtime == cache_mtime
+    ):
         return 0
 
     registered = 0
@@ -178,4 +211,5 @@ async def sync_hf_cache_inventory(
             )
             registered += 1
             break
+    _sync_states[cache_key] = _SyncState(synced_at=now, cache_mtime=cache_mtime)
     return registered

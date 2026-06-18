@@ -1,13 +1,11 @@
 """Factory for stage-based pipeline job routers (compress, image compress)."""
 
-from __future__ import annotations
-
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
@@ -84,7 +82,6 @@ class StagePipelineRouterConfig:
     presets: dict[str, dict[str, Any]]
     stage_order: tuple[str, ...] | list[str]
     stage_help: dict[str, str]
-    model_defaults: dict[str, Any] | None = None
     start_request_model: type[BaseModel]
     get_orchestrator: Callable[[], Orchestrator]
     list_jobs: Callable[[Database, str], Awaitable[list[dict]]]
@@ -93,6 +90,7 @@ class StagePipelineRouterConfig:
     update_status: Callable[..., Awaitable[None]]  # (db, job_id, status, **fields)
     prepare_config: Callable[[BaseModel, Database, str, ForgeSettings], Awaitable[dict]]
     enrich_stage_results: Callable[[dict[str, Any]], dict[str, Any]]
+    model_defaults: dict[str, Any] | None = None
 
 
 def build_stage_pipeline_router(config: StagePipelineRouterConfig) -> APIRouter:
@@ -113,7 +111,7 @@ def build_stage_pipeline_router(config: StagePipelineRouterConfig) -> APIRouter:
 
     @router.post("/jobs", response_model=PipelineJobResponse)
     async def start_job(
-        body: StartRequest,
+        body: Annotated[StartRequest, Body()],
         user_id: Annotated[str, Depends(get_current_user_id)],
         db: Annotated[Database, Depends(get_db)],
         orchestrator: Annotated[Orchestrator, Depends(get_orch)],

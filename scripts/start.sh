@@ -1,18 +1,46 @@
 #!/usr/bin/env bash
-# Start Seiso Forge (API + web UI).
+# Start Seiso Forge (API + web UI). Installs missing deps, runs doctor on failure,
+# and opens the browser when Forge is ready.
 #
 # Usage:
 #   ~/Seiso/scripts/start.sh
 #   SEISO_INSTALL_DIR=~/Seiso ./scripts/start.sh
 #
-# One-liner after install:
+# One-liner (installs if needed, then starts):
 #   curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/start.sh | bash
 set -euo pipefail
 
 INSTALL_DIR="${SEISO_INSTALL_DIR:-$HOME/Seiso}"
+INSTALL_URL="${SEISO_INSTALL_URL:-https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/install.sh}"
 
-log() { printf '==> %s\n' "$*"; }
-die() { printf 'error: %s\n' "$*" >&2; exit 1; }
+load_seiso_common() {
+  local lib_path=""
+  if [[ -n "${BASH_SOURCE[0]:-}" && -f "${BASH_SOURCE[0]}" ]]; then
+    lib_path="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/common.sh"
+  fi
+  if [[ -f "$lib_path" ]]; then
+    # shellcheck source=lib/common.sh
+    source "$lib_path"
+    return 0
+  fi
+  local raw_base="${SEISO_RAW_BASE:-https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main}"
+  local tmp
+  tmp="$(mktemp)"
+  if ! curl -fsSL "${raw_base}/scripts/lib/common.sh" -o "$tmp"; then
+    rm -f "$tmp"
+    printf 'error: could not load start helpers from %s\n' "$raw_base" >&2
+    exit 1
+  fi
+  # shellcheck source=/dev/null
+  source "$tmp"
+  rm -f "$tmp"
+}
+
+load_seiso_common
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-}")" 2>/dev/null && pwd || echo "")"
+
+log() { seiso_log "$@"; }
+die() { seiso_die "$@"; }
 
 resolve_root() {
   if [[ -n "${BASH_SOURCE[0]:-}" && -f "${BASH_SOURCE[0]}" ]]; then
@@ -27,24 +55,29 @@ resolve_root() {
     printf '%s\n' "$INSTALL_DIR"
     return
   fi
-  die "Seiso not found. Run the installer first:
-  curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/install.sh | bash"
+  return 1
+}
+
+bootstrap_install() {
+  log "Seiso not found — running full installer"
+  if [[ -f "${SCRIPT_DIR}/install.sh" ]]; then
+    SEISO_INSTALL_DIR="$INSTALL_DIR" SEISO_START=0 bash "${SCRIPT_DIR}/install.sh"
+    return
+  fi
+  command -v curl >/dev/null 2>&1 || die "curl is required to bootstrap install"
+  SEISO_INSTALL_DIR="$INSTALL_DIR" SEISO_START=0 bash -c "$(curl -fsSL "$INSTALL_URL")"
 }
 
 main() {
-  local root ui_dist
-  root="$(resolve_root)"
+  local root forge_url open_flag ui_dist
 
-  [[ -x "$root/.venv/bin/seiso" ]] || die "Virtualenv missing at $root/.venv — run $root/scripts/install.sh or $root/scripts/doctor.sh"
+  if ! root="$(resolve_root)"; then
+    bootstrap_install
+    root="$(resolve_root)" || die "Install did not complete. Run: curl -fsSL $INSTALL_URL | bash"
+  fi
 
-  ui_dist="$root/forge-ui/dist/index.html"
-  if [[ ! -f "$ui_dist" ]]; then
-    log "Forge UI not built — building now"
-    if command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1; then
-      (cd "$root/forge-ui" && npm ci && npm run build)
-    else
-      die "Forge UI is not built and Node.js/npm are unavailable. Run: $root/scripts/doctor.sh"
-    fi
+  if ! seiso_ensure_installed "$root"; then
+    die "Could not complete install. See doctor output above."
   fi
 
   # shellcheck disable=SC1091
@@ -57,12 +90,23 @@ main() {
     set +a
   fi
 
-  if [[ "${SEISO_INSTALL_JUST_RAN:-0}" == "1" ]]; then
-    log "Starting Forge — open http://${SEISO_HOST:-127.0.0.1}:${SEISO_PORT:-8765}"
-  else
-    log "Starting Forge at http://${SEISO_HOST:-127.0.0.1}:${SEISO_PORT:-8765}"
+  forge_url="$(seiso_forge_url)"
+  open_flag=""
+  if [[ "${SEISO_NO_OPEN:-0}" != "1" ]]; then
+    open_flag="--open"
   fi
-  exec seiso forge
+
+  if [[ "${SEISO_INSTALL_JUST_RAN:-0}" == "1" ]]; then
+    log "Starting Forge — opening $forge_url when ready"
+  else
+    log "Starting Forge at $forge_url"
+  fi
+
+  if [[ -n "$open_flag" ]]; then
+    seiso forge $open_flag
+  else
+    exec seiso forge
+  fi
 }
 
 main "$@"

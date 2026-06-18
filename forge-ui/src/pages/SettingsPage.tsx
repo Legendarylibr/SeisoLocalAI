@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { api, HfHubStatus } from "@/lib/api";
+import { api } from "@/lib/api";
+import { usePlatformSettings } from "@/context/PlatformSettingsContext";
 import { useAuth } from "@/hooks/useAuth";
 import { SecurityShield } from "@/components/SecurityShield";
 import { PageHeader } from "@/components/PageHeader";
@@ -19,19 +20,9 @@ export function SettingsPage() {
     }
     return "account";
   });
-  const [settings, setSettings] = useState<Awaited<ReturnType<typeof api.settings>> | null>(null);
+  const { settings, hfStatus, refresh } = usePlatformSettings();
   const [hfToken, setHfToken] = useState("");
   const [hfMsg, setHfMsg] = useState("");
-  const [hfStatus, setHfStatus] = useState<HfHubStatus | null>(null);
-
-  const refresh = () => {
-    api.settings().then(setSettings).catch(console.error);
-    api.hfStatus().then(setHfStatus).catch(console.error);
-  };
-
-  useEffect(() => {
-    refresh();
-  }, []);
 
   const saveToken = async () => {
     if (!hfToken.trim()) return;
@@ -39,7 +30,7 @@ export function SettingsPage() {
       await api.saveHfToken(hfToken.trim());
       setHfToken("");
       setHfMsg("Token saved (encrypted locally).");
-      refresh();
+      await refresh();
     } catch (err) {
       setHfMsg((err as Error).message);
     }
@@ -49,7 +40,7 @@ export function SettingsPage() {
     try {
       await api.clearHfToken();
       setHfMsg("Saved token cleared.");
-      refresh();
+      await refresh();
     } catch (err) {
       setHfMsg((err as Error).message);
     }
@@ -85,7 +76,7 @@ export function SettingsPage() {
           {
             id: "server",
             label: "Server",
-            description: "Bind, data dir, backend",
+            description: "Bind, data dir, backends",
             icon: <IconServer size={15} />,
           },
           {
@@ -305,7 +296,17 @@ export function SettingsPage() {
               <tbody>
                 <tr><td>Bind</td><td>{settings.host}:{settings.port}</td></tr>
                 <tr><td>Data dir</td><td className="mono">{settings.data_dir}</td></tr>
-                <tr><td>Backend</td><td><span className="badge">{settings.backend}</span></td></tr>
+                <tr><td>Training backend</td><td><span className="badge">{settings.training_backend}</span></td></tr>
+                <tr>
+                  <td>Inference engines</td>
+                  <td>
+                    {settings.inference_backends.length
+                      ? settings.inference_backends.map((b) => (
+                          <span key={b} className="badge" style={{ marginRight: "0.35rem" }}>{b}</span>
+                        ))
+                      : "—"}
+                  </td>
+                </tr>
               </tbody>
             </table>
           </div>

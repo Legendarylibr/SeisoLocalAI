@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { api, HardwareProfile, GuideStep, SystemMetrics } from "@/lib/api";
+import { api, GuideStep } from "@/lib/api";
+import { useLiveMetrics } from "@/context/MetricsContext";
+import { useHardwareProfile } from "@/hooks/useHardware";
 import { chatPath } from "@/lib/chatModel";
 import { PageHeader } from "@/components/PageHeader";
 import {
@@ -66,29 +68,10 @@ const RESEARCH_PIPELINES = [
 ] as const;
 
 export function DashboardPage() {
-  const [hw, setHw] = useState<HardwareProfile | null>(null);
-  const [metrics, setMetrics] = useState<SystemMetrics | null>(null);
+  const { profile: hw } = useHardwareProfile();
+  const metrics = useLiveMetrics(true);
   const [goal, setGoal] = useState<string>("chat");
   const [steps, setSteps] = useState<GuideStep[]>([]);
-
-  useEffect(() => {
-    api.hardware().then(setHw).catch(console.error);
-    let id: ReturnType<typeof setInterval> | null = null;
-    const poll = () => {
-      if (document.hidden) return;
-      api.metrics().then(setMetrics).catch(() => {});
-    };
-    poll();
-    id = setInterval(poll, 3000);
-    const onVisibility = () => {
-      if (!document.hidden) poll();
-    };
-    document.addEventListener("visibilitychange", onVisibility);
-    return () => {
-      if (id) clearInterval(id);
-      document.removeEventListener("visibilitychange", onVisibility);
-    };
-  }, []);
 
   useEffect(() => {
     api.guide(goal).then((r) => setSteps(r.steps)).catch(console.error);

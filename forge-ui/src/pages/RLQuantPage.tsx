@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, RLQuantJob, RLQuantPreset, subscribeSSE } from "@/lib/api";
+import { appendBoundedLog } from "@/lib/api/sse";
 import { RL_QUANT_FALLBACK_PRESETS, RL_QUANT_PRESET_HINTS } from "@/lib/rlQuantPresets";
 import { StudioPageShell } from "@/components/StudioPageShell";
 import { FormSection } from "@/components/research/FormSection";
@@ -40,10 +41,12 @@ export function RLQuantPage() {
   const [recommendation, setRecommendation] = useState<Record<string, unknown> | null>(null);
   const [activeJob, setActiveJob] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
+  const streamAbortRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     api.listRLQuantJobs().then(setJobs).catch(console.error);
     api.rlQuantPresets().then((r) => setPresets(r.presets)).catch(console.error);
+    return () => streamAbortRef.current?.();
   }, []);
 
   const refreshJobs = () => api.listRLQuantJobs().then(setJobs).catch(console.error);
@@ -72,9 +75,10 @@ export function RLQuantPage() {
         seed: 13,
       });
       setActiveJob(res.job_id);
-      subscribeSSE(`/rl-quant/jobs/${res.job_id}/stream`, (event, data) => {
-        if (event === "log") setLogs((l) => [...l, data]);
-        if (event === "error") setLogs((l) => [...l, `ERROR: ${data}`]);
+      streamAbortRef.current?.();
+      streamAbortRef.current = subscribeSSE(`/rl-quant/jobs/${res.job_id}/stream`, (event, data) => {
+        if (event === "log") setLogs((l) => appendBoundedLog(l, data));
+        if (event === "error") setLogs((l) => appendBoundedLog(l, `ERROR: ${data}`));
         if (event === "recommendation") {
           try {
             setRecommendation(JSON.parse(data));

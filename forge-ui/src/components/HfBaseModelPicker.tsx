@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, CatalogModel, TrainableModel } from "@/lib/api";
 import { formatBytes } from "@/lib/modelProgress";
-import { IconChevronDown, IconClose, IconSearch } from "@/components/Icons";
+import { HubComboboxSearch } from "@/components/HubComboboxSearch";
+import { IconChevronDown } from "@/components/Icons";
+import { useHubCombobox } from "@/hooks/useHubCombobox";
 
 type HfBaseModelPickerProps = {
   value: string;
@@ -11,13 +13,10 @@ type HfBaseModelPickerProps = {
 };
 
 export function HfBaseModelPicker({ value, localModels, disabled, onChange }: HfBaseModelPickerProps) {
-  const [open, setOpen] = useState(false);
-  const [search, setSearch] = useState("");
+  const { open, setOpen, search, setSearch, rootRef, searchRef } = useHubCombobox();
   const [results, setResults] = useState<CatalogModel[]>([]);
   const [resolvedValue, setResolvedValue] = useState<CatalogModel | null>(null);
   const [loading, setLoading] = useState(false);
-  const rootRef = useRef<HTMLDivElement>(null);
-  const searchRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!value) {
@@ -60,20 +59,7 @@ export function HfBaseModelPicker({ value, localModels, disabled, onChange }: Hf
   }, [open, search, refreshResults]);
 
   useEffect(() => {
-    if (!open) return;
-    const onDoc = (e: MouseEvent) => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
-  }, [open]);
-
-  useEffect(() => {
-    if (open) {
-      setSearch("");
-      setResults([]);
-      requestAnimationFrame(() => searchRef.current?.focus());
-    }
+    if (open) setResults([]);
   }, [open]);
 
   const pick = (repoId: string) => {
@@ -144,39 +130,14 @@ export function HfBaseModelPicker({ value, localModels, disabled, onChange }: Hf
 
       {open && (
         <div className="chat-model-picker-menu" role="listbox">
-          <div className="chat-model-picker-search">
-            <span className="chat-model-picker-search-icon" aria-hidden>
-              <IconSearch size={15} />
-            </span>
-            <input
-              ref={searchRef}
-              type="search"
-              className="chat-model-picker-search-input"
-              placeholder="Search local & Hugging Face models…"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Escape") {
-                  e.preventDefault();
-                  setOpen(false);
-                }
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  applyCustom();
-                }
-              }}
-            />
-            {search && (
-              <button
-                type="button"
-                className="chat-model-picker-search-clear"
-                onClick={() => setSearch("")}
-                aria-label="Clear search"
-              >
-                <IconClose size={14} />
-              </button>
-            )}
-          </div>
+          <HubComboboxSearch
+            searchRef={searchRef}
+            value={search}
+            placeholder="Search local & Hugging Face models…"
+            onChange={setSearch}
+            onEscape={() => setOpen(false)}
+            onEnter={applyCustom}
+          />
 
           <div className="chat-model-picker-list">
             {!emptyLocal && (

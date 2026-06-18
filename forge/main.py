@@ -38,8 +38,13 @@ async def lifespan(app: FastAPI):
     configure_hf_hub_cache(settings.data_dir)
     settings.ensure_dirs()
     settings.write_runtime_config()
-    yield
     db = get_db()
+    stale = await db.reconcile_stale_jobs()
+    if stale:
+        import logging
+
+        logging.getLogger(__name__).info("Marked %d stale job(s) as failed after restart", stale)
+    yield
     await db.close()
     clear_dependency_caches()
 

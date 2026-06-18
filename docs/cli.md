@@ -1,6 +1,9 @@
 # CLI reference
 
-Run commands from the **repository root** with your virtualenv active (`source .venv/bin/activate` or `~/Seiso/.venv/bin/activate`).
+Run commands from the **repository root** with your virtualenv active:
+
+- Linux / macOS / WSL: `source .venv/bin/activate`
+- Windows: `.\.venv\Scripts\Activate.ps1`
 
 Install entry points:
 
@@ -14,9 +17,9 @@ Helper scripts (repo `scripts/`, not on `PATH`):
 
 | Script | Purpose |
 |--------|---------|
-| `./scripts/install.sh` | Clone/install venv, pip extras, UI build |
-| `./scripts/start.sh` | Build UI if needed, then `seiso forge` |
-| `./scripts/doctor.sh` | Diagnose install, HF, GPU stack |
+| `./scripts/install.sh` | System deps, clone/install venv, pip extras, UI build; starts Forge by default |
+| `./scripts/start.sh` | Install missing deps if needed, then `seiso forge --open` (Linux/macOS/WSL only) |
+| `./scripts/doctor.sh` | Diagnose install, HF, GPU stack (runs automatically on install/start failure) |
 | `./scripts/precheck.sh` | Fast local CI gate (`make precheck`) |
 | `./scripts/install_flash_attn.sh` | Optional Flash Attention (Linux NVIDIA) |
 
@@ -28,6 +31,7 @@ Launch the Forge web server (API + built UI).
 
 ```bash
 seiso forge
+seiso forge --open             # open browser when /health is ready (default via start.sh)
 seiso forge --reload          # auto-reload Python on code changes
 seiso forge --port 8766       # custom port
 ```
@@ -59,7 +63,9 @@ Example config: `configs/example_lora.yaml` (dataset: `data/sample.jsonl`).
 
 **Checkpoints (CLI):** written under the YAML `output_dir` (example: `./outputs/lora-run/checkpoint-<timestamp>/`).
 
-**Checkpoints (Forge UI):** `{SEISO_DATA_DIR}/checkpoints/{user_id}/{job_id}/` (default `~/.seiso/checkpoints/...`).
+**Checkpoints (Forge UI):** `{SEISO_DATA_DIR}/checkpoints/{user_id}/{job_id}/`
+
+**Default data dir:** `$HOME/.seiso` (Linux/macOS/WSL) or `%USERPROFILE%\.seiso` (Windows)
 
 ## `seiso chat`
 
@@ -78,8 +84,11 @@ Export a training checkpoint to merged weights, LoRA, full fine-tune, or GGUF.
 # CLI training output (example_lora.yaml → ./outputs/lora-run/)
 seiso export --checkpoint ./outputs/lora-run/checkpoint-<timestamp> --formats merged,gguf
 
-# Forge training output
-seiso export --checkpoint ~/.seiso/checkpoints/<user>/<job_id>/checkpoint-<timestamp> --formats merged,gguf
+# Forge training output (Linux/macOS/WSL)
+seiso export --checkpoint "$HOME/.seiso/checkpoints/<user>/<job_id>/checkpoint-<timestamp>" --formats merged,gguf
+
+# Forge training output (Windows)
+seiso export --checkpoint "$env:USERPROFILE\.seiso\checkpoints\<user>\<job_id>\checkpoint-<timestamp>" --formats merged,gguf
 
 seiso export --checkpoint <path> --profile inference
 seiso export --checkpoint <path> --hub-repo user/my-model
@@ -116,7 +125,7 @@ Code Llama compression pipeline (vendored `third_party/codellama-compress`).
 seiso compress run --preset smoke
 seiso compress run --preset full --teacher-model codellama/CodeLlama-13b-hf --student-model codellama/CodeLlama-7b-hf
 
-seiso compress manifest-verify --run-dir ~/.seiso/compress/local/<job_id>
+seiso compress manifest-verify --run-dir "$HOME/.seiso/compress/local/<job_id>"
 seiso compress speculative --target-model ./finetuned --draft-model ./distilled --prompt "def fib(n):"
 ```
 

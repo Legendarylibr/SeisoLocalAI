@@ -93,6 +93,27 @@ def _get_download_lock(key: str) -> asyncio.Lock:
     return lock
 
 
+async def find_inventory_for_catalog_repo(
+    db: Database,
+    user_id: str,
+    catalog_repo: str,
+) -> dict[str, Any] | None:
+    """Find a local inventory row for a catalog repo id (handles GGUF mirror sources)."""
+    existing = await db.get_model_by_source(user_id, f"hf:{catalog_repo}")
+    if existing:
+        return existing
+    for row in await db.list_models(user_id):
+        if row.get("source") == f"hf:{catalog_repo}":
+            return row
+        try:
+            metadata = json.loads(row.get("metadata_json") or "{}")
+        except json.JSONDecodeError:
+            metadata = {}
+        if metadata.get("repo_id") == catalog_repo:
+            return row
+    return None
+
+
 def _path_has_complete_artifact(path: Path, fmt: str, expected_size: int) -> bool:
     if not path.exists():
         return False
@@ -321,7 +342,7 @@ async def perform_model_download(
         variant=resolved_variant,
     )
     async with _get_download_lock(key):
-        existing = await db.get_model_by_source(user_id, f"hf:{repo_id}")
+        existing = await find_inventory_for_catalog_repo(db, user_id, repo_id)
         cached = _cached_download_result_if_usable(
             existing,
             repo_id=repo_id,

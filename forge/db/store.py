@@ -877,3 +877,20 @@ class Database:
 
     async def list_image_compress_jobs(self, user_id: str) -> list[dict]:
         return await self._list_config_jobs("image_compress_jobs", user_id)
+
+    async def reconcile_stale_jobs(self, *, reason: str = "Server restarted while job was active") -> int:
+        """Mark in-flight jobs as failed after Forge restart (orchestrator state is in-memory only)."""
+        now = _now()
+        total = 0
+        async with self._conn() as conn:
+            for table in _JOB_ERROR_TABLES:
+                cur = await conn.execute(
+                    f"""UPDATE {table}
+                        SET status = 'failed', updated_at = ?,
+                            error_text = COALESCE(error_text, ?)
+                        WHERE status IN ('pending', 'running')""",
+                    (now, reason),
+                )
+                total += cur.rowcount
+            await conn.commit()
+        return total

@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { api, subscribeSSE, SystemMetrics, TrainableModel, TrainingJob, TrainingMetricPoint } from "@/lib/api";
+import { api, subscribeSSE, SystemMetrics, TrainingJob, TrainingMetricPoint } from "@/lib/api";
 import { initialDownloadProgress, ModelProgressState } from "@/lib/modelProgress";
-import { ensureTrainHubModel, fetchTrainableModels, isTrainModelCached } from "@/lib/trainModel";
+import { ensureTrainHubModel, isTrainModelCached } from "@/lib/trainModel";
+import { useTrainingModels } from "@/context/TrainingModelsContext";
 import { readStoredModel, writeStoredModel } from "@/lib/modelSelection";
 import { HfBaseModelPicker } from "@/components/HfBaseModelPicker";
 import { HfDatasetPicker } from "@/components/HfDatasetPicker";
@@ -26,7 +27,7 @@ export function TrainPage() {
     return Number.isFinite(n) && n > 0 ? n : undefined;
   })();
   const [jobs, setJobs] = useState<TrainingJob[]>([]);
-  const [localModels, setLocalModels] = useState<TrainableModel[]>([]);
+  const { models: localModels, refresh: refreshLocalModels } = useTrainingModels();
   const [modelId, setModelId] = useState("");
   const [dataset, setDataset] = useState("HuggingFaceH4/no_robots");
   const [method, setMethod] = useState("lora");
@@ -74,25 +75,20 @@ export function TrainPage() {
 
   useEffect(() => {
     api.listTrainingJobs().then(setJobs).catch(console.error);
-    api.listTrainingModels().then((r) => {
-      setLocalModels(r.models);
-      if (pendingModel) return;
-      const stored = readStoredModel("train:model");
-      if (stored) {
-        setModelId(stored);
-        return;
-      }
-      const firstLocal = r.models.find((m) => m.repo_id)?.repo_id;
-      if (firstLocal) setModelId(firstLocal);
-    }).catch(console.error);
     api.listExportProfiles().then(setExportProfiles).catch(console.error);
     if (pendingModel) setModelId(pendingModel);
   }, [pendingModel]);
 
-  const refreshLocalModels = useCallback(
-    () => api.listTrainingModels().then((r) => setLocalModels(r.models)).catch(console.error),
-    [],
-  );
+  useEffect(() => {
+    if (pendingModel || modelId) return;
+    const stored = readStoredModel("train:model");
+    if (stored) {
+      setModelId(stored);
+      return;
+    }
+    const firstLocal = localModels.find((m) => m.repo_id)?.repo_id;
+    if (firstLocal) setModelId(firstLocal);
+  }, [localModels, pendingModel, modelId]);
 
   useEffect(() => {
     if (!pendingModel || !pendingDownload) return;
@@ -105,9 +101,7 @@ export function TrainPage() {
       setDownloadError(null);
       setLoadProgress(initialDownloadProgress(pendingModel, pendingDownloadBytes));
       try {
-        const models = await fetchTrainableModels();
-        if (cancelled) return;
-        if (isTrainModelCached(models, pendingModel)) {
+        if (isTrainModelCached(localModels, pendingModel)) {
           setModelId(pendingModel);
           setSearchParams({ model: pendingModel }, { replace: true });
           return;
@@ -132,7 +126,7 @@ export function TrainPage() {
     return () => {
       cancelled = true;
     };
-  }, [pendingModel, pendingDownload, pendingDownloadBytes, refreshLocalModels, setSearchParams]);
+  }, [pendingModel, pendingDownload, pendingDownloadBytes, localModels, refreshLocalModels, setSearchParams]);
 
   useEffect(() => {
     if (!hw || hwApplied || pendingModel) return;
@@ -188,8 +182,7 @@ export function TrainPage() {
   };
 
   const ensureModelCached = async () => {
-    const models = await fetchTrainableModels();
-    if (isTrainModelCached(models, modelId)) return;
+    if (isTrainModelCached(localModels, modelId)) return;
     setDownloadingModel(true);
     setDownloadError(null);
     setLoadProgress(initialDownloadProgress(modelId));

@@ -1,4 +1,5 @@
 import { request } from "./client";
+import { cachedGet } from "./getCache";
 import type { CatalogDataset, TrainableModel, TrainingJob, TrainingMetricsPayload } from "./types";
 
 export const trainingApi = {
@@ -16,7 +17,8 @@ export const trainingApi = {
       body: JSON.stringify({ config, multi_gpu, export_on_complete }),
     }),
   listTrainingJobs: () => request<TrainingJob[]>("/training/jobs"),
-  listTrainingModels: () => request<{ models: TrainableModel[]; total: number }>("/training/models"),
+  listTrainingModels: () =>
+    cachedGet<{ models: TrainableModel[]; total: number }>("/training/models", 120_000),
   searchDatasets: (q: string, limit = 12) => {
     const params = new URLSearchParams({ q, limit: String(limit) });
     return request<{ datasets: CatalogDataset[]; total: number }>(`/training/datasets?${params}`);

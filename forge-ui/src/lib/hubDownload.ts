@@ -1,13 +1,9 @@
+import { invalidateApiCache } from "@/lib/api/getCache";
 import { api } from "@/lib/api";
+import { throwIfAborted } from "@/lib/abort";
 import { ModelProgressState, initialDownloadProgress, progressFromDownloadEvent } from "@/lib/modelProgress";
 
 export type ModelProgressHandler = (progress: ModelProgressState | null) => void;
-
-function throwIfAborted(signal?: AbortSignal) {
-  if (signal?.aborted) {
-    throw new DOMException("Aborted", "AbortError");
-  }
-}
 
 /** Stream a Hugging Face repo into local inventory with live byte progress. */
 export function streamHubModelDownload(
@@ -44,6 +40,9 @@ export function streamHubModelDownload(
             finishReject(new Error("Download completed without model id"));
             return;
           }
+          invalidateApiCache("/inference/models");
+          invalidateApiCache("/training/models");
+          invalidateApiCache("/models");
           finishResolve(modelId);
         },
         onError: (msg) => {
@@ -92,10 +91,26 @@ export function trainPath(repo: string, downloadBytes?: number | null): string {
   return `/train?${params.toString()}`;
 }
 
-export function inventoryHasRepo(
-  list: Array<{ source?: string | null }>,
+export function inventoryMatchesRepo(
+  model: { source?: string | null; metadata?: Record<string, unknown> | null },
   repo: string,
 ): boolean {
-  const source = `hf:${repo}`;
-  return list.some((m) => m.source === source);
+  const source = model.source || "";
+  if (source === `hf:${repo}`) return true;
+  const metaRepo = typeof model.metadata?.repo_id === "string" ? model.metadata.repo_id : null;
+  return metaRepo === repo;
+}
+
+export function inventoryHasRepo(
+  list: Array<{ source?: string | null; metadata?: Record<string, unknown> | null }>,
+  repo: string,
+): boolean {
+  return list.some((m) => inventoryMatchesRepo(m, repo));
+}
+
+export function findInventoryModelId(
+  list: Array<{ id: string; source?: string | null; metadata?: Record<string, unknown> | null }>,
+  repo: string,
+): string | undefined {
+  return list.find((m) => inventoryMatchesRepo(m, repo))?.id;
 }

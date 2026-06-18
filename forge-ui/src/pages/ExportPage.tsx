@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, ExportJob, HubPublishFields, PublishableModel, RLQuantJob, subscribeSSE } from "@/lib/api";
+import { appendBoundedLog } from "@/lib/api/sse";
 import { StudioPageShell } from "@/components/StudioPageShell";
 
 function emptyHub(): HubPublishFields {
@@ -36,12 +37,14 @@ export function ExportPage() {
   const [profile, setProfile] = useState("");
   const [profiles, setProfiles] = useState<{ id: string; formats: string[] }[]>([]);
   const [busy, setBusy] = useState(false);
+  const streamAbortRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     api.listRLQuantJobs().then(setRlJobs).catch(console.error);
     api.listPublishableOutputs().then(setPublishable).catch(console.error);
     api.listExportJobs().then(setExportJobs).catch(console.error);
     api.listExportProfiles().then(setProfiles).catch(console.error);
+    return () => streamAbortRef.current?.();
   }, []);
 
   const completedRlJobs = rlJobs.filter((j) => j.status === "completed" && j.gguf_quants?.length);
@@ -70,8 +73,9 @@ export function ExportPage() {
         profile || undefined,
       );
       setLastExportJobId(res.job_id);
-      subscribeSSE(`/export/jobs/${res.job_id}/stream`, (event, data) => {
-        if (event === "log" || event === "result") setLogs((l) => [...l, data]);
+      streamAbortRef.current?.();
+      streamAbortRef.current = subscribeSSE(`/export/jobs/${res.job_id}/stream`, (event, data) => {
+        if (event === "log" || event === "result") setLogs((l) => appendBoundedLog(l, data));
       });
       setTimeout(() => api.listPublishableOutputs().then(setPublishable).catch(console.error), 2000);
       setTimeout(() => api.listExportJobs().then(setExportJobs).catch(console.error), 2000);

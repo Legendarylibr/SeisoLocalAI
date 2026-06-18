@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { api, CatalogDataset } from "@/lib/api";
-import { IconChevronDown, IconClose, IconSearch } from "@/components/Icons";
+import { HubComboboxSearch } from "@/components/HubComboboxSearch";
+import { IconChevronDown } from "@/components/Icons";
+import { useHubCombobox } from "@/hooks/useHubCombobox";
 
 type HfDatasetPickerProps = {
   value: string;
@@ -9,12 +11,9 @@ type HfDatasetPickerProps = {
 };
 
 export function HfDatasetPicker({ value, onChange, disabled }: HfDatasetPickerProps) {
-  const [open, setOpen] = useState(false);
-  const [search, setSearch] = useState("");
+  const { open, setOpen, search, setSearch, rootRef, searchRef } = useHubCombobox();
   const [results, setResults] = useState<CatalogDataset[]>([]);
   const [loading, setLoading] = useState(false);
-  const rootRef = useRef<HTMLDivElement>(null);
-  const searchRef = useRef<HTMLInputElement>(null);
 
   const refreshResults = useCallback((q: string) => {
     const trimmed = q.trim();
@@ -38,20 +37,7 @@ export function HfDatasetPicker({ value, onChange, disabled }: HfDatasetPickerPr
   }, [open, search, refreshResults]);
 
   useEffect(() => {
-    if (!open) return;
-    const onDoc = (e: MouseEvent) => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
-  }, [open]);
-
-  useEffect(() => {
-    if (open) {
-      setSearch("");
-      setResults([]);
-      requestAnimationFrame(() => searchRef.current?.focus());
-    }
+    if (open) setResults([]);
   }, [open]);
 
   const pick = (repoId: string) => {
@@ -79,35 +65,13 @@ export function HfDatasetPicker({ value, onChange, disabled }: HfDatasetPickerPr
 
       {open && (
         <div className="chat-model-picker-menu" role="listbox">
-          <div className="chat-model-picker-search">
-            <span className="chat-model-picker-search-icon" aria-hidden>
-              <IconSearch size={15} />
-            </span>
-            <input
-              ref={searchRef}
-              type="search"
-              className="chat-model-picker-search-input"
-              placeholder="Search Hugging Face datasets…"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Escape") {
-                  e.preventDefault();
-                  setOpen(false);
-                }
-              }}
-            />
-            {search && (
-              <button
-                type="button"
-                className="chat-model-picker-search-clear"
-                onClick={() => setSearch("")}
-                aria-label="Clear search"
-              >
-                <IconClose size={14} />
-              </button>
-            )}
-          </div>
+          <HubComboboxSearch
+            searchRef={searchRef}
+            value={search}
+            placeholder="Search Hugging Face datasets…"
+            onChange={setSearch}
+            onEscape={() => setOpen(false)}
+          />
 
           <div className="chat-model-picker-list">
             {!search.trim() && (

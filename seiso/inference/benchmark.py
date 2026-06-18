@@ -82,7 +82,6 @@ async def _timed_stream(
 ) -> tuple[str, float | None, float, float]:
     """Return output text, load_ms, ttft_ms, generate_ms."""
     runner = runner or LocalInferenceRunner()
-    pool = get_model_pool()
 
     t0 = time.perf_counter()
     first_at: float | None = None
@@ -97,7 +96,6 @@ async def _timed_stream(
     t1 = time.perf_counter()
     output = "".join(chunks)
 
-    status = pool.status()
     load_ms: float | None = None
     if first_at is not None:
         ttft_ms = (first_at - t0) * 1000.0
