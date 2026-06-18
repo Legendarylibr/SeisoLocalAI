@@ -26,6 +26,20 @@ STAGE_ORDER = (
     "report",
 )
 
+_DEFAULT_BASE_MODEL: str | None = None
+
+
+def get_image_base_model_default() -> str:
+    """Vendor PipelineConfig default — single source for API and pipeline builder."""
+    global _DEFAULT_BASE_MODEL
+    if _DEFAULT_BASE_MODEL is None:
+        ensure_sd_compress_importable()
+        from sd_compress.config import PipelineConfig
+
+        _DEFAULT_BASE_MODEL = PipelineConfig().base_model
+    return _DEFAULT_BASE_MODEL
+
+
 PRESETS: dict[str, dict[str, Any]] = {
     "smoke": {
         "stages": [
@@ -109,7 +123,7 @@ def build_pipeline_config(
         data_path = str(output_root / "captions.json")
 
     overrides: dict[str, Any] = {
-        "base_model": str(payload.get("base_model", "runwayml/stable-diffusion-v1-5")),
+        "base_model": str(payload.get("base_model") or get_image_base_model_default()),
         "data_path": str(data_path),
         "output_dir": str(output_root),
         "distill_dir": str(output_root / "distilled"),

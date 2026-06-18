@@ -76,7 +76,7 @@ class OnlineLearningLoop:
             integrity_chain=bool(config.jsonl_integrity_chain) or jsonl_integrity_chain_enabled(),
         )
         self.replay_buffer = ReplayBuffer(config.online_replay_capacity, self.rng)
-        self.previous_action = zero_previous_action()
+        self.previous_action = zero_previous_action(config)
         self._max_bits = max(config.discrete_bit_widths)
         self._scale_upper = config.scale_bounds[1]
         self._clip_upper = config.clip_bounds[1]
@@ -197,10 +197,14 @@ class OnlineLearningLoop:
             if not accepted_candidate:
                 router_reward -= float(self.config.router_regression_penalty)
             self.router.update(router_trace, reward=router_reward)
-        self.previous_action = served_result.decision.feedback_vector(
+        from adaptive_quant.trainer_utils import feedback_vector
+
+        self.previous_action = feedback_vector(
+            served_result.decision,
             max_bits=self._max_bits,
             scale_upper=self._scale_upper,
             clip_upper=self._clip_upper,
+            config=self.config,
         )
         self.trainer.previous_action = list(self.previous_action)
 

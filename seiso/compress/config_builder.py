@@ -17,6 +17,24 @@ STAGE_ORDER = (
     "quantize_awq",
 )
 
+_MODEL_DEFAULTS: dict[str, str] | None = None
+
+
+def get_compress_model_defaults() -> dict[str, str]:
+    """Vendor DistillConfig defaults — single source for API and pipeline builder."""
+    global _MODEL_DEFAULTS
+    if _MODEL_DEFAULTS is None:
+        ensure_codellama_compress_importable()
+        from codellama_compress.config import DistillConfig
+
+        dc = DistillConfig()
+        _MODEL_DEFAULTS = {
+            "teacher_model": dc.teacher_model,
+            "student_model": dc.student_model,
+        }
+    return dict(_MODEL_DEFAULTS)
+
+
 PRESETS: dict[str, dict[str, Any]] = {
     "smoke": {
         "stages": ["distill", "prune", "finetune", "evaluate", "export"],
@@ -102,11 +120,12 @@ def build_pipeline_config(
             "max_train_samples": payload.get("max_train_samples", preset.get("max_train_samples")),
         },
     )
+    model_defaults = get_compress_model_defaults()
     distill_cfg = merge_dataclass(
         DistillConfig(),
         {
-            "teacher_model": str(payload.get("teacher_model", "codellama/CodeLlama-13b-hf")),
-            "student_model": str(payload.get("student_model", "codellama/CodeLlama-7b-hf")),
+            "teacher_model": str(payload.get("teacher_model") or model_defaults["teacher_model"]),
+            "student_model": str(payload.get("student_model") or model_defaults["student_model"]),
             "steps": int(payload.get("distill_steps", preset.get("distill_steps", 2))),
         },
     )

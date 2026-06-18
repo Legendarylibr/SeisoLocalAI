@@ -36,7 +36,8 @@ Seiso combines a **web workspace (Forge)** and a **Python core (CLI + library)**
 | Download & chat with open models | Model Hub, Chat | `seiso chat` |
 | QLoRA / LoRA / full fine-tune | Training Studio | `seiso train` |
 | Merge, GGUF, Hub publish | Export | `seiso export` |
-| LLM distill → prune → quant | Compress | `seiso compress` |
+| LLM distill → prune → quant | Compress | `seiso compress run` |
+| RL quant + CUDA kernel policy | RL Quant | `seiso rl-quant run` |
 | SD image compression | Image Compress | — |
 | RL adaptive GGUF quantization | RL Quant | — |
 | Visual data/recipe pipelines | Recipe Studio | — |
@@ -101,6 +102,8 @@ The installer clones to `~/Seiso`, creates a venv, installs platform extras (CUD
 
 The commands below assume a fresh clone at `~/Seiso`. Paste the commands only, not explanatory text.
 
+**Requirements:** Python 3.10+, [Node.js 18+](https://nodejs.org/) (20 LTS recommended), and git.
+
 Base install:
 
 ```bash
@@ -111,7 +114,7 @@ source .venv/bin/activate
 pip install -U pip wheel setuptools
 pip install -e ".[forge,train,dev]"
 cd forge-ui
-npm install
+npm ci
 npm run build
 cd ..
 seiso doctor
@@ -125,11 +128,32 @@ cd ~/Seiso
 source .venv/bin/activate
 pip install -e ".[forge,train,mlx,dev]"
 cd forge-ui
-npm install
+npm ci
 npm run build
 cd ..
 seiso doctor
 seiso forge
+```
+
+Linux + NVIDIA (adds Triton for fused kernels):
+
+```bash
+cd ~/Seiso
+source .venv/bin/activate
+pip install -e ".[forge,train,cuda,dev]"
+cd forge-ui
+npm ci
+npm run build
+cd ..
+seiso doctor
+seiso forge
+```
+
+Optional compression pipelines (install on top of the base stack):
+
+```bash
+pip install -e ".[compress-quant,compress-eval]"           # Code Llama GPTQ/AWQ (Linux NVIDIA)
+pip install -e ".[image-compress,image-compress-onnx]"     # Stable Diffusion pipeline
 ```
 
 Full install guide: **[docs/install.md](docs/install.md)**  
@@ -142,9 +166,10 @@ git clone https://github.com/Legendarylibr/SeisoLocalAI.git Seiso
 cd Seiso
 python -m venv .venv
 .venv\Scripts\activate
-pip install -U pip
+pip install -U pip wheel setuptools
 pip install -e ".[forge,train,dev]"
-cd forge-ui; npm install; npm run build; cd ..
+cd forge-ui; npm ci; npm run build; cd ..
+seiso doctor
 seiso forge
 ```
 
@@ -181,21 +206,29 @@ Forge details: **[docs/forge.md](docs/forge.md)**
 | Command | Purpose |
 |---------|---------|
 | `seiso forge` | Launch Forge web server |
+| `seiso doctor` | Diagnose install / HF / GPU stack |
 | `seiso train` | Train from YAML config |
 | `seiso chat` | Terminal chat with local models |
 | `seiso export` | Export merged / GGUF / LoRA + Hub push |
 | `seiso compress run` | Code Llama compression pipeline |
 | `seiso compress manifest-verify` | Verify hash-chained run manifest |
 | `seiso compress speculative` | Speculative decoding (draft + target) |
+| `seiso rl-quant run` | RL quantization (+ optional `--kernel-rl`) |
+| `seiso rl-quant profiles` | List CUDA kernel RL launch profiles |
 | `seiso inference` | One-shot inference |
-| `seiso-bench-kernels` | Benchmark fused GPU kernels |
+| `seiso bench-inference` | Inference load / TTFT / tok/s benchmark |
+| `seiso-bench-kernels` | Benchmark fused GPU training kernels |
+| `seiso-train-worker` | Multi-GPU worker (via `torchrun`, see docs) |
 
 ```bash
-# Example: fine-tune Llama 3.2 3B on sample data
+# Example: fine-tune Llama 3.2 3B on sample data (CLI → ./outputs/lora-run/)
 seiso train --config configs/example_lora.yaml
 
-# Example: export checkpoint to GGUF
-seiso export --checkpoint ./outputs/lora-run/checkpoint-<ts> --formats merged,gguf
+# Example: export CLI checkpoint to GGUF
+seiso export --checkpoint ./outputs/lora-run/checkpoint-<timestamp> --formats merged,gguf
+
+# Example: RL quant with CUDA kernel co-training
+seiso rl-quant run --preset minimal --kernel-rl --training-episodes 256
 ```
 
 Full reference: **[docs/cli.md](docs/cli.md)**
@@ -207,7 +240,7 @@ Full reference: **[docs/cli.md](docs/cli.md)**
 ```
 Seiso/
 ├── seiso/              # Core library — training, inference, export, kernels, compression
-├── seiso_cli/          # CLI entrypoints (seiso, seiso-bench-kernels, seiso-train-worker)
+├── seiso_cli/          # CLI: seiso, seiso-bench-kernels, seiso-train-worker
 ├── forge/              # FastAPI backend, auth, orchestrators, SSE job streaming
 ├── forge-ui/           # React 19 + TypeScript + Vite frontend
 ├── third_party/        # Vendored compression pipelines (codellama, SD, RL quant)
@@ -279,7 +312,7 @@ Three integrated pipelines ([compression.md](docs/compression.md)):
 
 1. **Code Llama** — distill → MLP prune → recovery finetune → GPTQ/AWQ → speculative decoding
 2. **Stable Diffusion** — progressive distill, prune, quantize, ONNX export
-3. **RL quantization** — train a policy for adaptive GGUF quant levels
+3. **RL quantization** — train a policy for adaptive GGUF quant levels (`seiso rl-quant run`, optional `--kernel-rl`)
 
 ---
 

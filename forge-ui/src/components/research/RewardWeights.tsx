@@ -4,6 +4,8 @@ const REWARD_LABELS: Record<string, { label: string; hint: string }> = {
   gamma_perplexity: { label: "Perplexity (γ)", hint: "Quality preservation weight" },
   delta_memory: { label: "Memory (δ)", hint: "VRAM footprint penalty" },
   epsilon_instability: { label: "Stability (ε)", hint: "Quantization variance penalty" },
+  theta_kernel_speedup: { label: "Kernel speedup (θ)", hint: "Reward fused CUDA profile speedup" },
+  iota_kernel_latency: { label: "Kernel latency (ι)", hint: "Penalize slow kernel micro-benchmarks" },
 };
 
 type RewardWeightsProps = {

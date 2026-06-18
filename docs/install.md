@@ -122,11 +122,14 @@ Build the UI and launch:
 cd ~/Seiso
 source .venv/bin/activate
 cd forge-ui
-npm install
+npm ci
 npm run build
 cd ..
+seiso doctor
 seiso forge
 ```
+
+Use `npm install` instead of `npm ci` only when you intentionally want to refresh the lockfile.
 
 ---
 
@@ -216,13 +219,25 @@ Full guide: [platforms/wsl.md](platforms/wsl.md)
 | `flash-attn` | Flash Attention 2 (optional; build from source) | **Linux NVIDIA only** |
 | `mlx` | mlx-lm | **macOS only** |
 | `llamacpp` | llama-cpp-python (GGUF inference) | All |
-| `compress-quant` | auto-gptq, autoawq | CUDA recommended |
+| `compress-quant` | auto-gptq, autoawq (requires `torch`; Linux NVIDIA) | CUDA recommended |
 | `compress-eval` | lm-eval harness | All |
 | `image-compress` | diffusers, torchvision, gradio | CUDA/MPS/CPU |
 | `image-compress-onnx` | optimum, onnxruntime | All |
+| `rl-quant` | Integrated adaptive RL quant (stdlib; no extra deps) | All |
 | `dev` | pytest, ruff, mypy, bandit | All |
 
-Combine extras: `pip install -e ".[forge,train,cuda,dev,compress-quant]"`
+Combine extras:
+
+```bash
+pip install -e ".[forge,train,cuda,dev,compress-quant]"
+```
+
+If `auto-gptq` fails to build, install the train stack first, then retry with build isolation disabled:
+
+```bash
+pip install -e ".[forge,train,compress-quant]"
+pip install auto-gptq autoawq --no-build-isolation
+```
 
 ---
 
@@ -231,7 +246,7 @@ Combine extras: `pip install -e ".[forge,train,cuda,dev,compress-quant]"`
 Forge serves the built UI from `forge-ui/dist`. Required before first launch:
 
 ```bash
-cd forge-ui && npm install && npm run build && cd ..
+cd forge-ui && npm ci && npm run build && cd ..
 ```
 
 Or use `./scripts/install.sh` / `./scripts/start.sh` (auto-builds if missing).
@@ -294,7 +309,7 @@ source .venv/bin/activate
 pip install -U pip
 pip install -e ".[forge,train,cuda,dev]"
 cd forge-ui
-npm install
+npm ci
 npm run build
 cd ..
 ```

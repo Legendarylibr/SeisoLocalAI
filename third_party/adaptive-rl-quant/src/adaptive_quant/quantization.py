@@ -4,6 +4,7 @@ from dataclasses import replace
 
 from adaptive_quant.configuration import FrameworkConfig
 from adaptive_quant.features import summarize_precision_needs
+from adaptive_quant.kernel_rl import finalize_kernel_profile
 from adaptive_quant.math_utils import clamp, mean, variance
 from adaptive_quant.types import EpisodeState, QuantizationDecision, QuantMode
 
@@ -166,6 +167,7 @@ def finalize_decision(
     finalized.metadata["average_bits"] = mean(finalized.effective_layer_bits)
     finalized.metadata["bit_variance"] = variance(finalized.effective_layer_bits)
     _finalize_moe_selection(finalized, state, config)
+    finalize_kernel_profile(finalized, config)
 
     out_of_bounds = any(bit < min_bits or bit > max_bits for bit in finalized.effective_layer_bits)
     extremely_fragmented = variance(finalized.effective_layer_bits) > 4.0

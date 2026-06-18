@@ -160,7 +160,7 @@ run_install_worker() {
     fi
   fi
   if [[ "${SEISO_SKIP_UI:-0}" != "1" ]]; then
-    (cd "$root/forge-ui" && npm install && npm run build)
+    (cd "$root/forge-ui" && npm ci && npm run build)
   fi
 }
 

@@ -34,11 +34,11 @@ dependencies = [
 
 [project.optional-dependencies]
 train = [
-  "torch>=2.2",
-  "transformers>=4.40",
-  "datasets>=2.19",
-  "peft>=0.11",
-  "accelerate>=0.30",
+  "torch>=2.12",
+  "transformers>=5.10",
+  "datasets>=5.0",
+  "peft>=0.19",
+  "accelerate>=1.13",
   "bitsandbytes>=0.43; platform_system != 'Darwin'",
   "trl>=0.8",
   "sentence-transformers>=3.0",
@@ -72,6 +72,8 @@ llamacpp = [
 rl-quant = []
 compress = []
 compress-quant = [
+  # torch must be present before auto-gptq builds its CUDA extension
+  "torch>=2.12",
   "auto-gptq>=0.7.1",
   "autoawq>=0.2.9",
 ]
@@ -79,19 +81,20 @@ compress-eval = [
   "lm-eval[hf]>=0.4.12",
 ]
 image-compress = [
-  "torch>=2.2",
-  "torchvision>=0.17",
-  "diffusers>=0.30",
-  "transformers>=4.40",
-  "accelerate>=0.30",
-  "pillow>=10.0",
+  "torch>=2.12",
+  "torchvision>=0.27",
+  "diffusers>=0.38",
+  "transformers>=5.9",
+  "accelerate>=1.13",
+  "pillow>=12.2",
   "lpips>=0.1.4",
-  "gradio>=4.0",
+  "gradio>=6.14",
+  "scipy>=1.17",
 ]
 image-compress-onnx = [
-  "optimum>=1.20",
-  "onnx>=1.16",
-  "onnxruntime>=1.18",
+  "optimum>=2.1",
+  "onnx>=1.21",
+  "onnxruntime>=1.26",
 ]
 dev = [
   "pytest>=8.2",
@@ -104,7 +107,7 @@ dev = [
   "pip-audit>=2.7",
   "pre-commit>=3.7",
   "httpx>=0.27",
-  "datasets>=2.19",
+  "datasets>=5.0",
 ]
 
 [project.scripts]

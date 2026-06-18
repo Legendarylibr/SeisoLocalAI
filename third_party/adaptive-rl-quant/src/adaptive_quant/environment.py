@@ -14,6 +14,7 @@ from adaptive_quant.logging_utils import JsonlLogger, NullJsonlLogger, jsonl_int
 from adaptive_quant.math_utils import variance
 from adaptive_quant.moe import ExpertBank
 from adaptive_quant.prompts import PromptLibrary
+from adaptive_quant.kernel_rl import finalize_kernel_profile
 from adaptive_quant.quantization import finalize_decision, safe_fallback_decision
 from adaptive_quant.reward import apply_moe_reward_penalties, compute_weighted_reward
 from adaptive_quant.trainer_utils import zero_previous_action
@@ -128,7 +129,7 @@ class AdaptiveQuantizationEnv:
         else:
             hardware = self._sample_hardware_random()
 
-        previous = previous_action or zero_previous_action()
+        previous = previous_action or zero_previous_action(self.config)
         input_features, sensitivity = self._get_prompt_context(prompt)
         hardware_profile = self.hardware_profiles[hardware]
         self._current_phase = phase
@@ -154,7 +155,9 @@ class AdaptiveQuantizationEnv:
             raise RuntimeError("Environment must be reset before evaluation.")
 
         finalized = finalize_decision(decision, self.current_state, self.config)
+        finalize_kernel_profile(finalized, self.config)
         primary_metrics = self.backend.evaluate(self.current_state, finalized)
+        primary_metrics = self._enrich_kernel_metrics(primary_metrics, finalized, episode_index)
         stability_penalty = self._stability_penalty(finalized, self.current_state)
 
         pre_fallback_metrics = dict(primary_metrics)
@@ -196,6 +199,11 @@ class AdaptiveQuantizationEnv:
             throughput_source=str(primary_metrics.get("throughput_source", "")),
             memory_source=str(primary_metrics.get("memory_source", "")),
             perplexity_source=str(primary_metrics.get("perplexity_source", "")),
+            kernel_profile_id=float(primary_metrics.get("kernel_profile_id", 0.0)),
+            kernel_profile_name=str(primary_metrics.get("kernel_profile_name", "")),
+            kernel_speedup=float(primary_metrics.get("kernel_speedup", 0.0)),
+            kernel_latency_ms=float(primary_metrics.get("kernel_latency_ms", 0.0)),
+            kernel_benchmark_source=str(primary_metrics.get("kernel_benchmark_source", "")),
         )
         result = EpisodeResult(state=self.current_state, decision=finalized, metrics=metrics)
         if log_episode:
@@ -252,6 +260,69 @@ class AdaptiveQuantizationEnv:
         input_features = extract_input_features(prompt)
         sensitivity = estimate_layer_sensitivity(prompt, input_features, self.config.num_layers)
         return input_features, sensitivity
+
+    def _enrich_kernel_metrics(
+        self,
+        metrics: BackendMetricDict,
+        decision: QuantizationDecision,
+        episode_index: int | None,
+    ) -> BackendMetricDict:
+        if not self.config.kernel_rl_enabled:
+            return metrics
+        live = bool(self.config.kernel_rl_live_benchmark)
+        if episode_index is not None and not live:
+            every = self.config.kernel_benchmark_every_n_episodes
+            if every > 1 and episode_index % every != 0:
+                from adaptive_quant.kernel_rl import kernel_metrics_for_profile
+
+                profile_id = int(decision.metadata.get("kernel_profile_index", 0))
+                kernel_metrics = kernel_metrics_for_profile(
+                    profile_id,
+                    hidden_dim=self.config.kernel_hidden_dim,
+                    batch_rows=self.config.kernel_batch_rows,
+                    hardware_compute_factor=float(
+                        self.current_state.hardware_profile.compute_factor
+                    )
+                    if self.current_state
+                    else 1.0,
+                    config=self.config,
+                )
+            else:
+                kernel_metrics = self._evaluate_kernel_metrics(decision)
+        else:
+            kernel_metrics = self._evaluate_kernel_metrics(decision)
+
+        try:
+            from seiso.rl_quant.kernel_integration import merge_kernel_metrics
+
+            return merge_kernel_metrics(metrics, kernel_metrics, config=self.config)
+        except ImportError:
+            merged = dict(metrics)
+            merged.update(kernel_metrics)
+            speedup = float(kernel_metrics.get("kernel_speedup", 1.0))
+            if speedup > 0.0:
+                merged["latency_ms"] = float(merged["latency_ms"]) / speedup
+                merged["throughput_tps"] = float(merged["throughput_tps"]) * speedup
+            return merged
+
+    def _evaluate_kernel_metrics(self, decision: QuantizationDecision) -> dict[str, float | str]:
+        if self.current_state is None:
+            return {}
+        try:
+            from seiso.rl_quant.kernel_integration import evaluate_kernel_for_decision
+
+            return evaluate_kernel_for_decision(decision, self.current_state, self.config)
+        except ImportError:
+            from adaptive_quant.kernel_rl import kernel_metrics_for_profile
+
+            profile_id = int(decision.metadata.get("kernel_profile_index", 0))
+            return kernel_metrics_for_profile(
+                profile_id,
+                hidden_dim=self.config.kernel_hidden_dim,
+                batch_rows=self.config.kernel_batch_rows,
+                hardware_compute_factor=float(self.current_state.hardware_profile.compute_factor),
+                config=self.config,
+            )
 
     def _compute_reward(self, metrics: BackendMetricDict, stability_penalty: float) -> float:
         reward = compute_weighted_reward(

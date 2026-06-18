@@ -1,6 +1,12 @@
 import { useEffect, useState } from "react";
-import { api, CompressJob, CompressPreset, subscribeSSE } from "@/lib/api";
+import { api, CompressJob, CompressPreset, TrainableModel } from "@/lib/api";
+import { PipelineJobPanel } from "@/components/studio/PipelineJobPanel";
+import { StagePipelineJobsTable } from "@/components/studio/StagePipelineJobsTable";
 import { StudioPageShell } from "@/components/StudioPageShell";
+import { HfBaseModelPicker } from "@/components/HfBaseModelPicker";
+import { usePipelineJobStream } from "@/hooks/usePipelineJobStream";
+import { useStagePipelinePresets } from "@/hooks/useStagePipelinePresets";
+import { resolveModelChoice, writeStoredModel } from "@/lib/modelSelection";
 
 const FALLBACK_PRESETS: CompressPreset[] = [
   { id: "smoke", label: "Smoke", stages: ["distill", "prune", "finetune", "evaluate", "export"] },
@@ -11,24 +17,28 @@ const FALLBACK_PRESETS: CompressPreset[] = [
 ];
 
 const FALLBACK_STAGES = [
-  "distill",
-  "prune",
-  "finetune",
-  "evaluate",
-  "export",
-  "quantize_gptq",
-  "quantize_awq",
+  ...new Set([
+    ...FALLBACK_PRESETS.flatMap((p) => p.stages),
+    "quantize_gptq",
+    "quantize_awq",
+  ]),
 ];
 
 export function CompressPage() {
   const [jobs, setJobs] = useState<CompressJob[]>([]);
-  const [presets, setPresets] = useState<CompressPreset[]>([]);
-  const [allStages, setAllStages] = useState<string[]>(FALLBACK_STAGES);
-  const [stageHelp, setStageHelp] = useState<Record<string, string>>({});
-  const [preset, setPreset] = useState("smoke");
-  const [selectedStages, setSelectedStages] = useState<string[]>(FALLBACK_PRESETS[0].stages);
-  const [teacherModel, setTeacherModel] = useState("codellama/CodeLlama-13b-hf");
-  const [studentModel, setStudentModel] = useState("codellama/CodeLlama-7b-hf");
+  const {
+    preset,
+    setPreset,
+    presetList,
+    allStages,
+    stageHelp,
+    selectedStages,
+    toggleStage,
+  } = useStagePipelinePresets(FALLBACK_PRESETS, FALLBACK_STAGES, api.compressPresets);
+  const [localModels, setLocalModels] = useState<TrainableModel[]>([]);
+  const [teacherModel, setTeacherModel] = useState("");
+  const [studentModel, setStudentModel] = useState("");
+  const [modelsReady, setModelsReady] = useState(false);
   const [modelDir, setModelDir] = useState("");
   const [distillSteps, setDistillSteps] = useState<number | "">("");
   const [finetuneSteps, setFinetuneSteps] = useState<number | "">("");
@@ -41,39 +51,42 @@ export function CompressPage() {
   const [deterministic, setDeterministic] = useState(true);
   const [configFile, setConfigFile] = useState("");
   const [linkTrainingJob, setLinkTrainingJob] = useState("");
-  const [logs, setLogs] = useState<string[]>([]);
-  const [result, setResult] = useState<Record<string, unknown> | null>(null);
-  const [activeJob, setActiveJob] = useState<string | null>(null);
+  const { logs, result, activeJob, resetStream, watchJob } = usePipelineJobStream();
   const [starting, setStarting] = useState(false);
-
-  const presetList = presets.length ? presets : FALLBACK_PRESETS;
 
   useEffect(() => {
     api.listCompressJobs().then(setJobs).catch(console.error);
-    api.compressPresets().then((r) => {
-      setPresets(r.presets);
-      setAllStages(r.stages.length ? r.stages : FALLBACK_STAGES);
-      setStageHelp(r.help);
-    }).catch(console.error);
   }, []);
 
   useEffect(() => {
-    const p = (presets.length ? presets : FALLBACK_PRESETS).find((x) => x.id === preset);
-    if (p?.stages.length) setSelectedStages(p.stages);
-  }, [preset, presets]);
+    let cancelled = false;
+    Promise.all([api.compressPresets(), api.listTrainingModels()])
+      .then(([presetsResp, localResp]) => {
+        if (cancelled) return;
+        setLocalModels(localResp.models);
+        const defaults = presetsResp.defaults ?? {};
+        const localRepos = localResp.models
+          .map((m) => m.repo_id)
+          .filter((repo): repo is string => !!repo);
+        setTeacherModel(
+          resolveModelChoice("compress:teacher", defaults.teacher_model, localRepos),
+        );
+        setStudentModel(
+          resolveModelChoice("compress:student", defaults.student_model, localRepos),
+        );
+        setModelsReady(true);
+      })
+      .catch(console.error);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const refreshJobs = () => api.listCompressJobs().then(setJobs).catch(console.error);
 
-  const toggleStage = (stage: string) => {
-    setSelectedStages((prev) =>
-      prev.includes(stage) ? prev.filter((s) => s !== stage) : [...prev, stage],
-    );
-  };
-
   const start = async () => {
     setStarting(true);
-    setLogs([]);
-    setResult(null);
+    resetStream();
     try {
       const body: Record<string, unknown> = {
         preset,
@@ -95,18 +108,8 @@ export function CompressPage() {
       if (linkTrainingJob) body.link_training_job_id = linkTrainingJob;
 
       const res = await api.startCompress(body);
-      setActiveJob(res.job_id);
-      subscribeSSE(`/compress/jobs/${res.job_id}/stream`, (event, data) => {
-        if (event === "log") setLogs((l) => [...l, data]);
-        if (event === "error") setLogs((l) => [...l, `ERROR: ${data}`]);
-        if (event === "result") {
-          try {
-            setResult(JSON.parse(data));
-          } catch {
-            /* ignore */
-          }
-          refreshJobs();
-        }
+      watchJob(`/compress/jobs/${res.job_id}/stream`, res.job_id, {
+        onResult: () => refreshJobs(),
       });
       refreshJobs();
     } finally {
@@ -155,10 +158,26 @@ export function CompressPage() {
 
           <h3 className="section-title">Models</h3>
           <label>Teacher model</label>
-          <input value={teacherModel} onChange={(e) => setTeacherModel(e.target.value)} />
+          <HfBaseModelPicker
+            value={teacherModel}
+            localModels={localModels}
+            disabled={!modelsReady}
+            onChange={(value) => {
+              setTeacherModel(value);
+              writeStoredModel("compress:teacher", value);
+            }}
+          />
 
           <label>Student model</label>
-          <input value={studentModel} onChange={(e) => setStudentModel(e.target.value)} />
+          <HfBaseModelPicker
+            value={studentModel}
+            localModels={localModels}
+            disabled={!modelsReady}
+            onChange={(value) => {
+              setStudentModel(value);
+              writeStoredModel("compress:student", value);
+            }}
+          />
 
           <label>Starting model dir (optional — for prune/finetune presets)</label>
           <input value={modelDir} onChange={(e) => setModelDir(e.target.value)} placeholder="~/.seiso/checkpoints/…" />
@@ -266,56 +285,15 @@ export function CompressPage() {
             />
           </details>
 
-          <button className="btn btn-primary btn-lg studio-action-bar-standalone" onClick={start} disabled={starting}>
+          <button className="btn btn-primary btn-lg studio-action-bar-standalone" onClick={start} disabled={starting || !modelsReady || !teacherModel || !studentModel}>
             {starting ? "Starting…" : "Run compression pipeline"}
           </button>
         </div>
 
-        <div className="card">
-          <h3 className="section-title">
-            Job log {activeJob ? <span className="badge">{activeJob.slice(0, 8)}</span> : ""}
-          </h3>
-          <div className="log-panel log-panel-tall">{logs.join("\n") || "Logs appear here during the pipeline."}</div>
-          {result && (
-            <div style={{ marginTop: "1rem" }}>
-              <h3 className="section-title">Result</h3>
-              <pre className="log-panel" style={{ fontSize: "0.8rem" }}>
-                {JSON.stringify(result, null, 2)}
-              </pre>
-            </div>
-          )}
-        </div>
+        <PipelineJobPanel activeJob={activeJob} logs={logs} result={result} />
       </div>
 
-      <div className="card" style={{ marginTop: "1rem" }}>
-        <h3 className="section-title">Recent jobs</h3>
-        {jobs.length === 0 ? (
-          <p className="muted-text">No compression jobs yet.</p>
-        ) : (
-          <table>
-            <thead>
-              <tr>
-                <th>ID</th>
-                <th>Status</th>
-                <th>Stages</th>
-                <th>Model</th>
-                <th>Created</th>
-              </tr>
-            </thead>
-            <tbody>
-              {jobs.map((j) => (
-                <tr key={j.id}>
-                  <td className="mono">{j.id.slice(0, 8)}…</td>
-                  <td><span className={`badge badge-${j.status}`}>{j.status}</span></td>
-                  <td>{j.stages?.join(", ") || "—"}</td>
-                  <td className="mono">{j.model_dir ? j.model_dir.split("/").slice(-2).join("/") : "—"}</td>
-                  <td className="muted-cell">{j.created_at?.slice(0, 19)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
+      <StagePipelineJobsTable jobs={jobs} emptyMessage="No compression jobs yet." />
     </StudioPageShell>
   );
 }

@@ -4,23 +4,19 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from seiso.vendor.bootstrap import ensure_vendor_importable, require_vendor_package
+from seiso.vendor.bootstrap import make_vendor_bootstrap
 
-_VENDOR_ROOT = Path(__file__).resolve().parents[2] / "third_party" / "adaptive-rl-quant"
+_bs = make_vendor_bootstrap(
+    "adaptive-rl-quant",
+    "adaptive_quant",
+    missing_hint="Expected third_party/adaptive-rl-quant/src/adaptive_quant",
+)
+_VENDOR_ROOT = _bs.root
 
 
 def vendor_root() -> Path:
     return _VENDOR_ROOT
 
 
-def ensure_adaptive_quant_importable() -> Path:
-    return ensure_vendor_importable(_VENDOR_ROOT)
-
-
-def require_adaptive_quant() -> None:
-    require_vendor_package(
-        _VENDOR_ROOT,
-        "adaptive_quant",
-        src_subdir="src",
-        missing_hint="Expected third_party/adaptive-rl-quant/src/adaptive_quant",
-    )
+ensure_adaptive_quant_importable = _bs.ensure_importable
+require_adaptive_quant = _bs.require

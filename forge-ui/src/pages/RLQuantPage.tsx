@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, RLQuantJob, RLQuantPreset, subscribeSSE } from "@/lib/api";
+import { RL_QUANT_FALLBACK_PRESETS, RL_QUANT_PRESET_HINTS } from "@/lib/rlQuantPresets";
 import { StudioPageShell } from "@/components/StudioPageShell";
 import { FormSection } from "@/components/research/FormSection";
 import { RewardWeights } from "@/components/research/RewardWeights";
@@ -13,12 +14,8 @@ const DEFAULT_REWARD = {
   gamma_perplexity: 0.85,
   delta_memory: 0.002,
   epsilon_instability: 1.0,
-};
-
-const PRESET_HINTS: Record<string, string> = {
-  minimal: "Fast smoke run — simulator backend, few episodes.",
-  reproducible: "Fixed seeds and logged artifacts for paper-grade reproducibility.",
-  post_train: "Post fine-tune checkpoint — links training output to quant recommendation.",
+  theta_kernel_speedup: 0.12,
+  iota_kernel_latency: 0.008,
 };
 
 export function RLQuantPage() {
@@ -34,6 +31,10 @@ export function RLQuantPage() {
   const [linkTrainingJob, setLinkTrainingJob] = useState("");
   const [ggufExport, setGgufExport] = useState(false);
   const [moeEnabled, setMoeEnabled] = useState(false);
+  const [kernelRlEnabled, setKernelRlEnabled] = useState(false);
+  const [kernelLiveBenchmark, setKernelLiveBenchmark] = useState(false);
+  const [kernelHiddenDim, setKernelHiddenDim] = useState(4096);
+  const [kernelBatchRows, setKernelBatchRows] = useState(4096);
   const [reward, setReward] = useState(DEFAULT_REWARD);
   const [logs, setLogs] = useState<string[]>([]);
   const [recommendation, setRecommendation] = useState<Record<string, unknown> | null>(null);
@@ -63,6 +64,10 @@ export function RLQuantPage() {
         link_training_job_id: linkTrainingJob || undefined,
         gguf_export: ggufExport,
         moe_enabled: moeEnabled,
+        kernel_rl_enabled: kernelRlEnabled,
+        kernel_live_benchmark: kernelLiveBenchmark,
+        kernel_hidden_dim: kernelRlEnabled ? kernelHiddenDim : undefined,
+        kernel_batch_rows: kernelRlEnabled ? kernelBatchRows : undefined,
         reward_weights: reward,
         seed: 13,
       });
@@ -85,13 +90,7 @@ export function RLQuantPage() {
     }
   };
 
-  const presetList = presets.length
-    ? presets
-    : [
-        { id: "minimal", label: "Minimal", backend: "simulator", training_backend: "stdlib" },
-        { id: "reproducible", label: "Reproducible", backend: "simulator", training_backend: "stdlib" },
-        { id: "post_train", label: "Post-train", backend: "simulator", training_backend: "stdlib" },
-      ];
+  const presetList = presets.length ? presets : RL_QUANT_FALLBACK_PRESETS;
 
   const selectedPreset = presetList.find((p) => p.id === preset);
 
@@ -120,7 +119,7 @@ export function RLQuantPage() {
                 ))}
               </select>
             </div>
-            {PRESET_HINTS[preset] && <p className="field-hint">{PRESET_HINTS[preset]}</p>}
+            {RL_QUANT_PRESET_HINTS[preset] && <p className="field-hint">{RL_QUANT_PRESET_HINTS[preset]}</p>}
             {selectedPreset && (
               <p className="field-hint">
                 Backend {selectedPreset.backend} · trainer {selectedPreset.training_backend}
@@ -173,6 +172,55 @@ export function RLQuantPage() {
             </div>
           </FormSection>
 
+          <FormSection title="CUDA kernel RL" hint="Co-train quantization with fused CUDA launch profiles." collapsible defaultOpen={false}>
+            <div className="studio-checkbox-grid">
+              <label className="studio-checkbox-item">
+                <input
+                  type="checkbox"
+                  checked={kernelRlEnabled}
+                  onChange={(e) => setKernelRlEnabled(e.target.checked)}
+                />
+                Enable kernel RL (joint quant + CUDA profile policy)
+              </label>
+              <label className="studio-checkbox-item">
+                <input
+                  type="checkbox"
+                  checked={kernelLiveBenchmark}
+                  onChange={(e) => setKernelLiveBenchmark(e.target.checked)}
+                  disabled={!kernelRlEnabled}
+                />
+                Live CUDA micro-benchmarks (NVIDIA GPU; slower, ground-truth)
+              </label>
+            </div>
+            {kernelRlEnabled && (
+              <div className="option-grid">
+                <div className="form-field">
+                  <label>Hidden dim (bench)</label>
+                  <input
+                    type="number"
+                    min={128}
+                    step={128}
+                    value={kernelHiddenDim}
+                    onChange={(e) => setKernelHiddenDim(+e.target.value)}
+                  />
+                </div>
+                <div className="form-field">
+                  <label>Batch rows (bench)</label>
+                  <input
+                    type="number"
+                    min={64}
+                    step={64}
+                    value={kernelBatchRows}
+                    onChange={(e) => setKernelBatchRows(+e.target.value)}
+                  />
+                </div>
+              </div>
+            )}
+            <p className="field-hint">
+              Profiles: auto, stripe, parallax, narrow_opt, wide_throughput, balanced. Winning profile is applied to native CUDA kernels at runtime.
+            </p>
+          </FormSection>
+
           <FormSection title="Export options" hint="Optional GGUF export and MoE variants." collapsible defaultOpen>
             <div className="studio-checkbox-grid">
               <label className="studio-checkbox-item">
@@ -215,6 +263,21 @@ export function RLQuantPage() {
                 <h3 className="form-section-title">Recommendation artifact</h3>
                 <p className="form-section-hint">Policy output from the completed sweep</p>
               </div>
+              {(() => {
+                const decision = (recommendation.decision ?? recommendation.recommended_quant) as
+                  | Record<string, unknown>
+                  | undefined;
+                const kernelName =
+                  (decision?.kernel_profile_name as string | undefined) ||
+                  ((decision?.metadata as Record<string, unknown> | undefined)?.kernel_profile_name as
+                    | string
+                    | undefined);
+                return kernelName ? (
+                  <p className="field-hint">
+                    Recommended CUDA kernel profile: <span className="mono">{kernelName}</span>
+                  </p>
+                ) : null;
+              })()}
               <div className="studio-artifact-panel">
                 <ArtifactViewer data={recommendation} />
               </div>

@@ -90,6 +90,10 @@ async def _run_chat(model: str, messages: list[dict]) -> str:
     return await run_chat({"model_path": model, "messages": messages})
 
 
+def _one_shot_reply(model: str, prompt: str) -> str:
+    return asyncio.run(_run_chat(model, [{"role": "user", "content": prompt}]))
+
+
 @app.command()
 def chat(
     model: str = typer.Option(..., help="Model ID or GGUF path"),
@@ -102,8 +106,7 @@ def chat(
     console.print(f"Backend: {backend.value}")
 
     if prompt:
-        reply = asyncio.run(_run_chat(model, [{"role": "user", "content": prompt}]))
-        console.print(f"[bold]Assistant:[/] {reply}")
+        console.print(f"[bold]Assistant:[/] {_one_shot_reply(model, prompt)}")
         return
 
     async def _interactive() -> None:
@@ -174,8 +177,189 @@ def inference_cmd(
     prompt: str = typer.Option(..., help="Prompt text"),
 ) -> None:
     """Run one-shot inference (alias for single-turn chat)."""
-    reply = asyncio.run(_run_chat(model, [{"role": "user", "content": prompt}]))
-    console.print(reply)
+    console.print(_one_shot_reply(model, prompt))
+
+
+@app.command(name="bench-inference")
+def bench_inference_cmd(
+    model: str = typer.Option(..., help="Model path or GGUF file"),
+    prompt: str = typer.Option("", help="Benchmark prompt (default: built-in paragraph)"),
+    max_tokens: int = typer.Option(128, help="Tokens to generate per run"),
+    backend: str = typer.Option("auto", help="auto | llamacpp | mlx | torch"),
+    compare: bool = typer.Option(
+        False,
+        "--compare",
+        help="Run baseline (CPU/no flash) vs optimized and print speedup",
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Print machine-readable JSON"),
+) -> None:
+    """Measure load time, time-to-first-token, and generation tok/s."""
+    from seiso.inference.benchmark import (
+        DEFAULT_PROMPT,
+        compare_inference_profiles,
+        run_bench_inference,
+    )
+
+    text = prompt or DEFAULT_PROMPT
+    console.print(f"[bold]Inference benchmark[/] backend={backend} max_tokens={max_tokens}")
+
+    if compare:
+        report = compare_inference_profiles(
+            model,
+            prompt=text,
+            max_tokens=max_tokens,
+            backend=backend,
+        )
+        if json_out:
+            import json
+
+            console.print(json.dumps(report, indent=2))
+            return
+
+        base = report["baseline"]
+        opt = report["optimized"]
+        console.print("\n[bold]Baseline[/] (CPU llama.cpp / no flash / no fused kernels)")
+        _print_bench_row(base)
+        console.print("\n[bold]Optimized[/] (current Seiso defaults)")
+        _print_bench_row(opt)
+        console.print(
+            f"\n[green]Speedup:[/] {report['speedup_tokens_per_sec']:.2f}x tok/s  "
+            f"TTFT improved by {report['ttft_improvement_ms']:.1f} ms"
+        )
+        return
+
+    result = run_bench_inference(
+        model,
+        prompt=text,
+        max_tokens=max_tokens,
+        backend=backend,
+        warmup=True,
+    )
+    if json_out:
+        import json
+
+        console.print(json.dumps(result.to_dict(), indent=2))
+        return
+
+    _print_bench_row(result.to_dict())
+
+
+def _print_bench_row(row: dict) -> None:
+    load = row.get("load_ms")
+    load_txt = f"{load:.0f} ms" if load is not None else "n/a"
+    console.print(f"  backend:       {row.get('backend')}")
+    console.print(f"  load (cold):   {load_txt}")
+    console.print(f"  TTFT:          {row.get('ttft_ms'):.1f} ms")
+    console.print(f"  generate:      {row.get('generate_ms'):.1f} ms")
+    console.print(f"  output tokens: {row.get('output_tokens')} (~estimate)")
+    console.print(f"  throughput:    [cyan]{row.get('tokens_per_sec'):.1f} tok/s[/]  ({row.get('ms_per_token'):.1f} ms/tok)")
+
+
+rl_quant_app = typer.Typer(
+    name="rl-quant",
+    help="Adaptive RL quantization — train quant + CUDA kernel policies.",
+    no_args_is_help=True,
+)
+app.add_typer(rl_quant_app, name="rl-quant")
+
+
+@rl_quant_app.command("run")
+def rl_quant_run(
+    preset: str = typer.Option("minimal", help="minimal | reproducible | post_train"),
+    training_episodes: int | None = typer.Option(None, help="Training episode count"),
+    evaluation_episodes: int | None = typer.Option(None, help="Evaluation episode count"),
+    backend: str = typer.Option("simulator", help="simulator | llama_cpp"),
+    training_backend: str = typer.Option("stdlib", help="stdlib | pytorch"),
+    seed: int = typer.Option(13, help="RNG seed"),
+    checkpoint_path: str | None = typer.Option(None, help="Fine-tune checkpoint for quality sidecar"),
+    gguf_path: str | None = typer.Option(None, help="GGUF path for llama.cpp backend"),
+    gguf_export: bool = typer.Option(False, help="Export GGUF after recommendation"),
+    moe_enabled: bool = typer.Option(False, help="Enable MoE expert variants"),
+    kernel_rl: bool = typer.Option(False, "--kernel-rl", help="Co-train CUDA kernel launch profiles"),
+    kernel_live_benchmark: bool = typer.Option(
+        False, "--kernel-live-benchmark", help="Live CUDA micro-benchmarks (NVIDIA GPU)"
+    ),
+    kernel_hidden_dim: int = typer.Option(4096, help="Hidden dim for kernel bench shapes"),
+    kernel_batch_rows: int = typer.Option(4096, help="Token rows for kernel bench shapes"),
+    write_report: bool = typer.Option(False, help="Write research markdown report"),
+    json_out: bool = typer.Option(False, "--json", help="Print machine-readable summary JSON"),
+) -> None:
+    """Run RL quantization pipeline locally (no Forge server required)."""
+    import json
+    import uuid
+
+    from forge.config import get_settings
+    from seiso.rl_quant.runner import run_rl_quant_job
+
+    settings = get_settings()
+    job_id = str(uuid.uuid4())[:12]
+    user_id = "cli"
+
+    payload: dict = {
+        "preset": preset,
+        "backend": backend,
+        "training_backend": training_backend,
+        "seed": seed,
+        "gguf_export": gguf_export,
+        "moe_enabled": moe_enabled,
+        "write_research_report": write_report,
+    }
+    if training_episodes is not None:
+        payload["training_episodes"] = training_episodes
+    if evaluation_episodes is not None:
+        payload["evaluation_episodes"] = evaluation_episodes
+    if checkpoint_path:
+        payload["checkpoint_path"] = checkpoint_path
+    if gguf_path:
+        payload["gguf_path"] = gguf_path
+    if kernel_rl:
+        payload["kernel_rl_enabled"] = True
+        payload["kernel_live_benchmark"] = kernel_live_benchmark
+        payload["kernel_hidden_dim"] = kernel_hidden_dim
+        payload["kernel_batch_rows"] = kernel_batch_rows
+
+    console.print(
+        f"[bold]RL quantization[/] preset={preset} backend={backend} trainer={training_backend}"
+        + (" kernel_rl=on" if kernel_rl else "")
+    )
+
+    result = run_rl_quant_job(
+        job_id=job_id,
+        user_id=user_id,
+        data_dir=settings.data_dir,
+        payload=payload,
+        on_log=lambda m: console.print(m),
+    )
+
+    if json_out:
+        console.print(json.dumps(result, indent=2, default=str))
+        return
+
+    console.print(f"[green]Output:[/] {result.get('output_dir')}")
+    rec_path = result.get("recommendation_path")
+    if rec_path:
+        console.print(f"[green]Recommendation:[/] {rec_path}")
+    rec = result.get("recommendation")
+    if isinstance(rec, dict):
+        decision = rec.get("decision") or rec.get("recommended_quant")
+        if isinstance(decision, dict):
+            kernel = decision.get("kernel_profile_name") or (
+                (decision.get("metadata") or {}).get("kernel_profile_name")
+            )
+            if kernel:
+                console.print(f"[cyan]CUDA kernel profile:[/] {kernel}")
+
+
+@rl_quant_app.command("profiles")
+def rl_quant_profiles() -> None:
+    """List CUDA kernel profiles available to the RL policy."""
+    from seiso.kernels.tuning import KERNEL_PROFILES
+
+    for profile in KERNEL_PROFILES:
+        console.print(
+            f"  [cyan]{profile['id']}[/] {profile['name']:16} "
+            f"rms={profile['rms_mode']} swiglu_vec={profile['swiglu_vec']} lora_tile={profile['lora_tile']}"
+        )
 
 
 compress_app = typer.Typer(

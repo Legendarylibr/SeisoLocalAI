@@ -109,7 +109,10 @@ export SEISO_NVIDIA_HOST_VENV_ACK=1
 seiso train --config configs/example_lora.yaml
 ```
 
-Checkpoints land in `{SEISO_DATA_DIR}/checkpoints/{user_id}/` with a `seiso_manifest.json` describing kernel and quant settings.
+Checkpoints:
+
+- **Forge UI:** `{SEISO_DATA_DIR}/checkpoints/{user_id}/{job_id}/checkpoint-*` (with `seiso_manifest.json`)
+- **CLI (`seiso train`):** YAML `output_dir` — see `configs/example_lora.yaml` (`./outputs/lora-run/`)
 
 Platform notes: [training/quickstart.md](training/quickstart.md) · [platforms/](platforms/).
 
@@ -123,7 +126,7 @@ Platform notes: [training/quickstart.md](training/quickstart.md) · [platforms/]
 **CLI equivalent:**
 
 ```bash
-seiso export --checkpoint ~/.seiso/checkpoints/<user>/<run>/checkpoint-<ts> \
+seiso export --checkpoint ~/.seiso/checkpoints/<user>/<job_id>/checkpoint-<timestamp> \
   --formats merged,gguf --profile inference
 ```
 
@@ -135,7 +138,7 @@ GGUF export requires `llama.cpp` (set `LLAMA_CPP_DIR` or install system `convert
 |---------|-------|-------|
 | Model compression (distill → prune → quant) | `/compress` | [compression.md](compression.md) |
 | Stable Diffusion compression | `/image-compress` | [compression.md](compression.md) |
-| RL adaptive GGUF quantization | `/rl-quant` | [compression.md](compression.md) |
+| RL adaptive GGUF quantization | `/rl-quant` | [compression.md](compression.md) · `seiso rl-quant run` |
 | Visual recipe graphs | `/recipes` | [forge.md](forge.md) |
 | External providers (OpenAI, Ollama, vLLM) | `/integrations` | [forge.md](forge.md) |
 | Multi-GPU training | Training Studio checkbox | [training/multi-gpu.md](training/multi-gpu.md) |

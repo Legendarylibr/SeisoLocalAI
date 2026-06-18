@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api, ChatMessage, ChatThread, HardwareProfile, InferenceModelOption, SecurityPosture, streamChat } from "@/lib/api";
-import { bootstrapChatModels, hasChatNavTarget, initializeChatSession, isChatModelReady, needsHubDownload, preloadWithProgress, resolveInferenceBackend } from "@/lib/chatModel";
+import { bootstrapChatModels, CHAT_BACKEND_STORAGE_KEY, CHAT_MODEL_STORAGE_KEY, hasChatNavTarget, initializeChatSession, isChatModelReady, needsHubDownload, preloadWithProgress, resolveInferenceBackend } from "@/lib/chatModel";
+import { writeStoredModel } from "@/lib/modelSelection";
 import { ModelProgressState, initialDownloadProgress, initialLoadProgress } from "@/lib/modelProgress";
 import { ChatModelPicker } from "@/components/ChatModelPicker";
 import { HardwareFitBadge } from "@/components/HardwareFitBadge";
@@ -129,6 +130,7 @@ export function ChatPage() {
         throw new Error("Model not found in inventory after download");
       }
       setSelection(modelId);
+      writeStoredModel(CHAT_MODEL_STORAGE_KEY, modelId);
       const backend =
         backendOverride ??
         resolveInferenceBackend(next, hwProfile, userPickedBackendRef.current ? inferenceBackend : undefined);
@@ -138,6 +140,7 @@ export function ChatPage() {
       const loaded = await preloadWithProgress(modelId, backend, setLoadProgress);
       setLoadedModelId(modelId);
       setLoadedBackend(loaded);
+      writeStoredModel(CHAT_BACKEND_STORAGE_KEY, loaded);
       return loaded;
     },
     [providerId, hwProfile, inferenceBackend],
@@ -643,6 +646,7 @@ export function ChatPage() {
                   }
                 }
                 setInferenceBackend(next);
+                writeStoredModel(CHAT_BACKEND_STORAGE_KEY, next);
                 userPickedBackendRef.current = true;
                 if (selection && !providerId) {
                   const model = models.find((m) => m.id === selection);
@@ -654,6 +658,7 @@ export function ChatPage() {
                     const loaded = await preloadWithProgress(selection, next, setLoadProgress);
                     setLoadedModelId(selection);
                     setLoadedBackend(loaded);
+                    writeStoredModel(CHAT_BACKEND_STORAGE_KEY, loaded);
                   } catch (e) {
                     setLoadedModelId(null);
                     setLoadedBackend(null);

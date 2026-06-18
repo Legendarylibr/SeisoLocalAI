@@ -13,6 +13,10 @@ const ChatPage = lazy(() => import("@/pages/ChatPage").then((m) => ({ default: m
 const ExportPage = lazy(() => import("@/pages/ExportPage").then((m) => ({ default: m.ExportPage })));
 const RLQuantPage = lazy(() => import("@/pages/RLQuantPage").then((m) => ({ default: m.RLQuantPage })));
 const CompressPage = lazy(() => import("@/pages/CompressPage").then((m) => ({ default: m.CompressPage })));
+const TrainPage = lazy(() => import("@/pages/TrainPage").then((m) => ({ default: m.TrainPage })));
+const ImageCompressPage = lazy(() =>
+  import("@/pages/ImageCompressPage").then((m) => ({ default: m.ImageCompressPage })),
+);
 const KnowledgePage = lazy(() => import("@/pages/KnowledgePage").then((m) => ({ default: m.KnowledgePage })));
 const RecipesPage = lazy(() => import("@/pages/RecipesPage").then((m) => ({ default: m.RecipesPage })));
 const IntegrationsPage = lazy(() =>
@@ -50,11 +54,16 @@ function Guard({ children, fullBleed = false }: { children: React.ReactNode; ful
       return;
     }
     setCheckingHfPrompt(true);
-    api.settings()
-      .then((settings) => {
-        setShowHfPrompt(!settings.hf_configured && !settings.hf_auth.user_token_saved);
+    Promise.all([api.settings(), api.hfStatus()])
+      .then(([settings, hfStatus]) => {
+        // Public Hub downloads work without a token — only prompt when setup blocks downloads.
+        if (hfStatus.ready_for_download) {
+          setShowHfPrompt(false);
+          return;
+        }
+        setShowHfPrompt(!settings.hf_auth.user_token_saved);
       })
-      .catch(() => setShowHfPrompt(true))
+      .catch(() => setShowHfPrompt(false))
       .finally(() => setCheckingHfPrompt(false));
   }, [user]);
 
@@ -96,6 +105,8 @@ export function App() {
           <Route path="/export" element={<Guard><ExportPage /></Guard>} />
           <Route path="/rl-quant" element={<Guard><RLQuantPage /></Guard>} />
           <Route path="/compress" element={<Guard><CompressPage /></Guard>} />
+          <Route path="/train" element={<Guard><TrainPage /></Guard>} />
+          <Route path="/image-compress" element={<Guard><ImageCompressPage /></Guard>} />
           <Route path="/knowledge" element={<Guard><KnowledgePage /></Guard>} />
           <Route path="/recipes" element={<Guard><RecipesPage /></Guard>} />
           <Route path="/integrations" element={<Guard><IntegrationsPage /></Guard>} />

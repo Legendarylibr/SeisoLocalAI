@@ -35,31 +35,61 @@ def _env_bool(name: str, default: bool) -> bool:
 
 def _default_llama_threads() -> int:
     cpus = os.cpu_count() or 4
-    # Leave a little headroom for the UI/server event loop.
+    if _default_llama_gpu_layers() != 0:
+        return max(2, min(cpus // 2, 8))
     return max(2, min(cpus - 2 if cpus > 4 else cpus, 12))
+
+
+def _cuda_available() -> bool:
+    try:
+        import torch
+
+        return torch.cuda.is_available()
+    except ImportError:
+        return False
 
 
 def _default_llama_gpu_layers() -> int:
     if platform.system() == "Darwin" and platform.machine() in {"arm64", "aarch64"}:
         return -1
+    if _cuda_available():
+        return -1
     return 0
+
+
+def _default_llama_batch() -> int:
+    return 2048 if _default_llama_gpu_layers() != 0 else 512
+
+
+def _default_llama_ubatch(n_batch: int) -> int:
+    if _default_llama_gpu_layers() != 0:
+        return min(n_batch, 2048)
+    return min(n_batch, 512)
 
 
 def llama_load_kwargs(n_ctx: int) -> dict[str, Any]:
     """Tuned llama.cpp defaults for faster preload/first token, overrideable by env."""
     n_threads = _env_int("SEISO_LLAMA_THREADS", _default_llama_threads())
-    n_batch = _env_int("SEISO_LLAMA_BATCH", 512)
-    return {
+    n_batch = _env_int("SEISO_LLAMA_BATCH", _default_llama_batch())
+    n_gpu_layers = _env_int("SEISO_LLAMA_GPU_LAYERS", _default_llama_gpu_layers())
+    kwargs: dict[str, Any] = {
         "n_ctx": n_ctx,
         "n_threads": n_threads,
         "n_threads_batch": _env_int("SEISO_LLAMA_THREADS_BATCH", n_threads),
         "n_batch": n_batch,
-        "n_ubatch": _env_int("SEISO_LLAMA_UBATCH", min(n_batch, 512)),
-        "n_gpu_layers": _env_int("SEISO_LLAMA_GPU_LAYERS", _default_llama_gpu_layers()),
+        "n_ubatch": _env_int("SEISO_LLAMA_UBATCH", _default_llama_ubatch(n_batch)),
+        "n_gpu_layers": n_gpu_layers,
         "use_mmap": _env_bool("SEISO_LLAMA_USE_MMAP", True),
         "use_mlock": _env_bool("SEISO_LLAMA_USE_MLOCK", False),
         "verbose": _env_bool("SEISO_LLAMA_VERBOSE", False),
+        "offload_kqv": _env_bool("SEISO_LLAMA_OFFLOAD_KQV", n_gpu_layers != 0),
+        "no_perf": _env_bool("SEISO_LLAMA_NO_PERF", True),
     }
+    if n_gpu_layers != 0:
+        kwargs["op_offload"] = _env_bool("SEISO_LLAMA_OP_OFFLOAD", True)
+    if n_gpu_layers != 0 and _env_bool("SEISO_LLAMA_FLASH_ATTN", True):
+        kwargs["flash_attn"] = True
+    return kwargs
 
 
 class BackendKind(StrEnum):
@@ -120,10 +150,10 @@ class ModelPool:
         self.bump_generation()
         self.unload_all()
 
-    def switch(self, model_path: str, backend: BackendKind, loader_fn) -> Any:
+    def switch(self, model_path: str, backend: BackendKind, loader_fn, *, cache_key: str | None = None) -> Any:
         """Load model_path, unloading any previously active model first."""
         norm = self.normalize_path(model_path)
-        key = f"{backend.value}:{norm}"
+        key = cache_key or f"{backend.value}:{norm}"
         if self._active and self._active.key == key:
             return self._active.handle
 
@@ -137,9 +167,14 @@ class ModelPool:
         def loader(path: str):
             from llama_cpp import Llama
 
-            return Llama(model_path=path, **llama_load_kwargs(n_ctx))
+            from seiso.inference.tuning import attach_llama_prompt_cache
 
-        return self.switch(model_path, BackendKind.LLAMA, loader)
+            llm = Llama(model_path=path, **llama_load_kwargs(n_ctx))
+            attach_llama_prompt_cache(llm)
+            return llm
+
+        key = f"llama:{self.normalize_path(model_path)}:ctx{n_ctx}"
+        return self.switch(model_path, BackendKind.LLAMA, loader, cache_key=key)
 
     def get_mlx(self, model_path: str) -> tuple[Any, Any]:
         def loader(path: str):
@@ -152,9 +187,10 @@ class ModelPool:
 
     def get_torch(self, model_path: str, *, load_in_4bit: bool = True) -> tuple[Any, Any]:
         def loader(path: str):
+            from seiso.inference.tuning import maybe_apply_fused_kernels, prepare_torch_model
             from seiso.models.loader import LoadOptions, ModelKind, load_model
 
-            return load_model(
+            model, tokenizer = load_model(
                 LoadOptions(
                     model_id=path,
                     kind=ModelKind.TEXT,
@@ -162,6 +198,9 @@ class ModelPool:
                     device_map="auto",
                 )
             )
+            prepare_torch_model(model)
+            maybe_apply_fused_kernels(model)
+            return model, tokenizer
 
         return self.switch(model_path, BackendKind.TORCH, loader)
 
@@ -210,7 +249,6 @@ class ModelPool:
 
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
-                torch.cuda.synchronize()
             if hasattr(torch, "mps") and torch.backends.mps.is_available():
                 torch.mps.empty_cache()
         except ImportError:

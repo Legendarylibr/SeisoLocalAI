@@ -19,6 +19,8 @@ class _RewardWeights(Protocol):
     epsilon_instability: float
     eta_token_latency: float
     zeta_perplexity_over_ref: float
+    theta_kernel_speedup: float
+    iota_kernel_latency: float
 
 
 def compute_weighted_reward(
@@ -53,6 +55,13 @@ def compute_weighted_reward(
     if ref is not None and zeta > 0.0:
         over = max(0.0, float(metrics["perplexity"]) - float(ref))
         reward -= zeta * over
+
+    kernel_speedup = float(metrics.get("kernel_speedup", 0.0))
+    if kernel_speedup > 0.0:
+        reward += weights.theta_kernel_speedup * kernel_speedup
+    kernel_latency = float(metrics.get("kernel_latency_ms", 0.0))
+    if kernel_latency > 0.0:
+        reward -= weights.iota_kernel_latency * kernel_latency
 
     return float(reward)
 

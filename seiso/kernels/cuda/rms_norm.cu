@@ -13,6 +13,7 @@
 #include <cmath>
 
 #include "include/seiso_vec.cuh"
+#include "tuning_state.cuh"
 
 namespace seiso {
 
@@ -226,10 +227,17 @@ void launch_rms_norm(
   const dim3 grid(static_cast<unsigned int>(rows));
   const dim3 block(kThreadsPerBlock);
 
+  const auto& tuning = kernel_tuning_state();
   const bool wide = cols >= 4096;
+  bool use_parallax = wide;
+  if (tuning.rms_mode == RMS_STRIPE) {
+    use_parallax = false;
+  } else if (tuning.rms_mode == RMS_PARALLAX) {
+    use_parallax = true;
+  }
 
 #if SEISO_HAS_CP_ASYNC
-  if (wide) {
+  if (use_parallax) {
     if (fuse_residual) {
       parallax_rms_norm_kernel<T, 64, true><<<grid, block, 0, stream>>>(
           x, residual, weight, out, cols, eps);

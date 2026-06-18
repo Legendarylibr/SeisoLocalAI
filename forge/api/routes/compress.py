@@ -2,41 +2,29 @@
 
 from __future__ import annotations
 
-import json
-import uuid
-from typing import Annotated, Any
+from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import HTTPException
 from pydantic import BaseModel, Field
-from sse_starlette.sse import EventSourceResponse
 
-from forge.api.deps import get_compress_orchestrator, get_db
-from forge.api.routes._stream import job_failure_message, job_log_event_gen, spawn_background
-from forge.config import ForgeSettings, get_settings
+from forge.api.deps import get_compress_orchestrator
+from forge.api.routes._jobs import resolve_linked_training_job
+from forge.api.routes._pipeline import StagePipelineRouterConfig, build_stage_pipeline_router
+from forge.config import ForgeSettings
 from forge.db.store import Database
-from forge.orchestrators.compress import CompressOrchestrator
-from forge.security.audit import audit_event
-from forge.security.auth import get_current_user_id
-from forge.services.jobs import assert_job_owner
-from forge.services.model_registry import register_export_outputs
 from forge.services.user_paths import assert_user_config_file, assert_user_path
-from seiso.compress.config_builder import PRESETS, STAGE_ORDER
+from seiso.compress.config_builder import PRESETS, STAGE_ORDER, get_compress_model_defaults
 from seiso.security import SecurityError
 
-router = APIRouter(prefix="/compress", tags=["compress"])
-
-
-def _format_job(row: dict) -> dict:
-    out = dict(row)
-    try:
-        out["stages"] = json.loads(row.get("stages_json") or "[]")
-    except json.JSONDecodeError:
-        out["stages"] = []
-    try:
-        out["stage_results"] = json.loads(row.get("stage_results_json") or "{}")
-    except json.JSONDecodeError:
-        out["stage_results"] = {}
-    return out
+STAGE_HELP = {
+    "distill": "Teacher → student KL distillation",
+    "prune": "Shape-preserving MLP neuron masking",
+    "finetune": "Post-prune recovery fine-tuning",
+    "evaluate": "Perplexity + speed smoke check",
+    "export": "vLLM/Docker/GGUF helper scripts",
+    "quantize_gptq": "GPTQ 4-bit (requires pip install seiso[compress-quant])",
+    "quantize_awq": "AWQ 4-bit (requires pip install seiso[compress-quant])",
+}
 
 
 class CompressStartRequest(BaseModel):
@@ -46,8 +34,8 @@ class CompressStartRequest(BaseModel):
     )
     stages: list[str] | None = None
     config_file: str | None = None
-    teacher_model: str = "codellama/CodeLlama-13b-hf"
-    student_model: str = "codellama/CodeLlama-7b-hf"
+    teacher_model: str | None = None
+    student_model: str | None = None
     model_dir: str | None = None
     distill_steps: int | None = None
     finetune_steps: int | None = None
@@ -61,137 +49,67 @@ class CompressStartRequest(BaseModel):
     link_training_job_id: str | None = None
 
 
-class CompressJobResponse(BaseModel):
-    job_id: str
-    status: str
+async def _prepare_compress_config(
+    body: BaseModel,
+    db: Database,
+    user_id: str,
+    settings: ForgeSettings,
+) -> dict[str, Any]:
+    req = body
+    assert isinstance(req, CompressStartRequest)
+    config = req.model_dump()
+    defaults = get_compress_model_defaults()
+    if not config.get("teacher_model"):
+        config["teacher_model"] = defaults["teacher_model"]
+    if not config.get("student_model"):
+        config["student_model"] = defaults["student_model"]
 
-
-@router.get("/jobs")
-async def list_compress_jobs(
-    user_id: Annotated[str, Depends(get_current_user_id)],
-    db: Annotated[Database, Depends(get_db)],
-) -> list[dict]:
-    return [_format_job(j) for j in await db.list_compress_jobs(user_id)]
-
-
-@router.get("/jobs/{job_id}")
-async def get_compress_job(
-    job_id: str,
-    user_id: Annotated[str, Depends(get_current_user_id)],
-    db: Annotated[Database, Depends(get_db)],
-) -> dict:
-    job = await db.get_compress_job(job_id, user_id)
-    if not job:
-        raise HTTPException(404, "Job not found")
-    return _format_job(job)
-
-
-@router.post("/jobs", response_model=CompressJobResponse)
-async def start_compress(
-    body: CompressStartRequest,
-    user_id: Annotated[str, Depends(get_current_user_id)],
-    db: Annotated[Database, Depends(get_db)],
-    orchestrator: Annotated[CompressOrchestrator, Depends(get_compress_orchestrator)],
-    settings: Annotated[ForgeSettings, Depends(get_settings)],
-) -> CompressJobResponse:
-    job_id = str(uuid.uuid4())
-    config = body.model_dump()
-
-    if body.link_training_job_id:
-        train_job = await db.get_training_job(body.link_training_job_id, user_id)
-        if not train_job:
-            raise HTTPException(404, "Linked training job not found")
-        if train_job.get("checkpoint_path"):
-            config["model_dir"] = train_job["checkpoint_path"]
-            if config.get("preset") == "smoke":
-                config["preset"] = "prune_recover"
+    if req.link_training_job_id:
+        await resolve_linked_training_job(
+            db,
+            user_id,
+            req.link_training_job_id,
+            config,
+            path_key="model_dir",
+            preset_when="smoke",
+            preset_override="prune_recover",
+        )
 
     try:
-        if body.config_file:
-            assert_user_config_file(settings.data_dir, user_id, body.config_file)
+        if req.config_file:
+            assert_user_config_file(settings.data_dir, user_id, req.config_file)
         if config.get("model_dir"):
             assert_user_path(settings.data_dir, user_id, config["model_dir"])
     except SecurityError as exc:
         raise HTTPException(403, str(exc)) from exc
 
-    await db.create_compress_job(user_id, config, job_id=job_id)
-    orchestrator.create_job(job_id=job_id, user_id=user_id)
-    payload = {**config, "user_id": user_id}
-
-    async def _run() -> None:
-        try:
-            await orchestrator.start(job_id, payload)
-            job = await orchestrator.wait_for(job_id)
-            if job:
-                result = job.result or {}
-                stage_results = dict(result.get("stage_results") or {})
-                if result.get("manifest"):
-                    stage_results["manifest"] = result["manifest"]
-                await db.update_compress_job_status(
-                    job_id,
-                    job.status.value,
-                    output_dir=result.get("output_root"),
-                    run_dir=result.get("run_dir"),
-                    model_dir=result.get("model_dir"),
-                    stages=result.get("stages"),
-                    stage_results=stage_results,
-                    error_text=job.error if job.status.value == "failed" else None,
-                )
-                if model_dir := result.get("model_dir"):
-                    await register_export_outputs(
-                        db,
-                        user_id=user_id,
-                        data_dir=settings.data_dir,
-                        outputs={"compressed": str(model_dir)},
-                        job_id=job_id,
-                    )
-        except Exception as exc:
-            await db.update_compress_job_status(
-                job_id,
-                "failed",
-                error_text=job_failure_message(orchestrator, job_id, exc),
-            )
-
-    spawn_background(_run())
-    audit_event("compress_start", user_id=user_id, job_id=job_id, preset=body.preset)
-    return CompressJobResponse(job_id=job_id, status="pending")
+    return config
 
 
-@router.get("/jobs/{job_id}/stream")
-async def stream_compress(
-    job_id: str,
-    user_id: Annotated[str, Depends(get_current_user_id)],
-    db: Annotated[Database, Depends(get_db)],
-    orchestrator: Annotated[CompressOrchestrator, Depends(get_compress_orchestrator)],
-):
-    if not await db.get_compress_job(job_id, user_id):
-        raise HTTPException(404, "Job not found")
-    assert_job_owner(orchestrator, job_id, user_id)
-
-    return EventSourceResponse(job_log_event_gen(orchestrator, job_id))
+def _enrich_compress_stage_results(result: dict[str, Any]) -> dict[str, Any]:
+    stage_results = dict(result.get("stage_results") or {})
+    if result.get("manifest"):
+        stage_results["manifest"] = result["manifest"]
+    return stage_results
 
 
-@router.get("/presets")
-async def list_presets(
-    user_id: Annotated[str, Depends(get_current_user_id)],
-) -> dict[str, Any]:
-    return {
-        "presets": [
-            {
-                "id": name,
-                "label": name.replace("_", " ").title(),
-                "stages": preset.get("stages", []),
-            }
-            for name, preset in PRESETS.items()
-        ],
-        "stages": list(STAGE_ORDER),
-        "help": {
-            "distill": "Teacher → student KL distillation",
-            "prune": "Shape-preserving MLP neuron masking",
-            "finetune": "Post-prune recovery fine-tuning",
-            "evaluate": "Perplexity + speed smoke check",
-            "export": "vLLM/Docker/GGUF helper scripts",
-            "quantize_gptq": "GPTQ 4-bit (requires pip install seiso[compress-quant])",
-            "quantize_awq": "AWQ 4-bit (requires pip install seiso[compress-quant])",
-        },
-    }
+router = build_stage_pipeline_router(
+    StagePipelineRouterConfig(
+        prefix="/compress",
+        tags=("compress",),
+        audit_event_name="compress_start",
+        export_registry_key="compressed",
+        presets=PRESETS,
+        stage_order=STAGE_ORDER,
+        stage_help=STAGE_HELP,
+        model_defaults=get_compress_model_defaults(),
+        start_request_model=CompressStartRequest,
+        get_orchestrator=get_compress_orchestrator,
+        list_jobs=lambda db, uid: db.list_compress_jobs(uid),
+        get_job=lambda db, jid, uid: db.get_compress_job(jid, uid),
+        create_job=lambda db, uid, cfg, jid: db.create_compress_job(uid, cfg, job_id=jid),
+        update_status=lambda db, jid, status, **kw: db.update_compress_job_status(jid, status, **kw),
+        prepare_config=_prepare_compress_config,
+        enrich_stage_results=_enrich_compress_stage_results,
+    )
+)

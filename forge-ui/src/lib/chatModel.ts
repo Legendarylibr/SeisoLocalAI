@@ -1,6 +1,10 @@
 import { api, HardwareProfile, InferenceModelOption, LocalModel } from "@/lib/api";
 import { inventoryHasRepo, streamHubModelDownload, ModelProgressHandler } from "@/lib/hubDownload";
+import { readStoredModel, writeStoredModel } from "@/lib/modelSelection";
 import { progressFromPreloadEvent } from "@/lib/modelProgress";
+
+export const CHAT_MODEL_STORAGE_KEY = "chat";
+export const CHAT_BACKEND_STORAGE_KEY = "chat-backend";
 
 type ChatNavTarget = { modelId?: string | null; repo?: string | null; downloadBytes?: number | null };
 
@@ -84,10 +88,15 @@ export function resolveInferenceBackend(
   return available[0];
 }
 
-export function pickInferenceModel(list: InferenceModelOption[], target: ChatNavTarget = {}): string {
+export function pickInferenceModel(
+  list: InferenceModelOption[],
+  target: ChatNavTarget = {},
+  storedId?: string | null,
+): string {
   return (
     (target.modelId && list.find((m) => m.id === target.modelId)?.id) ||
     (target.repo && list.find((m) => m.source === `hf:${target.repo}`)?.id) ||
+    (storedId && list.find((m) => m.id === storedId)?.id) ||
     list.find((m) => m.hardware_fit === "ideal" || m.hardware_fit === "good")?.id ||
     (list.length ? list[0].id : "")
   );
@@ -214,13 +223,20 @@ export async function bootstrapChatModels(
 
   const selectedId =
     (downloadedId && models.find((m) => m.id === downloadedId)?.id) ||
-    pickInferenceModel(models, target);
+    pickInferenceModel(models, target, readStoredModel(CHAT_MODEL_STORAGE_KEY));
+  const storedBackend = readStoredModel(CHAT_BACKEND_STORAGE_KEY);
   const selected = models.find((m) => m.id === selectedId) ?? null;
-  const backend = resolveInferenceBackend(selected, options.hwProfile ?? null);
+  const backend = resolveInferenceBackend(
+    selected,
+    options.hwProfile ?? null,
+    !target.modelId && !target.repo ? storedBackend ?? undefined : undefined,
+  );
 
   let loadedBackend = backend;
   if (options.preload !== false && selectedId && selected && !options.providerActive) {
     loadedBackend = await preloadWithProgress(selectedId, backend, options.onProgress, options.signal);
+    writeStoredModel(CHAT_MODEL_STORAGE_KEY, selectedId);
+    writeStoredModel(CHAT_BACKEND_STORAGE_KEY, loadedBackend);
   }
 
   return { models, selectedId, backend: loadedBackend, selected };
@@ -238,13 +254,21 @@ export async function initializeChatSession(
   throwIfAborted(options.signal);
   const models = options.initialModels ?? (await fetchInferenceModels());
   throwIfAborted(options.signal);
-  const selectedId = pickInferenceModel(models, {});
+  const storedId = readStoredModel(CHAT_MODEL_STORAGE_KEY);
+  const storedBackend = readStoredModel(CHAT_BACKEND_STORAGE_KEY);
+  const selectedId = pickInferenceModel(models, {}, storedId);
   const selected = models.find((m) => m.id === selectedId) ?? null;
-  const backend = resolveInferenceBackend(selected, options.hwProfile ?? null);
+  const backend = resolveInferenceBackend(
+    selected,
+    options.hwProfile ?? null,
+    storedBackend ?? undefined,
+  );
 
   let loadedBackend = backend;
   if (options.preload !== false && selectedId && selected && !options.providerActive) {
     loadedBackend = await preloadWithProgress(selectedId, backend, options.onProgress, options.signal);
+    writeStoredModel(CHAT_MODEL_STORAGE_KEY, selectedId);
+    writeStoredModel(CHAT_BACKEND_STORAGE_KEY, loadedBackend);
   }
 
   return { models, selectedId, backend: loadedBackend, selected };

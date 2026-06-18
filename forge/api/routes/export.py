@@ -14,6 +14,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from forge.api.deps import get_db, get_export_orchestrator
 from forge.api.routes._stream import job_failure_message, spawn_background
+from forge.api.routes._pipeline import PipelineJobResponse
 from forge.config import ForgeSettings, get_settings
 from forge.db.store import Database
 from forge.orchestrators.export import ExportOrchestrator
@@ -68,11 +69,6 @@ class PublishToHubRequest(BaseModel):
     output_path: str | None = None
     export_job_id: str | None = None
     hub: HubPublishRequest
-
-
-class ExportJobResponse(BaseModel):
-    job_id: str
-    status: str
 
 
 def _hub_metadata_from_request(hub: HubPublishRequest, *, job_id: str | None = None, source: str | None = None) -> HubModelMetadata:
@@ -175,14 +171,14 @@ async def list_export_jobs(
     return await db.list_export_jobs(user_id)
 
 
-@router.post("/jobs", response_model=ExportJobResponse)
+@router.post("/jobs", response_model=PipelineJobResponse)
 async def start_export(
     body: ExportStartRequest,
     user_id: Annotated[str, Depends(get_current_user_id)],
     db: Annotated[Database, Depends(get_db)],
     orchestrator: Annotated[ExportOrchestrator, Depends(get_export_orchestrator)],
     settings: Annotated[ForgeSettings, Depends(get_settings)],
-) -> ExportJobResponse:
+) -> PipelineJobResponse:
     try:
         await assert_pushable_checkpoint(db, data_dir=settings.data_dir, user_id=user_id, checkpoint=body.checkpoint)
     except (SecurityError, ValueError) as exc:
@@ -276,7 +272,7 @@ async def start_export(
 
     spawn_background(_run())
     audit_event("export_start", user_id=user_id, job_id=job_id, formats=body.formats)
-    return ExportJobResponse(job_id=job_id, status="pending")
+    return PipelineJobResponse(job_id=job_id, status="pending")
 
 
 @router.post("/publish")

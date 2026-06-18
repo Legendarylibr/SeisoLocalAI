@@ -41,7 +41,7 @@ main() {
   if [[ ! -f "$ui_dist" ]]; then
     log "Forge UI not built — building now"
     if command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1; then
-      (cd "$root/forge-ui" && npm install && npm run build)
+      (cd "$root/forge-ui" && npm ci && npm run build)
     else
       die "Forge UI is not built and Node.js/npm are unavailable. Run: $root/scripts/doctor.sh"
     fi

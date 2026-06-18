@@ -19,8 +19,10 @@ Start with **[getting-started.md](getting-started.md)** — a step-by-step walkt
 | Install on Linux or macOS in one command | [install.md](install.md#linux--macos--one-command-recommended) |
 | Install on Windows or AMD ROCm | [platforms/windows.md](platforms/windows.md) · [platforms/linux-amd-rocm.md](platforms/linux-amd-rocm.md) |
 | Launch the web UI | `./scripts/start.sh` or `seiso forge` → [forge.md](forge.md) |
+| Diagnose install / HF / GPU | `seiso doctor` or `./scripts/doctor.sh` → [cli.md](cli.md) |
 | Chat with a local model | [getting-started.md § Step 4](getting-started.md#step-4--chat-with-a-local-model) |
 | Fine-tune with QLoRA / LoRA | [training/quickstart.md](training/quickstart.md) |
+| RL quant from CLI | [cli.md § seiso rl-quant](cli.md#seiso-rl-quant) · [compression.md](compression.md) |
 | Use Cursor / Continue with local models | [getting-started.md § Connect external tools](getting-started.md#connect-external-tools-cursor-continue-etc) |
 | Export to GGUF or Hugging Face Hub | [getting-started.md § Step 6](getting-started.md#step-6--export-and-deploy) · [cli.md](cli.md) |
 | Compress / distill / quantize models | [compression.md](compression.md) |
@@ -42,6 +44,7 @@ Start with **[getting-started.md](getting-started.md)** — a step-by-step walkt
 | **Forge (UI dev)** | Terminal 1: `seiso forge` · Terminal 2: `cd forge-ui && npm run dev` | http://127.0.0.1:5173 |
 | **CLI training** | `seiso train --config configs/example_lora.yaml` | — |
 | **CLI chat** | `seiso chat --model <id-or-path> --prompt "..."` | — |
+| **CLI RL quant** | `seiso rl-quant run --preset minimal` | — |
 | **OpenAI-compatible API** | `seiso forge` then POST `/v1/chat/completions` | http://127.0.0.1:8765/v1/... |
 
 First launch opens onboarding — create your local admin password. Copy `.env.example` to `.env` to override host, port, or data directory.
@@ -134,11 +137,17 @@ cd forge-ui && npm install && npm run build && cd ..
 # Start Forge
 seiso forge    # → http://127.0.0.1:8765
 
-# Train
+# Train (CLI → ./outputs/lora-run/ per example_lora.yaml)
 seiso train --config configs/example_lora.yaml
+
+# RL quant (CLI → ~/.seiso/rl_quant/cli/<job_id>/)
+seiso rl-quant run --preset minimal --kernel-rl
 
 # Benchmark fused kernels
 seiso-bench-kernels --op all
+
+# Diagnose install
+seiso doctor
 ```
 
 ---

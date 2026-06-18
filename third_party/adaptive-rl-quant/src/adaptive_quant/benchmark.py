@@ -98,6 +98,7 @@ class BenchmarkSuite:
                 max_bits=max_bits,
                 scale_upper=scale_upper,
                 clip_upper=clip_upper,
+                config=config,
             ),
             episode_offset=3_000_000,
             phase="eval",

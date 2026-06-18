@@ -54,4 +54,21 @@ def test_llama_load_kwargs_default_metal_offload_on_apple_silicon(monkeypatch):
     monkeypatch.setattr(platform, "system", lambda: "Darwin")
     monkeypatch.setattr(platform, "machine", lambda: "arm64")
 
-    assert llama_load_kwargs(4096)["n_gpu_layers"] == -1
+    kwargs = llama_load_kwargs(4096)
+    assert kwargs["n_gpu_layers"] == -1
+    assert kwargs["flash_attn"] is True
+    assert kwargs["no_perf"] is True
+
+
+def test_llama_load_kwargs_cuda_defaults(monkeypatch):
+    monkeypatch.delenv("SEISO_LLAMA_GPU_LAYERS", raising=False)
+    monkeypatch.setattr(platform, "system", lambda: "Linux")
+    monkeypatch.setattr(platform, "machine", lambda: "x86_64")
+    monkeypatch.setattr("seiso.inference.model_pool._cuda_available", lambda: True)
+
+    kwargs = llama_load_kwargs(4096)
+    assert kwargs["n_gpu_layers"] == -1
+    assert kwargs["n_batch"] == 2048
+    assert kwargs["flash_attn"] is True
+    assert kwargs["offload_kqv"] is True
+    assert kwargs["op_offload"] is True

@@ -104,6 +104,14 @@ def _load_extension() -> Any | None:
         return None
 
 
+def set_kernel_tuning(rms_mode: int, swiglu_vec: int, lora_tile: int) -> None:
+    """Apply RL-selected CUDA launch configuration to the native extension."""
+    ext = _load_extension()
+    if ext is None:
+        return
+    ext.set_kernel_tuning(int(rms_mode), int(swiglu_vec), int(lora_tile))
+
+
 def fused_rms_norm(x, weight, eps: float = 1e-6, residual=None):
     """
     Stripe RMSNorm with optional fused residual — NVIDIA native path.

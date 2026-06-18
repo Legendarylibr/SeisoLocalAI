@@ -1,6 +1,26 @@
 # CLI reference
 
-All commands run from the **repository root** with your virtualenv active after `pip install -e ".[forge,train,...]"`.
+Run commands from the **repository root** with your virtualenv active (`source .venv/bin/activate` or `~/Seiso/.venv/bin/activate`).
+
+Install entry points:
+
+| Command | Installed as |
+|---------|----------------|
+| `seiso` | `pip install -e ".[forge,train,...]"` |
+| `seiso-bench-kernels` | same (script entry point) |
+| `seiso-train-worker` | same (multi-GPU worker; used via `torchrun`) |
+
+Helper scripts (repo `scripts/`, not on `PATH`):
+
+| Script | Purpose |
+|--------|---------|
+| `./scripts/install.sh` | Clone/install venv, pip extras, UI build |
+| `./scripts/start.sh` | Build UI if needed, then `seiso forge` |
+| `./scripts/doctor.sh` | Diagnose install, HF, GPU stack |
+| `./scripts/precheck.sh` | Fast local CI gate (`make precheck`) |
+| `./scripts/install_flash_attn.sh` | Optional Flash Attention (Linux NVIDIA) |
+
+---
 
 ## `seiso forge`
 
@@ -12,7 +32,20 @@ seiso forge --reload          # auto-reload Python on code changes
 seiso forge --port 8766       # custom port
 ```
 
-Requires `forge-ui/dist` for the web UI — build with `cd forge-ui && npm run build`.
+Requires `forge-ui/dist` — build with `cd forge-ui && npm run build` or use `./scripts/start.sh`.
+
+Open **http://127.0.0.1:8765**. OpenAI-compatible chat: **http://127.0.0.1:8765/v1/chat/completions** (no `/api` prefix).
+
+## `seiso doctor`
+
+Diagnose Python, Node, HF, and optional GPU packages.
+
+```bash
+seiso doctor
+seiso doctor --network   # also probe huggingface.co
+```
+
+Delegates to `./scripts/doctor.sh` when run from a clone.
 
 ## `seiso train`
 
@@ -24,13 +57,17 @@ seiso train --config configs/example_lora.yaml
 
 Example config: `configs/example_lora.yaml` (dataset: `data/sample.jsonl`).
 
+**Checkpoints (CLI):** written under the YAML `output_dir` (example: `./outputs/lora-run/checkpoint-<timestamp>/`).
+
+**Checkpoints (Forge UI):** `{SEISO_DATA_DIR}/checkpoints/{user_id}/{job_id}/` (default `~/.seiso/checkpoints/...`).
+
 ## `seiso chat`
 
 Terminal chat with a local model.
 
 ```bash
 seiso chat --model meta-llama/Llama-3.2-3B-Instruct --prompt "Hello"
-seiso chat --model /path/to/model.gguf   # interactive mode (no --prompt)
+seiso chat --model /path/to/model.gguf   # interactive mode (omit --prompt)
 ```
 
 ## `seiso export`
@@ -38,21 +75,36 @@ seiso chat --model /path/to/model.gguf   # interactive mode (no --prompt)
 Export a training checkpoint to merged weights, LoRA, full fine-tune, or GGUF.
 
 ```bash
-seiso export --checkpoint ./outputs/lora-run/checkpoint-<ts> --formats merged,gguf
-seiso export --checkpoint ./outputs/lora-run/checkpoint-<ts> --profile inference
-seiso export --checkpoint ./outputs/lora-run/checkpoint-<ts> --hub-repo user/my-model
-seiso export --checkpoint ./outputs/lora-run/checkpoint-<ts> --hub-repo user/my-model --precheck-only
-seiso export --checkpoint ./outputs/lora-run/checkpoint-<ts> --profile list
+# CLI training output (example_lora.yaml → ./outputs/lora-run/)
+seiso export --checkpoint ./outputs/lora-run/checkpoint-<timestamp> --formats merged,gguf
+
+# Forge training output
+seiso export --checkpoint ~/.seiso/checkpoints/<user>/<job_id>/checkpoint-<timestamp> --formats merged,gguf
+
+seiso export --checkpoint <path> --profile inference
+seiso export --checkpoint <path> --hub-repo user/my-model
+seiso export --checkpoint <path> --hub-repo user/my-model --precheck-only
+seiso export --checkpoint <path> --profile list
 ```
 
-Outputs land under `{SEISO_DATA_DIR}/exports/` by default.
+Exports land under `{SEISO_DATA_DIR}/exports/` by default.
 
 ## `seiso inference`
 
-One-shot inference (alias for single-turn chat).
+One-shot inference (alias for single-turn `seiso chat`).
 
 ```bash
 seiso inference --model meta-llama/Llama-3.2-3B-Instruct --prompt "Summarize Seiso in one sentence."
+```
+
+## `seiso bench-inference`
+
+Measure load time, time-to-first-token, and generation throughput.
+
+```bash
+seiso bench-inference --model /path/to/model.gguf --max-tokens 128
+seiso bench-inference --model <path> --compare    # baseline vs optimized
+seiso bench-inference --model <path> --json
 ```
 
 ## `seiso compress`
@@ -64,16 +116,44 @@ Code Llama compression pipeline (vendored `third_party/codellama-compress`).
 seiso compress run --preset smoke
 seiso compress run --preset full --teacher-model codellama/CodeLlama-13b-hf --student-model codellama/CodeLlama-7b-hf
 
-# Verify hash-chained manifest
-seiso compress manifest-verify --run-dir ~/.seiso/compress/<user>/<run>
-
-# Speculative decoding benchmark
+seiso compress manifest-verify --run-dir ~/.seiso/compress/local/<job_id>
 seiso compress speculative --target-model ./finetuned --draft-model ./distilled --prompt "def fib(n):"
 ```
 
 Requires `.[train]` for GPU stages. Optional `.[compress-quant]` for GPTQ/AWQ, `.[compress-eval]` for lm-eval.
 
+Config reference: `configs/example_compress.json`.
+
 See [compression.md](compression.md).
+
+## `seiso rl-quant`
+
+Adaptive RL quantization + optional CUDA kernel profile co-training (vendored `third_party/adaptive-rl-quant`).
+
+```bash
+# Fast smoke (simulator backend, analytic kernel metrics)
+seiso rl-quant run --preset minimal --training-episodes 256
+
+# Kernel RL — joint quant policy + CUDA launch profiles
+seiso rl-quant run --preset reproducible --kernel-rl --training-episodes 512
+
+# Live CUDA micro-benchmarks (NVIDIA GPU; slower, ground-truth)
+seiso rl-quant run --kernel-rl --kernel-live-benchmark
+
+# List tunable kernel profiles
+seiso rl-quant profiles
+
+# Machine-readable summary
+seiso rl-quant run --preset minimal --kernel-rl --json
+```
+
+Outputs: `{SEISO_DATA_DIR}/rl_quant/cli/<job_id>/` (CLI user `cli`).
+
+Forge equivalent: **RL Quant** page (`/rl-quant`) or `POST /api/rl-quant/jobs`.
+
+Config reference: `configs/rl_quant_smoke.json`.
+
+**Image compression** has no `seiso` subcommand — use Forge **Image Compress** (`/image-compress`) or the vendored `python -m sd_compress` CLI in `third_party/sd-distill-prune-quant/`.
 
 ## `seiso-bench-kernels`
 
@@ -81,12 +161,29 @@ Benchmark fused training kernels (NVIDIA CUDA or AMD Triton).
 
 ```bash
 seiso-bench-kernels --op all --rows 4096 --hidden 4096 --vocab 32000
+seiso-bench-kernels --op rms --dtype bfloat16
 ```
 
-## Multi-GPU training (manual)
+## Multi-GPU training (`seiso-train-worker`)
+
+Distributed training uses the worker entry point via `torchrun` (not a top-level `seiso` subcommand):
 
 ```bash
 torchrun --nproc_per_node=2 -m seiso.training.worker --config configs/example_lora.yaml
+# equivalent installed script:
+torchrun --nproc_per_node=2 seiso-train-worker --config configs/example_lora.yaml
 ```
 
 See [training/multi-gpu.md](training/multi-gpu.md).
+
+---
+
+## Forge-only workflows (no `seiso` subcommand)
+
+| Workflow | Forge page | API prefix |
+|----------|------------|------------|
+| Image compression (Stable Diffusion) | `/image-compress` | `/api/image-compress` |
+| Training with SSE job UI | `/train` | `/api/training` |
+| Export jobs | `/export` | `/api/export` |
+
+Upstream vendor CLIs (optional, not installed by default): `adaptive-rl-quant`, `adaptive-rl-quant-pytorch`, etc. in `third_party/adaptive-rl-quant/`. Prefer `seiso rl-quant run` for the integrated pipeline.
