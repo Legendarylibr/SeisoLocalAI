@@ -111,6 +111,10 @@ CATALOG: tuple[CatalogEntry, ...] = (
         ("reasoning", "popular"), priority=86, gguf_repo="unsloth/Qwen3-14B-GGUF",
     ),
     CatalogEntry(
+        "meta-llama/Llama-3.2-3B-Instruct", "Llama 3.2 3B Instruct", ModelFamily.LLAMA, "3B", ModelTask.CHAT, "Q4_K_M",
+        ("small", "popular"), priority=85, gguf_repo="unsloth/Llama-3.2-3B-Instruct-GGUF",
+    ),
+    CatalogEntry(
         "google/gemma-3-12b-it", "Gemma 3 12B Instruct", ModelFamily.GEMMA, "12B", ModelTask.CHAT, "Q4_K_M",
         ("vision", "popular"), priority=85, gguf_repo="unsloth/gemma-3-12b-it-GGUF",
     ),
@@ -137,6 +141,10 @@ CATALOG: tuple[CatalogEntry, ...] = (
     CatalogEntry(
         "Qwen/Qwen3-0.6B", "Qwen 3 0.6B", ModelFamily.QWEN, "0.6B", ModelTask.CHAT, "Q4_K_M",
         ("small",), priority=79, gguf_repo="unsloth/Qwen3-0.6B-GGUF",
+    ),
+    CatalogEntry(
+        "mistralai/Mistral-7B-Instruct-v0.3", "Mistral 7B Instruct v0.3", ModelFamily.MISTRAL, "7B", ModelTask.CHAT, "Q4_K_M",
+        ("popular",), priority=78, gguf_repo="unsloth/Mistral-7B-Instruct-v0.3-GGUF",
     ),
     CatalogEntry(
         "google/gemma-3-1b-it", "Gemma 3 1B Instruct", ModelFamily.GEMMA, "1B", ModelTask.CHAT, "Q4_K_M",

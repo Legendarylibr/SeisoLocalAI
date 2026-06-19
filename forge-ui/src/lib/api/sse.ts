@@ -78,7 +78,11 @@ export function streamPostSSE(
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: res.statusText }));
-      throw new Error(formatApiError(err.detail, res.statusText || "Request failed"));
+      const detail = formatApiError(err.detail, res.statusText || "Request failed");
+      if (res.status === 403 && /csrf/i.test(detail)) {
+        throw new Error("Session security token expired — sign out and sign in again, then retry.");
+      }
+      throw new Error(detail);
     }
 
     const reader = res.body?.getReader();
@@ -168,7 +172,11 @@ export function streamChat(
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: res.statusText }));
-      throw new Error(formatApiError(err.detail, res.statusText || "Chat request failed"));
+      const detail = formatApiError(err.detail, res.statusText || "Chat request failed");
+      if (res.status === 403 && /csrf/i.test(detail)) {
+        throw new Error("Session security token expired — sign out and sign in again, then retry.");
+      }
+      throw new Error(detail);
     }
 
     const reader = res.body?.getReader();

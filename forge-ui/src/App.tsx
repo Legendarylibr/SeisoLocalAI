@@ -9,7 +9,6 @@ import { Layout } from "@/components/Layout";
 import { SeisoLogoMark } from "@/components/SeisoLogo";
 import { HfTokenPrompt } from "@/components/HfTokenPrompt";
 import { AuthPage } from "@/pages/AuthPage";
-import authBgUrl from "@/assets/auth-bg.png";
 
 const DashboardPage = lazy(() => import("@/pages/DashboardPage").then((m) => ({ default: m.DashboardPage })));
 const HubPage = lazy(() => import("@/pages/HubPage").then((m) => ({ default: m.HubPage })));
@@ -18,9 +17,6 @@ const ExportPage = lazy(() => import("@/pages/ExportPage").then((m) => ({ defaul
 const RLQuantPage = lazy(() => import("@/pages/RLQuantPage").then((m) => ({ default: m.RLQuantPage })));
 const CompressPage = lazy(() => import("@/pages/CompressPage").then((m) => ({ default: m.CompressPage })));
 const TrainPage = lazy(() => import("@/pages/TrainPage").then((m) => ({ default: m.TrainPage })));
-const ImageCompressPage = lazy(() =>
-  import("@/pages/ImageCompressPage").then((m) => ({ default: m.ImageCompressPage })),
-);
 const KnowledgePage = lazy(() => import("@/pages/KnowledgePage").then((m) => ({ default: m.KnowledgePage })));
 const RecipesPage = lazy(() => import("@/pages/RecipesPage").then((m) => ({ default: m.RecipesPage })));
 const IntegrationsPage = lazy(() =>
@@ -31,9 +27,7 @@ const SettingsPage = lazy(() => import("@/pages/SettingsPage").then((m) => ({ de
 function PageLoading() {
   return (
     <div className="app-loading">
-      <div className="app-loading-atmosphere" aria-hidden>
-        <img src={authBgUrl} alt="" className="app-loading-bg-figure" draggable={false} />
-      </div>
+      <div className="app-loading-atmosphere" aria-hidden />
       <div className="app-loading-mark">
         <SeisoLogoMark className="brand-logo-img app-loading-logo" />
       </div>
@@ -95,7 +89,6 @@ function AppRoutes() {
         <Route path="/rl-quant" element={<Guard><RLQuantPage /></Guard>} />
         <Route path="/compress" element={<Guard><CompressPage /></Guard>} />
         <Route path="/train" element={<Guard><TrainPage /></Guard>} />
-        <Route path="/image-compress" element={<Guard><ImageCompressPage /></Guard>} />
         <Route path="/knowledge" element={<Guard><KnowledgePage /></Guard>} />
         <Route path="/recipes" element={<Guard><RecipesPage /></Guard>} />
         <Route path="/integrations" element={<Guard><IntegrationsPage /></Guard>} />

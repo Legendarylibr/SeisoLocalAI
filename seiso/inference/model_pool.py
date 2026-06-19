@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import gc
 import logging
 import os
 import platform
@@ -69,11 +68,19 @@ def _default_llama_ubatch(n_batch: int) -> int:
 
 def llama_load_kwargs(n_ctx: int) -> dict[str, Any]:
     """Tuned llama.cpp defaults for faster preload/first token, overrideable by env."""
-    from seiso.memory.protection import clamp_llama_load_kwargs
+    from seiso.memory.protection import clamp_llama_load_kwargs, headroom_mb
 
     n_threads = _env_int("SEISO_LLAMA_THREADS", _default_llama_threads())
     n_batch = _env_int("SEISO_LLAMA_BATCH", _default_llama_batch())
     n_gpu_layers = _env_int("SEISO_LLAMA_GPU_LAYERS", _default_llama_gpu_layers())
+    headroom = headroom_mb()
+    if n_gpu_layers != 0 and headroom > 0:
+        if headroom < 4096:
+            n_gpu_layers = min(n_gpu_layers if n_gpu_layers > 0 else 24, 16)
+        elif headroom < 6144:
+            n_gpu_layers = min(n_gpu_layers if n_gpu_layers > 0 else 32, 24)
+        elif headroom < 10240 and n_gpu_layers == -1:
+            n_gpu_layers = -1
     kwargs: dict[str, Any] = {
         "n_ctx": n_ctx,
         "n_threads": n_threads,
@@ -171,9 +178,10 @@ class ModelPool:
                 return self._active.handle
 
             self.unload_all()
-            logger.info("Loading model: %s (%s)", norm, backend.value)
-            from seiso.memory.protection import ensure_load_fits
+            from seiso.memory.protection import ensure_load_fits, release_cached_memory
 
+            release_cached_memory(sync=True)
+            logger.info("Loading model: %s (%s)", norm, backend.value)
             ensure_load_fits(load_path, mode="chat")
             try:
                 handle = loader_fn(load_path)
@@ -273,26 +281,9 @@ class ModelPool:
         self._free_memory()
 
     def _free_memory(self) -> None:
-        gc.collect()
-        if os.environ.get("SEISO_SKIP_MLX_PROBE", "").strip().lower() not in {"1", "true", "yes"}:
-            try:
-                import mlx.core as mx
+        from seiso.memory.protection import release_cached_memory
 
-                if hasattr(mx, "metal") and hasattr(mx.metal, "clear_cache"):
-                    mx.metal.clear_cache()
-            except ImportError:
-                pass
-            except Exception:
-                pass
-        try:
-            import torch
-
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-            if hasattr(torch, "mps") and torch.backends.mps.is_available():
-                torch.mps.empty_cache()
-        except ImportError:
-            pass
+        release_cached_memory(sync=True)
 
     def status(self) -> dict:
         with self._lock:

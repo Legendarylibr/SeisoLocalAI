@@ -14,10 +14,11 @@ _NO_REASONING = (
 
 _REASONING_PRONE_PATTERN = re.compile(
     r"(?i)(?:"
-    r"[-_/]r1(?:[-_/]|$)|deepseek-r1|deepseek_r1|qwq|qwen3|qwen3\.5|"
+    r"[-_/]r1(?:[-_/]|$)|deepseek-r1|deepseek_r1|qwq|qwen3|qwen3\.5|qwen3\.6|"
     r"gpt-oss|reasoning|think(?:ing)?-?instruct|magistral|"
     r"nemotron.*reason|phi-4-reason|olmo.*think|"
-    r"devstral|scout.*instruct"
+    r"devstral|scout.*instruct|"
+    r"moe|mixtral|a\d+b(?:[-_/]|$)|coder-next"
     r")"
 )
 
@@ -36,7 +37,11 @@ _FAMILY_HINTS: dict[str, str] = {
     ),
     "mixtral": (
         "Do not emit tool-call JSON or [TOOL_CALLS] sections. "
-        "Do not expose reasoning or analysis preambles before the answer."
+        "Do not expose reasoning, think blocks, or analysis preambles before the answer."
+    ),
+    "qwen": (
+        "Do not use Qwen tool markup (<tool_call>, tool_call blocks, or function JSON blobs). "
+        "Do not expose think blocks, reasoning tags, or 'Thinking Process' sections."
     ),
     "deepseek": (
         "Do not wrap replies in tool/function call syntax or action blocks meant for external tools. "

@@ -20,7 +20,7 @@ from forge.security.auth import (
     verify_password,
 )
 from forge.security.client_ip import client_ip
-from forge.security.csrf import clear_csrf_cookie, generate_csrf_token, set_csrf_cookie
+from forge.security.csrf import CSRF_COOKIE, clear_csrf_cookie, generate_csrf_token, set_csrf_cookie
 
 _login_limiter = LoginRateLimiter()
 
@@ -152,12 +152,18 @@ async def logout(
 
 @router.get("/me")
 async def me(
+    request: Request,
+    response: Response,
     user_id: Annotated[str, Depends(get_current_user_id)],
     db: Annotated[Database, Depends(get_db)],
+    settings: Annotated[ForgeSettings, Depends(get_settings)],
 ) -> dict:
     user = await db.get_user_by_id(user_id)
     if not user:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
+    # Issue CSRF cookie for existing sessions (e.g. after upgrade) so POST/SSE calls work.
+    if not request.cookies.get(CSRF_COOKIE):
+        set_csrf_cookie(response, generate_csrf_token(), secure=settings.cookie_secure)
     return {
         "id": user["id"],
         "email": user["email"],

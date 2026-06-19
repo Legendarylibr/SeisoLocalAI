@@ -15,9 +15,9 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T")
 
 # Reserve a slice of free memory for OS / display / other processes.
-_DEFAULT_RESERVE_RATIO = 0.10
+_DEFAULT_RESERVE_RATIO = 0.08
 # Generation + activations overhead on top of weight estimate.
-_INFERENCE_OVERHEAD_MB = 768
+_INFERENCE_OVERHEAD_MB = 512
 _TRAINING_OVERHEAD_RATIO = 2.2
 # Absolute ceilings — never exceed even on large machines.
 _MAX_INFERENCE_TOKENS = 8192
@@ -242,18 +242,46 @@ def headroom_mb() -> int:
             import psutil  # type: ignore
 
             avail = psutil.virtual_memory().available / (1024**2)
-            return int(min(avail * 0.65, ram * 1024 * 0.4))
+            return int(min(avail * 0.72, ram * 1024 * 0.45))
         except Exception:
+            avail = available_ram_mb()
+            if avail > 0:
+                return int(min(avail * 0.72, ram * 1024 * 0.45))
             return int(ram * 1024 * 0.35)
 
 
 def available_ram_mb() -> int:
+    """Cross-platform available RAM in MB (Linux, macOS, Windows)."""
     try:
         import psutil  # type: ignore
 
         return int(psutil.virtual_memory().available / (1024**2))
     except Exception:
-        return int(float(hardware_profile().get("ram_gb") or 8) * 1024 * 0.5)
+        pass
+    if platform.system() == "Windows":
+        try:
+            import ctypes
+
+            class MEMORYSTATUSEX(ctypes.Structure):
+                _fields_ = [
+                    ("dwLength", ctypes.c_ulong),
+                    ("dwMemoryLoad", ctypes.c_ulong),
+                    ("ullTotalPhys", ctypes.c_ulonglong),
+                    ("ullAvailPhys", ctypes.c_ulonglong),
+                    ("ullTotalPageFile", ctypes.c_ulonglong),
+                    ("ullAvailPageFile", ctypes.c_ulonglong),
+                    ("ullTotalVirtual", ctypes.c_ulonglong),
+                    ("ullAvailVirtual", ctypes.c_ulonglong),
+                    ("ullAvailExtendedVirtual", ctypes.c_ulonglong),
+                ]
+
+            stat = MEMORYSTATUSEX()
+            stat.dwLength = ctypes.sizeof(MEMORYSTATUSEX)
+            if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(stat)):
+                return int(stat.ullAvailPhys / (1024**2))
+        except Exception:
+            pass
+    return int(float(hardware_profile().get("ram_gb") or 8) * 1024 * 0.5)
 
 
 def build_hf_max_memory(*, reserve_ratio: float = _DEFAULT_RESERVE_RATIO) -> dict[int, str] | None:
@@ -295,7 +323,7 @@ def assess_path_memory_fit(path: str | Path, *, mode: str = "chat") -> dict[str,
         return assess_hardware_fit(est_gb, profile, mode=mode)
     except Exception:
         free = headroom_mb()
-        blocked = free > 0 and est_mb > free
+        blocked = free > 0 and est_mb > int(free * 1.12)
         return {
             "hardware_fit": "unlikely" if blocked else "good",
             "est_vram_mb": est_mb,
@@ -332,12 +360,12 @@ def sanitize_inference_payload(payload: dict[str, Any]) -> dict[str, Any]:
     prompt_tokens = _estimate_prompt_tokens(messages)
     headroom = headroom_mb()
 
-    max_tokens = int(out.get("max_tokens") or 512)
+    max_tokens = int(out.get("max_tokens") or 2048)
     max_tokens = max(1, min(max_tokens, _MAX_INFERENCE_TOKENS))
 
-    # Reserve ~1 MB KV per 128 tokens as a coarse guard.
-    kv_budget_tokens = max(256, int((headroom - _INFERENCE_OVERHEAD_MB) * 128 / 4))
-    max_tokens = min(max_tokens, max(64, kv_budget_tokens - prompt_tokens - 64))
+    # Reserve ~0.5 MB KV per 128 tokens as a coarse guard (less aggressive than before).
+    kv_budget_tokens = max(512, int((headroom - _INFERENCE_OVERHEAD_MB) * 128 / 2))
+    max_tokens = min(max_tokens, max(128, kv_budget_tokens - prompt_tokens - 32))
     out["max_tokens"] = max_tokens
 
     if out.get("n_ctx") is not None:

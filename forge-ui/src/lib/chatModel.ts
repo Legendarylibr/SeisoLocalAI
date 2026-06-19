@@ -12,16 +12,17 @@ type MemoryFitModel = {
   memory_load_blocked_reason?: string | null;
   est_vram_mb?: number;
   hardware_note?: string;
+  hardware_fit?: string;
 };
 
-/** True when a model's estimated runtime memory exceeds free VRAM/RAM headroom. */
+/** True when a model's estimated runtime memory clearly exceeds free VRAM/RAM headroom. */
 export function modelMemoryBlocked(
   model: MemoryFitModel | null | undefined,
   headroomMb?: number,
 ): boolean {
   if (!model) return false;
-  if (model.memory_load_blocked) return true;
-  if (headroomMb && model.est_vram_mb) return model.est_vram_mb > headroomMb;
+  if (model.memory_load_blocked && model.hardware_fit === "unlikely") return true;
+  if (headroomMb && model.est_vram_mb) return model.est_vram_mb > headroomMb * 1.12;
   return false;
 }
 
