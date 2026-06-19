@@ -104,3 +104,83 @@ def test_estimate_tokens():
 def test_baseline_env_disables_gpu_offload():
     assert BASELINE_ENV["SEISO_LLAMA_GPU_LAYERS"] == "0"
     assert BASELINE_ENV["SEISO_INFERENCE_FUSED_KERNELS"] == "false"
+
+
+def test_cli_benchmark_uses_sync_wrappers(monkeypatch):
+    from seiso.inference import benchmark as bench_mod
+    from seiso_cli import main as cli_mod
+
+    calls: list[tuple[str, dict]] = []
+    result = InferenceBenchResult(
+        backend="llamacpp",
+        model_path="/tmp/model.gguf",
+        prompt_chars=2,
+        output_chars=5,
+        output_tokens=2,
+        max_tokens=8,
+        load_ms=10.0,
+        ttft_ms=5.0,
+        generate_ms=20.0,
+        total_ms=35.0,
+        tokens_per_sec=100.0,
+        ms_per_token=10.0,
+    )
+
+    def fake_run_bench_inference(**kwargs):
+        calls.append(("bench", kwargs))
+        return result
+
+    def fake_run_compare_inference_profiles(**kwargs):
+        calls.append(("compare", kwargs))
+        return {
+            "baseline": {**result.to_dict(), "profile": "baseline"},
+            "optimized": {**result.to_dict(), "profile": "optimized"},
+            "speedup_tokens_per_sec": 2.0,
+            "ttft_improvement_ms": 5.0,
+        }
+
+    monkeypatch.setattr(bench_mod, "run_bench_inference", fake_run_bench_inference)
+    monkeypatch.setattr(
+        bench_mod,
+        "run_compare_inference_profiles",
+        fake_run_compare_inference_profiles,
+    )
+
+    cli_mod.bench_inference_cmd(
+        model="/tmp/model.gguf",
+        prompt="hi",
+        max_tokens=8,
+        backend="llamacpp",
+        compare=False,
+        json_out=True,
+    )
+    cli_mod.bench_inference_cmd(
+        model="/tmp/model.gguf",
+        prompt="hi",
+        max_tokens=8,
+        backend="llamacpp",
+        compare=True,
+        json_out=True,
+    )
+
+    assert calls == [
+        (
+            "bench",
+            {
+                "model_path": "/tmp/model.gguf",
+                "prompt": "hi",
+                "max_tokens": 8,
+                "backend": "llamacpp",
+                "warmup": True,
+            },
+        ),
+        (
+            "compare",
+            {
+                "model_path": "/tmp/model.gguf",
+                "prompt": "hi",
+                "max_tokens": 8,
+                "backend": "llamacpp",
+            },
+        ),
+    ]

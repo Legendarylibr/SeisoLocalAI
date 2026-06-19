@@ -5,8 +5,9 @@ import { IconLock } from "@/components/Icons";
 import authBgUrl from "@/assets/auth-bg.png";
 
 export function AuthPage() {
-  const { needsOnboarding, login, register } = useAuth();
+  const { needsOnboarding, storageModeConfigured, login, register } = useAuth();
   const [password, setPassword] = useState("");
+  const [storageMode, setStorageMode] = useState<"persistent" | "ephemeral">("persistent");
   const [error, setError] = useState("");
   const mode = needsOnboarding ? "register" : "login";
 
@@ -14,7 +15,7 @@ export function AuthPage() {
     e.preventDefault();
     setError("");
     try {
-      if (mode === "register") await register(password);
+      if (mode === "register") await register(password, storageModeConfigured ? undefined : storageMode);
       else await login(password);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Auth failed");
@@ -83,6 +84,34 @@ export function AuthPage() {
               autoFocus
               placeholder="Enter password"
             />
+            {mode === "register" && !storageModeConfigured && (
+              <fieldset className="auth-storage-choice">
+                <legend>Storage mode</legend>
+                <label>
+                  <input
+                    type="radio"
+                    name="storage-mode"
+                    value="persistent"
+                    checked={storageMode === "persistent"}
+                    onChange={() => setStorageMode("persistent")}
+                  />
+                  Keep my workspace across restarts
+                </label>
+                <label>
+                  <input
+                    type="radio"
+                    name="storage-mode"
+                    value="ephemeral"
+                    checked={storageMode === "ephemeral"}
+                    onChange={() => setStorageMode("ephemeral")}
+                  />
+                  Temporary session only
+                </label>
+                <p className="muted-text">
+                  Persistent mode stores users, chats, models, jobs, and provider settings in your local data directory.
+                </p>
+              </fieldset>
+            )}
             {error && <p className="auth-error" role="alert">{error}</p>}
             <button type="submit" className="btn btn-primary auth-submit">
               {mode === "register" ? "Set password and continue" : "Sign in"}

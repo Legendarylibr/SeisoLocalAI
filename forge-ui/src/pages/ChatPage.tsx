@@ -493,6 +493,7 @@ export function ChatPage() {
     const isOllamaOnly = selected?.kind === "ollama";
     const usingOllama = !providerId && effectiveBackend === "ollama";
     let assistantText = "";
+    let progressText = "";
     streamTextRef.current = "";
     streamThreadRef.current = threadId;
 
@@ -533,7 +534,32 @@ export function ChatPage() {
         },
         {
           onEvent: (event, data) => {
-            if (event === "error") setError(data);
+            if (event === "error") {
+              setError(data);
+              return;
+            }
+            if (event === "log") {
+              progressText = `${progressText}${progressText ? "\n" : ""}${data}`;
+              if (!assistantText) {
+                streamTextRef.current = progressText;
+                if (streamFlushRef.current === null) {
+                  streamFlushRef.current = window.requestAnimationFrame(flushStreamText);
+                }
+              }
+              return;
+            }
+            if (event === "defense") {
+              try {
+                const result = JSON.parse(data) as { action?: string; top_reasons?: string[] };
+                const label = result.action ? `AutoDefense: ${result.action}` : "AutoDefense scanned this response";
+                const reasons = result.top_reasons?.length ? ` (${result.top_reasons.join(", ")})` : "";
+                setError(`${label}${reasons}`);
+              } catch {
+                setError("AutoDefense scanned this response");
+              }
+              return;
+            }
+            if (event === "done") return;
             if (event === "token" || event === "message") {
               if (event === "message") assistantText = data;
               else assistantText += data;
@@ -561,6 +587,13 @@ export function ChatPage() {
       streamAbortRef.current = null;
       setStreaming(false);
     }
+  };
+
+  const stopStreaming = () => {
+    streamAbortRef.current?.();
+    streamAbortRef.current = null;
+    setStreaming(false);
+    setError("Generation stopped.");
   };
 
   const modelLabel = (m: InferenceModelOption) => {
@@ -739,6 +772,11 @@ export function ChatPage() {
           )}
           {streaming && !providerId && (
             <span className="chat-vram-hint muted-text">Generating — switch model anytime</span>
+          )}
+          {streaming && (
+            <button type="button" className="btn" onClick={stopStreaming}>
+              Stop
+            </button>
           )}
           {selected && selectedFit && !providerId && (
             <HardwareFitBadge fit={selectedFit} label={selected.hardware_fit_label} />

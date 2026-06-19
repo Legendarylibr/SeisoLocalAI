@@ -1,4 +1,4 @@
-.PHONY: ci ci-fast ci-list precheck lint types test security frontend imports fix
+.PHONY: ci ci-fast ci-list precheck deps lint types test security frontend imports fix
 
 ci:
 	python3 scripts/run_ci_local.py
@@ -10,6 +10,9 @@ ci-list:
 	python3 scripts/run_ci_local.py --list
 
 precheck: ci-fast
+
+deps:
+	python3 scripts/run_ci_local.py --job deps --skip-install
 
 lint:
 	python3 scripts/run_ci_local.py --job lint --skip-install

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api, RLQuantJob, RLQuantPreset, subscribeSSE } from "@/lib/api";
+import { invalidateApiCache } from "@/lib/api/getCache";
 import { appendBoundedLog } from "@/lib/api/sse";
 import { RL_QUANT_FALLBACK_PRESETS, RL_QUANT_PRESET_HINTS } from "@/lib/rlQuantPresets";
 import { StudioPageShell } from "@/components/StudioPageShell";
@@ -86,7 +87,11 @@ export function RLQuantPage() {
             /* ignore */
           }
         }
-        if (event === "result") refreshJobs();
+        if (event === "result") {
+          invalidateApiCache("/inference/models");
+          invalidateApiCache("/training/models");
+          refreshJobs();
+        }
       });
       refreshJobs();
     } finally {

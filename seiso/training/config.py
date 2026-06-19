@@ -58,6 +58,7 @@ class TrainConfig(BaseModel):
     eval_split_ratio: float = Field(default=0.05, ge=0, le=0.5)
     lr_scheduler: str = "cosine"
     resume_from: Path | None = None
+    sandbox_root: Path | None = None
     seed: int = 42
     deterministic: bool = True
     multi_gpu: bool = False
@@ -69,7 +70,7 @@ class TrainConfig(BaseModel):
     packing: bool = False
     extra: dict[str, Any] = Field(default_factory=dict)
 
-    @field_validator("output_dir", "dataset", "resume_from", mode="before")
+    @field_validator("output_dir", "dataset", "resume_from", "sandbox_root", mode="before")
     @classmethod
     def _expand_path(cls, v: Any) -> Any:
         if v is None:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from forge.security.http_client import _PinnedGetaddrinfo
+from forge.security.token_revocation import clear_revocations_for_tests, is_jti_revoked, revoke_jti
 from forge.security.url_policy import resolve_pinned_endpoint, validate_provider_base_url
 from forge.tools.code_exec import _validate_code
 from forge.tools.registry import parse_tool_calls
@@ -235,6 +236,58 @@ async def test_knowledge_bases_scoped_per_user(app, auth_client):
     )
     assert retrieve.status_code == 200
     assert retrieve.json().get("results") == []
+
+
+def test_jwt_revocation_overflow_retains_unexpired(monkeypatch):
+    import time
+
+    monkeypatch.setattr("forge.security.token_revocation._MAX_ENTRIES", 3)
+    now = time.time()
+    for idx in range(5):
+        revoke_jti(f"jti-{idx}", now + 3600 + idx)
+
+    assert all(is_jti_revoked(f"jti-{idx}") for idx in range(5))
+    clear_revocations_for_tests()
+
+
+@pytest.mark.asyncio
+async def test_cross_user_inference_cancel_rejected(app, auth_client):
+    client, _token, headers_a, _data_dir = auth_client
+    from forge.api.deps import get_db, get_inference_orchestrator
+
+    db = get_db()
+    user_a = await db.get_user_by_display_name("Admin")
+    _, token_b = await make_second_user("cancel@local.dev")
+    headers_b = {"Authorization": f"Bearer {token_b}"}
+    orchestrator = get_inference_orchestrator()
+    orchestrator._active_generation_user_id = user_a["id"]
+
+    rejected = await client.post("/api/inference/cancel-generation", headers=headers_b)
+    assert rejected.status_code == 403
+
+    allowed = await client.post("/api/inference/cancel-generation", headers=headers_a)
+    assert allowed.status_code == 200
+
+
+def test_trainer_dataset_sandbox_blocks_other_user_path(tmp_path):
+    from seiso.training.config import TrainConfig
+    from seiso.training.datasets import load_training_dataset
+
+    user_a_dataset = tmp_path / "uploads" / "user-a" / "private.jsonl"
+    user_a_dataset.parent.mkdir(parents=True)
+    user_a_dataset.write_text('{"text":"secret"}\n')
+    user_b_root = tmp_path / "uploads" / "user-b"
+    user_b_root.mkdir(parents=True)
+    cfg = TrainConfig.model_validate(
+        {
+            "model_id": "test/model",
+            "dataset": str(user_a_dataset),
+            "sandbox_root": str(user_b_root),
+        }
+    )
+
+    with pytest.raises(SecurityError):
+        load_training_dataset(cfg.dataset, sandbox_root=cfg.sandbox_root)
 
 
 @pytest.mark.asyncio

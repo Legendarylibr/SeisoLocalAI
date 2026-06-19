@@ -212,16 +212,16 @@ def bench_inference_cmd(
     """Measure load time, time-to-first-token, and generation tok/s."""
     from seiso.inference.benchmark import (
         DEFAULT_PROMPT,
-        compare_inference_profiles,
         run_bench_inference,
+        run_compare_inference_profiles,
     )
 
     text = prompt or DEFAULT_PROMPT
     console.print(f"[bold]Inference benchmark[/] backend={backend} max_tokens={max_tokens}")
 
     if compare:
-        report = compare_inference_profiles(
-            model,
+        report = run_compare_inference_profiles(
+            model_path=model,
             prompt=text,
             max_tokens=max_tokens,
             backend=backend,
@@ -245,7 +245,7 @@ def bench_inference_cmd(
         return
 
     result = run_bench_inference(
-        model,
+        model_path=model,
         prompt=text,
         max_tokens=max_tokens,
         backend=backend,

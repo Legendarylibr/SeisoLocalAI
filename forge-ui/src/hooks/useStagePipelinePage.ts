@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTrainingModels } from "@/context/TrainingModelsContext";
+import { invalidateApiCache } from "@/lib/api/getCache";
 import { usePipelineJobStream } from "@/hooks/usePipelineJobStream";
 import { useStagePipelinePresets } from "@/hooks/useStagePipelinePresets";
 
@@ -51,7 +52,11 @@ export function useStagePipelinePage<TJob extends { id: string }>({
       try {
         const res = await startJob(body);
         watchJob(streamPath(res.job_id), res.job_id, {
-          onResult: () => refreshJobs(),
+          onResult: () => {
+            invalidateApiCache("/inference/models");
+            invalidateApiCache("/training/models");
+            refreshJobs();
+          },
         });
         refreshJobs();
       } finally {

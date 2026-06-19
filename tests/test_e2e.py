@@ -179,6 +179,7 @@ async def test_inference_chat_e2e(app, auth_client, monkeypatch):
         headers=headers,
         json={
             "model_id": model["id"],
+            "inference_backend": "llamacpp",
             "messages": [{"role": "user", "content": "hello"}],
             "stream": False,
         },

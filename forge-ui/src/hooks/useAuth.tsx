@@ -5,8 +5,10 @@ type AuthState = {
   user: AuthUser | null;
   loading: boolean;
   needsOnboarding: boolean;
+  storageModeConfigured: boolean;
+  storageMode: "persistent" | "ephemeral";
   login: (password: string) => Promise<void>;
-  register: (password: string) => Promise<void>;
+  register: (password: string, storageMode?: "persistent" | "ephemeral") => Promise<void>;
   logout: () => Promise<void>;
 };
 
@@ -16,6 +18,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
   const [needsOnboarding, setNeedsOnboarding] = useState(false);
+  const [storageModeConfigured, setStorageModeConfigured] = useState(true);
+  const [storageMode, setStorageMode] = useState<"persistent" | "ephemeral">("persistent");
 
   useEffect(() => {
     clearLegacyToken();
@@ -23,6 +27,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         const status = await api.authStatus();
         setNeedsOnboarding(status.needs_onboarding);
+        setStorageModeConfigured(status.storage_mode_configured);
+        setStorageMode(status.storage_mode);
         if (!status.needs_onboarding) {
           try {
             const me = await api.me();
@@ -45,10 +51,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setNeedsOnboarding(false);
   }, []);
 
-  const register = useCallback(async (password: string) => {
-    const res = await api.register(password);
+  const register = useCallback(async (password: string, nextStorageMode?: "persistent" | "ephemeral") => {
+    const res = await api.register(password, nextStorageMode);
     setUser(res.user);
     setNeedsOnboarding(false);
+    setStorageModeConfigured(true);
+    if (nextStorageMode) setStorageMode(nextStorageMode);
   }, []);
 
   const logout = useCallback(async () => {
@@ -57,8 +65,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo(
-    () => ({ user, loading, needsOnboarding, login, register, logout }),
-    [user, loading, needsOnboarding, login, register, logout],
+    () => ({
+      user,
+      loading,
+      needsOnboarding,
+      storageModeConfigured,
+      storageMode,
+      login,
+      register,
+      logout,
+    }),
+    [user, loading, needsOnboarding, storageModeConfigured, storageMode, login, register, logout],
   );
 
   return (

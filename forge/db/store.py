@@ -19,6 +19,10 @@ ENCRYPTED_COLUMNS: dict[str, tuple[str, ...]] = {
     "providers": ("config_json",),
 }
 
+
+class DatabaseCryptoError(RuntimeError):
+    """Raised when encrypted database fields cannot be decrypted safely."""
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY,
@@ -185,6 +189,13 @@ _JOB_ERROR_TABLES = (
     "compress_jobs",
     "image_compress_jobs",
 )
+_CONFIG_JOB_TABLES = frozenset({"rl_quant_jobs", "compress_jobs", "image_compress_jobs"})
+
+
+def _config_job_table(table: str) -> str:
+    if table not in _CONFIG_JOB_TABLES:
+        raise ValueError(f"Unsupported config job table: {table}")
+    return table
 
 
 def _now() -> str:
@@ -213,7 +224,10 @@ class Database:
         return encrypt_field(value, self._encryption_key)
 
     def _dec(self, value: str) -> str:
-        return decrypt_field(value, self._encryption_key)
+        try:
+            return decrypt_field(value, self._encryption_key)
+        except Exception as exc:
+            raise DatabaseCryptoError("Encrypted database field could not be decrypted") from exc
 
     def _decrypt_row(self, table: str, row: dict[str, Any]) -> dict[str, Any]:
         out = dict(row)
@@ -471,16 +485,19 @@ class Database:
         checkpoint_path: str | None = None,
         metrics: dict | None = None,
         error_text: str | None = None,
+        user_id: str | None = None,
     ) -> None:
         now = _now()
+        owner_clause = " AND user_id = ?" if user_id else ""
         async with self._conn() as conn:
             if checkpoint_path or metrics is not None or error_text is not None:
-                await conn.execute(
-                    """UPDATE training_jobs SET status = ?, updated_at = ?,
+                query = f"""UPDATE training_jobs SET status = ?, updated_at = ?,
                        checkpoint_path = COALESCE(?, checkpoint_path),
                        metrics_json = COALESCE(?, metrics_json),
                        error_text = COALESCE(?, error_text)
-                       WHERE id = ?""",
+                       WHERE id = ?{owner_clause}"""  # nosec B608
+                await conn.execute(
+                    query,
                     (
                         status,
                         now,
@@ -488,21 +505,25 @@ class Database:
                         json.dumps(metrics or {}) if metrics is not None else None,
                         error_text,
                         job_id,
+                        *([user_id] if user_id else []),
                     ),
                 )
             else:
                 await conn.execute(
-                    "UPDATE training_jobs SET status = ?, updated_at = ? WHERE id = ?",
-                    (status, now, job_id),
+                    f"UPDATE training_jobs SET status = ?, updated_at = ? WHERE id = ?{owner_clause}",  # nosec B608
+                    (status, now, job_id, *([user_id] if user_id else [])),
                 )
             await conn.commit()
 
-    async def update_training_metrics(self, job_id: str, metrics: dict) -> None:
+    async def update_training_metrics(
+        self, job_id: str, metrics: dict, *, user_id: str | None = None
+    ) -> None:
         now = _now()
+        owner_clause = " AND user_id = ?" if user_id else ""
         async with self._conn() as conn:
             await conn.execute(
-                "UPDATE training_jobs SET metrics_json = ?, updated_at = ? WHERE id = ?",
-                (json.dumps(metrics), now, job_id),
+                f"UPDATE training_jobs SET metrics_json = ?, updated_at = ? WHERE id = ?{owner_clause}",  # nosec B608
+                (json.dumps(metrics), now, job_id, *([user_id] if user_id else [])),
             )
             await conn.commit()
 
@@ -696,29 +717,35 @@ class Database:
     async def _create_config_job(
         self, table: str, user_id: str, config: dict, job_id: str | None = None
     ) -> dict:
+        table = _config_job_table(table)
         jid = job_id or str(uuid.uuid4())
         now = _now()
         async with self._conn() as conn:
-            await conn.execute(
-                f"""INSERT INTO {table}
+            query = f"""INSERT INTO {table}
                    (id, user_id, status, config_json, created_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
+                   VALUES (?, ?, ?, ?, ?, ?)"""  # nosec B608
+            await conn.execute(
+                query,
                 (jid, user_id, "pending", json.dumps(config), now, now),
             )
             await conn.commit()
         return {"id": jid, "status": "pending", "config": config, "created_at": now}
 
     async def _get_config_job(self, table: str, job_id: str, user_id: str) -> dict | None:
+        table = _config_job_table(table)
+        query = f"SELECT * FROM {table} WHERE id = ? AND user_id = ?"  # nosec B608
         async with self._conn() as conn, conn.execute(
-            f"SELECT * FROM {table} WHERE id = ? AND user_id = ?",
+            query,
             (job_id, user_id),
         ) as cur:
             row = await cur.fetchone()
             return dict(row) if row else None
 
     async def _list_config_jobs(self, table: str, user_id: str) -> list[dict]:
+        table = _config_job_table(table)
+        query = f"SELECT * FROM {table} WHERE user_id = ? ORDER BY created_at DESC"  # nosec B608
         async with self._conn() as conn, conn.execute(
-            f"SELECT * FROM {table} WHERE user_id = ? ORDER BY created_at DESC",
+            query,
             (user_id,),
         ) as cur:
             return [dict(r) for r in await cur.fetchall()]
@@ -736,17 +763,19 @@ class Database:
         stage_results: dict | None = None,
         error_text: str | None = None,
     ) -> None:
+        table = _config_job_table(table)
         now = _now()
         async with self._conn() as conn:
-            await conn.execute(
-                f"""UPDATE {table} SET status = ?, updated_at = ?,
+            query = f"""UPDATE {table} SET status = ?, updated_at = ?,
                    output_dir = COALESCE(?, output_dir),
                    run_dir = COALESCE(?, run_dir),
                    model_dir = COALESCE(?, model_dir),
                    stages_json = COALESCE(?, stages_json),
                    stage_results_json = COALESCE(?, stage_results_json),
                    error_text = COALESCE(?, error_text)
-                   WHERE id = ?""",
+                   WHERE id = ?"""  # nosec B608
+            await conn.execute(
+                query,
                 (
                     status,
                     now,
@@ -884,11 +913,12 @@ class Database:
         total = 0
         async with self._conn() as conn:
             for table in _JOB_ERROR_TABLES:
-                cur = await conn.execute(
-                    f"""UPDATE {table}
+                query = f"""UPDATE {table}
                         SET status = 'failed', updated_at = ?,
                             error_text = COALESCE(error_text, ?)
-                        WHERE status IN ('pending', 'running')""",
+                        WHERE status IN ('pending', 'running')"""  # nosec B608
+                cur = await conn.execute(
+                    query,
                     (now, reason),
                 )
                 total += cur.rowcount

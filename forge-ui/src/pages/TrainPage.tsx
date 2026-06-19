@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api, subscribeSSE, SystemMetrics, TrainingJob, TrainingMetricPoint } from "@/lib/api";
+import { invalidateApiCache } from "@/lib/api/getCache";
+import { appendBoundedLog } from "@/lib/api/sse";
 import { initialDownloadProgress, ModelProgressState } from "@/lib/modelProgress";
 import { ensureTrainHubModel, isTrainModelCached } from "@/lib/trainModel";
 import { useTrainingModels } from "@/context/TrainingModelsContext";
@@ -108,6 +110,8 @@ export function TrainPage() {
         }
         await ensureTrainHubModel(pendingModel, setLoadProgress, pendingDownloadBytes);
         if (cancelled) return;
+        invalidateApiCache("/training/models");
+        invalidateApiCache("/inference/models");
         await refreshLocalModels();
         setModelId(pendingModel);
         setSearchParams({ model: pendingModel }, { replace: true });
@@ -188,6 +192,8 @@ export function TrainPage() {
     setLoadProgress(initialDownloadProgress(modelId));
     try {
       await ensureTrainHubModel(modelId, setLoadProgress);
+      invalidateApiCache("/training/models");
+      invalidateApiCache("/inference/models");
       await refreshLocalModels();
     } finally {
       setDownloadingModel(false);
@@ -244,8 +250,8 @@ export function TrainPage() {
       sseAbortRef.current = subscribeSSE(
         `/training/jobs/${res.job_id}/stream`,
         (event, data) => {
-          if (event === "log") setLogs((l) => [...l, data]);
-          if (event === "error") setLogs((l) => [...l, `ERROR: ${data}`]);
+          if (event === "log") setLogs((l) => appendBoundedLog(l, data));
+          if (event === "error") setLogs((l) => appendBoundedLog(l, `ERROR: ${data}`));
           if (event === "metric") {
             try {
               const point = JSON.parse(data) as TrainingMetricPoint & SystemMetrics;
@@ -260,10 +266,15 @@ export function TrainPage() {
           }
           if (event === "status") {
             setJobStatus(data);
+            if (data === "completed" || data === "failed" || data === "cancelled") {
+              invalidateApiCache("/training/models");
+              invalidateApiCache("/inference/models");
+              refreshLocalModels().catch(console.error);
+            }
             api.listTrainingJobs().then(setJobs);
           }
         },
-        (err) => setLogs((l) => [...l, `ERROR: ${err.message}`]),
+        (err) => setLogs((l) => appendBoundedLog(l, `ERROR: ${err.message}`)),
       );
       api.listTrainingJobs().then(setJobs);
     } catch (e) {

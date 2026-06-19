@@ -25,6 +25,7 @@ Or use the shell wrapper:
 
 | Job | What it runs | Skipped by `--fast` |
 |-----|--------------|---------------------|
+| **deps** | dependency lockfile digest verification | no |
 | **lint** | `ruff check`, `ruff format --check`, `pylint` (E/F only) | no |
 | **types** | `mypy seiso forge seiso_cli` | no |
 | **test** | smoke imports + `pytest -m "not slow"` | no |
@@ -115,6 +116,7 @@ Run `make ci-fast` on each row before merging significant changes:
 
 ```bash
 make lint
+make deps
 make types
 make test
 make security
