@@ -47,8 +47,9 @@ export function resolveInferenceBackend(
   hwProfile: HardwareProfile | null,
   override?: string,
 ): string {
-  if (!model) return "llamacpp";
-  const available = model.backends?.length ? model.backends : [model.default_backend || "llamacpp"];
+  if (!model) return "";
+  const available = model.backends?.length ? model.backends : model.default_backend ? [model.default_backend] : [];
+  if (available.length === 0) return "";
   if (available.length === 1) return available[0];
   if (override && override !== "auto" && available.includes(override)) return override;
 
@@ -202,6 +203,14 @@ export async function bootstrapChatSession(
       `Download finished but ${target.repo} was not found in local inventory. Try again or check Settings → Hugging Face.`,
     );
   }
+  if (selected && !backend) {
+    const fmt = selected.format?.toLowerCase();
+    const hint =
+      fmt === "gguf"
+        ? "GGUF chat requires llama.cpp. Install the llama.cpp runtime from Settings or run `pip install -e \".[llamacpp]\"`."
+        : "No installed local inference engine can load this model. Install MLX or PyTorch support.";
+    throw new Error(hint);
+  }
 
   let loadedBackend = backend;
   if (options.preload !== false && selectedId && selected && !options.providerActive) {
@@ -212,9 +221,6 @@ export async function bootstrapChatSession(
 
   return { models, selectedId, backend: loadedBackend, selected };
 }
-
-/** @deprecated Use bootstrapChatSession */
-export const bootstrapChatModels = bootstrapChatSession;
 
 /** Open /chat without Hub params — restores last model from localStorage. */
 export async function initializeChatSession(

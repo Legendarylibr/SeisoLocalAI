@@ -32,6 +32,10 @@ from seiso.security import SecurityError, sanitize_filename
 router = APIRouter(prefix="/models", tags=["models"])
 
 
+class DownloadStreamClosed(RuntimeError):
+    """Raised inside the download worker when the SSE client disconnects."""
+
+
 class ModelScanRequest(BaseModel):
     path: str
 
@@ -225,8 +229,9 @@ async def download_model_stream(
     stream_open = True
 
     def on_progress(payload: dict[str, Any]) -> None:
-        if stream_open:
-            loop.call_soon_threadsafe(queue.put_nowait, ("progress", payload))
+        if not stream_open:
+            raise DownloadStreamClosed("Download stream closed")
+        loop.call_soon_threadsafe(queue.put_nowait, ("progress", payload))
 
     async def run_download() -> None:
         try:
@@ -245,6 +250,8 @@ async def download_model_stream(
             )
             if stream_open:
                 await queue.put(("complete", result))
+        except DownloadStreamClosed:
+            return
         except Exception as exc:
             if stream_open:
                 msg = str(exc) if isinstance(exc, ValueError) else _format_hub_download_error(exc, repo_id=body.repo_id)
@@ -300,6 +307,8 @@ async def download_model_stream(
                     break
         finally:
             stream_open = False
+            if not download_task.done():
+                download_task.cancel()
 
     return EventSourceResponse(event_gen())
 

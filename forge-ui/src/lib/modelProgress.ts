@@ -91,6 +91,16 @@ export function progressFromDownloadEvent(data: Record<string, unknown>): ModelP
   const speed = typeof data.speed_bps === "number" ? data.speed_bps : 0;
   const repoId = typeof data.repo_id === "string" ? data.repo_id : null;
 
+  if (phase === "finalizing") {
+    return {
+      phase: "download",
+      label: typeof data.label === "string" ? data.label : "Finalizing local model inventory",
+      percent: typeof data.percent === "number" ? data.percent : 99,
+      etaSeconds: 3,
+      indeterminate: false,
+    };
+  }
+
   if (phase === "resolving" && total <= 0) {
     const label =
       typeof data.label === "string" ? data.label : "Resolving Hugging Face repo…";

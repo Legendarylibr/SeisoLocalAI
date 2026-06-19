@@ -291,16 +291,6 @@ export function IconAssistant({ size = defaults.size, className, strokeWidth = d
   );
 }
 
-export function IconAlert({ size = defaults.size, className, strokeWidth = defaults.strokeWidth }: IconProps) {
-  return (
-    <Svg size={size} className={className}>
-      <path d="M12 4.5L20.5 18.5H3.5L12 4.5Z" stroke="currentColor" strokeWidth={strokeWidth} strokeLinejoin="round" />
-      <path d="M12 10V13.5" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" />
-      <circle cx="12" cy="16" r="0.75" fill="currentColor" />
-    </Svg>
-  );
-}
-
 export function IconGlobe({ size = defaults.size, className, strokeWidth = defaults.strokeWidth }: IconProps) {
   return (
     <Svg size={size} className={className}>
@@ -318,17 +308,6 @@ export function IconHardDrive({ size = defaults.size, className, strokeWidth = d
       <path d="M4.5 11H19.5" stroke="currentColor" strokeWidth={strokeWidth} />
       <circle cx="8" cy="14.5" r="0.85" fill="currentColor" />
       <circle cx="11" cy="14.5" r="0.85" fill="currentColor" />
-    </Svg>
-  );
-}
-
-export function IconPlug({ size = defaults.size, className, strokeWidth = defaults.strokeWidth }: IconProps) {
-  return (
-    <Svg size={size} className={className}>
-      <path d="M9 4.5V8.5" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" />
-      <path d="M15 4.5V8.5" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" />
-      <path d="M7.5 8.5H16.5V11.5C16.5 14.5 14.5 16.5 12 16.5C9.5 16.5 7.5 14.5 7.5 11.5V8.5Z" stroke="currentColor" strokeWidth={strokeWidth} strokeLinejoin="round" />
-      <path d="M12 16.5V19.5" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" />
     </Svg>
   );
 }

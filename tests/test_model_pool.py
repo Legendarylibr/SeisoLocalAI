@@ -1,8 +1,11 @@
 """Tests for VRAM model pool."""
 
 import platform
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 
-from seiso.inference.model_pool import ModelPool, llama_load_kwargs
+from seiso.inference.model_pool import BackendKind, ModelPool, llama_load_kwargs
 
 
 def test_pool_singleton():
@@ -32,6 +35,36 @@ def test_cancel_and_unload_clears_active():
     pool = ModelPool.get()
     pool.cancel_and_unload()
     assert pool.active_key is None
+
+
+def test_switch_serializes_concurrent_loads_for_same_model(tmp_path):
+    pool = ModelPool()
+    model_path = tmp_path / "model.gguf"
+    model_path.write_bytes(b"gguf")
+    handle = object()
+    load_count = 0
+    count_lock = threading.Lock()
+    start = threading.Barrier(6)
+
+    def loader(path: str) -> object:
+        nonlocal load_count
+        assert path == str(model_path.absolute())
+        with count_lock:
+            load_count += 1
+        time.sleep(0.05)
+        return handle
+
+    def switch_once() -> object:
+        start.wait()
+        return pool.switch(str(model_path), BackendKind.LLAMA, loader)
+
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        futures = [executor.submit(switch_once) for _ in range(5)]
+        start.wait()
+        results = [future.result(timeout=2) for future in futures]
+
+    assert results == [handle] * 5
+    assert load_count == 1
 
 
 def test_llama_load_kwargs_are_tuned_and_overrideable(monkeypatch):

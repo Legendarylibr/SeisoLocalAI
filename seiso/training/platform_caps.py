@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import platform
 from functools import lru_cache
 from typing import Any
@@ -61,12 +62,13 @@ def training_capabilities() -> dict[str, Any]:
         pass
 
     mlx_ok = False
-    try:
-        import mlx.core  # noqa: F401
+    if os.environ.get("SEISO_SKIP_MLX_PROBE", "").strip().lower() not in {"1", "true", "yes"}:
+        try:
+            import mlx.core  # noqa: F401
 
-        mlx_ok = True
-    except ImportError:
-        pass
+            mlx_ok = True
+        except ImportError:
+            pass
 
     if has_cuda_gpu or has_rocm_gpu:
         train_platform = "cuda" if has_cuda_gpu else "rocm"

@@ -20,14 +20,6 @@ export const modelsApi = {
       local_only?: boolean;
     }>(`/models/catalog?${params}`);
   },
-  downloadModel: (repo_id: string, filename?: string, variant: "auto" | "safetensors" | "gguf" = "auto") =>
-    request<{ downloaded: string[]; repo_id: string; gguf_repo?: string; variant: string; model_id: string; cache_dir: string }>(
-      "/models/download",
-      {
-        method: "POST",
-        body: JSON.stringify({ repo_id, filename, variant: variant === "auto" ? "auto" : variant }),
-      },
-    ),
   streamDownloadModel: (
     repo_id: string,
     handlers: {

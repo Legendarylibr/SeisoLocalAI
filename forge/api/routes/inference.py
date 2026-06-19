@@ -87,8 +87,13 @@ async def inference_models(
         data_dir=settings.data_dir,
         hf_cache_dir=settings.hf_cache_dir,
     )
-    options = await list_inference_options(db, user_id, ollama_base_url=settings.ollama_base_url)
     profile = hardware_profile()
+    options = await list_inference_options(
+        db,
+        user_id,
+        ollama_base_url=settings.ollama_base_url,
+        profile=profile,
+    )
     return {
         "models": options,
         "total": len(options),
@@ -261,6 +266,20 @@ async def preload_model_stream(
             return
 
         status = pool.status()
+        yield {
+            "event": "progress",
+            "data": json.dumps(
+                {
+                    "phase": "ready",
+                    "label": f"{ctx['model_name']} is loaded into inference",
+                    "percent": 100,
+                    "model_id": body.model_id,
+                    "model_name": ctx["model_name"],
+                    "backend": ctx["backend"],
+                    "size_bytes": size_bytes,
+                }
+            ),
+        }
         yield {
             "event": "complete",
             "data": json.dumps(

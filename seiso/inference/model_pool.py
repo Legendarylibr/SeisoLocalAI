@@ -113,7 +113,7 @@ class ModelPool:
     """
 
     _instance: ModelPool | None = None
-    _lock = threading.Lock()
+    _lock = threading.RLock()
 
     def __init__(self) -> None:
         self._active: LoadedModel | None = None
@@ -129,7 +129,8 @@ class ModelPool:
 
     @property
     def active_key(self) -> str | None:
-        return self._active.key if self._active else None
+        with self._lock:
+            return self._active.key if self._active else None
 
     @staticmethod
     def normalize_path(model_path: str) -> str:
@@ -153,15 +154,17 @@ class ModelPool:
     def switch(self, model_path: str, backend: BackendKind, loader_fn, *, cache_key: str | None = None) -> Any:
         """Load model_path, unloading any previously active model first."""
         norm = self.normalize_path(model_path)
+        load_path = str(Path(model_path).expanduser().absolute())
         key = cache_key or f"{backend.value}:{norm}"
-        if self._active and self._active.key == key:
-            return self._active.handle
+        with self._lock:
+            if self._active and self._active.key == key:
+                return self._active.handle
 
-        self.unload_all()
-        logger.info("Loading model: %s (%s)", norm, backend.value)
-        handle = loader_fn(norm)
-        self._active = LoadedModel(key=key, backend=backend, handle=handle, meta={"path": norm})
-        return handle
+            self.unload_all()
+            logger.info("Loading model: %s (%s)", norm, backend.value)
+            handle = loader_fn(load_path)
+            self._active = LoadedModel(key=key, backend=backend, handle=handle, meta={"path": load_path})
+            return handle
 
     def get_llama(self, model_path: str, n_ctx: int = 4096) -> Any:
         def loader(path: str):
@@ -235,15 +238,16 @@ class ModelPool:
 
     def _free_memory(self) -> None:
         gc.collect()
-        try:
-            import mlx.core as mx
+        if os.environ.get("SEISO_SKIP_MLX_PROBE", "").strip().lower() not in {"1", "true", "yes"}:
+            try:
+                import mlx.core as mx
 
-            if hasattr(mx, "metal") and hasattr(mx.metal, "clear_cache"):
-                mx.metal.clear_cache()
-        except ImportError:
-            pass
-        except Exception:
-            pass
+                if hasattr(mx, "metal") and hasattr(mx.metal, "clear_cache"):
+                    mx.metal.clear_cache()
+            except ImportError:
+                pass
+            except Exception:
+                pass
         try:
             import torch
 
@@ -255,11 +259,13 @@ class ModelPool:
             pass
 
     def status(self) -> dict:
-        return {
-            "active_model": self._active.key if self._active else None,
-            "backend": self._active.backend.value if self._active else None,
-            "path": self._active.meta.get("path") if self._active else None,
-        }
+        with self._lock:
+            active = self._active
+            return {
+                "active_model": active.key if active else None,
+                "backend": active.backend.value if active else None,
+                "path": active.meta.get("path") if active else None,
+            }
 
 
 def get_model_pool() -> ModelPool:

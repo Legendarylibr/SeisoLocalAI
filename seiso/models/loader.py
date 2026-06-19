@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass
 from typing import Any
 
@@ -55,12 +56,13 @@ def detect_backend() -> Backend:
     except ImportError:
         pass
 
-    try:
-        import mlx.core  # noqa: F401
+    if os.environ.get("SEISO_SKIP_MLX_PROBE", "").strip().lower() not in {"1", "true", "yes"}:
+        try:
+            import mlx.core  # noqa: F401
 
-        return Backend.MLX
-    except ImportError:
-        pass
+            return Backend.MLX
+        except ImportError:
+            pass
 
     return Backend.CPU
 

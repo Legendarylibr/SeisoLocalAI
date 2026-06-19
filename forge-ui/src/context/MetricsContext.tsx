@@ -3,6 +3,8 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -20,6 +22,7 @@ const MetricsContext = createContext<MetricsContextValue | null>(null);
 export function MetricsProvider({ children }: { children: ReactNode }) {
   const [metrics, setMetrics] = useState<SystemMetrics | null>(null);
   const [watchers, setWatchers] = useState(0);
+  const pollingRef = useRef(false);
 
   const watch = useCallback(() => {
     setWatchers((count) => count + 1);
@@ -28,23 +31,36 @@ export function MetricsProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (watchers <= 0) return;
+    let cancelled = false;
 
-    const poll = () => {
+    const poll = async () => {
       if (document.hidden) return;
-      api.metrics().then(setMetrics).catch(() => {});
+      if (pollingRef.current) return;
+      pollingRef.current = true;
+      try {
+        const next = await api.metrics();
+        if (!cancelled) setMetrics(next);
+      } catch {
+        /* metrics are best-effort and local-only */
+      } finally {
+        pollingRef.current = false;
+      }
     };
 
-    poll();
+    void poll();
     const id = setInterval(poll, POLL_MS);
     document.addEventListener("visibilitychange", poll);
     return () => {
+      cancelled = true;
       clearInterval(id);
       document.removeEventListener("visibilitychange", poll);
     };
   }, [watchers]);
 
+  const value = useMemo(() => ({ metrics, watch }), [metrics, watch]);
+
   return (
-    <MetricsContext.Provider value={{ metrics, watch }}>
+    <MetricsContext.Provider value={value}>
       {children}
     </MetricsContext.Provider>
   );
@@ -56,10 +72,12 @@ export function useLiveMetrics(active = true): SystemMetrics | null {
     throw new Error("useLiveMetrics must be used within MetricsProvider");
   }
 
+  const { metrics, watch } = ctx;
+
   useEffect(() => {
     if (!active) return;
-    return ctx.watch();
-  }, [active, ctx]);
+    return watch();
+  }, [active, watch]);
 
-  return ctx.metrics;
+  return metrics;
 }

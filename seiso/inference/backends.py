@@ -28,7 +28,7 @@ def resolve_gguf_file(model_path: str) -> Path:
     """Pick a single GGUF file from a path or directory."""
     path = Path(model_path).expanduser()
     if path.is_file() and path.suffix.lower() == ".gguf":
-        return path.resolve()
+        return path.absolute()
     if path.is_dir():
         candidates = sorted(path.glob("*.gguf"))
         first_shards = [
@@ -37,10 +37,10 @@ def resolve_gguf_file(model_path: str) -> Path:
             if (match := _GGUF_SHARD_RE.match(p.name)) and match.group("index") == "00001"
         ]
         if first_shards:
-            return first_shards[0].resolve()
+            return first_shards[0].absolute()
         candidates = sorted(candidates, key=lambda p: p.stat().st_size, reverse=True)
         if candidates:
-            return candidates[0].resolve()
+            return candidates[0].absolute()
     raise ValueError(f"No GGUF file found at {model_path}")
 
 

@@ -537,8 +537,8 @@ def download_gguf(
     cached_target = cached_paths[0] if len(cached_paths) == 1 else cached_paths[0].parent
 
     return {
-        "path": str(cached_target.resolve()),
-        "paths": [str(path.resolve()) for path in cached_paths],
+        "path": str(cached_target),
+        "paths": [str(path) for path in cached_paths],
         "filename": filename,
         "filenames": filenames,
         "format": "gguf",
@@ -609,7 +609,7 @@ def link_inventory(inventory_dir: Path, inventory_name: str, target: Path) -> Pa
     inventory_dir.mkdir(parents=True, exist_ok=True)
     link = inventory_dir / inventory_name
     link.parent.mkdir(parents=True, exist_ok=True)
-    target = target.resolve()
+    target = target.expanduser().absolute()
     if link.is_symlink() or link.is_file():
         link.unlink()
     elif link.exists() and link.is_dir():

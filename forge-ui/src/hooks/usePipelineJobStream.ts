@@ -52,5 +52,5 @@ export function usePipelineJobStream() {
 
   useEffect(() => () => stopStream(), [stopStream]);
 
-  return { logs, result, activeJob, resetStream, watchJob, stopStream };
+  return { logs, result, activeJob, resetStream, watchJob };
 }

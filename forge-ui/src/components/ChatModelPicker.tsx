@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, CatalogModel, InferenceModelOption } from "@/lib/api";
+import { inventoryMatchesRepo } from "@/lib/hubDownload";
 import { formatBytes } from "@/lib/modelProgress";
 import { HubComboboxSearch } from "@/components/HubComboboxSearch";
 import { IconChevronDown } from "@/components/Icons";
@@ -30,16 +31,6 @@ export function ChatModelPicker({
 
   const selected = useMemo(() => models.find((m) => m.id === selection) ?? null, [models, selection]);
 
-  const downloadedRepos = useMemo(
-    () =>
-      new Set(
-        models
-          .map((m) => (m.source?.startsWith("hf:") ? m.source.slice(3) : null))
-          .filter((r): r is string => Boolean(r)),
-      ),
-    [models],
-  );
-
   const refreshCatalog = useCallback((q: string) => {
     setCatalogLoading(true);
     api
@@ -67,8 +58,8 @@ export function ChatModelPicker({
   }, [models, q]);
 
   const hubModels = useMemo(
-    () => catalog.filter((c) => !downloadedRepos.has(c.repo_id) && c.download_available !== false),
-    [catalog, downloadedRepos],
+    () => catalog.filter((c) => !models.some((m) => inventoryMatchesRepo(m, c.repo_id)) && c.download_available !== false),
+    [catalog, models],
   );
 
   const triggerLabel = switching
@@ -164,6 +155,7 @@ export function ChatModelPicker({
                           ? ` · ${m.params}`
                           : ""}
                       {m.hardware_fit_label ? ` · ${m.hardware_fit_label}` : ""}
+                      {m.download_mirror_verified === false && m.download_error ? " · mirror not pre-verified" : ""}
                     </span>
                   </button>
                 ))}

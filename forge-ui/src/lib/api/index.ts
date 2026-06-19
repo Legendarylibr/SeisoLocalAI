@@ -31,5 +31,4 @@ export const api = {
 };
 
 export { clearLegacyToken, streamChat, subscribeSSE };
-export { invalidateApiCache } from "./getCache";
 export type * from "./types";

@@ -3,6 +3,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
@@ -71,11 +72,9 @@ export function TrainingModelsProvider({ children }: { children: ReactNode }) {
       .finally(() => setLoading(false));
   }, [user, authLoading]);
 
-  return (
-    <TrainingModelsContext.Provider value={{ models, loading, refresh }}>
-      {children}
-    </TrainingModelsContext.Provider>
-  );
+  const value = useMemo(() => ({ models, loading, refresh }), [models, loading, refresh]);
+
+  return <TrainingModelsContext.Provider value={value}>{children}</TrainingModelsContext.Provider>;
 }
 
 export function useTrainingModels(): TrainingModelsState {

@@ -66,7 +66,6 @@ export function useStagePipelinePage<TJob extends { id: string }>({
     localModels,
     modelsReady: !modelsLoading,
     starting,
-    refreshJobs,
     runPipeline,
     logs,
     result,

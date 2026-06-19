@@ -154,6 +154,31 @@ async def test_perform_download_returns_cached_inventory_without_redownload(monk
     assert result["model_id"] == row["id"]
 
 
+def test_link_inventory_preserves_hf_snapshot_symlink(tmp_path):
+    blob = tmp_path / "hf_cache" / "models--org--Model-GGUF" / "blobs" / "abc"
+    blob.parent.mkdir(parents=True)
+    blob.write_bytes(b"gguf-bytes")
+    snapshot_file = (
+        tmp_path
+        / "hf_cache"
+        / "models--org--Model-GGUF"
+        / "snapshots"
+        / "rev"
+        / "model-q4.gguf"
+    )
+    snapshot_file.parent.mkdir(parents=True)
+    snapshot_file.symlink_to("../../blobs/abc")
+
+    inv = model_download.link_inventory(
+        tmp_path / "models" / "u1",
+        "org--Model/model-q4.gguf",
+        snapshot_file,
+    )
+
+    assert inv.is_symlink()
+    assert inv.readlink() == snapshot_file.absolute()
+
+
 @pytest.mark.asyncio
 async def test_find_inventory_for_catalog_repo_matches_metadata(monkeypatch, tmp_path):
     cached = tmp_path / "hf_cache" / "model-q4.gguf"

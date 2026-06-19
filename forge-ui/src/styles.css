@@ -2874,6 +2874,28 @@ th { color: var(--muted); font-weight: 500; font-size: 0.78rem; text-transform: 
   font-variant-numeric: tabular-nums;
 }
 
+.model-load-progress-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.model-load-progress-cancel {
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-secondary);
+  border-radius: 999px;
+  padding: 0.12rem 0.45rem;
+  font-size: 0.68rem;
+  cursor: pointer;
+}
+
+.model-load-progress-cancel:hover {
+  color: var(--text);
+  border-color: var(--accent-dim);
+}
+
 .model-load-progress-track {
   height: 6px;
   border-radius: 999px;

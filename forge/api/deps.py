@@ -78,3 +78,11 @@ def clear_dependency_caches() -> None:
     get_inference_orchestrator.cache_clear()
     get_recipe_orchestrator.cache_clear()
     get_knowledge_orchestrator.cache_clear()
+
+
+async def close_dependency_caches() -> None:
+    """Close async resources before resetting cached singletons."""
+    if get_db.cache_info().currsize:
+        db = get_db()
+        await db.close()
+    clear_dependency_caches()

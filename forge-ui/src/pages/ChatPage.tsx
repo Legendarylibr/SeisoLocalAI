@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api, ChatMessage, ChatThread, InferenceModelOption, streamChat } from "@/lib/api";
 import { usePlatformSettings } from "@/context/PlatformSettingsContext";
-import { bootstrapChatModels, CHAT_BACKEND_STORAGE_KEY, CHAT_MODEL_STORAGE_KEY, hasChatNavTarget, initializeChatSession, isChatModelReady, needsHubDownload, preloadWithProgress, resolveInferenceBackend } from "@/lib/chatModel";
+import { bootstrapChatSession, CHAT_BACKEND_STORAGE_KEY, CHAT_MODEL_STORAGE_KEY, hasChatNavTarget, initializeChatSession, isChatModelReady, needsHubDownload, preloadWithProgress, resolveInferenceBackend } from "@/lib/chatModel";
 import { useHardwareProfile } from "@/hooks/useHardware";
 import { writeStoredModel } from "@/lib/modelSelection";
 import { ModelProgressState, initialDownloadProgress, initialLoadProgress } from "@/lib/modelProgress";
@@ -68,12 +68,14 @@ export function ChatPage() {
   const [loadedModelId, setLoadedModelId] = useState<string | null>(null);
   const [loadedBackend, setLoadedBackend] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const scrollFrameRef = useRef<number | null>(null);
   const streamAbortRef = useRef<(() => void) | null>(null);
   const streamTextRef = useRef("");
   const streamFlushRef = useRef<number | null>(null);
   const streamThreadRef = useRef<string | null>(null);
   const userPickedBackendRef = useRef(false);
   const bootstrapGenRef = useRef(0);
+  const bootstrapAbortRef = useRef<AbortController | null>(null);
   const sessionInitRef = useRef(false);
 
   const messages = active ? messagesByThread[active] ?? [] : [];
@@ -187,6 +189,7 @@ export function ChatPage() {
   };
 
   const handleCatalogSelect = (repoId: string, downloadBytes?: number) => {
+    bootstrapAbortRef.current?.abort();
     streamAbortRef.current?.();
     streamAbortRef.current = null;
     if (streaming) setStreaming(false);
@@ -197,6 +200,16 @@ export function ChatPage() {
     }
     setSearchParams(params, { replace: true });
   };
+
+  const handleCancelModelLoad = useCallback(() => {
+    bootstrapAbortRef.current?.abort();
+    bootstrapAbortRef.current = null;
+    setSwitchingModel(false);
+    setLoadProgress(null);
+    if (pendingRepo) {
+      setSearchParams(selection ? { model: selection } : {}, { replace: true });
+    }
+  }, [pendingRepo, selection, setSearchParams]);
 
   const handleProviderChange = async (nextProvider: string) => {
     if (nextProvider === providerId) return;
@@ -253,6 +266,9 @@ export function ChatPage() {
     }
 
     const bootstrapGen = ++bootstrapGenRef.current;
+    bootstrapAbortRef.current?.abort();
+    const controller = new AbortController();
+    bootstrapAbortRef.current = controller;
     let cancelled = false;
 
     const applyResult = (result: {
@@ -288,6 +304,7 @@ export function ChatPage() {
           onProgress: setLoadProgress,
           initialModels,
           hwProfile,
+          signal: controller.signal,
         };
 
         if (pendingRepo) {
@@ -296,7 +313,7 @@ export function ChatPage() {
           } else {
             setLoadProgress(null);
           }
-          const result = await bootstrapChatModels(navTarget, commonOptions);
+          const result = await bootstrapChatSession(navTarget, commonOptions);
           if (cancelled) return;
           applyResult(result);
           sessionInitRef.current = true;
@@ -307,7 +324,7 @@ export function ChatPage() {
           }
         } else if (pendingModel) {
           setLoadProgress(null);
-          const result = await bootstrapChatModels({ modelId: pendingModel }, commonOptions);
+          const result = await bootstrapChatSession({ modelId: pendingModel }, commonOptions);
           if (cancelled) return;
           applyResult(result);
           sessionInitRef.current = true;
@@ -326,6 +343,9 @@ export function ChatPage() {
         setLoadedBackend(null);
         setError(e instanceof Error ? e.message : "Failed to load models");
       } finally {
+        if (bootstrapAbortRef.current === controller) {
+          bootstrapAbortRef.current = null;
+        }
         if (bootstrapGen === bootstrapGenRef.current) {
           setSwitchingModel(false);
           setLoadProgress(null);
@@ -336,6 +356,10 @@ export function ChatPage() {
     void bootstrap();
     return () => {
       cancelled = true;
+      controller.abort();
+      if (bootstrapAbortRef.current === controller) {
+        bootstrapAbortRef.current = null;
+      }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingModel, pendingRepo, pendingDownloadBytes]);
@@ -349,8 +373,20 @@ export function ChatPage() {
   }, [active, messagesByThread, loadMessages]);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: streaming ? "auto" : "smooth" });
+    if (scrollFrameRef.current !== null) {
+      window.cancelAnimationFrame(scrollFrameRef.current);
+    }
+    scrollFrameRef.current = window.requestAnimationFrame(() => {
+      scrollFrameRef.current = null;
+      bottomRef.current?.scrollIntoView({ behavior: streaming ? "auto" : "smooth" });
+    });
   }, [messages, active, streaming]);
+
+  useEffect(() => () => {
+    if (scrollFrameRef.current !== null) {
+      window.cancelAnimationFrame(scrollFrameRef.current);
+    }
+  }, []);
 
   const openThread = (t: ChatThread) => {
     setActive(t.id);
@@ -403,6 +439,14 @@ export function ChatPage() {
     }
     if (!providerId && waitingForModel) {
       setError("Wait for the model to finish loading.");
+      return;
+    }
+    if (!providerId && selection && !effectiveBackend) {
+      setError(
+        selected?.format === "gguf"
+          ? "GGUF chat requires llama.cpp. Install it with: pip install -e \".[llamacpp]\""
+          : "No installed local inference engine can load this model.",
+      );
       return;
     }
     if (!providerId && !modelReady && selection) {
@@ -524,7 +568,11 @@ export function ChatPage() {
   };
 
   const modelLabel = (m: InferenceModelOption) => {
-    const engine = m.backend_labels[m.default_backend] || m.default_backend;
+    const engine = m.default_backend
+      ? m.backend_labels[m.default_backend] || m.default_backend
+      : m.format === "gguf"
+        ? "missing llama.cpp"
+        : "missing local runtime";
     const fit = m.hardware_fit_label ? ` · ${m.hardware_fit_label}` : "";
     return `${m.name} · ${engine}${fit}`;
   };
@@ -723,7 +771,11 @@ export function ChatPage() {
                 )}
                 {selected && (
                   <span className="chat-model-status-engine muted-text">
-                    {selected.backend_labels?.[effectiveBackend] || BACKEND_LABELS[effectiveBackend] || effectiveBackend}
+                    {effectiveBackend
+                      ? selected.backend_labels?.[effectiveBackend] || BACKEND_LABELS[effectiveBackend] || effectiveBackend
+                      : selected.format === "gguf"
+                        ? "Missing llama.cpp runtime"
+                        : "Missing local inference runtime"}
                   </span>
                 )}
                 {modelReady && !effectiveLoadProgress && (
@@ -737,6 +789,7 @@ export function ChatPage() {
               <ModelLoadProgress
                 progress={effectiveLoadProgress}
                 modelName={selected?.name || pendingModelLabel}
+                onCancel={waitingForModel ? handleCancelModelLoad : undefined}
               />
             )}
           </div>

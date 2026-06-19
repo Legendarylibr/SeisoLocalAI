@@ -1,7 +1,7 @@
 import { invalidateApiCache } from "@/lib/api/getCache";
 import { api } from "@/lib/api";
 import { throwIfAborted } from "@/lib/abort";
-import { ModelProgressState, initialDownloadProgress, progressFromDownloadEvent } from "@/lib/modelProgress";
+import { ModelProgressState, formatBytes, initialDownloadProgress, progressFromDownloadEvent } from "@/lib/modelProgress";
 
 export type ModelProgressHandler = (progress: ModelProgressState | null) => void;
 
@@ -32,7 +32,14 @@ export function streamHubModelDownload(
     const { promise, abort } = api.streamDownloadModel(
       repo,
       {
-        onProgress: (data) => onProgress?.(progressFromDownloadEvent(data)),
+        onProgress: (data) => {
+          const progress = progressFromDownloadEvent(data);
+          const total = typeof data.total_bytes === "number" ? data.total_bytes : 0;
+          if (downloadBytes && total > downloadBytes * 1.25) {
+            progress.label = `Resolved actual download size: ${formatBytes(total)} · ${repo}`;
+          }
+          onProgress?.(progress);
+        },
         onComplete: (data) => {
           const modelId = String(data.model_id || "");
           if (!modelId) {
@@ -68,6 +75,20 @@ export function streamHubModelDownload(
     }
 
     promise
+      .then(async () => {
+        if (!settled) {
+          invalidateApiCache("/inference/models");
+          invalidateApiCache("/training/models");
+          invalidateApiCache("/models");
+          const recovered = findInventoryModelId((await api.listInferenceModels()).models, repo);
+          if (recovered) {
+            finishResolve(recovered);
+            return;
+          }
+          onProgress?.(null);
+          finishReject(new Error("Download stream ended before completion and the model was not found in inventory"));
+        }
+      })
       .catch((err) => {
         onProgress?.(null);
         if (settled) return;

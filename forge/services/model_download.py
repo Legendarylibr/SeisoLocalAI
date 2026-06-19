@@ -341,7 +341,18 @@ async def perform_model_download(
         revision=revision,
         variant=resolved_variant,
     )
-    async with _get_download_lock(key):
+    lock = _get_download_lock(key)
+    if lock.locked():
+        _emit_progress(
+            on_progress,
+            {
+                "phase": "resolving",
+                "label": f"Waiting for existing Hugging Face download of {repo_id}",
+                "repo_id": repo_id,
+                "percent": 0,
+            },
+        )
+    async with lock:
         existing = await find_inventory_for_catalog_repo(db, user_id, repo_id)
         cached = _cached_download_result_if_usable(
             existing,
@@ -349,6 +360,15 @@ async def perform_model_download(
             variant=resolved_variant,
         )
         if cached:
+            _emit_progress(
+                on_progress,
+                {
+                    "phase": "finalizing",
+                    "label": f"Using cached Hugging Face model for {repo_id}",
+                    "repo_id": repo_id,
+                    "percent": 100,
+                },
+            )
             return cached
 
         loop = asyncio.get_running_loop()
@@ -366,6 +386,15 @@ async def perform_model_download(
                 variant=variant,
                 on_progress=on_progress,
             ),
+        )
+        _emit_progress(
+            on_progress,
+            {
+                "phase": "finalizing",
+                "label": f"Registering {artifacts['name']} in local model inventory",
+                "repo_id": repo_id,
+                "percent": 99,
+            },
         )
         record = await db.upsert_model(
             user_id=user_id,

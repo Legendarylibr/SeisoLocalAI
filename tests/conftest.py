@@ -9,33 +9,26 @@ from pathlib import Path
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from forge.api.deps import clear_dependency_caches, get_db
+from forge.api.deps import clear_dependency_caches, close_dependency_caches, get_db
 from forge.main import create_app
 from forge.security.auth import create_access_token, hash_password
 from forge.security.token_revocation import clear_revocations_for_tests
 
 
 @pytest.fixture(autouse=True)
-def _reset_caches(monkeypatch, tmp_path):
+async def _reset_caches(monkeypatch, tmp_path):
     monkeypatch.setenv("SEISO_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("SEISO_SECRET_KEY", "test-secret-key-for-jwt-signing-32b")
     monkeypatch.setenv("SEISO_DB_ENCRYPTION_KEY", "01" * 32)
     monkeypatch.setenv("SEISO_DB_EPHEMERAL", "false")
+    monkeypatch.setenv("SEISO_SKIP_MLX_PROBE", "true")
     clear_revocations_for_tests()
     clear_dependency_caches()
     yield
-    clear_dependency_caches()
-
-
-@pytest.fixture(autouse=True)
-async def _close_db_after_test():
-    yield
     with contextlib.suppress(Exception):
-        db = get_db()
-        if db._conn_holder is not None:
-            await db.close()
-            # Let aiosqlite worker thread finish before pytest closes the event loop.
-            await asyncio.sleep(0.05)
+        await close_dependency_caches()
+        # Let aiosqlite worker threads publish their close result before pytest closes the loop.
+        await asyncio.sleep(0.2)
 
 
 @pytest.fixture

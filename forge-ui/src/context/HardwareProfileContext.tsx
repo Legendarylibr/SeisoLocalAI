@@ -3,6 +3,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
@@ -57,11 +58,9 @@ export function HardwareProfileProvider({ children }: { children: ReactNode }) {
     void refresh();
   }, [user, authLoading, refresh]);
 
-  return (
-    <HardwareProfileContext.Provider value={{ profile, loading, refresh }}>
-      {children}
-    </HardwareProfileContext.Provider>
-  );
+  const value = useMemo(() => ({ profile, loading, refresh }), [profile, loading, refresh]);
+
+  return <HardwareProfileContext.Provider value={value}>{children}</HardwareProfileContext.Provider>;
 }
 
 export function useHardwareProfileContext(): HardwareProfileState {

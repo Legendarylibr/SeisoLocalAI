@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 import { SystemMetrics, TrainingMetricPoint, api } from "@/lib/api";
 import { IconClose } from "@/components/Icons";
 
@@ -11,7 +11,7 @@ type Props = {
   status?: string | null;
 };
 
-function Sparkline({
+const Sparkline = memo(function Sparkline({
   values,
   color,
   height = 56,
@@ -41,9 +41,9 @@ function Sparkline({
       <polyline fill="none" stroke={color} strokeWidth="2" points={points} />
     </svg>
   );
-}
+});
 
-function StatCard({
+const StatCard = memo(function StatCard({
   label,
   value,
   sub,
@@ -66,9 +66,9 @@ function StatCard({
       {sub && <div className="metrics-stat-sub">{sub}</div>}
     </div>
   );
-}
+});
 
-function UtilBar({ label, pct, temp, color }: { label: string; pct: number | null; temp?: number | null; color: string }) {
+const UtilBar = memo(function UtilBar({ label, pct, temp, color }: { label: string; pct: number | null; temp?: number | null; color: string }) {
   const v = pct ?? 0;
   return (
     <div className="metrics-util-row">
@@ -82,7 +82,7 @@ function UtilBar({ label, pct, temp, color }: { label: string; pct: number | nul
       {temp != null && <span className="monitor-temp">{temp}°C</span>}
     </div>
   );
-}
+});
 
 export function TrainingMetricsDashboard({
   jobId,
@@ -117,20 +117,44 @@ export function TrainingMetricsDashboard({
     };
   }, [open, jobId]);
 
-  const mergedTraining = trainingPoints.length ? trainingPoints : hydratedTraining;
-  const mergedSystem = systemPoints.length ? systemPoints : hydratedSystem;
+  const mergedTraining = useMemo(
+    () => (trainingPoints.length ? trainingPoints : hydratedTraining),
+    [trainingPoints, hydratedTraining],
+  );
+  const mergedSystem = useMemo(
+    () => (systemPoints.length ? systemPoints : hydratedSystem),
+    [systemPoints, hydratedSystem],
+  );
 
   const training = useMemo(
     () => mergedTraining.filter((p) => p.type === "training" || p.type === "eval"),
     [mergedTraining],
   );
-  const losses = training.map((p) => p.loss ?? p.eval_loss).filter((v): v is number => v != null);
-  const evalLosses = training.map((p) => p.eval_loss).filter((v): v is number => v != null);
-  const rewards = training.map((p) => p.reward).filter((v): v is number => v != null);
-  const lrs = training.map((p) => p.learning_rate).filter((v): v is number => v != null);
+  const losses = useMemo(
+    () => training.map((p) => p.loss ?? p.eval_loss).filter((v): v is number => v != null),
+    [training],
+  );
+  const evalLosses = useMemo(
+    () => training.map((p) => p.eval_loss).filter((v): v is number => v != null),
+    [training],
+  );
+  const rewards = useMemo(
+    () => training.map((p) => p.reward).filter((v): v is number => v != null),
+    [training],
+  );
+  const lrs = useMemo(
+    () => training.map((p) => p.learning_rate).filter((v): v is number => v != null),
+    [training],
+  );
 
-  const latestTraining = [...training].reverse().find((p) => p.loss != null) ?? training.at(-1);
-  const latestEval = [...training].reverse().find((p) => p.eval_loss != null);
+  const latestTraining = useMemo(
+    () => [...training].reverse().find((p) => p.loss != null) ?? training.at(-1),
+    [training],
+  );
+  const latestEval = useMemo(
+    () => [...training].reverse().find((p) => p.eval_loss != null),
+    [training],
+  );
   const latestSystem = mergedSystem.at(-1);
 
   const steps = latestTraining?.step ?? training.at(-1)?.step ?? 0;

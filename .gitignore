@@ -29,3 +29,4 @@ htmlcov/
 checkpoints/
 exports/
 logs/
+.seiso-install.log

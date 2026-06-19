@@ -93,10 +93,8 @@ def _installed_backends() -> dict[str, bool]:
     }
 
 
-def _filter_installed_backends(backends: list[str]) -> list[str]:
-    installed = _installed_backends()
-    filtered = [b for b in backends if installed.get(b, False)]
-    return filtered or backends
+def _filter_installed_backends(backends: list[str], installed: dict[str, bool]) -> list[str]:
+    return [b for b in backends if installed.get(b, False)]
 
 
 async def _ollama_names(base_url: str = "") -> set[str]:
@@ -129,9 +127,11 @@ async def list_inference_options(
     *,
     ollama_base_url: str = "",
     hardware_aware: bool = True,
+    profile: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Build dropdown options for chat inference."""
-    profile = hardware_profile() if hardware_aware else None
+    profile = profile if profile is not None else hardware_profile() if hardware_aware else None
+    installed = _installed_backends()
     ollama_tags = await _ollama_names(ollama_base_url)
     options: list[dict[str, Any]] = []
 
@@ -142,7 +142,8 @@ async def list_inference_options(
                 model_path=row["path"],
                 model_format=row.get("format"),
                 ollama_names=ollama_tags,
-            )
+            ),
+            installed,
         )
         ollama_match = match_ollama_name(
             model_path=row["path"],
@@ -157,7 +158,7 @@ async def list_inference_options(
             "source_label": _source_label(row.get("source")),
             "format": row.get("format"),
             "path": row["path"],
-            "default_backend": _pick_default_backend(backends, profile),
+            "default_backend": _pick_default_backend(backends, profile) if backends else "",
             "backends": backends,
             "backend_labels": {b: BACKEND_LABELS.get(b, b) for b in backends},
             "ollama_model": ollama_match,
@@ -226,6 +227,11 @@ def resolve_chat_target(
     if option:
         if backend == "auto":
             backend = option["default_backend"]
+        if not backend:
+            fmt = (option.get("format") or "").lower()
+            if fmt == "gguf":
+                raise ValueError("GGUF chat requires llama.cpp. Install it with: pip install -e '.[llamacpp]'")
+            raise ValueError("No installed inference engine can load this model. Install MLX or PyTorch support.")
         if backend == BACKEND_OLLAMA:
             tag = option.get("ollama_model")
             if not tag:
@@ -239,6 +245,12 @@ def resolve_chat_target(
                 "inference_backend": BACKEND_OLLAMA,
                 "model_format": option.get("format"),
             }
+        allowed = set(option.get("backends") or [])
+        if allowed and backend not in allowed:
+            raise ValueError(
+                f"Backend {backend!r} is not available for {option['name']!r}. "
+                f"Available: {', '.join(sorted(allowed))}"
+            )
         return {
             "model_id": option["id"],
             "model_path": option["path"],

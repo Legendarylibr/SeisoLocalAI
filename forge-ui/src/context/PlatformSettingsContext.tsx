@@ -3,6 +3,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
@@ -72,11 +73,12 @@ export function PlatformSettingsProvider({ children }: { children: ReactNode }) 
     void refresh();
   }, [user, authLoading, refresh]);
 
-  return (
-    <PlatformSettingsContext.Provider value={{ settings, hfStatus, loading, refresh }}>
-      {children}
-    </PlatformSettingsContext.Provider>
+  const value = useMemo(
+    () => ({ settings, hfStatus, loading, refresh }),
+    [settings, hfStatus, loading, refresh],
   );
+
+  return <PlatformSettingsContext.Provider value={value}>{children}</PlatformSettingsContext.Provider>;
 }
 
 export function usePlatformSettings(): PlatformSettingsState {

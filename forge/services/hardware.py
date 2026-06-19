@@ -172,6 +172,8 @@ def _nvidia_smi_metrics() -> dict[int, dict[str, float]]:
 
 def _mlx_apple_gpu() -> list[dict[str, Any]]:
     """Best-effort Apple GPU label when MLX is available."""
+    if os.environ.get("SEISO_SKIP_MLX_PROBE", "").strip().lower() in {"1", "true", "yes"}:
+        return []
     try:
         import mlx.core as mx  # noqa: F401
 
