@@ -11,20 +11,44 @@ _CHUNK_SIZE = 1_200
 _TOOL_OPEN = TOOL_CALL_OPEN
 _TOOL_CLOSE = TOOL_CALL_CLOSE
 _PARTIAL_TOOL_PREFIXES = tuple(_TOOL_OPEN[:i] for i in range(1, len(_TOOL_OPEN) + 1))
+
+# Tags used across Qwen, DeepSeek-R1, and other reasoning-tuned models.
+_THINK_TAG_NAMES = (
+    "think",
+    "redacted_thinking",
+    "reasoning",
+    "thought",
+    "analysis",
+    "scratchpad",
+)
+
+
 def _paired_tag(name: str) -> tuple[str, str]:
     return f"<{name}>", f"</{name}>"
 
 
-_THINK_TAG_PAIRS = (
-    _paired_tag("think"),
-    _paired_tag("redacted_thinking"),
-)
-_THINK_OPEN, _THINK_CLOSE = _THINK_TAG_PAIRS[0]
+_THINK_TAG_PAIRS = tuple(_paired_tag(name) for name in _THINK_TAG_NAMES)
 _PARTIAL_THINK_OPEN_PREFIXES = tuple(
-    prefix for open_tag, _ in _THINK_TAG_PAIRS for prefix in (open_tag[:i] for i in range(1, len(open_tag) + 1))
+    prefix
+    for open_tag, _ in _THINK_TAG_PAIRS
+    for prefix in (open_tag[:i] for i in range(1, len(open_tag) + 1))
 )
-_THINKING_PROCESS_MARKER = "Thinking Process:"
-_PARTIAL_THINKING_PREFIXES = tuple(_THINKING_PROCESS_MARKER[:i] for i in range(1, len(_THINKING_PROCESS_MARKER) + 1))
+
+_REASONING_HEADERS = (
+    "thinking process:",
+    "reasoning:",
+    "analysis:",
+    "thought process:",
+    "chain of thought:",
+    "let me think",
+    "**thought:**",
+    "**reasoning:**",
+    "**analysis:**",
+)
+_PARTIAL_REASONING_PREFIXES = tuple(
+    header[:i] for header in _REASONING_HEADERS for i in range(1, len(header) + 1)
+)
+
 _FUNCTION_JSON_PATTERN = re.compile(
     r'\{\s*"name"\s*:\s*"[^"]+"\s*,\s*"arguments"\s*:\s*\{.*?\}\s*\}',
     re.DOTALL,
@@ -36,18 +60,52 @@ _THINK_TAG_PATTERN = re.compile(
     ),
     re.DOTALL | re.IGNORECASE,
 )
-_PIPE_THINK_PATTERN = re.compile(r"<\|think\|>.*?<\|/think\|>", re.DOTALL | re.IGNORECASE)
-_THINKING_PROCESS_PATTERN = re.compile(r"(?is)^\s*Thinking Process:\s*")
+_PIPE_TAG_PATTERN = re.compile(
+    r"<\|(think|reasoning|analysis|thought)\|>.*?<\|/\1\|>",
+    re.DOTALL | re.IGNORECASE,
+)
+_REASONING_HEADER_PATTERN = re.compile(
+    r"(?is)^\s*(?:\*\*)?(?:"
+    r"Thinking Process|Reasoning|Analysis|Thought process|Chain of thought|Let me think"
+    r")(?:\*\*)?\s*:"
+)
+_ANALYSIS_STEP_PATTERN = re.compile(
+    r"(?i)\b\d+\.\s*\*\*(Analyze the Input|Determine the Appropriate Response|Drafting Options|Thought)\*\*"
+)
 _FINAL_ANSWER_PATTERNS = (
     re.compile(
-        r'(?is)(?:Final Decision|Final Polish|Refining the Output|Let\'s go with)'
-        r'\s*:+\s*(?:\*\*)?\s*"([^"]+)"'
+        r"(?is)(?:Final Decision|Final Polish|Refining the Output|Let's go with|Final Answer|Answer|Response)"
+        r"\s*:+\s*(?:\*\*)?\s*\"([^\"]+)\""
     ),
     re.compile(
-        r'(?is)(?:Final Decision|Final Polish|Refining the Output|Let\'s go with)'
-        r'\s*:+\s*\*\*([^*]+)\*\*'
+        r"(?is)(?:Final Decision|Final Polish|Refining the Output|Let's go with|Final Answer|Answer|Response)"
+        r"\s*:+\s*\*\*([^*]+)\*\*"
+    ),
+    re.compile(
+        r"(?is)\*\*(?:Final Answer|Answer|Response):\*\*\s*(.+)\Z"
+    ),
+    re.compile(
+        r"(?is)\*\*(?:Final Answer|Answer|Response)\*\*\s*:+\s*(.+)\Z"
+    ),
+    re.compile(
+        r"(?is)(?:Final Decision|Final Polish|Final Answer|Answer|Response)"
+        r"\s*:+\s*([^\n\"]+?)\s*(?:Wait,|\Z)"
     ),
 )
+
+
+def _looks_like_reasoning_leak(content: str) -> bool:
+    if _REASONING_HEADER_PATTERN.match(content):
+        return True
+    if re.search(r"(?i)\*\*(?:reasoning|thought|analysis):\*\*", content):
+        return True
+    if _ANALYSIS_STEP_PATTERN.search(content):
+        return True
+    if _THINK_TAG_PATTERN.search(content):
+        return True
+    if _PIPE_TAG_PATTERN.search(content):
+        return True
+    return False
 
 
 def _extract_final_answer_from_reasoning(content: str) -> str | None:
@@ -56,14 +114,21 @@ def _extract_final_answer_from_reasoning(content: str) -> str | None:
         if not matches:
             continue
         candidate = str(matches[-1]).strip().strip('"').strip("'")
-        if candidate and len(candidate) < 500 and not candidate.lower().startswith("thinking process"):
+        if candidate and len(candidate) < 500 and not candidate.lower().startswith(
+            ("thinking process", "reasoning", "analysis")
+        ):
             return candidate
     quoted = re.findall(r'"([^"]{3,200})"', content)
     for candidate in reversed(quoted):
         text = candidate.strip()
-        if text and not re.search(r"(?i)(analyze|drafting|option|refining|determine)", text):
+        if text and not re.search(r"(?i)(analyze|drafting|option|refining|determine|reasoning)", text):
             return text
     return None
+
+
+def _starts_reasoning_leak(text: str) -> bool:
+    lower = text.lstrip().lower()
+    return any(lower.startswith(header) for header in _REASONING_HEADERS)
 
 
 def strip_reasoning_leakage(content: str) -> str:
@@ -72,19 +137,16 @@ def strip_reasoning_leakage(content: str) -> str:
         return content
 
     cleaned = _THINK_TAG_PATTERN.sub("", content)
-    cleaned = _PIPE_THINK_PATTERN.sub("", cleaned)
+    cleaned = _PIPE_TAG_PATTERN.sub("", cleaned)
 
-    if _THINKING_PROCESS_PATTERN.match(cleaned) or re.search(
-        r"(?i)\b\d+\.\s*\*\*(Analyze the Input|Determine the Appropriate Response|Drafting Options)\*\*",
-        cleaned,
-    ):
+    if _looks_like_reasoning_leak(cleaned):
         extracted = _extract_final_answer_from_reasoning(cleaned)
         if extracted:
             return extracted.strip()
-        cleaned = _THINKING_PROCESS_PATTERN.sub("", cleaned)
+        cleaned = _REASONING_HEADER_PATTERN.sub("", cleaned)
 
     cleaned = re.sub(
-        r"(?im)^\s*\d+\.\s+\*\*(Analyze|Determine|Drafting|Selecting|Refining|Final)[^*]*\*\*.*?"
+        r"(?im)^\s*\d+\.\s+\*\*(Analyze|Determine|Drafting|Selecting|Refining|Final|Thought|Reasoning)[^*]*\*\*.*?"
         r"(?=^\s*\d+\.\s+\*\*|\Z)",
         "",
         cleaned,
@@ -133,7 +195,6 @@ class StreamingOutputSanitizer:
         self._in_think = False
         self._reasoning_mode = False
         self._emitted = False
-        self._held_back = ""
 
     def feed(self, text: str) -> list[str]:
         if not text:
@@ -141,7 +202,6 @@ class StreamingOutputSanitizer:
         if not self._strip:
             return [text]
 
-        self._held_back += text
         if self._reasoning_mode:
             return []
 
@@ -173,7 +233,7 @@ class StreamingOutputSanitizer:
                 self._in_think = False
                 continue
 
-            if not self._emitted and self._buffer.lstrip().lower().startswith("thinking process:"):
+            if not self._emitted and _starts_reasoning_leak(self._buffer):
                 self._reasoning_mode = True
                 self._buffer = ""
                 break
@@ -234,14 +294,12 @@ class StreamingOutputSanitizer:
 
     @staticmethod
     def _split_pending_prefixes(text: str) -> tuple[str, str]:
-        for prefixes in (_PARTIAL_TOOL_PREFIXES, _PARTIAL_THINKING_PREFIXES, _PARTIAL_THINK_OPEN_PREFIXES):
+        for prefixes in (
+            _PARTIAL_TOOL_PREFIXES,
+            _PARTIAL_REASONING_PREFIXES,
+            _PARTIAL_THINK_OPEN_PREFIXES,
+        ):
             for prefix in reversed(prefixes):
-                if text.endswith(prefix):
-                    return text[: -len(prefix)], prefix
-        lower = text.lower()
-        for open_tag, _close_tag in _THINK_TAG_PAIRS:
-            for i in range(len(open_tag) - 1, 0, -1):
-                prefix = open_tag[:i]
-                if lower.endswith(prefix.lower()):
+                if text.lower().endswith(prefix.lower()):
                     return text[: -len(prefix)], prefix
         return text, ""

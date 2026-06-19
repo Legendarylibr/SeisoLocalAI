@@ -54,6 +54,30 @@ def test_strip_reasoning_leakage_removes_think_tags():
     assert strip_reasoning_leakage(raw) == "Hello  world"
 
 
+def test_strip_reasoning_leakage_removes_deepseek_think_block():
+    raw = (
+        "<" + "think" + ">" + "user said yo, respond casually" + "<" + "/" + "think" + ">"
+        "Yo! What's up?"
+    )
+    assert strip_reasoning_leakage(raw) == "Yo! What's up?"
+
+
+def test_strip_reasoning_leakage_extracts_answer_section():
+    raw = "**Reasoning:** step one, step two\n\n**Answer:** Paris is the capital of France."
+    assert strip_reasoning_leakage(raw) == "Paris is the capital of France."
+
+
+def test_strip_reasoning_leakage_strips_reasoning_header():
+    raw = "Reasoning: First I should greet the user. Final Answer: Hey there!"
+    assert strip_reasoning_leakage(raw) == "Hey there!"
+
+
+def test_streaming_output_sanitizer_holds_back_reasoning_header():
+    guard = StreamingOutputSanitizer(strip_tool_calls=True)
+    assert guard.feed("Reasoning: step one") == []
+    assert guard.finish() == []
+
+
 def test_streaming_output_sanitizer_holds_back_thinking_process():
     guard = StreamingOutputSanitizer(strip_tool_calls=True)
     assert guard.feed("Thinking Process: 1. **Analyze") == []

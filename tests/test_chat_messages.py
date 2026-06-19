@@ -10,7 +10,11 @@ from forge.services.chat_messages import (
     prepare_chat_context,
     trim_messages_to_context,
 )
-from forge.services.model_prompts import chat_system_prompt, model_switch_system_prompt
+from forge.services.model_prompts import (
+    chat_system_prompt,
+    is_reasoning_prone_model,
+    model_switch_system_prompt,
+)
 
 
 class FakeChatDb:
@@ -169,6 +173,26 @@ def test_chat_system_prompt_includes_thinking_process_hint_for_qwen():
     assert prompt
     assert "Thinking Process" in prompt
     assert "<tool_call>" in prompt
+    assert is_reasoning_prone_model("Qwen/Qwen3.5-4B")
+
+
+@pytest.mark.parametrize(
+    "model_key",
+    [
+        "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B",
+        "Qwen/QwQ-32B",
+        "openai/gpt-oss-20b",
+        "meta-llama/Llama-3.3-70B-Instruct",
+        "mistralai/Mistral-Small-3.2-24B-Instruct-2506",
+        "google/gemma-3-12b-it",
+        "microsoft/phi-4",
+    ],
+)
+def test_chat_system_prompt_includes_no_reasoning_hint_for_all_families(model_key: str):
+    prompt = chat_system_prompt(model_key, tools_enabled=False)
+    assert prompt
+    assert "chain-of-thought" in prompt.lower() or "thinking process" in prompt.lower()
+    assert "final" in prompt.lower()
 
 
 def test_model_switch_system_prompt_mentions_models():
