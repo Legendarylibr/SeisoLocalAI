@@ -1,4 +1,4 @@
-"""External LLM provider CRUD."""
+"""External LLM provider CRUD — local Ollama and vLLM only."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 
 from forge.api.deps import get_db
 from forge.db.store import Database
-from forge.providers.router import mask_config
+from forge.providers.router import LOCAL_PROVIDER_TYPES, mask_config
 from forge.security.audit import audit_event
 from forge.security.auth import get_current_user_id
 from forge.security.url_policy import validate_provider_base_url
@@ -18,10 +18,12 @@ from seiso.security import SecurityError
 
 router = APIRouter(prefix="/providers", tags=["providers"])
 
+_REMOVED_FRONTIER_TYPES = frozenset({"openai", "anthropic"})
+
 
 class ProviderCreate(BaseModel):
     name: str = Field(min_length=1, max_length=64)
-    provider_type: str = Field(description="openai | anthropic | ollama | vllm")
+    provider_type: str = Field(description="ollama | vllm")
     config: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -37,6 +39,7 @@ async def list_providers(
             "config": mask_config(json.loads(r["config_json"])),
         }
         for r in rows
+        if r["provider_type"].lower() not in _REMOVED_FRONTIER_TYPES
     ]
 
 
@@ -46,10 +49,11 @@ async def create_provider(
     user_id: Annotated[str, Depends(get_current_user_id)],
     db: Annotated[Database, Depends(get_db)],
 ) -> dict:
-    allowed = {"openai", "anthropic", "ollama", "vllm"}
     ptype = body.provider_type.lower()
-    if ptype not in allowed:
-        raise HTTPException(400, f"provider_type must be one of {allowed}")
+    if ptype in _REMOVED_FRONTIER_TYPES:
+        raise HTTPException(400, "Frontier cloud providers are not supported")
+    if ptype not in LOCAL_PROVIDER_TYPES:
+        raise HTTPException(400, f"provider_type must be one of {sorted(LOCAL_PROVIDER_TYPES)}")
     config = dict(body.config)
     if "base_url" in config and config["base_url"]:
         try:

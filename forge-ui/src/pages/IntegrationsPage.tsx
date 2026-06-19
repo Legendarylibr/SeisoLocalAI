@@ -8,7 +8,7 @@ type Provider = { id: string; name: string; provider_type: string; config: Recor
 export function IntegrationsPage() {
   const [providers, setProviders] = useState<Provider[]>([]);
   const [pName, setPName] = useState("");
-  const [pType, setPType] = useState("openai");
+  const [pType, setPType] = useState("ollama");
   const [pKey, setPKey] = useState("");
   const [pBaseUrl, setPBaseUrl] = useState("");
   const [pModel, setPModel] = useState("");
@@ -26,11 +26,7 @@ export function IntegrationsPage() {
       api_key: pKey,
       model:
         pModel ||
-        (pType === "anthropic"
-          ? "claude-3-5-sonnet-20241022"
-          : pType === "ollama"
-            ? "llama3.2"
-            : "gpt-4o-mini"),
+        (pType === "ollama" ? "llama3.2" : "default"),
     };
     if (pBaseUrl.trim()) config.base_url = pBaseUrl.trim();
     await api.createProvider({
@@ -49,7 +45,7 @@ export function IntegrationsPage() {
     <div>
       <PageHeader
         title="Integrations"
-        subtitle="External LLM providers — keys encrypted at rest."
+        subtitle="Local inference backends — Ollama and vLLM."
         group="Platform"
       />
 
@@ -59,20 +55,18 @@ export function IntegrationsPage() {
             <IconIntegrations size={18} />
           </span>
           <div className="card-head-text">
-            <h3>External providers</h3>
-            <p>API keys are encrypted in the local database and never returned in full after saving.</p>
+            <h3>Local backends</h3>
+            <p>Connect Ollama or a local vLLM server. Optional API keys are encrypted at rest.</p>
           </div>
         </div>
         <div className="grid" style={{ marginBottom: "1rem" }}>
           <div>
             <label>Name</label>
-            <input value={pName} onChange={(e) => setPName(e.target.value)} placeholder="My OpenAI" />
+            <input value={pName} onChange={(e) => setPName(e.target.value)} placeholder="My Ollama" />
           </div>
           <div>
             <label>Type</label>
             <select value={pType} onChange={(e) => setPType(e.target.value)}>
-              <option value="openai">OpenAI</option>
-              <option value="anthropic">Anthropic</option>
               <option value="ollama">Ollama</option>
               <option value="vllm">vLLM</option>
             </select>
@@ -84,7 +78,7 @@ export function IntegrationsPage() {
               value={pKey}
               onChange={(e) => setPKey(e.target.value)}
               autoComplete="off"
-              placeholder="sk-…"
+              placeholder="sk-… (optional for local servers)"
             />
           </div>
           <div>
@@ -92,7 +86,7 @@ export function IntegrationsPage() {
             <input
               value={pBaseUrl}
               onChange={(e) => setPBaseUrl(e.target.value)}
-              placeholder={pType === "ollama" ? "http://127.0.0.1:11434" : pType === "vllm" ? "http://127.0.0.1:8000/v1" : "https://api.openai.com/v1"}
+              placeholder={pType === "ollama" ? "http://127.0.0.1:11434" : "http://127.0.0.1:8000/v1"}
             />
           </div>
           <div>
@@ -100,7 +94,7 @@ export function IntegrationsPage() {
             <input
               value={pModel}
               onChange={(e) => setPModel(e.target.value)}
-              placeholder={pType === "anthropic" ? "claude-3-5-sonnet-20241022" : pType === "ollama" ? "llama3.2" : "gpt-4o-mini"}
+              placeholder={pType === "ollama" ? "llama3.2" : "default"}
             />
           </div>
         </div>
