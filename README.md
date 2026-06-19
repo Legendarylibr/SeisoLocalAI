@@ -1,5 +1,7 @@
 # Seiso Local AI
 
+Do not download models that require more VRAM than what you have. Still a WIP, added a blocker if it exceeds system ram, but not tested.
+
 [![CI](https://github.com/Legendarylibr/SeisoLocalAI/actions/workflows/ci.yml/badge.svg)](https://github.com/Legendarylibr/SeisoLocalAI/actions/workflows/ci.yml)
 
 **Seiso** is a free, local-first AI workspace for running, fine-tuning, quantizing, compressing, and deploying open models on your own hardware. No cloud required — download models, chat, train, export, and ship to Hugging Face Hub from a single interface.
