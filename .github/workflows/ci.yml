@@ -4,6 +4,8 @@ on:
   push:
     branches: [main, cleanup]
   pull_request:
+  schedule:
+    - cron: "17 6 * * 1"
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -33,6 +35,9 @@ jobs:
           pip install -e ".[forge,train,dev]"
           pip install -r requirements-dev.txt
 
+      - name: Verify dependency locks
+        run: python scripts/verify_dep_locks.py
+
       - name: Run fast quality gate
         run: make ci-fast
 
@@ -40,5 +45,24 @@ jobs:
         working-directory: forge-ui
         run: |
           npm ci
+          npm test
           npm run typecheck
           npm run build
+
+  slow-tests:
+    name: Slow integration tests
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[forge,train,dev]"
+          pip install -r requirements-dev.txt
+      - name: Run slow tests
+        run: python -m pytest tests/ -q -m slow

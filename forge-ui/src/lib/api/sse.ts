@@ -168,7 +168,7 @@ export function streamChat(
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: res.statusText }));
-      throw new Error(err.detail || "Chat request failed");
+      throw new Error(formatApiError(err.detail, res.statusText || "Chat request failed"));
     }
 
     const reader = res.body?.getReader();

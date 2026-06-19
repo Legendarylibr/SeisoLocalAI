@@ -22,7 +22,7 @@ def get_db() -> Database:
     return Database(
         settings.db_path,
         encryption_key=settings.db_encryption_key_bytes,
-        ephemeral=settings.db_ephemeral,
+        ephemeral=bool(settings.db_ephemeral),
     )
 
 

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api, ExportJob, HubPublishFields, PublishableModel, RLQuantJob, subscribeSSE } from "@/lib/api";
+import { invalidateApiCache } from "@/lib/api/getCache";
 import { appendBoundedLog } from "@/lib/api/sse";
 import { StudioPageShell } from "@/components/StudioPageShell";
 
@@ -8,7 +9,11 @@ function emptyHub(): HubPublishFields {
 }
 
 async function saveBlobResponse(res: Response, fallbackName: string) {
-  if (!res.ok) throw new Error("Download failed");
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    const detail = Array.isArray(err.detail) ? err.detail.map((d: unknown) => JSON.stringify(d)).join("; ") : err.detail;
+    throw new Error(detail || "Download failed");
+  }
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -23,6 +28,7 @@ async function saveBlobResponse(res: Response, fallbackName: string) {
 export function ExportPage() {
   const [checkpoint, setCheckpoint] = useState("");
   const [formats, setFormats] = useState(["merged", "gguf"]);
+  const [ggufQuants, setGgufQuants] = useState<string[]>(["q4_k_m"]);
   const [hub, setHub] = useState<HubPublishFields>(emptyHub);
   const [pushOnExport, setPushOnExport] = useState(false);
   const [rlQuantJobId, setRlQuantJobId] = useState("");
@@ -49,6 +55,7 @@ export function ExportPage() {
 
   const completedRlJobs = rlJobs.filter((j) => j.status === "completed" && j.gguf_quants?.length);
   const completedExports = exportJobs.filter((j) => j.status === "completed");
+  const GGUF_QUANT_OPTIONS = ["q2_k", "q3_k_m", "q4_k_m", "q5_k_m", "q6_k", "q8_0", "f16"];
 
   const hubFields = (): HubPublishFields | undefined => {
     if (!pushOnExport && !selectedModelId && !selectedExportJobId) return undefined;
@@ -71,11 +78,17 @@ export function ExportPage() {
         pushOnExport ? hubFields() : undefined,
         rlQuantJobId || undefined,
         profile || undefined,
+        rlQuantJobId ? undefined : ggufQuants,
       );
       setLastExportJobId(res.job_id);
       streamAbortRef.current?.();
       streamAbortRef.current = subscribeSSE(`/export/jobs/${res.job_id}/stream`, (event, data) => {
         if (event === "log" || event === "result") setLogs((l) => appendBoundedLog(l, data));
+        if (event === "error") setLogs((l) => appendBoundedLog(l, `ERROR: ${data}`));
+        if (event === "result") {
+          invalidateApiCache("/inference/models");
+          invalidateApiCache("/training/models");
+        }
       });
       setTimeout(() => api.listPublishableOutputs().then(setPublishable).catch(console.error), 2000);
       setTimeout(() => api.listExportJobs().then(setExportJobs).catch(console.error), 2000);
@@ -99,6 +112,7 @@ export function ExportPage() {
         hub: fields,
         formats,
         profile: profile || undefined,
+        gguf_quantizations: rlQuantJobId ? undefined : ggufQuants,
       });
       const lines = [
         res.ok ? `Precheck passed for ${res.repo_id}` : `Precheck failed for ${res.repo_id}`,
@@ -164,6 +178,10 @@ export function ExportPage() {
     setFormats((prev) => (prev.includes(f) ? prev.filter((x) => x !== f) : [...prev, f]));
   };
 
+  const toggleQuant = (quant: string) => {
+    setGgufQuants((prev) => (prev.includes(quant) ? prev.filter((q) => q !== quant) : [...prev, quant]));
+  };
+
   const updateHub = (key: keyof HubPublishFields, value: string | boolean) => {
     setHub((h) => ({ ...h, [key]: value }));
   };
@@ -208,6 +226,23 @@ export function ExportPage() {
             </option>
           ))}
         </select>
+        {formats.includes("gguf") && !rlQuantJobId && (
+          <>
+            <label>GGUF quantizations</label>
+            <div style={{ display: "flex", gap: "0.5rem", marginBottom: "0.75rem", flexWrap: "wrap" }}>
+              {GGUF_QUANT_OPTIONS.map((q) => (
+                <button
+                  key={q}
+                  type="button"
+                  className={`btn ${ggufQuants.includes(q) ? "btn-primary" : ""}`}
+                  onClick={() => toggleQuant(q)}
+                >
+                  {q}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
         <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginTop: "0.75rem" }}>
           <input type="checkbox" checked={pushOnExport} onChange={(e) => setPushOnExport(e.target.checked)} />
           Push to Hugging Face when export completes

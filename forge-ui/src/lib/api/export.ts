@@ -25,6 +25,7 @@ export const exportApi = {
     hub?: HubPublishFields,
     rlQuantJobId?: string,
     profile?: string,
+    ggufQuantizations?: string[],
   ) =>
     request<{ job_id: string }>("/export/jobs", {
       method: "POST",
@@ -32,6 +33,7 @@ export const exportApi = {
         checkpoint,
         formats,
         profile: profile || null,
+        gguf_quantizations: ggufQuantizations?.length ? ggufQuantizations : null,
         hub: hub || null,
         rl_quant_job_id: rlQuantJobId || null,
       }),

@@ -29,6 +29,7 @@ from forge.api.routes import (
 )
 from forge.api.routes import settings as settings_routes
 from forge.config import get_settings
+from forge.db.store import DatabaseCryptoError
 from seiso.models.hf_env import configure_hf_hub_cache
 
 
@@ -67,6 +68,10 @@ def create_app() -> FastAPI:
         allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
         allow_headers=["Authorization", "Content-Type", "X-CSRF-Token"],
     )
+
+    @app.exception_handler(DatabaseCryptoError)
+    async def database_crypto_error(_request: Request, _exc: DatabaseCryptoError):
+        return JSONResponse({"detail": "Encrypted local data could not be read"}, status_code=500)
 
     @app.middleware("http")
     async def security_headers(request: Request, call_next):

@@ -87,7 +87,7 @@ class SeisoTrainer:
         SeisoModel.for_training(model)
 
         ds_fmt = cfg.dataset_format
-        sandbox = resolve_data_dir()
+        sandbox = cfg.sandbox_root or resolve_data_dir()
         raw_ds = load_training_dataset(cfg.dataset, sandbox_root=sandbox)
         if cfg.eval_split_ratio > 0 and len(raw_ds) > 10:
             split = raw_ds.train_test_split(test_size=cfg.eval_split_ratio, seed=cfg.seed)
@@ -323,9 +323,7 @@ class SeisoTrainer:
 
         cfg = self.config
         apply_determinism(cfg.seed, deterministic=cfg.deterministic)
-        from seiso.security import resolve_data_dir
-
-        raw = load_training_dataset(cfg.dataset, sandbox_root=resolve_data_dir())
+        raw = load_training_dataset(cfg.dataset, sandbox_root=cfg.sandbox_root or resolve_data_dir())
         examples = []
         for row in raw:
             anchor = row.get("anchor") or row.get("query") or row.get("text", "")

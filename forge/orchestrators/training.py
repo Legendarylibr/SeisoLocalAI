@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
-import tempfile
 import time
 from pathlib import Path
 from typing import Any
@@ -129,15 +128,16 @@ class TrainingOrchestrator(Orchestrator):
 
     async def _run_distributed(self, job_id: str, config: TrainConfig, nproc: int) -> Path:
         config.multi_gpu = True
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
-            import yaml
+        import yaml
 
-            yaml.dump(config.model_dump(mode="json"), f)
-            cfg_path = f.name
+        config.output_dir.mkdir(parents=True, exist_ok=True)
+        cfg_path = config.output_dir / f"{job_id}.worker.yaml"
+        cfg_path.write_text(yaml.safe_dump(config.model_dump(mode="json")), encoding="utf-8")
+        cfg_path.chmod(0o600)
 
         self._emit_log(job_id, f"Launching torchrun --nproc_per_node={nproc}")
 
-        cmd = launch_worker_command(cfg_path, nproc)
+        cmd = launch_worker_command(str(cfg_path), nproc)
         env = {**__import__("os").environ, "SEISO_EMIT_METRICS_STDOUT": "1"}
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -163,7 +163,7 @@ class TrainingOrchestrator(Orchestrator):
                 self._emit_log(job_id, text)
 
         code = await proc.wait()
-        Path(cfg_path).unlink(missing_ok=True)
+        cfg_path.unlink(missing_ok=True)
         if code != 0:
             raise RuntimeError(f"Distributed training exited with code {code}")
 

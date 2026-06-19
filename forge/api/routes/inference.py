@@ -157,7 +157,10 @@ async def cancel_inference(
     orchestrator: Annotated[InferenceOrchestrator, Depends(get_inference_orchestrator)],
 ) -> dict:
     """Abort in-flight generation and unload the active local model from VRAM."""
-    return await orchestrator._runner.cancel_and_unload()
+    try:
+        return await orchestrator.cancel_and_unload_for_user(user_id)
+    except PermissionError as exc:
+        raise HTTPException(403, str(exc)) from exc
 
 
 @router.post("/cancel-generation")
@@ -166,7 +169,10 @@ async def cancel_generation(
     orchestrator: Annotated[InferenceOrchestrator, Depends(get_inference_orchestrator)],
 ) -> dict:
     """Abort in-flight generation but keep the active local model warmed."""
-    return await orchestrator._runner.cancel_generation()
+    try:
+        return await orchestrator.cancel_generation_for_user(user_id)
+    except PermissionError as exc:
+        raise HTTPException(403, str(exc)) from exc
 
 
 @router.post("/preload")

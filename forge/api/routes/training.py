@@ -125,7 +125,11 @@ async def start_training(
     await db.create_training_job(user_id, training_config, body.project_id, job_id=job_id)
     orchestrator.create_job(job_id=job_id, user_id=user_id)
     payload = {
-        "config": {**training_config, "extra": {**training_config.get("extra", {}), "user_id": user_id}},
+        "config": {
+            **training_config,
+            "sandbox_root": str(settings.data_dir / "uploads" / user_id),
+            "extra": {**training_config.get("extra", {}), "user_id": user_id},
+        },
         "output_dir": str(settings.checkpoints_dir / user_id / job_id),
         "multi_gpu": body.multi_gpu,
         "user_id": user_id,
@@ -136,7 +140,7 @@ async def start_training(
         points: list[dict[str, Any]],
         summary: dict[str, Any],
     ) -> None:
-        await db.update_training_metrics(jid, _serialize_metrics_payload(points, summary))
+        await db.update_training_metrics(jid, _serialize_metrics_payload(points, summary), user_id=user_id)
 
     orchestrator.set_metrics_persister(job_id, persist_metrics)
 
@@ -154,6 +158,7 @@ async def start_training(
                     job.status.value,
                     checkpoint_path=job.result.get("checkpoint_path"),
                     metrics=metrics_payload,
+                    user_id=user_id,
                 )
                 if job.status.value == "completed" and job.result.get("checkpoint_path"):
                     from forge.services.model_registry import (
@@ -215,6 +220,7 @@ async def start_training(
                 job_id,
                 "failed",
                 error_text=job_failure_message(orchestrator, job_id, exc),
+                user_id=user_id,
             )
 
     spawn_background(_run())

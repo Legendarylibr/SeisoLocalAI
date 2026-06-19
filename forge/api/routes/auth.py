@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
 
-from forge.api.deps import get_db
-from forge.config import ForgeSettings, get_settings
+from forge.api.deps import clear_dependency_caches, get_db
+from forge.config import ForgeSettings, StorageMode, get_settings
 from forge.db.store import Database
 from forge.security.audit import audit_event
 from forge.security.auth import (
@@ -31,6 +31,7 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 class RegisterRequest(BaseModel):
     password: str = Field(min_length=8, max_length=128)
+    storage_mode: str | None = Field(default=None, pattern="^(persistent|ephemeral)$")
 
 
 class LoginRequest(BaseModel):
@@ -45,21 +46,34 @@ class AuthResponse(BaseModel):
 
 class OnboardingStatus(BaseModel):
     needs_onboarding: bool
+    storage_mode: str
+    storage_mode_configured: bool
 
 
 @router.get("/status", response_model=OnboardingStatus)
 async def onboarding_status(db: Annotated[Database, Depends(get_db)]) -> OnboardingStatus:
     count = await db.user_count()
-    return OnboardingStatus(needs_onboarding=count == 0)
+    settings = get_settings()
+    return OnboardingStatus(
+        needs_onboarding=count == 0,
+        storage_mode=settings.storage_mode,
+        storage_mode_configured=settings.storage_mode_configured,
+    )
 
 
 @router.post("/register", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
 async def register(
     body: RegisterRequest,
     response: Response,
-    db: Annotated[Database, Depends(get_db)],
     settings: Annotated[ForgeSettings, Depends(get_settings)],
 ) -> AuthResponse:
+    if not settings.storage_mode_configured:
+        if not body.storage_mode:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Choose persistent or ephemeral storage")
+        settings.persist_storage_mode(cast(StorageMode, body.storage_mode))
+        clear_dependency_caches()
+    db = get_db()
+    settings = get_settings()
     try:
         user = await db.create_first_user(hash_password(body.password), DEFAULT_DISPLAY_NAME)
     except ValueError as exc:

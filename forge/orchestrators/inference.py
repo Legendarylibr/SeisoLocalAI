@@ -33,6 +33,7 @@ class InferenceOrchestrator(Orchestrator):
         self._runner = LocalInferenceRunner()
         self._active_ollama_model: str | None = None
         self._active_ollama_base_url = ""
+        self._active_generation_user_id: str | None = None
 
     @property
     def active_ollama_model(self) -> str | None:
@@ -40,6 +41,19 @@ class InferenceOrchestrator(Orchestrator):
 
     async def release_ollama_model(self) -> None:
         await self._release_ollama_model()
+
+    def _generation_owned_by_other(self, user_id: str | None) -> bool:
+        return bool(self._active_generation_user_id and self._active_generation_user_id != user_id)
+
+    async def cancel_and_unload_for_user(self, user_id: str | None) -> dict[str, Any]:
+        if self._generation_owned_by_other(user_id):
+            raise PermissionError("Another user has active inference")
+        return await self._runner.cancel_and_unload()
+
+    async def cancel_generation_for_user(self, user_id: str | None) -> dict[str, Any]:
+        if self._generation_owned_by_other(user_id):
+            raise PermissionError("Another user has active inference")
+        return await self._runner.cancel_generation()
 
     async def prepare_ollama_model(self, model: str, base_url: str = "") -> None:
         await self._runner.cancel_and_unload()
@@ -79,32 +93,37 @@ class InferenceOrchestrator(Orchestrator):
         def on_log(msg: str) -> None:
             self._emit_log(job_id, msg)
 
-        if provider:
-            reply = await self._provider_chat(provider, payload, messages, user_id=user_id)
-            backend = f"provider:{provider.get('provider_type', 'unknown')}"
-        elif use_tools:
-            if not user_id:
-                raise PermissionError("user_id required for tool execution")
-            if not settings.allow_tools:
-                raise PermissionError("Tools are disabled on this server")
-            if allow_code_exec and not settings.allow_code_exec:
-                raise PermissionError("Code execution is disabled on this server")
-            registry = build_default_registry(
-                str(self.sandbox_root),
-                allow_code_exec=allow_code_exec and settings.allow_code_exec,
-                user_id=user_id,
-            )
-            reply, _ = await self._tool_loop(payload, messages, registry, on_log, user_id=user_id)
-            backend = "local+tools"
-        else:
-            active = self._active_backend(payload)
-            self._emit_log(job_id, f"Inference backend: {active}")
-            if active == BACKEND_OLLAMA:
-                reply = await self._ollama_chat(payload, messages)
-                backend = BACKEND_OLLAMA
+        self._active_generation_user_id = str(user_id) if user_id else None
+        try:
+            if provider:
+                reply = await self._provider_chat(provider, payload, messages, user_id=user_id)
+                backend = f"provider:{provider.get('provider_type', 'unknown')}"
+            elif use_tools:
+                if not user_id:
+                    raise PermissionError("user_id required for tool execution")
+                if not settings.allow_tools:
+                    raise PermissionError("Tools are disabled on this server")
+                if allow_code_exec and not settings.allow_code_exec:
+                    raise PermissionError("Code execution is disabled on this server")
+                registry = build_default_registry(
+                    str(self.sandbox_root),
+                    allow_code_exec=allow_code_exec and settings.allow_code_exec,
+                    user_id=user_id,
+                )
+                reply, _ = await self._tool_loop(payload, messages, registry, on_log, user_id=user_id)
+                backend = "local+tools"
             else:
-                reply = await self._local_chat(payload)
-                backend = payload.get("inference_backend") or active
+                active = self._active_backend(payload)
+                self._emit_log(job_id, f"Inference backend: {active}")
+                if active == BACKEND_OLLAMA:
+                    reply = await self._ollama_chat(payload, messages)
+                    backend = BACKEND_OLLAMA
+                else:
+                    reply = await self._local_chat(payload)
+                    backend = payload.get("inference_backend") or active
+        finally:
+            if self._active_generation_user_id == (str(user_id) if user_id else None):
+                self._active_generation_user_id = None
 
         reply = sanitize_llm_output(reply)
 
@@ -135,6 +154,7 @@ class InferenceOrchestrator(Orchestrator):
         settings = get_settings()
         use_defense = defense_enabled(settings, request_flag=payload.get("defense"))
         messages = list(payload.get("messages", []))
+        user_id = payload.get("user_id")
 
         if use_defense:
             messages, _ = await scan_messages(
@@ -145,13 +165,18 @@ class InferenceOrchestrator(Orchestrator):
             )
             payload = {**payload, "messages": messages}
 
-        if self._active_backend(payload) == BACKEND_OLLAMA:
-            async for token in self._ollama_stream(payload):
+        self._active_generation_user_id = str(user_id) if user_id else None
+        try:
+            if self._active_backend(payload) == BACKEND_OLLAMA:
+                async for token in self._ollama_stream(payload):
+                    yield token
+                return
+            await self.release_ollama_model()
+            async for token in self._runner.stream(payload):
                 yield token
-            return
-        await self.release_ollama_model()
-        async for token in self._runner.stream(payload):
-            yield token
+        finally:
+            if self._active_generation_user_id == (str(user_id) if user_id else None):
+                self._active_generation_user_id = None
 
     def _active_backend(self, payload: dict[str, Any]) -> str:
         explicit = (payload.get("inference_backend") or "").lower()

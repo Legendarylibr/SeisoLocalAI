@@ -4,14 +4,18 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field, PrivateAttr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from forge.db.crypto import generate_encryption_key, resolve_encryption_key
 from seiso.security import generate_secret_key, resolve_data_dir
+
+StorageMode = Literal["persistent", "ephemeral"]
 
 
 class ForgeSettings(BaseSettings):
@@ -40,7 +44,7 @@ class ForgeSettings(BaseSettings):
     allow_code_exec: bool = False
     inference_api_key: str = ""
     ollama_base_url: str = "http://127.0.0.1:11434"
-    db_ephemeral: bool = True
+    db_ephemeral: bool | None = None
     db_encryption_key: str = ""
     autodefense_enabled: bool = False
     autodefense_url: str = "http://127.0.0.1:8000"
@@ -54,9 +58,11 @@ class ForgeSettings(BaseSettings):
         return Path(str(v)).expanduser()
 
     _session_db_key: bytes | None = PrivateAttr(default=None)
+    _storage_mode_configured: bool = PrivateAttr(default=False)
 
     def model_post_init(self, __context: object) -> None:
         self.data_dir = resolve_data_dir(self.data_dir)
+        self._resolve_storage_mode()
         if not self.secret_key:
             key_file = self.data_dir / ".secret_key"
             if key_file.exists():
@@ -67,11 +73,6 @@ class ForgeSettings(BaseSettings):
                 key_file.chmod(0o600)
 
         self._session_db_key = self._resolve_db_encryption_key()
-
-        if self.db_ephemeral:
-            legacy_db = self.data_dir / "forge.db"
-            if legacy_db.exists():
-                legacy_db.unlink()
 
         if not self.allow_remote:
             self.host = "127.0.0.1"
@@ -92,6 +93,44 @@ class ForgeSettings(BaseSettings):
 
         configure_revocation_store(self.data_dir)
         validate_security_settings(self)
+
+    def _resolve_storage_mode(self) -> None:
+        marker = self.data_dir / ".storage_mode"
+        env_configured = "SEISO_DB_EPHEMERAL" in os.environ or "SEISO_DB_STORAGE_MODE" in os.environ
+        if env_configured:
+            raw_mode = os.environ.get("SEISO_DB_STORAGE_MODE", "").strip().lower()
+            if raw_mode:
+                if raw_mode not in {"persistent", "ephemeral"}:
+                    raise ValueError("SEISO_DB_STORAGE_MODE must be 'persistent' or 'ephemeral'")
+                self.db_ephemeral = raw_mode == "ephemeral"
+            elif self.db_ephemeral is None:
+                self.db_ephemeral = False
+            self._storage_mode_configured = True
+            return
+        if marker.exists():
+            raw = marker.read_text(encoding="utf-8").strip().lower()
+            if raw not in {"persistent", "ephemeral"}:
+                raise ValueError(f"Invalid storage mode marker: {marker}")
+            self.db_ephemeral = raw == "ephemeral"
+            self._storage_mode_configured = True
+            return
+        # Before first onboarding, use an in-memory DB only to answer auth/status.
+        self.db_ephemeral = True
+        self._storage_mode_configured = False
+
+    @property
+    def storage_mode(self) -> StorageMode:
+        return "ephemeral" if self.db_ephemeral else "persistent"
+
+    @property
+    def storage_mode_configured(self) -> bool:
+        return self._storage_mode_configured
+
+    def persist_storage_mode(self, mode: StorageMode) -> None:
+        marker = self.data_dir / ".storage_mode"
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text(f"{mode}\n", encoding="utf-8")
+        marker.chmod(0o600)
 
     def _resolve_db_encryption_key(self) -> bytes:
         if self.db_encryption_key:

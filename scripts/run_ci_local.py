@@ -7,6 +7,7 @@ Jobs:
   types     — Mypy on seiso, forge, seiso_cli
   test      — smoke imports + pytest
   security  — Bandit, detect-secrets, pip-audit, pip check
+  deps      — dependency lockfile integrity
   frontend  — npm typecheck + production build (forge-ui)
   imports   — optional-extra import smokes (train, compress, mlx)
 
@@ -42,16 +43,17 @@ CI_ENV: dict[str, str] = {
 PY_PACKAGES = ("seiso", "forge", "seiso_cli", "tests")
 PY_TYPE_PACKAGES = ("seiso", "forge", "seiso_cli")
 
-ALL_JOBS = ("lint", "types", "test", "security", "frontend", "imports")
-FAST_JOBS = ("lint", "types", "test", "security")
+ALL_JOBS = ("deps", "lint", "types", "test", "security", "frontend", "imports")
+FAST_JOBS = ("deps", "lint", "types", "test", "security")
 
 SECRET_SCAN_SHELL = r"""
 set -euo pipefail
+: "${DETECT_SECRETS_CMD:=detect-secrets}"
 paths=(seiso forge seiso_cli tests forge-ui/src docs scripts .env.example README.md pyproject.toml Makefile)
 if [ -f .secrets.baseline ]; then
-  detect-secrets scan --baseline .secrets.baseline "${paths[@]}"
+  ${DETECT_SECRETS_CMD} scan --baseline .secrets.baseline "${paths[@]}"
 else
-  detect-secrets scan "${paths[@]}" > .secrets.baseline
+  ${DETECT_SECRETS_CMD} scan "${paths[@]}" > .secrets.baseline
   git diff --exit-code .secrets.baseline
 fi
 """
@@ -251,8 +253,27 @@ def job_lint(
     )
 
 
+def job_deps(root: Path, python: str, env: dict[str, str]) -> None:
+    _banner("Job: deps (lock verification)")
+    _step("Verify dependency lock digests", [python, "scripts/verify_dep_locks.py"], cwd=root, env=env)
+
+
 def job_types(root: Path, python: str, env: dict[str, str], *, update_baseline: bool) -> None:
     _banner("Job: types (mypy)")
+    version = subprocess.run(
+        [python, "-c", "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"],
+        cwd=str(root),
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    if version != CI_PYTHON:
+        print(
+            f"WARNING: mypy baseline is calibrated for Python {CI_PYTHON}; "
+            f"local interpreter is {version}. Use --python-bin with Python {CI_PYTHON} for authoritative results.",
+            file=sys.stderr,
+        )
 
     baseline_path = root / "scripts" / "mypy-baseline.txt"
     result = subprocess.run(
@@ -316,12 +337,24 @@ def job_security(root: Path, python: str, env: dict[str, str]) -> None:
         cwd=root,
         env=env,
     )
-    _shell_step("Secret scan (detect-secrets)", SECRET_SCAN_SHELL, cwd=root, env=env)
+    secret_env = dict(env)
+    secret_env["DETECT_SECRETS_CMD"] = f"{python} -m detect_secrets"
+    _shell_step("Secret scan (detect-secrets)", SECRET_SCAN_SHELL, cwd=root, env=secret_env)
     _step("pip check", [python, "-m", "pip", "check"], cwd=root, env=env)
-    pip_audit = shutil.which("pip-audit") or "pip-audit"
     _step(
         "Dependency vulnerability audit",
-        [pip_audit, "--progress-spinner=off", "--ignore-vuln", "CVE-2025-3000", "--ignore-vuln", "PYSEC-2025-194"],
+        [
+            python,
+            "-m",
+            "pip_audit",
+            "--cache-dir",
+            str(root / ".cache" / "pip-audit"),
+            "--progress-spinner=off",
+            "--ignore-vuln",
+            "CVE-2025-3000",
+            "--ignore-vuln",
+            "PYSEC-2025-194",
+        ],
         cwd=root,
         env=env,
     )
@@ -455,7 +488,9 @@ def main(argv: list[str] | None = None) -> int:
             _ensure_dev_tools(root, python_bin, env)
 
         for job in jobs:
-            if job == "lint":
+            if job == "deps":
+                job_deps(root, python_bin, env)
+            elif job == "lint":
                 job_lint(
                     root,
                     python_bin,

@@ -10,6 +10,8 @@ export function IntegrationsPage() {
   const [pName, setPName] = useState("");
   const [pType, setPType] = useState("openai");
   const [pKey, setPKey] = useState("");
+  const [pBaseUrl, setPBaseUrl] = useState("");
+  const [pModel, setPModel] = useState("");
 
   const refresh = async () => {
     setProviders(await api.listProviders());
@@ -20,13 +22,26 @@ export function IntegrationsPage() {
   }, []);
 
   const addProvider = async () => {
+    const config: Record<string, unknown> = {
+      api_key: pKey,
+      model:
+        pModel ||
+        (pType === "anthropic"
+          ? "claude-3-5-sonnet-20241022"
+          : pType === "ollama"
+            ? "llama3.2"
+            : "gpt-4o-mini"),
+    };
+    if (pBaseUrl.trim()) config.base_url = pBaseUrl.trim();
     await api.createProvider({
       name: pName,
       provider_type: pType,
-      config: { api_key: pKey, model: pType === "anthropic" ? "claude-3-5-sonnet-20241022" : "gpt-4o-mini" },
+      config,
     });
     setPName("");
     setPKey("");
+    setPBaseUrl("");
+    setPModel("");
     refresh();
   };
 
@@ -72,8 +87,24 @@ export function IntegrationsPage() {
               placeholder="sk-…"
             />
           </div>
+          <div>
+            <label>Base URL (optional)</label>
+            <input
+              value={pBaseUrl}
+              onChange={(e) => setPBaseUrl(e.target.value)}
+              placeholder={pType === "ollama" ? "http://127.0.0.1:11434" : pType === "vllm" ? "http://127.0.0.1:8000/v1" : "https://api.openai.com/v1"}
+            />
+          </div>
+          <div>
+            <label>Model (optional)</label>
+            <input
+              value={pModel}
+              onChange={(e) => setPModel(e.target.value)}
+              placeholder={pType === "anthropic" ? "claude-3-5-sonnet-20241022" : pType === "ollama" ? "llama3.2" : "gpt-4o-mini"}
+            />
+          </div>
         </div>
-        <button className="btn btn-primary" onClick={addProvider} disabled={!pName || !pKey}>
+        <button className="btn btn-primary" onClick={addProvider} disabled={!pName || (!pKey && pType !== "ollama" && pType !== "vllm")}>
           Add provider
         </button>
         {providers.length === 0 ? (
@@ -81,13 +112,14 @@ export function IntegrationsPage() {
         ) : (
           <table style={{ marginTop: "1rem" }}>
             <thead>
-              <tr><th>Name</th><th>Type</th><th>Key</th><th></th></tr>
+                  <tr><th>Name</th><th>Type</th><th>Model</th><th>Key</th><th></th></tr>
             </thead>
             <tbody>
               {providers.map((p) => (
                 <tr key={p.id}>
                   <td>{p.name}</td>
                   <td><span className="badge">{p.provider_type}</span></td>
+                  <td className="muted-text">{String(p.config.model || "—")}</td>
                   <td className="muted-text">Key: {String(p.config.api_key || "—")}</td>
                   <td>
                     <button className="btn" onClick={() => api.deleteProvider(p.id).then(refresh)}>Remove</button>

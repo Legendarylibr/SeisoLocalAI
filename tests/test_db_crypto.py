@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from forge.db.crypto import decrypt_field, encrypt_field, resolve_encryption_key
-from forge.db.store import Database
+from forge.db.store import Database, DatabaseCryptoError
 
 _TEST_KEY = base64.b64encode(b"\x01" * 32).decode()
 
@@ -87,3 +87,20 @@ async def test_ephemeral_db_wiped_on_close(db: Database):
     )
     assert await fresh.user_count() == 0
     await fresh.close()
+
+
+@pytest.mark.asyncio
+async def test_corrupt_encrypted_chat_message_fails_safely(db: Database):
+    user = await db.create_user("hashed", "User", email="u@local.dev")
+    thread = await db.create_thread(user["id"], "Test")
+    await db.add_message(thread["id"], "user", "secret prompt")
+
+    conn = await db._ensure_conn()
+    await conn.execute(
+        "UPDATE chat_messages SET content = ? WHERE thread_id = ?",
+        ("enc:v1:not-valid-base64", thread["id"]),
+    )
+    await conn.commit()
+
+    with pytest.raises(DatabaseCryptoError, match="could not be decrypted"):
+        await db.get_messages(thread["id"])
