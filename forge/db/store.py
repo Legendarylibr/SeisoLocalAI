@@ -180,7 +180,45 @@ CREATE INDEX IF NOT EXISTS idx_rl_quant_jobs_user ON rl_quant_jobs(user_id);
 CREATE INDEX IF NOT EXISTS idx_recipe_jobs_user ON recipe_jobs(user_id);
 CREATE INDEX IF NOT EXISTS idx_providers_user ON providers(user_id);
 CREATE INDEX IF NOT EXISTS idx_knowledge_bases_user ON knowledge_bases(user_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_models_user_source ON local_models(user_id, source);
+CREATE INDEX IF NOT EXISTS idx_threads_user_updated ON chat_threads(user_id, updated_at DESC);
 """
+
+_TRAINING_LIST_COLUMNS = (
+    "id",
+    "user_id",
+    "project_id",
+    "status",
+    "config_json",
+    "created_at",
+    "updated_at",
+)
+_EXPORT_LIST_COLUMNS = ("id", "user_id", "status", "created_at", "updated_at")
+_STAGE_PIPELINE_LIST_COLUMNS = (
+    "id",
+    "user_id",
+    "status",
+    "output_dir",
+    "run_dir",
+    "model_dir",
+    "stages_json",
+    "created_at",
+    "updated_at",
+)
+_RL_QUANT_LIST_COLUMNS = (
+    "id",
+    "user_id",
+    "status",
+    "output_dir",
+    "recommendation_path",
+    "gguf_quants_json",
+    "created_at",
+    "updated_at",
+)
+
+
+def _column_list(columns: tuple[str, ...]) -> str:
+    return ", ".join(columns)
 
 _JOB_ERROR_TABLES = (
     "training_jobs",
@@ -243,6 +281,8 @@ class Database:
         if not self._ephemeral:
             await conn.execute("PRAGMA journal_mode = WAL")
             await conn.execute("PRAGMA synchronous = NORMAL")
+            await conn.execute("PRAGMA cache_size = -64000")
+            await conn.execute("PRAGMA mmap_size = 268435456")
 
     async def _migrate_schema(self, conn: aiosqlite.Connection) -> None:
         for table in _JOB_ERROR_TABLES:
@@ -250,6 +290,12 @@ class Database:
                 cols = {row[1] for row in await cur.fetchall()}
             if "error_text" not in cols:
                 await conn.execute(f"ALTER TABLE {table} ADD COLUMN error_text TEXT")
+        await conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_models_user_source ON local_models(user_id, source)"
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_threads_user_updated ON chat_threads(user_id, updated_at DESC)"
+        )
 
     async def _ensure_conn(self) -> aiosqlite.Connection:
         if self._conn_holder is None:
@@ -421,26 +467,36 @@ class Database:
             return dict(row) if row else None
 
     async def upsert_model(self, user_id: str, source: str, **fields: Any) -> dict:
-        existing = await self.get_model_by_source(user_id, source)
-        if not existing:
-            return await self.add_model(user_id=user_id, source=source, **fields)
-
+        mid = str(uuid.uuid4())
+        now = _now()
         async with self._conn() as conn:
             await conn.execute(
-                """UPDATE local_models
-                   SET name = ?, path = ?, format = ?, size_bytes = ?, metadata_json = ?
-                   WHERE id = ?""",
+                """INSERT INTO local_models
+                   (id, user_id, name, path, source, format, size_bytes, metadata_json, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(user_id, source) DO UPDATE SET
+                   name = excluded.name,
+                   path = excluded.path,
+                   format = excluded.format,
+                   size_bytes = excluded.size_bytes,
+                   metadata_json = excluded.metadata_json""",
                 (
+                    mid,
+                    user_id,
                     fields["name"],
                     fields["path"],
+                    source,
                     fields.get("format"),
                     fields.get("size_bytes", 0),
                     json.dumps(fields.get("metadata", {})),
-                    existing["id"],
+                    now,
                 ),
             )
             await conn.commit()
-        return {**existing, **fields, "id": existing["id"], "user_id": user_id, "source": source}
+        row = await self.get_model_by_source(user_id, source)
+        if row is None:
+            raise RuntimeError("upsert_model failed to persist row")
+        return row
 
     async def create_training_job(
         self,
@@ -468,6 +524,27 @@ class Database:
         ) as cur:
             row = await cur.fetchone()
             return dict(row) if row else None
+
+    async def get_thread_with_messages(
+        self, thread_id: str, user_id: str
+    ) -> tuple[dict | None, list[dict]]:
+        """Load a thread and its messages in one connection acquisition."""
+        async with self._conn() as conn:
+            async with conn.execute(
+                "SELECT * FROM chat_threads WHERE id = ? AND user_id = ?",
+                (thread_id, user_id),
+            ) as cur:
+                thread_row = await cur.fetchone()
+            if not thread_row:
+                return None, []
+            async with conn.execute(
+                "SELECT * FROM chat_messages WHERE thread_id = ? ORDER BY created_at ASC",
+                (thread_id,),
+            ) as cur:
+                messages = [
+                    self._decrypt_row("chat_messages", dict(r)) for r in await cur.fetchall()
+                ]
+            return dict(thread_row), messages
 
     async def update_thread_model(self, thread_id: str, model_id: str | None) -> None:
         now = _now()
@@ -537,8 +614,9 @@ class Database:
             await conn.commit()
 
     async def list_training_jobs(self, user_id: str) -> list[dict]:
+        cols = _column_list(_TRAINING_LIST_COLUMNS)
         async with self._conn() as conn, conn.execute(
-            "SELECT * FROM training_jobs WHERE user_id = ? ORDER BY created_at DESC",
+            f"SELECT {cols} FROM training_jobs WHERE user_id = ? ORDER BY created_at DESC",  # nosec B608
             (user_id,),
         ) as cur:
             return [dict(r) for r in await cur.fetchall()]
@@ -595,7 +673,15 @@ class Database:
             await conn.commit()
             return cur.rowcount
 
-    async def add_message(self, thread_id: str, role: str, content: str, metadata: dict | None = None) -> dict:
+    async def add_message(
+        self,
+        thread_id: str,
+        role: str,
+        content: str,
+        metadata: dict | None = None,
+        *,
+        model_id: str | None = None,
+    ) -> dict:
         mid = str(uuid.uuid4())
         now = _now()
         enc_content = self._enc(content)
@@ -606,9 +692,16 @@ class Database:
                    VALUES (?, ?, ?, ?, ?, ?)""",
                 (mid, thread_id, role, enc_content, enc_metadata, now),
             )
-            await conn.execute(
-                "UPDATE chat_threads SET updated_at = ? WHERE id = ?", (now, thread_id)
-            )
+            if model_id is not None:
+                await conn.execute(
+                    "UPDATE chat_threads SET model_id = ?, updated_at = ? WHERE id = ?",
+                    (model_id, now, thread_id),
+                )
+            else:
+                await conn.execute(
+                    "UPDATE chat_threads SET updated_at = ? WHERE id = ?",
+                    (now, thread_id),
+                )
             await conn.commit()
         return {"id": mid, "thread_id": thread_id, "role": role, "content": content, "created_at": now}
 
@@ -715,8 +808,9 @@ class Database:
             await conn.commit()
 
     async def list_export_jobs(self, user_id: str) -> list[dict]:
+        cols = _column_list(_EXPORT_LIST_COLUMNS)
         async with self._conn() as conn, conn.execute(
-            "SELECT * FROM export_jobs WHERE user_id = ? ORDER BY created_at DESC",
+            f"SELECT {cols} FROM export_jobs WHERE user_id = ? ORDER BY created_at DESC",  # nosec B608
             (user_id,),
         ) as cur:
             return [dict(r) for r in await cur.fetchall()]
@@ -750,9 +844,16 @@ class Database:
             row = await cur.fetchone()
             return dict(row) if row else None
 
-    async def _list_config_jobs(self, table: str, user_id: str) -> list[dict]:
+    async def _list_config_jobs(
+        self,
+        table: str,
+        user_id: str,
+        *,
+        columns: tuple[str, ...] = _STAGE_PIPELINE_LIST_COLUMNS,
+    ) -> list[dict]:
         table = _config_job_table(table)
-        query = f"SELECT * FROM {table} WHERE user_id = ? ORDER BY created_at DESC"  # nosec B608
+        cols = _column_list(columns)
+        query = f"SELECT {cols} FROM {table} WHERE user_id = ? ORDER BY created_at DESC"  # nosec B608
         async with self._conn() as conn, conn.execute(
             query,
             (user_id,),
@@ -842,7 +943,9 @@ class Database:
             await conn.commit()
 
     async def list_rl_quant_jobs(self, user_id: str) -> list[dict]:
-        return await self._list_config_jobs("rl_quant_jobs", user_id)
+        return await self._list_config_jobs(
+            "rl_quant_jobs", user_id, columns=_RL_QUANT_LIST_COLUMNS
+        )
 
     # --- Compression jobs ---
 

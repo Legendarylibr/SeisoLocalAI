@@ -32,9 +32,28 @@ class FakeChatDb:
     async def get_messages(self, _thread_id: str) -> list[dict]:
         return self.messages
 
-    async def add_message(self, thread_id: str, role: str, content: str) -> dict:
+    async def get_thread_with_messages(
+        self, _thread_id: str, _user_id: str
+    ) -> tuple[dict | None, list[dict]]:
+        thread = await self.get_thread_for_user(_thread_id, _user_id)
+        if thread is None:
+            return None, []
+        return thread, list(self.messages)
+
+    async def add_message(
+        self,
+        thread_id: str,
+        role: str,
+        content: str,
+        metadata: dict | None = None,
+        *,
+        model_id: str | None = None,
+    ) -> dict:
         self.added.append((thread_id, role, content))
         self.messages.append({"role": role, "content": content})
+        if model_id is not None:
+            self.updated_models.append((thread_id, model_id))
+            self.thread_model_id = model_id
         return {"id": "msg-new", "thread_id": thread_id, "role": role, "content": content}
 
     async def get_thread_for_user(self, _thread_id: str, _user_id: str) -> dict | None:

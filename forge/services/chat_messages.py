@@ -216,12 +216,11 @@ async def build_trusted_messages(
     track_model = model_id or (model_key if model_key != "default" else None)
 
     if thread_id:
-        thread = await db.get_thread_for_user(thread_id, user_id or "")
+        thread, stored = await db.get_thread_with_messages(thread_id, user_id or "")
         prior_model_key: str | None = None
         if thread:
             prior_model_key = thread.get("model_id") or None
 
-        stored = await db.get_messages(thread_id)
         history: list[dict[str, str]] = [
             {
                 "role": m["role"],
@@ -231,12 +230,20 @@ async def build_trusted_messages(
             for m in stored
             if m.get("role") in ("user", "assistant")
         ]
-        if not history or history[-1]["role"] != "user" or history[-1]["content"] != content:
+        model_changed = bool(
+            track_model and thread and (thread.get("model_id") or None) != track_model
+        )
+        need_persist = not history or history[-1]["role"] != "user" or history[-1]["content"] != content
+        if need_persist:
             if persist_user:
-                await db.add_message(thread_id, "user", content)
+                await db.add_message(
+                    thread_id,
+                    "user",
+                    content,
+                    model_id=track_model if model_changed else None,
+                )
             history.append({"role": "user", "content": content, "created_at": ""})
-
-        if track_model and thread and (thread.get("model_id") or None) != track_model:
+        elif model_changed:
             await db.update_thread_model(thread_id, track_model)
 
         return (
