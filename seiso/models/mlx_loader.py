@@ -19,5 +19,8 @@ def load_mlx(options: LoadOptions) -> tuple[Any, Any]:
         ) from exc
 
     logger.info("Loading MLX model: %s", options.model_id)
+    from seiso.memory.protection import ensure_load_fits
+
+    ensure_load_fits(options.model_id, mode="chat")
     model, tokenizer = mlx_load(options.model_id)
     return model, tokenizer

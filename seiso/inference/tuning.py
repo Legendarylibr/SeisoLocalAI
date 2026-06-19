@@ -160,13 +160,16 @@ def estimate_llama_n_ctx(
 ) -> int:
     """Right-size context window to prompt + generation (faster KV cache)."""
     if not _env_bool("SEISO_LLAMA_DYNAMIC_CTX", True):
-        return default
-    chars = sum(len(str(m.get("content", ""))) for m in messages)
-    est_prompt = max(256, int(chars / 3.2))
-    needed = est_prompt + max_tokens + 128
-    step = 512
-    sized = min(ceiling, max(floor, ((needed + step - 1) // step) * step))
-    return sized
+        sized = default
+    else:
+        chars = sum(len(str(m.get("content", ""))) for m in messages)
+        est_prompt = max(256, int(chars / 3.2))
+        needed = est_prompt + max_tokens + 128
+        step = 512
+        sized = min(ceiling, max(floor, ((needed + step - 1) // step) * step))
+    from seiso.memory.protection import clamp_llama_n_ctx
+
+    return clamp_llama_n_ctx(sized, messages=messages, max_tokens=max_tokens)
 
 
 def attach_llama_prompt_cache(llm: Any) -> None:
@@ -179,6 +182,11 @@ def attach_llama_prompt_cache(llm: Any) -> None:
         from llama_cpp import LlamaRAMCache
 
         cache_mb = _env_int("SEISO_LLAMA_CACHE_MB", 1024)
+        from seiso.memory.protection import clamp_llama_cache_mb
+
+        cache_mb = clamp_llama_cache_mb(cache_mb)
+        if cache_mb <= 0:
+            return
         llm.set_cache(LlamaRAMCache(capacity_bytes=cache_mb * 1024 * 1024))
         llm._seiso_cache_attached = True
         logger.debug("llama.cpp RAM prompt cache enabled (%d MB)", cache_mb)

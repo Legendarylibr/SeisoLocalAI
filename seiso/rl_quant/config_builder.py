@@ -110,4 +110,7 @@ def build_framework_config(
 
     flat = config_to_flat_dict(base)
     flat.update(overrides)
+    from seiso.memory.protection import apply_rl_memory_guards
+
+    flat = apply_rl_memory_guards(flat)
     return config_from_dict(flat, base=base, strict=False)

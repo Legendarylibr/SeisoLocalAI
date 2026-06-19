@@ -187,7 +187,16 @@ if torch is not None:
             self.ordered_hardware = config.ordered_hardware()
             self.replay_buffer: Any = None
             if config.replay_buffer_capacity > 0:
-                device = self.policy.device if config.replay_buffer_on_gpu else torch.device("cpu")
+                replay_on_gpu = config.replay_buffer_on_gpu
+                if replay_on_gpu and self.policy.device.type == "cuda" and torch.cuda.is_available():
+                    try:
+                        index = self.policy.device.index if self.policy.device.index is not None else 0
+                        free_bytes, _total = torch.cuda.mem_get_info(index)
+                        if free_bytes < 6 * 1024**3:
+                            replay_on_gpu = False
+                    except Exception:
+                        replay_on_gpu = False
+                device = self.policy.device if replay_on_gpu else torch.device("cpu")
                 self.replay_buffer = _GPUReplayBuffer(
                     capacity=config.replay_buffer_capacity,
                     state_dim=config.state_vector_dim(),
@@ -237,6 +246,23 @@ if torch is not None:
             if rewards_accum is not None:
                 rewards_accum.extend(batch_rewards)
 
+        def _collect_batch_safe(self, batch_size: int) -> tuple[list[dict[str, Any]], list[float]]:
+            try:
+                from seiso.memory.protection import is_oom_error, release_cached_memory
+            except ImportError:
+                return self._collect_batch(batch_size)
+
+            size = max(1, int(batch_size))
+            for attempt in range(2):
+                try:
+                    return self._collect_batch(size)
+                except Exception as exc:
+                    if not is_oom_error(exc) or attempt >= 1 or size <= 1:
+                        raise
+                    release_cached_memory(sync=True)
+                    size = max(1, size // 2)
+            return self._collect_batch(size)
+
         def _train_fixed(self) -> dict[str, float]:
             rewards: list[float] = []
             while self.global_episode < self.config.training_episodes:
@@ -244,7 +270,7 @@ if torch is not None:
                     self.config.torch_batch_episodes,
                     self.config.training_episodes - self.global_episode,
                 )
-                batch_records, batch_rewards = self._collect_batch(batch_size)
+                batch_records, batch_rewards = self._collect_batch_safe(batch_size)
                 self._commit_training_batch(batch_records, batch_rewards, rewards)
 
             return reward_summary(rewards, updates=self.update_index)
@@ -271,7 +297,7 @@ if torch is not None:
             while self.global_episode < target:
                 batch_size = min(self.config.torch_batch_episodes, target - self.global_episode)
                 ep_before = self.global_episode
-                batch_records, batch_rewards = self._collect_batch(batch_size)
+                batch_records, batch_rewards = self._collect_batch_safe(batch_size)
                 self._commit_training_batch(batch_records, batch_rewards, all_rewards)
                 ep_after = self.global_episode
 

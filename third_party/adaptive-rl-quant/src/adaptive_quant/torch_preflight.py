@@ -117,6 +117,15 @@ def benchmark_policy_throughput(
         raise ImportError("PyTorch is not installed in this environment.") from TORCH_IMPORT_ERROR
 
     batch_size = config.torch_preflight_batch_size
+    if policy.device.type == "cuda" and torch.cuda.is_available():
+        try:
+            free_bytes, _total = _mem_get_info(policy.device.index or 0)
+            free_mb = free_bytes / (1024**2)
+            bytes_per_row = policy.model.state_dim * 4 * 8
+            safe_rows = max(64, int((free_mb * 0.35 * 1024**2) / max(bytes_per_row, 1)))
+            batch_size = min(batch_size, safe_rows)
+        except Exception:
+            batch_size = min(batch_size, 2048)
     warmup_steps = config.torch_preflight_warmup_steps
     timed_steps = config.torch_preflight_steps
     states = torch.randn(

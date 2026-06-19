@@ -82,9 +82,10 @@ def train(
     config: str = typer.Option(..., "--config", "-c", help="Training YAML config"),
 ) -> None:
     """Fine-tune a model from config."""
+    from seiso.memory.protection import apply_training_memory_guards
     from seiso.training.config import TrainConfig, run_training
 
-    cfg = TrainConfig.from_yaml(Path(config))
+    cfg = apply_training_memory_guards(TrainConfig.from_yaml(Path(config)))
     console.print(f"Training [cyan]{cfg.model_id}[/] ({cfg.method.value})")
     out = run_training(cfg)
     console.print(f"[green]Done:[/] {out}")
@@ -106,10 +107,16 @@ def chat(
     prompt: str = typer.Option("", help="Single-turn prompt"),
 ) -> None:
     """Terminal chat with a local model."""
+    from seiso.memory.protection import MemoryLoadBlockedError, ensure_load_fits
     from seiso.models.loader import detect_backend
 
     backend = detect_backend()
     console.print(f"Backend: {backend.value}")
+    try:
+        ensure_load_fits(model, mode="chat")
+    except MemoryLoadBlockedError as exc:
+        console.print(f"[red]Memory guard:[/] {exc}")
+        raise typer.Exit(1) from exc
 
     if prompt:
         console.print(f"[bold]Assistant:[/] {_one_shot_reply(model, prompt)}")
@@ -183,6 +190,13 @@ def inference_cmd(
     prompt: str = typer.Option(..., help="Prompt text"),
 ) -> None:
     """Run one-shot inference (alias for single-turn chat)."""
+    from seiso.memory.protection import MemoryLoadBlockedError, ensure_load_fits
+
+    try:
+        ensure_load_fits(model, mode="chat")
+    except MemoryLoadBlockedError as exc:
+        console.print(f"[red]Memory guard:[/] {exc}")
+        raise typer.Exit(1) from exc
     console.print(_one_shot_reply(model, prompt))
 
 

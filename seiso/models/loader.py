@@ -94,7 +94,7 @@ def load_model(options: LoadOptions, *, for_training: bool = False) -> tuple[Any
         device = detect_training_device()
         backend = Backend.TORCH if device in ("cuda", "mps") else Backend.CPU
         logger.info("Loading %s for training via torch (%s)", options.model_id, device)
-        return load_torch(options, backend=backend, device=device)
+        return load_torch(options, backend=backend, device=device, for_training=True)
 
     backend = detect_backend()
     logger.info("Loading %s via %s", options.model_id, backend.value)

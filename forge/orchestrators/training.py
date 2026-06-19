@@ -32,6 +32,9 @@ class TrainingOrchestrator(Orchestrator):
     async def execute(self, job_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         configure_hf_hub_cache(self.sandbox_root)
         config = TrainConfig.model_validate(payload["config"])
+        from seiso.memory.protection import apply_training_memory_guards
+
+        config = apply_training_memory_guards(config)
         config.output_dir = Path(payload.get("output_dir", self.sandbox_root / "checkpoints" / job_id))
 
         multi_gpu = bool(payload.get("multi_gpu", config.multi_gpu))

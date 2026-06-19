@@ -24,6 +24,11 @@ def load_training_dataset(path: str | Path, split: str = "train", *, sandbox_roo
 
     if p.exists():
         if p.suffix == ".jsonl":
+            from seiso.memory.protection import jsonl_load_safe
+
+            if jsonl_load_safe(p):
+                logger.info("Large JSONL — loading via datasets mmap (%s)", p)
+                return load_dataset("json", data_files=str(p), split=split)
             rows = []
             with p.open() as f:
                 for line in f:

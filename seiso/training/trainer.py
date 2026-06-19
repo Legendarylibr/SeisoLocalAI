@@ -14,6 +14,14 @@ from typing import Any
 
 from seiso.kernels.hooks import apply_fused_lora_kernels, apply_training_kernels
 from seiso.kernels.lifecycle import release_training_memory
+from seiso.memory.protection import (
+    apply_training_memory_guards,
+    apply_training_oom_fallback,
+    ensure_load_fits,
+    is_oom_error,
+    release_cached_memory,
+    training_pin_memory,
+)
 from seiso.models.seiso_model import SeisoModel
 from seiso.research.provenance import (
     apply_determinism,
@@ -42,6 +50,7 @@ class SeisoTrainer:
         self._metrics_callback = None
 
     def run(self) -> Path:
+        self.config = apply_training_memory_guards(self.config)
         cfg = self.config
         apply_determinism(cfg.seed, deterministic=cfg.deterministic)
         write_json(
@@ -150,9 +159,9 @@ class SeisoTrainer:
         )
 
         if cfg.resume_from:
-            trainer.train(resume_from_checkpoint=str(cfg.resume_from))
+            self._train_with_oom_recovery(trainer, resume_from_checkpoint=str(cfg.resume_from))
         else:
-            trainer.train()
+            self._train_with_oom_recovery(trainer)
 
         is_main = int(os.environ.get("LOCAL_RANK", os.environ.get("RANK", "0"))) == 0
         if not is_main:
@@ -170,6 +179,27 @@ class SeisoTrainer:
         logger.info("Training complete: %s", out)
         return out
 
+    def _train_with_oom_recovery(self, trainer, *, resume_from_checkpoint: str | None = None) -> None:
+        attempts = 0
+        while True:
+            try:
+                if resume_from_checkpoint:
+                    trainer.train(resume_from_checkpoint=resume_from_checkpoint)
+                else:
+                    trainer.train()
+                return
+            except Exception as exc:
+                if not is_oom_error(exc) or attempts >= 1:
+                    raise
+                attempts += 1
+                release_cached_memory(sync=True)
+                self.config = apply_training_oom_fallback(self.config)
+                cfg = self.config
+                trainer.args.per_device_train_batch_size = cfg.batch_size
+                trainer.args.per_device_eval_batch_size = cfg.batch_size
+                trainer.args.gradient_accumulation_steps = cfg.gradient_accumulation_steps
+                resume_from_checkpoint = None
+
     def _resolve_load_model_id(self) -> str:
         """Prefer cached local snapshot path for offline merge/export after training."""
         cfg = self.config
@@ -180,6 +210,7 @@ class SeisoTrainer:
         load_4bit = cfg.quant == QuantMode.INT4
         load_8bit = cfg.quant == QuantMode.INT8
         model_ref = self._resolve_load_model_id()
+        ensure_load_fits(model_ref, mode="train")
 
         self._loaded = SeisoModel.from_pretrained(
             model_ref,
@@ -300,7 +331,7 @@ class SeisoTrainer:
             "report_to": "none",
             "optim": optim,
             "lr_scheduler_type": cfg.lr_scheduler,
-            "dataloader_pin_memory": True,
+            "dataloader_pin_memory": training_pin_memory(),
             "remove_unused_columns": not dataset_text_field,
             "load_best_model_at_end": eval_ds is not None,
         }
