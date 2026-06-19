@@ -16,6 +16,7 @@ from forge.db.store import Database
 from forge.orchestrators.inference import InferenceOrchestrator
 from forge.security.auth import get_current_user_id
 from forge.services.chat_messages import build_trusted_messages
+from forge.services.llm_output import StreamingOutputSanitizer, sanitize_llm_output
 from forge.services.download_progress import estimate_load_eta_seconds
 from forge.services.hardware import hardware_profile
 from forge.services.hf_cache_inventory import sync_hf_cache_inventory
@@ -501,6 +502,11 @@ async def chat(
         thread_id=body.thread_id,
         client_messages=body.messages,
         persist_user=bool(body.thread_id),
+        user_id=user_id,
+        model_id=body.model_id,
+        model_path=body.model_path,
+        ollama_model=body.ollama_model,
+        tools_enabled=body.tools,
     )
     payload["messages"] = trusted_messages
 
@@ -589,14 +595,19 @@ async def chat(
         async def event_gen():
             if can_stream_local:
                 parts: list[str] = []
+                sanitizer = StreamingOutputSanitizer(strip_tool_calls=not body.tools)
                 backend_label = payload.get("inference_backend") or "local"
                 cancelled = False
                 try:
                     orchestrator._emit_log(job_id, f"Streaming inference ({backend_label})")
                     async for token in orchestrator.stream_local(payload):
-                        parts.append(token)
-                        yield {"event": "token", "data": token}
-                    content = "".join(parts)
+                        for chunk in sanitizer.feed(token):
+                            parts.append(chunk)
+                            yield {"event": "token", "data": chunk}
+                    for chunk in sanitizer.finish():
+                        parts.append(chunk)
+                        yield {"event": "token", "data": chunk}
+                    content = sanitize_llm_output("".join(parts), strip_tool_calls=not body.tools)
                     if body.thread_id:
                         await db.add_message(body.thread_id, "assistant", content)
                     yield {"event": "message", "data": content}
@@ -618,7 +629,10 @@ async def chat(
             if job and job.status.value == "failed":
                 yield {"event": "error", "data": job.error or "Inference failed"}
             elif job and job.result.get("content"):
-                content = job.result["content"]
+                content = sanitize_llm_output(
+                    job.result["content"],
+                    strip_tool_calls=not body.tools,
+                )
                 if body.thread_id:
                     await db.add_message(body.thread_id, "assistant", content)
                 yield {"event": "message", "data": content}
@@ -633,5 +647,9 @@ async def chat(
     if job.status.value == "failed":
         raise HTTPException(500, job.error or "Inference failed")
     if body.thread_id and job.result.get("content"):
-        await db.add_message(body.thread_id, "assistant", job.result["content"])
-    return {"job_id": job_id, **job.result}
+        content = sanitize_llm_output(job.result["content"], strip_tool_calls=not body.tools)
+        await db.add_message(body.thread_id, "assistant", content)
+    result = dict(job.result)
+    if result.get("content") and not body.tools:
+        result["content"] = sanitize_llm_output(result["content"], strip_tool_calls=True)
+    return {"job_id": job_id, **result}
