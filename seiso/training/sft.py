@@ -63,6 +63,16 @@ else:
     FusedSFTTrainer = None  # type: ignore[misc, assignment]
 
 
+def _sft_max_length_key() -> str:
+    """TRL 1.x uses max_length; older releases used max_seq_length."""
+    if SFTConfig is None:
+        return "max_seq_length"
+    import inspect
+
+    params = inspect.signature(SFTConfig.__init__).parameters
+    return "max_length" if "max_length" in params else "max_seq_length"
+
+
 def build_sft_trainer(
     model,
     tokenizer,
@@ -84,7 +94,9 @@ def build_sft_trainer(
         )
 
     cfg_kwargs = dict(training_args_dict)
-    cfg_kwargs.setdefault("max_seq_length", max_seq_length)
+    max_key = _sft_max_length_key()
+    cfg_kwargs.pop("max_seq_length", None)
+    cfg_kwargs.setdefault(max_key, max_seq_length)
     if packing:
         cfg_kwargs["packing"] = True
     if dataset_text_field:

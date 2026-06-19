@@ -1,0 +1,25 @@
+# Minimal CPU smoke test — tiny random model, no QLoRA
+model_id: hf-internal-testing/tiny-random-LlamaForCausalLM
+dataset: ./data/sample.jsonl
+output_dir: ./.test_outputs/train-smoke
+method: lora
+quant: 16bit
+dataset_format: chat
+epochs: 1
+batch_size: 1
+learning_rate: 0.0002
+max_seq_length: 128
+lora_r: 4
+lora_alpha: 8
+lora_dropout: 0
+gradient_accumulation_steps: 1
+gradient_checkpointing: false
+train_on_responses_only: true
+use_triton: false
+use_fused_ce: false
+use_fused_lora: false
+eval_split_ratio: 0
+save_steps: 10
+logging_steps: 1
+seed: 42
+deterministic: true

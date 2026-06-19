@@ -20,7 +20,6 @@ from seiso.research.provenance import (
     sha256_file,
     write_json,
 )
-from seiso.security import resolve_data_dir
 from seiso.training.config import QuantMode, TrainConfig, TrainMethod
 from seiso.training.datasets import (
     format_dataset_text,
@@ -87,8 +86,7 @@ class SeisoTrainer:
         SeisoModel.for_training(model)
 
         ds_fmt = cfg.dataset_format
-        sandbox = cfg.sandbox_root or resolve_data_dir()
-        raw_ds = load_training_dataset(cfg.dataset, sandbox_root=sandbox)
+        raw_ds = load_training_dataset(cfg.dataset, sandbox_root=cfg.sandbox_root)
         if cfg.eval_split_ratio > 0 and len(raw_ds) > 10:
             split = raw_ds.train_test_split(test_size=cfg.eval_split_ratio, seed=cfg.seed)
             train_ds, eval_ds = split["train"], split["test"]
@@ -269,11 +267,15 @@ class SeisoTrainer:
 
         use_bf16 = False
         use_fp16 = False
+        use_cpu = False
         if torch.cuda.is_available():
             use_bf16 = torch.cuda.is_bf16_supported() and cfg.quant != QuantMode.INT16
             use_fp16 = cfg.quant == QuantMode.INT16 and not use_bf16
         elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
             use_fp16 = cfg.quant == QuantMode.INT16
+        else:
+            use_cpu = True
+
         optim = "paged_adamw_8bit" if cfg.quant == QuantMode.INT4 else "adamw_torch"
 
         base = {
@@ -293,6 +295,7 @@ class SeisoTrainer:
             "save_total_limit": cfg.save_total_limit,
             "fp16": use_fp16,
             "bf16": use_bf16,
+            "use_cpu": use_cpu,
             "seed": cfg.seed,
             "report_to": "none",
             "optim": optim,
@@ -323,7 +326,7 @@ class SeisoTrainer:
 
         cfg = self.config
         apply_determinism(cfg.seed, deterministic=cfg.deterministic)
-        raw = load_training_dataset(cfg.dataset, sandbox_root=cfg.sandbox_root or resolve_data_dir())
+        raw = load_training_dataset(cfg.dataset, sandbox_root=cfg.sandbox_root)
         examples = []
         for row in raw:
             anchor = row.get("anchor") or row.get("query") or row.get("text", "")
