@@ -38,8 +38,13 @@ async def lifespan(app: FastAPI):
     configure_hf_hub_cache(settings.data_dir)
     settings.ensure_dirs()
     settings.write_runtime_config()
-    yield
     db = get_db()
+    stale = await db.reconcile_stale_jobs()
+    if stale:
+        import logging
+
+        logging.getLogger(__name__).info("Marked %d stale job(s) as failed after restart", stale)
+    yield
     await db.close()
     clear_dependency_caches()
 
@@ -103,6 +108,8 @@ def create_app() -> FastAPI:
         )
         response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
         response.headers["Cross-Origin-Resource-Policy"] = "same-origin"
+        if request.url.path.startswith("/assets/"):
+            response.headers.setdefault("Cache-Control", "public, max-age=31536000, immutable")
         return response
 
     prefix = "/api"
@@ -137,7 +144,7 @@ def create_app() -> FastAPI:
                 return JSONResponse({"detail": "Not found"}, status_code=404)
             index = ui_dist / "index.html"
             if index.exists():
-                return FileResponse(index)
+                return FileResponse(index, headers={"Cache-Control": "no-cache"})
             return JSONResponse({"detail": "UI not built"}, status_code=404)
 
     return app

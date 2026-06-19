@@ -17,23 +17,50 @@ This guide walks you from a fresh machine to your first chat, training run, and 
 
 ## Step 1 — Install
 
-### Linux & macOS (fastest)
+### Linux, macOS, and WSL2 (fastest)
+
+One command installs dependencies, builds the UI, and **starts Forge** (browser opens automatically):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/install.sh | bash
-~/Seiso/scripts/start.sh
 ```
 
-### From a git clone
+No separate start step is needed after a successful install.
+
+**Start Forge on later sessions:**
 
 ```bash
-git clone https://github.com/Legendarylibr/SeisoLocalAI.git Seiso
-cd Seiso
-./scripts/install.sh
-./scripts/start.sh
+"$HOME/Seiso/scripts/start.sh"
+# or: curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/start.sh | bash
 ```
 
-See [install.md](install.md) for Windows, AMD ROCm, and manual pip extras.
+Custom clone location: set `SEISO_INSTALL_DIR` before running the installer (for example `SEISO_INSTALL_DIR="$HOME/code/Seiso"`).
+
+### From a git clone (any platform)
+
+**Linux / macOS / WSL:**
+
+```bash
+git clone https://github.com/Legendarylibr/SeisoLocalAI.git "$HOME/Seiso"
+cd "$HOME/Seiso"
+./scripts/install.sh
+```
+
+**Windows (PowerShell):**
+
+```powershell
+git clone https://github.com/Legendarylibr/SeisoLocalAI.git "$env:USERPROFILE\Seiso"
+cd "$env:USERPROFILE\Seiso"
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -U pip wheel setuptools
+pip install -e ".[forge,train,dev]"
+cd forge-ui; npm ci; npm run build; cd ..
+seiso doctor
+seiso forge
+```
+
+See [install.md](install.md) for AMD ROCm, pip extras, and upgrade steps.
 
 ## Step 2 — Onboarding
 
@@ -50,7 +77,7 @@ Seiso binds to `127.0.0.1` by default. Your credentials stay on your machine.
 3. Click **Download** on a model sized for your hardware (start with 1–3B for training, 7B+ for chat if you have VRAM)
 4. Watch live download progress in the UI
 
-Models are stored under `~/.seiso/models/` (override with `SEISO_DATA_DIR`).
+Models are cached under `{SEISO_DATA_DIR}/hf_cache` (default `$HOME/.seiso/hf_cache` on Linux/macOS/WSL, `%USERPROFILE%\.seiso\hf_cache` on Windows). The Hub UI also registers inventory links under `{SEISO_DATA_DIR}/models/{user_id}/`.
 
 ## Step 4 — Chat with a local model
 
@@ -75,17 +102,28 @@ With Forge running, point any OpenAI-compatible client at:
 
 ```text
 Base URL: http://127.0.0.1:8765/v1
-API key:  Inference key from ~/.seiso/.inference_api_key (scoped to /v1 only; not full admin access)
+API key:  Inference key from `{SEISO_DATA_DIR}/.inference_api_key` (default `$HOME/.seiso` or `%USERPROFILE%\.seiso`; scoped to /v1 only)
 ```
 
 ```bash
+# Linux / macOS / WSL
 curl http://127.0.0.1:8765/v1/chat/completions \
-  -H "Authorization: Bearer $(cat ~/.seiso/.inference_api_key)" \
+  -H "Authorization: Bearer $(cat "$HOME/.seiso/.inference_api_key")" \
   -H "Content-Type: application/json" \
   -d '{
     "model": "meta-llama/Llama-3.2-3B-Instruct",
     "messages": [{"role": "user", "content": "Hello from Seiso"}]
   }'
+```
+
+```powershell
+# Windows PowerShell
+$key = Get-Content "$env:USERPROFILE\.seiso\.inference_api_key" -Raw
+Invoke-RestMethod http://127.0.0.1:8765/v1/chat/completions `
+  -Headers @{ Authorization = "Bearer $($key.Trim())" } `
+  -ContentType "application/json" `
+  -Method Post `
+  -Body '{"model":"meta-llama/Llama-3.2-3B-Instruct","messages":[{"role":"user","content":"Hello from Seiso"}]}'
 ```
 
 ## Step 5 — Fine-tune with Training Studio
@@ -98,6 +136,7 @@ curl http://127.0.0.1:8765/v1/chat/completions \
 **CLI equivalent:**
 
 ```bash
+# Linux / macOS / WSL — activate venv first
 source .venv/bin/activate
 seiso train --config configs/example_lora.yaml
 ```
@@ -109,7 +148,10 @@ export SEISO_NVIDIA_HOST_VENV_ACK=1
 seiso train --config configs/example_lora.yaml
 ```
 
-Checkpoints land in `{SEISO_DATA_DIR}/checkpoints/{user_id}/` with a `seiso_manifest.json` describing kernel and quant settings.
+Checkpoints:
+
+- **Forge UI:** `{SEISO_DATA_DIR}/checkpoints/{user_id}/{job_id}/checkpoint-*` (with `seiso_manifest.json`)
+- **CLI (`seiso train`):** YAML `output_dir` — see `configs/example_lora.yaml` (`./outputs/lora-run/`)
 
 Platform notes: [training/quickstart.md](training/quickstart.md) · [platforms/](platforms/).
 
@@ -123,7 +165,14 @@ Platform notes: [training/quickstart.md](training/quickstart.md) · [platforms/]
 **CLI equivalent:**
 
 ```bash
-seiso export --checkpoint ~/.seiso/checkpoints/<user>/<run>/checkpoint-<ts> \
+# Linux / macOS / WSL
+seiso export --checkpoint "$HOME/.seiso/checkpoints/<user>/<job_id>/checkpoint-<timestamp>" \
+  --formats merged,gguf --profile inference
+```
+
+```powershell
+# Windows
+seiso export --checkpoint "$env:USERPROFILE\.seiso\checkpoints\<user>\<job_id>\checkpoint-<timestamp>" `
   --formats merged,gguf --profile inference
 ```
 
@@ -135,7 +184,7 @@ GGUF export requires `llama.cpp` (set `LLAMA_CPP_DIR` or install system `convert
 |---------|-------|-------|
 | Model compression (distill → prune → quant) | `/compress` | [compression.md](compression.md) |
 | Stable Diffusion compression | `/image-compress` | [compression.md](compression.md) |
-| RL adaptive GGUF quantization | `/rl-quant` | [compression.md](compression.md) |
+| RL adaptive GGUF quantization | `/rl-quant` | [compression.md](compression.md) · `seiso rl-quant run` |
 | Visual recipe graphs | `/recipes` | [forge.md](forge.md) |
 | External providers (OpenAI, Ollama, vLLM) | `/integrations` | [forge.md](forge.md) |
 | Multi-GPU training | Training Studio checkbox | [training/multi-gpu.md](training/multi-gpu.md) |
@@ -144,11 +193,17 @@ GGUF export requires `llama.cpp` (set `LLAMA_CPP_DIR` or install system `convert
 
 ## Data directory layout
 
-Default: `~/.seiso` (set `SEISO_DATA_DIR` to change).
+Default data directory (override with `SEISO_DATA_DIR`):
+
+| OS | Default path |
+|----|--------------|
+| Linux / macOS / WSL | `$HOME/.seiso` |
+| Windows | `%USERPROFILE%\.seiso` |
 
 ```
-~/.seiso/
-├── models/           # Downloaded HF snapshots and GGUF files
+{SEISO_DATA_DIR}/
+├── models/           # Per-user inventory links to cached weights
+├── hf_cache/         # Hugging Face hub cache (GGUF / safetensors downloads)
 ├── checkpoints/      # Training outputs (per user)
 ├── exports/          # Merged / GGUF / LoRA exports
 ├── compress/         # LLM compression run artifacts
@@ -157,7 +212,6 @@ Default: `~/.seiso` (set `SEISO_DATA_DIR` to change).
 ├── knowledge/        # RAG vector stores (API)
 ├── uploads/          # User-uploaded datasets and files
 ├── artifacts/        # Tool-generated files
-├── hf_cache/         # Hugging Face hub cache
 └── sandbox/          # Sandboxed code-exec workspace
 ```
 

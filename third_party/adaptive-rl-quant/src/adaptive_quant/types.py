@@ -187,6 +187,11 @@ class EpisodeMetrics:
     throughput_source: str = ""
     memory_source: str = ""
     perplexity_source: str = ""
+    kernel_profile_id: float = 0.0
+    kernel_profile_name: str = ""
+    kernel_speedup: float = 0.0
+    kernel_latency_ms: float = 0.0
+    kernel_benchmark_source: str = ""
 
 
 @dataclass
@@ -232,3 +237,10 @@ class BackendMetricDict(BackendMetricRequired, total=False):
     measurement_contract: str
     subprocess_applies_quant_decision: bool
     decision_measurement_key: str
+    kernel_profile_id: float
+    kernel_profile_name: str
+    kernel_speedup: float
+    kernel_latency_ms: float
+    kernel_memory_overhead_mb: float
+    kernel_benchmark_source: str
+    kernel_reward_source: str

@@ -15,11 +15,20 @@ from seiso.inference.backends import (
     resolve_local_backend,
 )
 from seiso.inference.model_pool import get_model_pool
+from seiso.inference.tuning import (
+    configure_torch_inference,
+    estimate_llama_n_ctx,
+    extract_mlx_token_text,
+    llama_completion_kwargs,
+    mlx_stream_kwargs,
+    torch_generate_kwargs,
+)
 from seiso.models.chat_format import format_messages_for_prompt
 
 logger = logging.getLogger(__name__)
 
 _STREAM_DONE = object()
+_STREAM_BATCH_CHARS = 20
 
 
 class _StreamError:
@@ -57,12 +66,23 @@ class LocalInferenceRunner:
             return not self._pool.is_generation_active(generation_id)
 
         def producer() -> None:
+            buffer: list[str] = []
+            buffered = 0
             try:
                 for token in self._iter_tokens(payload, resolved_path, route, should_stop):
                     if should_stop():
                         break
-                    loop.call_soon_threadsafe(queue.put_nowait, token)
+                    buffer.append(token)
+                    buffered += len(token)
+                    if buffered >= _STREAM_BATCH_CHARS:
+                        loop.call_soon_threadsafe(queue.put_nowait, "".join(buffer))
+                        buffer.clear()
+                        buffered = 0
+                if buffer and not should_stop():
+                    loop.call_soon_threadsafe(queue.put_nowait, "".join(buffer))
             except Exception as exc:
+                if buffer and not should_stop():
+                    loop.call_soon_threadsafe(queue.put_nowait, "".join(buffer))
                 if not should_stop():
                     loop.call_soon_threadsafe(queue.put_nowait, _StreamError(exc))
             finally:
@@ -87,6 +107,11 @@ class LocalInferenceRunner:
 
     async def cancel_and_unload(self) -> dict:
         return await self.unload()
+
+    async def cancel_generation(self) -> dict:
+        """Stop active streams without unloading the warmed model."""
+        self._pool.bump_generation()
+        return self._pool.status()
 
     async def _ensure_model_switch(self, model_path: str) -> None:
         status = self._pool.status()
@@ -135,24 +160,23 @@ class LocalInferenceRunner:
 
         model, tokenizer = self._pool.get_mlx(model_path)
         prompt = format_messages_for_prompt(payload.get("messages", []), tokenizer)
-        max_tokens = payload.get("max_tokens", 512)
+        gen_kwargs = {"prompt": prompt, **mlx_stream_kwargs(payload)}
 
         try:
             from mlx_lm import stream_generate
 
-            for token in stream_generate(model, tokenizer, prompt=prompt, max_tokens=max_tokens):
+            for token in stream_generate(model, tokenizer, **gen_kwargs):
                 if should_stop():
                     break
-                if isinstance(token, tuple):
-                    yield token[0]
-                else:
-                    yield str(token)
+                text = extract_mlx_token_text(token)
+                if text:
+                    yield text
             return
         except (ImportError, TypeError):
             pass
 
         if not should_stop():
-            yield generate(model, tokenizer, prompt=prompt, max_tokens=max_tokens)
+            yield generate(model, tokenizer, **gen_kwargs)
 
     def _torch_stream(
         self,
@@ -163,25 +187,30 @@ class LocalInferenceRunner:
         import torch
         from transformers import TextIteratorStreamer
 
+        configure_torch_inference()
         model, tokenizer = self._pool.get_torch(model_path, load_in_4bit=True)
         messages = payload.get("messages", [])
         prompt = format_messages_for_prompt(messages, tokenizer)
         inputs = tokenizer(prompt, return_tensors="pt")
-        inputs = {k: v.to(model.device) for k, v in inputs.items()}
+        device = model.device
+        inputs = {
+            k: v.to(device, non_blocking=getattr(device, "type", "") == "cuda")
+            for k, v in inputs.items()
+        }
 
         streamer = TextIteratorStreamer(tokenizer, skip_prompt=True, skip_special_tokens=True)
-        gen_kwargs = {
-            **inputs,
-            "max_new_tokens": payload.get("max_tokens", 512),
-            "streamer": streamer,
-            "do_sample": payload.get("temperature", 0) > 0,
-            "temperature": max(payload.get("temperature", 0.7), 0.01),
-        }
-        if payload.get("temperature", 0) <= 0:
-            gen_kwargs["do_sample"] = False
-            gen_kwargs.pop("temperature", None)
+        gen_kwargs = torch_generate_kwargs(
+            payload,
+            inputs,
+            streamer,
+            pad_token_id=tokenizer.pad_token_id,
+        )
 
-        thread = threading.Thread(target=model.generate, kwargs=gen_kwargs, daemon=True)
+        def _generate() -> None:
+            with torch.inference_mode():
+                model.generate(**gen_kwargs)
+
+        thread = threading.Thread(target=_generate, daemon=True)
         thread.start()
         for text in streamer:
             if should_stop():
@@ -190,25 +219,26 @@ class LocalInferenceRunner:
                 yield text
         thread.join(timeout=0)
 
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()
-
     def _llama_stream(
         self,
         payload: dict[str, Any],
         model_path: str,
         should_stop: Callable[[], bool],
     ) -> Iterator[str]:
+        messages = payload.get("messages", [])
+        n_ctx = payload.get("n_ctx") or estimate_llama_n_ctx(
+            messages,
+            max_tokens=int(payload.get("max_tokens", 512)),
+        )
         try:
-            llm = self._pool.get_llama(model_path, n_ctx=payload.get("n_ctx", 4096))
+            llm = self._pool.get_llama(model_path, n_ctx=n_ctx)
         except ImportError as exc:
             raise RuntimeError("llama-cpp-python not installed") from exc
 
         messages = payload.get("messages", [])
         stream = llm.create_chat_completion(
             messages=messages,
-            max_tokens=payload.get("max_tokens", 512),
-            stream=True,
+            **llama_completion_kwargs(payload),
         )
         for chunk in stream:
             if should_stop():

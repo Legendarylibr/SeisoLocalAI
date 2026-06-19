@@ -9,6 +9,7 @@ import {
 type Props = {
   progress: ModelProgressState | null;
   modelName?: string | null;
+  onCancel?: () => void;
 };
 
 const STALL_SECONDS = 8;
@@ -98,19 +99,20 @@ function useLiveProgress(progress: ModelProgressState) {
   return { liveEta, displayPct, hasByteTracker, stalled };
 }
 
-export function ModelLoadProgress({ progress, modelName }: Props) {
+export function ModelLoadProgress({ progress, modelName, onCancel }: Props) {
   if (!progress) return null;
   return (
-    <ModelLoadProgressView progress={progress} modelName={modelName} />
+    <ModelLoadProgressView progress={progress} modelName={modelName} onCancel={onCancel} />
   );
 }
 
 type ViewProps = {
   progress: ModelProgressState;
   modelName?: string | null;
+  onCancel?: () => void;
 };
 
-function ModelLoadProgressView({ progress, modelName }: ViewProps) {
+function ModelLoadProgressView({ progress, modelName, onCancel }: ViewProps) {
   const { liveEta, displayPct, hasByteTracker, stalled } = useLiveProgress(progress);
   const pct = Math.min(100, Math.max(0, displayPct));
   const bytesDone = progress.bytesDone ?? 0;
@@ -127,7 +129,14 @@ function ModelLoadProgressView({ progress, modelName }: ViewProps) {
     >
       <div className="model-load-progress-header">
         <span className="model-load-progress-label">{progress.label}</span>
-        <span className="model-load-progress-eta">{formatEta(liveEta)}</span>
+        <span className="model-load-progress-actions">
+          <span className="model-load-progress-eta">{formatEta(liveEta)}</span>
+          {onCancel && progress.phase !== "ready" && (
+            <button type="button" className="model-load-progress-cancel" onClick={onCancel}>
+              Cancel
+            </button>
+          )}
+        </span>
       </div>
       {hasByteTracker && (
         <div className="model-load-progress-bytes">

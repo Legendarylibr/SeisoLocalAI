@@ -46,211 +46,159 @@ class CatalogEntry:
     priority: int = 50  # higher = shown first (newer / more relevant)
 
 
-# Curated catalog — one flagship per major open-source brand near the top (June 2026)
+# Curated catalog — popular GGUF-friendly open-weight models for local use (June 2026)
 CATALOG: tuple[CatalogEntry, ...] = (
-    # ── Flagships (interleaved brands) ──
+    # ── Current flagships and high-signal local picks ──
     CatalogEntry(
-        "moonshotai/Kimi-K2.7-Code", "Kimi K2.7 Code", ModelFamily.KIMI, "1T", ModelTask.CODE, "Q4_K_M",
-        ("code", "moe", "new", "popular"), priority=100,
-    ),
-    CatalogEntry(
-        "Qwen/Qwen3.6-35B-A3B", "Qwen 3.6 35B MoE", ModelFamily.QWEN, "35B", ModelTask.CHAT, "Q4_K_M",
-        ("code", "moe", "new", "popular"), priority=99, gguf_repo="bartowski/Qwen_Qwen3.6-35B-A3B-GGUF",
-    ),
-    CatalogEntry(
-        "meta-llama/Llama-4-Scout-17B-16E-Instruct", "Llama 4 Scout", ModelFamily.LLAMA, "109B", ModelTask.CHAT, "Q4_K_M",
-        ("moe", "vision", "new", "popular"), priority=98,
-    ),
-    CatalogEntry(
-        "google/gemma-4-31B-it", "Gemma 4 31B Instruct", ModelFamily.GEMMA, "31B", ModelTask.CHAT, "Q4_K_M",
-        ("code", "new", "popular"), priority=97,
-    ),
-    CatalogEntry(
-        "mistralai/Mistral-Small-4-119B-2603", "Mistral Small 4", ModelFamily.MISTRAL, "119B", ModelTask.CHAT, "Q4_K_M",
-        ("moe", "new", "popular"), priority=96,
-    ),
-    CatalogEntry(
-        "deepseek-ai/DeepSeek-R1-0528", "DeepSeek R1 (May 2025)", ModelFamily.DEEPSEEK, "671B", ModelTask.CHAT, "Q4_K_M",
-        ("reasoning", "moe", "popular", "new"), priority=95,
-    ),
-    CatalogEntry(
-        "nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-BF16", "Nemotron 3 Super 120B", ModelFamily.NEMOTRON, "120B", ModelTask.CHAT, "Q4_K_M",
-        ("moe", "new", "popular", "reasoning"), priority=94,
-    ),
-    CatalogEntry(
-        "zai-org/GLM-5", "GLM 5", ModelFamily.GLM, "744B", ModelTask.CHAT, "Q4_K_M",
-        ("moe", "new", "popular", "reasoning"), priority=93,
-    ),
-    CatalogEntry(
-        "MiniMaxAI/MiniMax-M2.7", "MiniMax M2.7", ModelFamily.MINIMAX, "230B", ModelTask.CHAT, "Q4_K_M",
-        ("moe", "new", "popular"), priority=92,
-    ),
-    CatalogEntry(
-        "microsoft/phi-4", "Phi-4", ModelFamily.PHI, "14B", ModelTask.CHAT, "Q4_K_M",
-        ("new", "popular"), priority=91,
-    ),
-    CatalogEntry(
-        "meta-llama/Llama-4-Maverick-17B-128E-Instruct", "Llama 4 Maverick", ModelFamily.LLAMA, "400B", ModelTask.CHAT, "Q4_K_M",
-        ("moe", "vision", "new"), priority=90,
-    ),
-    CatalogEntry(
-        "ibm-granite/granite-4.0-h-small", "Granite 4.0 H Small", ModelFamily.IBM, "8B", ModelTask.CHAT, "Q4_K_M",
-        ("new", "popular"), priority=89,
-    ),
-    CatalogEntry(
-        "allenai/Olmo-3-7B-Instruct", "Olmo 3 7B Instruct", ModelFamily.OLMO, "7B", ModelTask.CHAT, "Q4_K_M",
-        ("new",), priority=88,
-    ),
-    CatalogEntry(
-        "openai/gpt-oss-20b", "GPT-OSS 20B", ModelFamily.OTHER, "20B", ModelTask.CHAT, "Q4_K_M",
-        ("new", "popular"), priority=87,
-    ),
-    # ── Kimi ──
-    CatalogEntry(
-        "moonshotai/Kimi-K2.6", "Kimi K2.6", ModelFamily.KIMI, "1T", ModelTask.CODE, "Q4_K_M",
-        ("code", "moe", "new", "popular"), priority=86,
-    ),
-    CatalogEntry(
-        "moonshotai/Kimi-K2.5", "Kimi K2.5", ModelFamily.KIMI, "1T", ModelTask.CHAT, "Q4_K_M",
-        ("moe", "new", "popular", "vision"), priority=85,
-    ),
-    CatalogEntry(
-        "moonshotai/Kimi-K2-Thinking", "Kimi K2 Thinking", ModelFamily.KIMI, "1T", ModelTask.CHAT, "Q4_K_M",
-        ("moe", "new", "reasoning"), priority=84,
-    ),
-    # ── Qwen 3.6 / Coder ──
-    CatalogEntry(
-        "Qwen/Qwen3.6-27B", "Qwen 3.6 27B", ModelFamily.QWEN, "27B", ModelTask.CHAT, "Q4_K_M",
-        ("code", "new", "popular"), priority=83, gguf_repo="bartowski/Qwen3.6-27B-GGUF",
+        "Qwen/Qwen3.6-35B-A3B", "Qwen 3.6 35B MoE", ModelFamily.QWEN, "35B", ModelTask.CODE, "Q4_K_M",
+        ("code", "moe", "new", "popular"), priority=100, gguf_repo="unsloth/Qwen3.6-35B-A3B-GGUF",
     ),
     CatalogEntry(
         "Qwen/Qwen3-Coder-Next", "Qwen 3 Coder Next", ModelFamily.QWEN, "80B", ModelTask.CODE, "Q4_K_M",
-        ("code", "moe", "new"), priority=82,
+        ("code", "moe", "new", "popular"), priority=99, gguf_repo="unsloth/Qwen3-Coder-Next-GGUF",
+    ),
+    CatalogEntry(
+        "openai/gpt-oss-20b", "GPT-OSS 20B", ModelFamily.OTHER, "20B", ModelTask.CHAT, "Q4_K_M",
+        ("reasoning", "new", "popular"), priority=98, gguf_repo="unsloth/gpt-oss-20b-GGUF",
+    ),
+    CatalogEntry(
+        "google/gemma-3-27b-it", "Gemma 3 27B Instruct", ModelFamily.GEMMA, "27B", ModelTask.CHAT, "Q4_K_M",
+        ("vision", "new", "popular"), priority=97, gguf_repo="unsloth/gemma-3-27b-it-GGUF",
+    ),
+    CatalogEntry(
+        "deepseek-ai/DeepSeek-R1-0528", "DeepSeek R1 0528", ModelFamily.DEEPSEEK, "671B", ModelTask.CHAT, "Q4_K_M",
+        ("reasoning", "moe", "new", "popular"), priority=96, gguf_repo="unsloth/DeepSeek-R1-0528-GGUF",
+    ),
+    CatalogEntry(
+        "meta-llama/Llama-4-Scout-17B-16E-Instruct", "Llama 4 Scout", ModelFamily.LLAMA, "109B", ModelTask.CHAT, "Q4_K_M",
+        ("moe", "vision", "long-context", "popular"), priority=95, gguf_repo="unsloth/Llama-4-Scout-17B-16E-Instruct-GGUF",
+    ),
+    CatalogEntry(
+        "mistralai/Devstral-Small-2507", "Devstral Small 1.1", ModelFamily.MISTRAL, "24B", ModelTask.CODE, "Q4_K_M",
+        ("code", "agent", "new", "popular"), priority=94,
     ),
     CatalogEntry(
         "Qwen/Qwen3-Coder-30B-A3B-Instruct", "Qwen 3 Coder 30B MoE", ModelFamily.QWEN, "30B", ModelTask.CODE, "Q4_K_M",
-        ("code", "moe"), priority=81,
-    ),
-    # ── Gemma 4 ──
-    CatalogEntry(
-        "google/gemma-4-26B-A4B-it", "Gemma 4 26B MoE", ModelFamily.GEMMA, "26B", ModelTask.CHAT, "Q4_K_M",
-        ("code", "moe", "new"), priority=80,
+        ("code", "moe", "popular"), priority=93,
     ),
     CatalogEntry(
-        "google/gemma-4-12B-it", "Gemma 4 12B Instruct", ModelFamily.GEMMA, "12B", ModelTask.CHAT, "Q4_K_M",
-        ("code", "new", "vision"), priority=79,
+        "Qwen/Qwen3-30B-A3B", "Qwen 3 30B MoE", ModelFamily.QWEN, "30B", ModelTask.CHAT, "Q4_K_M",
+        ("moe", "reasoning", "popular"), priority=92, gguf_repo="unsloth/Qwen3-30B-A3B-GGUF",
     ),
     CatalogEntry(
-        "google/gemma-4-E4B-it", "Gemma 4 E4B Instruct", ModelFamily.GEMMA, "4B", ModelTask.CHAT, "Q4_K_M",
-        ("code", "new"), priority=78,
+        "mistralai/Mistral-Small-3.2-24B-Instruct-2506", "Mistral Small 3.2 24B", ModelFamily.MISTRAL, "24B", ModelTask.CHAT, "Q4_K_M",
+        ("vision", "new", "popular"), priority=91,
     ),
     CatalogEntry(
-        "google/gemma-4-E2B-it", "Gemma 4 E2B Instruct", ModelFamily.GEMMA, "2B", ModelTask.CHAT, "Q4_K_M",
-        ("code", "new"), priority=77,
-    ),
-    # ── Mistral / Devstral ──
-    CatalogEntry(
-        "mistralai/Devstral-Small-2507", "Devstral Small 1.1", ModelFamily.MISTRAL, "24B", ModelTask.CODE, "Q4_K_M",
-        ("code", "new"), priority=76,
+        "microsoft/phi-4", "Phi-4", ModelFamily.PHI, "14B", ModelTask.CHAT, "Q4_K_M",
+        ("popular",), priority=90, gguf_repo="unsloth/phi-4-GGUF",
     ),
     CatalogEntry(
-        "mistralai/Codestral-22B-v0.1", "Codestral 22B", ModelFamily.MISTRAL, "22B", ModelTask.CODE, "Q4_K_M",
-        ("code",), priority=75,
-    ),
-    # ── GLM ──
-    CatalogEntry(
-        "zai-org/GLM-4.7", "GLM 4.7", ModelFamily.GLM, "355B", ModelTask.CODE, "Q4_K_M",
-        ("code", "new"), priority=74,
+        "meta-llama/Llama-3.3-70B-Instruct", "Llama 3.3 70B Instruct", ModelFamily.LLAMA, "70B", ModelTask.CHAT, "Q4_K_M",
+        ("popular",), priority=89, gguf_repo="unsloth/Llama-3.3-70B-Instruct-GGUF",
     ),
     CatalogEntry(
-        "zai-org/GLM-4.7-Flash", "GLM 4.7 Flash", ModelFamily.GLM, "30B", ModelTask.CODE, "Q4_K_M",
-        ("code", "moe"), priority=73,
-    ),
-    # ── MiniMax ──
-    CatalogEntry(
-        "MiniMaxAI/MiniMax-M3", "MiniMax M3", ModelFamily.MINIMAX, "23B", ModelTask.CODE, "Q4_K_M",
-        ("code", "moe", "new"), priority=72,
-    ),
-    # ── DeepSeek ──
-    CatalogEntry(
-        "deepseek-ai/DeepSeek-V3.2", "DeepSeek V3.2", ModelFamily.DEEPSEEK, "671B", ModelTask.CHAT, "Q4_K_M",
-        ("moe",), priority=71,
+        "deepseek-ai/DeepSeek-R1-Distill-Qwen-32B", "DeepSeek R1 Distill Qwen 32B", ModelFamily.DEEPSEEK, "32B", ModelTask.CHAT, "Q4_K_M",
+        ("reasoning", "popular"), priority=88, gguf_repo="unsloth/DeepSeek-R1-Distill-Qwen-32B-GGUF",
     ),
     CatalogEntry(
-        "deepseek-ai/DeepSeek-R1-Distill-Llama-8B", "DeepSeek R1 Distill 8B", ModelFamily.DEEPSEEK, "8B", ModelTask.CHAT, "Q4_K_M",
-        ("reasoning",), priority=70,
+        "Qwen/QwQ-32B", "QwQ 32B Reasoning", ModelFamily.QWEN, "32B", ModelTask.CHAT, "Q4_K_M",
+        ("reasoning", "popular"), priority=87, gguf_repo="unsloth/QwQ-32B-GGUF",
+    ),
+    # ── Practical single-GPU and laptop-friendly models ──
+    CatalogEntry(
+        "Qwen/Qwen3-14B", "Qwen 3 14B", ModelFamily.QWEN, "14B", ModelTask.CHAT, "Q4_K_M",
+        ("reasoning", "popular"), priority=86, gguf_repo="unsloth/Qwen3-14B-GGUF",
+    ),
+    CatalogEntry(
+        "google/gemma-3-12b-it", "Gemma 3 12B Instruct", ModelFamily.GEMMA, "12B", ModelTask.CHAT, "Q4_K_M",
+        ("vision", "popular"), priority=85, gguf_repo="unsloth/gemma-3-12b-it-GGUF",
+    ),
+    CatalogEntry(
+        "Qwen/Qwen3-8B", "Qwen 3 8B", ModelFamily.QWEN, "8B", ModelTask.CHAT, "Q4_K_M",
+        ("reasoning", "popular"), priority=84, gguf_repo="unsloth/Qwen3-8B-GGUF",
+    ),
+    CatalogEntry(
+        "google/gemma-3-4b-it", "Gemma 3 4B Instruct", ModelFamily.GEMMA, "4B", ModelTask.CHAT, "Q4_K_M",
+        ("vision", "small", "popular"), priority=83, gguf_repo="unsloth/gemma-3-4b-it-GGUF",
+    ),
+    CatalogEntry(
+        "microsoft/Phi-4-mini-instruct", "Phi-4 Mini Instruct", ModelFamily.PHI, "3.8B", ModelTask.CHAT, "Q4_K_M",
+        ("small", "popular"), priority=82, gguf_repo="unsloth/Phi-4-mini-instruct-GGUF",
+    ),
+    CatalogEntry(
+        "Qwen/Qwen3-4B", "Qwen 3 4B", ModelFamily.QWEN, "4B", ModelTask.CHAT, "Q4_K_M",
+        ("small", "popular"), priority=81, gguf_repo="unsloth/Qwen3-4B-GGUF",
+    ),
+    CatalogEntry(
+        "Qwen/Qwen3-1.7B", "Qwen 3 1.7B", ModelFamily.QWEN, "1.7B", ModelTask.CHAT, "Q4_K_M",
+        ("small",), priority=80, gguf_repo="unsloth/Qwen3-1.7B-GGUF",
+    ),
+    CatalogEntry(
+        "Qwen/Qwen3-0.6B", "Qwen 3 0.6B", ModelFamily.QWEN, "0.6B", ModelTask.CHAT, "Q4_K_M",
+        ("small",), priority=79, gguf_repo="unsloth/Qwen3-0.6B-GGUF",
+    ),
+    CatalogEntry(
+        "google/gemma-3-1b-it", "Gemma 3 1B Instruct", ModelFamily.GEMMA, "1B", ModelTask.CHAT, "Q4_K_M",
+        ("small",), priority=78, gguf_repo="unsloth/gemma-3-1b-it-GGUF",
+    ),
+    # ── Popular reasoning, coding, and high-end alternatives ──
+    CatalogEntry(
+        "deepseek-ai/DeepSeek-R1-Distill-Qwen-14B", "DeepSeek R1 Distill Qwen 14B", ModelFamily.DEEPSEEK, "14B", ModelTask.CHAT, "Q4_K_M",
+        ("reasoning", "popular"), priority=77,
     ),
     CatalogEntry(
         "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B", "DeepSeek R1 Distill Qwen 7B", ModelFamily.DEEPSEEK, "7B", ModelTask.CHAT, "Q4_K_M",
-        ("reasoning",), priority=69,
-    ),
-    # ── Phi ──
-    CatalogEntry(
-        "microsoft/Phi-4-mini-instruct", "Phi-4 Mini", ModelFamily.PHI, "3.8B", ModelTask.CHAT, "Q4_K_M",
-        priority=68,
-    ),
-    # ── Qwen 3.5 (still popular, lower priority than 3.6) ──
-    CatalogEntry(
-        "Qwen/Qwen3.5-35B-A3B", "Qwen 3.5 35B MoE", ModelFamily.QWEN, "35B", ModelTask.CHAT, "Q4_K_M",
-        ("moe", "popular"), priority=67,
+        ("reasoning", "popular"), priority=76,
     ),
     CatalogEntry(
-        "Qwen/Qwen3.5-27B", "Qwen 3.5 27B", ModelFamily.QWEN, "27B", ModelTask.CHAT, "Q4_K_M",
-        ("popular",), priority=66,
+        "deepseek-ai/DeepSeek-R1-Distill-Llama-8B", "DeepSeek R1 Distill Llama 8B", ModelFamily.DEEPSEEK, "8B", ModelTask.CHAT, "Q4_K_M",
+        ("reasoning",), priority=75,
     ),
     CatalogEntry(
-        "Qwen/Qwen3.5-9B", "Qwen 3.5 9B", ModelFamily.QWEN, "9B", ModelTask.CHAT, "Q4_K_M",
-        ("popular",), priority=65,
+        "mistralai/Codestral-22B-v0.1", "Codestral 22B", ModelFamily.MISTRAL, "22B", ModelTask.CODE, "Q4_K_M",
+        ("code",), priority=74,
     ),
     CatalogEntry(
-        "Qwen/Qwen3.5-4B", "Qwen 3.5 4B", ModelFamily.QWEN, "4B", ModelTask.CHAT, "Q4_K_M",
-        ("popular",), priority=64,
+        "mistralai/Mistral-Small-3.1-24B-Instruct-2503", "Mistral Small 3.1 24B", ModelFamily.MISTRAL, "24B", ModelTask.CHAT, "Q4_K_M",
+        ("vision", "popular"), priority=73,
     ),
     CatalogEntry(
-        "Qwen/Qwen3.5-122B-A10B", "Qwen 3.5 122B MoE", ModelFamily.QWEN, "122B", ModelTask.CHAT, "Q4_K_M",
-        ("moe",), priority=63,
+        "moonshotai/Kimi-K2-Instruct", "Kimi K2 Instruct", ModelFamily.KIMI, "1T", ModelTask.CHAT, "Q4_K_M",
+        ("moe", "code", "popular"), priority=72,
     ),
     CatalogEntry(
-        "Qwen/Qwen3.5-0.8B", "Qwen 3.5 0.8B", ModelFamily.QWEN, "0.8B", ModelTask.CHAT, "Q4_K_M",
-        ("popular",), priority=62,
-    ),
-    CatalogEntry(
-        "Qwen/Qwen3.5-2B", "Qwen 3.5 2B", ModelFamily.QWEN, "2B", ModelTask.CHAT, "Q4_K_M",
-        priority=61,
-    ),
-    # ── Vision ──
-    CatalogEntry(
-        "Qwen/Qwen3-VL-2B-Instruct", "Qwen 3 VL 2B", ModelFamily.QWEN, "2B", ModelTask.VISION, "Q4_K_M",
-        ("popular",), priority=60,
-    ),
-    CatalogEntry(
-        "Qwen/Qwen3-VL-8B-Instruct", "Qwen 3 VL 8B", ModelFamily.QWEN, "8B", ModelTask.VISION, "Q4_K_M",
-        priority=59,
-    ),
-    CatalogEntry(
-        "Qwen/Qwen3-VL-4B-Instruct", "Qwen 3 VL 4B", ModelFamily.QWEN, "4B", ModelTask.VISION, "Q4_K_M",
-        priority=58,
-    ),
-    # ── Frontier / datacenter ──
-    CatalogEntry(
-        "nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-BF16", "Nemotron 3 Ultra 550B", ModelFamily.NEMOTRON, "550B", ModelTask.CHAT, "Q4_K_M",
-        ("moe", "reasoning"), priority=50,
-    ),
-    CatalogEntry(
-        "deepseek-ai/DeepSeek-V4-Flash", "DeepSeek V4 Flash", ModelFamily.DEEPSEEK, "284B", ModelTask.CHAT, "Q4_K_M",
-        ("moe",), priority=49,
-    ),
-    CatalogEntry(
-        "deepseek-ai/DeepSeek-V4-Pro", "DeepSeek V4 Pro", ModelFamily.DEEPSEEK, "1.6T", ModelTask.CHAT, "Q4_K_M",
-        ("moe",), priority=48,
-    ),
-    CatalogEntry(
-        "Qwen/Qwen3.5-397B-A17B", "Qwen 3.5 397B MoE", ModelFamily.QWEN, "397B", ModelTask.CHAT, "Q4_K_M",
-        ("moe",), priority=47,
+        "zai-org/GLM-4.5-Air", "GLM 4.5 Air", ModelFamily.GLM, "106B", ModelTask.CHAT, "Q4_K_M",
+        ("agent", "moe", "popular"), priority=71,
     ),
     CatalogEntry(
         "openai/gpt-oss-120b", "GPT-OSS 120B", ModelFamily.OTHER, "120B", ModelTask.CHAT, "Q4_K_M",
-        ("popular",), priority=46,
+        ("reasoning", "moe", "popular"), priority=70, gguf_repo="unsloth/gpt-oss-120b-GGUF",
+    ),
+    CatalogEntry(
+        "meta-llama/Llama-4-Maverick-17B-128E-Instruct", "Llama 4 Maverick", ModelFamily.LLAMA, "400B", ModelTask.CHAT, "Q4_K_M",
+        ("moe", "vision"), priority=69,
+    ),
+    CatalogEntry(
+        "deepseek-ai/DeepSeek-V3-0324", "DeepSeek V3 0324", ModelFamily.DEEPSEEK, "671B", ModelTask.CHAT, "Q4_K_M",
+        ("moe", "popular"), priority=68,
+    ),
+    CatalogEntry(
+        "deepseek-ai/DeepSeek-R1-Distill-Llama-70B", "DeepSeek R1 Distill Llama 70B", ModelFamily.DEEPSEEK, "70B", ModelTask.CHAT, "Q4_K_M",
+        ("reasoning",), priority=67,
+    ),
+    # ── Vision-language models ──
+    CatalogEntry(
+        "Qwen/Qwen3-VL-2B-Instruct", "Qwen 3 VL 2B", ModelFamily.QWEN, "2B", ModelTask.VISION, "Q4_K_M",
+        ("vision", "small", "popular"), priority=66,
+    ),
+    CatalogEntry(
+        "Qwen/Qwen3-VL-8B-Instruct", "Qwen 3 VL 8B", ModelFamily.QWEN, "8B", ModelTask.VISION, "Q4_K_M",
+        ("vision", "popular"), priority=65,
+    ),
+    CatalogEntry(
+        "Qwen/Qwen3-VL-4B-Instruct", "Qwen 3 VL 4B", ModelFamily.QWEN, "4B", ModelTask.VISION, "Q4_K_M",
+        ("vision",), priority=64,
     ),
     # ── Embeddings ──
     CatalogEntry("BAAI/bge-small-en-v1.5", "BGE Small EN", ModelFamily.OTHER, "33M", ModelTask.EMBEDDING, "F16", priority=20),
@@ -401,4 +349,12 @@ def get_by_repo(repo_id: str) -> CatalogEntry | None:
     for e in CATALOG:
         if e.repo_id == repo_id:
             return e
+    return None
+
+
+def get_by_gguf_mirror(mirror_repo: str) -> CatalogEntry | None:
+    """Map a GGUF mirror repo back to its catalog base model."""
+    for entry in CATALOG:
+        if entry.gguf_repo == mirror_repo:
+            return entry
     return None

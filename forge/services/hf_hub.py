@@ -29,6 +29,7 @@ _FILE_SIZE_CACHE: dict[str, tuple[float, int]] = {}
 _FILE_SIZE_TTL_S = 86_400.0
 _DOWNLOAD_RETRIES = 3
 _DOWNLOAD_RETRY_BACKOFF_S = 2.0
+_UNSUPPORTED_GGUF_REPO_HINTS = ("dflash", "draft")
 _GGUF_SHARD_RE = re.compile(
     r"^(?P<prefix>.+)-(?P<index>\d{5})-of-(?P<total>\d{5})\.gguf$",
     re.I,
@@ -110,6 +111,11 @@ def _pick_gguf_file(
 ) -> str | None:
     files = _pick_gguf_files(files, preferred_quant=preferred_quant, repo_id=repo_id)
     return files[0] if files else None
+
+
+def _is_supported_gguf_repo_candidate(repo_id: str) -> bool:
+    lowered = repo_id.lower()
+    return not any(hint in lowered for hint in _UNSUPPORTED_GGUF_REPO_HINTS)
 
 
 def _pick_gguf_files(
@@ -325,6 +331,7 @@ def _first_repo_with_gguf(
         return repo_ids[0] if repo_has_gguf(repo_ids[0], token=token, revision=revision) else None
 
     workers = min(max_workers, len(repo_ids))
+    results: dict[str, bool] = {}
     with ThreadPoolExecutor(max_workers=workers) as pool:
         futures = {
             pool.submit(repo_has_gguf, repo_id, token=token, revision=revision): repo_id
@@ -333,12 +340,12 @@ def _first_repo_with_gguf(
         for future in as_completed(futures):
             repo_id = futures[future]
             try:
-                if future.result():
-                    for pending in futures:
-                        pending.cancel()
-                    return repo_id
+                results[repo_id] = bool(future.result())
             except Exception:
-                continue
+                results[repo_id] = False
+    for repo_id in repo_ids:
+        if results.get(repo_id):
+            return repo_id
     return None
 
 
@@ -449,6 +456,7 @@ def resolve_gguf_repo(
         row["repo_id"]
         for row in search_huggingface_gguf_repos(query=model_name, limit=10)
         if needle in row["repo_id"].lower().replace("_", "-")
+        and _is_supported_gguf_repo_candidate(row["repo_id"])
     ]
     resolved = _first_repo_with_gguf(search_candidates, token=token, revision=revision)
     if resolved:
@@ -537,8 +545,8 @@ def download_gguf(
     cached_target = cached_paths[0] if len(cached_paths) == 1 else cached_paths[0].parent
 
     return {
-        "path": str(cached_target.resolve()),
-        "paths": [str(path.resolve()) for path in cached_paths],
+        "path": str(cached_target),
+        "paths": [str(path) for path in cached_paths],
         "filename": filename,
         "filenames": filenames,
         "format": "gguf",
@@ -609,7 +617,7 @@ def link_inventory(inventory_dir: Path, inventory_name: str, target: Path) -> Pa
     inventory_dir.mkdir(parents=True, exist_ok=True)
     link = inventory_dir / inventory_name
     link.parent.mkdir(parents=True, exist_ok=True)
-    target = target.resolve()
+    target = target.expanduser().absolute()
     if link.is_symlink() or link.is_file():
         link.unlink()
     elif link.exists() and link.is_dir():

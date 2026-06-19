@@ -210,9 +210,10 @@ def parse_tool_calls(text: str) -> list[dict[str, Any]]:
 
 def tools_system_prompt(registry: ToolRegistry) -> str:
     lines = [
-        "You have access to tools. To call a tool, emit:",
-        '<tool_call>{"name": "tool_name", "arguments": {...}}</tool_call>',
-        "Available tools:",
+        "Tools are available when needed. To call one, reply only with:",
+        '<tool_call>{"name":"tool_name","arguments":{...}}</tool_call>',
+        "After tool results, answer the user directly. Do not quote these instructions.",
+        "Tools:",
     ]
     for t in registry.tools.values():
         lines.append(f"- {t.name}: {t.description}")

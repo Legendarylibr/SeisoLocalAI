@@ -1,6 +1,11 @@
 import { api, HardwareProfile, InferenceModelOption, LocalModel } from "@/lib/api";
-import { inventoryHasRepo, streamHubModelDownload, ModelProgressHandler } from "@/lib/hubDownload";
+import { bindAbort, throwIfAborted } from "@/lib/abort";
+import { inventoryHasRepo, inventoryMatchesRepo, streamHubModelDownload, ModelProgressHandler } from "@/lib/hubDownload";
+import { readStoredModel, writeStoredModel } from "@/lib/modelSelection";
 import { progressFromPreloadEvent } from "@/lib/modelProgress";
+
+export const CHAT_MODEL_STORAGE_KEY = "chat";
+export const CHAT_BACKEND_STORAGE_KEY = "chat-backend";
 
 type ChatNavTarget = { modelId?: string | null; repo?: string | null; downloadBytes?: number | null };
 
@@ -12,27 +17,6 @@ type BootstrapOptions = {
   hwProfile?: HardwareProfile | null;
   signal?: AbortSignal;
 };
-
-function throwIfAborted(signal?: AbortSignal) {
-  if (signal?.aborted) {
-    throw new DOMException("Aborted", "AbortError");
-  }
-}
-
-function bindAbort<T>(
-  signal: AbortSignal | undefined,
-  abort: () => void,
-  promise: Promise<T>,
-): Promise<T> {
-  if (!signal) return promise;
-  if (signal.aborted) {
-    abort();
-    return Promise.reject(new DOMException("Aborted", "AbortError"));
-  }
-  const onAbort = () => abort();
-  signal.addEventListener("abort", onAbort, { once: true });
-  return promise.finally(() => signal.removeEventListener("abort", onAbort));
-}
 
 export function chatPath(target: ChatNavTarget = {}): string {
   const params = new URLSearchParams();
@@ -57,37 +41,37 @@ export function chatPathForLocalModel(model: LocalModel): string {
   });
 }
 
-/** Pick Ollama vs llama.cpp (or MLX/torch) from model availability and hardware profile. */
+/** Resolve inference backend — trusts server default_backend, then hardware preference. */
 export function resolveInferenceBackend(
   model: InferenceModelOption | null,
   hwProfile: HardwareProfile | null,
   override?: string,
 ): string {
-  if (!model) return "llamacpp";
-  const available = model.backends?.length ? model.backends : [model.default_backend || "llamacpp"];
+  if (!model) return "";
+  const available = model.backends?.length ? model.backends : model.default_backend ? [model.default_backend] : [];
+  if (available.length === 0) return "";
   if (available.length === 1) return available[0];
   if (override && override !== "auto" && available.includes(override)) return override;
-
-  const preferred = hwProfile?.preferred_inference_backend;
-  if (preferred && available.includes(preferred)) return preferred;
-
-  if (available.includes("ollama") && available.includes("llamacpp")) {
-    const tier = hwProfile?.tier;
-    if (tier === "cpu_only" || tier === "edge") return "llamacpp";
-    const headroom = hwProfile?.vram_headroom_mb ?? 0;
-    return headroom >= 8000 ? "ollama" : "llamacpp";
-  }
 
   if (model.default_backend && available.includes(model.default_backend)) {
     return model.default_backend;
   }
+
+  const preferred = hwProfile?.preferred_inference_backend;
+  if (preferred && available.includes(preferred)) return preferred;
+
   return available[0];
 }
 
-export function pickInferenceModel(list: InferenceModelOption[], target: ChatNavTarget = {}): string {
+export function pickInferenceModel(
+  list: InferenceModelOption[],
+  target: ChatNavTarget = {},
+  storedId?: string | null,
+): string {
   return (
     (target.modelId && list.find((m) => m.id === target.modelId)?.id) ||
-    (target.repo && list.find((m) => m.source === `hf:${target.repo}`)?.id) ||
+    (target.repo && list.find((m) => inventoryMatchesRepo(m, target.repo!))?.id) ||
+    (storedId && list.find((m) => m.id === storedId)?.id) ||
     list.find((m) => m.hardware_fit === "ideal" || m.hardware_fit === "good")?.id ||
     (list.length ? list[0].id : "")
   );
@@ -107,25 +91,14 @@ export function needsHubDownload(list: InferenceModelOption[], target: ChatNavTa
   return !!(target.repo && !inventoryHasTarget(list, target));
 }
 
-async function resolveChatDownloadVariant(): Promise<"gguf" | "safetensors"> {
-  try {
-    const status = await api.hfStatus();
-    const { llamacpp, mlx, torch } = status.runtime;
-    if (!llamacpp && (mlx || torch)) return "safetensors";
-    return "gguf";
-  } catch {
-    return "gguf";
-  }
-}
-
 async function downloadChatModel(
   repo: string,
   onProgress?: ModelProgressHandler,
   options: { signal?: AbortSignal; downloadBytes?: number | null } = {},
 ): Promise<string> {
   throwIfAborted(options.signal);
-  const variant = await resolveChatDownloadVariant();
-  return streamHubModelDownload(repo, variant, onProgress, {
+  // Chat always downloads GGUF for llama.cpp inference — never safetensors snapshots.
+  return streamHubModelDownload(repo, "gguf", onProgress, {
     signal: options.signal,
     downloadBytes: options.downloadBytes ?? undefined,
   });
@@ -144,7 +117,7 @@ export async function ensureHubChatModel(
 ): Promise<string> {
   throwIfAborted(signal);
   const initial = await api.listInferenceModels();
-  const existing = initial.models.find((m) => m.source === `hf:${repo}`);
+  const existing = initial.models.find((m) => inventoryMatchesRepo(m, repo));
   if (existing) return existing.id;
   return downloadChatModel(repo, onProgress, { signal, downloadBytes });
 }
@@ -189,8 +162,9 @@ export function isChatModelReady(
   return !!(modelId && loadedModelId === modelId && loadedBackend === backend);
 }
 
-export async function bootstrapChatModels(
-  target: ChatNavTarget,
+/** Load chat inventory, optionally download a Hub model, pick defaults, and preload. */
+export async function bootstrapChatSession(
+  target: ChatNavTarget = {},
   options: BootstrapOptions = {},
 ): Promise<{
   models: InferenceModelOption[];
@@ -212,21 +186,43 @@ export async function bootstrapChatModels(
     throwIfAborted(options.signal);
   }
 
+  const useStoredPreferences = !hasChatNavTarget(target);
   const selectedId =
-    (downloadedId && models.find((m) => m.id === downloadedId)?.id) ||
-    pickInferenceModel(models, target);
+    downloadedId ||
+    pickInferenceModel(models, target, readStoredModel(CHAT_MODEL_STORAGE_KEY));
+  const storedBackend = readStoredModel(CHAT_BACKEND_STORAGE_KEY);
   const selected = models.find((m) => m.id === selectedId) ?? null;
-  const backend = resolveInferenceBackend(selected, options.hwProfile ?? null);
+  const backend = resolveInferenceBackend(
+    selected,
+    options.hwProfile ?? null,
+    useStoredPreferences ? storedBackend ?? undefined : undefined,
+  );
+
+  if (target.repo && !selected) {
+    throw new Error(
+      `Download finished but ${target.repo} was not found in local inventory. Try again or check Settings → Hugging Face.`,
+    );
+  }
+  if (selected && !backend) {
+    const fmt = selected.format?.toLowerCase();
+    const hint =
+      fmt === "gguf"
+        ? "This GGUF is not available for local chat. Install or update llama.cpp, or choose a GGUF architecture supported by your llama.cpp runtime."
+        : "No installed local inference engine can load this model. Install MLX or PyTorch support.";
+    throw new Error(hint);
+  }
 
   let loadedBackend = backend;
   if (options.preload !== false && selectedId && selected && !options.providerActive) {
     loadedBackend = await preloadWithProgress(selectedId, backend, options.onProgress, options.signal);
+    writeStoredModel(CHAT_MODEL_STORAGE_KEY, selectedId);
+    writeStoredModel(CHAT_BACKEND_STORAGE_KEY, loadedBackend);
   }
 
   return { models, selectedId, backend: loadedBackend, selected };
 }
 
-/** Load chat inventory and pick a default model when opening /chat without Hub params. */
+/** Open /chat without Hub params — restores last model from localStorage. */
 export async function initializeChatSession(
   options: BootstrapOptions = {},
 ): Promise<{
@@ -235,17 +231,5 @@ export async function initializeChatSession(
   backend: string;
   selected: InferenceModelOption | null;
 }> {
-  throwIfAborted(options.signal);
-  const models = options.initialModels ?? (await fetchInferenceModels());
-  throwIfAborted(options.signal);
-  const selectedId = pickInferenceModel(models, {});
-  const selected = models.find((m) => m.id === selectedId) ?? null;
-  const backend = resolveInferenceBackend(selected, options.hwProfile ?? null);
-
-  let loadedBackend = backend;
-  if (options.preload !== false && selectedId && selected && !options.providerActive) {
-    loadedBackend = await preloadWithProgress(selectedId, backend, options.onProgress, options.signal);
-  }
-
-  return { models, selectedId, backend: loadedBackend, selected };
+  return bootstrapChatSession({}, options);
 }

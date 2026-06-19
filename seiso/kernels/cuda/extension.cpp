@@ -1,4 +1,5 @@
 #include "kernels.cuh"
+#include "tuning_state.cuh"
 
 #include <torch/extension.h>
 
@@ -229,6 +230,10 @@ torch::Tensor cross_entropy_backward(
   return grad_logits;
 }
 
+void set_kernel_tuning(int rms_mode, int swiglu_vec, int lora_tile) {
+  seiso::set_kernel_tuning_state(rms_mode, swiglu_vec, lora_tile);
+}
+
 }  // namespace
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
@@ -238,4 +243,5 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("fused_lora_delta", &fused_lora_delta, "Fused low-rank LoRA delta");
   m.def("cross_entropy_forward", &cross_entropy_forward, "Fused CE forward stats");
   m.def("cross_entropy_backward", &cross_entropy_backward, "Fused CE backward");
+  m.def("set_kernel_tuning", &set_kernel_tuning, "Set RL kernel launch profile");
 }

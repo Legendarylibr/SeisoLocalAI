@@ -52,3 +52,34 @@ async def run_vendor_job(
     )
     orchestrator._emit_log(job_id, result_log(result))
     return result
+
+
+def vendor_orchestrator(
+    *,
+    class_name: str,
+    kind: str,
+    user_id_error: str,
+    path_keys: tuple[str, ...],
+    start_message: str,
+    runner: Callable[..., dict[str, Any]],
+    result_log: Callable[[dict[str, Any]], str],
+) -> type[Orchestrator]:
+    """Build a thin Orchestrator subclass for a vendored pipeline runner."""
+
+    class _VendorOrchestrator(Orchestrator):
+        async def execute(self, job_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+            return await run_vendor_job(
+                self,
+                job_id,
+                payload,
+                user_id_error=user_id_error,
+                path_keys=path_keys,
+                start_message=start_message,
+                runner=runner,
+                result_log=result_log,
+            )
+
+    _VendorOrchestrator.kind = kind
+    _VendorOrchestrator.__name__ = class_name
+    _VendorOrchestrator.__qualname__ = class_name
+    return _VendorOrchestrator

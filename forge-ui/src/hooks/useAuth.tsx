@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, ReactNode } from "react";
 import { api, AuthUser, clearLegacyToken } from "@/lib/api";
 
 type AuthState = {
@@ -39,25 +39,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     })();
   }, []);
 
-  const login = async (password: string) => {
+  const login = useCallback(async (password: string) => {
     const res = await api.login(password);
     setUser(res.user);
     setNeedsOnboarding(false);
-  };
+  }, []);
 
-  const register = async (password: string) => {
+  const register = useCallback(async (password: string) => {
     const res = await api.register(password);
     setUser(res.user);
     setNeedsOnboarding(false);
-  };
+  }, []);
 
-  const logout = async () => {
+  const logout = useCallback(async () => {
     await api.logout();
     setUser(null);
-  };
+  }, []);
+
+  const value = useMemo(
+    () => ({ user, loading, needsOnboarding, login, register, logout }),
+    [user, loading, needsOnboarding, login, register, logout],
+  );
 
   return (
-    <AuthContext.Provider value={{ user, loading, needsOnboarding, login, register, logout }}>
+    <AuthContext.Provider value={value}>
       {children}
     </AuthContext.Provider>
   );

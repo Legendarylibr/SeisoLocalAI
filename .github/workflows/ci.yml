@@ -35,3 +35,10 @@ jobs:
 
       - name: Run fast quality gate
         run: make ci-fast
+
+      - name: Run frontend checks
+        working-directory: forge-ui
+        run: |
+          npm ci
+          npm run typecheck
+          npm run build

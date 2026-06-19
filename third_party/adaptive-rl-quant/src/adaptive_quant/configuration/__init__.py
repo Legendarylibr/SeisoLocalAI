@@ -6,6 +6,7 @@ from adaptive_quant.configuration.flat_access import config_to_flat_dict
 from adaptive_quant.configuration.framework import FrameworkConfig, RewardWeights
 from adaptive_quant.configuration.sections import (
     ArtifactPaths,
+    KernelSettings,
     LlamaCppSettings,
     MoESettings,
     OnlineSettings,
@@ -18,6 +19,7 @@ from adaptive_quant.configuration.sections import (
 __all__ = [
     "ArtifactPaths",
     "FrameworkConfig",
+    "KernelSettings",
     "LlamaCppSettings",
     "MoESettings",
     "OnlineSettings",

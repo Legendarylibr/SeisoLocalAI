@@ -1,18 +1,10 @@
-import { useEffect, useState } from "react";
-import { api, SystemMetrics } from "@/lib/api";
+import { useLiveMetrics } from "@/context/MetricsContext";
 import { IconActivity, IconClose } from "@/components/Icons";
+import { useState } from "react";
 
 export function SystemMonitor() {
   const [open, setOpen] = useState(false);
-  const [metrics, setMetrics] = useState<SystemMetrics | null>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const poll = () => api.metrics().then(setMetrics).catch(() => {});
-    poll();
-    const id = setInterval(poll, 2000);
-    return () => clearInterval(id);
-  }, [open]);
+  const metrics = useLiveMetrics(open);
 
   const bar = (pct: number | null | undefined, color: string) => {
     const v = pct ?? 0;

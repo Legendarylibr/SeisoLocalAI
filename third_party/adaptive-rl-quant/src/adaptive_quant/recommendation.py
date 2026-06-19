@@ -136,6 +136,7 @@ def _feedback_for_config(config: FrameworkConfig):
             max_bits=max_bits,
             scale_upper=scale_upper,
             clip_upper=clip_upper,
+            config=config,
         )
 
     return _feedback
@@ -223,10 +224,12 @@ def _decision_signature(decision: QuantizationDecision) -> str:
         f"|clip={payload['clipping_range']:.2f}"
         f"|precision={payload['precision_level']:.2f}"
         f"|moe={moe_fragment}"
+        f"|kernel={payload.get('kernel_profile_name', '-')}"
     )
 
 
 def _decision_payload(decision: QuantizationDecision) -> dict[str, Any]:
+    metadata = dict(decision.metadata)
     return {
         "mode": decision.mode.value,
         "base_bit_width": decision.base_bit_width,
@@ -236,6 +239,9 @@ def _decision_payload(decision: QuantizationDecision) -> dict[str, Any]:
         "clipping_range": round(float(decision.clipping_range), 4),
         "precision_level": round(float(decision.precision_level), 4),
         "moe_variant_names": list(decision.moe_variant_names),
+        "kernel_profile_index": metadata.get("kernel_profile_index"),
+        "kernel_profile_name": metadata.get("kernel_profile_name"),
+        "metadata": metadata,
     }
 
 

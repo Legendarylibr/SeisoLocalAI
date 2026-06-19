@@ -202,6 +202,19 @@ class RouterSettings:
 
 
 @dataclass
+class KernelSettings:
+    """CUDA kernel RL: policy selects launch profiles co-trained with quantization."""
+
+    rl_enabled: bool = False
+    profile_count: int = 6
+    default_profile: int = 0
+    hidden_dim: int = 4096
+    batch_rows: int = 4096
+    live_benchmark: bool = False
+    benchmark_every_n_episodes: int = 16
+
+
+@dataclass
 class TrainingSettings:
     training_episodes: int = 3_000
     evaluation_episodes: int = 400
@@ -309,6 +322,9 @@ for _field in RouterSettings.__dataclass_fields__:
 for _field in TrainingSettings.__dataclass_fields__:
     FLAT_FIELD_MAP[_field] = ("training", _field)
 
+for _field in KernelSettings.__dataclass_fields__:
+    FLAT_FIELD_MAP[f"kernel_{_field}"] = ("kernel", _field)
+
 NESTED_SECTION_KEYS = frozenset(
     {
         "artifacts",
@@ -321,6 +337,7 @@ NESTED_SECTION_KEYS = frozenset(
         "frontier",
         "router",
         "training",
+        "kernel",
         "reward_weights",
     }
 )
@@ -336,4 +353,5 @@ SECTION_TYPES: dict[str, type] = {
     "frontier": FrontierSettings,
     "router": RouterSettings,
     "training": TrainingSettings,
+    "kernel": KernelSettings,
 }

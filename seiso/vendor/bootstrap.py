@@ -3,7 +3,41 @@
 from __future__ import annotations
 
 import sys
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
+
+
+@dataclass(frozen=True)
+class VendorBootstrap:
+    root: Path
+    ensure_importable: Callable[[], Path]
+    require: Callable[[], None]
+
+
+def make_vendor_bootstrap(
+    vendor_dir: str,
+    package_name: str,
+    *,
+    src_subdir: str | None = "src",
+    missing_hint: str | None = None,
+) -> VendorBootstrap:
+    """Create vendor_root / ensure / require helpers for a third_party tree."""
+    root = Path(__file__).resolve().parents[2] / "third_party" / vendor_dir
+    hint = missing_hint or f"Expected third_party/{vendor_dir}"
+
+    def ensure_importable() -> Path:
+        return ensure_vendor_importable(root, src_subdir=src_subdir)
+
+    def require() -> None:
+        require_vendor_package(
+            root,
+            package_name,
+            src_subdir=src_subdir,
+            missing_hint=hint,
+        )
+
+    return VendorBootstrap(root=root, ensure_importable=ensure_importable, require=require)
 
 
 def ensure_vendor_importable(vendor_root: Path, *, src_subdir: str | None = "src") -> Path:

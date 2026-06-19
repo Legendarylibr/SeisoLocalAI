@@ -18,6 +18,7 @@ from forge.security.autodefense import (
     scan_messages,
     scan_output,
 )
+from forge.services.llm_output import sanitize_llm_output
 from forge.tools.registry import build_default_registry
 from seiso.inference.backends import BACKEND_OLLAMA
 from seiso.inference.runner import LocalInferenceRunner
@@ -88,6 +89,8 @@ class InferenceOrchestrator(Orchestrator):
             else:
                 reply = await self._local_chat(payload)
                 backend = payload.get("inference_backend") or active
+
+        reply = sanitize_llm_output(reply)
 
         if use_defense:
             self._emit_log(job_id, "AutoDefense: scanning output")

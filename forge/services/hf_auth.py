@@ -173,6 +173,8 @@ def resolve_hf_token_for_download(
     result = probe_hf_hub(token=token)
     if result.token_valid:
         return token, source
+    if not getattr(result, "reachable", True):
+        return None, "none"
     if result.token_invalid or result.anonymous_ok:
         return None, "none"
     return token, source

@@ -4,23 +4,19 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from seiso.vendor.bootstrap import ensure_vendor_importable, require_vendor_package
+from seiso.vendor.bootstrap import make_vendor_bootstrap
 
-_VENDOR_ROOT = Path(__file__).resolve().parents[2] / "third_party" / "codellama-compress"
+_bs = make_vendor_bootstrap(
+    "codellama-compress",
+    "codellama_compress",
+    missing_hint="Expected third_party/codellama-compress/src/codellama_compress",
+)
+_VENDOR_ROOT = _bs.root
 
 
 def vendor_root() -> Path:
     return _VENDOR_ROOT
 
 
-def ensure_codellama_compress_importable() -> Path:
-    return ensure_vendor_importable(_VENDOR_ROOT)
-
-
-def require_codellama_compress() -> None:
-    require_vendor_package(
-        _VENDOR_ROOT,
-        "codellama_compress",
-        src_subdir="src",
-        missing_hint="Expected third_party/codellama-compress/src/codellama_compress",
-    )
+ensure_codellama_compress_importable = _bs.ensure_importable
+require_codellama_compress = _bs.require

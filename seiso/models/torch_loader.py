@@ -56,8 +56,18 @@ def load_torch(
         model_kwargs["device_map"] = device_map
 
     dtype = _resolve_dtype(options)
+    if dtype is None and device != "mps":
+        try:
+            import torch
+
+            if torch.cuda.is_available():
+                dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+        except ImportError:
+            dtype = None
     if dtype is not None:
         model_kwargs["torch_dtype"] = dtype
+
+    model_kwargs.setdefault("low_cpu_mem_usage", True)
 
     if options.use_flash_attention and device != "mps":
         try:
@@ -66,7 +76,8 @@ def load_torch(
             model_kwargs["attn_implementation"] = "flash_attention_2"
             logger.info("Using Flash Attention 2")
         except ImportError:
-            pass
+            model_kwargs["attn_implementation"] = "sdpa"
+            logger.info("Using SDPA attention")
 
     use_4bit = options.load_in_4bit
     use_8bit = options.load_in_8bit

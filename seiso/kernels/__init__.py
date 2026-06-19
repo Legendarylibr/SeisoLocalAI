@@ -17,6 +17,13 @@ from seiso.kernels.hooks import (
 from seiso.kernels.lifecycle import release_training_memory, restore_kernel_patches
 from seiso.kernels.platform import GpuPlatform, GpuVendor, detect_gpu, is_amd, is_nvidia
 from seiso.kernels.triton_ops import is_triton_available
+from seiso.kernels.tuning import (
+    KERNEL_PROFILES,
+    apply_kernel_profile,
+    benchmark_kernel_profile,
+    kernel_metrics_dict,
+    kernel_profile_count,
+)
 
 __all__ = [
     "GpuPlatform",
@@ -34,6 +41,11 @@ __all__ = [
     "is_amd",
     "is_nvidia",
     "is_triton_available",
+    "KERNEL_PROFILES",
+    "apply_kernel_profile",
+    "benchmark_kernel_profile",
+    "kernel_metrics_dict",
+    "kernel_profile_count",
     "kernel_metadata",
     "release_training_memory",
     "restore_kernel_patches",

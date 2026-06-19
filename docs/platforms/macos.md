@@ -13,44 +13,46 @@
 
 ## Install
 
-**Recommended** — automated install (Python 3.10+, Node.js 18+, git):
+**Recommended** — one command installs deps, builds the UI, and starts Forge (browser opens automatically):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/install.sh | bash
-~/Seiso/scripts/start.sh
 ```
 
 Manual:
 
 ```bash
-git clone https://github.com/Legendarylibr/SeisoLocalAI.git ~/Seiso
-cd ~/Seiso
+git clone https://github.com/Legendarylibr/SeisoLocalAI.git "$HOME/Seiso"
+cd "$HOME/Seiso"
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -U pip wheel setuptools
 pip install -e ".[forge,train,mlx,dev]"
-cd forge-ui
-npm install
-npm run build
-cd ..
+cd forge-ui && npm ci && npm run build && cd ..
+seiso doctor
+seiso forge
 ```
 
 ## Start Forge
 
+**Later sessions** (after the initial install):
+
 ```bash
-~/Seiso/scripts/start.sh
+"$HOME/Seiso/scripts/start.sh"
 ```
 
 Or from an existing clone:
 
 ```bash
-cd ~/Seiso
+cd "$HOME/Seiso"
 source .venv/bin/activate
-cd forge-ui
-npm install
-npm run build
-cd ..
 seiso forge
+```
+
+Rebuild the UI only when needed:
+
+```bash
+cd "$HOME/Seiso/forge-ui" && npm ci && npm run build && cd ..
 ```
 
 ## MLX inference (chat)

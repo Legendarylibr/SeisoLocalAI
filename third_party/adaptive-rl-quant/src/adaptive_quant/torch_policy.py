@@ -6,6 +6,7 @@ from contextlib import nullcontext
 from typing import Any
 
 from adaptive_quant.configuration import FrameworkConfig
+from adaptive_quant.kernel_rl import kernel_profile_count
 from adaptive_quant.math_utils import discrete_precision_level
 from adaptive_quant.trainer_utils import zero_previous_action
 from adaptive_quant.types import QuantizationDecision, QuantMode
@@ -206,6 +207,11 @@ if torch is not None:
                 if config.moe_enabled
                 else None
             )
+            self.kernel_head = (
+                nn.Linear(config.torch_hidden_dim, kernel_profile_count(config))
+                if config.kernel_rl_enabled
+                else None
+            )
             self.learned_mean = nn.Linear(config.torch_hidden_dim, 3)
             self.learned_log_std = nn.Parameter(
                 torch.tensor([-0.35, -0.35, -0.55], dtype=torch.float32)
@@ -256,6 +262,8 @@ if torch is not None:
                 outputs["moe_logits"] = self.moe_head(features).view(
                     -1, self.config.moe_top_k, self.config.moe_variant_count()
                 )
+            if self.kernel_head is not None:
+                outputs["kernel_logits"] = self.kernel_head(features)
             return outputs
 
         def map_learned_parameters(self, raw_parameters: torch.Tensor) -> torch.Tensor:
@@ -349,6 +357,7 @@ class TorchPolicyAdapter:
             "layer_indices": [],
             "moe_indices": [],
             "moe_active": False,
+            "kernel_index": None,
             "learned_raw": [],
         }
 
@@ -379,6 +388,7 @@ class TorchPolicyAdapter:
             self._attach_moe_selection(
                 outputs, decision, record, deterministic, moe_context=moe_context
             )
+            self._attach_kernel_selection(outputs, decision, record, deterministic)
             return decision, record
 
         if selected_mode == QuantMode.GROUPED:
@@ -405,6 +415,7 @@ class TorchPolicyAdapter:
             self._attach_moe_selection(
                 outputs, decision, record, deterministic, moe_context=moe_context
             )
+            self._attach_kernel_selection(outputs, decision, record, deterministic)
             return decision, record
 
         if selected_mode == QuantMode.PER_LAYER:
@@ -433,6 +444,7 @@ class TorchPolicyAdapter:
             self._attach_moe_selection(
                 outputs, decision, record, deterministic, moe_context=moe_context
             )
+            self._attach_kernel_selection(outputs, decision, record, deterministic)
             return decision, record
 
         raw_mean = outputs["learned_mean"][0]
@@ -453,7 +465,31 @@ class TorchPolicyAdapter:
         self._attach_moe_selection(
             outputs, decision, record, deterministic, moe_context=moe_context
         )
+        self._attach_kernel_selection(outputs, decision, record, deterministic)
         return decision, record
+
+    def _attach_kernel_selection(
+        self,
+        outputs: dict[str, torch.Tensor],
+        decision: QuantizationDecision,
+        record: dict[str, Any],
+        deterministic: bool,
+    ) -> None:
+        if self.model.kernel_head is None or "kernel_logits" not in outputs:
+            return
+        logits = outputs["kernel_logits"][0]
+        distribution = Categorical(logits=logits)
+        index = (
+            int(torch.argmax(logits).item())
+            if deterministic
+            else int(distribution.sample().item())
+        )
+        record["kernel_index"] = index
+        record["log_prob"] += float(
+            distribution.log_prob(torch.tensor(index, device=self.device)).item()
+        )
+        record["entropy"] += float(distribution.entropy().item())
+        decision.metadata["kernel_profile_index"] = index
 
     def _attach_moe_selection(
         self,
@@ -591,7 +627,7 @@ class TorchPolicyAdapter:
 
         learned_mask = mode_codes == _mode_code(QuantMode.LEARNED.value)
         if learned_mask.any():
-            fallback_raw = zero_previous_action()
+            fallback_raw = zero_previous_action(self.config)
             raw_actions = torch.tensor(
                 [
                     record["learned_raw"] if record["learned_raw"] else fallback_raw
@@ -633,6 +669,26 @@ class TorchPolicyAdapter:
                 active_f = moe_active.float()
                 log_probs = log_probs + selected * active_f
                 entropies = entropies + entropy * active_f
+
+        if self.model.kernel_head is not None and "kernel_logits" in outputs:
+            kernel_indices = torch.tensor(
+                [
+                    int(record["kernel_index"])
+                    if record.get("kernel_index") is not None
+                    else int(self.config.kernel_default_profile)
+                    for record in records
+                ],
+                dtype=torch.long,
+                device=self.device,
+            )
+            logits = outputs["kernel_logits"].float()
+            log_distribution = torch.log_softmax(logits, dim=-1)
+            probabilities = torch.softmax(logits, dim=-1)
+            batch_indices = torch.arange(batch_size, device=self.device)
+            log_probs += log_distribution[batch_indices, kernel_indices]
+            entropies += -(probabilities[batch_indices] * log_distribution[batch_indices]).sum(
+                dim=-1
+            )
 
         return log_probs, entropies, outputs["value"].float()
 

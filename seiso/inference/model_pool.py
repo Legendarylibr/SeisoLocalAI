@@ -35,31 +35,61 @@ def _env_bool(name: str, default: bool) -> bool:
 
 def _default_llama_threads() -> int:
     cpus = os.cpu_count() or 4
-    # Leave a little headroom for the UI/server event loop.
+    if _default_llama_gpu_layers() != 0:
+        return max(2, min(cpus // 2, 8))
     return max(2, min(cpus - 2 if cpus > 4 else cpus, 12))
+
+
+def _cuda_available() -> bool:
+    try:
+        import torch
+
+        return torch.cuda.is_available()
+    except ImportError:
+        return False
 
 
 def _default_llama_gpu_layers() -> int:
     if platform.system() == "Darwin" and platform.machine() in {"arm64", "aarch64"}:
         return -1
+    if _cuda_available():
+        return -1
     return 0
+
+
+def _default_llama_batch() -> int:
+    return 2048 if _default_llama_gpu_layers() != 0 else 512
+
+
+def _default_llama_ubatch(n_batch: int) -> int:
+    if _default_llama_gpu_layers() != 0:
+        return min(n_batch, 2048)
+    return min(n_batch, 512)
 
 
 def llama_load_kwargs(n_ctx: int) -> dict[str, Any]:
     """Tuned llama.cpp defaults for faster preload/first token, overrideable by env."""
     n_threads = _env_int("SEISO_LLAMA_THREADS", _default_llama_threads())
-    n_batch = _env_int("SEISO_LLAMA_BATCH", 512)
-    return {
+    n_batch = _env_int("SEISO_LLAMA_BATCH", _default_llama_batch())
+    n_gpu_layers = _env_int("SEISO_LLAMA_GPU_LAYERS", _default_llama_gpu_layers())
+    kwargs: dict[str, Any] = {
         "n_ctx": n_ctx,
         "n_threads": n_threads,
         "n_threads_batch": _env_int("SEISO_LLAMA_THREADS_BATCH", n_threads),
         "n_batch": n_batch,
-        "n_ubatch": _env_int("SEISO_LLAMA_UBATCH", min(n_batch, 512)),
-        "n_gpu_layers": _env_int("SEISO_LLAMA_GPU_LAYERS", _default_llama_gpu_layers()),
+        "n_ubatch": _env_int("SEISO_LLAMA_UBATCH", _default_llama_ubatch(n_batch)),
+        "n_gpu_layers": n_gpu_layers,
         "use_mmap": _env_bool("SEISO_LLAMA_USE_MMAP", True),
         "use_mlock": _env_bool("SEISO_LLAMA_USE_MLOCK", False),
         "verbose": _env_bool("SEISO_LLAMA_VERBOSE", False),
+        "offload_kqv": _env_bool("SEISO_LLAMA_OFFLOAD_KQV", n_gpu_layers != 0),
+        "no_perf": _env_bool("SEISO_LLAMA_NO_PERF", True),
     }
+    if n_gpu_layers != 0:
+        kwargs["op_offload"] = _env_bool("SEISO_LLAMA_OP_OFFLOAD", True)
+    if n_gpu_layers != 0 and _env_bool("SEISO_LLAMA_FLASH_ATTN", True):
+        kwargs["flash_attn"] = True
+    return kwargs
 
 
 class BackendKind(StrEnum):
@@ -83,7 +113,7 @@ class ModelPool:
     """
 
     _instance: ModelPool | None = None
-    _lock = threading.Lock()
+    _lock = threading.RLock()
 
     def __init__(self) -> None:
         self._active: LoadedModel | None = None
@@ -99,7 +129,8 @@ class ModelPool:
 
     @property
     def active_key(self) -> str | None:
-        return self._active.key if self._active else None
+        with self._lock:
+            return self._active.key if self._active else None
 
     @staticmethod
     def normalize_path(model_path: str) -> str:
@@ -120,26 +151,56 @@ class ModelPool:
         self.bump_generation()
         self.unload_all()
 
-    def switch(self, model_path: str, backend: BackendKind, loader_fn) -> Any:
+    def switch(
+        self,
+        model_path: str,
+        backend: BackendKind,
+        loader_fn,
+        *,
+        cache_key: str | None = None,
+        meta: dict[str, Any] | None = None,
+    ) -> Any:
         """Load model_path, unloading any previously active model first."""
         norm = self.normalize_path(model_path)
-        key = f"{backend.value}:{norm}"
-        if self._active and self._active.key == key:
-            return self._active.handle
+        load_path = str(Path(model_path).expanduser().absolute())
+        key = cache_key or f"{backend.value}:{norm}"
+        with self._lock:
+            if self._active and self._active.key == key:
+                return self._active.handle
 
-        self.unload_all()
-        logger.info("Loading model: %s (%s)", norm, backend.value)
-        handle = loader_fn(norm)
-        self._active = LoadedModel(key=key, backend=backend, handle=handle, meta={"path": norm})
-        return handle
+            self.unload_all()
+            logger.info("Loading model: %s (%s)", norm, backend.value)
+            handle = loader_fn(load_path)
+            self._active = LoadedModel(
+                key=key,
+                backend=backend,
+                handle=handle,
+                meta={"path": load_path, "norm_path": norm, **(meta or {})},
+            )
+            return handle
 
     def get_llama(self, model_path: str, n_ctx: int = 4096) -> Any:
         def loader(path: str):
             from llama_cpp import Llama
 
-            return Llama(model_path=path, **llama_load_kwargs(n_ctx))
+            from seiso.inference.tuning import attach_llama_prompt_cache
 
-        return self.switch(model_path, BackendKind.LLAMA, loader)
+            llm = Llama(model_path=path, **llama_load_kwargs(n_ctx))
+            attach_llama_prompt_cache(llm)
+            return llm
+
+        norm = self.normalize_path(model_path)
+        with self._lock:
+            if (
+                self._active
+                and self._active.backend == BackendKind.LLAMA
+                and self._active.meta.get("norm_path") == norm
+                and int(self._active.meta.get("n_ctx") or 0) >= n_ctx
+            ):
+                return self._active.handle
+
+        key = f"llama:{norm}:ctx{n_ctx}"
+        return self.switch(model_path, BackendKind.LLAMA, loader, cache_key=key, meta={"n_ctx": n_ctx})
 
     def get_mlx(self, model_path: str) -> tuple[Any, Any]:
         def loader(path: str):
@@ -152,9 +213,10 @@ class ModelPool:
 
     def get_torch(self, model_path: str, *, load_in_4bit: bool = True) -> tuple[Any, Any]:
         def loader(path: str):
+            from seiso.inference.tuning import maybe_apply_fused_kernels, prepare_torch_model
             from seiso.models.loader import LoadOptions, ModelKind, load_model
 
-            return load_model(
+            model, tokenizer = load_model(
                 LoadOptions(
                     model_id=path,
                     kind=ModelKind.TEXT,
@@ -162,6 +224,9 @@ class ModelPool:
                     device_map="auto",
                 )
             )
+            prepare_torch_model(model)
+            maybe_apply_fused_kernels(model)
+            return model, tokenizer
 
         return self.switch(model_path, BackendKind.TORCH, loader)
 
@@ -196,32 +261,34 @@ class ModelPool:
 
     def _free_memory(self) -> None:
         gc.collect()
-        try:
-            import mlx.core as mx
+        if os.environ.get("SEISO_SKIP_MLX_PROBE", "").strip().lower() not in {"1", "true", "yes"}:
+            try:
+                import mlx.core as mx
 
-            if hasattr(mx, "metal") and hasattr(mx.metal, "clear_cache"):
-                mx.metal.clear_cache()
-        except ImportError:
-            pass
-        except Exception:
-            pass
+                if hasattr(mx, "metal") and hasattr(mx.metal, "clear_cache"):
+                    mx.metal.clear_cache()
+            except ImportError:
+                pass
+            except Exception:
+                pass
         try:
             import torch
 
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
-                torch.cuda.synchronize()
             if hasattr(torch, "mps") and torch.backends.mps.is_available():
                 torch.mps.empty_cache()
         except ImportError:
             pass
 
     def status(self) -> dict:
-        return {
-            "active_model": self._active.key if self._active else None,
-            "backend": self._active.backend.value if self._active else None,
-            "path": self._active.meta.get("path") if self._active else None,
-        }
+        with self._lock:
+            active = self._active
+            return {
+                "active_model": active.key if active else None,
+                "backend": active.backend.value if active else None,
+                "path": active.meta.get("path") if active else None,
+            }
 
 
 def get_model_pool() -> ModelPool:

@@ -5,6 +5,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from seiso.export.gguf import normalize_gguf_quant
+
 _BIT_TO_SEISO = {
     2: "q2_k",
     3: "q3_k_m",
@@ -13,19 +15,6 @@ _BIT_TO_SEISO = {
     6: "q6_k",
     8: "q8_0",
     16: "f16",
-}
-
-_LABEL_TO_SEISO = {
-    "Q2_K": "q2_k",
-    "Q3_K_M": "q3_k_m",
-    "Q3_K_S": "q3_k_s",
-    "Q4_K_M": "q4_k_m",
-    "Q4_K_S": "q4_k_s",
-    "Q5_K_M": "q5_k_m",
-    "Q5_K_S": "q5_k_s",
-    "Q6_K": "q6_k",
-    "Q8_0": "q8_0",
-    "F16": "f16",
 }
 
 
@@ -39,7 +28,7 @@ def recommendation_to_gguf_quants(recommendation: dict[str, Any]) -> list[str]:
         deploy = decision.get("deploy")
         quant = decision.get("quant_type") or decision.get("gguf_quant")
         if isinstance(quant, str) and quant:
-            return [_normalize_quant_label(quant)]
+            return [normalize_gguf_quant(quant)]
         if deploy == "adaptive_policy":
             return ["q4_k_m", "q8_0"]
 
@@ -54,13 +43,6 @@ def recommendation_to_gguf_quants(recommendation: dict[str, Any]) -> list[str]:
                 return [label]
         quant_type = fixed.get("quant_type")
         if isinstance(quant_type, str):
-            return [_normalize_quant_label(quant_type)]
+            return [normalize_gguf_quant(quant_type)]
 
     return ["q4_k_m"]
-
-
-def _normalize_quant_label(label: str) -> str:
-    upper = label.strip().upper().replace("-", "_")
-    if upper in _LABEL_TO_SEISO:
-        return _LABEL_TO_SEISO[upper]
-    return label.strip().lower()

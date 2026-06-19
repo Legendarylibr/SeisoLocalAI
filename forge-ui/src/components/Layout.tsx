@@ -24,8 +24,10 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
   {
     label: "Studio",
     items: [
+      { to: "/train", label: "Train", icon: "train", desc: "LoRA fine-tuning" },
       { to: "/rl-quant", label: "RL Quant", icon: "quant", desc: "Reward-guided quant" },
-      { to: "/compress", label: "Compress", icon: "compress", desc: "Distill & prune" },
+      { to: "/compress", label: "Compress", icon: "compress", desc: "Distill & prune LLMs" },
+      { to: "/image-compress", label: "Image Compress", icon: "image", desc: "SD distill & quant" },
       { to: "/export", label: "Export", icon: "export", desc: "Publish to Hub" },
       { to: "/recipes", label: "Recipes", icon: "recipes", desc: "Visual pipelines" },
     ],

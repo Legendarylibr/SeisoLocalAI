@@ -1,5 +1,6 @@
 #include "common.cuh"
 #include "kernels.cuh"
+#include "tuning_state.cuh"
 
 #include <cstdint>
 #include <type_traits>
@@ -64,8 +65,14 @@ void launch_fused_swiglu(
     cudaStream_t stream) {
   constexpr int BLOCK = 256;
   const int grid = static_cast<int>(rows);
+  const auto& tuning = kernel_tuning_state();
   if constexpr (std::is_same_v<T, __half> || std::is_same_v<T, __nv_bfloat16>) {
-    fused_swiglu_kernel<T, 8, BLOCK><<<grid, BLOCK, 0, stream>>>(gate, up, out, rows, cols);
+    const int vec = tuning.swiglu_vec == SWIGLU_VEC4 ? 4 : 8;
+    if (vec == 4) {
+      fused_swiglu_kernel<T, 4, BLOCK><<<grid, BLOCK, 0, stream>>>(gate, up, out, rows, cols);
+    } else {
+      fused_swiglu_kernel<T, 8, BLOCK><<<grid, BLOCK, 0, stream>>>(gate, up, out, rows, cols);
+    }
   } else {
     fused_swiglu_kernel<T, 4, BLOCK><<<grid, BLOCK, 0, stream>>>(gate, up, out, rows, cols);
   }

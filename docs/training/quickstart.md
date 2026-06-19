@@ -22,7 +22,7 @@ Fine-tune open models with QLoRA, LoRA, or full fine-tuning using Forge Training
    - **Batch size / seq length:** tuned to your VRAM
 5. Upload a JSONL dataset or use the bundled sample (`data/sample.jsonl`)
 6. Click **Start training** — logs stream over SSE in real time
-7. Checkpoints appear under `{SEISO_DATA_DIR}/checkpoints/{user_id}/`
+7. Checkpoints appear under `{SEISO_DATA_DIR}/checkpoints/{user_id}/{job_id}/`
 
 ### Multi-GPU
 

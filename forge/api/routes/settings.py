@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 from forge.config import ForgeSettings, get_settings
 from forge.security.auth import get_current_user_id
 from forge.services.hf_auth import clear_user_hf_token, hf_auth_status, save_user_hf_token
+from forge.services.hf_connectivity import check_inference_runtime
 from seiso.models.loader import detect_backend
 
 router = APIRouter(tags=["settings"])
@@ -43,7 +44,8 @@ class SettingsView(BaseModel):
     host: str
     port: int
     data_dir: str
-    backend: str
+    training_backend: str
+    inference_backends: list[str]
     allow_remote: bool
     hf_configured: bool
     hf_auth: HfAuthView
@@ -75,11 +77,21 @@ async def get_app_settings(
         settings_token=settings.hf_token or None,
     )
     user_saved = bool(load_user_hf_token(settings.data_dir, user_id, encryption_key=settings.hf_token_encryption_key))
+    runtime = check_inference_runtime()
+    inference_backends: list[str] = []
+    if runtime.llamacpp:
+        inference_backends.append("llamacpp")
+    inference_backends.append("ollama")
+    if runtime.mlx:
+        inference_backends.append("mlx")
+    if runtime.torch:
+        inference_backends.append("torch")
     return SettingsView(
         host=settings.host,
         port=settings.port,
         data_dir=str(settings.data_dir),
-        backend=detect_backend().value,
+        training_backend=detect_backend().value,
+        inference_backends=inference_backends,
         allow_remote=settings.allow_remote,
         hf_configured=auth.token_configured,
         hf_auth=HfAuthView(

@@ -395,7 +395,7 @@ def replay_manifest_steps(
     )
     mismatches: list[dict[str, Any]] = []
     steps = list(manifest.get("steps") or [])
-    previous_action = zero_previous_action()
+    previous_action = zero_previous_action(config)
     try:
         for step in steps:
             episode = step.get("episode")
@@ -455,6 +455,7 @@ def replay_manifest_steps(
                 max_bits=max(config.discrete_bit_widths),
                 scale_upper=config.scale_bounds[1],
                 clip_upper=config.clip_bounds[1],
+                config=config,
             )
     finally:
         env.logger.close()

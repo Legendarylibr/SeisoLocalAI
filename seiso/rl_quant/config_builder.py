@@ -85,6 +85,29 @@ def build_framework_config(
     if payload.get("moe_enabled") is True:
         overrides["moe_enabled"] = True
 
+    if payload.get("kernel_rl_enabled") is True:
+        overrides["kernel_rl_enabled"] = True
+    if (kernel_cfg := payload.get("kernel")) and isinstance(kernel_cfg, dict):
+        overrides.update(
+            {
+                f"kernel_{key}": value
+                for key, value in kernel_cfg.items()
+                if key != "rl_enabled"
+            }
+        )
+        if kernel_cfg.get("rl_enabled") is True:
+            overrides["kernel_rl_enabled"] = True
+    for flat_key in (
+        "kernel_live_benchmark",
+        "kernel_hidden_dim",
+        "kernel_batch_rows",
+        "kernel_benchmark_every_n_episodes",
+        "kernel_default_profile",
+        "kernel_profile_count",
+    ):
+        if flat_key in payload and payload[flat_key] is not None:
+            overrides[flat_key] = payload[flat_key]
+
     flat = config_to_flat_dict(base)
     flat.update(overrides)
     return config_from_dict(flat, base=base, strict=False)

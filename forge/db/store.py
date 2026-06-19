@@ -691,14 +691,16 @@ class Database:
         ) as cur:
             return [dict(r) for r in await cur.fetchall()]
 
-    # --- RL quant jobs ---
+    # --- Shared config-job helpers (RL quant, compress, image compress) ---
 
-    async def create_rl_quant_job(self, user_id: str, config: dict, job_id: str | None = None) -> dict:
+    async def _create_config_job(
+        self, table: str, user_id: str, config: dict, job_id: str | None = None
+    ) -> dict:
         jid = job_id or str(uuid.uuid4())
         now = _now()
         async with self._conn() as conn:
             await conn.execute(
-                """INSERT INTO rl_quant_jobs
+                f"""INSERT INTO {table}
                    (id, user_id, status, config_json, created_at, updated_at)
                    VALUES (?, ?, ?, ?, ?, ?)""",
                 (jid, user_id, "pending", json.dumps(config), now, now),
@@ -706,13 +708,66 @@ class Database:
             await conn.commit()
         return {"id": jid, "status": "pending", "config": config, "created_at": now}
 
-    async def get_rl_quant_job(self, job_id: str, user_id: str) -> dict | None:
+    async def _get_config_job(self, table: str, job_id: str, user_id: str) -> dict | None:
         async with self._conn() as conn, conn.execute(
-            "SELECT * FROM rl_quant_jobs WHERE id = ? AND user_id = ?",
+            f"SELECT * FROM {table} WHERE id = ? AND user_id = ?",
             (job_id, user_id),
         ) as cur:
             row = await cur.fetchone()
             return dict(row) if row else None
+
+    async def _list_config_jobs(self, table: str, user_id: str) -> list[dict]:
+        async with self._conn() as conn, conn.execute(
+            f"SELECT * FROM {table} WHERE user_id = ? ORDER BY created_at DESC",
+            (user_id,),
+        ) as cur:
+            return [dict(r) for r in await cur.fetchall()]
+
+    async def _update_stage_pipeline_job_status(
+        self,
+        table: str,
+        job_id: str,
+        status: str,
+        *,
+        output_dir: str | None = None,
+        run_dir: str | None = None,
+        model_dir: str | None = None,
+        stages: list[str] | None = None,
+        stage_results: dict | None = None,
+        error_text: str | None = None,
+    ) -> None:
+        now = _now()
+        async with self._conn() as conn:
+            await conn.execute(
+                f"""UPDATE {table} SET status = ?, updated_at = ?,
+                   output_dir = COALESCE(?, output_dir),
+                   run_dir = COALESCE(?, run_dir),
+                   model_dir = COALESCE(?, model_dir),
+                   stages_json = COALESCE(?, stages_json),
+                   stage_results_json = COALESCE(?, stage_results_json),
+                   error_text = COALESCE(?, error_text)
+                   WHERE id = ?""",
+                (
+                    status,
+                    now,
+                    output_dir,
+                    run_dir,
+                    model_dir,
+                    json.dumps(stages) if stages is not None else None,
+                    json.dumps(stage_results) if stage_results is not None else None,
+                    error_text,
+                    job_id,
+                ),
+            )
+            await conn.commit()
+
+    # --- RL quant jobs ---
+
+    async def create_rl_quant_job(self, user_id: str, config: dict, job_id: str | None = None) -> dict:
+        return await self._create_config_job("rl_quant_jobs", user_id, config, job_id=job_id)
+
+    async def get_rl_quant_job(self, job_id: str, user_id: str) -> dict | None:
+        return await self._get_config_job("rl_quant_jobs", job_id, user_id)
 
     async def update_rl_quant_job_status(
         self,
@@ -749,34 +804,15 @@ class Database:
             await conn.commit()
 
     async def list_rl_quant_jobs(self, user_id: str) -> list[dict]:
-        async with self._conn() as conn, conn.execute(
-            "SELECT * FROM rl_quant_jobs WHERE user_id = ? ORDER BY created_at DESC",
-            (user_id,),
-        ) as cur:
-            return [dict(r) for r in await cur.fetchall()]
+        return await self._list_config_jobs("rl_quant_jobs", user_id)
 
     # --- Compression jobs ---
 
     async def create_compress_job(self, user_id: str, config: dict, job_id: str | None = None) -> dict:
-        jid = job_id or str(uuid.uuid4())
-        now = _now()
-        async with self._conn() as conn:
-            await conn.execute(
-                """INSERT INTO compress_jobs
-                   (id, user_id, status, config_json, created_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
-                (jid, user_id, "pending", json.dumps(config), now, now),
-            )
-            await conn.commit()
-        return {"id": jid, "status": "pending", "config": config, "created_at": now}
+        return await self._create_config_job("compress_jobs", user_id, config, job_id=job_id)
 
     async def get_compress_job(self, job_id: str, user_id: str) -> dict | None:
-        async with self._conn() as conn, conn.execute(
-            "SELECT * FROM compress_jobs WHERE id = ? AND user_id = ?",
-            (job_id, user_id),
-        ) as cur:
-            row = await cur.fetchone()
-            return dict(row) if row else None
+        return await self._get_config_job("compress_jobs", job_id, user_id)
 
     async def update_compress_job_status(
         self,
@@ -790,62 +826,30 @@ class Database:
         stage_results: dict | None = None,
         error_text: str | None = None,
     ) -> None:
-        now = _now()
-        async with self._conn() as conn:
-            await conn.execute(
-                """UPDATE compress_jobs SET status = ?, updated_at = ?,
-                   output_dir = COALESCE(?, output_dir),
-                   run_dir = COALESCE(?, run_dir),
-                   model_dir = COALESCE(?, model_dir),
-                   stages_json = COALESCE(?, stages_json),
-                   stage_results_json = COALESCE(?, stage_results_json),
-                   error_text = COALESCE(?, error_text)
-                   WHERE id = ?""",
-                (
-                    status,
-                    now,
-                    output_dir,
-                    run_dir,
-                    model_dir,
-                    json.dumps(stages) if stages is not None else None,
-                    json.dumps(stage_results) if stage_results is not None else None,
-                    error_text,
-                    job_id,
-                ),
-            )
-            await conn.commit()
+        await self._update_stage_pipeline_job_status(
+            "compress_jobs",
+            job_id,
+            status,
+            output_dir=output_dir,
+            run_dir=run_dir,
+            model_dir=model_dir,
+            stages=stages,
+            stage_results=stage_results,
+            error_text=error_text,
+        )
 
     async def list_compress_jobs(self, user_id: str) -> list[dict]:
-        async with self._conn() as conn, conn.execute(
-            "SELECT * FROM compress_jobs WHERE user_id = ? ORDER BY created_at DESC",
-            (user_id,),
-        ) as cur:
-            return [dict(r) for r in await cur.fetchall()]
+        return await self._list_config_jobs("compress_jobs", user_id)
 
     # --- Image compression jobs ---
 
     async def create_image_compress_job(
         self, user_id: str, config: dict, job_id: str | None = None
     ) -> dict:
-        jid = job_id or str(uuid.uuid4())
-        now = _now()
-        async with self._conn() as conn:
-            await conn.execute(
-                """INSERT INTO image_compress_jobs
-                   (id, user_id, status, config_json, created_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
-                (jid, user_id, "pending", json.dumps(config), now, now),
-            )
-            await conn.commit()
-        return {"id": jid, "status": "pending", "config": config, "created_at": now}
+        return await self._create_config_job("image_compress_jobs", user_id, config, job_id=job_id)
 
     async def get_image_compress_job(self, job_id: str, user_id: str) -> dict | None:
-        async with self._conn() as conn, conn.execute(
-            "SELECT * FROM image_compress_jobs WHERE id = ? AND user_id = ?",
-            (job_id, user_id),
-        ) as cur:
-            row = await cur.fetchone()
-            return dict(row) if row else None
+        return await self._get_config_job("image_compress_jobs", job_id, user_id)
 
     async def update_image_compress_job_status(
         self,
@@ -859,34 +863,34 @@ class Database:
         stage_results: dict | None = None,
         error_text: str | None = None,
     ) -> None:
-        now = _now()
-        async with self._conn() as conn:
-            await conn.execute(
-                """UPDATE image_compress_jobs SET status = ?, updated_at = ?,
-                   output_dir = COALESCE(?, output_dir),
-                   run_dir = COALESCE(?, run_dir),
-                   model_dir = COALESCE(?, model_dir),
-                   stages_json = COALESCE(?, stages_json),
-                   stage_results_json = COALESCE(?, stage_results_json),
-                   error_text = COALESCE(?, error_text)
-                   WHERE id = ?""",
-                (
-                    status,
-                    now,
-                    output_dir,
-                    run_dir,
-                    model_dir,
-                    json.dumps(stages) if stages is not None else None,
-                    json.dumps(stage_results) if stage_results is not None else None,
-                    error_text,
-                    job_id,
-                ),
-            )
-            await conn.commit()
+        await self._update_stage_pipeline_job_status(
+            "image_compress_jobs",
+            job_id,
+            status,
+            output_dir=output_dir,
+            run_dir=run_dir,
+            model_dir=model_dir,
+            stages=stages,
+            stage_results=stage_results,
+            error_text=error_text,
+        )
 
     async def list_image_compress_jobs(self, user_id: str) -> list[dict]:
-        async with self._conn() as conn, conn.execute(
-            "SELECT * FROM image_compress_jobs WHERE user_id = ? ORDER BY created_at DESC",
-            (user_id,),
-        ) as cur:
-            return [dict(r) for r in await cur.fetchall()]
+        return await self._list_config_jobs("image_compress_jobs", user_id)
+
+    async def reconcile_stale_jobs(self, *, reason: str = "Server restarted while job was active") -> int:
+        """Mark in-flight jobs as failed after Forge restart (orchestrator state is in-memory only)."""
+        now = _now()
+        total = 0
+        async with self._conn() as conn:
+            for table in _JOB_ERROR_TABLES:
+                cur = await conn.execute(
+                    f"""UPDATE {table}
+                        SET status = 'failed', updated_at = ?,
+                            error_text = COALESCE(error_text, ?)
+                        WHERE status IN ('pending', 'running')""",
+                    (now, reason),
+                )
+                total += cur.rowcount
+            await conn.commit()
+        return total

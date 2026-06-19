@@ -15,8 +15,7 @@ from adaptive_quant.trainer_utils import (
 )
 from adaptive_quant.types import EpisodeResult, HardwareType, QuantizationDecision
 
-# Length of ``previous_action`` feedback vector emitted by ``feedback_vector``
-# (bits / scale / clip). Persisted in checkpoints; validated on resume.
+# Length of ``previous_action`` feedback vector without kernel RL.
 _PREVIOUS_ACTION_LEN = 3
 
 
@@ -63,7 +62,7 @@ class TrainerBase:
             env_kwargs["prompt_library"] = library
         self.env = AdaptiveQuantizationEnv(config, log_path=log_path, **env_kwargs)
         self.offline_router = OfflineRouterTrainer.maybe_create(config)
-        self.previous_action = zero_previous_action()
+        self.previous_action = zero_previous_action(config)
         self.training_history: list[dict[str, float]] = []
         self._next_eval_episode = 1_000_000
         self._max_bits = max(config.discrete_bit_widths)
@@ -161,4 +160,5 @@ class TrainerBase:
             max_bits=self._max_bits,
             scale_upper=self._scale_upper,
             clip_upper=self._clip_upper,
+            config=self.config,
         )

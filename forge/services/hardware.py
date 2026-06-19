@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import platform
 import re
 import shutil
@@ -172,6 +173,8 @@ def _nvidia_smi_metrics() -> dict[int, dict[str, float]]:
 
 def _mlx_apple_gpu() -> list[dict[str, Any]]:
     """Best-effort Apple GPU label when MLX is available."""
+    if os.environ.get("SEISO_SKIP_MLX_PROBE", "").strip().lower() in {"1", "true", "yes"}:
+        return []
     try:
         import mlx.core as mx  # noqa: F401
 
@@ -573,11 +576,20 @@ def enrich_catalog_models(
             row["download_bytes_estimated"] = False
             row["gguf_repo"] = info["gguf_repo"]
             row["gguf_file"] = info["filename"]
+            row["download_mirror_verified"] = True
             row["download_available"] = True
         elif m["repo_id"] in download_errors:
-            download_bytes = 0
-            row["download_available"] = False
+            download_bytes = estimate_gguf_download_bytes(
+                m["params"],
+                quant=m.get("quant", "Q4_K_M"),
+                tags=m.get("tags", ()),
+                repo_id=m.get("repo_id", ""),
+            )
+            row["download_bytes"] = download_bytes
+            row["download_bytes_estimated"] = True
+            row["download_mirror_verified"] = False
             row["download_error"] = download_errors[m["repo_id"]]
+            row["download_available"] = m.get("task") != "embedding"
         elif m.get("task") != "embedding":
             download_bytes = estimate_gguf_download_bytes(
                 m["params"],
@@ -587,6 +599,7 @@ def enrich_catalog_models(
             )
             row["download_bytes"] = download_bytes
             row["download_bytes_estimated"] = True
+            row["download_mirror_verified"] = False
             row["download_available"] = True
         else:
             download_bytes = 0

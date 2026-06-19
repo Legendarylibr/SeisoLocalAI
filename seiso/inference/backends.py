@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import struct
 from pathlib import Path
 
 from seiso.models.loader import Backend, detect_backend
@@ -15,6 +16,20 @@ BACKEND_MLX = "mlx"
 BACKEND_TORCH = "torch"
 BACKEND_AUTO = "auto"
 _GGUF_SHARD_RE = re.compile(r"^(?P<prefix>.+)-(?P<index>\d{5})-of-(?P<total>\d{5})\.gguf$", re.I)
+_GGUF_VALUE_SIZE = {
+    0: 1,  # uint8
+    1: 1,  # int8
+    2: 2,  # uint16
+    3: 2,  # int16
+    4: 4,  # uint32
+    5: 4,  # int32
+    6: 4,  # float32
+    7: 1,  # bool
+    10: 8,  # uint64
+    11: 8,  # int64
+    12: 8,  # float64
+}
+_UNSUPPORTED_GGUF_ARCHITECTURES = frozenset({"dflash-draft"})
 
 
 def _is_gguf_path(model_path: str) -> bool:
@@ -28,7 +43,7 @@ def resolve_gguf_file(model_path: str) -> Path:
     """Pick a single GGUF file from a path or directory."""
     path = Path(model_path).expanduser()
     if path.is_file() and path.suffix.lower() == ".gguf":
-        return path.resolve()
+        return path.absolute()
     if path.is_dir():
         candidates = sorted(path.glob("*.gguf"))
         first_shards = [
@@ -37,11 +52,77 @@ def resolve_gguf_file(model_path: str) -> Path:
             if (match := _GGUF_SHARD_RE.match(p.name)) and match.group("index") == "00001"
         ]
         if first_shards:
-            return first_shards[0].resolve()
+            return first_shards[0].absolute()
         candidates = sorted(candidates, key=lambda p: p.stat().st_size, reverse=True)
         if candidates:
-            return candidates[0].resolve()
+            return candidates[0].absolute()
     raise ValueError(f"No GGUF file found at {model_path}")
+
+
+def _read_gguf_string(handle) -> str:
+    raw_len = handle.read(8)
+    if len(raw_len) != 8:
+        raise ValueError("truncated GGUF string length")
+    (length,) = struct.unpack("<Q", raw_len)
+    raw = handle.read(length)
+    if len(raw) != length:
+        raise ValueError("truncated GGUF string")
+    return raw.decode("utf-8", errors="replace")
+
+
+def _skip_gguf_value(handle, value_type: int) -> None:
+    if value_type == 8:  # string
+        length = struct.unpack("<Q", handle.read(8))[0]
+        handle.seek(length, 1)
+        return
+    if value_type == 9:  # array
+        raw = handle.read(12)
+        if len(raw) != 12:
+            raise ValueError("truncated GGUF array header")
+        item_type, count = struct.unpack("<IQ", raw)
+        if item_type == 8:
+            for _ in range(count):
+                _skip_gguf_value(handle, item_type)
+            return
+        item_size = _GGUF_VALUE_SIZE.get(item_type)
+        if item_size is None:
+            raise ValueError(f"unsupported GGUF array type: {item_type}")
+        handle.seek(item_size * count, 1)
+        return
+    size = _GGUF_VALUE_SIZE.get(value_type)
+    if size is None:
+        raise ValueError(f"unsupported GGUF value type: {value_type}")
+    handle.seek(size, 1)
+
+
+def gguf_architecture(model_path: str) -> str | None:
+    """Read ``general.architecture`` from a GGUF file when available."""
+    try:
+        path = resolve_gguf_file(model_path)
+        with path.open("rb") as handle:
+            if handle.read(4) != b"GGUF":
+                return None
+            header = handle.read(20)
+            if len(header) != 20:
+                return None
+            _version, _tensor_count, kv_count = struct.unpack("<IQQ", header)
+            for _ in range(kv_count):
+                key = _read_gguf_string(handle)
+                raw_type = handle.read(4)
+                if len(raw_type) != 4:
+                    return None
+                (value_type,) = struct.unpack("<I", raw_type)
+                if key == "general.architecture" and value_type == 8:
+                    return _read_gguf_string(handle)
+                _skip_gguf_value(handle, value_type)
+    except (OSError, ValueError, struct.error):
+        return None
+    return None
+
+
+def gguf_is_supported_by_llamacpp(model_path: str) -> bool:
+    architecture = gguf_architecture(model_path)
+    return architecture not in _UNSUPPORTED_GGUF_ARCHITECTURES
 
 
 def recommend_backend(*, model_path: str, model_format: str | None = None) -> BackendName:
@@ -78,6 +159,8 @@ def match_ollama_name(
 
 def available_backends(*, model_path: str, model_format: str | None, ollama_names: set[str]) -> list[BackendName]:
     """Backends that can serve this inventory model."""
+    if (model_format or "").lower() == "gguf" and not gguf_is_supported_by_llamacpp(model_path):
+        return []
     primary = recommend_backend(model_path=model_path, model_format=model_format)
     options = [primary]
     if primary == BACKEND_LLAMACPP and match_ollama_name(

@@ -873,6 +873,35 @@ label {
   justify-content: center;
   gap: 1.25rem;
   padding: 2rem;
+  position: relative;
+  overflow: hidden;
+}
+
+.app-loading-atmosphere {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.app-loading-bg-figure {
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  transform: translateX(-50%);
+  max-width: min(560px, 72vw);
+  max-height: 86vh;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  opacity: 0.035;
+  filter: grayscale(1);
+  mask-image: radial-gradient(ellipse 55% 65% at 50% 60%, black 15%, transparent 72%);
+}
+
+.app-loading > :not(.app-loading-atmosphere) {
+  position: relative;
+  z-index: 1;
 }
 
 .app-loading-mark {
@@ -1270,6 +1299,11 @@ th { color: var(--muted); font-weight: 500; font-size: 0.78rem; text-transform: 
   margin: 0.25rem 0 0.35rem;
   font-size: 0.72rem;
   color: var(--text-muted);
+}
+.model-mirror-warn {
+  margin: 0.25rem 0 0.35rem;
+  font-size: 0.72rem;
+  color: #ed8936;
 }
 .chat-hw-tier { font-size: 0.72rem; }
 .chat-hw-warn {
@@ -2867,6 +2901,28 @@ th { color: var(--muted); font-weight: 500; font-size: 0.78rem; text-transform: 
   font-size: 0.72rem;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
+}
+
+.model-load-progress-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.model-load-progress-cancel {
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-secondary);
+  border-radius: 999px;
+  padding: 0.12rem 0.45rem;
+  font-size: 0.68rem;
+  cursor: pointer;
+}
+
+.model-load-progress-cancel:hover {
+  color: var(--text);
+  border-color: var(--accent-dim);
 }
 
 .model-load-progress-track {

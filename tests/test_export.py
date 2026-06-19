@@ -236,7 +236,7 @@ def test_export_full_finetune(tmp_path: Path):
 
 
 @patch("seiso.export.formats._push_hub")
-@patch("seiso.export.formats._merge_lora")
+@patch("seiso.export.formats.merge_lora_checkpoint")
 def test_export_skips_hub_precheck_when_disabled(mock_merge, mock_push, tmp_path: Path):
     sandbox = tmp_path / "data"
     ckpt = sandbox / "checkpoints" / "run1"
@@ -263,7 +263,7 @@ def test_export_skips_hub_precheck_when_disabled(mock_merge, mock_push, tmp_path
 
 @patch("seiso.export.formats._push_hub")
 @patch("seiso.export.formats.precheck_hub_export")
-@patch("seiso.export.formats._merge_lora")
+@patch("seiso.export.formats.merge_lora_checkpoint")
 def test_export_runs_hub_precheck_first(mock_merge, mock_precheck, mock_push, tmp_path: Path):
     sandbox = tmp_path / "data"
     ckpt = sandbox / "checkpoints" / "run1"

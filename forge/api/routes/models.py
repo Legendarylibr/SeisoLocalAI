@@ -22,7 +22,7 @@ from forge.security.auth import get_current_user_id
 from forge.services.hardware import enrich_catalog_models, hardware_profile, hardware_summary
 from forge.services.hf_auth import resolve_hf_token
 from forge.services.hf_cache_inventory import sync_hf_cache_inventory
-from forge.services.hf_hub import dir_size
+from forge.services.hf_hub import _format_hub_download_error, dir_size
 from forge.services.model_download import perform_model_download
 from forge.services.publishable import is_pushable_model
 from forge.services.user_paths import assert_user_path
@@ -30,6 +30,10 @@ from seiso.models.catalog import get_families, search_catalog
 from seiso.security import SecurityError, sanitize_filename
 
 router = APIRouter(prefix="/models", tags=["models"])
+
+
+class DownloadStreamClosed(RuntimeError):
+    """Raised inside the download worker when the SSE client disconnects."""
 
 
 class ModelScanRequest(BaseModel):
@@ -225,8 +229,9 @@ async def download_model_stream(
     stream_open = True
 
     def on_progress(payload: dict[str, Any]) -> None:
-        if stream_open:
-            loop.call_soon_threadsafe(queue.put_nowait, ("progress", payload))
+        if not stream_open:
+            return
+        loop.call_soon_threadsafe(queue.put_nowait, ("progress", payload))
 
     async def run_download() -> None:
         try:
@@ -245,9 +250,12 @@ async def download_model_stream(
             )
             if stream_open:
                 await queue.put(("complete", result))
+        except DownloadStreamClosed:
+            return
         except Exception as exc:
             if stream_open:
-                await queue.put(("error", str(exc)))
+                msg = str(exc) if isinstance(exc, ValueError) else _format_hub_download_error(exc, repo_id=body.repo_id)
+                await queue.put(("error", msg))
 
     async def event_gen():
         nonlocal stream_open
@@ -299,6 +307,9 @@ async def download_model_stream(
                     break
         finally:
             stream_open = False
+            # The browser may navigate away while huggingface_hub is still writing
+            # the model into the shared cache. Let that worker finish so a transient
+            # SSE disconnect does not corrupt or abort the download.
 
     return EventSourceResponse(event_gen())
 

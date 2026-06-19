@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { api, ChatMessage, ChatThread, HardwareProfile, InferenceModelOption, SecurityPosture, streamChat } from "@/lib/api";
-import { bootstrapChatModels, hasChatNavTarget, initializeChatSession, isChatModelReady, needsHubDownload, preloadWithProgress, resolveInferenceBackend } from "@/lib/chatModel";
+import { api, ChatMessage, ChatThread, InferenceModelOption, streamChat } from "@/lib/api";
+import { usePlatformSettings } from "@/context/PlatformSettingsContext";
+import { bootstrapChatSession, CHAT_BACKEND_STORAGE_KEY, CHAT_MODEL_STORAGE_KEY, hasChatNavTarget, initializeChatSession, isChatModelReady, needsHubDownload, preloadWithProgress, resolveInferenceBackend } from "@/lib/chatModel";
+import { useHardwareProfile } from "@/hooks/useHardware";
+import { writeStoredModel } from "@/lib/modelSelection";
 import { ModelProgressState, initialDownloadProgress, initialLoadProgress } from "@/lib/modelProgress";
 import { ChatModelPicker } from "@/components/ChatModelPicker";
 import { HardwareFitBadge } from "@/components/HardwareFitBadge";
@@ -57,19 +60,22 @@ export function ChatPage() {
   const [inferenceBackend, setInferenceBackend] = useState("llamacpp");
   const [models, setModels] = useState<InferenceModelOption[]>([]);
   const [providers, setProviders] = useState<Array<{ id: string; name: string; provider_type: string }>>([]);
-  const [security, setSecurity] = useState<SecurityPosture | null>(null);
-  const [hwProfile, setHwProfile] = useState<HardwareProfile | null>(null);
+  const { settings } = usePlatformSettings();
+  const security = settings?.security ?? null;
+  const { profile: hwProfile } = useHardwareProfile();
   const [switchingModel, setSwitchingModel] = useState(false);
   const [loadProgress, setLoadProgress] = useState<ModelProgressState | null>(null);
   const [loadedModelId, setLoadedModelId] = useState<string | null>(null);
   const [loadedBackend, setLoadedBackend] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const scrollFrameRef = useRef<number | null>(null);
   const streamAbortRef = useRef<(() => void) | null>(null);
   const streamTextRef = useRef("");
   const streamFlushRef = useRef<number | null>(null);
   const streamThreadRef = useRef<string | null>(null);
   const userPickedBackendRef = useRef(false);
   const bootstrapGenRef = useRef(0);
+  const bootstrapAbortRef = useRef<AbortController | null>(null);
   const sessionInitRef = useRef(false);
 
   const messages = active ? messagesByThread[active] ?? [] : [];
@@ -129,6 +135,7 @@ export function ChatPage() {
         throw new Error("Model not found in inventory after download");
       }
       setSelection(modelId);
+      writeStoredModel(CHAT_MODEL_STORAGE_KEY, modelId);
       const backend =
         backendOverride ??
         resolveInferenceBackend(next, hwProfile, userPickedBackendRef.current ? inferenceBackend : undefined);
@@ -138,6 +145,7 @@ export function ChatPage() {
       const loaded = await preloadWithProgress(modelId, backend, setLoadProgress);
       setLoadedModelId(modelId);
       setLoadedBackend(loaded);
+      writeStoredModel(CHAT_BACKEND_STORAGE_KEY, loaded);
       return loaded;
     },
     [providerId, hwProfile, inferenceBackend],
@@ -181,6 +189,7 @@ export function ChatPage() {
   };
 
   const handleCatalogSelect = (repoId: string, downloadBytes?: number) => {
+    bootstrapAbortRef.current?.abort();
     streamAbortRef.current?.();
     streamAbortRef.current = null;
     if (streaming) setStreaming(false);
@@ -191,6 +200,16 @@ export function ChatPage() {
     }
     setSearchParams(params, { replace: true });
   };
+
+  const handleCancelModelLoad = useCallback(() => {
+    bootstrapAbortRef.current?.abort();
+    bootstrapAbortRef.current = null;
+    setSwitchingModel(false);
+    setLoadProgress(null);
+    if (pendingRepo) {
+      setSearchParams(selection ? { model: selection } : {}, { replace: true });
+    }
+  }, [pendingRepo, selection, setSearchParams]);
 
   const handleProviderChange = async (nextProvider: string) => {
     if (nextProvider === providerId) return;
@@ -239,7 +258,6 @@ export function ChatPage() {
   useEffect(() => {
     api.listThreads().then(setThreads).catch(console.error);
     api.listProviders().then(setProviders).catch(() => {});
-    api.settings().then((s) => setSecurity(s.security)).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -248,6 +266,9 @@ export function ChatPage() {
     }
 
     const bootstrapGen = ++bootstrapGenRef.current;
+    bootstrapAbortRef.current?.abort();
+    const controller = new AbortController();
+    bootstrapAbortRef.current = controller;
     let cancelled = false;
 
     const applyResult = (result: {
@@ -271,12 +292,10 @@ export function ChatPage() {
       setLoadedModelId(null);
       setLoadedBackend(null);
       try {
-        const [hw, initialModelsResp] = await Promise.all([
-          api.hardware().catch(() => null),
+        const [initialModelsResp] = await Promise.all([
           api.listInferenceModels(),
         ]);
         if (cancelled) return;
-        if (hw) setHwProfile(hw);
 
         const initialModels = initialModelsResp.models;
         const commonOptions = {
@@ -284,7 +303,8 @@ export function ChatPage() {
           providerActive: !!providerId,
           onProgress: setLoadProgress,
           initialModels,
-          hwProfile: hw,
+          hwProfile,
+          signal: controller.signal,
         };
 
         if (pendingRepo) {
@@ -293,7 +313,7 @@ export function ChatPage() {
           } else {
             setLoadProgress(null);
           }
-          const result = await bootstrapChatModels(navTarget, commonOptions);
+          const result = await bootstrapChatSession(navTarget, commonOptions);
           if (cancelled) return;
           applyResult(result);
           sessionInitRef.current = true;
@@ -304,7 +324,7 @@ export function ChatPage() {
           }
         } else if (pendingModel) {
           setLoadProgress(null);
-          const result = await bootstrapChatModels({ modelId: pendingModel }, commonOptions);
+          const result = await bootstrapChatSession({ modelId: pendingModel }, commonOptions);
           if (cancelled) return;
           applyResult(result);
           sessionInitRef.current = true;
@@ -322,10 +342,10 @@ export function ChatPage() {
         setLoadedModelId(null);
         setLoadedBackend(null);
         setError(e instanceof Error ? e.message : "Failed to load models");
-        if (pendingRepo) {
-          setSearchParams({}, { replace: true });
-        }
       } finally {
+        if (bootstrapAbortRef.current === controller) {
+          bootstrapAbortRef.current = null;
+        }
         if (bootstrapGen === bootstrapGenRef.current) {
           setSwitchingModel(false);
           setLoadProgress(null);
@@ -336,6 +356,10 @@ export function ChatPage() {
     void bootstrap();
     return () => {
       cancelled = true;
+      controller.abort();
+      if (bootstrapAbortRef.current === controller) {
+        bootstrapAbortRef.current = null;
+      }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingModel, pendingRepo, pendingDownloadBytes]);
@@ -349,8 +373,20 @@ export function ChatPage() {
   }, [active, messagesByThread, loadMessages]);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: streaming ? "auto" : "smooth" });
+    if (scrollFrameRef.current !== null) {
+      window.cancelAnimationFrame(scrollFrameRef.current);
+    }
+    scrollFrameRef.current = window.requestAnimationFrame(() => {
+      scrollFrameRef.current = null;
+      bottomRef.current?.scrollIntoView({ behavior: streaming ? "auto" : "smooth" });
+    });
   }, [messages, active, streaming]);
+
+  useEffect(() => () => {
+    if (scrollFrameRef.current !== null) {
+      window.cancelAnimationFrame(scrollFrameRef.current);
+    }
+  }, []);
 
   const openThread = (t: ChatThread) => {
     setActive(t.id);
@@ -405,6 +441,14 @@ export function ChatPage() {
       setError("Wait for the model to finish loading.");
       return;
     }
+    if (!providerId && selection && !effectiveBackend) {
+      setError(
+        selected?.format === "gguf"
+          ? "This GGUF is not available for local chat. Install or update llama.cpp, or choose a supported GGUF."
+          : "No installed local inference engine can load this model.",
+      );
+      return;
+    }
     if (!providerId && !modelReady && selection) {
       setSwitchingModel(true);
       setError(null);
@@ -431,24 +475,20 @@ export function ChatPage() {
       openThread(t);
     }
 
+    let displayedMessages = messagesByThread[threadId!] ?? [];
+    if (displayedMessages.length === 0 && threads.some((t) => t.id === threadId)) {
+      displayedMessages = await api.getMessages(threadId!);
+    }
+
     setMessagesByThread((prev) => ({
       ...prev,
       [threadId!]: [
-        ...(prev[threadId!] ?? []),
+        ...displayedMessages,
         { id: crypto.randomUUID(), role: "user", content, created_at: new Date().toISOString() },
       ],
     }));
 
-    let priorMessages = messagesByThread[threadId!] ?? [];
-    if (priorMessages.length === 0 && threads.some((t) => t.id === threadId)) {
-      priorMessages = await api.getMessages(threadId!);
-      setMessagesByThread((prev) => ({ ...prev, [threadId!]: priorMessages }));
-    }
-
-    const history = [
-      ...priorMessages.map((m) => ({ role: m.role, content: m.content })),
-      { role: "user", content },
-    ];
+    const latestUserMessage = [{ role: "user", content }];
 
     const isOllamaOnly = selected?.kind === "ollama";
     const usingOllama = !providerId && effectiveBackend === "ollama";
@@ -482,7 +522,7 @@ export function ChatPage() {
       const { promise, abort } = streamChat(
         {
           thread_id: threadId,
-          messages: history,
+          messages: latestUserMessage,
           stream: true,
           tools: useTools && toolsAvailable,
           allow_code_exec: allowCodeExec && codeExecAvailable,
@@ -524,7 +564,11 @@ export function ChatPage() {
   };
 
   const modelLabel = (m: InferenceModelOption) => {
-    const engine = m.backend_labels[m.default_backend] || m.default_backend;
+    const engine = m.default_backend
+      ? m.backend_labels[m.default_backend] || m.default_backend
+      : m.format === "gguf"
+        ? "missing llama.cpp"
+        : "missing local runtime";
     const fit = m.hardware_fit_label ? ` · ${m.hardware_fit_label}` : "";
     return `${m.name} · ${engine}${fit}`;
   };
@@ -643,6 +687,7 @@ export function ChatPage() {
                   }
                 }
                 setInferenceBackend(next);
+                writeStoredModel(CHAT_BACKEND_STORAGE_KEY, next);
                 userPickedBackendRef.current = true;
                 if (selection && !providerId) {
                   const model = models.find((m) => m.id === selection);
@@ -654,6 +699,7 @@ export function ChatPage() {
                     const loaded = await preloadWithProgress(selection, next, setLoadProgress);
                     setLoadedModelId(selection);
                     setLoadedBackend(loaded);
+                    writeStoredModel(CHAT_BACKEND_STORAGE_KEY, loaded);
                   } catch (e) {
                     setLoadedModelId(null);
                     setLoadedBackend(null);
@@ -721,7 +767,11 @@ export function ChatPage() {
                 )}
                 {selected && (
                   <span className="chat-model-status-engine muted-text">
-                    {selected.backend_labels?.[effectiveBackend] || BACKEND_LABELS[effectiveBackend] || effectiveBackend}
+                    {effectiveBackend
+                      ? selected.backend_labels?.[effectiveBackend] || BACKEND_LABELS[effectiveBackend] || effectiveBackend
+                      : selected.format === "gguf"
+                        ? "Missing llama.cpp runtime"
+                        : "Missing local inference runtime"}
                   </span>
                 )}
                 {modelReady && !effectiveLoadProgress && (
@@ -735,6 +785,7 @@ export function ChatPage() {
               <ModelLoadProgress
                 progress={effectiveLoadProgress}
                 modelName={selected?.name || pendingModelLabel}
+                onCancel={waitingForModel ? handleCancelModelLoad : undefined}
               />
             )}
           </div>

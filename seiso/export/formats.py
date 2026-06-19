@@ -88,7 +88,7 @@ def export_checkpoint(
         elif fmt == ExportFormat.MERGED:
             dest = out_root / "merged"
             dest.mkdir(parents=True, exist_ok=True)
-            _merge_lora(ckpt, dest, log)
+            merge_lora_checkpoint(ckpt, dest, log)
             _write_export_sidecar(dest, ckpt, fmt, kind)
             results[fmt.value] = dest
 
@@ -342,11 +342,6 @@ def merge_lora_checkpoint(checkpoint: Path, dest: Path, log: Callable[[str], Non
         log(f"Copied full checkpoint to {dest}")
     else:
         raise ValueError(f"Checkpoint is neither a LoRA adapter nor a full model: {checkpoint}")
-
-
-def _merge_lora(checkpoint: Path, dest: Path, log: Callable[[str], None]) -> None:
-    """Backward-compatible alias for merge_lora_checkpoint."""
-    merge_lora_checkpoint(checkpoint, dest, log)
 
 
 def _push_hub(

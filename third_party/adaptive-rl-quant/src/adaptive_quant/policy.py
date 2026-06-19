@@ -7,6 +7,7 @@ import random
 from dataclasses import dataclass
 
 from adaptive_quant.configuration import FrameworkConfig
+from adaptive_quant.kernel_rl import kernel_profile_count
 from adaptive_quant.math_utils import discrete_precision_level
 from adaptive_quant.policy_heads import (
     CategoricalHead,
@@ -80,6 +81,11 @@ class UniversalQuantizationPolicy:
             else []
         )
         self.value_head = ValueHead(self.state_dim, self.rng)
+        self.kernel_head = (
+            CategoricalHead(self.state_dim, kernel_profile_count(config), self.rng)
+            if config.kernel_rl_enabled
+            else None
+        )
 
     def act(
         self, state: EpisodeState, deterministic: bool = False
@@ -197,6 +203,18 @@ class UniversalQuantizationPolicy:
             decision.metadata["moe_head"] = "packed_expert_bank"
 
         decision.metadata["selected_mode"] = selected_mode.value
+        if self.kernel_head is not None:
+            profile_index, probabilities = self.kernel_head.sample(
+                state_vector, self.rng, deterministic=deterministic
+            )
+            decision.metadata["kernel_profile_index"] = profile_index
+            traces.append(
+                {
+                    "head": "kernel",
+                    "selected_index": profile_index,
+                    "probabilities": probabilities,
+                }
+            )
         trace = PolicyTrace(
             state_vector=state_vector,
             value_prediction=value_prediction,
@@ -245,6 +263,8 @@ class UniversalQuantizationPolicy:
                 )
             elif head_name == "moe":
                 update_categorical(self.moe_heads[action_trace["slot"]], action_trace)
+            elif head_name == "kernel" and self.kernel_head is not None:
+                update_categorical(self.kernel_head, action_trace)
         self.value_head.update(trace.state_vector, reward, self.config.value_learning_rate)
 
     def snapshot(self) -> dict[str, object]:
@@ -256,6 +276,7 @@ class UniversalQuantizationPolicy:
             "layer_heads": copy.deepcopy(self.layer_heads),
             "learned_head": copy.deepcopy(self.learned_head),
             "moe_heads": copy.deepcopy(self.moe_heads),
+            "kernel_head": copy.deepcopy(self.kernel_head),
             "value_head": copy.deepcopy(self.value_head),
         }
 
@@ -271,6 +292,7 @@ class UniversalQuantizationPolicy:
         self.layer_heads = copy.deepcopy(snapshot["layer_heads"])
         self.learned_head = copy.deepcopy(snapshot["learned_head"])
         self.moe_heads = copy.deepcopy(snapshot.get("moe_heads", self.moe_heads))
+        self.kernel_head = copy.deepcopy(snapshot.get("kernel_head", self.kernel_head))
         self.value_head = copy.deepcopy(snapshot["value_head"])
 
     def _validate_live_snapshot(self, snapshot: dict[str, object]) -> None:
@@ -315,6 +337,9 @@ class UniversalQuantizationPolicy:
             "layer_heads": [_serialize_categorical_head(head) for head in self.layer_heads],
             "learned_head": _serialize_gaussian_head(self.learned_head),
             "moe_heads": [_serialize_categorical_head(head) for head in self.moe_heads],
+            "kernel_head": _serialize_categorical_head(self.kernel_head)
+            if self.kernel_head is not None
+            else None,
             "value_head": _serialize_value_head(self.value_head),
         }
 
@@ -372,4 +397,13 @@ class UniversalQuantizationPolicy:
         self.moe_heads = [
             _categorical_head_from_payload(item) for item in payload.get("moe_heads", [])
         ]
+        kernel_payload = payload.get("kernel_head")
+        if kernel_payload is not None and self.kernel_head is not None:
+            _validate_categorical_head_payload(
+                "kernel_head",
+                kernel_payload,
+                expected_input_dim=self.state_dim,
+                expected_output_dim=kernel_profile_count(self.config),
+            )
+            self.kernel_head = _categorical_head_from_payload(kernel_payload)
         self.value_head = _value_head_from_payload(payload["value_head"])

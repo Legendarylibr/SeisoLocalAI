@@ -21,6 +21,11 @@ from forge.services.download_progress import estimate_load_eta_seconds
 from forge.services.hardware import hardware_profile
 from forge.services.hf_cache_inventory import sync_hf_cache_inventory
 from forge.services.inference_models import list_inference_options, resolve_chat_target
+from forge.services.llm_output import (
+    StreamingOutputSanitizer,
+    chunk_sanitized_output,
+    sanitize_llm_output,
+)
 from forge.services.models import resolve_model_path
 from seiso.inference.backends import BACKEND_OLLAMA
 
@@ -87,8 +92,13 @@ async def inference_models(
         data_dir=settings.data_dir,
         hf_cache_dir=settings.hf_cache_dir,
     )
-    options = await list_inference_options(db, user_id, ollama_base_url=settings.ollama_base_url)
     profile = hardware_profile()
+    options = await list_inference_options(
+        db,
+        user_id,
+        ollama_base_url=settings.ollama_base_url,
+        profile=profile,
+    )
     return {
         "models": options,
         "total": len(options),
@@ -141,6 +151,15 @@ async def cancel_inference(
 ) -> dict:
     """Abort in-flight generation and unload the active local model from VRAM."""
     return await orchestrator._runner.cancel_and_unload()
+
+
+@router.post("/cancel-generation")
+async def cancel_generation(
+    user_id: Annotated[str, Depends(get_current_user_id)],
+    orchestrator: Annotated[InferenceOrchestrator, Depends(get_inference_orchestrator)],
+) -> dict:
+    """Abort in-flight generation but keep the active local model warmed."""
+    return await orchestrator._runner.cancel_generation()
 
 
 @router.post("/preload")
@@ -261,6 +280,20 @@ async def preload_model_stream(
             return
 
         status = pool.status()
+        yield {
+            "event": "progress",
+            "data": json.dumps(
+                {
+                    "phase": "ready",
+                    "label": f"{ctx['model_name']} is loaded into inference",
+                    "percent": 100,
+                    "model_id": body.model_id,
+                    "model_name": ctx["model_name"],
+                    "backend": ctx["backend"],
+                    "size_bytes": size_bytes,
+                }
+            ),
+        }
         yield {
             "event": "complete",
             "data": json.dumps(
@@ -476,10 +509,13 @@ async def chat(
                 cancelled = False
                 try:
                     orchestrator._emit_log(job_id, f"Streaming inference ({backend_label})")
+                    stream_guard = StreamingOutputSanitizer()
                     async for token in orchestrator.stream_local(payload):
                         parts.append(token)
-                        yield {"event": "token", "data": token}
-                    content = "".join(parts)
+                        if not use_defense:
+                            for safe_token in stream_guard.feed(token):
+                                yield {"event": "token", "data": safe_token}
+                    content = sanitize_llm_output("".join(parts))
                     if use_defense and content:
                         content, defense_result = await scan_output(
                             payload.get("messages", []),
@@ -490,6 +526,12 @@ async def chat(
                         )
                         if not defense_result.unavailable:
                             yield {"event": "defense", "data": json.dumps(defense_result.to_dict())}
+                    if use_defense:
+                        for token in chunk_sanitized_output(content):
+                            yield {"event": "token", "data": token}
+                    else:
+                        for token in stream_guard.finish():
+                            yield {"event": "token", "data": token}
                     if body.thread_id:
                         await db.add_message(body.thread_id, "assistant", content)
                     yield {"event": "message", "data": content}
@@ -505,7 +547,7 @@ async def chat(
                     raise
                 finally:
                     if cancelled:
-                        await orchestrator._runner.cancel_and_unload()
+                        await orchestrator._runner.cancel_generation()
                 return
 
             await orchestrator.start(job_id, payload)
@@ -517,7 +559,7 @@ async def chat(
                 if job.result.get("defense"):
                     yield {"event": "defense", "data": json.dumps(job.result["defense"])}
             elif job and job.result.get("content"):
-                content = job.result["content"]
+                content = sanitize_llm_output(job.result["content"])
                 if body.thread_id:
                     await db.add_message(body.thread_id, "assistant", content)
                 yield {"event": "message", "data": content}
@@ -536,6 +578,8 @@ async def chat(
         if job.result.get("defense"):
             raise HTTPException(403, detail, headers={"X-Seiso-Defense": json.dumps(job.result["defense"])})
         raise HTTPException(500, detail)
+    if job.result.get("content"):
+        job.result["content"] = sanitize_llm_output(job.result["content"])
     if body.thread_id and job.result.get("content"):
         await db.add_message(body.thread_id, "assistant", job.result["content"])
     return {"job_id": job_id, **job.result}

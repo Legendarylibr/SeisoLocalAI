@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Install Seiso on Linux or macOS — clone (if needed), venv, pip extras, Forge UI build.
+# Install Seiso on Linux or macOS — system deps, clone, venv, pip extras, Forge UI build.
 #
-# One-liner (Linux / macOS) — installs and starts Forge:
+# One-liner (Linux / macOS) — installs and starts Forge (opens browser when ready):
 #   curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/install.sh | bash
 #
 # Options (env vars):
@@ -12,6 +12,7 @@
 #   SEISO_SKIP_UI=1     Skip forge-ui npm build
 #   SEISO_NO_BANNER=1   Skip glitch install TUI
 #   SEISO_VERBOSE=1     Show full pip/npm output (no TUI overlay)
+#   SEISO_NO_OPEN=1     Do not open the browser after Forge starts
 #   SEISO_SKIP_FLASH_ATTN=0  Try optional Flash Attention during install (NVIDIA Linux)
 set -euo pipefail
 
@@ -20,11 +21,36 @@ INSTALL_DIR="${SEISO_INSTALL_DIR:-$HOME/Seiso}"
 BRANCH="${SEISO_BRANCH:-main}"
 SEISO_START="${SEISO_START:-1}"
 SEISO_SKIP_FLASH_ATTN="${SEISO_SKIP_FLASH_ATTN:-1}"
-FORGE_URL="http://127.0.0.1:8765"
 
-log() { printf '==> %s\n' "$*"; }
-warn() { printf 'warning: %s\n' "$*" >&2; }
-die() { printf 'error: %s\n' "$*" >&2; exit 1; }
+load_seiso_common() {
+  local lib_path=""
+  if [[ -n "${BASH_SOURCE[0]:-}" && -f "${BASH_SOURCE[0]}" ]]; then
+    lib_path="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/common.sh"
+  fi
+  if [[ -f "$lib_path" ]]; then
+    # shellcheck source=lib/common.sh
+    source "$lib_path"
+    return 0
+  fi
+  local raw_base="${SEISO_RAW_BASE:-https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/${SEISO_BRANCH:-main}}"
+  local tmp
+  tmp="$(mktemp)"
+  if ! curl -fsSL "${raw_base}/scripts/lib/common.sh" -o "$tmp"; then
+    rm -f "$tmp"
+    printf 'error: could not load install helpers from %s\n' "$raw_base" >&2
+    exit 1
+  fi
+  # shellcheck source=/dev/null
+  source "$tmp"
+  rm -f "$tmp"
+}
+
+load_seiso_common
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-}")" 2>/dev/null && pwd || echo "")"
+
+log() { seiso_log "$@"; }
+warn() { seiso_warn "$@"; }
+die() { seiso_die "$@"; }
 
 quiet_install_output() {
   [[ "${SEISO_VERBOSE:-0}" == "1" ]] && return 1
@@ -84,31 +110,8 @@ need_cmd() {
   command -v "$1" >/dev/null 2>&1 || die "Missing required command: $1"
 }
 
-python_version_ok() {
-  python3 - <<'PY'
-import sys
-raise SystemExit(0 if sys.version_info >= (3, 10) else 1)
-PY
-}
-
 detect_platform_extras() {
-  local os
-  os="$(uname -s)"
-  case "$os" in
-    Darwin)
-      echo "forge,train,mlx,dev"
-      ;;
-    Linux)
-      if command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi >/dev/null 2>&1; then
-        echo "forge,train,cuda,dev"
-      else
-        echo "forge,train,dev"
-      fi
-      ;;
-    *)
-      die "Unsupported OS: $os (use docs/platforms/windows.md on Windows)"
-      ;;
-  esac
+  seiso_detect_platform_extras
 }
 
 resolve_root() {
@@ -149,37 +152,27 @@ warn_windows_mount() {
 }
 
 run_install_worker() {
-  local root="$1" extras="$2"
-  # shellcheck disable=SC1091
-  source "$root/.venv/bin/activate"
-  python -m pip install -U pip wheel setuptools
-  pip install -e "${root}[${extras}]"
-  if [[ "${SEISO_SKIP_FLASH_ATTN}" != "1" && "$extras" == *cuda* && "$root" != /mnt/* ]]; then
-    if [[ -x "$root/scripts/install_flash_attn.sh" ]]; then
-      bash "$root/scripts/install_flash_attn.sh" || true
-    fi
-  fi
-  if [[ "${SEISO_SKIP_UI:-0}" != "1" ]]; then
-    (cd "$root/forge-ui" && npm install && npm run build)
-  fi
+  seiso_run_install_worker "$1" "$2"
+}
+
+install_failed() {
+  local root="$1"
+  warn "Install failed."
+  seiso_run_doctor "$root"
+  exit 1
 }
 
 main() {
   local root extras install_log
   uname -s | grep -Eq '^(Linux|Darwin)$' || die "This installer supports Linux and macOS only"
 
-  need_cmd python3
-  python_version_ok || die "Python 3.10+ is required ($(python3 --version 2>&1 || echo unknown))"
-  need_cmd git
+  log_unless_quiet "Checking system dependencies"
+  seiso_require_system_deps
 
   root="$(resolve_root)"
   install_tui_intro "$root"
   log_unless_quiet "Using repository at $root"
   warn_windows_mount "$root"
-
-  if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
-    die "Node.js 18+ is required — install from https://nodejs.org/ then re-run this script"
-  fi
 
   extras="$(detect_platform_extras)"
   log_unless_quiet "Installing Python extras: [$extras]"
@@ -199,25 +192,25 @@ main() {
   export SEISO_SKIP_FLASH_ATTN
 
   if ! run_with_install_tui "$root" "$install_log" \
-    bash -c "$(declare -f run_install_worker); run_install_worker \"$root\" \"$extras\""; then
-    die "Install failed. Run $root/scripts/doctor.sh for a guided diagnosis."
+    bash -c "source \"$root/scripts/lib/common.sh\"; seiso_run_install_worker \"$root\" \"$extras\""; then
+    install_failed "$root"
   fi
 
   install_tui_outro "$root"
 
   if [[ "$SEISO_START" == "1" ]]; then
     export SEISO_INSTALL_JUST_RAN=1
+    export SEISO_OPEN_BROWSER=1
     exec "$root/scripts/start.sh"
   fi
 
+  local forge_url
+  forge_url="$(seiso_forge_url)"
   if install_tui_enabled "$root"; then
-    printf '\n%s\nDoctor: %s/scripts/doctor.sh\n\n' "$FORGE_URL" "$root"
+    printf '\n%s\nDoctor: %s/scripts/doctor.sh\n\n' "$forge_url" "$root"
   else
-    printf '\nOpen %s and complete onboarding.\n\n' "$FORGE_URL"
-    printf 'Model storage: GGUF downloads go to ~/.seiso/hf_cache and load with llama.cpp.\n'
-    printf 'Typical GGUF downloads are 2-8 GB each; larger models can be 10-30+ GB.\n'
-    printf 'Ollama uses its own store — use ollama pull/create for Ollama models.\n'
-    printf 'Need help? Run: %s/scripts/doctor.sh\n\n' "$root"
+    printf '\nStart Forge: %s/scripts/start.sh\n' "$root"
+    printf 'Doctor: %s/scripts/doctor.sh\n\n' "$root"
   fi
 }
 

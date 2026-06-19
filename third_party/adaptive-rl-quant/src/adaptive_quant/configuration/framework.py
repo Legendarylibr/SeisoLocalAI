@@ -16,6 +16,7 @@ from adaptive_quant.configuration.sections import (
     ArtifactPaths,
     ContinuousLearningSettings,
     FrontierSettings,
+    KernelSettings,
     LlamaCppSettings,
     MoESettings,
     OnlineSettings,
@@ -38,6 +39,8 @@ class RewardWeights:
     epsilon_instability: float = 1.000
     eta_token_latency: float = 0.0
     zeta_perplexity_over_ref: float = 0.0
+    theta_kernel_speedup: float = 0.120
+    iota_kernel_latency: float = 0.008
 
 
 @dataclass(init=False)
@@ -58,6 +61,7 @@ class FrameworkConfig:
     frontier: FrontierSettings
     router: RouterSettings
     training: TrainingSettings
+    kernel: KernelSettings
     reward_weights: RewardWeights
     training_backend: str
     multi_hardware: bool
@@ -89,6 +93,7 @@ class FrameworkConfig:
         object.__setattr__(self, "frontier", FrontierSettings())
         object.__setattr__(self, "router", RouterSettings())
         object.__setattr__(self, "training", TrainingSettings())
+        object.__setattr__(self, "kernel", KernelSettings())
         object.__setattr__(self, "reward_weights", RewardWeights())
         object.__setattr__(self, "training_backend", "python")
         object.__setattr__(self, "multi_hardware", True)
@@ -148,6 +153,7 @@ class FrameworkConfig:
             "frontier",
             "router",
             "training",
+            "kernel",
         }:
             if name in FLAT_FIELD_MAP:
                 set_flat_field(self, name, value)
@@ -424,7 +430,38 @@ class FrameworkConfig:
         return 4 + top_k * (5 + self.moe_variant_count())
 
     def state_vector_dim(self) -> int:
-        return len(self.ordered_hardware()) + 5 + 2 + self.num_layers + 3 + self.moe_state_dim()
+        base = len(self.ordered_hardware()) + 5 + 2 + self.num_layers + 3 + self.moe_state_dim()
+        if self.kernel_rl_enabled:
+            base += 1
+        return base
+
+    @property
+    def kernel_rl_enabled(self) -> bool:
+        return bool(self.kernel.rl_enabled)
+
+    @property
+    def kernel_profile_count(self) -> int:
+        return max(1, int(self.kernel.profile_count))
+
+    @property
+    def kernel_default_profile(self) -> int:
+        return int(self.kernel.default_profile)
+
+    @property
+    def kernel_hidden_dim(self) -> int:
+        return int(self.kernel.hidden_dim)
+
+    @property
+    def kernel_batch_rows(self) -> int:
+        return int(self.kernel.batch_rows)
+
+    @property
+    def kernel_rl_live_benchmark(self) -> bool:
+        return bool(self.kernel.live_benchmark)
+
+    @property
+    def kernel_benchmark_every_n_episodes(self) -> int:
+        return max(1, int(self.kernel.benchmark_every_n_episodes))
 
     def clone(self, **changes: Any) -> FrameworkConfig:
         flat = config_to_flat_dict(self)

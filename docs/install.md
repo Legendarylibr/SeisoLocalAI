@@ -6,6 +6,19 @@ Complete guide to installing Seiso on every supported platform.
 
 ---
 
+## Paths on every OS
+
+| Purpose | Linux / macOS / WSL | Windows (native) | Override |
+|---------|---------------------|------------------|----------|
+| **Repository** | `$HOME/Seiso` | `%USERPROFILE%\Seiso` | `SEISO_INSTALL_DIR` |
+| **User data** | `$HOME/.seiso` | `%USERPROFILE%\.seiso` | `SEISO_DATA_DIR` |
+| **Virtualenv** | `{repo}/.venv` | `{repo}\.venv` | — |
+| **Activate venv** | `source .venv/bin/activate` | `.\.venv\Scripts\Activate.ps1` | — |
+
+Seiso config files accept `~/.seiso` and expand it correctly on all platforms. Shell one-liners must use the path style for your OS.
+
+---
+
 ## System requirements
 
 | Component | Minimum | Recommended |
@@ -33,13 +46,21 @@ Complete guide to installing Seiso on every supported platform.
 
 ## Linux & macOS — one command (recommended)
 
-**Requirements:** Python 3.10+, [Node.js 18+](https://nodejs.org/), and git.
+No manual prerequisites on most systems — the installer installs Python, Node, and git via Homebrew or your package manager when they are missing.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/install.sh | bash
 ```
 
-Forge starts automatically when install finishes. Open **http://127.0.0.1:8765** and create your local admin password.
+Forge starts when install finishes and your browser opens automatically at **http://127.0.0.1:8765**. You do **not** need to run `start.sh` immediately after a successful install. If anything fails, **doctor runs automatically** with a guided diagnosis.
+
+**Start Forge on later sessions:**
+
+```bash
+"$HOME/Seiso/scripts/start.sh"
+# or one-liner:
+curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/start.sh | bash
+```
 
 **Verify before running (recommended):**
 
@@ -51,12 +72,12 @@ bash install.sh
 
 ### What the installer does
 
-1. **Clones** Seiso to `~/Seiso` (override with `SEISO_INSTALL_DIR`)
+1. **Clones** Seiso to `$HOME/Seiso` on Linux/macOS/WSL (override with `SEISO_INSTALL_DIR`; Windows uses manual clone — see below)
 2. **Creates** a Python virtualenv at `.venv`
-3. **Installs** platform extras automatically:
-   - **Linux + NVIDIA** (`nvidia-smi` detected) → `[forge,train,cuda,dev]`
-   - **Linux (no NVIDIA)** → `[forge,train,dev]`
-   - **macOS** → `[forge,train,mlx,dev]`
+3. **Installs** platform extras automatically (includes GGUF chat via `llamacpp`):
+   - **Linux + NVIDIA** (`nvidia-smi` detected) → `[forge,train,cuda,llamacpp,dev]`
+   - **Linux (no NVIDIA)** → `[forge,train,llamacpp,dev]`
+   - **macOS** → `[forge,train,mlx,llamacpp,dev]`
 4. **Copies** `.env.example` → `.env` if missing
 5. **Builds** the Forge UI (`forge-ui/dist`)
 6. **Starts** Forge (unless `SEISO_START=0`)
@@ -65,18 +86,19 @@ bash install.sh
 
 | Variable | Default | Effect |
 |----------|---------|--------|
-| `SEISO_INSTALL_DIR` | `~/Seiso` | Clone/install path |
+| `SEISO_INSTALL_DIR` | `$HOME/Seiso` | Clone/install path (Linux/macOS/WSL) |
 | `SEISO_REPO_URL` | `https://github.com/Legendarylibr/SeisoLocalAI.git` | Git remote |
 | `SEISO_BRANCH` | `main` | Branch to clone |
 | `SEISO_SKIP_UI=1` | off | Skip `npm run build` |
 | `SEISO_START=0` | on (starts Forge) | Set to `0` to install without launching Forge |
+| `SEISO_NO_OPEN=1` | off | Do not open the browser after Forge starts |
 | `SEISO_NO_BANNER=1` | off | Skip install animation |
 | `SEISO_VERBOSE=1` | off | Show full pip/npm output |
 
 Custom location:
 
 ```bash
-SEISO_INSTALL_DIR=~/code/Seiso curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/install.sh | bash
+SEISO_INSTALL_DIR="$HOME/code/Seiso" curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/install.sh | bash
 ```
 
 ### Already cloned?
@@ -93,25 +115,41 @@ First launch: open **http://127.0.0.1:8765** and create your local admin passwor
 
 ## Manual install (all platforms)
 
-The commands below assume a fresh clone at `~/Seiso`. If you cloned somewhere else, replace `~/Seiso` with your repository path.
+Pick a repository path (`REPO`):
 
-Base install:
+- Linux / macOS / WSL: `"$HOME/Seiso"` (or any directory)
+- Windows: `"$env:USERPROFILE\Seiso"`
+
+Base install (Linux / macOS / WSL):
 
 ```bash
-git clone https://github.com/Legendarylibr/SeisoLocalAI.git ~/Seiso
-cd ~/Seiso
+git clone https://github.com/Legendarylibr/SeisoLocalAI.git "$HOME/Seiso"
+cd "$HOME/Seiso"
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -U pip wheel setuptools
 pip install -e ".[forge,train,dev]"
 ```
 
-On Windows, activate the virtualenv with `.venv\Scripts\activate` instead of `source .venv/bin/activate`.
+Base install (Windows PowerShell):
+
+```powershell
+git clone https://github.com/Legendarylibr/SeisoLocalAI.git "$env:USERPROFILE\Seiso"
+cd "$env:USERPROFILE\Seiso"
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -U pip wheel setuptools
+pip install -e ".[forge,train,dev]"
+```
 
 Optional environment file:
 
 ```bash
-cp .env.example .env
+cp -n .env.example .env    # Linux / macOS / WSL
+```
+
+```powershell
+if (-not (Test-Path .env)) { Copy-Item .env.example .env }   # Windows
 ```
 
 Edit `.env` and set `SEISO_HF_TOKEN` only if you need gated Hugging Face models.
@@ -119,14 +157,22 @@ Edit `.env` and set `SEISO_HF_TOKEN` only if you need gated Hugging Face models.
 Build the UI and launch:
 
 ```bash
-cd ~/Seiso
+cd "$HOME/Seiso"    # or your REPO path
 source .venv/bin/activate
-cd forge-ui
-npm install
-npm run build
-cd ..
+cd forge-ui && npm ci && npm run build && cd ..
+seiso doctor
 seiso forge
 ```
+
+```powershell
+cd "$env:USERPROFILE\Seiso"
+.\.venv\Scripts\Activate.ps1
+cd forge-ui; npm ci; npm run build; cd ..
+seiso doctor
+seiso forge
+```
+
+Use `npm install` instead of `npm ci` only when you intentionally want to refresh the lockfile.
 
 ---
 
@@ -174,7 +220,7 @@ Full guide: [platforms/linux-amd-rocm.md](platforms/linux-amd-rocm.md)
 ### macOS Apple Silicon
 
 ```bash
-cd ~/Seiso
+cd "$HOME/Seiso"
 source .venv/bin/activate
 pip install -e ".[forge,train,mlx,dev]"
 ```
@@ -186,11 +232,10 @@ Full guide: [platforms/macos.md](platforms/macos.md)
 ### Windows + NVIDIA
 
 ```powershell
+cd "$env:USERPROFILE\Seiso"
+.\.venv\Scripts\Activate.ps1
 pip install -e ".[forge,train,dev]"
-cd forge-ui
-npm install
-npm run build
-cd ..
+cd forge-ui; npm ci; npm run build; cd ..
 seiso forge
 ```
 
@@ -216,13 +261,25 @@ Full guide: [platforms/wsl.md](platforms/wsl.md)
 | `flash-attn` | Flash Attention 2 (optional; build from source) | **Linux NVIDIA only** |
 | `mlx` | mlx-lm | **macOS only** |
 | `llamacpp` | llama-cpp-python (GGUF inference) | All |
-| `compress-quant` | auto-gptq, autoawq | CUDA recommended |
+| `compress-quant` | auto-gptq, autoawq (requires `torch`; Linux NVIDIA) | CUDA recommended |
 | `compress-eval` | lm-eval harness | All |
 | `image-compress` | diffusers, torchvision, gradio | CUDA/MPS/CPU |
 | `image-compress-onnx` | optimum, onnxruntime | All |
+| `rl-quant` | Integrated adaptive RL quant (stdlib; no extra deps) | All |
 | `dev` | pytest, ruff, mypy, bandit | All |
 
-Combine extras: `pip install -e ".[forge,train,cuda,dev,compress-quant]"`
+Combine extras:
+
+```bash
+pip install -e ".[forge,train,cuda,dev,compress-quant]"
+```
+
+If `auto-gptq` fails to build, install the train stack first, then retry with build isolation disabled:
+
+```bash
+pip install -e ".[forge,train,compress-quant]"
+pip install auto-gptq autoawq --no-build-isolation
+```
 
 ---
 
@@ -231,7 +288,7 @@ Combine extras: `pip install -e ".[forge,train,cuda,dev,compress-quant]"`
 Forge serves the built UI from `forge-ui/dist`. Required before first launch:
 
 ```bash
-cd forge-ui && npm install && npm run build && cd ..
+cd forge-ui && npm ci && npm run build && cd ..
 ```
 
 Or use `./scripts/install.sh` / `./scripts/start.sh` (auto-builds if missing).
@@ -257,7 +314,9 @@ See [forge.md](forge.md) for pages, API routes, and environment variables.
 
 ## First launch checklist
 
-1. Start Forge: `seiso forge` or `./scripts/start.sh`
+1. Start Forge:
+   - Linux / macOS / WSL: `./scripts/start.sh` or `seiso forge` (with venv active)
+   - Windows: activate venv → `seiso forge`
 2. Open **http://127.0.0.1:8765**
 3. Complete onboarding — create local admin password
 4. (Optional) Add Hugging Face token in **Settings**
@@ -275,7 +334,7 @@ The `--network` option also checks `huggingface.co` reachability.
 
 Model storage notes:
 
-- Catalog chat downloads fetch a GGUF file into Seiso's Hugging Face cache (`~/.seiso/hf_cache` by default) and register a local inventory link for llama.cpp.
+- Catalog chat downloads fetch a GGUF file into Seiso's Hugging Face cache (`$SEISO_DATA_DIR/hf_cache` by default) and register a local inventory link for llama.cpp.
 - The Hub page shows the expected GGUF download size, usually 2-8 GB for small/medium Q4 models and 10-30+ GB for larger models.
 - Ollama keeps its own model store. Seiso lists and chats with models already available in Ollama, but Hugging Face catalog downloads are not automatically imported into Ollama. Use `ollama pull` or `ollama create` for that path.
 
@@ -288,15 +347,12 @@ Walkthrough: [getting-started.md](getting-started.md)
 From an existing clone:
 
 ```bash
-cd ~/Seiso
+cd "$HOME/Seiso"
 git pull origin main
 source .venv/bin/activate
 pip install -U pip
 pip install -e ".[forge,train,cuda,dev]"
-cd forge-ui
-npm install
-npm run build
-cd ..
+cd forge-ui && npm ci && npm run build && cd ..
 ```
 
 Adjust the extras for your platform, for example `.[forge,train,mlx,dev]` on Apple Silicon.
@@ -336,13 +392,12 @@ python -c "from seiso.training.platform_caps import training_capabilities; impor
 Remove the install directory:
 
 ```bash
-rm -rf ~/Seiso
+rm -rf "$HOME/Seiso"      # repository
+rm -rf "$HOME/.seiso"     # user data
 ```
 
-Remove user data, including models, checkpoints, and exports:
-
-```bash
-rm -rf ~/.seiso
+```powershell
+Remove-Item -Recurse -Force "$env:USERPROFILE\Seiso", "$env:USERPROFILE\.seiso"
 ```
 
 ---

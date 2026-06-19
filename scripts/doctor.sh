@@ -127,7 +127,7 @@ fi
 if [[ -f "$root/forge-ui/dist/index.html" ]]; then
   ok "Forge UI build exists"
 else
-  warn "Forge UI build missing. Run: cd $root/forge-ui && npm install && npm run build"
+  warn "Forge UI build missing. Run: cd $root/forge-ui && npm ci && npm run build"
 fi
 
 if [[ -x "$root/.venv/bin/python" ]]; then

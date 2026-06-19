@@ -3,14 +3,18 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any, TypeVar
 
+from adaptive_quant.kernel_rl import kernel_feedback_scalar
 from adaptive_quant.math_utils import mean
 from adaptive_quant.types import EpisodeResult, EpisodeState, HardwareType, QuantizationDecision
 
 StateT = TypeVar("StateT")
 
 
-def zero_previous_action() -> list[float]:
-    return [0.0, 0.0, 0.0]
+def zero_previous_action(config: Any | None = None) -> list[float]:
+    base = [0.0, 0.0, 0.0]
+    if config is not None and getattr(config, "kernel_rl_enabled", False):
+        base.append(0.0)
+    return base
 
 
 def feedback_vector(
@@ -19,12 +23,16 @@ def feedback_vector(
     max_bits: int,
     scale_upper: float,
     clip_upper: float,
+    config: Any | None = None,
 ) -> list[float]:
-    return decision.feedback_vector(
+    vector = decision.feedback_vector(
         max_bits=max_bits,
         scale_upper=scale_upper,
         clip_upper=clip_upper,
     )
+    if config is not None and getattr(config, "kernel_rl_enabled", False):
+        vector.append(kernel_feedback_scalar(decision, config))
+    return vector
 
 
 def training_row(step: float, result: EpisodeResult) -> dict[str, float]:
@@ -90,7 +98,7 @@ def run_env_episode_rollout(
     try:
         return collect_episode_results(
             episodes,
-            initial_previous_action=initial_previous_action or zero_previous_action(),
+            initial_previous_action=initial_previous_action or zero_previous_action(env.config),
             reset=env.reset,
             act=act,
             evaluate_current=lambda decision, episode_index: env.evaluate_current(

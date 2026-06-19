@@ -4,16 +4,17 @@ Full Seiso support: fused CUDA kernels, QLoRA, multi-GPU, Forge UI.
 
 ## Install
 
-**Recommended** — automated install (Python 3.10+, Node.js 18+, git):
+**Recommended** — one command installs deps, builds the UI, and starts Forge:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/install.sh | bash
-~/Seiso/scripts/start.sh
 ```
 
 Manual:
 
 ```bash
+git clone https://github.com/Legendarylibr/SeisoLocalAI.git "$HOME/Seiso"
+cd "$HOME/Seiso"
 python3 -m venv .venv && source .venv/bin/activate
 pip install -U pip
 pip install -e ".[forge,train,cuda,dev]"
@@ -26,7 +27,7 @@ Requirements:
 
 ### Optional: Flash Attention 2
 
-Not required. Install after the main editable install when the repo lives on the **Linux filesystem** (e.g. `~/Seiso`), not on a Windows mount (`/mnt/c/...` in WSL):
+Not required. Install after the main editable install when the repo lives on the **Linux filesystem** (e.g. `$HOME/Seiso`), not on a Windows mount (`/mnt/c/...` in WSL):
 
 ```bash
 ./scripts/install_flash_attn.sh
@@ -36,10 +37,18 @@ Skip during install: `SEISO_SKIP_FLASH_ATTN=1 ./scripts/install.sh`
 
 ## Start Forge
 
+**Later sessions:**
+
 ```bash
-~/Seiso/scripts/start.sh
-# or from a clone:
-cd forge-ui && npm install && npm run build && cd ..
+"$HOME/Seiso/scripts/start.sh"
+```
+
+Or from a clone with venv active:
+
+```bash
+cd "$HOME/Seiso"
+source .venv/bin/activate
+cd forge-ui && npm ci && npm run build && cd ..
 seiso forge
 ```
 
