@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 
 METRIC_STDOUT_PREFIX = "SEISO_METRIC:"
 MAX_METRIC_HISTORY = 5000
+_METRICS_FLUSH_INTERVAL = 10
 
 
 def is_main_process() -> bool:
@@ -67,6 +68,7 @@ class TrainingMetricsCallback:
         self.emit_stdout = emit_stdout
         self._history: list[dict[str, Any]] = []
         self._file = None
+        self._writes_since_flush = 0
 
     def _open_file(self) -> None:
         if self.metrics_path and self._file is None:
@@ -86,7 +88,10 @@ class TrainingMetricsCallback:
 
         if self._file:
             self._file.write(json.dumps(metric) + "\n")
-            self._file.flush()
+            self._writes_since_flush += 1
+            if self._writes_since_flush >= _METRICS_FLUSH_INTERVAL:
+                self._file.flush()
+                self._writes_since_flush = 0
 
         if self.emit_stdout:
             print(f"{METRIC_STDOUT_PREFIX}{json.dumps(metric)}", flush=True)
@@ -120,6 +125,9 @@ class TrainingMetricsCallback:
 
     def on_train_end(self, args, state, control, **kwargs) -> None:  # noqa: ARG002
         if self._file:
+            if self._writes_since_flush:
+                self._file.flush()
+                self._writes_since_flush = 0
             self._file.close()
             self._file = None
 

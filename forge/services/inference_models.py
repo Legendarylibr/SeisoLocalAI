@@ -34,9 +34,11 @@ from seiso.inference.backends import (
 logger = logging.getLogger(__name__)
 
 _OLLAMA_CACHE_TTL_S = 10.0
+_OPTIONS_CACHE_TTL_S = 5.0
 _ollama_cache: set[str] | None = None
 _ollama_cache_key: str = ""
 _ollama_cache_ts: float = 0.0
+_options_cache: dict[tuple, tuple[float, list[dict[str, Any]]]] = {}
 
 BACKEND_LABELS = {
     "llamacpp": "llama.cpp",
@@ -128,6 +130,78 @@ def _inventory_artifact_is_complete(row: dict[str, Any], metadata: dict[str, Any
     return expected_size <= 0 or actual_size >= expected_size
 
 
+def _build_local_option(
+    row: dict[str, Any],
+    *,
+    installed: dict[str, bool],
+    ollama_tags: set[str],
+    profile: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    metadata = json.loads(row.get("metadata_json") or "{}")
+    if not _inventory_artifact_is_complete(row, metadata):
+        return None
+    backends = _filter_installed_backends(
+        available_backends(
+            model_path=row["path"],
+            model_format=row.get("format"),
+            ollama_names=ollama_tags,
+        ),
+        installed,
+    )
+    ollama_match = match_ollama_name(
+        model_path=row["path"],
+        model_name=row["name"],
+        ollama_names=ollama_tags,
+    )
+    opt: dict[str, Any] = {
+        "id": row["id"],
+        "kind": "local",
+        "name": row["name"],
+        "source": row.get("source") or "manual",
+        "source_label": _source_label(row.get("source")),
+        "format": row.get("format"),
+        "path": row["path"],
+        "default_backend": _pick_default_backend(backends, profile) if backends else "",
+        "backends": backends,
+        "backend_labels": {b: BACKEND_LABELS.get(b, b) for b in backends},
+        "ollama_model": ollama_match,
+        "size_bytes": row.get("size_bytes", 0),
+        "metadata": metadata,
+    }
+    if profile:
+        opt.update(assess_inference_option_fit(opt, profile))
+    return opt
+
+
+def _build_ollama_option(
+    tag: str,
+    *,
+    profile: dict[str, Any] | None,
+) -> dict[str, Any]:
+    opt = {
+        "id": f"ollama:{tag}",
+        "kind": "ollama",
+        "name": tag,
+        "source": "ollama",
+        "source_label": SOURCE_LABELS["ollama"],
+        "format": None,
+        "path": None,
+        "default_backend": BACKEND_OLLAMA,
+        "backends": [BACKEND_OLLAMA],
+        "backend_labels": {BACKEND_OLLAMA: BACKEND_LABELS[BACKEND_OLLAMA]},
+        "ollama_model": tag,
+        "size_bytes": 0,
+        "metadata": {},
+    }
+    if profile:
+        opt.update(assess_inference_option_fit(opt, profile))
+    return opt
+
+
+def invalidate_inference_options_cache() -> None:
+    _options_cache.clear()
+
+
 async def _ollama_names(base_url: str = "") -> set[str]:
     global _ollama_cache, _ollama_cache_key, _ollama_cache_ts
 
@@ -152,6 +226,32 @@ async def _ollama_names(base_url: str = "") -> set[str]:
     return result
 
 
+async def get_inference_option(
+    db: Database,
+    user_id: str,
+    model_id: str,
+    *,
+    ollama_base_url: str = "",
+    hardware_aware: bool = True,
+    profile: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    """Resolve a single dropdown option without rebuilding the full inventory list."""
+    profile = profile if profile is not None else hardware_profile() if hardware_aware else None
+    installed = _installed_backends()
+    ollama_tags = await _ollama_names(ollama_base_url)
+
+    if model_id.startswith("ollama:"):
+        tag = model_id.removeprefix("ollama:")
+        if tag not in ollama_tags:
+            return None
+        return _build_ollama_option(tag, profile=profile)
+
+    row = await db.get_model(model_id, user_id)
+    if not row:
+        return None
+    return _build_local_option(row, installed=installed, ollama_tags=ollama_tags, profile=profile)
+
+
 async def list_inference_options(
     db: Database,
     user_id: str,
@@ -161,46 +261,23 @@ async def list_inference_options(
     profile: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Build dropdown options for chat inference."""
+    use_cache = profile is None
+    cache_key = (user_id, ollama_base_url, hardware_aware, id(db))
+    if use_cache:
+        now = time.monotonic()
+        cached = _options_cache.get(cache_key)
+        if cached and now - cached[0] < _OPTIONS_CACHE_TTL_S:
+            return cached[1]
+
     profile = profile if profile is not None else hardware_profile() if hardware_aware else None
     installed = _installed_backends()
     ollama_tags = await _ollama_names(ollama_base_url)
     options: list[dict[str, Any]] = []
 
     for row in await db.list_models(user_id):
-        metadata = json.loads(row.get("metadata_json") or "{}")
-        if not _inventory_artifact_is_complete(row, metadata):
-            continue
-        backends = _filter_installed_backends(
-            available_backends(
-                model_path=row["path"],
-                model_format=row.get("format"),
-                ollama_names=ollama_tags,
-            ),
-            installed,
-        )
-        ollama_match = match_ollama_name(
-            model_path=row["path"],
-            model_name=row["name"],
-            ollama_names=ollama_tags,
-        )
-        opt: dict[str, Any] = {
-            "id": row["id"],
-            "kind": "local",
-            "name": row["name"],
-            "source": row.get("source") or "manual",
-            "source_label": _source_label(row.get("source")),
-            "format": row.get("format"),
-            "path": row["path"],
-            "default_backend": _pick_default_backend(backends, profile) if backends else "",
-            "backends": backends,
-            "backend_labels": {b: BACKEND_LABELS.get(b, b) for b in backends},
-            "ollama_model": ollama_match,
-            "size_bytes": row.get("size_bytes", 0),
-            "metadata": metadata,
-        }
-        if profile:
-            opt.update(assess_inference_option_fit(opt, profile))
-        options.append(opt)
+        opt = _build_local_option(row, installed=installed, ollama_tags=ollama_tags, profile=profile)
+        if opt:
+            options.append(opt)
 
     seen_ollama: set[str] = set()
     for opt in options:
@@ -210,24 +287,7 @@ async def list_inference_options(
     for tag in sorted(ollama_tags):
         if tag in seen_ollama:
             continue
-        opt = {
-            "id": f"ollama:{tag}",
-            "kind": "ollama",
-            "name": tag,
-            "source": "ollama",
-            "source_label": SOURCE_LABELS["ollama"],
-            "format": None,
-            "path": None,
-            "default_backend": BACKEND_OLLAMA,
-            "backends": [BACKEND_OLLAMA],
-            "backend_labels": {BACKEND_OLLAMA: BACKEND_LABELS[BACKEND_OLLAMA]},
-            "ollama_model": tag,
-            "size_bytes": 0,
-            "metadata": {},
-        }
-        if profile:
-            opt.update(assess_inference_option_fit(opt, profile))
-        options.append(opt)
+        options.append(_build_ollama_option(tag, profile=profile))
 
     if profile:
         options.sort(
@@ -237,6 +297,8 @@ async def list_inference_options(
             )
         )
 
+    if use_cache:
+        _options_cache[cache_key] = (time.monotonic(), options)
     return options
 
 

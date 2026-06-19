@@ -34,8 +34,10 @@ FIT_RANK = {"ideal": 4, "good": 3, "tight": 2, "unlikely": 1}
 
 _PROFILE_TTL_S = 30.0
 _METRICS_TTL_S = 1.5
+_RECOMMENDED_REPO_TTL_SEC = 300.0
 _profile_cache: dict[str, Any] | None = None
 _profile_cache_ts: float = 0.0
+_recommended_repo_cache: dict[tuple, tuple[float, str | None]] = {}
 _metrics_cache: dict[str, Any] | None = None
 _metrics_cache_ts: float = 0.0
 _cpu_percent_primed = False
@@ -739,15 +741,29 @@ def training_defaults(profile: dict[str, Any]) -> dict[str, Any]:
 def recommended_catalog_repo(profile: dict[str, Any], *, task: str = "chat") -> str | None:
     from seiso.models.catalog import search_catalog
 
+    tier = classify_tier(profile)
+    budget = effective_budget_mb(profile)
+    cache_key = (tier.value, budget, task)
+    now = time.monotonic()
+    cached = _recommended_repo_cache.get(cache_key)
+    if cached and now - cached[0] < _RECOMMENDED_REPO_TTL_SEC:
+        return cached[1]
+
     models = search_catalog(task=task) if task else search_catalog()
     models = enrich_catalog_models(models, profile, fetch_sizes=False, diversify=True)
+    result: str | None = None
     for m in models:
         if m.get("hardware_fit") in ("ideal", "good") and m.get("task") != "embedding":
-            return m["repo_id"]
-    for m in models:
-        if m.get("task") != "embedding":
-            return m["repo_id"]
-    return None
+            result = m["repo_id"]
+            break
+    if result is None:
+        for m in models:
+            if m.get("task") != "embedding":
+                result = m["repo_id"]
+                break
+
+    _recommended_repo_cache[cache_key] = (now, result)
+    return result
 
 
 def enrich_profile(profile: dict[str, Any]) -> dict[str, Any]:

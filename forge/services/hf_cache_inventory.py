@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -18,7 +19,7 @@ from forge.services.hf_hub import (
 )
 from forge.services.user_paths import user_dir
 from seiso.inference.backends import gguf_is_supported_by_llamacpp
-from seiso.models.catalog import CATALOG, CatalogEntry, get_by_gguf_mirror
+from seiso.models.catalog import CatalogEntry, get_by_gguf_mirror, get_by_repo
 from seiso.security import sanitize_filename
 
 
@@ -31,13 +32,7 @@ def _repo_id_from_cache_dir(path: Path) -> str | None:
 
 
 def _catalog_entry_for_cached_repo(repo_id: str) -> CatalogEntry | None:
-    direct = next((entry for entry in CATALOG if entry.repo_id == repo_id), None)
-    if direct:
-        return direct
-    mirror = get_by_gguf_mirror(repo_id)
-    if mirror:
-        return mirror
-    return next((entry for entry in CATALOG if entry.gguf_repo == repo_id), None)
+    return get_by_repo(repo_id) or get_by_gguf_mirror(repo_id)
 
 
 def _display_name_for_shards(filename: str) -> str:
@@ -70,12 +65,32 @@ def _gguf_files_are_complete(
 
 
 def _cache_tree_mtime(hf_cache_dir: Path) -> float:
-    latest = hf_cache_dir.stat().st_mtime
-    for path in hf_cache_dir.rglob("*"):
+    """Fast invalidation probe — repo dirs + snapshots only, not full cache walk."""
+    try:
+        latest = hf_cache_dir.stat().st_mtime
+    except OSError:
+        return 0.0
+    for child in hf_cache_dir.iterdir():
+        if not child.name.startswith("models--"):
+            continue
         try:
-            latest = max(latest, path.stat().st_mtime)
+            latest = max(latest, child.stat().st_mtime)
         except OSError:
             continue
+        snapshots = child / "snapshots"
+        if not snapshots.is_dir():
+            continue
+        try:
+            latest = max(latest, snapshots.stat().st_mtime)
+        except OSError:
+            pass
+        for snap in snapshots.iterdir():
+            if not snap.is_dir():
+                continue
+            try:
+                latest = max(latest, snap.stat().st_mtime)
+            except OSError:
+                continue
     return latest
 
 
@@ -154,11 +169,9 @@ def _snapshot_record(
     user_id: str,
     hf_cache_dir: Path,
 ) -> dict[str, Any] | None:
-    weight_files = [
-        path
-        for path in snapshot_dir.rglob("*")
-        if path.is_file() and path.suffix.lower() in {".safetensors", ".bin"}
-    ]
+    weight_files: list[Path] = []
+    for pattern in ("*.safetensors", "*.bin"):
+        weight_files.extend(path for path in snapshot_dir.rglob(pattern) if path.is_file())
     if not weight_files:
         return None
 
@@ -201,6 +214,37 @@ class _SyncState:
 _sync_states: dict[str, _SyncState] = {}
 
 
+def _scan_hf_cache_records(
+    *,
+    hf_cache_dir: Path,
+    data_dir: Path,
+    user_id: str,
+) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    for repo_cache_dir in hf_cache_dir.iterdir():
+        repo_id = _repo_id_from_cache_dir(repo_cache_dir)
+        if not repo_id:
+            continue
+        for snapshot_dir in _latest_snapshot_dirs(repo_cache_dir):
+            record = _gguf_record_from_snapshot(
+                repo_id=repo_id,
+                snapshot_dir=snapshot_dir,
+                data_dir=data_dir,
+                user_id=user_id,
+                hf_cache_dir=hf_cache_dir,
+            ) or _snapshot_record(
+                repo_id=repo_id,
+                snapshot_dir=snapshot_dir,
+                data_dir=data_dir,
+                user_id=user_id,
+                hf_cache_dir=hf_cache_dir,
+            )
+            if record:
+                records.append(record)
+                break
+    return records
+
+
 async def sync_hf_cache_inventory(
     db: Database,
     user_id: str,
@@ -228,33 +272,19 @@ async def sync_hf_cache_inventory(
     ):
         return 0
 
+    records = await asyncio.to_thread(
+        _scan_hf_cache_records,
+        hf_cache_dir=hf_cache_dir,
+        data_dir=data_dir,
+        user_id=user_id,
+    )
     registered = 0
-    for repo_cache_dir in hf_cache_dir.iterdir():
-        repo_id = _repo_id_from_cache_dir(repo_cache_dir)
-        if not repo_id:
-            continue
-        for snapshot_dir in _latest_snapshot_dirs(repo_cache_dir):
-            record = _gguf_record_from_snapshot(
-                repo_id=repo_id,
-                snapshot_dir=snapshot_dir,
-                data_dir=data_dir,
-                user_id=user_id,
-                hf_cache_dir=hf_cache_dir,
-            ) or _snapshot_record(
-                repo_id=repo_id,
-                snapshot_dir=snapshot_dir,
-                data_dir=data_dir,
-                user_id=user_id,
-                hf_cache_dir=hf_cache_dir,
-            )
-            if not record:
-                continue
-            await db.upsert_model(
-                user_id=user_id,
-                source=record.pop("source"),
-                **record,
-            )
-            registered += 1
-            break
+    for record in records:
+        await db.upsert_model(
+            user_id=user_id,
+            source=record.pop("source"),
+            **record,
+        )
+        registered += 1
     _sync_states[cache_key] = _SyncState(synced_at=now, cache_mtime=cache_mtime)
     return registered

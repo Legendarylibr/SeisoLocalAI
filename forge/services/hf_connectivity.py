@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
+from functools import lru_cache
 from importlib.util import find_spec
 from typing import Any
 
@@ -64,6 +65,7 @@ def _dep_status(module: str) -> bool:
         return False
 
 
+@lru_cache(maxsize=1)
 def check_inference_runtime() -> InferenceRuntimeStatus:
     """Report which local inference stacks are importable."""
     status = InferenceRuntimeStatus(
