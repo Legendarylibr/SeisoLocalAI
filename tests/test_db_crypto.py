@@ -104,3 +104,60 @@ async def test_corrupt_encrypted_chat_message_fails_safely(db: Database):
 
     with pytest.raises(DatabaseCryptoError, match="could not be decrypted"):
         await db.get_messages(thread["id"])
+
+
+@pytest.mark.asyncio
+async def test_upsert_model_preserves_id_on_update(db: Database):
+    user = await db.create_user("hashed", "User", email="u@local.dev")
+    created = await db.upsert_model(
+        user["id"],
+        "hf:org/model",
+        name="Model v1",
+        path="/models/v1",
+        format="hf",
+        size_bytes=100,
+        metadata={"rev": 1},
+    )
+    updated = await db.upsert_model(
+        user["id"],
+        "hf:org/model",
+        name="Model v2",
+        path="/models/v2",
+        format="hf",
+        size_bytes=200,
+        metadata={"rev": 2},
+    )
+    assert updated["id"] == created["id"]
+    assert updated["name"] == "Model v2"
+    assert updated["path"] == "/models/v2"
+    assert json.loads(updated["metadata_json"]) == {"rev": 2}
+    assert len(await db.list_models(user["id"])) == 1
+
+
+@pytest.mark.asyncio
+async def test_get_thread_with_messages_batches_load(db: Database):
+    user = await db.create_user("hashed", "User", email="u@local.dev")
+    thread = await db.create_thread(user["id"], "Chat", model_id="model-a")
+    await db.add_message(thread["id"], "user", "hello")
+
+    loaded_thread, messages = await db.get_thread_with_messages(thread["id"], user["id"])
+    assert loaded_thread is not None
+    assert loaded_thread["model_id"] == "model-a"
+    assert messages[0]["content"] == "hello"
+
+    missing_thread, missing_messages = await db.get_thread_with_messages(
+        "missing", user["id"]
+    )
+    assert missing_thread is None
+    assert missing_messages == []
+
+
+@pytest.mark.asyncio
+async def test_add_message_can_update_thread_model(db: Database):
+    user = await db.create_user("hashed", "User", email="u@local.dev")
+    thread = await db.create_thread(user["id"], "Chat", model_id="model-a")
+    await db.add_message(thread["id"], "user", "hello", model_id="model-b")
+
+    updated = await db.get_thread_for_user(thread["id"], user["id"])
+    assert updated is not None
+    assert updated["model_id"] == "model-b"
