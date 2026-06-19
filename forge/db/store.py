@@ -469,6 +469,15 @@ class Database:
             row = await cur.fetchone()
             return dict(row) if row else None
 
+    async def update_thread_model(self, thread_id: str, model_id: str | None) -> None:
+        now = _now()
+        async with self._conn() as conn:
+            await conn.execute(
+                "UPDATE chat_threads SET model_id = ?, updated_at = ? WHERE id = ?",
+                (model_id, now, thread_id),
+            )
+            await conn.commit()
+
     async def get_training_job(self, job_id: str, user_id: str) -> dict | None:
         async with self._conn() as conn, conn.execute(
             "SELECT * FROM training_jobs WHERE id = ? AND user_id = ?",
