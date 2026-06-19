@@ -151,7 +151,15 @@ class ModelPool:
         self.bump_generation()
         self.unload_all()
 
-    def switch(self, model_path: str, backend: BackendKind, loader_fn, *, cache_key: str | None = None) -> Any:
+    def switch(
+        self,
+        model_path: str,
+        backend: BackendKind,
+        loader_fn,
+        *,
+        cache_key: str | None = None,
+        meta: dict[str, Any] | None = None,
+    ) -> Any:
         """Load model_path, unloading any previously active model first."""
         norm = self.normalize_path(model_path)
         load_path = str(Path(model_path).expanduser().absolute())
@@ -163,7 +171,12 @@ class ModelPool:
             self.unload_all()
             logger.info("Loading model: %s (%s)", norm, backend.value)
             handle = loader_fn(load_path)
-            self._active = LoadedModel(key=key, backend=backend, handle=handle, meta={"path": load_path})
+            self._active = LoadedModel(
+                key=key,
+                backend=backend,
+                handle=handle,
+                meta={"path": load_path, "norm_path": norm, **(meta or {})},
+            )
             return handle
 
     def get_llama(self, model_path: str, n_ctx: int = 4096) -> Any:
@@ -176,8 +189,18 @@ class ModelPool:
             attach_llama_prompt_cache(llm)
             return llm
 
-        key = f"llama:{self.normalize_path(model_path)}:ctx{n_ctx}"
-        return self.switch(model_path, BackendKind.LLAMA, loader, cache_key=key)
+        norm = self.normalize_path(model_path)
+        with self._lock:
+            if (
+                self._active
+                and self._active.backend == BackendKind.LLAMA
+                and self._active.meta.get("norm_path") == norm
+                and int(self._active.meta.get("n_ctx") or 0) >= n_ctx
+            ):
+                return self._active.handle
+
+        key = f"llama:{norm}:ctx{n_ctx}"
+        return self.switch(model_path, BackendKind.LLAMA, loader, cache_key=key, meta={"n_ctx": n_ctx})
 
     def get_mlx(self, model_path: str) -> tuple[Any, Any]:
         def loader(path: str):

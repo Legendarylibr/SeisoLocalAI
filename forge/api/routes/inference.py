@@ -148,6 +148,15 @@ async def cancel_inference(
     return await orchestrator._runner.cancel_and_unload()
 
 
+@router.post("/cancel-generation")
+async def cancel_generation(
+    user_id: Annotated[str, Depends(get_current_user_id)],
+    orchestrator: Annotated[InferenceOrchestrator, Depends(get_inference_orchestrator)],
+) -> dict:
+    """Abort in-flight generation but keep the active local model warmed."""
+    return await orchestrator._runner.cancel_generation()
+
+
 @router.post("/preload")
 async def preload_model(
     body: PreloadRequest,
@@ -524,7 +533,7 @@ async def chat(
                     raise
                 finally:
                     if cancelled:
-                        await orchestrator._runner.cancel_and_unload()
+                        await orchestrator._runner.cancel_generation()
                 return
 
             await orchestrator.start(job_id, payload)

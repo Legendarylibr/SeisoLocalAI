@@ -230,7 +230,7 @@ async def download_model_stream(
 
     def on_progress(payload: dict[str, Any]) -> None:
         if not stream_open:
-            raise DownloadStreamClosed("Download stream closed")
+            return
         loop.call_soon_threadsafe(queue.put_nowait, ("progress", payload))
 
     async def run_download() -> None:
@@ -307,8 +307,9 @@ async def download_model_stream(
                     break
         finally:
             stream_open = False
-            if not download_task.done():
-                download_task.cancel()
+            # The browser may navigate away while huggingface_hub is still writing
+            # the model into the shared cache. Let that worker finish so a transient
+            # SSE disconnect does not corrupt or abort the download.
 
     return EventSourceResponse(event_gen())
 

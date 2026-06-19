@@ -31,6 +31,7 @@ export const inferenceApi = {
       },
     ),
   cancelInference: () => request<{ active_model: string | null }>("/inference/cancel", { method: "POST" }),
+  cancelGeneration: () => request<{ active_model: string | null }>("/inference/cancel-generation", { method: "POST" }),
   listThreads: () => request<ChatThread[]>("/inference/threads"),
   createThread: (title: string, model_id?: string) =>
     request<ChatThread>("/inference/threads", {

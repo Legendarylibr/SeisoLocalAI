@@ -174,7 +174,7 @@ export function streamChat(
     promise,
     abort: () => {
       controller.abort();
-      request<{ active_model: string | null }>("/inference/cancel", { method: "POST" }).catch(() => {});
+      request<{ active_model: string | null }>("/inference/cancel-generation", { method: "POST" }).catch(() => {});
     },
   };
 }

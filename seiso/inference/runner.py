@@ -108,6 +108,11 @@ class LocalInferenceRunner:
     async def cancel_and_unload(self) -> dict:
         return await self.unload()
 
+    async def cancel_generation(self) -> dict:
+        """Stop active streams without unloading the warmed model."""
+        self._pool.bump_generation()
+        return self._pool.status()
+
     async def _ensure_model_switch(self, model_path: str) -> None:
         status = self._pool.status()
         active_path = status.get("path")

@@ -18,6 +18,7 @@ from forge.services.hf_hub import (
     download_gguf,
     download_training_snapshot,
     estimate_snapshot_download_bytes,
+    get_gguf_file_size_bytes,
     link_inventory,
     resolve_gguf_artifact,
 )
@@ -137,6 +138,16 @@ def _path_has_complete_artifact(path: Path, fmt: str, expected_size: int) -> boo
     return path.is_file() and path.stat().st_size > 0 and (expected_size <= 0 or path.stat().st_size >= expected_size)
 
 
+def _gguf_metadata_files_complete(path: Path, filenames: list[str], expected_size: int) -> bool:
+    if not filenames:
+        return False
+    files = [path] if path.is_file() and len(filenames) == 1 else [path / filename for filename in filenames]
+    if not all(item.is_file() and item.stat().st_size > 0 for item in files):
+        return False
+    actual_size = sum(item.stat().st_size for item in files)
+    return expected_size <= 0 or actual_size >= expected_size
+
+
 def _cached_download_result_if_usable(
     existing: dict[str, Any] | None,
     *,
@@ -148,6 +159,28 @@ def _cached_download_result_if_usable(
     path = Path(str(existing.get("path") or ""))
     fmt = str(existing.get("format") or "").lower()
     expected_size = int(existing.get("size_bytes") or 0)
+    try:
+        metadata = json.loads(existing.get("metadata_json") or "{}")
+    except json.JSONDecodeError:
+        metadata = {}
+    if fmt == "gguf":
+        gguf_repo = str(metadata.get("gguf_repo") or metadata.get("repo_id") or repo_id)
+        gguf_files = metadata.get("gguf_files") or metadata.get("gguf_file")
+        if isinstance(gguf_files, str):
+            gguf_files = [gguf_files]
+        if not isinstance(gguf_files, list) or not gguf_files:
+            if str(existing.get("source") or "").startswith("hf:"):
+                return None
+        else:
+            try:
+                expected_size = max(
+                    expected_size,
+                    sum(get_gguf_file_size_bytes(gguf_repo, str(item)) for item in gguf_files),
+                )
+            except Exception:
+                pass
+            if not _gguf_metadata_files_complete(path, [str(item) for item in gguf_files], expected_size):
+                return None
     if not _path_has_complete_artifact(path, fmt, expected_size):
         return None
     requested = variant.lower()
@@ -155,10 +188,6 @@ def _cached_download_result_if_usable(
         return None
     if requested == "safetensors" and fmt == "gguf":
         return None
-    try:
-        metadata = json.loads(existing.get("metadata_json") or "{}")
-    except json.JSONDecodeError:
-        metadata = {}
     cached_variant = "gguf" if fmt == "gguf" else "safetensors"
     downloaded = [str(path)]
     if fmt == "gguf" and path.is_dir():

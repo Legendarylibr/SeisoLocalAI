@@ -67,6 +67,35 @@ def test_switch_serializes_concurrent_loads_for_same_model(tmp_path):
     assert load_count == 1
 
 
+def test_llama_reuses_larger_preloaded_context(monkeypatch, tmp_path):
+    from seiso.inference import model_pool
+
+    pool = ModelPool()
+    model_path = tmp_path / "model.gguf"
+    model_path.write_bytes(b"gguf")
+    handle = object()
+    load_paths: list[str] = []
+
+    class FakeLlama:
+        def __init__(self, model_path: str, **_kwargs):
+            load_paths.append(model_path)
+
+    monkeypatch.setattr(model_pool, "llama_load_kwargs", lambda n_ctx: {"n_ctx": n_ctx})
+    monkeypatch.setitem(__import__("sys").modules, "llama_cpp", type("LlamaModule", (), {"Llama": FakeLlama}))
+    monkeypatch.setattr(
+        "seiso.inference.tuning.attach_llama_prompt_cache",
+        lambda _llm: None,
+    )
+
+    first = pool.get_llama(str(model_path), n_ctx=4096)
+    pool._active.handle = handle
+    second = pool.get_llama(str(model_path), n_ctx=2048)
+
+    assert first is not None
+    assert second is handle
+    assert load_paths == [str(model_path.absolute())]
+
+
 def test_llama_load_kwargs_are_tuned_and_overrideable(monkeypatch):
     monkeypatch.setenv("SEISO_LLAMA_THREADS", "6")
     monkeypatch.setenv("SEISO_LLAMA_GPU_LAYERS", "4")

@@ -444,7 +444,7 @@ export function ChatPage() {
     if (!providerId && selection && !effectiveBackend) {
       setError(
         selected?.format === "gguf"
-          ? "GGUF chat requires llama.cpp. Install it with: pip install -e \".[llamacpp]\""
+          ? "This GGUF is not available for local chat. Install or update llama.cpp, or choose a supported GGUF."
           : "No installed local inference engine can load this model.",
       );
       return;

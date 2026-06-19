@@ -216,16 +216,47 @@ seiso_run_install_worker() {
   fi
 }
 
+seiso_required_python_modules() {
+  local extras="$1"
+  printf '%s\n' seiso forge fastapi huggingface_hub
+  if [[ "$extras" == *llamacpp* ]]; then
+    printf '%s\n' llama_cpp
+  fi
+  if [[ "$extras" == *mlx* ]]; then
+    printf '%s\n' mlx_lm
+  fi
+  if [[ "$extras" == *train* ]]; then
+    printf '%s\n' torch transformers
+  fi
+}
+
+seiso_python_modules_available() {
+  local root="$1" extras="$2" module
+  [[ -x "$root/.venv/bin/python" ]] || return 1
+  while IFS= read -r module; do
+    [[ -n "$module" ]] || continue
+    "$root/.venv/bin/python" - "$module" <<'PY' >/dev/null 2>&1 || return 1
+import importlib.util
+import sys
+
+raise SystemExit(0 if importlib.util.find_spec(sys.argv[1]) else 1)
+PY
+  done < <(seiso_required_python_modules "$extras")
+  return 0
+}
+
 seiso_ensure_installed() {
   local root="$1"
   local extras install_log
 
-  if [[ -x "$root/.venv/bin/seiso" && -f "$root/forge-ui/dist/index.html" ]]; then
+  extras="$(seiso_detect_platform_extras)"
+
+  if [[ -x "$root/.venv/bin/seiso" && -f "$root/forge-ui/dist/index.html" ]] \
+    && seiso_python_modules_available "$root" "$extras"; then
     return 0
   fi
 
   seiso_log "Completing Seiso install..."
-  extras="$(seiso_detect_platform_extras)"
 
   if [[ ! -x "$root/.venv/bin/python" ]]; then
     seiso_log "Creating virtualenv at $root/.venv"

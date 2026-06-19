@@ -25,6 +25,23 @@ def test_resolve_gguf_repo_falls_back_to_mirror(monkeypatch):
     assert resolved.endswith("-GGUF")
 
 
+def test_resolve_gguf_repo_ignores_dflash_draft_candidates(monkeypatch):
+    monkeypatch.setattr(hf_hub, "repo_has_gguf", lambda repo_id, **_: repo_id == "vendor/Kimi-GGUF")
+    monkeypatch.setattr(
+        hf_hub,
+        "search_huggingface_gguf_repos",
+        lambda **_k: [
+            {"repo_id": "vendor/Kimi-DFlash"},
+            {"repo_id": "vendor/Kimi-GGUF"},
+        ],
+    )
+    hf_hub._GGUF_REPO_CACHE.clear()
+
+    resolved = hf_hub.resolve_gguf_repo("org/Kimi")
+
+    assert resolved == "vendor/Kimi-GGUF"
+
+
 def test_search_huggingface_datasets_parses_api_response(monkeypatch):
     payload = [
         {
@@ -115,6 +132,14 @@ def test_resolve_gguf_repo_uses_cache(monkeypatch):
     second = hf_hub.resolve_gguf_repo("meta-llama/Llama-3.1-8B-Instruct")
     assert first == second == "meta-llama/Llama-3.1-8B-Instruct"
     assert calls["n"] == 1
+
+
+def test_first_repo_with_gguf_preserves_candidate_order(monkeypatch):
+    monkeypatch.setattr(hf_hub, "repo_has_gguf", lambda repo_id, **_: repo_id in {"second/repo", "third/repo"})
+
+    resolved = hf_hub._first_repo_with_gguf(["first/repo", "second/repo", "third/repo"])
+
+    assert resolved == "second/repo"
 
 
 def test_download_gguf_skips_size_lookup_when_total_known(monkeypatch, tmp_path):

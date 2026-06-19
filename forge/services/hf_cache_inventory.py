@@ -12,9 +12,12 @@ from forge.services.hf_hub import (
     _inventory_name_for_files,
     _pick_gguf_files,
     dir_size,
+    estimate_snapshot_download_bytes,
+    get_gguf_file_size_bytes,
     link_inventory,
 )
 from forge.services.user_paths import user_dir
+from seiso.inference.backends import gguf_is_supported_by_llamacpp
 from seiso.models.catalog import CATALOG, CatalogEntry, get_by_gguf_mirror
 from seiso.security import sanitize_filename
 
@@ -43,6 +46,37 @@ def _display_name_for_shards(filename: str) -> str:
     if marker in stem:
         return stem.split(marker, 1)[0]
     return stem
+
+
+def _gguf_files_are_complete(
+    *,
+    repo_id: str,
+    filenames: list[str],
+    paths: list[Path],
+    entry: CatalogEntry | None,
+) -> bool:
+    """Avoid registering cache files that are still being written by HF downloads."""
+    if not filenames or len(filenames) != len(paths):
+        return False
+    if not all(path.is_file() and path.stat().st_size > 0 for path in paths):
+        return False
+    try:
+        expected = sum(get_gguf_file_size_bytes(repo_id, filename) for filename in filenames)
+    except Exception:
+        # If metadata is unavailable, do not block local cache recovery forever.
+        return entry is None
+    actual = sum(path.stat().st_size for path in paths)
+    return expected <= 0 or actual >= expected
+
+
+def _cache_tree_mtime(hf_cache_dir: Path) -> float:
+    latest = hf_cache_dir.stat().st_mtime
+    for path in hf_cache_dir.rglob("*"):
+        try:
+            latest = max(latest, path.stat().st_mtime)
+        except OSError:
+            continue
+    return latest
 
 
 def _latest_snapshot_dirs(repo_cache_dir: Path) -> list[Path]:
@@ -80,7 +114,9 @@ def _gguf_record_from_snapshot(
         return None
 
     paths = [snapshot_dir / filename for filename in filenames]
-    if not all(path.is_file() for path in paths):
+    if not _gguf_files_are_complete(repo_id=repo_id, filenames=filenames, paths=paths, entry=entry):
+        return None
+    if not gguf_is_supported_by_llamacpp(str(paths[0])):
         return None
 
     target = paths[0] if len(paths) == 1 else paths[0].parent
@@ -127,6 +163,15 @@ def _snapshot_record(
         return None
 
     entry = _catalog_entry_for_cached_repo(repo_id)
+    if entry:
+        try:
+            expected_size = estimate_snapshot_download_bytes(repo_id)
+        except Exception:
+            expected_size = 0
+        actual_size = sum(path.stat().st_size for path in weight_files)
+        if expected_size > 0 and actual_size < expected_size:
+            return None
+
     inventory_repo = entry.repo_id if entry else repo_id
     inventory_dir = user_dir(data_dir, user_id, "models")
     link = link_inventory(
@@ -168,7 +213,7 @@ async def sync_hf_cache_inventory(
         return 0
 
     try:
-        cache_mtime = hf_cache_dir.stat().st_mtime
+        cache_mtime = _cache_tree_mtime(hf_cache_dir)
         cache_key = f"{user_id}:{hf_cache_dir.resolve()}"
     except OSError:
         cache_mtime = 0.0

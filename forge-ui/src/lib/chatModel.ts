@@ -207,7 +207,7 @@ export async function bootstrapChatSession(
     const fmt = selected.format?.toLowerCase();
     const hint =
       fmt === "gguf"
-        ? "GGUF chat requires llama.cpp. Install the llama.cpp runtime from Settings or run `pip install -e \".[llamacpp]\"`."
+        ? "This GGUF is not available for local chat. Install or update llama.cpp, or choose a GGUF architecture supported by your llama.cpp runtime."
         : "No installed local inference engine can load this model. Install MLX or PyTorch support.";
     throw new Error(hint);
   }

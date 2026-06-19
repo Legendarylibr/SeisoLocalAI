@@ -63,6 +63,87 @@ def test_cached_download_rejects_incomplete_gguf(tmp_path):
     assert result is None
 
 
+def test_cached_download_rejects_stale_partial_gguf_inventory(monkeypatch, tmp_path):
+    cached = tmp_path / "model-Q4_K_M.gguf"
+    cached.write_bytes(b"partial")
+
+    monkeypatch.setattr(
+        model_download,
+        "get_gguf_file_size_bytes",
+        lambda _repo, _filename: 10_000,
+    )
+
+    result = model_download._cached_download_result_if_usable(
+        {
+            "id": "m1",
+            "path": str(cached),
+            "format": "gguf",
+            "size_bytes": cached.stat().st_size,
+            "metadata_json": (
+                '{"repo_id": "org/Model", "gguf_repo": "mirror/Model-GGUF", '
+                '"gguf_files": ["model-Q4_K_M.gguf"]}'
+            ),
+        },
+        repo_id="org/Model",
+        variant="gguf",
+    )
+
+    assert result is None
+
+
+def test_cached_download_rejects_hf_gguf_without_metadata(tmp_path):
+    cached = tmp_path / "model-Q4_K_M.gguf"
+    cached.write_bytes(b"partial")
+
+    result = model_download._cached_download_result_if_usable(
+        {
+            "id": "m1",
+            "path": str(cached),
+            "source": "hf:org/Model",
+            "format": "gguf",
+            "size_bytes": cached.stat().st_size,
+            "metadata_json": "{}",
+        },
+        repo_id="org/Model",
+        variant="gguf",
+    )
+
+    assert result is None
+
+
+def test_cached_download_validates_specific_gguf_files_in_directory(monkeypatch, tmp_path):
+    model_dir = tmp_path / "model"
+    model_dir.mkdir()
+    q4 = model_dir / "model-Q4_K_M.gguf"
+    q8 = model_dir / "model-Q8_0.gguf"
+    q4.write_bytes(b"x" * 10)
+    q8.write_bytes(b"y" * 100)
+
+    monkeypatch.setattr(
+        model_download,
+        "get_gguf_file_size_bytes",
+        lambda _repo, filename: 50 if filename.endswith("Q4_K_M.gguf") else 100,
+    )
+
+    result = model_download._cached_download_result_if_usable(
+        {
+            "id": "m1",
+            "path": str(model_dir),
+            "source": "hf:org/Model",
+            "format": "gguf",
+            "size_bytes": q4.stat().st_size + q8.stat().st_size,
+            "metadata_json": (
+                '{"repo_id": "org/Model", "gguf_repo": "mirror/Model-GGUF", '
+                '"gguf_files": ["model-Q4_K_M.gguf"]}'
+            ),
+        },
+        repo_id="org/Model",
+        variant="gguf",
+    )
+
+    assert result is None
+
+
 @pytest.mark.asyncio
 async def test_perform_gguf_download_registers_llamacpp_inventory(monkeypatch, tmp_path):
     cached = tmp_path / "hf_cache" / "model-q4.gguf"
@@ -130,7 +211,17 @@ async def test_perform_download_returns_cached_inventory_without_redownload(monk
         path=str(inv),
         format="gguf",
         size_bytes=cached.stat().st_size,
-        metadata={"repo_id": "org/Model", "cache_dir": str(tmp_path / "hf_cache")},
+        metadata={
+            "repo_id": "org/Model",
+            "cache_dir": str(tmp_path / "hf_cache"),
+            "gguf_file": "model-q4.gguf",
+            "gguf_files": ["model-q4.gguf"],
+        },
+    )
+    monkeypatch.setattr(
+        model_download,
+        "get_gguf_file_size_bytes",
+        lambda _repo, _filename: cached.stat().st_size,
     )
 
     monkeypatch.setattr(
@@ -196,7 +287,17 @@ async def test_find_inventory_for_catalog_repo_matches_metadata(monkeypatch, tmp
         path=str(inv),
         format="gguf",
         size_bytes=cached.stat().st_size,
-        metadata={"repo_id": "org/Model", "gguf_repo": "mirror/Model-GGUF"},
+        metadata={
+            "repo_id": "org/Model",
+            "gguf_repo": "mirror/Model-GGUF",
+            "gguf_file": "model-q4.gguf",
+            "gguf_files": ["model-q4.gguf"],
+        },
+    )
+    monkeypatch.setattr(
+        model_download,
+        "get_gguf_file_size_bytes",
+        lambda _repo, _filename: cached.stat().st_size,
     )
 
     found = await model_download.find_inventory_for_catalog_repo(db, "u1", "org/Model")
@@ -241,6 +342,62 @@ async def test_sync_hf_cache_inventory_registers_cached_gguf(tmp_path):
     assert rows[0]["source"] == "hf:org/Model-GGUF"
     assert rows[0]["format"] == "gguf"
     assert (tmp_path / "models" / "u1" / "org--Model-GGUF" / "model-Q4_K_M.gguf").is_symlink()
+
+
+@pytest.mark.asyncio
+async def test_sync_hf_cache_inventory_skips_partial_catalog_gguf(monkeypatch, tmp_path):
+    snapshot = tmp_path / "hf_cache" / "models--mirror--Model-GGUF" / "snapshots" / "abc"
+    snapshot.mkdir(parents=True)
+    gguf = snapshot / "model-Q4_K_M.gguf"
+    gguf.write_bytes(b"partial")
+
+    monkeypatch.setattr(
+        "forge.services.hf_cache_inventory._catalog_entry_for_cached_repo",
+        lambda _repo: SimpleNamespace(repo_id="org/Model", quant="Q4_K_M"),
+    )
+    monkeypatch.setattr(
+        "forge.services.hf_cache_inventory.get_gguf_file_size_bytes",
+        lambda _repo, _filename: 10_000,
+    )
+
+    db = Database(tmp_path / "forge.db", encryption_key=generate_encryption_key(), ephemeral=True)
+    count = await sync_hf_cache_inventory(
+        db,
+        "u1",
+        data_dir=tmp_path,
+        hf_cache_dir=tmp_path / "hf_cache",
+    )
+
+    assert count == 0
+    assert await db.list_models("u1") == []
+
+
+@pytest.mark.asyncio
+async def test_sync_hf_cache_inventory_skips_partial_safetensors(monkeypatch, tmp_path):
+    snapshot = tmp_path / "hf_cache" / "models--org--Model" / "snapshots" / "abc"
+    snapshot.mkdir(parents=True)
+    weights = snapshot / "model.safetensors"
+    weights.write_bytes(b"partial")
+
+    monkeypatch.setattr(
+        "forge.services.hf_cache_inventory._catalog_entry_for_cached_repo",
+        lambda _repo: SimpleNamespace(repo_id="org/Model"),
+    )
+    monkeypatch.setattr(
+        "forge.services.hf_cache_inventory.estimate_snapshot_download_bytes",
+        lambda _repo: 10_000,
+    )
+
+    db = Database(tmp_path / "forge.db", encryption_key=generate_encryption_key(), ephemeral=True)
+    count = await sync_hf_cache_inventory(
+        db,
+        "u1",
+        data_dir=tmp_path,
+        hf_cache_dir=tmp_path / "hf_cache",
+    )
+
+    assert count == 0
+    assert await db.list_models("u1") == []
 
 
 def test_resolve_download_variant_prefers_safetensors_without_llamacpp(monkeypatch):
