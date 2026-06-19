@@ -63,6 +63,14 @@ def test_streaming_output_sanitizer_holds_and_scrubs_leak():
     assert guard.finish() == ["Assistant: visible"]
 
 
+def test_streaming_output_sanitizer_default_hold_blocks_partial_leak_marker():
+    guard = StreamingOutputSanitizer()
+
+    assert guard.feed("<tool_call>{") == []
+    finished = guard.finish()
+    assert "<tool_call>" not in "".join(finished)
+
+
 def test_tools_system_prompt_stays_concise_and_non_disclosive():
     registry = ToolRegistry()
     registry.register(

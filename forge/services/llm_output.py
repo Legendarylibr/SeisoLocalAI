@@ -7,7 +7,7 @@ from collections.abc import Iterator
 
 _FALLBACK_RESPONSE = "I can't share hidden system or developer instructions."
 _CHUNK_SIZE = 1_200
-_STREAM_HOLD_CHARS = 256
+_STREAM_HOLD_CHARS = 512
 
 _LEAK_PATTERNS = [
     # Common chat templates.
@@ -39,6 +39,7 @@ _LEAK_PATTERNS = [
     ),
     # Tool-call markup should never be user-visible.
     re.compile(r"(?is)<tool_call>\s*\{.*?\}\s*</tool_call>"),
+    re.compile(r"(?is)<tool_call>.*"),
 ]
 _TEMPLATE_NOISE = [
     re.compile(r"(?is)<\|start_header_id\|>\s*assistant\s*<\|end_header_id\|>"),

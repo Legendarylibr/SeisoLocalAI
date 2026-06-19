@@ -42,18 +42,42 @@ class ChatCompletionRequest(BaseModel):
 
 
 _UNTRUSTED_OPENAI_ROLES = frozenset({"tool", "function", "system"})
+_UNVERIFIED_ASSISTANT_PREFIX = "[UNVERIFIED_PRIOR_ASSISTANT]\n"
 
 
-def _resolve_payload(body: ChatCompletionRequest, model_path: str | None) -> dict[str, Any]:
-    messages = []
+def _normalize_openai_messages(body: ChatCompletionRequest) -> list[dict[str, str]]:
+    """Reject privileged roles; downgrade client assistant turns to unverified user data."""
+    if not body.messages:
+        raise HTTPException(400, "At least one user message is required")
+    if body.messages[-1].role.lower() != "user":
+        raise HTTPException(400, "Last message must be from user")
+
+    messages: list[dict[str, str]] = []
     for m in body.messages:
         role = m.role.lower()
         if role in _UNTRUSTED_OPENAI_ROLES:
             raise HTTPException(400, f"Untrusted message role: {m.role}")
         content = m.content if isinstance(m.content, str) else json.dumps(m.content)
-        messages.append({"role": m.role, "content": content})
-    if not any(m["role"].lower() == "user" for m in messages):
+        if role == "assistant":
+            messages.append(
+                {
+                    "role": "user",
+                    "content": f"{_UNVERIFIED_ASSISTANT_PREFIX}{content}",
+                }
+            )
+            continue
+        if role != "user":
+            raise HTTPException(400, f"Unsupported message role: {m.role}")
+        messages.append({"role": "user", "content": content})
+    if not messages:
         raise HTTPException(400, "At least one user message is required")
+    if messages[-1]["role"] != "user":
+        raise HTTPException(400, "Last message must be from user")
+    return messages
+
+
+def _resolve_payload(body: ChatCompletionRequest, model_path: str | None) -> dict[str, Any]:
+    messages = _normalize_openai_messages(body)
     return {
         "model_path": model_path,
         "messages": messages,
@@ -176,8 +200,8 @@ async def chat_completions(
                 }
                 yield f"data: {json.dumps(final)}\n\n"
                 yield "data: [DONE]\n\n"
-            except Exception as exc:
-                err = {"error": {"message": str(exc), "type": "server_error"}}
+            except Exception:
+                err = {"error": {"message": "Inference stream failed", "type": "server_error"}}
                 yield f"data: {json.dumps(err)}\n\n"
 
         return StreamingResponse(sse_stream(), media_type="text/event-stream")
