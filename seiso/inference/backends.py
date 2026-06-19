@@ -95,28 +95,58 @@ def _skip_gguf_value(handle, value_type: int) -> None:
     handle.seek(size, 1)
 
 
+_gguf_arch_cache: dict[tuple[str, float, int], str | None] = {}
+
+
+def _gguf_cache_key(path: Path) -> tuple[str, float, int] | None:
+    try:
+        stat = path.stat()
+        return (str(path), stat.st_mtime, stat.st_size)
+    except OSError:
+        return None
+
+
 def gguf_architecture(model_path: str) -> str | None:
     """Read ``general.architecture`` from a GGUF file when available."""
     try:
         path = resolve_gguf_file(model_path)
-        with path.open("rb") as handle:
-            if handle.read(4) != b"GGUF":
-                return None
-            header = handle.read(20)
-            if len(header) != 20:
-                return None
-            _version, _tensor_count, kv_count = struct.unpack("<IQQ", header)
-            for _ in range(kv_count):
-                key = _read_gguf_string(handle)
-                raw_type = handle.read(4)
-                if len(raw_type) != 4:
-                    return None
-                (value_type,) = struct.unpack("<I", raw_type)
-                if key == "general.architecture" and value_type == 8:
-                    return _read_gguf_string(handle)
-                _skip_gguf_value(handle, value_type)
-    except (OSError, ValueError, struct.error):
+    except ValueError:
         return None
+
+    cache_key = _gguf_cache_key(path)
+    if cache_key is not None:
+        cached = _gguf_arch_cache.get(cache_key)
+        if cached is not None or cache_key in _gguf_arch_cache:
+            return cached
+
+    architecture: str | None
+    try:
+        architecture = _read_gguf_architecture(path)
+    except (OSError, ValueError, struct.error):
+        architecture = None
+
+    if cache_key is not None:
+        _gguf_arch_cache[cache_key] = architecture
+    return architecture
+
+
+def _read_gguf_architecture(path: Path) -> str | None:
+    with path.open("rb") as handle:
+        if handle.read(4) != b"GGUF":
+            return None
+        header = handle.read(20)
+        if len(header) != 20:
+            return None
+        _version, _tensor_count, kv_count = struct.unpack("<IQQ", header)
+        for _ in range(kv_count):
+            key = _read_gguf_string(handle)
+            raw_type = handle.read(4)
+            if len(raw_type) != 4:
+                return None
+            (value_type,) = struct.unpack("<I", raw_type)
+            if key == "general.architecture" and value_type == 8:
+                return _read_gguf_string(handle)
+            _skip_gguf_value(handle, value_type)
     return None
 
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Any
 
 from seiso.compat import StrEnum
@@ -46,6 +47,7 @@ def load_mlx(options: LoadOptions) -> tuple[Any, Any]:
     return _load_mlx(options)
 
 
+@lru_cache(maxsize=1)
 def detect_backend() -> Backend:
     """Pick the best available backend for inference."""
     try:

@@ -345,16 +345,16 @@ def get_families() -> list[str]:
     return sorted({e.family.value for e in CATALOG})
 
 
+_BY_REPO_ID: dict[str, CatalogEntry] = {e.repo_id: e for e in CATALOG}
+_BY_GGUF_REPO: dict[str, CatalogEntry] = {
+    e.gguf_repo: e for e in CATALOG if e.gguf_repo is not None
+}
+
+
 def get_by_repo(repo_id: str) -> CatalogEntry | None:
-    for e in CATALOG:
-        if e.repo_id == repo_id:
-            return e
-    return None
+    return _BY_REPO_ID.get(repo_id)
 
 
 def get_by_gguf_mirror(mirror_repo: str) -> CatalogEntry | None:
     """Map a GGUF mirror repo back to its catalog base model."""
-    for entry in CATALOG:
-        if entry.gguf_repo == mirror_repo:
-            return entry
-    return None
+    return _BY_GGUF_REPO.get(mirror_repo)

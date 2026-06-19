@@ -20,7 +20,7 @@ from forge.services.llm_output import StreamingOutputSanitizer, sanitize_llm_out
 from forge.services.download_progress import estimate_load_eta_seconds
 from forge.services.hardware import hardware_profile
 from forge.services.hf_cache_inventory import sync_hf_cache_inventory
-from forge.services.inference_models import list_inference_options, resolve_chat_target
+from forge.services.inference_models import get_inference_option, list_inference_options, resolve_chat_target
 from forge.services.models import resolve_model_path
 from seiso.inference.backends import BACKEND_LLAMACPP, BACKEND_MLX, BACKEND_OLLAMA, BACKEND_TORCH
 
@@ -354,8 +354,9 @@ async def _resolve_preload_context(
     model_id: str,
     inference_backend: str,
 ) -> dict[str, Any]:
-    options = await list_inference_options(db, user_id, ollama_base_url=settings.ollama_base_url)
-    selected = next((o for o in options if o["id"] == model_id), None)
+    selected = await get_inference_option(
+        db, user_id, model_id, ollama_base_url=settings.ollama_base_url
+    )
     if not selected:
         raise HTTPException(404, "Model not found in inventory")
 
@@ -548,8 +549,9 @@ async def chat(
             payload["inference_backend"] = body.inference_backend
             payload["ollama_base_url"] = settings.ollama_base_url
         elif body.model_id:
-            options = await list_inference_options(db, user_id, ollama_base_url=settings.ollama_base_url)
-            selected = next((o for o in options if o["id"] == body.model_id), None)
+            selected = await get_inference_option(
+                db, user_id, body.model_id, ollama_base_url=settings.ollama_base_url
+            )
             if selected and selected.get("memory_load_blocked"):
                 raise HTTPException(
                     400,

@@ -28,6 +28,73 @@ _MIN_LLAMA_BATCH = 128
 _MAX_LLAMA_CACHE_MB = 1024
 _MAX_JSONL_LOAD_MB = 512
 
+_vram_estimate_cache: dict[tuple, int] = {}
+
+
+def _path_stat_key(p: Path) -> tuple | None:
+    try:
+        stat = p.stat()
+        resolved = str(p.resolve())
+        if p.is_file():
+            return ("file", resolved, stat.st_mtime, stat.st_size)
+        if p.is_dir():
+            return ("dir", resolved, stat.st_mtime)
+    except OSError:
+        return None
+    return None
+
+
+def estimate_path_vram_mb(path: str | Path, *, mode: str = "chat") -> int:
+    """Conservative runtime memory estimate from path, size, or name."""
+    p = Path(path).expanduser()
+    cache_key = _path_stat_key(p)
+    if cache_key is not None and mode == "chat":
+        cached = _vram_estimate_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+    est = _estimate_path_vram_mb_uncached(p, mode=mode)
+
+    if cache_key is not None and mode == "chat":
+        _vram_estimate_cache[cache_key] = est
+    return est
+
+
+def _estimate_path_vram_mb_uncached(p: Path, *, mode: str = "chat") -> int:
+    name = p.name.lower()
+
+    if p.is_file() and p.suffix.lower() in {".gguf", ".bin", ".safetensors", ".pt", ".pth"}:
+        file_mb = max(p.stat().st_size / (1024**2), 1)
+        est = int(file_mb * 1.15 + _INFERENCE_OVERHEAD_MB)
+    elif p.is_dir():
+        weight_bytes = 0
+        for pattern in ("*.gguf", "*.safetensors", "*.bin"):
+            for f in p.rglob(pattern):
+                if f.is_file():
+                    weight_bytes += f.stat().st_size
+        if weight_bytes > 0:
+            est = int(weight_bytes / (1024**2) * 1.15 + _INFERENCE_OVERHEAD_MB)
+        else:
+            guessed = _guess_params_from_name(name) or 7.0
+            try:
+                from forge.services.hardware import estimate_chat_vram_gb
+
+                est = int(estimate_chat_vram_gb(f"{guessed}B") * 1024)
+            except Exception:
+                est = int(guessed * 1024 * 0.7 + _INFERENCE_OVERHEAD_MB)
+    else:
+        guessed = _guess_params_from_name(name) or _guess_params_from_name(str(p)) or 7.0
+        try:
+            from forge.services.hardware import estimate_chat_vram_gb
+
+            est = int(estimate_chat_vram_gb(f"{guessed}B") * 1024)
+        except Exception:
+            est = int(guessed * 1024 * 0.7 + _INFERENCE_OVERHEAD_MB)
+
+    if mode == "train":
+        est = int(est * _TRAINING_OVERHEAD_RATIO)
+    return max(est, 256)
+
 
 class MemoryLoadBlockedError(RuntimeError):
     """Raised when a model load would exceed available memory."""
@@ -215,44 +282,6 @@ def _guess_params_from_name(name: str) -> float | None:
 
     m = re.search(r"(\d+(?:\.\d+)?)\s*b", name, re.I)
     return float(m.group(1)) if m else None
-
-
-def estimate_path_vram_mb(path: str | Path, *, mode: str = "chat") -> int:
-    """Conservative runtime memory estimate from path, size, or name."""
-    p = Path(path).expanduser()
-    name = p.name.lower()
-
-    if p.is_file() and p.suffix.lower() in {".gguf", ".bin", ".safetensors", ".pt", ".pth"}:
-        file_mb = max(p.stat().st_size / (1024**2), 1)
-        est = int(file_mb * 1.15 + _INFERENCE_OVERHEAD_MB)
-    elif p.is_dir():
-        weight_bytes = 0
-        for pattern in ("*.gguf", "*.safetensors", "*.bin"):
-            for f in p.rglob(pattern):
-                if f.is_file():
-                    weight_bytes += f.stat().st_size
-        if weight_bytes > 0:
-            est = int(weight_bytes / (1024**2) * 1.15 + _INFERENCE_OVERHEAD_MB)
-        else:
-            guessed = _guess_params_from_name(name) or 7.0
-            try:
-                from forge.services.hardware import estimate_chat_vram_gb
-
-                est = int(estimate_chat_vram_gb(f"{guessed}B") * 1024)
-            except Exception:
-                est = int(guessed * 1024 * 0.7 + _INFERENCE_OVERHEAD_MB)
-    else:
-        guessed = _guess_params_from_name(name) or _guess_params_from_name(str(path)) or 7.0
-        try:
-            from forge.services.hardware import estimate_chat_vram_gb
-
-            est = int(estimate_chat_vram_gb(f"{guessed}B") * 1024)
-        except Exception:
-            est = int(guessed * 1024 * 0.7 + _INFERENCE_OVERHEAD_MB)
-
-    if mode == "train":
-        est = int(est * _TRAINING_OVERHEAD_RATIO)
-    return max(est, 256)
 
 
 def assess_path_memory_fit(path: str | Path, *, mode: str = "chat") -> dict[str, Any]:

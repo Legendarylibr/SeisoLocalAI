@@ -231,21 +231,19 @@ async def test_chat_route_keeps_local_gguf_ollama_on_ollama(monkeypatch, tmp_pat
 
             return Job()
 
-    async def fake_list_inference_options(*_args, **_kwargs):
-        return [
-            {
-                "id": "local-1",
-                "kind": "local",
-                "name": "export-q4",
-                "path": str(tmp_path / "export-q4.gguf"),
-                "format": "gguf",
-                "default_backend": BACKEND_LLAMACPP,
-                "backends": [BACKEND_LLAMACPP, BACKEND_OLLAMA],
-                "ollama_model": "export-q4:latest",
-            }
-        ]
+    async def fake_get_inference_option(*_args, **_kwargs):
+        return {
+            "id": "local-1",
+            "kind": "local",
+            "name": "export-q4",
+            "path": str(tmp_path / "export-q4.gguf"),
+            "format": "gguf",
+            "default_backend": BACKEND_LLAMACPP,
+            "backends": [BACKEND_LLAMACPP, BACKEND_OLLAMA],
+            "ollama_model": "export-q4:latest",
+        }
 
-    monkeypatch.setattr(inference_route, "list_inference_options", fake_list_inference_options)
+    monkeypatch.setattr(inference_route, "get_inference_option", fake_get_inference_option)
 
     body = inference_route.ChatRequest(
         model_id="local-1",
