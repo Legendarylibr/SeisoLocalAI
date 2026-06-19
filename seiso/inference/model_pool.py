@@ -11,25 +11,9 @@ from pathlib import Path
 from typing import Any
 
 from seiso.compat import StrEnum
+from seiso.env import env_bool, env_int
 
 logger = logging.getLogger(__name__)
-
-
-def _env_int(name: str, default: int) -> int:
-    raw = os.environ.get(name, "").strip()
-    if not raw:
-        return default
-    try:
-        return int(raw)
-    except ValueError:
-        return default
-
-
-def _env_bool(name: str, default: bool) -> bool:
-    raw = os.environ.get(name, "").strip().lower()
-    if not raw:
-        return default
-    return raw in {"1", "true", "yes", "on"}
 
 
 def _default_llama_threads() -> int:
@@ -70,9 +54,9 @@ def llama_load_kwargs(n_ctx: int) -> dict[str, Any]:
     """Tuned llama.cpp defaults for faster preload/first token, overrideable by env."""
     from seiso.memory.protection import clamp_llama_load_kwargs, headroom_mb
 
-    n_threads = _env_int("SEISO_LLAMA_THREADS", _default_llama_threads())
-    n_batch = _env_int("SEISO_LLAMA_BATCH", _default_llama_batch())
-    n_gpu_layers = _env_int("SEISO_LLAMA_GPU_LAYERS", _default_llama_gpu_layers())
+    n_threads = env_int("SEISO_LLAMA_THREADS", _default_llama_threads())
+    n_batch = env_int("SEISO_LLAMA_BATCH", _default_llama_batch())
+    n_gpu_layers = env_int("SEISO_LLAMA_GPU_LAYERS", _default_llama_gpu_layers())
     headroom = headroom_mb()
     if n_gpu_layers != 0 and headroom > 0:
         if headroom < 4096:
@@ -84,19 +68,19 @@ def llama_load_kwargs(n_ctx: int) -> dict[str, Any]:
     kwargs: dict[str, Any] = {
         "n_ctx": n_ctx,
         "n_threads": n_threads,
-        "n_threads_batch": _env_int("SEISO_LLAMA_THREADS_BATCH", n_threads),
+        "n_threads_batch": env_int("SEISO_LLAMA_THREADS_BATCH", n_threads),
         "n_batch": n_batch,
-        "n_ubatch": _env_int("SEISO_LLAMA_UBATCH", _default_llama_ubatch(n_batch)),
+        "n_ubatch": env_int("SEISO_LLAMA_UBATCH", _default_llama_ubatch(n_batch)),
         "n_gpu_layers": n_gpu_layers,
-        "use_mmap": _env_bool("SEISO_LLAMA_USE_MMAP", True),
-        "use_mlock": _env_bool("SEISO_LLAMA_USE_MLOCK", False),
-        "verbose": _env_bool("SEISO_LLAMA_VERBOSE", False),
-        "offload_kqv": _env_bool("SEISO_LLAMA_OFFLOAD_KQV", n_gpu_layers != 0),
-        "no_perf": _env_bool("SEISO_LLAMA_NO_PERF", True),
+        "use_mmap": env_bool("SEISO_LLAMA_USE_MMAP", True),
+        "use_mlock": env_bool("SEISO_LLAMA_USE_MLOCK", False),
+        "verbose": env_bool("SEISO_LLAMA_VERBOSE", False),
+        "offload_kqv": env_bool("SEISO_LLAMA_OFFLOAD_KQV", n_gpu_layers != 0),
+        "no_perf": env_bool("SEISO_LLAMA_NO_PERF", True),
     }
     if n_gpu_layers != 0:
-        kwargs["op_offload"] = _env_bool("SEISO_LLAMA_OP_OFFLOAD", True)
-    if n_gpu_layers != 0 and _env_bool("SEISO_LLAMA_FLASH_ATTN", True):
+        kwargs["op_offload"] = env_bool("SEISO_LLAMA_OP_OFFLOAD", True)
+    if n_gpu_layers != 0 and env_bool("SEISO_LLAMA_FLASH_ATTN", True):
         kwargs["flash_attn"] = True
     return clamp_llama_load_kwargs(kwargs)
 

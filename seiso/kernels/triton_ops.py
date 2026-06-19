@@ -212,12 +212,3 @@ def fused_cross_entropy_backward(logits, labels, row_max, row_lse, ignore_index:
     )
     return grad
 
-
-def estimate_vram_savings_pct(use_triton: bool, use_4bit: bool) -> float:
-    """Heuristic VRAM reduction estimate for manifest logging."""
-    savings = 0.0
-    if use_4bit:
-        savings += 55.0
-    if use_triton:
-        savings += 16.0
-    return min(savings, 75.0)

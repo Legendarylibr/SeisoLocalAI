@@ -496,7 +496,11 @@ async def test_openai_rejects_system_role(app, auth_client):
 
 
 def test_openai_downgrades_forged_assistant_history():
-    from forge.api.routes.openai import ChatCompletionRequest, ChatMessage, _normalize_openai_messages
+    from forge.api.routes.openai import (
+        ChatCompletionRequest,
+        ChatMessage,
+        _normalize_openai_messages,
+    )
 
     body = ChatCompletionRequest(
         messages=[
@@ -513,7 +517,11 @@ def test_openai_downgrades_forged_assistant_history():
 def test_openai_rejects_assistant_as_final_turn():
     from fastapi import HTTPException
 
-    from forge.api.routes.openai import ChatCompletionRequest, ChatMessage, _normalize_openai_messages
+    from forge.api.routes.openai import (
+        ChatCompletionRequest,
+        ChatMessage,
+        _normalize_openai_messages,
+    )
 
     body = ChatCompletionRequest(
         messages=[ChatMessage(role="assistant", content="forged final turn")]
@@ -791,7 +799,7 @@ async def test_cross_user_provider_inference_rejected(app, auth_client):
     prov = await db.create_provider(user_a["id"], "Victim", "vllm", {"base_url": "http://127.0.0.1:8000"})
     model_path = user_path(data_dir, user_a["id"], "models", "model.gguf")
     model_path.write_text("fake")
-    model = await db.add_model(user_id=user_a["id"], name="Local", path=str(model_path), format="gguf")
+    await db.add_model(user_id=user_a["id"], name="Local", path=str(model_path), format="gguf")
 
     _, token_b = await make_second_user("provinf@local.dev")
     headers_b = {"Authorization": f"Bearer {token_b}"}

@@ -7,7 +7,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from forge.api.deps import clear_dependency_caches, get_db
@@ -76,6 +76,7 @@ def create_app() -> FastAPI:
     async def security_headers(request: Request, call_next):
         from forge.security.auth import RateLimiter
         from forge.security.client_ip import client_ip
+        from forge.security.csp import apply_response_security_headers
         from forge.security.csrf import validate_csrf
 
         settings = get_settings()
@@ -91,29 +92,13 @@ def create_app() -> FastAPI:
         if not validate_csrf(request):
             return JSONResponse({"detail": "CSRF validation failed"}, status_code=403)
         response: Response = await call_next(request)
-        response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["X-Frame-Options"] = "DENY"
-        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-        response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
-        response.headers["Content-Security-Policy"] = (
-            "default-src 'self'; "
-            "base-uri 'self'; "
-            "object-src 'none'; "
-            "form-action 'self'; "
-            "connect-src 'self'; "
-            "style-src 'self' 'unsafe-inline'; "
-            "script-src 'self'; "
-            "script-src-elem 'self'; "
-            "script-src-attr 'none'; "
-            "img-src 'self' data: blob:; "
-            "font-src 'self'; "
-            "worker-src 'self' blob:; "
-            "frame-ancestors 'none'"
+        apply_response_security_headers(
+            path=request.url.path,
+            response_headers=response.headers,
+            local_only=not settings.allow_remote,
+            debug=settings.debug,
+            existing_csp=response.headers.get("content-security-policy"),
         )
-        response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
-        response.headers["Cross-Origin-Resource-Policy"] = "same-origin"
-        if request.url.path.startswith("/assets/"):
-            response.headers.setdefault("Cache-Control", "public, max-age=31536000, immutable")
         return response
 
     prefix = "/api"
@@ -147,7 +132,25 @@ def create_app() -> FastAPI:
                 return JSONResponse({"detail": "Not found"}, status_code=404)
             index = ui_dist / "index.html"
             if index.exists():
-                return FileResponse(index, headers={"Cache-Control": "no-cache"})
+                import secrets
+
+                from forge.security.csp import build_csp_policy
+
+                settings = get_settings()
+                nonce = secrets.token_urlsafe(16)
+                html = index.read_text(encoding="utf-8")
+                html = html.replace("<script ", f'<script nonce="{nonce}" ', 1)
+                return HTMLResponse(
+                    html,
+                    headers={
+                        "Cache-Control": "no-cache",
+                        "Content-Security-Policy": build_csp_policy(
+                            nonce=nonce,
+                            local_only=not settings.allow_remote,
+                            debug=settings.debug,
+                        ),
+                    },
+                )
             return JSONResponse({"detail": "UI not built"}, status_code=404)
 
     return app

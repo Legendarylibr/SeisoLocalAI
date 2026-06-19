@@ -4,32 +4,16 @@ from __future__ import annotations
 
 import contextlib
 import logging
-import os
 import threading
 from typing import Any
+
+from seiso.env import env_bool, env_int, env_str
 
 logger = logging.getLogger(__name__)
 
 _torch_configured = False
 _torch_lock = threading.Lock()
 _torch_compiled_ids: set[int] = set()
-
-
-def _env_bool(name: str, default: bool) -> bool:
-    raw = os.environ.get(name, "").strip().lower()
-    if not raw:
-        return default
-    return raw in {"1", "true", "yes", "on"}
-
-
-def _env_int(name: str, default: int) -> int:
-    raw = os.environ.get(name, "").strip()
-    if not raw:
-        return default
-    try:
-        return int(raw)
-    except ValueError:
-        return default
 
 
 def configure_torch_inference() -> None:
@@ -61,11 +45,6 @@ def configure_torch_inference() -> None:
         logger.debug("PyTorch inference backends configured")
 
 
-def _env_str(name: str, default: str) -> str:
-    raw = os.environ.get(name, "").strip()
-    return raw or default
-
-
 def prepare_torch_model(model: Any) -> Any:
     """Eval mode + KV cache + optional torch.compile for generation."""
     configure_torch_inference()
@@ -78,7 +57,7 @@ def prepare_torch_model(model: Any) -> Any:
 
 def maybe_compile_torch_model(model: Any) -> Any:
     """Optionally compile the model graph for lower per-token latency on CUDA."""
-    if not _env_bool("SEISO_TORCH_COMPILE", False):
+    if not env_bool("SEISO_TORCH_COMPILE", False):
         return model
     model_id = id(model)
     if model_id in _torch_compiled_ids:
@@ -90,7 +69,7 @@ def maybe_compile_torch_model(model: Any) -> Any:
             return model
         if getattr(model, "is_quantized", False) or hasattr(model, "peft_config"):
             return model
-        mode = _env_str("SEISO_TORCH_COMPILE_MODE", "reduce-overhead")
+        mode = env_str("SEISO_TORCH_COMPILE_MODE", "reduce-overhead")
         compiled = torch.compile(model, mode=mode)
         _torch_compiled_ids.add(model_id)
         logger.info("torch.compile enabled for inference (mode=%s)", mode)
@@ -102,7 +81,7 @@ def maybe_compile_torch_model(model: Any) -> Any:
 
 def apply_inference_kernels(model: Any) -> None:
     """Patch CUDA weights with fused RMSNorm/SwiGLU when enabled."""
-    if not _env_bool("SEISO_INFERENCE_FUSED_KERNELS", True):
+    if not env_bool("SEISO_INFERENCE_FUSED_KERNELS", True):
         return
     try:
         import torch
@@ -140,13 +119,13 @@ def mlx_stream_kwargs(payload: dict[str, Any]) -> dict[str, Any]:
     sampler = build_mlx_sampler(payload)
     if sampler is not None:
         kwargs["sampler"] = sampler
-    prefill = _env_int("SEISO_MLX_PREFILL_STEP", 4096)
+    prefill = env_int("SEISO_MLX_PREFILL_STEP", 4096)
     if prefill > 0:
         kwargs["prefill_step_size"] = prefill
-    kv_bits = _env_int("SEISO_MLX_KV_BITS", 0)
+    kv_bits = env_int("SEISO_MLX_KV_BITS", 0)
     if kv_bits > 0:
         kwargs["kv_bits"] = kv_bits
-        kwargs["kv_group_size"] = _env_int("SEISO_MLX_KV_GROUP_SIZE", 64)
+        kwargs["kv_group_size"] = env_int("SEISO_MLX_KV_GROUP_SIZE", 64)
     return kwargs
 
 
@@ -159,7 +138,7 @@ def estimate_llama_n_ctx(
     ceiling: int = 8192,
 ) -> int:
     """Right-size context window to prompt + generation (faster KV cache)."""
-    if not _env_bool("SEISO_LLAMA_DYNAMIC_CTX", True):
+    if not env_bool("SEISO_LLAMA_DYNAMIC_CTX", True):
         sized = default
     else:
         chars = sum(len(str(m.get("content", ""))) for m in messages)
@@ -174,14 +153,14 @@ def estimate_llama_n_ctx(
 
 def attach_llama_prompt_cache(llm: Any) -> None:
     """Enable RAM prefix cache for multi-turn / repeated prompts."""
-    if not _env_bool("SEISO_LLAMA_PROMPT_CACHE", True):
+    if not env_bool("SEISO_LLAMA_PROMPT_CACHE", True):
         return
     if getattr(llm, "_seiso_cache_attached", False):
         return
     try:
         from llama_cpp import LlamaRAMCache
 
-        cache_mb = _env_int("SEISO_LLAMA_CACHE_MB", 1024)
+        cache_mb = env_int("SEISO_LLAMA_CACHE_MB", 1024)
         from seiso.memory.protection import clamp_llama_cache_mb
 
         cache_mb = clamp_llama_cache_mb(cache_mb)

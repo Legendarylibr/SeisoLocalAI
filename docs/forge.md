@@ -50,7 +50,7 @@ seiso forge
 cd forge-ui && npm run dev
 ```
 
-Browse **http://127.0.0.1:5173**. CORS for this origin is pre-configured in `.env.example`.
+Browse **http://127.0.0.1:5173** (or `localhost:5173`) — CORS is pre-configured; no `.env` change needed.
 
 Optional API auto-reload during backend work:
 
@@ -120,7 +120,7 @@ Copy `.env.example` to `.env` in the repo root. Key settings:
 | `SEISO_TRUSTED_PROXY_IPS` | — | Comma-separated proxy IPs (e.g. `127.0.0.1,::1`) |
 | `SEISO_INFERENCE_API_KEY` | auto | Scoped key for `/v1` only (file: `{SEISO_DATA_DIR}/.inference_api_key`) |
 | `SEISO_SECURE_COOKIES` | `false` | `Secure` cookies when TLS is terminated upstream |
-| `SEISO_CORS_ORIGINS` | `http://127.0.0.1:8765,http://localhost:5173` | Allowed browser origins |
+| `SEISO_CORS_ORIGINS` | *(local defaults)* | Only set for HTTPS reverse proxy |
 | `SEISO_HF_TOKEN` | — | Hugging Face token for gated models |
 | `SEISO_DB_EPHEMERAL` | `true` | In-memory SQLite (wiped on restart) |
 | `SEISO_ALLOW_TOOLS` | `false` | Web search, artifacts |

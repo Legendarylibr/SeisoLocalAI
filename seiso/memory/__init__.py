@@ -12,7 +12,6 @@ from seiso.memory.protection import (
     headroom_mb,
     is_oom_error,
     release_cached_memory,
-    run_with_oom_retry,
     sanitize_inference_payload,
     training_pin_memory,
 )
@@ -29,7 +28,6 @@ __all__ = [
     "headroom_mb",
     "is_oom_error",
     "release_cached_memory",
-    "run_with_oom_retry",
     "sanitize_inference_payload",
     "training_pin_memory",
 ]
