@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+# Install (first run) or start Seiso Forge. Primary entry point after cloning.
+#
+# Usage:
+#   start                            # after install (on PATH via ~/.local/bin)
+#   SEISO_START=0 start              # install only (no auto-start)
+#   curl -fsSL …/main/start | bash   # one-liner without cloning first
+set -euo pipefail
+
+RAW_BASE="${SEISO_RAW_BASE:-https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main}"
+INSTALL_DIR="${SEISO_INSTALL_DIR:-$HOME/Seiso}"
+START_SRC="${BASH_SOURCE[0]:-}"
+
+load_common() {
+  local root="$1"
+  local common="$root/scripts/lib/common.sh"
+  if [[ -f "$common" ]]; then
+    # shellcheck source=scripts/lib/common.sh
+    source "$common"
+    return 0
+  fi
+  return 1
+}
+
+resolve_root_early() {
+  local src="$1"
+  if [[ -n "$src" && -e "$src" ]]; then
+    local dir candidate
+    while [[ -L "$src" ]]; do
+      local target
+      target="$(readlink "$src")"
+      if [[ "$target" != /* ]]; then
+        src="$(cd "$(dirname "$src")" && pwd)/$target"
+      else
+        src="$target"
+      fi
+    done
+    dir="$(cd "$(dirname "$src")" && pwd)"
+    if [[ -f "$dir/pyproject.toml" && -d "$dir/seiso_cli" ]]; then
+      printf '%s\n' "$dir"
+      return 0
+    fi
+  fi
+  if [[ -d "$INSTALL_DIR/seiso_cli" && -f "$INSTALL_DIR/pyproject.toml" ]]; then
+    printf '%s\n' "$INSTALL_DIR"
+    return 0
+  fi
+  return 1
+}
+
+needs_install() {
+  local root="$1"
+  [[ -x "$root/.venv/bin/seiso" && -f "$root/forge-ui/dist/index.html" ]] || return 0
+  return 1
+}
+
+if root="$(resolve_root_early "$START_SRC")"; then
+  if load_common "$root"; then
+    seiso_install_start_command "$root"
+    root="$(seiso_resolve_repo_for_start "$START_SRC")"
+    if needs_install "$root"; then
+      exec bash "$root/scripts/install.sh" "$@"
+    else
+      exec bash "$root/scripts/start.sh" "$@"
+    fi
+  fi
+fi
+
+command -v curl >/dev/null 2>&1 || {
+  printf 'error: curl is required\n' >&2
+  exit 1
+}
+exec bash -c "$(curl -fsSL "${RAW_BASE}/scripts/install.sh")"

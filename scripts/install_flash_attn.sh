@@ -69,7 +69,7 @@ main() {
     die "Refusing to build flash-attn on a Windows mount ($root).
 
 Clone into the Linux filesystem instead, e.g.:
-  SEISO_INSTALL_DIR=~/Seiso curl -fsSL .../scripts/install.sh | bash
+  SEISO_INSTALL_DIR=~/Seiso curl -fsSL .../start | bash
 
 Building CUDA wheels on /mnt/c/... often fails with missing pyproject.toml/setup.py errors."
   fi
@@ -115,7 +115,7 @@ Common fixes on Linux + NVIDIA (4090):
   3. Match PyTorch CUDA to your driver: https://pytorch.org/get-started/locally/
   4. Retry: MAX_JOBS=4 ./scripts/install_flash_attn.sh
 
-To skip permanently: export SEISO_SKIP_FLASH_ATTN=1 before ./scripts/install.sh
+To skip permanently: export SEISO_SKIP_FLASH_ATTN=1 before start
 EOF
     exit 1
   fi

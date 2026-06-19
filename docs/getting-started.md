@@ -22,7 +22,7 @@ This guide walks you from a fresh machine to your first chat, training run, and 
 One command installs dependencies, builds the UI, and **starts Forge** (browser opens automatically):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
 ```
 
 No separate start step is needed after a successful install.
@@ -30,8 +30,8 @@ No separate start step is needed after a successful install.
 **Start Forge on later sessions:**
 
 ```bash
-"$HOME/Seiso/scripts/start.sh"
-# or: curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/start.sh | bash
+cd "$HOME/Seiso" && start
+# or: curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
 ```
 
 Custom clone location: set `SEISO_INSTALL_DIR` before running the installer (for example `SEISO_INSTALL_DIR="$HOME/code/Seiso"`).
@@ -43,7 +43,7 @@ Custom clone location: set `SEISO_INSTALL_DIR` before running the installer (for
 ```bash
 git clone https://github.com/Legendarylibr/SeisoLocalAI.git "$HOME/Seiso"
 cd "$HOME/Seiso"
-./scripts/install.sh
+start
 ```
 
 **Windows (PowerShell):**

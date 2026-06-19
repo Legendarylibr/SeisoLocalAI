@@ -9,7 +9,7 @@ Fine-tune open models with QLoRA, LoRA, or full fine-tuning using Forge Training
 ## Forge (web UI)
 
 ```bash
-./scripts/start.sh
+start
 # or: seiso forge
 ```
 

@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Install Seiso on Linux or macOS — system deps, clone, venv, pip extras, Forge UI build.
 #
+# Prefer start (on PATH after install, or curl …/start | bash). This script is the lower-level installer.
+#
 # One-liner (Linux / macOS) — installs and starts Forge (opens browser when ready):
-#   curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
 #
 # Options (env vars):
 #   SEISO_INSTALL_DIR   Install location (default: ~/Seiso)
@@ -196,6 +198,8 @@ main() {
     install_failed "$root"
   fi
 
+  seiso_install_start_command "$root"
+
   install_tui_outro "$root"
 
   if [[ "$SEISO_START" == "1" ]]; then
@@ -209,7 +213,7 @@ main() {
   if install_tui_enabled "$root"; then
     printf '\n%s\nDoctor: %s/scripts/doctor.sh\n\n' "$forge_url" "$root"
   else
-    printf '\nStart Forge: %s/scripts/start.sh\n' "$root"
+    printf '\nStart Forge: start\n'
     printf 'Doctor: %s/scripts/doctor.sh\n\n' "$root"
   fi
 }

@@ -18,7 +18,7 @@ Start with **[getting-started.md](getting-started.md)** — a step-by-step walkt
 |------|------------|
 | Install on Linux or macOS in one command | [install.md](install.md#linux--macos--one-command-recommended) |
 | Install on Windows or AMD ROCm | [platforms/windows.md](platforms/windows.md) · [platforms/linux-amd-rocm.md](platforms/linux-amd-rocm.md) |
-| Launch the web UI | `./scripts/start.sh` or `seiso forge` → [forge.md](forge.md) |
+| Launch the web UI | `start` or `seiso forge` → [forge.md](forge.md) |
 | Diagnose install / HF / GPU | `seiso doctor` or `./scripts/doctor.sh` → [cli.md](cli.md) |
 | Chat with a local model | [getting-started.md § Step 4](getting-started.md#step-4--chat-with-a-local-model) |
 | Fine-tune with QLoRA / LoRA | [training/quickstart.md](training/quickstart.md) |
@@ -49,9 +49,9 @@ Start with **[getting-started.md](getting-started.md)** — a step-by-step walkt
 
 | Mode | Linux / macOS / WSL | Windows |
 |------|---------------------|---------|
-| **Install + start** | `curl -fsSL …/scripts/install.sh \| bash` — starts Forge when done | Manual install → `seiso forge` ([install.md](install.md)) |
-| **Later sessions** | `"$HOME/Seiso/scripts/start.sh"` or `seiso forge` from repo | `cd "$env:USERPROFILE\Seiso"` → activate venv → `seiso forge` |
-| **From a clone** | `./scripts/install.sh` (starts by default) or `SEISO_START=0 ./scripts/install.sh` then `./scripts/start.sh` | Build UI + `seiso forge` ([platforms/windows.md](platforms/windows.md)) |
+| **Install + start** | `curl -fsSL …/start \| bash` — starts Forge when done | Manual install → `seiso forge` ([install.md](install.md)) |
+| **Later sessions** | `start` or `seiso forge` from repo | `cd "$env:USERPROFILE\Seiso"` → activate venv → `seiso forge` |
+| **From a clone** | `start` (starts by default) or `SEISO_START=0 start` | Build UI + `seiso forge` ([platforms/windows.md](platforms/windows.md)) |
 | **Forge (UI dev)** | Terminal 1: `seiso forge` · Terminal 2: `cd forge-ui && npm run dev` | Same |
 | **CLI training** | `seiso train --config configs/example_lora.yaml` | `seiso train --config configs\example_lora.yaml` |
 | **OpenAI-compatible API** | `seiso forge` then POST `/v1/chat/completions` | Same |
@@ -130,14 +130,14 @@ See [install.md](install.md) and [forge.md](forge.md) for full details.
 
 ```bash
 # One-shot install + start (Linux / macOS / WSL — Forge starts automatically)
-curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
 
 # Start Forge on later sessions (Linux / macOS / WSL)
-"$HOME/Seiso/scripts/start.sh"
+cd "$HOME/Seiso" && start
 
 # From a clone (Linux / macOS / WSL)
 git clone https://github.com/Legendarylibr/SeisoLocalAI.git "$HOME/Seiso" && cd "$HOME/Seiso"
-./scripts/install.sh
+start
 
 # Linux NVIDIA (manual pip)
 pip install -e ".[forge,train,cuda,dev]"
@@ -194,7 +194,8 @@ Seiso/
 ├── data/               # Sample training JSONL
 ├── deploy/             # Caddy, nginx, systemd templates
 ├── docs/               # This documentation
-├── scripts/            # install.sh, start.sh, CI runner
+├── start               # install or launch Forge (primary entry point)
+├── scripts/            # install.sh, doctor.sh, CI runner
 ├── locks/              # python.lock, dependency digests
 └── tests/              # pytest suite
 ```
@@ -213,7 +214,7 @@ After models are downloaded, chat and training work without internet. Hub publis
 `$HOME/.seiso` on Linux/macOS/WSL, `%USERPROFILE%\.seiso` on Windows. Override with `SEISO_DATA_DIR`. See [getting-started.md § Data directory](getting-started.md#data-directory-layout).
 
 **Why is the UI blank?**  
-The Forge UI must be built: `cd forge-ui && npm run build`, or run `./scripts/start.sh` (auto-builds).
+The Forge UI must be built: `cd forge-ui && npm run build`, or run `start` (auto-builds).
 
 **Can I use QLoRA on macOS?**  
 No — macOS uses 16-bit LoRA via PyTorch MPS/CPU. QLoRA 4-bit requires NVIDIA CUDA or Linux with bitsandbytes.

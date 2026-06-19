@@ -49,25 +49,25 @@ Seiso config files accept `~/.seiso` and expand it correctly on all platforms. S
 No manual prerequisites on most systems — the installer installs Python, Node, and git via Homebrew or your package manager when they are missing.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
 ```
 
-Forge starts when install finishes and your browser opens automatically at **http://127.0.0.1:8765**. You do **not** need to run `start.sh` immediately after a successful install. If anything fails, **doctor runs automatically** with a guided diagnosis.
+Forge starts when install finishes and your browser opens automatically at **http://127.0.0.1:8765**. You do **not** need to run `start` again immediately after a successful install. If anything fails, **doctor runs automatically** with a guided diagnosis.
 
 **Start Forge on later sessions:**
 
 ```bash
-"$HOME/Seiso/scripts/start.sh"
+cd "$HOME/Seiso" && start
 # or one-liner:
-curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/start.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
 ```
 
 **Verify before running (recommended):**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/install.sh -o install.sh
-shasum -a 256 install.sh
-bash install.sh
+curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start -o start
+shasum -a 256 start
+bash start
 ```
 
 ### What the installer does
@@ -98,7 +98,7 @@ bash install.sh
 Custom location:
 
 ```bash
-SEISO_INSTALL_DIR="$HOME/code/Seiso" curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/install.sh | bash
+SEISO_INSTALL_DIR="$HOME/code/Seiso" curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
 ```
 
 ### Already cloned?
@@ -106,8 +106,10 @@ SEISO_INSTALL_DIR="$HOME/code/Seiso" curl -fsSL https://raw.githubusercontent.co
 Run from the repository root:
 
 ```bash
-./scripts/install.sh
+start
 ```
+
+Install registers `start` on your PATH (`~/.local/bin`). Open a new terminal if the command is not found yet.
 
 First launch: open **http://127.0.0.1:8765** and create your local admin password.
 
@@ -291,7 +293,7 @@ Forge serves the built UI from `forge-ui/dist`. Required before first launch:
 cd forge-ui && npm ci && npm run build && cd ..
 ```
 
-Or use `./scripts/install.sh` / `./scripts/start.sh` (auto-builds if missing).
+Or use `start` (auto-builds if missing).
 
 ### UI development (hot reload)
 
@@ -315,7 +317,7 @@ See [forge.md](forge.md) for pages, API routes, and environment variables.
 ## First launch checklist
 
 1. Start Forge:
-   - Linux / macOS / WSL: `./scripts/start.sh` or `seiso forge` (with venv active)
+   - Linux / macOS / WSL: `start` or `seiso forge` (with venv active)
    - Windows: activate venv → `seiso forge`
 2. Open **http://127.0.0.1:8765**
 3. Complete onboarding — create local admin password
@@ -360,7 +362,7 @@ Adjust the extras for your platform, for example `.[forge,train,mlx,dev]` on App
 Or re-run the installer (idempotent):
 
 ```bash
-./scripts/install.sh
+start
 ```
 
 ---
@@ -406,7 +408,7 @@ Remove-Item -Recurse -Force "$env:USERPROFILE\Seiso", "$env:USERPROFILE\.seiso"
 
 | Problem | Fix |
 |---------|-----|
-| UI is blank | `cd forge-ui && npm run build` or `./scripts/start.sh` |
+| UI is blank | `cd forge-ui && npm run build` or `start` |
 | `Missing required command: node` | Install Node.js 18+ from [nodejs.org](https://nodejs.org/) |
 | Python too old | Requires 3.10+ (`python3 --version`) |
 | CUDA kernels fail | Install CUDA toolkit; check `nvcc --version` |
