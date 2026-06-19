@@ -11,58 +11,38 @@ RAW_BASE="${SEISO_RAW_BASE:-https://raw.githubusercontent.com/Legendarylibr/Seis
 INSTALL_DIR="${SEISO_INSTALL_DIR:-$HOME/Seiso}"
 START_SRC="${BASH_SOURCE[0]:-}"
 
-load_common() {
+source_common() {
   local root="$1"
   local common="$root/scripts/lib/common.sh"
-  if [[ -f "$common" ]]; then
-    # shellcheck source=scripts/lib/common.sh
-    source "$common"
-    return 0
-  fi
-  return 1
+  [[ -f "$common" ]] || return 1
+  # shellcheck source=scripts/lib/common.sh
+  source "$common"
 }
 
-resolve_root_early() {
-  local src="$1"
-  if [[ -n "$src" && -e "$src" ]]; then
-    local dir candidate
-    while [[ -L "$src" ]]; do
-      local target
-      target="$(readlink "$src")"
-      if [[ "$target" != /* ]]; then
-        src="$(cd "$(dirname "$src")" && pwd)/$target"
-      else
-        src="$target"
-      fi
-    done
-    dir="$(cd "$(dirname "$src")" && pwd)"
-    if [[ -f "$dir/pyproject.toml" && -d "$dir/seiso_cli" ]]; then
-      printf '%s\n' "$dir"
-      return 0
-    fi
-  fi
-  if [[ -d "$INSTALL_DIR/seiso_cli" && -f "$INSTALL_DIR/pyproject.toml" ]]; then
-    printf '%s\n' "$INSTALL_DIR"
-    return 0
-  fi
-  return 1
-}
-
-needs_install() {
+launch_from_root() {
   local root="$1"
-  [[ -x "$root/.venv/bin/seiso" && -f "$root/forge-ui/dist/index.html" ]] || return 0
-  return 1
+  shift
+  seiso_install_start_command "$root"
+  if seiso_needs_install "$root"; then
+    exec bash "$root/scripts/install.sh" "$@"
+  fi
+  exec bash "$root/scripts/start.sh" "$@"
 }
 
-if root="$(resolve_root_early "$START_SRC")"; then
-  if load_common "$root"; then
-    seiso_install_start_command "$root"
-    root="$(seiso_resolve_repo_for_start "$START_SRC")"
-    if needs_install "$root"; then
-      exec bash "$root/scripts/install.sh" "$@"
-    else
-      exec bash "$root/scripts/start.sh" "$@"
+if [[ -n "$START_SRC" && -e "$START_SRC" ]]; then
+  candidate="$(cd "$(dirname "$START_SRC")" && pwd)"
+  if [[ -f "$candidate/scripts/lib/common.sh" ]]; then
+    source_common "$candidate" || true
+    if root="$(seiso_resolve_repo_for_start "$START_SRC")"; then
+      launch_from_root "$root" "$@"
     fi
+  fi
+fi
+
+if [[ -f "$INSTALL_DIR/scripts/lib/common.sh" ]]; then
+  source_common "$INSTALL_DIR"
+  if root="$(seiso_resolve_repo_for_start "$START_SRC")"; then
+    launch_from_root "$root" "$@"
   fi
 fi
 
