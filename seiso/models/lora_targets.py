@@ -34,7 +34,7 @@ def detect_architecture(model_id: str, model=None) -> str:
         (r"llama|tinyllama", "llama"),
         (r"mixtral", "mixtral"),
         (r"mistral|codestral", "mistral"),
-        (r"qwen3", "qwen3"),
+        (r"qwen3\.5|qwen3", "qwen3"),
         (r"qwen2|qwen", "qwen2"),
         (r"gemma-3|gemma3", "gemma3"),
         (r"gemma-2|gemma2", "gemma2"),
