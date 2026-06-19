@@ -75,7 +75,7 @@ def test_strip_reasoning_leakage_strips_reasoning_header():
 def test_streaming_output_sanitizer_holds_back_reasoning_header():
     guard = StreamingOutputSanitizer(strip_tool_calls=True)
     assert guard.feed("Reasoning: step one") == []
-    assert guard.finish() == []
+    assert guard.finish() == ["step one"]
 
 
 def test_streaming_output_sanitizer_holds_back_thinking_process():

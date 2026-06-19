@@ -55,6 +55,7 @@ export function ChatPage() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [useTools, setUseTools] = useState(false);
   const [allowCodeExec, setAllowCodeExec] = useState(false);
+  const [maxTokens, setMaxTokens] = useState(2048);
   const [providerId, setProviderId] = useState("");
   const [selection, setSelection] = useState("");
   const [inferenceBackend, setInferenceBackend] = useState("llamacpp");
@@ -543,6 +544,7 @@ export function ChatPage() {
           model_id: providerId || (usingOllama && isOllamaOnly) ? null : selection || null,
           ollama_model: usingOllama || isOllamaOnly ? selected?.ollama_model : null,
           inference_backend: providerId ? "auto" : effectiveBackend,
+          max_tokens: maxTokens,
         },
         {
           onEvent: (event, data) => {
@@ -769,6 +771,20 @@ export function ChatPage() {
             <input type="checkbox" checked={useTools} disabled={!toolsAvailable} onChange={(e) => setUseTools(e.target.checked)} />
             Tools
           </label>
+          <label className="chat-max-tokens" title="Maximum response length">
+            <span className="muted-text">Max</span>
+            <select
+              value={maxTokens}
+              onChange={(e) => setMaxTokens(Number(e.target.value))}
+              disabled={streaming}
+            >
+              <option value={512}>512</option>
+              <option value={1024}>1k</option>
+              <option value={2048}>2k</option>
+              <option value={4096}>4k</option>
+              <option value={8192}>8k</option>
+            </select>
+          </label>
           {switchingModel && !loadProgress && (
             <span className="chat-vram-hint">Preparing model…</span>
           )}
@@ -893,7 +909,7 @@ export function ChatPage() {
           {error && (
             <p className="chat-error">
               {error}
-              {(error.includes("gated") || error.includes("Access denied") || error.toLowerCase().includes("token")) && (
+              {(error.includes("gated") || error.includes("Access denied") || error.toLowerCase().includes("token") || error.toLowerCase().includes("csrf")) && (
                 <>
                   {" "}
                   <a href="/settings?tab=huggingface">Open Hugging Face settings</a>

@@ -41,7 +41,7 @@ class ChatRequest(BaseModel):
     ollama_model: str | None = None
     inference_backend: str = Field(default="auto", description="auto | llamacpp | ollama | mlx | torch")
     messages: list[dict[str, str]] = Field(default_factory=list)
-    max_tokens: int = Field(default=512, ge=1, le=8192)
+    max_tokens: int = Field(default=2048, ge=1, le=8192)
     stream: bool = True
     tools: bool = False
     allow_code_exec: bool = False

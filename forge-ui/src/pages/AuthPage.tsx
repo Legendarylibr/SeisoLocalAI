@@ -2,7 +2,23 @@ import { useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { SeisoLogoMark } from "@/components/SeisoLogo";
 import { IconLock } from "@/components/Icons";
-import authBgUrl from "@/assets/auth-bg.png";
+
+const STORAGE_OPTIONS = [
+  {
+    id: "persistent" as const,
+    title: "Keep my workspace",
+    subtitle: "Recommended for daily use",
+    detail: "Chats, models, jobs, and settings survive restarts. Stored encrypted in your local data folder.",
+    badge: "Default",
+  },
+  {
+    id: "ephemeral" as const,
+    title: "Temporary session",
+    subtitle: "Privacy-first, single visit",
+    detail: "Everything is wiped when you sign out or close the app. Nothing is written to disk.",
+    badge: null,
+  },
+];
 
 export function AuthPage() {
   const { needsOnboarding, storageModeConfigured, login, register } = useAuth();
@@ -25,7 +41,6 @@ export function AuthPage() {
   return (
     <div className="auth-page">
       <div className="auth-atmosphere" aria-hidden>
-        <img src={authBgUrl} alt="" className="auth-bg-figure" draggable={false} />
         <div className="auth-orb auth-orb-a" />
         <div className="auth-orb auth-orb-b" />
         <div className="auth-grid" />
@@ -85,32 +100,35 @@ export function AuthPage() {
               placeholder="Enter password"
             />
             {mode === "register" && !storageModeConfigured && (
-              <fieldset className="auth-storage-choice">
-                <legend>Storage mode</legend>
-                <label>
-                  <input
-                    type="radio"
-                    name="storage-mode"
-                    value="persistent"
-                    checked={storageMode === "persistent"}
-                    onChange={() => setStorageMode("persistent")}
-                  />
-                  Keep my workspace across restarts
-                </label>
-                <label>
-                  <input
-                    type="radio"
-                    name="storage-mode"
-                    value="ephemeral"
-                    checked={storageMode === "ephemeral"}
-                    onChange={() => setStorageMode("ephemeral")}
-                  />
-                  Temporary session only
-                </label>
-                <p className="muted-text">
-                  Persistent mode stores users, chats, models, jobs, and provider settings in your local data directory.
-                </p>
-              </fieldset>
+              <div className="auth-storage-section">
+                <div className="auth-storage-header">
+                  <span className="auth-storage-label">How should we store your data?</span>
+                  <span className="auth-storage-hint muted-text">Choose once — applies to this machine</span>
+                </div>
+                <div className="auth-storage-cards" role="radiogroup" aria-label="Storage mode">
+                  {STORAGE_OPTIONS.map((opt) => {
+                    const selected = storageMode === opt.id;
+                    return (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        role="radio"
+                        aria-checked={selected}
+                        className={`auth-storage-card${selected ? " auth-storage-card-selected" : ""}`}
+                        onClick={() => setStorageMode(opt.id)}
+                      >
+                        <div className="auth-storage-card-top">
+                          <span className="auth-storage-card-title">{opt.title}</span>
+                          {opt.badge && <span className="auth-storage-card-badge">{opt.badge}</span>}
+                        </div>
+                        <span className="auth-storage-card-sub">{opt.subtitle}</span>
+                        <p className="auth-storage-card-detail">{opt.detail}</p>
+                        <span className="auth-storage-card-check" aria-hidden>{selected ? "✓" : ""}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
             )}
             {error && <p className="auth-error" role="alert">{error}</p>}
             <button type="submit" className="btn btn-primary auth-submit">

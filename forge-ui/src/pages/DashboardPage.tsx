@@ -9,7 +9,6 @@ import {
   IconChat,
   IconTrain,
   IconCompress,
-  IconImage,
   IconInference,
   IconChevronRight,
   IconCpu,
@@ -43,13 +42,6 @@ const RESEARCH_PIPELINES = [
     desc: "Distill → prune → recover → GPTQ/AWQ with lm-eval benchmarks.",
     path: "/compress",
     Icon: IconCompress,
-  },
-  {
-    id: "image-compress",
-    title: "Image Compression",
-    desc: "Stable Diffusion distillation, pruning, INT8 quant, and export.",
-    path: "/image-compress",
-    Icon: IconImage,
   },
   {
     id: "recipes",

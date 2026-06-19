@@ -203,6 +203,7 @@ class StreamingOutputSanitizer:
             return [text]
 
         if self._reasoning_mode:
+            self._buffer += text
             return []
 
         emitted: list[str] = []
@@ -235,7 +236,6 @@ class StreamingOutputSanitizer:
 
             if not self._emitted and _starts_reasoning_leak(self._buffer):
                 self._reasoning_mode = True
-                self._buffer = ""
                 break
 
             think_idx = -1
@@ -278,6 +278,12 @@ class StreamingOutputSanitizer:
             self._in_tool_call = False
             self._in_think = False
         if self._reasoning_mode:
+            extracted = strip_reasoning_leakage(self._buffer)
+            self._buffer = ""
+            self._reasoning_mode = False
+            if extracted:
+                self._emitted = True
+                return [extracted]
             return []
         if not self._buffer:
             return []

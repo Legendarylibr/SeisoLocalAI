@@ -486,7 +486,7 @@ def assess_hardware_fit(
     if fit == "unlikely" and tier != HardwareTier.CPU_ONLY:
         note = f"Needs ~{est_vram_gb:.1f} GB — you have ~{headroom_gb} GB free"
 
-    blocked = headroom_mb > 0 and est_mb > headroom_mb
+    blocked = headroom_mb > 0 and est_mb > int(headroom_mb * 1.12)
     block_reason = None
     if blocked:
         block_reason = (
