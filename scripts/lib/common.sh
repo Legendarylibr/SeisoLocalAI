@@ -107,20 +107,9 @@ seiso_ensure_bin_on_path() {
   } >>"$profile"
 }
 
-seiso_resolve_root() {
-  local install_dir="${SEISO_INSTALL_DIR:-$HOME/Seiso}"
-  if [[ -n "${BASH_SOURCE[1]:-}" && -f "${BASH_SOURCE[1]}" ]]; then
-    local candidate
-    candidate="$(cd "$(dirname "${BASH_SOURCE[1]}")/.." && pwd)"
-    if [[ -f "$candidate/pyproject.toml" && -d "$candidate/seiso_cli" ]]; then
-      printf '%s\n' "$candidate"
-      return 0
-    fi
-  fi
-  if [[ -d "$install_dir/seiso_cli" && -f "$install_dir/pyproject.toml" ]]; then
-    printf '%s\n' "$install_dir"
-    return 0
-  fi
+seiso_needs_install() {
+  local root="$1"
+  [[ -x "$root/.venv/bin/seiso" && -f "$root/forge-ui/dist/index.html" ]] || return 0
   return 1
 }
 
@@ -236,14 +225,6 @@ seiso_run_doctor() {
   else
     seiso_warn "Doctor script not found at $root/scripts/doctor.sh"
   fi
-}
-
-seiso_die_with_doctor() {
-  local root="$1"
-  shift
-  seiso_die "$*"
-  # unreachable — seiso_die_with_doctor should be called like:
-  # seiso_run_doctor "$root"; seiso_die "message"
 }
 
 seiso_wait_for_health() {
