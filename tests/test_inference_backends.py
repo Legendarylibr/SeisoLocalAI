@@ -315,6 +315,93 @@ async def test_cancel_generation_keeps_loaded_model(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_ollama_chat_unloads_active_local_model(monkeypatch, tmp_path):
+    from forge.orchestrators import inference as inference_orchestrator
+
+    orchestrator = inference_orchestrator.InferenceOrchestrator(tmp_path)
+    calls = {"unload": 0, "ollama": 0}
+
+    async def fake_unload():
+        calls["unload"] += 1
+        return {"active_model": None}
+
+    async def fake_ollama_chat(*_args, **_kwargs):
+        calls["ollama"] += 1
+        return "ok"
+
+    monkeypatch.setattr(orchestrator._runner, "cancel_and_unload", fake_unload)
+    monkeypatch.setattr(inference_orchestrator, "ollama_chat_completion", fake_ollama_chat)
+
+    result = await orchestrator._ollama_chat(
+        {"ollama_model": "llama3.2", "ollama_base_url": "http://127.0.0.1:11434"},
+        [{"role": "user", "content": "hello"}],
+    )
+
+    assert result == "ok"
+    assert calls == {"unload": 1, "ollama": 1}
+
+
+@pytest.mark.asyncio
+async def test_ollama_chat_unloads_previous_ollama_model(monkeypatch, tmp_path):
+    from forge.orchestrators import inference as inference_orchestrator
+
+    orchestrator = inference_orchestrator.InferenceOrchestrator(tmp_path)
+    orchestrator._active_ollama_model = "old-model"
+    orchestrator._active_ollama_base_url = "http://127.0.0.1:11434"
+    calls: list[tuple[str, str]] = []
+
+    async def fake_unload_model(model: str, base_url: str = ""):
+        calls.append(("unload", model))
+        assert base_url == "http://127.0.0.1:11434"
+
+    async def fake_cancel_local():
+        calls.append(("local", "unload"))
+        return {"active_model": None}
+
+    async def fake_ollama_chat(*_args, model: str, **_kwargs):
+        calls.append(("chat", model))
+        return "ok"
+
+    monkeypatch.setattr(inference_orchestrator, "ollama_unload_model", fake_unload_model)
+    monkeypatch.setattr(orchestrator._runner, "cancel_and_unload", fake_cancel_local)
+    monkeypatch.setattr(inference_orchestrator, "ollama_chat_completion", fake_ollama_chat)
+
+    result = await orchestrator._ollama_chat(
+        {"ollama_model": "new-model", "ollama_base_url": "http://127.0.0.1:11434"},
+        [{"role": "user", "content": "hello"}],
+    )
+
+    assert result == "ok"
+    assert calls == [("local", "unload"), ("unload", "old-model"), ("chat", "new-model")]
+    assert orchestrator.active_ollama_model == "new-model"
+
+
+@pytest.mark.asyncio
+async def test_local_chat_unloads_active_ollama_model(monkeypatch, tmp_path):
+    from forge.orchestrators import inference as inference_orchestrator
+
+    orchestrator = inference_orchestrator.InferenceOrchestrator(tmp_path)
+    orchestrator._active_ollama_model = "llama3.2"
+    calls: list[str] = []
+
+    async def fake_unload_model(model: str, base_url: str = ""):
+        calls.append(f"ollama:{model}:{base_url}")
+
+    async def fake_local_chat(_payload):
+        calls.append("local-chat")
+        return "ok"
+
+    monkeypatch.setattr(inference_orchestrator, "ollama_unload_model", fake_unload_model)
+    monkeypatch.setattr(orchestrator._runner, "chat", fake_local_chat)
+
+    result = await orchestrator._local_chat({"model_path": "/tmp/model.gguf"})
+
+    assert result == "ok"
+    assert calls == ["ollama:llama3.2:", "local-chat"]
+    assert orchestrator.active_ollama_model is None
+
+
+@pytest.mark.asyncio
 async def test_list_inference_options_filters_to_installed_backends(monkeypatch, tmp_path):
     from forge.db.crypto import generate_encryption_key
     from forge.db.store import Database

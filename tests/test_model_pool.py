@@ -67,6 +67,31 @@ def test_switch_serializes_concurrent_loads_for_same_model(tmp_path):
     assert load_count == 1
 
 
+def test_switching_gguf_models_closes_previous_handle(tmp_path):
+    pool = ModelPool()
+    first_path = tmp_path / "first.gguf"
+    second_path = tmp_path / "second.gguf"
+    first_path.write_bytes(b"gguf")
+    second_path.write_bytes(b"gguf")
+
+    class FakeLlama:
+        def __init__(self) -> None:
+            self.closed = False
+
+        def close(self) -> None:
+            self.closed = True
+
+    first = FakeLlama()
+    second = FakeLlama()
+
+    pool.switch(str(first_path), BackendKind.LLAMA, lambda _path: first)
+    pool.switch(str(second_path), BackendKind.LLAMA, lambda _path: second)
+
+    assert first.closed is True
+    assert second.closed is False
+    assert pool.status()["path"] == str(second_path.absolute())
+
+
 def test_llama_reuses_larger_preloaded_context(monkeypatch, tmp_path):
     from seiso.inference import model_pool
 

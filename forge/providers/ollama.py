@@ -53,6 +53,22 @@ async def warm_model(model: str, base_url: str = "") -> None:
         resp.raise_for_status()
 
 
+async def unload_model(model: str, base_url: str = "") -> None:
+    """Ask Ollama to evict a resident model from memory."""
+    endpoint = _endpoint(base_url)
+    base = endpoint.base_url.rstrip("/")
+    url = f"{base}/api/generate" if not base.endswith("/v1") else f"{base.rsplit('/v1', 1)[0]}/api/generate"
+    payload = {
+        "model": model,
+        "prompt": "",
+        "stream": False,
+        "keep_alive": 0,
+    }
+    async with pinned_async_client(endpoint, timeout=60.0) as client:
+        resp = await client.post(url, json=payload)
+        resp.raise_for_status()
+
+
 async def list_models(base_url: str = "") -> list[dict[str, Any]]:
     """Return models from Ollama ``GET /api/tags``."""
     endpoint = _endpoint(base_url)

@@ -170,7 +170,11 @@ class ModelPool:
 
             self.unload_all()
             logger.info("Loading model: %s (%s)", norm, backend.value)
-            handle = loader_fn(load_path)
+            try:
+                handle = loader_fn(load_path)
+            except Exception:
+                self._free_memory()
+                raise
             self._active = LoadedModel(
                 key=key,
                 backend=backend,
@@ -251,11 +255,18 @@ class ModelPool:
                 pass
             del llm
 
-        elif backend in (BackendKind.MLX, BackendKind.TORCH):
-            if isinstance(handle, tuple):
-                del handle
-            else:
-                del handle
+        elif backend == BackendKind.TORCH:
+            try:
+                from seiso.kernels.lifecycle import release_training_memory
+
+                model = handle[0] if isinstance(handle, tuple) and handle else handle
+                release_training_memory(model, sync=False)
+            except Exception:
+                pass
+            del handle
+
+        elif backend == BackendKind.MLX:
+            del handle
 
         self._free_memory()
 
