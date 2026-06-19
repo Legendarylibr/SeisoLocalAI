@@ -413,6 +413,15 @@ async def _resolve_preload_context(
     if not path:
         raise HTTPException(400, "Model path not found")
 
+    from seiso.memory.protection import assess_path_memory_fit
+
+    fit = assess_path_memory_fit(path, mode="chat")
+    if fit.get("memory_load_blocked"):
+        raise HTTPException(
+            400,
+            fit.get("memory_load_blocked_reason") or "Model exceeds available memory on this machine",
+        )
+
     payload = {
         "model_path": path,
         "model_format": target.get("model_format") or selected.get("format"),
@@ -521,6 +530,14 @@ async def chat(
                 raise
             if not path:
                 raise HTTPException(400, "Invalid model_path")
+            from seiso.memory.protection import assess_path_memory_fit
+
+            fit = assess_path_memory_fit(path, mode="chat")
+            if fit.get("memory_load_blocked"):
+                raise HTTPException(
+                    400,
+                    fit.get("memory_load_blocked_reason") or "Model exceeds available memory on this machine",
+                )
             payload["model_path"] = path
             payload["inference_backend"] = body.inference_backend
             payload["ollama_base_url"] = settings.ollama_base_url

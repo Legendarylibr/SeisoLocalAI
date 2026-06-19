@@ -86,11 +86,13 @@ class TrainConfig(BaseModel):
 
 def run_training(config: TrainConfig, *, on_metric=None) -> Path:
     """Execute training job; returns output checkpoint directory."""
+    from seiso.memory.protection import apply_training_memory_guards
     from seiso.models.hf_env import configure_hf_hub_cache
     from seiso.security.nvidia_boundary import enforce_nvidia_secure_boundary
     from seiso.training.trainer import SeisoTrainer
 
     configure_hf_hub_cache()
     enforce_nvidia_secure_boundary(context="training")
+    config = apply_training_memory_guards(config)
     trainer = SeisoTrainer(config, on_metric=on_metric)
     return trainer.run()

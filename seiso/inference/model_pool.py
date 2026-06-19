@@ -69,6 +69,8 @@ def _default_llama_ubatch(n_batch: int) -> int:
 
 def llama_load_kwargs(n_ctx: int) -> dict[str, Any]:
     """Tuned llama.cpp defaults for faster preload/first token, overrideable by env."""
+    from seiso.memory.protection import clamp_llama_load_kwargs
+
     n_threads = _env_int("SEISO_LLAMA_THREADS", _default_llama_threads())
     n_batch = _env_int("SEISO_LLAMA_BATCH", _default_llama_batch())
     n_gpu_layers = _env_int("SEISO_LLAMA_GPU_LAYERS", _default_llama_gpu_layers())
@@ -89,7 +91,7 @@ def llama_load_kwargs(n_ctx: int) -> dict[str, Any]:
         kwargs["op_offload"] = _env_bool("SEISO_LLAMA_OP_OFFLOAD", True)
     if n_gpu_layers != 0 and _env_bool("SEISO_LLAMA_FLASH_ATTN", True):
         kwargs["flash_attn"] = True
-    return kwargs
+    return clamp_llama_load_kwargs(kwargs)
 
 
 class BackendKind(StrEnum):
@@ -170,6 +172,9 @@ class ModelPool:
 
             self.unload_all()
             logger.info("Loading model: %s (%s)", norm, backend.value)
+            from seiso.memory.protection import ensure_load_fits
+
+            ensure_load_fits(load_path, mode="chat")
             try:
                 handle = loader_fn(load_path)
             except Exception:
@@ -195,13 +200,10 @@ class ModelPool:
 
         norm = self.normalize_path(model_path)
         with self._lock:
-            if (
-                self._active
-                and self._active.backend == BackendKind.LLAMA
-                and self._active.meta.get("norm_path") == norm
-                and int(self._active.meta.get("n_ctx") or 0) >= n_ctx
-            ):
-                return self._active.handle
+            if self._active and self._active.backend == BackendKind.LLAMA and self._active.meta.get("norm_path") == norm:
+                cached_ctx = int(self._active.meta.get("n_ctx") or 0)
+                if cached_ctx >= n_ctx and cached_ctx <= max(n_ctx + 512, int(n_ctx * 1.25)):
+                    return self._active.handle
 
         key = f"llama:{norm}:ctx{n_ctx}"
         return self.switch(model_path, BackendKind.LLAMA, loader, cache_key=key, meta={"n_ctx": n_ctx})

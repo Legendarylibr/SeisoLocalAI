@@ -269,6 +269,9 @@ def export_gguf(
             else:
                 model.save_pretrained(str(merged))
             tokenizer.save_pretrained(str(merged))
+            from seiso.memory.protection import release_cached_memory
+
+            release_cached_memory()
         except Exception as exc:
             log(f"Merge failed: {exc}")
             return []

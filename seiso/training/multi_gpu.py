@@ -44,16 +44,20 @@ def detect_gpus() -> GpuLayout:
 
 def configure_training_args(base_args: dict, layout: GpuLayout, multi_gpu: bool) -> dict:
     """Merge DDP settings into HuggingFace TrainingArguments dict."""
+    from seiso.memory.protection import training_pin_memory
+
     args = dict(base_args)
     if multi_gpu and layout.use_ddp:
         args.update(
             {
                 "local_rank": layout.local_rank,
                 "ddp_find_unused_parameters": False,
-                "dataloader_pin_memory": True,
+                "dataloader_pin_memory": training_pin_memory(),
             }
         )
         logger.info("Multi-GPU DDP enabled: world_size=%d rank=%d", layout.world_size, layout.local_rank)
+    else:
+        args["dataloader_pin_memory"] = training_pin_memory()
     return args
 
 

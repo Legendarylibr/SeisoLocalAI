@@ -23,6 +23,7 @@ from seiso.inference.tuning import (
     mlx_stream_kwargs,
     torch_generate_kwargs,
 )
+from seiso.memory.protection import is_oom_error, release_cached_memory, sanitize_inference_payload
 from seiso.models.chat_format import format_messages_for_prompt
 
 logger = logging.getLogger(__name__)
@@ -51,6 +52,7 @@ class LocalInferenceRunner:
         return "".join(chunks)
 
     async def stream(self, payload: dict[str, Any]) -> AsyncIterator[str]:
+        payload = sanitize_inference_payload(payload)
         model_path = payload.get("model_path") or payload.get("model_id")
         if not model_path:
             raise ValueError("model_path or model_id required")
@@ -208,7 +210,16 @@ class LocalInferenceRunner:
 
         def _generate() -> None:
             with torch.inference_mode():
-                model.generate(**gen_kwargs)
+                try:
+                    model.generate(**gen_kwargs)
+                except Exception as exc:
+                    if not is_oom_error(exc):
+                        raise
+                    release_cached_memory(sync=True)
+                    reduced = dict(gen_kwargs)
+                    reduced["max_new_tokens"] = max(32, int(reduced.get("max_new_tokens", 512)) // 2)
+                    logger.warning("Torch inference OOM — retrying with max_new_tokens=%s", reduced["max_new_tokens"])
+                    model.generate(**reduced)
 
         thread = threading.Thread(target=_generate, daemon=True)
         thread.start()

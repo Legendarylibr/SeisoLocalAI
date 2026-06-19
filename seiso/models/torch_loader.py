@@ -19,7 +19,17 @@ def _resolve_dtype(options: LoadOptions) -> Any:
     return getattr(torch, options.dtype, None)
 
 
-def _resolve_device_map(backend: Backend, device: str | None = None) -> str | dict[str, str] | None:
+def _resolve_device_map(
+    backend: Backend,
+    device: str | None = None,
+    *,
+    for_training: bool = False,
+) -> str | dict[str, str] | None:
+    if for_training:
+        from seiso.memory.protection import resolve_training_device_map
+
+        return resolve_training_device_map(device)
+
     import torch
 
     if device == "mps" or (
@@ -39,6 +49,7 @@ def load_torch(
     backend: Backend = Backend.TORCH,
     *,
     device: str | None = None,
+    for_training: bool = False,
 ) -> tuple[Any, Any]:
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
@@ -51,9 +62,15 @@ def load_torch(
         "revision": options.revision or "main",
     }
 
-    device_map = _resolve_device_map(backend, device)
+    device_map = _resolve_device_map(backend, device, for_training=for_training)
     if device_map is not None:
         model_kwargs["device_map"] = device_map
+        if device_map == "auto":
+            from seiso.memory.protection import build_hf_max_memory
+
+            max_memory = build_hf_max_memory()
+            if max_memory:
+                model_kwargs["max_memory"] = max_memory
 
     dtype = _resolve_dtype(options)
     if dtype is None and device != "mps":
