@@ -21,6 +21,7 @@ from forge.services.download_progress import estimate_load_eta_seconds
 from forge.services.hardware import hardware_profile
 from forge.services.hf_cache_inventory import sync_hf_cache_inventory
 from forge.services.inference_models import list_inference_options, resolve_chat_target
+from forge.services.llm_output import StreamingOutputSanitizer, chunk_sanitized_output, sanitize_llm_output
 from forge.services.models import resolve_model_path
 from seiso.inference.backends import BACKEND_OLLAMA
 
@@ -504,10 +505,13 @@ async def chat(
                 cancelled = False
                 try:
                     orchestrator._emit_log(job_id, f"Streaming inference ({backend_label})")
+                    stream_guard = StreamingOutputSanitizer()
                     async for token in orchestrator.stream_local(payload):
                         parts.append(token)
-                        yield {"event": "token", "data": token}
-                    content = "".join(parts)
+                        if not use_defense:
+                            for safe_token in stream_guard.feed(token):
+                                yield {"event": "token", "data": safe_token}
+                    content = sanitize_llm_output("".join(parts))
                     if use_defense and content:
                         content, defense_result = await scan_output(
                             payload.get("messages", []),
@@ -518,6 +522,12 @@ async def chat(
                         )
                         if not defense_result.unavailable:
                             yield {"event": "defense", "data": json.dumps(defense_result.to_dict())}
+                    if use_defense:
+                        for token in chunk_sanitized_output(content):
+                            yield {"event": "token", "data": token}
+                    else:
+                        for token in stream_guard.finish():
+                            yield {"event": "token", "data": token}
                     if body.thread_id:
                         await db.add_message(body.thread_id, "assistant", content)
                     yield {"event": "message", "data": content}
@@ -545,7 +555,7 @@ async def chat(
                 if job.result.get("defense"):
                     yield {"event": "defense", "data": json.dumps(job.result["defense"])}
             elif job and job.result.get("content"):
-                content = job.result["content"]
+                content = sanitize_llm_output(job.result["content"])
                 if body.thread_id:
                     await db.add_message(body.thread_id, "assistant", content)
                 yield {"event": "message", "data": content}
@@ -564,6 +574,8 @@ async def chat(
         if job.result.get("defense"):
             raise HTTPException(403, detail, headers={"X-Seiso-Defense": json.dumps(job.result["defense"])})
         raise HTTPException(500, detail)
+    if job.result.get("content"):
+        job.result["content"] = sanitize_llm_output(job.result["content"])
     if body.thread_id and job.result.get("content"):
         await db.add_message(body.thread_id, "assistant", job.result["content"])
     return {"job_id": job_id, **job.result}

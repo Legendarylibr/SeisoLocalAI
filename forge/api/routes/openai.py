@@ -17,6 +17,7 @@ from forge.db.store import Database
 from forge.orchestrators.inference import InferenceOrchestrator
 from forge.security.autodefense import defense_enabled, scan_output
 from forge.security.openai_auth import get_openai_user_id
+from forge.services.llm_output import StreamingOutputSanitizer, chunk_sanitized_output, sanitize_llm_output
 from forge.services.models import resolve_model_path
 
 router = APIRouter(tags=["openai"])
@@ -128,8 +129,32 @@ async def chat_completions(
         async def sse_stream():
             parts: list[str] = []
             try:
+                stream_guard = StreamingOutputSanitizer()
                 async for token in orchestrator.stream_local(payload):
                     parts.append(token)
+                    if not use_defense:
+                        for safe_token in stream_guard.feed(token):
+                            chunk = {
+                                "id": completion_id,
+                                "object": "chat.completion.chunk",
+                                "created": created,
+                                "model": body.model,
+                                "choices": [
+                                    {"index": 0, "delta": {"content": safe_token}, "finish_reason": None}
+                                ],
+                            }
+                            yield f"data: {json.dumps(chunk)}\n\n"
+                content = sanitize_llm_output("".join(parts))
+                if use_defense and parts:
+                    content, _ = await scan_output(
+                        payload.get("messages", []),
+                        content,
+                        session_id=payload.get("thread_id"),
+                        user_id=user_id,
+                        settings=settings,
+                    )
+                output_tokens = chunk_sanitized_output(content) if use_defense else stream_guard.finish()
+                for token in output_tokens:
                     chunk = {
                         "id": completion_id,
                         "object": "chat.completion.chunk",
@@ -138,24 +163,6 @@ async def chat_completions(
                         "choices": [{"index": 0, "delta": {"content": token}, "finish_reason": None}],
                     }
                     yield f"data: {json.dumps(chunk)}\n\n"
-                if use_defense and parts:
-                    content, _ = await scan_output(
-                        payload.get("messages", []),
-                        "".join(parts),
-                        session_id=payload.get("thread_id"),
-                        user_id=user_id,
-                        settings=settings,
-                    )
-                    if content != "".join(parts):
-                        # Defense sanitized output — emit replacement as final delta
-                        chunk = {
-                            "id": completion_id,
-                            "object": "chat.completion.chunk",
-                            "created": created,
-                            "model": body.model,
-                            "choices": [{"index": 0, "delta": {"content": content}, "finish_reason": None}],
-                        }
-                        yield f"data: {json.dumps(chunk)}\n\n"
                 final = {
                     "id": completion_id,
                     "object": "chat.completion.chunk",
@@ -184,6 +191,7 @@ async def chat_completions(
             if job and job.status.value == "failed":
                 yield f"data: {json.dumps({'error': job.error or 'Inference failed'})}\n\n"
             elif content:
+                content = sanitize_llm_output(content)
                 chunk = {
                     "id": completion_id,
                     "object": "chat.completion.chunk",
@@ -200,7 +208,7 @@ async def chat_completions(
     if not job or job.status.value == "failed":
         raise HTTPException(500, job.error if job else "Inference failed")
 
-    content = job.result.get("content", "")
+    content = sanitize_llm_output(job.result.get("content", ""))
     return JSONResponse(
         {
             "id": completion_id,
