@@ -50,14 +50,16 @@ def _resolve_host(host: str) -> list[str]:
         raise SecurityError(f"base_url host could not be resolved: {host}") from exc
 
 
-def validate_provider_base_url(url: str, *, provider_type: str = "openai") -> str:
+def validate_provider_base_url(url: str, *, provider_type: str = "vllm") -> str:
     """Return normalized base URL or raise SecurityError."""
     raw = (url or "").strip()
     if not raw:
         ptype = provider_type.lower()
-        if ptype in ("ollama", "vllm"):
-            return "http://127.0.0.1:11434" if ptype == "ollama" else "http://127.0.0.1:8000"
-        return "https://api.openai.com/v1" if ptype == "openai" else "https://api.anthropic.com"
+        if ptype == "ollama":
+            return "http://127.0.0.1:11434"
+        if ptype == "vllm":
+            return "http://127.0.0.1:8000"
+        raise SecurityError(f"Unsupported provider_type: {provider_type}")
 
     parsed = urlparse(raw)
     if not parsed.scheme or not parsed.netloc:
@@ -106,7 +108,7 @@ class PinnedEndpoint:
     pinned_ip: str | None
 
 
-def resolve_pinned_endpoint(raw_url: str, *, provider_type: str = "openai") -> PinnedEndpoint:
+def resolve_pinned_endpoint(raw_url: str, *, provider_type: str = "vllm") -> PinnedEndpoint:
     """Validate URL, resolve DNS, and return an endpoint pinned to the resolved IP."""
     base = validate_provider_base_url(raw_url, provider_type=provider_type).rstrip("/")
     parsed = urlparse(base)

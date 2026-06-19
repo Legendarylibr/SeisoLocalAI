@@ -62,7 +62,7 @@ async def test_chat_messages_encrypted_at_rest(db: Database):
 @pytest.mark.asyncio
 async def test_provider_config_encrypted_at_rest(db: Database):
     user = await db.create_user("hashed", "User", email="u@local.dev")
-    await db.create_provider(user["id"], "OpenAI", "openai", {"api_key": "sk-test"})
+    await db.create_provider(user["id"], "Local vLLM", "vllm", {"base_url": "http://127.0.0.1:8000"})
 
     conn = await db._ensure_conn()
     async with conn.execute("SELECT config_json FROM providers") as cur:
@@ -71,7 +71,7 @@ async def test_provider_config_encrypted_at_rest(db: Database):
     assert str(row["config_json"]).startswith("enc:v1:")
 
     providers = await db.list_providers(user["id"])
-    assert json.loads(providers[0]["config_json"]) == {"api_key": "sk-test"}
+    assert json.loads(providers[0]["config_json"]) == {"base_url": "http://127.0.0.1:8000"}
 
 
 @pytest.mark.asyncio

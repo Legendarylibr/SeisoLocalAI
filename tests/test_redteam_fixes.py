@@ -16,17 +16,17 @@ from tests.conftest import make_second_user, user_path
 
 def test_provider_url_blocks_metadata_ip():
     with pytest.raises(SecurityError):
-        validate_provider_base_url("http://169.254.169.254/latest/meta-data/", provider_type="openai")
+        validate_provider_base_url("http://169.254.169.254/latest/meta-data/", provider_type="vllm")
 
 
 def test_provider_url_blocks_http_non_local():
     with pytest.raises(SecurityError):
-        validate_provider_base_url("http://example.com/v1", provider_type="openai")
+        validate_provider_base_url("http://example.com/v1", provider_type="vllm")
 
 
 def test_provider_url_fails_on_unresolvable_host():
     with pytest.raises(SecurityError, match="could not be resolved"):
-        validate_provider_base_url("https://this-host-definitely-does-not-exist-xyz123.invalid/v1", provider_type="openai")
+        validate_provider_base_url("https://this-host-definitely-does-not-exist-xyz123.invalid/v1", provider_type="vllm")
 
 
 def test_provider_url_allows_local_ollama_default_port():
@@ -50,7 +50,7 @@ def test_resolve_pinned_endpoint_pins_remote_host(monkeypatch):
         "forge.security.url_policy._resolve_host",
         lambda host: ["93.184.216.34"],
     )
-    endpoint = resolve_pinned_endpoint("https://example.com/v1", provider_type="openai")
+    endpoint = resolve_pinned_endpoint("https://example.com/v1", provider_type="vllm")
     assert endpoint.pinned_ip == "93.184.216.34"
     assert endpoint.host == "example.com"
     assert endpoint.base_url == "https://example.com/v1"
@@ -147,7 +147,7 @@ async def test_provider_ssrf_blocked_on_create(app, auth_client):
         headers=headers,
         json={
             "name": "Evil",
-            "provider_type": "openai",
+            "provider_type": "vllm",
             "config": {"base_url": "http://169.254.169.254/"},
         },
     )
