@@ -4,6 +4,7 @@ from forge.services.llm_output import (
     StreamingOutputSanitizer,
     chunk_sanitized_output,
     sanitize_llm_output,
+    strip_reasoning_leakage,
     strip_spurious_tool_syntax,
 )
 from forge.tools.registry import ToolRegistry, ToolSpec, tools_system_prompt
@@ -37,6 +38,31 @@ def test_streaming_output_sanitizer_passthrough():
     assert guard.feed("hello ") == ["hello "]
     assert guard.feed("world") == ["world"]
     assert guard.finish() == []
+
+
+def test_strip_reasoning_leakage_extracts_qwen_thinking_process_final_answer():
+    raw = (
+        'Thinking Process: 1. **Analyze the Input:** * Input: "yo" '
+        '2. **Drafting Options:** * Option 2 (Casual): Hey there! '
+        '6. **Final Decision:** "Yo! What\'s up? How can I help you out today?" Wait,'
+    )
+    assert strip_reasoning_leakage(raw) == "Yo! What's up? How can I help you out today?"
+
+
+def test_strip_reasoning_leakage_removes_think_tags():
+    raw = "Hello " + "<" + "think" + ">" + "internal reasoning" + "<" + "/" + "think" + ">" + " world"
+    assert strip_reasoning_leakage(raw) == "Hello  world"
+
+
+def test_streaming_output_sanitizer_holds_back_thinking_process():
+    guard = StreamingOutputSanitizer(strip_tool_calls=True)
+    assert guard.feed("Thinking Process: 1. **Analyze") == []
+    assert guard.finish() == []
+    final = sanitize_llm_output(
+        'Thinking Process: 6. **Final Decision:** "Yo!"',
+        strip_tool_calls=True,
+    )
+    assert final == "Yo!"
 
 
 def test_streaming_output_sanitizer_strips_tool_calls():

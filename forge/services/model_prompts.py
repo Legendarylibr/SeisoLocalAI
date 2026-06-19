@@ -7,8 +7,16 @@ import re
 from seiso.models.lora_targets import detect_architecture
 
 _FAMILY_HINTS: dict[str, str] = {
-    "qwen2": "Do not use Qwen tool markup (<tool_call>, tool_call blocks, or function JSON blobs).",
-    "qwen3": "Do not use Qwen tool markup (<tool_call>, tool_call blocks, or function JSON blobs).",
+    "qwen2": (
+        "Do not use Qwen tool markup (<tool_call>, tool_call blocks, or function JSON blobs). "
+        "Never output 'Thinking Process', numbered analysis steps, draft options, or internal monologue. "
+        "Reply with only the final short answer the user should read."
+    ),
+    "qwen3": (
+        "Do not use Qwen tool markup (<tool_call>, tool_call blocks, or function JSON blobs). "
+        "Never output 'Thinking Process', numbered analysis steps, draft options, or internal monologue. "
+        "Do not expose think blocks or reasoning tags. Reply with only the final short answer the user should read."
+    ),
     "mistral": "Do not emit [TOOL_CALLS] sections or Mistral function-call JSON.",
     "deepseek": "Do not wrap replies in tool/function call syntax or action blocks meant for external tools.",
     "llama": "Do not emit OpenAI-style function_call or tool_calls JSON in the reply.",
@@ -21,8 +29,9 @@ _FAMILY_HINTS: dict[str, str] = {
 
 _BASE_NO_TOOLS = (
     "You are a helpful assistant in a plain chat session. "
-    "Answer the user directly in natural language. "
-    "Never output tool calls, function calls, XML tool tags, or JSON action blocks."
+    "Answer the user directly in natural language with the final response only. "
+    "Never output tool calls, function calls, XML tool tags, JSON action blocks, "
+    "thinking process, chain-of-thought, or step-by-step internal analysis."
 )
 
 

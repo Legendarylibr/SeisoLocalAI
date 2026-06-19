@@ -594,20 +594,22 @@ async def chat(
 
         async def event_gen():
             if can_stream_local:
-                parts: list[str] = []
+                streamed: list[str] = []
+                raw_parts: list[str] = []
                 sanitizer = StreamingOutputSanitizer(strip_tool_calls=not body.tools)
                 backend_label = payload.get("inference_backend") or "local"
                 cancelled = False
                 try:
                     orchestrator._emit_log(job_id, f"Streaming inference ({backend_label})")
                     async for token in orchestrator.stream_local(payload):
+                        raw_parts.append(token)
                         for chunk in sanitizer.feed(token):
-                            parts.append(chunk)
+                            streamed.append(chunk)
                             yield {"event": "token", "data": chunk}
                     for chunk in sanitizer.finish():
-                        parts.append(chunk)
+                        streamed.append(chunk)
                         yield {"event": "token", "data": chunk}
-                    content = sanitize_llm_output("".join(parts), strip_tool_calls=not body.tools)
+                    content = sanitize_llm_output("".join(raw_parts), strip_tool_calls=not body.tools)
                     if body.thread_id:
                         await db.add_message(body.thread_id, "assistant", content)
                     yield {"event": "message", "data": content}

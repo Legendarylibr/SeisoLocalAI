@@ -11,10 +11,85 @@ _CHUNK_SIZE = 1_200
 _TOOL_OPEN = TOOL_CALL_OPEN
 _TOOL_CLOSE = TOOL_CALL_CLOSE
 _PARTIAL_TOOL_PREFIXES = tuple(_TOOL_OPEN[:i] for i in range(1, len(_TOOL_OPEN) + 1))
+def _paired_tag(name: str) -> tuple[str, str]:
+    return f"<{name}>", f"</{name}>"
+
+
+_THINK_TAG_PAIRS = (
+    _paired_tag("think"),
+    _paired_tag("redacted_thinking"),
+)
+_THINK_OPEN, _THINK_CLOSE = _THINK_TAG_PAIRS[0]
+_PARTIAL_THINK_OPEN_PREFIXES = tuple(
+    prefix for open_tag, _ in _THINK_TAG_PAIRS for prefix in (open_tag[:i] for i in range(1, len(open_tag) + 1))
+)
+_THINKING_PROCESS_MARKER = "Thinking Process:"
+_PARTIAL_THINKING_PREFIXES = tuple(_THINKING_PROCESS_MARKER[:i] for i in range(1, len(_THINKING_PROCESS_MARKER) + 1))
 _FUNCTION_JSON_PATTERN = re.compile(
     r'\{\s*"name"\s*:\s*"[^"]+"\s*,\s*"arguments"\s*:\s*\{.*?\}\s*\}',
     re.DOTALL,
 )
+_THINK_TAG_PATTERN = re.compile(
+    "|".join(
+        re.escape(open_tag) + r".*?" + re.escape(close_tag)
+        for open_tag, close_tag in _THINK_TAG_PAIRS
+    ),
+    re.DOTALL | re.IGNORECASE,
+)
+_PIPE_THINK_PATTERN = re.compile(r"<\|think\|>.*?<\|/think\|>", re.DOTALL | re.IGNORECASE)
+_THINKING_PROCESS_PATTERN = re.compile(r"(?is)^\s*Thinking Process:\s*")
+_FINAL_ANSWER_PATTERNS = (
+    re.compile(
+        r'(?is)(?:Final Decision|Final Polish|Refining the Output|Let\'s go with)'
+        r'\s*:+\s*(?:\*\*)?\s*"([^"]+)"'
+    ),
+    re.compile(
+        r'(?is)(?:Final Decision|Final Polish|Refining the Output|Let\'s go with)'
+        r'\s*:+\s*\*\*([^*]+)\*\*'
+    ),
+)
+
+
+def _extract_final_answer_from_reasoning(content: str) -> str | None:
+    for pattern in _FINAL_ANSWER_PATTERNS:
+        matches = pattern.findall(content)
+        if not matches:
+            continue
+        candidate = str(matches[-1]).strip().strip('"').strip("'")
+        if candidate and len(candidate) < 500 and not candidate.lower().startswith("thinking process"):
+            return candidate
+    quoted = re.findall(r'"([^"]{3,200})"', content)
+    for candidate in reversed(quoted):
+        text = candidate.strip()
+        if text and not re.search(r"(?i)(analyze|drafting|option|refining|determine)", text):
+            return text
+    return None
+
+
+def strip_reasoning_leakage(content: str) -> str:
+    """Remove visible chain-of-thought / thinking-process output."""
+    if not content:
+        return content
+
+    cleaned = _THINK_TAG_PATTERN.sub("", content)
+    cleaned = _PIPE_THINK_PATTERN.sub("", cleaned)
+
+    if _THINKING_PROCESS_PATTERN.match(cleaned) or re.search(
+        r"(?i)\b\d+\.\s*\*\*(Analyze the Input|Determine the Appropriate Response|Drafting Options)\*\*",
+        cleaned,
+    ):
+        extracted = _extract_final_answer_from_reasoning(cleaned)
+        if extracted:
+            return extracted.strip()
+        cleaned = _THINKING_PROCESS_PATTERN.sub("", cleaned)
+
+    cleaned = re.sub(
+        r"(?im)^\s*\d+\.\s+\*\*(Analyze|Determine|Drafting|Selecting|Refining|Final)[^*]*\*\*.*?"
+        r"(?=^\s*\d+\.\s+\*\*|\Z)",
+        "",
+        cleaned,
+    )
+    return cleaned.strip()
 
 
 def strip_spurious_tool_syntax(content: str) -> str:
@@ -28,10 +103,17 @@ def strip_spurious_tool_syntax(content: str) -> str:
     return cleaned.strip()
 
 
+def strip_spurious_chat_artifacts(content: str) -> str:
+    """Strip tool-call markup and leaked reasoning from plain chat replies."""
+    cleaned = strip_spurious_tool_syntax(content)
+    cleaned = strip_reasoning_leakage(cleaned)
+    return cleaned.strip()
+
+
 def sanitize_llm_output(content: str, *, strip_tool_calls: bool = False) -> str:
-    """Return assistant text, optionally stripping spurious tool-call syntax."""
+    """Return assistant text, optionally stripping spurious chat artifacts."""
     if strip_tool_calls:
-        return strip_spurious_tool_syntax(content)
+        return strip_spurious_chat_artifacts(content)
     return content
 
 
@@ -42,12 +124,16 @@ def chunk_sanitized_output(content: str, *, chunk_size: int = _CHUNK_SIZE) -> It
 
 
 class StreamingOutputSanitizer:
-    """Stream helper that can suppress spurious tool-call markup."""
+    """Stream helper that can suppress spurious tool-call and reasoning markup."""
 
     def __init__(self, *, strip_tool_calls: bool = False) -> None:
         self._strip = strip_tool_calls
         self._buffer = ""
         self._in_tool_call = False
+        self._in_think = False
+        self._reasoning_mode = False
+        self._emitted = False
+        self._held_back = ""
 
     def feed(self, text: str) -> list[str]:
         if not text:
@@ -55,8 +141,12 @@ class StreamingOutputSanitizer:
         if not self._strip:
             return [text]
 
-        self._buffer += text
+        self._held_back += text
+        if self._reasoning_mode:
+            return []
+
         emitted: list[str] = []
+        self._buffer += text
 
         while self._buffer:
             if self._in_tool_call:
@@ -68,16 +158,53 @@ class StreamingOutputSanitizer:
                 self._in_tool_call = False
                 continue
 
+            if self._in_think:
+                close_idx = -1
+                close_len = 0
+                for _open_tag, close_tag in _THINK_TAG_PAIRS:
+                    idx = self._buffer.lower().find(close_tag.lower())
+                    if idx != -1 and (close_idx == -1 or idx < close_idx):
+                        close_idx = idx
+                        close_len = len(close_tag)
+                if close_idx == -1:
+                    self._buffer = ""
+                    break
+                self._buffer = self._buffer[close_idx + close_len :]
+                self._in_think = False
+                continue
+
+            if not self._emitted and self._buffer.lstrip().lower().startswith("thinking process:"):
+                self._reasoning_mode = True
+                self._buffer = ""
+                break
+
+            think_idx = -1
+            think_open = ""
+            for open_tag, _close_tag in _THINK_TAG_PAIRS:
+                idx = self._buffer.lower().find(open_tag.lower())
+                if idx != -1 and (think_idx == -1 or idx < think_idx):
+                    think_idx = idx
+                    think_open = open_tag
+            if think_idx != -1:
+                if think_idx > 0:
+                    emitted.append(self._buffer[:think_idx])
+                    self._emitted = True
+                self._buffer = self._buffer[think_idx + len(think_open) :]
+                self._in_think = True
+                continue
+
             open_idx = self._buffer.find(_TOOL_OPEN)
             if open_idx == -1:
-                safe, pending = self._split_pending_prefix(self._buffer)
+                safe, pending = self._split_pending_prefixes(self._buffer)
                 if safe:
                     emitted.append(safe)
+                    self._emitted = True
                 self._buffer = pending
                 break
 
             if open_idx > 0:
                 emitted.append(self._buffer[:open_idx])
+                self._emitted = True
             self._buffer = self._buffer[open_idx + len(_TOOL_OPEN) :]
             self._in_tool_call = True
 
@@ -86,19 +213,35 @@ class StreamingOutputSanitizer:
     def finish(self) -> list[str]:
         if not self._strip:
             return []
-        if self._in_tool_call:
+        if self._in_tool_call or self._in_think:
             self._buffer = ""
             self._in_tool_call = False
+            self._in_think = False
+        if self._reasoning_mode:
             return []
         if not self._buffer:
             return []
         out = [self._buffer]
         self._buffer = ""
+        self._emitted = True
         return out
 
+    def finalize(self, *, full_text: str) -> str:
+        """Sanitize the complete assistant reply after streaming finishes."""
+        if not self._strip:
+            return full_text
+        return sanitize_llm_output(full_text, strip_tool_calls=True)
+
     @staticmethod
-    def _split_pending_prefix(text: str) -> tuple[str, str]:
-        for prefix in reversed(_PARTIAL_TOOL_PREFIXES):
-            if text.endswith(prefix):
-                return text[: -len(prefix)], prefix
+    def _split_pending_prefixes(text: str) -> tuple[str, str]:
+        for prefixes in (_PARTIAL_TOOL_PREFIXES, _PARTIAL_THINKING_PREFIXES, _PARTIAL_THINK_OPEN_PREFIXES):
+            for prefix in reversed(prefixes):
+                if text.endswith(prefix):
+                    return text[: -len(prefix)], prefix
+        lower = text.lower()
+        for open_tag, _close_tag in _THINK_TAG_PAIRS:
+            for i in range(len(open_tag) - 1, 0, -1):
+                prefix = open_tag[:i]
+                if lower.endswith(prefix.lower()):
+                    return text[: -len(prefix)], prefix
         return text, ""

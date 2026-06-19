@@ -164,9 +164,10 @@ def test_prepare_chat_context_skips_system_prompt_when_tools_enabled():
     assert messages == [{"role": "user", "content": "hi"}]
 
 
-def test_chat_system_prompt_includes_family_hint_for_qwen():
-    prompt = chat_system_prompt("Qwen/Qwen3-8B", tools_enabled=False)
+def test_chat_system_prompt_includes_thinking_process_hint_for_qwen():
+    prompt = chat_system_prompt("Qwen/Qwen3.5-4B", tools_enabled=False)
     assert prompt
+    assert "Thinking Process" in prompt
     assert "<tool_call>" in prompt
 
 
