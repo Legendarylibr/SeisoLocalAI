@@ -43,6 +43,13 @@ def test_clamp_llama_load_kwargs_reduces_batch_on_tight_memory(monkeypatch):
     monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 3500)
     kwargs = clamp_llama_load_kwargs({"n_ctx": 4096, "n_batch": 2048, "n_ubatch": 2048, "n_gpu_layers": -1})
     assert kwargs["n_batch"] <= 256
+    assert kwargs["n_ubatch"] <= kwargs["n_batch"]
+
+
+def test_clamp_llama_load_kwargs_scales_batch_with_large_context(monkeypatch):
+    monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 16384)
+    kwargs = clamp_llama_load_kwargs({"n_ctx": 8192, "n_batch": 2048, "n_ubatch": 512, "n_gpu_layers": -1})
+    assert kwargs["n_batch"] <= 1024
 
 
 def test_clamp_llama_cache_mb_disabled_on_low_headroom(monkeypatch):
@@ -102,7 +109,14 @@ def test_assess_path_memory_fit_for_small_file(tmp_path, monkeypatch):
 def test_allow_memory_overcommit_skips_block(tmp_path, monkeypatch):
     gguf = tmp_path / "big.gguf"
     gguf.write_bytes(b"\x00" * (4 * 1024**3))
-    monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 1024)
+    monkeypatch.setattr(
+        "seiso.memory.protection.assess_path_memory_fit",
+        lambda _path, mode="chat": {
+            "memory_load_blocked": True,
+            "memory_load_blocked_reason": "Model exceeds available memory",
+            "hardware_fit": "unlikely",
+        },
+    )
     monkeypatch.setenv("SEISO_ALLOW_MEMORY_OVERCOMMIT", "1")
     fit = ensure_load_fits(gguf, mode="chat")
     assert fit.get("memory_load_blocked") is True

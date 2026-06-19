@@ -454,7 +454,14 @@ def _warm_local_model(runner, payload: dict[str, Any]) -> None:
     elif route == "torch":
         pool.get_torch(resolved_path)
     else:
-        pool.get_llama(resolved_path, n_ctx=payload.get("n_ctx", 4096))
+        from seiso.inference.tuning import estimate_llama_n_ctx
+
+        messages = payload.get("messages") or []
+        n_ctx = payload.get("n_ctx") or estimate_llama_n_ctx(
+            messages,
+            max_tokens=int(payload.get("max_tokens", 1)),
+        )
+        pool.get_llama(resolved_path, n_ctx=n_ctx)
 
 
 async def _release_active_local_model(runner) -> None:

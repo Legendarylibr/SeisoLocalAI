@@ -92,6 +92,31 @@ def test_switching_gguf_models_closes_previous_handle(tmp_path):
     assert pool.status()["path"] == str(second_path.absolute())
 
 
+def test_llama_reuses_cached_model_when_context_grows(monkeypatch, tmp_path):
+    from seiso.inference import model_pool
+
+    pool = ModelPool()
+    model_path = tmp_path / "model.gguf"
+    model_path.write_bytes(b"gguf")
+    load_ctx: list[int] = []
+
+    class FakeLlama:
+        def __init__(self, model_path: str, **_kwargs):
+            load_ctx.append(_kwargs.get("n_ctx"))
+
+    monkeypatch.setattr(model_pool, "llama_load_kwargs", lambda n_ctx: {"n_ctx": n_ctx})
+    monkeypatch.setitem(__import__("sys").modules, "llama_cpp", type("LlamaModule", (), {"Llama": FakeLlama}))
+    monkeypatch.setattr(
+        "seiso.inference.tuning.attach_llama_prompt_cache",
+        lambda _llm: None,
+    )
+
+    pool.get_llama(str(model_path), n_ctx=4096)
+    pool.get_llama(str(model_path), n_ctx=8192)
+
+    assert load_ctx == [4096, 8192]
+
+
 def test_llama_reuses_larger_preloaded_context(monkeypatch, tmp_path):
     from seiso.inference import model_pool
 
@@ -152,10 +177,12 @@ def test_llama_load_kwargs_cuda_defaults(monkeypatch):
     monkeypatch.setattr(platform, "system", lambda: "Linux")
     monkeypatch.setattr(platform, "machine", lambda: "x86_64")
     monkeypatch.setattr("seiso.inference.model_pool._cuda_available", lambda: True)
+    monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 16384)
 
     kwargs = llama_load_kwargs(4096)
     assert kwargs["n_gpu_layers"] == -1
-    assert kwargs["n_batch"] == 2048
+    assert kwargs["n_batch"] == 1024
+    assert kwargs["n_ubatch"] == 512
     assert kwargs["flash_attn"] is True
     assert kwargs["offload_kqv"] is True
     assert kwargs["op_offload"] is True

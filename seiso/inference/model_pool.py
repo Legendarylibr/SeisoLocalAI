@@ -41,13 +41,24 @@ def _default_llama_gpu_layers() -> int:
 
 
 def _default_llama_batch() -> int:
-    return 2048 if _default_llama_gpu_layers() != 0 else 512
+    # Conservative default — clamp_llama_load_kwargs scales up on roomy hardware.
+    return 512
 
 
 def _default_llama_ubatch(n_batch: int) -> int:
-    if _default_llama_gpu_layers() != 0:
-        return min(n_batch, 2048)
-    return min(n_batch, 512)
+    # Smaller micro-batches cap peak VRAM during prompt prefill.
+    return min(n_batch, 256 if _default_llama_gpu_layers() != 0 else 512)
+
+
+def _headroom_llama_batch_caps(headroom: int) -> tuple[int, int]:
+    """Return (n_batch, n_ubatch) ceilings from free VRAM/RAM."""
+    if headroom < 4096:
+        return 256, 128
+    if headroom < 8192:
+        return 512, 256
+    if headroom < 16384:
+        return 1024, 512
+    return 2048, 512
 
 
 def llama_load_kwargs(n_ctx: int) -> dict[str, Any]:
@@ -55,9 +66,13 @@ def llama_load_kwargs(n_ctx: int) -> dict[str, Any]:
     from seiso.memory.protection import clamp_llama_load_kwargs, headroom_mb
 
     n_threads = env_int("SEISO_LLAMA_THREADS", _default_llama_threads())
-    n_batch = env_int("SEISO_LLAMA_BATCH", _default_llama_batch())
     n_gpu_layers = env_int("SEISO_LLAMA_GPU_LAYERS", _default_llama_gpu_layers())
     headroom = headroom_mb()
+    batch_cap, ubatch_cap = _headroom_llama_batch_caps(headroom)
+    n_batch = env_int("SEISO_LLAMA_BATCH", batch_cap)
+    n_ubatch = env_int("SEISO_LLAMA_UBATCH", min(n_batch, ubatch_cap))
+    n_batch = min(n_batch, batch_cap)
+    n_ubatch = min(n_ubatch, ubatch_cap, n_batch)
     if n_gpu_layers != 0 and headroom > 0:
         if headroom < 4096:
             n_gpu_layers = min(n_gpu_layers if n_gpu_layers > 0 else 24, 16)
@@ -70,7 +85,7 @@ def llama_load_kwargs(n_ctx: int) -> dict[str, Any]:
         "n_threads": n_threads,
         "n_threads_batch": env_int("SEISO_LLAMA_THREADS_BATCH", n_threads),
         "n_batch": n_batch,
-        "n_ubatch": env_int("SEISO_LLAMA_UBATCH", _default_llama_ubatch(n_batch)),
+        "n_ubatch": n_ubatch,
         "n_gpu_layers": n_gpu_layers,
         "use_mmap": env_bool("SEISO_LLAMA_USE_MMAP", True),
         "use_mlock": env_bool("SEISO_LLAMA_USE_MLOCK", False),
@@ -157,9 +172,13 @@ class ModelPool:
         norm = self.normalize_path(model_path)
         load_path = str(Path(model_path).expanduser().absolute())
         key = cache_key or f"{backend.value}:{norm}"
+        meta = meta or {}
         with self._lock:
             if self._active and self._active.key == key:
-                return self._active.handle
+                needed_ctx = int(meta.get("n_ctx") or 0)
+                cached_ctx = int(self._active.meta.get("n_ctx") or 0)
+                if needed_ctx <= 0 or cached_ctx >= needed_ctx:
+                    return self._active.handle
 
             self.unload_all()
             from seiso.memory.protection import ensure_load_fits, release_cached_memory
@@ -194,10 +213,10 @@ class ModelPool:
         with self._lock:
             if self._active and self._active.backend == BackendKind.LLAMA and self._active.meta.get("norm_path") == norm:
                 cached_ctx = int(self._active.meta.get("n_ctx") or 0)
-                if cached_ctx >= n_ctx and cached_ctx <= max(n_ctx + 512, int(n_ctx * 1.25)):
+                if cached_ctx >= n_ctx:
                     return self._active.handle
 
-        key = f"llama:{norm}:ctx{n_ctx}"
+        key = f"llama:{norm}"
         return self.switch(model_path, BackendKind.LLAMA, loader, cache_key=key, meta={"n_ctx": n_ctx})
 
     def get_mlx(self, model_path: str) -> tuple[Any, Any]:

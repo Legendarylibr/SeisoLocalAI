@@ -403,8 +403,11 @@ def clamp_llama_load_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
         cap_batch = _MAX_LLAMA_BATCH
 
     cap_batch = max(_MIN_LLAMA_BATCH, min(cap_batch, _MAX_LLAMA_BATCH))
+    ctx_scale = max(1, n_ctx // 2048)
+    cap_batch = max(_MIN_LLAMA_BATCH, cap_batch // ctx_scale)
     out["n_batch"] = min(int(out.get("n_batch") or cap_batch), cap_batch)
-    out["n_ubatch"] = min(int(out.get("n_ubatch") or out["n_batch"]), out["n_batch"])
+    ubatch_cap = max(_MIN_LLAMA_BATCH, min(out["n_batch"], cap_batch // 2 or _MIN_LLAMA_BATCH))
+    out["n_ubatch"] = min(int(out.get("n_ubatch") or ubatch_cap), ubatch_cap, out["n_batch"])
 
     # Very large contexts on tight VRAM: prefer CPU layers partial offload safety.
     if headroom < 6144 and int(out.get("n_gpu_layers") or 0) != 0:
