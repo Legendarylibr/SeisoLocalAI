@@ -16,7 +16,7 @@
 **Recommended** — one command installs deps, builds the UI, and starts Forge (browser opens automatically):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
 ```
 
 Manual:
@@ -38,7 +38,7 @@ seiso forge
 **Later sessions** (after the initial install):
 
 ```bash
-"$HOME/Seiso/scripts/start.sh"
+cd "$HOME/Seiso" && start
 ```
 
 Or from an existing clone:

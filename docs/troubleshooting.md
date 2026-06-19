@@ -42,7 +42,7 @@ cd forge-ui && npm install && npm run build && cd ..
 seiso forge
 ```
 
-Or run `./scripts/start.sh` — it builds the UI automatically if `forge-ui/dist` is missing.
+Or run `start` — it builds the UI automatically if `forge-ui/dist` is missing.
 
 For UI development, run `seiso forge` in one terminal and `cd forge-ui && npm run dev` in another — browse http://127.0.0.1:5173. See [forge.md](forge.md).
 
@@ -54,10 +54,10 @@ For UI development, run `seiso forge` in one terminal and `cd forge-ui && npm ru
 - Python 3.10+: `python3 --version`
 - Node.js 18+: `node --version` and `npm --version` ([nodejs.org](https://nodejs.org/))
 - git: `git --version`
-- Custom path: `SEISO_INSTALL_DIR="$HOME/code/Seiso" curl …/install.sh | bash`
-- Re-run from a clone: `./scripts/install.sh`
+- Custom path: `SEISO_INSTALL_DIR="$HOME/code/Seiso" curl …/start | bash`
+- Re-run from a clone: `start`
 
-**Symptom:** `Seiso not found` when running `start.sh`.
+**Symptom:** `Seiso not found` when running `start` or `curl …/start | bash`.
 
 **Fix:** Run the installer first, or set `SEISO_INSTALL_DIR` to your clone path.
 
@@ -68,8 +68,8 @@ For UI development, run `seiso forge` in one terminal and `cd forge-ui && npm ru
 **Cause:** The repo or pip build temp dir is on a **Windows filesystem** (common in WSL when the clone lives under `/mnt/c/Users/...`). CUDA extension builds need a Linux-native path.
 
 **Fix:**
-1. Install on the Linux filesystem: `SEISO_INSTALL_DIR="$HOME/Seiso"` then re-run `./scripts/install.sh`
-2. Skip flash-attn during install: `SEISO_SKIP_FLASH_ATTN=1 ./scripts/install.sh`
+1. Install on the Linux filesystem: `SEISO_INSTALL_DIR="$HOME/Seiso"` then re-run `start`
+2. Skip flash-attn during install: `SEISO_SKIP_FLASH_ATTN=1 start`
 3. After a successful main install on `$HOME/Seiso`, optionally run `./scripts/install_flash_attn.sh`
 4. Ensure CUDA toolkit (`nvcc --version`) and PyTorch CUDA match your driver ([pytorch.org](https://pytorch.org/get-started/locally/))
 

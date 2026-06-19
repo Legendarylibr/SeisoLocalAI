@@ -10,6 +10,103 @@ seiso_forge_url() {
   printf 'http://%s:%s' "${SEISO_HOST:-127.0.0.1}" "${SEISO_PORT:-8765}"
 }
 
+seiso_follow_symlinks() {
+  local path="$1"
+  [[ -n "$path" && -e "$path" ]] || return 1
+  while [[ -L "$path" ]]; do
+    local target
+    target="$(readlink "$path")"
+    if [[ "$target" != /* ]]; then
+      path="$(cd "$(dirname "$path")" && pwd)/$target"
+    else
+      path="$target"
+    fi
+  done
+  cd "$(dirname "$path")" && pwd
+}
+
+seiso_resolve_repo_for_start() {
+  local install_dir="${SEISO_INSTALL_DIR:-$HOME/Seiso}"
+  local src="${1:-}"
+
+  if [[ -n "$src" && -e "$src" ]]; then
+    local root
+    root="$(seiso_follow_symlinks "$src")" || return 1
+    if [[ -f "$root/pyproject.toml" && -d "$root/seiso_cli" ]]; then
+      printf '%s\n' "$root"
+      return 0
+    fi
+  fi
+
+  if [[ -d "$install_dir/seiso_cli" && -f "$install_dir/pyproject.toml" ]]; then
+    printf '%s\n' "$install_dir"
+    return 0
+  fi
+
+  return 1
+}
+
+seiso_start_bin_dir() {
+  printf '%s\n' "${SEISO_BIN_DIR:-$HOME/.local/bin}"
+}
+
+seiso_install_start_command() {
+  local root="$1"
+  local bin_dir start_script link_path
+
+  bin_dir="$(seiso_start_bin_dir)"
+  start_script="$root/start"
+  link_path="$bin_dir/start"
+
+  [[ -f "$start_script" ]] || return 0
+  chmod +x "$start_script" 2>/dev/null || true
+
+  mkdir -p "$bin_dir"
+  if [[ -e "$link_path" && ! -L "$link_path" ]]; then
+    seiso_warn "$link_path exists and is not a symlink — leaving it unchanged"
+    return 0
+  fi
+  ln -sf "$start_script" "$link_path"
+
+  seiso_ensure_bin_on_path "$bin_dir"
+}
+
+seiso_ensure_bin_on_path() {
+  local bin_dir="$1"
+  local marker line profile
+
+  [[ -n "$bin_dir" ]] || return 0
+  [[ "${SEISO_SKIP_PATH_SETUP:-0}" == "1" ]] && return 0
+
+  case ":${PATH}:" in
+    *":${bin_dir}:"*) ;;
+    *)
+      export PATH="${bin_dir}:${PATH}"
+      ;;
+  esac
+
+  marker='# seiso-start-path'
+  line="export PATH=\"${bin_dir}:\$PATH\" ${marker}"
+
+  if [[ -n "${ZSH_VERSION:-}" ]]; then
+    profile="${ZDOTDIR:-$HOME}/.zshrc"
+  elif [[ -f "$HOME/.bashrc" ]]; then
+    profile="$HOME/.bashrc"
+  elif [[ -f "$HOME/.profile" ]]; then
+    profile="$HOME/.profile"
+  else
+    return 0
+  fi
+
+  if grep -qF "$marker" "$profile" 2>/dev/null; then
+    return 0
+  fi
+
+  {
+    printf '\n%s\n' "$line"
+  } >>"$profile"
+}
+
 seiso_resolve_root() {
   local install_dir="${SEISO_INSTALL_DIR:-$HOME/Seiso}"
   if [[ -n "${BASH_SOURCE[1]:-}" && -f "${BASH_SOURCE[1]}" ]]; then
@@ -275,5 +372,6 @@ seiso_ensure_installed() {
     seiso_run_doctor "$root"
     return 1
   fi
+  seiso_install_start_command "$root"
   return 0
 }

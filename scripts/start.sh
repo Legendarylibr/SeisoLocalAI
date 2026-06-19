@@ -2,12 +2,12 @@
 # Start Seiso Forge (API + web UI). Installs missing deps, runs doctor on failure,
 # and opens the browser when Forge is ready.
 #
-# Usage:
-#   ~/Seiso/scripts/start.sh
+# Usage (prefer start on PATH after install):
+#   start
 #   SEISO_INSTALL_DIR=~/Seiso ./scripts/start.sh
 #
 # One-liner (installs if needed, then starts):
-#   curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/start.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
 set -euo pipefail
 
 INSTALL_DIR="${SEISO_INSTALL_DIR:-$HOME/Seiso}"
@@ -43,17 +43,9 @@ log() { seiso_log "$@"; }
 die() { seiso_die "$@"; }
 
 resolve_root() {
-  if [[ -n "${BASH_SOURCE[0]:-}" && -f "${BASH_SOURCE[0]}" ]]; then
-    local candidate
-    candidate="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-    if [[ -f "$candidate/pyproject.toml" && -d "$candidate/seiso_cli" ]]; then
-      printf '%s\n' "$candidate"
-      return
-    fi
-  fi
-  if [[ -d "$INSTALL_DIR/seiso_cli" && -f "$INSTALL_DIR/pyproject.toml" ]]; then
-    printf '%s\n' "$INSTALL_DIR"
-    return
+  if root="$(seiso_resolve_repo_for_start "${BASH_SOURCE[0]:-}")"; then
+    printf '%s\n' "$root"
+    return 0
   fi
   return 1
 }
@@ -79,6 +71,8 @@ main() {
   if ! seiso_ensure_installed "$root"; then
     die "Could not complete install. See doctor output above."
   fi
+
+  seiso_install_start_command "$root"
 
   # shellcheck disable=SC1091
   source "$root/.venv/bin/activate"

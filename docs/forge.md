@@ -11,7 +11,7 @@ Forge is Seiso's local web server: React UI, REST API under `/api`, and an OpenA
 From an existing clone (recommended helpers):
 
 ```bash
-"$HOME/Seiso/scripts/start.sh"     # later sessions — checks deps, builds UI if needed
+cd "$HOME/Seiso" && start     # checks deps, builds UI if needed
 # or after manual install:
 cd "$HOME/Seiso" && source .venv/bin/activate && seiso forge
 ```

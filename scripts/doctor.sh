@@ -75,7 +75,7 @@ if [[ ! -f "$root/pyproject.toml" || ! -d "$root/seiso_cli" ]]; then
   exit 1
 fi
 
-check_cmd git "Install git, then rerun scripts/install.sh."
+check_cmd git "Install git, then rerun start."
 check_cmd python3 "Install Python 3.10+."
 check_cmd node "Install Node.js 18+ from https://nodejs.org/."
 check_cmd npm "Install Node.js 18+ from https://nodejs.org/."
@@ -99,7 +99,7 @@ fi
 if [[ -f "$root/.env" ]]; then
   ok ".env exists"
 else
-  warn ".env missing. Copy .env.example to .env or rerun scripts/install.sh."
+  warn ".env missing. Copy .env.example to .env or rerun start."
 fi
 
 data_dir="${SEISO_DATA_DIR:-$HOME/.seiso}"
@@ -115,7 +115,7 @@ info "Ollama uses its own model store; use 'ollama pull' or 'ollama create' for 
 if [[ -x "$root/.venv/bin/python" ]]; then
   ok "virtualenv: $root/.venv"
 else
-  fail "virtualenv missing. Run: $root/scripts/install.sh"
+  fail "virtualenv missing. Run: start"
 fi
 
 if [[ -x "$root/.venv/bin/seiso" ]]; then
@@ -211,6 +211,6 @@ PY
 fi
 
 printf '\nNext steps:\n'
-printf '  Start Forge: %s/scripts/start.sh\n' "$root"
+printf '  Start Forge: start\n'
 printf '  If gated models fail: source %s/.venv/bin/activate && hf auth login\n' "$root"
 printf '  Full network check: %s/scripts/doctor.sh --network\n\n' "$root"

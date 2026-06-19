@@ -7,7 +7,7 @@ Full Seiso support: fused CUDA kernels, QLoRA, multi-GPU, Forge UI.
 **Recommended** — one command installs deps, builds the UI, and starts Forge:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
 ```
 
 Manual:
@@ -33,14 +33,14 @@ Not required. Install after the main editable install when the repo lives on the
 ./scripts/install_flash_attn.sh
 ```
 
-Skip during install: `SEISO_SKIP_FLASH_ATTN=1 ./scripts/install.sh`
+Skip during install: `SEISO_SKIP_FLASH_ATTN=1 start`
 
 ## Start Forge
 
 **Later sessions:**
 
 ```bash
-"$HOME/Seiso/scripts/start.sh"
+cd "$HOME/Seiso" && start
 ```
 
 Or from a clone with venv active:

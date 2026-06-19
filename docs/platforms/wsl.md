@@ -13,7 +13,7 @@ Treat WSL2 as **Linux** for Seiso. This is the recommended Windows path for full
 **Use the Linux home directory**, not a Windows path. Building CUDA wheels on `/mnt/c/...` often fails (missing `pyproject.toml` / `setup.py` on C:).
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
 # installs to $HOME/Seiso by default
 
 # Or from an existing clone under $HOME:

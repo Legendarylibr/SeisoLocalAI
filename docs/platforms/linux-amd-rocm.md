@@ -9,11 +9,11 @@ Training works with ROCm PyTorch. Fused kernels use **Triton** (native `.cu` ker
 2. Install Seiso (after ROCm PyTorch is installed):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
 source "$HOME/Seiso/.venv/bin/activate" && pip install triton
 ```
 
-**Later sessions:** `"$HOME/Seiso/scripts/start.sh"`
+**Later sessions:** `cd "$HOME/Seiso" && start`
 
 Or manually:
 
@@ -37,7 +37,7 @@ Seiso detects AMD via `torch.version.hip` in `seiso.kernels.platform.detect_gpu(
 ## Start & train
 
 ```bash
-"$HOME/Seiso/scripts/start.sh"
+cd "$HOME/Seiso" && start
 # or from a clone:
 cd "$HOME/Seiso" && source .venv/bin/activate && seiso forge
 # or

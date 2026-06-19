@@ -82,7 +82,7 @@ In config files and Python, `~/.seiso` expands correctly on every OS. In shell c
 One command installs missing system tools (Python, Node, git when possible), clones the repo, builds the UI, and **starts Forge automatically** (browser opens when ready):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
 ```
 
 What the installer does:
@@ -96,29 +96,31 @@ What the installer does:
 **Install only** (no auto-start):
 
 ```bash
-SEISO_START=0 curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/install.sh | bash
+SEISO_START=0 curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
 ```
 
 **Custom install location:**
 
 ```bash
-SEISO_INSTALL_DIR="$HOME/code/Seiso" curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/install.sh | bash
+SEISO_INSTALL_DIR="$HOME/code/Seiso" curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
 ```
 
 **Already cloned?** From the repository root:
 
 ```bash
-./scripts/install.sh          # install / upgrade deps + build UI; starts Forge by default
-SEISO_START=0 ./scripts/install.sh   # install only
+start                    # install / upgrade deps + build UI; starts Forge by default
+SEISO_START=0 start      # install only
 ```
+
+Install registers `start` on your PATH (`~/.local/bin`). Open a new terminal if the command is not found yet.
 
 ### Starting Forge after install
 
 | Situation | Linux / macOS / WSL | Notes |
 |-----------|---------------------|-------|
-| **First install** | Handled by `install.sh` — no extra step | Browser opens at `http://127.0.0.1:8765` |
-| **Later sessions** | `"$SEISO_INSTALL_DIR/scripts/start.sh"` or `"$HOME/Seiso/scripts/start.sh"` | Re-checks deps, builds UI if missing, opens browser |
-| **One-liner restart** | `curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/start.sh \| bash` | Bootstraps install if repo is missing |
+| **First install** | Handled by `start` — no extra step | Browser opens at `http://127.0.0.1:8765` |
+| **Later sessions** | `start` | Re-checks deps, builds UI if missing, opens browser |
+| **One-liner restart** | `curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start \| bash` | Bootstraps install if repo is missing |
 | **Manual** | `cd "$HOME/Seiso" && source .venv/bin/activate && seiso forge` | Add `--open` to launch the browser |
 | **Custom port** | `SEISO_PORT=8766 seiso forge` | Or set in `.env` |
 
@@ -240,7 +242,7 @@ First-run walkthrough: **[docs/getting-started.md](docs/getting-started.md)**
 
 ## Forge UI walkthrough
 
-After `seiso forge` (or `./scripts/start.sh`), browse to **http://127.0.0.1:8765**:
+After `seiso forge` (or `start`), browse to **http://127.0.0.1:8765**:
 
 | Page | Path | What it does |
 |------|------|--------------|
@@ -308,7 +310,8 @@ Seiso/
 ├── configs/            # Example YAML/JSON configs
 ├── deploy/             # Caddy, nginx, systemd, HTTPS env templates
 ├── docs/               # Documentation
-└── scripts/            # install.sh, start.sh, CI runner
+├── start               # install or launch Forge (primary entry point)
+└── scripts/            # install.sh, doctor.sh, CI runner
 ```
 
 Backend orchestrators spawn isolated workers with **SSE log streaming**:

@@ -15,10 +15,11 @@ Install entry points:
 
 Helper scripts (repo `scripts/`, not on `PATH`):
 
-| Script | Purpose |
-|--------|---------|
-| `./scripts/install.sh` | System deps, clone/install venv, pip extras, UI build; starts Forge by default |
-| `./scripts/start.sh` | Install missing deps if needed, then `seiso forge --open` (Linux/macOS/WSL only) |
+| Command / script | Purpose |
+|------------------|---------|
+| `start` | Install or launch Forge — on `PATH` via `~/.local/bin` after install |
+| `./scripts/install.sh` | Lower-level installer (system deps, venv, pip extras, UI build) |
+| `./scripts/start.sh` | Lower-level launcher (`seiso forge --open`; used by `start`) |
 | `./scripts/doctor.sh` | Diagnose install, HF, GPU stack (runs automatically on install/start failure) |
 | `./scripts/precheck.sh` | Fast local CI gate (`make precheck`) |
 | `./scripts/install_flash_attn.sh` | Optional Flash Attention (Linux NVIDIA) |
@@ -36,7 +37,7 @@ seiso forge --reload          # auto-reload Python on code changes
 seiso forge --port 8766       # custom port
 ```
 
-Requires `forge-ui/dist` — build with `cd forge-ui && npm run build` or use `./scripts/start.sh`.
+Requires `forge-ui/dist` — build with `cd forge-ui && npm run build` or use `start`.
 
 Open **http://127.0.0.1:8765**. OpenAI-compatible chat: **http://127.0.0.1:8765/v1/chat/completions** (no `/api` prefix).
 
