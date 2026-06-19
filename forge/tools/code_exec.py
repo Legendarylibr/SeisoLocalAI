@@ -176,6 +176,28 @@ _MAX_OUTPUT = 16_000
 _MAX_CODE_LEN = 8_000
 _MAX_RSS_BYTES = 256 * 1024 * 1024
 _MAX_OPEN_FDS = 32
+_MAX_ALLOC_SIZE = 1_000_000
+_ALLOWED_MODULES = frozenset(
+    {
+        "math",
+        "re",
+        "statistics",
+        "datetime",
+        "collections",
+        "itertools",
+        "json",
+        "decimal",
+        "fractions",
+        "random",
+        "string",
+        "textwrap",
+        "bisect",
+        "heapq",
+        "numbers",
+        "cmath",
+        "dataclasses",
+    }
+)
 
 
 def _subprocess_limits() -> None:
@@ -266,30 +288,88 @@ def _assign_windows_job(proc: subprocess.Popen[str], job_handle: int | None) -> 
         pass
 
 
+def _import_blocked(module: str) -> bool:
+    """Allow only a small stdlib subset; block underscore and dangerous modules."""
+    root = module.split(".")[0]
+    if root.startswith("_"):
+        return True
+    if root in _BLOCKED_MODULES:
+        return True
+    stripped = root.lstrip("_")
+    if stripped and stripped in _BLOCKED_MODULES:
+        return True
+    return root not in _ALLOWED_MODULES
+
+
+def _alloc_size(node: ast.AST) -> int | None:
+    if isinstance(node, ast.Constant):
+        if isinstance(node.value, bool):
+            return None
+        if isinstance(node.value, int):
+            return abs(node.value)
+        if isinstance(node.value, (str, bytes, list, tuple)):
+            return len(node.value)
+    if isinstance(node, ast.BinOp):
+        if isinstance(node.op, ast.Mult):
+            left = _alloc_size(node.left)
+            right = _alloc_size(node.right)
+            if left is not None and right is not None:
+                return left * right
+        if isinstance(node.op, ast.Pow):
+            base = _alloc_size(node.left)
+            exp = _alloc_size(node.right)
+            if base is not None and exp is not None and exp >= 0:
+                try:
+                    return base**exp
+                except OverflowError:
+                    return _MAX_ALLOC_SIZE + 1
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub):
+        inner = _alloc_size(node.operand)
+        if inner is not None:
+            return inner
+    return None
+
+
+def _check_alloc_size(validator: _CodeValidator, node: ast.AST) -> None:
+    size = _alloc_size(node)
+    if size is not None and size > _MAX_ALLOC_SIZE:
+        validator.errors.append(f"Allocation too large (>{_MAX_ALLOC_SIZE} elements)")
+
+
 class _CodeValidator(ast.NodeVisitor):
     def __init__(self) -> None:
         self.errors: list[str] = []
 
     def visit_Import(self, node: ast.Import) -> None:
         for alias in node.names:
-            root = alias.name.split(".")[0]
-            if root in _BLOCKED_MODULES:
+            if _import_blocked(alias.name):
                 self.errors.append(f"Import blocked: {alias.name}")
 
     def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
-        if node.module:
-            root = node.module.split(".")[0]
-            if root in _BLOCKED_MODULES:
-                self.errors.append(f"Import blocked: {node.module}")
+        if node.module and _import_blocked(node.module):
+            self.errors.append(f"Import blocked: {node.module}")
 
     def visit_Name(self, node: ast.Name) -> None:
         if isinstance(node.ctx, ast.Load) and node.id in _BLOCKED_NAMES:
             self.errors.append(f"Name blocked: {node.id}")
         self.generic_visit(node)
 
+    def visit_BinOp(self, node: ast.BinOp) -> None:
+        if isinstance(node.op, (ast.Mult, ast.Pow)):
+            _check_alloc_size(self, node)
+        self.generic_visit(node)
+
     def visit_Call(self, node: ast.Call) -> None:
-        if isinstance(node.func, ast.Name) and node.func.id in _BLOCKED_NAMES:
-            self.errors.append(f"Call blocked: {node.func.id}()")
+        if isinstance(node.func, ast.Name):
+            if node.func.id in _BLOCKED_NAMES:
+                self.errors.append(f"Call blocked: {node.func.id}()")
+            elif node.func.id == "range" and node.args:
+                _check_alloc_size(self, node.args[0])
+            elif node.func.id == "list" and node.args:
+                arg = node.args[0]
+                if isinstance(arg, ast.Call) and isinstance(arg.func, ast.Name) and arg.func.id == "range":
+                    if arg.args:
+                        _check_alloc_size(self, arg.args[0])
         self.generic_visit(node)
 
     def visit_Attribute(self, node: ast.Attribute) -> None:

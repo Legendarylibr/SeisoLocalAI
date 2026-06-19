@@ -41,7 +41,7 @@ class ChatCompletionRequest(BaseModel):
     tools: list[dict] | None = None
 
 
-_UNTRUSTED_OPENAI_ROLES = frozenset({"tool", "function", "system"})
+_UNTRUSTED_OPENAI_ROLES = frozenset({"tool", "function", "system", "developer"})
 _UNVERIFIED_ASSISTANT_PREFIX = "[UNVERIFIED_PRIOR_ASSISTANT]\n"
 
 

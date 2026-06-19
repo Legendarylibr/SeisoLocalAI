@@ -21,6 +21,28 @@ _LOCAL_HTTP_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 _LOCAL_DEFAULT_PORTS = {"ollama": {11434}, "vllm": {8000, 8001}}
 
 
+def _literal_ip(host: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address | None:
+    try:
+        return ipaddress.ip_address(host)
+    except ValueError:
+        return None
+
+
+def _is_local_host(host: str) -> bool:
+    if host in _LOCAL_HTTP_HOSTS:
+        return True
+    ip = _literal_ip(host)
+    if ip is not None:
+        return ip.is_loopback
+    try:
+        addrs = _resolve_host(host)
+    except SecurityError:
+        return False
+    return bool(addrs) and all(
+        (parsed := _literal_ip(addr)) is not None and parsed.is_loopback for addr in addrs
+    )
+
+
 def _is_blocked_ip(addr: str) -> bool:
     try:
         ip = ipaddress.ip_address(addr)
@@ -64,6 +86,8 @@ def validate_provider_base_url(url: str, *, provider_type: str = "vllm") -> str:
     parsed = urlparse(raw)
     if not parsed.scheme or not parsed.netloc:
         raise SecurityError("Invalid base_url: missing scheme or host")
+    if parsed.username or parsed.password:
+        raise SecurityError("base_url must not include embedded credentials")
 
     host = (parsed.hostname or "").lower().rstrip(".")
     if not host:
@@ -74,7 +98,11 @@ def validate_provider_base_url(url: str, *, provider_type: str = "vllm") -> str:
 
     scheme = parsed.scheme.lower()
     ptype = provider_type.lower()
-    local_ok = ptype in ("ollama", "vllm") and host in _LOCAL_HTTP_HOSTS
+    local_ok = ptype in ("ollama", "vllm") and _is_local_host(host)
+
+    literal = _literal_ip(host)
+    if literal is not None and not local_ok and _is_blocked_ip(str(literal)):
+        raise SecurityError("base_url host is not allowed")
 
     if scheme == "http" and not local_ok:
         raise SecurityError("base_url must use HTTPS (http allowed only for local ollama/vllm)")
@@ -116,7 +144,7 @@ def resolve_pinned_endpoint(raw_url: str, *, provider_type: str = "vllm") -> Pin
     scheme = parsed.scheme.lower()
     port = parsed.port or (443 if scheme == "https" else 80)
     ptype = provider_type.lower()
-    local_ok = ptype in ("ollama", "vllm") and host in _LOCAL_HTTP_HOSTS
+    local_ok = ptype in ("ollama", "vllm") and _is_local_host(host)
 
     if local_ok:
         return PinnedEndpoint(base_url=base, host=host, port=port, scheme=scheme, pinned_ip=None)
