@@ -8,7 +8,7 @@ from fastapi import HTTPException
 
 from forge.db.store import Database
 
-_UNTRUSTED_ROLES = frozenset({"tool", "function", "system"})
+_UNTRUSTED_ROLES = frozenset({"tool", "function", "system", "developer"})
 _DEFAULT_CONTEXT_CHAR_BUDGET = 24_000
 _OMISSION_MARKER = "[...older content omitted...]\n"
 
