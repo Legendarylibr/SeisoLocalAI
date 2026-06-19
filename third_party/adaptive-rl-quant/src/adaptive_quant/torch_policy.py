@@ -8,7 +8,6 @@ from typing import Any
 from adaptive_quant.configuration import FrameworkConfig
 from adaptive_quant.kernel_rl import kernel_profile_count
 from adaptive_quant.math_utils import discrete_precision_level
-from adaptive_quant.trainer_utils import zero_previous_action
 from adaptive_quant.types import QuantizationDecision, QuantMode
 
 try:
@@ -627,7 +626,8 @@ class TorchPolicyAdapter:
 
         learned_mask = mode_codes == _mode_code(QuantMode.LEARNED.value)
         if learned_mask.any():
-            fallback_raw = zero_previous_action(self.config)
+            # learned_mean/std are 3-D; kernel profile uses a separate head
+            fallback_raw = [0.0, 0.0, 0.0]
             raw_actions = torch.tensor(
                 [
                     record["learned_raw"] if record["learned_raw"] else fallback_raw

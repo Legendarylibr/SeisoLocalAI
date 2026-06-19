@@ -1,5 +1,9 @@
 """Tests for dataset tokenization and label masking."""
 
+from pathlib import Path
+
+import pytest
+
 from seiso.training.config import DatasetFormat
 from seiso.training.datasets import prepare_tokenized_dataset
 
@@ -30,6 +34,28 @@ class _FakeTokenizer:
             batch["input_ids"].append(f["input_ids"] + [0] * pad_len)
             batch["attention_mask"].append(f["attention_mask"] + [0] * pad_len)
         return {k: torch.tensor(v) for k, v in batch.items()}
+
+
+def test_cli_dataset_outside_data_dir_allowed(tmp_path: Path):
+    """CLI training may reference repo-local datasets without sandbox_root."""
+    from seiso.training.datasets import load_training_dataset
+
+    dataset = tmp_path / "train.jsonl"
+    dataset.write_text('{"text":"hello"}\n')
+    ds = load_training_dataset(dataset, sandbox_root=None)
+    assert len(ds) == 1
+
+
+def test_sandbox_blocks_outside_path(tmp_path: Path):
+    from seiso.security import SecurityError
+    from seiso.training.datasets import load_training_dataset
+
+    sandbox = tmp_path / "sandbox"
+    sandbox.mkdir()
+    outside = tmp_path / "outside.jsonl"
+    outside.write_text('{"text":"x"}\n')
+    with pytest.raises(SecurityError):
+        load_training_dataset(outside, sandbox_root=sandbox)
 
 
 def test_chat_labels_mask_prompt():
