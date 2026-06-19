@@ -4,12 +4,17 @@ const MAX_SSE_LOG_LINES = 2000;
 
 function parseSSEBlock(block: string): { event: string; data: string } | null {
   let event = "message";
-  let data = "";
-  for (const line of block.split("\n")) {
+  const dataLines: string[] = [];
+  for (const rawLine of block.split("\n")) {
+    const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
     if (line.startsWith("event:")) event = line.slice(6).trim();
-    if (line.startsWith("data:")) data = line.slice(5).trim();
+    if (line.startsWith("data:")) {
+      let data = line.slice(5);
+      if (data.startsWith(" ")) data = data.slice(1);
+      dataLines.push(data);
+    }
   }
-  return data ? { event, data } : null;
+  return dataLines.length ? { event, data: dataLines.join("\n") } : null;
 }
 
 async function consumeSSEStream(
@@ -24,9 +29,11 @@ async function consumeSSEStream(
       const { done, value } = await reader.read();
       if (done) {
         buffer += decoder.decode();
+        buffer = buffer.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
         break;
       }
       buffer += decoder.decode(value, { stream: true });
+      buffer = buffer.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
       const blocks = buffer.split("\n\n");
       buffer = blocks.pop() || "";
       for (const block of blocks) {

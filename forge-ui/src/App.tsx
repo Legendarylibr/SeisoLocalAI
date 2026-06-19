@@ -9,6 +9,7 @@ import { Layout } from "@/components/Layout";
 import { SeisoLogoMark } from "@/components/SeisoLogo";
 import { HfTokenPrompt } from "@/components/HfTokenPrompt";
 import { AuthPage } from "@/pages/AuthPage";
+import authBgUrl from "@/assets/auth-bg.png";
 
 const DashboardPage = lazy(() => import("@/pages/DashboardPage").then((m) => ({ default: m.DashboardPage })));
 const HubPage = lazy(() => import("@/pages/HubPage").then((m) => ({ default: m.HubPage })));
@@ -30,6 +31,9 @@ const SettingsPage = lazy(() => import("@/pages/SettingsPage").then((m) => ({ de
 function PageLoading() {
   return (
     <div className="app-loading">
+      <div className="app-loading-atmosphere" aria-hidden>
+        <img src={authBgUrl} alt="" className="app-loading-bg-figure" draggable={false} />
+      </div>
       <div className="app-loading-mark">
         <SeisoLogoMark className="brand-logo-img app-loading-logo" />
       </div>
@@ -67,15 +71,7 @@ function Guard({ children, fullBleed = false }: { children: React.ReactNode; ful
   };
 
   if (loading) {
-    return (
-      <div className="app-loading">
-        <div className="app-loading-mark">
-          <SeisoLogoMark className="brand-logo-img app-loading-logo" />
-        </div>
-        <div className="app-loading-bar" aria-hidden />
-        <p className="app-loading-text">Seiso Local AI</p>
-      </div>
-    );
+    return <PageLoading />;
   }
   if (!user && !needsOnboarding) return <AuthPage />;
   if (needsOnboarding && !user) return <AuthPage />;

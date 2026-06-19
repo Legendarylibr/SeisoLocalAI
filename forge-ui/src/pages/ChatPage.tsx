@@ -475,24 +475,20 @@ export function ChatPage() {
       openThread(t);
     }
 
+    let displayedMessages = messagesByThread[threadId!] ?? [];
+    if (displayedMessages.length === 0 && threads.some((t) => t.id === threadId)) {
+      displayedMessages = await api.getMessages(threadId!);
+    }
+
     setMessagesByThread((prev) => ({
       ...prev,
       [threadId!]: [
-        ...(prev[threadId!] ?? []),
+        ...displayedMessages,
         { id: crypto.randomUUID(), role: "user", content, created_at: new Date().toISOString() },
       ],
     }));
 
-    let priorMessages = messagesByThread[threadId!] ?? [];
-    if (priorMessages.length === 0 && threads.some((t) => t.id === threadId)) {
-      priorMessages = await api.getMessages(threadId!);
-      setMessagesByThread((prev) => ({ ...prev, [threadId!]: priorMessages }));
-    }
-
-    const history = [
-      ...priorMessages.map((m) => ({ role: m.role, content: m.content })),
-      { role: "user", content },
-    ];
+    const latestUserMessage = [{ role: "user", content }];
 
     const isOllamaOnly = selected?.kind === "ollama";
     const usingOllama = !providerId && effectiveBackend === "ollama";
@@ -526,7 +522,7 @@ export function ChatPage() {
       const { promise, abort } = streamChat(
         {
           thread_id: threadId,
-          messages: history,
+          messages: latestUserMessage,
           stream: true,
           tools: useTools && toolsAvailable,
           allow_code_exec: allowCodeExec && codeExecAvailable,
