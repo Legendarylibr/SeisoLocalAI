@@ -114,12 +114,25 @@ def build_mlx_sampler(payload: dict[str, Any]) -> Any | None:
         return None
 
 
+def _default_mlx_prefill_step() -> int:
+    from seiso.memory.protection import headroom_mb
+
+    headroom = headroom_mb()
+    if headroom < 4096:
+        return 512
+    if headroom < 8192:
+        return 1024
+    if headroom < 16384:
+        return 2048
+    return 4096
+
+
 def mlx_stream_kwargs(payload: dict[str, Any]) -> dict[str, Any]:
     kwargs: dict[str, Any] = {"max_tokens": payload.get("max_tokens", 512)}
     sampler = build_mlx_sampler(payload)
     if sampler is not None:
         kwargs["sampler"] = sampler
-    prefill = env_int("SEISO_MLX_PREFILL_STEP", 4096)
+    prefill = env_int("SEISO_MLX_PREFILL_STEP", _default_mlx_prefill_step())
     if prefill > 0:
         kwargs["prefill_step_size"] = prefill
     kv_bits = env_int("SEISO_MLX_KV_BITS", 0)

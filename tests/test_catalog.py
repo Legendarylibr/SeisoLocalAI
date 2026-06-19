@@ -26,7 +26,7 @@ def test_catalog_has_popular_models():
     assert "MiniMaxAI/MiniMax-M3" not in repos
     assert "mistralai/Devstral-Small-2507" in repos
     assert "mistralai/Mixtral-8x7B-Instruct-v0.1" not in repos
-    assert "mistralai/Mistral-7B-Instruct-v0.3" not in repos
+    assert "mistralai/Mistral-7B-Instruct-v0.3" in repos
     assert "deepseek-ai/DeepSeek-V3" not in repos
     assert "deepseek-ai/DeepSeek-R1" not in repos
     assert "HuggingFaceTB/SmolLM2-1.7B-Instruct" not in repos

@@ -275,12 +275,19 @@ class StreamingOutputSanitizer:
             self._in_tool_call = False
             self._in_think = False
         if self._reasoning_mode:
-            extracted = strip_reasoning_leakage(self._buffer)
+            buf = self._buffer
             self._buffer = ""
             self._reasoning_mode = False
-            if extracted:
+            answer = _extract_final_answer_from_reasoning(buf)
+            if answer:
                 self._emitted = True
-                return [extracted]
+                return [answer]
+            if re.search(r"(?i)thinking process", buf) or re.search(r"\d+\.\s*\*\*[^*]+$", buf):
+                return []
+            cleaned = strip_reasoning_leakage(buf)
+            if cleaned and not _looks_like_reasoning_leak(cleaned) and not _starts_reasoning_leak(cleaned):
+                self._emitted = True
+                return [cleaned]
             return []
         if not self._buffer:
             return []

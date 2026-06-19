@@ -21,8 +21,14 @@ def test_extract_mlx_token_text_from_response_object():
     assert extract_mlx_token_text(_FakeMlxToken("")) is None
 
 
-def test_mlx_stream_kwargs_greedy_by_default():
+def test_mlx_stream_kwargs_greedy_by_default(monkeypatch):
+    monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 16384)
     assert mlx_stream_kwargs({"max_tokens": 128}) == {"max_tokens": 128, "prefill_step_size": 4096}
+
+
+def test_mlx_stream_kwargs_scales_prefill_on_tight_memory(monkeypatch):
+    monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 3072)
+    assert mlx_stream_kwargs({"max_tokens": 64})["prefill_step_size"] == 512
 
 
 def test_mlx_stream_kwargs_with_temperature():
