@@ -560,17 +560,6 @@ export function ChatPage() {
               }
               return;
             }
-            if (event === "defense") {
-              try {
-                const result = JSON.parse(data) as { action?: string; top_reasons?: string[] };
-                const label = result.action ? `AutoDefense: ${result.action}` : "AutoDefense scanned this response";
-                const reasons = result.top_reasons?.length ? ` (${result.top_reasons.join(", ")})` : "";
-                setError(`${label}${reasons}`);
-              } catch {
-                setError("AutoDefense scanned this response");
-              }
-              return;
-            }
             if (event === "done") return;
             if (event === "token" || event === "message") {
               if (event === "message") assistantText = data;

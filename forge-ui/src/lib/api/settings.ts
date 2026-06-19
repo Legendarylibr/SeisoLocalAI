@@ -13,8 +13,6 @@ export const settingsApi = {
       allow_remote: boolean;
       hf_configured: boolean;
       hf_auth: HfAuthInfo;
-      autodefense_enabled: boolean;
-      autodefense_configured: boolean;
       security: SecurityPosture;
     }>("/settings", 300_000),
   saveHfToken: async (token: string) => {

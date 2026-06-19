@@ -264,7 +264,6 @@ async def test_chat_route_keeps_local_gguf_ollama_on_ollama(monkeypatch, tmp_pat
             {
                 "allow_tools": False,
                 "allow_code_exec": False,
-                "autodefense_enabled": False,
                 "ollama_base_url": "http://127.0.0.1:11434",
                 "data_dir": tmp_path,
             },

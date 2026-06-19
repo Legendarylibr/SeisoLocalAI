@@ -5,7 +5,6 @@ export type SecurityPosture = {
   allow_code_exec: boolean;
   allow_openai_tools: boolean;
   allow_remote: boolean;
-  autodefense_enabled: boolean;
   bind_localhost: boolean;
   db_encrypted: boolean;
   rate_limit: number;

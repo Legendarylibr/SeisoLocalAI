@@ -15,17 +15,11 @@ from forge.config import ForgeSettings, get_settings
 from forge.db.store import Database
 from forge.orchestrators.inference import InferenceOrchestrator
 from forge.security.auth import get_current_user_id
-from forge.security.autodefense import DefenseBlockedError, defense_enabled, scan_output
 from forge.services.chat_messages import build_trusted_messages
 from forge.services.download_progress import estimate_load_eta_seconds
 from forge.services.hardware import hardware_profile
 from forge.services.hf_cache_inventory import sync_hf_cache_inventory
 from forge.services.inference_models import list_inference_options, resolve_chat_target
-from forge.services.llm_output import (
-    StreamingOutputSanitizer,
-    chunk_sanitized_output,
-    sanitize_llm_output,
-)
 from forge.services.models import resolve_model_path
 from seiso.inference.backends import BACKEND_LLAMACPP, BACKEND_MLX, BACKEND_OLLAMA, BACKEND_TORCH
 
@@ -51,10 +45,6 @@ class ChatRequest(BaseModel):
     tools: bool = False
     allow_code_exec: bool = False
     provider_id: str | None = None
-    defense: bool | None = Field(
-        default=None,
-        description="Enable AutoDefense scan (requires SEISO_AUTODEFENSE_ENABLED). null=on when server enabled.",
-    )
 
 
 class ThreadCreate(BaseModel):
@@ -493,9 +483,6 @@ async def chat(
     if body.allow_code_exec and not settings.allow_code_exec:
         raise HTTPException(403, "Code execution is disabled on this server")
 
-    if body.defense is True and not settings.autodefense_enabled:
-        raise HTTPException(400, "AutoDefense is not enabled on this server (SEISO_AUTODEFENSE_ENABLED)")
-
     job_id = orchestrator.create_job(user_id=user_id)
     payload = body.model_dump(exclude={"messages"})
     payload["user_id"] = user_id
@@ -581,7 +568,6 @@ async def chat(
 
     if body.stream:
         can_stream_local = not body.tools and not body.provider_id
-        use_defense = defense_enabled(settings, request_flag=body.defense)
 
         async def event_gen():
             if can_stream_local:
@@ -590,37 +576,14 @@ async def chat(
                 cancelled = False
                 try:
                     orchestrator._emit_log(job_id, f"Streaming inference ({backend_label})")
-                    stream_guard = StreamingOutputSanitizer()
                     async for token in orchestrator.stream_local(payload):
                         parts.append(token)
-                        if not use_defense:
-                            for safe_token in stream_guard.feed(token):
-                                yield {"event": "token", "data": safe_token}
-                    content = sanitize_llm_output("".join(parts))
-                    if use_defense and content:
-                        content, defense_result = await scan_output(
-                            payload.get("messages", []),
-                            content,
-                            session_id=body.thread_id or job_id,
-                            user_id=user_id,
-                            settings=settings,
-                        )
-                        if not defense_result.unavailable:
-                            yield {"event": "defense", "data": json.dumps(defense_result.to_dict())}
-                    if use_defense:
-                        for token in chunk_sanitized_output(content):
-                            yield {"event": "token", "data": token}
-                    else:
-                        for token in stream_guard.finish():
-                            yield {"event": "token", "data": token}
+                        yield {"event": "token", "data": token}
+                    content = "".join(parts)
                     if body.thread_id:
                         await db.add_message(body.thread_id, "assistant", content)
                     yield {"event": "message", "data": content}
                     yield {"event": "done", "data": job_id}
-                except DefenseBlockedError as exc:
-                    yield {"event": "error", "data": str(exc)}
-                    if exc.result:
-                        yield {"event": "defense", "data": json.dumps(exc.result.to_dict())}
                 except Exception as exc:
                     yield {"event": "error", "data": str(exc)}
                 except asyncio.CancelledError:
@@ -637,15 +600,11 @@ async def chat(
             job = await orchestrator.wait_for(job_id)
             if job and job.status.value == "failed":
                 yield {"event": "error", "data": job.error or "Inference failed"}
-                if job.result.get("defense"):
-                    yield {"event": "defense", "data": json.dumps(job.result["defense"])}
             elif job and job.result.get("content"):
-                content = sanitize_llm_output(job.result["content"])
+                content = job.result["content"]
                 if body.thread_id:
                     await db.add_message(body.thread_id, "assistant", content)
                 yield {"event": "message", "data": content}
-                if job.result.get("defense"):
-                    yield {"event": "defense", "data": json.dumps(job.result["defense"])}
             yield {"event": "done", "data": job_id}
 
         return EventSourceResponse(event_gen())
@@ -655,12 +614,7 @@ async def chat(
     if not job:
         raise HTTPException(500, "Job lost")
     if job.status.value == "failed":
-        detail = job.error or "Inference failed"
-        if job.result.get("defense"):
-            raise HTTPException(403, detail, headers={"X-Seiso-Defense": json.dumps(job.result["defense"])})
-        raise HTTPException(500, detail)
-    if job.result.get("content"):
-        job.result["content"] = sanitize_llm_output(job.result["content"])
+        raise HTTPException(500, job.error or "Inference failed")
     if body.thread_id and job.result.get("content"):
         await db.add_message(body.thread_id, "assistant", job.result["content"])
     return {"job_id": job_id, **job.result}

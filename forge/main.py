@@ -13,7 +13,6 @@ from fastapi.staticfiles import StaticFiles
 from forge.api.deps import clear_dependency_caches, get_db
 from forge.api.routes import (
     auth,
-    autodefense,
     compress,
     export,
     image_compress,
@@ -129,7 +128,6 @@ def create_app() -> FastAPI:
     app.include_router(recipes.router, prefix=prefix)
     app.include_router(knowledge.router, prefix=prefix)
     app.include_router(providers.router, prefix=prefix)
-    app.include_router(autodefense.router, prefix=prefix)
     app.include_router(system.router, prefix=prefix)
     app.include_router(settings_routes.router, prefix=prefix)
     app.include_router(openai.router)  # /v1/chat/completions — no /api prefix (OpenAI compat)

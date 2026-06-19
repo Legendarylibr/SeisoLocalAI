@@ -23,7 +23,6 @@ class SecurityPosture(BaseModel):
     allow_code_exec: bool
     allow_openai_tools: bool
     allow_remote: bool
-    autodefense_enabled: bool
     bind_localhost: bool
     db_encrypted: bool
     rate_limit: int
@@ -49,8 +48,6 @@ class SettingsView(BaseModel):
     allow_remote: bool
     hf_configured: bool
     hf_auth: HfAuthView
-    autodefense_enabled: bool
-    autodefense_configured: bool
     security: SecurityPosture
 
 
@@ -102,14 +99,11 @@ async def get_app_settings(
             token_sources=auth.token_sources,
             user_token_saved=user_saved,
         ),
-        autodefense_enabled=settings.autodefense_enabled,
-        autodefense_configured=settings.autodefense_enabled,
         security=SecurityPosture(
             allow_tools=settings.allow_tools,
             allow_code_exec=settings.allow_code_exec,
             allow_openai_tools=settings.allow_openai_tools,
             allow_remote=settings.allow_remote,
-            autodefense_enabled=settings.autodefense_enabled,
             bind_localhost=not settings.allow_remote,
             db_encrypted=True,
             rate_limit=settings.rate_limit,

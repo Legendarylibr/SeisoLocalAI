@@ -46,11 +46,6 @@ class ForgeSettings(BaseSettings):
     ollama_base_url: str = "http://127.0.0.1:11434"
     db_ephemeral: bool | None = None
     db_encryption_key: str = ""
-    autodefense_enabled: bool = False
-    autodefense_url: str = "http://127.0.0.1:8000"
-    autodefense_api_key: str = ""
-    autodefense_timeout: float = Field(default=10.0, ge=1.0, le=120.0)
-    autodefense_fail_open: bool = False
 
     @field_validator("data_dir", mode="before")
     @classmethod

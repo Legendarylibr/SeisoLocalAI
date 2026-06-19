@@ -52,11 +52,6 @@ def validate_security_settings(settings: ForgeSettings) -> None:
                 "Remote access with tools/code-exec enabled — high risk of RCE if credentials leak."
             )
 
-    if settings.autodefense_fail_open and settings.autodefense_enabled:
-        logger.warning(
-            "SEISO_AUTODEFENSE_FAIL_OPEN=true — inference continues when AutoDefense is unreachable."
-        )
-
     if settings.debug:
         logger.warning("SEISO_DEBUG=true exposes /api/docs — disable in production.")
 
