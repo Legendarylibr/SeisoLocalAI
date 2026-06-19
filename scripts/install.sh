@@ -103,7 +103,7 @@ run_with_install_tui() {
 
 pre_clone_hint() {
   quiet_install_output || return 0
-  printf '\n\033[1mSeisoLocalAI\033[0m · fetching repository...\n\n'
+  printf '\n\033[1mSeisoLocalAI\033[0m · fetching repository...\n\n' >&2
 }
 
 need_cmd() {
@@ -133,11 +133,11 @@ resolve_root() {
     if quiet_install_output; then
       git clone --depth 1 --branch "$BRANCH" "$REPO_URL" "$INSTALL_DIR" >/dev/null 2>&1
     else
-      log "Cloning Seiso into $INSTALL_DIR"
+      log "Cloning Seiso into $INSTALL_DIR" >&2
       git clone --depth 1 --branch "$BRANCH" "$REPO_URL" "$INSTALL_DIR"
     fi
   else
-    log_unless_quiet "Updating existing clone in $INSTALL_DIR"
+    log_unless_quiet "Updating existing clone in $INSTALL_DIR" >&2
     git -C "$INSTALL_DIR" fetch --depth 1 origin "$BRANCH" >/dev/null 2>&1
     git -C "$INSTALL_DIR" checkout "$BRANCH" >/dev/null 2>&1
     git -C "$INSTALL_DIR" pull --ff-only origin "$BRANCH" >/dev/null 2>&1 || true
