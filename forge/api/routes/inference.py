@@ -27,9 +27,16 @@ from forge.services.llm_output import (
     sanitize_llm_output,
 )
 from forge.services.models import resolve_model_path
-from seiso.inference.backends import BACKEND_OLLAMA
+from seiso.inference.backends import BACKEND_LLAMACPP, BACKEND_MLX, BACKEND_OLLAMA, BACKEND_TORCH
 
 router = APIRouter(prefix="/inference", tags=["inference"])
+
+_POOL_BACKEND_BY_API_BACKEND = {
+    BACKEND_LLAMACPP: "llama",
+    "llama": "llama",
+    BACKEND_MLX: "mlx",
+    BACKEND_TORCH: "torch",
+}
 
 
 class ChatRequest(BaseModel):
@@ -173,9 +180,11 @@ async def preload_model(
     """Load a selected inventory model into the local inference engine."""
     ctx = await _resolve_preload_context(db, user_id, settings, body.model_id, body.inference_backend)
     if ctx.get("ollama_only"):
+        await _release_active_local_model(orchestrator._runner)
         return ctx["response"]
 
     loop = asyncio.get_running_loop()
+    await orchestrator.release_ollama_model()
     await loop.run_in_executor(None, lambda: _warm_local_model(orchestrator._runner, ctx["payload"]))
     status = orchestrator._runner._pool.status()
     return {"status": "loaded", "backend": ctx["backend"], **status}
@@ -194,9 +203,30 @@ async def preload_model_stream(
         ollama_model = ctx["response"].get("ollama_model") or ctx["response"].get("active_model")
         size_bytes = int(ctx.get("size_bytes") or 0)
         eta = estimate_load_eta_seconds(size_bytes) if size_bytes else 8
+        runner = orchestrator._runner
+        pool = runner._pool
+        loop = asyncio.get_running_loop()
 
         async def ollama_gen():
             from forge.providers.ollama import warm_model
+
+            switching_ollama = bool(
+                orchestrator.active_ollama_model
+                and orchestrator.active_ollama_model != ollama_model
+            )
+            if pool.active_key or switching_ollama:
+                yield {
+                    "event": "progress",
+                    "data": json.dumps(
+                        {
+                            "phase": "unloading",
+                            "label": "Releasing local model from VRAM before Ollama load",
+                            "percent": 5,
+                            "eta_seconds": 2,
+                        }
+                    ),
+                }
+            await orchestrator.prepare_ollama_model(ollama_model, settings.ollama_base_url)
 
             yield {
                 "event": "progress",
@@ -239,11 +269,21 @@ async def preload_model_stream(
     loop = asyncio.get_running_loop()
 
     async def event_gen():
-        active_path = pool.status().get("path")
-        switching = bool(
-            active_path
-            and pool.normalize_path(active_path) != pool.normalize_path(target_path)
-        )
+        if orchestrator.active_ollama_model:
+            yield {
+                "event": "progress",
+                "data": json.dumps(
+                    {
+                        "phase": "unloading",
+                        "label": "Releasing Ollama model from VRAM",
+                        "percent": 5,
+                        "eta_seconds": 2,
+                    }
+                ),
+            }
+            await orchestrator.release_ollama_model()
+
+        switching = _active_local_model_would_change(pool, target_path=target_path, backend=ctx["backend"])
         if switching:
             yield {
                 "event": "progress",
@@ -390,9 +430,7 @@ def _warm_local_model(runner, payload: dict[str, Any]) -> None:
     model_path = payload["model_path"]
     route, resolved_path = runner._resolve_route(payload, model_path)
     pool = runner._pool
-    norm = pool.normalize_path(resolved_path)
-    active_path = pool.status().get("path")
-    if active_path and pool.normalize_path(active_path) != norm:
+    if _active_local_model_would_change(pool, target_path=resolved_path, backend=payload.get("inference_backend")):
         pool.cancel_and_unload()
     if route == "mlx":
         pool.get_mlx(resolved_path)
@@ -400,6 +438,30 @@ def _warm_local_model(runner, payload: dict[str, Any]) -> None:
         pool.get_torch(resolved_path)
     else:
         pool.get_llama(resolved_path, n_ctx=payload.get("n_ctx", 4096))
+
+
+async def _release_active_local_model(runner) -> None:
+    pool = runner._pool
+    if not pool.active_key:
+        return
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, pool.cancel_and_unload)
+
+
+def _active_local_model_would_change(pool, *, target_path: str, backend: str | None) -> bool:
+    status = pool.status()
+    if not status.get("active_model"):
+        return False
+
+    expected_pool_backend = _POOL_BACKEND_BY_API_BACKEND.get((backend or "").lower())
+    if expected_pool_backend and status.get("backend") != expected_pool_backend:
+        return True
+
+    active_path = status.get("path")
+    return bool(
+        active_path
+        and pool.normalize_path(active_path) != pool.normalize_path(target_path)
+    )
 
 
 @router.post("/chat")
