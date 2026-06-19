@@ -1,4 +1,4 @@
-"""Cross-cutting OOM prevention — headroom probes, clamps, retries, and load guards."""
+"""Cross-cutting OOM prevention — headroom probes, clamps, and load guards."""
 
 from __future__ import annotations
 
@@ -6,13 +6,12 @@ import gc
 import logging
 import os
 import platform
-from collections.abc import Callable
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import Any
+
+from seiso.env import env_bool
 
 logger = logging.getLogger(__name__)
-
-T = TypeVar("T")
 
 # Reserve a slice of free memory for OS / display / other processes.
 _DEFAULT_RESERVE_RATIO = 0.08
@@ -100,16 +99,9 @@ class MemoryLoadBlockedError(RuntimeError):
     """Raised when a model load would exceed available memory."""
 
 
-def _env_bool(name: str, default: bool) -> bool:
-    raw = os.environ.get(name, "").strip().lower()
-    if not raw:
-        return default
-    return raw in {"1", "true", "yes", "on"}
-
-
 def allow_memory_overcommit() -> bool:
     """When true, log warnings instead of blocking oversized loads."""
-    return _env_bool("SEISO_ALLOW_MEMORY_OVERCOMMIT", False)
+    return env_bool("SEISO_ALLOW_MEMORY_OVERCOMMIT", False)
 
 
 def is_oom_error(exc: BaseException) -> bool:
@@ -551,42 +543,12 @@ def apply_rl_memory_guards(flat: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
-def estimate_file_ram_mb(path: Path) -> int:
-    """Rough RAM needed to load a JSONL file via Python list."""
-    size_mb = path.stat().st_size / (1024**2)
-    return int(size_mb * 2.5)
-
-
 def jsonl_load_safe(path: Path) -> bool:
     """True when JSONL should use datasets loader instead of in-memory list."""
     try:
         return path.stat().st_size > _MAX_JSONL_LOAD_MB * 1024**2
     except OSError:
         return False
-
-
-def run_with_oom_retry(
-    fn: Callable[[], T],
-    *,
-    label: str = "operation",
-    on_retry: Callable[[], None] | None = None,
-    max_attempts: int = 2,
-) -> T:
-    """Run ``fn`` once; on OOM release caches, optional ``on_retry``, then retry."""
-    last_exc: BaseException | None = None
-    for attempt in range(max_attempts):
-        try:
-            return fn()
-        except Exception as exc:
-            last_exc = exc
-            if not is_oom_error(exc) or attempt >= max_attempts - 1:
-                raise
-            logger.warning("%s OOM (attempt %d/%d): %s", label, attempt + 1, max_attempts, exc)
-            release_cached_memory(sync=True)
-            if on_retry:
-                on_retry()
-    assert last_exc is not None
-    raise last_exc
 
 
 def resolve_training_device_map(device: str | None = None) -> str | dict[str, str] | None:

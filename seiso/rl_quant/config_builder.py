@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from seiso.rl_quant.bootstrap import _VENDOR_ROOT, ensure_adaptive_quant_importable
+from seiso.rl_quant.bootstrap import ensure_adaptive_quant_importable, vendor_root
 
 
 def _artifact_paths(output_root: Path, run_name: str) -> dict[str, str]:
@@ -41,7 +41,7 @@ def build_framework_config(
     if config_file := payload.get("config_file"):
         path = Path(config_file)
         if not path.is_file():
-            path = _VENDOR_ROOT / "configs" / config_file
+            path = vendor_root() / "configs" / config_file
         base = load_config(path)
     else:
         base = named_preset(str(payload.get("preset", "reproducible")))
@@ -63,7 +63,7 @@ def build_framework_config(
     }
 
     if preset in {"post_train", "posttrain"}:
-        overrides["prompt_library_path"] = str(_VENDOR_ROOT / "prompts" / "post_train_library.json")
+        overrides["prompt_library_path"] = str(vendor_root() / "prompts" / "post_train_library.json")
     elif payload.get("prompt_library"):
         overrides["prompt_library_path"] = str(payload["prompt_library"])
 

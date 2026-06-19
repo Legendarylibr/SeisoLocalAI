@@ -1,9 +1,9 @@
 import type { RLQuantPreset } from "@/lib/api";
 
 export const RL_QUANT_FALLBACK_PRESETS: RLQuantPreset[] = [
-  { id: "minimal", label: "Minimal", backend: "simulator", training_backend: "stdlib" },
-  { id: "reproducible", label: "Reproducible", backend: "simulator", training_backend: "stdlib" },
-  { id: "post_train", label: "Post-train", backend: "simulator", training_backend: "stdlib" },
+  { id: "minimal", label: "Fast smoke (256 episodes)", backend: "simulator", training_backend: "stdlib" },
+  { id: "reproducible", label: "Reproducible research (simulator)", backend: "simulator", training_backend: "stdlib" },
+  { id: "post_train", label: "Post fine-tune RL (continuous, router)", backend: "simulator", training_backend: "stdlib" },
 ];
 
 export const RL_QUANT_PRESET_HINTS: Record<string, string> = {

@@ -367,9 +367,13 @@ class _CodeValidator(ast.NodeVisitor):
                 _check_alloc_size(self, node.args[0])
             elif node.func.id == "list" and node.args:
                 arg = node.args[0]
-                if isinstance(arg, ast.Call) and isinstance(arg.func, ast.Name) and arg.func.id == "range":
-                    if arg.args:
-                        _check_alloc_size(self, arg.args[0])
+                if (
+                    isinstance(arg, ast.Call)
+                    and isinstance(arg.func, ast.Name)
+                    and arg.func.id == "range"
+                    and arg.args
+                ):
+                    _check_alloc_size(self, arg.args[0])
         self.generic_visit(node)
 
     def visit_Attribute(self, node: ast.Attribute) -> None:

@@ -1,5 +1,6 @@
+from seiso.kernels.dispatch import estimate_vram_savings_pct
 from seiso.kernels.platform import GpuPlatform, GpuVendor, detect_gpu
-from seiso.kernels.triton_ops import estimate_vram_savings_pct, is_triton_available
+from seiso.kernels.triton_ops import is_triton_available
 
 
 def test_triton_availability():
@@ -12,8 +13,10 @@ def test_platform_detection():
     assert isinstance(platform.device_count, int)
 
 
-def test_vram_estimate_triton():
-    assert estimate_vram_savings_pct(True, True) >= 60
+def test_vram_estimate_fused():
+    """Dispatch heuristic: 4-bit (+55) plus fused-kernel bonus when a GPU backend is active."""
+    savings_both = estimate_vram_savings_pct(True, True)
+    assert savings_both >= 55
     assert estimate_vram_savings_pct(False, False) == 0
 
 

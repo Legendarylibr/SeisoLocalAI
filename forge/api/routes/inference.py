@@ -16,11 +16,15 @@ from forge.db.store import Database
 from forge.orchestrators.inference import InferenceOrchestrator
 from forge.security.auth import get_current_user_id
 from forge.services.chat_messages import build_trusted_messages
-from forge.services.llm_output import StreamingOutputSanitizer, sanitize_llm_output
 from forge.services.download_progress import estimate_load_eta_seconds
 from forge.services.hardware import hardware_profile
 from forge.services.hf_cache_inventory import sync_hf_cache_inventory
-from forge.services.inference_models import get_inference_option, list_inference_options, resolve_chat_target
+from forge.services.inference_models import (
+    get_inference_option,
+    list_inference_options,
+    resolve_chat_target,
+)
+from forge.services.llm_output import StreamingOutputSanitizer, sanitize_llm_output
 from forge.services.models import resolve_model_path
 from seiso.inference.backends import BACKEND_LLAMACPP, BACKEND_MLX, BACKEND_OLLAMA, BACKEND_TORCH
 

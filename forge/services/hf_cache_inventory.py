@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -80,10 +81,8 @@ def _cache_tree_mtime(hf_cache_dir: Path) -> float:
         snapshots = child / "snapshots"
         if not snapshots.is_dir():
             continue
-        try:
+        with contextlib.suppress(OSError):
             latest = max(latest, snapshots.stat().st_mtime)
-        except OSError:
-            pass
         for snap in snapshots.iterdir():
             if not snap.is_dir():
                 continue

@@ -17,6 +17,12 @@ from seiso.security import generate_secret_key, resolve_data_dir
 
 StorageMode = Literal["persistent", "ephemeral"]
 
+# Local Forge + Vite dev — 127.0.0.1 and localhost are different browser origins.
+DEFAULT_CORS_ORIGINS = (
+    "http://127.0.0.1:8765,http://localhost:8765,"
+    "http://127.0.0.1:5173,http://localhost:5173"
+)
+
 
 class ForgeSettings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -34,7 +40,7 @@ class ForgeSettings(BaseSettings):
     trust_proxy: bool = False
     trusted_proxy_ips: str = ""
     secure_cookies: bool = False
-    cors_origins: str = "http://127.0.0.1:8765,http://localhost:5173"
+    cors_origins: str = DEFAULT_CORS_ORIGINS
     hf_token: str = ""
     rate_limit: int = Field(default=120, ge=1)
     session_hours: int = Field(default=24, ge=1, le=168)

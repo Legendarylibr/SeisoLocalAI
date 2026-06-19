@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from seiso.compress.bootstrap import _VENDOR_ROOT, ensure_codellama_compress_importable
+from seiso.compress.bootstrap import ensure_codellama_compress_importable, vendor_root
 
 STAGE_ORDER = (
     "distill",
@@ -91,7 +91,7 @@ def build_pipeline_config(
 
         path = Path(config_file)
         if not path.is_file():
-            path = _VENDOR_ROOT / "configs" / config_file
+            path = vendor_root() / "configs" / config_file
         if path.is_file():
             blob = load_config_file(path)
             preset.update(blob.get("pipeline", {}))

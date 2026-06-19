@@ -103,10 +103,7 @@ def _looks_like_reasoning_leak(content: str) -> bool:
         return True
     if _THINK_TAG_PATTERN.search(content):
         return True
-    if _PIPE_TAG_PATTERN.search(content):
-        return True
-    return False
-
+    return bool(_PIPE_TAG_PATTERN.search(content))
 
 def _extract_final_answer_from_reasoning(content: str) -> str | None:
     for pattern in _FINAL_ANSWER_PATTERNS:
