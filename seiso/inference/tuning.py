@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import threading
@@ -53,10 +54,8 @@ def configure_torch_inference() -> None:
                 torch.backends.cuda.enable_mem_efficient_sdp(True)
             if hasattr(torch.backends.cuda, "enable_math_sdp"):
                 torch.backends.cuda.enable_math_sdp(False)
-            try:
+            with contextlib.suppress(Exception):
                 torch.set_float32_matmul_precision("high")
-            except Exception:
-                pass
 
         _torch_configured = True
         logger.debug("PyTorch inference backends configured")

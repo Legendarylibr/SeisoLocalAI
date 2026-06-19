@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import os
 import shutil
@@ -172,13 +173,11 @@ def _cached_download_result_if_usable(
             if str(existing.get("source") or "").startswith("hf:"):
                 return None
         else:
-            try:
+            with contextlib.suppress(Exception):
                 expected_size = max(
                     expected_size,
                     sum(get_gguf_file_size_bytes(gguf_repo, str(item)) for item in gguf_files),
                 )
-            except Exception:
-                pass
             if not _gguf_metadata_files_complete(path, [str(item) for item in gguf_files], expected_size):
                 return None
     if not _path_has_complete_artifact(path, fmt, expected_size):

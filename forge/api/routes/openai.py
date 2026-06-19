@@ -17,7 +17,11 @@ from forge.db.store import Database
 from forge.orchestrators.inference import InferenceOrchestrator
 from forge.security.autodefense import defense_enabled, scan_output
 from forge.security.openai_auth import get_openai_user_id
-from forge.services.llm_output import StreamingOutputSanitizer, chunk_sanitized_output, sanitize_llm_output
+from forge.services.llm_output import (
+    StreamingOutputSanitizer,
+    chunk_sanitized_output,
+    sanitize_llm_output,
+)
 from forge.services.models import resolve_model_path
 
 router = APIRouter(tags=["openai"])

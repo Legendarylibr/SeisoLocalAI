@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from forge.services.llm_output import StreamingOutputSanitizer, chunk_sanitized_output, sanitize_llm_output
+from forge.services.llm_output import (
+    StreamingOutputSanitizer,
+    chunk_sanitized_output,
+    sanitize_llm_output,
+)
 from forge.tools.registry import ToolRegistry, ToolSpec, tools_system_prompt
 
 

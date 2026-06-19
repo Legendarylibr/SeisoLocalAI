@@ -5,9 +5,10 @@ from __future__ import annotations
 import asyncio
 import os
 import time
+from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
-from typing import Any, Iterator
+from typing import Any
 
 from seiso.inference.backends import resolve_local_backend
 from seiso.inference.model_pool import get_model_pool

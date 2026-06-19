@@ -11,7 +11,11 @@ from pydantic import BaseModel, Field
 
 from forge.api.deps import get_db, get_rl_quant_orchestrator
 from forge.api.routes._jobs import format_rl_quant_job, resolve_linked_training_job
-from forge.api.routes._pipeline import FormattedJobRoutes, PipelineJobResponse, register_formatted_job_routes
+from forge.api.routes._pipeline import (
+    FormattedJobRoutes,
+    PipelineJobResponse,
+    register_formatted_job_routes,
+)
 from forge.api.routes._stream import job_failure_message, spawn_background
 from forge.api.routes.rl_quant_presets import rl_quant_presets_response
 from forge.config import ForgeSettings, get_settings

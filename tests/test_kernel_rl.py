@@ -26,8 +26,8 @@ def test_kernel_profiles_and_analytic_speedup():
 
 def test_kernel_reward_terms():
     require_adaptive_quant()
-    from adaptive_quant.reward import compute_weighted_reward
     from adaptive_quant.configuration import RewardWeights
+    from adaptive_quant.reward import compute_weighted_reward
 
     weights = RewardWeights(theta_kernel_speedup=0.5, iota_kernel_latency=0.01)
     base_metrics = {

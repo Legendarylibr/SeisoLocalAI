@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -91,6 +92,10 @@ def test_replay_manifest_from_vendor(tmp_path: Path):
 @pytest.mark.skipif(
     not __import__("importlib").util.find_spec("torch"),
     reason="torch not installed",
+)
+@pytest.mark.skipif(
+    os.environ.get("SEISO_RUN_MODEL_SMOKE_TESTS") != "1",
+    reason="requires model download; set SEISO_RUN_MODEL_SMOKE_TESTS=1 to run",
 )
 def test_run_smoke_pipeline(tmp_path: Path):
     """End-to-end smoke pipeline with minimal steps (requires torch + GPU/CPU)."""

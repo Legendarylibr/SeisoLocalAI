@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from seiso.inference.tuning import (
-    extract_mlx_token_text,
     estimate_llama_n_ctx,
+    extract_mlx_token_text,
     llama_completion_kwargs,
     mlx_stream_kwargs,
     torch_generate_kwargs,
@@ -27,8 +27,13 @@ def test_mlx_stream_kwargs_greedy_by_default():
 
 def test_mlx_stream_kwargs_with_temperature():
     pytest = __import__("pytest")
-    mlx_lm = pytest.importorskip("mlx_lm")
-    _ = mlx_lm  # used for skip only
+    try:
+        mlx_lm = pytest.importorskip("mlx_lm")
+        _ = mlx_lm  # used for skip only
+    except RuntimeError as exc:
+        if "No Metal device available" in str(exc):
+            pytest.skip(str(exc))
+        raise
     kwargs = mlx_stream_kwargs({"max_tokens": 64, "temperature": 0.7, "top_p": 0.9})
     assert kwargs["max_tokens"] == 64
     assert kwargs["sampler"] is not None

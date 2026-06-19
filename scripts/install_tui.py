@@ -10,7 +10,7 @@ import shutil
 import signal
 import sys
 import time
-from typing import Iterable
+from collections.abc import Iterable
 
 BRAND = "SeisoLocalAI"
 
