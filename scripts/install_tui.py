@@ -185,6 +185,13 @@ def cmd_intro(_: argparse.Namespace) -> int:
     return 0
 
 
+def _poll_exitcode(pid: int) -> int | None:
+    done_pid, status = os.waitpid(pid, os.WNOHANG)
+    if done_pid == 0:
+        return None
+    return os.waitstatus_to_exitcode(status)
+
+
 def cmd_during(args: argparse.Namespace) -> int:
     if not _tty():
         if args.wait_pid:
@@ -194,19 +201,22 @@ def cmd_during(args: argparse.Namespace) -> int:
 
     sys.stdout.write(HIDE)
     proc = args.wait_pid
+    exit_code: int | None = None
     if proc:
         try:
-            os.kill(proc, 0)
-        except OSError:
+            exit_code = _poll_exitcode(proc)
+        except ChildProcessError:
             return 0
 
     frame = 0
     try:
-        while True:
+        while exit_code is None:
             if proc is not None:
                 try:
-                    os.kill(proc, 0)
-                except OSError:
+                    exit_code = _poll_exitcode(proc)
+                except ChildProcessError:
+                    exit_code = 0
+                if exit_code is not None:
                     break
             glitch = 0.12 + (frame % 5) * 0.05 + random.random() * 0.08
             _draw(
@@ -222,41 +232,23 @@ def cmd_during(args: argparse.Namespace) -> int:
         sys.stdout.write(SHOW)
         sys.stdout.flush()
 
-    if proc is not None:
-        _, status = os.waitpid(proc, 0)
-        return os.waitstatus_to_exitcode(status)
-    return 0
+    return exit_code or 0
 
 
-def cmd_outro(_: argparse.Namespace) -> int:
+def cmd_outro(args: argparse.Namespace) -> int:
     if not _tty():
         return 0
     sys.stdout.write(HIDE)
     try:
-        for i in range(8):
-            glitch = max(0.02, 0.35 - i * 0.04)
-            _draw(
-                RAIN_SCENES[(7 - i) % len(RAIN_SCENES)],
-                subtitle="clouds breaking · static clearing",
-                brand_line=_flash_brand(i, glitch),
-                glitch=glitch,
-            )
-            time.sleep(0.08)
-
-        for i in range(10):
-            body = SUN_SCENE if i >= 3 else RAIN_SCENES[0] + "\n" + SUN_SCENE
-            glitch = max(0.0, 0.12 - i * 0.012)
-            _draw(
-                body,
-                subtitle="optimism · sunlight · clear signal",
-                brand_line=_flash_brand(i + 20, glitch),
-                glitch=glitch,
-                invert_flash=i == 1,
-            )
-            time.sleep(0.11)
-
+        _draw(
+            SUN_SCENE,
+            subtitle=f"install complete · open {args.url}",
+            brand_line=f"{C_SUN}{BOLD}{BRAND}{RESET}",
+            glitch=0.0,
+        )
         sys.stdout.write(
-            f"\n{C_SUN}{BOLD}✦ {BRAND} ready ✦{RESET}\n\n"
+            f"\n{C_SUN}{BOLD}Install complete.{RESET}\n"
+            f"Open Forge: {BOLD}{args.url}{RESET}\n\n"
         )
         sys.stdout.flush()
     finally:
@@ -277,6 +269,7 @@ def main(argv: Iterable[str] | None = None) -> int:
     p_during.set_defaults(func=cmd_during)
 
     p_outro = sub.add_parser("outro")
+    p_outro.add_argument("--url", default="http://127.0.0.1:8765")
     p_outro.set_defaults(func=cmd_outro)
 
     args = parser.parse_args(list(argv) if argv is not None else None)

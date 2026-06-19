@@ -81,7 +81,7 @@ install_tui_intro() {
 install_tui_outro() {
   local root="$1"
   install_tui_enabled "$root" || return 0
-  python3 "$root/scripts/install_tui.py" outro
+  python3 "$root/scripts/install_tui.py" outro --url "$FORGE_URL"
 }
 
 run_with_install_tui() {
