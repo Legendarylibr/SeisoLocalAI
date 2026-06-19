@@ -115,6 +115,8 @@ export type InferenceModelOption = {
   hardware_fit_label?: string;
   hardware_note?: string;
   est_vram_mb?: number;
+  memory_load_blocked?: boolean;
+  memory_load_blocked_reason?: string | null;
   metadata?: Record<string, unknown>;
 };
 
@@ -146,6 +148,8 @@ export type CatalogModel = {
   hardware_fit_label?: string;
   hardware_note?: string;
   est_vram_mb?: number;
+  memory_load_blocked?: boolean;
+  memory_load_blocked_reason?: string | null;
 };
 
 export type TrainingDefaults = {

@@ -7,6 +7,32 @@ import { progressFromPreloadEvent } from "@/lib/modelProgress";
 export const CHAT_MODEL_STORAGE_KEY = "chat";
 export const CHAT_BACKEND_STORAGE_KEY = "chat-backend";
 
+type MemoryFitModel = {
+  memory_load_blocked?: boolean;
+  memory_load_blocked_reason?: string | null;
+  est_vram_mb?: number;
+  hardware_note?: string;
+};
+
+/** True when a model's estimated runtime memory exceeds free VRAM/RAM headroom. */
+export function modelMemoryBlocked(
+  model: MemoryFitModel | null | undefined,
+  headroomMb?: number,
+): boolean {
+  if (!model) return false;
+  if (model.memory_load_blocked) return true;
+  if (headroomMb && model.est_vram_mb) return model.est_vram_mb > headroomMb;
+  return false;
+}
+
+export function modelMemoryBlockReason(model: MemoryFitModel | null | undefined): string {
+  return (
+    model?.memory_load_blocked_reason ||
+    model?.hardware_note ||
+    "This model exceeds available memory on your machine."
+  );
+}
+
 type ChatNavTarget = { modelId?: string | null; repo?: string | null; downloadBytes?: number | null };
 
 type BootstrapOptions = {
@@ -72,7 +98,8 @@ export function pickInferenceModel(
     (target.modelId && list.find((m) => m.id === target.modelId)?.id) ||
     (target.repo && list.find((m) => inventoryMatchesRepo(m, target.repo!))?.id) ||
     (storedId && list.find((m) => m.id === storedId)?.id) ||
-    list.find((m) => m.hardware_fit === "ideal" || m.hardware_fit === "good")?.id ||
+    list.find((m) => !modelMemoryBlocked(m) && (m.hardware_fit === "ideal" || m.hardware_fit === "good"))?.id ||
+    list.find((m) => !modelMemoryBlocked(m))?.id ||
     (list.length ? list[0].id : "")
   );
 }
@@ -210,6 +237,11 @@ export async function bootstrapChatSession(
         ? "This GGUF is not available for local chat. Install or update llama.cpp, or choose a GGUF architecture supported by your llama.cpp runtime."
         : "No installed local inference engine can load this model. Install MLX or PyTorch support.";
     throw new Error(hint);
+  }
+
+  const headroomMb = options.hwProfile?.vram_headroom_mb;
+  if (selected && modelMemoryBlocked(selected, headroomMb)) {
+    throw new Error(modelMemoryBlockReason(selected));
   }
 
   let loadedBackend = backend;

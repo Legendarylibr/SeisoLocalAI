@@ -100,3 +100,26 @@ def test_low_memory_apple_marks_large_models_tight(monkeypatch):
         profile,
     )
     assert fit["hardware_fit"] == "tight"
+
+
+def test_assess_hardware_fit_blocks_when_est_exceeds_headroom(monkeypatch):
+    profile = {"backend": "cuda", "gpus": [{"vram_total_mb": 8192, "vram_used_mb": 0}], "ram_gb": 16}
+    monkeypatch.setattr("forge.services.hardware.vram_headroom_mb", lambda _p: 4096)
+    fit = assess_catalog_fit(
+        {"params": "13B", "quant": "Q4_K_M", "tags": [], "repo_id": "x", "task": "chat"},
+        profile,
+    )
+    assert fit["memory_load_blocked"] is True
+    assert fit["memory_load_blocked_reason"]
+    assert "GB" in fit["memory_load_blocked_reason"]
+
+
+def test_assess_hardware_fit_allows_when_est_within_headroom(monkeypatch):
+    profile = {"backend": "cuda", "gpus": [{"vram_total_mb": 24576, "vram_used_mb": 0}], "ram_gb": 32}
+    monkeypatch.setattr("forge.services.hardware.vram_headroom_mb", lambda _p: 20480)
+    fit = assess_catalog_fit(
+        {"params": "7B", "quant": "Q4_K_M", "tags": [], "repo_id": "x", "task": "chat"},
+        profile,
+    )
+    assert fit["memory_load_blocked"] is False
+    assert fit["memory_load_blocked_reason"] is None

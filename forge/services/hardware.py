@@ -484,12 +484,22 @@ def assess_hardware_fit(
     if fit == "unlikely" and tier != HardwareTier.CPU_ONLY:
         note = f"Needs ~{est_vram_gb:.1f} GB — you have ~{headroom_gb} GB free"
 
+    blocked = headroom_mb > 0 and est_mb > headroom_mb
+    block_reason = None
+    if blocked:
+        block_reason = (
+            f"Needs ~{est_vram_gb:.1f} GB at runtime but only ~{headroom_gb} GB is free on this machine. "
+            "Choose a smaller or more quantized model."
+        )
+
     return {
         "hardware_fit": fit,
         "hardware_fit_label": label,
         "est_vram_mb": est_mb,
         "hardware_note": note,
         "hardware_fit_rank": FIT_RANK[fit],
+        "memory_load_blocked": blocked,
+        "memory_load_blocked_reason": block_reason,
     }
 
 

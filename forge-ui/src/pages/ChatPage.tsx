@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { api, ChatMessage, ChatThread, InferenceModelOption, streamChat } from "@/lib/api";
+import { api, ChatMessage, ChatThread, CatalogModel, InferenceModelOption, streamChat } from "@/lib/api";
 import { usePlatformSettings } from "@/context/PlatformSettingsContext";
-import { bootstrapChatSession, CHAT_BACKEND_STORAGE_KEY, CHAT_MODEL_STORAGE_KEY, hasChatNavTarget, initializeChatSession, isChatModelReady, needsHubDownload, preloadWithProgress, resolveInferenceBackend } from "@/lib/chatModel";
+import { bootstrapChatSession, CHAT_BACKEND_STORAGE_KEY, CHAT_MODEL_STORAGE_KEY, hasChatNavTarget, initializeChatSession, isChatModelReady, modelMemoryBlocked, modelMemoryBlockReason, needsHubDownload, preloadWithProgress, resolveInferenceBackend } from "@/lib/chatModel";
 import { useHardwareProfile } from "@/hooks/useHardware";
 import { writeStoredModel } from "@/lib/modelSelection";
 import { ModelProgressState, initialDownloadProgress, initialLoadProgress } from "@/lib/modelProgress";
@@ -105,6 +105,8 @@ export function ChatPage() {
       ? initialDownloadProgress(pendingRepo, pendingDownloadBytes)
       : null);
   const selectedFit = selected?.hardware_fit;
+  const modelBlocked = !providerId && modelMemoryBlocked(selected, hwProfile?.vram_headroom_mb);
+  const modelBlockReason = modelMemoryBlockReason(selected);
 
   const filteredThreads = useMemo(() => {
     const q = threadSearch.toLowerCase();
@@ -119,7 +121,9 @@ export function ChatPage() {
       const still = r.models.find((m) => m.id === selection);
       if (still) return r.models;
     }
-    const pick = r.models.find((m) => m.hardware_fit === "ideal" || m.hardware_fit === "good")?.id || r.models[0]?.id;
+    const pick = r.models.find((m) => !modelMemoryBlocked(m) && (m.hardware_fit === "ideal" || m.hardware_fit === "good"))?.id
+      || r.models.find((m) => !modelMemoryBlocked(m))?.id
+      || r.models[0]?.id;
     if (pick) {
       const model = r.models.find((m) => m.id === pick);
       setSelection(pick);
@@ -153,6 +157,10 @@ export function ChatPage() {
 
   const handleModelChange = async (modelId: string) => {
     const next = models.find((m) => m.id === modelId);
+    if (modelMemoryBlocked(next, hwProfile?.vram_headroom_mb)) {
+      setError(modelMemoryBlockReason(next));
+      return;
+    }
     const targetBackend = resolveInferenceBackend(next ?? null, hwProfile, inferenceBackend);
     if (
       modelId === selection &&
@@ -188,15 +196,19 @@ export function ChatPage() {
     }
   };
 
-  const handleCatalogSelect = (repoId: string, downloadBytes?: number) => {
+  const handleCatalogSelect = (model: CatalogModel) => {
+    if (modelMemoryBlocked(model, hwProfile?.vram_headroom_mb)) {
+      setError(modelMemoryBlockReason(model));
+      return;
+    }
     bootstrapAbortRef.current?.abort();
     streamAbortRef.current?.();
     streamAbortRef.current = null;
     if (streaming) setStreaming(false);
     setError(null);
-    const params = new URLSearchParams({ repo: repoId });
-    if (downloadBytes && downloadBytes > 0) {
-      params.set("bytes", String(downloadBytes));
+    const params = new URLSearchParams({ repo: model.repo_id });
+    if (model.download_bytes && model.download_bytes > 0) {
+      params.set("bytes", String(model.download_bytes));
     }
     setSearchParams(params, { replace: true });
   };
@@ -688,6 +700,7 @@ export function ChatPage() {
             selection={selection}
             disabled={!!providerId}
             switching={switchingModel}
+            headroomMb={hwProfile?.vram_headroom_mb}
             modelLabel={modelLabel}
             onSelectLocal={handleModelChange}
             onSelectCatalog={handleCatalogSelect}
@@ -899,8 +912,8 @@ export function ChatPage() {
               )}
             </p>
           )}
-          {selected?.hardware_fit === "unlikely" && !providerId && (
-            <p className="chat-hw-warn">{selected.hardware_note || "This model may exceed available memory on your machine."}</p>
+          {modelBlocked && (
+            <p className="chat-hw-warn">{modelBlockReason}</p>
           )}
         </div>
 
@@ -922,7 +935,7 @@ export function ChatPage() {
               type="button"
               className="chat-send-btn"
               onClick={send}
-              disabled={streaming || waitingForModel || !input.trim()}
+              disabled={streaming || waitingForModel || modelBlocked || !input.trim()}
               aria-label="Send message"
             >
               <IconSend size={16} />
