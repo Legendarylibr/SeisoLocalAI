@@ -2772,6 +2772,17 @@ th { color: var(--muted); font-weight: 500; font-size: 0.78rem; text-transform: 
   color: var(--accent);
 }
 
+.chat-model-picker-option.blocked,
+.chat-model-picker-option:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.chat-model-picker-option.blocked:hover,
+.chat-model-picker-option:disabled:hover {
+  background: transparent;
+}
+
 .chat-model-picker-option-name {
   overflow: hidden;
   text-overflow: ellipsis;

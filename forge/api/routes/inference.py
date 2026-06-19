@@ -368,6 +368,12 @@ async def _resolve_preload_context(
     if not selected:
         raise HTTPException(404, "Model not found in inventory")
 
+    if selected.get("memory_load_blocked"):
+        raise HTTPException(
+            400,
+            selected.get("memory_load_blocked_reason") or "Model exceeds available memory on this machine",
+        )
+
     if selected.get("kind") == "ollama":
         response = {
             "status": "ready",
@@ -534,6 +540,11 @@ async def chat(
         elif body.model_id:
             options = await list_inference_options(db, user_id, ollama_base_url=settings.ollama_base_url)
             selected = next((o for o in options if o["id"] == body.model_id), None)
+            if selected and selected.get("memory_load_blocked"):
+                raise HTTPException(
+                    400,
+                    selected.get("memory_load_blocked_reason") or "Model exceeds available memory on this machine",
+                )
             try:
                 target = resolve_chat_target(
                     selected,

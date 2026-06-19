@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, CatalogModel, InferenceModelOption } from "@/lib/api";
 import { inventoryMatchesRepo } from "@/lib/hubDownload";
 import { formatBytes } from "@/lib/modelProgress";
+import { modelMemoryBlocked, modelMemoryBlockReason } from "@/lib/chatModel";
 import { HubComboboxSearch } from "@/components/HubComboboxSearch";
 import { IconChevronDown } from "@/components/Icons";
 import { useHubCombobox } from "@/hooks/useHubCombobox";
@@ -11,9 +12,10 @@ type ChatModelPickerProps = {
   selection: string;
   disabled?: boolean;
   switching?: boolean;
+  headroomMb?: number;
   modelLabel: (m: InferenceModelOption) => string;
   onSelectLocal: (modelId: string) => void | Promise<void>;
-  onSelectCatalog: (repoId: string, downloadBytes?: number) => void | Promise<void>;
+  onSelectCatalog: (model: CatalogModel) => void | Promise<void>;
 };
 
 export function ChatModelPicker({
@@ -21,6 +23,7 @@ export function ChatModelPicker({
   selection,
   disabled,
   switching,
+  headroomMb,
   modelLabel,
   onSelectLocal,
   onSelectCatalog,
@@ -75,9 +78,9 @@ export function ChatModelPicker({
     void onSelectLocal(modelId);
   };
 
-  const pickCatalog = (repoId: string, downloadBytes?: number) => {
+  const pickCatalog = (model: CatalogModel) => {
     setOpen(false);
-    void onSelectCatalog(repoId, downloadBytes);
+    void onSelectCatalog(model);
   };
 
   const empty =
@@ -114,21 +117,29 @@ export function ChatModelPicker({
             {filteredLocal.length > 0 && (
               <div className="chat-model-picker-section">
                 <div className="chat-model-picker-section-title">Downloaded</div>
-                {filteredLocal.map((m) => (
+                {filteredLocal.map((m) => {
+                  const blocked = modelMemoryBlocked(m, headroomMb);
+                  return (
                   <button
                     key={m.id}
                     type="button"
                     role="option"
                     aria-selected={m.id === selection}
-                    className={`chat-model-picker-option${m.id === selection ? " active" : ""}`}
-                    onClick={() => pickLocal(m.id)}
+                    aria-disabled={blocked}
+                    disabled={blocked}
+                    className={`chat-model-picker-option${m.id === selection ? " active" : ""}${blocked ? " blocked" : ""}`}
+                    title={blocked ? modelMemoryBlockReason(m) : undefined}
+                    onClick={() => !blocked && pickLocal(m.id)}
                   >
                     <span className="chat-model-picker-option-name">{modelLabel(m)}</span>
                     {m.source_label && (
-                      <span className="chat-model-picker-option-meta">{m.source_label}</span>
+                      <span className="chat-model-picker-option-meta">
+                        {blocked ? modelMemoryBlockReason(m) : m.source_label}
+                      </span>
                     )}
                   </button>
-                ))}
+                  );
+                })}
               </div>
             )}
 
@@ -138,27 +149,37 @@ export function ChatModelPicker({
                 {catalogLoading && hubModels.length === 0 && (
                   <div className="chat-model-picker-hint">Searching models…</div>
                 )}
-                {hubModels.map((m) => (
+                {hubModels.map((m) => {
+                  const blocked = modelMemoryBlocked(m, headroomMb);
+                  return (
                   <button
                     key={m.repo_id}
                     type="button"
                     role="option"
-                    className="chat-model-picker-option chat-model-picker-option-hub"
-                    onClick={() => pickCatalog(m.repo_id, m.download_bytes)}
+                    aria-disabled={blocked}
+                    disabled={blocked}
+                    className={`chat-model-picker-option chat-model-picker-option-hub${blocked ? " blocked" : ""}`}
+                    title={blocked ? modelMemoryBlockReason(m) : undefined}
+                    onClick={() => !blocked && pickCatalog(m)}
                   >
                     <span className="chat-model-picker-option-name">{m.name}</span>
                     <span className="chat-model-picker-option-meta">
-                      {m.repo_id}
-                      {m.download_bytes
-                        ? ` · ${m.download_bytes_estimated ? "~" : ""}${formatBytes(m.download_bytes)} download`
-                        : m.params
-                          ? ` · ${m.params}`
-                          : ""}
-                      {m.hardware_fit_label ? ` · ${m.hardware_fit_label}` : ""}
-                      {m.download_mirror_verified === false && m.download_error ? " · mirror not pre-verified" : ""}
+                      {blocked
+                        ? modelMemoryBlockReason(m)
+                        : <>
+                          {m.repo_id}
+                          {m.download_bytes
+                            ? ` · ${m.download_bytes_estimated ? "~" : ""}${formatBytes(m.download_bytes)} download`
+                            : m.params
+                              ? ` · ${m.params}`
+                              : ""}
+                          {m.hardware_fit_label ? ` · ${m.hardware_fit_label}` : ""}
+                          {m.download_mirror_verified === false && m.download_error ? " · mirror not pre-verified" : ""}
+                        </>}
                     </span>
                   </button>
-                ))}
+                  );
+                })}
               </div>
             )}
 

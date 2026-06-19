@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api, CatalogModel, HardwareSummary, LocalModel } from "@/lib/api";
 import { usePlatformSettings } from "@/context/PlatformSettingsContext";
-import { chatPath, chatPathForLocalModel } from "@/lib/chatModel";
+import { chatPath, chatPathForLocalModel, modelMemoryBlocked, modelMemoryBlockReason } from "@/lib/chatModel";
 import { trainPath } from "@/lib/hubDownload";
 import { HardwareFitBadge } from "@/components/HardwareFitBadge";
 import { ModelCardSkeleton } from "@/components/ModelCardSkeleton";
@@ -101,10 +101,14 @@ export function HubPage() {
     return () => clearTimeout(t);
   }, [refreshCatalog]);
 
-  const openChat = (repoId: string, downloadBytes?: number) => {
-    setDownloading(repoId);
+  const openChat = (model: CatalogModel) => {
+    if (modelMemoryBlocked(model, hwSummary?.vram_headroom_mb)) {
+      window.alert(modelMemoryBlockReason(model));
+      return;
+    }
+    setDownloading(model.repo_id);
     setDownloadAction("chat");
-    navigate(chatPath({ repo: repoId, downloadBytes }));
+    navigate(chatPath({ repo: model.repo_id, downloadBytes: model.download_bytes }));
   };
 
   const openTrain = (repoId: string, downloadBytes?: number) => {
@@ -324,7 +328,7 @@ export function HubPage() {
                     <button
                       className="btn btn-primary"
                       disabled={downloading === m.repo_id || embeddingOnly}
-                      onClick={() => openChat(m.repo_id, m.download_bytes)}
+                      onClick={() => openChat(m)}
                       title="Download public GGUF to local cache and open chat"
                     >
                       {downloading === m.repo_id && downloadAction === "chat" ? "Opening…" : "Chat with GGUF"}
