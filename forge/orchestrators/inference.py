@@ -13,13 +13,6 @@ from forge.providers.ollama import stream_chat_completion as ollama_stream_chat
 from forge.providers.ollama import unload_model as ollama_unload_model
 from forge.providers.router import chat_completion
 from forge.security.audit import audit_event
-from forge.security.autodefense import (
-    DefenseBlockedError,
-    defense_enabled,
-    scan_messages,
-    scan_output,
-)
-from forge.services.llm_output import sanitize_llm_output
 from forge.tools.registry import build_default_registry
 from seiso.inference.backends import BACKEND_OLLAMA
 from seiso.inference.runner import LocalInferenceRunner
@@ -68,27 +61,9 @@ class InferenceOrchestrator(Orchestrator):
         provider = payload.get("provider")
         job = self.get_job(job_id)
         user_id = payload.get("user_id") or (job.user_id if job else None)
-        use_defense = defense_enabled(settings := get_settings(), request_flag=payload.get("defense"))
-        session_id = payload.get("thread_id") or job_id
-        defense_meta: dict[str, Any] | None = None
+        settings = get_settings()
 
         self._emit_log(job_id, f"Messages: {len(messages)}, tools={use_tools}, provider={provider or 'local'}")
-
-        if use_defense:
-            self._emit_log(job_id, "AutoDefense: scanning input")
-            messages, input_result = await scan_messages(
-                messages,
-                session_id=session_id,
-                user_id=user_id,
-                settings=settings,
-            )
-            payload = {**payload, "messages": messages}
-            if input_result and not input_result.unavailable:
-                defense_meta = input_result.to_dict()
-                self._emit_log(
-                    job_id,
-                    f"AutoDefense input: action={input_result.action} risk={input_result.risk_score}",
-                )
 
         def on_log(msg: str) -> None:
             self._emit_log(job_id, msg)
@@ -125,46 +100,12 @@ class InferenceOrchestrator(Orchestrator):
             if self._active_generation_user_id == (str(user_id) if user_id else None):
                 self._active_generation_user_id = None
 
-        reply = sanitize_llm_output(reply)
-
-        if use_defense:
-            self._emit_log(job_id, "AutoDefense: scanning output")
-            reply, output_result = await scan_output(
-                messages,
-                reply,
-                session_id=session_id,
-                user_id=user_id,
-                settings=settings,
-            )
-            if not output_result.unavailable:
-                defense_meta = output_result.to_dict()
-                self._emit_log(
-                    job_id,
-                    f"AutoDefense output: action={output_result.action} risk={output_result.risk_score}",
-                )
-
         self._emit_log(job_id, f"Generated {len(reply)} chars")
-        result: dict[str, Any] = {"content": reply, "backend": backend, "messages": len(messages)}
-        if defense_meta:
-            result["defense"] = defense_meta
-        return result
+        return {"content": reply, "backend": backend, "messages": len(messages)}
 
     async def stream_local(self, payload: dict[str, Any]) -> AsyncIterator[str]:
         """Stream tokens from local inference (llama.cpp, MLX, Torch, or Ollama)."""
-        settings = get_settings()
-        use_defense = defense_enabled(settings, request_flag=payload.get("defense"))
-        messages = list(payload.get("messages", []))
         user_id = payload.get("user_id")
-
-        if use_defense:
-            messages, _ = await scan_messages(
-                messages,
-                session_id=payload.get("thread_id"),
-                user_id=payload.get("user_id"),
-                settings=settings,
-            )
-            payload = {**payload, "messages": messages}
-
         self._active_generation_user_id = str(user_id) if user_id else None
         try:
             if self._active_backend(payload) == BACKEND_OLLAMA:
@@ -279,32 +220,3 @@ class InferenceOrchestrator(Orchestrator):
     async def _local_chat(self, payload: dict[str, Any]) -> str:
         await self.release_ollama_model()
         return await self._runner.chat(payload)
-
-    async def _run(self, job_id: str, payload: dict[str, Any]) -> None:
-        """Preserve AutoDefense metadata when a scan blocks the interaction."""
-        import asyncio
-
-        from forge.orchestrators.base import JobStatus
-
-        rec = self._jobs[job_id]
-        try:
-            result = await self.execute(job_id, payload)
-            rec.result = result
-            rec.status = JobStatus.COMPLETED
-        except DefenseBlockedError as exc:
-            rec.status = JobStatus.FAILED
-            rec.error = str(exc)
-            if exc.result:
-                rec.result = {"defense": exc.result.to_dict()}
-            self._emit_log(job_id, f"ERROR: {exc}")
-        except asyncio.CancelledError:
-            rec.status = JobStatus.CANCELLED
-            self._emit_log(job_id, "Job cancelled")
-            raise
-        except Exception as exc:
-            rec.status = JobStatus.FAILED
-            rec.error = str(exc)
-            self._emit_log(job_id, f"ERROR: {exc}")
-        finally:
-            self._subprocesses.pop(job_id, None)
-            self._finish_logs(job_id)

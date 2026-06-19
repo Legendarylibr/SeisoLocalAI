@@ -338,10 +338,6 @@ export function SettingsPage() {
                 <code>SEISO_ALLOW_CODE_EXEC=false</code>
                 <span>Disable sandboxed Python execution</span>
               </div>
-              <div className="env-hint">
-                <code>SEISO_AUTODEFENSE_ENABLED=true</code>
-                <span>Scan prompts for injection attacks</span>
-              </div>
             </div>
           </div>
         </div>

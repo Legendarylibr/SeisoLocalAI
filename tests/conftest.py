@@ -56,34 +56,6 @@ def enable_tools(monkeypatch):
 
 
 @pytest.fixture
-def enable_autodefense(monkeypatch):
-    """Enable AutoDefense and reload settings."""
-    from forge.api.deps import clear_dependency_caches
-
-    monkeypatch.setenv("SEISO_AUTODEFENSE_ENABLED", "true")
-    clear_dependency_caches()
-    yield
-    clear_dependency_caches()
-
-
-@pytest.fixture
-async def autodefense_auth_client(app, tmp_path, monkeypatch):
-    """Auth client with AutoDefense enabled before DB init (avoids ephemeral DB wipe)."""
-    monkeypatch.setenv("SEISO_AUTODEFENSE_ENABLED", "true")
-    clear_dependency_caches()
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        reg = await client.post(
-            "/api/auth/register",
-            json={"password": "securepass1"},
-        )
-        assert reg.status_code == 201
-        token = reg.json()["access_token"]
-        headers = {"Authorization": f"Bearer {token}"}
-        yield client, token, headers, tmp_path
-
-
-@pytest.fixture
 async def auth_client(app, tmp_path):
     """Register default user and return (client, token, headers)."""
     transport = ASGITransport(app=app)

@@ -43,14 +43,6 @@ function postureItems(s: SecurityPosture): Item[] {
       warn: s.allow_code_exec,
     },
     {
-      label: "Prompt defense",
-      ok: s.autodefense_enabled,
-      detail: s.autodefense_enabled
-        ? "AutoDefense scans inputs and outputs"
-        : "Optional — set SEISO_AUTODEFENSE_ENABLED=true",
-      warn: false,
-    },
-    {
       label: "Rate limiting",
       ok: !s.rate_limit_enabled || s.rate_limit > 0,
       detail: s.rate_limit_enabled
