@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { RecipeCanvas, RecipeGraph } from "@/components/RecipeCanvas";
 import { LogStream } from "@/components/research/LogStream";
+import { StudioCardHeader } from "@/components/studio/StudioCardHeader";
 import { StudioPageShell } from "@/components/StudioPageShell";
 import { api, subscribeSSE } from "@/lib/api";
 
@@ -70,28 +71,35 @@ export function RecipesPage() {
         />
       </div>
 
-      <div className="recipe-run-bar card">
-        <div className="recipe-run-meta">
-          {recipe ? (
-            <>
-              <strong>{recipe.name}</strong>
-              <span className="muted-text">
-                {recipe.nodes.length} nodes · {recipe.edges.length} connections
-              </span>
-            </>
-          ) : (
-            <span className="muted-text">Connect nodes and configure the Import path to run.</span>
-          )}
+      <div className="card studio-card recipe-run-bar">
+        <StudioCardHeader
+          inline
+          icon="▶"
+          title="Run recipe"
+          description={
+            recipe
+              ? `${recipe.nodes.length} nodes · ${recipe.edges.length} connections`
+              : "Connect nodes and configure the Import path to run."
+          }
+          meta={recipe ? <strong>{recipe.name}</strong> : undefined}
+        />
+        <div className="studio-action-bar studio-action-bar-flush">
+          <button className="btn btn-primary btn-lg" onClick={run} disabled={running}>
+            {running ? "Running…" : "Run recipe"}
+          </button>
         </div>
-        <button className="btn btn-primary" onClick={run} disabled={running}>
-          {running ? "Running…" : "Run recipe"}
-        </button>
-        {error && <p className="error-text">{error}</p>}
+        {error && <p className="error-text studio-field-hint">{error}</p>}
       </div>
 
       {(logs.length > 0 || running) && (
-        <div className="card">
-          <LogStream title="Pipeline output" logs={logs} tall />
+        <div className="card studio-card studio-card-scroll">
+          <StudioCardHeader
+            icon="②"
+            title="Pipeline output"
+            description="Streaming logs from the active recipe job"
+            tone="monitor"
+          />
+          <LogStream logs={logs} fill label="Recipe log" />
         </div>
       )}
     </StudioPageShell>

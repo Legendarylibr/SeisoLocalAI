@@ -14,11 +14,11 @@ type DataTableProps<T> = {
 
 export function DataTable<T>({ columns, rows, emptyMessage = "No records yet.", getRowKey }: DataTableProps<T>) {
   if (rows.length === 0) {
-    return <p className="research-empty">{emptyMessage}</p>;
+    return <p className="research-empty research-empty-studio">{emptyMessage}</p>;
   }
 
   return (
-    <div className="research-table-wrap">
+    <div className="research-table-wrap research-table-wrap-studio">
       <table className="research-table">
         <thead>
           <tr>

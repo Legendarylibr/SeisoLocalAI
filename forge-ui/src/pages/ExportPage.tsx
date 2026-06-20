@@ -2,6 +2,11 @@ import { useEffect, useRef, useState } from "react";
 import { api, ExportJob, HubPublishFields, PublishableModel, RLQuantJob, subscribeSSE } from "@/lib/api";
 import { invalidateApiCache } from "@/lib/api/getCache";
 import { appendBoundedLog } from "@/lib/api/sse";
+import { DataTable } from "@/components/research/DataTable";
+import { FormSection } from "@/components/research/FormSection";
+import { LogStream } from "@/components/research/LogStream";
+import { StudioCardBody } from "@/components/studio/StudioCardBody";
+import { StudioCardHeader } from "@/components/studio/StudioCardHeader";
 import { StudioPageShell } from "@/components/StudioPageShell";
 
 function emptyHub(): HubPublishFields {
@@ -191,185 +196,230 @@ export function ExportPage() {
       title="Export & Publish"
       subtitle="Merge LoRA, quantize GGUF, download locally, or publish Seiso-created outputs to Hugging Face."
     >
-      <div className="card">
-        <h3 className="section-title">Export checkpoint</h3>
-        <label>Checkpoint path (training output)</label>
-        <input value={checkpoint} onChange={(e) => setCheckpoint(e.target.value)} placeholder="~/.seiso/checkpoints/…" />
-        <label>Export profile (optional — overrides manual format picks)</label>
-        <select value={profile} onChange={(e) => setProfile(e.target.value)}>
-          <option value="">Manual formats</option>
-          {profiles.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.id} ({p.formats.join(", ")})
-            </option>
-          ))}
-        </select>
-        <label>Formats</label>
-        <div style={{ display: "flex", gap: "0.5rem", marginBottom: "0.75rem", flexWrap: "wrap" }}>
-          {["merged", "lora", "full", "gguf"].map((f) => (
-            <button
-              key={f}
-              type="button"
-              className={`btn ${formats.includes(f) ? "btn-primary" : ""}`}
-              onClick={() => toggleFormat(f)}
-            >
-              {f}
-            </button>
-          ))}
-        </div>
-        <label>RL quant job (optional — overrides GGUF quants)</label>
-        <select value={rlQuantJobId} onChange={(e) => setRlQuantJobId(e.target.value)}>
-          <option value="">Manual / default quants</option>
-          {completedRlJobs.map((j) => (
-            <option key={j.id} value={j.id}>
-              {j.id.slice(0, 8)} — {j.gguf_quants.join(", ")}
-            </option>
-          ))}
-        </select>
-        {formats.includes("gguf") && !rlQuantJobId && (
-          <>
-            <label>GGUF quantizations</label>
-            <div style={{ display: "flex", gap: "0.5rem", marginBottom: "0.75rem", flexWrap: "wrap" }}>
-              {GGUF_QUANT_OPTIONS.map((q) => (
-                <button
-                  key={q}
-                  type="button"
-                  className={`btn ${ggufQuants.includes(q) ? "btn-primary" : ""}`}
-                  onClick={() => toggleQuant(q)}
-                >
-                  {q}
-                </button>
-              ))}
+      <div className="train-layout train-layout--studio train-layout--export-fit">
+        <div className="card studio-card">
+          <StudioCardHeader
+            icon="①"
+            title="Export checkpoint"
+            description="Merge LoRA, pick formats, and optionally push to Hub when done."
+          />
+          <StudioCardBody>
+          <FormSection title="Source" hint="Training output directory to export from.">
+            <div className="form-field">
+              <label>Checkpoint path</label>
+              <input value={checkpoint} onChange={(e) => setCheckpoint(e.target.value)} placeholder="~/.seiso/checkpoints/…" />
             </div>
-          </>
-        )}
-        <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginTop: "0.75rem" }}>
-          <input type="checkbox" checked={pushOnExport} onChange={(e) => setPushOnExport(e.target.checked)} />
-          Push to Hugging Face when export completes
-        </label>
-        <button className="btn btn-primary" onClick={start} disabled={busy}>
-          Start export
-        </button>
-        {pushOnExport && (
-          <button className="btn" style={{ marginLeft: "0.5rem" }} onClick={precheck} disabled={busy}>
-            Precheck Hub
-          </button>
-        )}
-        {lastExportJobId && (
-          <button className="btn" style={{ marginLeft: "0.5rem" }} onClick={() => downloadExport(lastExportJobId)}>
-            Download GGUF
-          </button>
-        )}
-      </div>
-
-      <div className="card">
-        <h3 className="section-title">Publish to Hugging Face</h3>
-        <p className="muted-text" style={{ marginBottom: "0.75rem" }}>
-          Only Seiso training, export, and RL quant outputs can be published. Provide an API token or use{" "}
-          <code>huggingface-cli login</code> / <code>hf auth login</code>.
-        </p>
-        <div className="settings-grid" style={{ marginBottom: "0.75rem" }}>
-          <div>
-            <label>HF username</label>
-            <input value={hub.username} onChange={(e) => updateHub("username", e.target.value)} placeholder="your-username" />
-          </div>
-          <div>
-            <label>Model name</label>
-            <input value={hub.model_name} onChange={(e) => updateHub("model_name", e.target.value)} placeholder="my-finetuned-model" />
-          </div>
-          <div>
-            <label>Author</label>
-            <input value={hub.author} onChange={(e) => updateHub("author", e.target.value)} placeholder="Your Name" />
-          </div>
-          <div>
-            <label>License</label>
-            <input value={hub.license || ""} onChange={(e) => updateHub("license", e.target.value)} placeholder="apache-2.0" />
-          </div>
-          <div>
-            <label>Base model (optional)</label>
-            <input value={hub.base_model || ""} onChange={(e) => updateHub("base_model", e.target.value)} placeholder="meta-llama/Llama-3.2-3B" />
+          </FormSection>
+          <FormSection title="Formats & profile" hint="Manual picks or a named export profile." collapsible defaultOpen>
+            <div className="option-grid">
+              <div className="form-field">
+                <label>Export profile (optional)</label>
+                <select value={profile} onChange={(e) => setProfile(e.target.value)}>
+                  <option value="">Manual formats</option>
+                  {profiles.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.id} ({p.formats.join(", ")})
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="form-field">
+                <label>RL quant job (optional)</label>
+                <select value={rlQuantJobId} onChange={(e) => setRlQuantJobId(e.target.value)}>
+                  <option value="">Manual / default quants</option>
+                  {completedRlJobs.map((j) => (
+                    <option key={j.id} value={j.id}>
+                      {j.id.slice(0, 8)} — {j.gguf_quants.join(", ")}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div className="form-field">
+              <label>Formats</label>
+              <div className="studio-chip-group">
+                {["merged", "lora", "full", "gguf"].map((f) => (
+                  <button
+                    key={f}
+                    type="button"
+                    className={`btn ${formats.includes(f) ? "btn-primary" : ""}`}
+                    onClick={() => toggleFormat(f)}
+                  >
+                    {f}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {formats.includes("gguf") && !rlQuantJobId && (
+              <div className="form-field">
+                <label>GGUF quantizations</label>
+                <div className="studio-chip-group">
+                  {GGUF_QUANT_OPTIONS.map((q) => (
+                    <button
+                      key={q}
+                      type="button"
+                      className={`btn ${ggufQuants.includes(q) ? "btn-primary" : ""}`}
+                      onClick={() => toggleQuant(q)}
+                    >
+                      {q}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            <label className="studio-checkbox-item studio-checkbox-item-standalone">
+              <input type="checkbox" checked={pushOnExport} onChange={(e) => setPushOnExport(e.target.checked)} />
+              Push to Hugging Face when export completes
+            </label>
+          </FormSection>
+          </StudioCardBody>
+          <div className="studio-action-bar studio-action-bar-flush">
+            <button className="btn btn-primary btn-lg" onClick={start} disabled={busy}>
+              Start export
+            </button>
+            {pushOnExport && (
+              <button className="btn" onClick={precheck} disabled={busy}>
+                Precheck Hub
+              </button>
+            )}
+            {lastExportJobId && (
+              <button className="btn" onClick={() => downloadExport(lastExportJobId)}>
+                Download GGUF
+              </button>
+            )}
           </div>
         </div>
-        <label>Description (model card)</label>
-        <textarea
-          value={hub.description || ""}
-          onChange={(e) => updateHub("description", e.target.value)}
-          rows={3}
-          placeholder="Fine-tuned on …"
-          style={{ width: "100%", marginBottom: "0.75rem" }}
-        />
-        <label>HF API token (optional if saved in Settings or CLI login)</label>
-        <input
-          type="password"
-          value={hfTokenInput}
-          onChange={(e) => setHfTokenInput(e.target.value)}
-          placeholder="hf_…"
-          autoComplete="off"
-        />
-        <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginTop: "0.5rem" }}>
-          <input type="checkbox" checked={!!hub.use_cli} onChange={(e) => updateHub("use_cli", e.target.checked)} />
-          Prefer Hugging Face CLI login token
-        </label>
 
-        <label style={{ marginTop: "0.75rem" }}>Seiso output to publish</label>
-        <select value={selectedModelId} onChange={(e) => { setSelectedModelId(e.target.value); setSelectedExportJobId(""); }}>
-          <option value="">— from inventory —</option>
-          {publishable.map((m) => (
-            <option key={m.id} value={m.id}>
-              {m.name} ({m.format}) — {m.source}
-            </option>
-          ))}
-        </select>
-        <label>Or completed export job</label>
-        <select value={selectedExportJobId} onChange={(e) => { setSelectedExportJobId(e.target.value); setSelectedModelId(""); }}>
-          <option value="">— from export job —</option>
-          {completedExports.map((j) => (
-            <option key={j.id} value={j.id}>
-              {j.id.slice(0, 8)} — {j.created_at}
-            </option>
-          ))}
-        </select>
-        <button className="btn btn-primary" style={{ marginTop: "0.75rem" }} onClick={publish} disabled={busy}>
-          Publish to Hugging Face
-        </button>
-      </div>
+        <div className="card studio-card">
+          <StudioCardHeader
+            icon="②"
+            title="Publish to Hugging Face"
+            description="Upload Seiso-created outputs with a model card."
+          />
+          <StudioCardBody>
+          <p className="field-hint">
+            Only Seiso training, export, and RL quant outputs can be published. Provide an API token or use{" "}
+            <code>huggingface-cli login</code> / <code>hf auth login</code>.
+          </p>
+          <FormSection title="Hub metadata" hint="Repository identity and model card fields." collapsible defaultOpen>
+            <div className="option-grid">
+              <div className="form-field">
+                <label>HF username</label>
+                <input value={hub.username} onChange={(e) => updateHub("username", e.target.value)} placeholder="your-username" />
+              </div>
+              <div className="form-field">
+                <label>Model name</label>
+                <input value={hub.model_name} onChange={(e) => updateHub("model_name", e.target.value)} placeholder="my-finetuned-model" />
+              </div>
+              <div className="form-field">
+                <label>Author</label>
+                <input value={hub.author} onChange={(e) => updateHub("author", e.target.value)} placeholder="Your Name" />
+              </div>
+              <div className="form-field">
+                <label>License</label>
+                <input value={hub.license || ""} onChange={(e) => updateHub("license", e.target.value)} placeholder="apache-2.0" />
+              </div>
+              <div className="form-field">
+                <label>Base model (optional)</label>
+                <input value={hub.base_model || ""} onChange={(e) => updateHub("base_model", e.target.value)} placeholder="meta-llama/Llama-3.2-3B" />
+              </div>
+              <div className="form-field">
+                <label>HF API token (optional)</label>
+                <input
+                  type="password"
+                  value={hfTokenInput}
+                  onChange={(e) => setHfTokenInput(e.target.value)}
+                  placeholder="hf_…"
+                  autoComplete="off"
+                />
+              </div>
+            </div>
+            <div className="form-field">
+              <label>Description (model card)</label>
+              <textarea
+                value={hub.description || ""}
+                onChange={(e) => updateHub("description", e.target.value)}
+                rows={2}
+                placeholder="Fine-tuned on …"
+              />
+            </div>
+            <label className="studio-checkbox-item studio-checkbox-item-standalone">
+              <input type="checkbox" checked={!!hub.use_cli} onChange={(e) => updateHub("use_cli", e.target.checked)} />
+              Prefer Hugging Face CLI login token
+            </label>
+          </FormSection>
+          <FormSection title="Output selection" hint="Pick inventory or a completed export job." collapsible defaultOpen={false}>
+            <div className="option-grid">
+              <div className="form-field">
+                <label>Seiso output to publish</label>
+                <select value={selectedModelId} onChange={(e) => { setSelectedModelId(e.target.value); setSelectedExportJobId(""); }}>
+                  <option value="">— from inventory —</option>
+                  {publishable.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.name} ({m.format}) — {m.source}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="form-field">
+                <label>Or completed export job</label>
+                <select value={selectedExportJobId} onChange={(e) => { setSelectedExportJobId(e.target.value); setSelectedModelId(""); }}>
+                  <option value="">— from export job —</option>
+                  {completedExports.map((j) => (
+                    <option key={j.id} value={j.id}>
+                      {j.id.slice(0, 8)} — {j.created_at}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          </FormSection>
+          </StudioCardBody>
+          <div className="studio-action-bar studio-action-bar-flush">
+            <button className="btn btn-primary btn-lg" onClick={publish} disabled={busy}>
+              Publish to Hugging Face
+            </button>
+          </div>
+        </div>
 
-      {publishable.length > 0 && (
-        <div className="card">
-          <h3 className="section-title">Local outputs</h3>
-          <table>
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Format</th>
-                <th>Source</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {publishable.map((m) => (
-                <tr key={m.id}>
-                  <td>{m.name}</td>
-                  <td>{m.format}</td>
-                  <td>{m.source}</td>
-                  <td>
+        <div className="card studio-card studio-card-scroll">
+          <StudioCardHeader
+            icon="③"
+            title="Activity"
+            description="Local inventory downloads and export/publish logs."
+            tone="monitor"
+          />
+          {publishable.length > 0 ? (
+            <DataTable
+              columns={[
+                { key: "name", header: "Name" },
+                { key: "format", header: "Format" },
+                { key: "source", header: "Source" },
+                {
+                  key: "actions",
+                  header: "",
+                  render: (m) => (
                     <button className="btn" onClick={() => downloadModel(m.id, m.name)}>
                       Download
                     </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                  ),
+                },
+              ]}
+              rows={publishable.slice(0, 6)}
+              getRowKey={(m) => m.id}
+              emptyMessage="No local outputs yet."
+            />
+          ) : (
+            <p className="research-empty">No local outputs yet.</p>
+          )}
+          <LogStream
+            logs={logs}
+            emptyMessage="Export and publish logs appear here."
+            fill
+            label="Export log"
+          />
         </div>
-      )}
-
-      {logs.length > 0 && (
-        <div className="card">
-          <h3 className="section-title">Log</h3>
-          <div className="log-panel">{logs.join("\n")}</div>
-        </div>
-      )}
+      </div>
     </StudioPageShell>
   );
 }
