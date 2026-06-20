@@ -315,21 +315,3 @@ export type CompressPreset = {
   label: string;
   stages: string[];
 };
-
-export type ImageCompressJob = {
-  id: string;
-  status: string;
-  config_json: string;
-  output_dir: string | null;
-  run_dir: string | null;
-  model_dir: string | null;
-  stages: string[];
-  stage_results: Record<string, unknown>;
-  created_at: string;
-};
-
-export type ImageCompressPreset = {
-  id: string;
-  label: string;
-  stages: string[];
-};

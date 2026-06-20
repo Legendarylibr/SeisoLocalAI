@@ -15,7 +15,6 @@ from forge.api.routes import (
     auth,
     compress,
     export,
-    image_compress,
     inference,
     knowledge,
     models,
@@ -118,7 +117,6 @@ def create_app() -> FastAPI:
     app.include_router(export.router, prefix=prefix)
     app.include_router(rl_quant.router, prefix=prefix)
     app.include_router(compress.router, prefix=prefix)
-    app.include_router(image_compress.router, prefix=prefix)
     app.include_router(recipes.router, prefix=prefix)
     app.include_router(knowledge.router, prefix=prefix)
     app.include_router(providers.router, prefix=prefix)

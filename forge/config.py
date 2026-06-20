@@ -148,7 +148,7 @@ class ForgeSettings(BaseSettings):
 
     def ensure_dirs(self) -> None:
         """Create data subdirectories once at startup."""
-        for name in ("models", "checkpoints", "exports", "knowledge", "sandbox", "artifacts", "recipes", "uploads", "rl_quant", "compress", "image_compress", "hf_cache", "hf_tokens"):
+        for name in ("models", "checkpoints", "exports", "knowledge", "sandbox", "artifacts", "recipes", "uploads", "rl_quant", "compress", "hf_cache", "hf_tokens"):
             (self.data_dir / name).mkdir(parents=True, exist_ok=True)
 
     @property

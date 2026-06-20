@@ -8,7 +8,6 @@ from forge.config import get_settings
 from forge.db.store import Database
 from forge.orchestrators.compress import CompressOrchestrator
 from forge.orchestrators.export import ExportOrchestrator
-from forge.orchestrators.image_compress import ImageCompressOrchestrator
 from forge.orchestrators.inference import InferenceOrchestrator
 from forge.orchestrators.knowledge import KnowledgeOrchestrator
 from forge.orchestrators.recipes import RecipeOrchestrator
@@ -52,11 +51,6 @@ def get_compress_orchestrator() -> CompressOrchestrator:
 
 
 @lru_cache
-def get_image_compress_orchestrator() -> ImageCompressOrchestrator:
-    return ImageCompressOrchestrator(get_settings().data_dir)
-
-
-@lru_cache
 def get_recipe_orchestrator() -> RecipeOrchestrator:
     return RecipeOrchestrator(get_settings().data_dir)
 
@@ -74,7 +68,6 @@ def clear_dependency_caches() -> None:
     get_export_orchestrator.cache_clear()
     get_rl_quant_orchestrator.cache_clear()
     get_compress_orchestrator.cache_clear()
-    get_image_compress_orchestrator.cache_clear()
     get_inference_orchestrator.cache_clear()
     get_recipe_orchestrator.cache_clear()
     get_knowledge_orchestrator.cache_clear()

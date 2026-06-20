@@ -163,8 +163,6 @@ Forge equivalent: **RL Quant** page (`/rl-quant`) or `POST /api/rl-quant/jobs`.
 
 Config reference: `configs/rl_quant_smoke.json`.
 
-**Image compression** has no `seiso` subcommand — use Forge **Image Compress** (`/image-compress`) or the vendored `python -m sd_compress` CLI in `third_party/sd-distill-prune-quant/`.
-
 ## `seiso-bench-kernels`
 
 Benchmark fused training kernels (NVIDIA CUDA or AMD Triton).
@@ -192,7 +190,6 @@ See [training/multi-gpu.md](training/multi-gpu.md).
 
 | Workflow | Forge page | API prefix |
 |----------|------------|------------|
-| Image compression (Stable Diffusion) | `/image-compress` | `/api/image-compress` |
 | Training with SSE job UI | `/train` | `/api/training` |
 | Export jobs | `/export` | `/api/export` |
 

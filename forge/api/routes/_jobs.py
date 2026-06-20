@@ -19,7 +19,7 @@ def _parse_json_field(row: dict, key: str, fallback: Any) -> Any:
 
 
 def format_stage_pipeline_job(row: dict) -> dict:
-    """Decode stages_json / stage_results_json on a compress or image-compress row."""
+    """Decode stages_json / stage_results_json on a compress job row."""
     out = dict(row)
     out["stages"] = _parse_json_field(row, "stages_json", [])
     out["stage_results"] = _parse_json_field(row, "stage_results_json", {})

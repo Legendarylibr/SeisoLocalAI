@@ -1,4 +1,4 @@
-"""Factory for stage-based pipeline job routers (compress, image compress)."""
+"""Factory for stage-based pipeline job routers (compress)."""
 
 import uuid
 from collections.abc import Awaitable, Callable
