@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from seiso.image_compress.bootstrap import ensure_sd_compress_importable
+from seiso.vendor.config_builder import job_output_root, resolve_preset, validate_stages
 
 STAGE_ORDER = (
     "baseline",
@@ -112,11 +113,9 @@ def build_pipeline_config(
     ensure_sd_compress_importable()
     from sd_compress.config import PipelineConfig, ensure_captions
 
-    preset_name = str(payload.get("preset", "smoke"))
-    preset = dict(PRESETS.get(preset_name, PRESETS["smoke"]))
+    preset_name, preset = resolve_preset(PRESETS, str(payload.get("preset", "smoke")))
 
-    output_root = data_dir / "image_compress" / user_id / job_id
-    output_root.mkdir(parents=True, exist_ok=True)
+    output_root = job_output_root(data_dir, "image_compress", user_id, job_id)
 
     data_path = payload.get("data_path")
     if not data_path:
@@ -169,9 +168,7 @@ def build_pipeline_config(
     ensure_captions(config.data_path)
 
     stages = list(payload.get("stages") or preset.get("stages") or PRESETS["smoke"]["stages"])
-    for stage in stages:
-        if stage not in STAGE_ORDER:
-            raise ValueError(f"Unknown pipeline stage: {stage}")
+    validate_stages(stages, STAGE_ORDER)
 
     return {
         "job_id": job_id,

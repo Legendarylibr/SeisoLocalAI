@@ -15,6 +15,7 @@ from seiso.inference.backends import (
     resolve_local_backend,
 )
 from seiso.inference.model_pool import get_model_pool
+from seiso.inference.speculative import default_num_speculative_tokens, iter_speculative_tokens
 from seiso.inference.tuning import (
     configure_torch_inference,
     estimate_llama_n_ctx,
@@ -23,7 +24,6 @@ from seiso.inference.tuning import (
     mlx_stream_kwargs,
     torch_generate_kwargs,
 )
-from seiso.inference.speculative import default_num_speculative_tokens, iter_speculative_tokens
 from seiso.memory.protection import is_oom_error, release_cached_memory, sanitize_inference_payload
 from seiso.models.chat_format import format_messages_for_prompt
 

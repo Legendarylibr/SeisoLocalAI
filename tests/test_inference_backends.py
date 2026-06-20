@@ -12,12 +12,27 @@ from seiso.inference.backends import (
     BACKEND_OLLAMA,
     BACKEND_TORCH,
     available_backends,
+    clear_gguf_caches,
     gguf_architecture,
     match_ollama_name,
     recommend_backend,
     resolve_gguf_file,
     resolve_local_backend,
 )
+
+
+@pytest.fixture(autouse=True)
+def _reset_inference_caches():
+    from forge.services import inference_models
+    from forge.services.hf_connectivity import check_inference_runtime
+
+    inference_models.invalidate_inference_options_cache()
+    check_inference_runtime.cache_clear()
+    clear_gguf_caches()
+    yield
+    inference_models.invalidate_inference_options_cache()
+    check_inference_runtime.cache_clear()
+    clear_gguf_caches()
 
 
 def test_gguf_recommends_llamacpp(tmp_path: Path):

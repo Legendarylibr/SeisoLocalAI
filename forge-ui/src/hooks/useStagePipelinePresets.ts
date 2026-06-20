@@ -10,21 +10,20 @@ type PresetsResponse = {
 };
 
 export function useStagePipelinePresets(
-  fallbackPresets: StagePreset[],
   fallbackStages: string[],
   loadPresets: () => Promise<PresetsResponse>,
-  initialPreset = fallbackPresets[0]?.id ?? "smoke",
+  initialPreset = "smoke",
 ) {
   const [presets, setPresets] = useState<StagePreset[]>([]);
+  const [presetsLoading, setPresetsLoading] = useState(true);
   const [allStages, setAllStages] = useState<string[]>(fallbackStages);
   const [stageHelp, setStageHelp] = useState<Record<string, string>>({});
   const [defaults, setDefaults] = useState<Record<string, string>>({});
   const [preset, setPreset] = useState(initialPreset);
-  const [selectedStages, setSelectedStages] = useState<string[]>(
-    fallbackPresets[0]?.stages.length ? fallbackPresets[0].stages : fallbackStages,
-  );
+  const [selectedStages, setSelectedStages] = useState<string[]>(fallbackStages);
 
-  const presetList = presets.length ? presets : fallbackPresets;
+  const presetList = presets;
+  const presetsReady = !presetsLoading && presets.length > 0;
 
   useEffect(() => {
     loadPresets()
@@ -33,8 +32,12 @@ export function useStagePipelinePresets(
         setAllStages(r.stages.length ? r.stages : fallbackStages);
         setStageHelp(r.help);
         setDefaults(r.defaults ?? {});
+        if (r.presets.length > 0) {
+          setPreset((current) => (r.presets.some((p) => p.id === current) ? current : r.presets[0].id));
+        }
       })
-      .catch(console.error);
+      .catch(console.error)
+      .finally(() => setPresetsLoading(false));
     // Load presets once on mount; loader is stable for each page.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -55,6 +58,8 @@ export function useStagePipelinePresets(
     preset,
     setPreset,
     presetList,
+    presetsLoading,
+    presetsReady,
     allStages,
     stageHelp,
     selectedStages,

@@ -203,14 +203,7 @@ def inference_cmd(
     prompt: str = typer.Option(..., help="Prompt text"),
 ) -> None:
     """Run one-shot inference (alias for single-turn chat)."""
-    from seiso.memory.protection import MemoryLoadBlockedError, ensure_load_fits
-
-    try:
-        ensure_load_fits(model, mode="chat")
-    except MemoryLoadBlockedError as exc:
-        console.print(f"[red]Memory guard:[/] {exc}")
-        raise typer.Exit(1) from exc
-    console.print(_one_shot_reply(model, prompt))
+    chat(model=model, prompt=prompt)
 
 
 @app.command(name="bench-inference")

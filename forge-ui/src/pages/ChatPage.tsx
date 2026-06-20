@@ -28,6 +28,14 @@ const BACKEND_LABELS: Record<string, string> = {
   torch: "PyTorch",
 };
 
+function resolveBackendLabel(
+  backend: string,
+  labels: Record<string, string>,
+  optionLabels?: Record<string, string>,
+): string {
+  return optionLabels?.[backend] || labels[backend] || BACKEND_LABELS[backend] || backend;
+}
+
 type OpenTab = { threadId: string; title: string };
 
 export function ChatPage() {
@@ -65,6 +73,7 @@ export function ChatPage() {
   const { settings } = usePlatformSettings();
   const security = settings?.security ?? null;
   const { profile: hwProfile } = useHardwareProfile();
+  const backendLabels = hwProfile?.inference_backend_labels ?? {};
   const [switchingModel, setSwitchingModel] = useState(false);
   const [loadProgress, setLoadProgress] = useState<ModelProgressState | null>(null);
   const [loadedModelId, setLoadedModelId] = useState<string | null>(null);
@@ -783,7 +792,7 @@ export function ChatPage() {
               }}
             >
               {backendOptions.map((b) => (
-                <option key={b} value={b}>{selected.backend_labels?.[b] || BACKEND_LABELS[b] || b}</option>
+                <option key={b} value={b}>{resolveBackendLabel(b, backendLabels, selected.backend_labels)}</option>
               ))}
             </select>
           )}
@@ -858,7 +867,7 @@ export function ChatPage() {
                 {selected && (
                   <span className="chat-model-status-engine muted-text">
                     {effectiveBackend
-                      ? selected.backend_labels?.[effectiveBackend] || BACKEND_LABELS[effectiveBackend] || effectiveBackend
+                      ? resolveBackendLabel(effectiveBackend, backendLabels, selected.backend_labels)
                       : selected.format === "gguf"
                         ? "Missing llama.cpp runtime"
                         : "Missing local inference runtime"}
@@ -866,7 +875,7 @@ export function ChatPage() {
                 )}
                 {modelReady && !effectiveLoadProgress && (
                   <span className="chat-model-status-ready">
-                    Loaded in {BACKEND_LABELS[effectiveBackend] || effectiveBackend}
+                    Loaded in {resolveBackendLabel(effectiveBackend, backendLabels, selected?.backend_labels)}
                   </span>
                 )}
               </div>

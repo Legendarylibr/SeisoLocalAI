@@ -49,11 +49,11 @@ def test_enrich_catalog_ranks_priority_first():
 def test_format_catalog_note_shows_download_and_runtime():
     from forge.services.hardware import (
         HardwareTier,
-        _format_catalog_note,
         estimate_gguf_download_bytes,
+        format_catalog_note,
     )
 
-    note = _format_catalog_note(
+    note = format_catalog_note(
         est_vram_gb=2.9,
         download_bytes=int(19.7 * 1024**3),
         headroom_gb=9.6,
@@ -65,6 +65,15 @@ def test_format_catalog_note_shows_download_and_runtime():
 
     moe_est = estimate_gguf_download_bytes("35B", tags=("moe",), repo_id="Qwen/Qwen3.6-35B-A3B")
     assert 1.5 * 1024**3 < moe_est < 3.5 * 1024**3
+
+
+def test_hardware_profile_includes_backend_labels():
+    from forge.services.hardware import hardware_profile
+
+    profile = hardware_profile(force_refresh=True)
+    labels = profile.get("inference_backend_labels") or {}
+    assert labels.get("llamacpp") == "llama.cpp"
+    assert labels.get("mlx") == "MLX"
 
 
 def test_training_defaults_conservative_on_edge():
@@ -81,20 +90,20 @@ def test_preferred_backend_cpu_only_is_llamacpp():
 
 def test_preferred_backend_apple_tight_memory_is_llamacpp(monkeypatch):
     profile = {"backend": "mlx", "gpus": [], "ram_gb": 16}
-    monkeypatch.setattr("forge.services.hardware.vram_headroom_mb", lambda _p: 10240)
+    monkeypatch.setattr("seiso.hardware.training.vram_headroom_mb", lambda _p: 10240)
     assert classify_tier(profile).value == "apple_unified"
     assert preferred_inference_backend(profile) == "llamacpp"
 
 
 def test_preferred_backend_apple_plenty_is_mlx(monkeypatch):
     profile = {"backend": "mlx", "gpus": [], "ram_gb": 64}
-    monkeypatch.setattr("forge.services.hardware.vram_headroom_mb", lambda _p: 20480)
+    monkeypatch.setattr("seiso.hardware.training.vram_headroom_mb", lambda _p: 20480)
     assert preferred_inference_backend(profile) == "mlx"
 
 
 def test_low_memory_apple_marks_large_models_tight(monkeypatch):
     profile = {"backend": "mlx", "gpus": [], "ram_gb": 16}
-    monkeypatch.setattr("forge.services.hardware.vram_headroom_mb", lambda _p: 10240)
+    monkeypatch.setattr("seiso.hardware.training.vram_headroom_mb", lambda _p: 10240)
     fit = assess_catalog_fit(
         {"params": "7B", "quant": "Q4_K_M", "tags": [], "repo_id": "x", "task": "chat"},
         profile,
@@ -104,7 +113,7 @@ def test_low_memory_apple_marks_large_models_tight(monkeypatch):
 
 def test_assess_hardware_fit_blocks_when_est_exceeds_headroom(monkeypatch):
     profile = {"backend": "cuda", "gpus": [{"vram_total_mb": 8192, "vram_used_mb": 0}], "ram_gb": 16}
-    monkeypatch.setattr("forge.services.hardware.vram_headroom_mb", lambda _p: 4096)
+    monkeypatch.setattr("seiso.hardware.fit.vram_headroom_mb", lambda _p: 4096)
     fit = assess_catalog_fit(
         {"params": "13B", "quant": "Q4_K_M", "tags": [], "repo_id": "x", "task": "chat"},
         profile,
@@ -116,7 +125,7 @@ def test_assess_hardware_fit_blocks_when_est_exceeds_headroom(monkeypatch):
 
 def test_assess_hardware_fit_allows_when_est_within_headroom(monkeypatch):
     profile = {"backend": "cuda", "gpus": [{"vram_total_mb": 24576, "vram_used_mb": 0}], "ram_gb": 32}
-    monkeypatch.setattr("forge.services.hardware.vram_headroom_mb", lambda _p: 20480)
+    monkeypatch.setattr("seiso.hardware.fit.vram_headroom_mb", lambda _p: 20480)
     fit = assess_catalog_fit(
         {"params": "7B", "quant": "Q4_K_M", "tags": [], "repo_id": "x", "task": "chat"},
         profile,

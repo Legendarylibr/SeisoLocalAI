@@ -21,6 +21,7 @@ from forge.services.hardware import (
 from forge.services.hf_connectivity import check_inference_runtime
 from forge.services.hf_hub import get_gguf_file_size_bytes
 from seiso.inference.backends import (
+    BACKEND_LABELS,
     BACKEND_LLAMACPP,
     BACKEND_MLX,
     BACKEND_OLLAMA,
@@ -39,14 +40,6 @@ _ollama_cache: set[str] | None = None
 _ollama_cache_key: str = ""
 _ollama_cache_ts: float = 0.0
 _options_cache: dict[tuple, tuple[float, list[dict[str, Any]]]] = {}
-
-BACKEND_LABELS = {
-    "llamacpp": "llama.cpp",
-    "ollama": "Ollama",
-    "mlx": "MLX",
-    "torch": "PyTorch",
-    "auto": "Auto",
-}
 
 SOURCE_LABELS = {
     "hf:": "Hugging Face Hub",

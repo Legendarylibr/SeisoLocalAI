@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import { api, RLQuantJob, RLQuantPreset, subscribeSSE } from "@/lib/api";
 import { invalidateApiCache } from "@/lib/api/getCache";
 import { appendBoundedLog } from "@/lib/api/sse";
-import { RL_QUANT_FALLBACK_PRESETS, RL_QUANT_PRESET_HINTS } from "@/lib/rlQuantPresets";
 import { StudioPageShell } from "@/components/StudioPageShell";
 import { StudioCardBody } from "@/components/studio/StudioCardBody";
 import { StudioCardHeader } from "@/components/studio/StudioCardHeader";
@@ -25,6 +24,8 @@ const DEFAULT_REWARD = {
 export function RLQuantPage() {
   const [jobs, setJobs] = useState<RLQuantJob[]>([]);
   const [presets, setPresets] = useState<RLQuantPreset[]>([]);
+  const [presetHints, setPresetHints] = useState<Record<string, string>>({});
+  const [presetsLoading, setPresetsLoading] = useState(true);
   const [preset, setPreset] = useState("minimal");
   const [trainingEpisodes, setTrainingEpisodes] = useState(256);
   const [evaluationEpisodes, setEvaluationEpisodes] = useState(64);
@@ -48,7 +49,17 @@ export function RLQuantPage() {
 
   useEffect(() => {
     api.listRLQuantJobs().then(setJobs).catch(console.error);
-    api.rlQuantPresets().then((r) => setPresets(r.presets)).catch(console.error);
+    api
+      .rlQuantPresets()
+      .then((r) => {
+        setPresets(r.presets);
+        setPresetHints(r.preset_hints ?? {});
+        if (r.presets.length > 0) {
+          setPreset((current) => (r.presets.some((p) => p.id === current) ? current : r.presets[0].id));
+        }
+      })
+      .catch(console.error)
+      .finally(() => setPresetsLoading(false));
     return () => streamAbortRef.current?.();
   }, []);
 
@@ -101,9 +112,9 @@ export function RLQuantPage() {
     }
   };
 
-  const presetList = presets.length ? presets : RL_QUANT_FALLBACK_PRESETS;
-
   const selectedPreset = presetList.find((p) => p.id === preset);
+  const selectedHint = presetHints[preset];
+  const canStart = !presetsLoading && presetList.length > 0 && !!selectedPreset;
 
   return (
     <StudioPageShell
@@ -131,7 +142,11 @@ export function RLQuantPage() {
                     ))}
                   </select>
                 </div>
-                {RL_QUANT_PRESET_HINTS[preset] && <p className="field-hint">{RL_QUANT_PRESET_HINTS[preset]}</p>}
+                {selectedHint && <p className="field-hint">{selectedHint}</p>}
+                {presetsLoading && <p className="field-hint">Loading presets…</p>}
+                {!presetsLoading && presetList.length === 0 && (
+                  <p className="field-hint">Presets unavailable — check Forge connection.</p>
+                )}
                 {selectedPreset && (
                   <p className="field-hint">
                     Backend {selectedPreset.backend} · trainer {selectedPreset.training_backend}
@@ -256,7 +271,7 @@ export function RLQuantPage() {
           </StudioCardBody>
 
           <div className="studio-action-bar studio-action-bar-flush">
-            <button className="btn btn-primary btn-lg" onClick={start} disabled={starting}>
+            <button className="btn btn-primary btn-lg" onClick={start} disabled={starting || !canStart}>
               {starting ? "Starting…" : "Run RL quant pipeline"}
             </button>
           </div>
