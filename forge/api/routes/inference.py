@@ -42,6 +42,9 @@ class ChatRequest(BaseModel):
     thread_id: str | None = None
     model_id: str | None = None
     model_path: str | None = None
+    draft_model_id: str | None = None
+    draft_model_path: str | None = None
+    num_speculative_tokens: int | None = Field(default=None, ge=1, le=32)
     ollama_model: str | None = None
     inference_backend: str = Field(default="auto", description="auto | llamacpp | ollama | mlx | torch")
     messages: list[dict[str, str]] = Field(default_factory=list)
@@ -602,6 +605,45 @@ async def chat(
         else:
             raise HTTPException(400, "Select a model from inventory or provide model_path")
 
+    if body.draft_model_id and body.draft_model_path:
+        raise HTTPException(403, "Provide draft_model_id or draft_model_path, not both")
+
+    if body.draft_model_id or body.draft_model_path:
+        if body.provider_id:
+            raise HTTPException(400, "Speculative decoding is not available for cloud providers")
+        if payload.get("inference_backend") == BACKEND_OLLAMA:
+            raise HTTPException(400, "Speculative decoding requires a local PyTorch target model")
+        if body.draft_model_path:
+            draft_path = await resolve_model_path(
+                db,
+                user_id,
+                model_id=None,
+                model_path=body.draft_model_path,
+                data_dir=settings.data_dir,
+            )
+        else:
+            draft_selected = await get_inference_option(
+                db, user_id, body.draft_model_id, ollama_base_url=settings.ollama_base_url
+            )
+            if not draft_selected:
+                raise HTTPException(404, "Draft model not found")
+            draft_path = draft_selected.get("path")
+            if not draft_path:
+                raise HTTPException(400, "Draft model must be a local safetensors/checkpoint path")
+        if not draft_path:
+            raise HTTPException(400, "Invalid draft model path")
+        from seiso.memory.protection import assess_path_memory_fit
+
+        draft_fit = assess_path_memory_fit(draft_path, mode="chat")
+        if draft_fit.get("memory_load_blocked"):
+            raise HTTPException(
+                400,
+                draft_fit.get("memory_load_blocked_reason")
+                or "Draft model exceeds available memory on this machine",
+            )
+        payload["draft_model_path"] = draft_path
+        payload["inference_backend"] = BACKEND_TORCH
+
     if body.stream:
         can_stream_local = not body.tools and not body.provider_id
 
@@ -610,7 +652,11 @@ async def chat(
                 streamed: list[str] = []
                 raw_parts: list[str] = []
                 sanitizer = StreamingOutputSanitizer(strip_tool_calls=not body.tools)
-                backend_label = payload.get("inference_backend") or "local"
+                backend_label = (
+                    "speculative"
+                    if payload.get("draft_model_path")
+                    else (payload.get("inference_backend") or "local")
+                )
                 cancelled = False
                 try:
                     orchestrator._emit_log(job_id, f"Streaming inference ({backend_label})")
