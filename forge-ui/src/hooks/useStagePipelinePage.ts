@@ -14,7 +14,6 @@ type PresetsResponse = {
 };
 
 type StagePipelinePageOptions<TJob> = {
-  fallbackPresets: StagePreset[];
   fallbackStages: string[];
   loadPresets: () => Promise<PresetsResponse>;
   listJobs: () => Promise<TJob[]>;
@@ -23,7 +22,6 @@ type StagePipelinePageOptions<TJob> = {
 };
 
 export function useStagePipelinePage<TJob extends { id: string }>({
-  fallbackPresets,
   fallbackStages,
   loadPresets,
   listJobs,
@@ -34,7 +32,7 @@ export function useStagePipelinePage<TJob extends { id: string }>({
   const [starting, setStarting] = useState(false);
   const { models: localModels, loading: modelsLoading } = useTrainingModels();
 
-  const presets = useStagePipelinePresets(fallbackPresets, fallbackStages, loadPresets);
+  const presets = useStagePipelinePresets(fallbackStages, loadPresets);
   const { logs, result, activeJob, resetStream, watchJob } = usePipelineJobStream();
 
   useEffect(() => {

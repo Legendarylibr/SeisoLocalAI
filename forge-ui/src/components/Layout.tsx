@@ -27,6 +27,7 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
       { to: "/train", label: "Train", icon: "train", desc: "LoRA fine-tuning" },
       { to: "/rl-quant", label: "RL Quant", icon: "quant", desc: "Reward-guided quant" },
       { to: "/compress", label: "Compress", icon: "compress", desc: "Distill & prune LLMs" },
+      { to: "/image-compress", label: "Image Compress", icon: "image", desc: "SD distill & quant" },
       { to: "/export", label: "Export", icon: "export", desc: "Publish to Hub" },
       { to: "/recipes", label: "Recipes", icon: "recipes", desc: "Visual pipelines" },
     ],
@@ -41,7 +42,7 @@ export function Layout({ children, fullBleed = false }: { children: React.ReactN
   const location = useLocation();
   const { logout } = useAuth();
   const isChat = location.pathname === "/chat";
-  const isStudioCompact = /^\/(train|rl-quant|compress|export|recipes)(\/|$)/.test(location.pathname);
+  const isStudioCompact = /^\/(train|rl-quant|compress|image-compress|export|recipes)(\/|$)/.test(location.pathname);
   const [navOpen, setNavOpen] = useState(false);
 
   useEffect(() => {

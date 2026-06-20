@@ -6,15 +6,33 @@ import re
 import struct
 from pathlib import Path
 
+from seiso.compat import StrEnum
 from seiso.models.loader import Backend, detect_backend
 
 BackendName = str
 
-BACKEND_LLAMACPP = "llamacpp"
-BACKEND_OLLAMA = "ollama"
-BACKEND_MLX = "mlx"
-BACKEND_TORCH = "torch"
-BACKEND_AUTO = "auto"
+
+class InferenceBackend(StrEnum):
+    LLAMACPP = "llamacpp"
+    OLLAMA = "ollama"
+    MLX = "mlx"
+    TORCH = "torch"
+    AUTO = "auto"
+
+
+BACKEND_LLAMACPP = InferenceBackend.LLAMACPP
+BACKEND_OLLAMA = InferenceBackend.OLLAMA
+BACKEND_MLX = InferenceBackend.MLX
+BACKEND_TORCH = InferenceBackend.TORCH
+BACKEND_AUTO = InferenceBackend.AUTO
+
+BACKEND_LABELS: dict[str, str] = {
+    "llamacpp": "llama.cpp",
+    "ollama": "Ollama",
+    "mlx": "MLX",
+    "torch": "PyTorch",
+    "auto": "Auto",
+}
 _GGUF_SHARD_RE = re.compile(r"^(?P<prefix>.+)-(?P<index>\d{5})-of-(?P<total>\d{5})\.gguf$", re.I)
 _GGUF_VALUE_SIZE = {
     0: 1,  # uint8
@@ -96,6 +114,11 @@ def _skip_gguf_value(handle, value_type: int) -> None:
 
 
 _gguf_arch_cache: dict[tuple[str, float, int], str | None] = {}
+
+
+def clear_gguf_caches() -> None:
+    """Reset GGUF architecture cache (for tests)."""
+    _gguf_arch_cache.clear()
 
 
 def _gguf_cache_key(path: Path) -> tuple[str, float, int] | None:

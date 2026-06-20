@@ -6,6 +6,12 @@ from pathlib import Path
 from typing import Any
 
 from seiso.compress.bootstrap import ensure_codellama_compress_importable, vendor_root
+from seiso.vendor.config_builder import (
+    job_output_root,
+    resolve_config_file_path,
+    resolve_preset,
+    validate_stages,
+)
 
 STAGE_ORDER = (
     "distill",
@@ -83,26 +89,18 @@ def build_pipeline_config(
         merge_dataclass,
     )
 
-    preset_name = str(payload.get("preset", "smoke"))
-    preset = dict(PRESETS.get(preset_name, PRESETS["smoke"]))
+    preset_name, preset = resolve_preset(PRESETS, str(payload.get("preset", "smoke")))
 
-    if config_file := payload.get("config_file"):
+    if path := resolve_config_file_path(payload.get("config_file"), vendor_root=vendor_root()):
         from codellama_compress.config import load_config_file
 
-        path = Path(config_file)
-        if not path.is_file():
-            path = vendor_root() / "configs" / config_file
-        if path.is_file():
-            blob = load_config_file(path)
-            preset.update(blob.get("pipeline", {}))
+        blob = load_config_file(path)
+        preset.update(blob.get("pipeline", {}))
 
     stages = list(payload.get("stages") or preset.get("stages") or PRESETS["smoke"]["stages"])
-    for stage in stages:
-        if stage not in STAGE_ORDER:
-            raise ValueError(f"Unknown pipeline stage: {stage}")
+    validate_stages(stages, STAGE_ORDER)
 
-    output_root = data_dir / "compress" / user_id / job_id
-    output_root.mkdir(parents=True, exist_ok=True)
+    output_root = job_output_root(data_dir, "compress", user_id, job_id)
 
     seed = int(payload.get("seed", 42))
     det = merge_dataclass(

@@ -12,7 +12,15 @@ from seiso.rl_quant.bootstrap import (
     vendor_root,
 )
 from seiso.rl_quant.config_builder import build_framework_config
+from seiso.rl_quant.presets import rl_quant_presets_response
 from seiso.rl_quant.recommendation import recommendation_to_gguf_quants
+
+
+def test_rl_quant_presets_response_includes_hints():
+    payload = rl_quant_presets_response()
+    assert len(payload["presets"]) >= 3
+    assert payload["preset_hints"]["minimal"]
+    assert payload["reward_weights_help"]["gamma_perplexity"]
 
 
 def test_vendor_tree_present():

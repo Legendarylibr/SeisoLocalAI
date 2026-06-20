@@ -1,29 +1,22 @@
 import { useEffect, useState } from "react";
-import { api, CompressJob, CompressPreset } from "@/lib/api";
+import { api, CompressJob } from "@/lib/api";
 import { FormSection } from "@/components/research/FormSection";
 import { StagePipelineShell } from "@/components/studio/StagePipelineShell";
 import { HfBaseModelPicker } from "@/components/HfBaseModelPicker";
 import { useStagePipelinePage } from "@/hooks/useStagePipelinePage";
 import { resolveModelChoice, writeStoredModel } from "@/lib/modelSelection";
 
-const FALLBACK_PRESETS: CompressPreset[] = [
-  { id: "smoke", label: "Smoke", stages: ["distill", "prune", "finetune", "evaluate", "export"] },
-  { id: "full", label: "Full", stages: ["distill", "prune", "finetune", "evaluate", "export"] },
-  { id: "distill_only", label: "Distill Only", stages: ["distill", "evaluate"] },
-  { id: "prune_recover", label: "Prune Recover", stages: ["prune", "finetune", "evaluate", "export"] },
-  { id: "quantize", label: "Quantize", stages: ["quantize_gptq", "evaluate", "export"] },
-];
-
 const FALLBACK_STAGES = [
-  ...new Set([
-    ...FALLBACK_PRESETS.flatMap((p) => p.stages),
-    "quantize_gptq",
-    "quantize_awq",
-  ]),
+  "distill",
+  "prune",
+  "finetune",
+  "evaluate",
+  "export",
+  "quantize_gptq",
+  "quantize_awq",
 ];
 
 const COMPRESS_PIPELINE = {
-  fallbackPresets: FALLBACK_PRESETS,
   fallbackStages: FALLBACK_STAGES,
   loadPresets: api.compressPresets,
   listJobs: api.listCompressJobs,
@@ -44,6 +37,8 @@ export function CompressPage() {
     preset,
     setPreset,
     presetList,
+    presetsLoading,
+    presetsReady,
     allStages,
     stageHelp,
     selectedStages,
@@ -106,6 +101,7 @@ export function CompressPage() {
       preset={preset}
       setPreset={setPreset}
       presetList={presetList}
+      presetsLoading={presetsLoading}
       allStages={allStages}
       stageHelp={stageHelp}
       selectedStages={selectedStages}
@@ -115,7 +111,7 @@ export function CompressPage() {
       activeJob={activeJob}
       jobs={jobs}
       jobsEmptyMessage="No compression jobs yet."
-      canStart={modelsReady && !!teacherModel && !!studentModel}
+      canStart={presetsReady && modelsReady && !!teacherModel && !!studentModel}
       starting={starting}
       onStart={start}
       startLabel="Run compression pipeline"

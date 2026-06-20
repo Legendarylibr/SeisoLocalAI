@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, ImageCompressJob, ImageCompressPreset } from "@/lib/api";
+import { api, ImageCompressJob } from "@/lib/api";
 import { FormSection } from "@/components/research/FormSection";
 import { StagePipelineShell } from "@/components/studio/StagePipelineShell";
 import { HfBaseModelPicker } from "@/components/HfBaseModelPicker";
@@ -25,34 +25,9 @@ const IMAGE_STAGE_ORDER = [
   "report",
 ];
 
-const FALLBACK_PRESETS: ImageCompressPreset[] = [
-  {
-    id: "smoke",
-    label: "Smoke",
-    stages: ["baseline", "distill_progressive", "prune", "quantize", "evaluate_quantized", "report"],
-  },
-  { id: "full", label: "Full", stages: IMAGE_STAGE_ORDER },
-  {
-    id: "distill_only",
-    label: "Distill Only",
-    stages: ["baseline", "distill_progressive", "distill_clip", "distill_cfg", "evaluate_distilled", "report"],
-  },
-  {
-    id: "prune_recover",
-    label: "Prune Recover",
-    stages: ["prune", "evaluate_pruned", "finetune", "evaluate_finetuned", "report"],
-  },
-  {
-    id: "quantize",
-    label: "Quantize",
-    stages: ["quantize", "evaluate_quantized", "export_shard", "report"],
-  },
-];
-
-const FALLBACK_STAGES = [...new Set([...IMAGE_STAGE_ORDER, ...FALLBACK_PRESETS.flatMap((p) => p.stages)])];
+const FALLBACK_STAGES = [...IMAGE_STAGE_ORDER];
 
 const IMAGE_COMPRESS_PIPELINE = {
-  fallbackPresets: FALLBACK_PRESETS,
   fallbackStages: FALLBACK_STAGES,
   loadPresets: api.imageCompressPresets,
   listJobs: api.listImageCompressJobs,
@@ -73,6 +48,8 @@ export function ImageCompressPage() {
     preset,
     setPreset,
     presetList,
+    presetsLoading,
+    presetsReady,
     allStages,
     stageHelp,
     selectedStages,
@@ -134,6 +111,7 @@ export function ImageCompressPage() {
       preset={preset}
       setPreset={setPreset}
       presetList={presetList}
+      presetsLoading={presetsLoading}
       allStages={allStages}
       stageHelp={stageHelp}
       selectedStages={selectedStages}
@@ -143,7 +121,7 @@ export function ImageCompressPage() {
       activeJob={activeJob}
       jobs={jobs}
       jobsEmptyMessage="No image compression jobs yet."
-      canStart={modelsReady && !!baseModel}
+      canStart={presetsReady && modelsReady && !!baseModel}
       starting={starting}
       onStart={start}
       startLabel="Run image compression pipeline"

@@ -101,9 +101,12 @@ def llama_load_kwargs(n_ctx: int) -> dict[str, Any]:
 
 
 class BackendKind(StrEnum):
-    LLAMA = "llama"
+    LLAMACPP = "llamacpp"
     MLX = "mlx"
     TORCH = "torch"
+
+    # Backward-compatible alias for older call sites.
+    LLAMA = LLAMACPP
 
 
 @dataclass

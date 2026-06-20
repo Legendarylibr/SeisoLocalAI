@@ -22,6 +22,7 @@ type StagePipelineShellProps = {
   preset: string;
   setPreset: (id: string) => void;
   presetList: Array<{ id: string; label: string }>;
+  presetsLoading?: boolean;
   allStages: string[];
   stageHelp: Record<string, string>;
   selectedStages: string[];
@@ -46,6 +47,7 @@ export function StagePipelineShell({
   preset,
   setPreset,
   presetList,
+  presetsLoading = false,
   allStages,
   stageHelp,
   selectedStages,
@@ -83,6 +85,10 @@ export function StagePipelineShell({
                     ))}
                   </select>
                 </div>
+                {presetsLoading && <p className="field-hint">Loading presets…</p>}
+                {!presetsLoading && presetList.length === 0 && (
+                  <p className="field-hint">Presets unavailable — check Forge connection.</p>
+                )}
                 <div className="form-field">
                   <label>Stages</label>
                   <div className="checkbox-group compress-stages">

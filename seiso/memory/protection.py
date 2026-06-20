@@ -10,6 +10,13 @@ from pathlib import Path
 from typing import Any
 
 from seiso.env import env_bool
+from seiso.hardware import (
+    assess_hardware_fit,
+    hardware_profile,
+    training_defaults,
+    vram_headroom_mb,
+)
+from seiso.memory.estimates import estimate_chat_vram_gb, guess_params_from_name
 
 logger = logging.getLogger(__name__)
 
@@ -74,21 +81,11 @@ def _estimate_path_vram_mb_uncached(p: Path, *, mode: str = "chat") -> int:
         if weight_bytes > 0:
             est = int(weight_bytes / (1024**2) * 1.15 + _INFERENCE_OVERHEAD_MB)
         else:
-            guessed = _guess_params_from_name(name) or 7.0
-            try:
-                from forge.services.hardware import estimate_chat_vram_gb
-
-                est = int(estimate_chat_vram_gb(f"{guessed}B") * 1024)
-            except Exception:
-                est = int(guessed * 1024 * 0.7 + _INFERENCE_OVERHEAD_MB)
-    else:
-        guessed = _guess_params_from_name(name) or _guess_params_from_name(str(p)) or 7.0
-        try:
-            from forge.services.hardware import estimate_chat_vram_gb
-
+            guessed = guess_params_from_name(name) or 7.0
             est = int(estimate_chat_vram_gb(f"{guessed}B") * 1024)
-        except Exception:
-            est = int(guessed * 1024 * 0.7 + _INFERENCE_OVERHEAD_MB)
+    else:
+        guessed = guess_params_from_name(name) or guess_params_from_name(str(p)) or 7.0
+        est = int(estimate_chat_vram_gb(f"{guessed}B") * 1024)
 
     if mode == "train":
         est = int(est * _TRAINING_OVERHEAD_RATIO)
@@ -147,76 +144,10 @@ def release_cached_memory(*, sync: bool = False) -> None:
         pass
 
 
-def _minimal_hardware_profile() -> dict[str, Any]:
-    """Forge-free hardware snapshot for CLI and library-only callers."""
-    ram_gb = 8.0
-    try:
-        import psutil  # type: ignore
-
-        ram_gb = round(psutil.virtual_memory().total / (1024**3), 1)
-    except Exception:
-        pass
-
-    gpus: list[dict[str, Any]] = []
-    backend = "cpu"
-    try:
-        import torch
-
-        if torch.cuda.is_available():
-            backend = "cuda"
-            for i in range(torch.cuda.device_count()):
-                props = torch.cuda.get_device_properties(i)
-                total_mb = int(props.total_memory / (1024**2))
-                used_mb: int | None = None
-                try:
-                    free, total = torch.cuda.mem_get_info(i)
-                    used_mb = int((total - free) / (1024**2))
-                except Exception:
-                    pass
-                gpus.append(
-                    {
-                        "index": i,
-                        "name": str(props.name),
-                        "vram_total_mb": total_mb,
-                        "vram_used_mb": used_mb,
-                    }
-                )
-        elif platform.system() == "Darwin":
-            try:
-                import mlx.core  # noqa: F401
-
-                backend = "mlx"
-            except ImportError:
-                pass
-    except ImportError:
-        pass
-
-    return {
-        "platform": platform.system().lower(),
-        "arch": platform.machine(),
-        "backend": backend,
-        "ram_gb": ram_gb,
-        "gpus": gpus,
-        "local_only": True,
-    }
-
-
-def hardware_profile() -> dict[str, Any]:
-    """Return cached local hardware profile (Forge when available)."""
-    try:
-        from forge.services.hardware import hardware_profile as _forge_profile
-
-        return _forge_profile()
-    except Exception:
-        return _minimal_hardware_profile()
-
-
 def headroom_mb() -> int:
     """Free memory headroom in MB for fit checks and clamps."""
     profile = hardware_profile()
     try:
-        from forge.services.hardware import vram_headroom_mb
-
         return int(vram_headroom_mb(profile))
     except Exception:
         gpus = profile.get("gpus") or []
@@ -297,21 +228,12 @@ def build_hf_max_memory(*, reserve_ratio: float = _DEFAULT_RESERVE_RATIO) -> dic
     return max_memory or None
 
 
-def _guess_params_from_name(name: str) -> float | None:
-    import re
-
-    m = re.search(r"(\d+(?:\.\d+)?)\s*b", name, re.I)
-    return float(m.group(1)) if m else None
-
-
 def assess_path_memory_fit(path: str | Path, *, mode: str = "chat") -> dict[str, Any]:
     """Return fit metadata compatible with Forge hardware assessments."""
     est_mb = estimate_path_vram_mb(path, mode=mode)
     est_gb = round(est_mb / 1024, 2)
     profile = hardware_profile()
     try:
-        from forge.services.hardware import assess_hardware_fit
-
         return assess_hardware_fit(est_gb, profile, mode=mode)
     except Exception:
         free = headroom_mb()
@@ -450,8 +372,6 @@ def apply_training_memory_guards(config: Any) -> Any:
 
     profile = hardware_profile()
     try:
-        from forge.services.hardware import training_defaults
-
         defaults = training_defaults(profile)
     except Exception:
         defaults = {

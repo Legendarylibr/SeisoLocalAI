@@ -50,7 +50,6 @@ def default_num_speculative_tokens(payload: dict[str, Any]) -> int:
 
 
 def _model_device(model: Any) -> Any:
-    import torch
 
     return next(model.parameters()).device
 
