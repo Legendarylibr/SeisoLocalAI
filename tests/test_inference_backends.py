@@ -275,7 +275,7 @@ async def test_chat_route_keeps_local_gguf_ollama_on_ollama(monkeypatch, tmp_pat
 async def test_local_inference_stream_propagates_errors(monkeypatch):
     from seiso.inference.runner import LocalInferenceRunner
 
-    async def _noop_switch(_path: str) -> None:
+    async def _noop_switch(_path: str, *, draft_path: str | None = None) -> None:
         return None
 
     runner = LocalInferenceRunner()

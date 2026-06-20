@@ -23,6 +23,7 @@ from seiso.inference.tuning import (
     mlx_stream_kwargs,
     torch_generate_kwargs,
 )
+from seiso.inference.speculative import default_num_speculative_tokens, iter_speculative_tokens
 from seiso.memory.protection import is_oom_error, release_cached_memory, sanitize_inference_payload
 from seiso.models.chat_format import format_messages_for_prompt
 
@@ -58,8 +59,9 @@ class LocalInferenceRunner:
             raise ValueError("model_path or model_id required")
 
         route, resolved_path = self._resolve_route(payload, model_path)
+        draft_path = payload.get("draft_model_path")
         generation_id = self._pool.bump_generation()
-        await self._ensure_model_switch(resolved_path)
+        await self._ensure_model_switch(resolved_path, draft_path=draft_path)
 
         loop = asyncio.get_running_loop()
         queue: asyncio.Queue[str | object] = asyncio.Queue()
@@ -115,14 +117,36 @@ class LocalInferenceRunner:
         self._pool.bump_generation()
         return self._pool.status()
 
-    async def _ensure_model_switch(self, model_path: str) -> None:
+    async def _ensure_model_switch(self, model_path: str, *, draft_path: str | None = None) -> None:
         status = self._pool.status()
         active_path = status.get("path")
+        active_draft = status.get("draft_path")
+        if draft_path:
+            if (
+                active_path
+                and active_draft
+                and self._pool.normalize_path(active_path) == self._pool.normalize_path(model_path)
+                and self._pool.normalize_path(active_draft) == self._pool.normalize_path(draft_path)
+            ):
+                return
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, self._pool.unload_all)
+            return
+
+        if active_draft:
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, self._pool.unload_all)
+            return
+
         if active_path and self._pool.normalize_path(active_path) != self._pool.normalize_path(model_path):
             loop = asyncio.get_running_loop()
             await loop.run_in_executor(None, self._pool.unload_all)
 
     def _resolve_route(self, payload: dict[str, Any], model_path: str) -> tuple[str, str]:
+        if payload.get("draft_model_path"):
+            resolved = prepare_model_path(model_path, BACKEND_TORCH)
+            return "speculative", resolved
+
         backend = resolve_local_backend(
             model_path=model_path,
             model_format=payload.get("model_format"),
@@ -142,12 +166,56 @@ class LocalInferenceRunner:
         route: str,
         should_stop: Callable[[], bool],
     ) -> Iterator[str]:
-        if route == "mlx":
+        if route == "speculative":
+            yield from self._torch_speculative_stream(payload, model_path, should_stop)
+        elif route == "mlx":
             yield from self._mlx_stream(payload, model_path, should_stop)
         elif route == "torch":
             yield from self._torch_stream(payload, model_path, should_stop)
         else:
             yield from self._llama_stream(payload, model_path, should_stop)
+
+    def _torch_speculative_stream(
+        self,
+        payload: dict[str, Any],
+        model_path: str,
+        should_stop: Callable[[], bool],
+    ) -> Iterator[str]:
+        draft_path = payload.get("draft_model_path")
+        if not draft_path:
+            raise ValueError("draft_model_path required for speculative decoding")
+
+        configure_torch_inference()
+        bundle = self._pool.get_torch_speculative(model_path, draft_path, load_in_4bit=True)
+        messages = payload.get("messages", [])
+        prompt = format_messages_for_prompt(messages, bundle.target_tokenizer)
+        temperature = float(payload.get("temperature", 0.0))
+        max_new_tokens = int(payload.get("max_tokens", 512))
+        num_speculative_tokens = default_num_speculative_tokens(payload)
+
+        try:
+            yield from iter_speculative_tokens(
+                bundle=bundle,
+                prompt=prompt,
+                max_new_tokens=max_new_tokens,
+                num_speculative_tokens=num_speculative_tokens,
+                temperature=temperature,
+                should_stop=should_stop,
+            )
+        except Exception as exc:
+            if not is_oom_error(exc):
+                raise
+            release_cached_memory(sync=True)
+            reduced = max(32, max_new_tokens // 2)
+            logger.warning("Speculative inference OOM — retrying with max_new_tokens=%s", reduced)
+            yield from iter_speculative_tokens(
+                bundle=bundle,
+                prompt=prompt,
+                max_new_tokens=reduced,
+                num_speculative_tokens=max(1, num_speculative_tokens // 2),
+                temperature=temperature,
+                should_stop=should_stop,
+            )
 
     def _mlx_stream(
         self,

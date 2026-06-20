@@ -230,22 +230,56 @@ class ModelPool:
 
     def get_torch(self, model_path: str, *, load_in_4bit: bool = True) -> tuple[Any, Any]:
         def loader(path: str):
-            from seiso.inference.tuning import maybe_apply_fused_kernels, prepare_torch_model
-            from seiso.models.loader import LoadOptions, ModelKind, load_model
-
-            model, tokenizer = load_model(
-                LoadOptions(
-                    model_id=path,
-                    kind=ModelKind.TEXT,
-                    load_in_4bit=load_in_4bit,
-                    device_map="auto",
-                )
-            )
-            prepare_torch_model(model)
-            maybe_apply_fused_kernels(model)
-            return model, tokenizer
+            return self._load_torch_pair(path, load_in_4bit=load_in_4bit)
 
         return self.switch(model_path, BackendKind.TORCH, loader)
+
+    def _load_torch_pair(self, model_path: str, *, load_in_4bit: bool = True) -> tuple[Any, Any]:
+        from seiso.inference.tuning import maybe_apply_fused_kernels, prepare_torch_model
+        from seiso.models.loader import LoadOptions, ModelKind, load_model
+
+        model, tokenizer = load_model(
+            LoadOptions(
+                model_id=model_path,
+                kind=ModelKind.TEXT,
+                load_in_4bit=load_in_4bit,
+                device_map="auto",
+            )
+        )
+        prepare_torch_model(model)
+        maybe_apply_fused_kernels(model)
+        return model, tokenizer
+
+    def get_torch_speculative(self, target_path: str, draft_path: str, *, load_in_4bit: bool = True) -> Any:
+        """Load target + draft models for speculative decoding."""
+        from seiso.inference.speculative import TorchSpeculativeBundle
+
+        target_norm = self.normalize_path(target_path)
+        draft_norm = self.normalize_path(draft_path)
+        key = f"spec:{target_norm}:{draft_norm}"
+
+        def loader(_path: str) -> TorchSpeculativeBundle:
+            from seiso.memory.protection import ensure_load_fits, release_cached_memory
+
+            release_cached_memory(sync=True)
+            ensure_load_fits(target_path, mode="chat")
+            ensure_load_fits(draft_path, mode="chat")
+            target_model, target_tokenizer = self._load_torch_pair(target_path, load_in_4bit=load_in_4bit)
+            draft_model, draft_tokenizer = self._load_torch_pair(draft_path, load_in_4bit=load_in_4bit)
+            return TorchSpeculativeBundle(
+                target_model=target_model,
+                target_tokenizer=target_tokenizer,
+                draft_model=draft_model,
+                draft_tokenizer=draft_tokenizer,
+            )
+
+        return self.switch(
+            target_path,
+            BackendKind.TORCH,
+            loader,
+            cache_key=key,
+            meta={"path": target_path, "norm_path": target_norm, "draft_path": draft_path, "draft_norm_path": draft_norm},
+        )
 
     def unload_all(self) -> None:
         """Release all loaded models and clear GPU memory."""
@@ -270,10 +304,15 @@ class ModelPool:
 
         elif backend == BackendKind.TORCH:
             try:
+                from seiso.inference.speculative import TorchSpeculativeBundle
                 from seiso.kernels.lifecycle import release_training_memory
 
-                model = handle[0] if isinstance(handle, tuple) and handle else handle
-                release_training_memory(model, sync=False)
+                if isinstance(handle, TorchSpeculativeBundle):
+                    release_training_memory(handle.target_model, sync=False)
+                    release_training_memory(handle.draft_model, sync=False)
+                else:
+                    model = handle[0] if isinstance(handle, tuple) and handle else handle
+                    release_training_memory(model, sync=False)
             except Exception:
                 pass
             del handle
@@ -295,6 +334,7 @@ class ModelPool:
                 "active_model": active.key if active else None,
                 "backend": active.backend.value if active else None,
                 "path": active.meta.get("path") if active else None,
+                "draft_path": active.meta.get("draft_path") if active else None,
             }
 
 
