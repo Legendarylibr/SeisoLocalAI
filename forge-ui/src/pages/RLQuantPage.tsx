@@ -4,6 +4,8 @@ import { invalidateApiCache } from "@/lib/api/getCache";
 import { appendBoundedLog } from "@/lib/api/sse";
 import { RL_QUANT_FALLBACK_PRESETS, RL_QUANT_PRESET_HINTS } from "@/lib/rlQuantPresets";
 import { StudioPageShell } from "@/components/StudioPageShell";
+import { StudioCardBody } from "@/components/studio/StudioCardBody";
+import { StudioCardHeader } from "@/components/studio/StudioCardHeader";
 import { FormSection } from "@/components/research/FormSection";
 import { RewardWeights } from "@/components/research/RewardWeights";
 import { ArtifactViewer } from "@/components/research/ArtifactViewer";
@@ -109,253 +111,228 @@ export function RLQuantPage() {
       subtitle="Adaptive quantization via reinforcement learning — train a reward-guided policy, evaluate on simulator or llama.cpp, export GGUF with recommended quant levels."
       badge={<span className="trust-badge trust-badge-dim">REINFORCE · multiseed sweeps</span>}
     >
-      <div className="train-layout">
+      <div className="train-layout train-layout--config-monitor">
         <div className="card studio-card">
-          <div className="studio-card-head">
-            <span className="studio-card-icon" aria-hidden>①</span>
-            <div className="studio-card-head-text">
-              <div className="studio-card-title">Experiment config</div>
-              <div className="studio-card-desc">Preset, backends, inputs, and reward weights</div>
-            </div>
-          </div>
-
-          <FormSection title="Experiment preset" hint="Reproducible configs with logged artifacts.">
-            <div className="form-field">
-              <label>Preset</label>
-              <select value={preset} onChange={(e) => setPreset(e.target.value)}>
-                {presetList.map((p) => (
-                  <option key={p.id} value={p.id}>{p.label}</option>
-                ))}
-              </select>
-            </div>
-            {RL_QUANT_PRESET_HINTS[preset] && <p className="field-hint">{RL_QUANT_PRESET_HINTS[preset]}</p>}
-            {selectedPreset && (
-              <p className="field-hint">
-                Backend {selectedPreset.backend} · trainer {selectedPreset.training_backend}
-              </p>
-            )}
-          </FormSection>
-
-          <FormSection title="Training budget" collapsible defaultOpen>
-            <div className="option-grid">
-              <div className="form-field">
-                <label>Training episodes</label>
-                <input type="number" min={8} value={trainingEpisodes} onChange={(e) => setTrainingEpisodes(+e.target.value)} />
-              </div>
-              <div className="form-field">
-                <label>Evaluation episodes</label>
-                <input type="number" min={4} value={evaluationEpisodes} onChange={(e) => setEvaluationEpisodes(+e.target.value)} />
-              </div>
-            </div>
-          </FormSection>
-
-          <FormSection title="Backends" collapsible>
-            <div className="form-field">
-              <label>Measure backend</label>
-              <select value={backend} onChange={(e) => setBackend(e.target.value)}>
-                <option value="simulator">Simulator (no GPU)</option>
-                <option value="llama_cpp">llama.cpp (GGUF path required)</option>
-              </select>
-            </div>
-            <div className="form-field">
-              <label>Policy trainer</label>
-              <select value={trainingBackend} onChange={(e) => setTrainingBackend(e.target.value)}>
-                <option value="stdlib">Stdlib REINFORCE</option>
-                <option value="pytorch">PyTorch / CUDA</option>
-              </select>
-            </div>
-          </FormSection>
-
-          <FormSection title="Inputs" collapsible defaultOpen={false}>
-            <div className="form-field">
-              <label>Fine-tune checkpoint</label>
-              <input value={checkpoint} onChange={(e) => setCheckpoint(e.target.value)} placeholder="~/.seiso/checkpoints/…" />
-            </div>
-            <div className="form-field">
-              <label>GGUF path (llama.cpp)</label>
-              <input value={ggufPath} onChange={(e) => setGgufPath(e.target.value)} placeholder="models/model-q4.gguf" />
-            </div>
-            <div className="form-field">
-              <label>Link training job ID</label>
-              <input value={linkTrainingJob} onChange={(e) => setLinkTrainingJob(e.target.value)} placeholder="uuid from Train page" />
-            </div>
-          </FormSection>
-
-          <FormSection title="CUDA kernel RL" hint="Co-train quantization with fused CUDA launch profiles." collapsible defaultOpen={false}>
-            <div className="studio-checkbox-grid">
-              <label className="studio-checkbox-item">
-                <input
-                  type="checkbox"
-                  checked={kernelRlEnabled}
-                  onChange={(e) => setKernelRlEnabled(e.target.checked)}
-                />
-                Enable kernel RL (joint quant + CUDA profile policy)
-              </label>
-              <label className="studio-checkbox-item">
-                <input
-                  type="checkbox"
-                  checked={kernelLiveBenchmark}
-                  onChange={(e) => setKernelLiveBenchmark(e.target.checked)}
-                  disabled={!kernelRlEnabled}
-                />
-                Live CUDA micro-benchmarks (NVIDIA GPU; slower, ground-truth)
-              </label>
-            </div>
-            {kernelRlEnabled && (
-              <div className="option-grid">
-                <div className="form-field">
-                  <label>Hidden dim (bench)</label>
-                  <input
-                    type="number"
-                    min={128}
-                    step={128}
-                    value={kernelHiddenDim}
-                    onChange={(e) => setKernelHiddenDim(+e.target.value)}
-                  />
-                </div>
-                <div className="form-field">
-                  <label>Batch rows (bench)</label>
-                  <input
-                    type="number"
-                    min={64}
-                    step={64}
-                    value={kernelBatchRows}
-                    onChange={(e) => setKernelBatchRows(+e.target.value)}
-                  />
-                </div>
-              </div>
-            )}
-            <p className="field-hint">
-              Profiles: auto, stripe, parallax, narrow_opt, wide_throughput, balanced. Winning profile is applied to native CUDA kernels at runtime.
-            </p>
-          </FormSection>
-
-          <FormSection title="Export options" hint="Optional GGUF export and MoE variants." collapsible defaultOpen>
-            <div className="studio-checkbox-grid">
-              <label className="studio-checkbox-item">
-                <input type="checkbox" checked={ggufExport} onChange={(e) => setGgufExport(e.target.checked)} />
-                Export GGUF after recommendation
-              </label>
-              <label className="studio-checkbox-item">
-                <input type="checkbox" checked={moeEnabled} onChange={(e) => setMoeEnabled(e.target.checked)} />
-                MoE expert variants
-              </label>
-            </div>
-          </FormSection>
-
-          <FormSection title="Reward engineering" hint="Tune the multi-objective reward surface." collapsible>
-            <RewardWeights weights={reward} onChange={(w) => setReward({ ...reward, ...w })} />
-          </FormSection>
-        </div>
-
-        <div className="card studio-card">
-          <div className="studio-card-head">
-            <span className="studio-card-icon" aria-hidden>②</span>
-            <div className="studio-card-head-text">
-              <div className="studio-card-title">Live output</div>
-              <div className="studio-card-desc">Streaming logs and recommendation artifacts</div>
-              {activeJob && (
-                <div className="studio-card-meta">
-                  <span className="mono studio-job-id">{activeJob.slice(0, 8)}…</span>
-                </div>
-              )}
-            </div>
-          </div>
-          <LogStream
-            logs={logs}
-            emptyMessage="Run the RL quant pipeline to stream logs here."
-            tall
+          <StudioCardHeader
+            icon="①"
+            title="Experiment config"
+            description="Preset, backends, inputs, and reward weights"
           />
-          {recommendation && (
-            <div className="studio-artifact-section">
-              <div className="form-section-head">
-                <h3 className="form-section-title">Recommendation artifact</h3>
-                <p className="form-section-hint">Policy output from the completed sweep</p>
-              </div>
-              {(() => {
-                const decision = (recommendation.decision ?? recommendation.recommended_quant) as
-                  | Record<string, unknown>
-                  | undefined;
-                const kernelName =
-                  (decision?.kernel_profile_name as string | undefined) ||
-                  ((decision?.metadata as Record<string, unknown> | undefined)?.kernel_profile_name as
-                    | string
-                    | undefined);
-                return kernelName ? (
-                  <p className="field-hint">
-                    Recommended CUDA kernel profile: <span className="mono">{kernelName}</span>
-                  </p>
-                ) : null;
-              })()}
-              <div className="studio-artifact-panel">
-                <ArtifactViewer data={recommendation} />
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
 
-      <div className="card studio-card studio-run-card">
-        <div className="studio-card-head studio-card-head-inline">
-          <span className="studio-card-icon" aria-hidden>▶</span>
-          <div className="studio-card-head-text">
-            <div className="studio-card-title">Run pipeline</div>
-            <div className="studio-card-desc">
-              Starts a local REINFORCE sweep and streams metrics to the log panel.
+          <StudioCardBody>
+          <div className="studio-form-columns">
+            <div className="studio-form-col">
+              <FormSection title="Experiment preset" hint="Reproducible configs with logged artifacts.">
+                <div className="form-field">
+                  <label>Preset</label>
+                  <select value={preset} onChange={(e) => setPreset(e.target.value)}>
+                    {presetList.map((p) => (
+                      <option key={p.id} value={p.id}>{p.label}</option>
+                    ))}
+                  </select>
+                </div>
+                {RL_QUANT_PRESET_HINTS[preset] && <p className="field-hint">{RL_QUANT_PRESET_HINTS[preset]}</p>}
+                {selectedPreset && (
+                  <p className="field-hint">
+                    Backend {selectedPreset.backend} · trainer {selectedPreset.training_backend}
+                  </p>
+                )}
+              </FormSection>
+
+              <FormSection title="Training budget" collapsible defaultOpen>
+                <div className="option-grid">
+                  <div className="form-field">
+                    <label>Training episodes</label>
+                    <input type="number" min={8} value={trainingEpisodes} onChange={(e) => setTrainingEpisodes(+e.target.value)} />
+                  </div>
+                  <div className="form-field">
+                    <label>Evaluation episodes</label>
+                    <input type="number" min={4} value={evaluationEpisodes} onChange={(e) => setEvaluationEpisodes(+e.target.value)} />
+                  </div>
+                </div>
+              </FormSection>
+
+              <FormSection title="Backends" collapsible defaultOpen={false}>
+                <div className="form-field">
+                  <label>Measure backend</label>
+                  <select value={backend} onChange={(e) => setBackend(e.target.value)}>
+                    <option value="simulator">Simulator (no GPU)</option>
+                    <option value="llama_cpp">llama.cpp (GGUF path required)</option>
+                  </select>
+                </div>
+                <div className="form-field">
+                  <label>Policy trainer</label>
+                  <select value={trainingBackend} onChange={(e) => setTrainingBackend(e.target.value)}>
+                    <option value="stdlib">Stdlib REINFORCE</option>
+                    <option value="pytorch">PyTorch / CUDA</option>
+                  </select>
+                </div>
+              </FormSection>
+
+              <FormSection title="Inputs" collapsible defaultOpen={false}>
+                <div className="form-field">
+                  <label>Fine-tune checkpoint</label>
+                  <input value={checkpoint} onChange={(e) => setCheckpoint(e.target.value)} placeholder="~/.seiso/checkpoints/…" />
+                </div>
+                <div className="form-field">
+                  <label>GGUF path (llama.cpp)</label>
+                  <input value={ggufPath} onChange={(e) => setGgufPath(e.target.value)} placeholder="models/model-q4.gguf" />
+                </div>
+                <div className="form-field">
+                  <label>Link training job ID</label>
+                  <input value={linkTrainingJob} onChange={(e) => setLinkTrainingJob(e.target.value)} placeholder="uuid from Train page" />
+                </div>
+              </FormSection>
+
+              <FormSection title="Export options" hint="Optional GGUF export and MoE variants." collapsible defaultOpen={false}>
+                <div className="studio-checkbox-grid">
+                  <label className="studio-checkbox-item">
+                    <input type="checkbox" checked={ggufExport} onChange={(e) => setGgufExport(e.target.checked)} />
+                    Export GGUF after recommendation
+                  </label>
+                  <label className="studio-checkbox-item">
+                    <input type="checkbox" checked={moeEnabled} onChange={(e) => setMoeEnabled(e.target.checked)} />
+                    MoE expert variants
+                  </label>
+                </div>
+              </FormSection>
+            </div>
+
+            <div className="studio-form-col">
+              <FormSection title="CUDA kernel RL" hint="Co-train quantization with fused CUDA launch profiles." collapsible defaultOpen={false}>
+                <div className="studio-checkbox-grid">
+                  <label className="studio-checkbox-item">
+                    <input
+                      type="checkbox"
+                      checked={kernelRlEnabled}
+                      onChange={(e) => setKernelRlEnabled(e.target.checked)}
+                    />
+                    Enable kernel RL (joint quant + CUDA profile policy)
+                  </label>
+                  <label className="studio-checkbox-item">
+                    <input
+                      type="checkbox"
+                      checked={kernelLiveBenchmark}
+                      onChange={(e) => setKernelLiveBenchmark(e.target.checked)}
+                      disabled={!kernelRlEnabled}
+                    />
+                    Live CUDA micro-benchmarks (NVIDIA GPU; slower, ground-truth)
+                  </label>
+                </div>
+                {kernelRlEnabled && (
+                  <div className="option-grid">
+                    <div className="form-field">
+                      <label>Hidden dim (bench)</label>
+                      <input
+                        type="number"
+                        min={128}
+                        step={128}
+                        value={kernelHiddenDim}
+                        onChange={(e) => setKernelHiddenDim(+e.target.value)}
+                      />
+                    </div>
+                    <div className="form-field">
+                      <label>Batch rows (bench)</label>
+                      <input
+                        type="number"
+                        min={64}
+                        step={64}
+                        value={kernelBatchRows}
+                        onChange={(e) => setKernelBatchRows(+e.target.value)}
+                      />
+                    </div>
+                  </div>
+                )}
+                <p className="field-hint">
+                  Profiles: auto, stripe, parallax, narrow_opt, wide_throughput, balanced. Winning profile is applied to native CUDA kernels at runtime.
+                </p>
+              </FormSection>
+
+              <FormSection title="Reward engineering" hint="Tune the multi-objective reward surface." collapsible defaultOpen={false}>
+                <RewardWeights weights={reward} onChange={(w) => setReward({ ...reward, ...w })} />
+              </FormSection>
             </div>
           </div>
-        </div>
-        <div className="studio-action-bar studio-action-bar-flush">
-          <button className="btn btn-primary btn-lg" onClick={start} disabled={starting}>
-            {starting ? "Starting…" : "Run RL quant pipeline"}
-          </button>
-        </div>
-      </div>
+          </StudioCardBody>
 
-      <div className="card studio-card">
-        <div className="studio-card-head">
-          <span className="studio-card-icon" aria-hidden>③</span>
-          <div className="studio-card-head-text">
-            <div className="studio-card-title">Recent experiments</div>
-            <div className="studio-card-desc">Past RL quant jobs on this machine</div>
-            {jobs.length > 0 && (
-              <div className="studio-card-meta">
-                <span className="badge badge-dim">{jobs.length} job{jobs.length === 1 ? "" : "s"}</span>
+          <div className="studio-action-bar studio-action-bar-flush">
+            <button className="btn btn-primary btn-lg" onClick={start} disabled={starting}>
+              {starting ? "Starting…" : "Run RL quant pipeline"}
+            </button>
+          </div>
+        </div>
+
+        <div className="studio-monitor-stack">
+          <div className="card studio-card studio-card-scroll">
+            <StudioCardHeader
+              icon="②"
+              title="Live output"
+              description="Streaming logs and recommendation artifacts"
+              tone="monitor"
+              meta={
+                activeJob ? <span className="mono studio-job-id">{activeJob.slice(0, 8)}…</span> : undefined
+              }
+            />
+            <LogStream
+              logs={logs}
+              emptyMessage="Run the RL quant pipeline to stream logs here."
+              fill
+              label="RL quant log"
+            />
+            {recommendation && (
+              <div className="studio-artifact-section studio-artifact-section-compact">
+                <div className="form-section-head">
+                  <h3 className="form-section-title">Recommendation</h3>
+                </div>
+                <div className="studio-artifact-panel">
+                  <ArtifactViewer data={recommendation} />
+                </div>
               </div>
             )}
           </div>
+
+          <div className="card studio-card studio-card-compact">
+            <StudioCardHeader
+              icon="③"
+              title="History"
+              description="Past RL quant jobs on this machine"
+              tone="history"
+              meta={
+                jobs.length > 0 ? (
+                  <span className="badge badge-dim">{jobs.length}</span>
+                ) : undefined
+              }
+            />
+            <DataTable
+              columns={[
+                {
+                  key: "id",
+                  header: "ID",
+                  mono: true,
+                  render: (j) => `${j.id.slice(0, 8)}…`,
+                },
+                {
+                  key: "status",
+                  header: "Status",
+                  render: (j) => <span className={`badge badge-${j.status}`}>{j.status}</span>,
+                },
+                {
+                  key: "gguf_quants",
+                  header: "Quants",
+                  render: (j) => j.gguf_quants?.join(", ") || "—",
+                },
+                {
+                  key: "created_at",
+                  header: "Created",
+                  render: (j) => j.created_at?.slice(0, 10) ?? "—",
+                },
+              ]}
+              rows={jobs.slice(0, 6)}
+              getRowKey={(j) => j.id}
+              emptyMessage="No jobs yet."
+            />
+          </div>
         </div>
-        <DataTable
-          columns={[
-            {
-              key: "id",
-              header: "ID",
-              mono: true,
-              render: (j) => `${j.id.slice(0, 8)}…`,
-            },
-            {
-              key: "status",
-              header: "Status",
-              render: (j) => <span className={`badge badge-${j.status}`}>{j.status}</span>,
-            },
-            {
-              key: "gguf_quants",
-              header: "GGUF quants",
-              render: (j) => j.gguf_quants?.join(", ") || "—",
-            },
-            {
-              key: "created_at",
-              header: "Created",
-              render: (j) => j.created_at?.slice(0, 19) ?? "—",
-            },
-          ]}
-          rows={jobs}
-          getRowKey={(j) => j.id}
-          emptyMessage="No RL quant jobs yet — configure settings above and run the pipeline."
-        />
-        <p className="field-hint studio-field-hint">
-          Completed job IDs can be used on the Export page for RL-recommended GGUF quantizations.
-        </p>
       </div>
     </StudioPageShell>
   );

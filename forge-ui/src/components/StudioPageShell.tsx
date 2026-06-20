@@ -22,13 +22,14 @@ export function StudioPageShell({
   className = "",
 }: StudioPageShellProps) {
   return (
-    <div className={`studio-page${className ? ` ${className}` : ""}`}>
+    <div className={`studio-page studio-page--compact${className ? ` ${className}` : ""}`}>
       <PageHeader
         title={title}
         subtitle={subtitle}
         group={group}
         badge={badge}
         actions={actions}
+        className="page-header-studio"
       />
       {banner}
       <div className="studio-page-body">{children}</div>

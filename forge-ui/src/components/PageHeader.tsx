@@ -4,11 +4,12 @@ type PageHeaderProps = {
   group?: string;
   badge?: React.ReactNode;
   actions?: React.ReactNode;
+  className?: string;
 };
 
-export function PageHeader({ title, subtitle, group, badge, actions }: PageHeaderProps) {
+export function PageHeader({ title, subtitle, group, badge, actions, className = "" }: PageHeaderProps) {
   return (
-    <header className="page-header">
+    <header className={`page-header${className ? ` ${className}` : ""}`}>
       {group && (
         <nav className="page-breadcrumb" aria-label="Section">
           <span className="page-breadcrumb-group">{group}</span>

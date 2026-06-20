@@ -1,6 +1,9 @@
 import { type ReactNode } from "react";
+import { FormSection } from "@/components/research/FormSection";
 import { PipelineJobPanel } from "@/components/studio/PipelineJobPanel";
 import { StagePipelineJobsTable } from "@/components/studio/StagePipelineJobsTable";
+import { StudioCardBody } from "@/components/studio/StudioCardBody";
+import { StudioCardHeader } from "@/components/studio/StudioCardHeader";
 import { StudioPageShell } from "@/components/StudioPageShell";
 
 type StageJobRow = {
@@ -60,56 +63,67 @@ export function StagePipelineShell({
 }: StagePipelineShellProps) {
   return (
     <StudioPageShell title={title} subtitle={subtitle}>
-      <div className="train-layout">
-        <div className="card compress-config-card studio-card">
-          <div className="studio-card-head">
-            <span className="studio-card-icon" aria-hidden>{cardIcon}</span>
-            <div className="studio-card-head-text">
-              <div className="studio-card-title">Pipeline configuration</div>
-              <div className="studio-card-desc">{cardDesc}</div>
+      <div className="train-layout train-layout--config-monitor">
+        <div className="card studio-card">
+          <StudioCardHeader
+            icon={cardIcon}
+            title="Pipeline configuration"
+            description={cardDesc}
+          />
+
+          <StudioCardBody>
+          <div className="studio-config-grid">
+            <div className="studio-config-block">
+              <FormSection title="Pipeline" hint="Preset and active stages.">
+                <div className="form-field">
+                  <label>Preset</label>
+                  <select value={preset} onChange={(e) => setPreset(e.target.value)}>
+                    {presetList.map((p) => (
+                      <option key={p.id} value={p.id}>{p.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="form-field">
+                  <label>Stages</label>
+                  <div className="checkbox-group compress-stages">
+                    {allStages.map((stage) => (
+                      <label key={stage} title={stageHelp[stage]}>
+                        <input
+                          type="checkbox"
+                          checked={selectedStages.includes(stage)}
+                          onChange={() => toggleStage(stage)}
+                        />
+                        {stage.replace(/_/g, " ")}
+                        {stageHelp[stage] && (
+                          <span className="muted-text compress-stage-hint">{stageHelp[stage]}</span>
+                        )}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              </FormSection>
             </div>
+
+            <div className="studio-config-block">{children}</div>
           </div>
+          </StudioCardBody>
 
-          <h3 className="section-title">Pipeline</h3>
-          <label>Preset</label>
-          <select value={preset} onChange={(e) => setPreset(e.target.value)}>
-            {presetList.map((p) => (
-              <option key={p.id} value={p.id}>{p.label}</option>
-            ))}
-          </select>
-
-          <label>Stages</label>
-          <div className="checkbox-group compress-stages">
-            {allStages.map((stage) => (
-              <label key={stage} title={stageHelp[stage]}>
-                <input
-                  type="checkbox"
-                  checked={selectedStages.includes(stage)}
-                  onChange={() => toggleStage(stage)}
-                />
-                {stage.replace(/_/g, " ")}
-                {stageHelp[stage] && (
-                  <span className="muted-text compress-stage-hint">{stageHelp[stage]}</span>
-                )}
-              </label>
-            ))}
+          <div className="studio-action-bar studio-action-bar-flush">
+            <button
+              className="btn btn-primary btn-lg"
+              onClick={onStart}
+              disabled={starting || !canStart}
+            >
+              {starting ? "Starting…" : startLabel}
+            </button>
           </div>
-
-          {children}
-
-          <button
-            className="btn btn-primary btn-lg studio-action-bar-standalone"
-            onClick={onStart}
-            disabled={starting || !canStart}
-          >
-            {starting ? "Starting…" : startLabel}
-          </button>
         </div>
 
-        <PipelineJobPanel activeJob={activeJob} logs={logs} result={result} />
+        <div className="studio-monitor-stack">
+          <PipelineJobPanel activeJob={activeJob} logs={logs} result={result} />
+          <StagePipelineJobsTable jobs={jobs} emptyMessage={jobsEmptyMessage} />
+        </div>
       </div>
-
-      <StagePipelineJobsTable jobs={jobs} emptyMessage={jobsEmptyMessage} />
     </StudioPageShell>
   );
 }

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, CompressJob, CompressPreset } from "@/lib/api";
+import { FormSection } from "@/components/research/FormSection";
 import { StagePipelineShell } from "@/components/studio/StagePipelineShell";
 import { HfBaseModelPicker } from "@/components/HfBaseModelPicker";
 import { useStagePipelinePage } from "@/hooks/useStagePipelinePage";
@@ -119,129 +120,148 @@ export function CompressPage() {
       onStart={start}
       startLabel="Run compression pipeline"
     >
-      <h3 className="section-title">Models</h3>
-      <label>Teacher model</label>
-      <HfBaseModelPicker
-        value={teacherModel}
-        localModels={localModels}
-        disabled={!modelsReady}
-        onChange={(value) => {
-          setTeacherModel(value);
-          writeStoredModel("compress:teacher", value);
-        }}
-      />
-
-      <label>Student model</label>
-      <HfBaseModelPicker
-        value={studentModel}
-        localModels={localModels}
-        disabled={!modelsReady}
-        onChange={(value) => {
-          setStudentModel(value);
-          writeStoredModel("compress:student", value);
-        }}
-      />
-
-      <label>Starting model dir (optional — for prune/finetune presets)</label>
-      <input value={modelDir} onChange={(e) => setModelDir(e.target.value)} placeholder="~/.seiso/checkpoints/…" />
-
-      <label>Link training job ID (optional)</label>
-      <input value={linkTrainingJob} onChange={(e) => setLinkTrainingJob(e.target.value)} placeholder="uuid from Train page" />
-
-      <h3 className="section-title">Training & pruning</h3>
-      <div className="option-grid">
-        <div>
-          <label>Distill steps</label>
-          <input
-            type="number"
-            min={1}
-            value={distillSteps}
-            onChange={(e) => setDistillSteps(e.target.value ? +e.target.value : "")}
-            placeholder="preset default"
-          />
+      <div className="studio-config-columns">
+        <div className="studio-config-block">
+          <FormSection title="Models" hint="Teacher/student checkpoints for distillation.">
+            <div className="form-field">
+              <label>Teacher model</label>
+              <HfBaseModelPicker
+                value={teacherModel}
+                localModels={localModels}
+                disabled={!modelsReady}
+                onChange={(value) => {
+                  setTeacherModel(value);
+                  writeStoredModel("compress:teacher", value);
+                }}
+              />
+            </div>
+            <div className="form-field">
+              <label>Student model</label>
+              <HfBaseModelPicker
+                value={studentModel}
+                localModels={localModels}
+                disabled={!modelsReady}
+                onChange={(value) => {
+                  setStudentModel(value);
+                  writeStoredModel("compress:student", value);
+                }}
+              />
+            </div>
+            <div className="form-field">
+              <label>Starting model dir (optional)</label>
+              <input value={modelDir} onChange={(e) => setModelDir(e.target.value)} placeholder="~/.seiso/checkpoints/…" />
+            </div>
+            <div className="form-field">
+              <label>Link training job ID (optional)</label>
+              <input value={linkTrainingJob} onChange={(e) => setLinkTrainingJob(e.target.value)} placeholder="uuid from Train page" />
+            </div>
+          </FormSection>
         </div>
-        <div>
-          <label>Finetune steps</label>
-          <input
-            type="number"
-            min={1}
-            value={finetuneSteps}
-            onChange={(e) => setFinetuneSteps(e.target.value ? +e.target.value : "")}
-            placeholder="preset default"
-          />
+
+        <div className="studio-config-block">
+          <FormSection title="Training & pruning" hint="Step counts and sparsity targets." collapsible defaultOpen={false}>
+            <div className="option-grid">
+              <div className="form-field">
+                <label>Distill steps</label>
+                <input
+                  type="number"
+                  min={1}
+                  value={distillSteps}
+                  onChange={(e) => setDistillSteps(e.target.value ? +e.target.value : "")}
+                  placeholder="preset default"
+                />
+              </div>
+              <div className="form-field">
+                <label>Finetune steps</label>
+                <input
+                  type="number"
+                  min={1}
+                  value={finetuneSteps}
+                  onChange={(e) => setFinetuneSteps(e.target.value ? +e.target.value : "")}
+                  placeholder="preset default"
+                />
+              </div>
+            </div>
+            <div className="option-grid">
+              <div className="slider-row">
+                <label>Prune ratio: {pruneRatio.toFixed(2)}</label>
+                <input
+                  type="range"
+                  min={0.05}
+                  max={0.5}
+                  step={0.05}
+                  value={pruneRatio}
+                  onChange={(e) => setPruneRatio(+e.target.value)}
+                />
+              </div>
+              <div className="form-field">
+                <label>Prune method</label>
+                <select value={pruneMethod} onChange={(e) => setPruneMethod(e.target.value)}>
+                  <option value="magnitude">Magnitude</option>
+                  <option value="wanda">Wanda</option>
+                </select>
+              </div>
+            </div>
+            <div className="form-field">
+              <label>Max train samples (override)</label>
+              <input
+                type="number"
+                min={1}
+                value={maxTrainSamples}
+                onChange={(e) => setMaxTrainSamples(e.target.value ? +e.target.value : "")}
+                placeholder="preset default"
+              />
+            </div>
+          </FormSection>
+        </div>
+
+        <div className="studio-config-block">
+          <FormSection title="Export & quantization" hint="Output naming and GPTQ/AWQ calibration." collapsible defaultOpen={false}>
+            <div className="form-field">
+              <label>Export model name</label>
+              <input value={exportModelName} onChange={(e) => setExportModelName(e.target.value)} />
+            </div>
+            <div className="form-field">
+              <label>Calibration samples (GPTQ / AWQ)</label>
+              <input
+                type="number"
+                min={1}
+                value={calibrationSamples}
+                onChange={(e) => setCalibrationSamples(e.target.value ? +e.target.value : "")}
+                placeholder="preset default"
+              />
+            </div>
+          </FormSection>
+
+          <FormSection title="Reproducibility" collapsible defaultOpen={false}>
+            <div className="option-grid">
+              <div className="form-field">
+                <label>Seed</label>
+                <input type="number" min={0} value={seed} onChange={(e) => setSeed(+e.target.value)} />
+              </div>
+              <label className="studio-checkbox-item">
+                <input
+                  type="checkbox"
+                  checked={deterministic}
+                  onChange={(e) => setDeterministic(e.target.checked)}
+                />
+                Deterministic mode
+              </label>
+            </div>
+            <details className="config-advanced">
+              <summary>Advanced options</summary>
+              <div className="form-field">
+                <label>Config file path (optional JSON override)</label>
+                <input
+                  value={configFile}
+                  onChange={(e) => setConfigFile(e.target.value)}
+                  placeholder="~/.seiso/configs/compress.json"
+                />
+              </div>
+            </details>
+          </FormSection>
         </div>
       </div>
-
-      <div className="option-grid">
-        <div>
-          <label>Prune ratio: {pruneRatio.toFixed(2)}</label>
-          <input
-            type="range"
-            min={0.05}
-            max={0.5}
-            step={0.05}
-            value={pruneRatio}
-            onChange={(e) => setPruneRatio(+e.target.value)}
-          />
-        </div>
-        <div>
-          <label>Prune method</label>
-          <select value={pruneMethod} onChange={(e) => setPruneMethod(e.target.value)}>
-            <option value="magnitude">Magnitude</option>
-            <option value="wanda">Wanda</option>
-          </select>
-        </div>
-      </div>
-
-      <label>Max train samples (override)</label>
-      <input
-        type="number"
-        min={1}
-        value={maxTrainSamples}
-        onChange={(e) => setMaxTrainSamples(e.target.value ? +e.target.value : "")}
-        placeholder="preset default"
-      />
-
-      <h3 className="section-title">Export & quantization</h3>
-      <label>Export model name</label>
-      <input value={exportModelName} onChange={(e) => setExportModelName(e.target.value)} />
-
-      <label>Calibration samples (GPTQ / AWQ)</label>
-      <input
-        type="number"
-        min={1}
-        value={calibrationSamples}
-        onChange={(e) => setCalibrationSamples(e.target.value ? +e.target.value : "")}
-        placeholder="preset default"
-      />
-
-      <h3 className="section-title">Reproducibility</h3>
-      <div className="option-grid">
-        <div>
-          <label>Seed</label>
-          <input type="number" min={0} value={seed} onChange={(e) => setSeed(+e.target.value)} />
-        </div>
-        <div className="checkbox-group" style={{ margin: 0, justifyContent: "flex-end" }}>
-          <label>
-            <input
-              type="checkbox"
-              checked={deterministic}
-              onChange={(e) => setDeterministic(e.target.checked)}
-            />
-            Deterministic mode
-          </label>
-        </div>
-      </div>
-
-      <details className="config-advanced">
-        <summary>Advanced options</summary>
-        <label>Config file path (optional JSON override)</label>
-        <input
-          value={configFile}
-          onChange={(e) => setConfigFile(e.target.value)}
-          placeholder="~/.seiso/configs/compress.json"
-        />
-      </details>
     </StagePipelineShell>
   );
 }

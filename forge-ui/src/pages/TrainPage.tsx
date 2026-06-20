@@ -14,6 +14,8 @@ import { FormSection } from "@/components/research/FormSection";
 import { DataTable } from "@/components/research/DataTable";
 import { LogStream } from "@/components/research/LogStream";
 import { StudioPageShell } from "@/components/StudioPageShell";
+import { StudioCardBody } from "@/components/studio/StudioCardBody";
+import { StudioCardHeader } from "@/components/studio/StudioCardHeader";
 import { TrainingMetricsDashboard } from "@/components/TrainingMetricsDashboard";
 import { useHardwareProfile } from "@/hooks/useHardware";
 
@@ -309,13 +311,11 @@ export function TrainPage() {
 
       {(loadProgress || downloadingModel) && (
         <div className="card studio-card studio-download-card">
-          <div className="studio-card-head">
-            <span className="studio-card-icon" aria-hidden>↓</span>
-            <div className="studio-card-head-text">
-              <div className="studio-card-title">Downloading base model</div>
-              <div className="studio-card-desc">Fetching safetensors snapshot from Hugging Face Hub</div>
-            </div>
-          </div>
+          <StudioCardHeader
+            icon="↓"
+            title="Downloading base model"
+            description="Fetching safetensors snapshot from Hugging Face Hub"
+          />
           <ModelLoadProgress progress={loadProgress} modelName={modelId.split("/").pop()} />
         </div>
       )}
@@ -328,15 +328,14 @@ export function TrainPage() {
         </div>
       )}
 
-      <div className="train-layout">
+      <div className="train-layout train-layout--studio train-layout--studio-fit">
         <div className="card studio-card">
-          <div className="studio-card-head">
-            <span className="studio-card-icon" aria-hidden>①</span>
-            <div className="studio-card-head-text">
-              <div className="studio-card-title">Model & data</div>
-              <div className="studio-card-desc">Base checkpoint and training dataset</div>
-            </div>
-          </div>
+          <StudioCardHeader
+            icon="①"
+            title="Model & data"
+            description="Base checkpoint and training dataset"
+          />
+          <StudioCardBody>
           <div className="form-field">
             <label>Base model</label>
             <HfBaseModelPicker
@@ -350,8 +349,8 @@ export function TrainPage() {
             />
           </div>
           {localModels.length > 0 && (
-            <p className="muted-text studio-field-hint">
-              {localModels.length} safetensors snapshot{localModels.length === 1 ? "" : "s"} ready on disk — training uses cached weights automatically.
+            <p className="muted-text studio-field-hint studio-field-hint-compact">
+              {localModels.length} snapshot{localModels.length === 1 ? "" : "s"} cached locally.
             </p>
           )}
           <div className="form-field">
@@ -368,37 +367,37 @@ export function TrainPage() {
               <option value="text">Plain text</option>
             </select>
           </div>
+          </StudioCardBody>
         </div>
 
         <div className="card studio-card">
-          <div className="studio-card-head">
-            <span className="studio-card-icon" aria-hidden>②</span>
-            <div className="studio-card-head-text">
-              <div className="studio-card-title">Training method</div>
-              <div className="studio-card-desc">Hyperparameters, LoRA, and optimization flags</div>
+          <StudioCardHeader
+            icon="②"
+            title="Hyperparameters"
+            description="Method, quantization, and core training knobs"
+          />
+          <StudioCardBody>
+
+          <div className="option-grid">
+            <div className="form-field">
+              <label>Method</label>
+              <select value={method} onChange={(e) => setMethod(e.target.value)}>
+                <option value="lora">LoRA / QLoRA</option>
+                <option value="full">Full fine-tune</option>
+                <option value="embedding">Embedding</option>
+              </select>
+            </div>
+            <div className="form-field">
+              <label>Quantization</label>
+              <select value={quant} onChange={(e) => setQuant(e.target.value)}>
+                <option value="4bit">4-bit (QLoRA)</option>
+                <option value="8bit">8-bit</option>
+                <option value="16bit">16-bit FP16</option>
+                <option value="none">None (full precision)</option>
+              </select>
             </div>
           </div>
-
-          <FormSection title="Hyperparameters" hint="Method, quantization, and core training knobs.">
-            <div className="option-grid">
-              <div className="form-field">
-                <label>Method</label>
-                <select value={method} onChange={(e) => setMethod(e.target.value)}>
-                  <option value="lora">LoRA / QLoRA</option>
-                  <option value="full">Full fine-tune</option>
-                  <option value="embedding">Embedding</option>
-                </select>
-              </div>
-              <div className="form-field">
-                <label>Quantization</label>
-                <select value={quant} onChange={(e) => setQuant(e.target.value)}>
-                  <option value="4bit">4-bit (QLoRA)</option>
-                  <option value="8bit">8-bit</option>
-                  <option value="16bit">16-bit FP16</option>
-                  <option value="none">None (full precision)</option>
-                </select>
-              </div>
-            </div>
+          <div className="studio-slider-grid">
             <div className="slider-row">
               <label>Epochs: {epochs}</label>
               <input type="range" min={1} max={10} value={epochs} onChange={(e) => setEpochs(+e.target.value)} />
@@ -415,16 +414,16 @@ export function TrainPage() {
               <label>Learning rate: {lr.toExponential(1)}</label>
               <input type="range" min={-6} max={-3} step={0.1} value={Math.log10(lr)} onChange={(e) => setLr(10 ** +e.target.value)} />
             </div>
-          </FormSection>
+          </div>
 
           {method === "lora" && (
-            <FormSection title="LoRA settings" hint="Rank, alpha, and gradient accumulation.">
-              <div className="option-grid">
-                <div className="form-field">
+            <FormSection title="LoRA settings" hint="Rank, alpha, and gradient accumulation." collapsible defaultOpen={false}>
+              <div className="studio-slider-grid">
+                <div className="slider-row">
                   <label>LoRA rank (r): {loraR}</label>
                   <input type="range" min={4} max={128} step={4} value={loraR} onChange={(e) => setLoraR(+e.target.value)} />
                 </div>
-                <div className="form-field">
+                <div className="slider-row">
                   <label>LoRA alpha: {loraAlpha}</label>
                   <input type="range" min={8} max={256} step={8} value={loraAlpha} onChange={(e) => setLoraAlpha(+e.target.value)} />
                 </div>
@@ -435,8 +434,23 @@ export function TrainPage() {
               </div>
             </FormSection>
           )}
+          </StudioCardBody>
+        </div>
 
-          <FormSection title="Optimization" hint="Memory and throughput trade-offs." collapsible defaultOpen>
+        <div className="card studio-card">
+          <StudioCardHeader
+            icon="③"
+            title="Optimization & export"
+            description="Memory trade-offs, post-training bundles, and run controls"
+            meta={
+              activeJob && jobStatus ? (
+                <span className={`badge badge-${jobStatus}`}>{jobStatus}</span>
+              ) : undefined
+            }
+          />
+          <StudioCardBody>
+
+          <FormSection title="Optimization" hint="Memory and throughput trade-offs." collapsible defaultOpen={false}>
             <div className="studio-checkbox-grid">
               <label className="studio-checkbox-item">
                 <input type="checkbox" checked={gradCkpt} onChange={(e) => setGradCkpt(e.target.checked)} />
@@ -492,7 +506,7 @@ export function TrainPage() {
               title="Post-training export"
               hint="Bundle LoRA, merged weights, and GGUF quants when the run finishes."
               collapsible
-              defaultOpen={exportOnComplete}
+              defaultOpen={false}
             >
               <label className="studio-checkbox-item studio-checkbox-item-standalone">
                 <input
@@ -542,70 +556,50 @@ export function TrainPage() {
               )}
             </FormSection>
           )}
-        </div>
-      </div>
 
-      <div className="card studio-card studio-run-card">
-        <div className="studio-card-head studio-card-head-inline">
-          <span className="studio-card-icon" aria-hidden>▶</span>
-          <div className="studio-card-head-text">
-            <div className="studio-card-title">Run training</div>
-            <div className="studio-card-desc">
-              Downloads the base model if needed, then starts a local QLoRA job on this machine.
-            </div>
-            {activeJob && jobStatus && (
-              <div className="studio-card-meta">
-                <span className={`badge badge-${jobStatus}`}>{jobStatus}</span>
-              </div>
+          </StudioCardBody>
+          <div className="studio-action-bar studio-action-bar-flush">
+            <button className="btn btn-primary btn-lg" onClick={start} disabled={starting || downloadingModel}>
+              {starting ? "Starting…" : downloadingModel ? "Downloading model…" : "Start training"}
+            </button>
+            {activeJob && (
+              <button type="button" className="btn" onClick={() => setMetricsOpen(true)}>
+                View metrics
+              </button>
             )}
           </div>
         </div>
-        <div className="studio-action-bar studio-action-bar-flush">
-          <button className="btn btn-primary btn-lg" onClick={start} disabled={starting || downloadingModel}>
-            {starting ? "Starting…" : downloadingModel ? "Downloading model…" : "Start training"}
-          </button>
-          {activeJob && (
-            <button type="button" className="btn" onClick={() => setMetricsOpen(true)}>
-              View metrics
-            </button>
-          )}
-        </div>
-      </div>
 
-      <div className="train-layout studio-monitor-layout">
-        <div className="card studio-card">
-          <div className="studio-card-head">
-            <span className="studio-card-icon" aria-hidden>③</span>
-            <div className="studio-card-head-text">
-              <div className="studio-card-title">Live output</div>
-              <div className="studio-card-desc">Streaming logs from the active training job</div>
-              {activeJob && (
-                <div className="studio-card-meta">
-                  <span className="mono studio-job-id">{activeJob.slice(0, 8)}…</span>
-                </div>
-              )}
-            </div>
-          </div>
+        <div className="card studio-card studio-card-scroll">
+          <StudioCardHeader
+            icon="④"
+            title="Live output"
+            description="Streaming logs from the active training job"
+            tone="monitor"
+            meta={
+              activeJob ? <span className="mono studio-job-id">{activeJob.slice(0, 8)}…</span> : undefined
+            }
+          />
           <LogStream
             logs={logs}
             emptyMessage="Start a training run to stream logs here."
-            tall
+            fill
+            label="Training log"
           />
         </div>
 
-        <div className="card studio-card">
-          <div className="studio-card-head">
-            <span className="studio-card-icon" aria-hidden>④</span>
-            <div className="studio-card-head-text">
-              <div className="studio-card-title">Training history</div>
-              <div className="studio-card-desc">Past jobs on this machine</div>
-              {jobs.length > 0 && (
-                <div className="studio-card-meta">
-                  <span className="badge badge-dim">{jobs.length} job{jobs.length === 1 ? "" : "s"}</span>
-                </div>
-              )}
-            </div>
-          </div>
+        <div className="card studio-card studio-card-compact">
+          <StudioCardHeader
+            icon="⑤"
+            title="History"
+            description="Past jobs on this machine"
+            tone="history"
+            meta={
+              jobs.length > 0 ? (
+                <span className="badge badge-dim">{jobs.length}</span>
+              ) : undefined
+            }
+          />
           <DataTable
             columns={[
               {
@@ -627,12 +621,12 @@ export function TrainPage() {
               {
                 key: "created_at",
                 header: "Created",
-                render: (j) => new Date(j.created_at).toLocaleString(),
+                render: (j) => new Date(j.created_at).toLocaleDateString(),
               },
             ]}
-            rows={jobs}
+            rows={jobs.slice(0, 8)}
             getRowKey={(j) => j.id}
-            emptyMessage="No training jobs yet — configure settings above and start your first run."
+            emptyMessage="No jobs yet."
           />
         </div>
       </div>

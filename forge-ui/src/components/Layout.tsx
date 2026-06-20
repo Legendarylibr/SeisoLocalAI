@@ -41,6 +41,7 @@ export function Layout({ children, fullBleed = false }: { children: React.ReactN
   const location = useLocation();
   const { logout } = useAuth();
   const isChat = location.pathname === "/chat";
+  const isStudioCompact = /^\/(train|rl-quant|compress|export|recipes)(\/|$)/.test(location.pathname);
   const [navOpen, setNavOpen] = useState(false);
 
   useEffect(() => {
@@ -122,7 +123,7 @@ export function Layout({ children, fullBleed = false }: { children: React.ReactN
         </div>
       </aside>
 
-      <main className={`content${isChat ? " content-chat" : ""}`}>{children}</main>
+      <main className={`content${isChat ? " content-chat" : ""}${isStudioCompact ? " content-studio-compact" : ""}`}>{children}</main>
       <SystemMonitor />
     </div>
   );

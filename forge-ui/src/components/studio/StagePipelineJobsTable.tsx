@@ -1,3 +1,6 @@
+import { DataTable } from "@/components/research/DataTable";
+import { StudioCardHeader } from "@/components/studio/StudioCardHeader";
+
 type StageJobRow = {
   id: string;
   status: string;
@@ -13,34 +16,55 @@ type StagePipelineJobsTableProps = {
 
 export function StagePipelineJobsTable({ jobs, emptyMessage }: StagePipelineJobsTableProps) {
   return (
-    <div className="card" style={{ marginTop: "1rem" }}>
-      <h3 className="section-title">Recent jobs</h3>
-      {jobs.length === 0 ? (
-        <p className="muted-text">{emptyMessage}</p>
-      ) : (
-        <table>
-          <thead>
-            <tr>
-              <th>ID</th>
-              <th>Status</th>
-              <th>Stages</th>
-              <th>Model</th>
-              <th>Created</th>
-            </tr>
-          </thead>
-          <tbody>
-            {jobs.map((j) => (
-              <tr key={j.id}>
-                <td className="mono">{j.id.slice(0, 8)}…</td>
-                <td><span className={`badge badge-${j.status}`}>{j.status}</span></td>
-                <td>{j.stages?.join(", ") || "—"}</td>
-                <td className="mono">{j.model_dir ? j.model_dir.split("/").slice(-2).join("/") : "—"}</td>
-                <td className="muted-cell">{j.created_at?.slice(0, 19)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
+    <div className="card studio-card studio-card-compact">
+      <StudioCardHeader
+        icon="③"
+        title="Recent jobs"
+        description="Past pipeline runs on this machine"
+        tone="history"
+        meta={
+          jobs.length > 0 ? (
+            <span className="badge badge-dim">
+              {jobs.length} job{jobs.length === 1 ? "" : "s"}
+            </span>
+          ) : undefined
+        }
+      />
+      <DataTable
+        columns={[
+          {
+            key: "id",
+            header: "ID",
+            mono: true,
+            render: (j) => `${j.id.slice(0, 8)}…`,
+          },
+          {
+            key: "status",
+            header: "Status",
+            render: (j) => <span className={`badge badge-${j.status}`}>{j.status}</span>,
+          },
+          {
+            key: "stages",
+            header: "Stages",
+            render: (j) => j.stages?.join(", ") || "—",
+          },
+          {
+            key: "model",
+            header: "Model",
+            mono: true,
+            render: (j) =>
+              j.model_dir ? j.model_dir.split("/").slice(-2).join("/") : "—",
+          },
+          {
+            key: "created_at",
+            header: "Created",
+            render: (j) => j.created_at?.slice(0, 19) ?? "—",
+          },
+        ]}
+        rows={jobs.slice(0, 6)}
+        getRowKey={(j) => j.id}
+        emptyMessage={emptyMessage}
+      />
     </div>
   );
 }
