@@ -6,6 +6,7 @@ import base64
 import binascii
 import os
 import re
+from pathlib import Path
 from typing import Final
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -45,6 +46,21 @@ def resolve_encryption_key(raw: str | None) -> bytes:
 
 def generate_encryption_key() -> bytes:
     return os.urandom(_KEY_LEN)
+
+
+def load_encryption_key_file(path: Path) -> bytes:
+    """Load a 32-byte AES key from disk (raw binary or base64/hex text)."""
+    raw = path.read_bytes()
+    if len(raw) == _KEY_LEN:
+        return raw
+    return resolve_encryption_key(raw.decode("utf-8").strip())
+
+
+def persist_encryption_key_file(path: Path, key: bytes) -> None:
+    """Write a 32-byte AES key as base64 text for portable, UTF-8-safe storage."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(base64.b64encode(key).decode("ascii"), encoding="utf-8")
+    path.chmod(0o600)
 
 
 def encrypt_field(plaintext: str, key: bytes) -> str:
