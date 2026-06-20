@@ -183,7 +183,6 @@ GGUF export requires `llama.cpp` (set `LLAMA_CPP_DIR` or install system `convert
 | Feature | Where | Guide |
 |---------|-------|-------|
 | Model compression (distill → prune → quant) | `/compress` | [compression.md](compression.md) |
-| Stable Diffusion compression | `/image-compress` | [compression.md](compression.md) |
 | RL adaptive GGUF quantization | `/rl-quant` | [compression.md](compression.md) · `seiso rl-quant run` |
 | Visual recipe graphs | `/recipes` | [forge.md](forge.md) |
 | External providers (OpenAI, Ollama, vLLM) | `/integrations` | [forge.md](forge.md) |
@@ -207,7 +206,6 @@ Default data directory (override with `SEISO_DATA_DIR`):
 ├── checkpoints/      # Training outputs (per user)
 ├── exports/          # Merged / GGUF / LoRA exports
 ├── compress/         # LLM compression run artifacts
-├── image_compress/   # SD compression outputs
 ├── rl_quant/         # RL quant policy outputs
 ├── knowledge/        # RAG vector stores (API)
 ├── uploads/          # User-uploaded datasets and files

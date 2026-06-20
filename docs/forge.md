@@ -85,7 +85,6 @@ To run a second Forge intentionally, change **both** `SEISO_PORT` and `SEISO_DAT
 | `/train` | Training Studio | LoRA / QLoRA fine-tuning with live SSE logs |
 | `/export` | Export | Merge LoRA, GGUF, Hub publish from checkpoints |
 | `/compress` | Compress | Code Llama distillation / prune / quant pipeline |
-| `/image-compress` | Image Compress | Stable Diffusion distill / prune / quant pipeline |
 | `/rl-quant` | RL Quant | Adaptive GGUF quantization policy training |
 | `/recipes` | Recipe Studio | Visual graph editor for data/recipe jobs |
 | `/integrations` | Integrations | External providers (OpenAI, Anthropic, Ollama, vLLM) |
@@ -103,7 +102,6 @@ Knowledge-base ingest and retrieve are **API-only** (`/api/knowledge/...`); ther
 | `/api/training` | Training jobs, datasets, SSE logs |
 | `/api/export` | Export jobs, Hub publish |
 | `/api/compress` | LLM compression jobs |
-| `/api/image-compress` | Image compression jobs |
 | `/api/rl-quant` | RL quantization jobs |
 | `/api/recipes` | Recipe graph execution |
 | `/api/knowledge` | RAG ingest and retrieve |

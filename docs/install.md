@@ -265,8 +265,6 @@ Full guide: [platforms/wsl.md](platforms/wsl.md)
 | `llamacpp` | llama-cpp-python (GGUF inference) | All |
 | `compress-quant` | auto-gptq, autoawq (requires `torch`; Linux NVIDIA) | CUDA recommended |
 | `compress-eval` | lm-eval harness | All |
-| `image-compress` | diffusers, torchvision, gradio | CUDA/MPS/CPU |
-| `image-compress-onnx` | optimum, onnxruntime | All |
 | `rl-quant` | Integrated adaptive RL quant (stdlib; no extra deps) | All |
 | `dev` | pytest, ruff, mypy, bandit | All |
 

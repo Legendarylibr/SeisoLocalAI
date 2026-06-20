@@ -2,7 +2,6 @@ import { authApi } from "./auth";
 import { clearLegacyToken } from "./client";
 import { compressApi } from "./compress";
 import { exportApi } from "./export";
-import { imageCompressApi } from "./imageCompress";
 import { inferenceApi } from "./inference";
 import { knowledgeApi } from "./knowledge";
 import { modelsApi } from "./models";
@@ -22,7 +21,6 @@ export const api = {
   ...trainingApi,
   ...rlQuantApi,
   ...compressApi,
-  ...imageCompressApi,
   ...settingsApi,
   ...recipesApi,
   ...providersApi,

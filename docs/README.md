@@ -1,6 +1,6 @@
 # Seiso documentation
 
-Complete guide to installing, running, and extending **Seiso Local AI** — a free local workspace for fine-tuning, quantization, distillation, compression, reinforcement learning, and image model workflows.
+Complete guide to installing, running, and extending **Seiso Local AI** — a free local workspace for fine-tuning, quantization, distillation, compression, and reinforcement learning workflows.
 
 **Repository:** [github.com/Legendarylibr/SeisoLocalAI](https://github.com/Legendarylibr/SeisoLocalAI)
 
@@ -188,7 +188,6 @@ Seiso/
 ├── forge-ui/           # React + TypeScript + Vite (GPL-3.0)
 ├── third_party/        # Vendored compression pipelines
 │   ├── codellama-compress/
-│   ├── sd-distill-prune-quant/
 │   └── adaptive-rl-quant/
 ├── configs/            # Example YAML/JSON configs
 ├── data/               # Sample training JSONL
