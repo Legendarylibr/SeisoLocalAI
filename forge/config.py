@@ -12,7 +12,12 @@ from typing import Literal
 from pydantic import Field, PrivateAttr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from forge.db.crypto import generate_encryption_key, resolve_encryption_key
+from forge.db.crypto import (
+    generate_encryption_key,
+    load_encryption_key_file,
+    persist_encryption_key_file,
+    resolve_encryption_key,
+)
 from seiso.security import generate_secret_key, resolve_data_dir
 
 StorageMode = Literal["persistent", "ephemeral"]
@@ -140,10 +145,9 @@ class ForgeSettings(BaseSettings):
             return generate_encryption_key()
         key_file = self.data_dir / ".db_encryption_key"
         if key_file.exists():
-            return resolve_encryption_key(key_file.read_text().strip())
+            return load_encryption_key_file(key_file)
         key = generate_encryption_key()
-        key_file.write_bytes(key)
-        key_file.chmod(0o600)
+        persist_encryption_key_file(key_file, key)
         return key
 
     def ensure_dirs(self) -> None:

@@ -4,11 +4,18 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 from pathlib import Path
 
 import pytest
 
-from forge.db.crypto import decrypt_field, encrypt_field, resolve_encryption_key
+from forge.db.crypto import (
+    decrypt_field,
+    encrypt_field,
+    load_encryption_key_file,
+    persist_encryption_key_file,
+    resolve_encryption_key,
+)
 from forge.db.store import Database, DatabaseCryptoError
 
 _TEST_KEY = base64.b64encode(b"\x01" * 32).decode()
@@ -36,6 +43,37 @@ async def test_encrypt_decrypt_roundtrip():
 async def test_resolve_encryption_key_hex():
     hex_key = "01" * 32
     assert resolve_encryption_key(hex_key) == b"\x01" * 32
+
+
+def test_load_encryption_key_file_raw_binary(tmp_path: Path):
+    key = b"\x98\xab" + b"\x00" * 30
+    key_file = tmp_path / ".db_encryption_key"
+    key_file.write_bytes(key)
+    assert load_encryption_key_file(key_file) == key
+
+
+def test_load_encryption_key_file_base64_text(tmp_path: Path):
+    key = b"\x01" * 32
+    key_file = tmp_path / ".db_encryption_key"
+    persist_encryption_key_file(key_file, key)
+    assert load_encryption_key_file(key_file) == key
+
+
+def test_forge_settings_loads_legacy_binary_db_key(tmp_path: Path, monkeypatch):
+    from forge.config import ForgeSettings, get_settings
+
+    get_settings.cache_clear()
+    monkeypatch.delenv("SEISO_DB_EPHEMERAL", raising=False)
+    monkeypatch.delenv("SEISO_DB_STORAGE_MODE", raising=False)
+    monkeypatch.delenv("SEISO_DB_ENCRYPTION_KEY", raising=False)
+
+    key = b"\x98\xab" + os.urandom(30)
+    (tmp_path / ".storage_mode").write_text("persistent\n", encoding="utf-8")
+    (tmp_path / ".db_encryption_key").write_bytes(key)
+
+    settings = ForgeSettings(data_dir=tmp_path, db_encryption_key="")
+    assert settings.db_encryption_key_bytes == key
+    get_settings.cache_clear()
 
 
 @pytest.mark.asyncio
