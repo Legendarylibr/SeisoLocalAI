@@ -66,13 +66,22 @@ seiso forge --host 127.0.0.1 --port 8766
 SEISO_PORT=8766 seiso forge
 ```
 
+### Single instance
+
+Forge binds exclusively to `SEISO_HOST:SEISO_PORT` (default `127.0.0.1:8765`). Starting a second `seiso forge` on the same address exits immediately with an error. Two locks enforce this:
+
+1. **Port slot lock** — a file lock under your temp directory (`seiso-forge-locks/<user>/`) held for the entire `seiso forge` process, even when `SEISO_DATA_DIR` differs.
+2. **Data-dir lock** — `{SEISO_DATA_DIR}/.forge.lock` prevents two processes from sharing the same data directory on different ports.
+
+To run a second Forge intentionally, change **both** `SEISO_PORT` and `SEISO_DATA_DIR`.
+
 ## UI pages
 
 | Path | Page | Purpose |
 |------|------|---------|
 | `/` | Dashboard | Workspace overview and quick links |
 | `/hub` | Model Hub | Browse and download catalog models |
-| `/chat` | Chat | Local inference (GGUF, MLX, PyTorch, Ollama) |
+| `/chat` | Chat | Local inference (GGUF, MLX, PyTorch, Ollama); **Eject** button frees loaded model VRAM without changing selection |
 | `/train` | Training Studio | LoRA / QLoRA fine-tuning with live SSE logs |
 | `/export` | Export | Merge LoRA, GGUF, Hub publish from checkpoints |
 | `/compress` | Compress | Code Llama distillation / prune / quant pipeline |

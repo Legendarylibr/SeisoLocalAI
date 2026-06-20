@@ -17,6 +17,7 @@ import {
   IconLock,
   IconPlus,
   IconRefresh,
+  IconEject,
   IconSend,
 } from "@/components/Icons";
 
@@ -68,6 +69,7 @@ export function ChatPage() {
   const [loadProgress, setLoadProgress] = useState<ModelProgressState | null>(null);
   const [loadedModelId, setLoadedModelId] = useState<string | null>(null);
   const [loadedBackend, setLoadedBackend] = useState<string | null>(null);
+  const [ejectingModel, setEjectingModel] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollFrameRef = useRef<number | null>(null);
   const streamAbortRef = useRef<(() => void) | null>(null);
@@ -223,6 +225,24 @@ export function ChatPage() {
       setSearchParams(selection ? { model: selection } : {}, { replace: true });
     }
   }, [pendingRepo, selection, setSearchParams]);
+
+  const handleEjectModel = useCallback(async () => {
+    if (providerId || !loadedModelId || ejectingModel) return;
+    streamAbortRef.current?.();
+    streamAbortRef.current = null;
+    if (streaming) setStreaming(false);
+    setEjectingModel(true);
+    setError(null);
+    try {
+      await api.cancelInference();
+      setLoadedModelId(null);
+      setLoadedBackend(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to eject model from memory");
+    } finally {
+      setEjectingModel(false);
+    }
+  }, [providerId, loadedModelId, ejectingModel, streaming]);
 
   const handleProviderChange = async (nextProvider: string) => {
     if (nextProvider === providerId) return;
@@ -686,16 +706,30 @@ export function ChatPage() {
               <IconChevronRight size={18} strokeWidth={2.25} />
             )}
           </button>
-          <ChatModelPicker
-            models={models}
-            selection={selection}
-            disabled={!!providerId}
-            switching={switchingModel}
-            headroomMb={hwProfile?.vram_headroom_mb}
-            modelLabel={modelLabel}
-            onSelectLocal={handleModelChange}
-            onSelectCatalog={handleCatalogSelect}
-          />
+          <div className="chat-model-controls">
+            <ChatModelPicker
+              models={models}
+              selection={selection}
+              disabled={!!providerId}
+              switching={switchingModel}
+              headroomMb={hwProfile?.vram_headroom_mb}
+              modelLabel={modelLabel}
+              onSelectLocal={handleModelChange}
+              onSelectCatalog={handleCatalogSelect}
+            />
+            {!providerId && loadedModelId && (
+              <button
+                type="button"
+                className="chat-eject-model"
+                onClick={() => void handleEjectModel()}
+                disabled={ejectingModel || switchingModel}
+                title="Eject model — free VRAM/RAM (keeps selection)"
+                aria-label="Eject model from memory"
+              >
+                <IconEject size={15} />
+              </button>
+            )}
+          </div>
           <button
             type="button"
             className="chat-refresh-models"

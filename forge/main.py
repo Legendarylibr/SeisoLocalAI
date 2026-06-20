@@ -29,12 +29,17 @@ from forge.api.routes import (
 from forge.api.routes import settings as settings_routes
 from forge.config import get_settings
 from forge.db.store import DatabaseCryptoError
+from forge.instance_lock import ForgeDataDirLock, data_dir_lock_path, lock_held_by_current_process
 from seiso.models.hf_env import configure_hf_hub_cache
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
+    data_lock: ForgeDataDirLock | None = None
+    if not lock_held_by_current_process(data_dir_lock_path(settings.data_dir)):
+        data_lock = ForgeDataDirLock()
+        data_lock.acquire(settings.data_dir, host=settings.host, port=settings.port)
     configure_hf_hub_cache(settings.data_dir)
     settings.ensure_dirs()
     settings.write_runtime_config()
@@ -44,9 +49,13 @@ async def lifespan(app: FastAPI):
         import logging
 
         logging.getLogger(__name__).info("Marked %d stale job(s) as failed after restart", stale)
-    yield
-    await db.close()
-    clear_dependency_caches()
+    try:
+        yield
+    finally:
+        if data_lock is not None:
+            data_lock.release()
+        await db.close()
+        clear_dependency_caches()
 
 
 def create_app() -> FastAPI:
