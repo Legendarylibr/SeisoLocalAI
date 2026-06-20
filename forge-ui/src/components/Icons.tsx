@@ -215,6 +215,16 @@ export function IconRefresh({ size = defaults.size, className, strokeWidth = def
   );
 }
 
+export function IconEject({ size = defaults.size, className, strokeWidth = defaults.strokeWidth }: IconProps) {
+  return (
+    <Svg size={size} className={className}>
+      <path d="M12 4.5V13.5" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" />
+      <path d="M8.5 10L12 13.5L15.5 10" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M6.5 17.5H17.5" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" />
+    </Svg>
+  );
+}
+
 export function IconLock({ size = defaults.size, className, strokeWidth = defaults.strokeWidth }: IconProps) {
   return (
     <Svg size={size} className={className}>

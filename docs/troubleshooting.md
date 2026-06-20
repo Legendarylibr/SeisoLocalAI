@@ -117,11 +117,21 @@ Use header: `Authorization: Bearer seiso_sk_...`
 
 Or log in via Forge and use the session JWT.
 
-## Port in use
+## Port in use / Forge already running
+
+Forge binds exclusively to `127.0.0.1:8765` by default. A second `seiso forge` prints:
+
+```text
+Error: Forge is already running — cannot bind 127.0.0.1:8765.
+```
+
+Stop the existing Forge process, or use a different port **and** data directory:
 
 ```bash
-SEISO_PORT=8766 seiso forge
+SEISO_PORT=8766 SEISO_DATA_DIR=~/.seiso-alt seiso forge
 ```
+
+If two processes share the same `SEISO_DATA_DIR` on different ports, the data-dir lock (`.forge.lock`) blocks the second instance.
 
 ## HTTPS / reverse proxy
 

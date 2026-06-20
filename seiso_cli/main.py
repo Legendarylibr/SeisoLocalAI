@@ -33,11 +33,21 @@ def forge(
     import uvicorn
 
     from forge.config import get_settings
+    from forge.instance_lock import ForgeAlreadyRunningError, acquire_forge_instance_locks
     from forge.launch import schedule_browser_open
 
     settings = get_settings()
     bind_host = host or settings.host
     bind_port = port or settings.port
+    try:
+        instance_locks = acquire_forge_instance_locks(
+            host=bind_host,
+            port=bind_port,
+            data_dir=settings.data_dir,
+        )
+    except ForgeAlreadyRunningError as exc:
+        console.print(f"[bold red]Error:[/] {exc}")
+        raise typer.Exit(code=1) from exc
     forge_url = f"http://{bind_host}:{bind_port}"
     should_open = open_browser or os.environ.get("SEISO_OPEN_BROWSER", "").strip() in {
         "1",
@@ -47,16 +57,19 @@ def forge(
     if should_open:
         schedule_browser_open(forge_url)
     console.print(f"[bold green]Seiso[/] → {forge_url}")
-    uvicorn.run(
-        "forge.main:create_app",
-        factory=True,
-        host=bind_host,
-        port=bind_port,
-        reload=reload,
-        log_level="info",
-        proxy_headers=settings.trust_proxy,
-        forwarded_allow_ips="127.0.0.1,::1" if settings.trust_proxy else None,
-    )
+    try:
+        uvicorn.run(
+            "forge.main:create_app",
+            factory=True,
+            host=bind_host,
+            port=bind_port,
+            reload=reload,
+            log_level="info",
+            proxy_headers=settings.trust_proxy,
+            forwarded_allow_ips="127.0.0.1,::1" if settings.trust_proxy else None,
+        )
+    finally:
+        instance_locks.release()
 
 
 @app.command()
