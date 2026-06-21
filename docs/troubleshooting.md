@@ -102,6 +102,29 @@ Or point at a clean path:
 SEISO_INSTALL_DIR="$HOME/code/Seiso" curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
 ```
 
+**Symptom:** `Seiso CLI missing at …/Seiso/.venv/bin/seiso` or `seiso: command not found` right after install on native Linux.
+
+**Cause:** Usually the pip install did not finish (install TUI reported success too early, or heavy extras like PyTorch / llama.cpp failed). The installer now installs core `[forge,dev]` first so the CLI exists before optional training stacks.
+
+**Fix:**
+```bash
+SEISO_NO_BANNER=1 start
+```
+
+If that still fails, inspect the log and reinstall core extras manually:
+```bash
+cat "$HOME/Seiso/.seiso-install.log" | tail -50
+source "$HOME/Seiso/.venv/bin/activate"
+pip install -U pip wheel setuptools hatchling
+pip install -e "$HOME/Seiso[forge,dev]"
+"$HOME/Seiso/.venv/bin/seiso" forge
+```
+
+Optional training/inference extras can be added afterward:
+```bash
+pip install -e "$HOME/Seiso[train,llamacpp,dev]"
+```
+
 ## Flash Attention / flash-attn wheel build fails
 
 **Symptom:** `pip install` fails building `flash-attn`, or errors about missing `pyproject.toml` / `setup.py` on `C:\` or `/mnt/c/...`.

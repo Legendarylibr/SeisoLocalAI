@@ -112,11 +112,20 @@ seiso_cli_bin() {
   printf '%s\n' "$root/.venv/bin/seiso"
 }
 
+seiso_verify_cli() {
+  local root="$1"
+  [[ -x "$(seiso_cli_bin "$root")" ]]
+}
+
 seiso_require_cli() {
-  local root="$1" cli
+  local root="$1" cli log
   cli="$(seiso_cli_bin "$root")"
-  [[ -x "$cli" ]] || seiso_die "Seiso CLI missing at $cli. Re-run: start"
-  printf '%s\n' "$cli"
+  if [[ -x "$cli" ]]; then
+    printf '%s\n' "$cli"
+    return 0
+  fi
+  log="$root/.seiso-install.log"
+  seiso_die "Seiso CLI missing at $cli. Re-run: SEISO_NO_BANNER=1 start${log:+ — see $log}"
 }
 
 seiso_needs_install() {
@@ -294,8 +303,15 @@ seiso_run_install_worker() {
   local root="$1" extras="$2"
   # shellcheck disable=SC1091
   source "$root/.venv/bin/activate"
-  python -m pip install -U pip wheel setuptools
-  pip install -e "${root}[${extras}]"
+  python -m pip install -U pip wheel setuptools hatchling
+  pip install -e "${root}[forge,dev]"
+  seiso_verify_cli "$root" || return 1
+  if [[ "$extras" != "forge,dev" ]]; then
+    pip install -e "${root}[${extras}]" || {
+      seiso_warn "Optional extras failed (${extras}). Forge can still start — see $root/.seiso-install.log"
+      seiso_verify_cli "$root" || return 1
+    }
+  fi
   if [[ "${SEISO_SKIP_FLASH_ATTN:-1}" != "1" && "$extras" == *cuda* && "$root" != /mnt/* ]]; then
     if [[ -x "$root/scripts/install_flash_attn.sh" ]]; then
       bash "$root/scripts/install_flash_attn.sh" || true
@@ -304,6 +320,7 @@ seiso_run_install_worker() {
   if [[ "${SEISO_SKIP_UI:-0}" != "1" ]]; then
     (cd "$root/forge-ui" && npm ci && npm run build)
   fi
+  seiso_verify_cli "$root"
 }
 
 seiso_required_python_modules() {
@@ -361,6 +378,12 @@ seiso_ensure_installed() {
   install_log="$root/.seiso-install.log"
   if ! seiso_run_install_worker "$root" "$extras" >"$install_log" 2>&1; then
     seiso_warn "Install failed — see $install_log"
+    tail -30 "$install_log" >&2 || true
+    seiso_run_doctor "$root"
+    return 1
+  fi
+  if ! seiso_verify_cli "$root"; then
+    seiso_warn "Install finished but Seiso CLI is missing — see $install_log"
     tail -30 "$install_log" >&2 || true
     seiso_run_doctor "$root"
     return 1

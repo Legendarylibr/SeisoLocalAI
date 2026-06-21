@@ -93,8 +93,13 @@ run_with_install_tui() {
   if install_tui_enabled "$root"; then
     : >"$logfile"
     "$@" >>"$logfile" 2>&1 &
-    local job_pid=$!
-    if ! python3 "$root/scripts/install_tui.py" during --wait-pid "$job_pid"; then
+    local job_pid=$! tui_pid=0 job_status=0
+    python3 "$root/scripts/install_tui.py" during &
+    tui_pid=$!
+    wait "$job_pid" || job_status=$?
+    kill "$tui_pid" 2>/dev/null || true
+    wait "$tui_pid" 2>/dev/null || true
+    if [[ "$job_status" -ne 0 ]]; then
       warn "Install failed — see $logfile"
       tail -30 "$logfile" >&2 || true
       return 1
@@ -217,6 +222,12 @@ main() {
   export SEISO_SKIP_FLASH_ATTN
 
   if ! run_with_install_tui "$root" "$install_log" run_install_worker "$root" "$extras"; then
+    install_failed "$root"
+  fi
+
+  if ! seiso_verify_cli "$root"; then
+    warn "Install finished but Seiso CLI is missing — see $install_log"
+    tail -30 "$install_log" >&2 || true
     install_failed "$root"
   fi
 
