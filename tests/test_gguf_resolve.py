@@ -128,6 +128,26 @@ def test_resolve_gguf_repo_prefers_trusted_search_over_untrusted(monkeypatch):
     assert resolved == "bartowski/Kimi-GGUF"
 
 
+def test_resolve_gguf_repo_rejects_untrusted_catalog_entry(monkeypatch):
+    class Entry:
+        gguf_repo = "random-user/Custom-GGUF"
+        quant = "Q4_K_M"
+        tags = ("gguf", "base_model:org/Model")
+        repo_id = "random-user/Custom-GGUF"
+
+    monkeypatch.setattr(hf_hub, "repo_has_gguf", lambda repo_id, **_: repo_id == "bartowski/Custom-GGUF")
+    monkeypatch.setattr(
+        hf_hub,
+        "search_huggingface_gguf_repos",
+        lambda **_k: [{"repo_id": "bartowski/Custom-GGUF", "downloads": 1}],
+    )
+    hf_hub._GGUF_REPO_CACHE.clear()
+
+    resolved = hf_hub.resolve_gguf_repo("org/Model", entry=Entry())
+
+    assert resolved == "bartowski/Custom-GGUF"
+
+
 def test_resolve_gguf_repo_raises_when_missing(monkeypatch):
     monkeypatch.setattr(hf_hub, "repo_has_gguf", lambda *_a, **_k: False)
     monkeypatch.setattr(hf_hub, "search_huggingface_gguf_repos", lambda **_k: [])

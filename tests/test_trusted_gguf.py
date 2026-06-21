@@ -27,6 +27,10 @@ def test_catalog_mirror_is_trusted():
     assert is_trusted_gguf_repo("AesSedai/Kimi-K2.7-Code-GGUF")
 
 
+def test_curated_mirror_not_trusted_without_allowlist():
+    assert not is_trusted_gguf_repo("SomeOtherOrg/Model-GGUF", allow_catalog_mirrors=False)
+
+
 def test_gguf_mirror_candidates_prioritize_unsloth():
     candidates = gguf_mirror_candidates("meta-llama/Llama-3.1-8B-Instruct")
     assert candidates[0].startswith("unsloth/")
