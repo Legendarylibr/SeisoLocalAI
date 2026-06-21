@@ -489,34 +489,46 @@ export function ChatPage() {
     }
   }, []);
 
+  const messageCount = messages.length;
+
   useEffect(() => {
+    // Context is derived from message history; during streaming the assistant
+    // message updates every animation frame (~60/s), which would exceed the
+    // global API rate limit (240 req/min on localhost).
+    if (streaming) return;
+
     let cancelled = false;
-    const refreshContext = async () => {
-      setContextLoading(true);
-      try {
-        const status = await api.getContextStatus({
-          thread_id: active,
-          max_tokens: maxTokens,
-          n_ctx: contextWindow === "auto" ? null : contextWindow,
-          tools: useTools && toolsAvailable,
-          knowledge_base_id: knowledgeBaseId || null,
-          model_id: providerId ? null : selection || null,
-          ollama_model: selected?.ollama_model || null,
-        });
-        if (!cancelled) setContextStatus(status);
-      } catch {
-        if (!cancelled) setContextStatus(null);
-      } finally {
-        if (!cancelled) setContextLoading(false);
-      }
-    };
-    void refreshContext();
+    const timeout = window.setTimeout(() => {
+      const refreshContext = async () => {
+        setContextLoading(true);
+        try {
+          const status = await api.getContextStatus({
+            thread_id: active,
+            max_tokens: maxTokens,
+            n_ctx: contextWindow === "auto" ? null : contextWindow,
+            tools: useTools && toolsAvailable,
+            knowledge_base_id: knowledgeBaseId || null,
+            model_id: providerId ? null : selection || null,
+            ollama_model: selected?.ollama_model || null,
+          });
+          if (!cancelled) setContextStatus(status);
+        } catch {
+          if (!cancelled) setContextStatus(null);
+        } finally {
+          if (!cancelled) setContextLoading(false);
+        }
+      };
+      void refreshContext();
+    }, 400);
+
     return () => {
       cancelled = true;
+      window.clearTimeout(timeout);
     };
   }, [
     active,
-    messages,
+    messageCount,
+    streaming,
     maxTokens,
     contextWindow,
     knowledgeBaseId,
