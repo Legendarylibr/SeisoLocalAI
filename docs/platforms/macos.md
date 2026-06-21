@@ -27,7 +27,7 @@ cd "$HOME/Seiso"
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -U pip wheel setuptools
-pip install -e ".[forge,train,mlx,dev]"
+pip install -e ".[forge,train,llamacpp,dev]"
 cd forge-ui && npm ci && npm run build && cd ..
 seiso doctor
 seiso forge

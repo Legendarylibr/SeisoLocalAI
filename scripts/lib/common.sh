@@ -118,7 +118,7 @@ seiso_detect_platform_extras() {
   os="$(uname -s)"
   case "$os" in
     Darwin)
-      echo "forge,train,mlx,llamacpp,dev"
+      echo "forge,train,llamacpp,dev"
       ;;
     Linux)
       if command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi >/dev/null 2>&1; then

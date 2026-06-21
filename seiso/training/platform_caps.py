@@ -118,7 +118,7 @@ def _install_extra(system: str, nvidia: bool, rocm: bool, mlx: bool) -> str:
     if rocm:
         return 'pip install -e ".[forge,train]" && pip install triton  # ROCm PyTorch wheel first'
     if system == "Darwin" and mlx:
-        return 'pip install -e ".[forge,train,mlx]"'
+        return 'pip install -e ".[forge,train,llamacpp,mlx]"'
     if system == "Darwin":
-        return 'pip install -e ".[forge,train,mlx]"'
+        return 'pip install -e ".[forge,train,llamacpp]"  # optional extras: .[mlx] (macOS), .[cuda] (Linux NVIDIA)'
     return 'pip install -e ".[forge,train]"'
