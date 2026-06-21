@@ -20,6 +20,7 @@ _THINK_TAG_NAMES = (
     "thought",
     "analysis",
     "scratchpad",
+    "channel",
 )
 
 
@@ -74,32 +75,41 @@ _ANALYSIS_STEP_PATTERN = re.compile(
 )
 _FINAL_ANSWER_PATTERNS = (
     re.compile(
-        r"(?is)(?:Final Decision|Final Polish|Refining the Output|Let's go with|Final Answer|Answer|Response)"
+        r"(?is)(?:Final Decision|Final Polish|Refining the Output|Let's go with|Final Answer|Answer|Response|Reply|Output)"
         r"\s*:+\s*(?:\*\*)?\s*\"([^\"]+)\""
     ),
     re.compile(
-        r"(?is)(?:Final Decision|Final Polish|Refining the Output|Let's go with|Final Answer|Answer|Response)"
+        r"(?is)(?:Final Decision|Final Polish|Refining the Output|Let's go with|Final Answer|Answer|Response|Reply|Output)"
         r"\s*:+\s*\*\*([^*]+)\*\*"
     ),
     re.compile(
-        r"(?is)\*\*(?:Final Answer|Answer|Response):\*\*\s*(.+)\Z"
+        r"(?is)\*\*(?:Final Answer|Answer|Response|Reply|Output):\*\*\s*(.+)\Z"
     ),
     re.compile(
-        r"(?is)\*\*(?:Final Answer|Answer|Response)\*\*\s*:+\s*(.+)\Z"
+        r"(?is)\*\*(?:Final Answer|Answer|Response|Reply|Output)\*\*\s*:+\s*(.+)\Z"
     ),
     re.compile(
-        r"(?is)(?:Final Decision|Final Polish|Final Answer|Answer|Response)"
+        r"(?is)(?:Final Decision|Final Polish|Final Answer|Answer|Response|Reply|Output)"
         r"\s*:+\s*([^\n\"]+?)\s*(?:Wait,|\Z)"
     ),
+)
+_ORPHAN_CLOSE_TAG_PATTERN = re.compile(
+    r"</(?:think|redacted_thinking|reasoning|thought|analysis|scratchpad)>",
+    re.IGNORECASE,
+)
+_NUMBERED_ANALYSIS_START = re.compile(
+    r"(?is)^\s*\d+\.\s*\*\*(?:Analyze|Determine|Draft|Select|Refine|Thought|Reasoning|Option)"
 )
 
 
 def _looks_like_reasoning_leak(content: str) -> bool:
     if _REASONING_HEADER_PATTERN.match(content):
         return True
-    if re.search(r"(?i)\*\*(?:reasoning|thought|analysis):\*\*", content):
+    if re.search(r"(?i)\*\*(?:reasoning|thought|analysis|response|reply):\*\*", content):
         return True
     if _ANALYSIS_STEP_PATTERN.search(content):
+        return True
+    if _NUMBERED_ANALYSIS_START.match(content):
         return True
     if _THINK_TAG_PATTERN.search(content):
         return True
@@ -135,6 +145,7 @@ def strip_reasoning_leakage(content: str) -> str:
 
     cleaned = _THINK_TAG_PATTERN.sub("", content)
     cleaned = _PIPE_TAG_PATTERN.sub("", cleaned)
+    cleaned = _ORPHAN_CLOSE_TAG_PATTERN.sub("", cleaned)
 
     if _looks_like_reasoning_leak(cleaned):
         extracted = _extract_final_answer_from_reasoning(cleaned)
@@ -143,11 +154,12 @@ def strip_reasoning_leakage(content: str) -> str:
         cleaned = _REASONING_HEADER_PATTERN.sub("", cleaned)
 
     cleaned = re.sub(
-        r"(?im)^\s*\d+\.\s+\*\*(Analyze|Determine|Drafting|Selecting|Refining|Final|Thought|Reasoning)[^*]*\*\*.*?"
+        r"(?im)^\s*\d+\.\s+\*\*(Analyze|Determine|Drafting|Selecting|Refining|Final|Thought|Reasoning|Option)[^*]*\*\*.*?"
         r"(?=^\s*\d+\.\s+\*\*|\Z)",
         "",
         cleaned,
     )
+    cleaned = re.sub(r"(?im)^\s*\*\*(?:Reasoning|Thought|Analysis):\*\*.*?(?=^\s*\*\*|\Z)", "", cleaned)
     return cleaned.strip()
 
 

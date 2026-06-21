@@ -38,7 +38,7 @@ async def run_vendor_job(
     loop = asyncio.get_running_loop()
 
     def on_log(msg: str) -> None:
-        orchestrator._emit_log(job_id, msg)
+        loop.call_soon_threadsafe(orchestrator._emit_log, job_id, msg)
 
     result = await loop.run_in_executor(
         None,

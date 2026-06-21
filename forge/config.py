@@ -152,7 +152,7 @@ class ForgeSettings(BaseSettings):
 
     def ensure_dirs(self) -> None:
         """Create data subdirectories once at startup."""
-        for name in ("models", "checkpoints", "exports", "knowledge", "sandbox", "artifacts", "recipes", "uploads", "rl_quant", "compress", "hf_cache", "hf_tokens"):
+        for name in ("models", "checkpoints", "exports", "knowledge", "sandbox", "artifacts", "recipes", "uploads", "rl_quant", "compress", "distill_rl", "hf_cache", "hf_tokens"):
             (self.data_dir / name).mkdir(parents=True, exist_ok=True)
 
     @property
@@ -176,8 +176,13 @@ class ForgeSettings(BaseSettings):
 
     @property
     def rate_limit_enabled(self) -> bool:
-        """Rate limits apply only when remote access is enabled."""
-        return self.allow_remote
+        """Rate limits apply on all bindings (localhost included)."""
+        return True
+
+    @property
+    def rate_limit_per_minute(self) -> int:
+        """Stricter cap when exposed beyond loopback."""
+        return self.rate_limit if self.allow_remote else max(self.rate_limit, 240)
 
     @property
     def db_path(self) -> Path:
@@ -191,9 +196,13 @@ class ForgeSettings(BaseSettings):
 
     @property
     def hf_token_encryption_key(self) -> bytes:
-        """Stable key for HF token files, independent of ephemeral DB mode."""
-        material = f"seiso:hf-token:{self.secret_key}".encode()
-        return hashlib.sha256(material).digest()
+        """Dedicated key for HF token files, stored separately from JWT secret."""
+        key_file = self.data_dir / ".hf_token_encryption_key"
+        if key_file.exists():
+            return load_encryption_key_file(key_file)
+        legacy = hashlib.sha256(f"seiso:hf-token:{self.secret_key}".encode()).digest()
+        persist_encryption_key_file(key_file, legacy)
+        return legacy
 
     @property
     def models_dir(self) -> Path:

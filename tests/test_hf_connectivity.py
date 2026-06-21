@@ -121,6 +121,8 @@ def test_user_hf_token_uses_stable_settings_key(tmp_path):
         encryption_key=first.hf_token_encryption_key,
     )
 
+    assert (tmp_path / ".hf_token_encryption_key").is_file()
+
     second = ForgeSettings(data_dir=tmp_path)
     token = load_user_hf_token(
         second.data_dir,

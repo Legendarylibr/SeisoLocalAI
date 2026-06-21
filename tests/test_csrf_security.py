@@ -180,11 +180,11 @@ async def test_settings_includes_security_posture(app):
         assert sec["bind_localhost"] is True
         assert sec["db_encrypted"] is True
         assert sec["allow_tools"] is False
-        assert sec["rate_limit_enabled"] is False
+        assert sec["rate_limit_enabled"] is True
 
 
 @pytest.mark.asyncio
-async def test_no_rate_limit_on_localhost(monkeypatch):
+async def test_localhost_uses_relaxed_rate_limit(monkeypatch):
     monkeypatch.setenv("SEISO_ALLOW_REMOTE", "false")
     monkeypatch.setenv("SEISO_RATE_LIMIT", "3")
     clear_dependency_caches()
@@ -195,3 +195,15 @@ async def test_no_rate_limit_on_localhost(monkeypatch):
             res = await client.get("/api/models")
             assert res.status_code == 401
             assert res.status_code != 429
+
+
+def test_jti_revocation_store_enforces_cap(monkeypatch):
+    from forge.security import token_revocation as tr
+
+    monkeypatch.setattr(tr, "_MAX_ENTRIES", 100)
+    tr.clear_revocations_for_tests()
+    now = 1_700_000_000.0
+    for idx in range(110):
+        tr.revoke_jti(f"jti-{idx}", now + 3600 + idx)
+    assert len(tr._revoked) <= 100
+    tr.clear_revocations_for_tests()

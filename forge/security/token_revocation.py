@@ -52,9 +52,12 @@ def _prune(now: float | None = None) -> None:
     for jti in expired:
         del _revoked[jti]
     if len(_revoked) > _MAX_ENTRIES:
+        overflow = len(_revoked) - _MAX_ENTRIES
+        for jti, _ in sorted(_revoked.items(), key=lambda item: item[1])[:overflow]:
+            del _revoked[jti]
         logger.warning(
-            "Revoked JTI store exceeds soft limit (%d > %d); retaining unexpired revocations",
-            len(_revoked),
+            "Evicted %d revoked JTIs to enforce store cap (%d)",
+            overflow,
             _MAX_ENTRIES,
         )
 

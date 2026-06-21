@@ -395,6 +395,94 @@ compress_app = typer.Typer(
 )
 app.add_typer(compress_app, name="compress")
 
+distill_rl_app = typer.Typer(
+    name="distill-rl",
+    help="Distill a teacher model into a student, then apply preference RL (DPO).",
+    no_args_is_help=True,
+)
+app.add_typer(distill_rl_app, name="distill-rl")
+
+
+@distill_rl_app.command("presets")
+def distill_rl_presets() -> None:
+    """List distill-RL presets and pipeline stages."""
+    from seiso.distill_rl.config import PRESETS, STAGE_ORDER
+
+    for name, preset in PRESETS.items():
+        stages = preset.get("stages", [])
+        console.print(f"  [cyan]{name}[/] stages={','.join(stages)}")
+    console.print(f"Stage order: {', '.join(STAGE_ORDER)}")
+
+
+@distill_rl_app.command("run")
+def distill_rl_run(
+    preset: str = typer.Option("smoke", help="smoke | reproducible | full"),
+    config: str | None = typer.Option(None, "--config", "-c", help="JSON/YAML job config"),
+    teacher_model: str | None = typer.Option(None, help="Teacher HF model ID or path"),
+    student_model: str | None = typer.Option(None, help="Student HF model ID or path"),
+    distilled_path: str | None = typer.Option(
+        None, help="Existing distilled checkpoint (skip distill stage)"
+    ),
+    distill_steps: int | None = typer.Option(None, help="KL distillation steps"),
+    rollout_prompts: int | None = typer.Option(None, help="Max prompts for preference rollouts"),
+    dpo_epochs: int | None = typer.Option(None, help="DPO training epochs"),
+    prompt_library: str | None = typer.Option(None, help="Prompt JSON/JSONL for rollouts"),
+    stages: str | None = typer.Option(
+        None, help="Comma-separated stages: distill,rollout,dpo,evaluate"
+    ),
+    seeds: str | None = typer.Option(None, help="Comma-separated seeds for multi-seed research runs"),
+    seed: int = typer.Option(42, help="RNG seed (ignored when --seeds is set)"),
+    json_out: bool = typer.Option(False, "--json", help="Print machine-readable summary JSON"),
+) -> None:
+    """Distill teacher → student, build teacher/student preferences, run DPO."""
+    import json as json_mod
+    import uuid
+
+    from forge.config import get_settings
+    from seiso.distill_rl.runner import run_distill_rl_job
+
+    settings = get_settings()
+    job_id = f"cli-{uuid.uuid4().hex[:8]}"
+    payload: dict = {"preset": preset, "seed": seed}
+    if config:
+        payload["config_file"] = config
+    if teacher_model:
+        payload["teacher_model"] = teacher_model
+    if student_model:
+        payload["student_model"] = student_model
+    if distilled_path:
+        payload["distilled_path"] = distilled_path
+    if distill_steps is not None:
+        payload["distill_steps"] = distill_steps
+    if rollout_prompts is not None:
+        payload["rollout_max_prompts"] = rollout_prompts
+    if dpo_epochs is not None:
+        payload["dpo_epochs"] = dpo_epochs
+    if prompt_library:
+        payload["prompt_library"] = prompt_library
+    if stages:
+        payload["stages"] = [s.strip() for s in stages.split(",") if s.strip()]
+    if seeds:
+        payload["seeds"] = [int(s.strip()) for s in seeds.split(",") if s.strip()]
+
+    console.print(
+        f"[bold]Distill-RL[/] preset={preset} "
+        f"teacher={teacher_model or '(preset default)'} "
+        f"student={student_model or '(preset default)'}"
+    )
+    result = run_distill_rl_job(
+        job_id=job_id,
+        user_id="cli",
+        data_dir=settings.data_dir,
+        payload=payload,
+        on_log=lambda m: console.print(m),
+    )
+    if json_out:
+        console.print(json_mod.dumps(result, indent=2, default=str))
+    else:
+        console.print(f"[green]Done:[/] {result.get('final_model_dir')}")
+        console.print(f"Artifacts: {result.get('output_dir')}")
+
 
 @compress_app.command("run")
 def compress_run(

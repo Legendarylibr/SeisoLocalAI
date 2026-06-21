@@ -72,6 +72,28 @@ def test_strip_reasoning_leakage_strips_reasoning_header():
     assert strip_reasoning_leakage(raw) == "Hey there!"
 
 
+def test_strip_reasoning_leakage_removes_qwen_think_block():
+    raw = (
+        "<" + "think" + ">" + "The user said hello. I should respond warmly." + "<" + "/" + "think" + ">"
+        "Hi there! How can I help?"
+    )
+    assert strip_reasoning_leakage(raw) == "Hi there! How can I help?"
+
+
+def test_strip_reasoning_leakage_extracts_reply_section():
+    raw = "**Reasoning:** internal steps\n\n**Reply:** Sure, I can help with that."
+    assert strip_reasoning_leakage(raw) == "Sure, I can help with that."
+
+
+def test_strip_reasoning_leakage_strips_numbered_analysis_without_header():
+    raw = (
+        "1. **Analyze the Input:** user wants a greeting\n"
+        "2. **Drafting Options:** casual vs formal\n"
+        "**Final Answer:** Hey! Good to see you."
+    )
+    assert strip_reasoning_leakage(raw) == "Hey! Good to see you."
+
+
 def test_streaming_output_sanitizer_holds_back_reasoning_header():
     guard = StreamingOutputSanitizer(strip_tool_calls=True)
     assert guard.feed("Reasoning: step one") == []

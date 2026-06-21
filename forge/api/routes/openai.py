@@ -16,6 +16,7 @@ from forge.config import ForgeSettings, get_settings
 from forge.db.store import Database
 from forge.orchestrators.inference import InferenceOrchestrator
 from forge.security.openai_auth import get_openai_user_id
+from forge.services.llm_output import StreamingOutputSanitizer, sanitize_llm_output
 from forge.services.models import resolve_model_path
 
 router = APIRouter(tags=["openai"])
@@ -68,6 +69,10 @@ def _normalize_openai_messages(body: ChatCompletionRequest) -> list[dict[str, st
     if messages[-1]["role"] != "user":
         raise HTTPException(400, "Last message must be from user")
     return messages
+
+
+def _sanitize_openai_content(content: str, *, tools_enabled: bool) -> str:
+    return sanitize_llm_output(content, strip_tool_calls=not tools_enabled)
 
 
 def _resolve_payload(body: ChatCompletionRequest, model_path: str | None) -> dict[str, Any]:
@@ -148,16 +153,29 @@ async def chat_completions(
     if use_local_stream:
 
         async def sse_stream():
+            sanitizer = StreamingOutputSanitizer(strip_tool_calls=not body.tools)
+            raw_parts: list[str] = []
             try:
                 async for token in orchestrator.stream_local(payload):
-                    chunk = {
+                    raw_parts.append(token)
+                    for chunk in sanitizer.feed(token):
+                        chunk_payload = {
+                            "id": completion_id,
+                            "object": "chat.completion.chunk",
+                            "created": created,
+                            "model": body.model,
+                            "choices": [{"index": 0, "delta": {"content": chunk}, "finish_reason": None}],
+                        }
+                        yield f"data: {json.dumps(chunk_payload)}\n\n"
+                for chunk in sanitizer.finish():
+                    chunk_payload = {
                         "id": completion_id,
                         "object": "chat.completion.chunk",
                         "created": created,
                         "model": body.model,
-                        "choices": [{"index": 0, "delta": {"content": token}, "finish_reason": None}],
+                        "choices": [{"index": 0, "delta": {"content": chunk}, "finish_reason": None}],
                     }
-                    yield f"data: {json.dumps(chunk)}\n\n"
+                    yield f"data: {json.dumps(chunk_payload)}\n\n"
                 final = {
                     "id": completion_id,
                     "object": "chat.completion.chunk",
@@ -186,6 +204,7 @@ async def chat_completions(
             if job and job.status.value == "failed":
                 yield f"data: {json.dumps({'error': job.error or 'Inference failed'})}\n\n"
             elif content:
+                content = _sanitize_openai_content(content, tools_enabled=bool(body.tools))
                 chunk = {
                     "id": completion_id,
                     "object": "chat.completion.chunk",
@@ -202,7 +221,7 @@ async def chat_completions(
     if not job or job.status.value == "failed":
         raise HTTPException(500, job.error if job else "Inference failed")
 
-    content = job.result.get("content", "")
+    content = _sanitize_openai_content(job.result.get("content", ""), tools_enabled=bool(body.tools))
     return JSONResponse(
         {
             "id": completion_id,
