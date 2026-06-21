@@ -107,6 +107,18 @@ seiso_ensure_bin_on_path() {
   } >>"$profile"
 }
 
+seiso_cli_bin() {
+  local root="$1"
+  printf '%s\n' "$root/.venv/bin/seiso"
+}
+
+seiso_require_cli() {
+  local root="$1" cli
+  cli="$(seiso_cli_bin "$root")"
+  [[ -x "$cli" ]] || seiso_die "Seiso CLI missing at $cli. Re-run: start"
+  printf '%s\n' "$cli"
+}
+
 seiso_needs_install() {
   local root="$1"
   [[ -x "$root/.venv/bin/seiso" && -f "$root/forge-ui/dist/index.html" ]] || return 0
