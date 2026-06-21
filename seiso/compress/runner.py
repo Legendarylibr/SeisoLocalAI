@@ -1,4 +1,4 @@
-"""Run vendored Code Llama compression pipeline stages."""
+"""Run vendored LLM compression pipeline stages."""
 
 from __future__ import annotations
 

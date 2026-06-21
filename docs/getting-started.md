@@ -184,7 +184,7 @@ GGUF export requires `llama.cpp` (set `LLAMA_CPP_DIR` or install system `convert
 
 | Feature | Where | Guide |
 |---------|-------|-------|
-| Model compression (distill → prune → quant) | `/compress` | [compression.md](compression.md) |
+| Model compression (any HF causal LM; Llama-family prune) | `/compress` | [compression.md](compression.md) · `seiso compress run` |
 | Teacher distill + DPO alignment | `/distill-rl` | [compression.md](compression.md) · `seiso distill-rl run` |
 | RL adaptive GGUF quantization | `/rl-quant` | [compression.md](compression.md) · `seiso rl-quant run` |
 | Local RAG corpus | `/knowledge` | [forge.md](forge.md) |
@@ -212,7 +212,7 @@ Default data directory (override with `SEISO_DATA_DIR`):
 ├── models/           # Per-user inventory links to cached weights
 ├── checkpoints/      # Training outputs (per user)
 ├── exports/          # Merged / GGUF / LoRA exports
-├── compress/         # LLM compression run artifacts
+├── compress/         # LLM compression artifacts ({user_id}/{job_id}/runs/<run_id>/)
 ├── rl_quant/         # RL quant policy outputs
 ├── distill_rl/       # Distillation / RL artifacts
 ├── recipes/          # Recipe Studio job data

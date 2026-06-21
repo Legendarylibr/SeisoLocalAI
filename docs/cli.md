@@ -119,16 +119,25 @@ seiso bench-inference --model <path> --json
 
 ## `seiso compress`
 
-Code Llama compression pipeline (vendored `third_party/codellama-compress`).
+LLM compression pipeline (vendored `third_party/codellama-compress`). Accepts any HuggingFace causal LM; the `prune` stage requires Llama-family architecture (Llama, CodeLlama, Mistral, etc.).
 
 ```bash
 # Presets: smoke | full | distill_only | prune_recover | quantize
 seiso compress run --preset smoke
-seiso compress run --preset full --teacher-model codellama/CodeLlama-13b-hf --student-model codellama/CodeLlama-7b-hf
+seiso compress run --preset full \
+  --teacher-model codellama/CodeLlama-13b-hf \
+  --student-model codellama/CodeLlama-7b-hf
+seiso compress run --preset distill_only \
+  --teacher-model meta-llama/Llama-2-13b-hf \
+  --student-model meta-llama/Llama-2-7b-hf
+seiso compress run --preset prune_recover --model-dir ~/.seiso/checkpoints/<user>/<job>/
 
-seiso compress manifest-verify --run-dir "$HOME/.seiso/compress/local/<job_id>"
+# Verify hash-chained manifest (run_dir is under …/runs/<run_id>/)
+seiso compress manifest-verify --run-dir "$HOME/.seiso/compress/local/cli/runs/<run_id>"
 seiso compress speculative --target-model ./finetuned --draft-model ./distilled --prompt "def fib(n):"
 ```
+
+CLI output: `{SEISO_DATA_DIR}/compress/local/cli/runs/<run_id>/`.
 
 Requires `.[train]` for GPU stages. Optional `.[compress-quant]` for GPTQ/AWQ, `.[compress-eval]` for lm-eval.
 
@@ -138,28 +147,31 @@ See [compression.md](compression.md).
 
 ## `seiso distill-rl`
 
-Teacher-to-student KL distillation, preference rollouts (teacher chosen / student rejected), and DPO fine-tuning with research artifacts.
+Teacher-to-student KL distillation, preference rollouts (teacher chosen / student rejected), and DPO fine-tuning with research artifacts. **Auto-sweep** (default on) grid-searches DPO hyperparameters before the final alignment run.
 
 ```bash
 # List presets (smoke | reproducible | full) and stage order
 seiso distill-rl presets
 
-# Fast smoke on tiny models
+# Fast smoke (uses gpt2 by default — no GPU download required for tiny runs)
 seiso distill-rl run --preset smoke
 
-# Full Code Llama teacher → student with all stages
+# Full teacher → student with all stages (example: CodeLlama)
 seiso distill-rl run --preset full \
   --teacher-model codellama/CodeLlama-13b-hf \
   --student-model codellama/CodeLlama-7b-hf
 
 # Skip distill when a checkpoint already exists
-seiso distill-rl run --preset smoke --distilled-path ~/.seiso/distill_rl/local/<job>/distilled
+seiso distill-rl run --preset smoke --distilled-path ~/.seiso/distill_rl/cli/<job>/distilled
 
 # Multi-seed reproducibility
 seiso distill-rl run --preset reproducible --seeds 13,42,99 --json
+
+# Disable hyperparameter sweep
+seiso distill-rl run --preset smoke --no-auto-sweep
 ```
 
-Requires `.[train]` for GPU stages. Outputs: `{SEISO_DATA_DIR}/distill_rl/{user_id}/{job_id}/`.
+Requires `.[train]` for GPU stages. Outputs: `{SEISO_DATA_DIR}/distill_rl/cli/<job_id>/` (CLI) or `{SEISO_DATA_DIR}/distill_rl/{user_id}/{job_id}/` (Forge).
 
 Forge equivalent: **Distill-RL** page (`/distill-rl`) or `POST /api/distill-rl/jobs`.
 
@@ -169,7 +181,7 @@ See [compression.md](compression.md).
 
 ## `seiso rl-quant`
 
-Adaptive RL quantization + optional CUDA kernel profile co-training (vendored `third_party/adaptive-rl-quant`).
+Adaptive RL quantization + optional CUDA kernel profile co-training (vendored `third_party/adaptive-rl-quant`). **Auto-sweep** (default on) grid-searches learning rates before the full run.
 
 ```bash
 # Fast smoke (simulator backend, analytic kernel metrics)
@@ -181,12 +193,20 @@ seiso rl-quant run --preset reproducible --kernel-rl --training-episodes 512
 # Live CUDA micro-benchmarks (NVIDIA GPU; slower, ground-truth)
 seiso rl-quant run --kernel-rl --kernel-live-benchmark
 
+# Disable hyperparameter sweep
+seiso rl-quant run --preset minimal --no-auto-sweep
+
+# Custom sweep grid (JSON/TOML)
+seiso rl-quant run --preset minimal --sweep-config configs/my_sweep.json
+
 # List tunable kernel profiles
 seiso rl-quant profiles
 
 # Machine-readable summary
 seiso rl-quant run --preset minimal --kernel-rl --json
 ```
+
+Presets: `minimal` | `reproducible` | `post_train`. Backends: `simulator` (default) | `llama_cpp`.
 
 Outputs: `{SEISO_DATA_DIR}/rl_quant/cli/<job_id>/` (CLI user `cli`).
 
