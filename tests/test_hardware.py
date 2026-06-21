@@ -38,6 +38,49 @@ def test_classify_tier_cpu_when_no_gpu():
     assert tier.value == "cpu_only"
 
 
+def test_detect_gpus_nvidia_smi_fallback(monkeypatch):
+    from seiso.hardware.profile import detect_gpus, hardware_profile
+
+    monkeypatch.setattr("seiso.hardware.profile._torch_gpus", lambda: [])
+    monkeypatch.setattr("seiso.hardware.profile._mlx_apple_gpu", lambda: [])
+    monkeypatch.setattr(
+        "seiso.hardware.profile._nvidia_smi_gpus",
+        lambda: [
+            {
+                "index": 0,
+                "name": "NVIDIA GeForce RTX 4090",
+                "vram_total_mb": 24564,
+                "vram_used_mb": None,
+                "utilization_pct": None,
+                "temperature_c": None,
+            }
+        ],
+    )
+    monkeypatch.setattr("seiso.hardware.profile._nvidia_smi_metrics", lambda: {})
+
+    gpus = detect_gpus()
+    assert len(gpus) == 1
+    assert "4090" in gpus[0]["name"]
+
+    profile = hardware_profile(force_refresh=True)
+    assert profile["tier"] == "workstation"
+    assert profile["tier_label"] == "Workstation GPU"
+
+
+def test_detect_backend_linux_nvidia_smi_without_cuda(monkeypatch):
+    from seiso.models.loader import Backend, detect_backend
+
+    detect_backend.cache_clear()
+    monkeypatch.setattr("seiso.models.loader.platform.system", lambda: "Linux")
+    monkeypatch.setattr("seiso.security.nvidia_boundary.nvidia_smi_visible", lambda: True)
+
+    import torch
+
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    assert detect_backend() == Backend.TORCH
+    detect_backend.cache_clear()
+
+
 def test_enrich_catalog_ranks_priority_first():
     profile = {
         "backend": "cpu",
