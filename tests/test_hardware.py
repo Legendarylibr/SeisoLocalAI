@@ -23,6 +23,16 @@ def test_moe_uses_active_params():
     assert moe < full
 
 
+def test_unknown_params_use_conservative_default():
+    from seiso.memory.estimates import estimate_gguf_download_bytes
+
+    est = estimate_gguf_download_bytes("?", repo_id="some-org/mystery-gguf")
+    assert est > 0
+    assert est < 50 * 1024**3
+    vram = estimate_chat_vram_gb("?", repo_id="some-org/mystery-gguf")
+    assert 0 < vram < 20
+
+
 def test_classify_tier_cpu_when_no_gpu():
     tier = classify_tier({"backend": "cpu", "gpus": [], "ram_gb": 16})
     assert tier.value == "cpu_only"

@@ -3674,6 +3674,89 @@ th { color: var(--muted); font-weight: 500; font-size: 0.78rem; text-transform: 
   z-index: 80;
 }
 
+.chat-context-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.45rem clamp(0.75rem, 2vw, 1.25rem);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elevated);
+}
+
+.chat-context-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.chat-context-track {
+  height: 0.35rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+  margin-bottom: 0.35rem;
+}
+
+.chat-context-fill {
+  height: 100%;
+  border-radius: inherit;
+  transition: width 0.25s ease, background-color 0.25s ease;
+}
+
+.chat-context-fill-ok {
+  background: linear-gradient(90deg, rgba(78, 205, 192, 0.65), var(--accent));
+}
+
+.chat-context-fill-warn {
+  background: linear-gradient(90deg, rgba(245, 180, 70, 0.75), rgba(245, 140, 40, 0.95));
+}
+
+.chat-context-fill-critical {
+  background: linear-gradient(90deg, rgba(245, 110, 90, 0.85), var(--danger));
+}
+
+.chat-context-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+  font-size: 0.72rem;
+}
+
+.chat-context-label {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.chat-context-stats {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.chat-context-badge {
+  padding: 0.08rem 0.4rem;
+  border-radius: 999px;
+  background: rgba(245, 180, 70, 0.12);
+  color: #e8b35a;
+  font-size: 0.62rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.chat-context-window {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-shrink: 0;
+  font-size: 0.72rem;
+}
+
+.chat-context-window select {
+  min-width: 4.5rem;
+  padding: 0.2rem 0.45rem;
+  font-size: 0.72rem;
+}
+
 .chat-sidebar-toggle {
   display: inline-flex;
   align-items: center;
@@ -4429,11 +4512,29 @@ th { color: var(--muted); font-weight: 500; font-size: 0.78rem; text-transform: 
 }
 .chat-send-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 
+.chat-composer-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  max-width: 48rem;
+  margin: 0.45rem auto 0;
+}
+
+.chat-throughput {
+  flex-shrink: 0;
+  font-size: 0.68rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+}
+
 .chat-composer-hint {
+  flex: 1;
   text-align: center;
   font-size: 0.68rem;
   color: var(--muted);
-  margin-top: 0.45rem;
+  margin: 0;
 }
 
 /* ── System monitor popup ── */

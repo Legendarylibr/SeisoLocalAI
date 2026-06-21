@@ -259,6 +259,25 @@ export type KnowledgeChunk = {
 export type ChatThread = { id: string; title: string; model_id: string | null; created_at: string };
 export type ChatMessage = { id: string; role: string; content: string; created_at: string };
 
+export type ChatContextStatus = {
+  char_budget: number;
+  char_used: number;
+  char_total: number;
+  message_count: number;
+  messages_included: number;
+  messages_omitted: number;
+  estimated_prompt_tokens: number;
+  max_tokens: number;
+  n_ctx: number;
+  n_ctx_auto: number;
+  n_ctx_min: number;
+  n_ctx_max: number;
+  context_tokens_used: number;
+  context_tokens_limit: number;
+  fill_ratio: number;
+  history_trimmed: boolean;
+};
+
 export type TrainingJob = {
   id: string;
   status: string;

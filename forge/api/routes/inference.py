@@ -6,7 +6,7 @@ import asyncio
 import json
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
@@ -50,6 +50,7 @@ class ChatRequest(BaseModel):
     inference_backend: str = Field(default="auto", description="auto | llamacpp | ollama | mlx | torch")
     messages: list[dict[str, str]] = Field(default_factory=list)
     max_tokens: int = Field(default=2048, ge=1, le=8192)
+    n_ctx: int | None = Field(default=None, ge=2048, le=8192)
     stream: bool = True
     tools: bool = False
     allow_code_exec: bool = False
@@ -149,6 +150,57 @@ async def get_thread_messages(
     if not await db.get_thread_for_user(thread_id, user_id):
         raise HTTPException(404, "Thread not found")
     return await db.get_messages(thread_id)
+
+
+@router.get("/context")
+async def get_chat_context(
+    user_id: Annotated[str, Depends(get_current_user_id)],
+    db: Annotated[Database, Depends(get_db)],
+    settings: Annotated[ForgeSettings, Depends(get_settings)],
+    thread_id: str | None = None,
+    max_tokens: int = Query(default=2048, ge=1, le=8192),
+    n_ctx: int | None = Query(default=None, ge=2048, le=8192),
+    tools: bool = False,
+    knowledge_base_id: str | None = None,
+    model_id: str | None = None,
+    ollama_model: str | None = None,
+) -> dict[str, Any]:
+    """Context window usage for the chat UI."""
+    from forge.api.routes.knowledge import _validate_kb_id
+    from forge.services.chat_context import context_status_for_history
+    from forge.services.knowledge_context import format_knowledge_context, retrieve_knowledge_chunks
+
+    history: list[dict] = []
+    if thread_id:
+        if not await db.get_thread_for_user(thread_id, user_id):
+            raise HTTPException(404, "Thread not found")
+        history = await db.get_messages(thread_id)
+
+    knowledge_context: str | None = None
+    if knowledge_base_id:
+        kb_id = _validate_kb_id(knowledge_base_id)
+        last_user = ""
+        for msg in reversed(history):
+            if msg.get("role") == "user":
+                last_user = str(msg.get("content", "")).strip()
+                break
+        chunks = retrieve_knowledge_chunks(
+            settings.data_dir,
+            user_id=user_id,
+            knowledge_base_id=kb_id,
+            query=last_user,
+        )
+        knowledge_context = format_knowledge_context(chunks) or None
+
+    return context_status_for_history(
+        history,
+        max_tokens=max_tokens,
+        n_ctx=n_ctx,
+        model_id=model_id,
+        ollama_model=ollama_model,
+        tools_enabled=tools,
+        knowledge_context=knowledge_context,
+    )
 
 
 @router.post("/cancel")
