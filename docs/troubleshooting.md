@@ -86,6 +86,21 @@ For UI development, run `seiso forge` in one terminal and `cd forge-ui && npm ru
 
 **Fix:** Run the installer first, or set `SEISO_INSTALL_DIR` to your clone path.
 
+**Symptom:** `seiso_run_install_worker: command not found`, `no such file or directory` sourcing `common.sh`, then `Install failed` / `Doctor script not found`.
+
+**Cause:** The install directory exists but the git clone did not finish (network error, non-empty `$HOME/Seiso`, or partial download).
+
+**Fix:**
+```bash
+rm -rf "$HOME/Seiso"
+curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
+```
+
+Or point at a clean path:
+```bash
+SEISO_INSTALL_DIR="$HOME/code/Seiso" curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
+```
+
 ## Flash Attention / flash-attn wheel build fails
 
 **Symptom:** `pip install` fails building `flash-attn`, or errors about missing `pyproject.toml` / `setup.py` on `C:\` or `/mnt/c/...`.
