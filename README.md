@@ -46,7 +46,7 @@ Seiso combines a **web workspace (Forge)** and a **Python core (CLI + library)**
 | RL quant + CUDA kernel policy | RL Quant | `seiso rl-quant run` |
 | RL adaptive GGUF quantization | RL Quant | — |
 | Visual data/recipe pipelines | Recipe Studio | — |
-| RAG knowledge bases | API | — |
+| RAG knowledge bases | Knowledge | — |
 
 **Why local-first?**
 
@@ -259,9 +259,10 @@ After `seiso forge` (or `start`), browse to **http://127.0.0.1:8765**:
 | RL Quant | `/rl-quant` | Adaptive GGUF quantization via RL |
 | Recipe Studio | `/recipes` | Visual `@xyflow/react` graph editor |
 | Integrations | `/integrations` | Route to OpenAI, Anthropic, Ollama, vLLM |
+| Knowledge | `/knowledge` | RAG corpus ingest and retrieval |
 | Settings | `/settings` | HF token, hardware info, security toggles |
 
-Knowledge-base ingest/retrieve is **API-only** (`/api/knowledge/...`).
+Knowledge-base ingest/retrieve is also available via API (`/api/knowledge/...`).
 
 Forge details: **[docs/forge.md](docs/forge.md)**
 

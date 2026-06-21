@@ -77,9 +77,7 @@ def merge_kernel_metrics(
     if overhead > 0.0:
         merged["memory_mb"] = float(merged["memory_mb"]) + overhead
 
-    merged["kernel_reward_source"] = str(
-        kernel_metrics.get("kernel_benchmark_source", "analytic")
-    )
+    merged["kernel_reward_source"] = str(kernel_metrics.get("kernel_benchmark_source", "analytic"))
     return merged
 
 

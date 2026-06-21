@@ -60,7 +60,9 @@ def test_data_dir_lock_blocks_second_acquire(tmp_path: Path):
 def test_data_dir_lock_stale_pid_recovery(tmp_path: Path, monkeypatch):
     lock_path = tmp_path / ".forge.lock"
     lock_path.write_text(
-        json.dumps({"pid": 999999999, "host": "127.0.0.1", "port": 8765, "url": "http://127.0.0.1:8765"}),
+        json.dumps(
+            {"pid": 999999999, "host": "127.0.0.1", "port": 8765, "url": "http://127.0.0.1:8765"}
+        ),
         encoding="utf-8",
     )
     lock = ForgeDataDirLock()

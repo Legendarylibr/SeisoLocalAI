@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
 from forge.api.deps import get_db, get_training_orchestrator
+from forge.api.http_errors import raise_forbidden
 from forge.api.routes._stream import job_failure_message, spawn_background
 from forge.config import ForgeSettings, get_settings
 from forge.db.store import Database
@@ -51,11 +52,7 @@ def _serialize_metrics_payload(
     from seiso.security.hardware_privacy import sanitize_system_metric_point
 
     training = [p for p in points if p.get("type") in ("training", "eval")]
-    system = [
-        sanitize_system_metric_point(p)
-        for p in points
-        if p.get("type") == "system"
-    ]
+    system = [sanitize_system_metric_point(p) for p in points if p.get("type") == "system"]
     return {
         "summary": summary or {},
         "training": training[-2000:],
@@ -104,7 +101,7 @@ async def start_training(
     try:
         assert_user_training_config(settings.data_dir, user_id, body.config)
     except SecurityError as exc:
-        raise HTTPException(403, str(exc)) from exc
+        raise_forbidden(exc)
 
     configure_hf_hub_cache(settings.data_dir)
     inventory = await db.list_models(user_id)
@@ -140,7 +137,9 @@ async def start_training(
         points: list[dict[str, Any]],
         summary: dict[str, Any],
     ) -> None:
-        await db.update_training_metrics(jid, _serialize_metrics_payload(points, summary), user_id=user_id)
+        await db.update_training_metrics(
+            jid, _serialize_metrics_payload(points, summary), user_id=user_id
+        )
 
     orchestrator.set_metrics_persister(job_id, persist_metrics)
 
@@ -189,7 +188,9 @@ async def start_training(
                         hub_token = None
                         if hub_req:
                             hub = HubPublishRequest(**hub_req)
-                            hub_metadata = _hub_metadata_from_request(hub, job_id=job_id, source="training")
+                            hub_metadata = _hub_metadata_from_request(
+                                hub, job_id=job_id, source="training"
+                            )
                             hub_metadata.validate()
                             hub_repo = hub_metadata.repo_id
                             hub_token = _resolve_token(settings, user_id, hub)
@@ -224,7 +225,9 @@ async def start_training(
             )
 
     spawn_background(_run())
-    audit_event("training_start", user_id=user_id, job_id=job_id, model_id=body.config.get("model_id"))
+    audit_event(
+        "training_start", user_id=user_id, job_id=job_id, model_id=body.config.get("model_id")
+    )
     return TrainingJobResponse(job_id=job_id, status="pending")
 
 

@@ -166,7 +166,9 @@ def chat(
 def export_cmd(
     checkpoint: str = typer.Option(..., help="Checkpoint directory"),
     formats: str = typer.Option("merged", help="Comma-separated: merged,lora,full,gguf"),
-    profile: str | None = typer.Option(None, help="Export profile: lora_bundle, full_bundle, inference, ..."),
+    profile: str | None = typer.Option(
+        None, help="Export profile: lora_bundle, full_bundle, inference, ..."
+    ),
     hub_repo: str | None = typer.Option(None, help="Hugging Face repo to push"),
     precheck_only: bool = typer.Option(False, help="Run Hub precheck without exporting"),
 ) -> None:
@@ -200,7 +202,9 @@ def export_cmd(
             console.print("No Hub precheck requested (set --hub-repo)")
         return
 
-    results = run_export_plan(plan, hub_token=settings.hf_token or None, sandbox_root=settings.data_dir)
+    results = run_export_plan(
+        plan, hub_token=settings.hf_token or None, sandbox_root=settings.data_dir
+    )
     for k, v in results.items():
         console.print(f"  [green]{k}[/] → {v}")
 
@@ -289,7 +293,9 @@ def _print_bench_row(row: dict) -> None:
     console.print(f"  TTFT:          {row.get('ttft_ms'):.1f} ms")
     console.print(f"  generate:      {row.get('generate_ms'):.1f} ms")
     console.print(f"  output tokens: {row.get('output_tokens')} (~estimate)")
-    console.print(f"  throughput:    [cyan]{row.get('tokens_per_sec'):.1f} tok/s[/]  ({row.get('ms_per_token'):.1f} ms/tok)")
+    console.print(
+        f"  throughput:    [cyan]{row.get('tokens_per_sec'):.1f} tok/s[/]  ({row.get('ms_per_token'):.1f} ms/tok)"
+    )
 
 
 rl_quant_app = typer.Typer(
@@ -308,11 +314,15 @@ def rl_quant_run(
     backend: str = typer.Option("simulator", help="simulator | llama_cpp"),
     training_backend: str = typer.Option("stdlib", help="stdlib | pytorch"),
     seed: int = typer.Option(13, help="RNG seed"),
-    checkpoint_path: str | None = typer.Option(None, help="Fine-tune checkpoint for quality sidecar"),
+    checkpoint_path: str | None = typer.Option(
+        None, help="Fine-tune checkpoint for quality sidecar"
+    ),
     gguf_path: str | None = typer.Option(None, help="GGUF path for llama.cpp backend"),
     gguf_export: bool = typer.Option(False, help="Export GGUF after recommendation"),
     moe_enabled: bool = typer.Option(False, help="Enable MoE expert variants"),
-    kernel_rl: bool = typer.Option(False, "--kernel-rl", help="Co-train CUDA kernel launch profiles"),
+    kernel_rl: bool = typer.Option(
+        False, "--kernel-rl", help="Co-train CUDA kernel launch profiles"
+    ),
     kernel_live_benchmark: bool = typer.Option(
         False, "--kernel-live-benchmark", help="Live CUDA micro-benchmarks (NVIDIA GPU)"
     ),
@@ -441,7 +451,9 @@ def distill_rl_run(
     stages: str | None = typer.Option(
         None, help="Comma-separated stages: distill,rollout,dpo,evaluate"
     ),
-    seeds: str | None = typer.Option(None, help="Comma-separated seeds for multi-seed research runs"),
+    seeds: str | None = typer.Option(
+        None, help="Comma-separated seeds for multi-seed research runs"
+    ),
     seed: int = typer.Option(42, help="RNG seed (ignored when --seeds is set)"),
     json_out: bool = typer.Option(False, "--json", help="Print machine-readable summary JSON"),
 ) -> None:

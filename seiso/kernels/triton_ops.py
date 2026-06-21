@@ -148,7 +148,9 @@ def fused_cross_entropy_forward(logits, labels, ignore_index: int = -100):
             return
         cols = tl.arange(0, BLOCK)
         mask = cols < vocab
-        vals = tl.load(logits_ptr + row * vocab + cols, mask=mask, other=-float("inf")).to(tl.float32)
+        vals = tl.load(logits_ptr + row * vocab + cols, mask=mask, other=-float("inf")).to(
+            tl.float32
+        )
         row_max = tl.max(vals, axis=0)
         expv = tl.exp(vals - row_max)
         denom = tl.sum(expv, axis=0)
@@ -165,7 +167,9 @@ def fused_cross_entropy_forward(logits, labels, ignore_index: int = -100):
     return row_loss, row_max, row_lse
 
 
-def fused_cross_entropy_backward(logits, labels, row_max, row_lse, ignore_index: int = -100, grad_scale: float = 1.0):
+def fused_cross_entropy_backward(
+    logits, labels, row_max, row_lse, ignore_index: int = -100, grad_scale: float = 1.0
+):
     import torch
 
     rows, vocab = logits.shape
@@ -211,4 +215,3 @@ def fused_cross_entropy_backward(logits, labels, row_max, row_lse, ignore_index:
         logits, labels, row_max, row_lse, grad, vocab, ignore_index, grad_scale, BLOCK=BLOCK
     )
     return grad
-

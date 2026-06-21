@@ -164,7 +164,9 @@ async def chat_completions(
                             "object": "chat.completion.chunk",
                             "created": created,
                             "model": body.model,
-                            "choices": [{"index": 0, "delta": {"content": chunk}, "finish_reason": None}],
+                            "choices": [
+                                {"index": 0, "delta": {"content": chunk}, "finish_reason": None}
+                            ],
                         }
                         yield f"data: {json.dumps(chunk_payload)}\n\n"
                 for chunk in sanitizer.finish():
@@ -173,7 +175,9 @@ async def chat_completions(
                         "object": "chat.completion.chunk",
                         "created": created,
                         "model": body.model,
-                        "choices": [{"index": 0, "delta": {"content": chunk}, "finish_reason": None}],
+                        "choices": [
+                            {"index": 0, "delta": {"content": chunk}, "finish_reason": None}
+                        ],
                     }
                     yield f"data: {json.dumps(chunk_payload)}\n\n"
                 final = {
@@ -210,7 +214,9 @@ async def chat_completions(
                     "object": "chat.completion.chunk",
                     "created": created,
                     "model": body.model,
-                    "choices": [{"index": 0, "delta": {"content": content}, "finish_reason": "stop"}],
+                    "choices": [
+                        {"index": 0, "delta": {"content": content}, "finish_reason": "stop"}
+                    ],
                 }
                 yield f"data: {json.dumps(chunk)}\n\n"
             yield "data: [DONE]\n\n"
@@ -221,7 +227,9 @@ async def chat_completions(
     if not job or job.status.value == "failed":
         raise HTTPException(500, job.error if job else "Inference failed")
 
-    content = _sanitize_openai_content(job.result.get("content", ""), tools_enabled=bool(body.tools))
+    content = _sanitize_openai_content(
+        job.result.get("content", ""), tools_enabled=bool(body.tools)
+    )
     return JSONResponse(
         {
             "id": completion_id,

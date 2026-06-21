@@ -73,7 +73,11 @@ async def get_app_settings(
         encryption_key=settings.hf_token_encryption_key,
         settings_token=settings.hf_token or None,
     )
-    user_saved = bool(load_user_hf_token(settings.data_dir, user_id, encryption_key=settings.hf_token_encryption_key))
+    user_saved = bool(
+        load_user_hf_token(
+            settings.data_dir, user_id, encryption_key=settings.hf_token_encryption_key
+        )
+    )
     runtime = check_inference_runtime()
     inference_backends: list[str] = []
     if runtime.llamacpp:

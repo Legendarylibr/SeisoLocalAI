@@ -10,7 +10,7 @@ def test_build_ollama_create_commands(tmp_path: Path):
     quant_dir = tmp_path / "q4_k_m"
     quant_dir.mkdir()
     (quant_dir / "model-q4_k_m.gguf").write_text("gguf")
-    (quant_dir / "Modelfile").write_text('FROM ./model-q4_k_m.gguf\n')
+    (quant_dir / "Modelfile").write_text("FROM ./model-q4_k_m.gguf\n")
 
     commands = build_ollama_create_commands(
         {"gguf_q4_k_m": str(quant_dir / "model-q4_k_m.gguf")},

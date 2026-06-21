@@ -11,6 +11,10 @@ from pathlib import Path
 from typing import Any
 
 from forge.db.store import Database
+from forge.services.artifact_integrity import (
+    gguf_files_complete_at_path,
+    path_has_complete_artifact,
+)
 from forge.services.download_progress import ProgressCallback
 from forge.services.hf_auth import resolve_hf_token_for_download
 from forge.services.hf_connectivity import assert_hub_ready_for_download, check_inference_runtime
@@ -48,7 +52,7 @@ def resolve_download_variant(variant: str) -> str:
 
 
 def _format_gib(size_bytes: int) -> str:
-    return f"{size_bytes / (1024 ** 3):.1f} GB"
+    return f"{size_bytes / (1024**3):.1f} GB"
 
 
 def _assert_disk_space_for_download(cache_dir: Path, total_bytes: int) -> None:
@@ -116,39 +120,6 @@ async def find_inventory_for_catalog_repo(
     return None
 
 
-def _path_has_complete_artifact(path: Path, fmt: str, expected_size: int) -> bool:
-    if not path.exists():
-        return False
-    if path.name.endswith((".incomplete", ".partial", ".lock")):
-        return False
-    if fmt == "gguf":
-        if path.is_file():
-            size = path.stat().st_size
-            return path.suffix.lower() == ".gguf" and size > 0 and (expected_size <= 0 or size >= expected_size)
-        ggufs = [p for p in path.rglob("*.gguf") if p.is_file()]
-        size = sum(p.stat().st_size for p in ggufs)
-        return bool(ggufs) and size > 0 and (expected_size <= 0 or size >= expected_size)
-    if path.is_dir():
-        weight_files = [
-            p
-            for p in path.rglob("*")
-            if p.is_file() and p.suffix.lower() in {".safetensors", ".bin"}
-        ]
-        size = sum(p.stat().st_size for p in weight_files)
-        return bool(weight_files) and size > 0 and (expected_size <= 0 or size >= expected_size)
-    return path.is_file() and path.stat().st_size > 0 and (expected_size <= 0 or path.stat().st_size >= expected_size)
-
-
-def _gguf_metadata_files_complete(path: Path, filenames: list[str], expected_size: int) -> bool:
-    if not filenames:
-        return False
-    files = [path] if path.is_file() and len(filenames) == 1 else [path / filename for filename in filenames]
-    if not all(item.is_file() and item.stat().st_size > 0 for item in files):
-        return False
-    actual_size = sum(item.stat().st_size for item in files)
-    return expected_size <= 0 or actual_size >= expected_size
-
-
 def _cached_download_result_if_usable(
     existing: dict[str, Any] | None,
     *,
@@ -178,9 +149,11 @@ def _cached_download_result_if_usable(
                     expected_size,
                     sum(get_gguf_file_size_bytes(gguf_repo, str(item)) for item in gguf_files),
                 )
-            if not _gguf_metadata_files_complete(path, [str(item) for item in gguf_files], expected_size):
+            if not gguf_files_complete_at_path(
+                path, [str(item) for item in gguf_files], expected_size
+            ):
                 return None
-    if not _path_has_complete_artifact(path, fmt, expected_size):
+    if not path_has_complete_artifact(path, fmt, expected_size):
         return None
     requested = variant.lower()
     if requested == "gguf" and fmt != "gguf":

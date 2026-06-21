@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
 from fastapi import HTTPException
+
+from forge.api.http_errors import raise_forbidden
+from seiso.security import SecurityError
 
 
 def _parse_json_field(row: dict, key: str, fallback: Any) -> Any:
@@ -95,3 +99,40 @@ async def resolve_linked_training_job(
         preset_when=preset_when,
         preset_override=preset_override,
     )
+
+
+def validate_pipeline_paths(
+    data_dir: Path,
+    user_id: str,
+    config: dict[str, Any],
+    *,
+    config_file: str | None = None,
+    path_keys: tuple[str, ...] = (),
+    llama_cpp_binary: bool = False,
+) -> None:
+    """Validate user-scoped paths; raise HTTP 403 on sandbox violations."""
+    from forge.services.user_paths import (
+        assert_llama_cpp_binary,
+        assert_user_config_file,
+        assert_user_path,
+    )
+
+    try:
+        if config_file:
+            assert_user_config_file(data_dir, user_id, config_file)
+        for key in path_keys:
+            if config.get(key):
+                assert_user_path(data_dir, user_id, config[key])
+        if llama_cpp_binary and config.get("llama_cpp_binary"):
+            assert_llama_cpp_binary(config["llama_cpp_binary"])
+    except SecurityError as exc:
+        raise_forbidden(exc)
+
+
+def enrich_stage_results(result: dict[str, Any], *extra_keys: str) -> dict[str, Any]:
+    """Merge manifest and optional artifact keys into stage_results."""
+    stage_results = dict(result.get("stage_results") or {})
+    for key in ("manifest", *extra_keys):
+        if value := result.get(key):
+            stage_results[key] = value
+    return stage_results

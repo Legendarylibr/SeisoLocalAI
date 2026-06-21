@@ -8,6 +8,7 @@ from typing import Any
 
 from fastapi import HTTPException
 
+from forge.api.http_errors import raise_forbidden
 from forge.db.store import Database
 from forge.services.user_paths import assert_user_path, is_local_filesystem_path
 from seiso.security import SecurityError
@@ -28,7 +29,7 @@ async def resolve_model_path(
         try:
             p = assert_user_path(data_dir, user_id, model_path)
         except SecurityError as exc:
-            raise HTTPException(403, str(exc)) from exc
+            raise_forbidden(exc)
         if not p.exists():
             raise HTTPException(404, f"Model path not found: {model_path}")
         return str(p)
@@ -44,7 +45,7 @@ async def resolve_model_path(
     try:
         p = assert_user_path(data_dir, user_id, match["path"])
     except SecurityError as exc:
-        raise HTTPException(403, str(exc)) from exc
+        raise_forbidden(exc)
     if not p.exists():
         raise HTTPException(404, f"Model file missing on disk: {match['path']}")
     return str(p)

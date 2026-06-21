@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
 from forge.api.deps import get_db, get_export_orchestrator
+from forge.api.http_errors import raise_forbidden
 from forge.api.routes._pipeline import PipelineJobResponse
 from forge.api.routes._stream import job_failure_message, spawn_background
 from forge.config import ForgeSettings, get_settings
@@ -57,7 +58,9 @@ class ExportStartRequest(BaseModel):
     )
     gguf_quantizations: list[str] = Field(default_factory=lambda: ["q4_k_m"])
     hub: HubPublishRequest | None = None
-    hub_repo: str | None = Field(default=None, description="Deprecated — use hub.username + hub.model_name")
+    hub_repo: str | None = Field(
+        default=None, description="Deprecated — use hub.username + hub.model_name"
+    )
     rl_quant_job_id: str | None = Field(
         default=None,
         description="Apply GGUF quants from a completed RL quant recommendation job",
@@ -71,7 +74,9 @@ class PublishToHubRequest(BaseModel):
     hub: HubPublishRequest
 
 
-def _hub_metadata_from_request(hub: HubPublishRequest, *, job_id: str | None = None, source: str | None = None) -> HubModelMetadata:
+def _hub_metadata_from_request(
+    hub: HubPublishRequest, *, job_id: str | None = None, source: str | None = None
+) -> HubModelMetadata:
     return HubModelMetadata(
         username=hub.username.strip(),
         model_name=hub.model_name.strip(),
@@ -180,7 +185,9 @@ async def start_export(
     settings: Annotated[ForgeSettings, Depends(get_settings)],
 ) -> PipelineJobResponse:
     try:
-        await assert_pushable_checkpoint(db, data_dir=settings.data_dir, user_id=user_id, checkpoint=body.checkpoint)
+        await assert_pushable_checkpoint(
+            db, data_dir=settings.data_dir, user_id=user_id, checkpoint=body.checkpoint
+        )
     except (SecurityError, ValueError) as exc:
         raise HTTPException(403 if isinstance(exc, SecurityError) else 400, str(exc)) from exc
 
@@ -208,6 +215,7 @@ async def start_export(
             gguf_quants = parsed
         config["rl_quant_job_id"] = body.rl_quant_job_id
 
+    hub_precheck_dict: dict[str, Any] | None = None
     if hub_repo and hub_metadata:
         from seiso.export.hub_precheck import assert_hub_precheck_ok, precheck_hub_export
         from seiso.export.profiles import resolve_formats
@@ -229,6 +237,7 @@ async def start_export(
                 assert_hub_precheck_ok(precheck)
             except ValueError as exc:
                 raise HTTPException(400, str(exc)) from exc
+        hub_precheck_dict = precheck.to_dict()
 
     await db.create_export_job(user_id, config, job_id=job_id)
     orchestrator.create_job(job_id=job_id, user_id=user_id)
@@ -240,6 +249,7 @@ async def start_export(
         "hub_repo": hub_repo,
         "hub_token": hub_token,
         "hub_metadata": hub_metadata.__dict__ if hub_metadata else None,
+        "hub_precheck": hub_precheck_dict,
     }
 
     async def _run() -> None:
@@ -318,7 +328,9 @@ async def publish_to_hub(
         job_id = body.export_job_id
     elif body.output_path:
         try:
-            folder = await assert_pushable_path(db, data_dir=settings.data_dir, user_id=user_id, target=body.output_path)
+            folder = await assert_pushable_path(
+                db, data_dir=settings.data_dir, user_id=user_id, target=body.output_path
+            )
         except (SecurityError, ValueError) as exc:
             raise HTTPException(403 if isinstance(exc, SecurityError) else 400, str(exc)) from exc
     else:
@@ -350,7 +362,9 @@ async def publish_to_hub(
         logs.append(msg)
 
     try:
-        publish_folder_to_hub(folder, repo_id=repo_id, token=token, metadata=meta, on_log=on_log, skip_precheck=True)
+        publish_folder_to_hub(
+            folder, repo_id=repo_id, token=token, metadata=meta, on_log=on_log, skip_precheck=True
+        )
     except Exception as exc:
         raise HTTPException(500, f"Hugging Face upload failed: {exc}") from exc
 
@@ -384,7 +398,7 @@ async def download_export_output(
     try:
         path = assert_user_path(settings.data_dir, user_id, target_raw)
     except SecurityError as exc:
-        raise HTTPException(403, str(exc)) from exc
+        raise_forbidden(exc)
 
     if path.is_dir():
         ggufs = sorted(path.glob("*.gguf"))

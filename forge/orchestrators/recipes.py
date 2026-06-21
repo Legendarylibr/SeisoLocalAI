@@ -28,12 +28,16 @@ class RecipeOrchestrator(Orchestrator):
         recipe = payload["recipe"]
         nodes = recipe.get("nodes", [])
         edges = recipe.get("edges", [])
-        self._emit_log(job_id, f"Executing recipe: {recipe.get('name', job_id)} ({len(nodes)} nodes)")
+        self._emit_log(
+            job_id, f"Executing recipe: {recipe.get('name', job_id)} ({len(nodes)} nodes)"
+        )
 
         user_id = payload.get("user_id")
         if not user_id:
             raise PermissionError("user_id required for recipe output")
-        recipe_snapshot_path = safe_join(self.sandbox_root, "recipes", user_id, job_id, "recipe_snapshot.json")
+        recipe_snapshot_path = safe_join(
+            self.sandbox_root, "recipes", user_id, job_id, "recipe_snapshot.json"
+        )
         recipe_snapshot_path.parent.mkdir(parents=True, exist_ok=True)
         recipe_snapshot_path.write_text(json.dumps(recipe, indent=2), encoding="utf-8")
 
@@ -53,7 +57,11 @@ class RecipeOrchestrator(Orchestrator):
                 f.write(json.dumps(row) + "\n")
 
         self._emit_log(job_id, f"Recipe output: {out_path}")
-        return {"output_path": str(out_path), "row_count": len(outputs.get("_final", [])), "recipe_snapshot": str(recipe_snapshot_path)}
+        return {
+            "output_path": str(out_path),
+            "row_count": len(outputs.get("_final", [])),
+            "recipe_snapshot": str(recipe_snapshot_path),
+        }
 
     async def _run_node(
         self,

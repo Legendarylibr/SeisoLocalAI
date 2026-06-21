@@ -232,7 +232,11 @@ def hardware_profile(*, force_refresh: bool = False) -> dict[str, Any]:
     global _profile_cache, _profile_cache_ts
 
     now = time.time()
-    if not force_refresh and _profile_cache is not None and now - _profile_cache_ts < _PROFILE_TTL_S:
+    if (
+        not force_refresh
+        and _profile_cache is not None
+        and now - _profile_cache_ts < _PROFILE_TTL_S
+    ):
         return _profile_cache
 
     backend = detect_backend()

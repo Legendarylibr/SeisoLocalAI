@@ -75,6 +75,18 @@ Forge binds exclusively to `SEISO_HOST:SEISO_PORT` (default `127.0.0.1:8765`). S
 
 To run a second Forge intentionally, change **both** `SEISO_PORT` and `SEISO_DATA_DIR`.
 
+### Process model
+
+Forge runs as a **single uvicorn worker** by default. Job orchestrators (training, export, compress, RL quant), live SSE log streams, in-memory rate limiting, and loaded inference models all live in that one process.
+
+| Constraint | Why |
+|------------|-----|
+| Do not use `--workers N` with `N > 1` | Each worker gets its own job store and model pool — jobs started on worker A are invisible to worker B |
+| Restart clears in-flight SSE | Log buffers are in-memory; reconnect after restart shows DB-persisted job status only |
+| One Forge per data directory | The `.forge.lock` file prevents two processes from sharing checkpoints and the HF cache |
+
+For production behind a reverse proxy, terminate TLS upstream and run **one** Forge process per machine (or per isolated `SEISO_DATA_DIR`). See [deployment/reverse-proxy.md](deployment/reverse-proxy.md).
+
 ## UI pages
 
 | Path | Page | Purpose |

@@ -47,7 +47,9 @@ class ChatRequest(BaseModel):
     draft_model_path: str | None = None
     num_speculative_tokens: int | None = Field(default=None, ge=1, le=32)
     ollama_model: str | None = None
-    inference_backend: str = Field(default="auto", description="auto | llamacpp | ollama | mlx | torch")
+    inference_backend: str = Field(
+        default="auto", description="auto | llamacpp | ollama | mlx | torch"
+    )
     messages: list[dict[str, str]] = Field(default_factory=list)
     max_tokens: int = Field(default=2048, ge=1, le=8192)
     n_ctx: int | None = Field(default=None, ge=2048, le=8192)
@@ -65,7 +67,9 @@ class ThreadCreate(BaseModel):
 
 class PreloadRequest(BaseModel):
     model_id: str
-    inference_backend: str = Field(default="auto", description="auto | llamacpp | ollama | mlx | torch")
+    inference_backend: str = Field(
+        default="auto", description="auto | llamacpp | ollama | mlx | torch"
+    )
 
 
 @router.post("/threads")
@@ -236,14 +240,18 @@ async def preload_model(
     settings: Annotated[ForgeSettings, Depends(get_settings)],
 ) -> dict[str, Any]:
     """Load a selected inventory model into the local inference engine."""
-    ctx = await _resolve_preload_context(db, user_id, settings, body.model_id, body.inference_backend)
+    ctx = await _resolve_preload_context(
+        db, user_id, settings, body.model_id, body.inference_backend
+    )
     if ctx.get("ollama_only"):
         await _release_active_local_model(orchestrator._runner)
         return ctx["response"]
 
     loop = asyncio.get_running_loop()
     await orchestrator.release_ollama_model()
-    await loop.run_in_executor(None, lambda: _warm_local_model(orchestrator._runner, ctx["payload"]))
+    await loop.run_in_executor(
+        None, lambda: _warm_local_model(orchestrator._runner, ctx["payload"])
+    )
     status = orchestrator._runner._pool.status()
     return {"status": "loaded", "backend": ctx["backend"], **status}
 
@@ -256,7 +264,9 @@ async def preload_model_stream(
     orchestrator: Annotated[InferenceOrchestrator, Depends(get_inference_orchestrator)],
     settings: Annotated[ForgeSettings, Depends(get_settings)],
 ):
-    ctx = await _resolve_preload_context(db, user_id, settings, body.model_id, body.inference_backend)
+    ctx = await _resolve_preload_context(
+        db, user_id, settings, body.model_id, body.inference_backend
+    )
     if ctx.get("ollama_only"):
         ollama_model = ctx["response"].get("ollama_model") or ctx["response"].get("active_model")
         size_bytes = int(ctx.get("size_bytes") or 0)
@@ -341,7 +351,9 @@ async def preload_model_stream(
             }
             await orchestrator.release_ollama_model()
 
-        switching = _active_local_model_would_change(pool, target_path=target_path, backend=ctx["backend"])
+        switching = _active_local_model_would_change(
+            pool, target_path=target_path, backend=ctx["backend"]
+        )
         if switching:
             yield {
                 "event": "progress",
@@ -424,7 +436,8 @@ async def _resolve_preload_context(
     if selected.get("memory_load_blocked"):
         raise HTTPException(
             400,
-            selected.get("memory_load_blocked_reason") or "Model exceeds available memory on this machine",
+            selected.get("memory_load_blocked_reason")
+            or "Model exceeds available memory on this machine",
         )
 
     if selected.get("kind") == "ollama":
@@ -482,7 +495,8 @@ async def _resolve_preload_context(
     if fit.get("memory_load_blocked"):
         raise HTTPException(
             400,
-            fit.get("memory_load_blocked_reason") or "Model exceeds available memory on this machine",
+            fit.get("memory_load_blocked_reason")
+            or "Model exceeds available memory on this machine",
         )
 
     payload = {
@@ -504,7 +518,9 @@ def _warm_local_model(runner, payload: dict[str, Any]) -> None:
     model_path = payload["model_path"]
     route, resolved_path = runner._resolve_route(payload, model_path)
     pool = runner._pool
-    if _active_local_model_would_change(pool, target_path=resolved_path, backend=payload.get("inference_backend")):
+    if _active_local_model_would_change(
+        pool, target_path=resolved_path, backend=payload.get("inference_backend")
+    ):
         pool.cancel_and_unload()
     if route == "mlx":
         pool.get_mlx(resolved_path)
@@ -540,8 +556,7 @@ def _active_local_model_would_change(pool, *, target_path: str, backend: str | N
 
     active_path = status.get("path")
     return bool(
-        active_path
-        and pool.normalize_path(active_path) != pool.normalize_path(target_path)
+        active_path and pool.normalize_path(active_path) != pool.normalize_path(target_path)
     )
 
 
@@ -626,7 +641,8 @@ async def chat(
             if fit.get("memory_load_blocked"):
                 raise HTTPException(
                     400,
-                    fit.get("memory_load_blocked_reason") or "Model exceeds available memory on this machine",
+                    fit.get("memory_load_blocked_reason")
+                    or "Model exceeds available memory on this machine",
                 )
             payload["model_path"] = path
             payload["inference_backend"] = body.inference_backend
@@ -638,7 +654,8 @@ async def chat(
             if selected and selected.get("memory_load_blocked"):
                 raise HTTPException(
                     400,
-                    selected.get("memory_load_blocked_reason") or "Model exceeds available memory on this machine",
+                    selected.get("memory_load_blocked_reason")
+                    or "Model exceeds available memory on this machine",
                 )
             try:
                 target = resolve_chat_target(
@@ -737,7 +754,9 @@ async def chat(
                     for chunk in sanitizer.finish():
                         streamed.append(chunk)
                         yield {"event": "token", "data": chunk}
-                    content = sanitize_llm_output("".join(raw_parts), strip_tool_calls=not body.tools)
+                    content = sanitize_llm_output(
+                        "".join(raw_parts), strip_tool_calls=not body.tools
+                    )
                     if body.thread_id:
                         await db.add_message(body.thread_id, "assistant", content)
                     yield {"event": "message", "data": content}

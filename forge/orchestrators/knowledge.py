@@ -12,8 +12,8 @@ from forge.security.audit import audit_event
 from forge.services.knowledge_context import retrieve_knowledge_chunks
 from forge.services.knowledge_paths import assert_ingest_source
 from forge.tools.sanitize import wrap_tool_result
-from seiso.research.provenance import sha256_file
 from seiso.security import safe_join
+from seiso.security.deps import sha256_file
 
 
 class KnowledgeOrchestrator(Orchestrator):
@@ -42,7 +42,9 @@ class KnowledgeOrchestrator(Orchestrator):
         source = assert_ingest_source(self.sandbox_root, user_id, payload["source_path"])
         size = source.stat().st_size
         if size > self.MAX_INGEST_BYTES:
-            raise ValueError(f"Source file exceeds {self.MAX_INGEST_BYTES // (1024 * 1024)} MiB ingest limit")
+            raise ValueError(
+                f"Source file exceeds {self.MAX_INGEST_BYTES // (1024 * 1024)} MiB ingest limit"
+            )
         kb_dir = self._kb_dir(user_id, kb_id)
         kb_dir.mkdir(parents=True, exist_ok=True)
 
@@ -50,7 +52,9 @@ class KnowledgeOrchestrator(Orchestrator):
         source_hash = sha256_file(source)
         chunks = self._chunk(text)
         self._emit_log(job_id, f"Ingested {source.name}: {len(chunks)} chunks")
-        audit_event("kb_ingest", user_id=user_id, kb_id=kb_id, source=str(source.name), chunks=len(chunks))
+        audit_event(
+            "kb_ingest", user_id=user_id, kb_id=kb_id, source=str(source.name), chunks=len(chunks)
+        )
 
         index_path = kb_dir / "index.jsonl"
         with index_path.open("a") as f:

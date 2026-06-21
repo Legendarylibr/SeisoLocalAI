@@ -94,7 +94,9 @@ def render_readme(meta: HubModelMetadata, *, extra: dict[str, Any] | None = None
     title = meta.model_name.replace("-", " ").replace("_", " ").title()
     quant_line = ""
     if meta.quantizations:
-        quant_line = "\n## Quantizations\n\n" + "\n".join(f"- `{q}`" for q in meta.quantizations) + "\n"
+        quant_line = (
+            "\n## Quantizations\n\n" + "\n".join(f"- `{q}`" for q in meta.quantizations) + "\n"
+        )
 
     body = meta.description.strip() or (
         f"Model exported from [Seiso Forge](https://github.com/seiso) by **{meta.author}**."
@@ -111,7 +113,9 @@ def render_readme(meta: HubModelMetadata, *, extra: dict[str, Any] | None = None
         provenance.append(f"- **Seiso job:** `{meta.seiso_job_id}`")
     if meta.export_formats:
         provenance.append(f"- **Export formats:** {', '.join(meta.export_formats)}")
-    provenance.append(f"- **Exported:** {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}")
+    provenance.append(
+        f"- **Exported:** {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}"
+    )
     if extra:
         for k, v in extra.items():
             provenance.append(f"- **{k}:** {v}")
@@ -121,9 +125,7 @@ def render_readme(meta: HubModelMetadata, *, extra: dict[str, Any] | None = None
         f"# {title}\n\n"
         f"{body}\n"
         f"{quant_line}\n"
-        f"## Provenance\n\n"
-        + "\n".join(provenance)
-        + "\n\n## Usage\n\n"
+        f"## Provenance\n\n" + "\n".join(provenance) + "\n\n## Usage\n\n"
         "### Transformers\n\n"
         "```python\n"
         "from transformers import AutoModelForCausalLM, AutoTokenizer\n\n"
@@ -136,7 +138,9 @@ def render_readme(meta: HubModelMetadata, *, extra: dict[str, Any] | None = None
     return readme
 
 
-def write_hub_artifacts(folder: Path, meta: HubModelMetadata, *, extra: dict[str, Any] | None = None) -> dict[str, Path]:
+def write_hub_artifacts(
+    folder: Path, meta: HubModelMetadata, *, extra: dict[str, Any] | None = None
+) -> dict[str, Path]:
     """Write README.md and seiso_model_metadata.json into an export folder before upload."""
     folder.mkdir(parents=True, exist_ok=True)
     readme = folder / "README.md"

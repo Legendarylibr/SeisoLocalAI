@@ -37,7 +37,9 @@ def is_document_path(path: str) -> bool:
     return path not in {"/health", "/api/health"}
 
 
-def build_csp_policy(*, nonce: str | None = None, local_only: bool = True, debug: bool = False) -> str:
+def build_csp_policy(
+    *, nonce: str | None = None, local_only: bool = True, debug: bool = False
+) -> str:
     """Return a CSP header value tuned for local-first vs remote exposure."""
     script_elem = ["'self'", *SCRIPT_HASHES]
     script_src = ["'self'", *SCRIPT_HASHES]

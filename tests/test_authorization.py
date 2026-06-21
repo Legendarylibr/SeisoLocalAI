@@ -17,7 +17,9 @@ async def test_thread_cross_user_idor(app):
         token_a = reg.json()["access_token"]
         headers_a = {"Authorization": f"Bearer {token_a}"}
 
-        thread = await client.post("/api/inference/threads", json={"title": "secret"}, headers=headers_a)
+        thread = await client.post(
+            "/api/inference/threads", json={"title": "secret"}, headers=headers_a
+        )
         tid = thread.json()["id"]
 
         _, token_b = await make_second_user()

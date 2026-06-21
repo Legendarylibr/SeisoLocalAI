@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
 from forge.api.deps import get_db, get_inference_orchestrator
+from forge.api.http_errors import raise_forbidden
 from forge.config import ForgeSettings, get_settings
 from forge.db.store import Database
 from forge.orchestrators.inference import InferenceOrchestrator
@@ -162,7 +163,7 @@ async def download_local_model(
     try:
         path = assert_user_path(settings.data_dir, user_id, model["path"])
     except SecurityError as exc:
-        raise HTTPException(403, str(exc)) from exc
+        raise_forbidden(exc)
 
     if path.is_dir():
         ggufs = sorted(path.glob("*.gguf"))
@@ -187,7 +188,7 @@ async def scan_folder(
     try:
         folder = assert_user_path(settings.data_dir, user_id, body.path)
     except SecurityError as exc:
-        raise HTTPException(403, str(exc)) from exc
+        raise_forbidden(exc)
     if not folder.is_dir():
         raise HTTPException(400, "Path is not a directory")
 
@@ -277,7 +278,11 @@ async def download_model_stream(
             return
         except Exception as exc:
             if stream_open:
-                msg = str(exc) if isinstance(exc, ValueError) else _format_hub_download_error(exc, repo_id=body.repo_id)
+                msg = (
+                    str(exc)
+                    if isinstance(exc, ValueError)
+                    else _format_hub_download_error(exc, repo_id=body.repo_id)
+                )
                 await queue.put(("error", msg))
 
     async def event_gen():
@@ -296,7 +301,10 @@ async def download_model_stream(
                         heartbeat = dict(last_progress)
                         heartbeat["heartbeat"] = True
                         heartbeat["elapsed_seconds"] = int(elapsed)
-                        if int(heartbeat.get("bytes") or 0) <= 0 and heartbeat.get("phase") == "download":
+                        if (
+                            int(heartbeat.get("bytes") or 0) <= 0
+                            and heartbeat.get("phase") == "download"
+                        ):
                             heartbeat["label"] = (
                                 heartbeat.get("label")
                                 or f"Downloading {body.repo_id} from Hugging Face"
@@ -347,7 +355,7 @@ async def register_local(
     try:
         path = assert_user_path(settings.data_dir, user_id, body.path)
     except SecurityError as exc:
-        raise HTTPException(403, str(exc)) from exc
+        raise_forbidden(exc)
     if not path.exists():
         raise HTTPException(404, "Model path not found")
     return await db.add_model(

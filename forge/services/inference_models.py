@@ -5,11 +5,11 @@ from __future__ import annotations
 import json
 import logging
 import time
-from pathlib import Path
 from typing import Any
 
 from forge.db.store import Database
 from forge.providers.ollama import list_models as list_ollama_models
+from forge.services.artifact_integrity import inventory_gguf_is_complete
 from forge.services.hardware import (
     HardwareTier,
     assess_inference_option_fit,
@@ -27,7 +27,6 @@ from seiso.inference.backends import (
     BACKEND_OLLAMA,
     BACKEND_TORCH,
     available_backends,
-    gguf_is_supported_by_llamacpp,
     match_ollama_name,
     recommend_backend,
 )
@@ -96,31 +95,11 @@ def _filter_installed_backends(backends: list[str], installed: dict[str, bool]) 
 
 
 def _inventory_artifact_is_complete(row: dict[str, Any], metadata: dict[str, Any]) -> bool:
-    path = Path(str(row.get("path") or ""))
-    if not path.exists():
-        return False
-    fmt = str(row.get("format") or "").lower()
-    if fmt != "gguf":
-        return True
-    if not gguf_is_supported_by_llamacpp(str(path)):
-        return False
-
-    gguf_repo = str(metadata.get("gguf_repo") or metadata.get("repo_id") or "")
-    gguf_files = metadata.get("gguf_files") or metadata.get("gguf_file")
-    if isinstance(gguf_files, str):
-        gguf_files = [gguf_files]
-    if not gguf_repo or not isinstance(gguf_files, list) or not gguf_files:
-        return not str(row.get("source") or "").startswith("hf:")
-
-    local_files = [path] if path.is_file() else [path / str(filename) for filename in gguf_files]
-    if not all(item.is_file() for item in local_files):
-        return False
-    actual_size = sum(item.stat().st_size for item in local_files)
-    try:
-        expected_size = sum(get_gguf_file_size_bytes(gguf_repo, str(filename)) for filename in gguf_files)
-    except Exception:
-        return True
-    return expected_size <= 0 or actual_size >= expected_size
+    return inventory_gguf_is_complete(
+        row,
+        metadata,
+        size_lookup=get_gguf_file_size_bytes,
+    )
 
 
 def _build_local_option(
@@ -268,7 +247,9 @@ async def list_inference_options(
     options: list[dict[str, Any]] = []
 
     for row in await db.list_models(user_id):
-        opt = _build_local_option(row, installed=installed, ollama_tags=ollama_tags, profile=profile)
+        opt = _build_local_option(
+            row, installed=installed, ollama_tags=ollama_tags, profile=profile
+        )
         if opt:
             options.append(opt)
 
@@ -322,7 +303,9 @@ def resolve_chat_target(
                     f"{option['name']!r} is a GGUF file, but its architecture is not supported by this llama.cpp runtime. "
                     "Choose another GGUF quant or an Ollama model."
                 )
-            raise ValueError("No installed inference engine can load this model. Install MLX or PyTorch support.")
+            raise ValueError(
+                "No installed inference engine can load this model. Install MLX or PyTorch support."
+            )
         if backend == BACKEND_OLLAMA:
             tag = option.get("ollama_model")
             if not tag:

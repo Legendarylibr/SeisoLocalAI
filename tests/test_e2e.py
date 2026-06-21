@@ -75,7 +75,9 @@ async def test_training_job_e2e(app, auth_client, monkeypatch):
     db = get_db()
     user = await db.get_user_by_display_name("Admin")
     dataset = user_path(data_dir, user["id"], "uploads", "train.jsonl")
-    dataset.write_text('{"messages":[{"role":"user","content":"hi"},{"role":"assistant","content":"hey"}]}\n')
+    dataset.write_text(
+        '{"messages":[{"role":"user","content":"hi"},{"role":"assistant","content":"hey"}]}\n'
+    )
 
     def fake_run_training(config, on_metric=None):
         if on_metric:
@@ -167,7 +169,9 @@ async def test_inference_chat_e2e(app, auth_client, monkeypatch):
     user = await db.get_user_by_display_name("Admin")
     model_path = user_path(data_dir, user["id"], "models", "model.gguf")
     model_path.write_text("fake")
-    model = await db.add_model(user_id=user["id"], name="Local", path=str(model_path), format="gguf")
+    model = await db.add_model(
+        user_id=user["id"], name="Local", path=str(model_path), format="gguf"
+    )
 
     monkeypatch.setattr(
         "forge.orchestrators.inference.LocalInferenceRunner.chat",

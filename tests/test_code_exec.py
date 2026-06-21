@@ -28,11 +28,7 @@ def test_blocks_eval():
 
 
 def test_blocks_gi_frame_escape():
-    err = _validate_code(
-        "def gen():\n    yield 1\n"
-        "g = gen()\n"
-        "g.gi_frame.f_builtins"
-    )
+    err = _validate_code("def gen():\n    yield 1\ng = gen()\ng.gi_frame.f_builtins")
     assert err is not None
 
 

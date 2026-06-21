@@ -143,7 +143,9 @@ def build_default_registry(
     return reg
 
 
-def _write_artifact(filename: str, content: str, sandbox_root: str | None, user_id: str | None) -> str:
+def _write_artifact(
+    filename: str, content: str, sandbox_root: str | None, user_id: str | None
+) -> str:
     from pathlib import Path
 
     from forge.services.user_paths import user_dir
@@ -218,4 +220,3 @@ def tools_system_prompt(registry: ToolRegistry) -> str:
     for t in registry.tools.values():
         lines.append(f"- {t.name}: {t.description}")
     return "\n".join(lines)
-

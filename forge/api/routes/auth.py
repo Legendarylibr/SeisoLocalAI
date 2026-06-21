@@ -69,7 +69,9 @@ async def register(
 ) -> AuthResponse:
     if not settings.storage_mode_configured:
         if not body.storage_mode:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Choose persistent or ephemeral storage")
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST, "Choose persistent or ephemeral storage"
+            )
         settings.persist_storage_mode(cast(StorageMode, body.storage_mode))
         clear_dependency_caches()
     db = get_db()

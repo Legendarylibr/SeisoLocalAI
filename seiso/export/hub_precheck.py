@@ -195,7 +195,9 @@ def precheck_hub_export(
         if result.token_username and author and author.lower() == result.token_username.lower():
             result.repo_owned_by_user = True
             result.repo_available = True
-            result.warnings.append(f"Repo {result.repo_id} already exists — upload will add a new revision")
+            result.warnings.append(
+                f"Repo {result.repo_id} already exists — upload will add a new revision"
+            )
         else:
             result.repo_available = False
             result.errors.append(
@@ -222,3 +224,9 @@ def assert_hub_precheck_ok(result: HubPrecheckResult) -> None:
         return
     detail = "; ".join(result.errors) if result.errors else "Hub precheck failed"
     raise ValueError(detail)
+
+
+def hub_precheck_from_dict(data: dict[str, Any] | None) -> HubPrecheckResult | None:
+    if not data:
+        return None
+    return HubPrecheckResult(**data)

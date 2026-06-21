@@ -45,7 +45,9 @@ def bench_rms_norm(rows: int, cols: int, dtype: str) -> None:
 
     pt_ms = _bench(pytorch)
     fused_ms = _bench(fused)
-    print(f"RMSNorm [{active_backend()}] {rows}x{cols} {dtype}: pytorch {pt_ms:.3f}ms  fused {fused_ms:.3f}ms  speedup {pt_ms/fused_ms:.2f}x")
+    print(
+        f"RMSNorm [{active_backend()}] {rows}x{cols} {dtype}: pytorch {pt_ms:.3f}ms  fused {fused_ms:.3f}ms  speedup {pt_ms / fused_ms:.2f}x"
+    )
 
 
 def bench_swiglu(rows: int, cols: int, dtype: str) -> None:
@@ -65,7 +67,9 @@ def bench_swiglu(rows: int, cols: int, dtype: str) -> None:
 
     pt_ms = _bench(pytorch)
     fused_ms = _bench(fused)
-    print(f"SwiGLU  [{active_backend()}] {rows}x{cols} {dtype}: pytorch {pt_ms:.3f}ms  fused {fused_ms:.3f}ms  speedup {pt_ms/fused_ms:.2f}x")
+    print(
+        f"SwiGLU  [{active_backend()}] {rows}x{cols} {dtype}: pytorch {pt_ms:.3f}ms  fused {fused_ms:.3f}ms  speedup {pt_ms / fused_ms:.2f}x"
+    )
 
 
 def bench_cross_entropy(rows: int, vocab: int, dtype: str) -> None:
@@ -74,7 +78,9 @@ def bench_cross_entropy(rows: int, vocab: int, dtype: str) -> None:
     from seiso.kernels.dispatch import active_backend, fused_cross_entropy_loss
 
     device = "cuda"
-    logits = torch.randn(rows, vocab, device=device, dtype=getattr(torch, dtype), requires_grad=True)
+    logits = torch.randn(
+        rows, vocab, device=device, dtype=getattr(torch, dtype), requires_grad=True
+    )
     labels = torch.randint(0, vocab, (rows,), device=device)
     labels[::17] = -100
 
@@ -92,7 +98,9 @@ def bench_cross_entropy(rows: int, vocab: int, dtype: str) -> None:
 
     pt_ms = _bench(pytorch)
     fused_ms = _bench(fused)
-    print(f"CE      [{active_backend()}] {rows}x{vocab} {dtype}: pytorch {pt_ms:.3f}ms  fused {fused_ms:.3f}ms  speedup {pt_ms/fused_ms:.2f}x")
+    print(
+        f"CE      [{active_backend()}] {rows}x{vocab} {dtype}: pytorch {pt_ms:.3f}ms  fused {fused_ms:.3f}ms  speedup {pt_ms / fused_ms:.2f}x"
+    )
 
 
 def main() -> None:

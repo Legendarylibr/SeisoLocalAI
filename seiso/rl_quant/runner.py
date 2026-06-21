@@ -33,7 +33,9 @@ def run_rl_quant_job(
         if on_log:
             on_log(msg)
 
-    _log(f"RL quant run: {config.run_name} backend={config.backend} trainer={config.training_backend}")
+    _log(
+        f"RL quant run: {config.run_name} backend={config.backend} trainer={config.training_backend}"
+    )
     _log(f"Episodes: train={config.training_episodes} eval={config.evaluation_episodes}")
     _log(f"Artifacts: {config.artifacts.outputs_dir}")
 

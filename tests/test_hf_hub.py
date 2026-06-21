@@ -1,6 +1,5 @@
 """Tests for Hugging Face Hub download helpers."""
 
-
 from forge.services.hf_hub import _pick_gguf_file, _pick_gguf_files
 from seiso.models.hf_env import resolve_hf_cache_dir
 

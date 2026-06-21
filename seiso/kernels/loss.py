@@ -65,9 +65,7 @@ def fused_cross_entropy_loss(
     Falls back to PyTorch on CPU.
     """
     if not logits.is_cuda:
-        return torch.nn.functional.cross_entropy(
-            logits.float(), labels, ignore_index=ignore_index
-        )
+        return torch.nn.functional.cross_entropy(logits.float(), labels, ignore_index=ignore_index)
 
     if logits.dim() != 2:
         raise ValueError("logits must be 2D")

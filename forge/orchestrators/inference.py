@@ -21,7 +21,7 @@ from seiso.inference.runner import LocalInferenceRunner
 class InferenceOrchestrator(Orchestrator):
     kind = "inference"
 
-    def __init__(self, sandbox_root) -> None:
+    def __init__(self, sandbox_root: Path) -> None:
         super().__init__(sandbox_root)
         self._runner = LocalInferenceRunner()
         self._active_ollama_model: str | None = None
@@ -78,7 +78,9 @@ class InferenceOrchestrator(Orchestrator):
         user_id = payload.get("user_id") or (job.user_id if job else None)
         settings = get_settings()
 
-        self._emit_log(job_id, f"Messages: {len(messages)}, tools={use_tools}, provider={provider or 'local'}")
+        self._emit_log(
+            job_id, f"Messages: {len(messages)}, tools={use_tools}, provider={provider or 'local'}"
+        )
 
         def on_log(msg: str) -> None:
             self._emit_log(job_id, msg)
@@ -100,7 +102,9 @@ class InferenceOrchestrator(Orchestrator):
                     allow_code_exec=allow_code_exec and settings.allow_code_exec,
                     user_id=user_id,
                 )
-                reply, _ = await self._tool_loop(payload, messages, registry, on_log, user_id=user_id)
+                reply, _ = await self._tool_loop(
+                    payload, messages, registry, on_log, user_id=user_id
+                )
                 backend = "local+tools"
             else:
                 active = self._active_backend(payload)
@@ -209,7 +213,9 @@ class InferenceOrchestrator(Orchestrator):
             p = {**payload, "messages": msgs, "tools": False}
             return await self._local_chat(p)
 
-        return await run_agent_loop_async(generate, messages, registry, on_log=on_log, user_id=user_id)
+        return await run_agent_loop_async(
+            generate, messages, registry, on_log=on_log, user_id=user_id
+        )
 
     async def _provider_chat(
         self,

@@ -57,7 +57,11 @@ async def unload_model(model: str, base_url: str = "") -> None:
     """Ask Ollama to evict a resident model from memory."""
     endpoint = _endpoint(base_url)
     base = endpoint.base_url.rstrip("/")
-    url = f"{base}/api/generate" if not base.endswith("/v1") else f"{base.rsplit('/v1', 1)[0]}/api/generate"
+    url = (
+        f"{base}/api/generate"
+        if not base.endswith("/v1")
+        else f"{base.rsplit('/v1', 1)[0]}/api/generate"
+    )
     payload = {
         "model": model,
         "prompt": "",
@@ -128,7 +132,10 @@ async def stream_chat_completion(
         "max_tokens": max_tokens,
         "stream": True,
     }
-    async with pinned_async_client(endpoint, timeout=300.0) as client, client.stream("POST", url, json=payload) as resp:
+    async with (
+        pinned_async_client(endpoint, timeout=300.0) as client,
+        client.stream("POST", url, json=payload) as resp,
+    ):
         resp.raise_for_status()
         async for line in resp.aiter_lines():
             if not line or not line.startswith("data:"):

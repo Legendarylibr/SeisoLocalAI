@@ -22,16 +22,23 @@ class LockDigestError(SecurityError):
     """Raised when a lockfile fails digest or hash-policy verification."""
 
 
-def sha256_file(path: Path) -> str:
+def sha256_file(path: Path, *, max_bytes: int | None = None) -> str:
     digest = hashlib.sha256()
+    size = 0
     with path.open("rb") as fh:
         for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+            size += len(chunk)
+            if max_bytes is not None and size > max_bytes:
+                raise ValueError(f"File exceeds hash limit: {path}")
             digest.update(chunk)
     return digest.hexdigest()
 
 
 def load_digest_manifest(path: Path) -> dict[str, Any]:
-    data = json.loads(path.read_text(encoding="utf-8"))
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict):
+        raise LockDigestError("Digest manifest must be a JSON object")
+    data: dict[str, Any] = raw
     if data.get("algorithm") != "sha256":
         raise LockDigestError(f"Unsupported digest algorithm: {data.get('algorithm')!r}")
     artifacts = data.get("artifacts")
@@ -57,7 +64,9 @@ def verify_lock_digests(
     for rel_path, expected_digest in expected_by_path.items():
         if not isinstance(rel_path, str) or not isinstance(expected_digest, str):
             raise LockDigestError("Digest manifest entries must be strings")
-        if len(expected_digest) != 64 or any(ch not in "0123456789abcdef" for ch in expected_digest):
+        if len(expected_digest) != 64 or any(
+            ch not in "0123456789abcdef" for ch in expected_digest
+        ):
             raise LockDigestError(f"Invalid SHA-256 digest for {rel_path!r}")
 
         lock_path = (root / rel_path).resolve()

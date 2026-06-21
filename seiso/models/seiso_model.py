@@ -150,5 +150,9 @@ class SeisoModel:
         """Export GGUF quant(s) and Ollama Modelfile via Seiso's export pipeline."""
         from seiso.export.gguf import export_gguf
 
-        quants = [quantization_method] if isinstance(quantization_method, str) else list(quantization_method)
+        quants = (
+            [quantization_method]
+            if isinstance(quantization_method, str)
+            else list(quantization_method)
+        )
         return export_gguf(self.model, self.tokenizer, Path(save_directory), quants)

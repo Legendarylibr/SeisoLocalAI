@@ -254,13 +254,17 @@ def build_distill_rl_config(
             merged.get("align_distill_with_prompts", preset.get("align_distill_with_prompts", True))
         ),
         prompt_library_path=prompt_path,
-        rollout_max_prompts=int(merged.get("rollout_max_prompts", preset.get("rollout_max_prompts", 4))),
+        rollout_max_prompts=int(
+            merged.get("rollout_max_prompts", preset.get("rollout_max_prompts", 4))
+        ),
         rollout_max_new_tokens=int(
             merged.get("rollout_max_new_tokens", preset.get("rollout_max_new_tokens", 32))
         ),
         rollout_temperature=float(merged.get("rollout_temperature", 0.7)),
         use_chat_template=use_chat_template,
-        train_val_fraction=float(merged.get("train_val_fraction", preset.get("train_val_fraction", 0.85))),
+        train_val_fraction=float(
+            merged.get("train_val_fraction", preset.get("train_val_fraction", 0.85))
+        ),
         dpo_beta=float(merged.get("dpo_beta", 0.1)),
         dpo_epochs=int(merged.get("dpo_epochs", preset.get("dpo_epochs", 1))),
         dpo_learning_rate=float(merged.get("dpo_learning_rate", 5e-7)),

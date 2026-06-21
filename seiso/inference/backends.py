@@ -210,7 +210,9 @@ def match_ollama_name(
     return None
 
 
-def available_backends(*, model_path: str, model_format: str | None, ollama_names: set[str]) -> list[BackendName]:
+def available_backends(
+    *, model_path: str, model_format: str | None, ollama_names: set[str]
+) -> list[BackendName]:
     """Backends that can serve this inventory model."""
     if (model_format or "").lower() == "gguf" and not gguf_is_supported_by_llamacpp(model_path):
         return []

@@ -31,8 +31,10 @@ async def register_model_path(
         return None
 
     fmt = model_format or (resolved.suffix.lstrip(".") if resolved.is_file() else "safetensors")
-    size = resolved.stat().st_size if resolved.is_file() else sum(
-        f.stat().st_size for f in resolved.rglob("*") if f.is_file()
+    size = (
+        resolved.stat().st_size
+        if resolved.is_file()
+        else sum(f.stat().st_size for f in resolved.rglob("*") if f.is_file())
     )
 
     existing = await db.list_models(user_id)

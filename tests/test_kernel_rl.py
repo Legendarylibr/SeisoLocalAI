@@ -104,7 +104,9 @@ def test_kernel_integration_merge():
         "kernel_profile_name": "parallax",
         "kernel_benchmark_source": "analytic",
     }
-    merged = merge_kernel_metrics(metrics, kernel, config=type("C", (), {"kernel_rl_enabled": True})())
+    merged = merge_kernel_metrics(
+        metrics, kernel, config=type("C", (), {"kernel_rl_enabled": True})()
+    )
     assert merged["latency_ms"] == pytest.approx(160.0)
     assert merged["throughput_tps"] == pytest.approx(100.0)
     assert merged["kernel_profile_name"] == "parallax"

@@ -37,7 +37,9 @@ def test_resolve_gguf_converter_llama_cpp_dir(monkeypatch, tmp_path: Path):
     script = tmp_path / "convert_hf_to_gguf.py"
     script.write_text("# mock converter\n")
     monkeypatch.setenv("LLAMA_CPP_DIR", str(tmp_path))
-    monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/python3" if name == "python3" else None)
+    monkeypatch.setattr(
+        "shutil.which", lambda name: "/usr/bin/python3" if name == "python3" else None
+    )
     cmds = resolve_gguf_converter()
     assert cmds
     assert str(script) in cmds[0][1]

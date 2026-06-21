@@ -25,9 +25,9 @@ from seiso.memory.protection import (
 from seiso.models.seiso_model import SeisoModel
 from seiso.research.provenance import (
     apply_determinism,
-    sha256_file,
     write_json,
 )
+from seiso.security.deps import sha256_file
 from seiso.training.config import QuantMode, TrainConfig, TrainMethod
 from seiso.training.datasets import (
     format_dataset_text,
@@ -41,7 +41,9 @@ logger = logging.getLogger(__name__)
 
 
 class SeisoTrainer:
-    def __init__(self, config: TrainConfig, *, on_metric: Callable[[dict[str, Any]], None] | None = None) -> None:
+    def __init__(
+        self, config: TrainConfig, *, on_metric: Callable[[dict[str, Any]], None] | None = None
+    ) -> None:
         self.config = config
         self.config.output_dir.mkdir(parents=True, exist_ok=True)
         self._kernel_meta: dict = {}
@@ -179,7 +181,9 @@ class SeisoTrainer:
         logger.info("Training complete: %s", out)
         return out
 
-    def _train_with_oom_recovery(self, trainer, *, resume_from_checkpoint: str | None = None) -> None:
+    def _train_with_oom_recovery(
+        self, trainer, *, resume_from_checkpoint: str | None = None
+    ) -> None:
         attempts = 0
         while True:
             try:
@@ -263,7 +267,11 @@ class SeisoTrainer:
             tokenizer: Any
 
             def __call__(self, features):
-                label_rows = [f.pop("labels") for f in features] if features and "labels" in features[0] else None
+                label_rows = (
+                    [f.pop("labels") for f in features]
+                    if features and "labels" in features[0]
+                    else None
+                )
                 batch = self.tokenizer.pad(features, padding=True, return_tensors="pt")
                 if label_rows:
                     max_len = batch["input_ids"].shape[1]

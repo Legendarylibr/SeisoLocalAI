@@ -47,8 +47,24 @@ def test_enrich_catalog_ranks_priority_first():
         "arch": "x86_64",
     }
     models = [
-        {"repo_id": "big", "name": "Big", "params": "70B", "quant": "Q4_K_M", "tags": [], "priority": 90, "task": "chat"},
-        {"repo_id": "small", "name": "Small", "params": "1B", "quant": "Q4_K_M", "tags": [], "priority": 50, "task": "chat"},
+        {
+            "repo_id": "big",
+            "name": "Big",
+            "params": "70B",
+            "quant": "Q4_K_M",
+            "tags": [],
+            "priority": 90,
+            "task": "chat",
+        },
+        {
+            "repo_id": "small",
+            "name": "Small",
+            "params": "1B",
+            "quant": "Q4_K_M",
+            "tags": [],
+            "priority": 50,
+            "task": "chat",
+        },
     ]
     ranked = enrich_catalog_models(models, profile, fetch_sizes=False)
     assert ranked[0]["params"] == "70B"
@@ -87,7 +103,11 @@ def test_hardware_profile_includes_backend_labels():
 
 
 def test_training_defaults_conservative_on_edge():
-    profile = {"backend": "cuda", "gpus": [{"vram_total_mb": 6000, "vram_used_mb": 1000}], "ram_gb": 16}
+    profile = {
+        "backend": "cuda",
+        "gpus": [{"vram_total_mb": 6000, "vram_used_mb": 1000}],
+        "ram_gb": 16,
+    }
     defaults = training_defaults(profile)
     assert defaults["batch_size"] >= 1
     assert defaults["gradient_accumulation_steps"] >= 8
@@ -122,7 +142,11 @@ def test_low_memory_apple_marks_large_models_tight(monkeypatch):
 
 
 def test_assess_hardware_fit_blocks_when_est_exceeds_headroom(monkeypatch):
-    profile = {"backend": "cuda", "gpus": [{"vram_total_mb": 8192, "vram_used_mb": 0}], "ram_gb": 16}
+    profile = {
+        "backend": "cuda",
+        "gpus": [{"vram_total_mb": 8192, "vram_used_mb": 0}],
+        "ram_gb": 16,
+    }
     monkeypatch.setattr("seiso.hardware.fit.vram_headroom_mb", lambda _p: 4096)
     fit = assess_catalog_fit(
         {"params": "13B", "quant": "Q4_K_M", "tags": [], "repo_id": "x", "task": "chat"},
@@ -134,7 +158,11 @@ def test_assess_hardware_fit_blocks_when_est_exceeds_headroom(monkeypatch):
 
 
 def test_assess_hardware_fit_allows_when_est_within_headroom(monkeypatch):
-    profile = {"backend": "cuda", "gpus": [{"vram_total_mb": 24576, "vram_used_mb": 0}], "ram_gb": 32}
+    profile = {
+        "backend": "cuda",
+        "gpus": [{"vram_total_mb": 24576, "vram_used_mb": 0}],
+        "ram_gb": 32,
+    }
     monkeypatch.setattr("seiso.hardware.fit.vram_headroom_mb", lambda _p: 20480)
     fit = assess_catalog_fit(
         {"params": "7B", "quant": "Q4_K_M", "tags": [], "repo_id": "x", "task": "chat"},

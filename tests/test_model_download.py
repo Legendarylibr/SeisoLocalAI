@@ -151,7 +151,9 @@ async def test_perform_gguf_download_registers_llamacpp_inventory(monkeypatch, t
     cached.write_bytes(b"gguf-bytes")
 
     monkeypatch.setattr(model_download, "assert_hub_ready_for_download", lambda **_kwargs: None)
-    monkeypatch.setattr(model_download, "resolve_hf_token_for_download", lambda **_kwargs: (None, "none"))
+    monkeypatch.setattr(
+        model_download, "resolve_hf_token_for_download", lambda **_kwargs: (None, "none")
+    )
     monkeypatch.setattr(model_download, "get_by_repo", lambda _repo: None)
     monkeypatch.setattr(
         model_download,
@@ -250,12 +252,7 @@ def test_link_inventory_preserves_hf_snapshot_symlink(tmp_path):
     blob.parent.mkdir(parents=True)
     blob.write_bytes(b"gguf-bytes")
     snapshot_file = (
-        tmp_path
-        / "hf_cache"
-        / "models--org--Model-GGUF"
-        / "snapshots"
-        / "rev"
-        / "model-q4.gguf"
+        tmp_path / "hf_cache" / "models--org--Model-GGUF" / "snapshots" / "rev" / "model-q4.gguf"
     )
     snapshot_file.parent.mkdir(parents=True)
     snapshot_file.symlink_to("../../blobs/abc")
@@ -457,7 +454,9 @@ def test_cached_download_rejects_gguf_when_safetensors_requested(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_perform_download_auto_skips_gguf_cache_when_safetensors_preferred(monkeypatch, tmp_path):
+async def test_perform_download_auto_skips_gguf_cache_when_safetensors_preferred(
+    monkeypatch, tmp_path
+):
     monkeypatch.setattr(
         model_download,
         "check_inference_runtime",

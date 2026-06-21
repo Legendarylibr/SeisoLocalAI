@@ -26,7 +26,11 @@ async def authed_client(app):
 async def test_provider_crud(authed_client):
     create = await authed_client.post(
         "/api/providers",
-        json={"name": "Local vLLM", "provider_type": "vllm", "config": {"base_url": "http://127.0.0.1:8000"}},
+        json={
+            "name": "Local vLLM",
+            "provider_type": "vllm",
+            "config": {"base_url": "http://127.0.0.1:8000"},
+        },
     )
     assert create.status_code == 201
     pid = create.json()["id"]

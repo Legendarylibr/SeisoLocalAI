@@ -53,10 +53,17 @@ if _SFTTrainer is not None:
         def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
             if not self._seiso_use_fused_ce:
                 return self._seiso_super_compute_loss(
-                    model, inputs, return_outputs=return_outputs, num_items_in_batch=num_items_in_batch
+                    model,
+                    inputs,
+                    return_outputs=return_outputs,
+                    num_items_in_batch=num_items_in_batch,
                 )
             return _fused_compute_loss(
-                self, model, inputs, return_outputs=return_outputs, num_items_in_batch=num_items_in_batch
+                self,
+                model,
+                inputs,
+                return_outputs=return_outputs,
+                num_items_in_batch=num_items_in_batch,
             )
 
 else:
@@ -90,7 +97,14 @@ def build_sft_trainer(
     """Create TRL SFTTrainer when available; falls back to HF Trainer."""
     if _SFTTrainer is None or SFTConfig is None:
         return _fallback_trainer(
-            model, tokenizer, train_ds, eval_ds, training_args_dict, data_collator, use_fused_ce, callbacks
+            model,
+            tokenizer,
+            train_ds,
+            eval_ds,
+            training_args_dict,
+            data_collator,
+            use_fused_ce,
+            callbacks,
         )
 
     cfg_kwargs = dict(training_args_dict)
@@ -134,7 +148,9 @@ def build_sft_trainer(
         return trainer_cls(**kwargs)
 
 
-def _fallback_trainer(model, tokenizer, train_ds, eval_ds, training_args_dict, data_collator, use_fused_ce, callbacks):
+def _fallback_trainer(
+    model, tokenizer, train_ds, eval_ds, training_args_dict, data_collator, use_fused_ce, callbacks
+):
     from transformers import Trainer, TrainingArguments
 
     args = TrainingArguments(**training_args_dict)
@@ -154,14 +170,20 @@ def _fallback_trainer(model, tokenizer, train_ds, eval_ds, training_args_dict, d
             labels = inputs.get("labels")
             if labels is None:
                 return super().compute_loss(
-                    model, inputs, return_outputs=return_outputs, num_items_in_batch=num_items_in_batch
+                    model,
+                    inputs,
+                    return_outputs=return_outputs,
+                    num_items_in_batch=num_items_in_batch,
                 )
             model_inputs = {k: v for k, v in inputs.items() if k != "labels"}
             outputs = model(**model_inputs)
             logits = outputs.logits if hasattr(outputs, "logits") else outputs[0]
             if not logits.is_cuda:
                 return super().compute_loss(
-                    model, inputs, return_outputs=return_outputs, num_items_in_batch=num_items_in_batch
+                    model,
+                    inputs,
+                    return_outputs=return_outputs,
+                    num_items_in_batch=num_items_in_batch,
                 )
             from seiso.kernels.loss import fused_cross_entropy_loss, shift_logits_and_labels
 

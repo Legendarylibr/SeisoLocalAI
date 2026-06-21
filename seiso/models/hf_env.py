@@ -57,7 +57,9 @@ def hf_transfer_stack() -> dict[str, Any]:
         "on",
     }
     num_threads = os.environ.get("HF_HUB_NUM_THREADS", default_hub_num_threads()).strip()
-    download_timeout = os.environ.get("HF_HUB_DOWNLOAD_TIMEOUT", default_hub_download_timeout()).strip()
+    download_timeout = os.environ.get(
+        "HF_HUB_DOWNLOAD_TIMEOUT", default_hub_download_timeout()
+    ).strip()
     hf_home = os.environ.get("HF_HOME", "").strip()
     xet_cache = os.environ.get("HF_XET_CACHE", "").strip()
     hints: list[str] = []

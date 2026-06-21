@@ -32,9 +32,6 @@ from seiso.hardware.profile import enrich_profile_base
 from seiso.inference.backends import BACKEND_LABELS
 from seiso.memory.estimates import estimate_chat_vram_gb, estimate_gguf_download_bytes
 
-# Backward-compatible alias — prefer BACKEND_LABELS from seiso.inference.backends.
-INFERENCE_BACKEND_LABELS = BACKEND_LABELS
-
 _RECOMMENDED_REPO_TTL_SEC = 300.0
 _recommended_repo_cache: dict[tuple, tuple[float, str | None]] = {}
 
@@ -75,11 +72,15 @@ def enrich_catalog_models(
 
         def fetch_info(repo_id: str) -> tuple[str, dict[str, Any] | None, str | None]:
             try:
-                return repo_id, resolve_gguf_artifact(
+                return (
                     repo_id,
-                    entry=get_by_repo(repo_id),
-                    token=token,
-                ), None
+                    resolve_gguf_artifact(
+                        repo_id,
+                        entry=get_by_repo(repo_id),
+                        token=token,
+                    ),
+                    None,
+                )
             except Exception as exc:
                 return repo_id, None, str(exc)
 
@@ -124,7 +125,9 @@ def enrich_catalog_models(
             row["download_bytes_estimated"] = True
             row["download_mirror_verified"] = False
             row["download_error"] = download_errors[m["repo_id"]]
-            row["download_available"] = m.get("task") != "embedding" and "trusted GGUF" not in download_errors[m["repo_id"]]
+            row["download_available"] = (
+                m.get("task") != "embedding" and "trusted GGUF" not in download_errors[m["repo_id"]]
+            )
         elif m.get("task") != "embedding":
             download_bytes = estimate_gguf_download_bytes(
                 m["params"],
@@ -256,7 +259,6 @@ __all__ = [
     "TIER_LABELS",
     "GuideStep",
     "HardwareTier",
-    "INFERENCE_BACKEND_LABELS",
     "assess_catalog_fit",
     "assess_hardware_fit",
     "assess_inference_option_fit",

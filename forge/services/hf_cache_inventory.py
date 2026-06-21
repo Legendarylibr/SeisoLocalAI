@@ -10,12 +10,12 @@ from pathlib import Path
 from typing import Any
 
 from forge.db.store import Database
+from forge.services.artifact_integrity import gguf_files_complete_with_hub
 from forge.services.hf_hub import (
     _inventory_name_for_files,
     _pick_gguf_files,
     dir_size,
     estimate_snapshot_download_bytes,
-    get_gguf_file_size_bytes,
     link_inventory,
 )
 from forge.services.user_paths import user_dir
@@ -43,27 +43,6 @@ def _display_name_for_shards(filename: str) -> str:
     if marker in stem:
         return stem.split(marker, 1)[0]
     return stem
-
-
-def _gguf_files_are_complete(
-    *,
-    repo_id: str,
-    filenames: list[str],
-    paths: list[Path],
-    entry: CatalogEntry | None,
-) -> bool:
-    """Avoid registering cache files that are still being written by HF downloads."""
-    if not filenames or len(filenames) != len(paths):
-        return False
-    if not all(path.is_file() and path.stat().st_size > 0 for path in paths):
-        return False
-    try:
-        expected = sum(get_gguf_file_size_bytes(repo_id, filename) for filename in filenames)
-    except Exception:
-        # If metadata is unavailable, do not block local cache recovery forever.
-        return entry is None
-    actual = sum(path.stat().st_size for path in paths)
-    return expected <= 0 or actual >= expected
 
 
 def _cache_tree_mtime(hf_cache_dir: Path) -> float:
@@ -132,7 +111,12 @@ def _gguf_record_from_snapshot(
         return None
 
     paths = [snapshot_dir / filename for filename in filenames]
-    if not _gguf_files_are_complete(repo_id=repo_id, filenames=filenames, paths=paths, entry=entry):
+    if not gguf_files_complete_with_hub(
+        repo_id=repo_id,
+        filenames=filenames,
+        paths=paths,
+        entry=entry,
+    ):
         return None
     if not gguf_is_supported_by_llamacpp(str(paths[0])):
         return None

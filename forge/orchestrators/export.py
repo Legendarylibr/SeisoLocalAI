@@ -9,6 +9,7 @@ from typing import Any
 from forge.orchestrators.base import Orchestrator
 from forge.services.ollama_export import build_ollama_create_commands
 from forge.services.user_paths import assert_user_path
+from seiso.export.hub_precheck import hub_precheck_from_dict
 from seiso.export.model_card import HubModelMetadata
 from seiso.export.pipeline import prepare_export, run_export_plan
 from seiso.security import SecurityError
@@ -28,7 +29,9 @@ class ExportOrchestrator(Orchestrator):
 
         hub_meta_raw = payload.get("hub_metadata")
         hub_metadata = HubModelMetadata(**hub_meta_raw) if hub_meta_raw else None
-        output_dir = Path(payload.get("output_dir", self.sandbox_root / "exports" / user_id / job_id))
+        output_dir = Path(
+            payload.get("output_dir", self.sandbox_root / "exports" / user_id / job_id)
+        )
 
         self._emit_log(job_id, f"Exporting checkpoint: {checkpoint.name}")
 
@@ -47,6 +50,7 @@ class ExportOrchestrator(Orchestrator):
             hub_token=payload.get("hub_token"),
             hub_metadata=hub_metadata,
             on_log=on_log,
+            hub_precheck=hub_precheck_from_dict(payload.get("hub_precheck")),
         )
 
         if plan.precheck and not plan.precheck.ok:

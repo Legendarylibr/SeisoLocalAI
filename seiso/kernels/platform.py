@@ -2,29 +2,17 @@
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 from functools import lru_cache
 
 from seiso.compat import StrEnum
+from seiso.platform import detect_wsl2
 
 
 class GpuVendor(StrEnum):
     NVIDIA = "nvidia"
     AMD = "amd"
     CPU = "cpu"
-
-
-def detect_wsl2() -> bool:
-    """True when running inside WSL2 (CUDA path uses same native kernels as Linux)."""
-    if os.environ.get("WSL_INTEROP") or os.environ.get("WSL_DISTRO_NAME"):
-        return True
-    try:
-        with open("/proc/version", encoding="utf-8") as f:
-            version = f.read().lower()
-    except OSError:
-        return False
-    return "microsoft" in version or "wsl2" in version
 
 
 def _cuda_compute_capability() -> tuple[int, int] | None:
@@ -108,11 +96,3 @@ def detect_gpu() -> GpuPlatform:
         is_wsl2=wsl2,
         cuda_compute_capability=cc,
     )
-
-
-def is_nvidia() -> bool:
-    return detect_gpu().vendor == GpuVendor.NVIDIA
-
-
-def is_amd() -> bool:
-    return detect_gpu().vendor == GpuVendor.AMD

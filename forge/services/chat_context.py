@@ -12,7 +12,12 @@ from forge.services.chat_messages import (
 )
 from forge.services.model_prompts import resolve_model_key
 from seiso.inference.tuning import estimate_llama_n_ctx
-from seiso.memory.protection import _MAX_LLAMA_CTX, _MIN_LLAMA_CTX, _estimate_prompt_tokens, clamp_llama_n_ctx
+from seiso.memory.protection import (
+    _MAX_LLAMA_CTX,
+    _MIN_LLAMA_CTX,
+    _estimate_prompt_tokens,
+    clamp_llama_n_ctx,
+)
 
 
 def _history_from_records(records: list[dict[str, Any]]) -> list[dict[str, str]]:

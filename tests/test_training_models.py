@@ -69,7 +69,13 @@ def test_list_trainable_models_skips_gguf(tmp_path: Path):
     gguf.write_text("fake")
 
     inventory = [
-        {"id": "a", "name": "train", "path": str(st_dir), "source": "hf:org/model", "format": "safetensors"},
+        {
+            "id": "a",
+            "name": "train",
+            "path": str(st_dir),
+            "source": "hf:org/model",
+            "format": "safetensors",
+        },
         {"id": "b", "name": "chat", "path": str(gguf), "source": "hf:org/model", "format": "gguf"},
     ]
     models = list_trainable_models(inventory, data_dir=tmp_path, user_id=user_id)

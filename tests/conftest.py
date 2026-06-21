@@ -70,7 +70,9 @@ async def auth_client(app, tmp_path):
         yield client, token, headers, tmp_path
 
 
-async def make_second_user(email: str = "b@local.dev", password: str = "securepass2") -> tuple[str, str]:
+async def make_second_user(
+    email: str = "b@local.dev", password: str = "securepass2"
+) -> tuple[str, str]:
     """Insert a second user directly (onboarding blocks second registration)."""
     from forge.config import get_settings
 

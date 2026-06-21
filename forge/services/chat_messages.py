@@ -238,7 +238,9 @@ async def build_trusted_messages(
         model_changed = bool(
             track_model and thread and (thread.get("model_id") or None) != track_model
         )
-        need_persist = not history or history[-1]["role"] != "user" or history[-1]["content"] != content
+        need_persist = (
+            not history or history[-1]["role"] != "user" or history[-1]["content"] != content
+        )
         if need_persist:
             if persist_user:
                 await db.add_message(

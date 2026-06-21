@@ -78,7 +78,14 @@ def test_chat_labels_mask_prompt():
             return _Rows(out)
 
     ds = _Rows(
-        [{"messages": [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "hello"}]}]
+        [
+            {
+                "messages": [
+                    {"role": "user", "content": "hi"},
+                    {"role": "assistant", "content": "hello"},
+                ]
+            }
+        ]
     )
     tok = _FakeTokenizer()
     tokenized, fmt = prepare_tokenized_dataset(

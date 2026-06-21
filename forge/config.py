@@ -24,8 +24,7 @@ StorageMode = Literal["persistent", "ephemeral"]
 
 # Local Forge + Vite dev — 127.0.0.1 and localhost are different browser origins.
 DEFAULT_CORS_ORIGINS = (
-    "http://127.0.0.1:8765,http://localhost:8765,"
-    "http://127.0.0.1:5173,http://localhost:5173"
+    "http://127.0.0.1:8765,http://localhost:8765,http://127.0.0.1:5173,http://localhost:5173"
 )
 
 
@@ -152,7 +151,21 @@ class ForgeSettings(BaseSettings):
 
     def ensure_dirs(self) -> None:
         """Create data subdirectories once at startup."""
-        for name in ("models", "checkpoints", "exports", "knowledge", "sandbox", "artifacts", "recipes", "uploads", "rl_quant", "compress", "distill_rl", "hf_cache", "hf_tokens"):
+        for name in (
+            "models",
+            "checkpoints",
+            "exports",
+            "knowledge",
+            "sandbox",
+            "artifacts",
+            "recipes",
+            "uploads",
+            "rl_quant",
+            "compress",
+            "distill_rl",
+            "hf_cache",
+            "hf_tokens",
+        ):
             (self.data_dir / name).mkdir(parents=True, exist_ok=True)
 
     @property
