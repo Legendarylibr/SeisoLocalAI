@@ -422,7 +422,7 @@ def rl_quant_profiles() -> None:
 
 compress_app = typer.Typer(
     name="compress",
-    help="Code Llama compression pipeline (distill, prune, finetune, export).",
+    help="LLM compression pipeline (distill, prune, finetune, export).",
     no_args_is_help=True,
 )
 app.add_typer(compress_app, name="compress")

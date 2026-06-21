@@ -1,4 +1,4 @@
-"""Code Llama compression job orchestrator."""
+"""LLM compression job orchestrator."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ CompressOrchestrator = vendor_orchestrator(
     kind="compress",
     user_id_error="user_id required for compression job",
     path_keys=("model_dir",),
-    start_message="Starting Code Llama compression pipeline",
+    start_message="Starting LLM compression pipeline",
     runner=run_compress_job,
     result_log=lambda result: f"Run directory: {result.get('run_dir')}",
 )

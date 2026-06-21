@@ -96,7 +96,7 @@ For production behind a reverse proxy, terminate TLS upstream and run **one** Fo
 | `/chat` | Chat | Local inference (GGUF, MLX, PyTorch, Ollama); **Free memory** unloads models from RAM/VRAM without changing selection |
 | `/train` | Training Studio | LoRA / QLoRA fine-tuning with live SSE logs |
 | `/export` | Export | Merge LoRA, GGUF, Hub publish from checkpoints |
-| `/compress` | Compress | Code Llama distillation / prune / quant pipeline |
+| `/compress` | Compress | LLM distillation / prune (Llama-family) / quant pipeline |
 | `/distill-rl` | Distill-RL | Teacher → student distillation + DPO alignment |
 | `/rl-quant` | RL Quant | Adaptive GGUF quantization policy training |
 | `/recipes` | Recipe Studio | Visual graph editor for data/recipe jobs |

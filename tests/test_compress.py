@@ -1,4 +1,4 @@
-"""Code Llama compression integration tests."""
+"""LLM compression integration tests."""
 
 from __future__ import annotations
 

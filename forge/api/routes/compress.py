@@ -1,4 +1,4 @@
-"""Code Llama compression pipeline job routes."""
+"""LLM compression pipeline job routes."""
 
 from __future__ import annotations
 

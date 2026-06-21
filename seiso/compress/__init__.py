@@ -1,4 +1,4 @@
-"""Code Llama compression — distillation, pruning, quantization pipeline."""
+"""LLM compression — distillation, pruning, quantization pipeline."""
 
 from seiso.compress.bootstrap import (
     ensure_codellama_compress_importable,

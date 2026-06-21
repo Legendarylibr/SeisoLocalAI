@@ -215,7 +215,7 @@ seiso forge
 Optional compression pipelines (install on top of the base stack, from an activated venv):
 
 ```bash
-pip install -e ".[compress-quant,compress-eval]"       # Code Llama GPTQ/AWQ (Linux NVIDIA)
+pip install -e ".[compress-quant,compress-eval]"       # LLM compression GPTQ/AWQ (Linux NVIDIA)
 ```
 
 ### Diagnose problems
@@ -255,9 +255,9 @@ After `seiso forge` (or `start`), browse to **http://127.0.0.1:8765**:
 | Chat | `/chat` | Local inference (GGUF, MLX, PyTorch, Ollama) |
 | Training Studio | `/train` | LoRA / QLoRA fine-tune with live SSE logs |
 | Export | `/export` | Merge LoRA, GGUF quant, Hugging Face publish |
-| Compress | `/compress` | Code Llama distill → prune → finetune → quant |
-| Distill-RL | `/distill-rl` | Teacher → student distillation + DPO alignment |
-| RL Quant | `/rl-quant` | Adaptive GGUF quantization via RL |
+| Compress | `/compress` | LLM distill → prune (Llama-family) → finetune → quant |
+| Distill-RL | `/distill-rl` | Teacher → student distillation + DPO (auto-sweep) |
+| RL Quant | `/rl-quant` | Adaptive GGUF quantization via RL (auto-sweep) |
 | Recipe Studio | `/recipes` | Visual `@xyflow/react` graph editor |
 | Integrations | `/integrations` | Route to OpenAI, Anthropic, Ollama, vLLM |
 | Knowledge | `/knowledge` | RAG corpus ingest and retrieval |
@@ -278,7 +278,7 @@ Forge details: **[docs/forge.md](docs/forge.md)**
 | `seiso train` | Train from YAML config |
 | `seiso chat` | Terminal chat with local models |
 | `seiso export` | Export merged / GGUF / LoRA + Hub push |
-| `seiso compress run` | Code Llama compression pipeline |
+| `seiso compress run` | LLM compression pipeline |
 | `seiso compress manifest-verify` | Verify hash-chained run manifest |
 | `seiso compress speculative` | Speculative decoding (draft + target) |
 | `seiso distill-rl run` | Teacher distill → preference rollouts → DPO |
@@ -384,9 +384,9 @@ Training stack: **TRL `SFTTrainer`** + **PEFT** (LoRA/QLoRA) + optional **fused 
 
 Three integrated pipelines ([compression.md](docs/compression.md)):
 
-1. **Code Llama** — distill → MLP prune → recovery finetune → GPTQ/AWQ → speculative decoding
-2. **Distill-RL** — teacher KL distillation → preference rollouts → DPO fine-tuning (`seiso distill-rl run`)
-3. **RL quantization** — train a policy for adaptive GGUF quant levels (`seiso rl-quant run`, optional `--kernel-rl`)
+1. **LLM compression** — distill → MLP prune (Llama-family) → recovery finetune → GPTQ/AWQ → speculative decoding. Any HF causal LM; override teacher/student via CLI or Forge.
+2. **Distill-RL** — teacher KL distillation → preference rollouts → DPO fine-tuning with auto hyperparameter sweep (`seiso distill-rl run`)
+3. **RL quantization** — train a policy for adaptive GGUF quant levels with auto sweep (`seiso rl-quant run`, optional `--kernel-rl`)
 
 ---
 

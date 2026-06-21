@@ -156,8 +156,11 @@ seiso train --config configs/example_lora.yaml
 # RL quant (CLI → $SEISO_DATA_DIR/rl_quant/cli/<job_id>/)
 seiso rl-quant run --preset minimal --kernel-rl
 
-# Distill-RL (CLI → $SEISO_DATA_DIR/distill_rl/cli/<job_id>/)
+# Distill-RL (CLI → $SEISO_DATA_DIR/distill_rl/cli/<job_id>/; smoke preset uses gpt2)
 seiso distill-rl run --preset smoke
+
+# LLM compression (CLI → $SEISO_DATA_DIR/compress/local/cli/runs/<run_id>/)
+seiso compress run --preset smoke
 
 # Diagnose install
 seiso doctor

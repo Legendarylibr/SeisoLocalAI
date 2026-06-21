@@ -95,7 +95,7 @@ export function CompressPage() {
   return (
     <StagePipelineShell
       title="Model Compression"
-      subtitle="Code Llama compression pipeline: distillation, MLP pruning, recovery fine-tune, evaluation, and export bundles (vLLM/Docker/GGUF scripts). Hash-chained manifests for reproducibility."
+      subtitle="LLM compression pipeline: distillation, MLP pruning (Llama-family), recovery fine-tune, evaluation, and export bundles (vLLM/Docker/GGUF scripts). Works with any HuggingFace causal LM; hash-chained manifests for reproducibility."
       cardIcon="⚙"
       cardDesc="Presets, stages, models, and training parameters"
       preset={preset}
