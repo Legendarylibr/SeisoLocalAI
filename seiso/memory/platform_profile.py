@@ -87,7 +87,11 @@ def apply_platform_memory_profile(*, profile: dict[str, Any] | None = None) -> d
                 logging.getLogger(__name__).warning(
                     "SEISO_DATA_DIR on /mnt/ (Windows filesystem) — move to ~/ for better mmap performance"
                 )
-        if caps.get("train_platform") == "cpu" or not caps.get("gpu_count"):
+        if caps.get("nvidia_hardware") or (
+            caps.get("gpu_count", 0) > 0 and caps.get("vendor") == "nvidia"
+        ):
+            os.environ.setdefault("SEISO_LLAMA_GPU_LAYERS", "-1")
+        elif caps.get("train_platform") == "cpu" or not caps.get("gpu_count"):
             os.environ.setdefault("SEISO_LLAMA_GPU_LAYERS", "0")
 
     if low:

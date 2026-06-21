@@ -32,10 +32,19 @@ def _cuda_available() -> bool:
         return False
 
 
+def _nvidia_hardware_visible() -> bool:
+    try:
+        from seiso.security.nvidia_boundary import nvidia_smi_visible
+
+        return nvidia_smi_visible()
+    except ImportError:
+        return False
+
+
 def _default_llama_gpu_layers() -> int:
     if platform.system() == "Darwin" and platform.machine() in {"arm64", "aarch64"}:
         return -1
-    if _cuda_available():
+    if _cuda_available() or _nvidia_hardware_visible():
         return -1
     return 0
 

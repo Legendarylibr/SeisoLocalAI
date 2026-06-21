@@ -140,6 +140,11 @@ def _build_local_option(
         "size_bytes": row.get("size_bytes", 0),
         "metadata": metadata,
     }
+    if not backends and (row.get("format") or "").lower() == "gguf":
+        runtime = check_inference_runtime()
+        opt["install_hints"] = [
+            hint for hint in runtime.install_hints if "llama" in hint.lower()
+        ] or ['pip install -e ".[llamacpp]"  # GGUF chat via llama.cpp']
     if profile:
         opt.update(assess_inference_option_fit(opt, profile))
     return opt

@@ -193,3 +193,16 @@ def test_llama_load_kwargs_cuda_defaults(monkeypatch):
     assert kwargs["flash_attn"] is True
     assert kwargs["offload_kqv"] is True
     assert kwargs["op_offload"] is True
+
+
+def test_llama_load_kwargs_nvidia_smi_without_cuda_torch(monkeypatch):
+    for key in list(os.environ):
+        if key.startswith("SEISO_LLAMA_"):
+            monkeypatch.delenv(key, raising=False)
+    monkeypatch.setattr(platform, "system", lambda: "Linux")
+    monkeypatch.setattr("seiso.inference.model_pool._cuda_available", lambda: False)
+    monkeypatch.setattr("seiso.inference.model_pool._nvidia_hardware_visible", lambda: True)
+    monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 16384)
+
+    kwargs = llama_load_kwargs(4096)
+    assert kwargs["n_gpu_layers"] == -1
