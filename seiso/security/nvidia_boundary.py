@@ -7,11 +7,14 @@ before GPU training unless an approved isolation tier is active.
 
 from __future__ import annotations
 
+import csv
+import io
 import os
 import platform
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from seiso.platform import detect_wsl2
@@ -40,6 +43,9 @@ _NVIDIA_SMI_PATHS = (
 )
 
 _BOUNDARY_DOC = "docs/platforms/linux-nvidia.md"
+_QUERY_TTL_S = 30.0
+_query_cache: list[dict[str, object]] | None = None
+_query_cache_ts: float = 0.0
 
 
 def _env_enabled(name: str) -> bool:
@@ -75,22 +81,158 @@ def _resolve_nvidia_smi() -> str | None:
     return resolve_nvidia_smi_executable()
 
 
-def nvidia_smi_visible() -> bool:
-    """Return True when nvidia-smi reports at least one GPU."""
-    exe = _resolve_nvidia_smi()
-    if not exe:
-        return False
+def _run_nvidia_smi(exe: str, *args: str, timeout: float = 10.0) -> subprocess.CompletedProcess[str] | None:
     try:
-        proc = subprocess.run(
-            [exe, "--query-gpu=name", "--format=csv,noheader"],
+        return subprocess.run(
+            [exe, *args],
             capture_output=True,
             text=True,
-            timeout=10,
+            timeout=timeout,
             check=False,
         )
     except (OSError, subprocess.TimeoutExpired):
-        return False
-    return proc.returncode == 0 and bool(proc.stdout.strip())
+        return None
+
+
+def _parse_nvidia_smi_csv(
+    stdout: str,
+    *,
+    fields: tuple[str, ...],
+) -> list[dict[str, object]]:
+    gpus: list[dict[str, object]] = []
+    reader = csv.reader(io.StringIO(stdout.strip()))
+    for parts in reader:
+        if len(parts) < len(fields):
+            continue
+        record: dict[str, object] = {}
+        skip_row = False
+        for field_name, raw in zip(fields, parts, strict=False):
+            value = raw.strip()
+            if field_name == "index":
+                try:
+                    record["index"] = int(value)
+                except (TypeError, ValueError):
+                    record["index"] = len(gpus)
+            elif field_name == "name":
+                record["name"] = value
+            elif field_name == "memory.total":
+                try:
+                    record["memory_total_mb"] = int(float(value))
+                except (TypeError, ValueError):
+                    skip_row = True
+                    break
+        if skip_row:
+            continue
+        name = record.get("name")
+        if not isinstance(name, str) or not name.strip():
+            continue
+        if "index" not in record:
+            record["index"] = len(gpus)
+        if "memory_total_mb" not in record:
+            record["memory_total_mb"] = None
+        gpus.append(record)
+    return gpus
+
+
+def _query_nvidia_gpus_csv(exe: str, query: str) -> list[dict[str, object]]:
+    proc = _run_nvidia_smi(
+        exe,
+        f"--query-gpu={query}",
+        "--format=csv,noheader,nounits",
+        timeout=3,
+    )
+    if proc is None or proc.returncode != 0 or not proc.stdout.strip():
+        return []
+    fields = tuple(part.strip() for part in query.split(","))
+    return _parse_nvidia_smi_csv(proc.stdout, fields=fields)
+
+
+def _query_nvidia_gpus_list(exe: str) -> list[dict[str, object]]:
+    """Parse ``nvidia-smi -L`` when CSV queries are unavailable."""
+    proc = _run_nvidia_smi(exe, "-L", timeout=3)
+    if proc is None or proc.returncode != 0:
+        return []
+    gpus: list[dict[str, object]] = []
+    for line in proc.stdout.splitlines():
+        text = line.strip()
+        if not text.startswith("GPU "):
+            continue
+        body = text.removeprefix("GPU ").strip()
+        idx_text, _, rest = body.partition(":")
+        try:
+            index = int(idx_text.strip())
+        except ValueError:
+            index = len(gpus)
+        name = rest.split("(", 1)[0].strip()
+        if not name:
+            continue
+        gpus.append({"index": index, "name": name, "memory_total_mb": None})
+    return gpus
+
+
+def _probe_nvidia_gpus_uncached() -> list[dict[str, object]]:
+    exe = _resolve_nvidia_smi()
+    if not exe:
+        return []
+    for query in ("index,name,memory.total", "name,memory.total", "name"):
+        gpus = _query_nvidia_gpus_csv(exe, query)
+        if gpus:
+            return gpus
+    gpus = _query_nvidia_gpus_list(exe)
+    if not gpus:
+        return gpus
+    mem_proc = _run_nvidia_smi(
+        exe,
+        "--query-gpu=memory.total",
+        "--format=csv,noheader,nounits",
+        timeout=3,
+    )
+    if mem_proc is None or mem_proc.returncode != 0:
+        return gpus
+    memory_values: list[int] = []
+    for line in mem_proc.stdout.strip().splitlines():
+        raw = line.strip()
+        if not raw:
+            continue
+        try:
+            memory_values.append(int(float(raw)))
+        except (TypeError, ValueError):
+            memory_values.append(0)
+    for idx, gpu in enumerate(gpus):
+        if idx < len(memory_values) and memory_values[idx] > 0:
+            gpu["memory_total_mb"] = memory_values[idx]
+    return gpus
+
+
+def query_nvidia_gpus(*, force_refresh: bool = False) -> list[dict[str, object]]:
+    """Enumerate NVIDIA GPUs via nvidia-smi without PyTorch (cached 30s)."""
+    global _query_cache, _query_cache_ts
+
+    now = time.time()
+    if (
+        not force_refresh
+        and _query_cache is not None
+        and now - _query_cache_ts < _QUERY_TTL_S
+    ):
+        return _query_cache
+
+    gpus = _probe_nvidia_gpus_uncached()
+    _query_cache = gpus
+    _query_cache_ts = now
+    return gpus
+
+
+def clear_nvidia_gpu_query_cache() -> None:
+    """Clear cached nvidia-smi probe results (tests / post-install)."""
+    global _query_cache, _query_cache_ts
+
+    _query_cache = None
+    _query_cache_ts = 0.0
+
+
+def nvidia_smi_visible() -> bool:
+    """Return True when nvidia-smi reports at least one GPU."""
+    return bool(query_nvidia_gpus())
 
 
 def is_linux_nvidia_host() -> bool:
@@ -190,6 +332,7 @@ def enforce_nvidia_secure_boundary(*, context: str = "training") -> dict[str, ob
 
 __all__ = [
     "approved_nvidia_boundary",
+    "clear_nvidia_gpu_query_cache",
     "detect_wsl2",
     "enforce_nvidia_secure_boundary",
     "in_ci",
@@ -197,5 +340,7 @@ __all__ = [
     "is_linux_nvidia_host",
     "nvidia_boundary_report",
     "nvidia_smi_visible",
+    "query_nvidia_gpus",
     "recommended_gpu_install_ack_env",
+    "resolve_nvidia_smi_executable",
 ]

@@ -182,7 +182,13 @@ seiso_resolve_nvidia_smi() {
 seiso_nvidia_gpu_detected() {
   local smi
   smi="$(seiso_resolve_nvidia_smi)" || return 1
-  "$smi" >/dev/null 2>&1
+  if "$smi" --query-gpu=name --format=csv,noheader 2>/dev/null | grep -q '[^[:space:]]'; then
+    return 0
+  fi
+  if "$smi" -L 2>/dev/null | grep -q '^GPU '; then
+    return 0
+  fi
+  return 1
 }
 
 seiso_python_version_ok() {
@@ -388,6 +394,10 @@ seiso_ensure_installed() {
   local extras install_log
 
   extras="$(seiso_detect_platform_extras)"
+
+  if [[ "$extras" == *cuda* ]]; then
+    seiso_log "NVIDIA GPU detected — installing with CUDA extras"
+  fi
 
   if [[ -x "$root/.venv/bin/seiso" && -f "$root/forge-ui/dist/index.html" ]] \
     && seiso_python_modules_available "$root" "$extras"; then

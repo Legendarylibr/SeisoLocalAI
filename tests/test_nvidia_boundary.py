@@ -12,6 +12,8 @@ from seiso.security.nvidia_boundary import (
     detect_wsl2,
     enforce_nvidia_secure_boundary,
     nvidia_boundary_report,
+    nvidia_smi_visible,
+    query_nvidia_gpus,
 )
 
 
@@ -56,3 +58,100 @@ def test_gpu_platform_wsl2_field():
     platform = detect_gpu()
     assert hasattr(platform, "is_wsl2")
     assert isinstance(platform.is_wsl2, bool)
+
+
+def test_query_nvidia_gpus_csv_fallback(monkeypatch):
+    calls: list[tuple[str, ...]] = []
+
+    def fake_run(exe: str, *args: str, timeout: float = 10.0):
+        calls.append(args)
+        if args[:2] == ("--query-gpu=index,name,memory.total", "--format=csv,noheader,nounits"):
+            return type(
+                "Proc",
+                (),
+                {"returncode": 1, "stdout": "", "stderr": ""},
+            )()
+        if args[:2] == ("--query-gpu=name,memory.total", "--format=csv,noheader,nounits"):
+            return type(
+                "Proc",
+                (),
+                {"returncode": 0, "stdout": "NVIDIA GeForce RTX 4090, 24564\n", "stderr": ""},
+            )()
+        return type("Proc", (), {"returncode": 1, "stdout": "", "stderr": ""})()
+
+    monkeypatch.setattr(
+        "seiso.security.nvidia_boundary.resolve_nvidia_smi_executable",
+        lambda: "/usr/bin/nvidia-smi",
+    )
+    monkeypatch.setattr("seiso.security.nvidia_boundary._run_nvidia_smi", fake_run)
+
+    gpus = query_nvidia_gpus()
+    assert len(gpus) == 1
+    assert gpus[0]["name"] == "NVIDIA GeForce RTX 4090"
+    assert gpus[0]["memory_total_mb"] == 24564
+    assert nvidia_smi_visible() is True
+
+
+def test_detect_gpu_nvidia_smi_fallback(monkeypatch):
+    detect_gpu.cache_clear()
+    monkeypatch.setattr(
+        "seiso.security.nvidia_boundary.query_nvidia_gpus",
+        lambda **kwargs: [{"index": 0, "name": "NVIDIA GeForce RTX 4090", "memory_total_mb": 24564}],
+    )
+    monkeypatch.setattr("seiso.kernels.platform.platform.system", lambda: "Linux")
+
+    class _FakeCuda:
+        @staticmethod
+        def is_available() -> bool:
+            return False
+
+    class _FakeTorch:
+        cuda = _FakeCuda()
+        version = type("Version", (), {"hip": None})()
+
+    monkeypatch.setitem(__import__("sys").modules, "torch", _FakeTorch())
+
+    platform = detect_gpu()
+    assert platform.vendor.value == "nvidia"
+    assert platform.device_count == 1
+    assert "4090" in platform.device_name
+    detect_gpu.cache_clear()
+
+
+def test_platform_caps_install_hint_without_cuda_runtime(monkeypatch):
+    from seiso.kernels.platform import GpuPlatform, GpuVendor, detect_gpu
+    from seiso.training.platform_caps import training_capabilities
+
+    training_capabilities.cache_clear()
+    detect_gpu.cache_clear()
+    monkeypatch.setattr(
+        "seiso.training.platform_caps.detect_gpu",
+        lambda: GpuPlatform(
+            vendor=GpuVendor.NVIDIA,
+            device_name="NVIDIA GeForce RTX 4090",
+            device_count=1,
+            supports_native_cuda=False,
+            supports_triton=False,
+        ),
+    )
+
+    class _FakeCuda:
+        @staticmethod
+        def is_available() -> bool:
+            return False
+
+    class _FakeTorch:
+        cuda = _FakeCuda()
+        backends = type("Backends", (), {"mps": type("Mps", (), {"is_available": staticmethod(lambda: False)})()})()
+
+    monkeypatch.setitem(__import__("sys").modules, "torch", _FakeTorch())
+    monkeypatch.setattr("seiso.training.platform_caps.platform.system", lambda: "Linux")
+
+    caps = training_capabilities()
+    assert caps["gpu_count"] == 1
+    assert caps["nvidia_hardware"] is True
+    assert caps["cuda_runtime"] is False
+    assert caps["train_platform"] == "cpu"
+    assert "cuda" in caps["install_extra"]
+    training_capabilities.cache_clear()
+    detect_gpu.cache_clear()
