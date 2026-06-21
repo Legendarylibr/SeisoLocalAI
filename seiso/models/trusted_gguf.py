@@ -21,6 +21,13 @@ TRUSTED_GGUF_PUBLISHERS: frozenset[str] = frozenset(
 # Repo-id substrings that indicate experimental / non-inference artifacts.
 _UNSUPPORTED_GGUF_REPO_HINTS: frozenset[str] = frozenset({"dflash", "draft"})
 
+# Explicit GGUF mirrors approved outside the publisher allowlist.
+CURATED_GGUF_MIRRORS: frozenset[str] = frozenset(
+    {
+        "AesSedai/Kimi-K2.7-Code-GGUF",
+    }
+)
+
 # Higher rank = preferred when multiple trusted mirrors exist.
 _PUBLISHER_RANK: dict[str, int] = {
     "unsloth": 100,
@@ -43,6 +50,13 @@ def is_supported_gguf_repo_candidate(repo_id: str) -> bool:
     return not any(hint in lowered for hint in _UNSUPPORTED_GGUF_REPO_HINTS)
 
 
+def base_model_from_tags(tags: list[str] | tuple[str, ...]) -> str | None:
+    for tag in tags:
+        if tag.startswith("base_model:") and not tag.startswith("base_model:quantized:"):
+            return tag.split(":", 1)[1]
+    return None
+
+
 def is_trusted_gguf_repo(
     repo_id: str,
     *,
@@ -62,11 +76,8 @@ def is_trusted_gguf_repo(
         if owner.lower() == base_owner.lower():
             return True
 
-    if allow_catalog_mirrors:
-        from seiso.models.catalog import get_by_gguf_mirror
-
-        if get_by_gguf_mirror(repo_id):
-            return True
+    if allow_catalog_mirrors and repo_id in CURATED_GGUF_MIRRORS:
+        return True
 
     return False
 

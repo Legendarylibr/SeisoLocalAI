@@ -122,6 +122,13 @@ def _sample_hub_rows() -> list[dict]:
             "pipeline_tag": "image-text-to-text",
             "tags": ["gguf", "qwen", "vision", "multimodal", "base_model:Qwen/Qwen3-VL-2B-Instruct"],
         },
+        {
+            "id": "random-user/Qwen3.6-4B-GGUF",
+            "downloads": 999_999,
+            "createdAt": "2026-03-01T00:00:00.000Z",
+            "pipeline_tag": "text-generation",
+            "tags": ["gguf", "qwen3.6", "text-generation", "base_model:Qwen/Qwen3.6-4B"],
+        },
     ]
 
 
@@ -152,6 +159,13 @@ def _mock_hub_search(request, monkeypatch):
     monkeypatch.setattr("seiso.models.catalog._query_hub_page", _query_page)
     yield
     invalidate_catalog_cache()
+
+
+def test_hub_search_excludes_untrusted_repos():
+    result = search_catalog()
+    repos = {m["repo_id"] for m in result.models}
+    assert "random-user/Qwen3.6-4B-GGUF" not in repos
+    assert "AesSedai/Kimi-K2.7-Code-GGUF" in repos
 
 
 def test_hub_search_returns_gguf_models():

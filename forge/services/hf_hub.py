@@ -17,6 +17,7 @@ from typing import Any, TypeVar
 from forge.services.download_progress import ProgressCallback, make_tqdm_class
 from seiso.models.catalog import CatalogEntry, get_by_repo
 from seiso.models.trusted_gguf import (
+    base_model_from_tags,
     filter_trusted_gguf_search_results,
     gguf_mirror_candidates,
     is_supported_gguf_repo_candidate,
@@ -413,6 +414,10 @@ def resolve_gguf_artifact(
     return info
 
 
+def _catalog_base_repo(entry: CatalogEntry, repo_id: str) -> str | None:
+    return base_model_from_tags(entry.tags) or (repo_id if entry.repo_id != repo_id else None)
+
+
 def resolve_gguf_repo(
     repo_id: str,
     *,
@@ -423,7 +428,9 @@ def resolve_gguf_repo(
     """Resolve a catalog/base repo to a Hugging Face repo that ships GGUF files."""
     entry = entry or get_by_repo(repo_id)
     if entry and entry.gguf_repo:
-        return entry.gguf_repo
+        base_repo = _catalog_base_repo(entry, repo_id)
+        if is_trusted_gguf_repo(entry.gguf_repo, base_repo_id=base_repo or repo_id):
+            return entry.gguf_repo
 
     cache_key = f"{repo_id}:{revision}"
     now = time.time()
@@ -431,7 +438,10 @@ def resolve_gguf_repo(
     if cached and now - cached[0] < _GGUF_REPO_TTL_S:
         return cached[1]
 
-    if repo_has_gguf(repo_id, token=token, revision=revision):
+    if repo_has_gguf(repo_id, token=token, revision=revision) and is_trusted_gguf_repo(
+        repo_id,
+        base_repo_id=repo_id,
+    ):
         _GGUF_REPO_CACHE[cache_key] = (now, repo_id)
         return repo_id
 

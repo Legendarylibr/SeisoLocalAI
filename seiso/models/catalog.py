@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from seiso.compat import StrEnum
+from seiso.models.trusted_gguf import base_model_from_tags, is_trusted_gguf_repo
 
 _DEFAULT_LIMIT = 50
 _MAX_LIMIT = 100
@@ -327,6 +328,12 @@ def _hub_row_to_entry(row: dict, *, force_task: ModelTask | None = None) -> Cata
     if task == ModelTask.EMBEDDING and "gguf" not in {t.lower() for t in tags}:
         if force_task != ModelTask.EMBEDDING:
             return None
+
+    if task != ModelTask.EMBEDDING and not is_trusted_gguf_repo(
+        repo_id,
+        base_repo_id=base_model_from_tags(tags),
+    ):
+        return None
 
     downloads = row.get("downloads") if isinstance(row.get("downloads"), int) else 0
     created_at = row.get("createdAt") if isinstance(row.get("createdAt"), str) else None
