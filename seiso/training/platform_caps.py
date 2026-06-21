@@ -120,5 +120,5 @@ def _install_extra(system: str, nvidia: bool, rocm: bool, mlx: bool) -> str:
     if system == "Darwin" and mlx:
         return 'pip install -e ".[forge,train,llamacpp,mlx]"'
     if system == "Darwin":
-        return 'pip install -e ".[forge,train,llamacpp]"  # optional: .[mlx] for safetensors'
+        return 'pip install -e ".[forge,train,llamacpp]"  # optional extras: .[mlx] (macOS), .[cuda] (Linux NVIDIA)'
     return 'pip install -e ".[forge,train]"'
