@@ -73,6 +73,14 @@ class RLQuantStartRequest(BaseModel):
     kernel_hidden_dim: int | None = None
     kernel_batch_rows: int | None = None
     kernel_benchmark_every_n_episodes: int | None = None
+    auto_sweep: bool = Field(
+        default=True,
+        description="Grid-search key hyperparameters before the full RL quant run.",
+    )
+    sweep_config: str | None = Field(
+        default=None,
+        description="Optional sweep grid JSON/TOML under configs/ or vendor tree.",
+    )
 
 
 @router.post("/jobs", response_model=PipelineJobResponse)

@@ -73,7 +73,7 @@ Seiso binds to `127.0.0.1` by default. Your credentials stay on your machine.
 ## Step 3 — Download a model
 
 1. Go to **Model Hub** (`/hub`)
-2. Browse the curated catalog (~46 models: Llama, Mistral, Qwen, Gemma, and more)
+2. Search live Hugging Face Hub results for GGUF models (Llama, Mistral, Qwen, Gemma, and more)
 3. Click **Download** on a model sized for your hardware (start with 1–3B for training, 7B+ for chat if you have VRAM)
 4. Watch live download progress in the UI
 
@@ -185,7 +185,9 @@ GGUF export requires `llama.cpp` (set `LLAMA_CPP_DIR` or install system `convert
 | Feature | Where | Guide |
 |---------|-------|-------|
 | Model compression (distill → prune → quant) | `/compress` | [compression.md](compression.md) |
+| Teacher distill + DPO alignment | `/distill-rl` | [compression.md](compression.md) · `seiso distill-rl run` |
 | RL adaptive GGUF quantization | `/rl-quant` | [compression.md](compression.md) · `seiso rl-quant run` |
+| Local RAG corpus | `/knowledge` | [forge.md](forge.md) |
 | Visual recipe graphs | `/recipes` | [forge.md](forge.md) |
 | External providers (OpenAI, Ollama, vLLM) | `/integrations` | [forge.md](forge.md) |
 | Multi-GPU training | Training Studio checkbox | [training/multi-gpu.md](training/multi-gpu.md) |
@@ -214,7 +216,7 @@ Default data directory (override with `SEISO_DATA_DIR`):
 ├── rl_quant/         # RL quant policy outputs
 ├── distill_rl/       # Distillation / RL artifacts
 ├── recipes/          # Recipe Studio job data
-├── knowledge/        # RAG vector stores (API)
+├── knowledge/        # RAG vector stores
 ├── uploads/          # User-uploaded datasets and files
 ├── artifacts/        # Tool-generated files
 ├── sandbox/          # Sandboxed code-exec workspace

@@ -26,6 +26,8 @@ Start with **[getting-started.md](getting-started.md)** — a step-by-step walkt
 | Use Cursor / Continue with local models | [getting-started.md § Connect external tools](getting-started.md#connect-external-tools-cursor-continue-etc) |
 | Export to GGUF or Hugging Face Hub | [getting-started.md § Step 6](getting-started.md#step-6--export-and-deploy) · [cli.md](cli.md) |
 | Compress / distill / quantize models | [compression.md](compression.md) |
+| Teacher distill + DPO alignment | [cli.md § seiso distill-rl](cli.md#seiso-distill-rl) · [compression.md](compression.md) |
+| Build a local RAG corpus | [forge.md](forge.md) · `/knowledge` |
 | Enable fused GPU kernels | [training/kernels.md](training/kernels.md) |
 | Train on multiple GPUs | [training/multi-gpu.md](training/multi-gpu.md) |
 | Deploy with HTTPS | [deployment/reverse-proxy.md](deployment/reverse-proxy.md) |
@@ -154,6 +156,9 @@ seiso train --config configs/example_lora.yaml
 # RL quant (CLI → $SEISO_DATA_DIR/rl_quant/cli/<job_id>/)
 seiso rl-quant run --preset minimal --kernel-rl
 
+# Distill-RL (CLI → $SEISO_DATA_DIR/distill_rl/cli/<job_id>/)
+seiso distill-rl run --preset smoke
+
 # Diagnose install
 seiso doctor
 ```
@@ -179,6 +184,7 @@ Seiso/
 │   ├── kernels/        # Fused CUDA/Triton ops
 │   ├── export/         # Merge, GGUF, Hub publish
 │   ├── compress/       # LLM compression bootstrap
+│   ├── distill_rl/     # Teacher distill + DPO pipeline
 │   └── security/       # NVIDIA boundary gates
 ├── seiso_cli/          # CLI entrypoints
 ├── forge/              # FastAPI backend

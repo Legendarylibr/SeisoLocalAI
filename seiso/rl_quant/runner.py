@@ -8,6 +8,11 @@ from typing import Any
 
 from seiso.rl_quant.bootstrap import require_adaptive_quant
 from seiso.rl_quant.config_builder import build_framework_config
+from seiso.rl_quant.sweep import (
+    apply_best_sweep_overrides,
+    auto_sweep_enabled,
+    run_auto_hyperparameter_sweep,
+)
 
 
 def run_rl_quant_job(
@@ -32,6 +37,16 @@ def run_rl_quant_job(
     def _log(msg: str) -> None:
         if on_log:
             on_log(msg)
+
+    sweep_result: dict[str, Any] | None = None
+    if auto_sweep_enabled(payload):
+        _log("Phase: auto hyperparameter sweep")
+        sweep_result = run_auto_hyperparameter_sweep(
+            config,
+            payload=payload,
+            on_log=on_log,
+        )
+        config = apply_best_sweep_overrides(config, sweep_result.get("best_overrides") or {})
 
     _log(
         f"RL quant run: {config.run_name} backend={config.backend} trainer={config.training_backend}"
@@ -63,10 +78,14 @@ def run_rl_quant_job(
             recommendation = json.loads(path.read_text(encoding="utf-8"))
             _log(f"Recommendation written: {recommendation_path}")
 
-    return {
+    result: dict[str, Any] = {
         "summary": summary,
         "output_dir": config.artifacts.outputs_dir,
         "recommendation_path": str(recommendation_path) if recommendation_path else None,
         "recommendation": recommendation,
         "run_name": config.run_name,
+        "auto_sweep": auto_sweep_enabled(payload),
     }
+    if sweep_result is not None:
+        result["sweep"] = sweep_result
+    return result

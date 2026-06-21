@@ -329,6 +329,14 @@ def rl_quant_run(
     kernel_hidden_dim: int = typer.Option(4096, help="Hidden dim for kernel bench shapes"),
     kernel_batch_rows: int = typer.Option(4096, help="Token rows for kernel bench shapes"),
     write_report: bool = typer.Option(False, help="Write research markdown report"),
+    auto_sweep: bool = typer.Option(
+        True,
+        "--auto-sweep/--no-auto-sweep",
+        help="Grid-search key hyperparameters before the full run (default: on)",
+    ),
+    sweep_config: str | None = typer.Option(
+        None, help="Optional sweep grid JSON/TOML (defaults to preset auto grid)"
+    ),
     json_out: bool = typer.Option(False, "--json", help="Print machine-readable summary JSON"),
 ) -> None:
     """Run RL quantization pipeline locally (no Forge server required)."""
@@ -350,7 +358,10 @@ def rl_quant_run(
         "gguf_export": gguf_export,
         "moe_enabled": moe_enabled,
         "write_research_report": write_report,
+        "auto_sweep": auto_sweep,
     }
+    if sweep_config:
+        payload["sweep_config"] = sweep_config
     if training_episodes is not None:
         payload["training_episodes"] = training_episodes
     if evaluation_episodes is not None:
@@ -455,6 +466,11 @@ def distill_rl_run(
         None, help="Comma-separated seeds for multi-seed research runs"
     ),
     seed: int = typer.Option(42, help="RNG seed (ignored when --seeds is set)"),
+    auto_sweep: bool = typer.Option(
+        True,
+        "--auto-sweep/--no-auto-sweep",
+        help="Grid-search DPO hyperparameters before the full run (default: on)",
+    ),
     json_out: bool = typer.Option(False, "--json", help="Print machine-readable summary JSON"),
 ) -> None:
     """Distill teacher → student, build teacher/student preferences, run DPO."""
@@ -466,7 +482,7 @@ def distill_rl_run(
 
     settings = get_settings()
     job_id = f"cli-{uuid.uuid4().hex[:8]}"
-    payload: dict = {"preset": preset, "seed": seed}
+    payload: dict = {"preset": preset, "seed": seed, "auto_sweep": auto_sweep}
     if config:
         payload["config_file"] = config
     if teacher_model:
