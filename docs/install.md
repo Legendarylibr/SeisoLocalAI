@@ -77,7 +77,7 @@ bash start
 3. **Installs** platform extras automatically (includes GGUF chat via `llamacpp`):
    - **Linux + NVIDIA** (`nvidia-smi` detected) → `[forge,train,cuda,llamacpp,dev]`
    - **Linux (no NVIDIA)** → `[forge,train,llamacpp,dev]`
-   - **macOS** → `[forge,train,mlx,llamacpp,dev]`
+   - **macOS** → `[forge,train,llamacpp,dev]` (add `[mlx]` optionally for safetensors inference)
 4. **Copies** `.env.example` → `.env` if missing
 5. **Builds** the Forge UI (`forge-ui/dist`)
 6. **Starts** Forge (unless `SEISO_START=0`)
