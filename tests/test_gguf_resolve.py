@@ -6,8 +6,11 @@ from forge.services import hf_hub
 
 
 def test_gguf_mirror_candidates_include_bartowski():
-    candidates = hf_hub._gguf_mirror_candidates("Qwen/Qwen3.6-27B")
+    from seiso.models.trusted_gguf import gguf_mirror_candidates
+
+    candidates = gguf_mirror_candidates("Qwen/Qwen3.6-27B")
     assert any("Qwen3.6-27B" in c for c in candidates)
+    assert candidates[0].startswith("unsloth/")
 
 
 def test_resolve_gguf_repo_uses_explicit_gguf_repo(monkeypatch):
@@ -26,20 +29,20 @@ def test_resolve_gguf_repo_falls_back_to_mirror(monkeypatch):
 
 
 def test_resolve_gguf_repo_ignores_dflash_draft_candidates(monkeypatch):
-    monkeypatch.setattr(hf_hub, "repo_has_gguf", lambda repo_id, **_: repo_id == "vendor/Kimi-GGUF")
+    monkeypatch.setattr(hf_hub, "repo_has_gguf", lambda repo_id, **_: repo_id == "bartowski/Kimi-GGUF")
     monkeypatch.setattr(
         hf_hub,
         "search_huggingface_gguf_repos",
         lambda **_k: [
-            {"repo_id": "vendor/Kimi-DFlash"},
-            {"repo_id": "vendor/Kimi-GGUF"},
+            {"repo_id": "bartowski/Kimi-DFlash"},
+            {"repo_id": "bartowski/Kimi-GGUF"},
         ],
     )
     hf_hub._GGUF_REPO_CACHE.clear()
 
     resolved = hf_hub.resolve_gguf_repo("org/Kimi")
 
-    assert resolved == "vendor/Kimi-GGUF"
+    assert resolved == "bartowski/Kimi-GGUF"
 
 
 def test_search_huggingface_datasets_parses_api_response(monkeypatch):
@@ -108,6 +111,23 @@ def test_pick_gguf_file_prefers_active_moe_quant():
     assert picked == "Qwen3.6-35B-A3B-Q4_K_M.gguf"
 
 
+def test_resolve_gguf_repo_prefers_trusted_search_over_untrusted(monkeypatch):
+    monkeypatch.setattr(hf_hub, "repo_has_gguf", lambda repo_id, **_: repo_id == "bartowski/Kimi-GGUF")
+    monkeypatch.setattr(
+        hf_hub,
+        "search_huggingface_gguf_repos",
+        lambda **_k: [
+            {"repo_id": "random-user/Kimi-GGUF", "downloads": 999_999},
+            {"repo_id": "bartowski/Kimi-GGUF", "downloads": 10},
+        ],
+    )
+    hf_hub._GGUF_REPO_CACHE.clear()
+
+    resolved = hf_hub.resolve_gguf_repo("org/Kimi")
+
+    assert resolved == "bartowski/Kimi-GGUF"
+
+
 def test_resolve_gguf_repo_raises_when_missing(monkeypatch):
     monkeypatch.setattr(hf_hub, "repo_has_gguf", lambda *_a, **_k: False)
     monkeypatch.setattr(hf_hub, "search_huggingface_gguf_repos", lambda **_k: [])
@@ -116,7 +136,7 @@ def test_resolve_gguf_repo_raises_when_missing(monkeypatch):
         hf_hub.resolve_gguf_repo("org/NoGgufModel")
         assert False, "expected ValueError"
     except ValueError as exc:
-        assert "No GGUF quant repo found" in str(exc)
+        assert "No trusted GGUF quant repo found" in str(exc)
 
 
 def test_resolve_gguf_repo_uses_cache(monkeypatch):
