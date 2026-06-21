@@ -26,7 +26,7 @@ from forge.services.hf_hub import _format_hub_download_error, dir_size
 from forge.services.model_download import perform_model_download
 from forge.services.publishable import is_pushable_model
 from forge.services.user_paths import assert_user_path
-from seiso.models.catalog import get_families, search_catalog
+from seiso.models.catalog import HubSearchError, get_families, search_catalog
 from seiso.security import SecurityError, sanitize_filename
 
 router = APIRouter(prefix="/models", tags=["models"])
@@ -58,27 +58,41 @@ class LocalModelCreate(BaseModel):
 async def model_catalog(
     user_id: Annotated[str, Depends(get_current_user_id)],
     settings: Annotated[ForgeSettings, Depends(get_settings)],
-    q: str = Query("", description="Search query"),
+    q: str = Query("", description="Search Hugging Face Hub"),
     family: str | None = Query(None),
     task: str | None = Query(None),
     hardware_aware: bool = Query(True, description="Rank and annotate by local hardware fit"),
     fits_only: bool = Query(False, description="Show only ideal/good fits for this machine"),
+    limit: int = Query(50, ge=1, le=100),
+    cursor: str | None = Query(None, description="Hugging Face Hub pagination cursor"),
 ) -> dict:
-    models = search_catalog(q, family, task)
-    profile = hardware_profile()
-    hf_token: str | None = None
-    if hardware_aware:
-        hf_token, _ = resolve_hf_token(
-            user_id=user_id,
-            data_dir=settings.data_dir,
-            encryption_key=settings.hf_token_encryption_key,
-            settings_token=settings.hf_token or None,
+    hf_token, _ = resolve_hf_token(
+        user_id=user_id,
+        data_dir=settings.data_dir,
+        encryption_key=settings.hf_token_encryption_key,
+        settings_token=settings.hf_token or None,
+    )
+    try:
+        result = search_catalog(
+            q,
+            family,
+            task,
+            limit=limit,
+            cursor=cursor,
+            token=hf_token,
         )
+    except HubSearchError as exc:
+        status = 429 if exc.status_code == 429 else 502
+        raise HTTPException(status, str(exc)) from exc
+
+    models = result.models
+    profile = hardware_profile()
+    if hardware_aware:
         models = enrich_catalog_models(
             models,
             profile,
             token=hf_token,
-            diversify=not q.strip() and not family and not task,
+            diversify=False,
         )
     if fits_only:
         models = [m for m in models if m.get("hardware_fit") in ("ideal", "good")]
@@ -86,6 +100,10 @@ async def model_catalog(
         "models": models,
         "families": get_families(),
         "total": len(models),
+        "limit": limit,
+        "next_cursor": result.next_cursor,
+        "has_more": result.next_cursor is not None,
+        "source": "huggingface",
         "hardware_summary": hardware_summary(profile),
         "local_only": True,
     }

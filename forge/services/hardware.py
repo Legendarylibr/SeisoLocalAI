@@ -171,7 +171,7 @@ def enrich_catalog_models(
 
 
 def recommended_catalog_repo(profile: dict[str, Any], *, task: str = "chat") -> str | None:
-    from seiso.models.catalog import search_catalog
+    from seiso.models.catalog import HubSearchError, search_catalog
 
     tier = classify_tier(profile)
     budget = effective_budget_mb(profile)
@@ -181,7 +181,12 @@ def recommended_catalog_repo(profile: dict[str, Any], *, task: str = "chat") -> 
     if cached and now - cached[0] < _RECOMMENDED_REPO_TTL_SEC:
         return cached[1]
 
-    models = search_catalog(task=task) if task else search_catalog()
+    try:
+        models = search_catalog(task=task).models if task else search_catalog().models
+    except HubSearchError:
+        _recommended_repo_cache[cache_key] = (now, None)
+        return None
+
     models = enrich_catalog_models(models, profile, fetch_sizes=False, diversify=True)
     result: str | None = None
     for m in models:

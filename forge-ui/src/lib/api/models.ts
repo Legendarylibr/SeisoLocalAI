@@ -8,16 +8,21 @@ export const modelsApi = {
   freeMemory: () => request<VramStatus>("/models/vram/unload", { method: "POST" }),
   downloadLocalModel: (modelId: string) =>
     fetch(`${API}/models/${modelId}/download`, { credentials: "include" }),
-  catalog: (q = "", family?: string, task?: string, fitsOnly = false) => {
-    const params = new URLSearchParams({ hardware_aware: "true" });
+  catalog: (q = "", family?: string, task?: string, fitsOnly = false, cursor?: string | null, limit = 50) => {
+    const params = new URLSearchParams({ hardware_aware: "true", limit: String(limit) });
     if (q) params.set("q", q);
     if (family) params.set("family", family);
     if (task) params.set("task", task);
     if (fitsOnly) params.set("fits_only", "true");
+    if (cursor) params.set("cursor", cursor);
     return request<{
       models: CatalogModel[];
       families: string[];
       total: number;
+      limit: number;
+      next_cursor: string | null;
+      has_more: boolean;
+      source: string;
       hardware_summary?: HardwareSummary;
       local_only?: boolean;
     }>(`/models/catalog?${params}`);

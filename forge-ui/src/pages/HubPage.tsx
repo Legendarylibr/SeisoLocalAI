@@ -64,7 +64,6 @@ export function HubPage() {
   const [local, setLocal] = useState<LocalModel[]>([]);
   const [catalog, setCatalog] = useState<CatalogModel[]>([]);
   const [families, setFamilies] = useState<string[]>([]);
-  const [total, setTotal] = useState(0);
   const [search, setSearch] = useState("");
   const [family, setFamily] = useState("");
   const [task, setTask] = useState("");
@@ -76,25 +75,55 @@ export function HubPage() {
   const [downloadAction, setDownloadAction] = useState<"chat" | "train" | null>(null);
   const [tab, setTab] = useState<"catalog" | "local">("catalog");
   const [catalogLoading, setCatalogLoading] = useState(true);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [catalogSearchError, setCatalogSearchError] = useState<string | null>(null);
+  const PAGE_SIZE = 50;
 
   const refreshVram = () =>
     api.vramStatus().then(setVramStatus).catch(console.error);
 
   const refreshLocal = () => api.listModels().then(setLocal).catch(console.error);
 
+  const fetchCatalogPage = useCallback(
+    (cursor: string | null, append: boolean) => {
+      if (append) {
+        setLoadingMore(true);
+      } else {
+        setCatalogLoading(true);
+      }
+      api
+        .catalog(search, family || undefined, task || undefined, fitsOnly, cursor, PAGE_SIZE)
+        .then((r) => {
+          setCatalogSearchError(null);
+          setCatalog((prev) => (append ? [...prev, ...r.models] : r.models));
+          setFamilies(r.families);
+          setNextCursor(r.next_cursor);
+          setHasMore(r.has_more);
+          if (r.hardware_summary) setHwSummary(r.hardware_summary);
+        })
+        .catch((err: unknown) => {
+          const message = err instanceof Error ? err.message : "Hugging Face Hub search failed";
+          setCatalogSearchError(message);
+          if (!append) setCatalog([]);
+        })
+        .finally(() => {
+          setCatalogLoading(false);
+          setLoadingMore(false);
+        });
+    },
+    [search, family, task, fitsOnly],
+  );
+
   const refreshCatalog = useCallback(() => {
-    setCatalogLoading(true);
-    api
-      .catalog(search, family || undefined, task || undefined, fitsOnly)
-      .then((r) => {
-        setCatalog(r.models);
-        setFamilies(r.families);
-        setTotal(r.total);
-        if (r.hardware_summary) setHwSummary(r.hardware_summary);
-      })
-      .catch(console.error)
-      .finally(() => setCatalogLoading(false));
-  }, [search, family, task, fitsOnly]);
+    fetchCatalogPage(null, false);
+  }, [fetchCatalogPage]);
+
+  const loadMoreCatalog = useCallback(() => {
+    if (loadingMore || !hasMore || !nextCursor) return;
+    fetchCatalogPage(nextCursor, true);
+  }, [fetchCatalogPage, hasMore, loadingMore, nextCursor]);
 
   const handleFreeMemory = async () => {
     if (freeingMemory) return;
@@ -173,7 +202,7 @@ export function HubPage() {
     <div className="hub-page">
       <PageHeader
         title="Model Hub"
-        subtitle="Download GGUF models to Seiso's local cache for llama.cpp, or use separately pulled Ollama models from Chat. Detection stays on this machine."
+        subtitle="Search Hugging Face Hub for GGUF models, download what you want, then chat or fine-tune locally."
         group="Models"
       />
 
@@ -245,10 +274,10 @@ export function HubPage() {
         items={[
           {
             id: "catalog",
-            label: "Catalog",
-            description: "Browse Hugging Face — ranked for your GPU",
+            label: "Hugging Face",
+            description: "Search the Hub — download on demand",
             icon: <IconGlobe size={16} />,
-            count: total,
+            count: catalog.length,
           },
           {
             id: "local",
@@ -262,6 +291,11 @@ export function HubPage() {
 
       {tab === "catalog" && (
         <div className="hub-tab-panel">
+          {catalogSearchError && (
+            <StatusCallout tone="warn" title="Hugging Face Hub search failed">
+              {catalogSearchError}
+            </StatusCallout>
+          )}
           <div className="card filters hub-filters">
             <div className="hub-search-wrap">
               <span className="hub-search-icon" aria-hidden>
@@ -271,7 +305,7 @@ export function HubPage() {
                 className="hub-search-input"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search by name, family, size (e.g. qwen 7b coder)…"
+                placeholder="Search Hugging Face Hub (e.g. qwen 3.6 gguf, llama 8b)…"
               />
               {search && (
                 <button type="button" className="hub-search-clear" onClick={() => setSearch("")} aria-label="Clear">
@@ -307,9 +341,10 @@ export function HubPage() {
               </select>
             </div>
             <p className="hub-results-meta">
-              {catalogLoading ? "Searching catalog…" : (
+              {catalogLoading ? "Searching Hugging Face Hub…" : (
                 <>
-                  {total} model{total === 1 ? "" : "s"}
+                  {catalog.length} result{catalog.length === 1 ? "" : "s"}
+                  {search ? " from Hugging Face" : " · popular GGUF models on Hugging Face"}
                   {activeFilters.length > 0 && <> · filtered by {activeFilters.join(" · ")}</>}
                 </>
               )}
@@ -328,7 +363,7 @@ export function HubPage() {
                 <IconSearch size={28} />
               </div>
               <p className="empty-state-title">No models match your search</p>
-              <p className="empty-state-desc">Try clearing filters or browsing a different family.</p>
+              <p className="empty-state-desc">Try a different query on Hugging Face Hub, or clear filters to see popular GGUF models.</p>
               <button
                 type="button"
                 className="btn"
@@ -409,6 +444,13 @@ export function HubPage() {
               })}
             </div>
           )}
+          {hasMore && catalog.length > 0 && (
+            <div className="hub-load-more">
+              <button type="button" className="btn" onClick={loadMoreCatalog} disabled={loadingMore}>
+                {loadingMore ? "Loading…" : "Load more from Hugging Face"}
+              </button>
+            </div>
+          )}
         </div>
       )}
 
@@ -428,7 +470,7 @@ export function HubPage() {
             <div className="empty-state">
               <p>No local models yet.</p>
               <button className="btn btn-primary" type="button" onClick={() => setTab("catalog")}>
-                Browse catalog
+                Search Hugging Face
               </button>
             </div>
           ) : (
