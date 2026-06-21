@@ -1,7 +1,7 @@
 import { request } from "./client";
 import { streamPostSSE } from "./sse";
 import { cachedGet } from "./getCache";
-import type { ChatMessage, ChatThread, HardwareSummary, InferenceModelOption } from "./types";
+import type { ChatContextStatus, ChatMessage, ChatThread, HardwareSummary, InferenceModelOption } from "./types";
 
 export const inferenceApi = {
   listInferenceModels: () =>
@@ -40,5 +40,25 @@ export const inferenceApi = {
     }),
   getMessages: (threadId: string) =>
     request<ChatMessage[]>(`/inference/threads/${threadId}/messages`),
+  getContextStatus: (params: {
+    thread_id?: string | null;
+    max_tokens?: number;
+    n_ctx?: number | null;
+    tools?: boolean;
+    knowledge_base_id?: string | null;
+    model_id?: string | null;
+    ollama_model?: string | null;
+  }) => {
+    const q = new URLSearchParams();
+    if (params.thread_id) q.set("thread_id", params.thread_id);
+    if (params.max_tokens != null) q.set("max_tokens", String(params.max_tokens));
+    if (params.n_ctx != null) q.set("n_ctx", String(params.n_ctx));
+    if (params.tools) q.set("tools", "true");
+    if (params.knowledge_base_id) q.set("knowledge_base_id", params.knowledge_base_id);
+    if (params.model_id) q.set("model_id", params.model_id);
+    if (params.ollama_model) q.set("ollama_model", params.ollama_model);
+    const suffix = q.toString();
+    return request<ChatContextStatus>(`/inference/context${suffix ? `?${suffix}` : ""}`);
+  },
   deleteThread: (id: string) => request<{ status: string }>(`/inference/threads/${id}`, { method: "DELETE" }),
 };

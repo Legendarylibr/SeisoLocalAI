@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import math
 import re
 
 from seiso.models.catalog import _parse_param_size
+
+_UNKNOWN_PARAMS_B = 7.0
 
 _PARAM_RE = re.compile(r"(\d+(?:\.\d+)?)\s*b", re.I)
 _ACTIVE_MOE_RE = re.compile(r"a(\d+(?:\.\d+)?)b", re.I)
@@ -22,7 +25,13 @@ def _active_params_b(params: str, tags: tuple[str, ...] | list[str], repo_id: st
     moe_match = _ACTIVE_MOE_RE.search(text)
     if moe_match:
         return float(moe_match.group(1))
-    raw = _parse_param_size(params)
+    try:
+        raw = _parse_param_size(params)
+    except ValueError:
+        raw = float("nan")
+    if not math.isfinite(raw):
+        guessed = guess_params_from_name(repo_id) or guess_params_from_name(params)
+        raw = guessed if guessed is not None else _UNKNOWN_PARAMS_B
     if "moe" in tags:
         return max(raw * 0.2, 1.0)
     return raw
@@ -61,4 +70,5 @@ def estimate_gguf_download_bytes(
     """Estimate on-disk GGUF size from active params and quant."""
     params_b = _active_params_b(params, tags, repo_id)
     gb = params_b * _quant_bytes_per_param_b(quant) + 0.4
-    return int(max(gb, 0.25) * 1024**3)
+    gb = min(max(gb, 0.25), 10_000.0)
+    return int(gb * 1024**3)

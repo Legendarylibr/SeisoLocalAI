@@ -6,8 +6,16 @@ import { bootstrapChatSession, CHAT_BACKEND_STORAGE_KEY, CHAT_MODEL_STORAGE_KEY,
 import { hasLoadedInferenceMemory } from "@/lib/hubHardware";
 import { useHardwareProfile } from "@/hooks/useHardware";
 import { writeStoredModel } from "@/lib/modelSelection";
+import { computeTokensPerSec, estimateOutputTokens, formatTokensPerSec } from "@/lib/streamSpeed";
+import {
+  ContextWindowSetting,
+  readStoredContextWindow,
+  writeStoredContextWindow,
+} from "@/lib/chatContext";
+import type { ChatContextStatus } from "@/lib/api/types";
 import { ModelProgressState, initialDownloadProgress, initialLoadProgress } from "@/lib/modelProgress";
 import { ChatModelPicker } from "@/components/ChatModelPicker";
+import { ChatContextBar } from "@/components/ChatContextBar";
 import { HardwareFitBadge } from "@/components/HardwareFitBadge";
 import { ModelLoadProgress } from "@/components/ModelLoadProgress";
 import {
@@ -60,6 +68,8 @@ export function ChatPage() {
   const [messagesByThread, setMessagesByThread] = useState<Record<string, ChatMessage[]>>({});
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
+  const [streamTps, setStreamTps] = useState<number | null>(null);
+  const [lastTps, setLastTps] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [threadSearch, setThreadSearch] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -68,6 +78,9 @@ export function ChatPage() {
   const [knowledgeBases, setKnowledgeBases] = useState<Array<{ id: string; chunk_count: number; has_index: boolean }>>([]);
   const [knowledgeBaseId, setKnowledgeBaseId] = useState("");
   const [maxTokens, setMaxTokens] = useState(2048);
+  const [contextWindow, setContextWindow] = useState<ContextWindowSetting>(() => readStoredContextWindow());
+  const [contextStatus, setContextStatus] = useState<ChatContextStatus | null>(null);
+  const [contextLoading, setContextLoading] = useState(false);
   const [providerId, setProviderId] = useState("");
   const [selection, setSelection] = useState("");
   const [inferenceBackend, setInferenceBackend] = useState("llamacpp");
@@ -89,6 +102,7 @@ export function ChatPage() {
   const streamTextRef = useRef("");
   const streamFlushRef = useRef<number | null>(null);
   const streamThreadRef = useRef<string | null>(null);
+  const genStartRef = useRef<number | null>(null);
   const userPickedBackendRef = useRef(false);
   const bootstrapGenRef = useRef(0);
   const bootstrapAbortRef = useRef<AbortController | null>(null);
@@ -475,6 +489,44 @@ export function ChatPage() {
     }
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    const refreshContext = async () => {
+      setContextLoading(true);
+      try {
+        const status = await api.getContextStatus({
+          thread_id: active,
+          max_tokens: maxTokens,
+          n_ctx: contextWindow === "auto" ? null : contextWindow,
+          tools: useTools && toolsAvailable,
+          knowledge_base_id: knowledgeBaseId || null,
+          model_id: providerId ? null : selection || null,
+          ollama_model: selected?.ollama_model || null,
+        });
+        if (!cancelled) setContextStatus(status);
+      } catch {
+        if (!cancelled) setContextStatus(null);
+      } finally {
+        if (!cancelled) setContextLoading(false);
+      }
+    };
+    void refreshContext();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    active,
+    messages,
+    maxTokens,
+    contextWindow,
+    knowledgeBaseId,
+    selection,
+    providerId,
+    useTools,
+    toolsAvailable,
+    selected?.ollama_model,
+  ]);
+
   const openThread = (t: ChatThread) => {
     setActive(t.id);
     if (!openTabs.find((tab) => tab.threadId === t.id)) {
@@ -583,6 +635,26 @@ export function ChatPage() {
     let progressText = "";
     streamTextRef.current = "";
     streamThreadRef.current = threadId;
+    genStartRef.current = null;
+    setStreamTps(null);
+
+    const recordThroughput = (text: string, finalize = false) => {
+      const trimmed = text.trim();
+      if (!trimmed) return;
+      const now = performance.now();
+      if (genStartRef.current === null) genStartRef.current = now;
+      const tps = computeTokensPerSec(
+        estimateOutputTokens(trimmed),
+        now - genStartRef.current,
+      );
+      if (tps === null) return;
+      if (finalize) {
+        setLastTps(tps);
+        setStreamTps(null);
+      } else {
+        setStreamTps(tps);
+      }
+    };
 
     const flushStreamText = () => {
       streamFlushRef.current = null;
@@ -619,6 +691,7 @@ export function ChatPage() {
           ollama_model: usingOllama || isOllamaOnly ? selected?.ollama_model : null,
           inference_backend: providerId ? "auto" : effectiveBackend,
           max_tokens: maxTokens,
+          ...(contextWindow !== "auto" ? { n_ctx: contextWindow } : {}),
           knowledge_base_id: knowledgeBaseId || null,
         },
         {
@@ -637,11 +710,15 @@ export function ChatPage() {
               }
               return;
             }
-            if (event === "done") return;
+            if (event === "done") {
+              recordThroughput(assistantText, true);
+              return;
+            }
             if (event === "token" || event === "message") {
               if (event === "message") assistantText = data;
               else assistantText += data;
               streamTextRef.current = assistantText;
+              recordThroughput(assistantText);
               if (streamFlushRef.current === null) {
                 streamFlushRef.current = window.requestAnimationFrame(flushStreamText);
               }
@@ -661,8 +738,17 @@ export function ChatPage() {
         streamFlushRef.current = null;
       }
       if (streamTextRef.current) flushStreamText();
+      if (assistantText.trim() && genStartRef.current !== null) {
+        const tps = computeTokensPerSec(
+          estimateOutputTokens(assistantText),
+          performance.now() - genStartRef.current,
+        );
+        if (tps !== null) setLastTps(tps);
+      }
+      genStartRef.current = null;
       streamThreadRef.current = null;
       streamAbortRef.current = null;
+      setStreamTps(null);
       setStreaming(false);
     }
   };
@@ -682,6 +768,13 @@ export function ChatPage() {
         : "missing local runtime";
     const fit = m.hardware_fit_label ? ` · ${m.hardware_fit_label}` : "";
     return `${m.name} · ${engine}${fit}`;
+  };
+
+  const displayedTps = streaming ? streamTps : lastTps;
+
+  const handleContextWindowChange = (value: ContextWindowSetting) => {
+    setContextWindow(value);
+    writeStoredContextWindow(value);
   };
 
   return (
@@ -912,6 +1005,14 @@ export function ChatPage() {
           )}
         </header>
 
+        <ChatContextBar
+          status={contextStatus}
+          contextWindow={contextWindow}
+          loading={contextLoading}
+          disabled={streaming}
+          onContextWindowChange={handleContextWindowChange}
+        />
+
         {showModelStatus && (
           <div className="chat-model-status">
             {(selected || (pendingRepo && !modelReady)) && (
@@ -1048,7 +1149,14 @@ export function ChatPage() {
               <IconSend size={16} />
             </button>
           </div>
-          <p className="chat-composer-hint">Shift+Enter for new line · Memory encrypted in local DB</p>
+          <div className="chat-composer-meta">
+            {displayedTps != null && (
+              <span className="chat-throughput" aria-live="polite">
+                {formatTokensPerSec(displayedTps)}
+              </span>
+            )}
+            <p className="chat-composer-hint">Shift+Enter for new line · Memory encrypted in local DB</p>
+          </div>
         </footer>
       </main>
     </div>
