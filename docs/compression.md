@@ -1,10 +1,11 @@
 # Model compression
 
-Seiso integrates two vendored compression pipelines. Code Llama and RL quant also have `seiso` CLI subcommands.
+Seiso integrates three compression / alignment pipelines. Code Llama, Distill-RL, and RL quant also have `seiso` CLI subcommands.
 
 | Pipeline | Forge page | API prefix | CLI |
 |----------|------------|------------|-----|
 | Code Llama (LLM) | `/compress` | `/api/compress` | `seiso compress run` |
+| Distill-RL (teacher → DPO) | `/distill-rl` | `/api/distill-rl` | `seiso distill-rl run` |
 | Adaptive RL quant (GGUF) | `/rl-quant` | `/api/rl-quant` | `seiso rl-quant run` |
 
 Vendored sources: `third_party/codellama-compress/`, `third_party/adaptive-rl-quant/`.
@@ -60,6 +61,33 @@ Example config reference: `configs/example_compress.json`.
 
 Presets: `smoke`, `full`, `distill_only`, `prune_recover`, `quantize`.
 
+## Distill-RL (teacher → DPO)
+
+Teacher KL distillation into a smaller student, preference rollouts (teacher completions preferred over student), and DPO alignment. Produces hash-chained manifests and optional multi-seed aggregation for research runs.
+
+### Forge
+
+1. `seiso forge` → **Distill-RL** (`/distill-rl`)
+2. Pick a preset (`smoke`, `reproducible`, `full`), set teacher/student models, toggle stages
+3. Logs stream over SSE; outputs under `{SEISO_DATA_DIR}/distill_rl/{user_id}/{job_id}/`
+
+### CLI
+
+```bash
+seiso distill-rl presets
+seiso distill-rl run --preset smoke
+seiso distill-rl run --preset full \
+  --teacher-model codellama/CodeLlama-13b-hf \
+  --student-model codellama/CodeLlama-7b-hf
+seiso distill-rl run --preset reproducible --seeds 13,42,99
+```
+
+Example config references: `configs/distill_rl_smoke.json`, `configs/distill_rl_reproducible.json`.
+
+Presets: `smoke`, `reproducible`, `full`. Stages: `distill`, `rollout`, `dpo`, `evaluate`.
+
+Requires `.[train]` for GPU stages (same stack as Code Llama distillation).
+
 ## Adaptive RL quantization
 
 Trains a reinforcement-learning policy for adaptive GGUF quantization levels. Optionally co-trains CUDA kernel launch profiles (`kernel_rl_enabled`).
@@ -86,12 +114,12 @@ Integrated pipeline only — upstream `adaptive-rl-quant*` CLIs in `third_party/
 
 ## Platform notes
 
-| Platform | LLM compress | RL quant |
-|----------|--------------|----------|
-| Linux NVIDIA | ✓ (CUDA kernels in training stages) | ✓ |
-| Linux AMD ROCm | ✓ (Triton fallback) | ✓ |
-| Windows NVIDIA | ✓ (CUDA JIT) | ✓ (simulator; live CUDA bench if GPU available) |
-| macOS | CPU/MPS (slow for large models) | ✓ (simulator / analytic kernel metrics) |
+| Platform | LLM compress | Distill-RL | RL quant |
+|----------|--------------|------------|----------|
+| Linux NVIDIA | ✓ (CUDA kernels in training stages) | ✓ | ✓ |
+| Linux AMD ROCm | ✓ (Triton fallback) | ✓ | ✓ |
+| Windows NVIDIA | ✓ (CUDA JIT) | ✓ | ✓ (simulator; live CUDA bench if GPU available) |
+| macOS | CPU/MPS (slow for large models) | CPU/MPS (slow for large models) | ✓ (simulator / analytic kernel metrics) |
 
 For upstream pipeline details, see vendored READMEs:
 

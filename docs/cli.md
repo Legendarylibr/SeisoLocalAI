@@ -136,6 +136,37 @@ Config reference: `configs/example_compress.json`.
 
 See [compression.md](compression.md).
 
+## `seiso distill-rl`
+
+Teacher-to-student KL distillation, preference rollouts (teacher chosen / student rejected), and DPO fine-tuning with research artifacts.
+
+```bash
+# List presets (smoke | reproducible | full) and stage order
+seiso distill-rl presets
+
+# Fast smoke on tiny models
+seiso distill-rl run --preset smoke
+
+# Full Code Llama teacher → student with all stages
+seiso distill-rl run --preset full \
+  --teacher-model codellama/CodeLlama-13b-hf \
+  --student-model codellama/CodeLlama-7b-hf
+
+# Skip distill when a checkpoint already exists
+seiso distill-rl run --preset smoke --distilled-path ~/.seiso/distill_rl/local/<job>/distilled
+
+# Multi-seed reproducibility
+seiso distill-rl run --preset reproducible --seeds 13,42,99 --json
+```
+
+Requires `.[train]` for GPU stages. Outputs: `{SEISO_DATA_DIR}/distill_rl/{user_id}/{job_id}/`.
+
+Forge equivalent: **Distill-RL** page (`/distill-rl`) or `POST /api/distill-rl/jobs`.
+
+Config references: `configs/distill_rl_smoke.json`, `configs/distill_rl_reproducible.json`.
+
+See [compression.md](compression.md).
+
 ## `seiso rl-quant`
 
 Adaptive RL quantization + optional CUDA kernel profile co-training (vendored `third_party/adaptive-rl-quant`).
@@ -192,5 +223,9 @@ See [training/multi-gpu.md](training/multi-gpu.md).
 |----------|------------|------------|
 | Training with SSE job UI | `/train` | `/api/training` |
 | Export jobs | `/export` | `/api/export` |
+| Knowledge ingest / retrieve | `/knowledge` | `/api/knowledge` |
+| Recipe graph jobs | `/recipes` | `/api/recipes` |
+
+Compression and distill-RL pipelines also have CLI equivalents (`seiso compress run`, `seiso distill-rl run`, `seiso rl-quant run`).
 
 Upstream vendor CLIs (optional, not installed by default): `adaptive-rl-quant`, `adaptive-rl-quant-pytorch`, etc. in `third_party/adaptive-rl-quant/`. Prefer `seiso rl-quant run` for the integrated pipeline.

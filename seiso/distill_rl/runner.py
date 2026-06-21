@@ -12,6 +12,12 @@ from seiso.distill_rl.config import DistillRLConfig, build_distill_rl_config, re
 from seiso.distill_rl.manifest import append_artifact, init_run_manifest, verify_run_manifest
 from seiso.distill_rl.multiseed import aggregate_multiseed_runs
 from seiso.distill_rl.paper_bundle import create_paper_bundle
+from seiso.distill_rl.sweep import (
+    SharedStageContext,
+    apply_best_sweep_overrides,
+    auto_sweep_enabled,
+    run_auto_hyperparameter_sweep,
+)
 
 
 def run_distill_rl_job(
@@ -123,57 +129,24 @@ def _run_single_job(
     _write_effective_config(config)
     manifest = init_run_manifest(config)
 
-    stage_results: dict[str, Any] = {}
-    distilled_dir = _resolve_policy_model_dir(config)
+    shared = _run_shared_stages(config, on_log=on_log)
+
+    sweep_result: dict[str, Any] | None = None
+    if auto_sweep_enabled(payload) and "dpo" in config.stages:
+        _log("Phase: auto hyperparameter sweep (DPO)")
+        sweep_result = run_auto_hyperparameter_sweep(
+            config,
+            payload=payload,
+            shared=shared,
+            on_log=on_log,
+            run_dpo_fn=_run_dpo,
+        )
+        config = apply_best_sweep_overrides(config, sweep_result.get("best_overrides") or {})
+
+    stage_results: dict[str, Any] = dict(shared.stage_results)
+    distilled_dir = shared.distilled_dir
     dpo_dir: Path | None = None
     evaluation: dict[str, Any] | None = None
-
-    if "distill" in config.stages:
-        _log("Phase: distill (teacher logits → student)")
-        distilled_dir = _run_distill(config, on_log=on_log)
-        stage_results["distilled"] = str(distilled_dir)
-        append_artifact(config.output_root, stage="distill", artifact_path=distilled_dir)
-    elif not distilled_dir.is_dir():
-        raise FileNotFoundError(
-            f"Distilled student checkpoint missing: {distilled_dir}. "
-            "Run the distill stage or set distilled_path to an existing checkpoint."
-        )
-
-    policy_model_dir = distilled_dir
-
-    if "rollout" in config.stages:
-        _log("Phase: rollout (teacher chosen, student rejected)")
-        from seiso.distill_rl.preferences import build_preference_bundle
-
-        bundle = build_preference_bundle(
-            teacher_model=config.teacher_model,
-            student_model=str(policy_model_dir),
-            output_dir=config.preferences_dir,
-            prompt_library_path=config.prompt_library_path,
-            max_prompts=config.rollout_max_prompts,
-            max_new_tokens=config.rollout_max_new_tokens,
-            temperature=config.rollout_temperature,
-            seed=config.seed,
-            train_fraction=config.train_val_fraction,
-            use_chat_template=bool(config.use_chat_template),
-            teacher_revision=config.teacher_revision,
-            student_revision=config.student_revision,
-            on_log=on_log,
-        )
-        stage_results["preferences_train"] = str(bundle.train_path)
-        stage_results["preferences_val"] = str(bundle.val_path)
-        stage_results["preferences_manifest"] = str(bundle.manifest_path)
-        append_artifact(config.output_root, stage="rollout", artifact_path=bundle.manifest_path)
-        append_artifact(
-            config.output_root, stage="rollout", artifact_path=bundle.train_path, role="train"
-        )
-        append_artifact(
-            config.output_root, stage="rollout", artifact_path=bundle.val_path, role="val"
-        )
-        config.preferences_path.write_text(
-            bundle.train_path.read_text(encoding="utf-8"),
-            encoding="utf-8",
-        )
 
     if "dpo" in config.stages:
         _log("Phase: dpo (preference RL after distillation)")
@@ -181,7 +154,7 @@ def _run_single_job(
         if not train_path.is_file():
             raise FileNotFoundError(f"Preference train dataset missing: {train_path}")
         dpo_dir = _run_dpo(
-            config, model_dir=policy_model_dir, preferences_path=train_path, on_log=on_log
+            config, model_dir=distilled_dir, preferences_path=train_path, on_log=on_log
         )
         stage_results["dpo"] = str(dpo_dir)
         append_artifact(config.output_root, stage="dpo", artifact_path=dpo_dir)
@@ -190,7 +163,7 @@ def _run_single_job(
         _log("Phase: evaluate (PPL + val preference accuracy)")
         from seiso.distill_rl.evaluate import evaluate_pipeline
 
-        checkpoints: dict[str, Path | str] = {"distilled": policy_model_dir}
+        checkpoints: dict[str, Path | str] = {"distilled": distilled_dir}
         if dpo_dir is not None:
             checkpoints["dpo"] = dpo_dir
         student_path = Path(config.student_model).expanduser()
@@ -233,7 +206,7 @@ def _run_single_job(
 
     final_model_dir = stage_results.get("dpo") or str(distilled_dir)
     _log("Distill-RL pipeline complete")
-    return {
+    result: dict[str, Any] = {
         "output_dir": str(config.output_root),
         "output_root": str(config.output_root),
         "run_dir": str(config.output_root),
@@ -247,7 +220,69 @@ def _run_single_job(
         "manifest": manifest_report,
         "paper_bundle": paper_bundle,
         "final_model_dir": final_model_dir,
+        "auto_sweep": auto_sweep_enabled(payload),
     }
+    if sweep_result is not None:
+        result["sweep"] = sweep_result
+    return result
+
+
+def _run_shared_stages(
+    config: DistillRLConfig,
+    *,
+    on_log: Callable[[str], None] | None,
+) -> SharedStageContext:
+    stage_results: dict[str, Any] = {}
+    distilled_dir = _resolve_policy_model_dir(config)
+
+    if "distill" in config.stages:
+        if on_log:
+            on_log("Phase: distill (teacher logits → student)")
+        distilled_dir = _run_distill(config, on_log=on_log)
+        stage_results["distilled"] = str(distilled_dir)
+        append_artifact(config.output_root, stage="distill", artifact_path=distilled_dir)
+    elif not distilled_dir.is_dir():
+        raise FileNotFoundError(
+            f"Distilled student checkpoint missing: {distilled_dir}. "
+            "Run the distill stage or set distilled_path to an existing checkpoint."
+        )
+
+    if "rollout" in config.stages:
+        if on_log:
+            on_log("Phase: rollout (teacher chosen, student rejected)")
+        from seiso.distill_rl.preferences import build_preference_bundle
+
+        bundle = build_preference_bundle(
+            teacher_model=config.teacher_model,
+            student_model=str(distilled_dir),
+            output_dir=config.preferences_dir,
+            prompt_library_path=config.prompt_library_path,
+            max_prompts=config.rollout_max_prompts,
+            max_new_tokens=config.rollout_max_new_tokens,
+            temperature=config.rollout_temperature,
+            seed=config.seed,
+            train_fraction=config.train_val_fraction,
+            use_chat_template=bool(config.use_chat_template),
+            teacher_revision=config.teacher_revision,
+            student_revision=config.student_revision,
+            on_log=on_log,
+        )
+        stage_results["preferences_train"] = str(bundle.train_path)
+        stage_results["preferences_val"] = str(bundle.val_path)
+        stage_results["preferences_manifest"] = str(bundle.manifest_path)
+        append_artifact(config.output_root, stage="rollout", artifact_path=bundle.manifest_path)
+        append_artifact(
+            config.output_root, stage="rollout", artifact_path=bundle.train_path, role="train"
+        )
+        append_artifact(
+            config.output_root, stage="rollout", artifact_path=bundle.val_path, role="val"
+        )
+        config.preferences_path.write_text(
+            bundle.train_path.read_text(encoding="utf-8"),
+            encoding="utf-8",
+        )
+
+    return SharedStageContext(distilled_dir=distilled_dir, stage_results=stage_results)
 
 
 def _resolve_policy_model_dir(config: DistillRLConfig) -> Path:

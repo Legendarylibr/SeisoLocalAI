@@ -50,10 +50,18 @@ KERNEL_RL_HELP: dict[str, Any] = {
 }
 
 
+AUTO_SWEEP_HELP: dict[str, str] = {
+    "auto_sweep": "Run a hyperparameter grid search before the full pipeline (default: on)",
+    "sweep_config": "Optional sweep grid JSON/TOML; omit to use preset defaults",
+    "sweep_objective": "Metric to rank trials (default: evaluation.mean_reward)",
+}
+
+
 def rl_quant_presets_response() -> dict[str, Any]:
     return {
         "presets": RL_QUANT_PRESETS,
         "preset_hints": RL_QUANT_PRESET_HINTS,
         "reward_weights_help": REWARD_WEIGHTS_HELP,
         "kernel_rl_help": KERNEL_RL_HELP,
+        "auto_sweep_help": AUTO_SWEEP_HELP,
     }

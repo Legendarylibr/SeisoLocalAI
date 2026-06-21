@@ -77,7 +77,7 @@ To run a second Forge intentionally, change **both** `SEISO_PORT` and `SEISO_DAT
 
 ### Process model
 
-Forge runs as a **single uvicorn worker** by default. Job orchestrators (training, export, compress, RL quant), live SSE log streams, in-memory rate limiting, and loaded inference models all live in that one process.
+Forge runs as a **single uvicorn worker** by default. Job orchestrators (training, export, compress, distill-RL, RL quant), live SSE log streams, in-memory rate limiting, and loaded inference models all live in that one process.
 
 | Constraint | Why |
 |------------|-----|
@@ -97,12 +97,14 @@ For production behind a reverse proxy, terminate TLS upstream and run **one** Fo
 | `/train` | Training Studio | LoRA / QLoRA fine-tuning with live SSE logs |
 | `/export` | Export | Merge LoRA, GGUF, Hub publish from checkpoints |
 | `/compress` | Compress | Code Llama distillation / prune / quant pipeline |
+| `/distill-rl` | Distill-RL | Teacher → student distillation + DPO alignment |
 | `/rl-quant` | RL Quant | Adaptive GGUF quantization policy training |
 | `/recipes` | Recipe Studio | Visual graph editor for data/recipe jobs |
+| `/knowledge` | Knowledge | RAG corpus ingest and retrieval |
 | `/integrations` | Integrations | External providers (OpenAI, Anthropic, Ollama, vLLM) |
 | `/settings` | Settings | HF token, hardware info, security toggles |
 
-Knowledge-base ingest and retrieve are **API-only** (`/api/knowledge/...`); there is no dedicated UI page.
+Knowledge-base ingest and retrieve are also available via API (`/api/knowledge/...`).
 
 ## API surface
 
@@ -114,6 +116,7 @@ Knowledge-base ingest and retrieve are **API-only** (`/api/knowledge/...`); ther
 | `/api/training` | Training jobs, datasets, SSE logs |
 | `/api/export` | Export jobs, Hub publish |
 | `/api/compress` | LLM compression jobs |
+| `/api/distill-rl` | Distill → rollout → DPO jobs |
 | `/api/rl-quant` | RL quantization jobs |
 | `/api/recipes` | Recipe graph execution |
 | `/api/knowledge` | RAG ingest and retrieve |

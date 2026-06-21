@@ -21,6 +21,7 @@ def test_rl_quant_presets_response_includes_hints():
     assert len(payload["presets"]) >= 3
     assert payload["preset_hints"]["minimal"]
     assert payload["reward_weights_help"]["gamma_perplexity"]
+    assert payload["auto_sweep_help"]["auto_sweep"]
 
 
 def test_vendor_tree_present():
@@ -72,6 +73,7 @@ def test_run_smoke_pipeline(tmp_path: Path):
             "training_episodes": 24,
             "evaluation_episodes": 6,
             "write_research_report": False,
+            "auto_sweep": False,
         },
         on_log=lambda _m: None,
     )

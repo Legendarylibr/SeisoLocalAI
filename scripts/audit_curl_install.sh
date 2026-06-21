@@ -4,6 +4,8 @@
 set -euo pipefail
 
 INSTALL_URL="https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/install.sh"
+START_URL="https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start"
+COMMON_URL="https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/lib/common.sh"
 REPO_URL="https://github.com/Legendarylibr/SeisoLocalAI.git"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
@@ -24,19 +26,41 @@ else
   ok "curl HTTP 200 ($INSTALL_URL)"
 fi
 
+start_tmp="$(mktemp)"
+start_code="$(curl -fsSL -w '%{http_code}' -o "$start_tmp" "$START_URL" || true)"
+if [[ "$start_code" != "200" ]]; then
+  bad "curl returned HTTP $start_code for $START_URL"
+else
+  ok "curl HTTP 200 ($START_URL)"
+fi
+if rg -q 'scripts/install\.sh' "$start_tmp" "$ROOT/start" 2>/dev/null; then
+  ok "start script delegates to scripts/install.sh"
+else
+  bad "start script missing install.sh delegation"
+fi
+
 if bash -n "$tmp" 2>/dev/null; then
   ok "install.sh bash syntax valid"
 else
   bad "install.sh bash syntax invalid"
 fi
 
-if rg -q 'pip install -e "\$\{root\}\[\$\{extras\}\]"' "$tmp"; then
-  ok "pip extras syntax uses \${root}[\${extras}]"
+common_tmp="$(mktemp)"
+common_code="$(curl -fsSL -w '%{http_code}' -o "$common_tmp" "$COMMON_URL" || true)"
+if [[ "$common_code" != "200" ]]; then
+  bad "curl returned HTTP $common_code for $COMMON_URL"
 else
-  bad "pip extras syntax missing or wrong (expected pip install -e \"\${root}[\${extras}]\")"
+  ok "curl HTTP 200 ($COMMON_URL)"
 fi
 
-if rg -q 'pip install -e "\$root/\.\[' "$tmp"; then
+pip_pattern='pip install -e "\$\{root\}\[\$\{extras\}\]"'
+if rg -q "$pip_pattern" "$common_tmp" "$ROOT/scripts/lib/common.sh" 2>/dev/null; then
+  ok "pip extras syntax uses \${root}[\${extras}] (scripts/lib/common.sh)"
+else
+  bad "pip extras syntax missing in scripts/lib/common.sh (expected pip install -e \"\${root}[\${extras}]\")"
+fi
+
+if rg -q 'pip install -e "\$root/\.\[' "$tmp" "$common_tmp" "$ROOT/scripts/lib/common.sh" 2>/dev/null; then
   bad "broken pip path still present (\$root/.[extras])"
 else
   ok "no broken \$root/.[extras] pip path"
@@ -109,7 +133,15 @@ if [[ -f "$ROOT/scripts/install.sh" ]]; then
   fi
 fi
 
-rm -f "$tmp"
+if [[ -f "$ROOT/scripts/lib/common.sh" ]]; then
+  if diff -q "$ROOT/scripts/lib/common.sh" "$common_tmp" >/dev/null 2>&1; then
+    ok "local common.sh matches published main"
+  else
+    bad "local common.sh differs from published main (unpushed changes)"
+  fi
+fi
+
+rm -f "$tmp" "$common_tmp" "$start_tmp"
 rm -rf "$(dirname "$clone_dir")"
 
 printf '\nAudit complete: %d passed, %d failed\n' "$pass" "$fail"

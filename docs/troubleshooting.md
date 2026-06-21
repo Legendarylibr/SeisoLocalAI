@@ -57,6 +57,18 @@ seiso forge
 
 Or run `start` — it builds the UI automatically if `forge-ui/dist` is missing.
 
+**Symptom:** Sidebar shows old pages (for example **Image Compress** instead of **Distill-RL**).
+
+**Fix:** You are running a stale UI build or an old branch. From the repo root:
+
+```bash
+git pull
+cd forge-ui && npm ci && npm run build && cd ..
+seiso forge
+```
+
+Hard-refresh the browser (`Cmd+Shift+R` / `Ctrl+Shift+R`) after rebuilding.
+
 For UI development, run `seiso forge` in one terminal and `cd forge-ui && npm run dev` in another — browse http://127.0.0.1:5173. See [forge.md](forge.md).
 
 ## Install script fails

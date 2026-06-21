@@ -42,6 +42,11 @@ class DistillRLStartRequest(BaseModel):
     evaluate_teacher: bool = False
     hash_run_id: bool = False
     link_training_job_id: str | None = None
+    auto_sweep: bool = Field(
+        default=True,
+        description="Grid-search DPO hyperparameters before the full alignment run.",
+    )
+    sweep_config: str | None = None
 
 
 async def _prepare_distill_rl_config(
