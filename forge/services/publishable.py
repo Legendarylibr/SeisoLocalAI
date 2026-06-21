@@ -35,7 +35,9 @@ async def assert_pushable_model(db: Database, *, model_id: str, user_id: str) ->
     if not model:
         raise ValueError("Model not found")
     if not is_pushable_model(model):
-        raise ValueError("Only Seiso training, export, or RL quant outputs can be published to Hugging Face")
+        raise ValueError(
+            "Only Seiso training, export, or RL quant outputs can be published to Hugging Face"
+        )
     return model
 
 

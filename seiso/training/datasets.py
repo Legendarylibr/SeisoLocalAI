@@ -12,7 +12,9 @@ from seiso.training.config import DatasetFormat
 logger = logging.getLogger(__name__)
 
 
-def load_training_dataset(path: str | Path, split: str = "train", *, sandbox_root: Path | None = None):
+def load_training_dataset(
+    path: str | Path, split: str = "train", *, sandbox_root: Path | None = None
+):
     """Load dataset from HF hub ID, JSON/JSONL file, or directory."""
     from seiso.security import assert_within
 
@@ -88,7 +90,9 @@ def prepare_tokenized_dataset(
         if mask_assistant_only:
             messages = extract_messages(sample, fmt)
             if messages and messages[-1].get("role") == "assistant":
-                full_text = format_messages_for_prompt(messages, tokenizer, add_generation_prompt=False)
+                full_text = format_messages_for_prompt(
+                    messages, tokenizer, add_generation_prompt=False
+                )
                 prompt_messages = messages[:-1]
                 prompt_text = format_messages_for_prompt(
                     prompt_messages, tokenizer, add_generation_prompt=True
@@ -100,7 +104,11 @@ def prepare_tokenized_dataset(
                     prompt_text, truncation=True, max_length=max_seq_length, padding=False
                 )
                 labels = _build_labels(full_ids["input_ids"], len(prompt_ids["input_ids"]))
-                return {"input_ids": full_ids["input_ids"], "attention_mask": full_ids["attention_mask"], "labels": labels}
+                return {
+                    "input_ids": full_ids["input_ids"],
+                    "attention_mask": full_ids["attention_mask"],
+                    "labels": labels,
+                }
 
         text = format_sample(sample, fmt, tokenizer)
         encoded = tokenizer(text, truncation=True, max_length=max_seq_length, padding=False)

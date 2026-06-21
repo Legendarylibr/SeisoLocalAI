@@ -4,17 +4,18 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import HTTPException
 from pydantic import BaseModel, Field
 
 from forge.api.deps import get_compress_orchestrator
-from forge.api.routes._jobs import resolve_linked_training_job
+from forge.api.routes._jobs import (
+    enrich_stage_results,
+    resolve_linked_training_job,
+    validate_pipeline_paths,
+)
 from forge.api.routes._pipeline import StagePipelineRouterConfig, build_stage_pipeline_router
 from forge.config import ForgeSettings
 from forge.db.store import Database
-from forge.services.user_paths import assert_user_config_file, assert_user_path
 from seiso.compress.config_builder import PRESETS, STAGE_ORDER, get_compress_model_defaults
-from seiso.security import SecurityError
 
 STAGE_HELP = {
     "distill": "Teacher → student KL distillation",
@@ -75,22 +76,15 @@ async def _prepare_compress_config(
             preset_override="prune_recover",
         )
 
-    try:
-        if req.config_file:
-            assert_user_config_file(settings.data_dir, user_id, req.config_file)
-        if config.get("model_dir"):
-            assert_user_path(settings.data_dir, user_id, config["model_dir"])
-    except SecurityError as exc:
-        raise HTTPException(403, str(exc)) from exc
+    validate_pipeline_paths(
+        settings.data_dir,
+        user_id,
+        config,
+        config_file=req.config_file,
+        path_keys=("model_dir",),
+    )
 
     return config
-
-
-def _enrich_compress_stage_results(result: dict[str, Any]) -> dict[str, Any]:
-    stage_results = dict(result.get("stage_results") or {})
-    if result.get("manifest"):
-        stage_results["manifest"] = result["manifest"]
-    return stage_results
 
 
 router = build_stage_pipeline_router(
@@ -108,8 +102,10 @@ router = build_stage_pipeline_router(
         list_jobs=lambda db, uid: db.list_compress_jobs(uid),
         get_job=lambda db, jid, uid: db.get_compress_job(jid, uid),
         create_job=lambda db, uid, cfg, jid: db.create_compress_job(uid, cfg, job_id=jid),
-        update_status=lambda db, jid, status, **kw: db.update_compress_job_status(jid, status, **kw),
+        update_status=lambda db, jid, status, **kw: db.update_compress_job_status(
+            jid, status, **kw
+        ),
         prepare_config=_prepare_compress_config,
-        enrich_stage_results=_enrich_compress_stage_results,
+        enrich_stage_results=enrich_stage_results,
     )
 )

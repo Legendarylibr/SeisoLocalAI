@@ -10,7 +10,6 @@ from seiso.models.catalog import (
     diversify_by_family,
     get_by_repo,
     get_families,
-    invalidate_catalog_cache,
     search_catalog,
 )
 
@@ -22,7 +21,13 @@ def _sample_hub_rows() -> list[dict]:
             "downloads": 500_000,
             "createdAt": "2026-03-01T00:00:00.000Z",
             "pipeline_tag": "text-generation",
-            "tags": ["gguf", "qwen3.6", "moe", "text-generation", "base_model:Qwen/Qwen3.6-35B-A3B"],
+            "tags": [
+                "gguf",
+                "qwen3.6",
+                "moe",
+                "text-generation",
+                "base_model:Qwen/Qwen3.6-35B-A3B",
+            ],
         },
         {
             "id": "unsloth/Qwen3.6-27B-GGUF",
@@ -78,7 +83,12 @@ def _sample_hub_rows() -> list[dict]:
             "downloads": 340_000,
             "createdAt": "2026-01-15T00:00:00.000Z",
             "pipeline_tag": "text-generation",
-            "tags": ["gguf", "llama", "moe", "base_model:meta-llama/Llama-4-Scout-17B-16E-Instruct"],
+            "tags": [
+                "gguf",
+                "llama",
+                "moe",
+                "base_model:meta-llama/Llama-4-Scout-17B-16E-Instruct",
+            ],
         },
         {
             "id": "unsloth/Kimi-K2-Instruct-GGUF",
@@ -106,7 +116,12 @@ def _sample_hub_rows() -> list[dict]:
             "downloads": 300_000,
             "createdAt": "2026-01-01T00:00:00.000Z",
             "pipeline_tag": "text-generation",
-            "tags": ["gguf", "mistral", "vision", "base_model:mistralai/Mistral-Small-3.2-24B-Instruct-2506"],
+            "tags": [
+                "gguf",
+                "mistral",
+                "vision",
+                "base_model:mistralai/Mistral-Small-3.2-24B-Instruct-2506",
+            ],
         },
         {
             "id": "unsloth/Qwen3-Coder-Next-GGUF",
@@ -120,7 +135,13 @@ def _sample_hub_rows() -> list[dict]:
             "downloads": 280_000,
             "createdAt": "2026-01-01T00:00:00.000Z",
             "pipeline_tag": "image-text-to-text",
-            "tags": ["gguf", "qwen", "vision", "multimodal", "base_model:Qwen/Qwen3-VL-2B-Instruct"],
+            "tags": [
+                "gguf",
+                "qwen",
+                "vision",
+                "multimodal",
+                "base_model:Qwen/Qwen3-VL-2B-Instruct",
+            ],
         },
         {
             "id": "random-user/Qwen3.6-4B-GGUF",
@@ -140,7 +161,6 @@ def _mock_hub_search(request, monkeypatch):
     }:
         yield
         return
-    invalidate_catalog_cache()
 
     def _query_page(**kwargs):
         rows = _sample_hub_rows()
@@ -158,7 +178,6 @@ def _mock_hub_search(request, monkeypatch):
 
     monkeypatch.setattr("seiso.models.catalog._query_hub_page", _query_page)
     yield
-    invalidate_catalog_cache()
 
 
 def test_hub_search_excludes_untrusted_repos():
@@ -219,6 +238,36 @@ def test_get_by_repo_fetches_from_hub(monkeypatch):
     entry = get_by_repo("unsloth/Qwen3.6-4B-GGUF")
     assert entry is not None
     assert entry.family == ModelFamily.QWEN
+
+
+def test_get_by_repo_returns_none_on_transport_error(monkeypatch):
+    class FakeApi:
+        def __init__(self, token=None):
+            _ = token
+
+        def model_info(self, repo_id):
+            _ = repo_id
+            import httpx
+
+            raise httpx.ProxyError("403 Forbidden")
+
+    monkeypatch.setattr("huggingface_hub.HfApi", FakeApi)
+    assert get_by_repo("org/Model") is None
+
+
+def test_get_by_repo_returns_none_on_requests_connection_error(monkeypatch):
+    class FakeApi:
+        def __init__(self, token=None):
+            _ = token
+
+        def model_info(self, repo_id):
+            _ = repo_id
+            import requests
+
+            raise requests.exceptions.ConnectionError("connection refused")
+
+    monkeypatch.setattr("huggingface_hub.HfApi", FakeApi)
+    assert get_by_repo("org/Model") is None
 
 
 def test_hub_search_priority_order():

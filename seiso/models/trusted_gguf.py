@@ -76,10 +76,7 @@ def is_trusted_gguf_repo(
         if owner.lower() == base_owner.lower():
             return True
 
-    if allow_catalog_mirrors and repo_id in CURATED_GGUF_MIRRORS:
-        return True
-
-    return False
+    return allow_catalog_mirrors and repo_id in CURATED_GGUF_MIRRORS
 
 
 def gguf_repo_trust_rank(repo_id: str, *, base_repo_id: str | None = None) -> int:
@@ -110,7 +107,11 @@ def rank_trusted_gguf_repos(
             repo_id.lower(),
         )
 
-    trusted = [repo_id for repo_id in repo_ids if gguf_repo_trust_rank(repo_id, base_repo_id=base_repo_id) >= 0]
+    trusted = [
+        repo_id
+        for repo_id in repo_ids
+        if gguf_repo_trust_rank(repo_id, base_repo_id=base_repo_id) >= 0
+    ]
     return sorted(trusted, key=sort_key)
 
 

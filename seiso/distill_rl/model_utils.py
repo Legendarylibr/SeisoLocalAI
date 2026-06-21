@@ -22,7 +22,9 @@ def release_causal_lm(model: Any) -> None:
         torch.cuda.empty_cache()
 
 
-def load_causal_lm(model_path: str, *, revision: str | None = None, dtype: torch.dtype | None = None):
+def load_causal_lm(
+    model_path: str, *, revision: str | None = None, dtype: torch.dtype | None = None
+):
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
     load_kwargs: dict[str, Any] = {"trust_remote_code": False}
@@ -33,8 +35,10 @@ def load_causal_lm(model_path: str, *, revision: str | None = None, dtype: torch
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    resolved_dtype = dtype if dtype is not None else (
-        torch.bfloat16 if torch.cuda.is_available() else torch.float32
+    resolved_dtype = (
+        dtype
+        if dtype is not None
+        else (torch.bfloat16 if torch.cuda.is_available() else torch.float32)
     )
     model = AutoModelForCausalLM.from_pretrained(
         model_path,

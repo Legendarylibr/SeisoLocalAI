@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from "react";
-import { api, RLQuantJob, RLQuantPreset, subscribeSSE } from "@/lib/api";
+import { useEffect, useState } from "react";
+import { api, RLQuantJob, RLQuantPreset } from "@/lib/api";
 import { invalidateApiCache } from "@/lib/api/getCache";
-import { appendBoundedLog } from "@/lib/api/sse";
+import { usePipelineJobStream } from "@/hooks/usePipelineJobStream";
 import { StudioPageShell } from "@/components/StudioPageShell";
 import { StudioCardBody } from "@/components/studio/StudioCardBody";
 import { StudioCardHeader } from "@/components/studio/StudioCardHeader";
@@ -41,11 +41,9 @@ export function RLQuantPage() {
   const [kernelHiddenDim, setKernelHiddenDim] = useState(4096);
   const [kernelBatchRows, setKernelBatchRows] = useState(4096);
   const [reward, setReward] = useState(DEFAULT_REWARD);
-  const [logs, setLogs] = useState<string[]>([]);
   const [recommendation, setRecommendation] = useState<Record<string, unknown> | null>(null);
-  const [activeJob, setActiveJob] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
-  const streamAbortRef = useRef<(() => void) | null>(null);
+  const { logs, activeJob, resetStream, watchJob } = usePipelineJobStream();
 
   useEffect(() => {
     api.listRLQuantJobs().then(setJobs).catch(console.error);
@@ -60,14 +58,13 @@ export function RLQuantPage() {
       })
       .catch(console.error)
       .finally(() => setPresetsLoading(false));
-    return () => streamAbortRef.current?.();
   }, []);
 
   const refreshJobs = () => api.listRLQuantJobs().then(setJobs).catch(console.error);
 
   const start = async () => {
     setStarting(true);
-    setLogs([]);
+    resetStream();
     setRecommendation(null);
     try {
       const res = await api.startRLQuant({
@@ -88,23 +85,21 @@ export function RLQuantPage() {
         reward_weights: reward,
         seed: 13,
       });
-      setActiveJob(res.job_id);
-      streamAbortRef.current?.();
-      streamAbortRef.current = subscribeSSE(`/rl-quant/jobs/${res.job_id}/stream`, (event, data) => {
-        if (event === "log") setLogs((l) => appendBoundedLog(l, data));
-        if (event === "error") setLogs((l) => appendBoundedLog(l, `ERROR: ${data}`));
-        if (event === "recommendation") {
-          try {
-            setRecommendation(JSON.parse(data));
-          } catch {
-            /* ignore */
+      watchJob(`/rl-quant/jobs/${res.job_id}/stream`, res.job_id, {
+        onEvent: (event, data) => {
+          if (event === "recommendation") {
+            try {
+              setRecommendation(JSON.parse(data));
+            } catch {
+              /* ignore */
+            }
           }
-        }
-        if (event === "result") {
+        },
+        onResult: () => {
           invalidateApiCache("/inference/models");
           invalidateApiCache("/training/models");
           refreshJobs();
-        }
+        },
       });
       refreshJobs();
     } finally {

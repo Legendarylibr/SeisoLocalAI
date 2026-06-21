@@ -106,7 +106,9 @@ def test_llama_reuses_cached_model_when_context_grows(monkeypatch, tmp_path):
             load_ctx.append(_kwargs.get("n_ctx"))
 
     monkeypatch.setattr(model_pool, "llama_load_kwargs", lambda n_ctx: {"n_ctx": n_ctx})
-    monkeypatch.setitem(__import__("sys").modules, "llama_cpp", type("LlamaModule", (), {"Llama": FakeLlama}))
+    monkeypatch.setitem(
+        __import__("sys").modules, "llama_cpp", type("LlamaModule", (), {"Llama": FakeLlama})
+    )
     monkeypatch.setattr(
         "seiso.inference.tuning.attach_llama_prompt_cache",
         lambda _llm: None,
@@ -132,7 +134,9 @@ def test_llama_reuses_larger_preloaded_context(monkeypatch, tmp_path):
             load_paths.append(model_path)
 
     monkeypatch.setattr(model_pool, "llama_load_kwargs", lambda n_ctx: {"n_ctx": n_ctx})
-    monkeypatch.setitem(__import__("sys").modules, "llama_cpp", type("LlamaModule", (), {"Llama": FakeLlama}))
+    monkeypatch.setitem(
+        __import__("sys").modules, "llama_cpp", type("LlamaModule", (), {"Llama": FakeLlama})
+    )
     monkeypatch.setattr(
         "seiso.inference.tuning.attach_llama_prompt_cache",
         lambda _llm: None,

@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from forge.config import ForgeSettings
-from forge.services.user_paths import assert_user_path, user_dir
+from forge.services.user_paths import assert_llama_cpp_binary, assert_user_path, user_dir
 from seiso.models.hf_env import resolve_hf_cache_dir
 from seiso.security import SecurityError
 
@@ -93,3 +93,12 @@ def test_assert_user_path_rejects_cross_user_symlink(tmp_path: Path):
 
     with pytest.raises(SecurityError, match="Path must be under"):
         assert_user_path(tmp_path, user_id, link)
+
+
+def test_assert_llama_cpp_binary_allows_venv_path(tmp_path: Path):
+    binary = tmp_path / ".venv" / "bin" / "llama-cli"
+    binary.parent.mkdir(parents=True)
+    binary.write_bytes(b"fake-binary")
+
+    resolved = assert_llama_cpp_binary(binary)
+    assert resolved == binary.resolve()

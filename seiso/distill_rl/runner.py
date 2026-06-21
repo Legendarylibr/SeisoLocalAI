@@ -164,8 +164,12 @@ def _run_single_job(
         stage_results["preferences_val"] = str(bundle.val_path)
         stage_results["preferences_manifest"] = str(bundle.manifest_path)
         append_artifact(config.output_root, stage="rollout", artifact_path=bundle.manifest_path)
-        append_artifact(config.output_root, stage="rollout", artifact_path=bundle.train_path, role="train")
-        append_artifact(config.output_root, stage="rollout", artifact_path=bundle.val_path, role="val")
+        append_artifact(
+            config.output_root, stage="rollout", artifact_path=bundle.train_path, role="train"
+        )
+        append_artifact(
+            config.output_root, stage="rollout", artifact_path=bundle.val_path, role="val"
+        )
         config.preferences_path.write_text(
             bundle.train_path.read_text(encoding="utf-8"),
             encoding="utf-8",
@@ -176,7 +180,9 @@ def _run_single_job(
         train_path = config.preferences_train_path
         if not train_path.is_file():
             raise FileNotFoundError(f"Preference train dataset missing: {train_path}")
-        dpo_dir = _run_dpo(config, model_dir=policy_model_dir, preferences_path=train_path, on_log=on_log)
+        dpo_dir = _run_dpo(
+            config, model_dir=policy_model_dir, preferences_path=train_path, on_log=on_log
+        )
         stage_results["dpo"] = str(dpo_dir)
         append_artifact(config.output_root, stage="dpo", artifact_path=dpo_dir)
 

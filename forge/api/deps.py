@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from functools import lru_cache
 
 from forge.config import get_settings
@@ -16,6 +17,17 @@ from forge.orchestrators.recipes import RecipeOrchestrator
 from forge.orchestrators.rl_quant import RLQuantOrchestrator
 from forge.orchestrators.training import TrainingOrchestrator
 
+_ORCHESTRATOR_GETTERS: list[Callable[[], Orchestrator]] = []
+
+
+def _orchestrator_dep(cls: type[Orchestrator]) -> Callable[[], Orchestrator]:
+    @lru_cache
+    def _get() -> Orchestrator:
+        return cls(get_settings().data_dir)
+
+    _ORCHESTRATOR_GETTERS.append(_get)
+    return _get
+
 
 @lru_cache
 def get_db() -> Database:
@@ -27,58 +39,22 @@ def get_db() -> Database:
     )
 
 
-@lru_cache
-def get_training_orchestrator() -> TrainingOrchestrator:
-    return TrainingOrchestrator(get_settings().data_dir)
-
-
-@lru_cache
-def get_export_orchestrator() -> ExportOrchestrator:
-    return ExportOrchestrator(get_settings().data_dir)
-
-
-@lru_cache
-def get_inference_orchestrator() -> InferenceOrchestrator:
-    return InferenceOrchestrator(get_settings().data_dir)
-
-
-@lru_cache
-def get_rl_quant_orchestrator() -> Orchestrator:
-    return RLQuantOrchestrator(get_settings().data_dir)
-
-
-@lru_cache
-def get_compress_orchestrator() -> Orchestrator:
-    return CompressOrchestrator(get_settings().data_dir)
-
-
-@lru_cache
-def get_distill_rl_orchestrator() -> Orchestrator:
-    return DistillRLOrchestrator(get_settings().data_dir)
-
-
-@lru_cache
-def get_recipe_orchestrator() -> RecipeOrchestrator:
-    return RecipeOrchestrator(get_settings().data_dir)
-
-
-@lru_cache
-def get_knowledge_orchestrator() -> KnowledgeOrchestrator:
-    return KnowledgeOrchestrator(get_settings().data_dir)
+get_training_orchestrator = _orchestrator_dep(TrainingOrchestrator)
+get_export_orchestrator = _orchestrator_dep(ExportOrchestrator)
+get_inference_orchestrator = _orchestrator_dep(InferenceOrchestrator)
+get_rl_quant_orchestrator = _orchestrator_dep(RLQuantOrchestrator)
+get_compress_orchestrator = _orchestrator_dep(CompressOrchestrator)
+get_distill_rl_orchestrator = _orchestrator_dep(DistillRLOrchestrator)
+get_recipe_orchestrator = _orchestrator_dep(RecipeOrchestrator)
+get_knowledge_orchestrator = _orchestrator_dep(KnowledgeOrchestrator)
 
 
 def clear_dependency_caches() -> None:
     """Reset cached singletons — for tests and config reload."""
     get_settings.cache_clear()
     get_db.cache_clear()
-    get_training_orchestrator.cache_clear()
-    get_export_orchestrator.cache_clear()
-    get_rl_quant_orchestrator.cache_clear()
-    get_compress_orchestrator.cache_clear()
-    get_distill_rl_orchestrator.cache_clear()
-    get_inference_orchestrator.cache_clear()
-    get_recipe_orchestrator.cache_clear()
-    get_knowledge_orchestrator.cache_clear()
+    for getter in _ORCHESTRATOR_GETTERS:
+        getter.cache_clear()
 
 
 async def close_dependency_caches() -> None:

@@ -125,7 +125,7 @@ def release_cached_memory(*, sync: bool = False) -> None:
     gc.collect()
     if os.environ.get("SEISO_SKIP_MLX_PROBE", "").strip().lower() not in {"1", "true", "yes"}:
         try:
-            import mlx.core as mx
+            import mlx.core as mx  # pylint: disable=import-error,no-name-in-module
 
             if hasattr(mx, "metal") and hasattr(mx.metal, "clear_cache"):
                 mx.metal.clear_cache()
@@ -283,7 +283,9 @@ def sanitize_inference_payload(payload: dict[str, Any]) -> dict[str, Any]:
     out["max_tokens"] = max_tokens
 
     if out.get("n_ctx") is not None:
-        out["n_ctx"] = clamp_llama_n_ctx(int(out["n_ctx"]), messages=messages, max_tokens=max_tokens)
+        out["n_ctx"] = clamp_llama_n_ctx(
+            int(out["n_ctx"]), messages=messages, max_tokens=max_tokens
+        )
     return out
 
 
@@ -398,7 +400,9 @@ def apply_training_memory_guards(config: Any) -> Any:
     est_mb = estimate_path_vram_mb(config.model_id, mode="train")
     if headroom > 0 and est_mb > headroom and batch > 1:
         updates["batch_size"] = 1
-        updates["gradient_accumulation_steps"] = max(accum, defaults["gradient_accumulation_steps"]) * 2
+        updates["gradient_accumulation_steps"] = (
+            max(accum, defaults["gradient_accumulation_steps"]) * 2
+        )
     if headroom > 0 and est_mb > int(headroom * 0.85) and max_seq > 1024:
         updates["max_seq_length"] = min(max_seq, 1024)
 

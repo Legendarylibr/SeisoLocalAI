@@ -30,8 +30,8 @@ from forge.api.routes import settings as settings_routes
 from forge.config import get_settings
 from forge.db.store import DatabaseCryptoError
 from forge.instance_lock import ForgeDataDirLock, data_dir_lock_path, lock_held_by_current_process
-from seiso.models.hf_env import configure_hf_hub_cache
 from seiso.memory.platform_profile import apply_platform_memory_profile
+from seiso.models.hf_env import configure_hf_hub_cache
 
 
 @asynccontextmanager
@@ -95,7 +95,12 @@ def create_app() -> FastAPI:
             if not hasattr(app.state, "rate_limiter"):
                 app.state.rate_limiter = RateLimiter(settings.rate_limit_per_minute)
             client = client_ip(request)
-            if request.url.path not in ("/health", "/api/health", "/auth/status", "/api/auth/status"):
+            if request.url.path not in (
+                "/health",
+                "/api/health",
+                "/auth/status",
+                "/api/auth/status",
+            ):
                 try:
                     app.state.rate_limiter.check(client)
                 except HTTPException as exc:

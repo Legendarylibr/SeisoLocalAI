@@ -29,7 +29,9 @@ def test_resolve_gguf_repo_falls_back_to_mirror(monkeypatch):
 
 
 def test_resolve_gguf_repo_ignores_dflash_draft_candidates(monkeypatch):
-    monkeypatch.setattr(hf_hub, "repo_has_gguf", lambda repo_id, **_: repo_id == "bartowski/Kimi-GGUF")
+    monkeypatch.setattr(
+        hf_hub, "repo_has_gguf", lambda repo_id, **_: repo_id == "bartowski/Kimi-GGUF"
+    )
     monkeypatch.setattr(
         hf_hub,
         "search_huggingface_gguf_repos",
@@ -38,7 +40,7 @@ def test_resolve_gguf_repo_ignores_dflash_draft_candidates(monkeypatch):
             {"repo_id": "bartowski/Kimi-GGUF"},
         ],
     )
-    hf_hub._GGUF_REPO_CACHE.clear()
+    hf_hub._gguf_repo_cache.clear()
 
     resolved = hf_hub.resolve_gguf_repo("org/Kimi")
 
@@ -112,7 +114,9 @@ def test_pick_gguf_file_prefers_active_moe_quant():
 
 
 def test_resolve_gguf_repo_prefers_trusted_search_over_untrusted(monkeypatch):
-    monkeypatch.setattr(hf_hub, "repo_has_gguf", lambda repo_id, **_: repo_id == "bartowski/Kimi-GGUF")
+    monkeypatch.setattr(
+        hf_hub, "repo_has_gguf", lambda repo_id, **_: repo_id == "bartowski/Kimi-GGUF"
+    )
     monkeypatch.setattr(
         hf_hub,
         "search_huggingface_gguf_repos",
@@ -121,7 +125,7 @@ def test_resolve_gguf_repo_prefers_trusted_search_over_untrusted(monkeypatch):
             {"repo_id": "bartowski/Kimi-GGUF", "downloads": 10},
         ],
     )
-    hf_hub._GGUF_REPO_CACHE.clear()
+    hf_hub._gguf_repo_cache.clear()
 
     resolved = hf_hub.resolve_gguf_repo("org/Kimi")
 
@@ -135,23 +139,25 @@ def test_resolve_gguf_repo_rejects_untrusted_catalog_entry(monkeypatch):
         tags = ("gguf", "base_model:org/Model")
         repo_id = "random-user/Custom-GGUF"
 
-    monkeypatch.setattr(hf_hub, "repo_has_gguf", lambda repo_id, **_: repo_id == "bartowski/Custom-GGUF")
+    monkeypatch.setattr(
+        hf_hub, "repo_has_gguf", lambda repo_id, **_: repo_id == "bartowski/Model-GGUF"
+    )
     monkeypatch.setattr(
         hf_hub,
         "search_huggingface_gguf_repos",
-        lambda **_k: [{"repo_id": "bartowski/Custom-GGUF", "downloads": 1}],
+        lambda **_k: [{"repo_id": "bartowski/Model-GGUF", "downloads": 1}],
     )
-    hf_hub._GGUF_REPO_CACHE.clear()
+    hf_hub._gguf_repo_cache.clear()
 
     resolved = hf_hub.resolve_gguf_repo("org/Model", entry=Entry())
 
-    assert resolved == "bartowski/Custom-GGUF"
+    assert resolved == "bartowski/Model-GGUF"
 
 
 def test_resolve_gguf_repo_raises_when_missing(monkeypatch):
     monkeypatch.setattr(hf_hub, "repo_has_gguf", lambda *_a, **_k: False)
     monkeypatch.setattr(hf_hub, "search_huggingface_gguf_repos", lambda **_k: [])
-    hf_hub._GGUF_REPO_CACHE.clear()
+    hf_hub._gguf_repo_cache.clear()
     try:
         hf_hub.resolve_gguf_repo("org/NoGgufModel")
         assert False, "expected ValueError"
@@ -160,7 +166,7 @@ def test_resolve_gguf_repo_raises_when_missing(monkeypatch):
 
 
 def test_resolve_gguf_repo_uses_cache(monkeypatch):
-    hf_hub._GGUF_REPO_CACHE.clear()
+    hf_hub._gguf_repo_cache.clear()
     calls = {"n": 0}
 
     def _has_gguf(repo_id, **_) -> bool:
@@ -175,7 +181,9 @@ def test_resolve_gguf_repo_uses_cache(monkeypatch):
 
 
 def test_first_repo_with_gguf_preserves_candidate_order(monkeypatch):
-    monkeypatch.setattr(hf_hub, "repo_has_gguf", lambda repo_id, **_: repo_id in {"second/repo", "third/repo"})
+    monkeypatch.setattr(
+        hf_hub, "repo_has_gguf", lambda repo_id, **_: repo_id in {"second/repo", "third/repo"}
+    )
 
     resolved = hf_hub._first_repo_with_gguf(["first/repo", "second/repo", "third/repo"])
 

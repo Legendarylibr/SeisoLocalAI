@@ -138,12 +138,36 @@ _BLOCKED_MODULES = frozenset(
         "imp",
     }
 )
-_BLOCKED_NAMES = frozenset({
-    "eval", "exec", "compile", "open", "__import__", "breakpoint", "getattr", "setattr",
-    "delattr", "hasattr", "type", "object", "classmethod", "staticmethod", "super",
-    "vars", "input", "globals", "locals", "memoryview", "bytearray", "bytes",
-    "help", "dir", "property", "__build_class__",
-})
+_BLOCKED_NAMES = frozenset(
+    {
+        "eval",
+        "exec",
+        "compile",
+        "open",
+        "__import__",
+        "breakpoint",
+        "getattr",
+        "setattr",
+        "delattr",
+        "hasattr",
+        "type",
+        "object",
+        "classmethod",
+        "staticmethod",
+        "super",
+        "vars",
+        "input",
+        "globals",
+        "locals",
+        "memoryview",
+        "bytearray",
+        "bytes",
+        "help",
+        "dir",
+        "property",
+        "__build_class__",
+    }
+)
 _BLOCKED_ATTRS = frozenset(
     {
         "gi_frame",

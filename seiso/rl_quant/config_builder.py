@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from seiso.rl_quant.bootstrap import ensure_adaptive_quant_importable, vendor_root
+from seiso.vendor.config_builder import job_output_root, resolve_config_file_path
 
 
 def _artifact_paths(output_root: Path, run_name: str) -> dict[str, str]:
@@ -35,13 +36,12 @@ def build_framework_config(
     from adaptive_quant.easy_config import config_from_dict, load_config, named_preset
 
     run_name = str(payload.get("run_name") or f"seiso_{job_id[:8]}")
-    output_root = data_dir / "rl_quant" / user_id / job_id
-    output_root.mkdir(parents=True, exist_ok=True)
+    output_root = job_output_root(data_dir, "rl_quant", user_id, job_id)
 
     if config_file := payload.get("config_file"):
-        path = Path(config_file)
-        if not path.is_file():
-            path = vendor_root() / "configs" / config_file
+        path = resolve_config_file_path(config_file, vendor_root=vendor_root())
+        if path is None:
+            raise ValueError(f"Config file not found: {config_file}")
         base = load_config(path)
     else:
         base = named_preset(str(payload.get("preset", "reproducible")))
@@ -63,7 +63,9 @@ def build_framework_config(
     }
 
     if preset in {"post_train", "posttrain"}:
-        overrides["prompt_library_path"] = str(vendor_root() / "prompts" / "post_train_library.json")
+        overrides["prompt_library_path"] = str(
+            vendor_root() / "prompts" / "post_train_library.json"
+        )
     elif payload.get("prompt_library"):
         overrides["prompt_library_path"] = str(payload["prompt_library"])
 
@@ -89,11 +91,7 @@ def build_framework_config(
         overrides["kernel_rl_enabled"] = True
     if (kernel_cfg := payload.get("kernel")) and isinstance(kernel_cfg, dict):
         overrides.update(
-            {
-                f"kernel_{key}": value
-                for key, value in kernel_cfg.items()
-                if key != "rl_enabled"
-            }
+            {f"kernel_{key}": value for key, value in kernel_cfg.items() if key != "rl_enabled"}
         )
         if kernel_cfg.get("rl_enabled") is True:
             overrides["kernel_rl_enabled"] = True

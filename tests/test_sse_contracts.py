@@ -30,7 +30,9 @@ async def test_chat_stream_sends_token_message_done(app, auth_client, monkeypatc
     user = await db.get_user_by_display_name("Admin")
     model_path = user_path(data_dir, user["id"], "models", "model.gguf")
     model_path.write_text("fake")
-    model = await db.add_model(user_id=user["id"], name="Local", path=str(model_path), format="gguf")
+    model = await db.add_model(
+        user_id=user["id"], name="Local", path=str(model_path), format="gguf"
+    )
 
     async def fake_stream(_self, _payload):
         yield "hello "

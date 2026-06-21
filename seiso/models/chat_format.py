@@ -13,11 +13,14 @@ def format_messages_for_prompt(
 ) -> str:
     """Render chat messages to a single prompt string."""
     if hasattr(tokenizer, "apply_chat_template"):
-        return cast(str, tokenizer.apply_chat_template(
-            messages,
-            tokenize=False,
-            add_generation_prompt=add_generation_prompt,
-        ))
+        return cast(
+            str,
+            tokenizer.apply_chat_template(
+                messages,
+                tokenize=False,
+                add_generation_prompt=add_generation_prompt,
+            ),
+        )
     parts = [f"{m.get('role', 'user').upper()}: {m.get('content', '')}" for m in messages]
     if add_generation_prompt:
         parts.append("ASSISTANT:")

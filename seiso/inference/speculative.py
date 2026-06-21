@@ -3,35 +3,15 @@
 from __future__ import annotations
 
 import logging
-import time
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from typing import Any
 
 from seiso.env import env_int
-from seiso.models.chat_format import format_messages_for_prompt
 
 logger = logging.getLogger(__name__)
 
 _DEFAULT_SPECULATIVE_TOKENS = 5
-
-
-@dataclass(frozen=True)
-class SpeculativeStats:
-    tokens_generated: int
-    tokens_accepted: int
-    acceptance_rate: float
-    seconds: float
-    tokens_per_second: float
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "tokens_generated": self.tokens_generated,
-            "tokens_accepted": self.tokens_accepted,
-            "acceptance_rate": self.acceptance_rate,
-            "seconds": self.seconds,
-            "tokens_per_second": self.tokens_per_second,
-        }
 
 
 @dataclass(frozen=True)
@@ -146,41 +126,3 @@ def iter_speculative_tokens(
             chunk, decoded_len = _decode_new_text(tok, input_ids_t, decoded_len)
             if chunk:
                 yield chunk
-
-
-def speculative_generate(
-    *,
-    bundle: TorchSpeculativeBundle,
-    messages: list[dict[str, Any]],
-    max_new_tokens: int,
-    num_speculative_tokens: int,
-    temperature: float = 0.0,
-) -> tuple[str, SpeculativeStats]:
-    """Non-streaming speculative generation with timing stats."""
-    prompt = format_messages_for_prompt(messages, bundle.target_tokenizer)
-    t0 = time.time()
-    parts: list[str] = []
-    tokens_generated = 0
-    tokens_accepted = 0
-
-    for chunk in iter_speculative_tokens(
-        bundle=bundle,
-        prompt=prompt,
-        max_new_tokens=max_new_tokens,
-        num_speculative_tokens=num_speculative_tokens,
-        temperature=temperature,
-    ):
-        parts.append(chunk)
-        tokens_generated += max(1, len(chunk.split()))
-
-    dt = time.time() - t0
-    text = "".join(parts)
-    stats = SpeculativeStats(
-        tokens_generated=max(tokens_generated, 1),
-        tokens_accepted=tokens_accepted,
-        acceptance_rate=(tokens_accepted / max(1, tokens_generated)),
-        seconds=dt,
-        tokens_per_second=(tokens_generated / max(1e-9, dt)),
-    )
-    logger.debug("Speculative decode: %s", stats.to_dict())
-    return text, stats

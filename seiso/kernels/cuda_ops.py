@@ -7,6 +7,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+from seiso.kernels.fallback_ops import pytorch_rms_norm as _pytorch_rms_norm
 from seiso.kernels.platform import GpuVendor, detect_gpu
 
 logger = logging.getLogger(__name__)
@@ -170,17 +171,10 @@ def cross_entropy_forward(logits, labels, ignore_index: int = -100):
     return ext.cross_entropy_forward(logits, labels, ignore_index)
 
 
-def cross_entropy_backward(logits, labels, row_max, row_lse, ignore_index: int = -100, grad_scale: float = 1.0):
+def cross_entropy_backward(
+    logits, labels, row_max, row_lse, ignore_index: int = -100, grad_scale: float = 1.0
+):
     ext = _load_extension()
     if ext is None:
         raise RuntimeError("CUDA cross_entropy_backward requires native extension")
     return ext.cross_entropy_backward(logits, labels, row_max, row_lse, ignore_index, grad_scale)
-
-
-def _pytorch_rms_norm(x, weight, eps: float, residual):
-    import torch
-
-    if residual is not None:
-        x = x + residual
-    var = x.pow(2).mean(dim=-1, keepdim=True)
-    return x * torch.rsqrt(var + eps) * weight

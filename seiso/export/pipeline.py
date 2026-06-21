@@ -61,6 +61,7 @@ def prepare_export(
     hub_token: str | None = None,
     hub_metadata: HubModelMetadata | None = None,
     on_log: Callable[[str], None] | None = None,
+    hub_precheck: HubPrecheckResult | None = None,
 ) -> ExportPlan:
     """Resolve formats and run Hub precheck before any heavy export work."""
     kind = detect_checkpoint_kind(checkpoint)
@@ -92,7 +93,10 @@ def prepare_export(
         profile=prof.value if prof else None,
     )
 
-    if hub_repo and hub_token:
+    if hub_precheck is not None:
+        plan.precheck = hub_precheck
+        plan.warnings.extend(hub_precheck.warnings)
+    elif hub_repo and hub_token:
         plan.precheck = precheck_hub_export(
             repo_id=hub_repo,
             token=hub_token,

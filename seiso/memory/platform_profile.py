@@ -37,9 +37,10 @@ def apply_platform_memory_profile(*, profile: dict[str, Any] | None = None) -> d
     ram_gb = float(profile.get("ram_gb") or 0)
     caps = training_capabilities()
     system = platform.system()
-    low = os.environ.get("SEISO_MEMORY_PROFILE", "").strip().lower() == "low" or memory_profile_label(
-        profile
-    ) == "low"
+    low = (
+        os.environ.get("SEISO_MEMORY_PROFILE", "").strip().lower() == "low"
+        or memory_profile_label(profile) == "low"
+    )
 
     os.environ.setdefault("SEISO_LLAMA_USE_MMAP", "true")
     os.environ.setdefault("SEISO_LLAMA_USE_MLOCK", "false")
@@ -57,11 +58,17 @@ def apply_platform_memory_profile(*, profile: dict[str, Any] | None = None) -> d
         if tier == HardwareTier.CPU_ONLY:
             os.environ.setdefault("SEISO_LLAMA_GPU_LAYERS", "0")
             os.environ.setdefault("SEISO_LLAMA_BATCH", "512")
-            os.environ.setdefault("SEISO_LLAMA_THREADS", str(min(max((os.cpu_count() or 4) - 2, 2), 8)))
+            os.environ.setdefault(
+                "SEISO_LLAMA_THREADS", str(min(max((os.cpu_count() or 4) - 2, 2), 8))
+            )
         elif tier == HardwareTier.APPLE_UNIFIED and (ram_gb <= 24 or headroom < 12288):
             os.environ.setdefault("SEISO_LLAMA_GPU_LAYERS", "-1")
             os.environ.setdefault("SEISO_LLAMA_BATCH", "512" if headroom >= 8192 else "256")
-        if tier == HardwareTier.APPLE_UNIFIED and ram_gb <= 24 and not caps.get("supports_mlx_inference"):
+        if (
+            tier == HardwareTier.APPLE_UNIFIED
+            and ram_gb <= 24
+            and not caps.get("supports_mlx_inference")
+        ):
             os.environ.setdefault("SEISO_SKIP_MLX_PROBE", "1")
 
     elif system == "Windows":

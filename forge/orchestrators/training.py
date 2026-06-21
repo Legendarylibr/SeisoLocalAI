@@ -35,7 +35,9 @@ class TrainingOrchestrator(Orchestrator):
         from seiso.memory.protection import apply_training_memory_guards
 
         config = apply_training_memory_guards(config)
-        config.output_dir = Path(payload.get("output_dir", self.sandbox_root / "checkpoints" / job_id))
+        config.output_dir = Path(
+            payload.get("output_dir", self.sandbox_root / "checkpoints" / job_id)
+        )
 
         multi_gpu = bool(payload.get("multi_gpu", config.multi_gpu))
         config.multi_gpu = multi_gpu
@@ -70,13 +72,17 @@ class TrainingOrchestrator(Orchestrator):
                 checkpoint = await self._run_distributed(job_id, config, layout.device_count)
             else:
                 if multi_gpu and layout.device_count <= 1:
-                    self._emit_log(job_id, "multi_gpu requested but only one GPU — running single-process")
+                    self._emit_log(
+                        job_id, "multi_gpu requested but only one GPU — running single-process"
+                    )
 
                 def on_metric(metric: dict[str, Any]) -> None:
                     loop.call_soon_threadsafe(self._emit_metric, job_id, metric)
                     self._schedule_metrics_persist(job_id, loop)
 
-                checkpoint = await loop.run_in_executor(None, lambda: run_training(config, on_metric=on_metric))
+                checkpoint = await loop.run_in_executor(
+                    None, lambda: run_training(config, on_metric=on_metric)
+                )
 
             metrics_path = config.output_dir / "metrics.jsonl"
             if metrics_path.exists():
@@ -170,7 +176,9 @@ class TrainingOrchestrator(Orchestrator):
         if code != 0:
             raise RuntimeError(f"Distributed training exited with code {code}")
 
-        checkpoints = sorted(config.output_dir.glob("checkpoint-*"), key=lambda p: p.stat().st_mtime)
+        checkpoints = sorted(
+            config.output_dir.glob("checkpoint-*"), key=lambda p: p.stat().st_mtime
+        )
         if checkpoints:
             return checkpoints[-1]
         return config.output_dir

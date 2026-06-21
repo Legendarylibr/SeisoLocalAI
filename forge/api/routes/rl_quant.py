@@ -6,31 +6,29 @@ import json
 import uuid
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from forge.api.deps import get_db, get_rl_quant_orchestrator
-from forge.api.routes._jobs import format_rl_quant_job, resolve_linked_training_job
+from forge.api.routes._jobs import (
+    format_rl_quant_job,
+    resolve_linked_training_job,
+    validate_pipeline_paths,
+)
 from forge.api.routes._pipeline import (
     FormattedJobRoutes,
     PipelineJobResponse,
     register_formatted_job_routes,
 )
 from forge.api.routes._stream import job_failure_message, spawn_background
-from forge.api.routes.rl_quant_presets import rl_quant_presets_response
 from forge.config import ForgeSettings, get_settings
 from forge.db.store import Database
 from forge.orchestrators.rl_quant import RLQuantOrchestrator
 from forge.security.audit import audit_event
 from forge.security.auth import get_current_user_id
 from forge.services.model_registry import register_export_outputs
-from forge.services.user_paths import (
-    assert_llama_cpp_binary,
-    assert_user_config_file,
-    assert_user_path,
-)
+from seiso.rl_quant.presets import rl_quant_presets_response
 from seiso.rl_quant.recommendation import recommendation_to_gguf_quants
-from seiso.security import SecurityError
 
 router = APIRouter(prefix="/rl-quant", tags=["rl-quant"])
 
@@ -93,16 +91,14 @@ async def start_rl_quant(
             db, user_id, body.link_training_job_id, config, path_key="checkpoint_path"
         )
 
-    try:
-        if body.config_file:
-            assert_user_config_file(settings.data_dir, user_id, body.config_file)
-        for path_key in ("checkpoint_path", "gguf_path"):
-            if config.get(path_key):
-                assert_user_path(settings.data_dir, user_id, config[path_key])
-        if config.get("llama_cpp_binary"):
-            assert_llama_cpp_binary(config["llama_cpp_binary"])
-    except SecurityError as exc:
-        raise HTTPException(403, str(exc)) from exc
+    validate_pipeline_paths(
+        settings.data_dir,
+        user_id,
+        config,
+        config_file=body.config_file,
+        path_keys=("checkpoint_path", "gguf_path"),
+        llama_cpp_binary=True,
+    )
 
     await db.create_rl_quant_job(user_id, config, job_id=job_id)
     orchestrator.create_job(job_id=job_id, user_id=user_id)

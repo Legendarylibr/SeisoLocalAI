@@ -82,12 +82,8 @@ _FINAL_ANSWER_PATTERNS = (
         r"(?is)(?:Final Decision|Final Polish|Refining the Output|Let's go with|Final Answer|Answer|Response|Reply|Output)"
         r"\s*:+\s*\*\*([^*]+)\*\*"
     ),
-    re.compile(
-        r"(?is)\*\*(?:Final Answer|Answer|Response|Reply|Output):\*\*\s*(.+)\Z"
-    ),
-    re.compile(
-        r"(?is)\*\*(?:Final Answer|Answer|Response|Reply|Output)\*\*\s*:+\s*(.+)\Z"
-    ),
+    re.compile(r"(?is)\*\*(?:Final Answer|Answer|Response|Reply|Output):\*\*\s*(.+)\Z"),
+    re.compile(r"(?is)\*\*(?:Final Answer|Answer|Response|Reply|Output)\*\*\s*:+\s*(.+)\Z"),
     re.compile(
         r"(?is)(?:Final Decision|Final Polish|Final Answer|Answer|Response|Reply|Output)"
         r"\s*:+\s*([^\n\"]+?)\s*(?:Wait,|\Z)"
@@ -115,20 +111,25 @@ def _looks_like_reasoning_leak(content: str) -> bool:
         return True
     return bool(_PIPE_TAG_PATTERN.search(content))
 
+
 def _extract_final_answer_from_reasoning(content: str) -> str | None:
     for pattern in _FINAL_ANSWER_PATTERNS:
         matches = pattern.findall(content)
         if not matches:
             continue
         candidate = str(matches[-1]).strip().strip('"').strip("'")
-        if candidate and len(candidate) < 500 and not candidate.lower().startswith(
-            ("thinking process", "reasoning", "analysis")
+        if (
+            candidate
+            and len(candidate) < 500
+            and not candidate.lower().startswith(("thinking process", "reasoning", "analysis"))
         ):
             return candidate
     quoted = re.findall(r'"([^"]{3,200})"', content)
     for candidate in reversed(quoted):
         text = candidate.strip()
-        if text and not re.search(r"(?i)(analyze|drafting|option|refining|determine|reasoning)", text):
+        if text and not re.search(
+            r"(?i)(analyze|drafting|option|refining|determine|reasoning)", text
+        ):
             return text
     return None
 
@@ -159,7 +160,9 @@ def strip_reasoning_leakage(content: str) -> str:
         "",
         cleaned,
     )
-    cleaned = re.sub(r"(?im)^\s*\*\*(?:Reasoning|Thought|Analysis):\*\*.*?(?=^\s*\*\*|\Z)", "", cleaned)
+    cleaned = re.sub(
+        r"(?im)^\s*\*\*(?:Reasoning|Thought|Analysis):\*\*.*?(?=^\s*\*\*|\Z)", "", cleaned
+    )
     return cleaned.strip()
 
 
@@ -297,7 +300,11 @@ class StreamingOutputSanitizer:
             if re.search(r"(?i)thinking process", buf) or re.search(r"\d+\.\s*\*\*[^*]+$", buf):
                 return []
             cleaned = strip_reasoning_leakage(buf)
-            if cleaned and not _looks_like_reasoning_leak(cleaned) and not _starts_reasoning_leak(cleaned):
+            if (
+                cleaned
+                and not _looks_like_reasoning_leak(cleaned)
+                and not _starts_reasoning_leak(cleaned)
+            ):
                 self._emitted = True
                 return [cleaned]
             return []

@@ -37,7 +37,9 @@ def create_paper_bundle(
     manifest_path.write_text(json.dumps(bundle_manifest, indent=2) + "\n", encoding="utf-8")
     metrics_json_path.write_text(json.dumps(metrics, indent=2) + "\n", encoding="utf-8")
     _write_metrics_csv(metrics_csv_path, metrics)
-    appendix_path.write_text(_appendix_markdown(bundle_dir, stage_results, metrics), encoding="utf-8")
+    appendix_path.write_text(
+        _appendix_markdown(bundle_dir, stage_results, metrics), encoding="utf-8"
+    )
 
     return {
         "paper_bundle_dir": str(bundle_dir),

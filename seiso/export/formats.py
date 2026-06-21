@@ -98,7 +98,9 @@ def export_checkpoint(
                 shutil.copytree(ckpt, dest, dirs_exist_ok=True)
             _write_export_sidecar(dest, ckpt, fmt, kind)
             results[fmt.value] = dest
-            log(f"{'Full fine-tune' if fmt == ExportFormat.FULL else 'Base'} checkpoint exported to {dest}")
+            log(
+                f"{'Full fine-tune' if fmt == ExportFormat.FULL else 'Base'} checkpoint exported to {dest}"
+            )
 
         elif fmt == ExportFormat.GGUF:
             from seiso.export.gguf import export_gguf_from_checkpoint
@@ -161,7 +163,14 @@ def publish_folder_to_hub(
         )
         assert_hub_precheck_ok(precheck)
 
-    _push_hub(repo_id, token, folder, log, metadata=meta, quantizations=quantizations or meta.quantizations)
+    _push_hub(
+        repo_id,
+        token,
+        folder,
+        log,
+        metadata=meta,
+        quantizations=quantizations or meta.quantizations,
+    )
 
 
 def _enriched_metadata(options: ExportOptions, ckpt: Path) -> HubModelMetadata:
@@ -190,7 +199,9 @@ def _write_export_sidecar(dest: Path, ckpt: Path, fmt: ExportFormat, kind: str) 
     if manifest.is_file():
         with contextlib.suppress(OSError, json.JSONDecodeError):
             payload["training_manifest"] = json.loads(manifest.read_text())
-    (dest / "seiso_export_metadata.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    (dest / "seiso_export_metadata.json").write_text(
+        json.dumps(payload, indent=2), encoding="utf-8"
+    )
 
 
 def _select_hub_folder(out_root: Path, formats: list[ExportFormat]) -> Path:
@@ -202,7 +213,9 @@ def _select_hub_folder(out_root: Path, formats: list[ExportFormat]) -> Path:
                 return candidate
     if ExportFormat.GGUF in formats:
         for child in sorted(out_root.iterdir()):
-            if child.is_dir() and (child.name in {"q4_k_m", "q8_0", "f16"} or child.name.startswith("gguf-")):
+            if child.is_dir() and (
+                child.name in {"q4_k_m", "q8_0", "f16"} or child.name.startswith("gguf-")
+            ):
                 return child
     return out_root
 
@@ -332,7 +345,9 @@ def merge_lora_checkpoint(checkpoint: Path, dest: Path, log: Callable[[str], Non
         from seiso.memory.protection import ensure_load_fits, release_cached_memory
 
         ensure_load_fits(base_id, mode="chat")
-        model = deps.auto_model.from_pretrained(base_id, device_map="cpu", low_cpu_mem_usage=True, revision="main")  # nosec B615: revision pinned
+        model = deps.auto_model.from_pretrained(
+            base_id, device_map="cpu", low_cpu_mem_usage=True, revision="main"
+        )  # nosec B615: revision pinned
         model = deps.peft_model.from_pretrained(model, str(checkpoint))
         merged = model.merge_and_unload()
         merged.save_pretrained(str(dest))

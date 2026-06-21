@@ -6,7 +6,9 @@ from pathlib import Path
 
 from seiso.security import SecurityError, assert_within, safe_join
 
-_USER_SCOPED_ROOTS = frozenset({"uploads", "knowledge", "artifacts", "sandbox", "models", "checkpoints", "exports"})
+_USER_SCOPED_ROOTS = frozenset(
+    {"uploads", "knowledge", "artifacts", "sandbox", "models", "checkpoints", "exports"}
+)
 _SHARED_CACHE_ROOTS = frozenset({"hf_cache"})
 
 
@@ -77,7 +79,12 @@ def _assert_resolved_scope(
 
     if root in _SHARED_CACHE_ROOTS:
         log_rel = logical.relative_to(base)
-        if log_rel.parts and log_rel.parts[0] == "models" and len(log_rel.parts) >= 2 and log_rel.parts[1] == user_id:
+        if (
+            log_rel.parts
+            and log_rel.parts[0] == "models"
+            and len(log_rel.parts) >= 2
+            and log_rel.parts[1] == user_id
+        ):
             return
         raise SecurityError("Shared cache paths are only reachable via your model inventory")
 
@@ -110,9 +117,7 @@ def assert_user_path(sandbox_root: Path, user_id: str, target: str | Path) -> Pa
 
     resolved = assert_within(base, source.resolve())
     if source.is_symlink() and not resolved.exists():
-        raise SecurityError(
-            f"Model cache link is broken — re-download from Hub: {logical.name}"
-        )
+        raise SecurityError(f"Model cache link is broken — re-download from Hub: {logical.name}")
     _assert_resolved_scope(base, user_id, logical, resolved)
     return resolved
 
@@ -127,8 +132,13 @@ def assert_llama_cpp_binary(target: str | Path) -> Path:
     resolved = source.resolve()
     if not resolved.is_file():
         raise SecurityError("llama_cpp_binary must point to an existing file")
-    allowed = ("/usr/", "/opt/", "/bin/", "/sbin/", "/Users/", "/home/")
     path_str = str(resolved)
-    if not any(path_str.startswith(prefix) for prefix in allowed):
+    system_prefixes = ("/usr/", "/opt/", "/bin/", "/sbin/", "/Users/", "/home/")
+    parts_lower = {part.lower() for part in resolved.parts}
+    if not (
+        any(path_str.startswith(prefix) for prefix in system_prefixes)
+        or ".venv" in parts_lower
+        or "venv" in parts_lower
+    ):
         raise SecurityError("llama_cpp_binary is outside allowed system locations")
     return resolved

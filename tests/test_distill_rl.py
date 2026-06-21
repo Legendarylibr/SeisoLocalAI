@@ -142,7 +142,9 @@ def test_aggregate_multiseed_runs(tmp_path: Path):
     payload["checkpoints"]["distilled"]["val_preference_accuracy"] = 0.7
     (run_b / "evaluation_summary.json").write_text(json.dumps(payload), encoding="utf-8")
 
-    aggregate = aggregate_multiseed_runs([tmp_path / "run-a", tmp_path / "run-b"], output_dir=tmp_path / "agg")
+    aggregate = aggregate_multiseed_runs(
+        [tmp_path / "run-a", tmp_path / "run-b"], output_dir=tmp_path / "agg"
+    )
     stats = aggregate["checkpoints"]["distilled"]
     assert stats["perplexity_mean"] == 11.0
     assert stats["perplexity_n"] == 2.0
@@ -157,13 +159,19 @@ def test_run_distill_rl_job_orchestrates_stages(tmp_path: Path):
     prefs_dir.mkdir(parents=True)
     train = prefs_dir / "preferences_train.jsonl"
     val = prefs_dir / "preferences_val.jsonl"
-    train.write_text(json.dumps({"prompt": "p", "chosen": "yes", "rejected": "no"}) + "\n", encoding="utf-8")
-    val.write_text(json.dumps({"prompt": "p", "chosen": "yes", "rejected": "no"}) + "\n", encoding="utf-8")
+    train.write_text(
+        json.dumps({"prompt": "p", "chosen": "yes", "rejected": "no"}) + "\n", encoding="utf-8"
+    )
+    val.write_text(
+        json.dumps({"prompt": "p", "chosen": "yes", "rejected": "no"}) + "\n", encoding="utf-8"
+    )
     (prefs_dir / "preferences_manifest.json").write_text("{}", encoding="utf-8")
 
     dpo_dir = tmp_path / "distill_rl" / "cli" / "job-x" / "dpo" / "seiso_job-x" / "checkpoint-1"
     dpo_dir.mkdir(parents=True)
-    eval_summary = tmp_path / "distill_rl" / "cli" / "job-x" / "evaluation" / "evaluation_summary.json"
+    eval_summary = (
+        tmp_path / "distill_rl" / "cli" / "job-x" / "evaluation" / "evaluation_summary.json"
+    )
     eval_summary.parent.mkdir(parents=True)
     eval_summary.write_text(json.dumps({"checkpoints": {}}), encoding="utf-8")
 
@@ -179,7 +187,9 @@ def test_run_distill_rl_job_orchestrates_stages(tmp_path: Path):
     with (
         patch("seiso.models.hf_env.configure_hf_hub_cache"),
         patch("seiso.security.nvidia_boundary.enforce_nvidia_secure_boundary"),
-        patch("seiso.distill_rl.runner.init_run_manifest", return_value={"config_fingerprint": "abc"}),
+        patch(
+            "seiso.distill_rl.runner.init_run_manifest", return_value={"config_fingerprint": "abc"}
+        ),
         patch("seiso.distill_rl.runner.verify_run_manifest", return_value={"ok": True}),
         patch("seiso.distill_rl.runner.append_artifact"),
         patch("seiso.distill_rl.runner._run_distill", return_value=distilled),
@@ -206,7 +216,9 @@ def test_run_distill_rl_job_orchestrates_stages(tmp_path: Path):
 
 
 def test_resolve_job_seeds_from_reproducible_preset(tmp_path: Path):
-    seeds = resolve_job_seeds({"preset": "reproducible", "config_file": "distill_rl_reproducible.json"})
+    seeds = resolve_job_seeds(
+        {"preset": "reproducible", "config_file": "distill_rl_reproducible.json"}
+    )
     assert seeds == [13, 42, 99]
 
 

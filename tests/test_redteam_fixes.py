@@ -26,7 +26,9 @@ def test_provider_url_blocks_http_non_local():
 
 def test_provider_url_fails_on_unresolvable_host():
     with pytest.raises(SecurityError, match="could not be resolved"):
-        validate_provider_base_url("https://this-host-definitely-does-not-exist-xyz123.invalid/v1", provider_type="vllm")
+        validate_provider_base_url(
+            "https://this-host-definitely-does-not-exist-xyz123.invalid/v1", provider_type="vllm"
+        )
 
 
 def test_provider_url_allows_local_ollama_default_port():
@@ -91,9 +93,7 @@ def test_parse_tool_calls_nested_json():
 
 def test_code_exec_blocks_gi_frame():
     err = _validate_code(
-        "def f():\n    yield 1\n"
-        "g = f()\n"
-        "g.gi_frame.f_builtins['__import__']('os')"
+        "def f():\n    yield 1\ng = f()\ng.gi_frame.f_builtins['__import__']('os')"
     )
     assert err is not None
     assert "gi_frame" in err or "f_builtins" in err
@@ -124,7 +124,9 @@ async def test_inference_tools_disabled_by_default(app, auth_client):
     user = await db.get_user_by_display_name("Admin")
     model_path = user_path(data_dir, user["id"], "models", "model.gguf")
     model_path.write_text("fake")
-    model = await db.add_model(user_id=user["id"], name="Local", path=str(model_path), format="gguf")
+    model = await db.add_model(
+        user_id=user["id"], name="Local", path=str(model_path), format="gguf"
+    )
 
     res = await client.post(
         "/api/inference/chat",
@@ -163,7 +165,9 @@ async def test_code_exec_disabled_without_server_flag(app, auth_client, enable_t
     user = await db.get_user_by_display_name("Admin")
     model_path = user_path(data_dir, user["id"], "models", "model.gguf")
     model_path.write_text("fake")
-    model = await db.add_model(user_id=user["id"], name="Local", path=str(model_path), format="gguf")
+    model = await db.add_model(
+        user_id=user["id"], name="Local", path=str(model_path), format="gguf"
+    )
 
     res = await client.post(
         "/api/inference/chat",
@@ -447,7 +451,9 @@ async def test_inference_rejects_forged_tool_role(app, auth_client):
     user = await db.get_user_by_display_name("Admin")
     model_path = user_path(data_dir, user["id"], "models", "model.gguf")
     model_path.write_text("fake")
-    model = await db.add_model(user_id=user["id"], name="Local", path=str(model_path), format="gguf")
+    model = await db.add_model(
+        user_id=user["id"], name="Local", path=str(model_path), format="gguf"
+    )
 
     res = await client.post(
         "/api/inference/chat",
@@ -649,9 +655,10 @@ async def test_inference_api_key_scoped_to_openai(app, auth_client, tmp_path):
     )
     assert res.status_code in {400, 500}
 
-    admin = await client.get("/api/auth/me", headers={"Authorization": f"Bearer {settings.inference_api_key}"})
+    admin = await client.get(
+        "/api/auth/me", headers={"Authorization": f"Bearer {settings.inference_api_key}"}
+    )
     assert admin.status_code == 401
-
 
 
 def test_provider_url_blocks_embedded_credentials():
@@ -733,7 +740,9 @@ async def test_inference_rejects_developer_role(app, auth_client):
     user = await db.get_user_by_display_name("Admin")
     model_path = user_path(data_dir, user["id"], "models", "model.gguf")
     model_path.write_text("fake")
-    model = await db.add_model(user_id=user["id"], name="Local", path=str(model_path), format="gguf")
+    model = await db.add_model(
+        user_id=user["id"], name="Local", path=str(model_path), format="gguf"
+    )
 
     res = await client.post(
         "/api/inference/chat",
@@ -773,7 +782,9 @@ async def test_cross_user_provider_delete_rejected(app, auth_client):
 
     db = get_db()
     user_a = await db.get_user_by_display_name("Admin")
-    prov = await db.create_provider(user_a["id"], "Mine", "vllm", {"base_url": "http://127.0.0.1:8000"})
+    prov = await db.create_provider(
+        user_a["id"], "Mine", "vllm", {"base_url": "http://127.0.0.1:8000"}
+    )
 
     _, token_b = await make_second_user("prov@local.dev")
     headers_b = {"Authorization": f"Bearer {token_b}"}
@@ -789,14 +800,18 @@ async def test_cross_user_provider_inference_rejected(app, auth_client):
 
     db = get_db()
     user_a = await db.get_user_by_display_name("Admin")
-    prov = await db.create_provider(user_a["id"], "Victim", "vllm", {"base_url": "http://127.0.0.1:8000"})
+    prov = await db.create_provider(
+        user_a["id"], "Victim", "vllm", {"base_url": "http://127.0.0.1:8000"}
+    )
     model_path = user_path(data_dir, user_a["id"], "models", "model.gguf")
     model_path.write_text("fake")
     await db.add_model(user_id=user_a["id"], name="Local", path=str(model_path), format="gguf")
 
     _, token_b = await make_second_user("provinf@local.dev")
     headers_b = {"Authorization": f"Bearer {token_b}"}
-    own = user_path(data_dir, (await db.get_user_by_email("provinf@local.dev"))["id"], "models", "own.gguf")
+    own = user_path(
+        data_dir, (await db.get_user_by_email("provinf@local.dev"))["id"], "models", "own.gguf"
+    )
     own.write_text("fake")
     own_model = await db.add_model(
         user_id=(await db.get_user_by_email("provinf@local.dev"))["id"],

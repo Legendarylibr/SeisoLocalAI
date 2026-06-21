@@ -47,7 +47,9 @@ def open_browser(url: str) -> bool:
             return subprocess.run(["open", url], check=False, capture_output=True).returncode == 0
         if system == "Windows":
             return (
-                subprocess.run(["cmd", "/c", "start", "", url], check=False, capture_output=True).returncode
+                subprocess.run(
+                    ["cmd", "/c", "start", "", url], check=False, capture_output=True
+                ).returncode
                 == 0
             )
         xdg_open = shutil.which("xdg-open")

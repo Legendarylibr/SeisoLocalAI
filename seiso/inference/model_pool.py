@@ -214,13 +214,19 @@ class ModelPool:
 
         norm = self.normalize_path(model_path)
         with self._lock:
-            if self._active and self._active.backend == BackendKind.LLAMA and self._active.meta.get("norm_path") == norm:
+            if (
+                self._active
+                and self._active.backend == BackendKind.LLAMA
+                and self._active.meta.get("norm_path") == norm
+            ):
                 cached_ctx = int(self._active.meta.get("n_ctx") or 0)
                 if cached_ctx >= n_ctx:
                     return self._active.handle
 
         key = f"llama:{norm}"
-        return self.switch(model_path, BackendKind.LLAMA, loader, cache_key=key, meta={"n_ctx": n_ctx})
+        return self.switch(
+            model_path, BackendKind.LLAMA, loader, cache_key=key, meta={"n_ctx": n_ctx}
+        )
 
     def get_mlx(self, model_path: str) -> tuple[Any, Any]:
         def loader(path: str):
@@ -253,7 +259,9 @@ class ModelPool:
         maybe_apply_fused_kernels(model)
         return model, tokenizer
 
-    def get_torch_speculative(self, target_path: str, draft_path: str, *, load_in_4bit: bool = True) -> Any:
+    def get_torch_speculative(
+        self, target_path: str, draft_path: str, *, load_in_4bit: bool = True
+    ) -> Any:
         """Load target + draft models for speculative decoding."""
         from seiso.inference.speculative import TorchSpeculativeBundle
 
@@ -267,8 +275,12 @@ class ModelPool:
             release_cached_memory(sync=True)
             ensure_load_fits(target_path, mode="chat")
             ensure_load_fits(draft_path, mode="chat")
-            target_model, target_tokenizer = self._load_torch_pair(target_path, load_in_4bit=load_in_4bit)
-            draft_model, draft_tokenizer = self._load_torch_pair(draft_path, load_in_4bit=load_in_4bit)
+            target_model, target_tokenizer = self._load_torch_pair(
+                target_path, load_in_4bit=load_in_4bit
+            )
+            draft_model, draft_tokenizer = self._load_torch_pair(
+                draft_path, load_in_4bit=load_in_4bit
+            )
             return TorchSpeculativeBundle(
                 target_model=target_model,
                 target_tokenizer=target_tokenizer,
@@ -281,7 +293,12 @@ class ModelPool:
             BackendKind.TORCH,
             loader,
             cache_key=key,
-            meta={"path": target_path, "norm_path": target_norm, "draft_path": draft_path, "draft_norm_path": draft_norm},
+            meta={
+                "path": target_path,
+                "norm_path": target_norm,
+                "draft_path": draft_path,
+                "draft_norm_path": draft_norm,
+            },
         )
 
     def unload_all(self) -> None:

@@ -110,7 +110,9 @@ def test_precheck_repo_taken_by_other_user(mock_api_cls):
     info.author = "bob"
     api.repo_info.return_value = info
 
-    result = precheck_hub_export(repo_id="bob/existing", token="hf_test", metadata=_meta(username="alice"))
+    result = precheck_hub_export(
+        repo_id="bob/existing", token="hf_test", metadata=_meta(username="alice")
+    )
     assert not result.ok
     assert not result.repo_available
     assert any("owned by" in e for e in result.errors)
@@ -217,7 +219,9 @@ def test_export_full_finetune(tmp_path: Path):
     ckpt.mkdir(parents=True)
     (ckpt / "config.json").write_text('{"model_type": "llama"}')
     (ckpt / "model.safetensors").write_text("full-weights")
-    (ckpt / "seiso_manifest.json").write_text(json.dumps({"method": "full", "model_id": "meta-llama/Llama-3.2-3B"}))
+    (ckpt / "seiso_manifest.json").write_text(
+        json.dumps({"method": "full", "model_id": "meta-llama/Llama-3.2-3B"})
+    )
 
     out = sandbox / "exports" / "full-job"
     results = export_checkpoint(
@@ -420,7 +424,12 @@ async def test_export_job_precheck_before_start(mock_precheck, app, auth_client)
         json={
             "checkpoint": str(ckpt),
             "formats": ["merged"],
-            "hub": {"username": "alice", "model_name": "model", "author": "Alice", "hf_token": "hf_x"},
+            "hub": {
+                "username": "alice",
+                "model_name": "model",
+                "author": "Alice",
+                "hf_token": "hf_x",
+            },
         },
     )
     assert res.status_code == 400

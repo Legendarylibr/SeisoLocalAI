@@ -10,6 +10,7 @@ from typing import Any
 
 from forge.services.hf_auth import hf_auth_status, resolve_hf_token
 from seiso.models.hf_env import hf_transfer_stack, resolve_hf_cache_dir
+from seiso.models.hub_errors import format_hub_error
 
 
 @dataclass
@@ -96,7 +97,7 @@ def _probe_hf_hub_anonymous(api: Any, *, timeout: float, started: float) -> HfCo
             anonymous_ok=True,
         )
     except Exception as exc:
-        return HfConnectivityResult(reachable=False, error=_format_hub_error(exc))
+        return HfConnectivityResult(reachable=False, error=format_hub_error(exc, context="probe"))
 
 
 def probe_hf_hub(*, token: str | None = None, timeout: float = 15.0) -> HfConnectivityResult:
@@ -142,10 +143,12 @@ def probe_hf_hub(*, token: str | None = None, timeout: float = 15.0) -> HfConnec
                 return HfConnectivityResult(
                     reachable=False,
                     latency_ms=int((time.monotonic() - started) * 1000),
-                    error=_format_hub_error(exc),
+                    error=format_hub_error(exc, context="probe"),
                 )
         except Exception as exc:
-            return HfConnectivityResult(reachable=False, error=_format_hub_error(exc))
+            return HfConnectivityResult(
+                reachable=False, error=format_hub_error(exc, context="probe")
+            )
 
     anon = _probe_hf_hub_anonymous(api, timeout=timeout, started=started)
     if token_invalid:
@@ -154,16 +157,6 @@ def probe_hf_hub(*, token: str | None = None, timeout: float = 15.0) -> HfConnec
         if anon.reachable and anon.anonymous_ok:
             anon.error = None
     return anon
-
-
-def _format_hub_error(exc: Exception) -> str:
-    msg = str(exc).strip() or exc.__class__.__name__
-    lowered = msg.lower()
-    if "connection" in lowered or "network" in lowered or "resolve" in lowered:
-        return f"Cannot reach huggingface.co — check your network connection. ({msg})"
-    if "timeout" in lowered or "timed out" in lowered:
-        return f"Hugging Face Hub timed out — try again or increase HF_HUB_DOWNLOAD_TIMEOUT. ({msg})"
-    return msg
 
 
 def build_hf_status(
@@ -197,9 +190,7 @@ def build_hf_status(
         and (connectivity.anonymous_ok or connectivity.token_valid)
     )
     ready_for_gguf_chat = ready_for_download and runtime.llamacpp
-    ready_for_local_chat = ready_for_download and (
-        runtime.llamacpp or runtime.mlx or runtime.torch
-    )
+    ready_for_local_chat = ready_for_download and (runtime.llamacpp or runtime.mlx or runtime.torch)
 
     return {
         "auth": {
@@ -252,6 +243,5 @@ def assert_hub_ready_for_download(
         raise ValueError(result.error or "Cannot reach Hugging Face Hub")
     if not result.anonymous_ok and not result.token_valid:
         raise ValueError(
-            result.error
-            or "Cannot reach Hugging Face Hub — check your network connection"
+            result.error or "Cannot reach Hugging Face Hub — check your network connection"
         )

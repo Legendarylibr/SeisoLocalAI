@@ -30,3 +30,5 @@ checkpoints/
 exports/
 logs/
 .seiso-install.log
+.cache/
+.test_outputs/

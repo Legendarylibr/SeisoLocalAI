@@ -130,7 +130,7 @@ def write_ollama_modelfile(
 ) -> Path:
     """Write Modelfile for `ollama create`."""
     modelfile = dest_dir / "Modelfile"
-    lines = [f'FROM ./{gguf_filename}']
+    lines = [f"FROM ./{gguf_filename}"]
     if template:
         lines.append(f'TEMPLATE """{template}"""')
     if system_prompt:
@@ -148,7 +148,9 @@ def write_ollama_modelfile(
     return modelfile
 
 
-def convert_hf_dir_to_gguf(source: Path, dest: Path, quant: str, log: Callable[[str], None]) -> bool:
+def convert_hf_dir_to_gguf(
+    source: Path, dest: Path, quant: str, log: Callable[[str], None]
+) -> bool:
     """Convert a merged HF model directory to GGUF."""
     quant = normalize_gguf_quant(quant)
     if dest.exists():
@@ -276,5 +278,7 @@ def export_gguf(
             log(f"Merge failed: {exc}")
             return []
 
-        paths = _export_quants(merged, output_dir, normalize_gguf_quants(quantizations), output_dir.name, log)
+        paths = _export_quants(
+            merged, output_dir, normalize_gguf_quants(quantizations), output_dir.name, log
+        )
         return list(paths.values())

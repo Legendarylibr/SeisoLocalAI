@@ -164,7 +164,9 @@ async def bench_inference(
         output_tokens / (generate_ms / 1000.0) if generate_ms > 0 and output_tokens > 0 else 0.0
     )
     ms_per_token = generate_ms / output_tokens if output_tokens > 0 else 0.0
-    total_ms = (load_ms or 0.0) + ttft_ms + generate_ms if load_ms is not None else ttft_ms + generate_ms
+    total_ms = (
+        (load_ms or 0.0) + ttft_ms + generate_ms if load_ms is not None else ttft_ms + generate_ms
+    )
 
     return InferenceBenchResult(
         backend=resolved_backend,
@@ -218,9 +220,7 @@ async def compare_inference_profiles(
     )
 
     speedup = (
-        optimized.tokens_per_sec / baseline.tokens_per_sec
-        if baseline.tokens_per_sec > 0
-        else 0.0
+        optimized.tokens_per_sec / baseline.tokens_per_sec if baseline.tokens_per_sec > 0 else 0.0
     )
     ttft_delta = baseline.ttft_ms - optimized.ttft_ms
 

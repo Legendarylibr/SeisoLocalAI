@@ -28,27 +28,35 @@ def test_is_oom_error_ignores_other_errors():
 
 def test_sanitize_inference_payload_clamps_max_tokens(monkeypatch):
     monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 4096)
-    out = sanitize_inference_payload({"messages": [{"role": "user", "content": "hi"}], "max_tokens": 99999})
+    out = sanitize_inference_payload(
+        {"messages": [{"role": "user", "content": "hi"}], "max_tokens": 99999}
+    )
     assert 1 <= out["max_tokens"] <= 8192
 
 
 def test_clamp_llama_n_ctx_respects_headroom(monkeypatch):
     monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 3072)
-    n_ctx = clamp_llama_n_ctx(8192, messages=[{"role": "user", "content": "x" * 200}], max_tokens=256)
+    n_ctx = clamp_llama_n_ctx(
+        8192, messages=[{"role": "user", "content": "x" * 200}], max_tokens=256
+    )
     assert 2048 <= n_ctx <= 8192
     assert n_ctx % 512 == 0
 
 
 def test_clamp_llama_load_kwargs_reduces_batch_on_tight_memory(monkeypatch):
     monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 3500)
-    kwargs = clamp_llama_load_kwargs({"n_ctx": 4096, "n_batch": 2048, "n_ubatch": 2048, "n_gpu_layers": -1})
+    kwargs = clamp_llama_load_kwargs(
+        {"n_ctx": 4096, "n_batch": 2048, "n_ubatch": 2048, "n_gpu_layers": -1}
+    )
     assert kwargs["n_batch"] <= 256
     assert kwargs["n_ubatch"] <= kwargs["n_batch"]
 
 
 def test_clamp_llama_load_kwargs_scales_batch_with_large_context(monkeypatch):
     monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 16384)
-    kwargs = clamp_llama_load_kwargs({"n_ctx": 8192, "n_batch": 2048, "n_ubatch": 512, "n_gpu_layers": -1})
+    kwargs = clamp_llama_load_kwargs(
+        {"n_ctx": 8192, "n_batch": 2048, "n_ubatch": 512, "n_gpu_layers": -1}
+    )
     assert kwargs["n_batch"] <= 1024
 
 
@@ -60,7 +68,11 @@ def test_clamp_llama_cache_mb_disabled_on_low_headroom(monkeypatch):
 def test_apply_training_memory_guards_clamps_batch(monkeypatch):
     from seiso.training.config import TrainConfig
 
-    profile = {"backend": "cuda", "gpus": [{"vram_total_mb": 6000, "vram_used_mb": 1000}], "ram_gb": 16}
+    profile = {
+        "backend": "cuda",
+        "gpus": [{"vram_total_mb": 6000, "vram_used_mb": 1000}],
+        "ram_gb": 16,
+    }
     monkeypatch.setattr("seiso.memory.protection.hardware_profile", lambda: profile)
     monkeypatch.setattr("forge.services.hardware.vram_headroom_mb", lambda _p: 5000)
 

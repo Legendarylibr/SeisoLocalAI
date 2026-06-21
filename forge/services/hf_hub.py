@@ -11,11 +11,13 @@ import urllib.parse
 import urllib.request
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from functools import partial
 from pathlib import Path
 from typing import Any, TypeVar
 
 from forge.services.download_progress import ProgressCallback, make_tqdm_class
 from seiso.models.catalog import CatalogEntry, get_by_repo
+from seiso.models.hub_errors import format_hub_error
 from seiso.models.trusted_gguf import (
     base_model_from_tags,
     filter_trusted_gguf_search_results,
@@ -25,16 +27,13 @@ from seiso.models.trusted_gguf import (
     rank_trusted_gguf_repos,
 )
 from seiso.security import sanitize_filename
+from seiso.ttl_cache import TtlCache
 
 _HF_API = "https://huggingface.co/api"
-_GGUF_ARTIFACT_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
-_GGUF_ARTIFACT_TTL_S = 86_400.0  # 24h — mirror filenames rarely change
-_GGUF_REPO_CACHE: dict[str, tuple[float, str]] = {}
-_GGUF_REPO_TTL_S = 86_400.0
-_REPO_GGUF_CACHE: dict[str, tuple[float, bool]] = {}
-_REPO_GGUF_TTL_S = 3_600.0
-_FILE_SIZE_CACHE: dict[str, tuple[float, int]] = {}
-_FILE_SIZE_TTL_S = 86_400.0
+_gguf_artifact_cache: TtlCache[str, dict[str, Any]] = TtlCache(ttl_s=86_400.0, max_entries=128)
+_gguf_repo_cache: TtlCache[str, str] = TtlCache(ttl_s=86_400.0, max_entries=256)
+_repo_gguf_cache: TtlCache[str, bool] = TtlCache(ttl_s=3_600.0, max_entries=512)
+_file_size_cache: TtlCache[str, int] = TtlCache(ttl_s=86_400.0, max_entries=512)
 _DOWNLOAD_RETRIES = 3
 _DOWNLOAD_RETRY_BACKOFF_S = 2.0
 _GGUF_SHARD_RE = re.compile(
@@ -56,26 +55,7 @@ def _snapshot_max_workers() -> int:
 
 
 def _format_hub_download_error(exc: Exception, *, repo_id: str) -> str:
-    msg = str(exc).strip() or exc.__class__.__name__
-    lowered = msg.lower()
-    if "401" in msg or "403" in msg or "gated" in lowered or "authorized" in lowered:
-        return (
-            f"Access denied for {repo_id}. This model may be gated — "
-            "save a Hugging Face token in Settings or run `hf auth login`."
-        )
-    if "404" in msg or "not found" in lowered:
-        return f"Model repo not found on Hugging Face Hub: {repo_id}"
-    if "429" in msg or "rate limit" in lowered or "too many requests" in lowered:
-        return (
-            f"Hugging Face anonymous API rate limit reached while downloading {repo_id}. "
-            "Public models do not require a token, but anonymous requests are throttled. "
-            "Wait a few minutes and retry, or add a free HF token for higher limits."
-        )
-    if "connection" in lowered or "network" in lowered or "resolve" in lowered:
-        return f"Cannot reach huggingface.co while downloading {repo_id}. Check your network."
-    if "timeout" in lowered or "timed out" in lowered:
-        return f"Download timed out for {repo_id}. Retry or set HF_HUB_DOWNLOAD_TIMEOUT higher."
-    return f"Hub download failed for {repo_id}: {msg}"
+    return format_hub_error(exc, context="download", repo_id=repo_id)
 
 
 def _with_download_retries(fn: Callable[[], T], *, repo_id: str) -> T:
@@ -207,16 +187,15 @@ def _list_repo_files(repo_id: str, *, token: str | None, revision: str) -> list[
 
 def repo_has_gguf(repo_id: str, *, token: str | None = None, revision: str = "main") -> bool:
     cache_key = f"{repo_id}:{revision}"
-    now = time.time()
-    cached = _REPO_GGUF_CACHE.get(cache_key)
-    if cached and now - cached[0] < _REPO_GGUF_TTL_S:
-        return cached[1]
+    cached = _repo_gguf_cache.get(cache_key)
+    if cached is not None:
+        return cached
     try:
         files = _list_repo_files(repo_id, token=token, revision=revision)
         has_gguf = any(f.lower().endswith(".gguf") for f in files)
     except Exception:
         has_gguf = False
-    _REPO_GGUF_CACHE[cache_key] = (now, has_gguf)
+    _repo_gguf_cache.set(cache_key, has_gguf)
     return has_gguf
 
 
@@ -255,8 +234,12 @@ def search_huggingface_datasets(*, query: str, limit: int = 12) -> list[dict[str
             {
                 "repo_id": dataset_id,
                 "name": dataset_id.split("/")[-1],
-                "downloads": row.get("downloads") if isinstance(row.get("downloads"), int) else None,
-                "tags": [t for t in tags if isinstance(t, str)][:4] if isinstance(tags, list) else [],
+                "downloads": row.get("downloads")
+                if isinstance(row.get("downloads"), int)
+                else None,
+                "tags": [t for t in tags if isinstance(t, str)][:4]
+                if isinstance(tags, list)
+                else [],
             }
         )
     return results
@@ -303,7 +286,9 @@ def search_huggingface_gguf_repos(
         results.append(
             {
                 "repo_id": model_id,
-                "downloads": row.get("downloads") if isinstance(row.get("downloads"), int) else None,
+                "downloads": row.get("downloads")
+                if isinstance(row.get("downloads"), int)
+                else None,
                 "likes": row.get("likes") if isinstance(row.get("likes"), int) else None,
             }
         )
@@ -353,17 +338,16 @@ def get_gguf_file_size_bytes(
 ) -> int:
     """Return on-disk byte size for a single Hub file (uses HF metadata API)."""
     cache_key = f"{repo_id}:{filename}:{revision}"
-    now = time.time()
-    cached = _FILE_SIZE_CACHE.get(cache_key)
-    if cached and now - cached[0] < _FILE_SIZE_TTL_S:
-        return cached[1]
+    cached = _file_size_cache.get(cache_key)
+    if cached is not None:
+        return cached
 
     from huggingface_hub import get_hf_file_metadata, hf_hub_url
 
     url = hf_hub_url(repo_id, filename, repo_type="model", revision=revision)
     meta = get_hf_file_metadata(url, token=token)
     size_bytes = int(meta.size or 0)
-    _FILE_SIZE_CACHE[cache_key] = (now, size_bytes)
+    _file_size_cache.set(cache_key, size_bytes)
     return size_bytes
 
 
@@ -378,10 +362,9 @@ def resolve_gguf_artifact(
 ) -> dict[str, Any]:
     """Resolve GGUF mirror, preferred quant file, and download size for a catalog repo."""
     cache_key = f"{catalog_repo_id}:{filename or ''}:{revision}"
-    now = time.time()
-    if use_cache and cache_key in _GGUF_ARTIFACT_CACHE:
-        ts, data = _GGUF_ARTIFACT_CACHE[cache_key]
-        if now - ts < _GGUF_ARTIFACT_TTL_S:
+    if use_cache:
+        data = _gguf_artifact_cache.get(cache_key)
+        if data is not None:
             return dict(data)
 
     entry = entry or get_by_repo(catalog_repo_id)
@@ -410,12 +393,19 @@ def resolve_gguf_artifact(
         "size_bytes": size_bytes,
         "quant": quant,
     }
-    _GGUF_ARTIFACT_CACHE[cache_key] = (now, info)
+    _gguf_artifact_cache.set(cache_key, info)
     return info
 
 
 def _catalog_base_repo(entry: CatalogEntry, repo_id: str) -> str | None:
-    return base_model_from_tags(entry.tags) or (repo_id if entry.repo_id != repo_id else None)
+    tags = getattr(entry, "tags", ()) or ()
+    base = base_model_from_tags(list(tags))
+    if base:
+        return base
+    entry_repo = getattr(entry, "repo_id", None)
+    if entry_repo is not None and entry_repo != repo_id:
+        return repo_id
+    return None
 
 
 def resolve_gguf_repo(
@@ -426,23 +416,21 @@ def resolve_gguf_repo(
     entry: CatalogEntry | None = None,
 ) -> str:
     """Resolve a catalog/base repo to a Hugging Face repo that ships GGUF files."""
-    entry = entry or get_by_repo(repo_id)
     if entry and entry.gguf_repo:
         base_repo = _catalog_base_repo(entry, repo_id)
         if is_trusted_gguf_repo(entry.gguf_repo, base_repo_id=base_repo or repo_id):
             return entry.gguf_repo
 
     cache_key = f"{repo_id}:{revision}"
-    now = time.time()
-    cached = _GGUF_REPO_CACHE.get(cache_key)
-    if cached and now - cached[0] < _GGUF_REPO_TTL_S:
-        return cached[1]
+    cached = _gguf_repo_cache.get(cache_key)
+    if cached is not None:
+        return cached
 
     if repo_has_gguf(repo_id, token=token, revision=revision) and is_trusted_gguf_repo(
         repo_id,
         base_repo_id=repo_id,
     ):
-        _GGUF_REPO_CACHE[cache_key] = (now, repo_id)
+        _gguf_repo_cache.set(cache_key, repo_id)
         return repo_id
 
     mirror_candidates = rank_trusted_gguf_repos(
@@ -455,7 +443,7 @@ def resolve_gguf_repo(
         revision=revision,
     )
     if mirror:
-        _GGUF_REPO_CACHE[cache_key] = (now, mirror)
+        _gguf_repo_cache.set(cache_key, mirror)
         return mirror
 
     model_name = repo_id.split("/")[-1]
@@ -474,7 +462,7 @@ def resolve_gguf_repo(
     ]
     resolved = _first_repo_with_gguf(search_candidates, token=token, revision=revision)
     if resolved:
-        _GGUF_REPO_CACHE[cache_key] = (now, resolved)
+        _gguf_repo_cache.set(cache_key, resolved)
         return resolved
 
     raise ValueError(
@@ -498,7 +486,6 @@ def download_gguf(
 ) -> dict[str, Any]:
     from huggingface_hub import hf_hub_download
 
-    entry = entry or get_by_repo(repo_id)
     quant = entry.quant if entry else "Q4_K_M"
     inv_repo = inventory_repo_id or repo_id
 
@@ -550,7 +537,7 @@ def download_gguf(
         cached_paths.append(
             Path(
                 _with_download_retries(
-                    lambda kwargs=download_kwargs: hf_hub_download(**kwargs),  # nosec B615: revision pinned in download_kwargs
+                    partial(hf_hub_download, **download_kwargs),  # nosec B615: revision pinned in download_kwargs
                     repo_id=repo_id,
                 )
             )

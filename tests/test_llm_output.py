@@ -43,14 +43,16 @@ def test_streaming_output_sanitizer_passthrough():
 def test_strip_reasoning_leakage_extracts_qwen_thinking_process_final_answer():
     raw = (
         'Thinking Process: 1. **Analyze the Input:** * Input: "yo" '
-        '2. **Drafting Options:** * Option 2 (Casual): Hey there! '
+        "2. **Drafting Options:** * Option 2 (Casual): Hey there! "
         '6. **Final Decision:** "Yo! What\'s up? How can I help you out today?" Wait,'
     )
     assert strip_reasoning_leakage(raw) == "Yo! What's up? How can I help you out today?"
 
 
 def test_strip_reasoning_leakage_removes_think_tags():
-    raw = "Hello " + "<" + "think" + ">" + "internal reasoning" + "<" + "/" + "think" + ">" + " world"
+    raw = (
+        "Hello " + "<" + "think" + ">" + "internal reasoning" + "<" + "/" + "think" + ">" + " world"
+    )
     assert strip_reasoning_leakage(raw) == "Hello  world"
 
 
@@ -74,7 +76,14 @@ def test_strip_reasoning_leakage_strips_reasoning_header():
 
 def test_strip_reasoning_leakage_removes_qwen_think_block():
     raw = (
-        "<" + "think" + ">" + "The user said hello. I should respond warmly." + "<" + "/" + "think" + ">"
+        "<"
+        + "think"
+        + ">"
+        + "The user said hello. I should respond warmly."
+        + "<"
+        + "/"
+        + "think"
+        + ">"
         "Hi there! How can I help?"
     )
     assert strip_reasoning_leakage(raw) == "Hi there! How can I help?"

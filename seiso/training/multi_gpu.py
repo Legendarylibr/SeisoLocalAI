@@ -55,7 +55,9 @@ def configure_training_args(base_args: dict, layout: GpuLayout, multi_gpu: bool)
                 "dataloader_pin_memory": training_pin_memory(),
             }
         )
-        logger.info("Multi-GPU DDP enabled: world_size=%d rank=%d", layout.world_size, layout.local_rank)
+        logger.info(
+            "Multi-GPU DDP enabled: world_size=%d rank=%d", layout.world_size, layout.local_rank
+        )
     else:
         args["dataloader_pin_memory"] = training_pin_memory()
     return args

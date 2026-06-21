@@ -39,18 +39,28 @@ def normalize_training_log(state, logs: dict[str, Any]) -> dict[str, Any]:
         "loss": float(loss) if loss is not None else None,
         "eval_loss": float(logs["eval_loss"]) if logs.get("eval_loss") is not None else None,
         "reward": float(reward) if reward is not None else None,
-        "learning_rate": float(logs["learning_rate"]) if logs.get("learning_rate") is not None else None,
+        "learning_rate": float(logs["learning_rate"])
+        if logs.get("learning_rate") is not None
+        else None,
         "grad_norm": float(logs["grad_norm"]) if logs.get("grad_norm") is not None else None,
-        "train_runtime": float(logs["train_runtime"]) if logs.get("train_runtime") is not None else None,
+        "train_runtime": float(logs["train_runtime"])
+        if logs.get("train_runtime") is not None
+        else None,
         "train_samples_per_second": (
-            float(logs["train_samples_per_second"]) if logs.get("train_samples_per_second") is not None else None
+            float(logs["train_samples_per_second"])
+            if logs.get("train_samples_per_second") is not None
+            else None
         ),
         "train_steps_per_second": (
-            float(logs["train_steps_per_second"]) if logs.get("train_steps_per_second") is not None else None
+            float(logs["train_steps_per_second"])
+            if logs.get("train_steps_per_second") is not None
+            else None
         ),
         "ts": time.time(),
     }
-    return {k: v for k, v in metric.items() if v is not None or k in ("type", "step", "epoch", "ts")}
+    return {
+        k: v for k, v in metric.items() if v is not None or k in ("type", "step", "epoch", "ts")
+    }
 
 
 class TrainingMetricsCallback:

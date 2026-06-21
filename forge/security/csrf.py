@@ -11,13 +11,15 @@ CSRF_COOKIE: Final = "seiso_csrf"
 CSRF_HEADER: Final = "x-csrf-token"
 
 # Pre-auth and health endpoints skip CSRF validation.
-CSRF_EXEMPT_PATHS: Final = frozenset({
-    "/api/auth/login",
-    "/api/auth/register",
-    "/api/auth/status",
-    "/health",
-    "/api/health",
-})
+CSRF_EXEMPT_PATHS: Final = frozenset(
+    {
+        "/api/auth/login",
+        "/api/auth/register",
+        "/api/auth/status",
+        "/health",
+        "/api/health",
+    }
+)
 
 
 def generate_csrf_token() -> str:
@@ -54,4 +56,6 @@ def validate_csrf(request: Request) -> bool:
         return True
     cookie_token = request.cookies.get(CSRF_COOKIE)
     header_token = request.headers.get(CSRF_HEADER)
-    return bool(cookie_token and header_token and secrets.compare_digest(cookie_token, header_token))
+    return bool(
+        cookie_token and header_token and secrets.compare_digest(cookie_token, header_token)
+    )

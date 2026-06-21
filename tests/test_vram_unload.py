@@ -28,7 +28,9 @@ async def test_release_all_inference_memory_unloads_local_and_ollama(monkeypatch
         "seiso.memory.protection.release_cached_memory",
         lambda sync=False: calls.append(f"cache:{sync}"),
     )
-    monkeypatch.setattr("seiso.hardware.profile.hardware_profile", lambda force_refresh=False: {"ram_gb": 16})
+    monkeypatch.setattr(
+        "seiso.hardware.profile.hardware_profile", lambda force_refresh=False: {"ram_gb": 16}
+    )
     monkeypatch.setattr(
         "forge.services.inference_models.invalidate_inference_options_cache",
         lambda: calls.append("invalidate"),
@@ -82,7 +84,9 @@ async def test_release_all_inference_memory_refreshes_headroom(monkeypatch, tmp_
         return {"ram_gb": 24, "gpus": []}
 
     monkeypatch.setattr("seiso.hardware.profile.hardware_profile", fake_hw)
-    monkeypatch.setattr("forge.services.inference_models.invalidate_inference_options_cache", lambda: None)
+    monkeypatch.setattr(
+        "forge.services.inference_models.invalidate_inference_options_cache", lambda: None
+    )
     monkeypatch.setattr(
         "forge.services.hardware.build_vram_status",
         lambda _o: {"headroom_mb": 16384, "local": {"active_model": None}, "ollama_model": None},
@@ -103,7 +107,12 @@ def test_build_vram_status_shape(monkeypatch, tmp_path):
         "forge.services.hardware.hardware_profile",
         lambda force_refresh=False: {"ram_gb": 16, "gpus": [], "backend": "metal"},
     )
-    monkeypatch.setattr("seiso.hardware.tiers.classify_tier", lambda _p: __import__("seiso.hardware.tiers", fromlist=["HardwareTier"]).HardwareTier.APPLE_UNIFIED)
+    monkeypatch.setattr(
+        "seiso.hardware.tiers.classify_tier",
+        lambda _p: (
+            __import__("seiso.hardware.tiers", fromlist=["HardwareTier"]).HardwareTier.APPLE_UNIFIED
+        ),
+    )
     monkeypatch.setattr("seiso.hardware.tiers.vram_headroom_mb", lambda _p: 10240)
     monkeypatch.setattr("seiso.hardware.memory_headroom_label", lambda _p: "RAM")
     monkeypatch.setattr("seiso.memory.platform_profile.memory_profile_label", lambda _p: "low")

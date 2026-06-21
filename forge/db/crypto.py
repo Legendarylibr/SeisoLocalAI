@@ -22,7 +22,7 @@ def resolve_encryption_key(raw: str | None) -> bytes:
     if not raw:
         raise ValueError(
             "SEISO_DB_ENCRYPTION_KEY is required when database encryption is enabled. "
-            "Generate one with: python -c \"import base64, os; print(base64.b64encode(os.urandom(32)).decode())\""
+            'Generate one with: python -c "import base64, os; print(base64.b64encode(os.urandom(32)).decode())"'
         )
 
     if _HEX_KEY_RE.fullmatch(raw.strip()):

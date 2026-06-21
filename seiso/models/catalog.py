@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from seiso.compat import StrEnum
+from seiso.models.hub_errors import format_hub_error
 from seiso.models.trusted_gguf import base_model_from_tags, is_trusted_gguf_repo
 
 _DEFAULT_LIMIT = 50
@@ -89,33 +90,8 @@ class CatalogEntry:
     downloads: int | None = None
 
 
-def invalidate_catalog_cache() -> None:
-    """No-op — kept for test compatibility."""
-
-
 def _format_hub_search_error(exc: Exception, *, status_code: int | None = None) -> str:
-    msg = str(exc).strip() or exc.__class__.__name__
-    lowered = msg.lower()
-    code = status_code or getattr(getattr(exc, "response", None), "status_code", None)
-    if code == 401 or code == 403:
-        return (
-            "Hugging Face Hub access denied. Save a token in Settings or run `hf auth login` "
-            "to search gated models."
-        )
-    if code == 429:
-        return (
-            "Hugging Face Hub rate limit reached while searching. "
-            "Wait a few minutes and retry, or add a free HF token for higher limits."
-        )
-    if code == 404:
-        return "Hugging Face Hub search endpoint not found."
-    if "proxy" in lowered:
-        return "Network proxy blocked Hugging Face Hub. Check proxy settings and try again."
-    if "connection" in lowered or "network" in lowered or "resolve" in lowered:
-        return "Cannot reach huggingface.co. Check your network and try again."
-    if "timeout" in lowered or "timed out" in lowered:
-        return "Hugging Face Hub search timed out. Try again in a moment."
-    return f"Hugging Face Hub search failed: {msg}"
+    return format_hub_error(exc, context="search", status_code=status_code)
 
 
 def _parse_next_link(link_header: str | None) -> str | None:
@@ -177,7 +153,9 @@ def _fetch_hub_page(
         next_cursor = _cursor_from_link(response.headers.get("link"))
     except HfHubHTTPError as exc:
         status = exc.response.status_code if exc.response is not None else None
-        raise HubSearchError(_format_hub_search_error(exc, status_code=status), status_code=status) from exc
+        raise HubSearchError(
+            _format_hub_search_error(exc, status_code=status), status_code=status
+        ) from exc
     except Exception as exc:
         raise HubSearchError(_format_hub_search_error(exc)) from exc
 
@@ -325,9 +303,12 @@ def _hub_row_to_entry(row: dict, *, force_task: ModelTask | None = None) -> Cata
         return None
 
     task = force_task or _infer_task(repo_id, pipeline_tag, tags)
-    if task == ModelTask.EMBEDDING and "gguf" not in {t.lower() for t in tags}:
-        if force_task != ModelTask.EMBEDDING:
-            return None
+    if (
+        task == ModelTask.EMBEDDING
+        and "gguf" not in {t.lower() for t in tags}
+        and force_task != ModelTask.EMBEDDING
+    ):
+        return None
 
     if task != ModelTask.EMBEDDING and not is_trusted_gguf_repo(
         repo_id,
@@ -390,9 +371,8 @@ def _entry_to_dict(e: CatalogEntry) -> dict:
 
 def _matches_task(entry: CatalogEntry, task: str) -> bool:
     task_l = task.lower()
-    return (
-        entry.task.value == task_l
-        or (task_l == "chat" and entry.task == ModelTask.CODE and "popular" in entry.tags)
+    return entry.task.value == task_l or (
+        task_l == "chat" and entry.task == ModelTask.CODE and "popular" in entry.tags
     )
 
 
@@ -509,10 +489,16 @@ def get_by_repo(repo_id: str, *, token: str | None = None) -> CatalogEntry | Non
     from huggingface_hub import HfApi
     from huggingface_hub.errors import HfHubHTTPError
 
+    from seiso.models.hub_errors import is_hub_transport_error
+
     try:
         info = HfApi(token=token).model_info(repo_id)
     except HfHubHTTPError:
         return None
+    except Exception as exc:
+        if is_hub_transport_error(exc):
+            return None
+        raise
     return _hub_row_to_entry(_model_info_to_row(info))
 
 

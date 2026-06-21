@@ -100,11 +100,14 @@ def test_available_backends_rejects_unsupported_dflash_draft(tmp_path: Path):
 
 
 def test_match_ollama_name():
-    assert match_ollama_name(
-        model_path="/models/foo.gguf",
-        model_name="foo",
-        ollama_names={"foo:latest"},
-    ) == "foo:latest"
+    assert (
+        match_ollama_name(
+            model_path="/models/foo.gguf",
+            model_name="foo",
+            ollama_names={"foo:latest"},
+        )
+        == "foo:latest"
+    )
 
 
 def test_resolve_gguf_file_picks_largest(tmp_path: Path):
@@ -120,12 +123,7 @@ def test_resolve_gguf_file_preserves_symlink_path(tmp_path: Path):
     blob.parent.mkdir(parents=True)
     blob.write_bytes(b"gguf")
     snapshot = (
-        tmp_path
-        / "hf_cache"
-        / "models--org--Model-GGUF"
-        / "snapshots"
-        / "rev"
-        / "model-q4.gguf"
+        tmp_path / "hf_cache" / "models--org--Model-GGUF" / "snapshots" / "rev" / "model-q4.gguf"
     )
     snapshot.parent.mkdir(parents=True)
     snapshot.symlink_to("../../blobs/abc")
@@ -140,12 +138,7 @@ def test_model_pool_passes_preserved_path_to_loader(tmp_path: Path):
     blob.parent.mkdir(parents=True)
     blob.write_bytes(b"gguf")
     snapshot = (
-        tmp_path
-        / "hf_cache"
-        / "models--org--Model-GGUF"
-        / "snapshots"
-        / "rev"
-        / "model-q4.gguf"
+        tmp_path / "hf_cache" / "models--org--Model-GGUF" / "snapshots" / "rev" / "model-q4.gguf"
     )
     snapshot.parent.mkdir(parents=True)
     snapshot.symlink_to("../../blobs/abc")
@@ -201,7 +194,9 @@ def test_resolve_chat_target_local_gguf_ollama_engine():
         "backends": [BACKEND_LLAMACPP, BACKEND_OLLAMA],
         "ollama_model": "export-q4:latest",
     }
-    target = resolve_chat_target(option, model_id="local-1", ollama_model=None, inference_backend="ollama")
+    target = resolve_chat_target(
+        option, model_id="local-1", ollama_model=None, inference_backend="ollama"
+    )
     assert target["inference_backend"] == BACKEND_OLLAMA
     assert target["ollama_model"] == "export-q4:latest"
 
@@ -218,7 +213,9 @@ def test_resolve_chat_target_ollama_without_tag_raises():
         "ollama_model": None,
     }
     with pytest.raises(ValueError, match="not available in Ollama"):
-        resolve_chat_target(option, model_id="local-2", ollama_model=None, inference_backend="ollama")
+        resolve_chat_target(
+            option, model_id="local-2", ollama_model=None, inference_backend="ollama"
+        )
 
 
 @pytest.mark.asyncio
@@ -295,7 +292,9 @@ async def test_local_inference_stream_propagates_errors(monkeypatch):
 
     runner = LocalInferenceRunner()
     monkeypatch.setattr(runner, "_ensure_model_switch", _noop_switch)
-    monkeypatch.setattr(runner, "_resolve_route", lambda _payload, _path: ("llama", "/tmp/fake.gguf"))
+    monkeypatch.setattr(
+        runner, "_resolve_route", lambda _payload, _path: ("llama", "/tmp/fake.gguf")
+    )
     monkeypatch.setattr(runner._pool, "bump_generation", lambda: 1)
     monkeypatch.setattr(runner._pool, "is_generation_active", lambda _gen: True)
 
@@ -316,9 +315,15 @@ async def test_cancel_generation_keeps_loaded_model(monkeypatch):
     runner = LocalInferenceRunner()
     calls = {"bump": 0, "unload": 0}
 
-    monkeypatch.setattr(runner._pool, "status", lambda: {"active_model": "m1", "path": "/tmp/model.gguf"})
-    monkeypatch.setattr(runner._pool, "bump_generation", lambda: calls.__setitem__("bump", calls["bump"] + 1))
-    monkeypatch.setattr(runner._pool, "unload_all", lambda: calls.__setitem__("unload", calls["unload"] + 1))
+    monkeypatch.setattr(
+        runner._pool, "status", lambda: {"active_model": "m1", "path": "/tmp/model.gguf"}
+    )
+    monkeypatch.setattr(
+        runner._pool, "bump_generation", lambda: calls.__setitem__("bump", calls["bump"] + 1)
+    )
+    monkeypatch.setattr(
+        runner._pool, "unload_all", lambda: calls.__setitem__("unload", calls["unload"] + 1)
+    )
 
     status = await runner.cancel_generation()
 

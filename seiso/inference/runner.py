@@ -138,7 +138,9 @@ class LocalInferenceRunner:
             await loop.run_in_executor(None, self._pool.unload_all)
             return
 
-        if active_path and self._pool.normalize_path(active_path) != self._pool.normalize_path(model_path):
+        if active_path and self._pool.normalize_path(active_path) != self._pool.normalize_path(
+            model_path
+        ):
             loop = asyncio.get_running_loop()
             await loop.run_in_executor(None, self._pool.unload_all)
 
@@ -285,8 +287,13 @@ class LocalInferenceRunner:
                         raise
                     release_cached_memory(sync=True)
                     reduced = dict(gen_kwargs)
-                    reduced["max_new_tokens"] = max(32, int(reduced.get("max_new_tokens", 512)) // 2)
-                    logger.warning("Torch inference OOM — retrying with max_new_tokens=%s", reduced["max_new_tokens"])
+                    reduced["max_new_tokens"] = max(
+                        32, int(reduced.get("max_new_tokens", 512)) // 2
+                    )
+                    logger.warning(
+                        "Torch inference OOM — retrying with max_new_tokens=%s",
+                        reduced["max_new_tokens"],
+                    )
                     model.generate(**reduced)
 
         thread = threading.Thread(target=_generate, daemon=True)

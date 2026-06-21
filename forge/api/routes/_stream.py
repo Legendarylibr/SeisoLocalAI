@@ -13,7 +13,9 @@ from forge.orchestrators.base import Orchestrator
 logger = logging.getLogger(__name__)
 
 
-def job_failure_message(orchestrator: Orchestrator, job_id: str, exc: BaseException | None = None) -> str:
+def job_failure_message(
+    orchestrator: Orchestrator, job_id: str, exc: BaseException | None = None
+) -> str:
     """Best-effort failure text for DB persistence."""
     job = orchestrator.get_job(job_id)
     if job and job.error:

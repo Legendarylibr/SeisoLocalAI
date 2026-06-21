@@ -50,7 +50,9 @@ class Orchestrator(ABC):
         self._log_buffers: dict[str, list[str]] = defaultdict(list)
         self._metric_buffers: dict[str, list[dict[str, Any]]] = defaultdict(list)
         self._subscribers: dict[str, list[asyncio.Queue[str | None]]] = defaultdict(list)
-        self._metric_subscribers: dict[str, list[asyncio.Queue[dict[str, Any] | None]]] = defaultdict(list)
+        self._metric_subscribers: dict[str, list[asyncio.Queue[dict[str, Any] | None]]] = (
+            defaultdict(list)
+        )
         self._tasks: dict[str, asyncio.Task[None]] = {}
         self._subprocesses: dict[str, asyncio.subprocess.Process] = {}
 
@@ -190,10 +192,12 @@ class Orchestrator(ABC):
         return proc is not None
 
     @abstractmethod
-    async def execute(self, job_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-        ...
+    async def execute(self, job_id: str, payload: dict[str, Any]) -> dict[str, Any]: ...
 
     def snapshot(self) -> str:
         return json.dumps(
-            {jid: {"status": j.status, "kind": j.kind, "error": j.error} for jid, j in self._jobs.items()}
+            {
+                jid: {"status": j.status, "kind": j.kind, "error": j.error}
+                for jid, j in self._jobs.items()
+            }
         )

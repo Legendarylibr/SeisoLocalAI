@@ -40,7 +40,9 @@ class CreateBaseRequest(BaseModel):
 
 def _validate_kb_id(kb_id: str) -> str:
     if not _KB_ID_RE.match(kb_id):
-        raise HTTPException(400, "knowledge_base_id must be 1–64 alphanumeric characters, hyphens, or underscores")
+        raise HTTPException(
+            400, "knowledge_base_id must be 1–64 alphanumeric characters, hyphens, or underscores"
+        )
     return kb_id
 
 
@@ -110,7 +112,9 @@ async def upload_file(
 
     raw_name = Path(file.filename or "upload.txt").name
     if not _FILENAME_RE.match(raw_name):
-        raise HTTPException(400, "Filename must contain only letters, numbers, dots, hyphens, or underscores")
+        raise HTTPException(
+            400, "Filename must contain only letters, numbers, dots, hyphens, or underscores"
+        )
 
     content = await file.read()
     if len(content) > _MAX_UPLOAD_BYTES:

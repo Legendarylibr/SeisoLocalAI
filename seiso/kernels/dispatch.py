@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from functools import lru_cache
 
+from seiso.kernels.fallback_ops import pytorch_rms_norm as _pytorch_rms_norm
 from seiso.kernels.platform import GpuPlatform, detect_gpu
 
 logger = logging.getLogger(__name__)
@@ -101,15 +102,6 @@ def fused_lora_delta(x, lora_A, lora_B, base=None, scale: float = 1.0):
     return base + delta if base is not None else delta
 
 
-def _pytorch_rms_norm(x, weight, eps: float, residual):
-    import torch
-
-    if residual is not None:
-        x = x + residual
-    var = x.pow(2).mean(dim=-1, keepdim=True)
-    return x * torch.rsqrt(var + eps) * weight
-
-
 def kernel_metadata() -> dict:
     """Runtime kernel stack info for manifests and UI."""
     platform: GpuPlatform = detect_gpu()
@@ -126,7 +118,9 @@ def kernel_metadata() -> dict:
         "device_label": (
             "nvidia_gpu"
             if platform.vendor.value == "nvidia"
-            else "amd_gpu" if platform.vendor.value == "amd" else "cpu"
+            else "amd_gpu"
+            if platform.vendor.value == "amd"
+            else "cpu"
         ),
         "device_count": platform.device_count,
         "kernel_backend": backend,

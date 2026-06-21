@@ -13,7 +13,11 @@ from seiso.memory.platform_profile import apply_platform_memory_profile, memory_
 @pytest.fixture(autouse=True)
 def _clear_llama_env(monkeypatch):
     for key in list(os.environ):
-        if key.startswith("SEISO_LLAMA_") or key == "SEISO_MEMORY_PROFILE" or key == "SEISO_SKIP_MLX_PROBE":
+        if (
+            key.startswith("SEISO_LLAMA_")
+            or key == "SEISO_MEMORY_PROFILE"
+            or key == "SEISO_SKIP_MLX_PROBE"
+        ):
             monkeypatch.delenv(key, raising=False)
 
 
@@ -27,7 +31,9 @@ def test_memory_profile_label_balanced_on_roomy_machine():
 
 def test_platform_profile_darwin_16gb_apple(monkeypatch):
     profile = {"ram_gb": 16, "gpus": [], "backend": "metal", "platform": "Darwin"}
-    monkeypatch.setattr("seiso.memory.platform_profile.classify_tier", lambda _p: HardwareTier.APPLE_UNIFIED)
+    monkeypatch.setattr(
+        "seiso.memory.platform_profile.classify_tier", lambda _p: HardwareTier.APPLE_UNIFIED
+    )
     monkeypatch.setattr("seiso.memory.platform_profile.vram_headroom_mb", lambda _p: 6144)
     monkeypatch.setattr(
         "seiso.memory.platform_profile.training_capabilities",
@@ -47,7 +53,9 @@ def test_platform_profile_darwin_16gb_apple(monkeypatch):
 
 def test_platform_profile_darwin_intel_cpu_only(monkeypatch):
     profile = {"ram_gb": 16, "gpus": [], "backend": "cpu", "platform": "Darwin"}
-    monkeypatch.setattr("seiso.memory.platform_profile.classify_tier", lambda _p: HardwareTier.CPU_ONLY)
+    monkeypatch.setattr(
+        "seiso.memory.platform_profile.classify_tier", lambda _p: HardwareTier.CPU_ONLY
+    )
     monkeypatch.setattr("seiso.memory.platform_profile.vram_headroom_mb", lambda _p: 8192)
     monkeypatch.setattr(
         "seiso.memory.platform_profile.training_capabilities",
@@ -64,7 +72,9 @@ def test_platform_profile_darwin_intel_cpu_only(monkeypatch):
 
 def test_platform_profile_windows_no_cuda(monkeypatch):
     profile = {"ram_gb": 16, "gpus": [], "backend": "cpu", "platform": "Windows"}
-    monkeypatch.setattr("seiso.memory.platform_profile.classify_tier", lambda _p: HardwareTier.CPU_ONLY)
+    monkeypatch.setattr(
+        "seiso.memory.platform_profile.classify_tier", lambda _p: HardwareTier.CPU_ONLY
+    )
     monkeypatch.setattr("seiso.memory.platform_profile.vram_headroom_mb", lambda _p: 8192)
     monkeypatch.setattr(
         "seiso.memory.platform_profile.training_capabilities",
@@ -79,7 +89,9 @@ def test_platform_profile_windows_no_cuda(monkeypatch):
 
 def test_apply_only_setdefault(monkeypatch):
     profile = {"ram_gb": 16, "gpus": [], "backend": "cpu", "platform": "Darwin"}
-    monkeypatch.setattr("seiso.memory.platform_profile.classify_tier", lambda _p: HardwareTier.CPU_ONLY)
+    monkeypatch.setattr(
+        "seiso.memory.platform_profile.classify_tier", lambda _p: HardwareTier.CPU_ONLY
+    )
     monkeypatch.setattr("seiso.memory.platform_profile.vram_headroom_mb", lambda _p: 8192)
     monkeypatch.setattr(
         "seiso.memory.platform_profile.training_capabilities",

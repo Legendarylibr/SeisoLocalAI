@@ -95,7 +95,9 @@ def assess_catalog_fit(model: dict[str, Any], profile: dict[str, Any]) -> dict[s
     result = assess_hardware_fit(est_gb, profile, mode=mode)
     if "moe" in tags and download_bytes <= 0:
         note = result.get("hardware_note") or ""
-        moe_hint = "MoE — load needs full GGUF in RAM (mmap); active experts are smaller at runtime."
+        moe_hint = (
+            "MoE — load needs full GGUF in RAM (mmap); active experts are smaller at runtime."
+        )
         result["hardware_note"] = f"{note} · {moe_hint}" if note else moe_hint
     return result
 
@@ -128,5 +130,7 @@ def format_catalog_note(
     dl = f"Download ~{download_bytes / (1024**3):.1f} GB · " if download_bytes > 0 else ""
     runtime = f"Runtime ~{est_vram_gb:.1f} GB est. · "
     if fit == "unlikely" and tier != HardwareTier.CPU_ONLY:
-        return f"{dl}{runtime}Needs ~{est_vram_gb:.1f} GB at runtime — you have ~{headroom_gb} GB free"
+        return (
+            f"{dl}{runtime}Needs ~{est_vram_gb:.1f} GB at runtime — you have ~{headroom_gb} GB free"
+        )
     return f"{dl}{runtime}{headroom_gb} GB free on this machine"

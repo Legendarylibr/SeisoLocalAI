@@ -227,6 +227,8 @@ def test_chat_system_prompt_includes_no_reasoning_hint_for_all_families(model_ke
 
 
 def test_model_switch_system_prompt_mentions_models():
-    prompt = model_switch_system_prompt("meta-llama/Llama-4-Scout-17B-16E-Instruct", "Qwen/Qwen3.6-4B")
+    prompt = model_switch_system_prompt(
+        "meta-llama/Llama-4-Scout-17B-16E-Instruct", "Qwen/Qwen3.6-4B"
+    )
     assert "Llama 4 Scout" in prompt
     assert "Qwen3.6 4B" in prompt

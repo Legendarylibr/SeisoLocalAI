@@ -15,7 +15,7 @@ from seiso.kernels.hooks import (
     clear_kernel_patches,
 )
 from seiso.kernels.lifecycle import release_training_memory, restore_kernel_patches
-from seiso.kernels.platform import GpuPlatform, GpuVendor, detect_gpu, is_amd, is_nvidia
+from seiso.kernels.platform import GpuPlatform, GpuVendor, detect_gpu
 from seiso.kernels.triton_ops import is_triton_available
 from seiso.kernels.tuning import (
     KERNEL_PROFILES,
@@ -38,8 +38,6 @@ __all__ = [
     "fused_lora_delta",
     "fused_rms_norm",
     "fused_swiglu",
-    "is_amd",
-    "is_nvidia",
     "is_triton_available",
     "KERNEL_PROFILES",
     "apply_kernel_profile",
