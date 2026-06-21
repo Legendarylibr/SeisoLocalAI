@@ -181,40 +181,24 @@ def cmd_intro(_: argparse.Namespace) -> int:
     return 0
 
 
-def _poll_exitcode(pid: int) -> int | None:
-    done_pid, status = os.waitpid(pid, os.WNOHANG)
-    if done_pid == 0:
-        return None
-    return os.waitstatus_to_exitcode(status)
-
-
-def cmd_during(args: argparse.Namespace) -> int:
+def cmd_during(_: argparse.Namespace) -> int:
     if not _tty():
-        if args.wait_pid:
-            _, status = os.waitpid(args.wait_pid, 0)
-            return os.waitstatus_to_exitcode(status)
         return 0
 
-    sys.stdout.write(HIDE)
-    proc = args.wait_pid
-    exit_code: int | None = None
-    if proc:
-        try:
-            exit_code = _poll_exitcode(proc)
-        except ChildProcessError:
-            return 0
+    stop = False
 
+    def _handle_stop(_signum: int, _frame: object | None) -> None:
+        nonlocal stop
+        stop = True
+
+    signal.signal(signal.SIGTERM, _handle_stop)
+    signal.signal(signal.SIGINT, _handle_stop)
+
+    sys.stdout.write(HIDE)
     frame = 0
     cols, _ = _size()
     try:
-        while exit_code is None:
-            if proc is not None:
-                try:
-                    exit_code = _poll_exitcode(proc)
-                except ChildProcessError:
-                    exit_code = 0
-                if exit_code is not None:
-                    break
+        while not stop:
             glitch = 0.12 + (frame % 5) * 0.05 + random.random() * 0.08
             _draw(
                 _FORMATTED_RAIN_SCENES[frame % len(_FORMATTED_RAIN_SCENES)],
@@ -229,7 +213,7 @@ def cmd_during(args: argparse.Namespace) -> int:
         sys.stdout.write(SHOW)
         sys.stdout.flush()
 
-    return exit_code or 0
+    return 0
 
 
 def cmd_outro(args: argparse.Namespace) -> int:
@@ -262,7 +246,6 @@ def main(argv: Iterable[str] | None = None) -> int:
     p_intro.set_defaults(func=cmd_intro)
 
     p_during = sub.add_parser("during")
-    p_during.add_argument("--wait-pid", type=int, required=True)
     p_during.set_defaults(func=cmd_during)
 
     p_outro = sub.add_parser("outro")

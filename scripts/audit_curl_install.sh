@@ -99,6 +99,24 @@ else
   bad "resolve_root simulation failed for piped bash"
 fi
 
+if rg -q 'pip install -U pip wheel setuptools hatchling' "$ROOT/scripts/lib/common.sh" 2>/dev/null; then
+  ok "install worker bootstraps hatchling before editable install"
+else
+  bad "install worker missing hatchling bootstrap (editable install may fail on fresh venvs)"
+fi
+
+if rg -q 'wait "\$job_pid"' "$ROOT/scripts/install.sh" 2>/dev/null; then
+  ok "install TUI uses bash wait on background install job"
+else
+  bad "install.sh does not bash-wait on background install job (Python waitpid cannot reap bash siblings)"
+fi
+
+if rg -q 'seiso_verify_cli' "$ROOT/scripts/lib/common.sh" "$ROOT/scripts/install.sh" 2>/dev/null; then
+  ok "install path verifies seiso CLI after pip install"
+else
+  bad "install path missing post-install seiso CLI verification"
+fi
+
 log "Dry-run pip editable install syntax"
 audit_venv="$(mktemp -d)/venv"
 python3 -m venv "$audit_venv"
