@@ -116,6 +116,13 @@ detect_platform_extras() {
   seiso_detect_platform_extras
 }
 
+assert_repo_layout() {
+  local root="$1"
+  [[ -f "$root/pyproject.toml" && -d "$root/seiso_cli" && -f "$root/scripts/lib/common.sh" ]] || {
+    die "Seiso repository incomplete at $root. Remove the directory or set SEISO_INSTALL_DIR elsewhere, then re-run start."
+  }
+}
+
 resolve_root() {
   if [[ -n "${BASH_SOURCE[0]:-}" && -f "${BASH_SOURCE[0]}" ]]; then
     local candidate
@@ -126,6 +133,7 @@ resolve_root() {
     fi
   fi
   if [[ -d "$INSTALL_DIR/seiso_cli" && -f "$INSTALL_DIR/pyproject.toml" ]]; then
+    assert_repo_layout "$INSTALL_DIR"
     printf '%s\n' "$INSTALL_DIR"
     return
   fi
@@ -133,10 +141,12 @@ resolve_root() {
   if [[ ! -d "$INSTALL_DIR/.git" ]]; then
     pre_clone_hint
     if quiet_install_output; then
-      git clone --depth 1 --branch "$BRANCH" "$REPO_URL" "$INSTALL_DIR" >/dev/null 2>&1
+      git clone --depth 1 --branch "$BRANCH" "$REPO_URL" "$INSTALL_DIR" >/dev/null 2>&1 \
+        || die "git clone failed into $INSTALL_DIR. Check network access and that the directory is empty or missing."
     else
       log "Cloning Seiso into $INSTALL_DIR" >&2
-      git clone --depth 1 --branch "$BRANCH" "$REPO_URL" "$INSTALL_DIR"
+      git clone --depth 1 --branch "$BRANCH" "$REPO_URL" "$INSTALL_DIR" \
+        || die "git clone failed into $INSTALL_DIR. Check network access and that the directory is empty or missing."
     fi
   else
     log_unless_quiet "Updating existing clone in $INSTALL_DIR" >&2
@@ -144,6 +154,7 @@ resolve_root() {
     git -C "$INSTALL_DIR" checkout "$BRANCH" >/dev/null 2>&1
     git -C "$INSTALL_DIR" pull --ff-only origin "$BRANCH" >/dev/null 2>&1 || true
   fi
+  assert_repo_layout "$INSTALL_DIR"
   printf '%s\n' "$INSTALL_DIR"
 }
 
@@ -193,8 +204,7 @@ main() {
   export SEISO_SKIP_UI="${SEISO_SKIP_UI:-0}"
   export SEISO_SKIP_FLASH_ATTN
 
-  if ! run_with_install_tui "$root" "$install_log" \
-    bash -c "source \"$root/scripts/lib/common.sh\"; seiso_run_install_worker \"$root\" \"$extras\""; then
+  if ! run_with_install_tui "$root" "$install_log" run_install_worker "$root" "$extras"; then
     install_failed "$root"
   fi
 
