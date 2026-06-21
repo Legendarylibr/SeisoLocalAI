@@ -1,11 +1,45 @@
-"""Popular Hugging Face models curated for local training and inference."""
+"""Hugging Face Hub search for GGUF models — live queries via huggingface_hub."""
 
 from __future__ import annotations
 
+import math
+import re
+import urllib.parse
 from collections import defaultdict
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
 from seiso.compat import StrEnum
+
+_DEFAULT_LIMIT = 50
+_MAX_LIMIT = 100
+_HUB_API_MODELS = "https://huggingface.co/api/models"
+_UNSUPPORTED_REPO_HINTS = ("dflash", "draft", "mmproj")
+_SKIP_PIPELINE_TAGS = frozenset(
+    {
+        "text-to-speech",
+        "text-to-audio",
+        "automatic-speech-recognition",
+        "image-to-video",
+        "video-classification",
+        "object-detection",
+        "depth-estimation",
+    }
+)
+
+
+class HubSearchError(Exception):
+    """Hub model search failed (network, rate limit, auth, etc.)."""
+
+    def __init__(self, message: str, *, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
+
+@dataclass(frozen=True)
+class CatalogSearchResult:
+    models: list[dict]
+    next_cursor: str | None = None
 
 
 class ModelFamily(StrEnum):
@@ -28,6 +62,18 @@ class ModelTask(StrEnum):
     BASE = "base"
 
 
+_FAMILY_NEEDLES: tuple[tuple[ModelFamily, tuple[str, ...]], ...] = (
+    (ModelFamily.QWEN, ("qwen",)),
+    (ModelFamily.LLAMA, ("llama", "meta-llama")),
+    (ModelFamily.GEMMA, ("gemma", "google/gemma")),
+    (ModelFamily.PHI, ("phi", "microsoft/phi")),
+    (ModelFamily.MISTRAL, ("mistral", "devstral", "mixtral")),
+    (ModelFamily.DEEPSEEK, ("deepseek",)),
+    (ModelFamily.KIMI, ("kimi", "moonshot")),
+    (ModelFamily.GLM, ("glm", "zai-org")),
+)
+
+
 @dataclass(frozen=True)
 class CatalogEntry:
     repo_id: str
@@ -38,128 +84,270 @@ class CatalogEntry:
     quant: str
     tags: tuple[str, ...] = ()
     gguf_repo: str | None = None
-    priority: int = 50  # higher = shown first (newer / more relevant)
+    priority: int = 50
+    downloads: int | None = None
 
 
-# Curated catalog — Qwen 3.6 / 3.5 and recent open-weight models (June 2026)
-CATALOG: tuple[CatalogEntry, ...] = (
-    # ── Qwen 3.6 (current generation) ──
-    CatalogEntry(
-        "Qwen/Qwen3.6-35B-A3B", "Qwen 3.6 35B MoE", ModelFamily.QWEN, "35B", ModelTask.CODE, "Q4_K_M",
-        ("code", "moe", "new", "popular"), priority=100, gguf_repo="unsloth/Qwen3.6-35B-A3B-GGUF",
-    ),
-    CatalogEntry(
-        "Qwen/Qwen3.6-27B", "Qwen 3.6 27B", ModelFamily.QWEN, "27B", ModelTask.CHAT, "Q4_K_M",
-        ("reasoning", "new", "popular"), priority=99, gguf_repo="unsloth/Qwen3.6-27B-GGUF",
-    ),
-    CatalogEntry(
-        "Qwen/Qwen3.6-9B", "Qwen 3.6 9B", ModelFamily.QWEN, "9B", ModelTask.CHAT, "Q4_K_M",
-        ("reasoning", "new", "popular"), priority=98, gguf_repo="unsloth/Qwen3.6-9B-GGUF",
-    ),
-    CatalogEntry(
-        "Qwen/Qwen3.6-4B", "Qwen 3.6 4B", ModelFamily.QWEN, "4B", ModelTask.CHAT, "Q4_K_M",
-        ("small", "new", "popular"), priority=97, gguf_repo="unsloth/Qwen3.6-4B-GGUF",
-    ),
-    CatalogEntry(
-        "Qwen/Qwen3.6-1.7B", "Qwen 3.6 1.7B", ModelFamily.QWEN, "1.7B", ModelTask.CHAT, "Q4_K_M",
-        ("small", "new"), priority=96, gguf_repo="unsloth/Qwen3.6-1.7B-GGUF",
-    ),
-    # ── Qwen 3.5 (widely available GGUF mirrors) ──
-    CatalogEntry(
-        "Qwen/Qwen3.5-27B", "Qwen 3.5 27B", ModelFamily.QWEN, "27B", ModelTask.CHAT, "Q4_K_M",
-        ("reasoning", "popular"), priority=95, gguf_repo="unsloth/Qwen3.5-27B-GGUF",
-    ),
-    CatalogEntry(
-        "Qwen/Qwen3.5-4B", "Qwen 3.5 4B", ModelFamily.QWEN, "4B", ModelTask.CHAT, "Q4_K_M",
-        ("small", "popular"), priority=94, gguf_repo="unsloth/Qwen3.5-4B-GGUF",
-    ),
-    CatalogEntry(
-        "Qwen/Qwen3.5-2B", "Qwen 3.5 2B", ModelFamily.QWEN, "2B", ModelTask.CHAT, "Q4_K_M",
-        ("small", "popular"), priority=93, gguf_repo="unsloth/Qwen3.5-2B-GGUF",
-    ),
-    # ── Qwen coding ──
-    CatalogEntry(
-        "Qwen/Qwen3-Coder-Next", "Qwen 3 Coder Next", ModelFamily.QWEN, "80B", ModelTask.CODE, "Q4_K_M",
-        ("code", "moe", "new", "popular"), priority=92, gguf_repo="unsloth/Qwen3-Coder-Next-GGUF",
-    ),
-    CatalogEntry(
-        "Qwen/Qwen3-Coder-30B-A3B-Instruct", "Qwen 3 Coder 30B MoE", ModelFamily.QWEN, "30B", ModelTask.CODE, "Q4_K_M",
-        ("code", "moe", "popular"), priority=91, gguf_repo="unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF",
-    ),
-    # ── Recent flagship chat / reasoning models ──
-    CatalogEntry(
-        "openai/gpt-oss-20b", "GPT-OSS 20B", ModelFamily.OTHER, "20B", ModelTask.CHAT, "Q4_K_M",
-        ("reasoning", "new", "popular"), priority=90, gguf_repo="unsloth/gpt-oss-20b-GGUF",
-    ),
-    CatalogEntry(
-        "openai/gpt-oss-120b", "GPT-OSS 120B", ModelFamily.OTHER, "120B", ModelTask.CHAT, "Q4_K_M",
-        ("reasoning", "moe", "popular"), priority=89, gguf_repo="unsloth/gpt-oss-120b-GGUF",
-    ),
-    CatalogEntry(
-        "deepseek-ai/DeepSeek-R1-0528", "DeepSeek R1 0528", ModelFamily.DEEPSEEK, "671B", ModelTask.CHAT, "Q4_K_M",
-        ("reasoning", "moe", "new", "popular"), priority=88, gguf_repo="unsloth/DeepSeek-R1-0528-GGUF",
-    ),
-    CatalogEntry(
-        "meta-llama/Llama-4-Scout-17B-16E-Instruct", "Llama 4 Scout", ModelFamily.LLAMA, "109B", ModelTask.CHAT, "Q4_K_M",
-        ("moe", "vision", "long-context", "popular"), priority=87, gguf_repo="unsloth/Llama-4-Scout-17B-16E-Instruct-GGUF",
-    ),
-    CatalogEntry(
-        "meta-llama/Llama-4-Maverick-17B-128E-Instruct", "Llama 4 Maverick", ModelFamily.LLAMA, "400B", ModelTask.CHAT, "Q4_K_M",
-        ("moe", "vision", "new"), priority=86, gguf_repo="unsloth/Llama-4-Maverick-17B-128E-Instruct-GGUF",
-    ),
-    CatalogEntry(
-        "google/gemma-3-27b-it", "Gemma 3 27B Instruct", ModelFamily.GEMMA, "27B", ModelTask.CHAT, "Q4_K_M",
-        ("vision", "popular"), priority=85, gguf_repo="unsloth/gemma-3-27b-it-GGUF",
-    ),
-    CatalogEntry(
-        "google/gemma-3-12b-it", "Gemma 3 12B Instruct", ModelFamily.GEMMA, "12B", ModelTask.CHAT, "Q4_K_M",
-        ("vision", "popular"), priority=84, gguf_repo="unsloth/gemma-3-12b-it-GGUF",
-    ),
-    CatalogEntry(
-        "google/gemma-3-4b-it", "Gemma 3 4B Instruct", ModelFamily.GEMMA, "4B", ModelTask.CHAT, "Q4_K_M",
-        ("vision", "small", "popular"), priority=83, gguf_repo="unsloth/gemma-3-4b-it-GGUF",
-    ),
-    CatalogEntry(
-        "mistralai/Devstral-Small-2507", "Devstral Small 1.1", ModelFamily.MISTRAL, "24B", ModelTask.CODE, "Q4_K_M",
-        ("code", "agent", "new", "popular"), priority=82, gguf_repo="bartowski/Devstral-Small-2507-GGUF",
-    ),
-    CatalogEntry(
-        "mistralai/Mistral-Small-3.2-24B-Instruct-2506", "Mistral Small 3.2 24B", ModelFamily.MISTRAL, "24B", ModelTask.CHAT, "Q4_K_M",
-        ("vision", "new", "popular"), priority=81, gguf_repo="bartowski/Mistral-Small-3.2-24B-Instruct-2506-GGUF",
-    ),
-    CatalogEntry(
-        "moonshotai/Kimi-K2-Instruct", "Kimi K2 Instruct", ModelFamily.KIMI, "1T", ModelTask.CHAT, "Q4_K_M",
-        ("moe", "code", "popular"), priority=80, gguf_repo="unsloth/Kimi-K2-Instruct-GGUF",
-    ),
-    CatalogEntry(
-        "moonshotai/Kimi-K2.7-Code", "Kimi K2.7 Code", ModelFamily.KIMI, "1T", ModelTask.CODE, "Q4_K_M",
-        ("code", "moe", "new", "popular"), priority=79, gguf_repo="AesSedai/Kimi-K2.7-Code-GGUF",
-    ),
-    CatalogEntry(
-        "zai-org/GLM-4.5-Air", "GLM 4.5 Air", ModelFamily.GLM, "106B", ModelTask.CHAT, "Q4_K_M",
-        ("agent", "moe", "popular"), priority=78, gguf_repo="unsloth/GLM-4.5-Air-GGUF",
-    ),
-    CatalogEntry(
-        "microsoft/Phi-4-mini-instruct", "Phi-4 Mini Instruct", ModelFamily.PHI, "3.8B", ModelTask.CHAT, "Q4_K_M",
-        ("small", "popular"), priority=77, gguf_repo="unsloth/Phi-4-mini-instruct-GGUF",
-    ),
-    # ── Vision-language (Qwen 3.6 VL when available; Qwen3 VL as fallback) ──
-    CatalogEntry(
-        "Qwen/Qwen3-VL-8B-Instruct", "Qwen 3 VL 8B", ModelFamily.QWEN, "8B", ModelTask.VISION, "Q4_K_M",
-        ("vision", "popular"), priority=70,
-    ),
-    CatalogEntry(
-        "Qwen/Qwen3-VL-4B-Instruct", "Qwen 3 VL 4B", ModelFamily.QWEN, "4B", ModelTask.VISION, "Q4_K_M",
-        ("vision",), priority=69,
-    ),
-    CatalogEntry(
-        "Qwen/Qwen3-VL-2B-Instruct", "Qwen 3 VL 2B", ModelFamily.QWEN, "2B", ModelTask.VISION, "Q4_K_M",
-        ("vision", "small"), priority=68,
-    ),
-    # ── Embeddings (for knowledge / RAG) ──
-    CatalogEntry("BAAI/bge-small-en-v1.5", "BGE Small EN", ModelFamily.OTHER, "33M", ModelTask.EMBEDDING, "F16", priority=20),
-    CatalogEntry("BAAI/bge-m3", "BGE M3 Multilingual", ModelFamily.OTHER, "568M", ModelTask.EMBEDDING, "F16", priority=19),
-)
+def invalidate_catalog_cache() -> None:
+    """No-op — kept for test compatibility."""
+
+
+def _format_hub_search_error(exc: Exception, *, status_code: int | None = None) -> str:
+    msg = str(exc).strip() or exc.__class__.__name__
+    lowered = msg.lower()
+    code = status_code or getattr(getattr(exc, "response", None), "status_code", None)
+    if code == 401 or code == 403:
+        return (
+            "Hugging Face Hub access denied. Save a token in Settings or run `hf auth login` "
+            "to search gated models."
+        )
+    if code == 429:
+        return (
+            "Hugging Face Hub rate limit reached while searching. "
+            "Wait a few minutes and retry, or add a free HF token for higher limits."
+        )
+    if code == 404:
+        return "Hugging Face Hub search endpoint not found."
+    if "proxy" in lowered:
+        return "Network proxy blocked Hugging Face Hub. Check proxy settings and try again."
+    if "connection" in lowered or "network" in lowered or "resolve" in lowered:
+        return "Cannot reach huggingface.co. Check your network and try again."
+    if "timeout" in lowered or "timed out" in lowered:
+        return "Hugging Face Hub search timed out. Try again in a moment."
+    return f"Hugging Face Hub search failed: {msg}"
+
+
+def _parse_next_link(link_header: str | None) -> str | None:
+    if not link_header:
+        return None
+    for segment in link_header.split(","):
+        segment = segment.strip()
+        if 'rel="next"' in segment:
+            match = re.search(r"<([^>]+)>", segment)
+            if match:
+                url = match.group(1)
+                return url if url.startswith("https://") else None
+    return None
+
+
+def _cursor_from_link(link_header: str | None) -> str | None:
+    next_url = _parse_next_link(link_header)
+    if not next_url:
+        return None
+    parsed = urllib.parse.urlparse(next_url)
+    values = urllib.parse.parse_qs(parsed.query).get("cursor")
+    return values[0] if values else None
+
+
+def _fetch_hub_page(
+    *,
+    filter_tag: str | None = None,
+    pipeline_tag: str | None = None,
+    search: str | None = None,
+    sort: str = "downloads",
+    limit: int = _DEFAULT_LIMIT,
+    cursor: str | None = None,
+    token: str | None = None,
+) -> tuple[list[dict], str | None]:
+    """Fetch one Hub models page using huggingface_hub (returns rows + next cursor)."""
+    from huggingface_hub.errors import HfHubHTTPError
+    from huggingface_hub.utils import build_hf_headers, get_session, hf_raise_for_status
+
+    params: dict[str, str | int] = {
+        "sort": sort,
+        "limit": max(1, min(limit, _MAX_LIMIT)),
+        "full": "false",
+    }
+    if filter_tag:
+        params["filter"] = filter_tag
+    if pipeline_tag:
+        params["pipeline_tag"] = pipeline_tag
+    if search:
+        params["search"] = search.strip()
+    if cursor:
+        params["cursor"] = cursor
+
+    headers = build_hf_headers(token=token)
+    session = get_session()
+    try:
+        response = session.get(_HUB_API_MODELS, params=params, headers=headers)
+        hf_raise_for_status(response)
+        payload = response.json()
+        next_cursor = _cursor_from_link(response.headers.get("link"))
+    except HfHubHTTPError as exc:
+        status = exc.response.status_code if exc.response is not None else None
+        raise HubSearchError(_format_hub_search_error(exc, status_code=status), status_code=status) from exc
+    except Exception as exc:
+        raise HubSearchError(_format_hub_search_error(exc)) from exc
+
+    if not isinstance(payload, list):
+        return [], None
+    rows = [row for row in payload if isinstance(row, dict)]
+    return rows, next_cursor
+
+
+def _hub_search_text(query: str, family: str | None) -> str | None:
+    parts: list[str] = []
+    if query.strip():
+        parts.append(query.strip())
+    if family:
+        parts.append(family)
+    return " ".join(parts) if parts else None
+
+
+def _query_hub_page(
+    *,
+    query: str = "",
+    family: str | None = None,
+    task: str | None = None,
+    limit: int,
+    cursor: str | None = None,
+    token: str | None = None,
+) -> tuple[list[dict], str | None]:
+    hf_search = _hub_search_text(query, family)
+    if task == ModelTask.EMBEDDING.value:
+        return _fetch_hub_page(
+            pipeline_tag="feature-extraction",
+            search=hf_search,
+            limit=limit,
+            cursor=cursor,
+            token=token,
+        )
+    return _fetch_hub_page(
+        filter_tag="gguf",
+        search=hf_search,
+        limit=limit,
+        cursor=cursor,
+        token=token,
+    )
+
+
+def _model_info_to_row(info: object) -> dict:
+    created = getattr(info, "created_at", None) or getattr(info, "last_modified", None)
+    created_at = created.isoformat() if hasattr(created, "isoformat") else created
+    tags = getattr(info, "tags", None) or []
+    return {
+        "id": getattr(info, "id", None),
+        "modelId": getattr(info, "id", None),
+        "downloads": getattr(info, "downloads", None),
+        "pipeline_tag": getattr(info, "pipeline_tag", None),
+        "tags": list(tags) if isinstance(tags, list) else [],
+        "createdAt": created_at,
+    }
+
+
+def _parse_iso_ts(value: str | None) -> datetime | None:
+    if not value or not isinstance(value, str):
+        return None
+    try:
+        if value.endswith("Z"):
+            value = value[:-1] + "+00:00"
+        return datetime.fromisoformat(value).astimezone(timezone.utc)
+    except ValueError:
+        return None
+
+
+def _infer_family(repo_id: str, tags: list[str]) -> ModelFamily:
+    hay = f"{repo_id} {' '.join(tags)}".lower()
+    for family, needles in _FAMILY_NEEDLES:
+        if any(needle in hay for needle in needles):
+            return family
+    return ModelFamily.OTHER
+
+
+def _infer_task(repo_id: str, pipeline_tag: str | None, tags: list[str]) -> ModelTask:
+    tag_set = {t.lower() for t in tags}
+    hay = f"{repo_id} {' '.join(tags)}".lower()
+    if pipeline_tag == "feature-extraction" or "embedding" in tag_set:
+        return ModelTask.EMBEDDING
+    if pipeline_tag == "image-text-to-text" or "vision" in tag_set or "multimodal" in tag_set:
+        return ModelTask.VISION
+    if any(k in hay for k in ("coder", "code-", "-code", "coding", "devstral")):
+        return ModelTask.CODE
+    return ModelTask.CHAT
+
+
+def _infer_params(repo_id: str, tags: list[str]) -> str:
+    for source in (repo_id, " ".join(tags)):
+        match = re.search(r"(\d+(?:\.\d+)?)\s*[bB]\b", source)
+        if match:
+            return f"{match.group(1)}B"
+        match = re.search(r"(\d+(?:\.\d+)?)\s*[mM]\b", source)
+        if match:
+            return f"{match.group(1)}M"
+    return "?"
+
+
+def _display_name(repo_id: str, tags: list[str]) -> str:
+    for tag in tags:
+        if tag.startswith("base_model:") and not tag.startswith("base_model:quantized:"):
+            base = tag.split(":", 1)[1]
+            return base.split("/")[-1].replace("-", " ").replace("_", " ")
+    slug = repo_id.split("/")[-1]
+    slug = re.sub(r"(?i)-gguf$", "", slug)
+    slug = re.sub(r"[_-]+", " ", slug).strip()
+    return slug or repo_id
+
+
+def _is_supported_repo(repo_id: str) -> bool:
+    lowered = repo_id.lower()
+    return not any(hint in lowered for hint in _UNSUPPORTED_REPO_HINTS)
+
+
+def _compute_priority(downloads: int, created_at: str | None, tags: list[str]) -> int:
+    dl_score = min(88, int(math.log10(max(downloads, 1)) * 14))
+    created = _parse_iso_ts(created_at)
+    recency = 0
+    if created:
+        age_days = (datetime.now(timezone.utc) - created).days
+        if age_days <= 30:
+            recency = 12
+        elif age_days <= 90:
+            recency = 8
+        elif age_days <= 180:
+            recency = 4
+    tag_bonus = 5 if "popular" in tags else 0
+    return min(100, dl_score + recency + tag_bonus)
+
+
+def _hub_row_to_entry(row: dict, *, force_task: ModelTask | None = None) -> CatalogEntry | None:
+    repo_id = row.get("id") or row.get("modelId")
+    if not isinstance(repo_id, str) or not repo_id.strip():
+        return None
+    if not _is_supported_repo(repo_id):
+        return None
+
+    tags_raw = row.get("tags")
+    tags = [t for t in tags_raw if isinstance(t, str)] if isinstance(tags_raw, list) else []
+    pipeline_tag = row.get("pipeline_tag") if isinstance(row.get("pipeline_tag"), str) else None
+    if pipeline_tag in _SKIP_PIPELINE_TAGS:
+        return None
+
+    task = force_task or _infer_task(repo_id, pipeline_tag, tags)
+    if task == ModelTask.EMBEDDING and "gguf" not in {t.lower() for t in tags}:
+        if force_task != ModelTask.EMBEDDING:
+            return None
+
+    downloads = row.get("downloads") if isinstance(row.get("downloads"), int) else 0
+    created_at = row.get("createdAt") if isinstance(row.get("createdAt"), str) else None
+    family = _infer_family(repo_id, tags)
+    params = _infer_params(repo_id, tags)
+    name = _display_name(repo_id, tags)
+    catalog_tags = tuple(dict.fromkeys(["popular", *tags[:6]]))
+    priority = _compute_priority(downloads, created_at, list(catalog_tags))
+
+    return CatalogEntry(
+        repo_id=repo_id,
+        name=name,
+        family=family,
+        params=params,
+        task=task,
+        quant="Q4_K_M" if task != ModelTask.EMBEDDING else "F16",
+        tags=catalog_tags,
+        gguf_repo=repo_id,
+        priority=priority,
+        downloads=downloads,
+    )
 
 
 def _parse_param_size(params: str) -> float:
@@ -170,11 +358,13 @@ def _parse_param_size(params: str) -> float:
         return float(p[:-1])
     if p.endswith("M"):
         return float(p[:-1]) / 1000
+    if p == "?":
+        return float("inf")
     return float(p)
 
 
 def _entry_to_dict(e: CatalogEntry) -> dict:
-    return {
+    row = {
         "repo_id": e.repo_id,
         "name": e.name,
         "family": e.family.value,
@@ -183,13 +373,15 @@ def _entry_to_dict(e: CatalogEntry) -> dict:
         "quant": e.quant,
         "tags": list(e.tags),
         "gguf_repo": e.gguf_repo,
-        "featured": e.priority >= 87,
+        "featured": e.priority >= 80,
         "priority": e.priority,
     }
+    if e.downloads is not None:
+        row["downloads"] = e.downloads
+    return row
 
 
 def _matches_task(entry: CatalogEntry, task: str) -> bool:
-    """Task filter — chat includes general instruct models tagged for code use."""
     task_l = task.lower()
     return (
         entry.task.value == task_l
@@ -197,35 +389,83 @@ def _matches_task(entry: CatalogEntry, task: str) -> bool:
     )
 
 
+def _boost_score(entry: CatalogEntry, query: str) -> float:
+    """Soft ranking boost — never drops HF search results."""
+    base = float(entry.priority)
+    if not query.strip():
+        return base
+    q = query.lower().strip()
+    name_l = entry.name.lower()
+    repo_l = entry.repo_id.lower()
+    haystack = f"{name_l} {repo_l} {' '.join(entry.tags)}"
+    score = base
+    if q in repo_l:
+        score += 40
+    elif q in name_l:
+        score += 25
+    elif q in haystack:
+        score += 12
+    for tok in q.split():
+        if tok in repo_l:
+            score += 20
+        elif tok in haystack:
+            score += 8
+    return score
+
+
 def search_catalog(
     query: str = "",
     family: str | None = None,
     task: str | None = None,
     max_params: str | None = None,
-) -> list[dict]:
-    """Search and rank catalog entries — newer models rise when query is empty."""
-    q = query.lower().strip()
+    *,
+    limit: int = _DEFAULT_LIMIT,
+    cursor: str | None = None,
+    token: str | None = None,
+) -> CatalogSearchResult:
+    """Query Hugging Face Hub live via huggingface_hub; popular models rank first."""
+    limit = max(1, min(limit, _MAX_LIMIT))
+    rows, next_cursor = _query_hub_page(
+        query=query,
+        family=family,
+        task=task,
+        limit=limit,
+        cursor=cursor,
+        token=token,
+    )
+
+    force_task = ModelTask.EMBEDDING if task == ModelTask.EMBEDDING.value else None
+    entries: list[CatalogEntry] = []
+    seen: set[str] = set()
+    for row in rows:
+        entry = _hub_row_to_entry(row, force_task=force_task)
+        if entry is None or entry.repo_id in seen:
+            continue
+        seen.add(entry.repo_id)
+        entries.append(entry)
+
     scored: list[tuple[float, dict]] = []
+    for entry in entries:
+        if family and not query.strip() and entry.family.value != family.lower():
+            continue
+        if task and not _matches_task(entry, task):
+            continue
+        if max_params and _parse_param_size(entry.params) > _parse_param_size(max_params):
+            continue
+        scored.append((_boost_score(entry, query), _entry_to_dict(entry)))
 
-    for e in CATALOG:
-        if family and e.family.value != family.lower():
-            continue
-        if task and not _matches_task(e, task):
-            continue
-        if max_params and _parse_param_size(e.params) > _parse_param_size(max_params):
-            continue
+    if query.strip():
+        scored.sort(key=lambda pair: (-pair[0], -(pair[1].get("downloads") or 0), pair[1]["name"]))
+    else:
+        scored.sort(key=lambda pair: (-(pair[1].get("downloads") or 0), -pair[0], pair[1]["name"]))
 
-        score = _relevance_score(e, q)
-        if score < 0:
-            continue
-        scored.append((score, _entry_to_dict(e)))
-
-    scored.sort(key=lambda pair: (-pair[0], pair[1]["name"]))
-    return [item for _, item in scored]
+    return CatalogSearchResult(
+        models=[item for _, item in scored],
+        next_cursor=next_cursor,
+    )
 
 
 def diversify_by_family(models: list[dict]) -> list[dict]:
-    """Interleave families so the default catalog is not dominated by one brand."""
     if len(models) <= 1:
         return list(models)
 
@@ -254,62 +494,20 @@ def diversify_by_family(models: list[dict]) -> list[dict]:
     return diversified
 
 
-def _relevance_score(entry: CatalogEntry, query: str) -> float:
-    """Higher = better match. Returns -1 when query tokens miss entirely."""
-    base = float(entry.priority)
-    if not query:
-        return base
-
-    tokens = [t for t in query.split() if t]
-    if not tokens:
-        return base
-
-    name_l = entry.name.lower()
-    repo_l = entry.repo_id.lower()
-    haystack = f"{name_l} {repo_l} {' '.join(entry.tags)} {entry.family.value} {entry.task.value} {entry.params.lower()}"
-
-    score = base
-    for tok in tokens:
-        if tok in repo_l:
-            score += 40
-        elif name_l.startswith(tok):
-            score += 35
-        elif tok in name_l:
-            score += 22
-        elif tok in haystack:
-            score += 12
-        else:
-            if _subsequence(tok, name_l) or _subsequence(tok, repo_l):
-                score += 6
-            else:
-                return -1
-
-    if "new" in entry.tags:
-        score += 8
-    if entry.priority >= 87:
-        score += 5
-    return score
-
-
-def _subsequence(needle: str, haystack: str) -> bool:
-    it = iter(haystack)
-    return all(c in it for c in needle)
-
-
 def get_families() -> list[str]:
-    return sorted({e.family.value for e in CATALOG})
+    return sorted(f.value for f in ModelFamily)
 
 
-_BY_REPO_ID: dict[str, CatalogEntry] = {e.repo_id: e for e in CATALOG}
-_BY_GGUF_REPO: dict[str, CatalogEntry] = {
-    e.gguf_repo: e for e in CATALOG if e.gguf_repo is not None
-}
+def get_by_repo(repo_id: str, *, token: str | None = None) -> CatalogEntry | None:
+    from huggingface_hub import HfApi
+    from huggingface_hub.errors import HfHubHTTPError
+
+    try:
+        info = HfApi(token=token).model_info(repo_id)
+    except HfHubHTTPError:
+        return None
+    return _hub_row_to_entry(_model_info_to_row(info))
 
 
-def get_by_repo(repo_id: str) -> CatalogEntry | None:
-    return _BY_REPO_ID.get(repo_id)
-
-
-def get_by_gguf_mirror(mirror_repo: str) -> CatalogEntry | None:
-    """Map a GGUF mirror repo back to its catalog base model."""
-    return _BY_GGUF_REPO.get(mirror_repo)
+def get_by_gguf_mirror(mirror_repo: str, *, token: str | None = None) -> CatalogEntry | None:
+    return get_by_repo(mirror_repo, token=token)
