@@ -91,3 +91,19 @@ use_fused_ce: false
 ```bash
 cd forge-ui && npm install && npm run build && cd ..
 ```
+
+## Low-RAM Mac guide (Apple Silicon + Intel)
+
+Seiso detects **installed RAM and free headroom**, not chip model (M1, M2, Intel, etc.).
+
+| RAM | Suggested models | Backend |
+|-----|------------------|---------|
+| 16 GB | Phi-4 Mini, Gemma 3 4B, Qwen 3.6 4B–9B | llama.cpp GGUF |
+| 24 GB | Gemma 3 12B, Mistral Small 24B, GPT-OSS 20B | Free memory before load |
+| 32 GB+ | 27B class when Hub shows ideal/good fit | llama.cpp; MLX optional for safetensors |
+
+**Intel Mac:** CPU-only — stick to ≤3B Q4 for responsive chat.
+
+**Free memory:** Use the button in Chat or Model Hub before switching to a larger model. Weights stay on disk under `{SEISO_DATA_DIR}/hf_cache/`.
+
+Optional `.env` knobs (see `.env.example`): `SEISO_MEMORY_PROFILE=low`, `SEISO_LLAMA_USE_MMAP=true`, `SEISO_LLAMA_USE_MLOCK=false`, `SEISO_LLAMA_CACHE_MB=0`, `SEISO_SKIP_MLX_PROBE=1`.

@@ -78,7 +78,7 @@ async def test_build_trusted_messages_uses_server_history_and_latest_user_turn()
         thread_id="thread-1",
         client_messages=[{"role": "user", "content": "next"}],
         user_id="user-1",
-        model_id="Qwen/Qwen3-8B",
+        model_id="Qwen/Qwen3.6-4B",
     )
 
     assert user_content == "next"
@@ -115,7 +115,7 @@ async def test_build_trusted_messages_model_switch_adds_bridge():
             {"role": "user", "content": "hello"},
             {"role": "assistant", "content": "hi"},
         ],
-        thread_model_id="meta-llama/Llama-3.3-70B-Instruct",
+        thread_model_id="meta-llama/Llama-4-Scout-17B-16E-Instruct",
     )
 
     messages, _ = await build_trusted_messages(
@@ -123,13 +123,13 @@ async def test_build_trusted_messages_model_switch_adds_bridge():
         thread_id="thread-1",
         client_messages=[{"role": "user", "content": "continue"}],
         user_id="user-1",
-        model_id="Qwen/Qwen3-8B",
+        model_id="Qwen/Qwen3.6-4B",
     )
 
     system_messages = [m for m in messages if m["role"] == "system"]
     assert len(system_messages) == 2
     assert "switching" in system_messages[1]["content"].lower()
-    assert db.updated_models == [("thread-1", "Qwen/Qwen3-8B")]
+    assert db.updated_models == [("thread-1", "Qwen/Qwen3.6-4B")]
 
 
 def test_trim_messages_to_context_keeps_recent_turns_under_budget():
@@ -178,10 +178,22 @@ def test_trim_messages_to_context_decays_older_messages_by_time():
     assert len(trimmed[0]["content"]) < len("ancient " * 40)
 
 
+def test_prepare_chat_context_includes_knowledge_block():
+    messages = prepare_chat_context(
+        [{"role": "user", "content": "What does the doc say?"}],
+        model_key="Qwen/Qwen3.6-4B",
+        tools_enabled=False,
+        knowledge_context="Reference: Seiso runs locally.",
+    )
+    assert messages[0]["role"] == "system"
+    assert messages[1]["role"] == "system"
+    assert "Reference: Seiso runs locally." in messages[1]["content"]
+
+
 def test_prepare_chat_context_skips_system_prompt_when_tools_enabled():
     messages = prepare_chat_context(
         [{"role": "user", "content": "hi"}],
-        model_key="Qwen/Qwen3-8B",
+        model_key="Qwen/Qwen3.6-4B",
         tools_enabled=True,
     )
     assert messages == [{"role": "user", "content": "hi"}]
@@ -199,12 +211,12 @@ def test_chat_system_prompt_includes_thinking_process_hint_for_qwen():
     "model_key",
     [
         "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B",
-        "Qwen/QwQ-32B",
+        "Qwen/Qwen3.6-27B",
         "openai/gpt-oss-20b",
-        "meta-llama/Llama-3.3-70B-Instruct",
+        "meta-llama/Llama-4-Scout-17B-16E-Instruct",
         "mistralai/Mistral-Small-3.2-24B-Instruct-2506",
         "google/gemma-3-12b-it",
-        "microsoft/phi-4",
+        "microsoft/Phi-4-mini-instruct",
     ],
 )
 def test_chat_system_prompt_includes_no_reasoning_hint_for_all_families(model_key: str):
@@ -215,6 +227,6 @@ def test_chat_system_prompt_includes_no_reasoning_hint_for_all_families(model_ke
 
 
 def test_model_switch_system_prompt_mentions_models():
-    prompt = model_switch_system_prompt("meta-llama/Llama-3.3-70B-Instruct", "Qwen/Qwen3-8B")
-    assert "Llama 3.3 70B Instruct" in prompt
-    assert "Qwen3 8B" in prompt
+    prompt = model_switch_system_prompt("meta-llama/Llama-4-Scout-17B-16E-Instruct", "Qwen/Qwen3.6-4B")
+    assert "Llama 4 Scout" in prompt
+    assert "Qwen3.6 4B" in prompt

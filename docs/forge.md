@@ -81,7 +81,7 @@ To run a second Forge intentionally, change **both** `SEISO_PORT` and `SEISO_DAT
 |------|------|---------|
 | `/` | Dashboard | Workspace overview and quick links |
 | `/hub` | Model Hub | Browse and download catalog models |
-| `/chat` | Chat | Local inference (GGUF, MLX, PyTorch, Ollama); **Eject** button frees loaded model VRAM without changing selection |
+| `/chat` | Chat | Local inference (GGUF, MLX, PyTorch, Ollama); **Free memory** unloads models from RAM/VRAM without changing selection |
 | `/train` | Training Studio | LoRA / QLoRA fine-tuning with live SSE logs |
 | `/export` | Export | Merge LoRA, GGUF, Hub publish from checkpoints |
 | `/compress` | Compress | Code Llama distillation / prune / quant pipeline |
@@ -97,7 +97,7 @@ Knowledge-base ingest and retrieve are **API-only** (`/api/knowledge/...`); ther
 | Prefix | Purpose |
 |--------|---------|
 | `/api/auth` | Login, register (onboarding), session |
-| `/api/models` | Catalog, downloads, VRAM management |
+| `/api/models` | Catalog, downloads, VRAM management (`GET /vram`, `POST /vram/unload`) |
 | `/api/inference` | Chat completions, streaming |
 | `/api/training` | Training jobs, datasets, SSE logs |
 | `/api/export` | Export jobs, Hub publish |
@@ -111,6 +111,17 @@ Knowledge-base ingest and retrieve are **API-only** (`/api/knowledge/...`); ther
 | `/v1/chat/completions` | OpenAI-compatible chat (no `/api` prefix) |
 
 Set `SEISO_DEBUG=true` to expose interactive API docs at `/api/docs`.
+
+### VRAM / RAM management
+
+| Endpoint | Purpose |
+|----------|---------|
+| `GET /api/models/vram` | Loaded local model, Ollama model, headroom, recommended largest fit |
+| `POST /api/models/vram/unload` | Free memory — unload local pool + Ollama + refresh headroom |
+| `POST /api/inference/cancel` | Backward-compatible alias of `vram/unload` |
+| `POST /api/inference/cancel-generation` | Stop streaming only; keeps model warm |
+
+Model Hub shows headroom, loaded model name, **Free memory**, and largest catalog model that fits this machine.
 
 ## Environment variables
 

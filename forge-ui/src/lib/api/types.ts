@@ -167,6 +167,23 @@ export type TrainingDefaults = {
   note: string;
 };
 
+export type VramStatus = {
+  local: {
+    active_model: string | null;
+    path?: string | null;
+    backend?: string | null;
+  };
+  ollama_model: string | null;
+  active_model: string | null;
+  headroom_mb: number;
+  memory_label: string;
+  ram_gb?: number;
+  apple_unified?: boolean;
+  tier?: string;
+  memory_profile?: "low" | "balanced";
+  recommended_max_chat?: string | null;
+};
+
 export type HardwareSummary = {
   tier: string;
   tier_label: string;

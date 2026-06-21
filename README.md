@@ -393,15 +393,29 @@ All user data lives under **`SEISO_DATA_DIR`** (default below):
 ```
 {SEISO_DATA_DIR}/
 ├── hf_cache/         # Hugging Face hub cache (downloaded weights)
+├── hf_home/          # HF_HOME mirror (when configured by Seiso)
+├── hf_xet_cache/     # hf-xet transfer cache
+├── hf_tokens/        # Encrypted Hugging Face tokens (per user)
 ├── models/           # Per-user inventory links to cached weights
 ├── checkpoints/      # Training outputs (per user)
 ├── exports/          # Merged / GGUF / LoRA exports
 ├── compress/         # LLM compression artifacts
 ├── rl_quant/         # RL quant outputs
+├── distill_rl/       # Distillation / RL artifacts
+├── recipes/          # Recipe Studio job data
 ├── uploads/          # Datasets and user files
 ├── knowledge/        # RAG stores
-└── sandbox/          # Sandboxed code-exec workspace
+├── sandbox/          # Sandboxed code-exec workspace
+├── artifacts/        # General job artifacts
+├── forge.db          # SQLite database (when persistent)
+├── .secret_key       # Session signing key
+├── .db_encryption_key # DB encryption key (when persistent)
+├── .inference_api_key # Optional inference API key
+├── .forge.lock       # Single-instance lock
+└── runtime.json      # Runtime metadata
 ```
+
+**Free memory:** In Chat or Model Hub, use **Free memory** to unload the active llama.cpp / MLX / PyTorch model and any loaded Ollama model from RAM/VRAM. This does **not** delete downloaded files in `hf_cache/`. On Mac (Apple Silicon or Intel), free memory before loading a larger model — Seiso sizes loads as file size + ~0.8 GB overhead.
 
 Database defaults to **ephemeral in-memory SQLite** — chat history and job metadata are wiped on restart unless you opt into persistence (`SEISO_DB_EPHEMERAL=false`).
 

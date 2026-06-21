@@ -24,6 +24,7 @@ from forge.services.inference_models import (
     list_inference_options,
     resolve_chat_target,
 )
+from forge.services.knowledge_context import format_knowledge_context, retrieve_knowledge_chunks
 from forge.services.llm_output import StreamingOutputSanitizer, sanitize_llm_output
 from forge.services.models import resolve_model_path
 from seiso.inference.backends import BACKEND_LLAMACPP, BACKEND_MLX, BACKEND_OLLAMA, BACKEND_TORCH
@@ -53,6 +54,7 @@ class ChatRequest(BaseModel):
     tools: bool = False
     allow_code_exec: bool = False
     provider_id: str | None = None
+    knowledge_base_id: str | None = None
 
 
 class ThreadCreate(BaseModel):
@@ -512,6 +514,20 @@ async def chat(
     payload = body.model_dump(exclude={"messages"})
     payload["user_id"] = user_id
 
+    knowledge_context: str | None = None
+    if body.knowledge_base_id:
+        from forge.api.routes.knowledge import _validate_kb_id
+
+        kb_id = _validate_kb_id(body.knowledge_base_id)
+        user_query = str(body.messages[-1].get("content", "")).strip() if body.messages else ""
+        chunks = retrieve_knowledge_chunks(
+            settings.data_dir,
+            user_id=user_id,
+            knowledge_base_id=kb_id,
+            query=user_query,
+        )
+        knowledge_context = format_knowledge_context(chunks) or None
+
     trusted_messages, _user_content = await build_trusted_messages(
         db,
         thread_id=body.thread_id,
@@ -522,6 +538,7 @@ async def chat(
         model_path=body.model_path,
         ollama_model=body.ollama_model,
         tools_enabled=body.tools,
+        knowledge_context=knowledge_context,
     )
     payload["messages"] = trusted_messages
 

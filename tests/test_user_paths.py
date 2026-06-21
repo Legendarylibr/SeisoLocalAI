@@ -6,8 +6,45 @@ from pathlib import Path
 
 import pytest
 
-from forge.services.user_paths import assert_user_path
+from forge.config import ForgeSettings
+from forge.services.user_paths import assert_user_path, user_dir
+from seiso.models.hf_env import resolve_hf_cache_dir
 from seiso.security import SecurityError
+
+
+def test_data_dir_layout_matches_docs(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("SEISO_DATA_DIR", str(tmp_path))
+    monkeypatch.delenv("HUGGINGFACE_HUB_CACHE", raising=False)
+    monkeypatch.delenv("HF_HOME", raising=False)
+    monkeypatch.delenv("HF_XET_CACHE", raising=False)
+    settings = ForgeSettings()
+    settings.ensure_dirs()
+
+    expected_subdirs = (
+        "models",
+        "checkpoints",
+        "exports",
+        "knowledge",
+        "sandbox",
+        "artifacts",
+        "recipes",
+        "uploads",
+        "rl_quant",
+        "compress",
+        "distill_rl",
+        "hf_cache",
+        "hf_tokens",
+    )
+    for name in expected_subdirs:
+        assert (settings.data_dir / name).is_dir(), name
+
+    assert resolve_hf_cache_dir(settings.data_dir) == settings.data_dir / "hf_cache"
+
+    uid = "user-1"
+    model_dir = user_dir(settings.data_dir, uid, "models")
+    assert model_dir == settings.data_dir / "models" / uid
+    model_dir.mkdir(parents=True, exist_ok=True)
+    assert model_dir.is_dir()
 
 
 def test_assert_user_path_allows_inventory_symlink(tmp_path: Path):

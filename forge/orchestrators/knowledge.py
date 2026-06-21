@@ -9,6 +9,7 @@ from typing import Any
 
 from forge.orchestrators.base import Orchestrator
 from forge.security.audit import audit_event
+from forge.services.knowledge_context import retrieve_knowledge_chunks
 from forge.services.knowledge_paths import assert_ingest_source
 from forge.tools.sanitize import wrap_tool_result
 from seiso.research.provenance import sha256_file
@@ -89,25 +90,15 @@ class KnowledgeOrchestrator(Orchestrator):
         kb_id = payload["knowledge_base_id"]
         query = payload["query"]
         top_k = payload.get("top_k", 5)
-        kb_dir = self._kb_dir(user_id, kb_id)
-        index_path = kb_dir / "index.jsonl"
 
-        if not index_path.exists():
-            return {"results": []}
-
-        chunks = self._load_index_chunks(index_path)
-
-        q_tokens = set(query.lower().split())
-        scored = []
-        for c in chunks:
-            t_tokens = set(c["text"].lower().split())
-            score = len(q_tokens & t_tokens) / max(len(q_tokens), 1)
-            scored.append((score, c))
-        scored.sort(key=lambda x: x[0], reverse=True)
-
-        results = []
-        for _, c in scored[:top_k]:
-            results.append({**c, "text": wrap_tool_result(f"kb:{kb_id}", c["text"])})
+        chunks = retrieve_knowledge_chunks(
+            self.sandbox_root,
+            user_id=user_id,
+            knowledge_base_id=kb_id,
+            query=query,
+            top_k=top_k,
+        )
+        results = [{**c, "text": wrap_tool_result(f"kb:{kb_id}", c["text"])} for c in chunks]
         self._emit_log(job_id, f"Retrieved {len(results)} chunks for query")
         return {"results": results}
 

@@ -1,5 +1,18 @@
 # Troubleshooting
 
+## Model exceeds available memory
+
+**Symptom:** Chat or Hub blocks a model, or load fails with an out-of-memory error.
+
+**Fix:**
+1. Click **Free memory** in Chat or Model Hub (unloads llama.cpp / MLX / PyTorch / Ollama from RAM — does not delete `hf_cache/` files).
+2. Close other memory-heavy apps (browsers, other LLM tools).
+3. Pick a smaller model or more aggressive quant (Q4_K_M, Q4_0).
+4. On Mac ≤24 GB, prefer **llama.cpp + GGUF**; use MLX only when headroom is ample.
+5. Optional escape hatch: `SEISO_ALLOW_MEMORY_OVERCOMMIT=1` (not recommended).
+
+See [inference/backends.md](inference/backends.md#memory-management) for RAM-tier guidance.
+
 ## CUDA kernels fail to compile
 
 **Symptom:** Log shows `CUDA kernel load failed`, training uses PyTorch fallback.

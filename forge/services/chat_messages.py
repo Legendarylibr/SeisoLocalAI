@@ -148,6 +148,7 @@ def prepare_chat_context(
     model_key: str,
     tools_enabled: bool,
     prior_model_key: str | None = None,
+    knowledge_context: str | None = None,
 ) -> list[dict[str, str]]:
     """Apply decay trimming, model system prompt, and mid-thread model-switch bridge."""
     trimmed = trim_messages_to_context(history)
@@ -156,6 +157,9 @@ def prepare_chat_context(
     system = chat_system_prompt(model_key, tools_enabled=tools_enabled)
     if system:
         out.append({"role": "system", "content": system})
+
+    if knowledge_context:
+        out.append({"role": "system", "content": knowledge_context})
 
     if (
         prior_model_key
@@ -185,6 +189,7 @@ async def build_trusted_messages(
     model_path: str | None = None,
     ollama_model: str | None = None,
     tools_enabled: bool = False,
+    knowledge_context: str | None = None,
 ) -> tuple[list[dict[str, str]], str | None]:
     """Return (messages, new_user_content).
 
@@ -252,6 +257,7 @@ async def build_trusted_messages(
                 model_key=model_key,
                 tools_enabled=tools_enabled,
                 prior_model_key=prior_model_key,
+                knowledge_context=knowledge_context,
             ),
             content,
         )
@@ -263,6 +269,7 @@ async def build_trusted_messages(
             [{"role": "user", "content": content}],
             model_key=model_key,
             tools_enabled=tools_enabled,
+            knowledge_context=knowledge_context,
         ),
         content,
     )

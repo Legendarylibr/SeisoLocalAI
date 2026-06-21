@@ -198,6 +198,34 @@ def recommended_catalog_repo(profile: dict[str, Any], *, task: str = "chat") -> 
     return result
 
 
+def largest_fitting_catalog_repo(profile: dict[str, Any], *, task: str = "chat") -> str | None:
+    """Largest catalog model with ideal/good hardware fit."""
+    return recommended_catalog_repo(profile, task=task)
+
+
+def build_vram_status(orchestrator: Any) -> dict[str, Any]:
+    """Unified VRAM/RAM status for API responses."""
+    from seiso.hardware.tiers import HardwareTier, classify_tier, vram_headroom_mb
+    from seiso.memory.platform_profile import memory_profile_label
+
+    profile = hardware_profile(force_refresh=False)
+    tier = classify_tier(profile)
+    headroom = vram_headroom_mb(profile)
+    local = orchestrator._runner._pool.status()
+    return {
+        "local": local,
+        "ollama_model": orchestrator.active_ollama_model,
+        "headroom_mb": headroom,
+        "memory_label": memory_headroom_label(profile),
+        "ram_gb": profile.get("ram_gb"),
+        "apple_unified": tier == HardwareTier.APPLE_UNIFIED,
+        "tier": tier.value,
+        "memory_profile": memory_profile_label(profile),
+        "recommended_max_chat": largest_fitting_catalog_repo(profile, task="chat"),
+        "active_model": local.get("active_model") or orchestrator.active_ollama_model,
+    }
+
+
 def hardware_summary(profile: dict[str, Any]) -> dict[str, Any]:
     """Compact summary safe to embed in API responses."""
     tier = classify_tier(profile)
@@ -238,6 +266,8 @@ __all__ = [
     "format_catalog_note",
     "hardware_profile",
     "hardware_summary",
+    "largest_fitting_catalog_repo",
+    "build_vram_status",
     "live_metrics",
     "memory_headroom_label",
     "preferred_inference_backend",

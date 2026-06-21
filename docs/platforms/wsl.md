@@ -48,7 +48,13 @@ Browse to **http://127.0.0.1:8765** from Windows (WSL forwards localhost by defa
 
 ## Data paths
 
-- Seiso data: `$HOME/.seiso` inside WSL (not on `/mnt/c/...`)
+- Seiso data: `$HOME/.seiso` inside WSL (not on `/mnt/c/...`) — keeps mmap and HF cache fast
 - Mount Windows datasets: `/mnt/c/Users/.../data/train.jsonl`
 
 Use WSL paths in dataset fields, not `C:\...` strings.
+
+If `SEISO_DATA_DIR` points at `/mnt/c/...`, Forge logs a warning — move data to the Linux filesystem when possible.
+
+## Memory
+
+Use **Free memory** in Chat or Model Hub before loading a larger GGUF. Training jobs call `release_training_memory` after completion to return GPU memory.
