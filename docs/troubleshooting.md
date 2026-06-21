@@ -86,11 +86,12 @@ For UI development, run `seiso forge` in one terminal and `cd forge-ui && npm ru
 
 **Fix:** Run the installer first, or set `SEISO_INSTALL_DIR` to your clone path.
 
-**Symptom:** `seiso_run_install_worker: command not found`, `no such file or directory` sourcing `common.sh`, then `Install failed` / `Doctor script not found`.
+**Symptom:** `Seiso repository incomplete at …/Seiso`, or `seiso_run_install_worker: command not found` / `no such file or directory` sourcing `common.sh`, then `Install failed` / `Doctor script not found`.
 
-**Cause:** The install directory exists but the git clone did not finish (network error, non-empty `$HOME/Seiso`, or partial download).
+**Cause:** The install directory exists but the git clone did not finish (network error, non-empty `$HOME/Seiso`, or partial download). The installer expects `pyproject.toml`, `seiso_cli/`, and `scripts/lib/common.sh`.
 
-**Fix:**
+**Fix:** If the directory has a `.git` folder, re-run `start` — the installer will try to repair the clone. Otherwise remove the partial directory and install again:
+
 ```bash
 rm -rf "$HOME/Seiso"
 curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
