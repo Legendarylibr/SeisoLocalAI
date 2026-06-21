@@ -39,9 +39,24 @@ class InferenceOrchestrator(Orchestrator):
         return bool(self._active_generation_user_id and self._active_generation_user_id != user_id)
 
     async def cancel_and_unload_for_user(self, user_id: str | None) -> dict[str, Any]:
+        return await self.release_all_inference_memory(user_id)
+
+    async def release_all_inference_memory(self, user_id: str | None) -> dict[str, Any]:
+        """Unload local pool, Ollama, and refresh headroom for the next model load."""
         if self._generation_owned_by_other(user_id):
             raise PermissionError("Another user has active inference")
-        return await self._runner.cancel_and_unload()
+        await self._runner.cancel_and_unload()
+        await self._release_ollama_model()
+        from seiso.memory.protection import release_cached_memory
+
+        release_cached_memory(sync=True)
+        from forge.services.hardware import build_vram_status
+        from forge.services.inference_models import invalidate_inference_options_cache
+        from seiso.hardware.profile import hardware_profile as core_hardware_profile
+
+        core_hardware_profile(force_refresh=True)
+        invalidate_inference_options_cache()
+        return build_vram_status(self)
 
     async def cancel_generation_for_user(self, user_id: str | None) -> dict[str, Any]:
         if self._generation_owned_by_other(user_id):

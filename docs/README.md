@@ -77,7 +77,7 @@ See [install.md](install.md) and [forge.md](forge.md) for full details.
 1. [install.md](install.md) — pip extras per platform
 2. [cli.md](cli.md) — full command reference
 3. [training/quickstart.md](training/quickstart.md) — YAML config fields
-4. [inference/backends.md](inference/backends.md) — backend selection
+4. [inference/backends.md](inference/backends.md) — backend selection and [memory management](inference/backends.md#memory-management)
 
 ### Path C — Developer / contributor
 

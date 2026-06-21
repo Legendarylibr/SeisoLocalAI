@@ -66,14 +66,38 @@ def assess_hardware_fit(
 
 
 def assess_catalog_fit(model: dict[str, Any], profile: dict[str, Any]) -> dict[str, Any]:
-    est_gb = estimate_chat_vram_gb(
-        model["params"],
-        quant=model.get("quant", "Q4_K_M"),
-        tags=model.get("tags", ()),
-        repo_id=model.get("repo_id", ""),
-    )
+    tags = tuple(model.get("tags") or ())
+    download_bytes = int(model.get("download_bytes") or 0)
+    if download_bytes > 0:
+        est_gb = round(download_bytes / (1024**3) + 0.8, 2)
+    elif "moe" in tags:
+        from seiso.memory.estimates import estimate_gguf_download_bytes
+
+        est_gb = round(
+            estimate_gguf_download_bytes(
+                model["params"],
+                quant=model.get("quant", "Q4_K_M"),
+                tags=tags,
+                repo_id=model.get("repo_id", ""),
+            )
+            / (1024**3)
+            + 0.8,
+            2,
+        )
+    else:
+        est_gb = estimate_chat_vram_gb(
+            model["params"],
+            quant=model.get("quant", "Q4_K_M"),
+            tags=tags,
+            repo_id=model.get("repo_id", ""),
+        )
     mode = "train" if model.get("task") in ("base",) else "chat"
-    return assess_hardware_fit(est_gb, profile, mode=mode)
+    result = assess_hardware_fit(est_gb, profile, mode=mode)
+    if "moe" in tags and download_bytes <= 0:
+        note = result.get("hardware_note") or ""
+        moe_hint = "MoE — load needs full GGUF in RAM (mmap); active experts are smaller at runtime."
+        result["hardware_note"] = f"{note} · {moe_hint}" if note else moe_hint
+    return result
 
 
 def assess_inference_option_fit(option: dict[str, Any], profile: dict[str, Any]) -> dict[str, Any]:

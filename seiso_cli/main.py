@@ -104,10 +104,21 @@ def train(
     console.print(f"[green]Done:[/] {out}")
 
 
-async def _run_chat(model: str, messages: list[dict]) -> str:
+async def _run_chat(model: str, messages: list[dict], *, tools_enabled: bool = False) -> str:
+    from forge.services.llm_output import sanitize_llm_output
+    from forge.services.model_prompts import chat_system_prompt, resolve_model_key
     from seiso.inference.runner import run_chat
 
-    return await run_chat({"model_path": model, "messages": messages})
+    model_key = resolve_model_key(model_path=model)
+    system = chat_system_prompt(model_key, tools_enabled=tools_enabled)
+    payload_messages = list(messages)
+    if system and not any(m.get("role") == "system" for m in payload_messages):
+        payload_messages = [{"role": "system", "content": system}, *payload_messages]
+
+    raw = await run_chat({"model_path": model, "messages": payload_messages})
+    if tools_enabled:
+        return raw
+    return sanitize_llm_output(raw, strip_tool_calls=True)
 
 
 def _one_shot_reply(model: str, prompt: str) -> str:

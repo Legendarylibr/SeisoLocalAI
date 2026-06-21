@@ -96,7 +96,9 @@ async def vram_status(
     user_id: Annotated[str, Depends(get_current_user_id)],
     orchestrator: Annotated[InferenceOrchestrator, Depends(get_inference_orchestrator)],
 ) -> dict:
-    return orchestrator._runner._pool.status()
+    from forge.services.hardware import build_vram_status
+
+    return build_vram_status(orchestrator)
 
 
 @router.post("/vram/unload")
@@ -104,7 +106,10 @@ async def unload_vram(
     user_id: Annotated[str, Depends(get_current_user_id)],
     orchestrator: Annotated[InferenceOrchestrator, Depends(get_inference_orchestrator)],
 ) -> dict:
-    return await orchestrator._runner.cancel_and_unload()
+    try:
+        return await orchestrator.release_all_inference_memory(user_id)
+    except PermissionError as exc:
+        raise HTTPException(403, str(exc)) from exc
 
 
 @router.get("")

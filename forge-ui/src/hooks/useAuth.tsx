@@ -17,8 +17,8 @@ const AuthContext = createContext<AuthState | null>(null);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
-  const [needsOnboarding, setNeedsOnboarding] = useState(false);
-  const [storageModeConfigured, setStorageModeConfigured] = useState(true);
+  const [needsOnboarding, setNeedsOnboarding] = useState(true);
+  const [storageModeConfigured, setStorageModeConfigured] = useState(false);
   const [storageMode, setStorageMode] = useState<"persistent" | "ephemeral">("persistent");
 
   useEffect(() => {
@@ -39,6 +39,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
       } catch {
         setUser(null);
+        setNeedsOnboarding(true);
       } finally {
         setLoading(false);
       }

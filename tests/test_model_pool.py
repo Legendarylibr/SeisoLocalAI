@@ -1,5 +1,6 @@
 """Tests for VRAM model pool."""
 
+import os
 import platform
 import threading
 import time
@@ -173,7 +174,9 @@ def test_llama_load_kwargs_default_metal_offload_on_apple_silicon(monkeypatch):
 
 
 def test_llama_load_kwargs_cuda_defaults(monkeypatch):
-    monkeypatch.delenv("SEISO_LLAMA_GPU_LAYERS", raising=False)
+    for key in list(os.environ):
+        if key.startswith("SEISO_LLAMA_"):
+            monkeypatch.delenv(key, raising=False)
     monkeypatch.setattr(platform, "system", lambda: "Linux")
     monkeypatch.setattr(platform, "machine", lambda: "x86_64")
     monkeypatch.setattr("seiso.inference.model_pool._cuda_available", lambda: True)

@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { api, CatalogModel, HardwareSummary, LocalModel } from "@/lib/api";
+import { api, CatalogModel, HardwareSummary, LocalModel, VramStatus } from "@/lib/api";
 import { usePlatformSettings } from "@/context/PlatformSettingsContext";
 import { chatPath, chatPathForLocalModel, modelMemoryBlocked, modelMemoryBlockReason } from "@/lib/chatModel";
+import { formatLoadedModelLabel, hasLoadedInferenceMemory, hubRamTierHint } from "@/lib/hubHardware";
 import { trainPath } from "@/lib/hubDownload";
 import { HardwareFitBadge } from "@/components/HardwareFitBadge";
 import { ModelCardSkeleton } from "@/components/ModelCardSkeleton";
@@ -34,6 +35,8 @@ const QUICK_FILTERS = [
   { label: "Chat", task: "chat", q: "", fitsOnly: false },
   { label: "Code", task: "code", q: "", fitsOnly: false },
   { label: "Llama", task: "", q: "llama", fitsOnly: false },
+  { label: "Phi-4", task: "", q: "phi-4", fitsOnly: false },
+  { label: "Llama 4", task: "", q: "llama 4", fitsOnly: false },
   { label: "Gemma 3", task: "", q: "gemma 3", fitsOnly: false },
   { label: "Qwen 3.6", task: "", q: "qwen 3.6", fitsOnly: false },
   { label: "GPT-OSS", task: "", q: "gpt-oss", fitsOnly: false },
@@ -67,10 +70,15 @@ export function HubPage() {
   const [task, setTask] = useState("");
   const [fitsOnly, setFitsOnly] = useState(false);
   const [hwSummary, setHwSummary] = useState<HardwareSummary | null>(null);
+  const [vramStatus, setVramStatus] = useState<VramStatus | null>(null);
+  const [freeingMemory, setFreeingMemory] = useState(false);
   const [downloading, setDownloading] = useState<string | null>(null);
   const [downloadAction, setDownloadAction] = useState<"chat" | "train" | null>(null);
   const [tab, setTab] = useState<"catalog" | "local">("catalog");
   const [catalogLoading, setCatalogLoading] = useState(true);
+
+  const refreshVram = () =>
+    api.vramStatus().then(setVramStatus).catch(console.error);
 
   const refreshLocal = () => api.listModels().then(setLocal).catch(console.error);
 
@@ -88,8 +96,30 @@ export function HubPage() {
       .finally(() => setCatalogLoading(false));
   }, [search, family, task, fitsOnly]);
 
+  const handleFreeMemory = async () => {
+    if (freeingMemory) return;
+    setFreeingMemory(true);
+    try {
+      const status = await api.freeMemory();
+      setVramStatus(status);
+      refreshCatalog();
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setFreeingMemory(false);
+    }
+  };
+
+  const recommendedRepo = vramStatus?.recommended_max_chat;
+  const recommendedModel = useMemo(
+    () => (recommendedRepo ? catalog.find((m) => m.repo_id === recommendedRepo) : null),
+    [catalog, recommendedRepo],
+  );
+  const ramTierHint = hubRamTierHint(hwSummary, vramStatus);
+
   useEffect(() => {
     refreshLocal();
+    refreshVram();
     return () => {
       setDownloading(null);
       setDownloadAction(null);
@@ -148,11 +178,43 @@ export function HubPage() {
       />
 
       {hwSummary && (
-        <div className="hw-inline-banner card">
-          <span className="trust-badge">{hwSummary.tier_label}</span>
-          <span className="muted-text">
-            ~{Math.round(hwSummary.vram_headroom_mb / 1024)} GB {hwSummary.memory_headroom_label || "memory"} free · prefers {hwSummary.preferred_inference_backend_label || hwSummary.preferred_inference_backend}
-          </span>
+        <div className="hw-inline-banner card hub-hw-strip">
+          <div className="hub-hw-strip-main">
+            <span className="trust-badge">{hwSummary.tier_label}</span>
+            <span className="muted-text">
+              ~{Math.round((vramStatus?.headroom_mb ?? hwSummary.vram_headroom_mb) / 1024)} GB{" "}
+              {vramStatus?.memory_label || hwSummary.memory_headroom_label || "memory"} free
+              {" · "}
+              loaded: {formatLoadedModelLabel(vramStatus)}
+            </span>
+            {hasLoadedInferenceMemory(vramStatus) && (
+              <button
+                type="button"
+                className="btn btn-sm"
+                onClick={() => void handleFreeMemory()}
+                disabled={freeingMemory}
+              >
+                {freeingMemory ? "Freeing…" : "Free memory"}
+              </button>
+            )}
+          </div>
+          {ramTierHint && <p className="muted-text hub-hw-tier-hint">{ramTierHint}</p>}
+          {recommendedRepo && (
+            <p className="muted-text hub-hw-recommend">
+              Largest fit on this machine:{" "}
+              {recommendedModel ? (
+                <button
+                  type="button"
+                  className="link-button"
+                  onClick={() => applyQuickFilter(recommendedModel.name.toLowerCase(), "", false)}
+                >
+                  {recommendedModel.name}
+                </button>
+              ) : (
+                recommendedRepo
+              )}
+            </p>
+          )}
         </div>
       )}
 

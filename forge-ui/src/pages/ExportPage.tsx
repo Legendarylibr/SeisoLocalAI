@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { api, ExportJob, HubPublishFields, PublishableModel, RLQuantJob, subscribeSSE } from "@/lib/api";
 import { invalidateApiCache } from "@/lib/api/getCache";
 import { appendBoundedLog } from "@/lib/api/sse";
+import { buildOllamaCommandsFromExport, extractOllamaCommandsFromLogs } from "@/lib/ollamaExport";
 import { DataTable } from "@/components/research/DataTable";
 import { FormSection } from "@/components/research/FormSection";
 import { LogStream } from "@/components/research/LogStream";
@@ -48,6 +49,7 @@ export function ExportPage() {
   const [profile, setProfile] = useState("");
   const [profiles, setProfiles] = useState<{ id: string; formats: string[] }[]>([]);
   const [busy, setBusy] = useState(false);
+  const [ollamaCommands, setOllamaCommands] = useState<string[]>([]);
   const streamAbortRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
@@ -76,6 +78,7 @@ export function ExportPage() {
     if (!checkpoint.trim()) return;
     setBusy(true);
     setLogs([]);
+    setOllamaCommands([]);
     try {
       const res = await api.startExport(
         checkpoint,
@@ -88,11 +91,29 @@ export function ExportPage() {
       setLastExportJobId(res.job_id);
       streamAbortRef.current?.();
       streamAbortRef.current = subscribeSSE(`/export/jobs/${res.job_id}/stream`, (event, data) => {
-        if (event === "log" || event === "result") setLogs((l) => appendBoundedLog(l, data));
+        if (event === "log" || event === "result") {
+          setLogs((l) => {
+            const next = appendBoundedLog(l, data);
+            const fromLogs = extractOllamaCommandsFromLogs(next);
+            if (fromLogs.length) setOllamaCommands(fromLogs);
+            return next;
+          });
+        }
         if (event === "error") setLogs((l) => appendBoundedLog(l, `ERROR: ${data}`));
         if (event === "result") {
           invalidateApiCache("/inference/models");
           invalidateApiCache("/training/models");
+          try {
+            const parsed = JSON.parse(data) as { ollama_commands?: string[]; outputs?: Record<string, string> };
+            if (parsed.ollama_commands?.length) {
+              setOllamaCommands(parsed.ollama_commands);
+            } else if (parsed.outputs) {
+              const derived = buildOllamaCommandsFromExport(JSON.stringify(parsed.outputs), checkpoint.trim() || "seiso-model");
+              if (derived.length) setOllamaCommands(derived);
+            }
+          } catch {
+            /* result payload may be plain text from older servers */
+          }
         }
       });
       setTimeout(() => api.listPublishableOutputs().then(setPublishable).catch(console.error), 2000);
@@ -189,6 +210,22 @@ export function ExportPage() {
 
   const updateHub = (key: keyof HubPublishFields, value: string | boolean) => {
     setHub((h) => ({ ...h, [key]: value }));
+  };
+
+  const copyOllamaCommand = async (command: string) => {
+    try {
+      await navigator.clipboard.writeText(command);
+      setLogs((l) => appendBoundedLog(l, `Copied: ${command}`));
+    } catch (err) {
+      setLogs((l) => appendBoundedLog(l, (err as Error).message));
+    }
+  };
+
+  const showOllamaForJob = (job: ExportJob) => {
+    const name = checkpoint.trim() || job.id.slice(0, 8);
+    const commands = buildOllamaCommandsFromExport(job.output_paths_json, name);
+    if (commands.length) setOllamaCommands(commands);
+    else setLogs(["No GGUF outputs with Modelfile found for this export job."]);
   };
 
   return (
@@ -288,6 +325,17 @@ export function ExportPage() {
               </button>
             )}
           </div>
+          {ollamaCommands.length > 0 && (
+            <FormSection title="Import to Ollama" hint="Run in a terminal where Ollama is installed.">
+              <div className="studio-chip-group">
+                {ollamaCommands.map((command) => (
+                  <button key={command} type="button" className="btn" onClick={() => void copyOllamaCommand(command)}>
+                    Copy: {command}
+                  </button>
+                ))}
+              </div>
+            </FormSection>
+          )}
         </div>
 
         <div className="card studio-card">
@@ -379,6 +427,18 @@ export function ExportPage() {
             <button className="btn btn-primary btn-lg" onClick={publish} disabled={busy}>
               Publish to Hugging Face
             </button>
+            {selectedExportJobId && (
+              <button
+                className="btn"
+                type="button"
+                onClick={() => {
+                  const job = completedExports.find((j) => j.id === selectedExportJobId);
+                  if (job) showOllamaForJob(job);
+                }}
+              >
+                Ollama import command
+              </button>
+            )}
           </div>
         </div>
 

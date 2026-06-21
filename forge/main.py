@@ -31,6 +31,7 @@ from forge.config import get_settings
 from forge.db.store import DatabaseCryptoError
 from forge.instance_lock import ForgeDataDirLock, data_dir_lock_path, lock_held_by_current_process
 from seiso.models.hf_env import configure_hf_hub_cache
+from seiso.memory.platform_profile import apply_platform_memory_profile
 
 
 @asynccontextmanager
@@ -41,6 +42,7 @@ async def lifespan(app: FastAPI):
         data_lock = ForgeDataDirLock()
         data_lock.acquire(settings.data_dir, host=settings.host, port=settings.port)
     configure_hf_hub_cache(settings.data_dir)
+    apply_platform_memory_profile()
     settings.ensure_dirs()
     settings.write_runtime_config()
     db = get_db()

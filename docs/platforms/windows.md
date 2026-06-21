@@ -96,3 +96,9 @@ There is no Windows `doctor.sh` — use the `seiso doctor` CLI command instead.
 ## WSL alternative
 
 For easier Triton/flash-attn support, use [WSL2 + NVIDIA](wsl.md).
+
+## Memory (CPU-only vs CUDA)
+
+- **No NVIDIA GPU:** Forge sets `SEISO_LLAMA_GPU_LAYERS=0` — GGUF runs on CPU. Use smaller Q4 models.
+- **CUDA + tight VRAM:** batch and GPU layers are capped automatically; use **Free memory** in Chat/Hub before loading a larger model.
+- **Free memory** unloads the active inference model from VRAM/RAM; downloaded weights stay in `{SEISO_DATA_DIR}/hf_cache/`.

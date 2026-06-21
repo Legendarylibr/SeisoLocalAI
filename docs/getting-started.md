@@ -79,6 +79,8 @@ Seiso binds to `127.0.0.1` by default. Your credentials stay on your machine.
 
 Models are cached under `{SEISO_DATA_DIR}/hf_cache` (default `$HOME/.seiso/hf_cache` on Linux/macOS/WSL, `%USERPROFILE%\.seiso\hf_cache` on Windows). The Hub UI also registers inventory links under `{SEISO_DATA_DIR}/models/{user_id}/`.
 
+Before loading a larger model, use **Free memory** in Chat or Model Hub to unload the active inference model from RAM/VRAM (downloaded files in `hf_cache/` are kept).
+
 ## Step 4 — Chat with a local model
 
 1. Open **Chat** (`/chat`)
@@ -201,17 +203,30 @@ Default data directory (override with `SEISO_DATA_DIR`):
 
 ```
 {SEISO_DATA_DIR}/
-├── models/           # Per-user inventory links to cached weights
 ├── hf_cache/         # Hugging Face hub cache (GGUF / safetensors downloads)
+├── hf_home/          # HF_HOME (when set by Seiso)
+├── hf_xet_cache/     # hf-xet transfer cache
+├── hf_tokens/        # Encrypted Hugging Face tokens
+├── models/           # Per-user inventory links to cached weights
 ├── checkpoints/      # Training outputs (per user)
 ├── exports/          # Merged / GGUF / LoRA exports
 ├── compress/         # LLM compression run artifacts
 ├── rl_quant/         # RL quant policy outputs
+├── distill_rl/       # Distillation / RL artifacts
+├── recipes/          # Recipe Studio job data
 ├── knowledge/        # RAG vector stores (API)
 ├── uploads/          # User-uploaded datasets and files
 ├── artifacts/        # Tool-generated files
-└── sandbox/          # Sandboxed code-exec workspace
+├── sandbox/          # Sandboxed code-exec workspace
+├── forge.db          # SQLite database (persistent mode)
+├── .secret_key       # Session signing key
+├── .db_encryption_key
+├── .inference_api_key
+├── .forge.lock
+└── runtime.json
 ```
+
+See also the canonical tree in [README.md](../README.md#data--storage).
 
 ## Next steps
 

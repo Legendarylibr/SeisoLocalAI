@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { api, ChatMessage, ChatThread, CatalogModel, InferenceModelOption, streamChat } from "@/lib/api";
+import { api, ChatMessage, ChatThread, CatalogModel, InferenceModelOption, streamChat, VramStatus } from "@/lib/api";
 import { usePlatformSettings } from "@/context/PlatformSettingsContext";
 import { bootstrapChatSession, CHAT_BACKEND_STORAGE_KEY, CHAT_MODEL_STORAGE_KEY, hasChatNavTarget, initializeChatSession, isChatModelReady, modelMemoryBlocked, modelMemoryBlockReason, needsHubDownload, preloadWithProgress, resolveInferenceBackend } from "@/lib/chatModel";
+import { hasLoadedInferenceMemory } from "@/lib/hubHardware";
 import { useHardwareProfile } from "@/hooks/useHardware";
 import { writeStoredModel } from "@/lib/modelSelection";
 import { ModelProgressState, initialDownloadProgress, initialLoadProgress } from "@/lib/modelProgress";
@@ -64,6 +65,8 @@ export function ChatPage() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [useTools, setUseTools] = useState(false);
   const [allowCodeExec, setAllowCodeExec] = useState(false);
+  const [knowledgeBases, setKnowledgeBases] = useState<Array<{ id: string; chunk_count: number; has_index: boolean }>>([]);
+  const [knowledgeBaseId, setKnowledgeBaseId] = useState("");
   const [maxTokens, setMaxTokens] = useState(2048);
   const [providerId, setProviderId] = useState("");
   const [selection, setSelection] = useState("");
@@ -72,13 +75,14 @@ export function ChatPage() {
   const [providers, setProviders] = useState<Array<{ id: string; name: string; provider_type: string }>>([]);
   const { settings } = usePlatformSettings();
   const security = settings?.security ?? null;
-  const { profile: hwProfile } = useHardwareProfile();
+  const { profile: hwProfile, refresh: refreshHwProfile } = useHardwareProfile();
   const backendLabels = hwProfile?.inference_backend_labels ?? {};
   const [switchingModel, setSwitchingModel] = useState(false);
   const [loadProgress, setLoadProgress] = useState<ModelProgressState | null>(null);
   const [loadedModelId, setLoadedModelId] = useState<string | null>(null);
   const [loadedBackend, setLoadedBackend] = useState<string | null>(null);
-  const [ejectingModel, setEjectingModel] = useState(false);
+  const [vramStatus, setVramStatus] = useState<VramStatus | null>(null);
+  const [freeingMemory, setFreeingMemory] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollFrameRef = useRef<number | null>(null);
   const streamAbortRef = useRef<(() => void) | null>(null);
@@ -118,7 +122,32 @@ export function ChatPage() {
       : null);
   const selectedFit = selected?.hardware_fit;
   const modelBlocked = !providerId && modelMemoryBlocked(selected, hwProfile?.vram_headroom_mb);
-  const modelBlockReason = modelMemoryBlockReason(selected);
+
+  const memoryBlockHint = useCallback(
+    (model: InferenceModelOption | CatalogModel | null | undefined) => {
+      let reason = modelMemoryBlockReason(model);
+      if (hasLoadedInferenceMemory(vramStatus)) {
+        reason = `${reason} Free memory first, then retry.`;
+      }
+      return reason;
+    },
+    [vramStatus],
+  );
+
+  const modelBlockReason = memoryBlockHint(selected);
+
+  const refreshVramStatus = useCallback(async () => {
+    try {
+      const status = await api.vramStatus();
+      setVramStatus(status);
+      return status;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const showFreeMemory =
+    hasLoadedInferenceMemory(vramStatus) || Boolean(loadedModelId) || Boolean(vramStatus?.ollama_model);
 
   const filteredThreads = useMemo(() => {
     const q = threadSearch.toLowerCase();
@@ -143,6 +172,15 @@ export function ChatPage() {
     }
     return r.models;
   }, [selection, hwProfile]);
+
+  const releaseInferenceMemory = useCallback(async () => {
+    const status = await api.freeMemory();
+    setVramStatus(status);
+    setLoadedModelId(null);
+    setLoadedBackend(null);
+    await Promise.all([refreshHwProfile(), refreshModels()]);
+    return status;
+  }, [refreshHwProfile, refreshModels]);
 
   const activateModel = useCallback(
     async (modelId: string, list: InferenceModelOption[], backendOverride?: string) => {
@@ -170,7 +208,7 @@ export function ChatPage() {
   const handleModelChange = async (modelId: string) => {
     const next = models.find((m) => m.id === modelId);
     if (modelMemoryBlocked(next, hwProfile?.vram_headroom_mb)) {
-      setError(modelMemoryBlockReason(next));
+      setError(memoryBlockHint(next));
       return;
     }
     const targetBackend = resolveInferenceBackend(next ?? null, hwProfile, inferenceBackend);
@@ -188,11 +226,9 @@ export function ChatPage() {
     if (streaming) setStreaming(false);
     if (!providerId) {
       try {
-        await api.cancelInference();
-        setLoadedModelId(null);
-        setLoadedBackend(null);
+        await releaseInferenceMemory();
       } catch {
-        /* best-effort VRAM release */
+        /* best-effort memory release */
       }
     }
     try {
@@ -210,7 +246,7 @@ export function ChatPage() {
 
   const handleCatalogSelect = (model: CatalogModel) => {
     if (modelMemoryBlocked(model, hwProfile?.vram_headroom_mb)) {
-      setError(modelMemoryBlockReason(model));
+      setError(memoryBlockHint(model));
       return;
     }
     bootstrapAbortRef.current?.abort();
@@ -235,32 +271,37 @@ export function ChatPage() {
     }
   }, [pendingRepo, selection, setSearchParams]);
 
-  const handleEjectModel = useCallback(async () => {
-    if (providerId || !loadedModelId || ejectingModel) return;
+  const handleFreeMemory = useCallback(async () => {
+    if (!showFreeMemory || freeingMemory) return;
     streamAbortRef.current?.();
     streamAbortRef.current = null;
     if (streaming) setStreaming(false);
-    setEjectingModel(true);
+    setFreeingMemory(true);
     setError(null);
     try {
-      await api.cancelInference();
-      setLoadedModelId(null);
-      setLoadedBackend(null);
+      await releaseInferenceMemory();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to eject model from memory");
+      setError(e instanceof Error ? e.message : "Failed to free memory");
     } finally {
-      setEjectingModel(false);
+      setFreeingMemory(false);
     }
-  }, [providerId, loadedModelId, ejectingModel, streaming]);
+  }, [showFreeMemory, freeingMemory, streaming, releaseInferenceMemory]);
 
   const handleProviderChange = async (nextProvider: string) => {
     if (nextProvider === providerId) return;
     streamAbortRef.current?.();
     streamAbortRef.current = null;
     if (streaming) setStreaming(false);
+    if (nextProvider && (showFreeMemory || loadedModelId)) {
+      try {
+        await releaseInferenceMemory();
+      } catch {
+        /* ignore */
+      }
+    }
     if (!nextProvider && providerId) {
       try {
-        await api.cancelInference();
+        await releaseInferenceMemory();
       } catch {
         /* ignore */
       }
@@ -300,7 +341,11 @@ export function ChatPage() {
   useEffect(() => {
     api.listThreads().then(setThreads).catch(console.error);
     api.listProviders().then(setProviders).catch(() => {});
-  }, []);
+    api.listKnowledgeBases()
+      .then((res) => setKnowledgeBases(res.bases.filter((b) => b.has_index && b.chunk_count > 0)))
+      .catch(() => {});
+    void refreshVramStatus();
+  }, [refreshVramStatus]);
 
   useEffect(() => {
     if (!pendingRepo && sessionInitRef.current && (!pendingModel || pendingModel === selection)) {
@@ -574,6 +619,7 @@ export function ChatPage() {
           ollama_model: usingOllama || isOllamaOnly ? selected?.ollama_model : null,
           inference_backend: providerId ? "auto" : effectiveBackend,
           max_tokens: maxTokens,
+          knowledge_base_id: knowledgeBaseId || null,
         },
         {
           onEvent: (event, data) => {
@@ -726,14 +772,14 @@ export function ChatPage() {
               onSelectLocal={handleModelChange}
               onSelectCatalog={handleCatalogSelect}
             />
-            {!providerId && loadedModelId && (
+            {showFreeMemory && (
               <button
                 type="button"
-                className="chat-eject-model"
-                onClick={() => void handleEjectModel()}
-                disabled={ejectingModel || switchingModel}
-                title="Eject model — free VRAM/RAM (keeps selection)"
-                aria-label="Eject model from memory"
+                className="chat-free-memory"
+                onClick={() => void handleFreeMemory()}
+                disabled={freeingMemory || switchingModel}
+                title="Free memory — unload model from RAM/VRAM (keeps selection)"
+                aria-label="Free memory"
               >
                 <IconEject size={15} />
               </button>
@@ -759,9 +805,7 @@ export function ChatPage() {
                   streamAbortRef.current = null;
                   if (streaming) setStreaming(false);
                   try {
-                    await api.cancelInference();
-                    setLoadedModelId(null);
-                    setLoadedBackend(null);
+                    await releaseInferenceMemory();
                   } catch {
                     /* ignore */
                   }
@@ -809,6 +853,21 @@ export function ChatPage() {
             </select>
           ) : (
             <span className="chat-provider-label muted-text">Local</span>
+          )}
+          {knowledgeBases.length > 0 && (
+            <select
+              className="chat-knowledge-select"
+              value={knowledgeBaseId}
+              onChange={(e) => setKnowledgeBaseId(e.target.value)}
+              title="Inject knowledge base context into chat"
+            >
+              <option value="">No knowledge base</option>
+              {knowledgeBases.map((kb) => (
+                <option key={kb.id} value={kb.id}>
+                  KB: {kb.id} ({kb.chunk_count})
+                </option>
+              ))}
+            </select>
           )}
           <label className="chat-tools-toggle">
             <input type="checkbox" checked={useTools} disabled={!toolsAvailable} onChange={(e) => setUseTools(e.target.checked)} />

@@ -1,9 +1,11 @@
 import { API, request } from "./client";
 import { streamPostSSE } from "./sse";
-import type { CatalogModel, HardwareSummary, LocalModel } from "./types";
+import type { CatalogModel, HardwareSummary, LocalModel, VramStatus } from "./types";
 
 export const modelsApi = {
   listModels: () => request<LocalModel[]>("/models"),
+  vramStatus: () => request<VramStatus>("/models/vram"),
+  freeMemory: () => request<VramStatus>("/models/vram/unload", { method: "POST" }),
   downloadLocalModel: (modelId: string) =>
     fetch(`${API}/models/${modelId}/download`, { credentials: "include" }),
   catalog: (q = "", family?: string, task?: string, fitsOnly = false) => {

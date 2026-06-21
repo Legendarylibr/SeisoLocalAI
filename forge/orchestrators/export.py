@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from forge.orchestrators.base import Orchestrator
+from forge.services.ollama_export import build_ollama_create_commands
 from forge.services.user_paths import assert_user_path
 from seiso.export.model_card import HubModelMetadata
 from seiso.export.pipeline import prepare_export, run_export_plan
@@ -66,5 +67,13 @@ class ExportOrchestrator(Orchestrator):
             ),
         )
         paths = {k: str(v) for k, v in results.items()}
+        ollama_commands = build_ollama_create_commands(paths, model_name=checkpoint.name)
+        for command in ollama_commands:
+            self._emit_log(job_id, f"Ollama: {command}")
         self._emit_log(job_id, "Export complete")
-        return {"outputs": paths, "profile": plan.profile, "checkpoint_kind": plan.checkpoint_kind}
+        return {
+            "outputs": paths,
+            "profile": plan.profile,
+            "checkpoint_kind": plan.checkpoint_kind,
+            "ollama_commands": ollama_commands,
+        }
