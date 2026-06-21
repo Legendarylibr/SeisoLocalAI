@@ -1,6 +1,7 @@
 import { authApi } from "./auth";
 import { clearLegacyToken } from "./client";
 import { compressApi } from "./compress";
+import { distillRlApi } from "./distillRl";
 import { exportApi } from "./export";
 import { inferenceApi } from "./inference";
 import { knowledgeApi } from "./knowledge";
@@ -21,6 +22,7 @@ export const api = {
   ...trainingApi,
   ...rlQuantApi,
   ...compressApi,
+  ...distillRlApi,
   ...settingsApi,
   ...recipesApi,
   ...providersApi,

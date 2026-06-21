@@ -105,6 +105,21 @@ CREATE TABLE IF NOT EXISTS compress_jobs (
     updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS distill_rl_jobs (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    config_json TEXT NOT NULL,
+    output_dir TEXT,
+    run_dir TEXT,
+    model_dir TEXT,
+    stages_json TEXT DEFAULT '[]',
+    stage_results_json TEXT DEFAULT '{}',
+    error_text TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS chat_threads (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,
@@ -160,6 +175,7 @@ CREATE INDEX IF NOT EXISTS idx_jobs_user ON training_jobs(user_id);
 CREATE INDEX IF NOT EXISTS idx_messages_thread ON chat_messages(thread_id);
 CREATE INDEX IF NOT EXISTS idx_export_jobs_user ON export_jobs(user_id);
 CREATE INDEX IF NOT EXISTS idx_compress_jobs_user ON compress_jobs(user_id);
+CREATE INDEX IF NOT EXISTS idx_distill_rl_jobs_user ON distill_rl_jobs(user_id);
 CREATE INDEX IF NOT EXISTS idx_rl_quant_jobs_user ON rl_quant_jobs(user_id);
 CREATE INDEX IF NOT EXISTS idx_recipe_jobs_user ON recipe_jobs(user_id);
 CREATE INDEX IF NOT EXISTS idx_providers_user ON providers(user_id);
@@ -209,8 +225,9 @@ _JOB_ERROR_TABLES = (
     "export_jobs",
     "rl_quant_jobs",
     "compress_jobs",
+    "distill_rl_jobs",
 )
-_CONFIG_JOB_TABLES = frozenset({"rl_quant_jobs", "compress_jobs"})
+_CONFIG_JOB_TABLES = frozenset({"rl_quant_jobs", "compress_jobs", "distill_rl_jobs"})
 
 
 def _config_job_table(table: str) -> str:
@@ -964,6 +981,41 @@ class Database:
 
     async def list_compress_jobs(self, user_id: str) -> list[dict]:
         return await self._list_config_jobs("compress_jobs", user_id)
+
+    # --- Distill-RL jobs ---
+
+    async def create_distill_rl_job(self, user_id: str, config: dict, job_id: str | None = None) -> dict:
+        return await self._create_config_job("distill_rl_jobs", user_id, config, job_id=job_id)
+
+    async def get_distill_rl_job(self, job_id: str, user_id: str) -> dict | None:
+        return await self._get_config_job("distill_rl_jobs", job_id, user_id)
+
+    async def update_distill_rl_job_status(
+        self,
+        job_id: str,
+        status: str,
+        *,
+        output_dir: str | None = None,
+        run_dir: str | None = None,
+        model_dir: str | None = None,
+        stages: list[str] | None = None,
+        stage_results: dict | None = None,
+        error_text: str | None = None,
+    ) -> None:
+        await self._update_stage_pipeline_job_status(
+            "distill_rl_jobs",
+            job_id,
+            status,
+            output_dir=output_dir,
+            run_dir=run_dir,
+            model_dir=model_dir,
+            stages=stages,
+            stage_results=stage_results,
+            error_text=error_text,
+        )
+
+    async def list_distill_rl_jobs(self, user_id: str) -> list[dict]:
+        return await self._list_config_jobs("distill_rl_jobs", user_id)
 
     async def reconcile_stale_jobs(self, *, reason: str = "Server restarted while job was active") -> int:
         """Mark in-flight jobs as failed after Forge restart (orchestrator state is in-memory only)."""

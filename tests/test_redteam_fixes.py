@@ -238,7 +238,7 @@ async def test_knowledge_bases_scoped_per_user(app, auth_client):
     assert retrieve.json().get("results") == []
 
 
-def test_jwt_revocation_overflow_retains_unexpired(monkeypatch):
+def test_jwt_revocation_overflow_evicts_oldest(monkeypatch):
     import time
 
     monkeypatch.setattr("forge.security.token_revocation._MAX_ENTRIES", 3)
@@ -246,7 +246,9 @@ def test_jwt_revocation_overflow_retains_unexpired(monkeypatch):
     for idx in range(5):
         revoke_jti(f"jti-{idx}", now + 3600 + idx)
 
-    assert all(is_jti_revoked(f"jti-{idx}") for idx in range(5))
+    assert not is_jti_revoked("jti-0")
+    assert not is_jti_revoked("jti-1")
+    assert all(is_jti_revoked(f"jti-{idx}") for idx in range(2, 5))
     clear_revocations_for_tests()
 
 

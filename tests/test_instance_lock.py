@@ -85,15 +85,19 @@ def test_assert_port_available_skipped_when_multi_forge(monkeypatch):
         sock.close()
 
 
-def test_port_lock_blocks_second_instance_on_same_port(tmp_path: Path):
+def test_port_lock_blocks_second_instance_on_same_port():
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.bind(("127.0.0.1", 0))
+    port = sock.getsockname()[1]
     lock_a = ForgePortLock()
     lock_b = ForgePortLock()
-    lock_a.acquire("127.0.0.1", 8765)
+    lock_a.acquire("127.0.0.1", port)
     try:
         with pytest.raises(ForgeAlreadyRunningError, match="only one backend"):
-            lock_b.acquire("127.0.0.1", 8765)
+            lock_b.acquire("127.0.0.1", port)
     finally:
         lock_a.release()
+        sock.close()
 
 
 def test_acquire_forge_instance_locks_holds_both(tmp_path: Path):

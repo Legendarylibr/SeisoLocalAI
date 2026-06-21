@@ -91,7 +91,7 @@ def _is_addr_in_use(exc: OSError) -> bool:
 
 def _probe_bind(host: str, port: int) -> None:
     bind_host = host
-    if host in {"0.0.0.0", "::"}:
+    if host in {"0.0.0.0", "::"}:  # nosec B104 — detect all-interfaces bind requests, not binding to them
         bind_host = "127.0.0.1"
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
@@ -156,7 +156,7 @@ def _is_lock_contention(exc: BaseException) -> bool:
 
 def _flock_exclusive_nb(fd: int) -> None:
     if sys.platform == "win32":
-        import msvcrt
+        import msvcrt  # pylint: disable=import-error
 
         msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
         return
@@ -167,7 +167,7 @@ def _flock_exclusive_nb(fd: int) -> None:
 
 def _flock_unlock(fd: int) -> None:
     if sys.platform == "win32":
-        import msvcrt
+        import msvcrt  # pylint: disable=import-error
 
         msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
         return

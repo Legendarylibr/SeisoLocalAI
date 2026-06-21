@@ -112,9 +112,9 @@ export function RLQuantPage() {
     }
   };
 
-  const selectedPreset = presetList.find((p) => p.id === preset);
+  const selectedPreset = presets.find((p) => p.id === preset);
   const selectedHint = presetHints[preset];
-  const canStart = !presetsLoading && presetList.length > 0 && !!selectedPreset;
+  const canStart = !presetsLoading && presets.length > 0 && !!selectedPreset;
 
   return (
     <StudioPageShell
@@ -137,14 +137,14 @@ export function RLQuantPage() {
                 <div className="form-field">
                   <label>Preset</label>
                   <select value={preset} onChange={(e) => setPreset(e.target.value)}>
-                    {presetList.map((p) => (
+                    {presets.map((p) => (
                       <option key={p.id} value={p.id}>{p.label}</option>
                     ))}
                   </select>
                 </div>
                 {selectedHint && <p className="field-hint">{selectedHint}</p>}
                 {presetsLoading && <p className="field-hint">Loading presets…</p>}
-                {!presetsLoading && presetList.length === 0 && (
+                {!presetsLoading && presets.length === 0 && (
                   <p className="field-hint">Presets unavailable — check Forge connection.</p>
                 )}
                 {selectedPreset && (

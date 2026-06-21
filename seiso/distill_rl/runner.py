@@ -1,0 +1,395 @@
+"""Orchestrate teacher distillation and preference-based RL (DPO)."""
+
+from __future__ import annotations
+
+import json
+import math
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any
+
+from seiso.distill_rl.config import DistillRLConfig, build_distill_rl_config, resolve_job_seeds
+from seiso.distill_rl.manifest import append_artifact, init_run_manifest, verify_run_manifest
+from seiso.distill_rl.multiseed import aggregate_multiseed_runs
+from seiso.distill_rl.paper_bundle import create_paper_bundle
+
+
+def run_distill_rl_job(
+    *,
+    job_id: str,
+    user_id: str,
+    data_dir: Path,
+    payload: dict[str, Any],
+    on_log: Callable[[str], None] | None = None,
+) -> dict[str, Any]:
+    """Run distill → rollout → DPO → evaluate with research artifacts."""
+    seeds = resolve_job_seeds(payload)
+    if seeds:
+        return _run_multiseed_job(
+            job_id=job_id,
+            user_id=user_id,
+            data_dir=data_dir,
+            payload=payload,
+            seeds=[int(s) for s in seeds],
+            on_log=on_log,
+        )
+    return _run_single_job(
+        job_id=job_id,
+        user_id=user_id,
+        data_dir=data_dir,
+        payload=payload,
+        on_log=on_log,
+    )
+
+
+def _run_multiseed_job(
+    *,
+    job_id: str,
+    user_id: str,
+    data_dir: Path,
+    payload: dict[str, Any],
+    seeds: list[int],
+    on_log: Callable[[str], None] | None,
+) -> dict[str, Any]:
+    parent = data_dir / "distill_rl" / user_id / f"{job_id}-multiseed"
+    parent.mkdir(parents=True, exist_ok=True)
+    run_dirs: list[Path] = []
+    seed_results: list[dict[str, Any]] = []
+
+    for seed in seeds:
+        sub_payload = {**payload, "seed": seed}
+        sub_job_id = f"{job_id}-s{seed}"
+        if on_log:
+            on_log(f"Multi-seed run seed={seed}")
+        result = _run_single_job(
+            job_id=sub_job_id,
+            user_id=user_id,
+            data_dir=data_dir,
+            payload=sub_payload,
+            on_log=on_log,
+        )
+        seed_results.append(result)
+        run_dirs.append(Path(result["output_dir"]))
+
+    aggregate = aggregate_multiseed_runs(run_dirs, output_dir=parent)
+    bundle = create_paper_bundle(
+        output_root=parent,
+        run_name=f"multiseed_{job_id[:8]}",
+        config={"seeds": seeds, "payload": payload},
+        stage_results={"runs": [r.get("output_dir") for r in seed_results]},
+        evaluation=aggregate,
+        manifest=None,
+    )
+    return {
+        "multiseed": True,
+        "seeds": seeds,
+        "output_dir": str(parent),
+        "seed_results": seed_results,
+        "aggregate": aggregate,
+        "paper_bundle": bundle,
+    }
+
+
+def _run_single_job(
+    *,
+    job_id: str,
+    user_id: str,
+    data_dir: Path,
+    payload: dict[str, Any],
+    on_log: Callable[[str], None] | None,
+) -> dict[str, Any]:
+    from seiso.models.hf_env import configure_hf_hub_cache
+    from seiso.security.nvidia_boundary import enforce_nvidia_secure_boundary
+
+    configure_hf_hub_cache(data_dir)
+    enforce_nvidia_secure_boundary(context="training")
+
+    config = build_distill_rl_config(
+        job_id=job_id,
+        user_id=user_id,
+        data_dir=data_dir,
+        payload=payload,
+    )
+
+    def _log(msg: str) -> None:
+        if on_log:
+            on_log(msg)
+
+    _log(
+        f"Distill-RL run preset={config.preset} stages={','.join(config.stages)} "
+        f"teacher={config.teacher_model} student={config.student_model} seed={config.seed}"
+    )
+    config.output_root.mkdir(parents=True, exist_ok=True)
+    _write_effective_config(config)
+    manifest = init_run_manifest(config)
+
+    stage_results: dict[str, Any] = {}
+    distilled_dir = _resolve_policy_model_dir(config)
+    dpo_dir: Path | None = None
+    evaluation: dict[str, Any] | None = None
+
+    if "distill" in config.stages:
+        _log("Phase: distill (teacher logits → student)")
+        distilled_dir = _run_distill(config, on_log=on_log)
+        stage_results["distilled"] = str(distilled_dir)
+        append_artifact(config.output_root, stage="distill", artifact_path=distilled_dir)
+    elif not distilled_dir.is_dir():
+        raise FileNotFoundError(
+            f"Distilled student checkpoint missing: {distilled_dir}. "
+            "Run the distill stage or set distilled_path to an existing checkpoint."
+        )
+
+    policy_model_dir = distilled_dir
+
+    if "rollout" in config.stages:
+        _log("Phase: rollout (teacher chosen, student rejected)")
+        from seiso.distill_rl.preferences import build_preference_bundle
+
+        bundle = build_preference_bundle(
+            teacher_model=config.teacher_model,
+            student_model=str(policy_model_dir),
+            output_dir=config.preferences_dir,
+            prompt_library_path=config.prompt_library_path,
+            max_prompts=config.rollout_max_prompts,
+            max_new_tokens=config.rollout_max_new_tokens,
+            temperature=config.rollout_temperature,
+            seed=config.seed,
+            train_fraction=config.train_val_fraction,
+            use_chat_template=bool(config.use_chat_template),
+            teacher_revision=config.teacher_revision,
+            student_revision=config.student_revision,
+            on_log=on_log,
+        )
+        stage_results["preferences_train"] = str(bundle.train_path)
+        stage_results["preferences_val"] = str(bundle.val_path)
+        stage_results["preferences_manifest"] = str(bundle.manifest_path)
+        append_artifact(config.output_root, stage="rollout", artifact_path=bundle.manifest_path)
+        append_artifact(config.output_root, stage="rollout", artifact_path=bundle.train_path, role="train")
+        append_artifact(config.output_root, stage="rollout", artifact_path=bundle.val_path, role="val")
+        config.preferences_path.write_text(
+            bundle.train_path.read_text(encoding="utf-8"),
+            encoding="utf-8",
+        )
+
+    if "dpo" in config.stages:
+        _log("Phase: dpo (preference RL after distillation)")
+        train_path = config.preferences_train_path
+        if not train_path.is_file():
+            raise FileNotFoundError(f"Preference train dataset missing: {train_path}")
+        dpo_dir = _run_dpo(config, model_dir=policy_model_dir, preferences_path=train_path, on_log=on_log)
+        stage_results["dpo"] = str(dpo_dir)
+        append_artifact(config.output_root, stage="dpo", artifact_path=dpo_dir)
+
+    if "evaluate" in config.stages:
+        _log("Phase: evaluate (PPL + val preference accuracy)")
+        from seiso.distill_rl.evaluate import evaluate_pipeline
+
+        checkpoints: dict[str, Path | str] = {"distilled": policy_model_dir}
+        if dpo_dir is not None:
+            checkpoints["dpo"] = dpo_dir
+        student_path = Path(config.student_model).expanduser()
+        if student_path.is_dir():
+            checkpoints["student_base"] = student_path.resolve()
+        if config.evaluate_teacher:
+            teacher_path = Path(config.teacher_model).expanduser()
+            if teacher_path.is_dir():
+                checkpoints["teacher"] = teacher_path.resolve()
+            else:
+                checkpoints["teacher"] = config.teacher_model
+        val_path = config.preferences_val_path
+        if not val_path.is_file():
+            val_path = config.preferences_dir / "preferences_val.jsonl"
+        evaluation = evaluate_pipeline(
+            output_dir=config.evaluation_dir,
+            checkpoints=checkpoints,
+            val_preferences_path=val_path,
+            prompt_library_path=config.prompt_library_path,
+            eval_max_prompts=config.eval_max_prompts,
+            on_log=on_log,
+        )
+        stage_results["evaluation"] = evaluation.get("summary_path")
+        append_artifact(
+            config.output_root,
+            stage="evaluate",
+            artifact_path=Path(str(evaluation["summary_path"])),
+        )
+
+    manifest_report = verify_run_manifest(config.output_root)
+    paper_bundle = create_paper_bundle(
+        output_root=config.output_root,
+        run_name=f"seiso_{config.job_id[:8]}",
+        config=config.model_dump(mode="json"),
+        stage_results=stage_results,
+        evaluation=evaluation,
+        manifest=manifest,
+    )
+    stage_results["paper_bundle"] = paper_bundle.get("paper_bundle_dir")
+
+    final_model_dir = stage_results.get("dpo") or str(distilled_dir)
+    _log("Distill-RL pipeline complete")
+    return {
+        "output_dir": str(config.output_root),
+        "output_root": str(config.output_root),
+        "run_dir": str(config.output_root),
+        "model_dir": final_model_dir,
+        "preset": config.preset,
+        "seed": config.seed,
+        "stages": config.stages,
+        "stage_results": stage_results,
+        "distilled_dir": str(distilled_dir),
+        "evaluation": evaluation,
+        "manifest": manifest_report,
+        "paper_bundle": paper_bundle,
+        "final_model_dir": final_model_dir,
+    }
+
+
+def _resolve_policy_model_dir(config: DistillRLConfig) -> Path:
+    if config.distilled_path is not None:
+        path = config.distilled_path.expanduser().resolve()
+        if path.is_dir():
+            return path
+        raise FileNotFoundError(f"distilled_path is not a directory: {path}")
+
+    if config.distilled_dir.is_dir():
+        return config.distilled_dir
+
+    student_path = Path(config.student_model).expanduser()
+    if student_path.is_dir() and "distill" not in config.stages:
+        return student_path.resolve()
+
+    return config.distilled_dir
+
+
+def _write_effective_config(config: DistillRLConfig) -> None:
+    path = config.output_root / "distill_rl_config.json"
+    path.write_text(json.dumps(config.model_dump(mode="json"), indent=2) + "\n", encoding="utf-8")
+
+
+def _distill_texts(config: DistillRLConfig) -> list[str]:
+    from seiso.distill_rl.prompts import load_rollout_prompts, prompt_texts
+
+    limit = config.max_train_samples or config.rollout_max_prompts
+    prompts = load_rollout_prompts(config.prompt_library_path, limit=limit)
+    return prompt_texts(prompts)
+
+
+def _run_distill(config: DistillRLConfig, *, on_log: Callable[[str], None] | None) -> Path:
+    from contextlib import nullcontext
+
+    from seiso.compress.bootstrap import require_codellama_compress
+    from seiso.distill_rl.distill_corpus import override_distill_corpus
+
+    require_codellama_compress()
+    from codellama_compress.config import DatasetConfig, DistillConfig, merge_dataclass
+    from codellama_compress.distill import run_distillation
+    from codellama_compress.replay import apply_global_seeds
+
+    if config.deterministic:
+        apply_global_seeds(config.seed)
+
+    dataset_cfg = merge_dataclass(
+        DatasetConfig(),
+        {"seed": config.seed, "max_train_samples": config.max_train_samples},
+    )
+    distill_cfg = merge_dataclass(
+        DistillConfig(),
+        {
+            "teacher_model": config.teacher_model,
+            "student_model": config.student_model,
+            "steps": config.distill_steps,
+            "alpha": config.distill_alpha,
+            "temperature": config.distill_temperature,
+        },
+    )
+
+    out_dir = config.distilled_dir
+    if on_log:
+        on_log(f"Distilling for {distill_cfg.steps} steps → {out_dir}")
+
+    corpus_ctx = (
+        override_distill_corpus(_distill_texts(config))
+        if config.align_distill_with_prompts
+        else nullcontext()
+    )
+
+    with corpus_ctx:
+        run_distillation(
+            run_dir=config.output_root,
+            out_dir=out_dir,
+            dataset_cfg=dataset_cfg,
+            cfg=distill_cfg,
+            seed=config.seed,
+        )
+    return out_dir
+
+
+def _checkpoint_step(path: Path) -> int:
+    if not path.name.startswith("checkpoint-"):
+        return -1
+    suffix = path.name.removeprefix("checkpoint-")
+    try:
+        return int(suffix)
+    except ValueError:
+        return -1
+
+
+def _latest_checkpoint(run_dir: Path) -> Path | None:
+    checkpoints = sorted(run_dir.glob("checkpoint-*"), key=_checkpoint_step)
+    return checkpoints[-1] if checkpoints else None
+
+
+def _run_dpo(
+    config: DistillRLConfig,
+    *,
+    model_dir: Path,
+    preferences_path: Path,
+    on_log: Callable[[str], None] | None,
+) -> Path:
+    from seiso.rl_quant.bootstrap import require_adaptive_quant
+
+    require_adaptive_quant()
+    from adaptive_quant.llm_alignment.config import DPOSettings
+    from adaptive_quant.llm_alignment.dpo_trainer import DPOTrainer
+    from adaptive_quant.llm_alignment.preference_data import load_preference_dataset
+
+    settings = DPOSettings(
+        sft_model_path=str(model_dir),
+        output_dir=str(config.dpo_output_dir),
+        run_name=f"seiso_{config.job_id[:8]}",
+        beta=config.dpo_beta,
+        learning_rate=config.dpo_learning_rate,
+        num_epochs=config.dpo_epochs,
+        per_device_train_batch_size=config.dpo_batch_size,
+        gradient_accumulation_steps=config.dpo_gradient_accumulation_steps,
+        preference_dataset_path=str(preferences_path),
+        save_steps=config.dpo_save_steps,
+        seed=config.seed,
+        use_lora=config.dpo_use_lora,
+        use_qlora=config.dpo_use_qlora,
+        use_chat_template=bool(config.use_chat_template),
+        gradient_checkpointing=True,
+    )
+
+    examples = load_preference_dataset(preferences_path)
+    if config.dpo_max_steps is not None:
+        micro_batches = max(1, math.ceil(len(examples) / settings.per_device_train_batch_size))
+        optimizer_steps_per_epoch = max(
+            1,
+            math.ceil(micro_batches / settings.gradient_accumulation_steps),
+        )
+        settings.num_epochs = max(1, math.ceil(config.dpo_max_steps / optimizer_steps_per_epoch))
+
+    if on_log:
+        on_log(
+            f"DPO on {len(examples)} train preferences "
+            f"(beta={settings.beta}, epochs={settings.num_epochs}, lora={settings.use_lora}, "
+            f"chat_template={settings.use_chat_template})"
+        )
+
+    trainer = DPOTrainer(settings)
+    trainer.train(examples, shuffle=True)
+
+    run_dir = Path(settings.output_dir) / settings.run_name
+    latest = _latest_checkpoint(run_dir)
+    return latest if latest is not None else Path(run_dir)

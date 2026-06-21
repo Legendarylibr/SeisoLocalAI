@@ -16,6 +16,7 @@ const ChatPage = lazy(() => import("@/pages/ChatPage").then((m) => ({ default: m
 const ExportPage = lazy(() => import("@/pages/ExportPage").then((m) => ({ default: m.ExportPage })));
 const RLQuantPage = lazy(() => import("@/pages/RLQuantPage").then((m) => ({ default: m.RLQuantPage })));
 const CompressPage = lazy(() => import("@/pages/CompressPage").then((m) => ({ default: m.CompressPage })));
+const DistillRLPage = lazy(() => import("@/pages/DistillRLPage").then((m) => ({ default: m.DistillRLPage })));
 const TrainPage = lazy(() => import("@/pages/TrainPage").then((m) => ({ default: m.TrainPage })));
 const KnowledgePage = lazy(() => import("@/pages/KnowledgePage").then((m) => ({ default: m.KnowledgePage })));
 const RecipesPage = lazy(() => import("@/pages/RecipesPage").then((m) => ({ default: m.RecipesPage })));
@@ -88,6 +89,7 @@ function AppRoutes() {
         <Route path="/export" element={<Guard><ExportPage /></Guard>} />
         <Route path="/rl-quant" element={<Guard><RLQuantPage /></Guard>} />
         <Route path="/compress" element={<Guard><CompressPage /></Guard>} />
+        <Route path="/distill-rl" element={<Guard><DistillRLPage /></Guard>} />
         <Route path="/train" element={<Guard><TrainPage /></Guard>} />
         <Route path="/knowledge" element={<Guard><KnowledgePage /></Guard>} />
         <Route path="/recipes" element={<Guard><RecipesPage /></Guard>} />

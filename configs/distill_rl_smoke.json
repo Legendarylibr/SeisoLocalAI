@@ -1,0 +1,12 @@
+{
+  "preset": "smoke",
+  "teacher_model": "openai-community/gpt2",
+  "student_model": "openai-community/gpt2",
+  "distill_steps": 2,
+  "rollout_max_prompts": 4,
+  "dpo_epochs": 1,
+  "train_val_fraction": 0.75,
+  "eval_max_prompts": 4,
+  "align_distill_with_prompts": true,
+  "stages": ["distill", "rollout", "dpo", "evaluate"]
+}

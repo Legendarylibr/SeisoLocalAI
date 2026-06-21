@@ -14,6 +14,7 @@ from forge.api.deps import clear_dependency_caches, get_db
 from forge.api.routes import (
     auth,
     compress,
+    distill_rl,
     export,
     inference,
     knowledge,
@@ -90,7 +91,7 @@ def create_app() -> FastAPI:
         settings = get_settings()
         if settings.rate_limit_enabled:
             if not hasattr(app.state, "rate_limiter"):
-                app.state.rate_limiter = RateLimiter(settings.rate_limit)
+                app.state.rate_limiter = RateLimiter(settings.rate_limit_per_minute)
             client = client_ip(request)
             if request.url.path not in ("/health", "/api/health", "/auth/status", "/api/auth/status"):
                 try:
@@ -117,6 +118,7 @@ def create_app() -> FastAPI:
     app.include_router(export.router, prefix=prefix)
     app.include_router(rl_quant.router, prefix=prefix)
     app.include_router(compress.router, prefix=prefix)
+    app.include_router(distill_rl.router, prefix=prefix)
     app.include_router(recipes.router, prefix=prefix)
     app.include_router(knowledge.router, prefix=prefix)
     app.include_router(providers.router, prefix=prefix)

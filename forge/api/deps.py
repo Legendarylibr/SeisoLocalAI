@@ -6,7 +6,9 @@ from functools import lru_cache
 
 from forge.config import get_settings
 from forge.db.store import Database
+from forge.orchestrators.base import Orchestrator
 from forge.orchestrators.compress import CompressOrchestrator
+from forge.orchestrators.distill_rl import DistillRLOrchestrator
 from forge.orchestrators.export import ExportOrchestrator
 from forge.orchestrators.inference import InferenceOrchestrator
 from forge.orchestrators.knowledge import KnowledgeOrchestrator
@@ -41,13 +43,18 @@ def get_inference_orchestrator() -> InferenceOrchestrator:
 
 
 @lru_cache
-def get_rl_quant_orchestrator() -> RLQuantOrchestrator:
+def get_rl_quant_orchestrator() -> Orchestrator:
     return RLQuantOrchestrator(get_settings().data_dir)
 
 
 @lru_cache
-def get_compress_orchestrator() -> CompressOrchestrator:
+def get_compress_orchestrator() -> Orchestrator:
     return CompressOrchestrator(get_settings().data_dir)
+
+
+@lru_cache
+def get_distill_rl_orchestrator() -> Orchestrator:
+    return DistillRLOrchestrator(get_settings().data_dir)
 
 
 @lru_cache
@@ -68,6 +75,7 @@ def clear_dependency_caches() -> None:
     get_export_orchestrator.cache_clear()
     get_rl_quant_orchestrator.cache_clear()
     get_compress_orchestrator.cache_clear()
+    get_distill_rl_orchestrator.cache_clear()
     get_inference_orchestrator.cache_clear()
     get_recipe_orchestrator.cache_clear()
     get_knowledge_orchestrator.cache_clear()
