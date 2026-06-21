@@ -124,7 +124,7 @@ def enrich_catalog_models(
             row["download_bytes_estimated"] = True
             row["download_mirror_verified"] = False
             row["download_error"] = download_errors[m["repo_id"]]
-            row["download_available"] = m.get("task") != "embedding"
+            row["download_available"] = m.get("task") != "embedding" and "trusted GGUF" not in download_errors[m["repo_id"]]
         elif m.get("task") != "embedding":
             download_bytes = estimate_gguf_download_bytes(
                 m["params"],

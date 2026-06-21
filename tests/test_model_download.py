@@ -323,8 +323,27 @@ async def test_find_inventory_for_catalog_repo_matches_metadata(monkeypatch, tmp
 
 
 @pytest.mark.asyncio
+async def test_sync_hf_cache_inventory_skips_untrusted_gguf(tmp_path):
+    snapshot = tmp_path / "hf_cache" / "models--random-user--Model-GGUF" / "snapshots" / "abc"
+    snapshot.mkdir(parents=True)
+    gguf = snapshot / "model-Q4_K_M.gguf"
+    gguf.write_bytes(b"gguf-bytes")
+
+    db = Database(tmp_path / "forge.db", encryption_key=generate_encryption_key(), ephemeral=True)
+    count = await sync_hf_cache_inventory(
+        db,
+        "u1",
+        data_dir=tmp_path,
+        hf_cache_dir=tmp_path / "hf_cache",
+    )
+
+    assert count == 0
+    assert await db.list_models("u1") == []
+
+
+@pytest.mark.asyncio
 async def test_sync_hf_cache_inventory_registers_cached_gguf(tmp_path):
-    snapshot = tmp_path / "hf_cache" / "models--org--Model-GGUF" / "snapshots" / "abc"
+    snapshot = tmp_path / "hf_cache" / "models--bartowski--Model-GGUF" / "snapshots" / "abc"
     snapshot.mkdir(parents=True)
     gguf = snapshot / "model-Q4_K_M.gguf"
     gguf.write_bytes(b"gguf-bytes")
@@ -339,9 +358,9 @@ async def test_sync_hf_cache_inventory_registers_cached_gguf(tmp_path):
 
     rows = await db.list_models("u1")
     assert count == 1
-    assert rows[0]["source"] == "hf:org/Model-GGUF"
+    assert rows[0]["source"] == "hf:bartowski/Model-GGUF"
     assert rows[0]["format"] == "gguf"
-    assert (tmp_path / "models" / "u1" / "org--Model-GGUF" / "model-Q4_K_M.gguf").is_symlink()
+    assert (tmp_path / "models" / "u1" / "bartowski--Model-GGUF" / "model-Q4_K_M.gguf").is_symlink()
 
 
 @pytest.mark.asyncio

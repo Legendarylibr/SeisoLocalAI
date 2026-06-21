@@ -16,6 +16,13 @@ from typing import Any, TypeVar
 
 from forge.services.download_progress import ProgressCallback, make_tqdm_class
 from seiso.models.catalog import CatalogEntry, get_by_repo
+from seiso.models.trusted_gguf import (
+    filter_trusted_gguf_search_results,
+    gguf_mirror_candidates,
+    is_supported_gguf_repo_candidate,
+    is_trusted_gguf_repo,
+    rank_trusted_gguf_repos,
+)
 from seiso.security import sanitize_filename
 
 _HF_API = "https://huggingface.co/api"
@@ -29,7 +36,6 @@ _FILE_SIZE_CACHE: dict[str, tuple[float, int]] = {}
 _FILE_SIZE_TTL_S = 86_400.0
 _DOWNLOAD_RETRIES = 3
 _DOWNLOAD_RETRY_BACKOFF_S = 2.0
-_UNSUPPORTED_GGUF_REPO_HINTS = ("dflash", "draft")
 _GGUF_SHARD_RE = re.compile(
     r"^(?P<prefix>.+)-(?P<index>\d{5})-of-(?P<total>\d{5})\.gguf$",
     re.I,
@@ -111,11 +117,6 @@ def _pick_gguf_file(
 ) -> str | None:
     files = _pick_gguf_files(files, preferred_quant=preferred_quant, repo_id=repo_id)
     return files[0] if files else None
-
-
-def _is_supported_gguf_repo_candidate(repo_id: str) -> bool:
-    lowered = repo_id.lower()
-    return not any(hint in lowered for hint in _UNSUPPORTED_GGUF_REPO_HINTS)
 
 
 def _pick_gguf_files(
@@ -218,29 +219,6 @@ def repo_has_gguf(repo_id: str, *, token: str | None = None, revision: str = "ma
     return has_gguf
 
 
-def _gguf_mirror_candidates(repo_id: str) -> list[str]:
-    """Common community GGUF mirrors for a base-model repo id."""
-    model_name = repo_id.split("/")[-1]
-    title = re.sub(r"(^|[-_/])([a-z])", lambda m: m.group(1) + m.group(2).upper(), model_name)
-    mirrors = [
-        f"bartowski/{model_name}-GGUF",
-        f"bartowski/{title}-GGUF",
-        f"QuantFactory/{model_name}-GGUF",
-        f"QuantFactory/{title}-GGUF",
-        f"lmstudio-community/{model_name}-GGUF",
-        f"lmstudio-community/{title}-GGUF",
-    ]
-    if "Qwen" in repo_id:
-        mirrors.insert(2, f"bartowski/Qwen_{model_name}-GGUF")
-    seen: set[str] = set()
-    ordered: list[str] = []
-    for candidate in mirrors:
-        if candidate not in seen:
-            seen.add(candidate)
-            ordered.append(candidate)
-    return ordered
-
-
 def search_huggingface_datasets(*, query: str, limit: int = 12) -> list[dict[str, Any]]:
     """Search Hugging Face Hub for datasets (no token required)."""
     q = query.strip()
@@ -283,16 +261,23 @@ def search_huggingface_datasets(*, query: str, limit: int = 12) -> list[dict[str
     return results
 
 
-def search_huggingface_gguf_repos(*, query: str, limit: int = 8) -> list[dict[str, Any]]:
+def search_huggingface_gguf_repos(
+    *,
+    query: str,
+    limit: int = 8,
+    base_repo_id: str | None = None,
+    trusted_only: bool = True,
+) -> list[dict[str, Any]]:
     """Search Hugging Face Hub for GGUF repos (no token required)."""
     q = query.strip()
     if not q:
         return []
+    fetch_limit = max(1, min(limit * 4 if trusted_only else limit, 50))
     params = urllib.parse.urlencode(
         {
             "search": q,
             "filter": "gguf",
-            "limit": max(1, min(limit, 25)),
+            "limit": fetch_limit,
             "full": "false",
         }
     )
@@ -312,9 +297,18 @@ def search_huggingface_gguf_repos(*, query: str, limit: int = 8) -> list[dict[st
         if not isinstance(row, dict):
             continue
         model_id = row.get("id") or row.get("modelId")
-        if isinstance(model_id, str):
-            results.append({"repo_id": model_id})
-    return results
+        if not isinstance(model_id, str):
+            continue
+        results.append(
+            {
+                "repo_id": model_id,
+                "downloads": row.get("downloads") if isinstance(row.get("downloads"), int) else None,
+                "likes": row.get("likes") if isinstance(row.get("likes"), int) else None,
+            }
+        )
+    if trusted_only:
+        results = filter_trusted_gguf_search_results(results, base_repo_id=base_repo_id)
+    return results[: max(1, min(limit, 25))]
 
 
 def _first_repo_with_gguf(
@@ -441,8 +435,12 @@ def resolve_gguf_repo(
         _GGUF_REPO_CACHE[cache_key] = (now, repo_id)
         return repo_id
 
+    mirror_candidates = rank_trusted_gguf_repos(
+        gguf_mirror_candidates(repo_id),
+        base_repo_id=repo_id,
+    )
     mirror = _first_repo_with_gguf(
-        _gguf_mirror_candidates(repo_id),
+        mirror_candidates,
         token=token,
         revision=revision,
     )
@@ -454,9 +452,15 @@ def resolve_gguf_repo(
     needle = model_name.lower().replace("_", "-")
     search_candidates = [
         row["repo_id"]
-        for row in search_huggingface_gguf_repos(query=model_name, limit=10)
+        for row in search_huggingface_gguf_repos(
+            query=model_name,
+            limit=12,
+            base_repo_id=repo_id,
+            trusted_only=True,
+        )
         if needle in row["repo_id"].lower().replace("_", "-")
-        and _is_supported_gguf_repo_candidate(row["repo_id"])
+        and is_supported_gguf_repo_candidate(row["repo_id"])
+        and is_trusted_gguf_repo(row["repo_id"], base_repo_id=repo_id)
     ]
     resolved = _first_repo_with_gguf(search_candidates, token=token, revision=revision)
     if resolved:
@@ -464,8 +468,8 @@ def resolve_gguf_repo(
         return resolved
 
     raise ValueError(
-        f"No GGUF quant repo found for {repo_id}. "
-        f"Try a GGUF mirror such as bartowski/{model_name}-GGUF."
+        f"No trusted GGUF quant repo found for {repo_id}. "
+        f"Try a reputable mirror such as unsloth/{model_name}-GGUF or bartowski/{model_name}-GGUF."
     )
 
 
