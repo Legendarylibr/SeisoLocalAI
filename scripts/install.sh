@@ -116,29 +116,45 @@ detect_platform_extras() {
   seiso_detect_platform_extras
 }
 
+repo_layout_complete() {
+  local root="$1"
+  [[ -f "$root/pyproject.toml" && -d "$root/seiso_cli" && -f "$root/scripts/lib/common.sh" ]]
+}
+
 assert_repo_layout() {
   local root="$1"
-  [[ -f "$root/pyproject.toml" && -d "$root/seiso_cli" && -f "$root/scripts/lib/common.sh" ]] || {
+  repo_layout_complete "$root" || {
     die "Seiso repository incomplete at $root. Remove the directory or set SEISO_INSTALL_DIR elsewhere, then re-run start."
   }
+}
+
+sync_install_clone() {
+  git -C "$INSTALL_DIR" fetch --depth 1 origin "$BRANCH" >/dev/null 2>&1 || true
+  git -C "$INSTALL_DIR" checkout -f "$BRANCH" >/dev/null 2>&1 || true
+  git -C "$INSTALL_DIR" reset --hard "origin/$BRANCH" >/dev/null 2>&1 \
+    || git -C "$INSTALL_DIR" pull --ff-only origin "$BRANCH" >/dev/null 2>&1 || true
 }
 
 resolve_root() {
   if [[ -n "${BASH_SOURCE[0]:-}" && -f "${BASH_SOURCE[0]}" ]]; then
     local candidate
     candidate="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-    if [[ -f "$candidate/pyproject.toml" && -d "$candidate/seiso_cli" ]]; then
+    if repo_layout_complete "$candidate"; then
       printf '%s\n' "$candidate"
       return
     fi
   fi
-  if [[ -d "$INSTALL_DIR/seiso_cli" && -f "$INSTALL_DIR/pyproject.toml" ]]; then
-    assert_repo_layout "$INSTALL_DIR"
+  if repo_layout_complete "$INSTALL_DIR"; then
     printf '%s\n' "$INSTALL_DIR"
     return
   fi
   need_cmd git
-  if [[ ! -d "$INSTALL_DIR/.git" ]]; then
+  if [[ -d "$INSTALL_DIR/.git" ]]; then
+    log_unless_quiet "Repairing existing clone in $INSTALL_DIR" >&2
+    sync_install_clone
+  elif [[ -e "$INSTALL_DIR" ]]; then
+    die "Seiso repository incomplete at $INSTALL_DIR. Remove the directory or set SEISO_INSTALL_DIR elsewhere, then re-run start."
+  else
     pre_clone_hint
     if quiet_install_output; then
       git clone --depth 1 --branch "$BRANCH" "$REPO_URL" "$INSTALL_DIR" >/dev/null 2>&1 \
@@ -148,11 +164,6 @@ resolve_root() {
       git clone --depth 1 --branch "$BRANCH" "$REPO_URL" "$INSTALL_DIR" \
         || die "git clone failed into $INSTALL_DIR. Check network access and that the directory is empty or missing."
     fi
-  else
-    log_unless_quiet "Updating existing clone in $INSTALL_DIR" >&2
-    git -C "$INSTALL_DIR" fetch --depth 1 origin "$BRANCH" >/dev/null 2>&1
-    git -C "$INSTALL_DIR" checkout "$BRANCH" >/dev/null 2>&1
-    git -C "$INSTALL_DIR" pull --ff-only origin "$BRANCH" >/dev/null 2>&1 || true
   fi
   assert_repo_layout "$INSTALL_DIR"
   printf '%s\n' "$INSTALL_DIR"
