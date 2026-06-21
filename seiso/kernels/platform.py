@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import platform
 from dataclasses import dataclass
 from functools import lru_cache
 
@@ -58,15 +59,7 @@ def detect_gpu() -> GpuPlatform:
     try:
         import torch
     except ImportError:
-        return GpuPlatform(GpuVendor.CPU, "cpu", 0, False, False, wsl2, None)
-
-    if not torch.cuda.is_available():
-        return GpuPlatform(GpuVendor.CPU, "cpu", 0, False, False, wsl2, None)
-
-    device_count = torch.cuda.device_count()
-    name = torch.cuda.get_device_name(0) if device_count else "unknown"
-    is_amd = bool(getattr(torch.version, "hip", None))
-    cc = _cuda_compute_capability()
+        torch = None  # type: ignore[assignment]
 
     triton_ok = False
     try:
@@ -76,23 +69,51 @@ def detect_gpu() -> GpuPlatform:
     except ImportError:
         pass
 
-    if is_amd:
+    if torch is not None and torch.cuda.is_available():
+        device_count = torch.cuda.device_count()
+        name = torch.cuda.get_device_name(0) if device_count else "unknown"
+        is_amd = bool(getattr(torch.version, "hip", None))
+        cc = _cuda_compute_capability()
+
+        if is_amd:
+            return GpuPlatform(
+                vendor=GpuVendor.AMD,
+                device_name=name,
+                device_count=device_count,
+                supports_native_cuda=False,
+                supports_triton=triton_ok,
+                is_wsl2=wsl2,
+                cuda_compute_capability=cc,
+            )
+
         return GpuPlatform(
-            vendor=GpuVendor.AMD,
+            vendor=GpuVendor.NVIDIA,
             device_name=name,
             device_count=device_count,
-            supports_native_cuda=False,
+            supports_native_cuda=True,
             supports_triton=triton_ok,
             is_wsl2=wsl2,
             cuda_compute_capability=cc,
         )
 
-    return GpuPlatform(
-        vendor=GpuVendor.NVIDIA,
-        device_name=name,
-        device_count=device_count,
-        supports_native_cuda=True,
-        supports_triton=triton_ok,
-        is_wsl2=wsl2,
-        cuda_compute_capability=cc,
-    )
+    if platform.system().lower() in {"linux", "windows"}:
+        try:
+            from seiso.security.nvidia_boundary import query_nvidia_gpus
+
+            smi_gpus = query_nvidia_gpus()
+        except ImportError:
+            smi_gpus = []
+        if smi_gpus:
+            first = smi_gpus[0]
+            name = str(first.get("name") or "nvidia gpu")
+            return GpuPlatform(
+                vendor=GpuVendor.NVIDIA,
+                device_name=name,
+                device_count=len(smi_gpus),
+                supports_native_cuda=False,
+                supports_triton=triton_ok,
+                is_wsl2=wsl2,
+                cuda_compute_capability=None,
+            )
+
+    return GpuPlatform(GpuVendor.CPU, "cpu", 0, False, False, wsl2, None)

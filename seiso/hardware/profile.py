@@ -103,49 +103,26 @@ def _torch_gpus() -> list[dict[str, Any]]:
 
 def _nvidia_smi_gpus() -> list[dict[str, Any]]:
     """Enumerate GPUs via nvidia-smi when PyTorch CUDA is unavailable (e.g. CPU-only wheel)."""
-    from seiso.security.nvidia_boundary import resolve_nvidia_smi_executable
+    from seiso.security.nvidia_boundary import query_nvidia_gpus
 
-    smi = resolve_nvidia_smi_executable()
-    if not smi:
-        return []
-    try:
-        result = subprocess.run(
-            [
-                smi,
-                "--query-gpu=index,name,memory.total",
-                "--format=csv,noheader,nounits",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=3,
-            check=False,
+    gpus: list[dict[str, Any]] = []
+    for item in query_nvidia_gpus():
+        name = item.get("name")
+        if not isinstance(name, str) or not name.strip():
+            continue
+        total_raw = item.get("memory_total_mb")
+        total_mb = int(total_raw) if isinstance(total_raw, (int, float)) and total_raw > 0 else None
+        gpus.append(
+            {
+                "index": int(item.get("index", len(gpus))),
+                "name": _sanitize_label(name),
+                "vram_total_mb": total_mb,
+                "vram_used_mb": None,
+                "utilization_pct": None,
+                "temperature_c": None,
+            }
         )
-        if result.returncode != 0:
-            return []
-        gpus: list[dict[str, Any]] = []
-        for line in result.stdout.strip().splitlines():
-            parts = [p.strip() for p in line.split(",")]
-            if len(parts) < 3:
-                continue
-            try:
-                idx = int(parts[0])
-                name = _sanitize_label(parts[1])
-                total_mb = int(float(parts[2]))
-            except (ValueError, TypeError):
-                continue
-            gpus.append(
-                {
-                    "index": idx,
-                    "name": name,
-                    "vram_total_mb": total_mb,
-                    "vram_used_mb": None,
-                    "utilization_pct": None,
-                    "temperature_c": None,
-                }
-            )
-        return gpus
-    except (FileNotFoundError, subprocess.TimeoutExpired, ValueError, OSError):
-        return []
+    return gpus
 
 
 def _nvidia_smi_metrics() -> dict[int, dict[str, float]]:
@@ -298,10 +275,19 @@ def hardware_profile(*, force_refresh: bool = False) -> dict[str, Any]:
     ram = _ram_gb()
     disk_free = shutil.disk_usage("/").free // (1024**3)
 
+    cuda_runtime = False
+    try:
+        import torch
+
+        cuda_runtime = torch.cuda.is_available()
+    except ImportError:
+        pass
+
     profile = {
         "platform": platform.system().lower(),
         "arch": platform.machine(),
         "backend": backend.value,
+        "cuda_runtime": cuda_runtime,
         "cpu_cores": _cpu_cores(),
         "cpu_brand": _cpu_brand(),
         "ram_gb": ram,

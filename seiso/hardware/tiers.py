@@ -29,6 +29,17 @@ TIER_LABELS: dict[HardwareTier, str] = {
 }
 
 
+def _discrete_gpu_entries(gpus: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Non-Apple entries from local GPU probes."""
+    discrete: list[dict[str, Any]] = []
+    for gpu in gpus:
+        name = str(gpu.get("name") or "").lower()
+        if "apple gpu" in name:
+            continue
+        discrete.append(gpu)
+    return discrete
+
+
 def classify_tier(profile: dict[str, Any]) -> HardwareTier:
     raw_backend = profile.get("backend", "cpu")
     try:
@@ -36,12 +47,15 @@ def classify_tier(profile: dict[str, Any]) -> HardwareTier:
     except ValueError:
         backend = Backend.TORCH if raw_backend in ("cuda", "rocm") else Backend.CPU
     gpus = profile.get("gpus") or []
-    vram_total = max((g.get("vram_total_mb") or 0) for g in gpus) if gpus else 0
+    discrete = _discrete_gpu_entries(gpus)
+    vram_total = max((g.get("vram_total_mb") or 0) for g in discrete) if discrete else 0
 
     if backend == Backend.MLX and not vram_total:
         return HardwareTier.APPLE_UNIFIED
-    if not gpus or vram_total <= 0:
+    if not discrete:
         return HardwareTier.CPU_ONLY
+    if vram_total <= 0:
+        return HardwareTier.EDGE
     if vram_total >= 24000:
         return HardwareTier.WORKSTATION
     if vram_total >= 12000:

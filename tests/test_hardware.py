@@ -81,6 +81,42 @@ def test_detect_backend_linux_nvidia_smi_without_cuda(monkeypatch):
     detect_backend.cache_clear()
 
 
+def test_classify_tier_edge_when_gpu_present_without_vram():
+    from seiso.hardware.tiers import classify_tier
+
+    tier = classify_tier(
+        {
+            "backend": "torch",
+            "gpus": [{"name": "NVIDIA GeForce RTX 4090", "vram_total_mb": None}],
+            "ram_gb": 32,
+        }
+    )
+    assert tier.value == "edge"
+
+
+def test_query_nvidia_gpus_cache(monkeypatch):
+    from seiso.security.nvidia_boundary import clear_nvidia_gpu_query_cache, query_nvidia_gpus
+
+    calls = {"count": 0}
+
+    def fake_probe() -> list[dict[str, object]]:
+        calls["count"] += 1
+        return [{"index": 0, "name": "NVIDIA GeForce RTX 4090", "memory_total_mb": 24564}]
+
+    clear_nvidia_gpu_query_cache()
+    monkeypatch.setattr(
+        "seiso.security.nvidia_boundary._probe_nvidia_gpus_uncached",
+        fake_probe,
+    )
+
+    first = query_nvidia_gpus(force_refresh=True)
+    second = query_nvidia_gpus()
+    assert len(first) == 1
+    assert second == first
+    assert calls["count"] == 1
+    clear_nvidia_gpu_query_cache()
+
+
 def test_enrich_catalog_ranks_priority_first():
     profile = {
         "backend": "cpu",

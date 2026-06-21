@@ -21,9 +21,18 @@ def training_capabilities() -> dict[str, Any]:
     machine = platform.machine()
     gpu = detect_gpu()
 
+    cuda_runtime = False
+    try:
+        import torch
+
+        cuda_runtime = torch.cuda.is_available()
+    except ImportError:
+        pass
+
     supports_bnb = system != "Darwin"
-    has_cuda_gpu = gpu.device_count > 0 and gpu.vendor == GpuVendor.NVIDIA
-    has_rocm_gpu = gpu.device_count > 0 and gpu.vendor == GpuVendor.AMD
+    has_nvidia_hardware = gpu.device_count > 0 and gpu.vendor == GpuVendor.NVIDIA
+    has_cuda_gpu = has_nvidia_hardware and cuda_runtime
+    has_rocm_gpu = gpu.device_count > 0 and gpu.vendor == GpuVendor.AMD and cuda_runtime
 
     triton_ok = False
     try:
@@ -81,6 +90,8 @@ def training_capabilities() -> dict[str, Any]:
         "os": system,
         "arch": machine,
         "train_platform": train_platform,
+        "cuda_runtime": cuda_runtime,
+        "nvidia_hardware": has_nvidia_hardware,
         "supports_qlora": supports_bnb and (has_cuda_gpu or has_rocm_gpu),
         "supports_training": True,
         "supports_mps_training": mps_ok and system == "Darwin",
@@ -96,7 +107,13 @@ def training_capabilities() -> dict[str, Any]:
         "gpu_count": gpu.device_count,
         "device_label": _gpu_label(gpu),
         "recommended_quant": "4bit" if supports_bnb and (has_cuda_gpu or has_rocm_gpu) else "16bit",
-        "install_extra": _install_extra(system, has_cuda_gpu, has_rocm_gpu, mlx_ok),
+        "install_extra": _install_extra(
+            system,
+            has_nvidia_hardware,
+            has_rocm_gpu,
+            mlx_ok,
+            cuda_runtime,
+        ),
     }
 
 
@@ -110,10 +127,21 @@ def _gpu_label(gpu) -> str:
     return "gpu"
 
 
-def _install_extra(system: str, nvidia: bool, rocm: bool, mlx: bool) -> str:
-    if nvidia and system == "Linux":
-        return 'pip install -e ".[forge,train,cuda]"'
-    if nvidia and system == "Windows":
+def _install_extra(
+    system: str,
+    nvidia_hw: bool,
+    rocm: bool,
+    mlx: bool,
+    cuda_runtime: bool,
+) -> str:
+    if nvidia_hw and system == "Linux":
+        if cuda_runtime:
+            return 'pip install -e ".[forge,train,cuda,llamacpp]"'
+        return (
+            'pip install -e ".[forge,train,cuda,llamacpp]"'
+            "  # NVIDIA GPU detected — install CUDA-enabled PyTorch if missing"
+        )
+    if nvidia_hw and system == "Windows":
         return 'pip install -e ".[forge,train]"  # + CUDA toolkit for fused kernels'
     if rocm:
         return 'pip install -e ".[forge,train]" && pip install triton  # ROCm PyTorch wheel first'
