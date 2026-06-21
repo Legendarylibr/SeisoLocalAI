@@ -53,18 +53,26 @@ def _env_enabled(name: str) -> bool:
     return False
 
 
-def _resolve_nvidia_smi() -> str | None:
+def resolve_nvidia_smi_executable() -> str | None:
+    """Return an executable ``nvidia-smi`` path (env, PATH, then common driver locations)."""
     for env_name in ("SEISO_NVIDIA_SMI_PATH", "NVIDIA_SMI_PATH", "ADAPTIVE_RL_NVIDIA_SMI_PATH"):
         raw = os.environ.get(env_name, "").strip()
-        if raw and Path(raw).is_file():
-            return raw
+        if raw:
+            candidate = Path(raw)
+            if candidate.is_file() and os.access(candidate, os.X_OK):
+                return str(candidate.resolve())
     which = shutil.which("nvidia-smi")
     if which:
         return which
     for path in _NVIDIA_SMI_PATHS:
-        if Path(path).is_file():
-            return path
+        candidate = Path(path)
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate.resolve())
     return None
+
+
+def _resolve_nvidia_smi() -> str | None:
+    return resolve_nvidia_smi_executable()
 
 
 def nvidia_smi_visible() -> bool:

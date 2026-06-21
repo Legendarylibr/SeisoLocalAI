@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import platform
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any
@@ -57,6 +58,15 @@ def detect_backend() -> Backend:
             return Backend.TORCH
     except ImportError:
         pass
+
+    if platform.system().lower() == "linux":
+        try:
+            from seiso.security.nvidia_boundary import nvidia_smi_visible
+
+            if nvidia_smi_visible():
+                return Backend.TORCH
+        except ImportError:
+            pass
 
     if os.environ.get("SEISO_SKIP_MLX_PROBE", "").strip().lower() not in {"1", "true", "yes"}:
         try:

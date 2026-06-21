@@ -101,12 +101,64 @@ def _torch_gpus() -> list[dict[str, Any]]:
     return gpus
 
 
-def _nvidia_smi_metrics() -> dict[int, dict[str, float]]:
-    out: dict[int, dict[str, float]] = {}
+def _nvidia_smi_gpus() -> list[dict[str, Any]]:
+    """Enumerate GPUs via nvidia-smi when PyTorch CUDA is unavailable (e.g. CPU-only wheel)."""
+    from seiso.security.nvidia_boundary import resolve_nvidia_smi_executable
+
+    smi = resolve_nvidia_smi_executable()
+    if not smi:
+        return []
     try:
         result = subprocess.run(
             [
-                "nvidia-smi",
+                smi,
+                "--query-gpu=index,name,memory.total",
+                "--format=csv,noheader,nounits",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=3,
+            check=False,
+        )
+        if result.returncode != 0:
+            return []
+        gpus: list[dict[str, Any]] = []
+        for line in result.stdout.strip().splitlines():
+            parts = [p.strip() for p in line.split(",")]
+            if len(parts) < 3:
+                continue
+            try:
+                idx = int(parts[0])
+                name = _sanitize_label(parts[1])
+                total_mb = int(float(parts[2]))
+            except (ValueError, TypeError):
+                continue
+            gpus.append(
+                {
+                    "index": idx,
+                    "name": name,
+                    "vram_total_mb": total_mb,
+                    "vram_used_mb": None,
+                    "utilization_pct": None,
+                    "temperature_c": None,
+                }
+            )
+        return gpus
+    except (FileNotFoundError, subprocess.TimeoutExpired, ValueError, OSError):
+        return []
+
+
+def _nvidia_smi_metrics() -> dict[int, dict[str, float]]:
+    from seiso.security.nvidia_boundary import resolve_nvidia_smi_executable
+
+    out: dict[int, dict[str, float]] = {}
+    smi = resolve_nvidia_smi_executable()
+    if not smi:
+        return out
+    try:
+        result = subprocess.run(
+            [
+                smi,
                 "--query-gpu=index,utilization.gpu,memory.used,memory.total,temperature.gpu",
                 "--format=csv,noheader,nounits",
             ],
@@ -155,6 +207,8 @@ def _mlx_apple_gpu() -> list[dict[str, Any]]:
 
 def detect_gpus() -> list[dict[str, Any]]:
     gpus = _torch_gpus()
+    if not gpus:
+        gpus = _nvidia_smi_gpus()
     if not gpus:
         gpus = _mlx_apple_gpu()
     smi = _nvidia_smi_metrics()

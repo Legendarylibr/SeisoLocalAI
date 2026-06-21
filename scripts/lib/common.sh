@@ -142,7 +142,7 @@ seiso_detect_platform_extras() {
       echo "forge,train,llamacpp,dev"
       ;;
     Linux)
-      if command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi >/dev/null 2>&1; then
+      if seiso_nvidia_gpu_detected; then
         echo "forge,train,cuda,llamacpp,dev"
       else
         echo "forge,train,llamacpp,dev"
@@ -152,6 +152,37 @@ seiso_detect_platform_extras() {
       seiso_die "Unsupported OS: $os (use docs/platforms/windows.md on Windows)"
       ;;
   esac
+}
+
+seiso_resolve_nvidia_smi() {
+  local candidate env_path
+  for env_path in "${SEISO_NVIDIA_SMI_PATH:-}" "${NVIDIA_SMI_PATH:-}"; do
+    [[ -n "$env_path" && -x "$env_path" ]] || continue
+    printf '%s\n' "$env_path"
+    return 0
+  done
+  if command -v nvidia-smi >/dev/null 2>&1; then
+    command -v nvidia-smi
+    return 0
+  fi
+  for candidate in \
+    /usr/bin/nvidia-smi \
+    /usr/lib/nvidia/bin/nvidia-smi \
+    /usr/local/nvidia/bin/nvidia-smi \
+    /usr/local/cuda/bin/nvidia-smi \
+    /usr/lib/wsl/lib/nvidia-smi; do
+    if [[ -x "$candidate" ]]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
+seiso_nvidia_gpu_detected() {
+  local smi
+  smi="$(seiso_resolve_nvidia_smi)" || return 1
+  "$smi" >/dev/null 2>&1
 }
 
 seiso_python_version_ok() {
