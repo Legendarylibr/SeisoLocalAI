@@ -61,7 +61,7 @@ bootstrap_install() {
 }
 
 main() {
-  local root forge_url open_flag ui_dist
+  local root forge_url open_flag seiso_bin
 
   if ! root="$(resolve_root)"; then
     bootstrap_install
@@ -74,6 +74,8 @@ main() {
 
   seiso_install_start_command "$root"
 
+  export PATH="$root/.venv/bin:${PATH}"
+
   # shellcheck disable=SC1091
   source "$root/.venv/bin/activate"
 
@@ -82,7 +84,10 @@ main() {
     # shellcheck disable=SC1091
     source "$root/.env"
     set +a
+    export PATH="$root/.venv/bin:${PATH}"
   fi
+
+  seiso_bin="$(seiso_require_cli "$root")"
 
   forge_url="$(seiso_forge_url)"
   open_flag=""
@@ -97,9 +102,9 @@ main() {
   fi
 
   if [[ -n "$open_flag" ]]; then
-    seiso forge $open_flag
+    "$seiso_bin" forge $open_flag
   else
-    exec seiso forge
+    exec "$seiso_bin" forge
   fi
 }
 
