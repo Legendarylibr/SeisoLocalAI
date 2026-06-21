@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import importlib
+import platform
 import time
 from dataclasses import dataclass, field
 from functools import lru_cache
-from importlib.util import find_spec
 from typing import Any
 
 from forge.services.hf_auth import hf_auth_status, resolve_hf_token
@@ -61,7 +62,8 @@ class InferenceRuntimeStatus:
 
 def _dep_status(module: str) -> bool:
     try:
-        return find_spec(module) is not None
+        importlib.import_module(module)
+        return True
     except Exception:
         return False
 
@@ -79,7 +81,12 @@ def check_inference_runtime() -> InferenceRuntimeStatus:
     if not status.huggingface_hub:
         hints.append('pip install -e ".[forge]"  # includes huggingface-hub')
     if not status.llamacpp:
-        hints.append('pip install -e ".[llamacpp]"  # GGUF chat via llama.cpp')
+        if platform.system() == "Linux":
+            hints.append(
+                'pip install -e ".[llamacpp]"  # GGUF chat via llama.cpp (included in start on Linux)'
+            )
+        else:
+            hints.append('pip install -e ".[llamacpp]"  # GGUF chat via llama.cpp')
     if not status.mlx and not status.torch:
         hints.append('pip install -e ".[mlx]" or ".[train]"  # safetensors inference')
     status.install_hints = hints

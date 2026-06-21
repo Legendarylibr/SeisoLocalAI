@@ -336,6 +336,29 @@ seiso_open_forge_when_ready() {
   fi
 }
 
+seiso_llamacpp_import_ok() {
+  local root="$1"
+  [[ -x "$root/.venv/bin/python" ]] || return 1
+  "$root/.venv/bin/python" -c "import llama_cpp" >/dev/null 2>&1
+}
+
+seiso_ensure_llamacpp() {
+  local root="$1"
+  seiso_llamacpp_import_ok "$root" && return 0
+  seiso_log "Installing llama.cpp for GGUF chat..."
+  # shellcheck disable=SC1091
+  source "$root/.venv/bin/activate"
+  pip install -e "${root}[llamacpp]" || pip install 'llama-cpp-python>=0.3' || {
+    seiso_warn "GGUF chat requires llama-cpp-python. Run: pip install -e \"${root}[llamacpp]\""
+    return 1
+  }
+  seiso_llamacpp_import_ok "$root" || {
+    seiso_warn "llama-cpp-python installed but failed to import — see ${root}/.seiso-install.log"
+    return 1
+  }
+  return 0
+}
+
 seiso_run_install_worker() {
   local root="$1" extras="$2"
   # shellcheck disable=SC1091
@@ -348,6 +371,9 @@ seiso_run_install_worker() {
       seiso_warn "Optional extras failed (${extras}). Forge can still start — see $root/.seiso-install.log"
       seiso_verify_cli "$root" || return 1
     }
+  fi
+  if [[ "$extras" == *llamacpp* ]]; then
+    seiso_ensure_llamacpp "$root" || true
   fi
   if [[ "${SEISO_SKIP_FLASH_ATTN:-1}" != "1" && "$extras" == *cuda* && "$root" != /mnt/* ]]; then
     if [[ -x "$root/scripts/install_flash_attn.sh" ]]; then

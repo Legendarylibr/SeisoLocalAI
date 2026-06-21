@@ -87,6 +87,33 @@ def test_platform_profile_windows_no_cuda(monkeypatch):
     assert os.environ["SEISO_LLAMA_GPU_LAYERS"] == "0"
 
 
+def test_platform_profile_linux_nvidia_uses_gpu_layers(monkeypatch):
+    profile = {
+        "ram_gb": 32,
+        "gpus": [{"name": "NVIDIA GeForce RTX 4090", "vram_total_mb": 24576}],
+        "backend": "torch",
+        "platform": "Linux",
+    }
+    monkeypatch.setattr(
+        "seiso.memory.platform_profile.classify_tier", lambda _p: HardwareTier.WORKSTATION
+    )
+    monkeypatch.setattr("seiso.memory.platform_profile.vram_headroom_mb", lambda _p: 20480)
+    monkeypatch.setattr(
+        "seiso.memory.platform_profile.training_capabilities",
+        lambda: {
+            "gpu_count": 1,
+            "train_platform": "cpu",
+            "nvidia_hardware": True,
+            "vendor": "nvidia",
+        },
+    )
+    monkeypatch.setattr("platform.system", lambda: "Linux")
+
+    apply_platform_memory_profile(profile=profile)
+
+    assert os.environ["SEISO_LLAMA_GPU_LAYERS"] == "-1"
+
+
 def test_apply_only_setdefault(monkeypatch):
     profile = {"ram_gb": 16, "gpus": [], "backend": "cpu", "platform": "Darwin"}
     monkeypatch.setattr(
