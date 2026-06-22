@@ -14,7 +14,7 @@ from forge.services.hardware import live_metrics
 from seiso.models.hf_env import configure_hf_hub_cache
 from seiso.training.config import TrainConfig, run_training
 from seiso.training.metrics import parse_metric_line
-from seiso.training.multi_gpu import detect_gpus, gpu_stats, launch_worker_command
+from seiso.training.multi_gpu import detect_training_layout, gpu_stats, launch_worker_command
 
 
 class TrainingOrchestrator(Orchestrator):
@@ -51,7 +51,7 @@ class TrainingOrchestrator(Orchestrator):
             payload.get("use_fused_lora", config.extra.get("use_fused_lora", config.use_fused_lora))
         )
 
-        layout = detect_gpus()
+        layout = detect_training_layout()
         self._emit_log(job_id, f"Starting training: {config.model_id}")
         if resolved := config.extra.get("resolved_model_path"):
             self._emit_log(job_id, f"Using cached weights: {resolved}")

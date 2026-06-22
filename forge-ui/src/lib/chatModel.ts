@@ -233,9 +233,12 @@ export async function bootstrapChatSession(
   }
   if (selected && !backend) {
     const fmt = selected.format?.toLowerCase();
+    const installHint = selected.install_hints?.[0];
     const hint =
       fmt === "gguf"
-        ? "This GGUF is not available for local chat. Install or update llama.cpp, or choose a GGUF architecture supported by your llama.cpp runtime."
+        ? installHint
+          ? `GGUF chat needs llama.cpp. Run: ${installHint}`
+          : "This GGUF is not available for local chat. Install llama-cpp-python (pip install \"llama-cpp-python>=0.3\") or re-run start."
         : "No installed local inference engine can load this model. Install MLX or PyTorch support.";
     throw new Error(hint);
   }

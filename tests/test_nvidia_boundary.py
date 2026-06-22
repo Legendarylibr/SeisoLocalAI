@@ -93,12 +93,17 @@ def test_query_nvidia_gpus_csv_fallback(monkeypatch):
 
 
 def test_detect_gpu_nvidia_smi_fallback(monkeypatch):
+    from seiso.hardware.gpus import clear_gpu_enumeration_cache
+
     detect_gpu.cache_clear()
+    clear_gpu_enumeration_cache()
     monkeypatch.setattr(
         "seiso.security.nvidia_boundary.query_nvidia_gpus",
         lambda **kwargs: [{"index": 0, "name": "NVIDIA GeForce RTX 4090", "memory_total_mb": 24564}],
     )
-    monkeypatch.setattr("seiso.kernels.platform.platform.system", lambda: "Linux")
+    monkeypatch.setattr("seiso.hardware.gpus.platform.system", lambda: "Linux")
+    monkeypatch.setattr("seiso.hardware.gpus._torch_gpus", lambda: [])
+    clear_gpu_enumeration_cache()
 
     class _FakeCuda:
         @staticmethod
@@ -110,12 +115,14 @@ def test_detect_gpu_nvidia_smi_fallback(monkeypatch):
         version = type("Version", (), {"hip": None})()
 
     monkeypatch.setitem(__import__("sys").modules, "torch", _FakeTorch())
+    detect_gpu.cache_clear()
 
     platform = detect_gpu()
     assert platform.vendor.value == "nvidia"
     assert platform.device_count == 1
     assert "4090" in platform.device_name
     detect_gpu.cache_clear()
+    clear_gpu_enumeration_cache()
 
 
 def test_platform_caps_install_hint_without_cuda_runtime(monkeypatch):

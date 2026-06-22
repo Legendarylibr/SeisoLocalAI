@@ -27,7 +27,7 @@ cd "$HOME/Seiso"
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -U pip wheel setuptools
-pip install -e ".[forge,train,llamacpp,dev]"
+pip install -e ".[forge,train,llamacpp,mlx,dev]"
 cd forge-ui && npm ci && npm run build && cd ..
 seiso doctor
 seiso forge
@@ -57,7 +57,7 @@ cd "$HOME/Seiso/forge-ui" && npm ci && npm run build && cd ..
 
 ## MLX inference (chat)
 
-Requires `mlx-lm` from the `[mlx]` extra:
+The `[mlx]` extra is included automatically by `start` on macOS. For manual installs or upgrades:
 
 ```bash
 pip install -e ".[mlx]"

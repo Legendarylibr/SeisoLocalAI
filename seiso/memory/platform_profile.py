@@ -72,7 +72,11 @@ def apply_platform_memory_profile(*, profile: dict[str, Any] | None = None) -> d
             os.environ.setdefault("SEISO_SKIP_MLX_PROBE", "1")
 
     elif system == "Windows":
-        if caps.get("train_platform") == "cpu" or not caps.get("gpu_count"):
+        if caps.get("nvidia_hardware") or (
+            caps.get("gpu_count", 0) > 0 and caps.get("vendor") == "nvidia"
+        ):
+            os.environ.setdefault("SEISO_LLAMA_GPU_LAYERS", "-1")
+        elif caps.get("train_platform") == "cpu" or not caps.get("gpu_count"):
             os.environ.setdefault("SEISO_LLAMA_GPU_LAYERS", "0")
             os.environ.setdefault("SEISO_LLAMA_BATCH", "512")
         elif headroom < 8192:

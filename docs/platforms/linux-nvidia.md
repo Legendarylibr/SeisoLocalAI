@@ -17,13 +17,14 @@ git clone https://github.com/Legendarylibr/SeisoLocalAI.git "$HOME/Seiso"
 cd "$HOME/Seiso"
 python3 -m venv .venv && source .venv/bin/activate
 pip install -U pip
-pip install -e ".[forge,train,cuda,dev]"
+pip install -e ".[forge,train,cuda,llamacpp,dev]"
 ```
 
 Requirements:
 - NVIDIA driver + `nvidia-smi` working
 - CUDA toolkit (`nvcc`) for JIT-compiled fused kernels (first training run compiles)
 - PyTorch CUDA wheel (installed automatically via `torch` dependency)
+- `[llamacpp]` for local GGUF chat in Forge (included in `start` and the manual install above)
 
 ### Optional: Flash Attention 2
 

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import platform
 from dataclasses import dataclass
 from functools import lru_cache
 
@@ -96,24 +95,20 @@ def detect_gpu() -> GpuPlatform:
             cuda_compute_capability=cc,
         )
 
-    if platform.system().lower() in {"linux", "windows"}:
-        try:
-            from seiso.security.nvidia_boundary import query_nvidia_gpus
+    from seiso.hardware.gpus import enumerate_compute_gpus
 
-            smi_gpus = query_nvidia_gpus()
-        except ImportError:
-            smi_gpus = []
-        if smi_gpus:
-            first = smi_gpus[0]
-            name = str(first.get("name") or "nvidia gpu")
-            return GpuPlatform(
-                vendor=GpuVendor.NVIDIA,
-                device_name=name,
-                device_count=len(smi_gpus),
-                supports_native_cuda=False,
-                supports_triton=triton_ok,
-                is_wsl2=wsl2,
-                cuda_compute_capability=None,
-            )
+    smi_gpus = enumerate_compute_gpus()
+    if smi_gpus:
+        first = smi_gpus[0]
+        name = str(first.get("name") or "nvidia gpu")
+        return GpuPlatform(
+            vendor=GpuVendor.NVIDIA,
+            device_name=name,
+            device_count=len(smi_gpus),
+            supports_native_cuda=False,
+            supports_triton=triton_ok,
+            is_wsl2=wsl2,
+            cuda_compute_capability=None,
+        )
 
     return GpuPlatform(GpuVendor.CPU, "cpu", 0, False, False, wsl2, None)
