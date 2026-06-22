@@ -23,6 +23,8 @@ async def run_vendor_job(
     runner: Callable[..., dict[str, Any]],
     result_log: Callable[[dict[str, Any]], str],
 ) -> dict[str, Any]:
+    from forge.services.memory_release import prepare_for_gpu_task, release_after_task
+
     user_id = payload.get("user_id")
     if not user_id:
         raise PermissionError(user_id_error)
@@ -34,22 +36,34 @@ async def run_vendor_job(
             except SecurityError as exc:
                 raise PermissionError(str(exc)) from exc
 
+    prepare_for_gpu_task(
+        task=orchestrator.kind,
+        job_id=job_id,
+        log=lambda msg: orchestrator._emit_log(job_id, msg),
+    )
     orchestrator._emit_log(job_id, start_message)
     loop = asyncio.get_running_loop()
 
     def on_log(msg: str) -> None:
         loop.call_soon_threadsafe(orchestrator._emit_log, job_id, msg)
 
-    result = await loop.run_in_executor(
-        None,
-        lambda: runner(
-            job_id=job_id,
-            user_id=user_id,
-            data_dir=Path(orchestrator.sandbox_root),
-            payload=payload,
-            on_log=on_log,
-        ),
-    )
+    try:
+        result = await loop.run_in_executor(
+            None,
+            lambda: runner(
+                job_id=job_id,
+                user_id=user_id,
+                data_dir=Path(orchestrator.sandbox_root),
+                payload=payload,
+                on_log=on_log,
+            ),
+        )
+    finally:
+        release_after_task(
+            reason=f"{orchestrator.kind} complete",
+            log=lambda msg: orchestrator._emit_log(job_id, msg),
+        )
+
     orchestrator._emit_log(job_id, result_log(result))
     return result
 

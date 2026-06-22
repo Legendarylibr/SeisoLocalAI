@@ -18,6 +18,8 @@ class ExportOrchestrator(Orchestrator):
     kind = "export"
 
     async def execute(self, job_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        from forge.services.memory_release import prepare_for_gpu_task, release_after_task
+
         user_id = payload.get("user_id")
         if not user_id:
             raise PermissionError("user_id required for export")
@@ -25,6 +27,12 @@ class ExportOrchestrator(Orchestrator):
             checkpoint = assert_user_path(self.sandbox_root, user_id, payload["checkpoint"])
         except SecurityError as exc:
             raise PermissionError(str(exc)) from exc
+
+        prepare_for_gpu_task(
+            task="export",
+            job_id=job_id,
+            log=lambda msg: self._emit_log(job_id, msg),
+        )
 
         hub_meta_raw = payload.get("hub_metadata")
         hub_metadata = HubModelMetadata(**hub_meta_raw) if hub_meta_raw else None
@@ -39,36 +47,43 @@ class ExportOrchestrator(Orchestrator):
         def on_log(msg: str) -> None:
             self._emit_log(job_id, msg)
 
-        plan = prepare_export(
-            checkpoint=checkpoint,
-            output_dir=output_dir,
-            formats=payload.get("formats"),
-            profile=payload.get("profile"),
-            gguf_quantizations=payload.get("gguf_quantizations"),
-            hub_repo=payload.get("hub_repo"),
-            hub_token=payload.get("hub_token"),
-            hub_metadata=hub_metadata,
-            on_log=on_log,
-            hub_precheck=hub_precheck_from_dict(payload.get("hub_precheck")),
-        )
-
-        if plan.precheck and not plan.precheck.ok:
-            from seiso.export.hub_precheck import assert_hub_precheck_ok
-
-            assert_hub_precheck_ok(plan.precheck)
-
-        for warning in plan.warnings:
-            self._emit_log(job_id, f"Warning: {warning}")
-
-        results = await loop.run_in_executor(
-            None,
-            lambda: run_export_plan(
-                plan,
+        try:
+            plan = prepare_export(
+                checkpoint=checkpoint,
+                output_dir=output_dir,
+                formats=payload.get("formats"),
+                profile=payload.get("profile"),
+                gguf_quantizations=payload.get("gguf_quantizations"),
+                hub_repo=payload.get("hub_repo"),
                 hub_token=payload.get("hub_token"),
-                sandbox_root=self.sandbox_root,
+                hub_metadata=hub_metadata,
                 on_log=on_log,
-            ),
-        )
+                hub_precheck=hub_precheck_from_dict(payload.get("hub_precheck")),
+            )
+
+            if plan.precheck and not plan.precheck.ok:
+                from seiso.export.hub_precheck import assert_hub_precheck_ok
+
+                assert_hub_precheck_ok(plan.precheck)
+
+            for warning in plan.warnings:
+                self._emit_log(job_id, f"Warning: {warning}")
+
+            results = await loop.run_in_executor(
+                None,
+                lambda: run_export_plan(
+                    plan,
+                    hub_token=payload.get("hub_token"),
+                    sandbox_root=self.sandbox_root,
+                    on_log=on_log,
+                ),
+            )
+        finally:
+            release_after_task(
+                reason="export complete",
+                log=lambda msg: self._emit_log(job_id, msg),
+            )
+
         paths = {k: str(v) for k, v in results.items()}
         self._emit_log(job_id, "Export complete")
         return {

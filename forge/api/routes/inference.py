@@ -39,6 +39,15 @@ _POOL_BACKEND_BY_API_BACKEND = {
 }
 
 
+def _assert_inference_gpu_available() -> None:
+    from forge.services.memory_release import assert_gpu_available_for_inference
+
+    try:
+        assert_gpu_available_for_inference()
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
 class ChatRequest(BaseModel):
     thread_id: str | None = None
     model_id: str | None = None
@@ -236,6 +245,7 @@ async def preload_model(
     settings: Annotated[ForgeSettings, Depends(get_settings)],
 ) -> dict[str, Any]:
     """Load a selected inventory model into the local inference engine."""
+    _assert_inference_gpu_available()
     ctx = await _resolve_preload_context(
         db, user_id, settings, body.model_id, body.inference_backend
     )
@@ -256,6 +266,7 @@ async def preload_model_stream(
     orchestrator: Annotated[InferenceOrchestrator, Depends(get_inference_orchestrator)],
     settings: Annotated[ForgeSettings, Depends(get_settings)],
 ):
+    _assert_inference_gpu_available()
     ctx = await _resolve_preload_context(
         db, user_id, settings, body.model_id, body.inference_backend
     )
@@ -510,6 +521,7 @@ async def chat(
             "config": json.loads(prov["config_json"]),
         }
     if not body.provider_id:
+        _assert_inference_gpu_available()
         if body.model_path and body.model_id:
             raise HTTPException(403, "Provide model_id or model_path, not both")
         if body.model_path:

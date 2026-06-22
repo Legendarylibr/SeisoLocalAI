@@ -372,7 +372,23 @@ async def perform_model_download(
             )
             return cached
 
+        from forge.services.memory_release import prepare_for_gpu_task
+
         loop = asyncio.get_running_loop()
+        await loop.run_in_executor(
+            None,
+            lambda: prepare_for_gpu_task(task="download"),
+        )
+        _emit_progress(
+            on_progress,
+            {
+                "phase": "resolving",
+                "label": f"Released inference memory for {repo_id} download",
+                "repo_id": repo_id,
+                "percent": 2,
+            },
+        )
+
         artifacts = await loop.run_in_executor(
             None,
             lambda: _sync_download_artifacts(

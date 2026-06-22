@@ -31,14 +31,13 @@ class TrainingOrchestrator(Orchestrator):
 
     async def execute(self, job_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         configure_hf_hub_cache(self.sandbox_root)
-        from seiso.inference.model_pool import get_model_pool
-        from seiso.memory.protection import release_cached_memory
+        from forge.services.memory_release import prepare_for_gpu_task, release_after_task
 
-        pool = get_model_pool()
-        if pool.active_key:
-            self._emit_log(job_id, "Unloading active chat model to free GPU for training")
-            pool.cancel_and_unload()
-            release_cached_memory(sync=True)
+        prepare_for_gpu_task(
+            task="training",
+            job_id=job_id,
+            log=lambda msg: self._emit_log(job_id, msg),
+        )
         config = TrainConfig.model_validate(payload["config"])
         from seiso.memory.protection import apply_training_memory_guards
 
@@ -98,6 +97,10 @@ class TrainingOrchestrator(Orchestrator):
             else:
                 metrics_summary = self._summarize_buffered_metrics(job_id)
         finally:
+            release_after_task(
+                reason="training complete",
+                log=lambda msg: self._emit_log(job_id, msg),
+            )
             stop_poll.set()
             poll_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):

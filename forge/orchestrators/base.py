@@ -169,6 +169,10 @@ class Orchestrator(ABC):
             rec.status = JobStatus.CANCELLED
             self._emit_log(job_id, "Job cancelled")
             raise
+        except SystemExit as exc:
+            rec.status = JobStatus.FAILED
+            rec.error = str(exc) or "Job exited unexpectedly"
+            self._emit_log(job_id, f"ERROR: {rec.error}")
         except Exception as exc:
             rec.status = JobStatus.FAILED
             rec.error = str(exc)

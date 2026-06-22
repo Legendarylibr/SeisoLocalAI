@@ -197,6 +197,7 @@ class SeisoTrainer:
             self._patch_adapter_metadata(out)
         self._write_manifest(out, layout, multi_gpu, detected_fmt.value)
         release_training_memory(model)
+        self._cleanup_gpu(None)
         logger.info("Training complete: %s", out)
         return out
 
