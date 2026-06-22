@@ -98,7 +98,9 @@ def test_nvidia_llamacpp_stack_integration(monkeypatch):
 
     monkeypatch.setattr("seiso.inference.model_pool._cuda_available", lambda: False)
     monkeypatch.setattr("seiso.inference.model_pool._nvidia_hardware_visible", lambda: True)
+    monkeypatch.setattr("seiso.inference.model_pool._llama_gpu_offload_ok", lambda: True)
     monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 16384)
+    monkeypatch.delenv("SEISO_LLAMA_GPU_LAYERS", raising=False)
     assert llama_load_kwargs(4096)["n_gpu_layers"] == -1
 
     monkeypatch.setattr("seiso.hardware.gpus._torch_gpus", lambda: [])

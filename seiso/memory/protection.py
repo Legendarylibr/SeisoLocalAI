@@ -403,11 +403,12 @@ def apply_training_memory_guards(config: Any) -> Any:
         updates.update(
             {k: v for k, v in cuda_profile.items() if k not in meta_keys}
         )
-    except ImportError:
+    except (ImportError, RuntimeError):
+        # training_profile or CUDA extension unavailable — use safe defaults.
         if headroom > 0 and headroom < 8192:
             os.environ.setdefault("SEISO_KERNEL_LOW_VRAM", "1")
             updates.setdefault("gradient_checkpointing", True)
-            updates.setdefault("use_fused_ce", True)
+            updates.setdefault("use_fused_ce", False)
 
     # Downgrade quant to the platform-recommended value when the requested mode
     # is unavailable (e.g. QLoRA/4-bit on macOS where bitsandbytes is absent,

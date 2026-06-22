@@ -98,10 +98,32 @@ def load_torch(
 
     use_4bit = options.load_in_4bit
     use_8bit = options.load_in_8bit
-    if platform.system() == "Darwin" and (use_4bit or use_8bit):
-        logger.warning("bitsandbytes QLoRA is unavailable on macOS — loading without quantization")
-        use_4bit = False
-        use_8bit = False
+    if use_4bit or use_8bit:
+        # bitsandbytes (required for 4-bit/8-bit quantization) is only available
+        # on Linux/Windows with a CUDA or ROCm GPU. On macOS (no bnb) or a
+        # CPU-only box, silently fall back to unquantized load instead of
+        # crashing at BitsAndBytesConfig or model.from_pretrained.
+        bnb_unavailable = platform.system() == "Darwin"
+        if not bnb_unavailable:
+            try:
+                import bitsandbytes  # noqa: F401
+            except ImportError:
+                bnb_unavailable = True
+            else:
+                try:
+                    import torch
+
+                    if not torch.cuda.is_available():
+                        bnb_unavailable = True
+                except ImportError:
+                    bnb_unavailable = True
+        if bnb_unavailable:
+            logger.warning(
+                "bitsandbytes quantization unavailable on this platform — "
+                "loading without quantization"
+            )
+            use_4bit = False
+            use_8bit = False
 
     if use_4bit:
         from transformers import BitsAndBytesConfig

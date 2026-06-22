@@ -45,8 +45,44 @@ def _default_llama_gpu_layers() -> int:
     if platform.system() == "Darwin" and platform.machine() in {"arm64", "aarch64"}:
         return -1
     if _cuda_available() or _nvidia_hardware_visible():
-        return -1
+        # Only request full GPU offload when the installed llama-cpp-python
+        # wheel actually supports it. A CPU-only wheel on an NVIDIA box will
+        # crash if n_gpu_layers != 0.
+        if _llama_gpu_offload_ok():
+            return -1
     return 0
+
+
+_llama_offload_checked = False
+_llama_offload_supported = False
+
+
+def _llama_gpu_offload_ok() -> bool:
+    """True when the installed llama-cpp-python can offload to GPU."""
+    global _llama_offload_checked, _llama_offload_supported
+    if _llama_offload_checked:
+        return _llama_offload_supported
+    _llama_offload_checked = True
+    try:
+        import llama_cpp
+
+        for candidate in (
+            getattr(llama_cpp, "llama_supports_gpu_offload", None),
+            getattr(getattr(llama_cpp, "llama_cpp", None), "llama_supports_gpu_offload", None),
+        ):
+            if callable(candidate):
+                _llama_offload_supported = bool(candidate())
+                return _llama_offload_supported
+    except Exception:
+        pass
+    return False
+
+
+def _reset_llama_offload_cache() -> None:
+    """Clear the GPU offload probe cache (for tests / post-install)."""
+    global _llama_offload_checked, _llama_offload_supported
+    _llama_offload_checked = False
+    _llama_offload_supported = False
 
 
 def _default_llama_batch() -> int:
@@ -76,6 +112,14 @@ def llama_load_kwargs(n_ctx: int) -> dict[str, Any]:
 
     n_threads = env_int("SEISO_LLAMA_THREADS", _default_llama_threads())
     n_gpu_layers = env_int("SEISO_LLAMA_GPU_LAYERS", _default_llama_gpu_layers())
+    # Safety net: if the user or platform_profile set n_gpu_layers != 0 but the
+    # installed llama-cpp-python wheel can't actually offload (e.g. CPU-only
+    # wheel on an NVIDIA Linux box), force 0 to avoid a crash at Llama init.
+    if n_gpu_layers != 0 and not _llama_gpu_offload_ok():
+        logger.debug(
+            "llama-cpp-python wheel lacks GPU offload support — forcing n_gpu_layers=0"
+        )
+        n_gpu_layers = 0
     headroom = headroom_mb()
     batch_cap, ubatch_cap = _headroom_llama_batch_caps(headroom)
     n_batch = env_int("SEISO_LLAMA_BATCH", batch_cap)

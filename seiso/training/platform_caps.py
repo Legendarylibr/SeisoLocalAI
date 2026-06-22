@@ -30,6 +30,12 @@ def training_capabilities() -> dict[str, Any]:
         pass
 
     supports_bnb = system != "Darwin"
+    if supports_bnb:
+        # bitsandbytes may be absent even on Linux (CPU-only box or skipped install).
+        try:
+            import bitsandbytes  # noqa: F401
+        except ImportError:
+            supports_bnb = False
     has_nvidia_hardware = gpu.device_count > 0 and gpu.vendor == GpuVendor.NVIDIA
     has_cuda_gpu = has_nvidia_hardware and cuda_runtime
     has_rocm_gpu = gpu.device_count > 0 and gpu.vendor == GpuVendor.AMD and cuda_runtime

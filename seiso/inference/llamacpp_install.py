@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
 import subprocess
 import sys
 from typing import Any
@@ -72,6 +73,12 @@ def pip_install_strategies(*, prefer_cuda: bool) -> list[list[str]]:
 
 def _pip_install_from_source_cuda() -> bool:
     if not sys.platform.startswith("linux"):
+        return False
+    # Source build requires the CUDA toolkit (nvcc). If it's missing, skip
+    # silently — the caller falls back to a CPU wheel.
+    nvcc = shutil.which("nvcc")
+    if not nvcc:
+        logger.debug("Skipping CUDA source build: nvcc not found in PATH")
         return False
     env = os.environ.copy()
     env["CMAKE_ARGS"] = "-DLLAMA_CUDA=on"

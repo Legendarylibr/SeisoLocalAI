@@ -155,6 +155,7 @@ def test_llama_load_kwargs_are_tuned_and_overrideable(monkeypatch):
     monkeypatch.setenv("SEISO_LLAMA_THREADS", "6")
     monkeypatch.setenv("SEISO_LLAMA_GPU_LAYERS", "4")
     monkeypatch.setenv("SEISO_LLAMA_USE_MMAP", "false")
+    monkeypatch.setattr("seiso.inference.model_pool._llama_gpu_offload_ok", lambda: True)
 
     kwargs = llama_load_kwargs(2048)
 
@@ -170,6 +171,7 @@ def test_llama_load_kwargs_default_metal_offload_on_apple_silicon(monkeypatch):
     monkeypatch.delenv("SEISO_LLAMA_GPU_LAYERS", raising=False)
     monkeypatch.setattr(platform, "system", lambda: "Darwin")
     monkeypatch.setattr(platform, "machine", lambda: "arm64")
+    monkeypatch.setattr("seiso.inference.model_pool._llama_gpu_offload_ok", lambda: True)
 
     kwargs = llama_load_kwargs(4096)
     assert kwargs["n_gpu_layers"] == -1
@@ -184,6 +186,7 @@ def test_llama_load_kwargs_cuda_defaults(monkeypatch):
     monkeypatch.setattr(platform, "system", lambda: "Linux")
     monkeypatch.setattr(platform, "machine", lambda: "x86_64")
     monkeypatch.setattr("seiso.inference.model_pool._cuda_available", lambda: True)
+    monkeypatch.setattr("seiso.inference.model_pool._llama_gpu_offload_ok", lambda: True)
     monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 16384)
 
     kwargs = llama_load_kwargs(4096)
@@ -202,7 +205,157 @@ def test_llama_load_kwargs_nvidia_smi_without_cuda_torch(monkeypatch):
     monkeypatch.setattr(platform, "system", lambda: "Linux")
     monkeypatch.setattr("seiso.inference.model_pool._cuda_available", lambda: False)
     monkeypatch.setattr("seiso.inference.model_pool._nvidia_hardware_visible", lambda: True)
+    monkeypatch.setattr("seiso.inference.model_pool._llama_gpu_offload_ok", lambda: True)
     monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 16384)
 
     kwargs = llama_load_kwargs(4096)
     assert kwargs["n_gpu_layers"] == -1
+
+
+def test_llama_load_kwargs_forces_zero_gpu_layers_on_cpu_only_wheel(monkeypatch):
+    """Linux with NVIDIA hardware but CPU-only llama-cpp-python wheel should not
+    attempt GPU offload (would crash at Llama init)."""
+    import seiso.inference.model_pool as mp
+
+    for key in list(os.environ):
+        if key.startswith("SEISO_LLAMA_"):
+            monkeypatch.delenv(key, raising=False)
+    monkeypatch.setattr(platform, "system", lambda: "Linux")
+    monkeypatch.setattr(platform, "machine", lambda: "x86_64")
+    monkeypatch.setattr(mp, "_cuda_available", lambda: True)
+    monkeypatch.setattr(mp, "_nvidia_hardware_visible", lambda: True)
+    monkeypatch.setattr(mp, "_llama_gpu_offload_ok", lambda: False)
+    monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 16384)
+
+    kwargs = llama_load_kwargs(4096)
+    assert kwargs["n_gpu_layers"] == 0
+    assert "op_offload" not in kwargs
+    assert kwargs["offload_kqv"] is False
+
+
+def test_llama_load_kwargs_env_override_respected_when_gpu_supported(monkeypatch):
+    """SEISO_LLAMA_GPU_LAYERS env var is honored when GPU offload is supported."""
+    import seiso.inference.model_pool as mp
+
+    for key in list(os.environ):
+        if key.startswith("SEISO_LLAMA_"):
+            monkeypatch.delenv(key, raising=False)
+    monkeypatch.setattr(platform, "system", lambda: "Linux")
+    monkeypatch.setattr(mp, "_cuda_available", lambda: True)
+    monkeypatch.setattr(mp, "_llama_gpu_offload_ok", lambda: True)
+    monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 16384)
+    monkeypatch.setenv("SEISO_LLAMA_GPU_LAYERS", "10")
+
+    kwargs = llama_load_kwargs(4096)
+    assert kwargs["n_gpu_layers"] == 10
+
+
+def test_llama_load_kwargs_env_override_zeroed_when_gpu_unsupported(monkeypatch):
+    """SEISO_LLAMA_GPU_LAYERS=99 is forced to 0 when the wheel can't offload."""
+    import seiso.inference.model_pool as mp
+
+    for key in list(os.environ):
+        if key.startswith("SEISO_LLAMA_"):
+            monkeypatch.delenv(key, raising=False)
+    monkeypatch.setattr(platform, "system", lambda: "Linux")
+    monkeypatch.setattr(mp, "_cuda_available", lambda: True)
+    monkeypatch.setattr(mp, "_llama_gpu_offload_ok", lambda: False)
+    monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 16384)
+    monkeypatch.setenv("SEISO_LLAMA_GPU_LAYERS", "99")
+
+    kwargs = llama_load_kwargs(4096)
+    assert kwargs["n_gpu_layers"] == 0
+
+
+def test_platform_profile_linux_nvidia_cpu_only_wheel(monkeypatch):
+    """When llama-cpp-python lacks GPU offload, platform_profile should set
+    SEISO_LLAMA_GPU_LAYERS=0 even on Linux NVIDIA hardware."""
+    import os
+    import platform as plat
+    from seiso.hardware.tiers import HardwareTier
+    from seiso.memory.platform_profile import apply_platform_memory_profile
+
+    import seiso.inference.model_pool as mp
+
+    for key in list(os.environ):
+        if key.startswith("SEISO_LLAMA_") or key == "SEISO_MEMORY_PROFILE":
+            monkeypatch.delenv(key, raising=False)
+
+    monkeypatch.setattr(plat, "system", lambda: "Linux")
+    monkeypatch.setattr(mp, "_llama_gpu_offload_ok", lambda: False)
+    monkeypatch.setattr(
+        "seiso.memory.platform_profile.classify_tier",
+        lambda _p: HardwareTier.WORKSTATION,
+    )
+    monkeypatch.setattr("seiso.memory.platform_profile.vram_headroom_mb", lambda _p: 20480)
+    monkeypatch.setattr(
+        "seiso.memory.platform_profile.training_capabilities",
+        lambda: {
+            "nvidia_hardware": True,
+            "gpu_count": 1,
+            "vendor": "nvidia",
+            "train_platform": "cpu",
+            "supports_mlx_inference": False,
+        },
+    )
+
+    apply_platform_memory_profile(
+        profile={
+            "ram_gb": 32,
+            "gpus": [{"name": "NVIDIA RTX 4090", "vram_total_mb": 24576}],
+            "backend": "torch",
+            "platform": "Linux",
+        }
+    )
+    assert os.environ.get("SEISO_LLAMA_GPU_LAYERS") == "0"
+
+
+def test_platform_caps_bnb_unavailable_on_linux(monkeypatch):
+    """training_capabilities should report supports_qlora=False when
+    bitsandbytes is not importable, even on Linux with NVIDIA hardware."""
+    import builtins
+    import platform as plat
+    from seiso.kernels.platform import GpuPlatform, GpuVendor, detect_gpu
+    from seiso.training.platform_caps import training_capabilities
+
+    training_capabilities.cache_clear()
+    detect_gpu.cache_clear()
+    monkeypatch.setattr(
+        "seiso.training.platform_caps.detect_gpu",
+        lambda: GpuPlatform(
+            vendor=GpuVendor.NVIDIA,
+            device_name="RTX 4090",
+            device_count=1,
+            supports_native_cuda=False,
+            supports_triton=False,
+        ),
+    )
+    monkeypatch.setattr(plat, "system", lambda: "Linux")
+
+    class _FakeCuda:
+        @staticmethod
+        def is_available() -> bool:
+            return False
+
+    class _FakeTorch:
+        cuda = _FakeCuda()
+        backends = type("Backends", (), {"mps": type("Mps", (), {"is_available": staticmethod(lambda: False)})()})()
+
+    import sys
+
+    monkeypatch.setitem(sys.modules, "torch", _FakeTorch())
+
+    real_import = builtins.__import__
+
+    def fake_import(name, *args, **kwargs):
+        if name == "bitsandbytes":
+            raise ImportError("no bnb")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+
+    caps = training_capabilities()
+    assert caps["supports_qlora"] is False
+    assert caps["recommended_quant"] == "16bit"
+    training_capabilities.cache_clear()
+    detect_gpu.cache_clear()

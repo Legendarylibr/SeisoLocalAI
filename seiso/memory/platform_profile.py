@@ -94,7 +94,19 @@ def apply_platform_memory_profile(*, profile: dict[str, Any] | None = None) -> d
         if caps.get("nvidia_hardware") or (
             caps.get("gpu_count", 0) > 0 and caps.get("vendor") == "nvidia"
         ):
-            os.environ.setdefault("SEISO_LLAMA_GPU_LAYERS", "-1")
+            # Only request GPU offload when the installed llama-cpp-python
+            # wheel actually supports it; a CPU-only wheel would crash.
+            _llama_gpu_ok = True
+            try:
+                from seiso.inference.model_pool import _llama_gpu_offload_ok
+
+                _llama_gpu_ok = _llama_gpu_offload_ok()
+            except ImportError:
+                pass
+            if _llama_gpu_ok:
+                os.environ.setdefault("SEISO_LLAMA_GPU_LAYERS", "-1")
+            else:
+                os.environ.setdefault("SEISO_LLAMA_GPU_LAYERS", "0")
         elif caps.get("train_platform") == "cpu" or not caps.get("gpu_count"):
             os.environ.setdefault("SEISO_LLAMA_GPU_LAYERS", "0")
 
