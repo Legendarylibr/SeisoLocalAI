@@ -1,4 +1,4 @@
-"""External LLM provider routing — local Ollama and vLLM only."""
+"""External LLM provider routing — local vLLM only."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from forge.security.url_policy import resolve_pinned_endpoint
 
 logger = logging.getLogger(__name__)
 
-LOCAL_PROVIDER_TYPES = frozenset({"ollama", "vllm"})
+LOCAL_PROVIDER_TYPES = frozenset({"vllm"})
 
 
 async def chat_completion(
@@ -22,15 +22,6 @@ async def chat_completion(
     stream: bool = False,
 ) -> str:
     ptype = provider_type.lower()
-    if ptype == "ollama":
-        from forge.providers.ollama import chat_completion as ollama_chat
-
-        return await ollama_chat(
-            messages,
-            model=config.get("model", "llama3.2"),
-            max_tokens=max_tokens,
-            base_url=config.get("base_url", ""),
-        )
     if ptype == "vllm":
         return await _vllm_compatible(config, messages, max_tokens=max_tokens)
     raise ValueError(f"Unsupported provider: {provider_type}")

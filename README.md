@@ -237,7 +237,7 @@ seiso doctor
 
 ### Model download sizes
 
-Catalog chat downloads are local GGUF files for llama.cpp and usually need 2–8 GB each; larger models can need 10–30+ GB. Weights land in your Hugging Face cache (`SEISO_DATA_DIR/hf_cache` by default). Ollama models live in Ollama's own store — use `ollama pull` or `ollama create` for that path.
+Catalog chat downloads are local GGUF files for llama.cpp and usually need 2–8 GB each; larger models can need 10–30+ GB. Weights land in your Hugging Face cache (`SEISO_DATA_DIR/hf_cache` by default).
 
 Full install guide: **[docs/install.md](docs/install.md)**  
 First-run walkthrough: **[docs/getting-started.md](docs/getting-started.md)**
@@ -252,14 +252,14 @@ After `seiso forge` (or `start`), browse to **http://127.0.0.1:8765**:
 |------|------|--------------|
 | Dashboard | `/` | Workspace overview |
 | Model Hub | `/hub` | Live Hugging Face Hub search for GGUF models |
-| Chat | `/chat` | Local inference (GGUF, MLX, PyTorch, Ollama) |
+| Chat | `/chat` | Local inference (GGUF, MLX, PyTorch) |
 | Training Studio | `/train` | LoRA / QLoRA fine-tune with live SSE logs |
 | Export | `/export` | Merge LoRA, GGUF quant, Hugging Face publish |
 | Compress | `/compress` | LLM distill → prune (Llama-family) → finetune → quant |
 | Distill-RL | `/distill-rl` | Teacher → student distillation + DPO (auto-sweep) |
 | RL Quant | `/rl-quant` | Adaptive GGUF quantization via RL (auto-sweep) |
 | Recipe Studio | `/recipes` | Visual `@xyflow/react` graph editor |
-| Integrations | `/integrations` | Route to OpenAI, Anthropic, Ollama, vLLM |
+| Integrations | `/integrations` | Route to OpenAI, Anthropic, vLLM |
 | Knowledge | `/knowledge` | RAG corpus ingest and retrieval |
 | Settings | `/settings` | HF token, hardware info, security toggles |
 
@@ -350,7 +350,7 @@ Training stack: **TRL `SFTTrainer`** + **PEFT** (LoRA/QLoRA) + optional **fused 
 | Windows + NVIDIA | ✓ | ✓ QLoRA | ✓ CUDA JIT | [windows](docs/platforms/windows.md) |
 | WSL2 + NVIDIA | ✓ | ✓ QLoRA | ✓ CUDA + Triton | [wsl](docs/platforms/wsl.md) |
 | macOS Apple Silicon | ✓ MLX | ✓ 16-bit LoRA | — | [macos](docs/platforms/macos.md) |
-| CPU | ✓ GGUF/Ollama | limited | — | — |
+| CPU | ✓ GGUF | limited | — | — |
 
 \* bitsandbytes on ROCm depends on your PyTorch build.
 
@@ -370,9 +370,9 @@ Training stack: **TRL `SFTTrainer`** + **PEFT** (LoRA/QLoRA) + optional **fused 
 
 ### Inference
 
-- **Backends:** llama.cpp (GGUF), MLX (macOS), PyTorch (4-bit/16-bit), Ollama ([backends](docs/inference/backends.md))
+- **Backends:** llama.cpp (GGUF), MLX (macOS), PyTorch (4-bit/16-bit) ([backends](docs/inference/backends.md))
 - **Tool calling:** web search, sandboxed code execution, artifact writes (opt-in)
-- **Providers:** OpenAI, Anthropic, Ollama, vLLM with SSRF hardening
+- **Providers:** OpenAI, Anthropic, vLLM with SSRF hardening
 
 ### Export
 
@@ -424,7 +424,7 @@ All user data lives under **`SEISO_DATA_DIR`** (default below):
 └── runtime.json      # Runtime metadata
 ```
 
-**Free memory:** In Chat or Model Hub, use **Free memory** to unload the active llama.cpp / MLX / PyTorch model and any loaded Ollama model from RAM/VRAM. This does **not** delete downloaded files in `hf_cache/`. On Mac (Apple Silicon or Intel), free memory before loading a larger model — Seiso sizes loads as file size + ~0.8 GB overhead.
+**Free memory:** In Chat or Model Hub, use **Free memory** to unload the active llama.cpp / MLX / PyTorch model from RAM/VRAM. This does **not** delete downloaded files in `hf_cache/`. On Mac (Apple Silicon or Intel), free memory before loading a larger model — Seiso sizes loads as file size + ~0.8 GB overhead.
 
 Database defaults to **ephemeral in-memory SQLite** — chat history and job metadata are wiped on restart unless you opt into persistence (`SEISO_DB_EPHEMERAL=false`).
 

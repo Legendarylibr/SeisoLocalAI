@@ -120,7 +120,7 @@ def build_guidance(
             )
         )
         steps.append(
-            GuideStep("Open Chat", "Run local inference via llama.cpp, Ollama, or MLX.", "/chat", 3)
+            GuideStep("Open Chat", "Run local inference via llama.cpp or MLX.", "/chat", 3)
         )
         if vram_total < 6000 and not gpus:
             steps.append(

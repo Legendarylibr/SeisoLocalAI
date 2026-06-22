@@ -98,9 +98,6 @@ def apply_inference_kernels(model: Any) -> None:
         logger.debug("Inference fused kernels skipped: %s", exc)
 
 
-maybe_apply_fused_kernels = apply_inference_kernels
-
-
 def build_mlx_sampler(payload: dict[str, Any]) -> Any | None:
     temperature = float(payload.get("temperature", 0.0))
     if temperature <= 0:

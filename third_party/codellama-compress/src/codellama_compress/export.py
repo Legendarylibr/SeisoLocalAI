@@ -56,7 +56,7 @@ def write_export_bundle(
         f'CMD ["bash", "output/export/vllm_server.sh"]\n'
     )
 
-    # Ollama Modelfile (points at GGUF output produced by convert script)
+    # Modelfile (points at GGUF output produced by convert script)
     (out_dir / "Modelfile").write_text(
         f'FROM ./model-q4_k_m.gguf\nPARAMETER stop "<|eot_id|>"\nSYSTEM "You are {model_name}."\n'
     )

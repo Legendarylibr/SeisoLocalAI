@@ -149,7 +149,7 @@ class SeisoModel:
         *,
         quantization_method: str | list[str] = "q4_k_m",
     ) -> list[Path]:
-        """Export GGUF quant(s) and Ollama Modelfile via Seiso's export pipeline."""
+        """Export GGUF quant(s) and Modelfile via Seiso's export pipeline."""
         from seiso.export.gguf import export_gguf
 
         quants = (

@@ -8,7 +8,6 @@ names, CPU brands, or other host-identifying strings.
 from __future__ import annotations
 
 import platform
-import re
 from typing import Any
 
 # Fields allowed on persisted GPU snapshots (no model names or PCI ids).
@@ -24,9 +23,6 @@ _PERSIST_GPU_KEYS = frozenset(
         "total_bytes",
     }
 )
-
-_SERIAL_RE = re.compile(r"\b(serial|s/n|uuid)[:\s#-]*[\w-]+", re.I)
-_HOST_RE = re.compile(r"@[\w.-]+")
 
 
 def _generic_accelerator_label(vendor: str | None = None) -> str:
@@ -99,10 +95,11 @@ def sanitize_hardware_profile_for_storage(profile: dict[str, Any]) -> dict[str, 
 
 
 def sanitize_label_for_display(raw: str, *, max_len: int = 64) -> str:
-    """Sanitize hardware strings for ephemeral UI (not for persistence)."""
-    text = _SERIAL_RE.sub("", raw)
-    text = _HOST_RE.sub("", text)
-    text = " ".join(text.split())
-    if len(text) > max_len:
-        text = text[: max_len - 1] + "…"
-    return text or "Unknown"
+    """Sanitize hardware strings for ephemeral UI (not for persistence).
+
+    Delegates to seiso.hardware.gpus.sanitize_hardware_label to avoid
+    duplicated regex / logic.
+    """
+    from seiso.hardware.gpus import sanitize_hardware_label
+
+    return sanitize_hardware_label(raw, max_len=max_len)

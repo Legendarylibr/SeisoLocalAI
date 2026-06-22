@@ -93,7 +93,7 @@ For production behind a reverse proxy, terminate TLS upstream and run **one** Fo
 |------|------|---------|
 | `/` | Dashboard | Workspace overview and quick links |
 | `/hub` | Model Hub | Browse and download catalog models |
-| `/chat` | Chat | Local inference (GGUF, MLX, PyTorch, Ollama); **Free memory** unloads models from RAM/VRAM without changing selection |
+| `/chat` | Chat | Local inference (GGUF, MLX, PyTorch); **Free memory** unloads models from RAM/VRAM without changing selection |
 | `/train` | Training Studio | LoRA / QLoRA fine-tuning with live SSE logs |
 | `/export` | Export | Merge LoRA, GGUF, Hub publish from checkpoints |
 | `/compress` | Compress | LLM distillation / prune (Llama-family) / quant pipeline |
@@ -101,7 +101,7 @@ For production behind a reverse proxy, terminate TLS upstream and run **one** Fo
 | `/rl-quant` | RL Quant | Adaptive GGUF quantization policy training |
 | `/recipes` | Recipe Studio | Visual graph editor for data/recipe jobs |
 | `/knowledge` | Knowledge | RAG corpus ingest and retrieval |
-| `/integrations` | Integrations | External providers (OpenAI, Anthropic, Ollama, vLLM) |
+| `/integrations` | Integrations | External providers (OpenAI, Anthropic, vLLM) |
 | `/settings` | Settings | HF token, hardware info, security toggles |
 
 Knowledge-base ingest and retrieve are also available via API (`/api/knowledge/...`).
@@ -131,8 +131,8 @@ Set `SEISO_DEBUG=true` to expose interactive API docs at `/api/docs`.
 
 | Endpoint | Purpose |
 |----------|---------|
-| `GET /api/models/vram` | Loaded local model, Ollama model, headroom, recommended largest fit |
-| `POST /api/models/vram/unload` | Free memory — unload local pool + Ollama + refresh headroom |
+| `GET /api/models/vram` | Loaded local model, headroom, recommended largest fit |
+| `POST /api/models/vram/unload` | Free memory — unload local pool + refresh headroom |
 | `POST /api/inference/cancel` | Backward-compatible alias of `vram/unload` |
 | `POST /api/inference/cancel-generation` | Stop streaming only; keeps model warm |
 

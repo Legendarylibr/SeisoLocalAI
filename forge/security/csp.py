@@ -11,7 +11,7 @@ SCRIPT_HASHES: tuple[str, ...] = (
     "sha256-ZswfTY7H35rbv8WC7NXBoiC7WNu86vSzCDChNWwZZDM=",
 )
 
-# Common loopback services when Forge is bound to 127.0.0.1 (UI, Vite, Ollama, vLLM).
+# Common loopback services when Forge is bound to 127.0.0.1 (UI, Vite, vLLM).
 _LOCAL_CONNECT_SRC: tuple[str, ...] = (
     "http://127.0.0.1:8765",
     "http://127.0.0.1:5173",

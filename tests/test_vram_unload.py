@@ -6,24 +6,17 @@ import pytest
 
 
 @pytest.mark.asyncio
-async def test_release_all_inference_memory_unloads_local_and_ollama(monkeypatch, tmp_path):
+async def test_release_all_inference_memory_unloads_local(monkeypatch, tmp_path):
     from forge.orchestrators import inference as inference_orchestrator
 
     orchestrator = inference_orchestrator.InferenceOrchestrator(tmp_path)
-    orchestrator._active_ollama_model = "llama3.2"
-    orchestrator._active_ollama_base_url = "http://127.0.0.1:11434"
     calls: list[str] = []
 
     async def fake_cancel_and_unload():
         calls.append("local")
         return {"active_model": None, "path": None}
 
-    async def fake_release_ollama():
-        calls.append("ollama")
-        orchestrator._active_ollama_model = None
-
     monkeypatch.setattr(orchestrator._runner, "cancel_and_unload", fake_cancel_and_unload)
-    monkeypatch.setattr(orchestrator, "_release_ollama_model", fake_release_ollama)
     monkeypatch.setattr(
         "seiso.memory.protection.release_cached_memory",
         lambda sync=False: calls.append(f"cache:{sync}"),
@@ -37,14 +30,13 @@ async def test_release_all_inference_memory_unloads_local_and_ollama(monkeypatch
     )
     monkeypatch.setattr(
         "forge.services.hardware.build_vram_status",
-        lambda _o: {"local": {"active_model": None}, "ollama_model": None, "headroom_mb": 8192},
+        lambda _o: {"local": {"active_model": None}, "headroom_mb": 8192},
     )
 
     result = await orchestrator.release_all_inference_memory("user-1")
 
-    assert calls == ["local", "ollama", "cache:True", "invalidate"]
+    assert calls == ["local", "cache:True", "invalidate"]
     assert result["headroom_mb"] == 8192
-    assert orchestrator.active_ollama_model is None
 
 
 @pytest.mark.asyncio
@@ -56,13 +48,13 @@ async def test_cancel_and_unload_for_user_delegates_to_release(monkeypatch, tmp_
 
     async def fake_release(user_id):
         seen.append(user_id)
-        return {"local": {"active_model": None}, "ollama_model": None}
+        return {"local": {"active_model": None}}
 
     monkeypatch.setattr(orchestrator, "release_all_inference_memory", fake_release)
 
     out = await orchestrator.cancel_and_unload_for_user("u1")
     assert seen == ["u1"]
-    assert out["ollama_model"] is None
+    assert out["local"]["active_model"] is None
 
 
 @pytest.mark.asyncio
@@ -76,7 +68,6 @@ async def test_release_all_inference_memory_refreshes_headroom(monkeypatch, tmp_
         return {"active_model": None}
 
     monkeypatch.setattr(orchestrator._runner, "cancel_and_unload", noop_unload)
-    monkeypatch.setattr(orchestrator, "_release_ollama_model", noop_unload)
     monkeypatch.setattr("seiso.memory.protection.release_cached_memory", lambda sync=False: None)
 
     def fake_hw(force_refresh=False):
@@ -89,7 +80,7 @@ async def test_release_all_inference_memory_refreshes_headroom(monkeypatch, tmp_
     )
     monkeypatch.setattr(
         "forge.services.hardware.build_vram_status",
-        lambda _o: {"headroom_mb": 16384, "local": {"active_model": None}, "ollama_model": None},
+        lambda _o: {"headroom_mb": 16384, "local": {"active_model": None}},
     )
 
     result = await orchestrator.release_all_inference_memory(None)
@@ -102,7 +93,6 @@ def test_build_vram_status_shape(monkeypatch, tmp_path):
     from forge.services.hardware import build_vram_status
 
     orchestrator = InferenceOrchestrator(tmp_path)
-    orchestrator._active_ollama_model = "mistral"
     monkeypatch.setattr(
         "forge.services.hardware.hardware_profile",
         lambda force_refresh=False: {"ram_gb": 16, "gpus": [], "backend": "metal"},
@@ -128,7 +118,6 @@ def test_build_vram_status_shape(monkeypatch, tmp_path):
 
     status = build_vram_status(orchestrator)
 
-    assert status["ollama_model"] == "mistral"
     assert status["local"]["active_model"] == "model-a"
     assert status["headroom_mb"] == 10240
     assert status["memory_label"] == "RAM"

@@ -1,4 +1,4 @@
-"""External LLM provider CRUD — local Ollama and vLLM only."""
+"""External LLM provider CRUD — local vLLM only."""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ _REMOVED_FRONTIER_TYPES = frozenset({"openai", "anthropic"})
 
 class ProviderCreate(BaseModel):
     name: str = Field(min_length=1, max_length=64)
-    provider_type: str = Field(description="ollama | vllm")
+    provider_type: str = Field(description="vllm")
     config: dict[str, Any] = Field(default_factory=dict)
 
 

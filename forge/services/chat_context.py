@@ -91,14 +91,12 @@ def context_status_for_history(
     n_ctx: int | None = None,
     model_id: str | None = None,
     model_path: str | None = None,
-    ollama_model: str | None = None,
     tools_enabled: bool = False,
     knowledge_context: str | None = None,
 ) -> dict[str, Any]:
     model_key = resolve_model_key(
         model_id=model_id,
         model_path=model_path,
-        ollama_model=ollama_model,
     )
     return compute_chat_context_status(
         _history_from_records(history),

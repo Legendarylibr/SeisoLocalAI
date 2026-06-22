@@ -8,7 +8,7 @@ type Provider = { id: string; name: string; provider_type: string; config: Recor
 export function IntegrationsPage() {
   const [providers, setProviders] = useState<Provider[]>([]);
   const [pName, setPName] = useState("");
-  const [pType, setPType] = useState("ollama");
+  const [pType, setPType] = useState("vllm");
   const [pKey, setPKey] = useState("");
   const [pBaseUrl, setPBaseUrl] = useState("");
   const [pModel, setPModel] = useState("");
@@ -24,9 +24,7 @@ export function IntegrationsPage() {
   const addProvider = async () => {
     const config: Record<string, unknown> = {
       api_key: pKey,
-      model:
-        pModel ||
-        (pType === "ollama" ? "llama3.2" : "default"),
+      model: pModel || "default",
     };
     if (pBaseUrl.trim()) config.base_url = pBaseUrl.trim();
     await api.createProvider({
@@ -45,7 +43,7 @@ export function IntegrationsPage() {
     <div>
       <PageHeader
         title="Integrations"
-        subtitle="Local inference backends — Ollama and vLLM."
+        subtitle="Local inference backends — vLLM."
         group="Platform"
       />
 
@@ -56,18 +54,17 @@ export function IntegrationsPage() {
           </span>
           <div className="card-head-text">
             <h3>Local backends</h3>
-            <p>Connect Ollama or a local vLLM server. Optional API keys are encrypted at rest.</p>
+            <p>Connect a local vLLM server. Optional API keys are encrypted at rest.</p>
           </div>
         </div>
         <div className="grid" style={{ marginBottom: "1rem" }}>
           <div>
             <label>Name</label>
-            <input value={pName} onChange={(e) => setPName(e.target.value)} placeholder="My Ollama" />
+            <input value={pName} onChange={(e) => setPName(e.target.value)} placeholder="My vLLM server" />
           </div>
           <div>
             <label>Type</label>
             <select value={pType} onChange={(e) => setPType(e.target.value)}>
-              <option value="ollama">Ollama</option>
               <option value="vllm">vLLM</option>
             </select>
           </div>
@@ -86,7 +83,7 @@ export function IntegrationsPage() {
             <input
               value={pBaseUrl}
               onChange={(e) => setPBaseUrl(e.target.value)}
-              placeholder={pType === "ollama" ? "http://127.0.0.1:11434" : "http://127.0.0.1:8000/v1"}
+              placeholder="http://127.0.0.1:8000/v1"
             />
           </div>
           <div>
@@ -94,11 +91,11 @@ export function IntegrationsPage() {
             <input
               value={pModel}
               onChange={(e) => setPModel(e.target.value)}
-              placeholder={pType === "ollama" ? "llama3.2" : "default"}
+              placeholder="default"
             />
           </div>
         </div>
-        <button className="btn btn-primary" onClick={addProvider} disabled={!pName || (!pKey && pType !== "ollama" && pType !== "vllm")}>
+        <button className="btn btn-primary" onClick={addProvider} disabled={!pName || (!pKey && pType !== "vllm")}>
           Add provider
         </button>
         {providers.length === 0 ? (

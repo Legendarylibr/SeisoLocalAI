@@ -32,7 +32,6 @@ import {
 
 const BACKEND_LABELS: Record<string, string> = {
   llamacpp: "llama.cpp",
-  ollama: "Ollama",
   mlx: "MLX",
   torch: "PyTorch",
 };
@@ -161,7 +160,7 @@ export function ChatPage() {
   }, []);
 
   const showFreeMemory =
-    hasLoadedInferenceMemory(vramStatus) || Boolean(loadedModelId) || Boolean(vramStatus?.ollama_model);
+    hasLoadedInferenceMemory(vramStatus) || Boolean(loadedModelId);
 
   const filteredThreads = useMemo(() => {
     const q = threadSearch.toLowerCase();
@@ -509,7 +508,6 @@ export function ChatPage() {
             tools: useTools && toolsAvailable,
             knowledge_base_id: knowledgeBaseId || null,
             model_id: providerId ? null : selection || null,
-            ollama_model: selected?.ollama_model || null,
           });
           if (!cancelled) setContextStatus(status);
         } catch {
@@ -536,7 +534,6 @@ export function ChatPage() {
     providerId,
     useTools,
     toolsAvailable,
-    selected?.ollama_model,
   ]);
 
   const openThread = (t: ChatThread) => {
@@ -644,8 +641,6 @@ export function ChatPage() {
 
     const latestUserMessage = [{ role: "user", content }];
 
-    const isOllamaOnly = selected?.kind === "ollama";
-    const usingOllama = !providerId && effectiveBackend === "ollama";
     let assistantText = "";
     let progressText = "";
     streamTextRef.current = "";
@@ -702,8 +697,7 @@ export function ChatPage() {
           tools: useTools && toolsAvailable,
           allow_code_exec: allowCodeExec && codeExecAvailable,
           provider_id: providerId || null,
-          model_id: providerId || (usingOllama && isOllamaOnly) ? null : selection || null,
-          ollama_model: usingOllama || isOllamaOnly ? selected?.ollama_model : null,
+          model_id: providerId ? null : selection || null,
           inference_backend: providerId ? "auto" : effectiveBackend,
           max_tokens: maxTokens,
           ...(contextWindow !== "auto" ? { n_ctx: contextWindow } : {}),

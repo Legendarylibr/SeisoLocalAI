@@ -110,7 +110,6 @@ ok "data disk free: $(free_gb "$data_dir") GB at $data_dir"
 ok "HF cache disk free: $(free_gb "$hf_cache_dir") GB at $hf_cache_dir"
 info "catalog GGUF downloads are usually 2-8 GB each; larger models can be 10-30+ GB."
 info "Hugging Face GGUFs download to Seiso's cache/inventory and load with llama.cpp."
-info "Ollama uses its own model store; use 'ollama pull' or 'ollama create' for Ollama models."
 
 if [[ -x "$root/.venv/bin/python" ]]; then
   ok "virtualenv: $root/.venv"

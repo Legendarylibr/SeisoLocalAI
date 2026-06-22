@@ -55,13 +55,13 @@ def _cpu_brand() -> str:
 
         brand = cpuinfo.get_cpu_info().get("brand_raw", "")
         if brand:
-            return _sanitize_label(brand)
+            return sanitize_hardware_label(brand)
     except ImportError:
         pass
     proc = platform.processor() or platform.machine()
     if platform.system() == "Darwin" and platform.machine() in ("arm64", "aarch64"):
         return "Apple Silicon"
-    return _sanitize_label(proc)
+    return sanitize_hardware_label(proc)
 
 
 def _cpu_cores() -> int:

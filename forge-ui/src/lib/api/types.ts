@@ -101,7 +101,7 @@ export type HfHubStatus = {
 
 export type InferenceModelOption = {
   id: string;
-  kind: "local" | "ollama";
+  kind: "local";
   name: string;
   source: string;
   source_label: string;
@@ -109,7 +109,6 @@ export type InferenceModelOption = {
   default_backend: string;
   backends: string[];
   backend_labels: Record<string, string>;
-  ollama_model: string | null;
   size_bytes: number;
   hardware_fit?: "ideal" | "good" | "tight" | "unlikely";
   hardware_fit_label?: string;
@@ -175,7 +174,6 @@ export type VramStatus = {
     path?: string | null;
     backend?: string | null;
   };
-  ollama_model: string | null;
   active_model: string | null;
   headroom_mb: number;
   memory_label: string;

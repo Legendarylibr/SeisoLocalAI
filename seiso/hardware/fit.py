@@ -111,9 +111,6 @@ def assess_inference_option_fit(option: dict[str, Any], profile: dict[str, Any])
         guessed = guess_params_from_name(name)
         if guessed:
             est_gb = estimate_chat_vram_gb(f"{guessed}B")
-        elif option.get("kind") == "ollama":
-            guessed = guess_params_from_name(name.split(":")[0])
-            est_gb = estimate_chat_vram_gb(f"{guessed or 7}B") if guessed else 5.0
         else:
             est_gb = 6.0
     return assess_hardware_fit(est_gb, profile)

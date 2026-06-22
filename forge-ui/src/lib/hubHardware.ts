@@ -21,16 +21,12 @@ export function hubRamTierHint(hw: HardwareSummary | null, vram: VramStatus | nu
 
 export function formatLoadedModelLabel(vram: VramStatus | null): string {
   if (!vram) return "Nothing loaded";
-  const name = vram.active_model || vram.local?.active_model || vram.ollama_model;
+  const name = vram.active_model || vram.local?.active_model;
   if (!name) return "Nothing loaded";
-  if (vram.ollama_model && vram.local?.active_model) {
-    return `${vram.local.active_model} + Ollama (${vram.ollama_model})`;
-  }
-  if (vram.ollama_model) return `Ollama: ${vram.ollama_model}`;
   return name;
 }
 
 export function hasLoadedInferenceMemory(vram: VramStatus | null): boolean {
   if (!vram) return false;
-  return Boolean(vram.active_model || vram.local?.active_model || vram.ollama_model);
+  return Boolean(vram.active_model || vram.local?.active_model);
 }

@@ -9,7 +9,7 @@ Terminate TLS in front of Seiso Forge so you can access it over **HTTPS** withou
 | Access Forge UI over HTTPS (remote or LAN) | Yes — recommended |
 | Secure session cookies over HTTPS | Yes — set `SEISO_SECURE_COOKIES=true` |
 | HTTP-only **public** LLM API as a provider | Yes — see [Provider proxy](#https-wrapper-for-http-llm-apis) |
-| Local Ollama / vLLM | No — use `http://127.0.0.1:11434` or `:8000` directly |
+| Local vLLM | No — use `http://127.0.0.1:8000` directly |
 | LAN/private IP LLM server | No — SSRF rules still block private ranges |
 
 ## 1. Configure Forge
@@ -106,7 +106,7 @@ Forge never needs direct TLS support. The proxy forwards:
 
 ## HTTPS wrapper for HTTP LLM APIs
 
-Seiso requires **HTTPS** for remote provider URLs (except local Ollama/vLLM on loopback). If you have an HTTP-only public API, put it behind HTTPS:
+Seiso requires **HTTPS** for remote provider URLs (except local vLLM on loopback). If you have an HTTP-only public API, put it behind HTTPS:
 
 ```bash
 # deploy/caddy/Caddyfile.provider-proxy
@@ -148,7 +148,7 @@ Set `SEISO_TRUST_PROXY=true` and ensure the proxy sends `X-Forwarded-For`.
 
 | Error | Fix |
 |-------|-----|
-| `base_url must use HTTPS` | Use HTTPS URL or local Ollama/vLLM on loopback |
+| `base_url must use HTTPS` | Use HTTPS URL or local vLLM on loopback |
 | `resolves to a blocked network range` | Reverse proxy cannot expose private IPs to Forge |
 
 See also [troubleshooting.md](../troubleshooting.md).

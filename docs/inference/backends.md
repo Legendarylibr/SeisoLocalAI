@@ -7,7 +7,6 @@ Seiso routes chat/inference by platform and model format.
 | **llama.cpp (GGUF)** | All | `.[llamacpp]` | Default on NVIDIA when GGUF on disk |
 | **MLX** | macOS Apple Silicon | `.[mlx]` | Fast local chat on M-series |
 | **PyTorch** | CUDA / MPS / CPU | `.[train]` | HF weights, 4-bit via bitsandbytes |
-| **Ollama** | All | External | CPU-only tier fallback |
 
 ## Detection
 
@@ -39,7 +38,7 @@ Training **never** uses MLX — `load_model(..., for_training=True)` forces PyTo
 
 ## Memory management
 
-- **Free memory** (Chat or Model Hub) unloads llama.cpp, MLX, PyTorch, and Ollama models from RAM/VRAM. Disk cache under `{SEISO_DATA_DIR}/hf_cache/` is unchanged.
+- **Free Memory** (Chat or Model Hub) unloads llama.cpp, MLX, and PyTorch models from RAM/VRAM. Disk cache under `{SEISO_DATA_DIR}/hf_cache/` is unchanged.
 - Seiso keeps **one inference model** loaded at a time in the local pool; switching models unloads the previous one.
 - **Headroom refresh:** after Free memory, hardware fit labels update immediately so the next model is not falsely blocked.
 - **API:** `GET /api/models/vram` · `POST /api/models/vram/unload` (alias: `POST /api/inference/cancel`)

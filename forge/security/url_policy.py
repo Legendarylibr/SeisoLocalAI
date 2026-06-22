@@ -18,7 +18,7 @@ _BLOCKED_HOSTS = frozenset(
 )
 
 _LOCAL_HTTP_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
-_LOCAL_DEFAULT_PORTS = {"ollama": {11434}, "vllm": {8000, 8001}}
+_LOCAL_DEFAULT_PORTS = {"vllm": {8000, 8001}}
 
 
 def _literal_ip(host: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address | None:
@@ -77,8 +77,6 @@ def validate_provider_base_url(url: str, *, provider_type: str = "vllm") -> str:
     raw = (url or "").strip()
     if not raw:
         ptype = provider_type.lower()
-        if ptype == "ollama":
-            return "http://127.0.0.1:11434"
         if ptype == "vllm":
             return "http://127.0.0.1:8000"
         raise SecurityError(f"Unsupported provider_type: {provider_type}")
@@ -98,19 +96,19 @@ def validate_provider_base_url(url: str, *, provider_type: str = "vllm") -> str:
 
     scheme = parsed.scheme.lower()
     ptype = provider_type.lower()
-    local_ok = ptype in ("ollama", "vllm") and _is_local_host(host)
+    local_ok = ptype == "vllm" and _is_local_host(host)
 
     literal = _literal_ip(host)
     if literal is not None and not local_ok and _is_blocked_ip(str(literal)):
         raise SecurityError("base_url host is not allowed")
 
     if scheme == "http" and not local_ok:
-        raise SecurityError("base_url must use HTTPS (http allowed only for local ollama/vllm)")
+        raise SecurityError("base_url must use HTTPS (http allowed only for local vllm)")
     if scheme not in ("http", "https"):
         raise SecurityError("base_url scheme must be http or https")
 
     if local_ok:
-        port = parsed.port or (11434 if ptype == "ollama" else 8000)
+        port = parsed.port or 8000
         allowed = _LOCAL_DEFAULT_PORTS.get(ptype, set())
         if port not in allowed:
             raise SecurityError(f"Local {ptype} base_url must use port {sorted(allowed)}")
@@ -144,7 +142,7 @@ def resolve_pinned_endpoint(raw_url: str, *, provider_type: str = "vllm") -> Pin
     scheme = parsed.scheme.lower()
     port = parsed.port or (443 if scheme == "https" else 80)
     ptype = provider_type.lower()
-    local_ok = ptype in ("ollama", "vllm") and _is_local_host(host)
+    local_ok = ptype == "vllm" and _is_local_host(host)
 
     if local_ok:
         return PinnedEndpoint(base_url=base, host=host, port=port, scheme=scheme, pinned_ip=None)

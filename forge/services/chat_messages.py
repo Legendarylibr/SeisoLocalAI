@@ -187,7 +187,6 @@ async def build_trusted_messages(
     user_id: str | None = None,
     model_id: str | None = None,
     model_path: str | None = None,
-    ollama_model: str | None = None,
     tools_enabled: bool = False,
     knowledge_context: str | None = None,
 ) -> tuple[list[dict[str, str]], str | None]:
@@ -216,7 +215,6 @@ async def build_trusted_messages(
     model_key = resolve_model_key(
         model_id=model_id,
         model_path=model_path,
-        ollama_model=ollama_model,
     )
     track_model = model_id or (model_key if model_key != "default" else None)
 

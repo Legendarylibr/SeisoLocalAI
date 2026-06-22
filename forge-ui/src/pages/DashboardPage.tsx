@@ -24,7 +24,7 @@ const GOALS = [
   { id: "chat", label: "Chat", path: "/chat", Icon: IconChat, desc: "Run models locally with encrypted session memory" },
   { id: "train", label: "Train/Finetune", path: "/train", Icon: IconTrain, desc: "Fine-tune with LoRA on your hardware" },
   { id: "compress", label: "Compress", path: "/compress", Icon: IconCompress, desc: "Quantize and shrink models" },
-  { id: "inference", label: "Local LLM Inference", path: "/chat", Icon: IconInference, desc: "Chat with local GGUF, Ollama, or MLX engines" },
+  { id: "inference", label: "Local LLM Inference", path: "/chat", Icon: IconInference, desc: "Chat with local GGUF or MLX engines" },
 ] as const;
 
 const RESEARCH_PIPELINES = [
@@ -132,7 +132,7 @@ export function DashboardPage() {
               <div className="hw-card-icon"><IconGpu size={18} /></div>
               <div className="hw-card-label">GPU</div>
               <div className="hw-card-value">CPU / unified</div>
-              <div className="hw-card-meta">Use small models or Ollama</div>
+              <div className="hw-card-meta">Use small models</div>
             </div>
           )}
         </div>

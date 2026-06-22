@@ -84,7 +84,7 @@ Before loading a larger model, use **Free memory** in Chat or Model Hub to unloa
 ## Step 4 — Chat with a local model
 
 1. Open **Chat** (`/chat`)
-2. Select a downloaded model or a GGUF/Ollama backend
+2. Select a downloaded model or a GGUF backend
 3. Send a message — responses stream in real time
 
 **Backend auto-selection:**
@@ -94,7 +94,7 @@ Before loading a larger model, use **Free memory** in Chat or Model Hub to unloa
 | macOS Apple Silicon | MLX (with `[mlx]` extra) |
 | NVIDIA GPU + GGUF on disk | llama.cpp |
 | NVIDIA GPU + safetensors | PyTorch 4-bit |
-| CPU only | GGUF or Ollama |
+| CPU only | GGUF |
 
 Details: [inference/backends.md](inference/backends.md).
 
@@ -189,7 +189,7 @@ GGUF export requires `llama.cpp` (set `LLAMA_CPP_DIR` or install system `convert
 | RL adaptive GGUF quantization | `/rl-quant` | [compression.md](compression.md) · `seiso rl-quant run` |
 | Local RAG corpus | `/knowledge` | [forge.md](forge.md) |
 | Visual recipe graphs | `/recipes` | [forge.md](forge.md) |
-| External providers (OpenAI, Ollama, vLLM) | `/integrations` | [forge.md](forge.md) |
+| External providers (OpenAI, vLLM) | `/integrations` | [forge.md](forge.md) |
 | Multi-GPU training | Training Studio checkbox | [training/multi-gpu.md](training/multi-gpu.md) |
 | Fused GPU kernels | Training config / Studio | [training/kernels.md](training/kernels.md) |
 | HTTPS / LAN access | `deploy/` + `.env` | [deployment/reverse-proxy.md](deployment/reverse-proxy.md) |

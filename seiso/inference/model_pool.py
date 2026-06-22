@@ -304,7 +304,7 @@ class ModelPool:
         return self.switch(model_path, BackendKind.TORCH, loader)
 
     def _load_torch_pair(self, model_path: str, *, load_in_4bit: bool = True) -> tuple[Any, Any]:
-        from seiso.inference.tuning import maybe_apply_fused_kernels, prepare_torch_model
+        from seiso.inference.tuning import apply_inference_kernels, prepare_torch_model
         from seiso.models.loader import LoadOptions, ModelKind, load_model
 
         model, tokenizer = load_model(
@@ -316,7 +316,7 @@ class ModelPool:
             )
         )
         prepare_torch_model(model)
-        maybe_apply_fused_kernels(model)
+        apply_inference_kernels(model)
         return model, tokenizer
 
     def get_torch_speculative(

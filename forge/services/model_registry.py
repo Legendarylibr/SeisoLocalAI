@@ -93,7 +93,7 @@ async def register_export_outputs(
             meta = {"job_id": job_id, "export_key": key}
             modelfile = path.parent / "Modelfile" if path.is_file() else path / "Modelfile"
             if modelfile.is_file():
-                meta["ollama_modelfile"] = str(modelfile)
+                meta["modelfile"] = str(modelfile)
             entry = await register_model_path(
                 db,
                 user_id=user_id,

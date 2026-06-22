@@ -200,7 +200,6 @@ This is a high-level roadmap/checklist. Not every stage below is implemented in 
 
 10. GGUF Multi-Quantization
     └── q2_k, q3_k_m, q4_k_m, q5_k_m, q8_0
-    └── Ollama Modelfile
 
 11. Flash Attention
     └── Memory-efficient attention
@@ -296,18 +295,12 @@ docker run --gpus all -p 8000:8000 codellama-compressed
 docker-compose -f ./output/export/docker-compose.yml up
 ```
 
-### llama.cpp / Ollama (GGUF)
+### llama.cpp (GGUF)
 ```bash
 # Convert to multiple GGUF quantizations
 bash ./output/export/convert_gguf.sh ./output/finetuned ./output/gguf "q4_k_m,q5_k_m,q8_0"
 
-# Use with Ollama
-cp ./output/export/Modelfile ./output/gguf/
-cd ./output/gguf
-ollama create codellama-compressed -f Modelfile
-ollama run codellama-compressed
-
-# Or use with llama.cpp directly
+# Use with llama.cpp directly
 ./llama.cpp/llama-cli -m ./output/gguf/model-q4_k_m.gguf -p "def fibonacci(n):" -n 100
 ```
 

@@ -105,18 +105,18 @@ def auto_select_kernel_profile(hidden_dim: int, batch_rows: int) -> int:
 
 
 def apply_cuda_speedopts(*, deterministic: bool) -> None:
-    """Enable TF32 / cuDNN autotune when reproducibility is not required."""
+    """Enable TF32 / cuDNN autotune when reproducibility is not required.
+
+    Shares the same CUDA tuning logic as inference (configure_torch_inference)
+    to avoid duplicated torch.backends mutations.
+    """
     if deterministic:
         return
     try:
-        import torch
+        from seiso.inference.tuning import configure_torch_inference
 
-        if not torch.cuda.is_available():
-            return
-        torch.backends.cuda.matmul.allow_tf32 = True
-        torch.backends.cudnn.allow_tf32 = True
-        torch.backends.cudnn.benchmark = True
-    except (ImportError, AttributeError):
+        configure_torch_inference()
+    except ImportError:
         pass
 
 

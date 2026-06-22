@@ -1,4 +1,4 @@
-"""GGUF export and Ollama Modelfile generation."""
+"""GGUF export and Modelfile generation."""
 
 from __future__ import annotations
 
@@ -120,7 +120,7 @@ def resolve_gguf_converter() -> list[list[str]]:
     return candidates
 
 
-def write_ollama_modelfile(
+def write_modelfile(
     dest_dir: Path,
     gguf_filename: str,
     *,
@@ -128,7 +128,7 @@ def write_ollama_modelfile(
     system_prompt: str = "",
     template: str | None = None,
 ) -> Path:
-    """Write Modelfile for `ollama create`."""
+    """Write a Modelfile for use with llama.cpp / Modelfile-aware tooling."""
     modelfile = dest_dir / "Modelfile"
     lines = [f"FROM ./{gguf_filename}"]
     if template:
@@ -193,7 +193,7 @@ def export_gguf_from_checkpoint(
     merged_dir: Path | None = None,
     on_log: Callable[[str], None] | None = None,
 ) -> dict[str, Path]:
-    """Merge LoRA checkpoint if needed, convert quantizations, write Ollama Modelfiles."""
+    """Merge LoRA checkpoint if needed, convert quantizations, write Modelfiles."""
     output_root.mkdir(parents=True, exist_ok=True)
     quants = normalize_gguf_quants(quantizations)
 
@@ -220,7 +220,7 @@ def export_gguf_from_checkpoint(
         )
 
     first = next(iter(quants), "q4_k_m")
-    log(f"Ollama: ollama create {checkpoint.name} -f {output_root / first / 'Modelfile'}")
+    log(f"Modelfile written: {output_root / first / 'Modelfile'}")
     return results
 
 
@@ -237,7 +237,7 @@ def _export_quants(
         quant_dir.mkdir(parents=True, exist_ok=True)
         gguf_path = quant_dir / f"model-{quant}.gguf"
         if convert_hf_dir_to_gguf(merged, gguf_path, quant, log):
-            write_ollama_modelfile(quant_dir, gguf_path.name, model_name=model_name)
+            write_modelfile(quant_dir, gguf_path.name, model_name=model_name)
             results[f"gguf_{quant}"] = gguf_path
     return results
 

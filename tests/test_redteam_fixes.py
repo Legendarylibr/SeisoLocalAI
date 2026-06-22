@@ -31,22 +31,6 @@ def test_provider_url_fails_on_unresolvable_host():
         )
 
 
-def test_provider_url_allows_local_ollama_default_port():
-    url = validate_provider_base_url("http://127.0.0.1:11434", provider_type="ollama")
-    assert url.startswith("http://127.0.0.1:11434")
-
-
-def test_provider_url_blocks_ollama_wrong_port():
-    with pytest.raises(SecurityError):
-        validate_provider_base_url("http://127.0.0.1:6379", provider_type="ollama")
-
-
-def test_resolve_pinned_endpoint_skips_pin_for_local_ollama():
-    endpoint = resolve_pinned_endpoint("http://127.0.0.1:11434", provider_type="ollama")
-    assert endpoint.pinned_ip is None
-    assert endpoint.host == "127.0.0.1"
-
-
 def test_resolve_pinned_endpoint_pins_remote_host(monkeypatch):
     monkeypatch.setattr(
         "forge.security.url_policy._resolve_host",

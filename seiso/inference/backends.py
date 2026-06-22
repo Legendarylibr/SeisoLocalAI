@@ -14,21 +14,18 @@ BackendName = str
 
 class InferenceBackend(StrEnum):
     LLAMACPP = "llamacpp"
-    OLLAMA = "ollama"
     MLX = "mlx"
     TORCH = "torch"
     AUTO = "auto"
 
 
 BACKEND_LLAMACPP = InferenceBackend.LLAMACPP
-BACKEND_OLLAMA = InferenceBackend.OLLAMA
 BACKEND_MLX = InferenceBackend.MLX
 BACKEND_TORCH = InferenceBackend.TORCH
 BACKEND_AUTO = InferenceBackend.AUTO
 
 BACKEND_LABELS: dict[str, str] = {
     "llamacpp": "llama.cpp",
-    "ollama": "Ollama",
     "mlx": "MLX",
     "torch": "PyTorch",
     "auto": "Auto",
@@ -194,37 +191,13 @@ def recommend_backend(*, model_path: str, model_format: str | None = None) -> Ba
     return BACKEND_TORCH
 
 
-def match_ollama_name(
-    *,
-    model_path: str,
-    model_name: str,
-    ollama_names: set[str],
-) -> str | None:
-    """Find an Ollama tag that likely corresponds to a local GGUF/checkpoint."""
-    stems = {Path(model_path).stem.lower(), model_name.lower()}
-    for tag in ollama_names:
-        base = tag.split(":")[0].lower()
-        for stem in stems:
-            if base == stem or base.startswith(stem) or stem in base:
-                return tag
-    return None
-
-
 def available_backends(
-    *, model_path: str, model_format: str | None, ollama_names: set[str]
+    *, model_path: str, model_format: str | None = None
 ) -> list[BackendName]:
     """Backends that can serve this inventory model."""
     if (model_format or "").lower() == "gguf" and not gguf_is_supported_by_llamacpp(model_path):
         return []
-    primary = recommend_backend(model_path=model_path, model_format=model_format)
-    options = [primary]
-    if primary == BACKEND_LLAMACPP and match_ollama_name(
-        model_path=model_path,
-        model_name=Path(model_path).stem,
-        ollama_names=ollama_names,
-    ):
-        options.append(BACKEND_OLLAMA)
-    return options
+    return [recommend_backend(model_path=model_path, model_format=model_format)]
 
 
 def resolve_local_backend(
@@ -237,7 +210,7 @@ def resolve_local_backend(
     choice = (requested or BACKEND_AUTO).lower()
     if choice == BACKEND_AUTO:
         return recommend_backend(model_path=model_path, model_format=model_format)
-    if choice in {BACKEND_LLAMACPP, BACKEND_OLLAMA, BACKEND_MLX, BACKEND_TORCH}:
+    if choice in {BACKEND_LLAMACPP, BACKEND_MLX, BACKEND_TORCH}:
         return choice
     raise ValueError(f"Unsupported inference backend: {requested}")
 

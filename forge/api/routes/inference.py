@@ -27,7 +27,7 @@ from forge.services.inference_models import (
 from forge.services.knowledge_context import format_knowledge_context, retrieve_knowledge_chunks
 from forge.services.llm_output import StreamingOutputSanitizer, sanitize_llm_output
 from forge.services.models import resolve_model_path
-from seiso.inference.backends import BACKEND_LLAMACPP, BACKEND_MLX, BACKEND_OLLAMA, BACKEND_TORCH
+from seiso.inference.backends import BACKEND_LLAMACPP, BACKEND_MLX, BACKEND_TORCH
 
 router = APIRouter(prefix="/inference", tags=["inference"])
 
@@ -46,9 +46,8 @@ class ChatRequest(BaseModel):
     draft_model_id: str | None = None
     draft_model_path: str | None = None
     num_speculative_tokens: int | None = Field(default=None, ge=1, le=32)
-    ollama_model: str | None = None
     inference_backend: str = Field(
-        default="auto", description="auto | llamacpp | ollama | mlx | torch"
+        default="auto", description="auto | llamacpp | mlx | torch"
     )
     messages: list[dict[str, str]] = Field(default_factory=list)
     max_tokens: int = Field(default=2048, ge=1, le=8192)
@@ -68,7 +67,7 @@ class ThreadCreate(BaseModel):
 class PreloadRequest(BaseModel):
     model_id: str
     inference_backend: str = Field(
-        default="auto", description="auto | llamacpp | ollama | mlx | torch"
+        default="auto", description="auto | llamacpp | mlx | torch"
     )
 
 
@@ -95,7 +94,7 @@ async def inference_models(
     db: Annotated[Database, Depends(get_db)],
     settings: Annotated[ForgeSettings, Depends(get_settings)],
 ) -> dict[str, Any]:
-    """Unified model dropdown: HF Hub inventory, CLI paths, fine-tune/export outputs, Ollama."""
+    """Unified model dropdown: HF Hub inventory, CLI paths, fine-tune/export outputs."""
     from forge.services.hardware import hardware_summary
 
     await sync_hf_cache_inventory(
@@ -108,7 +107,6 @@ async def inference_models(
     options = await list_inference_options(
         db,
         user_id,
-        ollama_base_url=settings.ollama_base_url,
         profile=profile,
     )
     return {
@@ -167,7 +165,6 @@ async def get_chat_context(
     tools: bool = False,
     knowledge_base_id: str | None = None,
     model_id: str | None = None,
-    ollama_model: str | None = None,
 ) -> dict[str, Any]:
     """Context window usage for the chat UI."""
     from forge.api.routes.knowledge import _validate_kb_id
@@ -201,7 +198,6 @@ async def get_chat_context(
         max_tokens=max_tokens,
         n_ctx=n_ctx,
         model_id=model_id,
-        ollama_model=ollama_model,
         tools_enabled=tools,
         knowledge_context=knowledge_context,
     )
@@ -243,12 +239,8 @@ async def preload_model(
     ctx = await _resolve_preload_context(
         db, user_id, settings, body.model_id, body.inference_backend
     )
-    if ctx.get("ollama_only"):
-        await _release_active_local_model(orchestrator._runner)
-        return ctx["response"]
 
     loop = asyncio.get_running_loop()
-    await orchestrator.release_ollama_model()
     await loop.run_in_executor(
         None, lambda: _warm_local_model(orchestrator._runner, ctx["payload"])
     )
@@ -267,67 +259,6 @@ async def preload_model_stream(
     ctx = await _resolve_preload_context(
         db, user_id, settings, body.model_id, body.inference_backend
     )
-    if ctx.get("ollama_only"):
-        ollama_model = ctx["response"].get("ollama_model") or ctx["response"].get("active_model")
-        size_bytes = int(ctx.get("size_bytes") or 0)
-        eta = estimate_load_eta_seconds(size_bytes) if size_bytes else 8
-        runner = orchestrator._runner
-        pool = runner._pool
-        loop = asyncio.get_running_loop()
-
-        async def ollama_gen():
-            from forge.providers.ollama import warm_model
-
-            switching_ollama = bool(
-                orchestrator.active_ollama_model
-                and orchestrator.active_ollama_model != ollama_model
-            )
-            if pool.active_key or switching_ollama:
-                yield {
-                    "event": "progress",
-                    "data": json.dumps(
-                        {
-                            "phase": "unloading",
-                            "label": "Releasing local model from VRAM before Ollama load",
-                            "percent": 5,
-                            "eta_seconds": 2,
-                        }
-                    ),
-                }
-            await orchestrator.prepare_ollama_model(ollama_model, settings.ollama_base_url)
-
-            yield {
-                "event": "progress",
-                "data": json.dumps(
-                    {
-                        "phase": "loading",
-                        "label": f"Loading {ollama_model} in Ollama",
-                        "percent": 20,
-                        "eta_seconds": eta,
-                        "model_name": ollama_model,
-                        "backend": BACKEND_OLLAMA,
-                        "size_bytes": size_bytes,
-                    }
-                ),
-            }
-            try:
-                await warm_model(ollama_model, settings.ollama_base_url)
-            except Exception as exc:
-                yield {"event": "error", "data": str(exc)}
-                return
-            yield {
-                "event": "complete",
-                "data": json.dumps(
-                    {
-                        **ctx["response"],
-                        "status": "loaded",
-                        "backend": BACKEND_OLLAMA,
-                        "model_name": ollama_model,
-                    }
-                ),
-            }
-
-        return EventSourceResponse(ollama_gen())
 
     runner = orchestrator._runner
     pool = runner._pool
@@ -337,19 +268,6 @@ async def preload_model_stream(
     loop = asyncio.get_running_loop()
 
     async def event_gen():
-        if orchestrator.active_ollama_model:
-            yield {
-                "event": "progress",
-                "data": json.dumps(
-                    {
-                        "phase": "unloading",
-                        "label": "Releasing Ollama model from VRAM",
-                        "percent": 5,
-                        "eta_seconds": 2,
-                    }
-                ),
-            }
-            await orchestrator.release_ollama_model()
 
         switching = _active_local_model_would_change(
             pool, target_path=target_path, backend=ctx["backend"]
@@ -428,7 +346,7 @@ async def _resolve_preload_context(
     inference_backend: str,
 ) -> dict[str, Any]:
     selected = await get_inference_option(
-        db, user_id, model_id, ollama_base_url=settings.ollama_base_url
+        db, user_id, model_id
     )
     if not selected:
         raise HTTPException(404, "Model not found in inventory")
@@ -440,42 +358,16 @@ async def _resolve_preload_context(
             or "Model exceeds available memory on this machine",
         )
 
-    if selected.get("kind") == "ollama":
-        response = {
-            "status": "ready",
-            "backend": BACKEND_OLLAMA,
-            "ollama_model": selected.get("ollama_model"),
-            "active_model": selected.get("ollama_model"),
-        }
-        return {
-            "ollama_only": True,
-            "response": response,
-            "size_bytes": int(selected.get("size_bytes") or 0),
-        }
-
     try:
         target = resolve_chat_target(
             selected,
             model_id=model_id,
-            ollama_model=None,
             inference_backend=inference_backend,
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
 
     backend = target.get("inference_backend", inference_backend)
-    if backend == BACKEND_OLLAMA:
-        response = {
-            "status": "ready",
-            "backend": BACKEND_OLLAMA,
-            "ollama_model": target.get("ollama_model"),
-            "active_model": target.get("ollama_model"),
-        }
-        return {
-            "ollama_only": True,
-            "response": response,
-            "size_bytes": int(selected.get("size_bytes") or 0),
-        }
 
     path = target.get("model_path")
     if not path:
@@ -603,7 +495,6 @@ async def chat(
         user_id=user_id,
         model_id=body.model_id,
         model_path=body.model_path,
-        ollama_model=body.ollama_model,
         tools_enabled=body.tools,
         knowledge_context=knowledge_context,
     )
@@ -646,10 +537,9 @@ async def chat(
                 )
             payload["model_path"] = path
             payload["inference_backend"] = body.inference_backend
-            payload["ollama_base_url"] = settings.ollama_base_url
         elif body.model_id:
             selected = await get_inference_option(
-                db, user_id, body.model_id, ollama_base_url=settings.ollama_base_url
+                db, user_id, body.model_id
             )
             if selected and selected.get("memory_load_blocked"):
                 raise HTTPException(
@@ -661,33 +551,26 @@ async def chat(
                 target = resolve_chat_target(
                     selected,
                     model_id=body.model_id,
-                    ollama_model=body.ollama_model,
                     inference_backend=body.inference_backend,
                 )
             except ValueError as exc:
                 raise HTTPException(400, str(exc)) from exc
 
             payload["inference_backend"] = target.get("inference_backend", body.inference_backend)
-            payload["ollama_model"] = target.get("ollama_model")
             payload["model_format"] = target.get("model_format")
-            payload["ollama_base_url"] = settings.ollama_base_url
 
-            if target.get("inference_backend") == BACKEND_OLLAMA:
-                if not payload.get("ollama_model"):
-                    raise HTTPException(400, "Select an Ollama model")
-            else:
-                path = target.get("model_path")
-                if not path and body.model_id:
-                    path = await resolve_model_path(
-                        db,
-                        user_id,
-                        model_id=body.model_id,
-                        model_path=body.model_path,
-                        data_dir=settings.data_dir,
-                    )
-                if not path:
-                    raise HTTPException(400, "Select a model from inventory or provide model_path")
-                payload["model_path"] = path
+            path = target.get("model_path")
+            if not path and body.model_id:
+                path = await resolve_model_path(
+                    db,
+                    user_id,
+                    model_id=body.model_id,
+                    model_path=body.model_path,
+                    data_dir=settings.data_dir,
+                )
+            if not path:
+                raise HTTPException(400, "Select a model from inventory or provide model_path")
+            payload["model_path"] = path
         else:
             raise HTTPException(400, "Select a model from inventory or provide model_path")
 
@@ -697,8 +580,6 @@ async def chat(
     if body.draft_model_id or body.draft_model_path:
         if body.provider_id:
             raise HTTPException(400, "Speculative decoding is not available for cloud providers")
-        if payload.get("inference_backend") == BACKEND_OLLAMA:
-            raise HTTPException(400, "Speculative decoding requires a local PyTorch target model")
         if body.draft_model_path:
             draft_path = await resolve_model_path(
                 db,
@@ -709,7 +590,7 @@ async def chat(
             )
         else:
             draft_selected = await get_inference_option(
-                db, user_id, body.draft_model_id, ollama_base_url=settings.ollama_base_url
+                db, user_id, body.draft_model_id
             )
             if not draft_selected:
                 raise HTTPException(404, "Draft model not found")

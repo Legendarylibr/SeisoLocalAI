@@ -38,7 +38,7 @@ Seiso config files accept `~/.seiso` and expand it correctly on all platforms. S
 | NVIDIA + Windows/WSL | QLoRA 4-bit | GGUF, PyTorch | CUDA / Triton |
 | AMD ROCm | 4-bit* | PyTorch | Triton |
 | Apple Silicon | 16-bit LoRA | MLX, PyTorch | — |
-| CPU only | Tiny models | GGUF, Ollama | — |
+| CPU only | Tiny models | GGUF | — |
 
 \* bitsandbytes on ROCm depends on your PyTorch wheel.
 
@@ -336,7 +336,6 @@ Model storage notes:
 
 - Catalog chat downloads fetch a GGUF file into Seiso's Hugging Face cache (`$SEISO_DATA_DIR/hf_cache` by default) and register a local inventory link for llama.cpp.
 - The Hub page shows the expected GGUF download size, usually 2-8 GB for small/medium Q4 models and 10-30+ GB for larger models.
-- Ollama keeps its own model store. Seiso lists and chats with models already available in Ollama, but Hugging Face catalog downloads are not automatically imported into Ollama. Use `ollama pull` or `ollama create` for that path.
 
 Walkthrough: [getting-started.md](getting-started.md)
 

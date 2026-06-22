@@ -6,7 +6,7 @@
 |---------|---------------|-----------|
 | Forge UI | ✓ | ✓ |
 | MLX chat inference | ✓ (with `[mlx]`) | — |
-| GGUF / Ollama chat | ✓ | ✓ |
+| GGUF chat | ✓ | ✓ |
 | QLoRA 4-bit training | ✗ (no bitsandbytes) | ✗ |
 | 16-bit LoRA training | ✓ (MPS, small models) | ✓ (CPU, tiny models) |
 | Fused GPU kernels | ✗ | ✗ |

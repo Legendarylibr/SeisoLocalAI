@@ -53,7 +53,6 @@ class ForgeSettings(BaseSettings):
     allow_tools: bool = False
     allow_code_exec: bool = False
     inference_api_key: str = ""
-    ollama_base_url: str = "http://127.0.0.1:11434"
     db_ephemeral: bool | None = None
     db_encryption_key: str = ""
 

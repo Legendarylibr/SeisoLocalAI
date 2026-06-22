@@ -83,9 +83,8 @@ def resolve_model_key(
     *,
     model_id: str | None = None,
     model_path: str | None = None,
-    ollama_model: str | None = None,
 ) -> str:
-    for candidate in (model_id, ollama_model, model_path):
+    for candidate in (model_id, model_path):
         if candidate:
             return str(candidate)
     return "default"

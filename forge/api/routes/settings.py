@@ -82,7 +82,6 @@ async def get_app_settings(
     inference_backends: list[str] = []
     if runtime.llamacpp:
         inference_backends.append("llamacpp")
-    inference_backends.append("ollama")
     if runtime.mlx:
         inference_backends.append("mlx")
     if runtime.torch:

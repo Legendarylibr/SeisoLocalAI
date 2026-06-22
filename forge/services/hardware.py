@@ -222,7 +222,6 @@ def build_vram_status(orchestrator: Any) -> dict[str, Any]:
     local = orchestrator._runner._pool.status()
     return {
         "local": local,
-        "ollama_model": orchestrator.active_ollama_model,
         "headroom_mb": headroom,
         "memory_label": memory_headroom_label(profile),
         "ram_gb": profile.get("ram_gb"),
@@ -230,7 +229,7 @@ def build_vram_status(orchestrator: Any) -> dict[str, Any]:
         "tier": tier.value,
         "memory_profile": memory_profile_label(profile),
         "recommended_max_chat": largest_fitting_catalog_repo(profile, task="chat"),
-        "active_model": local.get("active_model") or orchestrator.active_ollama_model,
+        "active_model": local.get("active_model"),
     }
 
 

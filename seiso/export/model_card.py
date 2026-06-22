@@ -132,8 +132,8 @@ def render_readme(meta: HubModelMetadata, *, extra: dict[str, Any] | None = None
         f'model = AutoModelForCausalLM.from_pretrained("{meta.repo_id}")\n'
         f'tokenizer = AutoTokenizer.from_pretrained("{meta.repo_id}")\n'
         "```\n\n"
-        "### llama.cpp / Ollama\n\n"
-        "Use the GGUF artifacts in this repo with llama.cpp or the included Modelfile with Ollama.\n"
+        "### llama.cpp\n\n"
+        "Use the GGUF artifacts in this repo with llama.cpp or the included Modelfile.\n"
     )
     return readme
 
