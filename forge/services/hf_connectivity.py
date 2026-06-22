@@ -48,6 +48,7 @@ class InferenceRuntimeStatus:
     mlx: bool = False
     torch: bool = False
     huggingface_hub: bool = False
+    llamacpp_error: str | None = None
     install_hints: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -56,6 +57,7 @@ class InferenceRuntimeStatus:
             "mlx": self.mlx,
             "torch": self.torch,
             "huggingface_hub": self.huggingface_hub,
+            "llamacpp_error": self.llamacpp_error,
             "install_hints": self.install_hints,
         }
 
@@ -68,25 +70,44 @@ def _dep_status(module: str) -> bool:
         return False
 
 
+def _llamacpp_status() -> tuple[bool, str | None]:
+    from forge.services.llamacpp_runtime import llamacpp_import_ok
+
+    return llamacpp_import_ok()
+
+
 @lru_cache(maxsize=1)
 def check_inference_runtime() -> InferenceRuntimeStatus:
     """Report which local inference stacks are importable."""
+    llamacpp_ok, llamacpp_error = _llamacpp_status()
     status = InferenceRuntimeStatus(
-        llamacpp=_dep_status("llama_cpp"),
+        llamacpp=llamacpp_ok,
         mlx=_dep_status("mlx_lm"),
         torch=_dep_status("torch"),
         huggingface_hub=_dep_status("huggingface_hub"),
+        llamacpp_error=llamacpp_error,
     )
     hints: list[str] = []
     if not status.huggingface_hub:
         hints.append('pip install -e ".[forge]"  # includes huggingface-hub')
     if not status.llamacpp:
+        hint = 'pip install "llama-cpp-python>=0.3"  # or: pip install -e ".[llamacpp]"'
+        try:
+            from seiso.security.nvidia_boundary import nvidia_smi_visible
+
+            if nvidia_smi_visible():
+                hint = (
+                    'pip install -U "llama-cpp-python>=0.3" '
+                    "--extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu124"
+                )
+        except ImportError:
+            pass
         if platform.system() == "Linux":
-            hints.append(
-                'pip install -e ".[llamacpp]"  # GGUF chat via llama.cpp (included in start on Linux)'
-            )
+            hints.append(f"{hint} — required for GGUF chat (re-run start to auto-install)")
         else:
-            hints.append('pip install -e ".[llamacpp]"  # GGUF chat via llama.cpp')
+            hints.append(f"{hint}  # GGUF chat via llama.cpp")
+        if status.llamacpp_error:
+            hints.append(f"Import error: {status.llamacpp_error}")
     if not status.mlx and not status.torch:
         hints.append('pip install -e ".[mlx]" or ".[train]"  # safetensors inference')
     status.install_hints = hints
@@ -217,6 +238,7 @@ def build_hf_status(
             "mlx": runtime.mlx,
             "torch": runtime.torch,
             "huggingface_hub": runtime.huggingface_hub,
+            "llamacpp_error": runtime.llamacpp_error,
             "install_hints": runtime.install_hints,
         },
         "ready_for_download": ready_for_download,

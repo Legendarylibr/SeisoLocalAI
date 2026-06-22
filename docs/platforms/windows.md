@@ -28,7 +28,7 @@ cd "$env:USERPROFILE\Seiso"
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -U pip wheel setuptools
-pip install -e ".[forge,train,dev]"
+pip install -e ".[forge,train,llamacpp,dev]"
 if (-not (Test-Path .env)) { Copy-Item .env.example .env }
 cd forge-ui; npm ci; npm run build; cd ..
 seiso doctor
@@ -36,6 +36,14 @@ seiso forge
 ```
 
 Install PyTorch with CUDA from [pytorch.org](https://pytorch.org/get-started/locally/) if the default wheel is CPU-only.
+
+The `[llamacpp]` extra installs `llama-cpp-python` for **local GGUF chat** in Forge. Without it, Chat shows "GGUF not available".
+
+On **NVIDIA GPUs**, install a CUDA-enabled wheel so GGUF chat can offload to the GPU (Seiso auto-selects this during `start` / Forge repair when `nvidia-smi` works):
+
+```powershell
+pip install -U "llama-cpp-python>=0.3" --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu124
+```
 
 Triton from `[cuda]` is **Linux-only** in pyproject. Flash Attention is optional (`[flash-attn]`). On Windows, fused kernels use **native CUDA JIT** when `nvcc` is available.
 

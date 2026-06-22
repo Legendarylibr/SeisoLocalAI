@@ -4,18 +4,15 @@ from __future__ import annotations
 
 import os
 import platform
-import re
 import shutil
 import subprocess
 import time
 from typing import Any
 
+from seiso.hardware.gpus import sanitize_hardware_label
 from seiso.hardware.tiers import TIER_LABELS, classify_tier, effective_budget_mb, vram_headroom_mb
 from seiso.hardware.training import preferred_inference_backend, training_defaults
 from seiso.models.loader import detect_backend
-
-_SERIAL_RE = re.compile(r"\b(serial|s/n|uuid)[:\s#-]*[\w-]+", re.I)
-_HOST_RE = re.compile(r"@[\w.-]+")
 
 _PROFILE_TTL_S = 30.0
 _METRICS_TTL_S = 1.5
@@ -26,13 +23,15 @@ _metrics_cache_ts: float = 0.0
 _cpu_percent_primed = False
 
 
+def _disk_usage_root() -> str:
+    """Filesystem root used for free-space reporting (OS-appropriate)."""
+    if platform.system().lower() == "windows":
+        return os.environ.get("SystemDrive", "C:") + "\\"
+    return "/"
+
+
 def _sanitize_label(raw: str, *, max_len: int = 64) -> str:
-    text = _SERIAL_RE.sub("", raw)
-    text = _HOST_RE.sub("", text)
-    text = " ".join(text.split())
-    if len(text) > max_len:
-        text = text[: max_len - 1] + "…"
-    return text or "Unknown"
+    return sanitize_hardware_label(raw, max_len=max_len)
 
 
 def _ram_gb() -> float:
@@ -67,62 +66,6 @@ def _cpu_brand() -> str:
 
 def _cpu_cores() -> int:
     return __import__("os").cpu_count() or 1
-
-
-def _torch_gpus() -> list[dict[str, Any]]:
-    gpus: list[dict[str, Any]] = []
-    try:
-        import torch
-
-        if not torch.cuda.is_available():
-            return gpus
-        for i in range(torch.cuda.device_count()):
-            props = torch.cuda.get_device_properties(i)
-            name = _sanitize_label(props.name)
-            total_mb = int(props.total_memory / (1024**2))
-            used_mb: int | None = None
-            try:
-                free, total = torch.cuda.mem_get_info(i)
-                used_mb = int((total - free) / (1024**2))
-            except Exception:
-                pass
-            gpus.append(
-                {
-                    "index": i,
-                    "name": name,
-                    "vram_total_mb": total_mb,
-                    "vram_used_mb": used_mb,
-                    "utilization_pct": None,
-                    "temperature_c": None,
-                }
-            )
-    except ImportError:
-        pass
-    return gpus
-
-
-def _nvidia_smi_gpus() -> list[dict[str, Any]]:
-    """Enumerate GPUs via nvidia-smi when PyTorch CUDA is unavailable (e.g. CPU-only wheel)."""
-    from seiso.security.nvidia_boundary import query_nvidia_gpus
-
-    gpus: list[dict[str, Any]] = []
-    for item in query_nvidia_gpus():
-        name = item.get("name")
-        if not isinstance(name, str) or not name.strip():
-            continue
-        total_raw = item.get("memory_total_mb")
-        total_mb = int(total_raw) if isinstance(total_raw, (int, float)) and total_raw > 0 else None
-        gpus.append(
-            {
-                "index": int(item.get("index", len(gpus))),
-                "name": _sanitize_label(name),
-                "vram_total_mb": total_mb,
-                "vram_used_mb": None,
-                "utilization_pct": None,
-                "temperature_c": None,
-            }
-        )
-    return gpus
 
 
 def _nvidia_smi_metrics() -> dict[int, dict[str, float]]:
@@ -162,32 +105,10 @@ def _nvidia_smi_metrics() -> dict[int, dict[str, float]]:
     return out
 
 
-def _mlx_apple_gpu() -> list[dict[str, Any]]:
-    if os.environ.get("SEISO_SKIP_MLX_PROBE", "").strip().lower() in {"1", "true", "yes"}:
-        return []
-    try:
-        import mlx.core as mx  # noqa: F401
-
-        return [
-            {
-                "index": 0,
-                "name": "Apple GPU (MLX)",
-                "vram_total_mb": None,
-                "vram_used_mb": None,
-                "utilization_pct": None,
-                "temperature_c": None,
-            }
-        ]
-    except ImportError:
-        return []
-
-
 def detect_gpus() -> list[dict[str, Any]]:
-    gpus = _torch_gpus()
-    if not gpus:
-        gpus = _nvidia_smi_gpus()
-    if not gpus:
-        gpus = _mlx_apple_gpu()
+    from seiso.hardware.gpus import enumerate_gpus
+
+    gpus = [dict(gpu) for gpu in enumerate_gpus()]
     smi = _nvidia_smi_metrics()
     for gpu in gpus:
         idx = gpu.get("index", 0)
@@ -273,7 +194,7 @@ def hardware_profile(*, force_refresh: bool = False) -> dict[str, Any]:
     backend = detect_backend()
     gpus = detect_gpus()
     ram = _ram_gb()
-    disk_free = shutil.disk_usage("/").free // (1024**3)
+    disk_free = shutil.disk_usage(_disk_usage_root()).free // (1024**3)
 
     cuda_runtime = False
     try:

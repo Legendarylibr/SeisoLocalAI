@@ -18,7 +18,7 @@ class GpuLayout:
     device_count: int = 1
 
 
-def detect_gpus() -> GpuLayout:
+def detect_training_layout() -> GpuLayout:
     """Detect GPUs and distributed rank from torchrun/accelerate env vars."""
     try:
         import torch
@@ -40,6 +40,10 @@ def detect_gpus() -> GpuLayout:
         use_ddp=use_ddp,
         device_count=device_count,
     )
+
+
+# Backward-compatible alias — returns DDP layout, not hardware enumeration.
+detect_gpus = detect_training_layout
 
 
 def configure_training_args(base_args: dict, layout: GpuLayout, multi_gpu: bool) -> dict:

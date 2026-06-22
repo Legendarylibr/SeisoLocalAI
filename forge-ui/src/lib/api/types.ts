@@ -92,6 +92,7 @@ export type HfHubStatus = {
     torch: boolean;
     huggingface_hub: boolean;
     install_hints: string[];
+    llamacpp_error?: string | null;
   };
   ready_for_download: boolean;
   ready_for_gguf_chat: boolean;
@@ -116,6 +117,7 @@ export type InferenceModelOption = {
   est_vram_mb?: number;
   memory_load_blocked?: boolean;
   memory_load_blocked_reason?: string | null;
+  install_hints?: string[];
   metadata?: Record<string, unknown>;
 };
 

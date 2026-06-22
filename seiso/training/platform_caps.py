@@ -142,7 +142,10 @@ def _install_extra(
             "  # NVIDIA GPU detected — install CUDA-enabled PyTorch if missing"
         )
     if nvidia_hw and system == "Windows":
-        return 'pip install -e ".[forge,train]"  # + CUDA toolkit for fused kernels'
+        return (
+            'pip install -e ".[forge,train,llamacpp]"'
+            "  # NVIDIA GPU — use CUDA llama-cpp-python wheel for GGUF GPU chat"
+        )
     if rocm:
         return 'pip install -e ".[forge,train]" && pip install triton  # ROCm PyTorch wheel first'
     if system == "Darwin" and mlx:

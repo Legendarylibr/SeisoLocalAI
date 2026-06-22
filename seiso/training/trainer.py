@@ -34,7 +34,7 @@ from seiso.training.datasets import (
     load_training_dataset,
     prepare_tokenized_dataset,
 )
-from seiso.training.multi_gpu import configure_training_args, detect_gpus
+from seiso.training.multi_gpu import configure_training_args, detect_training_layout
 from seiso.training.sft import build_sft_trainer
 
 logger = logging.getLogger(__name__)
@@ -59,7 +59,7 @@ class SeisoTrainer:
             cfg.output_dir / "train_config_snapshot.json",
             cfg.model_dump(mode="json"),
         )
-        layout = detect_gpus()
+        layout = detect_training_layout()
         multi_gpu = bool(cfg.multi_gpu or cfg.extra.get("multi_gpu", False)) and layout.use_ddp
         use_triton = cfg.use_triton
         use_fused_ce = cfg.use_fused_ce

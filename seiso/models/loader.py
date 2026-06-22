@@ -59,7 +59,7 @@ def detect_backend() -> Backend:
     except ImportError:
         pass
 
-    if platform.system().lower() == "linux":
+    if platform.system().lower() in {"linux", "windows"}:
         try:
             from seiso.security.nvidia_boundary import nvidia_smi_visible
 

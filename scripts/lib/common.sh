@@ -139,7 +139,7 @@ seiso_detect_platform_extras() {
   os="$(uname -s)"
   case "$os" in
     Darwin)
-      echo "forge,train,llamacpp,dev"
+      echo "forge,train,llamacpp,mlx,dev"
       ;;
     Linux)
       if seiso_nvidia_gpu_detected; then
@@ -344,19 +344,14 @@ seiso_llamacpp_import_ok() {
 
 seiso_ensure_llamacpp() {
   local root="$1"
-  seiso_llamacpp_import_ok "$root" && return 0
-  seiso_log "Installing llama.cpp for GGUF chat..."
-  # shellcheck disable=SC1091
-  source "$root/.venv/bin/activate"
-  pip install -e "${root}[llamacpp]" || pip install 'llama-cpp-python>=0.3' || {
-    seiso_warn "GGUF chat requires llama-cpp-python. Run: pip install -e \"${root}[llamacpp]\""
-    return 1
-  }
-  seiso_llamacpp_import_ok "$root" || {
-    seiso_warn "llama-cpp-python installed but failed to import — see ${root}/.seiso-install.log"
-    return 1
-  }
-  return 0
+  [[ -x "$root/.venv/bin/python" ]] || return 1
+  seiso_log "Ensuring llama.cpp (GGUF chat) runtime..."
+  if "$root/.venv/bin/python" -m seiso.inference.llamacpp_install --quiet; then
+    return 0
+  fi
+  seiso_warn "GGUF chat requires llama-cpp-python with GPU support when NVIDIA is present."
+  seiso_warn "Try: pip install -U \"llama-cpp-python>=0.3\" --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu124"
+  return 1
 }
 
 seiso_run_install_worker() {
@@ -406,10 +401,10 @@ seiso_python_modules_available() {
   while IFS= read -r module; do
     [[ -n "$module" ]] || continue
     "$root/.venv/bin/python" - "$module" <<'PY' >/dev/null 2>&1 || return 1
-import importlib.util
+import importlib
 import sys
 
-raise SystemExit(0 if importlib.util.find_spec(sys.argv[1]) else 1)
+importlib.import_module(sys.argv[1])
 PY
   done < <(seiso_required_python_modules "$extras")
   return 0
@@ -423,6 +418,10 @@ seiso_ensure_installed() {
 
   if [[ "$extras" == *cuda* ]]; then
     seiso_log "NVIDIA GPU detected — installing with CUDA extras"
+  fi
+
+  if [[ -x "$root/.venv/bin/python" && "$extras" == *llamacpp* ]]; then
+    seiso_ensure_llamacpp "$root" || true
   fi
 
   if [[ -x "$root/.venv/bin/seiso" && -f "$root/forge-ui/dist/index.html" ]] \

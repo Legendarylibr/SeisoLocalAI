@@ -593,9 +593,12 @@ export function ChatPage() {
       return;
     }
     if (!providerId && selection && !effectiveBackend) {
+      const installHint = selected?.install_hints?.[0];
       setError(
         selected?.format === "gguf"
-          ? "This GGUF is not available for local chat. Install or update llama.cpp, or choose a supported GGUF."
+          ? installHint
+            ? `GGUF chat needs llama.cpp. Run: ${installHint}`
+            : 'GGUF chat needs llama-cpp-python. Run: pip install "llama-cpp-python>=0.3" or re-run start.'
           : "No installed local inference engine can load this model.",
       );
       return;
@@ -776,7 +779,9 @@ export function ChatPage() {
     const engine = m.default_backend
       ? m.backend_labels[m.default_backend] || m.default_backend
       : m.format === "gguf"
-        ? "missing llama.cpp"
+        ? m.install_hints?.length
+          ? "llama.cpp missing"
+          : "missing llama.cpp"
         : "missing local runtime";
     const fit = m.hardware_fit_label ? ` · ${m.hardware_fit_label}` : "";
     return `${m.name} · ${engine}${fit}`;
