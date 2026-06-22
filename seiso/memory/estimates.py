@@ -60,6 +60,38 @@ def estimate_chat_vram_gb(
     return round(params_b * _quant_bytes_per_param_b(quant) + 1.2, 2)
 
 
+def estimate_safetensors_download_bytes(
+    params: str,
+    *,
+    tags: tuple[str, ...] | list[str] = (),
+    repo_id: str = "",
+) -> int:
+    """Estimate on-disk safetensors size from parameter count (bf16-ish)."""
+    params_b = _active_params_b(params, tags, repo_id)
+    gb = params_b * 2.0 + 0.5
+    gb = min(max(gb, 0.2), 10_000.0)
+    return int(gb * 1024**3)
+
+
+def estimate_training_vram_gb(
+    params: str,
+    *,
+    quant: str = "4bit",
+    tags: tuple[str, ...] | list[str] = (),
+    repo_id: str = "",
+) -> float:
+    """Rough QLoRA/LoRA training VRAM for fit labels."""
+    params_b = _active_params_b(params, tags, repo_id)
+    quant_u = quant.lower()
+    if quant_u in {"16bit", "none", "fp16", "bf16"}:
+        base = params_b * 2.0
+    elif quant_u == "8bit":
+        base = params_b * 1.1
+    else:
+        base = params_b * 0.55
+    return round(base * 2.2 + 1.5, 2)
+
+
 def estimate_gguf_download_bytes(
     params: str,
     *,

@@ -22,7 +22,7 @@ from seiso.inference.backends import (
 @pytest.fixture(autouse=True)
 def _reset_inference_caches():
     from forge.services import inference_models
-    from forge.services.*** import check_inference_runtime
+    from forge.services.hf_connectivity import InferenceRuntimeStatus, check_inference_runtime
 
     inference_models.invalidate_inference_options_cache()
     check_inference_runtime.cache_clear()
@@ -83,6 +83,15 @@ def test_available_backends_rejects_unsupported_dflash_draft(tmp_path: Path):
     _write_minimal_gguf(gguf, "dflash-draft")
 
     assert available_backends(model_path=str(gguf), model_format="gguf") == []
+
+
+def test_recommend_backend_detects_extensionless_hf_blob(tmp_path: Path):
+    blob = tmp_path / "hf_cache" / "models--org--Model-GGUF" / "blobs" / "abc123"
+    blob.parent.mkdir(parents=True)
+    _write_minimal_gguf(blob, "llama")
+
+    assert recommend_backend(model_path=str(blob)) == BACKEND_LLAMACPP
+    assert resolve_gguf_file(str(blob)) == blob.absolute()
 
 
 def test_resolve_gguf_file_picks_largest(tmp_path: Path):
@@ -195,7 +204,7 @@ async def test_list_inference_options_filters_to_installed_backends(monkeypatch,
     from forge.db.crypto import generate_encryption_key
     from forge.db.store import Database
     from forge.services import inference_models
-    from forge.services.*** import InferenceRuntimeStatus
+    from forge.services.hf_connectivity import InferenceRuntimeStatus
 
     model_path = tmp_path / "model-q4.gguf"
     model_path.write_bytes(b"gguf")
@@ -234,7 +243,7 @@ async def test_list_inference_options_does_not_fallback_to_missing_backend(monke
     from forge.db.crypto import generate_encryption_key
     from forge.db.store import Database
     from forge.services import inference_models
-    from forge.services.*** import InferenceRuntimeStatus
+    from forge.services.hf_connectivity import InferenceRuntimeStatus
 
     model_path = tmp_path / "model-q4.gguf"
     model_path.write_bytes(b"gguf")
@@ -272,7 +281,7 @@ async def test_list_inference_options_skips_partial_hf_gguf(monkeypatch, tmp_pat
     from forge.db.crypto import generate_encryption_key
     from forge.db.store import Database
     from forge.services import inference_models
-    from forge.services.*** import InferenceRuntimeStatus
+    from forge.services.hf_connectivity import InferenceRuntimeStatus
 
     model_path = tmp_path / "model-Q4_K_M.gguf"
     model_path.write_bytes(b"partial")
@@ -313,7 +322,7 @@ async def test_list_inference_options_skips_hf_gguf_without_metadata(monkeypatch
     from forge.db.crypto import generate_encryption_key
     from forge.db.store import Database
     from forge.services import inference_models
-    from forge.services.*** import InferenceRuntimeStatus
+    from forge.services.hf_connectivity import InferenceRuntimeStatus
 
     model_path = tmp_path / "model-Q4_K_M.gguf"
     _write_minimal_gguf(model_path, "llama")

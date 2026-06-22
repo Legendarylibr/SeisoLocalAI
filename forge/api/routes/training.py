@@ -21,9 +21,12 @@ from forge.orchestrators.training import TrainingOrchestrator
 from forge.security.audit import audit_event
 from forge.security.auth import get_current_user_id
 from forge.services.hf_hub import search_huggingface_datasets
+from forge.services.hardware import hardware_profile
 from forge.services.jobs import assert_job_owner
 from forge.services.models import list_trainable_models, resolve_training_model_id
-from forge.services.user_paths import assert_user_training_config
+from forge.services.user_paths import assert_user_training_config, resolve_training_dataset_path
+from seiso.models.trainable_snapshot import is_gguf_only_repo_id
+from seiso.training.recommendations import recommend_training_config
 from seiso.models.hf_env import configure_hf_hub_cache
 from seiso.security import SecurityError
 
@@ -82,6 +85,16 @@ async def list_training_models(
     return {"models": models, "total": len(models)}
 
 
+@router.get("/recommendations")
+async def training_recommendations(
+    user_id: Annotated[str, Depends(get_current_user_id)],
+    model_id: str = Query("", description="Base model repo id or local path"),
+    dataset: str = Query("", description="Dataset hub id or local path"),
+) -> dict:
+    profile = hardware_profile()
+    return recommend_training_config(profile, model_id=model_id, dataset=dataset)
+
+
 @router.get("/jobs")
 async def list_jobs(
     user_id: Annotated[str, Depends(get_current_user_id)],
@@ -98,21 +111,35 @@ async def start_training(
     orchestrator: Annotated[TrainingOrchestrator, Depends(get_training_orchestrator)],
     settings: Annotated[ForgeSettings, Depends(get_settings)],
 ) -> TrainingJobResponse:
+    training_config = dict(body.config)
+    dataset = training_config.get("dataset")
+    if isinstance(dataset, str):
+        training_config["dataset"] = resolve_training_dataset_path(
+            settings.data_dir,
+            user_id,
+            dataset,
+            install_root=Path(__file__).resolve().parents[3],
+        )
+
     try:
-        assert_user_training_config(settings.data_dir, user_id, body.config)
+        assert_user_training_config(settings.data_dir, user_id, training_config)
     except SecurityError as exc:
         raise_forbidden(exc)
 
     configure_hf_hub_cache(settings.data_dir)
     inventory = await db.list_models(user_id)
+    original_model_id = str(training_config.get("model_id", ""))
+    if original_model_id and is_gguf_only_repo_id(original_model_id):
+        from seiso.models.trainable_snapshot import GGUF_ONLY_REPO_MESSAGE
+
+        raise HTTPException(400, GGUF_ONLY_REPO_MESSAGE)
     resolved_model_id, local_path = resolve_training_model_id(
-        str(body.config.get("model_id", "")),
+        original_model_id,
         data_dir=settings.data_dir,
         user_id=user_id,
         inventory=inventory,
     )
-    original_model_id = str(body.config.get("model_id", ""))
-    training_config = {**body.config, "model_id": resolved_model_id}
+    training_config = {**training_config, "model_id": resolved_model_id}
     training_config.setdefault("extra", {})
     if local_path or resolved_model_id != original_model_id:
         training_config["extra"]["resolved_model_path"] = local_path or resolved_model_id

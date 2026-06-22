@@ -339,7 +339,7 @@ seiso_open_forge_when_ready() {
 seiso_llamacpp_import_ok() {
   local root="$1"
   [[ -x "$root/.venv/bin/python" ]] || return 1
-  "$root/.venv/bin/python" -c "import llama_cpp" >/dev/null 2>&1
+  "$root/.venv/bin/python" -c "from seiso.platform import ensure_cuda_library_path; ensure_cuda_library_path(); import llama_cpp" >/dev/null 2>&1
 }
 
 seiso_ensure_llamacpp() {

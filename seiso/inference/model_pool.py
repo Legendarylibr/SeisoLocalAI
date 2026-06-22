@@ -291,6 +291,15 @@ def llama_load_kwargs(n_ctx: int, *, model_path: str | None = None) -> dict[str,
     return clamp_llama_load_kwargs(kwargs)
 
 
+def _llama_load_retryable(exc: ValueError) -> bool:
+    """True when llama.cpp init failed due to VRAM pressure and a smaller offload may work."""
+    msg = str(exc)
+    return (
+        "Failed to load model from file" in msg
+        or "Failed to create llama_context" in msg
+    )
+
+
 def _load_llama_model(path: str, n_ctx: int) -> Any:
     """Load a GGUF with VRAM-aware layer offload and clear OOM errors."""
     from llama_cpp import Llama
@@ -342,7 +351,7 @@ def _load_llama_model(path: str, n_ctx: int) -> Any:
             attach_llama_prompt_cache(llm)
             return llm
         except ValueError as exc:
-            if "Failed to load model from file" not in str(exc):
+            if not _llama_load_retryable(exc):
                 raise
             last_exc = exc
             release_cached_memory(sync=True)

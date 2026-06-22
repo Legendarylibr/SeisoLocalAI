@@ -7,7 +7,12 @@ from pathlib import Path
 import pytest
 
 from forge.config import ForgeSettings
-from forge.services.user_paths import assert_llama_cpp_binary, assert_user_path, user_dir
+from forge.services.user_paths import (
+    assert_llama_cpp_binary,
+    assert_user_path,
+    resolve_training_dataset_path,
+    user_dir,
+)
 from seiso.models.hf_env import resolve_hf_cache_dir
 from seiso.security import SecurityError
 
@@ -93,6 +98,23 @@ def test_assert_user_path_rejects_cross_user_symlink(tmp_path: Path):
 
     with pytest.raises(SecurityError, match="Path must be under"):
         assert_user_path(tmp_path, user_id, link)
+
+
+def test_resolve_training_dataset_path_seeds_sample_jsonl(tmp_path: Path):
+    install_root = tmp_path / "install"
+    (install_root / "data").mkdir(parents=True)
+    (install_root / "data" / "sample.jsonl").write_text('{"messages":[]}\n', encoding="utf-8")
+    user_id = "user-1"
+
+    resolved = resolve_training_dataset_path(
+        tmp_path,
+        user_id,
+        "./data/sample.jsonl",
+        install_root=install_root,
+    )
+    expected = tmp_path / "uploads" / user_id / "sample.jsonl"
+    assert Path(resolved) == expected
+    assert expected.read_text(encoding="utf-8") == '{"messages":[]}\n'
 
 
 def test_assert_llama_cpp_binary_allows_venv_path(tmp_path: Path):

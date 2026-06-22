@@ -12,6 +12,26 @@ from forge.services import model_download
 from forge.services.hf_cache_inventory import sync_hf_cache_inventory
 
 
+def test_download_training_snapshot_rejects_gguf_only_repo(monkeypatch, tmp_path):
+    snapshot = tmp_path / "hf_cache" / "models--unsloth--gemma" / "snapshots" / "rev"
+    snapshot.mkdir(parents=True)
+    (snapshot / "config.json").write_text("{}")
+
+    monkeypatch.setattr(
+        "huggingface_hub.snapshot_download",
+        lambda **_kwargs: str(snapshot),
+    )
+
+    from forge.services.hf_hub import download_training_snapshot
+
+    with pytest.raises(ValueError, match="GGUF-only"):
+        download_training_snapshot(
+            "unsloth/gemma-4-E4B-it-GGUF",
+            cache_dir=tmp_path / "hf_cache",
+            token=None,
+        )
+
+
 def test_disk_space_guard_allows_unknown_size(tmp_path):
     model_download._assert_disk_space_for_download(tmp_path, 0)
 

@@ -28,6 +28,7 @@ def test_resolve_training_model_from_inventory(tmp_path: Path):
     model_dir = tmp_path / "models" / user_id / "Llama--3.2-1B"
     model_dir.mkdir(parents=True)
     (model_dir / "config.json").write_text("{}")
+    (model_dir / "model.safetensors").write_bytes(b"weights")
 
     inventory = [
         {
@@ -49,6 +50,32 @@ def test_resolve_training_model_from_inventory(tmp_path: Path):
     assert local == resolved
 
 
+def test_resolve_training_model_skips_gguf_only_cache_marked_safetensors(tmp_path: Path):
+    user_id = "user-1"
+    bogus = tmp_path / "models" / user_id / "unsloth--gemma-4-E4B-it-GGUF"
+    bogus.mkdir(parents=True)
+    (bogus / "config.json").write_text("{}")
+
+    inventory = [
+        {
+            "id": "bad",
+            "name": "gemma-4-E4B-it-GGUF",
+            "path": str(bogus),
+            "source": "hf:unsloth/gemma-4-E4B-it-GGUF",
+            "format": "safetensors",
+            "metadata_json": '{"repo_id": "unsloth/gemma-4-E4B-it-GGUF"}',
+        }
+    ]
+    resolved, local = resolve_training_model_id(
+        "unsloth/gemma-4-E4B-it-GGUF",
+        data_dir=tmp_path,
+        user_id=user_id,
+        inventory=inventory,
+    )
+    assert resolved == "unsloth/gemma-4-E4B-it-GGUF"
+    assert local is None
+
+
 def test_resolve_training_model_hf_fallback(tmp_path: Path):
     resolved, local = resolve_training_model_id(
         "meta-llama/Llama-3.2-1B-Instruct",
@@ -65,6 +92,7 @@ def test_list_trainable_models_skips_gguf(tmp_path: Path):
     st_dir = tmp_path / "models" / user_id / "trainable"
     st_dir.mkdir(parents=True)
     (st_dir / "config.json").write_text("{}")
+    (st_dir / "model.safetensors").write_bytes(b"weights")
     gguf = tmp_path / "models" / user_id / "chat.gguf"
     gguf.write_text("fake")
 

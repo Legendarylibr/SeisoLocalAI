@@ -18,6 +18,7 @@ from forge.orchestrators.inference import InferenceOrchestrator
 from forge.security.openai_auth import get_openai_user_id
 from forge.services.llm_output import StreamingOutputSanitizer, sanitize_llm_output
 from forge.services.models import resolve_model_path
+from forge.services.user_paths import is_local_filesystem_path
 
 router = APIRouter(tags=["openai"])
 
@@ -75,15 +76,25 @@ def _sanitize_openai_content(content: str, *, tools_enabled: bool) -> str:
     return sanitize_llm_output(content, strip_tool_calls=not tools_enabled)
 
 
-def _resolve_payload(body: ChatCompletionRequest, model_path: str | None) -> dict[str, Any]:
+def _resolve_payload(
+    body: ChatCompletionRequest,
+    model_path: str | None,
+    *,
+    model_format: str | None = None,
+) -> dict[str, Any]:
     messages = _normalize_openai_messages(body)
-    return {
+    payload = {
         "model_path": model_path,
         "messages": messages,
         "max_tokens": body.max_tokens or 512,
         "temperature": body.temperature,
         "tools": bool(body.tools),
     }
+    if model_format:
+        payload["model_format"] = model_format
+        if model_format.lower() == "gguf":
+            payload["inference_backend"] = "llamacpp"
+    return payload
 
 
 async def _resolve_openai_model_path(
@@ -91,22 +102,51 @@ async def _resolve_openai_model_path(
     user_id: str,
     db: Database,
     settings: ForgeSettings,
-) -> str:
-    if body.model in ("default", "seiso"):
-        models = await db.list_models(user_id)
-        for row in models:
-            path = await resolve_model_path(
-                db, user_id, model_id=row["id"], model_path=None, data_dir=settings.data_dir
+) -> tuple[str, str | None]:
+    models = await db.list_models(user_id)
+
+    async def _path_for(model_id: str | None, model_path: str | None) -> str | None:
+        return await resolve_model_path(
+            db,
+            user_id,
+            model_id=model_id,
+            model_path=model_path,
+            data_dir=settings.data_dir,
+        )
+
+    def _format_for(model_id: str | None, model_path: str | None) -> str | None:
+        if model_id:
+            match = next(
+                (m for m in models if m["id"] == model_id or m["name"] == model_id),
+                None,
             )
+            if match:
+                return match.get("format")
+        if model_path:
+            match = next((m for m in models if m.get("path") == model_path), None)
+            if match:
+                return match.get("format")
+        return None
+
+    if body.model in ("default", "seiso"):
+        chat_first = sorted(
+            models,
+            key=lambda row: 0 if (row.get("format") or "").lower() == "gguf" else 1,
+        )
+        for row in chat_first:
+            path = await _path_for(row["id"], None)
             if path:
-                return path
+                return path, row.get("format")
         raise HTTPException(400, "No local model available — download from Hub")
 
-    path = await resolve_model_path(
-        db, user_id, model_id=body.model, model_path=None, data_dir=settings.data_dir
-    )
+    if is_local_filesystem_path(body.model):
+        path = await _path_for(None, body.model)
+        if path:
+            return path, _format_for(None, body.model)
+
+    path = await _path_for(body.model, None)
     if path:
-        return path
+        return path, _format_for(body.model, None)
     raise HTTPException(400, "No local model available — download from Hub")
 
 
@@ -142,8 +182,8 @@ async def chat_completions(
     if body.tools and not settings.allow_openai_tools:
         raise HTTPException(403, "Tool calling is disabled on the OpenAI-compatible API")
 
-    path = await _resolve_openai_model_path(body, user_id, db, settings)
-    payload = _resolve_payload(body, path)
+    path, model_format = await _resolve_openai_model_path(body, user_id, db, settings)
+    payload = _resolve_payload(body, path, model_format=model_format)
     payload["user_id"] = user_id
     completion_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
     created = int(time.time())

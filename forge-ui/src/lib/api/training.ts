@@ -1,6 +1,6 @@
 import { request } from "./client";
 import { cachedGet } from "./getCache";
-import type { CatalogDataset, TrainableModel, TrainingJob, TrainingMetricsPayload } from "./types";
+import type { CatalogDataset, TrainableModel, TrainingJob, TrainingMetricsPayload, TrainingRecommendations } from "./types";
 
 export const trainingApi = {
   startTraining: (
@@ -24,4 +24,10 @@ export const trainingApi = {
     return request<{ datasets: CatalogDataset[]; total: number }>(`/training/datasets?${params}`);
   },
   getTrainingMetrics: (jobId: string) => request<TrainingMetricsPayload>(`/training/jobs/${jobId}/metrics`),
+  getTrainingRecommendations: (modelId: string, dataset: string) => {
+    const params = new URLSearchParams();
+    if (modelId) params.set("model_id", modelId);
+    if (dataset) params.set("dataset", dataset);
+    return request<TrainingRecommendations>(`/training/recommendations?${params}`);
+  },
 };

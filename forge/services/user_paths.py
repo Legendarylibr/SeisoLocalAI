@@ -50,6 +50,36 @@ def assert_user_config_file(sandbox_root: Path, user_id: str, config_file: str) 
         )
 
 
+def resolve_training_dataset_path(
+    sandbox_root: Path, user_id: str, dataset: str, *, install_root: Path | None = None
+) -> str:
+    """Map CLI-style relative dataset paths into the user's uploads sandbox."""
+    if not dataset or not is_local_filesystem_path(dataset):
+        return dataset
+
+    path = Path(dataset).expanduser()
+    if path.is_absolute():
+        return dataset
+
+    uploads = user_dir(sandbox_root, user_id, "uploads")
+    uploads.mkdir(parents=True, exist_ok=True)
+    user_copy = uploads / path.name
+    if user_copy.exists():
+        return str(user_copy)
+
+    if path.name == "sample.jsonl":
+        candidates: list[Path] = []
+        if install_root is not None:
+            candidates.append(install_root / "data" / path.name)
+        candidates.append(Path.cwd() / "data" / path.name)
+        for bundled in candidates:
+            if bundled.is_file():
+                user_copy.write_bytes(bundled.read_bytes())
+                return str(user_copy)
+
+    return dataset
+
+
 def assert_user_training_config(sandbox_root: Path, user_id: str, config: dict) -> None:
     """Validate local dataset and checkpoint paths are scoped to the requesting user."""
     dataset = config.get("dataset")

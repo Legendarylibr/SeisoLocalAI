@@ -233,6 +233,13 @@ class SeisoTrainer:
         load_4bit = cfg.quant == QuantMode.INT4
         load_8bit = cfg.quant == QuantMode.INT8
         model_ref = self._resolve_load_model_id()
+        from seiso.models.trainable_snapshot import (
+            GGUF_ONLY_REPO_MESSAGE,
+            snapshot_has_trainable_weights,
+        )
+
+        if Path(model_ref).exists() and not snapshot_has_trainable_weights(Path(model_ref)):
+            raise ValueError(GGUF_ONLY_REPO_MESSAGE)
         ensure_load_fits(model_ref, mode="train")
 
         self._loaded = SeisoModel.from_pretrained(

@@ -27,7 +27,7 @@ from forge.services.hf_hub import _format_hub_download_error, dir_size
 from forge.services.model_download import perform_model_download
 from forge.services.publishable import is_pushable_model
 from forge.services.user_paths import assert_user_path
-from seiso.models.catalog import HubSearchError, get_families, search_catalog
+from seiso.models.catalog import HubSearchError, get_families, search_catalog, search_trainable_catalog
 from seiso.security import SecurityError, sanitize_filename
 
 router = APIRouter(prefix="/models", tags=["models"])
@@ -62,6 +62,7 @@ async def model_catalog(
     q: str = Query("", description="Search Hugging Face Hub"),
     family: str | None = Query(None),
     task: str | None = Query(None),
+    purpose: str = Query("chat", description="chat | train — train excludes GGUF-only repos"),
     hardware_aware: bool = Query(True, description="Rank and annotate by local hardware fit"),
     fits_only: bool = Query(False, description="Show only ideal/good fits for this machine"),
     limit: int = Query(50, ge=1, le=100),
@@ -73,8 +74,9 @@ async def model_catalog(
         encryption_key=settings.hf_token_encryption_key,
         settings_token=settings.hf_token or None,
     )
+    search_fn = search_trainable_catalog if purpose.strip().lower() == "train" else search_catalog
     try:
-        result = search_catalog(
+        result = search_fn(
             q,
             family,
             task,
@@ -89,12 +91,22 @@ async def model_catalog(
     models = result.models
     profile = hardware_profile()
     if hardware_aware:
-        models = enrich_catalog_models(
-            models,
-            profile,
-            token=hf_token,
-            diversify=False,
-        )
+        if purpose.strip().lower() == "train":
+            from forge.services.hardware import enrich_trainable_catalog_models
+
+            models = enrich_trainable_catalog_models(
+                models,
+                profile,
+                token=hf_token,
+                diversify=False,
+            )
+        else:
+            models = enrich_catalog_models(
+                models,
+                profile,
+                token=hf_token,
+                diversify=False,
+            )
     if fits_only:
         models = [m for m in models if m.get("hardware_fit") in ("ideal", "good")]
     return {

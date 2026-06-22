@@ -254,6 +254,14 @@ def test_llama_load_kwargs_nvidia_smi_without_cuda_torch(monkeypatch):
     assert kwargs["n_gpu_layers"] == -1
 
 
+def test_llama_load_retryable_detects_context_and_file_errors():
+    import seiso.inference.model_pool as mp
+
+    assert mp._llama_load_retryable(ValueError("Failed to create llama_context"))
+    assert mp._llama_load_retryable(ValueError("Failed to load model from file: x.gguf"))
+    assert not mp._llama_load_retryable(ValueError("invalid n_ctx"))
+
+
 def test_llama_layer_attempts_try_full_gpu_first(monkeypatch, tmp_path):
     import seiso.inference.model_pool as mp
 

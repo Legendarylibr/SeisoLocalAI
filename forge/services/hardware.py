@@ -30,7 +30,7 @@ from seiso.hardware import (
 from seiso.hardware.fit import format_catalog_note
 from seiso.hardware.profile import enrich_profile_base
 from seiso.inference.backends import BACKEND_LABELS
-from seiso.memory.estimates import estimate_chat_vram_gb, estimate_gguf_download_bytes
+from seiso.memory.estimates import estimate_chat_vram_gb, estimate_gguf_download_bytes, estimate_safetensors_download_bytes, estimate_training_vram_gb
 
 _RECOMMENDED_REPO_TTL_SEC = 300.0
 _recommended_repo_cache: dict[tuple, tuple[float, str | None]] = {}
@@ -40,10 +40,11 @@ def enrich_profile(profile: dict[str, Any]) -> dict[str, Any]:
     """Add tier, training defaults, catalog recommendations, and backend labels."""
     enriched = enrich_profile_base(profile)
     recommended_chat = recommended_catalog_repo(enriched, task="chat")
+    recommended_train = recommended_trainable_repo(enriched)
     return {
         **enriched,
         "recommended_chat_repo": recommended_chat,
-        "recommended_train_repo": recommended_chat,
+        "recommended_train_repo": recommended_train or recommended_chat,
         "inference_backend_labels": dict(BACKEND_LABELS),
     }
 
@@ -173,6 +174,62 @@ def enrich_catalog_models(
     return enriched
 
 
+def enrich_trainable_catalog_models(
+    models: list[dict[str, Any]],
+    profile: dict[str, Any],
+    *,
+    token: str | None = None,
+    fetch_sizes: bool = True,
+    diversify: bool = False,
+) -> list[dict[str, Any]]:
+    """Annotate safetensors training candidates with download + VRAM fit."""
+    from seiso.models.catalog import diversify_by_family
+
+    headroom_gb = round(vram_headroom_mb(profile) / 1024, 1)
+    tier = classify_tier(profile)
+    enriched: list[dict[str, Any]] = []
+    for m in models:
+        download_bytes = estimate_safetensors_download_bytes(
+            m["params"],
+            tags=m.get("tags", ()),
+            repo_id=m.get("repo_id", ""),
+        )
+        est_gb = estimate_training_vram_gb(
+            m["params"],
+            quant="4bit",
+            tags=m.get("tags", ()),
+            repo_id=m.get("repo_id", ""),
+        )
+        fit = assess_hardware_fit(est_gb, profile, mode="train")
+        row = {
+            **m,
+            **fit,
+            "download_bytes": download_bytes,
+            "download_bytes_estimated": True,
+            "download_available": True,
+            "trainable": True,
+            "hardware_note": format_catalog_note(
+                est_vram_gb=est_gb,
+                download_bytes=download_bytes,
+                headroom_gb=headroom_gb,
+                fit=fit["hardware_fit"],
+                tier=tier,
+            ),
+        }
+        enriched.append(row)
+
+    enriched.sort(
+        key=lambda m: (
+            -(m.get("priority") or 0),
+            -m.get("hardware_fit_rank", 0),
+            m.get("name", ""),
+        )
+    )
+    if diversify:
+        enriched = diversify_by_family(enriched)
+    return enriched
+
+
 def recommended_catalog_repo(profile: dict[str, Any], *, task: str = "chat") -> str | None:
     from seiso.models.catalog import HubSearchError, search_catalog
 
@@ -201,6 +258,42 @@ def recommended_catalog_repo(profile: dict[str, Any], *, task: str = "chat") -> 
             if m.get("task") != "embedding":
                 result = m["repo_id"]
                 break
+
+    _recommended_repo_cache[cache_key] = (now, result)
+    return result
+
+
+def recommended_trainable_repo(profile: dict[str, Any]) -> str | None:
+    from seiso.models.catalog import HubSearchError, search_trainable_catalog
+    from seiso.training.recommendations import _FALLBACK_TRAIN_REPO
+
+    tier = classify_tier(profile)
+    budget = effective_budget_mb(profile)
+    cache_key = (tier.value, budget, "train")
+    now = time.monotonic()
+    cached = _recommended_repo_cache.get(cache_key)
+    if cached and now - cached[0] < _RECOMMENDED_REPO_TTL_SEC:
+        return cached[1]
+
+    try:
+        models = search_trainable_catalog(task="chat").models
+    except HubSearchError:
+        _recommended_repo_cache[cache_key] = (now, _FALLBACK_TRAIN_REPO)
+        return _FALLBACK_TRAIN_REPO
+
+    models = enrich_trainable_catalog_models(models, profile, fetch_sizes=False, diversify=True)
+    result: str | None = None
+    for m in models:
+        if m.get("hardware_fit") in ("ideal", "good") and m.get("task") != "embedding":
+            result = m["repo_id"]
+            break
+    if result is None:
+        for m in models:
+            if m.get("task") != "embedding":
+                result = m["repo_id"]
+                break
+    if result is None:
+        result = _FALLBACK_TRAIN_REPO
 
     _recommended_repo_cache[cache_key] = (now, result)
     return result

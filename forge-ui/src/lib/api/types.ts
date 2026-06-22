@@ -286,6 +286,34 @@ export type TrainingJob = {
   created_at: string;
 };
 
+export type TrainingRecommendations = {
+  config: {
+    method: string;
+    quant: string;
+    batch_size: number;
+    gradient_accumulation_steps: number;
+    max_seq_length: number;
+    learning_rate: number;
+    epochs: number;
+    lora_r: number;
+    lora_alpha: number;
+    gradient_checkpointing: boolean;
+    use_triton: boolean;
+    use_fused_ce: boolean;
+    train_on_responses_only: boolean;
+    use_rslora: boolean;
+    packing: boolean;
+    dataset_format: string;
+  };
+  warnings: string[];
+  notes: string[];
+  trainable: boolean;
+  model_params?: string | null;
+  est_training_vram_gb?: number | null;
+  fallback_train_repo?: string;
+  hardware_tier?: string;
+};
+
 export type TrainableModel = {
   id: string;
   name: string;

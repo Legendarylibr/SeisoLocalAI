@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { api, subscribeSSE, SystemMetrics, TrainingJob, TrainingMetricPoint } from "@/lib/api";
+import { api, subscribeSSE, SystemMetrics, TrainingJob, TrainingMetricPoint, TrainingRecommendations } from "@/lib/api";
 import { invalidateApiCache } from "@/lib/api/getCache";
 import { appendBoundedLog } from "@/lib/api/sse";
 import { initialDownloadProgress, ModelProgressState } from "@/lib/modelProgress";
 import { ensureTrainHubModel, isTrainModelCached } from "@/lib/trainModel";
+import { GGUF_TRAIN_ERROR, isGgufOnlyRepoId } from "@/lib/trainRepo";
 import { useTrainingModels } from "@/context/TrainingModelsContext";
 import { readStoredModel, writeStoredModel } from "@/lib/modelSelection";
 import { HfBaseModelPicker } from "@/components/HfBaseModelPicker";
@@ -68,6 +69,9 @@ export function TrainPage() {
   const [loadProgress, setLoadProgress] = useState<ModelProgressState | null>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const [hwApplied, setHwApplied] = useState(false);
+  const [recommendations, setRecommendations] = useState<TrainingRecommendations | null>(null);
+  const [recLoading, setRecLoading] = useState(false);
+  const [configCustomized, setConfigCustomized] = useState(false);
   const downloadGenRef = useRef(0);
   const sseAbortRef = useRef<(() => void) | null>(null);
 
@@ -96,6 +100,11 @@ export function TrainPage() {
 
   useEffect(() => {
     if (!pendingModel || !pendingDownload) return;
+    if (isGgufOnlyRepoId(pendingModel)) {
+      setDownloadError(GGUF_TRAIN_ERROR);
+      setSearchParams({ model: pendingModel }, { replace: true });
+      return;
+    }
 
     const downloadGen = ++downloadGenRef.current;
     let cancelled = false;
@@ -158,6 +167,55 @@ export function TrainPage() {
   }, [method]);
 
   useEffect(() => {
+    if (!modelId && !dataset) {
+      setRecommendations(null);
+      return;
+    }
+    let cancelled = false;
+    setRecLoading(true);
+    api
+      .getTrainingRecommendations(modelId, dataset)
+      .then((rec) => {
+        if (!cancelled) setRecommendations(rec);
+      })
+      .catch(() => {
+        if (!cancelled) setRecommendations(null);
+      })
+      .finally(() => {
+        if (!cancelled) setRecLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [modelId, dataset]);
+
+  const applyRecommendations = useCallback(() => {
+    const rec = recommendations?.config;
+    if (!rec) return;
+    setMethod(rec.method);
+    setQuant(rec.quant);
+    setBatchSize(rec.batch_size);
+    setGradAccum(rec.gradient_accumulation_steps);
+    setMaxSeq(rec.max_seq_length);
+    setLr(rec.learning_rate);
+    setEpochs(rec.epochs);
+    setLoraR(rec.lora_r);
+    setLoraAlpha(rec.lora_alpha);
+    setGradCkpt(rec.gradient_checkpointing);
+    setUseFusedKernels(rec.use_triton);
+    setUseFusedCe(rec.use_fused_ce);
+    setTrainResponsesOnly(rec.train_on_responses_only);
+    setUseRsLora(rec.use_rslora);
+    setPacking(rec.packing);
+    if (rec.dataset_format && rec.dataset_format !== "auto") {
+      setDatasetFormat(rec.dataset_format);
+    }
+    setConfigCustomized(false);
+  }, [recommendations]);
+
+  const modelBlocked = Boolean(modelId && (isGgufOnlyRepoId(modelId) || recommendations?.trainable === false));
+
+  useEffect(() => {
     if (!exportProfiles.length) return;
     const prof = exportProfiles.find((p) => p.id === exportProfile);
     if (prof?.default_gguf_quants?.length) {
@@ -204,6 +262,10 @@ export function TrainPage() {
   };
 
   const start = async () => {
+    if (modelBlocked) {
+      setDownloadError(recommendations?.warnings[0] || GGUF_TRAIN_ERROR);
+      return;
+    }
     setStarting(true);
     setLogs([]);
     setTrainingMetrics([]);
@@ -290,7 +352,7 @@ export function TrainPage() {
   return (
     <StudioPageShell
       title="Training Studio"
-      subtitle="QLoRA 4-bit, TRL SFTTrainer — settings below are pre-filled from local hardware detection (nothing leaves this machine)."
+      subtitle="Fine-tune with LoRA/QLoRA — pick a safetensors base model (not GGUF). Settings adapt to your GPU and dataset."
       banner={
         hw?.training_defaults ? (
           <div className="hw-inline-banner card">
@@ -339,15 +401,76 @@ export function TrainPage() {
           <div className="form-field">
             <label>Base model</label>
             <HfBaseModelPicker
+              mode="train"
               value={modelId}
               localModels={localModels}
               disabled={downloadingModel}
               onChange={(value) => {
                 setModelId(value);
                 writeStoredModel("train:model", value);
+                setConfigCustomized(false);
               }}
             />
           </div>
+          {modelBlocked && (
+            <div className="status-callout status-callout-warn studio-error-callout" role="alert">
+              <div className="status-callout-body">
+                <strong className="status-callout-title">Not trainable</strong>
+                <div className="status-callout-text">
+                  {recommendations?.warnings[0] || GGUF_TRAIN_ERROR}
+                  {recommendations?.fallback_train_repo && (
+                    <>
+                      {" "}
+                      Try{" "}
+                      <button
+                        type="button"
+                        className="btn-link"
+                        onClick={() => {
+                          setModelId(recommendations.fallback_train_repo!);
+                          writeStoredModel("train:model", recommendations.fallback_train_repo!);
+                        }}
+                      >
+                        {recommendations.fallback_train_repo}
+                      </button>
+                      .
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+          {(recommendations || recLoading) && !modelBlocked && (
+            <div className="status-callout status-callout-info train-rec-panel">
+              <div className="status-callout-body">
+                <strong className="status-callout-title">
+                  {recLoading ? "Analyzing model & dataset…" : "Suggested settings"}
+                </strong>
+                {!recLoading && recommendations && (
+                  <>
+                    <div className="status-callout-text">
+                      {recommendations.notes.slice(0, 2).join(" ")}
+                      {recommendations.est_training_vram_gb != null && (
+                        <> Est. training VRAM ~{recommendations.est_training_vram_gb} GB.</>
+                      )}
+                    </div>
+                    <div className="train-rec-actions">
+                      <button
+                        type="button"
+                        className="btn btn-sm"
+                        onClick={applyRecommendations}
+                        disabled={recLoading}
+                      >
+                        Apply recommended settings
+                      </button>
+                      {configCustomized && (
+                        <span className="muted-text studio-field-hint-compact">You changed settings manually.</span>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
           {localModels.length > 0 && (
             <p className="muted-text studio-field-hint studio-field-hint-compact">
               {localModels.length} snapshot{localModels.length === 1 ? "" : "s"} cached locally.
@@ -359,13 +482,26 @@ export function TrainPage() {
           </div>
           <div className="form-field">
             <label>Dataset format</label>
-            <select value={datasetFormat} onChange={(e) => setDatasetFormat(e.target.value)}>
+            <select
+              value={datasetFormat}
+              onChange={(e) => {
+                setDatasetFormat(e.target.value);
+                setConfigCustomized(true);
+              }}
+            >
               <option value="auto">Auto-detect</option>
               <option value="chat">Chat / messages</option>
               <option value="alpaca">Alpaca (instruction/output)</option>
               <option value="sharegpt">ShareGPT conversations</option>
               <option value="text">Plain text</option>
             </select>
+            {recommendations?.config.dataset_format &&
+              recommendations.config.dataset_format !== "auto" &&
+              datasetFormat === "auto" && (
+                <p className="muted-text studio-field-hint studio-field-hint-compact">
+                  Recommended: {recommendations.config.dataset_format} — apply suggested settings to use it.
+                </p>
+              )}
           </div>
           </StudioCardBody>
         </div>
@@ -559,7 +695,11 @@ export function TrainPage() {
 
           </StudioCardBody>
           <div className="studio-action-bar studio-action-bar-flush">
-            <button className="btn btn-primary btn-lg" onClick={start} disabled={starting || downloadingModel}>
+            <button
+              className="btn btn-primary btn-lg"
+              onClick={start}
+              disabled={starting || downloadingModel || modelBlocked}
+            >
               {starting ? "Starting…" : downloadingModel ? "Downloading model…" : "Start training"}
             </button>
             {activeJob && (

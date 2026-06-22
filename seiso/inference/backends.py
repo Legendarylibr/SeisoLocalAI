@@ -47,9 +47,21 @@ _GGUF_VALUE_SIZE = {
 _UNSUPPORTED_GGUF_ARCHITECTURES = frozenset({"dflash-draft"})
 
 
+def _looks_like_gguf_file(path: Path) -> bool:
+    if path.suffix.lower() == ".gguf":
+        return True
+    if not path.is_file():
+        return False
+    try:
+        with path.open("rb") as handle:
+            return handle.read(4) == b"GGUF"
+    except OSError:
+        return False
+
+
 def _is_gguf_path(model_path: str) -> bool:
     path = Path(model_path)
-    if path.suffix.lower() == ".gguf":
+    if _looks_like_gguf_file(path):
         return True
     return path.is_dir() and any(path.glob("*.gguf"))
 
@@ -57,7 +69,7 @@ def _is_gguf_path(model_path: str) -> bool:
 def resolve_gguf_file(model_path: str) -> Path:
     """Pick a single GGUF file from a path or directory."""
     path = Path(model_path).expanduser()
-    if path.is_file() and path.suffix.lower() == ".gguf":
+    if path.is_file() and _looks_like_gguf_file(path):
         return path.absolute()
     if path.is_dir():
         candidates = sorted(path.glob("*.gguf"))

@@ -11,6 +11,7 @@ from fastapi import HTTPException
 from forge.api.http_errors import raise_forbidden
 from forge.db.store import Database
 from forge.services.user_paths import assert_user_path, is_local_filesystem_path
+from seiso.models.trainable_snapshot import snapshot_has_trainable_weights
 from seiso.security import SecurityError
 
 _TRAINABLE_FORMATS = frozenset({"safetensors", "bin", ""})
@@ -75,8 +76,9 @@ def resolve_training_model_id(
     if is_local_filesystem_path(model_id):
         try:
             path = assert_user_path(data_dir, user_id, model_id)
-            if path.exists():
-                return str(path.resolve()), str(path.resolve())
+            if path.exists() and snapshot_has_trainable_weights(path):
+                resolved = str(path.resolve())
+                return resolved, resolved
         except SecurityError:
             pass
 
@@ -94,7 +96,7 @@ def resolve_training_model_id(
             path = assert_user_path(data_dir, user_id, row["path"])
         except SecurityError:
             continue
-        if path.exists():
+        if path.exists() and snapshot_has_trainable_weights(path):
             resolved = str(path.resolve())
             return resolved, resolved
 
@@ -120,6 +122,8 @@ def list_trainable_models(
         except SecurityError:
             continue
         if not path.exists():
+            continue
+        if not snapshot_has_trainable_weights(path):
             continue
         meta = _model_metadata(row)
         repo_id = meta.get("repo_id")

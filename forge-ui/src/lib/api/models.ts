@@ -8,8 +8,8 @@ export const modelsApi = {
   freeMemory: () => request<VramStatus>("/models/vram/unload", { method: "POST" }),
   downloadLocalModel: (modelId: string) =>
     fetch(`${API}/models/${modelId}/download`, { credentials: "include" }),
-  catalog: (q = "", family?: string, task?: string, fitsOnly = false, cursor?: string | null, limit = 50) => {
-    const params = new URLSearchParams({ hardware_aware: "true", limit: String(limit) });
+  catalog: (q = "", family?: string, task?: string, fitsOnly = false, cursor?: string | null, limit = 50, purpose: "chat" | "train" = "chat") => {
+    const params = new URLSearchParams({ hardware_aware: "true", limit: String(limit), purpose });
     if (q) params.set("q", q);
     if (family) params.set("family", family);
     if (task) params.set("task", task);

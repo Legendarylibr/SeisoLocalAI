@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 
 from seiso.compat import StrEnum
 from seiso.models.hub_errors import format_hub_error
+from seiso.models.trainable_snapshot import is_gguf_only_repo_id
 from seiso.models.trusted_gguf import base_model_from_tags, is_trusted_gguf_repo
 
 _DEFAULT_LIMIT = 50
@@ -201,6 +202,34 @@ def _query_hub_page(
     )
 
 
+def _query_trainable_hub_page(
+    *,
+    query: str = "",
+    family: str | None = None,
+    task: str | None = None,
+    limit: int,
+    cursor: str | None = None,
+    token: str | None = None,
+) -> tuple[list[dict], str | None]:
+    hf_search = _hub_search_text(query, family)
+    if task == ModelTask.EMBEDDING.value:
+        return _fetch_hub_page(
+            pipeline_tag="feature-extraction",
+            search=hf_search,
+            limit=limit,
+            cursor=cursor,
+            token=token,
+        )
+    return _fetch_hub_page(
+        pipeline_tag="text-generation",
+        filter_tag="safetensors",
+        search=hf_search,
+        limit=limit,
+        cursor=cursor,
+        token=token,
+    )
+
+
 def _model_info_to_row(info: object) -> dict:
     created = getattr(info, "created_at", None) or getattr(info, "last_modified", None)
     created_at = created.isoformat() if hasattr(created, "isoformat") else created
@@ -338,6 +367,53 @@ def _hub_row_to_entry(row: dict, *, force_task: ModelTask | None = None) -> Cata
     )
 
 
+def _hub_row_to_trainable_entry(row: dict, *, force_task: ModelTask | None = None) -> CatalogEntry | None:
+    repo_id = row.get("id") or row.get("modelId")
+    if not isinstance(repo_id, str) or not repo_id.strip():
+        return None
+    if not _is_supported_repo(repo_id):
+        return None
+
+    tags_raw = row.get("tags")
+    tags = [t for t in tags_raw if isinstance(t, str)] if isinstance(tags_raw, list) else []
+    if is_gguf_only_repo_id(repo_id, tags):
+        return None
+
+    pipeline_tag = row.get("pipeline_tag") if isinstance(row.get("pipeline_tag"), str) else None
+    if pipeline_tag in _SKIP_PIPELINE_TAGS:
+        return None
+
+    task = force_task or _infer_task(repo_id, pipeline_tag, tags)
+    if task == ModelTask.EMBEDDING and force_task != ModelTask.EMBEDDING:
+        return None
+    if task == ModelTask.VISION:
+        return None
+
+    downloads = row.get("downloads") if isinstance(row.get("downloads"), int) else 0
+    created_at = row.get("createdAt") if isinstance(row.get("createdAt"), str) else None
+    family = _infer_family(repo_id, tags)
+    params = _infer_params(repo_id, tags)
+    name = _display_name(repo_id, tags)
+    catalog_tags = tuple(dict.fromkeys(["trainable", *tags[:6]]))
+    priority = _compute_priority(downloads, created_at, list(catalog_tags))
+    hay = f"{repo_id} {' '.join(tags)}".lower()
+    if "instruct" in hay or "-it" in hay or "chat" in hay:
+        priority = min(100, priority + 8)
+
+    return CatalogEntry(
+        repo_id=repo_id,
+        name=name,
+        family=family,
+        params=params,
+        task=task,
+        quant="bf16",
+        tags=catalog_tags,
+        gguf_repo=None,
+        priority=priority,
+        downloads=downloads,
+    )
+
+
 def _parse_param_size(params: str) -> float:
     p = params.strip().upper()
     if p.endswith("T"):
@@ -426,6 +502,58 @@ def search_catalog(
     seen: set[str] = set()
     for row in rows:
         entry = _hub_row_to_entry(row, force_task=force_task)
+        if entry is None or entry.repo_id in seen:
+            continue
+        seen.add(entry.repo_id)
+        entries.append(entry)
+
+    scored: list[tuple[float, dict]] = []
+    for entry in entries:
+        if family and not query.strip() and entry.family.value != family.lower():
+            continue
+        if task and not _matches_task(entry, task):
+            continue
+        if max_params and _parse_param_size(entry.params) > _parse_param_size(max_params):
+            continue
+        scored.append((_boost_score(entry, query), _entry_to_dict(entry)))
+
+    if query.strip():
+        scored.sort(key=lambda pair: (-pair[0], -(pair[1].get("downloads") or 0), pair[1]["name"]))
+    else:
+        scored.sort(key=lambda pair: (-(pair[1].get("downloads") or 0), -pair[0], pair[1]["name"]))
+
+    return CatalogSearchResult(
+        models=[item for _, item in scored],
+        next_cursor=next_cursor,
+    )
+
+
+def search_trainable_catalog(
+    query: str = "",
+    family: str | None = None,
+    task: str | None = None,
+    max_params: str | None = None,
+    *,
+    limit: int = _DEFAULT_LIMIT,
+    cursor: str | None = None,
+    token: str | None = None,
+) -> CatalogSearchResult:
+    """Query Hugging Face Hub for safetensors checkpoints suitable for LoRA/SFT."""
+    limit = max(1, min(limit, _MAX_LIMIT))
+    rows, next_cursor = _query_trainable_hub_page(
+        query=query,
+        family=family,
+        task=task,
+        limit=limit,
+        cursor=cursor,
+        token=token,
+    )
+
+    force_task = ModelTask.EMBEDDING if task == ModelTask.EMBEDDING.value else None
+    entries: list[CatalogEntry] = []
+    seen: set[str] = set()
+    for row in rows:
+        entry = _hub_row_to_trainable_entry(row, force_task=force_task)
         if entry is None or entry.repo_id in seen:
             continue
         seen.add(entry.repo_id)

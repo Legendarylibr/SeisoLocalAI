@@ -64,15 +64,26 @@ async def register_training_checkpoint(
     checkpoint_path: str,
     job_id: str,
 ) -> dict | None:
-    return await register_model_path(
-        db,
-        user_id=user_id,
-        data_dir=data_dir,
-        path=checkpoint_path,
-        name=f"checkpoint-{job_id[:8]}",
-        source="training",
-        model_format="safetensors",
-        metadata={"job_id": job_id, "origin": "fine-tune"},
+    try:
+        resolved = assert_user_path(data_dir, user_id, checkpoint_path)
+    except Exception:
+        return None
+    if not resolved.exists():
+        return None
+
+    size = sum(f.stat().st_size for f in resolved.rglob("*") if f.is_file())
+    meta = {"job_id": job_id, "origin": "fine-tune"}
+    norm = str(resolved.resolve())
+    meta["default_backend"] = backend_for_path(norm, "safetensors")
+
+    return await db.upsert_model(
+        user_id,
+        "training",
+        name=sanitize_filename(f"checkpoint-{job_id[:8]}"),
+        path=str(resolved),
+        format="safetensors",
+        size_bytes=size,
+        metadata=meta,
     )
 
 

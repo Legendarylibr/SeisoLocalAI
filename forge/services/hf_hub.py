@@ -17,6 +17,7 @@ from typing import Any, TypeVar
 
 from forge.services.download_progress import ProgressCallback, make_tqdm_class
 from seiso.models.catalog import CatalogEntry, get_by_repo
+from seiso.models.trainable_snapshot import snapshot_has_trainable_weights
 from seiso.models.hub_errors import format_hub_error
 from seiso.models.trusted_gguf import (
     base_model_from_tags,
@@ -604,6 +605,12 @@ def download_training_snapshot(
         repo_id=repo_id,
     )
     root = Path(path)
+    if not snapshot_has_trainable_weights(root):
+        from seiso.models.trainable_snapshot import GGUF_ONLY_REPO_MESSAGE
+
+        raise ValueError(
+            f"{GGUF_ONLY_REPO_MESSAGE} Repo: {repo_id}"
+        )
     return {
         "path": str(root.resolve()),
         "repo_id": repo_id,

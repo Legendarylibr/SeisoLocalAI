@@ -31,6 +31,14 @@ class TrainingOrchestrator(Orchestrator):
 
     async def execute(self, job_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         configure_hf_hub_cache(self.sandbox_root)
+        from seiso.inference.model_pool import get_model_pool
+        from seiso.memory.protection import release_cached_memory
+
+        pool = get_model_pool()
+        if pool.active_key:
+            self._emit_log(job_id, "Unloading active chat model to free GPU for training")
+            pool.cancel_and_unload()
+            release_cached_memory(sync=True)
         config = TrainConfig.model_validate(payload["config"])
         from seiso.memory.protection import apply_training_memory_guards
 
