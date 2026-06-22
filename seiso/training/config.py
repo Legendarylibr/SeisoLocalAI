@@ -68,6 +68,15 @@ class TrainConfig(BaseModel):
     use_rslora: bool = False
     train_on_responses_only: bool = True
     packing: bool = False
+    # ── Performance optimizations (auto-tuned when left at defaults) ──
+    dataloader_num_workers: int = 0  # 0 = auto-detect (min(4, cpu_count//2) on CUDA, 0 on CPU)
+    dataloader_persistent_workers: bool = True
+    dataloader_prefetch_factor: int | None = None  # None = let HF pick (2)
+    group_by_length: bool = True  # batch similar-length sequences → less padding waste
+    padding_free: bool = False  # use flash-attention padding-free packing (CUDA only)
+    neftune_noise_alpha: float | None = 5.0  # NEFTune instruction-tuning noise (None to disable)
+    torch_compile: bool = False  # torch.compile the training model (CUDA only, opt-in)
+    save_safetensors: bool = True
     extra: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("output_dir", "dataset", "resume_from", "sandbox_root", mode="before")

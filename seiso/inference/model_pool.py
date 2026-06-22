@@ -226,7 +226,14 @@ class ModelPool:
     ) -> Any:
         """Load model_path, unloading any previously active model first."""
         norm = self.normalize_path(model_path)
-        load_path = str(Path(model_path).expanduser().absolute())
+        # Only resolve to an absolute filesystem path when the input is an
+        # existing local file/dir.  HuggingFace repo IDs like "org/model-name"
+        # must be passed through unchanged so transformers can download them.
+        raw = Path(model_path).expanduser()
+        if raw.exists():
+            load_path = str(raw.absolute())
+        else:
+            load_path = str(model_path)
         key = cache_key or f"{backend.value}:{norm}"
         meta = meta or {}
         with self._lock:

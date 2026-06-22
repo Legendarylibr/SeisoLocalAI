@@ -75,7 +75,11 @@ def effective_budget_mb(profile: dict[str, Any]) -> int:
     if tier == HardwareTier.APPLE_UNIFIED:
         return int(ram * 1024 * 0.55)
     if tier == HardwareTier.CPU_ONLY:
-        return int(min(ram * 1024 * 0.35, 8192))
+        # CPU-only machines use system RAM for model weights.  Cap at a generous
+        # 32 GB so workstations with large RAM are not artificially limited to 8 GB
+        # (which blocks even small training runs).  The 35% ratio still protects
+        # low-RAM machines from OOM.
+        return int(min(ram * 1024 * 0.35, 32768))
     return int(vram_total or min(ram * 1024 * 0.4, 8192))
 
 

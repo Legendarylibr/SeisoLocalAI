@@ -1,4 +1,4 @@
-# QLoRA fine-tune (Seiso Core / Forge Train Studio)
+# QLoRA fine-tune (Seiso Core / Forge Train Studio) — optimized defaults
 model_id: meta-llama/Llama-3.2-3B-Instruct
 dataset: ./data/sample.jsonl
 output_dir: ./outputs/lora-run
@@ -20,6 +20,14 @@ packing: false
 use_triton: true
 use_fused_ce: true
 use_fused_lora: true
+# ── Performance optimizations ──
+dataloader_num_workers: 0          # 0 = auto-detect on CUDA
+dataloader_persistent_workers: true
+group_by_length: true              # batch similar-length → less padding
+padding_free: false                # set true with packing=true on CUDA for zero padding
+neftune_noise_alpha: 5.0           # NEFTune improves instruction-following
+torch_compile: false               # set true for CUDA (longer warmup, faster steady-state)
+save_safetensors: true
 seed: 42
 deterministic: true
 save_steps: 50

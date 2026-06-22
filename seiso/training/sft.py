@@ -115,6 +115,9 @@ def build_sft_trainer(
         cfg_kwargs["packing"] = True
     if dataset_text_field:
         cfg_kwargs["dataset_text_field"] = dataset_text_field
+    # padding_free is passed through to SFTConfig when present in args dict
+    if training_args_dict.get("padding_free"):
+        cfg_kwargs["padding_free"] = True
 
     args = SFTConfig(**cfg_kwargs)
     trainer_cls = FusedSFTTrainer if use_fused_ce else _SFTTrainer
@@ -153,7 +156,16 @@ def _fallback_trainer(
 ):
     from transformers import Trainer, TrainingArguments
 
-    args = TrainingArguments(**training_args_dict)
+    # Filter SFTConfig-only params that TrainingArguments doesn't accept
+    sft_only_keys = {
+        "padding_free", "packing", "dataset_text_field", "max_length", "max_seq_length",
+        "packing_strategy", "eval_packing", "assistant_only_loss", "completion_only_loss",
+        "dataset_kwargs", "dataset_num_proc", "chat_template_path", "eos_token",
+        "pad_token", "pad_to_multiple_of", "truncation_mode", "shuffle_dataset",
+        "activation_offloading", "loss_type", "model_init_kwargs",
+    }
+    filtered_args = {k: v for k, v in training_args_dict.items() if k not in sft_only_keys}
+    args = TrainingArguments(**filtered_args)
 
     if not use_fused_ce:
         return Trainer(

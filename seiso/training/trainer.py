@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import gc
+import inspect
 import json
 import logging
 import os
@@ -247,9 +248,16 @@ class SeisoTrainer:
             try:
                 from peft import prepare_model_for_kbit_training
 
+                # Let TrainingArguments handle gradient checkpointing via
+                # gradient_checkpointing_kwargs (use_reentrant=False) to avoid
+                # double-enablement and reentrant overhead.
                 model = prepare_model_for_kbit_training(
-                    model, use_gradient_checkpointing=cfg.gradient_checkpointing
+                    model, use_gradient_checkpointing=False
                 )
+                if cfg.gradient_checkpointing and hasattr(model, "gradient_checkpointing_enable"):
+                    model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={
+                        "use_reentrant": False
+                    })
                 self._loaded.model = model
             except ImportError:
                 logger.warning(
@@ -318,7 +326,7 @@ class SeisoTrainer:
         data_collator=None,
         dataset_text_field: str | None = None,
         callbacks=None,
-    ):
+    ) -> Any:
         cfg = self.config
         import torch
 
@@ -333,8 +341,14 @@ class SeisoTrainer:
         else:
             use_cpu = True
 
-        optim = "adamw_torch"
-        if cfg.quant == QuantMode.INT4:
+        # ── Optimizer selection ──
+        # adamw_torch_fused is the fastest on CUDA — it fuses the multi-tensor
+        # AdamW update into a single CUDA kernel.  For 4-bit QLoRA, paged_adamw_8bit
+        # is used only when bitsandbytes is available, as it pages optimizer states
+        # to CPU and prevents OOM on large models with limited VRAM.
+        if use_cpu:
+            optim = "adamw_torch"
+        elif cfg.quant == QuantMode.INT4:
             try:
                 import bitsandbytes  # noqa: F401
 
@@ -342,8 +356,34 @@ class SeisoTrainer:
             except ImportError:
                 logger.warning(
                     "quant=4bit requested but bitsandbytes is not installed; "
-                    "falling back to adamw_torch optimizer"
+                    "falling back to adamw_torch_fused optimizer"
                 )
+                optim = "adamw_torch_fused"
+        else:
+            optim = "adamw_torch_fused"
+
+        # ── Dataloader workers: auto-detect when not explicitly set ──
+        num_workers = cfg.dataloader_num_workers
+        if num_workers == 0 and torch.cuda.is_available():
+            cpu_count = os.cpu_count() or 4
+            num_workers = min(4, max(1, cpu_count // 2))
+        persistent_workers = num_workers > 0 and cfg.dataloader_persistent_workers
+
+        # ── Gradient checkpointing: use non-reentrant for better speed ──
+        grad_ckpt_kwargs = None
+        if cfg.gradient_checkpointing:
+            grad_ckpt_kwargs = {"use_reentrant": False}
+
+        # ── Padding-free packing: eliminates padding waste entirely on CUDA ──
+        # Requires flash-attention (sdpa also works on recent transformers).  When
+        # enabled, sequences are concatenated with position_ids and cu_seqlens,
+        # so every token is a real token — no padding compute waste at all.
+        padding_free = cfg.padding_free and torch.cuda.is_available() and cfg.packing
+
+        # ── Check which TrainingArguments params are actually available ──
+        # (transformers 5.x removed group_by_length; guard with hasattr)
+        from transformers import TrainingArguments as _TA
+        _ta_fields = set(inspect.signature(_TA.__init__).parameters.keys())
 
         base = {
             "output_dir": str(cfg.output_dir),
@@ -370,7 +410,29 @@ class SeisoTrainer:
             "dataloader_pin_memory": training_pin_memory(),
             "remove_unused_columns": not dataset_text_field,
             "load_best_model_at_end": eval_ds is not None,
+            # ── Performance optimizations ──
+            "dataloader_num_workers": num_workers,
+            "dataloader_persistent_workers": persistent_workers,
+            "gradient_checkpointing": cfg.gradient_checkpointing,
         }
+        # save_safetensors was removed in transformers 5.x — only add when available
+        if "save_safetensors" in _ta_fields:
+            base["save_safetensors"] = cfg.save_safetensors
+        # group_by_length was removed in transformers 5.x — only add when available
+        if "group_by_length" in _ta_fields:
+            base["group_by_length"] = cfg.group_by_length and not dataset_text_field
+        if cfg.dataloader_prefetch_factor is not None and num_workers > 0:
+            base["dataloader_prefetch_factor"] = cfg.dataloader_prefetch_factor
+        if grad_ckpt_kwargs is not None:
+            base["gradient_checkpointing_kwargs"] = grad_ckpt_kwargs
+        if cfg.neftune_noise_alpha is not None and not use_cpu:
+            base["neftune_noise_alpha"] = cfg.neftune_noise_alpha
+        if padding_free:
+            base["padding_free"] = True
+        if cfg.torch_compile and torch.cuda.is_available():
+            base["torch_compile"] = True
+            base["torch_compile_backend"] = "inductor"
+
         args_dict = configure_training_args(base, layout, multi_gpu)
         return build_sft_trainer(
             model,
@@ -486,6 +548,12 @@ class SeisoTrainer:
             "dataset_format": dataset_format,
             "train_on_responses_only": cfg.train_on_responses_only,
             "packing": cfg.packing,
+            "dataloader_num_workers": cfg.dataloader_num_workers,
+            "group_by_length": cfg.group_by_length,
+            "padding_free": cfg.padding_free,
+            "neftune_noise_alpha": cfg.neftune_noise_alpha,
+            "torch_compile": cfg.torch_compile,
+            "save_safetensors": cfg.save_safetensors,
             "multi_gpu": multi_gpu,
             "world_size": layout.world_size,
             "kernels": self._kernel_meta,

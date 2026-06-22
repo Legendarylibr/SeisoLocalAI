@@ -19,8 +19,8 @@ def assess_hardware_fit(
     est_mb = int(est_vram_gb * 1024)
     tier = classify_tier(profile)
 
-    if mode == "train":
-        est_mb = int(est_mb * 2.2)
+    # Note: train-mode overhead is already applied by estimate_path_vram_mb()
+    # via _TRAINING_OVERHEAD_RATIO.  Do not multiply again here.
 
     ratio = est_mb / headroom_mb if headroom_mb > 0 else 99.0
 

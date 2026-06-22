@@ -95,7 +95,9 @@ class SeisoModel:
         target_modules = modules_exist_in_model(model, target_modules)
 
         if use_gradient_checkpointing and hasattr(model, "gradient_checkpointing_enable"):
-            model.gradient_checkpointing_enable()
+            model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={
+                "use_reentrant": False
+            })
             if hasattr(model.config, "use_cache"):
                 model.config.use_cache = False
 

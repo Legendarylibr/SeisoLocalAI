@@ -18,6 +18,12 @@ train_on_responses_only: true
 use_triton: false
 use_fused_ce: false
 use_fused_lora: false
+# ── Performance optimizations (disabled for CPU smoke) ──
+dataloader_num_workers: 0
+dataloader_persistent_workers: false
+group_by_length: false
+neftune_noise_alpha: null           # NEFTune is CUDA-only
+save_safetensors: true
 eval_split_ratio: 0
 save_steps: 10
 logging_steps: 1
