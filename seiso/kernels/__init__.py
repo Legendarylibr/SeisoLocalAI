@@ -24,6 +24,11 @@ from seiso.kernels.tuning import (
     kernel_metrics_dict,
     kernel_profile_count,
 )
+from seiso.kernels.training_profile import (
+    CudaTrainingMode,
+    last_cuda_training_profile,
+    prepare_cuda_training_profile,
+)
 
 __all__ = [
     "GpuPlatform",
@@ -32,6 +37,7 @@ __all__ = [
     "apply_fused_lora_kernels",
     "apply_training_kernels",
     "clear_kernel_patches",
+    "CudaTrainingMode",
     "detect_gpu",
     "estimate_vram_savings_pct",
     "fused_cross_entropy_loss",
@@ -45,6 +51,8 @@ __all__ = [
     "kernel_metrics_dict",
     "kernel_profile_count",
     "kernel_metadata",
+    "last_cuda_training_profile",
+    "prepare_cuda_training_profile",
     "release_training_memory",
     "restore_kernel_patches",
 ]

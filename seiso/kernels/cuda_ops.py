@@ -145,22 +145,32 @@ def fused_swiglu(gate, up):
     return torch.nn.functional.silu(gate) * up
 
 
-def fused_lora_delta(x, lora_A, lora_B, base=None, scale: float = 1.0):
+def fused_lora_delta(x, lora_A, lora_B, base=None, scale: float = 1.0, *, inplace: bool = False):
     """Fused low-rank delta: ``base + scale * B @ (A @ x)`` for 1D or 2D inputs."""
 
     if not x.is_cuda:
         hidden = x @ lora_A.t()
         delta = scale * (hidden @ lora_B.t())
-        return base + delta if base is not None else delta
+        if base is None:
+            return delta
+        if inplace:
+            base.add_(delta.to(base.dtype))
+            return base
+        return base + delta
 
     ext = _load_extension()
     rank = lora_A.size(0)
     if ext is not None and rank <= 64 and x.dim() in (1, 2):
-        return ext.fused_lora_delta(x, lora_A, lora_B, base, scale)
+        return ext.fused_lora_delta(x, lora_A, lora_B, base, scale, inplace)
 
     hidden = x @ lora_A.t()
     delta = scale * (hidden @ lora_B.t())
-    return base + delta if base is not None else delta
+    if base is None:
+        return delta
+    if inplace:
+        base.add_(delta.to(base.dtype))
+        return base
+    return base + delta
 
 
 def cross_entropy_forward(logits, labels, ignore_index: int = -100):

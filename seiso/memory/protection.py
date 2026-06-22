@@ -388,6 +388,27 @@ def apply_training_memory_guards(config: Any) -> Any:
     accum = int(config.gradient_accumulation_steps)
     max_seq = int(config.max_seq_length)
 
+    est_mb = estimate_path_vram_mb(config.model_id, mode="train")
+    try:
+        from seiso.kernels.training_profile import prepare_cuda_training_profile
+
+        cuda_profile = prepare_cuda_training_profile(
+            headroom_mb=headroom,
+            est_train_mb=est_mb,
+            model_id=config.model_id,
+            batch_size=batch,
+            max_seq_length=max_seq,
+        )
+        meta_keys = {"cuda_training_mode", "kernel_profile_id", "kernel_low_vram"}
+        updates.update(
+            {k: v for k, v in cuda_profile.items() if k not in meta_keys}
+        )
+    except ImportError:
+        if headroom > 0 and headroom < 8192:
+            os.environ.setdefault("SEISO_KERNEL_LOW_VRAM", "1")
+            updates.setdefault("gradient_checkpointing", True)
+            updates.setdefault("use_fused_ce", True)
+
     if batch > defaults["batch_size"]:
         updates["batch_size"] = defaults["batch_size"]
         batch = defaults["batch_size"]
@@ -397,7 +418,6 @@ def apply_training_memory_guards(config: Any) -> Any:
         updates["max_seq_length"] = defaults["max_seq_length"]
         max_seq = defaults["max_seq_length"]
 
-    est_mb = estimate_path_vram_mb(config.model_id, mode="train")
     if headroom > 0 and est_mb > headroom and batch > 1:
         updates["batch_size"] = 1
         updates["gradient_accumulation_steps"] = (
