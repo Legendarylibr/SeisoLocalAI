@@ -194,7 +194,10 @@ def hardware_profile(*, force_refresh: bool = False) -> dict[str, Any]:
     backend = detect_backend()
     gpus = detect_gpus()
     ram = _ram_gb()
-    disk_free = shutil.disk_usage(_disk_usage_root()).free // (1024**3)
+    try:
+        disk_free = shutil.disk_usage(_disk_usage_root()).free // (1024**3)
+    except (OSError, FileNotFoundError):
+        disk_free = 0
 
     cuda_runtime = False
     try:

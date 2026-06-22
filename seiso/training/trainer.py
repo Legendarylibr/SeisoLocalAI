@@ -333,7 +333,17 @@ class SeisoTrainer:
         else:
             use_cpu = True
 
-        optim = "paged_adamw_8bit" if cfg.quant == QuantMode.INT4 else "adamw_torch"
+        optim = "adamw_torch"
+        if cfg.quant == QuantMode.INT4:
+            try:
+                import bitsandbytes  # noqa: F401
+
+                optim = "paged_adamw_8bit"
+            except ImportError:
+                logger.warning(
+                    "quant=4bit requested but bitsandbytes is not installed; "
+                    "falling back to adamw_torch optimizer"
+                )
 
         base = {
             "output_dir": str(cfg.output_dir),

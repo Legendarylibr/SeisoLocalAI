@@ -409,6 +409,31 @@ def apply_training_memory_guards(config: Any) -> Any:
             updates.setdefault("gradient_checkpointing", True)
             updates.setdefault("use_fused_ce", True)
 
+    # Downgrade quant to the platform-recommended value when the requested mode
+    # is unavailable (e.g. QLoRA/4-bit on macOS where bitsandbytes is absent,
+    # or 4-bit on a CPU-only box). Without this, torch_loader silently loads a
+    # 16-bit model while the trainer still requests paged_adamw_8bit, crashing
+    # at optimizer creation with ImportError: bitsandbytes.
+    recommended_quant = defaults.get("quant")
+    if recommended_quant and str(config.quant) != str(recommended_quant):
+        target: Any = None
+        try:
+            from seiso.training.config import QuantMode
+
+            target = QuantMode(recommended_quant)
+        except (ValueError, ImportError):
+            target = None
+        if target is not None and target != config.quant:
+            # Only downgrade — never upgrade beyond what the user asked for.
+            rank = {QuantMode.NONE: 0, QuantMode.INT16: 1, QuantMode.INT8: 2, QuantMode.INT4: 3}  # type: ignore[name-defined]
+            if rank.get(target, 0) < rank.get(config.quant, 0):
+                updates["quant"] = target
+                logger.info(
+                    "Training memory guards: quant %s -> %s (platform recommendation)",
+                    config.quant.value,
+                    target.value,
+                )
+
     if batch > defaults["batch_size"]:
         updates["batch_size"] = defaults["batch_size"]
         batch = defaults["batch_size"]
