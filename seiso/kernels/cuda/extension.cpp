@@ -106,7 +106,8 @@ torch::Tensor fused_lora_delta(
     torch::Tensor A,
     torch::Tensor B,
     c10::optional<torch::Tensor> base,
-    double scale) {
+    double scale,
+    bool inplace) {
   check_cuda(x, "x");
   check_cuda(A, "A");
   check_cuda(B, "B");
@@ -133,7 +134,11 @@ torch::Tensor fused_lora_delta(
     check_cuda(*base, "base");
     TORCH_CHECK(base->sizes() == x.sizes() || (x.dim() == 1 && base->dim() == 1 && base->size(0) == out_dim),
                 "base shape mismatch");
-    out = torch::empty_like(*base);
+    if (inplace) {
+      out = *base;
+    } else {
+      out = torch::empty_like(*base);
+    }
   } else if (x.dim() == 1) {
     out = torch::empty({out_dim}, x.options());
   } else {

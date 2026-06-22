@@ -55,6 +55,12 @@ class SeisoTrainer:
         self.config = apply_training_memory_guards(self.config)
         cfg = self.config
         apply_determinism(cfg.seed, deterministic=cfg.deterministic)
+        try:
+            from seiso.kernels.training_profile import apply_cuda_speedopts
+
+            apply_cuda_speedopts(deterministic=cfg.deterministic)
+        except ImportError:
+            pass
         write_json(
             cfg.output_dir / "train_config_snapshot.json",
             cfg.model_dump(mode="json"),
@@ -83,8 +89,20 @@ class SeisoTrainer:
 
         model, tokenizer = self._load_model()
         if use_triton:
-            self._kernel_meta = apply_training_kernels(model, use_cuda=True, use_triton=True)
+            self._kernel_meta = apply_training_kernels(
+                model,
+                use_cuda=True,
+                use_triton=True,
+            )
             self._kernel_meta["fused_ce"] = use_fused_ce
+            try:
+                from seiso.kernels.training_profile import last_cuda_training_profile
+
+                profile = last_cuda_training_profile()
+                if profile:
+                    self._kernel_meta["cuda_training_profile"] = profile
+            except ImportError:
+                pass
 
         if cfg.method == TrainMethod.LORA:
             model = self._apply_lora(model)

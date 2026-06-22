@@ -62,6 +62,7 @@ def training_defaults(profile: dict[str, Any]) -> dict[str, Any]:
         "max_recommended_params": max_params,
         "use_fused_kernels": caps["fused_kernels_available"],
         "use_fused_ce": caps["fused_ce_available"],
+        "kernel_low_vram": headroom > 0 and headroom < 8192,
         "kernel_backend": caps["kernel_backend"],
         "train_platform": caps["train_platform"],
         "multi_gpu_available": caps["multi_gpu_available"],

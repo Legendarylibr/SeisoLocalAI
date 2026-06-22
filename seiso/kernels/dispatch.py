@@ -83,23 +83,41 @@ def fused_cross_entropy_loss(logits, labels, *, ignore_index: int = -100):
     return _fused_ce(logits, labels, ignore_index=ignore_index)
 
 
-def fused_lora_delta(x, lora_A, lora_B, base=None, scale: float = 1.0):
+def fused_lora_delta(
+    x,
+    lora_A,
+    lora_B,
+    base=None,
+    scale: float = 1.0,
+    *,
+    inplace: bool = False,
+):
     """Fused low-rank delta when native CUDA is available."""
 
     if not getattr(x, "is_cuda", False):
         hidden = x @ lora_A.t()
         delta = scale * (hidden @ lora_B.t())
-        return base + delta if base is not None else delta
+        if base is None:
+            return delta
+        if inplace:
+            base.add_(delta.to(base.dtype))
+            return base
+        return base + delta
 
     backend = active_backend()
     if backend == "cuda":
         from seiso.kernels.cuda_ops import fused_lora_delta as cuda_lora
 
-        return cuda_lora(x, lora_A, lora_B, base=base, scale=scale)
+        return cuda_lora(x, lora_A, lora_B, base=base, scale=scale, inplace=inplace)
 
     hidden = x @ lora_A.t()
     delta = scale * (hidden @ lora_B.t())
-    return base + delta if base is not None else delta
+    if base is None:
+        return delta
+    if inplace:
+        base.add_(delta.to(base.dtype))
+        return base
+    return base + delta
 
 
 def kernel_metadata() -> dict:
@@ -113,6 +131,12 @@ def kernel_metadata() -> dict:
         boundary = nvidia_boundary_report()
     except ImportError:
         pass
+    try:
+        from seiso.kernels.memory_mode import kernel_low_vram_enabled
+
+        low_vram = kernel_low_vram_enabled()
+    except ImportError:
+        low_vram = False
     return {
         "vendor": platform.vendor.value,
         "device_label": (
@@ -132,14 +156,17 @@ def kernel_metadata() -> dict:
         ),
         "triton": platform.supports_triton,
         "nvidia_boundary": boundary,
+        "kernel_low_vram": low_vram,
     }
 
 
-def estimate_vram_savings_pct(use_fused: bool, use_4bit: bool) -> float:
+def estimate_vram_savings_pct(use_fused: bool, use_4bit: bool, *, low_vram: bool = False) -> float:
     savings = 0.0
     if use_4bit:
         savings += 55.0
     if use_fused:
         backend = active_backend()
         savings += 28.0 if backend == "cuda" else 18.0 if backend == "triton" else 0.0
-    return min(savings, 78.0)
+        if low_vram:
+            savings += 6.0 if backend == "cuda" else 4.0 if backend == "triton" else 0.0
+    return min(savings, 82.0)

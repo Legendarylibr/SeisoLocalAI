@@ -16,6 +16,7 @@ from seiso.kernels.dispatch import (
     kernel_metadata,
 )
 from seiso.kernels.lifecycle import register_patch, restore_kernel_patches
+from seiso.kernels.memory_mode import apply_low_vram_kernel_tuning, kernel_low_vram_enabled
 from seiso.kernels.platform import detect_gpu
 
 logger = logging.getLogger(__name__)
@@ -69,12 +70,18 @@ def apply_training_kernels(
     use_cuda: bool = True,
     use_triton: bool = True,
     patch_mlp: bool = True,
+    low_vram: bool | None = None,
 ) -> dict[str, Any]:
     """
     Patch RMSNorm and SwiGLU MLP modules with fused GPU kernels.
 
     NVIDIA: native CUDA. AMD ROCm: Triton. Patches are always restored on cleanup.
     """
+    if low_vram is None:
+        low_vram = kernel_low_vram_enabled()
+    if low_vram:
+        apply_low_vram_kernel_tuning()
+
     platform = detect_gpu()
     meta = kernel_metadata()
     meta.update(
@@ -86,6 +93,7 @@ def apply_training_kernels(
             "modules_patched": 0,
             "fused_enabled": use_cuda or use_triton,
             "patch_mlp": patch_mlp,
+            "kernel_low_vram": low_vram,
         }
     )
 
@@ -146,7 +154,9 @@ def apply_training_kernels(
     meta["modules_patched"] = total
     meta["cuda_applied"] = backend == "cuda" and total > 0
     meta["triton_applied"] = backend == "triton" and total > 0
-    meta["estimated_vram_savings_pct"] = estimate_vram_savings_pct(total > 0, False)
+    meta["estimated_vram_savings_pct"] = estimate_vram_savings_pct(
+        total > 0, False, low_vram=low_vram
+    )
 
     if total:
         logger.info(
@@ -169,16 +179,23 @@ def _is_peft_lora_linear(module: Any) -> bool:
     )
 
 
-def apply_fused_lora_kernels(model: Any, *, max_rank: int = 64) -> dict[str, Any]:
+def apply_fused_lora_kernels(
+    model: Any, *, max_rank: int = 64, low_vram: bool | None = None
+) -> dict[str, Any]:
     """
     Patch PEFT LoRA linear layers with fused CUDA low-rank delta kernels.
 
     Active on NVIDIA CUDA and WSL2 paths when rank <= max_rank.
+    In low-VRAM mode, writes the LoRA delta in-place into the base output.
     """
+    if low_vram is None:
+        low_vram = kernel_low_vram_enabled()
+
     meta = {
         "fused_lora_enabled": False,
         "lora_patched": 0,
         "lora_skipped": 0,
+        "kernel_low_vram": low_vram,
     }
     platform = detect_gpu()
     if not platform.uses_optimized_cuda_kernels or active_backend() != "cuda":
@@ -230,10 +247,23 @@ def apply_fused_lora_kernels(model: Any, *, max_rank: int = 64) -> dict[str, Any
                     and x_mod.dim() >= 2
                     and active_backend() == "cuda"
                 ):
-                    flat = x_mod.reshape(-1, x_mod.shape[-1])
-                    delta = fused_lora_delta(flat, lora_a.weight, lora_b.weight, scale=scaling)
-                    delta = delta.reshape(*x_mod.shape[:-1], delta.shape[-1])
-                    result = result + delta.to(result.dtype)
+                    flat_x = x_mod.reshape(-1, x_mod.shape[-1])
+                    if low_vram:
+                        flat_out = result.reshape(-1, result.shape[-1])
+                        fused_lora_delta(
+                            flat_x,
+                            lora_a.weight,
+                            lora_b.weight,
+                            base=flat_out,
+                            scale=scaling,
+                            inplace=True,
+                        )
+                    else:
+                        delta = fused_lora_delta(
+                            flat_x, lora_a.weight, lora_b.weight, scale=scaling
+                        )
+                        delta = delta.reshape(*x_mod.shape[:-1], delta.shape[-1])
+                        result = result + delta.to(result.dtype)
                 else:
                     result = result + lora_b(lora_a(x_mod)) * scaling
 

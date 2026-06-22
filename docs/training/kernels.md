@@ -67,3 +67,39 @@ First kernel use triggers JIT compile via `torch.utils.cpp_extension.load`.
 - `restore_kernel_patches()` restores original `forward` methods
 - `release_training_memory()` — patches + `gc` + `empty_cache` + `synchronize`
 - Called automatically at end of `SeisoTrainer.run()`
+
+## Low VRAM mode
+
+When free VRAM is under **8 GB** (or `SEISO_KERNEL_LOW_VRAM=1`), training uses **lean** mode:
+
+| Behavior | Why |
+|----------|-----|
+| Fused cross-entropy | Avoids materializing full `[batch, vocab]` softmax |
+| Gradient checkpointing | Recomputes activations instead of storing them |
+| In-place fused LoRA | Writes adapter delta directly into the linear output |
+| `narrow_opt` kernel profile | Smaller CUDA tiles, lower peak shared memory |
+
+## CUDA auto-tune (speed + efficiency)
+
+On NVIDIA with native CUDA kernels, Seiso picks a launch profile before training:
+
+| Mode | When | Goal |
+|------|------|------|
+| **speed** | ≥16 GB free, model fits comfortably | Max throughput — **no** gradient checkpointing, `wide_throughput` kernels |
+| **balanced** | 8–16 GB free | Auto-tuned profile + checkpointing only if the model is tight |
+| **lean** | &lt;8 GB free | Min VRAM — in-place LoRA, fused CE, checkpointing |
+
+Micro-benchmarks select the fastest kernel profile for your hidden size and batch×seq (cached). Disable with:
+
+```bash
+export SEISO_KERNEL_AUTO_TUNE=0
+```
+
+TF32 + cuDNN benchmark are enabled on CUDA when `deterministic: false` in your training config.
+
+Inspect at runtime:
+
+```python
+from seiso.kernels.training_profile import last_cuda_training_profile
+print(last_cuda_training_profile())
+```
