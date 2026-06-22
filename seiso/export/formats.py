@@ -21,6 +21,36 @@ from seiso.security import assert_within
 
 logger = logging.getLogger(__name__)
 
+_LARGE_HUB_UPLOAD_BYTES = 100 * 1024 * 1024
+
+
+class _HubUploadLogWriter:
+    """Capture tqdm / upload_large_folder stdout and forward to on_log."""
+
+    def __init__(self, log: Callable[[str], None]) -> None:
+        self._log = log
+        self._buf = ""
+
+    def write(self, text: str) -> None:
+        if not text:
+            return
+        self._buf += text
+        while "\n" in self._buf:
+            line, self._buf = self._buf.split("\n", 1)
+            cleaned = line.strip("\r").strip()
+            if cleaned:
+                self._log(cleaned)
+
+    def flush(self) -> None:
+        cleaned = self._buf.strip("\r").strip()
+        if cleaned:
+            self._log(cleaned)
+        self._buf = ""
+
+
+def _folder_byte_size(folder: Path) -> int:
+    return sum(p.stat().st_size for p in folder.rglob("*") if p.is_file())
+
 
 class ExportFormat(StrEnum):
     MERGED = "merged"
@@ -126,6 +156,7 @@ def export_checkpoint(
             log,
             metadata=meta,
             quantizations=options.gguf_quantizations,
+            data_dir=options.sandbox_root,
         )
         log(f"Pushed to Hugging Face: {options.hub_repo}")
 
@@ -141,6 +172,7 @@ def publish_folder_to_hub(
     quantizations: list[str] | None = None,
     on_log: Callable[[str], None] | None = None,
     skip_precheck: bool = False,
+    data_dir: Path | None = None,
 ) -> None:
     """Publish an existing export folder to Hugging Face with model card."""
 
@@ -170,6 +202,7 @@ def publish_folder_to_hub(
         log,
         metadata=meta,
         quantizations=quantizations or meta.quantizations,
+        data_dir=data_dir,
     )
 
 
@@ -372,7 +405,11 @@ def _push_hub(
     *,
     metadata: HubModelMetadata | None = None,
     quantizations: list[str] | None = None,
+    data_dir: Path | None = None,
 ) -> None:
+    from seiso.models.hf_env import configure_hf_hub_cache
+
+    configure_hf_hub_cache(data_dir)
     api = HfApi(token=token)
     if metadata:
         meta = metadata
@@ -386,12 +423,32 @@ def _push_hub(
     except Exception:
         api.create_repo(repo, repo_type="model", exist_ok=True)
 
-    api.upload_folder(
-        folder_path=str(folder),
-        repo_id=repo,
-        repo_type="model",
-        commit_message="Upload model from Seiso Forge",
-    )
+    total_bytes = _folder_byte_size(folder)
+    use_large = total_bytes >= _LARGE_HUB_UPLOAD_BYTES
+    if use_large:
+        log(
+            f"Uploading {total_bytes / 1e9:.2f} GB to {repo} "
+            "(resumable XET large-folder upload)..."
+        )
+        writer = _HubUploadLogWriter(log)
+        with contextlib.redirect_stdout(writer):
+            api.upload_large_folder(
+                repo_id=repo,
+                folder_path=str(folder),
+                repo_type="model",
+                num_workers=8,
+                print_report=True,
+                print_report_every=30,
+            )
+        writer.flush()
+    else:
+        log(f"Uploading to {repo}...")
+        api.upload_folder(
+            folder_path=str(folder),
+            repo_id=repo,
+            repo_type="model",
+            commit_message="Upload model from Seiso Forge",
+        )
     if metadata:
         card_data = metadata.to_card_dict()
         try:

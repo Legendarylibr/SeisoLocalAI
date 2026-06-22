@@ -54,10 +54,11 @@ def test_torch_generate_kwargs_greedy():
     assert kwargs["max_new_tokens"] == 256
 
 
-def test_estimate_llama_n_ctx_sizes_to_prompt():
+def test_estimate_llama_n_ctx_sizes_to_prompt(monkeypatch):
+    monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 16384)
     messages = [{"role": "user", "content": "x" * 4000}]
     n_ctx = estimate_llama_n_ctx(messages, max_tokens=256)
-    assert 2048 <= n_ctx <= 8192
+    assert 2048 <= n_ctx <= 131072
     assert n_ctx % 512 == 0
 
 

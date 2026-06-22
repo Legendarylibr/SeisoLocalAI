@@ -124,12 +124,14 @@ def _skip_gguf_value(handle, value_type: int) -> None:
 
 _gguf_arch_cache: dict[tuple[str, float, int], str | None] = {}
 _gguf_block_count_cache: dict[tuple[str, float, int], int | None] = {}
+_gguf_context_length_cache: dict[tuple[str, float, int], int | None] = {}
 
 
 def clear_gguf_caches() -> None:
     """Reset GGUF architecture cache (for tests)."""
     _gguf_arch_cache.clear()
     _gguf_block_count_cache.clear()
+    _gguf_context_length_cache.clear()
 
 
 def _gguf_cache_key(path: Path) -> tuple[str, float, int] | None:
@@ -186,6 +188,28 @@ def _read_gguf_metadata_u32(path: Path, key_suffix: str) -> int | None:
                 return int(value)
             _skip_gguf_value(handle, value_type)
     return None
+
+
+def gguf_context_length(model_path: str) -> int | None:
+    """Read training context length from GGUF metadata (e.g. llama.context_length)."""
+    try:
+        path = resolve_gguf_file(model_path)
+    except ValueError:
+        return None
+
+    cache_key = _gguf_cache_key(path)
+    if cache_key is not None and cache_key in _gguf_context_length_cache:
+        return _gguf_context_length_cache[cache_key]
+
+    length: int | None
+    try:
+        length = _read_gguf_metadata_u32(path, ".context_length")
+    except (OSError, ValueError, struct.error):
+        length = None
+
+    if cache_key is not None:
+        _gguf_context_length_cache[cache_key] = length
+    return length
 
 
 def gguf_block_count(model_path: str) -> int | None:

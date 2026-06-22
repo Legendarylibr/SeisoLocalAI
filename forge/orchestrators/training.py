@@ -30,6 +30,12 @@ class TrainingOrchestrator(Orchestrator):
         self._on_metrics_persist[job_id] = callback
 
     async def execute(self, job_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        import os
+
+        hf_token = payload.get("hf_token")
+        if hf_token:
+            os.environ["HF_TOKEN"] = str(hf_token)
+            os.environ.pop("HUGGING_FACE_HUB_TOKEN", None)
         configure_hf_hub_cache(self.sandbox_root)
         from forge.services.memory_release import prepare_for_gpu_task, release_after_task
 
@@ -76,7 +82,12 @@ class TrainingOrchestrator(Orchestrator):
 
         try:
             if multi_gpu and layout.device_count > 1:
-                checkpoint = await self._run_distributed(job_id, config, layout.device_count)
+                checkpoint = await self._run_distributed(
+                    job_id,
+                    config,
+                    layout.device_count,
+                    hf_token=payload.get("hf_token"),
+                )
             else:
                 if multi_gpu and layout.device_count <= 1:
                     self._emit_log(
@@ -87,8 +98,12 @@ class TrainingOrchestrator(Orchestrator):
                     loop.call_soon_threadsafe(self._emit_metric, job_id, metric)
                     self._schedule_metrics_persist(job_id, loop)
 
+                def on_log(line: str) -> None:
+                    loop.call_soon_threadsafe(self._emit_log, job_id, line)
+
                 checkpoint = await loop.run_in_executor(
-                    None, lambda: run_training(config, on_metric=on_metric)
+                    None,
+                    lambda: run_training(config, on_metric=on_metric, on_log=on_log),
                 )
 
             metrics_path = config.output_dir / "metrics.jsonl"
@@ -146,7 +161,14 @@ class TrainingOrchestrator(Orchestrator):
             except asyncio.TimeoutError:
                 continue
 
-    async def _run_distributed(self, job_id: str, config: TrainConfig, nproc: int) -> Path:
+    async def _run_distributed(
+        self,
+        job_id: str,
+        config: TrainConfig,
+        nproc: int,
+        *,
+        hf_token: str | None = None,
+    ) -> Path:
         config.multi_gpu = True
         import yaml
 
@@ -159,6 +181,9 @@ class TrainingOrchestrator(Orchestrator):
 
         cmd = launch_worker_command(str(cfg_path), nproc)
         env = {**__import__("os").environ, "SEISO_EMIT_METRICS_STDOUT": "1"}
+        if hf_token:
+            env["HF_TOKEN"] = str(hf_token)
+            env.pop("HUGGING_FACE_HUB_TOKEN", None)
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,

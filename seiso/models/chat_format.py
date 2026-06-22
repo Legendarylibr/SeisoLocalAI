@@ -32,6 +32,16 @@ def extract_messages(sample: dict[str, Any], fmt) -> list[dict[str, Any]]:
     from seiso.training.config import DatasetFormat
 
     if fmt == DatasetFormat.ALPACA:
+        if "query" in sample and "response" in sample:
+            return [
+                {"role": "user", "content": str(sample.get("query") or "")},
+                {"role": "assistant", "content": str(sample.get("response") or "")},
+            ]
+        if "question" in sample and "answer" in sample:
+            return [
+                {"role": "user", "content": str(sample.get("question") or "")},
+                {"role": "assistant", "content": str(sample.get("answer") or "")},
+            ]
         instruction = sample.get("instruction", "")
         inp = sample.get("input", "")
         output = sample.get("output", "")

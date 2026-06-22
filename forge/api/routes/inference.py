@@ -60,7 +60,9 @@ class ChatRequest(BaseModel):
     )
     messages: list[dict[str, str]] = Field(default_factory=list)
     max_tokens: int = Field(default=2048, ge=1, le=8192)
-    n_ctx: int | None = Field(default=None, ge=2048, le=8192)
+    n_ctx: int | None = Field(default=None, ge=2048, le=131072)
+    temperature: float = Field(default=0.7, ge=0, le=2)
+    top_p: float | None = Field(default=None, ge=0, le=1)
     stream: bool = True
     tools: bool = False
     allow_code_exec: bool = False
@@ -127,6 +129,28 @@ async def inference_models(
     }
 
 
+@router.get("/models/{model_id}/variants")
+async def inference_model_variants(
+    model_id: str,
+    user_id: Annotated[str, Depends(get_current_user_id)],
+    db: Annotated[Database, Depends(get_db)],
+    settings: Annotated[ForgeSettings, Depends(get_settings)],
+) -> dict[str, Any]:
+    from forge.services.hf_auth import resolve_hf_token
+    from forge.services.inference_variants import get_model_variants
+
+    hf_token, _ = resolve_hf_token(
+        user_id=user_id,
+        data_dir=settings.data_dir,
+        encryption_key=settings.hf_token_encryption_key,
+        settings_token=settings.hf_token or None,
+    )
+    variants = await get_model_variants(db, user_id, model_id, hf_token=hf_token)
+    if not await get_inference_option(db, user_id, model_id):
+        raise HTTPException(404, "Model not found")
+    return variants
+
+
 @router.delete("/threads/{thread_id}")
 async def delete_thread(
     thread_id: str,
@@ -170,7 +194,7 @@ async def get_chat_context(
     settings: Annotated[ForgeSettings, Depends(get_settings)],
     thread_id: str | None = None,
     max_tokens: int = Query(default=2048, ge=1, le=8192),
-    n_ctx: int | None = Query(default=None, ge=2048, le=8192),
+    n_ctx: int | None = Query(default=None, ge=2048, le=131072),
     tools: bool = False,
     knowledge_base_id: str | None = None,
     model_id: str | None = None,
@@ -178,6 +202,7 @@ async def get_chat_context(
     """Context window usage for the chat UI."""
     from forge.api.routes.knowledge import _validate_kb_id
     from forge.services.chat_context import context_status_for_history
+    from forge.services.inference_models import get_inference_option
     from forge.services.knowledge_context import format_knowledge_context, retrieve_knowledge_chunks
 
     history: list[dict] = []
@@ -185,6 +210,16 @@ async def get_chat_context(
         if not await db.get_thread_for_user(thread_id, user_id):
             raise HTTPException(404, "Thread not found")
         history = await db.get_messages(thread_id)
+
+    model_path: str | None = None
+    model_format: str | None = None
+    model_name: str | None = None
+    if model_id:
+        selected = await get_inference_option(db, user_id, model_id)
+        if selected:
+            model_path = selected.get("path")
+            model_format = selected.get("format")
+            model_name = selected.get("name")
 
     knowledge_context: str | None = None
     if knowledge_base_id:
@@ -207,6 +242,9 @@ async def get_chat_context(
         max_tokens=max_tokens,
         n_ctx=n_ctx,
         model_id=model_id,
+        model_path=model_path,
+        model_format=model_format,
+        model_name=model_name,
         tools_enabled=tools,
         knowledge_context=knowledge_context,
     )
@@ -435,6 +473,8 @@ def _warm_local_model(runner, payload: dict[str, Any]) -> None:
         n_ctx = payload.get("n_ctx") or estimate_llama_n_ctx(
             messages,
             max_tokens=int(payload.get("max_tokens", 1)),
+            model_path=resolved_path,
+            model_format=payload.get("model_format"),
         )
         pool.get_llama(resolved_path, n_ctx=n_ctx)
 

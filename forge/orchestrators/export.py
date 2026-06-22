@@ -34,6 +34,10 @@ class ExportOrchestrator(Orchestrator):
             log=lambda msg: self._emit_log(job_id, msg),
         )
 
+        from seiso.models.hf_env import configure_hf_hub_cache
+
+        configure_hf_hub_cache(self.sandbox_root)
+
         hub_meta_raw = payload.get("hub_metadata")
         hub_metadata = HubModelMetadata(**hub_meta_raw) if hub_meta_raw else None
         output_dir = Path(

@@ -10,9 +10,9 @@ export function streamHubModelDownload(
   repo: string,
   variant: "gguf" | "safetensors",
   onProgress?: ModelProgressHandler,
-  options: { signal?: AbortSignal; downloadBytes?: number } = {},
+  options: { signal?: AbortSignal; downloadBytes?: number; filename?: string } = {},
 ): Promise<string> {
-  const { signal, downloadBytes } = options;
+  const { signal, downloadBytes, filename } = options;
   throwIfAborted(signal);
   onProgress?.(initialDownloadProgress(repo, downloadBytes));
 
@@ -50,6 +50,7 @@ export function streamHubModelDownload(
           invalidateApiCache("/inference/models");
           invalidateApiCache("/training/models");
           invalidateApiCache("/models");
+          if (modelId) invalidateApiCache(`/inference/models/${modelId}/variants`);
           finishResolve(modelId);
         },
         onError: (msg) => {
@@ -58,6 +59,7 @@ export function streamHubModelDownload(
         },
       },
       variant,
+      filename ? { filename } : {},
     );
 
     const onAbort = () => {

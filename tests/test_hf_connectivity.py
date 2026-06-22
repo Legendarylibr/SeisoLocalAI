@@ -40,28 +40,28 @@ def test_configure_hf_hub_cache_sets_env(monkeypatch, tmp_path):
 
 def test_configure_hf_hub_cache_preserves_user_transfer_settings(monkeypatch, tmp_path):
     custom_cache = tmp_path / "custom-cache"
-    custom_home = tmp_path / "custom-home"
     custom_xet = tmp_path / "custom-xet"
     monkeypatch.setenv("HUGGINGFACE_HUB_CACHE", str(custom_cache))
-    monkeypatch.setenv("HF_HOME", str(custom_home))
     monkeypatch.setenv("HF_XET_CACHE", str(custom_xet))
     monkeypatch.setenv("HF_HUB_DOWNLOAD_TIMEOUT", "900")
     monkeypatch.setenv("HF_HUB_ETAG_TIMEOUT", "45")
     monkeypatch.setenv("HF_HUB_NUM_THREADS", "4")
-    monkeypatch.setenv("HF_XET_HIGH_PERFORMANCE", "0")
+    monkeypatch.setenv("HF_HUB_ENABLE_HF_TRANSFER", "1")
+    monkeypatch.setattr("seiso.models.hf_env._xet_available", lambda: True)
 
     cache = configure_hf_hub_cache(tmp_path)
 
     assert cache == custom_cache
-    assert os.environ["HF_HOME"] == str(custom_home)
+    assert os.environ["HF_HOME"] == str(tmp_path / "hf_home")
     assert os.environ["HUGGINGFACE_HUB_CACHE"] == str(custom_cache)
     assert os.environ["HF_XET_CACHE"] == str(custom_xet)
     assert custom_xet.is_dir()
-    assert (custom_home / "xet" / "logs").is_dir()
+    assert (tmp_path / "hf_home" / "xet" / "logs").is_dir()
     assert os.environ["HF_HUB_DOWNLOAD_TIMEOUT"] == "900"
     assert os.environ["HF_HUB_ETAG_TIMEOUT"] == "45"
     assert os.environ["HF_HUB_NUM_THREADS"] == "4"
-    assert os.environ["HF_XET_HIGH_PERFORMANCE"] == "0"
+    assert os.environ["HF_XET_HIGH_PERFORMANCE"] == "1"
+    assert "HF_HUB_ENABLE_HF_TRANSFER" not in os.environ
 
 
 def test_hf_transfer_stack_reports_backend():

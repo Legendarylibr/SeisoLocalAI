@@ -7,6 +7,25 @@ from typing import Literal
 HubErrorContext = Literal["search", "download", "probe"]
 
 
+def is_gated_hub_error(exc: BaseException) -> bool:
+    """True when Hub denied access (gated repo, missing/invalid token for private model)."""
+    code = getattr(getattr(exc, "response", None), "status_code", None)
+    if code in (401, 403):
+        return True
+    msg = str(exc).strip().lower()
+    return any(
+        token in msg
+        for token in (
+            "gated",
+            "authorized list",
+            "not in the authorized",
+            "access denied",
+            "403",
+            "401",
+        )
+    )
+
+
 def is_hub_transport_error(exc: BaseException) -> bool:
     """True for network/proxy/DNS failures — not Hub HTTP 4xx/5xx (HfHubHTTPError)."""
     if isinstance(exc, OSError):
@@ -38,6 +57,12 @@ def format_hub_error(
         or "authorized" in lowered
     ):
         if context == "download" and repo_id:
+            if "authorized" in lowered or "gated" in lowered:
+                return (
+                    f"Access denied for {repo_id}. Open https://huggingface.co/{repo_id}, "
+                    "sign in, and accept the model license — then retry. "
+                    "You can also save a Hugging Face token in Settings or run `hf auth login`."
+                )
             return (
                 f"Access denied for {repo_id}. This model may be gated — "
                 "save a Hugging Face token in Settings or run `hf auth login`."

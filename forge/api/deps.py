@@ -11,6 +11,7 @@ from forge.orchestrators.base import Orchestrator
 from forge.orchestrators.compress import CompressOrchestrator
 from forge.orchestrators.distill_rl import DistillRLOrchestrator
 from forge.orchestrators.export import ExportOrchestrator
+from forge.orchestrators.hub_publish import HubPublishOrchestrator
 from forge.orchestrators.inference import InferenceOrchestrator
 from forge.orchestrators.knowledge import KnowledgeOrchestrator
 from forge.orchestrators.recipes import RecipeOrchestrator
@@ -41,6 +42,7 @@ def get_db() -> Database:
 
 get_training_orchestrator = _orchestrator_dep(TrainingOrchestrator)
 get_export_orchestrator = _orchestrator_dep(ExportOrchestrator)
+get_hub_publish_orchestrator = _orchestrator_dep(HubPublishOrchestrator)
 get_inference_orchestrator = _orchestrator_dep(InferenceOrchestrator)
 get_rl_quant_orchestrator = _orchestrator_dep(RLQuantOrchestrator)
 get_compress_orchestrator = _orchestrator_dep(CompressOrchestrator)

@@ -123,6 +123,14 @@ def _build_local_option(
         "size_bytes": row.get("size_bytes", 0),
         "metadata": metadata,
     }
+    from forge.services.inference_variants import extract_quant_label, variant_group_key
+
+    opt["quant_label"] = extract_quant_label(
+        name=row["name"],
+        path=row["path"],
+        metadata=metadata,
+    )
+    opt["variant_group"] = variant_group_key(opt)
     if not backends and (row.get("format") or "").lower() == "gguf":
         runtime = check_inference_runtime()
         opt["install_hints"] = [

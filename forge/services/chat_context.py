@@ -11,9 +11,9 @@ from forge.services.chat_messages import (
     trim_messages_to_context,
 )
 from forge.services.model_prompts import resolve_model_key
+from seiso.inference.context_limits import context_window_presets, effective_context_ceiling
 from seiso.inference.tuning import estimate_llama_n_ctx
 from seiso.memory.protection import (
-    _MAX_LLAMA_CTX,
     _MIN_LLAMA_CTX,
     _estimate_prompt_tokens,
     clamp_llama_n_ctx,
@@ -38,6 +38,9 @@ def compute_chat_context_status(
     max_tokens: int = 2048,
     n_ctx: int | None = None,
     model_key: str = "default",
+    model_path: str | None = None,
+    model_format: str | None = None,
+    model_name: str | None = None,
     tools_enabled: bool = False,
     knowledge_context: str | None = None,
 ) -> dict[str, Any]:
@@ -53,12 +56,29 @@ def compute_chat_context_status(
         knowledge_context=knowledge_context,
     )
     est_prompt_tokens = _estimate_prompt_tokens(prepared)
-    n_ctx_auto = estimate_llama_n_ctx(prepared, max_tokens=max_tokens)
-    n_ctx_max = clamp_llama_n_ctx(_MAX_LLAMA_CTX, messages=prepared, max_tokens=max_tokens)
+    n_ctx_auto = estimate_llama_n_ctx(
+        prepared,
+        max_tokens=max_tokens,
+        model_path=model_path,
+        model_format=model_format,
+        model_name=model_name,
+    )
+    n_ctx_max = effective_context_ceiling(
+        model_path,
+        model_format=model_format,
+        model_name=model_name,
+    )
     if n_ctx is None:
         n_ctx_effective = n_ctx_auto
     else:
-        n_ctx_effective = clamp_llama_n_ctx(n_ctx, messages=prepared, max_tokens=max_tokens)
+        n_ctx_effective = clamp_llama_n_ctx(
+            n_ctx,
+            messages=prepared,
+            max_tokens=max_tokens,
+            model_path=model_path,
+            model_format=model_format,
+            model_name=model_name,
+        )
 
     reserved = max(1, int(max_tokens))
     total_need = est_prompt_tokens + reserved
@@ -77,6 +97,7 @@ def compute_chat_context_status(
         "n_ctx_auto": n_ctx_auto,
         "n_ctx_min": _MIN_LLAMA_CTX,
         "n_ctx_max": n_ctx_max,
+        "context_window_options": context_window_presets(n_ctx_max),
         "context_tokens_used": total_need,
         "context_tokens_limit": n_ctx_effective,
         "fill_ratio": round(fill_ratio, 4),
@@ -91,6 +112,8 @@ def context_status_for_history(
     n_ctx: int | None = None,
     model_id: str | None = None,
     model_path: str | None = None,
+    model_format: str | None = None,
+    model_name: str | None = None,
     tools_enabled: bool = False,
     knowledge_context: str | None = None,
 ) -> dict[str, Any]:
@@ -103,6 +126,9 @@ def context_status_for_history(
         max_tokens=max_tokens,
         n_ctx=n_ctx,
         model_key=model_key,
+        model_path=model_path,
+        model_format=model_format,
+        model_name=model_name,
         tools_enabled=tools_enabled,
         knowledge_context=knowledge_context,
     )

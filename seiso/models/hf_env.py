@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import contextlib
+import logging
 import os
 from pathlib import Path
 from typing import Any
 
 from seiso.security import resolve_data_dir
+
+logger = logging.getLogger(__name__)
 
 
 def resolve_hf_cache_dir(data_dir: Path | None = None) -> Path:
@@ -81,6 +85,60 @@ def hf_transfer_stack() -> dict[str, Any]:
     }
 
 
+def _read_hub_token() -> str | None:
+    """Read a Hugging Face token from env or the default CLI login locations."""
+    for key in ("HUGGING_FACE_HUB_TOKEN", "HF_TOKEN"):
+        raw = os.environ.get(key, "").strip()
+        if raw:
+            return raw
+    home = Path.home()
+    for path in (
+        home / ".cache" / "huggingface" / "token",
+        home / ".huggingface" / "token",
+    ):
+        if path.is_file():
+            raw = path.read_text(encoding="utf-8").strip()
+            if raw:
+                return raw
+    return None
+
+
+def configure_hf_hub_auth(token: str | None = None) -> str | None:
+    """
+    Ensure gated Hub models work when Seiso relocates HF_HOME away from ~/.cache.
+
+    huggingface_hub only reads ``$HF_HOME/token`` when HF_HOME is set; it does not
+    fall back to ``~/.cache/huggingface/token``. Mirror the CLI token into env (and
+    the active HF_HOME when configured) before model/dataset downloads.
+    """
+    resolved = (token or _read_hub_token() or "").strip() or None
+    if not resolved:
+        return None
+    try:
+        from huggingface_hub import HfApi
+
+        HfApi(token=resolved).whoami()
+    except Exception:
+        logger.warning(
+            "Hugging Face token is missing or invalid — gated models and some datasets "
+            "will fail until you run `hf auth login` or save a token in Seiso Settings."
+        )
+        return None
+    os.environ["HF_TOKEN"] = resolved
+    os.environ["HUGGING_FACE_HUB_TOKEN"] = resolved
+    hf_home = os.environ.get("HF_HOME", "").strip()
+    if hf_home:
+        token_path = Path(hf_home).expanduser() / "token"
+        try:
+            token_path.parent.mkdir(parents=True, exist_ok=True)
+            if not token_path.exists() or token_path.read_text(encoding="utf-8").strip() != resolved:
+                token_path.write_text(resolved + "\n", encoding="utf-8")
+                token_path.chmod(0o600)
+        except OSError:
+            pass
+    return resolved
+
+
 def configure_hf_hub_cache(data_dir: Path | None = None) -> Path:
     """
     Point HF libraries at Seiso's shared cache and apply standard transfer tuning.
@@ -92,17 +150,25 @@ def configure_hf_hub_cache(data_dir: Path | None = None) -> Path:
     - Xet cache/log state under the Seiso data dir instead of the user's global cache
     """
     root = resolve_data_dir(data_dir)
-    hf_home = Path(os.environ.get("HF_HOME", root / "hf_home")).expanduser()
-    os.environ.setdefault("HF_HOME", str(hf_home))
+    hf_home = root / "hf_home"
     if raw_cache := os.environ.get("HUGGINGFACE_HUB_CACHE"):
         cache = Path(raw_cache).expanduser()
     else:
         cache = root / "hf_cache"
     cache.mkdir(parents=True, exist_ok=True)
-    os.environ.setdefault("HUGGINGFACE_HUB_CACHE", str(cache))
+    # Always relocate Hub state under Seiso's data dir (do not leave a stale HF_HOME).
+    os.environ["HF_HOME"] = str(hf_home)
+    os.environ["HUGGINGFACE_HUB_CACHE"] = str(cache)
     xet_cache = Path(os.environ.get("HF_XET_CACHE", root / "hf_xet_cache")).expanduser()
     xet_cache.mkdir(parents=True, exist_ok=True)
-    os.environ.setdefault("HF_XET_CACHE", str(xet_cache))
+    os.environ["HF_XET_CACHE"] = str(xet_cache)
+    # huggingface_hub may have cached default paths at import time — refresh when loaded.
+    with contextlib.suppress(Exception):
+        import huggingface_hub.constants as hf_constants
+
+        hf_constants.HF_HOME = os.environ["HF_HOME"]
+        hf_constants.HF_HUB_CACHE = os.environ["HUGGINGFACE_HUB_CACHE"]
+        hf_constants.default_cache_path = cache
     # hf-xet writes logs under HF_HOME/xet/logs; create it early so failures are actionable.
     (hf_home / "xet" / "logs").mkdir(parents=True, exist_ok=True)
     # Generous defaults for large GGUF / safetensors downloads
@@ -110,6 +176,9 @@ def configure_hf_hub_cache(data_dir: Path | None = None) -> Path:
     os.environ.setdefault("HF_HUB_ETAG_TIMEOUT", "30")
     # More parallel shard downloads when hf-xet is available.
     os.environ.setdefault("HF_HUB_NUM_THREADS", default_hub_num_threads())
+    # hf_transfer was removed; the old env var is a silent no-op and can hide missing XET tuning.
+    os.environ.pop("HF_HUB_ENABLE_HF_TRANSFER", None)
     if _xet_available():
-        os.environ.setdefault("HF_XET_HIGH_PERFORMANCE", "1")
+        os.environ["HF_XET_HIGH_PERFORMANCE"] = "1"
+    configure_hf_hub_auth()
     return cache

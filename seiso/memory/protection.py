@@ -27,7 +27,7 @@ _INFERENCE_OVERHEAD_MB = 512
 _TRAINING_OVERHEAD_RATIO = 2.2
 # Absolute ceilings — never exceed even on large machines.
 _MAX_INFERENCE_TOKENS = 8192
-_MAX_LLAMA_CTX = 8192
+_MAX_LLAMA_CTX = 131072
 _MIN_LLAMA_CTX = 2048
 _MAX_LLAMA_BATCH = 2048
 _MIN_LLAMA_BATCH = 128
@@ -337,7 +337,11 @@ def sanitize_inference_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
     if out.get("n_ctx") is not None:
         out["n_ctx"] = clamp_llama_n_ctx(
-            int(out["n_ctx"]), messages=messages, max_tokens=max_tokens
+            int(out["n_ctx"]),
+            messages=messages,
+            max_tokens=max_tokens,
+            model_path=out.get("model_path"),
+            model_format=out.get("model_format"),
         )
     return out
 
@@ -347,8 +351,13 @@ def clamp_llama_n_ctx(
     *,
     messages: list[dict[str, Any]] | None = None,
     max_tokens: int = 512,
+    model_path: str | None = None,
+    model_format: str | None = None,
+    model_name: str | None = None,
 ) -> int:
-    """Bound llama.cpp context to prompt + generation + headroom."""
+    """Bound llama.cpp context to prompt + generation + headroom + model capability."""
+    from seiso.inference.context_limits import effective_context_ceiling
+
     messages = messages or []
     prompt_tokens = _estimate_prompt_tokens(messages)
     needed = prompt_tokens + max_tokens + 128
@@ -356,10 +365,11 @@ def clamp_llama_n_ctx(
     sized = ((needed + step - 1) // step) * step
     sized = max(_MIN_LLAMA_CTX, min(_MAX_LLAMA_CTX, sized))
 
-    headroom = headroom_mb()
-    ctx_cap = max(_MIN_LLAMA_CTX, int((headroom - _INFERENCE_OVERHEAD_MB) * 4))
-    ctx_cap = min(ctx_cap, _MAX_LLAMA_CTX)
-    ctx_cap = (ctx_cap // step) * step or _MIN_LLAMA_CTX
+    ctx_cap = effective_context_ceiling(
+        model_path,
+        model_format=model_format,
+        model_name=model_name,
+    )
 
     return min(max(n_ctx, sized), ctx_cap)
 

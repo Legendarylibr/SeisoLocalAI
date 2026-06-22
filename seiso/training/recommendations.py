@@ -37,6 +37,21 @@ _DATASET_HINTS: dict[str, dict[str, Any]] = {
         "train_on_responses_only": True,
         "note": "Multi-turn conversations — ShareGPT or chat format.",
     },
+    "meta-math/metamathqa": {
+        "dataset_format": "alpaca",
+        "train_on_responses_only": True,
+        "note": "Math Q&A pairs — uses query/response columns with assistant-only loss.",
+    },
+    "openai/gsm8k": {
+        "dataset_format": "alpaca",
+        "train_on_responses_only": True,
+        "note": "Grade-school math word problems — question/answer columns.",
+    },
+    "lighteval/math": {
+        "dataset_format": "alpaca",
+        "train_on_responses_only": True,
+        "note": "Competition math problems — question/solution columns when present.",
+    },
 }
 
 

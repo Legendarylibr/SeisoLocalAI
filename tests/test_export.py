@@ -291,6 +291,28 @@ def test_export_runs_hub_precheck_first(mock_merge, mock_precheck, mock_push, tm
     mock_push.assert_called_once()
 
 
+@patch("seiso.export.formats.HfApi")
+@patch("seiso.models.hf_env.configure_hf_hub_cache")
+def test_push_hub_uses_large_folder_for_big_uploads(mock_configure, mock_api_cls, tmp_path: Path):
+    from seiso.export.formats import _push_hub
+
+    folder = tmp_path / "gguf"
+    folder.mkdir()
+    big = folder / "model.gguf"
+    big.write_bytes(b"x" * (101 * 1024 * 1024))
+
+    api = MagicMock()
+    mock_api_cls.return_value = api
+    logs: list[str] = []
+
+    _push_hub("alice/model", "hf_test", folder, logs.append, data_dir=tmp_path)
+
+    mock_configure.assert_called_once_with(tmp_path)
+    api.upload_large_folder.assert_called_once()
+    api.upload_folder.assert_not_called()
+    assert any("resumable" in line.lower() for line in logs)
+
+
 # --- Pipeline ---
 
 

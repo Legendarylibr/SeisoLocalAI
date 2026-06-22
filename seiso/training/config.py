@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -93,7 +95,12 @@ class TrainConfig(BaseModel):
         return cls.model_validate(data)
 
 
-def run_training(config: TrainConfig, *, on_metric=None) -> Path:
+def run_training(
+    config: TrainConfig,
+    *,
+    on_metric=None,
+    on_log: Callable[[str], None] | None = None,
+) -> Path:
     """Execute training job; returns output checkpoint directory."""
     from seiso.memory.protection import apply_training_memory_guards
     from seiso.models.hf_env import configure_hf_hub_cache
@@ -102,9 +109,10 @@ def run_training(config: TrainConfig, *, on_metric=None) -> Path:
 
     from seiso.platform import ensure_cuda_library_path
 
-    configure_hf_hub_cache()
+    if not os.environ.get("HF_HOME"):
+        configure_hf_hub_cache(config.sandbox_root)
     ensure_cuda_library_path()
     enforce_nvidia_secure_boundary(context="training")
     config = apply_training_memory_guards(config)
-    trainer = SeisoTrainer(config, on_metric=on_metric)
+    trainer = SeisoTrainer(config, on_metric=on_metric, on_log=on_log)
     return trainer.run()

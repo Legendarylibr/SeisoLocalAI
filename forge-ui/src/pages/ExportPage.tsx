@@ -153,12 +153,18 @@ export function ExportPage() {
     setBusy(true);
     setLogs([]);
     try {
-      const res = await api.publishToHub({
+      const res = await api.startPublishToHub({
         model_id: selectedModelId || undefined,
         export_job_id: selectedExportJobId || undefined,
         hub: fields,
       });
-      setLogs([res.log || `Published to ${res.repo_id}`]);
+      streamAbortRef.current?.();
+      streamAbortRef.current = subscribeSSE(`/export/publish/jobs/${res.job_id}/stream`, (event, data) => {
+        if (event === "log" || event === "result") {
+          setLogs((l) => appendBoundedLog(l, data));
+        }
+        if (event === "error") setLogs((l) => appendBoundedLog(l, `ERROR: ${data}`));
+      });
     } catch (err) {
       setLogs([(err as Error).message]);
     } finally {

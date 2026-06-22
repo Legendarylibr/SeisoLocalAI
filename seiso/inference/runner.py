@@ -333,6 +333,8 @@ class LocalInferenceRunner:
         n_ctx = payload.get("n_ctx") or estimate_llama_n_ctx(
             messages,
             max_tokens=int(payload.get("max_tokens", 512)),
+            model_path=model_path,
+            model_format=payload.get("model_format"),
         )
         llm = self._pool.get_llama(model_path, n_ctx=n_ctx)
         kwargs = llama_completion_kwargs(payload)
@@ -356,6 +358,8 @@ class LocalInferenceRunner:
         n_ctx = payload.get("n_ctx") or estimate_llama_n_ctx(
             messages,
             max_tokens=int(payload.get("max_tokens", 512)),
+            model_path=model_path,
+            model_format=payload.get("model_format"),
         )
         try:
             llm = self._pool.get_llama(model_path, n_ctx=n_ctx)

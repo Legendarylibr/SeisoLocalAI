@@ -1,7 +1,14 @@
 import { request } from "./client";
 import { streamPostSSE } from "./sse";
 import { cachedGet } from "./getCache";
-import type { ChatContextStatus, ChatMessage, ChatThread, HardwareSummary, InferenceModelOption } from "./types";
+import type {
+  ChatContextStatus,
+  ChatMessage,
+  ChatThread,
+  HardwareSummary,
+  InferenceModelOption,
+  ModelVariantsResponse,
+} from "./types";
 
 export const inferenceApi = {
   listInferenceModels: () =>
@@ -59,4 +66,6 @@ export const inferenceApi = {
     return request<ChatContextStatus>(`/inference/context${suffix ? `?${suffix}` : ""}`);
   },
   deleteThread: (id: string) => request<{ status: string }>(`/inference/threads/${id}`, { method: "DELETE" }),
+  getModelVariants: (modelId: string) =>
+    cachedGet<ModelVariantsResponse>(`/inference/models/${encodeURIComponent(modelId)}/variants`, 30_000),
 };

@@ -12,13 +12,14 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
-from forge.api.deps import get_db, get_export_orchestrator
+from forge.api.deps import get_db, get_export_orchestrator, get_hub_publish_orchestrator
 from forge.api.http_errors import raise_forbidden
 from forge.api.routes._pipeline import PipelineJobResponse
 from forge.api.routes._stream import job_failure_message, spawn_background
 from forge.config import ForgeSettings, get_settings
 from forge.db.store import Database
 from forge.orchestrators.export import ExportOrchestrator
+from forge.orchestrators.hub_publish import HubPublishOrchestrator
 from forge.security.audit import audit_event
 from forge.security.auth import get_current_user_id
 from forge.services.hf_auth import resolve_hf_token
@@ -72,6 +73,50 @@ class PublishToHubRequest(BaseModel):
     output_path: str | None = None
     export_job_id: str | None = None
     hub: HubPublishRequest
+
+
+async def _resolve_publish_folder(
+    body: PublishToHubRequest,
+    *,
+    user_id: str,
+    db: Database,
+    data_dir: Path,
+) -> tuple[Path, str | None, str]:
+    """Return (folder, job_id, source) for a publish request."""
+    if body.model_id:
+        model = await assert_pushable_model(db, model_id=body.model_id, user_id=user_id)
+        folder = Path(model["path"])
+        meta_raw = json.loads(model.get("metadata_json") or "{}")
+        job_id = meta_raw.get("job_id")
+        source = model.get("source") or "export"
+    elif body.export_job_id:
+        job = await db.get_export_job(body.export_job_id, user_id)
+        if not job or job.get("status") != "completed":
+            raise HTTPException(400, "Export job not found or not completed")
+        outputs = json.loads(job.get("output_paths_json") or "{}")
+        if not outputs:
+            raise HTTPException(400, "Export job has no outputs")
+        preferred = next((v for k, v in outputs.items() if "gguf" in k.lower()), None)
+        if not preferred:
+            preferred = outputs.get("merged") or next(iter(outputs.values()))
+        folder = Path(preferred)
+        job_id = body.export_job_id
+        source = "export"
+    elif body.output_path:
+        try:
+            folder = await assert_pushable_path(
+                db, data_dir=data_dir, user_id=user_id, target=body.output_path
+            )
+        except (SecurityError, ValueError) as exc:
+            raise HTTPException(403 if isinstance(exc, SecurityError) else 400, str(exc)) from exc
+        job_id = None
+        source = "export"
+    else:
+        raise HTTPException(400, "Provide model_id, export_job_id, or output_path")
+
+    if folder.is_file():
+        folder = folder.parent
+    return folder, job_id, source
 
 
 def _hub_metadata_from_request(
@@ -285,14 +330,15 @@ async def start_export(
     return PipelineJobResponse(job_id=job_id, status="pending")
 
 
-@router.post("/publish")
-async def publish_to_hub(
+@router.post("/publish/jobs", response_model=PipelineJobResponse)
+async def start_publish_to_hub(
     body: PublishToHubRequest,
     user_id: Annotated[str, Depends(get_current_user_id)],
     db: Annotated[Database, Depends(get_db)],
+    orchestrator: Annotated[HubPublishOrchestrator, Depends(get_hub_publish_orchestrator)],
     settings: Annotated[ForgeSettings, Depends(get_settings)],
-) -> dict[str, str]:
-    """Publish a completed Seiso export output to Hugging Face."""
+) -> PipelineJobResponse:
+    """Start a background Hugging Face publish job (required for multi-GB GGUF uploads)."""
     token = _resolve_token(settings, user_id, body.hub)
     if not token:
         raise HTTPException(
@@ -304,41 +350,99 @@ async def publish_to_hub(
     meta.validate()
     repo_id = meta.repo_id
 
-    folder: Path | None = None
-    job_id: str | None = None
-    source = "export"
+    folder, job_id, source = await _resolve_publish_folder(
+        body,
+        user_id=user_id,
+        db=db,
+        data_dir=settings.data_dir,
+    )
+    meta.seiso_job_id = job_id
+    meta.seiso_source = source
 
-    if body.model_id:
-        model = await assert_pushable_model(db, model_id=body.model_id, user_id=user_id)
-        folder = Path(model["path"])
-        meta_raw = json.loads(model.get("metadata_json") or "{}")
-        job_id = meta_raw.get("job_id")
-        source = model.get("source") or "export"
-    elif body.export_job_id:
-        job = await db.get_export_job(body.export_job_id, user_id)
-        if not job or job.get("status") != "completed":
-            raise HTTPException(400, "Export job not found or not completed")
-        outputs = json.loads(job.get("output_paths_json") or "{}")
-        if not outputs:
-            raise HTTPException(400, "Export job has no outputs")
-        preferred = next((v for k, v in outputs.items() if "gguf" in k.lower()), None)
-        if not preferred:
-            preferred = outputs.get("merged") or next(iter(outputs.values()))
-        folder = Path(preferred)
-        job_id = body.export_job_id
-    elif body.output_path:
+    from seiso.export.hub_precheck import assert_hub_precheck_ok, precheck_hub_export
+
+    precheck = precheck_hub_export(
+        repo_id=repo_id,
+        token=token,
+        metadata=meta,
+        formats=meta.export_formats or None,
+    )
+    if not precheck.ok:
         try:
-            folder = await assert_pushable_path(
-                db, data_dir=settings.data_dir, user_id=user_id, target=body.output_path
-            )
-        except (SecurityError, ValueError) as exc:
-            raise HTTPException(403 if isinstance(exc, SecurityError) else 400, str(exc)) from exc
-    else:
-        raise HTTPException(400, "Provide model_id, export_job_id, or output_path")
+            assert_hub_precheck_ok(precheck)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
 
-    if folder.is_file():
-        folder = folder.parent
+    publish_job_id = str(uuid.uuid4())
+    orchestrator.create_job(job_id=publish_job_id, user_id=user_id)
+    payload: dict[str, Any] = {
+        "user_id": user_id,
+        "folder": str(folder),
+        "repo_id": repo_id,
+        "token": token,
+        "metadata": meta.__dict__,
+        "quantizations": meta.quantizations or None,
+    }
 
+    async def _run() -> None:
+        try:
+            await orchestrator.start(publish_job_id, payload)
+            await orchestrator.wait_for(publish_job_id)
+        except Exception as exc:
+            job = orchestrator.get_job(publish_job_id)
+            if job and job.status.value != "failed":
+                orchestrator._emit_log(publish_job_id, f"ERROR: {exc}")
+
+    spawn_background(_run())
+    audit_event("hf_publish_start", user_id=user_id, repo_id=repo_id, path=str(folder))
+    return PipelineJobResponse(job_id=publish_job_id, status="pending")
+
+
+@router.get("/publish/jobs/{job_id}/stream")
+async def stream_publish_to_hub(
+    job_id: str,
+    user_id: Annotated[str, Depends(get_current_user_id)],
+    orchestrator: Annotated[HubPublishOrchestrator, Depends(get_hub_publish_orchestrator)],
+):
+    assert_job_owner(orchestrator, job_id, user_id)
+
+    async def event_gen():
+        async for line in orchestrator.stream_logs(job_id):
+            yield {"event": "log", "data": line}
+        j = orchestrator.get_job(job_id)
+        if j and j.error:
+            yield {"event": "error", "data": j.error}
+        if j and j.result:
+            yield {"event": "result", "data": str(j.result)}
+
+    return EventSourceResponse(event_gen())
+
+
+@router.post("/publish")
+async def publish_to_hub(
+    body: PublishToHubRequest,
+    user_id: Annotated[str, Depends(get_current_user_id)],
+    db: Annotated[Database, Depends(get_db)],
+    settings: Annotated[ForgeSettings, Depends(get_settings)],
+) -> dict[str, str]:
+    """Publish synchronously — prefer POST /export/publish/jobs for large GGUF files."""
+    token = _resolve_token(settings, user_id, body.hub)
+    if not token:
+        raise HTTPException(
+            400,
+            "Hugging Face token required. Enter an API token, save one in Settings, set SEISO_HF_TOKEN, or run `hf auth login`.",
+        )
+
+    meta = _hub_metadata_from_request(body.hub)
+    meta.validate()
+    repo_id = meta.repo_id
+
+    folder, job_id, source = await _resolve_publish_folder(
+        body,
+        user_id=user_id,
+        db=db,
+        data_dir=settings.data_dir,
+    )
     meta.seiso_job_id = job_id
     meta.seiso_source = source
 
@@ -363,7 +467,13 @@ async def publish_to_hub(
 
     try:
         publish_folder_to_hub(
-            folder, repo_id=repo_id, token=token, metadata=meta, on_log=on_log, skip_precheck=True
+            folder,
+            repo_id=repo_id,
+            token=token,
+            metadata=meta,
+            on_log=on_log,
+            skip_precheck=True,
+            data_dir=settings.data_dir,
         )
     except Exception as exc:
         raise HTTPException(500, f"Hugging Face upload failed: {exc}") from exc

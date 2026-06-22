@@ -2,13 +2,17 @@ import type { ChatContextStatus } from "@/lib/api/types";
 
 export const CHAT_CTX_STORAGE_KEY = "seiso.chat.context_window";
 
-export type ContextWindowSetting = "auto" | 2048 | 4096 | 8192;
+export type ContextWindowSetting = "auto" | number;
 
-export function readStoredContextWindow(): ContextWindowSetting {
+export const DEFAULT_CONTEXT_WINDOW_OPTIONS = [2048, 4096, 8192, 16384, 32768];
+
+export function readStoredContextWindow(maxAllowed = 131072): ContextWindowSetting {
   try {
     const raw = localStorage.getItem(CHAT_CTX_STORAGE_KEY);
-    if (raw === "auto" || raw === "2048" || raw === "4096" || raw === "8192") {
-      return raw === "auto" ? "auto" : Number(raw) as 2048 | 4096 | 8192;
+    if (raw === "auto") return "auto";
+    const value = Number(raw);
+    if (Number.isFinite(value) && value >= 2048 && value <= maxAllowed) {
+      return value;
     }
   } catch {
     /* ignore */
@@ -22,6 +26,24 @@ export function writeStoredContextWindow(value: ContextWindowSetting): void {
   } catch {
     /* ignore */
   }
+}
+
+export function contextWindowOptionsFromStatus(
+  status: ChatContextStatus | null | undefined,
+): number[] {
+  const options = status?.context_window_options?.filter((n) => n >= 2048) ?? [];
+  return options.length ? options : DEFAULT_CONTEXT_WINDOW_OPTIONS;
+}
+
+export function normalizeContextWindow(
+  value: ContextWindowSetting,
+  options: number[],
+): ContextWindowSetting {
+  if (value === "auto") return "auto";
+  if (options.includes(value)) return value;
+  const max = options[options.length - 1];
+  if (typeof max === "number" && value > max) return max;
+  return "auto";
 }
 
 export function formatTokenCount(value: number): string {
@@ -45,9 +67,12 @@ export function contextWindowFillClass(ratio: number): string {
 export function contextSummary(status: ChatContextStatus): string {
   const used = formatTokenCount(status.context_tokens_used);
   const limit = formatTokenCount(status.context_tokens_limit);
+  const max = status.n_ctx_max > status.context_tokens_limit
+    ? ` · max ${formatTokenCount(status.n_ctx_max)}`
+    : "";
   const msgs =
     status.messages_omitted > 0
       ? `${status.messages_included}/${status.message_count} msgs`
       : `${status.message_count} msgs`;
-  return `${used} / ${limit} ctx · ${msgs}`;
+  return `${used} / ${limit} ctx${max} · ${msgs}`;
 }

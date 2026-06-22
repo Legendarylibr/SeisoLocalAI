@@ -1,21 +1,31 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { api, ChatMessage, ChatThread, CatalogModel, InferenceModelOption, streamChat, VramStatus } from "@/lib/api";
+import { api, ChatMessage, ChatThread, CatalogModel, InferenceModelOption, ModelVariantsResponse, streamChat, VramStatus } from "@/lib/api";
 import { usePlatformSettings } from "@/context/PlatformSettingsContext";
 import { bootstrapChatSession, CHAT_BACKEND_STORAGE_KEY, CHAT_MODEL_STORAGE_KEY, hasChatNavTarget, initializeChatSession, isChatModelReady, modelMemoryBlocked, modelMemoryBlockReason, needsHubDownload, preloadWithProgress, resolveInferenceBackend } from "@/lib/chatModel";
 import { hasLoadedInferenceMemory } from "@/lib/hubHardware";
+import { streamHubModelDownload } from "@/lib/hubDownload";
+import { invalidateApiCache } from "@/lib/api/getCache";
 import { useHardwareProfile } from "@/hooks/useHardware";
 import { writeStoredModel } from "@/lib/modelSelection";
 import { computeTokensPerSec, estimateOutputTokens, formatTokensPerSec } from "@/lib/streamSpeed";
 import {
   ContextWindowSetting,
+  contextWindowOptionsFromStatus,
+  normalizeContextWindow,
   readStoredContextWindow,
   writeStoredContextWindow,
 } from "@/lib/chatContext";
+import {
+  ChatInferenceSettings,
+  readChatInferenceSettings,
+  writeChatInferenceSettings,
+} from "@/lib/chatInferenceSettings";
 import type { ChatContextStatus } from "@/lib/api/types";
 import { ModelProgressState, initialDownloadProgress, initialLoadProgress } from "@/lib/modelProgress";
 import { ChatModelPicker } from "@/components/ChatModelPicker";
 import { ChatContextBar } from "@/components/ChatContextBar";
+import { ChatInferencePanel } from "@/components/ChatInferencePanel";
 import { HardwareFitBadge } from "@/components/HardwareFitBadge";
 import { ModelLoadProgress } from "@/components/ModelLoadProgress";
 import {
@@ -76,10 +86,13 @@ export function ChatPage() {
   const [allowCodeExec, setAllowCodeExec] = useState(false);
   const [knowledgeBases, setKnowledgeBases] = useState<Array<{ id: string; chunk_count: number; has_index: boolean }>>([]);
   const [knowledgeBaseId, setKnowledgeBaseId] = useState("");
-  const [maxTokens, setMaxTokens] = useState(2048);
+  const [inferenceSettings, setInferenceSettings] = useState<ChatInferenceSettings>(() => readChatInferenceSettings());
   const [contextWindow, setContextWindow] = useState<ContextWindowSetting>(() => readStoredContextWindow());
   const [contextStatus, setContextStatus] = useState<ChatContextStatus | null>(null);
   const [contextLoading, setContextLoading] = useState(false);
+  const [modelVariants, setModelVariants] = useState<ModelVariantsResponse | null>(null);
+  const [variantsLoading, setVariantsLoading] = useState(false);
+  const [downloadingQuant, setDownloadingQuant] = useState<string | null>(null);
   const [providerId, setProviderId] = useState("");
   const [selection, setSelection] = useState("");
   const [inferenceBackend, setInferenceBackend] = useState("llamacpp");
@@ -122,6 +135,23 @@ export function ChatPage() {
     () => resolveInferenceBackend(selected, hwProfile, inferenceBackend),
     [selected, hwProfile, inferenceBackend],
   );
+  const chatBackend = useMemo(() => {
+    if (providerId) return "auto";
+    if (
+      inferenceSettings.specEnabled &&
+      inferenceSettings.draftModelId &&
+      modelVariants?.supports_speculative
+    ) {
+      return "torch";
+    }
+    return effectiveBackend;
+  }, [
+    providerId,
+    inferenceSettings.specEnabled,
+    inferenceSettings.draftModelId,
+    modelVariants?.supports_speculative,
+    effectiveBackend,
+  ]);
   const modelReady = useMemo(
     () => isChatModelReady(selection, effectiveBackend, loadedModelId, loadedBackend),
     [selection, effectiveBackend, loadedModelId, loadedBackend],
@@ -149,6 +179,11 @@ export function ChatPage() {
 
   const modelBlockReason = memoryBlockHint(selected);
 
+  const contextWindowOptions = useMemo(
+    () => contextWindowOptionsFromStatus(contextStatus),
+    [contextStatus],
+  );
+
   const refreshVramStatus = useCallback(async () => {
     try {
       const status = await api.vramStatus();
@@ -172,6 +207,9 @@ export function ChatPage() {
     const r = await api.listInferenceModels();
     setModels(r.models);
     if (selection) {
+      invalidateApiCache(`/inference/models/${selection}/variants`);
+    }
+    if (selection) {
       const still = r.models.find((m) => m.id === selection);
       if (still) return r.models;
     }
@@ -185,6 +223,39 @@ export function ChatPage() {
     }
     return r.models;
   }, [selection, hwProfile]);
+
+  const patchInferenceSettings = useCallback((partial: Partial<ChatInferenceSettings>) => {
+    setInferenceSettings((prev) => {
+      const next = { ...prev, ...partial };
+      writeChatInferenceSettings(next);
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!selection || providerId) {
+      setModelVariants(null);
+      return;
+    }
+
+    let cancelled = false;
+    setVariantsLoading(true);
+    void api
+      .getModelVariants(selection)
+      .then((variants) => {
+        if (!cancelled) setModelVariants(variants);
+      })
+      .catch(() => {
+        if (!cancelled) setModelVariants(null);
+      })
+      .finally(() => {
+        if (!cancelled) setVariantsLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selection, providerId, models]);
 
   const releaseInferenceMemory = useCallback(async () => {
     const status = await api.freeMemory();
@@ -253,6 +324,26 @@ export function ChatPage() {
       setError(e instanceof Error ? e.message : "Failed to load model into inference engine");
     } finally {
       setSwitchingModel(false);
+      setLoadProgress(null);
+    }
+  };
+
+  const handleDownloadHubVariant = async (repo: string, filename: string, quant: string) => {
+    if (providerId || switchingModel || downloadingQuant) return;
+    setDownloadingQuant(quant);
+    setError(null);
+    try {
+      const modelId = await streamHubModelDownload(repo, "gguf", setLoadProgress, { filename });
+      invalidateApiCache(`/inference/models/${modelId}/variants`);
+      await refreshModels();
+      await handleModelChange(modelId);
+      void api.getModelVariants(modelId).then(setModelVariants).catch(() => setModelVariants(null));
+    } catch (e) {
+      if (!(e instanceof DOMException && e.name === "AbortError")) {
+        setError(e instanceof Error ? e.message : "Quant download failed");
+      }
+    } finally {
+      setDownloadingQuant(null);
       setLoadProgress(null);
     }
   };
@@ -503,7 +594,7 @@ export function ChatPage() {
         try {
           const status = await api.getContextStatus({
             thread_id: active,
-            max_tokens: maxTokens,
+            max_tokens: inferenceSettings.maxTokens,
             n_ctx: contextWindow === "auto" ? null : contextWindow,
             tools: useTools && toolsAvailable,
             knowledge_base_id: knowledgeBaseId || null,
@@ -527,7 +618,7 @@ export function ChatPage() {
     active,
     messageCount,
     streaming,
-    maxTokens,
+    inferenceSettings.maxTokens,
     contextWindow,
     knowledgeBaseId,
     selection,
@@ -535,6 +626,14 @@ export function ChatPage() {
     useTools,
     toolsAvailable,
   ]);
+
+  useEffect(() => {
+    const normalized = normalizeContextWindow(contextWindow, contextWindowOptions);
+    if (normalized !== contextWindow) {
+      setContextWindow(normalized);
+      writeStoredContextWindow(normalized);
+    }
+  }, [contextWindow, contextWindowOptions]);
 
   const openThread = (t: ChatThread) => {
     setActive(t.id);
@@ -698,9 +797,21 @@ export function ChatPage() {
           allow_code_exec: allowCodeExec && codeExecAvailable,
           provider_id: providerId || null,
           model_id: providerId ? null : selection || null,
-          inference_backend: providerId ? "auto" : effectiveBackend,
-          max_tokens: maxTokens,
+          inference_backend: providerId ? "auto" : chatBackend,
+          max_tokens: inferenceSettings.maxTokens,
+          temperature: inferenceSettings.temperature,
+          ...(inferenceSettings.topPEnabled && inferenceSettings.temperature > 0
+            ? { top_p: inferenceSettings.topP }
+            : {}),
           ...(contextWindow !== "auto" ? { n_ctx: contextWindow } : {}),
+          ...(inferenceSettings.specEnabled &&
+          inferenceSettings.draftModelId &&
+          modelVariants?.supports_speculative
+            ? {
+                draft_model_id: inferenceSettings.draftModelId,
+                num_speculative_tokens: inferenceSettings.numSpeculativeTokens,
+              }
+            : {}),
           knowledge_base_id: knowledgeBaseId || null,
         },
         {
@@ -786,6 +897,10 @@ export function ChatPage() {
   const handleContextWindowChange = (value: ContextWindowSetting) => {
     setContextWindow(value);
     writeStoredContextWindow(value);
+  };
+
+  const handleInferencePanelOpenChange = (open: boolean) => {
+    patchInferenceSettings({ panelOpen: open });
   };
 
   return (
@@ -977,20 +1092,6 @@ export function ChatPage() {
             <input type="checkbox" checked={useTools} disabled={!toolsAvailable} onChange={(e) => setUseTools(e.target.checked)} />
             Tools
           </label>
-          <label className="chat-max-tokens" title="Maximum response length">
-            <span className="muted-text">Max</span>
-            <select
-              value={maxTokens}
-              onChange={(e) => setMaxTokens(Number(e.target.value))}
-              disabled={streaming}
-            >
-              <option value={512}>512</option>
-              <option value={1024}>1k</option>
-              <option value={2048}>2k</option>
-              <option value={4096}>4k</option>
-              <option value={8192}>8k</option>
-            </select>
-          </label>
           {switchingModel && !loadProgress && (
             <span className="chat-vram-hint">Preparing model…</span>
           )}
@@ -1018,10 +1119,26 @@ export function ChatPage() {
 
         <ChatContextBar
           status={contextStatus}
-          contextWindow={contextWindow}
           loading={contextLoading}
-          disabled={streaming}
+        />
+
+        <ChatInferencePanel
+          open={inferenceSettings.panelOpen}
+          onOpenChange={handleInferencePanelOpenChange}
+          settings={inferenceSettings}
+          onSettingsChange={patchInferenceSettings}
+          contextWindow={contextWindow}
           onContextWindowChange={handleContextWindowChange}
+          contextWindowOptions={contextWindowOptions}
+          variants={modelVariants}
+          variantsLoading={variantsLoading}
+          downloadingQuant={downloadingQuant}
+          disabled={streaming}
+          providerActive={!!providerId}
+          onSelectLocalVariant={(modelId) => void handleModelChange(modelId)}
+          onDownloadHubVariant={(repo, filename, quant) =>
+            void handleDownloadHubVariant(repo, filename, quant)
+          }
         />
 
         {showModelStatus && (

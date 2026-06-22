@@ -53,6 +53,9 @@ def load_torch(
 ) -> tuple[Any, Any]:
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
+    from seiso.models.hf_env import _read_hub_token
+
+    hub_token = _read_hub_token()
     tokenizer_kwargs: dict[str, Any] = {
         "trust_remote_code": options.trust_remote_code,
         "revision": options.revision or "main",
@@ -61,6 +64,9 @@ def load_torch(
         "trust_remote_code": options.trust_remote_code,
         "revision": options.revision or "main",
     }
+    if hub_token:
+        tokenizer_kwargs["token"] = hub_token
+        model_kwargs["token"] = hub_token
 
     device_map = _resolve_device_map(backend, device, for_training=for_training)
     if device_map is not None:

@@ -43,14 +43,27 @@ logger = logging.getLogger(__name__)
 
 class SeisoTrainer:
     def __init__(
-        self, config: TrainConfig, *, on_metric: Callable[[dict[str, Any]], None] | None = None
+        self,
+        config: TrainConfig,
+        *,
+        on_metric: Callable[[dict[str, Any]], None] | None = None,
+        on_log: Callable[[str], None] | None = None,
     ) -> None:
         self.config = config
         self.config.output_dir.mkdir(parents=True, exist_ok=True)
         self._kernel_meta: dict = {}
         self._loaded: SeisoModel | None = None
         self._on_metric = on_metric
+        self._on_log = on_log
         self._metrics_callback = None
+
+    def _log(self, message: str) -> None:
+        logger.info(message)
+        if self._on_log:
+            try:
+                self._on_log(message)
+            except Exception:
+                logger.exception("on_log callback failed")
 
     def run(self) -> Path:
         self.config = apply_training_memory_guards(self.config)
@@ -117,6 +130,10 @@ class SeisoTrainer:
 
         ds_fmt = cfg.dataset_format
         raw_ds = load_training_dataset(cfg.dataset, sandbox_root=cfg.sandbox_root)
+        max_samples = cfg.extra.get("max_samples")
+        if isinstance(max_samples, int) and max_samples > 0 and len(raw_ds) > max_samples:
+            raw_ds = raw_ds.select(range(max_samples))
+            logger.info("Limited dataset to %d samples (max_samples)", max_samples)
         if cfg.eval_split_ratio > 0 and len(raw_ds) > 10:
             split = raw_ds.train_test_split(test_size=cfg.eval_split_ratio, seed=cfg.seed)
             train_ds, eval_ds = split["train"], split["test"]
@@ -243,13 +260,43 @@ class SeisoTrainer:
             raise ValueError(GGUF_ONLY_REPO_MESSAGE)
         ensure_load_fits(model_ref, mode="train")
 
-        self._loaded = SeisoModel.from_pretrained(
-            model_ref,
-            max_seq_length=cfg.max_seq_length,
-            load_in_4bit=load_4bit,
-            load_in_8bit=load_8bit,
-            dtype="float16" if cfg.quant == QuantMode.INT16 else None,
-        )
+        from seiso.models.hf_env import configure_hf_hub_auth
+        from seiso.models.trainable_mirrors import resolve_trainable_hub_id
+
+        hub_token = configure_hf_hub_auth()
+        if not Path(model_ref).exists():
+            resolved_hub, mirror_note = resolve_trainable_hub_id(
+                str(cfg.model_id),
+                token=hub_token,
+            )
+            if mirror_note and "Training with mirror" in mirror_note:
+                model_ref = resolved_hub
+                cfg.extra.setdefault("training_mirror_note", mirror_note)
+                logger.warning(mirror_note)
+            elif mirror_note:
+                raise ValueError(mirror_note)
+
+        if not Path(model_ref).exists():
+            self._log(
+                f"Downloading trainable weights for {model_ref} from Hugging Face "
+                "(large models can take 10-30 minutes before the first training step)..."
+            )
+        else:
+            self._log(f"Loading trainable weights from {model_ref}")
+
+        try:
+            self._loaded = SeisoModel.from_pretrained(
+                model_ref,
+                max_seq_length=cfg.max_seq_length,
+                load_in_4bit=load_4bit,
+                load_in_8bit=load_8bit,
+                dtype="float16" if cfg.quant == QuantMode.INT16 else None,
+            )
+        except OSError as exc:
+            from seiso.models.hub_errors import format_hub_error
+
+            msg = format_hub_error(exc, context="download", repo_id=str(cfg.model_id))
+            raise ValueError(msg) from exc
         model, tokenizer = self._loaded.model, self._loaded.tokenizer
 
         if cfg.method == TrainMethod.LORA and cfg.quant in (QuantMode.INT4, QuantMode.INT8):

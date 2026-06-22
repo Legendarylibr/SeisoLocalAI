@@ -64,6 +64,41 @@ def _serialize_metrics_payload(
     }
 
 
+def _effective_job_status(
+    db_status: str,
+    orchestrator: TrainingOrchestrator,
+    job_id: str,
+) -> str:
+    live = orchestrator.get_job(job_id)
+    if not live:
+        return db_status
+    live_status = live.status.value
+    if db_status == "pending" and live_status in ("running", "completed", "failed", "cancelled"):
+        return live_status
+    return db_status
+
+
+def _format_training_job_row(
+    row: dict[str, Any],
+    orchestrator: TrainingOrchestrator | None = None,
+) -> dict[str, Any]:
+    job_id = str(row.get("id", ""))
+    status = str(row.get("status", "unknown"))
+    if orchestrator is not None:
+        status = _effective_job_status(status, orchestrator, job_id)
+    return {
+        "id": job_id,
+        "status": status,
+        "config_json": row.get("config_json"),
+        "metrics_json": row.get("metrics_json"),
+        "error_text": row.get("error_text"),
+        "checkpoint_path": row.get("checkpoint_path"),
+        "created_at": row.get("created_at"),
+        "updated_at": row.get("updated_at"),
+        "project_id": row.get("project_id"),
+    }
+
+
 @router.get("/datasets")
 async def search_datasets(
     user_id: Annotated[str, Depends(get_current_user_id)],
@@ -99,8 +134,23 @@ async def training_recommendations(
 async def list_jobs(
     user_id: Annotated[str, Depends(get_current_user_id)],
     db: Annotated[Database, Depends(get_db)],
+    orchestrator: Annotated[TrainingOrchestrator, Depends(get_training_orchestrator)],
 ) -> list[dict]:
-    return await db.list_training_jobs(user_id)
+    rows = await db.list_training_jobs(user_id)
+    return [_format_training_job_row(row, orchestrator) for row in rows]
+
+
+@router.get("/jobs/{job_id}")
+async def get_job(
+    job_id: str,
+    user_id: Annotated[str, Depends(get_current_user_id)],
+    db: Annotated[Database, Depends(get_db)],
+    orchestrator: Annotated[TrainingOrchestrator, Depends(get_training_orchestrator)],
+) -> dict:
+    row = await db.get_training_job(job_id, user_id)
+    if not row:
+        raise HTTPException(404, "Job not found")
+    return _format_training_job_row(row, orchestrator)
 
 
 @router.post("/jobs", response_model=TrainingJobResponse)
@@ -127,6 +177,14 @@ async def start_training(
         raise_forbidden(exc)
 
     configure_hf_hub_cache(settings.data_dir)
+    from forge.services.hf_auth import resolve_hf_token
+
+    hf_token, _ = resolve_hf_token(
+        user_id=user_id,
+        data_dir=settings.data_dir,
+        encryption_key=settings.hf_token_encryption_key,
+        settings_token=settings.hf_token or None,
+    )
     inventory = await db.list_models(user_id)
     original_model_id = str(training_config.get("model_id", ""))
     if original_model_id and is_gguf_only_repo_id(original_model_id):
@@ -157,6 +215,7 @@ async def start_training(
         "output_dir": str(settings.checkpoints_dir / user_id / job_id),
         "multi_gpu": body.multi_gpu,
         "user_id": user_id,
+        "hf_token": hf_token,
     }
 
     async def persist_metrics(
@@ -172,6 +231,7 @@ async def start_training(
 
     async def _run() -> None:
         try:
+            await db.update_job_status(job_id, "running", user_id=user_id)
             await orchestrator.start(job_id, payload)
             job = await orchestrator.wait_for(job_id)
             if job:

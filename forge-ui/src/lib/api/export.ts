@@ -48,6 +48,16 @@ export const exportApi = {
       method: "POST",
       body: JSON.stringify(body),
     }),
+  startPublishToHub: (body: {
+    model_id?: string;
+    export_job_id?: string;
+    output_path?: string;
+    hub: HubPublishFields;
+  }) =>
+    request<{ job_id: string; status: string }>("/export/publish/jobs", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
   downloadExportOutput: (jobId: string, key = "gguf") =>
     fetch(`${API}/export/outputs/${jobId}/download?key=${encodeURIComponent(key)}`, {
       credentials: "include",

@@ -45,6 +45,10 @@ def load_training_dataset(
 
 
 def detect_format(sample: dict) -> DatasetFormat:
+    if ("query" in sample and "response" in sample) or (
+        "question" in sample and "answer" in sample
+    ):
+        return DatasetFormat.ALPACA
     if "conversations" in sample or "messages" in sample:
         return DatasetFormat.SHAREGPT if "conversations" in sample else DatasetFormat.CHAT
     if "instruction" in sample and "output" in sample:

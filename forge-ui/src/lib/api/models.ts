@@ -35,10 +35,16 @@ export const modelsApi = {
       onError?: (message: string) => void;
     },
     variant: "auto" | "safetensors" | "gguf" = "gguf",
+    options: { filename?: string; revision?: string } = {},
   ) =>
     streamPostSSE(
       "/models/download/stream",
-      { repo_id, variant: variant === "auto" ? "auto" : variant },
+      {
+        repo_id,
+        variant: variant === "auto" ? "auto" : variant,
+        ...(options.filename ? { filename: options.filename } : {}),
+        ...(options.revision ? { revision: options.revision } : {}),
+      },
       {
         progress: (data) => handlers.onProgress(JSON.parse(data)),
         complete: (data) => handlers.onComplete(JSON.parse(data)),

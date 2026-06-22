@@ -276,6 +276,60 @@ export type ChatContextStatus = {
   context_tokens_limit: number;
   fill_ratio: number;
   history_trimmed: boolean;
+  context_window_options?: number[];
+};
+
+export type InferenceLocalVariant = {
+  id: string;
+  name?: string | null;
+  quant: string;
+  size_bytes?: number;
+  path?: string | null;
+  hardware_fit?: InferenceModelOption["hardware_fit"];
+  hardware_fit_label?: string;
+  memory_load_blocked?: boolean;
+  selected?: boolean;
+  source: "local";
+  repo_id?: string | null;
+  gguf_file?: string | null;
+};
+
+export type InferenceHubVariant = {
+  quant: string;
+  gguf_file: string;
+  gguf_repo: string;
+  source: "hub";
+  downloaded: boolean;
+  local_id?: string | null;
+  selected?: boolean;
+  size_bytes?: number;
+  hardware_fit?: InferenceModelOption["hardware_fit"];
+  hardware_fit_label?: string;
+  memory_load_blocked?: boolean;
+};
+
+export type InferenceDraftCandidate = {
+  id: string;
+  name?: string | null;
+  size_bytes?: number;
+  format?: string | null;
+  backends?: string[];
+  hardware_fit?: InferenceModelOption["hardware_fit"];
+  hardware_fit_label?: string;
+};
+
+export type ModelVariantsResponse = {
+  model_id: string;
+  variant_group?: string | null;
+  gguf_repo?: string | null;
+  catalog_repo?: string | null;
+  base_model?: string | null;
+  current_quant?: string | null;
+  local_variants: InferenceLocalVariant[];
+  hub_variants: InferenceHubVariant[];
+  draft_candidates: InferenceDraftCandidate[];
+  supports_speculative: boolean;
+  supports_llamacpp: boolean;
 };
 
 export type TrainingJob = {
