@@ -125,7 +125,12 @@ class InferenceOrchestrator(Orchestrator):
         from forge.tools.agent_loop import run_agent_loop_async
 
         async def generate(msgs: list[dict]) -> str:
-            p = {**payload, "messages": msgs, "tools": False}
+            p = {
+                **payload,
+                "messages": msgs,
+                "tools": False,
+                "tools_schemas": registry.schemas(),
+            }
             return await self._local_chat(p)
 
         return await run_agent_loop_async(

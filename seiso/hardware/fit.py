@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from seiso.hardware.tiers import FIT_RANK, HardwareTier, classify_tier, vram_headroom_mb
+from seiso.hardware.tiers import FIT_RANK, HardwareTier, classify_tier, fit_headroom_mb, vram_headroom_mb
 from seiso.memory.estimates import estimate_chat_vram_gb, guess_params_from_name
 
 
@@ -15,20 +15,21 @@ def assess_hardware_fit(
     mode: str = "chat",
 ) -> dict[str, Any]:
     """Return fit label + short note — never leaves the machine."""
-    headroom_mb = vram_headroom_mb(profile)
+    capacity_mb = fit_headroom_mb(profile)
+    free_mb = vram_headroom_mb(profile)
     est_mb = int(est_vram_gb * 1024)
     tier = classify_tier(profile)
 
     # Note: train-mode overhead is already applied by estimate_path_vram_mb()
     # via _TRAINING_OVERHEAD_RATIO.  Do not multiply again here.
 
-    ratio = est_mb / headroom_mb if headroom_mb > 0 else 99.0
+    ratio = est_mb / capacity_mb if capacity_mb > 0 else 99.0
 
     if ratio <= 0.65:
         fit, label = "ideal", "Ideal fit"
     elif ratio <= 0.95:
         fit, label = "good", "Good fit"
-    elif ratio <= 1.15:
+    elif ratio <= 1.05:
         fit, label = "tight", "Tight fit"
     else:
         fit, label = "unlikely", "May not fit"
@@ -36,21 +37,31 @@ def assess_hardware_fit(
     if tier == HardwareTier.CPU_ONLY and est_mb > 4096:
         fit, label = "unlikely", "CPU — try ≤3B Q4"
 
-    if tier == HardwareTier.APPLE_UNIFIED and headroom_mb < 12288 and est_mb > 5120:
+    if tier == HardwareTier.APPLE_UNIFIED and capacity_mb < 12288 and est_mb > 5120:
         fit, label = "tight", "Tight — use Q4 GGUF + llama.cpp"
-    if tier == HardwareTier.APPLE_UNIFIED and headroom_mb < 8192 and est_mb > 4096:
+    if tier == HardwareTier.APPLE_UNIFIED and capacity_mb < 8192 and est_mb > 4096:
         fit, label = "unlikely", "Low memory — try ≤3B Q4"
 
-    headroom_gb = round(headroom_mb / 1024, 1)
-    note = f"~{est_vram_gb:.1f} GB est. · {headroom_gb} GB free on this machine"
-    if fit == "unlikely" and tier != HardwareTier.CPU_ONLY:
-        note = f"Needs ~{est_vram_gb:.1f} GB — you have ~{headroom_gb} GB free"
+    # Warn when the model fits the GPU but current free VRAM is low (other apps/models).
+    if (
+        fit in {"ideal", "good", "tight"}
+        and free_mb > 0
+        and est_mb > int(free_mb * 1.05)
+        and capacity_mb > free_mb
+    ):
+        fit, label = "tight", "Tight fit — free VRAM is low; close other GPU apps first"
 
-    blocked = headroom_mb > 0 and est_mb > int(headroom_mb * 1.12)
+    capacity_gb = round(capacity_mb / 1024, 1)
+    free_gb = round(free_mb / 1024, 1)
+    note = f"~{est_vram_gb:.1f} GB est. · {free_gb} GB free now · {capacity_gb} GB GPU budget"
+    if fit == "unlikely" and tier != HardwareTier.CPU_ONLY:
+        note = f"Needs ~{est_vram_gb:.1f} GB — GPU budget ~{capacity_gb} GB"
+
+    blocked = capacity_mb > 0 and est_mb > int(capacity_mb * 1.05)
     block_reason = None
     if blocked:
         block_reason = (
-            f"Needs ~{est_vram_gb:.1f} GB at runtime but only ~{headroom_gb} GB is free on this machine. "
+            f"Needs ~{est_vram_gb:.1f} GB at runtime but this GPU has ~{capacity_gb} GB usable VRAM. "
             "Choose a smaller or more quantized model."
         )
 

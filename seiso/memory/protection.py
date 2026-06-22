@@ -71,7 +71,11 @@ def _estimate_path_vram_mb_uncached(p: Path, *, mode: str = "chat") -> int:
 
     if p.is_file() and p.suffix.lower() in {".gguf", ".bin", ".safetensors", ".pt", ".pth"}:
         file_mb = max(p.stat().st_size / (1024**2), 1)
-        est = int(file_mb * 1.15 + _INFERENCE_OVERHEAD_MB)
+        if p.suffix.lower() == ".gguf":
+            # GGUF weights map ~1:1 to VRAM when fully offloaded; add KV/activation headroom.
+            est = int(file_mb + _INFERENCE_OVERHEAD_MB)
+        else:
+            est = int(file_mb * 1.15 + _INFERENCE_OVERHEAD_MB)
     elif p.is_dir():
         weight_bytes = 0
         for pattern in ("*.gguf", "*.safetensors", "*.bin"):
@@ -79,7 +83,11 @@ def _estimate_path_vram_mb_uncached(p: Path, *, mode: str = "chat") -> int:
                 if f.is_file():
                     weight_bytes += f.stat().st_size
         if weight_bytes > 0:
-            est = int(weight_bytes / (1024**2) * 1.15 + _INFERENCE_OVERHEAD_MB)
+            weight_mb = weight_bytes / (1024**2)
+            if any(f.suffix.lower() == ".gguf" for f in p.rglob("*.gguf") if f.is_file()):
+                est = int(weight_mb + _INFERENCE_OVERHEAD_MB)
+            else:
+                est = int(weight_mb * 1.15 + _INFERENCE_OVERHEAD_MB)
         else:
             guessed = guess_params_from_name(name) or 7.0
             est = int(estimate_chat_vram_gb(f"{guessed}B") * 1024)
@@ -142,6 +150,34 @@ def release_cached_memory(*, sync: bool = False) -> None:
             torch.mps.empty_cache()
     except ImportError:
         pass
+
+
+def llama_batch_headroom_mb(
+    free_mb: int,
+    *,
+    model_path: str | Path | None = None,
+    n_gpu_layers: int = -1,
+) -> int:
+    """VRAM left for llama.cpp batch/KV after estimated weight offload."""
+    if not model_path or n_gpu_layers == 0:
+        return free_mb
+    path = Path(model_path)
+    if not path.is_file():
+        return free_mb
+    try:
+        from seiso.inference.backends import gguf_block_count
+
+        weight_mb = int(estimate_path_vram_mb(path))
+        total_layers = gguf_block_count(path) or 64
+        if n_gpu_layers == -1:
+            gpu_weight_mb = weight_mb
+        else:
+            gpu_fraction = max(0.0, min(float(n_gpu_layers) / float(total_layers), 1.0))
+            gpu_weight_mb = int(weight_mb * gpu_fraction) + 384
+        kv_mb = max(512, min(int(free_mb * 0.12), 1536))
+        return max(_MIN_LLAMA_BATCH * 2, free_mb - gpu_weight_mb - kv_mb)
+    except Exception:
+        return free_mb
 
 
 def headroom_mb() -> int:
@@ -236,23 +272,40 @@ def assess_path_memory_fit(path: str | Path, *, mode: str = "chat") -> dict[str,
     try:
         return assess_hardware_fit(est_gb, profile, mode=mode)
     except Exception:
-        free = headroom_mb()
-        blocked = free > 0 and est_mb > int(free * 1.12)
+        from seiso.hardware.tiers import fit_headroom_mb
+
+        budget = fit_headroom_mb(profile)
+        blocked = budget > 0 and est_mb > int(budget * 1.05)
         return {
             "hardware_fit": "unlikely" if blocked else "good",
             "est_vram_mb": est_mb,
             "memory_load_blocked": blocked,
             "memory_load_blocked_reason": (
-                f"Needs ~{est_gb:.1f} GB at runtime but only ~{round(free / 1024, 1)} GB is free."
+                f"Needs ~{est_gb:.1f} GB at runtime but this GPU has ~{round(budget / 1024, 1)} GB usable VRAM."
                 if blocked
                 else None
             ),
         }
 
 
+def assess_path_memory_fit_for_load(
+    path: str | Path,
+    *,
+    mode: str = "chat",
+    pool: Any | None = None,
+    backend: str | None = None,
+) -> dict[str, Any]:
+    """Assess fit after unloading any active Seiso model that would be replaced."""
+    from seiso.inference.model_pool import get_model_pool
+
+    active_pool = pool or get_model_pool()
+    active_pool.prepare_for_load(str(path), backend)
+    return assess_path_memory_fit(path, mode=mode)
+
+
 def ensure_load_fits(path: str | Path, *, mode: str = "chat") -> dict[str, Any]:
     """Block or warn before loading a model that exceeds headroom."""
-    fit = assess_path_memory_fit(path, mode=mode)
+    fit = assess_path_memory_fit_for_load(path, mode=mode)
     if fit.get("memory_load_blocked"):
         reason = fit.get("memory_load_blocked_reason") or "Model exceeds available memory"
         if allow_memory_overcommit():
@@ -314,7 +367,13 @@ def clamp_llama_n_ctx(
 def clamp_llama_load_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
     """Scale llama.cpp batch/ubatch down on tight memory."""
     out = dict(kwargs)
-    headroom = headroom_mb()
+    model_path = out.pop("_model_path", None)
+    n_gpu_layers = int(out.get("n_gpu_layers") or 0)
+    headroom = llama_batch_headroom_mb(
+        headroom_mb(),
+        model_path=model_path,
+        n_gpu_layers=n_gpu_layers,
+    )
     n_ctx = int(out.get("n_ctx") or _MIN_LLAMA_CTX)
 
     if headroom < 4096:
@@ -332,10 +391,6 @@ def clamp_llama_load_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
     out["n_batch"] = min(int(out.get("n_batch") or cap_batch), cap_batch)
     ubatch_cap = max(_MIN_LLAMA_BATCH, min(out["n_batch"], cap_batch // 2 or _MIN_LLAMA_BATCH))
     out["n_ubatch"] = min(int(out.get("n_ubatch") or ubatch_cap), ubatch_cap, out["n_batch"])
-
-    # Very large contexts on tight VRAM: prefer CPU layers partial offload safety.
-    if headroom < 6144 and int(out.get("n_gpu_layers") or 0) != 0:
-        out["n_gpu_layers"] = min(int(out.get("n_gpu_layers") or -1), 24)
 
     ctx_cap = clamp_llama_n_ctx(n_ctx, max_tokens=512)
     if n_ctx > ctx_cap:

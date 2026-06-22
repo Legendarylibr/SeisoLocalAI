@@ -100,7 +100,10 @@ def run_training(config: TrainConfig, *, on_metric=None) -> Path:
     from seiso.security.nvidia_boundary import enforce_nvidia_secure_boundary
     from seiso.training.trainer import SeisoTrainer
 
+    from seiso.platform import ensure_cuda_library_path
+
     configure_hf_hub_cache()
+    ensure_cuda_library_path()
     enforce_nvidia_secure_boundary(context="training")
     config = apply_training_memory_guards(config)
     trainer = SeisoTrainer(config, on_metric=on_metric)

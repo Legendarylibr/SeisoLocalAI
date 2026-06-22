@@ -269,8 +269,8 @@ async def preload_model_stream(
 
     async def event_gen():
 
-        switching = _active_local_model_would_change(
-            pool, target_path=target_path, backend=ctx["backend"]
+        switching = orchestrator._runner._pool.would_switch_model(
+            target_path, ctx["backend"]
         )
         if switching:
             yield {
@@ -284,7 +284,12 @@ async def preload_model_stream(
                     }
                 ),
             }
-            await loop.run_in_executor(None, pool.cancel_and_unload)
+            await loop.run_in_executor(
+                None,
+                lambda: orchestrator._runner._pool.prepare_for_load(
+                    target_path, ctx["backend"]
+                ),
+            )
 
         yield {
             "event": "progress",
@@ -351,13 +356,6 @@ async def _resolve_preload_context(
     if not selected:
         raise HTTPException(404, "Model not found in inventory")
 
-    if selected.get("memory_load_blocked"):
-        raise HTTPException(
-            400,
-            selected.get("memory_load_blocked_reason")
-            or "Model exceeds available memory on this machine",
-        )
-
     try:
         target = resolve_chat_target(
             selected,
@@ -381,9 +379,13 @@ async def _resolve_preload_context(
     if not path:
         raise HTTPException(400, "Model path not found")
 
-    from seiso.memory.protection import assess_path_memory_fit
+    from seiso.memory.protection import assess_path_memory_fit_for_load
 
-    fit = assess_path_memory_fit(path, mode="chat")
+    fit = assess_path_memory_fit_for_load(
+        path,
+        mode="chat",
+        backend=backend,
+    )
     if fit.get("memory_load_blocked"):
         raise HTTPException(
             400,
@@ -410,10 +412,7 @@ def _warm_local_model(runner, payload: dict[str, Any]) -> None:
     model_path = payload["model_path"]
     route, resolved_path = runner._resolve_route(payload, model_path)
     pool = runner._pool
-    if _active_local_model_would_change(
-        pool, target_path=resolved_path, backend=payload.get("inference_backend")
-    ):
-        pool.cancel_and_unload()
+    pool.prepare_for_load(resolved_path, payload.get("inference_backend"))
     if route == "mlx":
         pool.get_mlx(resolved_path)
     elif route == "torch":
@@ -526,9 +525,9 @@ async def chat(
                 raise
             if not path:
                 raise HTTPException(400, "Invalid model_path")
-            from seiso.memory.protection import assess_path_memory_fit
+            from seiso.memory.protection import assess_path_memory_fit_for_load
 
-            fit = assess_path_memory_fit(path, mode="chat")
+            fit = assess_path_memory_fit_for_load(path, mode="chat")
             if fit.get("memory_load_blocked"):
                 raise HTTPException(
                     400,
@@ -541,12 +540,6 @@ async def chat(
             selected = await get_inference_option(
                 db, user_id, body.model_id
             )
-            if selected and selected.get("memory_load_blocked"):
-                raise HTTPException(
-                    400,
-                    selected.get("memory_load_blocked_reason")
-                    or "Model exceeds available memory on this machine",
-                )
             try:
                 target = resolve_chat_target(
                     selected,
@@ -570,6 +563,19 @@ async def chat(
                 )
             if not path:
                 raise HTTPException(400, "Select a model from inventory or provide model_path")
+            from seiso.memory.protection import assess_path_memory_fit_for_load
+
+            fit = assess_path_memory_fit_for_load(
+                path,
+                mode="chat",
+                backend=payload.get("inference_backend"),
+            )
+            if fit.get("memory_load_blocked"):
+                raise HTTPException(
+                    400,
+                    fit.get("memory_load_blocked_reason")
+                    or "Model exceeds available memory on this machine",
+                )
             payload["model_path"] = path
         else:
             raise HTTPException(400, "Select a model from inventory or provide model_path")
@@ -599,9 +605,9 @@ async def chat(
                 raise HTTPException(400, "Draft model must be a local safetensors/checkpoint path")
         if not draft_path:
             raise HTTPException(400, "Invalid draft model path")
-        from seiso.memory.protection import assess_path_memory_fit
+        from seiso.memory.protection import assess_path_memory_fit_for_load
 
-        draft_fit = assess_path_memory_fit(draft_path, mode="chat")
+        draft_fit = assess_path_memory_fit_for_load(draft_path, mode="chat", backend=BACKEND_TORCH)
         if draft_fit.get("memory_load_blocked"):
             raise HTTPException(
                 400,

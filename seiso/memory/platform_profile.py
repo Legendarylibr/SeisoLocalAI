@@ -51,7 +51,12 @@ def apply_platform_memory_profile(*, profile: dict[str, Any] | None = None) -> d
         os.environ.setdefault("SEISO_LLAMA_CACHE_MB", "0")
     else:
         os.environ.setdefault("SEISO_LLAMA_PROMPT_CACHE", "true")
-        cache_mb = "256" if headroom < 12288 else "512"
+        if tier == HardwareTier.WORKSTATION and headroom >= 8192:
+            cache_mb = "1024"
+        elif headroom < 12288:
+            cache_mb = "256"
+        else:
+            cache_mb = "512"
         os.environ.setdefault("SEISO_LLAMA_CACHE_MB", cache_mb)
 
     if system == "Darwin":
@@ -107,6 +112,16 @@ def apply_platform_memory_profile(*, profile: dict[str, Any] | None = None) -> d
                 os.environ.setdefault("SEISO_LLAMA_GPU_LAYERS", "-1")
             else:
                 os.environ.setdefault("SEISO_LLAMA_GPU_LAYERS", "0")
+            if not low and tier in (HardwareTier.WORKSTATION, HardwareTier.CAPABLE):
+                os.environ.setdefault("SEISO_LLAMA_FLASH_ATTN", "true")
+                os.environ.setdefault("SEISO_LLAMA_OP_OFFLOAD", "true")
+                os.environ.setdefault("SEISO_LLAMA_OFFLOAD_KQV", "true")
+                if tier == HardwareTier.WORKSTATION:
+                    os.environ.setdefault("SEISO_LLAMA_BATCH", "2048")
+                    os.environ.setdefault("SEISO_LLAMA_UBATCH", "512")
+                else:
+                    os.environ.setdefault("SEISO_LLAMA_BATCH", "1024")
+                    os.environ.setdefault("SEISO_LLAMA_UBATCH", "512")
         elif caps.get("train_platform") == "cpu" or not caps.get("gpu_count"):
             os.environ.setdefault("SEISO_LLAMA_GPU_LAYERS", "0")
 

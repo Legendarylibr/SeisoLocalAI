@@ -38,6 +38,7 @@ def active_backend() -> str:
 
 def fused_rms_norm(x, weight, eps: float = 1e-6, residual=None):
     """``rms_norm(x + residual) * weight`` via best available backend."""
+    import torch
 
     if not getattr(x, "is_cuda", False):
         return _pytorch_rms_norm(x, weight, eps, residual)
@@ -49,6 +50,9 @@ def fused_rms_norm(x, weight, eps: float = 1e-6, residual=None):
         return cuda_rms(x, weight, eps=eps, residual=residual)
 
     if backend == "triton":
+        # Triton RMSNorm is inference-only (no autograd); keep training on PyTorch.
+        if torch.is_grad_enabled() and (x.requires_grad or getattr(weight, "requires_grad", False)):
+            return _pytorch_rms_norm(x, weight, eps, residual)
         from seiso.kernels.triton_ops import fused_rms_norm as triton_rms
 
         return triton_rms(x, weight, eps=eps, residual=residual)

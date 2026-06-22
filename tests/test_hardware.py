@@ -283,10 +283,11 @@ def test_low_memory_apple_marks_large_models_tight(monkeypatch):
 def test_assess_hardware_fit_blocks_when_est_exceeds_headroom(monkeypatch):
     profile = {
         "backend": "cuda",
-        "gpus": [{"vram_total_mb": 8192, "vram_used_mb": 0}],
+        "gpus": [{"vram_total_mb": 8192, "vram_used_mb": 7000}],
         "ram_gb": 16,
     }
-    monkeypatch.setattr("seiso.hardware.fit.vram_headroom_mb", lambda _p: 4096)
+    monkeypatch.setattr("seiso.hardware.fit.fit_headroom_mb", lambda _p: 4096)
+    monkeypatch.setattr("seiso.hardware.fit.vram_headroom_mb", lambda _p: 1192)
     fit = assess_catalog_fit(
         {"params": "13B", "quant": "Q4_K_M", "tags": [], "repo_id": "x", "task": "chat"},
         profile,
@@ -302,6 +303,7 @@ def test_assess_hardware_fit_allows_when_est_within_headroom(monkeypatch):
         "gpus": [{"vram_total_mb": 24576, "vram_used_mb": 0}],
         "ram_gb": 32,
     }
+    monkeypatch.setattr("seiso.hardware.fit.fit_headroom_mb", lambda _p: 20480)
     monkeypatch.setattr("seiso.hardware.fit.vram_headroom_mb", lambda _p: 20480)
     fit = assess_catalog_fit(
         {"params": "7B", "quant": "Q4_K_M", "tags": [], "repo_id": "x", "task": "chat"},
@@ -309,3 +311,23 @@ def test_assess_hardware_fit_allows_when_est_within_headroom(monkeypatch):
     )
     assert fit["memory_load_blocked"] is False
     assert fit["memory_load_blocked_reason"] is None
+
+
+def test_assess_hardware_fit_allows_27b_q4_on_4090_when_vram_in_use():
+    profile = {
+        "backend": "cuda",
+        "gpus": [{"vram_total_mb": 24564, "vram_used_mb": 17000, "name": "NVIDIA GeForce RTX 4090"}],
+        "ram_gb": 32,
+    }
+    fit = assess_catalog_fit(
+        {
+            "params": "27B",
+            "quant": "Q4_K_M",
+            "tags": [],
+            "repo_id": "lmstudio-community/Qwen3.6-27B-GGUF",
+            "task": "chat",
+        },
+        profile,
+    )
+    assert fit["memory_load_blocked"] is False
+    assert fit["hardware_fit"] in {"good", "tight", "ideal"}

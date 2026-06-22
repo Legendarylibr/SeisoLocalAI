@@ -6,7 +6,7 @@ import json
 from collections.abc import Awaitable, Callable
 
 from forge.security.audit import audit_event
-from forge.tools.registry import ToolRegistry, parse_tool_calls, tools_system_prompt
+from forge.tools.registry import ToolRegistry, TOOL_CALL_PATTERN, parse_tool_calls, tools_system_prompt
 
 
 async def run_agent_loop_async(
@@ -30,9 +30,9 @@ async def run_agent_loop_async(
         calls = parse_tool_calls(reply)
 
         if not calls:
-            from forge.tools.registry import TOOL_CALL_PATTERN
+            from forge.services.llm_output import strip_spurious_chat_artifacts
 
-            clean = TOOL_CALL_PATTERN.sub("", reply).strip()
+            clean = strip_spurious_chat_artifacts(TOOL_CALL_PATTERN.sub("", reply).strip())
             return clean or reply, history + [{"role": "assistant", "content": clean or reply}]
 
         if on_log:

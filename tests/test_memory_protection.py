@@ -60,6 +60,25 @@ def test_clamp_llama_load_kwargs_scales_batch_with_large_context(monkeypatch):
     assert kwargs["n_batch"] <= 1024
 
 
+def test_llama_batch_headroom_accounts_for_model_weights(monkeypatch, tmp_path):
+    from seiso.memory.protection import llama_batch_headroom_mb
+
+    gguf = tmp_path / "model.gguf"
+    gguf.write_bytes(b"\x00" * (8 * 1024**2))
+    monkeypatch.setattr(
+        "seiso.memory.protection.estimate_path_vram_mb",
+        lambda _path: 8192,
+    )
+    monkeypatch.setattr(
+        "seiso.inference.backends.gguf_block_count",
+        lambda _path: 32,
+    )
+    remaining = llama_batch_headroom_mb(
+        16384, model_path=gguf, n_gpu_layers=-1
+    )
+    assert remaining < 8192
+
+
 def test_clamp_llama_cache_mb_disabled_on_low_headroom(monkeypatch):
     monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 2048)
     assert clamp_llama_cache_mb(1024) == 0
@@ -105,7 +124,14 @@ def test_apply_rl_memory_guards_scales_preflight(monkeypatch):
 def test_ensure_load_fits_blocks_oversized_gguf(tmp_path, monkeypatch):
     gguf = tmp_path / "huge.gguf"
     gguf.write_bytes(b"\x00" * (9 * 1024**3))
-    monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 2048)
+    profile = {"backend": "cuda", "gpus": [{"vram_total_mb": 4096, "vram_used_mb": 0}], "ram_gb": 16}
+    monkeypatch.setattr("seiso.memory.protection.hardware_profile", lambda force_refresh=False: profile)
+    monkeypatch.setattr("seiso.hardware.fit.fit_headroom_mb", lambda _p: 2048)
+    monkeypatch.setattr("seiso.hardware.fit.vram_headroom_mb", lambda _p: 2048)
+    monkeypatch.setattr(
+        "seiso.inference.model_pool.ModelPool.prepare_for_load",
+        lambda self, *args, **kwargs: False,
+    )
     with pytest.raises(MemoryLoadBlockedError):
         ensure_load_fits(gguf, mode="chat")
 

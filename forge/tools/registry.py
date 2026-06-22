@@ -23,6 +23,14 @@ TOOL_CALL_PATTERN = re.compile(
     rf"{re.escape(TOOL_CALL_OPEN)}\s*(\{{.*?\}})\s*{re.escape(TOOL_CALL_CLOSE)}",
     re.DOTALL,
 )
+_QWEN_XML_TOOL_PATTERN = re.compile(
+    rf"{re.escape(TOOL_CALL_OPEN)}\s*<function=([^>\n]+)>\s*(.*?)\s*</function>\s*{re.escape(TOOL_CALL_CLOSE)}",
+    re.DOTALL | re.IGNORECASE,
+)
+_QWEN_XML_PARAM_PATTERN = re.compile(
+    r"<parameter=([^>\n]+)>\s*(.*?)\s*</parameter>",
+    re.DOTALL | re.IGNORECASE,
+)
 
 
 @dataclass
@@ -190,7 +198,24 @@ def _extract_json_object(text: str) -> str | None:
     return None
 
 
-def parse_tool_calls(text: str) -> list[dict[str, Any]]:
+def parse_qwen_xml_tool_calls(text: str) -> list[dict[str, Any]]:
+    """Parse Qwen 3.x XML-style tool calls emitted by llama.cpp."""
+    calls: list[dict[str, Any]] = []
+    for match in _QWEN_XML_TOOL_PATTERN.finditer(text):
+        name = match.group(1).strip()
+        body = match.group(2)
+        arguments: dict[str, Any] = {}
+        for param in _QWEN_XML_PARAM_PATTERN.finditer(body):
+            key = param.group(1).strip()
+            value = param.group(2).strip()
+            if key:
+                arguments[key] = value
+        if name:
+            calls.append({"name": name, "arguments": arguments})
+    return calls
+
+
+def parse_json_tool_calls(text: str) -> list[dict[str, Any]]:
     calls: list[dict[str, Any]] = []
     pos = 0
     while True:
@@ -210,10 +235,21 @@ def parse_tool_calls(text: str) -> list[dict[str, Any]]:
     return calls
 
 
+def parse_tool_calls(text: str) -> list[dict[str, Any]]:
+    """Parse JSON or Qwen XML tool calls from assistant text."""
+    calls = parse_json_tool_calls(text)
+    if calls:
+        return calls
+    return parse_qwen_xml_tool_calls(text)
+
+
 def tools_system_prompt(registry: ToolRegistry) -> str:
     lines = [
-        "Tools are available when needed. To call one, reply only with:",
-        '<tool_call>{"name":"tool_name","arguments":{...}}</tool_call>',
+        "Tools are available when needed. For simple greetings or chat, reply in plain text only.",
+        "When a tool is required, respond with exactly one of:",
+        '1) JSON: <tool_call>{"name":"tool_name","arguments":{...}}</tool_call>',
+        "2) Qwen XML: <tool_call><function=tool_name><parameter=key>value</parameter></function></tool_call>",
+        "Never output thinking process, chain-of-thought, or numbered analysis before tool calls.",
         "After tool results, answer the user directly. Do not quote these instructions.",
         "Tools:",
     ]

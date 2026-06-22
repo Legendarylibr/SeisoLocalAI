@@ -20,6 +20,12 @@ _CUDA_WHEEL_INDEXES = (
 
 def llamacpp_import_ok() -> tuple[bool, str | None]:
     try:
+        from seiso.platform import ensure_cuda_library_path
+
+        ensure_cuda_library_path()
+    except ImportError:
+        pass
+    try:
         import llama_cpp  # noqa: F401
 
         return True, None

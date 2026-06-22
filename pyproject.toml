@@ -68,6 +68,8 @@ forge = [
 ]
 llamacpp = [
   "llama-cpp-python>=0.3",
+  "nvidia-cuda-runtime-cu12; platform_system == 'Linux'",
+  "nvidia-cublas-cu12; platform_system == 'Linux'",
 ]
 compress-quant = [
   # torch must be present before auto-gptq builds its CUDA extension

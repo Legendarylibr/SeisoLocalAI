@@ -48,6 +48,20 @@ if _TRITON:
         tl.store(out_ptr + row * n_cols + cols, out, mask=mask)
 
 
+def _flatten_rows(x):
+    """Collapse leading dims so Triton kernels see (rows, cols)."""
+    if x.dim() <= 2:
+        return x, None
+    cols = x.shape[-1]
+    return x.reshape(-1, cols), x.shape
+
+
+def _restore_rows(out, orig_shape):
+    if orig_shape is None:
+        return out
+    return out.reshape(orig_shape)
+
+
 def fused_rms_norm(x, weight, eps: float = 1e-6, residual=None):
     """Row-wise RMS normalization with optional fused residual add."""
     import torch
@@ -58,6 +72,10 @@ def fused_rms_norm(x, weight, eps: float = 1e-6, residual=None):
             x = x + residual
         var = x.pow(2).mean(dim=-1, keepdim=True)
         return x * torch.rsqrt(var + eps) * weight
+
+    x, orig_shape = _flatten_rows(x)
+    if residual is not None:
+        residual, _ = _flatten_rows(residual)
 
     rows, cols = x.shape
     out = torch.empty_like(x)
@@ -75,7 +93,7 @@ def fused_rms_norm(x, weight, eps: float = 1e-6, residual=None):
         FUSE_RESIDUAL=fuse,
         BLOCK=BLOCK,
     )
-    return out
+    return _restore_rows(out, orig_shape)
 
 
 if _TRITON:
@@ -99,11 +117,14 @@ def fused_swiglu(gate, up):
     if not _TRITON or not on_gpu:
         return torch.nn.functional.silu(gate) * up
 
+    gate, orig_shape = _flatten_rows(gate)
+    up, _ = _flatten_rows(up)
+
     rows, cols = gate.shape
     out = torch.empty_like(gate)
     BLOCK = triton.next_power_of_2(cols)  # type: ignore[union-attr]
     _swiglu_kernel[(rows,)](gate, up, out, cols, BLOCK=BLOCK)  # type: ignore[misc]
-    return out
+    return _restore_rows(out, orig_shape)
 
 
 def fused_cross_entropy_forward(logits, labels, ignore_index: int = -100):

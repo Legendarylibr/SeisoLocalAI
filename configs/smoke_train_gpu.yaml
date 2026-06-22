@@ -1,0 +1,26 @@
+# Quick GPU QLoRA smoke — small public model, 1 epoch
+model_id: Qwen/Qwen2.5-0.5B-Instruct
+dataset: ./data/sample.jsonl
+output_dir: ./.test_outputs/train-gpu-smoke
+method: lora
+quant: 4bit
+dataset_format: auto
+epochs: 1
+batch_size: 1
+learning_rate: 0.0002
+max_seq_length: 512
+lora_r: 8
+lora_alpha: 16
+lora_dropout: 0
+gradient_accumulation_steps: 1
+gradient_checkpointing: true
+train_on_responses_only: true
+use_triton: true
+use_fused_ce: true
+use_fused_lora: true
+save_safetensors: true
+eval_split_ratio: 0
+save_steps: 10
+logging_steps: 1
+seed: 42
+deterministic: true

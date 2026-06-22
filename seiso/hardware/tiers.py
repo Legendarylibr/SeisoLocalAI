@@ -94,6 +94,25 @@ def _vram_headroom_mb(gpus: list[dict[str, Any]]) -> int:
     return best
 
 
+_GPU_CAPACITY_RESERVE = 0.10
+
+
+def discrete_vram_total_mb(profile: dict[str, Any]) -> int:
+    """Largest discrete GPU VRAM total from a hardware profile."""
+    discrete = _discrete_gpu_entries(profile.get("gpus") or [])
+    if not discrete:
+        return 0
+    return max((int(g.get("vram_total_mb") or 0) for g in discrete), default=0)
+
+
+def fit_headroom_mb(profile: dict[str, Any]) -> int:
+    """Budget for load blocking — GPU capacity on discrete cards, free memory elsewhere."""
+    total = discrete_vram_total_mb(profile)
+    if total > 0:
+        return int(total * (1.0 - _GPU_CAPACITY_RESERVE))
+    return vram_headroom_mb(profile)
+
+
 def vram_headroom_mb(profile: dict[str, Any]) -> int:
     """Free memory headroom for fit checks."""
     gpus = profile.get("gpus") or []

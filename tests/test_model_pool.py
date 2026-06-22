@@ -6,7 +6,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 
-from seiso.inference.model_pool import BackendKind, ModelPool, llama_load_kwargs
+from seiso.inference.model_pool import BackendKind, LoadedModel, ModelPool, llama_load_kwargs
 
 
 def test_pool_singleton():
@@ -36,6 +36,48 @@ def test_cancel_and_unload_clears_active():
     pool = ModelPool.get()
     pool.cancel_and_unload()
     assert pool.active_key is None
+
+
+def test_prepare_for_load_unloads_when_switching(tmp_path, monkeypatch):
+    pool = ModelPool()
+    first = tmp_path / "a.gguf"
+    second = tmp_path / "b.gguf"
+    first.write_bytes(b"a")
+    second.write_bytes(b"b")
+    pool._active = LoadedModel(
+        key="llama:a",
+        backend=BackendKind.LLAMA,
+        handle=object(),
+        meta={"path": str(first), "norm_path": str(first.resolve())},
+    )
+    refreshed = {"calls": 0}
+
+    def _refresh(force_refresh=False):
+        refreshed["calls"] += 1
+        return {}
+
+    monkeypatch.setattr("seiso.hardware.profile.hardware_profile", _refresh)
+    unloaded = pool.prepare_for_load(str(second), BackendKind.LLAMA)
+    assert unloaded is True
+    assert pool.active_key is None
+    assert refreshed["calls"] == 1
+
+
+def test_prepare_for_load_keeps_same_model(tmp_path, monkeypatch):
+    pool = ModelPool()
+    model = tmp_path / "same.gguf"
+    model.write_bytes(b"x")
+    norm = str(model.resolve())
+    pool._active = LoadedModel(
+        key=f"llama:{norm}",
+        backend=BackendKind.LLAMA,
+        handle=object(),
+        meta={"path": str(model), "norm_path": norm},
+    )
+    monkeypatch.setattr("seiso.hardware.profile.hardware_profile", lambda force_refresh=False: {})
+    unloaded = pool.prepare_for_load(str(model), BackendKind.LLAMA)
+    assert unloaded is False
+    assert pool.active_key is not None
 
 
 def test_switch_serializes_concurrent_loads_for_same_model(tmp_path):
@@ -102,13 +144,13 @@ def test_llama_reuses_cached_model_when_context_grows(monkeypatch, tmp_path):
     load_ctx: list[int] = []
 
     class FakeLlama:
-        def __init__(self, model_path: str, **_kwargs):
-            load_ctx.append(_kwargs.get("n_ctx"))
+        pass
 
-    monkeypatch.setattr(model_pool, "llama_load_kwargs", lambda n_ctx: {"n_ctx": n_ctx})
-    monkeypatch.setitem(
-        __import__("sys").modules, "llama_cpp", type("LlamaModule", (), {"Llama": FakeLlama})
-    )
+    def fake_load(path, n_ctx):
+        load_ctx.append(n_ctx)
+        return FakeLlama()
+
+    monkeypatch.setattr(model_pool, "_load_llama_model", fake_load)
     monkeypatch.setattr(
         "seiso.inference.tuning.attach_llama_prompt_cache",
         lambda _llm: None,
@@ -130,13 +172,13 @@ def test_llama_reuses_larger_preloaded_context(monkeypatch, tmp_path):
     load_paths: list[str] = []
 
     class FakeLlama:
-        def __init__(self, model_path: str, **_kwargs):
-            load_paths.append(model_path)
+        pass
 
-    monkeypatch.setattr(model_pool, "llama_load_kwargs", lambda n_ctx: {"n_ctx": n_ctx})
-    monkeypatch.setitem(
-        __import__("sys").modules, "llama_cpp", type("LlamaModule", (), {"Llama": FakeLlama})
-    )
+    def fake_load(path, n_ctx):
+        load_paths.append(path)
+        return FakeLlama()
+
+    monkeypatch.setattr(model_pool, "_load_llama_model", fake_load)
     monkeypatch.setattr(
         "seiso.inference.tuning.attach_llama_prompt_cache",
         lambda _llm: None,
@@ -210,6 +252,20 @@ def test_llama_load_kwargs_nvidia_smi_without_cuda_torch(monkeypatch):
 
     kwargs = llama_load_kwargs(4096)
     assert kwargs["n_gpu_layers"] == -1
+
+
+def test_llama_layer_attempts_try_full_gpu_first(monkeypatch, tmp_path):
+    import seiso.inference.model_pool as mp
+
+    gguf = tmp_path / "big.gguf"
+    gguf.write_bytes(b"\x00" * 1024)
+    monkeypatch.setattr(mp, "_llama_gpu_offload_ok", lambda: True)
+    monkeypatch.setattr(mp, "fit_llama_gpu_layers", lambda _p, _r, _h: 24)
+
+    attempts = mp._llama_layer_attempts(str(gguf), -1, 4096)
+    assert attempts[0] == -1
+    assert 24 in attempts
+    assert attempts[-1] == 0
 
 
 def test_llama_load_kwargs_forces_zero_gpu_layers_on_cpu_only_wheel(monkeypatch):

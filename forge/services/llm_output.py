@@ -5,7 +5,12 @@ from __future__ import annotations
 import re
 from collections.abc import Iterator
 
-from forge.tools.registry import TOOL_CALL_CLOSE, TOOL_CALL_OPEN, TOOL_CALL_PATTERN
+from forge.tools.registry import (
+    TOOL_CALL_CLOSE,
+    TOOL_CALL_OPEN,
+    TOOL_CALL_PATTERN,
+    _QWEN_XML_TOOL_PATTERN,
+)
 
 _CHUNK_SIZE = 1_200
 _TOOL_OPEN = TOOL_CALL_OPEN
@@ -37,6 +42,8 @@ _PARTIAL_THINK_OPEN_PREFIXES = tuple(
 
 _REASONING_HEADERS = (
     "thinking process:",
+    "here's a thinking process",
+    "here is a thinking process",
     "reasoning:",
     "analysis:",
     "thought process:",
@@ -98,7 +105,43 @@ _NUMBERED_ANALYSIS_START = re.compile(
 )
 
 
+def _strip_redacted_thinking_block(content: str) -> str:
+    if re.search(r"(?i)</think>", content):
+        return re.split(r"(?i)</think>", content)[-1].strip()
+    return re.sub(
+        r"(?is)<think>.*?(?:</think>|$)", "", content
+    ).strip()
+
+
+def _extract_after_thinking_process_block(content: str) -> str | None:
+    if not re.search(r"(?i)here'?s a thinking process", content):
+        return None
+    if "✅" in content:
+        tail = content.split("✅")[-1].strip()
+        if tail and len(tail) < 600 and not _looks_like_reasoning_leak(tail):
+            return tail
+    parts = re.split(r"\n{2,}", content.strip())
+    for part in reversed(parts):
+        text = part.strip()
+        if not text or len(text) > 600:
+            continue
+        if re.match(r"^\d+\.\s+\*\*", text):
+            continue
+        if re.search(
+            r"(?i)(analyze the (?:user )?input|identify constraints|determine response|"
+            r"check constraints|output generation|draft(?:ing)? response|draft response)",
+            text,
+        ):
+            continue
+        if re.search(r"(?i)here'?s a thinking process", text):
+            continue
+        return text
+    return None
+
+
 def _looks_like_reasoning_leak(content: str) -> bool:
+    if re.search(r"(?i)here'?s a thinking process", content):
+        return True
     if _REASONING_HEADER_PATTERN.match(content):
         return True
     if re.search(r"(?i)\*\*(?:reasoning|thought|analysis|response|reply):\*\*", content):
@@ -144,7 +187,12 @@ def strip_reasoning_leakage(content: str) -> str:
     if not content:
         return content
 
-    cleaned = _THINK_TAG_PATTERN.sub("", content)
+    cleaned = _strip_redacted_thinking_block(content)
+    extracted = _extract_after_thinking_process_block(cleaned)
+    if extracted:
+        return extracted.strip()
+
+    cleaned = _THINK_TAG_PATTERN.sub("", cleaned)
     cleaned = _PIPE_TAG_PATTERN.sub("", cleaned)
     cleaned = _ORPHAN_CLOSE_TAG_PATTERN.sub("", cleaned)
 
@@ -171,6 +219,7 @@ def strip_spurious_tool_syntax(content: str) -> str:
     if not content:
         return content
     cleaned = TOOL_CALL_PATTERN.sub("", content)
+    cleaned = _QWEN_XML_TOOL_PATTERN.sub("", cleaned)
     cleaned = _FUNCTION_JSON_PATTERN.sub("", cleaned)
     cleaned = re.sub(r"\[TOOL_CALLS?\]", "", cleaned, flags=re.I)
     cleaned = re.sub(r"<\|tool_call\|>.*?(?:<\|/tool_call\|>|$)", "", cleaned, flags=re.DOTALL)
@@ -293,7 +342,9 @@ class StreamingOutputSanitizer:
             buf = self._buffer
             self._buffer = ""
             self._reasoning_mode = False
-            answer = _extract_final_answer_from_reasoning(buf)
+            answer = _extract_after_thinking_process_block(buf)
+            if not answer:
+                answer = _extract_final_answer_from_reasoning(buf)
             if answer:
                 self._emitted = True
                 return [answer]

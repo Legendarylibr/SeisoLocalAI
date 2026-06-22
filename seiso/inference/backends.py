@@ -111,11 +111,13 @@ def _skip_gguf_value(handle, value_type: int) -> None:
 
 
 _gguf_arch_cache: dict[tuple[str, float, int], str | None] = {}
+_gguf_block_count_cache: dict[tuple[str, float, int], int | None] = {}
 
 
 def clear_gguf_caches() -> None:
     """Reset GGUF architecture cache (for tests)."""
     _gguf_arch_cache.clear()
+    _gguf_block_count_cache.clear()
 
 
 def _gguf_cache_key(path: Path) -> tuple[str, float, int] | None:
@@ -148,6 +150,52 @@ def gguf_architecture(model_path: str) -> str | None:
     if cache_key is not None:
         _gguf_arch_cache[cache_key] = architecture
     return architecture
+
+
+def _read_gguf_metadata_u32(path: Path, key_suffix: str) -> int | None:
+    with path.open("rb") as handle:
+        if handle.read(4) != b"GGUF":
+            return None
+        header = handle.read(20)
+        if len(header) != 20:
+            return None
+        _version, _tensor_count, kv_count = struct.unpack("<IQQ", header)
+        for _ in range(kv_count):
+            key = _read_gguf_string(handle)
+            raw_type = handle.read(4)
+            if len(raw_type) != 4:
+                return None
+            (value_type,) = struct.unpack("<I", raw_type)
+            if key.endswith(key_suffix) and value_type == 4:
+                raw = handle.read(4)
+                if len(raw) != 4:
+                    return None
+                (value,) = struct.unpack("<I", raw)
+                return int(value)
+            _skip_gguf_value(handle, value_type)
+    return None
+
+
+def gguf_block_count(model_path: str) -> int | None:
+    """Read transformer block count from GGUF metadata when available."""
+    try:
+        path = resolve_gguf_file(model_path)
+    except ValueError:
+        return None
+
+    cache_key = _gguf_cache_key(path)
+    if cache_key is not None and cache_key in _gguf_block_count_cache:
+        return _gguf_block_count_cache[cache_key]
+
+    count: int | None
+    try:
+        count = _read_gguf_metadata_u32(path, ".block_count")
+    except (OSError, ValueError, struct.error):
+        count = None
+
+    if cache_key is not None:
+        _gguf_block_count_cache[cache_key] = count
+    return count
 
 
 def _read_gguf_architecture(path: Path) -> str | None:

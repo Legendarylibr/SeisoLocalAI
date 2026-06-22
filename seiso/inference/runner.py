@@ -47,6 +47,22 @@ class LocalInferenceRunner:
         self._pool = get_model_pool()
 
     async def chat(self, payload: dict[str, Any]) -> str:
+        if payload.get("tools_schemas"):
+            loop = asyncio.get_running_loop()
+            payload = sanitize_inference_payload(payload)
+            model_path = payload.get("model_path") or payload.get("model_id")
+            if not model_path:
+                raise ValueError("model_path or model_id required")
+            route, resolved_path = self._resolve_route(payload, model_path)
+            if route != "llama":
+                raise ValueError("Tool calling is only supported with llama.cpp GGUF models")
+            generation_id = self._pool.bump_generation()
+            await self._ensure_model_switch(resolved_path)
+            return await loop.run_in_executor(
+                None,
+                lambda: self._llama_complete(payload, resolved_path, generation_id),
+            )
+
         chunks: list[str] = []
         async for token in self.stream(payload):
             chunks.append(token)
@@ -121,6 +137,7 @@ class LocalInferenceRunner:
         status = self._pool.status()
         active_path = status.get("path")
         active_draft = status.get("draft_path")
+        loop = asyncio.get_running_loop()
         if draft_path:
             if (
                 active_path
@@ -129,20 +146,21 @@ class LocalInferenceRunner:
                 and self._pool.normalize_path(active_draft) == self._pool.normalize_path(draft_path)
             ):
                 return
-            loop = asyncio.get_running_loop()
-            await loop.run_in_executor(None, self._pool.unload_all)
+            await loop.run_in_executor(
+                None, lambda: self._pool.prepare_for_load(model_path, BACKEND_TORCH)
+            )
             return
 
         if active_draft:
-            loop = asyncio.get_running_loop()
-            await loop.run_in_executor(None, self._pool.unload_all)
+            await loop.run_in_executor(
+                None, lambda: self._pool.prepare_for_load(model_path)
+            )
             return
 
-        if active_path and self._pool.normalize_path(active_path) != self._pool.normalize_path(
-            model_path
-        ):
-            loop = asyncio.get_running_loop()
-            await loop.run_in_executor(None, self._pool.unload_all)
+        if self._pool.would_switch_model(model_path):
+            await loop.run_in_executor(
+                None, lambda: self._pool.prepare_for_load(model_path)
+            )
 
     def _resolve_route(self, payload: dict[str, Any], model_path: str) -> tuple[str, str]:
         if payload.get("draft_model_path"):
@@ -304,6 +322,29 @@ class LocalInferenceRunner:
             if text:
                 yield text
         thread.join(timeout=0)
+
+    def _llama_complete(
+        self,
+        payload: dict[str, Any],
+        model_path: str,
+        generation_id: int,
+    ) -> str:
+        messages = payload.get("messages", [])
+        n_ctx = payload.get("n_ctx") or estimate_llama_n_ctx(
+            messages,
+            max_tokens=int(payload.get("max_tokens", 512)),
+        )
+        llm = self._pool.get_llama(model_path, n_ctx=n_ctx)
+        kwargs = llama_completion_kwargs(payload)
+        kwargs["stream"] = False
+        tools = payload.get("tools_schemas")
+        if tools:
+            kwargs["tools"] = tools
+        out = llm.create_chat_completion(messages=messages, **kwargs)
+        if not self._pool.is_generation_active(generation_id):
+            return ""
+        message = out["choices"][0].get("message") or {}
+        return str(message.get("content") or "")
 
     def _llama_stream(
         self,

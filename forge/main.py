@@ -42,6 +42,9 @@ async def lifespan(app: FastAPI):
         data_lock = ForgeDataDirLock()
         data_lock.acquire(settings.data_dir, host=settings.host, port=settings.port)
     configure_hf_hub_cache(settings.data_dir)
+    from seiso.platform import ensure_cuda_library_path
+
+    ensure_cuda_library_path()
     from forge.services.llamacpp_runtime import ensure_llamacpp_runtime
 
     ensure_llamacpp_runtime()
