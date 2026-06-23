@@ -41,7 +41,7 @@ class TrainConfig(BaseModel):
     method: TrainMethod = TrainMethod.LORA
     quant: QuantMode = QuantMode.INT4
     dataset_format: DatasetFormat = DatasetFormat.AUTO
-    epochs: int = Field(default=1, ge=1)
+    epochs: int = Field(default=3, ge=1, description="Maximum training epochs (early stopping may finish earlier)")
     batch_size: int = Field(default=2, ge=1)
     learning_rate: float = Field(default=2e-4, gt=0)
     max_seq_length: int = Field(default=2048, ge=128)
@@ -58,6 +58,18 @@ class TrainConfig(BaseModel):
     save_total_limit: int = Field(default=3, ge=1)
     eval_steps: int | None = None
     eval_split_ratio: float = Field(default=0.05, ge=0, le=0.5)
+    max_eval_samples: int = Field(
+        default=128,
+        ge=1,
+        description="Cap validation rows so most of the dataset stays in training",
+    )
+    preprocess_dataset: bool = True
+    deduplicate_dataset: bool = True
+    min_sample_chars: int = Field(default=1, ge=0)
+    early_stopping: bool = True
+    early_stopping_patience: int = Field(default=3, ge=1)
+    early_stopping_threshold: float = Field(default=0.001, ge=0)
+    metric_for_best_model: str = "eval_loss"
     lr_scheduler: str = "cosine"
     resume_from: Path | None = None
     sandbox_root: Path | None = None

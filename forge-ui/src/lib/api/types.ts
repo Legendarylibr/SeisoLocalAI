@@ -360,6 +360,11 @@ export type TrainingRecommendations = {
     use_rslora: boolean;
     packing: boolean;
     dataset_format: string;
+    preprocess_dataset?: boolean;
+    deduplicate_dataset?: boolean;
+    max_eval_samples?: number;
+    early_stopping?: boolean;
+    early_stopping_patience?: number;
   };
   warnings: string[];
   notes: string[];

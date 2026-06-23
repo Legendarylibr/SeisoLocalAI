@@ -36,6 +36,7 @@ from seiso.training.datasets import (
     prepare_tokenized_dataset,
 )
 from seiso.training.multi_gpu import configure_training_args, detect_training_layout
+from seiso.training.preprocess import compute_eval_split_size, preprocess_training_dataset
 from seiso.training.sft import build_sft_trainer
 
 logger = logging.getLogger(__name__)
@@ -130,13 +131,34 @@ class SeisoTrainer:
 
         ds_fmt = cfg.dataset_format
         raw_ds = load_training_dataset(cfg.dataset, sandbox_root=cfg.sandbox_root)
+        preprocess_stats: dict[str, Any] | None = None
+        if cfg.preprocess_dataset:
+            raw_ds, preprocess_stats, ds_fmt = preprocess_training_dataset(
+                raw_ds,
+                dataset_format=ds_fmt,
+                deduplicate=cfg.deduplicate_dataset,
+                min_chars=cfg.min_sample_chars,
+            )
+            self._log(
+                f"Preprocessed dataset: {preprocess_stats['kept']}/{preprocess_stats['initial_samples']} "
+                f"samples kept (format={preprocess_stats['resolved_format']})"
+            )
         max_samples = cfg.extra.get("max_samples")
         if isinstance(max_samples, int) and max_samples > 0 and len(raw_ds) > max_samples:
             raw_ds = raw_ds.select(range(max_samples))
             logger.info("Limited dataset to %d samples (max_samples)", max_samples)
-        if cfg.eval_split_ratio > 0 and len(raw_ds) > 10:
-            split = raw_ds.train_test_split(test_size=cfg.eval_split_ratio, seed=cfg.seed)
+        eval_n = 0
+        if len(raw_ds) > 10 and (cfg.early_stopping or cfg.eval_split_ratio > 0):
+            split_ratio = cfg.eval_split_ratio if cfg.eval_split_ratio > 0 else 0.02
+            eval_n = compute_eval_split_size(
+                len(raw_ds),
+                split_ratio,
+                cfg.max_eval_samples,
+            )
+        if eval_n > 0:
+            split = raw_ds.train_test_split(test_size=eval_n, seed=cfg.seed)
             train_ds, eval_ds = split["train"], split["test"]
+            self._log(f"Train/eval split: {len(train_ds)} train, {len(eval_ds)} eval (max_eval={cfg.max_eval_samples})")
         else:
             train_ds, eval_ds = raw_ds, None
 
@@ -184,6 +206,17 @@ class SeisoTrainer:
         )
         self._metrics_callback = metrics_cb
 
+        trainer_callbacks: list[Any] = [metrics_cb]
+        if eval_ds is not None and cfg.early_stopping:
+            from transformers import EarlyStoppingCallback
+
+            trainer_callbacks.append(
+                EarlyStoppingCallback(
+                    early_stopping_patience=cfg.early_stopping_patience,
+                    early_stopping_threshold=cfg.early_stopping_threshold,
+                )
+            )
+
         trainer = self._build_trainer(
             model,
             tokenizer,
@@ -193,7 +226,7 @@ class SeisoTrainer:
             multi_gpu,
             data_collator=data_collator,
             dataset_text_field=dataset_text_field,
-            callbacks=[metrics_cb],
+            callbacks=trainer_callbacks,
         )
 
         if cfg.resume_from:
@@ -212,7 +245,15 @@ class SeisoTrainer:
         tokenizer.save_pretrained(str(out))
         if cfg.method == TrainMethod.LORA:
             self._patch_adapter_metadata(out)
-        self._write_manifest(out, layout, multi_gpu, detected_fmt.value)
+        self._write_manifest(
+            out,
+            layout,
+            multi_gpu,
+            detected_fmt.value,
+            preprocess_stats=preprocess_stats,
+            train_samples=len(train_ds),
+            eval_samples=len(eval_ds) if eval_ds is not None else 0,
+        )
         release_training_memory(model)
         self._cleanup_gpu(None)
         logger.info("Training complete: %s", out)
@@ -481,12 +522,16 @@ class SeisoTrainer:
             "lr_scheduler_type": cfg.lr_scheduler,
             "dataloader_pin_memory": training_pin_memory(),
             "remove_unused_columns": not dataset_text_field,
-            "load_best_model_at_end": eval_ds is not None,
+            "load_best_model_at_end": eval_ds is not None and cfg.early_stopping,
             # ── Performance optimizations ──
             "dataloader_num_workers": num_workers,
             "dataloader_persistent_workers": persistent_workers,
             "gradient_checkpointing": cfg.gradient_checkpointing,
         }
+        if eval_ds is not None and cfg.early_stopping:
+            if "metric_for_best_model" in _ta_fields:
+                base["metric_for_best_model"] = cfg.metric_for_best_model
+                base["greater_is_better"] = cfg.metric_for_best_model != "eval_loss"
         # save_safetensors was removed in transformers 5.x — only add when available
         if "save_safetensors" in _ta_fields:
             base["save_safetensors"] = cfg.save_safetensors
@@ -583,7 +628,17 @@ class SeisoTrainer:
         adapter_cfg["seiso_quant_mode"] = self.config.quant.value
         adapter_cfg_path.write_text(json.dumps(adapter_cfg, indent=2))
 
-    def _write_manifest(self, out: Path, layout, multi_gpu: bool, dataset_format: str) -> None:
+    def _write_manifest(
+        self,
+        out: Path,
+        layout,
+        multi_gpu: bool,
+        dataset_format: str,
+        *,
+        preprocess_stats: dict[str, Any] | None = None,
+        train_samples: int = 0,
+        eval_samples: int = 0,
+    ) -> None:
         cfg = self.config
         base_path = self._resolve_load_model_id()
         original_id = str(cfg.extra.get("original_model_id") or cfg.model_id)
@@ -608,7 +663,17 @@ class SeisoTrainer:
             "gradient_accumulation_steps": cfg.gradient_accumulation_steps,
             "gradient_checkpointing": cfg.gradient_checkpointing,
             "eval_split_ratio": cfg.eval_split_ratio,
+            "max_eval_samples": cfg.max_eval_samples,
             "eval_steps": cfg.eval_steps,
+            "preprocess_dataset": cfg.preprocess_dataset,
+            "deduplicate_dataset": cfg.deduplicate_dataset,
+            "early_stopping": cfg.early_stopping,
+            "early_stopping_patience": cfg.early_stopping_patience,
+            "early_stopping_threshold": cfg.early_stopping_threshold,
+            "metric_for_best_model": cfg.metric_for_best_model,
+            "preprocess_stats": preprocess_stats,
+            "train_samples": train_samples,
+            "eval_samples": eval_samples,
             "lr_scheduler": cfg.lr_scheduler,
             "seed": cfg.seed,
             "deterministic": cfg.deterministic,

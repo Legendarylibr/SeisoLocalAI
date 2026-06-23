@@ -38,7 +38,10 @@ export function TrainPage() {
   const [method, setMethod] = useState("lora");
   const [quant, setQuant] = useState("4bit");
   const [datasetFormat, setDatasetFormat] = useState("auto");
-  const [epochs, setEpochs] = useState(1);
+  const [epochs, setEpochs] = useState(5);
+  const [earlyStopping, setEarlyStopping] = useState(true);
+  const [earlyStoppingPatience, setEarlyStoppingPatience] = useState(3);
+  const [preprocessDataset, setPreprocessDataset] = useState(true);
   const [batchSize, setBatchSize] = useState(2);
   const [lr, setLr] = useState(0.0002);
   const [maxSeq, setMaxSeq] = useState(2048);
@@ -199,6 +202,9 @@ export function TrainPage() {
     setMaxSeq(rec.max_seq_length);
     setLr(rec.learning_rate);
     setEpochs(rec.epochs);
+    if (rec.early_stopping != null) setEarlyStopping(rec.early_stopping);
+    if (rec.early_stopping_patience != null) setEarlyStoppingPatience(rec.early_stopping_patience);
+    if (rec.preprocess_dataset != null) setPreprocessDataset(rec.preprocess_dataset);
     setLoraR(rec.lora_r);
     setLoraAlpha(rec.lora_alpha);
     setGradCkpt(rec.gradient_checkpointing);
@@ -294,6 +300,10 @@ export function TrainPage() {
           batch_size: batchSize,
           learning_rate: lr,
           max_seq_length: maxSeq,
+          preprocess_dataset: preprocessDataset,
+          deduplicate_dataset: preprocessDataset,
+          early_stopping: earlyStopping,
+          early_stopping_patience: earlyStoppingPatience,
           lora_r: loraR,
           lora_alpha: loraAlpha,
           gradient_accumulation_steps: gradAccum,
@@ -535,8 +545,11 @@ export function TrainPage() {
           </div>
           <div className="studio-slider-grid">
             <div className="slider-row">
-              <label>Epochs: {epochs}</label>
-              <input type="range" min={1} max={10} value={epochs} onChange={(e) => setEpochs(+e.target.value)} />
+              <label>Max epochs: {epochs}</label>
+              <input type="range" min={1} max={20} value={epochs} onChange={(e) => setEpochs(+e.target.value)} />
+              <p className="muted-text studio-field-hint studio-field-hint-compact">
+                Training stops earlier when early stopping finds the best eval loss.
+              </p>
             </div>
             <div className="slider-row">
               <label>Batch size: {batchSize}</label>
@@ -589,6 +602,14 @@ export function TrainPage() {
           <FormSection title="Optimization" hint="Memory and throughput trade-offs." collapsible defaultOpen={false}>
             <div className="studio-checkbox-grid">
               <label className="studio-checkbox-item">
+                <input type="checkbox" checked={preprocessDataset} onChange={(e) => setPreprocessDataset(e.target.checked)} />
+                Normalize &amp; clean dataset
+              </label>
+              <label className="studio-checkbox-item">
+                <input type="checkbox" checked={earlyStopping} onChange={(e) => setEarlyStopping(e.target.checked)} />
+                Early stopping (optimal epoch)
+              </label>
+              <label className="studio-checkbox-item">
                 <input type="checkbox" checked={gradCkpt} onChange={(e) => setGradCkpt(e.target.checked)} />
                 Gradient checkpointing
               </label>
@@ -635,6 +656,18 @@ export function TrainPage() {
                 Fused cross-entropy
               </label>
             </div>
+            {earlyStopping && (
+              <div className="slider-row">
+                <label>Early-stop patience: {earlyStoppingPatience}</label>
+                <input
+                  type="range"
+                  min={1}
+                  max={10}
+                  value={earlyStoppingPatience}
+                  onChange={(e) => setEarlyStoppingPatience(+e.target.value)}
+                />
+              </div>
+            )}
           </FormSection>
 
           {method !== "embedding" && (

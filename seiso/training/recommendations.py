@@ -105,12 +105,12 @@ def _scale_for_model_size(base: dict[str, Any], params_b: float | None) -> dict[
         cfg["gradient_accumulation_steps"] = max(2, int(cfg["gradient_accumulation_steps"]) // 2)
         cfg["lora_r"] = 16
         cfg["lora_alpha"] = 32
-        cfg["epochs"] = 2
+        cfg["epochs"] = 5
     elif params_b <= 3.0:
         cfg["batch_size"] = min(int(cfg["batch_size"]), 2)
         cfg["lora_r"] = 16
         cfg["lora_alpha"] = 32
-        cfg["epochs"] = 1
+        cfg["epochs"] = 3
     elif params_b <= 7.0:
         cfg["batch_size"] = 1
         cfg["gradient_accumulation_steps"] = max(int(cfg["gradient_accumulation_steps"]), 8)
@@ -159,7 +159,7 @@ def recommend_training_config(
         "gradient_accumulation_steps": defaults["gradient_accumulation_steps"],
         "max_seq_length": defaults["max_seq_length"],
         "learning_rate": 2e-4,
-        "epochs": 1,
+        "epochs": 5,
         "lora_r": 16,
         "lora_alpha": 32,
         "gradient_checkpointing": defaults["gradient_checkpointing"],
@@ -169,6 +169,11 @@ def recommend_training_config(
         "use_rslora": False,
         "packing": False,
         "dataset_format": ds.get("dataset_format", "auto"),
+        "preprocess_dataset": True,
+        "deduplicate_dataset": True,
+        "max_eval_samples": 128,
+        "early_stopping": True,
+        "early_stopping_patience": 3,
     }
     config = _scale_for_model_size(base_cfg, params_b)
 
