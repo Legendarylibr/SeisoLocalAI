@@ -15,6 +15,23 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_QUANTS = ("q4_k_m", "q8_0", "f16")
 
+# Direct HF→GGUF outtypes supported by the installed convert_hf_to_gguf.py.
+DIRECT_CONVERT_OUTTYPES = frozenset({"f32", "f16", "bf16", "q8_0", "tq1_0", "tq2_0", "auto"})
+
+# K-quants produced via llama-quantize from an intermediate F16 GGUF.
+LLAMA_QUANTIZE_TYPES: dict[str, str] = {
+    "q2_k": "Q2_K",
+    "q3_k_s": "Q3_K_S",
+    "q3_k_m": "Q3_K_M",
+    "q3_k_l": "Q3_K_L",
+    "q4_0": "Q4_0",
+    "q4_k_s": "Q4_K_S",
+    "q4_k_m": "Q4_K_M",
+    "q5_k_s": "Q5_K_S",
+    "q5_k_m": "Q5_K_M",
+    "q6_k": "Q6_K",
+}
+
 # llama.cpp convert_hf_to_gguf --outtype values supported by Seiso export.
 SUPPORTED_GGUF_QUANTS = frozenset(
     {
@@ -94,6 +111,54 @@ def normalize_gguf_quants(quantizations: list[str] | tuple[str, ...]) -> list[st
     return out or ["q4_k_m"]
 
 
+def resolve_llama_quantize_binary() -> Path | None:
+    llama_cpp_dir = os.environ.get("LLAMA_CPP_DIR", "").strip()
+    if llama_cpp_dir:
+        candidate = Path(llama_cpp_dir) / "build" / "bin" / "llama-quantize"
+        if candidate.is_file():
+            return candidate
+    if path := shutil.which("llama-quantize"):
+        return Path(path)
+    return None
+
+
+def convert_outtype_for_hf_export(quant: str) -> str | None:
+    """Return a direct convert_hf_to_gguf outtype, or None when quantize-from-f16 is required."""
+    normalized = normalize_gguf_quant(quant)
+    if normalized in DIRECT_CONVERT_OUTTYPES:
+        return normalized
+    if normalized in LLAMA_QUANTIZE_TYPES:
+        return None
+    return normalized if normalized in DIRECT_CONVERT_OUTTYPES else None
+
+
+def quantize_gguf_file(
+    source: Path,
+    dest: Path,
+    quant: str,
+    log: Callable[[str], None],
+) -> bool:
+    """Re-quantize an existing GGUF (typically F16) with llama-quantize."""
+    normalized = normalize_gguf_quant(quant)
+    quant_type = LLAMA_QUANTIZE_TYPES.get(normalized)
+    binary = resolve_llama_quantize_binary()
+    if quant_type is None or binary is None:
+        return False
+    if dest.exists():
+        dest.unlink()
+    cmd = [str(binary), str(source), str(dest), quant_type]
+    try:
+        subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=7200)
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError) as exc:
+        detail = getattr(exc, "stderr", "") or getattr(exc, "stdout", "") or str(exc)
+        log(f"llama-quantize failed for {quant}: {str(detail)[:300]}")
+        return False
+    if dest.is_file() and dest.stat().st_size > 0:
+        log(f"GGUF written: {dest} ({quant_type})")
+        return True
+    return False
+
+
 def resolve_gguf_converter() -> list[list[str]]:
     """Return candidate llama.cpp HF→GGUF converter command prefixes (most preferred first)."""
     candidates: list[list[str]] = []
@@ -156,6 +221,27 @@ def convert_hf_dir_to_gguf(
     if dest.exists():
         dest.unlink()
 
+    direct = convert_outtype_for_hf_export(quant)
+    if direct is not None:
+        return _convert_hf_dir_direct(source, dest, direct, log)
+
+    if quant in LLAMA_QUANTIZE_TYPES:
+        with tempfile.NamedTemporaryFile(suffix=".gguf", delete=False) as tmp:
+            f16_path = Path(tmp.name)
+        try:
+            if not _convert_hf_dir_direct(source, f16_path, "f16", log):
+                return False
+            return quantize_gguf_file(f16_path, dest, quant, log)
+        finally:
+            f16_path.unlink(missing_ok=True)
+
+    log(f"GGUF conversion failed for {quant}: unsupported quant for installed llama.cpp")
+    return False
+
+
+def _convert_hf_dir_direct(
+    source: Path, dest: Path, outtype: str, log: Callable[[str], None]
+) -> bool:
     converters = resolve_gguf_converter()
     if not converters:
         log(
@@ -166,11 +252,11 @@ def convert_hf_dir_to_gguf(
 
     errors: list[str] = []
     for prefix in converters:
-        cmd = [*prefix, str(source), "--outfile", str(dest), "--outtype", quant]
+        cmd = [*prefix, str(source), "--outfile", str(dest), "--outtype", outtype]
         try:
             subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=7200)
             if dest.exists() and dest.stat().st_size > 0:
-                log(f"GGUF written: {dest} ({quant})")
+                log(f"GGUF written: {dest} ({outtype})")
                 return True
             errors.append(f"{cmd[0]}: output file missing or empty")
         except FileNotFoundError:
@@ -181,7 +267,7 @@ def convert_hf_dir_to_gguf(
             detail = (exc.stderr or exc.stdout or str(exc)).strip()
             errors.append(f"{cmd[0]}: {detail[:300]}")
 
-    log(f"GGUF conversion failed for {quant}: {'; '.join(errors[:3])}")
+    log(f"GGUF conversion failed for {outtype}: {'; '.join(errors[:3])}")
     return False
 
 

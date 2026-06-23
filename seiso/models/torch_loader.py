@@ -51,7 +51,7 @@ def load_torch(
     device: str | None = None,
     for_training: bool = False,
 ) -> tuple[Any, Any]:
-    from transformers import AutoModelForCausalLM, AutoTokenizer
+    from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
 
     from seiso.models.hf_env import _read_hub_token
 
@@ -68,6 +68,12 @@ def load_torch(
         tokenizer_kwargs["token"] = hub_token
         model_kwargs["token"] = hub_token
 
+    from seiso.models.hub_quant import native_quant_method_from_config
+
+    pre_config = AutoConfig.from_pretrained(options.model_id, **tokenizer_kwargs)
+    pre_quant_method = native_quant_method_from_config(pre_config) or ""
+    native_hub_quant = bool(pre_quant_method)
+
     device_map = _resolve_device_map(backend, device, for_training=for_training)
     if device_map is not None:
         model_kwargs["device_map"] = device_map
@@ -79,7 +85,7 @@ def load_torch(
                 model_kwargs["max_memory"] = max_memory
 
     dtype = _resolve_dtype(options)
-    if dtype is None and device != "mps":
+    if dtype is None and device != "mps" and not native_hub_quant:
         try:
             import torch
 
@@ -87,12 +93,18 @@ def load_torch(
                 dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
         except ImportError:
             dtype = None
-    if dtype is not None:
+    if dtype is not None and not native_hub_quant:
         model_kwargs["torch_dtype"] = dtype
 
     model_kwargs.setdefault("low_cpu_mem_usage", True)
 
-    if options.use_flash_attention and device != "mps":
+    if native_hub_quant:
+        model_kwargs["attn_implementation"] = "eager"
+        logger.info(
+            "Native %s weights — keeping hub dtype, using eager attention",
+            pre_quant_method,
+        )
+    elif options.use_flash_attention and device != "mps":
         try:
             import flash_attn  # noqa: F401
 
@@ -104,6 +116,15 @@ def load_torch(
 
     use_4bit = options.load_in_4bit
     use_8bit = options.load_in_8bit
+
+    if native_hub_quant:
+        logger.info(
+            "Model ships with native %s weights — skipping bitsandbytes QLoRA quant",
+            pre_quant_method,
+        )
+        use_4bit = False
+        use_8bit = False
+
     if use_4bit or use_8bit:
         # bitsandbytes (required for 4-bit/8-bit quantization) is only available
         # on Linux/Windows with a CUDA or ROCm GPU. On macOS (no bnb) or a
@@ -141,7 +162,9 @@ def load_torch(
             bnb_4bit_quant_type="nf4",
         )
     elif use_8bit:
-        model_kwargs["load_in_8bit"] = True
+        from transformers import BitsAndBytesConfig
+
+        model_kwargs["quantization_config"] = BitsAndBytesConfig(load_in_8bit=True)
 
     tokenizer = AutoTokenizer.from_pretrained(options.model_id, **tokenizer_kwargs)  # nosec B615: revision pinned in tokenizer_kwargs
     if tokenizer.pad_token is None:

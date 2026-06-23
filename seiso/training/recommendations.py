@@ -82,6 +82,12 @@ def _dataset_hints(dataset: str) -> dict[str, Any]:
             "train_on_responses_only": True,
             "note": "Name suggests chat data — chat format with response-only loss.",
         }
+    if any(token in key for token in ("code", "pretrain", "pretraining")):
+        return {
+            "dataset_format": "text",
+            "train_on_responses_only": False,
+            "note": "Code/pretraining corpus — normalize to a single text field (see scripts/prepare_code_corpus.py).",
+        }
     return {
         "dataset_format": "auto",
         "train_on_responses_only": True,

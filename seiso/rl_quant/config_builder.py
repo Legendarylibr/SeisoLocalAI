@@ -106,6 +106,21 @@ def build_framework_config(
         if flat_key in payload and payload[flat_key] is not None:
             overrides[flat_key] = payload[flat_key]
 
+    if payload.get("router_enabled") is True:
+        overrides["router_enabled"] = True
+    if routes := payload.get("router_routes"):
+        if isinstance(routes, (list, tuple)) and routes:
+            overrides["router_routes"] = tuple(str(r) for r in routes)
+    if modes := payload.get("hardware_modes"):
+        if isinstance(modes, (list, tuple)) and modes:
+            overrides["hardware_modes"] = tuple(str(m) for m in modes)
+    if repos := payload.get("route_hf_allowed_repos"):
+        if isinstance(repos, (list, tuple)) and repos:
+            overrides["route_hf_allowed_repos"] = tuple(str(r) for r in repos)
+    for bound_key in ("router_exploration", "router_regression_penalty", "llama_cpp_timeout_s"):
+        if bound_key in payload and payload[bound_key] is not None:
+            overrides[bound_key] = payload[bound_key]
+
     flat = config_to_flat_dict(base)
     flat.update(overrides)
     from seiso.memory.protection import apply_rl_memory_guards

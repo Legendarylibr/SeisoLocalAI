@@ -378,16 +378,18 @@ def merge_lora_checkpoint(checkpoint: Path, dest: Path, log: Callable[[str], Non
         from seiso.memory.protection import ensure_load_fits, release_cached_memory
 
         ensure_load_fits(base_id, mode="chat")
+        tok_path = checkpoint if (checkpoint / "tokenizer_config.json").is_file() else base_id
+        tok = deps.auto_tokenizer.from_pretrained(str(tok_path), revision="main")  # nosec B615: revision pinned
         model = deps.auto_model.from_pretrained(
             base_id, device_map="cpu", low_cpu_mem_usage=True, revision="main"
         )  # nosec B615: revision pinned
+        if len(tok) != model.get_input_embeddings().weight.shape[0]:
+            model.resize_token_embeddings(len(tok))
         model = deps.peft_model.from_pretrained(model, str(checkpoint))
         merged = model.merge_and_unload()
         merged.save_pretrained(str(dest))
         del model, merged
         release_cached_memory()
-        tok_path = checkpoint if (checkpoint / "tokenizer_config.json").is_file() else base_id
-        tok = deps.auto_tokenizer.from_pretrained(str(tok_path), revision="main")  # nosec B615: revision pinned
         tok.save_pretrained(str(dest))
         log(f"Merged model saved to {dest}")
     elif (checkpoint / "config.json").is_file():

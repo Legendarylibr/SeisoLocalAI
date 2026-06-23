@@ -285,12 +285,29 @@ class SeisoTrainer:
             self._log(f"Loading trainable weights from {model_ref}")
 
         try:
+            from seiso.models.hub_quant import is_native_hub_quant_model
+
+            trust_remote_code = bool(cfg.extra.get("trust_remote_code", False))
+            native_hub_quant = is_native_hub_quant_model(
+                str(cfg.model_id),
+                trust_remote_code=trust_remote_code,
+                peek=True,
+            )
+            load_dtype = None if native_hub_quant else (
+                "float16" if cfg.quant == QuantMode.INT16 else None
+            )
+            use_flash = (
+                not native_hub_quant
+                and bool(cfg.extra.get("use_flash_attention", True))
+            )
             self._loaded = SeisoModel.from_pretrained(
                 model_ref,
                 max_seq_length=cfg.max_seq_length,
                 load_in_4bit=load_4bit,
                 load_in_8bit=load_8bit,
-                dtype="float16" if cfg.quant == QuantMode.INT16 else None,
+                dtype=load_dtype,
+                trust_remote_code=bool(cfg.extra.get("trust_remote_code", False)),
+                use_flash_attention=use_flash,
             )
         except OSError as exc:
             from seiso.models.hub_errors import format_hub_error

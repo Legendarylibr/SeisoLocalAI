@@ -198,6 +198,7 @@ def _llama_cpp_command(
         str(config.llama_cpp_context),
         "-n",
         str(config.llama_cpp_generate_tokens),
+        "-st",
     ]
 
 

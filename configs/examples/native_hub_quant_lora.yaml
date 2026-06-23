@@ -1,0 +1,33 @@
+# LoRA on a model with native hub quantization (MXFP4/FP8 — not bitsandbytes QLoRA).
+# Prepare data: python scripts/prepare_code_corpus.py -o ~/.seiso/datasets/code-pretrain.jsonl
+# Train: seiso train -c configs/examples/native_hub_quant_lora.yaml
+model_id: org/model-with-native-hub-quant
+dataset: ~/.seiso/datasets/code-pretrain.jsonl
+output_dir: ~/.seiso/experiments/native-hub-quant-lora
+method: lora
+quant: 16bit
+dataset_format: text
+train_on_responses_only: false
+epochs: 1
+batch_size: 1
+learning_rate: 1.0e-4
+max_seq_length: 512
+lora_r: 8
+lora_alpha: 16
+lora_dropout: 0.05
+gradient_accumulation_steps: 32
+gradient_checkpointing: true
+group_by_length: false
+packing: false
+eval_split_ratio: 0.01
+save_steps: 200
+logging_steps: 10
+seed: 42
+deterministic: true
+use_triton: false
+use_fused_ce: false
+use_fused_lora: false
+save_safetensors: true
+extra:
+  trust_remote_code: true
+  use_flash_attention: false

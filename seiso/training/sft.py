@@ -5,6 +5,10 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from seiso.env import configure_transformers_env
+
+configure_transformers_env()
+
 logger = logging.getLogger(__name__)
 
 try:

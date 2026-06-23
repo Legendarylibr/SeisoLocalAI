@@ -102,6 +102,7 @@ def run_training(
     on_log: Callable[[str], None] | None = None,
 ) -> Path:
     """Execute training job; returns output checkpoint directory."""
+    from seiso.env import configure_transformers_env
     from seiso.memory.protection import apply_training_memory_guards
     from seiso.models.hf_env import configure_hf_hub_cache
     from seiso.security.nvidia_boundary import enforce_nvidia_secure_boundary
@@ -109,6 +110,7 @@ def run_training(
 
     from seiso.platform import ensure_cuda_library_path
 
+    configure_transformers_env()
     if not os.environ.get("HF_HOME"):
         configure_hf_hub_cache(config.sandbox_root)
     ensure_cuda_library_path()

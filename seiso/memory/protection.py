@@ -16,7 +16,11 @@ from seiso.hardware import (
     training_defaults,
     vram_headroom_mb,
 )
-from seiso.memory.estimates import estimate_chat_vram_gb, guess_params_from_name
+from seiso.memory.estimates import (
+    estimate_chat_vram_gb,
+    estimate_training_vram_gb,
+    guess_params_from_name,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -66,8 +70,39 @@ def estimate_path_vram_mb(path: str | Path, *, mode: str = "chat") -> int:
     return est
 
 
+def _hub_model_vram_mb(path_str: str, *, mode: str) -> int | None:
+    """VRAM estimate for HuggingFace repo ids (not local paths)."""
+    from seiso.models.hub_quant import (
+        infer_active_params_b,
+        is_hub_model_id,
+        is_native_hub_quant_model,
+        peek_hub_config,
+    )
+
+    if not is_hub_model_id(path_str):
+        return None
+
+    config = peek_hub_config(path_str)
+    params_b = infer_active_params_b(path_str, config=config)
+    label = f"{params_b:g}B"
+    native = is_native_hub_quant_model(path_str, config=config, peek=False)
+    quant = "mxfp4" if native and mode == "train" else ("Q8_0" if native else "4bit")
+    est_gb = (
+        estimate_training_vram_gb(label, quant=quant, repo_id=path_str)
+        if mode == "train"
+        else estimate_chat_vram_gb(label, quant=quant, repo_id=path_str)
+    )
+    return int(est_gb * 1024)
+
+
 def _estimate_path_vram_mb_uncached(p: Path, *, mode: str = "chat") -> int:
     name = p.name.lower()
+    path_str = str(p)
+
+    if not p.exists():
+        hub_est = _hub_model_vram_mb(path_str, mode=mode)
+        if hub_est is not None:
+            return hub_est
 
     if p.is_file() and p.suffix.lower() in {".gguf", ".bin", ".safetensors", ".pt", ".pth"}:
         file_mb = max(p.stat().st_size / (1024**2), 1)
@@ -92,10 +127,23 @@ def _estimate_path_vram_mb_uncached(p: Path, *, mode: str = "chat") -> int:
             guessed = guess_params_from_name(name) or 7.0
             est = int(estimate_chat_vram_gb(f"{guessed}B") * 1024)
     else:
-        guessed = guess_params_from_name(name) or guess_params_from_name(str(p)) or 7.0
-        est = int(estimate_chat_vram_gb(f"{guessed}B") * 1024)
+        hub_est = _hub_model_vram_mb(path_str, mode=mode)
+        if hub_est is not None:
+            est = hub_est
+        else:
+            guessed = guess_params_from_name(name) or guess_params_from_name(path_str) or 7.0
+            est = int(estimate_chat_vram_gb(f"{guessed}B", repo_id=path_str) * 1024)
+            if mode == "train":
+                est = int(
+                    estimate_training_vram_gb(
+                        f"{guessed}B",
+                        quant="4bit",
+                        repo_id=path_str,
+                    )
+                    * 1024
+                )
 
-    if mode == "train":
+    if mode == "train" and _hub_model_vram_mb(path_str, mode=mode) is None and p.exists():
         est = int(est * _TRAINING_OVERHEAD_RATIO)
     return max(est, 256)
 
@@ -516,6 +564,24 @@ def apply_training_memory_guards(config: Any) -> Any:
         )
     if headroom > 0 and est_mb > int(headroom * 0.85) and max_seq > 1024:
         updates["max_seq_length"] = min(max_seq, 1024)
+
+    from seiso.models.hub_quant import needs_tight_vram_training
+
+    trust_remote_code = bool(getattr(config, "extra", {}).get("trust_remote_code", False))
+    if needs_tight_vram_training(
+        str(config.model_id),
+        trust_remote_code=trust_remote_code,
+        est_train_mb=est_mb,
+        headroom_mb=headroom,
+    ):
+        updates.setdefault("batch_size", 1)
+        updates.setdefault("gradient_accumulation_steps", max(accum, 32))
+        updates.setdefault("max_seq_length", min(max_seq, 512))
+        updates.setdefault("use_triton", False)
+        updates.setdefault("use_fused_lora", False)
+        updates.setdefault("use_fused_ce", False)
+        updates.setdefault("gradient_checkpointing", True)
+        updates.setdefault("packing", False)
 
     if not updates:
         return config

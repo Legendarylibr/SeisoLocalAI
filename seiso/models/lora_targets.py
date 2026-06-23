@@ -20,6 +20,7 @@ _ARCHITECTURE_TARGETS: dict[str, list[str]] = {
     "falcon": ["query_key_value", "dense", "dense_h_to_4h", "dense_4h_to_h"],
     "gpt2": ["c_attn", "c_proj", "c_fc"],
     "gpt_neox": ["query_key_value", "dense", "dense_h_to_4h", "dense_4h_to_h"],
+    "gpt_oss": ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
     "deepseek": ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
     "yi": ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
 }
@@ -44,7 +45,7 @@ def detect_architecture(model_id: str, model=None) -> str:
         (r"deepseek-r1|deepseek_r1|deepseek", "deepseek"),
         (r"falcon", "falcon"),
         (r"yi-", "yi"),
-        (r"gpt-oss", "llama"),
+        (r"gpt-oss|gpt_oss", "gpt_oss"),
     ]
     for pat, arch in patterns:
         if re.search(pat, mid):

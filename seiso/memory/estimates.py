@@ -32,7 +32,7 @@ def _active_params_b(params: str, tags: tuple[str, ...] | list[str], repo_id: st
     if not math.isfinite(raw):
         guessed = guess_params_from_name(repo_id) or guess_params_from_name(params)
         raw = guessed if guessed is not None else _UNKNOWN_PARAMS_B
-    if "moe" in tags:
+    if "moe" in tags or "moe" in text:
         return max(raw * 0.2, 1.0)
     return raw
 
@@ -83,7 +83,10 @@ def estimate_training_vram_gb(
     """Rough QLoRA/LoRA training VRAM for fit labels."""
     params_b = _active_params_b(params, tags, repo_id)
     quant_u = quant.lower()
-    if quant_u in {"16bit", "none", "fp16", "bf16"}:
+    if quant_u in {"mxfp4", "fp8"}:
+        # Native hub quant (~8-bit effective weights).
+        base = params_b * 1.1
+    elif quant_u in {"16bit", "none", "fp16", "bf16"}:
         base = params_b * 2.0
     elif quant_u == "8bit":
         base = params_b * 1.1
