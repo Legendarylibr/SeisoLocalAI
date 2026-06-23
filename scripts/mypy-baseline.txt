@@ -15,8 +15,6 @@ forge/instance_lock.py:49: error: Returning Any from function declared to return
 forge/instance_lock.py:81: error: Returning Any from function declared to return "bool"  [no-any-return]
 forge/main.py:113: error: Argument "response_headers" to "apply_response_security_headers" has incompatible type "MutableHeaders"; expected "dict[str, str]"  [arg-type]
 forge/orchestrators/inference.py:150: error: Returning Any from function declared to return "str"  [no-any-return]
-forge/providers/ollama.py:117: error: Returning Any from function declared to return "str"  [no-any-return]
-forge/providers/ollama.py:32: error: Returning Any from function declared to return "str"  [no-any-return]
 forge/providers/router.py:56: error: Returning Any from function declared to return "str"  [no-any-return]
 forge/security/auth.py:45: error: Returning Any from function declared to return "str"  [no-any-return]
 forge/security/http_client.py:32: error: Incompatible types in assignment (expression has type "Callable[[str, VarArg(Any), KwArg(Any)], Any]", variable has type "Callable[[bytes | str | None, bytes | str | int | None, int, int, int, int], list[tuple[AddressFamily, SocketKind, int, str, tuple[str, int] | tuple[str, int, int, int]]]]")  [assignment]

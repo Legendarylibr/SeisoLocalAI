@@ -664,21 +664,6 @@ label {
   z-index: 0;
 }
 
-.auth-bg-figure {
-  position: absolute;
-  left: 50%;
-  bottom: 0;
-  transform: translateX(-50%);
-  max-width: min(520px, 70vw);
-  max-height: 85vh;
-  width: auto;
-  height: auto;
-  object-fit: contain;
-  opacity: 0.035;
-  filter: grayscale(1);
-  mask-image: radial-gradient(ellipse 55% 65% at 50% 60%, black 15%, transparent 72%);
-}
-
 .auth-orb {
   position: absolute;
   border-radius: 50%;

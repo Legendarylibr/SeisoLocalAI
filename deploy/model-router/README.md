@@ -103,12 +103,11 @@ curl http://127.0.0.1:8780/v1/chat/completions \
 |------|---------|
 | `config/router.local.yaml` | Local router — **llama.cpp** (default) |
 | `config/router.local.vllm.yaml` | Local router — vLLM + Nemotron orchestrator |
-| `config/orchestrator_tools.json` | Reference `answer` tool schema for specialists |
 | `config/router.prod.yaml` | Prod auth, rate limits, vLLM |
 | `config/specialists.local.llamacpp.json` | llama.cpp specialist catalog |
 | `config/specialists.local.vllm.json` | Local vLLM specialist catalog |
 | `config/specialists.prod.vllm.json` | Production vLLM catalog |
-| `config/llama-swap.local.yaml` | llama-swap → llama.cpp containers |
+| `config/llama-swap.local.llamacpp.yaml` | llama-swap → llama.cpp containers |
 | `config/llama-swap.local.vllm.yaml` | llama-swap → local vLLM containers |
 | `config/llama-swap.prod.yaml` | llama-swap spawns vLLM on demand |
 

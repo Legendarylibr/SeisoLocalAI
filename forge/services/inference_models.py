@@ -198,9 +198,10 @@ async def list_inference_options(
                 "default_backend": BACKEND_ROUTER,
                 "backends": [BACKEND_ROUTER],
                 "backend_labels": {BACKEND_ROUTER: BACKEND_LABELS[BACKEND_ROUTER]},
-                "ollama_model": None,
                 "size_bytes": 0,
-                "metadata": {"description": "Classifier + RL policy over vLLM specialist backends"},
+                "metadata": {
+                    "description": "Nemotron orchestrator or heuristic routing over vLLM specialists"
+                },
                 "hardware_fit": "ideal",
                 "hardware_fit_label": "Managed routing",
                 "hardware_fit_rank": 100,

@@ -371,7 +371,3 @@ def create_router_app(settings: RouterSettings | None = None) -> FastAPI:
         return StreamingResponse(event_gen(), media_type="text/event-stream")
 
     return app
-
-
-def create_app(settings: RouterSettings | None = None) -> FastAPI:
-    return create_router_app(settings)
