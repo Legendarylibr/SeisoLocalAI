@@ -31,7 +31,8 @@ def test_specialist_catalog_roundtrip(tmp_path: Path):
             SpecialistRoute(
                 route_id="general",
                 llamaswap_model="seiso-general",
-                vllm_url="http://localhost:8001",
+                backend_url="http://localhost:8001",
+                backend_type="vllm",
                 vram_hot=True,
             )
         ]
@@ -41,6 +42,29 @@ def test_specialist_catalog_roundtrip(tmp_path: Path):
     loaded = SpecialistCatalog.from_json(path)
     assert len(loaded) == 1
     assert loaded.by_id("general").llamaswap_model == "seiso-general"
+
+
+def test_specialist_catalog_vllm_url_alias(tmp_path: Path):
+    path = tmp_path / "specialists.json"
+    path.write_text(
+        json.dumps(
+            {
+                "routes": [
+                    {
+                        "route_id": "general",
+                        "llamaswap_model": "seiso-general",
+                        "vllm_url": "http://localhost:8080",
+                        "backend_type": "llamacpp",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    loaded = SpecialistCatalog.from_json(path)
+    route = loaded.by_id("general")
+    assert route.backend_url == "http://localhost:8080"
+    assert route.is_llamacpp
 
 
 def test_bandit_select_and_update():

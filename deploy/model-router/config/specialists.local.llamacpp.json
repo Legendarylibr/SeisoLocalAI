@@ -4,48 +4,45 @@
       "route_id": "general",
       "llamaswap_model": "seiso-general",
       "openai_model_name": "seiso-general",
-      "backend_type": "vllm",
-      "backend_url": "http://vllm-general:8000",
+      "backend_type": "llamacpp",
+      "backend_url": "http://llama-general:8080",
       "domain_hints": ["general", "chat", "qa"],
       "hardware_hints": ["any"],
       "vram_hot": true,
-      "sleep_level": 1,
       "idle_sleep_sec": 0,
       "fallback_priority": 10,
       "metadata": {
-        "description": "Backward-compatible default catalog (vLLM). Prefer specialists.local.*.json"
+        "description": "General chat GGUF via llama.cpp"
       }
     },
     {
       "route_id": "code",
       "llamaswap_model": "seiso-code",
       "openai_model_name": "seiso-code",
-      "backend_type": "vllm",
-      "backend_url": "http://vllm-code:8000",
+      "backend_type": "llamacpp",
+      "backend_url": "http://llama-code:8080",
       "domain_hints": ["code"],
       "hardware_hints": ["gpu", "any"],
       "vram_hot": true,
-      "sleep_level": 1,
       "idle_sleep_sec": 0,
       "fallback_priority": 20,
       "metadata": {
-        "description": "Code specialist (vLLM)"
+        "description": "Code specialist GGUF via llama.cpp"
       }
     },
     {
       "route_id": "reasoning",
       "llamaswap_model": "seiso-reasoning",
       "openai_model_name": "seiso-reasoning",
-      "backend_type": "vllm",
-      "backend_url": "http://vllm-reasoning:8000",
+      "backend_type": "llamacpp",
+      "backend_url": "http://llama-reasoning:8080",
       "domain_hints": ["reasoning", "math"],
       "hardware_hints": ["gpu", "any"],
       "vram_hot": false,
-      "sleep_level": 1,
       "idle_sleep_sec": 300,
       "fallback_priority": 30,
       "metadata": {
-        "description": "Reasoning specialist (vLLM sleep L1)"
+        "description": "Reasoning GGUF — unloaded by llama-swap TTL when idle"
       }
     }
   ]

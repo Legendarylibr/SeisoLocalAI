@@ -1,22 +1,25 @@
-# Local stack: router + llama-swap + 3 vLLM specialists (sleep mode level 1)
+# Local stack (default): router + llama-swap + 3 llama.cpp specialists
 #
 #   cd deploy/model-router
 #   docker compose -f docker-compose.local.yml up --build
 #
+# Place GGUF files under MODEL_CACHE_DIR (default ../../models) and set SEISO_*_GGUF.
+# For vLLM local stack instead: docker compose -f docker-compose.local.vllm.yml up --build
+#
 # Router:     http://127.0.0.1:8780/v1/chat/completions
 # llama-swap: http://127.0.0.1:8080 (internal orchestrator)
 
-x-vllm-env: &vllm_env
-  VLLM_SERVER_DEV_MODE: "1"
-  HF_HOME: /models/cache
+x-llama-env: &llama_env
+  LLAMA_ARG_HOST: "0.0.0.0"
+  LLAMA_ARG_PORT: "8080"
 
-x-vllm-base: &vllm_base
-  image: vllm/vllm-openai:latest
+x-llama-base: &llama_base
+  image: ghcr.io/ggml-org/llama.cpp:server
   restart: unless-stopped
   volumes:
-    - ${MODEL_CACHE_DIR:-../../models}:/models/cache
+    - ${MODEL_CACHE_DIR:-../../models}:/models:ro
   environment:
-    <<: *vllm_env
+    <<: *llama_env
   deploy:
     resources:
       reservations:
@@ -25,11 +28,11 @@ x-vllm-base: &vllm_base
             count: 1
             capabilities: [gpu]
   healthcheck:
-    test: ["CMD", "curl", "-sf", "http://localhost:8000/health"]
+    test: ["CMD", "curl", "-sf", "http://localhost:8080/health"]
     interval: 30s
     timeout: 10s
     retries: 10
-    start_period: 120s
+    start_period: 60s
 
 services:
   router:
@@ -47,7 +50,7 @@ services:
     depends_on:
       llama-swap:
         condition: service_started
-      vllm-general:
+      llama-general:
         condition: service_healthy
     networks:
       - seiso-router
@@ -58,75 +61,54 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      - ./config/llama-swap.local.yaml:/app/config.yaml:ro
+      - ./config/llama-swap.local.llamacpp.yaml:/app/config.yaml:ro
     command: ["--config", "/app/config.yaml", "--listen", ":8080"]
     depends_on:
-      vllm-general:
+      llama-general:
         condition: service_healthy
-      vllm-code:
+      llama-code:
         condition: service_healthy
-      vllm-reasoning:
+      llama-reasoning:
         condition: service_healthy
     networks:
       - seiso-router
 
-  vllm-general:
-    <<: *vllm_base
-    container_name: seiso-vllm-general
+  llama-general:
+    <<: *llama_base
+    container_name: seiso-llama-general
     command:
-      - --host
-      - "0.0.0.0"
-      - --port
-      - "8000"
       - --model
-      - ${SEISO_GENERAL_MODEL:-Qwen/Qwen2.5-0.5B-Instruct}
-      - --served-model-name
+      - ${SEISO_GENERAL_GGUF:-/models/general-q4_k_m.gguf}
+      - --alias
       - seiso-general
-      - --enable-sleep-mode
-      - --gpu-memory-utilization
-      - "0.40"
-      - --max-model-len
-      - "4096"
+      - -ngl
+      - "${N_GPU_LAYERS:-99}"
     networks:
       - seiso-router
 
-  vllm-code:
-    <<: *vllm_base
-    container_name: seiso-vllm-code
+  llama-code:
+    <<: *llama_base
+    container_name: seiso-llama-code
     command:
-      - --host
-      - "0.0.0.0"
-      - --port
-      - "8000"
       - --model
-      - ${SEISO_CODE_MODEL:-Qwen/Qwen2.5-Coder-0.5B-Instruct}
-      - --served-model-name
+      - ${SEISO_CODE_GGUF:-/models/code-q4_k_m.gguf}
+      - --alias
       - seiso-code
-      - --enable-sleep-mode
-      - --gpu-memory-utilization
-      - "0.40"
-      - --max-model-len
-      - "8192"
+      - -ngl
+      - "${N_GPU_LAYERS:-99}"
     networks:
       - seiso-router
 
-  vllm-reasoning:
-    <<: *vllm_base
-    container_name: seiso-vllm-reasoning
+  llama-reasoning:
+    <<: *llama_base
+    container_name: seiso-llama-reasoning
     command:
-      - --host
-      - "0.0.0.0"
-      - --port
-      - "8000"
       - --model
-      - ${SEISO_REASONING_MODEL:-Qwen/Qwen2.5-1.5B-Instruct}
-      - --served-model-name
+      - ${SEISO_REASONING_GGUF:-/models/reasoning-q4_k_m.gguf}
+      - --alias
       - seiso-reasoning
-      - --enable-sleep-mode
-      - --gpu-memory-utilization
-      - "0.35"
-      - --max-model-len
-      - "8192"
+      - -ngl
+      - "${N_GPU_LAYERS:-99}"
     networks:
       - seiso-router
 

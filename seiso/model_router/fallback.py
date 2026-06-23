@@ -6,7 +6,7 @@ import logging
 from dataclasses import dataclass
 
 from seiso.model_router.catalog import SpecialistCatalog, SpecialistRoute
-from seiso.model_router.vllm_lifecycle import BackendState, VLLMLifecycleManager
+from seiso.model_router.backend_lifecycle import BackendLifecycleManager, BackendState
 
 logger = logging.getLogger(__name__)
 
@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class FallbackChain:
     catalog: SpecialistCatalog
-    lifecycle: VLLMLifecycleManager
+    lifecycle: BackendLifecycleManager
     default_route_id: str = "general"
 
     def ordered_fallbacks(self, primary: SpecialistRoute) -> list[SpecialistRoute]:

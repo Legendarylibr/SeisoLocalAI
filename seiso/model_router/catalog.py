@@ -1,4 +1,4 @@
-"""Specialist route catalog for vLLM backends."""
+"""Specialist route catalog for llama.cpp and vLLM backends."""
 
 from __future__ import annotations
 
@@ -7,14 +7,18 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+_BACKEND_VLLM = "vllm"
+_BACKEND_LLAMACPP = "llamacpp"
+
 
 @dataclass
 class SpecialistRoute:
-    """One specialist model served by a vLLM (or llama-swap) backend."""
+    """One specialist model served via llama-swap and/or a direct backend URL."""
 
     route_id: str
     llamaswap_model: str
-    vllm_url: str
+    backend_url: str
+    backend_type: str = _BACKEND_VLLM
     domain_hints: tuple[str, ...] = ()
     hardware_hints: tuple[str, ...] = ("any",)
     vram_hot: bool = False
@@ -27,6 +31,23 @@ class SpecialistRoute:
     def __post_init__(self) -> None:
         if not self.openai_model_name:
             self.openai_model_name = self.llamaswap_model
+        normalized = (self.backend_type or _BACKEND_VLLM).strip().lower()
+        if normalized not in {_BACKEND_VLLM, _BACKEND_LLAMACPP}:
+            raise ValueError(f"Unknown backend_type: {self.backend_type!r}")
+        self.backend_type = normalized
+
+    @property
+    def is_vllm(self) -> bool:
+        return self.backend_type == _BACKEND_VLLM
+
+    @property
+    def is_llamacpp(self) -> bool:
+        return self.backend_type == _BACKEND_LLAMACPP
+
+    @property
+    def vllm_url(self) -> str:
+        """Backward-compatible alias for direct backend URL."""
+        return self.backend_url
 
     def matches_hardware(self, hardware: str) -> bool:
         hw = hardware.strip().lower()
@@ -44,7 +65,8 @@ class SpecialistRoute:
         return {
             "route_id": self.route_id,
             "llamaswap_model": self.llamaswap_model,
-            "vllm_url": self.vllm_url,
+            "backend_url": self.backend_url,
+            "backend_type": self.backend_type,
             "domain_hints": list(self.domain_hints),
             "hardware_hints": list(self.hardware_hints),
             "vram_hot": self.vram_hot,
@@ -98,11 +120,15 @@ class SpecialistCatalog:
         items = raw.get("routes", raw if isinstance(raw, list) else [])
         routes: list[SpecialistRoute] = []
         for item in items:
+            backend_url = item.get("backend_url") or item.get("vllm_url")
+            if not backend_url:
+                raise ValueError(f"route {item.get('route_id')!r} needs backend_url or vllm_url")
             routes.append(
                 SpecialistRoute(
                     route_id=str(item["route_id"]),
                     llamaswap_model=str(item.get("llamaswap_model", item["route_id"])),
-                    vllm_url=str(item["vllm_url"]).rstrip("/"),
+                    backend_url=str(backend_url).rstrip("/"),
+                    backend_type=str(item.get("backend_type", _BACKEND_VLLM)),
                     domain_hints=tuple(item.get("domain_hints", [])),
                     hardware_hints=tuple(item.get("hardware_hints", ["any"])),
                     vram_hot=bool(item.get("vram_hot", False)),

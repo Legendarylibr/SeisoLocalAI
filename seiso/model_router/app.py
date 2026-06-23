@@ -18,7 +18,7 @@ from seiso.model_router.config import RouterSettings, resolve_paths
 from seiso.model_router.fallback import FallbackChain
 from seiso.model_router.monitoring import collect_metrics
 from seiso.model_router.policy import SpecialistRouteBandit, pick_route_with_hints
-from seiso.model_router.vllm_lifecycle import VLLMLifecycleManager
+from seiso.model_router.backend_lifecycle import BackendLifecycleManager
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +81,7 @@ def create_router_app(settings: RouterSettings | None = None) -> FastAPI:
     if settings.policy_state_path.is_file():
         bandit.load(settings.policy_state_path)
 
-    lifecycle = VLLMLifecycleManager(settings=settings, catalog=catalog)
+    lifecycle = BackendLifecycleManager(settings=settings, catalog=catalog)
     fallback = FallbackChain(catalog=catalog, lifecycle=lifecycle, default_route_id=settings.fallback_route_id)
     state: dict[str, Any] = {
         "settings": settings,
@@ -106,7 +106,11 @@ def create_router_app(settings: RouterSettings | None = None) -> FastAPI:
 
     @app.get("/health")
     async def health() -> dict[str, Any]:
-        return {"status": "ok", "mode": settings.mode}
+        return {
+            "status": "ok",
+            "mode": settings.mode,
+            "inference_backend": settings.inference_backend,
+        }
 
     @app.get("/ready")
     async def ready() -> dict[str, Any]:
@@ -212,7 +216,7 @@ def create_router_app(settings: RouterSettings | None = None) -> FastAPI:
             target_base = settings.llamaswap_url.rstrip("/")
             route_payload["model"] = awake_route.llamaswap_model
         else:
-            target_base = awake_route.vllm_url
+            target_base = awake_route.backend_url
 
         if body.stream:
             return await _stream_response(

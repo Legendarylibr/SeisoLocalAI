@@ -1,5 +1,6 @@
-# llama-swap local config — llama.cpp (default local stack)
-# For vLLM local stack use llama-swap.local.vllm.yaml via docker-compose.local.vllm.yml
+# llama-swap local config — llama.cpp (llama-server) specialists
+# Place GGUF files under MODEL_CACHE_DIR and set SEISO_*_GGUF paths in compose.
+# llama-swap TTL unloads idle models (no vLLM-style sleep API).
 
 listen: ":8080"
 

@@ -13,7 +13,7 @@
       "idle_sleep_sec": 0,
       "fallback_priority": 10,
       "metadata": {
-        "description": "Backward-compatible default catalog (vLLM). Prefer specialists.local.*.json"
+        "description": "Fast general-purpose chat specialist (VRAM hot)"
       }
     },
     {
@@ -29,7 +29,7 @@
       "idle_sleep_sec": 0,
       "fallback_priority": 20,
       "metadata": {
-        "description": "Code specialist (vLLM)"
+        "description": "Code generation specialist (VRAM hot)"
       }
     },
     {
@@ -45,7 +45,7 @@
       "idle_sleep_sec": 300,
       "fallback_priority": 30,
       "metadata": {
-        "description": "Reasoning specialist (vLLM sleep L1)"
+        "description": "Reasoning/math specialist — vLLM sleep level 1 when idle"
       }
     }
   ]

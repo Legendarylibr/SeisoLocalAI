@@ -1,20 +1,22 @@
 # Seiso Model Router
 
-Classifier + RL policy gateway over **vLLM** specialists, with **llama-swap** as the unified OpenAI-compatible orchestrator.
+Classifier + RL policy gateway over **llama.cpp** or **vLLM** specialists, with **llama-swap** as the unified OpenAI-compatible orchestrator.
 
 ## Architecture
 
 ```
-Client → Router (classifier + RouteBandit) → llama-swap → vLLM specialist
+Client → Router (classifier + RouteBandit) → llama-swap → specialist backend
               │                                    │
-              └─ wake/sleep hooks (level 1) ───────┘
+              └─ lifecycle (vLLM sleep/wake) ─────┘
+              └─ llama.cpp: health + llama-swap TTL unload
 ```
 
-- **Router** (`seiso/model_router/`): domain classifier, contextual UCB bandit (extends adaptive-rl-quant features), fallback chain, GPU/RAM metrics.
-- **llama-swap**: YAML-defined model registry, TTL, proxy to vLLM backends.
-- **vLLM**: `--enable-sleep-mode` + `VLLM_SERVER_DEV_MODE=1` for HTTP sleep/wake (level 1 = weights in RAM).
+- **Router** (`seiso/model_router/`): domain classifier, contextual UCB bandit, fallback chain, GPU/RAM metrics.
+- **llama-swap**: YAML-defined model registry, TTL, proxy to backends.
+- **Local default**: **llama.cpp** (`llama-server` containers, GGUF).
+- **Local vLLM / Production**: **vLLM** with `--enable-sleep-mode` + HTTP sleep/wake (level 1).
 
-### VRAM policy
+### VRAM policy (vLLM routes)
 
 | Tier | Behavior |
 |------|----------|
@@ -22,30 +24,44 @@ Client → Router (classifier + RouteBandit) → llama-swap → vLLM specialist
 | **Other specialists** | Sleep level 1 after `idle_sleep_sec` (weights in CPU RAM) |
 | **Fallback** | If primary unreachable, try routes by `fallback_priority` |
 
-## Quick start (local)
+llama.cpp routes rely on llama-swap TTL for unloading cold models; the router does not call a sleep API on llama-server.
+
+## Quick start (local — llama.cpp, default)
 
 ```bash
 cd SeisoLocalAI
 pip install -e ".[forge]"
 
-# Without Docker — router only (point specialists.json at your vLLM URLs)
+# Router only (point router.local.yaml at your llama.cpp / llama-swap URLs)
 seiso router --config deploy/model-router/config/router.local.yaml
 
-# Full stack (GPU required)
+# Full stack (GPU + GGUF files under models/)
 cd deploy/model-router
 docker compose -f docker-compose.local.yml up --build
 ```
 
+Set GGUF paths (defaults assume files in `../../models/`):
+
 ```bash
-curl http://127.0.0.1:8780/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{
-    "messages": [{"role":"user","content":"write a python function to merge two dicts"}],
-    "max_tokens": 128
-  }'
+export SEISO_GENERAL_GGUF=/models/your-general.gguf
+export SEISO_CODE_GGUF=/models/your-code.gguf
+export SEISO_REASONING_GGUF=/models/your-reasoning.gguf
 ```
 
-## Production
+## Quick start (local — vLLM)
+
+```bash
+cd deploy/model-router
+docker compose -f docker-compose.local.vllm.yml up --build
+```
+
+Or router only:
+
+```bash
+seiso router --config deploy/model-router/config/router.local.vllm.yaml
+```
+
+## Production (vLLM)
 
 ```bash
 export SEISO_ROUTER_API_KEYS=prod-key-one,prod-key-two
@@ -57,15 +73,36 @@ docker compose -f docker-compose.prod.yml up --build -d
 - Rate limit: `SEISO_ROUTER_RATE_LIMIT_RPM` (default 120)
 - Metrics: `GET /metrics` (Prometheus); prod compose includes Prometheus on `:9090`
 
+## Example request
+
+```bash
+curl http://127.0.0.1:8780/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "messages": [{"role":"user","content":"write a python function to merge two dicts"}],
+    "max_tokens": 128
+  }'
+```
+
 ## Configuration
 
 | File | Purpose |
 |------|---------|
-| `config/specialists.json` | Specialist routes, VRAM hot flags, vLLM URLs |
-| `config/router.local.yaml` | Local router settings |
-| `config/router.prod.yaml` | Prod auth, rate limits, logging |
-| `config/llama-swap.local.yaml` | llama-swap → pre-running vLLM containers |
-| `config/llama-swap.prod.yaml` | llama-swap spawns vLLM with sleep flags |
+| `config/router.local.yaml` | Local router — **llama.cpp** (default) |
+| `config/router.local.vllm.yaml` | Local router — vLLM |
+| `config/router.prod.yaml` | Prod auth, rate limits, vLLM |
+| `config/specialists.local.llamacpp.json` | llama.cpp specialist catalog |
+| `config/specialists.local.vllm.json` | Local vLLM specialist catalog |
+| `config/specialists.prod.vllm.json` | Production vLLM catalog |
+| `config/llama-swap.local.yaml` | llama-swap → llama.cpp containers |
+| `config/llama-swap.local.vllm.yaml` | llama-swap → local vLLM containers |
+| `config/llama-swap.prod.yaml` | llama-swap spawns vLLM on demand |
+
+| Compose file | Stack |
+|--------------|-------|
+| `docker-compose.local.yml` | Router + llama.cpp (default) |
+| `docker-compose.local.vllm.yml` | Router + vLLM |
+| `docker-compose.prod.yml` | Prod router + on-demand vLLM |
 
 ## Endpoints
 
@@ -73,7 +110,7 @@ docker compose -f docker-compose.prod.yml up --build -d
 |------|-------------|
 | `POST /v1/chat/completions` | Routed chat (OpenAI-compatible) |
 | `GET /v1/models` | List specialist model IDs |
-| `GET /router/status` | Lifecycle + policy stats |
+| `GET /router/status` | Lifecycle + policy stats (`inference_backend` in status) |
 | `GET /health` | Liveness |
 | `GET /ready` | Backend readiness |
 | `GET /metrics` | Prometheus metrics |
@@ -84,7 +121,7 @@ Response includes `seiso_router` metadata (route_id, domain, latency, reward).
 
 The bandit learns from latency-based rewards and persists to `data/router/policy_state.json`. It reuses feature extraction from `adaptive_quant` (entropy, complexity buckets) compatible with the existing RL quant route learner.
 
-## Sleep / wake hooks
+## Sleep / wake hooks (vLLM)
 
 ```bash
 deploy/model-router/scripts/wake_hook.sh http://vllm-code:8000

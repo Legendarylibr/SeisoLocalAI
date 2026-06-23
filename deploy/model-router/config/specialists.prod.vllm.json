@@ -13,7 +13,7 @@
       "idle_sleep_sec": 0,
       "fallback_priority": 10,
       "metadata": {
-        "description": "Backward-compatible default catalog (vLLM). Prefer specialists.local.*.json"
+        "description": "Production general specialist (vLLM, VRAM hot)"
       }
     },
     {
@@ -29,7 +29,7 @@
       "idle_sleep_sec": 0,
       "fallback_priority": 20,
       "metadata": {
-        "description": "Code specialist (vLLM)"
+        "description": "Production code specialist (vLLM)"
       }
     },
     {
@@ -42,10 +42,10 @@
       "hardware_hints": ["gpu", "any"],
       "vram_hot": false,
       "sleep_level": 1,
-      "idle_sleep_sec": 300,
+      "idle_sleep_sec": 600,
       "fallback_priority": 30,
       "metadata": {
-        "description": "Reasoning specialist (vLLM sleep L1)"
+        "description": "Production reasoning specialist — sleep L1 when idle"
       }
     }
   ]

@@ -16,11 +16,14 @@ class RouterSettings(BaseSettings):
     host: str = "127.0.0.1"
     port: int = 8780
     mode: str = "local"  # local | prod
+    inference_backend: str = "llamacpp"  # llamacpp | vllm (local stack selector)
 
     config_path: Path = Field(default=Path("deploy/model-router/config/router.local.yaml"))
 
     llamaswap_url: str = ""
-    specialists_path: Path = Field(default=Path("deploy/model-router/config/specialists.json"))
+    specialists_path: Path = Field(
+        default=Path("deploy/model-router/config/specialists.local.llamacpp.json")
+    )
     policy_state_path: Path = Field(default=Path("data/router/policy_state.json"))
 
     hardware: str = "gpu"
