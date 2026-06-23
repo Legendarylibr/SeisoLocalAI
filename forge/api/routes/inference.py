@@ -26,8 +26,9 @@ from forge.services.inference_models import (
 )
 from forge.services.knowledge_context import format_knowledge_context, retrieve_knowledge_chunks
 from forge.services.llm_output import StreamingOutputSanitizer, sanitize_llm_output
+from forge.services.model_router_client import ROUTER_MODEL_ID, fetch_router_status
 from forge.services.models import resolve_model_path
-from seiso.inference.backends import BACKEND_LLAMACPP, BACKEND_MLX, BACKEND_TORCH
+from seiso.inference.backends import BACKEND_LLAMACPP, BACKEND_MLX, BACKEND_ROUTER, BACKEND_TORCH
 
 router = APIRouter(prefix="/inference", tags=["inference"])
 
@@ -68,6 +69,10 @@ class ChatRequest(BaseModel):
     allow_code_exec: bool = False
     provider_id: str | None = None
     knowledge_base_id: str | None = None
+    router_model: str | None = Field(
+        default=None,
+        description="Optional explicit specialist model id for Smart Router",
+    )
 
 
 class ThreadCreate(BaseModel):
@@ -119,6 +124,7 @@ async def inference_models(
         db,
         user_id,
         profile=profile,
+        model_router_enabled=settings.model_router_enabled,
     )
     return {
         "models": options,
@@ -126,7 +132,13 @@ async def inference_models(
         "hardware_summary": hardware_summary(profile),
         "preferred_inference_backend": profile.get("preferred_inference_backend"),
         "local_only": True,
+        "model_router": {
+            "enabled": settings.model_router_enabled,
+            "url": settings.model_router_url if settings.model_router_enabled else "",
+            "model_id": ROUTER_MODEL_ID,
+        },
     }
+
 
 
 @router.get("/models/{model_id}/variants")
@@ -149,6 +161,19 @@ async def inference_model_variants(
     if not await get_inference_option(db, user_id, model_id):
         raise HTTPException(404, "Model not found")
     return variants
+
+
+@router.get("/router/status")
+async def router_status(
+    settings: Annotated[ForgeSettings, Depends(get_settings)],
+) -> dict[str, Any]:
+    if not settings.model_router_enabled:
+        return {"enabled": False}
+    try:
+        status = await fetch_router_status(settings)
+        return {"enabled": True, **status}
+    except Exception as exc:
+        raise HTTPException(502, f"Model router unavailable: {exc}") from exc
 
 
 @router.delete("/threads/{thread_id}")
@@ -561,7 +586,8 @@ async def chat(
             "config": json.loads(prov["config_json"]),
         }
     if not body.provider_id:
-        _assert_inference_gpu_available()
+        if body.model_id != ROUTER_MODEL_ID:
+            _assert_inference_gpu_available()
         if body.model_path and body.model_id:
             raise HTTPException(403, "Provide model_id or model_path, not both")
         if body.model_path:
@@ -589,9 +615,20 @@ async def chat(
             payload["model_path"] = path
             payload["inference_backend"] = body.inference_backend
         elif body.model_id:
-            selected = await get_inference_option(
-                db, user_id, body.model_id
-            )
+            selected = await get_inference_option(db, user_id, body.model_id)
+            if selected is None and settings.model_router_enabled and body.model_id == ROUTER_MODEL_ID:
+                selected = next(
+                    (
+                        o
+                        for o in await list_inference_options(
+                            db,
+                            user_id,
+                            model_router_enabled=True,
+                        )
+                        if o["id"] == body.model_id
+                    ),
+                    None,
+                )
             try:
                 target = resolve_chat_target(
                     selected,
@@ -604,31 +641,40 @@ async def chat(
             payload["inference_backend"] = target.get("inference_backend", body.inference_backend)
             payload["model_format"] = target.get("model_format")
 
-            path = target.get("model_path")
-            if not path and body.model_id:
-                path = await resolve_model_path(
-                    db,
-                    user_id,
-                    model_id=body.model_id,
-                    model_path=body.model_path,
-                    data_dir=settings.data_dir,
-                )
-            if not path:
-                raise HTTPException(400, "Select a model from inventory or provide model_path")
-            from seiso.memory.protection import assess_path_memory_fit_for_load
+            if target.get("inference_backend") == BACKEND_ROUTER:
+                if not settings.model_router_enabled:
+                    raise HTTPException(
+                        400,
+                        "Smart Router is not enabled (set SEISO_MODEL_ROUTER_ENABLED=1)",
+                    )
+                payload["use_model_router"] = True
+                payload["router_model"] = body.router_model
+            else:
+                path = target.get("model_path")
+                if not path and body.model_id:
+                    path = await resolve_model_path(
+                        db,
+                        user_id,
+                        model_id=body.model_id,
+                        model_path=body.model_path,
+                        data_dir=settings.data_dir,
+                    )
+                if not path:
+                    raise HTTPException(400, "Select a model from inventory or provide model_path")
+                from seiso.memory.protection import assess_path_memory_fit_for_load
 
-            fit = assess_path_memory_fit_for_load(
-                path,
-                mode="chat",
-                backend=payload.get("inference_backend"),
-            )
-            if fit.get("memory_load_blocked"):
-                raise HTTPException(
-                    400,
-                    fit.get("memory_load_blocked_reason")
-                    or "Model exceeds available memory on this machine",
+                fit = assess_path_memory_fit_for_load(
+                    path,
+                    mode="chat",
+                    backend=payload.get("inference_backend"),
                 )
-            payload["model_path"] = path
+                if fit.get("memory_load_blocked"):
+                    raise HTTPException(
+                        400,
+                        fit.get("memory_load_blocked_reason")
+                        or "Model exceeds available memory on this machine",
+                    )
+                payload["model_path"] = path
         else:
             raise HTTPException(400, "Select a model from inventory or provide model_path")
 
@@ -670,9 +716,27 @@ async def chat(
         payload["inference_backend"] = BACKEND_TORCH
 
     if body.stream:
-        can_stream_local = not body.tools and not body.provider_id
+        use_router = bool(payload.get("use_model_router"))
+        can_stream_router = use_router and not body.tools and not body.provider_id
+        can_stream_local = not body.tools and not body.provider_id and not use_router
 
         async def event_gen():
+            if can_stream_router:
+                parts: list[str] = []
+                try:
+                    orchestrator._emit_log(job_id, "Streaming inference (smart router)")
+                    async for token in orchestrator.stream_router(payload):
+                        parts.append(token)
+                        yield {"event": "token", "data": token}
+                    content = "".join(parts)
+                    if body.thread_id:
+                        await db.add_message(body.thread_id, "assistant", content)
+                    yield {"event": "message", "data": content}
+                    yield {"event": "done", "data": job_id}
+                except Exception as exc:
+                    yield {"event": "error", "data": str(exc)}
+                return
+
             if can_stream_local:
                 streamed: list[str] = []
                 raw_parts: list[str] = []

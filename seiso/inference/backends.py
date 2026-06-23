@@ -11,23 +11,25 @@ from seiso.models.loader import Backend, detect_backend
 
 BackendName = str
 
-
 class InferenceBackend(StrEnum):
     LLAMACPP = "llamacpp"
     MLX = "mlx"
     TORCH = "torch"
+    ROUTER = "router"
     AUTO = "auto"
 
 
 BACKEND_LLAMACPP = InferenceBackend.LLAMACPP
 BACKEND_MLX = InferenceBackend.MLX
 BACKEND_TORCH = InferenceBackend.TORCH
+BACKEND_ROUTER = InferenceBackend.ROUTER
 BACKEND_AUTO = InferenceBackend.AUTO
 
 BACKEND_LABELS: dict[str, str] = {
     "llamacpp": "llama.cpp",
     "mlx": "MLX",
     "torch": "PyTorch",
+    "router": "Smart Router",
     "auto": "Auto",
 }
 _GGUF_SHARD_RE = re.compile(r"^(?P<prefix>.+)-(?P<index>\d{5})-of-(?P<total>\d{5})\.gguf$", re.I)

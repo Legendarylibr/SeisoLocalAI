@@ -1,0 +1,61 @@
+# llama-swap production config — spawns vLLM with sleep mode on demand (GPU shared)
+listen: ":8080"
+
+hooks:
+  onModelLoaded:
+    - sh
+    - -c
+    - "curl -sf -X POST \"http://127.0.0.1:${PORT}/wake_up\" || true"
+  onModelUnload:
+    - sh
+    - -c
+    - "curl -sf -X POST \"http://127.0.0.1:${PORT}/sleep?level=1\" || true"
+
+models:
+  seiso-general:
+    ttl: 7200
+    checkEndpoint: /health
+    env:
+      VLLM_SERVER_DEV_MODE: "1"
+      HF_HOME: /models/cache
+    cmd: |
+      python3 -m vllm.entrypoints.openai.api_server \
+        --host 0.0.0.0 \
+        --port ${PORT} \
+        --model ${env.SEISO_GENERAL_MODEL} \
+        --served-model-name seiso-general \
+        --enable-sleep-mode \
+        --gpu-memory-utilization 0.42 \
+        --max-model-len 4096
+
+  seiso-code:
+    ttl: 7200
+    checkEndpoint: /health
+    env:
+      VLLM_SERVER_DEV_MODE: "1"
+      HF_HOME: /models/cache
+    cmd: |
+      python3 -m vllm.entrypoints.openai.api_server \
+        --host 0.0.0.0 \
+        --port ${PORT} \
+        --model ${env.SEISO_CODE_MODEL} \
+        --served-model-name seiso-code \
+        --enable-sleep-mode \
+        --gpu-memory-utilization 0.42 \
+        --max-model-len 8192
+
+  seiso-reasoning:
+    ttl: 1800
+    checkEndpoint: /health
+    env:
+      VLLM_SERVER_DEV_MODE: "1"
+      HF_HOME: /models/cache
+    cmd: |
+      python3 -m vllm.entrypoints.openai.api_server \
+        --host 0.0.0.0 \
+        --port ${PORT} \
+        --model ${env.SEISO_REASONING_MODEL} \
+        --served-model-name seiso-reasoning \
+        --enable-sleep-mode \
+        --gpu-memory-utilization 0.35 \
+        --max-model-len 8192

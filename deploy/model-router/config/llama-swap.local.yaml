@@ -1,0 +1,54 @@
+# llama-swap local config — vLLM backends with sleep mode level 1
+# Docs: https://github.com/mostlygeek/llama-swap
+#
+# vLLM sleep mode requires:
+#   VLLM_SERVER_DEV_MODE=1
+#   --enable-sleep-mode
+#
+# Sleep/wake HTTP (level 1 = weights in CPU RAM, fast wake):
+#   POST /sleep?level=1
+#   POST /wake_up
+#   GET  /is_sleeping
+
+listen: ":8080"
+
+# Global hooks: router lifecycle manager also calls sleep/wake directly on vLLM.
+# These hooks run when llama-swap loads/unloads a model process.
+hooks:
+  onModelLoaded:
+    - sh
+    - -c
+    - "curl -sf -X POST \"${PROXY}/wake_up\" || true"
+  onModelUnload:
+    - sh
+    - -c
+    - "curl -sf -X POST \"${PROXY}/sleep?level=1\" || curl -sf -X POST \"${PROXY}/sleep\" -d '{\"level\":\"1\"}' || true"
+
+models:
+  seiso-general:
+  # Proxy to long-running vLLM container (docker-compose)
+    proxy: http://vllm-general:8000
+    checkEndpoint: /health
+    ttl: 86400
+    cmd: |
+      while ! curl -sf http://vllm-general:8000/health; do sleep 2; done; sleep infinity
+    env:
+      PROXY: http://vllm-general:8000
+
+  seiso-code:
+    proxy: http://vllm-code:8000
+    checkEndpoint: /health
+    ttl: 86400
+    cmd: |
+      while ! curl -sf http://vllm-code:8000/health; do sleep 2; done; sleep infinity
+    env:
+      PROXY: http://vllm-code:8000
+
+  seiso-reasoning:
+    proxy: http://vllm-reasoning:8000
+    checkEndpoint: /health
+    ttl: 3600
+    cmd: |
+      while ! curl -sf http://vllm-reasoning:8000/health; do sleep 2; done; sleep infinity
+    env:
+      PROXY: http://vllm-reasoning:8000

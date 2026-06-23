@@ -99,9 +99,11 @@ export type HfHubStatus = {
   ready_for_local_chat?: boolean;
 };
 
+export const ROUTER_MODEL_ID = "__seiso_router__";
+
 export type InferenceModelOption = {
   id: string;
-  kind: "local";
+  kind: "local" | "router";
   name: string;
   source: string;
   source_label: string;

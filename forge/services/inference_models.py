@@ -23,6 +23,7 @@ from seiso.inference.backends import (
     BACKEND_LABELS,
     BACKEND_LLAMACPP,
     BACKEND_MLX,
+    BACKEND_ROUTER,
     BACKEND_TORCH,
     available_backends,
     recommend_backend,
@@ -169,6 +170,7 @@ async def list_inference_options(
     *,
     hardware_aware: bool = True,
     profile: dict[str, Any] | None = None,
+    model_router_enabled: bool = False,
 ) -> list[dict[str, Any]]:
     """Build dropdown options for chat inference."""
     use_cache = profile is None
@@ -182,6 +184,28 @@ async def list_inference_options(
     profile = profile if profile is not None else hardware_profile() if hardware_aware else None
     installed = _installed_backends()
     options: list[dict[str, Any]] = []
+
+    if model_router_enabled:
+        options.append(
+            {
+                "id": "__seiso_router__",
+                "kind": "router",
+                "name": "Smart Router (auto-route)",
+                "source": "router",
+                "source_label": "vLLM specialists",
+                "format": None,
+                "path": None,
+                "default_backend": BACKEND_ROUTER,
+                "backends": [BACKEND_ROUTER],
+                "backend_labels": {BACKEND_ROUTER: BACKEND_LABELS[BACKEND_ROUTER]},
+                "ollama_model": None,
+                "size_bytes": 0,
+                "metadata": {"description": "Classifier + RL policy over vLLM specialist backends"},
+                "hardware_fit": "ideal",
+                "hardware_fit_label": "Managed routing",
+                "hardware_fit_rank": 100,
+            }
+        )
 
     for row in await db.list_models(user_id):
         opt = _build_local_option(row, installed=installed, profile=profile)
@@ -208,6 +232,13 @@ def resolve_chat_target(
     inference_backend: str | None,
 ) -> dict[str, Any]:
     """Map a dropdown selection to chat payload fields."""
+    if option and option.get("kind") == "router":
+        return {
+            "model_id": option["id"],
+            "model_path": None,
+            "inference_backend": BACKEND_ROUTER,
+        }
+
     backend = (inference_backend or "auto").lower()
     if option:
         if backend == "auto":

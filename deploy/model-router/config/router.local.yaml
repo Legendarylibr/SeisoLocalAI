@@ -1,0 +1,31 @@
+# Local development router settings (no API keys, exploration enabled)
+host: "0.0.0.0"
+port: 8780
+mode: local
+
+specialists_path: deploy/model-router/config/specialists.json
+policy_state_path: data/router/policy_state.json
+
+# Unified llama-swap proxy (orchestrator). Router classifies then forwards here.
+llamaswap_url: "http://llama-swap:8080"
+
+hardware: gpu
+max_vram_hot: 2
+default_idle_sleep_sec: 300
+lifecycle_poll_sec: 15.0
+wake_timeout_sec: 120.0
+request_timeout_sec: 300.0
+
+enable_rl_policy: true
+rl_ucb_c: 1.5
+rl_prior_weight: 4.0
+rl_warmup_pulls: 3
+rl_seed: 13
+
+fallback_route_id: general
+allow_explicit_model: true
+
+api_keys: []
+rate_limit_rpm: 0
+rate_limit_burst: 20
+log_json: false

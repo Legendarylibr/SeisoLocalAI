@@ -1,0 +1,67 @@
+# Production stack: router (auth + rate limits) + llama-swap on-demand vLLM
+#
+#   export SEISO_ROUTER_API_KEYS=your-secret-key
+#   cd deploy/model-router
+#   docker compose -f docker-compose.prod.yml up --build -d
+
+services:
+  router:
+    build:
+      context: ../../
+      dockerfile: deploy/model-router/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8780:8780"
+    environment:
+      SEISO_ROUTER_CONFIG_PATH: deploy/model-router/config/router.prod.yaml
+      SEISO_ROUTER_MODE: prod
+      SEISO_ROUTER_API_KEYS: ${SEISO_ROUTER_API_KEYS:-}
+      SEISO_ROUTER_RATE_LIMIT_RPM: ${SEISO_ROUTER_RATE_LIMIT_RPM:-120}
+      SEISO_ROUTER_LLAMASWAP_URL: http://llama-swap:8080
+    volumes:
+      - router_data:/app/data/router
+      - ${MODEL_CACHE_DIR:-../../models}:/models/cache:ro
+    depends_on:
+      - llama-swap
+    networks:
+      - seiso-router
+
+  llama-swap:
+    image: ghcr.io/mostlygeek/llama-swap:latest
+    restart: unless-stopped
+    volumes:
+      - ./config/llama-swap.prod.yaml:/app/config.yaml:ro
+      - ${MODEL_CACHE_DIR:-../../models}:/models/cache
+    environment:
+      SEISO_GENERAL_MODEL: ${SEISO_GENERAL_MODEL:-Qwen/Qwen2.5-0.5B-Instruct}
+      SEISO_CODE_MODEL: ${SEISO_CODE_MODEL:-Qwen/Qwen2.5-Coder-0.5B-Instruct}
+      SEISO_REASONING_MODEL: ${SEISO_REASONING_MODEL:-Qwen/Qwen2.5-1.5B-Instruct}
+      VLLM_SERVER_DEV_MODE: "1"
+      HF_HOME: /models/cache
+    command: ["--config", "/app/config.yaml", "--listen", ":8080"]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    networks:
+      - seiso-router
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    networks:
+      - seiso-router
+
+volumes:
+  router_data:
+
+networks:
+  seiso-router:
+    driver: bridge

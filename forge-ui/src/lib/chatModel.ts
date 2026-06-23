@@ -1,4 +1,5 @@
 import { api, HardwareProfile, InferenceModelOption, LocalModel } from "@/lib/api";
+import { ROUTER_MODEL_ID } from "@/lib/api/types";
 import { bindAbort, throwIfAborted } from "@/lib/abort";
 import { inventoryHasRepo, inventoryMatchesRepo, streamHubModelDownload, ModelProgressHandler } from "@/lib/hubDownload";
 import { readStoredModel, writeStoredModel } from "@/lib/modelSelection";
@@ -186,7 +187,11 @@ export function isChatModelReady(
   backend: string,
   loadedModelId: string | null,
   loadedBackend: string | null,
+  kind?: InferenceModelOption["kind"],
 ): boolean {
+  if (modelId === ROUTER_MODEL_ID || kind === "router" || backend === "router") {
+    return !!modelId;
+  }
   return !!(modelId && loadedModelId === modelId && loadedBackend === backend);
 }
 
@@ -249,7 +254,13 @@ export async function bootstrapChatSession(
   }
 
   let loadedBackend = backend;
-  if (options.preload !== false && selectedId && selected && !options.providerActive) {
+  if (
+    options.preload !== false &&
+    selectedId &&
+    selected &&
+    selected.kind !== "router" &&
+    !options.providerActive
+  ) {
     loadedBackend = await preloadWithProgress(selectedId, backend, options.onProgress, options.signal);
     writeStoredModel(CHAT_MODEL_STORAGE_KEY, selectedId);
     writeStoredModel(CHAT_BACKEND_STORAGE_KEY, loadedBackend);

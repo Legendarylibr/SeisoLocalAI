@@ -1,0 +1,32 @@
+# Production router settings
+host: "0.0.0.0"
+port: 8780
+mode: prod
+
+specialists_path: deploy/model-router/config/specialists.json
+policy_state_path: data/router/policy_state.json
+
+llamaswap_url: "http://llama-swap:8080"
+
+hardware: gpu
+max_vram_hot: 2
+default_idle_sleep_sec: 600
+lifecycle_poll_sec: 20.0
+wake_timeout_sec: 180.0
+request_timeout_sec: 600.0
+
+enable_rl_policy: true
+rl_ucb_c: 1.2
+rl_prior_weight: 6.0
+rl_warmup_pulls: 5
+rl_seed: 13
+
+fallback_route_id: general
+allow_explicit_model: true
+
+# Set via env: SEISO_ROUTER_API_KEYS=key1,key2
+api_keys: []
+rate_limit_rpm: 120
+rate_limit_burst: 30
+log_json: true
+trust_proxy: true

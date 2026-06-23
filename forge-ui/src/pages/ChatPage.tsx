@@ -21,7 +21,7 @@ import {
   readChatInferenceSettings,
   writeChatInferenceSettings,
 } from "@/lib/chatInferenceSettings";
-import type { ChatContextStatus } from "@/lib/api/types";
+import type { ChatContextStatus, ROUTER_MODEL_ID } from "@/lib/api/types";
 import { ModelProgressState, initialDownloadProgress, initialLoadProgress } from "@/lib/modelProgress";
 import { ChatModelPicker } from "@/components/ChatModelPicker";
 import { ChatContextBar } from "@/components/ChatContextBar";
@@ -107,6 +107,7 @@ export function ChatPage() {
   const [loadedModelId, setLoadedModelId] = useState<string | null>(null);
   const [loadedBackend, setLoadedBackend] = useState<string | null>(null);
   const [vramStatus, setVramStatus] = useState<VramStatus | null>(null);
+  const [routerStatus, setRouterStatus] = useState<Record<string, unknown> | null>(null);
   const [freeingMemory, setFreeingMemory] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollFrameRef = useRef<number | null>(null);
@@ -152,11 +153,15 @@ export function ChatPage() {
     modelVariants?.supports_speculative,
     effectiveBackend,
   ]);
+  const isRouterMode = selected?.kind === "router" || selection === ROUTER_MODEL_ID;
   const modelReady = useMemo(
-    () => isChatModelReady(selection, effectiveBackend, loadedModelId, loadedBackend),
-    [selection, effectiveBackend, loadedModelId, loadedBackend],
+    () => isChatModelReady(selection, chatBackend, loadedModelId, loadedBackend, selected?.kind),
+    [selection, chatBackend, loadedModelId, loadedBackend, selected?.kind],
   );
-  const showModelStatus = !providerId && !!(loadProgress || switchingModel || (hasNavTarget && !modelReady) || (selected && !modelReady));
+  const showModelStatus =
+    !isRouterMode &&
+    !providerId &&
+    !!(loadProgress || switchingModel || (hasNavTarget && !modelReady) || (selected && !modelReady));
   const waitingForModel = switchingModel || !!loadProgress;
   const effectiveLoadProgress =
     loadProgress ??
@@ -278,6 +283,13 @@ export function ChatPage() {
         backendOverride ??
         resolveInferenceBackend(next, hwProfile, userPickedBackendRef.current ? inferenceBackend : undefined);
       setInferenceBackend(backend);
+      if (next.kind === "router") {
+        setLoadedModelId(modelId);
+        setLoadedBackend("router");
+        writeStoredModel(CHAT_BACKEND_STORAGE_KEY, "router");
+        api.routerStatus().then((s) => setRouterStatus(s.detail ?? s)).catch(() => setRouterStatus(null));
+        return "router";
+      }
       if (providerId) return backend;
       setLoadProgress(initialLoadProgress(next.name, next.size_bytes));
       const loaded = await preloadWithProgress(modelId, backend, setLoadProgress);
@@ -1092,7 +1104,12 @@ export function ChatPage() {
             <input type="checkbox" checked={useTools} disabled={!toolsAvailable} onChange={(e) => setUseTools(e.target.checked)} />
             Tools
           </label>
-          {switchingModel && !loadProgress && (
+          {isRouterMode && !providerId && (
+            <span className="chat-vram-hint" title="Routes to vLLM specialists via classifier + RL policy">
+              Smart Router · auto-route
+            </span>
+          )}
+          {switchingModel && !loadProgress && !isRouterMode && (
             <span className="chat-vram-hint">Preparing model…</span>
           )}
           {streaming && !providerId && (

@@ -612,5 +612,36 @@ def compress_speculative(
     console.print(stats.to_dict())
 
 
+@app.command("router")
+def router_serve(
+    config: str = typer.Option(
+        "deploy/model-router/config/router.local.yaml",
+        "--config",
+        "-c",
+        help="Router YAML config",
+    ),
+    host: str | None = typer.Option(None, help="Bind host"),
+    port: int | None = typer.Option(None, help="Bind port"),
+    reload: bool = typer.Option(False, help="Dev auto-reload"),
+) -> None:
+    """Launch Seiso model router (classifier + RL policy over vLLM specialists)."""
+    import uvicorn
+
+    from seiso.model_router.config import RouterSettings, resolve_paths
+
+    settings = resolve_paths(RouterSettings.load(Path(config)))
+    bind_host = host or settings.host
+    bind_port = port or settings.port
+    console.print(f"[bold green]Seiso Router[/] → http://{bind_host}:{bind_port}")
+    uvicorn.run(
+        "seiso.model_router.main:build_app",
+        factory=True,
+        host=bind_host,
+        port=bind_port,
+        reload=reload,
+        log_level="info",
+    )
+
+
 if __name__ == "__main__":
     app()

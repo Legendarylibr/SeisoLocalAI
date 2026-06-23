@@ -18,7 +18,14 @@ export const inferenceApi = {
       hardware_summary?: HardwareSummary;
       preferred_inference_backend?: string;
       local_only?: boolean;
+      model_router?: { enabled: boolean; url: string; model_id: string };
     }>("/inference/models", 60_000),
+  routerStatus: () =>
+    request<{
+      enabled: boolean;
+      health?: Record<string, unknown>;
+      detail?: Record<string, unknown>;
+    }>("/inference/router/status"),
   streamPreloadModel: (
     model_id: string,
     inference_backend: string,

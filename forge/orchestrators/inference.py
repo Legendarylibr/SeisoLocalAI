@@ -11,6 +11,7 @@ from forge.orchestrators.base import Orchestrator
 from forge.providers.router import chat_completion
 from forge.security.audit import audit_event
 from forge.tools.registry import build_default_registry
+from seiso.inference.backends import BACKEND_ROUTER
 from seiso.inference.runner import LocalInferenceRunner
 
 
@@ -65,11 +66,16 @@ class InferenceOrchestrator(Orchestrator):
         def on_log(msg: str) -> None:
             self._emit_log(job_id, msg)
 
+        result_router_meta: dict[str, Any] | None = None
         self._active_generation_user_id = str(user_id) if user_id else None
         try:
             if provider:
                 reply = await self._provider_chat(provider, payload, messages, user_id=user_id)
                 backend = f"provider:{provider.get('provider_type', 'unknown')}"
+            elif payload.get("use_model_router"):
+                reply, router_meta = await self._router_chat(payload, messages)
+                backend = BACKEND_ROUTER
+                result_router_meta = router_meta
             elif use_tools:
                 if not user_id:
                     raise PermissionError("user_id required for tool execution")
@@ -96,7 +102,46 @@ class InferenceOrchestrator(Orchestrator):
                 self._active_generation_user_id = None
 
         self._emit_log(job_id, f"Generated {len(reply)} chars")
-        return {"content": reply, "backend": backend, "messages": len(messages)}
+        result: dict[str, Any] = {"content": reply, "backend": backend, "messages": len(messages)}
+        if result_router_meta:
+            result["router"] = result_router_meta
+        return result
+
+    async def stream_router(self, payload: dict[str, Any]) -> AsyncIterator[str]:
+        """Stream tokens from the Seiso model router."""
+        from forge.services.model_router_client import router_stream_chat
+
+        settings = get_settings()
+        if not settings.model_router_enabled:
+            raise RuntimeError("Model router is not enabled on this server")
+
+        messages = list(payload.get("messages", []))
+        async for token in router_stream_chat(
+            settings,
+            messages,
+            model=payload.get("router_model"),
+            max_tokens=payload.get("max_tokens", 512),
+            temperature=float(payload.get("temperature", 0.7)),
+        ):
+            yield token
+
+    async def _router_chat(
+        self,
+        payload: dict[str, Any],
+        messages: list[dict],
+    ) -> tuple[str, dict[str, Any]]:
+        from forge.services.model_router_client import router_chat_completion
+
+        settings = get_settings()
+        if not settings.model_router_enabled:
+            raise RuntimeError("Model router is not enabled on this server")
+        return await router_chat_completion(
+            settings,
+            messages,
+            model=payload.get("router_model"),
+            max_tokens=payload.get("max_tokens", 512),
+            temperature=float(payload.get("temperature", 0.7)),
+        )
 
     async def stream_local(self, payload: dict[str, Any]) -> AsyncIterator[str]:
         """Stream tokens from local inference (llama.cpp, MLX, or Torch)."""

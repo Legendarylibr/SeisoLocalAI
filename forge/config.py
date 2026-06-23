@@ -55,6 +55,9 @@ class ForgeSettings(BaseSettings):
     inference_api_key: str = ""
     db_ephemeral: bool | None = None
     db_encryption_key: str = ""
+    model_router_enabled: bool = False
+    model_router_url: str = "http://127.0.0.1:8780"
+    model_router_api_key: str = ""
 
     @field_validator("data_dir", mode="before")
     @classmethod
