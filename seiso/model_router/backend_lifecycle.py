@@ -85,6 +85,11 @@ class BackendLifecycleManager:
             await self._probe_state(route)
 
     async def _probe_state(self, route: SpecialistRoute) -> BackendState:
+        if route.is_cloud:
+            record = self._records[route.route_id]
+            record.state = BackendState.AWAKE
+            record.error = ""
+            return BackendState.AWAKE
         client = self._client
         if client is None:
             return BackendState.UNKNOWN
@@ -119,6 +124,10 @@ class BackendLifecycleManager:
         async with self._lock:
             record = self._records[route.route_id]
             record.last_used = time.monotonic()
+            if route.is_cloud:
+                record.state = BackendState.AWAKE
+                record.error = ""
+                return record
             if route.vram_hot:
                 record.state = BackendState.AWAKE
                 return record

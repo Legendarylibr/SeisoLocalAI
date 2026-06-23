@@ -45,9 +45,8 @@ def build_answer_tools(catalog: SpecialistCatalog) -> list[dict[str, Any]]:
     for route in catalog:
         alias = orchestrator_alias_for(route)
         aliases.append(alias)
-        desc = route.metadata.get("description") or route.route_id
-        hints = ", ".join(route.domain_hints) if route.domain_hints else "general"
-        detail_lines.append(f"{alias}: {desc} (domains: {hints})")
+        desc = route.orchestrator_detail()
+        detail_lines.append(f"{alias}: {desc}")
 
     model_description = (
         "The specialist model used to answer. Choices: "

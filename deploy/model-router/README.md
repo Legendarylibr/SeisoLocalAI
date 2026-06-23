@@ -5,14 +5,15 @@ Classifier + RL policy gateway over **llama.cpp** or **vLLM** specialists. **[Ne
 ## Architecture
 
 ```
-Client → Router → [Nemotron-Orchestrator-8B] → specialist pick → llama-swap → vLLM specialist (sleep L1)
+Client → Router → [Nemotron-Orchestrator-8B] → specialist pick → LiteLLM → llama-swap / cloud API / cloud vLLM
               │    (vLLM + sleep mode only)
-              ├─ heuristic classifier + RouteBandit (llama.cpp or vLLM without Nemotron)
-              └─ lifecycle (vLLM sleep/wake) + GPU/RAM metrics
+              ├─ heuristic classifier + RouteBandit (llama.cpp → httpx)
+              └─ lifecycle (local vLLM sleep/wake) + GPU/RAM metrics
 ```
 
-- **Router** (`seiso/model_router/`): domain classifier, contextual UCB bandit, optional Nemotron orchestrator (vLLM sleep stacks only), fallback chain, GPU/RAM metrics.
+- **Router** (`seiso/model_router/`): domain classifier, contextual UCB bandit, optional Nemotron orchestrator (vLLM sleep stacks only), **LiteLLM execution on all vLLM stacks**, httpx for llama.cpp, fallback chain, GPU/RAM metrics.
 - **Nemotron-Orchestrator-8B**: ToolOrchestra model served via vLLM with sleep mode; picks specialists via the `answer` tool.
+- **LiteLLM**: Always executes vLLM-stack completions — local `hosted_vllm/*` via llama-swap, plus optional `cloud_vllm` and `cloud_api` catalog routes.
 - **llama-swap**: YAML-defined model registry, TTL, proxy to backends.
 - **Local default**: **llama.cpp** (`llama-server` containers, GGUF).
 - **Local vLLM / Production**: **vLLM** with `--enable-sleep-mode` + HTTP sleep/wake (level 1).
@@ -107,7 +108,9 @@ curl http://127.0.0.1:8780/v1/chat/completions \
 | `config/specialists.local.llamacpp.json` | llama.cpp specialist catalog |
 | `config/specialists.local.vllm.json` | Local vLLM specialist catalog |
 | `config/specialists.prod.vllm.json` | Production vLLM catalog |
+| `config/specialists.cloud.example.json` | Example cloud API + cloud vLLM routes |
 | `config/llama-swap.local.llamacpp.yaml` | llama-swap → llama.cpp containers |
+| `config/litellm.local.vllm.yaml` | Standalone LiteLLM proxy + Nemotron callback |
 | `config/llama-swap.local.vllm.yaml` | llama-swap → local vLLM containers |
 | `config/llama-swap.prod.yaml` | llama-swap spawns vLLM on demand |
 
@@ -140,6 +143,38 @@ The orchestrator issues an `answer` tool call with a specialist alias (`seiso-ge
 | `orchestrator_model` | Served model name (default `seiso-orchestrator`) |
 
 Response metadata includes `seiso_router.orchestrator` and `orchestrator_alias` when Nemotron routing is active.
+
+## LiteLLM execution (vLLM stacks)
+
+When `inference_backend: vllm`, the router **always** executes completions through LiteLLM (no direct httpx to vLLM). llama.cpp stacks use httpx to llama-swap / llama-server.
+
+| Setting | Purpose |
+|---------|---------|
+| `litellm_routing_strategy` | LiteLLM Router strategy (default `simple-shuffle`) |
+
+Flow: **Nemotron or heuristic picks route** → **LiteLLM Router** → llama-swap, direct vLLM URL, cloud vLLM, or managed API (`openai/*`, `anthropic/*`, …).
+
+Cloud routes use `backend_type: cloud_api` or `cloud_vllm` in the specialist catalog — see `specialists.cloud.example.json`. Set `litellm_model` and `api_key_env` for API providers.
+
+Install router extras locally:
+
+```bash
+pip install -e ".[router]"
+```
+
+vLLM startup fails fast if LiteLLM is not installed.
+
+### Standalone LiteLLM proxy (optional)
+
+Run the LiteLLM proxy with the Nemotron pre-call hook instead of the Seiso router:
+
+```bash
+pip install -e ".[router]"
+export SEISO_ROUTER_CONFIG_PATH=deploy/model-router/config/router.local.vllm.yaml
+litellm --config deploy/model-router/config/litellm.local.vllm.yaml --port 4000
+```
+
+The callback in `seiso/model_router/litellm_callback.py` calls Nemotron before LiteLLM forwards to vLLM.
 
 ## Endpoints
 

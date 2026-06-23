@@ -58,6 +58,9 @@ class RouterSettings(BaseSettings):
     orchestrator_temperature: float = 0.7
     orchestrator_max_tokens: int = 512
 
+    # LiteLLM executes all vLLM-stack completions (local + cloud catalog routes)
+    litellm_routing_strategy: str = "simple-shuffle"
+
     @model_validator(mode="after")
     def _nemotron_requires_vllm_sleep(self) -> "RouterSettings":
         if self.routing_mode.strip().lower() != "nemotron":
@@ -84,6 +87,10 @@ class RouterSettings(BaseSettings):
             and self.vllm_sleep_mode
             and bool(self.orchestrator_url.strip())
         )
+
+    def litellm_gateway_enabled(self) -> bool:
+        """vLLM stacks always execute via LiteLLM (Nemotron picks, LiteLLM dispatches)."""
+        return self.inference_backend.strip().lower() == "vllm"
 
     @field_validator("api_keys", mode="before")
     @classmethod

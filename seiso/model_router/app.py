@@ -83,12 +83,29 @@ def create_router_app(settings: RouterSettings | None = None) -> FastAPI:
 
     lifecycle = BackendLifecycleManager(settings=settings, catalog=catalog)
     fallback = FallbackChain(catalog=catalog, lifecycle=lifecycle, default_route_id=settings.fallback_route_id)
+
+    litellm_gateway = None
+    if settings.litellm_gateway_enabled():
+        try:
+            from seiso.model_router.litellm_gateway import LitellmGateway
+
+            litellm_gateway = LitellmGateway(
+                catalog,
+                llamaswap_url=settings.llamaswap_url,
+                routing_strategy=settings.litellm_routing_strategy,
+                request_timeout_sec=settings.request_timeout_sec,
+            )
+        except Exception as exc:
+            raise RuntimeError(
+                "vLLM router stack requires LiteLLM — pip install -e '.[router]'"
+            ) from exc
     state: dict[str, Any] = {
         "settings": settings,
         "catalog": catalog,
         "bandit": bandit,
         "lifecycle": lifecycle,
         "fallback": fallback,
+        "litellm": litellm_gateway,
         "http": None,
     }
 
@@ -111,9 +128,9 @@ def create_router_app(settings: RouterSettings | None = None) -> FastAPI:
             "mode": settings.mode,
             "inference_backend": settings.inference_backend,
             "routing_mode": settings.routing_mode,
-            "inference_backend": settings.inference_backend,
             "vllm_sleep_mode": settings.vllm_sleep_mode,
             "nemotron_enabled": settings.nemotron_orchestrator_enabled(),
+            "litellm_enabled": settings.litellm_gateway_enabled(),
             "orchestrator_model": settings.orchestrator_model if settings.orchestrator_url else None,
         }
 
@@ -153,6 +170,7 @@ def create_router_app(settings: RouterSettings | None = None) -> FastAPI:
             "inference_backend": settings.inference_backend,
             "vllm_sleep_mode": settings.vllm_sleep_mode,
             "nemotron_enabled": settings.nemotron_orchestrator_enabled(),
+            "litellm_enabled": settings.litellm_gateway_enabled(),
             "orchestrator_url": settings.orchestrator_url or None,
             "orchestrator_model": settings.orchestrator_model,
         }
@@ -244,35 +262,61 @@ def create_router_app(settings: RouterSettings | None = None) -> FastAPI:
         lifecycle.touch(awake_route.route_id)
         wake_ms = lifecycle._records[awake_route.route_id].wake_latency_ms
 
-        upstream_model = awake_route.openai_model_name
-        route_payload = {
-            "model": upstream_model,
-            "messages": messages,
-            "max_tokens": body.max_tokens,
-            "temperature": body.temperature,
-            "stream": body.stream,
-        }
-
-        if settings.llamaswap_url:
-            target_base = settings.llamaswap_url.rstrip("/")
-            route_payload["model"] = awake_route.llamaswap_model
+        if settings.litellm_gateway_enabled():
+            gateway = state["litellm"]
+            if gateway is None:
+                raise HTTPException(status_code=503, detail="LiteLLM gateway not initialized")
+            if body.stream:
+                return await _stream_litellm_response(
+                    gateway,
+                    awake_route,
+                    messages,
+                    body.max_tokens,
+                    body.temperature,
+                    classification,
+                    context,
+                    route_reason,
+                    fallback_mode,
+                    orchestrator_meta,
+                )
+            start = time.perf_counter()
+            try:
+                data = await gateway.chat_completion(
+                    awake_route,
+                    messages=messages,
+                    max_tokens=body.max_tokens,
+                    temperature=body.temperature,
+                )
+                latency_ms = (time.perf_counter() - start) * 1000.0
+                ok = True
+            except Exception as exc:
+                raise HTTPException(status_code=502, detail=str(exc)) from exc
         else:
-            target_base = awake_route.backend_url
-
-        if body.stream:
-            return await _stream_response(
-                target_base,
-                route_payload,
-                awake_route,
-                classification,
-                context,
-                route_reason,
-                fallback_mode,
+            route_payload = {
+                "model": awake_route.llamaswap_model,
+                "messages": messages,
+                "max_tokens": body.max_tokens,
+                "temperature": body.temperature,
+                "stream": body.stream,
+            }
+            target_base = (
+                settings.llamaswap_url.rstrip("/")
+                if settings.llamaswap_url
+                else awake_route.backend_url
             )
-
-        data, latency_ms, ok = await _forward_chat(route_payload, target_base)
-        if not ok:
-            raise HTTPException(status_code=502, detail=data)
+            if body.stream:
+                return await _stream_response(
+                    target_base,
+                    route_payload,
+                    awake_route,
+                    classification,
+                    context,
+                    route_reason,
+                    fallback_mode,
+                )
+            data, latency_ms, ok = await _forward_chat(route_payload, target_base)
+            if not ok:
+                raise HTTPException(status_code=502, detail=data)
 
         response_text = ""
         if isinstance(data, dict):
@@ -304,9 +348,69 @@ def create_router_app(settings: RouterSettings | None = None) -> FastAPI:
                 "reward": reward,
                 "reasoning": route_reason,
                 "routing_mode": settings.routing_mode,
+                "execution": "litellm" if settings.litellm_gateway_enabled() else "httpx",
                 **orchestrator_meta,
             }
         return data
+
+    async def _stream_litellm_response(
+        gateway,
+        route,
+        messages: list[dict[str, Any]],
+        max_tokens: int,
+        temperature: float,
+        classification,
+        context,
+        route_reason: str,
+        fallback_mode: str,
+        orchestrator_meta: dict[str, Any],
+    ) -> StreamingResponse:
+        start = time.perf_counter()
+        bandit = state["bandit"]
+
+        async def event_gen():
+            collected: list[str] = []
+            try:
+                async for chunk in gateway.stream_chat_completion(
+                    route,
+                    messages=messages,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                ):
+                    text = chunk if isinstance(chunk, str) else chunk.decode("utf-8", errors="ignore")
+                    for line in text.split("\n"):
+                        if not line.startswith("data:"):
+                            continue
+                        payload = line[5:].strip()
+                        if not payload or payload == "[DONE]":
+                            continue
+                        try:
+                            import json as _json
+
+                            piece = _json.loads(payload)
+                            delta = piece.get("choices", [{}])[0].get("delta", {})
+                            content = delta.get("content")
+                            if content:
+                                collected.append(content)
+                        except Exception:
+                            pass
+                    yield text
+            finally:
+                latency_ms = (time.perf_counter() - start) * 1000.0
+                reward = _compute_reward(
+                    latency_ms,
+                    True,
+                    response_text="".join(collected),
+                    classification=classification,
+                    route=route,
+                    fallback_mode=fallback_mode,
+                    wake_latency_ms=lifecycle._records[route.route_id].wake_latency_ms,
+                )
+                if settings.enable_rl_policy:
+                    bandit.update(route.route_id, context, reward)
+                    bandit.save(settings.policy_state_path)
+
+        return StreamingResponse(event_gen(), media_type="text/event-stream")
 
     async def _stream_response(
         target_base: str,

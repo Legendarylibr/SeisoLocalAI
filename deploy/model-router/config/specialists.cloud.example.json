@@ -1,0 +1,48 @@
+{
+  "routes": [
+    {
+      "route_id": "cloud-general",
+      "llamaswap_model": "seiso-cloud-general",
+      "openai_model_name": "seiso-cloud-general",
+      "backend_type": "cloud_api",
+      "backend_url": "",
+      "litellm_model": "openai/gpt-4o-mini",
+      "api_key_env": "OPENAI_API_KEY",
+      "domain_hints": ["general", "chat"],
+      "hardware_hints": ["any"],
+      "fallback_priority": 50,
+      "orchestrator_alias": "seiso-cloud-general-1",
+      "metadata": {
+        "description": "Cloud generalist (managed API)",
+        "tier": "cloud",
+        "pricing": {
+          "input_per_million": 0.15,
+          "output_per_million": 0.6,
+          "avg_latency_sec": 3
+        }
+      }
+    },
+    {
+      "route_id": "cloud-vllm-code",
+      "llamaswap_model": "seiso-cloud-code",
+      "openai_model_name": "seiso-cloud-code",
+      "backend_type": "cloud_vllm",
+      "backend_url": "https://your-gpu-cluster.example.com",
+      "litellm_model": "hosted_vllm/your-code-model",
+      "api_key_env": "CLOUD_VLLM_API_KEY",
+      "domain_hints": ["code"],
+      "hardware_hints": ["any"],
+      "fallback_priority": 55,
+      "orchestrator_alias": "seiso-cloud-code-1",
+      "metadata": {
+        "description": "Cloud vLLM code specialist on rented GPU",
+        "tier": "cloud",
+        "pricing": {
+          "input_per_million": 0.8,
+          "output_per_million": 0.8,
+          "avg_latency_sec": 12
+        }
+      }
+    }
+  ]
+}

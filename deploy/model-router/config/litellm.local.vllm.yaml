@@ -1,0 +1,28 @@
+# LiteLLM proxy — optional standalone gateway (Seiso router embeds LiteLLM by default on vLLM stacks)
+#
+# Merge local specialists with cloud routes from specialists.cloud.example.json when ready.
+# Nemotron callback rewrites `model` before LiteLLM dispatches to hosted_vllm/* or cloud APIs.
+
+model_list:
+  - model_name: seiso-general
+    litellm_params:
+      model: hosted_vllm/seiso-general
+      api_base: http://llama-swap:8080/v1
+  - model_name: seiso-code
+    litellm_params:
+      model: hosted_vllm/seiso-code
+      api_base: http://llama-swap:8080/v1
+  - model_name: seiso-reasoning
+    litellm_params:
+      model: hosted_vllm/seiso-reasoning
+      api_base: http://llama-swap:8080/v1
+
+litellm_settings:
+  callbacks:
+    - seiso.model_router.litellm_callback.nemotron_router_callback
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+
+router_settings:
+  routing_strategy: simple-shuffle

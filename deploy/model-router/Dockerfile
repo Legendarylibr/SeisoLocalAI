@@ -18,7 +18,8 @@ RUN pip install --no-cache-dir hatchling && \
       "pyyaml>=6.0" \
       "fastapi>=0.111" \
       "uvicorn[standard]>=0.29" \
-      "psutil>=5.9" && \
+      "psutil>=5.9" \
+      "litellm>=1.55.0" && \
     pip install --no-cache-dir -e .
 
 ENV SEISO_ROUTER_CONFIG_PATH=deploy/model-router/config/router.local.yaml

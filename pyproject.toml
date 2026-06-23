@@ -68,6 +68,9 @@ forge = [
   "sse-starlette>=2.1",
   "cryptography>=42",
 ]
+router = [
+  "litellm>=1.55.0",
+]
 llamacpp = [
   "llama-cpp-python>=0.3",
   "nvidia-cuda-runtime-cu12; platform_system == 'Linux'",
