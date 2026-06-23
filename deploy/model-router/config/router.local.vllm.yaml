@@ -1,8 +1,9 @@
-# Local router — vLLM specialists with sleep mode level 1
+# Local router — vLLM specialists + Nemotron-Orchestrator-8B (sleep mode required)
 host: "0.0.0.0"
 port: 8780
 mode: local
 inference_backend: vllm
+vllm_sleep_mode: true
 
 specialists_path: deploy/model-router/config/specialists.local.vllm.json
 policy_state_path: data/router/policy_state.json
@@ -15,6 +16,14 @@ default_idle_sleep_sec: 300
 lifecycle_poll_sec: 15.0
 wake_timeout_sec: 120.0
 request_timeout_sec: 300.0
+
+# Nemotron-Orchestrator-8B picks specialists via ToolOrchestra-style tool calls
+routing_mode: nemotron
+orchestrator_url: "http://vllm-orchestrator:8000"
+orchestrator_model: seiso-orchestrator
+orchestrator_timeout_sec: 120.0
+orchestrator_temperature: 0.7
+orchestrator_max_tokens: 512
 
 enable_rl_policy: true
 rl_ucb_c: 1.5

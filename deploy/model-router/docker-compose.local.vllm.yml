@@ -1,10 +1,13 @@
-# Local stack — vLLM specialists with sleep mode level 1
+# Local stack — vLLM specialists + Nemotron-Orchestrator-8B (all with sleep mode level 1)
 #
 #   cd deploy/model-router
 #   docker compose -f docker-compose.local.vllm.yml up --build
 #
 # Router:     http://127.0.0.1:8780/v1/chat/completions
-# llama-swap: http://127.0.0.1:8080 (internal orchestrator)
+# llama-swap: http://127.0.0.1:8080
+#
+# Nemotron orchestrator routing requires inference_backend=vllm and vllm_sleep_mode=true
+# (see config/router.local.vllm.yaml).
 
 x-vllm-env: &vllm_env
   VLLM_SERVER_DEV_MODE: "1"
@@ -49,6 +52,8 @@ services:
         condition: service_started
       vllm-general:
         condition: service_healthy
+      vllm-orchestrator:
+        condition: service_healthy
     networks:
       - seiso-router
 
@@ -67,6 +72,28 @@ services:
         condition: service_healthy
       vllm-reasoning:
         condition: service_healthy
+      vllm-orchestrator:
+        condition: service_healthy
+    networks:
+      - seiso-router
+
+  vllm-orchestrator:
+    <<: *vllm_base
+    container_name: seiso-vllm-orchestrator
+    command:
+      - --host
+      - "0.0.0.0"
+      - --port
+      - "8000"
+      - --model
+      - ${SEISO_ORCHESTRATOR_MODEL:-nvidia/Nemotron-Orchestrator-8B}
+      - --served-model-name
+      - seiso-orchestrator
+      - --enable-sleep-mode
+      - --gpu-memory-utilization
+      - "0.45"
+      - --max-model-len
+      - "8192"
     networks:
       - seiso-router
 

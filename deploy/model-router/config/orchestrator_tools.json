@@ -1,0 +1,21 @@
+[
+  {
+    "type": "function",
+    "function": {
+      "name": "answer",
+      "description": "Delegate the problem to a specialist model and return its answer.",
+      "parameters": {
+        "type": "object",
+        "title": "parameters",
+        "properties": {
+          "model": {
+            "description": "Specialist model alias (see specialists.local.vllm.json orchestrator_alias fields).",
+            "type": "string",
+            "enum": ["seiso-general-1", "seiso-code-1", "seiso-reasoning-1"]
+          }
+        },
+        "required": ["model"]
+      }
+    }
+  }
+]

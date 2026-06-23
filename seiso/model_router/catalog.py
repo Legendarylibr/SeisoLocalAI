@@ -26,6 +26,7 @@ class SpecialistRoute:
     idle_sleep_sec: int | None = None
     fallback_priority: int = 100
     openai_model_name: str = ""
+    orchestrator_alias: str = ""
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -74,6 +75,7 @@ class SpecialistRoute:
             "idle_sleep_sec": self.idle_sleep_sec,
             "fallback_priority": self.fallback_priority,
             "openai_model_name": self.openai_model_name,
+            "orchestrator_alias": self.orchestrator_alias,
             "metadata": dict(self.metadata),
         }
 
@@ -136,6 +138,7 @@ class SpecialistCatalog:
                     idle_sleep_sec=item.get("idle_sleep_sec"),
                     fallback_priority=int(item.get("fallback_priority", 100)),
                     openai_model_name=str(item.get("openai_model_name", "")),
+                    orchestrator_alias=str(item.get("orchestrator_alias", "")),
                     metadata=dict(item.get("metadata", {})),
                 )
             )

@@ -3,6 +3,7 @@ host: "0.0.0.0"
 port: 8780
 mode: prod
 inference_backend: vllm
+vllm_sleep_mode: true
 
 specialists_path: deploy/model-router/config/specialists.prod.vllm.json
 policy_state_path: data/router/policy_state.json

@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -17,6 +17,7 @@ class RouterSettings(BaseSettings):
     port: int = 8780
     mode: str = "local"  # local | prod
     inference_backend: str = "llamacpp"  # llamacpp | vllm (local stack selector)
+    vllm_sleep_mode: bool = False  # required for Nemotron orchestrator routing
 
     config_path: Path = Field(default=Path("deploy/model-router/config/router.local.yaml"))
 
@@ -48,6 +49,41 @@ class RouterSettings(BaseSettings):
 
     fallback_route_id: str = "general"
     allow_explicit_model: bool = True
+
+    # Nemotron-Orchestrator-8B (ToolOrchestra-style routing)
+    routing_mode: str = "heuristic"  # heuristic | nemotron
+    orchestrator_url: str = ""
+    orchestrator_model: str = "seiso-orchestrator"
+    orchestrator_timeout_sec: float = 120.0
+    orchestrator_temperature: float = 0.7
+    orchestrator_max_tokens: int = 512
+
+    @model_validator(mode="after")
+    def _nemotron_requires_vllm_sleep(self) -> "RouterSettings":
+        if self.routing_mode.strip().lower() != "nemotron":
+            return self
+        issues: list[str] = []
+        if self.inference_backend.strip().lower() != "vllm":
+            issues.append("inference_backend must be vllm")
+        if not self.vllm_sleep_mode:
+            issues.append("vllm_sleep_mode must be true")
+        if not self.orchestrator_url.strip():
+            issues.append("orchestrator_url must be set")
+        if issues:
+            raise ValueError(
+                "routing_mode=nemotron is only supported with vLLM sleep mode: "
+                + "; ".join(issues)
+            )
+        return self
+
+    def nemotron_orchestrator_enabled(self) -> bool:
+        """True when Nemotron routing is configured for a vLLM sleep-mode stack."""
+        return (
+            self.routing_mode.strip().lower() == "nemotron"
+            and self.inference_backend.strip().lower() == "vllm"
+            and self.vllm_sleep_mode
+            and bool(self.orchestrator_url.strip())
+        )
 
     @field_validator("api_keys", mode="before")
     @classmethod

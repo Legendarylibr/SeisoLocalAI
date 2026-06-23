@@ -110,6 +110,11 @@ def create_router_app(settings: RouterSettings | None = None) -> FastAPI:
             "status": "ok",
             "mode": settings.mode,
             "inference_backend": settings.inference_backend,
+            "routing_mode": settings.routing_mode,
+            "inference_backend": settings.inference_backend,
+            "vllm_sleep_mode": settings.vllm_sleep_mode,
+            "nemotron_enabled": settings.nemotron_orchestrator_enabled(),
+            "orchestrator_model": settings.orchestrator_model if settings.orchestrator_url else None,
         }
 
     @app.get("/ready")
@@ -144,6 +149,12 @@ def create_router_app(settings: RouterSettings | None = None) -> FastAPI:
             "lifecycle": lifecycle.status(),
             "metrics": collect_metrics().to_dict(),
             "policy_pulls": bandit._total_pulls,
+            "routing_mode": settings.routing_mode,
+            "inference_backend": settings.inference_backend,
+            "vllm_sleep_mode": settings.vllm_sleep_mode,
+            "nemotron_enabled": settings.nemotron_orchestrator_enabled(),
+            "orchestrator_url": settings.orchestrator_url or None,
+            "orchestrator_model": settings.orchestrator_model,
         }
 
     async def _forward_chat(
@@ -180,12 +191,42 @@ def create_router_app(settings: RouterSettings | None = None) -> FastAPI:
         )
 
         explicit_route = None
+        route_reason = ""
+        orchestrator_meta: dict[str, Any] = {}
+
         if body.model and settings.allow_explicit_model:
             explicit_route = catalog.by_llamaswap_model(body.model)
 
         if explicit_route:
             primary = explicit_route
             route_reason = f"explicit_model={body.model}"
+        elif settings.nemotron_orchestrator_enabled():
+            from seiso.model_router.nemotron import select_route_via_nemotron
+
+            try:
+                selection = await select_route_via_nemotron(
+                    state["http"],
+                    orchestrator_url=settings.orchestrator_url,
+                    orchestrator_model=settings.orchestrator_model,
+                    catalog=catalog,
+                    messages=messages,
+                    fallback_route_id=settings.fallback_route_id,
+                    timeout=settings.orchestrator_timeout_sec,
+                    temperature=settings.orchestrator_temperature,
+                    max_tokens=settings.orchestrator_max_tokens,
+                )
+                primary = selection.route
+                route_reason = selection.reasoning
+                orchestrator_meta = {
+                    "orchestrator": "nvidia/Nemotron-Orchestrator-8B",
+                    "orchestrator_alias": selection.orchestrator_alias,
+                    "tool_calls": selection.raw_tool_calls,
+                }
+            except Exception as exc:
+                logger.warning("nemotron orchestrator failed, falling back to heuristic: %s", exc)
+                primary = catalog.by_id(settings.fallback_route_id)
+                route_reason = f"nemotron_error={exc}"
+                orchestrator_meta = {"orchestrator_error": str(exc)}
         elif settings.enable_rl_policy:
             selection = pick_route_with_hints(
                 bandit,
@@ -262,6 +303,8 @@ def create_router_app(settings: RouterSettings | None = None) -> FastAPI:
                 "latency_ms": latency_ms,
                 "reward": reward,
                 "reasoning": route_reason,
+                "routing_mode": settings.routing_mode,
+                **orchestrator_meta,
             }
         return data
 

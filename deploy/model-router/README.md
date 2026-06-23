@@ -1,17 +1,18 @@
 # Seiso Model Router
 
-Classifier + RL policy gateway over **llama.cpp** or **vLLM** specialists, with **llama-swap** as the unified OpenAI-compatible orchestrator.
+Classifier + RL policy gateway over **llama.cpp** or **vLLM** specialists. **[Nemotron-Orchestrator-8B](https://huggingface.co/nvidia/Nemotron-Orchestrator-8B)** routing is supported **only** on **vLLM stacks with sleep mode** (`--enable-sleep-mode`). **llama-swap** proxies specialists.
 
 ## Architecture
 
 ```
-Client → Router (classifier + RouteBandit) → llama-swap → specialist backend
-              │                                    │
-              └─ lifecycle (vLLM sleep/wake) ─────┘
-              └─ llama.cpp: health + llama-swap TTL unload
+Client → Router → [Nemotron-Orchestrator-8B] → specialist pick → llama-swap → vLLM specialist (sleep L1)
+              │    (vLLM + sleep mode only)
+              ├─ heuristic classifier + RouteBandit (llama.cpp or vLLM without Nemotron)
+              └─ lifecycle (vLLM sleep/wake) + GPU/RAM metrics
 ```
 
-- **Router** (`seiso/model_router/`): domain classifier, contextual UCB bandit, fallback chain, GPU/RAM metrics.
+- **Router** (`seiso/model_router/`): domain classifier, contextual UCB bandit, optional Nemotron orchestrator (vLLM sleep stacks only), fallback chain, GPU/RAM metrics.
+- **Nemotron-Orchestrator-8B**: ToolOrchestra model served via vLLM with sleep mode; picks specialists via the `answer` tool.
 - **llama-swap**: YAML-defined model registry, TTL, proxy to backends.
 - **Local default**: **llama.cpp** (`llama-server` containers, GGUF).
 - **Local vLLM / Production**: **vLLM** with `--enable-sleep-mode` + HTTP sleep/wake (level 1).
@@ -48,18 +49,30 @@ export SEISO_CODE_GGUF=/models/your-code.gguf
 export SEISO_REASONING_GGUF=/models/your-reasoning.gguf
 ```
 
-## Quick start (local — vLLM)
+## Quick start (local — vLLM + Nemotron orchestrator)
+
+Requires vLLM specialists and the orchestrator all started with `--enable-sleep-mode` (see `docker-compose.local.vllm.yml`).
 
 ```bash
 cd deploy/model-router
 docker compose -f docker-compose.local.vllm.yml up --build
 ```
 
-Or router only:
+This starts **Nemotron-Orchestrator-8B** (`vllm-orchestrator`) plus three vLLM specialists. The router config sets `inference_backend: vllm`, `vllm_sleep_mode: true`, and `routing_mode: nemotron`.
+
+Override the orchestrator checkpoint:
+
+```bash
+export SEISO_ORCHESTRATOR_MODEL=nvidia/Nemotron-Orchestrator-8B
+```
+
+Router only (orchestrator already running on vLLM with sleep mode):
 
 ```bash
 seiso router --config deploy/model-router/config/router.local.vllm.yaml
 ```
+
+Nemotron routing is rejected at startup unless all three are set: `inference_backend: vllm`, `vllm_sleep_mode: true`, and `orchestrator_url`.
 
 ## Production (vLLM)
 
@@ -89,7 +102,8 @@ curl http://127.0.0.1:8780/v1/chat/completions \
 | File | Purpose |
 |------|---------|
 | `config/router.local.yaml` | Local router — **llama.cpp** (default) |
-| `config/router.local.vllm.yaml` | Local router — vLLM |
+| `config/router.local.vllm.yaml` | Local router — vLLM + Nemotron orchestrator |
+| `config/orchestrator_tools.json` | Reference `answer` tool schema for specialists |
 | `config/router.prod.yaml` | Prod auth, rate limits, vLLM |
 | `config/specialists.local.llamacpp.json` | llama.cpp specialist catalog |
 | `config/specialists.local.vllm.json` | Local vLLM specialist catalog |
@@ -101,8 +115,32 @@ curl http://127.0.0.1:8780/v1/chat/completions \
 | Compose file | Stack |
 |--------------|-------|
 | `docker-compose.local.yml` | Router + llama.cpp (default) |
-| `docker-compose.local.vllm.yml` | Router + vLLM |
+| `docker-compose.local.vllm.yml` | Router + Nemotron + vLLM specialists |
 | `docker-compose.prod.yml` | Prod router + on-demand vLLM |
+
+## Nemotron orchestrator (vLLM sleep mode only)
+
+Nemotron routing activates only when **all** of the following are true:
+
+| Requirement | Config |
+|-------------|--------|
+| vLLM backend | `inference_backend: vllm` |
+| Sleep mode stack | `vllm_sleep_mode: true` (all vLLM containers use `--enable-sleep-mode`) |
+| Orchestrator endpoint | `orchestrator_url` pointing at Nemotron on vLLM |
+| Routing mode | `routing_mode: nemotron` |
+
+The orchestrator issues an `answer` tool call with a specialist alias (`seiso-general-1`, `seiso-code-1`, `seiso-reasoning-1`) from `orchestrator_alias` in `specialists.local.vllm.json`.
+
+**llama.cpp** stacks and vLLM without sleep mode always use heuristic classifier + RL bandit routing, even if `routing_mode: nemotron` is set (startup validation rejects invalid Nemotron configs).
+
+| Setting | Purpose |
+|---------|---------|
+| `routing_mode` | `nemotron` (vLLM sleep only) or `heuristic` |
+| `vllm_sleep_mode` | Must be `true` for Nemotron |
+| `orchestrator_url` | vLLM OpenAI base URL for Nemotron |
+| `orchestrator_model` | Served model name (default `seiso-orchestrator`) |
+
+Response metadata includes `seiso_router.orchestrator` and `orchestrator_alias` when Nemotron routing is active.
 
 ## Endpoints
 

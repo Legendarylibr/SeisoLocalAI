@@ -14,7 +14,8 @@
       "fallback_priority": 10,
       "metadata": {
         "description": "Fast general-purpose chat specialist (VRAM hot)"
-      }
+      },
+      "orchestrator_alias": "seiso-general-1"
     },
     {
       "route_id": "code",
@@ -30,7 +31,8 @@
       "fallback_priority": 20,
       "metadata": {
         "description": "Code generation specialist (VRAM hot)"
-      }
+      },
+      "orchestrator_alias": "seiso-code-1"
     },
     {
       "route_id": "reasoning",
@@ -46,7 +48,8 @@
       "fallback_priority": 30,
       "metadata": {
         "description": "Reasoning/math specialist — vLLM sleep level 1 when idle"
-      }
+      },
+      "orchestrator_alias": "seiso-reasoning-1"
     }
   ]
 }
