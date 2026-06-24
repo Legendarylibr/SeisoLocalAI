@@ -75,7 +75,9 @@ def test_bandit_select_and_update():
     )
     bandit = SpecialistRouteBandit(catalog=catalog, seed=1)
     messages = [{"role": "user", "content": "import os; print(os.getcwd())"}]
-    classification, context = classify_messages(messages, hardware="gpu", known_domains=catalog.known_domains())
+    classification, context = classify_messages(
+        messages, hardware="gpu", known_domains=catalog.known_domains()
+    )
     selection = pick_route_with_hints(bandit, context, classification.domain)
     bandit.update(selection.route.route_id, context, 0.8)
     assert bandit._total_pulls == 1

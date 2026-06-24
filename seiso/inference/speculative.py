@@ -25,11 +25,11 @@ class TorchSpeculativeBundle:
 @dataclass(frozen=True)
 class DFlashDraftSpeculativeBundle:
     """Target (usually torch) + dflash GGUF draft loaded via llama.cpp for fast proposals."""
+
     target_model: Any
     target_tokenizer: Any
     draft_llm: Any  # llama_cpp.Llama instance for the dflash draft
     draft_tokenizer: Any  # usually same as target or compatible
-
 
 
 def default_num_speculative_tokens(payload: dict[str, Any]) -> int:
@@ -211,7 +211,9 @@ def iter_speculative_tokens_dflash(
             if not proposed_ids:
                 # fallback single token from target
                 t_out = target(input_ids_t)
-                next_id = torch.argmax(t_out.logits[:, -1, :], dim=-1, keepdim=True).to(target_device)
+                next_id = torch.argmax(t_out.logits[:, -1, :], dim=-1, keepdim=True).to(
+                    target_device
+                )
                 input_ids_t = torch.cat([input_ids_t, next_id], dim=1)
                 tokens_generated += 1
                 chunk, decoded_len = _decode_new_text(target_tok, input_ids_t, decoded_len)
@@ -245,7 +247,11 @@ def iter_speculative_tokens_dflash(
             if tokens_generated >= max_new_tokens or stop():
                 break
 
-            pos = prefix_len + accept - 1 if accept < len(proposed_ids) else prefix_len + len(proposed_ids) - 1
+            pos = (
+                prefix_len + accept - 1
+                if accept < len(proposed_ids)
+                else prefix_len + len(proposed_ids) - 1
+            )
             next_id = torch.argmax(logits[:, pos, :], dim=-1, keepdim=True).to(target_device)
             input_ids_t = torch.cat([input_ids_t, next_id], dim=1)
             tokens_generated += 1

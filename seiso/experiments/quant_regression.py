@@ -13,7 +13,6 @@ from pathlib import Path
 from statistics import mean
 from typing import Any
 
-from seiso.export.formats import ExportFormat, ExportOptions, export_checkpoint
 from seiso.export.gguf import normalize_gguf_quants, resolve_gguf_converter
 from seiso.training.config import QuantMode, TrainConfig, run_training
 
@@ -211,39 +210,6 @@ def export_merged_checkpoint(
     return merged
 
 
-def export_checkpoint_ggufs(
-    checkpoint: Path,
-    export_root: Path,
-    *,
-    gguf_quants: list[str] | tuple[str, ...] = DEFAULT_GGUF_QUANTS,
-    on_log: Callable[[str], None] | None = None,
-) -> dict[str, Path]:
-    """Merge LoRA checkpoint and export GGUF variants when llama.cpp is available."""
-    if not resolve_gguf_converter():
-        if on_log:
-            on_log("GGUF converter unavailable — skipping GGUF export (set LLAMA_CPP_DIR)")
-        return {}
-
-    export_root.mkdir(parents=True, exist_ok=True)
-    results = export_checkpoint(
-        ExportOptions(
-            checkpoint=checkpoint,
-            output_dir=export_root,
-            formats=[ExportFormat.MERGED, ExportFormat.GGUF],
-            gguf_quantizations=list(gguf_quants),
-            sandbox_root=checkpoint.parent.parent,
-        ),
-        on_log=on_log,
-    )
-    gguf_paths: dict[str, Path] = {}
-    for key, value in results.items():
-        if key.startswith("gguf_") and Path(value).is_file():
-            gguf_paths[key.removeprefix("gguf_")] = Path(value)
-        elif key == ExportFormat.GGUF.value:
-            continue
-    return gguf_paths
-
-
 def resolve_llama_cpp_python_shim() -> Path | None:
     shim = LLAMA_CLI_PYTHON_SHIM
     return shim if shim.is_file() else None
@@ -388,8 +354,12 @@ def summarize_route_report(report: dict[str, Any]) -> dict[str, Any]:
         else None,
         "recommended_route": best_rec.get("route_id"),
         "recommended_quant": best_rec.get("quant_label"),
-        "reward_regression": mean(reward_regs) if reward_regs else _finite(best_rec.get("reward_regression")),
-        "perplexity_regression": mean(ppl_regs) if ppl_regs else _finite(best_rec.get("perplexity_regression")),
+        "reward_regression": mean(reward_regs)
+        if reward_regs
+        else _finite(best_rec.get("reward_regression")),
+        "perplexity_regression": mean(ppl_regs)
+        if ppl_regs
+        else _finite(best_rec.get("perplexity_regression")),
         "mean_selected_memory_mb": _finite(report.get("mean_selected_memory_mb")),
     }
 
@@ -489,10 +459,7 @@ def run_route_regression_eval(
         report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
         report["artifact_path"] = str(report_path)
 
-    report["output_dir"] = str(
-        output_dir
-        or (data_dir / "rl_quant" / "quant_regression" / job_id)
-    )
+    report["output_dir"] = str(output_dir or (data_dir / "rl_quant" / "quant_regression" / job_id))
     report["job_id"] = job_id
     return report
 

@@ -661,7 +661,9 @@ def experiment_quant_regression(
     ),
     quants: str = typer.Option("4bit,8bit,16bit", help="Training quants to compare"),
     gguf_quants: str = typer.Option("q4_k_m,q8_0,f16", help="GGUF variants for route regression"),
-    deploy_quants: str = typer.Option("4bit,8bit,16bit", help="Deployment quants to compare (HF eval)"),
+    deploy_quants: str = typer.Option(
+        "4bit,8bit,16bit", help="Deployment quants to compare (HF eval)"
+    ),
     measurement: str = typer.Option(
         "both",
         "--measurement",

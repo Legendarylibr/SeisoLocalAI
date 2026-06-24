@@ -174,7 +174,8 @@ class SpecialistRouteBandit:
             "total_pulls": self._total_pulls,
             "global": {rid: s.to_dict() for rid, s in self._global.items()},
             "buckets": {
-                bk: {rid: s.to_dict() for rid, s in arms.items()} for bk, arms in self._buckets.items()
+                bk: {rid: s.to_dict() for rid, s in arms.items()}
+                for bk, arms in self._buckets.items()
             },
         }
 
@@ -188,8 +189,7 @@ class SpecialistRouteBandit:
         self._rng = random.Random(self.seed)
         self._total_pulls = int(state.get("total_pulls", 0))
         self._global = {
-            rid: _ArmStats.from_dict(stats)
-            for rid, stats in (state.get("global") or {}).items()
+            rid: _ArmStats.from_dict(stats) for rid, stats in (state.get("global") or {}).items()
         }
         self._buckets = {
             bk: {rid: _ArmStats.from_dict(stats) for rid, stats in arms.items()}

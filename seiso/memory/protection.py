@@ -513,9 +513,7 @@ def apply_training_memory_guards(config: Any) -> Any:
             max_seq_length=max_seq,
         )
         meta_keys = {"cuda_training_mode", "kernel_profile_id", "kernel_low_vram"}
-        updates.update(
-            {k: v for k, v in cuda_profile.items() if k not in meta_keys}
-        )
+        updates.update({k: v for k, v in cuda_profile.items() if k not in meta_keys})
     except (ImportError, RuntimeError):
         # training_profile or CUDA extension unavailable — use safe defaults.
         if headroom > 0 and headroom < 8192:

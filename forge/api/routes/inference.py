@@ -56,9 +56,7 @@ class ChatRequest(BaseModel):
     draft_model_id: str | None = None
     draft_model_path: str | None = None
     num_speculative_tokens: int | None = Field(default=None, ge=1, le=32)
-    inference_backend: str = Field(
-        default="auto", description="auto | llamacpp | mlx | torch"
-    )
+    inference_backend: str = Field(default="auto", description="auto | llamacpp | mlx | torch")
     messages: list[dict[str, str]] = Field(default_factory=list)
     max_tokens: int = Field(default=2048, ge=1, le=8192)
     n_ctx: int | None = Field(default=None, ge=2048, le=131072)
@@ -82,9 +80,7 @@ class ThreadCreate(BaseModel):
 
 class PreloadRequest(BaseModel):
     model_id: str
-    inference_backend: str = Field(
-        default="auto", description="auto | llamacpp | mlx | torch"
-    )
+    inference_backend: str = Field(default="auto", description="auto | llamacpp | mlx | torch")
 
 
 @router.post("/threads")
@@ -138,7 +134,6 @@ async def inference_models(
             "model_id": ROUTER_MODEL_ID,
         },
     }
-
 
 
 @router.get("/models/{model_id}/variants")
@@ -343,9 +338,7 @@ async def preload_model_stream(
 
     async def event_gen():
 
-        switching = orchestrator._runner._pool.would_switch_model(
-            target_path, ctx["backend"]
-        )
+        switching = orchestrator._runner._pool.would_switch_model(target_path, ctx["backend"])
         if switching:
             yield {
                 "event": "progress",
@@ -360,9 +353,7 @@ async def preload_model_stream(
             }
             await loop.run_in_executor(
                 None,
-                lambda: orchestrator._runner._pool.prepare_for_load(
-                    target_path, ctx["backend"]
-                ),
+                lambda: orchestrator._runner._pool.prepare_for_load(target_path, ctx["backend"]),
             )
 
         yield {
@@ -424,9 +415,7 @@ async def _resolve_preload_context(
     model_id: str,
     inference_backend: str,
 ) -> dict[str, Any]:
-    selected = await get_inference_option(
-        db, user_id, model_id
-    )
+    selected = await get_inference_option(db, user_id, model_id)
     if not selected:
         raise HTTPException(404, "Model not found in inventory")
 
@@ -616,7 +605,11 @@ async def chat(
             payload["inference_backend"] = body.inference_backend
         elif body.model_id:
             selected = await get_inference_option(db, user_id, body.model_id)
-            if selected is None and settings.model_router_enabled and body.model_id == ROUTER_MODEL_ID:
+            if (
+                selected is None
+                and settings.model_router_enabled
+                and body.model_id == ROUTER_MODEL_ID
+            ):
                 selected = next(
                     (
                         o
@@ -693,9 +686,7 @@ async def chat(
                 data_dir=settings.data_dir,
             )
         else:
-            draft_selected = await get_inference_option(
-                db, user_id, body.draft_model_id
-            )
+            draft_selected = await get_inference_option(db, user_id, body.draft_model_id)
             if not draft_selected:
                 raise HTTPException(404, "Draft model not found")
             draft_path = draft_selected.get("path")

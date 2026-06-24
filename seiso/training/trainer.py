@@ -179,7 +179,9 @@ class SeisoTrainer:
         if eval_n > 0:
             split = raw_ds.train_test_split(test_size=eval_n, seed=cfg.seed)
             train_ds, eval_ds = split["train"], split["test"]
-            self._log(f"Train/eval split: {len(train_ds)} train, {len(eval_ds)} eval (max_eval={cfg.max_eval_samples})")
+            self._log(
+                f"Train/eval split: {len(train_ds)} train, {len(eval_ds)} eval (max_eval={cfg.max_eval_samples})"
+            )
         else:
             train_ds, eval_ds = raw_ds, None
 
@@ -355,13 +357,10 @@ class SeisoTrainer:
                 trust_remote_code=trust_remote_code,
                 peek=True,
             )
-            load_dtype = None if native_hub_quant else (
-                "float16" if cfg.quant == QuantMode.INT16 else None
+            load_dtype = (
+                None if native_hub_quant else ("float16" if cfg.quant == QuantMode.INT16 else None)
             )
-            use_flash = (
-                not native_hub_quant
-                and bool(cfg.extra.get("use_flash_attention", True))
-            )
+            use_flash = not native_hub_quant and bool(cfg.extra.get("use_flash_attention", True))
             self._loaded = SeisoModel.from_pretrained(
                 model_ref,
                 max_seq_length=cfg.max_seq_length,
@@ -385,13 +384,11 @@ class SeisoTrainer:
                 # Let TrainingArguments handle gradient checkpointing via
                 # gradient_checkpointing_kwargs (use_reentrant=False) to avoid
                 # double-enablement and reentrant overhead.
-                model = prepare_model_for_kbit_training(
-                    model, use_gradient_checkpointing=False
-                )
+                model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=False)
                 if cfg.gradient_checkpointing and hasattr(model, "gradient_checkpointing_enable"):
-                    model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={
-                        "use_reentrant": False
-                    })
+                    model.gradient_checkpointing_enable(
+                        gradient_checkpointing_kwargs={"use_reentrant": False}
+                    )
                 self._loaded.model = model
             except ImportError:
                 logger.warning(
@@ -517,6 +514,7 @@ class SeisoTrainer:
         # ── Check which TrainingArguments params are actually available ──
         # (transformers 5.x removed group_by_length; guard with hasattr)
         from transformers import TrainingArguments as _TA
+
         _ta_fields = set(inspect.signature(_TA.__init__).parameters.keys())
 
         base = {
@@ -549,11 +547,7 @@ class SeisoTrainer:
             "dataloader_persistent_workers": persistent_workers,
             "gradient_checkpointing": cfg.gradient_checkpointing,
         }
-        if (
-            eval_ds is not None
-            and cfg.early_stopping
-            and "metric_for_best_model" in _ta_fields
-        ):
+        if eval_ds is not None and cfg.early_stopping and "metric_for_best_model" in _ta_fields:
             base["metric_for_best_model"] = cfg.metric_for_best_model
             base["greater_is_better"] = cfg.metric_for_best_model != "eval_loss"
         # save_safetensors was removed in transformers 5.x — only add when available

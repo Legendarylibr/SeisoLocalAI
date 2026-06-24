@@ -13,6 +13,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from seiso.models.hub_quant import infer_active_params_b  # noqa: E402
+from seiso.io.jsonl import write_jsonl  # noqa: E402
 from seiso.training.code_corpus import (  # noqa: E402
     is_metadata_only_row,
     normalize_code_row,
@@ -150,19 +151,18 @@ def main() -> int:
     configs = tuple(config_names) if config_names else None
 
     out = Path(args.output).expanduser()
-    out.parent.mkdir(parents=True, exist_ok=True)
     written = 0
     try:
-        with out.open("w", encoding="utf-8") as handle:
-            for record in _iter_normalized(
+        written = write_jsonl(
+            _iter_normalized(
                 repos,
                 configs=configs,
                 max_samples=args.max_samples,
                 skip_metadata_only=not args.include_metadata_only,
                 token=token,
-            ):
-                handle.write(json.dumps(record, ensure_ascii=False) + "\n")
-                written += 1
+            ),
+            out,
+        )
     except Exception as exc:
         msg = str(exc)
         if "403" in msg or "gated" in msg.lower():

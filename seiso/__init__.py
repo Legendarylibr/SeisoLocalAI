@@ -1,4 +1,9 @@
-"""Seiso Core — fast local model training, export, and inference utilities."""
+"""Seiso Core — fast local model training, export, and inference utilities.
+
+Public re-exports for library consumers (``pip install seiso``). Forge, CLI,
+and tests import submodules directly (``from seiso.training.config import …``);
+those paths are stable and preferred for in-repo code.
+"""
 
 __version__ = "0.1.0"
 

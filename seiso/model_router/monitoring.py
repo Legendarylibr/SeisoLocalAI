@@ -35,11 +35,11 @@ class SystemMetrics:
     def prometheus_lines(self) -> list[str]:
         lines: list[str] = []
         for i, util in enumerate(self.gpu_utilization_pct):
-            lines.append(f"seiso_gpu_utilization_percent{{gpu=\"{i}\"}} {util}")
+            lines.append(f'seiso_gpu_utilization_percent{{gpu="{i}"}} {util}')
         for i, used in enumerate(self.vram_used_mb):
-            lines.append(f"seiso_vram_used_mb{{gpu=\"{i}\"}} {used}")
+            lines.append(f'seiso_vram_used_mb{{gpu="{i}"}} {used}')
         for i, total in enumerate(self.vram_total_mb):
-            lines.append(f"seiso_vram_total_mb{{gpu=\"{i}\"}} {total}")
+            lines.append(f'seiso_vram_total_mb{{gpu="{i}"}} {total}')
         lines.append(f"seiso_ram_used_mb {self.ram_used_mb}")
         lines.append(f"seiso_ram_total_mb {self.ram_total_mb}")
         return lines

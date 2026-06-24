@@ -99,7 +99,9 @@ def test_detect_gpu_nvidia_smi_fallback(monkeypatch):
     clear_gpu_enumeration_cache()
     monkeypatch.setattr(
         "seiso.security.nvidia_boundary.query_nvidia_gpus",
-        lambda **kwargs: [{"index": 0, "name": "NVIDIA GeForce RTX 4090", "memory_total_mb": 24564}],
+        lambda **kwargs: [
+            {"index": 0, "name": "NVIDIA GeForce RTX 4090", "memory_total_mb": 24564}
+        ],
     )
     monkeypatch.setattr("seiso.hardware.gpus.platform.system", lambda: "Linux")
     monkeypatch.setattr("seiso.hardware.gpus._torch_gpus", lambda: [])
@@ -149,7 +151,11 @@ def test_platform_caps_install_hint_without_cuda_runtime(monkeypatch):
 
     class _FakeTorch:
         cuda = _FakeCuda()
-        backends = type("Backends", (), {"mps": type("Mps", (), {"is_available": staticmethod(lambda: False)})()})()
+        backends = type(
+            "Backends",
+            (),
+            {"mps": type("Mps", (), {"is_available": staticmethod(lambda: False)})()},
+        )()
 
     monkeypatch.setitem(__import__("sys").modules, "torch", _FakeTorch())
     monkeypatch.setattr("seiso.training.platform_caps.platform.system", lambda: "Linux")

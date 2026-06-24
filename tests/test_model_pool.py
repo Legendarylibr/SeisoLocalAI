@@ -404,7 +404,11 @@ def test_platform_caps_bnb_unavailable_on_linux(monkeypatch):
 
     class _FakeTorch:
         cuda = _FakeCuda()
-        backends = type("Backends", (), {"mps": type("Mps", (), {"is_available": staticmethod(lambda: False)})()})()
+        backends = type(
+            "Backends",
+            (),
+            {"mps": type("Mps", (), {"is_available": staticmethod(lambda: False)})()},
+        )()
 
     import sys
 

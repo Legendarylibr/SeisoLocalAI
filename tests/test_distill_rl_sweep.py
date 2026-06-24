@@ -127,7 +127,9 @@ def test_run_distill_rl_job_runs_sweep_before_final_dpo(tmp_path: Path):
     eval_summary.write_text("{}", encoding="utf-8")
 
     with (
-        patch("seiso.distill_rl.runner.run_auto_hyperparameter_sweep", return_value=sweep_result) as sweep,
+        patch(
+            "seiso.distill_rl.runner.run_auto_hyperparameter_sweep", return_value=sweep_result
+        ) as sweep,
         patch("seiso.models.hf_env.configure_hf_hub_cache"),
         patch("seiso.security.nvidia_boundary.enforce_nvidia_secure_boundary"),
         patch("seiso.distill_rl.runner.init_run_manifest", return_value={}),
@@ -140,7 +142,10 @@ def test_run_distill_rl_job_runs_sweep_before_final_dpo(tmp_path: Path):
             "seiso.distill_rl.evaluate.evaluate_pipeline",
             return_value={"summary_path": str(eval_summary), "checkpoints": {}},
         ),
-        patch("seiso.distill_rl.runner.create_paper_bundle", return_value={"paper_bundle_dir": str(job_root)}),
+        patch(
+            "seiso.distill_rl.runner.create_paper_bundle",
+            return_value={"paper_bundle_dir": str(job_root)},
+        ),
     ):
         shared.return_value = SharedStageContext(
             distilled_dir=distilled,

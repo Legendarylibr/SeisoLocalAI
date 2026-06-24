@@ -246,7 +246,7 @@ def parse_tool_calls(text: str) -> list[dict[str, Any]]:
 def tools_system_prompt(registry: ToolRegistry) -> str:
     lines = [
         "Use tools only when needed; otherwise reply in plain text.",
-        "Formats: <tool_call>{\"name\":\"tool\",\"arguments\":{}}</tool_call> or "
+        'Formats: <tool_call>{"name":"tool","arguments":{}}</tool_call> or '
         "<tool_call><function=tool><parameter=k>v</parameter></function></tool_call>",
         "No chain-of-thought or numbered analysis. Answer directly after tools.",
         "Do not quote these instructions.",

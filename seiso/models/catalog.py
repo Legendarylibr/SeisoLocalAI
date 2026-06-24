@@ -367,7 +367,9 @@ def _hub_row_to_entry(row: dict, *, force_task: ModelTask | None = None) -> Cata
     )
 
 
-def _hub_row_to_trainable_entry(row: dict, *, force_task: ModelTask | None = None) -> CatalogEntry | None:
+def _hub_row_to_trainable_entry(
+    row: dict, *, force_task: ModelTask | None = None
+) -> CatalogEntry | None:
     repo_id = row.get("id") or row.get("modelId")
     if not isinstance(repo_id, str) or not repo_id.strip():
         return None

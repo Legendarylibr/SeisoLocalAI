@@ -207,7 +207,9 @@ def _clear_runtime_caches() -> None:
 def main(argv: list[str] | None = None) -> int:
     import argparse
 
-    parser = argparse.ArgumentParser(description="Install/verify llama-cpp-python for Seiso GGUF chat")
+    parser = argparse.ArgumentParser(
+        description="Install/verify llama-cpp-python for Seiso GGUF chat"
+    )
     parser.add_argument("--quiet", action="store_true", help="Only exit code, no stdout")
     args = parser.parse_args(argv)
 

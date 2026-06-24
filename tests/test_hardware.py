@@ -319,7 +319,9 @@ def test_assess_hardware_fit_allows_when_est_within_headroom(monkeypatch):
 def test_assess_hardware_fit_allows_27b_q4_on_4090_when_vram_in_use():
     profile = {
         "backend": "cuda",
-        "gpus": [{"vram_total_mb": 24564, "vram_used_mb": 17000, "name": "NVIDIA GeForce RTX 4090"}],
+        "gpus": [
+            {"vram_total_mb": 24564, "vram_used_mb": 17000, "name": "NVIDIA GeForce RTX 4090"}
+        ],
         "ram_gb": 32,
     }
     fit = assess_catalog_fit(

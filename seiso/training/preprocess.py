@@ -214,7 +214,8 @@ def validate_training_dataset(
         raw = raw.select(range(max_check_samples))
         logger.info(
             "Dataset validation: sampling first %d rows out of %d for preflight check",
-            max_check_samples, initial,
+            max_check_samples,
+            initial,
         )
 
     if initial == 0 or len(raw) == 0:
@@ -248,5 +249,6 @@ def validate_training_dataset(
         "resolved_format": resolved_fmt.value,
         "removed_invalid": stats["removed_invalid"],
         "removed_duplicate": stats["removed_duplicate"],
-        "sampled_for_validation": max_check_samples is not None and stats["initial_samples"] < initial,
+        "sampled_for_validation": max_check_samples is not None
+        and stats["initial_samples"] < initial,
     }

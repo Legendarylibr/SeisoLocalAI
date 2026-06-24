@@ -81,7 +81,9 @@ def _resolve_nvidia_smi() -> str | None:
     return resolve_nvidia_smi_executable()
 
 
-def _run_nvidia_smi(exe: str, *args: str, timeout: float = 10.0) -> subprocess.CompletedProcess[str] | None:
+def _run_nvidia_smi(
+    exe: str, *args: str, timeout: float = 10.0
+) -> subprocess.CompletedProcess[str] | None:
     try:
         return subprocess.run(
             [exe, *args],
@@ -209,11 +211,7 @@ def query_nvidia_gpus(*, force_refresh: bool = False) -> list[dict[str, object]]
     global _query_cache, _query_cache_ts
 
     now = time.time()
-    if (
-        not force_refresh
-        and _query_cache is not None
-        and now - _query_cache_ts < _QUERY_TTL_S
-    ):
+    if not force_refresh and _query_cache is not None and now - _query_cache_ts < _QUERY_TTL_S:
         return _query_cache
 
     gpus = _probe_nvidia_gpus_uncached()

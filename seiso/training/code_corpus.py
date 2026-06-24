@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-import json
-from collections.abc import Iterator
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 _TEXT_COLUMNS = ("text", "content", "code", "raw_content", "file_content")
@@ -34,7 +31,9 @@ def _first_str(row: dict[str, Any], keys: tuple[str, ...]) -> str | None:
     return None
 
 
-def normalize_code_row(row: dict[str, Any], *, source: str | None = None) -> NormalizedCodeSample | None:
+def normalize_code_row(
+    row: dict[str, Any], *, source: str | None = None
+) -> NormalizedCodeSample | None:
     """Convert a code-hub row into a single training text field."""
     body = _first_str(row, _TEXT_COLUMNS)
     if not body:
@@ -95,7 +94,9 @@ def recommend_pretraining_epochs(
         note = "Subset fits within one Chinchilla-optimal pass."
     else:
         recommended = min(3, epochs_for_chinchilla)
-        note = f"Chinchilla-optimal pass suggests up to {epochs_for_chinchilla} epochs on this subset."
+        note = (
+            f"Chinchilla-optimal pass suggests up to {epochs_for_chinchilla} epochs on this subset."
+        )
 
     return {
         "recommended_epochs": recommended,
@@ -103,16 +104,6 @@ def recommend_pretraining_epochs(
         "chinchilla_target_tokens": chinchilla_target,
         "note": note,
     }
-
-
-def write_jsonl(records: Iterator[dict[str, Any]], path: Path) -> int:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    count = 0
-    with path.open("w", encoding="utf-8") as handle:
-        for record in records:
-            handle.write(json.dumps(record, ensure_ascii=False) + "\n")
-            count += 1
-    return count
 
 
 def is_metadata_only_row(row: dict[str, Any]) -> bool:

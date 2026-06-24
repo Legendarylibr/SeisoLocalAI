@@ -30,10 +30,6 @@ def _disk_usage_root() -> str:
     return "/"
 
 
-def _sanitize_label(raw: str, *, max_len: int = 64) -> str:
-    return sanitize_hardware_label(raw, max_len=max_len)
-
-
 def _ram_gb() -> float:
     try:
         import psutil  # type: ignore

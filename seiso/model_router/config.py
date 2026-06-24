@@ -74,8 +74,7 @@ class RouterSettings(BaseSettings):
             issues.append("orchestrator_url must be set")
         if issues:
             raise ValueError(
-                "routing_mode=nemotron is only supported with vLLM sleep mode: "
-                + "; ".join(issues)
+                "routing_mode=nemotron is only supported with vLLM sleep mode: " + "; ".join(issues)
             )
         return self
 

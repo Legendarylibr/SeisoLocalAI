@@ -209,7 +209,5 @@ async def select_route_via_nemotron(
     if not tool_calls:
         logger.warning("orchestrator returned no tool calls")
 
-    selection = selection_from_tool_calls(
-        catalog, tool_calls, fallback_route_id=fallback_route_id
-    )
+    selection = selection_from_tool_calls(catalog, tool_calls, fallback_route_id=fallback_route_id)
     return selection

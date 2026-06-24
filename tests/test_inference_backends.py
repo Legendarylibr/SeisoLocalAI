@@ -83,7 +83,9 @@ def test_available_backends_allows_dflash_draft_for_speculative(tmp_path: Path):
 
     # dflash-draft is now allowed (via llama.cpp) when used as speculative draft model
     backends = available_backends(model_path=str(gguf), model_format="gguf")
-    assert backends == ["llamacpp"] or backends == []  # may be filtered by other catalog logic in full flow
+    assert (
+        backends == ["llamacpp"] or backends == []
+    )  # may be filtered by other catalog logic in full flow
 
 
 def test_recommend_backend_detects_extensionless_hf_blob(tmp_path: Path):

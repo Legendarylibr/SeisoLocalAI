@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from collections.abc import Callable
 from typing import Any
@@ -11,7 +10,9 @@ logger = logging.getLogger(__name__)
 
 LogFn = Callable[[str], None] | None
 
-_GPU_TASK_KINDS = frozenset({"training", "export", "compress", "distill_rl", "rl_quant", "download"})
+_GPU_TASK_KINDS = frozenset(
+    {"training", "export", "compress", "distill_rl", "rl_quant", "download"}
+)
 
 
 def _refresh_hardware_profile() -> None:
@@ -114,20 +115,3 @@ def assert_gpu_available_for_inference() -> None:
             f"Cannot load chat models while {', '.join(blocking)} is running. "
             "Wait for the job to finish or cancel it first."
         )
-
-
-async def prepare_for_gpu_task_async(
-    *,
-    task: str,
-    log: LogFn = None,
-    job_id: str | None = None,
-) -> dict[str, Any]:
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(
-        None, lambda: prepare_for_gpu_task(task=task, log=log, job_id=job_id)
-    )
-
-
-async def release_after_task_async(*, reason: str, log: LogFn = None) -> None:
-    loop = asyncio.get_running_loop()
-    await loop.run_in_executor(None, lambda: release_after_task(reason=reason, log=log))

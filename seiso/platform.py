@@ -29,7 +29,12 @@ def pip_nvidia_cuda_lib_dirs() -> list[str]:
     if hasattr(site, "getusersitepackages"):
         pass
     # Editable installs / venv: also scan sys.prefix site-packages.
-    roots.append(Path(sys.prefix) / "lib" / f"python{sys.version_info.major}.{sys.version_info.minor}" / "site-packages")
+    roots.append(
+        Path(sys.prefix)
+        / "lib"
+        / f"python{sys.version_info.major}.{sys.version_info.minor}"
+        / "site-packages"
+    )
 
     for root in roots:
         nvidia_root = root / "nvidia"

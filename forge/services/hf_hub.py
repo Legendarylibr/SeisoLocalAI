@@ -608,9 +608,7 @@ def download_training_snapshot(
     if not snapshot_has_trainable_weights(root):
         from seiso.models.trainable_snapshot import GGUF_ONLY_REPO_MESSAGE
 
-        raise ValueError(
-            f"{GGUF_ONLY_REPO_MESSAGE} Repo: {repo_id}"
-        )
+        raise ValueError(f"{GGUF_ONLY_REPO_MESSAGE} Repo: {repo_id}")
     return {
         "path": str(root.resolve()),
         "repo_id": repo_id,

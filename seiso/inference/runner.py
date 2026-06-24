@@ -165,19 +165,14 @@ class LocalInferenceRunner:
             return
 
         if active_draft:
-            await loop.run_in_executor(
-                None, lambda: self._pool.prepare_for_load(model_path)
-            )
+            await loop.run_in_executor(None, lambda: self._pool.prepare_for_load(model_path))
             return
 
         if self._pool.would_switch_model(model_path):
-            await loop.run_in_executor(
-                None, lambda: self._pool.prepare_for_load(model_path)
-            )
+            await loop.run_in_executor(None, lambda: self._pool.prepare_for_load(model_path))
 
     def _resolve_route(self, payload: dict[str, Any], model_path: str) -> tuple[str, str]:
         if payload.get("draft_model_path"):
-
             payload.get("draft_model_path")
             # dflash drafts are fast GGUF; we still run verification on torch target path for now
             resolved = prepare_model_path(model_path, BACKEND_TORCH)

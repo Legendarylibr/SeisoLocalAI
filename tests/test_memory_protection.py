@@ -73,9 +73,7 @@ def test_llama_batch_headroom_accounts_for_model_weights(monkeypatch, tmp_path):
         "seiso.inference.backends.gguf_block_count",
         lambda _path: 32,
     )
-    remaining = llama_batch_headroom_mb(
-        16384, model_path=gguf, n_gpu_layers=-1
-    )
+    remaining = llama_batch_headroom_mb(16384, model_path=gguf, n_gpu_layers=-1)
     assert remaining < 8192
 
 
@@ -124,8 +122,14 @@ def test_apply_rl_memory_guards_scales_preflight(monkeypatch):
 def test_ensure_load_fits_blocks_oversized_gguf(tmp_path, monkeypatch):
     gguf = tmp_path / "huge.gguf"
     gguf.write_bytes(b"\x00" * (9 * 1024**3))
-    profile = {"backend": "cuda", "gpus": [{"vram_total_mb": 4096, "vram_used_mb": 0}], "ram_gb": 16}
-    monkeypatch.setattr("seiso.memory.protection.hardware_profile", lambda force_refresh=False: profile)
+    profile = {
+        "backend": "cuda",
+        "gpus": [{"vram_total_mb": 4096, "vram_used_mb": 0}],
+        "ram_gb": 16,
+    }
+    monkeypatch.setattr(
+        "seiso.memory.protection.hardware_profile", lambda force_refresh=False: profile
+    )
     monkeypatch.setattr("seiso.hardware.fit.fit_headroom_mb", lambda _p: 2048)
     monkeypatch.setattr("seiso.hardware.fit.vram_headroom_mb", lambda _p: 2048)
     monkeypatch.setattr(

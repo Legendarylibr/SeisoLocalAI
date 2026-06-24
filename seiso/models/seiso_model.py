@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
@@ -25,17 +24,6 @@ def resolve_dtype(dtype: str | None = None) -> str | None:
     except ImportError:
         pass
     return None
-
-
-@dataclass
-class SeisoModelConfig:
-    model_id: str
-    max_seq_length: int = 2048
-    load_in_4bit: bool = True
-    load_in_8bit: bool = False
-    dtype: str | None = None
-    trust_remote_code: bool = False
-    use_flash_attention: bool = True
 
 
 class SeisoModel:
@@ -95,9 +83,9 @@ class SeisoModel:
         target_modules = modules_exist_in_model(model, target_modules)
 
         if use_gradient_checkpointing and hasattr(model, "gradient_checkpointing_enable"):
-            model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={
-                "use_reentrant": False
-            })
+            model.gradient_checkpointing_enable(
+                gradient_checkpointing_kwargs={"use_reentrant": False}
+            )
             if hasattr(model.config, "use_cache"):
                 model.config.use_cache = False
 

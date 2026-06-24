@@ -43,12 +43,7 @@ def compute_route_reward(
     fallback_penalty = -0.1 if fallback_used else 0.0
 
     # Weighted blend — quality weighted higher than raw speed
-    reward = (
-        0.35 * latency_score
-        + 0.40 * quality
-        + domain_bonus
-        + fallback_penalty
-    )
+    reward = 0.35 * latency_score + 0.40 * quality + domain_bonus + fallback_penalty
     return max(-1.0, min(1.0, reward))
 
 

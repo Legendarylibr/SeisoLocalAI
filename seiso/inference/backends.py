@@ -11,6 +11,7 @@ from seiso.models.loader import Backend, detect_backend
 
 BackendName = str
 
+
 class InferenceBackend(StrEnum):
     LLAMACPP = "llamacpp"
     MLX = "mlx"
@@ -52,7 +53,6 @@ _GGUF_VALUE_SIZE = {
 _UNSUPPORTED_GGUF_ARCHITECTURES = frozenset()  # was {"dflash-draft"} - now supported as drafts
 
 
-
 def is_dflash_draft(model_path: str) -> bool:
     """Detect if a GGUF path is a dflash/draft model (specialized small draft for speculative decoding)."""
     arch = gguf_architecture(model_path)
@@ -60,7 +60,6 @@ def is_dflash_draft(model_path: str) -> bool:
         return True
     name = Path(model_path).name.lower()
     return "dflash" in name or "-draft" in name or "draft" in name and "gguf" in name
-
 
 
 def _looks_like_gguf_file(path: Path) -> bool:
@@ -291,9 +290,7 @@ def recommend_backend(*, model_path: str, model_format: str | None = None) -> Ba
     return BACKEND_TORCH
 
 
-def available_backends(
-    *, model_path: str, model_format: str | None = None
-) -> list[BackendName]:
+def available_backends(*, model_path: str, model_format: str | None = None) -> list[BackendName]:
     """Backends that can serve this inventory model."""
     if (model_format or "").lower() == "gguf" and not gguf_is_supported_by_llamacpp(model_path):
         return []

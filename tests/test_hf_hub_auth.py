@@ -6,7 +6,9 @@ import os
 from pathlib import Path
 
 
-def test_configure_hf_hub_auth_mirrors_cli_token_into_relocated_hf_home(monkeypatch, tmp_path: Path):
+def test_configure_hf_hub_auth_mirrors_cli_token_into_relocated_hf_home(
+    monkeypatch, tmp_path: Path
+):
     from seiso.models.hf_env import configure_hf_hub_auth, configure_hf_hub_cache
 
     cli_token = "hf_test_token_123"

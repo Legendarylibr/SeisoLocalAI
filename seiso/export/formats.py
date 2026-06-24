@@ -429,8 +429,7 @@ def _push_hub(
     use_large = total_bytes >= _LARGE_HUB_UPLOAD_BYTES
     if use_large:
         log(
-            f"Uploading {total_bytes / 1e9:.2f} GB to {repo} "
-            "(resumable XET large-folder upload)..."
+            f"Uploading {total_bytes / 1e9:.2f} GB to {repo} (resumable XET large-folder upload)..."
         )
         writer = _HubUploadLogWriter(log)
         with contextlib.redirect_stdout(writer):
