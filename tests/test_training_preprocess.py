@@ -64,7 +64,9 @@ def test_normalize_chat_requires_assistant():
         DatasetFormat.CHAT,
     )
     assert ok and ok["messages"][-1]["content"] == "answer"
-    bad = normalize_sample({"messages": [{"role": "user", "content": "only user"}]}, DatasetFormat.CHAT)
+    bad = normalize_sample(
+        {"messages": [{"role": "user", "content": "only user"}]}, DatasetFormat.CHAT
+    )
     assert bad is None
 
 

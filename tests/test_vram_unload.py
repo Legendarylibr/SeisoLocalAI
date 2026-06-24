@@ -112,7 +112,7 @@ def test_build_vram_status_shape(monkeypatch, tmp_path):
         lambda: {"active_model": "model-a", "path": "/tmp/a.gguf"},
     )
     monkeypatch.setattr(
-        "forge.services.hardware.largest_fitting_catalog_repo",
+        "forge.services.hardware.recommended_catalog_repo",
         lambda _p, task="chat": "microsoft/Phi-4-mini-instruct",
     )
 

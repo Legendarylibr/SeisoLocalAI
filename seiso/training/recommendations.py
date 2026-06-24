@@ -188,9 +188,11 @@ def recommend_training_config(
                 f"Model is ~{params_b:g}B — your GPU profile recommends ≤{max_rec}. "
                 "Expect tight VRAM; reduce max seq length or pick a smaller base."
             )
-        notes.append(f"Base model ~{params_b:g}B — batch {config['batch_size']}, "
-                     f"grad accum {config['gradient_accumulation_steps']}, "
-                     f"seq {config['max_seq_length']}.")
+        notes.append(
+            f"Base model ~{params_b:g}B — batch {config['batch_size']}, "
+            f"grad accum {config['gradient_accumulation_steps']}, "
+            f"seq {config['max_seq_length']}."
+        )
 
     if ds.get("note"):
         notes.append(str(ds["note"]))

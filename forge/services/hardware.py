@@ -304,11 +304,6 @@ def recommended_trainable_repo(profile: dict[str, Any]) -> str | None:
     return result
 
 
-def largest_fitting_catalog_repo(profile: dict[str, Any], *, task: str = "chat") -> str | None:
-    """Largest catalog model with ideal/good hardware fit."""
-    return recommended_catalog_repo(profile, task=task)
-
-
 def build_vram_status(orchestrator: Any) -> dict[str, Any]:
     """Unified VRAM/RAM status for API responses."""
     from seiso.hardware.tiers import HardwareTier, classify_tier, vram_headroom_mb
@@ -326,7 +321,7 @@ def build_vram_status(orchestrator: Any) -> dict[str, Any]:
         "apple_unified": tier == HardwareTier.APPLE_UNIFIED,
         "tier": tier.value,
         "memory_profile": memory_profile_label(profile),
-        "recommended_max_chat": largest_fitting_catalog_repo(profile, task="chat"),
+        "recommended_max_chat": recommended_catalog_repo(profile, task="chat"),
         "active_model": local.get("active_model"),
     }
 
@@ -370,7 +365,6 @@ __all__ = [
     "format_catalog_note",
     "hardware_profile",
     "hardware_summary",
-    "largest_fitting_catalog_repo",
     "build_vram_status",
     "live_metrics",
     "memory_headroom_label",

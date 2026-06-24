@@ -241,9 +241,7 @@ def llama_load_kwargs(n_ctx: int, *, model_path: str | None = None) -> dict[str,
     # installed llama-cpp-python wheel can't actually offload (e.g. CPU-only
     # wheel on an NVIDIA Linux box), force 0 to avoid a crash at Llama init.
     if n_gpu_layers != 0 and not _llama_gpu_offload_ok():
-        logger.debug(
-            "llama-cpp-python wheel lacks GPU offload support — forcing n_gpu_layers=0"
-        )
+        logger.debug("llama-cpp-python wheel lacks GPU offload support — forcing n_gpu_layers=0")
         n_gpu_layers = 0
     from seiso.memory.protection import llama_batch_headroom_mb
 
@@ -252,11 +250,7 @@ def llama_load_kwargs(n_ctx: int, *, model_path: str | None = None) -> dict[str,
     if n_gpu_layers != 0 and model_path:
         from seiso.inference.backends import gguf_block_count
 
-        layer_hint = (
-            n_gpu_layers
-            if n_gpu_layers > 0
-            else (gguf_block_count(model_path) or 64)
-        )
+        layer_hint = n_gpu_layers if n_gpu_layers > 0 else (gguf_block_count(model_path) or 64)
     batch_headroom = llama_batch_headroom_mb(
         free_mb, model_path=model_path, n_gpu_layers=layer_hint
     )
@@ -293,10 +287,7 @@ def llama_load_kwargs(n_ctx: int, *, model_path: str | None = None) -> dict[str,
 def _llama_load_retryable(exc: ValueError) -> bool:
     """True when llama.cpp init failed due to VRAM pressure and a smaller offload may work."""
     msg = str(exc)
-    return (
-        "Failed to load model from file" in msg
-        or "Failed to create llama_context" in msg
-    )
+    return "Failed to load model from file" in msg or "Failed to create llama_context" in msg
 
 
 def _load_llama_model(path: str, n_ctx: int) -> Any:
@@ -434,7 +425,9 @@ class ModelPool:
         self.bump_generation()
         self.unload_all()
 
-    def would_switch_model(self, target_path: str, backend: str | BackendKind | None = None) -> bool:
+    def would_switch_model(
+        self, target_path: str, backend: str | BackendKind | None = None
+    ) -> bool:
         """True when loading target_path would replace the active inference model."""
         status = self.status()
         if not status.get("active_model"):

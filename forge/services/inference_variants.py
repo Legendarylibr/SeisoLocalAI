@@ -30,7 +30,9 @@ def _metadata(row_or_opt: dict[str, Any]) -> dict[str, Any]:
     return {}
 
 
-def extract_quant_label(*, name: str, path: str = "", metadata: dict[str, Any] | None = None) -> str:
+def extract_quant_label(
+    *, name: str, path: str = "", metadata: dict[str, Any] | None = None
+) -> str:
     meta = metadata or {}
     for candidate in (
         meta.get("gguf_file"),
@@ -69,7 +71,9 @@ def _same_variant_group(a: dict[str, Any], b: dict[str, Any]) -> bool:
 
 def _option_variant_row(opt: dict[str, Any], *, current_id: str) -> dict[str, Any]:
     meta = _metadata(opt)
-    quant = extract_quant_label(name=str(opt.get("name") or ""), path=str(opt.get("path") or ""), metadata=meta)
+    quant = extract_quant_label(
+        name=str(opt.get("name") or ""), path=str(opt.get("path") or ""), metadata=meta
+    )
     return {
         "id": opt["id"],
         "name": opt.get("name"),
@@ -141,7 +145,12 @@ async def get_model_variants(
     """Local quant siblings plus Hub GGUF files for the same mirror/base model."""
     current = await get_inference_option(db, user_id, model_id)
     if not current:
-        return {"model_id": model_id, "local_variants": [], "hub_variants": [], "variant_group": None}
+        return {
+            "model_id": model_id,
+            "local_variants": [],
+            "hub_variants": [],
+            "variant_group": None,
+        }
 
     all_options = await list_inference_options(db, user_id)
     local_variants = [
@@ -167,7 +176,11 @@ async def get_model_variants(
         if isinstance(gguf_file, str):
             local_by_file[gguf_file] = row
 
-    hub_variants = _hub_variant_rows(gguf_repo, token=hf_token, local_by_file=local_by_file) if gguf_repo else []
+    hub_variants = (
+        _hub_variant_rows(gguf_repo, token=hf_token, local_by_file=local_by_file)
+        if gguf_repo
+        else []
+    )
 
     draft_candidates = [
         {

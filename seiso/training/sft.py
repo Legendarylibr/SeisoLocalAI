@@ -162,11 +162,26 @@ def _fallback_trainer(
 
     # Filter SFTConfig-only params that TrainingArguments doesn't accept
     sft_only_keys = {
-        "padding_free", "packing", "dataset_text_field", "max_length", "max_seq_length",
-        "packing_strategy", "eval_packing", "assistant_only_loss", "completion_only_loss",
-        "dataset_kwargs", "dataset_num_proc", "chat_template_path", "eos_token",
-        "pad_token", "pad_to_multiple_of", "truncation_mode", "shuffle_dataset",
-        "activation_offloading", "loss_type", "model_init_kwargs",
+        "padding_free",
+        "packing",
+        "dataset_text_field",
+        "max_length",
+        "max_seq_length",
+        "packing_strategy",
+        "eval_packing",
+        "assistant_only_loss",
+        "completion_only_loss",
+        "dataset_kwargs",
+        "dataset_num_proc",
+        "chat_template_path",
+        "eos_token",
+        "pad_token",
+        "pad_to_multiple_of",
+        "truncation_mode",
+        "shuffle_dataset",
+        "activation_offloading",
+        "loss_type",
+        "model_init_kwargs",
     }
     filtered_args = {k: v for k, v in training_args_dict.items() if k not in sft_only_keys}
     args = TrainingArguments(**filtered_args)

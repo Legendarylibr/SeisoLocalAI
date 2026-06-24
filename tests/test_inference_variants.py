@@ -14,7 +14,10 @@ from forge.services.inference_variants import (
 def test_extract_quant_label_from_filename():
     assert extract_quant_label(name="model-Q4_K_M.gguf", path="model-Q4_K_M.gguf") == "Q4_K"
     assert extract_quant_label(name="model", path="weights-IQ4_XS.gguf") == "IQ4_XS"
-    assert extract_quant_label(name="model", path="model-q8_0.gguf", metadata={"quant": "Q8_0"}) == "Q8_0"
+    assert (
+        extract_quant_label(name="model", path="model-q8_0.gguf", metadata={"quant": "Q8_0"})
+        == "Q8_0"
+    )
 
 
 def test_variant_group_key_prefers_repo_id():
@@ -35,7 +38,11 @@ async def test_get_model_variants_groups_local_quants(monkeypatch):
         "path": "/models/model-q4.gguf",
         "format": "gguf",
         "backends": ["llamacpp"],
-        "metadata": {"repo_id": "org/Model-GGUF", "gguf_repo": "org/Model-GGUF", "gguf_file": "model-q4.gguf"},
+        "metadata": {
+            "repo_id": "org/Model-GGUF",
+            "gguf_repo": "org/Model-GGUF",
+            "gguf_file": "model-q4.gguf",
+        },
     }
     sibling = {
         "id": "q8",
@@ -43,7 +50,12 @@ async def test_get_model_variants_groups_local_quants(monkeypatch):
         "path": "/models/model-q8.gguf",
         "format": "gguf",
         "backends": ["llamacpp"],
-        "metadata": {"repo_id": "org/Model-GGUF", "gguf_repo": "org/Model-GGUF", "gguf_file": "model-q8.gguf", "quant": "Q8_0"},
+        "metadata": {
+            "repo_id": "org/Model-GGUF",
+            "gguf_repo": "org/Model-GGUF",
+            "gguf_file": "model-q8.gguf",
+            "quant": "Q8_0",
+        },
     }
 
     async def fake_get_option(db, user_id, model_id, **kwargs):
@@ -79,4 +91,6 @@ async def test_get_model_variants_groups_local_quants(monkeypatch):
     assert variants["current_quant"] == "Q4"
     assert len(variants["local_variants"]) == 2
     assert variants["local_variants"][0]["selected"] is True
-    assert any(row["quant"] == "Q3_K_M" and not row["downloaded"] for row in variants["hub_variants"])
+    assert any(
+        row["quant"] == "Q3_K_M" and not row["downloaded"] for row in variants["hub_variants"]
+    )

@@ -148,7 +148,10 @@ def _select_lowest_memory_without_regression(
         perplexity_regression = float(row["perplexity"]) - best_perplexity
         if reward_regression > max_reward_regression:
             continue
-        if max_perplexity_regression is not None and perplexity_regression > max_perplexity_regression:
+        if (
+            max_perplexity_regression is not None
+            and perplexity_regression > max_perplexity_regression
+        ):
             continue
         eligible.append(
             {
@@ -186,7 +189,9 @@ def run_hf_deploy_quant_regression(
     """Compare deployment quants on merged HF weights using GPU eval loss/perplexity."""
     from seiso.models.hub_quant import infer_active_params_b
 
-    params_b = parameters_b if parameters_b is not None else infer_active_params_b(base_config.model_id)
+    params_b = (
+        parameters_b if parameters_b is not None else infer_active_params_b(base_config.model_id)
+    )
     texts = _load_eval_texts(train_out, base_config, max_samples=max_eval_samples)
     if not texts:
         raise RuntimeError("No eval texts available — increase dataset size or eval_split_ratio")

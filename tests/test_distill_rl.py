@@ -208,7 +208,11 @@ def test_run_distill_rl_job_orchestrates_stages(tmp_path: Path):
             job_id="job-x",
             user_id="cli",
             data_dir=tmp_path,
-            payload={"preset": "smoke", "stages": ["distill", "rollout", "dpo", "evaluate"], "auto_sweep": False},
+            payload={
+                "preset": "smoke",
+                "stages": ["distill", "rollout", "dpo", "evaluate"],
+                "auto_sweep": False,
+            },
         )
 
     assert result["final_model_dir"] == str(dpo_dir)

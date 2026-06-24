@@ -8,7 +8,9 @@ def test_resolve_cuda_training_mode_tiers():
 
     assert resolve_cuda_training_mode(headroom_mb=4096) == CudaTrainingMode.LEAN
     assert resolve_cuda_training_mode(headroom_mb=12000) == CudaTrainingMode.BALANCED
-    assert resolve_cuda_training_mode(headroom_mb=24000, est_train_mb=4000) == CudaTrainingMode.SPEED
+    assert (
+        resolve_cuda_training_mode(headroom_mb=24000, est_train_mb=4000) == CudaTrainingMode.SPEED
+    )
 
 
 def test_prepare_profile_speed_disables_checkpointing(monkeypatch):

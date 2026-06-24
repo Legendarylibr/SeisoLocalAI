@@ -77,29 +77,3 @@ def sanitize_env_report(report: dict[str, Any]) -> dict[str, Any]:
     if report.get("pip_freeze"):
         sanitized["pip_freeze"] = report["pip_freeze"]
     return sanitized
-
-
-def sanitize_hardware_profile_for_storage(profile: dict[str, Any]) -> dict[str, Any]:
-    """Tier and budget fields only — no CPU/GPU product strings."""
-    return {
-        "tier": profile.get("tier"),
-        "tier_label": profile.get("tier_label"),
-        "backend": profile.get("backend"),
-        "gpu_count": len(profile.get("gpus") or []),
-        "ram_gb": profile.get("ram_gb"),
-        "effective_vram_mb": profile.get("effective_vram_mb"),
-        "vram_headroom_mb": profile.get("vram_headroom_mb"),
-        "arch": profile.get("arch"),
-        "local_only": True,
-    }
-
-
-def sanitize_label_for_display(raw: str, *, max_len: int = 64) -> str:
-    """Sanitize hardware strings for ephemeral UI (not for persistence).
-
-    Delegates to seiso.hardware.gpus.sanitize_hardware_label to avoid
-    duplicated regex / logic.
-    """
-    from seiso.hardware.gpus import sanitize_hardware_label
-
-    return sanitize_hardware_label(raw, max_len=max_len)

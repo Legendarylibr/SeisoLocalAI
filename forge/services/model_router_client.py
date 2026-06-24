@@ -101,12 +101,15 @@ async def router_stream_chat(
         payload["model"] = model
 
     timeout = httpx.Timeout(None)
-    async with httpx.AsyncClient(timeout=timeout) as client, client.stream(
-        "POST",
-        f"{base}/v1/chat/completions",
-        json=payload,
-        headers=router_headers(settings),
-    ) as resp:
+    async with (
+        httpx.AsyncClient(timeout=timeout) as client,
+        client.stream(
+            "POST",
+            f"{base}/v1/chat/completions",
+            json=payload,
+            headers=router_headers(settings),
+        ) as resp,
+    ):
         if resp.status_code >= 400:
             body = await resp.aread()
             raise RuntimeError(body.decode("utf-8", errors="replace") or "Router request failed")

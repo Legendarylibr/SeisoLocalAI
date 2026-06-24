@@ -131,7 +131,10 @@ def configure_hf_hub_auth(token: str | None = None) -> str | None:
         token_path = Path(hf_home).expanduser() / "token"
         try:
             token_path.parent.mkdir(parents=True, exist_ok=True)
-            if not token_path.exists() or token_path.read_text(encoding="utf-8").strip() != resolved:
+            if (
+                not token_path.exists()
+                or token_path.read_text(encoding="utf-8").strip() != resolved
+            ):
                 token_path.write_text(resolved + "\n", encoding="utf-8")
                 token_path.chmod(0o600)
         except OSError:

@@ -82,7 +82,9 @@ def create_router_app(settings: RouterSettings | None = None) -> FastAPI:
         bandit.load(settings.policy_state_path)
 
     lifecycle = BackendLifecycleManager(settings=settings, catalog=catalog)
-    fallback = FallbackChain(catalog=catalog, lifecycle=lifecycle, default_route_id=settings.fallback_route_id)
+    fallback = FallbackChain(
+        catalog=catalog, lifecycle=lifecycle, default_route_id=settings.fallback_route_id
+    )
 
     litellm_gateway = None
     if settings.litellm_gateway_enabled():
@@ -131,7 +133,9 @@ def create_router_app(settings: RouterSettings | None = None) -> FastAPI:
             "vllm_sleep_mode": settings.vllm_sleep_mode,
             "nemotron_enabled": settings.nemotron_orchestrator_enabled(),
             "litellm_enabled": settings.litellm_gateway_enabled(),
-            "orchestrator_model": settings.orchestrator_model if settings.orchestrator_url else None,
+            "orchestrator_model": settings.orchestrator_model
+            if settings.orchestrator_url
+            else None,
         }
 
     @app.get("/ready")
@@ -320,9 +324,7 @@ def create_router_app(settings: RouterSettings | None = None) -> FastAPI:
 
         response_text = ""
         if isinstance(data, dict):
-            response_text = (
-                data.get("choices", [{}])[0].get("message", {}).get("content", "") or ""
-            )
+            response_text = data.get("choices", [{}])[0].get("message", {}).get("content", "") or ""
 
         reward = _compute_reward(
             latency_ms,
@@ -377,7 +379,9 @@ def create_router_app(settings: RouterSettings | None = None) -> FastAPI:
                     max_tokens=max_tokens,
                     temperature=temperature,
                 ):
-                    text = chunk if isinstance(chunk, str) else chunk.decode("utf-8", errors="ignore")
+                    text = (
+                        chunk if isinstance(chunk, str) else chunk.decode("utf-8", errors="ignore")
+                    )
                     for line in text.split("\n"):
                         if not line.startswith("data:"):
                             continue

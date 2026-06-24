@@ -41,7 +41,9 @@ class TrainConfig(BaseModel):
     method: TrainMethod = TrainMethod.LORA
     quant: QuantMode = QuantMode.INT4
     dataset_format: DatasetFormat = DatasetFormat.AUTO
-    epochs: int = Field(default=3, ge=1, description="Maximum training epochs (early stopping may finish earlier)")
+    epochs: int = Field(
+        default=3, ge=1, description="Maximum training epochs (early stopping may finish earlier)"
+    )
     batch_size: int = Field(default=2, ge=1)
     learning_rate: float = Field(default=2e-4, gt=0)
     max_seq_length: int = Field(default=2048, ge=128)

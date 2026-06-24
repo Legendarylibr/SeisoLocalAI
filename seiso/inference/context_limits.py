@@ -76,7 +76,11 @@ def resolve_model_context_ceiling(
     fmt = (model_format or "").lower()
     native: int | None = None
 
-    if fmt == "gguf" or path.suffix.lower() == ".gguf" or (path.is_file() and path.name.lower().endswith(".gguf")):
+    if (
+        fmt == "gguf"
+        or path.suffix.lower() == ".gguf"
+        or (path.is_file() and path.name.lower().endswith(".gguf"))
+    ):
         from seiso.inference.backends import gguf_context_length
 
         native = gguf_context_length(model_path)

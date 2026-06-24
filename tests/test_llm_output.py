@@ -54,7 +54,7 @@ def test_strip_reasoning_leakage_extracts_qwen36_thinking_process_preamble():
 def test_strip_reasoning_leakage_strips_redacted_thinking_suffix():
     raw = (
         "I will search for news.\n</think>\n\n"
-        '<tool_call><function=web_search><parameter=query>AI news</parameter></function></tool_call>'
+        "<tool_call><function=web_search><parameter=query>AI news</parameter></function></tool_call>"
     )
     assert "redacted_thinking" not in strip_reasoning_leakage(raw).lower()
 

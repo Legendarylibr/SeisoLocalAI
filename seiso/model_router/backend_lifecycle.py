@@ -100,7 +100,9 @@ class BackendLifecycleManager:
                 if resp.status_code == 404:
                     health = await client.get(f"{url}/health", timeout=5.0)
                     record.state = (
-                        BackendState.AWAKE if health.status_code == 200 else BackendState.UNREACHABLE
+                        BackendState.AWAKE
+                        if health.status_code == 200
+                        else BackendState.UNREACHABLE
                     )
                 elif resp.status_code == 200:
                     data = resp.json()
@@ -172,14 +174,18 @@ class BackendLifecycleManager:
             return
         start = time.monotonic()
         try:
-            resp = await client.post(f"{route.backend_url}/wake_up", timeout=self.settings.wake_timeout_sec)
+            resp = await client.post(
+                f"{route.backend_url}/wake_up", timeout=self.settings.wake_timeout_sec
+            )
             if resp.status_code >= 400:
                 resp = await client.post(
                     f"{route.backend_url}/wake_up?tags=weights",
                     timeout=self.settings.wake_timeout_sec,
                 )
             record.wake_latency_ms = (time.monotonic() - start) * 1000.0
-            record.state = BackendState.AWAKE if resp.status_code < 400 else BackendState.UNREACHABLE
+            record.state = (
+                BackendState.AWAKE if resp.status_code < 400 else BackendState.UNREACHABLE
+            )
             record.error = "" if resp.status_code < 400 else resp.text[:200]
         except Exception as exc:
             record.state = BackendState.UNREACHABLE

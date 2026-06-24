@@ -218,7 +218,9 @@ def run_auto_hyperparameter_sweep(
                     )
                 )
             objective_values = [result.objective_value for result in seed_results]
-            objective_mean, objective_std, objective_n = aggregate_objective_values(objective_values)
+            objective_mean, objective_std, objective_n = aggregate_objective_values(
+                objective_values
+            )
             representative = max(
                 seed_results,
                 key=lambda result: (

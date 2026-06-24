@@ -10,6 +10,7 @@ from typing import Any
 
 from seiso.distill_rl.prompts import RolloutPrompt, load_rollout_prompts, split_train_val
 from seiso.distill_rl.rollouts import generate_preference_rows
+from seiso.io.jsonl import write_jsonl
 
 
 @dataclass(frozen=True)
@@ -76,8 +77,8 @@ def build_preference_bundle(
 
     train_path = output_dir / "preferences_train.jsonl"
     val_path = output_dir / "preferences_val.jsonl"
-    _write_jsonl(train_path, train_rows)
-    _write_jsonl(val_path, val_rows)
+    write_jsonl(train_rows, train_path)
+    write_jsonl(val_rows, val_path)
 
     manifest = {
         "teacher_model": teacher_model,
@@ -146,12 +147,6 @@ def _rows_for_split(
             continue
         kept.append(row)
     return kept, filtered
-
-
-def _write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
-    with path.open("w", encoding="utf-8") as handle:
-        for row in rows:
-            handle.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
 def _file_hash(path: Path) -> str:
