@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# Start vLLM Smart Router stack (Docker). See scripts/start-router-vllm.sh.
+set -euo pipefail
+
+RAW_BASE="${SEISO_RAW_BASE:-https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main}"
+INSTALL_DIR="${SEISO_INSTALL_DIR:-$HOME/Seiso}"
+START_SRC="${BASH_SOURCE[0]:-}"
+
+source_common() {
+  local root="$1"
+  local common="$root/scripts/lib/common.sh"
+  [[ -f "$common" ]] || return 1
+  # shellcheck source=scripts/lib/common.sh
+  source "$common"
+}
+
+launch_from_root() {
+  local root="$1"
+  shift
+  exec bash "$root/scripts/start-router-vllm.sh" "$@"
+}
+
+if [[ -n "$START_SRC" && -e "$START_SRC" ]]; then
+  candidate="$(cd "$(dirname "$START_SRC")" && pwd)"
+  if [[ -f "$candidate/scripts/lib/common.sh" ]]; then
+    source_common "$candidate" || true
+    if root="$(seiso_resolve_repo_for_start "$START_SRC")"; then
+      launch_from_root "$root" "$@"
+    fi
+  fi
+fi
+
+if [[ -f "$INSTALL_DIR/scripts/start-router-vllm.sh" ]]; then
+  exec bash "$INSTALL_DIR/scripts/start-router-vllm.sh" "$@"
+fi
+
+die() { printf 'error: %s\n' "$*" >&2; exit 1; }
+command -v curl >/dev/null 2>&1 || die "curl is required"
+exec bash -c "$(curl -fsSL "${RAW_BASE}/scripts/start-router-vllm.sh")" _ "$@"
