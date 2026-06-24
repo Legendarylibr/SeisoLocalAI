@@ -24,6 +24,7 @@
 - [Development](#development)
 - [Security](#security)
 - [Documentation index](#documentation-index)
+- [Inference stack](#inference-stack)
 
 ---
 
@@ -432,8 +433,45 @@ Training stack: **TRL `SFTTrainer`** + **PEFT** (LoRA/QLoRA) + optional **fused 
 ### Inference
 
 - **Backends:** llama.cpp (GGUF), MLX (macOS), PyTorch (4-bit/16-bit) ([backends](docs/inference/backends.md))
+- **Smart Router:** optional multi-specialist routing (general / code / reasoning) with Nemotron orchestrator on vLLM stacks; completions dispatch through **LiteLLM** ([model-router](deploy/model-router/README.md))
 - **Tool calling:** web search, sandboxed code execution, artifact writes (opt-in)
 - **Providers:** OpenAI, Anthropic, vLLM with SSRF hardening
+
+#### Smart Router quick start (vLLM + LiteLLM)
+
+Requires **NVIDIA GPU**, **Docker**, and `pip install -e ".[router]"`.
+
+```bash
+# Full vLLM stack (Nemotron + vLLM specialists + llama-swap + Seiso router)
+start-router-vllm
+# equivalent:
+seiso router --stack vllm
+# detached:
+start-router-vllm -d
+```
+
+Enable in Forge (`.env` or environment) so Chat shows **Smart Router (auto-route)**:
+
+```bash
+SEISO_MODEL_ROUTER_ENABLED=true
+SEISO_MODEL_ROUTER_URL=http://127.0.0.1:8780
+```
+
+Router endpoint: `http://127.0.0.1:8780/v1/chat/completions`. Router-only (stack already up):
+
+```bash
+seiso router --vllm
+```
+
+**llama.cpp router stack** (default local Docker config, no vLLM):
+
+```bash
+seiso router --stack llamacpp
+# router process only (llama-swap already running):
+seiso router
+```
+
+Standalone LiteLLM proxy (optional): `litellm --config deploy/model-router/config/litellm.local.vllm.yaml --port 4000`
 
 ### Export
 
@@ -617,3 +655,18 @@ Seiso is licensed under the **GNU General Public License v3.0 (GPL-3.0)**. See [
 | HTTPS deployment | [docs/deployment/reverse-proxy.md](docs/deployment/reverse-proxy.md) |
 | Troubleshooting | [docs/troubleshooting.md](docs/troubleshooting.md) |
 | Local CI | [docs/CI_LOCAL.md](docs/CI_LOCAL.md) |
+| Smart Router (vLLM / LiteLLM) | [deploy/model-router/README.md](deploy/model-router/README.md) |
+
+---
+
+## Inference stack
+
+Seiso’s local chat and Smart Router build on these inference projects:
+
+| Project | Role in Seiso |
+|---------|----------------|
+| [**llama.cpp**](https://github.com/ggml-org/llama.cpp) | Default GGUF chat backend (`llama-cpp-python`, `llama-server` in router stacks) |
+| [**vLLM**](https://github.com/vllm-project/vllm) | GPU specialist serving for the Smart Router (sleep-mode stacks, Nemotron orchestrator) |
+| [**LiteLLM**](https://github.com/BerriAI/litellm) | Completion dispatch on vLLM router stacks (local `hosted_vllm/*` + optional cloud APIs) |
+
+Install router extras: `pip install -e ".[router]"`. vLLM stacks are started via `start-router-vllm` or `seiso router --stack vllm` (see [Smart Router quick start](#smart-router-quick-start-vllm--litellm)).
