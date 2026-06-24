@@ -37,6 +37,10 @@ INV = "\033[7m"
 
 GLITCH_CHARS = "▓▒░█@#$%&*~^/\\|<>"
 
+INTRO_FRAMES = 2
+INTRO_SLEEP_S = 0.05
+DURING_SLEEP_S = 0.06
+
 _FMT = {
     "sky": C_SKY,
     "rain": C_RAIN,
@@ -159,22 +163,26 @@ def _draw(
     sys.stdout.flush()
 
 
+def _play_intro_frames(cols: int) -> None:
+    for i in range(INTRO_FRAMES):
+        glitch = 0.15 + (i % 3) * 0.08
+        _draw(
+            _FORMATTED_RAIN_SCENES[i % len(_FORMATTED_RAIN_SCENES)],
+            subtitle="rain on the wire",
+            brand_line=_flash_brand(i, glitch, cols),
+            glitch=glitch,
+            invert_flash=i == 1,
+        )
+        time.sleep(INTRO_SLEEP_S)
+
+
 def cmd_intro(_: argparse.Namespace) -> int:
     if not _tty():
         return 0
     sys.stdout.write(HIDE)
     try:
         cols, _ = _size()
-        for i in range(6):
-            glitch = 0.15 + (i % 3) * 0.08
-            _draw(
-                _FORMATTED_RAIN_SCENES[i % len(_FORMATTED_RAIN_SCENES)],
-                subtitle="rain on the wire",
-                brand_line=_flash_brand(i, glitch, cols),
-                glitch=glitch,
-                invert_flash=i == 2,
-            )
-            time.sleep(0.12)
+        _play_intro_frames(cols)
     finally:
         sys.stdout.write(SHOW)
         sys.stdout.flush()
@@ -198,6 +206,7 @@ def cmd_during(_: argparse.Namespace) -> int:
     frame = 0
     cols, _ = _size()
     try:
+        _play_intro_frames(cols)
         while not stop:
             glitch = 0.12 + (frame % 5) * 0.05 + random.random() * 0.08
             _draw(
@@ -208,7 +217,7 @@ def cmd_during(_: argparse.Namespace) -> int:
                 invert_flash=frame % 17 == 0,
             )
             frame += 1
-            time.sleep(0.09)
+            time.sleep(DURING_SLEEP_S)
     finally:
         sys.stdout.write(SHOW)
         sys.stdout.flush()

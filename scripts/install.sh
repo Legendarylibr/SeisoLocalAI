@@ -74,12 +74,6 @@ install_tui_enabled() {
   return 0
 }
 
-install_tui_intro() {
-  local root="$1"
-  install_tui_enabled "$root" || return 0
-  python3 "$root/scripts/install_tui.py" intro
-}
-
 install_tui_outro() {
   local root="$1" forge_url
   install_tui_enabled "$root" || return 0
@@ -185,6 +179,21 @@ run_install_worker() {
   seiso_run_install_worker "$1" "$2"
 }
 
+run_install_prep_and_worker() {
+  local root="$1" extras="$2"
+  if [[ ! -x "$root/.venv/bin/python" ]]; then
+    log_unless_quiet "Creating virtualenv at $root/.venv"
+    python3 -m venv "$root/.venv"
+  fi
+
+  if [[ ! -f "$root/.env" && -f "$root/.env.example" ]]; then
+    cp "$root/.env.example" "$root/.env"
+    log_unless_quiet "Created $root/.env from .env.example"
+  fi
+
+  run_install_worker "$root" "$extras"
+}
+
 install_failed() {
   local root="$1"
   warn "Install failed."
@@ -200,7 +209,6 @@ main() {
   seiso_require_system_deps
 
   root="$(resolve_root)"
-  install_tui_intro "$root"
   log_unless_quiet "Using repository at $root"
   warn_windows_mount "$root"
 
@@ -208,20 +216,11 @@ main() {
   log_unless_quiet "Installing Python extras: [$extras]"
 
   install_log="$root/.seiso-install.log"
-  if [[ ! -x "$root/.venv/bin/python" ]]; then
-    log_unless_quiet "Creating virtualenv at $root/.venv"
-    python3 -m venv "$root/.venv"
-  fi
-
-  if [[ ! -f "$root/.env" && -f "$root/.env.example" ]]; then
-    cp "$root/.env.example" "$root/.env"
-    log_unless_quiet "Created $root/.env from .env.example"
-  fi
 
   export SEISO_SKIP_UI="${SEISO_SKIP_UI:-0}"
   export SEISO_SKIP_FLASH_ATTN
 
-  if ! run_with_install_tui "$root" "$install_log" run_install_worker "$root" "$extras"; then
+  if ! run_with_install_tui "$root" "$install_log" run_install_prep_and_worker "$root" "$extras"; then
     install_failed "$root"
   fi
 
