@@ -113,6 +113,73 @@ SEISO_START=0 start      # install only
 
 Install registers `start` on your PATH (`~/.local/bin`). Open a new terminal if the command is not found yet.
 
+### Manual Linux setup
+
+Use this when you already manage Python/Node yourself, want a custom clone path, or prefer not to run the one-liner installer.
+
+**Prerequisites**
+
+| Tool | Version | Notes |
+|------|---------|-------|
+| Python | 3.10+ (3.11+ recommended) | `python3 --version` |
+| Node.js | 18+ (20 LTS recommended) | For `forge-ui` build |
+| git | any recent | — |
+| NVIDIA driver | optional | `nvidia-smi` must work for CUDA training |
+
+**1. Clone and create a virtualenv**
+
+```bash
+git clone https://github.com/Legendarylibr/SeisoLocalAI.git "$HOME/Seiso"
+cd "$HOME/Seiso"
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -U pip wheel setuptools
+cp -n .env.example .env
+```
+
+**2. Install Python extras (pick your hardware)**
+
+Linux with **NVIDIA GPU** (matches what `start` installs):
+
+```bash
+pip install -e ".[forge,train,cuda,llamacpp,dev]"
+```
+
+Linux **without NVIDIA** (CPU or non-CUDA inference):
+
+```bash
+pip install -e ".[forge,train,llamacpp,dev]"
+```
+
+Optional add-ons (from an activated venv):
+
+```bash
+pip install -e ".[router]"                              # LiteLLM model-router gateway
+pip install -e ".[compress-quant,compress-eval]"      # LLM compression pipelines (NVIDIA)
+./scripts/install_flash_attn.sh                         # Flash Attention 2 (NVIDIA, optional)
+```
+
+**3. Build the Forge UI and verify**
+
+```bash
+cd forge-ui && npm ci && npm run build && cd ..
+seiso doctor
+seiso doctor --network    # optional: Hugging Face + download readiness
+```
+
+**4. Start Forge**
+
+```bash
+seiso forge               # http://127.0.0.1:8765
+seiso forge --open        # same, and open the browser
+```
+
+On first launch, create your local admin password in the browser. User data (models, checkpoints, exports) lives in `~/.seiso` unless you set `SEISO_DATA_DIR`.
+
+**Later sessions:** `cd "$HOME/Seiso" && source .venv/bin/activate && seiso forge`, or use `start` from the repo root after `scripts/install.sh` has registered it.
+
+More detail: [docs/platforms/linux-nvidia.md](docs/platforms/linux-nvidia.md) (CUDA kernels, multi-GPU), [docs/install.md](docs/install.md) (full install reference).
+
 ### Starting Forge after install
 
 | Situation | Linux / macOS / WSL | Notes |
