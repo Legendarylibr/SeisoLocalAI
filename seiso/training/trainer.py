@@ -36,7 +36,11 @@ from seiso.training.datasets import (
     prepare_tokenized_dataset,
 )
 from seiso.training.multi_gpu import configure_training_args, detect_training_layout
-from seiso.training.preprocess import compute_eval_split_size, preprocess_training_dataset
+from seiso.training.preprocess import (
+    compute_eval_split_size,
+    preprocess_training_dataset,
+    validate_training_dataset,
+)
 from seiso.training.sft import build_sft_trainer
 
 logger = logging.getLogger(__name__)
@@ -80,6 +84,23 @@ class SeisoTrainer:
             cfg.output_dir / "train_config_snapshot.json",
             cfg.model_dump(mode="json"),
         )
+
+        # Validate dataset *first* (before loading potentially huge model weights).
+        # This ensures errors about bad formatting are shown before expensive work.
+        try:
+            val_stats = validate_training_dataset(
+                cfg.dataset,
+                dataset_format=cfg.dataset_format,
+                sandbox_root=cfg.sandbox_root,
+                max_check_samples=None,  # full check at actual train time
+            )
+            self._log(
+                f"Dataset validation passed: {val_stats['kept']} usable samples "
+                f"(format={val_stats['resolved_format']})"
+            )
+        except Exception as exc:
+            raise ValueError(f"Dataset cannot be normalized for training: {exc}") from exc
+
         layout = detect_training_layout()
         multi_gpu = bool(cfg.multi_gpu or cfg.extra.get("multi_gpu", False)) and layout.use_ddp
         use_triton = cfg.use_triton

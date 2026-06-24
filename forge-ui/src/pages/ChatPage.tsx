@@ -21,7 +21,8 @@ import {
   readChatInferenceSettings,
   writeChatInferenceSettings,
 } from "@/lib/chatInferenceSettings";
-import type { ChatContextStatus, ROUTER_MODEL_ID } from "@/lib/api/types";
+import type { ChatContextStatus } from "@/lib/api/types";
+import { ROUTER_MODEL_ID } from "@/lib/api/types";
 import { ModelProgressState, initialDownloadProgress, initialLoadProgress } from "@/lib/modelProgress";
 import { ChatModelPicker } from "@/components/ChatModelPicker";
 import { ChatContextBar } from "@/components/ChatContextBar";
@@ -107,7 +108,7 @@ export function ChatPage() {
   const [loadedModelId, setLoadedModelId] = useState<string | null>(null);
   const [loadedBackend, setLoadedBackend] = useState<string | null>(null);
   const [vramStatus, setVramStatus] = useState<VramStatus | null>(null);
-  const [routerStatus, setRouterStatus] = useState<Record<string, unknown> | null>(null);
+  const [, setRouterStatus] = useState<Record<string, unknown> | null>(null);
   const [freeingMemory, setFreeingMemory] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollFrameRef = useRef<number | null>(null);

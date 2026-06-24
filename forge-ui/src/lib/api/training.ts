@@ -30,4 +30,12 @@ export const trainingApi = {
     if (dataset) params.set("dataset", dataset);
     return request<TrainingRecommendations>(`/training/recommendations?${params}`);
   },
+  validateDataset: (dataset: string, datasetFormat: string = "auto") =>
+    request<{ valid: boolean; kept?: number; resolved_format?: string; error?: string }>(
+      "/training/validate-dataset",
+      {
+        method: "POST",
+        body: JSON.stringify({ dataset, dataset_format: datasetFormat }),
+      },
+    ),
 };

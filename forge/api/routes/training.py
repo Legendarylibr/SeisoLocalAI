@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
@@ -26,6 +27,8 @@ from forge.services.jobs import assert_job_owner
 from forge.services.models import list_trainable_models, resolve_training_model_id
 from forge.services.user_paths import assert_user_training_config, resolve_training_dataset_path
 from seiso.models.trainable_snapshot import is_gguf_only_repo_id
+from seiso.training.config import DatasetFormat
+from seiso.training.preprocess import validate_training_dataset
 from seiso.training.recommendations import recommend_training_config
 from seiso.models.hf_env import configure_hf_hub_cache
 from seiso.security import SecurityError
@@ -130,6 +133,46 @@ async def training_recommendations(
     return recommend_training_config(profile, model_id=model_id, dataset=dataset)
 
 
+class DatasetValidationRequest(BaseModel):
+    dataset: str
+    dataset_format: str = "auto"
+
+
+@router.post("/validate-dataset")
+async def validate_dataset_endpoint(
+    body: DatasetValidationRequest,
+    user_id: Annotated[str, Depends(get_current_user_id)],
+    settings: Annotated[ForgeSettings, Depends(get_settings)],
+) -> dict:
+    """Preflight endpoint so the UI can validate a dataset (and show error) before the user clicks Start."""
+    ds = body.dataset
+    if isinstance(ds, str):
+        try:
+            ds = resolve_training_dataset_path(
+                settings.data_dir,
+                user_id,
+                ds,
+                install_root=Path(__file__).resolve().parents[3],
+            )
+        except Exception:
+            pass  # let validate raise a nice message
+
+    try:
+        ds_fmt = DatasetFormat(body.dataset_format) if body.dataset_format else DatasetFormat.AUTO
+        stats = validate_training_dataset(
+            ds,
+            dataset_format=ds_fmt,
+            sandbox_root=Path(settings.data_dir) / "uploads" / user_id,
+            max_check_samples=8192,
+        )
+        return {"valid": True, **stats}
+    except Exception as exc:
+        return JSONResponse(
+            {"valid": False, "error": str(exc)},
+            status_code=400,
+        )
+
+
 @router.get("/jobs")
 async def list_jobs(
     user_id: Annotated[str, Depends(get_current_user_id)],
@@ -175,6 +218,24 @@ async def start_training(
         assert_user_training_config(settings.data_dir, user_id, training_config)
     except SecurityError as exc:
         raise_forbidden(exc)
+
+    # Early dataset normalization check — fail fast with clear error *before* queuing the job
+    # or downloading the base model. This fulfills "show error before training".
+    dataset_for_val = training_config.get("dataset")
+    ds_fmt_str = training_config.get("dataset_format", "auto")
+    try:
+        ds_fmt = DatasetFormat(ds_fmt_str) if ds_fmt_str else DatasetFormat.AUTO
+        val = validate_training_dataset(
+            dataset_for_val,
+            dataset_format=ds_fmt,
+            sandbox_root=Path(settings.data_dir) / "uploads" / user_id,
+            max_check_samples=8192,  # safe preflight size; actual training uses full
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Dataset cannot be normalized for training: {exc}",
+        )
 
     configure_hf_hub_cache(settings.data_dir)
     from forge.services.hf_auth import resolve_hf_token
@@ -244,6 +305,7 @@ async def start_training(
                     job.status.value,
                     checkpoint_path=job.result.get("checkpoint_path"),
                     metrics=metrics_payload,
+                    error_text=job.error,
                     user_id=user_id,
                 )
                 if job.status.value == "completed" and job.result.get("checkpoint_path"):

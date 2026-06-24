@@ -75,6 +75,33 @@ export function TrainPage() {
   const [recommendations, setRecommendations] = useState<TrainingRecommendations | null>(null);
   const [recLoading, setRecLoading] = useState(false);
   const [configCustomized, setConfigCustomized] = useState(false);
+  const [datasetValid, setDatasetValid] = useState(true);
+  const [datasetError, setDatasetError] = useState<string | null>(null);
+  const [validatingDataset, setValidatingDataset] = useState(false);
+
+  const validateDataset = useCallback(async (ds: string, fmt: string) => {
+    if (!ds) {
+      setDatasetValid(true);
+      setDatasetError(null);
+      return;
+    }
+    setValidatingDataset(true);
+    try {
+      const res = await api.validateDataset(ds, fmt);
+      if (res.valid) {
+        setDatasetValid(true);
+        setDatasetError(null);
+      } else {
+        setDatasetValid(false);
+        setDatasetError(res.error || "Dataset cannot be normalized for training");
+      }
+    } catch (e: any) {
+      setDatasetValid(false);
+      setDatasetError(e?.message || "Failed to validate dataset");
+    } finally {
+      setValidatingDataset(false);
+    }
+  }, []);
   const downloadGenRef = useRef(0);
   const sseAbortRef = useRef<(() => void) | null>(null);
 
@@ -192,6 +219,25 @@ export function TrainPage() {
     };
   }, [modelId, dataset]);
 
+  // Pre-validate dataset for format/normalization before allowing training start
+  useEffect(() => {
+    const t = setTimeout(() => {
+      validateDataset(dataset, datasetFormat);
+    }, 250);
+    return () => clearTimeout(t);
+  }, [dataset, datasetFormat, validateDataset]);
+
+  useEffect(() => {
+    if (configCustomized || !recommendations?.config) return;
+    const rec = recommendations.config;
+    if (rec.dataset_format && rec.dataset_format !== "auto") {
+      setDatasetFormat(rec.dataset_format);
+    }
+    if (rec.train_on_responses_only != null) {
+      setTrainResponsesOnly(rec.train_on_responses_only);
+    }
+  }, [recommendations, configCustomized]);
+
   const applyRecommendations = useCallback(() => {
     const rec = recommendations?.config;
     if (!rec) return;
@@ -270,6 +316,10 @@ export function TrainPage() {
   const start = async () => {
     if (modelBlocked) {
       setDownloadError(recommendations?.warnings[0] || GGUF_TRAIN_ERROR);
+      return;
+    }
+    if (!datasetValid) {
+      setDownloadError(datasetError || "Dataset cannot be normalized for training");
       return;
     }
     setStarting(true);
@@ -488,7 +538,7 @@ export function TrainPage() {
           )}
           <div className="form-field">
             <label>Dataset</label>
-            <HfDatasetPicker value={dataset} onChange={setDataset} />
+            <HfDatasetPicker value={dataset} onChange={(v) => { setDataset(v); setConfigCustomized(false); }} />
           </div>
           <div className="form-field">
             <label>Dataset format</label>
@@ -513,6 +563,24 @@ export function TrainPage() {
                 </p>
               )}
           </div>
+
+          {(validatingDataset || !datasetValid || datasetError) && (
+            <div className={`status-callout ${datasetValid ? "status-callout-warn" : "status-callout-error"} studio-error-callout`} style={{marginTop: 8}}>
+              <div className="status-callout-body">
+                <strong className="status-callout-title">
+                  {validatingDataset ? "Validating dataset…" : datasetValid ? "Dataset warning" : "Dataset error"}
+                </strong>
+                <div className="status-callout-text">
+                  {validatingDataset ? "Checking if the dataset can be normalized for training..." : (datasetError || "Dataset looks invalid for training.")}
+                </div>
+                {!datasetValid && (
+                  <div className="muted-text" style={{fontSize: "12px", marginTop: 4}}>
+                    Fix the format or pick a dataset with chat messages, instruction/output pairs, or plain text.
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
           </StudioCardBody>
         </div>
 
@@ -527,7 +595,7 @@ export function TrainPage() {
           <div className="option-grid">
             <div className="form-field">
               <label>Method</label>
-              <select value={method} onChange={(e) => setMethod(e.target.value)}>
+              <select value={method} onChange={(e) => { setMethod(e.target.value); setConfigCustomized(true); }}>
                 <option value="lora">LoRA / QLoRA</option>
                 <option value="full">Full fine-tune</option>
                 <option value="embedding">Embedding</option>
@@ -535,7 +603,7 @@ export function TrainPage() {
             </div>
             <div className="form-field">
               <label>Quantization</label>
-              <select value={quant} onChange={(e) => setQuant(e.target.value)}>
+              <select value={quant} onChange={(e) => { setQuant(e.target.value); setConfigCustomized(true); }}>
                 <option value="4bit">4-bit (QLoRA)</option>
                 <option value="8bit">8-bit</option>
                 <option value="16bit">16-bit FP16</option>
@@ -546,22 +614,22 @@ export function TrainPage() {
           <div className="studio-slider-grid">
             <div className="slider-row">
               <label>Max epochs: {epochs}</label>
-              <input type="range" min={1} max={20} value={epochs} onChange={(e) => setEpochs(+e.target.value)} />
+              <input type="range" min={1} max={20} value={epochs} onChange={(e) => { setEpochs(+e.target.value); setConfigCustomized(true); }} />
               <p className="muted-text studio-field-hint studio-field-hint-compact">
                 Training stops earlier when early stopping finds the best eval loss.
               </p>
             </div>
             <div className="slider-row">
               <label>Batch size: {batchSize}</label>
-              <input type="range" min={1} max={16} value={batchSize} onChange={(e) => setBatchSize(+e.target.value)} />
+              <input type="range" min={1} max={16} value={batchSize} onChange={(e) => { setBatchSize(+e.target.value); setConfigCustomized(true); }} />
             </div>
             <div className="slider-row">
               <label>Max seq length: {maxSeq}</label>
-              <input type="range" min={512} max={8192} step={256} value={maxSeq} onChange={(e) => setMaxSeq(+e.target.value)} />
+              <input type="range" min={512} max={8192} step={256} value={maxSeq} onChange={(e) => { setMaxSeq(+e.target.value); setConfigCustomized(true); }} />
             </div>
             <div className="slider-row">
               <label>Learning rate: {lr.toExponential(1)}</label>
-              <input type="range" min={-6} max={-3} step={0.1} value={Math.log10(lr)} onChange={(e) => setLr(10 ** +e.target.value)} />
+              <input type="range" min={-6} max={-3} step={0.1} value={Math.log10(lr)} onChange={(e) => { setLr(10 ** +e.target.value); setConfigCustomized(true); }} />
             </div>
           </div>
 
@@ -579,7 +647,7 @@ export function TrainPage() {
               </div>
               <div className="slider-row">
                 <label>Grad accumulation: {gradAccum}</label>
-                <input type="range" min={1} max={32} value={gradAccum} onChange={(e) => setGradAccum(+e.target.value)} />
+                <input type="range" min={1} max={32} value={gradAccum} onChange={(e) => { setGradAccum(+e.target.value); setConfigCustomized(true); }} />
               </div>
             </FormSection>
           )}
@@ -602,27 +670,27 @@ export function TrainPage() {
           <FormSection title="Optimization" hint="Memory and throughput trade-offs." collapsible defaultOpen={false}>
             <div className="studio-checkbox-grid">
               <label className="studio-checkbox-item">
-                <input type="checkbox" checked={preprocessDataset} onChange={(e) => setPreprocessDataset(e.target.checked)} />
+                <input type="checkbox" checked={preprocessDataset} onChange={(e) => { setPreprocessDataset(e.target.checked); setConfigCustomized(true); }} />
                 Normalize &amp; clean dataset
               </label>
               <label className="studio-checkbox-item">
-                <input type="checkbox" checked={earlyStopping} onChange={(e) => setEarlyStopping(e.target.checked)} />
+                <input type="checkbox" checked={earlyStopping} onChange={(e) => { setEarlyStopping(e.target.checked); setConfigCustomized(true); }} />
                 Early stopping (optimal epoch)
               </label>
               <label className="studio-checkbox-item">
-                <input type="checkbox" checked={gradCkpt} onChange={(e) => setGradCkpt(e.target.checked)} />
+                <input type="checkbox" checked={gradCkpt} onChange={(e) => { setGradCkpt(e.target.checked); setConfigCustomized(true); }} />
                 Gradient checkpointing
               </label>
               <label className="studio-checkbox-item">
-                <input type="checkbox" checked={trainResponsesOnly} onChange={(e) => setTrainResponsesOnly(e.target.checked)} />
+                <input type="checkbox" checked={trainResponsesOnly} onChange={(e) => { setTrainResponsesOnly(e.target.checked); setConfigCustomized(true); }} />
                 Train on responses only
               </label>
               <label className="studio-checkbox-item">
-                <input type="checkbox" checked={useRsLora} onChange={(e) => setUseRsLora(e.target.checked)} />
+                <input type="checkbox" checked={useRsLora} onChange={(e) => { setUseRsLora(e.target.checked); setConfigCustomized(true); }} />
                 Rank-stabilized LoRA (rsLoRA)
               </label>
               <label className="studio-checkbox-item">
-                <input type="checkbox" checked={packing} onChange={(e) => setPacking(e.target.checked)} />
+                <input type="checkbox" checked={packing} onChange={(e) => { setPacking(e.target.checked); setConfigCustomized(true); }} />
                 Sequence packing
               </label>
               <label className="studio-checkbox-item">
@@ -731,7 +799,7 @@ export function TrainPage() {
             <button
               className="btn btn-primary btn-lg"
               onClick={start}
-              disabled={starting || downloadingModel || modelBlocked}
+              disabled={starting || downloadingModel || modelBlocked || !datasetValid || validatingDataset}
             >
               {starting ? "Starting…" : downloadingModel ? "Downloading model…" : "Start training"}
             </button>
