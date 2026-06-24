@@ -101,27 +101,26 @@ async def router_stream_chat(
         payload["model"] = model
 
     timeout = httpx.Timeout(None)
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        async with client.stream(
-            "POST",
-            f"{base}/v1/chat/completions",
-            json=payload,
-            headers=router_headers(settings),
-        ) as resp:
-            if resp.status_code >= 400:
-                body = await resp.aread()
-                raise RuntimeError(body.decode("utf-8", errors="replace") or "Router request failed")
-            async for line in resp.aiter_lines():
-                if not line.startswith("data:"):
-                    continue
-                raw = line[5:].strip()
-                if not raw or raw == "[DONE]":
-                    continue
-                try:
-                    chunk = json.loads(raw)
-                except json.JSONDecodeError:
-                    continue
-                delta = chunk.get("choices", [{}])[0].get("delta", {})
-                token = delta.get("content")
-                if token:
-                    yield token
+    async with httpx.AsyncClient(timeout=timeout) as client, client.stream(
+        "POST",
+        f"{base}/v1/chat/completions",
+        json=payload,
+        headers=router_headers(settings),
+    ) as resp:
+        if resp.status_code >= 400:
+            body = await resp.aread()
+            raise RuntimeError(body.decode("utf-8", errors="replace") or "Router request failed")
+        async for line in resp.aiter_lines():
+            if not line.startswith("data:"):
+                continue
+            raw = line[5:].strip()
+            if not raw or raw == "[DONE]":
+                continue
+            try:
+                chunk = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+            delta = chunk.get("choices", [{}])[0].get("delta", {})
+            token = delta.get("content")
+            if token:
+                yield token

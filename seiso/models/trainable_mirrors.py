@@ -58,15 +58,18 @@ def resolve_trainable_hub_id(
         return repo, None
 
     mirror = TRAINABLE_HUB_MIRRORS.get(repo.lower())
-    if mirror and mirror.lower() != repo.lower():
-        if _probe_hub_config_download(mirror, token=token) == "ok":
-            note = (
-                f"{repo} is gated on Hugging Face (accept the license at "
-                f"https://huggingface.co/{repo} to use the official weights). "
-                f"Training with mirror {mirror} instead."
-            )
-            logger.warning(note)
-            return mirror, note
+    if (
+        mirror
+        and mirror.lower() != repo.lower()
+        and _probe_hub_config_download(mirror, token=token) == "ok"
+    ):
+        note = (
+            f"{repo} is gated on Hugging Face (accept the license at "
+            f"https://huggingface.co/{repo} to use the official weights). "
+            f"Training with mirror {mirror} instead."
+        )
+        logger.warning(note)
+        return mirror, note
 
     return repo, (
         f"Cannot download {repo}. If it is gated, open "

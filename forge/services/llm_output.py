@@ -6,10 +6,10 @@ import re
 from collections.abc import Iterator
 
 from forge.tools.registry import (
+    _QWEN_XML_TOOL_PATTERN,
     TOOL_CALL_CLOSE,
     TOOL_CALL_OPEN,
     TOOL_CALL_PATTERN,
-    _QWEN_XML_TOOL_PATTERN,
 )
 
 _CHUNK_SIZE = 1_200
@@ -106,11 +106,13 @@ _NUMBERED_ANALYSIS_START = re.compile(
 
 
 def _strip_redacted_thinking_block(content: str) -> str:
-    if re.search(r"(?i)</think>", content):
-        return re.split(r"(?i)</think>", content)[-1].strip()
-    return re.sub(
-        r"(?is)<think>.*?(?:</think>|$)", "", content
-    ).strip()
+    # Remove paired think/reasoning tags first so surrounding text is preserved.
+    cleaned = _THINK_TAG_PATTERN.sub("", content)
+    cleaned = _PIPE_TAG_PATTERN.sub("", cleaned)
+    # Redacted-thinking models may emit </think> without a matching open tag.
+    if re.search(r"(?i)</think>", cleaned):
+        cleaned = re.split(r"(?i)</think>", cleaned)[-1]
+    return cleaned.strip()
 
 
 def _extract_after_thinking_process_block(content: str) -> str | None:

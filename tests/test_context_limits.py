@@ -5,8 +5,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
-
 from seiso.inference.context_limits import (
     context_window_presets,
     effective_context_ceiling,
@@ -57,7 +55,7 @@ def test_effective_context_ceiling_clamps_to_vram(monkeypatch, tmp_path: Path):
 def test_gguf_context_length_reads_metadata(monkeypatch, tmp_path: Path):
     import struct
 
-    from seiso.inference.backends import gguf_context_length, clear_gguf_caches
+    from seiso.inference.backends import clear_gguf_caches, gguf_context_length
 
     clear_gguf_caches()
     gguf = tmp_path / "model.gguf"

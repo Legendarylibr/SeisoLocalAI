@@ -177,6 +177,7 @@ ignored-modules = [
   "lm_eval",
   "diffusers",
   "onnxruntime",
+  "litellm",
 ]
 
 [tool.pip-audit]

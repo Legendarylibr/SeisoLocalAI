@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import uuid
 from pathlib import Path
@@ -21,17 +22,17 @@ from forge.db.store import Database
 from forge.orchestrators.training import TrainingOrchestrator
 from forge.security.audit import audit_event
 from forge.security.auth import get_current_user_id
-from forge.services.hf_hub import search_huggingface_datasets
 from forge.services.hardware import hardware_profile
+from forge.services.hf_hub import search_huggingface_datasets
 from forge.services.jobs import assert_job_owner
 from forge.services.models import list_trainable_models, resolve_training_model_id
 from forge.services.user_paths import assert_user_training_config, resolve_training_dataset_path
+from seiso.models.hf_env import configure_hf_hub_cache
 from seiso.models.trainable_snapshot import is_gguf_only_repo_id
+from seiso.security import SecurityError
 from seiso.training.config import DatasetFormat
 from seiso.training.preprocess import validate_training_dataset
 from seiso.training.recommendations import recommend_training_config
-from seiso.models.hf_env import configure_hf_hub_cache
-from seiso.security import SecurityError
 
 router = APIRouter(prefix="/training", tags=["training"])
 
@@ -147,15 +148,13 @@ async def validate_dataset_endpoint(
     """Preflight endpoint so the UI can validate a dataset (and show error) before the user clicks Start."""
     ds = body.dataset
     if isinstance(ds, str):
-        try:
+        with contextlib.suppress(Exception):
             ds = resolve_training_dataset_path(
                 settings.data_dir,
                 user_id,
                 ds,
                 install_root=Path(__file__).resolve().parents[3],
             )
-        except Exception:
-            pass  # let validate raise a nice message
 
     try:
         ds_fmt = DatasetFormat(body.dataset_format) if body.dataset_format else DatasetFormat.AUTO
@@ -225,7 +224,7 @@ async def start_training(
     ds_fmt_str = training_config.get("dataset_format", "auto")
     try:
         ds_fmt = DatasetFormat(ds_fmt_str) if ds_fmt_str else DatasetFormat.AUTO
-        val = validate_training_dataset(
+        validate_training_dataset(
             dataset_for_val,
             dataset_format=ds_fmt,
             sandbox_root=Path(settings.data_dir) / "uploads" / user_id,
@@ -235,7 +234,7 @@ async def start_training(
         raise HTTPException(
             status_code=400,
             detail=f"Dataset cannot be normalized for training: {exc}",
-        )
+        ) from exc
 
     configure_hf_hub_cache(settings.data_dir)
     from forge.services.hf_auth import resolve_hf_token

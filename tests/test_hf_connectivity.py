@@ -95,16 +95,23 @@ def test_probe_hf_hub_missing_package(monkeypatch):
 
 
 def test_dep_status_handles_runtime_import_failures(monkeypatch):
-    def fail_find_spec(_name):
-        raise RuntimeError("No Metal device available")
+    import importlib
 
-    monkeypatch.setattr(hf_connectivity, "find_spec", fail_find_spec)
+    real_import_module = importlib.import_module
+
+    def fail_import_module(name: str):
+        if name == "mlx_lm":
+            raise RuntimeError("No Metal device available")
+        return real_import_module(name)
+
+    monkeypatch.setattr(hf_connectivity.importlib, "import_module", fail_import_module)
     assert hf_connectivity._dep_status("mlx_lm") is False
 
 
 def test_resolve_hf_token_ignores_env_placeholder(monkeypatch):
     monkeypatch.delenv("HF_TOKEN", raising=False)
     monkeypatch.delenv("HUGGING_FACE_HUB_TOKEN", raising=False)
+    monkeypatch.setattr("forge.services.hf_auth._read_cli_token", lambda: None)
 
     token, source = resolve_hf_token(settings_token="# optional: paste token here")
 

@@ -6,7 +6,6 @@ from pathlib import Path
 
 import pytest
 
-from forge.services.inference_models import resolve_chat_target
 from seiso.inference.backends import (
     BACKEND_LLAMACPP,
     BACKEND_TORCH,
@@ -22,7 +21,7 @@ from seiso.inference.backends import (
 @pytest.fixture(autouse=True)
 def _reset_inference_caches():
     from forge.services import inference_models
-    from forge.services.hf_connectivity import InferenceRuntimeStatus, check_inference_runtime
+    from forge.services.hf_connectivity import check_inference_runtime
 
     inference_models.invalidate_inference_options_cache()
     check_inference_runtime.cache_clear()

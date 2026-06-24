@@ -177,9 +177,8 @@ class LocalInferenceRunner:
 
     def _resolve_route(self, payload: dict[str, Any], model_path: str) -> tuple[str, str]:
         if payload.get("draft_model_path"):
-            from seiso.inference.backends import is_dflash_draft
 
-            draft_p = payload.get("draft_model_path")
+            payload.get("draft_model_path")
             # dflash drafts are fast GGUF; we still run verification on torch target path for now
             resolved = prepare_model_path(model_path, BACKEND_TORCH)
             return "speculative", resolved

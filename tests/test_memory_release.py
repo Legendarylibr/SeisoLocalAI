@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import pytest
 
-from forge.orchestrators.base import JobStatus
-
 
 def test_release_inference_memory_unloads_active(monkeypatch):
     from forge.services import memory_release

@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
 from fastapi.testclient import TestClient
 
 from seiso.model_router.catalog import SpecialistCatalog, SpecialistRoute

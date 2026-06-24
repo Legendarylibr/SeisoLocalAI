@@ -8,16 +8,17 @@ from pathlib import Path
 
 from seiso.model_router.app import create_router_app
 from seiso.model_router.config import RouterSettings, resolve_paths
-from seiso.model_router.middleware import APIKeyMiddleware, RateLimitMiddleware, RequestLoggingMiddleware
+from seiso.model_router.middleware import (
+    APIKeyMiddleware,
+    RateLimitMiddleware,
+    RequestLoggingMiddleware,
+)
 
 
 def build_app(settings: RouterSettings | None = None):
     if settings is None:
         config_path = os.environ.get("SEISO_ROUTER_CONFIG_PATH")
-        if config_path:
-            settings = RouterSettings.load(Path(config_path))
-        else:
-            settings = RouterSettings()
+        settings = RouterSettings.load(Path(config_path)) if config_path else RouterSettings()
 
     resolved = resolve_paths(settings)
     app = create_router_app(resolved)

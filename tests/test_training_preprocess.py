@@ -27,7 +27,7 @@ class _Rows:
         out = []
         for row in self._rows:
             out.append(fn(row))
-        cols = list(out[0].keys()) if out else []
+        list(out[0].keys()) if out else []
         return _Rows(out)
 
     def filter(self, fn):

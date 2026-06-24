@@ -14,8 +14,8 @@ from seiso.model_router.nemotron import (
     orchestrator_alias_for,
     parse_tool_calls,
     problem_from_messages,
-    selection_from_tool_calls,
     select_route_via_nemotron,
+    selection_from_tool_calls,
 )
 
 
@@ -109,7 +109,6 @@ def test_selection_from_tool_calls_falls_back():
 
 @pytest.mark.asyncio
 async def test_select_route_via_nemotron_http():
-    from unittest.mock import MagicMock
 
     catalog = _sample_catalog()
     mock_response = MagicMock()

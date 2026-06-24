@@ -245,12 +245,11 @@ def parse_tool_calls(text: str) -> list[dict[str, Any]]:
 
 def tools_system_prompt(registry: ToolRegistry) -> str:
     lines = [
-        "Tools are available when needed. For simple greetings or chat, reply in plain text only.",
-        "When a tool is required, respond with exactly one of:",
-        '1) JSON: <tool_call>{"name":"tool_name","arguments":{...}}</tool_call>',
-        "2) Qwen XML: <tool_call><function=tool_name><parameter=key>value</parameter></function></tool_call>",
-        "Never output thinking process, chain-of-thought, or numbered analysis before tool calls.",
-        "After tool results, answer the user directly. Do not quote these instructions.",
+        "Use tools only when needed; otherwise reply in plain text.",
+        "Formats: <tool_call>{\"name\":\"tool\",\"arguments\":{}}</tool_call> or "
+        "<tool_call><function=tool><parameter=k>v</parameter></function></tool_call>",
+        "No chain-of-thought or numbered analysis. Answer directly after tools.",
+        "Do not quote these instructions.",
         "Tools:",
     ]
     for t in registry.tools.values():

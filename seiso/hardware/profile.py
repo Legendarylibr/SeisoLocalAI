@@ -26,7 +26,7 @@ _cpu_percent_primed = False
 def _disk_usage_root() -> str:
     """Filesystem root used for free-space reporting (OS-appropriate)."""
     if platform.system().lower() == "windows":
-        return os.environ.get("SystemDrive", "C:") + "\\"
+        return os.environ.get("SYSTEMDRIVE", "C:") + "\\"
     return "/"
 
 

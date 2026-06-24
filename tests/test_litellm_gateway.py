@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+import sys
+import types
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -95,7 +97,9 @@ async def test_litellm_gateway_chat_completion():
     }
     mock_router.acompletion = AsyncMock(return_value=mock_response)
 
-    with patch("litellm.Router", return_value=mock_router):
+    litellm_mod = types.ModuleType("litellm")
+    litellm_mod.Router = MagicMock(return_value=mock_router)
+    with patch.dict(sys.modules, {"litellm": litellm_mod}):
         gateway = LitellmGateway(_local_catalog(), llamaswap_url="http://llama-swap:8080")
         route = _local_catalog().by_id("code")
         out = await gateway.chat_completion(

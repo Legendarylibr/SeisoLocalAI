@@ -44,12 +44,11 @@ def _nvidia_hardware_visible() -> bool:
 def _default_llama_gpu_layers() -> int:
     if platform.system() == "Darwin" and platform.machine() in {"arm64", "aarch64"}:
         return -1
-    if _cuda_available() or _nvidia_hardware_visible():
+    if (_cuda_available() or _nvidia_hardware_visible()) and _llama_gpu_offload_ok():
         # Only request full GPU offload when the installed llama-cpp-python
         # wheel actually supports it. A CPU-only wheel on an NVIDIA box will
         # crash if n_gpu_layers != 0.
-        if _llama_gpu_offload_ok():
-            return -1
+        return -1
     return 0
 
 
@@ -486,10 +485,7 @@ class ModelPool:
         # existing local file/dir.  HuggingFace repo IDs like "org/model-name"
         # must be passed through unchanged so transformers can download them.
         raw = Path(model_path).expanduser()
-        if raw.exists():
-            load_path = str(raw.absolute())
-        else:
-            load_path = str(model_path)
+        load_path = str(raw.absolute()) if raw.exists() else str(model_path)
         key = cache_key or f"{backend.value}:{norm}"
         meta = meta or {}
         with self._lock:

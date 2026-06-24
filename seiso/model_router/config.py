@@ -62,7 +62,7 @@ class RouterSettings(BaseSettings):
     litellm_routing_strategy: str = "simple-shuffle"
 
     @model_validator(mode="after")
-    def _nemotron_requires_vllm_sleep(self) -> "RouterSettings":
+    def _nemotron_requires_vllm_sleep(self) -> RouterSettings:
         if self.routing_mode.strip().lower() != "nemotron":
             return self
         issues: list[str] = []
@@ -100,7 +100,7 @@ class RouterSettings(BaseSettings):
         return value
 
     @classmethod
-    def load(cls, path: Path | None = None, **overrides: Any) -> "RouterSettings":
+    def load(cls, path: Path | None = None, **overrides: Any) -> RouterSettings:
         if path and path.is_file():
             return cls.from_yaml(path, **overrides)
         return cls(**overrides)

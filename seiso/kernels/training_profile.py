@@ -55,9 +55,10 @@ def guess_hidden_dim(model_id: str) -> int:
 def resolve_cuda_training_mode(*, headroom_mb: int, est_train_mb: int = 0) -> CudaTrainingMode:
     if headroom_mb > 0 and headroom_mb < _HEADROOM_LEAN_MB:
         return CudaTrainingMode.LEAN
-    if headroom_mb >= _HEADROOM_SPEED_MB:
-        if est_train_mb <= 0 or est_train_mb < int(headroom_mb * 0.6):
-            return CudaTrainingMode.SPEED
+    if headroom_mb >= _HEADROOM_SPEED_MB and (
+        est_train_mb <= 0 or est_train_mb < int(headroom_mb * 0.6)
+    ):
+        return CudaTrainingMode.SPEED
     return CudaTrainingMode.BALANCED
 
 

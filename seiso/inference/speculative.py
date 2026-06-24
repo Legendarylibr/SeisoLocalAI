@@ -57,7 +57,6 @@ def _propose_with_dflash_draft(
     temperature: float = 0.0,
 ) -> list[int]:
     """Use fast dflash (llama.cpp) draft to propose k tokens, return token ids in *target* tokenizer space."""
-    import torch  # not needed here
 
     # Generate proposed continuation with the small fast draft
     gen_kwargs: dict[str, Any] = {

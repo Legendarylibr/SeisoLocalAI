@@ -39,7 +39,7 @@ def test_classify_tier_cpu_when_no_gpu():
 
 
 def test_detect_gpus_nvidia_smi_fallback(monkeypatch):
-    from seiso.hardware.gpus import clear_gpu_enumeration_cache, enumerate_gpus
+    from seiso.hardware.gpus import clear_gpu_enumeration_cache
     from seiso.hardware.profile import detect_gpus, hardware_profile
 
     clear_gpu_enumeration_cache()
@@ -87,6 +87,8 @@ def test_detect_gpu_matches_profile_enumeration(monkeypatch):
         ],
     )
     monkeypatch.setattr("seiso.hardware.profile._nvidia_smi_metrics", lambda: {})
+    # detect_gpu() prefers torch.cuda when available; disable so it uses nvidia-smi enumeration.
+    monkeypatch.setattr("torch.cuda.is_available", lambda: False)
     clear_gpu_enumeration_cache()
     detect_gpu.cache_clear()
 
@@ -130,7 +132,7 @@ def test_disk_usage_root_windows(monkeypatch):
     from seiso.hardware.profile import _disk_usage_root
 
     monkeypatch.setattr("seiso.hardware.profile.platform.system", lambda: "Windows")
-    monkeypatch.setenv("SystemDrive", "D:")
+    monkeypatch.setenv("SYSTEMDRIVE", "D:")
     assert _disk_usage_root() == "D:\\"
 
 
@@ -272,7 +274,8 @@ def test_preferred_backend_apple_plenty_is_mlx(monkeypatch):
 
 def test_low_memory_apple_marks_large_models_tight(monkeypatch):
     profile = {"backend": "mlx", "gpus": [], "ram_gb": 16}
-    monkeypatch.setattr("seiso.hardware.training.vram_headroom_mb", lambda _p: 10240)
+    monkeypatch.setattr("seiso.hardware.fit.vram_headroom_mb", lambda _p: 10240)
+    monkeypatch.setattr("seiso.hardware.fit.fit_headroom_mb", lambda _p: 10240)
     fit = assess_catalog_fit(
         {"params": "7B", "quant": "Q4_K_M", "tags": [], "repo_id": "x", "task": "chat"},
         profile,

@@ -336,10 +336,10 @@ def test_platform_profile_linux_nvidia_cpu_only_wheel(monkeypatch):
     SEISO_LLAMA_GPU_LAYERS=0 even on Linux NVIDIA hardware."""
     import os
     import platform as plat
-    from seiso.hardware.tiers import HardwareTier
-    from seiso.memory.platform_profile import apply_platform_memory_profile
 
     import seiso.inference.model_pool as mp
+    from seiso.hardware.tiers import HardwareTier
+    from seiso.memory.platform_profile import apply_platform_memory_profile
 
     for key in list(os.environ):
         if key.startswith("SEISO_LLAMA_") or key == "SEISO_MEMORY_PROFILE":
@@ -379,6 +379,7 @@ def test_platform_caps_bnb_unavailable_on_linux(monkeypatch):
     bitsandbytes is not importable, even on Linux with NVIDIA hardware."""
     import builtins
     import platform as plat
+
     from seiso.kernels.platform import GpuPlatform, GpuVendor, detect_gpu
     from seiso.training.platform_caps import training_capabilities
 

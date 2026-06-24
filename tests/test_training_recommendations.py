@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from seiso.models.catalog import search_trainable_catalog
 from seiso.models.trainable_snapshot import is_gguf_only_repo_id
 from seiso.training.recommendations import recommend_training_config

@@ -27,7 +27,12 @@ from forge.services.hf_hub import _format_hub_download_error, dir_size
 from forge.services.model_download import perform_model_download
 from forge.services.publishable import is_pushable_model
 from forge.services.user_paths import assert_user_path
-from seiso.models.catalog import HubSearchError, get_families, search_catalog, search_trainable_catalog
+from seiso.models.catalog import (
+    HubSearchError,
+    get_families,
+    search_catalog,
+    search_trainable_catalog,
+)
 from seiso.security import SecurityError, sanitize_filename
 
 router = APIRouter(prefix="/models", tags=["models"])

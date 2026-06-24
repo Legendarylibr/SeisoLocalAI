@@ -549,10 +549,13 @@ class SeisoTrainer:
             "dataloader_persistent_workers": persistent_workers,
             "gradient_checkpointing": cfg.gradient_checkpointing,
         }
-        if eval_ds is not None and cfg.early_stopping:
-            if "metric_for_best_model" in _ta_fields:
-                base["metric_for_best_model"] = cfg.metric_for_best_model
-                base["greater_is_better"] = cfg.metric_for_best_model != "eval_loss"
+        if (
+            eval_ds is not None
+            and cfg.early_stopping
+            and "metric_for_best_model" in _ta_fields
+        ):
+            base["metric_for_best_model"] = cfg.metric_for_best_model
+            base["greater_is_better"] = cfg.metric_for_best_model != "eval_loss"
         # save_safetensors was removed in transformers 5.x — only add when available
         if "save_safetensors" in _ta_fields:
             base["save_safetensors"] = cfg.save_safetensors

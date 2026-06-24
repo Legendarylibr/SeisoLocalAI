@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from unittest.mock import patch
-
 
 def test_pip_install_strategies_cuda_first_when_preferred():
     from seiso.inference.llamacpp_install import pip_install_strategies
@@ -79,7 +77,6 @@ def test_nvidia_llamacpp_stack_integration(monkeypatch):
 
     from seiso.hardware.gpus import clear_gpu_enumeration_cache
     from seiso.hardware.profile import detect_gpus
-    from seiso.inference import llamacpp_install
     from seiso.inference.model_pool import llama_load_kwargs
     from seiso.kernels.platform import GpuVendor, detect_gpu
     from seiso.memory.platform_profile import apply_platform_memory_profile

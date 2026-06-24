@@ -117,10 +117,9 @@ def run_training(
     from seiso.env import configure_transformers_env
     from seiso.memory.protection import apply_training_memory_guards
     from seiso.models.hf_env import configure_hf_hub_cache
+    from seiso.platform import ensure_cuda_library_path
     from seiso.security.nvidia_boundary import enforce_nvidia_secure_boundary
     from seiso.training.trainer import SeisoTrainer
-
-    from seiso.platform import ensure_cuda_library_path
 
     configure_transformers_env()
     if not os.environ.get("HF_HOME"):

@@ -5,8 +5,8 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
-from seiso.model_router.catalog import SpecialistCatalog, SpecialistRoute
 from seiso.model_router.backend_lifecycle import BackendLifecycleManager, BackendState
+from seiso.model_router.catalog import SpecialistCatalog, SpecialistRoute
 
 logger = logging.getLogger(__name__)
 

@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import os
+from pathlib import Path
 
 
 def test_configure_hf_hub_auth_mirrors_cli_token_into_relocated_hf_home(monkeypatch, tmp_path: Path):

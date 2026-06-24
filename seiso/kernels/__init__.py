@@ -16,6 +16,11 @@ from seiso.kernels.hooks import (
 )
 from seiso.kernels.lifecycle import release_training_memory, restore_kernel_patches
 from seiso.kernels.platform import GpuPlatform, GpuVendor, detect_gpu
+from seiso.kernels.training_profile import (
+    CudaTrainingMode,
+    last_cuda_training_profile,
+    prepare_cuda_training_profile,
+)
 from seiso.kernels.triton_ops import is_triton_available
 from seiso.kernels.tuning import (
     KERNEL_PROFILES,
@@ -23,11 +28,6 @@ from seiso.kernels.tuning import (
     benchmark_kernel_profile,
     kernel_metrics_dict,
     kernel_profile_count,
-)
-from seiso.kernels.training_profile import (
-    CudaTrainingMode,
-    last_cuda_training_profile,
-    prepare_cuda_training_profile,
 )
 
 __all__ = [

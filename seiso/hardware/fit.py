@@ -4,7 +4,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from seiso.hardware.tiers import FIT_RANK, HardwareTier, classify_tier, fit_headroom_mb, vram_headroom_mb
+from seiso.hardware.tiers import (
+    FIT_RANK,
+    HardwareTier,
+    classify_tier,
+    fit_headroom_mb,
+    vram_headroom_mb,
+)
 from seiso.memory.estimates import estimate_chat_vram_gb, guess_params_from_name
 
 
@@ -120,10 +126,7 @@ def assess_inference_option_fit(option: dict[str, Any], profile: dict[str, Any])
         est_gb = round(size_bytes / (1024**3) + 0.8, 2)
     else:
         guessed = guess_params_from_name(name)
-        if guessed:
-            est_gb = estimate_chat_vram_gb(f"{guessed}B")
-        else:
-            est_gb = 6.0
+        est_gb = estimate_chat_vram_gb(f"{guessed}B") if guessed else 6.0
     return assess_hardware_fit(est_gb, profile)
 
 

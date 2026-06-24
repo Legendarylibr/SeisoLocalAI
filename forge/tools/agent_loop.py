@@ -6,7 +6,12 @@ import json
 from collections.abc import Awaitable, Callable
 
 from forge.security.audit import audit_event
-from forge.tools.registry import ToolRegistry, TOOL_CALL_PATTERN, parse_tool_calls, tools_system_prompt
+from forge.tools.registry import (
+    TOOL_CALL_PATTERN,
+    ToolRegistry,
+    parse_tool_calls,
+    tools_system_prompt,
+)
 
 
 async def run_agent_loop_async(

@@ -703,8 +703,8 @@ async def chat(
                 raise HTTPException(400, "Draft model must be a local safetensors/checkpoint path")
         if not draft_path:
             raise HTTPException(400, "Invalid draft model path")
-        from seiso.memory.protection import assess_path_memory_fit_for_load
         from seiso.inference.backends import is_dflash_draft
+        from seiso.memory.protection import assess_path_memory_fit_for_load
 
         draft_backend = BACKEND_LLAMACPP if is_dflash_draft(draft_path) else BACKEND_TORCH
         draft_fit = assess_path_memory_fit_for_load(draft_path, mode="chat", backend=draft_backend)

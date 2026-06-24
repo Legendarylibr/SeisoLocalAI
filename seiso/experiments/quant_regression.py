@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import shutil
 import uuid
@@ -15,6 +16,8 @@ from typing import Any
 from seiso.export.formats import ExportFormat, ExportOptions, export_checkpoint
 from seiso.export.gguf import normalize_gguf_quants, resolve_gguf_converter
 from seiso.training.config import QuantMode, TrainConfig, run_training
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_TRAIN_QUANTS: tuple[str, ...] = ("4bit", "8bit", "16bit")
 DEFAULT_GGUF_QUANTS: tuple[str, ...] = ("q4_k_m", "q8_0", "f16")
@@ -138,10 +141,11 @@ def build_eval_route_prompt_library(
     """Build llama.cpp route prompts from the training eval split (e.g. MetaMathQA holdout)."""
     from adaptive_quant.prompts import default_prompt_library
     from adaptive_quant.types import PromptSample
+    from transformers import AutoTokenizer
+
     from seiso.models.chat_format import extract_messages, format_messages_for_prompt
     from seiso.training.config import DatasetFormat
     from seiso.training.datasets import detect_format, load_training_dataset
-    from transformers import AutoTokenizer
 
     cfg = _resolve_train_config(train_out, base_config)
     raw = load_training_dataset(cfg.dataset, sandbox_root=cfg.sandbox_root)
@@ -166,10 +170,7 @@ def build_eval_route_prompt_library(
         messages = extract_messages(sample, ds_fmt)
         if not messages:
             continue
-        if messages[-1].get("role") == "assistant":
-            prompt_messages = messages[:-1]
-        else:
-            prompt_messages = messages
+        prompt_messages = messages[:-1] if messages[-1].get("role") == "assistant" else messages
         prompt_text = format_messages_for_prompt(
             prompt_messages,
             tokenizer,
@@ -250,7 +251,10 @@ def resolve_llama_cpp_python_shim() -> Path | None:
 
 def llama_cpp_python_gpu_ready() -> bool:
     try:
-        from seiso.inference.llamacpp_install import llamacpp_gpu_offload_supported, llamacpp_import_ok
+        from seiso.inference.llamacpp_install import (
+            llamacpp_gpu_offload_supported,
+            llamacpp_import_ok,
+        )
 
         ok, _err = llamacpp_import_ok()
         return ok and llamacpp_gpu_offload_supported()
@@ -280,9 +284,10 @@ def _llama_cli_binary_has_gpu(binary: Path) -> bool:
 def resolve_llama_cpp_binary(explicit: str | None = None) -> Path | None:
     if explicit:
         path = Path(explicit).expanduser()
-        if path.is_file():
-            if path.name == "llama_cli_python_shim.py" or _llama_cli_binary_has_gpu(path):
-                return path
+        if path.is_file() and (
+            path.name == "llama_cli_python_shim.py" or _llama_cli_binary_has_gpu(path)
+        ):
+            return path
         shim = resolve_llama_cpp_python_shim()
         if shim is not None and llama_cpp_python_gpu_ready():
             return shim
@@ -413,7 +418,10 @@ def run_route_regression_eval(
 
     ensure_adaptive_quant_importable()
     from adaptive_quant.prompts import PromptLibrary
-    from adaptive_quant.route_pipeline import evaluate_routes_for_prompts, validate_local_route_models
+    from adaptive_quant.route_pipeline import (
+        evaluate_routes_for_prompts,
+        validate_local_route_models,
+    )
     from adaptive_quant.types import HardwareType
 
     catalog = build_route_catalog(gguf_paths, route_repo_id=route_repo_id)
@@ -555,7 +563,7 @@ def run_quant_regression_study(
                 "llama_cpp measurement requires CUDA-enabled llama-cli (or llama-cpp-python GPU shim) "
                 "and convert_hf_to_gguf. Use --measurement hf (default) for GPU eval on merged weights."
             )
-        log("llama_cpp backend unavailable — running HF measurement only")
+        logger.warning("llama_cpp backend unavailable — running HF measurement only")
         mode = "hf"
     llama_bin = resolve_llama_cpp_binary(llama_cpp_binary)
 
@@ -614,6 +622,7 @@ def run_quant_regression_study(
                 _persist_manifest(manifest_path, report, existing)
                 continue
 
+            metrics: dict[str, Any] = {}
             if mode in {"hf", "both"}:
                 log(
                     f"HF deploy-quant regression quant={quant_label} "

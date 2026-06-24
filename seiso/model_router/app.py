@@ -12,13 +12,13 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import PlainTextResponse, StreamingResponse
 from pydantic import BaseModel
 
+from seiso.model_router.backend_lifecycle import BackendLifecycleManager
 from seiso.model_router.catalog import SpecialistCatalog
 from seiso.model_router.classifier import classify_messages
 from seiso.model_router.config import RouterSettings, resolve_paths
 from seiso.model_router.fallback import FallbackChain
 from seiso.model_router.monitoring import collect_metrics
 from seiso.model_router.policy import SpecialistRouteBandit, pick_route_with_hints
-from seiso.model_router.backend_lifecycle import BackendLifecycleManager
 
 logger = logging.getLogger(__name__)
 

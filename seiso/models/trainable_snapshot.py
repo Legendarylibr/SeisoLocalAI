@@ -27,9 +27,7 @@ def is_gguf_only_repo_id(repo_id: str, tags: list[str] | tuple[str, ...] | None 
     if is_trusted_gguf_repo(repo_id):
         return True
     tag_set = {t.lower() for t in (tags or ())}
-    if "gguf" in tag_set and "safetensors" not in tag_set and "pytorch" not in tag_set:
-        return True
-    return False
+    return bool("gguf" in tag_set and "safetensors" not in tag_set and "pytorch" not in tag_set)
 
 
 def trainable_weight_files(root: Path) -> list[Path]:

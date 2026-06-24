@@ -392,7 +392,7 @@ async def test_sync_hf_cache_inventory_skips_partial_catalog_gguf(monkeypatch, t
         lambda _repo: SimpleNamespace(repo_id="org/Model", quant="Q4_K_M"),
     )
     monkeypatch.setattr(
-        "forge.services.hf_cache_inventory.get_gguf_file_size_bytes",
+        "forge.services.hf_hub.get_gguf_file_size_bytes",
         lambda _repo, _filename: 10_000,
     )
 

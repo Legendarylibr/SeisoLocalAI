@@ -108,15 +108,16 @@ def build_framework_config(
 
     if payload.get("router_enabled") is True:
         overrides["router_enabled"] = True
-    if routes := payload.get("router_routes"):
-        if isinstance(routes, (list, tuple)) and routes:
-            overrides["router_routes"] = tuple(str(r) for r in routes)
-    if modes := payload.get("hardware_modes"):
-        if isinstance(modes, (list, tuple)) and modes:
-            overrides["hardware_modes"] = tuple(str(m) for m in modes)
-    if repos := payload.get("route_hf_allowed_repos"):
-        if isinstance(repos, (list, tuple)) and repos:
-            overrides["route_hf_allowed_repos"] = tuple(str(r) for r in repos)
+    if (routes := payload.get("router_routes")) and isinstance(routes, (list, tuple)) and routes:
+        overrides["router_routes"] = tuple(str(r) for r in routes)
+    if (modes := payload.get("hardware_modes")) and isinstance(modes, (list, tuple)) and modes:
+        overrides["hardware_modes"] = tuple(str(m) for m in modes)
+    if (
+        (repos := payload.get("route_hf_allowed_repos"))
+        and isinstance(repos, (list, tuple))
+        and repos
+    ):
+        overrides["route_hf_allowed_repos"] = tuple(str(r) for r in repos)
     for bound_key in ("router_exploration", "router_regression_penalty", "llama_cpp_timeout_s"):
         if bound_key in payload and payload[bound_key] is not None:
             overrides[bound_key] = payload[bound_key]

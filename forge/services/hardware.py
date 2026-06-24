@@ -30,7 +30,12 @@ from seiso.hardware import (
 from seiso.hardware.fit import format_catalog_note
 from seiso.hardware.profile import enrich_profile_base
 from seiso.inference.backends import BACKEND_LABELS
-from seiso.memory.estimates import estimate_chat_vram_gb, estimate_gguf_download_bytes, estimate_safetensors_download_bytes, estimate_training_vram_gb
+from seiso.memory.estimates import (
+    estimate_chat_vram_gb,
+    estimate_gguf_download_bytes,
+    estimate_safetensors_download_bytes,
+    estimate_training_vram_gb,
+)
 
 _RECOMMENDED_REPO_TTL_SEC = 300.0
 _recommended_repo_cache: dict[tuple, tuple[float, str | None]] = {}
