@@ -46,7 +46,21 @@ _GGUF_VALUE_SIZE = {
     11: 8,  # int64
     12: 8,  # float64
 }
-_UNSUPPORTED_GGUF_ARCHITECTURES = frozenset({"dflash-draft"})
+# dflash-draft are specialized tiny draft models. We allow llama.cpp backend for them
+# (especially when used as speculative drafts). They are filtered from main catalogs
+# via other hints.
+_UNSUPPORTED_GGUF_ARCHITECTURES = frozenset()  # was {"dflash-draft"} - now supported as drafts
+
+
+
+def is_dflash_draft(model_path: str) -> bool:
+    """Detect if a GGUF path is a dflash/draft model (specialized small draft for speculative decoding)."""
+    arch = gguf_architecture(model_path)
+    if arch and "dflash" in arch.lower():
+        return True
+    name = Path(model_path).name.lower()
+    return "dflash" in name or "-draft" in name or "draft" in name and "gguf" in name
+
 
 
 def _looks_like_gguf_file(path: Path) -> bool:

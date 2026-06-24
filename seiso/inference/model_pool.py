@@ -600,7 +600,7 @@ class ModelPool:
     def get_torch_speculative(
         self, target_path: str, draft_path: str, *, load_in_4bit: bool = True
     ) -> Any:
-        """Load target + draft models for speculative decoding."""
+        """Load target + draft models for speculative decoding (torch draft)."""
         from seiso.inference.speculative import TorchSpeculativeBundle
 
         target_norm = self.normalize_path(target_path)
@@ -637,6 +637,9 @@ class ModelPool:
                 "draft_norm_path": draft_norm,
             },
         )
+
+    # Note: dflash drafts are loaded directly in the runner using llama_cpp.Llama
+    # to avoid interfering with the primary target model's active handle in the pool.
 
     def unload_all(self) -> None:
         """Release all loaded models and clear GPU memory."""

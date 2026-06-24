@@ -704,8 +704,10 @@ async def chat(
         if not draft_path:
             raise HTTPException(400, "Invalid draft model path")
         from seiso.memory.protection import assess_path_memory_fit_for_load
+        from seiso.inference.backends import is_dflash_draft
 
-        draft_fit = assess_path_memory_fit_for_load(draft_path, mode="chat", backend=BACKEND_TORCH)
+        draft_backend = BACKEND_LLAMACPP if is_dflash_draft(draft_path) else BACKEND_TORCH
+        draft_fit = assess_path_memory_fit_for_load(draft_path, mode="chat", backend=draft_backend)
         if draft_fit.get("memory_load_blocked"):
             raise HTTPException(
                 400,
@@ -713,6 +715,8 @@ async def chat(
                 or "Draft model exceeds available memory on this machine",
             )
         payload["draft_model_path"] = draft_path
+        # For dflash draft we can still use torch target + dflash draft speculative for now
+        # (or extend later). Keep target torch for verification compatibility.
         payload["inference_backend"] = BACKEND_TORCH
 
     if body.stream:

@@ -9,13 +9,20 @@ from collections.abc import AsyncIterator, Callable, Iterator
 from typing import Any
 
 from seiso.inference.backends import (
+    BACKEND_LLAMACPP,
     BACKEND_MLX,
     BACKEND_TORCH,
+    is_dflash_draft,
     prepare_model_path,
     resolve_local_backend,
 )
 from seiso.inference.model_pool import get_model_pool
-from seiso.inference.speculative import default_num_speculative_tokens, iter_speculative_tokens
+from seiso.inference.speculative import (
+    DFlashDraftSpeculativeBundle,
+    default_num_speculative_tokens,
+    iter_speculative_tokens,
+    iter_speculative_tokens_dflash,
+)
 from seiso.inference.tuning import (
     configure_torch_inference,
     estimate_llama_n_ctx,
@@ -146,9 +153,15 @@ class LocalInferenceRunner:
                 and self._pool.normalize_path(active_draft) == self._pool.normalize_path(draft_path)
             ):
                 return
+            # prepare target (torch for verification in dflash case too)
             await loop.run_in_executor(
                 None, lambda: self._pool.prepare_for_load(model_path, BACKEND_TORCH)
             )
+            # For dflash draft also prep the fast llama draft
+            if is_dflash_draft(draft_path):
+                await loop.run_in_executor(
+                    None, lambda: self._pool.prepare_for_load(draft_path, BACKEND_LLAMACPP)
+                )
             return
 
         if active_draft:
@@ -164,6 +177,10 @@ class LocalInferenceRunner:
 
     def _resolve_route(self, payload: dict[str, Any], model_path: str) -> tuple[str, str]:
         if payload.get("draft_model_path"):
+            from seiso.inference.backends import is_dflash_draft
+
+            draft_p = payload.get("draft_model_path")
+            # dflash drafts are fast GGUF; we still run verification on torch target path for now
             resolved = prepare_model_path(model_path, BACKEND_TORCH)
             return "speculative", resolved
 
@@ -206,6 +223,55 @@ class LocalInferenceRunner:
             raise ValueError("draft_model_path required for speculative decoding")
 
         configure_torch_inference()
+
+        if is_dflash_draft(draft_path):
+            # dFlash speculative: fast GGUF dflash draft (llama.cpp) + target verifier (torch)
+            from llama_cpp import Llama as LlamaCPP
+
+            # Load target using pool (will be the active model)
+            target_model, target_tok = self._pool.get_torch(model_path, load_in_4bit=True)
+            # Load dflash draft directly (small, use llama.cpp for speed)
+            draft_resolved = prepare_model_path(draft_path, BACKEND_LLAMACPP)
+            draft_llm = LlamaCPP(
+                model_path=draft_resolved,
+                n_ctx=4096,
+                n_gpu_layers=-1,  # tiny draft can use lots of layers
+                verbose=False,
+            )
+
+            bundle = DFlashDraftSpeculativeBundle(
+                target_model=target_model,
+                target_tokenizer=target_tok,
+                draft_llm=draft_llm,
+                draft_tokenizer=target_tok,  # vocab alignment expected for dflash
+            )
+
+            messages = payload.get("messages", [])
+            prompt = format_messages_for_prompt(messages, target_tok)
+            temperature = float(payload.get("temperature", 0.0))
+            max_new_tokens = int(payload.get("max_tokens", 512))
+            num_speculative_tokens = default_num_speculative_tokens(payload)
+
+            try:
+                yield from iter_speculative_tokens_dflash(
+                    bundle=bundle,
+                    prompt=prompt,
+                    max_new_tokens=max_new_tokens,
+                    num_speculative_tokens=num_speculative_tokens,
+                    temperature=temperature,
+                    should_stop=should_stop,
+                )
+            finally:
+                # cleanup draft llm
+                try:
+                    if hasattr(draft_llm, "close"):
+                        draft_llm.close()
+                except Exception:
+                    pass
+                del draft_llm
+            return
+
+        # Original torch + torch speculative
         bundle = self._pool.get_torch_speculative(model_path, draft_path, load_in_4bit=True)
         messages = payload.get("messages", [])
         prompt = format_messages_for_prompt(messages, bundle.target_tokenizer)
