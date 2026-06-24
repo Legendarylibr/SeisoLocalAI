@@ -16,6 +16,9 @@
 #   SEISO_VERBOSE=1     Show full pip/npm output (no TUI overlay)
 #   SEISO_NO_OPEN=1     Do not open the browser after Forge starts
 #   SEISO_SKIP_FLASH_ATTN=0  Try optional Flash Attention during install (NVIDIA Linux)
+#   SEISO_FAST_INSTALL=1    Skip PyTorch/training extras (Forge + GGUF chat only)
+#   SEISO_INSTALL_DEV=1     Include dev extras (pytest, ruff, mypy, …)
+#   SEISO_INSTALL_EXTRAS=…  Override auto-detected pip extras (e.g. forge,train,cuda)
 set -euo pipefail
 
 REPO_URL="${SEISO_REPO_URL:-https://github.com/Legendarylibr/SeisoLocalAI.git}"

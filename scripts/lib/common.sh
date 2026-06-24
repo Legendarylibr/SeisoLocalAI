@@ -157,23 +157,39 @@ seiso_needs_install() {
 }
 
 seiso_detect_platform_extras() {
-  local os
-  os="$(uname -s)"
-  case "$os" in
-    Darwin)
-      echo "forge,train,llamacpp,mlx,dev"
-      ;;
-    Linux)
-      if seiso_nvidia_gpu_detected; then
-        echo "forge,train,cuda,llamacpp,dev"
-      else
-        echo "forge,train,llamacpp,dev"
-      fi
-      ;;
-    *)
-      seiso_die "Unsupported OS: $os (use docs/platforms/windows.md on Windows)"
-      ;;
-  esac
+  if [[ -n "${SEISO_INSTALL_EXTRAS:-}" ]]; then
+    printf '%s\n' "$SEISO_INSTALL_EXTRAS"
+    return 0
+  fi
+
+  local os extras
+  if [[ "${SEISO_FAST_INSTALL:-0}" == "1" ]]; then
+    extras="forge,llamacpp"
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+      extras="${extras},mlx"
+    fi
+  else
+    os="$(uname -s)"
+    case "$os" in
+      Darwin)
+        extras="forge,train,llamacpp,mlx"
+        ;;
+      Linux)
+        if seiso_nvidia_gpu_detected; then
+          extras="forge,train,cuda,llamacpp"
+        else
+          extras="forge,train,llamacpp"
+        fi
+        ;;
+      *)
+        seiso_die "Unsupported OS: $os (use docs/platforms/windows.md on Windows)"
+        ;;
+    esac
+  fi
+  if [[ "${SEISO_INSTALL_DEV:-0}" == "1" ]]; then
+    extras="${extras},dev"
+  fi
+  printf '%s\n' "$extras"
 }
 
 seiso_resolve_nvidia_smi() {
@@ -376,30 +392,69 @@ seiso_ensure_llamacpp() {
   return 1
 }
 
+seiso_pip_bootstrap() {
+  if [[ "${SEISO_VERBOSE:-0}" == "1" ]]; then
+    python -m pip install -U pip wheel setuptools hatchling
+  else
+    python -m pip install -q -U pip wheel setuptools hatchling
+  fi
+}
+
+seiso_pip_install_extras() {
+  local root="$1" extras="$2"
+  local -a pip_quiet=()
+  [[ "${SEISO_VERBOSE:-0}" != "1" ]] && pip_quiet=(-q)
+
+  if pip install "${pip_quiet[@]}" -e "${root}[${extras}]" --prefer-binary; then
+    return 0
+  fi
+  seiso_warn "Full install failed — installing core [forge] then retrying optional extras"
+  pip install "${pip_quiet[@]}" -e "${root}[forge]" --prefer-binary || return 1
+  seiso_verify_cli "$root" || return 1
+  pip install "${pip_quiet[@]}" -e "${root}[${extras}]" --prefer-binary || {
+    seiso_warn "Optional extras failed (${extras}). Forge can still start — see $root/.seiso-install.log"
+    seiso_verify_cli "$root" || return 1
+  }
+  return 0
+}
+
 seiso_run_install_worker() {
   local root="$1" extras="$2"
+  local ui_pid=0 ui_status=0 llamacpp_pid=0
+
+  if [[ "${SEISO_SKIP_UI:-0}" != "1" ]]; then
+    (cd "$root/forge-ui" && npm ci --no-audit --no-fund && npm run build) &
+    ui_pid=$!
+  fi
+
   # shellcheck disable=SC1091
   source "$root/.venv/bin/activate"
-  python -m pip install -U pip wheel setuptools hatchling
-  pip install -e "${root}[forge,dev]"
+  seiso_pip_bootstrap
+  seiso_pip_install_extras "$root" "$extras" || {
+    if [[ "$ui_pid" -ne 0 ]]; then
+      kill "$ui_pid" 2>/dev/null || true
+      wait "$ui_pid" 2>/dev/null || true
+    fi
+    return 1
+  }
   seiso_verify_cli "$root" || return 1
-  if [[ "$extras" != "forge,dev" ]]; then
-    pip install -e "${root}[${extras}]" || {
-      seiso_warn "Optional extras failed (${extras}). Forge can still start — see $root/.seiso-install.log"
-      seiso_verify_cli "$root" || return 1
-    }
-  fi
+
   if [[ "$extras" == *llamacpp* ]]; then
-    seiso_ensure_llamacpp "$root" || true
+    seiso_ensure_llamacpp "$root" &
+    llamacpp_pid=$!
   fi
   if [[ "${SEISO_SKIP_FLASH_ATTN:-1}" != "1" && "$extras" == *cuda* && "$root" != /mnt/* ]]; then
     if [[ -x "$root/scripts/install_flash_attn.sh" ]]; then
       bash "$root/scripts/install_flash_attn.sh" || true
     fi
   fi
-  if [[ "${SEISO_SKIP_UI:-0}" != "1" ]]; then
-    (cd "$root/forge-ui" && npm ci && npm run build)
+  if [[ "$ui_pid" -ne 0 ]]; then
+    wait "$ui_pid" || ui_status=$?
   fi
+  if [[ "$llamacpp_pid" -ne 0 ]]; then
+    wait "$llamacpp_pid" || true
+  fi
+  [[ "$ui_status" -eq 0 ]] || return 1
   seiso_verify_cli "$root"
 }
 
