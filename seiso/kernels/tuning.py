@@ -11,11 +11,13 @@ from typing import Any
 # in the CUDA sources; named profiles force specific launch paths.
 KERNEL_PROFILES: tuple[dict[str, Any], ...] = (
     {"id": 0, "name": "auto", "rms_mode": 0, "swiglu_vec": 0, "lora_tile": 0},
-    {"id": 1, "name": "stripe", "rms_mode": 1, "swiglu_vec": 8, "lora_tile": 32},
-    {"id": 2, "name": "parallax", "rms_mode": 2, "swiglu_vec": 8, "lora_tile": 64},
-    {"id": 3, "name": "narrow_opt", "rms_mode": 1, "swiglu_vec": 4, "lora_tile": 16},
-    {"id": 4, "name": "wide_throughput", "rms_mode": 2, "swiglu_vec": 8, "lora_tile": 64},
-    {"id": 5, "name": "balanced", "rms_mode": 0, "swiglu_vec": 8, "lora_tile": 32},
+    {"id": 1, "name": "stripe", "rms_mode": 1, "swiglu_vec": 8, "lora_tile": 128},
+    {"id": 2, "name": "parallax", "rms_mode": 2, "swiglu_vec": 8, "lora_tile": 512},
+    {"id": 3, "name": "narrow_opt", "rms_mode": 1, "swiglu_vec": 4, "lora_tile": 128},
+    {"id": 4, "name": "wide_throughput", "rms_mode": 2, "swiglu_vec": 8, "lora_tile": 512},
+    {"id": 5, "name": "balanced", "rms_mode": 0, "swiglu_vec": 8, "lora_tile": 256},
+    {"id": 6, "name": "hopper_fa3", "rms_mode": 2, "swiglu_vec": 8, "lora_tile": 384},
+    {"id": 7, "name": "blackwell", "rms_mode": 2, "swiglu_vec": 8, "lora_tile": 512},
 )
 
 _ACTIVE_PROFILE_ID = 0
@@ -50,6 +52,19 @@ def apply_kernel_profile(profile_id: int) -> dict[str, Any]:
     profile = kernel_profile_by_id(profile_id)
     _ACTIVE_PROFILE_ID = int(profile["id"])
 
+    arch_sm = 0
+    use_graphs = 0
+    use_overlap = 1
+    try:
+        from seiso.kernels.arch_tuning import detect_arch_tuning
+
+        arch = detect_arch_tuning()
+        arch_sm = arch.sm
+        use_graphs = 1 if arch.use_cuda_graphs else 0
+        use_overlap = 1 if arch.use_stream_overlap else 0
+    except ImportError:
+        pass
+
     try:
         from seiso.kernels.cuda_ops import set_kernel_tuning
 
@@ -57,6 +72,9 @@ def apply_kernel_profile(profile_id: int) -> dict[str, Any]:
             int(profile["rms_mode"]),
             int(profile["swiglu_vec"]),
             int(profile["lora_tile"]),
+            arch_sm=arch_sm,
+            use_cuda_graphs=use_graphs,
+            use_stream_overlap=use_overlap,
         )
     except (ImportError, AttributeError, RuntimeError):
         pass

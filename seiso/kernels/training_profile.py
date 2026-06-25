@@ -80,7 +80,18 @@ def auto_select_kernel_profile(hidden_dim: int, batch_rows: int) -> int:
 
     from seiso.kernels.tuning import apply_kernel_profile, benchmark_kernel_profile
 
-    candidates = (4, 2, 5, 1, 3)  # throughput-first search order
+    try:
+        from seiso.kernels.arch_tuning import detect_arch_tuning
+
+        arch = detect_arch_tuning()
+        if arch.family.value == "hopper":
+            candidates = (6, 4, 2, 5, 1, 3)
+        elif arch.family.value == "blackwell":
+            candidates = (7, 6, 4, 2, 5)
+        else:
+            candidates = (4, 2, 5, 1, 3)
+    except ImportError:
+        candidates = (4, 2, 5, 1, 3)  # throughput-first search order
     best_id = _PROFILE_BY_MODE[CudaTrainingMode.BALANCED]
     best_ms = float("inf")
     for profile_id in candidates:
@@ -117,6 +128,12 @@ def apply_cuda_speedopts(*, deterministic: bool) -> None:
         from seiso.inference.tuning import configure_torch_inference
 
         configure_torch_inference()
+    except ImportError:
+        pass
+    try:
+        from seiso.kernels.arch_tuning import apply_arch_tuning
+
+        apply_arch_tuning(deterministic=deterministic)
     except ImportError:
         pass
 
@@ -186,6 +203,8 @@ def prepare_cuda_training_profile(
         "use_fused_ce": caps_fused,
         "use_triton": caps_fused,
         "use_fused_lora": caps_fused and native_cuda_kernels_available(),
+        "use_fused_lora_qkv": caps_fused and native_cuda_kernels_available(),
+        "use_cuda_graphs": mode != CudaTrainingMode.LEAN,
     }
 
     if mode == CudaTrainingMode.LEAN and max_seq_length > 1024 and headroom_mb < 6144:

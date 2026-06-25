@@ -15,6 +15,16 @@ class GpuVendor(StrEnum):
     CPU = "cpu"
 
 
+def _native_cuda_kernels_ready() -> bool:
+    """True when nvcc toolkit is present (kernels JIT-compile on first use)."""
+    try:
+        from seiso.kernels.cuda_env import cuda_toolkit_ready
+
+        return cuda_toolkit_ready()
+    except ImportError:
+        return False
+
+
 def _cuda_compute_capability() -> tuple[int, int] | None:
     try:
         import torch
@@ -85,11 +95,12 @@ def detect_gpu() -> GpuPlatform:
                 cuda_compute_capability=cc,
             )
 
+        native_cuda = _native_cuda_kernels_ready()
         return GpuPlatform(
             vendor=GpuVendor.NVIDIA,
             device_name=name,
             device_count=device_count,
-            supports_native_cuda=True,
+            supports_native_cuda=native_cuda,
             supports_triton=triton_ok,
             is_wsl2=wsl2,
             cuda_compute_capability=cc,

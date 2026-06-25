@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+
 #include <cuda_runtime.h>
 
 namespace seiso {
@@ -57,6 +59,38 @@ void launch_cross_entropy_backward(
     int vocab,
     int ignore_index,
     float inv_count,
+    cudaStream_t stream);
+
+template <typename T>
+void launch_fused_lora_qkv_delta(
+    const T* x,
+    T* out_q,
+    T* out_k,
+    T* out_v,
+    const T* A_q,
+    const T* B_q,
+    const T* A_k,
+    const T* B_k,
+    const T* A_v,
+    const T* B_v,
+    int rows,
+    int in_dim,
+    int out_dim,
+    int rank,
+    float scale_q,
+    float scale_k,
+    float scale_v,
+    cudaStream_t stream);
+
+template <typename T>
+void launch_fused_mlp_swiglu(
+    const T* x,
+    const T* W_gate,
+    const T* W_up,
+    T* out,
+    int rows,
+    int in_dim,
+    int hidden_dim,
     cudaStream_t stream);
 
 }  // namespace seiso

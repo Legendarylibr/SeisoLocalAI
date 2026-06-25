@@ -79,3 +79,16 @@ void launch_fused_swiglu(
 }
 
 }  // namespace seiso
+
+#include "explicit_inst.cuh"
+
+namespace seiso {
+
+template void launch_fused_swiglu<float>(
+    const float*, const float*, float*, int64_t, int, cudaStream_t);
+template void launch_fused_swiglu<__half>(
+    const __half*, const __half*, __half*, int64_t, int, cudaStream_t);
+template void launch_fused_swiglu<__nv_bfloat16>(
+    const __nv_bfloat16*, const __nv_bfloat16*, __nv_bfloat16*, int64_t, int, cudaStream_t);
+
+}  // namespace seiso

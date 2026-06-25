@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from seiso.training.config import DatasetFormat
+from seiso.training.datasets import detect_format
 from seiso.training.preprocess import (
     compute_eval_split_size,
     normalize_sample,
+    parse_human_assistant_dialog,
     preprocess_training_dataset,
 )
 
@@ -89,3 +91,55 @@ def test_compute_eval_split_size_caps_holdout():
     assert compute_eval_split_size(10000, 0.05, 128) == 128
     assert compute_eval_split_size(50, 0.5, 128) == 25
     assert compute_eval_split_size(5, 0.05, 128) == 0
+
+
+def test_parse_human_assistant_dialog_multiturn():
+    text = (
+        "\n\nHuman: What is 2+2?\n\n"
+        "Assistant: 4\n\n"
+        "Human: And 3+3?\n\n"
+        "Assistant: 6"
+    )
+    messages = parse_human_assistant_dialog(text)
+    assert len(messages) == 4
+    assert messages[0] == {"role": "user", "content": "What is 2+2?"}
+    assert messages[-1] == {"role": "assistant", "content": "6"}
+
+
+def test_detect_format_preference_pairs():
+    sample = {"chosen": "Human: hi\n\nAssistant: hello", "rejected": "Human: hi\n\nAssistant: nope"}
+    assert detect_format(sample) == DatasetFormat.PREFERENCE
+
+
+def test_normalize_preference_uses_chosen_turns():
+    row = normalize_sample(
+        {
+            "chosen": "\n\nHuman: Explain gravity\n\nAssistant: Gravity pulls masses together.",
+            "rejected": "\n\nHuman: Explain gravity\n\nAssistant: Magic.",
+        },
+        DatasetFormat.PREFERENCE,
+    )
+    assert row
+    assert row["messages"][0]["role"] == "user"
+    assert "gravity" in row["messages"][0]["content"].lower()
+    assert row["messages"][-1]["role"] == "assistant"
+
+
+def test_preprocess_hh_rlhf_resolves_to_chat():
+    ds = _Rows(
+        [
+            {
+                "chosen": "\n\nHuman: Hi\n\nAssistant: Hello there.",
+                "rejected": "\n\nHuman: Hi\n\nAssistant: Go away.",
+            },
+            {
+                "chosen": "\n\nHuman: Bye\n\nAssistant: Goodbye.",
+                "rejected": "\n\nHuman: Bye\n\nAssistant: Nope.",
+            },
+        ]
+    )
+    cleaned, stats, fmt = preprocess_training_dataset(ds, dataset_format=DatasetFormat.AUTO)
+    assert fmt == DatasetFormat.CHAT
+    assert len(cleaned) == 2
+    assert stats["kept"] == 2
+    assert "messages" in cleaned[0]
