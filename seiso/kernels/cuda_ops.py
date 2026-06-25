@@ -7,10 +7,14 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+from seiso.kernels.cuda_env import configure_cuda_build_env
 from seiso.kernels.fallback_ops import pytorch_rms_norm as _pytorch_rms_norm
 from seiso.kernels.platform import GpuVendor, detect_gpu
 
 logger = logging.getLogger(__name__)
+
+# Must run before any torch cpp_extension import (CUDA_HOME is read once).
+configure_cuda_build_env()
 
 _CUDA_DIR = Path(__file__).resolve().parent / "cuda"
 _EXT: Any | None = None
@@ -24,6 +28,29 @@ def _torch_cuda_available() -> bool:
         return torch.cuda.is_available()
     except ImportError:
         return False
+
+
+def _ensure_cuda_build_env() -> dict[str, str]:
+    """Configure CUDA_HOME, PATH, host compiler, and CCCL includes for nvcc."""
+    return configure_cuda_build_env()
+
+
+def _as_cuda_2d(tensor: Any) -> tuple[Any, tuple[int, ...] | None]:
+    """Flatten trailing dims to (rows, cols) for native 2D kernels; None if already 2D."""
+    if tensor.dim() == 2:
+        return tensor, None
+    if tensor.dim() < 2:
+        raise ValueError(f"expected >=2D tensor, got shape {tuple(tensor.shape)}")
+    orig = tuple(tensor.shape)
+    flat = tensor.reshape(-1, orig[-1])
+    return flat, orig
+
+
+def _cuda_include_paths() -> list[str]:
+    from seiso.kernels.cuda_env import cuda_build_include_paths
+
+    base = [str(_CUDA_DIR / "include"), str(_CUDA_DIR)]
+    return base + cuda_build_include_paths()
 
 
 def _cuda_compile_flags() -> tuple[list[str], list[str]]:
@@ -45,9 +72,8 @@ def _cuda_compile_flags() -> tuple[list[str], list[str]]:
     cc = platform.cuda_compute_capability
     if cc is not None:
         major, minor = cc
-        arch = f"compute_{major}{minor}"
-        sm = f"sm_{major}{minor}"
-        extra_cuda_cflags.append(f"-gencode=arch={arch},code={sm}")
+        # Direct SM target avoids PTX ISA version mismatches across pip toolkit wheels.
+        extra_cuda_cflags.append(f"-arch=sm_{major}{minor}")
 
     if platform.is_wsl2:
         # WSL2: parallel nvcc threads + lineinfo for profiling on Windows hosts.
@@ -80,6 +106,14 @@ def _load_extension() -> Any | None:
     try:
         from torch.utils.cpp_extension import load
 
+        build_meta = _ensure_cuda_build_env()
+        if not build_meta.get("cuda_home"):
+            raise OSError(
+                "CUDA toolkit (nvcc) not found. Install with: "
+                "pip install 'cuda-toolkit[nvcc]==13.3.0' cuda-cccl ninja"
+            )
+        from seiso.kernels.cuda_env import cuda_link_flags
+
         cflags, cuda_cflags = _cuda_compile_flags()
         _EXT = load(
             name="seiso_cuda_kernels",
@@ -88,11 +122,14 @@ def _load_extension() -> Any | None:
                 str(_CUDA_DIR / "rms_norm.cu"),
                 str(_CUDA_DIR / "fused_swiglu.cu"),
                 str(_CUDA_DIR / "fused_lora.cu"),
+                str(_CUDA_DIR / "fused_lora_qkv.cu"),
+                str(_CUDA_DIR / "fused_mlp.cu"),
                 str(_CUDA_DIR / "fused_cross_entropy.cu"),
             ],
-            extra_include_paths=[str(_CUDA_DIR / "include"), str(_CUDA_DIR)],
+            extra_include_paths=_cuda_include_paths(),
             extra_cflags=cflags,
             extra_cuda_cflags=cuda_cflags,
+            extra_ldflags=cuda_link_flags(),
             verbose=False,
         )
         plat = detect_gpu()
@@ -101,16 +138,41 @@ def _load_extension() -> Any | None:
         return _EXT
     except Exception as exc:  # noqa: BLE001
         _EXT_ERROR = str(exc)
-        logger.debug("CUDA kernel load failed: %s", exc)
+        logger.warning("CUDA kernel load failed: %s", exc)
         return None
 
 
-def set_kernel_tuning(rms_mode: int, swiglu_vec: int, lora_tile: int) -> None:
+def cuda_kernel_status() -> dict[str, str | bool | None]:
+    """Diagnostic info when native kernels fail to load."""
+    from seiso.kernels.cuda_env import cuda_toolkit_status
+
+    status = cuda_toolkit_status()
+    status["extension_loaded"] = _EXT is not None
+    status["extension_error"] = _EXT_ERROR
+    return status
+
+
+def set_kernel_tuning(
+    rms_mode: int,
+    swiglu_vec: int,
+    lora_tile: int,
+    *,
+    arch_sm: int = 0,
+    use_cuda_graphs: int = 0,
+    use_stream_overlap: int = 1,
+) -> None:
     """Apply RL-selected CUDA launch configuration to the native extension."""
     ext = _load_extension()
     if ext is None:
         return
-    ext.set_kernel_tuning(int(rms_mode), int(swiglu_vec), int(lora_tile))
+    ext.set_kernel_tuning(
+        int(rms_mode),
+        int(swiglu_vec),
+        int(lora_tile),
+        int(arch_sm),
+        int(use_cuda_graphs),
+        int(use_stream_overlap),
+    )
 
 
 def fused_rms_norm(x, weight, eps: float = 1e-6, residual=None):
@@ -123,9 +185,15 @@ def fused_rms_norm(x, weight, eps: float = 1e-6, residual=None):
     if not x.is_cuda:
         return _pytorch_rms_norm(x, weight, eps, residual)
 
+    x2, orig_shape = _as_cuda_2d(x)
+    res2 = residual
+    if residual is not None and residual.dim() != 2:
+        res2, _ = _as_cuda_2d(residual)
+
     ext = _load_extension()
     if ext is not None:
-        return ext.fused_rmsnorm(x, weight, residual, eps)
+        out = ext.fused_rmsnorm(x2, weight, res2, eps)
+        return out.reshape(orig_shape) if orig_shape is not None else out
 
     return _pytorch_rms_norm(x, weight, eps, residual)
 
@@ -137,9 +205,13 @@ def fused_swiglu(gate, up):
     if not gate.is_cuda:
         return torch.nn.functional.silu(gate) * up
 
+    gate2, orig_shape = _as_cuda_2d(gate)
+    up2 = up if up.dim() == 2 else _as_cuda_2d(up)[0]
+
     ext = _load_extension()
     if ext is not None:
-        return ext.fused_swiglu(gate, up)
+        out = ext.fused_swiglu(gate2, up2)
+        return out.reshape(orig_shape) if orig_shape is not None else out
     return torch.nn.functional.silu(gate) * up
 
 
@@ -186,3 +258,52 @@ def cross_entropy_backward(
     if ext is None:
         raise RuntimeError("CUDA cross_entropy_backward requires native extension")
     return ext.cross_entropy_backward(logits, labels, row_max, row_lse, ignore_index, grad_scale)
+
+
+def fused_lora_qkv_delta(
+    x,
+    out_q,
+    out_k,
+    out_v,
+    lora_A_q,
+    lora_B_q,
+    lora_A_k,
+    lora_B_k,
+    lora_A_v,
+    lora_B_v,
+    *,
+    scale_q: float = 1.0,
+    scale_k: float = 1.0,
+    scale_v: float = 1.0,
+):
+    """In-place fused LoRA deltas for Q/K/V sharing one input read."""
+    ext = _load_extension()
+    if ext is None:
+        raise RuntimeError("fused_lora_qkv_delta requires native CUDA extension")
+    return ext.fused_lora_qkv_delta(
+        x,
+        out_q,
+        out_k,
+        out_v,
+        lora_A_q,
+        lora_B_q,
+        lora_A_k,
+        lora_B_k,
+        lora_A_v,
+        lora_B_v,
+        scale_q,
+        scale_k,
+        scale_v,
+    )
+
+
+def fused_mlp_swiglu(x, W_gate, W_up):
+    """Fused gate/up projection + SwiGLU: silu(x @ W_gate^T) * (x @ W_up^T)."""
+    ext = _load_extension()
+    if ext is None:
+        import torch
+
+        gate = x @ W_gate.t()
+        up = x @ W_up.t()
+        return torch.nn.functional.silu(gate) * up
+    return ext.fused_mlp_swiglu(x, W_gate, W_up)

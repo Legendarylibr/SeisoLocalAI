@@ -1,7 +1,9 @@
 #include "common.cuh"
 #include "kernels.cuh"
+#include "tuning_state.cuh"
 
 #include <cstdint>
+#include <type_traits>
 
 namespace seiso {
 
@@ -78,18 +80,66 @@ void launch_fused_lora_delta(
     int rank,
     float scale,
     cudaStream_t stream) {
-  constexpr int TILE = 256;
-  const dim3 grid((out_dim + TILE - 1) / TILE, static_cast<unsigned>(rows));
-  if (rank <= 16) {
-    fused_lora_delta_batched_kernel<T, TILE, 16><<<grid, TILE, 0, stream>>>(
-        x, base, A, B, out, rows, in_dim, out_dim, rank, scale);
-  } else if (rank <= 32) {
-    fused_lora_delta_batched_kernel<T, TILE, 32><<<grid, TILE, 0, stream>>>(
-        x, base, A, B, out, rows, in_dim, out_dim, rank, scale);
+  const auto& tuning = kernel_tuning_state();
+  int tile = tuning.lora_tile > 0 ? tuning.lora_tile : 256;
+  if (tile <= 128) {
+    tile = 128;
+  } else if (tile <= 256) {
+    tile = 256;
   } else {
-    fused_lora_delta_batched_kernel<T, TILE, 64><<<grid, TILE, 0, stream>>>(
-        x, base, A, B, out, rows, in_dim, out_dim, rank, scale);
+    tile = 512;
+  }
+  const dim3 grid((out_dim + tile - 1) / tile, static_cast<unsigned>(rows));
+
+  auto launch = [&](auto tile_const, auto rank_const) {
+    using Tile = decltype(tile_const);
+    using Rank = decltype(rank_const);
+    fused_lora_delta_batched_kernel<T, Tile::value, Rank::value>
+        <<<grid, Tile::value, 0, stream>>>(
+            x, base, A, B, out, rows, in_dim, out_dim, rank, scale);
+  };
+
+  if (tile == 128) {
+    if (rank <= 16) {
+      launch(std::integral_constant<int, 128>{}, std::integral_constant<int, 16>{});
+    } else if (rank <= 32) {
+      launch(std::integral_constant<int, 128>{}, std::integral_constant<int, 32>{});
+    } else {
+      launch(std::integral_constant<int, 128>{}, std::integral_constant<int, 64>{});
+    }
+  } else if (tile == 256) {
+    if (rank <= 16) {
+      launch(std::integral_constant<int, 256>{}, std::integral_constant<int, 16>{});
+    } else if (rank <= 32) {
+      launch(std::integral_constant<int, 256>{}, std::integral_constant<int, 32>{});
+    } else {
+      launch(std::integral_constant<int, 256>{}, std::integral_constant<int, 64>{});
+    }
+  } else {
+    if (rank <= 16) {
+      launch(std::integral_constant<int, 512>{}, std::integral_constant<int, 16>{});
+    } else if (rank <= 32) {
+      launch(std::integral_constant<int, 512>{}, std::integral_constant<int, 32>{});
+    } else {
+      launch(std::integral_constant<int, 512>{}, std::integral_constant<int, 64>{});
+    }
   }
 }
+
+}  // namespace seiso
+
+#include "explicit_inst.cuh"
+
+namespace seiso {
+
+template void launch_fused_lora_delta<float>(
+    const float*, const float*, const float*, const float*, float*, int, int, int, int, float,
+    cudaStream_t);
+template void launch_fused_lora_delta<__half>(
+    const __half*, const __half*, const __half*, const __half*, __half*, int, int, int, int, float,
+    cudaStream_t);
+template void launch_fused_lora_delta<__nv_bfloat16>(
+    const __nv_bfloat16*, const __nv_bfloat16*, const __nv_bfloat16*, const __nv_bfloat16*,
+    __nv_bfloat16*, int, int, int, int, float, cudaStream_t);
 
 }  // namespace seiso

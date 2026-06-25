@@ -22,11 +22,9 @@ constexpr int kWarpSize = 32;
 constexpr int kThreadsPerBlock = kWarpsPerBlock * kWarpSize;  // 256
 constexpr int kElemsPerThread = 4;  // unrolled scalar chunks per inner step
 
-#if __CUDA_ARCH__ >= 800
+// Always compile cp.async path in .cu TUs; launch targets sm_80+ via -arch=sm_XX.
 #define SEISO_HAS_CP_ASYNC 1
-#else
-#define SEISO_HAS_CP_ASYNC 0
-#endif
+#include <cuda_pipeline.h>
 
 // ---------------------------------------------------------------------------
 // Stripe RMSNorm (+ optional residual)
@@ -237,16 +235,10 @@ void launch_rms_norm(
   }
 
 #if SEISO_HAS_CP_ASYNC
-  if (use_parallax) {
-    if (fuse_residual) {
-      parallax_rms_norm_kernel<T, 64, true><<<grid, block, 0, stream>>>(
-          x, residual, weight, out, cols, eps);
-    } else {
-      parallax_rms_norm_kernel<T, 64, false><<<grid, block, 0, stream>>>(
-          x, residual, weight, out, cols, eps);
-    }
-    return;
-  }
+  // Parallax cp.async path disabled: pipeline memcpy requires 4-byte chunks and
+  // the current prototype trips cudaErrorLaunchFailure on Ada/Hopper. Fall back
+  // to stripe until the async prefetch kernel is reworked.
+  (void)use_parallax;
 #endif
 
   if (fuse_residual) {
@@ -257,5 +249,20 @@ void launch_rms_norm(
         x, residual, weight, out, cols, eps);
   }
 }
+
+}  // namespace seiso
+
+#include "explicit_inst.cuh"
+
+namespace seiso {
+
+template void launch_rms_norm<float>(
+    const float*, const float*, const float*, float*, int64_t, int64_t, float, bool, cudaStream_t);
+template void launch_rms_norm<__half>(
+    const __half*, const __half*, const __half*, __half*, int64_t, int64_t, float, bool,
+    cudaStream_t);
+template void launch_rms_norm<__nv_bfloat16>(
+    const __nv_bfloat16*, const __nv_bfloat16*, const __nv_bfloat16*, __nv_bfloat16*, int64_t,
+    int64_t, float, bool, cudaStream_t);
 
 }  // namespace seiso

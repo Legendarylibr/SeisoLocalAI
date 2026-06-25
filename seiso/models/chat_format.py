@@ -65,4 +65,19 @@ def extract_messages(sample: dict[str, Any], fmt) -> list[dict[str, Any]]:
     if fmt == DatasetFormat.CHAT:
         return cast(list[dict[str, Any]], sample.get("messages", []))
 
+    if fmt == DatasetFormat.PREFERENCE:
+        from seiso.training.preprocess import parse_human_assistant_dialog
+
+        if sample.get("messages"):
+            return cast(list[dict[str, Any]], sample["messages"])
+        chosen = sample.get("chosen") or sample.get("chosen_response") or sample.get("accepted")
+        messages = parse_human_assistant_dialog(chosen)
+        if messages:
+            return messages
+        prompt = str(sample.get("prompt") or "")
+        response = str(chosen or "")
+        if prompt and response:
+            return [{"role": "user", "content": prompt}, {"role": "assistant", "content": response}]
+        return []
+
     return [{"role": "user", "content": sample.get("text") or sample.get("content") or str(sample)}]

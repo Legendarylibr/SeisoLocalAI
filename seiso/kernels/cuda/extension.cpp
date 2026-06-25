@@ -3,9 +3,12 @@
 
 #include <torch/extension.h>
 
+#include <ATen/cuda/CUDAContext.h>
+#include <c10/cuda/CUDAStream.h>
 #include <cuda_bf16.h>
 #include <cuda_fp16.h>
 
+#include <cstdint>
 #include <stdexcept>
 #include <string>
 
@@ -29,11 +32,11 @@ void check_cuda(const torch::Tensor& t, const char* name) {
         return __VA_ARGS__();                                                         \
       }                                                                               \
       case at::ScalarType::Half: {                                                    \
-        using scalar_t = at::Half;                                                    \
+        using scalar_t = __half;                                                      \
         return __VA_ARGS__();                                                         \
       }                                                                               \
       case at::ScalarType::BFloat16: {                                                \
-        using scalar_t = at::BFloat16;                                                \
+        using scalar_t = __nv_bfloat16;                                               \
         return __VA_ARGS__();                                                         \
       }                                                                               \
       default:                                                                        \
@@ -60,17 +63,17 @@ torch::Tensor fused_rmsnorm(
   const int64_t rows = x.size(0);
   const int cols = static_cast<int>(x.size(1));
   const float eps_f = static_cast<float>(eps);
-  cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+  cudaStream_t stream = c10::cuda::getCurrentCUDAStream();
 
   const void* res_ptr = residual.has_value() ? residual->data_ptr() : nullptr;
 
   DISPATCH_FLOAT_TYPES(x.scalar_type(), "fused_rmsnorm", [&] {
     using T = scalar_t;
     seiso::launch_rms_norm<T>(
-        x.data_ptr<T>(),
-        residual.has_value() ? static_cast<const T*>(res_ptr) : nullptr,
-        weight.data_ptr<T>(),
-        out.data_ptr<T>(),
+        reinterpret_cast<const T*>(x.data_ptr()),
+        residual.has_value() ? reinterpret_cast<const T*>(res_ptr) : nullptr,
+        reinterpret_cast<const T*>(weight.data_ptr()),
+        reinterpret_cast<T*>(out.data_ptr()),
         rows,
         cols,
         eps_f,
@@ -90,12 +93,17 @@ torch::Tensor fused_swiglu(torch::Tensor gate, torch::Tensor up) {
   auto out = torch::empty_like(gate);
   const int64_t rows = gate.size(0);
   const int cols = static_cast<int>(gate.size(1));
-  cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+  cudaStream_t stream = c10::cuda::getCurrentCUDAStream();
 
   DISPATCH_FLOAT_TYPES(gate.scalar_type(), "fused_swiglu", [&] {
     using T = scalar_t;
     seiso::launch_fused_swiglu<T>(
-        gate.data_ptr<T>(), up.data_ptr<T>(), out.data_ptr<T>(), rows, cols, stream);
+        reinterpret_cast<const T*>(gate.data_ptr()),
+        reinterpret_cast<const T*>(up.data_ptr()),
+        reinterpret_cast<T*>(out.data_ptr()),
+        rows,
+        cols,
+        stream);
   });
 
   return out;
@@ -145,17 +153,17 @@ torch::Tensor fused_lora_delta(
     out = torch::empty({rows, out_dim}, x.options());
   }
 
-  cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+  cudaStream_t stream = c10::cuda::getCurrentCUDAStream();
   const float scale_f = static_cast<float>(scale);
 
   DISPATCH_FLOAT_TYPES(x.scalar_type(), "fused_lora_delta", [&] {
     using T = scalar_t;
     seiso::launch_fused_lora_delta<T>(
-        x.data_ptr<T>(),
-        base.has_value() ? base->data_ptr<T>() : nullptr,
-        A.data_ptr<T>(),
-        B.data_ptr<T>(),
-        out.data_ptr<T>(),
+        reinterpret_cast<const T*>(x.data_ptr()),
+        base.has_value() ? reinterpret_cast<const T*>(base->data_ptr()) : nullptr,
+        reinterpret_cast<const T*>(A.data_ptr()),
+        reinterpret_cast<const T*>(B.data_ptr()),
+        reinterpret_cast<T*>(out.data_ptr()),
         rows,
         in_dim,
         out_dim,
@@ -184,12 +192,12 @@ std::vector<torch::Tensor> cross_entropy_forward(
   auto row_loss = torch::empty({rows}, opts);
   auto row_max = torch::empty({rows}, opts);
   auto row_lse = torch::empty({rows}, opts);
-  cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+  cudaStream_t stream = c10::cuda::getCurrentCUDAStream();
 
   DISPATCH_FLOAT_TYPES(logits.scalar_type(), "cross_entropy_forward", [&] {
     using T = scalar_t;
     seiso::launch_cross_entropy_forward<T>(
-        logits.data_ptr<T>(),
+        reinterpret_cast<const T*>(logits.data_ptr()),
         labels.data_ptr<int64_t>(),
         row_loss.data_ptr<float>(),
         row_max.data_ptr<float>(),
@@ -215,16 +223,16 @@ torch::Tensor cross_entropy_backward(
   auto grad_logits = torch::zeros_like(logits);
   const int rows = static_cast<int>(logits.size(0));
   const int vocab = static_cast<int>(logits.size(1));
-  cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+  cudaStream_t stream = c10::cuda::getCurrentCUDAStream();
 
   DISPATCH_FLOAT_TYPES(logits.scalar_type(), "cross_entropy_backward", [&] {
     using T = scalar_t;
     seiso::launch_cross_entropy_backward<T>(
-        logits.data_ptr<T>(),
+        reinterpret_cast<const T*>(logits.data_ptr()),
         labels.data_ptr<int64_t>(),
         row_max.data_ptr<float>(),
         row_lse.data_ptr<float>(),
-        grad_logits.data_ptr<T>(),
+        reinterpret_cast<T*>(grad_logits.data_ptr()),
         rows,
         vocab,
         static_cast<int>(ignore_index),
@@ -235,8 +243,130 @@ torch::Tensor cross_entropy_backward(
   return grad_logits;
 }
 
-void set_kernel_tuning(int rms_mode, int swiglu_vec, int lora_tile) {
-  seiso::set_kernel_tuning_state(rms_mode, swiglu_vec, lora_tile);
+void fused_lora_qkv_delta(
+    torch::Tensor x,
+    torch::Tensor out_q,
+    torch::Tensor out_k,
+    torch::Tensor out_v,
+    torch::Tensor A_q,
+    torch::Tensor B_q,
+    torch::Tensor A_k,
+    torch::Tensor B_k,
+    torch::Tensor A_v,
+    torch::Tensor B_v,
+    double scale_q,
+    double scale_k,
+    double scale_v) {
+  check_cuda(x, "x");
+  check_cuda(out_q, "out_q");
+  check_cuda(out_k, "out_k");
+  check_cuda(out_v, "out_v");
+  check_cuda(A_q, "A_q");
+  check_cuda(B_q, "B_q");
+  check_cuda(A_k, "A_k");
+  check_cuda(B_k, "B_k");
+  check_cuda(A_v, "A_v");
+  check_cuda(B_v, "B_v");
+  TORCH_CHECK(x.dim() == 2, "x must be 2D");
+  TORCH_CHECK(out_q.dim() == 2 && out_k.dim() == 2 && out_v.dim() == 2, "outputs must be 2D");
+  TORCH_CHECK(A_q.dim() == 2 && B_q.dim() == 2, "A_q and B_q must be 2D");
+  TORCH_CHECK(A_k.dim() == 2 && B_k.dim() == 2, "A_k and B_k must be 2D");
+  TORCH_CHECK(A_v.dim() == 2 && B_v.dim() == 2, "A_v and B_v must be 2D");
+  TORCH_CHECK(
+      out_q.sizes() == out_k.sizes() && out_q.sizes() == out_v.sizes(),
+      "out_q/out_k/out_v shape mismatch");
+  TORCH_CHECK(out_q.size(0) == x.size(0), "batch mismatch");
+  TORCH_CHECK(out_q.size(1) == B_q.size(0), "out_q out_dim mismatch");
+  TORCH_CHECK(out_k.size(1) == B_k.size(0), "out_k out_dim mismatch");
+  TORCH_CHECK(out_v.size(1) == B_v.size(0), "out_v out_dim mismatch");
+
+  const int rows = static_cast<int>(x.size(0));
+  const int in_dim = static_cast<int>(x.size(1));
+  const int out_dim = static_cast<int>(out_q.size(1));
+  const int rank = static_cast<int>(A_q.size(0));
+  TORCH_CHECK(rank > 0 && rank <= 64, "rank must be in (0, 64]");
+  TORCH_CHECK(A_q.size(1) == in_dim, "A_q in_dim mismatch");
+  TORCH_CHECK(A_k.size(0) == rank && A_k.size(1) == in_dim, "A_k shape mismatch");
+  TORCH_CHECK(A_v.size(0) == rank && A_v.size(1) == in_dim, "A_v shape mismatch");
+  TORCH_CHECK(B_q.size(1) == rank, "B_q rank mismatch");
+  TORCH_CHECK(B_k.size(1) == rank, "B_k rank mismatch");
+  TORCH_CHECK(B_v.size(1) == rank, "B_v rank mismatch");
+  const auto dtype = x.scalar_type();
+  TORCH_CHECK(out_q.scalar_type() == dtype, "out_q dtype mismatch");
+  TORCH_CHECK(out_k.scalar_type() == dtype, "out_k dtype mismatch");
+  TORCH_CHECK(out_v.scalar_type() == dtype, "out_v dtype mismatch");
+  TORCH_CHECK(A_q.scalar_type() == dtype, "A_q dtype mismatch");
+  TORCH_CHECK(B_q.scalar_type() == dtype, "B_q dtype mismatch");
+  TORCH_CHECK(A_k.scalar_type() == dtype, "A_k dtype mismatch");
+  TORCH_CHECK(B_k.scalar_type() == dtype, "B_k dtype mismatch");
+  TORCH_CHECK(A_v.scalar_type() == dtype, "A_v dtype mismatch");
+  TORCH_CHECK(B_v.scalar_type() == dtype, "B_v dtype mismatch");
+  cudaStream_t stream = c10::cuda::getCurrentCUDAStream();
+
+  DISPATCH_FLOAT_TYPES(x.scalar_type(), "fused_lora_qkv_delta", [&] {
+    using T = scalar_t;
+    seiso::launch_fused_lora_qkv_delta<T>(
+        reinterpret_cast<const T*>(x.data_ptr()),
+        reinterpret_cast<T*>(out_q.data_ptr()),
+        reinterpret_cast<T*>(out_k.data_ptr()),
+        reinterpret_cast<T*>(out_v.data_ptr()),
+        reinterpret_cast<const T*>(A_q.data_ptr()),
+        reinterpret_cast<const T*>(B_q.data_ptr()),
+        reinterpret_cast<const T*>(A_k.data_ptr()),
+        reinterpret_cast<const T*>(B_k.data_ptr()),
+        reinterpret_cast<const T*>(A_v.data_ptr()),
+        reinterpret_cast<const T*>(B_v.data_ptr()),
+        rows,
+        in_dim,
+        out_dim,
+        rank,
+        static_cast<float>(scale_q),
+        static_cast<float>(scale_k),
+        static_cast<float>(scale_v),
+        stream);
+  });
+}
+
+torch::Tensor fused_mlp_swiglu(
+    torch::Tensor x,
+    torch::Tensor W_gate,
+    torch::Tensor W_up) {
+  check_cuda(x, "x");
+  check_cuda(W_gate, "W_gate");
+  check_cuda(W_up, "W_up");
+  TORCH_CHECK(x.dim() == 2, "x must be 2D");
+  TORCH_CHECK(W_gate.dim() == 2 && W_up.dim() == 2, "weights must be 2D");
+
+  const int rows = static_cast<int>(x.size(0));
+  const int in_dim = static_cast<int>(x.size(1));
+  const int hidden_dim = static_cast<int>(W_gate.size(0));
+  auto out = torch::empty({rows, hidden_dim}, x.options());
+  cudaStream_t stream = c10::cuda::getCurrentCUDAStream();
+
+  DISPATCH_FLOAT_TYPES(x.scalar_type(), "fused_mlp_swiglu", [&] {
+    using T = scalar_t;
+    seiso::launch_fused_mlp_swiglu<T>(
+        reinterpret_cast<const T*>(x.data_ptr()),
+        reinterpret_cast<const T*>(W_gate.data_ptr()),
+        reinterpret_cast<const T*>(W_up.data_ptr()),
+        reinterpret_cast<T*>(out.data_ptr()),
+        rows,
+        in_dim,
+        hidden_dim,
+        stream);
+  });
+  return out;
+}
+
+void set_kernel_tuning(
+    int rms_mode,
+    int swiglu_vec,
+    int lora_tile,
+    int arch_sm,
+    int use_cuda_graphs,
+    int use_stream_overlap) {
+  seiso::set_kernel_tuning_state(
+      rms_mode, swiglu_vec, lora_tile, arch_sm, use_cuda_graphs, use_stream_overlap);
 }
 
 }  // namespace
@@ -246,6 +376,8 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("fused_rmsnorm", &fused_rmsnorm, "Fused residual + RMSNorm");
   m.def("fused_swiglu", &fused_swiglu, "Fused SwiGLU activation");
   m.def("fused_lora_delta", &fused_lora_delta, "Fused low-rank LoRA delta");
+  m.def("fused_lora_qkv_delta", &fused_lora_qkv_delta, "Fused LoRA QKV delta");
+  m.def("fused_mlp_swiglu", &fused_mlp_swiglu, "Fused gate/up matmul + SwiGLU");
   m.def("cross_entropy_forward", &cross_entropy_forward, "Fused CE forward stats");
   m.def("cross_entropy_backward", &cross_entropy_backward, "Fused CE backward");
   m.def("set_kernel_tuning", &set_kernel_tuning, "Set RL kernel launch profile");

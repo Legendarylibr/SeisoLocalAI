@@ -13,7 +13,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from seiso.kernels.hooks import apply_fused_lora_kernels, apply_training_kernels
+from seiso.kernels.hooks import (
+    apply_fused_lora_kernels,
+    apply_fused_lora_qkv_kernels,
+    apply_fused_residual_norm_kernels,
+    apply_training_kernels,
+)
 from seiso.kernels.lifecycle import release_training_memory
 from seiso.memory.protection import (
     apply_training_memory_guards,
@@ -106,6 +111,8 @@ class SeisoTrainer:
         use_triton = cfg.use_triton
         use_fused_ce = cfg.use_fused_ce
         use_fused_lora = cfg.use_fused_lora
+        use_fused_lora_qkv = bool(cfg.extra.get("use_fused_lora_qkv", use_fused_lora))
+        use_cuda_graphs = bool(cfg.extra.get("use_cuda_graphs", not cfg.deterministic))
 
         logger.info(
             "Training %s | method=%s quant=%s | world_size=%d",
@@ -140,10 +147,22 @@ class SeisoTrainer:
             except ImportError:
                 pass
 
+        if use_triton:
+            residual_meta = apply_fused_residual_norm_kernels(model)
+            self._kernel_meta.update(residual_meta)
+
         if cfg.method == TrainMethod.LORA:
             model = self._apply_lora(model)
-            if use_fused_lora:
-                lora_meta = apply_fused_lora_kernels(model, max_rank=64)
+            fused_lora_rank = min(cfg.lora_r, 64)
+            if use_fused_lora_qkv:
+                qkv_meta = apply_fused_lora_qkv_kernels(model, max_rank=fused_lora_rank)
+                self._kernel_meta.update(qkv_meta)
+            if use_fused_lora or use_fused_lora_qkv:
+                lora_meta = apply_fused_lora_kernels(
+                    model,
+                    max_rank=fused_lora_rank,
+                    skip_qkv=use_fused_lora_qkv,
+                )
                 self._kernel_meta.update(lora_meta)
         elif cfg.method == TrainMethod.FULL and cfg.quant in (QuantMode.INT4, QuantMode.INT8):
             logger.warning("Full fine-tune with quantization — consider LoRA for memory efficiency")
@@ -568,6 +587,28 @@ class SeisoTrainer:
             base["torch_compile"] = True
             base["torch_compile_backend"] = "inductor"
 
+        merged_callbacks = list(callbacks or [])
+        use_cuda_graphs = bool(cfg.extra.get("use_cuda_graphs", not cfg.deterministic))
+        if use_cuda_graphs and cfg.gradient_checkpointing:
+            logger.info(
+                "CUDA graphs disabled — incompatible with gradient_checkpointing "
+                "(disable GC or set extra.use_cuda_graphs=false)"
+            )
+            use_cuda_graphs = False
+        if use_cuda_graphs and torch.cuda.is_available():
+            try:
+                from seiso.kernels.cuda_graphs import make_training_graph_callback
+
+                cb = make_training_graph_callback(
+                    deterministic=cfg.deterministic,
+                    enabled=use_cuda_graphs,
+                )
+                if cb is not None:
+                    merged_callbacks.append(cb)
+            except ImportError:
+                pass
+            self._kernel_meta["cuda_graphs_requested"] = True
+
         args_dict = configure_training_args(base, layout, multi_gpu)
         return build_sft_trainer(
             model,
@@ -580,7 +621,8 @@ class SeisoTrainer:
             dataset_text_field=dataset_text_field,
             data_collator=data_collator,
             use_fused_ce=cfg.use_fused_ce,
-            callbacks=callbacks,
+            use_cuda_graphs=use_cuda_graphs,
+            callbacks=merged_callbacks or None,
         )
 
     def _train_embedding(self) -> Path:

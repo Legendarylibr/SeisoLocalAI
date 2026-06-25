@@ -551,6 +551,7 @@ export function TrainPage() {
             >
               <option value="auto">Auto-detect</option>
               <option value="chat">Chat / messages</option>
+              <option value="preference">Preference (chosen/rejected)</option>
               <option value="alpaca">Alpaca (instruction/output)</option>
               <option value="sharegpt">ShareGPT conversations</option>
               <option value="text">Plain text</option>
@@ -575,7 +576,7 @@ export function TrainPage() {
                 </div>
                 {!datasetValid && (
                   <div className="muted-text" style={{fontSize: "12px", marginTop: 4}}>
-                    Fix the format or pick a dataset with chat messages, instruction/output pairs, or plain text.
+                    Fix the format or pick a dataset with chat messages, preference pairs (chosen/rejected), instruction/output pairs, or plain text.
                   </div>
                 )}
               </div>

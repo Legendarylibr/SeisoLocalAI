@@ -87,6 +87,159 @@ def fused_cross_entropy_loss(logits, labels, *, ignore_index: int = -100):
     return _fused_ce(logits, labels, ignore_index=ignore_index)
 
 
+def fused_mlp_swiglu(x, W_gate, W_up):
+    """``silu(x @ W_gate^T) * (x @ W_up^T)`` via native CUDA when available."""
+    import torch
+
+    if not getattr(x, "is_cuda", False):
+        gate = x @ W_gate.t()
+        up = x @ W_up.t()
+        return torch.nn.functional.silu(gate) * up
+
+    backend = active_backend()
+    if backend == "cuda":
+        from seiso.kernels.cuda_ops import fused_mlp_swiglu as cuda_mlp
+
+        return cuda_mlp(x, W_gate, W_up)
+
+    gate = x @ W_gate.t()
+    up = x @ W_up.t()
+    return torch.nn.functional.silu(gate) * up
+
+
+def _fused_lora_qkv_delta_torch(
+    x,
+    out_q,
+    out_k,
+    out_v,
+    lora_A_q,
+    lora_B_q,
+    lora_A_k,
+    lora_B_k,
+    lora_A_v,
+    lora_B_v,
+    *,
+    scale_q: float = 1.0,
+    scale_k: float = 1.0,
+    scale_v: float = 1.0,
+) -> None:
+    """cuBLAS-backed LoRA Q/K/V deltas — one A@x read when ranks match."""
+    import torch
+
+    rank_q = lora_A_q.size(0)
+    rank_k = lora_A_k.size(0)
+    rank_v = lora_A_v.size(0)
+    if rank_q == rank_k == rank_v:
+        hidden_all = x @ torch.cat((lora_A_q, lora_A_k, lora_A_v), dim=0).t()
+        h_q, h_k, h_v = hidden_all.split((rank_q, rank_k, rank_v), dim=-1)
+    else:
+        h_q = x @ lora_A_q.t()
+        h_k = x @ lora_A_k.t()
+        h_v = x @ lora_A_v.t()
+
+    out_q.add_((scale_q * (h_q @ lora_B_q.t())).to(out_q.dtype))
+    out_k.add_((scale_k * (h_k @ lora_B_k.t())).to(out_k.dtype))
+    out_v.add_((scale_v * (h_v @ lora_B_v.t())).to(out_v.dtype))
+
+
+def _prefer_cublas_lora_qkv(x) -> bool:
+    """Naive CUDA QKV kernel serializes A@x; cuBLAS wins on training-scale tensors."""
+    import torch
+
+    if torch.is_grad_enabled():
+        return True
+    rows = x.numel() // x.shape[-1]
+    in_dim = x.shape[-1]
+    return rows * in_dim > 64 * 512
+
+
+def fused_lora_qkv_delta(
+    x,
+    out_q,
+    out_k,
+    out_v,
+    lora_A_q,
+    lora_B_q,
+    lora_A_k,
+    lora_B_k,
+    lora_A_v,
+    lora_B_v,
+    *,
+    scale_q: float = 1.0,
+    scale_k: float = 1.0,
+    scale_v: float = 1.0,
+):
+    """In-place fused LoRA deltas for Q/K/V projections."""
+    if not getattr(x, "is_cuda", False):
+        import torch
+
+        for out, a, b, scale in (
+            (out_q, lora_A_q, lora_B_q, scale_q),
+            (out_k, lora_A_k, lora_B_k, scale_k),
+            (out_v, lora_A_v, lora_B_v, scale_v),
+        ):
+            hidden = x @ a.t()
+            delta = scale * (hidden @ b.t())
+            out.add_(delta.to(out.dtype))
+        return
+
+    if _prefer_cublas_lora_qkv(x):
+        return _fused_lora_qkv_delta_torch(
+            x,
+            out_q,
+            out_k,
+            out_v,
+            lora_A_q,
+            lora_B_q,
+            lora_A_k,
+            lora_B_k,
+            lora_A_v,
+            lora_B_v,
+            scale_q=scale_q,
+            scale_k=scale_k,
+            scale_v=scale_v,
+        )
+
+    backend = active_backend()
+    if backend == "cuda":
+        try:
+            from seiso.kernels.cuda_ops import fused_lora_qkv_delta as cuda_qkv
+
+            return cuda_qkv(
+                x,
+                out_q,
+                out_k,
+                out_v,
+                lora_A_q,
+                lora_B_q,
+                lora_A_k,
+                lora_B_k,
+                lora_A_v,
+                lora_B_v,
+                scale_q=scale_q,
+                scale_k=scale_k,
+                scale_v=scale_v,
+            )
+        except (RuntimeError, ImportError):
+            pass
+
+    return _fused_lora_qkv_delta_torch(
+        x,
+        out_q,
+        out_k,
+        out_v,
+        lora_A_q,
+        lora_B_q,
+        lora_A_k,
+        lora_B_k,
+        lora_A_v,
+        lora_B_v,
+        scale_q=scale_q,
+        scale_k=scale_k,
+        scale_v=scale_v,
+    )
+
+
 def fused_lora_delta(
     x,
     lora_A,
@@ -108,11 +261,22 @@ def fused_lora_delta(
             return base
         return base + delta
 
-    backend = active_backend()
-    if backend == "cuda":
-        from seiso.kernels.cuda_ops import fused_lora_delta as cuda_lora
+    import torch
 
-        return cuda_lora(x, lora_A, lora_B, base=base, scale=scale, inplace=inplace)
+    rows = x.numel() // x.shape[-1]
+    in_dim = x.shape[-1]
+    use_cuda = (
+        active_backend() == "cuda"
+        and not torch.is_grad_enabled()
+        and rows * in_dim <= 64 * 512
+    )
+    if use_cuda:
+        try:
+            from seiso.kernels.cuda_ops import fused_lora_delta as cuda_lora
+
+            return cuda_lora(x, lora_A, lora_B, base=base, scale=scale, inplace=inplace)
+        except (RuntimeError, ImportError):
+            pass
 
     hidden = x @ lora_A.t()
     delta = scale * (hidden @ lora_B.t())
@@ -141,6 +305,21 @@ def kernel_metadata() -> dict:
         low_vram = kernel_low_vram_enabled()
     except ImportError:
         low_vram = False
+    arch_meta: dict = {}
+    try:
+        from seiso.kernels.arch_tuning import detect_arch_tuning
+
+        arch = detect_arch_tuning()
+        arch_meta = {
+            "arch_family": arch.family.value,
+            "arch_sm": arch.sm,
+            "use_wmma": arch.use_wmma,
+            "use_persistent_kernels": arch.use_persistent_kernels,
+            "prefer_flash_attn": arch.prefer_flash_attn,
+        }
+    except ImportError:
+        pass
+
     return {
         "vendor": platform.vendor.value,
         "device_label": (
@@ -161,6 +340,7 @@ def kernel_metadata() -> dict:
         "triton": platform.supports_triton,
         "nvidia_boundary": boundary,
         "kernel_low_vram": low_vram,
+        **arch_meta,
     }
 
 

@@ -47,12 +47,19 @@ def _fused_compute_loss(trainer, model, inputs, return_outputs=False, num_items_
 
 
 if _SFTTrainer is not None:
+    from seiso.kernels.cuda_graphs import CudaGraphTrainerMixin
 
-    class FusedSFTTrainer(_SFTTrainer):
-        def __init__(self, *args, use_fused_ce: bool = True, **kwargs):
+    class FusedSFTTrainer(CudaGraphTrainerMixin, _SFTTrainer):
+        def __init__(self, *args, use_fused_ce: bool = True, use_cuda_graphs: bool = False, **kwargs):
             self._seiso_use_fused_ce = use_fused_ce
             self._seiso_super_compute_loss = super().compute_loss
-            super().__init__(*args, **kwargs)
+            super().__init__(*args, use_cuda_graphs=use_cuda_graphs, **kwargs)
+
+        def training_step(self, model, inputs, num_items_in_batch=None):
+            with self.maybe_activation_offload_context:
+                return CudaGraphTrainerMixin.training_step(
+                    self, model, inputs, num_items_in_batch=num_items_in_batch
+                )
 
         def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
             if not self._seiso_use_fused_ce:
@@ -96,6 +103,7 @@ def build_sft_trainer(
     dataset_text_field: str | None = None,
     data_collator=None,
     use_fused_ce: bool = True,
+    use_cuda_graphs: bool = False,
     callbacks=None,
 ):
     """Create TRL SFTTrainer when available; falls back to HF Trainer."""
@@ -108,6 +116,7 @@ def build_sft_trainer(
             training_args_dict,
             data_collator,
             use_fused_ce,
+            use_cuda_graphs,
             callbacks,
         )
 
@@ -132,6 +141,8 @@ def build_sft_trainer(
     }
     if use_fused_ce:
         kwargs["use_fused_ce"] = True
+    if use_cuda_graphs:
+        kwargs["use_cuda_graphs"] = True
     if eval_ds is not None:
         kwargs["eval_dataset"] = eval_ds
     if data_collator is not None:
@@ -140,11 +151,12 @@ def build_sft_trainer(
         kwargs["callbacks"] = callbacks
 
     logger.info(
-        "Using %s (max_seq_length=%d, packing=%s, fused_ce=%s)",
+        "Using %s (max_seq_length=%d, packing=%s, fused_ce=%s, cuda_graphs=%s)",
         trainer_cls.__name__,
         max_seq_length,
         packing,
         use_fused_ce,
+        use_cuda_graphs,
     )
     try:
         kwargs["processing_class"] = tokenizer
@@ -156,7 +168,15 @@ def build_sft_trainer(
 
 
 def _fallback_trainer(
-    model, tokenizer, train_ds, eval_ds, training_args_dict, data_collator, use_fused_ce, callbacks
+    model,
+    tokenizer,
+    train_ds,
+    eval_ds,
+    training_args_dict,
+    data_collator,
+    use_fused_ce,
+    use_cuda_graphs,
+    callbacks,
 ):
     from transformers import Trainer, TrainingArguments
 
@@ -196,7 +216,13 @@ def _fallback_trainer(
             callbacks=callbacks,
         )
 
-    class _FusedTrainer(Trainer):
+    from seiso.kernels.cuda_graphs import CudaGraphTrainerMixin
+
+    class _FusedTrainer(CudaGraphTrainerMixin, Trainer):
+        def __init__(self, *args, **kwargs):
+            use_cuda_graphs = kwargs.pop("use_cuda_graphs", False)
+            super().__init__(*args, use_cuda_graphs=use_cuda_graphs, **kwargs)
+
         def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
             labels = inputs.get("labels")
             if labels is None:
@@ -228,5 +254,6 @@ def _fallback_trainer(
         train_dataset=train_ds,
         eval_dataset=eval_ds,
         data_collator=data_collator,
+        use_cuda_graphs=use_cuda_graphs,
         callbacks=callbacks,
     )

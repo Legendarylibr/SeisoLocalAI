@@ -2,20 +2,25 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any
 
+logger = logging.getLogger(__name__)
+
 # Discrete profiles the RL policy selects.  ``auto`` matches the default heuristics
 # in the CUDA sources; named profiles force specific launch paths.
 KERNEL_PROFILES: tuple[dict[str, Any], ...] = (
     {"id": 0, "name": "auto", "rms_mode": 0, "swiglu_vec": 0, "lora_tile": 0},
-    {"id": 1, "name": "stripe", "rms_mode": 1, "swiglu_vec": 8, "lora_tile": 32},
-    {"id": 2, "name": "parallax", "rms_mode": 2, "swiglu_vec": 8, "lora_tile": 64},
-    {"id": 3, "name": "narrow_opt", "rms_mode": 1, "swiglu_vec": 4, "lora_tile": 16},
-    {"id": 4, "name": "wide_throughput", "rms_mode": 2, "swiglu_vec": 8, "lora_tile": 64},
-    {"id": 5, "name": "balanced", "rms_mode": 0, "swiglu_vec": 8, "lora_tile": 32},
+    {"id": 1, "name": "stripe", "rms_mode": 1, "swiglu_vec": 8, "lora_tile": 128},
+    {"id": 2, "name": "parallax", "rms_mode": 2, "swiglu_vec": 8, "lora_tile": 512},
+    {"id": 3, "name": "narrow_opt", "rms_mode": 1, "swiglu_vec": 4, "lora_tile": 128},
+    {"id": 4, "name": "wide_throughput", "rms_mode": 2, "swiglu_vec": 8, "lora_tile": 512},
+    {"id": 5, "name": "balanced", "rms_mode": 0, "swiglu_vec": 8, "lora_tile": 256},
+    {"id": 6, "name": "hopper_fa3", "rms_mode": 2, "swiglu_vec": 8, "lora_tile": 384},
+    {"id": 7, "name": "blackwell", "rms_mode": 2, "swiglu_vec": 8, "lora_tile": 512},
 )
 
 _ACTIVE_PROFILE_ID = 0
@@ -50,6 +55,19 @@ def apply_kernel_profile(profile_id: int) -> dict[str, Any]:
     profile = kernel_profile_by_id(profile_id)
     _ACTIVE_PROFILE_ID = int(profile["id"])
 
+    arch_sm = 0
+    use_graphs = 0
+    use_overlap = 1
+    try:
+        from seiso.kernels.arch_tuning import detect_arch_tuning
+
+        arch = detect_arch_tuning()
+        arch_sm = arch.sm
+        use_graphs = 1 if arch.use_cuda_graphs else 0
+        use_overlap = 1 if arch.use_stream_overlap else 0
+    except ImportError:
+        pass
+
     try:
         from seiso.kernels.cuda_ops import set_kernel_tuning
 
@@ -57,6 +75,9 @@ def apply_kernel_profile(profile_id: int) -> dict[str, Any]:
             int(profile["rms_mode"]),
             int(profile["swiglu_vec"]),
             int(profile["lora_tile"]),
+            arch_sm=arch_sm,
+            use_cuda_graphs=use_graphs,
+            use_stream_overlap=use_overlap,
         )
     except (ImportError, AttributeError, RuntimeError):
         pass
@@ -156,43 +177,71 @@ def _cached_live_benchmark(
             source="analytic_no_cuda",
         )
 
-    apply_kernel_profile(profile_id)
-    device = "cuda"
-    torch_dtype = getattr(torch, dtype, torch.bfloat16)
-    rows = max(64, int(batch_rows))
-    cols = max(128, int(hidden_dim))
+    try:
+        from seiso.kernels.cuda_env import configure_cuda_build_env
 
-    x = torch.randn(rows, cols, device=device, dtype=torch_dtype)
-    w = torch.ones(cols, device=device, dtype=torch_dtype)
-    gate = torch.randn(rows, cols, device=device, dtype=torch_dtype)
-    up = torch.randn(rows, cols, device=device, dtype=torch_dtype)
+        configure_cuda_build_env()
+        apply_kernel_profile(profile_id)
+        device = "cuda"
+        torch_dtype = getattr(torch, dtype, torch.bfloat16)
+        rows = max(64, int(batch_rows))
+        # Vectorized SwiGLU kernels require hidden dim aligned to 8.
+        cols = max(128, int(hidden_dim))
+        cols = ((cols + 7) // 8) * 8
 
-    def pytorch_rms():
-        y = x
-        v = y.pow(2).mean(dim=-1, keepdim=True)
-        return y * torch.rsqrt(v + 1e-6) * w
+        x = torch.randn(rows, cols, device=device, dtype=torch_dtype)
+        w = torch.ones(cols, device=device, dtype=torch_dtype)
+        gate = torch.randn(rows, cols, device=device, dtype=torch_dtype)
+        up = torch.randn(rows, cols, device=device, dtype=torch_dtype)
 
-    def fused_rms():
-        return fused_rms_norm(x, w)
+        def pytorch_rms():
+            y = x
+            v = y.pow(2).mean(dim=-1, keepdim=True)
+            return y * torch.rsqrt(v + 1e-6) * w
 
-    def pytorch_swiglu():
-        return torch.nn.functional.silu(gate) * up
+        def fused_rms():
+            return fused_rms_norm(x, w)
 
-    def fused_sw():
-        return fused_swiglu(gate, up)
+        def pytorch_swiglu():
+            return torch.nn.functional.silu(gate) * up
 
-    pt_ms = _bench_ms(pytorch_rms) + _bench_ms(pytorch_swiglu)
-    fused_ms = _bench_ms(fused_rms) + _bench_ms(fused_sw)
-    speedup = pt_ms / max(fused_ms, 1e-6)
+        def fused_sw():
+            return fused_swiglu(gate, up)
 
-    return KernelBenchmarkResult(
-        profile_id=profile_id,
-        profile_name=str(profile["name"]),
-        latency_ms=float(fused_ms),
-        speedup_vs_pytorch=float(speedup),
-        memory_overhead_mb=0.0,
-        source="live_cuda",
-    )
+        pt_ms = _bench_ms(pytorch_rms) + _bench_ms(pytorch_swiglu)
+        fused_ms = _bench_ms(fused_rms) + _bench_ms(fused_sw)
+        speedup = pt_ms / max(fused_ms, 1e-6)
+
+        return KernelBenchmarkResult(
+            profile_id=profile_id,
+            profile_name=str(profile["name"]),
+            latency_ms=float(fused_ms),
+            speedup_vs_pytorch=float(speedup),
+            memory_overhead_mb=0.0,
+            source="live_cuda",
+        )
+    except Exception as exc:
+        logger.warning(
+            "Live CUDA kernel benchmark failed for profile %d: %s",
+            profile_id,
+            exc,
+        )
+        try:
+            import torch
+
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
+        except Exception:
+            pass
+        speedup = analytic_kernel_speedup(profile_id, hidden_dim=hidden_dim, batch_rows=batch_rows)
+        return KernelBenchmarkResult(
+            profile_id=profile_id,
+            profile_name=str(profile["name"]),
+            latency_ms=1.0 / max(speedup, 0.1),
+            speedup_vs_pytorch=speedup,
+            memory_overhead_mb=0.0,
+            source="analytic_benchmark_failed",
+        )
 
 
 def benchmark_kernel_profile(

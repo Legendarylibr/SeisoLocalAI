@@ -15,6 +15,41 @@ from seiso.training.datasets import detect_format, load_training_dataset
 logger = logging.getLogger(__name__)
 
 _WHITESPACE_RE = re.compile(r"\s+")
+_HUMAN_ASSISTANT_TURN_RE = re.compile(
+    r"(?:^|\n)\s*(Human|Assistant)\s*:\s*",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+def _normalize_dialog_text(text: Any) -> str:
+    """Normalize line endings without collapsing turn boundaries."""
+    if text is None:
+        return ""
+    normalized = str(text).replace("\r\n", "\n").replace("\r", "\n").strip()
+    return normalized
+
+
+def parse_human_assistant_dialog(text: Any) -> list[dict[str, str]]:
+    """Parse Human/Assistant dialog transcripts into chat messages."""
+    raw = _normalize_dialog_text(text)
+    if not raw:
+        return []
+
+    matches = list(_HUMAN_ASSISTANT_TURN_RE.finditer(raw))
+    if not matches:
+        return []
+
+    messages: list[dict[str, str]] = []
+    for idx, match in enumerate(matches):
+        role_raw = match.group(1).lower()
+        role = "user" if role_raw == "human" else "assistant"
+        start = match.end()
+        end = matches[idx + 1].start() if idx + 1 < len(matches) else len(raw)
+        content = raw[start:end].strip()
+        content = _WHITESPACE_RE.sub(" ", content).strip()
+        if content:
+            messages.append({"role": role, "content": content})
+    return messages
 
 
 def _strip_text(value: Any) -> str:
@@ -80,6 +115,21 @@ def normalize_sample(sample: dict[str, Any], fmt: DatasetFormat) -> dict[str, An
         if not turns or not any(t["from"] == "gpt" for t in turns):
             return None
         return {"conversations": turns}
+
+    if fmt == DatasetFormat.PREFERENCE:
+        chosen = sample.get("chosen") or sample.get("chosen_response") or sample.get("accepted")
+        messages = parse_human_assistant_dialog(chosen)
+        if not messages:
+            prompt = _strip_text(sample.get("prompt"))
+            response = _strip_text(sample.get("chosen") or sample.get("chosen_response"))
+            if prompt and response and "Human:" not in response and "Assistant:" not in response:
+                messages = [
+                    {"role": "user", "content": prompt},
+                    {"role": "assistant", "content": response},
+                ]
+        if not messages or not any(m["role"] == "assistant" for m in messages):
+            return None
+        return {"messages": messages}
 
     if fmt == DatasetFormat.CHAT or "messages" in sample:
         messages: list[dict[str, str]] = []
@@ -187,6 +237,10 @@ def preprocess_training_dataset(
             f"Format: {resolved_fmt.value}. "
             "Dataset must contain usable assistant responses or text after normalization."
         )
+
+    if resolved_fmt == DatasetFormat.PREFERENCE:
+        resolved_fmt = DatasetFormat.CHAT
+        stats["resolved_format"] = resolved_fmt.value
 
     return final, stats, resolved_fmt
 

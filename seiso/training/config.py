@@ -32,6 +32,7 @@ class DatasetFormat(StrEnum):
     ALPACA = "alpaca"
     CHAT = "chat"
     SHAREGPT = "sharegpt"
+    PREFERENCE = "preference"
 
 
 class TrainConfig(BaseModel):

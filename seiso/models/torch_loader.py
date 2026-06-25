@@ -105,14 +105,11 @@ def load_torch(
             pre_quant_method,
         )
     elif options.use_flash_attention and device != "mps":
-        try:
-            import flash_attn  # noqa: F401
+        from seiso.kernels.attention import resolve_attention_implementation
 
-            model_kwargs["attn_implementation"] = "flash_attention_2"
-            logger.info("Using Flash Attention 2")
-        except ImportError:
-            model_kwargs["attn_implementation"] = "sdpa"
-            logger.info("Using SDPA attention")
+        attn_impl = resolve_attention_implementation(prefer_fa3=True)
+        model_kwargs["attn_implementation"] = attn_impl
+        logger.info("Using %s attention", attn_impl.replace("_", " "))
 
     use_4bit = options.load_in_4bit
     use_8bit = options.load_in_8bit

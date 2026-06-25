@@ -139,3 +139,26 @@ void launch_cross_entropy_backward(
 }
 
 }  // namespace seiso
+
+#include "explicit_inst.cuh"
+
+namespace seiso {
+
+template void launch_cross_entropy_forward<float>(
+    const float*, const int64_t*, float*, float*, float*, int, int, int, cudaStream_t);
+template void launch_cross_entropy_forward<__half>(
+    const __half*, const int64_t*, float*, float*, float*, int, int, int, cudaStream_t);
+template void launch_cross_entropy_forward<__nv_bfloat16>(
+    const __nv_bfloat16*, const int64_t*, float*, float*, float*, int, int, int, cudaStream_t);
+
+template void launch_cross_entropy_backward<float>(
+    const float*, const int64_t*, const float*, const float*, float*, int, int, int, float,
+    cudaStream_t);
+template void launch_cross_entropy_backward<__half>(
+    const __half*, const int64_t*, const float*, const float*, __half*, int, int, int, float,
+    cudaStream_t);
+template void launch_cross_entropy_backward<__nv_bfloat16>(
+    const __nv_bfloat16*, const int64_t*, const float*, const float*, __nv_bfloat16*, int, int, int,
+    float, cudaStream_t);
+
+}  // namespace seiso

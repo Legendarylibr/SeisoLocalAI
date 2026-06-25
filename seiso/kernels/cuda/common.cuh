@@ -1,5 +1,8 @@
 #pragma once
 
+#include <c10/util/BFloat16.h>
+#include <c10/util/Half.h>
+
 #include <cuda_bf16.h>
 #include <cuda_fp16.h>
 #include <cuda_runtime.h>
@@ -31,6 +34,18 @@ struct VecWidth<__nv_bfloat16> {
   using type = uint4;
 };
 
+template <>
+struct VecWidth<c10::Half> {
+  static constexpr int k = 8;
+  using type = uint4;
+};
+
+template <>
+struct VecWidth<c10::BFloat16> {
+  static constexpr int k = 8;
+  using type = uint4;
+};
+
 // ---------------------------------------------------------------------------
 // Device math
 // ---------------------------------------------------------------------------
@@ -38,6 +53,12 @@ struct VecWidth<__nv_bfloat16> {
 __device__ __forceinline__ float to_float(float x) { return x; }
 __device__ __forceinline__ float to_float(__half x) { return __half2float(x); }
 __device__ __forceinline__ float to_float(__nv_bfloat16 x) { return __bfloat162float(x); }
+__device__ __forceinline__ float to_float(c10::Half x) {
+  return __half2float(*reinterpret_cast<const __half*>(&x));
+}
+__device__ __forceinline__ float to_float(c10::BFloat16 x) {
+  return __bfloat162float(*reinterpret_cast<const __nv_bfloat16*>(&x));
+}
 
 template <typename T>
 __device__ __forceinline__ T from_float(float x);
@@ -55,6 +76,18 @@ __device__ __forceinline__ __half from_float<__half>(float x) {
 template <>
 __device__ __forceinline__ __nv_bfloat16 from_float<__nv_bfloat16>(float x) {
   return __float2bfloat16(x);
+}
+
+template <>
+__device__ __forceinline__ c10::Half from_float<c10::Half>(float x) {
+  const __half raw = __float2half_rn(x);
+  return *reinterpret_cast<const c10::Half*>(&raw);
+}
+
+template <>
+__device__ __forceinline__ c10::BFloat16 from_float<c10::BFloat16>(float x) {
+  const __nv_bfloat16 raw = __float2bfloat16_rn(x);
+  return *reinterpret_cast<const c10::BFloat16*>(&raw);
 }
 
 __device__ __forceinline__ float to_float(float4 v) { return v.x; }
@@ -110,21 +143,5 @@ __device__ __forceinline__ float block_sum(float v, float* smem) {
 __device__ __forceinline__ float silu(float x) {
   return x / (1.f + expf(-x));
 }
-
-// Ampere+ async copy helpers (no-op fallback on older arch at compile time)
-#if __CUDA_ARCH__ >= 800
-__device__ __forceinline__ void cp_async_ca(const void* src, void* dst, int size) {
-  asm volatile("cp.async.ca.shared.global [%0], [%1], %2;\n" ::"r"(dst), "l"(src), "n"(size));
-}
-
-__device__ __forceinline__ void cp_async_commit() {
-  asm volatile("cp.async.commit_group;\n");
-}
-
-template <int N>
-__device__ __forceinline__ void cp_async_wait() {
-  asm volatile("cp.async.wait_group %0;\n" ::"n"(N));
-}
-#endif
 
 }  // namespace seiso

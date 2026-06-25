@@ -76,6 +76,12 @@ def _dataset_hints(dataset: str) -> dict[str, Any]:
             "train_on_responses_only": False,
             "note": "Name suggests instruction tuning — Alpaca format is a safe default.",
         }
+    if "preference" in key:
+        return {
+            "dataset_format": "preference",
+            "train_on_responses_only": True,
+            "note": "Preference data — uses chosen responses parsed as chat turns.",
+        }
     if any(token in key for token in ("chat", "conversation", "sharegpt", "messages")):
         return {
             "dataset_format": "chat",

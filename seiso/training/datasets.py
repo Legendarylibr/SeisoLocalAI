@@ -45,6 +45,10 @@ def load_training_dataset(
 
 
 def detect_format(sample: dict) -> DatasetFormat:
+    if ("chosen" in sample and "rejected" in sample) or (
+        "chosen" in sample and "prompt" in sample
+    ):
+        return DatasetFormat.PREFERENCE
     if ("query" in sample and "response" in sample) or (
         "question" in sample and "answer" in sample
     ):
