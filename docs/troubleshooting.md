@@ -17,10 +17,35 @@ See [inference/backends.md](inference/backends.md#memory-management) for RAM-tie
 
 **Symptom:** Log shows `CUDA kernel load failed`, training uses PyTorch fallback.
 
-**Fix:**
+**Common error (CUDA 13 / PyTorch 2.12):**
+
+```text
+ptxas ... fatal : Unsupported .version 9.3; current version is '9.0'
+```
+
+The pip `cuda-toolkit[nvcc]==13.0.2` wheel bundles an `nvcc` that emits PTX 9.3 while its `ptxas` only accepts up to 9.0. Upgrade the toolkit inside the Seiso venv, clear the JIT cache, then restart:
+
+```bash
+cd ~/Seiso
+source .venv/bin/activate
+pip install 'cuda-toolkit[nvcc]>=13.1.0'
+rm -rf ~/.cache/torch_extensions/*/seiso_cuda_kernels
+start
+```
+
+Check compatibility:
+
+```bash
+.venv/bin/python -c "from seiso.kernels.cuda_env import cuda_toolkit_status; print(cuda_toolkit_status())"
+```
+
+`ptxas_compatible` should be `True` and `ptxas_max` should be at least `9.3` when using CUDA 13.
+
+**Other fixes:**
 - Install CUDA toolkit; ensure `nvcc --version` works
 - Windows: install Visual Studio Build Tools
 - Match PyTorch CUDA version to toolkit
+- Keep Triton’s bundled `ptxas` off `PATH` ahead of the toolkit (Seiso sanitizes this automatically on kernel JIT)
 
 ## `bitsandbytes` / QLoRA on macOS
 
