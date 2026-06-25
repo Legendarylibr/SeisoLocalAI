@@ -8,7 +8,12 @@ import { streamHubModelDownload } from "@/lib/hubDownload";
 import { invalidateApiCache } from "@/lib/api/getCache";
 import { useHardwareProfile } from "@/hooks/useHardware";
 import { writeStoredModel } from "@/lib/modelSelection";
-import { computeTokensPerSec, estimateOutputTokens, formatTokensPerSec } from "@/lib/streamSpeed";
+import {
+  computeTokensPerSec,
+  formatTokensPerSec,
+  parseStreamStats,
+  resolveOutputTokenCount,
+} from "@/lib/streamSpeed";
 import {
   ContextWindowSetting,
   contextWindowOptionsFromStatus,
@@ -117,6 +122,7 @@ export function ChatPage() {
   const streamFlushRef = useRef<number | null>(null);
   const streamThreadRef = useRef<string | null>(null);
   const genStartRef = useRef<number | null>(null);
+  const outputTokensRef = useRef(0);
   const userPickedBackendRef = useRef(false);
   const bootstrapGenRef = useRef(0);
   const bootstrapAbortRef = useRef<AbortController | null>(null);
@@ -758,17 +764,15 @@ export function ChatPage() {
     streamTextRef.current = "";
     streamThreadRef.current = threadId;
     genStartRef.current = null;
+    outputTokensRef.current = 0;
     setStreamTps(null);
 
-    const recordThroughput = (text: string, finalize = false) => {
-      const trimmed = text.trim();
-      if (!trimmed) return;
+    const recordThroughput = (finalize = false) => {
+      const tokenCount = resolveOutputTokenCount(outputTokensRef.current, assistantText);
+      if (tokenCount <= 0) return;
       const now = performance.now();
       if (genStartRef.current === null) genStartRef.current = now;
-      const tps = computeTokensPerSec(
-        estimateOutputTokens(trimmed),
-        now - genStartRef.current,
-      );
+      const tps = computeTokensPerSec(tokenCount, now - genStartRef.current);
       if (tps === null) return;
       if (finalize) {
         setLastTps(tps);
@@ -843,15 +847,21 @@ export function ChatPage() {
               }
               return;
             }
+            if (event === "stats") {
+              const stats = parseStreamStats(data);
+              if (stats) outputTokensRef.current = stats.output_tokens;
+              recordThroughput();
+              return;
+            }
             if (event === "done") {
-              recordThroughput(assistantText, true);
+              recordThroughput(true);
               return;
             }
             if (event === "token" || event === "message") {
               if (event === "message") assistantText = data;
               else assistantText += data;
               streamTextRef.current = assistantText;
-              recordThroughput(assistantText);
+              recordThroughput();
               if (streamFlushRef.current === null) {
                 streamFlushRef.current = window.requestAnimationFrame(flushStreamText);
               }
@@ -872,13 +882,12 @@ export function ChatPage() {
       }
       if (streamTextRef.current) flushStreamText();
       if (assistantText.trim() && genStartRef.current !== null) {
-        const tps = computeTokensPerSec(
-          estimateOutputTokens(assistantText),
-          performance.now() - genStartRef.current,
-        );
+        const tokenCount = resolveOutputTokenCount(outputTokensRef.current, assistantText);
+        const tps = computeTokensPerSec(tokenCount, performance.now() - genStartRef.current);
         if (tps !== null) setLastTps(tps);
       }
       genStartRef.current = null;
+      outputTokensRef.current = 0;
       streamThreadRef.current = null;
       streamAbortRef.current = null;
       setStreamTps(null);

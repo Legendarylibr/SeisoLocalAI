@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from seiso.env import env_int
+from seiso.inference.streaming import StreamToken
 
 logger = logging.getLogger(__name__)
 
@@ -86,7 +87,7 @@ def iter_speculative_tokens(
     num_speculative_tokens: int,
     temperature: float = 0.0,
     should_stop: Callable[[], bool] | None = None,
-) -> Iterator[str]:
+) -> Iterator[StreamToken]:
     """
     Stream decoded text from speculative decoding.
 
@@ -152,7 +153,7 @@ def iter_speculative_tokens(
                 tokens_generated += accept
                 chunk, decoded_len = _decode_new_text(tok, input_ids_t, decoded_len)
                 if chunk:
-                    yield chunk
+                    yield StreamToken(chunk, accept)
 
             if tokens_generated >= max_new_tokens or stop():
                 break
@@ -164,7 +165,7 @@ def iter_speculative_tokens(
             tokens_generated += 1
             chunk, decoded_len = _decode_new_text(tok, input_ids_t, decoded_len)
             if chunk:
-                yield chunk
+                yield StreamToken(chunk)
 
 
 def iter_speculative_tokens_dflash(
@@ -175,7 +176,7 @@ def iter_speculative_tokens_dflash(
     num_speculative_tokens: int,
     temperature: float = 0.0,
     should_stop: Callable[[], bool] | None = None,
-) -> Iterator[str]:
+) -> Iterator[StreamToken]:
     """
     Speculative decoding using dflash GGUF draft (via llama.cpp for speed) + target verifier.
     """
@@ -218,7 +219,7 @@ def iter_speculative_tokens_dflash(
                 tokens_generated += 1
                 chunk, decoded_len = _decode_new_text(target_tok, input_ids_t, decoded_len)
                 if chunk:
-                    yield chunk
+                    yield StreamToken(chunk)
                 continue
 
             proposed_ids_t = torch.tensor([proposed_ids], device=target_device)
@@ -242,7 +243,7 @@ def iter_speculative_tokens_dflash(
                 tokens_generated += accept
                 chunk, decoded_len = _decode_new_text(target_tok, input_ids_t, decoded_len)
                 if chunk:
-                    yield chunk
+                    yield StreamToken(chunk, accept)
 
             if tokens_generated >= max_new_tokens or stop():
                 break
@@ -257,4 +258,4 @@ def iter_speculative_tokens_dflash(
             tokens_generated += 1
             chunk, decoded_len = _decode_new_text(target_tok, input_ids_t, decoded_len)
             if chunk:
-                yield chunk
+                yield StreamToken(chunk)

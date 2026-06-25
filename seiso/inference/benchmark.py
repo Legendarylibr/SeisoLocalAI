@@ -80,19 +80,21 @@ async def _timed_stream(
     payload: dict[str, Any],
     *,
     runner: LocalInferenceRunner | None = None,
-) -> tuple[str, float | None, float, float]:
-    """Return output text, load_ms, ttft_ms, generate_ms."""
+) -> tuple[str, float | None, float, float, int]:
+    """Return output text, load_ms, ttft_ms, generate_ms, and output token count."""
     runner = runner or LocalInferenceRunner()
 
     t0 = time.perf_counter()
     first_at: float | None = None
     chunks: list[str] = []
+    output_tokens = 0
 
-    async for token in runner.stream(payload):
+    async for update in runner.stream_updates(payload):
         now = time.perf_counter()
         if first_at is None:
             first_at = now
-        chunks.append(token)
+        chunks.append(update.text)
+        output_tokens = update.output_tokens
 
     t1 = time.perf_counter()
     output = "".join(chunks)
@@ -105,7 +107,7 @@ async def _timed_stream(
         ttft_ms = (t1 - t0) * 1000.0
         generate_ms = 0.0
 
-    return output, load_ms, ttft_ms, generate_ms
+    return output, load_ms, ttft_ms, generate_ms, output_tokens
 
 
 def _build_payload(
@@ -157,9 +159,10 @@ async def bench_inference(
             load_ms = (time.perf_counter() - cold_t0) * 1000.0
             notes.append("warmup=16tok cold load")
 
-        output, _, ttft_ms, generate_ms = await _timed_stream(payload, runner=runner)
+        output, _, ttft_ms, generate_ms, output_tokens = await _timed_stream(payload, runner=runner)
 
-    output_tokens = _estimate_tokens(output)
+    if output_tokens <= 0:
+        output_tokens = _estimate_tokens(output)
     tokens_per_sec = (
         output_tokens / (generate_ms / 1000.0) if generate_ms > 0 and output_tokens > 0 else 0.0
     )

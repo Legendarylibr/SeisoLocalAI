@@ -292,7 +292,7 @@ def _print_bench_row(row: dict) -> None:
     console.print(f"  load (cold):   {load_txt}")
     console.print(f"  TTFT:          {row.get('ttft_ms'):.1f} ms")
     console.print(f"  generate:      {row.get('generate_ms'):.1f} ms")
-    console.print(f"  output tokens: {row.get('output_tokens')} (~estimate)")
+    console.print(f"  output tokens: {row.get('output_tokens')}")
     console.print(
         f"  throughput:    [cyan]{row.get('tokens_per_sec'):.1f} tok/s[/]  ({row.get('ms_per_token'):.1f} ms/tok)"
     )

@@ -77,7 +77,7 @@ def test_iter_speculative_tokens_streams_matching_draft_and_target():
     )
 
     assert chunks
-    assert any("4" in chunk for chunk in chunks)
+    assert any("4" in chunk.text for chunk in chunks)
 
 
 @pytest.mark.asyncio
@@ -90,9 +90,11 @@ async def test_runner_routes_to_speculative_stream(monkeypatch):
     async def _noop_switch(_path: str, *, draft_path: str | None = None) -> None:
         seen["draft_path"] = draft_path or ""
 
+    from seiso.inference.streaming import StreamToken
+
     def _fake_speculative(_payload, _model_path, should_stop):
         assert not should_stop()
-        yield "spec"
+        yield StreamToken("spec")
 
     monkeypatch.setattr(runner, "_ensure_model_switch", _noop_switch)
     monkeypatch.setattr(runner, "_torch_speculative_stream", _fake_speculative)

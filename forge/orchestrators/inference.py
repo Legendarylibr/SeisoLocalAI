@@ -145,11 +145,16 @@ class InferenceOrchestrator(Orchestrator):
 
     async def stream_local(self, payload: dict[str, Any]) -> AsyncIterator[str]:
         """Stream tokens from local inference (llama.cpp, MLX, or Torch)."""
+        async for update in self.stream_local_updates(payload):
+            yield update.text
+
+    async def stream_local_updates(self, payload: dict[str, Any]) -> AsyncIterator[Any]:
+        """Stream local inference with cumulative output token counts."""
         user_id = payload.get("user_id")
         self._active_generation_user_id = str(user_id) if user_id else None
         try:
-            async for token in self._runner.stream(payload):
-                yield token
+            async for update in self._runner.stream_updates(payload):
+                yield update
         finally:
             if self._active_generation_user_id == (str(user_id) if user_id else None):
                 self._active_generation_user_id = None

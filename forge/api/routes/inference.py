@@ -718,10 +718,16 @@ async def chat(
         async def event_gen():
             if can_stream_router:
                 parts: list[str] = []
+                output_tokens = 0
                 try:
                     orchestrator._emit_log(job_id, "Streaming inference (smart router)")
                     async for token in orchestrator.stream_router(payload):
                         parts.append(token)
+                        output_tokens += 1
+                        yield {
+                            "event": "stats",
+                            "data": json.dumps({"output_tokens": output_tokens}),
+                        }
                         yield {"event": "token", "data": token}
                     content = "".join(parts)
                     if body.thread_id:
@@ -744,9 +750,13 @@ async def chat(
                 cancelled = False
                 try:
                     orchestrator._emit_log(job_id, f"Streaming inference ({backend_label})")
-                    async for token in orchestrator.stream_local(payload):
-                        raw_parts.append(token)
-                        for chunk in sanitizer.feed(token):
+                    async for update in orchestrator.stream_local_updates(payload):
+                        raw_parts.append(update.text)
+                        yield {
+                            "event": "stats",
+                            "data": json.dumps({"output_tokens": update.output_tokens}),
+                        }
+                        for chunk in sanitizer.feed(update.text):
                             streamed.append(chunk)
                             yield {"event": "token", "data": chunk}
                     for chunk in sanitizer.finish():
