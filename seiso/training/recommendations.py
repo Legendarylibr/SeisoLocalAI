@@ -2,12 +2,21 @@
 
 from __future__ import annotations
 
+import logging
+from pathlib import Path
 from typing import Any
 
 from seiso.hardware.training import training_defaults
 from seiso.memory.estimates import estimate_training_vram_gb, guess_params_from_name
 from seiso.models.catalog import _parse_param_size
 from seiso.models.trainable_snapshot import GGUF_ONLY_REPO_MESSAGE, is_gguf_only_repo_id
+from seiso.training.config import DatasetFormat
+from seiso.training.dataset_analysis import (
+    analysis_notes_for_recommendations,
+    analyze_training_dataset,
+)
+
+logger = logging.getLogger(__name__)
 
 _FALLBACK_TRAIN_REPO = "Qwen/Qwen2.5-0.5B-Instruct"
 
@@ -141,16 +150,40 @@ def _scale_for_model_size(base: dict[str, Any], params_b: float | None) -> dict[
     return cfg
 
 
+def _try_analyze_dataset(
+    dataset: str,
+    *,
+    sandbox_root: Path | None = None,
+) -> dict[str, Any] | None:
+    if not dataset.strip():
+        return None
+    try:
+        return analyze_training_dataset(
+            dataset,
+            dataset_format=DatasetFormat.AUTO,
+            sandbox_root=sandbox_root,
+        )
+    except Exception as exc:
+        logger.info("Dataset analysis unavailable for %s: %s", dataset, exc)
+        return None
+
+
 def recommend_training_config(
     profile: dict[str, Any],
     *,
     model_id: str = "",
     dataset: str = "",
+    sandbox_root: Path | None = None,
 ) -> dict[str, Any]:
     """Return suggested training knobs for the current hardware, model, and dataset."""
     defaults = training_defaults(profile)
     params_b = _model_params_b(model_id)
-    ds = _dataset_hints(dataset)
+    analysis = _try_analyze_dataset(dataset, sandbox_root=sandbox_root)
+    ds = (
+        analysis.get("recommended_config", {})
+        if analysis
+        else _dataset_hints(dataset)
+    )
     warnings: list[str] = []
     notes: list[str] = [defaults["note"]]
 
@@ -163,9 +196,9 @@ def recommend_training_config(
         "quant": defaults["quant"],
         "batch_size": defaults["batch_size"],
         "gradient_accumulation_steps": defaults["gradient_accumulation_steps"],
-        "max_seq_length": defaults["max_seq_length"],
+        "max_seq_length": ds.get("max_seq_length", defaults["max_seq_length"]),
         "learning_rate": 2e-4,
-        "epochs": 5,
+        "epochs": ds.get("epochs", 5),
         "lora_r": 16,
         "lora_alpha": 32,
         "gradient_checkpointing": defaults["gradient_checkpointing"],
@@ -173,13 +206,13 @@ def recommend_training_config(
         "use_fused_ce": defaults.get("use_fused_ce", True),
         "train_on_responses_only": ds.get("train_on_responses_only", True),
         "use_rslora": False,
-        "packing": False,
+        "packing": ds.get("packing", False),
         "dataset_format": ds.get("dataset_format", "auto"),
-        "preprocess_dataset": True,
-        "deduplicate_dataset": True,
+        "preprocess_dataset": ds.get("preprocess_dataset", True),
+        "deduplicate_dataset": ds.get("deduplicate_dataset", True),
         "max_eval_samples": 128,
-        "early_stopping": True,
-        "early_stopping_patience": 3,
+        "early_stopping": ds.get("early_stopping", True),
+        "early_stopping_patience": ds.get("early_stopping_patience", 3),
     }
     config = _scale_for_model_size(base_cfg, params_b)
 
@@ -200,7 +233,9 @@ def recommend_training_config(
             f"seq {config['max_seq_length']}."
         )
 
-    if ds.get("note"):
+    if analysis:
+        notes.extend(analysis_notes_for_recommendations(analysis))
+    elif ds.get("note"):
         notes.append(str(ds["note"]))
 
     est_vram_gb = None
@@ -211,7 +246,7 @@ def recommend_training_config(
             repo_id=model_id,
         )
 
-    return {
+    payload: dict[str, Any] = {
         "config": config,
         "warnings": warnings,
         "notes": notes,
@@ -221,3 +256,6 @@ def recommend_training_config(
         "fallback_train_repo": _FALLBACK_TRAIN_REPO,
         "hardware_tier": profile.get("tier_label") or profile.get("tier"),
     }
+    if analysis:
+        payload["dataset_analysis"] = analysis
+    return payload

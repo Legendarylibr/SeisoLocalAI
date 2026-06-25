@@ -42,9 +42,17 @@ def extract_messages(sample: dict[str, Any], fmt) -> list[dict[str, Any]]:
                 {"role": "user", "content": str(sample.get("question") or "")},
                 {"role": "assistant", "content": str(sample.get("answer") or "")},
             ]
+        if "prompt" in sample and ("completion" in sample or "response" in sample):
+            return [
+                {"role": "user", "content": str(sample.get("prompt") or "")},
+                {
+                    "role": "assistant",
+                    "content": str(sample.get("completion") or sample.get("response") or ""),
+                },
+            ]
         instruction = sample.get("instruction", "")
         inp = sample.get("input", "")
-        output = sample.get("output", "")
+        output = sample.get("output") or sample.get("response") or ""
         user = f"{instruction}\n{inp}".strip() if inp else instruction
         return [
             {"role": "user", "content": user},

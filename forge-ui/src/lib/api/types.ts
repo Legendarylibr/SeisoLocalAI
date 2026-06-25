@@ -342,6 +342,46 @@ export type TrainingJob = {
   created_at: string;
 };
 
+export type DatasetLengthStats = {
+  chars_min: number;
+  chars_p50: number;
+  chars_p95: number;
+  chars_max: number;
+  estimated_tokens_p95: number;
+};
+
+export type DatasetAnalysis = {
+  valid: boolean;
+  dataset: string;
+  split: string;
+  columns: string[];
+  initial_samples: number;
+  kept: number;
+  removed_invalid: number;
+  removed_duplicate: number;
+  utilization_pct: number;
+  resolved_format: string;
+  format_confidence: number;
+  domain: string;
+  domain_label: string;
+  length_stats: DatasetLengthStats;
+  recommended_config: {
+    dataset_format: string;
+    train_on_responses_only: boolean;
+    preprocess_dataset: boolean;
+    deduplicate_dataset: boolean;
+    max_seq_length: number;
+    epochs: number;
+    early_stopping: boolean;
+    early_stopping_patience: number;
+    packing: boolean;
+  };
+  notes: string[];
+  sample_preview: Record<string, string>[];
+  uses_full_dataset: boolean;
+  error?: string;
+};
+
 export type TrainingRecommendations = {
   config: {
     method: string;
@@ -373,6 +413,7 @@ export type TrainingRecommendations = {
   est_training_vram_gb?: number | null;
   fallback_train_repo?: string;
   hardware_tier?: string;
+  dataset_analysis?: DatasetAnalysis;
 };
 
 export type TrainableModel = {

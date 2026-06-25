@@ -91,9 +91,15 @@ def normalize_sample(sample: dict[str, Any], fmt: DatasetFormat) -> dict[str, An
             if not answer:
                 return None
             return {"question": question, "answer": answer}
+        if "prompt" in sample and ("completion" in sample or "response" in sample):
+            prompt = _strip_text(sample.get("prompt"))
+            completion = _strip_text(sample.get("completion") or sample.get("response"))
+            if not completion:
+                return None
+            return {"instruction": prompt, "output": completion}
         instruction = _strip_text(sample.get("instruction"))
         inp = _strip_text(sample.get("input"))
-        output = _strip_text(sample.get("output"))
+        output = _strip_text(sample.get("output") or sample.get("response"))
         if not output:
             return None
         if not instruction and not inp:
