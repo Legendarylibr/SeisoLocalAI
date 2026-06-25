@@ -358,32 +358,71 @@ def apply_fused_lora_kernels(
     return meta
 
 
-def _batched_base_qkv_forward(flat_x: Any, q_proj: Any, k_proj: Any, v_proj: Any) -> tuple[Any, Any, Any]:
-    """One einsum for Q/K/V base linear when weight shapes match (MHA)."""
+def _einsum_linear_batch(
+    flat_x: Any,
+    weights: tuple[Any, ...],
+    biases: tuple[Any | None, ...],
+) -> tuple[Any, ...]:
+    """Batched linear via one einsum when shapes match."""
     import torch
-
-    layers = (q_proj.base_layer, k_proj.base_layer, v_proj.base_layer)
-    weights = tuple(ly.weight for ly in layers)
-    if not (weights[0].shape == weights[1].shape == weights[2].shape):
-        return (
-            q_proj.base_layer(flat_x),
-            k_proj.base_layer(flat_x),
-            v_proj.base_layer(flat_x),
-        )
-
-    biases = tuple(getattr(ly, "bias", None) for ly in layers)
-    if any(b is not None for b in biases) and not all(b is not None for b in biases):
-        return (
-            q_proj.base_layer(flat_x),
-            k_proj.base_layer(flat_x),
-            v_proj.base_layer(flat_x),
-        )
 
     W = torch.stack(weights, dim=0)
     outs = torch.einsum("soi,bi->bso", W, flat_x)
     if all(b is not None for b in biases):
         outs = outs + torch.stack(biases, dim=0).unsqueeze(0)
     return outs.unbind(dim=1)
+
+
+def _layer_bias(layer: Any) -> Any | None:
+    return getattr(layer, "bias", None)
+
+
+def _supports_einsum_batch(layers: tuple[Any, ...]) -> bool:
+    """Quantized (bitsandbytes) base layers must use their own forward."""
+    for layer in layers:
+        cls = type(layer).__name__.lower()
+        if "bnb" in cls or "bitsandbytes" in cls:
+            return False
+        weight = getattr(layer, "weight", None)
+        if weight is not None and hasattr(weight, "quant_state"):
+            return False
+    return True
+
+
+def _bias_set_complete(biases: tuple[Any | None, ...]) -> bool:
+    return not any(b is not None for b in biases) or all(b is not None for b in biases)
+
+
+def _batched_base_qkv_forward(flat_x: Any, q_proj: Any, k_proj: Any, v_proj: Any) -> tuple[Any, Any, Any]:
+    """Batched base Q/K/V linear — full MHA or GQA (shared K/V shapes)."""
+    layers = (q_proj.base_layer, k_proj.base_layer, v_proj.base_layer)
+    weights = tuple(ly.weight for ly in layers)
+    biases = tuple(_layer_bias(ly) for ly in layers)
+
+    if not _bias_set_complete(biases) or not _supports_einsum_batch(layers):
+        return (
+            q_proj.base_layer(flat_x),
+            k_proj.base_layer(flat_x),
+            v_proj.base_layer(flat_x),
+        )
+
+    if weights[0].shape == weights[1].shape == weights[2].shape:
+        return _einsum_linear_batch(flat_x, weights, biases)
+
+    if weights[1].shape == weights[2].shape:
+        out_q = q_proj.base_layer(flat_x)
+        out_k, out_v = _einsum_linear_batch(
+            flat_x,
+            (weights[1], weights[2]),
+            (biases[1], biases[2]),
+        )
+        return out_q, out_k, out_v
+
+    return (
+        q_proj.base_layer(flat_x),
+        k_proj.base_layer(flat_x),
+        v_proj.base_layer(flat_x),
+    )
 
 
 def _get_active_lora_weights(module: Any, adapter: str) -> tuple[Any, Any, float] | None:
