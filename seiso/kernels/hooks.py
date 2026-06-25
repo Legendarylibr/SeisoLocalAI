@@ -323,11 +323,7 @@ def apply_fused_lora_kernels(
                 if dropout_p > 0 and self.training:
                     x_mod = F.dropout(x_mod, p=dropout_p)
 
-                if (
-                    _use_fused_cuda_kernels(x_mod)
-                    and rank <= max_rank
-                    and x_mod.dim() >= 2
-                ):
+                if rank <= max_rank and x_mod.dim() >= 2:
                     flat_x = x_mod.reshape(-1, x_mod.shape[-1])
                     if low_vram:
                         flat_out = result.reshape(-1, result.shape[-1])
@@ -360,6 +356,34 @@ def apply_fused_lora_kernels(
         target = "WSL2 CUDA" if platform.is_wsl2 else "CUDA"
         logger.info("Fused LoRA: %d layers patched (%s path)", patched, target)
     return meta
+
+
+def _batched_base_qkv_forward(flat_x: Any, q_proj: Any, k_proj: Any, v_proj: Any) -> tuple[Any, Any, Any]:
+    """One einsum for Q/K/V base linear when weight shapes match (MHA)."""
+    import torch
+
+    layers = (q_proj.base_layer, k_proj.base_layer, v_proj.base_layer)
+    weights = tuple(ly.weight for ly in layers)
+    if not (weights[0].shape == weights[1].shape == weights[2].shape):
+        return (
+            q_proj.base_layer(flat_x),
+            k_proj.base_layer(flat_x),
+            v_proj.base_layer(flat_x),
+        )
+
+    biases = tuple(getattr(ly, "bias", None) for ly in layers)
+    if any(b is not None for b in biases) and not all(b is not None for b in biases):
+        return (
+            q_proj.base_layer(flat_x),
+            k_proj.base_layer(flat_x),
+            v_proj.base_layer(flat_x),
+        )
+
+    W = torch.stack(weights, dim=0)
+    outs = torch.einsum("soi,bi->bso", W, flat_x)
+    if all(b is not None for b in biases):
+        outs = outs + torch.stack(biases, dim=0).unsqueeze(0)
+    return outs.unbind(dim=1)
 
 
 def _get_active_lora_weights(module: Any, adapter: str) -> tuple[Any, Any, float] | None:
@@ -442,15 +466,6 @@ def _patch_fused_qkv_projections(
             if self.disable_adapters or not self.active_adapters:
                 return self.base_layer(x, *args, **kwargs)
 
-            if not _use_fused_cuda_kernels(x):
-                result = self.base_layer(x, *args, **kwargs)
-                for adapter in self.active_adapters:
-                    if adapter in self.lora_A:
-                        result = result + self.lora_B[adapter](self.lora_A[adapter](x)) * self.scaling[
-                            adapter
-                        ]
-                return result
-
             if _proj_slot(self) == 0:
                 cache["key"] = None
                 cache["outs"] = None
@@ -470,9 +485,12 @@ def _patch_fused_qkv_projections(
             flat_x = x_mod.reshape(-1, x_mod.shape[-1])
             cache_key = (flat_x.data_ptr(), tuple(flat_x.shape), flat_x._version, adapters)
             if cache["key"] != cache_key:
-                out_q = attn_module.q_proj.base_layer(flat_x)
-                out_k = attn_module.k_proj.base_layer(flat_x)
-                out_v = attn_module.v_proj.base_layer(flat_x)
+                out_q, out_k, out_v = _batched_base_qkv_forward(
+                    flat_x,
+                    attn_module.q_proj,
+                    attn_module.k_proj,
+                    attn_module.v_proj,
+                )
                 try:
                     if not _apply_adapter_qkv_delta(flat_x, out_q, out_k, out_v, adapter):
                         return _fallback_projection(self, x, *args, **kwargs)
