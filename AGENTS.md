@@ -14,6 +14,7 @@ Key commands:
 - `seiso doctor [--network]`
 - `seiso forge` (then open browser)
 - `seiso train --config configs/example_lora.yaml`
+- `seiso experiment quant-regression -c configs/examples/quant_regression_study.yaml` (research)
 - `make ci-fast` (or `python3 scripts/run_ci_local.py --fast`)
 
 ## Rules of thumb
@@ -42,7 +43,7 @@ Do not relax sandbox or crypto defaults without a very strong documented reason 
 ## Extending common areas (pointers)
 
 - **New training preset / recs**: `seiso/training/recommendations.py`, `seiso/training/dataset_analysis.py`, `seiso/training/practices.py`, `platform_caps.py`, example YAML in `configs/`. Update TrainPage + `docs/training/quickstart.md` if new knobs appear. Run `pytest tests/test_docs_accuracy.py`.
-- **New kernel op**: Add to `seiso/kernels/cuda/` + dispatch + hooks + tests. Update low-VRAM profile logic.
+- **New kernel op**: Add to `seiso/kernels/cuda/` + `cuda_ops.py` + dispatch + hooks + tests. Update low-VRAM profile logic.
 - **New pipeline stage (compress/distill/rl)**: Update the stage router / config builder + manifest + the corresponding orchestrator + page.
 - **New inference backend**: `seiso/inference/backends.py` + model pool + runner + UI picker.
 - **Export format**: `seiso/export/formats.py` + gguf helpers + profiles.

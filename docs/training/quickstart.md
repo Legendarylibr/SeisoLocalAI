@@ -113,7 +113,12 @@ save_steps: 50
 | `use_triton` | Enable fused RMSNorm + SwiGLU MLP |
 | `use_fused_ce` | Fused cross-entropy in SFTTrainer |
 | `use_fused_lora` | Fused LoRA delta kernel (CUDA) |
+| `use_rslora` | Rank-stabilized LoRA (RSLoRA) |
 | `neftune_noise_alpha` | NEFTune noise for instruction tuning (`null` disables) |
+| `early_stopping` | Stop when eval loss plateaus (uses `eval_split_ratio` / `max_eval_samples`) |
+| `deterministic` | Reproducible seeds and CUDA settings (`false` enables TF32 + cuDNN benchmark on CUDA) |
+| `torch_compile` | Opt-in `torch.compile` on CUDA |
+| `extra` | Extension dict — e.g. `use_fused_lora_qkv: true` for batched attention LoRA (see [kernels.md](kernels.md)) |
 | `packing` | Sequence packing (large plain-text corpora) |
 | `padding_free` | Padding-free packing with flash attention (CUDA + packing) |
 | `multi_gpu` | Enable distributed training (or Forge checkbox) |

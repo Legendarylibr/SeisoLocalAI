@@ -1,7 +1,7 @@
 # SeisoLocalAI Project Analysis
 
-**Date:** 2026-06-24  
-**Source:** Local clone at `/home/c/Seiso` (remote GitHub 404 at time of analysis — https://github.com/legendarylibr/SeisoLocalAI)  
+**Date:** 2026-06-25  
+**Source:** Local clone at `/home/c/Seiso` — [github.com/Legendarylibr/SeisoLocalAI](https://github.com/Legendarylibr/SeisoLocalAI)  
 **Analyst context:** Full source tree + populated `~/.seiso`, prior usage artifacts, successful UI build + partial CI runs on RTX 4090 Linux host.
 
 This document provides a software engineering analysis: architecture, features, code health, security, platform notes, WIP status, and actionable recommendations.
@@ -31,9 +31,7 @@ Seiso is a **mature, ambitious local-first AI workspace** (GPL-3.0) that combine
 - Two consistent surfaces (CLI + UI) sharing the same core runners/orchestrators.
 - Comprehensive docs + smoke presets + local CI gate.
 
-**Current state:** Marked WIP in README. Usable today for chat, training, export on supported hardware. Advanced pipelines (compress/RL/distill) rely on vendored code and optional extras; best on Linux + NVIDIA. Some style debt (imports, simplifications) and a modest number of pre-existing lint baseline issues. One hardware enumeration test is flaky in this env.
-
-Remote repo currently inaccessible; local tree is the source of truth.
+**Current state:** Alpha (`pyproject.toml` Development Status :: 3). Usable today for chat, training, export on supported hardware. Advanced pipelines (compress/RL/distill) rely on vendored code and optional extras; best on Linux + NVIDIA. Research CLI `seiso experiment quant-regression` compares multi-quant train → GGUF export → deploy eval. Some style debt (imports, simplifications) and a modest number of pre-existing lint baseline issues. One hardware enumeration test is flaky in this env.
 
 ---
 
@@ -51,7 +49,7 @@ User
         └── db (aiosqlite + field-level AES-GCM crypto)
 ```
 
-- **Core** (`seiso/`): Training, inference, export, kernels, compress, distill_rl, rl_quant, models, hardware, memory, platform, security helpers, vendor wrappers.
+- **Core** (`seiso/`): Training, inference, export, kernels, compress, distill_rl, rl_quant, experiments, models, hardware, memory, platform, security helpers, vendor wrappers.
 - **Forge** (`forge/`): Web server, job orchestration + SSE streaming, persistence, auth/onboarding, security middleware, model registry/inventory, OpenAI compat.
 - **UI** (`forge-ui/`): React + TS + Vite + xyflow (recipes). Talks REST + SSE. Built assets served by Forge SPA fallback.
 - **Vendoring**: `third_party/{codellama-compress, adaptive-rl-quant}` bootstrapped at runtime (no pip). Seiso provides config translation, job wrapping, UI/CLI surfaces, kernel bridge, manifests.
@@ -79,7 +77,7 @@ User
 - **Repro**: Manifests (hash chained via vendored replay), provenance, seeds, snapshots.
 - **Inference**: Model pool with unload, backends auto-select, speculative, context limits, router mode.
 
-Entry points: `start` script, `seiso` CLI (many subcommands), `forge.main:create_app`, `seiso-train-worker`, `seiso-bench-kernels`.
+Entry points: `start` script, `seiso` CLI (`forge`, `train`, `chat`, `export`, `compress`, `distill-rl`, `rl-quant`, `experiment`, `router`, …), `forge.main:create_app`, `seiso-train-worker`, `seiso-bench-kernels`.
 
 ---
 
@@ -126,8 +124,13 @@ Entry points: `start` script, `seiso` CLI (many subcommands), `forge.main:create
 - `seiso/rl_quant/{runner.py,config_builder.py,sweep.py,kernel_integration.py}`
 - Heavy use of vendored adaptive-rl-quant.
 
+### Quant regression experiments
+- `seiso experiment quant-regression` — multi-quant QLoRA training, GGUF export, HF + llama.cpp deploy-quant regression.
+- `seiso/experiments/{quant_regression.py,hf_deploy_regression.py}`
+- Config: `configs/examples/quant_regression_study.yaml`
+
 ### Fused Kernels (unique strength)
-- Native CUDA (rms_norm, swiglu, lora_delta, cross_entropy) + Triton + PyTorch fallback.
+- Native CUDA (rms_norm, swiglu, lora_delta, lora_qkv, cross_entropy) + Triton + PyTorch fallback.
 - Temporary forward patches + strict restore + empty_cache.
 - Low-VRAM modes, auto-tune, discrete profiles selectable by RL or heuristics.
 - `seiso/kernels/{dispatch.py,hooks.py,platform.py,loss.py,lifecycle.py,tuning.py,training_profile.py,cuda/*,triton_ops.py}`
@@ -209,7 +212,7 @@ All three changes are **correct and minimal**:
 - MLX absent (correct for Linux).
 - "Hub ready for download" / "Local chat runtime ready" can be False without token or downloaded models (expected).
 
-**Key optional extras** (see pyproject.toml): `.[forge,train,cuda,llamacpp,mlx,compress-quant,compress-eval,router,dev,flash-attn]`.
+**Key optional extras** (see pyproject.toml): `.[forge,train,cuda,llamacpp,mlx,compress-quant,compress-eval,router,dev,flash-attn]`. RL quant has no separate extra — it uses `.[train]` plus vendored bootstrap.
 
 External: llama.cpp (convert/quantize binaries managed by scripts), nvcc for CUDA JIT kernels.
 
@@ -237,7 +240,6 @@ External: llama.cpp (convert/quantize binaries managed by scripts), nvcc for CUD
 2. Clean the few obvious F401 / unused in tests and experiments.
 3. Ensure TrainPage recommendation effect also considers `configCustomized` in more places if needed; consider surfacing "applied from recs" indicator.
 4. Document the `error_text` field in API response shapes / UI job lists if not already.
-5. Add a one-line note in README about current remote repo status (or mirror).
 
 ### Medium
 - Improve hardware enumeration robustness (the failing test) or mark it xfail/skip with reason.

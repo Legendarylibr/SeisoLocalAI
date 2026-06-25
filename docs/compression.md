@@ -24,12 +24,13 @@ Optional per pipeline:
 |-------|---------|
 | `.[compress-quant]` | GPTQ / AWQ for LLM compression pipeline (Linux NVIDIA; needs train stack) |
 | `.[compress-eval]` | lm-eval harness for LLM compression evaluate stage |
-| `.[rl-quant]` | Integrated adaptive RL quant (stdlib; no extra deps) |
+
+RL quant uses the integrated `seiso/rl_quant/` bridge (vendored `third_party/adaptive-rl-quant` bootstrapped at runtime). No separate pip extra — install `.[train]` for GPU stages.
 
 Install example:
 
 ```bash
-pip install -e ".[compress-quant,compress-eval,rl-quant]"
+pip install -e ".[compress-quant,compress-eval]"
 ```
 
 If GPTQ build fails on Linux NVIDIA:
@@ -209,7 +210,7 @@ CLI writes under `{SEISO_DATA_DIR}/rl_quant/cli/<job_id>/`.
 
 1. `seiso forge` → **RL Quant** (`/rl-quant`)
 2. Enable **CUDA kernel RL** optionally; choose preset and checkpoint/GGUF paths
-3. Toggle auto-sweep in experiment config
+3. Toggle auto-sweep in the job config (or disable with `--no-auto-sweep` on CLI)
 
 ### CLI
 

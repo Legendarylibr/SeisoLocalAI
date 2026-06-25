@@ -347,6 +347,7 @@ Forge details: **[docs/forge.md](docs/forge.md)**
 | `seiso distill-rl presets` | List distill-RL presets and stages |
 | `seiso rl-quant run` | RL quantization (+ optional `--kernel-rl`) |
 | `seiso rl-quant profiles` | List CUDA kernel RL launch profiles |
+| `seiso experiment quant-regression` | Multi-quant train + GGUF export + deploy-quant regression study |
 | `seiso inference` | One-shot inference |
 | `seiso bench-inference` | Inference load / TTFT / tok/s benchmark |
 | `seiso-bench-kernels` | Benchmark fused GPU training kernels |
@@ -364,6 +365,9 @@ seiso rl-quant run --preset minimal --kernel-rl --training-episodes 256
 
 # Example: distill-RL smoke (teacher → DPO)
 seiso distill-rl run --preset smoke
+
+# Example: quant regression study (train → export → eval)
+seiso experiment quant-regression -c configs/examples/quant_regression_study.yaml
 ```
 
 Full reference: **[docs/cli.md](docs/cli.md)**
@@ -374,7 +378,7 @@ Full reference: **[docs/cli.md](docs/cli.md)**
 
 ```
 Seiso/
-├── seiso/              # Core library — training, inference, export, kernels, compression
+├── seiso/              # Core library — training, inference, export, kernels, compression, experiments
 ├── seiso_cli/          # CLI: seiso, seiso-bench-kernels, seiso-train-worker
 ├── forge/              # FastAPI backend, auth, orchestrators, SSE job streaming
 ├── forge-ui/           # React 19 + TypeScript + Vite frontend
@@ -398,6 +402,7 @@ Backend orchestrators spawn isolated workers with **SSE log streaming**:
 | `forge/orchestrators/compress` | LLM distillation, pruning, quant |
 | `forge/orchestrators/distill_rl` | Teacher distill + DPO preference alignment |
 | `forge/orchestrators/rl_quant` | Adaptive RL GGUF quant policy |
+| `forge/orchestrators/hub_publish` | Hugging Face Hub publish jobs (via Export) |
 
 Training stack: **TRL `SFTTrainer`** + **PEFT** (LoRA/QLoRA) + optional **fused CUDA/Triton kernels**.
 
@@ -501,8 +506,8 @@ All user data lives under **`SEISO_DATA_DIR`** (default below):
 ```
 {SEISO_DATA_DIR}/
 ├── hf_cache/         # Hugging Face hub cache (downloaded weights)
-├── hf_home/          # HF_HOME mirror (when configured by Seiso)
-├── hf_xet_cache/     # hf-xet transfer cache
+├── hf_home/          # HF_HOME mirror (created on first Hub configure)
+├── hf_xet_cache/     # hf-xet transfer cache (created on first Hub configure)
 ├── hf_tokens/        # Encrypted Hugging Face tokens (per user)
 ├── models/           # Per-user inventory links to cached weights
 ├── checkpoints/      # Training outputs (per user)
@@ -647,6 +652,7 @@ Seiso is licensed under the **GNU General Public License v3.0 (GPL-3.0)**. See [
 | Documentation hub | [docs/README.md](docs/README.md) |
 | Forge UI & API | [docs/forge.md](docs/forge.md) |
 | CLI commands | [docs/cli.md](docs/cli.md) |
+| Quant regression study | [docs/cli.md § seiso experiment](docs/cli.md#seiso-experiment) |
 | Training | [docs/training/quickstart.md](docs/training/quickstart.md) |
 | GPU kernels | [docs/training/kernels.md](docs/training/kernels.md) |
 | Multi-GPU | [docs/training/multi-gpu.md](docs/training/multi-gpu.md) |
@@ -666,7 +672,8 @@ Seiso’s local chat and Smart Router build on these inference projects:
 | Project | Role in Seiso |
 |---------|----------------|
 | [**llama.cpp**](https://github.com/ggml-org/llama.cpp) | Default GGUF chat backend (`llama-cpp-python`, `llama-server` in router stacks) |
-| [**vLLM**](https://github.com/vllm-project/vllm) | GPU specialist serving for the Smart Router (sleep-mode stacks, Nemotron orchestrator) |
+| [**vLLM**](https://github.com/vllm-project/vllm) | GPU specialist serving for the Smart Router (sleep-mode stacks) |
+| [**Nemotron-Orchestrator-8B**](https://huggingface.co/nvidia/Nemotron-Orchestrator-8B) | NVIDIA ToolOrchestra routing model — picks general / code / reasoning specialists on vLLM Smart Router stacks (`routing_mode: nemotron`) |
 | [**LiteLLM**](https://github.com/BerriAI/litellm) | Completion dispatch on vLLM router stacks (local `hosted_vllm/*` + optional cloud APIs) |
 
 Install router extras: `pip install -e ".[router]"`. vLLM stacks are started via `start-router-vllm` or `seiso router --stack vllm` (see [Smart Router quick start](#smart-router-quick-start-vllm--litellm)).

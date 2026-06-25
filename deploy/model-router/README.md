@@ -32,7 +32,7 @@ llama.cpp routes rely on llama-swap TTL for unloading cold models; the router do
 
 ```bash
 cd SeisoLocalAI
-pip install -e ".[forge]"
+pip install -e ".[router]"
 
 # Router only (point router.local.yaml at your llama.cpp / llama-swap URLs)
 seiso router --config deploy/model-router/config/router.local.yaml

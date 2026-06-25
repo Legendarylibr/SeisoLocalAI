@@ -218,6 +218,38 @@ Forge equivalent: **RL Quant** page (`/rl-quant`) or `POST /api/rl-quant/jobs`.
 
 Config reference: `configs/rl_quant_smoke.json`.
 
+## `seiso experiment`
+
+Research benchmarks and regression studies (headless; no Forge server required).
+
+### `seiso experiment quant-regression`
+
+Train one model at several QLoRA quants, export GGUFs, and measure deployment-quant regression (HF merged-weight eval and/or llama.cpp route eval).
+
+```bash
+# Default study config (Qwen 3B + MetaMathQA)
+seiso experiment quant-regression
+
+# Custom base training YAML (quant overridden per run)
+seiso experiment quant-regression -c configs/examples/quant_regression_study.yaml
+
+# Compare training quants and GGUF export variants
+seiso experiment quant-regression \
+  --quants 4bit,8bit,16bit \
+  --gguf-quants q4_k_m,q8_0,f16 \
+  --measurement both
+
+# Reuse checkpoints from a prior study
+seiso experiment quant-regression --study-dir ~/.seiso/experiments/my-study --skip-training
+
+# Machine-readable report
+seiso experiment quant-regression --json
+```
+
+Requires `.[train]` and `llama.cpp` (`LLAMA_CPP_DIR` or system `convert_hf_to_gguf`) for GGUF export / route eval. Outputs land under the study `output_dir` from the base YAML (default example: `~/.seiso/experiments/quant-regression-qwen3b-metamath/`).
+
+Config reference: `configs/examples/quant_regression_study.yaml`.
+
 ## `seiso router`
 
 Smart Router gateway — routes chat to specialists (llama.cpp or vLLM). vLLM stacks execute completions through **LiteLLM**.
