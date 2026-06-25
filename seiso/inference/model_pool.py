@@ -195,14 +195,24 @@ def _llama_speed_extras(model_path: str) -> dict[str, Any]:
         extras["swa_full"] = False
 
     if env_bool("SEISO_LLAMA_KV_QUANT", True) and weight_mb >= 12000:
+        # Q8 KV cache can fail llama_context init when VRAM is tight or the model
+        # runs CPU-only — only enable when headroom can cover weights + KV buffers.
         try:
-            from llama_cpp import llama_cpp as lc
+            from seiso.memory.protection import headroom_mb
 
-            extras["type_k"] = lc.GGML_TYPE_Q8_0
-            extras["type_v"] = lc.GGML_TYPE_Q8_0
+            if headroom_mb() >= int(weight_mb * 0.55):
+                from llama_cpp import llama_cpp as lc
+
+                extras["type_k"] = lc.GGML_TYPE_Q8_0
+                extras["type_v"] = lc.GGML_TYPE_Q8_0
         except ImportError:
             pass
     return extras
+
+
+def _llama_kv_quant_kwargs(extras: dict[str, Any]) -> dict[str, Any]:
+    """Return type_k/type_v entries when present (for stripping on retry)."""
+    return {k: extras[k] for k in ("type_k", "type_v") if k in extras}
 
 
 def _llama_gpu_layers_optimal(model_path: str, requested: int) -> int:
@@ -306,52 +316,66 @@ def _load_llama_model(path: str, n_ctx: int) -> Any:
         pass
 
     kwargs = llama_load_kwargs(n_ctx, model_path=path)
-    kwargs.update(_llama_speed_extras(path))
+    speed_extras = _llama_speed_extras(path)
+    kv_quant = _llama_kv_quant_kwargs(speed_extras)
     requested = env_int("SEISO_LLAMA_GPU_LAYERS", _default_llama_gpu_layers())
     if requested != 0 and not _llama_gpu_offload_ok():
         requested = 0
     attempts = _llama_layer_attempts(path, requested, headroom_mb())
 
     last_exc: Exception | None = None
-    seen: set[int] = set()
+    seen: set[tuple[int, bool]] = set()
     for attempt in attempts:
-        if attempt in seen:
-            continue
-        seen.add(attempt)
-        load_kwargs = dict(kwargs)
-        load_kwargs["n_gpu_layers"] = attempt
-        load_kwargs["offload_kqv"] = attempt != 0
-        load_kwargs.pop("_model_path", None)
-        try:
-            llm = Llama(model_path=path, **load_kwargs)
-            llm._seiso_n_gpu_layers = attempt  # noqa: SLF001
-            if attempt > 0:
-                from seiso.inference.backends import gguf_block_count
+        for use_kv_quant in (True, False) if kv_quant else (False,):
+            key = (attempt, use_kv_quant)
+            if key in seen:
+                continue
+            seen.add(key)
+            load_kwargs = dict(kwargs)
+            load_kwargs.update(speed_extras)
+            if not use_kv_quant:
+                load_kwargs.pop("type_k", None)
+                load_kwargs.pop("type_v", None)
+            load_kwargs["n_gpu_layers"] = attempt
+            load_kwargs["offload_kqv"] = attempt != 0
+            load_kwargs.pop("_model_path", None)
+            try:
+                llm = Llama(model_path=path, **load_kwargs)
+                llm._seiso_n_gpu_layers = attempt  # noqa: SLF001
+                if attempt > 0:
+                    from seiso.inference.backends import gguf_block_count
 
-                total_layers = gguf_block_count(path) or 64
-                if attempt < total_layers:
-                    logger.warning(
-                        "Partial GPU offload for %s: %d/%d layers (~%.1f GB free) — "
-                        "close other GPU apps for ~3× faster generation",
-                        Path(path).name,
+                    total_layers = gguf_block_count(path) or 64
+                    if attempt < total_layers:
+                        logger.warning(
+                            "Partial GPU offload for %s: %d/%d layers (~%.1f GB free) — "
+                            "close other GPU apps for ~3× faster generation",
+                            Path(path).name,
+                            attempt,
+                            total_layers,
+                            headroom_mb() / 1024,
+                        )
+                attach_llama_prompt_cache(llm)
+                return llm
+            except ValueError as exc:
+                if not _llama_load_retryable(exc):
+                    raise
+                last_exc = exc
+                release_cached_memory(sync=True)
+                if use_kv_quant and kv_quant:
+                    logger.debug(
+                        "llama.cpp load failed at n_gpu_layers=%s with KV quant — retrying without",
                         attempt,
-                        total_layers,
-                        headroom_mb() / 1024,
                     )
-            attach_llama_prompt_cache(llm)
-            return llm
-        except ValueError as exc:
-            if not _llama_load_retryable(exc):
-                raise
-            last_exc = exc
-            release_cached_memory(sync=True)
-            logger.warning("llama.cpp load failed at n_gpu_layers=%s — retrying", attempt)
+                    continue
+                logger.warning("llama.cpp load failed at n_gpu_layers=%s — retrying", attempt)
 
     free_gb = round(headroom_mb() / 1024, 1)
     need_gb = round(estimate_path_vram_mb(path) / 1024, 1)
     raise RuntimeError(
-        f"Could not load model — needs ~{need_gb} GB VRAM but only ~{free_gb} GB is free. "
-        "Close other GPU apps (browser, games), unload the previous model, or pick a smaller quant."
+        f"Could not load model — needs ~{need_gb} GB GPU/RAM headroom but only ~{free_gb} GB is free. "
+        "Close other GPU apps (browser, games, other llama.cpp sessions), unload the previous model, "
+        "or pick a smaller quant."
     ) from last_exc
 
 
