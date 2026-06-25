@@ -122,10 +122,20 @@ Knowledge-base ingest and retrieve are also available via API (`/api/knowledge/.
 | `/api/knowledge` | RAG ingest and retrieve |
 | `/api/providers` | External LLM provider configs |
 | `/api/system` | Hardware detection, metrics |
+| `/api/settings` | App settings, HF token, security posture |
 | `/health` | Liveness check |
 | `/v1/chat/completions` | OpenAI-compatible chat (no `/api` prefix) |
 
 Set `SEISO_DEBUG=true` to expose interactive API docs at `/api/docs`.
+
+### Settings API
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `GET` | `/api/settings` | Host, port, data dir, inference backends, HF auth summary, security posture |
+| `PUT` | `/api/settings/hf-token` | Save and validate per-user Hugging Face token |
+| `DELETE` | `/api/settings/hf-token` | Clear saved per-user HF token |
+| `GET` | `/api/settings/hf-status` | Hub connectivity, transfer stack, inference runtime probe |
 
 ### Training API
 
@@ -175,5 +185,10 @@ Copy `.env.example` to `.env` in the repo root. Key settings:
 | `SEISO_ALLOW_TOOLS` | `false` | Web search, artifacts |
 | `SEISO_ALLOW_CODE_EXEC` | `false` | Sandboxed `execute_code` tool |
 | `SEISO_ALLOW_OPENAI_TOOLS` | `false` | Tool calling on `/v1/chat/completions` |
+| `SEISO_RATE_LIMIT` | `120` | Requests/minute per IP when `SEISO_ALLOW_REMOTE=true` |
+| `SEISO_SESSION_HOURS` | `24` | Signed session lifetime |
+| `SEISO_MEMORY_PROFILE` | — | Set to `low` for lean RAM / llama.cpp tuning (see `.env.example`) |
+| `SEISO_MODEL_ROUTER_ENABLED` | `false` | Enable Smart Router model in Chat |
+| `SEISO_MODEL_ROUTER_URL` | — | Router base URL (e.g. `http://127.0.0.1:8780`) |
 
 HTTPS reverse-proxy deployment: [deployment/reverse-proxy.md](deployment/reverse-proxy.md) and [deploy/README.md](../deploy/README.md).

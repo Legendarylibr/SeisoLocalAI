@@ -137,3 +137,45 @@ def test_repository_layout_snippet_matches_core_packages():
     assert "dataset analysis" in quickstart
     assert (REPO_ROOT / "seiso/training/dataset_analysis.py").is_file()
     assert (REPO_ROOT / "seiso/training/practices.py").is_file()
+
+
+def test_cli_docs_cover_experiment_command():
+    """seiso experiment quant-regression must appear in user-facing CLI docs."""
+    cli_doc = _read("docs/cli.md")
+    readme = _read("README.md")
+    assert "seiso experiment" in cli_doc
+    assert "quant-regression" in cli_doc
+    assert "configs/examples/quant_regression_study.yaml" in cli_doc
+    assert "seiso experiment" in readme and "quant-regression" in readme
+
+
+def test_docs_do_not_reference_nonexistent_rl_quant_extra():
+    """pyproject.toml has no [rl-quant] optional extra — docs must not claim one."""
+    for rel in ("docs/compression.md", "docs/install.md"):
+        text = _read(rel)
+        assert ".[rl-quant]" not in text, f"{rel} references nonexistent .[rl-quant] extra"
+        assert "`rl-quant`" not in text or "seiso rl-quant" in text or "rl_quant/" in text, (
+            f"{rel} may list rl-quant as pip extra"
+        )
+
+
+def test_forge_doc_covers_settings_api():
+    forge_doc = _read("docs/forge.md")
+    for fragment in (
+        "/api/settings",
+        "/api/settings/hf-token",
+        "/api/settings/hf-status",
+    ):
+        assert fragment in forge_doc
+
+
+def test_install_doc_lists_router_extra():
+    install = _read("docs/install.md")
+    assert "`router`" in install
+    assert "litellm" in install.lower() or "LiteLLM" in install or "Smart Router" in install
+
+
+def test_quickstart_extra_field_documents_fused_lora_qkv():
+    quickstart = _read("docs/training/quickstart.md")
+    assert "use_fused_lora_qkv" in quickstart
+    assert "`extra`" in quickstart

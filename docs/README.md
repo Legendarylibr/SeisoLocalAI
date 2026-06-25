@@ -27,6 +27,7 @@ Start with **[getting-started.md](getting-started.md)** — a step-by-step walkt
 | Export to GGUF or Hugging Face Hub | [getting-started.md § Step 6](getting-started.md#step-6--export-and-deploy) · [cli.md](cli.md) |
 | Compress / distill / quantize models | [compression.md](compression.md) |
 | Teacher distill + DPO alignment | [cli.md § seiso distill-rl](cli.md#seiso-distill-rl) · [compression.md](compression.md) |
+| Quant regression study (train → export → eval) | [cli.md § seiso experiment](cli.md#seiso-experiment) |
 | Build a local RAG corpus | [forge.md](forge.md) · `/knowledge` |
 | Enable fused GPU kernels | [training/kernels.md](training/kernels.md) |
 | Train on multiple GPUs | [training/multi-gpu.md](training/multi-gpu.md) |
@@ -77,7 +78,7 @@ See [install.md](install.md) and [forge.md](forge.md) for full details.
 ### Path B — CLI / automation
 
 1. [install.md](install.md) — pip extras per platform
-2. [cli.md](cli.md) — full command reference
+2. [cli.md](cli.md) — full command reference (`seiso experiment` for research studies)
 3. [training/quickstart.md](training/quickstart.md) — YAML config fields
 4. [inference/backends.md](inference/backends.md) — backend selection and [memory management](inference/backends.md#memory-management)
 
@@ -159,6 +160,9 @@ seiso rl-quant run --preset minimal --kernel-rl
 # Distill-RL (CLI → $SEISO_DATA_DIR/distill_rl/cli/<job_id>/; smoke preset uses gpt2)
 seiso distill-rl run --preset smoke
 
+# Quant regression study (CLI → study output_dir in YAML)
+seiso experiment quant-regression -c configs/examples/quant_regression_study.yaml
+
 # LLM compression (CLI → $SEISO_DATA_DIR/compress/local/cli/runs/<run_id>/)
 seiso compress run --preset smoke
 
@@ -188,6 +192,8 @@ Seiso/
 │   ├── export/         # Merge, GGUF, Hub publish
 │   ├── compress/       # LLM compression bootstrap
 │   ├── distill_rl/     # Teacher distill + DPO pipeline
+│   ├── rl_quant/       # Adaptive RL quant + kernel policy bridge
+│   ├── experiments/    # Research studies (quant regression, HF deploy eval)
 │   └── security/       # NVIDIA boundary gates
 ├── seiso_cli/          # CLI entrypoints
 ├── forge/              # FastAPI backend

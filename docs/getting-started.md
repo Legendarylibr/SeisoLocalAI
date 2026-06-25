@@ -193,6 +193,7 @@ GGUF export requires `llama.cpp` (set `LLAMA_CPP_DIR` or install system `convert
 | External providers (OpenAI, vLLM) | `/integrations` | [forge.md](forge.md) |
 | Multi-GPU training | Training Studio checkbox | [training/multi-gpu.md](training/multi-gpu.md) |
 | Fused GPU kernels | Training config / Studio | [training/kernels.md](training/kernels.md) |
+| Quant regression study (CLI) | `seiso experiment quant-regression` | [cli.md](cli.md#seiso-experiment) |
 | HTTPS / LAN access | `deploy/` + `.env` | [deployment/reverse-proxy.md](deployment/reverse-proxy.md) |
 
 ## Data directory layout
@@ -207,8 +208,8 @@ Default data directory (override with `SEISO_DATA_DIR`):
 ```
 {SEISO_DATA_DIR}/
 ├── hf_cache/         # Hugging Face hub cache (GGUF / safetensors downloads)
-├── hf_home/          # HF_HOME (when set by Seiso)
-├── hf_xet_cache/     # hf-xet transfer cache
+├── hf_home/          # HF_HOME mirror (created on first Hub configure)
+├── hf_xet_cache/     # hf-xet transfer cache (created on first Hub configure)
 ├── hf_tokens/        # Encrypted Hugging Face tokens
 ├── models/           # Per-user inventory links to cached weights
 ├── checkpoints/      # Training outputs (per user)

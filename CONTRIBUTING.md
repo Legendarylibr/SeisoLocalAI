@@ -14,7 +14,7 @@ Thanks for helping improve Seiso.
 |------|---------|
 | `forge/` | FastAPI backend for Forge |
 | `forge-ui/` | React UI |
-| `seiso/` | Core training, inference, and export library |
+| `seiso/` | Core training, inference, export, compression, and research library |
 | `seiso_cli/` | CLI entry points |
 | `docs/` | User and developer documentation |
 | `tests/` | Python tests |
