@@ -66,8 +66,28 @@ python -m seiso.kernels.benchmark --rows 4096 --hidden 4096 --dtype bfloat16
 seiso train --config configs/smoke_train_gpu_e2e.yaml
 ```
 
+## Follow-up fixes (post-8dd09eb)
+
+| Area | Fix |
+|------|-----|
+| `seiso/kernels/dispatch.py` | Autograd-safe PyTorch fallback for `fused_swiglu`, `fused_mlp_swiglu`, and CUDA RMSNorm when any operand requires grad; Triton RMSNorm guard now includes `residual` |
+| `seiso/kernels/dispatch.py` | GQA LoRA QKV: stack shared-rank K/V `A @ x` when Q rank differs |
+| `seiso/kernels/hooks.py` | GQA base QKV: batch K/V `einsum` when shapes match; skip einsum on bitsandbytes 4-bit base layers |
+| `tests/test_fused_lora_qkv_training.py` | GQA + training autograd regression coverage |
+
+### Re-benchmark (RTX 4090, 2026-06-25)
+
+Per-op (bf16, 4096×4096): RMSNorm 1.91×, SwiGLU 1.31×, CE 1.23×.
+
+End-to-end training step (Qwen2.5-0.5B, bf16 LoRA, batch 2, seq 256):
+
+| Config | `train_runtime` | Steps/sec |
+|--------|-----------------|-----------|
+| Baseline (no fused kernels) | 1.23 s | 0.81 |
+| Fused kernels + QKV (this follow-up) | 0.97 s | 1.03 |
+
 ## Remaining limits
 
 - **QLoRA 4-bit:** CUDA graph capture is still skipped (bitsandbytes layers are not graph-safe).
-- **RMSNorm / MLP fusion:** Native CUDA paths remain inference-oriented; training forward uses PyTorch when `requires_grad=True`.
-- **GQA models:** Batched base QKV `einsum` falls back to three separate forwards when Q/K/V weight shapes differ.
+- **QLoRA base QKV:** Batched `einsum` is disabled on 4-bit base layers; LoRA delta fusion still active via cuBLAS.
+- **RMSNorm native CUDA:** Training uses PyTorch RMSNorm when activations require grad (correctness over raw CUDA speed).

@@ -11,6 +11,15 @@ from seiso.kernels.platform import GpuPlatform, detect_gpu
 logger = logging.getLogger(__name__)
 
 
+def _needs_pytorch_autograd(*tensors) -> bool:
+    """Native CUDA/Triton fused ops lack autograd — route training to PyTorch."""
+    import torch
+
+    if not torch.is_grad_enabled():
+        return False
+    return any(getattr(t, "requires_grad", False) for t in tensors if t is not None)
+
+
 @lru_cache(maxsize=1)
 def active_backend() -> str:
     """Resolved kernel backend for this process."""
@@ -45,13 +54,15 @@ def fused_rms_norm(x, weight, eps: float = 1e-6, residual=None):
 
     backend = active_backend()
     if backend == "cuda":
+        if _needs_pytorch_autograd(x, weight, residual):
+            return _pytorch_rms_norm(x, weight, eps, residual)
         from seiso.kernels.cuda_ops import fused_rms_norm as cuda_rms
 
         return cuda_rms(x, weight, eps=eps, residual=residual)
 
     if backend == "triton":
         # Triton RMSNorm is inference-only (no autograd); keep training on PyTorch.
-        if torch.is_grad_enabled() and (x.requires_grad or getattr(weight, "requires_grad", False)):
+        if _needs_pytorch_autograd(x, weight, residual):
             return _pytorch_rms_norm(x, weight, eps, residual)
         from seiso.kernels.triton_ops import fused_rms_norm as triton_rms
 
@@ -65,6 +76,9 @@ def fused_swiglu(gate, up):
     import torch
 
     if not getattr(gate, "is_cuda", False):
+        return torch.nn.functional.silu(gate) * up
+
+    if _needs_pytorch_autograd(gate, up):
         return torch.nn.functional.silu(gate) * up
 
     backend = active_backend()
@@ -92,6 +106,11 @@ def fused_mlp_swiglu(x, W_gate, W_up):
     import torch
 
     if not getattr(x, "is_cuda", False):
+        gate = x @ W_gate.t()
+        up = x @ W_up.t()
+        return torch.nn.functional.silu(gate) * up
+
+    if _needs_pytorch_autograd(x, W_gate, W_up):
         gate = x @ W_gate.t()
         up = x @ W_up.t()
         return torch.nn.functional.silu(gate) * up
@@ -132,6 +151,10 @@ def _fused_lora_qkv_delta_torch(
     if rank_q == rank_k == rank_v:
         hidden_all = x @ torch.cat((lora_A_q, lora_A_k, lora_A_v), dim=0).t()
         h_q, h_k, h_v = hidden_all.split((rank_q, rank_k, rank_v), dim=-1)
+    elif rank_k == rank_v:
+        h_q = x @ lora_A_q.t()
+        hidden_kv = x @ torch.cat((lora_A_k, lora_A_v), dim=0).t()
+        h_k, h_v = hidden_kv.split((rank_k, rank_v), dim=-1)
     else:
         h_q = x @ lora_A_q.t()
         h_k = x @ lora_A_k.t()
