@@ -454,6 +454,22 @@ seiso_llamacpp_import_ok() {
   "$root/.venv/bin/python" -c "from seiso.platform import ensure_cuda_library_path; ensure_cuda_library_path(); import llama_cpp" >/dev/null 2>&1
 }
 
+# cuda-toolkit 13.0.2 pip wheels ship ptxas capped at PTX 9.0 while nvcc emits 9.3.
+seiso_repair_cuda_ptxas() {
+  local root="$1"
+  local py="$root/.venv/bin/python"
+  [[ -x "$py" ]] || return 0
+  if ! "$py" -c "import torch; raise SystemExit(0 if torch.cuda.is_available() else 1)" 2>/dev/null; then
+    return 0
+  fi
+  if "$py" -c "from seiso.kernels.cuda_env import cuda_toolkit_status; s=cuda_toolkit_status(); raise SystemExit(0 if s.get('ptxas_compatible') else 1)" 2>/dev/null; then
+    return 0
+  fi
+  seiso_log "Repairing CUDA toolkit ptxas (PTX 9.3 required for kernel JIT)..."
+  seiso_pip_install_for_venv "$py" 'cuda-toolkit[nvcc]>=13.1.0' || return 1
+  rm -rf "${HOME:-/tmp}/.cache/torch_extensions"/*/seiso_cuda_kernels 2>/dev/null || true
+}
+
 seiso_ensure_llamacpp() {
   local root="$1"
   [[ -x "$root/.venv/bin/python" ]] || return 1
@@ -589,6 +605,9 @@ seiso_run_install_worker() {
     wait "$llamacpp_pid" || true
   fi
   [[ "$ui_status" -eq 0 ]] || return 1
+  if [[ "$extras" == *cuda* ]]; then
+    seiso_repair_cuda_ptxas "$root" || seiso_warn "CUDA ptxas repair skipped — fused kernels may fall back to PyTorch"
+  fi
   seiso_verify_cli "$root"
 }
 
@@ -637,6 +656,9 @@ seiso_ensure_installed() {
 
   if [[ -x "$root/.venv/bin/seiso" && -f "$root/forge-ui/dist/index.html" ]] \
     && seiso_python_modules_available "$root" "$extras"; then
+    if [[ "$extras" == *cuda* ]]; then
+      seiso_repair_cuda_ptxas "$root" || seiso_warn "CUDA ptxas repair skipped — fused kernels may fall back to PyTorch"
+    fi
     return 0
   fi
 
