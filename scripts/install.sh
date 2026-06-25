@@ -11,9 +11,10 @@
 #   SEISO_REPO_URL      Git remote (default: https://github.com/Legendarylibr/SeisoLocalAI.git)
 #   SEISO_BRANCH        Branch to clone (default: main)
 #   SEISO_START=0       Install only — do not launch Forge when finished (default: start)
-#   SEISO_SKIP_UI=1     Skip forge-ui npm build
+#   SEISO_SKIP_UI=1     Skip forge-ui build
+#   SEISO_USE_NPM=1     Use npm instead of Bun for forge-ui (Bun is default when available)
 #   SEISO_NO_BANNER=1   Skip glitch install TUI
-#   SEISO_VERBOSE=1     Show full pip/npm output (no TUI overlay)
+#   SEISO_VERBOSE=1     Show full pip/UI package manager output (no TUI overlay)
 #   SEISO_NO_OPEN=1     Do not open the browser after Forge starts
 #   SEISO_SKIP_FLASH_ATTN=0  Try optional Flash Attention during install (NVIDIA Linux)
 #   SEISO_FAST_INSTALL=1    Skip PyTorch/training extras (Forge + GGUF chat only)

@@ -236,12 +236,80 @@ raise SystemExit(0 if sys.version_info >= (3, 10) else 1)
 PY
 }
 
+seiso_bun_bin_dir() {
+  printf '%s\n' "${BUN_INSTALL:-$HOME/.bun}/bin"
+}
+
+seiso_ensure_bun_on_path() {
+  local bun_bin
+  bun_bin="$(seiso_bun_bin_dir)"
+  if [[ -d "$bun_bin" ]]; then
+    export PATH="$bun_bin:$PATH"
+  fi
+}
+
+seiso_ensure_bun() {
+  seiso_ensure_bun_on_path
+  command -v bun >/dev/null 2>&1 && return 0
+  [[ "${SEISO_USE_NPM:-0}" == "1" ]] && return 1
+
+  seiso_log "Installing Bun (fast JS package manager)..."
+  if ! curl -fsSL https://bun.sh/install | bash; then
+    seiso_warn "Bun install failed — will fall back to npm for Forge UI"
+    return 1
+  fi
+  seiso_ensure_bun_on_path
+  seiso_ensure_bin_on_path "$(seiso_bun_bin_dir)"
+  command -v bun >/dev/null 2>&1
+}
+
+seiso_ui_pkg_manager() {
+  seiso_ensure_bun_on_path
+  if [[ "${SEISO_USE_NPM:-0}" != "1" ]] && command -v bun >/dev/null 2>&1; then
+    printf 'bun\n'
+  elif command -v npm >/dev/null 2>&1; then
+    printf 'npm\n'
+  else
+    return 1
+  fi
+}
+
+seiso_ui_install_deps() {
+  local ui_dir="$1" pm
+  pm="$(seiso_ui_pkg_manager)" || seiso_die "Bun or npm is required for Forge UI — install Bun (https://bun.sh) or Node.js 18+"
+  if [[ "$pm" == "bun" ]]; then
+    (cd "$ui_dir" && bun install --frozen-lockfile)
+  else
+    (cd "$ui_dir" && npm ci --no-audit --no-fund)
+  fi
+}
+
+seiso_ui_run_script() {
+  local ui_dir="$1" script="$2" pm
+  pm="$(seiso_ui_pkg_manager)" || return 1
+  if [[ "$pm" == "bun" ]]; then
+    (cd "$ui_dir" && bun run "$script")
+  else
+    (cd "$ui_dir" && npm run "$script")
+  fi
+}
+
+seiso_build_forge_ui() {
+  local root="$1"
+  seiso_ensure_bun || true
+  seiso_ui_install_deps "$root/forge-ui" || return 1
+  seiso_ui_run_script "$root/forge-ui" build || return 1
+}
+
 seiso_ensure_system_deps() {
   local missing=()
   command -v python3 >/dev/null 2>&1 || missing+=(python3)
   command -v git >/dev/null 2>&1 || missing+=(git)
-  command -v node >/dev/null 2>&1 || missing+=(node)
-  command -v npm >/dev/null 2>&1 || missing+=(npm)
+  command -v curl >/dev/null 2>&1 || missing+=(curl)
+  if [[ "${SEISO_USE_NPM:-0}" == "1" ]]; then
+    command -v node >/dev/null 2>&1 || missing+=(node)
+    command -v npm >/dev/null 2>&1 || missing+=(npm)
+  fi
   [[ ${#missing[@]} -eq 0 ]] && return 0
 
   seiso_log "Installing missing system tools: ${missing[*]}"
@@ -271,7 +339,7 @@ seiso_ensure_system_deps() {
     fi
     "${apt_cmd[@]}" update -qq
     "${apt_cmd[@]}" install -y \
-      python3 python3-venv python3-pip git curl ca-certificates nodejs npm \
+      python3 python3-venv python3-pip git curl ca-certificates \
       || return 1
     return 0
   fi
@@ -281,7 +349,7 @@ seiso_ensure_system_deps() {
     if [[ "$(id -u)" -ne 0 ]] && command -v sudo >/dev/null 2>&1; then
       dnf_cmd=(sudo dnf)
     fi
-    "${dnf_cmd[@]}" install -y python3 python3-pip git curl nodejs npm \
+    "${dnf_cmd[@]}" install -y python3 python3-pip git curl ca-certificates \
       || return 1
     return 0
   fi
@@ -291,7 +359,7 @@ seiso_ensure_system_deps() {
     if [[ "$(id -u)" -ne 0 ]] && command -v sudo >/dev/null 2>&1; then
       pacman_cmd=(sudo pacman)
     fi
-    "${pacman_cmd[@]}" -Sy --noconfirm python python-pip git curl nodejs npm \
+    "${pacman_cmd[@]}" -Sy --noconfirm python python-pip git curl ca-certificates \
       || return 1
     return 0
   fi
@@ -304,10 +372,16 @@ seiso_require_system_deps() {
     seiso_warn "Could not auto-install system dependencies."
     command -v python3 >/dev/null 2>&1 || seiso_die "Python 3.10+ is required — install from https://www.python.org/downloads/"
     command -v git >/dev/null 2>&1 || seiso_die "git is required — install git, then re-run this script"
-    command -v node >/dev/null 2>&1 || seiso_die "Node.js 18+ is required — install from https://nodejs.org/"
-    command -v npm >/dev/null 2>&1 || seiso_die "npm is required — install Node.js 18+ from https://nodejs.org/"
+    command -v curl >/dev/null 2>&1 || seiso_die "curl is required — install curl, then re-run this script"
   fi
   seiso_python_version_ok || seiso_die "Python 3.10+ is required ($(python3 --version 2>&1 || echo unknown))"
+  if [[ "${SEISO_USE_NPM:-0}" == "1" ]]; then
+    command -v node >/dev/null 2>&1 || seiso_die "Node.js 18+ is required — install from https://nodejs.org/ or unset SEISO_USE_NPM"
+    command -v npm >/dev/null 2>&1 || seiso_die "npm is required — install Node.js 18+ from https://nodejs.org/ or unset SEISO_USE_NPM"
+  else
+    seiso_ensure_bun || command -v npm >/dev/null 2>&1 \
+      || seiso_die "Bun or npm is required for Forge UI — install Bun (https://bun.sh) or Node.js 18+"
+  fi
 }
 
 seiso_run_doctor() {
@@ -445,7 +519,7 @@ seiso_run_install_worker() {
   local ui_pid=0 ui_status=0 llamacpp_pid=0
 
   if [[ "${SEISO_SKIP_UI:-0}" != "1" ]]; then
-    (cd "$root/forge-ui" && npm ci --no-audit --no-fund && npm run build) &
+    (seiso_build_forge_ui "$root") &
     ui_pid=$!
   fi
 
