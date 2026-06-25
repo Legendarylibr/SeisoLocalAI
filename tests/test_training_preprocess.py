@@ -125,7 +125,7 @@ def test_normalize_preference_uses_chosen_turns():
     assert row["messages"][-1]["role"] == "assistant"
 
 
-def test_preprocess_hh_rlhf_resolves_to_chat():
+def test_preprocess_preference_resolves_to_chat():
     ds = _Rows(
         [
             {

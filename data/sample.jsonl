@@ -1,4 +1,4 @@
 {"messages":[{"role":"user","content":"What is Seiso?"},{"role":"assistant","content":"Seiso is a local-first AI platform for running, training, and exporting open models on your own hardware."}]}
 {"messages":[{"role":"user","content":"How do I fine-tune a model?"},{"role":"assistant","content":"Use `seiso train -c configs/example_lora.yaml` or open Training Studio in Forge after downloading a safetensors snapshot from the Model Hub."}]}
 {"messages":[{"role":"user","content":"Can I use QLoRA on macOS?"},{"role":"assistant","content":"macOS uses 16-bit LoRA via PyTorch MPS or CPU. QLoRA 4-bit requires NVIDIA CUDA or Linux with bitsandbytes."}]}
-{"messages":[{"role":"user","content":"What is RL quantization?"},{"role":"assistant","content":"Seiso RL quantization trains a policy to pick adaptive GGUF quant settings based on latency, throughput, and quality rewards — not chat-model RLHF."}]}
+{"messages":[{"role":"user","content":"What is RL quantization?"},{"role":"assistant","content":"Seiso RL quantization trains a policy to pick adaptive GGUF quant settings based on latency, throughput, and quality rewards."}]}

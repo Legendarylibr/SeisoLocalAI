@@ -30,7 +30,7 @@ def _normalize_dialog_text(text: Any) -> str:
 
 
 def parse_human_assistant_dialog(text: Any) -> list[dict[str, str]]:
-    """Parse Anthropic HH-RLHF-style Human/Assistant transcripts into chat messages."""
+    """Parse Human/Assistant dialog transcripts into chat messages."""
     raw = _normalize_dialog_text(text)
     if not raw:
         return []

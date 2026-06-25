@@ -52,11 +52,6 @@ _DATASET_HINTS: dict[str, dict[str, Any]] = {
         "train_on_responses_only": True,
         "note": "Competition math problems — question/solution columns when present.",
     },
-    "anthropic/hh-rlhf": {
-        "dataset_format": "preference",
-        "train_on_responses_only": True,
-        "note": "Preference pairs (chosen/rejected) — SFT trains on chosen Human/Assistant turns.",
-    },
 }
 
 
@@ -81,7 +76,7 @@ def _dataset_hints(dataset: str) -> dict[str, Any]:
             "train_on_responses_only": False,
             "note": "Name suggests instruction tuning — Alpaca format is a safe default.",
         }
-    if any(token in key for token in ("rlhf", "preference", "hh-rlhf")):
+    if "preference" in key:
         return {
             "dataset_format": "preference",
             "train_on_responses_only": True,
