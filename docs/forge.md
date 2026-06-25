@@ -113,7 +113,7 @@ Knowledge-base ingest and retrieve are also available via API (`/api/knowledge/.
 | `/api/auth` | Login, register (onboarding), session |
 | `/api/models` | Catalog, downloads, VRAM management (`GET /vram`, `POST /vram/unload`) |
 | `/api/inference` | Chat completions, streaming |
-| `/api/training` | Training jobs, datasets, SSE logs |
+| `/api/training` | Training jobs, dataset search/analysis, recommendations, SSE logs |
 | `/api/export` | Export jobs, Hub publish |
 | `/api/compress` | LLM compression jobs |
 | `/api/distill-rl` | Distill → rollout → DPO jobs |
@@ -126,6 +126,22 @@ Knowledge-base ingest and retrieve are also available via API (`/api/knowledge/.
 | `/v1/chat/completions` | OpenAI-compatible chat (no `/api` prefix) |
 
 Set `SEISO_DEBUG=true` to expose interactive API docs at `/api/docs`.
+
+### Training API
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `GET` | `/api/training/datasets` | Search Hugging Face datasets |
+| `GET` | `/api/training/models` | List locally cached trainable snapshots |
+| `GET` | `/api/training/recommendations` | Hardware + dataset-aware hyperparameter hints |
+| `POST` | `/api/training/analyze-dataset` | Full-corpus schema analysis and training suggestions |
+| `POST` | `/api/training/validate-dataset` | Preflight validation (same full-corpus pass) |
+| `POST` | `/api/training/jobs` | Start a training job |
+| `GET` | `/api/training/jobs` | List jobs for the signed-in user |
+| `GET` | `/api/training/jobs/{id}/stream` | SSE logs and metrics |
+| `POST` | `/api/training/jobs/{id}/cancel` | Cancel a running job |
+
+See [training/quickstart.md](training/quickstart.md) for dataset formats and config fields.
 
 ### VRAM / RAM management
 

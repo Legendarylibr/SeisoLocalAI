@@ -131,9 +131,10 @@ Invoke-RestMethod http://127.0.0.1:8765/v1/chat/completions `
 ## Step 5 — Fine-tune with Training Studio
 
 1. Open **Training Studio** (`/train`)
-2. Settings are pre-filled from hardware detection (quant method, fused kernels, batch size hints)
-3. Pick a base model and dataset (upload JSONL or use `data/sample.jsonl`)
-4. Click **Start training** — logs stream over SSE
+2. Pick a **safetensors** base model (from Model Hub — not a GGUF-only mirror)
+3. Pick a dataset (Hugging Face hub ID, upload JSONL, or `data/sample.jsonl`)
+4. Wait for **dataset analysis** — Seiso scans the full corpus and suggests format, epochs, and seq length from the schema
+5. Review hardware-tuned settings (quant, batch size, fused kernels) and click **Start training** — logs stream over SSE
 
 **CLI equivalent:**
 

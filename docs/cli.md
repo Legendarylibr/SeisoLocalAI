@@ -64,7 +64,9 @@ seiso train --config configs/example_lora.yaml
 
 Example config: `configs/example_lora.yaml` (dataset: `data/sample.jsonl`).
 
-**Checkpoints (CLI):** written under the YAML `output_dir` (example: `./outputs/lora-run/checkpoint-<timestamp>/`).
+Forge Training Studio runs the same training stack but adds full-dataset analysis, live recommendations, and SSE job streaming via `/api/training/*` (see [training/quickstart.md](training/quickstart.md)).
+
+**Checkpoints (CLI):** written under the YAML `output_dir` (example: `./outputs/lora-run/checkpoint-<timestamp>/`), including `seiso_manifest.json` and `dataset_analysis.json`.
 
 **Checkpoints (Forge UI):** `{SEISO_DATA_DIR}/checkpoints/{user_id}/{job_id}/`
 

@@ -183,7 +183,7 @@ seiso forge
 ```
 Seiso/
 ├── seiso/              # Core library (GPL-3.0)
-│   ├── training/       # TRL trainer, config, platform caps
+│   ├── training/       # TRL trainer, dataset analysis, practices, platform caps
 │   ├── kernels/        # Fused CUDA/Triton ops
 │   ├── export/         # Merge, GGUF, Hub publish
 │   ├── compress/       # LLM compression bootstrap

@@ -41,7 +41,7 @@ Do not relax sandbox or crypto defaults without a very strong documented reason 
 
 ## Extending common areas (pointers)
 
-- **New training preset / recs**: `seiso/training/recommendations.py` + `platform_caps.py` + example YAML in `configs/`. Update TrainPage form state if new knobs appear.
+- **New training preset / recs**: `seiso/training/recommendations.py`, `seiso/training/dataset_analysis.py`, `seiso/training/practices.py`, `platform_caps.py`, example YAML in `configs/`. Update TrainPage + `docs/training/quickstart.md` if new knobs appear. Run `pytest tests/test_docs_accuracy.py`.
 - **New kernel op**: Add to `seiso/kernels/cuda/` + dispatch + hooks + tests. Update low-VRAM profile logic.
 - **New pipeline stage (compress/distill/rl)**: Update the stage router / config builder + manifest + the corresponding orchestrator + page.
 - **New inference backend**: `seiso/inference/backends.py` + model pool + runner + UI picker.
