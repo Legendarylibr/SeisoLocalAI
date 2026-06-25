@@ -24,9 +24,11 @@ async def test_bench_inference_with_mocked_runner(monkeypatch):
             self.calls += 1
             return "warm"
 
-        async def stream(self, _payload):
-            yield "Hello"
-            yield " world"
+        async def stream_updates(self, _payload):
+            from seiso.inference.streaming import StreamUpdate
+
+            yield StreamUpdate(text="Hello", output_tokens=1)
+            yield StreamUpdate(text=" world", output_tokens=2)
 
     fake = FakeRunner()
     monkeypatch.setattr(bench_mod, "LocalInferenceRunner", lambda: fake)
@@ -52,7 +54,7 @@ async def test_bench_inference_with_mocked_runner(monkeypatch):
 
     assert isinstance(result, InferenceBenchResult)
     assert result.output_chars == len("Hello world")
-    assert result.output_tokens >= 1
+    assert result.output_tokens == 2
     assert result.backend == "llamacpp"
     assert fake.calls == 1
 

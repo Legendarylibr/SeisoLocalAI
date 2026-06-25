@@ -32,6 +32,7 @@ from seiso.inference.tuning import (
     torch_generate_kwargs,
 )
 from seiso.memory.protection import is_oom_error, release_cached_memory, sanitize_inference_payload
+from seiso.inference.streaming import StreamToken, StreamUpdate
 from seiso.models.chat_format import format_messages_for_prompt
 
 logger = logging.getLogger(__name__)
@@ -76,6 +77,10 @@ class LocalInferenceRunner:
         return "".join(chunks)
 
     async def stream(self, payload: dict[str, Any]) -> AsyncIterator[str]:
+        async for update in self.stream_updates(payload):
+            yield update.text
+
+    async def stream_updates(self, payload: dict[str, Any]) -> AsyncIterator[StreamUpdate]:
         payload = sanitize_inference_payload(payload)
         model_path = payload.get("model_path") or payload.get("model_id")
         if not model_path:
@@ -87,7 +92,7 @@ class LocalInferenceRunner:
         await self._ensure_model_switch(resolved_path, draft_path=draft_path)
 
         loop = asyncio.get_running_loop()
-        queue: asyncio.Queue[str | object] = asyncio.Queue()
+        queue: asyncio.Queue[StreamUpdate | object] = asyncio.Queue()
 
         def should_stop() -> bool:
             return not self._pool.is_generation_active(generation_id)
@@ -95,21 +100,32 @@ class LocalInferenceRunner:
         def producer() -> None:
             buffer: list[str] = []
             buffered = 0
+            output_tokens = 0
             try:
-                for token in self._iter_tokens(payload, resolved_path, route, should_stop):
+                for part in self._iter_tokens(payload, resolved_path, route, should_stop):
                     if should_stop():
                         break
-                    buffer.append(token)
-                    buffered += len(token)
+                    output_tokens += part.new_tokens
+                    buffer.append(part.text)
+                    buffered += len(part.text)
                     if buffered >= _STREAM_BATCH_CHARS:
-                        loop.call_soon_threadsafe(queue.put_nowait, "".join(buffer))
+                        loop.call_soon_threadsafe(
+                            queue.put_nowait,
+                            StreamUpdate(text="".join(buffer), output_tokens=output_tokens),
+                        )
                         buffer.clear()
                         buffered = 0
                 if buffer and not should_stop():
-                    loop.call_soon_threadsafe(queue.put_nowait, "".join(buffer))
+                    loop.call_soon_threadsafe(
+                        queue.put_nowait,
+                        StreamUpdate(text="".join(buffer), output_tokens=output_tokens),
+                    )
             except Exception as exc:
                 if buffer and not should_stop():
-                    loop.call_soon_threadsafe(queue.put_nowait, "".join(buffer))
+                    loop.call_soon_threadsafe(
+                        queue.put_nowait,
+                        StreamUpdate(text="".join(buffer), output_tokens=output_tokens),
+                    )
                 if not should_stop():
                     loop.call_soon_threadsafe(queue.put_nowait, _StreamError(exc))
             finally:
@@ -125,7 +141,7 @@ class LocalInferenceRunner:
                 break
             if isinstance(item, _StreamError):
                 raise item.exc
-            yield str(item)
+            yield item
 
     async def unload(self) -> dict:
         loop = asyncio.get_running_loop()
@@ -196,7 +212,7 @@ class LocalInferenceRunner:
         model_path: str,
         route: str,
         should_stop: Callable[[], bool],
-    ) -> Iterator[str]:
+    ) -> Iterator[StreamToken]:
         if route == "speculative":
             yield from self._torch_speculative_stream(payload, model_path, should_stop)
         elif route == "mlx":
@@ -211,7 +227,7 @@ class LocalInferenceRunner:
         payload: dict[str, Any],
         model_path: str,
         should_stop: Callable[[], bool],
-    ) -> Iterator[str]:
+    ) -> Iterator[StreamToken]:
         draft_path = payload.get("draft_model_path")
         if not draft_path:
             raise ValueError("draft_model_path required for speculative decoding")
@@ -302,7 +318,7 @@ class LocalInferenceRunner:
         payload: dict[str, Any],
         model_path: str,
         should_stop: Callable[[], bool],
-    ) -> Iterator[str]:
+    ) -> Iterator[StreamToken]:
         try:
             from mlx_lm import generate
         except ImportError as exc:
@@ -320,20 +336,20 @@ class LocalInferenceRunner:
                     break
                 text = extract_mlx_token_text(token)
                 if text:
-                    yield text
+                    yield StreamToken(text)
             return
         except (ImportError, TypeError):
             pass
 
         if not should_stop():
-            yield generate(model, tokenizer, **gen_kwargs)
+            yield StreamToken(generate(model, tokenizer, **gen_kwargs))
 
     def _torch_stream(
         self,
         payload: dict[str, Any],
         model_path: str,
         should_stop: Callable[[], bool],
-    ) -> Iterator[str]:
+    ) -> Iterator[StreamToken]:
         import torch
         from transformers import TextIteratorStreamer
 
@@ -380,7 +396,7 @@ class LocalInferenceRunner:
             if should_stop():
                 break
             if text:
-                yield text
+                yield StreamToken(text)
         thread.join(timeout=0)
 
     def _llama_complete(
@@ -413,7 +429,7 @@ class LocalInferenceRunner:
         payload: dict[str, Any],
         model_path: str,
         should_stop: Callable[[], bool],
-    ) -> Iterator[str]:
+    ) -> Iterator[StreamToken]:
         messages = payload.get("messages", [])
         n_ctx = payload.get("n_ctx") or estimate_llama_n_ctx(
             messages,
@@ -437,7 +453,7 @@ class LocalInferenceRunner:
             delta = chunk["choices"][0].get("delta", {})
             content = delta.get("content")
             if content:
-                yield content
+                yield StreamToken(content)
 
 
 async def run_chat(payload: dict[str, Any]) -> str:

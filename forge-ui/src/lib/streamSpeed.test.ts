@@ -1,7 +1,24 @@
 import { describe, expect, it } from "vitest";
-import { computeTokensPerSec, estimateOutputTokens, formatTokensPerSec } from "./streamSpeed";
+import {
+  computeTokensPerSec,
+  estimateOutputTokens,
+  formatTokensPerSec,
+  parseStreamStats,
+  resolveOutputTokenCount,
+} from "./streamSpeed";
 
 describe("streamSpeed", () => {
+  it("parses server stream stats", () => {
+    expect(parseStreamStats('{"output_tokens": 42}')).toEqual({ output_tokens: 42 });
+    expect(parseStreamStats("not-json")).toBeNull();
+    expect(parseStreamStats('{"output_tokens": -1}')).toBeNull();
+  });
+
+  it("prefers measured token counts with text fallback", () => {
+    expect(resolveOutputTokenCount(12, "")).toBe(12);
+    expect(resolveOutputTokenCount(0, "hello world")).toBeGreaterThan(0);
+  });
+
   it("estimates tokens from output text", () => {
     expect(estimateOutputTokens("")).toBe(0);
     expect(estimateOutputTokens("hello world")).toBeGreaterThan(0);

@@ -34,11 +34,16 @@ async def test_chat_stream_sends_token_message_done(app, auth_client, monkeypatc
         user_id=user["id"], name="Local", path=str(model_path), format="gguf"
     )
 
-    async def fake_stream(_self, _payload):
-        yield "hello "
-        yield "world"
+    from seiso.inference.streaming import StreamUpdate
 
-    monkeypatch.setattr("forge.orchestrators.inference.LocalInferenceRunner.stream", fake_stream)
+    async def fake_stream_updates(_self, _payload):
+        yield StreamUpdate(text="hello ", output_tokens=1)
+        yield StreamUpdate(text="world", output_tokens=2)
+
+    monkeypatch.setattr(
+        "forge.orchestrators.inference.LocalInferenceRunner.stream_updates",
+        fake_stream_updates,
+    )
 
     async with client.stream(
         "POST",
@@ -58,3 +63,6 @@ async def test_chat_stream_sends_token_message_done(app, auth_client, monkeypatc
     assert token_text == "hello world"
     assert ("message", "hello world") in events
     assert any(event == "done" for event, _data in events)
+    stats = [data for event, data in events if event == "stats"]
+    assert stats
+    assert '"output_tokens": 2' in stats[-1]
