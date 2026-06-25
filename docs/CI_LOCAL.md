@@ -58,6 +58,7 @@ python3 scripts/run_ci_local.py --job types --update-mypy-baseline --skip-instal
 ### Test detail
 
 - Installs `.[forge,dev]` unless `--skip-install`
+- `tests/test_docs_accuracy.py` — doc links, example configs, and training API references stay aligned with the codebase
 - Runs unit/integration tests excluding `@pytest.mark.slow`
 - Slow tests: `pytest -m slow`
 
