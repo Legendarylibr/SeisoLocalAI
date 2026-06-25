@@ -42,7 +42,7 @@ export function TrainPage() {
   const [jobs, setJobs] = useState<TrainingJob[]>([]);
   const { models: localModels, refresh: refreshLocalModels } = useTrainingModels();
   const [modelId, setModelId] = useState("");
-  const [dataset, setDataset] = useState("tatsu-lab/alpaca");
+  const [dataset, setDataset] = useState("");
   const [method, setMethod] = useState("lora");
   const [quant, setQuant] = useState("4bit");
   const [datasetFormat, setDatasetFormat] = useState("auto");
@@ -213,9 +213,6 @@ export function TrainPage() {
     setGradCkpt(d.gradient_checkpointing);
     if (d.use_fused_kernels != null) setUseFusedKernels(d.use_fused_kernels);
     if (d.use_fused_ce != null) setUseFusedCe(d.use_fused_ce);
-    if (hw.recommended_train_repo && !readStoredModel("train:model") && !modelId) {
-      setModelId(hw.recommended_train_repo);
-    }
     setHwApplied(true);
   }, [hw, hwApplied, pendingModel]);
 
@@ -506,23 +503,8 @@ export function TrainPage() {
                 <strong className="status-callout-title">Not trainable</strong>
                 <div className="status-callout-text">
                   {recommendations?.warnings[0] || GGUF_TRAIN_ERROR}
-                  {recommendations?.fallback_train_repo && (
-                    <>
-                      {" "}
-                      Try{" "}
-                      <button
-                        type="button"
-                        className="btn-link"
-                        onClick={() => {
-                          setModelId(recommendations.fallback_train_repo!);
-                          writeStoredModel("train:model", recommendations.fallback_train_repo!);
-                        }}
-                      >
-                        {recommendations.fallback_train_repo}
-                      </button>
-                      .
-                    </>
-                  )}
+                  {" "}
+                  Pick any safetensors Hugging Face checkpoint from the catalog.
                 </div>
               </div>
             </div>

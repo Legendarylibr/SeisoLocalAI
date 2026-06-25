@@ -67,23 +67,18 @@ def detect_format_consensus(
     return DatasetFormat(winner), confidence, {"votes": dict(votes), "method": "schema_vote"}
 
 
-def _infer_domain(
-    fmt: DatasetFormat,
-    columns: list[str],
-    *,
-    dataset_id: str = "",
-) -> tuple[str, str]:
+def _infer_domain(fmt: DatasetFormat, columns: list[str]) -> tuple[str, str]:
+    """Classify supervision type from detected schema columns only."""
     colset = {c.lower() for c in columns}
-    ds_lower = dataset_id.lower()
 
-    if fmt == DatasetFormat.TEXT and (colset & _CODE_COLUMNS or "code" in ds_lower):
+    if fmt == DatasetFormat.TEXT and colset & _CODE_COLUMNS:
         return "code_pretraining", _DOMAIN_LABELS["code_pretraining"]
     if fmt == DatasetFormat.PREFERENCE:
         return "preference_alignment", _DOMAIN_LABELS["preference_alignment"]
     if fmt in (DatasetFormat.CHAT, DatasetFormat.SHAREGPT):
         return "conversational", _DOMAIN_LABELS["conversational"]
     if fmt == DatasetFormat.ALPACA:
-        if colset & _MATH_COLUMNS or any(t in ds_lower for t in ("math", "gsm8k", "metamath")):
+        if colset & _MATH_COLUMNS:
             return "qa", _DOMAIN_LABELS["qa"]
         return "instruction_tuning", _DOMAIN_LABELS["instruction_tuning"]
     if fmt == DatasetFormat.TEXT:
@@ -221,7 +216,7 @@ def analyze_training_dataset(
         min_chars=1,
     )
 
-    domain, domain_label = _infer_domain(resolved_fmt, columns, dataset_id=str(dataset))
+    domain, domain_label = _infer_domain(resolved_fmt, columns)
     length_sample_idx = _stratified_indices(len(cleaned), max_samples=512)
     length_rows = [
         {k: v for k, v in cleaned[i].items() if not str(k).startswith("_")}

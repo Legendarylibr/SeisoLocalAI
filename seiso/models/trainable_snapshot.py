@@ -12,8 +12,8 @@ _GGUF_REPO_RE = re.compile(r"(?:^|/)[^/]*-gguf(?:$|/|-)", re.I)
 
 GGUF_ONLY_REPO_MESSAGE = (
     "This model cache is GGUF-only (chat/inference weights). LoRA/QLoRA training needs a "
-    "safetensors or PyTorch checkpoint — pick a non-GGUF Hugging Face repo (for example "
-    "Qwen/Qwen2.5-0.5B-Instruct) or download the safetensors variant from the catalog."
+    "safetensors or PyTorch checkpoint — pick a non-GGUF Hugging Face repo or download "
+    "the safetensors variant from the catalog."
 )
 
 

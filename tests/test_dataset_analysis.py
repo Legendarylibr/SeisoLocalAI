@@ -55,7 +55,7 @@ def test_infer_domain_instruction_vs_code():
     assert domain == "instruction_tuning"
     assert "Instruction" in label
 
-    code_domain, _ = _infer_domain(DatasetFormat.TEXT, ["code", "language"], dataset_id="bigcode/the-stack")
+    code_domain, _ = _infer_domain(DatasetFormat.TEXT, ["code", "language"])
     assert code_domain == "code_pretraining"
 
 

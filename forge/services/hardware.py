@@ -270,7 +270,6 @@ def recommended_catalog_repo(profile: dict[str, Any], *, task: str = "chat") -> 
 
 def recommended_trainable_repo(profile: dict[str, Any]) -> str | None:
     from seiso.models.catalog import HubSearchError, search_trainable_catalog
-    from seiso.training.recommendations import _FALLBACK_TRAIN_REPO
 
     tier = classify_tier(profile)
     budget = effective_budget_mb(profile)
@@ -283,8 +282,8 @@ def recommended_trainable_repo(profile: dict[str, Any]) -> str | None:
     try:
         models = search_trainable_catalog(task="chat").models
     except HubSearchError:
-        _recommended_repo_cache[cache_key] = (now, _FALLBACK_TRAIN_REPO)
-        return _FALLBACK_TRAIN_REPO
+        _recommended_repo_cache[cache_key] = (now, None)
+        return None
 
     models = enrich_trainable_catalog_models(models, profile, fetch_sizes=False, diversify=True)
     result: str | None = None
@@ -297,8 +296,6 @@ def recommended_trainable_repo(profile: dict[str, Any]) -> str | None:
             if m.get("task") != "embedding":
                 result = m["repo_id"]
                 break
-    if result is None:
-        result = _FALLBACK_TRAIN_REPO
 
     _recommended_repo_cache[cache_key] = (now, result)
     return result
