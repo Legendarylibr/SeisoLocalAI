@@ -411,7 +411,6 @@ export type TrainingRecommendations = {
   trainable: boolean;
   model_params?: string | null;
   est_training_vram_gb?: number | null;
-  fallback_train_repo?: string;
   hardware_tier?: string;
   dataset_analysis?: DatasetAnalysis;
 };

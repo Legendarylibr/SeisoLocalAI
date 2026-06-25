@@ -1,4 +1,4 @@
-"""Hardware- and model-aware training configuration recommendations."""
+"""Hardware- and dataset-aware training configuration recommendations."""
 
 from __future__ import annotations
 
@@ -18,53 +18,23 @@ from seiso.training.dataset_analysis import (
 
 logger = logging.getLogger(__name__)
 
-_FALLBACK_TRAIN_REPO = "Qwen/Qwen2.5-0.5B-Instruct"
 
-_DATASET_HINTS: dict[str, dict[str, Any]] = {
-    "huggingfaceh4/no_robots": {
-        "dataset_format": "chat",
+def _default_dataset_config() -> dict[str, Any]:
+    """Schema-agnostic defaults when no dataset analysis is available."""
+    return {
+        "dataset_format": "auto",
         "train_on_responses_only": True,
-        "note": "Chat-style preference data — use chat format and train on assistant replies only.",
-    },
-    "tatsu-lab/alpaca": {
-        "dataset_format": "alpaca",
-        "train_on_responses_only": False,
-        "note": "Instruction/output pairs — Alpaca format works best.",
-    },
-    "yahma/alpaca-cleaned": {
-        "dataset_format": "alpaca",
-        "train_on_responses_only": False,
-        "note": "Classic instruction tuning dataset — Alpaca format.",
-    },
-    "databricks/databricks-dolly-15k": {
-        "dataset_format": "alpaca",
-        "train_on_responses_only": False,
-        "note": "Instruction/context/response columns — Alpaca-style mapping.",
-    },
-    "open-orca/openorca": {
-        "dataset_format": "sharegpt",
-        "train_on_responses_only": True,
-        "note": "Multi-turn conversations — ShareGPT or chat format.",
-    },
-    "meta-math/metamathqa": {
-        "dataset_format": "alpaca",
-        "train_on_responses_only": True,
-        "note": "Math Q&A pairs — uses query/response columns with assistant-only loss.",
-    },
-    "openai/gsm8k": {
-        "dataset_format": "alpaca",
-        "train_on_responses_only": True,
-        "note": "Grade-school math word problems — question/answer columns.",
-    },
-    "lighteval/math": {
-        "dataset_format": "alpaca",
-        "train_on_responses_only": True,
-        "note": "Competition math problems — question/solution columns when present.",
-    },
-}
+        "preprocess_dataset": True,
+        "deduplicate_dataset": True,
+        "packing": False,
+        "early_stopping": True,
+        "early_stopping_patience": 3,
+    }
 
 
 def _model_params_b(model_id: str) -> float | None:
+    if not model_id.strip():
+        return None
     guessed = guess_params_from_name(model_id)
     if guessed is not None:
         return guessed
@@ -75,77 +45,50 @@ def _model_params_b(model_id: str) -> float | None:
     return raw if raw != float("inf") else None
 
 
-def _dataset_hints(dataset: str) -> dict[str, Any]:
-    key = dataset.strip().lower()
-    if key in _DATASET_HINTS:
-        return dict(_DATASET_HINTS[key])
-    if "alpaca" in key:
-        return {
-            "dataset_format": "alpaca",
-            "train_on_responses_only": False,
-            "note": "Name suggests instruction tuning — Alpaca format is a safe default.",
-        }
-    if "preference" in key:
-        return {
-            "dataset_format": "preference",
-            "train_on_responses_only": True,
-            "note": "Preference data — uses chosen responses parsed as chat turns.",
-        }
-    if any(token in key for token in ("chat", "conversation", "sharegpt", "messages")):
-        return {
-            "dataset_format": "chat",
-            "train_on_responses_only": True,
-            "note": "Name suggests chat data — chat format with response-only loss.",
-        }
-    if any(token in key for token in ("code", "pretrain", "pretraining")):
-        return {
-            "dataset_format": "text",
-            "train_on_responses_only": False,
-            "note": "Code/pretraining corpus — normalize to a single text field (see scripts/prepare_code_corpus.py).",
-        }
-    return {
-        "dataset_format": "auto",
-        "train_on_responses_only": True,
-        "note": "Leave format on Auto-detect unless you know the schema.",
-    }
-
-
-def _scale_for_model_size(base: dict[str, Any], params_b: float | None) -> dict[str, Any]:
+def _apply_hardware_caps(
+    base: dict[str, Any],
+    params_b: float | None,
+    *,
+    hardware_max_seq: int,
+) -> dict[str, Any]:
+    """Cap memory-sensitive knobs from hardware/parameter count without overriding dataset choices."""
     cfg = dict(base)
     if params_b is None:
         return cfg
 
     if params_b <= 1.0:
-        cfg["batch_size"] = min(int(cfg["batch_size"]), 4)
-        cfg["gradient_accumulation_steps"] = max(2, int(cfg["gradient_accumulation_steps"]) // 2)
-        cfg["lora_r"] = 16
-        cfg["lora_alpha"] = 32
-        cfg["epochs"] = 5
+        cfg["batch_size"] = min(int(cfg.get("batch_size", 1)), 4)
+        cfg["gradient_accumulation_steps"] = max(2, int(cfg.get("gradient_accumulation_steps", 4)) // 2)
+        cfg.setdefault("lora_r", 16)
+        cfg.setdefault("lora_alpha", 32)
     elif params_b <= 3.0:
-        cfg["batch_size"] = min(int(cfg["batch_size"]), 2)
-        cfg["lora_r"] = 16
-        cfg["lora_alpha"] = 32
-        cfg["epochs"] = 3
+        cfg["batch_size"] = min(int(cfg.get("batch_size", 1)), 2)
+        cfg.setdefault("lora_r", 16)
+        cfg.setdefault("lora_alpha", 32)
     elif params_b <= 7.0:
-        cfg["batch_size"] = 1
-        cfg["gradient_accumulation_steps"] = max(int(cfg["gradient_accumulation_steps"]), 8)
-        cfg["max_seq_length"] = min(int(cfg["max_seq_length"]), 2048)
-        cfg["lora_r"] = 16
-        cfg["lora_alpha"] = 32
+        cfg["batch_size"] = min(int(cfg.get("batch_size", 1)), 1)
+        cfg["gradient_accumulation_steps"] = max(int(cfg.get("gradient_accumulation_steps", 4)), 8)
+        cfg.setdefault("lora_r", 16)
+        cfg.setdefault("lora_alpha", 32)
     elif params_b <= 14.0:
         cfg["batch_size"] = 1
-        cfg["gradient_accumulation_steps"] = max(int(cfg["gradient_accumulation_steps"]), 16)
-        cfg["max_seq_length"] = min(int(cfg["max_seq_length"]), 2048)
-        cfg["lora_r"] = 8
-        cfg["lora_alpha"] = 16
-        cfg["quant"] = "4bit"
+        cfg["gradient_accumulation_steps"] = max(int(cfg.get("gradient_accumulation_steps", 4)), 16)
+        cfg.setdefault("lora_r", 8)
+        cfg.setdefault("lora_alpha", 16)
+        cfg.setdefault("quant", "4bit")
     else:
         cfg["batch_size"] = 1
-        cfg["gradient_accumulation_steps"] = max(int(cfg["gradient_accumulation_steps"]), 32)
-        cfg["max_seq_length"] = min(int(cfg["max_seq_length"]), 1024)
-        cfg["lora_r"] = 8
-        cfg["lora_alpha"] = 16
-        cfg["quant"] = "4bit"
+        cfg["gradient_accumulation_steps"] = max(int(cfg.get("gradient_accumulation_steps", 4)), 32)
+        cfg.setdefault("lora_r", 8)
+        cfg.setdefault("lora_alpha", 16)
+        cfg.setdefault("quant", "4bit")
+
+    seq_cap = hardware_max_seq
+    if params_b > 14.0:
+        seq_cap = min(seq_cap, 1024)
+    elif params_b > 3.0:
+        seq_cap = min(seq_cap, 2048)
+    cfg["max_seq_length"] = min(int(cfg.get("max_seq_length", seq_cap)), seq_cap)
 
     return cfg
 
@@ -179,15 +122,11 @@ def recommend_training_config(
     defaults = training_defaults(profile)
     params_b = _model_params_b(model_id)
     analysis = _try_analyze_dataset(dataset, sandbox_root=sandbox_root)
-    ds = (
-        analysis.get("recommended_config", {})
-        if analysis
-        else _dataset_hints(dataset)
-    )
+    ds = analysis.get("recommended_config", {}) if analysis else _default_dataset_config()
     warnings: list[str] = []
     notes: list[str] = [defaults["note"]]
 
-    trainable = not is_gguf_only_repo_id(model_id)
+    trainable = not model_id or not is_gguf_only_repo_id(model_id)
     if model_id and not trainable:
         warnings.append(GGUF_ONLY_REPO_MESSAGE)
 
@@ -198,7 +137,7 @@ def recommend_training_config(
         "gradient_accumulation_steps": defaults["gradient_accumulation_steps"],
         "max_seq_length": ds.get("max_seq_length", defaults["max_seq_length"]),
         "learning_rate": 2e-4,
-        "epochs": ds.get("epochs", 5),
+        "epochs": ds.get("epochs", 3),
         "lora_r": 16,
         "lora_alpha": 32,
         "gradient_checkpointing": defaults["gradient_checkpointing"],
@@ -214,7 +153,11 @@ def recommend_training_config(
         "early_stopping": ds.get("early_stopping", True),
         "early_stopping_patience": ds.get("early_stopping_patience", 3),
     }
-    config = _scale_for_model_size(base_cfg, params_b)
+    config = _apply_hardware_caps(
+        base_cfg,
+        params_b,
+        hardware_max_seq=int(defaults["max_seq_length"]),
+    )
 
     if params_b is not None:
         max_rec = defaults.get("max_recommended_params", "7B")
@@ -235,8 +178,6 @@ def recommend_training_config(
 
     if analysis:
         notes.extend(analysis_notes_for_recommendations(analysis))
-    elif ds.get("note"):
-        notes.append(str(ds["note"]))
 
     est_vram_gb = None
     if params_b is not None:
@@ -253,7 +194,6 @@ def recommend_training_config(
         "trainable": trainable,
         "model_params": f"{params_b:g}B" if params_b is not None else None,
         "est_training_vram_gb": est_vram_gb,
-        "fallback_train_repo": _FALLBACK_TRAIN_REPO,
         "hardware_tier": profile.get("tier_label") or profile.get("tier"),
     }
     if analysis:

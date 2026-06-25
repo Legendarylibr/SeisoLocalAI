@@ -11,4 +11,4 @@ export function isGgufOnlyRepoId(repoId: string): boolean {
 }
 
 export const GGUF_TRAIN_ERROR =
-  "GGUF repos are for chat/inference only. Pick a safetensors checkpoint (e.g. Qwen/Qwen2.5-0.5B-Instruct).";
+  "GGUF repos are for chat/inference only. Pick a safetensors Hugging Face checkpoint from the catalog.";
