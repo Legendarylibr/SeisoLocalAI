@@ -23,6 +23,20 @@ from seiso.kernels.platform import detect_gpu
 
 logger = logging.getLogger(__name__)
 
+
+def _use_fused_cuda_kernels(x: Any) -> bool:
+    """Native CUDA fused ops lack autograd — use PyTorch paths when gradients are needed."""
+    import torch
+
+    if not getattr(x, "is_cuda", False):
+        return False
+    if active_backend() != "cuda":
+        return False
+    if torch.is_grad_enabled() and getattr(x, "requires_grad", False):
+        return False
+    return True
+
+
 _RMSNORM_CLASSES = frozenset({"LlamaRMSNorm", "Qwen2RMSNorm", "GemmaRMSNorm", "RMSNorm"})
 _MLP_CLASSES = frozenset(
     {
@@ -162,7 +176,7 @@ def apply_training_kernels(
             eps = getattr(module, "variance_epsilon", getattr(module, "eps", 1e-6))
 
             def _rms_forward(self, hidden_states, _eps=eps):
-                if hidden_states.is_cuda:
+                if _use_fused_cuda_kernels(hidden_states):
                     return fused_rms_norm(hidden_states, self.weight, eps=_eps)
                 return self._seiso_orig_forward(hidden_states)
 
@@ -175,8 +189,7 @@ def apply_training_kernels(
 
             def _mlp_forward(self, hidden_states):
                 if (
-                    hidden_states.is_cuda
-                    and active_backend() == "cuda"
+                    _use_fused_cuda_kernels(hidden_states)
                     and not _is_peft_lora_linear(self.gate_proj)
                     and not _is_peft_lora_linear(self.up_proj)
                 ):
@@ -217,6 +230,16 @@ def apply_training_kernels(
             platform.device_name,
         )
     return meta
+
+
+def _lora_dropout_p(dropout: Any) -> float:
+    """PEFT stores dropout as float or nn.Dropout depending on version."""
+    if dropout is None:
+        return 0.0
+    if isinstance(dropout, (int, float)):
+        return float(dropout)
+    p = getattr(dropout, "p", None)
+    return float(p) if p is not None else 0.0
 
 
 def _is_peft_lora_linear(module: Any) -> bool:
@@ -290,21 +313,20 @@ def apply_fused_lora_kernels(
                     continue
                 lora_a = self.lora_A[active_adapter]
                 lora_b = self.lora_B[active_adapter]
-                dropout = self.lora_dropout[active_adapter]
+                dropout_p = _lora_dropout_p(self.lora_dropout[active_adapter])
                 scaling = self.scaling[active_adapter]
                 rank = lora_a.weight.size(0)
 
                 x_mod = x
                 if hasattr(self, "_cast_input_dtype"):
                     x_mod = self._cast_input_dtype(x_mod, lora_a.weight.dtype)
-                if dropout > 0 and self.training:
-                    x_mod = F.dropout(x_mod, p=dropout)
+                if dropout_p > 0 and self.training:
+                    x_mod = F.dropout(x_mod, p=dropout_p)
 
                 if (
-                    x_mod.is_cuda
+                    _use_fused_cuda_kernels(x_mod)
                     and rank <= max_rank
                     and x_mod.dim() >= 2
-                    and active_backend() == "cuda"
                 ):
                     flat_x = x_mod.reshape(-1, x_mod.shape[-1])
                     if low_vram:
@@ -401,7 +423,7 @@ def _patch_fused_qkv_projections(
                 x_mod = x
                 if hasattr(self, "_cast_input_dtype"):
                     x_mod = self._cast_input_dtype(x_mod, self.lora_A[adapter].weight.dtype)
-                dropout_p = float(self.lora_dropout[adapter])
+                dropout_p = _lora_dropout_p(self.lora_dropout[adapter])
                 if dropout_p > 0 and self.training:
                     x_mod = F.dropout(x_mod, p=dropout_p)
                 flat_x = x_mod.reshape(-1, x_mod.shape[-1])
@@ -420,7 +442,7 @@ def _patch_fused_qkv_projections(
             if self.disable_adapters or not self.active_adapters:
                 return self.base_layer(x, *args, **kwargs)
 
-            if not x.is_cuda or active_backend() != "cuda":
+            if not _use_fused_cuda_kernels(x):
                 result = self.base_layer(x, *args, **kwargs)
                 for adapter in self.active_adapters:
                     if adapter in self.lora_A:
@@ -441,7 +463,7 @@ def _patch_fused_qkv_projections(
             x_mod = x
             if hasattr(self, "_cast_input_dtype"):
                 x_mod = self._cast_input_dtype(x_mod, self.lora_A[adapter].weight.dtype)
-            dropout_p = float(self.lora_dropout[adapter])
+            dropout_p = _lora_dropout_p(self.lora_dropout[adapter])
             if dropout_p > 0 and self.training:
                 x_mod = F.dropout(x_mod, p=dropout_p)
 
@@ -520,7 +542,7 @@ def _patch_post_attention_residual_norm(model: Any, decoder: Any) -> bool:
     fallback = norm.forward
 
     def _residual_norm_forward(self_norm, hidden_states, _parent=decoder, _fallback=fallback):
-        if hidden_states.is_cuda:
+        if _use_fused_cuda_kernels(hidden_states):
             residual = getattr(_parent, "_seiso_residual", None)
             if (
                 residual is not None
@@ -590,9 +612,12 @@ def _patch_fused_residual_decoder_forward(model: Any, decoder: Any) -> bool:
             attn_for_norm = attn_hidden
         post_attn_skip = residual + attn_for_norm
 
-        self._seiso_residual = residual
-        hidden_states = self.post_attention_layernorm(attn_for_norm)
-        self._seiso_residual = None
+        if _use_fused_cuda_kernels(attn_for_norm):
+            self._seiso_residual = residual
+            hidden_states = self.post_attention_layernorm(attn_for_norm)
+            self._seiso_residual = None
+        else:
+            hidden_states = self.post_attention_layernorm(post_attn_skip)
 
         hidden_states = self.mlp(hidden_states)
         if mlp_dropout is not None:

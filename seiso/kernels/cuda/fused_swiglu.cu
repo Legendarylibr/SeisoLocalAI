@@ -39,7 +39,7 @@ __global__ void fused_swiglu_kernel(
       ov.z = silu(gv.z) * uv.z;
       ov.w = silu(gv.w) * uv.w;
       store_vec4(reinterpret_cast<float*>(o_row) + base, ov);
-    } else {
+    } else if constexpr (VEC == 8) {
       uint4 gv = load_vec8(reinterpret_cast<const T*>(g_row) + base);
       uint4 uv = load_vec8(reinterpret_cast<const T*>(u_row) + base);
       const T* gh = reinterpret_cast<const T*>(&gv);
@@ -51,6 +51,17 @@ __global__ void fused_swiglu_kernel(
         oh[k] = from_float<T>(v);
       }
       store_vec8(reinterpret_cast<T*>(o_row) + base, *reinterpret_cast<uint4*>(oh));
+    } else {
+      T gh[4];
+      T uh[4];
+      T oh[4];
+#pragma unroll
+      for (int k = 0; k < 4; ++k) {
+        gh[k] = g_row[base + k];
+        uh[k] = u_row[base + k];
+        oh[k] = from_float<T>(silu(to_float(gh[k])) * to_float(uh[k]));
+        o_row[base + k] = oh[k];
+      }
     }
   }
 }
@@ -68,10 +79,12 @@ void launch_fused_swiglu(
   const auto& tuning = kernel_tuning_state();
   if constexpr (std::is_same_v<T, __half> || std::is_same_v<T, __nv_bfloat16>) {
     const int vec = tuning.swiglu_vec == SWIGLU_VEC4 ? 4 : 8;
-    if (vec == 4) {
+    if (vec == 4 && cols % 4 == 0) {
       fused_swiglu_kernel<T, 4, BLOCK><<<grid, BLOCK, 0, stream>>>(gate, up, out, rows, cols);
-    } else {
+    } else if (cols % 8 == 0) {
       fused_swiglu_kernel<T, 8, BLOCK><<<grid, BLOCK, 0, stream>>>(gate, up, out, rows, cols);
+    } else {
+      fused_swiglu_kernel<T, 4, BLOCK><<<grid, BLOCK, 0, stream>>>(gate, up, out, rows, cols);
     }
   } else {
     fused_swiglu_kernel<T, 4, BLOCK><<<grid, BLOCK, 0, stream>>>(gate, up, out, rows, cols);

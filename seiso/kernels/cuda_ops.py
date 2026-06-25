@@ -7,10 +7,14 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+from seiso.kernels.cuda_env import configure_cuda_build_env
 from seiso.kernels.fallback_ops import pytorch_rms_norm as _pytorch_rms_norm
 from seiso.kernels.platform import GpuVendor, detect_gpu
 
 logger = logging.getLogger(__name__)
+
+# Must run before any torch cpp_extension import (CUDA_HOME is read once).
+configure_cuda_build_env()
 
 _CUDA_DIR = Path(__file__).resolve().parent / "cuda"
 _EXT: Any | None = None
@@ -28,9 +32,18 @@ def _torch_cuda_available() -> bool:
 
 def _ensure_cuda_build_env() -> dict[str, str]:
     """Configure CUDA_HOME, PATH, host compiler, and CCCL includes for nvcc."""
-    from seiso.kernels.cuda_env import configure_cuda_build_env
-
     return configure_cuda_build_env()
+
+
+def _as_cuda_2d(tensor: Any) -> tuple[Any, tuple[int, ...] | None]:
+    """Flatten trailing dims to (rows, cols) for native 2D kernels; None if already 2D."""
+    if tensor.dim() == 2:
+        return tensor, None
+    if tensor.dim() < 2:
+        raise ValueError(f"expected >=2D tensor, got shape {tuple(tensor.shape)}")
+    orig = tuple(tensor.shape)
+    flat = tensor.reshape(-1, orig[-1])
+    return flat, orig
 
 
 def _cuda_include_paths() -> list[str]:
@@ -172,9 +185,15 @@ def fused_rms_norm(x, weight, eps: float = 1e-6, residual=None):
     if not x.is_cuda:
         return _pytorch_rms_norm(x, weight, eps, residual)
 
+    x2, orig_shape = _as_cuda_2d(x)
+    res2 = residual
+    if residual is not None and residual.dim() != 2:
+        res2, _ = _as_cuda_2d(residual)
+
     ext = _load_extension()
     if ext is not None:
-        return ext.fused_rmsnorm(x, weight, residual, eps)
+        out = ext.fused_rmsnorm(x2, weight, res2, eps)
+        return out.reshape(orig_shape) if orig_shape is not None else out
 
     return _pytorch_rms_norm(x, weight, eps, residual)
 
@@ -186,9 +205,13 @@ def fused_swiglu(gate, up):
     if not gate.is_cuda:
         return torch.nn.functional.silu(gate) * up
 
+    gate2, orig_shape = _as_cuda_2d(gate)
+    up2 = up if up.dim() == 2 else _as_cuda_2d(up)[0]
+
     ext = _load_extension()
     if ext is not None:
-        return ext.fused_swiglu(gate, up)
+        out = ext.fused_swiglu(gate2, up2)
+        return out.reshape(orig_shape) if orig_shape is not None else out
     return torch.nn.functional.silu(gate) * up
 
 

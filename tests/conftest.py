@@ -7,6 +7,16 @@ import contextlib
 from pathlib import Path
 
 import pytest
+
+
+def pytest_configure(config):
+    """Bootstrap CUDA toolkit paths before torch cpp_extension reads CUDA_HOME."""
+    try:
+        from seiso.kernels.cuda_env import configure_cuda_build_env
+
+        configure_cuda_build_env()
+    except ImportError:
+        pass
 from httpx import ASGITransport, AsyncClient
 
 from forge.api.deps import clear_dependency_caches, close_dependency_caches, get_db

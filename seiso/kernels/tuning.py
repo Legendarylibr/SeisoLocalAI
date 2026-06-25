@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 # Discrete profiles the RL policy selects.  ``auto`` matches the default heuristics
 # in the CUDA sources; named profiles force specific launch paths.
@@ -174,43 +177,71 @@ def _cached_live_benchmark(
             source="analytic_no_cuda",
         )
 
-    apply_kernel_profile(profile_id)
-    device = "cuda"
-    torch_dtype = getattr(torch, dtype, torch.bfloat16)
-    rows = max(64, int(batch_rows))
-    cols = max(128, int(hidden_dim))
+    try:
+        from seiso.kernels.cuda_env import configure_cuda_build_env
 
-    x = torch.randn(rows, cols, device=device, dtype=torch_dtype)
-    w = torch.ones(cols, device=device, dtype=torch_dtype)
-    gate = torch.randn(rows, cols, device=device, dtype=torch_dtype)
-    up = torch.randn(rows, cols, device=device, dtype=torch_dtype)
+        configure_cuda_build_env()
+        apply_kernel_profile(profile_id)
+        device = "cuda"
+        torch_dtype = getattr(torch, dtype, torch.bfloat16)
+        rows = max(64, int(batch_rows))
+        # Vectorized SwiGLU kernels require hidden dim aligned to 8.
+        cols = max(128, int(hidden_dim))
+        cols = ((cols + 7) // 8) * 8
 
-    def pytorch_rms():
-        y = x
-        v = y.pow(2).mean(dim=-1, keepdim=True)
-        return y * torch.rsqrt(v + 1e-6) * w
+        x = torch.randn(rows, cols, device=device, dtype=torch_dtype)
+        w = torch.ones(cols, device=device, dtype=torch_dtype)
+        gate = torch.randn(rows, cols, device=device, dtype=torch_dtype)
+        up = torch.randn(rows, cols, device=device, dtype=torch_dtype)
 
-    def fused_rms():
-        return fused_rms_norm(x, w)
+        def pytorch_rms():
+            y = x
+            v = y.pow(2).mean(dim=-1, keepdim=True)
+            return y * torch.rsqrt(v + 1e-6) * w
 
-    def pytorch_swiglu():
-        return torch.nn.functional.silu(gate) * up
+        def fused_rms():
+            return fused_rms_norm(x, w)
 
-    def fused_sw():
-        return fused_swiglu(gate, up)
+        def pytorch_swiglu():
+            return torch.nn.functional.silu(gate) * up
 
-    pt_ms = _bench_ms(pytorch_rms) + _bench_ms(pytorch_swiglu)
-    fused_ms = _bench_ms(fused_rms) + _bench_ms(fused_sw)
-    speedup = pt_ms / max(fused_ms, 1e-6)
+        def fused_sw():
+            return fused_swiglu(gate, up)
 
-    return KernelBenchmarkResult(
-        profile_id=profile_id,
-        profile_name=str(profile["name"]),
-        latency_ms=float(fused_ms),
-        speedup_vs_pytorch=float(speedup),
-        memory_overhead_mb=0.0,
-        source="live_cuda",
-    )
+        pt_ms = _bench_ms(pytorch_rms) + _bench_ms(pytorch_swiglu)
+        fused_ms = _bench_ms(fused_rms) + _bench_ms(fused_sw)
+        speedup = pt_ms / max(fused_ms, 1e-6)
+
+        return KernelBenchmarkResult(
+            profile_id=profile_id,
+            profile_name=str(profile["name"]),
+            latency_ms=float(fused_ms),
+            speedup_vs_pytorch=float(speedup),
+            memory_overhead_mb=0.0,
+            source="live_cuda",
+        )
+    except Exception as exc:
+        logger.warning(
+            "Live CUDA kernel benchmark failed for profile %d: %s",
+            profile_id,
+            exc,
+        )
+        try:
+            import torch
+
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
+        except Exception:
+            pass
+        speedup = analytic_kernel_speedup(profile_id, hidden_dim=hidden_dim, batch_rows=batch_rows)
+        return KernelBenchmarkResult(
+            profile_id=profile_id,
+            profile_name=str(profile["name"]),
+            latency_ms=1.0 / max(speedup, 0.1),
+            speedup_vs_pytorch=speedup,
+            memory_overhead_mb=0.0,
+            source="analytic_benchmark_failed",
+        )
 
 
 def benchmark_kernel_profile(

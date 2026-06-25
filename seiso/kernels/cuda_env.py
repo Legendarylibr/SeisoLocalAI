@@ -162,3 +162,7 @@ def cuda_toolkit_status() -> dict[str, str | bool | None]:
         "cccl_include": discover_cccl_include(),
         "ready": home is not None,
     }
+
+
+# Configure nvcc/CUDA_HOME before torch.utils.cpp_extension reads the environment.
+configure_cuda_build_env()
