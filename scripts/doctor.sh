@@ -77,8 +77,28 @@ fi
 
 check_cmd git "Install git, then rerun start."
 check_cmd python3 "Install Python 3.10+."
-check_cmd node "Install Node.js 18+ from https://nodejs.org/."
-check_cmd npm "Install Node.js 18+ from https://nodejs.org/."
+
+if [[ -f "$root/scripts/lib/common.sh" ]]; then
+  # shellcheck source=lib/common.sh
+  source "$root/scripts/lib/common.sh"
+  seiso_ensure_bun_on_path
+fi
+
+if command -v bun >/dev/null 2>&1; then
+  ok "bun version: $(bun --version 2>&1)"
+elif command -v npm >/dev/null 2>&1; then
+  ok "npm version: $(npm --version 2>&1)"
+else
+  fail "bun or npm missing. Run start to auto-install Bun, or install Node.js 18+ from https://nodejs.org/."
+fi
+
+if command -v node >/dev/null 2>&1; then
+  ok "node version: $(node --version 2>&1)"
+elif command -v bun >/dev/null 2>&1; then
+  ok "node not installed (Bun provides the JS runtime for Forge UI)"
+else
+  fail "node missing. Install Node.js 18+ from https://nodejs.org/ or run start to install Bun."
+fi
 
 if command -v python3 >/dev/null 2>&1; then
   if python3 - <<'PY'
@@ -90,10 +110,6 @@ PY
   else
     fail "python3 is too old: $(python3 --version 2>&1). Install Python 3.10+."
   fi
-fi
-
-if command -v node >/dev/null 2>&1; then
-  ok "node version: $(node --version 2>&1)"
 fi
 
 if [[ -f "$root/.env" ]]; then
@@ -126,7 +142,11 @@ fi
 if [[ -f "$root/forge-ui/dist/index.html" ]]; then
   ok "Forge UI build exists"
 else
-  warn "Forge UI build missing. Run: cd $root/forge-ui && npm ci && npm run build"
+  if command -v bun >/dev/null 2>&1; then
+    warn "Forge UI build missing. Run: cd $root/forge-ui && bun install --frozen-lockfile && bun run build"
+  else
+    warn "Forge UI build missing. Run: cd $root/forge-ui && npm ci && npm run build"
+  fi
 fi
 
 if [[ -x "$root/.venv/bin/python" ]]; then

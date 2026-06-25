@@ -8,7 +8,7 @@ Jobs:
   test      — smoke imports + pytest
   security  — Bandit, detect-secrets, pip-audit, pip check
   deps      — dependency lockfile integrity
-  frontend  — npm typecheck + production build (forge-ui)
+  frontend  — bun/npm typecheck + production build (forge-ui)
   imports   — optional-extra import smokes (train, compress, mlx)
 
 Usage:
@@ -360,18 +360,33 @@ def job_security(root: Path, python: str, env: dict[str, str]) -> None:
     )
 
 
+def _ui_pkg_manager(env: dict[str, str]) -> tuple[str, list[str]]:
+    bun_install = Path(os.environ.get("BUN_INSTALL", Path.home() / ".bun"))
+    bun_bin = bun_install / "bin" / "bun"
+    if env.get("SEISO_USE_NPM") != "1" and bun_bin.is_file():
+        return "bun", [str(bun_bin)]
+    bun = shutil.which("bun", path=env.get("PATH"))
+    if env.get("SEISO_USE_NPM") != "1" and bun:
+        return "bun", [bun]
+    npm = shutil.which("npm", path=env.get("PATH"))
+    if npm:
+        return "npm", [npm]
+    raise SystemExit("bun or npm not found; install Bun (https://bun.sh) or Node.js to run the frontend job")
+
+
 def job_frontend(root: Path, env: dict[str, str]) -> None:
     _banner("Job: frontend (forge-ui)")
 
     ui = root / "forge-ui"
-    npm = shutil.which("npm")
-    if not npm:
-        raise SystemExit("npm not found; install Node.js to run the frontend job")
+    pm_name, pm_cmd = _ui_pkg_manager(env)
 
     if not (ui / "node_modules").is_dir():
-        _step("npm ci", [npm, "ci"], cwd=ui, env=env)
-    _step("TypeScript check", [npm, "run", "typecheck"], cwd=ui, env=env)
-    _step("Production build", [npm, "run", "build"], cwd=ui, env=env)
+        if pm_name == "bun":
+            _step("bun install --frozen-lockfile", [*pm_cmd, "install", "--frozen-lockfile"], cwd=ui, env=env)
+        else:
+            _step("npm ci", [*pm_cmd, "ci"], cwd=ui, env=env)
+    _step("TypeScript check", [*pm_cmd, "run", "typecheck"], cwd=ui, env=env)
+    _step("Production build", [*pm_cmd, "run", "build"], cwd=ui, env=env)
 
 
 def job_imports(root: Path, python: str, env: dict[str, str]) -> None:
