@@ -53,11 +53,10 @@ else
   ok "curl HTTP 200 ($COMMON_URL)"
 fi
 
-pip_pattern='pip install -e "\$\{root\}\[\$\{extras\}\]"'
-if rg -q "$pip_pattern" "$common_tmp" "$ROOT/scripts/lib/common.sh" 2>/dev/null; then
-  ok "pip extras syntax uses \${root}[\${extras}] (scripts/lib/common.sh)"
+if rg -q 'seiso_pip_install.*-e "\$\{root\}\[\$\{pip_extras\}\]"' "$common_tmp" "$ROOT/scripts/lib/common.sh" 2>/dev/null; then
+  ok "pip extras syntax uses \${root}[\${pip_extras}] via seiso_pip_install"
 else
-  bad "pip extras syntax missing in scripts/lib/common.sh (expected pip install -e \"\${root}[\${extras}]\")"
+  bad "pip extras syntax missing in scripts/lib/common.sh (expected seiso_pip_install -e \"\${root}[\${pip_extras}]\")"
 fi
 
 if rg -q 'pip install -e "\$root/\.\[' "$tmp" "$common_tmp" "$ROOT/scripts/lib/common.sh" 2>/dev/null; then
@@ -99,10 +98,23 @@ else
   bad "resolve_root simulation failed for piped bash"
 fi
 
-if rg -q 'pip install -U pip wheel setuptools hatchling' "$ROOT/scripts/lib/common.sh" 2>/dev/null; then
+if rg -q 'seiso_pip_bootstrap' "$ROOT/scripts/lib/common.sh" 2>/dev/null \
+  && rg -q 'hatchling' "$ROOT/scripts/lib/common.sh" 2>/dev/null; then
   ok "install worker bootstraps hatchling before editable install"
 else
   bad "install worker missing hatchling bootstrap (editable install may fail on fresh venvs)"
+fi
+
+if rg -q 'cuda-toolkit\[nvcc\]==13\.0\.2' "$ROOT/pyproject.toml" 2>/dev/null; then
+  ok "cuda-toolkit pin matches torch 2.12 (13.0.2)"
+else
+  bad "cuda-toolkit pin should be 13.0.2 to match torch 2.12"
+fi
+
+if rg -q 'seiso_use_uv' "$ROOT/scripts/lib/common.sh" 2>/dev/null; then
+  ok "install path supports uv for Python deps"
+else
+  bad "install path missing uv support"
 fi
 
 if rg -q 'wait "\$job_pid"' "$ROOT/scripts/install.sh" 2>/dev/null; then
@@ -128,7 +140,7 @@ if python -m pip install -e "${clone_dir}[forge,train,dev]" --dry-run >/dev/null
 else
   bad "pip dry-run [forge,train,dev] failed"
 fi
-if python -m pip install -e "${clone_dir}[forge,train,cuda,dev]" --dry-run >/dev/null 2>&1; then
+if python -m pip install -e "${ROOT}[forge,train,cuda,dev]" --dry-run >/dev/null 2>&1; then
   ok "pip dry-run [forge,train,cuda,dev] succeeds"
 else
   bad "pip dry-run [forge,train,cuda,dev] failed"

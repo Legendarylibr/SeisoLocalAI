@@ -99,6 +99,12 @@ What the installer does:
 SEISO_START=0 curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
 ```
 
+**Fast install** (Forge + GGUF chat — skips PyTorch/training):
+
+```bash
+SEISO_FAST_INSTALL=1 curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
+```
+
 **Custom install location:**
 
 ```bash
@@ -123,7 +129,7 @@ Use this when you already manage Python/Node yourself, want a custom clone path,
 | Tool | Version | Notes |
 |------|---------|-------|
 | Python | 3.10+ (3.11+ recommended) | `python3 --version` |
-| Node.js | 18+ (20 LTS recommended) | For `forge-ui` build |
+| Bun or Node.js | Bun auto-installed; or Node 18+ | For `forge-ui` build (Bun is default) |
 | git | any recent | — |
 | NVIDIA driver | optional | `nvidia-smi` must work for CUDA training |
 
@@ -163,7 +169,7 @@ pip install -e ".[compress-quant,compress-eval]"      # LLM compression pipeline
 **3. Build the Forge UI and verify**
 
 ```bash
-cd forge-ui && npm ci && npm run build && cd ..
+cd forge-ui && bun install --frozen-lockfile && bun run build && cd ..
 seiso doctor
 seiso doctor --network    # optional: Hugging Face + download readiness
 ```

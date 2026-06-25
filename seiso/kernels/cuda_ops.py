@@ -110,7 +110,7 @@ def _load_extension() -> Any | None:
         if not build_meta.get("cuda_home"):
             raise OSError(
                 "CUDA toolkit (nvcc) not found. Install with: "
-                "pip install 'cuda-toolkit[nvcc]==13.3.0' cuda-cccl ninja"
+                "pip install 'cuda-toolkit[nvcc]==13.0.2' cuda-cccl ninja"
             )
         from seiso.kernels.cuda_env import cuda_link_flags
 

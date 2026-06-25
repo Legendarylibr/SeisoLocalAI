@@ -459,7 +459,8 @@ seiso_ensure_llamacpp() {
   [[ -x "$root/.venv/bin/python" ]] || return 1
   seiso_log "Ensuring llama.cpp (GGUF chat) runtime..."
   if [[ "$(uname -s)" == "Linux" ]]; then
-    "$root/.venv/bin/python" -m pip install -q nvidia-cuda-runtime-cu12 nvidia-cublas-cu12 --prefer-binary \
+    seiso_pip_install_for_venv "$root/.venv/bin/python" \
+      nvidia-cuda-runtime-cu12 nvidia-cublas-cu12 --prefer-binary \
       || true
   fi
   if "$root/.venv/bin/python" -m seiso.inference.llamacpp_install --quiet; then
@@ -470,12 +471,49 @@ seiso_ensure_llamacpp() {
   return 1
 }
 
-seiso_pip_bootstrap() {
-  if [[ "${SEISO_VERBOSE:-0}" == "1" ]]; then
-    python -m pip install -U pip wheel "setuptools<82" hatchling
+seiso_use_uv() {
+  [[ "${SEISO_USE_UV:-1}" == "0" ]] && return 1
+  command -v uv >/dev/null 2>&1
+}
+
+seiso_pip_quiet_args() {
+  [[ "${SEISO_VERBOSE:-0}" != "1" ]] && printf '%s\n' -q
+}
+
+seiso_pip_filter_uv_args() {
+  local arg
+  for arg in "$@"; do
+    [[ "$arg" == "--prefer-binary" ]] && continue
+    printf '%s\0' "$arg"
+  done
+}
+
+seiso_pip_install() {
+  local -a quiet=() filtered=()
+  mapfile -t quiet < <(seiso_pip_quiet_args)
+  if seiso_use_uv; then
+    mapfile -d '' -t filtered < <(seiso_pip_filter_uv_args "$@")
+    uv pip install "${quiet[@]}" "${filtered[@]}"
   else
-    python -m pip install -q -U pip wheel "setuptools<82" hatchling
+    python -m pip install "${quiet[@]}" "$@"
   fi
+}
+
+seiso_pip_install_for_venv() {
+  local venv_python="$1"
+  shift
+  local -a quiet=() filtered=()
+  mapfile -t quiet < <(seiso_pip_quiet_args)
+  if seiso_use_uv; then
+    mapfile -d '' -t filtered < <(seiso_pip_filter_uv_args "$@")
+    uv pip install --python "$venv_python" "${quiet[@]}" "${filtered[@]}"
+  else
+    "$venv_python" -m pip install "${quiet[@]}" "$@"
+  fi
+}
+
+seiso_pip_bootstrap() {
+  seiso_pip_install -U pip wheel "setuptools<82" hatchling
 }
 
 seiso_extras_without_llamacpp() {
@@ -501,13 +539,13 @@ seiso_pip_install_extras() {
     pip_extras="$(seiso_extras_without_llamacpp "$extras")"
   fi
 
-  if pip install "${pip_quiet[@]}" -e "${root}[${pip_extras}]" --prefer-binary; then
+  if seiso_pip_install "${pip_quiet[@]}" -e "${root}[${pip_extras}]" --prefer-binary; then
     return 0
   fi
   seiso_warn "Full install failed — installing core [forge] then retrying optional extras"
-  pip install "${pip_quiet[@]}" -e "${root}[forge]" --prefer-binary || return 1
+  seiso_pip_install "${pip_quiet[@]}" -e "${root}[forge]" --prefer-binary || return 1
   seiso_verify_cli "$root" || return 1
-  pip install "${pip_quiet[@]}" -e "${root}[${pip_extras}]" --prefer-binary || {
+  seiso_pip_install "${pip_quiet[@]}" -e "${root}[${pip_extras}]" --prefer-binary || {
     seiso_warn "Optional extras failed (${pip_extras}). Forge can still start — see $root/.seiso-install.log"
     seiso_verify_cli "$root" || return 1
   }

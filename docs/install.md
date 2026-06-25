@@ -89,16 +89,25 @@ bash start
 | `SEISO_INSTALL_DIR` | `$HOME/Seiso` | Clone/install path (Linux/macOS/WSL) |
 | `SEISO_REPO_URL` | `https://github.com/Legendarylibr/SeisoLocalAI.git` | Git remote |
 | `SEISO_BRANCH` | `main` | Branch to clone |
-| `SEISO_SKIP_UI=1` | off | Skip `npm run build` |
+| `SEISO_SKIP_UI=1` | off | Skip Forge UI build |
 | `SEISO_START=0` | on (starts Forge) | Set to `0` to install without launching Forge |
 | `SEISO_NO_OPEN=1` | off | Do not open the browser after Forge starts |
 | `SEISO_NO_BANNER=1` | off | Skip install animation |
-| `SEISO_VERBOSE=1` | off | Show full pip/npm output |
+| `SEISO_VERBOSE=1` | off | Show full pip/Bun output |
+| `SEISO_USE_NPM=1` | off | Use npm instead of Bun for `forge-ui` (Bun is default) |
+| `SEISO_USE_UV=0` | on (use uv if installed) | Use pip instead of uv for Python deps |
+| `SEISO_FAST_INSTALL=1` | off | Forge + GGUF chat only — skip PyTorch/training extras |
 
 Custom location:
 
 ```bash
 SEISO_INSTALL_DIR="$HOME/code/Seiso" curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
+```
+
+Fast install (Forge + chat only — skips PyTorch/training download):
+
+```bash
+SEISO_FAST_INSTALL=1 curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
 ```
 
 ### Already cloned?
