@@ -41,10 +41,10 @@ from seiso.training.datasets import (
     prepare_tokenized_dataset,
 )
 from seiso.training.multi_gpu import configure_training_args, detect_training_layout
+from seiso.training.dataset_analysis import analyze_training_dataset
 from seiso.training.preprocess import (
     compute_eval_split_size,
     preprocess_training_dataset,
-    validate_training_dataset,
 )
 from seiso.training.sft import build_sft_trainer
 
@@ -93,15 +93,15 @@ class SeisoTrainer:
         # Validate dataset *first* (before loading potentially huge model weights).
         # This ensures errors about bad formatting are shown before expensive work.
         try:
-            val_stats = validate_training_dataset(
+            analysis = analyze_training_dataset(
                 cfg.dataset,
                 dataset_format=cfg.dataset_format,
                 sandbox_root=cfg.sandbox_root,
-                max_check_samples=None,  # full check at actual train time
             )
+            write_json(cfg.output_dir / "dataset_analysis.json", analysis)
             self._log(
-                f"Dataset validation passed: {val_stats['kept']} usable samples "
-                f"(format={val_stats['resolved_format']})"
+                f"Dataset analysis: {analysis['kept']:,}/{analysis['initial_samples']:,} usable samples "
+                f"(format={analysis['resolved_format']}, domain={analysis['domain']})"
             )
         except Exception as exc:
             raise ValueError(f"Dataset cannot be normalized for training: {exc}") from exc

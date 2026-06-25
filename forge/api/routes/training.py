@@ -31,7 +31,7 @@ from seiso.models.hf_env import configure_hf_hub_cache
 from seiso.models.trainable_snapshot import is_gguf_only_repo_id
 from seiso.security import SecurityError
 from seiso.training.config import DatasetFormat
-from seiso.training.preprocess import validate_training_dataset
+from seiso.training.dataset_analysis import analyze_training_dataset
 from seiso.training.recommendations import recommend_training_config
 
 router = APIRouter(prefix="/training", tags=["training"])
@@ -127,11 +127,26 @@ async def list_training_models(
 @router.get("/recommendations")
 async def training_recommendations(
     user_id: Annotated[str, Depends(get_current_user_id)],
+    settings: Annotated[ForgeSettings, Depends(get_settings)],
     model_id: str = Query("", description="Base model repo id or local path"),
     dataset: str = Query("", description="Dataset hub id or local path"),
 ) -> dict:
     profile = hardware_profile()
-    return recommend_training_config(profile, model_id=model_id, dataset=dataset)
+    resolved_dataset = dataset
+    if isinstance(dataset, str) and dataset.strip():
+        with contextlib.suppress(Exception):
+            resolved_dataset = resolve_training_dataset_path(
+                settings.data_dir,
+                user_id,
+                dataset,
+                install_root=Path(__file__).resolve().parents[3],
+            )
+    return recommend_training_config(
+        profile,
+        model_id=model_id,
+        dataset=str(resolved_dataset),
+        sandbox_root=Path(settings.data_dir) / "uploads" / user_id,
+    )
 
 
 class DatasetValidationRequest(BaseModel):
@@ -139,14 +154,13 @@ class DatasetValidationRequest(BaseModel):
     dataset_format: str = "auto"
 
 
-@router.post("/validate-dataset")
-async def validate_dataset_endpoint(
-    body: DatasetValidationRequest,
-    user_id: Annotated[str, Depends(get_current_user_id)],
-    settings: Annotated[ForgeSettings, Depends(get_settings)],
-) -> dict:
-    """Preflight endpoint so the UI can validate a dataset (and show error) before the user clicks Start."""
-    ds = body.dataset
+def _resolve_dataset_for_user(
+    dataset: str,
+    *,
+    user_id: str,
+    settings: ForgeSettings,
+) -> str | Path:
+    ds = dataset
     if isinstance(ds, str):
         with contextlib.suppress(Exception):
             ds = resolve_training_dataset_path(
@@ -155,16 +169,50 @@ async def validate_dataset_endpoint(
                 ds,
                 install_root=Path(__file__).resolve().parents[3],
             )
+    return ds
 
+
+@router.post("/analyze-dataset")
+async def analyze_dataset_endpoint(
+    body: DatasetValidationRequest,
+    user_id: Annotated[str, Depends(get_current_user_id)],
+    settings: Annotated[ForgeSettings, Depends(get_settings)],
+) -> dict:
+    """Research-grade dataset analysis: full-corpus schema detection and training hints."""
+    ds = _resolve_dataset_for_user(body.dataset, user_id=user_id, settings=settings)
     try:
         ds_fmt = DatasetFormat(body.dataset_format) if body.dataset_format else DatasetFormat.AUTO
-        stats = validate_training_dataset(
+        analysis = analyze_training_dataset(
             ds,
             dataset_format=ds_fmt,
             sandbox_root=Path(settings.data_dir) / "uploads" / user_id,
-            max_check_samples=8192,
         )
-        return {"valid": True, **stats}
+        return analysis
+    except Exception as exc:
+        return JSONResponse(
+            {"valid": False, "error": str(exc)},
+            status_code=400,
+        )
+
+
+@router.post("/validate-dataset")
+async def validate_dataset_endpoint(
+    body: DatasetValidationRequest,
+    user_id: Annotated[str, Depends(get_current_user_id)],
+    settings: Annotated[ForgeSettings, Depends(get_settings)],
+) -> dict:
+    """Preflight endpoint — scans the entire dataset before training starts."""
+    ds = _resolve_dataset_for_user(body.dataset, user_id=user_id, settings=settings)
+    try:
+        ds_fmt = DatasetFormat(body.dataset_format) if body.dataset_format else DatasetFormat.AUTO
+        analysis = analyze_training_dataset(
+            ds,
+            dataset_format=ds_fmt,
+            sandbox_root=Path(settings.data_dir) / "uploads" / user_id,
+        )
+        if not analysis.get("valid"):
+            raise ValueError("No valid training samples after preprocessing")
+        return {"valid": True, **analysis}
     except Exception as exc:
         return JSONResponse(
             {"valid": False, "error": str(exc)},
@@ -224,12 +272,13 @@ async def start_training(
     ds_fmt_str = training_config.get("dataset_format", "auto")
     try:
         ds_fmt = DatasetFormat(ds_fmt_str) if ds_fmt_str else DatasetFormat.AUTO
-        validate_training_dataset(
+        analysis = analyze_training_dataset(
             dataset_for_val,
             dataset_format=ds_fmt,
             sandbox_root=Path(settings.data_dir) / "uploads" / user_id,
-            max_check_samples=8192,  # safe preflight size; actual training uses full
         )
+        if not analysis.get("valid"):
+            raise ValueError("No valid training samples after preprocessing")
     except Exception as exc:
         raise HTTPException(
             status_code=400,

@@ -1,6 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { api, subscribeSSE, SystemMetrics, TrainingJob, TrainingMetricPoint, TrainingRecommendations } from "@/lib/api";
+import {
+  api,
+  DatasetAnalysis,
+  subscribeSSE,
+  SystemMetrics,
+  TrainingJob,
+  TrainingMetricPoint,
+  TrainingRecommendations,
+} from "@/lib/api";
 import { invalidateApiCache } from "@/lib/api/getCache";
 import { appendBoundedLog } from "@/lib/api/sse";
 import { initialDownloadProgress, ModelProgressState } from "@/lib/modelProgress";
@@ -34,7 +42,7 @@ export function TrainPage() {
   const [jobs, setJobs] = useState<TrainingJob[]>([]);
   const { models: localModels, refresh: refreshLocalModels } = useTrainingModels();
   const [modelId, setModelId] = useState("");
-  const [dataset, setDataset] = useState("HuggingFaceH4/no_robots");
+  const [dataset, setDataset] = useState("tatsu-lab/alpaca");
   const [method, setMethod] = useState("lora");
   const [quant, setQuant] = useState("4bit");
   const [datasetFormat, setDatasetFormat] = useState("auto");
@@ -77,29 +85,49 @@ export function TrainPage() {
   const [configCustomized, setConfigCustomized] = useState(false);
   const [datasetValid, setDatasetValid] = useState(true);
   const [datasetError, setDatasetError] = useState<string | null>(null);
-  const [validatingDataset, setValidatingDataset] = useState(false);
+  const [analyzingDataset, setAnalyzingDataset] = useState(false);
+  const [datasetAnalysis, setDatasetAnalysis] = useState<DatasetAnalysis | null>(null);
 
-  const validateDataset = useCallback(async (ds: string, fmt: string) => {
+  const analyzeDataset = useCallback(async (ds: string, fmt: string) => {
     if (!ds) {
       setDatasetValid(true);
       setDatasetError(null);
+      setDatasetAnalysis(null);
       return;
     }
-    setValidatingDataset(true);
+    setAnalyzingDataset(true);
     try {
-      const res = await api.validateDataset(ds, fmt);
+      const res = await api.analyzeDataset(ds, fmt);
       if (res.valid) {
         setDatasetValid(true);
         setDatasetError(null);
+        setDatasetAnalysis(res);
+        const rec = res.recommended_config;
+        if (rec?.dataset_format && rec.dataset_format !== "auto") {
+          setDatasetFormat(rec.dataset_format);
+        }
+        if (rec?.train_on_responses_only != null) {
+          setTrainResponsesOnly(rec.train_on_responses_only);
+        }
+        if (rec?.max_seq_length) setMaxSeq(rec.max_seq_length);
+        if (rec?.epochs) setEpochs(rec.epochs);
+        if (rec?.early_stopping != null) setEarlyStopping(rec.early_stopping);
+        if (rec?.early_stopping_patience != null) {
+          setEarlyStoppingPatience(rec.early_stopping_patience);
+        }
+        if (rec?.preprocess_dataset != null) setPreprocessDataset(rec.preprocess_dataset);
+        if (rec?.packing != null) setPacking(rec.packing);
       } else {
         setDatasetValid(false);
         setDatasetError(res.error || "Dataset cannot be normalized for training");
+        setDatasetAnalysis(null);
       }
     } catch (e: any) {
       setDatasetValid(false);
-      setDatasetError(e?.message || "Failed to validate dataset");
+      setDatasetError(e?.message || "Failed to analyze dataset");
+      setDatasetAnalysis(null);
     } finally {
-      setValidatingDataset(false);
+      setAnalyzingDataset(false);
     }
   }, []);
   const downloadGenRef = useRef(0);
@@ -219,16 +247,16 @@ export function TrainPage() {
     };
   }, [modelId, dataset]);
 
-  // Pre-validate dataset for format/normalization before allowing training start
+  // Analyze the full dataset schema when selection changes (dataset-specialized training)
   useEffect(() => {
     const t = setTimeout(() => {
-      validateDataset(dataset, datasetFormat);
-    }, 250);
+      analyzeDataset(dataset, datasetFormat);
+    }, 350);
     return () => clearTimeout(t);
-  }, [dataset, datasetFormat, validateDataset]);
+  }, [dataset, datasetFormat, analyzeDataset]);
 
   useEffect(() => {
-    if (configCustomized || !recommendations?.config) return;
+    if (configCustomized || !recommendations?.config || datasetAnalysis) return;
     const rec = recommendations.config;
     if (rec.dataset_format && rec.dataset_format !== "auto") {
       setDatasetFormat(rec.dataset_format);
@@ -236,7 +264,7 @@ export function TrainPage() {
     if (rec.train_on_responses_only != null) {
       setTrainResponsesOnly(rec.train_on_responses_only);
     }
-  }, [recommendations, configCustomized]);
+  }, [recommendations, configCustomized, datasetAnalysis]);
 
   const applyRecommendations = useCallback(() => {
     const rec = recommendations?.config;
@@ -412,7 +440,7 @@ export function TrainPage() {
   return (
     <StudioPageShell
       title="Training Studio"
-      subtitle="Fine-tune with LoRA/QLoRA — pick a safetensors base model (not GGUF). Settings adapt to your GPU and dataset."
+      subtitle="Fine-tune with LoRA/QLoRA — pick a safetensors base model (not GGUF). The full dataset is analyzed to set format and hyperparameters (independent of chat)."
       banner={
         hw?.training_defaults ? (
           <div className="hw-inline-banner card">
@@ -565,19 +593,48 @@ export function TrainPage() {
               )}
           </div>
 
-          {(validatingDataset || !datasetValid || datasetError) && (
+          {(analyzingDataset || !datasetValid || datasetError) && (
             <div className={`status-callout ${datasetValid ? "status-callout-warn" : "status-callout-error"} studio-error-callout`} style={{marginTop: 8}}>
               <div className="status-callout-body">
                 <strong className="status-callout-title">
-                  {validatingDataset ? "Validating dataset…" : datasetValid ? "Dataset warning" : "Dataset error"}
+                  {analyzingDataset ? "Analyzing dataset…" : datasetValid ? "Dataset warning" : "Dataset error"}
                 </strong>
                 <div className="status-callout-text">
-                  {validatingDataset ? "Checking if the dataset can be normalized for training..." : (datasetError || "Dataset looks invalid for training.")}
+                  {analyzingDataset
+                    ? "Scanning the entire dataset, detecting schema, and preparing research-grade training settings..."
+                    : (datasetError || "Dataset looks invalid for training.")}
                 </div>
                 {!datasetValid && (
                   <div className="muted-text" style={{fontSize: "12px", marginTop: 4}}>
-                    Fix the format or pick a dataset with chat messages, preference pairs (chosen/rejected), instruction/output pairs, or plain text.
+                    Pick a dataset with instruction/output pairs, Q&A columns, multi-turn messages, preference pairs, or plain text/code fields.
                   </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {datasetAnalysis?.valid && !analyzingDataset && (
+            <div className="status-callout status-callout-info train-rec-panel" style={{ marginTop: 8 }}>
+              <div className="status-callout-body">
+                <strong className="status-callout-title">Dataset analysis</strong>
+                <div className="status-callout-text">
+                  {datasetAnalysis.domain_label} · {datasetAnalysis.resolved_format} format ·{" "}
+                  {datasetAnalysis.kept.toLocaleString()} / {datasetAnalysis.initial_samples.toLocaleString()} rows retained (
+                  {datasetAnalysis.utilization_pct}%)
+                </div>
+                <div className="muted-text studio-field-hint studio-field-hint-compact">
+                  Columns: {datasetAnalysis.columns.join(", ")} · p95 ~{datasetAnalysis.length_stats.estimated_tokens_p95} tokens
+                </div>
+                {datasetAnalysis.notes[0] && (
+                  <div className="muted-text studio-field-hint studio-field-hint-compact">{datasetAnalysis.notes[0]}</div>
+                )}
+                {datasetAnalysis.sample_preview.length > 0 && (
+                  <details className="train-dataset-preview" style={{ marginTop: 8 }}>
+                    <summary className="muted-text">Preview normalized rows</summary>
+                    <pre className="train-dataset-preview-body">
+                      {JSON.stringify(datasetAnalysis.sample_preview, null, 2)}
+                    </pre>
+                  </details>
                 )}
               </div>
             </div>

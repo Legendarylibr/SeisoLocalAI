@@ -53,11 +53,17 @@ def detect_format(sample: dict) -> DatasetFormat:
         "question" in sample and "answer" in sample
     ):
         return DatasetFormat.ALPACA
+    if ("prompt" in sample and "completion" in sample) or (
+        "prompt" in sample and "response" in sample
+    ):
+        return DatasetFormat.ALPACA
     if "conversations" in sample or "messages" in sample:
         return DatasetFormat.SHAREGPT if "conversations" in sample else DatasetFormat.CHAT
-    if "instruction" in sample and "output" in sample:
+    if ("instruction" in sample and "output" in sample) or (
+        "instruction" in sample and "response" in sample
+    ):
         return DatasetFormat.ALPACA
-    if "text" in sample or "content" in sample:
+    if "text" in sample or "content" in sample or "code" in sample:
         return DatasetFormat.TEXT
     return DatasetFormat.TEXT
 

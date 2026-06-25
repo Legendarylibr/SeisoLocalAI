@@ -1,6 +1,13 @@
 import { request } from "./client";
 import { cachedGet } from "./getCache";
-import type { CatalogDataset, TrainableModel, TrainingJob, TrainingMetricsPayload, TrainingRecommendations } from "./types";
+import type {
+  CatalogDataset,
+  DatasetAnalysis,
+  TrainableModel,
+  TrainingJob,
+  TrainingMetricsPayload,
+  TrainingRecommendations,
+} from "./types";
 
 export const trainingApi = {
   startTraining: (
@@ -30,12 +37,14 @@ export const trainingApi = {
     if (dataset) params.set("dataset", dataset);
     return request<TrainingRecommendations>(`/training/recommendations?${params}`);
   },
+  analyzeDataset: (dataset: string, datasetFormat: string = "auto") =>
+    request<DatasetAnalysis>("/training/analyze-dataset", {
+      method: "POST",
+      body: JSON.stringify({ dataset, dataset_format: datasetFormat }),
+    }),
   validateDataset: (dataset: string, datasetFormat: string = "auto") =>
-    request<{ valid: boolean; kept?: number; resolved_format?: string; error?: string }>(
-      "/training/validate-dataset",
-      {
-        method: "POST",
-        body: JSON.stringify({ dataset, dataset_format: datasetFormat }),
-      },
-    ),
+    request<DatasetAnalysis & { valid: boolean; error?: string }>("/training/validate-dataset", {
+      method: "POST",
+      body: JSON.stringify({ dataset, dataset_format: datasetFormat }),
+    }),
 };
