@@ -25,14 +25,14 @@ class _Rows:
     def __getitem__(self, idx):
         return self._rows[idx]
 
-    def map(self, fn, remove_columns=None):
+    def map(self, fn, remove_columns=None, **kwargs):
         out = []
         for row in self._rows:
             out.append(fn(row))
         list(out[0].keys()) if out else []
         return _Rows(out)
 
-    def filter(self, fn):
+    def filter(self, fn, **kwargs):
         kept = [row for row in self._rows if fn(row)]
         return _Rows(kept)
 

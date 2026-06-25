@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
+from typing import Any
 
 from seiso.models.chat_format import extract_messages, format_messages_for_prompt
 from seiso.training.config import DatasetFormat
@@ -91,6 +92,7 @@ def prepare_tokenized_dataset(
     max_seq_length: int,
     dataset_format: DatasetFormat = DatasetFormat.AUTO,
     train_on_inputs: bool = False,
+    num_proc: int | None = None,
 ):
     """Tokenize dataset with chat formatting and assistant-only loss masking."""
     fmt = dataset_format
@@ -129,7 +131,10 @@ def prepare_tokenized_dataset(
         encoded["labels"] = list(encoded["input_ids"])
         return encoded
 
-    tokenized = dataset.map(tokenize, remove_columns=dataset.column_names)
+    map_kwargs: dict[str, Any] = {"remove_columns": dataset.column_names}
+    if num_proc and num_proc > 1:
+        map_kwargs["num_proc"] = num_proc
+    tokenized = dataset.map(tokenize, **map_kwargs)
     return tokenized, fmt
 
 

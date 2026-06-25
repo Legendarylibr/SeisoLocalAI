@@ -34,7 +34,7 @@ from seiso.research.provenance import (
     write_json,
 )
 from seiso.security.deps import sha256_file
-from seiso.training.config import QuantMode, TrainConfig, TrainMethod
+from seiso.training.config import DatasetFormat, QuantMode, TrainConfig, TrainMethod
 from seiso.training.datasets import (
     format_dataset_text,
     load_training_dataset,
@@ -42,6 +42,14 @@ from seiso.training.datasets import (
 )
 from seiso.training.multi_gpu import configure_training_args, detect_training_layout
 from seiso.training.dataset_analysis import analyze_training_dataset
+from seiso.training.practices import (
+    default_pad_to_multiple_of,
+    resolve_compute_dtype,
+    resolve_map_workers,
+    resolve_optimizer,
+    sft_modern_kwargs,
+    training_args_modern_extras,
+)
 from seiso.training.preprocess import (
     compute_eval_split_size,
     preprocess_training_dataset,
@@ -178,6 +186,7 @@ class SeisoTrainer:
                 dataset_format=ds_fmt,
                 deduplicate=cfg.deduplicate_dataset,
                 min_chars=cfg.min_sample_chars,
+                num_proc=resolve_map_workers(cfg),
             )
             self._log(
                 f"Preprocessed dataset: {preprocess_stats['kept']}/{preprocess_stats['initial_samples']} "
@@ -219,12 +228,14 @@ class SeisoTrainer:
                 tokenized_eval, _ = format_dataset_text(eval_ds, tokenizer, detected_fmt)
                 eval_ds = tokenized_eval
         else:
+            map_workers = resolve_map_workers(cfg)
             train_ds, detected_fmt = prepare_tokenized_dataset(
                 train_ds,
                 tokenizer,
                 max_seq_length=cfg.max_seq_length,
                 dataset_format=ds_fmt,
                 train_on_inputs=not cfg.train_on_responses_only,
+                num_proc=map_workers,
             )
             tokenized_eval = None
             if eval_ds is not None:
@@ -234,9 +245,14 @@ class SeisoTrainer:
                     max_seq_length=cfg.max_seq_length,
                     dataset_format=detected_fmt,
                     train_on_inputs=not cfg.train_on_responses_only,
+                    num_proc=map_workers,
                 )
                 eval_ds = tokenized_eval
-            data_collator = self._make_collator(tokenizer)
+            pad_multiple = default_pad_to_multiple_of(
+                cfg.pad_to_multiple_of,
+                cuda_available=torch.cuda.is_available(),
+            )
+            data_collator = self._make_collator(tokenizer, pad_to_multiple_of=pad_multiple)
 
         from seiso.training.metrics import build_metrics_callback
 
@@ -268,6 +284,7 @@ class SeisoTrainer:
             multi_gpu,
             data_collator=data_collator,
             dataset_text_field=dataset_text_field,
+            dataset_format=detected_fmt,
             callbacks=trainer_callbacks,
         )
 
@@ -433,36 +450,16 @@ class SeisoTrainer:
         return model
 
     @staticmethod
-    def _make_collator(tokenizer):
-        from dataclasses import dataclass
+    def _make_collator(tokenizer, *, pad_to_multiple_of: int | None = None):
+        from transformers import DataCollatorForSeq2Seq
 
-        import torch
-
-        @dataclass
-        class SFTCollator:
-            tokenizer: Any
-
-            def __call__(self, features):
-                label_rows = (
-                    [f.pop("labels") for f in features]
-                    if features and "labels" in features[0]
-                    else None
-                )
-                batch = self.tokenizer.pad(features, padding=True, return_tensors="pt")
-                if label_rows:
-                    max_len = batch["input_ids"].shape[1]
-                    padded = []
-                    for lab in label_rows:
-                        row = list(lab) + [-100] * (max_len - len(lab))
-                        padded.append(row[:max_len])
-                    batch["labels"] = torch.tensor(padded, dtype=torch.long)
-                else:
-                    labels = batch["input_ids"].clone()
-                    labels[batch["attention_mask"] == 0] = -100
-                    batch["labels"] = labels
-                return batch
-
-        return SFTCollator(tokenizer=tokenizer)
+        return DataCollatorForSeq2Seq(
+            tokenizer=tokenizer,
+            model=None,
+            padding=True,
+            label_pad_token_id=-100,
+            pad_to_multiple_of=pad_to_multiple_of,
+        )
 
     def _build_trainer(
         self,
@@ -475,46 +472,30 @@ class SeisoTrainer:
         *,
         data_collator=None,
         dataset_text_field: str | None = None,
+        dataset_format: DatasetFormat = DatasetFormat.AUTO,
         callbacks=None,
     ) -> Any:
         cfg = self.config
         import torch
 
-        use_bf16 = False
-        use_fp16 = False
-        use_cpu = False
-        if torch.cuda.is_available():
-            use_bf16 = torch.cuda.is_bf16_supported() and cfg.quant != QuantMode.INT16
-            use_fp16 = cfg.quant == QuantMode.INT16 and not use_bf16
-        elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        cuda_available = torch.cuda.is_available()
+        use_cpu = not cuda_available and not (
+            hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
+        )
+        bf16_supported = cuda_available and torch.cuda.is_bf16_supported()
+        use_bf16, use_fp16 = resolve_compute_dtype(
+            cuda_available=cuda_available,
+            bf16_supported=bf16_supported,
+            quant=cfg.quant.value,
+        )
+        if not cuda_available and hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
             use_fp16 = cfg.quant == QuantMode.INT16
-        else:
-            use_cpu = True
 
-        # ── Optimizer selection ──
-        # adamw_torch_fused is the fastest on CUDA — it fuses the multi-tensor
-        # AdamW update into a single CUDA kernel.  For 4-bit QLoRA, paged_adamw_8bit
-        # is used only when bitsandbytes is available, as it pages optimizer states
-        # to CPU and prevents OOM on large models with limited VRAM.
-        if use_cpu:
-            optim = "adamw_torch"
-        elif cfg.quant == QuantMode.INT4:
-            try:
-                import bitsandbytes  # noqa: F401
-
-                optim = "paged_adamw_8bit"
-            except ImportError:
-                logger.warning(
-                    "quant=4bit requested but bitsandbytes is not installed; "
-                    "falling back to adamw_torch_fused optimizer"
-                )
-                optim = "adamw_torch_fused"
-        else:
-            optim = "adamw_torch_fused"
+        optim = resolve_optimizer(cfg.quant.value, use_cpu=use_cpu)
 
         # ── Dataloader workers: auto-detect when not explicitly set ──
         num_workers = cfg.dataloader_num_workers
-        if num_workers == 0 and torch.cuda.is_available():
+        if num_workers == 0 and cuda_available:
             cpu_count = os.cpu_count() or 4
             num_workers = min(4, max(1, cpu_count // 2))
         persistent_workers = num_workers > 0 and cfg.dataloader_persistent_workers
@@ -528,7 +509,7 @@ class SeisoTrainer:
         # Requires flash-attention (sdpa also works on recent transformers).  When
         # enabled, sequences are concatenated with position_ids and cu_seqlens,
         # so every token is a real token — no padding compute waste at all.
-        padding_free = cfg.padding_free and torch.cuda.is_available() and cfg.packing
+        padding_free = cfg.padding_free and cuda_available and cfg.packing
 
         # ── Check which TrainingArguments params are actually available ──
         # (transformers 5.x removed group_by_length; guard with hasattr)
@@ -583,9 +564,11 @@ class SeisoTrainer:
             base["neftune_noise_alpha"] = cfg.neftune_noise_alpha
         if padding_free:
             base["padding_free"] = True
-        if cfg.torch_compile and torch.cuda.is_available():
+        if cfg.torch_compile and cuda_available:
             base["torch_compile"] = True
             base["torch_compile_backend"] = "inductor"
+
+        base.update(training_args_modern_extras(cfg, eval_enabled=eval_ds is not None))
 
         merged_callbacks = list(callbacks or [])
         use_cuda_graphs = bool(cfg.extra.get("use_cuda_graphs", not cfg.deterministic))
@@ -595,7 +578,7 @@ class SeisoTrainer:
                 "(disable GC or set extra.use_cuda_graphs=false)"
             )
             use_cuda_graphs = False
-        if use_cuda_graphs and torch.cuda.is_available():
+        if use_cuda_graphs and cuda_available:
             try:
                 from seiso.kernels.cuda_graphs import make_training_graph_callback
 
@@ -610,6 +593,13 @@ class SeisoTrainer:
             self._kernel_meta["cuda_graphs_requested"] = True
 
         args_dict = configure_training_args(base, layout, multi_gpu)
+        modern_sft = sft_modern_kwargs(
+            cfg,
+            train_on_responses_only=cfg.train_on_responses_only,
+            dataset_format=dataset_format,
+            cuda_available=cuda_available,
+            use_text_field=bool(dataset_text_field),
+        )
         return build_sft_trainer(
             model,
             tokenizer,
@@ -623,6 +613,7 @@ class SeisoTrainer:
             use_fused_ce=cfg.use_fused_ce,
             use_cuda_graphs=use_cuda_graphs,
             callbacks=merged_callbacks or None,
+            sft_extras=modern_sft,
         )
 
     def _train_embedding(self) -> Path:
@@ -750,6 +741,9 @@ class SeisoTrainer:
             "padding_free": cfg.padding_free,
             "neftune_noise_alpha": cfg.neftune_noise_alpha,
             "torch_compile": cfg.torch_compile,
+            "dataset_num_proc": cfg.dataset_num_proc,
+            "pad_to_multiple_of": cfg.pad_to_multiple_of,
+            "assistant_only_loss": cfg.assistant_only_loss,
             "save_safetensors": cfg.save_safetensors,
             "multi_gpu": multi_gpu,
             "world_size": layout.world_size,
