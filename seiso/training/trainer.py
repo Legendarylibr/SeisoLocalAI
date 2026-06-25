@@ -248,6 +248,8 @@ class SeisoTrainer:
                     num_proc=map_workers,
                 )
                 eval_ds = tokenized_eval
+            import torch
+
             pad_multiple = default_pad_to_multiple_of(
                 cfg.pad_to_multiple_of,
                 cuda_available=torch.cuda.is_available(),
