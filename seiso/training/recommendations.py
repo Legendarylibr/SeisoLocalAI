@@ -10,11 +10,12 @@ from seiso.hardware.training import training_defaults
 from seiso.memory.estimates import estimate_training_vram_gb, guess_params_from_name
 from seiso.models.catalog import _parse_param_size
 from seiso.models.trainable_snapshot import GGUF_ONLY_REPO_MESSAGE, is_gguf_only_repo_id
-from seiso.training.config import DatasetFormat
+from seiso.training.config import DatasetFormat, TrainMethod
 from seiso.training.dataset_analysis import (
     analysis_notes_for_recommendations,
     analyze_training_dataset,
 )
+from seiso.training.practices import learning_rate_for_method, warmup_ratio_for_corpus
 
 logger = logging.getLogger(__name__)
 
@@ -136,7 +137,11 @@ def recommend_training_config(
         "batch_size": defaults["batch_size"],
         "gradient_accumulation_steps": defaults["gradient_accumulation_steps"],
         "max_seq_length": ds.get("max_seq_length", defaults["max_seq_length"]),
-        "learning_rate": 2e-4,
+        "learning_rate": learning_rate_for_method(TrainMethod(defaults["method"])),
+        "warmup_ratio": ds.get(
+            "warmup_ratio",
+            warmup_ratio_for_corpus(int(analysis.get("kept", 0)) if analysis else 0),
+        ),
         "epochs": ds.get("epochs", 3),
         "lora_r": 16,
         "lora_alpha": 32,

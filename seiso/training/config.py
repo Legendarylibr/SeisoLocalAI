@@ -85,6 +85,18 @@ class TrainConfig(BaseModel):
     use_rslora: bool = False
     train_on_responses_only: bool = True
     packing: bool = False
+    assistant_only_loss: bool | None = Field(
+        default=None,
+        description="TRL assistant-only loss when the trainer tokenizes chat rows (None = auto)",
+    )
+    dataset_num_proc: int | None = Field(
+        default=None,
+        description="Parallel workers for dataset map/tokenize (None = auto, 0 = disable)",
+    )
+    pad_to_multiple_of: int | None = Field(
+        default=None,
+        description="Pad batch sequences to this multiple for tensor cores (None = 8 on CUDA)",
+    )
     # ── Performance optimizations (auto-tuned when left at defaults) ──
     dataloader_num_workers: int = 0  # 0 = auto-detect (min(4, cpu_count//2) on CUDA, 0 on CPU)
     dataloader_persistent_workers: bool = True

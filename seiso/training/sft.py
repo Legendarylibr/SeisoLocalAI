@@ -105,6 +105,7 @@ def build_sft_trainer(
     use_fused_ce: bool = True,
     use_cuda_graphs: bool = False,
     callbacks=None,
+    sft_extras: dict[str, Any] | None = None,
 ):
     """Create TRL SFTTrainer when available; falls back to HF Trainer."""
     if _SFTTrainer is None or SFTConfig is None:
@@ -131,6 +132,10 @@ def build_sft_trainer(
     # padding_free is passed through to SFTConfig when present in args dict
     if training_args_dict.get("padding_free"):
         cfg_kwargs["padding_free"] = True
+    if sft_extras:
+        for key, value in sft_extras.items():
+            if value is not None:
+                cfg_kwargs[key] = value
 
     args = SFTConfig(**cfg_kwargs)
     trainer_cls = FusedSFTTrainer if use_fused_ce else _SFTTrainer

@@ -71,7 +71,7 @@ def test_chat_labels_mask_prompt():
         def __getitem__(self, idx):
             return self._rows[idx]
 
-        def map(self, fn, remove_columns=None):
+        def map(self, fn, remove_columns=None, **kwargs):
             out = []
             for row in self._rows:
                 out.append(fn(row))

@@ -11,7 +11,6 @@ from typing import Any
 
 from seiso.training.config import DatasetFormat
 from seiso.training.datasets import detect_format, load_training_dataset
-
 logger = logging.getLogger(__name__)
 
 _WHITESPACE_RE = re.compile(r"\s+")
@@ -182,6 +181,7 @@ def preprocess_training_dataset(
     dataset_format: DatasetFormat = DatasetFormat.AUTO,
     deduplicate: bool = True,
     min_chars: int = 1,
+    num_proc: int | None = None,
 ) -> tuple[Any, dict[str, Any], DatasetFormat]:
     """Normalize rows, drop invalid/empty samples, and optionally deduplicate."""
     initial = len(dataset)
@@ -205,9 +205,12 @@ def preprocess_training_dataset(
             return {"_seiso_valid": False}
         return {**norm, "_seiso_valid": True}
 
-    mapped = dataset.map(transform)
+    map_kwargs: dict[str, Any] = {}
+    if num_proc and num_proc > 1:
+        map_kwargs["num_proc"] = num_proc
+    mapped = dataset.map(transform, **map_kwargs)
     before_filter = len(mapped)
-    filtered = mapped.filter(lambda row: row["_seiso_valid"])
+    filtered = mapped.filter(lambda row: row["_seiso_valid"], **map_kwargs)
     stats["removed_invalid"] = before_filter - len(filtered)
 
     if deduplicate and len(filtered) > 0:

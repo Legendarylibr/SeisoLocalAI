@@ -11,6 +11,7 @@ from typing import Any
 
 from seiso.training.config import DatasetFormat
 from seiso.training.datasets import detect_format, load_training_dataset
+from seiso.training.practices import warmup_ratio_for_corpus
 from seiso.training.preprocess import normalize_sample, preprocess_training_dataset
 
 logger = logging.getLogger(__name__)
@@ -177,6 +178,7 @@ def build_dataset_training_config(
         "deduplicate_dataset": True,
         "max_seq_length": max_seq,
         "epochs": epochs,
+        "warmup_ratio": warmup_ratio_for_corpus(kept),
         "early_stopping": kept >= 200,
         "early_stopping_patience": 3,
         "packing": resolved_format == DatasetFormat.TEXT and kept >= 10_000,
