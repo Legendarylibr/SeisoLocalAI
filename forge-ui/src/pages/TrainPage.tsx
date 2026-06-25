@@ -839,7 +839,7 @@ export function TrainPage() {
             <button
               className="btn btn-primary btn-lg"
               onClick={start}
-              disabled={starting || downloadingModel || modelBlocked || !datasetValid || validatingDataset}
+              disabled={starting || downloadingModel || modelBlocked || !datasetValid || analyzingDataset}
             >
               {starting ? "Starting…" : downloadingModel ? "Downloading model…" : "Start training"}
             </button>
