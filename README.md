@@ -627,7 +627,7 @@ Outbound provider calls block private/metadata hosts, require HTTPS for remote e
 ### Auth & database
 
 - Signed session tokens; login throttling (10 attempts/min per IP)
-- Rate limiting when `SEISO_ALLOW_REMOTE=true` (default 120 req/min per IP)
+- Rate limiting on all bindings (default 120 req/min per IP when remote; ≥240 on localhost)
 - AES-256-GCM encryption for sensitive DB columns
 - Ephemeral SQLite by default — zero retention on restart
 

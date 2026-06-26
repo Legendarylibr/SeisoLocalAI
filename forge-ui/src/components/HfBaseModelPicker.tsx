@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, CatalogModel, TrainableModel } from "@/lib/api";
 import { formatBytes } from "@/lib/modelProgress";
+import { GGUF_TRAIN_ERROR, isGgufOnlyRepoId } from "@/lib/trainRepo";
 import { HubComboboxSearch } from "@/components/HubComboboxSearch";
 import { IconChevronDown } from "@/components/Icons";
 import { useHubCombobox } from "@/hooks/useHubCombobox";
@@ -75,6 +76,7 @@ export function HfBaseModelPicker({
   }, [open]);
 
   const pick = (repoId: string) => {
+    if (trainableOnly && isGgufOnlyRepoId(repoId)) return;
     setOpen(false);
     onChange(repoId);
   };
@@ -82,6 +84,7 @@ export function HfBaseModelPicker({
   const applyCustom = () => {
     const trimmed = search.trim();
     if (!trimmed) return;
+    if (trainableOnly && isGgufOnlyRepoId(trimmed)) return;
     setOpen(false);
     onChange(trimmed);
   };
@@ -103,11 +106,16 @@ export function HfBaseModelPicker({
       : value || (trainableOnly ? "Select a base model…" : "Select or search a model…");
 
   const q = search.toLowerCase().trim();
+  const customIsGguf = trainableOnly && isGgufOnlyRepoId(search.trim());
 
   const hubModels = useMemo(() => {
     const localRepoIds = new Set(localModels.map((m) => m.repo_id).filter(Boolean) as string[]);
-    return results.filter((m) => !localRepoIds.has(m.repo_id));
-  }, [results, localModels]);
+    return results.filter((m) => {
+      if (localRepoIds.has(m.repo_id)) return false;
+      if (trainableOnly && isGgufOnlyRepoId(m.repo_id, m.tags)) return false;
+      return true;
+    });
+  }, [results, localModels, trainableOnly]);
 
   const filteredLocal = useMemo(() => {
     if (!q) return localModels;
@@ -121,7 +129,7 @@ export function HfBaseModelPicker({
 
   const emptyLocal = filteredLocal.length === 0;
   const emptyHub = !loading && hubModels.length === 0;
-  const showCustomHint = q && emptyHub;
+  const showCustomHint = q && emptyHub && !customIsGguf;
 
   return (
     <div className="chat-model-picker" ref={rootRef}>
@@ -212,6 +220,12 @@ export function HfBaseModelPicker({
 
             {emptyLocal && emptyHub && !showCustomHint && (
               <div className="chat-model-picker-hint">No models match your search.</div>
+            )}
+
+            {customIsGguf && (
+              <div className="chat-model-picker-hint chat-model-picker-hint-warn">
+                {GGUF_TRAIN_ERROR}
+              </div>
             )}
 
             {showCustomHint && (

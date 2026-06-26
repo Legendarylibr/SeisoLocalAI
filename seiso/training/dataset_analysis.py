@@ -12,7 +12,7 @@ from typing import Any
 from seiso.training.config import DatasetFormat
 from seiso.training.datasets import detect_format, load_training_dataset
 from seiso.training.practices import warmup_ratio_for_corpus
-from seiso.training.preprocess import normalize_sample, preprocess_training_dataset
+from seiso.training.preprocess import preprocess_training_dataset
 
 logger = logging.getLogger(__name__)
 

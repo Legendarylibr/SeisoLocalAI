@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from seiso.inference.streaming import StreamToken, StreamUpdate
+from seiso.inference.streaming import StreamToken
 
 
 def test_stream_token_normalizes_non_positive_counts():

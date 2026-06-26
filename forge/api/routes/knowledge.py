@@ -13,11 +13,10 @@ from forge.api.deps import get_knowledge_orchestrator
 from forge.config import ForgeSettings, get_settings
 from forge.orchestrators.knowledge import KnowledgeOrchestrator
 from forge.security.auth import get_current_user_id
+from forge.services.knowledge_paths import validate_kb_id
 from seiso.security import SecurityError, safe_join
 
 router = APIRouter(prefix="/knowledge", tags=["knowledge"])
-
-_KB_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
 _FILENAME_RE = re.compile(r"^[a-zA-Z0-9._-]{1,128}$")
 _MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 
@@ -36,14 +35,6 @@ class RetrieveRequest(BaseModel):
 class CreateBaseRequest(BaseModel):
     knowledge_base_id: str = Field(min_length=1, max_length=64)
     name: str = Field(default="", max_length=128)
-
-
-def _validate_kb_id(kb_id: str) -> str:
-    if not _KB_ID_RE.match(kb_id):
-        raise HTTPException(
-            400, "knowledge_base_id must be 1–64 alphanumeric characters, hyphens, or underscores"
-        )
-    return kb_id
 
 
 def _count_chunks(index_path: Path) -> int:
@@ -89,7 +80,7 @@ async def create_base(
     user_id: Annotated[str, Depends(get_current_user_id)],
     settings: Annotated[ForgeSettings, Depends(get_settings)],
 ) -> dict:
-    kb_id = _validate_kb_id(body.knowledge_base_id)
+    kb_id = validate_kb_id(body.knowledge_base_id)
     try:
         kb_dir = safe_join(settings.data_dir, "knowledge", user_id, kb_id)
         kb_dir.mkdir(parents=True, exist_ok=True)
@@ -132,7 +123,7 @@ async def ingest(
     orchestrator: Annotated[KnowledgeOrchestrator, Depends(get_knowledge_orchestrator)],
     settings: Annotated[ForgeSettings, Depends(get_settings)],
 ) -> dict:
-    _validate_kb_id(body.knowledge_base_id)
+    validate_kb_id(body.knowledge_base_id)
     try:
         uploads = safe_join(settings.data_dir, "uploads", user_id)
         uploads.mkdir(parents=True, exist_ok=True)
@@ -154,7 +145,7 @@ async def retrieve(
     user_id: Annotated[str, Depends(get_current_user_id)],
     orchestrator: Annotated[KnowledgeOrchestrator, Depends(get_knowledge_orchestrator)],
 ) -> dict:
-    _validate_kb_id(body.knowledge_base_id)
+    validate_kb_id(body.knowledge_base_id)
     job_id = orchestrator.create_job(user_id=user_id)
     payload = {"action": "retrieve", "user_id": user_id, **body.model_dump()}
     await orchestrator.start(job_id, payload)

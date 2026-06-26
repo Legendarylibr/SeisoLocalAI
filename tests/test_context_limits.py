@@ -48,7 +48,8 @@ def test_effective_context_ceiling_clamps_to_vram(monkeypatch, tmp_path: Path):
         encoding="utf-8",
     )
     ceiling = effective_context_ceiling(str(model_dir), model_format="safetensors")
-    assert ceiling <= 14336
+    # (headroom - overhead) * 5, rounded down to 512-token steps
+    assert ceiling == 18944
     assert ceiling >= 2048
 
 

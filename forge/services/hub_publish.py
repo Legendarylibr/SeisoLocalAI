@@ -5,7 +5,7 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 
 from forge.config import ForgeSettings
-from forge.services.hf_auth import resolve_hf_token_for_upload
+from forge.services.hf_auth import resolve_hf_token
 from seiso.export.model_card import HubModelMetadata
 
 
@@ -43,8 +43,8 @@ def resolve_hub_publish_token(
     hub: HubPublishRequest | None,
 ) -> str | None:
     if not hub:
-        return None
-    token, _ = resolve_hf_token_for_upload(
+        return settings.hf_token or None
+    token, _ = resolve_hf_token(
         request_token=hub.hf_token,
         user_id=user_id,
         data_dir=settings.data_dir,

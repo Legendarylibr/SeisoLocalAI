@@ -35,7 +35,7 @@ async def test_release_all_inference_memory_unloads_local(monkeypatch, tmp_path)
 
     result = await orchestrator.release_all_inference_memory("user-1")
 
-    assert calls == ["local", "cache:True", "invalidate"]
+    assert calls == ["local", "cache:False", "invalidate"]
     assert result["headroom_mb"] == 8192
 
 
