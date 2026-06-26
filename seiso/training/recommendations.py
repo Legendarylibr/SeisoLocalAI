@@ -9,6 +9,7 @@ from typing import Any
 from seiso.hardware.training import training_defaults
 from seiso.memory.estimates import estimate_training_vram_gb, guess_params_from_name
 from seiso.models.catalog import _parse_param_size
+from seiso.models.hub_quant import native_quant_training_block_reason
 from seiso.models.trainable_snapshot import GGUF_ONLY_REPO_MESSAGE, is_gguf_only_repo_id
 from seiso.training.config import DatasetFormat, TrainMethod
 from seiso.training.dataset_analysis import (
@@ -130,6 +131,10 @@ def recommend_training_config(
     trainable = not model_id or not is_gguf_only_repo_id(model_id)
     if model_id and not trainable:
         warnings.append(GGUF_ONLY_REPO_MESSAGE)
+    native_quant_block = native_quant_training_block_reason(model_id) if model_id else None
+    if native_quant_block:
+        trainable = False
+        warnings.append(native_quant_block)
 
     base_cfg = {
         "method": defaults["method"],
