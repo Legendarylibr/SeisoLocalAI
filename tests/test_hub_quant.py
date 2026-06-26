@@ -7,12 +7,17 @@ from seiso.models.hub_quant import (
     infer_active_params_b,
     is_hub_model_id,
     is_native_hub_quant_model,
+    native_quant_training_block_reason,
     needs_tight_vram_training,
 )
 
 
 class _QuantConfig:
     quantization_config = {"quant_method": "mxfp4"}
+
+
+class _Fp8Config:
+    quantization_config = {"quant_method": "fp8"}
 
 
 class _MoeConfig:
@@ -44,6 +49,16 @@ def test_active_params_from_moe_config():
 def test_infer_active_params_dense_model():
     params = infer_active_params_b("Qwen/Qwen2.5-3B-Instruct")
     assert params >= 2.5
+
+
+def test_native_quant_training_block_reason_fp8():
+    reason = native_quant_training_block_reason("org/model", config=_Fp8Config())
+    assert reason is not None
+    assert "FP8" in reason
+
+
+def test_native_quant_training_block_reason_mxfp4():
+    assert native_quant_training_block_reason("org/model", config=_QuantConfig()) is None
 
 
 def test_needs_tight_vram_for_native_quant(monkeypatch):

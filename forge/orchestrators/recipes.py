@@ -11,7 +11,11 @@ from typing import Any
 
 from forge.orchestrators.base import Orchestrator
 from forge.services.user_paths import assert_user_path
+from seiso.models.chat_format import extract_messages, format_messages_for_prompt
 from seiso.security import safe_join
+from seiso.training.config import DatasetFormat
+from seiso.training.datasets import detect_format
+from seiso.training.preprocess import normalize_sample
 
 
 class _SafeFormatMap(dict):
@@ -19,6 +23,45 @@ class _SafeFormatMap(dict):
 
     def __missing__(self, key: str) -> str:
         return ""
+
+
+def _recipe_template_fields(row: Any) -> dict[str, str]:
+    """Map a dataset row to template placeholders for the transform node."""
+    if not isinstance(row, dict):
+        return {"text": str(row)}
+
+    fmt = detect_format(row)
+    normalized = normalize_sample(row, fmt)
+    if not normalized:
+        return {"text": ""}
+
+    fields = {k: str(v) for k, v in normalized.items() if isinstance(v, (str, int, float))}
+
+    if "text" in normalized:
+        fields["text"] = str(normalized["text"])
+    elif "messages" in normalized:
+        messages = extract_messages(normalized, DatasetFormat.CHAT)
+        fields["text"] = format_messages_for_prompt(
+            messages, tokenizer=None, add_generation_prompt=False
+        )
+    elif "instruction" in normalized:
+        instruction = str(normalized.get("instruction") or "")
+        inp = str(normalized.get("input") or "")
+        output = str(normalized.get("output") or "")
+        user = f"{instruction}\n{inp}".strip() if inp else instruction
+        fields.setdefault("instruction", instruction)
+        fields.setdefault("input", inp)
+        fields.setdefault("output", output)
+        fields["text"] = f"USER: {user}\nASSISTANT: {output}".strip()
+    elif "conversations" in normalized:
+        messages = extract_messages(normalized, DatasetFormat.SHAREGPT)
+        fields["text"] = format_messages_for_prompt(
+            messages, tokenizer=None, add_generation_prompt=False
+        )
+    else:
+        fields["text"] = str(next(iter(normalized.values()), ""))
+
+    return fields
 
 
 class RecipeOrchestrator(Orchestrator):
@@ -84,12 +127,10 @@ class RecipeOrchestrator(Orchestrator):
             source_id = config.get("source")
             rows = outputs.get(source_id, [])
             template = config.get("template", "{text}")
-            _ALLOWED_TEMPLATE_KEYS = frozenset({"text", "content", "source", "id", "chunk_index"})
             out = []
             for r in rows:
                 if isinstance(r, dict):
-                    safe = {k: str(v) for k, v in r.items() if k in _ALLOWED_TEMPLATE_KEYS}
-                    text = template.format_map(_SafeFormatMap(safe))
+                    text = template.format_map(_SafeFormatMap(_recipe_template_fields(r)))
                 else:
                     text = str(r)
                 out.append({"text": text})
@@ -117,8 +158,15 @@ class RecipeOrchestrator(Orchestrator):
         return {}
 
     @staticmethod
+    def _resolve_import_suffix(path: Path, fmt: str | None) -> str:
+        normalized = (fmt or "").strip().lower().lstrip(".")
+        if normalized in ("", "auto", "txt", "text"):
+            return path.suffix.lower().lstrip(".") or "txt"
+        return normalized
+
+    @staticmethod
     def _import_file(path: Path, fmt: str | None) -> list[dict]:
-        suffix = (fmt or path.suffix).lower()
+        suffix = RecipeOrchestrator._resolve_import_suffix(path, fmt)
         if suffix in (".csv", "csv"):
             with path.open() as f:
                 return list(csv.DictReader(f))

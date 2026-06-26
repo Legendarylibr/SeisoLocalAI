@@ -41,9 +41,21 @@ export function RecipesPage() {
       sseAbortRef.current = subscribeSSE(
         `/recipes/jobs/${res.job_id}/stream`,
         (event, data) => {
-          if (event === "error") setLogs((l) => [...l, `ERROR: ${data}`]);
-          else if (event === "done") setRunning(false);
-          else setLogs((l) => [...l, data]);
+          if (event === "log") setLogs((l) => [...l, data]);
+          else if (event === "error") {
+            setLogs((l) => [...l, `ERROR: ${data}`]);
+            setRunning(false);
+          } else if (event === "result") {
+            try {
+              const result = JSON.parse(data) as { row_count?: number; output_path?: string };
+              if (result.row_count != null) {
+                setLogs((l) => [...l, `Wrote ${result.row_count} rows to ${result.output_path ?? "output"}`]);
+              }
+            } catch {
+              setLogs((l) => [...l, data]);
+            }
+            setRunning(false);
+          } else if (event === "done") setRunning(false);
         },
         (err) => {
           setError(err.message);

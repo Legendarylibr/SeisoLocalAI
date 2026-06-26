@@ -16,6 +16,8 @@ logger = logging.getLogger(__name__)
 
 ROUTER_MODEL_ID = "__seiso_router__"
 
+_router_client: httpx.AsyncClient | None = None
+
 
 def _validate_router_url(url: str) -> str:
     parsed = urlparse(url.strip())
@@ -25,6 +27,25 @@ def _validate_router_url(url: str) -> str:
     if host not in {"127.0.0.1", "localhost", "::1"} and not host.endswith(".internal"):
         raise ValueError("model_router_url must point to localhost for local-first routing")
     return url.rstrip("/")
+
+
+def _router_http_client() -> httpx.AsyncClient:
+    """Reuse one keep-alive client for router calls (lower TLS/TCP overhead)."""
+    global _router_client
+    if _router_client is None or _router_client.is_closed:
+        _router_client = httpx.AsyncClient(
+            timeout=httpx.Timeout(300.0, connect=10.0),
+            limits=httpx.Limits(max_connections=16, max_keepalive_connections=8),
+        )
+    return _router_client
+
+
+async def close_router_client() -> None:
+    """Release pooled router connections (Forge shutdown hook)."""
+    global _router_client
+    if _router_client is not None and not _router_client.is_closed:
+        await _router_client.aclose()
+    _router_client = None
 
 
 def router_headers(settings: ForgeSettings) -> dict[str, str]:
@@ -38,17 +59,16 @@ def router_headers(settings: ForgeSettings) -> dict[str, str]:
 
 async def fetch_router_status(settings: ForgeSettings) -> dict[str, Any]:
     base = _validate_router_url(settings.model_router_url)
-    timeout = httpx.Timeout(10.0)
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        health = await client.get(f"{base}/health")
-        status: dict[str, Any] = {"health": health.json() if health.status_code == 200 else {}}
-        try:
-            detail = await client.get(f"{base}/router/status")
-            if detail.status_code == 200:
-                status["detail"] = detail.json()
-        except Exception as exc:
-            logger.debug("router status unavailable: %s", exc)
-        return status
+    client = _router_http_client()
+    health = await client.get(f"{base}/health", timeout=10.0)
+    status: dict[str, Any] = {"health": health.json() if health.status_code == 200 else {}}
+    try:
+        detail = await client.get(f"{base}/router/status", timeout=10.0)
+        if detail.status_code == 200:
+            status["detail"] = detail.json()
+    except Exception as exc:
+        logger.debug("router status unavailable: %s", exc)
+    return status
 
 
 async def router_chat_completion(
@@ -69,17 +89,17 @@ async def router_chat_completion(
     if model:
         payload["model"] = model
 
-    async with httpx.AsyncClient(timeout=httpx.Timeout(300.0)) as client:
-        resp = await client.post(
-            f"{base}/v1/chat/completions",
-            json=payload,
-            headers=router_headers(settings),
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        content = data.get("choices", [{}])[0].get("message", {}).get("content", "") or ""
-        meta = data.get("seiso_router") or {}
-        return content, meta
+    client = _router_http_client()
+    resp = await client.post(
+        f"{base}/v1/chat/completions",
+        json=payload,
+        headers=router_headers(settings),
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    content = data.get("choices", [{}])[0].get("message", {}).get("content", "") or ""
+    meta = data.get("seiso_router") or {}
+    return content, meta
 
 
 async def router_stream_chat(
@@ -100,16 +120,14 @@ async def router_stream_chat(
     if model:
         payload["model"] = model
 
-    timeout = httpx.Timeout(None)
-    async with (
-        httpx.AsyncClient(timeout=timeout) as client,
-        client.stream(
-            "POST",
-            f"{base}/v1/chat/completions",
-            json=payload,
-            headers=router_headers(settings),
-        ) as resp,
-    ):
+    client = _router_http_client()
+    async with client.stream(
+        "POST",
+        f"{base}/v1/chat/completions",
+        json=payload,
+        headers=router_headers(settings),
+        timeout=None,
+    ) as resp:
         if resp.status_code >= 400:
             body = await resp.aread()
             raise RuntimeError(body.decode("utf-8", errors="replace") or "Router request failed")
