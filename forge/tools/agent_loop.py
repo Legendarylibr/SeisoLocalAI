@@ -22,9 +22,10 @@ async def run_agent_loop_async(
     max_rounds: int = 5,
     on_log: Callable[[str], None] | None = None,
     user_id: str | None = None,
+    model_key: str | None = None,
 ) -> tuple[str, list[dict]]:
     history = list(messages)
-    system = tools_system_prompt(registry)
+    system = tools_system_prompt(registry, model_key=model_key)
     if not history or history[0].get("role") != "system":
         history.insert(0, {"role": "system", "content": system})
     elif "tool_call" not in history[0].get("content", ""):
@@ -32,7 +33,7 @@ async def run_agent_loop_async(
 
     for round_i in range(max_rounds):
         reply = await generate_fn(history)
-        calls = parse_tool_calls(reply)
+        calls = parse_tool_calls(reply, model_key=model_key)
 
         if not calls:
             from forge.services.llm_output import strip_spurious_chat_artifacts

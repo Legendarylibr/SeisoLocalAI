@@ -181,6 +181,26 @@ def gguf_architecture(model_path: str) -> str | None:
     return architecture
 
 
+def _gguf_has_metadata_key(path: Path, key_suffix: str) -> bool:
+    with path.open("rb") as handle:
+        if handle.read(4) != b"GGUF":
+            return False
+        header = handle.read(20)
+        if len(header) != 20:
+            return False
+        _version, _tensor_count, kv_count = struct.unpack("<IQQ", header)
+        for _ in range(kv_count):
+            key = _read_gguf_string(handle)
+            raw_type = handle.read(4)
+            if len(raw_type) != 4:
+                return False
+            (value_type,) = struct.unpack("<I", raw_type)
+            if key.endswith(key_suffix):
+                return True
+            _skip_gguf_value(handle, value_type)
+    return False
+
+
 def _read_gguf_metadata_u32(path: Path, key_suffix: str) -> int | None:
     with path.open("rb") as handle:
         if handle.read(4) != b"GGUF":
@@ -225,6 +245,22 @@ def gguf_context_length(model_path: str) -> int | None:
     if cache_key is not None:
         _gguf_context_length_cache[cache_key] = length
     return length
+
+
+def gguf_uses_sliding_window_attention(model_path: str) -> bool:
+    """True when GGUF metadata indicates sliding-window attention layers."""
+    try:
+        path = resolve_gguf_file(model_path)
+    except ValueError:
+        return False
+
+    try:
+        sliding_window = _read_gguf_metadata_u32(path, ".attention.sliding_window")
+        if sliding_window is not None and sliding_window > 0:
+            return True
+        return _gguf_has_metadata_key(path, ".attention.sliding_window_pattern")
+    except (OSError, ValueError, struct.error):
+        return False
 
 
 def gguf_block_count(model_path: str) -> int | None:

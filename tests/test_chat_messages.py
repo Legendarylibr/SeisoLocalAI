@@ -199,12 +199,20 @@ def test_prepare_chat_context_skips_system_prompt_when_tools_enabled():
     assert messages == [{"role": "user", "content": "hi"}]
 
 
-def test_chat_system_prompt_includes_thinking_process_hint_for_qwen():
+def test_chat_system_prompt_includes_thinking_process_hint_for_reasoning_models():
     prompt = chat_system_prompt("Qwen/Qwen3.5-4B", tools_enabled=False)
     assert prompt
-    assert "Thinking Process" in prompt
-    assert "<tool_call>" in prompt
+    assert "thinking process" in prompt.lower()
+    assert "tool" in prompt.lower()
     assert is_reasoning_prone_model("Qwen/Qwen3.5-4B")
+
+
+def test_chat_system_prompt_includes_coding_guidance_for_all_models():
+    for model_key in ("Qwen/Qwen2.5-Coder-7B", "meta-llama/Llama-3.1-8B"):
+        prompt = chat_system_prompt(model_key, tools_enabled=False)
+        assert prompt
+        assert "fenced blocks" in prompt.lower()
+        assert "helpful assistant" in prompt.lower()
 
 
 @pytest.mark.parametrize(

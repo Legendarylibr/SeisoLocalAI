@@ -6,7 +6,7 @@ import re
 from collections.abc import Iterator
 
 from forge.tools.registry import (
-    _QWEN_XML_TOOL_PATTERN,
+    _XML_FUNCTION_TOOL_PATTERN,
     TOOL_CALL_CLOSE,
     TOOL_CALL_OPEN,
     TOOL_CALL_PATTERN,
@@ -17,7 +17,7 @@ _TOOL_OPEN = TOOL_CALL_OPEN
 _TOOL_CLOSE = TOOL_CALL_CLOSE
 _PARTIAL_TOOL_PREFIXES = tuple(_TOOL_OPEN[:i] for i in range(1, len(_TOOL_OPEN) + 1))
 
-# Tags used across Qwen, DeepSeek-R1, and other reasoning-tuned models.
+# Tags used across reasoning-tuned local models.
 _THINK_TAG_NAMES = (
     "think",
     "redacted_thinking",
@@ -221,7 +221,7 @@ def strip_spurious_tool_syntax(content: str) -> str:
     if not content:
         return content
     cleaned = TOOL_CALL_PATTERN.sub("", content)
-    cleaned = _QWEN_XML_TOOL_PATTERN.sub("", cleaned)
+    cleaned = _XML_FUNCTION_TOOL_PATTERN.sub("", cleaned)
     cleaned = _FUNCTION_JSON_PATTERN.sub("", cleaned)
     cleaned = re.sub(r"\[TOOL_CALLS?\]", "", cleaned, flags=re.I)
     cleaned = re.sub(r"<\|tool_call\|>.*?(?:<\|/tool_call\|>|$)", "", cleaned, flags=re.DOTALL)
