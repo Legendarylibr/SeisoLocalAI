@@ -377,7 +377,9 @@ async def test_export_profiles_api(app, auth_client):
 @pytest.mark.asyncio
 async def test_export_precheck_api_no_token(app, auth_client, monkeypatch):
     client, _token, headers, _data_dir = auth_client
-    monkeypatch.setattr("forge.api.routes.export._resolve_token", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        "forge.services.hub_publish.resolve_hub_publish_token", lambda *_a, **_k: None
+    )
     res = await client.post(
         "/api/export/precheck",
         headers=headers,

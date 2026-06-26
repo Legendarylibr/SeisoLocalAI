@@ -897,13 +897,19 @@ label {
 .auth-brand { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; }
 .auth-error { color: var(--danger); margin-bottom: 0.75rem; font-size: 0.88rem; }
 .auth-submit { width: 100%; margin-top: 0.35rem; padding: 0.65rem; }
-.hf-token-layout {
-  max-width: 560px;
-  justify-content: center;
+.hf-token-page .hf-token-layout {
+  max-width: 920px;
 }
 .hf-token-card {
-  max-width: 560px;
-  width: min(100%, 560px);
+  width: 100%;
+}
+.hf-token-page .hf-token-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.hf-token-page .hf-token-actions .auth-submit {
+  margin-top: 0;
 }
 .hf-token-actions {
   margin-top: 0.85rem;

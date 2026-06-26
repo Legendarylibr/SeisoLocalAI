@@ -261,8 +261,20 @@ export function HubPage() {
         </StatusCallout>
       )}
       {hubReady === true && (
-        <StatusCallout tone="success" title="Public downloads ready">
-          No token needed for public GGUF models. Add a Hugging Face token in Settings only for gated repos or publishing.
+        <StatusCallout
+          tone={hfStatus?.connectivity.token_valid ? "success" : "info"}
+          title={hfStatus?.connectivity.token_valid ? "Hub authenticated" : "Public downloads ready"}
+          action={
+            !hfStatus?.connectivity.token_valid ? (
+              <Link to="/settings?tab=huggingface" className="btn btn-sm">
+                Add HF token
+              </Link>
+            ) : undefined
+          }
+        >
+          {hfStatus?.connectivity.token_valid
+            ? "Gated model downloads and publishing are enabled for your account."
+            : "Public GGUF models download without a token. Gated repos and publishing need a Hugging Face token in Settings."}
         </StatusCallout>
       )}
 

@@ -297,9 +297,9 @@ async def start_training(
         ) from exc
 
     configure_hf_hub_cache(settings.data_dir)
-    from forge.services.hf_auth import resolve_hf_token
+    from forge.services.hf_auth import resolve_hf_token_for_download
 
-    hf_token, _ = resolve_hf_token(
+    hf_token, _ = resolve_hf_token_for_download(
         user_id=user_id,
         data_dir=settings.data_dir,
         encryption_key=settings.hf_token_encryption_key,
@@ -394,10 +394,10 @@ async def start_training(
                     )
 
                     if body.export_on_complete:
-                        from forge.api.routes.export import (
+                        from forge.services.hub_publish import (
                             HubPublishRequest,
-                            _hub_metadata_from_request,
-                            _resolve_token,
+                            hub_metadata_from_request,
+                            resolve_hub_publish_token,
                         )
                         from seiso.export.pipeline import auto_export_after_training
 
@@ -408,12 +408,12 @@ async def start_training(
                         hub_token = None
                         if hub_req:
                             hub = HubPublishRequest(**hub_req)
-                            hub_metadata = _hub_metadata_from_request(
+                            hub_metadata = hub_metadata_from_request(
                                 hub, job_id=job_id, source="training"
                             )
                             hub_metadata.validate()
                             hub_repo = hub_metadata.repo_id
-                            hub_token = _resolve_token(settings, user_id, hub)
+                            hub_token = resolve_hub_publish_token(settings, user_id, hub)
 
                         export_dir = settings.data_dir / "exports" / user_id / f"train-{job_id}"
                         export_cfg.update(

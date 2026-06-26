@@ -195,6 +195,10 @@ export function SettingsPage() {
                     </td>
                   </tr>
                   <tr>
+                    <td>Ready to upload</td>
+                    <td>{hfStatus.ready_for_upload ? "Yes (valid token)" : "No — token required for publishing"}</td>
+                  </tr>
+                  <tr>
                     <td>Local chat runtime</td>
                     <td>
                       {hfStatus.ready_for_local_chat

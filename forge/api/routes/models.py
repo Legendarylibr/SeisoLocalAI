@@ -21,7 +21,7 @@ from forge.db.store import Database
 from forge.orchestrators.inference import InferenceOrchestrator
 from forge.security.auth import get_current_user_id
 from forge.services.hardware import enrich_catalog_models, hardware_profile, hardware_summary
-from forge.services.hf_auth import resolve_hf_token
+from forge.services.hf_auth import resolve_hf_token_for_download
 from forge.services.hf_cache_inventory import sync_hf_cache_inventory
 from forge.services.hf_hub import _format_hub_download_error, dir_size
 from forge.services.model_download import perform_model_download
@@ -73,7 +73,7 @@ async def model_catalog(
     limit: int = Query(50, ge=1, le=100),
     cursor: str | None = Query(None, description="Hugging Face Hub pagination cursor"),
 ) -> dict:
-    hf_token, _ = resolve_hf_token(
+    hf_token, _ = resolve_hf_token_for_download(
         user_id=user_id,
         data_dir=settings.data_dir,
         encryption_key=settings.hf_token_encryption_key,

@@ -95,6 +95,7 @@ export type HfHubStatus = {
     llamacpp_error?: string | null;
   };
   ready_for_download: boolean;
+  ready_for_upload: boolean;
   ready_for_gguf_chat: boolean;
   ready_for_local_chat?: boolean;
 };
