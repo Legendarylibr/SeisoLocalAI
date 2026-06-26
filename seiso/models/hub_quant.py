@@ -183,7 +183,7 @@ def needs_tight_vram_training(
         peek=True,
     ):
         return True
-    if headroom_mb > 0 and est_train_mb > int(headroom_mb * 0.85):
+    if headroom_mb > 0 and est_train_mb > int(headroom_mb * 0.97):
         return True
     params_b = infer_active_params_b(model_id, trust_remote_code=trust_remote_code)
     return params_b >= 14.0

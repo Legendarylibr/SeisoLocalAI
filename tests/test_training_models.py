@@ -50,6 +50,20 @@ def test_resolve_training_model_from_inventory(tmp_path: Path):
     assert local == resolved
 
 
+def test_resolve_training_model_rejects_gguf_only_repo(tmp_path: Path):
+    import pytest
+
+    from seiso.models.trainable_snapshot import GGUF_ONLY_REPO_MESSAGE
+
+    with pytest.raises(ValueError, match="GGUF-only"):
+        resolve_training_model_id(
+            "unsloth/gemma-4-E4B-it-GGUF",
+            data_dir=tmp_path,
+            user_id="user-1",
+            inventory=[],
+        )
+
+
 def test_resolve_training_model_skips_gguf_only_cache_marked_safetensors(tmp_path: Path):
     user_id = "user-1"
     bogus = tmp_path / "models" / user_id / "unsloth--gemma-4-E4B-it-GGUF"
@@ -66,14 +80,27 @@ def test_resolve_training_model_skips_gguf_only_cache_marked_safetensors(tmp_pat
             "metadata_json": '{"repo_id": "unsloth/gemma-4-E4B-it-GGUF"}',
         }
     ]
+    trainable_dir = tmp_path / "models" / user_id / "org--model"
+    trainable_dir.mkdir(parents=True)
+    (trainable_dir / "model.safetensors").write_bytes(b"weights")
+    inventory.append(
+        {
+            "id": "good",
+            "name": "model",
+            "path": str(trainable_dir),
+            "source": "hf:org/model",
+            "format": "safetensors",
+            "metadata_json": '{"repo_id": "org/model"}',
+        }
+    )
     resolved, local = resolve_training_model_id(
-        "unsloth/gemma-4-E4B-it-GGUF",
+        "org/model",
         data_dir=tmp_path,
         user_id=user_id,
         inventory=inventory,
     )
-    assert resolved == "unsloth/gemma-4-E4B-it-GGUF"
-    assert local is None
+    assert resolved == str(trainable_dir.resolve())
+    assert local == resolved
 
 
 def test_resolve_training_model_hf_fallback(tmp_path: Path):

@@ -45,7 +45,7 @@ _runner_lock = threading.Lock()
 
 def _stream_batch_chars() -> int:
     """Chars to batch after the first token; lower = snappier UI, higher = fewer SSE events."""
-    return max(1, env_int("SEISO_STREAM_BATCH_CHARS", 8))
+    return max(1, env_int("SEISO_STREAM_BATCH_CHARS", 24))
 
 
 class _StreamError:

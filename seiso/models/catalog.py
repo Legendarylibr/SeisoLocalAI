@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from seiso.compat import StrEnum
 from seiso.models.hub_errors import format_hub_error
 from seiso.models.trainable_snapshot import is_gguf_only_repo_id
-from seiso.models.trusted_gguf import base_model_from_tags, is_trusted_gguf_repo
+from seiso.models.trusted_gguf import base_model_from_tags
 
 _DEFAULT_LIMIT = 50
 _MAX_LIMIT = 100
@@ -302,6 +302,15 @@ def _is_supported_repo(repo_id: str) -> bool:
     return not any(hint in lowered for hint in _UNSUPPORTED_REPO_HINTS)
 
 
+def _is_gguf_hub_repo(repo_id: str, tags: list[str]) -> bool:
+    """True when a Hub row is a GGUF model (HF gguf filter or naming/tags)."""
+    tag_set = {t.lower() for t in tags}
+    if "gguf" in tag_set:
+        return True
+    lowered = repo_id.lower()
+    return "-gguf" in lowered or lowered.endswith("gguf")
+
+
 def _compute_priority(downloads: int, created_at: str | None, tags: list[str]) -> int:
     dl_score = min(88, int(math.log10(max(downloads, 1)) * 14))
     created = _parse_iso_ts(created_at)
@@ -339,10 +348,7 @@ def _hub_row_to_entry(row: dict, *, force_task: ModelTask | None = None) -> Cata
     ):
         return None
 
-    if task != ModelTask.EMBEDDING and not is_trusted_gguf_repo(
-        repo_id,
-        base_repo_id=base_model_from_tags(tags),
-    ):
+    if task != ModelTask.EMBEDDING and not _is_gguf_hub_repo(repo_id, tags):
         return None
 
     downloads = row.get("downloads") if isinstance(row.get("downloads"), int) else 0

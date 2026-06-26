@@ -67,7 +67,7 @@ def release_inference_memory(*, reason: str, log: LogFn = None) -> dict[str, Any
             logger.info(msg)
         pool.cancel_and_unload()
 
-    release_cached_memory(sync=True)
+    release_cached_memory(sync=had_active)
     _refresh_hardware_profile()
     return {
         "unloaded_inference": had_active,

@@ -22,7 +22,7 @@ def _clear_llama_env(monkeypatch):
 
 
 def test_memory_profile_label_low_on_tight_headroom():
-    assert memory_profile_label({"ram_gb": 16, "gpus": []}) == "low"
+    assert memory_profile_label({"ram_gb": 12, "gpus": []}) == "low"
 
 
 def test_memory_profile_label_balanced_on_roomy_machine():
@@ -34,7 +34,7 @@ def test_platform_profile_darwin_16gb_apple(monkeypatch):
     monkeypatch.setattr(
         "seiso.memory.platform_profile.classify_tier", lambda _p: HardwareTier.APPLE_UNIFIED
     )
-    monkeypatch.setattr("seiso.memory.platform_profile.vram_headroom_mb", lambda _p: 6144)
+    monkeypatch.setattr("seiso.memory.platform_profile.vram_headroom_mb", lambda _p: 3072)
     monkeypatch.setattr(
         "seiso.memory.platform_profile.training_capabilities",
         lambda: {"supports_mlx_inference": False, "gpu_count": 0, "train_platform": "cpu"},

@@ -36,7 +36,7 @@ class InferenceOrchestrator(Orchestrator):
         await self._runner.cancel_and_unload()
         from seiso.memory.protection import release_cached_memory
 
-        release_cached_memory(sync=True)
+        release_cached_memory(sync=False)
         from forge.services.hardware import build_vram_status
         from forge.services.inference_models import invalidate_inference_options_cache
         from seiso.hardware.profile import hardware_profile as core_hardware_profile

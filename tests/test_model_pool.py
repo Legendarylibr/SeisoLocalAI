@@ -254,11 +254,11 @@ def test_llama_load_kwargs_cuda_defaults(monkeypatch):
     monkeypatch.setattr(platform, "machine", lambda: "x86_64")
     monkeypatch.setattr("seiso.inference.model_pool._cuda_available", lambda: True)
     monkeypatch.setattr("seiso.inference.model_pool._llama_gpu_offload_ok", lambda: True)
-    monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 16384)
+    monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 12000)
 
     kwargs = llama_load_kwargs(4096)
     assert kwargs["n_gpu_layers"] == -1
-    assert kwargs["n_batch"] == 1024
+    assert kwargs["n_batch"] == 1792
     assert kwargs["n_ubatch"] == 512
     assert kwargs["flash_attn"] is True
     assert kwargs["offload_kqv"] is True

@@ -14,7 +14,7 @@ def memory_profile_label(profile: dict[str, Any]) -> str:
     """Derive low vs balanced from live headroom."""
     headroom = vram_headroom_mb(profile)
     ram_gb = float(profile.get("ram_gb") or 0)
-    if headroom < 6144 or (ram_gb > 0 and ram_gb <= 16):
+    if headroom < 4096 or (ram_gb > 0 and ram_gb <= 12):
         return "low"
     if headroom < 12288 or (ram_gb > 0 and ram_gb <= 24):
         return "balanced"
@@ -46,7 +46,7 @@ def apply_platform_memory_profile(*, profile: dict[str, Any] | None = None) -> d
     os.environ.setdefault("SEISO_LLAMA_USE_MLOCK", "false")
     os.environ.setdefault("SEISO_LLAMA_NO_PERF", "true")
 
-    if low or headroom < 8192:
+    if low or headroom < 6144:
         os.environ.setdefault("SEISO_LLAMA_PROMPT_CACHE", "false")
         os.environ.setdefault("SEISO_LLAMA_CACHE_MB", "0")
     else:
@@ -54,9 +54,9 @@ def apply_platform_memory_profile(*, profile: dict[str, Any] | None = None) -> d
         if tier == HardwareTier.WORKSTATION and headroom >= 8192:
             cache_mb = "1024"
         elif headroom < 12288:
-            cache_mb = "256"
-        else:
             cache_mb = "512"
+        else:
+            cache_mb = "768"
         os.environ.setdefault("SEISO_LLAMA_CACHE_MB", cache_mb)
 
     if system == "Darwin":
@@ -120,14 +120,14 @@ def apply_platform_memory_profile(*, profile: dict[str, Any] | None = None) -> d
                     os.environ.setdefault("SEISO_LLAMA_BATCH", "2048")
                     os.environ.setdefault("SEISO_LLAMA_UBATCH", "512")
                 else:
-                    os.environ.setdefault("SEISO_LLAMA_BATCH", "1024")
+                    os.environ.setdefault("SEISO_LLAMA_BATCH", "1536")
                     os.environ.setdefault("SEISO_LLAMA_UBATCH", "512")
         elif caps.get("train_platform") == "cpu" or not caps.get("gpu_count"):
             os.environ.setdefault("SEISO_LLAMA_GPU_LAYERS", "0")
 
     if low:
-        os.environ.setdefault("SEISO_LLAMA_BATCH", "256")
-        os.environ.setdefault("SEISO_LLAMA_UBATCH", "128")
+        os.environ.setdefault("SEISO_LLAMA_BATCH", "384")
+        os.environ.setdefault("SEISO_LLAMA_UBATCH", "256")
 
     return {
         "memory_profile": memory_profile_label(profile),

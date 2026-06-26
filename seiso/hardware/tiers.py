@@ -94,7 +94,7 @@ def _vram_headroom_mb(gpus: list[dict[str, Any]]) -> int:
     return best
 
 
-_GPU_CAPACITY_RESERVE = 0.10
+_GPU_CAPACITY_RESERVE = 0.04
 
 
 def discrete_vram_total_mb(profile: dict[str, Any]) -> int:

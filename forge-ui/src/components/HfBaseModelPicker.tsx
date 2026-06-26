@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, CatalogModel, TrainableModel } from "@/lib/api";
 import { formatBytes } from "@/lib/modelProgress";
-import { GGUF_TRAIN_ERROR, isGgufOnlyRepoId } from "@/lib/trainRepo";
 import { HubComboboxSearch } from "@/components/HubComboboxSearch";
 import { IconChevronDown } from "@/components/Icons";
 import { useHubCombobox } from "@/hooks/useHubCombobox";
@@ -10,7 +9,7 @@ type HfBaseModelPickerProps = {
   value: string;
   localModels: TrainableModel[];
   disabled?: boolean;
-  /** chat = GGUF catalog; train = safetensors-only for LoRA/SFT */
+  /** chat = GGUF catalog; train = safetensors checkpoints for LoRA/SFT */
   mode?: "chat" | "train";
   onChange: (value: string) => void;
 };
@@ -76,7 +75,6 @@ export function HfBaseModelPicker({
   }, [open]);
 
   const pick = (repoId: string) => {
-    if (trainableOnly && isGgufOnlyRepoId(repoId)) return;
     setOpen(false);
     onChange(repoId);
   };
@@ -84,7 +82,6 @@ export function HfBaseModelPicker({
   const applyCustom = () => {
     const trimmed = search.trim();
     if (!trimmed) return;
-    if (trainableOnly && isGgufOnlyRepoId(trimmed)) return;
     setOpen(false);
     onChange(trimmed);
   };
@@ -103,19 +100,14 @@ export function HfBaseModelPicker({
     ? selectedLocal.name
     : selectedHub
       ? selectedHub.name
-      : value || (trainableOnly ? "Select a trainable checkpoint…" : "Select or search a model…");
+      : value || (trainableOnly ? "Select a base model…" : "Select or search a model…");
 
   const q = search.toLowerCase().trim();
-  const customIsGguf = trainableOnly && isGgufOnlyRepoId(search.trim());
 
   const hubModels = useMemo(() => {
     const localRepoIds = new Set(localModels.map((m) => m.repo_id).filter(Boolean) as string[]);
-    return results.filter((m) => {
-      if (localRepoIds.has(m.repo_id)) return false;
-      if (trainableOnly && isGgufOnlyRepoId(m.repo_id)) return false;
-      return true;
-    });
-  }, [results, localModels, trainableOnly]);
+    return results.filter((m) => !localRepoIds.has(m.repo_id));
+  }, [results, localModels]);
 
   const filteredLocal = useMemo(() => {
     if (!q) return localModels;
@@ -129,7 +121,7 @@ export function HfBaseModelPicker({
 
   const emptyLocal = filteredLocal.length === 0;
   const emptyHub = !loading && hubModels.length === 0;
-  const showCustomHint = q && emptyHub && !customIsGguf;
+  const showCustomHint = q && emptyHub;
 
   return (
     <div className="chat-model-picker" ref={rootRef}>
@@ -147,12 +139,6 @@ export function HfBaseModelPicker({
         </span>
       </button>
 
-      {trainableOnly && value && isGgufOnlyRepoId(value) && (
-        <p className="muted-text studio-field-hint studio-field-hint-compact train-model-warn" role="alert">
-          {GGUF_TRAIN_ERROR}
-        </p>
-      )}
-
       {open && (
         <div className="chat-model-picker-menu" role="listbox">
           <HubComboboxSearch
@@ -160,7 +146,7 @@ export function HfBaseModelPicker({
             value={search}
             placeholder={
               trainableOnly
-                ? "Search safetensors checkpoints (no GGUF)…"
+                ? "Search Hugging Face checkpoints…"
                 : "Search local & Hugging Face models…"
             }
             onChange={setSearch}
@@ -169,12 +155,6 @@ export function HfBaseModelPicker({
           />
 
           <div className="chat-model-picker-list">
-            {trainableOnly && (
-              <div className="chat-model-picker-hint">
-                Training needs safetensors or PyTorch weights — GGUF chat models are hidden.
-              </div>
-            )}
-
             {!emptyLocal && (
               <div className="chat-model-picker-section">
                 <div className="chat-model-picker-section-title">Cached locally</div>
@@ -202,9 +182,7 @@ export function HfBaseModelPicker({
 
             {(hubModels.length > 0 || loading) && (
               <div className="chat-model-picker-section">
-                <div className="chat-model-picker-section-title">
-                  {trainableOnly ? "Trainable on Hugging Face" : "Hugging Face Hub"}
-                </div>
+                <div className="chat-model-picker-section-title">Hugging Face Hub</div>
                 {loading && hubModels.length === 0 && (
                   <div className="chat-model-picker-hint">Searching models…</div>
                 )}
@@ -232,11 +210,7 @@ export function HfBaseModelPicker({
               </div>
             )}
 
-            {customIsGguf && (
-              <div className="chat-model-picker-hint train-model-warn">{GGUF_TRAIN_ERROR}</div>
-            )}
-
-            {emptyLocal && emptyHub && !showCustomHint && !customIsGguf && (
+            {emptyLocal && emptyHub && !showCustomHint && (
               <div className="chat-model-picker-hint">No models match your search.</div>
             )}
 

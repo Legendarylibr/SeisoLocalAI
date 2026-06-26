@@ -93,7 +93,7 @@ def _reset_llama_offload_cache() -> None:
 
 def _default_llama_batch() -> int:
     # Conservative default — clamp_llama_load_kwargs scales up on roomy hardware.
-    return 512
+    return 768
 
 
 def _default_llama_ubatch(n_batch: int) -> int:
@@ -104,11 +104,11 @@ def _default_llama_ubatch(n_batch: int) -> int:
 def _headroom_llama_batch_caps(headroom: int) -> tuple[int, int]:
     """Return (n_batch, n_ubatch) ceilings from free VRAM/RAM."""
     if headroom < 4096:
-        return 256, 128
-    if headroom < 8192:
         return 512, 256
-    if headroom < 16384:
+    if headroom < 8192:
         return 1024, 512
+    if headroom < 16384:
+        return 1792, 512
     return 2048, 512
 
 
@@ -126,7 +126,7 @@ def _speed_llama_batch_defaults(headroom: int) -> tuple[int, int] | None:
     if tier == HardwareTier.WORKSTATION and headroom >= 8192:
         return 2048, 512
     if tier == HardwareTier.CAPABLE and headroom >= 8192:
-        return 1024, 512
+        return 1536, 512
     return None
 
 
@@ -138,17 +138,17 @@ def fit_llama_gpu_layers(model_path: str, requested: int, headroom_mb: int) -> i
     from seiso.inference.backends import gguf_block_count
     from seiso.memory.protection import estimate_path_vram_mb
 
-    weight_mb = max(int(estimate_path_vram_mb(model_path) - 512), 256)
+    weight_mb = max(int(estimate_path_vram_mb(model_path) - 384), 256)
     total_layers = gguf_block_count(model_path) or 64
-    kv_reserve_mb = max(768, min(int(headroom_mb * 0.15), 2048))
+    kv_reserve_mb = max(384, min(int(headroom_mb * 0.10), 1536))
     avail_mb = headroom_mb - kv_reserve_mb
 
-    if avail_mb >= int(weight_mb * 0.92):
+    if avail_mb >= int(weight_mb * 0.84):
         if requested == -1:
             return -1
         return max(0, min(requested, total_layers))
 
-    if avail_mb < 384:
+    if avail_mb < 256:
         logger.warning(
             "VRAM too tight for GPU offload (~%.1f GB free) — running GGUF on CPU",
             headroom_mb / 1024,
@@ -181,27 +181,28 @@ def _llama_layer_attempts(model_path: str, requested: int, free_mb: int) -> list
 
 
 def _llama_speed_extras(model_path: str) -> dict[str, Any]:
-    """Model-specific llama.cpp knobs for throughput and VRAM headroom."""
+    """GGUF-metadata-driven llama.cpp knobs for throughput and VRAM headroom."""
     extras: dict[str, Any] = {}
     try:
-        from seiso.inference.backends import gguf_architecture
+        from seiso.inference.backends import gguf_uses_sliding_window_attention
         from seiso.memory.protection import estimate_path_vram_mb
 
-        arch = (gguf_architecture(model_path) or "").lower()
         weight_mb = int(estimate_path_vram_mb(model_path))
     except Exception:
         return extras
 
-    if "qwen" in arch and not env_bool("SEISO_LLAMA_SWA_FULL", False):
+    if gguf_uses_sliding_window_attention(model_path) and not env_bool(
+        "SEISO_LLAMA_SWA_FULL", False
+    ):
         extras["swa_full"] = False
 
-    if env_bool("SEISO_LLAMA_KV_QUANT", True) and weight_mb >= 12000:
+    if env_bool("SEISO_LLAMA_KV_QUANT", True) and weight_mb >= 14000:
         # Q8 KV cache can fail llama_context init when VRAM is tight or the model
         # runs CPU-only — only enable when headroom can cover weights + KV buffers.
         try:
             from seiso.memory.protection import headroom_mb
 
-            if headroom_mb() >= int(weight_mb * 0.55):
+            if headroom_mb() >= int(weight_mb * 0.48):
                 from llama_cpp import llama_cpp as lc
 
                 extras["type_k"] = lc.GGML_TYPE_Q8_0
@@ -237,17 +238,17 @@ def _clear_optimal_layers_cache() -> None:
 
 def _llama_gpu_layers_optimal(model_path: str, requested: int) -> int:
     """Best layer count for current free VRAM — used to decide cache reload."""
-    cache_key = (model_path, requested)
     now = time.time()
+    from seiso.memory.protection import headroom_mb
+
+    free_mb = headroom_mb()
+    cache_key = (model_path, requested, free_mb // 512)
     with _optimal_layers_lock:
         cached = _optimal_layers_cache.get(cache_key)
         if cached and now - cached[1] < _OPTIMAL_LAYERS_TTL_S:
             return cached[0]
 
-    from seiso.memory.protection import headroom_mb, release_cached_memory
-
-    release_cached_memory(sync=False)
-    layers = fit_llama_gpu_layers(model_path, requested, headroom_mb())
+    layers = fit_llama_gpu_layers(model_path, requested, free_mb)
     with _optimal_layers_lock:
         _optimal_layers_cache[cache_key] = (layers, now)
     return layers
@@ -331,7 +332,7 @@ def _load_llama_model(path: str, n_ctx: int) -> Any:
     from seiso.inference.tuning import attach_llama_prompt_cache
     from seiso.memory.protection import estimate_path_vram_mb, headroom_mb, release_cached_memory
 
-    release_cached_memory(sync=True)
+    release_cached_memory(sync=False)
     _clear_optimal_layers_cache()
     _refresh_headroom_stats(force=True)
 
@@ -498,8 +499,6 @@ class ModelPool:
         if should_unload and self.active_key:
             self.cancel_and_unload()
             unloaded = True
-        else:
-            self._free_memory()
         if unloaded:
             _clear_optimal_layers_cache()
             _refresh_headroom_stats(force=True)
@@ -708,13 +707,13 @@ class ModelPool:
         elif backend == BackendKind.MLX:
             del handle
 
-        self._free_memory()
+        self._free_memory(sync=True)
         clear_dflash_draft_cache()
 
-    def _free_memory(self) -> None:
+    def _free_memory(self, *, sync: bool = False) -> None:
         from seiso.memory.protection import release_cached_memory
 
-        release_cached_memory(sync=True)
+        release_cached_memory(sync=sync)
         _clear_optimal_layers_cache()
 
     def status(self) -> dict:

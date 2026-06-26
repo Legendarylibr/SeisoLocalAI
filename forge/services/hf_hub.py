@@ -24,8 +24,7 @@ from seiso.models.trusted_gguf import (
     filter_trusted_gguf_search_results,
     gguf_mirror_candidates,
     is_supported_gguf_repo_candidate,
-    is_trusted_gguf_repo,
-    rank_trusted_gguf_repos,
+
 )
 from seiso.security import sanitize_filename
 from seiso.ttl_cache import TtlCache
@@ -295,6 +294,13 @@ def search_huggingface_gguf_repos(
         )
     if trusted_only:
         results = filter_trusted_gguf_search_results(results, base_repo_id=base_repo_id)
+    else:
+        results.sort(
+            key=lambda row: (
+                -int(row.get("downloads") or 0),
+                str(row.get("repo_id") or "").lower(),
+            )
+        )
     return results[: max(1, min(limit, 25))]
 
 
@@ -417,27 +423,27 @@ def resolve_gguf_repo(
     entry: CatalogEntry | None = None,
 ) -> str:
     """Resolve a catalog/base repo to a Hugging Face repo that ships GGUF files."""
-    if entry and entry.gguf_repo:
-        base_repo = _catalog_base_repo(entry, repo_id)
-        if is_trusted_gguf_repo(entry.gguf_repo, base_repo_id=base_repo or repo_id):
-            return entry.gguf_repo
+    if entry and entry.gguf_repo and repo_has_gguf(
+        entry.gguf_repo,
+        token=token,
+        revision=revision,
+    ):
+        return entry.gguf_repo
 
     cache_key = f"{repo_id}:{revision}"
     cached = _gguf_repo_cache.get(cache_key)
     if cached is not None:
         return cached
 
-    if repo_has_gguf(repo_id, token=token, revision=revision) and is_trusted_gguf_repo(
-        repo_id,
-        base_repo_id=repo_id,
-    ):
+    if repo_has_gguf(repo_id, token=token, revision=revision):
         _gguf_repo_cache.set(cache_key, repo_id)
         return repo_id
 
-    mirror_candidates = rank_trusted_gguf_repos(
-        gguf_mirror_candidates(repo_id),
-        base_repo_id=repo_id,
-    )
+    mirror_candidates = [
+        candidate
+        for candidate in gguf_mirror_candidates(repo_id)
+        if is_supported_gguf_repo_candidate(candidate)
+    ]
     mirror = _first_repo_with_gguf(
         mirror_candidates,
         token=token,
@@ -455,21 +461,17 @@ def resolve_gguf_repo(
             query=model_name,
             limit=12,
             base_repo_id=repo_id,
-            trusted_only=True,
+            trusted_only=False,
         )
         if needle in row["repo_id"].lower().replace("_", "-")
         and is_supported_gguf_repo_candidate(row["repo_id"])
-        and is_trusted_gguf_repo(row["repo_id"], base_repo_id=repo_id)
     ]
     resolved = _first_repo_with_gguf(search_candidates, token=token, revision=revision)
     if resolved:
         _gguf_repo_cache.set(cache_key, resolved)
         return resolved
 
-    raise ValueError(
-        f"No trusted GGUF quant repo found for {repo_id}. "
-        f"Try a reputable mirror such as unsloth/{model_name}-GGUF or bartowski/{model_name}-GGUF."
-    )
+    raise ValueError(f"No GGUF files found for {repo_id} on Hugging Face Hub.")
 
 
 def download_gguf(
