@@ -195,6 +195,8 @@ def release_cached_memory(*, sync: bool = False) -> None:
 
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
+            if hasattr(torch.cuda, "ipc_collect"):
+                torch.cuda.ipc_collect()
             if sync:
                 torch.cuda.synchronize()
         if hasattr(torch, "mps") and torch.backends.mps.is_available():

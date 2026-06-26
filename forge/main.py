@@ -49,6 +49,12 @@ async def lifespan(app: FastAPI):
 
     ensure_llamacpp_runtime()
     apply_platform_memory_profile()
+    try:
+        from seiso.hardware.vram_processes import log_vram_contention_at_startup
+
+        log_vram_contention_at_startup()
+    except ImportError:
+        pass
     settings.ensure_dirs()
     settings.write_runtime_config()
     db = get_db()
