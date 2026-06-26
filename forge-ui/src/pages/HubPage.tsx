@@ -202,7 +202,7 @@ export function HubPage() {
     <div className="hub-page">
       <PageHeader
         title="Model Hub"
-        subtitle="Search Hugging Face Hub for GGUF models, download what you want, then chat or fine-tune locally."
+        subtitle="Browse popular models from Hugging Face Hub, download locally, then chat or fine-tune."
         group="Models"
       />
 
@@ -344,7 +344,7 @@ export function HubPage() {
               {catalogLoading ? "Searching Hugging Face Hub…" : (
                 <>
                   {catalog.length} result{catalog.length === 1 ? "" : "s"}
-                  {search ? " from Hugging Face" : " · popular GGUF models on Hugging Face"}
+                  {search ? " from Hugging Face" : " · popular models on Hugging Face"}
                   {activeFilters.length > 0 && <> · filtered by {activeFilters.join(" · ")}</>}
                 </>
               )}
@@ -363,7 +363,7 @@ export function HubPage() {
                 <IconSearch size={28} />
               </div>
               <p className="empty-state-title">No models match your search</p>
-              <p className="empty-state-desc">Try a different query on Hugging Face Hub, or clear filters to see popular GGUF models.</p>
+              <p className="empty-state-desc">Try a different query on Hugging Face Hub, or clear filters to see popular models.</p>
               <button
                 type="button"
                 className="btn"
@@ -381,7 +381,6 @@ export function HubPage() {
             <div className="model-grid">
               {catalog.map((m) => {
                 const embeddingOnly = m.download_available === false;
-                const mirrorUnverified = m.download_mirror_verified === false && !!m.download_error;
                 return (
                 <div
                   key={m.repo_id}
@@ -411,11 +410,6 @@ export function HubPage() {
                     </p>
                   ) : null}
                   {m.hardware_note && !embeddingOnly && <p className="model-hw-note">{m.hardware_note}</p>}
-                  {mirrorUnverified && (
-                    <p className="model-mirror-warn">
-                      Mirror not pre-verified: {m.download_error} You can still try downloading.
-                    </p>
-                  )}
                   {embeddingOnly && (
                     <p className="model-unavailable-note">
                       Embedding models are not supported for direct chat download.

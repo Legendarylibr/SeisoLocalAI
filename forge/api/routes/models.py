@@ -67,7 +67,7 @@ async def model_catalog(
     q: str = Query("", description="Search Hugging Face Hub"),
     family: str | None = Query(None),
     task: str | None = Query(None),
-    purpose: str = Query("chat", description="chat | train — train excludes GGUF-only repos"),
+    purpose: str = Query("chat", description="chat = GGUF Hub catalog; train = safetensors checkpoints"),
     hardware_aware: bool = Query(True, description="Rank and annotate by local hardware fit"),
     fits_only: bool = Query(False, description="Show only ideal/good fits for this machine"),
     limit: int = Query(50, ge=1, le=100),

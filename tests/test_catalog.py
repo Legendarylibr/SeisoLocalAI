@@ -180,10 +180,10 @@ def _mock_hub_search(request, monkeypatch):
     yield
 
 
-def test_hub_search_excludes_untrusted_repos():
+def test_hub_search_includes_popular_gguf_repos():
     result = search_catalog()
     repos = {m["repo_id"] for m in result.models}
-    assert "random-user/Qwen3.6-4B-GGUF" not in repos
+    assert "random-user/Qwen3.6-4B-GGUF" in repos
     assert "AesSedai/Kimi-K2.7-Code-GGUF" in repos
 
 

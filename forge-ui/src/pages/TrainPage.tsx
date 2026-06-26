@@ -13,7 +13,7 @@ import { invalidateApiCache } from "@/lib/api/getCache";
 import { appendBoundedLog } from "@/lib/api/sse";
 import { initialDownloadProgress, ModelProgressState } from "@/lib/modelProgress";
 import { ensureTrainHubModel, isTrainModelCached } from "@/lib/trainModel";
-import { GGUF_TRAIN_ERROR, isGgufOnlyRepoId } from "@/lib/trainRepo";
+
 import { useTrainingModels } from "@/context/TrainingModelsContext";
 import { readStoredModel, writeStoredModel } from "@/lib/modelSelection";
 import { HfBaseModelPicker } from "@/components/HfBaseModelPicker";
@@ -158,12 +158,6 @@ export function TrainPage() {
 
   useEffect(() => {
     if (!pendingModel || !pendingDownload) return;
-    if (isGgufOnlyRepoId(pendingModel)) {
-      setDownloadError(GGUF_TRAIN_ERROR);
-      setSearchParams({ model: pendingModel }, { replace: true });
-      return;
-    }
-
     const downloadGen = ++downloadGenRef.current;
     let cancelled = false;
 
@@ -290,7 +284,7 @@ export function TrainPage() {
     setConfigCustomized(false);
   }, [recommendations]);
 
-  const modelBlocked = Boolean(modelId && (isGgufOnlyRepoId(modelId) || recommendations?.trainable === false));
+  const modelBlocked = Boolean(modelId && recommendations?.trainable === false);
   const canStart =
     Boolean(modelId.trim() && dataset.trim()) &&
     !modelBlocked &&
@@ -345,7 +339,7 @@ export function TrainPage() {
 
   const start = async () => {
     if (modelBlocked) {
-      setDownloadError(recommendations?.warnings[0] || GGUF_TRAIN_ERROR);
+      setDownloadError(recommendations?.warnings[0] || "This model cannot be trained on your hardware.");
       return;
     }
     if (!datasetValid) {
@@ -442,7 +436,7 @@ export function TrainPage() {
   return (
     <StudioPageShell
       title="Training Studio"
-      subtitle="Fine-tune with LoRA/QLoRA — pick a safetensors base model (not GGUF). The full dataset is analyzed to set format and hyperparameters (independent of chat)."
+      subtitle="Fine-tune with LoRA/QLoRA. The full dataset is analyzed to set format and hyperparameters (independent of chat)."
       banner={
         hw?.training_defaults ? (
           <div className="hw-inline-banner card">
@@ -509,9 +503,7 @@ export function TrainPage() {
               <div className="status-callout-body">
                 <strong className="status-callout-title">Not trainable</strong>
                 <div className="status-callout-text">
-                  {recommendations?.warnings[0] || GGUF_TRAIN_ERROR}
-                  {" "}
-                  Pick any safetensors Hugging Face checkpoint from the catalog.
+                  {recommendations?.warnings[0] || "This model cannot be trained on your hardware."}
                 </div>
               </div>
             </div>

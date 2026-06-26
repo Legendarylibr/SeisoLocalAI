@@ -5,21 +5,26 @@ from __future__ import annotations
 from forge.services import hf_hub
 
 
-def test_gguf_mirror_candidates_include_bartowski():
+def test_gguf_mirror_candidates_include_gguf_mirrors():
     from seiso.models.trusted_gguf import gguf_mirror_candidates
 
-    candidates = gguf_mirror_candidates("Qwen/Qwen3.6-27B")
-    assert any("Qwen3.6-27B" in c for c in candidates)
+    candidates = gguf_mirror_candidates("acme/Example-7B")
+    assert any("Example-7B" in c for c in candidates)
     assert candidates[0].startswith("unsloth/")
 
 
 def test_resolve_gguf_repo_uses_explicit_gguf_repo(monkeypatch):
     class Entry:
-        gguf_repo = "bartowski/Custom-GGUF"
+        gguf_repo = "mirror-org/Example-7B-GGUF"
         quant = "Q4_K_M"
 
-    resolved = hf_hub.resolve_gguf_repo("Qwen/Qwen3.6-27B", entry=Entry())
-    assert resolved == "bartowski/Custom-GGUF"
+    monkeypatch.setattr(
+        hf_hub,
+        "repo_has_gguf",
+        lambda repo_id, **_: repo_id == "mirror-org/Example-7B-GGUF",
+    )
+    resolved = hf_hub.resolve_gguf_repo("acme/Example-7B", entry=Entry())
+    assert resolved == "mirror-org/Example-7B-GGUF"
 
 
 def test_resolve_gguf_repo_falls_back_to_mirror(monkeypatch):
@@ -132,7 +137,7 @@ def test_resolve_gguf_repo_prefers_trusted_search_over_untrusted(monkeypatch):
     assert resolved == "bartowski/Kimi-GGUF"
 
 
-def test_resolve_gguf_repo_rejects_untrusted_catalog_entry(monkeypatch):
+def test_resolve_gguf_repo_uses_catalog_entry_gguf_repo(monkeypatch):
     class Entry:
         gguf_repo = "random-user/Custom-GGUF"
         quant = "Q4_K_M"
@@ -140,18 +145,13 @@ def test_resolve_gguf_repo_rejects_untrusted_catalog_entry(monkeypatch):
         repo_id = "random-user/Custom-GGUF"
 
     monkeypatch.setattr(
-        hf_hub, "repo_has_gguf", lambda repo_id, **_: repo_id == "bartowski/Model-GGUF"
-    )
-    monkeypatch.setattr(
-        hf_hub,
-        "search_huggingface_gguf_repos",
-        lambda **_k: [{"repo_id": "bartowski/Model-GGUF", "downloads": 1}],
+        hf_hub, "repo_has_gguf", lambda repo_id, **_: repo_id == "random-user/Custom-GGUF"
     )
     hf_hub._gguf_repo_cache.clear()
 
     resolved = hf_hub.resolve_gguf_repo("org/Model", entry=Entry())
 
-    assert resolved == "bartowski/Model-GGUF"
+    assert resolved == "random-user/Custom-GGUF"
 
 
 def test_resolve_gguf_repo_raises_when_missing(monkeypatch):
@@ -162,7 +162,7 @@ def test_resolve_gguf_repo_raises_when_missing(monkeypatch):
         hf_hub.resolve_gguf_repo("org/NoGgufModel")
         assert False, "expected ValueError"
     except ValueError as exc:
-        assert "No trusted GGUF quant repo found" in str(exc)
+        assert "No GGUF files found" in str(exc)
 
 
 def test_resolve_gguf_repo_uses_cache(monkeypatch):
