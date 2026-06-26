@@ -1,4 +1,4 @@
-"""Hugging Face Hub search for GGUF models — live queries via huggingface_hub."""
+"""Hugging Face Hub model search — live queries via huggingface_hub."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from seiso.models.trainable_snapshot import is_gguf_only_repo_id
 _DEFAULT_LIMIT = 50
 _MAX_LIMIT = 100
 _HUB_API_MODELS = "https://huggingface.co/api/models"
-_UNSUPPORTED_REPO_HINTS = ("dflash", "draft", "mmproj")
+
 _SKIP_PIPELINE_TAGS = frozenset(
     {
         "text-to-speech",
@@ -193,7 +193,7 @@ def _query_hub_page(
             token=token,
         )
     return _fetch_hub_page(
-        filter_tag="gguf",
+        pipeline_tag="text-generation",
         search=hf_search,
         limit=limit,
         cursor=cursor,
@@ -221,7 +221,6 @@ def _query_trainable_hub_page(
         )
     return _fetch_hub_page(
         pipeline_tag="text-generation",
-        filter_tag="safetensors",
         search=hf_search,
         limit=limit,
         cursor=cursor,
@@ -297,8 +296,13 @@ def _display_name(repo_id: str, tags: list[str]) -> str:
 
 
 def _is_supported_repo(repo_id: str) -> bool:
-    lowered = repo_id.lower()
-    return not any(hint in lowered for hint in _UNSUPPORTED_REPO_HINTS)
+    repo = repo_id.strip()
+    return bool(repo) and "/" in repo
+
+
+def is_gguf_hub_repo(repo_id: str, tags: list[str] | tuple[str, ...] | None = None) -> bool:
+    """True when a Hub row is a GGUF artifact (tags or naming)."""
+    return _is_gguf_hub_repo(repo_id, list(tags or ()))
 
 
 def _is_gguf_hub_repo(repo_id: str, tags: list[str]) -> bool:
@@ -340,16 +344,7 @@ def _hub_row_to_entry(row: dict, *, force_task: ModelTask | None = None) -> Cata
         return None
 
     task = force_task or _infer_task(repo_id, pipeline_tag, tags)
-    if (
-        task == ModelTask.EMBEDDING
-        and "gguf" not in {t.lower() for t in tags}
-        and force_task != ModelTask.EMBEDDING
-    ):
-        return None
-
-    if task != ModelTask.EMBEDDING and not _is_gguf_hub_repo(repo_id, tags):
-        return None
-
+    is_gguf = _is_gguf_hub_repo(repo_id, tags)
     downloads = row.get("downloads") if isinstance(row.get("downloads"), int) else 0
     created_at = row.get("createdAt") if isinstance(row.get("createdAt"), str) else None
     family = _infer_family(repo_id, tags)
@@ -364,9 +359,9 @@ def _hub_row_to_entry(row: dict, *, force_task: ModelTask | None = None) -> Cata
         family=family,
         params=params,
         task=task,
-        quant="Q4_K_M" if task != ModelTask.EMBEDDING else "F16",
+        quant="Q4_K_M" if is_gguf else ("F16" if task == ModelTask.EMBEDDING else "bf16"),
         tags=catalog_tags,
-        gguf_repo=repo_id,
+        gguf_repo=repo_id if is_gguf else None,
         priority=priority,
         downloads=downloads,
     )

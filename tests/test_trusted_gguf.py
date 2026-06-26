@@ -1,4 +1,4 @@
-"""Tests for trusted GGUF publisher filtering."""
+"""Tests for GGUF repo filtering and ranking."""
 
 from seiso.models.trusted_gguf import (
     filter_trusted_gguf_search_results,
@@ -8,49 +8,35 @@ from seiso.models.trusted_gguf import (
 )
 
 
-def test_trusted_publishers_include_common_mirrors():
+def test_any_hf_repo_is_supported():
     assert is_trusted_gguf_repo("unsloth/Qwen3.6-4B-GGUF")
-    assert is_trusted_gguf_repo("bartowski/Llama-3.1-8B-Instruct-GGUF")
-    assert is_trusted_gguf_repo("QuantFactory/Mistral-7B-GGUF")
+    assert is_trusted_gguf_repo("random-user/base-model")
+    assert is_trusted_gguf_repo("Qwen/Qwen2.5-0.5B-Instruct")
+    assert is_trusted_gguf_repo("vendor/Kimi-DFlash")
 
 
-def test_untrusted_random_gguf_rejected():
-    assert not is_trusted_gguf_repo("random-user/my-model-gguf")
-    assert not is_trusted_gguf_repo("vendor/Kimi-DFlash")
+def test_gguf_mirror_candidates_probe_naming_variants():
+    candidates = gguf_mirror_candidates("acme/Example-7B")
+    assert candidates == ["acme/Example-7B-GGUF", "acme/Example-7B"]
 
 
-def test_official_publisher_gguf_allowed():
-    assert is_trusted_gguf_repo("Qwen/Qwen3.6-4B-GGUF", base_repo_id="Qwen/Qwen3.6-4B")
-
-
-def test_catalog_mirror_is_trusted():
-    assert is_trusted_gguf_repo("AesSedai/Kimi-K2.7-Code-GGUF")
-
-
-def test_curated_mirror_not_trusted_without_allowlist():
-    assert not is_trusted_gguf_repo("SomeOtherOrg/Model-GGUF", allow_catalog_mirrors=False)
-
-
-def test_gguf_mirror_candidates_prioritize_unsloth():
-    candidates = gguf_mirror_candidates("meta-llama/Llama-3.1-8B-Instruct")
-    assert candidates[0].startswith("unsloth/")
-    assert "bartowski/Llama-3.1-8B-Instruct-GGUF" in candidates
-
-
-def test_filter_trusted_gguf_search_results_ranks_by_trust_and_downloads():
+def test_filter_trusted_gguf_search_results_sorts_by_downloads():
     rows = [
         {"repo_id": "random-user/Llama-GGUF", "downloads": 999_999},
         {"repo_id": "bartowski/Llama-GGUF", "downloads": 100},
-        {"repo_id": "unsloth/Llama-GGUF", "downloads": 50},
+        {"repo_id": "meta-llama/Llama-GGUF", "downloads": 50},
     ]
     filtered = filter_trusted_gguf_search_results(rows, base_repo_id="meta-llama/Llama-3.1-8B")
-    assert [row["repo_id"] for row in filtered] == ["unsloth/Llama-GGUF", "bartowski/Llama-GGUF"]
+    assert [row["repo_id"] for row in filtered] == [
+        "random-user/Llama-GGUF",
+        "bartowski/Llama-GGUF",
+        "meta-llama/Llama-GGUF",
+    ]
 
 
-def test_rank_trusted_gguf_repos_preserves_input_order_for_equal_rank():
+def test_rank_trusted_gguf_repos_sorts_by_downloads():
     ordered = rank_trusted_gguf_repos(
         ["bartowski/A-GGUF", "QuantFactory/A-GGUF"],
-        base_repo_id="org/A",
+        popularity={"QuantFactory/A-GGUF": 200, "bartowski/A-GGUF": 50},
     )
-    assert ordered[0].startswith("bartowski/")
-    assert len(ordered) == 2
+    assert ordered == ["QuantFactory/A-GGUF", "bartowski/A-GGUF"]

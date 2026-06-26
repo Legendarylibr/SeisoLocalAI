@@ -174,7 +174,7 @@ async def test_perform_gguf_download_registers_llamacpp_inventory(monkeypatch, t
     monkeypatch.setattr(
         model_download, "resolve_hf_token_for_download", lambda **_kwargs: (None, "none")
     )
-    monkeypatch.setattr(model_download, "get_by_repo", lambda _repo: None)
+    monkeypatch.setattr(model_download, "get_by_repo", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
         model_download,
         "resolve_gguf_artifact",
@@ -340,8 +340,8 @@ async def test_find_inventory_for_catalog_repo_matches_metadata(monkeypatch, tmp
 
 
 @pytest.mark.asyncio
-async def test_sync_hf_cache_inventory_skips_untrusted_gguf(tmp_path):
-    snapshot = tmp_path / "hf_cache" / "models--random-user--Model-GGUF" / "snapshots" / "abc"
+async def test_sync_hf_cache_inventory_registers_any_cached_gguf(tmp_path):
+    snapshot = tmp_path / "hf_cache" / "models--random-user--Kimi-DFlash" / "snapshots" / "abc"
     snapshot.mkdir(parents=True)
     gguf = snapshot / "model-Q4_K_M.gguf"
     gguf.write_bytes(b"gguf-bytes")
@@ -354,8 +354,10 @@ async def test_sync_hf_cache_inventory_skips_untrusted_gguf(tmp_path):
         hf_cache_dir=tmp_path / "hf_cache",
     )
 
-    assert count == 0
-    assert await db.list_models("u1") == []
+    rows = await db.list_models("u1")
+    assert count == 1
+    assert rows[0]["source"] == "hf:random-user/Kimi-DFlash"
+    assert rows[0]["format"] == "gguf"
 
 
 @pytest.mark.asyncio

@@ -12,6 +12,8 @@ def test_is_gguf_only_repo_id_detects_mirrors():
     assert is_gguf_only_repo_id("bartowski/Qwen3-4B-GGUF")
     assert not is_gguf_only_repo_id("Qwen/Qwen2.5-0.5B-Instruct")
     assert not is_gguf_only_repo_id("google/gemma-2-2b-it")
+    assert not is_gguf_only_repo_id("unsloth/gemma-3-12b-it")
+    assert not is_gguf_only_repo_id("bartowski/Llama-3.1-8B-Instruct")
 
 
 def test_search_trainable_catalog_skips_gguf(monkeypatch):

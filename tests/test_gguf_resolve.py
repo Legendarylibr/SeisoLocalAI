@@ -9,8 +9,7 @@ def test_gguf_mirror_candidates_include_gguf_mirrors():
     from seiso.models.trusted_gguf import gguf_mirror_candidates
 
     candidates = gguf_mirror_candidates("acme/Example-7B")
-    assert any("Example-7B" in c for c in candidates)
-    assert candidates[0].startswith("unsloth/")
+    assert candidates == ["acme/Example-7B-GGUF", "acme/Example-7B"]
 
 
 def test_resolve_gguf_repo_uses_explicit_gguf_repo(monkeypatch):
@@ -118,23 +117,25 @@ def test_pick_gguf_file_prefers_active_moe_quant():
     assert picked == "Qwen3.6-35B-A3B-Q4_K_M.gguf"
 
 
-def test_resolve_gguf_repo_prefers_trusted_search_over_untrusted(monkeypatch):
+def test_resolve_gguf_repo_uses_top_hub_search_match(monkeypatch):
     monkeypatch.setattr(
-        hf_hub, "repo_has_gguf", lambda repo_id, **_: repo_id == "bartowski/Kimi-GGUF"
+        hf_hub,
+        "repo_has_gguf",
+        lambda repo_id, **_: repo_id == "random-user/Kimi-GGUF",
     )
     monkeypatch.setattr(
         hf_hub,
         "search_huggingface_gguf_repos",
         lambda **_k: [
             {"repo_id": "random-user/Kimi-GGUF", "downloads": 999_999},
-            {"repo_id": "bartowski/Kimi-GGUF", "downloads": 10},
+            {"repo_id": "org/Kimi-GGUF", "downloads": 10},
         ],
     )
     hf_hub._gguf_repo_cache.clear()
 
-    resolved = hf_hub.resolve_gguf_repo("org/Kimi")
+    resolved = hf_hub.resolve_gguf_repo("org/Kimi-Base")
 
-    assert resolved == "bartowski/Kimi-GGUF"
+    assert resolved == "random-user/Kimi-GGUF"
 
 
 def test_resolve_gguf_repo_uses_catalog_entry_gguf_repo(monkeypatch):

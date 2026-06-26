@@ -294,10 +294,22 @@ def test_diversify_by_family_interleaves_brands():
     assert len(set(first_families)) >= 5
 
 
-def test_hub_row_to_entry_skips_unsupported_repos():
+def test_hub_row_to_entry_accepts_any_text_generation_repo():
     from seiso.models.catalog import _hub_row_to_entry
 
     entry = _hub_row_to_entry(
+        {
+            "id": "Qwen/Qwen2.5-0.5B-Instruct",
+            "downloads": 999,
+            "tags": ["safetensors", "text-generation"],
+            "pipeline_tag": "text-generation",
+        }
+    )
+    assert entry is not None
+    assert entry.repo_id == "Qwen/Qwen2.5-0.5B-Instruct"
+    assert entry.gguf_repo is None
+
+    gguf_entry = _hub_row_to_entry(
         {
             "id": "vendor/Kimi-DFlash",
             "downloads": 999,
@@ -305,7 +317,8 @@ def test_hub_row_to_entry_skips_unsupported_repos():
             "pipeline_tag": "text-generation",
         }
     )
-    assert entry is None
+    assert gguf_entry is not None
+    assert gguf_entry.gguf_repo == "vendor/Kimi-DFlash"
 
 
 def test_search_catalog_uses_hub_cursor(monkeypatch):
