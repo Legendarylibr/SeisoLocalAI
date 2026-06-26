@@ -47,6 +47,37 @@ def test_tools_system_prompt_uses_xml_format_for_qwen_family():
     assert "JSON blocks" not in prompt
 
 
+def test_tools_system_prompt_uses_coding_guidance_for_code_models():
+    registry = ToolRegistry()
+    registry.register(
+        ToolSpec(
+            name="web_search",
+            description="Search the web",
+            parameters={"type": "object"},
+            handler=lambda: "",
+        )
+    )
+    prompt = tools_system_prompt(registry, model_key="mistralai/Devstral-Small-2505")
+    assert "expert coding assistant" in prompt.lower()
+    assert "fenced code blocks" in prompt.lower()
+    assert "execute_code" in prompt
+
+
+def test_tools_system_prompt_uses_coding_guidance_when_code_exec_enabled():
+    registry = ToolRegistry()
+    registry.register(
+        ToolSpec(
+            name="execute_code",
+            description="Run Python code in a sandboxed environment.",
+            parameters={"type": "object"},
+            handler=lambda code: "",
+        )
+    )
+    prompt = tools_system_prompt(registry, model_key="meta-llama/Llama-3.1-8B")
+    assert "expert coding assistant" in prompt.lower()
+    assert "write_artifact" in prompt
+
+
 def test_tools_system_prompt_uses_json_format_for_llama_family():
     registry = ToolRegistry()
     registry.register(
