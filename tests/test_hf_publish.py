@@ -8,6 +8,7 @@ from forge.services.hf_auth import (
     hf_auth_status,
     resolve_hf_token,
     resolve_hf_token_for_download,
+    resolve_hf_token_for_upload,
     save_user_hf_token,
 )
 from forge.services.publishable import is_pushable_model
@@ -88,6 +89,34 @@ def test_resolve_hf_token_for_download_drops_invalid_token(monkeypatch):
         )(),
     )
     token, source = resolve_hf_token_for_download(settings_token="hf_bad")
+    assert token is None
+    assert source == "none"
+
+
+def test_resolve_hf_token_for_upload_requires_valid_token(monkeypatch):
+    monkeypatch.setattr(
+        "forge.services.hf_connectivity.probe_hf_hub",
+        lambda **_: type(
+            "R",
+            (),
+            {"token_valid": True, "token_invalid": False, "anonymous_ok": True},
+        )(),
+    )
+    token, source = resolve_hf_token_for_upload(settings_token="hf_good")
+    assert token == "hf_good"
+    assert source == "env_seiso"
+
+
+def test_resolve_hf_token_for_upload_rejects_invalid_token(monkeypatch):
+    monkeypatch.setattr(
+        "forge.services.hf_connectivity.probe_hf_hub",
+        lambda **_: type(
+            "R",
+            (),
+            {"token_valid": False, "token_invalid": True, "anonymous_ok": True},
+        )(),
+    )
+    token, source = resolve_hf_token_for_upload(settings_token="hf_bad")
     assert token is None
     assert source == "none"
 

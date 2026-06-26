@@ -28,16 +28,9 @@ from forge.services.knowledge_context import format_knowledge_context, retrieve_
 from forge.services.llm_output import StreamingOutputSanitizer, sanitize_llm_output
 from forge.services.model_router_client import ROUTER_MODEL_ID, fetch_router_status
 from forge.services.models import resolve_model_path
-from seiso.inference.backends import BACKEND_LLAMACPP, BACKEND_MLX, BACKEND_ROUTER, BACKEND_TORCH
+from seiso.inference.backends import BACKEND_LLAMACPP, BACKEND_ROUTER, BACKEND_TORCH
 
 router = APIRouter(prefix="/inference", tags=["inference"])
-
-_POOL_BACKEND_BY_API_BACKEND = {
-    BACKEND_LLAMACPP: "llama",
-    "llama": "llama",
-    BACKEND_MLX: "mlx",
-    BACKEND_TORCH: "torch",
-}
 
 
 def _assert_inference_gpu_available() -> None:
@@ -143,10 +136,10 @@ async def inference_model_variants(
     db: Annotated[Database, Depends(get_db)],
     settings: Annotated[ForgeSettings, Depends(get_settings)],
 ) -> dict[str, Any]:
-    from forge.services.hf_auth import resolve_hf_token
+    from forge.services.hf_auth import resolve_hf_token_for_download
     from forge.services.inference_variants import get_model_variants
 
-    hf_token, _ = resolve_hf_token(
+    hf_token, _ = resolve_hf_token_for_download(
         user_id=user_id,
         data_dir=settings.data_dir,
         encryption_key=settings.hf_token_encryption_key,
@@ -498,21 +491,6 @@ async def _release_active_local_model(runner) -> None:
         return
     loop = asyncio.get_running_loop()
     await loop.run_in_executor(None, pool.cancel_and_unload)
-
-
-def _active_local_model_would_change(pool, *, target_path: str, backend: str | None) -> bool:
-    status = pool.status()
-    if not status.get("active_model"):
-        return False
-
-    expected_pool_backend = _POOL_BACKEND_BY_API_BACKEND.get((backend or "").lower())
-    if expected_pool_backend and status.get("backend") != expected_pool_backend:
-        return True
-
-    active_path = status.get("path")
-    return bool(
-        active_path and pool.normalize_path(active_path) != pool.normalize_path(target_path)
-    )
 
 
 @router.post("/chat")

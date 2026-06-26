@@ -114,6 +114,11 @@ def check_inference_runtime() -> InferenceRuntimeStatus:
     return status
 
 
+from seiso.inference.runtime_cache import register_runtime_cache_clear
+
+register_runtime_cache_clear(check_inference_runtime.cache_clear)
+
+
 def _probe_hf_hub_anonymous(api: Any, *, timeout: float, started: float) -> HfConnectivityResult:
     """Anonymous reachability check — public models work without credentials."""
     try:
@@ -217,6 +222,7 @@ def build_hf_status(
         and runtime.huggingface_hub
         and (connectivity.anonymous_ok or connectivity.token_valid)
     )
+    ready_for_upload = connectivity.token_valid
     ready_for_gguf_chat = ready_for_download and runtime.llamacpp
     ready_for_local_chat = ready_for_download and (runtime.llamacpp or runtime.mlx or runtime.torch)
 
@@ -242,6 +248,7 @@ def build_hf_status(
             "install_hints": runtime.install_hints,
         },
         "ready_for_download": ready_for_download,
+        "ready_for_upload": ready_for_upload,
         "ready_for_gguf_chat": ready_for_gguf_chat,
         "ready_for_local_chat": ready_for_local_chat,
     }

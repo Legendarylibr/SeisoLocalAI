@@ -149,6 +149,35 @@ def resolve_hf_token(
     return None, "none"
 
 
+def resolve_hf_token_for_upload(
+    *,
+    request_token: str | None = None,
+    user_id: str | None = None,
+    data_dir: Path | None = None,
+    encryption_key: bytes | None = None,
+    settings_token: str | None = None,
+    prefer_cli: bool = False,
+) -> tuple[str | None, TokenSource]:
+    """Resolve a valid HF token for Hub uploads — missing or rejected tokens are denied."""
+    token, source = resolve_hf_token(
+        request_token=request_token,
+        user_id=user_id,
+        data_dir=data_dir,
+        encryption_key=encryption_key,
+        settings_token=settings_token,
+        prefer_cli=prefer_cli,
+    )
+    if not token:
+        return None, "none"
+
+    from forge.services.hf_connectivity import probe_hf_hub
+
+    result = probe_hf_hub(token=token)
+    if result.token_valid:
+        return token, source
+    return None, "none"
+
+
 def resolve_hf_token_for_download(
     *,
     request_token: str | None = None,

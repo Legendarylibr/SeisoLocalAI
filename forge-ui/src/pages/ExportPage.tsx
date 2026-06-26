@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { api, ExportJob, HubPublishFields, PublishableModel, RLQuantJob, subscribeSSE } from "@/lib/api";
 import { invalidateApiCache } from "@/lib/api/getCache";
 import { appendBoundedLog } from "@/lib/api/sse";
+import { canPublishToHub } from "@/lib/hfAuth";
+import { usePlatformSettings } from "@/context/PlatformSettingsContext";
 import { DataTable } from "@/components/research/DataTable";
 import { FormSection } from "@/components/research/FormSection";
 import { LogStream } from "@/components/research/LogStream";
@@ -30,7 +33,11 @@ async function saveBlobResponse(res: Response, fallbackName: string) {
   URL.revokeObjectURL(url);
 }
 
+const UPLOAD_TOKEN_MSG =
+  "A valid Hugging Face token is required to publish. Add one in Settings, enter it below, or run `hf auth login`.";
+
 export function ExportPage() {
+  const { settings, hfStatus } = usePlatformSettings();
   const [checkpoint, setCheckpoint] = useState("");
   const [formats, setFormats] = useState(["merged", "gguf"]);
   const [ggufQuants, setGgufQuants] = useState<string[]>(["q4_k_m"]);
@@ -72,8 +79,17 @@ export function ExportPage() {
     return fields;
   };
 
+  const uploadReady = canPublishToHub(hfStatus, settings?.hf_auth, {
+    requestToken: hfTokenInput,
+    useCli: hub.use_cli,
+  });
+
   const start = async () => {
     if (!checkpoint.trim()) return;
+    if (pushOnExport && !uploadReady) {
+      setLogs([UPLOAD_TOKEN_MSG]);
+      return;
+    }
     setBusy(true);
     setLogs([]);
     try {
@@ -110,6 +126,10 @@ export function ExportPage() {
   };
 
   const precheck = async () => {
+    if (!uploadReady) {
+      setLogs([UPLOAD_TOKEN_MSG]);
+      return;
+    }
     const fields = hubFields();
     if (!fields) {
       setLogs(["Username, model name, and author are required for Hub precheck."]);
@@ -141,6 +161,10 @@ export function ExportPage() {
   };
 
   const publish = async () => {
+    if (!uploadReady) {
+      setLogs([UPLOAD_TOKEN_MSG]);
+      return;
+    }
     const fields = hubFields();
     if (!fields) {
       setLogs(["Username, model name, and author are required for Hugging Face publish."]);
@@ -289,7 +313,7 @@ export function ExportPage() {
               Start export
             </button>
             {pushOnExport && (
-              <button className="btn" onClick={precheck} disabled={busy}>
+              <button className="btn" onClick={precheck} disabled={busy || !uploadReady}>
                 Precheck Hub
               </button>
             )}
@@ -309,9 +333,16 @@ export function ExportPage() {
           />
           <StudioCardBody>
           <p className="field-hint">
-            Only Seiso training, export, and RL quant outputs can be published. Provide an API token or use{" "}
-            <code>huggingface-cli login</code> / <code>hf auth login</code>.
+            Only Seiso training, export, and RL quant outputs can be published. A valid Hugging Face token is always
+            required for upload — add one in{" "}
+            <Link to="/settings?tab=huggingface">Settings</Link>, enter it below, or use{" "}
+            <code>hf auth login</code>.
           </p>
+          {!uploadReady && (
+            <p className="auth-error" role="status" style={{ marginBottom: "0.75rem" }}>
+              {UPLOAD_TOKEN_MSG}
+            </p>
+          )}
           <FormSection title="Hub metadata" hint="Repository identity and model card fields." collapsible defaultOpen>
             <div className="option-grid">
               <div className="form-field">
@@ -335,7 +366,7 @@ export function ExportPage() {
                 <input value={hub.base_model || ""} onChange={(e) => updateHub("base_model", e.target.value)} placeholder="meta-llama/Llama-3.2-3B" />
               </div>
               <div className="form-field">
-                <label>HF API token (optional)</label>
+                <label>HF API token {uploadReady ? "(optional override)" : "(required for upload)"}</label>
                 <input
                   type="password"
                   value={hfTokenInput}
@@ -387,7 +418,7 @@ export function ExportPage() {
           </FormSection>
           </StudioCardBody>
           <div className="studio-action-bar studio-action-bar-flush">
-            <button className="btn btn-primary btn-lg" onClick={publish} disabled={busy}>
+            <button className="btn btn-primary btn-lg" onClick={publish} disabled={busy || !uploadReady}>
               Publish to Hugging Face
             </button>
           </div>

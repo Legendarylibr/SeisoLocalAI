@@ -22,7 +22,11 @@ from forge.orchestrators.export import ExportOrchestrator
 from forge.orchestrators.hub_publish import HubPublishOrchestrator
 from forge.security.audit import audit_event
 from forge.security.auth import get_current_user_id
-from forge.services.hf_auth import resolve_hf_token
+from forge.services.hub_publish import (
+    HubPublishRequest,
+    hub_metadata_from_request,
+    resolve_hub_publish_token,
+)
 from forge.services.jobs import assert_job_owner
 from forge.services.publishable import (
     assert_pushable_checkpoint,
@@ -36,18 +40,6 @@ from seiso.export.model_card import HubModelMetadata
 from seiso.security import SecurityError
 
 router = APIRouter(prefix="/export", tags=["export"])
-
-
-class HubPublishRequest(BaseModel):
-    username: str = Field(min_length=1, max_length=128)
-    model_name: str = Field(min_length=1, max_length=128)
-    author: str = Field(min_length=1, max_length=256)
-    license: str = Field(default="apache-2.0", max_length=64)
-    base_model: str | None = Field(default=None, max_length=256)
-    description: str = Field(default="", max_length=4000)
-    tags: list[str] = Field(default_factory=list)
-    hf_token: str | None = Field(default=None, description="Per-request HF API token")
-    use_cli: bool = Field(default=False, description="Prefer cached `hf auth login` token")
 
 
 class ExportStartRequest(BaseModel):
@@ -119,48 +111,14 @@ async def _resolve_publish_folder(
     return folder, job_id, source
 
 
-def _hub_metadata_from_request(
-    hub: HubPublishRequest, *, job_id: str | None = None, source: str | None = None
-) -> HubModelMetadata:
-    return HubModelMetadata(
-        username=hub.username.strip(),
-        model_name=hub.model_name.strip(),
-        author=hub.author.strip(),
-        license=hub.license.strip() or "apache-2.0",
-        base_model=hub.base_model.strip() if hub.base_model else None,
-        description=hub.description,
-        tags=hub.tags,
-        seiso_job_id=job_id,
-        seiso_source=source,
-    )
-
-
 def _resolve_hub_repo(body: ExportStartRequest) -> tuple[str | None, HubModelMetadata | None]:
     if body.hub:
-        meta = _hub_metadata_from_request(body.hub)
+        meta = hub_metadata_from_request(body.hub)
         meta.validate()
         return meta.repo_id, meta
     if body.hub_repo:
         return body.hub_repo.strip(), None
     return None, None
-
-
-def _resolve_token(
-    settings: ForgeSettings,
-    user_id: str,
-    hub: HubPublishRequest | None,
-) -> str | None:
-    if not hub:
-        return settings.hf_token or None
-    token, _ = resolve_hf_token(
-        request_token=hub.hf_token,
-        user_id=user_id,
-        data_dir=settings.data_dir,
-        encryption_key=settings.hf_token_encryption_key,
-        settings_token=settings.hf_token or None,
-        prefer_cli=hub.use_cli,
-    )
-    return token
 
 
 @router.get("/profiles")
@@ -186,11 +144,11 @@ async def precheck_hub_export_route(
     """Validate Hub repo availability and model card before starting export."""
     from seiso.export.hub_precheck import precheck_hub_export
 
-    meta = _hub_metadata_from_request(body.hub)
+    meta = hub_metadata_from_request(body.hub)
     meta.validate()
     if body.profile or "gguf" in [f.lower() for f in body.formats]:
         meta.quantizations = list(body.gguf_quantizations)
-    token = _resolve_token(settings, user_id, body.hub)
+    token = resolve_hub_publish_token(settings, user_id, body.hub)
     if not token:
         raise HTTPException(
             400,
@@ -237,7 +195,7 @@ async def start_export(
         raise HTTPException(403 if isinstance(exc, SecurityError) else 400, str(exc)) from exc
 
     hub_repo, hub_metadata = _resolve_hub_repo(body)
-    hub_token = _resolve_token(settings, user_id, body.hub)
+    hub_token = resolve_hub_publish_token(settings, user_id, body.hub)
     if hub_repo and not hub_token:
         raise HTTPException(
             400,
@@ -339,14 +297,14 @@ async def start_publish_to_hub(
     settings: Annotated[ForgeSettings, Depends(get_settings)],
 ) -> PipelineJobResponse:
     """Start a background Hugging Face publish job (required for multi-GB GGUF uploads)."""
-    token = _resolve_token(settings, user_id, body.hub)
+    token = resolve_hub_publish_token(settings, user_id, body.hub)
     if not token:
         raise HTTPException(
             400,
             "Hugging Face token required. Enter an API token, save one in Settings, set SEISO_HF_TOKEN, or run `hf auth login`.",
         )
 
-    meta = _hub_metadata_from_request(body.hub)
+    meta = hub_metadata_from_request(body.hub)
     meta.validate()
     repo_id = meta.repo_id
 
@@ -426,14 +384,14 @@ async def publish_to_hub(
     settings: Annotated[ForgeSettings, Depends(get_settings)],
 ) -> dict[str, str]:
     """Publish synchronously — prefer POST /export/publish/jobs for large GGUF files."""
-    token = _resolve_token(settings, user_id, body.hub)
+    token = resolve_hub_publish_token(settings, user_id, body.hub)
     if not token:
         raise HTTPException(
             400,
             "Hugging Face token required. Enter an API token, save one in Settings, set SEISO_HF_TOKEN, or run `hf auth login`.",
         )
 
-    meta = _hub_metadata_from_request(body.hub)
+    meta = hub_metadata_from_request(body.hub)
     meta.validate()
     repo_id = meta.repo_id
 

@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense } from "react";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { AuthProvider, useAuth } from "@/hooks/useAuth";
 import { HardwareProfileProvider } from "@/context/HardwareProfileContext";
@@ -7,8 +7,9 @@ import { PlatformSettingsProvider, usePlatformSettings } from "@/context/Platfor
 import { TrainingModelsProvider } from "@/context/TrainingModelsContext";
 import { Layout } from "@/components/Layout";
 import { SeisoLogoMark } from "@/components/SeisoLogo";
-import { HfTokenPrompt } from "@/components/HfTokenPrompt";
 import { AuthPage } from "@/pages/AuthPage";
+import { HfTokenPage } from "@/pages/HfTokenPage";
+import { needsHfTokenOnboarding, skipHfOnboarding } from "@/lib/hfOnboarding";
 
 const DashboardPage = lazy(() => import("@/pages/DashboardPage").then((m) => ({ default: m.DashboardPage })));
 const HubPage = lazy(() => import("@/pages/HubPage").then((m) => ({ default: m.HubPage })));
@@ -40,29 +41,10 @@ function PageLoading() {
 
 function Guard({ children, fullBleed = false }: { children: React.ReactNode; fullBleed?: boolean }) {
   const { user, loading, needsOnboarding } = useAuth();
-  const { settings, hfStatus, loading: platformLoading } = usePlatformSettings();
-  const [showHfPrompt, setShowHfPrompt] = useState(false);
+  const { hfStatus, loading: platformLoading } = usePlatformSettings();
 
-  useEffect(() => {
-    if (!user || platformLoading) {
-      if (!user) setShowHfPrompt(false);
-      return;
-    }
-    const key = `seiso_hf_prompt_skipped:${user.id}`;
-    if (sessionStorage.getItem(key) === "1") {
-      setShowHfPrompt(false);
-      return;
-    }
-    if (hfStatus?.ready_for_download) {
-      setShowHfPrompt(false);
-      return;
-    }
-    setShowHfPrompt(!settings?.hf_auth.user_token_saved);
-  }, [user, platformLoading, settings, hfStatus]);
-
-  const dismissHfPrompt = () => {
-    if (user) sessionStorage.setItem(`seiso_hf_prompt_skipped:${user.id}`, "1");
-    setShowHfPrompt(false);
+  const dismissHfOnboarding = () => {
+    if (user) skipHfOnboarding(user.id);
   };
 
   if (loading) {
@@ -71,10 +53,12 @@ function Guard({ children, fullBleed = false }: { children: React.ReactNode; ful
   if (!user && !needsOnboarding) return <AuthPage />;
   if (needsOnboarding && !user) return <AuthPage />;
   if (platformLoading && user) return <PageLoading />;
+  if (user && needsHfTokenOnboarding(hfStatus, user.id)) {
+    return <HfTokenPage onDone={dismissHfOnboarding} />;
+  }
   return (
     <Layout fullBleed={fullBleed}>
       <Suspense fallback={<PageLoading />}>{children}</Suspense>
-      {showHfPrompt && <HfTokenPrompt onDone={dismissHfPrompt} />}
     </Layout>
   );
 }
