@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -9,6 +10,7 @@ import pytest
 
 from seiso.inference.speculative import (
     TorchSpeculativeBundle,
+    _decode_new_text,
     default_num_speculative_tokens,
     iter_speculative_tokens,
 )
@@ -24,7 +26,25 @@ class _FakeTokenizer:
         return SimpleNamespace(input_ids=torch.tensor([self._tokens], dtype=torch.long))
 
     def decode(self, token_ids, skip_special_tokens: bool = True) -> str:
-        return " ".join(str(int(t)) for t in token_ids.tolist())
+        if isinstance(token_ids, list):
+            ids = token_ids
+        else:
+            ids = token_ids.tolist()
+        return " ".join(str(int(t)) for t in ids)
+
+
+class _BpeLikeTokenizer(_FakeTokenizer):
+    """Tokenizer where per-token decode differs from full-sequence decode."""
+
+    def decode(self, token_ids, skip_special_tokens: bool = True) -> str:
+        if isinstance(token_ids, list):
+            ids = token_ids
+        else:
+            ids = token_ids.tolist()
+        if ids == [10, 11]:
+            return "AB"
+        mapping = {10: "A", 11: "X", 12: "C", 1: "1", 2: "2", 3: "3", 4: "4"}
+        return "".join(mapping.get(int(i), str(i)) for i in ids)
 
 
 class _FakeModel:
@@ -39,14 +59,48 @@ class _FakeModel:
 
         yield torch.zeros(1)
 
-    def __call__(self, input_ids):
+    def __call__(self, input_ids, past_key_values=None, use_cache=False):
         import torch
 
         batch, length = input_ids.shape
         vocab = 16
         logits = torch.zeros(batch, length, vocab)
         logits[:, :, self.next_id] = 10.0
-        return SimpleNamespace(logits=logits)
+        cached = (past_key_values or 0) + length if use_cache else None
+        return SimpleNamespace(logits=logits, past_key_values=cached)
+
+
+class _RejectingFakeModel:
+    """Target accepts one proposed 5, then rejects the next proposed 5."""
+
+    def __init__(self) -> None:
+        import torch
+
+        self.device = torch.device("cpu")
+
+    def parameters(self):
+        import torch
+
+        yield torch.zeros(1)
+
+    def __call__(self, input_ids, past_key_values=None, use_cache=False):
+        import torch
+
+        batch, length = input_ids.shape
+        vocab = 16
+        logits = torch.zeros(batch, length, vocab)
+        logits[:, :, 5] = 10.0
+        if length >= 4:
+            logits[:, 3, :] = 0.0
+            logits[:, 3, 6] = 10.0
+        cached = (past_key_values or 0) + length if use_cache else None
+        return SimpleNamespace(logits=logits, past_key_values=cached)
+
+
+class _NoCacheFakeModel(_FakeModel):
+    def __call__(self, input_ids, past_key_values=None, use_cache=False):
+        out = super().__call__(input_ids, past_key_values=past_key_values, use_cache=use_cache)
+        return SimpleNamespace(logits=out.logits, past_key_values=None)
 
 
 def test_default_num_speculative_tokens_from_payload():
@@ -56,6 +110,47 @@ def test_default_num_speculative_tokens_from_payload():
 def test_default_num_speculative_tokens_env_fallback(monkeypatch):
     monkeypatch.setenv("SEISO_SPECULATIVE_TOKENS", "7")
     assert default_num_speculative_tokens({}) == 7
+
+
+def test_decode_new_text_is_bpe_safe():
+    import torch
+
+    tok = _BpeLikeTokenizer()
+    tok._tokens = [10, 11]
+    ids = torch.tensor([[10, 11]], dtype=torch.long)
+
+    full_text = tok.decode(ids[0])
+    assert full_text == "AB"
+
+    suffix, end = _decode_new_text(tok, ids, prev_char_len=1)
+    assert suffix == "B"
+    assert end == len(full_text)
+
+    wrong_incremental = tok.decode([11])
+    assert wrong_incremental == "X"
+    assert wrong_incremental != suffix
+
+
+def test_iter_speculative_tokens_uses_kv_cache_by_default():
+    tok = _FakeTokenizer()
+    bundle = TorchSpeculativeBundle(
+        target_model=_FakeModel(4),
+        target_tokenizer=tok,
+        draft_model=_FakeModel(4),
+        draft_tokenizer=tok,
+    )
+
+    chunks = list(
+        iter_speculative_tokens(
+            bundle=bundle,
+            prompt="hello",
+            max_new_tokens=2,
+            num_speculative_tokens=2,
+        )
+    )
+
+    assert chunks
+    assert any("4" in chunk.text for chunk in chunks)
 
 
 def test_iter_speculative_tokens_streams_matching_draft_and_target():
@@ -78,6 +173,74 @@ def test_iter_speculative_tokens_streams_matching_draft_and_target():
 
     assert chunks
     assert any("4" in chunk.text for chunk in chunks)
+
+
+def test_cached_and_naive_paths_match(monkeypatch):
+    monkeypatch.delenv("SEISO_SPECULATIVE_KV_CACHE", raising=False)
+    tok = _FakeTokenizer()
+    bundle = TorchSpeculativeBundle(
+        target_model=_FakeModel(4),
+        target_tokenizer=tok,
+        draft_model=_FakeModel(4),
+        draft_tokenizer=tok,
+    )
+    kwargs = {
+        "bundle": bundle,
+        "prompt": "hello",
+        "max_new_tokens": 4,
+        "num_speculative_tokens": 2,
+    }
+
+    cached = "".join(chunk.text for chunk in iter_speculative_tokens(**kwargs))
+
+    monkeypatch.setenv("SEISO_SPECULATIVE_KV_CACHE", "false")
+    naive = "".join(chunk.text for chunk in iter_speculative_tokens(**kwargs))
+
+    assert cached == naive
+
+
+def test_partial_rejection_still_streams():
+    tok = _FakeTokenizer()
+    bundle = TorchSpeculativeBundle(
+        target_model=_RejectingFakeModel(),
+        target_tokenizer=tok,
+        draft_model=_FakeModel(5),
+        draft_tokenizer=tok,
+    )
+
+    chunks = list(
+        iter_speculative_tokens(
+            bundle=bundle,
+            prompt="hello",
+            max_new_tokens=2,
+            num_speculative_tokens=2,
+        )
+    )
+
+    assert chunks
+    assert any("5" in chunk.text or "6" in chunk.text for chunk in chunks)
+
+
+def test_kv_cache_falls_back_when_past_key_values_missing(monkeypatch):
+    monkeypatch.delenv("SEISO_SPECULATIVE_KV_CACHE", raising=False)
+    tok = _FakeTokenizer()
+    bundle = TorchSpeculativeBundle(
+        target_model=_NoCacheFakeModel(4),
+        target_tokenizer=tok,
+        draft_model=_FakeModel(4),
+        draft_tokenizer=tok,
+    )
+
+    chunks = list(
+        iter_speculative_tokens(
+            bundle=bundle,
+            prompt="hello",
+            max_new_tokens=2,
+            num_speculative_tokens=2,
+        )
+    )
+
+    assert chunks
 
 
 @pytest.mark.asyncio
@@ -114,6 +277,81 @@ async def test_runner_routes_to_speculative_stream(monkeypatch):
 
     assert tokens == ["spec"]
     assert seen["draft_path"] == "/tmp/draft"
+
+
+def test_iter_speculative_tokens_kv_cache_can_be_disabled(monkeypatch):
+    monkeypatch.setenv("SEISO_SPECULATIVE_KV_CACHE", "false")
+    tok = _FakeTokenizer()
+    bundle = TorchSpeculativeBundle(
+        target_model=_FakeModel(4),
+        target_tokenizer=tok,
+        draft_model=_FakeModel(4),
+        draft_tokenizer=tok,
+    )
+
+    chunks = list(
+        iter_speculative_tokens(
+            bundle=bundle,
+            prompt="hello",
+            max_new_tokens=2,
+            num_speculative_tokens=2,
+        )
+    )
+
+    assert chunks
+
+
+def test_dflash_draft_infer_serializes_concurrent_calls():
+    from seiso.inference.model_pool import DflashDraftHandle, dflash_draft_infer
+
+    active = {"count": 0, "max": 0}
+
+    class _FakeDraftLlm:
+        def __call__(self, _text, **kwargs):
+            active["count"] += 1
+            active["max"] = max(active["max"], active["count"])
+            import time
+
+            time.sleep(0.05)
+            active["count"] -= 1
+            return {"choices": [{"text": "x"}]}
+
+    handle = DflashDraftHandle(_FakeDraftLlm())
+    errors: list[BaseException] = []
+
+    def _run() -> None:
+        try:
+            assert dflash_draft_infer(handle, "prompt", max_tokens=1) == "x"
+        except BaseException as exc:
+            errors.append(exc)
+
+    threads = [threading.Thread(target=_run) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=5)
+
+    assert not errors
+    assert active["max"] == 1
+
+
+def test_unload_all_clears_dflash_draft_cache(monkeypatch, tmp_path):
+    from seiso.inference import model_pool as mp
+
+    closed = {"count": 0}
+
+    class _FakeLlama:
+        def close(self) -> None:
+            closed["count"] += 1
+
+    norm = str((tmp_path / "draft.gguf").resolve())
+    mp._dflash_draft_cache[norm] = mp.DflashDraftHandle(_FakeLlama())
+
+    pool = mp.ModelPool()
+    pool.unload_all()
+
+    assert closed["count"] == 1
+    assert mp._dflash_draft_cache == {}
 
 
 def test_model_pool_status_includes_draft_path():
