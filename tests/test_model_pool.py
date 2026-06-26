@@ -63,6 +63,24 @@ def test_prepare_for_load_unloads_when_switching(tmp_path, monkeypatch):
     assert refreshed["calls"] == 1
 
 
+def test_llama_gpu_layers_optimal_uses_short_ttl_cache(monkeypatch, tmp_path):
+    import seiso.inference.model_pool as mp
+
+    mp._clear_optimal_layers_cache()
+    gguf = tmp_path / "model.gguf"
+    gguf.write_bytes(b"gguf")
+    calls: list[int] = []
+
+    monkeypatch.setattr(mp, "fit_llama_gpu_layers", lambda _p, _r, _h: calls.append(1) or 32)
+
+    first = mp._llama_gpu_layers_optimal(str(gguf), -1)
+    second = mp._llama_gpu_layers_optimal(str(gguf), -1)
+
+    assert first == 32
+    assert second == 32
+    assert len(calls) == 1
+
+
 def test_prepare_for_load_keeps_same_model(tmp_path, monkeypatch):
     pool = ModelPool()
     model = tmp_path / "same.gguf"
@@ -74,10 +92,17 @@ def test_prepare_for_load_keeps_same_model(tmp_path, monkeypatch):
         handle=object(),
         meta={"path": str(model), "norm_path": norm},
     )
-    monkeypatch.setattr("seiso.hardware.profile.hardware_profile", lambda force_refresh=False: {})
+    refreshed = {"calls": 0}
+
+    def _refresh(force_refresh=False):
+        refreshed["calls"] += 1
+        return {}
+
+    monkeypatch.setattr("seiso.hardware.profile.hardware_profile", _refresh)
     unloaded = pool.prepare_for_load(str(model), BackendKind.LLAMA)
     assert unloaded is False
     assert pool.active_key is not None
+    assert refreshed["calls"] == 0
 
 
 def test_switch_serializes_concurrent_loads_for_same_model(tmp_path):

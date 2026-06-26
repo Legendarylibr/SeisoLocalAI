@@ -28,10 +28,13 @@ def configure_torch_inference() -> None:
             return
 
         if torch.cuda.is_available():
-            torch.backends.cudnn.benchmark = True
+            if env_bool("SEISO_TORCH_CUDNN_BENCHMARK", True):
+                torch.backends.cudnn.benchmark = True
             torch.backends.cudnn.deterministic = False
             torch.backends.cuda.matmul.allow_tf32 = True
             torch.backends.cudnn.allow_tf32 = True
+            if hasattr(torch.backends.cuda.matmul, "allow_fp16_reduced_precision_reduction"):
+                torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = True
             if hasattr(torch.backends.cuda, "enable_flash_sdp"):
                 torch.backends.cuda.enable_flash_sdp(True)
             if hasattr(torch.backends.cuda, "enable_mem_efficient_sdp"):

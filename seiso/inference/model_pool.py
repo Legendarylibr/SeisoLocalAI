@@ -6,6 +6,7 @@ import logging
 import os
 import platform
 import threading
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -215,18 +216,41 @@ def _llama_kv_quant_kwargs(extras: dict[str, Any]) -> dict[str, Any]:
     return {k: extras[k] for k in ("type_k", "type_v") if k in extras}
 
 
-def _llama_gpu_layers_optimal(model_path: str, requested: int) -> int:
-    """Best layer count for current free VRAM — used to decide cache reload."""
-    from seiso.memory.protection import headroom_mb, release_cached_memory
+_optimal_layers_cache: dict[tuple[str, int], tuple[int, float]] = {}
+_optimal_layers_lock = threading.Lock()
+_OPTIMAL_LAYERS_TTL_S = 8.0
 
-    release_cached_memory(sync=False)
+
+def _refresh_headroom_stats(*, force: bool = False) -> None:
+    """Refresh GPU/RAM stats — force only after unload/load, not per chat token."""
     try:
         from seiso.hardware.profile import hardware_profile
 
-        hardware_profile(force_refresh=True)
+        hardware_profile(force_refresh=force)
     except ImportError:
         pass
-    return fit_llama_gpu_layers(model_path, requested, headroom_mb())
+
+
+def _clear_optimal_layers_cache() -> None:
+    _optimal_layers_cache.clear()
+
+
+def _llama_gpu_layers_optimal(model_path: str, requested: int) -> int:
+    """Best layer count for current free VRAM — used to decide cache reload."""
+    cache_key = (model_path, requested)
+    now = time.time()
+    with _optimal_layers_lock:
+        cached = _optimal_layers_cache.get(cache_key)
+        if cached and now - cached[1] < _OPTIMAL_LAYERS_TTL_S:
+            return cached[0]
+
+    from seiso.memory.protection import headroom_mb, release_cached_memory
+
+    release_cached_memory(sync=False)
+    layers = fit_llama_gpu_layers(model_path, requested, headroom_mb())
+    with _optimal_layers_lock:
+        _optimal_layers_cache[cache_key] = (layers, now)
+    return layers
 
 
 def _llama_cache_is_optimal(model_path: str, cached_layers: int, requested: int) -> bool:
@@ -308,12 +332,8 @@ def _load_llama_model(path: str, n_ctx: int) -> Any:
     from seiso.memory.protection import estimate_path_vram_mb, headroom_mb, release_cached_memory
 
     release_cached_memory(sync=True)
-    try:
-        from seiso.hardware.profile import hardware_profile
-
-        hardware_profile(force_refresh=True)
-    except ImportError:
-        pass
+    _clear_optimal_layers_cache()
+    _refresh_headroom_stats(force=True)
 
     kwargs = llama_load_kwargs(n_ctx, model_path=path)
     speed_extras = _llama_speed_extras(path)
@@ -448,6 +468,7 @@ class ModelPool:
         """Stop lagging streams and release VRAM/RAM."""
         self.bump_generation()
         self.unload_all()
+        clear_dflash_draft_cache()
 
     def would_switch_model(
         self, target_path: str, backend: str | BackendKind | None = None
@@ -479,12 +500,9 @@ class ModelPool:
             unloaded = True
         else:
             self._free_memory()
-        try:
-            from seiso.hardware.profile import hardware_profile
-
-            hardware_profile(force_refresh=True)
-        except ImportError:
-            pass
+        if unloaded:
+            _clear_optimal_layers_cache()
+            _refresh_headroom_stats(force=True)
         return unloaded
 
     def switch(
@@ -528,12 +546,8 @@ class ModelPool:
                 if self._active:
                     self.cancel_and_unload()
                 self._free_memory()
-                try:
-                    from seiso.hardware.profile import hardware_profile
-
-                    hardware_profile(force_refresh=True)
-                except ImportError:
-                    pass
+                _clear_optimal_layers_cache()
+                _refresh_headroom_stats(force=True)
 
             logger.info("Loading model: %s (%s)", norm, backend.value)
             ensure_load_fits(load_path, mode="chat")
@@ -658,6 +672,7 @@ class ModelPool:
         """Release all loaded models and clear GPU memory."""
         with self._lock:
             if not self._active:
+                clear_dflash_draft_cache()
                 return
             backend = self._active.backend
             key = self._active.key
@@ -694,11 +709,13 @@ class ModelPool:
             del handle
 
         self._free_memory()
+        clear_dflash_draft_cache()
 
     def _free_memory(self) -> None:
         from seiso.memory.protection import release_cached_memory
 
         release_cached_memory(sync=True)
+        _clear_optimal_layers_cache()
 
     def status(self) -> dict:
         with self._lock:
@@ -709,6 +726,103 @@ class ModelPool:
                 "path": active.meta.get("path") if active else None,
                 "draft_path": active.meta.get("draft_path") if active else None,
             }
+
+
+class DflashDraftHandle:
+    """Thread-safe wrapper around a cached llama.cpp dflash/draft model."""
+
+    __slots__ = ("llm", "_infer_lock")
+
+    def __init__(self, llm: Any) -> None:
+        self.llm = llm
+        self._infer_lock = threading.Lock()
+
+
+_dflash_draft_cache: dict[str, DflashDraftHandle] = {}
+_dflash_draft_lock = threading.Lock()
+
+
+def _load_dflash_llm(resolved_path: str, n_ctx: int) -> Any:
+    from llama_cpp import Llama
+
+    from seiso.inference.tuning import attach_llama_prompt_cache
+
+    kwargs = llama_load_kwargs(n_ctx, model_path=resolved_path)
+    kwargs.pop("_model_path", None)
+    llm = Llama(model_path=resolved_path, **kwargs)
+    attach_llama_prompt_cache(llm)
+    return llm
+
+
+def get_dflash_draft(model_path: str, *, n_ctx: int = 4096) -> DflashDraftHandle:
+    """Return a cached, thread-safe llama.cpp handle for dflash/draft GGUF models."""
+    from seiso.inference.backends import BACKEND_LLAMACPP, prepare_model_path
+
+    resolved = prepare_model_path(model_path, BACKEND_LLAMACPP)
+    norm = str(Path(resolved).resolve())
+    with _dflash_draft_lock:
+        cached = _dflash_draft_cache.get(norm)
+        if cached is not None:
+            return cached
+
+    llm = _load_dflash_llm(resolved, n_ctx)
+
+    with _dflash_draft_lock:
+        cached = _dflash_draft_cache.get(norm)
+        if cached is not None:
+            try:
+                if hasattr(llm, "close"):
+                    llm.close()
+            except Exception:
+                pass
+            return cached
+        handle = DflashDraftHandle(llm)
+        _dflash_draft_cache[norm] = handle
+        return handle
+
+
+def dflash_draft_infer(
+    draft: Any,
+    current_text: str,
+    *,
+    max_tokens: int,
+    temperature: float = 0.0,
+) -> str:
+    """Run a single dflash draft completion under the per-handle inference lock."""
+    if isinstance(draft, DflashDraftHandle):
+        llm = draft.llm
+        infer_lock = draft._infer_lock
+    else:
+        llm = draft
+        infer_lock = None
+
+    gen_kwargs: dict[str, Any] = {
+        "max_tokens": max_tokens,
+        "echo": False,
+        "temperature": max(temperature, 0.0) if temperature > 0 else 0.0,
+    }
+    if temperature <= 0:
+        gen_kwargs["temperature"] = 0.0
+
+    if infer_lock is not None:
+        with infer_lock:
+            out = llm(current_text, **gen_kwargs)
+    else:
+        out = llm(current_text, **gen_kwargs)
+
+    return out["choices"][0]["text"] if out.get("choices") else ""
+
+
+def clear_dflash_draft_cache() -> None:
+    """Release cached dflash draft models."""
+    with _dflash_draft_lock:
+        for handle in _dflash_draft_cache.values():
+            try:
+                if hasattr(handle.llm, "close"):
+                    handle.llm.close()
+            except Exception:
+                pass
+        _dflash_draft_cache.clear()
 
 
 def get_model_pool() -> ModelPool:

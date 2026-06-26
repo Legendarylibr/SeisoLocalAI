@@ -154,6 +154,27 @@ def test_resolve_local_backend_auto():
     )
 
 
+def test_get_inference_runner_is_singleton():
+    import seiso.inference.runner as runner_mod
+
+    runner_mod._runner = None
+    first = runner_mod.get_inference_runner()
+    second = runner_mod.get_inference_runner()
+    assert first is second
+
+
+def test_inference_orchestrator_uses_shared_runner():
+    from pathlib import Path
+
+    from forge.orchestrators.inference import InferenceOrchestrator
+    import seiso.inference.runner as runner_mod
+
+    runner_mod._runner = None
+    shared = runner_mod.get_inference_runner()
+    orchestrator = InferenceOrchestrator(Path("/tmp/seiso-sandbox"))
+    assert orchestrator._runner is shared
+
+
 @pytest.mark.asyncio
 async def test_local_inference_stream_propagates_errors(monkeypatch):
     from seiso.inference.runner import LocalInferenceRunner

@@ -16,13 +16,14 @@ from seiso.inference.backends import (
     prepare_model_path,
     resolve_local_backend,
 )
-from seiso.inference.model_pool import get_model_pool
+from seiso.inference.model_pool import get_dflash_draft, get_model_pool
 from seiso.inference.speculative import (
     DFlashDraftSpeculativeBundle,
     default_num_speculative_tokens,
     iter_speculative_tokens,
     iter_speculative_tokens_dflash,
 )
+from seiso.env import env_int
 from seiso.inference.tuning import (
     configure_torch_inference,
     estimate_llama_n_ctx,
@@ -38,7 +39,13 @@ from seiso.models.chat_format import format_messages_for_prompt
 logger = logging.getLogger(__name__)
 
 _STREAM_DONE = object()
-_STREAM_BATCH_CHARS = 20
+_runner: "LocalInferenceRunner | None" = None
+_runner_lock = threading.Lock()
+
+
+def _stream_batch_chars() -> int:
+    """Chars to batch after the first token; lower = snappier UI, higher = fewer SSE events."""
+    return max(1, env_int("SEISO_STREAM_BATCH_CHARS", 8))
 
 
 class _StreamError:
@@ -101,6 +108,8 @@ class LocalInferenceRunner:
             buffer: list[str] = []
             buffered = 0
             output_tokens = 0
+            flushed_once = False
+            batch_chars = _stream_batch_chars()
             try:
                 for part in self._iter_tokens(payload, resolved_path, route, should_stop):
                     if should_stop():
@@ -108,7 +117,15 @@ class LocalInferenceRunner:
                     output_tokens += part.new_tokens
                     buffer.append(part.text)
                     buffered += len(part.text)
-                    if buffered >= _STREAM_BATCH_CHARS:
+                    if not flushed_once:
+                        loop.call_soon_threadsafe(
+                            queue.put_nowait,
+                            StreamUpdate(text="".join(buffer), output_tokens=output_tokens),
+                        )
+                        buffer.clear()
+                        buffered = 0
+                        flushed_once = True
+                    elif buffered >= batch_chars:
                         loop.call_soon_threadsafe(
                             queue.put_nowait,
                             StreamUpdate(text="".join(buffer), output_tokens=output_tokens),
@@ -145,6 +162,7 @@ class LocalInferenceRunner:
 
     async def unload(self) -> dict:
         loop = asyncio.get_running_loop()
+
         await loop.run_in_executor(None, self._pool.cancel_and_unload)
         return self._pool.status()
 
@@ -236,18 +254,8 @@ class LocalInferenceRunner:
 
         if is_dflash_draft(draft_path):
             # dFlash speculative: fast GGUF dflash draft (llama.cpp) + target verifier (torch)
-            from llama_cpp import Llama as LlamaCPP
-
-            # Load target using pool (will be the active model)
             target_model, target_tok = self._pool.get_torch(model_path, load_in_4bit=True)
-            # Load dflash draft directly (small, use llama.cpp for speed)
-            draft_resolved = prepare_model_path(draft_path, BACKEND_LLAMACPP)
-            draft_llm = LlamaCPP(
-                model_path=draft_resolved,
-                n_ctx=4096,
-                n_gpu_layers=-1,  # tiny draft can use lots of layers
-                verbose=False,
-            )
+            draft_llm = get_dflash_draft(draft_path)
 
             bundle = DFlashDraftSpeculativeBundle(
                 target_model=target_model,
@@ -262,23 +270,14 @@ class LocalInferenceRunner:
             max_new_tokens = int(payload.get("max_tokens", 512))
             num_speculative_tokens = default_num_speculative_tokens(payload)
 
-            try:
-                yield from iter_speculative_tokens_dflash(
-                    bundle=bundle,
-                    prompt=prompt,
-                    max_new_tokens=max_new_tokens,
-                    num_speculative_tokens=num_speculative_tokens,
-                    temperature=temperature,
-                    should_stop=should_stop,
-                )
-            finally:
-                # cleanup draft llm
-                try:
-                    if hasattr(draft_llm, "close"):
-                        draft_llm.close()
-                except Exception:
-                    pass
-                del draft_llm
+            yield from iter_speculative_tokens_dflash(
+                bundle=bundle,
+                prompt=prompt,
+                max_new_tokens=max_new_tokens,
+                num_speculative_tokens=num_speculative_tokens,
+                temperature=temperature,
+                should_stop=should_stop,
+            )
             return
 
         # Original torch + torch speculative
@@ -456,6 +455,15 @@ class LocalInferenceRunner:
                 yield StreamToken(content)
 
 
+def get_inference_runner() -> LocalInferenceRunner:
+    """Process-wide runner — reuses the warmed model pool across requests."""
+    global _runner
+    if _runner is None:
+        with _runner_lock:
+            if _runner is None:
+                _runner = LocalInferenceRunner()
+    return _runner
+
+
 async def run_chat(payload: dict[str, Any]) -> str:
-    runner = LocalInferenceRunner()
-    return await runner.chat(payload)
+    return await get_inference_runner().chat(payload)

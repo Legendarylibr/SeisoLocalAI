@@ -48,10 +48,11 @@ async def test_openai_chat_with_inventory_model(app, auth_client, monkeypatch):
         format="gguf",
     )
 
-    monkeypatch.setattr(
-        "forge.orchestrators.inference.LocalInferenceRunner.chat",
-        AsyncMock(return_value="Hello from Seiso"),
-    )
+    from forge.api.deps import get_inference_orchestrator
+
+    mock_runner = AsyncMock()
+    mock_runner.chat = AsyncMock(return_value="Hello from Seiso")
+    get_inference_orchestrator()._runner = mock_runner
 
     res = await client.post(
         "/v1/chat/completions",
@@ -175,10 +176,11 @@ async def test_inference_chat_e2e(app, auth_client, monkeypatch):
         user_id=user["id"], name="Local", path=str(model_path), format="gguf"
     )
 
-    monkeypatch.setattr(
-        "forge.orchestrators.inference.LocalInferenceRunner.chat",
-        AsyncMock(return_value="streamed reply"),
-    )
+    from forge.api.deps import get_inference_orchestrator
+
+    mock_runner = AsyncMock()
+    mock_runner.chat = AsyncMock(return_value="streamed reply")
+    get_inference_orchestrator()._runner = mock_runner
 
     res = await client.post(
         "/api/inference/chat",

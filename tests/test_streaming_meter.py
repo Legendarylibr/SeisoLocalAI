@@ -38,5 +38,5 @@ async def test_runner_stream_updates_counts_decode_steps(monkeypatch):
         )
     ]
 
-    assert [part.text for part in updates] == ["abc"]
+    assert [part.text for part in updates] == ["a", "bc"]
     assert updates[-1].output_tokens == 3

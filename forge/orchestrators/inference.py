@@ -12,7 +12,7 @@ from forge.providers.router import chat_completion
 from forge.security.audit import audit_event
 from forge.tools.registry import build_default_registry
 from seiso.inference.backends import BACKEND_ROUTER
-from seiso.inference.runner import LocalInferenceRunner
+from seiso.inference.runner import get_inference_runner
 
 
 class InferenceOrchestrator(Orchestrator):
@@ -20,7 +20,7 @@ class InferenceOrchestrator(Orchestrator):
 
     def __init__(self, sandbox_root: Path) -> None:
         super().__init__(sandbox_root)
-        self._runner = LocalInferenceRunner()
+        self._runner = get_inference_runner()
         self._active_generation_user_id: str | None = None
 
     def _generation_owned_by_other(self, user_id: str | None) -> bool:

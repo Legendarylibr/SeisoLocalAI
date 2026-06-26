@@ -36,14 +36,17 @@ async def test_chat_stream_sends_token_message_done(app, auth_client, monkeypatc
 
     from seiso.inference.streaming import StreamUpdate
 
-    async def fake_stream_updates(_self, _payload):
+    async def fake_stream_updates(_payload):
         yield StreamUpdate(text="hello ", output_tokens=1)
         yield StreamUpdate(text="world", output_tokens=2)
 
-    monkeypatch.setattr(
-        "forge.orchestrators.inference.LocalInferenceRunner.stream_updates",
-        fake_stream_updates,
-    )
+    from unittest.mock import MagicMock
+
+    from forge.api.deps import get_inference_orchestrator
+
+    mock_runner = MagicMock()
+    mock_runner.stream_updates = fake_stream_updates
+    get_inference_orchestrator()._runner = mock_runner
 
     async with client.stream(
         "POST",
