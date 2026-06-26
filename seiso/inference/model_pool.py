@@ -101,15 +101,29 @@ def _default_llama_ubatch(n_batch: int) -> int:
     return min(n_batch, 256 if _default_llama_gpu_layers() != 0 else 512)
 
 
-def _headroom_llama_batch_caps(headroom: int) -> tuple[int, int]:
-    """Return (n_batch, n_ubatch) ceilings from free VRAM/RAM."""
+def _llama_speed_scale_enabled() -> bool:
+    return env_bool("SEISO_LLAMA_SPEED_SCALE", True)
+
+
+def _headroom_llama_batch_caps(headroom: int, *, speed_first: bool = False) -> tuple[int, int]:
+    """Return (n_batch, n_ubatch) ceilings from post-weight VRAM headroom."""
     if headroom < 4096:
-        return 512, 256
-    if headroom < 8192:
-        return 1024, 512
-    if headroom < 16384:
-        return 1792, 512
-    return 2048, 512
+        batch, ubatch = 512, 256
+    elif headroom < 8192:
+        batch, ubatch = 1024, 512
+    elif headroom < 16384:
+        batch, ubatch = 1792, 512
+    else:
+        batch, ubatch = 2048, 512
+
+    if speed_first and _llama_speed_scale_enabled():
+        if headroom >= 6144:
+            ubatch = min(batch, 768)
+        if headroom >= 10240:
+            ubatch = min(batch, 1024)
+        if headroom >= 12288 and batch < 2048:
+            batch = min(2048, batch + 256)
+    return batch, ubatch
 
 
 def _speed_llama_batch_defaults(headroom: int) -> tuple[int, int] | None:
@@ -172,11 +186,46 @@ def _llama_borderline_vram(model_path: str, free_mb: int | None = None) -> bool:
     return weight_mb > int(free * 0.68)
 
 
+def _llama_speed_memory_profiles(
+    base_kwargs: dict[str, Any], model_path: str, free_mb: int
+) -> list[dict[str, Any]]:
+    """Higher batch/ubatch when spare VRAM exists beyond model weights."""
+    if not _llama_speed_scale_enabled():
+        return []
+    if int(base_kwargs.get("n_gpu_layers") or 0) == 0:
+        return []
+    if _llama_borderline_vram(model_path, free_mb):
+        return []
+
+    from seiso.inference.backends import gguf_block_count
+    from seiso.memory.protection import _MIN_LLAMA_BATCH, _MIN_LLAMA_CTX, llama_batch_headroom_mb
+
+    requested = int(base_kwargs.get("n_gpu_layers") or -1)
+    layer_hint = requested if requested > 0 else (gguf_block_count(model_path) or 64)
+    batch_headroom = llama_batch_headroom_mb(
+        free_mb, model_path=model_path, n_gpu_layers=layer_hint
+    )
+    n_ctx = int(base_kwargs.get("n_ctx") or _MIN_LLAMA_CTX)
+    ctx_scale = max(1, n_ctx // 4096)
+
+    base_batch = int(base_kwargs.get("n_batch") or 512)
+    base_ubatch = int(base_kwargs.get("n_ubatch") or 256)
+    speed_batch, speed_ubatch = _headroom_llama_batch_caps(batch_headroom, speed_first=True)
+    speed_batch = max(_MIN_LLAMA_BATCH, speed_batch // ctx_scale)
+    speed_ubatch = min(speed_ubatch, speed_batch)
+
+    if speed_batch <= base_batch and speed_ubatch <= base_ubatch:
+        return []
+    return [{"n_batch": speed_batch, "n_ubatch": speed_ubatch}]
+
+
 def _llama_load_memory_profiles(
     base_kwargs: dict[str, Any], n_ctx: int, model_path: str, free_mb: int
 ) -> list[dict[str, Any]]:
-    """Progressively leaner VRAM profiles — full offload is retried before partial layers."""
-    profiles: list[dict[str, Any]] = [{}]
+    """Throughput-first, then base, then leaner VRAM profiles before partial layers."""
+    profiles: list[dict[str, Any]] = []
+    profiles.extend(_llama_speed_memory_profiles(base_kwargs, model_path, free_mb))
+    profiles.append({})
     borderline = _llama_borderline_vram(model_path, free_mb)
     base_batch = int(base_kwargs.get("n_batch") or 512)
     base_ubatch = int(base_kwargs.get("n_ubatch") or 256)
@@ -376,10 +425,16 @@ def llama_load_kwargs(n_ctx: int, *, model_path: str | None = None) -> dict[str,
     batch_headroom = llama_batch_headroom_mb(
         free_mb, model_path=model_path, n_gpu_layers=layer_hint
     )
-    batch_cap, ubatch_cap = _headroom_llama_batch_caps(batch_headroom)
+    borderline = bool(model_path and _llama_borderline_vram(model_path, free_mb))
+    speed_first = _llama_speed_scale_enabled() and n_gpu_layers != 0 and not borderline
+    batch_cap, ubatch_cap = _headroom_llama_batch_caps(batch_headroom, speed_first=False)
     speed_defaults = _speed_llama_batch_defaults(batch_headroom)
     if speed_defaults is not None:
         batch_cap, ubatch_cap = speed_defaults
+    if speed_first:
+        speed_batch, speed_ubatch = _headroom_llama_batch_caps(batch_headroom, speed_first=True)
+        batch_cap = max(batch_cap, speed_batch)
+        ubatch_cap = max(ubatch_cap, speed_ubatch)
     n_batch = env_int("SEISO_LLAMA_BATCH", batch_cap)
     n_ubatch = env_int("SEISO_LLAMA_UBATCH", min(n_batch, ubatch_cap))
     n_batch = min(n_batch, batch_cap)
