@@ -138,12 +138,13 @@ def fit_llama_gpu_layers(model_path: str, requested: int, headroom_mb: int) -> i
     from seiso.inference.backends import gguf_block_count
     from seiso.memory.protection import estimate_path_vram_mb
 
-    weight_mb = max(int(estimate_path_vram_mb(model_path) - 384), 256)
+    weight_mb = max(int(estimate_path_vram_mb(model_path)), 256)
     total_layers = gguf_block_count(model_path) or 64
-    kv_reserve_mb = max(384, min(int(headroom_mb * 0.10), 1536))
+    # Compact ctx/batch + KV quant can free ~1–2 GB on large models.
+    kv_reserve_mb = max(256, min(int(headroom_mb * 0.08), 1024))
     avail_mb = headroom_mb - kv_reserve_mb
 
-    if avail_mb >= int(weight_mb * 0.84):
+    if avail_mb >= int(weight_mb * 0.92):
         if requested == -1:
             return -1
         return max(0, min(requested, total_layers))
@@ -162,22 +163,87 @@ def fit_llama_gpu_layers(model_path: str, requested: int, headroom_mb: int) -> i
     return partial
 
 
+def _llama_borderline_vram(model_path: str, free_mb: int | None = None) -> bool:
+    """True when weights are close to free VRAM and lean load settings may help."""
+    from seiso.memory.protection import estimate_path_vram_mb, headroom_mb
+
+    weight_mb = int(estimate_path_vram_mb(model_path))
+    free = int(free_mb if free_mb is not None else headroom_mb())
+    return weight_mb > int(free * 0.68)
+
+
+def _llama_load_memory_profiles(
+    base_kwargs: dict[str, Any], n_ctx: int, model_path: str, free_mb: int
+) -> list[dict[str, Any]]:
+    """Progressively leaner VRAM profiles — full offload is retried before partial layers."""
+    profiles: list[dict[str, Any]] = [{}]
+    borderline = _llama_borderline_vram(model_path, free_mb)
+    base_batch = int(base_kwargs.get("n_batch") or 512)
+    base_ubatch = int(base_kwargs.get("n_ubatch") or 256)
+
+    if borderline or n_ctx > 2048:
+        profiles.append(
+            {
+                "n_ctx": min(n_ctx, 2048),
+                "n_batch": min(base_batch, 512),
+                "n_ubatch": min(base_ubatch, 256),
+            }
+        )
+    if borderline:
+        profiles.append(
+            {
+                "n_ctx": min(n_ctx, 2048),
+                "n_batch": 256,
+                "n_ubatch": 128,
+            }
+        )
+
+    unique: list[dict[str, Any]] = []
+    seen: set[tuple[tuple[str, Any], ...]] = set()
+    for profile in profiles:
+        key = tuple(sorted(profile.items()))
+        if key not in seen:
+            seen.add(key)
+            unique.append(profile)
+    return unique
+
+
 def _llama_layer_attempts(model_path: str, requested: int, free_mb: int) -> list[int]:
-    """Try full GPU first, then fall back to smaller partial layer counts."""
+    """Layer counts for partial offload — full GPU is handled separately."""
     if requested == 0 or not _llama_gpu_offload_ok():
         return [0]
 
-    attempts: list[int] = []
-    if requested == -1:
-        attempts.append(-1)
-    elif requested > 0:
-        attempts.append(requested)
+    from seiso.inference.backends import gguf_block_count
 
+    total_layers = gguf_block_count(model_path) or 64
     fitted = fit_llama_gpu_layers(model_path, requested, free_mb)
-    for layers in (fitted, max(fitted // 2, 8) if fitted > 8 else None, 0):
-        if layers is not None and layers not in attempts:
+    if fitted in (-1, 0):
+        return [0]
+
+    attempts: list[int] = []
+    high = min(total_layers - 1, fitted + 6)
+    step = 4 if high - fitted > 12 else 2
+    for layers in range(high, fitted - 1, -step):
+        if layers > 0 and layers not in attempts:
             attempts.append(layers)
+    if fitted not in attempts:
+        attempts.append(fitted)
+    if fitted > 8 and (fitted // 2) not in attempts:
+        attempts.append(fitted // 2)
+    if 0 not in attempts:
+        attempts.append(0)
     return attempts
+
+
+def _llama_full_gpu_targets(requested: int) -> list[int]:
+    """Layer counts that mean 'all layers on GPU'."""
+    if requested == 0 or not _llama_gpu_offload_ok():
+        return []
+    if requested == -1:
+        return [-1]
+    if requested > 0:
+        return [requested]
+    return []
 
 
 def _llama_speed_extras(model_path: str) -> dict[str, Any]:
@@ -185,36 +251,57 @@ def _llama_speed_extras(model_path: str) -> dict[str, Any]:
     extras: dict[str, Any] = {}
     try:
         from seiso.inference.backends import gguf_uses_sliding_window_attention
-        from seiso.memory.protection import estimate_path_vram_mb
 
-        weight_mb = int(estimate_path_vram_mb(model_path))
+        if gguf_uses_sliding_window_attention(model_path) and not env_bool(
+            "SEISO_LLAMA_SWA_FULL", False
+        ):
+            extras["swa_full"] = False
     except Exception:
-        return extras
-
-    if gguf_uses_sliding_window_attention(model_path) and not env_bool(
-        "SEISO_LLAMA_SWA_FULL", False
-    ):
-        extras["swa_full"] = False
-
-    if env_bool("SEISO_LLAMA_KV_QUANT", True) and weight_mb >= 14000:
-        # Q8 KV cache can fail llama_context init when VRAM is tight or the model
-        # runs CPU-only — only enable when headroom can cover weights + KV buffers.
-        try:
-            from seiso.memory.protection import headroom_mb
-
-            if headroom_mb() >= int(weight_mb * 0.48):
-                from llama_cpp import llama_cpp as lc
-
-                extras["type_k"] = lc.GGML_TYPE_Q8_0
-                extras["type_v"] = lc.GGML_TYPE_Q8_0
-        except ImportError:
-            pass
+        pass
     return extras
 
 
-def _llama_kv_quant_kwargs(extras: dict[str, Any]) -> dict[str, Any]:
-    """Return type_k/type_v entries when present (for stripping on retry)."""
-    return {k: extras[k] for k in ("type_k", "type_v") if k in extras}
+def _llama_kv_quant_options(model_path: str) -> list[dict[str, Any]]:
+    """KV-cache quant tiers to try (leanest first) when VRAM is tight."""
+    if not env_bool("SEISO_LLAMA_KV_QUANT", True):
+        return [{}]
+    try:
+        from llama_cpp import llama_cpp as lc
+
+        from seiso.memory.protection import estimate_path_vram_mb, headroom_mb
+
+        weight_mb = int(estimate_path_vram_mb(model_path))
+        free_mb = headroom_mb()
+    except (ImportError, Exception):
+        return [{}]
+
+    options: list[dict[str, Any]] = [{}]
+    if weight_mb < 6000:
+        return options
+
+    if _llama_borderline_vram(model_path, free_mb) or weight_mb >= 12000:
+        options.append(
+            {
+                "type_k": lc.GGML_TYPE_Q4_K,
+                "type_v": lc.GGML_TYPE_Q4_K,
+            }
+        )
+    if weight_mb >= 10000 and free_mb >= int(weight_mb * 0.42):
+        options.append(
+            {
+                "type_k": lc.GGML_TYPE_Q8_0,
+                "type_v": lc.GGML_TYPE_Q8_0,
+            }
+        )
+
+    unique: list[dict[str, Any]] = []
+    seen: set[tuple[tuple[str, Any], ...]] = set()
+    for option in options:
+        key = tuple(sorted(option.items()))
+        if key not in seen:
+            seen.add(key)
+            unique.append(option)
+    return unique
 
 
 _optimal_layers_cache: dict[tuple[str, int], tuple[int, float]] = {}
@@ -327,69 +414,111 @@ def _llama_load_retryable(exc: ValueError) -> bool:
 
 def _load_llama_model(path: str, n_ctx: int) -> Any:
     """Load a GGUF with VRAM-aware layer offload and clear OOM errors."""
+    try:
+        from seiso.platform import ensure_cuda_library_path
+
+        ensure_cuda_library_path()
+    except ImportError:
+        pass
     from llama_cpp import Llama
 
     from seiso.inference.tuning import attach_llama_prompt_cache
     from seiso.memory.protection import estimate_path_vram_mb, headroom_mb, release_cached_memory
 
-    release_cached_memory(sync=False)
+    release_cached_memory(sync=True)
     _clear_optimal_layers_cache()
     _refresh_headroom_stats(force=True)
 
+    est_mb = int(estimate_path_vram_mb(path))
+    if est_mb >= 6000:
+        try:
+            from seiso.hardware.vram_processes import warn_before_large_model_load
+
+            warn_before_large_model_load(model_path=path, est_mb=est_mb)
+        except ImportError:
+            pass
+
     kwargs = llama_load_kwargs(n_ctx, model_path=path)
     speed_extras = _llama_speed_extras(path)
-    kv_quant = _llama_kv_quant_kwargs(speed_extras)
     requested = env_int("SEISO_LLAMA_GPU_LAYERS", _default_llama_gpu_layers())
     if requested != 0 and not _llama_gpu_offload_ok():
         requested = 0
-    attempts = _llama_layer_attempts(path, requested, headroom_mb())
+
+    free_mb = headroom_mb()
+    memory_profiles = _llama_load_memory_profiles(kwargs, n_ctx, path, free_mb)
+    kv_options = _llama_kv_quant_options(path)
+    full_targets = _llama_full_gpu_targets(requested)
+    partial_targets = (
+        _llama_layer_attempts(path, requested, free_mb) if requested != 0 else [0]
+    )
 
     last_exc: Exception | None = None
-    seen: set[tuple[int, bool]] = set()
-    for attempt in attempts:
-        for use_kv_quant in (True, False) if kv_quant else (False,):
-            key = (attempt, use_kv_quant)
-            if key in seen:
-                continue
-            seen.add(key)
-            load_kwargs = dict(kwargs)
-            load_kwargs.update(speed_extras)
-            if not use_kv_quant:
-                load_kwargs.pop("type_k", None)
-                load_kwargs.pop("type_v", None)
-            load_kwargs["n_gpu_layers"] = attempt
-            load_kwargs["offload_kqv"] = attempt != 0
-            load_kwargs.pop("_model_path", None)
-            try:
-                llm = Llama(model_path=path, **load_kwargs)
-                llm._seiso_n_gpu_layers = attempt  # noqa: SLF001
-                if attempt > 0:
-                    from seiso.inference.backends import gguf_block_count
+    seen: set[tuple[int, tuple[tuple[str, Any], ...], tuple[tuple[str, Any], ...]]] = set()
 
-                    total_layers = gguf_block_count(path) or 64
-                    if attempt < total_layers:
-                        logger.warning(
-                            "Partial GPU offload for %s: %d/%d layers (~%.1f GB free) — "
-                            "close other GPU apps for ~3× faster generation",
-                            Path(path).name,
-                            attempt,
-                            total_layers,
-                            headroom_mb() / 1024,
-                        )
-                attach_llama_prompt_cache(llm)
-                return llm
-            except ValueError as exc:
-                if not _llama_load_retryable(exc):
-                    raise
-                last_exc = exc
-                release_cached_memory(sync=True)
-                if use_kv_quant and kv_quant:
-                    logger.debug(
-                        "llama.cpp load failed at n_gpu_layers=%s with KV quant — retrying without",
-                        attempt,
+    def _try_load(
+        layers: int,
+        profile: dict[str, Any],
+        kv_quant: dict[str, Any],
+        *,
+        log_retry: bool,
+    ) -> Any | None:
+        nonlocal last_exc
+        key = (layers, tuple(sorted(profile.items())), tuple(sorted(kv_quant.items())))
+        if key in seen:
+            return None
+        seen.add(key)
+
+        load_kwargs = dict(kwargs)
+        load_kwargs.update(speed_extras)
+        load_kwargs.update(profile)
+        load_kwargs.update(kv_quant)
+        load_kwargs["n_gpu_layers"] = layers
+        load_kwargs["offload_kqv"] = layers != 0
+        load_kwargs.pop("_model_path", None)
+        try:
+            llm = Llama(model_path=path, **load_kwargs)
+            llm._seiso_n_gpu_layers = layers  # noqa: SLF001
+            if layers > 0:
+                from seiso.inference.backends import gguf_block_count
+
+                total_layers = gguf_block_count(path) or 64
+                if layers < total_layers:
+                    logger.warning(
+                        "Partial GPU offload for %s: %d/%d layers (~%.1f GB free) — "
+                        "close other GPU apps for full GPU offload and ~3× faster generation",
+                        Path(path).name,
+                        layers,
+                        total_layers,
+                        headroom_mb() / 1024,
                     )
-                    continue
-                logger.warning("llama.cpp load failed at n_gpu_layers=%s — retrying", attempt)
+            attach_llama_prompt_cache(llm)
+            return llm
+        except ValueError as exc:
+            if not _llama_load_retryable(exc):
+                raise
+            last_exc = exc
+            release_cached_memory(sync=True)
+            if log_retry:
+                logger.warning("llama.cpp load failed at n_gpu_layers=%s — retrying", layers)
+            return None
+
+    for layers in full_targets:
+        for profile_idx, profile in enumerate(memory_profiles):
+            for kv_idx, kv_quant in enumerate(kv_options):
+                log_retry = profile_idx == len(memory_profiles) - 1 and kv_idx == len(kv_options) - 1
+                llm = _try_load(layers, profile, kv_quant, log_retry=log_retry)
+                if llm is not None:
+                    return llm
+
+    lean_profile = memory_profiles[-1] if memory_profiles else {}
+    for layer_idx, layers in enumerate(partial_targets):
+        if layers in full_targets:
+            continue
+        # KV-quantized caches can crash llama.cpp on partial offload (Qwen/MoE).
+        log_retry = layer_idx == 0 or layer_idx == len(partial_targets) - 1
+        llm = _try_load(layers, lean_profile, {}, log_retry=log_retry)
+        if llm is not None:
+            return llm
 
     free_gb = round(headroom_mb() / 1024, 1)
     need_gb = round(estimate_path_vram_mb(path) / 1024, 1)
@@ -537,14 +666,19 @@ class ModelPool:
                         return self._active.handle
 
             self.prepare_for_load(load_path, backend)
-            from seiso.memory.protection import ensure_load_fits, estimate_path_vram_mb, headroom_mb
+            from seiso.memory.protection import (
+                ensure_load_fits,
+                estimate_path_vram_mb,
+                headroom_mb,
+                release_cached_memory,
+            )
 
-            if int(estimate_path_vram_mb(load_path)) >= 12000 and headroom_mb() < int(
-                estimate_path_vram_mb(load_path) * 0.95
-            ):
+            est_mb = int(estimate_path_vram_mb(load_path))
+            if est_mb >= 8000 and headroom_mb() < int(est_mb * 0.98):
                 if self._active:
                     self.cancel_and_unload()
                 self._free_memory()
+                release_cached_memory(sync=True)
                 _clear_optimal_layers_cache()
                 _refresh_headroom_stats(force=True)
 

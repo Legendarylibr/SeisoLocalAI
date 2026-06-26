@@ -124,3 +124,5 @@ def test_build_vram_status_shape(monkeypatch, tmp_path):
     assert status["apple_unified"] is True
     assert status["recommended_max_chat"] == "microsoft/Phi-4-mini-instruct"
     assert status["active_model"] == "model-a"
+    assert "vram_contention" in status
+    assert status["vram_contention"]["external_vram_mb"] == 0

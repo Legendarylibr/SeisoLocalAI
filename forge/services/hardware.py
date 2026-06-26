@@ -283,6 +283,12 @@ def build_vram_status(orchestrator: Any) -> dict[str, Any]:
     tier = classify_tier(profile)
     headroom = vram_headroom_mb(profile)
     local = orchestrator._runner._pool.status()
+    try:
+        from seiso.hardware.vram_processes import vram_contention_summary
+
+        vram_contention = vram_contention_summary()
+    except ImportError:
+        vram_contention = {"external_vram_mb": 0, "contended": False, "processes": []}
     return {
         "local": local,
         "headroom_mb": headroom,
@@ -293,6 +299,7 @@ def build_vram_status(orchestrator: Any) -> dict[str, Any]:
         "memory_profile": memory_profile_label(profile),
         "recommended_max_chat": recommended_catalog_repo(profile, task="chat"),
         "active_model": local.get("active_model"),
+        "vram_contention": vram_contention,
     }
 
 

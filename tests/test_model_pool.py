@@ -287,18 +287,47 @@ def test_llama_load_retryable_detects_context_and_file_errors():
     assert not mp._llama_load_retryable(ValueError("invalid n_ctx"))
 
 
-def test_llama_layer_attempts_try_full_gpu_first(monkeypatch, tmp_path):
+def test_llama_layer_attempts_partial_descending(monkeypatch, tmp_path):
     import seiso.inference.model_pool as mp
 
     gguf = tmp_path / "big.gguf"
     gguf.write_bytes(b"\x00" * 1024)
     monkeypatch.setattr(mp, "_llama_gpu_offload_ok", lambda: True)
     monkeypatch.setattr(mp, "fit_llama_gpu_layers", lambda _p, _r, _h: 24)
+    monkeypatch.setattr("seiso.inference.backends.gguf_block_count", lambda _p: 32)
 
     attempts = mp._llama_layer_attempts(str(gguf), -1, 4096)
-    assert attempts[0] == -1
+    assert -1 not in attempts
     assert 24 in attempts
     assert attempts[-1] == 0
+    assert attempts[0] >= 24
+
+
+def test_llama_full_gpu_targets(monkeypatch):
+    import seiso.inference.model_pool as mp
+
+    monkeypatch.setattr(mp, "_llama_gpu_offload_ok", lambda: True)
+    assert mp._llama_full_gpu_targets(-1) == [-1]
+    assert mp._llama_full_gpu_targets(12) == [12]
+    assert mp._llama_full_gpu_targets(0) == []
+
+
+def test_llama_load_memory_profiles_adds_compact_for_borderline(monkeypatch, tmp_path):
+    import seiso.inference.model_pool as mp
+
+    gguf = tmp_path / "big.gguf"
+    gguf.write_bytes(b"\x00" * 1024)
+    monkeypatch.setattr(mp, "_llama_borderline_vram", lambda _p, _f: True)
+
+    profiles = mp._llama_load_memory_profiles(
+        {"n_batch": 2048, "n_ubatch": 512},
+        8192,
+        str(gguf),
+        12000,
+    )
+    assert profiles[0] == {}
+    assert profiles[1]["n_ctx"] == 2048
+    assert profiles[-1]["n_batch"] == 256
 
 
 def test_llama_load_kwargs_forces_zero_gpu_layers_on_cpu_only_wheel(monkeypatch):
