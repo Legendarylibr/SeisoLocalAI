@@ -1,10 +1,23 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, CatalogModel, TrainableModel } from "@/lib/api";
 import { formatBytes } from "@/lib/modelProgress";
-import { GGUF_TRAIN_ERROR, isGgufOnlyRepoId } from "@/lib/trainRepo";
 import { HubComboboxSearch } from "@/components/HubComboboxSearch";
 import { IconChevronDown } from "@/components/Icons";
 import { useHubCombobox } from "@/hooks/useHubCombobox";
+
+/** Client-side mirror of seiso.models.trainable_snapshot.is_gguf_only_repo_id. */
+const GGUF_REPO_RE = /(?:^|\/)[^/]*-gguf(?:$|\/|-)/i;
+
+const GGUF_ONLY_REPO_MESSAGE =
+  "This repo is GGUF-only (chat/inference weights). LoRA/QLoRA training needs a safetensors or PyTorch checkpoint.";
+
+function isGgufOnlyRepoId(repoId: string, tags: string[] | readonly string[] = []): boolean {
+  const lowered = repoId.trim().toLowerCase();
+  if (!lowered) return false;
+  if (GGUF_REPO_RE.test(lowered) || lowered.endsWith("-gguf")) return true;
+  const tagSet = new Set(tags.map((t) => t.toLowerCase()));
+  return tagSet.has("gguf") && !tagSet.has("safetensors") && !tagSet.has("pytorch");
+}
 
 type HfBaseModelPickerProps = {
   value: string;
@@ -224,7 +237,7 @@ export function HfBaseModelPicker({
 
             {customIsGguf && (
               <div className="chat-model-picker-hint chat-model-picker-hint-warn">
-                {GGUF_TRAIN_ERROR}
+                {GGUF_ONLY_REPO_MESSAGE}
               </div>
             )}
 

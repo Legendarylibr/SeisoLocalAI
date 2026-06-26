@@ -45,11 +45,9 @@ def enrich_profile(profile: dict[str, Any]) -> dict[str, Any]:
     """Add tier, training defaults, catalog recommendations, and backend labels."""
     enriched = enrich_profile_base(profile)
     recommended_chat = recommended_catalog_repo(enriched, task="chat")
-    recommended_train = recommended_trainable_repo(enriched)
     return {
         **enriched,
         "recommended_chat_repo": recommended_chat,
-        "recommended_train_repo": recommended_train or recommended_chat,
         "inference_backend_labels": dict(BACKEND_LABELS),
     }
 
@@ -67,8 +65,8 @@ def enrich_catalog_models(
     fetch_sizes: bool = True,
     diversify: bool = False,
 ) -> list[dict[str, Any]]:
-    from forge.services.hf_hub import resolve_gguf_artifact
-    from seiso.models.catalog import diversify_by_family, get_by_repo
+    from forge.services.hf_hub import estimate_snapshot_download_bytes, resolve_gguf_artifact
+    from seiso.models.catalog import diversify_by_family, get_by_repo, is_gguf_hub_repo
 
     download_info: dict[str, dict[str, Any]] = {}
     download_errors: dict[str, str] = {}
@@ -77,16 +75,24 @@ def enrich_catalog_models(
         workers = min(3 if token else 2, len(candidates))
 
         def fetch_info(repo_id: str) -> tuple[str, dict[str, Any] | None, str | None]:
+            entry = get_by_repo(repo_id)
+            tags = list(getattr(entry, "tags", ()) or ())
             try:
-                return (
-                    repo_id,
-                    resolve_gguf_artifact(
+                if is_gguf_hub_repo(repo_id, tags):
+                    return (
                         repo_id,
-                        entry=get_by_repo(repo_id),
-                        token=token,
-                    ),
-                    None,
+                        resolve_gguf_artifact(
+                            repo_id,
+                            entry=entry,
+                            token=token,
+                        ),
+                        None,
+                    )
+                size_bytes = estimate_snapshot_download_bytes(
+                    repo_id,
+                    token=token,
                 )
+                return repo_id, {"size_bytes": size_bytes}, None
             except Exception as exc:
                 return repo_id, None, str(exc)
 
@@ -116,9 +122,11 @@ def enrich_catalog_models(
             row.update(actual_fit)
             row["download_bytes"] = download_bytes
             row["download_bytes_estimated"] = False
-            row["gguf_repo"] = info["gguf_repo"]
-            row["gguf_file"] = info["filename"]
-            row["download_mirror_verified"] = True
+            if info.get("gguf_repo"):
+                row["gguf_repo"] = info["gguf_repo"]
+            if info.get("filename"):
+                row["gguf_file"] = info["filename"]
+            row["download_mirror_verified"] = bool(info.get("gguf_repo"))
             row["download_available"] = True
         elif m["repo_id"] in download_errors:
             download_bytes = estimate_gguf_download_bytes(
@@ -251,39 +259,6 @@ def recommended_catalog_repo(profile: dict[str, Any], *, task: str = "chat") -> 
         return None
 
     models = enrich_catalog_models(models, profile, fetch_sizes=False, diversify=True)
-    result: str | None = None
-    for m in models:
-        if m.get("hardware_fit") in ("ideal", "good") and m.get("task") != "embedding":
-            result = m["repo_id"]
-            break
-    if result is None:
-        for m in models:
-            if m.get("task") != "embedding":
-                result = m["repo_id"]
-                break
-
-    _recommended_repo_cache[cache_key] = (now, result)
-    return result
-
-
-def recommended_trainable_repo(profile: dict[str, Any]) -> str | None:
-    from seiso.models.catalog import HubSearchError, search_trainable_catalog
-
-    tier = classify_tier(profile)
-    budget = effective_budget_mb(profile)
-    cache_key = (tier.value, budget, "train")
-    now = time.monotonic()
-    cached = _recommended_repo_cache.get(cache_key)
-    if cached and now - cached[0] < _RECOMMENDED_REPO_TTL_SEC:
-        return cached[1]
-
-    try:
-        models = search_trainable_catalog(task="chat").models
-    except HubSearchError:
-        _recommended_repo_cache[cache_key] = (now, None)
-        return None
-
-    models = enrich_trainable_catalog_models(models, profile, fetch_sizes=False, diversify=True)
     result: str | None = None
     for m in models:
         if m.get("hardware_fit") in ("ideal", "good") and m.get("task") != "embedding":

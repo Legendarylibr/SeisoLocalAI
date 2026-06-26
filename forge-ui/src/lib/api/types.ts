@@ -226,7 +226,6 @@ export type HardwareProfile = {
   inference_backend_labels?: Record<string, string>;
   training_defaults?: TrainingDefaults;
   recommended_chat_repo?: string | null;
-  recommended_train_repo?: string | null;
 };
 
 export type SystemMetrics = {

@@ -23,8 +23,6 @@ from seiso.models.trusted_gguf import (
     base_model_from_tags,
     filter_trusted_gguf_search_results,
     gguf_mirror_candidates,
-    is_supported_gguf_repo_candidate,
-
 )
 from seiso.security import sanitize_filename
 from seiso.ttl_cache import TtlCache
@@ -292,9 +290,8 @@ def search_huggingface_gguf_repos(
                 "likes": row.get("likes") if isinstance(row.get("likes"), int) else None,
             }
         )
-    if trusted_only:
-        results = filter_trusted_gguf_search_results(results, base_repo_id=base_repo_id)
-    else:
+    results = filter_trusted_gguf_search_results(results, base_repo_id=base_repo_id)
+    if not trusted_only:
         results.sort(
             key=lambda row: (
                 -int(row.get("downloads") or 0),
@@ -439,11 +436,7 @@ def resolve_gguf_repo(
         _gguf_repo_cache.set(cache_key, repo_id)
         return repo_id
 
-    mirror_candidates = [
-        candidate
-        for candidate in gguf_mirror_candidates(repo_id)
-        if is_supported_gguf_repo_candidate(candidate)
-    ]
+    mirror_candidates = gguf_mirror_candidates(repo_id)
     mirror = _first_repo_with_gguf(
         mirror_candidates,
         token=token,
@@ -454,17 +447,14 @@ def resolve_gguf_repo(
         return mirror
 
     model_name = repo_id.split("/")[-1]
-    needle = model_name.lower().replace("_", "-")
     search_candidates = [
         row["repo_id"]
         for row in search_huggingface_gguf_repos(
             query=model_name,
             limit=12,
             base_repo_id=repo_id,
-            trusted_only=False,
+            trusted_only=True,
         )
-        if needle in row["repo_id"].lower().replace("_", "-")
-        and is_supported_gguf_repo_candidate(row["repo_id"])
     ]
     resolved = _first_repo_with_gguf(search_candidates, token=token, revision=revision)
     if resolved:

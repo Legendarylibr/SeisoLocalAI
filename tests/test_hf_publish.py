@@ -3,6 +3,7 @@
 from pathlib import Path
 
 from forge.services import hf_auth
+from forge.config import ForgeSettings
 from forge.services.hf_auth import (
     find_hf_cli,
     hf_auth_status,
@@ -11,6 +12,7 @@ from forge.services.hf_auth import (
     resolve_hf_token_for_upload,
     save_user_hf_token,
 )
+from forge.services.hub_publish import HubPublishRequest, resolve_hub_publish_token
 from forge.services.publishable import is_pushable_model
 from seiso.export.model_card import HubModelMetadata, render_readme, write_hub_artifacts
 
@@ -138,6 +140,43 @@ def test_resolve_hf_token_for_download_drops_invalid_token_when_anonymous_down(m
 def test_hf_auth_status_no_token():
     status = hf_auth_status()
     assert status.token_configured is False or status.token_sources
+
+
+def test_resolve_hub_publish_token_requires_valid_token(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "forge.services.hf_connectivity.probe_hf_hub",
+        lambda **_: type(
+            "R",
+            (),
+            {"token_valid": False, "token_invalid": True, "anonymous_ok": True},
+        )(),
+    )
+    settings = ForgeSettings(data_dir=tmp_path, hf_token="hf_bad")
+    hub = HubPublishRequest(
+        username="alice",
+        model_name="my-model",
+        author="Alice",
+        hf_token="hf_bad",
+    )
+    assert resolve_hub_publish_token(settings, "user1", hub) is None
+
+
+def test_resolve_hub_publish_token_accepts_valid_token(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "forge.services.hf_connectivity.probe_hf_hub",
+        lambda **_: type(
+            "R",
+            (),
+            {"token_valid": True, "token_invalid": False, "anonymous_ok": True},
+        )(),
+    )
+    settings = ForgeSettings(data_dir=tmp_path, hf_token="hf_good")
+    hub = HubPublishRequest(
+        username="alice",
+        model_name="my-model",
+        author="Alice",
+    )
+    assert resolve_hub_publish_token(settings, "user1", hub) == "hf_good"
 
 
 def test_find_hf_cli_checks_active_python_bin(monkeypatch, tmp_path):

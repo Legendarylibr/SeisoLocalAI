@@ -21,7 +21,7 @@ from forge.services.hf_hub import (
 from forge.services.user_paths import user_dir
 from seiso.inference.backends import gguf_is_supported_by_llamacpp
 from seiso.models.catalog import CatalogEntry, get_by_gguf_mirror, get_by_repo
-from seiso.models.trusted_gguf import is_trusted_gguf_repo
+
 from seiso.security import sanitize_filename
 
 
@@ -101,8 +101,6 @@ def _gguf_record_from_snapshot(
         return None
 
     entry = _catalog_entry_for_cached_repo(repo_id)
-    if entry is None and not is_trusted_gguf_repo(repo_id):
-        return None
 
     inventory_repo = entry.repo_id if entry else repo_id
     quant = entry.quant if entry else "Q4_K_M"

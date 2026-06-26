@@ -189,7 +189,8 @@ def _sync_download_artifacts(
     on_progress: ProgressCallback | None = None,
 ) -> dict[str, Any]:
     """Blocking Hugging Face download — safe to run in a thread pool."""
-    variant = resolve_download_variant(variant)
+    resolved_variant = resolve_download_variant(variant)
+    use_safetensors = resolved_variant == "safetensors"
     assert_hub_ready_for_download(
         user_id=user_id,
         data_dir=data_dir,
@@ -204,10 +205,9 @@ def _sync_download_artifacts(
     )
     cache_dir = hf_cache_dir
     inventory_dir = user_dir(data_dir, user_id, "models")
-    entry = get_by_repo(catalog_repo)
     source = f"hf:{catalog_repo}"
 
-    if variant == "safetensors":
+    if use_safetensors:
         _emit_progress(
             on_progress,
             {
@@ -258,6 +258,7 @@ def _sync_download_artifacts(
             "percent": 0,
         },
     )
+    entry = get_by_repo(catalog_repo, token=token)
     artifact = resolve_gguf_artifact(
         catalog_repo,
         token=token,
