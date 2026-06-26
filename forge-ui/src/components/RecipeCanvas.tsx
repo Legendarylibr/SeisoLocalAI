@@ -235,6 +235,15 @@ export function RecipeCanvas({ onChange }: Props) {
   );
 }
 
+function inferImportFormat(path: string): string {
+  const trimmed = path.trim();
+  if (!trimmed || !trimmed.includes(".")) return "auto";
+  const ext = trimmed.split(".").pop()?.toLowerCase() ?? "";
+  if (ext === "text") return "txt";
+  if (["jsonl", "json", "csv", "txt"].includes(ext)) return ext;
+  return "auto";
+}
+
 function buildConfig(
   nodeId: string,
   nodeType: string,
@@ -246,7 +255,7 @@ function buildConfig(
 
   switch (nodeType) {
     case "import":
-      return { path: config.importPath, format: "txt" };
+      return { path: config.importPath, format: inferImportFormat(config.importPath) };
     case "transform":
       return { source, template: config.transformTemplate };
     case "filter":

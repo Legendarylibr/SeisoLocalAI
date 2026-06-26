@@ -130,6 +130,13 @@ class Orchestrator(ABC):
         self._subscribers[job_id].append(queue)
         for line in self._log_buffers.get(job_id, []):
             yield line
+        job = self.get_job(job_id)
+        if job and job.status in (
+            JobStatus.COMPLETED,
+            JobStatus.FAILED,
+            JobStatus.CANCELLED,
+        ):
+            return
         while True:
             msg = await queue.get()
             if msg is None:

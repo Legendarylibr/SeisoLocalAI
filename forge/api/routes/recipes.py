@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
 from forge.api.deps import get_recipe_orchestrator
+from forge.api.routes._stream import job_log_event_gen
 from forge.orchestrators.recipes import RecipeOrchestrator
 from forge.security.auth import get_current_user_id
 from forge.services.jobs import assert_job_owner
@@ -41,10 +42,8 @@ async def stream_recipe(
     assert_job_owner(orchestrator, job_id, user_id)
 
     async def event_gen():
-        async for line in orchestrator.stream_logs(job_id):
-            yield {"event": "log", "data": line}
-        j = orchestrator.get_job(job_id)
-        if j and j.error:
-            yield {"event": "error", "data": j.error}
+        async for event in job_log_event_gen(orchestrator, job_id):
+            yield event
+        yield {"event": "done", "data": job_id}
 
     return EventSourceResponse(event_gen())

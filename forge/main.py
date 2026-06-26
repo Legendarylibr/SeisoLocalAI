@@ -60,6 +60,9 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
+        from forge.services.model_router_client import close_router_client
+
+        await close_router_client()
         if data_lock is not None:
             data_lock.release()
         await db.close()
