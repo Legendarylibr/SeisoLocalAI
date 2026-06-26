@@ -12,7 +12,6 @@ from forge.services.chat_messages import (
 )
 from forge.services.model_prompts import (
     chat_system_prompt,
-    is_coding_model,
     is_reasoning_prone_model,
     model_switch_system_prompt,
 )
@@ -208,19 +207,12 @@ def test_chat_system_prompt_includes_thinking_process_hint_for_reasoning_models(
     assert is_reasoning_prone_model("Qwen/Qwen3.5-4B")
 
 
-def test_chat_system_prompt_uses_coding_base_for_code_models():
-    prompt = chat_system_prompt("Qwen/Qwen2.5-Coder-7B", tools_enabled=False)
-    assert prompt
-    assert is_coding_model("Qwen/Qwen2.5-Coder-7B")
-    assert "expert coding assistant" in prompt.lower()
-    assert "fenced blocks" in prompt.lower()
-
-
-def test_chat_system_prompt_keeps_general_base_for_chat_models():
-    prompt = chat_system_prompt("meta-llama/Llama-3.1-8B", tools_enabled=False)
-    assert prompt
-    assert "helpful assistant" in prompt.lower()
-    assert "expert coding assistant" not in prompt.lower()
+def test_chat_system_prompt_includes_coding_guidance_for_all_models():
+    for model_key in ("Qwen/Qwen2.5-Coder-7B", "meta-llama/Llama-3.1-8B"):
+        prompt = chat_system_prompt(model_key, tools_enabled=False)
+        assert prompt
+        assert "fenced blocks" in prompt.lower()
+        assert "helpful assistant" in prompt.lower()
 
 
 @pytest.mark.parametrize(
