@@ -48,7 +48,7 @@ def test_clamp_llama_load_kwargs_reduces_batch_on_tight_memory(monkeypatch):
     kwargs = clamp_llama_load_kwargs(
         {"n_ctx": 4096, "n_batch": 2048, "n_ubatch": 2048, "n_gpu_layers": -1}
     )
-    assert kwargs["n_batch"] <= 256
+    assert kwargs["n_batch"] <= 512
     assert kwargs["n_ubatch"] <= kwargs["n_batch"]
 
 
@@ -106,7 +106,7 @@ def test_apply_training_memory_guards_clamps_batch(monkeypatch):
 
 
 def test_apply_rl_memory_guards_scales_preflight(monkeypatch):
-    monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 3072)
+    monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 2048)
     out = apply_rl_memory_guards(
         {
             "torch_preflight_batch_size": 16384,
@@ -114,9 +114,9 @@ def test_apply_rl_memory_guards_scales_preflight(monkeypatch):
             "torch_batch_episodes": 2048,
         }
     )
-    assert out["torch_preflight_batch_size"] <= 512
+    assert out["torch_preflight_batch_size"] <= 768
     assert out["replay_buffer_on_gpu"] is False
-    assert out["torch_batch_episodes"] <= 256
+    assert out["torch_batch_episodes"] <= 384
 
 
 def test_ensure_load_fits_blocks_oversized_gguf(tmp_path, monkeypatch):

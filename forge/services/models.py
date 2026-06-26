@@ -11,7 +11,11 @@ from fastapi import HTTPException
 from forge.api.http_errors import raise_forbidden
 from forge.db.store import Database
 from forge.services.user_paths import assert_user_path, is_local_filesystem_path
-from seiso.models.trainable_snapshot import snapshot_has_trainable_weights
+from seiso.models.trainable_snapshot import (
+    GGUF_ONLY_REPO_MESSAGE,
+    is_gguf_only_repo_id,
+    snapshot_has_trainable_weights,
+)
 from seiso.security import SecurityError
 
 _TRAINABLE_FORMATS = frozenset({"safetensors", "bin", ""})
@@ -65,6 +69,17 @@ def _model_metadata(row: dict[str, Any]) -> dict[str, Any]:
     return {}
 
 
+def _inventory_repo_id(row: dict[str, Any]) -> str | None:
+    meta = _model_metadata(row)
+    repo_id = meta.get("repo_id")
+    if repo_id:
+        return str(repo_id)
+    source = row.get("source")
+    if isinstance(source, str) and source.startswith("hf:"):
+        return source[3:]
+    return None
+
+
 def resolve_training_model_id(
     model_id: str,
     *,
@@ -73,6 +88,9 @@ def resolve_training_model_id(
     inventory: list[dict[str, Any]] | None = None,
 ) -> tuple[str, str | None]:
     """Resolve a training model ref to a local snapshot path when cached, else HF repo id."""
+    if is_gguf_only_repo_id(model_id):
+        raise ValueError(GGUF_ONLY_REPO_MESSAGE)
+
     if is_local_filesystem_path(model_id):
         try:
             path = assert_user_path(data_dir, user_id, model_id)
@@ -87,18 +105,24 @@ def resolve_training_model_id(
         fmt = (row.get("format") or "").lower()
         if fmt == "gguf":
             continue
+        repo_id = _inventory_repo_id(row)
+        if repo_id and is_gguf_only_repo_id(repo_id):
+            continue
         source = row.get("source") or ""
-        meta = _model_metadata(row)
-        repo_match = source == hf_source or meta.get("repo_id") == model_id
+        repo_match = source == hf_source or repo_id == model_id
         if not repo_match:
             continue
         try:
             path = assert_user_path(data_dir, user_id, row["path"])
         except SecurityError:
             continue
-        if path.exists() and snapshot_has_trainable_weights(path):
+        if not path.exists():
+            continue
+        if snapshot_has_trainable_weights(path):
             resolved = str(path.resolve())
             return resolved, resolved
+        if repo_id and is_gguf_only_repo_id(repo_id):
+            raise ValueError(GGUF_ONLY_REPO_MESSAGE)
 
     return model_id, None
 
@@ -117,6 +141,9 @@ def list_trainable_models(
             continue
         if fmt == "gguf":
             continue
+        repo_id = _inventory_repo_id(row)
+        if repo_id and is_gguf_only_repo_id(repo_id):
+            continue
         try:
             path = assert_user_path(data_dir, user_id, row["path"])
         except SecurityError:
@@ -125,10 +152,6 @@ def list_trainable_models(
             continue
         if not snapshot_has_trainable_weights(path):
             continue
-        meta = _model_metadata(row)
-        repo_id = meta.get("repo_id")
-        if not repo_id and isinstance(row.get("source"), str) and row["source"].startswith("hf:"):
-            repo_id = row["source"][3:]
         options.append(
             {
                 "id": row["id"],

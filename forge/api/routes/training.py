@@ -314,12 +314,15 @@ async def start_training(
     native_quant_block = native_quant_training_block_reason(original_model_id)
     if native_quant_block:
         raise HTTPException(400, native_quant_block)
-    resolved_model_id, local_path = resolve_training_model_id(
-        original_model_id,
-        data_dir=settings.data_dir,
-        user_id=user_id,
-        inventory=inventory,
-    )
+    try:
+        resolved_model_id, local_path = resolve_training_model_id(
+            original_model_id,
+            data_dir=settings.data_dir,
+            user_id=user_id,
+            inventory=inventory,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
     training_config = {**training_config, "model_id": resolved_model_id}
     training_config.setdefault("extra", {})
     if local_path or resolved_model_id != original_model_id:

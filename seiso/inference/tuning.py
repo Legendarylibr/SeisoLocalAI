@@ -119,11 +119,11 @@ def _default_mlx_prefill_step() -> int:
 
     headroom = headroom_mb()
     if headroom < 4096:
-        return 512
+        return 768
     if headroom < 8192:
-        return 1024
+        return 1536
     if headroom < 16384:
-        return 2048
+        return 3072
     return 4096
 
 

@@ -95,8 +95,14 @@ def train(
     config: str = typer.Option(..., "--config", "-c", help="Training YAML config"),
 ) -> None:
     """Fine-tune a model from config."""
-    from seiso.memory.protection import apply_training_memory_guards
+    from seiso.inference.model_pool import get_model_pool
+    from seiso.memory.protection import apply_training_memory_guards, release_cached_memory
     from seiso.training.config import TrainConfig, run_training
+
+    pool = get_model_pool()
+    if pool.active_key:
+        pool.cancel_and_unload()
+    release_cached_memory(sync=False)
 
     cfg = apply_training_memory_guards(TrainConfig.from_yaml(Path(config)))
     console.print(f"Training [cyan]{cfg.model_id}[/] ({cfg.method.value})")

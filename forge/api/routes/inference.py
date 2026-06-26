@@ -475,7 +475,6 @@ def _warm_local_model(runner, payload: dict[str, Any]) -> None:
     model_path = payload["model_path"]
     route, resolved_path = runner._resolve_route(payload, model_path)
     pool = runner._pool
-    pool.prepare_for_load(resolved_path, payload.get("inference_backend"))
     if route == "mlx":
         pool.get_mlx(resolved_path)
     elif route == "torch":

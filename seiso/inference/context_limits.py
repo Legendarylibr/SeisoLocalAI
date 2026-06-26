@@ -109,7 +109,7 @@ def effective_context_ceiling(
 
     step = 512
     headroom = headroom_mb()
-    vram_cap = max(_MIN_LLAMA_CTX, int((headroom - _INFERENCE_OVERHEAD_MB) * 4))
+    vram_cap = max(_MIN_LLAMA_CTX, int((headroom - _INFERENCE_OVERHEAD_MB) * 5))
     vram_cap = min(vram_cap, ABSOLUTE_MAX_CTX)
     vram_cap = (vram_cap // step) * step or _MIN_LLAMA_CTX
 
