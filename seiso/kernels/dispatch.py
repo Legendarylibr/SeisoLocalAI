@@ -47,7 +47,6 @@ def active_backend() -> str:
 
 def fused_rms_norm(x, weight, eps: float = 1e-6, residual=None):
     """``rms_norm(x + residual) * weight`` via best available backend."""
-    import torch
 
     if not getattr(x, "is_cuda", False):
         return _pytorch_rms_norm(x, weight, eps, residual)
@@ -194,7 +193,6 @@ def fused_lora_qkv_delta(
 ):
     """In-place fused LoRA deltas for Q/K/V projections."""
     if not getattr(x, "is_cuda", False):
-        import torch
 
         for out, a, b, scale in (
             (out_q, lora_A_q, lora_B_q, scale_q),

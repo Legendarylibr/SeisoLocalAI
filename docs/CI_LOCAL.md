@@ -128,6 +128,17 @@ python3 scripts/run_ci_local.py --job test --skip-install
 python3 scripts/run_ci_local.py --list
 ```
 
+## Live Forge integration check
+
+After starting Forge (`seiso forge`), verify API routes the UI depends on:
+
+```bash
+make live-check
+# or: python3 scripts/live_frontend_backend_check.py
+```
+
+This script hits authenticated Forge endpoints (health, catalog, training models, etc.) and is **not** part of `make ci-fast` — it requires a running server on `http://127.0.0.1:8765`.
+
 ## Scope
 
 Lint/type/test jobs target first-party code only:

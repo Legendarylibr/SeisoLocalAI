@@ -1,10 +1,23 @@
-"""Knowledge-base ingest path policy."""
+"""Knowledge base path policy and ID validation."""
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
+from fastapi import HTTPException
 from seiso.security import SecurityError, assert_within, safe_join
+
+_KB_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
+
+
+def validate_kb_id(kb_id: str) -> str:
+    if not _KB_ID_RE.match(kb_id):
+        raise HTTPException(
+            400,
+            "knowledge_base_id must be 1–64 alphanumeric characters, hyphens, or underscores",
+        )
+    return kb_id
 
 
 def assert_ingest_source(sandbox_root: Path, user_id: str, source_path: str | Path) -> Path:

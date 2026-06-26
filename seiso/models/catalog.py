@@ -12,7 +12,6 @@ from datetime import datetime, timezone
 from seiso.compat import StrEnum
 from seiso.models.hub_errors import format_hub_error
 from seiso.models.trainable_snapshot import is_gguf_only_repo_id
-from seiso.models.trusted_gguf import base_model_from_tags
 
 _DEFAULT_LIMIT = 50
 _MAX_LIMIT = 100

@@ -53,7 +53,6 @@ def test_resolve_training_model_from_inventory(tmp_path: Path):
 def test_resolve_training_model_rejects_gguf_only_repo(tmp_path: Path):
     import pytest
 
-    from seiso.models.trainable_snapshot import GGUF_ONLY_REPO_MESSAGE
 
     with pytest.raises(ValueError, match="GGUF-only"):
         resolve_training_model_id(

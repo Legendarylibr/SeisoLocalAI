@@ -120,7 +120,6 @@ class SeisoTrainer:
         use_fused_ce = cfg.use_fused_ce
         use_fused_lora = cfg.use_fused_lora
         use_fused_lora_qkv = bool(cfg.extra.get("use_fused_lora_qkv", use_fused_lora))
-        use_cuda_graphs = bool(cfg.extra.get("use_cuda_graphs", not cfg.deterministic))
 
         logger.info(
             "Training %s | method=%s quant=%s | world_size=%d",

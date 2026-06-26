@@ -185,7 +185,7 @@ Copy `.env.example` to `.env` in the repo root. Key settings:
 | `SEISO_ALLOW_TOOLS` | `false` | Web search, artifacts |
 | `SEISO_ALLOW_CODE_EXEC` | `false` | Sandboxed `execute_code` tool |
 | `SEISO_ALLOW_OPENAI_TOOLS` | `false` | Tool calling on `/v1/chat/completions` |
-| `SEISO_RATE_LIMIT` | `120` | Requests/minute per IP when `SEISO_ALLOW_REMOTE=true` |
+| `SEISO_RATE_LIMIT` | `120` | Requests/minute per IP (≥240 on localhost) |
 | `SEISO_SESSION_HOURS` | `24` | Signed session lifetime |
 | `SEISO_MEMORY_PROFILE` | — | Set to `low` for lean RAM / llama.cpp tuning (see `.env.example`) |
 | `SEISO_MODEL_ROUTER_ENABLED` | `false` | Enable Smart Router model in Chat |

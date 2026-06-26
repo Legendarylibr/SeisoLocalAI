@@ -118,8 +118,6 @@ class CudaGraphTrainingManager:
     @staticmethod
     def _model_uses_bnb_quant(model: Any) -> bool:
         try:
-            import torch.nn as nn
-
             for module in model.modules():
                 cls = type(module).__name__.lower()
                 if "bnb" in cls or "bitsandbytes" in cls:
@@ -164,7 +162,6 @@ class CudaGraphTrainingManager:
         inputs: dict[str, Any],
         num_items_in_batch: Any,
     ) -> Any:
-        import torch
 
         with trainer.compute_loss_context_manager():
             loss = trainer.compute_loss(model, inputs, num_items_in_batch=num_items_in_batch)
@@ -254,7 +251,6 @@ class CudaGraphTrainingManager:
         if not self.eligible(trainer, model):
             return None
 
-        import torch
 
         model.train()
         if hasattr(trainer.optimizer, "train") and callable(trainer.optimizer.train):
@@ -348,7 +344,6 @@ def make_training_graph_callback(*, deterministic: bool = False, enabled: bool =
 
     class _CudaGraphCallback(TrainerCallback):
         def on_train_begin(self, args, state, control, **kwargs):
-            trainer = kwargs.get("model") and kwargs or {}
             t = kwargs.get("trainer")
             if t is not None and getattr(t, "_seiso_cuda_graph_manager", None) is None:
                 attach_cuda_graphs(t, enabled=enabled, deterministic=deterministic)

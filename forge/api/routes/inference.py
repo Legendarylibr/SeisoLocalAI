@@ -19,16 +19,17 @@ from forge.services.chat_messages import build_trusted_messages
 from forge.services.download_progress import estimate_load_eta_seconds
 from forge.services.hardware import hardware_profile
 from forge.services.hf_cache_inventory import sync_hf_cache_inventory
-from forge.services.inference_models import (
-    get_inference_option,
-    list_inference_options,
-    resolve_chat_target,
-)
+from forge.services.inference_models import get_inference_option, list_inference_options
 from forge.services.knowledge_context import format_knowledge_context, retrieve_knowledge_chunks
 from forge.services.llm_output import StreamingOutputSanitizer, sanitize_llm_output
 from forge.services.model_router_client import ROUTER_MODEL_ID, fetch_router_status
-from forge.services.models import resolve_model_path
-from seiso.inference.backends import BACKEND_LLAMACPP, BACKEND_ROUTER, BACKEND_TORCH
+from forge.services.inference_chat import (
+    resolve_draft_model,
+    resolve_explicit_model_path,
+    resolve_inventory_model_path,
+    resolve_preload_context,
+)
+from forge.services.knowledge_paths import validate_kb_id
 
 router = APIRouter(prefix="/inference", tags=["inference"])
 
@@ -213,7 +214,6 @@ async def get_chat_context(
     model_id: str | None = None,
 ) -> dict[str, Any]:
     """Context window usage for the chat UI."""
-    from forge.api.routes.knowledge import _validate_kb_id
     from forge.services.chat_context import context_status_for_history
     from forge.services.inference_models import get_inference_option
     from forge.services.knowledge_context import format_knowledge_context, retrieve_knowledge_chunks
@@ -236,7 +236,7 @@ async def get_chat_context(
 
     knowledge_context: str | None = None
     if knowledge_base_id:
-        kb_id = _validate_kb_id(knowledge_base_id)
+        kb_id = validate_kb_id(knowledge_base_id)
         last_user = ""
         for msg in reversed(history):
             if msg.get("role") == "user":
@@ -297,15 +297,15 @@ async def preload_model(
 ) -> dict[str, Any]:
     """Load a selected inventory model into the local inference engine."""
     _assert_inference_gpu_available()
-    ctx = await _resolve_preload_context(
+    ctx = await resolve_preload_context(
         db, user_id, settings, body.model_id, body.inference_backend
     )
 
     loop = asyncio.get_running_loop()
     await loop.run_in_executor(
-        None, lambda: _warm_local_model(orchestrator._runner, ctx["payload"])
+        None, lambda: orchestrator._runner.warm_model(ctx["payload"])
     )
-    status = orchestrator._runner._pool.status()
+    status = orchestrator._runner.pool.status()
     return {"status": "loaded", "backend": ctx["backend"], **status}
 
 
@@ -318,12 +318,12 @@ async def preload_model_stream(
     settings: Annotated[ForgeSettings, Depends(get_settings)],
 ):
     _assert_inference_gpu_available()
-    ctx = await _resolve_preload_context(
+    ctx = await resolve_preload_context(
         db, user_id, settings, body.model_id, body.inference_backend
     )
 
     runner = orchestrator._runner
-    pool = runner._pool
+    pool = runner.pool
     target_path = ctx["payload"]["model_path"]
     size_bytes = ctx.get("size_bytes", 0)
     eta = estimate_load_eta_seconds(size_bytes)
@@ -331,7 +331,7 @@ async def preload_model_stream(
 
     async def event_gen():
 
-        switching = orchestrator._runner._pool.would_switch_model(target_path, ctx["backend"])
+        switching = runner.pool.would_switch_model(target_path, ctx["backend"])
         if switching:
             yield {
                 "event": "progress",
@@ -346,7 +346,7 @@ async def preload_model_stream(
             }
             await loop.run_in_executor(
                 None,
-                lambda: orchestrator._runner._pool.prepare_for_load(target_path, ctx["backend"]),
+                lambda: runner.pool.prepare_for_load(target_path, ctx["backend"]),
             )
 
         yield {
@@ -365,7 +365,7 @@ async def preload_model_stream(
             ),
         }
         try:
-            await loop.run_in_executor(None, lambda: _warm_local_model(runner, ctx["payload"]))
+            await loop.run_in_executor(None, lambda: runner.warm_model(ctx["payload"]))
         except Exception as exc:
             yield {"event": "error", "data": str(exc)}
             return
@@ -401,98 +401,6 @@ async def preload_model_stream(
     return EventSourceResponse(event_gen())
 
 
-async def _resolve_preload_context(
-    db: Database,
-    user_id: str,
-    settings: ForgeSettings,
-    model_id: str,
-    inference_backend: str,
-) -> dict[str, Any]:
-    selected = await get_inference_option(db, user_id, model_id)
-    if not selected:
-        raise HTTPException(404, "Model not found in inventory")
-
-    try:
-        target = resolve_chat_target(
-            selected,
-            model_id=model_id,
-            inference_backend=inference_backend,
-        )
-    except ValueError as exc:
-        raise HTTPException(400, str(exc)) from exc
-
-    backend = target.get("inference_backend", inference_backend)
-
-    path = target.get("model_path")
-    if not path:
-        path = await resolve_model_path(
-            db,
-            user_id,
-            model_id=model_id,
-            model_path=None,
-            data_dir=settings.data_dir,
-        )
-    if not path:
-        raise HTTPException(400, "Model path not found")
-
-    from seiso.memory.protection import assess_path_memory_fit_for_load
-
-    fit = assess_path_memory_fit_for_load(
-        path,
-        mode="chat",
-        backend=backend,
-    )
-    if fit.get("memory_load_blocked"):
-        raise HTTPException(
-            400,
-            fit.get("memory_load_blocked_reason")
-            or "Model exceeds available memory on this machine",
-        )
-
-    payload = {
-        "model_path": path,
-        "model_format": target.get("model_format") or selected.get("format"),
-        "inference_backend": backend,
-        "messages": [{"role": "user", "content": "ping"}],
-        "max_tokens": 1,
-    }
-    return {
-        "payload": payload,
-        "backend": backend,
-        "model_name": selected.get("name") or model_id,
-        "size_bytes": int(selected.get("size_bytes") or 0),
-    }
-
-
-def _warm_local_model(runner, payload: dict[str, Any]) -> None:
-    model_path = payload["model_path"]
-    route, resolved_path = runner._resolve_route(payload, model_path)
-    pool = runner._pool
-    if route == "mlx":
-        pool.get_mlx(resolved_path)
-    elif route == "torch":
-        pool.get_torch(resolved_path)
-    else:
-        from seiso.inference.tuning import estimate_llama_n_ctx
-
-        messages = payload.get("messages") or []
-        n_ctx = payload.get("n_ctx") or estimate_llama_n_ctx(
-            messages,
-            max_tokens=int(payload.get("max_tokens", 1)),
-            model_path=resolved_path,
-            model_format=payload.get("model_format"),
-        )
-        pool.get_llama(resolved_path, n_ctx=n_ctx)
-
-
-async def _release_active_local_model(runner) -> None:
-    pool = runner._pool
-    if not pool.active_key:
-        return
-    loop = asyncio.get_running_loop()
-    await loop.run_in_executor(None, pool.cancel_and_unload)
-
-
 @router.post("/chat")
 async def chat(
     body: ChatRequest,
@@ -516,9 +424,7 @@ async def chat(
 
     knowledge_context: str | None = None
     if body.knowledge_base_id:
-        from forge.api.routes.knowledge import _validate_kb_id
-
-        kb_id = _validate_kb_id(body.knowledge_base_id)
+        kb_id = validate_kb_id(body.knowledge_base_id)
         user_query = str(body.messages[-1].get("content", "")).strip() if body.messages else ""
         chunks = retrieve_knowledge_chunks(
             settings.data_dir,
@@ -557,135 +463,43 @@ async def chat(
         if body.model_path and body.model_id:
             raise HTTPException(403, "Provide model_id or model_path, not both")
         if body.model_path:
-            try:
-                path = await resolve_model_path(
+            payload.update(
+                await resolve_explicit_model_path(
                     db,
                     user_id,
-                    model_id=None,
+                    settings,
                     model_path=body.model_path,
-                    data_dir=settings.data_dir,
-                )
-            except HTTPException:
-                raise
-            if not path:
-                raise HTTPException(400, "Invalid model_path")
-            from seiso.memory.protection import assess_path_memory_fit_for_load
-
-            fit = assess_path_memory_fit_for_load(path, mode="chat")
-            if fit.get("memory_load_blocked"):
-                raise HTTPException(
-                    400,
-                    fit.get("memory_load_blocked_reason")
-                    or "Model exceeds available memory on this machine",
-                )
-            payload["model_path"] = path
-            payload["inference_backend"] = body.inference_backend
-        elif body.model_id:
-            selected = await get_inference_option(db, user_id, body.model_id)
-            if (
-                selected is None
-                and settings.model_router_enabled
-                and body.model_id == ROUTER_MODEL_ID
-            ):
-                selected = next(
-                    (
-                        o
-                        for o in await list_inference_options(
-                            db,
-                            user_id,
-                            model_router_enabled=True,
-                        )
-                        if o["id"] == body.model_id
-                    ),
-                    None,
-                )
-            try:
-                target = resolve_chat_target(
-                    selected,
-                    model_id=body.model_id,
                     inference_backend=body.inference_backend,
                 )
-            except ValueError as exc:
-                raise HTTPException(400, str(exc)) from exc
-
-            payload["inference_backend"] = target.get("inference_backend", body.inference_backend)
-            payload["model_format"] = target.get("model_format")
-
-            if target.get("inference_backend") == BACKEND_ROUTER:
-                if not settings.model_router_enabled:
-                    raise HTTPException(
-                        400,
-                        "Smart Router is not enabled (set SEISO_MODEL_ROUTER_ENABLED=1)",
-                    )
-                payload["use_model_router"] = True
+            )
+        elif body.model_id:
+            model_updates = await resolve_inventory_model_path(
+                db,
+                user_id,
+                settings,
+                model_id=body.model_id,
+                model_path=body.model_path,
+                inference_backend=body.inference_backend,
+                model_router_enabled=settings.model_router_enabled,
+            )
+            payload.update(model_updates)
+            if model_updates.get("use_model_router"):
                 payload["router_model"] = body.router_model
-            else:
-                path = target.get("model_path")
-                if not path and body.model_id:
-                    path = await resolve_model_path(
-                        db,
-                        user_id,
-                        model_id=body.model_id,
-                        model_path=body.model_path,
-                        data_dir=settings.data_dir,
-                    )
-                if not path:
-                    raise HTTPException(400, "Select a model from inventory or provide model_path")
-                from seiso.memory.protection import assess_path_memory_fit_for_load
-
-                fit = assess_path_memory_fit_for_load(
-                    path,
-                    mode="chat",
-                    backend=payload.get("inference_backend"),
-                )
-                if fit.get("memory_load_blocked"):
-                    raise HTTPException(
-                        400,
-                        fit.get("memory_load_blocked_reason")
-                        or "Model exceeds available memory on this machine",
-                    )
-                payload["model_path"] = path
         else:
             raise HTTPException(400, "Select a model from inventory or provide model_path")
-
-    if body.draft_model_id and body.draft_model_path:
-        raise HTTPException(403, "Provide draft_model_id or draft_model_path, not both")
 
     if body.draft_model_id or body.draft_model_path:
         if body.provider_id:
             raise HTTPException(400, "Speculative decoding is not available for cloud providers")
-        if body.draft_model_path:
-            draft_path = await resolve_model_path(
+        payload.update(
+            await resolve_draft_model(
                 db,
                 user_id,
-                model_id=None,
-                model_path=body.draft_model_path,
-                data_dir=settings.data_dir,
+                settings,
+                draft_model_id=body.draft_model_id,
+                draft_model_path=body.draft_model_path,
             )
-        else:
-            draft_selected = await get_inference_option(db, user_id, body.draft_model_id)
-            if not draft_selected:
-                raise HTTPException(404, "Draft model not found")
-            draft_path = draft_selected.get("path")
-            if not draft_path:
-                raise HTTPException(400, "Draft model must be a local safetensors/checkpoint path")
-        if not draft_path:
-            raise HTTPException(400, "Invalid draft model path")
-        from seiso.inference.backends import is_dflash_draft
-        from seiso.memory.protection import assess_path_memory_fit_for_load
-
-        draft_backend = BACKEND_LLAMACPP if is_dflash_draft(draft_path) else BACKEND_TORCH
-        draft_fit = assess_path_memory_fit_for_load(draft_path, mode="chat", backend=draft_backend)
-        if draft_fit.get("memory_load_blocked"):
-            raise HTTPException(
-                400,
-                draft_fit.get("memory_load_blocked_reason")
-                or "Draft model exceeds available memory on this machine",
-            )
-        payload["draft_model_path"] = draft_path
-        # For dflash draft we can still use torch target + dflash draft speculative for now
-        # (or extend later). Keep target torch for verification compatibility.
-        payload["inference_backend"] = BACKEND_TORCH
+        )
 
     if body.stream:
         use_router = bool(payload.get("use_model_router"))

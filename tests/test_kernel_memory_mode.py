@@ -87,5 +87,6 @@ def test_training_memory_guards_set_low_vram_env(monkeypatch):
 
     assert os.environ.get("SEISO_KERNEL_LOW_VRAM") == "1"
     assert cfg.gradient_checkpointing is True
-    assert cfg.use_fused_ce is True
+    # Explicit use_fused_ce=False is respected; tight VRAM also keeps fused CE off.
+    assert cfg.use_fused_ce is False
     assert cfg.max_seq_length <= 1024

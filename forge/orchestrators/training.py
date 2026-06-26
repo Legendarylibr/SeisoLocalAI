@@ -45,9 +45,6 @@ class TrainingOrchestrator(Orchestrator):
             log=lambda msg: self._emit_log(job_id, msg),
         )
         config = TrainConfig.model_validate(payload["config"])
-        from seiso.memory.protection import apply_training_memory_guards
-
-        config = apply_training_memory_guards(config)
         config.output_dir = Path(
             payload.get("output_dir", self.sandbox_root / "checkpoints" / job_id)
         )

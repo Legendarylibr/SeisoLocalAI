@@ -5,7 +5,6 @@ from __future__ import annotations
 from seiso.training.config import DatasetFormat, TrainConfig, TrainMethod
 from seiso.training.practices import (
     default_dataset_num_proc,
-    default_pad_to_multiple_of,
     learning_rate_for_method,
     resolve_compute_dtype,
     resolve_optimizer,

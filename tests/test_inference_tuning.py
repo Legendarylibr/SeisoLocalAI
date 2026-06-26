@@ -28,7 +28,7 @@ def test_mlx_stream_kwargs_greedy_by_default(monkeypatch):
 
 def test_mlx_stream_kwargs_scales_prefill_on_tight_memory(monkeypatch):
     monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 3072)
-    assert mlx_stream_kwargs({"max_tokens": 64})["prefill_step_size"] == 512
+    assert mlx_stream_kwargs({"max_tokens": 64})["prefill_step_size"] == 768
 
 
 def test_mlx_stream_kwargs_with_temperature():

@@ -38,6 +38,7 @@ _MIN_LLAMA_BATCH = 128
 _MAX_LLAMA_CACHE_MB = 1024
 _MAX_JSONL_LOAD_MB = 512
 
+_VRAM_ESTIMATE_CACHE_MAX = 256
 _vram_estimate_cache: dict[tuple, int] = {}
 
 
@@ -66,6 +67,8 @@ def estimate_path_vram_mb(path: str | Path, *, mode: str = "chat") -> int:
     est = _estimate_path_vram_mb_uncached(p, mode=mode)
 
     if cache_key is not None and mode == "chat":
+        if len(_vram_estimate_cache) >= _VRAM_ESTIMATE_CACHE_MAX:
+            _vram_estimate_cache.pop(next(iter(_vram_estimate_cache)))
         _vram_estimate_cache[cache_key] = est
     return est
 

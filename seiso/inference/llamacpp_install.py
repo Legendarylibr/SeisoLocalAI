@@ -196,12 +196,9 @@ def ensure_llamacpp_installed(*, auto_install: bool | None = None) -> dict[str, 
 
 
 def _clear_runtime_caches() -> None:
-    try:
-        from forge.services.hf_connectivity import check_inference_runtime
+    from seiso.inference.runtime_cache import clear_inference_runtime_caches
 
-        check_inference_runtime.cache_clear()
-    except ImportError:
-        pass
+    clear_inference_runtime_caches()
 
 
 def main(argv: list[str] | None = None) -> int:

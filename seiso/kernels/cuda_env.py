@@ -201,7 +201,6 @@ def configure_cuda_build_env() -> dict[str, str]:
     if home:
         os.environ["CUDA_HOME"] = home
         meta["cuda_home"] = home
-        bin_dir = str(Path(home) / "bin")
         os.environ["PATH"] = _sanitize_path_for_cuda_build(home, os.environ.get("PATH", ""))
         if not toolkit_ptxas_compatible(home):
             _warn_ptxas_mismatch(home)

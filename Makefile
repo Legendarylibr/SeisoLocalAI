@@ -34,3 +34,7 @@ imports:
 
 fix:
 	python3 scripts/run_ci_local.py --job lint --fix --skip-install
+
+live-check:
+	@echo "Requires Forge running at http://127.0.0.1:8765 (seiso forge)"
+	python3 scripts/live_frontend_backend_check.py

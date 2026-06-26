@@ -61,6 +61,34 @@ class LocalInferenceRunner:
     def __init__(self) -> None:
         self._pool = get_model_pool()
 
+    @property
+    def pool(self):
+        """Active model pool (public accessor for Forge services)."""
+        return self._pool
+
+    def resolve_route(self, payload: dict[str, Any], model_path: str) -> tuple[str, str]:
+        return self._resolve_route(payload, model_path)
+
+    def warm_model(self, payload: dict[str, Any]) -> None:
+        """Load a model into the pool without generating (preload / ping)."""
+        model_path = payload["model_path"]
+        route, resolved_path = self._resolve_route(payload, model_path)
+        if route == "mlx":
+            self._pool.get_mlx(resolved_path)
+        elif route == "torch":
+            self._pool.get_torch(resolved_path)
+        else:
+            from seiso.inference.tuning import estimate_llama_n_ctx
+
+            messages = payload.get("messages") or []
+            n_ctx = payload.get("n_ctx") or estimate_llama_n_ctx(
+                messages,
+                max_tokens=int(payload.get("max_tokens", 1)),
+                model_path=resolved_path,
+                model_format=payload.get("model_format"),
+            )
+            self._pool.get_llama(resolved_path, n_ctx=n_ctx)
+
     async def chat(self, payload: dict[str, Any]) -> str:
         if payload.get("tools_schemas"):
             loop = asyncio.get_running_loop()
