@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import JSONResponse
+
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
@@ -28,6 +28,7 @@ from forge.services.jobs import assert_job_owner
 from forge.services.models import list_trainable_models, resolve_training_model_id
 from forge.services.user_paths import assert_user_training_config, resolve_training_dataset_path
 from seiso.models.hf_env import configure_hf_hub_cache
+from seiso.models.hub_quant import native_quant_training_block_reason
 from seiso.models.trainable_snapshot import is_gguf_only_repo_id
 from seiso.security import SecurityError
 from seiso.training.config import DatasetFormat
@@ -160,16 +161,27 @@ def _resolve_dataset_for_user(
     user_id: str,
     settings: ForgeSettings,
 ) -> str | Path:
-    ds = dataset
-    if isinstance(ds, str):
-        with contextlib.suppress(Exception):
-            ds = resolve_training_dataset_path(
-                settings.data_dir,
-                user_id,
-                ds,
-                install_root=Path(__file__).resolve().parents[3],
-            )
-    return ds
+    if not dataset or not isinstance(dataset, str):
+        return dataset
+    return resolve_training_dataset_path(
+        settings.data_dir,
+        user_id,
+        dataset,
+        install_root=Path(__file__).resolve().parents[3],
+    )
+
+
+def _run_dataset_analysis(
+    dataset: str | Path,
+    *,
+    dataset_format: DatasetFormat,
+    sandbox_root: Path,
+) -> dict[str, Any]:
+    return analyze_training_dataset(
+        dataset,
+        dataset_format=dataset_format,
+        sandbox_root=sandbox_root,
+    )
 
 
 @router.post("/analyze-dataset")
@@ -182,17 +194,15 @@ async def analyze_dataset_endpoint(
     ds = _resolve_dataset_for_user(body.dataset, user_id=user_id, settings=settings)
     try:
         ds_fmt = DatasetFormat(body.dataset_format) if body.dataset_format else DatasetFormat.AUTO
-        analysis = analyze_training_dataset(
+        analysis = await asyncio.to_thread(
+            _run_dataset_analysis,
             ds,
             dataset_format=ds_fmt,
             sandbox_root=Path(settings.data_dir) / "uploads" / user_id,
         )
         return analysis
     except Exception as exc:
-        return JSONResponse(
-            {"valid": False, "error": str(exc)},
-            status_code=400,
-        )
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/validate-dataset")
@@ -205,7 +215,8 @@ async def validate_dataset_endpoint(
     ds = _resolve_dataset_for_user(body.dataset, user_id=user_id, settings=settings)
     try:
         ds_fmt = DatasetFormat(body.dataset_format) if body.dataset_format else DatasetFormat.AUTO
-        analysis = analyze_training_dataset(
+        analysis = await asyncio.to_thread(
+            _run_dataset_analysis,
             ds,
             dataset_format=ds_fmt,
             sandbox_root=Path(settings.data_dir) / "uploads" / user_id,
@@ -214,10 +225,7 @@ async def validate_dataset_endpoint(
             raise ValueError("No valid training samples after preprocessing")
         return {"valid": True, **analysis}
     except Exception as exc:
-        return JSONResponse(
-            {"valid": False, "error": str(exc)},
-            status_code=400,
-        )
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/jobs")
@@ -272,13 +280,16 @@ async def start_training(
     ds_fmt_str = training_config.get("dataset_format", "auto")
     try:
         ds_fmt = DatasetFormat(ds_fmt_str) if ds_fmt_str else DatasetFormat.AUTO
-        analysis = analyze_training_dataset(
+        analysis = await asyncio.to_thread(
+            _run_dataset_analysis,
             dataset_for_val,
             dataset_format=ds_fmt,
             sandbox_root=Path(settings.data_dir) / "uploads" / user_id,
         )
         if not analysis.get("valid"):
             raise ValueError("No valid training samples after preprocessing")
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(
             status_code=400,
@@ -300,6 +311,9 @@ async def start_training(
         from seiso.models.trainable_snapshot import GGUF_ONLY_REPO_MESSAGE
 
         raise HTTPException(400, GGUF_ONLY_REPO_MESSAGE)
+    native_quant_block = native_quant_training_block_reason(original_model_id)
+    if native_quant_block:
+        raise HTTPException(400, native_quant_block)
     resolved_model_id, local_path = resolve_training_model_id(
         original_model_id,
         data_dir=settings.data_dir,
@@ -311,6 +325,9 @@ async def start_training(
     if local_path or resolved_model_id != original_model_id:
         training_config["extra"]["resolved_model_path"] = local_path or resolved_model_id
         training_config["extra"]["original_model_id"] = original_model_id
+    resolved_block = native_quant_training_block_reason(resolved_model_id)
+    if resolved_block:
+        raise HTTPException(400, resolved_block)
 
     job_id = str(uuid.uuid4())
     await db.create_training_job(user_id, training_config, body.project_id, job_id=job_id)
@@ -348,12 +365,15 @@ async def start_training(
                     orchestrator.get_metrics(job_id),
                     job.result.get("metrics_summary"),
                 )
+                error_text = job.error
+                if not error_text and job.status.value == "failed":
+                    error_text = job_failure_message(orchestrator, job_id)
                 await db.update_job_status(
                     job_id,
                     job.status.value,
                     checkpoint_path=job.result.get("checkpoint_path"),
                     metrics=metrics_payload,
-                    error_text=job.error,
+                    error_text=error_text,
                     user_id=user_id,
                 )
                 if job.status.value == "completed" and job.result.get("checkpoint_path"):

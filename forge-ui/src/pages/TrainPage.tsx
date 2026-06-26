@@ -42,7 +42,7 @@ export function TrainPage() {
   const [jobs, setJobs] = useState<TrainingJob[]>([]);
   const { models: localModels, refresh: refreshLocalModels } = useTrainingModels();
   const [modelId, setModelId] = useState("");
-  const [dataset, setDataset] = useState("");
+  const [dataset, setDataset] = useState("./data/sample.jsonl");
   const [method, setMethod] = useState("lora");
   const [quant, setQuant] = useState("4bit");
   const [datasetFormat, setDatasetFormat] = useState("auto");
@@ -291,6 +291,11 @@ export function TrainPage() {
   }, [recommendations]);
 
   const modelBlocked = Boolean(modelId && (isGgufOnlyRepoId(modelId) || recommendations?.trainable === false));
+  const canStart =
+    Boolean(modelId.trim() && dataset.trim()) &&
+    !modelBlocked &&
+    datasetValid &&
+    !analyzingDataset;
 
   useEffect(() => {
     if (!exportProfiles.length) return;
@@ -469,7 +474,9 @@ export function TrainPage() {
       {downloadError && (
         <div className="status-callout status-callout-error studio-error-callout" role="alert">
           <div className="status-callout-body">
-            <strong className="status-callout-title">Download failed</strong>
+            <strong className="status-callout-title">
+              {downloadingModel || /download/i.test(downloadError) ? "Download failed" : "Training error"}
+            </strong>
             <div className="status-callout-text">{downloadError}</div>
           </div>
         </div>
@@ -839,9 +846,15 @@ export function TrainPage() {
             <button
               className="btn btn-primary btn-lg"
               onClick={start}
-              disabled={starting || downloadingModel || modelBlocked || !datasetValid || analyzingDataset}
+              disabled={starting || downloadingModel || !canStart}
             >
-              {starting ? "Starting…" : downloadingModel ? "Downloading model…" : "Start training"}
+              {starting
+                ? "Starting…"
+                : downloadingModel
+                  ? "Downloading model…"
+                  : !modelId.trim() || !dataset.trim()
+                    ? "Select model and dataset"
+                    : "Start training"}
             </button>
             {activeJob && (
               <button type="button" className="btn" onClick={() => setMetricsOpen(true)}>

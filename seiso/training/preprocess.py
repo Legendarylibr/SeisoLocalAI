@@ -175,6 +175,17 @@ def compute_eval_split_size(
     return max(0, eval_n)
 
 
+def _datasets_map_kwargs(num_proc: int | None) -> dict[str, Any]:
+    """Map/filter kwargs safe for Forge workers (no tqdm writes to closed pipes)."""
+    from datasets.utils.logging import disable_progress_bar
+
+    disable_progress_bar()
+    kwargs: dict[str, Any] = {}
+    if num_proc and num_proc > 1:
+        kwargs["num_proc"] = num_proc
+    return kwargs
+
+
 def preprocess_training_dataset(
     dataset,
     *,
@@ -205,9 +216,7 @@ def preprocess_training_dataset(
             return {"_seiso_valid": False}
         return {**norm, "_seiso_valid": True}
 
-    map_kwargs: dict[str, Any] = {}
-    if num_proc and num_proc > 1:
-        map_kwargs["num_proc"] = num_proc
+    map_kwargs = _datasets_map_kwargs(num_proc)
     mapped = dataset.map(transform, **map_kwargs)
     before_filter = len(mapped)
     filtered = mapped.filter(lambda row: row["_seiso_valid"], **map_kwargs)
