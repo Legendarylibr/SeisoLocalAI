@@ -181,18 +181,19 @@ def _llama_layer_attempts(model_path: str, requested: int, free_mb: int) -> list
 
 
 def _llama_speed_extras(model_path: str) -> dict[str, Any]:
-    """Model-specific llama.cpp knobs for throughput and VRAM headroom."""
+    """GGUF-metadata-driven llama.cpp knobs for throughput and VRAM headroom."""
     extras: dict[str, Any] = {}
     try:
-        from seiso.inference.backends import gguf_architecture
+        from seiso.inference.backends import gguf_uses_sliding_window_attention
         from seiso.memory.protection import estimate_path_vram_mb
 
-        arch = (gguf_architecture(model_path) or "").lower()
         weight_mb = int(estimate_path_vram_mb(model_path))
     except Exception:
         return extras
 
-    if "qwen" in arch and not env_bool("SEISO_LLAMA_SWA_FULL", False):
+    if gguf_uses_sliding_window_attention(model_path) and not env_bool(
+        "SEISO_LLAMA_SWA_FULL", False
+    ):
         extras["swa_full"] = False
 
     if env_bool("SEISO_LLAMA_KV_QUANT", True) and weight_mb >= 12000:

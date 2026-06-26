@@ -183,8 +183,18 @@ class InferenceOrchestrator(Orchestrator):
             }
             return await self._local_chat(p)
 
+        model_key = (
+            payload.get("model_id")
+            or payload.get("model_path")
+            or payload.get("model_name")
+        )
         return await run_agent_loop_async(
-            generate, messages, registry, on_log=on_log, user_id=user_id
+            generate,
+            messages,
+            registry,
+            on_log=on_log,
+            user_id=user_id,
+            model_key=str(model_key) if model_key else None,
         )
 
     async def _provider_chat(

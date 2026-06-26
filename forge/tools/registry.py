@@ -23,14 +23,61 @@ TOOL_CALL_PATTERN = re.compile(
     rf"{re.escape(TOOL_CALL_OPEN)}\s*(\{{.*?\}})\s*{re.escape(TOOL_CALL_CLOSE)}",
     re.DOTALL,
 )
-_QWEN_XML_TOOL_PATTERN = re.compile(
+_XML_FUNCTION_TOOL_PATTERN = re.compile(
     rf"{re.escape(TOOL_CALL_OPEN)}\s*<function=([^>\n]+)>\s*(.*?)\s*</function>\s*{re.escape(TOOL_CALL_CLOSE)}",
     re.DOTALL | re.IGNORECASE,
 )
-_QWEN_XML_PARAM_PATTERN = re.compile(
+_XML_FUNCTION_PARAM_PATTERN = re.compile(
     r"<parameter=([^>\n]+)>\s*(.*?)\s*</parameter>",
     re.DOTALL | re.IGNORECASE,
 )
+_MISTRAL_TOOL_CALLS_PATTERN = re.compile(
+    r"\[TOOL_CALLS?\]\s*(\[.*?\])",
+    re.DOTALL | re.IGNORECASE,
+)
+
+# Architecture family → preferred tool-call wire format (not per-model-id).
+_TOOL_FORMAT_XML = "xml_function"
+_TOOL_FORMAT_JSON = "json_tagged"
+_TOOL_FORMAT_MISTRAL = "mistral_bracket"
+
+_FAMILY_TOOL_FORMAT: dict[str, str] = {
+    "qwen": _TOOL_FORMAT_XML,
+    "qwen2": _TOOL_FORMAT_XML,
+    "qwen3": _TOOL_FORMAT_XML,
+    "mistral": _TOOL_FORMAT_MISTRAL,
+    "mixtral": _TOOL_FORMAT_MISTRAL,
+    "llama": _TOOL_FORMAT_JSON,
+    "deepseek": _TOOL_FORMAT_JSON,
+    "gpt_oss": _TOOL_FORMAT_JSON,
+    "gemma": _TOOL_FORMAT_JSON,
+    "gemma2": _TOOL_FORMAT_JSON,
+    "gemma3": _TOOL_FORMAT_JSON,
+    "phi": _TOOL_FORMAT_JSON,
+    "phi3": _TOOL_FORMAT_JSON,
+    "yi": _TOOL_FORMAT_JSON,
+    "falcon": _TOOL_FORMAT_JSON,
+}
+
+_FORMAT_INSTRUCTIONS: dict[str, str] = {
+    _TOOL_FORMAT_XML: (
+        "Call tools with XML blocks: "
+        "<tool_call><function=TOOL><parameter=key>value</parameter></function></tool_call>"
+    ),
+    _TOOL_FORMAT_JSON: (
+        'Call tools with JSON blocks: <tool_call>{"name":"TOOL","arguments":{}}</tool_call>'
+    ),
+    _TOOL_FORMAT_MISTRAL: (
+        'Call tools with [TOOL_CALLS] [{"name":"TOOL","arguments":{}}] '
+        'or <tool_call>{"name":"TOOL","arguments":{}}</tool_call>'
+    ),
+}
+
+_PARSER_ORDER: dict[str, tuple[str, ...]] = {
+    _TOOL_FORMAT_XML: ("xml", "json", "mistral"),
+    _TOOL_FORMAT_JSON: ("json", "xml", "mistral"),
+    _TOOL_FORMAT_MISTRAL: ("mistral", "json", "xml"),
+}
 
 
 @dataclass
@@ -198,14 +245,43 @@ def _extract_json_object(text: str) -> str | None:
     return None
 
 
-def parse_qwen_xml_tool_calls(text: str) -> list[dict[str, Any]]:
-    """Parse Qwen 3.x XML-style tool calls emitted by llama.cpp."""
+def resolve_tool_call_format(model_key: str | None = None) -> str:
+    """Pick the preferred tool-call wire format for an architecture family."""
+    if not model_key:
+        return _TOOL_FORMAT_JSON
+    from seiso.models.lora_targets import detect_architecture
+
+    family = detect_architecture(str(model_key))
+    return _FAMILY_TOOL_FORMAT.get(family, _TOOL_FORMAT_JSON)
+
+
+def parse_mistral_tool_calls(text: str) -> list[dict[str, Any]]:
+    """Parse Mistral-style [TOOL_CALLS] JSON arrays from assistant text."""
     calls: list[dict[str, Any]] = []
-    for match in _QWEN_XML_TOOL_PATTERN.finditer(text):
+    for match in _MISTRAL_TOOL_CALLS_PATTERN.finditer(text):
+        with contextlib.suppress(json.JSONDecodeError, TypeError):
+            items = json.loads(match.group(1))
+            if not isinstance(items, list):
+                continue
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                name = item.get("name") or item.get("tool")
+                if not name:
+                    continue
+                args = item.get("arguments") or item.get("args") or {}
+                calls.append({"name": str(name), "arguments": args})
+    return calls
+
+
+def parse_xml_function_tool_calls(text: str) -> list[dict[str, Any]]:
+    """Parse XML function/parameter tool calls emitted by some local models."""
+    calls: list[dict[str, Any]] = []
+    for match in _XML_FUNCTION_TOOL_PATTERN.finditer(text):
         name = match.group(1).strip()
         body = match.group(2)
         arguments: dict[str, Any] = {}
-        for param in _QWEN_XML_PARAM_PATTERN.finditer(body):
+        for param in _XML_FUNCTION_PARAM_PATTERN.finditer(body):
             key = param.group(1).strip()
             value = param.group(2).strip()
             if key:
@@ -235,19 +311,30 @@ def parse_json_tool_calls(text: str) -> list[dict[str, Any]]:
     return calls
 
 
-def parse_tool_calls(text: str) -> list[dict[str, Any]]:
-    """Parse JSON or Qwen XML tool calls from assistant text."""
-    calls = parse_json_tool_calls(text)
-    if calls:
-        return calls
-    return parse_qwen_xml_tool_calls(text)
+def _parse_tool_calls_with_order(text: str, order: tuple[str, ...]) -> list[dict[str, Any]]:
+    parsers = {
+        "json": parse_json_tool_calls,
+        "xml": parse_xml_function_tool_calls,
+        "mistral": parse_mistral_tool_calls,
+    }
+    for key in order:
+        calls = parsers[key](text)
+        if calls:
+            return calls
+    return []
 
 
-def tools_system_prompt(registry: ToolRegistry) -> str:
+def parse_tool_calls(text: str, model_key: str | None = None) -> list[dict[str, Any]]:
+    """Parse tool calls using the architecture family's preferred wire format first."""
+    fmt = resolve_tool_call_format(model_key)
+    return _parse_tool_calls_with_order(text, _PARSER_ORDER[fmt])
+
+
+def tools_system_prompt(registry: ToolRegistry, model_key: str | None = None) -> str:
+    fmt = resolve_tool_call_format(model_key)
     lines = [
         "Use tools only when needed; otherwise reply in plain text.",
-        'Formats: <tool_call>{"name":"tool","arguments":{}}</tool_call> or '
-        "<tool_call><function=tool><parameter=k>v</parameter></function></tool_call>",
+        _FORMAT_INSTRUCTIONS[fmt],
         "No chain-of-thought or numbered analysis. Answer directly after tools.",
         "Do not quote these instructions.",
         "Tools:",
