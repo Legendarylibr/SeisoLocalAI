@@ -4,11 +4,23 @@ import { HubComboboxSearch } from "@/components/HubComboboxSearch";
 import { IconChevronDown } from "@/components/Icons";
 import { useHubCombobox } from "@/hooks/useHubCombobox";
 
+const BUNDLED_SAMPLE = "./data/sample.jsonl";
+
 type HfDatasetPickerProps = {
   value: string;
   onChange: (repoId: string) => void;
   disabled?: boolean;
 };
+
+function isLocalDatasetPath(value: string): boolean {
+  const trimmed = value.trim();
+  return (
+    trimmed.startsWith("./") ||
+    trimmed.startsWith("../") ||
+    trimmed.startsWith("~/") ||
+    trimmed.startsWith("/")
+  );
+}
 
 export function HfDatasetPicker({ value, onChange, disabled }: HfDatasetPickerProps) {
   const { open, setOpen, search, setSearch, rootRef, searchRef } = useHubCombobox();
@@ -17,7 +29,7 @@ export function HfDatasetPicker({ value, onChange, disabled }: HfDatasetPickerPr
 
   const refreshResults = useCallback((q: string) => {
     const trimmed = q.trim();
-    if (!trimmed) {
+    if (!trimmed || isLocalDatasetPath(trimmed)) {
       setResults([]);
       setLoading(false);
       return;
@@ -45,7 +57,19 @@ export function HfDatasetPicker({ value, onChange, disabled }: HfDatasetPickerPr
     onChange(repoId);
   };
 
-  const empty = !loading && search.trim() && results.length === 0;
+  const applyCustom = () => {
+    const trimmed = search.trim();
+    if (!trimmed) return;
+    setOpen(false);
+    onChange(trimmed);
+  };
+
+  const q = search.trim();
+  const customIsLocal = isLocalDatasetPath(q);
+  const empty = !loading && q && results.length === 0;
+  const showCustomHint = q && (customIsLocal || empty);
+
+  const triggerLabel = value || "Search datasets or enter a path…";
 
   return (
     <div className="chat-model-picker hub-search-picker" ref={rootRef}>
@@ -57,7 +81,7 @@ export function HfDatasetPicker({ value, onChange, disabled }: HfDatasetPickerPr
         aria-haspopup="listbox"
         aria-expanded={open}
       >
-        <span className="chat-model-picker-label">{value || "Search datasets…"}</span>
+        <span className="chat-model-picker-label">{triggerLabel}</span>
         <span className="chat-model-picker-chevron" aria-hidden>
           <IconChevronDown size={14} />
         </span>
@@ -68,16 +92,35 @@ export function HfDatasetPicker({ value, onChange, disabled }: HfDatasetPickerPr
           <HubComboboxSearch
             searchRef={searchRef}
             value={search}
-            placeholder="Search Hugging Face datasets…"
+            placeholder="Search Hugging Face datasets or paste a local path…"
             onChange={setSearch}
             onEscape={() => setOpen(false)}
+            onEnter={applyCustom}
           />
 
           <div className="chat-model-picker-list">
-            {!search.trim() && (
-              <div className="chat-model-picker-hint">Type to search Hugging Face datasets.</div>
+            <div className="chat-model-picker-section">
+              <div className="chat-model-picker-section-title">Quick start</div>
+              <button
+                type="button"
+                role="option"
+                aria-selected={value === BUNDLED_SAMPLE}
+                className={`chat-model-picker-option${value === BUNDLED_SAMPLE ? " active" : ""}`}
+                onClick={() => pick(BUNDLED_SAMPLE)}
+              >
+                <span className="chat-model-picker-option-name">Bundled sample dataset</span>
+                <span className="chat-model-picker-option-meta">
+                  {BUNDLED_SAMPLE} · 4 chat rows for smoke tests
+                </span>
+              </button>
+            </div>
+
+            {!q && (
+              <div className="chat-model-picker-hint">
+                Type to search Hugging Face datasets, or press Enter to use a hub ID or local path.
+              </div>
             )}
-            {loading && search.trim() && results.length === 0 && (
+            {loading && q && !customIsLocal && results.length === 0 && (
               <div className="chat-model-picker-hint">Searching datasets…</div>
             )}
             {results.map((d) => (
@@ -97,7 +140,19 @@ export function HfDatasetPicker({ value, onChange, disabled }: HfDatasetPickerPr
                 </span>
               </button>
             ))}
-            {empty && <div className="chat-model-picker-hint">No datasets match your search.</div>}
+            {showCustomHint && (
+              <button
+                type="button"
+                role="option"
+                className="chat-model-picker-option chat-model-picker-option-hub"
+                onClick={applyCustom}
+              >
+                <span className="chat-model-picker-option-name">
+                  {customIsLocal ? "Use local dataset path" : "Use exact dataset ID"}
+                </span>
+                <span className="chat-model-picker-option-meta">{q}</span>
+              </button>
+            )}
           </div>
         </div>
       )}
