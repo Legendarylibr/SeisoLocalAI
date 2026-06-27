@@ -240,6 +240,7 @@ def _iter_speculative_tokens_cached(
         if not _kv_cache_usable(d_out):
             raise RuntimeError("draft model returned no past_key_values")
         draft_past = d_out.past_key_values
+        draft_prefix_logits = d_out.logits[:, -1, :]
 
         while tokens_generated < max_new_tokens:
             if stop():
@@ -249,15 +250,18 @@ def _iter_speculative_tokens_cached(
             saved_prefix_logits = prefix_logits
 
             proposed: list[Any] = []
+            next_logits = draft_prefix_logits
             for _ in range(k):
-                d_out = _model_forward(draft, input_ids_d[:, -1:], past_key_values=draft_past)
-                draft_past = d_out.past_key_values
-                next_logits = d_out.logits[:, -1, :]
                 if temperature > 0:
                     next_logits = next_logits / max(temperature, 0.01)
                 next_id = torch.argmax(next_logits, dim=-1, keepdim=True)
                 proposed.append(next_id)
                 input_ids_d = torch.cat([input_ids_d, next_id.to(draft_device)], dim=1)
+                d_out = _model_forward(draft, next_id.to(draft_device), past_key_values=draft_past)
+                if not _kv_cache_usable(d_out):
+                    raise RuntimeError("draft model returned no past_key_values")
+                draft_past = d_out.past_key_values
+                next_logits = d_out.logits[:, -1, :]
 
             proposed_ids_t = torch.cat(proposed, dim=1).to(target_device)
 
@@ -269,16 +273,11 @@ def _iter_speculative_tokens_cached(
                 input_ids_t = torch.cat([input_ids_t, proposed_ids_t], dim=1)
                 target_past = v_out.past_key_values
                 prefix_logits = verify_logits[:, k - 1, :]
+                draft_prefix_logits = next_logits
                 tokens_generated += k
                 chunk, decoded_len = _decode_new_text(tok, input_ids_t, decoded_len)
                 if chunk:
                     yield StreamToken(chunk, k)
-
-                input_ids_d = input_ids_t.to(draft_device)
-                d_out = _model_forward(draft, input_ids_d)
-                if not _kv_cache_usable(d_out):
-                    raise RuntimeError("draft model returned no past_key_values")
-                draft_past = d_out.past_key_values
                 continue
 
             if accept > 0:
@@ -318,6 +317,7 @@ def _iter_speculative_tokens_cached(
             if not _kv_cache_usable(d_out):
                 raise RuntimeError("draft model returned no past_key_values")
             draft_past = d_out.past_key_values
+            draft_prefix_logits = d_out.logits[:, -1, :]
 
             tokens_generated += 1
             chunk, decoded_len = _decode_new_text(tok, input_ids_t, decoded_len)
@@ -412,10 +412,10 @@ def _iter_speculative_tokens_dflash_cached(
             )
 
             if not proposed_ids:
-                c_out = _model_forward(target, input_ids_t[:, -1:], past_key_values=target_past)
-                target_past = c_out.past_key_values
-                next_id = torch.argmax(c_out.logits[:, -1, :], dim=-1, keepdim=True).to(target_device)
+                next_id = torch.argmax(prefix_logits, dim=-1, keepdim=True).to(target_device)
                 input_ids_t = torch.cat([input_ids_t, next_id], dim=1)
+                c_out = _model_forward(target, next_id, past_key_values=target_past)
+                target_past = c_out.past_key_values
                 prefix_logits = c_out.logits[:, -1, :]
                 tokens_generated += 1
                 chunk, decoded_len = _decode_new_text(target_tok, input_ids_t, decoded_len)

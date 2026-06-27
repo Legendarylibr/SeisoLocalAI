@@ -103,6 +103,38 @@ class _NoCacheFakeModel(_FakeModel):
         return SimpleNamespace(logits=out.logits, past_key_values=None)
 
 
+class _CacheStrictIncrementModel:
+    """Model that rejects duplicated cache tokens and predicts 4, 5, 6... after a 3-token prompt."""
+
+    def __init__(self) -> None:
+        import torch
+
+        self.device = torch.device("cpu")
+
+    def parameters(self):
+        import torch
+
+        yield torch.zeros(1)
+
+    def __call__(self, input_ids, past_key_values=None, use_cache=False):
+        import torch
+
+        batch, length = input_ids.shape
+        vocab = 16
+        past_len = int(past_key_values or 0)
+        if past_key_values is not None:
+            expected = past_len + 1
+            actual = int(input_ids[0, 0].item())
+            assert actual == expected, f"expected cached token {expected}, got {actual}"
+
+        logits = torch.zeros(batch, length, vocab)
+        for pos in range(length):
+            next_id = min(past_len + pos + 2, vocab - 1)
+            logits[:, pos, next_id] = 10.0
+        cached = past_len + length if use_cache else None
+        return SimpleNamespace(logits=logits, past_key_values=cached)
+
+
 def test_default_num_speculative_tokens_from_payload():
     assert default_num_speculative_tokens({"num_speculative_tokens": 3}) == 3
 
@@ -219,6 +251,27 @@ def test_partial_rejection_still_streams():
 
     assert chunks
     assert any("5" in chunk.text or "6" in chunk.text for chunk in chunks)
+
+
+def test_cached_draft_does_not_replay_prompt_token():
+    tok = _FakeTokenizer()
+    bundle = TorchSpeculativeBundle(
+        target_model=_CacheStrictIncrementModel(),
+        target_tokenizer=tok,
+        draft_model=_CacheStrictIncrementModel(),
+        draft_tokenizer=tok,
+    )
+
+    chunks = list(
+        iter_speculative_tokens(
+            bundle=bundle,
+            prompt="hello",
+            max_new_tokens=2,
+            num_speculative_tokens=2,
+        )
+    )
+
+    assert "".join(chunk.text for chunk in chunks) == " 4 5"
 
 
 def test_kv_cache_falls_back_when_past_key_values_missing(monkeypatch):
