@@ -252,6 +252,7 @@ def test_llama_load_kwargs_cuda_defaults(monkeypatch):
             monkeypatch.delenv(key, raising=False)
     monkeypatch.setattr(platform, "system", lambda: "Linux")
     monkeypatch.setattr(platform, "machine", lambda: "x86_64")
+    monkeypatch.setattr(os, "cpu_count", lambda: 24)
     monkeypatch.setattr("seiso.inference.model_pool._cuda_available", lambda: True)
     monkeypatch.setattr("seiso.inference.model_pool._llama_gpu_offload_ok", lambda: True)
     monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 9000)
@@ -259,11 +260,26 @@ def test_llama_load_kwargs_cuda_defaults(monkeypatch):
 
     kwargs = llama_load_kwargs(4096)
     assert kwargs["n_gpu_layers"] == -1
+    assert kwargs["n_threads"] == 12
+    assert kwargs["n_threads_batch"] == 16
     assert kwargs["n_batch"] == 1792
     assert kwargs["n_ubatch"] == 768
     assert kwargs["flash_attn"] is True
     assert kwargs["offload_kqv"] is True
     assert kwargs["op_offload"] is True
+
+
+def test_llama_load_kwargs_threads_batch_override(monkeypatch):
+    for key in list(os.environ):
+        if key.startswith("SEISO_LLAMA_"):
+            monkeypatch.delenv(key, raising=False)
+    monkeypatch.setattr(os, "cpu_count", lambda: 16)
+    monkeypatch.setattr("seiso.inference.model_pool._llama_gpu_offload_ok", lambda: False)
+    monkeypatch.setenv("SEISO_LLAMA_THREADS_BATCH", "5")
+
+    kwargs = llama_load_kwargs(2048)
+
+    assert kwargs["n_threads_batch"] == 5
 
 
 def test_llama_load_kwargs_nvidia_smi_without_cuda_torch(monkeypatch):

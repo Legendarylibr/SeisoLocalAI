@@ -24,6 +24,14 @@ def _default_llama_threads() -> int:
     return max(2, min(cpus - 2 if cpus > 4 else cpus, 12))
 
 
+def _default_llama_threads_batch(n_threads: int) -> int:
+    """Use wider CPU parallelism for prompt prefill without changing decode threads."""
+    if "SEISO_LLAMA_THREADS" in os.environ:
+        return n_threads
+    cpus = os.cpu_count() or 4
+    return max(n_threads, min(cpus, 16))
+
+
 def _cuda_available() -> bool:
     try:
         import torch
@@ -442,7 +450,10 @@ def llama_load_kwargs(n_ctx: int, *, model_path: str | None = None) -> dict[str,
     kwargs: dict[str, Any] = {
         "n_ctx": n_ctx,
         "n_threads": n_threads,
-        "n_threads_batch": env_int("SEISO_LLAMA_THREADS_BATCH", n_threads),
+        "n_threads_batch": env_int(
+            "SEISO_LLAMA_THREADS_BATCH",
+            _default_llama_threads_batch(n_threads),
+        ),
         "n_batch": n_batch,
         "n_ubatch": n_ubatch,
         "n_gpu_layers": n_gpu_layers,
