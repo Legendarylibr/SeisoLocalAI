@@ -85,6 +85,13 @@ def _build_labels(input_ids: list[int], prompt_len: int) -> list[int]:
     return labels
 
 
+def _rows_from_batch(batch: dict[str, list[Any]]) -> list[dict[str, Any]]:
+    return [
+        dict(zip(batch.keys(), values, strict=True))
+        for values in zip(*batch.values(), strict=True)
+    ]
+
+
 def prepare_tokenized_dataset(
     dataset,
     tokenizer,
@@ -103,10 +110,7 @@ def prepare_tokenized_dataset(
     mask_assistant_only = not train_on_inputs and fmt != DatasetFormat.TEXT
 
     def tokenize_batch(batch):
-        rows = [
-            dict(zip(batch.keys(), values, strict=True))
-            for values in zip(*batch.values(), strict=True)
-        ]
+        rows = _rows_from_batch(batch)
         texts = [format_sample(row, fmt, tokenizer) for row in rows]
         encoded = tokenizer(texts, truncation=True, max_length=max_seq_length, padding=False)
         encoded["labels"] = [list(ids) for ids in encoded["input_ids"]]
@@ -166,12 +170,8 @@ def format_dataset_text(
     eos = getattr(tokenizer, "eos_token", "") or ""
 
     def add_text_batch(batch):
-        rows = [
-            dict(zip(batch.keys(), values, strict=True))
-            for values in zip(*batch.values(), strict=True)
-        ]
         texts = []
-        for row in rows:
+        for row in _rows_from_batch(batch):
             text = format_sample(row, fmt, tokenizer)
             if eos and not text.endswith(eos):
                 text += eos

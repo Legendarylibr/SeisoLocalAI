@@ -18,6 +18,7 @@ from seiso.experiments.quant_regression import (
     resolve_llama_cpp_python_shim,
     summarize_route_report,
 )
+from seiso.experiments.hf_deploy_regression import summarize_hf_deploy_report
 from seiso.rl_quant.bootstrap import require_adaptive_quant
 from seiso.rl_quant.config_builder import build_framework_config
 from seiso.training.config import TrainConfig
@@ -75,6 +76,40 @@ def test_summarize_route_report():
     assert metrics["eval_mean_reward"] == pytest.approx(1.1)
     assert metrics["recommended_quant"] == "Q8_0"
     assert metrics["reward_regression"] == pytest.approx(0.02)
+
+
+def test_summarize_route_report_ignores_non_finite_metrics():
+    report = {
+        "rows": [
+            {"route_id": "gguf_q4", "reward": "nan", "perplexity": "inf"},
+            {"route_id": "gguf_q8", "reward": "bad", "perplexity": None},
+        ],
+        "recommendations": [
+            {
+                "route_id": "gguf_q4",
+                "quant_label": "Q4_K_M",
+                "reward_regression": "bad",
+                "perplexity_regression": "inf",
+            }
+        ],
+    }
+    metrics = summarize_route_report(report)
+    assert metrics["eval_mean_reward"] is None
+    assert metrics["eval_mean_perplexity"] is None
+    assert metrics["reward_regression"] is None
+    assert metrics["perplexity_regression"] is None
+
+
+def test_summarize_hf_deploy_report_ignores_non_finite_metrics():
+    report = {
+        "rows": [{"reward": "nan", "perplexity": "inf"}],
+        "recommendations": [{"route_id": "4bit", "deploy_quant": "4bit", "memory_mb": "bad"}],
+    }
+    metrics = summarize_hf_deploy_report(report)
+    assert metrics["eval_mean_reward"] is None
+    assert metrics["eval_mean_perplexity"] is None
+    assert metrics["recommended_quant"] == "4bit"
+    assert metrics["mean_selected_memory_mb"] is None
 
 
 def test_format_report_table_includes_errors():
