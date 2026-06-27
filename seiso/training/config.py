@@ -100,7 +100,7 @@ class TrainConfig(BaseModel):
     # ── Performance optimizations (auto-tuned when left at defaults) ──
     dataloader_num_workers: int = 0  # 0 = auto-detect (min(4, cpu_count//2) on CUDA, 0 on CPU)
     dataloader_persistent_workers: bool = True
-    dataloader_prefetch_factor: int | None = None  # None = let HF pick (2)
+    dataloader_prefetch_factor: int | None = None  # None = auto 2 when CUDA workers are enabled
     group_by_length: bool = True  # batch similar-length sequences → less padding waste
     padding_free: bool = False  # use flash-attention padding-free packing (CUDA only)
     neftune_noise_alpha: float | None = 5.0  # NEFTune instruction-tuning noise (None to disable)

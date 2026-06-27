@@ -28,6 +28,7 @@ from seiso.inference.tuning import (
     configure_torch_inference,
     estimate_llama_n_ctx,
     extract_mlx_token_text,
+    generate_with_cache_fallback,
     llama_completion_kwargs,
     mlx_stream_kwargs,
     torch_generate_kwargs,
@@ -402,7 +403,7 @@ class LocalInferenceRunner:
         def _generate() -> None:
             with torch.inference_mode():
                 try:
-                    model.generate(**gen_kwargs)
+                    generate_with_cache_fallback(model, gen_kwargs)
                 except Exception as exc:
                     if not is_oom_error(exc):
                         raise
@@ -415,7 +416,7 @@ class LocalInferenceRunner:
                         "Torch inference OOM — retrying with max_new_tokens=%s",
                         reduced["max_new_tokens"],
                     )
-                    model.generate(**reduced)
+                    generate_with_cache_fallback(model, reduced)
 
         thread = threading.Thread(target=_generate, daemon=True)
         thread.start()

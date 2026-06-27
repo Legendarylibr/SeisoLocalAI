@@ -5,6 +5,7 @@ from __future__ import annotations
 from seiso.inference.tuning import (
     estimate_llama_n_ctx,
     extract_mlx_token_text,
+    generate_with_cache_fallback,
     llama_completion_kwargs,
     mlx_stream_kwargs,
     torch_generate_kwargs,
@@ -50,8 +51,52 @@ def test_torch_generate_kwargs_greedy():
     streamer = object()
     kwargs = torch_generate_kwargs({"max_tokens": 256, "temperature": 0}, inputs, streamer)
     assert kwargs["do_sample"] is False
+    assert kwargs["num_beams"] == 1
     assert kwargs["use_cache"] is True
+    assert kwargs["cache_implementation"] == "dynamic"
+    assert kwargs["return_dict_in_generate"] is False
+    assert kwargs["output_scores"] is False
     assert kwargs["max_new_tokens"] == 256
+
+
+def test_torch_generate_kwargs_cache_can_be_disabled(monkeypatch):
+    monkeypatch.setenv("SEISO_TORCH_CACHE_IMPLEMENTATION", "off")
+    kwargs = torch_generate_kwargs({"max_tokens": 32, "temperature": 0}, {}, object())
+    assert "cache_implementation" not in kwargs
+
+
+def test_torch_generate_kwargs_payload_overrides_cache_impl(monkeypatch):
+    monkeypatch.setenv("SEISO_TORCH_CACHE_IMPLEMENTATION", "dynamic")
+    kwargs = torch_generate_kwargs(
+        {"max_tokens": 32, "temperature": 0, "cache_implementation": "static"},
+        {},
+        object(),
+    )
+    assert kwargs["cache_implementation"] == "static"
+
+
+def test_generate_with_cache_fallback_retries_unsupported_cache_impl():
+    calls: list[dict] = []
+
+    class _Model:
+        def generate(self, **kwargs):
+            calls.append(kwargs)
+            if "cache_implementation" in kwargs:
+                raise ValueError("The following model_kwargs are not used: ['cache_implementation']")
+            return "ok"
+
+    assert generate_with_cache_fallback(_Model(), {"cache_implementation": "dynamic"}) == "ok"
+    assert calls == [{"cache_implementation": "dynamic"}, {}]
+
+
+def test_generate_with_cache_fallback_keeps_unrelated_errors():
+    class _Model:
+        def generate(self, **kwargs):
+            raise ValueError("bad prompt")
+
+    pytest = __import__("pytest")
+    with pytest.raises(ValueError, match="bad prompt"):
+        generate_with_cache_fallback(_Model(), {"cache_implementation": "dynamic"})
 
 
 def test_estimate_llama_n_ctx_sizes_to_prompt(monkeypatch):

@@ -44,6 +44,7 @@ from seiso.training.multi_gpu import configure_training_args, detect_training_la
 from seiso.training.dataset_analysis import analyze_training_dataset
 from seiso.training.practices import (
     default_pad_to_multiple_of,
+    resolve_dataloader_settings,
     resolve_compute_dtype,
     resolve_map_workers,
     resolve_optimizer,
@@ -218,16 +219,26 @@ class SeisoTrainer:
         use_sft_text = cfg.packing
         data_collator = None
         dataset_text_field = None
+        map_workers = resolve_map_workers(cfg)
 
         if use_sft_text:
-            train_ds, detected_fmt = format_dataset_text(train_ds, tokenizer, ds_fmt)
+            train_ds, detected_fmt = format_dataset_text(
+                train_ds,
+                tokenizer,
+                ds_fmt,
+                num_proc=map_workers,
+            )
             dataset_text_field = "text"
             tokenized_eval = None
             if eval_ds is not None:
-                tokenized_eval, _ = format_dataset_text(eval_ds, tokenizer, detected_fmt)
+                tokenized_eval, _ = format_dataset_text(
+                    eval_ds,
+                    tokenizer,
+                    detected_fmt,
+                    num_proc=map_workers,
+                )
                 eval_ds = tokenized_eval
         else:
-            map_workers = resolve_map_workers(cfg)
             train_ds, detected_fmt = prepare_tokenized_dataset(
                 train_ds,
                 tokenizer,
@@ -494,12 +505,11 @@ class SeisoTrainer:
 
         optim = resolve_optimizer(cfg.quant.value, use_cpu=use_cpu)
 
-        # ── Dataloader workers: auto-detect when not explicitly set ──
-        num_workers = cfg.dataloader_num_workers
-        if num_workers == 0 and cuda_available:
-            cpu_count = os.cpu_count() or 4
-            num_workers = min(4, max(1, cpu_count // 2))
-        persistent_workers = num_workers > 0 and cfg.dataloader_persistent_workers
+        # Overlap CPU input preparation with GPU compute when workers are available.
+        num_workers, persistent_workers, prefetch_factor = resolve_dataloader_settings(
+            cfg,
+            cuda_available=cuda_available,
+        )
 
         # ── Gradient checkpointing: use non-reentrant for better speed ──
         grad_ckpt_kwargs = None
@@ -557,8 +567,8 @@ class SeisoTrainer:
         # group_by_length was removed in transformers 5.x — only add when available
         if "group_by_length" in _ta_fields:
             base["group_by_length"] = cfg.group_by_length and not dataset_text_field
-        if cfg.dataloader_prefetch_factor is not None and num_workers > 0:
-            base["dataloader_prefetch_factor"] = cfg.dataloader_prefetch_factor
+        if prefetch_factor is not None:
+            base["dataloader_prefetch_factor"] = prefetch_factor
         if grad_ckpt_kwargs is not None:
             base["gradient_checkpointing_kwargs"] = grad_ckpt_kwargs
         if cfg.neftune_noise_alpha is not None and not use_cpu:
@@ -638,7 +648,22 @@ class SeisoTrainer:
         model = SentenceTransformer(cfg.model_id)
         g = torch.Generator()
         g.manual_seed(cfg.seed)
-        loader = DataLoader(examples, shuffle=True, batch_size=cfg.batch_size, generator=g)
+        cuda_available = torch.cuda.is_available()
+        num_workers, persistent_workers, prefetch_factor = resolve_dataloader_settings(
+            cfg,
+            cuda_available=cuda_available,
+        )
+        loader_kwargs: dict[str, Any] = {
+            "shuffle": True,
+            "batch_size": cfg.batch_size,
+            "generator": g,
+            "num_workers": num_workers,
+            "pin_memory": training_pin_memory(),
+            "persistent_workers": persistent_workers,
+        }
+        if prefetch_factor is not None:
+            loader_kwargs["prefetch_factor"] = prefetch_factor
+        loader = DataLoader(examples, **loader_kwargs)
         loss = losses.MultipleNegativesRankingLoss(model)
         out = cfg.output_dir / f"embed-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}"
         model.fit(
