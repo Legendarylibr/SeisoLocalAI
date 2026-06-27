@@ -217,9 +217,15 @@ def torch_generate_kwargs(
         "max_new_tokens": payload.get("max_tokens", 512),
         "streamer": streamer,
         "use_cache": True,
+        "return_dict_in_generate": False,
+        "output_scores": False,
     }
     if pad_token_id is not None:
         kwargs["pad_token_id"] = pad_token_id
+
+    cache_impl = _torch_cache_implementation(payload)
+    if cache_impl:
+        kwargs["cache_implementation"] = cache_impl
 
     if temperature > 0:
         kwargs["do_sample"] = True
@@ -229,7 +235,46 @@ def torch_generate_kwargs(
             kwargs["top_p"] = float(top_p)
     else:
         kwargs["do_sample"] = False
+        kwargs["num_beams"] = 1
     return kwargs
+
+
+def _torch_cache_implementation(payload: dict[str, Any]) -> str | None:
+    """Resolve Transformers generation cache implementation for faster decode when supported."""
+    raw = payload.get("cache_implementation")
+    if raw is None:
+        raw = env_str("SEISO_TORCH_CACHE_IMPLEMENTATION", "dynamic")
+    text = str(raw).strip().lower()
+    if not text or text in {"none", "false", "off", "disable", "disabled"}:
+        return None
+    return text
+
+
+def generate_with_cache_fallback(model: Any, gen_kwargs: dict[str, Any]) -> Any:
+    """Run ``generate`` and retry without cache_implementation if the stack rejects it."""
+    try:
+        return model.generate(**gen_kwargs)
+    except (TypeError, ValueError) as exc:
+        if "cache_implementation" not in gen_kwargs or not _looks_like_unsupported_kwarg(exc):
+            raise
+        reduced = dict(gen_kwargs)
+        reduced.pop("cache_implementation", None)
+        logger.debug("Retrying torch generate without cache_implementation: %s", exc)
+        return model.generate(**reduced)
+
+
+def _looks_like_unsupported_kwarg(exc: BaseException) -> bool:
+    text = str(exc).lower()
+    return (
+        "cache_implementation" in text
+        and (
+            "unexpected" in text
+            or "unused" in text
+            or "not used" in text
+            or "not supported" in text
+            or "invalid" in text
+        )
+    )
 
 
 def llama_completion_kwargs(payload: dict[str, Any]) -> dict[str, Any]:

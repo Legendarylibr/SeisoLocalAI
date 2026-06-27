@@ -31,6 +31,56 @@ def resolve_map_workers(config: TrainConfig) -> int | None:
     return default_dataset_num_proc(config.dataset_num_proc)
 
 
+def default_dataloader_num_workers(
+    explicit: int,
+    *,
+    cuda_available: bool,
+    cpu_count: int | None = None,
+) -> int:
+    """Training DataLoader workers: parallelize on CUDA, stay single-process on CPU."""
+    if explicit > 0:
+        return explicit
+    if not cuda_available:
+        return 0
+    cpu = cpu_count if cpu_count is not None else (os.cpu_count() or 4)
+    if cpu <= 2:
+        return 0
+    return min(4, max(1, cpu // 2))
+
+
+def default_dataloader_prefetch_factor(
+    explicit: int | None,
+    *,
+    num_workers: int,
+    cuda_available: bool,
+) -> int | None:
+    """Prefetch batches only when worker processes can overlap CPU input work with GPU compute."""
+    if num_workers <= 0:
+        return None
+    if explicit is not None:
+        return explicit if explicit > 0 else None
+    return 2 if cuda_available else None
+
+
+def resolve_dataloader_settings(
+    config: TrainConfig,
+    *,
+    cuda_available: bool,
+) -> tuple[int, bool, int | None]:
+    """Return DataLoader worker, persistent-worker, and prefetch settings."""
+    workers = default_dataloader_num_workers(
+        config.dataloader_num_workers,
+        cuda_available=cuda_available,
+    )
+    persistent = workers > 0 and config.dataloader_persistent_workers
+    prefetch = default_dataloader_prefetch_factor(
+        config.dataloader_prefetch_factor,
+        num_workers=workers,
+        cuda_available=cuda_available,
+    )
+    return workers, persistent, prefetch
+
+
 def learning_rate_for_method(method: TrainMethod, *, explicit: float | None = None) -> float:
     """Method-appropriate LR without model-specific tuning."""
     if explicit is not None and explicit > 0:

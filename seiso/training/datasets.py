@@ -102,6 +102,16 @@ def prepare_tokenized_dataset(
     logger.info("Dataset format: %s, samples: %d", fmt.value, len(dataset))
     mask_assistant_only = not train_on_inputs and fmt != DatasetFormat.TEXT
 
+    def tokenize_batch(batch):
+        rows = [
+            dict(zip(batch.keys(), values, strict=True))
+            for values in zip(*batch.values(), strict=True)
+        ]
+        texts = [format_sample(row, fmt, tokenizer) for row in rows]
+        encoded = tokenizer(texts, truncation=True, max_length=max_seq_length, padding=False)
+        encoded["labels"] = [list(ids) for ids in encoded["input_ids"]]
+        return encoded
+
     def tokenize(sample):
         if mask_assistant_only:
             messages = extract_messages(sample, fmt)
@@ -134,11 +144,20 @@ def prepare_tokenized_dataset(
     map_kwargs: dict[str, Any] = {"remove_columns": dataset.column_names}
     if num_proc and num_proc > 1:
         map_kwargs["num_proc"] = num_proc
-    tokenized = dataset.map(tokenize, **map_kwargs)
+    if mask_assistant_only:
+        tokenized = dataset.map(tokenize, **map_kwargs)
+    else:
+        tokenized = dataset.map(tokenize_batch, batched=True, **map_kwargs)
     return tokenized, fmt
 
 
-def format_dataset_text(dataset, tokenizer, dataset_format: DatasetFormat = DatasetFormat.AUTO):
+def format_dataset_text(
+    dataset,
+    tokenizer,
+    dataset_format: DatasetFormat = DatasetFormat.AUTO,
+    *,
+    num_proc: int | None = None,
+):
     """Add `text` column for TRL SFTTrainer."""
     fmt = dataset_format
     if fmt == DatasetFormat.AUTO and len(dataset) > 0:
@@ -146,10 +165,23 @@ def format_dataset_text(dataset, tokenizer, dataset_format: DatasetFormat = Data
 
     eos = getattr(tokenizer, "eos_token", "") or ""
 
-    def add_text(sample):
-        text = format_sample(sample, fmt, tokenizer)
-        if eos and not text.endswith(eos):
-            text += eos
-        return {"text": text}
+    def add_text_batch(batch):
+        rows = [
+            dict(zip(batch.keys(), values, strict=True))
+            for values in zip(*batch.values(), strict=True)
+        ]
+        texts = []
+        for row in rows:
+            text = format_sample(row, fmt, tokenizer)
+            if eos and not text.endswith(eos):
+                text += eos
+            texts.append(text)
+        return {"text": texts}
 
-    return dataset.map(add_text, remove_columns=dataset.column_names), fmt
+    map_kwargs: dict[str, Any] = {
+        "batched": True,
+        "remove_columns": dataset.column_names,
+    }
+    if num_proc and num_proc > 1:
+        map_kwargs["num_proc"] = num_proc
+    return dataset.map(add_text_batch, **map_kwargs), fmt
