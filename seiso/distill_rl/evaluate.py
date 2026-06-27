@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import math
+import statistics
 from pathlib import Path
 from typing import Any
 
@@ -73,7 +75,7 @@ def _evaluate_checkpoint(
             eval_texts[0] if eval_texts else "def fib(n):",
             device,
         )
-        val_accuracy = _val_preference_accuracy(model, tokenizer, val_rows, device)
+        val_metrics = _val_preference_metrics(model, tokenizer, val_rows, device)
     finally:
         release_causal_lm(model)
 
@@ -82,24 +84,56 @@ def _evaluate_checkpoint(
         "perplexity": ppl,
         "tokens_per_second": tps,
         "avg_time_ms": ms,
-        "val_preference_accuracy": val_accuracy,
+        **val_metrics,
     }
 
 
-def _val_preference_accuracy(model, tokenizer, val_rows: list[dict[str, Any]], device) -> float:
+def _val_preference_metrics(
+    model,
+    tokenizer,
+    val_rows: list[dict[str, Any]],
+    device,
+) -> dict[str, float | int]:
     if not val_rows:
-        return 0.0
+        return {
+            "val_preference_accuracy": 0.0,
+            "val_preference_margin_mean": 0.0,
+            "val_preference_margin_median": 0.0,
+            "val_preference_count": 0,
+            "alignment_score": 0.0,
+        }
 
     correct = 0
+    margins: list[float] = []
     for row in val_rows:
         chosen_lp = _sequence_logprob(model, tokenizer, row["prompt"], row["chosen"], device)
         rejected_lp = _sequence_logprob(model, tokenizer, row["prompt"], row["rejected"], device)
-        if chosen_lp > rejected_lp:
+        margin = chosen_lp - rejected_lp
+        margins.append(margin)
+        if margin > 0:
             correct += 1
-    return correct / len(val_rows)
+    accuracy = correct / len(val_rows)
+    mean_margin = statistics.fmean(margins)
+    median_margin = statistics.median(margins)
+    alignment_score = accuracy + 0.05 * math.tanh(mean_margin)
+    return {
+        "val_preference_accuracy": accuracy,
+        "val_preference_margin_mean": mean_margin,
+        "val_preference_margin_median": median_margin,
+        "val_preference_count": len(val_rows),
+        "alignment_score": alignment_score,
+    }
 
 
-def _sequence_logprob(model, tokenizer, prompt: str, completion: str, device) -> float:
+def _sequence_logprob(
+    model,
+    tokenizer,
+    prompt: str,
+    completion: str,
+    device,
+    *,
+    average: bool = True,
+) -> float:
     import torch
 
     text = f"{prompt}{completion}"
@@ -112,6 +146,8 @@ def _sequence_logprob(model, tokenizer, prompt: str, completion: str, device) ->
         labels = enc["input_ids"][0, prompt_len:]
         log_probs = torch.log_softmax(logits, dim=-1)
         token_log_probs = log_probs.gather(1, labels.unsqueeze(1)).squeeze(1)
+        if average:
+            return float(token_log_probs.mean().item()) if token_log_probs.numel() else 0.0
         return float(token_log_probs.sum().item())
 
 

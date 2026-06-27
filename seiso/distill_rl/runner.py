@@ -399,10 +399,14 @@ def _run_dpo(
         output_dir=str(config.dpo_output_dir),
         run_name=f"seiso_{config.job_id[:8]}",
         beta=config.dpo_beta,
+        average_log_prob=config.dpo_average_log_prob,
         learning_rate=config.dpo_learning_rate,
         num_epochs=config.dpo_epochs,
         per_device_train_batch_size=config.dpo_batch_size,
         gradient_accumulation_steps=config.dpo_gradient_accumulation_steps,
+        max_grad_norm=config.dpo_max_grad_norm,
+        warmup_ratio=config.dpo_warmup_ratio,
+        weight_decay=config.dpo_weight_decay,
         preference_dataset_path=str(preferences_path),
         save_steps=config.dpo_save_steps,
         seed=config.seed,
@@ -424,7 +428,9 @@ def _run_dpo(
     if on_log:
         on_log(
             f"DPO on {len(examples)} train preferences "
-            f"(beta={settings.beta}, epochs={settings.num_epochs}, lora={settings.use_lora}, "
+            f"(beta={settings.beta}, lr={settings.learning_rate:g}, "
+            f"effective_batch={settings.per_device_train_batch_size * settings.gradient_accumulation_steps}, "
+            f"epochs={settings.num_epochs}, lora={settings.use_lora}, "
             f"chat_template={settings.use_chat_template})"
         )
 

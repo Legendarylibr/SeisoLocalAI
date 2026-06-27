@@ -150,6 +150,36 @@ def test_aggregate_multiseed_runs(tmp_path: Path):
     assert stats["perplexity_n"] == 2.0
 
 
+def test_val_preference_metrics_include_margin_and_alignment(monkeypatch):
+    from seiso.distill_rl import evaluate
+
+    scores = {
+        ("p", "good"): -0.2,
+        ("p", "bad"): -0.4,
+        ("q", "short"): -0.5,
+        ("q", "long"): -0.1,
+    }
+
+    def fake_logprob(_model, _tokenizer, prompt, completion, _device):
+        return scores[(prompt, completion)]
+
+    monkeypatch.setattr(evaluate, "_sequence_logprob", fake_logprob)
+    metrics = evaluate._val_preference_metrics(
+        object(),
+        object(),
+        [
+            {"prompt": "p", "chosen": "good", "rejected": "bad"},
+            {"prompt": "q", "chosen": "short", "rejected": "long"},
+        ],
+        object(),
+    )
+
+    assert metrics["val_preference_accuracy"] == pytest.approx(0.5)
+    assert metrics["val_preference_margin_mean"] == pytest.approx(-0.1)
+    assert metrics["val_preference_count"] == 2
+    assert metrics["alignment_score"] < metrics["val_preference_accuracy"]
+
+
 def test_run_distill_rl_job_orchestrates_stages(tmp_path: Path):
     from seiso.distill_rl.runner import run_distill_rl_job
 
