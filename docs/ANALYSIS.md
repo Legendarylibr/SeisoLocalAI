@@ -21,7 +21,7 @@ Seiso is a **mature, ambitious local-first AI workspace** (GPL-3.0) that combine
 - QLoRA / LoRA / full fine-tuning with live metrics/SSE.
 - Export (LoRA merge, GGUF multi-quant, Hub publish + model cards).
 - Advanced research pipelines: LLM compression (distill + optional prune + FT + quant), Distill-RL (KL + DPO), RL quantization (adaptive + optional kernel policy co-training).
-- RAG/knowledge bases, visual recipe graphs, provider routing (litellm), OpenAI-compatible API (`/v1`).
+- RAG/knowledge bases, visual recipe graphs, provider routing, OpenAI-compatible API (`/v1`).
 
 **Strengths:**
 - Excellent hardware awareness and memory protection (guards, headroom, unload, low-VRAM modes).
@@ -75,9 +75,9 @@ User
 - **Kernels**: CUDA/Triton/PyTorch dispatch + monkey-patch lifecycle (restore guaranteed).
 - **Security**: JWT auth + onboarding, CSRF, rate limit, CSP (nonce), URL policy, token revocation, nvidia boundary reporting, path sandbox.
 - **Repro**: Manifests (hash chained via vendored replay), provenance, seeds, snapshots.
-- **Inference**: Model pool with unload, backends auto-select, speculative, context limits, router mode.
+- **Inference**: Model pool with unload, backends auto-select, speculative, context limits, external router client mode.
 
-Entry points: `start` script, `seiso` CLI (`forge`, `train`, `chat`, `export`, `compress`, `distill-rl`, `rl-quant`, `experiment`, `router`, …), `forge.main:create_app`, `seiso-train-worker`, `seiso-bench-kernels`.
+Entry points: `start` script, `seiso` CLI (`forge`, `train`, `chat`, `export`, `compress`, `distill-rl`, `rl-quant`, `experiment`, …), `forge.main:create_app`, `seiso-train-worker`, `seiso-bench-kernels`.
 
 ---
 
@@ -89,7 +89,7 @@ Entry points: `start` script, `seiso` CLI (`forge`, `train`, `chat`, `export`, `
 - Forge: `forge/api/routes/inference.py`, services (inference_models, model_pool, llamacpp_runtime).
 - UI: ChatPage.tsx (model picker, context bar, streaming, router status, memory free).
 - OpenAI compat lives at root `/v1/...` (no /api prefix).
-- Router mode (`__seiso_router__`) for intelligent model selection.
+- External router mode (`__seiso_router__`) for intelligent model selection through a separately running router service.
 
 ### Training Studio (QLoRA / LoRA / full)
 - `seiso/training/{config.py,trainer.py,sft.py,datasets.py,preprocess.py,metrics.py,recommendations.py,multi_gpu.py,worker.py}`
@@ -137,7 +137,7 @@ Entry points: `start` script, `seiso` CLI (`forge`, `train`, `chat`, `export`, `
 - Bench: `seiso-bench-kernels`.
 
 ### Other
-- Knowledge/RAG, Recipes (xyflow graph), Integrations (litellm providers), Settings (HF token, hardware, security toggles).
+- Knowledge/RAG, Recipes (xyflow graph), Integrations (provider endpoints), Settings (HF token, hardware, security toggles).
 - Model Hub (live search + GGUF focus).
 
 ---
@@ -212,7 +212,7 @@ All three changes are **correct and minimal**:
 - MLX absent (correct for Linux).
 - "Hub ready for download" / "Local chat runtime ready" can be False without token or downloaded models (expected).
 
-**Key optional extras** (see pyproject.toml): `.[forge,train,cuda,llamacpp,mlx,compress-quant,compress-eval,router,dev,flash-attn]`. RL quant has no separate extra — it uses `.[train]` plus vendored bootstrap.
+**Key optional extras** (see pyproject.toml): `.[forge,train,cuda,llamacpp,mlx,compress-quant,compress-eval,dev,flash-attn]`. RL quant has no separate extra — it uses `.[train]` plus vendored bootstrap.
 
 External: llama.cpp (convert/quantize binaries managed by scripts), nvcc for CUDA JIT kernels.
 

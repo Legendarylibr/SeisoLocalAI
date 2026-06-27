@@ -169,12 +169,6 @@ def test_forge_doc_covers_settings_api():
         assert fragment in forge_doc
 
 
-def test_install_doc_lists_router_extra():
-    install = _read("docs/install.md")
-    assert "`router`" in install
-    assert "litellm" in install.lower() or "LiteLLM" in install or "Smart Router" in install
-
-
 def test_quickstart_extra_field_documents_fused_lora_qkv():
     quickstart = _read("docs/training/quickstart.md")
     assert "use_fused_lora_qkv" in quickstart

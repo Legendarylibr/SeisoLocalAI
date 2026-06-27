@@ -23,8 +23,6 @@ Helper scripts (repo `scripts/`, not on `PATH`):
 | `./scripts/doctor.sh` | Diagnose install, HF, GPU stack (runs automatically on install/start failure) |
 | `./scripts/precheck.sh` | Fast local CI gate (`make precheck`) |
 | `./scripts/install_flash_attn.sh` | Optional Flash Attention (Linux NVIDIA) |
-| `start-router-vllm` | vLLM Smart Router Docker stack — on `PATH` after install |
-| `./scripts/start-router-vllm.sh` | Lower-level vLLM router launcher (used by `start-router-vllm`) |
 
 ---
 
@@ -250,29 +248,13 @@ Requires `.[train]` and `llama.cpp` (`LLAMA_CPP_DIR` or system `convert_hf_to_gg
 
 Config reference: `configs/examples/quant_regression_study.yaml`.
 
-## `seiso router`
+## External Smart Router
 
-Smart Router gateway — routes chat to specialists (llama.cpp or vLLM). vLLM stacks execute completions through **LiteLLM**.
-
-```bash
-pip install -e ".[router]"
-
-# Full vLLM Docker stack (Nemotron + vLLM + llama-swap + router)
-seiso router --stack vllm
-start-router-vllm              # same stack; registered on PATH after install
-start-router-vllm -d           # detached
-
-# Router process only (backend stack must already be running)
-seiso router                   # llama.cpp config (default)
-seiso router --vllm            # vLLM + LiteLLM config
-
-# llama.cpp Docker stack
-seiso router --stack llamacpp
-```
+The router backend service now lives in [Legendarylibr/SeisoModelRouter](https://github.com/Legendarylibr/SeisoModelRouter). Run that service separately when you want multi-specialist routing.
 
 Forge integration: set `SEISO_MODEL_ROUTER_ENABLED=true` and `SEISO_MODEL_ROUTER_URL=http://127.0.0.1:8780` in `.env`. Chat model picker shows **Smart Router (auto-route)**.
 
-Endpoint: `http://127.0.0.1:8780/v1/chat/completions`. Full stack docs: [deploy/model-router/README.md](../deploy/model-router/README.md).
+Expected endpoint: `http://127.0.0.1:8780/v1/chat/completions`.
 
 ## `seiso-bench-kernels`
 
