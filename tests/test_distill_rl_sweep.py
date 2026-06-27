@@ -30,6 +30,7 @@ def test_auto_sweep_can_be_disabled():
 def test_default_sweep_grid_smoke():
     grid = default_sweep_grid({"preset": "smoke"})
     assert "dpo_beta" in grid
+    assert min(grid["dpo_learning_rate"]) >= 2e-6
 
 
 def test_sweep_dpo_max_steps_halves_config():
@@ -40,6 +41,16 @@ def test_sweep_dpo_max_steps_halves_config():
         payload={"preset": "smoke", "dpo_max_steps": 8},
     )
     assert sweep_dpo_max_steps(cfg, {}) == 4
+
+
+def test_sweep_dpo_max_steps_uses_train_size_when_uncapped():
+    cfg = build_distill_rl_config(
+        job_id="job-1",
+        user_id="user-1",
+        data_dir=Path("/tmp"),
+        payload={"preset": "full", "dpo_batch_size": 1, "dpo_gradient_accumulation_steps": 8},
+    )
+    assert sweep_dpo_max_steps(cfg, {}, train_example_count=96) == 12
 
 
 def test_apply_best_sweep_overrides():
@@ -56,6 +67,19 @@ def test_apply_best_sweep_overrides():
 def test_extract_metric_nested_path():
     payload = {"checkpoints": {"dpo": {"val_preference_accuracy": 0.82}}}
     assert extract_metric(payload, "checkpoints.dpo.val_preference_accuracy") == pytest.approx(0.82)
+
+
+def test_distill_rl_defaults_use_stable_dpo_values(tmp_path: Path):
+    cfg = build_distill_rl_config(
+        job_id="job-1",
+        user_id="user-1",
+        data_dir=tmp_path,
+        payload={"preset": "reproducible"},
+    )
+    assert cfg.dpo_learning_rate == pytest.approx(5e-6)
+    assert cfg.dpo_gradient_accumulation_steps == 8
+    assert cfg.dpo_average_log_prob is True
+    assert cfg.dpo_warmup_ratio == pytest.approx(0.1)
 
 
 def test_run_auto_hyperparameter_sweep_ranks_trials(tmp_path: Path):
@@ -85,12 +109,32 @@ def test_run_auto_hyperparameter_sweep_ranks_trials(tmp_path: Path):
         path.mkdir(parents=True, exist_ok=True)
 
     evaluations = [
-        {"checkpoints": {"dpo": {"val_preference_accuracy": 0.4}}, "summary_path": "a.json"},
-        {"checkpoints": {"dpo": {"val_preference_accuracy": 0.9}}, "summary_path": "b.json"},
+        {
+            "checkpoints": {
+                "dpo": {
+                    "alignment_score": 0.4,
+                    "val_preference_accuracy": 0.4,
+                    "val_preference_margin_mean": -0.1,
+                }
+            },
+            "summary_path": "a.json",
+        },
+        {
+            "checkpoints": {
+                "dpo": {
+                    "alignment_score": 0.9,
+                    "val_preference_accuracy": 0.9,
+                    "val_preference_margin_mean": 0.2,
+                }
+            },
+            "summary_path": "b.json",
+        },
     ]
+    seen_output_dirs: list[Path] = []
     dpo_iter = iter(dpo_dirs)
 
     def fake_dpo(_cfg, *, model_dir, preferences_path, on_log=None):
+        seen_output_dirs.append(_cfg.dpo_output_dir)
         return next(dpo_iter)
 
     with patch("seiso.distill_rl.evaluate.evaluate_pipeline", side_effect=evaluations):
@@ -104,6 +148,7 @@ def test_run_auto_hyperparameter_sweep_ranks_trials(tmp_path: Path):
     assert result["trial_count"] == 2
     assert result["best_objective_value"] == pytest.approx(0.9)
     assert result["best_overrides"]["dpo_beta"] == 0.1
+    assert all(path.parent == cfg.output_root / "sweep" for path in seen_output_dirs)
     assert Path(str(result["aggregate_path"])).is_file()
 
 

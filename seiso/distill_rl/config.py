@@ -26,6 +26,8 @@ PRESETS: dict[str, dict[str, Any]] = {
         "dpo_epochs": 1,
         "dpo_max_steps": 2,
         "dpo_save_steps": 1000,
+        "dpo_learning_rate": 5e-6,
+        "dpo_gradient_accumulation_steps": 4,
         "train_val_fraction": 0.75,
         "eval_max_prompts": 4,
         "align_distill_with_prompts": True,
@@ -43,6 +45,8 @@ PRESETS: dict[str, dict[str, Any]] = {
         "dpo_epochs": 1,
         "dpo_max_steps": 20,
         "dpo_save_steps": 50,
+        "dpo_learning_rate": 5e-6,
+        "dpo_gradient_accumulation_steps": 8,
         "train_val_fraction": 0.85,
         "eval_max_prompts": 32,
         "align_distill_with_prompts": True,
@@ -59,6 +63,8 @@ PRESETS: dict[str, dict[str, Any]] = {
         "dpo_epochs": 1,
         "dpo_max_steps": None,
         "dpo_save_steps": 200,
+        "dpo_learning_rate": 2e-6,
+        "dpo_gradient_accumulation_steps": 8,
         "train_val_fraction": 0.85,
         "eval_max_prompts": 64,
         "align_distill_with_prompts": True,
@@ -97,13 +103,18 @@ class DistillRLConfig(BaseModel):
 
     dpo_beta: float = 0.1
     dpo_epochs: int = 1
-    dpo_learning_rate: float = 5e-7
+    dpo_learning_rate: float = 5e-6
     dpo_batch_size: int = 1
-    dpo_gradient_accumulation_steps: int = 2
+    dpo_gradient_accumulation_steps: int = 8
     dpo_max_steps: int | None = None
     dpo_save_steps: int = 200
     dpo_use_lora: bool = True
     dpo_use_qlora: bool = False
+    dpo_average_log_prob: bool = True
+    dpo_warmup_ratio: float = 0.1
+    dpo_weight_decay: float = 0.01
+    dpo_max_grad_norm: float = 0.3
+    dpo_output_dir_override: Path | None = None
 
     eval_max_prompts: int = 8
     evaluate_teacher: bool = False
@@ -130,6 +141,8 @@ class DistillRLConfig(BaseModel):
 
     @property
     def dpo_output_dir(self) -> Path:
+        if self.dpo_output_dir_override is not None:
+            return self.dpo_output_dir_override
         return self.output_root / "dpo"
 
     @property
@@ -265,15 +278,25 @@ def build_distill_rl_config(
         train_val_fraction=float(
             merged.get("train_val_fraction", preset.get("train_val_fraction", 0.85))
         ),
-        dpo_beta=float(merged.get("dpo_beta", 0.1)),
+        dpo_beta=float(merged.get("dpo_beta", preset.get("dpo_beta", 0.1))),
         dpo_epochs=int(merged.get("dpo_epochs", preset.get("dpo_epochs", 1))),
-        dpo_learning_rate=float(merged.get("dpo_learning_rate", 5e-7)),
-        dpo_batch_size=int(merged.get("dpo_batch_size", 1)),
-        dpo_gradient_accumulation_steps=int(merged.get("dpo_gradient_accumulation_steps", 2)),
+        dpo_learning_rate=float(
+            merged.get("dpo_learning_rate", preset.get("dpo_learning_rate", 5e-6))
+        ),
+        dpo_batch_size=int(merged.get("dpo_batch_size", preset.get("dpo_batch_size", 1))),
+        dpo_gradient_accumulation_steps=int(
+            merged.get("dpo_gradient_accumulation_steps", preset.get("dpo_gradient_accumulation_steps", 8))
+        ),
         dpo_max_steps=merged.get("dpo_max_steps", preset.get("dpo_max_steps")),
         dpo_save_steps=int(merged.get("dpo_save_steps", preset.get("dpo_save_steps", 200))),
         dpo_use_lora=bool(merged.get("dpo_use_lora", True)),
         dpo_use_qlora=bool(merged.get("dpo_use_qlora", False)),
+        dpo_average_log_prob=bool(
+            merged.get("dpo_average_log_prob", preset.get("dpo_average_log_prob", True))
+        ),
+        dpo_warmup_ratio=float(merged.get("dpo_warmup_ratio", preset.get("dpo_warmup_ratio", 0.1))),
+        dpo_weight_decay=float(merged.get("dpo_weight_decay", preset.get("dpo_weight_decay", 0.01))),
+        dpo_max_grad_norm=float(merged.get("dpo_max_grad_norm", preset.get("dpo_max_grad_norm", 0.3))),
         eval_max_prompts=int(merged.get("eval_max_prompts", preset.get("eval_max_prompts", 8))),
         evaluate_teacher=bool(merged.get("evaluate_teacher", False)),
     )

@@ -13,25 +13,26 @@ from typing import Any
 
 from seiso.distill_rl.config import DistillRLConfig
 
-DEFAULT_OBJECTIVE = "checkpoints.dpo.val_preference_accuracy"
+DEFAULT_OBJECTIVE = "checkpoints.dpo.alignment_score"
 
 _DEFAULT_SWEEP_GRIDS: dict[str, dict[str, tuple[Any, ...]]] = {
     "smoke": {
-        "dpo_beta": (0.05, 0.1),
+        "dpo_beta": (0.1, 0.2),
+        "dpo_learning_rate": (2e-6, 5e-6),
     },
     "reproducible": {
-        "dpo_beta": (0.05, 0.1, 0.2),
-        "dpo_learning_rate": (2e-7, 5e-7),
+        "dpo_beta": (0.1, 0.2, 0.3),
+        "dpo_learning_rate": (1e-6, 2e-6, 5e-6),
     },
     "full": {
-        "dpo_beta": (0.05, 0.1, 0.2),
-        "dpo_learning_rate": (2e-7, 5e-7, 1e-6),
+        "dpo_beta": (0.1, 0.2, 0.3),
+        "dpo_learning_rate": (1e-6, 2e-6, 5e-6),
     },
 }
 
 _FALLBACK_GRID: dict[str, tuple[Any, ...]] = {
-    "dpo_beta": (0.05, 0.1),
-    "dpo_learning_rate": (2e-7, 5e-7),
+    "dpo_beta": (0.1, 0.2),
+    "dpo_learning_rate": (2e-6, 5e-6),
 }
 
 
@@ -85,12 +86,25 @@ def default_sweep_grid(payload: dict[str, Any]) -> dict[str, tuple[Any, ...]]:
     return dict(_DEFAULT_SWEEP_GRIDS.get(preset, _FALLBACK_GRID))
 
 
-def sweep_dpo_max_steps(config: DistillRLConfig, payload: dict[str, Any]) -> int | None:
+def sweep_dpo_max_steps(
+    config: DistillRLConfig,
+    payload: dict[str, Any],
+    *,
+    train_example_count: int | None = None,
+) -> int | None:
     if payload.get("sweep_dpo_max_steps") is not None:
         return int(payload["sweep_dpo_max_steps"])
     if config.dpo_max_steps is not None:
-        return max(1, int(config.dpo_max_steps) // 2)
-    return max(1, int(config.dpo_epochs))
+        return max(2, min(int(config.dpo_max_steps), max(4, int(config.dpo_max_steps) // 3)))
+    if train_example_count is None:
+        return max(4, int(config.dpo_epochs))
+    micro_batches = max(1, (train_example_count + config.dpo_batch_size - 1) // config.dpo_batch_size)
+    optimizer_steps_per_epoch = max(
+        1,
+        (micro_batches + config.dpo_gradient_accumulation_steps - 1)
+        // config.dpo_gradient_accumulation_steps,
+    )
+    return min(32, max(4, optimizer_steps_per_epoch))
 
 
 def apply_best_sweep_overrides(
@@ -142,10 +156,11 @@ def run_auto_hyperparameter_sweep(
     plans = _build_trial_plans(grid)
     sweep_root = config.output_root / "sweep"
     sweep_root.mkdir(parents=True, exist_ok=True)
-    sweep_steps = sweep_dpo_max_steps(config, payload)
     train_path = config.preferences_train_path
     if not train_path.is_file():
         raise FileNotFoundError(f"Preference train dataset missing for sweep: {train_path}")
+    train_example_count = _count_jsonl_rows(train_path)
+    sweep_steps = sweep_dpo_max_steps(config, payload, train_example_count=train_example_count)
 
     _log(
         f"Auto hyperparameter sweep: {len(plans)} DPO trial(s)"
@@ -158,7 +173,8 @@ def run_auto_hyperparameter_sweep(
         _log(f"Sweep trial {plan.trial_id}/{len(plans)}: {plan.run_name_suffix}")
         trial_config = apply_best_sweep_overrides(config, plan.overrides).model_copy(
             update={
-                "dpo_output_dir": sweep_root / f"trial_{plan.trial_id:03d}_{plan.run_name_suffix}",
+                "dpo_output_dir_override": sweep_root
+                / f"trial_{plan.trial_id:03d}_{plan.run_name_suffix}",
                 "dpo_max_steps": sweep_steps,
             }
         )
@@ -206,6 +222,7 @@ def run_auto_hyperparameter_sweep(
                 "trial_id": result.plan.trial_id,
                 "run_name_suffix": result.plan.run_name_suffix,
                 "objective_value": result.objective_value,
+                "metrics": _leaderboard_metrics(result.evaluation),
                 "overrides": result.plan.overrides,
                 "dpo_dir": str(result.dpo_dir),
                 "evaluation_path": result.evaluation.get("summary_path"),
@@ -260,6 +277,15 @@ def _coerce_value(raw: str) -> Any:
         return raw
 
 
+def _count_jsonl_rows(path: Path) -> int:
+    count = 0
+    with path.open(encoding="utf-8") as handle:
+        for line in handle:
+            if line.strip():
+                count += 1
+    return count
+
+
 def _build_trial_plans(grid: dict[str, tuple[Any, ...]]) -> list[SweepTrialPlan]:
     if not grid:
         raise ValueError("Sweep requires a non-empty parameter grid")
@@ -309,6 +335,7 @@ def _write_leaderboard_csv(
 ) -> None:
     rows: list[dict[str, str]] = []
     for rank, result in enumerate(ranked_results, start=1):
+        metrics = _leaderboard_metrics(result.evaluation)
         rows.append(
             {
                 "rank": str(rank),
@@ -318,11 +345,36 @@ def _write_leaderboard_csv(
                 "objective_value": ""
                 if result.objective_value is None
                 else str(result.objective_value),
+                "val_accuracy": _csv_metric(metrics.get("val_preference_accuracy")),
+                "mean_margin": _csv_metric(metrics.get("val_preference_margin_mean")),
+                "alignment_score": _csv_metric(metrics.get("alignment_score")),
                 "dpo_dir": str(result.dpo_dir),
             }
         )
-    fieldnames = ["rank", "trial_id", "suffix", "objective", "objective_value", "dpo_dir"]
+    fieldnames = [
+        "rank",
+        "trial_id",
+        "suffix",
+        "objective",
+        "objective_value",
+        "val_accuracy",
+        "mean_margin",
+        "alignment_score",
+        "dpo_dir",
+    ]
     with output_path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(rows)
+
+
+def _leaderboard_metrics(evaluation: dict[str, Any]) -> dict[str, Any]:
+    checkpoints = evaluation.get("checkpoints")
+    if not isinstance(checkpoints, dict):
+        return {}
+    dpo = checkpoints.get("dpo")
+    return dpo if isinstance(dpo, dict) else {}
+
+
+def _csv_metric(value: Any) -> str:
+    return "" if value is None else str(value)
