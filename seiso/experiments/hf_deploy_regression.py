@@ -9,6 +9,7 @@ from pathlib import Path
 from statistics import mean
 from typing import Any
 
+from seiso.experiments._metrics import finite_float, finite_floats
 from seiso.training.config import QuantMode, TrainConfig
 
 DEFAULT_DEPLOY_QUANTS: tuple[str, ...] = ("4bit", "8bit", "16bit")
@@ -18,18 +19,6 @@ _DEPLOY_BITS: dict[str, float] = {
     "8bit": 8.5,
     "16bit": 16.0,
 }
-
-
-def _finite(value: Any) -> float | None:
-    if value is None:
-        return None
-    try:
-        out = float(value)
-    except (TypeError, ValueError):
-        return None
-    if out != out or out in (float("inf"), float("-inf")):
-        return None
-    return out
 
 
 def _load_eval_texts(
@@ -251,16 +240,14 @@ def summarize_hf_deploy_report(report: dict[str, Any]) -> dict[str, Any]:
         report.get("recommendations") if isinstance(report.get("recommendations"), list) else []
     )
     selected = recommendations[0] if recommendations else {}
-    rewards = [_finite(row.get("reward")) for row in rows if isinstance(row, dict)]
-    perplexities = [_finite(row.get("perplexity")) for row in rows if isinstance(row, dict)]
+    rewards = finite_floats([row.get("reward") for row in rows if isinstance(row, dict)])
+    perplexities = finite_floats([row.get("perplexity") for row in rows if isinstance(row, dict)])
     return {
-        "eval_mean_reward": mean([v for v in rewards if v is not None]) if rewards else None,
-        "eval_mean_perplexity": mean([v for v in perplexities if v is not None])
-        if perplexities
-        else None,
+        "eval_mean_reward": mean(rewards) if rewards else None,
+        "eval_mean_perplexity": mean(perplexities) if perplexities else None,
         "recommended_route": selected.get("route_id"),
         "recommended_quant": selected.get("quant_label") or selected.get("deploy_quant"),
-        "reward_regression": _finite(selected.get("reward_regression")),
-        "perplexity_regression": _finite(selected.get("perplexity_regression")),
-        "mean_selected_memory_mb": _finite(selected.get("memory_mb")),
+        "reward_regression": finite_float(selected.get("reward_regression")),
+        "perplexity_regression": finite_float(selected.get("perplexity_regression")),
+        "mean_selected_memory_mb": finite_float(selected.get("memory_mb")),
     }

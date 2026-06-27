@@ -13,6 +13,7 @@ from pathlib import Path
 from statistics import mean
 from typing import Any
 
+from seiso.experiments._metrics import finite_float, finite_floats
 from seiso.export.gguf import normalize_gguf_quants, resolve_gguf_converter
 from seiso.training.config import QuantMode, TrainConfig, run_training
 
@@ -339,28 +340,24 @@ def summarize_route_report(report: dict[str, Any]) -> dict[str, Any]:
     )
     selected = [rec for rec in recommendations if isinstance(rec, dict) and rec.get("route_id")]
 
-    rewards = [_finite(row.get("reward")) for row in rows if isinstance(row, dict)]
-    perplexities = [_finite(row.get("perplexity")) for row in rows if isinstance(row, dict)]
-    reward_regs = [_finite(rec.get("reward_regression")) for rec in selected]
-    ppl_regs = [_finite(rec.get("perplexity_regression")) for rec in selected]
-    reward_regs = [v for v in reward_regs if v is not None]
-    ppl_regs = [v for v in ppl_regs if v is not None]
+    rewards = finite_floats([row.get("reward") for row in rows if isinstance(row, dict)])
+    perplexities = finite_floats([row.get("perplexity") for row in rows if isinstance(row, dict)])
+    reward_regs = finite_floats([rec.get("reward_regression") for rec in selected])
+    ppl_regs = finite_floats([rec.get("perplexity_regression") for rec in selected])
 
     best_rec = selected[0] if selected else {}
     return {
-        "eval_mean_reward": mean([v for v in rewards if v is not None]) if rewards else None,
-        "eval_mean_perplexity": mean([v for v in perplexities if v is not None])
-        if perplexities
-        else None,
+        "eval_mean_reward": mean(rewards) if rewards else None,
+        "eval_mean_perplexity": mean(perplexities) if perplexities else None,
         "recommended_route": best_rec.get("route_id"),
         "recommended_quant": best_rec.get("quant_label"),
         "reward_regression": mean(reward_regs)
         if reward_regs
-        else _finite(best_rec.get("reward_regression")),
+        else finite_float(best_rec.get("reward_regression")),
         "perplexity_regression": mean(ppl_regs)
         if ppl_regs
-        else _finite(best_rec.get("perplexity_regression")),
-        "mean_selected_memory_mb": _finite(report.get("mean_selected_memory_mb")),
+        else finite_float(best_rec.get("perplexity_regression")),
+        "mean_selected_memory_mb": finite_float(report.get("mean_selected_memory_mb")),
     }
 
 
@@ -479,21 +476,9 @@ def _read_training_metrics(checkpoint: Path) -> tuple[float | None, float | None
         except json.JSONDecodeError:
             continue
         if row.get("type") == "eval" or row.get("eval_loss") is not None:
-            eval_loss = _finite(row.get("eval_loss") or row.get("loss")) or eval_loss
-        train_loss = _finite(row.get("train_loss") or row.get("loss")) or train_loss
+            eval_loss = finite_float(row.get("eval_loss") or row.get("loss")) or eval_loss
+        train_loss = finite_float(row.get("train_loss") or row.get("loss")) or train_loss
     return train_loss, eval_loss
-
-
-def _finite(value: Any) -> float | None:
-    if value is None:
-        return None
-    try:
-        out = float(value)
-    except (TypeError, ValueError):
-        return None
-    if out != out or out in (float("inf"), float("-inf")):  # NaN / inf
-        return None
-    return out
 
 
 def run_quant_regression_study(
