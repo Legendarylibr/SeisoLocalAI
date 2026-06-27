@@ -236,7 +236,6 @@ main() {
   fi
 
   seiso_install_start_command "$root"
-  seiso_install_router_start_command "$root"
 
   install_tui_outro "$root"
 

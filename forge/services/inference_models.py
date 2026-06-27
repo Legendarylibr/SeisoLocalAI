@@ -192,7 +192,7 @@ async def list_inference_options(
                 "kind": "router",
                 "name": "Smart Router (auto-route)",
                 "source": "router",
-                "source_label": "vLLM specialists",
+                "source_label": "External router",
                 "format": None,
                 "path": None,
                 "default_backend": BACKEND_ROUTER,
@@ -200,7 +200,7 @@ async def list_inference_options(
                 "backend_labels": {BACKEND_ROUTER: BACKEND_LABELS[BACKEND_ROUTER]},
                 "size_bytes": 0,
                 "metadata": {
-                    "description": "Nemotron orchestrator or heuristic routing over vLLM specialists"
+                    "description": "External local router service"
                 },
                 "hardware_fit": "ideal",
                 "hardware_fit_label": "Managed routing",

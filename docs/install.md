@@ -274,13 +274,12 @@ Full guide: [platforms/wsl.md](platforms/wsl.md)
 | `llamacpp` | llama-cpp-python (GGUF inference) | All |
 | `compress-quant` | auto-gptq, autoawq (requires `torch`; Linux NVIDIA) | CUDA recommended |
 | `compress-eval` | lm-eval harness | All |
-| `router` | LiteLLM gateway for Smart Router stacks | All (vLLM stack needs NVIDIA + Docker) |
 | `dev` | pytest, ruff, mypy, bandit | All |
 
 Combine extras:
 
 ```bash
-pip install -e ".[forge,train,cuda,dev,compress-quant,router]"
+pip install -e ".[forge,train,cuda,dev,compress-quant]"
 ```
 
 If `auto-gptq` fails to build, install the train stack first, then retry with build isolation disabled:

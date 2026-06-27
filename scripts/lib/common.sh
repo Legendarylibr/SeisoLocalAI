@@ -71,28 +71,6 @@ seiso_install_start_command() {
   seiso_ensure_bin_on_path "$bin_dir"
 }
 
-seiso_install_router_start_command() {
-  local root="$1"
-  local bin_dir script link_path
-
-  bin_dir="$(seiso_start_bin_dir)"
-  script="$root/start-router-vllm"
-  link_path="$bin_dir/start-router-vllm"
-
-  [[ -f "$script" ]] || return 0
-  chmod +x "$script" 2>/dev/null || true
-  chmod +x "$root/scripts/start-router-vllm.sh" 2>/dev/null || true
-
-  mkdir -p "$bin_dir"
-  if [[ -e "$link_path" && ! -L "$link_path" ]]; then
-    seiso_warn "$link_path exists and is not a symlink — leaving it unchanged"
-    return 0
-  fi
-  ln -sf "$script" "$link_path"
-
-  seiso_ensure_bin_on_path "$bin_dir"
-}
-
 seiso_ensure_bin_on_path() {
   local bin_dir="$1"
   local marker line profile

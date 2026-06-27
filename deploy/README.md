@@ -10,8 +10,6 @@ Ready-to-use configs for HTTPS access to Seiso Forge.
 | [caddy/Caddyfile.provider-proxy](caddy/Caddyfile.provider-proxy) | HTTPS wrapper for HTTP-only LLM APIs |
 | [nginx/seiso-forge.conf](nginx/seiso-forge.conf) | nginx TLS termination + SSE |
 | [docker-compose.caddy.yml](docker-compose.caddy.yml) | Run Caddy in Docker |
-| [model-router/README.md](model-router/README.md) | Smart Router — llama.cpp or vLLM + LiteLLM |
-| `start-router-vllm` (repo root) | Start vLLM router Docker stack (Nemotron + LiteLLM) |
 | [systemd/seiso-forge.service](systemd/seiso-forge.service) | systemd unit for Forge |
 
 Full guide: [docs/deployment/reverse-proxy.md](../docs/deployment/reverse-proxy.md)
