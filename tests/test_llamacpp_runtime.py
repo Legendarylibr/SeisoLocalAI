@@ -17,10 +17,42 @@ def test_llamacpp_import_ok_when_module_present():
 def test_ensure_llamacpp_runtime_skips_install_when_present():
     from forge.services.llamacpp_runtime import ensure_llamacpp_runtime
 
-    with patch("forge.services.llamacpp_runtime.llamacpp_import_ok", return_value=(True, None)):
+    with (
+        patch("forge.services.llamacpp_runtime.llamacpp_import_ok", return_value=(True, None)),
+        patch("forge.services.llamacpp_runtime.nvidia_hardware_visible", return_value=False),
+        patch("forge.services.llamacpp_runtime.llamacpp_gpu_offload_supported", return_value=False),
+        patch(
+            "forge.services.llamacpp_runtime.ensure_llamacpp_installed",
+            side_effect=AssertionError("should not install"),
+        ),
+    ):
         result = ensure_llamacpp_runtime(auto_install=True)
     assert result["llamacpp"] is True
     assert result["installed"] is False
+
+
+def test_ensure_llamacpp_runtime_delegates_for_cpu_wheel_on_nvidia():
+    from forge.services.llamacpp_runtime import ensure_llamacpp_runtime
+
+    with (
+        patch("forge.services.llamacpp_runtime.llamacpp_import_ok", return_value=(True, None)),
+        patch("forge.services.llamacpp_runtime.nvidia_hardware_visible", return_value=True),
+        patch("forge.services.llamacpp_runtime.llamacpp_gpu_offload_supported", return_value=False),
+        patch(
+            "forge.services.llamacpp_runtime.ensure_llamacpp_installed",
+            return_value={
+                "llamacpp": True,
+                "installed": True,
+                "gpu_offload": True,
+                "error": None,
+            },
+        ) as ensure_installed,
+    ):
+        result = ensure_llamacpp_runtime(auto_install=True)
+
+    ensure_installed.assert_called_once_with(auto_install=True)
+    assert result["llamacpp"] is True
+    assert result["installed"] is True
 
 
 def test_ensure_llamacpp_runtime_installs_when_missing(monkeypatch):
