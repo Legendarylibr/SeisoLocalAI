@@ -40,9 +40,6 @@ def assess_hardware_fit(
     else:
         fit, label = "unlikely", "May not fit"
 
-    if tier == HardwareTier.CPU_ONLY and est_mb > 4096:
-        fit, label = "unlikely", "CPU — try ≤3B Q4"
-
     if tier == HardwareTier.APPLE_UNIFIED and capacity_mb < 12288 and est_mb > 5120:
         fit, label = "tight", "Tight — use Q4 GGUF + llama.cpp"
     if tier == HardwareTier.APPLE_UNIFIED and capacity_mb < 8192 and est_mb > 4096:

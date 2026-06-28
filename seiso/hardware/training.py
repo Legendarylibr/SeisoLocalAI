@@ -21,9 +21,11 @@ def preferred_inference_backend(profile: dict[str, Any]) -> str:
         return str(InferenceBackend.LLAMACPP)
     if headroom < 6000 or tier == HardwareTier.EDGE:
         return str(InferenceBackend.LLAMACPP)
-    if tier == HardwareTier.APPLE_UNIFIED and headroom < 16384:
+    if tier == HardwareTier.APPLE_UNIFIED:
+        if backend == Backend.MLX and headroom >= 16384:
+            return str(InferenceBackend.MLX)
         return str(InferenceBackend.LLAMACPP)
-    if tier == HardwareTier.APPLE_UNIFIED or backend == Backend.MLX:
+    if backend == Backend.MLX:
         return str(InferenceBackend.MLX)
     return str(InferenceBackend.LLAMACPP)
 

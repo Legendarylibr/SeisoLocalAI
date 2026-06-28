@@ -259,6 +259,20 @@ def test_preferred_backend_cpu_only_is_llamacpp():
     assert preferred_inference_backend(profile) == "llamacpp"
 
 
+def test_apple_silicon_without_mlx_probe_uses_unified_memory():
+    profile = {"platform": "darwin", "arch": "arm64", "backend": "cpu", "gpus": [], "ram_gb": 64}
+
+    assert classify_tier(profile).value == "apple_unified"
+
+
+def test_apple_silicon_without_mlx_probe_prefers_llamacpp(monkeypatch):
+    profile = {"platform": "darwin", "arch": "arm64", "backend": "cpu", "gpus": [], "ram_gb": 64}
+    monkeypatch.setattr("seiso.hardware.training.vram_headroom_mb", lambda _p: 32768)
+
+    assert classify_tier(profile).value == "apple_unified"
+    assert preferred_inference_backend(profile) == "llamacpp"
+
+
 def test_preferred_backend_apple_tight_memory_is_llamacpp(monkeypatch):
     profile = {"backend": "mlx", "gpus": [], "ram_gb": 16}
     monkeypatch.setattr("seiso.hardware.training.vram_headroom_mb", lambda _p: 10240)
@@ -281,6 +295,18 @@ def test_low_memory_apple_marks_large_models_tight(monkeypatch):
         profile,
     )
     assert fit["hardware_fit"] == "tight"
+
+
+def test_cpu_only_large_model_fit_uses_memory_guard(monkeypatch):
+    profile = {"backend": "cpu", "gpus": [], "ram_gb": 64}
+    monkeypatch.setattr("seiso.hardware.fit.fit_headroom_mb", lambda _p: 32768)
+    monkeypatch.setattr("seiso.hardware.fit.vram_headroom_mb", lambda _p: 32768)
+    fit = assess_catalog_fit(
+        {"params": "7B", "quant": "Q4_K_M", "tags": [], "repo_id": "x", "task": "chat"},
+        profile,
+    )
+    assert fit["memory_load_blocked"] is False
+    assert fit["hardware_fit"] in {"ideal", "good", "tight"}
 
 
 def test_assess_hardware_fit_blocks_when_est_exceeds_headroom(monkeypatch):
