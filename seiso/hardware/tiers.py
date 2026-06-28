@@ -50,7 +50,14 @@ def classify_tier(profile: dict[str, Any]) -> HardwareTier:
     discrete = _discrete_gpu_entries(gpus)
     vram_total = max((g.get("vram_total_mb") or 0) for g in discrete) if discrete else 0
 
-    if backend == Backend.MLX and not vram_total:
+    profile_platform = str(profile.get("platform") or "").lower()
+    profile_arch = str(profile.get("arch") or "").lower()
+    apple_silicon = profile_platform in {"darwin", "macos"} and profile_arch in {
+        "arm64",
+        "aarch64",
+    }
+
+    if (backend == Backend.MLX or apple_silicon) and not vram_total:
         return HardwareTier.APPLE_UNIFIED
     if not discrete:
         return HardwareTier.CPU_ONLY
