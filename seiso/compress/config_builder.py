@@ -31,7 +31,7 @@ def get_compress_model_defaults() -> dict[str, str]:
     global _MODEL_DEFAULTS
     if _MODEL_DEFAULTS is None:
         ensure_codellama_compress_importable()
-        from codellama_compress.config import DistillConfig
+        from seiso.codellama_compress.config import DistillConfig
 
         dc = DistillConfig()
         _MODEL_DEFAULTS = {
@@ -81,7 +81,7 @@ def build_pipeline_config(
 ) -> dict[str, Any]:
     """Return normalized pipeline settings for a Forge or CLI job."""
     ensure_codellama_compress_importable()
-    from codellama_compress.config import (
+    from seiso.codellama_compress.config import (
         DatasetConfig,
         DeterminismConfig,
         DistillConfig,
@@ -92,7 +92,7 @@ def build_pipeline_config(
     preset_name, preset = resolve_preset(PRESETS, str(payload.get("preset", "smoke")))
 
     if path := resolve_config_file_path(payload.get("config_file"), vendor_root=vendor_root()):
-        from codellama_compress.config import load_config_file
+        from seiso.codellama_compress.config import load_config_file
 
         blob = load_config_file(path)
         preset.update(blob.get("pipeline", {}))

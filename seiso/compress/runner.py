@@ -1,4 +1,4 @@
-"""Run vendored LLM compression pipeline stages."""
+"""Run bundled LLM compression pipeline stages."""
 
 from __future__ import annotations
 
@@ -60,13 +60,13 @@ def run_compress_job(
 ) -> dict[str, Any]:
     """Execute distill → prune → finetune → evaluate → export (configurable)."""
     require_codellama_compress()
-    from codellama_compress.io import (
+    from seiso.codellama_compress.io import (
         assert_disk_budget,
         new_run_dir,
         save_effective_config,
         write_env_report,
     )
-    from codellama_compress.replay import (
+    from seiso.codellama_compress.replay import (
         append_artifact_record,
         apply_global_seeds,
         content_fingerprint,
@@ -114,7 +114,7 @@ def run_compress_job(
     for stage in cfg["stages"]:
         _log(f"Phase: {stage}")
         if stage == "distill":
-            from codellama_compress.distill import run_distillation
+            from seiso.codellama_compress.distill import run_distillation
 
             out_dir = run_dir / "distilled"
             run_distillation(
@@ -128,7 +128,7 @@ def run_compress_job(
             stage_results["distilled"] = str(out_dir)
 
         elif stage == "prune":
-            from codellama_compress.prune import run_mlp_mask_prune
+            from seiso.codellama_compress.prune import run_mlp_mask_prune
 
             in_dir = _resolve_model_dir(cfg, run_dir, "prune")
             out_dir = run_dir / "pruned"
@@ -143,7 +143,7 @@ def run_compress_job(
             stage_results["pruned"] = str(out_dir)
 
         elif stage == "finetune":
-            from codellama_compress.finetune import run_finetune
+            from seiso.codellama_compress.finetune import run_finetune
 
             in_dir = _resolve_model_dir(cfg, run_dir, "finetune")
             out_dir = run_dir / "finetuned"
@@ -159,7 +159,7 @@ def run_compress_job(
             stage_results["finetuned"] = str(out_dir)
 
         elif stage == "evaluate":
-            from codellama_compress.evaluate import evaluate_into_run_dir
+            from seiso.codellama_compress.evaluate import evaluate_into_run_dir
 
             model_dir = _resolve_model_dir(cfg, run_dir, "evaluate")
             result = evaluate_into_run_dir(run_dir=run_dir, model_dir=model_dir)
@@ -167,7 +167,7 @@ def run_compress_job(
             _log(str(result))
 
         elif stage == "export":
-            from codellama_compress.export import write_export_bundle
+            from seiso.codellama_compress.export import write_export_bundle
 
             model_dir = _resolve_model_dir(cfg, run_dir, "export")
             export_dir = run_dir / "export_bundle"
@@ -182,7 +182,7 @@ def run_compress_job(
             _log(f"Export bundle: {export_dir}")
 
         elif stage == "quantize_gptq":
-            from codellama_compress.quantize_gptq import run_gptq_quantization
+            from seiso.codellama_compress.quantize_gptq import run_gptq_quantization
 
             in_dir = _resolve_model_dir(cfg, run_dir, "quantize_gptq")
             out_dir = run_dir / "quantized-gptq"
@@ -199,7 +199,7 @@ def run_compress_job(
             stage_results["quantized_gptq"] = str(out_dir)
 
         elif stage == "quantize_awq":
-            from codellama_compress.quantize_awq import run_awq_quantization
+            from seiso.codellama_compress.quantize_awq import run_awq_quantization
 
             in_dir = _resolve_model_dir(cfg, run_dir, "quantize_awq")
             out_dir = run_dir / "quantized-awq"

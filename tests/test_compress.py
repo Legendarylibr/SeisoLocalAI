@@ -15,16 +15,15 @@ from seiso.compress.bootstrap import (
 from seiso.compress.config_builder import PRESETS, STAGE_ORDER, build_pipeline_config
 
 
-def test_vendor_tree_present():
+def test_bundled_source_present():
     root = vendor_root()
-    assert (root / "src" / "codellama_compress" / "cli.py").is_file()
-    assert (root / "LICENSE").is_file()
+    assert (root / "cli.py").is_file()
 
 
 def test_codellama_compress_importable():
     ensure_codellama_compress_importable()
     require_codellama_compress()
-    import codellama_compress  # noqa: F401
+    import seiso.codellama_compress  # noqa: F401
 
 
 def test_stage_order():
@@ -53,8 +52,8 @@ def test_presets_have_stages():
 def test_replay_manifest_from_vendor(tmp_path: Path):
     """Vendor replay/manifest helpers work without GPU."""
     require_codellama_compress()
-    from codellama_compress.config import DeterminismConfig
-    from codellama_compress.replay import (
+    from seiso.codellama_compress.config import DeterminismConfig
+    from seiso.codellama_compress.replay import (
         append_artifact_record,
         content_fingerprint,
         init_manifest,

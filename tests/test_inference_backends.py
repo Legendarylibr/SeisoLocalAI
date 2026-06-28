@@ -12,6 +12,9 @@ from seiso.inference.backends import (
     available_backends,
     clear_gguf_caches,
     gguf_architecture,
+    gguf_block_count,
+    gguf_context_length,
+    gguf_uses_sliding_window_attention,
     recommend_backend,
     resolve_gguf_file,
     resolve_local_backend,
@@ -70,11 +73,52 @@ def _write_minimal_gguf(path: Path, architecture: str) -> None:
     )
 
 
+def _write_gguf_with_u32_metadata(path: Path, pairs: list[tuple[bytes, int]]) -> None:
+    import struct
+
+    arch_key = b"general.architecture"
+    arch_value = b"llama"
+    payload = [
+        struct.pack("<Q", len(arch_key)),
+        arch_key,
+        struct.pack("<I", 8),
+        struct.pack("<Q", len(arch_value)),
+        arch_value,
+    ]
+    for key, value in pairs:
+        payload.extend(
+            [
+                struct.pack("<Q", len(key)),
+                key,
+                struct.pack("<I", 4),
+                struct.pack("<I", value),
+            ]
+        )
+    path.write_bytes(b"GGUF" + struct.pack("<IQQ", 3, 0, 1 + len(pairs)) + b"".join(payload))
+
+
 def test_gguf_architecture_reads_metadata(tmp_path: Path):
     gguf = tmp_path / "model.gguf"
     _write_minimal_gguf(gguf, "llama")
 
     assert gguf_architecture(str(gguf)) == "llama"
+
+
+def test_gguf_metadata_reader_collects_context_blocks_and_swa(tmp_path: Path):
+    gguf = tmp_path / "model.gguf"
+    _write_gguf_with_u32_metadata(
+        gguf,
+        [
+            (b"llama.context_length", 8192),
+            (b"llama.block_count", 32),
+            (b"llama.attention.sliding_window", 4096),
+        ],
+    )
+
+    assert gguf_architecture(str(gguf)) == "llama"
+    assert gguf_context_length(str(gguf)) == 8192
+    assert gguf_block_count(str(gguf)) == 32
+    assert gguf_uses_sliding_window_attention(str(gguf)) is True
 
 
 def test_available_backends_allows_dflash_draft_for_speculative(tmp_path: Path):
@@ -103,6 +147,15 @@ def test_resolve_gguf_file_picks_largest(tmp_path: Path):
     small.write_bytes(b"a")
     large.write_bytes(b"a" * 10)
     assert resolve_gguf_file(str(tmp_path)).name == "large.gguf"
+
+
+def test_resolve_gguf_file_prefers_first_shard_without_sorting_by_size(tmp_path: Path):
+    shard_two = tmp_path / "model-00002-of-00002.gguf"
+    shard_one = tmp_path / "model-00001-of-00002.gguf"
+    shard_two.write_bytes(b"a" * 100)
+    shard_one.write_bytes(b"a")
+
+    assert resolve_gguf_file(str(tmp_path)).name == shard_one.name
 
 
 def test_resolve_gguf_file_preserves_symlink_path(tmp_path: Path):
@@ -166,8 +219,8 @@ def test_get_inference_runner_is_singleton():
 def test_inference_orchestrator_uses_shared_runner():
     from pathlib import Path
 
-    from forge.orchestrators.inference import InferenceOrchestrator
     import seiso.inference.runner as runner_mod
+    from forge.orchestrators.inference import InferenceOrchestrator
 
     runner_mod._runner = None
     shared = runner_mod.get_inference_runner()

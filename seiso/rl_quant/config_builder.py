@@ -30,10 +30,10 @@ def build_framework_config(
     data_dir: Path,
     payload: dict[str, Any],
 ) -> Any:
-    """Return adaptive_quant.configuration.FrameworkConfig for a Forge job."""
+    """Return seiso.adaptive_quant.configuration.FrameworkConfig for a Forge job."""
     ensure_adaptive_quant_importable()
-    from adaptive_quant.configuration import config_to_flat_dict
-    from adaptive_quant.easy_config import config_from_dict, load_config, named_preset
+    from seiso.adaptive_quant.configuration import config_to_flat_dict
+    from seiso.adaptive_quant.easy_config import config_from_dict, load_config, named_preset
 
     run_name = str(payload.get("run_name") or f"seiso_{job_id[:8]}")
     output_root = job_output_root(data_dir, "rl_quant", user_id, job_id)

@@ -322,9 +322,9 @@ def _run_distill(config: DistillRLConfig, *, on_log: Callable[[str], None] | Non
     from seiso.distill_rl.distill_corpus import override_distill_corpus
 
     require_codellama_compress()
-    from codellama_compress.config import DatasetConfig, DistillConfig, merge_dataclass
-    from codellama_compress.distill import run_distillation
-    from codellama_compress.replay import apply_global_seeds
+    from seiso.codellama_compress.config import DatasetConfig, DistillConfig, merge_dataclass
+    from seiso.codellama_compress.distill import run_distillation
+    from seiso.codellama_compress.replay import apply_global_seeds
 
     if config.deterministic:
         apply_global_seeds(config.seed)
@@ -390,9 +390,9 @@ def _run_dpo(
     from seiso.rl_quant.bootstrap import require_adaptive_quant
 
     require_adaptive_quant()
-    from adaptive_quant.llm_alignment.config import DPOSettings
-    from adaptive_quant.llm_alignment.dpo_trainer import DPOTrainer
-    from adaptive_quant.llm_alignment.preference_data import load_preference_dataset
+    from seiso.adaptive_quant.llm_alignment.config import DPOSettings
+    from seiso.adaptive_quant.llm_alignment.dpo_trainer import DPOTrainer
+    from seiso.adaptive_quant.llm_alignment.preference_data import load_preference_dataset
 
     settings = DPOSettings(
         sft_model_path=str(model_dir),

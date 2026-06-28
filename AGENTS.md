@@ -25,7 +25,7 @@ Key commands:
 - **Never delete** `~/.seiso` or its subdirs (user data, caches, checkpoints). Use `SEISO_DATA_DIR` overrides for throwaway experiments.
 - Memory-sensitive work: the platform applies guards (`seiso/memory/protection.py`, `forge/services/memory_release.py`). Call `prepare_for_gpu_task` patterns when adding new heavy GPU jobs.
 - Kernels are **monkey-patched temporarily** — always ensure restore paths run (see `lifecycle.py`, trainer cleanup, memory release). Test both success and exception cases.
-- Vendored code lives in `third_party/`. Modify via Seiso wrappers (`config_builder.py`, `runner.py`, `bootstrap.py`, `kernel_integration.py`) or contribute upstream. Do not edit vendored trees in place for normal work.
+- Bundled compression and RL quant code lives under `seiso/` (`seiso/codellama_compress/`, `seiso/adaptive_quant/`, `seiso/analysis/`). Prefer the Seiso wrappers (`config_builder.py`, `runner.py`, `bootstrap.py`, `kernel_integration.py`) when changing integrated workflows.
 - Forge jobs stream logs/metrics via orchestrators + SSE. When adding features, update the matching orchestrator + route + UI page together.
 - UI: after TS/JS changes run `cd forge-ui && npm run build` (or use `npm run dev` against a running `seiso forge`).
 - Before significant changes: `make ci-fast`. Full `make ci` for frontend or big refactors. Respect ruff/mypy baselines unless you intentionally refresh them.
@@ -74,7 +74,9 @@ seiso/                 # core (runners, kernels, training, export, compress, rl,
 seiso_cli/main.py      # CLI
 forge/                 # FastAPI (orchestrators, routes, services, security, db)
 forge-ui/              # React sources + built dist/
-third_party/           # vendored (codellama-compress, adaptive-rl-quant)
+seiso/codellama_compress/    # bundled LLM compression implementation
+seiso/adaptive_quant/        # bundled adaptive RL quant implementation
+seiso/analysis/        # bundled RL quant analysis CLI/helpers
 configs/               # example + smoke YAML/JSON
 scripts/               # install, doctor, run_ci_local, ...
 tests/                 # broad pytest coverage

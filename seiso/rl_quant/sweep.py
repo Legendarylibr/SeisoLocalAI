@@ -60,7 +60,7 @@ def default_sweep_grid(payload: dict[str, Any]) -> dict[str, tuple[Any, ...]]:
 
     vary = payload.get("vary") or payload.get("sweep_vary")
     if isinstance(vary, list) and vary:
-        from adaptive_quant.sweep import parse_vary_argument
+        from seiso.adaptive_quant.sweep import parse_vary_argument
 
         grid: dict[str, tuple[Any, ...]] = {}
         for item in vary:
@@ -98,7 +98,7 @@ def sweep_episode_budget(
 
 def resolve_sweep_spec(payload: dict[str, Any], *, preset: str) -> Any:
     """Build a SweepSpec from payload overrides or preset defaults."""
-    from adaptive_quant.sweep import DEFAULT_OBJECTIVE, SweepSpec, load_sweep_file
+    from seiso.adaptive_quant.sweep import DEFAULT_OBJECTIVE, SweepSpec, load_sweep_file
 
     sweep_config = payload.get("sweep_config")
     if sweep_config:
@@ -118,7 +118,7 @@ def resolve_sweep_spec(payload: dict[str, Any], *, preset: str) -> Any:
     if isinstance(seeds_raw, list) and seeds_raw:
         seeds = tuple(int(value) for value in seeds_raw)
     elif isinstance(seeds_raw, str) and seeds_raw.strip():
-        from adaptive_quant.sweep import parse_seed_list
+        from seiso.adaptive_quant.sweep import parse_seed_list
 
         parsed = parse_seed_list(seeds_raw)
         seeds = tuple(parsed) if parsed else None
@@ -141,19 +141,19 @@ def run_auto_hyperparameter_sweep(
     on_log: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
     """Run sweep trials, rank them, and return the best override mapping."""
-    from adaptive_quant.cli.aggregate_reports import build_sweep_report
-    from adaptive_quant.cli.startup_overrides import (
+    from seiso.adaptive_quant.cli.aggregate_reports import build_sweep_report
+    from seiso.adaptive_quant.cli.startup_overrides import (
         apply_startup_overrides,
         enforce_privileged_override_policy,
     )
-    from adaptive_quant.experiment_aggregate import extract_metric
-    from adaptive_quant.logging_utils import write_json
-    from adaptive_quant.paper_bundle import create_multiseed_paper_bundle
-    from adaptive_quant.pipeline.output_summary import experiment_config_summary
-    from adaptive_quant.pipeline.research_contract import EVIDENCE_SWEEP, build_research_contract
-    from adaptive_quant.pipeline.vcs import git_commit_hash
-    from adaptive_quant.research_pipeline import run_pipeline_entrypoint
-    from adaptive_quant.sweep import (
+    from seiso.adaptive_quant.experiment_aggregate import extract_metric
+    from seiso.adaptive_quant.logging_utils import write_json
+    from seiso.adaptive_quant.paper_bundle import create_multiseed_paper_bundle
+    from seiso.adaptive_quant.pipeline.output_summary import experiment_config_summary
+    from seiso.adaptive_quant.pipeline.research_contract import EVIDENCE_SWEEP, build_research_contract
+    from seiso.adaptive_quant.pipeline.vcs import git_commit_hash
+    from seiso.adaptive_quant.research_pipeline import run_pipeline_entrypoint
+    from seiso.adaptive_quant.sweep import (
         SweepTrialResult,
         build_trial_plans,
         rank_trials,
@@ -202,7 +202,7 @@ def run_auto_hyperparameter_sweep(
         runs_skipped = 0
 
         if seeds:
-            from adaptive_quant.sweep import SweepSeedResult, aggregate_objective_values
+            from seiso.adaptive_quant.sweep import SweepSeedResult, aggregate_objective_values
 
             seed_results: list[SweepSeedResult] = []
             for seed in seeds:
@@ -379,7 +379,7 @@ def apply_best_sweep_overrides(config: Any, best_overrides: dict[str, Any]) -> A
     """Merge ranked sweep overrides onto the full-episode config."""
     if not best_overrides:
         return config
-    from adaptive_quant.cli.startup_overrides import (
+    from seiso.adaptive_quant.cli.startup_overrides import (
         apply_startup_overrides,
         enforce_privileged_override_policy,
     )

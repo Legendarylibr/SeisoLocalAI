@@ -8,7 +8,7 @@ Seiso integrates three compression / alignment pipelines. LLM compression, Disti
 | Distill-RL (teacher → DPO) | `/distill-rl` | `/api/distill-rl` | `seiso distill-rl run` |
 | Adaptive RL quant (GGUF) | `/rl-quant` | `/api/rl-quant` | `seiso rl-quant run` |
 
-Vendored sources: `third_party/codellama-compress/`, `third_party/adaptive-rl-quant/`.
+Bundled sources: `seiso/codellama_compress/`, `seiso/adaptive_quant/`, and `seiso/analysis/`.
 
 ## Install extras
 
@@ -25,7 +25,7 @@ Optional per pipeline:
 | `.[compress-quant]` | GPTQ / AWQ for LLM compression pipeline (Linux NVIDIA; needs train stack) |
 | `.[compress-eval]` | lm-eval harness for LLM compression evaluate stage |
 
-RL quant uses the integrated `seiso/rl_quant/` bridge (vendored `third_party/adaptive-rl-quant` bootstrapped at runtime). No separate pip extra — install `.[train]` for GPU stages.
+RL quant uses the integrated `seiso/rl_quant/` bridge with the bundled `seiso.adaptive_quant` package. No separate pip extra — install `.[train]` for GPU stages.
 
 Install example:
 
@@ -39,7 +39,7 @@ If GPTQ build fails on Linux NVIDIA:
 pip install auto-gptq autoawq --no-build-isolation
 ```
 
-Vendored packages are bootstrapped at runtime from `third_party/` — no separate clone required.
+Bundled packages are bootstrapped at runtime from `seiso/` — no separate clone required.
 
 ---
 
@@ -224,7 +224,7 @@ seiso rl-quant profiles                                  # list kernel launch pr
 
 Smoke config reference: `configs/rl_quant_smoke.json`.
 
-Integrated pipeline only — upstream `adaptive-rl-quant*` CLIs in `third_party/adaptive-rl-quant/` are optional for advanced research; use `seiso rl-quant run` for the Forge-equivalent path.
+Integrated pipeline only — use `seiso rl-quant run` for the Forge-equivalent path.
 
 ---
 
@@ -237,7 +237,4 @@ Integrated pipeline only — upstream `adaptive-rl-quant*` CLIs in `third_party/
 | Windows NVIDIA | ✓ (CUDA JIT) | ✓ | ✓ (simulator; live CUDA bench if GPU available) |
 | macOS | CPU/MPS (slow for large models) | CPU/MPS (slow for large models) | ✓ (simulator / analytic kernel metrics) |
 
-For upstream pipeline details, see vendored READMEs:
-
-- `third_party/codellama-compress/README.seiso.md`
-- `third_party/adaptive-rl-quant/README.md`
+For pipeline details, use this guide and the CLI help for `seiso compress`, `seiso distill-rl`, and `seiso rl-quant`.

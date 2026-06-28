@@ -145,4 +145,4 @@ Lint/type/test jobs target first-party code only:
 
 - `seiso/`, `forge/`, `seiso_cli/`, `tests/`
 
-`third_party/` vendored trees have their own CI. `forge-ui/dist/` build output is excluded.
+`forge-ui/dist/` build output is excluded.

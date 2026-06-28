@@ -387,7 +387,9 @@ Seiso/
 ├── seiso_cli/          # CLI: seiso, seiso-bench-kernels, seiso-train-worker
 ├── forge/              # FastAPI backend, auth, orchestrators, SSE job streaming
 ├── forge-ui/           # React 19 + TypeScript + Vite frontend
-├── third_party/        # Vendored compression pipelines (codellama, RL quant)
+├── seiso/codellama_compress/ # Bundled LLM compression implementation
+├── seiso/adaptive_quant/     # Bundled adaptive RL quant implementation
+├── seiso/analysis/           # RL quant analysis CLI/helpers
 ├── configs/            # Example YAML/JSON configs
 ├── deploy/             # Caddy, nginx, systemd, HTTPS env templates
 ├── docs/               # Documentation
