@@ -5,8 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from seiso.rl_quant.bootstrap import ensure_adaptive_quant_importable, vendor_root
-from seiso.vendor.config_builder import job_output_root, resolve_config_file_path
+from seiso.bundled.config_builder import job_output_root, resolve_config_file_path
+from seiso.rl_quant.bootstrap import bundle_root, ensure_adaptive_quant_importable
 
 
 def _artifact_paths(output_root: Path, run_name: str) -> dict[str, str]:
@@ -39,7 +39,7 @@ def build_framework_config(
     output_root = job_output_root(data_dir, "rl_quant", user_id, job_id)
 
     if config_file := payload.get("config_file"):
-        path = resolve_config_file_path(config_file, vendor_root=vendor_root())
+        path = resolve_config_file_path(config_file, bundle_root=bundle_root())
         if path is None:
             raise ValueError(f"Config file not found: {config_file}")
         base = load_config(path)
@@ -64,7 +64,7 @@ def build_framework_config(
 
     if preset in {"post_train", "posttrain"}:
         overrides["prompt_library_path"] = str(
-            vendor_root() / "prompts" / "post_train_library.json"
+            bundle_root() / "prompts" / "post_train_library.json"
         )
     elif payload.get("prompt_library"):
         overrides["prompt_library_path"] = str(payload["prompt_library"])

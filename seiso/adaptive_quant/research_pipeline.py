@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import contextlib
+
 from seiso.adaptive_quant.configuration import FrameworkConfig, config_to_flat_dict
 from seiso.adaptive_quant.logging_utils import write_json
 from seiso.adaptive_quant.paper_bundle import create_pipeline_paper_bundle
@@ -30,7 +32,7 @@ def maybe_save_final_checkpoint(config: FrameworkConfig, trainer) -> str | None:
 
 def write_pipeline_failure_artifact(config: FrameworkConfig, exc: BaseException) -> None:
     """Best-effort failure record for non-research pipelines (mirrors research pipeline)."""
-    try:
+    with contextlib.suppress(Exception):
         write_json(
             f"{config.benchmark_dir}/{config.run_name}_pipeline_failure.json",
             {
@@ -39,8 +41,6 @@ def write_pipeline_failure_artifact(config: FrameworkConfig, exc: BaseException)
                 "error_type": type(exc).__name__,
             },
         )
-    except Exception:
-        pass
 
 
 def run_research_analysis(config: FrameworkConfig, history_path: str | None) -> dict[str, object]:

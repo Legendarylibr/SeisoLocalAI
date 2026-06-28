@@ -213,10 +213,10 @@ class LauncherRequestHandler(BaseHTTPRequestHandler):
                     python_bin=self.server.python_bin,
                 )
             )
-        except ValueError as exc:
-            self._send_json({"error": str(exc)}, status=400)
         except json.JSONDecodeError:
             self._send_json({"error": "invalid JSON"}, status=400)
+        except ValueError as exc:
+            self._send_json({"error": str(exc)}, status=400)
 
     def _handle_chat(self) -> None:
         try:
@@ -232,10 +232,10 @@ class LauncherRequestHandler(BaseHTTPRequestHandler):
                     session=self.server.chat_session,
                 )
             )
-        except ValueError as exc:
-            self._send_json({"error": str(exc)}, status=400)
         except json.JSONDecodeError:
             self._send_json({"error": "invalid JSON"}, status=400)
+        except ValueError as exc:
+            self._send_json({"error": str(exc)}, status=400)
         except (FileNotFoundError, OSError) as exc:
             self._send_json({"error": str(exc)}, status=400)
 
@@ -247,10 +247,10 @@ class LauncherRequestHandler(BaseHTTPRequestHandler):
             from seiso.adaptive_quant.ui.chat import build_models_response
 
             self._send_json(build_models_response(repo=self.server.repo, body=body or {}))
-        except ValueError as exc:
-            self._send_json({"error": str(exc)}, status=400)
         except json.JSONDecodeError:
             self._send_json({"error": "invalid JSON"}, status=400)
+        except ValueError as exc:
+            self._send_json({"error": str(exc)}, status=400)
         except (FileNotFoundError, TimeoutError, RuntimeError, OSError) as exc:
             self._send_json({"error": str(exc)}, status=400)
 
@@ -269,10 +269,10 @@ class LauncherRequestHandler(BaseHTTPRequestHandler):
                 options=options,
             )
             self._send_json(record.to_dict(), status=202)
-        except ValueError as exc:
-            self._send_json({"error": str(exc)}, status=400)
         except json.JSONDecodeError:
             self._send_json({"error": "invalid JSON"}, status=400)
+        except ValueError as exc:
+            self._send_json({"error": str(exc)}, status=400)
 
 
 def serve_launcher(

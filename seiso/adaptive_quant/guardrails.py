@@ -39,11 +39,7 @@ def passes_online_guardrails(
         config.online_max_memory_ratio
     ):
         return False
-    if float(candidate_perplexity) > float(baseline_perplexity) + float(
-        config.online_max_perplexity_delta
-    ):
-        return False
-    return True
+    return not float(candidate_perplexity) > float(baseline_perplexity) + float(config.online_max_perplexity_delta)
 
 
 __all__ = ["passes_online_guardrails", "should_fallback_due_to_instability"]

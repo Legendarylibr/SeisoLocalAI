@@ -11,6 +11,7 @@ from typing import Any
 
 from seiso.training.config import DatasetFormat
 from seiso.training.datasets import detect_format, load_training_dataset
+
 logger = logging.getLogger(__name__)
 
 _WHITESPACE_RE = re.compile(r"\s+")

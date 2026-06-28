@@ -32,12 +32,12 @@ def validate_stages(stages: list[str], stage_order: tuple[str, ...]) -> None:
             raise ValueError(f"Unknown pipeline stage: {stage}")
 
 
-def resolve_config_file_path(config_file: str | None, *, vendor_root: Path) -> Path | None:
+def resolve_config_file_path(config_file: str | None, *, bundle_root: Path) -> Path | None:
     """Resolve a config file path from an absolute path or bundled configs dir."""
     if not config_file:
         return None
     path = Path(config_file)
     if path.is_file():
         return path
-    vendor_path = vendor_root / "configs" / config_file
-    return vendor_path if vendor_path.is_file() else None
+    bundled_path = bundle_root / "configs" / config_file
+    return bundled_path if bundled_path.is_file() else None

@@ -87,7 +87,7 @@ class QuantSpec:
     family: str = "gguf"
 
     @classmethod
-    def from_label(cls, label: str, *, family: str = "gguf") -> "QuantSpec":
+    def from_label(cls, label: str, *, family: str = "gguf") -> QuantSpec:
         normalized = label.strip().upper()
         bits = QUANT_BITS.get(normalized)
         if bits is None:
@@ -254,7 +254,7 @@ class RouteCatalog:
         return result
 
     @classmethod
-    def from_dict(cls, data: Mapping[str, Any]) -> "RouteCatalog":
+    def from_dict(cls, data: Mapping[str, Any]) -> RouteCatalog:
         if not isinstance(data, Mapping):
             raise TypeError(f"RouteCatalog payload must be a mapping, got {type(data).__name__}")
         raw_routes = data.get("routes", [])
@@ -279,7 +279,7 @@ class RouteCatalog:
         return {"routes": [route.to_dict() for route in self.routes]}
 
     @classmethod
-    def from_file(cls, path: str | Path) -> "RouteCatalog":
+    def from_file(cls, path: str | Path) -> RouteCatalog:
         target = Path(path)
         if not target.is_file():
             raise FileNotFoundError(f"Route catalog not found: {target}")

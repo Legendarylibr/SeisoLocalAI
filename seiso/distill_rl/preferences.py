@@ -154,9 +154,9 @@ def _file_hash(path: Path) -> str:
 
 
 def _prompt_library_hash(path: Path | None) -> str | None:
-    from seiso.rl_quant.bootstrap import vendor_root
+    from seiso.rl_quant.bootstrap import bundle_root
 
-    source = path or (vendor_root() / "prompts" / "post_train_library.json")
+    source = path or (bundle_root() / "prompts" / "post_train_library.json")
     if not source.is_file():
         return None
     return hashlib.sha256(source.read_bytes()).hexdigest()

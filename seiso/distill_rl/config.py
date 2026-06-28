@@ -10,7 +10,7 @@ from typing import Any, cast
 import yaml
 from pydantic import BaseModel, Field
 
-from seiso.vendor.config_builder import job_output_root, resolve_preset, validate_stages
+from seiso.bundled.config_builder import job_output_root, resolve_preset, validate_stages
 
 STAGE_ORDER = ("distill", "rollout", "dpo", "evaluate")
 

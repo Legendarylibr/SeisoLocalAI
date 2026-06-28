@@ -111,7 +111,10 @@ def _setup_ready(repo: Path) -> dict[str, Any]:
 
 
 def _torch_status() -> dict[str, Any]:
-    from seiso.adaptive_quant.torch_install import INSTALL_CUDA_TORCH_SCRIPT, torch_cuda_ready_report
+    from seiso.adaptive_quant.torch_install import (
+        INSTALL_CUDA_TORCH_SCRIPT,
+        torch_cuda_ready_report,
+    )
 
     report = dict(torch_cuda_ready_report())
     report["install_script"] = INSTALL_CUDA_TORCH_SCRIPT

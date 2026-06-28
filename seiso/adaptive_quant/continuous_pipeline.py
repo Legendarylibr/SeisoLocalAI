@@ -9,7 +9,10 @@ from seiso.adaptive_quant.continuous_learning import ContinuousLearningLoop
 from seiso.adaptive_quant.logging_utils import md_table, write_json, write_text_file
 from seiso.adaptive_quant.pipeline.research_contract import build_research_contract
 from seiso.adaptive_quant.pipeline.vcs import git_commit_hash
-from seiso.adaptive_quant.research_pipeline import maybe_save_final_checkpoint, write_training_history
+from seiso.adaptive_quant.research_pipeline import (
+    maybe_save_final_checkpoint,
+    write_training_history,
+)
 from seiso.adaptive_quant.security_audit import build_security_audit_record
 from seiso.adaptive_quant.security_bypass import enforce_security_bypass_policy
 from seiso.adaptive_quant.trainer import build_trainer

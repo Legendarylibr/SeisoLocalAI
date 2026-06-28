@@ -35,17 +35,17 @@ from seiso.research.provenance import (
 )
 from seiso.security.deps import sha256_file
 from seiso.training.config import DatasetFormat, QuantMode, TrainConfig, TrainMethod
+from seiso.training.dataset_analysis import analyze_training_dataset
 from seiso.training.datasets import (
     format_dataset_text,
     load_training_dataset,
     prepare_tokenized_dataset,
 )
 from seiso.training.multi_gpu import configure_training_args, detect_training_layout
-from seiso.training.dataset_analysis import analyze_training_dataset
 from seiso.training.practices import (
     default_pad_to_multiple_of,
-    resolve_dataloader_settings,
     resolve_compute_dtype,
+    resolve_dataloader_settings,
     resolve_map_workers,
     resolve_optimizer,
     sft_modern_kwargs,

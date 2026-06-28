@@ -311,14 +311,14 @@ def test_hub_row_to_entry_accepts_any_text_generation_repo():
 
     gguf_entry = _hub_row_to_entry(
         {
-            "id": "vendor/Kimi-DFlash",
+            "id": "local-owner/Kimi-DFlash",
             "downloads": 999,
             "tags": ["gguf", "text-generation"],
             "pipeline_tag": "text-generation",
         }
     )
     assert gguf_entry is not None
-    assert gguf_entry.gguf_repo == "vendor/Kimi-DFlash"
+    assert gguf_entry.gguf_repo == "local-owner/Kimi-DFlash"
 
 
 def test_search_catalog_uses_hub_cursor(monkeypatch):

@@ -6,7 +6,10 @@ import random
 import sys
 from typing import Any
 
-from seiso.adaptive_quant.backends.llama_cpp import require_llama_cpp_paths, run_llama_cpp_completion
+from seiso.adaptive_quant.backends.llama_cpp import (
+    require_llama_cpp_paths,
+    run_llama_cpp_completion,
+)
 from seiso.adaptive_quant.configuration import FrameworkConfig
 from seiso.adaptive_quant.frontier_reference import (
     FrontierReferenceClient,

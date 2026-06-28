@@ -52,7 +52,7 @@ class RouteContext:
         domain: str,
         complexity_score: float,
         known_domains: Iterable[str] | None = None,
-    ) -> "RouteContext":
+    ) -> RouteContext:
         hw = hardware.value if isinstance(hardware, HardwareType) else str(hardware)
         hw = hw.strip().lower() or HardwareType.CPU.value
 
@@ -112,7 +112,7 @@ class _ArmStats:
         }
 
     @classmethod
-    def from_dict(cls, payload: dict[str, Any], *, label: str = "arm") -> "_ArmStats":
+    def from_dict(cls, payload: dict[str, Any], *, label: str = "arm") -> _ArmStats:
         if not isinstance(payload, dict):
             raise TypeError(f"{label} stats must be a dict")
         pulls = non_negative_int(

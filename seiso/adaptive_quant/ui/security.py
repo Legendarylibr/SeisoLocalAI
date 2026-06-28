@@ -15,7 +15,7 @@ from seiso.adaptive_quant.configuration.validation import validate_cli_path_argu
 from seiso.adaptive_quant.logging_utils import enforce_safe_parsed_json, safe_json_loads
 from seiso.adaptive_quant.ui.rl_fields import collect_rl_set_overrides
 
-_LAUNCHER_TOKEN_HEADER = "X-Launcher-Token"
+_LAUNCHER_TOKEN_HEADER = "X-Launcher-Token"  # nosec B105 - header name, not a secret
 _MAX_API_BODY_BYTES = 1 << 20
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 _ALLOW_REMOTE_ENV = "ADAPTIVE_RL_LAUNCHER_ALLOW_REMOTE"

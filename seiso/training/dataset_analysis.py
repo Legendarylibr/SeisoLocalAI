@@ -144,9 +144,7 @@ def _recommend_epochs(kept: int, domain: str) -> int:
 
 
 def _recommend_train_on_responses(fmt: DatasetFormat, domain: str) -> bool:
-    if fmt == DatasetFormat.TEXT or domain == "code_pretraining":
-        return False
-    return True
+    return not (fmt == DatasetFormat.TEXT or domain == "code_pretraining")
 
 
 def _preview_rows(rows: list[dict[str, Any]], *, limit: int = 3) -> list[dict[str, Any]]:

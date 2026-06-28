@@ -12,7 +12,10 @@ from seiso.adaptive_quant.cli.common import (
     resolve_startup_config,
 )
 from seiso.adaptive_quant.configuration import FrameworkConfig
-from seiso.adaptive_quant.frontier_comparison import compare_frontier_to_local, score_frontier_reference
+from seiso.adaptive_quant.frontier_comparison import (
+    compare_frontier_to_local,
+    score_frontier_reference,
+)
 from seiso.adaptive_quant.presets.baseline import CONFIG
 
 

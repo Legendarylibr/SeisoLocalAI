@@ -10,6 +10,7 @@ from functools import lru_cache
 from typing import Any
 
 from forge.services.hf_auth import hf_auth_status, resolve_hf_token
+from seiso.inference.runtime_cache import register_runtime_cache_clear
 from seiso.models.hf_env import hf_transfer_stack, resolve_hf_cache_dir
 from seiso.models.hub_errors import format_hub_error
 
@@ -112,9 +113,6 @@ def check_inference_runtime() -> InferenceRuntimeStatus:
         hints.append('pip install -e ".[mlx]" or ".[train]"  # safetensors inference')
     status.install_hints = hints
     return status
-
-
-from seiso.inference.runtime_cache import register_runtime_cache_clear
 
 register_runtime_cache_clear(check_inference_runtime.cache_clear)
 

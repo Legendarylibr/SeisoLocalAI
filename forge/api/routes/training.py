@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 

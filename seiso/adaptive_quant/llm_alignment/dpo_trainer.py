@@ -15,7 +15,11 @@ from torch.utils.data import DataLoader
 
 from seiso.adaptive_quant.llm_alignment.config import DPOSettings
 from seiso.adaptive_quant.llm_alignment.data_collator import DPODataCollator
-from seiso.adaptive_quant.llm_alignment.dpo_loss import DPOMetrics, compute_dpo_loss, get_batch_logps
+from seiso.adaptive_quant.llm_alignment.dpo_loss import (
+    DPOMetrics,
+    compute_dpo_loss,
+    get_batch_logps,
+)
 from seiso.adaptive_quant.llm_alignment.model_loading import load_policy_and_reference
 from seiso.adaptive_quant.logging_utils import JsonlLogger, write_json
 
@@ -137,7 +141,7 @@ class DPOTrainer:
                         "disable_adapter(); load with LoRA/QLoRA or pass an explicit "
                         "reference_model."
                     )
-                with disable_adapter():
+                with disable_adapter():  # pylint: disable=not-callable
                     return self._forward_logps(
                         self.policy_model,
                         input_ids,

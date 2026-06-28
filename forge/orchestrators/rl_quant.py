@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from forge.orchestrators._vendor_job import vendor_orchestrator
+from forge.orchestrators._bundled_job import bundled_orchestrator
 from seiso.rl_quant.runner import run_rl_quant_job
 
-RLQuantOrchestrator = vendor_orchestrator(
+RLQuantOrchestrator = bundled_orchestrator(
     class_name="RLQuantOrchestrator",
     kind="rl_quant",
     user_id_error="user_id required for RL quant job",

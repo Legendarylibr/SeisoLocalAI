@@ -39,7 +39,7 @@ def is_local_filesystem_path(target: str | Path) -> bool:
 
 
 def assert_user_config_file(sandbox_root: Path, user_id: str, config_file: str) -> None:
-    """Vendor preset filenames or absolute paths under the user's data tree only."""
+    """Allow preset filenames or absolute paths under the user's data tree only."""
     path = Path(config_file).expanduser()
     if path.is_absolute():
         assert_user_path(sandbox_root, user_id, path)

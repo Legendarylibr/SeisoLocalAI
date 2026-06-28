@@ -15,7 +15,10 @@ from seiso.adaptive_quant.logging_utils import write_json
 from seiso.adaptive_quant.math_utils import parse_seed_list
 from seiso.adaptive_quant.paper_bundle import create_multiseed_paper_bundle
 from seiso.adaptive_quant.pipeline.output_summary import experiment_config_summary
-from seiso.adaptive_quant.pipeline.research_contract import EVIDENCE_MULTISEED, build_research_contract
+from seiso.adaptive_quant.pipeline.research_contract import (
+    EVIDENCE_MULTISEED,
+    build_research_contract,
+)
 from seiso.adaptive_quant.pipeline.vcs import git_commit_hash
 from seiso.adaptive_quant.research_pipeline import run_pipeline_entrypoint
 

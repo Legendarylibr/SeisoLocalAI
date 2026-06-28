@@ -9,55 +9,55 @@ from pathlib import Path
 
 
 @dataclass(frozen=True)
-class VendorBootstrap:
+class BundledPackage:
     root: Path
     ensure_importable: Callable[[], Path]
     require: Callable[[], None]
 
 
-def make_vendor_bootstrap(
+def make_bundled_package(
     package_dir: str,
     package_name: str,
     *,
     src_subdir: str | None = None,
     missing_hint: str | None = None,
-) -> VendorBootstrap:
+) -> BundledPackage:
     """Create root / ensure / require helpers for a bundled source package."""
     root = Path(__file__).resolve().parents[2] / package_dir
     hint = missing_hint or f"Expected {package_dir}"
 
     def ensure_importable() -> Path:
-        return ensure_vendor_importable(root, src_subdir=src_subdir)
+        return ensure_bundled_importable(root, src_subdir=src_subdir)
 
     def require() -> None:
-        require_vendor_package(
+        require_bundled_package(
             root,
             package_name,
             src_subdir=src_subdir,
             missing_hint=hint,
         )
 
-    return VendorBootstrap(root=root, ensure_importable=ensure_importable, require=require)
+    return BundledPackage(root=root, ensure_importable=ensure_importable, require=require)
 
 
-def ensure_vendor_importable(vendor_root: Path, *, src_subdir: str | None = None) -> Path:
+def ensure_bundled_importable(bundle_root: Path, *, src_subdir: str | None = None) -> Path:
     """Insert the package import root on sys.path if needed."""
-    import_root = vendor_root / src_subdir if src_subdir else vendor_root.parent
+    import_root = bundle_root / src_subdir if src_subdir else bundle_root.parent
     root = str(import_root.resolve())
     if root not in sys.path:
         sys.path.insert(0, root)
     return import_root
 
 
-def require_vendor_package(
-    vendor_root: Path,
+def require_bundled_package(
+    bundle_root: Path,
     package_name: str,
     *,
     src_subdir: str | None = None,
     missing_hint: str | None = None,
 ) -> Path:
     """Ensure a bundled package is importable or raise RuntimeError."""
-    import_root = ensure_vendor_importable(vendor_root, src_subdir=src_subdir)
+    import_root = ensure_bundled_importable(bundle_root, src_subdir=src_subdir)
     try:
         __import__(package_name)
     except ImportError as exc:

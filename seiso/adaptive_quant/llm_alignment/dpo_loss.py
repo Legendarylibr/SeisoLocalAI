@@ -91,7 +91,7 @@ def compute_dpo_loss(
     ref_logratios = reference_chosen_logps - reference_rejected_logps
     logits = pi_logratios - ref_logratios
 
-    losses = -F.logsigmoid(beta * logits)
+    losses = -F.logsigmoid(beta * logits)  # pylint: disable=not-callable
     loss = losses.mean()
 
     with torch.no_grad():

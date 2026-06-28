@@ -8,7 +8,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
-from . import __version__
+from . import __version__  # pylint: disable=import-error
 from .config import save_json, to_jsonable
 
 MANIFEST_VERSION = 1
@@ -218,10 +218,7 @@ def artifact_sha256_for_stage(run_dir: Path, stage: str, *, role: str = "output"
 
 
 def verify_artifact_sha256(path: Path, expected_sha256: str) -> bool:
-    if path.is_dir():
-        actual = hash_directory(path)
-    else:
-        actual = sha256_file(path)
+    actual = hash_directory(path) if path.is_dir() else sha256_file(path)
     return actual == expected_sha256
 
 

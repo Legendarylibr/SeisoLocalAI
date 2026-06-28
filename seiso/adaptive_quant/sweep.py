@@ -173,10 +173,7 @@ def expand_grid(grid: dict[str, tuple[Any, ...]]) -> list[dict[str, Any]]:
 
 
 def _short_value(value: Any) -> str:
-    if isinstance(value, float):
-        text = f"{value:.4g}"
-    else:
-        text = str(value)
+    text = f"{value:.4g}" if isinstance(value, float) else str(value)
     return re.sub(r"[^a-zA-Z0-9]+", "p", text)[:16]
 
 

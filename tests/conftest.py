@@ -7,6 +7,12 @@ import contextlib
 from pathlib import Path
 
 import pytest
+from httpx import ASGITransport, AsyncClient
+
+from forge.api.deps import clear_dependency_caches, close_dependency_caches, get_db
+from forge.main import create_app
+from forge.security.auth import create_access_token, hash_password
+from forge.security.token_revocation import clear_revocations_for_tests
 
 
 def pytest_configure(config):
@@ -17,12 +23,6 @@ def pytest_configure(config):
         configure_cuda_build_env()
     except ImportError:
         pass
-from httpx import ASGITransport, AsyncClient
-
-from forge.api.deps import clear_dependency_caches, close_dependency_caches, get_db
-from forge.main import create_app
-from forge.security.auth import create_access_token, hash_password
-from forge.security.token_revocation import clear_revocations_for_tests
 
 
 @pytest.fixture(autouse=True)

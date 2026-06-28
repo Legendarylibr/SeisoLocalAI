@@ -139,10 +139,10 @@ def build_eval_route_prompt_library(
     max_prompts: int = 16,
 ) -> list[Any]:
     """Build llama.cpp route prompts from the training eval split (e.g. MetaMathQA holdout)."""
-    from seiso.adaptive_quant.prompts import default_prompt_library
-    from seiso.adaptive_quant.types import PromptSample
     from transformers import AutoTokenizer
 
+    from seiso.adaptive_quant.prompts import default_prompt_library
+    from seiso.adaptive_quant.types import PromptSample
     from seiso.models.chat_format import extract_messages, format_messages_for_prompt
     from seiso.training.config import DatasetFormat
     from seiso.training.datasets import detect_format, load_training_dataset

@@ -6,6 +6,7 @@ import re
 from pathlib import Path
 
 from fastapi import HTTPException
+
 from seiso.security import SecurityError, assert_within, safe_join
 
 _KB_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")

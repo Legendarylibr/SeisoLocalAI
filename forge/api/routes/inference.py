@@ -19,17 +19,17 @@ from forge.services.chat_messages import build_trusted_messages
 from forge.services.download_progress import estimate_load_eta_seconds
 from forge.services.hardware import hardware_profile
 from forge.services.hf_cache_inventory import sync_hf_cache_inventory
-from forge.services.inference_models import get_inference_option, list_inference_options
-from forge.services.knowledge_context import format_knowledge_context, retrieve_knowledge_chunks
-from forge.services.llm_output import StreamingOutputSanitizer, sanitize_llm_output
-from forge.services.model_router_client import ROUTER_MODEL_ID, fetch_router_status
 from forge.services.inference_chat import (
     resolve_draft_model,
     resolve_explicit_model_path,
     resolve_inventory_model_path,
     resolve_preload_context,
 )
+from forge.services.inference_models import get_inference_option, list_inference_options
+from forge.services.knowledge_context import format_knowledge_context, retrieve_knowledge_chunks
 from forge.services.knowledge_paths import validate_kb_id
+from forge.services.llm_output import StreamingOutputSanitizer, sanitize_llm_output
+from forge.services.model_router_client import ROUTER_MODEL_ID, fetch_router_status
 
 router = APIRouter(prefix="/inference", tags=["inference"])
 

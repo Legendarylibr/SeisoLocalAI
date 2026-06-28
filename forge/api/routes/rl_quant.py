@@ -79,7 +79,7 @@ class RLQuantStartRequest(BaseModel):
     )
     sweep_config: str | None = Field(
         default=None,
-        description="Optional sweep grid JSON/TOML under configs/ or vendor tree.",
+        description="Optional sweep grid JSON/TOML under configs/ or the bundled tree.",
     )
 
 

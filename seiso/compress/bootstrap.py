@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from seiso.vendor.packages import CODELLAMA
+from seiso.bundled.packages import CODELLAMA
 
-_VENDOR_ROOT = CODELLAMA.root
+_BUNDLE_ROOT = CODELLAMA.root
 
 
-def vendor_root() -> Path:
-    return _VENDOR_ROOT
+def bundle_root() -> Path:
+    return _BUNDLE_ROOT
 
 
 ensure_codellama_compress_importable = CODELLAMA.ensure_importable

@@ -163,10 +163,7 @@ def speculative_generate(
         # Next token from target:
         # - if mismatch: use target greedy token at mismatch position
         # - if full accept: use target greedy token after the accepted span
-        if accept < k:
-            pos = prefix_len + accept - 1
-        else:
-            pos = prefix_len + k - 1
+        pos = prefix_len + accept - 1 if accept < k else prefix_len + k - 1
         next_id = torch.argmax(logits[:, pos, :], dim=-1, keepdim=True).to(target_device)
         input_ids_t = torch.cat([input_ids_t, next_id], dim=1)
         input_ids_d = input_ids_t.to(draft_device)

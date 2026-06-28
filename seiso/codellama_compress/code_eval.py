@@ -11,7 +11,11 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from .code_exec import run_python_sandboxed
 from .reporting import jsonl_writer, write_metrics, write_provenance
-from .security import assert_code_exec_permitted, is_isolated_execution_environment, resolve_user_path
+from .security import (
+    assert_code_exec_permitted,
+    is_isolated_execution_environment,
+    resolve_user_path,
+)
 
 
 @dataclass(frozen=True)

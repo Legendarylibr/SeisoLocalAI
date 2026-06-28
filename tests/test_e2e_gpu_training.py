@@ -5,8 +5,12 @@ from __future__ import annotations
 import json
 import shutil
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
+
+if TYPE_CHECKING:
+    from seiso.training.config import TrainConfig
 
 pytestmark = pytest.mark.skipif(
     "not __import__('torch').cuda.is_available()",
@@ -21,7 +25,7 @@ def e2e_output_dir(tmp_path_factory) -> Path:
     shutil.rmtree(out, ignore_errors=True)
 
 
-def _base_config(output_dir: Path, *, quant: str = "4bit") -> "TrainConfig":
+def _base_config(output_dir: Path, *, quant: str = "4bit") -> TrainConfig:
     from seiso.training.config import TrainConfig
 
     return TrainConfig(

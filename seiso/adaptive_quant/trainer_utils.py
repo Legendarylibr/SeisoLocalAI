@@ -5,7 +5,12 @@ from typing import Any, TypeVar
 
 from seiso.adaptive_quant.kernel_rl import kernel_feedback_scalar
 from seiso.adaptive_quant.math_utils import mean
-from seiso.adaptive_quant.types import EpisodeResult, EpisodeState, HardwareType, QuantizationDecision
+from seiso.adaptive_quant.types import (
+    EpisodeResult,
+    EpisodeState,
+    HardwareType,
+    QuantizationDecision,
+)
 
 StateT = TypeVar("StateT")
 
