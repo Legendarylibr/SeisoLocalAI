@@ -115,7 +115,7 @@ packages = ["seiso", "seiso_cli", "forge"]
 [tool.ruff]
 line-length = 100
 target-version = "py310"
-exclude = ["third_party", ".venv", "venv", "forge-ui/dist"]
+exclude = [".venv", "venv", "forge-ui/dist"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
@@ -165,9 +165,9 @@ ignored-modules = [
   "transformers",
   "torch",
   "mlx_lm",
-  "codellama_compress",
+  "seiso.codellama_compress",
   "adaptive_rl_quant",
-  "adaptive_quant",
+  "seiso.adaptive_quant",
   "sentence_transformers",
   "triton",
   "flash_attn",
@@ -210,7 +210,7 @@ disable = [
 max-line-length = 100
 
 [tool.bandit]
-exclude_dirs = ["tests", "third_party", ".venv", "venv", "forge-ui"]
+exclude_dirs = ["tests", ".venv", "venv", "forge-ui"]
 skips = [
   "B101",  # assert (tests excluded; remaining uses are dev guards)
   "B404",  # subprocess import — required for training/export orchestration

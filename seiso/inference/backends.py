@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import mmap
 import re
 import struct
+from dataclasses import dataclass
 from pathlib import Path
 
 from seiso.compat import StrEnum
@@ -47,10 +49,28 @@ _GGUF_VALUE_SIZE = {
     11: 8,  # int64
     12: 8,  # float64
 }
+_GGUF_TYPE_U32 = 4
+_GGUF_TYPE_STRING = 8
+_GGUF_TYPE_ARRAY = 9
+_GGUF_MAGIC = b"GGUF"
+_GGUF_HEADER_FMT = "<IQQ"
+_GGUF_KEY_ARCH = b"general.architecture"
+_GGUF_SUFFIX_CTX_LEN = b".context_length"
+_GGUF_SUFFIX_BLOCK_CNT = b".block_count"
+_GGUF_SUFFIX_SLIDING_WIN = b".attention.sliding_window"
+_GGUF_SUFFIX_SLIDING_PAT = b".attention.sliding_window_pattern"
 # dflash-draft are specialized tiny draft models. We allow llama.cpp backend for them
 # (especially when used as speculative drafts). They are filtered from main catalogs
 # via other hints.
 _UNSUPPORTED_GGUF_ARCHITECTURES = frozenset()  # was {"dflash-draft"} - now supported as drafts
+
+
+@dataclass(slots=True)
+class _GGUFMetadata:
+    architecture: str | None = None
+    context_length: int | None = None
+    block_count: int | None = None
+    has_sliding_window: bool = False
 
 
 def is_dflash_draft(model_path: str) -> bool:
@@ -87,66 +107,34 @@ def resolve_gguf_file(model_path: str) -> Path:
     if path.is_file() and _looks_like_gguf_file(path):
         return path.absolute()
     if path.is_dir():
-        candidates = sorted(path.glob("*.gguf"))
-        first_shards = [
-            p
-            for p in candidates
-            if (match := _GGUF_SHARD_RE.match(p.name)) and match.group("index") == "00001"
-        ]
-        if first_shards:
-            return first_shards[0].absolute()
-        candidates = sorted(candidates, key=lambda p: p.stat().st_size, reverse=True)
-        if candidates:
-            return candidates[0].absolute()
+        first_shard: Path | None = None
+        largest: tuple[int, str, Path] | None = None
+        for candidate in path.glob("*.gguf"):
+            match = _GGUF_SHARD_RE.match(candidate.name)
+            if match and match.group("index") == "00001":
+                if first_shard is None or candidate.name < first_shard.name:
+                    first_shard = candidate
+                continue
+            try:
+                size = candidate.stat().st_size
+            except OSError:
+                continue
+            item = (size, candidate.name, candidate)
+            if largest is None or item > largest:
+                largest = item
+        if first_shard is not None:
+            return first_shard.absolute()
+        if largest is not None:
+            return largest[2].absolute()
     raise ValueError(f"No GGUF file found at {model_path}")
 
 
-def _read_gguf_string(handle) -> str:
-    raw_len = handle.read(8)
-    if len(raw_len) != 8:
-        raise ValueError("truncated GGUF string length")
-    (length,) = struct.unpack("<Q", raw_len)
-    raw = handle.read(length)
-    if len(raw) != length:
-        raise ValueError("truncated GGUF string")
-    return raw.decode("utf-8", errors="replace")
-
-
-def _skip_gguf_value(handle, value_type: int) -> None:
-    if value_type == 8:  # string
-        length = struct.unpack("<Q", handle.read(8))[0]
-        handle.seek(length, 1)
-        return
-    if value_type == 9:  # array
-        raw = handle.read(12)
-        if len(raw) != 12:
-            raise ValueError("truncated GGUF array header")
-        item_type, count = struct.unpack("<IQ", raw)
-        if item_type == 8:
-            for _ in range(count):
-                _skip_gguf_value(handle, item_type)
-            return
-        item_size = _GGUF_VALUE_SIZE.get(item_type)
-        if item_size is None:
-            raise ValueError(f"unsupported GGUF array type: {item_type}")
-        handle.seek(item_size * count, 1)
-        return
-    size = _GGUF_VALUE_SIZE.get(value_type)
-    if size is None:
-        raise ValueError(f"unsupported GGUF value type: {value_type}")
-    handle.seek(size, 1)
-
-
-_gguf_arch_cache: dict[tuple[str, float, int], str | None] = {}
-_gguf_block_count_cache: dict[tuple[str, float, int], int | None] = {}
-_gguf_context_length_cache: dict[tuple[str, float, int], int | None] = {}
+_gguf_metadata_cache: dict[tuple[str, float, int], _GGUFMetadata] = {}
 
 
 def clear_gguf_caches() -> None:
-    """Reset GGUF architecture cache (for tests)."""
-    _gguf_arch_cache.clear()
-    _gguf_block_count_cache.clear()
-    _gguf_context_length_cache.clear()
+    """Reset GGUF metadata cache (for tests)."""
+    _gguf_metadata_cache.clear()
 
 
 def _gguf_cache_key(path: Path) -> tuple[str, float, int] | None:
@@ -157,152 +145,122 @@ def _gguf_cache_key(path: Path) -> tuple[str, float, int] | None:
         return None
 
 
-def gguf_architecture(model_path: str) -> str | None:
-    """Read ``general.architecture`` from a GGUF file when available."""
+def _skip_gguf_mmap_value(mm: mmap.mmap, offset: int, value_type: int) -> int:
+    if value_type == _GGUF_TYPE_STRING:
+        (length,) = struct.unpack_from("<Q", mm, offset)
+        return offset + 8 + length
+    if value_type == _GGUF_TYPE_ARRAY:
+        item_type, count = struct.unpack_from("<IQ", mm, offset)
+        offset += 12
+        if item_type == _GGUF_TYPE_STRING:
+            for _ in range(count):
+                (length,) = struct.unpack_from("<Q", mm, offset)
+                offset += 8 + length
+            return offset
+        item_size = _GGUF_VALUE_SIZE.get(item_type)
+        if item_size is None:
+            raise ValueError(f"unsupported GGUF array type: {item_type}")
+        return offset + item_size * count
+    size = _GGUF_VALUE_SIZE.get(value_type)
+    if size is None:
+        raise ValueError(f"unsupported GGUF value type: {value_type}")
+    return offset + size
+
+
+def _read_gguf_metadata(path: Path) -> _GGUFMetadata:
+    meta = _GGUFMetadata()
+    try:
+        with path.open("rb") as handle:
+            if handle.read(4) != _GGUF_MAGIC:
+                return meta
+            size = handle.seek(0, 2)
+            if size < 24:
+                return meta
+            handle.seek(0)
+            with mmap.mmap(handle.fileno(), 0, access=mmap.ACCESS_READ) as mm:
+                if mm[:4] != _GGUF_MAGIC:
+                    return meta
+                _version, _tensor_count, kv_count = struct.unpack_from(_GGUF_HEADER_FMT, mm, 4)
+                offset = 24
+                for _ in range(kv_count):
+                    if offset + 12 > size:
+                        break
+                    (key_len,) = struct.unpack_from("<Q", mm, offset)
+                    offset += 8
+                    if offset + key_len + 4 > size:
+                        break
+                    key = mm[offset : offset + key_len]
+                    offset += key_len
+                    (value_type,) = struct.unpack_from("<I", mm, offset)
+                    offset += 4
+
+                    if key == _GGUF_KEY_ARCH and value_type == _GGUF_TYPE_STRING:
+                        (value_len,) = struct.unpack_from("<Q", mm, offset)
+                        start = offset + 8
+                        end = start + value_len
+                        if end <= size:
+                            meta.architecture = mm[start:end].decode(
+                                "utf-8", errors="replace"
+                            )
+                        offset = end
+                    elif key.endswith(_GGUF_SUFFIX_CTX_LEN) and value_type == _GGUF_TYPE_U32:
+                        meta.context_length = int(struct.unpack_from("<I", mm, offset)[0])
+                        offset += 4
+                    elif key.endswith(_GGUF_SUFFIX_BLOCK_CNT) and value_type == _GGUF_TYPE_U32:
+                        meta.block_count = int(struct.unpack_from("<I", mm, offset)[0])
+                        offset += 4
+                    elif key.endswith(_GGUF_SUFFIX_SLIDING_WIN) and value_type == _GGUF_TYPE_U32:
+                        meta.has_sliding_window = (
+                            int(struct.unpack_from("<I", mm, offset)[0]) > 0
+                            or meta.has_sliding_window
+                        )
+                        offset += 4
+                    else:
+                        if key.endswith(_GGUF_SUFFIX_SLIDING_PAT):
+                            meta.has_sliding_window = True
+                        offset = _skip_gguf_mmap_value(mm, offset, value_type)
+                    if offset > size:
+                        break
+    except (OSError, ValueError, struct.error):
+        return _GGUFMetadata()
+    return meta
+
+
+def _gguf_metadata(model_path: str) -> _GGUFMetadata:
     try:
         path = resolve_gguf_file(model_path)
     except ValueError:
-        return None
+        return _GGUFMetadata()
 
     cache_key = _gguf_cache_key(path)
-    if cache_key is not None:
-        cached = _gguf_arch_cache.get(cache_key)
-        if cached is not None or cache_key in _gguf_arch_cache:
-            return cached
-
-    architecture: str | None
-    try:
-        architecture = _read_gguf_architecture(path)
-    except (OSError, ValueError, struct.error):
-        architecture = None
-
-    if cache_key is not None:
-        _gguf_arch_cache[cache_key] = architecture
-    return architecture
+    if cache_key is None:
+        return _read_gguf_metadata(path)
+    cached = _gguf_metadata_cache.get(cache_key)
+    if cached is not None:
+        return cached
+    meta = _read_gguf_metadata(path)
+    _gguf_metadata_cache[cache_key] = meta
+    return meta
 
 
-def _gguf_has_metadata_key(path: Path, key_suffix: str) -> bool:
-    with path.open("rb") as handle:
-        if handle.read(4) != b"GGUF":
-            return False
-        header = handle.read(20)
-        if len(header) != 20:
-            return False
-        _version, _tensor_count, kv_count = struct.unpack("<IQQ", header)
-        for _ in range(kv_count):
-            key = _read_gguf_string(handle)
-            raw_type = handle.read(4)
-            if len(raw_type) != 4:
-                return False
-            (value_type,) = struct.unpack("<I", raw_type)
-            if key.endswith(key_suffix):
-                return True
-            _skip_gguf_value(handle, value_type)
-    return False
-
-
-def _read_gguf_metadata_u32(path: Path, key_suffix: str) -> int | None:
-    with path.open("rb") as handle:
-        if handle.read(4) != b"GGUF":
-            return None
-        header = handle.read(20)
-        if len(header) != 20:
-            return None
-        _version, _tensor_count, kv_count = struct.unpack("<IQQ", header)
-        for _ in range(kv_count):
-            key = _read_gguf_string(handle)
-            raw_type = handle.read(4)
-            if len(raw_type) != 4:
-                return None
-            (value_type,) = struct.unpack("<I", raw_type)
-            if key.endswith(key_suffix) and value_type == 4:
-                raw = handle.read(4)
-                if len(raw) != 4:
-                    return None
-                (value,) = struct.unpack("<I", raw)
-                return int(value)
-            _skip_gguf_value(handle, value_type)
-    return None
+def gguf_architecture(model_path: str) -> str | None:
+    """Read ``general.architecture`` from a GGUF file when available."""
+    return _gguf_metadata(model_path).architecture
 
 
 def gguf_context_length(model_path: str) -> int | None:
     """Read training context length from GGUF metadata (e.g. llama.context_length)."""
-    try:
-        path = resolve_gguf_file(model_path)
-    except ValueError:
-        return None
-
-    cache_key = _gguf_cache_key(path)
-    if cache_key is not None and cache_key in _gguf_context_length_cache:
-        return _gguf_context_length_cache[cache_key]
-
-    length: int | None
-    try:
-        length = _read_gguf_metadata_u32(path, ".context_length")
-    except (OSError, ValueError, struct.error):
-        length = None
-
-    if cache_key is not None:
-        _gguf_context_length_cache[cache_key] = length
-    return length
+    return _gguf_metadata(model_path).context_length
 
 
 def gguf_uses_sliding_window_attention(model_path: str) -> bool:
     """True when GGUF metadata indicates sliding-window attention layers."""
-    try:
-        path = resolve_gguf_file(model_path)
-    except ValueError:
-        return False
-
-    try:
-        sliding_window = _read_gguf_metadata_u32(path, ".attention.sliding_window")
-        if sliding_window is not None and sliding_window > 0:
-            return True
-        return _gguf_has_metadata_key(path, ".attention.sliding_window_pattern")
-    except (OSError, ValueError, struct.error):
-        return False
+    return _gguf_metadata(model_path).has_sliding_window
 
 
 def gguf_block_count(model_path: str) -> int | None:
     """Read transformer block count from GGUF metadata when available."""
-    try:
-        path = resolve_gguf_file(model_path)
-    except ValueError:
-        return None
-
-    cache_key = _gguf_cache_key(path)
-    if cache_key is not None and cache_key in _gguf_block_count_cache:
-        return _gguf_block_count_cache[cache_key]
-
-    count: int | None
-    try:
-        count = _read_gguf_metadata_u32(path, ".block_count")
-    except (OSError, ValueError, struct.error):
-        count = None
-
-    if cache_key is not None:
-        _gguf_block_count_cache[cache_key] = count
-    return count
-
-
-def _read_gguf_architecture(path: Path) -> str | None:
-    with path.open("rb") as handle:
-        if handle.read(4) != b"GGUF":
-            return None
-        header = handle.read(20)
-        if len(header) != 20:
-            return None
-        _version, _tensor_count, kv_count = struct.unpack("<IQQ", header)
-        for _ in range(kv_count):
-            key = _read_gguf_string(handle)
-            raw_type = handle.read(4)
-            if len(raw_type) != 4:
-                return None
-            (value_type,) = struct.unpack("<I", raw_type)
-            if key == "general.architecture" and value_type == 8:
-                return _read_gguf_string(handle)
-            _skip_gguf_value(handle, value_type)
-    return None
+    return _gguf_metadata(model_path).block_count
 
 
 def gguf_is_supported_by_llamacpp(model_path: str) -> bool:

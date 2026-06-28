@@ -201,9 +201,9 @@ Seiso/
 │   ├── orchestrators/  # Job workers (train, export, compress, …)
 │   └── security/       # Auth, CSRF, path sandbox
 ├── forge-ui/           # React + TypeScript + Vite (GPL-3.0)
-├── third_party/        # Vendored compression pipelines
-│   ├── codellama-compress/
-│   └── adaptive-rl-quant/
+├── seiso/codellama_compress/ # Bundled LLM compression implementation
+├── seiso/adaptive_quant/     # Bundled adaptive RL quant implementation
+├── seiso/analysis/           # RL quant analysis CLI/helpers
 ├── configs/            # Example YAML/JSON configs
 ├── data/               # Sample training JSONL
 ├── deploy/             # Caddy, nginx, systemd templates

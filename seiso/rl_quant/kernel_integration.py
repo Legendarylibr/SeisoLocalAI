@@ -1,4 +1,4 @@
-"""Bridge Seiso CUDA kernel tuning into adaptive_quant RL evaluation."""
+"""Bridge Seiso CUDA kernel tuning into seiso.adaptive_quant RL evaluation."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ def evaluate_kernel_for_decision(
     config: Any,
 ) -> dict[str, float | str]:
     """Apply kernel profile and return metrics for reward computation."""
-    from adaptive_quant.kernel_rl import kernel_metrics_for_profile
+    from seiso.adaptive_quant.kernel_rl import kernel_metrics_for_profile
 
     profile_id = int(decision.metadata.get("kernel_profile_index", 0))
     hidden_dim = int(getattr(config, "kernel_hidden_dim", 4096))

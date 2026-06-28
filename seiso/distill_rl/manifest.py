@@ -19,7 +19,7 @@ def init_run_manifest(config: DistillRLConfig) -> dict[str, Any]:
     from seiso.compress.bootstrap import require_codellama_compress
 
     require_codellama_compress()
-    from codellama_compress.replay import content_fingerprint, init_manifest
+    from seiso.codellama_compress.replay import content_fingerprint, init_manifest
 
     fp = content_fingerprint(pipeline_fingerprint(config))
     manifest = cast(
@@ -52,7 +52,7 @@ def append_artifact(
     from seiso.compress.bootstrap import require_codellama_compress
 
     require_codellama_compress()
-    from codellama_compress.replay import append_artifact_record
+    from seiso.codellama_compress.replay import append_artifact_record
 
     append_artifact_record(
         run_dir,
@@ -67,7 +67,7 @@ def verify_run_manifest(run_dir: Path) -> dict[str, Any]:
     from seiso.compress.bootstrap import require_codellama_compress
 
     require_codellama_compress()
-    from codellama_compress.replay import verify_manifest
+    from seiso.codellama_compress.replay import verify_manifest
 
     return cast(dict[str, Any], verify_manifest(run_dir))
 
@@ -94,6 +94,6 @@ def _write_manifest(run_dir: Path, manifest: dict[str, Any]) -> None:
     from seiso.compress.bootstrap import require_codellama_compress
 
     require_codellama_compress()
-    from codellama_compress.replay import write_manifest
+    from seiso.codellama_compress.replay import write_manifest
 
     write_manifest(run_dir, manifest)

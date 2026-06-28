@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import sys
+import types
 from pathlib import Path
 
 import pytest
 
+from seiso.experiments.hf_deploy_regression import summarize_hf_deploy_report
 from seiso.experiments.quant_regression import (
     QuantRegressionReport,
     QuantRegressionRow,
@@ -18,7 +21,6 @@ from seiso.experiments.quant_regression import (
     resolve_llama_cpp_python_shim,
     summarize_route_report,
 )
-from seiso.experiments.hf_deploy_regression import summarize_hf_deploy_report
 from seiso.rl_quant.bootstrap import require_adaptive_quant
 from seiso.rl_quant.config_builder import build_framework_config
 from seiso.training.config import TrainConfig
@@ -233,10 +235,10 @@ def test_build_eval_route_prompt_library_from_metamath(monkeypatch, tmp_path: Pa
                 parts.append("assistant:")
             return "\n".join(parts)
 
-    monkeypatch.setattr(
-        "transformers.AutoTokenizer.from_pretrained",
-        lambda *args, **kwargs: _Tok(),
+    transformers_stub = types.SimpleNamespace(
+        AutoTokenizer=types.SimpleNamespace(from_pretrained=lambda *args, **kwargs: _Tok())
     )
+    monkeypatch.setitem(sys.modules, "transformers", transformers_stub)
 
     prompts = build_eval_route_prompt_library(train_out, cfg, max_prompts=4)
     assert len(prompts) == 2

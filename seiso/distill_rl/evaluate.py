@@ -64,7 +64,7 @@ def _evaluate_checkpoint(
     from seiso.compress.bootstrap import require_codellama_compress
 
     require_codellama_compress()
-    from codellama_compress.evaluate import compute_perplexity, measure_speed
+    from seiso.codellama_compress.evaluate import compute_perplexity, measure_speed
 
     model, tokenizer, device = load_causal_lm(model_path)
     try:

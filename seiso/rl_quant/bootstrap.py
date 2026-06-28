@@ -1,4 +1,4 @@
-"""Bootstrap vendored adaptive_quant onto sys.path."""
+"""Bootstrap bundled seiso.adaptive_quant onto sys.path."""
 
 from __future__ import annotations
 

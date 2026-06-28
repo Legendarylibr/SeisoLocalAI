@@ -95,7 +95,7 @@ def test_run_auto_hyperparameter_sweep_ranks_trials(tmp_path: Path):
     ]
 
     with patch(
-        "adaptive_quant.research_pipeline.run_pipeline_entrypoint",
+        "seiso.adaptive_quant.research_pipeline.run_pipeline_entrypoint",
         side_effect=summaries,
     ):
         result = run_auto_hyperparameter_sweep(
@@ -129,7 +129,7 @@ def test_run_rl_quant_job_runs_sweep_before_pipeline(tmp_path: Path):
             "seiso.rl_quant.runner.run_auto_hyperparameter_sweep",
             return_value=sweep_result,
         ) as sweep,
-        patch("adaptive_quant.research_pipeline.ResearchPipeline") as pipeline_cls,
+        patch("seiso.adaptive_quant.research_pipeline.ResearchPipeline") as pipeline_cls,
     ):
         pipeline_cls.return_value.run.return_value = pipeline_summary
         result = run_rl_quant_job(
@@ -150,7 +150,7 @@ def test_run_rl_quant_job_skips_sweep_when_disabled(tmp_path: Path):
 
     with (
         patch("seiso.rl_quant.runner.run_auto_hyperparameter_sweep") as sweep,
-        patch("adaptive_quant.research_pipeline.ResearchPipeline") as pipeline_cls,
+        patch("seiso.adaptive_quant.research_pipeline.ResearchPipeline") as pipeline_cls,
     ):
         pipeline_cls.return_value.run.return_value = {}
         result = run_rl_quant_job(

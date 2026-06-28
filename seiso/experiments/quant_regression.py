@@ -24,7 +24,7 @@ DEFAULT_GGUF_QUANTS: tuple[str, ...] = ("q4_k_m", "q8_0", "f16")
 DEFAULT_ROUTE_HARDWARE: tuple[str, ...] = ("gpu",)
 LLAMA_CLI_PYTHON_SHIM = Path(__file__).resolve().parents[2] / "scripts" / "llama_cli_python_shim.py"
 
-# Seiso export folder → adaptive_quant RouteCatalog quant labels.
+# Seiso export folder → seiso.adaptive_quant RouteCatalog quant labels.
 ROUTE_QUANT_LABELS: dict[str, str] = {
     "q4_0": "Q4_0",
     "q4_k_m": "Q4_K_M",
@@ -33,7 +33,7 @@ ROUTE_QUANT_LABELS: dict[str, str] = {
     "bf16": "BF16",
 }
 
-# Map Seiso GGUF folder names to router @qN suffixes (adaptive_quant routing).
+# Map Seiso GGUF folder names to router @qN suffixes (seiso.adaptive_quant routing).
 GGUF_ROUTE_BITS: dict[str, int] = {
     "q2_k": 2,
     "q3_k_s": 3,
@@ -139,8 +139,8 @@ def build_eval_route_prompt_library(
     max_prompts: int = 16,
 ) -> list[Any]:
     """Build llama.cpp route prompts from the training eval split (e.g. MetaMathQA holdout)."""
-    from adaptive_quant.prompts import default_prompt_library
-    from adaptive_quant.types import PromptSample
+    from seiso.adaptive_quant.prompts import default_prompt_library
+    from seiso.adaptive_quant.types import PromptSample
     from transformers import AutoTokenizer
 
     from seiso.models.chat_format import extract_messages, format_messages_for_prompt
@@ -307,7 +307,7 @@ def build_route_catalog(
     *,
     route_repo_id: str = "local/quant-regression-study",
 ) -> Any:
-    from adaptive_quant.model_routes import ModelRoute, RouteCatalog
+    from seiso.adaptive_quant.model_routes import ModelRoute, RouteCatalog
 
     routes: list[Any] = []
     for quant_key, path in sorted(gguf_paths.items()):
@@ -384,12 +384,12 @@ def run_route_regression_eval(
     from seiso.rl_quant.config_builder import build_framework_config
 
     ensure_adaptive_quant_importable()
-    from adaptive_quant.prompts import PromptLibrary
-    from adaptive_quant.route_pipeline import (
+    from seiso.adaptive_quant.prompts import PromptLibrary
+    from seiso.adaptive_quant.route_pipeline import (
         evaluate_routes_for_prompts,
         validate_local_route_models,
     )
-    from adaptive_quant.types import HardwareType
+    from seiso.adaptive_quant.types import HardwareType
 
     catalog = build_route_catalog(gguf_paths, route_repo_id=route_repo_id)
     validate_local_route_models(catalog)
@@ -427,7 +427,7 @@ def run_route_regression_eval(
         )
         prompt_source = "eval_split"
     else:
-        from adaptive_quant.prompts import default_prompt_library
+        from seiso.adaptive_quant.prompts import default_prompt_library
 
         prompts = default_prompt_library()[: max(1, route_prompt_limit)]
         prompt_source = "default_library"

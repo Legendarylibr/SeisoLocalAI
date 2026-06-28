@@ -121,7 +121,7 @@ seiso bench-inference --model <path> --json
 
 ## `seiso compress`
 
-LLM compression pipeline (vendored `third_party/codellama-compress`). Accepts any HuggingFace causal LM; the `prune` stage requires Llama-family architecture (Llama, CodeLlama, Mistral, etc.).
+LLM compression pipeline (`seiso.codellama_compress`). Accepts any HuggingFace causal LM; the `prune` stage requires Llama-family architecture (Llama, CodeLlama, Mistral, etc.).
 
 ```bash
 # Presets: smoke | full | distill_only | prune_recover | quantize
@@ -183,7 +183,7 @@ See [compression.md](compression.md).
 
 ## `seiso rl-quant`
 
-Adaptive RL quantization + optional CUDA kernel profile co-training (vendored `third_party/adaptive-rl-quant`). **Auto-sweep** (default on) grid-searches learning rates before the full run.
+Adaptive RL quantization + optional CUDA kernel profile co-training (`seiso.adaptive_quant`). **Auto-sweep** (default on) grid-searches learning rates before the full run.
 
 ```bash
 # Fast smoke (simulator backend, analytic kernel metrics)
@@ -290,4 +290,4 @@ See [training/multi-gpu.md](training/multi-gpu.md).
 
 Compression and distill-RL pipelines also have CLI equivalents (`seiso compress run`, `seiso distill-rl run`, `seiso rl-quant run`).
 
-Upstream vendor CLIs (optional, not installed by default): `adaptive-rl-quant`, `adaptive-rl-quant-pytorch`, etc. in `third_party/adaptive-rl-quant/`. Prefer `seiso rl-quant run` for the integrated pipeline.
+Prefer `seiso rl-quant run` for the integrated pipeline; the bundled `seiso.adaptive_quant` package provides the research internals.

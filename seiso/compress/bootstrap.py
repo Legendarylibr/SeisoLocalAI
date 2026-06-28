@@ -1,4 +1,4 @@
-"""Bootstrap vendored codellama_compress onto sys.path."""
+"""Bootstrap bundled seiso.codellama_compress onto sys.path."""
 
 from __future__ import annotations
 

@@ -24,16 +24,15 @@ def test_rl_quant_presets_response_includes_hints():
     assert payload["auto_sweep_help"]["auto_sweep"]
 
 
-def test_vendor_tree_present():
+def test_bundled_source_present():
     root = vendor_root()
-    assert (root / "src" / "adaptive_quant" / "research_pipeline.py").is_file()
-    assert (root / "LICENSE").is_file()
+    assert (root / "research_pipeline.py").is_file()
 
 
 def test_adaptive_quant_importable():
     ensure_adaptive_quant_importable()
     require_adaptive_quant()
-    import adaptive_quant  # noqa: F401
+    import seiso.adaptive_quant  # noqa: F401
 
 
 def test_build_framework_config_minimal(tmp_path: Path):

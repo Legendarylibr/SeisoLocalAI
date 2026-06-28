@@ -1,0 +1,387 @@
+from __future__ import annotations
+
+import random
+from collections.abc import Callable
+from dataclasses import replace
+from typing import Any
+
+from seiso.adaptive_quant.backends import build_backend
+from seiso.adaptive_quant.configuration import FrameworkConfig
+from seiso.adaptive_quant.features import estimate_layer_sensitivity, extract_input_features
+from seiso.adaptive_quant.guardrails import should_fallback_due_to_instability
+from seiso.adaptive_quant.hardware import detect_host_hardware, host_aware_hardware_profiles
+from seiso.adaptive_quant.logging_utils import JsonlLogger, NullJsonlLogger, jsonl_integrity_chain_enabled
+from seiso.adaptive_quant.math_utils import variance
+from seiso.adaptive_quant.moe import ExpertBank
+from seiso.adaptive_quant.prompts import PromptLibrary
+from seiso.adaptive_quant.kernel_rl import finalize_kernel_profile
+from seiso.adaptive_quant.quantization import finalize_decision, safe_fallback_decision
+from seiso.adaptive_quant.reward import apply_moe_reward_penalties, compute_weighted_reward
+from seiso.adaptive_quant.trainer_utils import zero_previous_action
+from seiso.adaptive_quant.types import (
+    BackendMetricDict,
+    EpisodeMetrics,
+    EpisodeResult,
+    EpisodeState,
+    HardwareType,
+    PromptSample,
+    QuantizationDecision,
+)
+
+
+class AdaptiveQuantizationEnv:
+    """One-step RL interface: reset (prompt + hardware + features) → policy act → backend measures → reward.
+
+    ``SimulatorBackend`` is the default measurable world; ``LlamaCppBackend`` delegates to your **llama.cpp**
+    binary when ``config.backend="llama_cpp"``. MoE adds ``ExpertBank`` routing and penalties when enabled.
+    Episodes append structured rows to JSONL for downstream ``analysis/`` tools.
+    """
+
+    def __init__(
+        self,
+        config: FrameworkConfig,
+        log_path: str | None = None,
+        *,
+        enable_logging: bool = True,
+        backend_factory: Callable[[FrameworkConfig], Any] | None = None,
+        prompt_library: PromptLibrary | None = None,
+        expert_bank: ExpertBank | None = None,
+        auto_expert_bank: bool = True,
+    ) -> None:
+        """Optional ``backend_factory`` defaults to :func:`seiso.adaptive_quant.backends.build_backend`."""
+        self.config = config
+        self.rng = random.Random(config.seed)
+        self.prompt_library = prompt_library or PromptLibrary()
+        self._prompt_split_rng = random.Random(config.prompt_split_seed)
+        self.train_prompt_ids: set[str] | None = None
+        self.eval_prompt_ids: set[str] | None = None
+        if config.prompt_split_enabled:
+            self.train_prompt_ids, self.eval_prompt_ids = self.prompt_library.split_ids(
+                rng=self._prompt_split_rng,
+                train_fraction=config.prompt_train_fraction,
+            )
+        self.detected_hardware = detect_host_hardware() if config.detect_host_hardware else None
+        self.hardware_profiles = host_aware_hardware_profiles(self.detected_hardware)
+        self.backend = (backend_factory or build_backend)(config)
+        if expert_bank is not None:
+            self.expert_bank = expert_bank
+        elif auto_expert_bank and config.moe_enabled:
+            self.expert_bank = ExpertBank(config)
+        else:
+            self.expert_bank = None
+        resolved_log = log_path or config.primary_log_path()
+        self.logger = (
+            JsonlLogger(
+                resolved_log,
+                buffered=bool(config.jsonl_buffered),
+                flush_every=int(config.jsonl_flush_every),
+                integrity_chain=bool(config.jsonl_integrity_chain)
+                or jsonl_integrity_chain_enabled(),
+            )
+            if enable_logging
+            else NullJsonlLogger()
+        )
+        self.current_state: EpisodeState | None = None
+        self._current_phase: str = "train"
+        self._prompt_cache: dict[str, tuple] = {}
+        if config.cache_prompt_features:
+            for prompt in self.prompt_library.prompts:
+                self._prompt_cache[prompt.prompt_id] = self._build_prompt_context(prompt)
+
+    def reset(
+        self,
+        previous_action: list[float] | None = None,
+        forced_hardware: HardwareType | None = None,
+        forced_prompt_id: str | None = None,
+        forced_prompt: PromptSample | None = None,
+        phase: str = "train",
+        episode_index: int | None = None,
+    ) -> EpisodeState:
+        mode = self.config.env_sampling_mode.strip().lower()
+        ep = 0 if episode_index is None else int(episode_index)
+
+        if forced_prompt is not None:
+            prompt = forced_prompt
+        elif mode == "sequential":
+            pid = forced_prompt_id or self._sequential_prompt_id(ep, phase)
+            prompt = self.prompt_library.by_id(pid)
+        elif mode == "forced":
+            pid = forced_prompt_id or self.config.env_forced_prompt_id
+            if pid is None:
+                raise ValueError(
+                    "env_sampling_mode='forced' requires forced_prompt, forced_prompt_id, or env_forced_prompt_id"
+                )
+            prompt = self.prompt_library.by_id(pid)
+        else:
+            prompt = self._sample_prompt_random(forced_prompt_id, phase=phase)
+
+        if forced_hardware is not None:
+            hardware = forced_hardware
+        elif mode == "sequential":
+            hardware = self._sequential_hardware(ep)
+        elif mode == "forced":
+            raw_hw = self.config.env_forced_hardware
+            if raw_hw is None:
+                raise ValueError(
+                    "env_sampling_mode='forced' requires forced_hardware on reset() or env_forced_hardware in config"
+                )
+            hardware = HardwareType(raw_hw)
+        else:
+            hardware = self._sample_hardware_random()
+
+        previous = previous_action or zero_previous_action(self.config)
+        input_features, sensitivity = self._get_prompt_context(prompt)
+        hardware_profile = self.hardware_profiles[hardware]
+        self._current_phase = phase
+        self.current_state = EpisodeState(
+            hardware_profile=hardware_profile,
+            prompt=prompt,
+            input_features=input_features,
+            sensitivity=sensitivity,
+            previous_action=previous,
+            moe_context=self.expert_bank.build_context(prompt, input_features, hardware_profile)
+            if self.expert_bank is not None
+            else None,
+        )
+        return self.current_state
+
+    def evaluate_current(
+        self,
+        decision: QuantizationDecision,
+        episode_index: int | None = None,
+        log_episode: bool = True,
+    ) -> EpisodeResult:
+        if self.current_state is None:
+            raise RuntimeError("Environment must be reset before evaluation.")
+
+        finalized = finalize_decision(decision, self.current_state, self.config)
+        finalize_kernel_profile(finalized, self.config)
+        primary_metrics = self.backend.evaluate(self.current_state, finalized)
+        primary_metrics = self._enrich_kernel_metrics(primary_metrics, finalized, episode_index)
+        stability_penalty = self._stability_penalty(finalized, self.current_state)
+
+        pre_fallback_metrics = dict(primary_metrics)
+        pre_fallback_stability = float(stability_penalty)
+        pre_fallback_reward = self._compute_reward(pre_fallback_metrics, pre_fallback_stability)
+
+        if should_fallback_due_to_instability(
+            stability_penalty, threshold=self.config.instability_threshold
+        ):
+            fallback = finalize_decision(
+                safe_fallback_decision(self.config), self.current_state, self.config
+            )
+            fallback.fallback_applied = True
+            fallback.unstable = True
+            fallback.metadata["fallback_reason"] = "instability"
+            fallback.metadata["fallback_pre"] = {
+                "reward": pre_fallback_reward,
+                "stability_penalty": pre_fallback_stability,
+                "metrics": pre_fallback_metrics,
+            }
+            finalized = fallback
+            primary_metrics = self.backend.evaluate(self.current_state, finalized)
+            stability_penalty = self._stability_penalty(finalized, self.current_state)
+
+        reward = self._compute_reward(primary_metrics, stability_penalty)
+        metrics = EpisodeMetrics(
+            latency_ms=primary_metrics["latency_ms"],
+            throughput_tps=primary_metrics["throughput_tps"],
+            perplexity=primary_metrics["perplexity"],
+            memory_mb=primary_metrics["memory_mb"],
+            stability_penalty=stability_penalty,
+            reward=reward,
+            tokens_processed=primary_metrics.get("tokens_processed", 0.0),
+            latency_ms_per_token=primary_metrics.get("latency_ms_per_token", 0.0),
+            swap_cost_ms=primary_metrics.get("swap_cost_ms", 0.0),
+            cache_miss_count=primary_metrics.get("cache_miss_count", 0.0),
+            variant_churn=primary_metrics.get("variant_churn", 0.0),
+            latency_source=str(primary_metrics.get("latency_source", "")),
+            throughput_source=str(primary_metrics.get("throughput_source", "")),
+            memory_source=str(primary_metrics.get("memory_source", "")),
+            perplexity_source=str(primary_metrics.get("perplexity_source", "")),
+            kernel_profile_id=float(primary_metrics.get("kernel_profile_id", 0.0)),
+            kernel_profile_name=str(primary_metrics.get("kernel_profile_name", "")),
+            kernel_speedup=float(primary_metrics.get("kernel_speedup", 0.0)),
+            kernel_latency_ms=float(primary_metrics.get("kernel_latency_ms", 0.0)),
+            kernel_benchmark_source=str(primary_metrics.get("kernel_benchmark_source", "")),
+        )
+        result = EpisodeResult(state=self.current_state, decision=finalized, metrics=metrics)
+        if log_episode:
+            self._log_episode(result, episode_index)
+        return result
+
+    def _sequential_prompt_id(self, episode_index: int, phase: str) -> str:
+        if self.config.prompt_split_enabled:
+            split_ids = self.train_prompt_ids if phase == "train" else self.eval_prompt_ids
+            allowed = split_ids or {p.prompt_id for p in self.prompt_library.prompts}
+        else:
+            allowed = {p.prompt_id for p in self.prompt_library.prompts}
+        ordered = sorted(allowed)
+        return ordered[episode_index % len(ordered)]
+
+    def _sequential_hardware(self, episode_index: int) -> HardwareType:
+        modes = self.config.ordered_hardware()
+        if not self.config.multi_hardware:
+            return modes[0]
+        return modes[episode_index % len(modes)]
+
+    def _sample_hardware_random(self) -> HardwareType:
+        hardware_modes = self.config.ordered_hardware()
+        if not self.config.multi_hardware:
+            return hardware_modes[0]
+        return hardware_modes[self.rng.randrange(len(hardware_modes))]
+
+    def _sample_prompt_random(
+        self, forced_prompt_id: str | None, *, phase: str = "train"
+    ) -> PromptSample:
+        if forced_prompt_id is not None:
+            return self.prompt_library.by_id(forced_prompt_id)
+        if not self.config.prompt_split_enabled:
+            return self.prompt_library.sample(self.rng)
+        allowed = self.train_prompt_ids if phase == "train" else self.eval_prompt_ids
+        if not allowed:
+            raise ValueError(
+                f"{phase} prompt split is empty; check prompt_split configuration "
+                f"(prompt_split_enabled={self.config.prompt_split_enabled})"
+            )
+        ordered_ids = sorted(allowed)
+        prompt_id = ordered_ids[self.rng.randrange(len(ordered_ids))]
+        return self.prompt_library.by_id(prompt_id)
+
+    def _get_prompt_context(self, prompt):
+        if prompt.prompt_id in self._prompt_cache:
+            return self._prompt_cache[prompt.prompt_id]
+        context = self._build_prompt_context(prompt)
+        if self.config.cache_prompt_features:
+            self._prompt_cache[prompt.prompt_id] = context
+        return context
+
+    def _build_prompt_context(self, prompt):
+        input_features = extract_input_features(prompt)
+        sensitivity = estimate_layer_sensitivity(prompt, input_features, self.config.num_layers)
+        return input_features, sensitivity
+
+    def _enrich_kernel_metrics(
+        self,
+        metrics: BackendMetricDict,
+        decision: QuantizationDecision,
+        episode_index: int | None,
+    ) -> BackendMetricDict:
+        if not self.config.kernel_rl_enabled:
+            return metrics
+        live = bool(self.config.kernel_rl_live_benchmark)
+        if episode_index is not None and not live:
+            every = self.config.kernel_benchmark_every_n_episodes
+            if every > 1 and episode_index % every != 0:
+                from seiso.adaptive_quant.kernel_rl import kernel_metrics_for_profile
+
+                profile_id = int(decision.metadata.get("kernel_profile_index", 0))
+                kernel_metrics = kernel_metrics_for_profile(
+                    profile_id,
+                    hidden_dim=self.config.kernel_hidden_dim,
+                    batch_rows=self.config.kernel_batch_rows,
+                    hardware_compute_factor=float(
+                        self.current_state.hardware_profile.compute_factor
+                    )
+                    if self.current_state
+                    else 1.0,
+                    config=self.config,
+                )
+            else:
+                kernel_metrics = self._evaluate_kernel_metrics(decision)
+        else:
+            kernel_metrics = self._evaluate_kernel_metrics(decision)
+
+        try:
+            from seiso.rl_quant.kernel_integration import merge_kernel_metrics
+
+            return merge_kernel_metrics(metrics, kernel_metrics, config=self.config)
+        except ImportError:
+            merged = dict(metrics)
+            merged.update(kernel_metrics)
+            speedup = float(kernel_metrics.get("kernel_speedup", 1.0))
+            if speedup > 0.0:
+                merged["latency_ms"] = float(merged["latency_ms"]) / speedup
+                merged["throughput_tps"] = float(merged["throughput_tps"]) * speedup
+            return merged
+
+    def _evaluate_kernel_metrics(self, decision: QuantizationDecision) -> dict[str, float | str]:
+        if self.current_state is None:
+            return {}
+        try:
+            from seiso.rl_quant.kernel_integration import evaluate_kernel_for_decision
+
+            return evaluate_kernel_for_decision(decision, self.current_state, self.config)
+        except ImportError:
+            from seiso.adaptive_quant.kernel_rl import kernel_metrics_for_profile
+
+            profile_id = int(decision.metadata.get("kernel_profile_index", 0))
+            return kernel_metrics_for_profile(
+                profile_id,
+                hidden_dim=self.config.kernel_hidden_dim,
+                batch_rows=self.config.kernel_batch_rows,
+                hardware_compute_factor=float(self.current_state.hardware_profile.compute_factor),
+                config=self.config,
+            )
+
+    def _compute_reward(self, metrics: BackendMetricDict, stability_penalty: float) -> float:
+        reward = compute_weighted_reward(
+            reward_weights=self.config.reward_weights,
+            metrics=metrics,
+            stability_penalty=stability_penalty,
+            perplexity_reference=self.config.reward_perplexity_reference,
+            include_instability=True,
+        )
+        return apply_moe_reward_penalties(reward, metrics, self.config)
+
+    def _stability_penalty(self, decision: QuantizationDecision, state: EpisodeState) -> float:
+        if self.config.stability_probe_count <= 1:
+            return 0.0
+        perplexities = []
+        allowed = None
+        if self.config.prompt_split_enabled:
+            # Keep probes within the same split as the active prompt.
+            if self.eval_prompt_ids is not None and state.prompt.prompt_id in self.eval_prompt_ids:
+                allowed = self.eval_prompt_ids
+            elif self.train_prompt_ids is not None:
+                allowed = self.train_prompt_ids
+        if self.config.stability_probe_sampling.strip().lower() == "deterministic":
+            probes = self.prompt_library.probes_deterministic(
+                state.prompt, self.config.stability_probe_count, allowed_ids=allowed
+            )
+        else:
+            probes = self.prompt_library.probes(
+                state.prompt, self.config.stability_probe_count, self.rng, allowed_ids=allowed
+            )
+        for probe in probes:
+            probe_features, probe_sensitivity = self._get_prompt_context(probe)
+            probe_state = replace(
+                state,
+                prompt=probe,
+                input_features=probe_features,
+                sensitivity=probe_sensitivity,
+            )
+            probe_decision = finalize_decision(replace(decision), probe_state, self.config)
+            metrics = self.backend.evaluate(probe_state, probe_decision)
+            perplexities.append(metrics["perplexity"])
+        return variance(perplexities)
+
+    def _log_episode(self, result: EpisodeResult, episode_index: int | None) -> None:
+        if episode_index is not None and self.config.log_every_n_episodes > 1:
+            if episode_index % self.config.log_every_n_episodes != 0:
+                return
+        record = {
+            "episode": episode_index,
+            "phase": self._current_phase,
+            "run_name": self.config.run_name,
+            "hardware_mode": result.state.hardware_profile.hardware_type.value,
+            "prompt_id": result.state.prompt.prompt_id,
+            "prompt_domain": result.state.prompt.domain,
+            "input_features": result.state.input_features,
+            "sensitivity": result.state.sensitivity,
+            "previous_action": result.state.previous_action,
+            "moe_context": result.state.moe_context,
+            "decision": result.decision,
+            "metrics": result.metrics,
+        }
+        self.logger.log(record)

@@ -1,4 +1,4 @@
-"""Run vendored Adaptive RL Quantization research pipeline."""
+"""Run bundled Adaptive RL Quantization research pipeline."""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ def run_rl_quant_job(
 ) -> dict[str, Any]:
     """Execute train → evaluate → recommend → benchmark → analysis."""
     require_adaptive_quant()
-    from adaptive_quant.research_pipeline import ResearchPipeline
+    from seiso.adaptive_quant.research_pipeline import ResearchPipeline
 
     config = build_framework_config(
         job_id=job_id,

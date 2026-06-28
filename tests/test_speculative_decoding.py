@@ -9,10 +9,12 @@ from unittest.mock import MagicMock
 import pytest
 
 from seiso.inference.speculative import (
+    DFlashDraftSpeculativeBundle,
     TorchSpeculativeBundle,
     _decode_new_text,
     default_num_speculative_tokens,
     iter_speculative_tokens,
+    iter_speculative_tokens_dflash,
 )
 
 
@@ -26,10 +28,7 @@ class _FakeTokenizer:
         return SimpleNamespace(input_ids=torch.tensor([self._tokens], dtype=torch.long))
 
     def decode(self, token_ids, skip_special_tokens: bool = True) -> str:
-        if isinstance(token_ids, list):
-            ids = token_ids
-        else:
-            ids = token_ids.tolist()
+        ids = token_ids if isinstance(token_ids, list) else token_ids.tolist()
         return " ".join(str(int(t)) for t in ids)
 
 
@@ -37,10 +36,7 @@ class _BpeLikeTokenizer(_FakeTokenizer):
     """Tokenizer where per-token decode differs from full-sequence decode."""
 
     def decode(self, token_ids, skip_special_tokens: bool = True) -> str:
-        if isinstance(token_ids, list):
-            ids = token_ids
-        else:
-            ids = token_ids.tolist()
+        ids = token_ids if isinstance(token_ids, list) else token_ids.tolist()
         if ids == [10, 11]:
             return "AB"
         mapping = {10: "A", 11: "X", 12: "C", 1: "1", 2: "2", 3: "3", 4: "4"}
@@ -133,6 +129,40 @@ class _CacheStrictIncrementModel:
             logits[:, pos, next_id] = 10.0
         cached = past_len + length if use_cache else None
         return SimpleNamespace(logits=logits, past_key_values=cached)
+
+
+class _CroppableCache:
+    def __init__(self, length: int) -> None:
+        self.length = length
+        self.crops: list[int] = []
+
+    def __bool__(self) -> bool:
+        return True
+
+    def __int__(self) -> int:
+        return self.length
+
+    def crop(self, seq_len: int) -> None:
+        self.crops.append(seq_len)
+        self.length = seq_len
+
+
+class _CroppableFakeModel(_FakeModel):
+    def __init__(self, next_id: int) -> None:
+        super().__init__(next_id)
+        self.full_replays = 0
+        self.last_cache: _CroppableCache | None = None
+
+    def __call__(self, input_ids, past_key_values=None, use_cache=False):
+        out = super().__call__(input_ids, past_key_values=past_key_values, use_cache=False)
+        if past_key_values is None:
+            self.full_replays += 1
+            past_len = 0
+        else:
+            past_len = int(past_key_values)
+        cache = _CroppableCache(past_len + int(input_ids.shape[1])) if use_cache else None
+        self.last_cache = cache
+        return SimpleNamespace(logits=out.logits, past_key_values=cache)
 
 
 def test_default_num_speculative_tokens_from_payload():
@@ -251,6 +281,61 @@ def test_partial_rejection_still_streams():
 
     assert chunks
     assert any("5" in chunk.text or "6" in chunk.text for chunk in chunks)
+
+
+def test_cached_rejection_crops_draft_cache_instead_of_replaying_prefix():
+    tok = _FakeTokenizer()
+    draft = _CroppableFakeModel(5)
+    bundle = TorchSpeculativeBundle(
+        target_model=_RejectingFakeModel(),
+        target_tokenizer=tok,
+        draft_model=draft,
+        draft_tokenizer=tok,
+    )
+
+    chunks = list(
+        iter_speculative_tokens(
+            bundle=bundle,
+            prompt="hello",
+            max_new_tokens=2,
+            num_speculative_tokens=2,
+        )
+    )
+
+    assert chunks
+    assert draft.full_replays == 1
+
+
+def test_dflash_cached_reuses_incremental_prompt_text(monkeypatch):
+    tok = _FakeTokenizer()
+    prompts: list[str] = []
+
+    def _fake_propose(_draft_llm, _target_tok, current_text, k, temperature=0.0):
+        prompts.append(current_text)
+        return [4] * k
+
+    monkeypatch.setattr(
+        "seiso.inference.speculative._propose_with_dflash_draft",
+        _fake_propose,
+    )
+    bundle = DFlashDraftSpeculativeBundle(
+        target_model=_FakeModel(4),
+        target_tokenizer=tok,
+        draft_llm=object(),
+        draft_tokenizer=tok,
+    )
+
+    chunks = list(
+        iter_speculative_tokens_dflash(
+            bundle=bundle,
+            prompt="hello",
+            max_new_tokens=2,
+            num_speculative_tokens=1,
+        )
+    )
+
+    assert chunks
+    assert prompts == ["1 2 3", "1 2 3 4"]
 
 
 def test_cached_draft_does_not_replay_prompt_token():

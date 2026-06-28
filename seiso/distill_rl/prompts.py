@@ -16,7 +16,7 @@ class RolloutPrompt:
 
 
 def load_rollout_prompts(path: Path | None, *, limit: int) -> list[RolloutPrompt]:
-    """Return prompt records from JSON, JSONL, or the vendored post-train library."""
+    """Return prompt records from JSON, JSONL, or the bundled post-train library."""
     source = path or (vendor_root() / "prompts" / "post_train_library.json")
     if not source.is_file():
         raise FileNotFoundError(f"Prompt library not found: {source}")

@@ -1,4 +1,4 @@
-"""Tests for kernel RL integration across Seiso and adaptive_quant."""
+"""Tests for kernel RL integration across Seiso and seiso.adaptive_quant."""
 
 from __future__ import annotations
 
@@ -26,8 +26,8 @@ def test_kernel_profiles_and_analytic_speedup():
 
 def test_kernel_reward_terms():
     require_adaptive_quant()
-    from adaptive_quant.configuration import RewardWeights
-    from adaptive_quant.reward import compute_weighted_reward
+    from seiso.adaptive_quant.configuration import RewardWeights
+    from seiso.adaptive_quant.reward import compute_weighted_reward
 
     weights = RewardWeights(theta_kernel_speedup=0.5, iota_kernel_latency=0.01)
     base_metrics = {
@@ -70,9 +70,9 @@ def test_build_framework_config_kernel_rl(tmp_path):
 
 def test_policy_kernel_head_act():
     require_adaptive_quant()
-    from adaptive_quant.configuration import FrameworkConfig
-    from adaptive_quant.environment import AdaptiveQuantizationEnv
-    from adaptive_quant.policy import UniversalQuantizationPolicy
+    from seiso.adaptive_quant.configuration import FrameworkConfig
+    from seiso.adaptive_quant.environment import AdaptiveQuantizationEnv
+    from seiso.adaptive_quant.policy import UniversalQuantizationPolicy
 
     config = FrameworkConfig(
         training_episodes=4,

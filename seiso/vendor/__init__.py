@@ -1,4 +1,4 @@
-"""Shared helpers for vendored third-party packages."""
+"""Shared helpers for bundled source packages."""
 
 from seiso.vendor.bootstrap import (
     ensure_vendor_importable,

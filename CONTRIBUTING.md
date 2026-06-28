@@ -16,11 +16,13 @@ Thanks for helping improve Seiso.
 | `forge-ui/` | React UI |
 | `seiso/` | Core training, inference, export, compression, and research library |
 | `seiso_cli/` | CLI entry points |
+| `seiso/codellama_compress/` | Bundled LLM compression implementation |
+| `seiso/adaptive_quant/` | Bundled adaptive RL quant implementation |
+| `seiso/analysis/` | RL quant analysis helpers |
 | `docs/` | User and developer documentation |
 | `tests/` | Python tests |
 | `scripts/` | Install, start, and CI helpers |
 | `deploy/` | Reverse-proxy and systemd examples |
-| `third_party/` | Vendored dependencies (e.g. adaptive RL quant) |
 
 ## Documentation
 

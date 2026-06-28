@@ -1,4 +1,4 @@
-"""Shared helpers for vendored pipeline config builders."""
+"""Shared helpers for bundled pipeline config builders."""
 
 from __future__ import annotations
 
@@ -33,7 +33,7 @@ def validate_stages(stages: list[str], stage_order: tuple[str, ...]) -> None:
 
 
 def resolve_config_file_path(config_file: str | None, *, vendor_root: Path) -> Path | None:
-    """Resolve a config file path from an absolute path or vendor configs dir."""
+    """Resolve a config file path from an absolute path or bundled configs dir."""
     if not config_file:
         return None
     path = Path(config_file)

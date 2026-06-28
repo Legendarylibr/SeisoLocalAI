@@ -26,12 +26,12 @@ Seiso is a **mature, ambitious local-first AI workspace** (GPL-3.0) that combine
 **Strengths:**
 - Excellent hardware awareness and memory protection (guards, headroom, unload, low-VRAM modes).
 - Custom fused kernels (CUDA native + Triton dispatch) with patching lifecycle and RL integration.
-- Reproducible pipelines via hash-chained manifests + vendored research code.
+- Reproducible pipelines via hash-chained manifests + bundled research code.
 - Thoughtful security model (local-only default, encrypted DB fields, CSRF/rate-limit, path sandboxing, per-user scoping).
 - Two consistent surfaces (CLI + UI) sharing the same core runners/orchestrators.
 - Comprehensive docs + smoke presets + local CI gate.
 
-**Current state:** Alpha (`pyproject.toml` Development Status :: 3). Usable today for chat, training, export on supported hardware. Advanced pipelines (compress/RL/distill) rely on vendored code and optional extras; best on Linux + NVIDIA. Research CLI `seiso experiment quant-regression` compares multi-quant train → GGUF export → deploy eval. Some style debt (imports, simplifications) and a modest number of pre-existing lint baseline issues. One hardware enumeration test is flaky in this env.
+**Current state:** Alpha (`pyproject.toml` Development Status :: 3). Usable today for chat, training, export on supported hardware. Advanced pipelines (compress/RL/distill) rely on bundled research code and optional extras; best on Linux + NVIDIA. Research CLI `seiso experiment quant-regression` compares multi-quant train → GGUF export → deploy eval. Some style debt (imports, simplifications) and a modest number of pre-existing lint baseline issues. One hardware enumeration test is flaky in this env.
 
 ---
 
@@ -44,15 +44,15 @@ User
 ├── seiso CLI (seiso_cli/main.py + typer) ──► direct calls into seiso.* runners
 └── Forge UI (browser) 
     └── forge/ (FastAPI)
-        ├── api/routes/*  ──► orchestrators/* ──► seiso.* (or vendored bootstrap)
+        ├── api/routes/*  ──► orchestrators/* ──► seiso.* / bundled packages
         ├── services (jobs, models, hardware, memory_release, HF, ...)
         └── db (aiosqlite + field-level AES-GCM crypto)
 ```
 
-- **Core** (`seiso/`): Training, inference, export, kernels, compress, distill_rl, rl_quant, experiments, models, hardware, memory, platform, security helpers, vendor wrappers.
+- **Core** (`seiso/`): Training, inference, export, kernels, compress, distill_rl, rl_quant, experiments, models, hardware, memory, platform, security helpers, bundled package wrappers.
 - **Forge** (`forge/`): Web server, job orchestration + SSE streaming, persistence, auth/onboarding, security middleware, model registry/inventory, OpenAI compat.
 - **UI** (`forge-ui/`): React + TS + Vite + xyflow (recipes). Talks REST + SSE. Built assets served by Forge SPA fallback.
-- **Vendoring**: `third_party/{codellama-compress, adaptive-rl-quant}` bootstrapped at runtime (no pip). Seiso provides config translation, job wrapping, UI/CLI surfaces, kernel bridge, manifests.
+- **Bundled packages**: `seiso.codellama_compress`, `seiso.adaptive_quant`, and `analysis` are part of this repository and are bootstrapped at runtime (no separate pip package). Seiso provides config translation, job wrapping, UI/CLI surfaces, kernel bridge, and manifests.
 
 ### Job & Orchestration Model
 - `forge/orchestrators/base.py`: `Orchestrator` ABC, `JobRecord`, status, SSE log/metrics queues, cancellation, subprocess tracking.
@@ -74,7 +74,7 @@ User
 - **Hardware/Memory**: `seiso/hardware/`, `seiso/memory/{protection,estimates,platform_profile}`, `forge/services/memory_release.py`, `prepare_for_gpu_task`.
 - **Kernels**: CUDA/Triton/PyTorch dispatch + monkey-patch lifecycle (restore guaranteed).
 - **Security**: JWT auth + onboarding, CSRF, rate limit, CSP (nonce), URL policy, token revocation, nvidia boundary reporting, path sandbox.
-- **Repro**: Manifests (hash chained via vendored replay), provenance, seeds, snapshots.
+- **Repro**: Manifests (hash chained via bundled replay), provenance, seeds, snapshots.
 - **Inference**: Model pool with unload, backends auto-select, speculative, context limits, external router client mode.
 
 Entry points: `start` script, `seiso` CLI (`forge`, `train`, `chat`, `export`, `compress`, `distill-rl`, `rl-quant`, `experiment`, …), `forge.main:create_app`, `seiso-train-worker`, `seiso-bench-kernels`.
@@ -109,20 +109,20 @@ Entry points: `start` script, `seiso` CLI (`forge`, `train`, `chat`, `export`, `
 
 ### Compression Pipeline
 - Stages: distill / (optional prune for Llama MLP) / finetune / quant (GPTQ/AWQ) / eval / export.
-- `seiso/compress/{runner.py,config_builder.py,bootstrap.py}` + vendored codellama-compress.
+- `seiso/compress/{runner.py,config_builder.py,bootstrap.py}` + bundled `seiso.codellama_compress`.
 - UI + CLI presets; stage pipeline router in API.
 
 ### Distill-RL
 - Teacher KL distill → preference rollouts (teacher > student) → DPO.
 - `seiso/distill_rl/{runner.py,config.py,sweep.py,rollouts.py,preferences.py,evaluate.py,manifest.py,...}`
 - Multi-seed + auto-sweep + paper bundle.
-- Cross-vendor (codellama + adaptive alignment).
+- Cross-pipeline (compression + adaptive alignment).
 
 ### RL Quant
 - Adaptive RL for GGUF quant policy (per-tensor/layer).
 - Optional `--kernel-rl` co-trains discrete CUDA kernel profiles.
 - `seiso/rl_quant/{runner.py,config_builder.py,sweep.py,kernel_integration.py}`
-- Heavy use of vendored adaptive-rl-quant.
+- Heavy use of bundled adaptive RL quant internals.
 
 ### Quant regression experiments
 - `seiso experiment quant-regression` — multi-quant QLoRA training, GGUF export, HF + llama.cpp deploy-quant regression.
@@ -169,7 +169,7 @@ Entry points: `start` script, `seiso` CLI (`forge`, `train`, `chat`, `export`, `
 ### Vendored Code
 - Large research implementations live outside main tree.
 - Seiso owns the integration surface (config builders, runners, manifests, kernel bridge, UI flows).
-- Treat vendored as mostly read-only; improve via wrappers or upstream when needed.
+- Prefer Seiso wrappers for integrated workflow changes; edit bundled internals when the shared behavior itself needs to change.
 
 ### Local Edits at Time of Analysis (3 files)
 All three changes are **correct and minimal**:
@@ -194,7 +194,7 @@ All three changes are **correct and minimal**:
 - CSP nonce for served UI; tool/code-exec opt-in.
 - Audit logging hooks present.
 
-**Strong for a local tool.** Risks mainly around: vendored code execution surface, external llama.cpp binaries, optional remote providers, and any future "allow_remote" toggles.
+**Strong for a local tool.** Risks mainly around: bundled research code execution surface, external llama.cpp binaries, optional remote providers, and any future "allow_remote" toggles.
 
 ---
 
@@ -212,7 +212,7 @@ All three changes are **correct and minimal**:
 - MLX absent (correct for Linux).
 - "Hub ready for download" / "Local chat runtime ready" can be False without token or downloaded models (expected).
 
-**Key optional extras** (see pyproject.toml): `.[forge,train,cuda,llamacpp,mlx,compress-quant,compress-eval,dev,flash-attn]`. RL quant has no separate extra — it uses `.[train]` plus vendored bootstrap.
+**Key optional extras** (see pyproject.toml): `.[forge,train,cuda,llamacpp,mlx,compress-quant,compress-eval,dev,flash-attn]`. RL quant has no separate extra — it uses `.[train]` plus bundled package bootstrap.
 
 External: llama.cpp (convert/quantize binaries managed by scripts), nvcc for CUDA JIT kernels.
 
@@ -248,7 +248,7 @@ External: llama.cpp (convert/quantize binaries managed by scripts), nvcc for CUD
 - Consider a `seiso doctor --fix` or better auto-remediation for common missing extras.
 
 ### Longer-term / Research-y
-- Upstream improvements to vendored repos (manifests, DPO, kernel RL).
+- Continued improvements to bundled research packages (manifests, DPO, kernel RL).
 - macOS / AMD kernel story (Triton training limitations noted).
 - Full multi-user / project isolation polish.
 - Optional vLLM / other backends via providers.

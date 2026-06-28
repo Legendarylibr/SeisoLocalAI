@@ -174,14 +174,6 @@ def resolve_gguf_converter() -> list[list[str]]:
         if path := shutil.which(name):
             candidates.append([path])
 
-    repo_root = Path(__file__).resolve().parents[2]
-    vendored = repo_root / "third_party" / "llama.cpp" / "convert_hf_to_gguf.py"
-    if vendored.is_file():
-        py = shutil.which("python3") or shutil.which("python") or "python3"
-        cmd = [py, str(vendored)]
-        if cmd not in candidates:
-            candidates.append(cmd)
-
     return candidates
 
 
