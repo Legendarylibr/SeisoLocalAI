@@ -166,7 +166,7 @@ Entry points: `start` script, `seiso` CLI (`forge`, `train`, `chat`, `export`, `
 - Some `UP037` quoted annotations, collections.abc suggestions.
 - Overall professional; technical debt is visible but contained via baselines.
 
-### Vendored Code
+### Bundled Code
 - Large research implementations live outside main tree.
 - Seiso owns the integration surface (config builders, runners, manifests, kernel bridge, UI flows).
 - Prefer Seiso wrappers for integrated workflow changes; edit bundled internals when the shared behavior itself needs to change.

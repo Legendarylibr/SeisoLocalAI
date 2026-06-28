@@ -5,13 +5,13 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from seiso.compress.bootstrap import ensure_codellama_compress_importable, vendor_root
-from seiso.vendor.config_builder import (
+from seiso.bundled.config_builder import (
     job_output_root,
     resolve_config_file_path,
     resolve_preset,
     validate_stages,
 )
+from seiso.compress.bootstrap import bundle_root, ensure_codellama_compress_importable
 
 STAGE_ORDER = (
     "distill",
@@ -27,7 +27,7 @@ _MODEL_DEFAULTS: dict[str, str] | None = None
 
 
 def get_compress_model_defaults() -> dict[str, str]:
-    """Vendor DistillConfig defaults — single source for API and pipeline builder."""
+    """Bundled DistillConfig defaults — single source for API and pipeline builder."""
     global _MODEL_DEFAULTS
     if _MODEL_DEFAULTS is None:
         ensure_codellama_compress_importable()
@@ -91,7 +91,7 @@ def build_pipeline_config(
 
     preset_name, preset = resolve_preset(PRESETS, str(payload.get("preset", "smoke")))
 
-    if path := resolve_config_file_path(payload.get("config_file"), vendor_root=vendor_root()):
+    if path := resolve_config_file_path(payload.get("config_file"), bundle_root=bundle_root()):
         from seiso.codellama_compress.config import load_config_file
 
         blob = load_config_file(path)

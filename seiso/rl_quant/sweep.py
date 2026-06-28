@@ -6,8 +6,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
 
-from seiso.rl_quant.bootstrap import vendor_root
-from seiso.vendor.config_builder import resolve_config_file_path
+from seiso.bundled.config_builder import resolve_config_file_path
+from seiso.rl_quant.bootstrap import bundle_root
 
 # Compact grids tuned for smoke vs research presets.
 _DEFAULT_SWEEP_GRIDS: dict[str, dict[str, tuple[Any, ...]]] = {
@@ -102,7 +102,7 @@ def resolve_sweep_spec(payload: dict[str, Any], *, preset: str) -> Any:
 
     sweep_config = payload.get("sweep_config")
     if sweep_config:
-        path = resolve_config_file_path(str(sweep_config), vendor_root=vendor_root())
+        path = resolve_config_file_path(str(sweep_config), bundle_root=bundle_root())
         if path is None:
             raise ValueError(f"Sweep config file not found: {sweep_config}")
         spec, _ = load_sweep_file(path)
@@ -150,7 +150,10 @@ def run_auto_hyperparameter_sweep(
     from seiso.adaptive_quant.logging_utils import write_json
     from seiso.adaptive_quant.paper_bundle import create_multiseed_paper_bundle
     from seiso.adaptive_quant.pipeline.output_summary import experiment_config_summary
-    from seiso.adaptive_quant.pipeline.research_contract import EVIDENCE_SWEEP, build_research_contract
+    from seiso.adaptive_quant.pipeline.research_contract import (
+        EVIDENCE_SWEEP,
+        build_research_contract,
+    )
     from seiso.adaptive_quant.pipeline.vcs import git_commit_hash
     from seiso.adaptive_quant.research_pipeline import run_pipeline_entrypoint
     from seiso.adaptive_quant.sweep import (

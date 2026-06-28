@@ -12,7 +12,7 @@ def test_any_hf_repo_is_supported():
     assert is_trusted_gguf_repo("unsloth/Qwen3.6-4B-GGUF")
     assert is_trusted_gguf_repo("random-user/base-model")
     assert is_trusted_gguf_repo("Qwen/Qwen2.5-0.5B-Instruct")
-    assert is_trusted_gguf_repo("vendor/Kimi-DFlash")
+    assert is_trusted_gguf_repo("local-owner/Kimi-DFlash")
 
 
 def test_gguf_mirror_candidates_probe_naming_variants():

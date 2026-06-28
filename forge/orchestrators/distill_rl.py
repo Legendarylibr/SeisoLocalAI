@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from forge.orchestrators._vendor_job import vendor_orchestrator
+from forge.orchestrators._bundled_job import bundled_orchestrator
 from seiso.distill_rl.runner import run_distill_rl_job
 
-DistillRLOrchestrator = vendor_orchestrator(
+DistillRLOrchestrator = bundled_orchestrator(
     class_name="DistillRLOrchestrator",
     kind="distill_rl",
     user_id_error="user_id required for distill-RL job",

@@ -6,7 +6,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from seiso.rl_quant.bootstrap import vendor_root
+from seiso.rl_quant.bootstrap import bundle_root
 
 
 @dataclass(frozen=True)
@@ -17,7 +17,7 @@ class RolloutPrompt:
 
 def load_rollout_prompts(path: Path | None, *, limit: int) -> list[RolloutPrompt]:
     """Return prompt records from JSON, JSONL, or the bundled post-train library."""
-    source = path or (vendor_root() / "prompts" / "post_train_library.json")
+    source = path or (bundle_root() / "prompts" / "post_train_library.json")
     if not source.is_file():
         raise FileNotFoundError(f"Prompt library not found: {source}")
 

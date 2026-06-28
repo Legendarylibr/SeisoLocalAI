@@ -7,9 +7,9 @@ from pathlib import Path
 import pytest
 
 from seiso.rl_quant.bootstrap import (
+    bundle_root,
     ensure_adaptive_quant_importable,
     require_adaptive_quant,
-    vendor_root,
 )
 from seiso.rl_quant.config_builder import build_framework_config
 from seiso.rl_quant.presets import rl_quant_presets_response
@@ -25,7 +25,7 @@ def test_rl_quant_presets_response_includes_hints():
 
 
 def test_bundled_source_present():
-    root = vendor_root()
+    root = bundle_root()
     assert (root / "research_pipeline.py").is_file()
 
 

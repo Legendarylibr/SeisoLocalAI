@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from forge.orchestrators._vendor_job import vendor_orchestrator
+from forge.orchestrators._bundled_job import bundled_orchestrator
 from seiso.compress.runner import run_compress_job
 
-CompressOrchestrator = vendor_orchestrator(
+CompressOrchestrator = bundled_orchestrator(
     class_name="CompressOrchestrator",
     kind="compress",
     user_id_error="user_id required for compression job",

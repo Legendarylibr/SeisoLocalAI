@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from seiso.vendor.packages import ADAPTIVE_QUANT
+from seiso.bundled.packages import ADAPTIVE_QUANT
 
-_VENDOR_ROOT = ADAPTIVE_QUANT.root
+_BUNDLE_ROOT = ADAPTIVE_QUANT.root
 
 
-def vendor_root() -> Path:
-    return _VENDOR_ROOT
+def bundle_root() -> Path:
+    return _BUNDLE_ROOT
 
 
 ensure_adaptive_quant_importable = ADAPTIVE_QUANT.ensure_importable
