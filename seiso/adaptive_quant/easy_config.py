@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 import warnings
 from collections.abc import Mapping
 from dataclasses import fields, replace
@@ -14,6 +15,11 @@ from seiso.adaptive_quant.logging_utils import (
     enforce_safe_parsed_json,
     safe_json_loads,
 )
+
+if sys.version_info >= (3, 11):
+    from tomllib import loads as toml_loads
+else:
+    from tomli import loads as toml_loads
 
 _FRAMEWORK_FIELD_NAMES = all_flat_config_keys() | NESTED_SECTION_KEYS
 _REWARD_FIELD_NAMES = {f.name for f in fields(RewardWeights)}
@@ -186,8 +192,6 @@ def _parse_config_file(path: Path) -> dict[str, Any]:
             raise TypeError(f"Config root must be an object/dict, got {type(data).__name__}")
         return data
     if suffix in (".toml", ".tml"):
-        from tomllib import loads as toml_loads
-
         data = toml_loads(text)
         enforce_safe_parsed_json(data, label=cfg_label)
         if not isinstance(data, dict):
