@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 import struct
 from pathlib import Path
+from typing import Any, Callable
 
 from seiso.compat import StrEnum
 from seiso.models.loader import Backend, detect_backend
@@ -33,24 +34,26 @@ BACKEND_LABELS: dict[str, str] = {
     "router": "Smart Router",
     "auto": "Auto",
 }
+
 _GGUF_SHARD_RE = re.compile(r"^(?P<prefix>.+)-(?P<index>\d{5})-of-(?P<total>\d{5})\.gguf$", re.I)
-_GGUF_VALUE_SIZE = {
-    0: 1,  # uint8
-    1: 1,  # int8
-    2: 2,  # uint16
-    3: 2,  # int16
-    4: 4,  # uint32
-    5: 4,  # int32
-    6: 4,  # float32
-    7: 1,  # bool
+_GGUF_VALUE_SIZE: dict[int, int] = {
+    0: 1,   # uint8
+    1: 1,   # int8
+    2: 2,   # uint16
+    3: 2,   # int16
+    4: 4,   # uint32
+    5: 4,   # int32
+    6: 4,   # float32
+    7: 1,   # bool
     10: 8,  # uint64
     11: 8,  # int64
     12: 8,  # float64
 }
+
 # dflash-draft are specialized tiny draft models. We allow llama.cpp backend for them
 # (especially when used as speculative drafts). They are filtered from main catalogs
 # via other hints.
-_UNSUPPORTED_GGUF_ARCHITECTURES = frozenset()  # was {"dflash-draft"} - now supported as drafts
+_UNSUPPORTED_GGUF_ARCHITECTURES = frozenset()
 
 
 def is_dflash_draft(model_path: str) -> bool:
@@ -59,14 +62,12 @@ def is_dflash_draft(model_path: str) -> bool:
     if arch and "dflash" in arch.lower():
         return True
     name = Path(model_path).name.lower()
-    return "dflash" in name or "-draft" in name or "draft" in name and "gguf" in name
+    return "dflash" in name or "-draft" in name or ("draft" in name and "gguf" in name)
 
 
-def _looks_like_gguf_file(path: Path) -> bool:
+def _is_gguf_file(path: Path) -> bool:
     if path.suffix.lower() == ".gguf":
         return True
-    if not path.is_file():
-        return False
     try:
         with path.open("rb") as handle:
             return handle.read(4) == b"GGUF"
@@ -76,28 +77,30 @@ def _looks_like_gguf_file(path: Path) -> bool:
 
 def _is_gguf_path(model_path: str) -> bool:
     path = Path(model_path)
-    if _looks_like_gguf_file(path):
-        return True
-    return path.is_dir() and any(path.glob("*.gguf"))
+    if path.is_file():
+        return _is_gguf_file(path)
+    if path.is_dir():
+        return any(path.glob("*.gguf"))
+    return False
 
 
 def resolve_gguf_file(model_path: str) -> Path:
     """Pick a single GGUF file from a path or directory."""
     path = Path(model_path).expanduser()
-    if path.is_file() and _looks_like_gguf_file(path):
+    if path.is_file() and _is_gguf_file(path):
         return path.absolute()
+
     if path.is_dir():
         candidates = sorted(path.glob("*.gguf"))
-        first_shards = [
-            p
-            for p in candidates
-            if (match := _GGUF_SHARD_RE.match(p.name)) and match.group("index") == "00001"
-        ]
-        if first_shards:
-            return first_shards[0].absolute()
-        candidates = sorted(candidates, key=lambda p: p.stat().st_size, reverse=True)
+        # Prefer first shard of a sharded model
+        for candidate in candidates:
+            match = _GGUF_SHARD_RE.match(candidate.name)
+            if match and match.group("index") == "00001":
+                return candidate.absolute()
+        # Fall back to largest file
         if candidates:
-            return candidates[0].absolute()
+            return max(candidates, key=lambda p: p.stat().st_size).absolute()
+
     raise ValueError(f"No GGUF file found at {model_path}")
 
 
@@ -137,6 +140,61 @@ def _skip_gguf_value(handle, value_type: int) -> None:
     handle.seek(size, 1)
 
 
+def _read_gguf_metadata(
+    path: Path,
+    *,
+    key_matcher: Callable[[str], bool],
+    value_type: int | None = None,
+    read_value: bool = False,
+) -> Any | None:
+    """Read a single metadata value from a GGUF file.
+
+    Args:
+        path: Path to the GGUF file.
+        key_matcher: Predicate that returns True for the target key.
+        value_type: Expected GGUF value type (None to accept any).
+        read_value: If True, return the parsed value; otherwise return True/False.
+
+    Returns:
+        - If ``read_value`` is True: the parsed value or None.
+        - If ``read_value`` is False: True if key found, else False.
+    """
+    with path.open("rb") as handle:
+        if handle.read(4) != b"GGUF":
+            return None
+        header = handle.read(20)
+        if len(header) != 20:
+            return None
+        _version, _tensor_count, kv_count = struct.unpack("<IQQ", header)
+
+        for _ in range(kv_count):
+            key = _read_gguf_string(handle)
+            raw_type = handle.read(4)
+            if len(raw_type) != 4:
+                return None
+            (actual_type,) = struct.unpack("<I", raw_type)
+
+            if key_matcher(key) and (value_type is None or actual_type == value_type):
+                if read_value:
+                    if actual_type == 8:
+                        return _read_gguf_string(handle)
+                    if actual_type == 4:
+                        raw = handle.read(4)
+                        if len(raw) != 4:
+                            return None
+                        (value,) = struct.unpack("<I", raw)
+                        return int(value)
+                    return True
+                else:
+                    return True
+
+            _skip_gguf_value(handle, actual_type)
+
+    return None
+
+
+# --- Caching infrastructure ---
+
 _gguf_arch_cache: dict[tuple[str, float, int], str | None] = {}
 _gguf_block_count_cache: dict[tuple[str, float, int], int | None] = {}
 _gguf_context_length_cache: dict[tuple[str, float, int], int | None] = {}
@@ -157,6 +215,8 @@ def _gguf_cache_key(path: Path) -> tuple[str, float, int] | None:
         return None
 
 
+# --- Public GGUF metadata readers ---
+
 def gguf_architecture(model_path: str) -> str | None:
     """Read ``general.architecture`` from a GGUF file when available."""
     try:
@@ -165,64 +225,23 @@ def gguf_architecture(model_path: str) -> str | None:
         return None
 
     cache_key = _gguf_cache_key(path)
-    if cache_key is not None:
-        cached = _gguf_arch_cache.get(cache_key)
-        if cached is not None or cache_key in _gguf_arch_cache:
-            return cached
+    if cache_key is not None and cache_key in _gguf_arch_cache:
+        return _gguf_arch_cache[cache_key]
 
     architecture: str | None
     try:
-        architecture = _read_gguf_architecture(path)
+        architecture = _read_gguf_metadata(
+            path,
+            key_matcher=lambda k: k == "general.architecture",
+            value_type=8,
+            read_value=True,
+        )
     except (OSError, ValueError, struct.error):
         architecture = None
 
     if cache_key is not None:
         _gguf_arch_cache[cache_key] = architecture
     return architecture
-
-
-def _gguf_has_metadata_key(path: Path, key_suffix: str) -> bool:
-    with path.open("rb") as handle:
-        if handle.read(4) != b"GGUF":
-            return False
-        header = handle.read(20)
-        if len(header) != 20:
-            return False
-        _version, _tensor_count, kv_count = struct.unpack("<IQQ", header)
-        for _ in range(kv_count):
-            key = _read_gguf_string(handle)
-            raw_type = handle.read(4)
-            if len(raw_type) != 4:
-                return False
-            (value_type,) = struct.unpack("<I", raw_type)
-            if key.endswith(key_suffix):
-                return True
-            _skip_gguf_value(handle, value_type)
-    return False
-
-
-def _read_gguf_metadata_u32(path: Path, key_suffix: str) -> int | None:
-    with path.open("rb") as handle:
-        if handle.read(4) != b"GGUF":
-            return None
-        header = handle.read(20)
-        if len(header) != 20:
-            return None
-        _version, _tensor_count, kv_count = struct.unpack("<IQQ", header)
-        for _ in range(kv_count):
-            key = _read_gguf_string(handle)
-            raw_type = handle.read(4)
-            if len(raw_type) != 4:
-                return None
-            (value_type,) = struct.unpack("<I", raw_type)
-            if key.endswith(key_suffix) and value_type == 4:
-                raw = handle.read(4)
-                if len(raw) != 4:
-                    return None
-                (value,) = struct.unpack("<I", raw)
-                return int(value)
-            _skip_gguf_value(handle, value_type)
-    return None
 
 
 def gguf_context_length(model_path: str) -> int | None:
@@ -238,7 +257,12 @@ def gguf_context_length(model_path: str) -> int | None:
 
     length: int | None
     try:
-        length = _read_gguf_metadata_u32(path, ".context_length")
+        length = _read_gguf_metadata(
+            path,
+            key_matcher=lambda k: k.endswith(".context_length"),
+            value_type=4,
+            read_value=True,
+        )
     except (OSError, ValueError, struct.error):
         length = None
 
@@ -255,10 +279,18 @@ def gguf_uses_sliding_window_attention(model_path: str) -> bool:
         return False
 
     try:
-        sliding_window = _read_gguf_metadata_u32(path, ".attention.sliding_window")
+        sliding_window = _read_gguf_metadata(
+            path,
+            key_matcher=lambda k: k.endswith(".attention.sliding_window"),
+            value_type=4,
+            read_value=True,
+        )
         if sliding_window is not None and sliding_window > 0:
             return True
-        return _gguf_has_metadata_key(path, ".attention.sliding_window_pattern")
+        return _read_gguf_metadata(
+            path,
+            key_matcher=lambda k: k.endswith(".attention.sliding_window_pattern"),
+        ) or False
     except (OSError, ValueError, struct.error):
         return False
 
@@ -276,7 +308,12 @@ def gguf_block_count(model_path: str) -> int | None:
 
     count: int | None
     try:
-        count = _read_gguf_metadata_u32(path, ".block_count")
+        count = _read_gguf_metadata(
+            path,
+            key_matcher=lambda k: k.endswith(".block_count"),
+            value_type=4,
+            read_value=True,
+        )
     except (OSError, ValueError, struct.error):
         count = None
 
@@ -285,25 +322,7 @@ def gguf_block_count(model_path: str) -> int | None:
     return count
 
 
-def _read_gguf_architecture(path: Path) -> str | None:
-    with path.open("rb") as handle:
-        if handle.read(4) != b"GGUF":
-            return None
-        header = handle.read(20)
-        if len(header) != 20:
-            return None
-        _version, _tensor_count, kv_count = struct.unpack("<IQQ", header)
-        for _ in range(kv_count):
-            key = _read_gguf_string(handle)
-            raw_type = handle.read(4)
-            if len(raw_type) != 4:
-                return None
-            (value_type,) = struct.unpack("<I", raw_type)
-            if key == "general.architecture" and value_type == 8:
-                return _read_gguf_string(handle)
-            _skip_gguf_value(handle, value_type)
-    return None
-
+# --- Backend resolution ---
 
 def gguf_is_supported_by_llamacpp(model_path: str) -> bool:
     architecture = gguf_architecture(model_path)
@@ -313,16 +332,20 @@ def gguf_is_supported_by_llamacpp(model_path: str) -> bool:
 def recommend_backend(*, model_path: str, model_format: str | None = None) -> BackendName:
     """Pick the default local inference engine from model path/format."""
     fmt = (model_format or "").lower()
-    path = Path(model_path)
+
     if fmt == "gguf" or _is_gguf_path(model_path):
         return BACKEND_LLAMACPP
+
+    path = Path(model_path)
     if fmt in {"safetensors", "bin"} or path.is_dir():
         backend = detect_backend()
         if backend == Backend.MLX:
             return BACKEND_MLX
         return BACKEND_TORCH
+
     if path.suffix.lower() == ".gguf":
         return BACKEND_LLAMACPP
+
     return BACKEND_TORCH
 
 
