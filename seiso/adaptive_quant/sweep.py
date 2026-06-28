@@ -5,6 +5,7 @@ from __future__ import annotations
 import itertools
 import math
 import re
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -18,6 +19,11 @@ from seiso.adaptive_quant.configuration import FrameworkConfig
 from seiso.adaptive_quant.logging_utils import safe_json_loads
 from seiso.adaptive_quant.math_utils import parse_seed_list
 from seiso.adaptive_quant.paper_bundle import aggregate_values
+
+if sys.version_info >= (3, 11):
+    from tomllib import loads as toml_loads
+else:
+    from tomli import loads as toml_loads
 
 SweepDirection = Literal["maximize", "minimize"]
 
@@ -244,8 +250,6 @@ def _parse_sweep_file(path: Path) -> dict[str, Any]:
     if suffix == ".json":
         data = safe_json_loads(text, label=label)
     elif suffix in (".toml", ".tml"):
-        from tomllib import loads as toml_loads
-
         data = toml_loads(text)
     else:
         raise ValueError(f"Unsupported sweep file extension {suffix!r} (use .json or .toml)")
