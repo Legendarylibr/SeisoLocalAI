@@ -118,6 +118,18 @@ def resolve_gguf_file(model_path: str) -> Path:
     raise ValueError(f"No GGUF file found at {model_path}")
 
 
+# ── Speculative Decoding Support ───────────────────────────────
+
+def is_draft_model(model_path: str) -> bool:
+    """Generalized check if a model is intended for speculative drafting.
+
+    Uses filename heuristics to avoid loading metadata solely for this check.
+    """
+    name = Path(model_path).name.lower()
+    # Common naming conventions for draft models
+    return "draft" in name or "speculative" in name
+
+
 # ── mmap single-pass GGUF reader (fully inlined hot path) ──────
 
 def _read_gguf_metadata_all(path: Path) -> _GGUFMetadata:
@@ -284,7 +296,11 @@ def gguf_is_supported_by_llamacpp(_model_path: str) -> bool:
 
 
 def recommend_backend(*, model_path: str, model_format: str | None = None) -> BackendName:
-    """Pick the default local inference engine from model path/format."""
+    """Pick the default local inference engine from model path/format.
+
+    Note: Draft models (for speculative decoding) are typically small GGUFs,
+    so they correctly resolve to LLAMACPP here automatically.
+    """
     fmt = (model_format or "").lower()
 
     if fmt == "gguf" or _is_gguf_path(model_path):
