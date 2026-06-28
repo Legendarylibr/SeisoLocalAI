@@ -11,7 +11,11 @@ from sse_starlette.sse import EventSourceResponse
 
 from forge.api.deps import get_db
 from forge.api.routes._jobs import format_stage_pipeline_job, stage_presets_response
-from forge.api.routes._stream import job_failure_message, job_log_event_gen, spawn_background
+from forge.api.routes._stream import (
+    job_failure_message,
+    job_log_event_gen,
+    spawn_background,
+)
 from forge.config import ForgeSettings, get_settings
 from forge.db.store import Database
 from forge.orchestrators.base import Orchestrator
@@ -35,7 +39,9 @@ class FormattedJobRoutes:
     before_result: Callable[[dict[str, Any]], list[dict[str, str]]] | None = None
 
 
-def register_formatted_job_routes(router: APIRouter, routes: FormattedJobRoutes) -> None:
+def register_formatted_job_routes(
+    router: APIRouter, routes: FormattedJobRoutes
+) -> None:
     """Register GET /jobs, GET /jobs/{id}, and GET /jobs/{id}/stream on a router."""
     get_orch = routes.get_orchestrator
 
@@ -160,7 +166,9 @@ def build_stage_pipeline_router(config: StagePipelineRouterConfig) -> APIRouter:
 
         spawn_background(_run())
         preset = config_payload.get("preset", "")
-        audit_event(config.audit_event_name, user_id=user_id, job_id=job_id, preset=preset)
+        audit_event(
+            config.audit_event_name, user_id=user_id, job_id=job_id, preset=preset
+        )
         return PipelineJobResponse(job_id=job_id, status="pending")
 
     @router.get("/presets")

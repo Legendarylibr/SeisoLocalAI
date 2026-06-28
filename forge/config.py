@@ -23,9 +23,7 @@ from seiso.security import generate_secret_key, resolve_data_dir
 StorageMode = Literal["persistent", "ephemeral"]
 
 # Local Forge + Vite dev — 127.0.0.1 and localhost are different browser origins.
-DEFAULT_CORS_ORIGINS = (
-    "http://127.0.0.1:8765,http://localhost:8765,http://127.0.0.1:5173,http://localhost:5173"
-)
+DEFAULT_CORS_ORIGINS = "http://127.0.0.1:8765,http://localhost:8765,http://127.0.0.1:5173,http://localhost:5173"
 
 
 class ForgeSettings(BaseSettings):
@@ -103,12 +101,16 @@ class ForgeSettings(BaseSettings):
 
     def _resolve_storage_mode(self) -> None:
         marker = self.data_dir / ".storage_mode"
-        env_configured = "SEISO_DB_EPHEMERAL" in os.environ or "SEISO_DB_STORAGE_MODE" in os.environ
+        env_configured = (
+            "SEISO_DB_EPHEMERAL" in os.environ or "SEISO_DB_STORAGE_MODE" in os.environ
+        )
         if env_configured:
             raw_mode = os.environ.get("SEISO_DB_STORAGE_MODE", "").strip().lower()
             if raw_mode:
                 if raw_mode not in {"persistent", "ephemeral"}:
-                    raise ValueError("SEISO_DB_STORAGE_MODE must be 'persistent' or 'ephemeral'")
+                    raise ValueError(
+                        "SEISO_DB_STORAGE_MODE must be 'persistent' or 'ephemeral'"
+                    )
                 self.db_ephemeral = raw_mode == "ephemeral"
             elif self.db_ephemeral is None:
                 self.db_ephemeral = False

@@ -116,7 +116,9 @@ def _assert_resolved_scope(
             and log_rel.parts[1] == user_id
         ):
             return
-        raise SecurityError("Shared cache paths are only reachable via your model inventory")
+        raise SecurityError(
+            "Shared cache paths are only reachable via your model inventory"
+        )
 
     raise SecurityError(f"Access denied to path root: {root!r}")
 
@@ -147,7 +149,9 @@ def assert_user_path(sandbox_root: Path, user_id: str, target: str | Path) -> Pa
 
     resolved = assert_within(base, source.resolve())
     if source.is_symlink() and not resolved.exists():
-        raise SecurityError(f"Model cache link is broken — re-download from Hub: {logical.name}")
+        raise SecurityError(
+            f"Model cache link is broken — re-download from Hub: {logical.name}"
+        )
     _assert_resolved_scope(base, user_id, logical, resolved)
     return resolved
 

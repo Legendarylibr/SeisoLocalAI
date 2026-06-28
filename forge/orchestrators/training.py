@@ -14,7 +14,11 @@ from forge.services.hardware import live_metrics
 from seiso.models.hf_env import configure_hf_hub_cache
 from seiso.training.config import TrainConfig, run_training
 from seiso.training.metrics import parse_metric_line
-from seiso.training.multi_gpu import detect_training_layout, gpu_stats, launch_worker_command
+from seiso.training.multi_gpu import (
+    detect_training_layout,
+    gpu_stats,
+    launch_worker_command,
+)
 
 
 class TrainingOrchestrator(Orchestrator):
@@ -37,7 +41,10 @@ class TrainingOrchestrator(Orchestrator):
             os.environ["HF_TOKEN"] = str(hf_token)
             os.environ.pop("HUGGING_FACE_HUB_TOKEN", None)
         configure_hf_hub_cache(self.sandbox_root)
-        from forge.services.memory_release import prepare_for_gpu_task, release_after_task
+        from forge.services.memory_release import (
+            prepare_for_gpu_task,
+            release_after_task,
+        )
 
         prepare_for_gpu_task(
             task="training",
@@ -55,17 +62,24 @@ class TrainingOrchestrator(Orchestrator):
             payload.get("use_triton", config.extra.get("use_triton", config.use_triton))
         )
         config.use_fused_ce = bool(
-            payload.get("use_fused_ce", config.extra.get("use_fused_ce", config.use_fused_ce))
+            payload.get(
+                "use_fused_ce", config.extra.get("use_fused_ce", config.use_fused_ce)
+            )
         )
         config.use_fused_lora = bool(
-            payload.get("use_fused_lora", config.extra.get("use_fused_lora", config.use_fused_lora))
+            payload.get(
+                "use_fused_lora",
+                config.extra.get("use_fused_lora", config.use_fused_lora),
+            )
         )
 
         layout = detect_training_layout()
         self._emit_log(job_id, f"Starting training: {config.model_id}")
         if resolved := config.extra.get("resolved_model_path"):
             self._emit_log(job_id, f"Using cached weights: {resolved}")
-        self._emit_log(job_id, f"Method: {config.method.value}, quant: {config.quant.value}")
+        self._emit_log(
+            job_id, f"Method: {config.method.value}, quant: {config.quant.value}"
+        )
         self._emit_log(
             job_id,
             f"GPUs: {layout.device_count} visible, world_size={layout.world_size}, "
@@ -88,7 +102,8 @@ class TrainingOrchestrator(Orchestrator):
             else:
                 if multi_gpu and layout.device_count <= 1:
                     self._emit_log(
-                        job_id, "multi_gpu requested but only one GPU — running single-process"
+                        job_id,
+                        "multi_gpu requested but only one GPU — running single-process",
                     )
 
                 def on_metric(metric: dict[str, Any]) -> None:
@@ -131,7 +146,9 @@ class TrainingOrchestrator(Orchestrator):
             "metrics_summary": metrics_summary,
         }
 
-    def _schedule_metrics_persist(self, job_id: str, loop: asyncio.AbstractEventLoop) -> None:
+    def _schedule_metrics_persist(
+        self, job_id: str, loop: asyncio.AbstractEventLoop
+    ) -> None:
         task = self._metrics_persist_tasks.get(job_id)
         if task and not task.done():
             return
@@ -171,7 +188,9 @@ class TrainingOrchestrator(Orchestrator):
 
         config.output_dir.mkdir(parents=True, exist_ok=True)
         cfg_path = config.output_dir / f"{job_id}.worker.yaml"
-        cfg_path.write_text(yaml.safe_dump(config.model_dump(mode="json")), encoding="utf-8")
+        cfg_path.write_text(
+            yaml.safe_dump(config.model_dump(mode="json")), encoding="utf-8"
+        )
         cfg_path.chmod(0o600)
 
         self._emit_log(job_id, f"Launching torchrun --nproc_per_node={nproc}")
@@ -249,7 +268,9 @@ class TrainingOrchestrator(Orchestrator):
             if m.get("type") in ("training", "eval") and m.get("type") != "system"
         ]
         losses = [float(m["loss"]) for m in training if m.get("loss") is not None]
-        eval_losses = [float(m["eval_loss"]) for m in training if m.get("eval_loss") is not None]
+        eval_losses = [
+            float(m["eval_loss"]) for m in training if m.get("eval_loss") is not None
+        ]
         return {
             "total_steps": max((int(m.get("step", 0)) for m in training), default=0),
             "final_loss": losses[-1] if losses else None,

@@ -172,7 +172,9 @@ class FrameworkConfig:
         v.validate_artifact_dir("checkpoint_dir", self.checkpoint_dir)
         v.validate_artifact_dir("report_dir", self.report_dir)
         v.validate_artifact_dir("gguf_export_dir", self.gguf_export_dir)
-        v.validate_optional_filesystem_path("resume_from_checkpoint", self.resume_from_checkpoint)
+        v.validate_optional_filesystem_path(
+            "resume_from_checkpoint", self.resume_from_checkpoint
+        )
         v.validate_optional_filesystem_path("llama_cpp_binary", self.llama_cpp_binary)
         v.validate_optional_filesystem_path("llama_cpp_model", self.llama_cpp_model)
         v.validate_gguf_export_settings(
@@ -183,7 +185,9 @@ class FrameworkConfig:
             llama_cpp_binary=self.llama_cpp_binary,
             llama_cpp_model=self.llama_cpp_model,
         )
-        v.validate_optional_filesystem_path("external_quality_path", self.external_quality_path)
+        v.validate_optional_filesystem_path(
+            "external_quality_path", self.external_quality_path
+        )
         v.validate_quant_mode(self.quant_mode)
         v.validate_hardware_modes(self.hardware_modes)
         v.validate_backend(self.backend)
@@ -234,7 +238,9 @@ class FrameworkConfig:
         )
         v.validate_bounded_positive_int("training_episodes", self.training_episodes)
         v.validate_bounded_positive_int("evaluation_episodes", self.evaluation_episodes)
-        v.validate_bounded_positive_int("max_training_episodes", self.max_training_episodes)
+        v.validate_bounded_positive_int(
+            "max_training_episodes", self.max_training_episodes
+        )
         if self.benchmark_training_episodes is not None:
             v.validate_bounded_positive_int(
                 "benchmark_training_episodes", self.benchmark_training_episodes
@@ -244,17 +250,25 @@ class FrameworkConfig:
                 "benchmark_evaluation_episodes", self.benchmark_evaluation_episodes
             )
         v.validate_bounded_positive_int("online_requests", self.online_requests)
-        v.validate_bounded_nonneg_int("replay_buffer_capacity", self.replay_buffer_capacity)
-        v.validate_bounded_positive_int("online_replay_capacity", self.online_replay_capacity)
+        v.validate_bounded_nonneg_int(
+            "replay_buffer_capacity", self.replay_buffer_capacity
+        )
+        v.validate_bounded_positive_int(
+            "online_replay_capacity", self.online_replay_capacity
+        )
         if self.continuous_learning_enabled:
-            supported_modes = frozenset({"library_cycle", "sequential", "jsonl", "reward_adaptive"})
+            supported_modes = frozenset(
+                {"library_cycle", "sequential", "jsonl", "reward_adaptive"}
+            )
             mode = self.continuous_task_stream_mode.strip().lower()
             if mode not in supported_modes:
                 raise ValueError(
                     "continuous_task_stream_mode must be one of "
                     f"{sorted(supported_modes)}, got {mode!r}"
                 )
-            v.validate_bounded_positive_int("continuous_max_tasks", self.continuous_max_tasks)
+            v.validate_bounded_positive_int(
+                "continuous_max_tasks", self.continuous_max_tasks
+            )
             v.validate_bounded_positive_int(
                 "continuous_update_every_n_tasks", self.continuous_update_every_n_tasks
             )
@@ -262,16 +276,22 @@ class FrameworkConfig:
                 "continuous_eval_every_n_tasks", self.continuous_eval_every_n_tasks
             )
             v.validate_bounded_nonneg_int(
-                "continuous_checkpoint_every_n_tasks", self.continuous_checkpoint_every_n_tasks
+                "continuous_checkpoint_every_n_tasks",
+                self.continuous_checkpoint_every_n_tasks,
             )
             v.validate_bounded_positive_int(
                 "continuous_replay_capacity", self.continuous_replay_capacity
             )
-            v.validate_bounded_positive_int("continuous_batch_size", self.continuous_batch_size)
             v.validate_bounded_positive_int(
-                "continuous_min_replay_before_update", self.continuous_min_replay_before_update
+                "continuous_batch_size", self.continuous_batch_size
             )
-            v.validate_bounded_positive_int("continuous_drift_window", self.continuous_drift_window)
+            v.validate_bounded_positive_int(
+                "continuous_min_replay_before_update",
+                self.continuous_min_replay_before_update,
+            )
+            v.validate_bounded_positive_int(
+                "continuous_drift_window", self.continuous_drift_window
+            )
             if mode == "jsonl" and not self.continuous_task_jsonl_path:
                 raise ValueError(
                     "continuous_task_stream_mode='jsonl' requires continuous_task_jsonl_path"
@@ -301,7 +321,9 @@ class FrameworkConfig:
             self.online_max_replay_entries_per_prompt_hash,
             ceiling=v.MAX_ONLINE_REPLAY_ENTRIES_PER_PROMPT_HASH,
         )
-        v.validate_optional_filesystem_path("prompt_library_path", self.prompt_library_path)
+        v.validate_optional_filesystem_path(
+            "prompt_library_path", self.prompt_library_path
+        )
         v.validate_router_routes(self.router_routes)
         v.validate_moe_topology(
             num_experts=self.moe_num_experts,
@@ -430,7 +452,14 @@ class FrameworkConfig:
         return 4 + top_k * (5 + self.moe_variant_count())
 
     def state_vector_dim(self) -> int:
-        base = len(self.ordered_hardware()) + 5 + 2 + self.num_layers + 3 + self.moe_state_dim()
+        base = (
+            len(self.ordered_hardware())
+            + 5
+            + 2
+            + self.num_layers
+            + 3
+            + self.moe_state_dim()
+        )
         if self.kernel_rl_enabled:
             base += 1
         return base

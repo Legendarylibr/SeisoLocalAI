@@ -19,7 +19,9 @@ def guess_params_from_name(name: str) -> float | None:
     return float(m.group(1)) if m else None
 
 
-def _active_params_b(params: str, tags: tuple[str, ...] | list[str], repo_id: str = "") -> float:
+def _active_params_b(
+    params: str, tags: tuple[str, ...] | list[str], repo_id: str = ""
+) -> float:
     """Effective parameter count for VRAM estimates (MoE / active experts)."""
     text = f"{params} {repo_id}".lower()
     moe_match = _ACTIVE_MOE_RE.search(text)

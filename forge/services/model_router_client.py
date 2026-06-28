@@ -25,7 +25,9 @@ def _validate_router_url(url: str) -> str:
         raise ValueError("model_router_url must be a valid http(s) URL")
     host = (parsed.hostname or "").lower()
     if host not in {"127.0.0.1", "localhost", "::1"} and not host.endswith(".internal"):
-        raise ValueError("model_router_url must point to localhost for local-first routing")
+        raise ValueError(
+            "model_router_url must point to localhost for local-first routing"
+        )
     return url.rstrip("/")
 
 
@@ -61,7 +63,9 @@ async def fetch_router_status(settings: ForgeSettings) -> dict[str, Any]:
     base = _validate_router_url(settings.model_router_url)
     client = _router_http_client()
     health = await client.get(f"{base}/health", timeout=10.0)
-    status: dict[str, Any] = {"health": health.json() if health.status_code == 200 else {}}
+    status: dict[str, Any] = {
+        "health": health.json() if health.status_code == 200 else {}
+    }
     try:
         detail = await client.get(f"{base}/router/status", timeout=10.0)
         if detail.status_code == 200:
@@ -130,7 +134,9 @@ async def router_stream_chat(
     ) as resp:
         if resp.status_code >= 400:
             body = await resp.aread()
-            raise RuntimeError(body.decode("utf-8", errors="replace") or "Router request failed")
+            raise RuntimeError(
+                body.decode("utf-8", errors="replace") or "Router request failed"
+            )
         async for line in resp.aiter_lines():
             if not line.startswith("data:"):
                 continue

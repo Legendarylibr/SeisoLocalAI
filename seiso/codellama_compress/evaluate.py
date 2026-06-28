@@ -42,7 +42,9 @@ def _default_texts() -> list[str]:
     ]
 
 
-def compute_perplexity(model, tokenizer, texts: Iterable[str], device: torch.device) -> float:
+def compute_perplexity(
+    model, tokenizer, texts: Iterable[str], device: torch.device
+) -> float:
     model.eval()
     total_loss = 0.0
     total_tokens = 0
@@ -85,7 +87,9 @@ def measure_speed(
 def evaluate_model_dir(model_dir: Path, out_path: Path | None = None) -> EvalResult:
     # This is intentionally a lightweight smoke evaluation.
     model_dir = resolve_user_path(model_dir, must_exist=True)
-    tok = AutoTokenizer.from_pretrained(model_dir, use_fast=True, trust_remote_code=False)
+    tok = AutoTokenizer.from_pretrained(
+        model_dir, use_fast=True, trust_remote_code=False
+    )
     model = AutoModelForCausalLM.from_pretrained(
         model_dir,
         device_map="auto",
@@ -95,7 +99,9 @@ def evaluate_model_dir(model_dir: Path, out_path: Path | None = None) -> EvalRes
     device = model.device
     ppl = compute_perplexity(model, tok, _default_texts(), device)
     tps, ms = measure_speed(model, tok, "def fibonacci(n):", device)
-    res = EvalResult(model=str(model_dir), perplexity=ppl, tokens_per_second=tps, avg_time_ms=ms)
+    res = EvalResult(
+        model=str(model_dir), perplexity=ppl, tokens_per_second=tps, avg_time_ms=ms
+    )
     if out_path is not None:
         save_json(out_path, res.to_dict())
     return res
@@ -103,7 +109,9 @@ def evaluate_model_dir(model_dir: Path, out_path: Path | None = None) -> EvalRes
 
 def evaluate_into_run_dir(*, run_dir: Path, model_dir: Path) -> EvalResult:
     model_dir = resolve_user_path(model_dir, must_exist=True)
-    tok = AutoTokenizer.from_pretrained(model_dir, use_fast=True, trust_remote_code=False)
+    tok = AutoTokenizer.from_pretrained(
+        model_dir, use_fast=True, trust_remote_code=False
+    )
     model = AutoModelForCausalLM.from_pretrained(
         model_dir,
         device_map="auto",
@@ -114,7 +122,9 @@ def evaluate_into_run_dir(*, run_dir: Path, model_dir: Path) -> EvalResult:
     device = model.device
     ppl = compute_perplexity(model, tok, _default_texts(), device)
     tps, ms = measure_speed(model, tok, "def fibonacci(n):", device)
-    res = EvalResult(model=str(model_dir), perplexity=ppl, tokens_per_second=tps, avg_time_ms=ms)
+    res = EvalResult(
+        model=str(model_dir), perplexity=ppl, tokens_per_second=tps, avg_time_ms=ms
+    )
     write_samples_jsonl(
         run_dir=run_dir,
         stage="evaluate",

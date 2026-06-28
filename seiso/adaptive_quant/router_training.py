@@ -7,7 +7,12 @@ from pathlib import Path
 from seiso.adaptive_quant.configuration import FrameworkConfig
 from seiso.adaptive_quant.prompts import PromptLibrary, load_prompt_library_json
 from seiso.adaptive_quant.routing import EfficientTaskRouter, RouterTrace
-from seiso.adaptive_quant.types import EpisodeResult, EpisodeState, QuantizationDecision, QuantMode
+from seiso.adaptive_quant.types import (
+    EpisodeResult,
+    EpisodeState,
+    QuantizationDecision,
+    QuantMode,
+)
 
 
 def resolve_prompt_library(

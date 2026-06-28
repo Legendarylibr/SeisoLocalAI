@@ -53,7 +53,9 @@ register_formatted_job_routes(
 
 
 class RLQuantStartRequest(BaseModel):
-    preset: str = Field(default="reproducible", description="reproducible | minimal | post_train")
+    preset: str = Field(
+        default="reproducible", description="reproducible | minimal | post_train"
+    )
     config_file: str | None = None
     run_name: str | None = None
     training_episodes: int | None = None

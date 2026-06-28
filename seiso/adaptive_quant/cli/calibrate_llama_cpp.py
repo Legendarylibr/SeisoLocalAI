@@ -10,7 +10,10 @@ from seiso.adaptive_quant.backend import (
     require_llama_cpp_paths,
     run_llama_cpp_measurement,
 )
-from seiso.adaptive_quant.cli.common import add_config_file_argument, load_config_or_fallback
+from seiso.adaptive_quant.cli.common import (
+    add_config_file_argument,
+    load_config_or_fallback,
+)
 from seiso.adaptive_quant.configuration import FrameworkConfig
 from seiso.adaptive_quant.environment import AdaptiveQuantizationEnv
 from seiso.adaptive_quant.logging_utils import write_json
@@ -28,10 +31,14 @@ def main(argv: Iterable[str] | None = None) -> None:
     )
     add_config_file_argument(parser, help_suffix="Otherwise uses baseline preset.")
     parser.add_argument(
-        "--run-name", default="llama_cpp_calibration", help="Output artifact run name prefix."
+        "--run-name",
+        default="llama_cpp_calibration",
+        help="Output artifact run name prefix.",
     )
     parser.add_argument(
-        "--prompts", default="6", help="Number of random prompts to sample for calibration."
+        "--prompts",
+        default="6",
+        help="Number of random prompts to sample for calibration.",
     )
     parser.add_argument("--seed", default="1234", help="RNG seed for prompt sampling.")
     args = parser.parse_args(list(argv) if argv is not None else None)
@@ -108,15 +115,19 @@ def main(argv: Iterable[str] | None = None) -> None:
                 "memory_mb": sim_memory,
             },
             "fit": {
-                "latency_multiplier": ratio_mean(observed_latency, sim_latency)
-                if observed_latency
-                else 1.0,
-                "throughput_multiplier": ratio_mean(observed_throughput, sim_throughput)
-                if observed_throughput
-                else 1.0,
-                "memory_multiplier": ratio_mean(observed_memory, sim_memory)
-                if observed_memory
-                else 1.0,
+                "latency_multiplier": (
+                    ratio_mean(observed_latency, sim_latency)
+                    if observed_latency
+                    else 1.0
+                ),
+                "throughput_multiplier": (
+                    ratio_mean(observed_throughput, sim_throughput)
+                    if observed_throughput
+                    else 1.0
+                ),
+                "memory_multiplier": (
+                    ratio_mean(observed_memory, sim_memory) if observed_memory else 1.0
+                ),
             },
         }
 
@@ -139,7 +150,9 @@ def main(argv: Iterable[str] | None = None) -> None:
     write_json(out_path, output)
     from seiso.adaptive_quant.run_footer import print_calibration_footer
 
-    print_calibration_footer(run_name=args.run_name, out_path=out_path, calibration=calibration)
+    print_calibration_footer(
+        run_name=args.run_name, out_path=out_path, calibration=calibration
+    )
 
 
 if __name__ == "__main__":

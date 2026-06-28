@@ -18,7 +18,10 @@ from seiso.kernels.dispatch import (
     kernel_metadata,
 )
 from seiso.kernels.lifecycle import register_patch, restore_kernel_patches
-from seiso.kernels.memory_mode import apply_low_vram_kernel_tuning, kernel_low_vram_enabled
+from seiso.kernels.memory_mode import (
+    apply_low_vram_kernel_tuning,
+    kernel_low_vram_enabled,
+)
 from seiso.kernels.platform import detect_gpu
 
 logger = logging.getLogger(__name__)
@@ -35,7 +38,9 @@ def _use_fused_cuda_kernels(x: Any) -> bool:
     return not (torch.is_grad_enabled() and getattr(x, "requires_grad", False))
 
 
-_RMSNORM_CLASSES = frozenset({"LlamaRMSNorm", "Qwen2RMSNorm", "GemmaRMSNorm", "RMSNorm"})
+_RMSNORM_CLASSES = frozenset(
+    {"LlamaRMSNorm", "Qwen2RMSNorm", "GemmaRMSNorm", "RMSNorm"}
+)
 _MLP_CLASSES = frozenset(
     {
         "LlamaMLP",
@@ -391,7 +396,9 @@ def _bias_set_complete(biases: tuple[Any | None, ...]) -> bool:
     return not any(b is not None for b in biases) or all(b is not None for b in biases)
 
 
-def _batched_base_qkv_forward(flat_x: Any, q_proj: Any, k_proj: Any, v_proj: Any) -> tuple[Any, Any, Any]:
+def _batched_base_qkv_forward(
+    flat_x: Any, q_proj: Any, k_proj: Any, v_proj: Any
+) -> tuple[Any, Any, Any]:
     """Batched base Q/K/V linear — full MHA or GQA (shared K/V shapes)."""
     layers = (q_proj.base_layer, k_proj.base_layer, v_proj.base_layer)
     weights = tuple(ly.weight for ly in layers)
@@ -423,7 +430,9 @@ def _batched_base_qkv_forward(flat_x: Any, q_proj: Any, k_proj: Any, v_proj: Any
     )
 
 
-def _get_active_lora_weights(module: Any, adapter: str) -> tuple[Any, Any, float] | None:
+def _get_active_lora_weights(
+    module: Any, adapter: str
+) -> tuple[Any, Any, float] | None:
     if adapter not in module.lora_A or adapter not in module.lora_B:
         return None
     return (
@@ -483,7 +492,9 @@ def _patch_fused_qkv_projections(
                     continue
                 x_mod = x
                 if hasattr(self, "_cast_input_dtype"):
-                    x_mod = self._cast_input_dtype(x_mod, self.lora_A[adapter].weight.dtype)
+                    x_mod = self._cast_input_dtype(
+                        x_mod, self.lora_A[adapter].weight.dtype
+                    )
                 dropout_p = _lora_dropout_p(self.lora_dropout[adapter])
                 if dropout_p > 0 and self.training:
                     x_mod = F.dropout(x_mod, p=dropout_p)
@@ -491,12 +502,17 @@ def _patch_fused_qkv_projections(
                 w = _get_active_lora_weights(self, adapter)
                 if w and w[0].size(0) <= max_rank:
                     delta = fused_lora_delta(flat_x, w[0], w[1], scale=w[2])
-                    result = result + delta.reshape(*x_mod.shape[:-1], delta.shape[-1]).to(result.dtype)
+                    result = result + delta.reshape(
+                        *x_mod.shape[:-1], delta.shape[-1]
+                    ).to(result.dtype)
                 else:
-                    result = result + self.lora_B[adapter](self.lora_A[adapter](x_mod)) * self.scaling[
-                        adapter
-                    ]
+                    result = (
+                        result
+                        + self.lora_B[adapter](self.lora_A[adapter](x_mod))
+                        * self.scaling[adapter]
+                    )
             return result
+
         def _forward(self, x, *args, **kwargs):
             import torch.nn.functional as F
 
@@ -520,7 +536,12 @@ def _patch_fused_qkv_projections(
                 x_mod = F.dropout(x_mod, p=dropout_p)
 
             flat_x = x_mod.reshape(-1, x_mod.shape[-1])
-            cache_key = (flat_x.data_ptr(), tuple(flat_x.shape), flat_x._version, adapters)
+            cache_key = (
+                flat_x.data_ptr(),
+                tuple(flat_x.shape),
+                flat_x._version,
+                adapters,
+            )
             if cache["key"] != cache_key:
                 out_q, out_k, out_v = _batched_base_qkv_forward(
                     flat_x,
@@ -529,7 +550,9 @@ def _patch_fused_qkv_projections(
                     attn_module.v_proj,
                 )
                 try:
-                    if not _apply_adapter_qkv_delta(flat_x, out_q, out_k, out_v, adapter):
+                    if not _apply_adapter_qkv_delta(
+                        flat_x, out_q, out_k, out_v, adapter
+                    ):
                         return _fallback_projection(self, x, *args, **kwargs)
                     cache["outs"] = (out_q, out_k, out_v)
                     cache["key"] = cache_key
@@ -577,7 +600,10 @@ def apply_fused_lora_qkv_kernels(
             continue
         if not all(hasattr(module, p) for p in ("q_proj", "k_proj", "v_proj")):
             continue
-        if not all(_is_peft_lora_linear(m) for m in (module.q_proj, module.k_proj, module.v_proj)):
+        if not all(
+            _is_peft_lora_linear(m)
+            for m in (module.q_proj, module.k_proj, module.v_proj)
+        ):
             continue
         if _patch_fused_qkv_projections(model, module, max_rank=max_rank):
             patched += 1
@@ -597,7 +623,9 @@ def _patch_post_attention_residual_norm(model: Any, decoder: Any) -> bool:
 
     fallback = norm.forward
 
-    def _residual_norm_forward(self_norm, hidden_states, _parent=decoder, _fallback=fallback):
+    def _residual_norm_forward(
+        self_norm, hidden_states, _parent=decoder, _fallback=fallback
+    ):
         if _use_fused_cuda_kernels(hidden_states):
             residual = getattr(_parent, "_seiso_residual", None)
             if (
@@ -609,7 +637,9 @@ def _patch_post_attention_residual_norm(model: Any, decoder: Any) -> bool:
                 out = fused_rms_norm(
                     hidden_states,
                     self_norm.weight,
-                    eps=getattr(self_norm, "variance_epsilon", getattr(self_norm, "eps", 1e-6)),
+                    eps=getattr(
+                        self_norm, "variance_epsilon", getattr(self_norm, "eps", 1e-6)
+                    ),
                     residual=residual,
                 )
                 _parent._seiso_residual = None
@@ -659,7 +689,9 @@ def _patch_fused_residual_decoder_forward(model: Any, decoder: Any) -> bool:
         hidden_states = attn_out[0] if isinstance(attn_out, tuple) else attn_out
 
         attn_hidden = attn_out[0] if isinstance(attn_out, tuple) else attn_out
-        attn_for_norm = attn_dropout(attn_hidden) if attn_dropout is not None else attn_hidden
+        attn_for_norm = (
+            attn_dropout(attn_hidden) if attn_dropout is not None else attn_hidden
+        )
         post_attn_skip = residual + attn_for_norm
 
         if _use_fused_cuda_kernels(attn_for_norm):
@@ -695,7 +727,10 @@ def apply_fused_residual_norm_kernels(model: Any) -> dict[str, Any]:
         cls = type(module).__name__
         if cls not in _DECODER_LAYER_CLASSES:
             continue
-        if not all(hasattr(module, a) for a in ("input_layernorm", "post_attention_layernorm", "self_attn", "mlp")):
+        if not all(
+            hasattr(module, a)
+            for a in ("input_layernorm", "post_attention_layernorm", "self_attn", "mlp")
+        ):
             continue
 
         if cls not in _FUSED_RESIDUAL_DECODER_CLASSES:

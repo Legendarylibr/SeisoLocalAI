@@ -100,13 +100,17 @@ def native_quant_training_block_reason(
     """Return a user-facing error when native hub quant weights cannot be fine-tuned."""
     method = native_quant_method_from_config(config) if config is not None else None
     if method is None:
-        config = config or peek_model_config(model_ref, trust_remote_code=trust_remote_code)
+        config = config or peek_model_config(
+            model_ref, trust_remote_code=trust_remote_code
+        )
         method = native_quant_method_from_config(config) if config is not None else None
     if method is None and "-fp8" in str(model_ref).lower():
         method = "fp8"
     if method not in UNTRAINABLE_NATIVE_QUANT_METHODS:
         return None
-    return NATIVE_QUANT_TRAINING_MESSAGE.format(method=method, method_upper=method.upper())
+    return NATIVE_QUANT_TRAINING_MESSAGE.format(
+        method=method, method_upper=method.upper()
+    )
 
 
 def active_params_from_config(config: Any) -> float | None:
@@ -124,7 +128,9 @@ def active_params_from_config(config: Any) -> float | None:
                 return count
 
     total_params = getattr(config, "num_parameters", None)
-    num_experts = getattr(config, "num_local_experts", None) or getattr(config, "num_experts", None)
+    num_experts = getattr(config, "num_local_experts", None) or getattr(
+        config, "num_experts", None
+    )
     experts_per_tok = (
         getattr(config, "num_experts_per_tok", None)
         or getattr(config, "num_selected_experts", None)
@@ -140,7 +146,11 @@ def active_params_from_config(config: Any) -> float | None:
 
     model_type = str(getattr(config, "model_type", "") or "").lower()
     tags: tuple[str, ...] = ("moe",) if "moe" in model_type else ()
-    label = str(getattr(config, "name_or_path", "") or getattr(config, "_name_or_path", "") or "")
+    label = str(
+        getattr(config, "name_or_path", "")
+        or getattr(config, "_name_or_path", "")
+        or ""
+    )
     if not label:
         label = f"{getattr(config, 'hidden_size', '')}-{model_type}".strip("-")
     if label:

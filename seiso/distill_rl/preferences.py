@@ -8,7 +8,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from seiso.distill_rl.prompts import RolloutPrompt, load_rollout_prompts, split_train_val
+from seiso.distill_rl.prompts import (
+    RolloutPrompt,
+    load_rollout_prompts,
+    split_train_val,
+)
 from seiso.distill_rl.rollouts import generate_preference_rows
 from seiso.io.jsonl import write_jsonl
 
@@ -90,7 +94,9 @@ def build_preference_bundle(
         "max_new_tokens": max_new_tokens,
         "use_chat_template": use_chat_template,
         "train_fraction": train_fraction,
-        "prompt_library": str(prompt_library_path) if prompt_library_path else "default",
+        "prompt_library": (
+            str(prompt_library_path) if prompt_library_path else "default"
+        ),
         "prompt_library_sha256": _prompt_library_hash(prompt_library_path),
         "train_count": len(train_rows),
         "val_count": len(val_rows),

@@ -6,4 +6,8 @@ from seiso.bundled.bootstrap import (
     require_bundled_package,
 )
 
-__all__ = ["ensure_bundled_importable", "make_bundled_package", "require_bundled_package"]
+__all__ = [
+    "ensure_bundled_importable",
+    "make_bundled_package",
+    "require_bundled_package",
+]

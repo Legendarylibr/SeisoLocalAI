@@ -12,7 +12,10 @@ from forge.api.routes._jobs import (
     resolve_linked_training_job,
     validate_pipeline_paths,
 )
-from forge.api.routes._pipeline import StagePipelineRouterConfig, build_stage_pipeline_router
+from forge.api.routes._pipeline import (
+    StagePipelineRouterConfig,
+    build_stage_pipeline_router,
+)
 from forge.config import ForgeSettings
 from forge.db.store import Database
 from seiso.distill_rl.config import PRESETS, STAGE_ORDER
@@ -96,11 +99,15 @@ router = build_stage_pipeline_router(
         get_orchestrator=get_distill_rl_orchestrator,
         list_jobs=lambda db, uid: db.list_distill_rl_jobs(uid),
         get_job=lambda db, jid, uid: db.get_distill_rl_job(jid, uid),
-        create_job=lambda db, uid, cfg, jid: db.create_distill_rl_job(uid, cfg, job_id=jid),
+        create_job=lambda db, uid, cfg, jid: db.create_distill_rl_job(
+            uid, cfg, job_id=jid
+        ),
         update_status=lambda db, jid, status, **kw: db.update_distill_rl_job_status(
             jid, status, **kw
         ),
         prepare_config=_prepare_distill_rl_config,
-        enrich_stage_results=lambda result: enrich_stage_results(result, "paper_bundle"),
+        enrich_stage_results=lambda result: enrich_stage_results(
+            result, "paper_bundle"
+        ),
     )
 )

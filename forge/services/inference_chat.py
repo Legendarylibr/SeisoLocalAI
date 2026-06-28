@@ -213,7 +213,9 @@ async def resolve_draft_model(
             raise HTTPException(404, "Draft model not found")
         draft_path = draft_selected.get("path")
         if not draft_path:
-            raise HTTPException(400, "Draft model must be a local safetensors/checkpoint path")
+            raise HTTPException(
+                400, "Draft model must be a local safetensors/checkpoint path"
+            )
     else:
         return {}
 

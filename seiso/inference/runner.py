@@ -34,7 +34,11 @@ from seiso.inference.tuning import (
     mlx_stream_kwargs,
     torch_generate_kwargs,
 )
-from seiso.memory.protection import is_oom_error, release_cached_memory, sanitize_inference_payload
+from seiso.memory.protection import (
+    is_oom_error,
+    release_cached_memory,
+    sanitize_inference_payload,
+)
 from seiso.models.chat_format import format_messages_for_prompt
 
 logger = logging.getLogger(__name__)
@@ -67,7 +71,9 @@ class LocalInferenceRunner:
         """Active model pool (public accessor for Forge services)."""
         return self._pool
 
-    def resolve_route(self, payload: dict[str, Any], model_path: str) -> tuple[str, str]:
+    def resolve_route(
+        self, payload: dict[str, Any], model_path: str
+    ) -> tuple[str, str]:
         return self._resolve_route(payload, model_path)
 
     def warm_model(self, payload: dict[str, Any]) -> None:
@@ -99,7 +105,9 @@ class LocalInferenceRunner:
                 raise ValueError("model_path or model_id required")
             route, resolved_path = self._resolve_route(payload, model_path)
             if route != "llama":
-                raise ValueError("Tool calling is only supported with llama.cpp GGUF models")
+                raise ValueError(
+                    "Tool calling is only supported with llama.cpp GGUF models"
+                )
             generation_id = self._pool.bump_generation()
             await self._ensure_model_switch(resolved_path)
             return await loop.run_in_executor(
@@ -116,7 +124,9 @@ class LocalInferenceRunner:
         async for update in self.stream_updates(payload):
             yield update.text
 
-    async def stream_updates(self, payload: dict[str, Any]) -> AsyncIterator[StreamUpdate]:
+    async def stream_updates(
+        self, payload: dict[str, Any]
+    ) -> AsyncIterator[StreamUpdate]:
         payload = sanitize_inference_payload(payload)
         model_path = payload.get("model_path") or payload.get("model_id")
         if not model_path:
@@ -140,7 +150,9 @@ class LocalInferenceRunner:
             flushed_once = False
             batch_chars = _stream_batch_chars()
             try:
-                for part in self._iter_tokens(payload, resolved_path, route, should_stop):
+                for part in self._iter_tokens(
+                    payload, resolved_path, route, should_stop
+                ):
                     if should_stop():
                         break
                     output_tokens += part.new_tokens
@@ -149,7 +161,9 @@ class LocalInferenceRunner:
                     if not flushed_once:
                         loop.call_soon_threadsafe(
                             queue.put_nowait,
-                            StreamUpdate(text="".join(buffer), output_tokens=output_tokens),
+                            StreamUpdate(
+                                text="".join(buffer), output_tokens=output_tokens
+                            ),
                         )
                         buffer.clear()
                         buffered = 0
@@ -157,7 +171,9 @@ class LocalInferenceRunner:
                     elif buffered >= batch_chars:
                         loop.call_soon_threadsafe(
                             queue.put_nowait,
-                            StreamUpdate(text="".join(buffer), output_tokens=output_tokens),
+                            StreamUpdate(
+                                text="".join(buffer), output_tokens=output_tokens
+                            ),
                         )
                         buffer.clear()
                         buffered = 0
@@ -203,7 +219,9 @@ class LocalInferenceRunner:
         self._pool.bump_generation()
         return self._pool.status()
 
-    async def _ensure_model_switch(self, model_path: str, *, draft_path: str | None = None) -> None:
+    async def _ensure_model_switch(
+        self, model_path: str, *, draft_path: str | None = None
+    ) -> None:
         status = self._pool.status()
         active_path = status.get("path")
         active_draft = status.get("draft_path")
@@ -212,8 +230,10 @@ class LocalInferenceRunner:
             if (
                 active_path
                 and active_draft
-                and self._pool.normalize_path(active_path) == self._pool.normalize_path(model_path)
-                and self._pool.normalize_path(active_draft) == self._pool.normalize_path(draft_path)
+                and self._pool.normalize_path(active_path)
+                == self._pool.normalize_path(model_path)
+                and self._pool.normalize_path(active_draft)
+                == self._pool.normalize_path(draft_path)
             ):
                 return
             # prepare target (torch for verification in dflash case too)
@@ -223,18 +243,25 @@ class LocalInferenceRunner:
             # For dflash draft also prep the fast llama draft
             if is_dflash_draft(draft_path):
                 await loop.run_in_executor(
-                    None, lambda: self._pool.prepare_for_load(draft_path, BACKEND_LLAMACPP)
+                    None,
+                    lambda: self._pool.prepare_for_load(draft_path, BACKEND_LLAMACPP),
                 )
             return
 
         if active_draft:
-            await loop.run_in_executor(None, lambda: self._pool.prepare_for_load(model_path))
+            await loop.run_in_executor(
+                None, lambda: self._pool.prepare_for_load(model_path)
+            )
             return
 
         if self._pool.would_switch_model(model_path):
-            await loop.run_in_executor(None, lambda: self._pool.prepare_for_load(model_path))
+            await loop.run_in_executor(
+                None, lambda: self._pool.prepare_for_load(model_path)
+            )
 
-    def _resolve_route(self, payload: dict[str, Any], model_path: str) -> tuple[str, str]:
+    def _resolve_route(
+        self, payload: dict[str, Any], model_path: str
+    ) -> tuple[str, str]:
         if payload.get("draft_model_path"):
             payload.get("draft_model_path")
             # dflash drafts are fast GGUF; we still run verification on torch target path for now
@@ -283,7 +310,9 @@ class LocalInferenceRunner:
 
         if is_dflash_draft(draft_path):
             # dFlash speculative: fast GGUF dflash draft (llama.cpp) + target verifier (torch)
-            target_model, target_tok = self._pool.get_torch(model_path, load_in_4bit=True)
+            target_model, target_tok = self._pool.get_torch(
+                model_path, load_in_4bit=True
+            )
             draft_llm = get_dflash_draft(draft_path)
 
             bundle = DFlashDraftSpeculativeBundle(
@@ -310,7 +339,9 @@ class LocalInferenceRunner:
             return
 
         # Original torch + torch speculative
-        bundle = self._pool.get_torch_speculative(model_path, draft_path, load_in_4bit=True)
+        bundle = self._pool.get_torch_speculative(
+            model_path, draft_path, load_in_4bit=True
+        )
         messages = payload.get("messages", [])
         prompt = format_messages_for_prompt(messages, bundle.target_tokenizer)
         temperature = float(payload.get("temperature", 0.0))
@@ -331,7 +362,9 @@ class LocalInferenceRunner:
                 raise
             release_cached_memory(sync=True)
             reduced = max(32, max_new_tokens // 2)
-            logger.warning("Speculative inference OOM — retrying with max_new_tokens=%s", reduced)
+            logger.warning(
+                "Speculative inference OOM — retrying with max_new_tokens=%s", reduced
+            )
             yield from iter_speculative_tokens(
                 bundle=bundle,
                 prompt=prompt,
@@ -392,7 +425,9 @@ class LocalInferenceRunner:
             for k, v in inputs.items()
         }
 
-        streamer = TextIteratorStreamer(tokenizer, skip_prompt=True, skip_special_tokens=True)
+        streamer = TextIteratorStreamer(
+            tokenizer, skip_prompt=True, skip_special_tokens=True
+        )
         gen_kwargs = torch_generate_kwargs(
             payload,
             inputs,

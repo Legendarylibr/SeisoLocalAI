@@ -139,8 +139,15 @@ def _ensure_dev_tools(root: Path, python: str, env: dict[str, str]) -> None:
         )
 
 
-def _install_project(root: Path, python: str, env: dict[str, str], *, extra: str = "forge,train,dev") -> None:
-    _step("Install project", [python, "-m", "pip", "install", "-e", f".[{extra}]"], cwd=root, env=env)
+def _install_project(
+    root: Path, python: str, env: dict[str, str], *, extra: str = "forge,train,dev"
+) -> None:
+    _step(
+        "Install project",
+        [python, "-m", "pip", "install", "-e", f".[{extra}]"],
+        cwd=root,
+        env=env,
+    )
     _step(
         "Install dev tools",
         [python, "-m", "pip", "install", "-r", "requirements-dev.txt"],
@@ -205,7 +212,12 @@ def job_lint(
             cwd=root,
             env=env,
         )
-        _step("Ruff format", [python, "-m", "ruff", "format", *PY_PACKAGES], cwd=root, env=env)
+        _step(
+            "Ruff format",
+            [python, "-m", "ruff", "format", *PY_PACKAGES],
+            cwd=root,
+            env=env,
+        )
 
     result = subprocess.run(
         [python, "-m", "ruff", "check", *PY_PACKAGES, "--output-format=json"],
@@ -255,13 +267,24 @@ def job_lint(
 
 def job_deps(root: Path, python: str, env: dict[str, str]) -> None:
     _banner("Job: deps (lock verification)")
-    _step("Verify dependency lock digests", [python, "scripts/verify_dep_locks.py"], cwd=root, env=env)
+    _step(
+        "Verify dependency lock digests",
+        [python, "scripts/verify_dep_locks.py"],
+        cwd=root,
+        env=env,
+    )
 
 
-def job_types(root: Path, python: str, env: dict[str, str], *, update_baseline: bool) -> None:
+def job_types(
+    root: Path, python: str, env: dict[str, str], *, update_baseline: bool
+) -> None:
     _banner("Job: types (mypy)")
     version = subprocess.run(
-        [python, "-c", "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"],
+        [
+            python,
+            "-c",
+            "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')",
+        ],
         cwd=str(root),
         env=env,
         capture_output=True,
@@ -339,7 +362,9 @@ def job_security(root: Path, python: str, env: dict[str, str]) -> None:
     )
     secret_env = dict(env)
     secret_env["DETECT_SECRETS_CMD"] = f"{python} -m detect_secrets"
-    _shell_step("Secret scan (detect-secrets)", SECRET_SCAN_SHELL, cwd=root, env=secret_env)
+    _shell_step(
+        "Secret scan (detect-secrets)", SECRET_SCAN_SHELL, cwd=root, env=secret_env
+    )
     _step("pip check", [python, "-m", "pip", "check"], cwd=root, env=env)
     _step(
         "Dependency vulnerability audit",
@@ -371,7 +396,9 @@ def _ui_pkg_manager(env: dict[str, str]) -> tuple[str, list[str]]:
     npm = shutil.which("npm", path=env.get("PATH"))
     if npm:
         return "npm", [npm]
-    raise SystemExit("bun or npm not found; install Bun (https://bun.sh) or Node.js to run the frontend job")
+    raise SystemExit(
+        "bun or npm not found; install Bun (https://bun.sh) or Node.js to run the frontend job"
+    )
 
 
 def job_frontend(root: Path, env: dict[str, str]) -> None:
@@ -382,7 +409,12 @@ def job_frontend(root: Path, env: dict[str, str]) -> None:
 
     if not (ui / "node_modules").is_dir():
         if pm_name == "bun":
-            _step("bun install --frozen-lockfile", [*pm_cmd, "install", "--frozen-lockfile"], cwd=ui, env=env)
+            _step(
+                "bun install --frozen-lockfile",
+                [*pm_cmd, "install", "--frozen-lockfile"],
+                cwd=ui,
+                env=env,
+            )
         else:
             _step("npm ci", [*pm_cmd, "ci"], cwd=ui, env=env)
     _step("TypeScript check", [*pm_cmd, "run", "typecheck"], cwd=ui, env=env)
@@ -392,16 +424,30 @@ def job_frontend(root: Path, env: dict[str, str]) -> None:
 def job_imports(root: Path, python: str, env: dict[str, str]) -> None:
     _banner("Job: imports (optional extras smoke)")
 
-    _step("Install train extra", [python, "-m", "pip", "install", "-e", ".[train]"], cwd=root, env=env)
+    _step(
+        "Install train extra",
+        [python, "-m", "pip", "install", "-e", ".[train]"],
+        cwd=root,
+        env=env,
+    )
     _step(
         "Smoke import training stack",
-        [python, "-c", "import transformers; import peft; import datasets; print('train ok')"],
+        [
+            python,
+            "-c",
+            "import transformers; import peft; import datasets; print('train ok')",
+        ],
         cwd=root,
         env=env,
     )
 
     if platform.system() == "Darwin":
-        _step("Install mlx extra", [python, "-m", "pip", "install", "-e", ".[mlx]"], cwd=root, env=env)
+        _step(
+            "Install mlx extra",
+            [python, "-m", "pip", "install", "-e", ".[mlx]"],
+            cwd=root,
+            env=env,
+        )
         _step(
             "Smoke import MLX",
             [
@@ -418,7 +464,9 @@ def job_imports(root: Path, python: str, env: dict[str, str]) -> None:
 def _print_plan(*, python_bin: str, jobs: Sequence[str], fix: bool) -> None:
     host = platform.system()
     print(f"Quality gate: {CI_DOC}")
-    print(f"Local host: {host}  |  interpreter: {python_bin}  |  CI Python: {CI_PYTHON}")
+    print(
+        f"Local host: {host}  |  interpreter: {python_bin}  |  CI Python: {CI_PYTHON}"
+    )
     if fix:
         print("Ruff auto-fix: enabled (--fix)")
     print("\nRecommended matrix (run --fast before merges):")
@@ -433,7 +481,9 @@ def _print_plan(*, python_bin: str, jobs: Sequence[str], fix: bool) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Run the local quality gate (docs/CI_LOCAL.md).")
+    parser = argparse.ArgumentParser(
+        description="Run the local quality gate (docs/CI_LOCAL.md)."
+    )
     parser.add_argument(
         "--job",
         choices=ALL_JOBS,
@@ -514,7 +564,9 @@ def main(argv: list[str] | None = None) -> int:
                     update_baseline=args.update_ruff_baseline,
                 )
             elif job == "types":
-                job_types(root, python_bin, env, update_baseline=args.update_mypy_baseline)
+                job_types(
+                    root, python_bin, env, update_baseline=args.update_mypy_baseline
+                )
             elif job == "test":
                 job_test(root, python_bin, env)
             elif job == "security":
@@ -531,7 +583,9 @@ def main(argv: list[str] | None = None) -> int:
 
     print("\nOK: run_ci_local.py finished successfully (all selected jobs passed).")
     if len(jobs) == len(ALL_JOBS):
-        print(f"See {CI_DOC} for the recommended cross-platform matrix before large merges.")
+        print(
+            f"See {CI_DOC} for the recommended cross-platform matrix before large merges."
+        )
     return 0
 
 

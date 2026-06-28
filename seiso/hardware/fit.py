@@ -79,7 +79,9 @@ def assess_hardware_fit(
     }
 
 
-def assess_catalog_fit(model: dict[str, Any], profile: dict[str, Any]) -> dict[str, Any]:
+def assess_catalog_fit(
+    model: dict[str, Any], profile: dict[str, Any]
+) -> dict[str, Any]:
     tags = tuple(model.get("tags") or ())
     download_bytes = int(model.get("download_bytes") or 0)
     if download_bytes > 0:
@@ -109,14 +111,14 @@ def assess_catalog_fit(model: dict[str, Any], profile: dict[str, Any]) -> dict[s
     result = assess_hardware_fit(est_gb, profile, mode=mode)
     if "moe" in tags and download_bytes <= 0:
         note = result.get("hardware_note") or ""
-        moe_hint = (
-            "MoE — load needs full GGUF in RAM (mmap); active experts are smaller at runtime."
-        )
+        moe_hint = "MoE — load needs full GGUF in RAM (mmap); active experts are smaller at runtime."
         result["hardware_note"] = f"{note} · {moe_hint}" if note else moe_hint
     return result
 
 
-def assess_inference_option_fit(option: dict[str, Any], profile: dict[str, Any]) -> dict[str, Any]:
+def assess_inference_option_fit(
+    option: dict[str, Any], profile: dict[str, Any]
+) -> dict[str, Any]:
     size_bytes = int(option.get("size_bytes") or 0)
     name = option.get("name") or ""
     if size_bytes > 0:
@@ -135,10 +137,12 @@ def format_catalog_note(
     fit: str,
     tier: HardwareTier,
 ) -> str:
-    dl = f"Download ~{download_bytes / (1024**3):.1f} GB · " if download_bytes > 0 else ""
+    dl = (
+        f"Download ~{download_bytes / (1024**3):.1f} GB · "
+        if download_bytes > 0
+        else ""
+    )
     runtime = f"Runtime ~{est_vram_gb:.1f} GB est. · "
     if fit == "unlikely" and tier != HardwareTier.CPU_ONLY:
-        return (
-            f"{dl}{runtime}Needs ~{est_vram_gb:.1f} GB at runtime — you have ~{headroom_gb} GB free"
-        )
+        return f"{dl}{runtime}Needs ~{est_vram_gb:.1f} GB at runtime — you have ~{headroom_gb} GB free"
     return f"{dl}{runtime}{headroom_gb} GB free on this machine"

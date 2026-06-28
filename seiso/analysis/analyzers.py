@@ -31,7 +31,9 @@ def _publish_analysis(
     *,
     json_name: str,
     bar_charts: list[tuple[str, str, dict[str, float], str]] | None = None,
-    scatter_charts: list[tuple[str, str, list[tuple[float, float]], str, str]] | None = None,
+    scatter_charts: (
+        list[tuple[str, str, list[tuple[float, float]], str, str]] | None
+    ) = None,
 ) -> dict[str, object]:
     write_analysis_artifacts(
         output_root,
@@ -142,7 +144,10 @@ def analyze_moe_cache(
         cache_misses.append(cache_miss)
         cache_vs_latency.append((cache_miss, float(metrics.get("latency_ms", 0.0))))
         entropy_vs_reward.append(
-            (float(moe_context.get("router_entropy", 0.0)), float(metrics.get("reward", 0.0)))
+            (
+                float(moe_context.get("router_entropy", 0.0)),
+                float(metrics.get("reward", 0.0)),
+            )
         )
     reward_by_hardware = by_hardware(records, ("metrics", "reward"))
     summary: dict[str, object] = {
@@ -208,7 +213,10 @@ def analyze_moe_experts(
             expert_frequency[expert_key] = expert_frequency.get(expert_key, 0.0) + 1.0
             variant_usage[variant_name] = variant_usage.get(variant_name, 0.0) + 1.0
             sensitivity_vs_aggressiveness.append(
-                (float(expert.get("sensitivity", 0.0)), aggressiveness_map.get(variant_name, 0.5))
+                (
+                    float(expert.get("sensitivity", 0.0)),
+                    aggressiveness_map.get(variant_name, 0.5),
+                )
             )
     top_experts = dict(
         sorted(expert_frequency.items(), key=lambda item: item[1], reverse=True)[
@@ -253,7 +261,9 @@ def analyze_quant(
     learned = [r for r in records if r.get("decision", {}).get("mode") == "learned"]
     scale_values = [float(r["decision"].get("scale_factor", 0.0)) for r in learned]
     clip_values = [float(r["decision"].get("clipping_range", 0.0)) for r in learned]
-    precision_values = [float(r["decision"].get("precision_level", 0.0)) for r in learned]
+    precision_values = [
+        float(r["decision"].get("precision_level", 0.0)) for r in learned
+    ]
     average_bits = [
         mean_effective_bits(d)
         for r in learned
@@ -267,7 +277,11 @@ def analyze_quant(
         "precision_level": summary_stats(precision_values),
         "effective_bits_mean": mean(average_bits),
     }
-    sf, cr, pl = summary["scale_factor"], summary["clipping_range"], summary["precision_level"]
+    sf, cr, pl = (
+        summary["scale_factor"],
+        summary["clipping_range"],
+        summary["precision_level"],
+    )
     assert isinstance(sf, dict) and isinstance(cr, dict) and isinstance(pl, dict)
     return _publish_analysis(
         output_root,
@@ -324,7 +338,9 @@ def analyze_online(
 ) -> dict[str, object]:
     records, output_root = jsonl_analysis_setup(log_path, output_dir, phase=phase)
     reward_by_hardware = by_hardware(records, ("served_metrics", "reward"))
-    complexity_reward_points = [(input_complexity(r), served_reward(r)) for r in records]
+    complexity_reward_points = [
+        (input_complexity(r), served_reward(r)) for r in records
+    ]
     summary: dict[str, object] = {
         "log_path": log_path,
         "records": len(records),

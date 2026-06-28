@@ -16,7 +16,11 @@ from huggingface_hub import HfApi
 
 from seiso.compat import StrEnum
 from seiso.export.hub_precheck import assert_hub_precheck_ok, precheck_hub_export
-from seiso.export.model_card import HubModelMetadata, metadata_from_manifest, write_hub_artifacts
+from seiso.export.model_card import (
+    HubModelMetadata,
+    metadata_from_manifest,
+    write_hub_artifacts,
+)
 from seiso.security import assert_within
 
 logger = logging.getLogger(__name__)
@@ -135,7 +139,9 @@ def export_checkpoint(
         elif fmt == ExportFormat.GGUF:
             from seiso.export.gguf import export_gguf_from_checkpoint
 
-            merged = results.get(ExportFormat.MERGED.value) or results.get(ExportFormat.FULL.value)
+            merged = results.get(ExportFormat.MERGED.value) or results.get(
+                ExportFormat.FULL.value
+            )
             gguf_paths = export_gguf_from_checkpoint(
                 ckpt,
                 out_root,
@@ -218,7 +224,10 @@ def _write_export_sidecar(dest: Path, ckpt: Path, fmt: ExportFormat, kind: str) 
     """Write seiso_export_metadata.json alongside exported artifacts."""
     if not dest.is_dir():
         return
-    from seiso.research.provenance import directory_checksum_manifest, git_commit_optional
+    from seiso.research.provenance import (
+        directory_checksum_manifest,
+        git_commit_optional,
+    )
 
     payload = {
         "format": fmt.value,
@@ -241,13 +250,16 @@ def _select_hub_folder(out_root: Path, formats: list[ExportFormat]) -> Path:
     """Prefer merged/full weights; fall back to GGUF quant dir or export root."""
     for key in (ExportFormat.MERGED, ExportFormat.FULL, ExportFormat.BASE):
         if key in formats:
-            candidate = out_root / ("merged" if key == ExportFormat.MERGED else key.value)
+            candidate = out_root / (
+                "merged" if key == ExportFormat.MERGED else key.value
+            )
             if candidate.is_dir() and any(candidate.iterdir()):
                 return candidate
     if ExportFormat.GGUF in formats:
         for child in sorted(out_root.iterdir()):
             if child.is_dir() and (
-                child.name in {"q4_k_m", "q8_0", "f16"} or child.name.startswith("gguf-")
+                child.name in {"q4_k_m", "q8_0", "f16"}
+                or child.name.startswith("gguf-")
             ):
                 return child
     return out_root
@@ -294,7 +306,12 @@ def _resolve_merge_base_model(checkpoint: Path) -> str:
             pass
 
     manifest = _load_training_manifest(checkpoint)
-    for key in ("resolved_model_path", "base_model_path", "model_id", "original_model_id"):
+    for key in (
+        "resolved_model_path",
+        "base_model_path",
+        "model_id",
+        "original_model_id",
+    ):
         value = manifest.get(key)
         if not isinstance(value, str) or not value.strip():
             continue
@@ -338,7 +355,9 @@ def validate_lora_checkpoint(checkpoint: Path) -> None:
             raise ValueError(f"LoRA checkpoint missing adapter weights: {checkpoint}")
 
 
-def _export_lora_adapter(checkpoint: Path, dest: Path, log: Callable[[str], None]) -> None:
+def _export_lora_adapter(
+    checkpoint: Path, dest: Path, log: Callable[[str], None]
+) -> None:
     """Copy a validated LoRA adapter tree for standalone use."""
     validate_lora_checkpoint(checkpoint)
     if dest.exists():
@@ -347,7 +366,11 @@ def _export_lora_adapter(checkpoint: Path, dest: Path, log: Callable[[str], None
     readme = dest / "README.md"
     if not readme.is_file():
         manifest = _load_training_manifest(checkpoint)
-        base = manifest.get("original_model_id") or manifest.get("model_id") or "base model"
+        base = (
+            manifest.get("original_model_id")
+            or manifest.get("model_id")
+            or "base model"
+        )
         quant = manifest.get("quant", "unknown")
         readme.write_text(
             f"# LoRA adapter\n\n"
@@ -366,7 +389,9 @@ def _export_lora_adapter(checkpoint: Path, dest: Path, log: Callable[[str], None
     log(f"Validated LoRA adapter ({checkpoint.name})")
 
 
-def merge_lora_checkpoint(checkpoint: Path, dest: Path, log: Callable[[str], None]) -> None:
+def merge_lora_checkpoint(
+    checkpoint: Path, dest: Path, log: Callable[[str], None]
+) -> None:
     """Merge LoRA weights into base model when PEFT adapter present."""
     adapter_config = checkpoint / "adapter_config.json"
     if adapter_config.exists():
@@ -378,8 +403,12 @@ def merge_lora_checkpoint(checkpoint: Path, dest: Path, log: Callable[[str], Non
         from seiso.memory.protection import ensure_load_fits, release_cached_memory
 
         ensure_load_fits(base_id, mode="chat")
-        tok_path = checkpoint if (checkpoint / "tokenizer_config.json").is_file() else base_id
-        tok = deps.auto_tokenizer.from_pretrained(str(tok_path), revision="main")  # nosec B615: revision pinned
+        tok_path = (
+            checkpoint if (checkpoint / "tokenizer_config.json").is_file() else base_id
+        )
+        tok = deps.auto_tokenizer.from_pretrained(
+            str(tok_path), revision="main"
+        )  # nosec B615: revision pinned
         model = deps.auto_model.from_pretrained(
             base_id, device_map="cpu", low_cpu_mem_usage=True, revision="main"
         )  # nosec B615: revision pinned
@@ -396,7 +425,9 @@ def merge_lora_checkpoint(checkpoint: Path, dest: Path, log: Callable[[str], Non
         shutil.copytree(checkpoint, dest, dirs_exist_ok=True)
         log(f"Copied full checkpoint to {dest}")
     else:
-        raise ValueError(f"Checkpoint is neither a LoRA adapter nor a full model: {checkpoint}")
+        raise ValueError(
+            f"Checkpoint is neither a LoRA adapter nor a full model: {checkpoint}"
+        )
 
 
 def _push_hub(

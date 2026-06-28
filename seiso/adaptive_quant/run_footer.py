@@ -96,7 +96,10 @@ def print_pipeline_footer(
         from seiso.adaptive_quant.rust_cli import resolve_rust_cli_binary
 
         rows.append(
-            ("rust_simulator", "on" if resolve_rust_cli_binary(config) else "binary missing")
+            (
+                "rust_simulator",
+                "on" if resolve_rust_cli_binary(config) else "binary missing",
+            )
         )
     rp = art.get("report")
     if rp:
@@ -115,11 +118,15 @@ def print_pipeline_footer(
 
     train = summary.get("train")
     if isinstance(train, dict):
-        rows.extend(_metric_rows("train", train, ("mean_reward", "episodes", "updates")))
+        rows.extend(
+            _metric_rows("train", train, ("mean_reward", "episodes", "updates"))
+        )
     ev = summary.get("evaluation")
     if isinstance(ev, dict):
         rows.extend(
-            _metric_rows("eval", ev, ("mean_reward", "mean_latency_ms", "mean_throughput_tps"))
+            _metric_rows(
+                "eval", ev, ("mean_reward", "mean_latency_ms", "mean_throughput_tps")
+            )
         )
     recommendation = summary.get("recommendation")
     if isinstance(recommendation, dict):
@@ -132,7 +139,10 @@ def print_pipeline_footer(
         fixed = recommendation.get("recommended_quant")
         if isinstance(fixed, dict):
             rows.append(
-                ("recommended_quant", format_display(fixed.get("signature"), style="footer"))
+                (
+                    "recommended_quant",
+                    format_display(fixed.get("signature"), style="footer"),
+                )
             )
             evaluation = fixed.get("evaluation")
             if isinstance(evaluation, dict):
@@ -144,7 +154,9 @@ def print_pipeline_footer(
                 )
         decision = recommendation.get("decision")
         if isinstance(decision, dict) and decision.get("deploy"):
-            rows.append(("deploy", format_display(decision.get("deploy"), style="footer")))
+            rows.append(
+                ("deploy", format_display(decision.get("deploy"), style="footer"))
+            )
     exported = art.get("exported_gguf")
     if exported:
         rows.append(("exported_gguf", str(exported)))
@@ -176,7 +188,9 @@ def print_sweep_footer(
         if plan is not None:
             rows.append(("best_trial", f"#{plan.trial_id} ({plan.run_name_suffix})"))
         if objective_value is not None:
-            rows.append(("best_objective", format_display(objective_value, style="footer")))
+            rows.append(
+                ("best_objective", format_display(objective_value, style="footer"))
+            )
     print_cli_block("Sweep complete", rows)
 
 

@@ -9,9 +9,17 @@ import pytest
 
 from forge.config import ForgeSettings
 from forge.services import hf_connectivity, hf_hub
-from forge.services.hf_auth import load_user_hf_token, resolve_hf_token, save_user_hf_token
+from forge.services.hf_auth import (
+    load_user_hf_token,
+    resolve_hf_token,
+    save_user_hf_token,
+)
 from forge.services.user_paths import assert_user_path
-from seiso.models.hf_env import configure_hf_hub_cache, hf_transfer_stack, resolve_hf_cache_dir
+from seiso.models.hf_env import (
+    configure_hf_hub_cache,
+    hf_transfer_stack,
+    resolve_hf_cache_dir,
+)
 from seiso.security import SecurityError
 
 
@@ -219,7 +227,9 @@ def test_assert_hub_ready_raises_when_unreachable(monkeypatch):
     monkeypatch.setattr(
         hf_connectivity,
         "probe_hf_hub",
-        lambda **_: hf_connectivity.HfConnectivityResult(reachable=False, error="offline"),
+        lambda **_: hf_connectivity.HfConnectivityResult(
+            reachable=False, error="offline"
+        ),
     )
     with pytest.raises(ValueError, match="offline"):
         hf_connectivity.assert_hub_ready_for_download()

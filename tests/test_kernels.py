@@ -66,7 +66,9 @@ def test_dispatch_and_patch_restore(monkeypatch):
             self.down_proj = nn.Linear(dim, dim, bias=False)
 
         def forward(self, x):
-            return self.down_proj(torch.nn.functional.silu(self.gate_proj(x)) * self.up_proj(x))
+            return self.down_proj(
+                torch.nn.functional.silu(self.gate_proj(x)) * self.up_proj(x)
+            )
 
     mlp_model = nn.Sequential(FakeMLP(16))
     mlp_model[0].__class__.__name__ = "LlamaMLP"

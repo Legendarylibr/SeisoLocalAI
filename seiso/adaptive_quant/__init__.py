@@ -17,7 +17,9 @@ from typing import Any
 
 from seiso.adaptive_quant.configuration import FrameworkConfig as FrameworkConfig
 from seiso.adaptive_quant.gpu_profiles import apply_gpu_profile as apply_gpu_profile
-from seiso.adaptive_quant.gpu_profiles import available_gpu_profiles as available_gpu_profiles
+from seiso.adaptive_quant.gpu_profiles import (
+    available_gpu_profiles as available_gpu_profiles,
+)
 from seiso.adaptive_quant.types import OnlineRequest as OnlineRequest
 
 _EAGER_EXPORTS = (
@@ -29,19 +31,40 @@ _EAGER_EXPORTS = (
 
 _LAZY: dict[str, tuple[str, str]] = {
     "BenchmarkSuite": ("seiso.adaptive_quant.benchmark", "BenchmarkSuite"),
-    "AdaptiveQuantizationEnv": ("seiso.adaptive_quant.environment", "AdaptiveQuantizationEnv"),
-    "OnlineLearningLoop": ("seiso.adaptive_quant.online_learning", "OnlineLearningLoop"),
+    "AdaptiveQuantizationEnv": (
+        "seiso.adaptive_quant.environment",
+        "AdaptiveQuantizationEnv",
+    ),
+    "OnlineLearningLoop": (
+        "seiso.adaptive_quant.online_learning",
+        "OnlineLearningLoop",
+    ),
     "Trainer": ("seiso.adaptive_quant.trainer", "Trainer"),
-    "UniversalQuantizationPolicy": ("seiso.adaptive_quant.policy", "UniversalQuantizationPolicy"),
-    "build_request_stream": ("seiso.adaptive_quant.online_learning", "build_request_stream"),
+    "UniversalQuantizationPolicy": (
+        "seiso.adaptive_quant.policy",
+        "UniversalQuantizationPolicy",
+    ),
+    "build_request_stream": (
+        "seiso.adaptive_quant.online_learning",
+        "build_request_stream",
+    ),
     "build_trainer": ("seiso.adaptive_quant.trainer", "build_trainer"),
     "detect_host_hardware": ("seiso.adaptive_quant.hardware", "detect_host_hardware"),
     "load_config": ("seiso.adaptive_quant.easy_config", "load_config"),
     "quick_config": ("seiso.adaptive_quant.easy_config", "quick_config"),
-    "recommend_quantization": ("seiso.adaptive_quant.recommendation", "recommend_quantization"),
-    "run_online_pipeline": ("seiso.adaptive_quant.online_pipeline", "run_online_pipeline"),
+    "recommend_quantization": (
+        "seiso.adaptive_quant.recommendation",
+        "recommend_quantization",
+    ),
+    "run_online_pipeline": (
+        "seiso.adaptive_quant.online_pipeline",
+        "run_online_pipeline",
+    ),
     "ResearchPipeline": ("seiso.adaptive_quant.research_pipeline", "ResearchPipeline"),
-    "run_pipeline_entrypoint": ("seiso.adaptive_quant.research_pipeline", "run_pipeline_entrypoint"),
+    "run_pipeline_entrypoint": (
+        "seiso.adaptive_quant.research_pipeline",
+        "run_pipeline_entrypoint",
+    ),
 }
 
 __all__ = sorted((*_EAGER_EXPORTS, *_LAZY))

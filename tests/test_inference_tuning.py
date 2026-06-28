@@ -24,7 +24,10 @@ def test_extract_mlx_token_text_from_response_object():
 
 def test_mlx_stream_kwargs_greedy_by_default(monkeypatch):
     monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 16384)
-    assert mlx_stream_kwargs({"max_tokens": 128}) == {"max_tokens": 128, "prefill_step_size": 4096}
+    assert mlx_stream_kwargs({"max_tokens": 128}) == {
+        "max_tokens": 128,
+        "prefill_step_size": 4096,
+    }
 
 
 def test_mlx_stream_kwargs_scales_prefill_on_tight_memory(monkeypatch):
@@ -49,7 +52,9 @@ def test_mlx_stream_kwargs_with_temperature():
 def test_torch_generate_kwargs_greedy():
     inputs = {"input_ids": object()}
     streamer = object()
-    kwargs = torch_generate_kwargs({"max_tokens": 256, "temperature": 0}, inputs, streamer)
+    kwargs = torch_generate_kwargs(
+        {"max_tokens": 256, "temperature": 0}, inputs, streamer
+    )
     assert kwargs["do_sample"] is False
     assert kwargs["num_beams"] == 1
     assert kwargs["use_cache"] is True
@@ -82,10 +87,15 @@ def test_generate_with_cache_fallback_retries_unsupported_cache_impl():
         def generate(self, **kwargs):
             calls.append(kwargs)
             if "cache_implementation" in kwargs:
-                raise ValueError("The following model_kwargs are not used: ['cache_implementation']")
+                raise ValueError(
+                    "The following model_kwargs are not used: ['cache_implementation']"
+                )
             return "ok"
 
-    assert generate_with_cache_fallback(_Model(), {"cache_implementation": "dynamic"}) == "ok"
+    assert (
+        generate_with_cache_fallback(_Model(), {"cache_implementation": "dynamic"})
+        == "ok"
+    )
     assert calls == [{"cache_implementation": "dynamic"}, {}]
 
 

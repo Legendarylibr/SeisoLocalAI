@@ -104,8 +104,12 @@ def _svg_canvas(
     return parts, width, height, margin
 
 
-def write_bar_chart(path: str, title: str, values: dict[str, float], y_label: str) -> None:
-    parts, width, height, margin = _svg_canvas(title=title, bg_color="#fbf7ef", y_label=y_label)
+def write_bar_chart(
+    path: str, title: str, values: dict[str, float], y_label: str
+) -> None:
+    parts, width, height, margin = _svg_canvas(
+        title=title, bg_color="#fbf7ef", y_label=y_label
+    )
     chart_height = height - 2 * margin
     chart_width = width - 2 * margin
     labels = list(values.keys())
@@ -156,7 +160,9 @@ def write_scatter_plot(
     for point in points:
         x = scale_x(point[0])
         y = scale_y(point[1])
-        parts.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="4.5" fill="#c9713d" opacity="0.85" />')
+        parts.append(
+            f'<circle cx="{x:.1f}" cy="{y:.1f}" r="4.5" fill="#c9713d" opacity="0.85" />'
+        )
 
     parts.append("</svg>")
     write_text_file(path, "\n".join(parts))

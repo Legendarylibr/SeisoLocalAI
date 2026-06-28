@@ -25,7 +25,10 @@ from seiso.adaptive_quant.logging_utils import read_json, write_json
 from seiso.adaptive_quant.math_utils import fmt_float
 from seiso.adaptive_quant.paper_bundle import create_multiseed_paper_bundle
 from seiso.adaptive_quant.pipeline.output_summary import experiment_config_summary
-from seiso.adaptive_quant.pipeline.research_contract import EVIDENCE_SWEEP, build_research_contract
+from seiso.adaptive_quant.pipeline.research_contract import (
+    EVIDENCE_SWEEP,
+    build_research_contract,
+)
 from seiso.adaptive_quant.pipeline.vcs import git_commit_hash
 from seiso.adaptive_quant.presets.baseline import CONFIG as CONFIG_DENSE
 from seiso.adaptive_quant.research_pipeline import run_pipeline_entrypoint
@@ -55,7 +58,9 @@ def _default_base_config(args: argparse.Namespace) -> FrameworkConfig:
     return CONFIG_DENSE
 
 
-def _apply_outputs_dir(base_config: FrameworkConfig, outputs_dir: str) -> FrameworkConfig:
+def _apply_outputs_dir(
+    base_config: FrameworkConfig, outputs_dir: str
+) -> FrameworkConfig:
     return base_config.with_output_root(outputs_dir)
 
 
@@ -89,7 +94,9 @@ def _build_cli_sweep_spec(args: argparse.Namespace) -> SweepSpec:
     )
 
 
-def _resolve_sweep_inputs(args: argparse.Namespace) -> tuple[FrameworkConfig, SweepSpec]:
+def _resolve_sweep_inputs(
+    args: argparse.Namespace,
+) -> tuple[FrameworkConfig, SweepSpec]:
     if args.sweep_config:
         spec, file_base = load_sweep_file(args.sweep_config)
         base_config = file_base if file_base is not None else _default_base_config(args)
@@ -106,7 +113,9 @@ def _resolve_seed_list(args: argparse.Namespace, spec: SweepSpec) -> list[int] |
     return None
 
 
-def _apply_trial_overrides(base_config: FrameworkConfig, plan: SweepTrialPlan) -> FrameworkConfig:
+def _apply_trial_overrides(
+    base_config: FrameworkConfig, plan: SweepTrialPlan
+) -> FrameworkConfig:
     enforce_privileged_override_policy(plan.overrides)
     return cast(
         FrameworkConfig,
@@ -166,7 +175,9 @@ def _execute_trial(
             )
 
         objective_values = [result.objective_value for result in seed_results]
-        objective_mean, objective_std, objective_n = aggregate_objective_values(objective_values)
+        objective_mean, objective_std, objective_n = aggregate_objective_values(
+            objective_values
+        )
         representative = max(
             seed_results,
             key=lambda result: (
@@ -223,10 +234,14 @@ def _write_sweep_csv(
                 "trial_id": str(result.plan.trial_id),
                 "suffix": result.plan.run_name_suffix,
                 "objective": objective,
-                "objective_value": ""
-                if result.objective_value is None
-                else str(result.objective_value),
-                "objective_std": "" if result.objective_std is None else str(result.objective_std),
+                "objective_value": (
+                    ""
+                    if result.objective_value is None
+                    else str(result.objective_value)
+                ),
+                "objective_std": (
+                    "" if result.objective_std is None else str(result.objective_std)
+                ),
                 "objective_n": str(result.objective_n),
                 "summary_path": result.summary_path,
             }
@@ -282,7 +297,9 @@ def main(argv: Iterable[str] | None = None) -> None:
         metavar="PATH",
         help="Load sweep grid/trials/objective from a .json or .toml file.",
     )
-    add_config_file_argument(parser, help_suffix=" Used when --sweep-config is omitted.")
+    add_config_file_argument(
+        parser, help_suffix=" Used when --sweep-config is omitted."
+    )
     parser.add_argument(
         "--preset",
         choices=["dense", "moe"],
@@ -348,11 +365,16 @@ def main(argv: Iterable[str] | None = None) -> None:
         help="Skip pipeline runs when the trial summary JSON already exists.",
     )
     parser.add_argument(
-        "--quiet", action="store_true", help="Suppress end-of-run CLI banners (e.g. unit tests)."
+        "--quiet",
+        action="store_true",
+        help="Suppress end-of-run CLI banners (e.g. unit tests).",
     )
     args = parser.parse_args(list(argv) if argv is not None else None)
 
-    from seiso.adaptive_quant.cli.common import enforce_cli_startup, validate_cli_output_dir
+    from seiso.adaptive_quant.cli.common import (
+        enforce_cli_startup,
+        validate_cli_output_dir,
+    )
 
     enforce_cli_startup(context="sweep CLI")
     validate_cli_output_dir("outputs-dir", args.outputs_dir)
@@ -374,7 +396,9 @@ def main(argv: Iterable[str] | None = None) -> None:
             base_config = base_config.clone(seed=seed)
 
     try:
-        plans = build_trial_plans(grid=spec.grid, explicit_trials=list(spec.trials or ()))
+        plans = build_trial_plans(
+            grid=spec.grid, explicit_trials=list(spec.trials or ())
+        )
     except ValueError as exc:
         raise SystemExit(str(exc)) from exc
 

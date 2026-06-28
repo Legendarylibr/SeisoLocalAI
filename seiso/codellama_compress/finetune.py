@@ -7,7 +7,11 @@ from pathlib import Path
 from accelerate import Accelerator
 from torch.optim import AdamW
 from tqdm.auto import tqdm
-from transformers import AutoModelForCausalLM, AutoTokenizer, get_cosine_schedule_with_warmup
+from transformers import (
+    AutoModelForCausalLM,
+    AutoTokenizer,
+    get_cosine_schedule_with_warmup,
+)
 
 from .config import DatasetConfig, DistillConfig, save_json
 from .data import iter_dataset_texts
@@ -131,7 +135,9 @@ def run_finetune(
 
             if accelerator.is_local_main_process:
                 lr = (
-                    float(scheduler.get_last_lr()[0]) if hasattr(scheduler, "get_last_lr") else None
+                    float(scheduler.get_last_lr()[0])
+                    if hasattr(scheduler, "get_last_lr")
+                    else None
                 )
                 dt = None
                 if step_t0 is not None:

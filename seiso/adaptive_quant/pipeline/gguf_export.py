@@ -8,7 +8,9 @@ from pathlib import Path
 from typing import Any
 
 from seiso.adaptive_quant.configuration import FrameworkConfig
-from seiso.adaptive_quant.configuration.validation import validate_llama_cpp_binary_allowlist
+from seiso.adaptive_quant.configuration.validation import (
+    validate_llama_cpp_binary_allowlist,
+)
 from seiso.adaptive_quant.model_routes import QUANT_BITS
 
 _BIT_WIDTH_TO_QUANT: dict[int, str] = {
@@ -31,7 +33,9 @@ _QUANTIZE_NAME_CANDIDATES = (
 def resolve_gguf_export_source(config: FrameworkConfig) -> str:
     source = config.llama_cpp_gguf_export_source or config.llama_cpp_model
     if not source:
-        raise ValueError("GGUF export requires llama_cpp_gguf_export_source or llama_cpp_model")
+        raise ValueError(
+            "GGUF export requires llama_cpp_gguf_export_source or llama_cpp_model"
+        )
     return str(source)
 
 
@@ -62,7 +66,9 @@ def derive_quantize_binary(config: FrameworkConfig) -> str:
         return str(config.llama_cpp_gguf_quantize_binary)
     binary = config.llama_cpp_binary
     if not binary:
-        raise ValueError("GGUF export requires llama_cpp_gguf_quantize_binary or llama_cpp_binary")
+        raise ValueError(
+            "GGUF export requires llama_cpp_gguf_quantize_binary or llama_cpp_binary"
+        )
     parent = Path(binary).resolve().parent
     for name in _QUANTIZE_NAME_CANDIDATES:
         candidate = parent / name
@@ -119,7 +125,11 @@ def maybe_export_gguf(
     recommendation: dict[str, object] | None,
 ) -> dict[str, Any]:
     if not config.llama_cpp_gguf_export_enabled:
-        return {"enabled": False, "skipped": True, "reason": "llama_cpp_gguf_export_enabled=false"}
+        return {
+            "enabled": False,
+            "skipped": True,
+            "reason": "llama_cpp_gguf_export_enabled=false",
+        }
     try:
         return export_gguf(config, recommendation)
     except Exception as exc:

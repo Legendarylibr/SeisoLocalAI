@@ -39,7 +39,9 @@ if _TRITON:
         mask = cols < n_cols
         x = tl.load(x_ptr + row * n_cols + cols, mask=mask, other=0.0).to(tl.float32)
         if FUSE_RESIDUAL:
-            r = tl.load(r_ptr + row * n_cols + cols, mask=mask, other=0.0).to(tl.float32)
+            r = tl.load(r_ptr + row * n_cols + cols, mask=mask, other=0.0).to(
+                tl.float32
+            )
             x = x + r
         var = tl.sum(x * x, axis=0) / n_cols
         rms = tl.rsqrt(var + eps)
@@ -169,9 +171,9 @@ def fused_cross_entropy_forward(logits, labels, ignore_index: int = -100):
             return
         cols = tl.arange(0, BLOCK)
         mask = cols < vocab
-        vals = tl.load(logits_ptr + row * vocab + cols, mask=mask, other=-float("inf")).to(
-            tl.float32
-        )
+        vals = tl.load(
+            logits_ptr + row * vocab + cols, mask=mask, other=-float("inf")
+        ).to(tl.float32)
         row_max = tl.max(vals, axis=0)
         expv = tl.exp(vals - row_max)
         denom = tl.sum(expv, axis=0)
@@ -226,13 +228,23 @@ def fused_cross_entropy_backward(
             tl.store(grad_ptr + row * vocab + cols, 0.0, mask=mask)
             return
         lse = tl.load(lse_ptr + row)
-        vals = tl.load(logits_ptr + row * vocab + cols, mask=mask, other=0.0).to(tl.float32)
+        vals = tl.load(logits_ptr + row * vocab + cols, mask=mask, other=0.0).to(
+            tl.float32
+        )
         probs = tl.exp(vals - lse)
         probs = tl.where(cols == label, probs - 1.0, probs)
         tl.store(grad_ptr + row * vocab + cols, probs * scale, mask=mask)
 
     BLOCK = triton.next_power_of_2(vocab)  # type: ignore[union-attr]
     _ce_bwd_kernel[(rows,)](  # type: ignore[misc]
-        logits, labels, row_max, row_lse, grad, vocab, ignore_index, grad_scale, BLOCK=BLOCK
+        logits,
+        labels,
+        row_max,
+        row_lse,
+        grad,
+        vocab,
+        ignore_index,
+        grad_scale,
+        BLOCK=BLOCK,
     )
     return grad

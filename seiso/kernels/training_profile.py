@@ -52,7 +52,9 @@ def guess_hidden_dim(model_id: str) -> int:
     return 4096
 
 
-def resolve_cuda_training_mode(*, headroom_mb: int, est_train_mb: int = 0) -> CudaTrainingMode:
+def resolve_cuda_training_mode(
+    *, headroom_mb: int, est_train_mb: int = 0
+) -> CudaTrainingMode:
     if headroom_mb > 0 and headroom_mb < _HEADROOM_LEAN_MB:
         return CudaTrainingMode.LEAN
     if headroom_mb >= _HEADROOM_SPEED_MB and (
@@ -151,7 +153,9 @@ def prepare_cuda_training_profile(
 
     Returns a dict merged into TrainConfig by ``apply_training_memory_guards``.
     """
-    mode = resolve_cuda_training_mode(headroom_mb=headroom_mb, est_train_mb=est_train_mb)
+    mode = resolve_cuda_training_mode(
+        headroom_mb=headroom_mb, est_train_mb=est_train_mb
+    )
     low_vram = mode == CudaTrainingMode.LEAN
     hidden_dim = guess_hidden_dim(model_id)
     batch_rows = max(64, int(batch_size) * int(max_seq_length))
@@ -184,7 +188,9 @@ def prepare_cuda_training_profile(
     elif mode == CudaTrainingMode.LEAN:
         gradient_checkpointing = True
     else:
-        gradient_checkpointing = est_train_mb > int(headroom_mb * 0.65) if headroom_mb > 0 else True
+        gradient_checkpointing = (
+            est_train_mb > int(headroom_mb * 0.65) if headroom_mb > 0 else True
+        )
 
     caps_fused = True
     try:

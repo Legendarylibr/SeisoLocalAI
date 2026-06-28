@@ -39,7 +39,8 @@ def _is_local_host(host: str) -> bool:
     except SecurityError:
         return False
     return bool(addrs) and all(
-        (parsed := _literal_ip(addr)) is not None and parsed.is_loopback for addr in addrs
+        (parsed := _literal_ip(addr)) is not None and parsed.is_loopback
+        for addr in addrs
     )
 
 
@@ -103,7 +104,9 @@ def validate_provider_base_url(url: str, *, provider_type: str = "vllm") -> str:
         raise SecurityError("base_url host is not allowed")
 
     if scheme == "http" and not local_ok:
-        raise SecurityError("base_url must use HTTPS (http allowed only for local vllm)")
+        raise SecurityError(
+            "base_url must use HTTPS (http allowed only for local vllm)"
+        )
     if scheme not in ("http", "https"):
         raise SecurityError("base_url scheme must be http or https")
 
@@ -111,7 +114,9 @@ def validate_provider_base_url(url: str, *, provider_type: str = "vllm") -> str:
         port = parsed.port or 8000
         allowed = _LOCAL_DEFAULT_PORTS.get(ptype, set())
         if port not in allowed:
-            raise SecurityError(f"Local {ptype} base_url must use port {sorted(allowed)}")
+            raise SecurityError(
+                f"Local {ptype} base_url must use port {sorted(allowed)}"
+            )
     else:
         for addr in _resolve_host(host):
             if _is_blocked_ip(addr):
@@ -134,7 +139,9 @@ class PinnedEndpoint:
     pinned_ip: str | None
 
 
-def resolve_pinned_endpoint(raw_url: str, *, provider_type: str = "vllm") -> PinnedEndpoint:
+def resolve_pinned_endpoint(
+    raw_url: str, *, provider_type: str = "vllm"
+) -> PinnedEndpoint:
     """Validate URL, resolve DNS, and return an endpoint pinned to the resolved IP."""
     base = validate_provider_base_url(raw_url, provider_type=provider_type).rstrip("/")
     parsed = urlparse(base)
@@ -145,11 +152,15 @@ def resolve_pinned_endpoint(raw_url: str, *, provider_type: str = "vllm") -> Pin
     local_ok = ptype == "vllm" and _is_local_host(host)
 
     if local_ok:
-        return PinnedEndpoint(base_url=base, host=host, port=port, scheme=scheme, pinned_ip=None)
+        return PinnedEndpoint(
+            base_url=base, host=host, port=port, scheme=scheme, pinned_ip=None
+        )
 
     addrs = _resolve_host(host)
     for addr in addrs:
         if _is_blocked_ip(addr):
             raise SecurityError("base_url resolves to a blocked network range")
 
-    return PinnedEndpoint(base_url=base, host=host, port=port, scheme=scheme, pinned_ip=addrs[0])
+    return PinnedEndpoint(
+        base_url=base, host=host, port=port, scheme=scheme, pinned_ip=addrs[0]
+    )

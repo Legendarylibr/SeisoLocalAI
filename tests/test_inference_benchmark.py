@@ -91,7 +91,9 @@ async def test_compare_profiles_runs_twice(monkeypatch):
 
     monkeypatch.setattr(bench_mod, "get_model_pool", lambda: FakePool())
 
-    report = await compare_inference_profiles("/tmp/model.gguf", prompt="hi", max_tokens=32)
+    report = await compare_inference_profiles(
+        "/tmp/model.gguf", prompt="hi", max_tokens=32
+    )
     assert calls == ["baseline", "optimized"]
     assert report["speedup_tokens_per_sec"] == 2.5
     assert report["baseline"]["profile"] == "baseline"

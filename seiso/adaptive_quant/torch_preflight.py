@@ -12,9 +12,13 @@ from seiso.adaptive_quant.torch_policy import (
 )
 
 
-def run_torch_preflight(config: FrameworkConfig, policy: TorchPolicyAdapter) -> dict[str, object]:
+def run_torch_preflight(
+    config: FrameworkConfig, policy: TorchPolicyAdapter
+) -> dict[str, object]:
     if torch is None:
-        raise ImportError("PyTorch is not installed in this environment.") from TORCH_IMPORT_ERROR
+        raise ImportError(
+            "PyTorch is not installed in this environment."
+        ) from TORCH_IMPORT_ERROR
 
     report = collect_torch_system_report(config, policy)
     report["throughput_benchmark"] = benchmark_policy_throughput(config, policy)
@@ -25,7 +29,9 @@ def collect_torch_system_report(
     config: FrameworkConfig, policy: TorchPolicyAdapter
 ) -> dict[str, object]:
     if torch is None:
-        raise ImportError("PyTorch is not installed in this environment.") from TORCH_IMPORT_ERROR
+        raise ImportError(
+            "PyTorch is not installed in this environment."
+        ) from TORCH_IMPORT_ERROR
 
     device = policy.device
     warnings: list[str] = []
@@ -37,9 +43,9 @@ def collect_torch_system_report(
         "resolved_device": str(device),
         "torch_version": torch.__version__,
         "cuda_version": getattr(torch.version, "cuda", None),
-        "cudnn_version": torch.backends.cudnn.version()
-        if hasattr(torch.backends, "cudnn")
-        else None,
+        "cudnn_version": (
+            torch.backends.cudnn.version() if hasattr(torch.backends, "cudnn") else None
+        ),
         "compile_enabled": bool(config.torch_compile and hasattr(torch, "compile")),
         "fused_optimizer_requested": config.torch_fused_optimizer,
         "fused_optimizer_available": fused_available,
@@ -77,7 +83,9 @@ def collect_torch_system_report(
     )
 
     if "bf16" in config.torch_dtype.lower() and not bf16_supported:
-        warnings.append("Requested bf16, but this CUDA stack does not report bf16 support.")
+        warnings.append(
+            "Requested bf16, but this CUDA stack does not report bf16 support."
+        )
     cuda_diag = report["cuda_diagnostics"]
     if isinstance(cuda_diag, dict):
         if cuda_diag.get("cuda_arch_warning"):
@@ -114,7 +122,9 @@ def benchmark_policy_throughput(
     config: FrameworkConfig, policy: TorchPolicyAdapter
 ) -> dict[str, object]:
     if torch is None:
-        raise ImportError("PyTorch is not installed in this environment.") from TORCH_IMPORT_ERROR
+        raise ImportError(
+            "PyTorch is not installed in this environment."
+        ) from TORCH_IMPORT_ERROR
 
     batch_size = config.torch_preflight_batch_size
     if policy.device.type == "cuda" and torch.cuda.is_available():
@@ -171,9 +181,13 @@ def benchmark_policy_throughput(
         "warmup_steps": warmup_steps,
         "timed_steps": timed_steps,
         "inference_ms_per_step": round((inference_seconds / timed_steps) * 1000.0, 4),
-        "inference_samples_per_second": round((batch_size * timed_steps) / inference_seconds, 2),
+        "inference_samples_per_second": round(
+            (batch_size * timed_steps) / inference_seconds, 2
+        ),
         "backward_ms_per_step": round((train_seconds / timed_steps) * 1000.0, 4),
-        "backward_samples_per_second": round((batch_size * timed_steps) / train_seconds, 2),
+        "backward_samples_per_second": round(
+            (batch_size * timed_steps) / train_seconds, 2
+        ),
     }
 
 

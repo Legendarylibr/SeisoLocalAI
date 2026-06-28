@@ -28,7 +28,9 @@ from seiso.security import sanitize_filename
 from seiso.ttl_cache import TtlCache
 
 _HF_API = "https://huggingface.co/api"
-_gguf_artifact_cache: TtlCache[str, dict[str, Any]] = TtlCache(ttl_s=86_400.0, max_entries=128)
+_gguf_artifact_cache: TtlCache[str, dict[str, Any]] = TtlCache(
+    ttl_s=86_400.0, max_entries=128
+)
 _gguf_repo_cache: TtlCache[str, str] = TtlCache(ttl_s=86_400.0, max_entries=256)
 _repo_gguf_cache: TtlCache[str, bool] = TtlCache(ttl_s=3_600.0, max_entries=512)
 _file_size_cache: TtlCache[str, int] = TtlCache(ttl_s=86_400.0, max_entries=512)
@@ -85,7 +87,9 @@ def _with_download_retries(fn: Callable[[], T], *, repo_id: str) -> T:
                 break
             time.sleep(_DOWNLOAD_RETRY_BACKOFF_S * (2**attempt))
     assert last_exc is not None
-    raise ValueError(_format_hub_download_error(last_exc, repo_id=repo_id)) from last_exc
+    raise ValueError(
+        _format_hub_download_error(last_exc, repo_id=repo_id)
+    ) from last_exc
 
 
 def _pick_gguf_file(
@@ -151,9 +155,13 @@ def _pick_gguf_files(
         if len(group) == expected:
             complete_groups.append(sorted(group))
     if complete_groups:
-        return sorted(complete_groups, key=lambda group: (len(group), len(group[0]), group[0]))[0]
+        return sorted(
+            complete_groups, key=lambda group: (len(group), len(group[0]), group[0])
+        )[0]
 
-    non_sharded = [filename for filename in pool if not _GGUF_SHARD_RE.match(Path(filename).name)]
+    non_sharded = [
+        filename for filename in pool if not _GGUF_SHARD_RE.match(Path(filename).name)
+    ]
     if non_sharded:
         return [sorted(non_sharded, key=len)[0]]
     return []
@@ -183,7 +191,9 @@ def _list_repo_files(repo_id: str, *, token: str | None, revision: str) -> list[
     return list_repo_files(repo_id, token=token, revision=revision)
 
 
-def repo_has_gguf(repo_id: str, *, token: str | None = None, revision: str = "main") -> bool:
+def repo_has_gguf(
+    repo_id: str, *, token: str | None = None, revision: str = "main"
+) -> bool:
     cache_key = f"{repo_id}:{revision}"
     cached = _repo_gguf_cache.get(cache_key)
     if cached is not None:
@@ -214,7 +224,9 @@ def search_huggingface_datasets(*, query: str, limit: int = 12) -> list[dict[str
         return []
     request = urllib.request.Request(url, headers={"User-Agent": "seiso-forge/1.0"})
     try:
-        with urllib.request.urlopen(request, timeout=15.0) as response:  # nosec B310: only https://huggingface.co URLs
+        with urllib.request.urlopen(
+            request, timeout=15.0
+        ) as response:  # nosec B310: only https://huggingface.co URLs
             payload = json.loads(response.read().decode("utf-8"))
     except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError):
         return []
@@ -232,12 +244,16 @@ def search_huggingface_datasets(*, query: str, limit: int = 12) -> list[dict[str
             {
                 "repo_id": dataset_id,
                 "name": dataset_id.split("/")[-1],
-                "downloads": row.get("downloads")
-                if isinstance(row.get("downloads"), int)
-                else None,
-                "tags": [t for t in tags if isinstance(t, str)][:4]
-                if isinstance(tags, list)
-                else [],
+                "downloads": (
+                    row.get("downloads")
+                    if isinstance(row.get("downloads"), int)
+                    else None
+                ),
+                "tags": (
+                    [t for t in tags if isinstance(t, str)][:4]
+                    if isinstance(tags, list)
+                    else []
+                ),
             }
         )
     return results
@@ -268,7 +284,9 @@ def search_huggingface_gguf_repos(
         return []
     request = urllib.request.Request(url, headers={"User-Agent": "seiso-forge/1.0"})
     try:
-        with urllib.request.urlopen(request, timeout=15.0) as response:  # nosec B310: only https://huggingface.co URLs
+        with urllib.request.urlopen(
+            request, timeout=15.0
+        ) as response:  # nosec B310: only https://huggingface.co URLs
             payload = json.loads(response.read().decode("utf-8"))
     except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError):
         return []
@@ -284,10 +302,14 @@ def search_huggingface_gguf_repos(
         results.append(
             {
                 "repo_id": model_id,
-                "downloads": row.get("downloads")
-                if isinstance(row.get("downloads"), int)
-                else None,
-                "likes": row.get("likes") if isinstance(row.get("likes"), int) else None,
+                "downloads": (
+                    row.get("downloads")
+                    if isinstance(row.get("downloads"), int)
+                    else None
+                ),
+                "likes": (
+                    row.get("likes") if isinstance(row.get("likes"), int) else None
+                ),
             }
         )
     results = filter_trusted_gguf_search_results(results, base_repo_id=base_repo_id)
@@ -312,7 +334,11 @@ def _first_repo_with_gguf(
     if not repo_ids:
         return None
     if len(repo_ids) == 1:
-        return repo_ids[0] if repo_has_gguf(repo_ids[0], token=token, revision=revision) else None
+        return (
+            repo_ids[0]
+            if repo_has_gguf(repo_ids[0], token=token, revision=revision)
+            else None
+        )
 
     workers = min(max_workers, len(repo_ids))
     results: dict[str, bool] = {}
@@ -372,13 +398,17 @@ def resolve_gguf_artifact(
             return dict(data)
 
     entry = entry or get_by_repo(catalog_repo_id)
-    gguf_repo = resolve_gguf_repo(catalog_repo_id, token=token, revision=revision, entry=entry)
+    gguf_repo = resolve_gguf_repo(
+        catalog_repo_id, token=token, revision=revision, entry=entry
+    )
     quant = entry.quant if entry else "Q4_K_M"
 
     filenames: list[str]
     if not filename:
         files = _list_repo_files(gguf_repo, token=token, revision=revision)
-        filenames = _pick_gguf_files(files, preferred_quant=quant, repo_id=catalog_repo_id)
+        filenames = _pick_gguf_files(
+            files, preferred_quant=quant, repo_id=catalog_repo_id
+        )
         if not filenames:
             raise ValueError(f"No GGUF files found in {gguf_repo}")
         filename = filenames[0]
@@ -420,10 +450,14 @@ def resolve_gguf_repo(
     entry: CatalogEntry | None = None,
 ) -> str:
     """Resolve a catalog/base repo to a Hugging Face repo that ships GGUF files."""
-    if entry and entry.gguf_repo and repo_has_gguf(
-        entry.gguf_repo,
-        token=token,
-        revision=revision,
+    if (
+        entry
+        and entry.gguf_repo
+        and repo_has_gguf(
+            entry.gguf_repo,
+            token=token,
+            revision=revision,
+        )
     ):
         return entry.gguf_repo
 
@@ -530,13 +564,17 @@ def download_gguf(
         cached_paths.append(
             Path(
                 _with_download_retries(
-                    partial(hf_hub_download, **download_kwargs),  # nosec B615: revision pinned in download_kwargs
+                    partial(
+                        hf_hub_download, **download_kwargs
+                    ),  # nosec B615: revision pinned in download_kwargs
                     repo_id=repo_id,
                 )
             )
         )
 
-    cached_target = cached_paths[0] if len(cached_paths) == 1 else cached_paths[0].parent
+    cached_target = (
+        cached_paths[0] if len(cached_paths) == 1 else cached_paths[0].parent
+    )
 
     return {
         "path": str(cached_target),
@@ -593,7 +631,9 @@ def download_training_snapshot(
     if on_progress:
         snapshot_kwargs["tqdm_class"] = make_tqdm_class(on_progress)
     path = _with_download_retries(
-        lambda: snapshot_download(**snapshot_kwargs),  # nosec B615: revision pinned in snapshot_kwargs
+        lambda: snapshot_download(
+            **snapshot_kwargs
+        ),  # nosec B615: revision pinned in snapshot_kwargs
         repo_id=repo_id,
     )
     root = Path(path)

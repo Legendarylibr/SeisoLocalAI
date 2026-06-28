@@ -30,13 +30,17 @@ def test_nvidia_boundary_report_keys():
 
 
 def test_enforce_boundary_skips_non_linux():
-    with patch("seiso.security.nvidia_boundary.is_linux_nvidia_host", return_value=False):
+    with patch(
+        "seiso.security.nvidia_boundary.is_linux_nvidia_host", return_value=False
+    ):
         report = enforce_nvidia_secure_boundary(context="test")
     assert report["linux_nvidia_host"] is False
 
 
 def test_enforce_boundary_requires_ack_on_linux_nvidia():
-    with patch("seiso.security.nvidia_boundary.is_linux_nvidia_host", return_value=True):
+    with patch(
+        "seiso.security.nvidia_boundary.is_linux_nvidia_host", return_value=True
+    ):
         with patch("seiso.security.nvidia_boundary.in_ci", return_value=False):
             with pytest.raises(SystemExit):
                 enforce_nvidia_secure_boundary(context="test")
@@ -47,7 +51,9 @@ def test_enforce_boundary_wsl2_ack():
         "SEISO_NVIDIA_WSL_ACK": "1",
         "WSL_DISTRO_NAME": "Ubuntu",
     }
-    with patch("seiso.security.nvidia_boundary.is_linux_nvidia_host", return_value=True):
+    with patch(
+        "seiso.security.nvidia_boundary.is_linux_nvidia_host", return_value=True
+    ):
         with patch("seiso.security.nvidia_boundary.in_ci", return_value=False):
             with patch.dict(os.environ, env, clear=False):
                 report = enforce_nvidia_secure_boundary(context="test")
@@ -65,17 +71,27 @@ def test_query_nvidia_gpus_csv_fallback(monkeypatch):
 
     def fake_run(exe: str, *args: str, timeout: float = 10.0):
         calls.append(args)
-        if args[:2] == ("--query-gpu=index,name,memory.total", "--format=csv,noheader,nounits"):
+        if args[:2] == (
+            "--query-gpu=index,name,memory.total",
+            "--format=csv,noheader,nounits",
+        ):
             return type(
                 "Proc",
                 (),
                 {"returncode": 1, "stdout": "", "stderr": ""},
             )()
-        if args[:2] == ("--query-gpu=name,memory.total", "--format=csv,noheader,nounits"):
+        if args[:2] == (
+            "--query-gpu=name,memory.total",
+            "--format=csv,noheader,nounits",
+        ):
             return type(
                 "Proc",
                 (),
-                {"returncode": 0, "stdout": "NVIDIA GeForce RTX 4090, 24564\n", "stderr": ""},
+                {
+                    "returncode": 0,
+                    "stdout": "NVIDIA GeForce RTX 4090, 24564\n",
+                    "stderr": "",
+                },
             )()
         return type("Proc", (), {"returncode": 1, "stdout": "", "stderr": ""})()
 

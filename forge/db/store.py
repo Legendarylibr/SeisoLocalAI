@@ -267,7 +267,9 @@ class Database:
         try:
             return decrypt_field(value, self._encryption_key)
         except Exception as exc:
-            raise DatabaseCryptoError("Encrypted database field could not be decrypted") from exc
+            raise DatabaseCryptoError(
+                "Encrypted database field could not be decrypted"
+            ) from exc
 
     def _decrypt_row(self, table: str, row: dict[str, Any]) -> dict[str, Any]:
         out = dict(row)
@@ -328,7 +330,10 @@ class Database:
         yield await self._ensure_conn()
 
     async def user_count(self) -> int:
-        async with self._conn() as conn, conn.execute("SELECT COUNT(*) AS c FROM users") as cur:
+        async with (
+            self._conn() as conn,
+            conn.execute("SELECT COUNT(*) AS c FROM users") as cur,
+        ):
             row = await cur.fetchone()
             return int(row["c"]) if row else 0
 
@@ -410,7 +415,9 @@ class Database:
     async def get_user_by_email(self, email: str) -> dict | None:
         async with (
             self._conn() as conn,
-            conn.execute("SELECT * FROM users WHERE email = ?", (email.lower(),)) as cur,
+            conn.execute(
+                "SELECT * FROM users WHERE email = ?", (email.lower(),)
+            ) as cur,
         ):
             row = await cur.fetchone()
             return dict(row) if row else None
@@ -559,7 +566,8 @@ class Database:
                 (thread_id,),
             ) as cur:
                 messages = [
-                    self._decrypt_row("chat_messages", dict(r)) for r in await cur.fetchall()
+                    self._decrypt_row("chat_messages", dict(r))
+                    for r in await cur.fetchall()
                 ]
             return dict(thread_row), messages
 
@@ -644,7 +652,9 @@ class Database:
         ):
             return [dict(r) for r in await cur.fetchall()]
 
-    async def create_thread(self, user_id: str, title: str, model_id: str | None = None) -> dict:
+    async def create_thread(
+        self, user_id: str, title: str, model_id: str | None = None
+    ) -> dict:
         tid = str(uuid.uuid4())
         now = _now()
         async with self._conn() as conn:
@@ -683,7 +693,9 @@ class Database:
             )
             if not await cur.fetchone():
                 return False
-            await conn.execute("DELETE FROM chat_messages WHERE thread_id = ?", (thread_id,))
+            await conn.execute(
+                "DELETE FROM chat_messages WHERE thread_id = ?", (thread_id,)
+            )
             await conn.execute("DELETE FROM chat_threads WHERE id = ?", (thread_id,))
             await conn.commit()
             return True
@@ -695,7 +707,9 @@ class Database:
                 "DELETE FROM chat_messages WHERE thread_id IN (SELECT id FROM chat_threads WHERE user_id = ?)",
                 (user_id,),
             )
-            cur = await conn.execute("DELETE FROM chat_threads WHERE user_id = ?", (user_id,))
+            cur = await conn.execute(
+                "DELETE FROM chat_threads WHERE user_id = ?", (user_id,)
+            )
             await conn.commit()
             return cur.rowcount
 
@@ -745,7 +759,10 @@ class Database:
                 (thread_id,),
             ) as cur,
         ):
-            return [self._decrypt_row("chat_messages", dict(r)) for r in await cur.fetchall()]
+            return [
+                self._decrypt_row("chat_messages", dict(r))
+                for r in await cur.fetchall()
+            ]
 
     # --- Providers ---
 
@@ -757,7 +774,9 @@ class Database:
                 (user_id,),
             ) as cur,
         ):
-            return [self._decrypt_row("providers", dict(r)) for r in await cur.fetchall()]
+            return [
+                self._decrypt_row("providers", dict(r)) for r in await cur.fetchall()
+            ]
 
     async def create_provider(
         self, user_id: str, name: str, provider_type: str, config: dict
@@ -889,7 +908,9 @@ class Database:
             await conn.commit()
         return {"id": jid, "status": "pending", "config": config, "created_at": now}
 
-    async def _get_config_job(self, table: str, job_id: str, user_id: str) -> dict | None:
+    async def _get_config_job(
+        self, table: str, job_id: str, user_id: str
+    ) -> dict | None:
         table = _config_job_table(table)
         query = f"SELECT * FROM {table} WHERE id = ? AND user_id = ?"  # nosec B608
         async with (
@@ -966,7 +987,9 @@ class Database:
     async def create_rl_quant_job(
         self, user_id: str, config: dict, job_id: str | None = None
     ) -> dict:
-        return await self._create_config_job("rl_quant_jobs", user_id, config, job_id=job_id)
+        return await self._create_config_job(
+            "rl_quant_jobs", user_id, config, job_id=job_id
+        )
 
     async def get_rl_quant_job(self, job_id: str, user_id: str) -> dict | None:
         return await self._get_config_job("rl_quant_jobs", job_id, user_id)
@@ -997,7 +1020,11 @@ class Database:
                     now,
                     output_dir,
                     recommendation_path,
-                    json.dumps(recommendation_json) if recommendation_json is not None else None,
+                    (
+                        json.dumps(recommendation_json)
+                        if recommendation_json is not None
+                        else None
+                    ),
                     json.dumps(gguf_quants) if gguf_quants is not None else None,
                     error_text,
                     job_id,
@@ -1015,7 +1042,9 @@ class Database:
     async def create_compress_job(
         self, user_id: str, config: dict, job_id: str | None = None
     ) -> dict:
-        return await self._create_config_job("compress_jobs", user_id, config, job_id=job_id)
+        return await self._create_config_job(
+            "compress_jobs", user_id, config, job_id=job_id
+        )
 
     async def get_compress_job(self, job_id: str, user_id: str) -> dict | None:
         return await self._get_config_job("compress_jobs", job_id, user_id)
@@ -1052,7 +1081,9 @@ class Database:
     async def create_distill_rl_job(
         self, user_id: str, config: dict, job_id: str | None = None
     ) -> dict:
-        return await self._create_config_job("distill_rl_jobs", user_id, config, job_id=job_id)
+        return await self._create_config_job(
+            "distill_rl_jobs", user_id, config, job_id=job_id
+        )
 
     async def get_distill_rl_job(self, job_id: str, user_id: str) -> dict | None:
         return await self._get_config_job("distill_rl_jobs", job_id, user_id)

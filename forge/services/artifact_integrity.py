@@ -25,7 +25,9 @@ def path_has_complete_artifact(path: Path, fmt: str, expected_size: int) -> bool
             )
         ggufs = [p for p in path.rglob("*.gguf") if p.is_file()]
         size = sum(p.stat().st_size for p in ggufs)
-        return bool(ggufs) and size > 0 and (expected_size <= 0 or size >= expected_size)
+        return (
+            bool(ggufs) and size > 0 and (expected_size <= 0 or size >= expected_size)
+        )
     if path.is_dir():
         weight_files = [
             p
@@ -33,7 +35,11 @@ def path_has_complete_artifact(path: Path, fmt: str, expected_size: int) -> bool
             if p.is_file() and p.suffix.lower() in {".safetensors", ".bin"}
         ]
         size = sum(p.stat().st_size for p in weight_files)
-        return bool(weight_files) and size > 0 and (expected_size <= 0 or size >= expected_size)
+        return (
+            bool(weight_files)
+            and size > 0
+            and (expected_size <= 0 or size >= expected_size)
+        )
     return (
         path.is_file()
         and path.stat().st_size > 0
@@ -41,7 +47,9 @@ def path_has_complete_artifact(path: Path, fmt: str, expected_size: int) -> bool
     )
 
 
-def gguf_files_complete_at_path(path: Path, filenames: list[str], expected_size: int) -> bool:
+def gguf_files_complete_at_path(
+    path: Path, filenames: list[str], expected_size: int
+) -> bool:
     if not filenames:
         return False
     files = (
@@ -101,7 +109,9 @@ def inventory_gguf_is_complete(
     if not gguf_repo or not isinstance(gguf_files, list) or not gguf_files:
         return not str(row.get("source") or "").startswith("hf:")
 
-    local_files = [path] if path.is_file() else [path / str(filename) for filename in gguf_files]
+    local_files = (
+        [path] if path.is_file() else [path / str(filename) for filename in gguf_files]
+    )
     if not all(item.is_file() for item in local_files):
         return False
     actual_size = sum(item.stat().st_size for item in local_files)
@@ -110,7 +120,9 @@ def inventory_gguf_is_complete(
 
         size_lookup = get_gguf_file_size_bytes
     try:
-        expected_size = sum(size_lookup(gguf_repo, str(filename)) for filename in gguf_files)
+        expected_size = sum(
+            size_lookup(gguf_repo, str(filename)) for filename in gguf_files
+        )
     except Exception:
         return True
     return expected_size <= 0 or actual_size >= expected_size

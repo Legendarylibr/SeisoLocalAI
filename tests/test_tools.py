@@ -24,9 +24,7 @@ def test_parse_xml_function_tool_calls():
 
 
 def test_parse_tool_calls():
-    text = (
-        'Hello <tool_call>{"name": "web_search", "arguments": {"query": "test"}}</tool_call> done'
-    )
+    text = 'Hello <tool_call>{"name": "web_search", "arguments": {"query": "test"}}</tool_call> done'
     calls = parse_tool_calls(text)
     assert len(calls) == 1
     assert calls[0]["name"] == "web_search"

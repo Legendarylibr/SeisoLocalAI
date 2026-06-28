@@ -9,7 +9,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from seiso.adaptive_quant.ui.commands import build_job_env, build_workflow_command, format_command
+from seiso.adaptive_quant.ui.commands import (
+    build_job_env,
+    build_workflow_command,
+    format_command,
+)
 from seiso.adaptive_quant.ui.security import validate_run_options
 
 
@@ -54,7 +58,11 @@ class JobManager:
         if len(self._jobs) <= self._max_jobs:
             return
         finished = sorted(
-            (job for job in self._jobs.values() if job.status in {"succeeded", "failed"}),
+            (
+                job
+                for job in self._jobs.values()
+                if job.status in {"succeeded", "failed"}
+            ),
             key=lambda item: item.finished_at or 0.0,
         )
         for job in finished[: max(0, len(self._jobs) - self._max_jobs)]:
@@ -96,7 +104,9 @@ class JobManager:
         with self._lock:
             return [
                 job.to_dict()
-                for job in sorted(self._jobs.values(), key=lambda j: j.started_at or 0.0)
+                for job in sorted(
+                    self._jobs.values(), key=lambda j: j.started_at or 0.0
+                )
             ]
 
     def _append_log(self, record: JobRecord, line: str) -> None:
@@ -134,7 +144,9 @@ class JobManager:
             record._process = None
 
 
-def build_action_command(*, action: str, repo: Path, python_bin: str) -> tuple[str, list[str]]:
+def build_action_command(
+    *, action: str, repo: Path, python_bin: str
+) -> tuple[str, list[str]]:
     """Backward-compatible wrapper around :func:`build_workflow_command`."""
     return build_workflow_command(
         workflow=action,
@@ -161,7 +173,9 @@ def start_configured_workflow(
         python_bin=python_bin,
     )
     env = build_job_env(opts, repo=repo)
-    return jobs.start(workflow=workflow, label=label, command=command, cwd=repo, env=env)
+    return jobs.start(
+        workflow=workflow, label=label, command=command, cwd=repo, env=env
+    )
 
 
 def action_catalog(status: dict[str, Any]) -> list[dict[str, Any]]:

@@ -5,7 +5,10 @@ from collections.abc import Iterable
 from typing import Any
 
 from seiso.adaptive_quant.cli.aggregate_reports import build_multiseed_report
-from seiso.adaptive_quant.cli.presets import apply_short_run_episodes, select_dense_moe_preset
+from seiso.adaptive_quant.cli.presets import (
+    apply_short_run_episodes,
+    select_dense_moe_preset,
+)
 from seiso.adaptive_quant.experiment_aggregate import (
     aggregate_numeric_maps,
     default_key_filter,
@@ -28,9 +31,14 @@ def main(argv: Iterable[str] | None = None) -> None:
         description="Run a preset across multiple seeds and aggregate results."
     )
     parser.add_argument(
-        "--preset", choices=["dense", "moe"], default="dense", help="Which config preset to run."
+        "--preset",
+        choices=["dense", "moe"],
+        default="dense",
+        help="Which config preset to run.",
     )
-    parser.add_argument("--seeds", default="13,17,23,29,31", help='Seeds as "a,b,c" or "a-b".')
+    parser.add_argument(
+        "--seeds", default="13,17,23,29,31", help='Seeds as "a,b,c" or "a-b".'
+    )
     parser.add_argument(
         "--run-name",
         default=None,
@@ -43,7 +51,9 @@ def main(argv: Iterable[str] | None = None) -> None:
         help="Override training_episodes (useful for fast smoke tests).",
     )
     parser.add_argument(
-        "--quiet", action="store_true", help="Suppress end-of-run CLI banners (e.g. unit tests)."
+        "--quiet",
+        action="store_true",
+        help="Suppress end-of-run CLI banners (e.g. unit tests).",
     )
     parser.add_argument(
         "--outputs-dir",
@@ -52,7 +62,10 @@ def main(argv: Iterable[str] | None = None) -> None:
     )
     args = parser.parse_args(list(argv) if argv is not None else None)
 
-    from seiso.adaptive_quant.cli.common import enforce_cli_startup, validate_cli_output_dir
+    from seiso.adaptive_quant.cli.common import (
+        enforce_cli_startup,
+        validate_cli_output_dir,
+    )
 
     enforce_cli_startup(context="multiseed CLI")
     validate_cli_output_dir("outputs-dir", args.outputs_dir)
@@ -75,7 +88,9 @@ def main(argv: Iterable[str] | None = None) -> None:
     for seed in seeds:
         seed_run_name = f"{base_run_name}_seed{seed}"
         config = base_config.clone(seed=seed, run_name=seed_run_name)
-        summary = run_pipeline_entrypoint(config, footer_mode="none" if args.quiet else "minimal")
+        summary = run_pipeline_entrypoint(
+            config, footer_mode="none" if args.quiet else "minimal"
+        )
         per_seed_paths.append(config.summary_path())
 
         numeric = flatten_numeric(summary)
@@ -101,14 +116,20 @@ def main(argv: Iterable[str] | None = None) -> None:
         ),
         "seeds": seeds,
         "per_seed": [
-            {"seed": seed, "run_name": f"{base_run_name}_seed{seed}", "summary_path": path}
+            {
+                "seed": seed,
+                "run_name": f"{base_run_name}_seed{seed}",
+                "summary_path": path,
+            }
             for seed, path in zip(seeds, per_seed_paths, strict=True)
         ],
         "artifacts": {
             "per_seed_summaries": per_seed_paths,
             "report": output_md_path,
         },
-        "aggregates": {k: v.to_dict() for k, v in aggregated.items() if default_key_filter(k)},
+        "aggregates": {
+            k: v.to_dict() for k, v in aggregated.items() if default_key_filter(k)
+        },
     }
     paper_bundle = create_multiseed_paper_bundle(
         config=base_config,

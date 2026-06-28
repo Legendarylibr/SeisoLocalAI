@@ -56,7 +56,9 @@ def recommend_quantization(trainer, config: FrameworkConfig) -> dict[str, object
         "recommended_quant": best_fixed,
         "candidates": evaluated_candidates,
     }
-    from seiso.adaptive_quant.pipeline.output_summary import recommendation_decision_block
+    from seiso.adaptive_quant.pipeline.output_summary import (
+        recommendation_decision_block,
+    )
 
     payload["decision"] = recommendation_decision_block(payload)
     return payload

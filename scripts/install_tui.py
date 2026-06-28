@@ -156,7 +156,17 @@ def _draw(
     bar = "═" * min(cols - 2, 58)
     sub = f"{DIM}{subtitle}{RESET}"
     art = _glitch_text(body, glitch).strip("\n").splitlines()
-    parts = [CLEAR, brand_line, "", sub, "", *art, "", brand_line, f"{C_MUTE}{bar}{RESET}"]
+    parts = [
+        CLEAR,
+        brand_line,
+        "",
+        sub,
+        "",
+        *art,
+        "",
+        brand_line,
+        f"{C_MUTE}{bar}{RESET}",
+    ]
     if invert_flash:
         parts.append(f"{INV}{C_GLITCH} ░▒▓ SIGNAL ░▒▓ {RESET}")
     sys.stdout.write("\n".join(parts) + "\n")

@@ -17,7 +17,13 @@ KERNEL_PROFILES: tuple[dict[str, Any], ...] = (
     {"id": 1, "name": "stripe", "rms_mode": 1, "swiglu_vec": 8, "lora_tile": 128},
     {"id": 2, "name": "parallax", "rms_mode": 2, "swiglu_vec": 8, "lora_tile": 512},
     {"id": 3, "name": "narrow_opt", "rms_mode": 1, "swiglu_vec": 4, "lora_tile": 128},
-    {"id": 4, "name": "wide_throughput", "rms_mode": 2, "swiglu_vec": 8, "lora_tile": 512},
+    {
+        "id": 4,
+        "name": "wide_throughput",
+        "rms_mode": 2,
+        "swiglu_vec": 8,
+        "lora_tile": 512,
+    },
     {"id": 5, "name": "balanced", "rms_mode": 0, "swiglu_vec": 8, "lora_tile": 256},
     {"id": 6, "name": "hopper_fa3", "rms_mode": 2, "swiglu_vec": 8, "lora_tile": 384},
     {"id": 7, "name": "blackwell", "rms_mode": 2, "swiglu_vec": 8, "lora_tile": 512},
@@ -156,7 +162,9 @@ def _cached_live_benchmark(
 
         from seiso.kernels.dispatch import fused_rms_norm, fused_swiglu
     except ImportError:
-        speedup = analytic_kernel_speedup(profile_id, hidden_dim=hidden_dim, batch_rows=batch_rows)
+        speedup = analytic_kernel_speedup(
+            profile_id, hidden_dim=hidden_dim, batch_rows=batch_rows
+        )
         return KernelBenchmarkResult(
             profile_id=profile_id,
             profile_name=str(profile["name"]),
@@ -167,7 +175,9 @@ def _cached_live_benchmark(
         )
 
     if not torch.cuda.is_available():
-        speedup = analytic_kernel_speedup(profile_id, hidden_dim=hidden_dim, batch_rows=batch_rows)
+        speedup = analytic_kernel_speedup(
+            profile_id, hidden_dim=hidden_dim, batch_rows=batch_rows
+        )
         return KernelBenchmarkResult(
             profile_id=profile_id,
             profile_name=str(profile["name"]),
@@ -233,7 +243,9 @@ def _cached_live_benchmark(
                 torch.cuda.synchronize()
         except Exception:
             pass
-        speedup = analytic_kernel_speedup(profile_id, hidden_dim=hidden_dim, batch_rows=batch_rows)
+        speedup = analytic_kernel_speedup(
+            profile_id, hidden_dim=hidden_dim, batch_rows=batch_rows
+        )
         return KernelBenchmarkResult(
             profile_id=profile_id,
             profile_name=str(profile["name"]),
@@ -254,7 +266,9 @@ def benchmark_kernel_profile(
 ) -> KernelBenchmarkResult:
     """Benchmark a kernel profile; uses LRU cache for training throughput."""
     if not live:
-        speedup = analytic_kernel_speedup(profile_id, hidden_dim=hidden_dim, batch_rows=batch_rows)
+        speedup = analytic_kernel_speedup(
+            profile_id, hidden_dim=hidden_dim, batch_rows=batch_rows
+        )
         profile = kernel_profile_by_id(profile_id)
         return KernelBenchmarkResult(
             profile_id=profile_id,

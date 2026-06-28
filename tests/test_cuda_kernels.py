@@ -123,7 +123,16 @@ def test_fused_lora_qkv_cache_invalidates_after_inplace_copy():
         out_k = torch.zeros(rows, out_dim, device="cuda", dtype=dtype)
         out_v = torch.zeros(rows, out_dim, device="cuda", dtype=dtype)
         fused_lora_qkv_delta(
-            x, out_q, out_k, out_v, a_q, b_q, a_k, b_k, a_v, b_v,
+            x,
+            out_q,
+            out_k,
+            out_v,
+            a_q,
+            b_q,
+            a_k,
+            b_k,
+            a_v,
+            b_v,
         )
         return out_q.clone(), out_k.clone(), out_v.clone()
 

@@ -91,13 +91,17 @@ def build_pipeline_config(
 
     preset_name, preset = resolve_preset(PRESETS, str(payload.get("preset", "smoke")))
 
-    if path := resolve_config_file_path(payload.get("config_file"), bundle_root=bundle_root()):
+    if path := resolve_config_file_path(
+        payload.get("config_file"), bundle_root=bundle_root()
+    ):
         from seiso.codellama_compress.config import load_config_file
 
         blob = load_config_file(path)
         preset.update(blob.get("pipeline", {}))
 
-    stages = list(payload.get("stages") or preset.get("stages") or PRESETS["smoke"]["stages"])
+    stages = list(
+        payload.get("stages") or preset.get("stages") or PRESETS["smoke"]["stages"]
+    )
     validate_stages(stages, STAGE_ORDER)
 
     output_root = job_output_root(data_dir, "compress", user_id, job_id)
@@ -115,22 +119,30 @@ def build_pipeline_config(
         DatasetConfig(),
         {
             "seed": seed,
-            "max_train_samples": payload.get("max_train_samples", preset.get("max_train_samples")),
+            "max_train_samples": payload.get(
+                "max_train_samples", preset.get("max_train_samples")
+            ),
         },
     )
     model_defaults = get_compress_model_defaults()
     distill_cfg = merge_dataclass(
         DistillConfig(),
         {
-            "teacher_model": str(payload.get("teacher_model") or model_defaults["teacher_model"]),
-            "student_model": str(payload.get("student_model") or model_defaults["student_model"]),
+            "teacher_model": str(
+                payload.get("teacher_model") or model_defaults["teacher_model"]
+            ),
+            "student_model": str(
+                payload.get("student_model") or model_defaults["student_model"]
+            ),
             "steps": int(payload.get("distill_steps", preset.get("distill_steps", 2))),
         },
     )
     finetune_cfg = merge_dataclass(
         DistillConfig(teacher_model="", alpha=0.0, temperature=1.0),
         {
-            "steps": int(payload.get("finetune_steps", preset.get("finetune_steps", 2))),
+            "steps": int(
+                payload.get("finetune_steps", preset.get("finetune_steps", 2))
+            ),
         },
     )
     gptq_cfg = merge_dataclass(
@@ -138,7 +150,9 @@ def build_pipeline_config(
         {
             "seed": seed,
             "calibration_samples": int(
-                payload.get("calibration_samples", preset.get("calibration_samples", 32))
+                payload.get(
+                    "calibration_samples", preset.get("calibration_samples", 32)
+                )
             ),
         },
     )
@@ -171,7 +185,8 @@ def build_pipeline_config(
         "env_report": bool(
             payload.get(
                 "env_report",
-                preset_name not in {"smoke"} and bool(payload.get("deterministic", True)),
+                preset_name not in {"smoke"}
+                and bool(payload.get("deterministic", True)),
             )
         ),
         "min_free_gb": payload.get("min_free_gb"),

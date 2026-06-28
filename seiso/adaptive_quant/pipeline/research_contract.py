@@ -61,7 +61,9 @@ def metric_sources_for_config(config: FrameworkConfig) -> dict[str, str]:
         "throughput_tps": perf_source,
         "memory_mb": perf_source,
         "perplexity": quality_source,
-        "reward": "simulator_plus_external_quality" if has_external_quality else perf_source,
+        "reward": (
+            "simulator_plus_external_quality" if has_external_quality else perf_source
+        ),
         "simulator_engine": sim_engine or "python",
     }
 
@@ -126,7 +128,11 @@ def _escalation_path(config: FrameworkConfig, evidence_level: str) -> list[str]:
         hints.append(
             "Enable llama_cpp_gguf_export_enabled to write a recommendation-driven GGUF under outputs/gguf/."
         )
-    if config.rust_simulator_enabled and config.backend == "simulator" and not config.moe_enabled:
+    if (
+        config.rust_simulator_enabled
+        and config.backend == "simulator"
+        and not config.moe_enabled
+    ):
         from seiso.adaptive_quant.rust_cli import resolve_rust_cli_binary
 
         if resolve_rust_cli_binary(config) is None:
@@ -198,14 +204,18 @@ def build_research_contract(
             "moe_enabled": config.moe_enabled,
             "hardware_modes": list(config.hardware_modes),
             "router_enabled": config.router_enabled,
-            "router_route_count": len(config.router_routes) if config.router_enabled else 0,
+            "router_route_count": (
+                len(config.router_routes) if config.router_enabled else 0
+            ),
             "llama_cpp_configured": bool(
-                config.backend == "llama_cpp" and config.llama_cpp_binary and config.llama_cpp_model
+                config.backend == "llama_cpp"
+                and config.llama_cpp_binary
+                and config.llama_cpp_model
             ),
             "external_quality": bool(config.external_quality_path),
-            "external_quality_metric": config.external_quality_metric
-            if config.external_quality_path
-            else None,
+            "external_quality_metric": (
+                config.external_quality_metric if config.external_quality_path else None
+            ),
             "gguf_export_enabled": export_enabled,
             "rust_simulator_enabled": config.rust_simulator_enabled,
             "rust_cli_binary": config.rust_cli_binary,
@@ -265,7 +275,9 @@ def build_claims_validation(
         "learning_target": LEARNING_TARGET_POLICY,
         "deployment_grade": False,
         "external_quality": has_external_quality,
-        "external_quality_metric": config.external_quality_metric if has_external_quality else None,
+        "external_quality_metric": (
+            config.external_quality_metric if has_external_quality else None
+        ),
         "metric_count": len(metrics),
         "has_benchmark_summary": isinstance(summary.get("benchmarks"), Mapping),
         "has_evaluation_summary": isinstance(summary.get("evaluation"), Mapping),
@@ -295,14 +307,18 @@ def research_contract_report_lines(contract: Mapping[str, Any]) -> list[str]:
             lines.append("- **GGUF export:** enabled (`llama_cpp_gguf_export_enabled`)")
         does_not = learning.get("does_not_train")
         if isinstance(does_not, list) and does_not:
-            lines.append(f"- **Does not train:** {', '.join(f'`{x}`' for x in does_not)}")
+            lines.append(
+                f"- **Does not train:** {', '.join(f'`{x}`' for x in does_not)}"
+            )
     if isinstance(evidence, dict):
         lines.append(f"- **Evidence level:** `{evidence.get('level')}`")
         sources = evidence.get("metric_sources")
         if isinstance(sources, dict):
             perf = sources.get("latency_ms", "?")
             quality = sources.get("perplexity", "?")
-            lines.append(f"- **Metric sources:** latency/throughput `{perf}`; quality `{quality}`")
+            lines.append(
+                f"- **Metric sources:** latency/throughput `{perf}`; quality `{quality}`"
+            )
         boundary = evidence.get("claim_boundary")
         if isinstance(boundary, dict):
             valid = boundary.get("valid_claims")
@@ -319,7 +335,11 @@ def research_contract_report_lines(contract: Mapping[str, Any]) -> list[str]:
             )
         rust_cli = measurement.get("rust_cli")
         if isinstance(rust_cli, dict) and rust_cli.get("enabled"):
-            avail = "available" if rust_cli.get("available") else "binary missing (Python fallback)"
+            avail = (
+                "available"
+                if rust_cli.get("available")
+                else "binary missing (Python fallback)"
+            )
             lines.append(f"- **Rust simulator CLI:** {avail}")
     return lines
 

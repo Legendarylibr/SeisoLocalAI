@@ -41,7 +41,11 @@ def validate_security_settings(settings: ForgeSettings) -> None:
             "SEISO_ALLOW_REMOTE is enabled — Forge is exposed on the network. "
             "Use a strong password, TLS reverse proxy, and keep tools/code-exec disabled."
         )
-        dangerous = settings.allow_tools or settings.allow_code_exec or settings.allow_openai_tools
+        dangerous = (
+            settings.allow_tools
+            or settings.allow_code_exec
+            or settings.allow_openai_tools
+        )
         if dangerous and not _env_enabled(_REMOTE_DANGEROUS_ACK_ENV):
             raise RuntimeError(
                 "Remote access with tools or code execution requires: "

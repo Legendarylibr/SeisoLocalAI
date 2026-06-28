@@ -16,13 +16,16 @@ async def test_release_all_inference_memory_unloads_local(monkeypatch, tmp_path)
         calls.append("local")
         return {"active_model": None, "path": None}
 
-    monkeypatch.setattr(orchestrator._runner, "cancel_and_unload", fake_cancel_and_unload)
+    monkeypatch.setattr(
+        orchestrator._runner, "cancel_and_unload", fake_cancel_and_unload
+    )
     monkeypatch.setattr(
         "seiso.memory.protection.release_cached_memory",
         lambda sync=False: calls.append(f"cache:{sync}"),
     )
     monkeypatch.setattr(
-        "seiso.hardware.profile.hardware_profile", lambda force_refresh=False: {"ram_gb": 16}
+        "seiso.hardware.profile.hardware_profile",
+        lambda force_refresh=False: {"ram_gb": 16},
     )
     monkeypatch.setattr(
         "forge.services.inference_models.invalidate_inference_options_cache",
@@ -68,7 +71,9 @@ async def test_release_all_inference_memory_refreshes_headroom(monkeypatch, tmp_
         return {"active_model": None}
 
     monkeypatch.setattr(orchestrator._runner, "cancel_and_unload", noop_unload)
-    monkeypatch.setattr("seiso.memory.protection.release_cached_memory", lambda sync=False: None)
+    monkeypatch.setattr(
+        "seiso.memory.protection.release_cached_memory", lambda sync=False: None
+    )
 
     def fake_hw(force_refresh=False):
         refresh_calls.append(force_refresh)
@@ -76,7 +81,8 @@ async def test_release_all_inference_memory_refreshes_headroom(monkeypatch, tmp_
 
     monkeypatch.setattr("seiso.hardware.profile.hardware_profile", fake_hw)
     monkeypatch.setattr(
-        "forge.services.inference_models.invalidate_inference_options_cache", lambda: None
+        "forge.services.inference_models.invalidate_inference_options_cache",
+        lambda: None,
     )
     monkeypatch.setattr(
         "forge.services.hardware.build_vram_status",
@@ -100,12 +106,16 @@ def test_build_vram_status_shape(monkeypatch, tmp_path):
     monkeypatch.setattr(
         "seiso.hardware.tiers.classify_tier",
         lambda _p: (
-            __import__("seiso.hardware.tiers", fromlist=["HardwareTier"]).HardwareTier.APPLE_UNIFIED
+            __import__(
+                "seiso.hardware.tiers", fromlist=["HardwareTier"]
+            ).HardwareTier.APPLE_UNIFIED
         ),
     )
     monkeypatch.setattr("seiso.hardware.tiers.vram_headroom_mb", lambda _p: 10240)
     monkeypatch.setattr("seiso.hardware.memory_headroom_label", lambda _p: "RAM")
-    monkeypatch.setattr("seiso.memory.platform_profile.memory_profile_label", lambda _p: "low")
+    monkeypatch.setattr(
+        "seiso.memory.platform_profile.memory_profile_label", lambda _p: "low"
+    )
     monkeypatch.setattr(
         orchestrator._runner._pool,
         "status",

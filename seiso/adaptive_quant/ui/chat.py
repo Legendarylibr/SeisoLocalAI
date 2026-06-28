@@ -61,7 +61,9 @@ def build_chat_config(*, repo: Path) -> dict[str, Any]:
     task_count = 0
     if tasks_path.is_file():
         task_count = sum(
-            1 for line in tasks_path.read_text(encoding="utf-8").splitlines() if line.strip()
+            1
+            for line in tasks_path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
         )
 
     backends: list[dict[str, Any]] = [
@@ -158,7 +160,9 @@ class ChatSessionManager:
             config.training_backend,
         )
 
-    def _persist_session_config(self, config: FrameworkConfig, *, model_id: str | None) -> None:
+    def _persist_session_config(
+        self, config: FrameworkConfig, *, model_id: str | None
+    ) -> None:
         payload = config.to_flat_dict()
         if model_id:
             payload["selected_model_id"] = model_id
@@ -188,7 +192,9 @@ class ChatSessionManager:
                 raise ValueError(
                     "Select a downloaded Hugging Face route or local GGUF model first."
                 )
-            binary = discover_llama_cpp_binary(repo=self.repo) or config.llama_cpp_binary
+            binary = (
+                discover_llama_cpp_binary(repo=self.repo) or config.llama_cpp_binary
+            )
             if not binary:
                 raise FileNotFoundError(
                     "llama.cpp binary not found. Set LLAMA_CPP_BINARY, llama_cpp_binary in config, "
@@ -233,7 +239,9 @@ class ChatSessionManager:
 
     def _save_session(self) -> None:
         if self._trainer is not None:
-            self._trainer.save_checkpoint(str(self._session_dir / SESSION_CHECKPOINT_NAME))
+            self._trainer.save_checkpoint(
+                str(self._session_dir / SESSION_CHECKPOINT_NAME)
+            )
         self._reward_tracker.save(self._session_dir / SESSION_REWARD_PATH_NAME)
 
     def handle_chat(self, body: dict[str, Any]) -> dict[str, Any]:
@@ -293,7 +301,9 @@ class ChatSessionManager:
                 "backend": backend,
                 "measurement_backend": measurement,
                 "selected_model_id": model_id,
-                "response_text": _format_rl_response(outcome, learn=learn, measurement=measurement),
+                "response_text": _format_rl_response(
+                    outcome, learn=learn, measurement=measurement
+                ),
                 "prompt_id": prompt_id,
                 "reward": outcome.reward,
                 "learn_applied": learn,
@@ -362,7 +372,11 @@ class ChatSessionManager:
             payload = json.loads(line)
             if isinstance(payload, dict):
                 tasks.append(payload)
-        return {"path": str(path.relative_to(self.repo)), "tasks": tasks[-50:], "count": len(tasks)}
+        return {
+            "path": str(path.relative_to(self.repo)),
+            "tasks": tasks[-50:],
+            "count": len(tasks),
+        }
 
     def reset_session(self) -> dict[str, str]:
         with self._lock:
@@ -422,7 +436,9 @@ def append_chat_task(
     return {"path": str(path.relative_to(repo)), "prompt_id": prompt_id}
 
 
-def build_models_response(*, repo: Path, body: dict[str, Any] | None = None) -> dict[str, Any]:
+def build_models_response(
+    *, repo: Path, body: dict[str, Any] | None = None
+) -> dict[str, Any]:
     action = str((body or {}).get("action") or "catalog").strip().lower()
     if action == "search":
         query = str((body or {}).get("query") or "").strip()
@@ -440,7 +456,9 @@ def build_models_response(*, repo: Path, body: dict[str, Any] | None = None) -> 
         model_id = str((body or {}).get("model_id") or "").strip()
         choice = resolve_model_choice(repo=repo, model_id=model_id)
         if choice is None or not choice.route_id:
-            raise ValueError("model_id must reference a Hugging Face route catalog entry")
+            raise ValueError(
+                "model_id must reference a Hugging Face route catalog entry"
+            )
         downloaded = download_route_model(repo=repo, route_id=choice.route_id)
         save_selected_model_id(repo, downloaded.id)
         payload = model_catalog_payload(repo=repo)

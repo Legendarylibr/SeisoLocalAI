@@ -34,21 +34,36 @@ def _sample_hub_rows() -> list[dict]:
             "downloads": 450_000,
             "createdAt": "2026-03-01T00:00:00.000Z",
             "pipeline_tag": "text-generation",
-            "tags": ["gguf", "qwen3.6", "text-generation", "base_model:Qwen/Qwen3.6-27B"],
+            "tags": [
+                "gguf",
+                "qwen3.6",
+                "text-generation",
+                "base_model:Qwen/Qwen3.6-27B",
+            ],
         },
         {
             "id": "unsloth/Qwen3.6-4B-GGUF",
             "downloads": 400_000,
             "createdAt": "2026-03-01T00:00:00.000Z",
             "pipeline_tag": "text-generation",
-            "tags": ["gguf", "qwen3.6", "text-generation", "base_model:Qwen/Qwen3.6-4B"],
+            "tags": [
+                "gguf",
+                "qwen3.6",
+                "text-generation",
+                "base_model:Qwen/Qwen3.6-4B",
+            ],
         },
         {
             "id": "unsloth/Qwen3.5-4B-GGUF",
             "downloads": 390_000,
             "createdAt": "2025-11-01T00:00:00.000Z",
             "pipeline_tag": "text-generation",
-            "tags": ["gguf", "qwen3.5", "text-generation", "base_model:Qwen/Qwen3.5-4B"],
+            "tags": [
+                "gguf",
+                "qwen3.5",
+                "text-generation",
+                "base_model:Qwen/Qwen3.5-4B",
+            ],
         },
         {
             "id": "bartowski/gemma-3-27b-it-GGUF",
@@ -62,14 +77,24 @@ def _sample_hub_rows() -> list[dict]:
             "downloads": 370_000,
             "createdAt": "2026-01-01T00:00:00.000Z",
             "pipeline_tag": "text-generation",
-            "tags": ["gguf", "mistral", "code", "base_model:mistralai/Devstral-Small-2507"],
+            "tags": [
+                "gguf",
+                "mistral",
+                "code",
+                "base_model:mistralai/Devstral-Small-2507",
+            ],
         },
         {
             "id": "unsloth/DeepSeek-R1-0528-GGUF",
             "downloads": 360_000,
             "createdAt": "2026-02-01T00:00:00.000Z",
             "pipeline_tag": "text-generation",
-            "tags": ["gguf", "deepseek", "moe", "base_model:deepseek-ai/DeepSeek-R1-0528"],
+            "tags": [
+                "gguf",
+                "deepseek",
+                "moe",
+                "base_model:deepseek-ai/DeepSeek-R1-0528",
+            ],
         },
         {
             "id": "unsloth/gpt-oss-20b-GGUF",
@@ -148,7 +173,12 @@ def _sample_hub_rows() -> list[dict]:
             "downloads": 999_999,
             "createdAt": "2026-03-01T00:00:00.000Z",
             "pipeline_tag": "text-generation",
-            "tags": ["gguf", "qwen3.6", "text-generation", "base_model:Qwen/Qwen3.6-4B"],
+            "tags": [
+                "gguf",
+                "qwen3.6",
+                "text-generation",
+                "base_model:Qwen/Qwen3.6-4B",
+            ],
         },
     ]
 

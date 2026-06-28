@@ -38,8 +38,12 @@ async def run_agent_loop_async(
         if not calls:
             from forge.services.llm_output import strip_spurious_chat_artifacts
 
-            clean = strip_spurious_chat_artifacts(TOOL_CALL_PATTERN.sub("", reply).strip())
-            return clean or reply, history + [{"role": "assistant", "content": clean or reply}]
+            clean = strip_spurious_chat_artifacts(
+                TOOL_CALL_PATTERN.sub("", reply).strip()
+            )
+            return clean or reply, history + [
+                {"role": "assistant", "content": clean or reply}
+            ]
 
         if on_log:
             on_log(f"Tool round {round_i + 1}: {len(calls)} call(s)")

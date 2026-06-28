@@ -37,15 +37,23 @@ def normalize_training_log(state, logs: dict[str, Any]) -> dict[str, Any]:
         "step": int(state.global_step),
         "epoch": round(float(logs.get("epoch", state.epoch or 0)), 4),
         "loss": float(loss) if loss is not None else None,
-        "eval_loss": float(logs["eval_loss"]) if logs.get("eval_loss") is not None else None,
+        "eval_loss": (
+            float(logs["eval_loss"]) if logs.get("eval_loss") is not None else None
+        ),
         "reward": float(reward) if reward is not None else None,
-        "learning_rate": float(logs["learning_rate"])
-        if logs.get("learning_rate") is not None
-        else None,
-        "grad_norm": float(logs["grad_norm"]) if logs.get("grad_norm") is not None else None,
-        "train_runtime": float(logs["train_runtime"])
-        if logs.get("train_runtime") is not None
-        else None,
+        "learning_rate": (
+            float(logs["learning_rate"])
+            if logs.get("learning_rate") is not None
+            else None
+        ),
+        "grad_norm": (
+            float(logs["grad_norm"]) if logs.get("grad_norm") is not None else None
+        ),
+        "train_runtime": (
+            float(logs["train_runtime"])
+            if logs.get("train_runtime") is not None
+            else None
+        ),
         "train_samples_per_second": (
             float(logs["train_samples_per_second"])
             if logs.get("train_samples_per_second") is not None
@@ -59,7 +67,9 @@ def normalize_training_log(state, logs: dict[str, Any]) -> dict[str, Any]:
         "ts": time.time(),
     }
     return {
-        k: v for k, v in metric.items() if v is not None or k in ("type", "step", "epoch", "ts")
+        k: v
+        for k, v in metric.items()
+        if v is not None or k in ("type", "step", "epoch", "ts")
     }
 
 
@@ -113,7 +123,9 @@ class TrainingMetricsCallback:
         self._open_file()
         self._emit(metric)
 
-    def on_evaluate(self, args, state, control, metrics=None, **kwargs) -> None:  # noqa: ARG002
+    def on_evaluate(
+        self, args, state, control, metrics=None, **kwargs
+    ) -> None:  # noqa: ARG002
         if not metrics or not is_main_process():
             return
         eval_loss = metrics.get("eval_loss")
@@ -148,7 +160,9 @@ class TrainingMetricsCallback:
     def summary(self) -> dict[str, Any]:
         training = [m for m in self._history if m.get("type") in ("training", "eval")]
         losses = [m["loss"] for m in training if m.get("loss") is not None]
-        eval_losses = [m["eval_loss"] for m in training if m.get("eval_loss") is not None]
+        eval_losses = [
+            m["eval_loss"] for m in training if m.get("eval_loss") is not None
+        ]
         return {
             "total_steps": max((m.get("step", 0) for m in training), default=0),
             "final_loss": losses[-1] if losses else None,

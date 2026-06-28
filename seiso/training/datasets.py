@@ -41,8 +41,12 @@ def load_training_dataset(
             data = json.loads(p.read_text())
             return Dataset.from_list(data if isinstance(data, list) else [data])
         if p.is_dir():
-            return load_dataset(str(p), split=split, revision="main")  # nosec B615: local path, revision pinned for hub fallback
-    return load_dataset(str(path), split=split, revision="main")  # nosec B615: revision pinned
+            return load_dataset(
+                str(p), split=split, revision="main"
+            )  # nosec B615: local path, revision pinned for hub fallback
+    return load_dataset(
+        str(path), split=split, revision="main"
+    )  # nosec B615: revision pinned
 
 
 def detect_format(sample: dict) -> DatasetFormat:
@@ -59,7 +63,9 @@ def detect_format(sample: dict) -> DatasetFormat:
     ):
         return DatasetFormat.ALPACA
     if "conversations" in sample or "messages" in sample:
-        return DatasetFormat.SHAREGPT if "conversations" in sample else DatasetFormat.CHAT
+        return (
+            DatasetFormat.SHAREGPT if "conversations" in sample else DatasetFormat.CHAT
+        )
     if ("instruction" in sample and "output" in sample) or (
         "instruction" in sample and "response" in sample
     ):
@@ -112,7 +118,9 @@ def prepare_tokenized_dataset(
     def tokenize_batch(batch):
         rows = _rows_from_batch(batch)
         texts = [format_sample(row, fmt, tokenizer) for row in rows]
-        encoded = tokenizer(texts, truncation=True, max_length=max_seq_length, padding=False)
+        encoded = tokenizer(
+            texts, truncation=True, max_length=max_seq_length, padding=False
+        )
         encoded["labels"] = [list(ids) for ids in encoded["input_ids"]]
         return encoded
 
@@ -131,9 +139,14 @@ def prepare_tokenized_dataset(
                     full_text, truncation=True, max_length=max_seq_length, padding=False
                 )
                 prompt_ids = tokenizer(
-                    prompt_text, truncation=True, max_length=max_seq_length, padding=False
+                    prompt_text,
+                    truncation=True,
+                    max_length=max_seq_length,
+                    padding=False,
                 )
-                labels = _build_labels(full_ids["input_ids"], len(prompt_ids["input_ids"]))
+                labels = _build_labels(
+                    full_ids["input_ids"], len(prompt_ids["input_ids"])
+                )
                 return {
                     "input_ids": full_ids["input_ids"],
                     "attention_mask": full_ids["attention_mask"],
@@ -141,7 +154,9 @@ def prepare_tokenized_dataset(
                 }
 
         text = format_sample(sample, fmt, tokenizer)
-        encoded = tokenizer(text, truncation=True, max_length=max_seq_length, padding=False)
+        encoded = tokenizer(
+            text, truncation=True, max_length=max_seq_length, padding=False
+        )
         encoded["labels"] = list(encoded["input_ids"])
         return encoded
 

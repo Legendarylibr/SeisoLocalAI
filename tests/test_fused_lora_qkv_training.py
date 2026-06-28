@@ -30,7 +30,16 @@ def test_lora_qkv_uses_cublas_during_training():
     ref_q, ref_k, ref_v = out_q.clone(), out_k.clone(), out_v.clone()
 
     fused_lora_qkv_delta(
-        x, out_q, out_k, out_v, a_q, b_q, a_k, b_k, a_v, b_v,
+        x,
+        out_q,
+        out_k,
+        out_v,
+        a_q,
+        b_q,
+        a_k,
+        b_k,
+        a_v,
+        b_v,
     )
 
     for ref, a, b in ((ref_q, a_q, b_q), (ref_k, a_k, b_k), (ref_v, a_v, b_v)):
@@ -49,16 +58,28 @@ def test_stacked_a_matmul_matches_separate():
     rows, in_dim, out_dim, rank = 64, 512, 512, 16
     dtype = torch.float32
     x = torch.randn(rows, in_dim, device="cuda", dtype=dtype)
-    mats = [torch.randn(rank, in_dim, device="cuda", dtype=dtype) * 0.01 for _ in range(3)]
-    bs = [torch.randn(out_dim, rank, device="cuda", dtype=dtype) * 0.01 for _ in range(3)]
+    mats = [
+        torch.randn(rank, in_dim, device="cuda", dtype=dtype) * 0.01 for _ in range(3)
+    ]
+    bs = [
+        torch.randn(out_dim, rank, device="cuda", dtype=dtype) * 0.01 for _ in range(3)
+    ]
     out_q = torch.zeros(rows, out_dim, device="cuda", dtype=dtype)
     out_k = torch.zeros(rows, out_dim, device="cuda", dtype=dtype)
     out_v = torch.zeros(rows, out_dim, device="cuda", dtype=dtype)
     ref_q, ref_k, ref_v = out_q.clone(), out_k.clone(), out_v.clone()
 
     _fused_lora_qkv_delta_torch(
-        x, out_q, out_k, out_v,
-        mats[0], bs[0], mats[1], bs[1], mats[2], bs[2],
+        x,
+        out_q,
+        out_k,
+        out_v,
+        mats[0],
+        bs[0],
+        mats[1],
+        bs[1],
+        mats[2],
+        bs[2],
     )
 
     for ref, a, b in zip((ref_q, ref_k, ref_v), mats, bs, strict=True):
@@ -88,8 +109,16 @@ def test_gqa_stacked_kv_a_matmul_matches_separate():
     ref_q, ref_k, ref_v = out_q.clone(), out_k.clone(), out_v.clone()
 
     _fused_lora_qkv_delta_torch(
-        x, out_q, out_k, out_v,
-        a_q, b_q, a_k, b_k, a_v, b_v,
+        x,
+        out_q,
+        out_k,
+        out_v,
+        a_q,
+        b_q,
+        a_k,
+        b_k,
+        a_v,
+        b_v,
     )
 
     ref_q.add_(x @ a_q.t() @ b_q.t())

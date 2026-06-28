@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from forge.services.knowledge_context import format_knowledge_context, retrieve_knowledge_chunks
+from forge.services.knowledge_context import (
+    format_knowledge_context,
+    retrieve_knowledge_chunks,
+)
 
 
 def test_retrieve_knowledge_chunks_scores_overlap(tmp_path: Path):

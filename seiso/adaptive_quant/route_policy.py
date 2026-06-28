@@ -118,9 +118,13 @@ class _ArmStats:
         pulls = non_negative_int(
             payload.get("pulls", 0), label=f"{label}.pulls", maximum=_MAX_BANDIT_PULLS
         )
-        mean_reward = finite_float(payload.get("mean_reward", 0.0), label=f"{label}.mean_reward")
+        mean_reward = finite_float(
+            payload.get("mean_reward", 0.0), label=f"{label}.mean_reward"
+        )
         m2 = finite_float(payload.get("m2", 0.0), label=f"{label}.m2")
-        last_reward = finite_float(payload.get("last_reward", 0.0), label=f"{label}.last_reward")
+        last_reward = finite_float(
+            payload.get("last_reward", 0.0), label=f"{label}.last_reward"
+        )
         if m2 < 0.0:
             raise ValueError(f"{label}.m2 must be >= 0, got {m2!r}")
         return cls(
@@ -168,7 +172,9 @@ class RouteBandit:
     seed: int = 13
     known_domains: tuple[str, ...] | None = None
     _global: dict[str, _ArmStats] = field(default_factory=dict, init=False, repr=False)
-    _buckets: dict[str, dict[str, _ArmStats]] = field(default_factory=dict, init=False, repr=False)
+    _buckets: dict[str, dict[str, _ArmStats]] = field(
+        default_factory=dict, init=False, repr=False
+    )
     _rng: random.Random = field(init=False, repr=False)
     _total_pulls: int = field(default=0, init=False, repr=False)
 
@@ -187,9 +193,13 @@ class RouteBandit:
     def total_pulls(self) -> int:
         return int(self._total_pulls)
 
-    def select(self, context: RouteContext, *, deterministic: bool = False) -> RouteSelection:
+    def select(
+        self, context: RouteContext, *, deterministic: bool = False
+    ) -> RouteSelection:
         """Pick a route under exploration; ties broken by ``self._rng`` for reproducibility."""
-        feasible_routes = [r for r in self.catalog if r.matches_hardware(context.hardware)]
+        feasible_routes = [
+            r for r in self.catalog if r.matches_hardware(context.hardware)
+        ]
         if not feasible_routes:
             feasible_routes = list(self.catalog)
             feasible = False
@@ -217,7 +227,11 @@ class RouteBandit:
         # Tie-break randomly when several arms share the top score (reproducible via self._rng).
         scores = [item[0] for item in scored]
         best_value = max(scores)
-        ties = [index for index, value in enumerate(scores) if math.isclose(value, best_value)]
+        ties = [
+            index
+            for index, value in enumerate(scores)
+            if math.isclose(value, best_value)
+        ]
         winner = ties[0] if deterministic else ties[self._rng.randrange(len(ties))]
         score, route, arm, global_arm = scored[winner]
 
@@ -268,7 +282,8 @@ class RouteBandit:
 
     def best_route_global(self) -> ModelRoute:
         means = [
-            self._global.get(route.route_id, _ArmStats()).mean_reward for route in self.catalog
+            self._global.get(route.route_id, _ArmStats()).mean_reward
+            for route in self.catalog
         ]
         return self.catalog.routes[argmax(means)]
 
@@ -280,7 +295,9 @@ class RouteBandit:
             "warmup_pulls": int(self.warmup_pulls),
             "seed": int(self.seed),
             "total_pulls": int(self._total_pulls),
-            "global": {arm_id: stats.to_dict() for arm_id, stats in self._global.items()},
+            "global": {
+                arm_id: stats.to_dict() for arm_id, stats in self._global.items()
+            },
             "buckets": {
                 bucket_key: {arm_id: stats.to_dict() for arm_id, stats in arms.items()}
                 for bucket_key, arms in self._buckets.items()
@@ -345,7 +362,9 @@ class RouteBandit:
                     f"{sorted(unknown_bucket)}"
                 )
             buckets[bucket_key] = {
-                arm_id: _ArmStats.from_dict(arm_payload, label=f"buckets[{bucket_key}][{arm_id}]")
+                arm_id: _ArmStats.from_dict(
+                    arm_payload, label=f"buckets[{bucket_key}][{arm_id}]"
+                )
                 for arm_id, arm_payload in arms.items()
             }
         self._buckets = buckets
@@ -410,9 +429,13 @@ class RouteBandit:
         deterministic: bool,
     ) -> float:
         prior_mean = global_arm.mean_reward if global_arm.pulls > 0 else 0.0
-        prior_strength = self.prior_weight if arm.pulls < max(1, self.warmup_pulls) else 0.0
+        prior_strength = (
+            self.prior_weight if arm.pulls < max(1, self.warmup_pulls) else 0.0
+        )
         denom = max(1, arm.pulls + int(prior_strength))
-        blended_mean = (arm.mean_reward * arm.pulls + prior_mean * prior_strength) / denom
+        blended_mean = (
+            arm.mean_reward * arm.pulls + prior_mean * prior_strength
+        ) / denom
 
         if arm.pulls == 0 and not deterministic:
             # Force at least one pull per arm before exploiting; large bonus dominates ties.

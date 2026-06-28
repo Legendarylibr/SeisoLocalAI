@@ -35,7 +35,9 @@ def _probe_hub_config_download(
     except Exception as exc:
         if is_gated_hub_error(exc):
             return "gated"
-        raise ValueError(format_hub_error(exc, context="download", repo_id=repo_id)) from exc
+        raise ValueError(
+            format_hub_error(exc, context="download", repo_id=repo_id)
+        ) from exc
 
 
 def resolve_trainable_hub_id(

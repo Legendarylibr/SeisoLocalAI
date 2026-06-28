@@ -43,7 +43,9 @@ class TrainConfig(BaseModel):
     quant: QuantMode = QuantMode.INT4
     dataset_format: DatasetFormat = DatasetFormat.AUTO
     epochs: int = Field(
-        default=3, ge=1, description="Maximum training epochs (early stopping may finish earlier)"
+        default=3,
+        ge=1,
+        description="Maximum training epochs (early stopping may finish earlier)",
     )
     batch_size: int = Field(default=2, ge=1)
     learning_rate: float = Field(default=2e-4, gt=0)
@@ -98,17 +100,25 @@ class TrainConfig(BaseModel):
         description="Pad batch sequences to this multiple for tensor cores (None = 8 on CUDA)",
     )
     # ── Performance optimizations (auto-tuned when left at defaults) ──
-    dataloader_num_workers: int = 0  # 0 = auto-detect (min(4, cpu_count//2) on CUDA, 0 on CPU)
+    dataloader_num_workers: int = (
+        0  # 0 = auto-detect (min(4, cpu_count//2) on CUDA, 0 on CPU)
+    )
     dataloader_persistent_workers: bool = True
-    dataloader_prefetch_factor: int | None = None  # None = auto 2 when CUDA workers are enabled
+    dataloader_prefetch_factor: int | None = (
+        None  # None = auto 2 when CUDA workers are enabled
+    )
     group_by_length: bool = True  # batch similar-length sequences → less padding waste
     padding_free: bool = False  # use flash-attention padding-free packing (CUDA only)
-    neftune_noise_alpha: float | None = 5.0  # NEFTune instruction-tuning noise (None to disable)
+    neftune_noise_alpha: float | None = (
+        5.0  # NEFTune instruction-tuning noise (None to disable)
+    )
     torch_compile: bool = False  # torch.compile the training model (CUDA only, opt-in)
     save_safetensors: bool = True
     extra: dict[str, Any] = Field(default_factory=dict)
 
-    @field_validator("output_dir", "dataset", "resume_from", "sandbox_root", mode="before")
+    @field_validator(
+        "output_dir", "dataset", "resume_from", "sandbox_root", mode="before"
+    )
     @classmethod
     def _expand_path(cls, v: Any) -> Any:
         if v is None:

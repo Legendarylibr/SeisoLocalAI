@@ -42,7 +42,9 @@ def generate_preference_rows(
         revision=student_revision,
     )
     rows: list[dict[str, Any]] = []
-    for prompt, chosen, rejected in zip(prompts, teacher_outputs, student_outputs, strict=True):
+    for prompt, chosen, rejected in zip(
+        prompts, teacher_outputs, student_outputs, strict=True
+    ):
         rows.append(
             {
                 "prompt_id": prompt.prompt_id,
@@ -60,7 +62,9 @@ def _prompt_seed(base_seed: int, prompt_id: str) -> int:
     return int(digest[:8], 16)
 
 
-def _format_generation_prompt(tokenizer, prompt: str, *, use_chat_template: bool) -> str:
+def _format_generation_prompt(
+    tokenizer, prompt: str, *, use_chat_template: bool
+) -> str:
     if use_chat_template and hasattr(tokenizer, "apply_chat_template"):
         return str(
             tokenizer.apply_chat_template(

@@ -14,15 +14,24 @@ from seiso.adaptive_quant.llm_alignment.config import DPOSettings  # noqa: F401
 _EAGER_EXPORTS = ("DPOSettings",)
 
 _LAZY: dict[str, tuple[str, str]] = {
-    "DPODataCollator": ("seiso.adaptive_quant.llm_alignment.data_collator", "DPODataCollator"),
+    "DPODataCollator": (
+        "seiso.adaptive_quant.llm_alignment.data_collator",
+        "DPODataCollator",
+    ),
     "DPOMetrics": ("seiso.adaptive_quant.llm_alignment.dpo_loss", "DPOMetrics"),
     "DPOTrainer": ("seiso.adaptive_quant.llm_alignment.dpo_trainer", "DPOTrainer"),
     "clone_reference_from_policy": (
         "seiso.adaptive_quant.llm_alignment.model_loading",
         "clone_reference_from_policy",
     ),
-    "compute_dpo_loss": ("seiso.adaptive_quant.llm_alignment.dpo_loss", "compute_dpo_loss"),
-    "get_batch_logps": ("seiso.adaptive_quant.llm_alignment.dpo_loss", "get_batch_logps"),
+    "compute_dpo_loss": (
+        "seiso.adaptive_quant.llm_alignment.dpo_loss",
+        "compute_dpo_loss",
+    ),
+    "get_batch_logps": (
+        "seiso.adaptive_quant.llm_alignment.dpo_loss",
+        "get_batch_logps",
+    ),
     "load_policy_and_reference": (
         "seiso.adaptive_quant.llm_alignment.model_loading",
         "load_policy_and_reference",

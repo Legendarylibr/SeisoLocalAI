@@ -11,7 +11,9 @@ _SAFE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _RUN_NAME_RE = _SAFE_ID_RE
 _HF_REVISION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$")
 # Hub repo ids: ``org/name`` (preferred) or a single legacy segment (e.g. ``gpt2``).
-_HF_REPO_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,95}/[A-Za-z0-9][A-Za-z0-9._-]{0,95}$")
+_HF_REPO_ID_RE = re.compile(
+    r"^[A-Za-z0-9][A-Za-z0-9._-]{0,95}/[A-Za-z0-9][A-Za-z0-9._-]{0,95}$"
+)
 _HF_LEGACY_MODEL_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$")
 _HF_FILENAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,255}$")
 
@@ -89,7 +91,9 @@ def _validate_choice(field_name: str, value: str, allowed: frozenset[str]) -> No
         raise TypeError(f"{field_name} must be a string")
     key = value.strip().lower()
     if key not in allowed:
-        raise ValueError(f"{field_name} must be one of {sorted(allowed)}, got {value!r}")
+        raise ValueError(
+            f"{field_name} must be one of {sorted(allowed)}, got {value!r}"
+        )
 
 
 def validate_env_sampling_mode(name: str) -> None:
@@ -256,12 +260,16 @@ def sanitize_user_text(text: str) -> str:
     if not isinstance(text, str):
         raise TypeError("text must be a string")
     normalized = unicodedata.normalize("NFKC", text)
-    stripped = "".join(ch for ch in normalized if unicodedata.category(ch) != "Cf" and ch != "\x00")
+    stripped = "".join(
+        ch for ch in normalized if unicodedata.category(ch) != "Cf" and ch != "\x00"
+    )
     return stripped.strip()
 
 
 def validate_router_task_text(text: str) -> str:
-    return _validate_bounded_user_text("task_text", text, max_chars=MAX_ROUTER_TASK_TEXT_CHARS)
+    return _validate_bounded_user_text(
+        "task_text", text, max_chars=MAX_ROUTER_TASK_TEXT_CHARS
+    )
 
 
 def _validate_bounded_user_text(field_name: str, text: str, *, max_chars: int) -> str:
@@ -271,12 +279,16 @@ def _validate_bounded_user_text(field_name: str, text: str, *, max_chars: int) -
         raise ValueError(f"{field_name} must not contain NUL bytes")
     sanitized = sanitize_user_text(text)
     if len(sanitized) > max_chars:
-        raise ValueError(f"{field_name} exceeds {max_chars} characters ({len(sanitized)} given)")
+        raise ValueError(
+            f"{field_name} exceeds {max_chars} characters ({len(sanitized)} given)"
+        )
     return sanitized
 
 
 def validate_online_prompt_text(text: str) -> str:
-    return _validate_bounded_user_text("prompt_text", text, max_chars=MAX_ONLINE_PROMPT_TEXT_CHARS)
+    return _validate_bounded_user_text(
+        "prompt_text", text, max_chars=MAX_ONLINE_PROMPT_TEXT_CHARS
+    )
 
 
 def validate_llama_cpp_binary_allowlist(resolved_binary: str) -> None:
@@ -343,11 +355,17 @@ def validate_llama_cpp_model_allowlist(resolved_model: str) -> None:
 def validate_moe_topology(
     *, num_experts: int, top_k: int, gpu_resident: int, max_aggressive: int
 ) -> None:
-    validate_bounded_positive_int("moe_num_experts", num_experts, ceiling=MAX_MOE_EXPERTS)
+    validate_bounded_positive_int(
+        "moe_num_experts", num_experts, ceiling=MAX_MOE_EXPERTS
+    )
     validate_bounded_positive_int("moe_top_k", top_k, ceiling=MAX_MOE_TOP_K)
     if top_k > num_experts:
-        raise ValueError(f"moe_top_k ({top_k}) must be <= moe_num_experts ({num_experts})")
-    validate_bounded_positive_int("moe_gpu_resident_experts", gpu_resident, ceiling=MAX_MOE_EXPERTS)
+        raise ValueError(
+            f"moe_top_k ({top_k}) must be <= moe_num_experts ({num_experts})"
+        )
+    validate_bounded_positive_int(
+        "moe_gpu_resident_experts", gpu_resident, ceiling=MAX_MOE_EXPERTS
+    )
     if gpu_resident > num_experts:
         raise ValueError(
             f"moe_gpu_resident_experts ({gpu_resident}) must be <= moe_num_experts ({num_experts})"
@@ -435,7 +453,9 @@ def validate_router_routes(routes: tuple[str, ...]) -> None:
         try:
             parse_route(route)
         except (TypeError, ValueError) as exc:
-            raise ValueError(f"router_routes[{index}] is invalid ({route!r}): {exc}") from exc
+            raise ValueError(
+                f"router_routes[{index}] is invalid ({route!r}): {exc}"
+            ) from exc
 
 
 def validate_hf_model_id(
@@ -546,7 +566,10 @@ def validate_router_hf_settings(
         raise ValueError(
             "router_feature_backend='hf' requires router_hf_embedding_model to be set."
         )
-    if not router_hf_embedding_revision or not str(router_hf_embedding_revision).strip():
+    if (
+        not router_hf_embedding_revision
+        or not str(router_hf_embedding_revision).strip()
+    ):
         raise ValueError(
             "router_feature_backend='hf' requires router_hf_embedding_revision "
             "(pin a commit hash or tag; do not leave revision unset)."
@@ -557,7 +580,9 @@ def validate_router_hf_settings(
             "allowlist; list every embedding model id you permit."
         )
     model_id = str(router_hf_embedding_model).strip()
-    validate_hf_model_id("router_hf_embedding_model", model_id, require_hub_namespace=True)
+    validate_hf_model_id(
+        "router_hf_embedding_model", model_id, require_hub_namespace=True
+    )
     allowed = {entry.strip() for entry in router_hf_allowed_models}
     if model_id not in allowed:
         raise ValueError(
@@ -582,7 +607,9 @@ def validate_optional_hf_revision(field_name: str, revision: str | None) -> None
     if "\x00" in revision or "\n" in revision or "\r" in revision:
         raise ValueError(f"{field_name} contains invalid control characters")
     if path_has_parent_reference(revision) or revision.startswith("-"):
-        raise ValueError(f"{field_name} must not contain '..' or start with '-' ({revision!r})")
+        raise ValueError(
+            f"{field_name} must not contain '..' or start with '-' ({revision!r})"
+        )
     if not _HF_REVISION_RE.match(revision):
         raise ValueError(f"{field_name} contains unsupported characters ({revision!r})")
 
@@ -592,8 +619,12 @@ def validate_hf_allowed_models(models: tuple[str, ...]) -> None:
         raise TypeError("router_hf_allowed_models must be a tuple of strings")
     for model in models:
         if not isinstance(model, str) or not model.strip():
-            raise ValueError("router_hf_allowed_models entries must be non-empty strings")
-        validate_hf_model_id("router_hf_allowed_models", model.strip(), require_hub_namespace=True)
+            raise ValueError(
+                "router_hf_allowed_models entries must be non-empty strings"
+            )
+        validate_hf_model_id(
+            "router_hf_allowed_models", model.strip(), require_hub_namespace=True
+        )
 
 
 def validate_gguf_export_settings(
@@ -609,7 +640,10 @@ def validate_gguf_export_settings(
         return
     from seiso.adaptive_quant.model_routes import QUANT_BITS
 
-    if not isinstance(gguf_export_quant_type, str) or not gguf_export_quant_type.strip():
+    if (
+        not isinstance(gguf_export_quant_type, str)
+        or not gguf_export_quant_type.strip()
+    ):
         raise ValueError(
             "llama_cpp_gguf_export_quant_type must be a non-empty string when export is enabled"
         )
@@ -625,7 +659,9 @@ def validate_gguf_export_settings(
             "llama_cpp_gguf_export_enabled requires llama_cpp_gguf_export_source or llama_cpp_model"
         )
     validate_optional_filesystem_path("llama_cpp_gguf_export_source", source)
-    validate_optional_filesystem_path("llama_cpp_gguf_quantize_binary", gguf_quantize_binary)
+    validate_optional_filesystem_path(
+        "llama_cpp_gguf_quantize_binary", gguf_quantize_binary
+    )
     if gguf_quantize_binary is None and not llama_cpp_binary:
         raise ValueError(
             "llama_cpp_gguf_export_enabled requires llama_cpp_gguf_quantize_binary or llama_cpp_binary"
@@ -652,7 +688,9 @@ def validate_rust_cli_settings(
         )
     validate_optional_filesystem_path("rust_cli_binary", rust_cli_binary)
     if rust_cli_timeout_s <= 0:
-        raise ValueError("rust_cli_timeout_s must be positive when rust_simulator_enabled is set")
+        raise ValueError(
+            "rust_cli_timeout_s must be positive when rust_simulator_enabled is set"
+        )
 
 
 def validate_frontier_api_base_url(api_base: str) -> None:
@@ -672,7 +710,9 @@ def validate_frontier_api_base_url(api_base: str) -> None:
     except ValueError:
         return
     if addr.is_link_local:
-        raise ValueError(f"frontier_api_base must not target link-local address {host!r}")
+        raise ValueError(
+            f"frontier_api_base must not target link-local address {host!r}"
+        )
 
 
 def validate_frontier_settings(
@@ -719,11 +759,17 @@ def validate_frontier_settings(
     validate_bounded_positive_int("frontier_max_tokens", int(max_tokens), ceiling=8192)
     if float(timeout_s) <= 0:
         raise ValueError("frontier_timeout_s must be > 0")
-    validate_bounded_positive_int("frontier_max_prompt_chars", int(max_prompt_chars), ceiling=65536)
-    validate_bounded_nonneg_int(
-        "frontier_comparison_prompt_limit", int(comparison_prompt_limit), ceiling=MAX_EPISODE_COUNT
+    validate_bounded_positive_int(
+        "frontier_max_prompt_chars", int(max_prompt_chars), ceiling=65536
     )
-    if not isinstance(eval_min_overlap, (int, float)) or isinstance(eval_min_overlap, bool):
+    validate_bounded_nonneg_int(
+        "frontier_comparison_prompt_limit",
+        int(comparison_prompt_limit),
+        ceiling=MAX_EPISODE_COUNT,
+    )
+    if not isinstance(eval_min_overlap, (int, float)) or isinstance(
+        eval_min_overlap, bool
+    ):
         raise TypeError("frontier_eval_min_overlap must be numeric")
     overlap = float(eval_min_overlap)
     if not 0.0 <= overlap <= 1.0:

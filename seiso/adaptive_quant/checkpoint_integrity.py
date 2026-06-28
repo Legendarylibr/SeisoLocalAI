@@ -86,7 +86,9 @@ def verify_dict_integrity(payload: dict[str, Any], *, label: str) -> None:
         )
 
 
-def attach_torch_sidecar_integrity(meta: dict[str, Any], pt_path: str | Path) -> dict[str, Any]:
+def attach_torch_sidecar_integrity(
+    meta: dict[str, Any], pt_path: str | Path
+) -> dict[str, Any]:
     stamped = dict(meta)
     meta_digest = sha256_canonical(stamped)
     tensor_digest = sha256_file(pt_path)

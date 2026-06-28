@@ -84,7 +84,9 @@ def test_merge_lora_uses_local_base(mock_deps, tmp_path: Path):
 
     ckpt = tmp_path / "ckpt"
     ckpt.mkdir()
-    (ckpt / "adapter_config.json").write_text('{"base_model_name_or_path": "remote/model"}')
+    (ckpt / "adapter_config.json").write_text(
+        '{"base_model_name_or_path": "remote/model"}'
+    )
     (ckpt / "seiso_manifest.json").write_text(
         f'{{"resolved_model_path": "{base}", "model_id": "remote/model"}}'
     )
@@ -95,7 +97,9 @@ def test_merge_lora_uses_local_base(mock_deps, tmp_path: Path):
 
     deps = mock_deps.return_value
     mock_model = deps.auto_model.from_pretrained.return_value
-    deps.peft_model.from_pretrained.return_value.merge_and_unload.return_value = mock_model
+    deps.peft_model.from_pretrained.return_value.merge_and_unload.return_value = (
+        mock_model
+    )
 
     merge_lora_checkpoint(ckpt, merged, lambda _msg: None)
     deps.auto_model.from_pretrained.assert_called_once()

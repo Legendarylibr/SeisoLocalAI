@@ -58,7 +58,9 @@ def test_native_quant_training_block_reason_fp8():
 
 
 def test_native_quant_training_block_reason_mxfp4():
-    assert native_quant_training_block_reason("org/model", config=_QuantConfig()) is None
+    assert (
+        native_quant_training_block_reason("org/model", config=_QuantConfig()) is None
+    )
 
 
 def test_needs_tight_vram_for_native_quant(monkeypatch):

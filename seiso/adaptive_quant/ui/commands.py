@@ -11,7 +11,10 @@ from seiso.adaptive_quant.nvidia_secure_boundary import (
     _ACK_WSL_ENV,
     recommended_gpu_install_ack_env,
 )
-from seiso.adaptive_quant.ui.rl_fields import apply_rl_cli_flags, collect_rl_set_overrides
+from seiso.adaptive_quant.ui.rl_fields import (
+    apply_rl_cli_flags,
+    collect_rl_set_overrides,
+)
 
 
 def _cli_path(repo: Path, name: str) -> Path | None:
@@ -118,22 +121,30 @@ def build_workflow_command(
         return (label, command)
 
     if workflow == "moe":
-        command = _workflow_command(repo, python_bin, "adaptive-rl-quant-moe", "moe_research")
+        command = _workflow_command(
+            repo, python_bin, "adaptive-rl-quant-moe", "moe_research"
+        )
         _append_common_overrides(command, opts)
         return ("MoE research", command)
 
     if workflow == "pytorch":
-        command = _workflow_command(repo, python_bin, "adaptive-rl-quant-pytorch", "pytorch")
+        command = _workflow_command(
+            repo, python_bin, "adaptive-rl-quant-pytorch", "pytorch"
+        )
         preset = str(opts.get("preset") or "gpu").strip()
         if opts.get("config"):
             _append_common_overrides(command, opts)
         else:
             command.extend(["--preset", preset])
-            _append_common_overrides(command, {k: v for k, v in opts.items() if k != "preset"})
+            _append_common_overrides(
+                command, {k: v for k, v in opts.items() if k != "preset"}
+            )
         return (f"PyTorch preset {preset}", command)
 
     if workflow == "multiseed":
-        command = _workflow_command(repo, python_bin, "adaptive-rl-quant-multiseed", "multiseed")
+        command = _workflow_command(
+            repo, python_bin, "adaptive-rl-quant-multiseed", "multiseed"
+        )
         command.extend(["--preset", str(opts.get("preset") or "dense")])
         if opts.get("seeds"):
             command.extend(["--seeds", str(opts["seeds"])])
@@ -144,7 +155,9 @@ def build_workflow_command(
         return ("Multiseed experiment", command)
 
     if workflow == "sweep":
-        command = _workflow_command(repo, python_bin, "adaptive-rl-quant-sweep", "sweep")
+        command = _workflow_command(
+            repo, python_bin, "adaptive-rl-quant-sweep", "sweep"
+        )
         if opts.get("sweep_config"):
             command.extend(["--sweep-config", str(opts["sweep_config"])])
         if opts.get("config"):
@@ -166,7 +179,9 @@ def build_workflow_command(
         return ("Hyperparameter sweep", command)
 
     if workflow == "online":
-        command = _workflow_command(repo, python_bin, "adaptive-rl-quant-online", "online_learning")
+        command = _workflow_command(
+            repo, python_bin, "adaptive-rl-quant-online", "online_learning"
+        )
         _append_common_overrides(command, opts)
         if opts.get("requests") is not None:
             command.extend(["--requests", str(opts["requests"])])
@@ -180,7 +195,9 @@ def build_workflow_command(
         return ("Continuous learning", command)
 
     if workflow == "frontier":
-        command = _workflow_command(repo, python_bin, "adaptive-rl-quant-frontier", "frontier")
+        command = _workflow_command(
+            repo, python_bin, "adaptive-rl-quant-frontier", "frontier"
+        )
         _append_common_overrides(command, opts)
         return ("Frontier comparison", command)
 

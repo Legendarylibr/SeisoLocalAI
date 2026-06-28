@@ -24,7 +24,10 @@ class InferenceOrchestrator(Orchestrator):
         self._active_generation_user_id: str | None = None
 
     def _generation_owned_by_other(self, user_id: str | None) -> bool:
-        return bool(self._active_generation_user_id and self._active_generation_user_id != user_id)
+        return bool(
+            self._active_generation_user_id
+            and self._active_generation_user_id != user_id
+        )
 
     async def cancel_and_unload_for_user(self, user_id: str | None) -> dict[str, Any]:
         return await self.release_all_inference_memory(user_id)
@@ -60,7 +63,8 @@ class InferenceOrchestrator(Orchestrator):
         settings = get_settings()
 
         self._emit_log(
-            job_id, f"Messages: {len(messages)}, tools={use_tools}, provider={provider or 'local'}"
+            job_id,
+            f"Messages: {len(messages)}, tools={use_tools}, provider={provider or 'local'}",
         )
 
         def on_log(msg: str) -> None:
@@ -70,7 +74,9 @@ class InferenceOrchestrator(Orchestrator):
         self._active_generation_user_id = str(user_id) if user_id else None
         try:
             if provider:
-                reply = await self._provider_chat(provider, payload, messages, user_id=user_id)
+                reply = await self._provider_chat(
+                    provider, payload, messages, user_id=user_id
+                )
                 backend = f"provider:{provider.get('provider_type', 'unknown')}"
             elif payload.get("use_model_router"):
                 reply, router_meta = await self._router_chat(payload, messages)
@@ -102,7 +108,11 @@ class InferenceOrchestrator(Orchestrator):
                 self._active_generation_user_id = None
 
         self._emit_log(job_id, f"Generated {len(reply)} chars")
-        result: dict[str, Any] = {"content": reply, "backend": backend, "messages": len(messages)}
+        result: dict[str, Any] = {
+            "content": reply,
+            "backend": backend,
+            "messages": len(messages),
+        }
         if result_router_meta:
             result["router"] = result_router_meta
         return result

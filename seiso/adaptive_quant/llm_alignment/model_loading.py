@@ -113,7 +113,9 @@ def load_policy_and_reference(
     elif settings.bf16:
         model_kwargs["torch_dtype"] = __import__("torch").bfloat16
 
-    tokenizer = AutoTokenizer.from_pretrained(settings.sft_model_path, trust_remote_code=False)
+    tokenizer = AutoTokenizer.from_pretrained(
+        settings.sft_model_path, trust_remote_code=False
+    )
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 

@@ -72,7 +72,9 @@ def argmax(values: Sequence[float]) -> int:
     return best_index
 
 
-def discrete_precision_level(bit_width: int, discrete_bit_widths: Sequence[int]) -> float:
+def discrete_precision_level(
+    bit_width: int, discrete_bit_widths: Sequence[int]
+) -> float:
     """Map ``bit_width`` to [0, 1] along ``discrete_bit_widths`` range (0.0 when only one width)."""
     lo = min(discrete_bit_widths)
     hi = max(discrete_bit_widths)
@@ -106,7 +108,10 @@ def safe_ratio(numer: float, denom: float) -> float | None:
 
 
 def ratio_mean(
-    observed: list[float], simulated: list[float], *, clamp: tuple[float, float] = (0.01, 100.0)
+    observed: list[float],
+    simulated: list[float],
+    *,
+    clamp: tuple[float, float] = (0.01, 100.0),
 ) -> float:
     lower, upper = clamp
     ratios = [

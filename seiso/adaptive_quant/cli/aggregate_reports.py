@@ -87,7 +87,9 @@ def filtered_aggregate_section(
     ]
     return [
         title,
-        "\n".join(md_table(["metric", "mean", "std", "ci95_low", "ci95_high", "n"], rows)),
+        "\n".join(
+            md_table(["metric", "mean", "std", "ci95_low", "ci95_high", "n"], rows)
+        ),
         "",
     ]
 
@@ -165,7 +167,9 @@ def build_multiseed_report(
     ]
     lines.extend(filtered_aggregate_section(aggregated))
     lines.extend(
-        markdown_table_section("## Per-seed artifacts", ["seed", "summary"], per_seed_rows)
+        markdown_table_section(
+            "## Per-seed artifacts", ["seed", "summary"], per_seed_rows
+        )
     )
     lines.extend(
         notes_section(

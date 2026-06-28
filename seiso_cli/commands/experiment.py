@@ -26,7 +26,9 @@ def experiment_quant_regression(
         help="Base training YAML (quant is overridden per run)",
     ),
     quants: str = typer.Option("4bit,8bit,16bit", help="Training quants to compare"),
-    gguf_quants: str = typer.Option("q4_k_m,q8_0,f16", help="GGUF variants for route regression"),
+    gguf_quants: str = typer.Option(
+        "q4_k_m,q8_0,f16", help="GGUF variants for route regression"
+    ),
     deploy_quants: str = typer.Option(
         "4bit,8bit,16bit", help="Deployment quants to compare (HF eval)"
     ),
@@ -40,22 +42,34 @@ def experiment_quant_regression(
         None, help="Deprecated alias for --measurement hf|llama_cpp"
     ),
     llama_cpp_binary: str | None = typer.Option(None, help="Path to llama-cli"),
-    llama_cpp_timeout_s: float = typer.Option(600.0, help="Per-prompt llama.cpp timeout"),
+    llama_cpp_timeout_s: float = typer.Option(
+        600.0, help="Per-prompt llama.cpp timeout"
+    ),
     route_prompt_limit: int = typer.Option(16, help="Prompts per llama.cpp route eval"),
-    max_eval_samples: int = typer.Option(64, help="Eval samples for HF deploy-quant regression"),
+    max_eval_samples: int = typer.Option(
+        64, help="Eval samples for HF deploy-quant regression"
+    ),
     max_reward_regression: float | None = typer.Option(
         None, help="Max deploy reward regression vs best (default from config extra)"
     ),
     max_perplexity_regression: float | None = typer.Option(
-        None, help="Max deploy perplexity regression vs best (default from config extra)"
+        None,
+        help="Max deploy perplexity regression vs best (default from config extra)",
     ),
-    skip_training: bool = typer.Option(False, help="Reuse existing checkpoints under study_dir"),
-    skip_rl: bool = typer.Option(False, help="Train/export only; skip route regression"),
+    skip_training: bool = typer.Option(
+        False, help="Reuse existing checkpoints under study_dir"
+    ),
+    skip_rl: bool = typer.Option(
+        False, help="Train/export only; skip route regression"
+    ),
     json_out: bool = typer.Option(False, "--json", help="Print JSON report"),
 ) -> None:
     """Train one model at several QLoRA quants, export GGUFs, measure deployment-quant regression."""
     from forge.config import get_settings
-    from seiso.experiments.quant_regression import format_report_table, run_quant_regression_study
+    from seiso.experiments.quant_regression import (
+        format_report_table,
+        run_quant_regression_study,
+    )
     from seiso.training.config import TrainConfig
 
     root = Path(__file__).resolve().parents[2]
@@ -97,6 +111,8 @@ def experiment_quant_regression(
 
     console.print("")
     console.print(format_report_table(report))
-    console.print(f"\n[green]Report:[/] {report.study_dir}/quant_regression_report.json")
+    console.print(
+        f"\n[green]Report:[/] {report.study_dir}/quant_regression_report.json"
+    )
     if any(row.error for row in report.rows):
         raise typer.Exit(1)

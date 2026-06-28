@@ -34,7 +34,9 @@ def _nvcc_release_major(home: str) -> int | None:
     if not nvcc.is_file():
         return None
     try:
-        out = subprocess.check_output([str(nvcc), "--version"], text=True, stderr=subprocess.STDOUT)
+        out = subprocess.check_output(
+            [str(nvcc), "--version"], text=True, stderr=subprocess.STDOUT
+        )
     except (OSError, subprocess.CalledProcessError):
         return None
     for line in out.splitlines():
@@ -201,7 +203,9 @@ def configure_cuda_build_env() -> dict[str, str]:
     if home:
         os.environ["CUDA_HOME"] = home
         meta["cuda_home"] = home
-        os.environ["PATH"] = _sanitize_path_for_cuda_build(home, os.environ.get("PATH", ""))
+        os.environ["PATH"] = _sanitize_path_for_cuda_build(
+            home, os.environ.get("PATH", "")
+        )
         if not toolkit_ptxas_compatible(home):
             _warn_ptxas_mismatch(home)
             meta["ptxas_mismatch"] = "true"
@@ -252,13 +256,19 @@ def discover_cudart_lib_dir() -> str | None:
     home = discover_cuda_home()
     if home:
         lib = Path(home) / "lib"
-        if any((lib / name).is_file() for name in ("libcudart.so", "libcudart.so.13", "libcudart.so.12")):
+        if any(
+            (lib / name).is_file()
+            for name in ("libcudart.so", "libcudart.so.13", "libcudart.so.12")
+        ):
             return str(lib)
 
     for site in _site_packages():
         for rel in ("nvidia/cuda_runtime/lib", "nvidia/cu13/lib", "nvidia/cu12/lib"):
             lib = site / rel
-            if any((lib / name).is_file() for name in ("libcudart.so", "libcudart.so.13", "libcudart.so.12")):
+            if any(
+                (lib / name).is_file()
+                for name in ("libcudart.so", "libcudart.so.13", "libcudart.so.12")
+            ):
                 return str(lib)
     return None
 

@@ -10,7 +10,11 @@ from typing import Any, cast
 import yaml
 from pydantic import BaseModel, Field
 
-from seiso.bundled.config_builder import job_output_root, resolve_preset, validate_stages
+from seiso.bundled.config_builder import (
+    job_output_root,
+    resolve_preset,
+    validate_stages,
+)
 
 STAGE_ORDER = ("distill", "rollout", "dpo", "evaluate")
 
@@ -78,7 +82,9 @@ class DistillRLConfig(BaseModel):
     user_id: str
     output_root: Path
     preset: str = "smoke"
-    stages: list[str] = Field(default_factory=lambda: ["distill", "rollout", "dpo", "evaluate"])
+    stages: list[str] = Field(
+        default_factory=lambda: ["distill", "rollout", "dpo", "evaluate"]
+    )
     teacher_model: str
     student_model: str
     teacher_revision: str | None = None
@@ -208,7 +214,9 @@ def infer_use_chat_template(model_id: str, explicit: bool | None) -> bool:
     if explicit is not None:
         return explicit
     lowered = model_id.lower()
-    return any(marker in lowered for marker in ("instruct", "chat", "-it", "_it", "gemma"))
+    return any(
+        marker in lowered for marker in ("instruct", "chat", "-it", "_it", "gemma")
+    )
 
 
 def build_distill_rl_config(
@@ -220,7 +228,9 @@ def build_distill_rl_config(
 ) -> DistillRLConfig:
     merged = _merged_payload(payload)
     preset_name, preset = resolve_preset(PRESETS, str(merged.get("preset", "smoke")))
-    stages = list(merged.get("stages") or preset.get("stages") or PRESETS["smoke"]["stages"])
+    stages = list(
+        merged.get("stages") or preset.get("stages") or PRESETS["smoke"]["stages"]
+    )
     validate_stage_sequence(stages)
 
     hash_run_id = bool(merged.get("hash_run_id", False))
@@ -260,18 +270,25 @@ def build_distill_rl_config(
         deterministic=bool(merged.get("deterministic", True)),
         hash_run_id=bool(merged.get("hash_run_id", False)),
         distill_steps=int(merged.get("distill_steps", preset.get("distill_steps", 2))),
-        max_train_samples=merged.get("max_train_samples", preset.get("max_train_samples")),
+        max_train_samples=merged.get(
+            "max_train_samples", preset.get("max_train_samples")
+        ),
         distill_alpha=float(merged.get("distill_alpha", 0.5)),
         distill_temperature=float(merged.get("distill_temperature", 2.0)),
         align_distill_with_prompts=bool(
-            merged.get("align_distill_with_prompts", preset.get("align_distill_with_prompts", True))
+            merged.get(
+                "align_distill_with_prompts",
+                preset.get("align_distill_with_prompts", True),
+            )
         ),
         prompt_library_path=prompt_path,
         rollout_max_prompts=int(
             merged.get("rollout_max_prompts", preset.get("rollout_max_prompts", 4))
         ),
         rollout_max_new_tokens=int(
-            merged.get("rollout_max_new_tokens", preset.get("rollout_max_new_tokens", 32))
+            merged.get(
+                "rollout_max_new_tokens", preset.get("rollout_max_new_tokens", 32)
+            )
         ),
         rollout_temperature=float(merged.get("rollout_temperature", 0.7)),
         use_chat_template=use_chat_template,
@@ -283,20 +300,35 @@ def build_distill_rl_config(
         dpo_learning_rate=float(
             merged.get("dpo_learning_rate", preset.get("dpo_learning_rate", 5e-6))
         ),
-        dpo_batch_size=int(merged.get("dpo_batch_size", preset.get("dpo_batch_size", 1))),
+        dpo_batch_size=int(
+            merged.get("dpo_batch_size", preset.get("dpo_batch_size", 1))
+        ),
         dpo_gradient_accumulation_steps=int(
-            merged.get("dpo_gradient_accumulation_steps", preset.get("dpo_gradient_accumulation_steps", 8))
+            merged.get(
+                "dpo_gradient_accumulation_steps",
+                preset.get("dpo_gradient_accumulation_steps", 8),
+            )
         ),
         dpo_max_steps=merged.get("dpo_max_steps", preset.get("dpo_max_steps")),
-        dpo_save_steps=int(merged.get("dpo_save_steps", preset.get("dpo_save_steps", 200))),
+        dpo_save_steps=int(
+            merged.get("dpo_save_steps", preset.get("dpo_save_steps", 200))
+        ),
         dpo_use_lora=bool(merged.get("dpo_use_lora", True)),
         dpo_use_qlora=bool(merged.get("dpo_use_qlora", False)),
         dpo_average_log_prob=bool(
             merged.get("dpo_average_log_prob", preset.get("dpo_average_log_prob", True))
         ),
-        dpo_warmup_ratio=float(merged.get("dpo_warmup_ratio", preset.get("dpo_warmup_ratio", 0.1))),
-        dpo_weight_decay=float(merged.get("dpo_weight_decay", preset.get("dpo_weight_decay", 0.01))),
-        dpo_max_grad_norm=float(merged.get("dpo_max_grad_norm", preset.get("dpo_max_grad_norm", 0.3))),
-        eval_max_prompts=int(merged.get("eval_max_prompts", preset.get("eval_max_prompts", 8))),
+        dpo_warmup_ratio=float(
+            merged.get("dpo_warmup_ratio", preset.get("dpo_warmup_ratio", 0.1))
+        ),
+        dpo_weight_decay=float(
+            merged.get("dpo_weight_decay", preset.get("dpo_weight_decay", 0.01))
+        ),
+        dpo_max_grad_norm=float(
+            merged.get("dpo_max_grad_norm", preset.get("dpo_max_grad_norm", 0.3))
+        ),
+        eval_max_prompts=int(
+            merged.get("eval_max_prompts", preset.get("eval_max_prompts", 8))
+        ),
         evaluate_teacher=bool(merged.get("evaluate_teacher", False)),
     )

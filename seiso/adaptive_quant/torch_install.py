@@ -47,7 +47,10 @@ def cuda_torch_install_instructions(*, index_url: str = DEFAULT_CUDA_INDEX) -> s
 
 def torch_cuda_ready_report() -> dict[str, object]:
     """Canonical JSON-friendly summary of the active torch/CUDA install."""
-    from seiso.adaptive_quant.hardware import nvidia_smi_visible, resolve_nvidia_smi_executable
+    from seiso.adaptive_quant.hardware import (
+        nvidia_smi_visible,
+        resolve_nvidia_smi_executable,
+    )
     from seiso.adaptive_quant.torch_policy import torch_cuda_diagnostics
 
     report: dict[str, object] = dict(torch_cuda_diagnostics("cuda"))

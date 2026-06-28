@@ -33,7 +33,11 @@ def build_framework_config(
     """Return seiso.adaptive_quant.configuration.FrameworkConfig for a Forge job."""
     ensure_adaptive_quant_importable()
     from seiso.adaptive_quant.configuration import config_to_flat_dict
-    from seiso.adaptive_quant.easy_config import config_from_dict, load_config, named_preset
+    from seiso.adaptive_quant.easy_config import (
+        config_from_dict,
+        load_config,
+        named_preset,
+    )
 
     run_name = str(payload.get("run_name") or f"seiso_{job_id[:8]}")
     output_root = job_output_root(data_dir, "rl_quant", user_id, job_id)
@@ -53,8 +57,12 @@ def build_framework_config(
 
     overrides: dict[str, Any] = {
         **_artifact_paths(output_root, run_name),
-        "training_episodes": int(payload.get("training_episodes", base.training_episodes)),
-        "evaluation_episodes": int(payload.get("evaluation_episodes", base.evaluation_episodes)),
+        "training_episodes": int(
+            payload.get("training_episodes", base.training_episodes)
+        ),
+        "evaluation_episodes": int(
+            payload.get("evaluation_episodes", base.evaluation_episodes)
+        ),
         "seed": int(payload.get("seed", base.seed)),
         "backend": str(payload.get("backend", base.backend)),
         "training_backend": str(payload.get("training_backend", base.training_backend)),
@@ -91,7 +99,11 @@ def build_framework_config(
         overrides["kernel_rl_enabled"] = True
     if (kernel_cfg := payload.get("kernel")) and isinstance(kernel_cfg, dict):
         overrides.update(
-            {f"kernel_{key}": value for key, value in kernel_cfg.items() if key != "rl_enabled"}
+            {
+                f"kernel_{key}": value
+                for key, value in kernel_cfg.items()
+                if key != "rl_enabled"
+            }
         )
         if kernel_cfg.get("rl_enabled") is True:
             overrides["kernel_rl_enabled"] = True
@@ -108,9 +120,17 @@ def build_framework_config(
 
     if payload.get("router_enabled") is True:
         overrides["router_enabled"] = True
-    if (routes := payload.get("router_routes")) and isinstance(routes, (list, tuple)) and routes:
+    if (
+        (routes := payload.get("router_routes"))
+        and isinstance(routes, (list, tuple))
+        and routes
+    ):
         overrides["router_routes"] = tuple(str(r) for r in routes)
-    if (modes := payload.get("hardware_modes")) and isinstance(modes, (list, tuple)) and modes:
+    if (
+        (modes := payload.get("hardware_modes"))
+        and isinstance(modes, (list, tuple))
+        and modes
+    ):
         overrides["hardware_modes"] = tuple(str(m) for m in modes)
     if (
         (repos := payload.get("route_hf_allowed_repos"))
@@ -118,7 +138,11 @@ def build_framework_config(
         and repos
     ):
         overrides["route_hf_allowed_repos"] = tuple(str(r) for r in repos)
-    for bound_key in ("router_exploration", "router_regression_penalty", "llama_cpp_timeout_s"):
+    for bound_key in (
+        "router_exploration",
+        "router_regression_penalty",
+        "llama_cpp_timeout_s",
+    ):
         if bound_key in payload and payload[bound_key] is not None:
             overrides[bound_key] = payload[bound_key]
 

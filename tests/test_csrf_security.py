@@ -174,7 +174,9 @@ async def test_settings_includes_security_posture(app):
         )
         token = reg.json()["access_token"]
 
-        res = await client.get("/api/settings", headers={"Authorization": f"Bearer {token}"})
+        res = await client.get(
+            "/api/settings", headers={"Authorization": f"Bearer {token}"}
+        )
         assert res.status_code == 200
         sec = res.json()["security"]
         assert sec["bind_localhost"] is True

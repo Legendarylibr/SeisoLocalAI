@@ -18,13 +18,18 @@ class ExportOrchestrator(Orchestrator):
     kind = "export"
 
     async def execute(self, job_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-        from forge.services.memory_release import prepare_for_gpu_task, release_after_task
+        from forge.services.memory_release import (
+            prepare_for_gpu_task,
+            release_after_task,
+        )
 
         user_id = payload.get("user_id")
         if not user_id:
             raise PermissionError("user_id required for export")
         try:
-            checkpoint = assert_user_path(self.sandbox_root, user_id, payload["checkpoint"])
+            checkpoint = assert_user_path(
+                self.sandbox_root, user_id, payload["checkpoint"]
+            )
         except SecurityError as exc:
             raise PermissionError(str(exc)) from exc
 

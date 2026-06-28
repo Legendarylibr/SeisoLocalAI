@@ -24,7 +24,9 @@ def format_terminal_hyperlink(url: str, *, label: str | None = None) -> str:
     return f"\033]8;;{url}\033\\{text}\033]8;;\033\\"
 
 
-def wait_for_launcher_ready(url: str, *, timeout_s: float = 15.0, poll_s: float = 0.2) -> bool:
+def wait_for_launcher_ready(
+    url: str, *, timeout_s: float = 15.0, poll_s: float = 0.2
+) -> bool:
     """Poll the launcher URL until it responds or the timeout elapses."""
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
@@ -72,7 +74,9 @@ def open_dashboard_url(
             return completed.returncode == 0
         xdg_open = shutil.which("xdg-open")
         if xdg_open:
-            completed = subprocess.run([xdg_open, url], check=False, capture_output=True)
+            completed = subprocess.run(
+                [xdg_open, url], check=False, capture_output=True
+            )
             return completed.returncode == 0
     except OSError:
         return False

@@ -25,7 +25,9 @@ def run_continuous_pipeline(
     cli_startup_overrides: dict[str, object] | None = None,
 ) -> dict[str, object]:
     if not config.continuous_learning_enabled:
-        raise ValueError("continuous_learning_enabled must be true for the continuous pipeline")
+        raise ValueError(
+            "continuous_learning_enabled must be true for the continuous pipeline"
+        )
 
     summary_path = config.summary_path()
     trainer = build_trainer(config)
@@ -59,7 +61,9 @@ def run_continuous_pipeline(
         raise
     except Exception as exc:
         pipeline_error = exc
-        from seiso.adaptive_quant.research_pipeline import write_pipeline_failure_artifact
+        from seiso.adaptive_quant.research_pipeline import (
+            write_pipeline_failure_artifact,
+        )
 
         write_pipeline_failure_artifact(config, exc)
     finally:
@@ -93,9 +97,13 @@ def run_continuous_pipeline(
             "report": report_path,
         },
     }
-    from seiso.adaptive_quant.pipeline.output_summary import build_research_artifact_index
+    from seiso.adaptive_quant.pipeline.output_summary import (
+        build_research_artifact_index,
+    )
 
-    summary["artifact_index"] = build_research_artifact_index(config, summary["artifacts"])
+    summary["artifact_index"] = build_research_artifact_index(
+        config, summary["artifacts"]
+    )
     write_json(summary_path, summary)
     return summary
 
@@ -171,7 +179,11 @@ def _write_continuous_report(
         f"- checkpoint: `{checkpoint_path or 'not written'}`",
         "",
         "## Continuous stream",
-        *(md_table(["metric", "value"], continuous_rows) if continuous_rows else ["_not written_"]),
+        *(
+            md_table(["metric", "value"], continuous_rows)
+            if continuous_rows
+            else ["_not written_"]
+        ),
         "",
         "## Evaluation",
         *(md_table(["metric", "value"], eval_rows) if eval_rows else ["_not written_"]),

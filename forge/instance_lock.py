@@ -23,14 +23,20 @@ _WINDOWS_ADDR_IN_USE = frozenset({10048, 10049})
 class ForgeAlreadyRunningError(RuntimeError):
     """Raised when another Forge instance holds the port or data directory."""
 
-    def __init__(self, message: str, *, url: str | None = None, pid: int | None = None) -> None:
+    def __init__(
+        self, message: str, *, url: str | None = None, pid: int | None = None
+    ) -> None:
         super().__init__(message)
         self.url = url
         self.pid = pid
 
 
 def multi_forge_allowed() -> bool:
-    return os.environ.get("SEISO_ALLOW_MULTI_FORGE", "").strip().lower() in {"1", "true", "yes"}
+    return os.environ.get("SEISO_ALLOW_MULTI_FORGE", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }
 
 
 def data_dir_lock_path(data_dir: Path) -> Path:
@@ -91,7 +97,10 @@ def _is_addr_in_use(exc: OSError) -> bool:
 
 def _probe_bind(host: str, port: int) -> None:
     bind_host = host
-    if host in {"0.0.0.0", "::"}:  # nosec B104 — detect all-interfaces bind requests, not binding to them
+    if host in {
+        "0.0.0.0",
+        "::",
+    }:  # nosec B104 — detect all-interfaces bind requests, not binding to them
         bind_host = "127.0.0.1"
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
@@ -202,7 +211,9 @@ class _ExclusiveFileLock:
             if retry_stale and pid and not _pid_alive(pid):
                 os.close(fd)
                 path.unlink(missing_ok=True)
-                self._try_acquire(path, meta=meta, busy_factory=busy_factory, retry_stale=False)
+                self._try_acquire(
+                    path, meta=meta, busy_factory=busy_factory, retry_stale=False
+                )
                 return
             os.close(fd)
             raise busy_factory(existing) from exc
@@ -300,7 +311,9 @@ class ForgeInstanceLocks:
             self.port_lock = None
 
 
-def acquire_forge_instance_locks(*, host: str, port: int, data_dir: Path) -> ForgeInstanceLocks:
+def acquire_forge_instance_locks(
+    *, host: str, port: int, data_dir: Path
+) -> ForgeInstanceLocks:
     """Acquire port + data-dir locks for `seiso forge` — held until release()."""
     if multi_forge_allowed():
         return ForgeInstanceLocks()

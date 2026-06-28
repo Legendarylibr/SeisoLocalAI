@@ -36,7 +36,9 @@ def create_pipeline_paper_bundle(
 
     metrics = flatten_numeric(headline_summary_for_metrics(summary))
     selected_metrics = _select_metrics(metrics, config=config)
-    metric_rows = [{"metric": key, "value": value} for key, value in selected_metrics.items()]
+    metric_rows = [
+        {"metric": key, "value": value} for key, value in selected_metrics.items()
+    ]
 
     manifest = _manifest(config=config, run_name=config.run_name, summary=summary)
     manifest["metric_sources"] = metric_sources_for_config(config)
@@ -63,7 +65,9 @@ def create_pipeline_paper_bundle(
         ),
     )
 
-    claims = build_claims_validation(config=config, summary=summary, metrics=selected_metrics)
+    claims = build_claims_validation(
+        config=config, summary=summary, metrics=selected_metrics
+    )
     write_json(claims_json_path, claims)
     write_text_file(claims_md_path, _claims_markdown(claims))
     write_text_file(
@@ -71,9 +75,11 @@ def create_pipeline_paper_bundle(
         _appendix_markdown(
             run_name=config.run_name,
             bundle_dir=bundle_dir,
-            artifacts=summary.get("artifacts", {})
-            if isinstance(summary.get("artifacts"), Mapping)
-            else {},
+            artifacts=(
+                summary.get("artifacts", {})
+                if isinstance(summary.get("artifacts"), Mapping)
+                else {}
+            ),
             episode_count=episode_count,
             claims=claims,
         ),
@@ -142,7 +148,16 @@ def create_multiseed_paper_bundle(
     write_json(stats_json_path, aggregate_stats)
     _write_csv(
         stats_csv_path,
-        ["metric", "mean", "std", "n", "stderr", "ci95_low", "ci95_high", "effect_size_vs_zero"],
+        [
+            "metric",
+            "mean",
+            "std",
+            "n",
+            "stderr",
+            "ci95_low",
+            "ci95_high",
+            "effect_size_vs_zero",
+        ],
         rows,
     )
     claims = build_claims_validation(
@@ -202,7 +217,9 @@ def aggregate_values(values: Sequence[float]) -> dict[str, float | int]:
     }
 
 
-def _select_metrics(metrics: Mapping[str, float], *, config: FrameworkConfig) -> dict[str, float]:
+def _select_metrics(
+    metrics: Mapping[str, float], *, config: FrameworkConfig
+) -> dict[str, float]:
     """
     Pick a small set of high-signal metrics for `metrics_summary.*`.
 
@@ -226,7 +243,9 @@ def _select_metrics(metrics: Mapping[str, float], *, config: FrameworkConfig) ->
         "quality_variance_delta",
     )
     needles = (
-        base_needles if config.backend == "llama_cpp" else base_needles + simulator_only_needles
+        base_needles
+        if config.backend == "llama_cpp"
+        else base_needles + simulator_only_needles
     )
     return {
         key: metrics[key]
@@ -238,7 +257,9 @@ def _select_metrics(metrics: Mapping[str, float], *, config: FrameworkConfig) ->
 def _manifest(
     *, config: FrameworkConfig, run_name: str, summary: Mapping[str, Any]
 ) -> dict[str, Any]:
-    config_dict = summary.get("config") if isinstance(summary.get("config"), Mapping) else {}
+    config_dict = (
+        summary.get("config") if isinstance(summary.get("config"), Mapping) else {}
+    )
     llama_binary = config.llama_cpp_binary
     llama_model = config.llama_cpp_model
     external_quality_path = config.external_quality_path
@@ -342,7 +363,9 @@ def _write_episode_csv(path: Path, telemetry_path: str | None) -> int:
     if not records:
         _write_csv(path, ["record_index"], [])
         return 0
-    rows = [_flatten_record(record, index=index) for index, record in enumerate(records)]
+    rows = [
+        _flatten_record(record, index=index) for index, record in enumerate(records)
+    ]
     headers = sorted({key for row in rows for key in row})
     _write_csv(path, headers, rows)
     return len(rows)
@@ -366,7 +389,9 @@ def _flatten_record(record: Mapping[str, Any], *, index: int) -> dict[str, Any]:
     return row
 
 
-def _write_csv(path: Path, headers: Sequence[str], rows: Sequence[Mapping[str, Any]]) -> None:
+def _write_csv(
+    path: Path, headers: Sequence[str], rows: Sequence[Mapping[str, Any]]
+) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=list(headers), extrasaction="ignore")

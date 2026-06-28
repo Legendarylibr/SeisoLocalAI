@@ -22,7 +22,10 @@ async def test_runner_stream_updates_counts_decode_steps(monkeypatch):
         yield StreamToken("a")
         yield StreamToken("bc", 2)
 
-    monkeypatch.setattr(runner, "_resolve_route", lambda _payload, _path: ("llama", "/tmp/model.gguf"))
+    monkeypatch.setattr(
+        runner, "_resolve_route", lambda _payload, _path: ("llama", "/tmp/model.gguf")
+    )
+
     async def _noop_switch(*_args, **_kwargs) -> None:
         return None
 
@@ -34,7 +37,10 @@ async def test_runner_stream_updates_counts_decode_steps(monkeypatch):
     updates = [
         update
         async for update in runner.stream_updates(
-            {"model_path": "/tmp/model.gguf", "messages": [{"role": "user", "content": "hi"}]}
+            {
+                "model_path": "/tmp/model.gguf",
+                "messages": [{"role": "user", "content": "hi"}],
+            }
         )
     ]
 

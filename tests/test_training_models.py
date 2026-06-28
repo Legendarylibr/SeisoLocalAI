@@ -53,7 +53,6 @@ def test_resolve_training_model_from_inventory(tmp_path: Path):
 def test_resolve_training_model_rejects_gguf_only_repo(tmp_path: Path):
     import pytest
 
-
     with pytest.raises(ValueError, match="GGUF-only"):
         resolve_training_model_id(
             "unsloth/gemma-4-E4B-it-GGUF",
@@ -63,7 +62,9 @@ def test_resolve_training_model_rejects_gguf_only_repo(tmp_path: Path):
         )
 
 
-def test_resolve_training_model_skips_gguf_only_cache_marked_safetensors(tmp_path: Path):
+def test_resolve_training_model_skips_gguf_only_cache_marked_safetensors(
+    tmp_path: Path,
+):
     user_id = "user-1"
     bogus = tmp_path / "models" / user_id / "unsloth--gemma-4-E4B-it-GGUF"
     bogus.mkdir(parents=True)
@@ -130,7 +131,13 @@ def test_list_trainable_models_skips_gguf(tmp_path: Path):
             "source": "hf:org/model",
             "format": "safetensors",
         },
-        {"id": "b", "name": "chat", "path": str(gguf), "source": "hf:org/model", "format": "gguf"},
+        {
+            "id": "b",
+            "name": "chat",
+            "path": str(gguf),
+            "source": "hf:org/model",
+            "format": "gguf",
+        },
     ]
     models = list_trainable_models(inventory, data_dir=tmp_path, user_id=user_id)
     assert len(models) == 1

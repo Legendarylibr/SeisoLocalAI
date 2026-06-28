@@ -52,7 +52,10 @@ def test_normalize_alpaca_strips_and_requires_output():
         DatasetFormat.ALPACA,
     )
     assert row == {"instruction": "hi", "output": "hello"}
-    assert normalize_sample({"instruction": "x", "output": ""}, DatasetFormat.ALPACA) is None
+    assert (
+        normalize_sample({"instruction": "x", "output": ""}, DatasetFormat.ALPACA)
+        is None
+    )
 
 
 def test_normalize_chat_requires_assistant():
@@ -80,7 +83,9 @@ def test_preprocess_drops_invalid_and_duplicates():
             {"instruction": "b", "output": ""},
         ]
     )
-    cleaned, stats, fmt = preprocess_training_dataset(ds, dataset_format=DatasetFormat.ALPACA)
+    cleaned, stats, fmt = preprocess_training_dataset(
+        ds, dataset_format=DatasetFormat.ALPACA
+    )
     assert fmt == DatasetFormat.ALPACA
     assert len(cleaned) == 1
     assert stats["removed_invalid"] == 1
@@ -107,7 +112,10 @@ def test_parse_human_assistant_dialog_multiturn():
 
 
 def test_detect_format_preference_pairs():
-    sample = {"chosen": "Human: hi\n\nAssistant: hello", "rejected": "Human: hi\n\nAssistant: nope"}
+    sample = {
+        "chosen": "Human: hi\n\nAssistant: hello",
+        "rejected": "Human: hi\n\nAssistant: nope",
+    }
     assert detect_format(sample) == DatasetFormat.PREFERENCE
 
 
@@ -138,7 +146,9 @@ def test_preprocess_preference_resolves_to_chat():
             },
         ]
     )
-    cleaned, stats, fmt = preprocess_training_dataset(ds, dataset_format=DatasetFormat.AUTO)
+    cleaned, stats, fmt = preprocess_training_dataset(
+        ds, dataset_format=DatasetFormat.AUTO
+    )
     assert fmt == DatasetFormat.CHAT
     assert len(cleaned) == 2
     assert stats["kept"] == 2

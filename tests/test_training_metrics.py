@@ -1,6 +1,10 @@
 """Tests for structured training metrics."""
 
-from seiso.training.metrics import METRIC_STDOUT_PREFIX, normalize_training_log, parse_metric_line
+from seiso.training.metrics import (
+    METRIC_STDOUT_PREFIX,
+    normalize_training_log,
+    parse_metric_line,
+)
 
 
 class _State:

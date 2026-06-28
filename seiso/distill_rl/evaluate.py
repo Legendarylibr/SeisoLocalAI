@@ -26,7 +26,10 @@ def evaluate_pipeline(
     eval_prompts = load_rollout_prompts(prompt_library_path, limit=eval_max_prompts)
     eval_texts = [prompt.text for prompt in eval_prompts]
 
-    results: dict[str, Any] = {"checkpoints": {}, "eval_prompt_count": len(eval_prompts)}
+    results: dict[str, Any] = {
+        "checkpoints": {},
+        "eval_prompt_count": len(eval_prompts),
+    }
     val_rows = _load_jsonl(val_preferences_path)
 
     for name, model_ref in checkpoints.items():
@@ -106,8 +109,12 @@ def _val_preference_metrics(
     correct = 0
     margins: list[float] = []
     for row in val_rows:
-        chosen_lp = _sequence_logprob(model, tokenizer, row["prompt"], row["chosen"], device)
-        rejected_lp = _sequence_logprob(model, tokenizer, row["prompt"], row["rejected"], device)
+        chosen_lp = _sequence_logprob(
+            model, tokenizer, row["prompt"], row["chosen"], device
+        )
+        rejected_lp = _sequence_logprob(
+            model, tokenizer, row["prompt"], row["rejected"], device
+        )
         margin = chosen_lp - rejected_lp
         margins.append(margin)
         if margin > 0:
@@ -147,7 +154,9 @@ def _sequence_logprob(
         log_probs = torch.log_softmax(logits, dim=-1)
         token_log_probs = log_probs.gather(1, labels.unsqueeze(1)).squeeze(1)
         if average:
-            return float(token_log_probs.mean().item()) if token_log_probs.numel() else 0.0
+            return (
+                float(token_log_probs.mean().item()) if token_log_probs.numel() else 0.0
+            )
         return float(token_log_probs.sum().item())
 
 

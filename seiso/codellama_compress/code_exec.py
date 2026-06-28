@@ -53,7 +53,9 @@ class ExecResult:
     exit_code: int
     stdout: str
     stderr: str
-    reason: Literal["ok", "timeout", "runtime_error", "internal_error", "unsupported_platform"]
+    reason: Literal[
+        "ok", "timeout", "runtime_error", "internal_error", "unsupported_platform"
+    ]
 
 
 def _limit_resources() -> None:
@@ -152,8 +154,12 @@ def run_python_sandboxed(*, code: str, timeout_s: float = 3.0) -> ExecResult:
                 return ExecResult(
                     ok=False,
                     exit_code=124,
-                    stdout=_truncate((e.stdout or "") if isinstance(e.stdout, str) else ""),
-                    stderr=_truncate((e.stderr or "") if isinstance(e.stderr, str) else ""),
+                    stdout=_truncate(
+                        (e.stdout or "") if isinstance(e.stdout, str) else ""
+                    ),
+                    stderr=_truncate(
+                        (e.stderr or "") if isinstance(e.stderr, str) else ""
+                    ),
                     reason="timeout",
                 )
     except Exception as e:  # pragma: no cover

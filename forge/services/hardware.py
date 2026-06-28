@@ -65,7 +65,10 @@ def enrich_catalog_models(
     fetch_sizes: bool = True,
     diversify: bool = False,
 ) -> list[dict[str, Any]]:
-    from forge.services.hf_hub import estimate_snapshot_download_bytes, resolve_gguf_artifact
+    from forge.services.hf_hub import (
+        estimate_snapshot_download_bytes,
+        resolve_gguf_artifact,
+    )
     from seiso.models.catalog import diversify_by_family, get_by_repo, is_gguf_hub_repo
 
     download_info: dict[str, dict[str, Any]] = {}
@@ -97,7 +100,9 @@ def enrich_catalog_models(
                 return repo_id, None, str(exc)
 
         with ThreadPoolExecutor(max_workers=workers) as pool:
-            futures = {pool.submit(fetch_info, m["repo_id"]): m["repo_id"] for m in candidates}
+            futures = {
+                pool.submit(fetch_info, m["repo_id"]): m["repo_id"] for m in candidates
+            }
             for future in as_completed(futures):
                 repo_id, info, error = future.result()
                 if info:
@@ -241,7 +246,9 @@ def enrich_trainable_catalog_models(
     return enriched
 
 
-def recommended_catalog_repo(profile: dict[str, Any], *, task: str = "chat") -> str | None:
+def recommended_catalog_repo(
+    profile: dict[str, Any], *, task: str = "chat"
+) -> str | None:
     from seiso.models.catalog import HubSearchError, search_catalog
 
     tier = classify_tier(profile)

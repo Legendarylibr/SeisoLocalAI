@@ -57,5 +57,7 @@ def validate_csrf(request: Request) -> bool:
     cookie_token = request.cookies.get(CSRF_COOKIE)
     header_token = request.headers.get(CSRF_HEADER)
     return bool(
-        cookie_token and header_token and secrets.compare_digest(cookie_token, header_token)
+        cookie_token
+        and header_token
+        and secrets.compare_digest(cookie_token, header_token)
     )

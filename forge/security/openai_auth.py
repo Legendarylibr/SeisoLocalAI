@@ -25,10 +25,14 @@ async def get_openai_user_id(
     """Accept session JWT or inference-scoped API key (never full admin via API key alone)."""
     if creds and creds.credentials:
         token = creds.credentials.strip()
-        if settings.inference_api_key and secrets.compare_digest(token, settings.inference_api_key):
+        if settings.inference_api_key and secrets.compare_digest(
+            token, settings.inference_api_key
+        ):
             user = await db.get_sole_user()
             if not user:
-                raise HTTPException(status.HTTP_401_UNAUTHORIZED, "No local user configured")
+                raise HTTPException(
+                    status.HTTP_401_UNAUTHORIZED, "No local user configured"
+                )
             return str(user["id"])
         if token.startswith(_INFERENCE_KEY_PREFIX):
             raise HTTPException(

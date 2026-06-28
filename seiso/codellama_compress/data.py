@@ -9,7 +9,9 @@ from .config import DatasetConfig
 from .security import dataset_load_extra_kwargs, normalize_training_text
 
 
-def iter_dataset_texts(dataset_cfg: DatasetConfig, *, force_streaming: bool = False) -> Iterable[str]:
+def iter_dataset_texts(
+    dataset_cfg: DatasetConfig, *, force_streaming: bool = False
+) -> Iterable[str]:
     """Yield normalized non-empty code/text samples from an allowlisted dataset."""
     kwargs = dataset_load_extra_kwargs(dataset_cfg)
     if force_streaming:
@@ -26,7 +28,10 @@ def iter_dataset_texts(dataset_cfg: DatasetConfig, *, force_streaming: bool = Fa
             continue
         yield normalize_training_text(txt)
         n += 1
-        if dataset_cfg.max_train_samples is not None and n >= dataset_cfg.max_train_samples:
+        if (
+            dataset_cfg.max_train_samples is not None
+            and n >= dataset_cfg.max_train_samples
+        ):
             break
 
 

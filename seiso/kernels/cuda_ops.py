@@ -134,7 +134,11 @@ def _load_extension() -> Any | None:
         )
         plat = detect_gpu()
         target = "WSL2 CUDA" if plat.is_wsl2 else "native CUDA"
-        logger.info("Seiso %s fused kernels loaded (SM %s)", target, plat.cuda_compute_capability)
+        logger.info(
+            "Seiso %s fused kernels loaded (SM %s)",
+            target,
+            plat.cuda_compute_capability,
+        )
         return _EXT
     except Exception as exc:  # noqa: BLE001
         _EXT_ERROR = str(exc)
@@ -215,7 +219,9 @@ def fused_swiglu(gate, up):
     return torch.nn.functional.silu(gate) * up
 
 
-def fused_lora_delta(x, lora_A, lora_B, base=None, scale: float = 1.0, *, inplace: bool = False):
+def fused_lora_delta(
+    x, lora_A, lora_B, base=None, scale: float = 1.0, *, inplace: bool = False
+):
     """Fused low-rank delta: ``base + scale * B @ (A @ x)`` for 1D or 2D inputs."""
 
     if not x.is_cuda:
@@ -257,7 +263,9 @@ def cross_entropy_backward(
     ext = _load_extension()
     if ext is None:
         raise RuntimeError("CUDA cross_entropy_backward requires native extension")
-    return ext.cross_entropy_backward(logits, labels, row_max, row_lse, ignore_index, grad_scale)
+    return ext.cross_entropy_backward(
+        logits, labels, row_max, row_lse, ignore_index, grad_scale
+    )
 
 
 def fused_lora_qkv_delta(

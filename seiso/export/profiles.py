@@ -23,7 +23,11 @@ class ExportProfile(StrEnum):
 
 _PROFILE_FORMATS: dict[ExportProfile, list[ExportFormat]] = {
     ExportProfile.LORA_ADAPTER: [ExportFormat.LORA],
-    ExportProfile.LORA_BUNDLE: [ExportFormat.LORA, ExportFormat.MERGED, ExportFormat.GGUF],
+    ExportProfile.LORA_BUNDLE: [
+        ExportFormat.LORA,
+        ExportFormat.MERGED,
+        ExportFormat.GGUF,
+    ],
     ExportProfile.FULL_FINETUNE: [ExportFormat.FULL],
     ExportProfile.FULL_BUNDLE: [ExportFormat.FULL, ExportFormat.GGUF],
     ExportProfile.INFERENCE: [ExportFormat.MERGED, ExportFormat.GGUF],
@@ -44,7 +48,9 @@ def resolve_profile(name: str | ExportProfile) -> ExportProfile:
         return ExportProfile(name)
     except ValueError as exc:
         valid = ", ".join(p.value for p in ExportProfile)
-        raise ValueError(f"Unknown export profile {name!r}; choose from: {valid}") from exc
+        raise ValueError(
+            f"Unknown export profile {name!r}; choose from: {valid}"
+        ) from exc
 
 
 def formats_for_profile(profile: ExportProfile) -> list[ExportFormat]:

@@ -94,7 +94,9 @@ def write_analysis_artifacts(
     *,
     json_name: str,
     bar_charts: list[tuple[str, str, dict[str, float], str]] | None = None,
-    scatter_charts: list[tuple[str, str, list[tuple[float, float]], str, str]] | None = None,
+    scatter_charts: (
+        list[tuple[str, str, list[tuple[float, float]], str, str]] | None
+    ) = None,
 ) -> None:
     write_json(str(output_root / json_name), summary)
     for filename, title, values, y_label in bar_charts or ():

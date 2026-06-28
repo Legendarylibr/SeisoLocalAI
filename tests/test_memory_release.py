@@ -47,7 +47,9 @@ def test_prepare_for_gpu_task_blocks_other_running_jobs(monkeypatch):
     monkeypatch.setattr(
         memory_release,
         "running_gpu_task_kinds",
-        lambda exclude_job_id=None: [] if exclude_job_id in {"job-1", "job-2"} else ["training"],
+        lambda exclude_job_id=None: (
+            [] if exclude_job_id in {"job-1", "job-2"} else ["training"]
+        ),
     )
 
     memory_release.prepare_for_gpu_task(task="export", job_id="job-2")

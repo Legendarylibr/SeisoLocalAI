@@ -34,7 +34,12 @@ def validate_bind_host(host: str) -> None:
     normalized = host.strip().lower()
     if normalized in _LOOPBACK_HOSTS:
         return
-    if os.environ.get(_ALLOW_REMOTE_ENV, "").strip().lower() in {"1", "true", "yes", "on"}:
+    if os.environ.get(_ALLOW_REMOTE_ENV, "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }:
         return
     raise SystemExit(
         f"Refusing to bind launcher to {host!r}. "

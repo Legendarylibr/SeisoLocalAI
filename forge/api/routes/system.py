@@ -7,7 +7,12 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, Query
 
 from forge.security.auth import get_current_user_id
-from forge.services.hardware import build_guidance, hardware_profile, hardware_summary, live_metrics
+from forge.services.hardware import (
+    build_guidance,
+    hardware_profile,
+    hardware_summary,
+    live_metrics,
+)
 from seiso.models.loader import Backend
 
 router = APIRouter(prefix="/system", tags=["system"])
@@ -42,7 +47,9 @@ async def get_guide(
     )
     return {
         "goal": goal,
-        "steps": [{"title": s.title, "detail": s.detail, "path": s.path} for s in steps],
+        "steps": [
+            {"title": s.title, "detail": s.detail, "path": s.path} for s in steps
+        ],
         "hardware_summary": hardware_summary(profile),
         "local_only": True,
     }

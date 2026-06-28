@@ -161,7 +161,9 @@ class QuantizationDecision:
     unstable: bool = False
     metadata: dict[str, Any] = field(default_factory=dict)
 
-    def feedback_vector(self, max_bits: int, scale_upper: float, clip_upper: float) -> list[float]:
+    def feedback_vector(
+        self, max_bits: int, scale_upper: float, clip_upper: float
+    ) -> list[float]:
         average_bits = mean(self.effective_layer_bits)
         return [
             average_bits / max_bits if max_bits else 0.0,

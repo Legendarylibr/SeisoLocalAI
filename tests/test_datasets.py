@@ -11,7 +11,9 @@ from seiso.training.datasets import format_dataset_text, prepare_tokenized_datas
 class _FakeTokenizer:
     eos_token = "<eos>"
 
-    def apply_chat_template(self, messages, tokenize=False, add_generation_prompt=False):
+    def apply_chat_template(
+        self, messages, tokenize=False, add_generation_prompt=False
+    ):
         parts = []
         for m in messages:
             parts.append(f"{m['role']}: {m['content']}")
@@ -25,7 +27,9 @@ class _FakeTokenizer:
     def __call__(self, text, truncation=True, max_length=2048, padding=False):
         if isinstance(text, list):
             rows = [
-                self(item, truncation=truncation, max_length=max_length, padding=padding)
+                self(
+                    item, truncation=truncation, max_length=max_length, padding=padding
+                )
                 for item in text
             ]
             return {
@@ -167,7 +171,9 @@ def test_format_dataset_text_uses_batched_map_and_appends_eos():
             return _Rows([{"text": text} for text in mapped["text"]])
 
     ds = _Rows([{"text": "hello"}, {"text": "already<eos>"}])
-    formatted, fmt = format_dataset_text(ds, _FakeTokenizer(), DatasetFormat.TEXT, num_proc=2)
+    formatted, fmt = format_dataset_text(
+        ds, _FakeTokenizer(), DatasetFormat.TEXT, num_proc=2
+    )
 
     assert fmt == DatasetFormat.TEXT
     assert ds.map_kwargs == {"batched": True, "num_proc": 2}

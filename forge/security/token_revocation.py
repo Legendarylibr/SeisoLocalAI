@@ -40,7 +40,9 @@ def _persist() -> None:
         return
     try:
         _store_path.parent.mkdir(parents=True, exist_ok=True)
-        _store_path.write_text(json.dumps(_revoked, separators=(",", ":")), encoding="utf-8")
+        _store_path.write_text(
+            json.dumps(_revoked, separators=(",", ":")), encoding="utf-8"
+        )
         _store_path.chmod(0o600)
     except OSError:
         logger.warning("Could not persist revoked JTIs")

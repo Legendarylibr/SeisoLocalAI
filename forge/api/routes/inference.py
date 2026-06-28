@@ -26,7 +26,10 @@ from forge.services.inference_chat import (
     resolve_preload_context,
 )
 from forge.services.inference_models import get_inference_option, list_inference_options
-from forge.services.knowledge_context import format_knowledge_context, retrieve_knowledge_chunks
+from forge.services.knowledge_context import (
+    format_knowledge_context,
+    retrieve_knowledge_chunks,
+)
 from forge.services.knowledge_paths import validate_kb_id
 from forge.services.llm_output import StreamingOutputSanitizer, sanitize_llm_output
 from forge.services.model_router_client import ROUTER_MODEL_ID, fetch_router_status
@@ -50,7 +53,9 @@ class ChatRequest(BaseModel):
     draft_model_id: str | None = None
     draft_model_path: str | None = None
     num_speculative_tokens: int | None = Field(default=None, ge=1, le=32)
-    inference_backend: str = Field(default="auto", description="auto | llamacpp | mlx | torch")
+    inference_backend: str = Field(
+        default="auto", description="auto | llamacpp | mlx | torch"
+    )
     messages: list[dict[str, str]] = Field(default_factory=list)
     max_tokens: int = Field(default=2048, ge=1, le=8192)
     n_ctx: int | None = Field(default=None, ge=2048, le=131072)
@@ -74,7 +79,9 @@ class ThreadCreate(BaseModel):
 
 class PreloadRequest(BaseModel):
     model_id: str
-    inference_backend: str = Field(default="auto", description="auto | llamacpp | mlx | torch")
+    inference_backend: str = Field(
+        default="auto", description="auto | llamacpp | mlx | torch"
+    )
 
 
 @router.post("/threads")
@@ -216,7 +223,10 @@ async def get_chat_context(
     """Context window usage for the chat UI."""
     from forge.services.chat_context import context_status_for_history
     from forge.services.inference_models import get_inference_option
-    from forge.services.knowledge_context import format_knowledge_context, retrieve_knowledge_chunks
+    from forge.services.knowledge_context import (
+        format_knowledge_context,
+        retrieve_knowledge_chunks,
+    )
 
     history: list[dict] = []
     if thread_id:
@@ -425,7 +435,9 @@ async def chat(
     knowledge_context: str | None = None
     if body.knowledge_base_id:
         kb_id = validate_kb_id(body.knowledge_base_id)
-        user_query = str(body.messages[-1].get("content", "")).strip() if body.messages else ""
+        user_query = (
+            str(body.messages[-1].get("content", "")).strip() if body.messages else ""
+        )
         chunks = retrieve_knowledge_chunks(
             settings.data_dir,
             user_id=user_id,
@@ -486,11 +498,15 @@ async def chat(
             if model_updates.get("use_model_router"):
                 payload["router_model"] = body.router_model
         else:
-            raise HTTPException(400, "Select a model from inventory or provide model_path")
+            raise HTTPException(
+                400, "Select a model from inventory or provide model_path"
+            )
 
     if body.draft_model_id or body.draft_model_path:
         if body.provider_id:
-            raise HTTPException(400, "Speculative decoding is not available for cloud providers")
+            raise HTTPException(
+                400, "Speculative decoding is not available for cloud providers"
+            )
         payload.update(
             await resolve_draft_model(
                 db,
@@ -540,7 +556,9 @@ async def chat(
                 )
                 cancelled = False
                 try:
-                    orchestrator._emit_log(job_id, f"Streaming inference ({backend_label})")
+                    orchestrator._emit_log(
+                        job_id, f"Streaming inference ({backend_label})"
+                    )
                     async for update in orchestrator.stream_local_updates(payload):
                         raw_parts.append(update.text)
                         yield {
@@ -595,9 +613,13 @@ async def chat(
     if job.status.value == "failed":
         raise HTTPException(500, job.error or "Inference failed")
     if body.thread_id and job.result.get("content"):
-        content = sanitize_llm_output(job.result["content"], strip_tool_calls=not body.tools)
+        content = sanitize_llm_output(
+            job.result["content"], strip_tool_calls=not body.tools
+        )
         await db.add_message(body.thread_id, "assistant", content)
     result = dict(job.result)
     if result.get("content") and not body.tools:
-        result["content"] = sanitize_llm_output(result["content"], strip_tool_calls=True)
+        result["content"] = sanitize_llm_output(
+            result["content"], strip_tool_calls=True
+        )
     return {"job_id": job_id, **result}

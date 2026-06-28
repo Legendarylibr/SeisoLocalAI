@@ -105,7 +105,9 @@ def test_summarize_route_report_ignores_non_finite_metrics():
 def test_summarize_hf_deploy_report_ignores_non_finite_metrics():
     report = {
         "rows": [{"reward": "nan", "perplexity": "inf"}],
-        "recommendations": [{"route_id": "4bit", "deploy_quant": "4bit", "memory_mb": "bad"}],
+        "recommendations": [
+            {"route_id": "4bit", "deploy_quant": "4bit", "memory_mb": "bad"}
+        ],
     }
     metrics = summarize_hf_deploy_report(report)
     assert metrics["eval_mean_reward"] is None
@@ -188,7 +190,9 @@ def test_build_eval_route_prompt_library_from_metamath(monkeypatch, tmp_path: Pa
     )
     train_out = tmp_path / "train-4bit"
     train_out.mkdir()
-    (train_out / "train_config_snapshot.json").write_text(cfg.model_dump_json(), encoding="utf-8")
+    (train_out / "train_config_snapshot.json").write_text(
+        cfg.model_dump_json(), encoding="utf-8"
+    )
 
     class _EvalSplit:
         def __init__(self):
@@ -228,7 +232,9 @@ def test_build_eval_route_prompt_library_from_metamath(monkeypatch, tmp_path: Pa
     )
 
     class _Tok:
-        def apply_chat_template(self, messages, *, tokenize=False, add_generation_prompt=False):
+        def apply_chat_template(
+            self, messages, *, tokenize=False, add_generation_prompt=False
+        ):
             del tokenize
             parts = [f"{m['role']}: {m['content']}" for m in messages]
             if add_generation_prompt:
@@ -236,7 +242,9 @@ def test_build_eval_route_prompt_library_from_metamath(monkeypatch, tmp_path: Pa
             return "\n".join(parts)
 
     transformers_stub = types.SimpleNamespace(
-        AutoTokenizer=types.SimpleNamespace(from_pretrained=lambda *args, **kwargs: _Tok())
+        AutoTokenizer=types.SimpleNamespace(
+            from_pretrained=lambda *args, **kwargs: _Tok()
+        )
     )
     monkeypatch.setitem(sys.modules, "transformers", transformers_stub)
 

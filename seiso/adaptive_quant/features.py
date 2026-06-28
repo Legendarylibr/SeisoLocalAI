@@ -3,7 +3,13 @@ from __future__ import annotations
 import math
 import re
 
-from seiso.adaptive_quant.math_utils import clamp, deterministic_float, mean, norm, variance
+from seiso.adaptive_quant.math_utils import (
+    clamp,
+    deterministic_float,
+    mean,
+    norm,
+    variance,
+)
 from seiso.adaptive_quant.types import InputFeatures, LayerSensitivity, PromptSample
 
 TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_]+|[^\sA-Za-z0-9_]")
@@ -112,8 +118,12 @@ def estimate_layer_sensitivity(
 
     layer_stats: list[float] = []
     for layer_index in range(num_layers):
-        phase = math.sin((layer_index + 1) * 0.8 + input_features.complexity_score * 2.2)
-        layer_bias = deterministic_float(f"{prompt.prompt_id}:{layer_index}", -0.10, 0.10)
+        phase = math.sin(
+            (layer_index + 1) * 0.8 + input_features.complexity_score * 2.2
+        )
+        layer_bias = deterministic_float(
+            f"{prompt.prompt_id}:{layer_index}", -0.10, 0.10
+        )
         layer_value = clamp(
             0.40
             + 0.25 * input_features.complexity_score

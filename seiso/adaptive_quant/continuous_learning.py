@@ -21,7 +21,11 @@ from seiso.adaptive_quant.logging_utils import (
 from seiso.adaptive_quant.math_utils import mean
 from seiso.adaptive_quant.prompts import PromptLibrary
 from seiso.adaptive_quant.reward_path import RewardPathTracker
-from seiso.adaptive_quant.rl_loop import RLEpisodeOutcome, record_training_row, run_rl_episode
+from seiso.adaptive_quant.rl_loop import (
+    RLEpisodeOutcome,
+    record_training_row,
+    run_rl_episode,
+)
 from seiso.adaptive_quant.router_training import resolve_prompt_library
 from seiso.adaptive_quant.trainer_utils import reward_summary
 from seiso.adaptive_quant.types import HardwareType, PromptSample
@@ -75,7 +79,9 @@ class ContinuousExperienceBuffer:
             }
             global_mean = mean([entry.reward for entry in pool]) if pool else 0.0
             underperformers = [
-                entry for entry in pool if means.get(entry.prompt_id, global_mean) <= global_mean
+                entry
+                for entry in pool
+                if means.get(entry.prompt_id, global_mean) <= global_mean
             ]
             if underperformers:
                 take = min(sample_size // 2 or 1, len(underperformers))
@@ -96,7 +102,9 @@ class ContinuousExperienceBuffer:
 class ContinuousTaskStream:
     """Task stream for continuous RL (library, sequential, JSONL, or reward-adaptive)."""
 
-    SUPPORTED_MODES = frozenset({"library_cycle", "sequential", "jsonl", "reward_adaptive"})
+    SUPPORTED_MODES = frozenset(
+        {"library_cycle", "sequential", "jsonl", "reward_adaptive"}
+    )
 
     def __init__(
         self,
@@ -107,7 +115,9 @@ class ContinuousTaskStream:
     ) -> None:
         self.config = config
         self.rng = random.Random(config.seed + 1901)
-        self.prompt_library = prompt_library or resolve_prompt_library(config) or PromptLibrary()
+        self.prompt_library = (
+            prompt_library or resolve_prompt_library(config) or PromptLibrary()
+        )
         self.reward_tracker = reward_tracker or RewardPathTracker()
         self.hardware_options = config.ordered_hardware()
         mode = config.continuous_task_stream_mode.strip().lower()
@@ -124,14 +134,18 @@ class ContinuousTaskStream:
             raise ValueError("continuous max_tasks must be > 0")
         for task_index in range(limit):
             prompt, hardware = self._next_task_pair(task_index)
-            yield ContinuousTask(task_index=task_index, prompt=prompt, hardware=hardware)
+            yield ContinuousTask(
+                task_index=task_index, prompt=prompt, hardware=hardware
+            )
 
     def _next_task_pair(self, task_index: int) -> tuple[PromptSample, HardwareType]:
         if self.mode == "jsonl":
             row = self._jsonl_tasks[task_index % len(self._jsonl_tasks)]
             return row["prompt"], row["hardware"]
         if self.mode == "sequential":
-            prompt = self.prompt_library.prompts[task_index % len(self.prompt_library.prompts)]
+            prompt = self.prompt_library.prompts[
+                task_index % len(self.prompt_library.prompts)
+            ]
             hardware = self.hardware_options[task_index % len(self.hardware_options)]
             return prompt, hardware
         if self.mode == "reward_adaptive":
@@ -140,9 +154,13 @@ class ContinuousTaskStream:
                 self.rng,
                 explore_fraction=float(self.config.continuous_exploration_rate),
             )
-            hardware = self.hardware_options[self.rng.randrange(len(self.hardware_options))]
+            hardware = self.hardware_options[
+                self.rng.randrange(len(self.hardware_options))
+            ]
             return prompt, hardware
-        prompt = self.prompt_library.prompts[self.rng.randrange(len(self.prompt_library.prompts))]
+        prompt = self.prompt_library.prompts[
+            self.rng.randrange(len(self.prompt_library.prompts))
+        ]
         hardware = self.hardware_options[self.rng.randrange(len(self.hardware_options))]
         return prompt, hardware
 
@@ -171,11 +189,15 @@ class ContinuousTaskStream:
                 )
             text = validate_online_prompt_text(str(payload["prompt_text"]))
             domain = str(payload.get("prompt_domain") or "custom")
-            hardware_raw = str(payload.get("hardware") or self.hardware_options[0].value)
+            hardware_raw = str(
+                payload.get("hardware") or self.hardware_options[0].value
+            )
             hardware = HardwareType(hardware_raw)
             rows.append(
                 {
-                    "prompt": PromptSample(prompt_id=prompt_id, text=text, domain=domain),
+                    "prompt": PromptSample(
+                        prompt_id=prompt_id, text=text, domain=domain
+                    ),
                     "hardware": hardware,
                 }
             )
@@ -191,7 +213,9 @@ class ContinuousLearningLoop:
         from seiso.adaptive_quant.trainer import build_trainer
 
         if not config.continuous_learning_enabled:
-            raise ValueError("continuous_learning_enabled must be true for ContinuousLearningLoop")
+            raise ValueError(
+                "continuous_learning_enabled must be true for ContinuousLearningLoop"
+            )
 
         self.config = config
         self.trainer = trainer or build_trainer(config)
@@ -209,7 +233,8 @@ class ContinuousLearningLoop:
             config.continuous_telemetry_path(),
             buffered=bool(config.jsonl_buffered),
             flush_every=int(config.jsonl_flush_every),
-            integrity_chain=bool(config.jsonl_integrity_chain) or jsonl_integrity_chain_enabled(),
+            integrity_chain=bool(config.jsonl_integrity_chain)
+            or jsonl_integrity_chain_enabled(),
         )
         self.tasks_completed = 0
         self.tasks_since_update = 0
@@ -222,7 +247,11 @@ class ContinuousLearningLoop:
         self.best_policy_snapshot = self.trainer.snapshot_policy()
 
     def _reward_path_state_path(self) -> Path:
-        return Path(self.config.outputs_dir) / self.config.run_name / "reward_path_state.json"
+        return (
+            Path(self.config.outputs_dir)
+            / self.config.run_name
+            / "reward_path_state.json"
+        )
 
     def _load_reward_tracker(self) -> RewardPathTracker:
         path = self._reward_path_state_path()
@@ -293,9 +322,11 @@ class ContinuousLearningLoop:
                 "total_rollbacks": self.total_rollbacks,
                 "replay_size": len(self.experience_buffer),
                 "eval_runs": len(eval_summaries),
-                "mean_eval_reward": mean([row.get("mean_reward", 0.0) for row in eval_summaries])
-                if eval_summaries
-                else 0.0,
+                "mean_eval_reward": (
+                    mean([row.get("mean_reward", 0.0) for row in eval_summaries])
+                    if eval_summaries
+                    else 0.0
+                ),
                 "telemetry_path": self.config.continuous_telemetry_path(),
                 "reward_path_state": reward_path_file,
                 "prompt_reward_summary": self.reward_tracker.prompt_summary(),
@@ -337,7 +368,9 @@ class ContinuousLearningLoop:
     def _maybe_apply_rl_update(self) -> dict[str, float] | None:
         if self.tasks_since_update < int(self.config.continuous_update_every_n_tasks):
             return None
-        if len(self.experience_buffer) < int(self.config.continuous_min_replay_before_update):
+        if len(self.experience_buffer) < int(
+            self.config.continuous_min_replay_before_update
+        ):
             return None
 
         sampled = self.experience_buffer.sample(
@@ -384,7 +417,9 @@ class ContinuousLearningLoop:
             self.best_policy_snapshot = self.trainer.snapshot_policy()
             return "improved"
 
-        if recent_mean < self.best_recent_reward - float(self.config.continuous_drift_reward_delta):
+        if recent_mean < self.best_recent_reward - float(
+            self.config.continuous_drift_reward_delta
+        ):
             self.trainer.restore_policy(self.best_policy_snapshot)
             self.total_rollbacks += 1
             self.recent_rewards.clear()
@@ -392,7 +427,9 @@ class ContinuousLearningLoop:
         return "steady"
 
 
-def build_continuous_learning_loop(config: FrameworkConfig, trainer=None) -> ContinuousLearningLoop:
+def build_continuous_learning_loop(
+    config: FrameworkConfig, trainer=None
+) -> ContinuousLearningLoop:
     return ContinuousLearningLoop(config, trainer=trainer)
 
 

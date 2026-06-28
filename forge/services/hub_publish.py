@@ -18,7 +18,9 @@ class HubPublishRequest(BaseModel):
     description: str = Field(default="", max_length=4000)
     tags: list[str] = Field(default_factory=list)
     hf_token: str | None = Field(default=None, description="Per-request HF API token")
-    use_cli: bool = Field(default=False, description="Prefer cached `hf auth login` token")
+    use_cli: bool = Field(
+        default=False, description="Prefer cached `hf auth login` token"
+    )
 
 
 def hub_metadata_from_request(

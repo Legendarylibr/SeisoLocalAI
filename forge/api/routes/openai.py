@@ -180,7 +180,9 @@ async def chat_completions(
 ):
     """OpenAI-compatible chat endpoint for Cursor, Continue, and other clients."""
     if body.tools and not settings.allow_openai_tools:
-        raise HTTPException(403, "Tool calling is disabled on the OpenAI-compatible API")
+        raise HTTPException(
+            403, "Tool calling is disabled on the OpenAI-compatible API"
+        )
 
     path, model_format = await _resolve_openai_model_path(body, user_id, db, settings)
     payload = _resolve_payload(body, path, model_format=model_format)
@@ -205,7 +207,11 @@ async def chat_completions(
                             "created": created,
                             "model": body.model,
                             "choices": [
-                                {"index": 0, "delta": {"content": chunk}, "finish_reason": None}
+                                {
+                                    "index": 0,
+                                    "delta": {"content": chunk},
+                                    "finish_reason": None,
+                                }
                             ],
                         }
                         yield f"data: {json.dumps(chunk_payload)}\n\n"
@@ -216,7 +222,11 @@ async def chat_completions(
                         "created": created,
                         "model": body.model,
                         "choices": [
-                            {"index": 0, "delta": {"content": chunk}, "finish_reason": None}
+                            {
+                                "index": 0,
+                                "delta": {"content": chunk},
+                                "finish_reason": None,
+                            }
                         ],
                     }
                     yield f"data: {json.dumps(chunk_payload)}\n\n"
@@ -230,7 +240,12 @@ async def chat_completions(
                 yield f"data: {json.dumps(final)}\n\n"
                 yield "data: [DONE]\n\n"
             except Exception:
-                err = {"error": {"message": "Inference stream failed", "type": "server_error"}}
+                err = {
+                    "error": {
+                        "message": "Inference stream failed",
+                        "type": "server_error",
+                    }
+                }
                 yield f"data: {json.dumps(err)}\n\n"
 
         return StreamingResponse(sse_stream(), media_type="text/event-stream")
@@ -248,14 +263,20 @@ async def chat_completions(
             if job and job.status.value == "failed":
                 yield f"data: {json.dumps({'error': job.error or 'Inference failed'})}\n\n"
             elif content:
-                content = _sanitize_openai_content(content, tools_enabled=bool(body.tools))
+                content = _sanitize_openai_content(
+                    content, tools_enabled=bool(body.tools)
+                )
                 chunk = {
                     "id": completion_id,
                     "object": "chat.completion.chunk",
                     "created": created,
                     "model": body.model,
                     "choices": [
-                        {"index": 0, "delta": {"content": content}, "finish_reason": "stop"}
+                        {
+                            "index": 0,
+                            "delta": {"content": content},
+                            "finish_reason": "stop",
+                        }
                     ],
                 }
                 yield f"data: {json.dumps(chunk)}\n\n"

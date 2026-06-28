@@ -10,7 +10,13 @@ KERNEL_PROFILES: tuple[dict[str, Any], ...] = (
     {"id": 1, "name": "stripe", "rms_mode": 1, "swiglu_vec": 8, "lora_tile": 32},
     {"id": 2, "name": "parallax", "rms_mode": 2, "swiglu_vec": 8, "lora_tile": 64},
     {"id": 3, "name": "narrow_opt", "rms_mode": 1, "swiglu_vec": 4, "lora_tile": 16},
-    {"id": 4, "name": "wide_throughput", "rms_mode": 2, "swiglu_vec": 8, "lora_tile": 64},
+    {
+        "id": 4,
+        "name": "wide_throughput",
+        "rms_mode": 2,
+        "swiglu_vec": 8,
+        "lora_tile": 64,
+    },
     {"id": 5, "name": "balanced", "rms_mode": 0, "swiglu_vec": 8, "lora_tile": 32},
 )
 

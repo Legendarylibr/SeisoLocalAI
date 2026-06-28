@@ -35,7 +35,9 @@ def create_access_token(
     *,
     hours: int | None = None,
 ) -> str:
-    expire = datetime.now(timezone.utc) + timedelta(hours=hours or settings.session_hours)
+    expire = datetime.now(timezone.utc) + timedelta(
+        hours=hours or settings.session_hours
+    )
     payload = {
         "sub": subject,
         "exp": expire,
@@ -104,7 +106,9 @@ class RateLimiter:
         cutoff = now - 60.0
         self._hits[client_ip] = [t for t in window if t > cutoff]
         if len(self._hits[client_ip]) >= self.max_per_minute:
-            raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "Rate limit exceeded")
+            raise HTTPException(
+                status.HTTP_429_TOO_MANY_REQUESTS, "Rate limit exceeded"
+            )
         self._hits[client_ip].append(now)
 
 

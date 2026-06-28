@@ -103,7 +103,9 @@ def _gguf_record_from_snapshot(
 
     inventory_repo = entry.repo_id if entry else repo_id
     quant = entry.quant if entry else "Q4_K_M"
-    filenames = _pick_gguf_files(rel_files, preferred_quant=quant, repo_id=inventory_repo)
+    filenames = _pick_gguf_files(
+        rel_files, preferred_quant=quant, repo_id=inventory_repo
+    )
     if not filenames:
         return None
 
@@ -137,7 +139,9 @@ def _gguf_record_from_snapshot(
 
     return {
         "source": f"hf:{inventory_repo}",
-        "name": target.name if target.is_file() else _display_name_for_shards(filenames[0]),
+        "name": (
+            target.name if target.is_file() else _display_name_for_shards(filenames[0])
+        ),
         "path": str(link.absolute()),
         "format": "gguf",
         "size_bytes": size_bytes,
@@ -155,7 +159,9 @@ def _snapshot_record(
 ) -> dict[str, Any] | None:
     weight_files: list[Path] = []
     for pattern in ("*.safetensors", "*.bin"):
-        weight_files.extend(path for path in snapshot_dir.rglob(pattern) if path.is_file())
+        weight_files.extend(
+            path for path in snapshot_dir.rglob(pattern) if path.is_file()
+        )
     if not weight_files:
         return None
 

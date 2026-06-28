@@ -8,7 +8,10 @@ from collections import OrderedDict
 from typing import cast
 
 from seiso.adaptive_quant.backends.protocol import per_token_latency_fields
-from seiso.adaptive_quant.backends.quality import ExternalQualityScores, apply_external_quality
+from seiso.adaptive_quant.backends.quality import (
+    ExternalQualityScores,
+    apply_external_quality,
+)
 from seiso.adaptive_quant.backends.simulator import SimulatorBackend
 from seiso.adaptive_quant.configuration import FrameworkConfig
 from seiso.adaptive_quant.configuration.validation import (
@@ -17,7 +20,11 @@ from seiso.adaptive_quant.configuration.validation import (
     validate_llama_cpp_model_allowlist,
     validate_runtime_filesystem_path,
 )
-from seiso.adaptive_quant.types import BackendMetricDict, EpisodeState, QuantizationDecision
+from seiso.adaptive_quant.types import (
+    BackendMetricDict,
+    EpisodeState,
+    QuantizationDecision,
+)
 
 _NUMBER_RE = r"-?\d+(?:\.\d+)?"
 _TIMING_RE = re.compile(
@@ -55,7 +62,9 @@ def _extract_memory_mb(text: str, default: float = 0.0) -> float:
 
     patterns = [
         re.compile(rf"{label}[^0-9]{{0,64}}(?P<num>{_NUMBER_RE})\s*(?P<unit>{unit})\b"),
-        re.compile(rf"(?P<num>{_NUMBER_RE})\s*(?P<unit>{unit})\b[^a-z]{{0,64}}{label}\b"),
+        re.compile(
+            rf"(?P<num>{_NUMBER_RE})\s*(?P<unit>{unit})\b[^a-z]{{0,64}}{label}\b"
+        ),
     ]
 
     last_value = default
@@ -153,7 +162,9 @@ def run_llama_cpp_completion(
             timeout=timeout_s,
         )
     except subprocess.TimeoutExpired as exc:
-        raise RuntimeError(f"llama.cpp command timed out after {timeout_s:.1f}s.") from exc
+        raise RuntimeError(
+            f"llama.cpp command timed out after {timeout_s:.1f}s."
+        ) from exc
 
     raw_output = ((completed.stdout or "") + "\n" + (completed.stderr or "")).strip()
     parsed = parse_llama_cpp_metrics(raw_output.lower())
@@ -227,7 +238,9 @@ def run_llama_cpp_measurement(
             timeout=timeout_s,
         )
     except subprocess.TimeoutExpired as exc:
-        raise RuntimeError(f"llama.cpp command timed out after {timeout_s:.1f}s.") from exc
+        raise RuntimeError(
+            f"llama.cpp command timed out after {timeout_s:.1f}s."
+        ) from exc
 
     raw_output = ((completed.stdout or "") + "\n" + (completed.stderr or "")).strip()
     parsed = parse_llama_cpp_metrics(raw_output.lower())
@@ -254,7 +267,9 @@ def require_llama_cpp_paths(
         raise TypeError("llama_cpp_model_path override must be a string path")
     model = model_override if model_override is not None else config.llama_cpp_model
     if not binary or not model:
-        raise FileNotFoundError("llama.cpp backend requires both a binary path and a model path.")
+        raise FileNotFoundError(
+            "llama.cpp backend requires both a binary path and a model path."
+        )
     validate_runtime_filesystem_path("llama_cpp_binary", str(binary))
     validate_runtime_filesystem_path("llama_cpp_model", str(model))
     model_str = str(model)
@@ -280,7 +295,9 @@ def _decision_measurement_key(decision: QuantizationDecision) -> str:
     model_override = str(decision.metadata.get("llama_cpp_model_path", ""))
     avg_bits = 0.0
     if decision.effective_layer_bits:
-        avg_bits = sum(decision.effective_layer_bits) / len(decision.effective_layer_bits)
+        avg_bits = sum(decision.effective_layer_bits) / len(
+            decision.effective_layer_bits
+        )
     return "|".join(
         [
             decision.mode.value,
@@ -304,7 +321,9 @@ class LlamaCppBackend:
         if bool(config.llama_cpp_cache_enabled):
             self._cache = OrderedDict()
 
-    def evaluate(self, state: EpisodeState, decision: QuantizationDecision) -> BackendMetricDict:
+    def evaluate(
+        self, state: EpisodeState, decision: QuantizationDecision
+    ) -> BackendMetricDict:
         llama_cpp_binary, llama_cpp_model = require_llama_cpp_paths(
             self.config,
             model_override=decision.metadata.get("llama_cpp_model_path"),
@@ -322,7 +341,10 @@ class LlamaCppBackend:
             metrics["throughput_tps"] = float(parsed["throughput_tps"])
         if parsed.get("latency_ms_per_token", 0.0) > 0.0:
             tokens_processed = float(
-                parsed.get("tokens_processed", max(1, int(self.config.llama_cpp_generate_tokens)))
+                parsed.get(
+                    "tokens_processed",
+                    max(1, int(self.config.llama_cpp_generate_tokens)),
+                )
             )
             metrics["latency_ms"] = float(
                 parsed.get(
@@ -336,7 +358,10 @@ class LlamaCppBackend:
             metrics["memory_mb"] = float(parsed["memory_mb"])
         if "latency_ms_per_token" not in metrics or "tokens_processed" not in metrics:
             metrics.update(
-                cast(BackendMetricDict, per_token_latency_fields(state, metrics["latency_ms"]))
+                cast(
+                    BackendMetricDict,
+                    per_token_latency_fields(state, metrics["latency_ms"]),
+                )
             )
         metrics.update(
             cast(
@@ -344,9 +369,11 @@ class LlamaCppBackend:
                 {
                     "latency_source": "llama_cpp",
                     "throughput_source": "llama_cpp",
-                    "memory_source": "llama_cpp"
-                    if parsed.get("memory_mb", 0.0) > 0.0
-                    else "simulator",
+                    "memory_source": (
+                        "llama_cpp"
+                        if parsed.get("memory_mb", 0.0) > 0.0
+                        else "simulator"
+                    ),
                     "perplexity_source": "simulator",
                     "measurement_contract": "hybrid",
                     "subprocess_applies_quant_decision": _subprocess_applies_quant_decision(

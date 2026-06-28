@@ -74,8 +74,12 @@ def apply_moe_reward_penalties(
     """Subtract MoE swap/cache/churn terms shared by env and other reward call sites."""
     adjusted = float(reward)
     adjusted -= config.moe_swap_penalty * float(metrics.get("swap_cost_ms", 0.0))
-    adjusted -= config.moe_cache_miss_penalty * float(metrics.get("cache_miss_count", 0.0))
-    adjusted -= config.moe_variant_churn_penalty * float(metrics.get("variant_churn", 0.0))
+    adjusted -= config.moe_cache_miss_penalty * float(
+        metrics.get("cache_miss_count", 0.0)
+    )
+    adjusted -= config.moe_variant_churn_penalty * float(
+        metrics.get("variant_churn", 0.0)
+    )
     return float(adjusted)
 
 

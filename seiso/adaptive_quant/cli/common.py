@@ -57,8 +57,12 @@ def add_config_override_arguments(parser: argparse.ArgumentParser) -> None:
         default=None,
         help="Override benchmark_evaluation_episodes for this run.",
     )
-    group.add_argument("--run-name", default=None, help="Override run_name for output artifacts.")
-    group.add_argument("--seed", type=int, default=None, help="Override the top-level random seed.")
+    group.add_argument(
+        "--run-name", default=None, help="Override run_name for output artifacts."
+    )
+    group.add_argument(
+        "--seed", type=int, default=None, help="Override the top-level random seed."
+    )
     group.add_argument(
         "--set",
         dest="config_overrides",
@@ -86,12 +90,16 @@ def resolve_startup_config(
     return resolved, audit
 
 
-def apply_config_overrides(config: FrameworkConfig, args: argparse.Namespace) -> FrameworkConfig:
+def apply_config_overrides(
+    config: FrameworkConfig, args: argparse.Namespace
+) -> FrameworkConfig:
     resolved, _audit = resolve_startup_config(config, args)
     return resolved
 
 
-def load_config_or_fallback(path: str | None, fallback: FrameworkConfig) -> FrameworkConfig:
+def load_config_or_fallback(
+    path: str | None, fallback: FrameworkConfig
+) -> FrameworkConfig:
     if path is None:
         return fallback
     from seiso.adaptive_quant.configuration.validation import validate_cli_path_argument
@@ -109,7 +117,9 @@ def enforce_cli_startup(*, context: str, nvidia_boundary: bool = False) -> None:
 
     enforce_security_bypass_policy(context=context)
     if nvidia_boundary:
-        from seiso.adaptive_quant.nvidia_secure_boundary import enforce_nvidia_secure_boundary
+        from seiso.adaptive_quant.nvidia_secure_boundary import (
+            enforce_nvidia_secure_boundary,
+        )
 
         enforce_nvidia_secure_boundary(context=context)
 
