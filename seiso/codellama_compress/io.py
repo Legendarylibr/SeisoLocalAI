@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import os
 import platform
 import subprocess
@@ -84,11 +85,8 @@ def safe_symlink(src: Path, dst: Path) -> None:
     dst.parent.mkdir(parents=True, exist_ok=True)
     if dst.exists() or dst.is_symlink():
         return
-    try:
+    with contextlib.suppress(Exception):
         dst.symlink_to(src, target_is_directory=src.is_dir())
-    except Exception:
-        # Fall back silently; symlinks can be restricted on some filesystems.
-        pass
 
 
 def dir_size_bytes(path: Path) -> int:

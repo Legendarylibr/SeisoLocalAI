@@ -204,9 +204,7 @@ def is_isolated_execution_environment() -> bool:
         return True
     if os.environ.get(IN_CONTAINER_ENV, "").strip() in ("1", "true", "yes"):
         return True
-    if os.environ.get("CI", "").strip().lower() in ("1", "true", "yes"):
-        return True
-    return False
+    return os.environ.get("CI", "").strip().lower() in ("1", "true", "yes")
 
 
 def assert_code_exec_permitted(*, allow_insecure: bool = False) -> None:

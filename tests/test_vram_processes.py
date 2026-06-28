@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import logging
 
-import pytest
-
 from seiso.hardware import vram_processes as vp
 
 

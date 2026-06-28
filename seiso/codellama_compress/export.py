@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import shlex
 from pathlib import Path
 
@@ -138,7 +139,5 @@ def write_export_bundle(
 
     # Make scripts executable (best-effort)
     for p in ["vllm_server.sh", "convert_gguf.sh"]:
-        try:
+        with contextlib.suppress(Exception):
             (out_dir / p).chmod(0o755)
-        except Exception:
-            pass

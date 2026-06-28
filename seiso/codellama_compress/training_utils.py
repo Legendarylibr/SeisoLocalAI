@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 from pathlib import Path
 from typing import Any
 
@@ -62,11 +63,7 @@ def rotate_checkpoints(checkpoint_root: Path, *, keep: int | None) -> None:
                 child.unlink(missing_ok=True)
         for child in sorted(old.rglob("*"), reverse=True):
             if child.is_dir():
-                try:
+                with contextlib.suppress(OSError):
                     child.rmdir()
-                except OSError:
-                    pass
-        try:
+        with contextlib.suppress(OSError):
             old.rmdir()
-        except OSError:
-            pass

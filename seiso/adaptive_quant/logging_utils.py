@@ -233,10 +233,9 @@ class JsonlLogger:
             self._pending = 0
 
     def flush(self) -> None:
-        if self._handle is not None and not self._handle.closed:
-            if self._pending:
-                self._handle.flush()
-                self._pending = 0
+        if self._handle is not None and not self._handle.closed and self._pending:
+            self._handle.flush()
+            self._pending = 0
 
     def close(self) -> None:
         if self._handle is not None:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 from collections.abc import Callable
 
 _clear_hooks: list[Callable[[], None]] = []
@@ -16,7 +17,5 @@ def register_runtime_cache_clear(callback: Callable[[], None]) -> None:
 def clear_inference_runtime_caches() -> None:
     """Invoke all registered runtime cache clears."""
     for callback in _clear_hooks:
-        try:
+        with contextlib.suppress(Exception):
             callback()
-        except Exception:
-            pass

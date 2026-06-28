@@ -103,7 +103,7 @@ def validate_cuda_runtime_compatibility(requested_device: str = "cuda") -> None:
 
 def resolve_training_device(
     requested: str, *, require_cuda: bool = False
-) -> tuple["torch.device", str | None]:
+) -> tuple[torch.device, str | None]:
     """
     Map config.torch_device to a device that exists on this machine.
     Falls back to CPU when CUDA/MPS was requested but is not available,
@@ -338,9 +338,8 @@ class TorchPolicyAdapter:
         moe_context: Any | None = None,
     ) -> tuple[QuantizationDecision, dict[str, Any]]:
         state = self.state_tensor([state_vector])
-        with torch.inference_mode():
-            with self.autocast_context():
-                outputs = self.model(state)
+        with torch.inference_mode(), self.autocast_context():
+            outputs = self.model(state)
 
         selected_mode, mode_index, log_prob, entropy = self._sample_mode(
             outputs, deterministic=deterministic

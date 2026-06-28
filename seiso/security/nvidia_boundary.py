@@ -46,6 +46,7 @@ _BOUNDARY_DOC = "docs/platforms/linux-nvidia.md"
 _QUERY_TTL_S = 30.0
 _query_cache: list[dict[str, object]] | None = None
 _query_cache_ts: float = 0.0
+_query_cache_exe: str | None = None
 
 
 def _env_enabled(name: str) -> bool:
@@ -172,8 +173,8 @@ def _query_nvidia_gpus_list(exe: str) -> list[dict[str, object]]:
     return gpus
 
 
-def _probe_nvidia_gpus_uncached() -> list[dict[str, object]]:
-    exe = _resolve_nvidia_smi()
+def _probe_nvidia_gpus_uncached(exe: str | None = None) -> list[dict[str, object]]:
+    exe = exe or _resolve_nvidia_smi()
     if not exe:
         return []
     for query in ("index,name,memory.total", "name,memory.total", "name"):
@@ -208,24 +209,32 @@ def _probe_nvidia_gpus_uncached() -> list[dict[str, object]]:
 
 def query_nvidia_gpus(*, force_refresh: bool = False) -> list[dict[str, object]]:
     """Enumerate NVIDIA GPUs via nvidia-smi without PyTorch (cached 30s)."""
-    global _query_cache, _query_cache_ts
+    global _query_cache, _query_cache_ts, _query_cache_exe
 
     now = time.time()
-    if not force_refresh and _query_cache is not None and now - _query_cache_ts < _QUERY_TTL_S:
+    exe = _resolve_nvidia_smi()
+    if (
+        not force_refresh
+        and _query_cache is not None
+        and _query_cache_exe == exe
+        and now - _query_cache_ts < _QUERY_TTL_S
+    ):
         return _query_cache
 
-    gpus = _probe_nvidia_gpus_uncached()
+    gpus = _probe_nvidia_gpus_uncached(exe)
     _query_cache = gpus
     _query_cache_ts = now
+    _query_cache_exe = exe
     return gpus
 
 
 def clear_nvidia_gpu_query_cache() -> None:
     """Clear cached nvidia-smi probe results (tests / post-install)."""
-    global _query_cache, _query_cache_ts
+    global _query_cache, _query_cache_ts, _query_cache_exe
 
     _query_cache = None
     _query_cache_ts = 0.0
+    _query_cache_exe = None
 
 
 def nvidia_smi_visible() -> bool:

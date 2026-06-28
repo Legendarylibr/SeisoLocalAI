@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from seiso.training.config import DatasetFormat
 from seiso.training.dataset_analysis import (
-    build_dataset_training_config,
-    detect_format_consensus,
     _infer_domain,
     _length_stats,
+    build_dataset_training_config,
+    detect_format_consensus,
 )
 from seiso.training.preprocess import normalize_sample
 

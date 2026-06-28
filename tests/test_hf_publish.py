@@ -2,8 +2,8 @@
 
 from pathlib import Path
 
-from forge.services import hf_auth
 from forge.config import ForgeSettings
+from forge.services import hf_auth
 from forge.services.hf_auth import (
     find_hf_cli,
     hf_auth_status,

@@ -151,9 +151,7 @@ class CudaGraphTrainingManager:
             return False
         if getattr(args, "use_cpu", False):
             return False
-        if model is not None and self._model_uses_bnb_quant(model):
-            return False
-        return True
+        return not (model is not None and self._model_uses_bnb_quant(model))
 
     def _compute_step_loss(
         self,

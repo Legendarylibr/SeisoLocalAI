@@ -34,6 +34,20 @@ def _default_dataset_config() -> dict[str, Any]:
     }
 
 
+def _dataset_format_hint(dataset: str) -> str:
+    """Infer common dataset families when full dataset analysis is unavailable."""
+    name = dataset.strip().lower()
+    if not name:
+        return "auto"
+    if "alpaca" in name:
+        return "alpaca"
+    if any(marker in name for marker in ("chat", "sharegpt", "ultrachat", "no_robots")):
+        return "chat"
+    if any(marker in name for marker in ("preference", "dpo", "orpo", "chosen", "rejected")):
+        return "preference"
+    return "auto"
+
+
 def _model_params_b(model_id: str) -> float | None:
     if not model_id.strip():
         return None
@@ -125,6 +139,8 @@ def recommend_training_config(
     params_b = _model_params_b(model_id)
     analysis = _try_analyze_dataset(dataset, sandbox_root=sandbox_root)
     ds = analysis.get("recommended_config", {}) if analysis else _default_dataset_config()
+    if not analysis and ds.get("dataset_format", "auto") == "auto":
+        ds["dataset_format"] = _dataset_format_hint(dataset)
     warnings: list[str] = []
     notes: list[str] = [defaults["note"]]
 

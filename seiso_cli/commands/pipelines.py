@@ -286,7 +286,7 @@ def compress_manifest_verify(
     from seiso.compress.bootstrap import require_codellama_compress
 
     require_codellama_compress()
-    from codellama_compress.replay import verify_manifest
+    from seiso.codellama_compress.replay import verify_manifest
 
     report = verify_manifest(Path(run_dir))
     console.print(report)
@@ -306,7 +306,7 @@ def compress_speculative(
     from seiso.compress.bootstrap import require_codellama_compress
 
     require_codellama_compress()
-    from codellama_compress.speculative import speculative_generate
+    from seiso.codellama_compress.speculative import speculative_generate
 
     text, stats = speculative_generate(
         prompt=prompt,

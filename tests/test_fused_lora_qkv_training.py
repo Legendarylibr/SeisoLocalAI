@@ -61,7 +61,7 @@ def test_stacked_a_matmul_matches_separate():
         mats[0], bs[0], mats[1], bs[1], mats[2], bs[2],
     )
 
-    for ref, a, b in zip((ref_q, ref_k, ref_v), mats, bs):
+    for ref, a, b in zip((ref_q, ref_k, ref_v), mats, bs, strict=True):
         ref.add_(x @ a.t() @ b.t())
 
     torch.testing.assert_close(out_q, ref_q, rtol=1e-4, atol=1e-4)

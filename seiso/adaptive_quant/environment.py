@@ -10,11 +10,15 @@ from seiso.adaptive_quant.configuration import FrameworkConfig
 from seiso.adaptive_quant.features import estimate_layer_sensitivity, extract_input_features
 from seiso.adaptive_quant.guardrails import should_fallback_due_to_instability
 from seiso.adaptive_quant.hardware import detect_host_hardware, host_aware_hardware_profiles
-from seiso.adaptive_quant.logging_utils import JsonlLogger, NullJsonlLogger, jsonl_integrity_chain_enabled
+from seiso.adaptive_quant.kernel_rl import finalize_kernel_profile
+from seiso.adaptive_quant.logging_utils import (
+    JsonlLogger,
+    NullJsonlLogger,
+    jsonl_integrity_chain_enabled,
+)
 from seiso.adaptive_quant.math_utils import variance
 from seiso.adaptive_quant.moe import ExpertBank
 from seiso.adaptive_quant.prompts import PromptLibrary
-from seiso.adaptive_quant.kernel_rl import finalize_kernel_profile
 from seiso.adaptive_quant.quantization import finalize_decision, safe_fallback_decision
 from seiso.adaptive_quant.reward import apply_moe_reward_penalties, compute_weighted_reward
 from seiso.adaptive_quant.trainer_utils import zero_previous_action
@@ -367,9 +371,12 @@ class AdaptiveQuantizationEnv:
         return variance(perplexities)
 
     def _log_episode(self, result: EpisodeResult, episode_index: int | None) -> None:
-        if episode_index is not None and self.config.log_every_n_episodes > 1:
-            if episode_index % self.config.log_every_n_episodes != 0:
-                return
+        if (
+            episode_index is not None
+            and self.config.log_every_n_episodes > 1
+            and episode_index % self.config.log_every_n_episodes != 0
+        ):
+            return
         record = {
             "episode": episode_index,
             "phase": self._current_phase,

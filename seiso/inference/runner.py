@@ -8,6 +8,7 @@ import threading
 from collections.abc import AsyncIterator, Callable, Iterator
 from typing import Any
 
+from seiso.env import env_int
 from seiso.inference.backends import (
     BACKEND_LLAMACPP,
     BACKEND_MLX,
@@ -23,7 +24,7 @@ from seiso.inference.speculative import (
     iter_speculative_tokens,
     iter_speculative_tokens_dflash,
 )
-from seiso.env import env_int
+from seiso.inference.streaming import StreamToken, StreamUpdate
 from seiso.inference.tuning import (
     configure_torch_inference,
     estimate_llama_n_ctx,
@@ -34,13 +35,12 @@ from seiso.inference.tuning import (
     torch_generate_kwargs,
 )
 from seiso.memory.protection import is_oom_error, release_cached_memory, sanitize_inference_payload
-from seiso.inference.streaming import StreamToken, StreamUpdate
 from seiso.models.chat_format import format_messages_for_prompt
 
 logger = logging.getLogger(__name__)
 
 _STREAM_DONE = object()
-_runner: "LocalInferenceRunner | None" = None
+_runner: LocalInferenceRunner | None = None
 _runner_lock = threading.Lock()
 
 

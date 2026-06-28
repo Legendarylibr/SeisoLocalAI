@@ -32,9 +32,7 @@ def _use_fused_cuda_kernels(x: Any) -> bool:
         return False
     if active_backend() != "cuda":
         return False
-    if torch.is_grad_enabled() and getattr(x, "requires_grad", False):
-        return False
-    return True
+    return not (torch.is_grad_enabled() and getattr(x, "requires_grad", False))
 
 
 _RMSNORM_CLASSES = frozenset({"LlamaRMSNorm", "Qwen2RMSNorm", "GemmaRMSNorm", "RMSNorm"})
@@ -539,10 +537,11 @@ def _patch_fused_qkv_projections(
                     return _fallback_projection(self, x, *args, **kwargs)
 
             outs = cache["outs"]
-            if outs is None:
+            if not isinstance(outs, tuple):
                 return self.base_layer(x, *args, **kwargs)
             slot = _proj_slot(self)
-            return outs[slot].reshape(*x.shape[:-1], outs[slot].shape[-1]).to(x.dtype)
+            projected = outs[slot]  # pylint: disable=unsubscriptable-object
+            return projected.reshape(*x.shape[:-1], projected.shape[-1]).to(x.dtype)
 
         return _forward
 
@@ -657,16 +656,10 @@ def _patch_fused_residual_decoder_forward(model: Any, decoder: Any) -> bool:
             position_embeddings=position_embeddings,
             **kwargs,
         )
-        if isinstance(attn_out, tuple):
-            hidden_states = attn_out[0]
-        else:
-            hidden_states = attn_out
+        hidden_states = attn_out[0] if isinstance(attn_out, tuple) else attn_out
 
         attn_hidden = attn_out[0] if isinstance(attn_out, tuple) else attn_out
-        if attn_dropout is not None:
-            attn_for_norm = attn_dropout(attn_hidden)
-        else:
-            attn_for_norm = attn_hidden
+        attn_for_norm = attn_dropout(attn_hidden) if attn_dropout is not None else attn_hidden
         post_attn_skip = residual + attn_for_norm
 
         if _use_fused_cuda_kernels(attn_for_norm):

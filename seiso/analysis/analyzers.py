@@ -489,7 +489,7 @@ def _parse_phase_argv(argv: list[str], usage: str) -> tuple[list[str], str | Non
     i = 0
     while i < len(argv):
         token = argv[i]
-        if token == "--phase":
+        if token == "--phase":  # nosec B105 - CLI flag, not a password
             if i + 1 >= len(argv):
                 raise SystemExit(f"Usage: {usage}")
             value = argv[i + 1].strip().lower()

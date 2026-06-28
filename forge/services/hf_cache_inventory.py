@@ -21,7 +21,6 @@ from forge.services.hf_hub import (
 from forge.services.user_paths import user_dir
 from seiso.inference.backends import gguf_is_supported_by_llamacpp
 from seiso.models.catalog import CatalogEntry, get_by_gguf_mirror, get_by_repo
-
 from seiso.security import sanitize_filename
 
 
