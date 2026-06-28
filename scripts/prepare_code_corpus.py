@@ -12,8 +12,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from seiso.models.hub_quant import infer_active_params_b  # noqa: E402
 from seiso.io.jsonl import write_jsonl  # noqa: E402
+from seiso.models.hub_quant import infer_active_params_b  # noqa: E402
 from seiso.training.code_corpus import (  # noqa: E402
     is_metadata_only_row,
     normalize_code_row,

@@ -83,7 +83,7 @@ def main(argv: list[str] | None = None) -> int:
     if isinstance(out, dict):
         choices = out.get("choices") or []
         if choices and isinstance(choices[0], dict):
-            text = str((choices[0].get("text") or "")).strip()
+            text = str(choices[0].get("text") or "").strip()
     token_count = max(1, int(args.tokens))
     per_token_ms = elapsed_ms / token_count
     tok_s = 1000.0 / per_token_ms if per_token_ms > 0 else 0.0
