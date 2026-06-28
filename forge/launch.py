@@ -19,7 +19,9 @@ def wait_for_health(url: str, *, timeout_s: float = 30.0, poll_s: float = 0.5) -
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
         try:
-            with urllib.request.urlopen(health_url, timeout=min(2.0, timeout_s)) as response:
+            with urllib.request.urlopen(
+                health_url, timeout=min(2.0, timeout_s)
+            ) as response:
                 if 200 <= response.status < 400:
                     return True
         except (urllib.error.URLError, TimeoutError, OSError):
@@ -44,7 +46,12 @@ def open_browser(url: str) -> bool:
     system = platform.system()
     try:
         if system == "Darwin":
-            return subprocess.run(["open", url], check=False, capture_output=True).returncode == 0
+            return (
+                subprocess.run(
+                    ["open", url], check=False, capture_output=True
+                ).returncode
+                == 0
+            )
         if system == "Windows":
             return (
                 subprocess.run(
@@ -54,7 +61,12 @@ def open_browser(url: str) -> bool:
             )
         xdg_open = shutil.which("xdg-open")
         if xdg_open:
-            return subprocess.run([xdg_open, url], check=False, capture_output=True).returncode == 0
+            return (
+                subprocess.run(
+                    [xdg_open, url], check=False, capture_output=True
+                ).returncode
+                == 0
+            )
     except OSError:
         return False
     return False

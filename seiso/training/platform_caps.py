@@ -60,7 +60,9 @@ def training_capabilities() -> dict[str, Any]:
     fused_kernels = has_cuda_gpu or (has_rocm_gpu and triton_ok)
     kernel_backend = "none"
     if has_cuda_gpu:
-        kernel_backend = "cuda" if cuda_ext_ok else ("triton" if triton_ok else "pytorch")
+        kernel_backend = (
+            "cuda" if cuda_ext_ok else ("triton" if triton_ok else "pytorch")
+        )
 
     elif has_rocm_gpu and triton_ok:
         kernel_backend = "triton"
@@ -77,7 +79,11 @@ def training_capabilities() -> dict[str, Any]:
         pass
 
     mlx_ok = False
-    if os.environ.get("SEISO_SKIP_MLX_PROBE", "").strip().lower() not in {"1", "true", "yes"}:
+    if os.environ.get("SEISO_SKIP_MLX_PROBE", "").strip().lower() not in {
+        "1",
+        "true",
+        "yes",
+    }:
         try:
             import mlx.core  # noqa: F401
 
@@ -112,7 +118,9 @@ def training_capabilities() -> dict[str, Any]:
         "vendor": gpu.vendor.value,
         "gpu_count": gpu.device_count,
         "device_label": _gpu_label(gpu),
-        "recommended_quant": "4bit" if supports_bnb and (has_cuda_gpu or has_rocm_gpu) else "16bit",
+        "recommended_quant": (
+            "4bit" if supports_bnb and (has_cuda_gpu or has_rocm_gpu) else "16bit"
+        ),
         "install_extra": _install_extra(
             system,
             has_nvidia_hardware,

@@ -9,7 +9,11 @@ from pydantic import BaseModel, Field
 
 from forge.config import ForgeSettings, get_settings
 from forge.security.auth import get_current_user_id
-from forge.services.hf_auth import clear_user_hf_token, hf_auth_status, save_user_hf_token
+from forge.services.hf_auth import (
+    clear_user_hf_token,
+    hf_auth_status,
+    save_user_hf_token,
+)
 from forge.services.hf_connectivity import check_inference_runtime
 from seiso.models.loader import detect_backend
 
@@ -127,7 +131,9 @@ async def save_hf_token(
 
     token = _normalize_token(body.token)
     if not token:
-        raise HTTPException(status_code=400, detail="Invalid Hugging Face token format.")
+        raise HTTPException(
+            status_code=400, detail="Invalid Hugging Face token format."
+        )
 
     result = probe_hf_hub(token=token)
     if not result.reachable:

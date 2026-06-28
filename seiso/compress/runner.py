@@ -75,7 +75,9 @@ def run_compress_job(
         verify_manifest,
     )
 
-    cfg = build_pipeline_config(job_id=job_id, user_id=user_id, data_dir=data_dir, payload=payload)
+    cfg = build_pipeline_config(
+        job_id=job_id, user_id=user_id, data_dir=data_dir, payload=payload
+    )
 
     def _log(msg: str) -> None:
         if on_log:
@@ -108,7 +110,9 @@ def run_compress_job(
         stage=cfg["stages"][0],
     )
 
-    _log(f"Compression run: {run_dir.name} preset={cfg['preset']} stages={','.join(cfg['stages'])}")
+    _log(
+        f"Compression run: {run_dir.name} preset={cfg['preset']} stages={','.join(cfg['stages'])}"
+    )
 
     stage_results: dict[str, Any] = {}
     for stage in cfg["stages"]:
@@ -124,7 +128,9 @@ def run_compress_job(
                 cfg=cfg["distill"],
                 seed=det.seed,
             )
-            append_artifact_record(run_dir, stage="distill", artifact_path=out_dir, role="output")
+            append_artifact_record(
+                run_dir, stage="distill", artifact_path=out_dir, role="output"
+            )
             stage_results["distilled"] = str(out_dir)
 
         elif stage == "prune":
@@ -139,7 +145,9 @@ def run_compress_job(
                 method=cfg["prune"]["method"],
                 seed=det.seed,
             )
-            append_artifact_record(run_dir, stage="prune", artifact_path=out_dir, role="output")
+            append_artifact_record(
+                run_dir, stage="prune", artifact_path=out_dir, role="output"
+            )
             stage_results["pruned"] = str(out_dir)
 
         elif stage == "finetune":
@@ -155,7 +163,9 @@ def run_compress_job(
                 cfg=cfg["finetune"],
                 seed=det.seed,
             )
-            append_artifact_record(run_dir, stage="finetune", artifact_path=out_dir, role="output")
+            append_artifact_record(
+                run_dir, stage="finetune", artifact_path=out_dir, role="output"
+            )
             stage_results["finetuned"] = str(out_dir)
 
         elif stage == "evaluate":
@@ -163,7 +173,9 @@ def run_compress_job(
 
             model_dir = _resolve_model_dir(cfg, run_dir, "evaluate")
             result = evaluate_into_run_dir(run_dir=run_dir, model_dir=model_dir)
-            stage_results["evaluate"] = result.to_dict() if hasattr(result, "to_dict") else result
+            stage_results["evaluate"] = (
+                result.to_dict() if hasattr(result, "to_dict") else result
+            )
             _log(str(result))
 
         elif stage == "export":
@@ -177,7 +189,9 @@ def run_compress_job(
                 model_name=cfg["export"]["model_name"],
                 port=cfg["export"]["port"],
             )
-            append_artifact_record(run_dir, stage="export", artifact_path=export_dir, role="output")
+            append_artifact_record(
+                run_dir, stage="export", artifact_path=export_dir, role="output"
+            )
             stage_results["export_bundle"] = str(export_dir)
             _log(f"Export bundle: {export_dir}")
 

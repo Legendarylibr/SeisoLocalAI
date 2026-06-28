@@ -82,12 +82,22 @@ async def test_training_job_e2e(app, auth_client, monkeypatch):
 
     def fake_run_training(config, on_metric=None, on_log=None):
         if on_metric:
-            on_metric({"type": "training", "step": 1, "loss": 1.5, "reward": -1.5, "epoch": 0.1})
+            on_metric(
+                {
+                    "type": "training",
+                    "step": 1,
+                    "loss": 1.5,
+                    "reward": -1.5,
+                    "epoch": 0.1,
+                }
+            )
         if on_log:
             on_log("mock training complete")
         out = Path(config.output_dir) / "checkpoint-e2e"
         out.mkdir(parents=True, exist_ok=True)
-        (out / "adapter_config.json").write_text('{"base_model_name_or_path": "test/model"}')
+        (out / "adapter_config.json").write_text(
+            '{"base_model_name_or_path": "test/model"}'
+        )
         return out
 
     monkeypatch.setattr("forge.orchestrators.training.run_training", fake_run_training)

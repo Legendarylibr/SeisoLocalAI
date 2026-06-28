@@ -27,8 +27,12 @@ def test_residual_patches_only_fused_decoder_classes(monkeypatch):
         patched_decoders.append(type(decoder).__name__)
         return True
 
-    monkeypatch.setattr("seiso.kernels.hooks._patch_post_attention_residual_norm", _fake_norm_patch)
-    monkeypatch.setattr("seiso.kernels.hooks._patch_fused_residual_decoder_forward", _fake_decoder_patch)
+    monkeypatch.setattr(
+        "seiso.kernels.hooks._patch_post_attention_residual_norm", _fake_norm_patch
+    )
+    monkeypatch.setattr(
+        "seiso.kernels.hooks._patch_fused_residual_decoder_forward", _fake_decoder_patch
+    )
 
     class LlamaDecoderLayer:
         input_layernorm = object()
@@ -68,7 +72,10 @@ def test_residual_fusion_matches_llama_decoder_semantics():
     torch = pytest.importorskip("torch")
     from transformers import LlamaConfig, LlamaModel
 
-    from seiso.kernels.hooks import apply_fused_residual_norm_kernels, apply_training_kernels
+    from seiso.kernels.hooks import (
+        apply_fused_residual_norm_kernels,
+        apply_training_kernels,
+    )
 
     config = LlamaConfig(
         hidden_size=64,
@@ -115,6 +122,6 @@ def test_residual_fusion_matches_llama_decoder_semantics():
     h = layer.mlp(h)
     ref = post_skip + h
 
-    assert torch.allclose(out_patched, ref, rtol=0.05, atol=0.2), (
-        f"residual fusion mismatch: max diff {(out_patched - ref).abs().max().item()}"
-    )
+    assert torch.allclose(
+        out_patched, ref, rtol=0.05, atol=0.2
+    ), f"residual fusion mismatch: max diff {(out_patched - ref).abs().max().item()}"

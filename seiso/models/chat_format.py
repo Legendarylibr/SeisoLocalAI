@@ -21,7 +21,9 @@ def format_messages_for_prompt(
                 add_generation_prompt=add_generation_prompt,
             ),
         )
-    parts = [f"{m.get('role', 'user').upper()}: {m.get('content', '')}" for m in messages]
+    parts = [
+        f"{m.get('role', 'user').upper()}: {m.get('content', '')}" for m in messages
+    ]
     if add_generation_prompt:
         parts.append("ASSISTANT:")
     return "\n".join(parts)
@@ -47,7 +49,9 @@ def extract_messages(sample: dict[str, Any], fmt) -> list[dict[str, Any]]:
                 {"role": "user", "content": str(sample.get("prompt") or "")},
                 {
                     "role": "assistant",
-                    "content": str(sample.get("completion") or sample.get("response") or ""),
+                    "content": str(
+                        sample.get("completion") or sample.get("response") or ""
+                    ),
                 },
             ]
         instruction = sample.get("instruction", "")
@@ -67,7 +71,9 @@ def extract_messages(sample: dict[str, Any], fmt) -> list[dict[str, Any]]:
                 role = "user"
             elif role in ("gpt", "assistant", "bot"):
                 role = "assistant"
-            messages.append({"role": role, "content": turn.get("value", turn.get("content", ""))})
+            messages.append(
+                {"role": role, "content": turn.get("value", turn.get("content", ""))}
+            )
         return messages
 
     if fmt == DatasetFormat.CHAT:
@@ -78,14 +84,26 @@ def extract_messages(sample: dict[str, Any], fmt) -> list[dict[str, Any]]:
 
         if sample.get("messages"):
             return cast(list[dict[str, Any]], sample["messages"])
-        chosen = sample.get("chosen") or sample.get("chosen_response") or sample.get("accepted")
+        chosen = (
+            sample.get("chosen")
+            or sample.get("chosen_response")
+            or sample.get("accepted")
+        )
         messages = parse_human_assistant_dialog(chosen)
         if messages:
             return messages
         prompt = str(sample.get("prompt") or "")
         response = str(chosen or "")
         if prompt and response:
-            return [{"role": "user", "content": prompt}, {"role": "assistant", "content": response}]
+            return [
+                {"role": "user", "content": prompt},
+                {"role": "assistant", "content": response},
+            ]
         return []
 
-    return [{"role": "user", "content": sample.get("text") or sample.get("content") or str(sample)}]
+    return [
+        {
+            "role": "user",
+            "content": sample.get("text") or sample.get("content") or str(sample),
+        }
+    ]

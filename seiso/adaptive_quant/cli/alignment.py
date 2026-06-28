@@ -41,15 +41,21 @@ def main(argv: Iterable[str] | None = None) -> None:
             "Requires: pip install -e '.[alignment]'"
         ),
     )
-    parser.add_argument("--sft-model", required=True, help="Path or HF id for the SFT checkpoint.")
+    parser.add_argument(
+        "--sft-model", required=True, help="Path or HF id for the SFT checkpoint."
+    )
     parser.add_argument(
         "--dataset",
         required=True,
         help="JSON or JSONL file with prompt/chosen/rejected fields.",
     )
-    parser.add_argument("--output-dir", default="outputs/alignment", help="Artifact root.")
+    parser.add_argument(
+        "--output-dir", default="outputs/alignment", help="Artifact root."
+    )
     parser.add_argument("--run-name", default="dpo_run", help="Run subdirectory name.")
-    parser.add_argument("--beta", type=float, default=0.1, help="DPO KL regularization strength.")
+    parser.add_argument(
+        "--beta", type=float, default=0.1, help="DPO KL regularization strength."
+    )
     parser.add_argument("--learning-rate", type=float, default=5e-7)
     parser.add_argument("--epochs", type=int, default=1)
     parser.add_argument("--batch-size", type=int, default=2)
@@ -60,8 +66,12 @@ def main(argv: Iterable[str] | None = None) -> None:
     parser.add_argument("--logging-steps", type=int, default=10)
     parser.add_argument("--save-steps", type=int, default=200)
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--lora", action="store_true", help="Attach LoRA adapters to the policy.")
-    parser.add_argument("--qlora", action="store_true", help="Load base model in 4-bit (QLoRA).")
+    parser.add_argument(
+        "--lora", action="store_true", help="Attach LoRA adapters to the policy."
+    )
+    parser.add_argument(
+        "--qlora", action="store_true", help="Load base model in 4-bit (QLoRA)."
+    )
     parser.add_argument(
         "--chat-template",
         action="store_true",
@@ -71,7 +81,9 @@ def main(argv: Iterable[str] | None = None) -> None:
 
     from seiso.adaptive_quant.cli.common import enforce_cli_startup
     from seiso.adaptive_quant.configuration.validation import validate_cli_path_argument
-    from seiso.adaptive_quant.nvidia_secure_boundary import enforce_nvidia_secure_boundary
+    from seiso.adaptive_quant.nvidia_secure_boundary import (
+        enforce_nvidia_secure_boundary,
+    )
 
     enforce_cli_startup(context="alignment CLI")
     enforce_nvidia_secure_boundary(context="alignment CLI")

@@ -22,7 +22,9 @@ logger = logging.getLogger(__name__)
 DEFAULT_TRAIN_QUANTS: tuple[str, ...] = ("4bit", "8bit", "16bit")
 DEFAULT_GGUF_QUANTS: tuple[str, ...] = ("q4_k_m", "q8_0", "f16")
 DEFAULT_ROUTE_HARDWARE: tuple[str, ...] = ("gpu",)
-LLAMA_CLI_PYTHON_SHIM = Path(__file__).resolve().parents[2] / "scripts" / "llama_cli_python_shim.py"
+LLAMA_CLI_PYTHON_SHIM = (
+    Path(__file__).resolve().parents[2] / "scripts" / "llama_cli_python_shim.py"
+)
 
 # Seiso export folder → seiso.adaptive_quant RouteCatalog quant labels.
 ROUTE_QUANT_LABELS: dict[str, str] = {
@@ -128,7 +130,9 @@ def _resolve_regression_bounds(
 def _resolve_train_config(train_out: Path, base_config: TrainConfig) -> TrainConfig:
     snapshot = train_out / "train_config_snapshot.json"
     if snapshot.is_file():
-        return TrainConfig.model_validate(json.loads(snapshot.read_text(encoding="utf-8")))
+        return TrainConfig.model_validate(
+            json.loads(snapshot.read_text(encoding="utf-8"))
+        )
     return base_config
 
 
@@ -153,7 +157,9 @@ def build_eval_route_prompt_library(
     if isinstance(max_total, int) and max_total > 0 and len(raw) > max_total:
         raw = raw.select(range(max_total))
     if cfg.eval_split_ratio > 0 and len(raw) > 10:
-        eval_ds = raw.train_test_split(test_size=cfg.eval_split_ratio, seed=cfg.seed)["test"]
+        eval_ds = raw.train_test_split(test_size=cfg.eval_split_ratio, seed=cfg.seed)[
+            "test"
+        ]
     else:
         eval_ds = raw
 
@@ -161,7 +167,9 @@ def build_eval_route_prompt_library(
     if ds_fmt == DatasetFormat.AUTO and len(eval_ds) > 0:
         ds_fmt = detect_format(eval_ds[0])
 
-    tokenizer = AutoTokenizer.from_pretrained(str(cfg.model_id), trust_remote_code=False)
+    tokenizer = AutoTokenizer.from_pretrained(
+        str(cfg.model_id), trust_remote_code=False
+    )
     limit = max(1, max_prompts)
     prompts: list[PromptSample] = []
     for index, sample in enumerate(eval_ds):
@@ -170,7 +178,9 @@ def build_eval_route_prompt_library(
         messages = extract_messages(sample, ds_fmt)
         if not messages:
             continue
-        prompt_messages = messages[:-1] if messages[-1].get("role") == "assistant" else messages
+        prompt_messages = (
+            messages[:-1] if messages[-1].get("role") == "assistant" else messages
+        )
         prompt_text = format_messages_for_prompt(
             prompt_messages,
             tokenizer,
@@ -314,7 +324,9 @@ def build_route_catalog(
         normalized = normalize_gguf_quants([quant_key])[0]
         quant_label = ROUTE_QUANT_LABELS.get(normalized)
         if quant_label is None:
-            raise ValueError(f"No RouteCatalog quant label for GGUF folder {quant_key!r}")
+            raise ValueError(
+                f"No RouteCatalog quant label for GGUF folder {quant_key!r}"
+            )
         if not path.is_file():
             raise FileNotFoundError(f"GGUF route file missing: {path}")
         routes.append(
@@ -329,19 +341,29 @@ def build_route_catalog(
             )
         )
     if len(routes) < 2:
-        raise ValueError("Route regression requires at least two exported GGUF variants")
+        raise ValueError(
+            "Route regression requires at least two exported GGUF variants"
+        )
     return RouteCatalog(routes=routes)
 
 
 def summarize_route_report(report: dict[str, Any]) -> dict[str, Any]:
     rows = report.get("rows") if isinstance(report.get("rows"), list) else []
     recommendations = (
-        report.get("recommendations") if isinstance(report.get("recommendations"), list) else []
+        report.get("recommendations")
+        if isinstance(report.get("recommendations"), list)
+        else []
     )
-    selected = [rec for rec in recommendations if isinstance(rec, dict) and rec.get("route_id")]
+    selected = [
+        rec for rec in recommendations if isinstance(rec, dict) and rec.get("route_id")
+    ]
 
-    rewards = finite_floats([row.get("reward") for row in rows if isinstance(row, dict)])
-    perplexities = finite_floats([row.get("perplexity") for row in rows if isinstance(row, dict)])
+    rewards = finite_floats(
+        [row.get("reward") for row in rows if isinstance(row, dict)]
+    )
+    perplexities = finite_floats(
+        [row.get("perplexity") for row in rows if isinstance(row, dict)]
+    )
     reward_regs = finite_floats([rec.get("reward_regression") for rec in selected])
     ppl_regs = finite_floats([rec.get("perplexity_regression") for rec in selected])
 
@@ -351,12 +373,16 @@ def summarize_route_report(report: dict[str, Any]) -> dict[str, Any]:
         "eval_mean_perplexity": mean(perplexities) if perplexities else None,
         "recommended_route": best_rec.get("route_id"),
         "recommended_quant": best_rec.get("quant_label"),
-        "reward_regression": mean(reward_regs)
-        if reward_regs
-        else finite_float(best_rec.get("reward_regression")),
-        "perplexity_regression": mean(ppl_regs)
-        if ppl_regs
-        else finite_float(best_rec.get("perplexity_regression")),
+        "reward_regression": (
+            mean(reward_regs)
+            if reward_regs
+            else finite_float(best_rec.get("reward_regression"))
+        ),
+        "perplexity_regression": (
+            mean(ppl_regs)
+            if ppl_regs
+            else finite_float(best_rec.get("perplexity_regression"))
+        ),
         "mean_selected_memory_mb": finite_float(report.get("mean_selected_memory_mb")),
     }
 
@@ -456,7 +482,9 @@ def run_route_regression_eval(
         report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
         report["artifact_path"] = str(report_path)
 
-    report["output_dir"] = str(output_dir or (data_dir / "rl_quant" / "quant_regression" / job_id))
+    report["output_dir"] = str(
+        output_dir or (data_dir / "rl_quant" / "quant_regression" / job_id)
+    )
     report["job_id"] = job_id
     return report
 
@@ -476,8 +504,12 @@ def _read_training_metrics(checkpoint: Path) -> tuple[float | None, float | None
         except json.JSONDecodeError:
             continue
         if row.get("type") == "eval" or row.get("eval_loss") is not None:
-            eval_loss = finite_float(row.get("eval_loss") or row.get("loss")) or eval_loss
-        train_loss = finite_float(row.get("train_loss") or row.get("loss")) or train_loss
+            eval_loss = (
+                finite_float(row.get("eval_loss") or row.get("loss")) or eval_loss
+            )
+        train_loss = (
+            finite_float(row.get("train_loss") or row.get("loss")) or train_loss
+        )
     return train_loss, eval_loss
 
 
@@ -566,7 +598,9 @@ def run_quant_regression_study(
             row.train_loss, row.eval_loss = _read_training_metrics(Path(row.checkpoint))
 
             export_dir = train_out / "export"
-            merged_dir = export_merged_checkpoint(Path(row.checkpoint), export_dir, on_log=log)
+            merged_dir = export_merged_checkpoint(
+                Path(row.checkpoint), export_dir, on_log=log
+            )
             row.export_dir = str(export_dir)
 
             if skip_rl:
@@ -680,14 +714,18 @@ def _resolve_checkpoint(train_out: Path) -> Path | None:
             return Path(ckpt)
     candidates = sorted(train_out.glob("checkpoint-*"), reverse=True)
     for candidate in candidates:
-        if (candidate / "adapter_config.json").is_file() or (candidate / "config.json").is_file():
+        if (candidate / "adapter_config.json").is_file() or (
+            candidate / "config.json"
+        ).is_file():
             return candidate
     if (train_out / "adapter_config.json").is_file():
         return train_out
     return None
 
 
-def _persist_manifest(path: Path, report: QuantRegressionReport, existing: dict[str, Any]) -> None:
+def _persist_manifest(
+    path: Path, report: QuantRegressionReport, existing: dict[str, Any]
+) -> None:
     payload = {**existing, **report.to_dict()}
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 

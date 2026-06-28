@@ -20,7 +20,12 @@ from forge.security.auth import (
     verify_password,
 )
 from forge.security.client_ip import client_ip
-from forge.security.csrf import CSRF_COOKIE, clear_csrf_cookie, generate_csrf_token, set_csrf_cookie
+from forge.security.csrf import (
+    CSRF_COOKIE,
+    clear_csrf_cookie,
+    generate_csrf_token,
+    set_csrf_cookie,
+)
 
 _login_limiter = LoginRateLimiter()
 
@@ -51,7 +56,9 @@ class OnboardingStatus(BaseModel):
 
 
 @router.get("/status", response_model=OnboardingStatus)
-async def onboarding_status(db: Annotated[Database, Depends(get_db)]) -> OnboardingStatus:
+async def onboarding_status(
+    db: Annotated[Database, Depends(get_db)],
+) -> OnboardingStatus:
     count = await db.user_count()
     settings = get_settings()
     return OnboardingStatus(
@@ -61,7 +68,9 @@ async def onboarding_status(db: Annotated[Database, Depends(get_db)]) -> Onboard
     )
 
 
-@router.post("/register", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/register", response_model=AuthResponse, status_code=status.HTTP_201_CREATED
+)
 async def register(
     body: RegisterRequest,
     response: Response,
@@ -77,7 +86,9 @@ async def register(
     db = get_db()
     settings = get_settings()
     try:
-        user = await db.create_first_user(hash_password(body.password), DEFAULT_DISPLAY_NAME)
+        user = await db.create_first_user(
+            hash_password(body.password), DEFAULT_DISPLAY_NAME
+        )
     except ValueError as exc:
         raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
     token = create_access_token(user["id"], settings)
@@ -94,7 +105,11 @@ async def register(
     audit_event("auth_register", user_id=user["id"])
     return AuthResponse(
         access_token=token,
-        user={"id": user["id"], "email": user["email"], "display_name": user["display_name"]},
+        user={
+            "id": user["id"],
+            "email": user["email"],
+            "display_name": user["display_name"],
+        },
     )
 
 
@@ -126,7 +141,11 @@ async def login(
     audit_event("auth_login", user_id=user["id"])
     return AuthResponse(
         access_token=token,
-        user={"id": user["id"], "email": user["email"], "display_name": user["display_name"]},
+        user={
+            "id": user["id"],
+            "email": user["email"],
+            "display_name": user["display_name"],
+        },
     )
 
 

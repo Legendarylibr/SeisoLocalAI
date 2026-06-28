@@ -44,7 +44,9 @@ def score_frontier_reference(
     output_path: str | None = None,
 ) -> dict[str, Any]:
     if not (config.frontier_enabled or config.frontier_auto_compare_in_pipeline):
-        raise ValueError("frontier_enabled must be true to score frontier reference outputs")
+        raise ValueError(
+            "frontier_enabled must be true to score frontier reference outputs"
+        )
     selected = prompts or select_comparison_prompts(config)
     client = FrontierReferenceClient(config)
     records: dict[str, dict[str, Any]] = {}
@@ -112,7 +114,9 @@ def _local_completion_for_prompt(
     return LocalCompletion(
         prompt_id=prompt.prompt_id,
         response_text=generated,
-        latency_ms=float(metrics.get("latency_ms", metrics.get("latency_ms_per_token", 0.0))),
+        latency_ms=float(
+            metrics.get("latency_ms", metrics.get("latency_ms_per_token", 0.0))
+        ),
         source="llama_cpp",
     )
 
@@ -137,7 +141,9 @@ def compare_frontier_to_local(
 
     local_reference: dict[str, str] = {}
     if config.frontier_local_reference_path:
-        local_reference = _load_local_reference_map(config.frontier_local_reference_path)
+        local_reference = _load_local_reference_map(
+            config.frontier_local_reference_path
+        )
 
     rows: list[dict[str, Any]] = []
     skipped_missing_reference = 0
@@ -147,7 +153,9 @@ def compare_frontier_to_local(
             skipped_missing_reference += 1
             continue
         frontier_text = str(ref.get("response_text") or "")
-        local = _local_completion_for_prompt(config, prompt, local_reference=local_reference)
+        local = _local_completion_for_prompt(
+            config, prompt, local_reference=local_reference
+        )
         overlap = None
         len_ratio = None
         local_text = ""
@@ -175,7 +183,9 @@ def compare_frontier_to_local(
         )
 
     overlap_values = [
-        float(row["reference_overlap"]) for row in rows if row["reference_overlap"] is not None
+        float(row["reference_overlap"])
+        for row in rows
+        if row["reference_overlap"] is not None
     ]
     if skipped_missing_reference:
         print(
@@ -199,7 +209,9 @@ def compare_frontier_to_local(
     if config.frontier_write_external_quality_sidecar and overlap_values:
         sidecar_path = _external_quality_sidecar_path(config)
         sidecar = {
-            row["prompt_id"]: {config.frontier_comparison_metric: row["reference_overlap"]}
+            row["prompt_id"]: {
+                config.frontier_comparison_metric: row["reference_overlap"]
+            }
             for row in rows
             if row["reference_overlap"] is not None
         }

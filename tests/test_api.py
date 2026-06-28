@@ -33,7 +33,9 @@ async def test_onboarding_flow(app):
         assert reg.status_code == 201
         token = reg.json()["access_token"]
 
-        me = await client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
+        me = await client.get(
+            "/api/auth/me", headers={"Authorization": f"Bearer {token}"}
+        )
         assert me.status_code == 200
         assert me.json()["display_name"] == "Admin"
 
@@ -45,7 +47,9 @@ async def test_onboarding_flow(app):
 
 
 @pytest.mark.asyncio
-async def test_onboarding_requires_storage_choice_when_unconfigured(monkeypatch, tmp_path):
+async def test_onboarding_requires_storage_choice_when_unconfigured(
+    monkeypatch, tmp_path
+):
     monkeypatch.setenv("SEISO_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("SEISO_SECRET_KEY", "test-secret-key-for-jwt-signing-32b")
     monkeypatch.delenv("SEISO_DB_EPHEMERAL", raising=False)
@@ -60,7 +64,9 @@ async def test_onboarding_requires_storage_choice_when_unconfigured(monkeypatch,
         assert status.status_code == 200
         assert status.json()["storage_mode_configured"] is False
 
-        missing = await client.post("/api/auth/register", json={"password": "securepass1"})
+        missing = await client.post(
+            "/api/auth/register", json={"password": "securepass1"}
+        )
         assert missing.status_code == 400
 
         reg = await client.post(
@@ -68,7 +74,9 @@ async def test_onboarding_requires_storage_choice_when_unconfigured(monkeypatch,
             json={"password": "securepass1", "storage_mode": "persistent"},
         )
         assert reg.status_code == 201
-        assert (tmp_path / ".storage_mode").read_text(encoding="utf-8").strip() == "persistent"
+        assert (tmp_path / ".storage_mode").read_text(
+            encoding="utf-8"
+        ).strip() == "persistent"
         assert (tmp_path / "forge.db").exists()
 
 

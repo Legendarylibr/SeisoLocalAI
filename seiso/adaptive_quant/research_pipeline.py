@@ -30,7 +30,9 @@ def maybe_save_final_checkpoint(config: FrameworkConfig, trainer) -> str | None:
     return save_checkpoint(config.final_checkpoint_path())
 
 
-def write_pipeline_failure_artifact(config: FrameworkConfig, exc: BaseException) -> None:
+def write_pipeline_failure_artifact(
+    config: FrameworkConfig, exc: BaseException
+) -> None:
     """Best-effort failure record for non-research pipelines (mirrors research pipeline)."""
     with contextlib.suppress(Exception):
         write_json(
@@ -43,7 +45,9 @@ def write_pipeline_failure_artifact(config: FrameworkConfig, exc: BaseException)
         )
 
 
-def run_research_analysis(config: FrameworkConfig, history_path: str | None) -> dict[str, object]:
+def run_research_analysis(
+    config: FrameworkConfig, history_path: str | None
+) -> dict[str, object]:
     from seiso.adaptive_quant.pipeline.output_summary import resolve_analysis_log_path
     from seiso.analysis.analyzers import (
         analyze_hardware,
@@ -68,8 +72,12 @@ def run_research_analysis(config: FrameworkConfig, history_path: str | None) -> 
         ),
     }
     if config.moe_enabled:
-        analysis["moe_experts"] = analyze_moe_experts(primary_log, f"{analysis_root}/moe_experts")
-        analysis["moe_cache"] = analyze_moe_cache(primary_log, f"{analysis_root}/moe_cache")
+        analysis["moe_experts"] = analyze_moe_experts(
+            primary_log, f"{analysis_root}/moe_experts"
+        )
+        analysis["moe_cache"] = analyze_moe_cache(
+            primary_log, f"{analysis_root}/moe_cache"
+        )
     if history_path is not None:
         analysis["training_dynamics"] = analyze_training_dynamics(
             history_path, f"{analysis_root}/training"
@@ -115,7 +123,8 @@ class ResearchPipeline:
                 preflight_report = run_torch_preflight(config, trainer.policy)
                 preflight_report["gpu_profile"] = gpu_profile_report
                 write_json(
-                    f"{config.benchmark_dir}/{config.run_name}_preflight.json", preflight_report
+                    f"{config.benchmark_dir}/{config.run_name}_preflight.json",
+                    preflight_report,
                 )
 
             train_summary = trainer.train()
@@ -126,7 +135,9 @@ class ResearchPipeline:
                 flush = getattr(trainer.env.logger, "flush", None)
                 if callable(flush):
                     flush()
-                replay_report = finalize_replay_artifacts(config, log_path, git_commit=commit)
+                replay_report = finalize_replay_artifacts(
+                    config, log_path, git_commit=commit
+                )
             recommendation_summary = self._recommend_quantization(config, trainer)
             from seiso.adaptive_quant.pipeline.gguf_export import maybe_export_gguf
 
@@ -248,7 +259,9 @@ class ResearchPipeline:
         summary["seiso.analysis"] = slim_analysis_for_summary(analysis, config)
         paper_bundle = create_pipeline_paper_bundle(config=config, summary=summary)
         summary["artifacts"]["paper_bundle"] = paper_bundle
-        summary["artifact_index"] = build_research_artifact_index(config, summary["artifacts"])
+        summary["artifact_index"] = build_research_artifact_index(
+            config, summary["artifacts"]
+        )
         write_json(config.summary_path(), summary)
         return summary
 
@@ -266,7 +279,9 @@ class ResearchPipeline:
         try:
             requested = self.requested_profile or self.original_config.torch_gpu_profile
             if torch is None:
-                raise ImportError(TORCH_BACKEND_REQUIRED_MESSAGE) from TORCH_IMPORT_ERROR
+                raise ImportError(
+                    TORCH_BACKEND_REQUIRED_MESSAGE
+                ) from TORCH_IMPORT_ERROR
             cuda = detect_cuda_device()
             device_name = cuda.name if cuda is not None else None
             total_memory_gb = cuda.total_memory_gb if cuda is not None else None
@@ -310,7 +325,9 @@ class ResearchPipeline:
             stats["replay_buffer_entries"] = float(replay.size)
         return stats
 
-    def _recommend_quantization(self, config: FrameworkConfig, trainer) -> dict[str, object]:
+    def _recommend_quantization(
+        self, config: FrameworkConfig, trainer
+    ) -> dict[str, object]:
         from seiso.adaptive_quant.recommendation import recommend_quantization
 
         return recommend_quantization(trainer, config)
@@ -326,7 +343,10 @@ def run_pipeline_entrypoint(
     show_target_hardware: bool = False,
     footer_mode: str = "full",
 ) -> dict[str, object]:
-    from seiso.adaptive_quant.run_footer import print_launcher_dashboard_hint, print_pipeline_footer
+    from seiso.adaptive_quant.run_footer import (
+        print_launcher_dashboard_hint,
+        print_pipeline_footer,
+    )
 
     print_launcher_dashboard_hint(when="startup")
     summary = ResearchPipeline(

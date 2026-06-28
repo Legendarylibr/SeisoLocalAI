@@ -70,4 +70,7 @@ def test_python_lock_without_hashes_is_rejected(tmp_path: Path):
 def test_sha256_file_matches_known_value(tmp_path: Path):
     sample = tmp_path / "sample.txt"
     sample.write_bytes(b"seiso-lock-check\n")
-    assert sha256_file(sample) == "e9140ca2669aba95a6ff302815ebb84ef0137acab886757e64e0eb9266e8cfc7"
+    assert (
+        sha256_file(sample)
+        == "e9140ca2669aba95a6ff302815ebb84ef0137acab886757e64e0eb9266e8cfc7"
+    )

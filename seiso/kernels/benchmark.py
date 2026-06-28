@@ -106,9 +106,13 @@ def bench_cross_entropy(rows: int, vocab: int, dtype: str) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Benchmark Seiso fused kernels")
     parser.add_argument("--rows", type=int, default=4096, help="Token rows (batch*seq)")
-    parser.add_argument("--hidden", type=int, default=4096, help="Hidden / intermediate dim")
+    parser.add_argument(
+        "--hidden", type=int, default=4096, help="Hidden / intermediate dim"
+    )
     parser.add_argument("--vocab", type=int, default=32000, help="Vocab size for CE")
-    parser.add_argument("--dtype", choices=["float16", "bfloat16", "float32"], default="bfloat16")
+    parser.add_argument(
+        "--dtype", choices=["float16", "bfloat16", "float32"], default="bfloat16"
+    )
     parser.add_argument("--op", choices=["all", "rms", "swiglu", "ce"], default="all")
     args = parser.parse_args()
 

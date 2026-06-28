@@ -64,7 +64,11 @@ def test_apply_best_sweep_overrides():
         job_id="job-sweep",
         user_id="user-1",
         data_dir=Path("/tmp/seiso-test"),
-        payload={"preset": "minimal", "training_episodes": 32, "evaluation_episodes": 8},
+        payload={
+            "preset": "minimal",
+            "training_episodes": 32,
+            "evaluation_episodes": 8,
+        },
     )
     updated = apply_best_sweep_overrides(cfg, {"learning_rate": 0.02})
     assert updated.learning_rate == 0.02
@@ -129,7 +133,9 @@ def test_run_rl_quant_job_runs_sweep_before_pipeline(tmp_path: Path):
             "seiso.rl_quant.runner.run_auto_hyperparameter_sweep",
             return_value=sweep_result,
         ) as sweep,
-        patch("seiso.adaptive_quant.research_pipeline.ResearchPipeline") as pipeline_cls,
+        patch(
+            "seiso.adaptive_quant.research_pipeline.ResearchPipeline"
+        ) as pipeline_cls,
     ):
         pipeline_cls.return_value.run.return_value = pipeline_summary
         result = run_rl_quant_job(
@@ -150,7 +156,9 @@ def test_run_rl_quant_job_skips_sweep_when_disabled(tmp_path: Path):
 
     with (
         patch("seiso.rl_quant.runner.run_auto_hyperparameter_sweep") as sweep,
-        patch("seiso.adaptive_quant.research_pipeline.ResearchPipeline") as pipeline_cls,
+        patch(
+            "seiso.adaptive_quant.research_pipeline.ResearchPipeline"
+        ) as pipeline_cls,
     ):
         pipeline_cls.return_value.run.return_value = {}
         result = run_rl_quant_job(

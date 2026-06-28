@@ -67,15 +67,30 @@ def write_research_report_markdown(
         analysis_root = Path(config.analysis_dir) / config.run_name
         rel_root = Path("..") / "analysis" / config.run_name
         candidates = [
-            ("hardware reward", analysis_root / "hardware" / "hardware_generalization_reward.svg"),
+            (
+                "hardware reward",
+                analysis_root / "hardware" / "hardware_generalization_reward.svg",
+            ),
             (
                 "hardware latency",
                 analysis_root / "hardware" / "hardware_generalization_latency.svg",
             ),
-            ("input complexity vs bits", analysis_root / "inputs" / "input_complexity_vs_bits.svg"),
-            ("input adaptation scatter", analysis_root / "inputs" / "input_adaptation_scatter.svg"),
-            ("quant function params", analysis_root / "quant" / "quant_function_parameters.svg"),
-            ("training reward curve", analysis_root / "training" / "training_reward_curve.svg"),
+            (
+                "input complexity vs bits",
+                analysis_root / "inputs" / "input_complexity_vs_bits.svg",
+            ),
+            (
+                "input adaptation scatter",
+                analysis_root / "inputs" / "input_adaptation_scatter.svg",
+            ),
+            (
+                "quant function params",
+                analysis_root / "quant" / "quant_function_parameters.svg",
+            ),
+            (
+                "training reward curve",
+                analysis_root / "training" / "training_reward_curve.svg",
+            ),
         ]
         if config.moe_enabled:
             candidates.extend(
@@ -105,16 +120,26 @@ def write_research_report_markdown(
         ("mean_stability_penalty", eval_summary.get("mean_stability_penalty")),
     ]
     eval_rows = [[k, fmt_report_num(v)] for k, v in eval_metrics]
-    recommendation = recommendation_summary if isinstance(recommendation_summary, dict) else None
-    recommended_quant = (
-        recommendation.get("recommended_quant") if isinstance(recommendation, dict) else None
+    recommendation = (
+        recommendation_summary if isinstance(recommendation_summary, dict) else None
     )
-    decision = recommendation.get("decision") if isinstance(recommendation, dict) else None
+    recommended_quant = (
+        recommendation.get("recommended_quant")
+        if isinstance(recommendation, dict)
+        else None
+    )
+    decision = (
+        recommendation.get("decision") if isinstance(recommendation, dict) else None
+    )
 
     bench = benchmark_summary
     single_vs_multi = bench.get("single_vs_multi") if isinstance(bench, dict) else None
-    static_vs_dynamic = bench.get("static_vs_dynamic") if isinstance(bench, dict) else None
-    discrete_vs_learned = bench.get("discrete_vs_learned") if isinstance(bench, dict) else None
+    static_vs_dynamic = (
+        bench.get("static_vs_dynamic") if isinstance(bench, dict) else None
+    )
+    discrete_vs_learned = (
+        bench.get("discrete_vs_learned") if isinstance(bench, dict) else None
+    )
 
     key_results_lines: list[str] = []
     if isinstance(single_vs_multi, dict):
@@ -249,7 +274,11 @@ def write_research_report_markdown(
         )
     if preflight_report:
         lines.extend(
-            ["", "### Preflight", *md_table(["field", "value"], _dict_table_rows(preflight_report))]
+            [
+                "",
+                "### Preflight",
+                *md_table(["field", "value"], _dict_table_rows(preflight_report)),
+            ]
         )
     lines.extend(
         [
@@ -260,7 +289,9 @@ def write_research_report_markdown(
         ]
     )
     if vram_report:
-        lines.extend(["", *md_table(["vram metric", "value"], _dict_table_rows(vram_report))])
+        lines.extend(
+            ["", *md_table(["vram metric", "value"], _dict_table_rows(vram_report))]
+        )
     else:
         lines.append("- vram: `n/a (cpu backend)`")
     lines.extend(
@@ -292,4 +323,9 @@ def write_research_report_markdown(
     return str(target)
 
 
-__all__ = ["fmt_report_num", "maybe_report_link", "md_code_json", "write_research_report_markdown"]
+__all__ = [
+    "fmt_report_num",
+    "maybe_report_link",
+    "md_code_json",
+    "write_research_report_markdown",
+]

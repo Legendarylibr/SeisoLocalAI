@@ -16,7 +16,9 @@ logger = logging.getLogger(__name__)
 DEFAULT_QUANTS = ("q4_k_m", "q8_0", "f16")
 
 # Direct HF→GGUF outtypes supported by the installed convert_hf_to_gguf.py.
-DIRECT_CONVERT_OUTTYPES = frozenset({"f32", "f16", "bf16", "q8_0", "tq1_0", "tq2_0", "auto"})
+DIRECT_CONVERT_OUTTYPES = frozenset(
+    {"f32", "f16", "bf16", "q8_0", "tq1_0", "tq2_0", "auto"}
+)
 
 # K-quants produced via llama-quantize from an intermediate F16 GGUF.
 LLAMA_QUANTIZE_TYPES: dict[str, str] = {
@@ -104,7 +106,9 @@ def normalize_gguf_quants(quantizations: list[str] | tuple[str, ...]) -> list[st
     for label in quantizations:
         quant = normalize_gguf_quant(label)
         if quant not in SUPPORTED_GGUF_QUANTS:
-            logger.warning("Unknown GGUF quant %r — using as-is (may fail at convert time)", label)
+            logger.warning(
+                "Unknown GGUF quant %r — using as-is (may fail at convert time)", label
+            )
         if quant not in seen:
             seen.add(quant)
             out.append(quant)
@@ -149,7 +153,11 @@ def quantize_gguf_file(
     cmd = [str(binary), str(source), str(dest), quant_type]
     try:
         subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=7200)
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError) as exc:
+    except (
+        subprocess.CalledProcessError,
+        subprocess.TimeoutExpired,
+        FileNotFoundError,
+    ) as exc:
         detail = getattr(exc, "stderr", "") or getattr(exc, "stdout", "") or str(exc)
         log(f"llama-quantize failed for {quant}: {str(detail)[:300]}")
         return False
@@ -227,7 +235,9 @@ def convert_hf_dir_to_gguf(
         finally:
             f16_path.unlink(missing_ok=True)
 
-    log(f"GGUF conversion failed for {quant}: unsupported quant for installed llama.cpp")
+    log(
+        f"GGUF conversion failed for {quant}: unsupported quant for installed llama.cpp"
+    )
     return False
 
 
@@ -246,7 +256,9 @@ def _convert_hf_dir_direct(
     for prefix in converters:
         cmd = [*prefix, str(source), "--outfile", str(dest), "--outtype", outtype]
         try:
-            subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=7200)
+            subprocess.run(
+                cmd, check=True, capture_output=True, text=True, timeout=7200
+            )
             if dest.exists() and dest.stat().st_size > 0:
                 log(f"GGUF written: {dest} ({outtype})")
                 return True
@@ -357,6 +369,10 @@ def export_gguf(
             return []
 
         paths = _export_quants(
-            merged, output_dir, normalize_gguf_quants(quantizations), output_dir.name, log
+            merged,
+            output_dir,
+            normalize_gguf_quants(quantizations),
+            output_dir.name,
+            log,
         )
         return list(paths.values())

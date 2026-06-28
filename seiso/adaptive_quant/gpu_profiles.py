@@ -247,7 +247,9 @@ def infer_gpu_profile(device_name: str | None, total_memory_gb: float | None) ->
     normalized = normalize_gpu_name(device_name or "")
     if "h100" in normalized:
         return "h100"
-    if "a100" in normalized and ("80" in normalized or (total_memory_gb or 0.0) >= 70.0):
+    if "a100" in normalized and (
+        "80" in normalized or (total_memory_gb or 0.0) >= 70.0
+    ):
         return "a100_80gb"
     if "a100" in normalized:
         return "a100_40gb"

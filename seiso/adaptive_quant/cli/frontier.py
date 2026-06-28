@@ -34,7 +34,8 @@ def _score_command(args: argparse.Namespace) -> None:
     )
     summary = score_frontier_reference(cfg, output_path=args.output)
     print(
-        f"[frontier] scored {summary['prompt_count']} prompts → {summary['path']}", file=sys.stderr
+        f"[frontier] scored {summary['prompt_count']} prompts → {summary['path']}",
+        file=sys.stderr,
     )
 
 

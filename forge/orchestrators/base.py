@@ -34,7 +34,9 @@ class JobRecord:
     kind: str
     user_id: str | None = None
     status: JobStatus = JobStatus.PENDING
-    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    created_at: str = field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
     result: dict[str, Any] = field(default_factory=dict)
     error: str | None = None
 
@@ -49,10 +51,12 @@ class Orchestrator(ABC):
         self._jobs: dict[str, JobRecord] = {}
         self._log_buffers: dict[str, list[str]] = defaultdict(list)
         self._metric_buffers: dict[str, list[dict[str, Any]]] = defaultdict(list)
-        self._subscribers: dict[str, list[asyncio.Queue[str | None]]] = defaultdict(list)
-        self._metric_subscribers: dict[str, list[asyncio.Queue[dict[str, Any] | None]]] = (
-            defaultdict(list)
+        self._subscribers: dict[str, list[asyncio.Queue[str | None]]] = defaultdict(
+            list
         )
+        self._metric_subscribers: dict[
+            str, list[asyncio.Queue[dict[str, Any] | None]]
+        ] = defaultdict(list)
         self._tasks: dict[str, asyncio.Task[None]] = {}
         self._subprocesses: dict[str, asyncio.subprocess.Process] = {}
 
@@ -66,7 +70,9 @@ class Orchestrator(ABC):
     def get_job(self, job_id: str) -> JobRecord | None:
         return self._jobs.get(job_id)
 
-    def register_subprocess(self, job_id: str, proc: asyncio.subprocess.Process) -> None:
+    def register_subprocess(
+        self, job_id: str, proc: asyncio.subprocess.Process
+    ) -> None:
         self._subprocesses[job_id] = proc
 
     def _evict_oldest_job(self) -> None:

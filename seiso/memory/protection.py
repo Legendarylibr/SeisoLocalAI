@@ -107,7 +107,13 @@ def _estimate_path_vram_mb_uncached(p: Path, *, mode: str = "chat") -> int:
         if hub_est is not None:
             return hub_est
 
-    if p.is_file() and p.suffix.lower() in {".gguf", ".bin", ".safetensors", ".pt", ".pth"}:
+    if p.is_file() and p.suffix.lower() in {
+        ".gguf",
+        ".bin",
+        ".safetensors",
+        ".pt",
+        ".pth",
+    }:
         file_mb = max(p.stat().st_size / (1024**2), 1)
         if p.suffix.lower() == ".gguf":
             # GGUF weights map ~1:1 to VRAM when fully offloaded; add KV/activation headroom.
@@ -122,7 +128,9 @@ def _estimate_path_vram_mb_uncached(p: Path, *, mode: str = "chat") -> int:
                     weight_bytes += f.stat().st_size
         if weight_bytes > 0:
             weight_mb = weight_bytes / (1024**2)
-            if any(f.suffix.lower() == ".gguf" for f in p.rglob("*.gguf") if f.is_file()):
+            if any(
+                f.suffix.lower() == ".gguf" for f in p.rglob("*.gguf") if f.is_file()
+            ):
                 est = int(weight_mb + _INFERENCE_OVERHEAD_MB)
             else:
                 est = int(weight_mb * 1.15 + _INFERENCE_OVERHEAD_MB)
@@ -134,7 +142,9 @@ def _estimate_path_vram_mb_uncached(p: Path, *, mode: str = "chat") -> int:
         if hub_est is not None:
             est = hub_est
         else:
-            guessed = guess_params_from_name(name) or guess_params_from_name(path_str) or 7.0
+            guessed = (
+                guess_params_from_name(name) or guess_params_from_name(path_str) or 7.0
+            )
             est = int(estimate_chat_vram_gb(f"{guessed}B", repo_id=path_str) * 1024)
             if mode == "train":
                 est = int(
@@ -146,7 +156,11 @@ def _estimate_path_vram_mb_uncached(p: Path, *, mode: str = "chat") -> int:
                     * 1024
                 )
 
-    if mode == "train" and _hub_model_vram_mb(path_str, mode=mode) is None and p.exists():
+    if (
+        mode == "train"
+        and _hub_model_vram_mb(path_str, mode=mode) is None
+        and p.exists()
+    ):
         est = int(est * _TRAINING_OVERHEAD_RATIO)
     return max(est, 256)
 
@@ -182,7 +196,11 @@ def is_oom_error(exc: BaseException) -> bool:
 def release_cached_memory(*, sync: bool = False) -> None:
     """Best-effort GPU/RAM cache release."""
     gc.collect()
-    if os.environ.get("SEISO_SKIP_MLX_PROBE", "").strip().lower() not in {"1", "true", "yes"}:
+    if os.environ.get("SEISO_SKIP_MLX_PROBE", "").strip().lower() not in {
+        "1",
+        "true",
+        "yes",
+    }:
         try:
             import mlx.core as mx  # pylint: disable=import-error,no-name-in-module
 
@@ -296,7 +314,9 @@ def available_ram_mb() -> int:
     return int(float(hardware_profile().get("ram_gb") or 8) * 1024 * 0.5)
 
 
-def build_hf_max_memory(*, reserve_ratio: float = _DEFAULT_RESERVE_RATIO) -> dict[int, str] | None:
+def build_hf_max_memory(
+    *, reserve_ratio: float = _DEFAULT_RESERVE_RATIO
+) -> dict[int, str] | None:
     """Build HuggingFace ``max_memory`` map from live free VRAM."""
     try:
         import torch
@@ -362,7 +382,9 @@ def ensure_load_fits(path: str | Path, *, mode: str = "chat") -> dict[str, Any]:
     """Block or warn before loading a model that exceeds headroom."""
     fit = assess_path_memory_fit_for_load(path, mode=mode)
     if fit.get("memory_load_blocked"):
-        reason = fit.get("memory_load_blocked_reason") or "Model exceeds available memory"
+        reason = (
+            fit.get("memory_load_blocked_reason") or "Model exceeds available memory"
+        )
         if allow_memory_overcommit():
             logger.warning("Memory overcommit allowed: %s", reason)
         else:
@@ -454,8 +476,12 @@ def clamp_llama_load_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
     ctx_scale = max(1, n_ctx // 4096)
     cap_batch = max(_MIN_LLAMA_BATCH, cap_batch // ctx_scale)
     out["n_batch"] = min(int(out.get("n_batch") or cap_batch), cap_batch)
-    ubatch_cap = max(_MIN_LLAMA_BATCH, min(out["n_batch"], cap_batch // 2 or _MIN_LLAMA_BATCH))
-    out["n_ubatch"] = min(int(out.get("n_ubatch") or ubatch_cap), ubatch_cap, out["n_batch"])
+    ubatch_cap = max(
+        _MIN_LLAMA_BATCH, min(out["n_batch"], cap_batch // 2 or _MIN_LLAMA_BATCH)
+    )
+    out["n_ubatch"] = min(
+        int(out.get("n_ubatch") or ubatch_cap), ubatch_cap, out["n_batch"]
+    )
 
     ctx_cap = clamp_llama_n_ctx(n_ctx, max_tokens=512)
     if n_ctx > ctx_cap:
@@ -580,7 +606,9 @@ def apply_training_memory_guards(config: Any) -> Any:
 
     from seiso.models.hub_quant import needs_tight_vram_training
 
-    trust_remote_code = bool(getattr(config, "extra", {}).get("trust_remote_code", False))
+    trust_remote_code = bool(
+        getattr(config, "extra", {}).get("trust_remote_code", False)
+    )
     if needs_tight_vram_training(
         str(config.model_id),
         trust_remote_code=trust_remote_code,
@@ -668,7 +696,9 @@ def jsonl_load_safe(path: Path) -> bool:
         return False
 
 
-def resolve_training_device_map(device: str | None = None) -> str | dict[str, str] | None:
+def resolve_training_device_map(
+    device: str | None = None,
+) -> str | dict[str, str] | None:
     """Single-device placement for DDP; auto only for single-process CUDA."""
     import os
 

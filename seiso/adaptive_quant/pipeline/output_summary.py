@@ -119,7 +119,10 @@ def analysis_takeaway_lines(analysis: dict[str, object]) -> list[str]:
         )
 
     moe_cache = analysis.get("moe_cache")
-    if isinstance(moe_cache, dict) and moe_cache.get("mean_cache_miss_count") is not None:
+    if (
+        isinstance(moe_cache, dict)
+        and moe_cache.get("mean_cache_miss_count") is not None
+    ):
         lines.append(
             f"- MoE cache: mean misses **{_fmt(moe_cache.get('mean_cache_miss_count'))}**, "
             f"swap cost **{_fmt(moe_cache.get('mean_swap_cost_ms'))} ms**"
@@ -165,7 +168,10 @@ def benchmark_metric_rows(
                 continue
             rows.append([f"{section_name}.{delta_name}", _fmt(delta_value), "—", "—"])
     single = benchmark_summary.get("single_vs_multi")
-    if isinstance(single, dict) and single.get("generalization_gap_improvement") is not None:
+    if (
+        isinstance(single, dict)
+        and single.get("generalization_gap_improvement") is not None
+    ):
         rows.append(
             [
                 "single_vs_multi.gap_improvement",
@@ -220,9 +226,11 @@ def headline_summary_for_metrics(summary: Mapping[str, Any]) -> dict[str, Any]:
         if isinstance(fixed, dict):
             slim_rec["recommended_quant"] = {
                 "signature": fixed.get("signature"),
-                "evaluation": fixed.get("evaluation")
-                if isinstance(fixed.get("evaluation"), dict)
-                else None,
+                "evaluation": (
+                    fixed.get("evaluation")
+                    if isinstance(fixed.get("evaluation"), dict)
+                    else None
+                ),
             }
         decision = recommendation.get("decision")
         if isinstance(decision, dict):
@@ -238,7 +246,9 @@ def headline_summary_for_metrics(summary: Mapping[str, Any]) -> dict[str, Any]:
     return curated
 
 
-def slim_online_analysis_for_summary(online_analysis: dict[str, object]) -> dict[str, object]:
+def slim_online_analysis_for_summary(
+    online_analysis: dict[str, object],
+) -> dict[str, object]:
     """Drop chart paths from online summary JSON; figures live under ``analysis_dir``."""
     slim: dict[str, object] = {}
     for key in (
@@ -258,21 +268,29 @@ def slim_online_analysis_for_summary(online_analysis: dict[str, object]) -> dict
 def online_analysis_takeaway_lines(online_analysis: dict[str, object]) -> list[str]:
     lines: list[str] = []
     if online_analysis.get("mean_served_reward") is not None:
-        lines.append(f"- Mean served reward: **{_fmt(online_analysis.get('mean_served_reward'))}**")
+        lines.append(
+            f"- Mean served reward: **{_fmt(online_analysis.get('mean_served_reward'))}**"
+        )
     if online_analysis.get("candidate_accept_rate") is not None:
         lines.append(
             f"- Candidate accept rate: **{_fmt(online_analysis.get('candidate_accept_rate'))}**"
         )
     if online_analysis.get("online_update_rate") is not None:
-        lines.append(f"- Online update rate: **{_fmt(online_analysis.get('online_update_rate'))}**")
+        lines.append(
+            f"- Online update rate: **{_fmt(online_analysis.get('online_update_rate'))}**"
+        )
     rollback = online_analysis.get("rollback_count")
     if rollback is not None:
         lines.append(f"- Rollbacks: **{int(rollback)}**")
     rewards = online_analysis.get("reward_by_hardware")
     if isinstance(rewards, dict) and rewards:
         best = max(rewards.items(), key=lambda item: float(item[1]))
-        lines.append(f"- Best hardware for served reward: `{best[0]}` ({_fmt(best[1])})")
-    return lines or ["- (no online analysis takeaways — check `outputs/analysis/<run>/online/`)"]
+        lines.append(
+            f"- Best hardware for served reward: `{best[0]}` ({_fmt(best[1])})"
+        )
+    return lines or [
+        "- (no online analysis takeaways — check `outputs/analysis/<run>/online/`)"
+    ]
 
 
 def recommendation_decision_block(payload: dict[str, object]) -> dict[str, object]:

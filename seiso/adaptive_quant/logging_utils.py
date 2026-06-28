@@ -35,7 +35,9 @@ _JSONL_REQUIRE_INTEGRITY_CHAIN_ENV = "ADAPTIVE_RL_JSONL_REQUIRE_INTEGRITY_CHAIN"
 def enforce_local_read_limit(path: str | Path, *, label: str = "File") -> None:
     p = Path(path)
     if p.is_file() and p.stat().st_size > MAX_LOCAL_READ_BYTES:
-        raise ValueError(f"{label} exceeds local read limit ({MAX_LOCAL_READ_BYTES} bytes): {p}")
+        raise ValueError(
+            f"{label} exceeds local read limit ({MAX_LOCAL_READ_BYTES} bytes): {p}"
+        )
 
 
 def enforce_safe_parsed_json(value: Any, *, label: str = "JSON") -> None:
@@ -277,7 +279,9 @@ def write_text_file(path: str | Path, text: str) -> None:
     _write_text_atomically(path, _write)
 
 
-def load_jsonl(path: str, *, require_integrity_chain: bool | None = None) -> list[dict[str, Any]]:
+def load_jsonl(
+    path: str, *, require_integrity_chain: bool | None = None
+) -> list[dict[str, Any]]:
     source = Path(path)
     if not source.exists():
         return []
@@ -292,7 +296,9 @@ def load_jsonl(path: str, *, require_integrity_chain: bool | None = None) -> lis
     with source.open("r", encoding="utf-8") as handle:
         for i, line in enumerate(handle):
             if i >= MAX_JSONL_LINES:
-                raise ValueError(f"JSONL exceeds local line limit ({MAX_JSONL_LINES}): {source}")
+                raise ValueError(
+                    f"JSONL exceeds local line limit ({MAX_JSONL_LINES}): {source}"
+                )
             raw_len = len(line.encode("utf-8"))
             if raw_len > MAX_JSONL_LINE_BYTES:
                 raise ValueError(
@@ -340,7 +346,9 @@ def _verify_jsonl_record_integrity(
     record: dict[str, Any], *, prev_hash: str, label: str, require: bool | None = None
 ) -> str:
     stored_hash = record.get("_integrity_hash")
-    require_chain = _jsonl_require_integrity_chain_enabled() if require is None else bool(require)
+    require_chain = (
+        _jsonl_require_integrity_chain_enabled() if require is None else bool(require)
+    )
     if stored_hash is None:
         if require_chain:
             raise ValueError(

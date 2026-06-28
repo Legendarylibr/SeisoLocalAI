@@ -5,7 +5,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from seiso.memory.platform_profile import apply_platform_memory_profile, memory_profile_label
+    from seiso.memory.platform_profile import (
+        apply_platform_memory_profile,
+        memory_profile_label,
+    )
     from seiso.memory.protection import (
         MemoryLoadBlockedError,
         apply_rl_memory_guards,

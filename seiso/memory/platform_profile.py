@@ -21,7 +21,9 @@ def memory_profile_label(profile: dict[str, Any]) -> str:
     return "balanced"
 
 
-def apply_platform_memory_profile(*, profile: dict[str, Any] | None = None) -> dict[str, Any]:
+def apply_platform_memory_profile(
+    *, profile: dict[str, Any] | None = None
+) -> dict[str, Any]:
     """
     Apply lean RAM defaults for this OS/tier.
 
@@ -68,7 +70,9 @@ def apply_platform_memory_profile(*, profile: dict[str, Any] | None = None) -> d
             )
         elif tier == HardwareTier.APPLE_UNIFIED and (ram_gb <= 24 or headroom < 12288):
             os.environ.setdefault("SEISO_LLAMA_GPU_LAYERS", "-1")
-            os.environ.setdefault("SEISO_LLAMA_BATCH", "512" if headroom >= 8192 else "256")
+            os.environ.setdefault(
+                "SEISO_LLAMA_BATCH", "512" if headroom >= 8192 else "256"
+            )
         if (
             tier == HardwareTier.APPLE_UNIFIED
             and ram_gb <= 24

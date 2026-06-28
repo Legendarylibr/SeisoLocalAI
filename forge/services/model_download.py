@@ -17,7 +17,10 @@ from forge.services.artifact_integrity import (
 )
 from forge.services.download_progress import ProgressCallback
 from forge.services.hf_auth import resolve_hf_token_for_download
-from forge.services.hf_connectivity import assert_hub_ready_for_download, check_inference_runtime
+from forge.services.hf_connectivity import (
+    assert_hub_ready_for_download,
+    check_inference_runtime,
+)
 from forge.services.hf_hub import (
     dir_size,
     download_gguf,
@@ -34,7 +37,9 @@ from seiso.security import sanitize_filename
 _DOWNLOAD_LOCKS: dict[str, asyncio.Lock] = {}
 
 
-def _emit_progress(on_progress: ProgressCallback | None, payload: dict[str, Any]) -> None:
+def _emit_progress(
+    on_progress: ProgressCallback | None, payload: dict[str, Any]
+) -> None:
     if on_progress:
         on_progress(payload)
 
@@ -147,7 +152,10 @@ def _cached_download_result_if_usable(
             with contextlib.suppress(Exception):
                 expected_size = max(
                     expected_size,
-                    sum(get_gguf_file_size_bytes(gguf_repo, str(item)) for item in gguf_files),
+                    sum(
+                        get_gguf_file_size_bytes(gguf_repo, str(item))
+                        for item in gguf_files
+                    ),
                 )
             if not gguf_files_complete_at_path(
                 path, [str(item) for item in gguf_files], expected_size
@@ -429,5 +437,9 @@ async def perform_model_download(
             "variant": artifacts["variant"],
             "model_id": record["id"],
             "cache_dir": artifacts["cache_dir"],
-            **({"gguf_repo": artifacts["gguf_repo"]} if "gguf_repo" in artifacts else {}),
+            **(
+                {"gguf_repo": artifacts["gguf_repo"]}
+                if "gguf_repo" in artifacts
+                else {}
+            ),
         }

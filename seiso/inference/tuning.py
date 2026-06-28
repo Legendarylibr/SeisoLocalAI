@@ -33,7 +33,9 @@ def configure_torch_inference() -> None:
             torch.backends.cudnn.deterministic = False
             torch.backends.cuda.matmul.allow_tf32 = True
             torch.backends.cudnn.allow_tf32 = True
-            if hasattr(torch.backends.cuda.matmul, "allow_fp16_reduced_precision_reduction"):
+            if hasattr(
+                torch.backends.cuda.matmul, "allow_fp16_reduced_precision_reduction"
+            ):
                 torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = True
             if hasattr(torch.backends.cuda, "enable_flash_sdp"):
                 torch.backends.cuda.enable_flash_sdp(True)
@@ -255,7 +257,10 @@ def generate_with_cache_fallback(model: Any, gen_kwargs: dict[str, Any]) -> Any:
     try:
         return model.generate(**gen_kwargs)
     except (TypeError, ValueError) as exc:
-        if "cache_implementation" not in gen_kwargs or not _looks_like_unsupported_kwarg(exc):
+        if (
+            "cache_implementation" not in gen_kwargs
+            or not _looks_like_unsupported_kwarg(exc)
+        ):
             raise
         reduced = dict(gen_kwargs)
         reduced.pop("cache_implementation", None)
@@ -265,15 +270,12 @@ def generate_with_cache_fallback(model: Any, gen_kwargs: dict[str, Any]) -> Any:
 
 def _looks_like_unsupported_kwarg(exc: BaseException) -> bool:
     text = str(exc).lower()
-    return (
-        "cache_implementation" in text
-        and (
-            "unexpected" in text
-            or "unused" in text
-            or "not used" in text
-            or "not supported" in text
-            or "invalid" in text
-        )
+    return "cache_implementation" in text and (
+        "unexpected" in text
+        or "unused" in text
+        or "not used" in text
+        or "not supported" in text
+        or "invalid" in text
     )
 
 

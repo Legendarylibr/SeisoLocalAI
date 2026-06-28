@@ -8,8 +8,16 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from seiso.distill_rl.config import DistillRLConfig, build_distill_rl_config, resolve_job_seeds
-from seiso.distill_rl.manifest import append_artifact, init_run_manifest, verify_run_manifest
+from seiso.distill_rl.config import (
+    DistillRLConfig,
+    build_distill_rl_config,
+    resolve_job_seeds,
+)
+from seiso.distill_rl.manifest import (
+    append_artifact,
+    init_run_manifest,
+    verify_run_manifest,
+)
 from seiso.distill_rl.multiseed import aggregate_multiseed_runs
 from seiso.distill_rl.paper_bundle import create_paper_bundle
 from seiso.distill_rl.sweep import (
@@ -141,7 +149,9 @@ def _run_single_job(
             on_log=on_log,
             run_dpo_fn=_run_dpo,
         )
-        config = apply_best_sweep_overrides(config, sweep_result.get("best_overrides") or {})
+        config = apply_best_sweep_overrides(
+            config, sweep_result.get("best_overrides") or {}
+        )
 
     stage_results: dict[str, Any] = dict(shared.stage_results)
     distilled_dir = shared.distilled_dir
@@ -240,7 +250,9 @@ def _run_shared_stages(
             on_log("Phase: distill (teacher logits → student)")
         distilled_dir = _run_distill(config, on_log=on_log)
         stage_results["distilled"] = str(distilled_dir)
-        append_artifact(config.output_root, stage="distill", artifact_path=distilled_dir)
+        append_artifact(
+            config.output_root, stage="distill", artifact_path=distilled_dir
+        )
     elif not distilled_dir.is_dir():
         raise FileNotFoundError(
             f"Distilled student checkpoint missing: {distilled_dir}. "
@@ -270,12 +282,20 @@ def _run_shared_stages(
         stage_results["preferences_train"] = str(bundle.train_path)
         stage_results["preferences_val"] = str(bundle.val_path)
         stage_results["preferences_manifest"] = str(bundle.manifest_path)
-        append_artifact(config.output_root, stage="rollout", artifact_path=bundle.manifest_path)
         append_artifact(
-            config.output_root, stage="rollout", artifact_path=bundle.train_path, role="train"
+            config.output_root, stage="rollout", artifact_path=bundle.manifest_path
         )
         append_artifact(
-            config.output_root, stage="rollout", artifact_path=bundle.val_path, role="val"
+            config.output_root,
+            stage="rollout",
+            artifact_path=bundle.train_path,
+            role="train",
+        )
+        append_artifact(
+            config.output_root,
+            stage="rollout",
+            artifact_path=bundle.val_path,
+            role="val",
         )
         config.preferences_path.write_text(
             bundle.train_path.read_text(encoding="utf-8"),
@@ -304,7 +324,9 @@ def _resolve_policy_model_dir(config: DistillRLConfig) -> Path:
 
 def _write_effective_config(config: DistillRLConfig) -> None:
     path = config.output_root / "distill_rl_config.json"
-    path.write_text(json.dumps(config.model_dump(mode="json"), indent=2) + "\n", encoding="utf-8")
+    path.write_text(
+        json.dumps(config.model_dump(mode="json"), indent=2) + "\n", encoding="utf-8"
+    )
 
 
 def _distill_texts(config: DistillRLConfig) -> list[str]:
@@ -315,14 +337,20 @@ def _distill_texts(config: DistillRLConfig) -> list[str]:
     return prompt_texts(prompts)
 
 
-def _run_distill(config: DistillRLConfig, *, on_log: Callable[[str], None] | None) -> Path:
+def _run_distill(
+    config: DistillRLConfig, *, on_log: Callable[[str], None] | None
+) -> Path:
     from contextlib import nullcontext
 
     from seiso.compress.bootstrap import require_codellama_compress
     from seiso.distill_rl.distill_corpus import override_distill_corpus
 
     require_codellama_compress()
-    from seiso.codellama_compress.config import DatasetConfig, DistillConfig, merge_dataclass
+    from seiso.codellama_compress.config import (
+        DatasetConfig,
+        DistillConfig,
+        merge_dataclass,
+    )
     from seiso.codellama_compress.distill import run_distillation
     from seiso.codellama_compress.replay import apply_global_seeds
 
@@ -392,7 +420,9 @@ def _run_dpo(
     require_adaptive_quant()
     from seiso.adaptive_quant.llm_alignment.config import DPOSettings
     from seiso.adaptive_quant.llm_alignment.dpo_trainer import DPOTrainer
-    from seiso.adaptive_quant.llm_alignment.preference_data import load_preference_dataset
+    from seiso.adaptive_quant.llm_alignment.preference_data import (
+        load_preference_dataset,
+    )
 
     settings = DPOSettings(
         sft_model_path=str(model_dir),
@@ -418,12 +448,16 @@ def _run_dpo(
 
     examples = load_preference_dataset(preferences_path)
     if config.dpo_max_steps is not None:
-        micro_batches = max(1, math.ceil(len(examples) / settings.per_device_train_batch_size))
+        micro_batches = max(
+            1, math.ceil(len(examples) / settings.per_device_train_batch_size)
+        )
         optimizer_steps_per_epoch = max(
             1,
             math.ceil(micro_batches / settings.gradient_accumulation_steps),
         )
-        settings.num_epochs = max(1, math.ceil(config.dpo_max_steps / optimizer_steps_per_epoch))
+        settings.num_epochs = max(
+            1, math.ceil(config.dpo_max_steps / optimizer_steps_per_epoch)
+        )
 
     if on_log:
         on_log(

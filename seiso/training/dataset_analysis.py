@@ -27,9 +27,19 @@ _DOMAIN_LABELS: dict[str, str] = {
 }
 
 _CODE_COLUMNS = frozenset(
-    {"code", "content", "file_content", "raw_content", "programming_language", "language", "lang"}
+    {
+        "code",
+        "content",
+        "file_content",
+        "raw_content",
+        "programming_language",
+        "language",
+        "lang",
+    }
 )
-_MATH_COLUMNS = frozenset({"question", "answer", "query", "response", "solution", "problem"})
+_MATH_COLUMNS = frozenset(
+    {"question", "answer", "query", "response", "solution", "problem"}
+)
 
 
 def _stratified_indices(n: int, *, max_samples: int = 48, seed: int = 42) -> list[int]:
@@ -54,7 +64,11 @@ def detect_format_consensus(
 ) -> tuple[DatasetFormat, float, dict[str, Any]]:
     """Vote on dataset format from multiple rows (robust to malformed headers)."""
     if forced != DatasetFormat.AUTO:
-        return forced, 1.0, {"votes": {forced.value: len(samples)}, "method": "user_override"}
+        return (
+            forced,
+            1.0,
+            {"votes": {forced.value: len(samples)}, "method": "user_override"},
+        )
 
     if not samples:
         return DatasetFormat.TEXT, 0.0, {"votes": {}, "method": "empty"}
@@ -65,7 +79,11 @@ def detect_format_consensus(
 
     winner, count = votes.most_common(1)[0]
     confidence = count / max(1, len(samples))
-    return DatasetFormat(winner), confidence, {"votes": dict(votes), "method": "schema_vote"}
+    return (
+        DatasetFormat(winner),
+        confidence,
+        {"votes": dict(votes), "method": "schema_vote"},
+    )
 
 
 def _infer_domain(fmt: DatasetFormat, columns: list[str]) -> tuple[str, str]:
@@ -147,7 +165,9 @@ def _recommend_train_on_responses(fmt: DatasetFormat, domain: str) -> bool:
     return not (fmt == DatasetFormat.TEXT or domain == "code_pretraining")
 
 
-def _preview_rows(rows: list[dict[str, Any]], *, limit: int = 3) -> list[dict[str, Any]]:
+def _preview_rows(
+    rows: list[dict[str, Any]], *, limit: int = 3
+) -> list[dict[str, Any]]:
     preview: list[dict[str, Any]] = []
     for row in rows[:limit]:
         clipped: dict[str, Any] = {}
@@ -211,7 +231,9 @@ def analyze_training_dataset(
 
     cleaned, stats, resolved_fmt = preprocess_training_dataset(
         raw,
-        dataset_format=inferred_fmt if dataset_format == DatasetFormat.AUTO else dataset_format,
+        dataset_format=(
+            inferred_fmt if dataset_format == DatasetFormat.AUTO else dataset_format
+        ),
         deduplicate=True,
         min_chars=1,
     )
@@ -263,7 +285,10 @@ def analyze_training_dataset(
         "recommended_config": recommended,
         "notes": notes,
         "sample_preview": _preview_rows(
-            [{k: v for k, v in cleaned[i].items() if not str(k).startswith("_")} for i in range(min(3, len(cleaned)))],
+            [
+                {k: v for k, v in cleaned[i].items() if not str(k).startswith("_")}
+                for i in range(min(3, len(cleaned)))
+            ],
         ),
         "uses_full_dataset": True,
     }

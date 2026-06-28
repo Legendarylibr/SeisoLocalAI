@@ -82,7 +82,11 @@ def _llama_gpu_offload_ok() -> bool:
 
         for candidate in (
             getattr(llama_cpp, "llama_supports_gpu_offload", None),
-            getattr(getattr(llama_cpp, "llama_cpp", None), "llama_supports_gpu_offload", None),
+            getattr(
+                getattr(llama_cpp, "llama_cpp", None),
+                "llama_supports_gpu_offload",
+                None,
+            ),
         ):
             if callable(candidate):
                 _llama_offload_supported = bool(candidate())
@@ -113,7 +117,9 @@ def _llama_speed_scale_enabled() -> bool:
     return env_bool("SEISO_LLAMA_SPEED_SCALE", True)
 
 
-def _headroom_llama_batch_caps(headroom: int, *, speed_first: bool = False) -> tuple[int, int]:
+def _headroom_llama_batch_caps(
+    headroom: int, *, speed_first: bool = False
+) -> tuple[int, int]:
     """Return (n_batch, n_ubatch) ceilings from post-weight VRAM headroom."""
     if headroom < 4096:
         batch, ubatch = 512, 256
@@ -206,7 +212,11 @@ def _llama_speed_memory_profiles(
         return []
 
     from seiso.inference.backends import gguf_block_count
-    from seiso.memory.protection import _MIN_LLAMA_BATCH, _MIN_LLAMA_CTX, llama_batch_headroom_mb
+    from seiso.memory.protection import (
+        _MIN_LLAMA_BATCH,
+        _MIN_LLAMA_CTX,
+        llama_batch_headroom_mb,
+    )
 
     requested = int(base_kwargs.get("n_gpu_layers") or -1)
     layer_hint = requested if requested > 0 else (gguf_block_count(model_path) or 64)
@@ -218,7 +228,9 @@ def _llama_speed_memory_profiles(
 
     base_batch = int(base_kwargs.get("n_batch") or 512)
     base_ubatch = int(base_kwargs.get("n_ubatch") or 256)
-    speed_batch, speed_ubatch = _headroom_llama_batch_caps(batch_headroom, speed_first=True)
+    speed_batch, speed_ubatch = _headroom_llama_batch_caps(
+        batch_headroom, speed_first=True
+    )
     speed_batch = max(_MIN_LLAMA_BATCH, speed_batch // ctx_scale)
     speed_ubatch = min(speed_ubatch, speed_batch)
 
@@ -398,7 +410,9 @@ def _llama_gpu_layers_optimal(model_path: str, requested: int) -> int:
     return layers
 
 
-def _llama_cache_is_optimal(model_path: str, cached_layers: int, requested: int) -> bool:
+def _llama_cache_is_optimal(
+    model_path: str, cached_layers: int, requested: int
+) -> bool:
     """True when a cached llama handle already uses the best GPU offload available."""
     if requested == 0:
         return cached_layers == 0
@@ -420,7 +434,9 @@ def llama_load_kwargs(n_ctx: int, *, model_path: str | None = None) -> dict[str,
     # installed llama-cpp-python wheel can't actually offload (e.g. CPU-only
     # wheel on an NVIDIA Linux box), force 0 to avoid a crash at Llama init.
     if n_gpu_layers != 0 and not _llama_gpu_offload_ok():
-        logger.debug("llama-cpp-python wheel lacks GPU offload support — forcing n_gpu_layers=0")
+        logger.debug(
+            "llama-cpp-python wheel lacks GPU offload support — forcing n_gpu_layers=0"
+        )
         n_gpu_layers = 0
     from seiso.memory.protection import llama_batch_headroom_mb
 
@@ -429,18 +445,24 @@ def llama_load_kwargs(n_ctx: int, *, model_path: str | None = None) -> dict[str,
     if n_gpu_layers != 0 and model_path:
         from seiso.inference.backends import gguf_block_count
 
-        layer_hint = n_gpu_layers if n_gpu_layers > 0 else (gguf_block_count(model_path) or 64)
+        layer_hint = (
+            n_gpu_layers if n_gpu_layers > 0 else (gguf_block_count(model_path) or 64)
+        )
     batch_headroom = llama_batch_headroom_mb(
         free_mb, model_path=model_path, n_gpu_layers=layer_hint
     )
     borderline = bool(model_path and _llama_borderline_vram(model_path, free_mb))
     speed_first = _llama_speed_scale_enabled() and n_gpu_layers != 0 and not borderline
-    batch_cap, ubatch_cap = _headroom_llama_batch_caps(batch_headroom, speed_first=False)
+    batch_cap, ubatch_cap = _headroom_llama_batch_caps(
+        batch_headroom, speed_first=False
+    )
     speed_defaults = _speed_llama_batch_defaults(batch_headroom)
     if speed_defaults is not None:
         batch_cap, ubatch_cap = speed_defaults
     if speed_first:
-        speed_batch, speed_ubatch = _headroom_llama_batch_caps(batch_headroom, speed_first=True)
+        speed_batch, speed_ubatch = _headroom_llama_batch_caps(
+            batch_headroom, speed_first=True
+        )
         batch_cap = max(batch_cap, speed_batch)
         ubatch_cap = max(ubatch_cap, speed_ubatch)
     n_batch = env_int("SEISO_LLAMA_BATCH", batch_cap)
@@ -475,7 +497,10 @@ def llama_load_kwargs(n_ctx: int, *, model_path: str | None = None) -> dict[str,
 def _llama_load_retryable(exc: ValueError) -> bool:
     """True when llama.cpp init failed due to VRAM pressure and a smaller offload may work."""
     msg = str(exc)
-    return "Failed to load model from file" in msg or "Failed to create llama_context" in msg
+    return (
+        "Failed to load model from file" in msg
+        or "Failed to create llama_context" in msg
+    )
 
 
 def _load_llama_model(path: str, n_ctx: int) -> Any:
@@ -489,7 +514,11 @@ def _load_llama_model(path: str, n_ctx: int) -> Any:
     from llama_cpp import Llama
 
     from seiso.inference.tuning import attach_llama_prompt_cache
-    from seiso.memory.protection import estimate_path_vram_mb, headroom_mb, release_cached_memory
+    from seiso.memory.protection import (
+        estimate_path_vram_mb,
+        headroom_mb,
+        release_cached_memory,
+    )
 
     release_cached_memory(sync=True)
     _clear_optimal_layers_cache()
@@ -519,7 +548,9 @@ def _load_llama_model(path: str, n_ctx: int) -> Any:
     )
 
     last_exc: Exception | None = None
-    seen: set[tuple[int, tuple[tuple[str, Any], ...], tuple[tuple[str, Any], ...]]] = set()
+    seen: set[tuple[int, tuple[tuple[str, Any], ...], tuple[tuple[str, Any], ...]]] = (
+        set()
+    )
 
     def _try_load(
         layers: int,
@@ -565,13 +596,18 @@ def _load_llama_model(path: str, n_ctx: int) -> Any:
             last_exc = exc
             release_cached_memory(sync=True)
             if log_retry:
-                logger.warning("llama.cpp load failed at n_gpu_layers=%s — retrying", layers)
+                logger.warning(
+                    "llama.cpp load failed at n_gpu_layers=%s — retrying", layers
+                )
             return None
 
     for layers in full_targets:
         for profile_idx, profile in enumerate(memory_profiles):
             for kv_idx, kv_quant in enumerate(kv_options):
-                log_retry = profile_idx == len(memory_profiles) - 1 and kv_idx == len(kv_options) - 1
+                log_retry = (
+                    profile_idx == len(memory_profiles) - 1
+                    and kv_idx == len(kv_options) - 1
+                )
                 llm = _try_load(layers, profile, kv_quant, log_retry=log_retry)
                 if llm is not None:
                     return llm
@@ -674,7 +710,11 @@ class ModelPool:
         if not status.get("active_model"):
             return False
         if backend is not None:
-            raw = backend.value if isinstance(backend, BackendKind) else str(backend).lower()
+            raw = (
+                backend.value
+                if isinstance(backend, BackendKind)
+                else str(backend).lower()
+            )
             expected = _POOL_BACKEND_BY_API.get(raw, raw)
             if status.get("backend") != expected:
                 return True
@@ -689,7 +729,9 @@ class ModelPool:
         backend: str | BackendKind | None = None,
     ) -> bool:
         """Unload the active model when switching and refresh GPU memory stats."""
-        should_unload = target_path is None or self.would_switch_model(target_path, backend)
+        should_unload = target_path is None or self.would_switch_model(
+            target_path, backend
+        )
         unloaded = False
         if should_unload and self.active_key:
             self.cancel_and_unload()
@@ -728,7 +770,9 @@ class ModelPool:
                     requested_layers = env_int(
                         "SEISO_LLAMA_GPU_LAYERS", _default_llama_gpu_layers()
                     )
-                    if _llama_cache_is_optimal(load_path, cached_layers, requested_layers):
+                    if _llama_cache_is_optimal(
+                        load_path, cached_layers, requested_layers
+                    ):
                         return self._active.handle
 
             self.prepare_for_load(load_path, backend)
@@ -757,12 +801,19 @@ class ModelPool:
                 raise
             layer_meta: dict[str, Any] = {}
             if backend == BackendKind.LLAMA:
-                layer_meta["n_gpu_layers"] = int(getattr(handle, "_seiso_n_gpu_layers", -1))
+                layer_meta["n_gpu_layers"] = int(
+                    getattr(handle, "_seiso_n_gpu_layers", -1)
+                )
             self._active = LoadedModel(
                 key=key,
                 backend=backend,
                 handle=handle,
-                meta={"path": load_path, "norm_path": norm, **layer_meta, **(meta or {})},
+                meta={
+                    "path": load_path,
+                    "norm_path": norm,
+                    **layer_meta,
+                    **(meta or {}),
+                },
             )
             return handle
 
@@ -771,7 +822,9 @@ class ModelPool:
             return _load_llama_model(path, n_ctx)
 
         norm = self.normalize_path(model_path)
-        requested_layers = env_int("SEISO_LLAMA_GPU_LAYERS", _default_llama_gpu_layers())
+        requested_layers = env_int(
+            "SEISO_LLAMA_GPU_LAYERS", _default_llama_gpu_layers()
+        )
         with self._lock:
             if (
                 self._active
@@ -801,13 +854,17 @@ class ModelPool:
 
         return self.switch(model_path, BackendKind.MLX, loader)
 
-    def get_torch(self, model_path: str, *, load_in_4bit: bool = True) -> tuple[Any, Any]:
+    def get_torch(
+        self, model_path: str, *, load_in_4bit: bool = True
+    ) -> tuple[Any, Any]:
         def loader(path: str):
             return self._load_torch_pair(path, load_in_4bit=load_in_4bit)
 
         return self.switch(model_path, BackendKind.TORCH, loader)
 
-    def _load_torch_pair(self, model_path: str, *, load_in_4bit: bool = True) -> tuple[Any, Any]:
+    def _load_torch_pair(
+        self, model_path: str, *, load_in_4bit: bool = True
+    ) -> tuple[Any, Any]:
         from seiso.inference.tuning import apply_inference_kernels, prepare_torch_model
         from seiso.models.loader import LoadOptions, ModelKind, load_model
 
@@ -898,7 +955,9 @@ class ModelPool:
                     release_training_memory(handle.target_model, sync=False)
                     release_training_memory(handle.draft_model, sync=False)
                 else:
-                    model = handle[0] if isinstance(handle, tuple) and handle else handle
+                    model = (
+                        handle[0] if isinstance(handle, tuple) and handle else handle
+                    )
                     release_training_memory(model, sync=False)
             except Exception:
                 pass

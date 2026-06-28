@@ -34,7 +34,9 @@ def create_paper_bundle(
         "environment": (manifest or {}).get("environment", {}),
         "config_fingerprint": (manifest or {}).get("config_fingerprint"),
     }
-    manifest_path.write_text(json.dumps(bundle_manifest, indent=2) + "\n", encoding="utf-8")
+    manifest_path.write_text(
+        json.dumps(bundle_manifest, indent=2) + "\n", encoding="utf-8"
+    )
     metrics_json_path.write_text(json.dumps(metrics, indent=2) + "\n", encoding="utf-8")
     _write_metrics_csv(metrics_csv_path, metrics)
     appendix_path.write_text(
@@ -89,5 +91,7 @@ def _appendix_markdown(
         lines.append(f"- {stage}: `{path}`")
     lines.extend(["", "## Metrics"])
     for key, value in sorted(metrics.items()):
-        lines.append(f"- {key}: {value:.6g}" if isinstance(value, float) else f"- {key}: {value}")
+        lines.append(
+            f"- {key}: {value:.6g}" if isinstance(value, float) else f"- {key}: {value}"
+        )
     return "\n".join(lines) + "\n"

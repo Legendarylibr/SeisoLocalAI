@@ -71,12 +71,7 @@ def _generate_completions(
 
 def _humaneval_program(prompt: str, completion: str, test: str) -> str:
     return (
-        "# Generated solution\n"
-        + prompt
-        + completion
-        + "\n\n# Tests\n"
-        + test
-        + "\n"
+        "# Generated solution\n" + prompt + completion + "\n\n# Tests\n" + test + "\n"
     )
 
 
@@ -113,7 +108,9 @@ def run_code_eval(
     )
 
     model_dir = resolve_user_path(model_dir, must_exist=True)
-    tok = AutoTokenizer.from_pretrained(model_dir, use_fast=True, trust_remote_code=False)
+    tok = AutoTokenizer.from_pretrained(
+        model_dir, use_fast=True, trust_remote_code=False
+    )
     if tok.pad_token is None:
         tok.pad_token = tok.eos_token
     model = AutoModelForCausalLM.from_pretrained(

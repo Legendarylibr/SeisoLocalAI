@@ -124,8 +124,9 @@ class ModelRoute:
         validate_hf_model_id("repo_id", self.repo_id, require_hub_namespace=True)
         if self.filename is not None:
             validate_hf_filename("filename", self.filename)
-            if self.family.strip().lower() == "gguf" and not self.filename.lower().endswith(
-                ".gguf"
+            if (
+                self.family.strip().lower() == "gguf"
+                and not self.filename.lower().endswith(".gguf")
             ):
                 raise ValueError(
                     f"GGUF route filename must end with '.gguf', got {self.filename!r}"
@@ -133,7 +134,9 @@ class ModelRoute:
         if self.revision is not None:
             validate_hf_revision("revision", self.revision)
         normalized_quant = (
-            self.quant_label.strip().upper() if isinstance(self.quant_label, str) else ""
+            self.quant_label.strip().upper()
+            if isinstance(self.quant_label, str)
+            else ""
         )
         if not normalized_quant:
             raise ValueError("quant_label is required for ModelRoute")
@@ -145,7 +148,9 @@ class ModelRoute:
         else:
             object.__setattr__(self, "effective_bits", float(self.effective_bits))
 
-        normalized_hints = tuple(hint.strip().lower() for hint in self.hardware_hints if hint)
+        normalized_hints = tuple(
+            hint.strip().lower() for hint in self.hardware_hints if hint
+        )
         if not normalized_hints:
             normalized_hints = ("any",)
         unknown = [hint for hint in normalized_hints if hint not in _HARDWARE_HINTS]
@@ -155,7 +160,9 @@ class ModelRoute:
             )
         object.__setattr__(self, "hardware_hints", normalized_hints)
 
-        normalized_domains = tuple(domain.strip().lower() for domain in self.domain_hints if domain)
+        normalized_domains = tuple(
+            domain.strip().lower() for domain in self.domain_hints if domain
+        )
         object.__setattr__(self, "domain_hints", normalized_domains)
 
         if self.parameters_b is not None and float(self.parameters_b) <= 0:
@@ -165,7 +172,9 @@ class ModelRoute:
 
     def quant_spec(self) -> QuantSpec:
         return QuantSpec(
-            label=self.quant_label, effective_bits=self.effective_bits or 0.0, family=self.family
+            label=self.quant_label,
+            effective_bits=self.effective_bits or 0.0,
+            family=self.family,
         )
 
     def matches_hardware(self, hardware_value: str) -> bool:
@@ -256,7 +265,9 @@ class RouteCatalog:
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> RouteCatalog:
         if not isinstance(data, Mapping):
-            raise TypeError(f"RouteCatalog payload must be a mapping, got {type(data).__name__}")
+            raise TypeError(
+                f"RouteCatalog payload must be a mapping, got {type(data).__name__}"
+            )
         raw_routes = data.get("routes", [])
         if not isinstance(raw_routes, list):
             raise TypeError("RouteCatalog 'routes' must be a list")
@@ -267,7 +278,9 @@ class RouteCatalog:
                 raise TypeError(f"routes[{index}] must be an object")
             unknown = set(payload) - valid_keys
             if unknown:
-                raise ValueError(f"Unknown ModelRoute keys at routes[{index}]: {sorted(unknown)}")
+                raise ValueError(
+                    f"Unknown ModelRoute keys at routes[{index}]: {sorted(unknown)}"
+                )
             kwargs = dict(payload)
             for key in ("hardware_hints", "domain_hints"):
                 if key in kwargs and isinstance(kwargs[key], list):

@@ -3,7 +3,9 @@ from __future__ import annotations
 from seiso.adaptive_quant.configuration import FrameworkConfig
 
 
-def should_fallback_due_to_instability(stability_penalty: float, *, threshold: float) -> bool:
+def should_fallback_due_to_instability(
+    stability_penalty: float, *, threshold: float
+) -> bool:
     return float(stability_penalty) > float(threshold)
 
 
@@ -29,7 +31,9 @@ def passes_online_guardrails(
 
     if candidate_unstable or candidate_fallback_applied:
         return False
-    if float(candidate_reward) < float(baseline_reward) - float(config.online_reward_guard):
+    if float(candidate_reward) < float(baseline_reward) - float(
+        config.online_reward_guard
+    ):
         return False
     if float(candidate_latency_ms) > float(baseline_latency_ms) * float(
         config.online_max_latency_ratio
@@ -39,7 +43,9 @@ def passes_online_guardrails(
         config.online_max_memory_ratio
     ):
         return False
-    return not float(candidate_perplexity) > float(baseline_perplexity) + float(config.online_max_perplexity_delta)
+    return not float(candidate_perplexity) > float(baseline_perplexity) + float(
+        config.online_max_perplexity_delta
+    )
 
 
 __all__ = ["passes_online_guardrails", "should_fallback_due_to_instability"]

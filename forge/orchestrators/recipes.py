@@ -35,7 +35,9 @@ def _recipe_template_fields(row: Any) -> dict[str, str]:
     if not normalized:
         return {"text": ""}
 
-    fields = {k: str(v) for k, v in normalized.items() if isinstance(v, (str, int, float))}
+    fields = {
+        k: str(v) for k, v in normalized.items() if isinstance(v, (str, int, float))
+    }
 
     if "text" in normalized:
         fields["text"] = str(normalized["text"])
@@ -72,7 +74,8 @@ class RecipeOrchestrator(Orchestrator):
         nodes = recipe.get("nodes", [])
         edges = recipe.get("edges", [])
         self._emit_log(
-            job_id, f"Executing recipe: {recipe.get('name', job_id)} ({len(nodes)} nodes)"
+            job_id,
+            f"Executing recipe: {recipe.get('name', job_id)} ({len(nodes)} nodes)",
         )
 
         user_id = payload.get("user_id")
@@ -93,7 +96,9 @@ class RecipeOrchestrator(Orchestrator):
             result = await self._run_node(node, outputs, payload)
             outputs[nid] = result
 
-        out_path = safe_join(self.sandbox_root, "recipes", user_id, job_id, "output.jsonl")
+        out_path = safe_join(
+            self.sandbox_root, "recipes", user_id, job_id, "output.jsonl"
+        )
         out_path.parent.mkdir(parents=True, exist_ok=True)
         with out_path.open("w") as f:
             for row in outputs.get("_final", []):
@@ -121,7 +126,9 @@ class RecipeOrchestrator(Orchestrator):
             if not user_id:
                 raise PermissionError("user_id required for recipe import")
             path = assert_user_path(self.sandbox_root, user_id, config["path"])
-            return await loop.run_in_executor(None, self._import_file, path, config.get("format"))
+            return await loop.run_in_executor(
+                None, self._import_file, path, config.get("format")
+            )
 
         if ntype == "transform":
             source_id = config.get("source")
@@ -130,7 +137,9 @@ class RecipeOrchestrator(Orchestrator):
             out = []
             for r in rows:
                 if isinstance(r, dict):
-                    text = template.format_map(_SafeFormatMap(_recipe_template_fields(r)))
+                    text = template.format_map(
+                        _SafeFormatMap(_recipe_template_fields(r))
+                    )
                 else:
                     text = str(r)
                 out.append({"text": text})
@@ -147,7 +156,9 @@ class RecipeOrchestrator(Orchestrator):
             rows = outputs.get(source_id, [])
             n = min(config.get("count", 100), len(rows))
             seed = int(config.get("seed", payload.get("seed", 42)))
-            rng = random.Random(seed)  # nosec B311 - deterministic sampling from user-provided seed
+            rng = random.Random(
+                seed
+            )  # nosec B311 - deterministic sampling from user-provided seed
             return rng.sample(rows, n) if n < len(rows) else list(rows)
 
         if ntype == "output":

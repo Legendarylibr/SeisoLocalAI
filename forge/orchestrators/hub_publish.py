@@ -22,7 +22,9 @@ class HubPublishOrchestrator(Orchestrator):
             self._emit_log(job_id, msg)
 
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, lambda: self._run_publish(payload, on_log))
+        return await loop.run_in_executor(
+            None, lambda: self._run_publish(payload, on_log)
+        )
 
     def _run_publish(
         self,

@@ -9,7 +9,9 @@ import typer
 from seiso_cli.console import console
 
 
-async def _run_chat(model: str, messages: list[dict], *, tools_enabled: bool = False) -> str:
+async def _run_chat(
+    model: str, messages: list[dict], *, tools_enabled: bool = False
+) -> str:
     from forge.services.llm_output import sanitize_llm_output
     from forge.services.model_prompts import chat_system_prompt, resolve_model_key
     from seiso.inference.runner import run_chat
@@ -76,7 +78,9 @@ def inference_cmd(
 
 def bench_inference_cmd(
     model: str = typer.Option(..., help="Model path or GGUF file"),
-    prompt: str = typer.Option("", help="Benchmark prompt (default: built-in paragraph)"),
+    prompt: str = typer.Option(
+        "", help="Benchmark prompt (default: built-in paragraph)"
+    ),
     max_tokens: int = typer.Option(128, help="Tokens to generate per run"),
     backend: str = typer.Option("auto", help="auto | llamacpp | mlx | torch"),
     compare: bool = typer.Option(
@@ -94,7 +98,9 @@ def bench_inference_cmd(
     )
 
     text = prompt or DEFAULT_PROMPT
-    console.print(f"[bold]Inference benchmark[/] backend={backend} max_tokens={max_tokens}")
+    console.print(
+        f"[bold]Inference benchmark[/] backend={backend} max_tokens={max_tokens}"
+    )
 
     if compare:
         report = run_compare_inference_profiles(
@@ -111,7 +117,9 @@ def bench_inference_cmd(
 
         base = report["baseline"]
         opt = report["optimized"]
-        console.print("\n[bold]Baseline[/] (CPU llama.cpp / no flash / no fused kernels)")
+        console.print(
+            "\n[bold]Baseline[/] (CPU llama.cpp / no flash / no fused kernels)"
+        )
         _print_bench_row(base)
         console.print("\n[bold]Optimized[/] (current Seiso defaults)")
         _print_bench_row(opt)

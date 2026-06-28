@@ -6,7 +6,10 @@ from typing import Any
 from seiso.adaptive_quant.configuration import FrameworkConfig
 from seiso.adaptive_quant.environment import AdaptiveQuantizationEnv
 from seiso.adaptive_quant.prompts import PromptLibrary
-from seiso.adaptive_quant.router_training import OfflineRouterTrainer, resolve_prompt_library
+from seiso.adaptive_quant.router_training import (
+    OfflineRouterTrainer,
+    resolve_prompt_library,
+)
 from seiso.adaptive_quant.trainer_utils import (
     collect_episode_results,
     feedback_vector,
@@ -39,7 +42,9 @@ def coerce_previous_action(value: Any) -> list[float]:
     coerced: list[float] = []
     for index, item in enumerate(value):
         if isinstance(item, bool) or not isinstance(item, (int, float)):
-            raise TypeError(f"previous_action[{index}] must be numeric, got {type(item).__name__}")
+            raise TypeError(
+                f"previous_action[{index}] must be numeric, got {type(item).__name__}"
+            )
         f = float(item)
         if not math.isfinite(f):
             raise ValueError(f"previous_action[{index}] must be finite, got {f!r}")
@@ -96,7 +101,9 @@ class TrainerBase:
         def prepare_decision(decision, state):
             if router is None:
                 return decision
-            return router.prepare_decision(pending_policy.get("decision", decision), state)
+            return router.prepare_decision(
+                pending_policy.get("decision", decision), state
+            )
 
         def on_episode(state, result):
             if router is None:

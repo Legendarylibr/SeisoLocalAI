@@ -26,22 +26,32 @@ def summarize_frontier_eval_rows(
     rows: list[dict[str, Any]], config: FrameworkConfig
 ) -> dict[str, Any]:
     overlaps = [
-        float(row["reference_overlap"]) for row in rows if row.get("reference_overlap") is not None
+        float(row["reference_overlap"])
+        for row in rows
+        if row.get("reference_overlap") is not None
     ]
     length_ratios = [
-        float(row["length_ratio"]) for row in rows if row.get("length_ratio") is not None
+        float(row["length_ratio"])
+        for row in rows
+        if row.get("length_ratio") is not None
     ]
     local_latency = [
-        float(row["local_latency_ms"]) for row in rows if row.get("local_latency_ms") is not None
+        float(row["local_latency_ms"])
+        for row in rows
+        if row.get("local_latency_ms") is not None
     ]
     frontier_latency = [
         float(row["frontier_latency_ms"])
         for row in rows
         if row.get("frontier_latency_ms") is not None
     ]
-    local_available = sum(1 for row in rows if row.get("local_source") not in {None, "unavailable"})
+    local_available = sum(
+        1 for row in rows if row.get("local_source") not in {None, "unavailable"}
+    )
     prompt_total = len(rows)
-    local_coverage = float(local_available) / float(prompt_total) if prompt_total else 0.0
+    local_coverage = (
+        float(local_available) / float(prompt_total) if prompt_total else 0.0
+    )
 
     by_domain: dict[str, list[float]] = defaultdict(list)
     for row in rows:
@@ -51,7 +61,9 @@ def summarize_frontier_eval_rows(
         domain = str(row.get("prompt_domain") or "unknown")
         by_domain[domain].append(float(overlap))
 
-    overlap_by_domain = {domain: mean(values) for domain, values in sorted(by_domain.items())}
+    overlap_by_domain = {
+        domain: mean(values) for domain, values in sorted(by_domain.items())
+    }
     min_overlap = float(config.frontier_eval_min_overlap)
     min_coverage = float(config.frontier_eval_min_local_coverage)
     mean_overlap = mean(overlaps) if overlaps else 0.0
@@ -70,7 +82,10 @@ def summarize_frontier_eval_rows(
         if overlap is None or float(overlap) < min_overlap:
             failed_prompts.append(prompt_id)
             continue
-        if row.get("local_source") in {None, "unavailable"} and local_coverage < min_coverage:
+        if (
+            row.get("local_source") in {None, "unavailable"}
+            and local_coverage < min_coverage
+        ):
             failed_prompts.append(prompt_id)
 
     return {

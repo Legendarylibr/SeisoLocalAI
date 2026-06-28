@@ -13,7 +13,9 @@ from seiso.adaptive_quant.types import BackendMetricDict, EpisodeState
 class ExternalQualityScores:
     """Prompt-level external quality scores loaded from JSON/JSONL."""
 
-    def __init__(self, scores_by_prompt_id: Mapping[str, float], *, metric: str, path: str) -> None:
+    def __init__(
+        self, scores_by_prompt_id: Mapping[str, float], *, metric: str, path: str
+    ) -> None:
         self.scores_by_prompt_id = dict(scores_by_prompt_id)
         self.metric = metric
         self.path = path
@@ -52,7 +54,9 @@ def apply_external_quality(
         return
     score = external_quality.score_for_prompt(state.prompt.prompt_id)
     if score is None:
-        metrics["perplexity_source"] = f"simulator_missing_external_{external_quality.metric}"
+        metrics["perplexity_source"] = (
+            f"simulator_missing_external_{external_quality.metric}"
+        )
         return
     metrics["perplexity"] = float(score)
     metrics["perplexity_source"] = f"external:{external_quality.metric}"

@@ -48,7 +48,9 @@ def _model_device(model: Any) -> Any:
     return next(model.parameters()).device
 
 
-def _decode_new_text(tokenizer: Any, token_ids: Any, prev_char_len: int) -> tuple[str, int]:
+def _decode_new_text(
+    tokenizer: Any, token_ids: Any, prev_char_len: int
+) -> tuple[str, int]:
     """Decode the full sequence and return only the new text suffix (BPE-safe)."""
     text = tokenizer.decode(token_ids[0], skip_special_tokens=True)
     return text[prev_char_len:], len(text)
@@ -167,7 +169,11 @@ def _iter_speculative_tokens_naive(
                 proposed.append(next_id)
                 draft_ids = torch.cat([draft_ids, next_id.to(draft_ids.device)], dim=1)
 
-            proposed_ids_t = torch.cat(proposed, dim=1).to(target_device) if proposed else input_ids_t[:, :0]
+            proposed_ids_t = (
+                torch.cat(proposed, dim=1).to(target_device)
+                if proposed
+                else input_ids_t[:, :0]
+            )
             candidate = torch.cat([input_ids_t, proposed_ids_t], dim=1)
 
             t_out = target(candidate)
@@ -184,7 +190,9 @@ def _iter_speculative_tokens_naive(
                     break
 
             if accept > 0:
-                input_ids_t = torch.cat([input_ids_t, proposed_ids_t[:, :accept]], dim=1)
+                input_ids_t = torch.cat(
+                    [input_ids_t, proposed_ids_t[:, :accept]], dim=1
+                )
                 input_ids_d = input_ids_t.to(draft_device)
                 tokens_generated += accept
                 chunk, decoded_len = _decode_new_text(tok, input_ids_t, decoded_len)
@@ -195,7 +203,9 @@ def _iter_speculative_tokens_naive(
                 break
 
             pos = prefix_len + accept - 1 if accept < k else prefix_len + k - 1
-            next_id = torch.argmax(logits[:, pos, :], dim=-1, keepdim=True).to(target_device)
+            next_id = torch.argmax(logits[:, pos, :], dim=-1, keepdim=True).to(
+                target_device
+            )
             input_ids_t = torch.cat([input_ids_t, next_id], dim=1)
             input_ids_d = input_ids_t.to(draft_device)
             tokens_generated += 1
@@ -257,7 +267,9 @@ def _iter_speculative_tokens_cached(
                 next_id = torch.argmax(next_logits, dim=-1, keepdim=True)
                 proposed.append(next_id)
                 input_ids_d = torch.cat([input_ids_d, next_id.to(draft_device)], dim=1)
-                d_out = _model_forward(draft, next_id.to(draft_device), past_key_values=draft_past)
+                d_out = _model_forward(
+                    draft, next_id.to(draft_device), past_key_values=draft_past
+                )
                 if not _kv_cache_usable(d_out):
                     raise RuntimeError("draft model returned no past_key_values")
                 draft_past = d_out.past_key_values
@@ -267,7 +279,9 @@ def _iter_speculative_tokens_cached(
 
             v_out = _model_forward(target, proposed_ids_t, past_key_values=target_past)
             verify_logits = v_out.logits
-            accept = _verify_proposed(saved_prefix_logits, verify_logits, proposed_ids_t)
+            accept = _verify_proposed(
+                saved_prefix_logits, verify_logits, proposed_ids_t
+            )
 
             if accept == k:
                 input_ids_t = torch.cat([input_ids_t, proposed_ids_t], dim=1)
@@ -291,7 +305,9 @@ def _iter_speculative_tokens_cached(
                         past_key_values=target_past,
                     )
                     target_past = a_out.past_key_values
-                input_ids_t = torch.cat([input_ids_t, proposed_ids_t[:, :accept]], dim=1)
+                input_ids_t = torch.cat(
+                    [input_ids_t, proposed_ids_t[:, :accept]], dim=1
+                )
                 tokens_generated += accept
                 chunk, decoded_len = _decode_new_text(tok, input_ids_t, decoded_len)
                 if chunk:
@@ -421,13 +437,17 @@ def _iter_speculative_tokens_dflash_cached(
             )
 
             if not proposed_ids:
-                next_id = torch.argmax(prefix_logits, dim=-1, keepdim=True).to(target_device)
+                next_id = torch.argmax(prefix_logits, dim=-1, keepdim=True).to(
+                    target_device
+                )
                 input_ids_t = torch.cat([input_ids_t, next_id], dim=1)
                 c_out = _model_forward(target, next_id, past_key_values=target_past)
                 target_past = c_out.past_key_values
                 prefix_logits = c_out.logits[:, -1, :]
                 tokens_generated += 1
-                chunk, decoded_len = _decode_new_text(target_tok, input_ids_t, decoded_len)
+                chunk, decoded_len = _decode_new_text(
+                    target_tok, input_ids_t, decoded_len
+                )
                 current_text += chunk
                 if chunk:
                     yield StreamToken(chunk)
@@ -437,14 +457,18 @@ def _iter_speculative_tokens_dflash_cached(
 
             v_out = _model_forward(target, proposed_ids_t, past_key_values=target_past)
             verify_logits = v_out.logits
-            accept = _verify_proposed(saved_prefix_logits, verify_logits, proposed_ids_t)
+            accept = _verify_proposed(
+                saved_prefix_logits, verify_logits, proposed_ids_t
+            )
 
             if accept == len(proposed_ids):
                 input_ids_t = torch.cat([input_ids_t, proposed_ids_t], dim=1)
                 target_past = v_out.past_key_values
                 prefix_logits = verify_logits[:, accept - 1, :]
                 tokens_generated += accept
-                chunk, decoded_len = _decode_new_text(target_tok, input_ids_t, decoded_len)
+                chunk, decoded_len = _decode_new_text(
+                    target_tok, input_ids_t, decoded_len
+                )
                 current_text += chunk
                 if chunk:
                     yield StreamToken(chunk, accept)
@@ -461,9 +485,13 @@ def _iter_speculative_tokens_dflash_cached(
                         past_key_values=target_past,
                     )
                     target_past = a_out.past_key_values
-                input_ids_t = torch.cat([input_ids_t, proposed_ids_t[:, :accept]], dim=1)
+                input_ids_t = torch.cat(
+                    [input_ids_t, proposed_ids_t[:, :accept]], dim=1
+                )
                 tokens_generated += accept
-                chunk, decoded_len = _decode_new_text(target_tok, input_ids_t, decoded_len)
+                chunk, decoded_len = _decode_new_text(
+                    target_tok, input_ids_t, decoded_len
+                )
                 current_text += chunk
                 if chunk:
                     yield StreamToken(chunk, accept)
@@ -530,10 +558,14 @@ def _iter_speculative_tokens_dflash_naive(
 
             if not proposed_ids:
                 t_out = target(input_ids_t)
-                next_id = torch.argmax(t_out.logits[:, -1, :], dim=-1, keepdim=True).to(target_device)
+                next_id = torch.argmax(t_out.logits[:, -1, :], dim=-1, keepdim=True).to(
+                    target_device
+                )
                 input_ids_t = torch.cat([input_ids_t, next_id], dim=1)
                 tokens_generated += 1
-                chunk, decoded_len = _decode_new_text(target_tok, input_ids_t, decoded_len)
+                chunk, decoded_len = _decode_new_text(
+                    target_tok, input_ids_t, decoded_len
+                )
                 current_text += chunk
                 if chunk:
                     yield StreamToken(chunk)
@@ -556,9 +588,13 @@ def _iter_speculative_tokens_dflash_naive(
                     break
 
             if accept > 0:
-                input_ids_t = torch.cat([input_ids_t, proposed_ids_t[:, :accept]], dim=1)
+                input_ids_t = torch.cat(
+                    [input_ids_t, proposed_ids_t[:, :accept]], dim=1
+                )
                 tokens_generated += accept
-                chunk, decoded_len = _decode_new_text(target_tok, input_ids_t, decoded_len)
+                chunk, decoded_len = _decode_new_text(
+                    target_tok, input_ids_t, decoded_len
+                )
                 current_text += chunk
                 if chunk:
                     yield StreamToken(chunk, accept)
@@ -571,7 +607,9 @@ def _iter_speculative_tokens_dflash_naive(
                 if accept < len(proposed_ids)
                 else prefix_len + len(proposed_ids) - 1
             )
-            next_id = torch.argmax(logits[:, pos, :], dim=-1, keepdim=True).to(target_device)
+            next_id = torch.argmax(logits[:, pos, :], dim=-1, keepdim=True).to(
+                target_device
+            )
             input_ids_t = torch.cat([input_ids_t, next_id], dim=1)
             tokens_generated += 1
             chunk, decoded_len = _decode_new_text(target_tok, input_ids_t, decoded_len)
@@ -605,7 +643,9 @@ def iter_speculative_tokens_dflash(
             )
             return
         except _KV_CACHE_FALLBACK_ERRORS as exc:
-            logger.debug("dFlash speculative KV cache unavailable — falling back: %s", exc)
+            logger.debug(
+                "dFlash speculative KV cache unavailable — falling back: %s", exc
+            )
 
     yield from _iter_speculative_tokens_dflash_naive(
         bundle=bundle,

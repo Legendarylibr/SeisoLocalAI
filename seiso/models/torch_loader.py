@@ -90,7 +90,9 @@ def load_torch(
             import torch
 
             if torch.cuda.is_available():
-                dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+                dtype = (
+                    torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+                )
         except ImportError:
             dtype = None
     if dtype is not None and not native_hub_quant:
@@ -163,11 +165,15 @@ def load_torch(
 
         model_kwargs["quantization_config"] = BitsAndBytesConfig(load_in_8bit=True)
 
-    tokenizer = AutoTokenizer.from_pretrained(options.model_id, **tokenizer_kwargs)  # nosec B615: revision pinned in tokenizer_kwargs
+    tokenizer = AutoTokenizer.from_pretrained(
+        options.model_id, **tokenizer_kwargs
+    )  # nosec B615: revision pinned in tokenizer_kwargs
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    model = AutoModelForCausalLM.from_pretrained(options.model_id, **model_kwargs)  # nosec B615: revision pinned in model_kwargs
+    model = AutoModelForCausalLM.from_pretrained(
+        options.model_id, **model_kwargs
+    )  # nosec B615: revision pinned in model_kwargs
 
     if len(tokenizer) != model.get_input_embeddings().weight.shape[0]:
         model.resize_token_embeddings(len(tokenizer))

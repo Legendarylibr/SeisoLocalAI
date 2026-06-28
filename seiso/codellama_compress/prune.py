@@ -49,7 +49,9 @@ def run_mlp_mask_prune(
     out_dir.mkdir(parents=True, exist_ok=True)
     in_model_dir = resolve_user_path(in_model_dir, must_exist=True)
 
-    tok = AutoTokenizer.from_pretrained(in_model_dir, use_fast=True, trust_remote_code=False)
+    tok = AutoTokenizer.from_pretrained(
+        in_model_dir, use_fast=True, trust_remote_code=False
+    )
     model = AutoModelForCausalLM.from_pretrained(
         in_model_dir,
         torch_dtype=torch.float16,

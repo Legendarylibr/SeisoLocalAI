@@ -37,7 +37,11 @@ async def test_recipe_execute_writes_user_scoped_output_and_snapshot(tmp_path):
     recipe = {
         "name": "smoke",
         "nodes": [
-            {"id": "in", "type": "import", "config": {"path": str(source), "format": "jsonl"}},
+            {
+                "id": "in",
+                "type": "import",
+                "config": {"path": str(source), "format": "jsonl"},
+            },
             {"id": "out", "type": "output", "config": {"source": "in"}},
         ],
         "edges": [{"source": "in", "target": "out"}],
@@ -76,13 +80,24 @@ async def test_recipe_default_pipeline_parses_messages_jsonl(tmp_path):
     recipe = {
         "name": "messages",
         "nodes": [
-            {"id": "import", "type": "import", "config": {"path": str(source), "format": "txt"}},
+            {
+                "id": "import",
+                "type": "import",
+                "config": {"path": str(source), "format": "txt"},
+            },
             {
                 "id": "transform",
                 "type": "transform",
-                "config": {"source": "import", "template": "Instruction: {text}\nOutput:"},
+                "config": {
+                    "source": "import",
+                    "template": "Instruction: {text}\nOutput:",
+                },
             },
-            {"id": "filter", "type": "filter", "config": {"source": "transform", "min_length": 5}},
+            {
+                "id": "filter",
+                "type": "filter",
+                "config": {"source": "transform", "min_length": 5},
+            },
             {"id": "out", "type": "output", "config": {"source": "filter"}},
         ],
         "edges": [

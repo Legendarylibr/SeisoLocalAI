@@ -10,7 +10,12 @@ import time
 from typing import Any
 
 from seiso.hardware.gpus import sanitize_hardware_label
-from seiso.hardware.tiers import TIER_LABELS, classify_tier, effective_budget_mb, vram_headroom_mb
+from seiso.hardware.tiers import (
+    TIER_LABELS,
+    classify_tier,
+    effective_budget_mb,
+    vram_headroom_mb,
+)
 from seiso.hardware.training import preferred_inference_backend, training_defaults
 from seiso.models.loader import detect_backend
 
@@ -91,10 +96,14 @@ def _nvidia_smi_metrics() -> dict[int, dict[str, float]]:
                 continue
             idx = int(parts[0])
             out[idx] = {
-                "utilization_pct": float(parts[1]) if parts[1] not in ("[N/A]", "N/A") else 0.0,
+                "utilization_pct": (
+                    float(parts[1]) if parts[1] not in ("[N/A]", "N/A") else 0.0
+                ),
                 "vram_used_mb": float(parts[2]),
                 "vram_total_mb": float(parts[3]),
-                "temperature_c": float(parts[4]) if parts[4] not in ("[N/A]", "N/A") else 0.0,
+                "temperature_c": (
+                    float(parts[4]) if parts[4] not in ("[N/A]", "N/A") else 0.0
+                ),
             }
     except (FileNotFoundError, subprocess.TimeoutExpired, ValueError, OSError):
         pass

@@ -5,7 +5,9 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from seiso.adaptive_quant.cli.startup_overrides import allow_privileged_overrides_from_env
+from seiso.adaptive_quant.cli.startup_overrides import (
+    allow_privileged_overrides_from_env,
+)
 from seiso.adaptive_quant.configuration import FrameworkConfig
 from seiso.adaptive_quant.configuration.validation import (
     _HF_ALLOWED_REPOS_ENV,
@@ -27,7 +29,9 @@ def build_security_audit_record(
         "training_backend": config.training_backend,
         "privileged_cli_overrides_allowed": allow_privileged_overrides_from_env(),
         "hf_allow_unlisted": hf_allow_unlisted_from_env(),
-        "hf_allowed_repos_env_set": bool(os.environ.get(_HF_ALLOWED_REPOS_ENV, "").strip()),
+        "hf_allowed_repos_env_set": bool(
+            os.environ.get(_HF_ALLOWED_REPOS_ENV, "").strip()
+        ),
         "hf_repo_allowlist": sorted(
             hf_allowed_repos_from_env() | frozenset(config.route_hf_allowed_repos)
         ),
@@ -36,7 +40,9 @@ def build_security_audit_record(
         "llama_cpp_binary_prefixes_env_set": bool(
             os.environ.get(_LLAMA_CPP_BINARY_PREFIXES_ENV, "").strip()
         ),
-        "security_bypass_env_active": [name for name, _desc in active_security_bypasses()],
+        "security_bypass_env_active": [
+            name for name, _desc in active_security_bypasses()
+        ],
         "nvidia_boundary": nvidia_boundary_report(),
     }
     binary = config.llama_cpp_binary

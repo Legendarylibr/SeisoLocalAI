@@ -90,7 +90,9 @@ _FINAL_ANSWER_PATTERNS = (
         r"\s*:+\s*\*\*([^*]+)\*\*"
     ),
     re.compile(r"(?is)\*\*(?:Final Answer|Answer|Response|Reply|Output):\*\*\s*(.+)\Z"),
-    re.compile(r"(?is)\*\*(?:Final Answer|Answer|Response|Reply|Output)\*\*\s*:+\s*(.+)\Z"),
+    re.compile(
+        r"(?is)\*\*(?:Final Answer|Answer|Response|Reply|Output)\*\*\s*:+\s*(.+)\Z"
+    ),
     re.compile(
         r"(?is)(?:Final Decision|Final Polish|Final Answer|Answer|Response|Reply|Output)"
         r"\s*:+\s*([^\n\"]+?)\s*(?:Wait,|\Z)"
@@ -146,7 +148,9 @@ def _looks_like_reasoning_leak(content: str) -> bool:
         return True
     if _REASONING_HEADER_PATTERN.match(content):
         return True
-    if re.search(r"(?i)\*\*(?:reasoning|thought|analysis|response|reply):\*\*", content):
+    if re.search(
+        r"(?i)\*\*(?:reasoning|thought|analysis|response|reply):\*\*", content
+    ):
         return True
     if _ANALYSIS_STEP_PATTERN.search(content):
         return True
@@ -166,7 +170,9 @@ def _extract_final_answer_from_reasoning(content: str) -> str | None:
         if (
             candidate
             and len(candidate) < 500
-            and not candidate.lower().startswith(("thinking process", "reasoning", "analysis"))
+            and not candidate.lower().startswith(
+                ("thinking process", "reasoning", "analysis")
+            )
         ):
             return candidate
     quoted = re.findall(r'"([^"]{3,200})"', content)
@@ -211,7 +217,9 @@ def strip_reasoning_leakage(content: str) -> str:
         cleaned,
     )
     cleaned = re.sub(
-        r"(?im)^\s*\*\*(?:Reasoning|Thought|Analysis):\*\*.*?(?=^\s*\*\*|\Z)", "", cleaned
+        r"(?im)^\s*\*\*(?:Reasoning|Thought|Analysis):\*\*.*?(?=^\s*\*\*|\Z)",
+        "",
+        cleaned,
     )
     return cleaned.strip()
 
@@ -224,7 +232,9 @@ def strip_spurious_tool_syntax(content: str) -> str:
     cleaned = _XML_FUNCTION_TOOL_PATTERN.sub("", cleaned)
     cleaned = _FUNCTION_JSON_PATTERN.sub("", cleaned)
     cleaned = re.sub(r"\[TOOL_CALLS?\]", "", cleaned, flags=re.I)
-    cleaned = re.sub(r"<\|tool_call\|>.*?(?:<\|/tool_call\|>|$)", "", cleaned, flags=re.DOTALL)
+    cleaned = re.sub(
+        r"<\|tool_call\|>.*?(?:<\|/tool_call\|>|$)", "", cleaned, flags=re.DOTALL
+    )
     return cleaned.strip()
 
 
@@ -242,7 +252,9 @@ def sanitize_llm_output(content: str, *, strip_tool_calls: bool = False) -> str:
     return content
 
 
-def chunk_sanitized_output(content: str, *, chunk_size: int = _CHUNK_SIZE) -> Iterator[str]:
+def chunk_sanitized_output(
+    content: str, *, chunk_size: int = _CHUNK_SIZE
+) -> Iterator[str]:
     """Yield assistant text in bounded chunks for SSE clients."""
     for start in range(0, len(content), chunk_size):
         yield content[start : start + chunk_size]
@@ -350,7 +362,9 @@ class StreamingOutputSanitizer:
             if answer:
                 self._emitted = True
                 return [answer]
-            if re.search(r"(?i)thinking process", buf) or re.search(r"\d+\.\s*\*\*[^*]+$", buf):
+            if re.search(r"(?i)thinking process", buf) or re.search(
+                r"\d+\.\s*\*\*[^*]+$", buf
+            ):
                 return []
             cleaned = strip_reasoning_leakage(buf)
             if (

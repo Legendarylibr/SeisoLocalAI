@@ -26,7 +26,10 @@ def forge(
     import uvicorn
 
     from forge.config import get_settings
-    from forge.instance_lock import ForgeAlreadyRunningError, acquire_forge_instance_locks
+    from forge.instance_lock import (
+        ForgeAlreadyRunningError,
+        acquire_forge_instance_locks,
+    )
     from forge.launch import schedule_browser_open
 
     settings = get_settings()
@@ -66,7 +69,9 @@ def forge(
 
 
 def doctor(
-    network: bool = typer.Option(False, "--network", help="Also probe huggingface.co reachability"),
+    network: bool = typer.Option(
+        False, "--network", help="Also probe huggingface.co reachability"
+    ),
 ) -> None:
     """Diagnose install, runtime, and Hugging Face setup."""
     root = Path(__file__).resolve().parents[2]

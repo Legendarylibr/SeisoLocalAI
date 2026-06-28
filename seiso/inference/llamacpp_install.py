@@ -49,7 +49,11 @@ def llamacpp_gpu_offload_supported() -> bool:
 
         for candidate in (
             getattr(llama_cpp, "llama_supports_gpu_offload", None),
-            getattr(getattr(llama_cpp, "llama_cpp", None), "llama_supports_gpu_offload", None),
+            getattr(
+                getattr(llama_cpp, "llama_cpp", None),
+                "llama_supports_gpu_offload",
+                None,
+            ),
         ):
             if callable(candidate):
                 return bool(candidate())
@@ -65,7 +69,9 @@ def pip_install_strategies(*, prefer_cuda: bool) -> list[list[str]]:
 
     if prefer_cuda:
         for index in _CUDA_WHEEL_INDEXES:
-            strategies.append([*base, "--only-binary", ":all:", "--extra-index-url", index])
+            strategies.append(
+                [*base, "--only-binary", ":all:", "--extra-index-url", index]
+            )
             strategies.append([*base, "--extra-index-url", index])
 
     strategies.extend(
@@ -90,7 +96,15 @@ def _pip_install_from_source_cuda() -> bool:
     env["CMAKE_ARGS"] = "-DLLAMA_CUDA=on"
     try:
         proc = subprocess.run(
-            [sys.executable, "-m", "pip", "install", "-U", _LLAMACPP_SPEC, "--no-cache-dir"],
+            [
+                sys.executable,
+                "-m",
+                "pip",
+                "install",
+                "-U",
+                _LLAMACPP_SPEC,
+                "--no-cache-dir",
+            ],
             capture_output=True,
             text=True,
             timeout=1800,
@@ -137,7 +151,9 @@ def ensure_llamacpp_installed(*, auto_install: bool | None = None) -> dict[str, 
     Ensure ``llama_cpp`` imports and, when NVIDIA hardware is visible, prefer a GPU-capable wheel.
     """
     if auto_install is None:
-        auto_install = os.environ.get("SEISO_SKIP_LLAMACPP_INSTALL", "").strip().lower() not in {
+        auto_install = os.environ.get(
+            "SEISO_SKIP_LLAMACPP_INSTALL", ""
+        ).strip().lower() not in {
             "1",
             "true",
             "yes",
@@ -207,7 +223,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Install/verify llama-cpp-python for Seiso GGUF chat"
     )
-    parser.add_argument("--quiet", action="store_true", help="Only exit code, no stdout")
+    parser.add_argument(
+        "--quiet", action="store_true", help="Only exit code, no stdout"
+    )
     args = parser.parse_args(argv)
 
     result = ensure_llamacpp_installed()

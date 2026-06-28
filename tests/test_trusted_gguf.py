@@ -26,7 +26,9 @@ def test_filter_trusted_gguf_search_results_sorts_by_downloads():
         {"repo_id": "bartowski/Llama-GGUF", "downloads": 100},
         {"repo_id": "meta-llama/Llama-GGUF", "downloads": 50},
     ]
-    filtered = filter_trusted_gguf_search_results(rows, base_repo_id="meta-llama/Llama-3.1-8B")
+    filtered = filter_trusted_gguf_search_results(
+        rows, base_repo_id="meta-llama/Llama-3.1-8B"
+    )
     assert [row["repo_id"] for row in filtered] == [
         "random-user/Llama-GGUF",
         "bartowski/Llama-GGUF",

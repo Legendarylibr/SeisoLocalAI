@@ -68,7 +68,9 @@ class ExpertBank:
         variants: list[PackedExpertVariant] = []
         for name in names:
             variants.append(
-                preset.get(name, PackedExpertVariant(name, 0.5, 0.96, 1.03, 0.94, 0.20, 1.8))
+                preset.get(
+                    name, PackedExpertVariant(name, 0.5, 0.96, 1.03, 0.94, 0.20, 1.8)
+                )
             )
         return variants
 
@@ -77,17 +79,24 @@ class ExpertBank:
         return self.variants[bounded]
 
     def build_context(
-        self, prompt: PromptSample, input_features: InputFeatures, hardware_profile: HardwareProfile
+        self,
+        prompt: PromptSample,
+        input_features: InputFeatures,
+        hardware_profile: HardwareProfile,
     ) -> MoEContext:
         top_k = max(1, min(self.config.moe_top_k, self.config.moe_num_experts))
         router_scores: list[tuple[int, float]] = []
         for expert_index in range(self.config.moe_num_experts):
-            score = self._router_score(prompt, input_features, hardware_profile, expert_index)
+            score = self._router_score(
+                prompt, input_features, hardware_profile, expert_index
+            )
             router_scores.append((expert_index, score))
         selected = sorted(router_scores, key=lambda item: item[1], reverse=True)[:top_k]
         probabilities = softmax([score for _expert_index, score in selected])
         experts: list[MoEExpertState] = []
-        for (expert_index, _score), probability in zip(selected, probabilities, strict=True):
+        for (expert_index, _score), probability in zip(
+            selected, probabilities, strict=True
+        ):
             hotness = self._expert_hotness(prompt, hardware_profile, expert_index)
             resident = self._resident_score(hardware_profile, expert_index, hotness)
             sensitivity = clamp(
@@ -122,7 +131,9 @@ class ExpertBank:
             + input_features.complexity_score * 0.45
             + max(
                 0.0,
-                0.65 - sum(expert.resident_on_device for expert in experts) / max(1, len(experts)),
+                0.65
+                - sum(expert.resident_on_device for expert in experts)
+                / max(1, len(experts)),
             )
             * 0.40,
             0.0,
@@ -151,11 +162,15 @@ class ExpertBank:
         hardware_profile: HardwareProfile,
         expert_index: int,
     ) -> float:
-        prompt_bias = deterministic_float(f"router:{prompt.prompt_id}:{expert_index}", 0.0, 1.0)
+        prompt_bias = deterministic_float(
+            f"router:{prompt.prompt_id}:{expert_index}", 0.0, 1.0
+        )
         hardware_bias = deterministic_float(
             f"router:{hardware_profile.hardware_type.value}:{expert_index}", 0.0, 1.0
         )
-        domain_bucket = stable_hash_int(f"{prompt.domain}:{expert_index}", modulo=7) / 6.0
+        domain_bucket = (
+            stable_hash_int(f"{prompt.domain}:{expert_index}", modulo=7) / 6.0
+        )
         return (
             0.40 * prompt_bias
             + 0.20 * hardware_bias
@@ -172,7 +187,10 @@ class ExpertBank:
             * deterministic_float(
                 f"hot:{hardware_profile.hardware_type.value}:{expert_index}", 0.0, 1.0
             )
-            + 0.20 * deterministic_float(f"hot-prompt:{prompt.prompt_id}:{expert_index}", 0.0, 1.0),
+            + 0.20
+            * deterministic_float(
+                f"hot-prompt:{prompt.prompt_id}:{expert_index}", 0.0, 1.0
+            ),
             0.0,
             1.0,
         )
@@ -186,6 +204,12 @@ class ExpertBank:
             return 1.0 if hotness >= 0.78 else 0.0
         if hardware_profile.hardware_type.value == "cpu":
             return (
-                0.45 if expert_index < max(1, self.config.moe_gpu_resident_experts // 2) else 0.15
+                0.45
+                if expert_index < max(1, self.config.moe_gpu_resident_experts // 2)
+                else 0.15
             )
-        return 0.15 if expert_index < max(1, self.config.moe_gpu_resident_experts // 3) else 0.0
+        return (
+            0.15
+            if expert_index < max(1, self.config.moe_gpu_resident_experts // 3)
+            else 0.0
+        )

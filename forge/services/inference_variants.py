@@ -36,7 +36,11 @@ def extract_quant_label(
     meta = metadata or {}
     for candidate in (
         meta.get("gguf_file"),
-        meta.get("gguf_files", [None])[0] if isinstance(meta.get("gguf_files"), list) else None,
+        (
+            meta.get("gguf_files", [None])[0]
+            if isinstance(meta.get("gguf_files"), list)
+            else None
+        ),
         Path(path).name if path else None,
         name,
     ):
@@ -61,7 +65,9 @@ def variant_group_key(opt: dict[str, Any]) -> str:
     if isinstance(source, str) and source.startswith("hf:"):
         return source[3:].lower()
     name = str(opt.get("name") or "").lower()
-    stripped = re.sub(r"[-_.]?(q\d+[_a-z0-9]*|iq\d+[_a-z0-9]*|f16|bf16).*$", "", name, flags=re.I)
+    stripped = re.sub(
+        r"[-_.]?(q\d+[_a-z0-9]*|iq\d+[_a-z0-9]*|f16|bf16).*$", "", name, flags=re.I
+    )
     return stripped or name or str(opt.get("id") or "")
 
 
@@ -163,7 +169,9 @@ async def get_model_variants(
     meta = _metadata(current)
     gguf_repo = str(meta.get("gguf_repo") or meta.get("repo_id") or "")
     if not gguf_repo.endswith("-GGUF") and not gguf_repo.lower().endswith("gguf"):
-        base = meta.get("base_model") or base_model_from_tags(tuple(meta.get("tags") or ()))
+        base = meta.get("base_model") or base_model_from_tags(
+            tuple(meta.get("tags") or ())
+        )
         if isinstance(base, str) and base:
             from seiso.models.trusted_gguf import gguf_mirror_candidates
 

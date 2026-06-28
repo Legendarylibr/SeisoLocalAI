@@ -15,7 +15,12 @@ from seiso.adaptive_quant.checkpoint_integrity import (
 )
 from seiso.adaptive_quant.configuration import FrameworkConfig, config_to_flat_dict
 from seiso.adaptive_quant.environment import AdaptiveQuantizationEnv
-from seiso.adaptive_quant.logging_utils import load_jsonl, read_json, to_jsonable, write_json
+from seiso.adaptive_quant.logging_utils import (
+    load_jsonl,
+    read_json,
+    to_jsonable,
+    write_json,
+)
 from seiso.adaptive_quant.math_utils import finite_float
 from seiso.adaptive_quant.trainer_utils import feedback_vector, zero_previous_action
 from seiso.adaptive_quant.types import QuantizationDecision, QuantMode
@@ -49,7 +54,9 @@ _CONFIG_FINGERPRINT_EXCLUDE = frozenset(
     }
 )
 
-_INTEGRITY_META_KEYS = frozenset({"_integrity_hash", "_integrity_prev", INTEGRITY_FIELD})
+_INTEGRITY_META_KEYS = frozenset(
+    {"_integrity_hash", "_integrity_prev", INTEGRITY_FIELD}
+)
 
 
 def _require_simulator_replay(config: FrameworkConfig) -> None:
@@ -77,7 +84,9 @@ def _integrity_chain_required(
     return False
 
 
-def assert_replay_verified(report: dict[str, Any] | None, config: FrameworkConfig) -> None:
+def assert_replay_verified(
+    report: dict[str, Any] | None, config: FrameworkConfig
+) -> None:
     if not config.replay_verify_after_run or report is None:
         return
     for block_name in ("jsonl_verify", "replay_verify"):
@@ -88,16 +97,22 @@ def assert_replay_verified(report: dict[str, Any] | None, config: FrameworkConfi
             )
         if not bool(block.get("verified")):
             mismatches = block.get("mismatches") or []
-            raise RuntimeError(f"Replay verification failed ({block_name}): {mismatches[:5]}")
+            raise RuntimeError(
+                f"Replay verification failed ({block_name}): {mismatches[:5]}"
+            )
 
 
 def strip_integrity_meta(record: Mapping[str, Any]) -> dict[str, Any]:
-    return {key: value for key, value in record.items() if key not in _INTEGRITY_META_KEYS}
+    return {
+        key: value for key, value in record.items() if key not in _INTEGRITY_META_KEYS
+    }
 
 
 def config_fingerprint(config: FrameworkConfig) -> str:
     flat = config_to_flat_dict(config)
-    body = {key: flat[key] for key in sorted(flat) if key not in _CONFIG_FINGERPRINT_EXCLUDE}
+    body = {
+        key: flat[key] for key in sorted(flat) if key not in _CONFIG_FINGERPRINT_EXCLUDE
+    }
     return sha256_canonical(body)
 
 
@@ -173,7 +188,8 @@ def _float_list(payload: Mapping[str, Any], key: str) -> list[float]:
     if not isinstance(value, list):
         raise TypeError(f"decision.{key} must be a list")
     return [
-        finite_float(item, label=f"decision.{key}[{index}]") for index, item in enumerate(value)
+        finite_float(item, label=f"decision.{key}[{index}]")
+        for index, item in enumerate(value)
     ]
 
 
@@ -203,7 +219,9 @@ def decision_from_logged(payload: Mapping[str, Any]) -> QuantizationDecision:
         base_bit_width=_optional_int(payload, "base_bit_width"),
         group_bit_widths=_int_list(payload, "group_bit_widths"),
         layer_bit_widths=_int_list(payload, "layer_bit_widths"),
-        scale_factor=finite_float(payload.get("scale_factor", 1.0), label="decision.scale_factor"),
+        scale_factor=finite_float(
+            payload.get("scale_factor", 1.0), label="decision.scale_factor"
+        ),
         clipping_range=finite_float(
             payload.get("clipping_range", 1.0), label="decision.clipping_range"
         ),
@@ -279,7 +297,9 @@ def write_replay_manifest(
     log_path: str | None = None,
 ) -> str:
     target = Path(path or config.replay_manifest_path())
-    payload = build_manifest_payload(config, records, git_commit=git_commit, log_path=log_path)
+    payload = build_manifest_payload(
+        config, records, git_commit=git_commit, log_path=log_path
+    )
     write_json(target, payload)
     return str(target)
 
@@ -333,8 +353,15 @@ def verify_jsonl_against_manifest(
                 "actual": len(recomputed),
             }
         )
-    for idx, (expected, actual) in enumerate(zip(manifest_steps, recomputed, strict=False)):
-        for field in ("step_sha256", "chain_sha256", "observation_sha256", "outcome_sha256"):
+    for idx, (expected, actual) in enumerate(
+        zip(manifest_steps, recomputed, strict=False)
+    ):
+        for field in (
+            "step_sha256",
+            "chain_sha256",
+            "observation_sha256",
+            "outcome_sha256",
+        ):
             if str(expected.get(field)) != str(actual.get(field)):
                 mismatches.append(
                     {
@@ -412,7 +439,9 @@ def replay_manifest_steps(
                         "actual": logged_previous,
                     }
                 )
-            env.reset(previous_action=previous_action, phase=phase, episode_index=ep_index)
+            env.reset(
+                previous_action=previous_action, phase=phase, episode_index=ep_index
+            )
             decision_payload = step.get("decision")
             if not isinstance(decision_payload, Mapping):
                 mismatches.append(
@@ -424,7 +453,9 @@ def replay_manifest_steps(
                 )
                 continue
             raw_decision = decision_from_logged(decision_payload)
-            result = env.evaluate_current(raw_decision, episode_index=ep_index, log_episode=False)
+            result = env.evaluate_current(
+                raw_decision, episode_index=ep_index, log_episode=False
+            )
             record = {
                 "episode": episode,
                 "phase": phase,
@@ -483,7 +514,11 @@ def finalize_replay_artifacts(
         str(path),
         require_integrity_chain=bool(config.jsonl_integrity_chain),
     )
-    if config.jsonl_integrity_chain and records and not records[-1].get("_integrity_hash"):
+    if (
+        config.jsonl_integrity_chain
+        and records
+        and not records[-1].get("_integrity_hash")
+    ):
         raise ValueError(
             "jsonl_integrity_chain is enabled but the primary log has no _integrity_hash; "
             "flush the logger before building the replay manifest."
@@ -498,7 +533,9 @@ def finalize_replay_artifacts(
         "manifest_path": manifest_path,
         "step_count": len(records),
         "config_sha256": config_fingerprint(config),
-        "chain_head_sha256": build_manifest_steps(records)[-1]["chain_sha256"] if records else "",
+        "chain_head_sha256": (
+            build_manifest_steps(records)[-1]["chain_sha256"] if records else ""
+        ),
     }
     if config.replay_verify_after_run:
         manifest = load_replay_manifest(manifest_path)

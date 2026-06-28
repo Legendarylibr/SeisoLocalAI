@@ -129,23 +129,27 @@ def resolve_training_device(
                     "incompatible CUDA runtime."
                 )
             if require_cuda:
-                from seiso.adaptive_quant.torch_install import cuda_torch_install_instructions
+                from seiso.adaptive_quant.torch_install import (
+                    cuda_torch_install_instructions,
+                )
 
                 raise RuntimeError(
                     f"torch_device={requested!r} but CUDA is not available.{extra}\n\n"
                     f"{cuda_torch_install_instructions()}"
                 )
-            return torch.device(
-                "cpu"
-            ), f"torch_device={requested!r} but CUDA is not available; using CPU.{extra}"
+            return (
+                torch.device("cpu"),
+                f"torch_device={requested!r} but CUDA is not available; using CPU.{extra}",
+            )
         validate_cuda_runtime_compatibility(raw)
         return device, None
     if device.type == "mps":
         mps_ok = hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
         if not mps_ok:
-            return torch.device(
-                "cpu"
-            ), f"torch_device={requested!r} but MPS is not available; using CPU."
+            return (
+                torch.device("cpu"),
+                f"torch_device={requested!r} but MPS is not available; using CPU.",
+            )
         return device, None
     return device, None
 
@@ -199,10 +203,17 @@ if torch is not None:
                 else None
             )
             self.discrete_head = nn.Linear(config.torch_hidden_dim, self.num_bits)
-            self.group_head = nn.Linear(config.torch_hidden_dim, config.num_groups * self.num_bits)
-            self.layer_head = nn.Linear(config.torch_hidden_dim, config.num_layers * self.num_bits)
+            self.group_head = nn.Linear(
+                config.torch_hidden_dim, config.num_groups * self.num_bits
+            )
+            self.layer_head = nn.Linear(
+                config.torch_hidden_dim, config.num_layers * self.num_bits
+            )
             self.moe_head = (
-                nn.Linear(config.torch_hidden_dim, config.moe_top_k * config.moe_variant_count())
+                nn.Linear(
+                    config.torch_hidden_dim,
+                    config.moe_top_k * config.moe_variant_count(),
+                )
                 if config.moe_enabled
                 else None
             )
@@ -220,14 +231,22 @@ if torch is not None:
             self.register_buffer(
                 "learned_lower",
                 torch.tensor(
-                    [config.scale_bounds[0], config.clip_bounds[0], config.precision_bounds[0]],
+                    [
+                        config.scale_bounds[0],
+                        config.clip_bounds[0],
+                        config.precision_bounds[0],
+                    ],
                     dtype=torch.float32,
                 ),
             )
             self.register_buffer(
                 "learned_upper",
                 torch.tensor(
-                    [config.scale_bounds[1], config.clip_bounds[1], config.precision_bounds[1]],
+                    [
+                        config.scale_bounds[1],
+                        config.clip_bounds[1],
+                        config.precision_bounds[1],
+                    ],
                     dtype=torch.float32,
                 ),
             )
@@ -252,7 +271,9 @@ if torch is not None:
                     -1, self.config.num_layers, self.num_bits
                 ),
                 "learned_mean": self.learned_mean(features),
-                "learned_std": self.learned_log_std.exp().unsqueeze(0).repeat(features.shape[0], 1),
+                "learned_std": self.learned_log_std.exp()
+                .unsqueeze(0)
+                .repeat(features.shape[0], 1),
                 "value": self.value_head(features).squeeze(-1),
             }
             if self.mode_head is not None:
@@ -267,7 +288,9 @@ if torch is not None:
 
         def map_learned_parameters(self, raw_parameters: torch.Tensor) -> torch.Tensor:
             bounded = torch.sigmoid(raw_parameters)
-            return self.learned_lower + bounded * (self.learned_upper - self.learned_lower)
+            return self.learned_lower + bounded * (
+                self.learned_upper - self.learned_lower
+            )
 
 
 class TorchPolicyAdapter:
@@ -279,7 +302,9 @@ class TorchPolicyAdapter:
         self.config = config
         configure_global_torch_reproducibility(config)
         self.supported_modes = config.supported_modes()
-        self.mode_to_index = {mode: index for index, mode in enumerate(self.supported_modes)}
+        self.mode_to_index = {
+            mode: index for index, mode in enumerate(self.supported_modes)
+        }
         self.device, device_note = resolve_training_device(
             config.torch_device,
             require_cuda=config.torch_require_cuda,
@@ -289,7 +314,11 @@ class TorchPolicyAdapter:
         self.compute_dtype = _resolve_autocast_dtype(config.torch_dtype)
         self.model = TorchActorCritic(config).to(self.device)
         self._configure_cuda()
-        if config.torch_compile and not config.torch_deterministic and hasattr(torch, "compile"):
+        if (
+            config.torch_compile
+            and not config.torch_deterministic
+            and hasattr(torch, "compile")
+        ):
             try:
                 self.model = torch.compile(self.model)
             except Exception as exc:
@@ -401,14 +430,18 @@ class TorchPolicyAdapter:
                     else int(distribution.sample().item())
                 )
                 record["log_prob"] += float(
-                    distribution.log_prob(torch.tensor(index, device=self.device)).item()
+                    distribution.log_prob(
+                        torch.tensor(index, device=self.device)
+                    ).item()
                 )
                 record["entropy"] += float(distribution.entropy().item())
                 group_indices.append(index)
                 group_bits.append(self.config.discrete_bit_widths[index])
             record["group_indices"] = group_indices
             decision = QuantizationDecision(
-                mode=selected_mode, group_bit_widths=group_bits, metadata={"head": "torch_grouped"}
+                mode=selected_mode,
+                group_bit_widths=group_bits,
+                metadata={"head": "torch_grouped"},
             )
             self._attach_moe_selection(
                 outputs, decision, record, deterministic, moe_context=moe_context
@@ -428,7 +461,9 @@ class TorchPolicyAdapter:
                     else int(distribution.sample().item())
                 )
                 record["log_prob"] += float(
-                    distribution.log_prob(torch.tensor(index, device=self.device)).item()
+                    distribution.log_prob(
+                        torch.tensor(index, device=self.device)
+                    ).item()
                 )
                 record["entropy"] += float(distribution.entropy().item())
                 layer_indices.append(index)
@@ -450,7 +485,9 @@ class TorchPolicyAdapter:
         distribution = Normal(raw_mean, raw_std)
         raw_sample = raw_mean if deterministic else distribution.sample()
         bounded = self.model.map_learned_parameters(raw_sample.unsqueeze(0))[0]
-        record["learned_raw"] = [float(value) for value in raw_sample.detach().cpu().tolist()]
+        record["learned_raw"] = [
+            float(value) for value in raw_sample.detach().cpu().tolist()
+        ]
         record["log_prob"] += float(distribution.log_prob(raw_sample).sum().item())
         record["entropy"] += float(distribution.entropy().sum().item())
         decision = QuantizationDecision(
@@ -498,7 +535,11 @@ class TorchPolicyAdapter:
         *,
         moe_context: Any | None,
     ) -> None:
-        if moe_context is None or self.model.moe_head is None or "moe_logits" not in outputs:
+        if (
+            moe_context is None
+            or self.model.moe_head is None
+            or "moe_logits" not in outputs
+        ):
             return
         moe_indices: list[int] = []
         moe_names: list[str] = []
@@ -547,10 +588,12 @@ class TorchPolicyAdapter:
             valid_mask = mode_indices >= 0
             if valid_mask.any():
                 batch_indices = torch.arange(batch_size, device=self.device)[valid_mask]
-                log_probs[valid_mask] += mode_log_probs[batch_indices, mode_indices[valid_mask]]
-                entropies[valid_mask] += -(mode_probs[valid_mask] * mode_log_probs[valid_mask]).sum(
-                    dim=-1
-                )
+                log_probs[valid_mask] += mode_log_probs[
+                    batch_indices, mode_indices[valid_mask]
+                ]
+                entropies[valid_mask] += -(
+                    mode_probs[valid_mask] * mode_log_probs[valid_mask]
+                ).sum(dim=-1)
 
         discrete_mask = (mode_codes == _mode_code(QuantMode.DISCRETE.value)) | (
             mode_codes == _mode_code(QuantMode.DYNAMIC.value)
@@ -558,7 +601,11 @@ class TorchPolicyAdapter:
         if discrete_mask.any():
             discrete_indices = torch.tensor(
                 [
-                    int(record["discrete_index"]) if record["discrete_index"] is not None else 0
+                    (
+                        int(record["discrete_index"])
+                        if record["discrete_index"] is not None
+                        else 0
+                    )
                     for record in records
                 ],
                 dtype=torch.long,
@@ -579,9 +626,11 @@ class TorchPolicyAdapter:
         if grouped_mask.any():
             group_indices = torch.tensor(
                 [
-                    record["group_indices"]
-                    if record["group_indices"]
-                    else [0] * self.config.num_groups
+                    (
+                        record["group_indices"]
+                        if record["group_indices"]
+                        else [0] * self.config.num_groups
+                    )
                     for record in records
                 ],
                 dtype=torch.long,
@@ -591,7 +640,9 @@ class TorchPolicyAdapter:
             log_distribution = torch.log_softmax(logits, dim=-1)
             probabilities = torch.softmax(logits, dim=-1)
             selected = (
-                torch.gather(log_distribution, dim=-1, index=group_indices.unsqueeze(-1))
+                torch.gather(
+                    log_distribution, dim=-1, index=group_indices.unsqueeze(-1)
+                )
                 .squeeze(-1)
                 .sum(dim=-1)
             )
@@ -603,9 +654,11 @@ class TorchPolicyAdapter:
         if layer_mask.any():
             layer_indices = torch.tensor(
                 [
-                    record["layer_indices"]
-                    if record["layer_indices"]
-                    else [0] * self.config.num_layers
+                    (
+                        record["layer_indices"]
+                        if record["layer_indices"]
+                        else [0] * self.config.num_layers
+                    )
                     for record in records
                 ],
                 dtype=torch.long,
@@ -615,7 +668,9 @@ class TorchPolicyAdapter:
             log_distribution = torch.log_softmax(logits, dim=-1)
             probabilities = torch.softmax(logits, dim=-1)
             selected = (
-                torch.gather(log_distribution, dim=-1, index=layer_indices.unsqueeze(-1))
+                torch.gather(
+                    log_distribution, dim=-1, index=layer_indices.unsqueeze(-1)
+                )
                 .squeeze(-1)
                 .sum(dim=-1)
             )
@@ -635,8 +690,12 @@ class TorchPolicyAdapter:
                 dtype=torch.float32,
                 device=self.device,
             )
-            distribution = Normal(outputs["learned_mean"].float(), outputs["learned_std"].float())
-            log_probs[learned_mask] += distribution.log_prob(raw_actions).sum(dim=-1)[learned_mask]
+            distribution = Normal(
+                outputs["learned_mean"].float(), outputs["learned_std"].float()
+            )
+            log_probs[learned_mask] += distribution.log_prob(raw_actions).sum(dim=-1)[
+                learned_mask
+            ]
             entropies[learned_mask] += distribution.entropy().sum(dim=-1)[learned_mask]
 
         if self.model.moe_head is not None and "moe_logits" in outputs:
@@ -648,9 +707,12 @@ class TorchPolicyAdapter:
             if moe_active.any():
                 moe_indices = torch.tensor(
                     [
-                        record["moe_indices"]
-                        if record["moe_indices"]
-                        else [self.config.default_moe_variant_index()] * self.config.moe_top_k
+                        (
+                            record["moe_indices"]
+                            if record["moe_indices"]
+                            else [self.config.default_moe_variant_index()]
+                            * self.config.moe_top_k
+                        )
                         for record in records
                     ],
                     dtype=torch.long,
@@ -660,7 +722,9 @@ class TorchPolicyAdapter:
                 log_distribution = torch.log_softmax(logits, dim=-1)
                 probabilities = torch.softmax(logits, dim=-1)
                 selected = (
-                    torch.gather(log_distribution, dim=-1, index=moe_indices.unsqueeze(-1))
+                    torch.gather(
+                        log_distribution, dim=-1, index=moe_indices.unsqueeze(-1)
+                    )
                     .squeeze(-1)
                     .sum(dim=-1)
                 )
@@ -672,9 +736,11 @@ class TorchPolicyAdapter:
         if self.model.kernel_head is not None and "kernel_logits" in outputs:
             kernel_indices = torch.tensor(
                 [
-                    int(record["kernel_index"])
-                    if record.get("kernel_index") is not None
-                    else int(self.config.kernel_default_profile)
+                    (
+                        int(record["kernel_index"])
+                        if record.get("kernel_index") is not None
+                        else int(self.config.kernel_default_profile)
+                    )
                     for record in records
                 ],
                 dtype=torch.long,
@@ -685,9 +751,9 @@ class TorchPolicyAdapter:
             probabilities = torch.softmax(logits, dim=-1)
             batch_indices = torch.arange(batch_size, device=self.device)
             log_probs += log_distribution[batch_indices, kernel_indices]
-            entropies += -(probabilities[batch_indices] * log_distribution[batch_indices]).sum(
-                dim=-1
-            )
+            entropies += -(
+                probabilities[batch_indices] * log_distribution[batch_indices]
+            ).sum(dim=-1)
 
         return log_probs, entropies, outputs["value"].float()
 
@@ -701,12 +767,16 @@ class TorchPolicyAdapter:
         logits = outputs["mode_logits"][0]
         distribution = Categorical(logits=logits)
         index = (
-            int(torch.argmax(logits).item()) if deterministic else int(distribution.sample().item())
+            int(torch.argmax(logits).item())
+            if deterministic
+            else int(distribution.sample().item())
         )
         return (
             self.supported_modes[index],
             index,
-            float(distribution.log_prob(torch.tensor(index, device=self.device)).item()),
+            float(
+                distribution.log_prob(torch.tensor(index, device=self.device)).item()
+            ),
             float(distribution.entropy().item()),
         )
 
@@ -716,7 +786,8 @@ class TorchPolicyAdapter:
                 "PyTorch is not installed in this environment."
             ) from TORCH_IMPORT_ERROR
         return {
-            name: tensor.detach().cpu().clone() for name, tensor in self.model.state_dict().items()
+            name: tensor.detach().cpu().clone()
+            for name, tensor in self.model.state_dict().items()
         }
 
     def restore(self, snapshot) -> None:

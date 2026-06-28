@@ -71,13 +71,17 @@ def merge_kernel_metrics(
         merged["latency_ms"] = float(merged["latency_ms"]) / speedup
         merged["throughput_tps"] = float(merged["throughput_tps"]) * speedup
         if "latency_ms_per_token" in merged:
-            merged["latency_ms_per_token"] = float(merged["latency_ms_per_token"]) / speedup
+            merged["latency_ms_per_token"] = (
+                float(merged["latency_ms_per_token"]) / speedup
+            )
 
     overhead = float(kernel_metrics.get("kernel_memory_overhead_mb", 0.0))
     if overhead > 0.0:
         merged["memory_mb"] = float(merged["memory_mb"]) + overhead
 
-    merged["kernel_reward_source"] = str(kernel_metrics.get("kernel_benchmark_source", "analytic"))
+    merged["kernel_reward_source"] = str(
+        kernel_metrics.get("kernel_benchmark_source", "analytic")
+    )
     return merged
 
 

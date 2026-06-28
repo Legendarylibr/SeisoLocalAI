@@ -64,7 +64,9 @@ def test_quickstart_documents_real_train_config_fields():
     model_fields = set(TrainConfig.model_fields.keys())
     undocumented = table_fields - model_fields
     assert table_fields, "expected config field table in quickstart"
-    assert not undocumented, f"quickstart table lists unknown TrainConfig fields: {undocumented}"
+    assert (
+        not undocumented
+    ), f"quickstart table lists unknown TrainConfig fields: {undocumented}"
 
 
 def test_sample_jsonl_is_valid_chat_dataset():
@@ -123,7 +125,9 @@ def test_docs_internal_markdown_links_resolve():
             try:
                 resolved.relative_to(REPO_ROOT)
             except ValueError:
-                broken.append(f"{md_path.relative_to(REPO_ROOT)} -> {target} (outside repo)")
+                broken.append(
+                    f"{md_path.relative_to(REPO_ROOT)} -> {target} (outside repo)"
+                )
                 continue
             if not resolved.exists():
                 broken.append(f"{md_path.relative_to(REPO_ROOT)} -> {target}")
@@ -153,10 +157,12 @@ def test_docs_do_not_reference_nonexistent_rl_quant_extra():
     """pyproject.toml has no [rl-quant] optional extra — docs must not claim one."""
     for rel in ("docs/compression.md", "docs/install.md"):
         text = _read(rel)
-        assert ".[rl-quant]" not in text, f"{rel} references nonexistent .[rl-quant] extra"
-        assert "`rl-quant`" not in text or "seiso rl-quant" in text or "rl_quant/" in text, (
-            f"{rel} may list rl-quant as pip extra"
-        )
+        assert (
+            ".[rl-quant]" not in text
+        ), f"{rel} references nonexistent .[rl-quant] extra"
+        assert (
+            "`rl-quant`" not in text or "seiso rl-quant" in text or "rl_quant/" in text
+        ), f"{rel} may list rl-quant as pip extra"
 
 
 def test_forge_doc_covers_settings_api():

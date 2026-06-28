@@ -14,7 +14,9 @@ from seiso.adaptive_quant.types import PromptSample
 def default_prompt_library() -> list[PromptSample]:
     return [
         PromptSample("simple_qa", "What is the capital of France?", "qa"),
-        PromptSample("short_code", "Write a Python function that reverses a list.", "code"),
+        PromptSample(
+            "short_code", "Write a Python function that reverses a list.", "code"
+        ),
         PromptSample(
             "math_reasoning",
             "Solve step by step: if a train travels 60 miles in 45 minutes, what is the average speed?",
@@ -55,7 +57,9 @@ def default_prompt_library() -> list[PromptSample]:
             "Translate the following paragraph from English to Japanese while preserving technical terminology about distributed systems and cache invalidation.",
             "translation",
         ),
-        PromptSample("low_complexity", "List three benefits of daily exercise.", "wellness"),
+        PromptSample(
+            "low_complexity", "List three benefits of daily exercise.", "wellness"
+        ),
         PromptSample(
             "very_complex",
             "Design a fault-tolerant serving stack for a multilingual assistant that must satisfy strict privacy, mixed CPU/GPU deployment, and unpredictable latency constraints. Explain tradeoffs and rollout phases.",
@@ -72,7 +76,9 @@ class PromptLibrary:
     def sample(self, rng: random.Random) -> PromptSample:
         return self.prompts[rng.randrange(len(self.prompts))]
 
-    def split_ids(self, *, rng: random.Random, train_fraction: float) -> tuple[set[str], set[str]]:
+    def split_ids(
+        self, *, rng: random.Random, train_fraction: float
+    ) -> tuple[set[str], set[str]]:
         train_fraction = max(0.0, min(1.0, float(train_fraction)))
         ids = [prompt.prompt_id for prompt in self.prompts]
         rng.shuffle(ids)
@@ -151,13 +157,17 @@ def load_prompt_library_json(path: str | Path) -> PromptLibrary:
     raw_prompts = payload.get("prompts") if isinstance(payload, dict) else payload
     if not isinstance(raw_prompts, list):
         raise TypeError("prompt JSON must be a list or an object with a 'prompts' list")
-    prompts = [_parse_prompt_item(item, index) for index, item in enumerate(raw_prompts)]
+    prompts = [
+        _parse_prompt_item(item, index) for index, item in enumerate(raw_prompts)
+    ]
     if not prompts:
         raise ValueError("prompt JSON must include at least one prompt")
     seen: set[str] = set()
     for prompt in prompts:
         if prompt.prompt_id in seen:
-            raise ValueError(f"duplicate prompt_id in prompt JSON: {prompt.prompt_id!r}")
+            raise ValueError(
+                f"duplicate prompt_id in prompt JSON: {prompt.prompt_id!r}"
+            )
         seen.add(prompt.prompt_id)
     return PromptLibrary(prompts)
 

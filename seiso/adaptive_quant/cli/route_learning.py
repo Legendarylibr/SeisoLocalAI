@@ -86,9 +86,13 @@ def main(argv: Iterable[str] | None = None) -> None:
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
-    seed_parser = sub.add_parser("seed", help="Write a default catalog with curated GGUF entries.")
+    seed_parser = sub.add_parser(
+        "seed", help="Write a default catalog with curated GGUF entries."
+    )
     seed_parser.add_argument(
-        "--force", action="store_true", help="Overwrite the catalog if it already exists."
+        "--force",
+        action="store_true",
+        help="Overwrite the catalog if it already exists.",
     )
 
     list_parser = sub.add_parser("list", help="Print the catalog.")
@@ -99,8 +103,12 @@ def main(argv: Iterable[str] | None = None) -> None:
         help="Output format. Default: table.",
     )
 
-    register_parser = sub.add_parser("register", help="Add or replace a route in the catalog.")
-    register_parser.add_argument("--route-id", required=True, help="Stable route identifier.")
+    register_parser = sub.add_parser(
+        "register", help="Add or replace a route in the catalog."
+    )
+    register_parser.add_argument(
+        "--route-id", required=True, help="Stable route identifier."
+    )
     register_parser.add_argument(
         "--repo", required=True, help="Hugging Face '<org>/<name>' repo id."
     )
@@ -142,7 +150,9 @@ def main(argv: Iterable[str] | None = None) -> None:
         default=None,
         help="Optional task domain hint (e.g. code, qa). Pass repeatedly for multiple.",
     )
-    register_parser.add_argument("--notes", default="", help="Free-text note for the catalog row.")
+    register_parser.add_argument(
+        "--notes", default="", help="Free-text note for the catalog row."
+    )
     register_parser.add_argument(
         "--replace",
         action="store_true",
@@ -150,10 +160,16 @@ def main(argv: Iterable[str] | None = None) -> None:
     )
 
     remove_parser = sub.add_parser("remove", help="Remove a route from the catalog.")
-    remove_parser.add_argument("--route-id", required=True, help="Identifier of the route to drop.")
+    remove_parser.add_argument(
+        "--route-id", required=True, help="Identifier of the route to drop."
+    )
 
-    download_parser = sub.add_parser("download", help="Fetch a route via huggingface-cli / hf.")
-    download_parser.add_argument("--route-id", required=True, help="Catalog route to download.")
+    download_parser = sub.add_parser(
+        "download", help="Fetch a route via huggingface-cli / hf."
+    )
+    download_parser.add_argument(
+        "--route-id", required=True, help="Catalog route to download."
+    )
     download_parser.add_argument(
         "--local-dir",
         default=None,
@@ -171,8 +187,12 @@ def main(argv: Iterable[str] | None = None) -> None:
         help="Print the resolved argv without spawning huggingface-cli.",
     )
 
-    train_parser = sub.add_parser("train", help="Train the route bandit and persist artifacts.")
-    add_config_file_argument(train_parser, help_suffix="Otherwise uses baseline preset defaults.")
+    train_parser = sub.add_parser(
+        "train", help="Train the route bandit and persist artifacts."
+    )
+    add_config_file_argument(
+        train_parser, help_suffix="Otherwise uses baseline preset defaults."
+    )
     add_config_override_arguments(train_parser)
     train_parser.add_argument(
         "--iterations",
@@ -271,7 +291,9 @@ def main(argv: Iterable[str] | None = None) -> None:
         help="Require every catalog route to have an existing local GGUF path before evaluation.",
     )
 
-    recommend_parser = sub.add_parser("recommend", help="Print the best route for a context.")
+    recommend_parser = sub.add_parser(
+        "recommend", help="Print the best route for a context."
+    )
     add_config_file_argument(recommend_parser)
     add_config_override_arguments(recommend_parser)
     recommend_parser.add_argument(
@@ -342,7 +364,9 @@ def _cmd_seed(catalog_path: Path, *, force: bool) -> None:
 def _cmd_list(catalog_path: Path, *, output_format: str) -> None:
     catalog = _load_catalog(catalog_path, allow_missing=True)
     if not catalog.routes:
-        print(f"(empty catalog at {catalog_path}; run 'seed' or 'register' to populate it)")
+        print(
+            f"(empty catalog at {catalog_path}; run 'seed' or 'register' to populate it)"
+        )
         return
     if output_format == "json":
         json.dump(catalog.to_dict(), sys.stdout, indent=2, sort_keys=True)
@@ -397,7 +421,10 @@ def _cmd_register(catalog_path: Path, args: argparse.Namespace) -> None:
     catalog.save(str(catalog_path))
     # Keep stdout stable for scripting (JSON / table output). Emit human-status only when interactive
     # or explicitly requested (keeps unittest/CI quiet).
-    if sys.stderr.isatty() or os.environ.get("ADAPTIVE_RL_QUANT_VERBOSE", "").strip() == "1":
+    if (
+        sys.stderr.isatty()
+        or os.environ.get("ADAPTIVE_RL_QUANT_VERBOSE", "").strip() == "1"
+    ):
         print(f"Registered route {route.route_id!r} → {catalog_path}", file=sys.stderr)
 
 
@@ -452,7 +479,9 @@ def _cmd_download(catalog_path: Path, args: argparse.Namespace) -> None:
         timeout_s=float(args.timeout),
     )
     if result.timed_out:
-        raise SystemExit(f"Download timed out after {args.timeout}s. argv={result.command}")
+        raise SystemExit(
+            f"Download timed out after {args.timeout}s. argv={result.command}"
+        )
     if not result.ok:
         sys.stderr.write(result.stderr)
         raise SystemExit(
@@ -551,7 +580,9 @@ def _cmd_evaluate_prompts(catalog_path: Path, args: argparse.Namespace) -> None:
         hardware=hardware,
         max_reward_regression=float(args.max_reward_regression),
         max_perplexity_regression=(
-            None if args.no_perplexity_regression_bound else float(args.max_perplexity_regression)
+            None
+            if args.no_perplexity_regression_bound
+            else float(args.max_perplexity_regression)
         ),
     )
     if args.output is not None:
@@ -575,7 +606,15 @@ def _cmd_evaluate_prompts(catalog_path: Path, args: argparse.Namespace) -> None:
             for rec in report["recommendations"]
         ]
         for line in md_table(
-            ["prompt_id", "hardware", "route_id", "quant", "memory_mb", "reward", "reason"],
+            [
+                "prompt_id",
+                "hardware",
+                "route_id",
+                "quant",
+                "memory_mb",
+                "reward",
+                "reason",
+            ],
             rows,
         ):
             print(line)

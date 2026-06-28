@@ -29,7 +29,9 @@ async def run_recipe(
     orchestrator: Annotated[RecipeOrchestrator, Depends(get_recipe_orchestrator)],
 ) -> dict:
     job_id = orchestrator.create_job(user_id=user_id)
-    asyncio.create_task(orchestrator.start(job_id, {**body.model_dump(), "user_id": user_id}))
+    asyncio.create_task(
+        orchestrator.start(job_id, {**body.model_dump(), "user_id": user_id})
+    )
     return {"job_id": job_id, "status": "pending"}
 
 

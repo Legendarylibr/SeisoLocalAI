@@ -65,8 +65,12 @@ def speculative_generate(
     if num_speculative_tokens < 1:
         raise ValueError("num_speculative_tokens must be >= 1")
 
-    tok = AutoTokenizer.from_pretrained(target_model, use_fast=True, trust_remote_code=False)
-    draft_tok = AutoTokenizer.from_pretrained(draft_model, use_fast=True, trust_remote_code=False)
+    tok = AutoTokenizer.from_pretrained(
+        target_model, use_fast=True, trust_remote_code=False
+    )
+    draft_tok = AutoTokenizer.from_pretrained(
+        draft_model, use_fast=True, trust_remote_code=False
+    )
     if tok.pad_token is None:
         tok.pad_token = tok.eos_token
     if draft_tok.pad_token is None:
@@ -75,7 +79,9 @@ def speculative_generate(
     if not allow_mismatched_tokenizers:
         mismatch = []
         if tok.vocab_size != draft_tok.vocab_size:
-            mismatch.append(f"vocab_size target={tok.vocab_size} draft={draft_tok.vocab_size}")
+            mismatch.append(
+                f"vocab_size target={tok.vocab_size} draft={draft_tok.vocab_size}"
+            )
         if tok.eos_token_id != draft_tok.eos_token_id:
             mismatch.append(
                 f"eos_token_id target={tok.eos_token_id} draft={draft_tok.eos_token_id}"
@@ -164,7 +170,9 @@ def speculative_generate(
         # - if mismatch: use target greedy token at mismatch position
         # - if full accept: use target greedy token after the accepted span
         pos = prefix_len + accept - 1 if accept < k else prefix_len + k - 1
-        next_id = torch.argmax(logits[:, pos, :], dim=-1, keepdim=True).to(target_device)
+        next_id = torch.argmax(logits[:, pos, :], dim=-1, keepdim=True).to(
+            target_device
+        )
         input_ids_t = torch.cat([input_ids_t, next_id], dim=1)
         input_ids_d = input_ids_t.to(draft_device)
         tokens_generated += 1

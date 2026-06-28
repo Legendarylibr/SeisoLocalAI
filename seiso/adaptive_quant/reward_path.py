@@ -69,7 +69,9 @@ class RewardPathTracker:
         stats.recent.append(float(reward))
         self._reward_path.append((prompt_id, float(reward)))
         if domain:
-            stats_domain = self._by_prompt.setdefault(f"domain:{domain}", _PromptStats())
+            stats_domain = self._by_prompt.setdefault(
+                f"domain:{domain}", _PromptStats()
+            )
             stats_domain.count += 1
             stats_domain.total_reward += float(reward)
             stats_domain.recent.append(float(reward))
@@ -89,9 +91,13 @@ class RewardPathTracker:
 
         explore_fraction = max(0.0, min(1.0, float(explore_fraction)))
         if rng.random() < explore_fraction:
-            counts = [self._by_prompt.get(p.prompt_id, _PromptStats()).count for p in prompts]
+            counts = [
+                self._by_prompt.get(p.prompt_id, _PromptStats()).count for p in prompts
+            ]
             min_count = min(counts)
-            candidates = [p for p, c in zip(prompts, counts, strict=True) if c == min_count]
+            candidates = [
+                p for p, c in zip(prompts, counts, strict=True) if c == min_count
+            ]
             return rng.choice(candidates)
 
         def score(prompt: PromptSample) -> float:
@@ -120,7 +126,8 @@ class RewardPathTracker:
         target.parent.mkdir(parents=True, exist_ok=True)
         payload = {
             "prompt_stats": {
-                prompt_id: stats.to_dict() for prompt_id, stats in self._by_prompt.items()
+                prompt_id: stats.to_dict()
+                for prompt_id, stats in self._by_prompt.items()
             },
             "reward_path": self.reward_path_tail(limit=256),
         }

@@ -127,7 +127,9 @@ def test_precheck_repo_owned_by_user_warns(mock_api_cls):
     info.author = "alice"
     api.repo_info.return_value = info
 
-    result = precheck_hub_export(repo_id="alice/existing", token="hf_test", metadata=_meta())
+    result = precheck_hub_export(
+        repo_id="alice/existing", token="hf_test", metadata=_meta()
+    )
     assert result.ok
     assert result.repo_owned_by_user
     assert any("already exists" in w for w in result.warnings)
@@ -268,12 +270,16 @@ def test_export_skips_hub_precheck_when_disabled(mock_merge, mock_push, tmp_path
 @patch("seiso.export.formats._push_hub")
 @patch("seiso.export.formats.precheck_hub_export")
 @patch("seiso.export.formats.merge_lora_checkpoint")
-def test_export_runs_hub_precheck_first(mock_merge, mock_precheck, mock_push, tmp_path: Path):
+def test_export_runs_hub_precheck_first(
+    mock_merge, mock_precheck, mock_push, tmp_path: Path
+):
     sandbox = tmp_path / "data"
     ckpt = sandbox / "checkpoints" / "run1"
     ckpt.mkdir(parents=True)
     mock_merge.side_effect = lambda c, d, log: d.mkdir(parents=True, exist_ok=True)
-    mock_precheck.return_value = HubPrecheckResult(repo_id="alice/model", ok=True, token_valid=True)
+    mock_precheck.return_value = HubPrecheckResult(
+        repo_id="alice/model", ok=True, token_valid=True
+    )
 
     out = sandbox / "exports" / "job1"
     export_checkpoint(
@@ -293,7 +299,9 @@ def test_export_runs_hub_precheck_first(mock_merge, mock_precheck, mock_push, tm
 
 @patch("seiso.export.formats.HfApi")
 @patch("seiso.models.hf_env.configure_hf_hub_cache")
-def test_push_hub_uses_large_folder_for_big_uploads(mock_configure, mock_api_cls, tmp_path: Path):
+def test_push_hub_uses_large_folder_for_big_uploads(
+    mock_configure, mock_api_cls, tmp_path: Path
+):
     from seiso.export.formats import _push_hub
 
     folder = tmp_path / "gguf"

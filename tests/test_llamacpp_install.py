@@ -57,7 +57,9 @@ def test_ensure_skips_install_when_cuda_capable(monkeypatch):
 
     monkeypatch.setattr(llamacpp_install, "nvidia_hardware_visible", lambda: True)
     monkeypatch.setattr(llamacpp_install, "llamacpp_import_ok", lambda: (True, None))
-    monkeypatch.setattr(llamacpp_install, "llamacpp_gpu_offload_supported", lambda: True)
+    monkeypatch.setattr(
+        llamacpp_install, "llamacpp_gpu_offload_supported", lambda: True
+    )
 
     def fail_install(**kwargs):
         raise AssertionError("should not install")
@@ -94,8 +96,12 @@ def test_nvidia_llamacpp_stack_integration(monkeypatch):
     ]
 
     monkeypatch.setattr("seiso.inference.model_pool._cuda_available", lambda: False)
-    monkeypatch.setattr("seiso.inference.model_pool._nvidia_hardware_visible", lambda: True)
-    monkeypatch.setattr("seiso.inference.model_pool._llama_gpu_offload_ok", lambda: True)
+    monkeypatch.setattr(
+        "seiso.inference.model_pool._nvidia_hardware_visible", lambda: True
+    )
+    monkeypatch.setattr(
+        "seiso.inference.model_pool._llama_gpu_offload_ok", lambda: True
+    )
     monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 16384)
     monkeypatch.delenv("SEISO_LLAMA_GPU_LAYERS", raising=False)
     assert llama_load_kwargs(4096)["n_gpu_layers"] == -1
@@ -127,5 +133,7 @@ def test_nvidia_llamacpp_stack_integration(monkeypatch):
         },
     )
     monkeypatch.delenv("SEISO_LLAMA_GPU_LAYERS", raising=False)
-    apply_platform_memory_profile(profile={"backend": "torch", "gpus": fake_gpus, "ram_gb": 32})
+    apply_platform_memory_profile(
+        profile={"backend": "torch", "gpus": fake_gpus, "ram_gb": 32}
+    )
     assert os.environ.get("SEISO_LLAMA_GPU_LAYERS") == "-1"

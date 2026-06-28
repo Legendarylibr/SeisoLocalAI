@@ -39,7 +39,9 @@ class KnowledgeOrchestrator(Orchestrator):
     async def _ingest(self, job_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         user_id = payload["user_id"]
         kb_id = payload["knowledge_base_id"]
-        source = assert_ingest_source(self.sandbox_root, user_id, payload["source_path"])
+        source = assert_ingest_source(
+            self.sandbox_root, user_id, payload["source_path"]
+        )
         size = source.stat().st_size
         if size > self.MAX_INGEST_BYTES:
             raise ValueError(
@@ -53,14 +55,20 @@ class KnowledgeOrchestrator(Orchestrator):
         chunks = self._chunk(text)
         self._emit_log(job_id, f"Ingested {source.name}: {len(chunks)} chunks")
         audit_event(
-            "kb_ingest", user_id=user_id, kb_id=kb_id, source=str(source.name), chunks=len(chunks)
+            "kb_ingest",
+            user_id=user_id,
+            kb_id=kb_id,
+            source=str(source.name),
+            chunks=len(chunks),
         )
 
         index_path = kb_dir / "index.jsonl"
         with index_path.open("a") as f:
             for i, chunk in enumerate(chunks):
                 record = {
-                    "id": hashlib.sha256(f"{kb_id}:{i}:{chunk[:32]}".encode()).hexdigest()[:16],
+                    "id": hashlib.sha256(
+                        f"{kb_id}:{i}:{chunk[:32]}".encode()
+                    ).hexdigest()[:16],
                     "text": chunk,
                     "source": str(source.name),
                     "source_path": str(source),
@@ -102,7 +110,9 @@ class KnowledgeOrchestrator(Orchestrator):
             query=query,
             top_k=top_k,
         )
-        results = [{**c, "text": wrap_tool_result(f"kb:{kb_id}", c["text"])} for c in chunks]
+        results = [
+            {**c, "text": wrap_tool_result(f"kb:{kb_id}", c["text"])} for c in chunks
+        ]
         self._emit_log(job_id, f"Retrieved {len(results)} chunks for query")
         return {"results": results}
 

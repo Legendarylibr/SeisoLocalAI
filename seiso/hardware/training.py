@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from seiso.hardware.tiers import TIER_LABELS, HardwareTier, classify_tier, vram_headroom_mb
+from seiso.hardware.tiers import (
+    TIER_LABELS,
+    HardwareTier,
+    classify_tier,
+    vram_headroom_mb,
+)
 from seiso.inference.backends import InferenceBackend
 from seiso.models.loader import Backend
 
@@ -48,7 +53,9 @@ def training_defaults(profile: dict[str, Any]) -> dict[str, Any]:
         batch, accum, max_seq, max_params = 1, 16, 1024, "1B"
 
     quant = caps["recommended_quant"]
-    note = f"Tuned for {TIER_LABELS[tier]} ({ram:.0f} GB RAM, ~{headroom // 1024} GB free)"
+    note = (
+        f"Tuned for {TIER_LABELS[tier]} ({ram:.0f} GB RAM, ~{headroom // 1024} GB free)"
+    )
     if not caps["supports_qlora"]:
         note += " — use 16-bit LoRA on macOS (no bitsandbytes)"
     if caps["fused_kernels_available"]:

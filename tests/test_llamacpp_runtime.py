@@ -18,9 +18,18 @@ def test_ensure_llamacpp_runtime_skips_install_when_present():
     from forge.services.llamacpp_runtime import ensure_llamacpp_runtime
 
     with (
-        patch("forge.services.llamacpp_runtime.llamacpp_import_ok", return_value=(True, None)),
-        patch("forge.services.llamacpp_runtime.nvidia_hardware_visible", return_value=False),
-        patch("forge.services.llamacpp_runtime.llamacpp_gpu_offload_supported", return_value=False),
+        patch(
+            "forge.services.llamacpp_runtime.llamacpp_import_ok",
+            return_value=(True, None),
+        ),
+        patch(
+            "forge.services.llamacpp_runtime.nvidia_hardware_visible",
+            return_value=False,
+        ),
+        patch(
+            "forge.services.llamacpp_runtime.llamacpp_gpu_offload_supported",
+            return_value=False,
+        ),
         patch(
             "forge.services.llamacpp_runtime.ensure_llamacpp_installed",
             side_effect=AssertionError("should not install"),
@@ -35,9 +44,17 @@ def test_ensure_llamacpp_runtime_delegates_for_cpu_wheel_on_nvidia():
     from forge.services.llamacpp_runtime import ensure_llamacpp_runtime
 
     with (
-        patch("forge.services.llamacpp_runtime.llamacpp_import_ok", return_value=(True, None)),
-        patch("forge.services.llamacpp_runtime.nvidia_hardware_visible", return_value=True),
-        patch("forge.services.llamacpp_runtime.llamacpp_gpu_offload_supported", return_value=False),
+        patch(
+            "forge.services.llamacpp_runtime.llamacpp_import_ok",
+            return_value=(True, None),
+        ),
+        patch(
+            "forge.services.llamacpp_runtime.nvidia_hardware_visible", return_value=True
+        ),
+        patch(
+            "forge.services.llamacpp_runtime.llamacpp_gpu_offload_supported",
+            return_value=False,
+        ),
         patch(
             "forge.services.llamacpp_runtime.ensure_llamacpp_installed",
             return_value={
@@ -64,9 +81,13 @@ def test_ensure_llamacpp_runtime_installs_when_missing(monkeypatch):
 
     def fake_import():
         calls["install"] += 1
-        return calls["install"] > 1, None if calls["install"] > 1 else "ModuleNotFoundError: x"
+        return calls["install"] > 1, (
+            None if calls["install"] > 1 else "ModuleNotFoundError: x"
+        )
 
-    monkeypatch.setattr("seiso.inference.llamacpp_install.llamacpp_import_ok", fake_import)
+    monkeypatch.setattr(
+        "seiso.inference.llamacpp_install.llamacpp_import_ok", fake_import
+    )
     monkeypatch.setattr(
         "seiso.inference.llamacpp_install.pip_install_llamacpp",
         lambda **kwargs: True,

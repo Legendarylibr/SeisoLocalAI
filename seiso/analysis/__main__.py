@@ -21,7 +21,9 @@ def main() -> None:
         raise SystemExit(0)
     command = sys.argv[1]
     if command not in CLI_COMMANDS:
-        raise SystemExit(f"Unknown analysis command: {command!r}\n\n{_usage(CLI_COMMANDS)}")
+        raise SystemExit(
+            f"Unknown analysis command: {command!r}\n\n{_usage(CLI_COMMANDS)}"
+        )
     sys.argv = [sys.argv[0], *sys.argv[2:]]
     run_cli(command)
 

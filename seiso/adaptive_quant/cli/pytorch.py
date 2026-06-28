@@ -51,7 +51,9 @@ def _preset_map() -> dict[str, _PytorchPreset]:
 
 
 def main(argv: Iterable[str] | None = None) -> None:
-    from seiso.adaptive_quant.nvidia_secure_boundary import enforce_nvidia_secure_boundary
+    from seiso.adaptive_quant.nvidia_secure_boundary import (
+        enforce_nvidia_secure_boundary,
+    )
 
     enforce_nvidia_secure_boundary(context="pytorch-cli")
     presets = _preset_map()

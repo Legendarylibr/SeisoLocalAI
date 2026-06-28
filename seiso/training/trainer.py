@@ -113,10 +113,14 @@ class SeisoTrainer:
                 f"(format={analysis['resolved_format']}, domain={analysis['domain']})"
             )
         except Exception as exc:
-            raise ValueError(f"Dataset cannot be normalized for training: {exc}") from exc
+            raise ValueError(
+                f"Dataset cannot be normalized for training: {exc}"
+            ) from exc
 
         layout = detect_training_layout()
-        multi_gpu = bool(cfg.multi_gpu or cfg.extra.get("multi_gpu", False)) and layout.use_ddp
+        multi_gpu = (
+            bool(cfg.multi_gpu or cfg.extra.get("multi_gpu", False)) and layout.use_ddp
+        )
         use_triton = cfg.use_triton
         use_fused_ce = cfg.use_fused_ce
         use_fused_lora = cfg.use_fused_lora
@@ -172,8 +176,13 @@ class SeisoTrainer:
                     skip_qkv=use_fused_lora_qkv,
                 )
                 self._kernel_meta.update(lora_meta)
-        elif cfg.method == TrainMethod.FULL and cfg.quant in (QuantMode.INT4, QuantMode.INT8):
-            logger.warning("Full fine-tune with quantization — consider LoRA for memory efficiency")
+        elif cfg.method == TrainMethod.FULL and cfg.quant in (
+            QuantMode.INT4,
+            QuantMode.INT8,
+        ):
+            logger.warning(
+                "Full fine-tune with quantization — consider LoRA for memory efficiency"
+            )
 
         SeisoModel.for_training(model)
 
@@ -193,7 +202,11 @@ class SeisoTrainer:
                 f"samples kept (format={preprocess_stats['resolved_format']})"
             )
         max_samples = cfg.extra.get("max_samples")
-        if isinstance(max_samples, int) and max_samples > 0 and len(raw_ds) > max_samples:
+        if (
+            isinstance(max_samples, int)
+            and max_samples > 0
+            and len(raw_ds) > max_samples
+        ):
             raw_ds = raw_ds.select(range(max_samples))
             logger.info("Limited dataset to %d samples (max_samples)", max_samples)
         eval_n = 0
@@ -264,7 +277,9 @@ class SeisoTrainer:
                 cfg.pad_to_multiple_of,
                 cuda_available=torch.cuda.is_available(),
             )
-            data_collator = self._make_collator(tokenizer, pad_to_multiple_of=pad_multiple)
+            data_collator = self._make_collator(
+                tokenizer, pad_to_multiple_of=pad_multiple
+            )
 
         from seiso.training.metrics import build_metrics_callback
 
@@ -301,7 +316,9 @@ class SeisoTrainer:
         )
 
         if cfg.resume_from:
-            self._train_with_oom_recovery(trainer, resume_from_checkpoint=str(cfg.resume_from))
+            self._train_with_oom_recovery(
+                trainer, resume_from_checkpoint=str(cfg.resume_from)
+            )
         else:
             self._train_with_oom_recovery(trainer)
 
@@ -311,7 +328,10 @@ class SeisoTrainer:
             logger.info("Non-main rank finished training (no checkpoint write)")
             return cfg.output_dir
 
-        out = cfg.output_dir / f"checkpoint-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}"
+        out = (
+            cfg.output_dir
+            / f"checkpoint-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}"
+        )
         trainer.save_model(str(out))
         tokenizer.save_pretrained(str(out))
         if cfg.method == TrainMethod.LORA:
@@ -350,7 +370,9 @@ class SeisoTrainer:
                 cfg = self.config
                 trainer.args.per_device_train_batch_size = cfg.batch_size
                 trainer.args.per_device_eval_batch_size = cfg.batch_size
-                trainer.args.gradient_accumulation_steps = cfg.gradient_accumulation_steps
+                trainer.args.gradient_accumulation_steps = (
+                    cfg.gradient_accumulation_steps
+                )
                 resume_from_checkpoint = None
 
     def _resolve_load_model_id(self) -> str:
@@ -368,7 +390,9 @@ class SeisoTrainer:
             snapshot_has_trainable_weights,
         )
 
-        if Path(model_ref).exists() and not snapshot_has_trainable_weights(Path(model_ref)):
+        if Path(model_ref).exists() and not snapshot_has_trainable_weights(
+            Path(model_ref)
+        ):
             raise ValueError(GGUF_ONLY_REPO_MESSAGE)
         ensure_load_fits(model_ref, mode="train")
 
@@ -406,9 +430,13 @@ class SeisoTrainer:
                 peek=True,
             )
             load_dtype = (
-                None if native_hub_quant else ("float16" if cfg.quant == QuantMode.INT16 else None)
+                None
+                if native_hub_quant
+                else ("float16" if cfg.quant == QuantMode.INT16 else None)
             )
-            use_flash = not native_hub_quant and bool(cfg.extra.get("use_flash_attention", True))
+            use_flash = not native_hub_quant and bool(
+                cfg.extra.get("use_flash_attention", True)
+            )
             self._loaded = SeisoModel.from_pretrained(
                 model_ref,
                 max_seq_length=cfg.max_seq_length,
@@ -425,15 +453,22 @@ class SeisoTrainer:
             raise ValueError(msg) from exc
         model, tokenizer = self._loaded.model, self._loaded.tokenizer
 
-        if cfg.method == TrainMethod.LORA and cfg.quant in (QuantMode.INT4, QuantMode.INT8):
+        if cfg.method == TrainMethod.LORA and cfg.quant in (
+            QuantMode.INT4,
+            QuantMode.INT8,
+        ):
             try:
                 from peft import prepare_model_for_kbit_training
 
                 # Let TrainingArguments handle gradient checkpointing via
                 # gradient_checkpointing_kwargs (use_reentrant=False) to avoid
                 # double-enablement and reentrant overhead.
-                model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=False)
-                if cfg.gradient_checkpointing and hasattr(model, "gradient_checkpointing_enable"):
+                model = prepare_model_for_kbit_training(
+                    model, use_gradient_checkpointing=False
+                )
+                if cfg.gradient_checkpointing and hasattr(
+                    model, "gradient_checkpointing_enable"
+                ):
                     model.gradient_checkpointing_enable(
                         gradient_checkpointing_kwargs={"use_reentrant": False}
                     )
@@ -500,7 +535,11 @@ class SeisoTrainer:
             bf16_supported=bf16_supported,
             quant=cfg.quant.value,
         )
-        if not cuda_available and hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        if (
+            not cuda_available
+            and hasattr(torch.backends, "mps")
+            and torch.backends.mps.is_available()
+        ):
             use_fp16 = cfg.quant == QuantMode.INT16
 
         optim = resolve_optimizer(cfg.quant.value, use_cpu=use_cpu)
@@ -558,7 +597,11 @@ class SeisoTrainer:
             "dataloader_persistent_workers": persistent_workers,
             "gradient_checkpointing": cfg.gradient_checkpointing,
         }
-        if eval_ds is not None and cfg.early_stopping and "metric_for_best_model" in _ta_fields:
+        if (
+            eval_ds is not None
+            and cfg.early_stopping
+            and "metric_for_best_model" in _ta_fields
+        ):
             base["metric_for_best_model"] = cfg.metric_for_best_model
             base["greater_is_better"] = cfg.metric_for_best_model != "eval_loss"
         # save_safetensors was removed in transformers 5.x — only add when available
@@ -643,7 +686,9 @@ class SeisoTrainer:
                 examples.append(InputExample(texts=[anchor, positive]))
 
         if not examples:
-            raise ValueError("Embedding dataset needs anchor/query + positive/answer columns")
+            raise ValueError(
+                "Embedding dataset needs anchor/query + positive/answer columns"
+            )
 
         model = SentenceTransformer(cfg.model_id)
         g = torch.Generator()
@@ -665,7 +710,10 @@ class SeisoTrainer:
             loader_kwargs["prefetch_factor"] = prefetch_factor
         loader = DataLoader(examples, **loader_kwargs)
         loss = losses.MultipleNegativesRankingLoss(model)
-        out = cfg.output_dir / f"embed-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}"
+        out = (
+            cfg.output_dir
+            / f"embed-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}"
+        )
         model.fit(
             train_objectives=[(loader, loss)],
             epochs=cfg.epochs,
@@ -699,7 +747,9 @@ class SeisoTrainer:
             return
 
         base_path = self._resolve_load_model_id()
-        original_id = str(self.config.extra.get("original_model_id") or self.config.model_id)
+        original_id = str(
+            self.config.extra.get("original_model_id") or self.config.model_id
+        )
         adapter_cfg["base_model_name_or_path"] = base_path
         adapter_cfg["seiso_original_base_model"] = original_id
         adapter_cfg["seiso_quant_mode"] = self.config.quant.value

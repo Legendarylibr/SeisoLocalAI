@@ -70,7 +70,9 @@ def _normalize_role(role: str) -> str:
     return "user"
 
 
-def normalize_sample(sample: dict[str, Any], fmt: DatasetFormat) -> dict[str, Any] | None:
+def normalize_sample(
+    sample: dict[str, Any], fmt: DatasetFormat
+) -> dict[str, Any] | None:
     """Map a raw row to a canonical schema, or None if it has no trainable content."""
     if fmt == DatasetFormat.TEXT:
         text = _strip_text(sample.get("text") or sample.get("content"))
@@ -116,19 +118,32 @@ def normalize_sample(sample: dict[str, Any], fmt: DatasetFormat) -> dict[str, An
             if not content:
                 continue
             role = _normalize_role(str(turn.get("from") or turn.get("role") or "user"))
-            from_role = "human" if role == "user" else "gpt" if role == "assistant" else role
+            from_role = (
+                "human" if role == "user" else "gpt" if role == "assistant" else role
+            )
             turns.append({"from": from_role, "value": content})
         if not turns or not any(t["from"] == "gpt" for t in turns):
             return None
         return {"conversations": turns}
 
     if fmt == DatasetFormat.PREFERENCE:
-        chosen = sample.get("chosen") or sample.get("chosen_response") or sample.get("accepted")
+        chosen = (
+            sample.get("chosen")
+            or sample.get("chosen_response")
+            or sample.get("accepted")
+        )
         messages = parse_human_assistant_dialog(chosen)
         if not messages:
             prompt = _strip_text(sample.get("prompt"))
-            response = _strip_text(sample.get("chosen") or sample.get("chosen_response"))
-            if prompt and response and "Human:" not in response and "Assistant:" not in response:
+            response = _strip_text(
+                sample.get("chosen") or sample.get("chosen_response")
+            )
+            if (
+                prompt
+                and response
+                and "Human:" not in response
+                and "Assistant:" not in response
+            ):
                 messages = [
                     {"role": "user", "content": prompt},
                     {"role": "assistant", "content": response},
@@ -144,7 +159,10 @@ def normalize_sample(sample: dict[str, Any], fmt: DatasetFormat) -> dict[str, An
             if not content:
                 continue
             messages.append(
-                {"role": _normalize_role(str(turn.get("role") or "user")), "content": content}
+                {
+                    "role": _normalize_role(str(turn.get("role") or "user")),
+                    "content": content,
+                }
             )
         if not messages or not any(m["role"] == "assistant" for m in messages):
             return None

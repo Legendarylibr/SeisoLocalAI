@@ -425,7 +425,9 @@ def _validate_code(code: str) -> str | None:
     return None
 
 
-def execute_code(code: str, sandbox_root: str | None = None, user_id: str | None = None) -> str:
+def execute_code(
+    code: str, sandbox_root: str | None = None, user_id: str | None = None
+) -> str:
     """Run user code in isolated subprocess with AST pre-check."""
     err = _validate_code(code)
     if err:
@@ -442,8 +444,7 @@ def execute_code(code: str, sandbox_root: str | None = None, user_id: str | None
         base = root / "sandbox"
     base.mkdir(parents=True, exist_ok=True)
 
-    wrapped = textwrap.dedent(
-        f"""
+    wrapped = textwrap.dedent(f"""
         import json, sys, math, re, statistics, datetime, collections, itertools
         _SAFE_BUILTINS = {{
             "print": print, "len": len, "range": range, "enumerate": enumerate,
@@ -464,10 +465,11 @@ def execute_code(code: str, sandbox_root: str | None = None, user_id: str | None
         else:
             out = "\\n".join(_stdout)[:{_MAX_OUTPUT}]
             print(out or json.dumps({{"status": "ok"}}))
-        """
-    )
+        """)
 
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".py", dir=base, delete=False) as f:
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".py", dir=base, delete=False
+    ) as f:
         f.write(wrapped)
         script = Path(f.name)
     with contextlib.suppress(OSError):

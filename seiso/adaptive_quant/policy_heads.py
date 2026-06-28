@@ -69,7 +69,9 @@ class CategoricalHead:
 
 
 class GaussianHead:
-    def __init__(self, input_dim: int, output_dim: int, rng: random.Random, stddev: float) -> None:
+    def __init__(
+        self, input_dim: int, output_dim: int, rng: random.Random, stddev: float
+    ) -> None:
         self.weights = _random_matrix(output_dim, input_dim, rng)
         self.bias = [0.0] * output_dim
         self.stddev = stddev
@@ -92,7 +94,8 @@ class GaussianHead:
             raw_samples = list(raw_means)
         else:
             raw_samples = [
-                gaussian_sample(mean_value, self.stddev, rng) for mean_value in raw_means
+                gaussian_sample(mean_value, self.stddev, rng)
+                for mean_value in raw_means
             ]
         mapped = [
             _map_to_bounds(stable_sigmoid(sample), lower, upper)
@@ -110,14 +113,18 @@ class GaussianHead:
     ) -> None:
         variance = max(self.stddev * self.stddev, 1e-6)
         for row_index, row in enumerate(self.weights):
-            coefficient = ((raw_samples[row_index] - raw_means[row_index]) / variance) * advantage
+            coefficient = (
+                (raw_samples[row_index] - raw_means[row_index]) / variance
+            ) * advantage
             for column_index, value in enumerate(state_vector):
                 row[column_index] += learning_rate * coefficient * value
             self.bias[row_index] += learning_rate * coefficient
 
 
 class ValueHead:
-    def __init__(self, input_dim: int, rng: random.Random, *, zero_init: bool = False) -> None:
+    def __init__(
+        self, input_dim: int, rng: random.Random, *, zero_init: bool = False
+    ) -> None:
         self.weights = (
             [0.0 for _ in range(input_dim)]
             if zero_init
@@ -128,7 +135,9 @@ class ValueHead:
     def predict(self, state_vector: list[float]) -> float:
         return dot(self.weights, state_vector) + self.bias
 
-    def update(self, state_vector: list[float], target: float, learning_rate: float) -> None:
+    def update(
+        self, state_vector: list[float], target: float, learning_rate: float
+    ) -> None:
         prediction = self.predict(state_vector)
         error = target - prediction
         for index, value in enumerate(state_vector):
@@ -169,7 +178,9 @@ def _categorical_head_shape(payload: object, *, label: str) -> tuple[int, int]:
     if not isinstance(weights, list) or not isinstance(bias, list):
         raise TypeError(f"{label} payload must contain list weights and bias")
     if len(weights) != len(bias):
-        raise ValueError(f"{label} payload has {len(weights)} rows but {len(bias)} bias values")
+        raise ValueError(
+            f"{label} payload has {len(weights)} rows but {len(bias)} bias values"
+        )
     row_width: int | None = None
     for index, row in enumerate(weights):
         if not isinstance(row, list):
@@ -233,11 +244,15 @@ def _restore_categorical_head(head: CategoricalHead, payload: object) -> None:
     if not isinstance(payload, dict):
         raise TypeError("categorical head payload must be a dict")
     head.weights = [
-        [_finite_float(value, label=f"weights[{i}][{j}]") for j, value in enumerate(row)]
+        [
+            _finite_float(value, label=f"weights[{i}][{j}]")
+            for j, value in enumerate(row)
+        ]
         for i, row in enumerate(payload["weights"])
     ]
     head.bias = [
-        _finite_float(value, label=f"bias[{i}]") for i, value in enumerate(payload["bias"])
+        _finite_float(value, label=f"bias[{i}]")
+        for i, value in enumerate(payload["bias"])
     ]
 
 
@@ -289,11 +304,15 @@ def _gaussian_head_from_payload(payload: object) -> GaussianHead:
         raise ValueError(f"gaussian.stddev must be >= 0, got {stddev!r}")
     head = GaussianHead(input_dim, output_dim, random.Random(0), stddev)
     head.weights = [
-        [_finite_float(value, label=f"gaussian.weights[{i}][{j}]") for j, value in enumerate(row)]
+        [
+            _finite_float(value, label=f"gaussian.weights[{i}][{j}]")
+            for j, value in enumerate(row)
+        ]
         for i, row in enumerate(payload["weights"])
     ]
     head.bias = [
-        _finite_float(value, label=f"gaussian.bias[{i}]") for i, value in enumerate(payload["bias"])
+        _finite_float(value, label=f"gaussian.bias[{i}]")
+        for i, value in enumerate(payload["bias"])
     ]
     return head
 
@@ -305,7 +324,9 @@ def _serialize_value_head(head: ValueHead) -> dict[str, object]:
     }
 
 
-def _validate_value_head_payload(label: str, payload: object, *, expected_input_dim: int) -> None:
+def _validate_value_head_payload(
+    label: str, payload: object, *, expected_input_dim: int
+) -> None:
     if not isinstance(payload, dict):
         raise TypeError(f"{label} payload must be a dict")
     weights = payload.get("weights")

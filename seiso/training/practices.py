@@ -20,7 +20,9 @@ def default_dataset_num_proc(explicit: int | None = None) -> int | None:
     return min(4, max(1, cpu // 2))
 
 
-def default_pad_to_multiple_of(explicit: int | None, *, cuda_available: bool) -> int | None:
+def default_pad_to_multiple_of(
+    explicit: int | None, *, cuda_available: bool
+) -> int | None:
     """Pad sequence lengths for tensor-core efficiency (8 on CUDA, unpadded on CPU)."""
     if explicit is not None:
         return explicit if explicit > 0 else None
@@ -81,7 +83,9 @@ def resolve_dataloader_settings(
     return workers, persistent, prefetch
 
 
-def learning_rate_for_method(method: TrainMethod, *, explicit: float | None = None) -> float:
+def learning_rate_for_method(
+    method: TrainMethod, *, explicit: float | None = None
+) -> float:
     """Method-appropriate LR without model-specific tuning."""
     if explicit is not None and explicit > 0:
         return explicit
@@ -92,7 +96,9 @@ def learning_rate_for_method(method: TrainMethod, *, explicit: float | None = No
     return 2e-4
 
 
-def warmup_ratio_for_corpus(sample_count: int, *, explicit: float | None = None) -> float:
+def warmup_ratio_for_corpus(
+    sample_count: int, *, explicit: float | None = None
+) -> float:
     """Warmup fraction scaled to corpus size (modern linear warmup practice)."""
     if explicit is not None:
         return explicit
@@ -123,7 +129,9 @@ def resolve_optimizer(quant: str, *, use_cpu: bool) -> str:
     return "adamw_torch_fused"
 
 
-def resolve_compute_dtype(*, cuda_available: bool, bf16_supported: bool, quant: str) -> tuple[bool, bool]:
+def resolve_compute_dtype(
+    *, cuda_available: bool, bf16_supported: bool, quant: str
+) -> tuple[bool, bool]:
     """Return (use_bf16, use_fp16) for TrainingArguments."""
     if not cuda_available:
         return False, False
@@ -148,7 +156,9 @@ def sft_modern_kwargs(
     if num_proc:
         kwargs["dataset_num_proc"] = num_proc
 
-    pad = default_pad_to_multiple_of(config.pad_to_multiple_of, cuda_available=cuda_available)
+    pad = default_pad_to_multiple_of(
+        config.pad_to_multiple_of, cuda_available=cuda_available
+    )
     if pad:
         kwargs["pad_to_multiple_of"] = pad
 
@@ -170,7 +180,9 @@ def sft_modern_kwargs(
     return kwargs
 
 
-def training_args_modern_extras(config: TrainConfig, *, eval_enabled: bool) -> dict[str, Any]:
+def training_args_modern_extras(
+    config: TrainConfig, *, eval_enabled: bool
+) -> dict[str, Any]:
     """Extra TrainingArguments fields supported on recent transformers releases."""
     extras: dict[str, Any] = {}
     if eval_enabled:

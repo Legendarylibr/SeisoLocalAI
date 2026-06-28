@@ -44,7 +44,9 @@ _TOP_LEVEL_FIELD_NAMES = frozenset(
     }
 )
 
-_ALL_FLAT_CONFIG_KEYS = _TOP_LEVEL_FIELD_NAMES | set(FLAT_FIELD_MAP) | {_REWARD_WEIGHTS_KEY}
+_ALL_FLAT_CONFIG_KEYS = (
+    _TOP_LEVEL_FIELD_NAMES | set(FLAT_FIELD_MAP) | {_REWARD_WEIGHTS_KEY}
+)
 
 
 def all_flat_config_keys() -> frozenset[str]:
@@ -76,7 +78,11 @@ def apply_flat_kwargs(config: object, kwargs: Mapping[str, Any]) -> None:
     for key, value in kwargs.items():
         if key in NESTED_SECTION_KEYS:
             _merge_section(config, key, value)
-        elif key in FLAT_FIELD_MAP or key in _TOP_LEVEL_FIELD_NAMES or key == _REWARD_WEIGHTS_KEY:
+        elif (
+            key in FLAT_FIELD_MAP
+            or key in _TOP_LEVEL_FIELD_NAMES
+            or key == _REWARD_WEIGHTS_KEY
+        ):
             set_flat_field(config, key, value)
         else:
             raise TypeError(f"Unexpected FrameworkConfig keyword argument: {key!r}")

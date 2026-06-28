@@ -8,8 +8,14 @@ from pathlib import Path
 from typing import Any
 
 from seiso.adaptive_quant.configuration import FrameworkConfig, RewardWeights
-from seiso.adaptive_quant.configuration.flat_access import all_flat_config_keys, apply_flat_kwargs
-from seiso.adaptive_quant.configuration.sections import NESTED_SECTION_KEYS, SECTION_TYPES
+from seiso.adaptive_quant.configuration.flat_access import (
+    all_flat_config_keys,
+    apply_flat_kwargs,
+)
+from seiso.adaptive_quant.configuration.sections import (
+    NESTED_SECTION_KEYS,
+    SECTION_TYPES,
+)
 from seiso.adaptive_quant.logging_utils import (
     enforce_local_read_limit,
     enforce_safe_parsed_json,
@@ -89,7 +95,9 @@ def config_from_dict(
     d = dict(data)
     rw_raw = d.pop("reward_weights", None)
     nested_raw = {
-        k: d.pop(k) for k in list(d) if k in NESTED_SECTION_KEYS and k != "reward_weights"
+        k: d.pop(k)
+        for k in list(d)
+        if k in NESTED_SECTION_KEYS and k != "reward_weights"
     }
 
     if strict:
@@ -149,7 +157,9 @@ def _validate_nested_sections_strict(nested_raw: Mapping[str, Any]) -> None:
         if isinstance(section_value, section_type):
             continue
         if not isinstance(section_value, Mapping):
-            raise TypeError(f"{section_key} must be a mapping or {section_type.__name__}")
+            raise TypeError(
+                f"{section_key} must be a mapping or {section_type.__name__}"
+            )
         allowed = {f.name for f in fields(section_type)}
         bad = set(section_value) - allowed
         if bad:
@@ -174,7 +184,9 @@ def load_config(path: str | Path, *, strict: bool = True) -> FrameworkConfig:
         raise FileNotFoundError(f"Config file not found: {raw_path}")
     data = _parse_config_file(raw_path)
     if not isinstance(data, dict):
-        raise TypeError(f"Config root must be an object/dict, got {type(data).__name__}")
+        raise TypeError(
+            f"Config root must be an object/dict, got {type(data).__name__}"
+        )
     payload = dict(data)
     preset_name = payload.pop("preset", None)
     base = named_preset(preset_name) if preset_name is not None else FrameworkConfig()
@@ -189,12 +201,16 @@ def _parse_config_file(path: Path) -> dict[str, Any]:
     if suffix == ".json":
         data = safe_json_loads(text, label=cfg_label)
         if not isinstance(data, dict):
-            raise TypeError(f"Config root must be an object/dict, got {type(data).__name__}")
+            raise TypeError(
+                f"Config root must be an object/dict, got {type(data).__name__}"
+            )
         return data
     if suffix in (".toml", ".tml"):
         data = toml_loads(text)
         enforce_safe_parsed_json(data, label=cfg_label)
         if not isinstance(data, dict):
-            raise TypeError(f"Config root must be an object/dict, got {type(data).__name__}")
+            raise TypeError(
+                f"Config root must be an object/dict, got {type(data).__name__}"
+            )
         return data
     raise ValueError(f"Unsupported config extension {suffix!r} (use .json or .toml)")

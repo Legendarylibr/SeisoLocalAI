@@ -4,7 +4,10 @@ import sys
 from pathlib import Path
 
 from seiso.adaptive_quant.base_trainer import TrainerBase, coerce_previous_action
-from seiso.adaptive_quant.checkpoint_integrity import attach_dict_integrity, verify_dict_integrity
+from seiso.adaptive_quant.checkpoint_integrity import (
+    attach_dict_integrity,
+    verify_dict_integrity,
+)
 from seiso.adaptive_quant.configuration import FrameworkConfig
 from seiso.adaptive_quant.configuration.validation import MAX_EPISODE_COUNT
 from seiso.adaptive_quant.logging_utils import read_json, write_json
@@ -82,7 +85,9 @@ class Trainer(TrainerBase):
 
         return reward_summary(rewards, updates=len(self.training_history))
 
-    def update_online(self, updates: list[tuple[PolicyTrace, float]]) -> dict[str, float]:
+    def update_online(
+        self, updates: list[tuple[PolicyTrace, float]]
+    ) -> dict[str, float]:
         rewards: list[float] = []
         for trace, reward in updates:
             self.policy.update(trace, reward)
@@ -110,14 +115,18 @@ class Trainer(TrainerBase):
         payload = read_json(target, label="Python trainer checkpoint")
         verify_dict_integrity(payload, label="Python trainer checkpoint")
         if int(payload.get("format", 0)) != _PYTHON_CHECKPOINT_FORMAT:
-            raise ValueError(f"Unsupported Python trainer checkpoint format in {target}")
+            raise ValueError(
+                f"Unsupported Python trainer checkpoint format in {target}"
+            )
         policy_state = payload.get("policy_state")
         if not isinstance(policy_state, dict):
             raise RuntimeError(
                 f"Refusing to load legacy Python checkpoint {target}: missing serialized policy state."
             )
         self.policy.restore_checkpoint_state(policy_state)
-        completed = int(payload.get("completed_episodes", len(payload.get("training_history", []))))
+        completed = int(
+            payload.get("completed_episodes", len(payload.get("training_history", [])))
+        )
         if completed < 0 or completed > MAX_EPISODE_COUNT:
             raise ValueError(
                 f"completed_episodes must be in [0, {MAX_EPISODE_COUNT}], got {completed}"

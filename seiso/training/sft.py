@@ -19,11 +19,16 @@ except ImportError:
     SFTConfig = None  # type: ignore[misc, assignment]
 
 
-def _fused_compute_loss(trainer, model, inputs, return_outputs=False, num_items_in_batch=None):
+def _fused_compute_loss(
+    trainer, model, inputs, return_outputs=False, num_items_in_batch=None
+):
     labels = inputs.get("labels")
     if labels is None:
         return trainer._seiso_super_compute_loss(
-            model, inputs, return_outputs=return_outputs, num_items_in_batch=num_items_in_batch
+            model,
+            inputs,
+            return_outputs=return_outputs,
+            num_items_in_batch=num_items_in_batch,
         )
 
     model_inputs = {k: v for k, v in inputs.items() if k != "labels"}
@@ -32,7 +37,10 @@ def _fused_compute_loss(trainer, model, inputs, return_outputs=False, num_items_
 
     if not logits.is_cuda:
         return trainer._seiso_super_compute_loss(
-            model, inputs, return_outputs=return_outputs, num_items_in_batch=num_items_in_batch
+            model,
+            inputs,
+            return_outputs=return_outputs,
+            num_items_in_batch=num_items_in_batch,
         )
 
     from seiso.kernels.loss import fused_cross_entropy_loss, shift_logits_and_labels
@@ -50,7 +58,13 @@ if _SFTTrainer is not None:
     from seiso.kernels.cuda_graphs import CudaGraphTrainerMixin
 
     class FusedSFTTrainer(CudaGraphTrainerMixin, _SFTTrainer):
-        def __init__(self, *args, use_fused_ce: bool = True, use_cuda_graphs: bool = False, **kwargs):
+        def __init__(
+            self,
+            *args,
+            use_fused_ce: bool = True,
+            use_cuda_graphs: bool = False,
+            **kwargs,
+        ):
             self._seiso_use_fused_ce = use_fused_ce
             self._seiso_super_compute_loss = super().compute_loss
             super().__init__(*args, use_cuda_graphs=use_cuda_graphs, **kwargs)
@@ -61,7 +75,9 @@ if _SFTTrainer is not None:
                     self, model, inputs, num_items_in_batch=num_items_in_batch
                 )
 
-        def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
+        def compute_loss(
+            self, model, inputs, return_outputs=False, num_items_in_batch=None
+        ):
             if not self._seiso_use_fused_ce:
                 return self._seiso_super_compute_loss(
                     model,
@@ -208,7 +224,9 @@ def _fallback_trainer(
         "loss_type",
         "model_init_kwargs",
     }
-    filtered_args = {k: v for k, v in training_args_dict.items() if k not in sft_only_keys}
+    filtered_args = {
+        k: v for k, v in training_args_dict.items() if k not in sft_only_keys
+    }
     args = TrainingArguments(**filtered_args)
 
     if not use_fused_ce:
@@ -228,7 +246,9 @@ def _fallback_trainer(
             use_cuda_graphs = kwargs.pop("use_cuda_graphs", False)
             super().__init__(*args, use_cuda_graphs=use_cuda_graphs, **kwargs)
 
-        def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
+        def compute_loss(
+            self, model, inputs, return_outputs=False, num_items_in_batch=None
+        ):
             labels = inputs.get("labels")
             if labels is None:
                 return super().compute_loss(
@@ -247,7 +267,10 @@ def _fallback_trainer(
                     return_outputs=return_outputs,
                     num_items_in_batch=num_items_in_batch,
                 )
-            from seiso.kernels.loss import fused_cross_entropy_loss, shift_logits_and_labels
+            from seiso.kernels.loss import (
+                fused_cross_entropy_loss,
+                shift_logits_and_labels,
+            )
 
             shift_logits, shift_labels = shift_logits_and_labels(logits, labels)
             loss = fused_cross_entropy_loss(shift_logits, shift_labels)

@@ -35,7 +35,9 @@ BACKEND_LABELS: dict[str, str] = {
     "router": "Smart Router",
     "auto": "Auto",
 }
-_GGUF_SHARD_RE = re.compile(r"^(?P<prefix>.+)-(?P<index>\d{5})-of-(?P<total>\d{5})\.gguf$", re.I)
+_GGUF_SHARD_RE = re.compile(
+    r"^(?P<prefix>.+)-(?P<index>\d{5})-of-(?P<total>\d{5})\.gguf$", re.I
+)
 _GGUF_VALUE_SIZE = {
     0: 1,  # uint8
     1: 1,  # int8
@@ -62,7 +64,9 @@ _GGUF_SUFFIX_SLIDING_PAT = b".attention.sliding_window_pattern"
 # dflash-draft are specialized tiny draft models. We allow llama.cpp backend for them
 # (especially when used as speculative drafts). They are filtered from main catalogs
 # via other hints.
-_UNSUPPORTED_GGUF_ARCHITECTURES = frozenset()  # was {"dflash-draft"} - now supported as drafts
+_UNSUPPORTED_GGUF_ARCHITECTURES = (
+    frozenset()
+)  # was {"dflash-draft"} - now supported as drafts
 
 
 @dataclass(slots=True)
@@ -180,7 +184,9 @@ def _read_gguf_metadata(path: Path) -> _GGUFMetadata:
             with mmap.mmap(handle.fileno(), 0, access=mmap.ACCESS_READ) as mm:
                 if mm[:4] != _GGUF_MAGIC:
                     return meta
-                _version, _tensor_count, kv_count = struct.unpack_from(_GGUF_HEADER_FMT, mm, 4)
+                _version, _tensor_count, kv_count = struct.unpack_from(
+                    _GGUF_HEADER_FMT, mm, 4
+                )
                 offset = 24
                 for _ in range(kv_count):
                     if offset + 12 > size:
@@ -203,13 +209,24 @@ def _read_gguf_metadata(path: Path) -> _GGUFMetadata:
                                 "utf-8", errors="replace"
                             )
                         offset = end
-                    elif key.endswith(_GGUF_SUFFIX_CTX_LEN) and value_type == _GGUF_TYPE_U32:
-                        meta.context_length = int(struct.unpack_from("<I", mm, offset)[0])
+                    elif (
+                        key.endswith(_GGUF_SUFFIX_CTX_LEN)
+                        and value_type == _GGUF_TYPE_U32
+                    ):
+                        meta.context_length = int(
+                            struct.unpack_from("<I", mm, offset)[0]
+                        )
                         offset += 4
-                    elif key.endswith(_GGUF_SUFFIX_BLOCK_CNT) and value_type == _GGUF_TYPE_U32:
+                    elif (
+                        key.endswith(_GGUF_SUFFIX_BLOCK_CNT)
+                        and value_type == _GGUF_TYPE_U32
+                    ):
                         meta.block_count = int(struct.unpack_from("<I", mm, offset)[0])
                         offset += 4
-                    elif key.endswith(_GGUF_SUFFIX_SLIDING_WIN) and value_type == _GGUF_TYPE_U32:
+                    elif (
+                        key.endswith(_GGUF_SUFFIX_SLIDING_WIN)
+                        and value_type == _GGUF_TYPE_U32
+                    ):
                         meta.has_sliding_window = (
                             int(struct.unpack_from("<I", mm, offset)[0]) > 0
                             or meta.has_sliding_window
@@ -268,7 +285,9 @@ def gguf_is_supported_by_llamacpp(model_path: str) -> bool:
     return architecture not in _UNSUPPORTED_GGUF_ARCHITECTURES
 
 
-def recommend_backend(*, model_path: str, model_format: str | None = None) -> BackendName:
+def recommend_backend(
+    *, model_path: str, model_format: str | None = None
+) -> BackendName:
     """Pick the default local inference engine from model path/format."""
     fmt = (model_format or "").lower()
     path = Path(model_path)
@@ -284,9 +303,13 @@ def recommend_backend(*, model_path: str, model_format: str | None = None) -> Ba
     return BACKEND_TORCH
 
 
-def available_backends(*, model_path: str, model_format: str | None = None) -> list[BackendName]:
+def available_backends(
+    *, model_path: str, model_format: str | None = None
+) -> list[BackendName]:
     """Backends that can serve this inventory model."""
-    if (model_format or "").lower() == "gguf" and not gguf_is_supported_by_llamacpp(model_path):
+    if (model_format or "").lower() == "gguf" and not gguf_is_supported_by_llamacpp(
+        model_path
+    ):
         return []
     return [recommend_backend(model_path=model_path, model_format=model_format)]
 

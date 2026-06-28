@@ -25,7 +25,9 @@ from seiso.adaptive_quant.trainer_utils import online_update_summary, reward_sum
 _CHECKPOINT_FORMAT_V2 = 2
 
 
-def _crossed_episode_milestone(episode_before: int, episode_after: int, interval: int) -> bool:
+def _crossed_episode_milestone(
+    episode_before: int, episode_after: int, interval: int
+) -> bool:
     """True once ``episode_after`` passes a multiple of ``interval`` (stdlib trainer semantics)."""
     if interval <= 0:
         return False
@@ -77,7 +79,9 @@ if torch is not None:
             self.device = device
             self.size = 0
             self.cursor = 0
-            self.states = torch.zeros(capacity, state_dim, dtype=torch.float32, device=device)
+            self.states = torch.zeros(
+                capacity, state_dim, dtype=torch.float32, device=device
+            )
             self.rewards = torch.zeros(capacity, dtype=torch.float32, device=device)
             self.log_probs = torch.zeros(capacity, dtype=torch.float32, device=device)
             self.values = torch.zeros(capacity, dtype=torch.float32, device=device)
@@ -97,7 +101,9 @@ if torch is not None:
             record: dict[str, Any],
         ) -> None:
             idx = self.cursor % self.capacity
-            self.states[idx] = torch.tensor(state_vector, dtype=torch.float32, device=self.device)
+            self.states[idx] = torch.tensor(
+                state_vector, dtype=torch.float32, device=self.device
+            )
             self.rewards[idx] = reward
             self.log_probs[idx] = log_prob
             self.values[idx] = value
@@ -115,9 +121,15 @@ if torch is not None:
             log_probs = [rec["log_prob"] for rec in records_batch]
             values = [rec["value"] for rec in records_batch]
 
-            batch_states = torch.tensor(state_vectors, dtype=torch.float32, device=self.device)
-            batch_rewards = torch.tensor(rewards, dtype=torch.float32, device=self.device)
-            batch_log_probs = torch.tensor(log_probs, dtype=torch.float32, device=self.device)
+            batch_states = torch.tensor(
+                state_vectors, dtype=torch.float32, device=self.device
+            )
+            batch_rewards = torch.tensor(
+                rewards, dtype=torch.float32, device=self.device
+            )
+            batch_log_probs = torch.tensor(
+                log_probs, dtype=torch.float32, device=self.device
+            )
             batch_values = torch.tensor(values, dtype=torch.float32, device=self.device)
 
             n = int(batch_states.shape[0])
@@ -138,7 +150,9 @@ if torch is not None:
 
         def sample(
             self, batch_size: int
-        ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, list[dict[str, Any]]]:
+        ) -> tuple[
+            torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, list[dict[str, Any]]
+        ]:
             indices = self._sample_indices(batch_size)
             sampled_records = self.records_at(indices)
             return (
@@ -175,9 +189,13 @@ if torch is not None:
             return total
 
     class TorchTrainer(TrainerBase):
-        def __init__(self, config: FrameworkConfig, log_path: str | None = None) -> None:
+        def __init__(
+            self, config: FrameworkConfig, log_path: str | None = None
+        ) -> None:
             if torch is None:
-                raise ImportError(TORCH_BACKEND_REQUIRED_MESSAGE) from TORCH_IMPORT_ERROR
+                raise ImportError(
+                    TORCH_BACKEND_REQUIRED_MESSAGE
+                ) from TORCH_IMPORT_ERROR
             super().__init__(config, log_path=log_path)
             self.policy = TorchPolicyAdapter(config)
             self.optimizer = self._build_optimizer()
@@ -188,9 +206,17 @@ if torch is not None:
             self.replay_buffer: Any = None
             if config.replay_buffer_capacity > 0:
                 replay_on_gpu = config.replay_buffer_on_gpu
-                if replay_on_gpu and self.policy.device.type == "cuda" and torch.cuda.is_available():
+                if (
+                    replay_on_gpu
+                    and self.policy.device.type == "cuda"
+                    and torch.cuda.is_available()
+                ):
                     try:
-                        index = self.policy.device.index if self.policy.device.index is not None else 0
+                        index = (
+                            self.policy.device.index
+                            if self.policy.device.index is not None
+                            else 0
+                        )
                         free_bytes, _total = torch.cuda.mem_get_info(index)
                         if free_bytes < 6 * 1024**3:
                             replay_on_gpu = False
@@ -214,7 +240,9 @@ if torch is not None:
             }
             if self.config.torch_fused_optimizer and self.policy.device.type == "cuda":
                 try:
-                    return torch.optim.AdamW(self.policy.model.parameters(), fused=True, **kwargs)
+                    return torch.optim.AdamW(
+                        self.policy.model.parameters(), fused=True, **kwargs
+                    )
                 except TypeError:
                     pass
             return torch.optim.AdamW(self.policy.model.parameters(), **kwargs)
@@ -246,7 +274,9 @@ if torch is not None:
             if rewards_accum is not None:
                 rewards_accum.extend(batch_rewards)
 
-        def _collect_batch_safe(self, batch_size: int) -> tuple[list[dict[str, Any]], list[float]]:
+        def _collect_batch_safe(
+            self, batch_size: int
+        ) -> tuple[list[dict[str, Any]], list[float]]:
             try:
                 from seiso.memory.protection import is_oom_error, release_cached_memory
             except ImportError:
@@ -295,7 +325,9 @@ if torch is not None:
                 )
 
             while self.global_episode < target:
-                batch_size = min(self.config.torch_batch_episodes, target - self.global_episode)
+                batch_size = min(
+                    self.config.torch_batch_episodes, target - self.global_episode
+                )
                 ep_before = self.global_episode
                 batch_records, batch_rewards = self._collect_batch_safe(batch_size)
                 self._commit_training_batch(batch_records, batch_rewards, all_rewards)
@@ -352,9 +384,11 @@ if torch is not None:
                 "vram_allocated_mb": round(allocated_mb, 1),
                 "vram_reserved_mb": round(reserved_mb, 1),
                 "replay_buffer_mb": round(replay_mb, 1),
-                "replay_buffer_size": float(self.replay_buffer.size)
-                if self.replay_buffer is not None
-                else 0.0,
+                "replay_buffer_size": (
+                    float(self.replay_buffer.size)
+                    if self.replay_buffer is not None
+                    else 0.0
+                ),
             }
 
         def _vram_summary(self) -> str:
@@ -366,7 +400,9 @@ if torch is not None:
                 f"replay={stats.get('replay_buffer_size', 0):.0f}"
             )
 
-        def _collect_batch(self, batch_size: int) -> tuple[list[dict[str, Any]], list[float]]:
+        def _collect_batch(
+            self, batch_size: int
+        ) -> tuple[list[dict[str, Any]], list[float]]:
             records: list[dict[str, Any]] = []
             rewards: list[float] = []
             for _ in range(batch_size):
@@ -383,7 +419,9 @@ if torch is not None:
                 )
                 routed_decision = decision
                 if self.offline_router is not None:
-                    routed_decision = self.offline_router.prepare_decision(decision, state)
+                    routed_decision = self.offline_router.prepare_decision(
+                        decision, state
+                    )
                 result = self.env.evaluate_current(
                     routed_decision, episode_index=self.global_episode
                 )
@@ -405,18 +443,28 @@ if torch is not None:
 
         def _update_policy(self, records: list[dict[str, Any]]) -> dict[str, float]:
             device = self.policy.device
-            states = self.policy.state_tensor([record["state_vector"] for record in records])
+            states = self.policy.state_tensor(
+                [record["state_vector"] for record in records]
+            )
             rewards = torch.tensor(
-                [record["reward"] for record in records], dtype=torch.float32, device=device
+                [record["reward"] for record in records],
+                dtype=torch.float32,
+                device=device,
             )
             old_log_probs = torch.tensor(
-                [record["log_prob"] for record in records], dtype=torch.float32, device=device
+                [record["log_prob"] for record in records],
+                dtype=torch.float32,
+                device=device,
             )
             old_values = torch.tensor(
-                [record["value"] for record in records], dtype=torch.float32, device=device
+                [record["value"] for record in records],
+                dtype=torch.float32,
+                device=device,
             )
             advantages = rewards - old_values
-            advantages = (advantages - advantages.mean()) / (advantages.std(unbiased=False) + 1e-6)
+            advantages = (advantages - advantages.mean()) / (
+                advantages.std(unbiased=False) + 1e-6
+            )
 
             indices = list(range(len(records)))
             policy_losses: list[float] = []
@@ -426,7 +474,9 @@ if torch is not None:
             for _ in range(self.config.torch_update_epochs):
                 self.rng.shuffle(indices)
                 for start in range(0, len(indices), self.config.torch_minibatch_size):
-                    batch_indices = indices[start : start + self.config.torch_minibatch_size]
+                    batch_indices = indices[
+                        start : start + self.config.torch_minibatch_size
+                    ]
                     if not batch_indices:
                         continue
                     state_batch = states[batch_indices]
@@ -444,7 +494,9 @@ if torch is not None:
                         policy_loss = -(log_probs * advantage_batch).mean()
                     elif algo == "awr":
                         beta = max(float(self.config.torch_awr_beta), 1e-6)
-                        raw_w = torch.exp(torch.clamp(advantage_batch / beta, min=-5.0, max=5.0))
+                        raw_w = torch.exp(
+                            torch.clamp(advantage_batch / beta, min=-5.0, max=5.0)
+                        )
                         w = raw_w / (raw_w.mean() + 1e-8)
                         policy_loss = -(w.detach() * log_probs).mean()
                     else:
@@ -458,7 +510,9 @@ if torch is not None:
                             * advantage_batch
                         )
                         policy_loss = -torch.min(unclipped, clipped).mean()
-                    value_loss = torch.nn.functional.mse_loss(values.float(), reward_batch)
+                    value_loss = torch.nn.functional.mse_loss(
+                        values.float(), reward_batch
+                    )
                     entropy_bonus = entropies.mean()
                     loss = (
                         policy_loss
@@ -484,7 +538,9 @@ if torch is not None:
                 "advantage_std": float(advantages.std(unbiased=False).detach().item()),
             }
 
-        def update_online(self, updates: list[tuple[dict[str, Any], float]]) -> dict[str, float]:
+        def update_online(
+            self, updates: list[tuple[dict[str, Any], float]]
+        ) -> dict[str, float]:
             records: list[dict[str, Any]] = []
             rewards: list[float] = []
             for record, reward in updates:
@@ -524,16 +580,22 @@ if torch is not None:
             meta_path = Path(_checkpoint_meta_path(str(pt_path)))
             if meta_path.is_file():
                 raw_meta = read_json(meta_path, label="Checkpoint sidecar")
-                verify_torch_sidecar_integrity(raw_meta, pt_path, label="Checkpoint sidecar")
+                verify_torch_sidecar_integrity(
+                    raw_meta, pt_path, label="Checkpoint sidecar"
+                )
                 if int(raw_meta.get("format", 0)) != _CHECKPOINT_FORMAT_V2:
-                    raise ValueError(f"Unsupported checkpoint metadata format in {meta_path}")
+                    raise ValueError(
+                        f"Unsupported checkpoint metadata format in {meta_path}"
+                    )
                 tensors = _torch_load_v2_tensor_file(str(pt_path))
                 self.policy.restore(tensors["model_state"])
                 self.optimizer.load_state_dict(tensors["optimizer_state"])
                 self._optimizer_to_device()
                 self.global_episode = int(raw_meta.get("global_episode", 0))
                 self.update_index = int(raw_meta.get("update_index", 0))
-                self.previous_action = coerce_previous_action(raw_meta.get("previous_action"))
+                self.previous_action = coerce_previous_action(
+                    raw_meta.get("previous_action")
+                )
                 self.training_history = list(raw_meta.get("training_history", []))
                 return
 
@@ -563,6 +625,8 @@ if torch is not None:
 else:
 
     class TorchTrainer(TrainerBase):  # type: ignore[no-redef]
-        def __init__(self, config: FrameworkConfig, log_path: str | None = None) -> None:
+        def __init__(
+            self, config: FrameworkConfig, log_path: str | None = None
+        ) -> None:
             del config, log_path
             raise ImportError(TORCH_BACKEND_REQUIRED_MESSAGE) from TORCH_IMPORT_ERROR

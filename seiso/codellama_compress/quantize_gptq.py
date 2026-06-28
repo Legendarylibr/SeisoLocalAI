@@ -52,7 +52,9 @@ def run_gptq_quantization(
             'auto-gptq is not installed. Install with: pip install ".[quant]"'
         ) from e
 
-    tokenizer = AutoTokenizer.from_pretrained(in_model_dir, use_fast=True, trust_remote_code=False)
+    tokenizer = AutoTokenizer.from_pretrained(
+        in_model_dir, use_fast=True, trust_remote_code=False
+    )
     ensure_pad_token(tokenizer)
 
     quantize_config = BaseQuantizeConfig(
@@ -90,5 +92,9 @@ def run_gptq_quantization(
     write_metrics(
         run_dir,
         stage="quantize_gptq",
-        metrics={"output_dir": str(out_dir), "bits": cfg.bits, "group_size": cfg.group_size},
+        metrics={
+            "output_dir": str(out_dir),
+            "bits": cfg.bits,
+            "group_size": cfg.group_size,
+        },
     )

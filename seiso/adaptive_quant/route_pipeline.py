@@ -50,7 +50,9 @@ from seiso.adaptive_quant.types import (
 def _median_complexity_prompt(library: PromptLibrary):
     from seiso.adaptive_quant.features import extract_input_features
 
-    ordered = sorted(library.prompts, key=lambda p: extract_input_features(p).complexity_score)
+    ordered = sorted(
+        library.prompts, key=lambda p: extract_input_features(p).complexity_score
+    )
     return ordered[len(ordered) // 2]
 
 
@@ -83,7 +85,9 @@ class RouteTrainingSummary:
         }
 
 
-def build_route_decision(route: ModelRoute, config: FrameworkConfig) -> QuantizationDecision:
+def build_route_decision(
+    route: ModelRoute, config: FrameworkConfig
+) -> QuantizationDecision:
     """Construct a ``QuantizationDecision`` whose effective bits exactly match the route.
 
     We bypass :func:`seiso.adaptive_quant.quantization.finalize_decision` on purpose: that helper
@@ -126,7 +130,9 @@ def validate_local_route_models(catalog: RouteCatalog) -> None:
     if missing or invalid:
         details: list[str] = []
         if missing:
-            details.append(f"missing local_path for routes: {', '.join(sorted(missing))}")
+            details.append(
+                f"missing local_path for routes: {', '.join(sorted(missing))}"
+            )
         if invalid:
             details.append(f"local_path is not a file: {'; '.join(sorted(invalid))}")
         raise FileNotFoundError(
@@ -207,10 +213,14 @@ def train_route_bandit(
     if iterations <= 0:
         raise ValueError("iterations must be > 0")
     if not catalog.routes:
-        raise ValueError("catalog is empty; register at least one route before training")
+        raise ValueError(
+            "catalog is empty; register at least one route before training"
+        )
     if not hf_allow_unlisted_from_env():
         for route in catalog.routes:
-            assert_hf_repo_allowed(route.repo_id, config_allowlist=config.route_hf_allowed_repos)
+            assert_hf_repo_allowed(
+                route.repo_id, config_allowlist=config.route_hf_allowed_repos
+            )
 
     library = prompt_library or PromptLibrary()
     known_domains = tuple(sorted({prompt.domain for prompt in library.prompts}))
@@ -220,7 +230,9 @@ def train_route_bandit(
     env = AdaptiveQuantizationEnv(config, enable_logging=False, prompt_library=library)
     backend = build_backend(config)
 
-    log_path = telemetry_path or f"{config.log_dir}/{config.run_name}_route_telemetry.jsonl"
+    log_path = (
+        telemetry_path or f"{config.log_dir}/{config.run_name}_route_telemetry.jsonl"
+    )
     logger = JsonlLogger(
         log_path,
         buffered=bool(config.jsonl_buffered),
@@ -314,7 +326,9 @@ def evaluate_route_bandit(
             for prompt in library.prompts:
                 for hardware_value in config.hardware_modes:
                     hardware = HardwareType(hardware_value)
-                    state = env.reset(forced_prompt_id=prompt.prompt_id, forced_hardware=hardware)
+                    state = env.reset(
+                        forced_prompt_id=prompt.prompt_id, forced_hardware=hardware
+                    )
                     context = RouteContext.from_features(
                         hardware=hardware,
                         domain=state.prompt.domain,
@@ -378,26 +392,36 @@ def evaluate_routes_for_prompts(
     eligible route with the lowest measured ``memory_mb``.
     """
     if not catalog.routes:
-        raise ValueError("catalog is empty; register at least one route before evaluation")
+        raise ValueError(
+            "catalog is empty; register at least one route before evaluation"
+        )
     if max_reward_regression < 0.0:
         raise ValueError("max_reward_regression must be >= 0")
     if max_perplexity_regression is not None and max_perplexity_regression < 0.0:
         raise ValueError("max_perplexity_regression must be >= 0")
-    hardware_modes = hardware or tuple(HardwareType(value) for value in config.hardware_modes)
+    hardware_modes = hardware or tuple(
+        HardwareType(value) for value in config.hardware_modes
+    )
     if not hardware_modes:
         raise ValueError("at least one hardware mode is required")
     if not hf_allow_unlisted_from_env():
         for route in catalog.routes:
-            assert_hf_repo_allowed(route.repo_id, config_allowlist=config.route_hf_allowed_repos)
+            assert_hf_repo_allowed(
+                route.repo_id, config_allowlist=config.route_hf_allowed_repos
+            )
 
-    env = AdaptiveQuantizationEnv(config, enable_logging=False, prompt_library=prompt_library)
+    env = AdaptiveQuantizationEnv(
+        config, enable_logging=False, prompt_library=prompt_library
+    )
     backend = build_backend(config)
     rows: list[dict[str, Any]] = []
     recommendations: list[dict[str, Any]] = []
     try:
         for prompt in prompt_library.prompts:
             for hw in hardware_modes:
-                state = env.reset(forced_prompt=prompt, forced_hardware=hw, phase="eval")
+                state = env.reset(
+                    forced_prompt=prompt, forced_hardware=hw, phase="eval"
+                )
                 group_rows: list[dict[str, Any]] = []
                 for route in catalog.filter(hardware=hw.value):
                     metrics, reward = evaluate_route(

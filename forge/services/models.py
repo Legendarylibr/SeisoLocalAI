@@ -43,7 +43,9 @@ async def resolve_model_path(
         return None
 
     models = await db.list_models(user_id)
-    match = next((m for m in models if m["id"] == model_id or m["name"] == model_id), None)
+    match = next(
+        (m for m in models if m["id"] == model_id or m["name"] == model_id), None
+    )
     if not match:
         raise HTTPException(404, f"Model not found in inventory: {model_id}")
 

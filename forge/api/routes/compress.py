@@ -12,10 +12,17 @@ from forge.api.routes._jobs import (
     resolve_linked_training_job,
     validate_pipeline_paths,
 )
-from forge.api.routes._pipeline import StagePipelineRouterConfig, build_stage_pipeline_router
+from forge.api.routes._pipeline import (
+    StagePipelineRouterConfig,
+    build_stage_pipeline_router,
+)
 from forge.config import ForgeSettings
 from forge.db.store import Database
-from seiso.compress.config_builder import PRESETS, STAGE_ORDER, get_compress_model_defaults
+from seiso.compress.config_builder import (
+    PRESETS,
+    STAGE_ORDER,
+    get_compress_model_defaults,
+)
 
 STAGE_HELP = {
     "distill": "Teacher → student KL distillation",
@@ -101,7 +108,9 @@ router = build_stage_pipeline_router(
         get_orchestrator=get_compress_orchestrator,
         list_jobs=lambda db, uid: db.list_compress_jobs(uid),
         get_job=lambda db, jid, uid: db.get_compress_job(jid, uid),
-        create_job=lambda db, uid, cfg, jid: db.create_compress_job(uid, cfg, job_id=jid),
+        create_job=lambda db, uid, cfg, jid: db.create_compress_job(
+            uid, cfg, job_id=jid
+        ),
         update_status=lambda db, jid, status, **kw: db.update_compress_job_status(
             jid, status, **kw
         ),

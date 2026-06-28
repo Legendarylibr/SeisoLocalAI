@@ -40,7 +40,9 @@ def load_digest_manifest(path: Path) -> dict[str, Any]:
         raise LockDigestError("Digest manifest must be a JSON object")
     data: dict[str, Any] = raw
     if data.get("algorithm") != "sha256":
-        raise LockDigestError(f"Unsupported digest algorithm: {data.get('algorithm')!r}")
+        raise LockDigestError(
+            f"Unsupported digest algorithm: {data.get('algorithm')!r}"
+        )
     artifacts = data.get("artifacts")
     if not isinstance(artifacts, dict) or not artifacts:
         raise LockDigestError("Digest manifest missing non-empty 'artifacts' object")
@@ -127,7 +129,9 @@ def verify_python_lock_has_hashes(lock_path: Path) -> None:
         )
 
 
-def build_digest_manifest(repo_root: Path, artifacts: dict[str, Path]) -> dict[str, Any]:
+def build_digest_manifest(
+    repo_root: Path, artifacts: dict[str, Path]
+) -> dict[str, Any]:
     manifest_artifacts: dict[str, str] = {}
     for rel_path, absolute_path in artifacts.items():
         manifest_artifacts[rel_path] = sha256_file(absolute_path)

@@ -48,7 +48,11 @@ def test_sweep_dpo_max_steps_uses_train_size_when_uncapped():
         job_id="job-1",
         user_id="user-1",
         data_dir=Path("/tmp"),
-        payload={"preset": "full", "dpo_batch_size": 1, "dpo_gradient_accumulation_steps": 8},
+        payload={
+            "preset": "full",
+            "dpo_batch_size": 1,
+            "dpo_gradient_accumulation_steps": 8,
+        },
     )
     assert sweep_dpo_max_steps(cfg, {}, train_example_count=96) == 12
 
@@ -66,7 +70,9 @@ def test_apply_best_sweep_overrides():
 
 def test_extract_metric_nested_path():
     payload = {"checkpoints": {"dpo": {"val_preference_accuracy": 0.82}}}
-    assert extract_metric(payload, "checkpoints.dpo.val_preference_accuracy") == pytest.approx(0.82)
+    assert extract_metric(
+        payload, "checkpoints.dpo.val_preference_accuracy"
+    ) == pytest.approx(0.82)
 
 
 def test_distill_rl_defaults_use_stable_dpo_values(tmp_path: Path):
@@ -87,14 +93,19 @@ def test_run_auto_hyperparameter_sweep_ranks_trials(tmp_path: Path):
         job_id="job-sweep",
         user_id="user-1",
         data_dir=tmp_path,
-        payload={"preset": "smoke", "stages": ["distill", "rollout", "dpo", "evaluate"]},
+        payload={
+            "preset": "smoke",
+            "stages": ["distill", "rollout", "dpo", "evaluate"],
+        },
     )
     cfg.output_root.mkdir(parents=True, exist_ok=True)
     prefs_dir = cfg.preferences_dir
     prefs_dir.mkdir(parents=True, exist_ok=True)
     train = prefs_dir / "preferences_train.jsonl"
     val = prefs_dir / "preferences_val.jsonl"
-    train.write_text('{"prompt":"p","chosen":"yes","rejected":"no"}\n', encoding="utf-8")
+    train.write_text(
+        '{"prompt":"p","chosen":"yes","rejected":"no"}\n', encoding="utf-8"
+    )
     val.write_text('{"prompt":"p","chosen":"yes","rejected":"no"}\n', encoding="utf-8")
 
     distilled = cfg.distilled_dir
@@ -163,7 +174,9 @@ def test_run_distill_rl_job_runs_sweep_before_final_dpo(tmp_path: Path):
     prefs.mkdir(parents=True)
     train = prefs / "preferences_train.jsonl"
     val = prefs / "preferences_val.jsonl"
-    train.write_text('{"prompt":"p","chosen":"yes","rejected":"no"}\n', encoding="utf-8")
+    train.write_text(
+        '{"prompt":"p","chosen":"yes","rejected":"no"}\n', encoding="utf-8"
+    )
     val.write_text('{"prompt":"p","chosen":"yes","rejected":"no"}\n', encoding="utf-8")
     dpo_dir = job_root / "dpo" / "checkpoint-1"
     dpo_dir.mkdir(parents=True)
@@ -173,7 +186,8 @@ def test_run_distill_rl_job_runs_sweep_before_final_dpo(tmp_path: Path):
 
     with (
         patch(
-            "seiso.distill_rl.runner.run_auto_hyperparameter_sweep", return_value=sweep_result
+            "seiso.distill_rl.runner.run_auto_hyperparameter_sweep",
+            return_value=sweep_result,
         ) as sweep,
         patch("seiso.models.hf_env.configure_hf_hub_cache"),
         patch("seiso.security.nvidia_boundary.enforce_nvidia_secure_boundary"),
@@ -194,7 +208,10 @@ def test_run_distill_rl_job_runs_sweep_before_final_dpo(tmp_path: Path):
     ):
         shared.return_value = SharedStageContext(
             distilled_dir=distilled,
-            stage_results={"distilled": str(distilled), "preferences_train": str(train)},
+            stage_results={
+                "distilled": str(distilled),
+                "preferences_train": str(train),
+            },
         )
         result = run_distill_rl_job(
             job_id="job-sweep",

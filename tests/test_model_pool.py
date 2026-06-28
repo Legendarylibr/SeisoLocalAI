@@ -6,7 +6,12 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 
-from seiso.inference.model_pool import BackendKind, LoadedModel, ModelPool, llama_load_kwargs
+from seiso.inference.model_pool import (
+    BackendKind,
+    LoadedModel,
+    ModelPool,
+    llama_load_kwargs,
+)
 
 
 def test_pool_singleton():
@@ -71,7 +76,9 @@ def test_llama_gpu_layers_optimal_uses_short_ttl_cache(monkeypatch, tmp_path):
     gguf.write_bytes(b"gguf")
     calls: list[int] = []
 
-    monkeypatch.setattr(mp, "fit_llama_gpu_layers", lambda _p, _r, _h: calls.append(1) or 32)
+    monkeypatch.setattr(
+        mp, "fit_llama_gpu_layers", lambda _p, _r, _h: calls.append(1) or 32
+    )
 
     first = mp._llama_gpu_layers_optimal(str(gguf), -1)
     second = mp._llama_gpu_layers_optimal(str(gguf), -1)
@@ -222,7 +229,9 @@ def test_llama_load_kwargs_are_tuned_and_overrideable(monkeypatch):
     monkeypatch.setenv("SEISO_LLAMA_THREADS", "6")
     monkeypatch.setenv("SEISO_LLAMA_GPU_LAYERS", "4")
     monkeypatch.setenv("SEISO_LLAMA_USE_MMAP", "false")
-    monkeypatch.setattr("seiso.inference.model_pool._llama_gpu_offload_ok", lambda: True)
+    monkeypatch.setattr(
+        "seiso.inference.model_pool._llama_gpu_offload_ok", lambda: True
+    )
 
     kwargs = llama_load_kwargs(2048)
 
@@ -238,7 +247,9 @@ def test_llama_load_kwargs_default_metal_offload_on_apple_silicon(monkeypatch):
     monkeypatch.delenv("SEISO_LLAMA_GPU_LAYERS", raising=False)
     monkeypatch.setattr(platform, "system", lambda: "Darwin")
     monkeypatch.setattr(platform, "machine", lambda: "arm64")
-    monkeypatch.setattr("seiso.inference.model_pool._llama_gpu_offload_ok", lambda: True)
+    monkeypatch.setattr(
+        "seiso.inference.model_pool._llama_gpu_offload_ok", lambda: True
+    )
 
     kwargs = llama_load_kwargs(4096)
     assert kwargs["n_gpu_layers"] == -1
@@ -254,9 +265,13 @@ def test_llama_load_kwargs_cuda_defaults(monkeypatch):
     monkeypatch.setattr(platform, "machine", lambda: "x86_64")
     monkeypatch.setattr(os, "cpu_count", lambda: 24)
     monkeypatch.setattr("seiso.inference.model_pool._cuda_available", lambda: True)
-    monkeypatch.setattr("seiso.inference.model_pool._llama_gpu_offload_ok", lambda: True)
+    monkeypatch.setattr(
+        "seiso.inference.model_pool._llama_gpu_offload_ok", lambda: True
+    )
     monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 9000)
-    monkeypatch.setattr("seiso.inference.model_pool._speed_llama_batch_defaults", lambda _h: None)
+    monkeypatch.setattr(
+        "seiso.inference.model_pool._speed_llama_batch_defaults", lambda _h: None
+    )
 
     kwargs = llama_load_kwargs(4096)
     assert kwargs["n_gpu_layers"] == -1
@@ -274,7 +289,9 @@ def test_llama_load_kwargs_threads_batch_override(monkeypatch):
         if key.startswith("SEISO_LLAMA_"):
             monkeypatch.delenv(key, raising=False)
     monkeypatch.setattr(os, "cpu_count", lambda: 16)
-    monkeypatch.setattr("seiso.inference.model_pool._llama_gpu_offload_ok", lambda: False)
+    monkeypatch.setattr(
+        "seiso.inference.model_pool._llama_gpu_offload_ok", lambda: False
+    )
     monkeypatch.setenv("SEISO_LLAMA_THREADS_BATCH", "5")
 
     kwargs = llama_load_kwargs(2048)
@@ -288,8 +305,12 @@ def test_llama_load_kwargs_nvidia_smi_without_cuda_torch(monkeypatch):
             monkeypatch.delenv(key, raising=False)
     monkeypatch.setattr(platform, "system", lambda: "Linux")
     monkeypatch.setattr("seiso.inference.model_pool._cuda_available", lambda: False)
-    monkeypatch.setattr("seiso.inference.model_pool._nvidia_hardware_visible", lambda: True)
-    monkeypatch.setattr("seiso.inference.model_pool._llama_gpu_offload_ok", lambda: True)
+    monkeypatch.setattr(
+        "seiso.inference.model_pool._nvidia_hardware_visible", lambda: True
+    )
+    monkeypatch.setattr(
+        "seiso.inference.model_pool._llama_gpu_offload_ok", lambda: True
+    )
     monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 16384)
 
     kwargs = llama_load_kwargs(4096)
@@ -300,7 +321,9 @@ def test_llama_load_retryable_detects_context_and_file_errors():
     import seiso.inference.model_pool as mp
 
     assert mp._llama_load_retryable(ValueError("Failed to create llama_context"))
-    assert mp._llama_load_retryable(ValueError("Failed to load model from file: x.gguf"))
+    assert mp._llama_load_retryable(
+        ValueError("Failed to load model from file: x.gguf")
+    )
     assert not mp._llama_load_retryable(ValueError("invalid n_ctx"))
 
 
@@ -476,7 +499,9 @@ def test_platform_profile_linux_nvidia_cpu_only_wheel(monkeypatch):
         "seiso.memory.platform_profile.classify_tier",
         lambda _p: HardwareTier.WORKSTATION,
     )
-    monkeypatch.setattr("seiso.memory.platform_profile.vram_headroom_mb", lambda _p: 20480)
+    monkeypatch.setattr(
+        "seiso.memory.platform_profile.vram_headroom_mb", lambda _p: 20480
+    )
     monkeypatch.setattr(
         "seiso.memory.platform_profile.training_capabilities",
         lambda: {

@@ -43,34 +43,60 @@ def build_guidance(
         elif vram_total >= 6000:
             steps.append(
                 GuideStep(
-                    "Get a 3–7B GGUF", "Quantized models fit comfortably in your VRAM.", "/hub", 3
+                    "Get a 3–7B GGUF",
+                    "Quantized models fit comfortably in your VRAM.",
+                    "/hub",
+                    3,
                 )
             )
-            steps.append(GuideStep("Open Chat", "Pick a model and start chatting.", "/chat", 2))
+            steps.append(
+                GuideStep("Open Chat", "Pick a model and start chatting.", "/chat", 2)
+            )
         elif gpus:
             steps.append(
-                GuideStep("Try a 1–3B model", "Limited VRAM — use Q4_K_M quantization.", "/hub", 3)
+                GuideStep(
+                    "Try a 1–3B model",
+                    "Limited VRAM — use Q4_K_M quantization.",
+                    "/hub",
+                    3,
+                )
             )
         else:
             steps.append(
                 GuideStep(
-                    "Try a small GGUF", "No discrete GPU — use Q4 models with llama.cpp.", "/hub", 3
+                    "Try a small GGUF",
+                    "No discrete GPU — use Q4 models with llama.cpp.",
+                    "/hub",
+                    3,
                 )
             )
         steps.append(
             GuideStep(
-                "Monitor load", "Watch GPU/CPU in the live monitor (stays on this machine).", "/", 1
+                "Monitor load",
+                "Watch GPU/CPU in the live monitor (stays on this machine).",
+                "/",
+                1,
             )
         )
 
     elif goal == "train":
         if vram_total >= 24000:
             steps.append(
-                GuideStep("Fine-tune 7B+", "Enough VRAM for LoRA on 7–14B models.", "/train", 3)
+                GuideStep(
+                    "Fine-tune 7B+",
+                    "Enough VRAM for LoRA on 7–14B models.",
+                    "/train",
+                    3,
+                )
             )
         elif vram_total >= 12000:
             steps.append(
-                GuideStep("LoRA on 3–7B", "Use 4-bit loading and small batch sizes.", "/train", 3)
+                GuideStep(
+                    "LoRA on 3–7B",
+                    "Use 4-bit loading and small batch sizes.",
+                    "/train",
+                    3,
+                )
             )
         else:
             steps.append(
@@ -120,7 +146,9 @@ def build_guidance(
             )
         )
         steps.append(
-            GuideStep("Open Chat", "Run local inference via llama.cpp or MLX.", "/chat", 3)
+            GuideStep(
+                "Open Chat", "Run local inference via llama.cpp or MLX.", "/chat", 3
+            )
         )
         if vram_total < 6000 and not gpus:
             steps.append(
@@ -133,9 +161,15 @@ def build_guidance(
             )
 
     else:
-        steps.append(GuideStep("Browse the catalog", "Newest models are listed first.", "/hub", 2))
         steps.append(
-            GuideStep("Open Chat", "Encrypted memory lasts until you sign out.", "/chat", 2)
+            GuideStep(
+                "Browse the catalog", "Newest models are listed first.", "/hub", 2
+            )
+        )
+        steps.append(
+            GuideStep(
+                "Open Chat", "Encrypted memory lasts until you sign out.", "/chat", 2
+            )
         )
 
     steps.sort(key=lambda s: -s.priority)

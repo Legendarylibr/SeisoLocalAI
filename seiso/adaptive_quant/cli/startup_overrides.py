@@ -12,7 +12,10 @@ from typing import Any
 
 from seiso.adaptive_quant.configuration import RewardWeights
 from seiso.adaptive_quant.configuration.flat_access import all_flat_config_keys
-from seiso.adaptive_quant.configuration.sections import NESTED_SECTION_KEYS, SECTION_TYPES
+from seiso.adaptive_quant.configuration.sections import (
+    NESTED_SECTION_KEYS,
+    SECTION_TYPES,
+)
 from seiso.adaptive_quant.logging_utils import safe_json_loads, to_jsonable
 
 _ALLOW_PRIVILEGED_OVERRIDES_ENV = "ADAPTIVE_RL_ALLOW_PRIVILEGED_OVERRIDES"
@@ -109,13 +112,17 @@ def parse_override_value(value_text: str) -> Any:
         except json.JSONDecodeError:
             pass
     if len(text) > _MAX_OVERRIDE_STRING_CHARS:
-        raise ValueError(f"CLI --set string value exceeds {_MAX_OVERRIDE_STRING_CHARS} characters")
+        raise ValueError(
+            f"CLI --set string value exceeds {_MAX_OVERRIDE_STRING_CHARS} characters"
+        )
     return text
 
 
 def parse_config_override(raw: str) -> tuple[str, Any]:
     if "=" not in raw:
-        raise argparse.ArgumentTypeError("Expected KEY=VALUE, for example training_episodes=500")
+        raise argparse.ArgumentTypeError(
+            "Expected KEY=VALUE, for example training_episodes=500"
+        )
     raw_key, value_text = raw.split("=", 1)
     try:
         key = normalize_override_key(raw_key)
@@ -146,7 +153,9 @@ def merge_override(overrides: dict[str, Any], key: str, value: Any) -> None:
         raise ValueError(f"Unknown {section_name} config key: {field_name!r}")
     section_overrides = overrides.setdefault(section_name, {})
     if not isinstance(section_overrides, dict):
-        raise ValueError(f"Cannot mix whole-section and dotted overrides for {section_name!r}")
+        raise ValueError(
+            f"Cannot mix whole-section and dotted overrides for {section_name!r}"
+        )
     section_overrides[field_name] = value
 
 

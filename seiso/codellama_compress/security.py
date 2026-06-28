@@ -10,7 +10,9 @@ from typing import Any
 
 # Run directories are created under output/runs/<run_id>.
 _RUN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
-_HF_DATASET_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$")
+_HF_DATASET_ID_RE = re.compile(
+    r"^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$"
+)
 
 # Reject shell/metacharacters in values embedded into generated scripts.
 _UNSAFE_SHELL_CHARS = frozenset("\n\r\x00$`\"'\\;|&<>(){}[]*?!#~")
@@ -97,7 +99,9 @@ def resolve_user_path(path: Path, *, must_exist: bool = False) -> Path:
     return resolved
 
 
-def resolve_path_under_base(path: Path, *, base: Path, must_exist: bool = False) -> Path:
+def resolve_path_under_base(
+    path: Path, *, base: Path, must_exist: bool = False
+) -> Path:
     resolved = resolve_user_path(path, must_exist=must_exist)
     base_r = resolve_user_path(base, must_exist=False)
     try:
@@ -107,7 +111,9 @@ def resolve_path_under_base(path: Path, *, base: Path, must_exist: bool = False)
     return resolved
 
 
-def load_bounded_json_config(path: Path, *, max_bytes: int = _MAX_CONFIG_BYTES) -> dict[str, Any]:
+def load_bounded_json_config(
+    path: Path, *, max_bytes: int = _MAX_CONFIG_BYTES
+) -> dict[str, Any]:
     p = resolve_user_path(path, must_exist=True)
     if not p.is_file():
         raise ValueError(f"Config path is not a file: {p}")
@@ -160,7 +166,9 @@ def _assert_safe_hf_dataset_id(dataset_id: str) -> str:
 
 def allowed_dataset_ids() -> frozenset[str]:
     extra = os.environ.get(DATASET_ALLOWLIST_EXTRA_ENV, "")
-    extras = {_assert_safe_hf_dataset_id(x.strip()) for x in extra.split(",") if x.strip()}
+    extras = {
+        _assert_safe_hf_dataset_id(x.strip()) for x in extra.split(",") if x.strip()
+    }
     return _DEFAULT_ALLOWED_DATASETS | extras
 
 
@@ -191,7 +199,9 @@ def resolve_trust_remote_code(config_flag: bool) -> bool:
     return bool(config_flag and env_on)
 
 
-def trust_remote_code_audit_record(*, config_flag: bool, effective: bool) -> dict[str, Any]:
+def trust_remote_code_audit_record(
+    *, config_flag: bool, effective: bool
+) -> dict[str, Any]:
     return {
         "trust_remote_code_config": config_flag,
         "trust_remote_code_effective": effective,

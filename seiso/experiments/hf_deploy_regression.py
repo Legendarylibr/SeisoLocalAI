@@ -30,7 +30,9 @@ def _load_eval_texts(
     snapshot = train_out / "train_config_snapshot.json"
     cfg = base_config
     if snapshot.is_file():
-        cfg = TrainConfig.model_validate(json.loads(snapshot.read_text(encoding="utf-8")))
+        cfg = TrainConfig.model_validate(
+            json.loads(snapshot.read_text(encoding="utf-8"))
+        )
 
     from seiso.training.datasets import format_dataset_text, load_training_dataset
 
@@ -46,7 +48,9 @@ def _load_eval_texts(
 
     from transformers import AutoTokenizer
 
-    tokenizer = AutoTokenizer.from_pretrained(str(cfg.model_id), trust_remote_code=False)
+    tokenizer = AutoTokenizer.from_pretrained(
+        str(cfg.model_id), trust_remote_code=False
+    )
     eval_ds, _ = format_dataset_text(eval_ds, tokenizer, cfg.dataset_format)
     texts = [str(text) for text in eval_ds["text"][:max_samples]]
     return [t for t in texts if t.strip()]
@@ -70,7 +74,9 @@ def _eval_merged_loss(
     dtype = torch.float16 if quant == QuantMode.INT16 else None
 
     if on_log:
-        on_log(f"Evaluating merged weights deploy_quant={deploy_quant} samples={len(texts)}")
+        on_log(
+            f"Evaluating merged weights deploy_quant={deploy_quant} samples={len(texts)}"
+        )
 
     tokenizer = AutoTokenizer.from_pretrained(str(merged_dir), trust_remote_code=False)
     if tokenizer.pad_token is None:
@@ -179,11 +185,15 @@ def run_hf_deploy_quant_regression(
     from seiso.models.hub_quant import infer_active_params_b
 
     params_b = (
-        parameters_b if parameters_b is not None else infer_active_params_b(base_config.model_id)
+        parameters_b
+        if parameters_b is not None
+        else infer_active_params_b(base_config.model_id)
     )
     texts = _load_eval_texts(train_out, base_config, max_samples=max_eval_samples)
     if not texts:
-        raise RuntimeError("No eval texts available — increase dataset size or eval_split_ratio")
+        raise RuntimeError(
+            "No eval texts available — increase dataset size or eval_split_ratio"
+        )
 
     rows: list[dict[str, Any]] = []
     for deploy_quant in deploy_quants:
@@ -237,16 +247,23 @@ def run_hf_deploy_quant_regression(
 def summarize_hf_deploy_report(report: dict[str, Any]) -> dict[str, Any]:
     rows = report.get("rows") if isinstance(report.get("rows"), list) else []
     recommendations = (
-        report.get("recommendations") if isinstance(report.get("recommendations"), list) else []
+        report.get("recommendations")
+        if isinstance(report.get("recommendations"), list)
+        else []
     )
     selected = recommendations[0] if recommendations else {}
-    rewards = finite_floats([row.get("reward") for row in rows if isinstance(row, dict)])
-    perplexities = finite_floats([row.get("perplexity") for row in rows if isinstance(row, dict)])
+    rewards = finite_floats(
+        [row.get("reward") for row in rows if isinstance(row, dict)]
+    )
+    perplexities = finite_floats(
+        [row.get("perplexity") for row in rows if isinstance(row, dict)]
+    )
     return {
         "eval_mean_reward": mean(rewards) if rewards else None,
         "eval_mean_perplexity": mean(perplexities) if perplexities else None,
         "recommended_route": selected.get("route_id"),
-        "recommended_quant": selected.get("quant_label") or selected.get("deploy_quant"),
+        "recommended_quant": selected.get("quant_label")
+        or selected.get("deploy_quant"),
         "reward_regression": finite_float(selected.get("reward_regression")),
         "perplexity_regression": finite_float(selected.get("perplexity_regression")),
         "mean_selected_memory_mb": finite_float(selected.get("memory_mb")),

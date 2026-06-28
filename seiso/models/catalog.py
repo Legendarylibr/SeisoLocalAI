@@ -266,7 +266,11 @@ def _infer_task(repo_id: str, pipeline_tag: str | None, tags: list[str]) -> Mode
     hay = f"{repo_id} {' '.join(tags)}".lower()
     if pipeline_tag == "feature-extraction" or "embedding" in tag_set:
         return ModelTask.EMBEDDING
-    if pipeline_tag == "image-text-to-text" or "vision" in tag_set or "multimodal" in tag_set:
+    if (
+        pipeline_tag == "image-text-to-text"
+        or "vision" in tag_set
+        or "multimodal" in tag_set
+    ):
         return ModelTask.VISION
     if any(k in hay for k in ("coder", "code-", "-code", "coding", "devstral")):
         return ModelTask.CODE
@@ -286,7 +290,9 @@ def _infer_params(repo_id: str, tags: list[str]) -> str:
 
 def _display_name(repo_id: str, tags: list[str]) -> str:
     for tag in tags:
-        if tag.startswith("base_model:") and not tag.startswith("base_model:quantized:"):
+        if tag.startswith("base_model:") and not tag.startswith(
+            "base_model:quantized:"
+        ):
             base = tag.split(":", 1)[1]
             return base.split("/")[-1].replace("-", " ").replace("_", " ")
     slug = repo_id.split("/")[-1]
@@ -300,7 +306,9 @@ def _is_supported_repo(repo_id: str) -> bool:
     return bool(repo) and "/" in repo
 
 
-def is_gguf_hub_repo(repo_id: str, tags: list[str] | tuple[str, ...] | None = None) -> bool:
+def is_gguf_hub_repo(
+    repo_id: str, tags: list[str] | tuple[str, ...] | None = None
+) -> bool:
     """True when a Hub row is a GGUF artifact (tags or naming)."""
     return _is_gguf_hub_repo(repo_id, list(tags or ()))
 
@@ -330,7 +338,9 @@ def _compute_priority(downloads: int, created_at: str | None, tags: list[str]) -
     return min(100, dl_score + recency + tag_bonus)
 
 
-def _hub_row_to_entry(row: dict, *, force_task: ModelTask | None = None) -> CatalogEntry | None:
+def _hub_row_to_entry(
+    row: dict, *, force_task: ModelTask | None = None
+) -> CatalogEntry | None:
     repo_id = row.get("id") or row.get("modelId")
     if not isinstance(repo_id, str) or not repo_id.strip():
         return None
@@ -338,8 +348,14 @@ def _hub_row_to_entry(row: dict, *, force_task: ModelTask | None = None) -> Cata
         return None
 
     tags_raw = row.get("tags")
-    tags = [t for t in tags_raw if isinstance(t, str)] if isinstance(tags_raw, list) else []
-    pipeline_tag = row.get("pipeline_tag") if isinstance(row.get("pipeline_tag"), str) else None
+    tags = (
+        [t for t in tags_raw if isinstance(t, str)]
+        if isinstance(tags_raw, list)
+        else []
+    )
+    pipeline_tag = (
+        row.get("pipeline_tag") if isinstance(row.get("pipeline_tag"), str) else None
+    )
     if pipeline_tag in _SKIP_PIPELINE_TAGS:
         return None
 
@@ -359,7 +375,9 @@ def _hub_row_to_entry(row: dict, *, force_task: ModelTask | None = None) -> Cata
         family=family,
         params=params,
         task=task,
-        quant="Q4_K_M" if is_gguf else ("F16" if task == ModelTask.EMBEDDING else "bf16"),
+        quant=(
+            "Q4_K_M" if is_gguf else ("F16" if task == ModelTask.EMBEDDING else "bf16")
+        ),
         tags=catalog_tags,
         gguf_repo=repo_id if is_gguf else None,
         priority=priority,
@@ -377,11 +395,17 @@ def _hub_row_to_trainable_entry(
         return None
 
     tags_raw = row.get("tags")
-    tags = [t for t in tags_raw if isinstance(t, str)] if isinstance(tags_raw, list) else []
+    tags = (
+        [t for t in tags_raw if isinstance(t, str)]
+        if isinstance(tags_raw, list)
+        else []
+    )
     if is_gguf_only_repo_id(repo_id, tags):
         return None
 
-    pipeline_tag = row.get("pipeline_tag") if isinstance(row.get("pipeline_tag"), str) else None
+    pipeline_tag = (
+        row.get("pipeline_tag") if isinstance(row.get("pipeline_tag"), str) else None
+    )
     if pipeline_tag in _SKIP_PIPELINE_TAGS:
         return None
 
@@ -515,14 +539,28 @@ def search_catalog(
             continue
         if task and not _matches_task(entry, task):
             continue
-        if max_params and _parse_param_size(entry.params) > _parse_param_size(max_params):
+        if max_params and _parse_param_size(entry.params) > _parse_param_size(
+            max_params
+        ):
             continue
         scored.append((_boost_score(entry, query), _entry_to_dict(entry)))
 
     if query.strip():
-        scored.sort(key=lambda pair: (-pair[0], -(pair[1].get("downloads") or 0), pair[1]["name"]))
+        scored.sort(
+            key=lambda pair: (
+                -pair[0],
+                -(pair[1].get("downloads") or 0),
+                pair[1]["name"],
+            )
+        )
     else:
-        scored.sort(key=lambda pair: (-(pair[1].get("downloads") or 0), -pair[0], pair[1]["name"]))
+        scored.sort(
+            key=lambda pair: (
+                -(pair[1].get("downloads") or 0),
+                -pair[0],
+                pair[1]["name"],
+            )
+        )
 
     return CatalogSearchResult(
         models=[item for _, item in scored],
@@ -567,14 +605,28 @@ def search_trainable_catalog(
             continue
         if task and not _matches_task(entry, task):
             continue
-        if max_params and _parse_param_size(entry.params) > _parse_param_size(max_params):
+        if max_params and _parse_param_size(entry.params) > _parse_param_size(
+            max_params
+        ):
             continue
         scored.append((_boost_score(entry, query), _entry_to_dict(entry)))
 
     if query.strip():
-        scored.sort(key=lambda pair: (-pair[0], -(pair[1].get("downloads") or 0), pair[1]["name"]))
+        scored.sort(
+            key=lambda pair: (
+                -pair[0],
+                -(pair[1].get("downloads") or 0),
+                pair[1]["name"],
+            )
+        )
     else:
-        scored.sort(key=lambda pair: (-(pair[1].get("downloads") or 0), -pair[0], pair[1]["name"]))
+        scored.sort(
+            key=lambda pair: (
+                -(pair[1].get("downloads") or 0),
+                -pair[0],
+                pair[1]["name"],
+            )
+        )
 
     return CatalogSearchResult(
         models=[item for _, item in scored],
@@ -592,7 +644,9 @@ def diversify_by_family(models: list[dict]) -> list[dict]:
 
     family_order = sorted(
         by_family.keys(),
-        key=lambda fam: -(by_family[fam][0].get("priority") or 0) if by_family[fam] else 0,
+        key=lambda fam: (
+            -(by_family[fam][0].get("priority") or 0) if by_family[fam] else 0
+        ),
     )
     indices = {fam: 0 for fam in family_order}
     diversified: list[dict] = []
@@ -632,5 +686,7 @@ def get_by_repo(repo_id: str, *, token: str | None = None) -> CatalogEntry | Non
     return _hub_row_to_entry(_model_info_to_row(info))
 
 
-def get_by_gguf_mirror(mirror_repo: str, *, token: str | None = None) -> CatalogEntry | None:
+def get_by_gguf_mirror(
+    mirror_repo: str, *, token: str | None = None
+) -> CatalogEntry | None:
     return get_by_repo(mirror_repo, token=token)

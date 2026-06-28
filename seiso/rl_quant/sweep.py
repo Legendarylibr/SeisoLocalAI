@@ -126,7 +126,11 @@ def resolve_sweep_spec(payload: dict[str, Any], *, preset: str) -> Any:
     return SweepSpec(
         objective=objective,
         direction=direction_raw,  # type: ignore[arg-type]
-        seed=int(payload["sweep_seed"]) if payload.get("sweep_seed") is not None else None,
+        seed=(
+            int(payload["sweep_seed"])
+            if payload.get("sweep_seed") is not None
+            else None
+        ),
         seeds=seeds,
         grid=default_sweep_grid({**payload, "preset": preset}),
         trials=None,
@@ -205,7 +209,10 @@ def run_auto_hyperparameter_sweep(
         runs_skipped = 0
 
         if seeds:
-            from seiso.adaptive_quant.sweep import SweepSeedResult, aggregate_objective_values
+            from seiso.adaptive_quant.sweep import (
+                SweepSeedResult,
+                aggregate_objective_values,
+            )
 
             seed_results: list[SweepSeedResult] = []
             for seed in seeds:
@@ -407,10 +414,14 @@ def _write_sweep_leaderboard_csv(
                 "trial_id": str(result.plan.trial_id),
                 "suffix": result.plan.run_name_suffix,
                 "objective": objective,
-                "objective_value": ""
-                if result.objective_value is None
-                else str(result.objective_value),
-                "objective_std": "" if result.objective_std is None else str(result.objective_std),
+                "objective_value": (
+                    ""
+                    if result.objective_value is None
+                    else str(result.objective_value)
+                ),
+                "objective_std": (
+                    "" if result.objective_std is None else str(result.objective_std)
+                ),
                 "objective_n": str(result.objective_n),
                 "summary_path": result.summary_path,
             }

@@ -115,13 +115,21 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Adaptive RL Quantization launcher dashboard (local web UI)."
     )
-    parser.add_argument("--host", default="127.0.0.1", help="Bind address (default: 127.0.0.1).")
-    parser.add_argument("--port", type=int, default=8765, help="HTTP port (default: 8765).")
-    parser.add_argument("--repo", type=Path, default=None, help="Repository root (auto-detected).")
+    parser.add_argument(
+        "--host", default="127.0.0.1", help="Bind address (default: 127.0.0.1)."
+    )
+    parser.add_argument(
+        "--port", type=int, default=8765, help="HTTP port (default: 8765)."
+    )
+    parser.add_argument(
+        "--repo", type=Path, default=None, help="Repository root (auto-detected)."
+    )
     parser.add_argument(
         "--python", dest="python_bin", default=None, help="Python for subprocess jobs."
     )
-    parser.add_argument("--no-browser", action="store_true", help="Do not open a browser tab.")
+    parser.add_argument(
+        "--no-browser", action="store_true", help="Do not open a browser tab."
+    )
     parser.add_argument(
         "--detach",
         action="store_true",

@@ -25,10 +25,14 @@ async def test_thread_cross_user_idor(app):
         _, token_b = await make_second_user()
         headers_b = {"Authorization": f"Bearer {token_b}"}
 
-        res = await client.get(f"/api/inference/threads/{tid}/messages", headers=headers_b)
+        res = await client.get(
+            f"/api/inference/threads/{tid}/messages", headers=headers_b
+        )
         assert res.status_code == 404
 
-        res_owner = await client.get(f"/api/inference/threads/{tid}/messages", headers=headers_a)
+        res_owner = await client.get(
+            f"/api/inference/threads/{tid}/messages", headers=headers_a
+        )
         assert res_owner.status_code == 200
 
 

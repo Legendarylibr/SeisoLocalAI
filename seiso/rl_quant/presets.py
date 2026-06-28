@@ -46,7 +46,14 @@ KERNEL_RL_HELP: dict[str, Any] = {
     "kernel_live_benchmark": "Run cached live GPU micro-benchmarks (NVIDIA CUDA only; slower)",
     "kernel_hidden_dim": "Hidden dimension for kernel bench shapes (default 4096)",
     "kernel_batch_rows": "Token rows for kernel bench shapes (default 4096)",
-    "profiles": ["auto", "stripe", "parallax", "narrow_opt", "wide_throughput", "balanced"],
+    "profiles": [
+        "auto",
+        "stripe",
+        "parallax",
+        "narrow_opt",
+        "wide_throughput",
+        "balanced",
+    ],
 }
 
 

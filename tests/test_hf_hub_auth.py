@@ -32,4 +32,6 @@ def test_configure_hf_hub_auth_mirrors_cli_token_into_relocated_hf_home(
 
     assert resolved == cli_token
     assert os.environ.get("HUGGING_FACE_HUB_TOKEN") == cli_token
-    assert (Path(os.environ["HF_HOME"]) / "token").read_text(encoding="utf-8").strip() == cli_token
+    assert (Path(os.environ["HF_HOME"]) / "token").read_text(
+        encoding="utf-8"
+    ).strip() == cli_token

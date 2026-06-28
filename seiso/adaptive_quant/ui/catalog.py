@@ -148,7 +148,10 @@ _WORKFLOW_DEFINITIONS: list[dict[str, Any]] = [
                     {"value": "gpu", "label": "gpu — auto VRAM profile"},
                     {"value": "3090", "label": "3090 — RTX 3090 host"},
                     {"value": "4090", "label": "4090 — RTX 4090 host"},
-                    {"value": "4090-universal", "label": "4090-universal — multi-hardware"},
+                    {
+                        "value": "4090-universal",
+                        "label": "4090-universal — multi-hardware",
+                    },
                     {"value": "post-train", "label": "post-train — long routed RL"},
                 ],
                 "default": "gpu",
@@ -364,7 +367,9 @@ def list_config_files(repo: Path) -> list[dict[str, str]]:
     return files
 
 
-def launcher_catalog(*, repo: Path, status: dict[str, Any] | None = None) -> dict[str, Any]:
+def launcher_catalog(
+    *, repo: Path, status: dict[str, Any] | None = None
+) -> dict[str, Any]:
     """Return workflow definitions and selectable options for the dashboard."""
     if status is None:
         from seiso.adaptive_quant.ui.status import dashboard_status
@@ -372,13 +377,17 @@ def launcher_catalog(*, repo: Path, status: dict[str, Any] | None = None) -> dic
         status = dashboard_status(repo=repo)
 
     nvidia = status.get("nvidia", {})
-    recommended_ack = recommended_gpu_install_ack_env() if nvidia.get("linux_nvidia_host") else None
+    recommended_ack = (
+        recommended_gpu_install_ack_env() if nvidia.get("linux_nvidia_host") else None
+    )
 
     workflows: list[dict[str, Any]] = []
     for workflow in _WORKFLOW_DEFINITIONS:
         entry = dict(workflow)
         entry["field_groups"] = field_groups_for_workflow(entry["id"])
-        if entry.get("requires_nvidia_ack") and nvidia.get("needs_ack_for_gpu_training"):
+        if entry.get("requires_nvidia_ack") and nvidia.get(
+            "needs_ack_for_gpu_training"
+        ):
             entry["nvidia_ack_required"] = True
         workflows.append(entry)
 
@@ -389,9 +398,7 @@ def launcher_catalog(*, repo: Path, status: dict[str, Any] | None = None) -> dic
         "recommended_nvidia_ack": (
             "host_venv"
             if recommended_ack == "ADAPTIVE_RL_NVIDIA_HOST_VENV_ACK"
-            else "wsl"
-            if recommended_ack == "ADAPTIVE_RL_NVIDIA_WSL_ACK"
-            else None
+            else "wsl" if recommended_ack == "ADAPTIVE_RL_NVIDIA_WSL_ACK" else None
         ),
         "platform": {
             "wsl2": detect_wsl2(),

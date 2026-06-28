@@ -65,7 +65,11 @@ def _nvidia_smi_gpus() -> list[dict[str, Any]]:
         if not isinstance(name, str) or not name.strip():
             continue
         total_raw = item.get("memory_total_mb")
-        total_mb = int(total_raw) if isinstance(total_raw, (int, float)) and total_raw > 0 else None
+        total_mb = (
+            int(total_raw)
+            if isinstance(total_raw, (int, float)) and total_raw > 0
+            else None
+        )
         gpus.append(
             {
                 "index": int(item.get("index", len(gpus))),
@@ -80,7 +84,11 @@ def _nvidia_smi_gpus() -> list[dict[str, Any]]:
 
 
 def _mlx_apple_gpu() -> list[dict[str, Any]]:
-    if os.environ.get("SEISO_SKIP_MLX_PROBE", "").strip().lower() in {"1", "true", "yes"}:
+    if os.environ.get("SEISO_SKIP_MLX_PROBE", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }:
         return []
     try:
         import mlx.core as mx  # noqa: F401

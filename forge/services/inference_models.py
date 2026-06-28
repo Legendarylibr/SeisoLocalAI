@@ -82,11 +82,15 @@ def _installed_backends() -> dict[str, bool]:
     }
 
 
-def _filter_installed_backends(backends: list[str], installed: dict[str, bool]) -> list[str]:
+def _filter_installed_backends(
+    backends: list[str], installed: dict[str, bool]
+) -> list[str]:
     return [b for b in backends if installed.get(b, False)]
 
 
-def _inventory_artifact_is_complete(row: dict[str, Any], metadata: dict[str, Any]) -> bool:
+def _inventory_artifact_is_complete(
+    row: dict[str, Any], metadata: dict[str, Any]
+) -> bool:
     return inventory_gguf_is_complete(
         row,
         metadata,
@@ -155,7 +159,11 @@ async def get_inference_option(
     profile: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     """Resolve a single dropdown option without rebuilding the full inventory list."""
-    profile = profile if profile is not None else hardware_profile() if hardware_aware else None
+    profile = (
+        profile
+        if profile is not None
+        else hardware_profile() if hardware_aware else None
+    )
     installed = _installed_backends()
 
     row = await db.get_model(model_id, user_id)
@@ -181,7 +189,11 @@ async def list_inference_options(
         if cached and now - cached[0] < _OPTIONS_CACHE_TTL_S:
             return cached[1]
 
-    profile = profile if profile is not None else hardware_profile() if hardware_aware else None
+    profile = (
+        profile
+        if profile is not None
+        else hardware_profile() if hardware_aware else None
+    )
     installed = _installed_backends()
     options: list[dict[str, Any]] = []
 
@@ -199,9 +211,7 @@ async def list_inference_options(
                 "backends": [BACKEND_ROUTER],
                 "backend_labels": {BACKEND_ROUTER: BACKEND_LABELS[BACKEND_ROUTER]},
                 "size_bytes": 0,
-                "metadata": {
-                    "description": "External local router service"
-                },
+                "metadata": {"description": "External local router service"},
                 "hardware_fit": "ideal",
                 "hardware_fit_label": "Managed routing",
                 "hardware_fit_rank": 100,

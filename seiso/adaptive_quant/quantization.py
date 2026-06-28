@@ -53,14 +53,18 @@ def _allowed_bit_widths(config: FrameworkConfig) -> list[int]:
     return sorted(config.discrete_bit_widths)
 
 
-def nearest_allowed_discrete_bit_width(value: float | int, config: FrameworkConfig) -> int:
+def nearest_allowed_discrete_bit_width(
+    value: float | int, config: FrameworkConfig
+) -> int:
     allowed = _allowed_bit_widths(config)
     if not allowed:
         return int(config.safe_default_bits)
     return min(allowed, key=lambda candidate: abs(float(candidate) - float(value)))
 
 
-def _normalize_bit_width(bit_width: int | None, allowed: list[int], *, default: int) -> int:
+def _normalize_bit_width(
+    bit_width: int | None, allowed: list[int], *, default: int
+) -> int:
     if bit_width is None:
         return default
     return _nearest_allowed_bit_width(bit_width, allowed, default=default)
@@ -90,7 +94,10 @@ def _learned_bits(
     max_bits: int,
 ) -> list[float]:
     learned_span = (max_bits - min_bits) * 0.75
-    base_bits = min_bits + clamp(decision.precision_level, *config.precision_bounds) * learned_span
+    base_bits = (
+        min_bits
+        + clamp(decision.precision_level, *config.precision_bounds) * learned_span
+    )
     scale_factor = clamp(decision.scale_factor, *config.scale_bounds)
     clipping_range = clamp(decision.clipping_range, *config.clip_bounds)
     precision_need = summarize_precision_needs(state.input_features, state.sensitivity)
@@ -100,7 +107,9 @@ def _learned_bits(
         sensitivity_push = 1.05 * (layer_stat - 0.55) + 0.80 * (precision_need - 0.50)
         scale_push = (scale_factor - 1.0) * 0.45
         clipping_push = (clipping_range - 1.0) * 0.35
-        depth_bias = 0.12 if layer_index >= len(state.sensitivity.layer_stats) // 2 else -0.04
+        depth_bias = (
+            0.12 if layer_index >= len(state.sensitivity.layer_stats) // 2 else -0.04
+        )
         layer_bits.append(
             clamp(
                 base_bits + sensitivity_push + scale_push + clipping_push + depth_bias,
@@ -117,7 +126,9 @@ def finalize_decision(
     finalized = replace(decision)
     finalized.scale_factor = clamp(finalized.scale_factor, *config.scale_bounds)
     finalized.clipping_range = clamp(finalized.clipping_range, *config.clip_bounds)
-    finalized.precision_level = clamp(finalized.precision_level, *config.precision_bounds)
+    finalized.precision_level = clamp(
+        finalized.precision_level, *config.precision_bounds
+    )
 
     allowed = _allowed_bit_widths(config)
     min_bits = allowed[0] if allowed else int(config.safe_default_bits)
@@ -135,7 +146,9 @@ def finalize_decision(
             for bit_width in finalized.group_bit_widths
         ]
         finalized.group_bit_widths = normalized
-        finalized.effective_layer_bits = _expand_group_bits(normalized, config.num_layers)
+        finalized.effective_layer_bits = _expand_group_bits(
+            normalized, config.num_layers
+        )
     elif finalized.mode == QuantMode.PER_LAYER:
         if not finalized.layer_bit_widths:
             finalized.layer_bit_widths = [config.safe_default_bits] * config.num_layers
@@ -143,7 +156,9 @@ def finalize_decision(
             _normalize_bit_width(bit_width, allowed, default=config.safe_default_bits)
             for bit_width in finalized.layer_bit_widths
         ]
-        normalized = _pad_or_truncate(normalized, config.num_layers, fill=normalized[-1])
+        normalized = _pad_or_truncate(
+            normalized, config.num_layers, fill=normalized[-1]
+        )
         finalized.layer_bit_widths = normalized
         finalized.effective_layer_bits = [
             float(bit_width) for bit_width in finalized.layer_bit_widths
@@ -169,7 +184,9 @@ def finalize_decision(
     _finalize_moe_selection(finalized, state, config)
     finalize_kernel_profile(finalized, config)
 
-    out_of_bounds = any(bit < min_bits or bit > max_bits for bit in finalized.effective_layer_bits)
+    out_of_bounds = any(
+        bit < min_bits or bit > max_bits for bit in finalized.effective_layer_bits
+    )
     extremely_fragmented = variance(finalized.effective_layer_bits) > 4.0
     if out_of_bounds or extremely_fragmented:
         fallback = safe_fallback_decision(config)
@@ -197,12 +214,16 @@ def _finalize_moe_selection(
     default_index = config.default_moe_variant_index()
     variant_count = config.moe_variant_count()
     fixed_index = (
-        config.moe_variant_index(config.moe_fixed_variant) if config.moe_fixed_variant else None
+        config.moe_variant_index(config.moe_fixed_variant)
+        if config.moe_fixed_variant
+        else None
     )
     if fixed_index is not None:
         normalized_indices = [fixed_index] * len(state.moe_context.experts)
     else:
-        normalized_indices = list(decision.moe_variant_indices[: len(state.moe_context.experts)])
+        normalized_indices = list(
+            decision.moe_variant_indices[: len(state.moe_context.experts)]
+        )
         normalized_indices = _pad_or_truncate(
             normalized_indices,
             len(state.moe_context.experts),
@@ -238,7 +259,10 @@ def _finalize_moe_selection(
     )
     variant_churn = (
         mean(
-            [abs(index - default_index) / max(1, variant_count - 1) for index in normalized_indices]
+            [
+                abs(index - default_index) / max(1, variant_count - 1)
+                for index in normalized_indices
+            ]
         )
         if normalized_indices
         else 0.0
@@ -262,7 +286,9 @@ def _apply_moe_safety(
         and config.moe_max_aggressive_experts >= 0
         and aggressive_index < config.moe_variant_count()
     ):
-        aggressive_slots = [slot for slot, index in enumerate(indices) if index == aggressive_index]
+        aggressive_slots = [
+            slot for slot, index in enumerate(indices) if index == aggressive_index
+        ]
         if len(aggressive_slots) > config.moe_max_aggressive_experts:
             ranked = sorted(
                 aggressive_slots,
@@ -274,7 +300,9 @@ def _apply_moe_safety(
                 if slot not in keep:
                     indices[slot] = default_index
 
-    while _predicted_moe_swap_cost(indices, state, config) > config.moe_max_swap_cost_ms:
+    while (
+        _predicted_moe_swap_cost(indices, state, config) > config.moe_max_swap_cost_ms
+    ):
         adjusted = False
         for slot, expert in sorted(
             enumerate(state.moe_context.experts),

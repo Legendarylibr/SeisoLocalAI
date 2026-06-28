@@ -49,7 +49,10 @@ def _parse_nvidia_smi_process_csv(stdout: str) -> list[GpuMemoryProcess]:
 def query_gpu_compute_processes() -> list[GpuMemoryProcess]:
     """Return CUDA/compute processes currently using discrete GPU memory."""
     try:
-        from seiso.security.nvidia_boundary import _run_nvidia_smi, resolve_nvidia_smi_executable
+        from seiso.security.nvidia_boundary import (
+            _run_nvidia_smi,
+            resolve_nvidia_smi_executable,
+        )
     except ImportError:
         return []
 
@@ -75,7 +78,9 @@ def query_gpu_compute_processes() -> list[GpuMemoryProcess]:
     return []
 
 
-def external_gpu_compute_processes(*, exclude_pid: int | None = None) -> list[GpuMemoryProcess]:
+def external_gpu_compute_processes(
+    *, exclude_pid: int | None = None
+) -> list[GpuMemoryProcess]:
     """GPU compute processes other than the current PID."""
     current = exclude_pid if exclude_pid is not None else os.getpid()
     return [proc for proc in query_gpu_compute_processes() if proc.pid != current]
@@ -109,9 +114,7 @@ def _format_process_lines(processes: list[dict[str, Any]], *, limit: int = 4) ->
     lines: list[str] = []
     for proc in processes[:limit]:
         used_gb = proc["used_mb"] / 1024
-        lines.append(
-            f"  - {proc['name']} (PID {proc['pid']}): {used_gb:.1f} GB"
-        )
+        lines.append(f"  - {proc['name']} (PID {proc['pid']}): {used_gb:.1f} GB")
     extra = len(processes) - limit
     if extra > 0:
         lines.append(f"  - …and {extra} more (run `nvidia-smi` for details)")
@@ -138,7 +141,9 @@ def warn_vram_contention(
     if model_est_mb >= large_model_mb:
         should_warn = True
     elif model_est_mb > 0:
-        should_warn = summary["external_vram_mb"] >= max(warn_external_mb, model_est_mb // 4)
+        should_warn = summary["external_vram_mb"] >= max(
+            warn_external_mb, model_est_mb // 4
+        )
     else:
         should_warn = summary["external_vram_mb"] >= _DEFAULT_STARTUP_WARN_MB
 
@@ -165,7 +170,9 @@ def log_vram_contention_at_startup() -> dict[str, Any] | None:
     return warn_vram_contention(context="startup")
 
 
-def warn_before_large_model_load(*, model_path: str, est_mb: int) -> dict[str, Any] | None:
+def warn_before_large_model_load(
+    *, model_path: str, est_mb: int
+) -> dict[str, Any] | None:
     """Pre-load hook for GGUF models that benefit from a clean GPU."""
     from pathlib import Path
 

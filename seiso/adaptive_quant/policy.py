@@ -58,7 +58,9 @@ class UniversalQuantizationPolicy:
         self.supported_modes = config.supported_modes()
         self.ordered_hardware = config.ordered_hardware()
         self.state_dim = config.state_vector_dim()
-        self.mode_head = CategoricalHead(self.state_dim, len(self.supported_modes), self.rng)
+        self.mode_head = CategoricalHead(
+            self.state_dim, len(self.supported_modes), self.rng
+        )
         self.discrete_head = CategoricalHead(
             self.state_dim, len(config.discrete_bit_widths), self.rng
         )
@@ -70,7 +72,9 @@ class UniversalQuantizationPolicy:
             CategoricalHead(self.state_dim, len(config.discrete_bit_widths), self.rng)
             for _ in range(config.num_layers)
         ]
-        self.learned_head = GaussianHead(self.state_dim, 3, self.rng, config.continuous_stddev)
+        self.learned_head = GaussianHead(
+            self.state_dim, 3, self.rng, config.continuous_stddev
+        )
         self.learned_head.bias = [-0.10, -0.20, -0.45]
         self.moe_heads = (
             [
@@ -123,7 +127,11 @@ class UniversalQuantizationPolicy:
                 metadata={"head": "discrete"},
             )
             traces.append(
-                {"head": "discrete", "selected_index": bit_index, "probabilities": probabilities}
+                {
+                    "head": "discrete",
+                    "selected_index": bit_index,
+                    "probabilities": probabilities,
+                }
             )
         elif selected_mode == QuantMode.GROUPED:
             group_bits: list[int] = []
@@ -141,7 +149,9 @@ class UniversalQuantizationPolicy:
                     }
                 )
             decision = QuantizationDecision(
-                mode=selected_mode, group_bit_widths=group_bits, metadata={"head": "grouped"}
+                mode=selected_mode,
+                group_bit_widths=group_bits,
+                metadata={"head": "grouped"},
             )
         elif selected_mode == QuantMode.PER_LAYER:
             layer_bits: list[int] = []
@@ -159,7 +169,9 @@ class UniversalQuantizationPolicy:
                     }
                 )
             decision = QuantizationDecision(
-                mode=selected_mode, layer_bit_widths=layer_bits, metadata={"head": "per_layer"}
+                mode=selected_mode,
+                layer_bit_widths=layer_bits,
+                metadata={"head": "per_layer"},
             )
         elif selected_mode == QuantMode.LEARNED:
             bounds = [
@@ -177,14 +189,18 @@ class UniversalQuantizationPolicy:
                 precision_level=samples[2],
                 metadata={"head": "learned"},
             )
-            traces.append({"head": "learned", "raw_samples": raw_samples, "raw_means": raw_means})
+            traces.append(
+                {"head": "learned", "raw_samples": raw_samples, "raw_means": raw_means}
+            )
         else:
             raise ValueError(f"Unsupported selected mode: {selected_mode}")
 
         if self.config.moe_enabled and state.moe_context is not None:
             variant_indices: list[int] = []
             variant_names: list[str] = []
-            for slot, head in enumerate(self.moe_heads[: len(state.moe_context.experts)]):
+            for slot, head in enumerate(
+                self.moe_heads[: len(state.moe_context.experts)]
+            ):
                 variant_index, probabilities = head.sample(
                     state_vector, self.rng, deterministic=deterministic
                 )
@@ -265,7 +281,9 @@ class UniversalQuantizationPolicy:
                 update_categorical(self.moe_heads[action_trace["slot"]], action_trace)
             elif head_name == "kernel" and self.kernel_head is not None:
                 update_categorical(self.kernel_head, action_trace)
-        self.value_head.update(trace.state_vector, reward, self.config.value_learning_rate)
+        self.value_head.update(
+            trace.state_vector, reward, self.config.value_learning_rate
+        )
 
     def snapshot(self) -> dict[str, object]:
         return {
@@ -310,19 +328,27 @@ class UniversalQuantizationPolicy:
                 raise ValueError(f"policy snapshot missing {key!r}")
         mode_head = snapshot["mode_head"]
         if not isinstance(mode_head, CategoricalHead):
-            raise TypeError("policy snapshot mode_head must be a CategoricalHead instance")
+            raise TypeError(
+                "policy snapshot mode_head must be a CategoricalHead instance"
+            )
         if len(mode_head.weights) != len(self.supported_modes):
             raise ValueError("policy snapshot mode_head output dimension mismatch")
         discrete_head = snapshot["discrete_head"]
         if not isinstance(discrete_head, CategoricalHead):
-            raise TypeError("policy snapshot discrete_head must be a CategoricalHead instance")
+            raise TypeError(
+                "policy snapshot discrete_head must be a CategoricalHead instance"
+            )
         if len(discrete_head.weights) != len(self.config.discrete_bit_widths):
             raise ValueError("policy snapshot discrete_head output dimension mismatch")
         group_heads = snapshot["group_heads"]
-        if not isinstance(group_heads, list) or len(group_heads) != len(self.group_heads):
+        if not isinstance(group_heads, list) or len(group_heads) != len(
+            self.group_heads
+        ):
             raise ValueError("policy snapshot group_heads length mismatch")
         layer_heads = snapshot["layer_heads"]
-        if not isinstance(layer_heads, list) or len(layer_heads) != len(self.layer_heads):
+        if not isinstance(layer_heads, list) or len(layer_heads) != len(
+            self.layer_heads
+        ):
             raise ValueError("policy snapshot layer_heads length mismatch")
         moe_heads = snapshot.get("moe_heads", self.moe_heads)
         if not isinstance(moe_heads, list) or len(moe_heads) != len(self.moe_heads):
@@ -333,13 +359,19 @@ class UniversalQuantizationPolicy:
             "rng_state": _serialize_rng_state(self.rng.getstate()),
             "mode_head": _serialize_categorical_head(self.mode_head),
             "discrete_head": _serialize_categorical_head(self.discrete_head),
-            "group_heads": [_serialize_categorical_head(head) for head in self.group_heads],
-            "layer_heads": [_serialize_categorical_head(head) for head in self.layer_heads],
+            "group_heads": [
+                _serialize_categorical_head(head) for head in self.group_heads
+            ],
+            "layer_heads": [
+                _serialize_categorical_head(head) for head in self.layer_heads
+            ],
             "learned_head": _serialize_gaussian_head(self.learned_head),
             "moe_heads": [_serialize_categorical_head(head) for head in self.moe_heads],
-            "kernel_head": _serialize_categorical_head(self.kernel_head)
-            if self.kernel_head is not None
-            else None,
+            "kernel_head": (
+                _serialize_categorical_head(self.kernel_head)
+                if self.kernel_head is not None
+                else None
+            ),
             "value_head": _serialize_value_head(self.value_head),
         }
 
@@ -391,11 +423,16 @@ class UniversalQuantizationPolicy:
         self.rng.setstate(_deserialize_rng_state(payload["rng_state"]))
         _restore_categorical_head(self.mode_head, payload["mode_head"])
         _restore_categorical_head(self.discrete_head, payload["discrete_head"])
-        self.group_heads = [_categorical_head_from_payload(item) for item in payload["group_heads"]]
-        self.layer_heads = [_categorical_head_from_payload(item) for item in payload["layer_heads"]]
+        self.group_heads = [
+            _categorical_head_from_payload(item) for item in payload["group_heads"]
+        ]
+        self.layer_heads = [
+            _categorical_head_from_payload(item) for item in payload["layer_heads"]
+        ]
         self.learned_head = _gaussian_head_from_payload(payload["learned_head"])
         self.moe_heads = [
-            _categorical_head_from_payload(item) for item in payload.get("moe_heads", [])
+            _categorical_head_from_payload(item)
+            for item in payload.get("moe_heads", [])
         ]
         kernel_payload = payload.get("kernel_head")
         if kernel_payload is not None and self.kernel_head is not None:

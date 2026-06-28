@@ -156,7 +156,9 @@ def run_distillation(
             T = cfg.temperature
             soft_teacher = F.softmax(t_logits / T, dim=-1)
             soft_student = F.log_softmax(s_logits / T, dim=-1)
-            distill_loss = F.kl_div(soft_student, soft_teacher, reduction="batchmean") * (T * T)
+            distill_loss = F.kl_div(
+                soft_student, soft_teacher, reduction="batchmean"
+            ) * (T * T)
 
             loss = cfg.alpha * distill_loss + (1.0 - cfg.alpha) * hard_loss
             loss = loss / cfg.grad_accum_steps
@@ -176,7 +178,9 @@ def run_distillation(
 
             if accelerator.is_local_main_process:
                 lr = (
-                    float(scheduler.get_last_lr()[0]) if hasattr(scheduler, "get_last_lr") else None
+                    float(scheduler.get_last_lr()[0])
+                    if hasattr(scheduler, "get_last_lr")
+                    else None
                 )
                 dt = None
                 if step_t0 is not None:

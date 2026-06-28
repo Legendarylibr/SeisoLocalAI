@@ -77,7 +77,9 @@ def test_replay_manifest_from_bundled_package(tmp_path: Path):
         effective_config=effective,
         stage="distill",
     )
-    append_artifact_record(run_dir, stage="distill", artifact_path=artifact, role="output")
+    append_artifact_record(
+        run_dir, stage="distill", artifact_path=artifact, role="output"
+    )
 
     ok = verify_manifest(run_dir)
     assert ok["ok"] is True

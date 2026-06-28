@@ -99,7 +99,9 @@ def extract_metric(summary: dict[str, Any], objective: str) -> float | None:
         return flat[objective]
     suffix = f".{objective}"
     suffix_matches = [
-        (key, value) for key, value in flat.items() if key.endswith(suffix) and math.isfinite(value)
+        (key, value)
+        for key, value in flat.items()
+        if key.endswith(suffix) and math.isfinite(value)
     ]
     if len(suffix_matches) == 1:
         return suffix_matches[0][1]

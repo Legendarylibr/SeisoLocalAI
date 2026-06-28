@@ -72,7 +72,12 @@ def format_hub_error(
             "to access gated models."
         )
 
-    if code == 429 or "429" in msg or "rate limit" in lowered or "too many requests" in lowered:
+    if (
+        code == 429
+        or "429" in msg
+        or "rate limit" in lowered
+        or "too many requests" in lowered
+    ):
         if context == "download" and repo_id:
             return (
                 f"Hugging Face anonymous API rate limit reached while downloading {repo_id}. "
@@ -106,9 +111,7 @@ def format_hub_error(
             return f"Download timed out for {repo_id}. Retry or set HF_HUB_DOWNLOAD_TIMEOUT higher."
         if context == "search":
             return "Hugging Face Hub search timed out. Try again in a moment."
-        return (
-            f"Hugging Face Hub timed out — try again or increase HF_HUB_DOWNLOAD_TIMEOUT. ({msg})"
-        )
+        return f"Hugging Face Hub timed out — try again or increase HF_HUB_DOWNLOAD_TIMEOUT. ({msg})"
 
     if context == "download" and repo_id:
         return f"Hub download failed for {repo_id}: {msg}"

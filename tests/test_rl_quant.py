@@ -41,7 +41,11 @@ def test_build_framework_config_minimal(tmp_path: Path):
         job_id="job-1",
         user_id="user-1",
         data_dir=tmp_path,
-        payload={"preset": "minimal", "training_episodes": 16, "evaluation_episodes": 4},
+        payload={
+            "preset": "minimal",
+            "training_episodes": 16,
+            "evaluation_episodes": 4,
+        },
     )
     assert cfg.training_episodes == 16
     assert cfg.backend == "simulator"

@@ -53,16 +53,22 @@ async def create_provider(
     if ptype in _REMOVED_FRONTIER_TYPES:
         raise HTTPException(400, "Frontier cloud providers are not supported")
     if ptype not in LOCAL_PROVIDER_TYPES:
-        raise HTTPException(400, f"provider_type must be one of {sorted(LOCAL_PROVIDER_TYPES)}")
+        raise HTTPException(
+            400, f"provider_type must be one of {sorted(LOCAL_PROVIDER_TYPES)}"
+        )
     config = dict(body.config)
     if "base_url" in config and config["base_url"]:
         try:
-            config["base_url"] = validate_provider_base_url(config["base_url"], provider_type=ptype)
+            config["base_url"] = validate_provider_base_url(
+                config["base_url"], provider_type=ptype
+            )
         except SecurityError as exc:
             raise HTTPException(400, str(exc)) from exc
     row = await db.create_provider(user_id, body.name, ptype, config)
     row["config"] = mask_config(config)
-    audit_event("provider_create", user_id=user_id, provider_id=row["id"], provider_type=ptype)
+    audit_event(
+        "provider_create", user_id=user_id, provider_id=row["id"], provider_type=ptype
+    )
     return row
 
 

@@ -38,7 +38,9 @@ def _reset_inference_caches():
 def test_gguf_recommends_llamacpp(tmp_path: Path):
     gguf = tmp_path / "model-q4.gguf"
     gguf.write_bytes(b"gguf")
-    assert recommend_backend(model_path=str(gguf), model_format="gguf") == BACKEND_LLAMACPP
+    assert (
+        recommend_backend(model_path=str(gguf), model_format="gguf") == BACKEND_LLAMACPP
+    )
 
 
 def _complete_hf_gguf_metadata(filename: str = "model-q4.gguf") -> dict:
@@ -94,7 +96,9 @@ def _write_gguf_with_u32_metadata(path: Path, pairs: list[tuple[bytes, int]]) ->
                 struct.pack("<I", value),
             ]
         )
-    path.write_bytes(b"GGUF" + struct.pack("<IQQ", 3, 0, 1 + len(pairs)) + b"".join(payload))
+    path.write_bytes(
+        b"GGUF" + struct.pack("<IQQ", 3, 0, 1 + len(pairs)) + b"".join(payload)
+    )
 
 
 def test_gguf_architecture_reads_metadata(tmp_path: Path):
@@ -163,7 +167,12 @@ def test_resolve_gguf_file_preserves_symlink_path(tmp_path: Path):
     blob.parent.mkdir(parents=True)
     blob.write_bytes(b"gguf")
     snapshot = (
-        tmp_path / "hf_cache" / "models--org--Model-GGUF" / "snapshots" / "rev" / "model-q4.gguf"
+        tmp_path
+        / "hf_cache"
+        / "models--org--Model-GGUF"
+        / "snapshots"
+        / "rev"
+        / "model-q4.gguf"
     )
     snapshot.parent.mkdir(parents=True)
     snapshot.symlink_to("../../blobs/abc")
@@ -178,7 +187,12 @@ def test_model_pool_passes_preserved_path_to_loader(tmp_path: Path):
     blob.parent.mkdir(parents=True)
     blob.write_bytes(b"gguf")
     snapshot = (
-        tmp_path / "hf_cache" / "models--org--Model-GGUF" / "snapshots" / "rev" / "model-q4.gguf"
+        tmp_path
+        / "hf_cache"
+        / "models--org--Model-GGUF"
+        / "snapshots"
+        / "rev"
+        / "model-q4.gguf"
     )
     snapshot.parent.mkdir(parents=True)
     snapshot.symlink_to("../../blobs/abc")
@@ -261,13 +275,19 @@ async def test_cancel_generation_keeps_loaded_model(monkeypatch):
     calls = {"bump": 0, "unload": 0}
 
     monkeypatch.setattr(
-        runner._pool, "status", lambda: {"active_model": "m1", "path": "/tmp/model.gguf"}
+        runner._pool,
+        "status",
+        lambda: {"active_model": "m1", "path": "/tmp/model.gguf"},
     )
     monkeypatch.setattr(
-        runner._pool, "bump_generation", lambda: calls.__setitem__("bump", calls["bump"] + 1)
+        runner._pool,
+        "bump_generation",
+        lambda: calls.__setitem__("bump", calls["bump"] + 1),
     )
     monkeypatch.setattr(
-        runner._pool, "unload_all", lambda: calls.__setitem__("unload", calls["unload"] + 1)
+        runner._pool,
+        "unload_all",
+        lambda: calls.__setitem__("unload", calls["unload"] + 1),
     )
 
     status = await runner.cancel_generation()
@@ -277,7 +297,9 @@ async def test_cancel_generation_keeps_loaded_model(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_list_inference_options_filters_to_installed_backends(monkeypatch, tmp_path):
+async def test_list_inference_options_filters_to_installed_backends(
+    monkeypatch, tmp_path
+):
     from forge.db.crypto import generate_encryption_key
     from forge.db.store import Database
     from forge.services import inference_models
@@ -286,7 +308,9 @@ async def test_list_inference_options_filters_to_installed_backends(monkeypatch,
     model_path = tmp_path / "model-q4.gguf"
     model_path.write_bytes(b"gguf")
 
-    db = Database(tmp_path / "forge.db", encryption_key=generate_encryption_key(), ephemeral=True)
+    db = Database(
+        tmp_path / "forge.db", encryption_key=generate_encryption_key(), ephemeral=True
+    )
     await db.add_model(
         user_id="u1",
         name="Model Q4",
@@ -308,7 +332,9 @@ async def test_list_inference_options_filters_to_installed_backends(monkeypatch,
         lambda _repo, _filename: model_path.stat().st_size,
     )
 
-    options = await inference_models.list_inference_options(db, "u1", hardware_aware=False)
+    options = await inference_models.list_inference_options(
+        db, "u1", hardware_aware=False
+    )
 
     assert options[0]["id"]
     assert options[0]["backends"] == [BACKEND_LLAMACPP]
@@ -316,7 +342,9 @@ async def test_list_inference_options_filters_to_installed_backends(monkeypatch,
 
 
 @pytest.mark.asyncio
-async def test_list_inference_options_does_not_fallback_to_missing_backend(monkeypatch, tmp_path):
+async def test_list_inference_options_does_not_fallback_to_missing_backend(
+    monkeypatch, tmp_path
+):
     from forge.db.crypto import generate_encryption_key
     from forge.db.store import Database
     from forge.services import inference_models
@@ -325,7 +353,9 @@ async def test_list_inference_options_does_not_fallback_to_missing_backend(monke
     model_path = tmp_path / "model-q4.gguf"
     model_path.write_bytes(b"gguf")
 
-    db = Database(tmp_path / "forge.db", encryption_key=generate_encryption_key(), ephemeral=True)
+    db = Database(
+        tmp_path / "forge.db", encryption_key=generate_encryption_key(), ephemeral=True
+    )
     await db.add_model(
         user_id="u1",
         name="Model Q4",
@@ -347,7 +377,9 @@ async def test_list_inference_options_does_not_fallback_to_missing_backend(monke
         lambda _repo, _filename: model_path.stat().st_size,
     )
 
-    options = await inference_models.list_inference_options(db, "u1", hardware_aware=False)
+    options = await inference_models.list_inference_options(
+        db, "u1", hardware_aware=False
+    )
 
     assert options[0]["backends"] == []
     assert options[0]["default_backend"] == ""
@@ -363,7 +395,9 @@ async def test_list_inference_options_skips_partial_hf_gguf(monkeypatch, tmp_pat
     model_path = tmp_path / "model-Q4_K_M.gguf"
     model_path.write_bytes(b"partial")
 
-    db = Database(tmp_path / "forge.db", encryption_key=generate_encryption_key(), ephemeral=True)
+    db = Database(
+        tmp_path / "forge.db", encryption_key=generate_encryption_key(), ephemeral=True
+    )
     await db.add_model(
         user_id="u1",
         name="Model Q4",
@@ -389,13 +423,17 @@ async def test_list_inference_options_skips_partial_hf_gguf(monkeypatch, tmp_pat
         lambda _repo, _filename: 10_000,
     )
 
-    options = await inference_models.list_inference_options(db, "u1", hardware_aware=False)
+    options = await inference_models.list_inference_options(
+        db, "u1", hardware_aware=False
+    )
 
     assert options == []
 
 
 @pytest.mark.asyncio
-async def test_list_inference_options_skips_hf_gguf_without_metadata(monkeypatch, tmp_path):
+async def test_list_inference_options_skips_hf_gguf_without_metadata(
+    monkeypatch, tmp_path
+):
     from forge.db.crypto import generate_encryption_key
     from forge.db.store import Database
     from forge.services import inference_models
@@ -404,7 +442,9 @@ async def test_list_inference_options_skips_hf_gguf_without_metadata(monkeypatch
     model_path = tmp_path / "model-Q4_K_M.gguf"
     _write_minimal_gguf(model_path, "llama")
 
-    db = Database(tmp_path / "forge.db", encryption_key=generate_encryption_key(), ephemeral=True)
+    db = Database(
+        tmp_path / "forge.db", encryption_key=generate_encryption_key(), ephemeral=True
+    )
     await db.add_model(
         user_id="u1",
         name="Model Q4",
@@ -421,6 +461,8 @@ async def test_list_inference_options_skips_hf_gguf_without_metadata(monkeypatch
         lambda: InferenceRuntimeStatus(llamacpp=True, mlx=False, torch=False),
     )
 
-    options = await inference_models.list_inference_options(db, "u1", hardware_aware=False)
+    options = await inference_models.list_inference_options(
+        db, "u1", hardware_aware=False
+    )
 
     assert options == []

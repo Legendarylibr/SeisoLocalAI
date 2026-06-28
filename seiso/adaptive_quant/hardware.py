@@ -9,7 +9,10 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from seiso.adaptive_quant.gpu_profiles import SIMULATOR_PROFILE_TUNING, infer_gpu_profile
+from seiso.adaptive_quant.gpu_profiles import (
+    SIMULATOR_PROFILE_TUNING,
+    infer_gpu_profile,
+)
 from seiso.adaptive_quant.math_utils import clamp
 from seiso.adaptive_quant.types import HardwareProfile, HardwareType
 
@@ -176,7 +179,9 @@ def host_aware_hardware_profiles(
     cpu_throughput = clamp(0.82 + 0.72 * cpu_scale + arm_bonus, 0.82, 1.56)
     cpu_latency = clamp(1.46 - 0.58 * cpu_scale - arm_bonus * 0.5, 0.82, 1.46)
     cpu_memory_budget_mb = clamp(total_memory_gb * 1024.0 * 0.68, 2_048.0, 96_000.0)
-    cpu_preferred_bits = clamp(3.4 + min(total_memory_gb, 128.0) / 128.0 * 1.35, 3.4, 4.85)
+    cpu_preferred_bits = clamp(
+        3.4 + min(total_memory_gb, 128.0) / 128.0 * 1.35, 3.4, 4.85
+    )
 
     profiles[HardwareType.CPU] = HardwareProfile(
         hardware_type=HardwareType.CPU,
@@ -186,7 +191,9 @@ def host_aware_hardware_profiles(
         latency_bias=cpu_latency,
         memory_budget_mb=cpu_memory_budget_mb,
         preferred_bits=cpu_preferred_bits,
-        kernel_uniformity_preference=clamp(0.42 + cpu_scale * 0.16 + arm_bonus * 0.4, 0.42, 0.72),
+        kernel_uniformity_preference=clamp(
+            0.42 + cpu_scale * 0.16 + arm_bonus * 0.4, 0.42, 0.72
+        ),
         ngl=0,
     )
 
@@ -202,7 +209,10 @@ def host_aware_hardware_profiles(
         ngl=0,
     )
 
-    if detected.accelerator_type == HardwareType.GPU and detected.accelerator_profile is not None:
+    if (
+        detected.accelerator_type == HardwareType.GPU
+        and detected.accelerator_profile is not None
+    ):
         template = SIMULATOR_PROFILE_TUNING.get(
             detected.accelerator_profile, SIMULATOR_PROFILE_TUNING["consumer_8gb"]
         )
@@ -278,18 +288,26 @@ def _detect_accelerator_from_nvidia_smi() -> CudaDeviceInfo | None:
         return None
     if completed.returncode != 0:
         return None
-    first_line = next((line.strip() for line in completed.stdout.splitlines() if line.strip()), "")
+    first_line = next(
+        (line.strip() for line in completed.stdout.splitlines() if line.strip()), ""
+    )
     if not first_line:
         return None
     name, _, memory_text = first_line.partition(",")
     try:
-        memory_gb = round(float(memory_text.strip()) / 1024.0, 2) if memory_text.strip() else None
+        memory_gb = (
+            round(float(memory_text.strip()) / 1024.0, 2)
+            if memory_text.strip()
+            else None
+        )
     except ValueError:
         memory_gb = None
     clean_name = name.strip() or None
     if not clean_name or memory_gb is None:
         return None
-    return CudaDeviceInfo(name=clean_name, total_memory_gb=memory_gb, cuda_available=True)
+    return CudaDeviceInfo(
+        name=clean_name, total_memory_gb=memory_gb, cuda_available=True
+    )
 
 
 def _detect_total_memory_gb() -> float | None:

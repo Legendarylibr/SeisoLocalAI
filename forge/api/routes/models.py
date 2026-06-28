@@ -20,7 +20,11 @@ from forge.config import ForgeSettings, get_settings
 from forge.db.store import Database
 from forge.orchestrators.inference import InferenceOrchestrator
 from forge.security.auth import get_current_user_id
-from forge.services.hardware import enrich_catalog_models, hardware_profile, hardware_summary
+from forge.services.hardware import (
+    enrich_catalog_models,
+    hardware_profile,
+    hardware_summary,
+)
 from forge.services.hf_auth import resolve_hf_token_for_download
 from forge.services.hf_cache_inventory import sync_hf_cache_inventory
 from forge.services.hf_hub import _format_hub_download_error, dir_size
@@ -67,9 +71,15 @@ async def model_catalog(
     q: str = Query("", description="Search Hugging Face Hub"),
     family: str | None = Query(None),
     task: str | None = Query(None),
-    purpose: str = Query("chat", description="chat = GGUF Hub catalog; train = safetensors checkpoints"),
-    hardware_aware: bool = Query(True, description="Rank and annotate by local hardware fit"),
-    fits_only: bool = Query(False, description="Show only ideal/good fits for this machine"),
+    purpose: str = Query(
+        "chat", description="chat = GGUF Hub catalog; train = safetensors checkpoints"
+    ),
+    hardware_aware: bool = Query(
+        True, description="Rank and annotate by local hardware fit"
+    ),
+    fits_only: bool = Query(
+        False, description="Show only ideal/good fits for this machine"
+    ),
     limit: int = Query(50, ge=1, le=100),
     cursor: str | None = Query(None, description="Hugging Face Hub pagination cursor"),
 ) -> dict:
@@ -79,7 +89,11 @@ async def model_catalog(
         encryption_key=settings.hf_token_encryption_key,
         settings_token=settings.hf_token or None,
     )
-    search_fn = search_trainable_catalog if purpose.strip().lower() == "train" else search_catalog
+    search_fn = (
+        search_trainable_catalog
+        if purpose.strip().lower() == "train"
+        else search_catalog
+    )
     try:
         result = search_fn(
             q,

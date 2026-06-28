@@ -46,12 +46,16 @@ def run_rl_quant_job(
             payload=payload,
             on_log=on_log,
         )
-        config = apply_best_sweep_overrides(config, sweep_result.get("best_overrides") or {})
+        config = apply_best_sweep_overrides(
+            config, sweep_result.get("best_overrides") or {}
+        )
 
     _log(
         f"RL quant run: {config.run_name} backend={config.backend} trainer={config.training_backend}"
     )
-    _log(f"Episodes: train={config.training_episodes} eval={config.evaluation_episodes}")
+    _log(
+        f"Episodes: train={config.training_episodes} eval={config.evaluation_episodes}"
+    )
     _log(f"Artifacts: {config.artifacts.outputs_dir}")
 
     pipeline = ResearchPipeline(config)
@@ -59,9 +63,13 @@ def run_rl_quant_job(
     summary = pipeline.run()
     _log("RL quantization pipeline complete")
 
-    artifacts = summary.get("artifacts") if isinstance(summary.get("artifacts"), dict) else {}
+    artifacts = (
+        summary.get("artifacts") if isinstance(summary.get("artifacts"), dict) else {}
+    )
     raw_rec = summary.get("recommendation")
-    recommendation: dict[str, Any] | None = raw_rec if isinstance(raw_rec, dict) else None
+    recommendation: dict[str, Any] | None = (
+        raw_rec if isinstance(raw_rec, dict) else None
+    )
     recommendation_path: str | Path | None = None
     if isinstance(artifacts.get("recommendation"), str):
         recommendation_path = artifacts["recommendation"]
@@ -81,7 +89,9 @@ def run_rl_quant_job(
     result: dict[str, Any] = {
         "summary": summary,
         "output_dir": config.artifacts.outputs_dir,
-        "recommendation_path": str(recommendation_path) if recommendation_path else None,
+        "recommendation_path": (
+            str(recommendation_path) if recommendation_path else None
+        ),
         "recommendation": recommendation,
         "run_name": config.run_name,
         "auto_sweep": auto_sweep_enabled(payload),

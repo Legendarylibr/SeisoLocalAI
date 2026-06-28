@@ -25,7 +25,10 @@ from forge.services.hardware import hardware_profile
 from forge.services.hf_hub import search_huggingface_datasets
 from forge.services.jobs import assert_job_owner
 from forge.services.models import list_trainable_models, resolve_training_model_id
-from forge.services.user_paths import assert_user_training_config, resolve_training_dataset_path
+from forge.services.user_paths import (
+    assert_user_training_config,
+    resolve_training_dataset_path,
+)
 from seiso.models.hf_env import configure_hf_hub_cache
 from seiso.models.hub_quant import native_quant_training_block_reason
 from seiso.models.trainable_snapshot import is_gguf_only_repo_id
@@ -59,7 +62,9 @@ def _serialize_metrics_payload(
     from seiso.security.hardware_privacy import sanitize_system_metric_point
 
     training = [p for p in points if p.get("type") in ("training", "eval")]
-    system = [sanitize_system_metric_point(p) for p in points if p.get("type") == "system"]
+    system = [
+        sanitize_system_metric_point(p) for p in points if p.get("type") == "system"
+    ]
     return {
         "summary": summary or {},
         "training": training[-2000:],
@@ -77,7 +82,12 @@ def _effective_job_status(
     if not live:
         return db_status
     live_status = live.status.value
-    if db_status == "pending" and live_status in ("running", "completed", "failed", "cancelled"):
+    if db_status == "pending" and live_status in (
+        "running",
+        "completed",
+        "failed",
+        "cancelled",
+    ):
         return live_status
     return db_status
 
@@ -120,7 +130,9 @@ async def list_training_models(
     settings: Annotated[ForgeSettings, Depends(get_settings)],
 ) -> dict:
     inventory = await db.list_models(user_id)
-    models = list_trainable_models(inventory, data_dir=settings.data_dir, user_id=user_id)
+    models = list_trainable_models(
+        inventory, data_dir=settings.data_dir, user_id=user_id
+    )
     return {"models": models, "total": len(models)}
 
 
@@ -192,7 +204,11 @@ async def analyze_dataset_endpoint(
     """Research-grade dataset analysis: full-corpus schema detection and training hints."""
     ds = _resolve_dataset_for_user(body.dataset, user_id=user_id, settings=settings)
     try:
-        ds_fmt = DatasetFormat(body.dataset_format) if body.dataset_format else DatasetFormat.AUTO
+        ds_fmt = (
+            DatasetFormat(body.dataset_format)
+            if body.dataset_format
+            else DatasetFormat.AUTO
+        )
         analysis = await asyncio.to_thread(
             _run_dataset_analysis,
             ds,
@@ -213,7 +229,11 @@ async def validate_dataset_endpoint(
     """Preflight endpoint — scans the entire dataset before training starts."""
     ds = _resolve_dataset_for_user(body.dataset, user_id=user_id, settings=settings)
     try:
-        ds_fmt = DatasetFormat(body.dataset_format) if body.dataset_format else DatasetFormat.AUTO
+        ds_fmt = (
+            DatasetFormat(body.dataset_format)
+            if body.dataset_format
+            else DatasetFormat.AUTO
+        )
         analysis = await asyncio.to_thread(
             _run_dataset_analysis,
             ds,
@@ -325,14 +345,18 @@ async def start_training(
     training_config = {**training_config, "model_id": resolved_model_id}
     training_config.setdefault("extra", {})
     if local_path or resolved_model_id != original_model_id:
-        training_config["extra"]["resolved_model_path"] = local_path or resolved_model_id
+        training_config["extra"]["resolved_model_path"] = (
+            local_path or resolved_model_id
+        )
         training_config["extra"]["original_model_id"] = original_model_id
     resolved_block = native_quant_training_block_reason(resolved_model_id)
     if resolved_block:
         raise HTTPException(400, resolved_block)
 
     job_id = str(uuid.uuid4())
-    await db.create_training_job(user_id, training_config, body.project_id, job_id=job_id)
+    await db.create_training_job(
+        user_id, training_config, body.project_id, job_id=job_id
+    )
     orchestrator.create_job(job_id=job_id, user_id=user_id)
     payload = {
         "config": {
@@ -378,7 +402,9 @@ async def start_training(
                     error_text=error_text,
                     user_id=user_id,
                 )
-                if job.status.value == "completed" and job.result.get("checkpoint_path"):
+                if job.status.value == "completed" and job.result.get(
+                    "checkpoint_path"
+                ):
                     from forge.services.model_registry import (
                         register_export_outputs,
                         register_training_checkpoint,
@@ -412,14 +438,20 @@ async def start_training(
                             )
                             hub_metadata.validate()
                             hub_repo = hub_metadata.repo_id
-                            hub_token = resolve_hub_publish_token(settings, user_id, hub)
+                            hub_token = resolve_hub_publish_token(
+                                settings, user_id, hub
+                            )
 
-                        export_dir = settings.data_dir / "exports" / user_id / f"train-{job_id}"
+                        export_dir = (
+                            settings.data_dir / "exports" / user_id / f"train-{job_id}"
+                        )
                         export_cfg.update(
                             {
                                 "hub_repo": hub_repo,
                                 "hub_token": hub_token,
-                                "hub_metadata": hub_metadata.__dict__ if hub_metadata else None,
+                                "hub_metadata": (
+                                    hub_metadata.__dict__ if hub_metadata else None
+                                ),
                             }
                         )
                         outputs = auto_export_after_training(
@@ -445,7 +477,10 @@ async def start_training(
 
     spawn_background(_run())
     audit_event(
-        "training_start", user_id=user_id, job_id=job_id, model_id=body.config.get("model_id")
+        "training_start",
+        user_id=user_id,
+        job_id=job_id,
+        model_id=body.config.get("model_id"),
     )
     return TrainingJobResponse(job_id=job_id, status="pending")
 

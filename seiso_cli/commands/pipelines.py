@@ -19,7 +19,9 @@ rl_quant_app = typer.Typer(
 def rl_quant_run(
     preset: str = typer.Option("minimal", help="minimal | reproducible | post_train"),
     training_episodes: int | None = typer.Option(None, help="Training episode count"),
-    evaluation_episodes: int | None = typer.Option(None, help="Evaluation episode count"),
+    evaluation_episodes: int | None = typer.Option(
+        None, help="Evaluation episode count"
+    ),
     backend: str = typer.Option("simulator", help="simulator | llama_cpp"),
     training_backend: str = typer.Option("stdlib", help="stdlib | pytorch"),
     seed: int = typer.Option(13, help="RNG seed"),
@@ -35,8 +37,12 @@ def rl_quant_run(
     kernel_live_benchmark: bool = typer.Option(
         False, "--kernel-live-benchmark", help="Live CUDA micro-benchmarks (NVIDIA GPU)"
     ),
-    kernel_hidden_dim: int = typer.Option(4096, help="Hidden dim for kernel bench shapes"),
-    kernel_batch_rows: int = typer.Option(4096, help="Token rows for kernel bench shapes"),
+    kernel_hidden_dim: int = typer.Option(
+        4096, help="Hidden dim for kernel bench shapes"
+    ),
+    kernel_batch_rows: int = typer.Option(
+        4096, help="Token rows for kernel bench shapes"
+    ),
     write_report: bool = typer.Option(False, help="Write research markdown report"),
     auto_sweep: bool = typer.Option(
         True,
@@ -46,7 +52,9 @@ def rl_quant_run(
     sweep_config: str | None = typer.Option(
         None, help="Optional sweep grid JSON/TOML (defaults to preset auto grid)"
     ),
-    json_out: bool = typer.Option(False, "--json", help="Print machine-readable summary JSON"),
+    json_out: bool = typer.Option(
+        False, "--json", help="Print machine-readable summary JSON"
+    ),
 ) -> None:
     """Run RL quantization pipeline locally (no Forge server required)."""
     import json
@@ -156,16 +164,22 @@ def distill_rl_presets() -> None:
 @distill_rl_app.command("run")
 def distill_rl_run(
     preset: str = typer.Option("smoke", help="smoke | reproducible | full"),
-    config: str | None = typer.Option(None, "--config", "-c", help="JSON/YAML job config"),
+    config: str | None = typer.Option(
+        None, "--config", "-c", help="JSON/YAML job config"
+    ),
     teacher_model: str | None = typer.Option(None, help="Teacher HF model ID or path"),
     student_model: str | None = typer.Option(None, help="Student HF model ID or path"),
     distilled_path: str | None = typer.Option(
         None, help="Existing distilled checkpoint (skip distill stage)"
     ),
     distill_steps: int | None = typer.Option(None, help="KL distillation steps"),
-    rollout_prompts: int | None = typer.Option(None, help="Max prompts for preference rollouts"),
+    rollout_prompts: int | None = typer.Option(
+        None, help="Max prompts for preference rollouts"
+    ),
     dpo_epochs: int | None = typer.Option(None, help="DPO training epochs"),
-    prompt_library: str | None = typer.Option(None, help="Prompt JSON/JSONL for rollouts"),
+    prompt_library: str | None = typer.Option(
+        None, help="Prompt JSON/JSONL for rollouts"
+    ),
     stages: str | None = typer.Option(
         None, help="Comma-separated stages: distill,rollout,dpo,evaluate"
     ),
@@ -178,7 +192,9 @@ def distill_rl_run(
         "--auto-sweep/--no-auto-sweep",
         help="Grid-search DPO hyperparameters before the full run (default: on)",
     ),
-    json_out: bool = typer.Option(False, "--json", help="Print machine-readable summary JSON"),
+    json_out: bool = typer.Option(
+        False, "--json", help="Print machine-readable summary JSON"
+    ),
 ) -> None:
     """Distill teacher → student, build teacher/student preferences, run DPO."""
     import json as json_mod

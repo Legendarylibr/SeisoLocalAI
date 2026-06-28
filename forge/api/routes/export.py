@@ -100,7 +100,9 @@ async def _resolve_publish_folder(
                 db, data_dir=data_dir, user_id=user_id, target=body.output_path
             )
         except (SecurityError, ValueError) as exc:
-            raise HTTPException(403 if isinstance(exc, SecurityError) else 400, str(exc)) from exc
+            raise HTTPException(
+                403 if isinstance(exc, SecurityError) else 400, str(exc)
+            ) from exc
         job_id = None
         source = "export"
     else:
@@ -111,7 +113,9 @@ async def _resolve_publish_folder(
     return folder, job_id, source
 
 
-def _resolve_hub_repo(body: ExportStartRequest) -> tuple[str | None, HubModelMetadata | None]:
+def _resolve_hub_repo(
+    body: ExportStartRequest,
+) -> tuple[str | None, HubModelMetadata | None]:
     if body.hub:
         meta = hub_metadata_from_request(body.hub)
         meta.validate()
@@ -192,7 +196,9 @@ async def start_export(
             db, data_dir=settings.data_dir, user_id=user_id, checkpoint=body.checkpoint
         )
     except (SecurityError, ValueError) as exc:
-        raise HTTPException(403 if isinstance(exc, SecurityError) else 400, str(exc)) from exc
+        raise HTTPException(
+            403 if isinstance(exc, SecurityError) else 400, str(exc)
+        ) from exc
 
     hub_repo, hub_metadata = _resolve_hub_repo(body)
     hub_token = resolve_hub_publish_token(settings, user_id, body.hub)
@@ -220,7 +226,10 @@ async def start_export(
 
     hub_precheck_dict: dict[str, Any] | None = None
     if hub_repo and hub_metadata:
-        from seiso.export.hub_precheck import assert_hub_precheck_ok, precheck_hub_export
+        from seiso.export.hub_precheck import (
+            assert_hub_precheck_ok,
+            precheck_hub_export,
+        )
         from seiso.export.profiles import resolve_formats
 
         resolved_formats = resolve_formats(
@@ -293,7 +302,9 @@ async def start_publish_to_hub(
     body: PublishToHubRequest,
     user_id: Annotated[str, Depends(get_current_user_id)],
     db: Annotated[Database, Depends(get_db)],
-    orchestrator: Annotated[HubPublishOrchestrator, Depends(get_hub_publish_orchestrator)],
+    orchestrator: Annotated[
+        HubPublishOrchestrator, Depends(get_hub_publish_orchestrator)
+    ],
     settings: Annotated[ForgeSettings, Depends(get_settings)],
 ) -> PipelineJobResponse:
     """Start a background Hugging Face publish job (required for multi-GB GGUF uploads)."""
@@ -360,7 +371,9 @@ async def start_publish_to_hub(
 async def stream_publish_to_hub(
     job_id: str,
     user_id: Annotated[str, Depends(get_current_user_id)],
-    orchestrator: Annotated[HubPublishOrchestrator, Depends(get_hub_publish_orchestrator)],
+    orchestrator: Annotated[
+        HubPublishOrchestrator, Depends(get_hub_publish_orchestrator)
+    ],
 ):
     assert_job_owner(orchestrator, job_id, user_id)
 

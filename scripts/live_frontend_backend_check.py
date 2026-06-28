@@ -64,7 +64,15 @@ def mint_token() -> tuple[str, str]:
 
 
 def check_static_ui(client: httpx.Client, report: Report) -> None:
-    for path in ("/", "/train", "/chat", "/export", "/compress", "/distill-rl", "/rl-quant"):
+    for path in (
+        "/",
+        "/train",
+        "/chat",
+        "/export",
+        "/compress",
+        "/distill-rl",
+        "/rl-quant",
+    ):
         r = client.get(f"{BASE}{path}")
         report.add(
             f"SPA route {path}",
@@ -73,18 +81,26 @@ def check_static_ui(client: httpx.Client, report: Report) -> None:
         )
     assets = REPO / "forge-ui" / "dist" / "assets"
     js_files = list(assets.glob("TrainPage-*.js"))
-    report.add("TrainPage bundle built", bool(js_files), str(js_files[0].name if js_files else "missing"))
+    report.add(
+        "TrainPage bundle built",
+        bool(js_files),
+        str(js_files[0].name if js_files else "missing"),
+    )
 
 
 def api_get(client: httpx.Client, path: str, headers: dict[str, str]) -> httpx.Response:
     return client.get(f"{API}{path}", headers=headers)
 
 
-def api_post(client: httpx.Client, path: str, headers: dict[str, str], body: dict) -> httpx.Response:
+def api_post(
+    client: httpx.Client, path: str, headers: dict[str, str], body: dict
+) -> httpx.Response:
     return client.post(f"{API}{path}", headers=headers, json=body)
 
 
-def check_training_flow(client: httpx.Client, headers: dict[str, str], report: Report) -> str | None:
+def check_training_flow(
+    client: httpx.Client, headers: dict[str, str], report: Report
+) -> str | None:
     r = api_get(client, "/training/models", headers)
     report.add("GET /training/models", r.status_code == 200, f"status={r.status_code}")
     models = r.json().get("models", []) if r.status_code == 200 else []
@@ -107,7 +123,9 @@ def check_training_flow(client: httpx.Client, headers: dict[str, str], report: R
         f"/training/recommendations?model_id={model_id}&dataset=./data/sample.jsonl",
         headers,
     )
-    report.add("GET /training/recommendations", r.status_code == 200, f"status={r.status_code}")
+    report.add(
+        "GET /training/recommendations", r.status_code == 200, f"status={r.status_code}"
+    )
 
     r = api_post(
         client,
@@ -136,7 +154,11 @@ def check_training_flow(client: httpx.Client, headers: dict[str, str], report: R
     )
 
     r = api_get(client, "/training/jobs", headers)
-    report.add("GET /training/jobs", r.status_code == 200, f"count={len(r.json()) if r.is_success else 0}")
+    report.add(
+        "GET /training/jobs",
+        r.status_code == 200,
+        f"count={len(r.json()) if r.is_success else 0}",
+    )
 
     cfg = {
         "model_id": "hf-internal-testing/tiny-random-LlamaForCausalLM",
@@ -187,7 +209,11 @@ def check_training_flow(client: httpx.Client, headers: dict[str, str], report: R
         )
 
         r = api_get(client, f"/training/jobs/{job_id}/metrics", headers)
-        report.add("GET /training/jobs/{id}/metrics", r.status_code == 200, f"status={r.status_code}")
+        report.add(
+            "GET /training/jobs/{id}/metrics",
+            r.status_code == 200,
+            f"status={r.status_code}",
+        )
 
         # SSE smoke — read first event
         with client.stream(
@@ -201,12 +227,18 @@ def check_training_flow(client: httpx.Client, headers: dict[str, str], report: R
                 if line.startswith("data:"):
                     got_event = True
                     break
-        report.add("GET /training/jobs/{id}/stream (SSE)", got_event or status in terminal, "event or terminal")
+        report.add(
+            "GET /training/jobs/{id}/stream (SSE)",
+            got_event or status in terminal,
+            "event or terminal",
+        )
 
     return job_id
 
 
-def check_other_pages(client: httpx.Client, headers: dict[str, str], report: Report) -> None:
+def check_other_pages(
+    client: httpx.Client, headers: dict[str, str], report: Report
+) -> None:
     endpoints: list[tuple[str, str]] = [
         ("GET /auth/status", "GET", "/auth/status"),
         ("GET /auth/me", "GET", "/auth/me"),
@@ -268,7 +300,11 @@ def main() -> int:
 
     with httpx.Client(timeout=30.0) as client:
         r = client.get(f"{BASE}/health")
-        report.add("GET /health", r.status_code == 200 and r.json().get("status") == "ok", str(r.json()))
+        report.add(
+            "GET /health",
+            r.status_code == 200 and r.json().get("status") == "ok",
+            str(r.json()),
+        )
 
         check_static_ui(client, report)
         check_other_pages(client, headers, report)

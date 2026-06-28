@@ -3,7 +3,9 @@ from __future__ import annotations
 from typing import Any
 
 # Shared workflow sets
-_RUN_WORKFLOWS = frozenset({"research", "moe", "pytorch", "online", "continuous", "frontier"})
+_RUN_WORKFLOWS = frozenset(
+    {"research", "moe", "pytorch", "online", "continuous", "frontier"}
+)
 _TRAIN_WORKFLOWS = frozenset({"research", "moe", "pytorch", "frontier"})
 
 _REWARD_WEIGHT_FIELDS: list[dict[str, Any]] = [
@@ -226,7 +228,10 @@ RL_FIELD_GROUPS: list[dict[str, Any]] = [
                 "type": "choice",
                 "choices": [
                     {"value": "", "label": "Built-in default (12 prompts)"},
-                    {"value": "prompts/smoke_library.json", "label": "Smoke — 4 fast prompts"},
+                    {
+                        "value": "prompts/smoke_library.json",
+                        "label": "Smoke — 4 fast prompts",
+                    },
                     {
                         "value": "prompts/diversity_library.json",
                         "label": "Diversity — 8 domains",
@@ -633,9 +638,18 @@ RL_FIELD_GROUPS: list[dict[str, Any]] = [
                 "label": "Task stream mode",
                 "type": "choice",
                 "choices": [
-                    {"value": "library_cycle", "label": "library_cycle — random prompts"},
-                    {"value": "sequential", "label": "sequential — fixed curriculum order"},
-                    {"value": "reward_adaptive", "label": "reward_adaptive — follow reward paths"},
+                    {
+                        "value": "library_cycle",
+                        "label": "library_cycle — random prompts",
+                    },
+                    {
+                        "value": "sequential",
+                        "label": "sequential — fixed curriculum order",
+                    },
+                    {
+                        "value": "reward_adaptive",
+                        "label": "reward_adaptive — follow reward paths",
+                    },
                     {"value": "jsonl", "label": "jsonl — custom task file"},
                 ],
                 "default": "library_cycle",

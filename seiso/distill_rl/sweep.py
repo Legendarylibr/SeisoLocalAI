@@ -95,10 +95,14 @@ def sweep_dpo_max_steps(
     if payload.get("sweep_dpo_max_steps") is not None:
         return int(payload["sweep_dpo_max_steps"])
     if config.dpo_max_steps is not None:
-        return max(2, min(int(config.dpo_max_steps), max(4, int(config.dpo_max_steps) // 3)))
+        return max(
+            2, min(int(config.dpo_max_steps), max(4, int(config.dpo_max_steps) // 3))
+        )
     if train_example_count is None:
         return max(4, int(config.dpo_epochs))
-    micro_batches = max(1, (train_example_count + config.dpo_batch_size - 1) // config.dpo_batch_size)
+    micro_batches = max(
+        1, (train_example_count + config.dpo_batch_size - 1) // config.dpo_batch_size
+    )
     optimizer_steps_per_epoch = max(
         1,
         (micro_batches + config.dpo_gradient_accumulation_steps - 1)
@@ -158,9 +162,13 @@ def run_auto_hyperparameter_sweep(
     sweep_root.mkdir(parents=True, exist_ok=True)
     train_path = config.preferences_train_path
     if not train_path.is_file():
-        raise FileNotFoundError(f"Preference train dataset missing for sweep: {train_path}")
+        raise FileNotFoundError(
+            f"Preference train dataset missing for sweep: {train_path}"
+        )
     train_example_count = _count_jsonl_rows(train_path)
-    sweep_steps = sweep_dpo_max_steps(config, payload, train_example_count=train_example_count)
+    sweep_steps = sweep_dpo_max_steps(
+        config, payload, train_example_count=train_example_count
+    )
 
     _log(
         f"Auto hyperparameter sweep: {len(plans)} DPO trial(s)"
@@ -230,7 +238,9 @@ def run_auto_hyperparameter_sweep(
             for rank, result in enumerate(ranked, start=1)
         ],
     }
-    aggregate_path.write_text(json.dumps(aggregate_payload, indent=2) + "\n", encoding="utf-8")
+    aggregate_path.write_text(
+        json.dumps(aggregate_payload, indent=2) + "\n", encoding="utf-8"
+    )
     _write_leaderboard_csv(ranked, leaderboard_path, objective=objective)
 
     best_overrides = best.plan.overrides if best is not None else {}
@@ -260,7 +270,9 @@ def _parse_vary_argument(raw: str) -> tuple[str, tuple[Any, ...]]:
     if "=" not in raw:
         raise ValueError(f"Expected KEY=val1,val2,... got {raw!r}")
     key, values_text = raw.split("=", 1)
-    values = [_coerce_value(part.strip()) for part in values_text.split(",") if part.strip()]
+    values = [
+        _coerce_value(part.strip()) for part in values_text.split(",") if part.strip()
+    ]
     if not values:
         raise ValueError(f"No values provided for sweep parameter {key!r}")
     return key.strip(), tuple(values)
@@ -291,7 +303,9 @@ def _build_trial_plans(grid: dict[str, tuple[Any, ...]]) -> list[SweepTrialPlan]
         raise ValueError("Sweep requires a non-empty parameter grid")
     keys = sorted(grid.keys())
     plans: list[SweepTrialPlan] = []
-    for trial_id, values in enumerate(itertools.product(*(grid[key] for key in keys)), start=1):
+    for trial_id, values in enumerate(
+        itertools.product(*(grid[key] for key in keys)), start=1
+    ):
         overrides = dict(zip(keys, values, strict=True))
         plans.append(
             SweepTrialPlan(
@@ -315,7 +329,9 @@ def _trial_run_suffix(overrides: dict[str, Any], *, max_len: int = 48) -> str:
     return slug[:max_len] or "default"
 
 
-def _rank_trials(results: list[SweepTrialResult], *, direction: str) -> list[SweepTrialResult]:
+def _rank_trials(
+    results: list[SweepTrialResult], *, direction: str
+) -> list[SweepTrialResult]:
     reverse = direction == "maximize"
 
     def sort_key(result: SweepTrialResult) -> tuple[int, float]:
@@ -342,9 +358,11 @@ def _write_leaderboard_csv(
                 "trial_id": str(result.plan.trial_id),
                 "suffix": result.plan.run_name_suffix,
                 "objective": objective,
-                "objective_value": ""
-                if result.objective_value is None
-                else str(result.objective_value),
+                "objective_value": (
+                    ""
+                    if result.objective_value is None
+                    else str(result.objective_value)
+                ),
                 "val_accuracy": _csv_metric(metrics.get("val_preference_accuracy")),
                 "mean_margin": _csv_metric(metrics.get("val_preference_margin_mean")),
                 "alignment_score": _csv_metric(metrics.get("alignment_score")),

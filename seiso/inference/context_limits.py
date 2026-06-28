@@ -39,7 +39,12 @@ def hf_config_context_length(model_path: str) -> int | None:
     if not isinstance(data, dict):
         return None
 
-    for key in ("max_position_embeddings", "model_max_length", "n_positions", "seq_length"):
+    for key in (
+        "max_position_embeddings",
+        "model_max_length",
+        "n_positions",
+        "seq_length",
+    ):
         value = data.get(key)
         if isinstance(value, int) and value >= 512:
             return value
@@ -48,7 +53,11 @@ def hf_config_context_length(model_path: str) -> int | None:
     if isinstance(rope, dict):
         original = rope.get("original_max_position_embeddings")
         factor = rope.get("factor", 1)
-        if isinstance(original, int) and isinstance(factor, (int, float)) and factor > 0:
+        if (
+            isinstance(original, int)
+            and isinstance(factor, (int, float))
+            and factor > 0
+        ):
             return int(original * factor)
     return None
 

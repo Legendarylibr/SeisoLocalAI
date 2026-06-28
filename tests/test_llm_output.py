@@ -65,19 +65,37 @@ def test_strip_reasoning_leakage_extracts_qwen_thinking_process_final_answer():
         "2. **Drafting Options:** * Option 2 (Casual): Hey there! "
         '6. **Final Decision:** "Yo! What\'s up? How can I help you out today?" Wait,'
     )
-    assert strip_reasoning_leakage(raw) == "Yo! What's up? How can I help you out today?"
+    assert (
+        strip_reasoning_leakage(raw) == "Yo! What's up? How can I help you out today?"
+    )
 
 
 def test_strip_reasoning_leakage_removes_think_tags():
     raw = (
-        "Hello " + "<" + "think" + ">" + "internal reasoning" + "<" + "/" + "think" + ">" + " world"
+        "Hello "
+        + "<"
+        + "think"
+        + ">"
+        + "internal reasoning"
+        + "<"
+        + "/"
+        + "think"
+        + ">"
+        + " world"
     )
     assert strip_reasoning_leakage(raw) == "Hello  world"
 
 
 def test_strip_reasoning_leakage_removes_deepseek_think_block():
     raw = (
-        "<" + "think" + ">" + "user said yo, respond casually" + "<" + "/" + "think" + ">"
+        "<"
+        + "think"
+        + ">"
+        + "user said yo, respond casually"
+        + "<"
+        + "/"
+        + "think"
+        + ">"
         "Yo! What's up?"
     )
     assert strip_reasoning_leakage(raw) == "Yo! What's up?"

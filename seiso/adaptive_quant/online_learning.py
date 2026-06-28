@@ -20,7 +20,12 @@ from seiso.adaptive_quant.prompts import PromptLibrary
 from seiso.adaptive_quant.routing import EfficientTaskRouter
 from seiso.adaptive_quant.security_audit import build_security_audit_record
 from seiso.adaptive_quant.trainer_utils import zero_previous_action
-from seiso.adaptive_quant.types import OnlineRequest, PromptSample, QuantizationDecision, QuantMode
+from seiso.adaptive_quant.types import (
+    OnlineRequest,
+    PromptSample,
+    QuantizationDecision,
+    QuantMode,
+)
 
 
 @dataclass
@@ -67,13 +72,15 @@ class OnlineLearningLoop:
             config.online_telemetry_path(),
             buffered=bool(config.jsonl_buffered),
             flush_every=int(config.jsonl_flush_every),
-            integrity_chain=bool(config.jsonl_integrity_chain) or jsonl_integrity_chain_enabled(),
+            integrity_chain=bool(config.jsonl_integrity_chain)
+            or jsonl_integrity_chain_enabled(),
         )
         self.replay_logger = JsonlLogger(
             config.online_replay_path(),
             buffered=bool(config.jsonl_buffered),
             flush_every=int(config.jsonl_flush_every),
-            integrity_chain=bool(config.jsonl_integrity_chain) or jsonl_integrity_chain_enabled(),
+            integrity_chain=bool(config.jsonl_integrity_chain)
+            or jsonl_integrity_chain_enabled(),
         )
         self.replay_buffer = ReplayBuffer(config.online_replay_capacity, self.rng)
         self.previous_action = zero_previous_action(config)
@@ -90,7 +97,9 @@ class OnlineLearningLoop:
         self.total_candidate_accepts = 0
         self.total_candidate_rejects = 0
         self._prompt_replay_counts: dict[str, int] = {}
-        self.recent_served_rewards: deque[float] = deque(maxlen=max(4, config.online_drift_window))
+        self.recent_served_rewards: deque[float] = deque(
+            maxlen=max(4, config.online_drift_window)
+        )
         self.best_recent_reward = float("-inf")
         self.best_policy_snapshot = self.trainer.snapshot_policy()
         self.router: EfficientTaskRouter | None = None
@@ -117,7 +126,9 @@ class OnlineLearningLoop:
             forced_prompt=prompt,
             episode_index=self.request_index,
         )
-        baseline_decision, _baseline_payload = self.trainer.act_online(state, deterministic=True)
+        baseline_decision, _baseline_payload = self.trainer.act_online(
+            state, deterministic=True
+        )
 
         router_selected_route: str | None = None
         router_reward: float | None = None
@@ -130,7 +141,11 @@ class OnlineLearningLoop:
             )
             router_selected_route = route.key
             bits = route.quant_bits or int(self.config.safe_default_bits)
-            metadata = {"head": "router", "route": route.key, "route_backend": route.backend}
+            metadata = {
+                "head": "router",
+                "route": route.key,
+                "route_backend": route.backend,
+            }
             if route.backend == "llama_cpp":
                 path = route.llama_cpp_model_path()
                 if path is not None:
@@ -171,7 +186,9 @@ class OnlineLearningLoop:
                 episode_index=20_000_000 + self.request_index,
                 log_episode=False,
             )
-            accepted_candidate = self._passes_guardrails(candidate_result, baseline_result)
+            accepted_candidate = self._passes_guardrails(
+                candidate_result, baseline_result
+            )
             if accepted_candidate:
                 self.total_candidate_accepts += 1
             else:
@@ -180,10 +197,16 @@ class OnlineLearningLoop:
             self.total_candidate_accepts += 1
 
         served_result = (
-            candidate_result if accepted_candidate or baseline_result is None else baseline_result
+            candidate_result
+            if accepted_candidate or baseline_result is None
+            else baseline_result
         )
 
-        if self.router is not None and router_trace is not None and baseline_result is not None:
+        if (
+            self.router is not None
+            and router_trace is not None
+            and baseline_result is not None
+        ):
             baseline_ppl = float(baseline_result.metrics.perplexity)
             self._router_baseline_perplexity[prompt.prompt_id] = baseline_ppl
             router_reward = float(
@@ -256,10 +279,14 @@ class OnlineLearningLoop:
             "input_features": state.input_features,
             "decision": served_result.decision,
             "candidate_decision": candidate_result.decision,
-            "baseline_decision": baseline_decision if baseline_result is not None else None,
+            "baseline_decision": (
+                baseline_decision if baseline_result is not None else None
+            ),
             "served_metrics": served_result.metrics,
             "candidate_metrics": candidate_result.metrics,
-            "baseline_metrics": baseline_result.metrics if baseline_result is not None else None,
+            "baseline_metrics": (
+                baseline_result.metrics if baseline_result is not None else None
+            ),
             "explore": explore,
             "canary": canary,
             "accepted_candidate": accepted_candidate,
@@ -379,7 +406,10 @@ class OnlineLearningLoop:
             self.best_policy_snapshot = self.trainer.snapshot_policy()
             return "improved"
 
-        if recent_mean < self.best_recent_reward - self.config.online_drift_reward_delta:
+        if (
+            recent_mean
+            < self.best_recent_reward - self.config.online_drift_reward_delta
+        ):
             self.trainer.restore_policy(self.best_policy_snapshot)
             self.safe_mode_remaining = self.config.online_safe_mode_cooldown
             self.total_rollbacks += 1

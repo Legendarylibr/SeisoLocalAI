@@ -27,7 +27,9 @@ def test_resolve_gguf_repo_uses_explicit_gguf_repo(monkeypatch):
 
 
 def test_resolve_gguf_repo_falls_back_to_mirror(monkeypatch):
-    monkeypatch.setattr(hf_hub, "repo_has_gguf", lambda repo_id, **_: repo_id.endswith("-GGUF"))
+    monkeypatch.setattr(
+        hf_hub, "repo_has_gguf", lambda repo_id, **_: repo_id.endswith("-GGUF")
+    )
     resolved = hf_hub.resolve_gguf_repo("meta-llama/Llama-3.1-8B-Instruct")
     assert resolved.endswith("-GGUF")
 
@@ -72,7 +74,9 @@ def test_search_huggingface_datasets_parses_api_response(monkeypatch):
 
             return json.dumps(payload).encode("utf-8")
 
-    monkeypatch.setattr(hf_hub.urllib.request, "urlopen", lambda *_a, **_k: FakeResponse())
+    monkeypatch.setattr(
+        hf_hub.urllib.request, "urlopen", lambda *_a, **_k: FakeResponse()
+    )
     rows = hf_hub.search_huggingface_datasets(query="no_robots", limit=5)
     assert rows == [
         {
@@ -93,15 +97,21 @@ def test_resolve_gguf_artifact_composes_mirror_file_and_size(monkeypatch):
         gguf_repo = None
         quant = "Q4_K_M"
 
-    monkeypatch.setattr(hf_hub, "resolve_gguf_repo", lambda *_a, **_k: "mirror/Model-GGUF")
+    monkeypatch.setattr(
+        hf_hub, "resolve_gguf_repo", lambda *_a, **_k: "mirror/Model-GGUF"
+    )
     monkeypatch.setattr(
         hf_hub,
         "_list_repo_files",
         lambda *_a, **_k: ["Model-Q4_K_M.gguf", "Model-Q8_0.gguf", "mmproj-Q6_K.gguf"],
     )
-    monkeypatch.setattr(hf_hub, "get_gguf_file_size_bytes", lambda *_a, **_k: 5_000_000_000)
+    monkeypatch.setattr(
+        hf_hub, "get_gguf_file_size_bytes", lambda *_a, **_k: 5_000_000_000
+    )
 
-    artifact = hf_hub.resolve_gguf_artifact("org/Qwen3.6-35B-A3B", entry=Entry(), use_cache=False)
+    artifact = hf_hub.resolve_gguf_artifact(
+        "org/Qwen3.6-35B-A3B", entry=Entry(), use_cache=False
+    )
     assert artifact["gguf_repo"] == "mirror/Model-GGUF"
     assert artifact["filename"] == "Model-Q4_K_M.gguf"
     assert artifact["size_bytes"] == 5_000_000_000
@@ -113,7 +123,9 @@ def test_pick_gguf_file_prefers_active_moe_quant():
         "Qwen3.6-35B-A3B-Q4_K_M.gguf",
         "mmproj-Q6_K.gguf",
     ]
-    picked = hf_hub._pick_gguf_file(files, preferred_quant="Q4_K_M", repo_id="Qwen/Qwen3.6-35B-A3B")
+    picked = hf_hub._pick_gguf_file(
+        files, preferred_quant="Q4_K_M", repo_id="Qwen/Qwen3.6-35B-A3B"
+    )
     assert picked == "Qwen3.6-35B-A3B-Q4_K_M.gguf"
 
 
@@ -146,7 +158,9 @@ def test_resolve_gguf_repo_uses_catalog_entry_gguf_repo(monkeypatch):
         repo_id = "random-user/Custom-GGUF"
 
     monkeypatch.setattr(
-        hf_hub, "repo_has_gguf", lambda repo_id, **_: repo_id == "random-user/Custom-GGUF"
+        hf_hub,
+        "repo_has_gguf",
+        lambda repo_id, **_: repo_id == "random-user/Custom-GGUF",
     )
     hf_hub._gguf_repo_cache.clear()
 
@@ -183,7 +197,9 @@ def test_resolve_gguf_repo_uses_cache(monkeypatch):
 
 def test_first_repo_with_gguf_preserves_candidate_order(monkeypatch):
     monkeypatch.setattr(
-        hf_hub, "repo_has_gguf", lambda repo_id, **_: repo_id in {"second/repo", "third/repo"}
+        hf_hub,
+        "repo_has_gguf",
+        lambda repo_id, **_: repo_id in {"second/repo", "third/repo"},
     )
 
     resolved = hf_hub._first_repo_with_gguf(["first/repo", "second/repo", "third/repo"])
@@ -202,7 +218,9 @@ def test_download_gguf_skips_size_lookup_when_total_known(monkeypatch, tmp_path)
 
     cached = tmp_path / "model.gguf"
     cached.write_bytes(b"gguf")
-    monkeypatch.setattr(hf_hub, "_with_download_retries", lambda _fn, **_k: str(cached.resolve()))
+    monkeypatch.setattr(
+        hf_hub, "_with_download_retries", lambda _fn, **_k: str(cached.resolve())
+    )
 
     progress_events: list[dict] = []
     hf_hub.download_gguf(

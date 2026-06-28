@@ -28,7 +28,9 @@ from seiso.adaptive_quant.math_utils import finite_float
 from seiso.adaptive_quant.policy_heads import CategoricalHead, ValueHead
 
 
-def _router_hf_pretrained_kwargs(config: FrameworkConfig) -> tuple[dict[str, Any], dict[str, Any]]:
+def _router_hf_pretrained_kwargs(
+    config: FrameworkConfig,
+) -> tuple[dict[str, Any], dict[str, Any]]:
     """Return ``(tokenizer_kwargs, model_kwargs)`` for Hugging Face Hub loads.
 
     Model weights must be ``safetensors``; ``trust_remote_code`` stays disabled.
@@ -81,11 +83,15 @@ def parse_route(route: str) -> RouteCandidate:
             model_part = rest.strip()
 
     if "@q" not in model_part:
-        candidate = RouteCandidate(backend=backend, model_id=model_part, quant_bits=None)
+        candidate = RouteCandidate(
+            backend=backend, model_id=model_part, quant_bits=None
+        )
         if backend == "llama_cpp":
             validate_runtime_filesystem_path("llama_cpp_route_model", model_part)
         elif backend == "hf":
-            validate_hf_model_id("router_route_model_id", model_part, require_hub_namespace=True)
+            validate_hf_model_id(
+                "router_route_model_id", model_part, require_hub_namespace=True
+            )
         return candidate
     model_id, suffix = model_part.rsplit("@q", 1)
     model_id = model_id.strip()
@@ -102,7 +108,9 @@ def parse_route(route: str) -> RouteCandidate:
     if backend == "llama_cpp":
         validate_runtime_filesystem_path("llama_cpp_route_model", model_id)
     elif backend == "hf":
-        validate_hf_model_id("router_route_model_id", model_id, require_hub_namespace=True)
+        validate_hf_model_id(
+            "router_route_model_id", model_id, require_hub_namespace=True
+        )
     return candidate
 
 
@@ -206,7 +214,12 @@ class EfficientTaskRouter:
         model = AutoModel.from_pretrained(model_id, **model_kw)
         model.eval()
         model.to(device)
-        self._hf = {"torch": torch, "tokenizer": tokenizer, "model": model, "device": device}
+        self._hf = {
+            "torch": torch,
+            "tokenizer": tokenizer,
+            "model": model,
+            "device": device,
+        }
         return self._hf
 
     def _hf_features(self, text: str) -> list[float]:
@@ -217,7 +230,9 @@ class EfficientTaskRouter:
         device = hf["device"]
 
         with torch.no_grad():
-            batch = tokenizer(text or "", return_tensors="pt", truncation=True, max_length=256)
+            batch = tokenizer(
+                text or "", return_tensors="pt", truncation=True, max_length=256
+            )
             batch = {k: v.to(device) for k, v in batch.items()}
             out = model(**batch)
             hidden = out.last_hidden_state

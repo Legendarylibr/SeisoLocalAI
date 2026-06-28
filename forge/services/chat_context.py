@@ -11,7 +11,10 @@ from forge.services.chat_messages import (
     trim_messages_to_context,
 )
 from forge.services.model_prompts import resolve_model_key
-from seiso.inference.context_limits import context_window_presets, effective_context_ceiling
+from seiso.inference.context_limits import (
+    context_window_presets,
+    effective_context_ceiling,
+)
 from seiso.inference.tuning import estimate_llama_n_ctx
 from seiso.memory.protection import (
     _MIN_LLAMA_CTX,

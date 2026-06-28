@@ -4,7 +4,10 @@ import logging
 from typing import cast
 
 from seiso.adaptive_quant.backends.protocol import per_token_latency_fields
-from seiso.adaptive_quant.backends.quality import ExternalQualityScores, apply_external_quality
+from seiso.adaptive_quant.backends.quality import (
+    ExternalQualityScores,
+    apply_external_quality,
+)
 from seiso.adaptive_quant.configuration import FrameworkConfig
 from seiso.adaptive_quant.math_utils import clamp, mean, variance
 from seiso.adaptive_quant.moe import ExpertBank
@@ -36,7 +39,9 @@ class SimulatorBackend:
             self._rust_binary = resolve_rust_cli_binary(config)
             self._use_rust = self._rust_binary is not None
 
-    def evaluate(self, state: EpisodeState, decision: QuantizationDecision) -> BackendMetricDict:
+    def evaluate(
+        self, state: EpisodeState, decision: QuantizationDecision
+    ) -> BackendMetricDict:
         from seiso.adaptive_quant.rust_cli import RustCliError, run_rust_sim_eval
 
         if self._use_rust and self._rust_binary is not None:
@@ -99,7 +104,9 @@ class SimulatorBackend:
         if hardware.hardware_type == HardwareType.GPU:
             throughput_tps *= 1.0 - min(0.12, bit_variance * 0.03)
         else:
-            throughput_tps *= 1.0 + min(0.10, max(0.0, hardware.preferred_bits - avg_bits) * 0.02)
+            throughput_tps *= 1.0 + min(
+                0.10, max(0.0, hardware.preferred_bits - avg_bits) * 0.02
+            )
 
         memory_mb = 4_800.0 * (avg_bits / 16.0) * (1.0 + complexity * 0.15)
         if decision.mode in {QuantMode.PER_LAYER, QuantMode.LEARNED}:
@@ -129,12 +136,17 @@ class SimulatorBackend:
             )
             throughput_tps *= max(
                 0.55,
-                1.0 - excess_bits * (0.07 if hardware.hardware_type == HardwareType.CPU else 0.12),
+                1.0
+                - excess_bits
+                * (0.07 if hardware.hardware_type == HardwareType.CPU else 0.12),
             )
             memory_mb *= 1.0 + excess_bits * (
                 0.10 if hardware.hardware_type == HardwareType.CPU else 0.18
             )
-        elif hardware.hardware_type == HardwareType.GPU and avg_bits < hardware.preferred_bits:
+        elif (
+            hardware.hardware_type == HardwareType.GPU
+            and avg_bits < hardware.preferred_bits
+        ):
             deficit_bits = hardware.preferred_bits - avg_bits
             perplexity += deficit_bits * 0.45
             throughput_tps *= max(0.78, 1.0 - deficit_bits * 0.03)
@@ -148,11 +160,16 @@ class SimulatorBackend:
             throughput_tps *= 1.12 + compression * 0.08
             memory_mb *= 0.78 - compression * 0.04
             perplexity -= 0.38 + sensitivity * 0.22
-        elif decision.mode == QuantMode.GROUPED and hardware.hardware_type != HardwareType.GPU:
+        elif (
+            decision.mode == QuantMode.GROUPED
+            and hardware.hardware_type != HardwareType.GPU
+        ):
             latency_ms *= 0.95
             throughput_tps *= 1.03
 
-        overflow_ratio = max(0.0, memory_mb - hardware.memory_budget_mb) / hardware.memory_budget_mb
+        overflow_ratio = (
+            max(0.0, memory_mb - hardware.memory_budget_mb) / hardware.memory_budget_mb
+        )
         if overflow_ratio > 0.0:
             latency_ms *= 1.0 + overflow_ratio * 2.50
             throughput_tps *= 1.0 / (1.0 + overflow_ratio * 1.8)
@@ -166,15 +183,20 @@ class SimulatorBackend:
             and state.moe_context is not None
             and decision.moe_variant_indices
         ):
-            latency_ms, throughput_tps, perplexity, memory_mb, swap_cost_ms, cache_miss_count = (
-                self._apply_moe_adjustments(
-                    state,
-                    decision,
-                    latency_ms,
-                    throughput_tps,
-                    perplexity,
-                    memory_mb,
-                )
+            (
+                latency_ms,
+                throughput_tps,
+                perplexity,
+                memory_mb,
+                swap_cost_ms,
+                cache_miss_count,
+            ) = self._apply_moe_adjustments(
+                state,
+                decision,
+                latency_ms,
+                throughput_tps,
+                perplexity,
+                memory_mb,
             )
 
         metrics: BackendMetricDict = {
@@ -190,21 +212,30 @@ class SimulatorBackend:
         if isinstance(calibration, dict):
             hw_key = state.hardware_profile.hardware_type.value
             hw_cal = (
-                calibration.get(hw_key, {}) if isinstance(calibration.get(hw_key, {}), dict) else {}
+                calibration.get(hw_key, {})
+                if isinstance(calibration.get(hw_key, {}), dict)
+                else {}
             )
             latency_mul = float(hw_cal.get("latency_multiplier", 1.0))
             throughput_mul = float(hw_cal.get("throughput_multiplier", 1.0))
             memory_mul = float(hw_cal.get("memory_multiplier", 1.0))
             if latency_mul > 0:
-                metrics["latency_ms"] = clamp(metrics["latency_ms"] * latency_mul, 1.0, 60_000.0)
+                metrics["latency_ms"] = clamp(
+                    metrics["latency_ms"] * latency_mul, 1.0, 60_000.0
+                )
             if throughput_mul > 0:
                 metrics["throughput_tps"] = clamp(
                     metrics["throughput_tps"] * throughput_mul, 0.1, 100_000.0
                 )
             if memory_mul > 0:
-                metrics["memory_mb"] = clamp(metrics["memory_mb"] * memory_mul, 50.0, 512_000.0)
+                metrics["memory_mb"] = clamp(
+                    metrics["memory_mb"] * memory_mul, 50.0, 512_000.0
+                )
         metrics.update(
-            cast(BackendMetricDict, per_token_latency_fields(state, metrics["latency_ms"]))
+            cast(
+                BackendMetricDict,
+                per_token_latency_fields(state, metrics["latency_ms"]),
+            )
         )
         metrics.update(
             {
@@ -241,12 +272,18 @@ class SimulatorBackend:
         ):
             variant = self.expert_bank.variant_by_index(variant_index)
             routing_weight = 0.60 + expert.router_probability
-            latency_multiplier *= 1.0 + (variant.latency_multiplier - 1.0) * routing_weight * 0.50
+            latency_multiplier *= (
+                1.0 + (variant.latency_multiplier - 1.0) * routing_weight * 0.50
+            )
             throughput_multiplier *= (
                 1.0 + (variant.throughput_multiplier - 1.0) * routing_weight * 0.55
             )
-            memory_multiplier *= 1.0 + (variant.memory_multiplier - 1.0) * routing_weight * 0.40
-            sensitivity_penalty += variant.perplexity_penalty * expert.sensitivity * routing_weight
+            memory_multiplier *= (
+                1.0 + (variant.memory_multiplier - 1.0) * routing_weight * 0.40
+            )
+            sensitivity_penalty += (
+                variant.perplexity_penalty * expert.sensitivity * routing_weight
+            )
             if expert.resident_on_device < 0.5:
                 cache_misses += 1.0
                 total_swap_cost += (
@@ -259,4 +296,11 @@ class SimulatorBackend:
         throughput_tps *= throughput_multiplier
         memory_mb *= memory_multiplier
         perplexity += sensitivity_penalty
-        return latency_ms, throughput_tps, perplexity, memory_mb, total_swap_cost, cache_misses
+        return (
+            latency_ms,
+            throughput_tps,
+            perplexity,
+            memory_mb,
+            total_swap_cost,
+            cache_misses,
+        )

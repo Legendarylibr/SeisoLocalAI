@@ -47,6 +47,10 @@ async def test_frontier_providers_rejected(authed_client):
     for ptype in ("openai", "anthropic"):
         res = await authed_client.post(
             "/api/providers",
-            json={"name": ptype, "provider_type": ptype, "config": {"api_key": "sk-test"}},
+            json={
+                "name": ptype,
+                "provider_type": ptype,
+                "config": {"api_key": "sk-test"},
+            },
         )
         assert res.status_code == 400

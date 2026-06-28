@@ -62,7 +62,11 @@ def _env_enabled(name: str) -> bool:
 
 def resolve_nvidia_smi_executable() -> str | None:
     """Return an executable ``nvidia-smi`` path (env, PATH, then common driver locations)."""
-    for env_name in ("SEISO_NVIDIA_SMI_PATH", "NVIDIA_SMI_PATH", "ADAPTIVE_RL_NVIDIA_SMI_PATH"):
+    for env_name in (
+        "SEISO_NVIDIA_SMI_PATH",
+        "NVIDIA_SMI_PATH",
+        "ADAPTIVE_RL_NVIDIA_SMI_PATH",
+    ):
         raw = os.environ.get(env_name, "").strip()
         if raw:
             candidate = Path(raw)
@@ -314,7 +318,9 @@ def enforce_nvidia_secure_boundary(*, context: str = "training") -> dict[str, ob
         return report
 
     if _env_enabled(_SKIP_BOUNDARY_ENV):
-        message = f"NVIDIA secure boundary skipped during {context} ({_SKIP_BOUNDARY_ENV}=1)."
+        message = (
+            f"NVIDIA secure boundary skipped during {context} ({_SKIP_BOUNDARY_ENV}=1)."
+        )
         if _env_enabled(_ABORT_ENV):
             raise SystemExit(message)
         print(message, file=sys.stderr)

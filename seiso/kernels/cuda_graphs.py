@@ -12,7 +12,9 @@ _WARMUP_STEPS = 3
 _CAPTURE_WARMUP = 2
 
 
-def cuda_graphs_enabled(*, explicit: bool | None = None, deterministic: bool = False) -> bool:
+def cuda_graphs_enabled(
+    *, explicit: bool | None = None, deterministic: bool = False
+) -> bool:
     """Whether CUDA graph training is allowed for this run."""
     if deterministic:
         return False
@@ -76,8 +78,12 @@ class CudaGraphTrainingManager:
             "cuda_graphs_eager_steps": self._eager_steps,
         }
 
-    def try_enable(self, *, explicit: bool | None = None, deterministic: bool = False) -> bool:
-        self._enabled = cuda_graphs_enabled(explicit=explicit, deterministic=deterministic)
+    def try_enable(
+        self, *, explicit: bool | None = None, deterministic: bool = False
+    ) -> bool:
+        self._enabled = cuda_graphs_enabled(
+            explicit=explicit, deterministic=deterministic
+        )
         return self._enabled
 
     def reset(self) -> None:
@@ -112,7 +118,11 @@ class CudaGraphTrainingManager:
     def _copy_inputs(src: dict[str, Any], dst: dict[str, Any]) -> None:
         for key, val in src.items():
             static = dst.get(key)
-            if static is not None and hasattr(static, "copy_") and hasattr(val, "shape"):
+            if (
+                static is not None
+                and hasattr(static, "copy_")
+                and hasattr(val, "shape")
+            ):
                 static.copy_(val)
 
     @staticmethod
@@ -162,13 +172,16 @@ class CudaGraphTrainingManager:
     ) -> Any:
 
         with trainer.compute_loss_context_manager():
-            loss = trainer.compute_loss(model, inputs, num_items_in_batch=num_items_in_batch)
+            loss = trainer.compute_loss(
+                model, inputs, num_items_in_batch=num_items_in_batch
+            )
 
         if int(getattr(trainer.args, "n_gpu", 1)) > 1:
             loss = loss.mean()
 
         if (
-            not getattr(trainer, "model_accepts_loss_kwargs", False) or num_items_in_batch is None
+            not getattr(trainer, "model_accepts_loss_kwargs", False)
+            or num_items_in_batch is None
         ) and getattr(trainer, "compute_loss_func", None) is None:
             loss = loss / trainer.current_gradient_accumulation_steps
 
@@ -249,7 +262,6 @@ class CudaGraphTrainingManager:
         if not self.eligible(trainer, model):
             return None
 
-
         model.train()
         if hasattr(trainer.optimizer, "train") and callable(trainer.optimizer.train):
             trainer.optimizer.train()
@@ -264,12 +276,16 @@ class CudaGraphTrainingManager:
         if not self._captured:
             if self._eager_steps < self._warmup_steps:
                 self._eager_steps += 1
-                loss = self._compute_step_loss(trainer, model, inputs, num_items_in_batch)
+                loss = self._compute_step_loss(
+                    trainer, model, inputs, num_items_in_batch
+                )
                 self._backward(trainer, loss)
                 return loss.detach()
 
             if not self._try_capture(trainer, model, inputs, num_items_in_batch):
-                loss = self._compute_step_loss(trainer, model, inputs, num_items_in_batch)
+                loss = self._compute_step_loss(
+                    trainer, model, inputs, num_items_in_batch
+                )
                 self._backward(trainer, loss)
                 return loss.detach()
 
@@ -289,7 +305,9 @@ class CudaGraphTrainerMixin:
     def __init__(self, *args, use_cuda_graphs: bool = False, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self._seiso_cuda_graph_manager = CudaGraphTrainingManager()
-        deterministic = bool(getattr(getattr(self, "args", None), "full_determinism", False))
+        deterministic = bool(
+            getattr(getattr(self, "args", None), "full_determinism", False)
+        )
         self._seiso_cuda_graph_manager.try_enable(
             explicit=use_cuda_graphs,
             deterministic=deterministic,
@@ -301,7 +319,9 @@ class CudaGraphTrainerMixin:
             loss = mgr.training_step(self, model, inputs, num_items_in_batch)
             if loss is not None:
                 return loss
-        return super().training_step(model, inputs, num_items_in_batch=num_items_in_batch)
+        return super().training_step(
+            model, inputs, num_items_in_batch=num_items_in_batch
+        )
 
     def log(self, logs: dict[str, float], start_time: float | None = None) -> None:
         mgr = self._seiso_cuda_graph_manager
@@ -311,7 +331,9 @@ class CudaGraphTrainerMixin:
         return super().log(logs, start_time=start_time)
 
 
-def attach_cuda_graphs(trainer: Any, *, enabled: bool = True, deterministic: bool = False) -> Any:
+def attach_cuda_graphs(
+    trainer: Any, *, enabled: bool = True, deterministic: bool = False
+) -> Any:
     """Attach CUDA graph manager to an existing trainer instance (monkeypatch)."""
     mgr = CudaGraphTrainingManager()
     mgr.try_enable(explicit=enabled, deterministic=deterministic)
@@ -333,7 +355,9 @@ def attach_cuda_graphs(trainer: Any, *, enabled: bool = True, deterministic: boo
     return trainer
 
 
-def make_training_graph_callback(*, deterministic: bool = False, enabled: bool = True) -> Any | None:
+def make_training_graph_callback(
+    *, deterministic: bool = False, enabled: bool = True
+) -> Any | None:
     """TrainerCallback that resets CUDA graph state after training."""
     try:
         from transformers import TrainerCallback
@@ -348,7 +372,10 @@ def make_training_graph_callback(*, deterministic: bool = False, enabled: bool =
 
         def on_train_end(self, args, state, control, **kwargs):
             t = kwargs.get("trainer")
-            if t is not None and getattr(t, "_seiso_cuda_graph_manager", None) is not None:
+            if (
+                t is not None
+                and getattr(t, "_seiso_cuda_graph_manager", None) is not None
+            ):
                 t._seiso_cuda_graph_manager.reset()
 
     return _CudaGraphCallback()
