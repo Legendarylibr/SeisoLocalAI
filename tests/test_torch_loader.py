@@ -155,3 +155,94 @@ def test_load_torch_allows_disabling_device_map(monkeypatch):
 
     assert "device_map" not in model_calls[0]
     assert "max_memory" not in model_calls[0]
+
+
+def test_load_torch_retries_without_bitsandbytes_quantization(monkeypatch):
+    from seiso.models import torch_loader
+
+    model_calls: list[dict] = []
+
+    class FakeCuda:
+        @staticmethod
+        def is_available() -> bool:
+            return True
+
+        @staticmethod
+        def is_bf16_supported() -> bool:
+            return False
+
+    fake_torch = SimpleNamespace(
+        cuda=FakeCuda(),
+        float16=object(),
+        bfloat16=object(),
+    )
+
+    class FakeAutoConfig:
+        @staticmethod
+        def from_pretrained(_model_id, **_kwargs):
+            return SimpleNamespace(quantization_config=None)
+
+    class FakeTokenizer:
+        pad_token = None
+        eos_token = "<eos>"
+
+        def __len__(self) -> int:
+            return 8
+
+    class FakeAutoTokenizer:
+        @staticmethod
+        def from_pretrained(_model_id, **_kwargs):
+            return FakeTokenizer()
+
+    class FakeEmbeddings:
+        weight = SimpleNamespace(shape=(8, 4))
+
+    class FakeModel:
+        def get_input_embeddings(self):
+            return FakeEmbeddings()
+
+        def resize_token_embeddings(self, _size: int) -> None:
+            raise AssertionError("tokenizer and embeddings should already match")
+
+    class FakeBitsAndBytesConfig:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    class FakeAutoModelForCausalLM:
+        @staticmethod
+        def from_pretrained(_model_id, **kwargs):
+            model_calls.append(kwargs)
+            if len(model_calls) == 1:
+                raise RuntimeError(
+                    "bitsandbytes rejected this quantization_config"
+                )
+            return FakeModel()
+
+    monkeypatch.setitem(__import__("sys").modules, "torch", fake_torch)
+    monkeypatch.setitem(__import__("sys").modules, "bitsandbytes", SimpleNamespace())
+    monkeypatch.setitem(
+        __import__("sys").modules,
+        "transformers",
+        SimpleNamespace(
+            AutoConfig=FakeAutoConfig,
+            AutoModelForCausalLM=FakeAutoModelForCausalLM,
+            AutoTokenizer=FakeAutoTokenizer,
+            BitsAndBytesConfig=FakeBitsAndBytesConfig,
+        ),
+    )
+    monkeypatch.setattr(torch_loader, "_cuda_available", lambda: True)
+    monkeypatch.setattr(
+        "seiso.kernels.attention.resolve_attention_implementation",
+        lambda prefer_fa3=True: "sdpa",
+    )
+    monkeypatch.setattr("seiso.memory.protection.build_hf_max_memory", lambda: None)
+
+    torch_loader.load_torch(
+        LoadOptions(model_id="org/model", load_in_4bit=True),
+        backend=Backend.TORCH,
+    )
+
+    assert len(model_calls) == 2
+    assert "quantization_config" in model_calls[0]
+    assert "quantization_config" not in model_calls[1]
+    assert model_calls[1]["device_map"] == "auto"
