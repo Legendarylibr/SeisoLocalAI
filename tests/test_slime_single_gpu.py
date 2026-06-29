@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import random
 from pathlib import Path
 
 import pytest
@@ -16,6 +17,7 @@ from seiso.slime_single_gpu.trainer import (
     _assign_grouped_advantages,
     _chunked,
     _empty_stats,
+    _iter_sample_batches,
     _load_samples,
     _merge_stats,
 )
@@ -45,6 +47,7 @@ def test_single_gpu_slime_config_from_yaml(tmp_path: Path):
     assert cfg.max_vram_gb == 12
     assert cfg.rollout_batch_size == 4
     assert cfg.policy_micro_batch_size == 4
+    assert cfg.shuffle_buffer_size == 2048
 
 
 def test_single_gpu_slime_defaults_do_not_load_reference_model(tmp_path: Path):
@@ -64,6 +67,7 @@ def test_example_single_gpu_slime_config_loads_samples():
     assert cfg.dataset == Path("data/slime_sample.jsonl")
     assert cfg.kl_coef == 0.0
     assert cfg.policy_micro_batch_size == 2
+    assert cfg.shuffle_buffer_size == 128
     assert samples
     assert {"prompt", "answer"} <= set(samples[0])
 
@@ -97,6 +101,8 @@ def test_single_gpu_slime_config_rejects_invalid_vram_cap(tmp_path: Path):
     [
         ("rollout_batch_size", 0),
         ("policy_micro_batch_size", 0),
+        ("shuffle_buffer_size", 0),
+        ("max_samples_per_epoch", 0),
         ("max_grad_norm", 0),
     ],
 )
@@ -117,6 +123,48 @@ def test_single_gpu_slime_config_rejects_invalid_optimization_knobs(
         cfg.validate()
 
 
+def test_single_gpu_slime_config_requires_rollout_batch_to_cover_group(tmp_path: Path):
+    cfg = SingleGpuSlimeConfig(
+        model_id="test/model",
+        dataset=tmp_path / "data.jsonl",
+        output_dir=tmp_path / "out",
+        rollouts_per_prompt=4,
+        rollout_batch_size=2,
+    )
+
+    with pytest.raises(ValueError, match="rollout_batch_size"):
+        cfg.validate()
+
+
+def test_sample_batches_stream_with_bounded_shuffle(tmp_path: Path):
+    path = tmp_path / "data.jsonl"
+    path.write_text(
+        "\n".join(
+            [
+                '{"prompt":"p0","answer":"a0"}',
+                '{"prompt":"p1","answer":"a1"}',
+                '{"prompt":"p2","answer":"a2"}',
+                '{"messages":[]}',
+            ]
+        ),
+        encoding="utf-8",
+    )
+    cfg = SingleGpuSlimeConfig(
+        model_id="test/model",
+        dataset=path,
+        output_dir=tmp_path / "out",
+        train_batch_size=2,
+        shuffle_buffer_size=2,
+        max_samples_per_epoch=3,
+    )
+
+    batches = list(_iter_sample_batches(cfg, random.Random(7)))
+
+    assert [len(batch) for batch in batches] == [2, 1]
+    assert sum(len(batch) for batch in batches) == 3
+    assert all({"prompt", "answer"} <= set(sample) for batch in batches for sample in batch)
+
+
 def test_reward_helpers():
     sample = {"answer": "42"}
 
@@ -134,10 +182,10 @@ def test_unknown_reward_names_are_rejected():
 
 def test_grouped_advantages_are_normalized():
     rollouts = [
-        Rollout({}, "p", "a", None, None, None, None, None, 0.0),
-        Rollout({}, "p", "b", None, None, None, None, None, 1.0),
-        Rollout({}, "q", "c", None, None, None, None, None, 2.0),
-        Rollout({}, "q", "d", None, None, None, None, None, 4.0),
+        Rollout(None, None, None, None, None, 0.0),
+        Rollout(None, None, None, None, None, 1.0),
+        Rollout(None, None, None, None, None, 2.0),
+        Rollout(None, None, None, None, None, 4.0),
     ]
 
     _assign_grouped_advantages(rollouts, group_size=2)

@@ -20,9 +20,6 @@ T = TypeVar("T")
 
 @dataclass
 class Rollout:
-    sample: dict[str, Any]
-    prompt: str
-    completion: str
     input_ids: Any
     attention_mask: Any
     response_mask: Any
@@ -80,19 +77,18 @@ def train_single_gpu_slime(config: SingleGpuSlimeConfig) -> Path:
     _assert_vram_fit(torch, config.max_vram_gb, config.device)
     optimizer = _build_optimizer(model, config)
     reward_fn = resolve_reward(config.reward)
-    samples = list(_load_samples(config))
-    if not samples:
-        raise ValueError(f"no samples found in {config.dataset}")
 
     config.output_dir.mkdir(parents=True, exist_ok=True)
     metrics_path = config.output_dir / "slime_single_gpu_metrics.jsonl"
     global_step = 0
     pending_accumulation_steps = 0
+    saw_sample = False
     optimizer.zero_grad(set_to_none=True)
+    rng = random.Random(config.seed)
 
     for epoch in range(config.epochs):
-        random.shuffle(samples)
-        for batch_samples in _batched(samples, config.train_batch_size):
+        for batch_samples in _iter_sample_batches(config, rng):
+            saw_sample = True
             rollouts = _collect_rollouts(
                 model=model,
                 ref_model=ref_model,
@@ -133,6 +129,8 @@ def train_single_gpu_slime(config: SingleGpuSlimeConfig) -> Path:
                 _save(model, tokenizer, config.output_dir)
                 return config.output_dir
 
+    if not saw_sample:
+        raise ValueError(f"no samples found in {config.dataset}")
     if pending_accumulation_steps:
         _optimizer_step(model, optimizer, torch, config)
     _save(model, tokenizer, config.output_dir)
@@ -150,20 +148,10 @@ def _collect_rollouts(
     torch,
 ) -> list[Rollout]:
     model.eval()
-    prompts: list[str] = []
-    source_samples: list[dict[str, Any]] = []
-    for sample in samples:
-        prompt = str(sample[config.prompt_field])
-        for _ in range(config.rollouts_per_prompt):
-            prompts.append(prompt)
-            source_samples.append(sample)
-
+    prompt_batch_size = max(1, config.rollout_batch_size // config.rollouts_per_prompt)
     rollouts: list[Rollout] = []
-    for prompt_chunk, sample_chunk in zip(
-        _chunked(prompts, config.rollout_batch_size),
-        _chunked(source_samples, config.rollout_batch_size),
-        strict=True,
-    ):
+    for sample_chunk in _chunked(samples, prompt_batch_size):
+        prompt_chunk = [str(sample[config.prompt_field]) for sample in sample_chunk]
         encoded = tokenizer(
             prompt_chunk,
             return_tensors="pt",
@@ -182,19 +170,22 @@ def _collect_rollouts(
                 pad_token_id=tokenizer.pad_token_id,
                 eos_token_id=tokenizer.eos_token_id,
                 use_cache=True,
+                num_return_sequences=config.rollouts_per_prompt,
             )
 
+        completions = tokenizer.batch_decode(
+            generated[:, prompt_width:],
+            skip_special_tokens=True,
+        )
         chunk_rollouts: list[Rollout] = []
-        for idx, sample in enumerate(sample_chunk):
+        for idx in range(int(generated.shape[0])):
+            sample_idx = idx // config.rollouts_per_prompt
+            sample = sample_chunk[sample_idx]
             response_mask = torch.zeros_like(generated[idx], dtype=torch.bool)
             response_mask[prompt_width:] = generated[idx, prompt_width:] != tokenizer.pad_token_id
-            completion_ids = generated[idx, prompt_width:]
-            completion = tokenizer.decode(completion_ids, skip_special_tokens=True)
+            completion = completions[idx]
             chunk_rollouts.append(
                 Rollout(
-                    sample=sample,
-                    prompt=prompt_chunk[idx],
-                    completion=completion,
                     input_ids=generated[idx].detach().cpu(),
                     attention_mask=(generated[idx] != tokenizer.pad_token_id).detach().cpu(),
                     response_mask=response_mask.detach().cpu(),
@@ -378,6 +369,34 @@ def _optimizer_step(model, optimizer, torch, config: SingleGpuSlimeConfig) -> No
     _assert_vram_fit(torch, config.max_vram_gb, config.device)
 
 
+def _iter_sample_batches(
+    config: SingleGpuSlimeConfig,
+    rng: random.Random,
+) -> Iterable[list[dict[str, Any]]]:
+    yield from _batched_records(_iter_shuffled_samples(config, rng), config.train_batch_size)
+
+
+def _iter_shuffled_samples(
+    config: SingleGpuSlimeConfig,
+    rng: random.Random,
+) -> Iterable[dict[str, Any]]:
+    buffer: list[dict[str, Any]] = []
+    read = 0
+    for sample in _load_samples(config):
+        buffer.append(sample)
+        read += 1
+        if config.max_samples_per_epoch is not None and read >= config.max_samples_per_epoch:
+            break
+        if len(buffer) < config.shuffle_buffer_size:
+            continue
+        idx = rng.randrange(len(buffer))
+        yield buffer.pop(idx)
+
+    while buffer:
+        idx = rng.randrange(len(buffer))
+        yield buffer.pop(idx)
+
+
 def _load_samples(config: SingleGpuSlimeConfig) -> Iterable[dict[str, Any]]:
     for sample in iter_jsonl(config.dataset):
         if config.prompt_field not in sample:
@@ -467,6 +486,20 @@ def _batched(items: list[dict[str, Any]], batch_size: int) -> Iterable[list[dict
         yield items[start : start + batch_size]
 
 
+def _batched_records(
+    records: Iterable[dict[str, Any]],
+    batch_size: int,
+) -> Iterable[list[dict[str, Any]]]:
+    batch: list[dict[str, Any]] = []
+    for record in records:
+        batch.append(record)
+        if len(batch) >= batch_size:
+            yield batch
+            batch = []
+    if batch:
+        yield batch
+
+
 def _chunked(items: list[T], chunk_size: int) -> Iterable[list[T]]:
     for start in range(0, len(items), chunk_size):
         yield items[start : start + chunk_size]
@@ -475,8 +508,9 @@ def _chunked(items: list[T], chunk_size: int) -> Iterable[list[T]]:
 def _release_cuda(torch, device: str) -> None:
     if device != "cuda":
         return
-    gc.collect()
-    torch.cuda.empty_cache()
+    # Let PyTorch's caching allocator reuse blocks between microbatches. Calling
+    # empty_cache/gc here adds CPU overhead and usually makes single-GPU runs slower.
+    return
 
 
 def _append_metrics(path: Path, record: dict[str, Any]) -> None:

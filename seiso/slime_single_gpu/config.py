@@ -26,6 +26,8 @@ class SingleGpuSlimeConfig:
     rollout_batch_size: int = 4
     policy_micro_batch_size: int = 4
     train_batch_size: int = 1
+    shuffle_buffer_size: int = 2048
+    max_samples_per_epoch: int | None = None
     gradient_accumulation_steps: int = 8
     learning_rate: float = 5e-6
     weight_decay: float = 0.0
@@ -64,8 +66,14 @@ class SingleGpuSlimeConfig:
             raise ValueError("train_batch_size must be positive")
         if self.rollout_batch_size < 1:
             raise ValueError("rollout_batch_size must be positive")
+        if self.rollout_batch_size < self.rollouts_per_prompt:
+            raise ValueError("rollout_batch_size must be at least rollouts_per_prompt")
         if self.policy_micro_batch_size < 1:
             raise ValueError("policy_micro_batch_size must be positive")
+        if self.shuffle_buffer_size < 1:
+            raise ValueError("shuffle_buffer_size must be positive")
+        if self.max_samples_per_epoch is not None and self.max_samples_per_epoch < 1:
+            raise ValueError("max_samples_per_epoch must be positive")
         if self.gradient_accumulation_steps < 1:
             raise ValueError("gradient_accumulation_steps must be positive")
         if self.max_grad_norm <= 0:
