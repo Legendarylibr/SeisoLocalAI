@@ -42,6 +42,12 @@ class SingleGpuSlimeConfig:
     dtype: str = "auto"
     device: str = "cuda"
     gradient_checkpointing: bool = True
+    use_lora: bool = False
+    lora_r: int = 16
+    lora_alpha: int = 32
+    lora_dropout: float = 0.05
+    lora_target_modules: list[str] | None = None
+    lora_bias: str = "none"
     use_8bit_optimizer: bool = False
     trust_remote_code: bool = False
     save_every_steps: int = 100
@@ -86,3 +92,14 @@ class SingleGpuSlimeConfig:
             raise ValueError("clip_ratio must be positive")
         if self.max_vram_gb is not None and self.max_vram_gb <= 0:
             raise ValueError("max_vram_gb must be positive")
+        if self.use_lora:
+            if self.lora_r < 1:
+                raise ValueError("lora_r must be positive")
+            if self.lora_alpha < 1:
+                raise ValueError("lora_alpha must be positive")
+            if self.lora_dropout < 0 or self.lora_dropout >= 1:
+                raise ValueError("lora_dropout must be in [0, 1)")
+            if self.lora_bias not in {"none", "all", "lora_only"}:
+                raise ValueError("lora_bias must be one of: none, all, lora_only")
+            if self.lora_target_modules is not None and not self.lora_target_modules:
+                raise ValueError("lora_target_modules must not be empty")

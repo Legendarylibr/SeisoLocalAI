@@ -20,6 +20,7 @@ from seiso.slime_single_gpu.trainer import (
     _iter_sample_batches,
     _load_samples,
     _merge_stats,
+    _resolve_lora_target_modules,
 )
 
 
@@ -48,9 +49,10 @@ def test_single_gpu_slime_config_from_yaml(tmp_path: Path):
     assert cfg.rollout_batch_size == 4
     assert cfg.policy_micro_batch_size == 4
     assert cfg.shuffle_buffer_size == 2048
+    assert cfg.use_lora is False
 
 
-def test_single_gpu_slime_defaults_do_not_load_reference_model(tmp_path: Path):
+def test_single_gpu_slime_defaults_do_not_load_reference_model_or_lora(tmp_path: Path):
     cfg = SingleGpuSlimeConfig(
         model_id="test/model",
         dataset=tmp_path / "data.jsonl",
@@ -58,6 +60,7 @@ def test_single_gpu_slime_defaults_do_not_load_reference_model(tmp_path: Path):
     )
 
     assert cfg.kl_coef == 0.0
+    assert cfg.use_lora is False
 
 
 def test_example_single_gpu_slime_config_loads_samples():
@@ -68,6 +71,8 @@ def test_example_single_gpu_slime_config_loads_samples():
     assert cfg.kl_coef == 0.0
     assert cfg.policy_micro_batch_size == 2
     assert cfg.shuffle_buffer_size == 128
+    assert cfg.use_lora is True
+    assert cfg.lora_r == 16
     assert samples
     assert {"prompt", "answer"} <= set(samples[0])
 
@@ -115,6 +120,34 @@ def test_single_gpu_slime_config_rejects_invalid_optimization_knobs(
         "model_id": "test/model",
         "dataset": tmp_path / "data.jsonl",
         "output_dir": tmp_path / "out",
+        field: value,
+    }
+    cfg = SingleGpuSlimeConfig(**kwargs)
+
+    with pytest.raises(ValueError, match=field):
+        cfg.validate()
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("lora_r", 0),
+        ("lora_alpha", 0),
+        ("lora_dropout", 1),
+        ("lora_bias", "bad"),
+        ("lora_target_modules", []),
+    ],
+)
+def test_single_gpu_slime_config_rejects_invalid_lora_options(
+    tmp_path: Path,
+    field: str,
+    value,
+):
+    kwargs = {
+        "model_id": "test/model",
+        "dataset": tmp_path / "data.jsonl",
+        "output_dir": tmp_path / "out",
+        "use_lora": True,
         field: value,
     }
     cfg = SingleGpuSlimeConfig(**kwargs)
@@ -191,6 +224,61 @@ def test_grouped_advantages_are_normalized():
     _assign_grouped_advantages(rollouts, group_size=2)
 
     assert [r.advantage for r in rollouts] == [-1.0, 1.0, -1.0, 1.0]
+
+
+class Linear:
+    pass
+
+
+class _Other:
+    pass
+
+
+class _DummyModel:
+    def __init__(self, modules):
+        self._modules = modules
+
+    def named_modules(self):
+        yield "", self
+        yield from self._modules
+
+
+def test_lora_target_inference_prefers_common_projection_names():
+    model = _DummyModel(
+        [
+            ("model.layers.0.self_attn.q_proj", _Other()),
+            ("model.layers.0.self_attn.v_proj", _Other()),
+            ("model.layers.0.mlp.down_proj", _Other()),
+            ("lm_head", Linear()),
+        ]
+    )
+
+    assert _resolve_lora_target_modules(model, None) == [
+        "q_proj",
+        "v_proj",
+        "down_proj",
+    ]
+
+
+def test_lora_target_inference_falls_back_to_linear_modules():
+    model = _DummyModel(
+        [
+            ("block.foo", Linear()),
+            ("block.bar", Linear()),
+            ("lm_head", Linear()),
+        ]
+    )
+
+    assert _resolve_lora_target_modules(model, None) == ["bar", "foo"]
+
+
+def test_lora_target_inference_honors_configured_modules():
+    model = _DummyModel([])
+
+    assert _resolve_lora_target_modules(model, ["v_proj", "q_proj", "q_proj"]) == [
+        "q_proj",
+        "v_proj",
+    ]
 
 
 def test_chunked_splits_work_for_single_gpu_microbatches():

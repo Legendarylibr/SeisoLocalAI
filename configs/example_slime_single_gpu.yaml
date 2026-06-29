@@ -21,4 +21,8 @@ clip_ratio: 0.2
 temperature: 0.9
 top_p: 0.95
 gradient_checkpointing: true
+use_lora: true
+lora_r: 16
+lora_alpha: 32
+lora_dropout: 0.05
 use_8bit_optimizer: false

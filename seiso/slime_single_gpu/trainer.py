@@ -17,6 +17,23 @@ from seiso.slime_single_gpu.rewards import resolve_reward
 
 T = TypeVar("T")
 
+_PREFERRED_LORA_TARGETS = (
+    "q_proj",
+    "k_proj",
+    "v_proj",
+    "o_proj",
+    "gate_proj",
+    "up_proj",
+    "down_proj",
+    "query_key_value",
+    "dense",
+    "dense_h_to_4h",
+    "dense_4h_to_h",
+    "W_pack",
+    "c_attn",
+    "c_proj",
+)
+
 
 @dataclass
 class Rollout:
@@ -60,6 +77,10 @@ def train_single_gpu_slime(config: SingleGpuSlimeConfig) -> Path:
     model.config.use_cache = False
     if config.gradient_checkpointing and hasattr(model, "gradient_checkpointing_enable"):
         model.gradient_checkpointing_enable()
+    if config.use_lora:
+        model = _apply_lora(model, config)
+        if config.gradient_checkpointing and hasattr(model, "enable_input_require_grads"):
+            model.enable_input_require_grads()
 
     ref_model = None
     if config.kl_coef > 0:
@@ -342,28 +363,82 @@ def _assign_grouped_advantages(rollouts: list[Rollout], group_size: int) -> None
 
 
 def _build_optimizer(model, config: SingleGpuSlimeConfig):
+    trainable_params = [param for param in model.parameters() if param.requires_grad]
+    if not trainable_params:
+        raise RuntimeError("no trainable parameters found for slime optimizer")
     if config.use_8bit_optimizer:
         try:
             import bitsandbytes as bnb
         except ImportError as exc:
             raise RuntimeError("use_8bit_optimizer requires bitsandbytes") from exc
         return bnb.optim.AdamW8bit(
-            model.parameters(),
+            trainable_params,
             lr=config.learning_rate,
             weight_decay=config.weight_decay,
         )
     import torch
 
     return torch.optim.AdamW(
-        model.parameters(),
+        trainable_params,
         lr=config.learning_rate,
         weight_decay=config.weight_decay,
         fused=config.device == "cuda",
     )
 
 
+def _apply_lora(model, config: SingleGpuSlimeConfig):
+    try:
+        from peft import LoraConfig, TaskType, get_peft_model
+    except ImportError as exc:
+        raise RuntimeError("use_lora requires the optional peft dependency") from exc
+
+    target_modules = _resolve_lora_target_modules(model, config.lora_target_modules)
+    lora_config = LoraConfig(
+        task_type=TaskType.CAUSAL_LM,
+        r=config.lora_r,
+        lora_alpha=config.lora_alpha,
+        lora_dropout=config.lora_dropout,
+        bias=config.lora_bias,
+        target_modules=target_modules,
+    )
+    return get_peft_model(model, lora_config)
+
+
+def _resolve_lora_target_modules(
+    model,
+    configured: list[str] | None,
+) -> list[str]:
+    if configured is not None:
+        return sorted(set(configured))
+
+    module_tails = {
+        name.rsplit(".", 1)[-1]
+        for name, _module in model.named_modules()
+        if name
+    }
+    preferred = [target for target in _PREFERRED_LORA_TARGETS if target in module_tails]
+    if preferred:
+        return preferred
+
+    linear_like = {
+        name.rsplit(".", 1)[-1]
+        for name, module in model.named_modules()
+        if name
+        and name.rsplit(".", 1)[-1] != "lm_head"
+        and module.__class__.__name__.lower() in {"linear", "conv1d"}
+    }
+    if linear_like:
+        return sorted(linear_like)
+    raise RuntimeError(
+        "could not infer LoRA target modules; set lora_target_modules explicitly"
+    )
+
+
 def _optimizer_step(model, optimizer, torch, config: SingleGpuSlimeConfig) -> None:
-    torch.nn.utils.clip_grad_norm_(model.parameters(), config.max_grad_norm)
+    torch.nn.utils.clip_grad_norm_(
+        (param for param in model.parameters() if param.requires_grad),
+        config.max_grad_norm,
+    )
     optimizer.step()
     optimizer.zero_grad(set_to_none=True)
     _assert_vram_fit(torch, config.max_vram_gb, config.device)
