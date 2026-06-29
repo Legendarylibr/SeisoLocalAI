@@ -225,6 +225,24 @@ def test_llama_reuses_larger_preloaded_context(monkeypatch, tmp_path):
     assert load_paths == [str(model_path.absolute())]
 
 
+def test_dflash_loader_reuses_vram_aware_llama_loader(monkeypatch, tmp_path):
+    from seiso.inference import model_pool
+
+    draft = tmp_path / "draft.gguf"
+    draft.write_bytes(b"gguf")
+    calls: list[tuple[str, int]] = []
+    handle = object()
+
+    def fake_load(path, n_ctx):
+        calls.append((path, n_ctx))
+        return handle
+
+    monkeypatch.setattr(model_pool, "_load_llama_model", fake_load)
+
+    assert model_pool._load_dflash_llm(str(draft), 2048) is handle
+    assert calls == [(str(draft), 2048)]
+
+
 def test_llama_load_kwargs_are_tuned_and_overrideable(monkeypatch):
     monkeypatch.setenv("SEISO_LLAMA_THREADS", "6")
     monkeypatch.setenv("SEISO_LLAMA_GPU_LAYERS", "4")
