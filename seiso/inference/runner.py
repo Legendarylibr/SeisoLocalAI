@@ -461,18 +461,37 @@ class LocalInferenceRunner:
 
     @staticmethod
     def _torch_input_device(model: Any) -> Any:
-        import torch
-
         device_map = getattr(model, "hf_device_map", None)
         if isinstance(device_map, dict):
             for raw_device in device_map.values():
-                text = str(raw_device)
-                if text and text not in {"cpu", "disk", "meta"}:
-                    return torch.device(text)
+                device = LocalInferenceRunner._normalize_torch_device(raw_device)
+                if device is not None and device.type not in {"cpu", "meta"}:
+                    return device
         device = getattr(model, "device", None)
         if device is not None:
             return device
         return next(model.parameters()).device
+
+    @staticmethod
+    def _normalize_torch_device(raw_device: Any) -> Any | None:
+        import torch
+
+        if raw_device is None:
+            return None
+        if isinstance(raw_device, torch.device):
+            return raw_device
+        if isinstance(raw_device, int):
+            return torch.device(f"cuda:{raw_device}")
+        text = str(raw_device).strip().lower()
+        if not text or text in {"disk", "offload"}:
+            return None
+        if text.isdigit():
+            return torch.device(f"cuda:{text}")
+        try:
+            return torch.device(text)
+        except (TypeError, RuntimeError):
+            logger.debug("Ignoring unrecognized torch device map entry: %r", raw_device)
+            return None
 
     def _torch_complete(
         self,
