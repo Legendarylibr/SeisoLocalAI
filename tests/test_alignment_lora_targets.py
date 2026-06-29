@@ -14,7 +14,9 @@ from seiso.adaptive_quant.llm_alignment.model_loading import (
 
 class _FakeModel:
     def __init__(self, names: list[str], model_type: str | None = None) -> None:
-        self.config = types.SimpleNamespace(model_type=model_type) if model_type else None
+        self.config = (
+            types.SimpleNamespace(model_type=model_type) if model_type else None
+        )
         self._names = names
 
     def named_parameters(self):
@@ -66,4 +68,3 @@ def test_alignment_lora_targets_fail_when_no_targets_exist():
 
     with pytest.raises(ValueError, match="Could not infer LoRA target modules"):
         resolve_alignment_lora_target_modules(model, settings)
-

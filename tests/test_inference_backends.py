@@ -270,9 +270,7 @@ def test_prepare_model_path_uses_parent_for_hf_weight_file(tmp_path: Path):
     weights = model_dir / "model.safetensors"
     weights.write_bytes(b"x")
 
-    assert prepare_model_path(str(weights), BACKEND_TORCH) == str(
-        model_dir.absolute()
-    )
+    assert prepare_model_path(str(weights), BACKEND_TORCH) == str(model_dir.absolute())
     assert prepare_model_path(str(weights), BACKEND_MLX) == str(model_dir.absolute())
 
 
@@ -485,9 +483,7 @@ def test_warm_model_preloads_torch_speculative_pair(monkeypatch):
         lambda *_args, **_kwargs: pytest.fail("speculative preload used llama path"),
     )
 
-    runner.warm_model(
-        {"model_path": "/tmp/target", "draft_model_path": "/tmp/draft"}
-    )
+    runner.warm_model({"model_path": "/tmp/target", "draft_model_path": "/tmp/draft"})
 
     assert calls == [
         (
@@ -529,7 +525,9 @@ def test_warm_model_preloads_dflash_speculative_components(monkeypatch):
     monkeypatch.setattr(
         runner._pool,
         "get_torch_speculative",
-        lambda *_args, **_kwargs: pytest.fail("dflash preload should not load torch draft"),
+        lambda *_args, **_kwargs: pytest.fail(
+            "dflash preload should not load torch draft"
+        ),
     )
 
     runner.warm_model(

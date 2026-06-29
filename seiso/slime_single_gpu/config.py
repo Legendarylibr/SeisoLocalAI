@@ -67,7 +67,9 @@ class SingleGpuSlimeConfig:
 
     def validate(self) -> None:
         if self.rollouts_per_prompt < 2:
-            raise ValueError("rollouts_per_prompt must be at least 2 for grouped advantages")
+            raise ValueError(
+                "rollouts_per_prompt must be at least 2 for grouped advantages"
+            )
         if self.train_batch_size < 1:
             raise ValueError("train_batch_size must be positive")
         if self.rollout_batch_size < 1:

@@ -52,7 +52,9 @@ def resolve_reward(name: str) -> RewardFn:
         return rewards[name]
     except KeyError as exc:
         choices = ", ".join(sorted(rewards))
-        raise ValueError(f"unknown reward {name!r}; expected one of: {choices}") from exc
+        raise ValueError(
+            f"unknown reward {name!r}; expected one of: {choices}"
+        ) from exc
 
 
 def _last_number(text: str) -> float | None:
