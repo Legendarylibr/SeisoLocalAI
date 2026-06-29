@@ -21,6 +21,7 @@ def generate_preference_rows(
     use_chat_template: bool,
     teacher_revision: str | None = None,
     student_revision: str | None = None,
+    trust_remote_code: bool = False,
 ) -> list[dict[str, Any]]:
     """Generate preference rows with deterministic per-prompt seeds."""
     teacher_outputs = generate_completions(
@@ -31,6 +32,7 @@ def generate_preference_rows(
         seed=seed,
         use_chat_template=use_chat_template,
         revision=teacher_revision,
+        trust_remote_code=trust_remote_code,
     )
     student_outputs = generate_completions(
         student_model,
@@ -40,6 +42,7 @@ def generate_preference_rows(
         seed=seed + 10_000,
         use_chat_template=use_chat_template,
         revision=student_revision,
+        trust_remote_code=trust_remote_code,
     )
     rows: list[dict[str, Any]] = []
     for prompt, chosen, rejected in zip(
@@ -85,10 +88,15 @@ def generate_completions(
     seed: int,
     use_chat_template: bool,
     revision: str | None = None,
+    trust_remote_code: bool = False,
 ) -> list[str]:
     from seiso.distill_rl.model_utils import load_causal_lm, release_causal_lm
 
-    model, tokenizer, device = load_causal_lm(model_path, revision=revision)
+    model, tokenizer, device = load_causal_lm(
+        model_path,
+        revision=revision,
+        trust_remote_code=trust_remote_code,
+    )
     outputs: list[str] = []
     try:
         for prompt in prompts:

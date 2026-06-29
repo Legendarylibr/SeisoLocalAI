@@ -5,6 +5,10 @@ from __future__ import annotations
 from typing import Any
 
 from seiso.adaptive_quant.llm_alignment.config import DPOSettings
+from seiso.models.lora_targets import (
+    get_lora_target_modules,
+    modules_exist_in_model,
+)
 
 
 def _require_transformers() -> Any:
@@ -33,7 +37,27 @@ def _build_quantization_config(settings: DPOSettings) -> Any | None:
     )
 
 
-def _build_lora_config(settings: DPOSettings) -> Any:
+def resolve_alignment_lora_target_modules(
+    model: Any,
+    settings: DPOSettings,
+) -> list[str]:
+    """Resolve DPO LoRA targets from configured names or the model itself."""
+    configured = list(settings.lora_target_modules)
+    target_modules = modules_exist_in_model(model, configured) if configured else []
+    if not target_modules:
+        target_modules = modules_exist_in_model(
+            model,
+            get_lora_target_modules(settings.sft_model_path, model),
+        )
+    if not target_modules:
+        raise ValueError(
+            "Could not infer LoRA target modules for this alignment model. "
+            "Set lora_target_modules explicitly for this architecture."
+        )
+    return target_modules
+
+
+def _build_lora_config(settings: DPOSettings, model: Any) -> Any:
     try:
         from peft import LoraConfig, TaskType
     except ImportError as exc:
@@ -41,11 +65,12 @@ def _build_lora_config(settings: DPOSettings) -> Any:
             "LoRA/QLoRA requires peft. Install with: pip install -e '.[alignment]'"
         ) from exc
 
+    target_modules = resolve_alignment_lora_target_modules(model, settings)
     return LoraConfig(
         r=settings.lora_r,
         lora_alpha=settings.lora_alpha,
         lora_dropout=settings.lora_dropout,
-        target_modules=list(settings.lora_target_modules),
+        target_modules=target_modules,
         bias="none",
         task_type=TaskType.CAUSAL_LM,
     )
@@ -105,16 +130,21 @@ def load_policy_and_reference(
 
     quantization_config = _build_quantization_config(settings)
     model_kwargs: dict[str, Any] = {
-        "trust_remote_code": False,
+        "trust_remote_code": settings.trust_remote_code,
     }
     if quantization_config is not None:
         model_kwargs["quantization_config"] = quantization_config
         model_kwargs["device_map"] = "auto"
+        from seiso.memory.protection import build_hf_max_memory
+
+        max_memory = build_hf_max_memory()
+        if max_memory:
+            model_kwargs["max_memory"] = max_memory
     elif settings.bf16:
         model_kwargs["torch_dtype"] = __import__("torch").bfloat16
 
     tokenizer = AutoTokenizer.from_pretrained(
-        settings.sft_model_path, trust_remote_code=False
+        settings.sft_model_path, trust_remote_code=settings.trust_remote_code
     )
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
@@ -128,7 +158,9 @@ def load_policy_and_reference(
     if use_peft:
         from peft import get_peft_model
 
-        policy_model = get_peft_model(base_model, _build_lora_config(settings))
+        policy_model = get_peft_model(
+            base_model, _build_lora_config(settings, base_model)
+        )
         reference_model = None
         reference_uses_adapter_disable = True
     else:

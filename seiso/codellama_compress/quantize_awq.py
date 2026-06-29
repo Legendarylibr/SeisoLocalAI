@@ -18,6 +18,7 @@ def run_awq_quantization(
     out_dir: Path,
     dataset_cfg: DatasetConfig,
     cfg: GPTQConfig,
+    trust_remote_code: bool = False,
 ) -> None:
     """
     AWQ quantization using autoawq.
@@ -34,11 +35,14 @@ def run_awq_quantization(
         ) from e
 
     tok = AutoTokenizer.from_pretrained(
-        in_model_dir, use_fast=True, trust_remote_code=False
+        in_model_dir, use_fast=True, trust_remote_code=trust_remote_code
     )
     ensure_pad_token(tok)
 
-    model = AutoAWQForCausalLM.from_pretrained(in_model_dir)
+    model = AutoAWQForCausalLM.from_pretrained(
+        in_model_dir,
+        trust_remote_code=trust_remote_code,
+    )
     quant_config = {
         "w_bit": 4,
         "q_group_size": 128,

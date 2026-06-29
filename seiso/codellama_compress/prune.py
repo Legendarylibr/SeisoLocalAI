@@ -36,6 +36,7 @@ def run_mlp_mask_prune(
     ratio: float = 0.25,
     method: Literal["magnitude", "wanda"] = "magnitude",
     seed: int = 42,
+    trust_remote_code: bool = False,
 ) -> None:
     """
     Mask (zero) a fraction of intermediate neurons in Llama MLPs.
@@ -50,13 +51,13 @@ def run_mlp_mask_prune(
     in_model_dir = resolve_user_path(in_model_dir, must_exist=True)
 
     tok = AutoTokenizer.from_pretrained(
-        in_model_dir, use_fast=True, trust_remote_code=False
+        in_model_dir, use_fast=True, trust_remote_code=trust_remote_code
     )
     model = AutoModelForCausalLM.from_pretrained(
         in_model_dir,
         torch_dtype=torch.float16,
         device_map="cpu",
-        trust_remote_code=False,
+        trust_remote_code=trust_remote_code,
     )
     model.eval()
 

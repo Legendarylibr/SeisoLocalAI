@@ -84,17 +84,38 @@ def measure_speed(
     return (avg_tokens / max(1e-9, avg_time), avg_time * 1000.0)
 
 
-def evaluate_model_dir(model_dir: Path, out_path: Path | None = None) -> EvalResult:
+def _auto_device_load_kwargs(*, trust_remote_code: bool) -> dict[str, Any]:
+    kwargs: dict[str, Any] = {
+        "device_map": "auto",
+        "torch_dtype": torch.float16,
+        "trust_remote_code": trust_remote_code,
+    }
+    if torch.cuda.is_available():
+        try:
+            from seiso.memory.protection import build_hf_max_memory
+
+            max_memory = build_hf_max_memory()
+            if max_memory:
+                kwargs["max_memory"] = max_memory
+        except Exception:
+            pass
+    return kwargs
+
+
+def evaluate_model_dir(
+    model_dir: Path,
+    out_path: Path | None = None,
+    *,
+    trust_remote_code: bool = False,
+) -> EvalResult:
     # This is intentionally a lightweight smoke evaluation.
     model_dir = resolve_user_path(model_dir, must_exist=True)
     tok = AutoTokenizer.from_pretrained(
-        model_dir, use_fast=True, trust_remote_code=False
+        model_dir, use_fast=True, trust_remote_code=trust_remote_code
     )
     model = AutoModelForCausalLM.from_pretrained(
         model_dir,
-        device_map="auto",
-        torch_dtype=torch.float16,
-        trust_remote_code=False,
+        **_auto_device_load_kwargs(trust_remote_code=trust_remote_code),
     )
     device = model.device
     ppl = compute_perplexity(model, tok, _default_texts(), device)
@@ -107,16 +128,19 @@ def evaluate_model_dir(model_dir: Path, out_path: Path | None = None) -> EvalRes
     return res
 
 
-def evaluate_into_run_dir(*, run_dir: Path, model_dir: Path) -> EvalResult:
+def evaluate_into_run_dir(
+    *,
+    run_dir: Path,
+    model_dir: Path,
+    trust_remote_code: bool = False,
+) -> EvalResult:
     model_dir = resolve_user_path(model_dir, must_exist=True)
     tok = AutoTokenizer.from_pretrained(
-        model_dir, use_fast=True, trust_remote_code=False
+        model_dir, use_fast=True, trust_remote_code=trust_remote_code
     )
     model = AutoModelForCausalLM.from_pretrained(
         model_dir,
-        device_map="auto",
-        torch_dtype=torch.float16,
-        trust_remote_code=False,
+        **_auto_device_load_kwargs(trust_remote_code=trust_remote_code),
     )
     write_provenance(run_dir, extra={"stage": "evaluate"})
     device = model.device

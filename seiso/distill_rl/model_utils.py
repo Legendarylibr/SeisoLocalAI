@@ -23,11 +23,15 @@ def release_causal_lm(model: Any) -> None:
 
 
 def load_causal_lm(
-    model_path: str, *, revision: str | None = None, dtype: torch.dtype | None = None
+    model_path: str,
+    *,
+    revision: str | None = None,
+    dtype: torch.dtype | None = None,
+    trust_remote_code: bool = False,
 ):
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
-    load_kwargs: dict[str, Any] = {"trust_remote_code": False}
+    load_kwargs: dict[str, Any] = {"trust_remote_code": trust_remote_code}
     if revision:
         load_kwargs["revision"] = revision
 
@@ -40,12 +44,19 @@ def load_causal_lm(
         if dtype is not None
         else (torch.bfloat16 if torch.cuda.is_available() else torch.float32)
     )
-    model = AutoModelForCausalLM.from_pretrained(
-        model_path,
-        torch_dtype=resolved_dtype,
-        device_map="auto" if torch.cuda.is_available() else None,
+    model_kwargs: dict[str, Any] = {
+        "torch_dtype": resolved_dtype,
+        "device_map": "auto" if torch.cuda.is_available() else None,
         **load_kwargs,
-    )
+    }
+    if model_kwargs["device_map"] == "auto":
+        from seiso.memory.protection import build_hf_max_memory
+
+        max_memory = build_hf_max_memory()
+        if max_memory:
+            model_kwargs["max_memory"] = max_memory
+
+    model = AutoModelForCausalLM.from_pretrained(model_path, **model_kwargs)
     if not torch.cuda.is_available():
         model = model.to(device="cpu")  # type: ignore[call-arg]
     model.eval()

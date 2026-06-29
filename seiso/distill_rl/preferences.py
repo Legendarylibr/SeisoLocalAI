@@ -41,6 +41,7 @@ def build_preference_bundle(
     use_chat_template: bool,
     teacher_revision: str | None = None,
     student_revision: str | None = None,
+    trust_remote_code: bool = False,
     on_log=None,
 ) -> PreferenceBundle:
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -66,6 +67,7 @@ def build_preference_bundle(
         use_chat_template=use_chat_template,
         teacher_revision=teacher_revision,
         student_revision=student_revision,
+        trust_remote_code=trust_remote_code,
     )
     val_rows, val_filtered = _rows_for_split(
         teacher_model=teacher_model,
@@ -77,6 +79,7 @@ def build_preference_bundle(
         use_chat_template=use_chat_template,
         teacher_revision=teacher_revision,
         student_revision=student_revision,
+        trust_remote_code=trust_remote_code,
     )
 
     train_path = output_dir / "preferences_train.jsonl"
@@ -89,6 +92,7 @@ def build_preference_bundle(
         "student_model": student_model,
         "teacher_revision": teacher_revision,
         "student_revision": student_revision,
+        "trust_remote_code": trust_remote_code,
         "seed": seed,
         "temperature": temperature,
         "max_new_tokens": max_new_tokens,
@@ -131,6 +135,7 @@ def _rows_for_split(
     use_chat_template: bool,
     teacher_revision: str | None = None,
     student_revision: str | None = None,
+    trust_remote_code: bool = False,
 ) -> tuple[list[dict[str, Any]], int]:
     rows = generate_preference_rows(
         teacher_model=teacher_model,
@@ -142,6 +147,7 @@ def _rows_for_split(
         use_chat_template=use_chat_template,
         teacher_revision=teacher_revision,
         student_revision=student_revision,
+        trust_remote_code=trust_remote_code,
     )
     filtered = 0
     kept: list[dict[str, Any]] = []

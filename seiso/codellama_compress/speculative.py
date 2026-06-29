@@ -35,6 +35,28 @@ def _device_map(device: Literal["auto", "cuda", "cpu"]) -> Any:
     return "auto"
 
 
+def _auto_model_kwargs(
+    *,
+    device: Literal["auto", "cuda", "cpu"],
+    trust_remote_code: bool,
+) -> dict[str, Any]:
+    kwargs: dict[str, Any] = {
+        "device_map": _device_map(device),
+        "torch_dtype": torch.float16,
+        "trust_remote_code": trust_remote_code,
+    }
+    if kwargs["device_map"] == "auto" and torch.cuda.is_available():
+        try:
+            from seiso.memory.protection import build_hf_max_memory
+
+            max_memory = build_hf_max_memory()
+            if max_memory:
+                kwargs["max_memory"] = max_memory
+        except Exception:
+            pass
+    return kwargs
+
+
 def _model_device(model) -> torch.device:
     # Works for non-sharded models; for device_map="auto" models, parameters should still
     # have concrete devices (or at least the first parameter does).
@@ -52,6 +74,7 @@ def speculative_generate(
     temperature: float = 0.0,
     device: Literal["auto", "cuda", "cpu"] = "auto",
     allow_mismatched_tokenizers: bool = False,
+    trust_remote_code: bool = False,
 ) -> tuple[str, SpeculativeStats]:
     """
     Speculative decoding (Leviathan et al. 2022 style) with greedy/argmax verification.
@@ -66,10 +89,10 @@ def speculative_generate(
         raise ValueError("num_speculative_tokens must be >= 1")
 
     tok = AutoTokenizer.from_pretrained(
-        target_model, use_fast=True, trust_remote_code=False
+        target_model, use_fast=True, trust_remote_code=trust_remote_code
     )
     draft_tok = AutoTokenizer.from_pretrained(
-        draft_model, use_fast=True, trust_remote_code=False
+        draft_model, use_fast=True, trust_remote_code=trust_remote_code
     )
     if tok.pad_token is None:
         tok.pad_token = tok.eos_token
@@ -99,15 +122,17 @@ def speculative_generate(
 
     target = AutoModelForCausalLM.from_pretrained(
         target_model,
-        device_map=_device_map(device),
-        torch_dtype=torch.float16,
-        trust_remote_code=False,
+        **_auto_model_kwargs(
+            device=device,
+            trust_remote_code=trust_remote_code,
+        ),
     )
     draft = AutoModelForCausalLM.from_pretrained(
         draft_model,
-        device_map=_device_map(device),
-        torch_dtype=torch.float16,
-        trust_remote_code=False,
+        **_auto_model_kwargs(
+            device=device,
+            trust_remote_code=trust_remote_code,
+        ),
     )
 
     # Keep separate tensors per-model to avoid device_map mismatches.

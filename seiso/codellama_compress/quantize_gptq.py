@@ -40,6 +40,7 @@ def run_gptq_quantization(
     out_dir: Path,
     dataset_cfg: DatasetConfig,
     cfg: GPTQConfig,
+    trust_remote_code: bool = False,
 ) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     write_provenance(run_dir, extra={"stage": "quantize_gptq"})
@@ -53,7 +54,7 @@ def run_gptq_quantization(
         ) from e
 
     tokenizer = AutoTokenizer.from_pretrained(
-        in_model_dir, use_fast=True, trust_remote_code=False
+        in_model_dir, use_fast=True, trust_remote_code=trust_remote_code
     )
     ensure_pad_token(tokenizer)
 
@@ -68,6 +69,7 @@ def run_gptq_quantization(
         in_model_dir,
         quantize_config=quantize_config,
         device="cuda" if torch.cuda.is_available() else "cpu",
+        trust_remote_code=trust_remote_code,
     )
 
     calib_ids, calib_texts = _build_calibration_data(tokenizer, dataset_cfg, cfg)

@@ -44,6 +44,7 @@ class DPOSettings:
     )
     use_qlora: bool = False
     bnb_4bit_compute_dtype: str = "bfloat16"
+    trust_remote_code: bool = False
 
     # Runtime
     bf16: bool = True

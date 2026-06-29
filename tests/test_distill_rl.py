@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import sys
+import types
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -34,6 +36,17 @@ def test_build_distill_rl_config_smoke_defaults(tmp_path: Path):
     assert "evaluate" in cfg.stages
     assert cfg.align_distill_with_prompts is True
     assert cfg.train_val_fraction == 0.75
+    assert cfg.trust_remote_code is False
+
+
+def test_build_distill_rl_config_accepts_trust_remote_code(tmp_path: Path):
+    cfg = build_distill_rl_config(
+        job_id="job-1",
+        user_id="user-1",
+        data_dir=tmp_path,
+        payload={"preset": "smoke", "trust_remote_code": True},
+    )
+    assert cfg.trust_remote_code is True
 
 
 def test_build_distill_rl_config_reproducible_seeds(tmp_path: Path):
@@ -127,6 +140,118 @@ def test_build_preference_bundle_filters_degenerate_pairs(tmp_path: Path, monkey
     assert bundle.filtered_count >= 0
     assert bundle.manifest_path.is_file()
     assert all(row["chosen"] != row["rejected"] for row in train_rows)
+
+
+def test_build_preference_bundle_forwards_trust_remote_code(
+    tmp_path: Path, monkeypatch
+):
+    prompts = [RolloutPrompt(prompt_id="p1", text="one")]
+    seen: list[bool] = []
+
+    def fake_rows(**kwargs):
+        seen.append(kwargs["trust_remote_code"])
+        return [
+            {
+                "prompt_id": "p1",
+                "prompt": "one",
+                "chosen": "good",
+                "rejected": "bad",
+                "generation_seed": 1,
+            }
+        ]
+
+    monkeypatch.setattr(
+        "seiso.distill_rl.preferences.generate_preference_rows", fake_rows
+    )
+    monkeypatch.setattr(
+        "seiso.distill_rl.preferences.load_rollout_prompts",
+        lambda *_args, **_kwargs: prompts,
+    )
+
+    bundle = build_preference_bundle(
+        teacher_model="teacher",
+        student_model="student",
+        output_dir=tmp_path / "prefs",
+        prompt_library_path=None,
+        max_prompts=1,
+        max_new_tokens=8,
+        temperature=0.0,
+        seed=13,
+        train_fraction=0.5,
+        use_chat_template=False,
+        trust_remote_code=True,
+    )
+
+    manifest = json.loads(bundle.manifest_path.read_text(encoding="utf-8"))
+    assert seen == [True, True]
+    assert manifest["trust_remote_code"] is True
+
+
+def test_load_causal_lm_applies_trust_remote_code_and_max_memory(monkeypatch):
+    from seiso.distill_rl import model_utils
+
+    calls: dict[str, dict] = {}
+
+    class FakeCuda:
+        @staticmethod
+        def is_available():
+            return True
+
+        @staticmethod
+        def empty_cache():
+            return None
+
+    class FakeTokenizer:
+        pad_token = None
+        eos_token = "<eos>"
+
+    class FakeTokenizers:
+        @staticmethod
+        def from_pretrained(model_path, **kwargs):
+            calls["tokenizer"] = {"model_path": model_path, **kwargs}
+            return FakeTokenizer()
+
+    class FakeParameter:
+        device = "cuda:0"
+
+    class FakeModel:
+        device = "cuda:0"
+
+        def eval(self):
+            return self
+
+        def parameters(self):
+            return iter([FakeParameter()])
+
+    class FakeModels:
+        @staticmethod
+        def from_pretrained(model_path, **kwargs):
+            calls["model"] = {"model_path": model_path, **kwargs}
+            return FakeModel()
+
+    fake_transformers = types.SimpleNamespace(
+        AutoModelForCausalLM=FakeModels,
+        AutoTokenizer=FakeTokenizers,
+    )
+    monkeypatch.setitem(sys.modules, "transformers", fake_transformers)
+    monkeypatch.setattr(model_utils.torch, "cuda", FakeCuda)
+    monkeypatch.setattr(
+        "seiso.memory.protection.build_hf_max_memory",
+        lambda: {0: "12000MiB"},
+    )
+
+    model_utils.load_causal_lm(
+        "org/custom-model",
+        revision="abc123",
+        trust_remote_code=True,
+    )
+
+    assert calls["tokenizer"]["trust_remote_code"] is True
+    assert calls["tokenizer"]["revision"] == "abc123"
+    assert calls["model"]["trust_remote_code"] is True
+    assert calls["model"]["revision"] == "abc123"
+    assert calls["model"]["device_map"] == "auto"
+    assert calls["model"]["max_memory"] == {0: "12000MiB"}
 
 
 def test_latest_checkpoint_sorts_numeric_suffix(tmp_path: Path):

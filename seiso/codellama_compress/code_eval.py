@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import torch
 from datasets import load_dataset
@@ -93,6 +93,7 @@ def run_code_eval(
     top_p: float = 0.95,
     limit: int | None = None,
     allow_insecure_code_exec: bool = False,
+    trust_remote_code: bool = False,
 ) -> CodeEvalResult:
     assert_code_exec_permitted(allow_insecure=allow_insecure_code_exec)
     out_dir = run_dir / "code_eval" / suite
@@ -109,16 +110,25 @@ def run_code_eval(
 
     model_dir = resolve_user_path(model_dir, must_exist=True)
     tok = AutoTokenizer.from_pretrained(
-        model_dir, use_fast=True, trust_remote_code=False
+        model_dir, use_fast=True, trust_remote_code=trust_remote_code
     )
     if tok.pad_token is None:
         tok.pad_token = tok.eos_token
-    model = AutoModelForCausalLM.from_pretrained(
-        model_dir,
-        device_map="auto",
-        torch_dtype=torch.float16,
-        trust_remote_code=False,
-    )
+    model_kwargs: dict[str, Any] = {
+        "device_map": "auto",
+        "torch_dtype": torch.float16,
+        "trust_remote_code": trust_remote_code,
+    }
+    if torch.cuda.is_available():
+        try:
+            from seiso.memory.protection import build_hf_max_memory
+
+            max_memory = build_hf_max_memory()
+            if max_memory:
+                model_kwargs["max_memory"] = max_memory
+        except Exception:
+            pass
+    model = AutoModelForCausalLM.from_pretrained(model_dir, **model_kwargs)
 
     details_path = out_dir / "details.jsonl"
     total = 0
