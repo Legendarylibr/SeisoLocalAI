@@ -15,7 +15,12 @@ from seiso.export.hub_precheck import (
     precheck_hub_export,
     validate_repo_id,
 )
-from seiso.export.model_card import HubModelMetadata, render_readme, write_hub_artifacts
+from seiso.export.model_card import (
+    HubModelMetadata,
+    metadata_from_manifest,
+    render_readme,
+    write_hub_artifacts,
+)
 from seiso.export.pipeline import (
     auto_export_after_training,
     prepare_export,
@@ -175,6 +180,17 @@ def test_suggest_profile_from_manifest(tmp_path: Path):
     ckpt.mkdir()
     (ckpt / "seiso_manifest.json").write_text(json.dumps({"method": "full"}))
     assert suggest_profile(ckpt) == ExportProfile.FULL_BUNDLE
+
+
+def test_slime_manifest_suggests_lora_profile(tmp_path: Path):
+    ckpt = tmp_path / "ckpt"
+    ckpt.mkdir()
+    (ckpt / "seiso_manifest.json").write_text(
+        json.dumps({"method": "slime", "adapter": "lora"})
+    )
+
+    assert detect_checkpoint_kind(ckpt) == "lora"
+    assert suggest_profile(ckpt) == ExportProfile.LORA_ADAPTER
 
 
 def test_resolve_formats_deduplicates():
@@ -368,6 +384,19 @@ def test_write_hub_artifacts_includes_finetune_type(tmp_path: Path):
     payload = json.loads((tmp_path / "seiso_model_metadata.json").read_text())
     assert payload["finetune_type"] == "full"
     assert payload["export_formats"] == ["full", "gguf"]
+
+
+def test_metadata_from_slime_manifest_marks_post_training(tmp_path: Path):
+    manifest = tmp_path / "seiso_manifest.json"
+    manifest.write_text(
+        json.dumps({"method": "slime", "model_id": "test/base"}),
+        encoding="utf-8",
+    )
+
+    meta = metadata_from_manifest(_meta(), manifest)
+
+    assert meta.finetune_type == "slime"
+    assert meta.base_model == "test/base"
 
 
 # --- API ---

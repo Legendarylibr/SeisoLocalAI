@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import os
 from collections.abc import Callable
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +19,7 @@ class TrainMethod(StrEnum):
     LORA = "lora"
     FULL = "full"
     EMBEDDING = "embedding"
+    SLIME = "slime"
 
 
 class QuantMode(StrEnum):
@@ -114,6 +117,43 @@ class TrainConfig(BaseModel):
     )
     torch_compile: bool = False  # torch.compile the training model (CUDA only, opt-in)
     save_safetensors: bool = True
+    training_methodology: str = Field(
+        default="seiso_release_post_training",
+        description="Stable methodology label written into manifests and snapshots.",
+    )
+    prompt_field: str = "prompt"
+    answer_field: str = "answer"
+    reward: str = "exact_match"
+    reward_field: str = "reward"
+    max_vram_gb: float | None = Field(default=None, gt=0)
+    max_prompt_tokens: int = Field(default=512, ge=1)
+    max_new_tokens: int = Field(default=256, ge=1)
+    rollouts_per_prompt: int = Field(default=4, ge=2)
+    rollout_batch_size: int = Field(default=4, ge=1)
+    policy_micro_batch_size: int | None = Field(default=None, ge=1)
+    train_batch_size: int | None = Field(default=None, ge=1)
+    shuffle_buffer_size: int = Field(default=2048, ge=1)
+    max_samples_per_epoch: int | None = Field(default=None, ge=1)
+    kl_coef: float = Field(default=0.0, ge=0)
+    clip_ratio: float = Field(default=0.2, gt=0)
+    temperature: float = Field(default=0.9, gt=0)
+    top_p: float = Field(default=0.95, gt=0, le=1)
+    dtype: str = "auto"
+    device: str = "cuda"
+    slime_use_lora: bool = True
+    use_8bit_optimizer: bool = False
+    trust_remote_code: bool = False
+    best_checkpoint_dir: str = Field(default="checkpoint-best", min_length=1)
+    final_checkpoint_dir: str = ""
+    auto_stop: bool = True
+    auto_stop_metric: str = "reward_mean"
+    auto_stop_patience: int = Field(default=20, ge=1)
+    auto_stop_min_delta: float = Field(default=1e-4, ge=0)
+    auto_stop_warmup_steps: int = Field(default=10, ge=0)
+    stop_on_nonfinite: bool = True
+    write_verifier_data: bool = True
+    verifier_data_file: str = Field(default="slime_verifier_data.jsonl", min_length=1)
+    verifier_max_text_chars: int = Field(default=2048, ge=0)
     extra: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator(
@@ -130,6 +170,66 @@ class TrainConfig(BaseModel):
         with open(path) as f:
             data = yaml.safe_load(f) or {}
         return cls.model_validate(data)
+
+    def to_single_gpu_slime_config(self):
+        """Project a general training config into the release-grade slime runner."""
+        from seiso.slime_single_gpu.config import SingleGpuSlimeConfig
+
+        policy_batch = self.policy_micro_batch_size or self.batch_size
+        train_batch = self.train_batch_size or self.batch_size
+        return SingleGpuSlimeConfig(
+            model_id=self.model_id,
+            dataset=Path(self.dataset),
+            output_dir=self.output_dir,
+            prompt_field=self.prompt_field,
+            answer_field=self.answer_field,
+            reward=self.reward,
+            reward_field=self.reward_field,
+            max_vram_gb=self.max_vram_gb,
+            max_prompt_tokens=self.max_prompt_tokens,
+            max_new_tokens=self.max_new_tokens,
+            rollouts_per_prompt=self.rollouts_per_prompt,
+            rollout_batch_size=self.rollout_batch_size,
+            policy_micro_batch_size=policy_batch,
+            train_batch_size=train_batch,
+            shuffle_buffer_size=self.shuffle_buffer_size,
+            max_samples_per_epoch=self.max_samples_per_epoch,
+            gradient_accumulation_steps=self.gradient_accumulation_steps,
+            learning_rate=self.learning_rate,
+            weight_decay=self.weight_decay,
+            max_grad_norm=self.max_grad_norm,
+            epochs=self.epochs,
+            max_steps=self.extra.get("max_steps"),
+            kl_coef=self.kl_coef,
+            clip_ratio=self.clip_ratio,
+            temperature=self.temperature,
+            top_p=self.top_p,
+            seed=self.seed,
+            dtype=self.dtype,
+            device=self.device,
+            gradient_checkpointing=self.gradient_checkpointing,
+            use_lora=self.slime_use_lora,
+            lora_r=self.lora_r,
+            lora_alpha=self.lora_alpha,
+            lora_dropout=self.lora_dropout,
+            lora_target_modules=self.extra.get("lora_target_modules"),
+            lora_bias=str(self.extra.get("lora_bias", "none")),
+            use_8bit_optimizer=self.use_8bit_optimizer,
+            trust_remote_code=self.trust_remote_code,
+            save_every_steps=self.save_steps,
+            log_every_steps=self.logging_steps,
+            best_checkpoint_dir=self.best_checkpoint_dir,
+            final_checkpoint_dir=self.final_checkpoint_dir,
+            auto_stop=self.auto_stop,
+            auto_stop_metric=self.auto_stop_metric,
+            auto_stop_patience=self.auto_stop_patience,
+            auto_stop_min_delta=self.auto_stop_min_delta,
+            auto_stop_warmup_steps=self.auto_stop_warmup_steps,
+            stop_on_nonfinite=self.stop_on_nonfinite,
+            write_verifier_data=self.write_verifier_data,
+            verifier_data_file=self.verifier_data_file,
+            verifier_max_text_chars=self.verifier_max_text_chars,
+        )
 
 
 def run_training(
@@ -150,5 +250,47 @@ def run_training(
         configure_hf_hub_cache(config.sandbox_root)
     ensure_cuda_library_path()
     enforce_nvidia_secure_boundary(context="training")
+    if config.method == TrainMethod.SLIME:
+        from seiso.slime_single_gpu.trainer import train_single_gpu_slime
+
+        slime_config = config.to_single_gpu_slime_config()
+        out = train_single_gpu_slime(slime_config)
+        _write_slime_manifest(config, out)
+        return out
     trainer = SeisoTrainer(config, on_metric=on_metric, on_log=on_log)
     return trainer.run()
+
+
+def _write_slime_manifest(config: TrainConfig, output_dir: Path) -> None:
+    payload = {
+        "model_id": config.model_id,
+        "original_model_id": str(config.extra.get("original_model_id") or config.model_id),
+        "method": TrainMethod.SLIME.value,
+        "methodology": config.training_methodology,
+        "post_training_algorithm": "single_gpu_slime_grpo",
+        "adapter": "lora" if config.slime_use_lora else "full",
+        "quant": config.quant.value,
+        "dataset": str(config.dataset),
+        "epochs": config.epochs,
+        "batch_size": config.batch_size,
+        "learning_rate": config.learning_rate,
+        "gradient_accumulation_steps": config.gradient_accumulation_steps,
+        "max_vram_gb": config.max_vram_gb,
+        "reward": config.reward,
+        "rollouts_per_prompt": config.rollouts_per_prompt,
+        "auto_stop": config.auto_stop,
+        "auto_stop_metric": config.auto_stop_metric,
+        "auto_stop_patience": config.auto_stop_patience,
+        "best_checkpoint_dir": str(config.output_dir / config.best_checkpoint_dir),
+        "verifier_data_file": (
+            str(config.output_dir / config.verifier_data_file)
+            if config.write_verifier_data
+            else None
+        ),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    output_dir.mkdir(parents=True, exist_ok=True)
+    (output_dir / "seiso_manifest.json").write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
