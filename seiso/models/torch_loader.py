@@ -19,29 +19,61 @@ def _resolve_dtype(options: LoadOptions) -> Any:
     return getattr(torch, options.dtype, None)
 
 
+_AUTO_DEVICE_MAPS = {"auto", "balanced", "balanced_low_0", "sequential"}
+_DISABLED_DEVICE_MAPS = {"", "none", "false", "off", "disabled", "cpu"}
+
+
+def _cuda_available() -> bool:
+    import torch
+
+    return bool(torch.cuda.is_available())
+
+
+def _mps_available() -> bool:
+    import torch
+
+    return bool(
+        hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
+    )
+
+
 def _resolve_device_map(
     backend: Backend,
     device: str | None = None,
     *,
     for_training: bool = False,
+    requested: str | dict[str, str] | None = "auto",
 ) -> str | dict[str, str] | None:
     if for_training:
         from seiso.memory.protection import resolve_training_device_map
 
         return resolve_training_device_map(device)
 
-    import torch
+    if isinstance(requested, dict):
+        return requested
 
-    if device == "mps" or (
-        device is None
-        and backend != Backend.TORCH
-        and hasattr(torch.backends, "mps")
-        and torch.backends.mps.is_available()
-    ):
-        return {"": "mps"}
-    if device == "cuda" or (backend == Backend.TORCH and torch.cuda.is_available()):
-        return "auto"
-    return None
+    request = "auto" if requested is None else str(requested).strip().lower()
+    if request in _DISABLED_DEVICE_MAPS:
+        return None
+
+    if request == "cuda":
+        return {"": "cuda"} if _cuda_available() else None
+    if request == "mps":
+        return {"": "mps"} if _mps_available() else None
+
+    if request in _AUTO_DEVICE_MAPS:
+        if device == "cuda" or (backend == Backend.TORCH and _cuda_available()):
+            return request
+        if request == "auto" and (device == "mps" or _mps_available()):
+            return {"": "mps"}
+        return None
+
+    return request
+
+
+def _device_map_accepts_max_memory(device_map: str | dict[str, str] | None) -> bool:
+    return isinstance(device_map, str) and device_map in _AUTO_DEVICE_MAPS
+
 
 
 def load_torch(
@@ -74,10 +106,15 @@ def load_torch(
     pre_quant_method = native_quant_method_from_config(pre_config) or ""
     native_hub_quant = bool(pre_quant_method)
 
-    device_map = _resolve_device_map(backend, device, for_training=for_training)
+    device_map = _resolve_device_map(
+        backend,
+        device,
+        for_training=for_training,
+        requested=options.device_map,
+    )
     if device_map is not None:
         model_kwargs["device_map"] = device_map
-        if device_map == "auto":
+        if _device_map_accepts_max_memory(device_map):
             from seiso.memory.protection import build_hf_max_memory
 
             max_memory = build_hf_max_memory()

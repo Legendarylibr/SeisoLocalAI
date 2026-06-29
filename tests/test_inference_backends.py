@@ -268,6 +268,49 @@ async def test_local_inference_stream_propagates_errors(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_local_inference_chat_uses_direct_completion(monkeypatch):
+    from seiso.inference.runner import LocalInferenceRunner
+
+    async def _noop_switch(_path: str, *, draft_path: str | None = None) -> None:
+        return None
+
+    runner = LocalInferenceRunner()
+    monkeypatch.setattr(runner, "_ensure_model_switch", _noop_switch)
+    monkeypatch.setattr(
+        runner, "_resolve_route", lambda _payload, _path: ("llama", "/tmp/fake.gguf")
+    )
+    monkeypatch.setattr(runner._pool, "bump_generation", lambda: 7)
+
+    calls: list[str] = []
+
+    def _complete(_payload, _path, _route, _generation_id):
+        calls.append("complete")
+        return "done"
+
+    def _iter_tokens(*_args, **_kwargs):
+        raise AssertionError("chat should not use streaming token iteration")
+
+    monkeypatch.setattr(runner, "_complete", _complete)
+    monkeypatch.setattr(runner, "_iter_tokens", _iter_tokens)
+
+    assert await runner.chat({"model_path": "/tmp/fake.gguf"}) == "done"
+    assert calls == ["complete"]
+
+
+def test_torch_input_device_prefers_sharded_gpu():
+    import torch
+
+    from seiso.inference.runner import LocalInferenceRunner
+
+    class FakeModel:
+        hf_device_map = {"embed": "cpu", "layers.0": "cuda:1", "lm_head": "cpu"}
+
+    assert LocalInferenceRunner._torch_input_device(FakeModel()) == torch.device(
+        "cuda:1"
+    )
+
+
+@pytest.mark.asyncio
 async def test_cancel_generation_keeps_loaded_model(monkeypatch):
     from seiso.inference.runner import LocalInferenceRunner
 
