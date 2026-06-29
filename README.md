@@ -36,6 +36,7 @@ Seiso combines a **web workspace (Forge)** and a **Python core (CLI + library)**
 |----------|----------|-----|
 | Download & chat with open models | Model Hub, Chat | `seiso chat` |
 | QLoRA / LoRA / full fine-tune | Training Studio | `seiso train` |
+| Single-GPU slime post-training | CLI | `seiso train --config configs/example_training_slime.yaml` |
 | Merge, GGUF, Hub publish | Export | `seiso export` |
 | LLM distill → prune → quant | Compress | `seiso compress run` |
 | Teacher distill + DPO alignment | Distill-RL | `seiso distill-rl run` |
@@ -436,11 +437,12 @@ Training stack: **TRL `SFTTrainer`** + **PEFT** (LoRA/QLoRA) + optional **fused 
 
 ### Training
 
-- **Methods:** LoRA, QLoRA (4-bit), full fine-tune, embedding training
+- **Methods:** LoRA, QLoRA (4-bit), full fine-tune, embedding training, single-GPU slime post-training
 - **Formats:** JSONL chat datasets with auto format detection
 - **Optimizations:** gradient checkpointing, packing, RSLoRA, train-on-responses-only
 - **Multi-GPU:** `torchrun` distributed workers; rank-0 checkpoint writes ([multi-gpu](docs/training/multi-gpu.md))
 - **Fused kernels:** RMSNorm, SwiGLU MLP, cross-entropy, fused LoRA delta ([kernels](docs/training/kernels.md))
+- **Release-style post-training:** `method: slime` adds rollout rewards, verifier data, best/final checkpoints, and plateau auto-stop on one GPU ([training](docs/training/quickstart.md#slime-post-training))
 
 ### Inference
 

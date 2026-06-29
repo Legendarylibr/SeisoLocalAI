@@ -54,7 +54,7 @@ Delegates to `./scripts/doctor.sh` when run from a clone.
 
 ## `seiso train`
 
-Fine-tune from a YAML config.
+Fine-tune or post-train from a YAML config.
 
 ```bash
 seiso train --config configs/example_lora.yaml
@@ -62,9 +62,17 @@ seiso train --config configs/example_lora.yaml
 
 Example config: `configs/example_lora.yaml` (dataset: `data/sample.jsonl`).
 
+Single-GPU slime-style post-training is also a first-class training method:
+
+```bash
+seiso train --config configs/example_training_slime.yaml
+```
+
+Use `method: slime` for local rollout/reward policy updates with LoRA adapters, verifier JSONL, best/final checkpoints, and plateau auto-stop. See [training/quickstart.md § Slime Post-Training](training/quickstart.md#slime-post-training).
+
 Forge Training Studio runs the same training stack but adds full-dataset analysis, live recommendations, and SSE job streaming via `/api/training/*` (see [training/quickstart.md](training/quickstart.md)).
 
-**Checkpoints (CLI):** written under the YAML `output_dir` (example: `./outputs/lora-run/checkpoint-<timestamp>/`), including `seiso_manifest.json` and `dataset_analysis.json`.
+**Checkpoints (CLI):** written under the YAML `output_dir` (example: `./outputs/lora-run/checkpoint-<timestamp>/` for SFT, or `./outputs/slime-train-method/` for slime), including `seiso_manifest.json`. SFT runs also write `dataset_analysis.json`; slime runs write `slime_single_gpu_metrics.jsonl`, `slime_training_state.json`, and optional `slime_verifier_data.jsonl`.
 
 **Checkpoints (Forge UI):** `{SEISO_DATA_DIR}/checkpoints/{user_id}/{job_id}/`
 
