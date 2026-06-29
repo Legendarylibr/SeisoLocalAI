@@ -140,10 +140,6 @@ def train_single_gpu_slime(config: SingleGpuSlimeConfig) -> Path:
         model.gradient_checkpointing_enable()
     if config.use_lora:
         model = _apply_lora(model, config)
-        if config.gradient_checkpointing and hasattr(
-            model, "enable_input_require_grads"
-        ):
-            model.enable_input_require_grads()
 
     ref_model = None
     if config.kl_coef > 0:
@@ -372,7 +368,6 @@ def _collect_rollouts(
             _append_jsonl_records(verifier_path, verifier_records)
         rollouts.extend(chunk_rollouts)
         del encoded, generated, padded
-        _release_cuda(torch, config.device)
 
     _assign_grouped_advantages(rollouts, config.rollouts_per_prompt)
     model.train()
@@ -396,7 +391,6 @@ def _backprop_policy_step(
         (loss * weighted * loss_scale).backward()
         _merge_stats(stats, chunk_stats, weight=weighted)
         del loss
-        _release_cuda(torch, config.device)
     return stats
 
 
@@ -455,16 +449,6 @@ def _merge_stats(
     for key in ("loss", "policy_loss", "kl", "reward_mean"):
         stats[key] += chunk_stats[key] * weight
     stats["reward_max"] = max(stats["reward_max"], chunk_stats["reward_max"])
-
-
-def _policy_step(
-    model,
-    rollouts: list[Rollout],
-    pad_token_id: int,
-    config: SingleGpuSlimeConfig,
-    torch,
-):
-    return _policy_loss(model, rollouts, pad_token_id, config, torch)
 
 
 def _sequence_logprobs(model, batch: dict[str, Any], torch):
@@ -740,13 +724,6 @@ def _set_seed(seed: int) -> None:
         return
 
 
-def _batched(
-    items: list[dict[str, Any]], batch_size: int
-) -> Iterable[list[dict[str, Any]]]:
-    for start in range(0, len(items), batch_size):
-        yield items[start : start + batch_size]
-
-
 def _batched_records(
     records: Iterable[dict[str, Any]],
     batch_size: int,
@@ -764,14 +741,6 @@ def _batched_records(
 def _chunked(items: list[T], chunk_size: int) -> Iterable[list[T]]:
     for start in range(0, len(items), chunk_size):
         yield items[start : start + chunk_size]
-
-
-def _release_cuda(torch, device: str) -> None:
-    if device != "cuda":
-        return
-    # Let PyTorch's caching allocator reuse blocks between microbatches. Calling
-    # empty_cache/gc here adds CPU overhead and usually makes single-GPU runs slower.
-    return
 
 
 def _append_metrics(path: Path, record: dict[str, Any]) -> None:
