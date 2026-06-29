@@ -205,39 +205,8 @@ def _starts_reasoning_leak(text: str) -> bool:
 
 
 def strip_reasoning_leakage(content: str) -> str:
-    """Remove visible chain-of-thought / thinking-process output."""
-    if not content:
-        return content
-
-    cleaned = _strip_answer_label_prefix(_strip_redacted_thinking_block(content))
-    if not cleaned:
-        return ""
-    extracted = _extract_after_thinking_process_block(cleaned)
-    if extracted:
-        return _strip_answer_label_prefix(extracted.strip())
-
-    cleaned = _THINK_TAG_PATTERN.sub("", cleaned)
-    cleaned = _PIPE_TAG_PATTERN.sub("", cleaned)
-    cleaned = _ORPHAN_CLOSE_TAG_PATTERN.sub("", cleaned)
-
-    if _looks_like_reasoning_leak(cleaned):
-        extracted = _extract_final_answer_from_reasoning(cleaned)
-        if extracted:
-            return _strip_answer_label_prefix(extracted.strip())
-        cleaned = _REASONING_HEADER_PATTERN.sub("", cleaned)
-
-    cleaned = re.sub(
-        r"(?im)^\s*\d+\.\s+\*\*(Analyze|Determine|Drafting|Selecting|Refining|Final|Thought|Reasoning|Option)[^*]*\*\*.*?"
-        r"(?=^\s*\d+\.\s+\*\*|\Z)",
-        "",
-        cleaned,
-    )
-    cleaned = re.sub(
-        r"(?im)^\s*\*\*(?:Reasoning|Thought|Analysis):\*\*.*?(?=^\s*\*\*|\Z)",
-        "",
-        cleaned,
-    )
-    return _strip_answer_label_prefix(cleaned.strip())
+    """Legacy compatibility helper; runtime chat leaves model text intact."""
+    return content
 
 
 def strip_spurious_tool_syntax(content: str) -> str:
@@ -255,10 +224,8 @@ def strip_spurious_tool_syntax(content: str) -> str:
 
 
 def strip_spurious_chat_artifacts(content: str) -> str:
-    """Strip tool-call markup and leaked reasoning from plain chat replies."""
-    cleaned = strip_spurious_tool_syntax(content)
-    cleaned = strip_reasoning_leakage(cleaned)
-    return cleaned.strip()
+    """Strip only tool-call markup from plain chat replies."""
+    return strip_spurious_tool_syntax(content).strip()
 
 
 def sanitize_llm_output(content: str, *, strip_tool_calls: bool = False) -> str:
@@ -293,10 +260,6 @@ class StreamingOutputSanitizer:
         if not self._strip:
             return [text]
 
-        if self._reasoning_mode:
-            self._buffer += text
-            return []
-
         emitted: list[str] = []
         self._buffer += text
 
@@ -308,40 +271,6 @@ class StreamingOutputSanitizer:
                     break
                 self._buffer = self._buffer[close_idx + len(_TOOL_CLOSE) :]
                 self._in_tool_call = False
-                continue
-
-            if self._in_think:
-                close_idx = -1
-                close_len = 0
-                for _open_tag, close_tag in _THINK_TAG_PAIRS:
-                    idx = self._buffer.lower().find(close_tag.lower())
-                    if idx != -1 and (close_idx == -1 or idx < close_idx):
-                        close_idx = idx
-                        close_len = len(close_tag)
-                if close_idx == -1:
-                    self._buffer = ""
-                    break
-                self._buffer = self._buffer[close_idx + close_len :]
-                self._in_think = False
-                continue
-
-            if not self._emitted and _starts_reasoning_leak(self._buffer):
-                self._reasoning_mode = True
-                break
-
-            think_idx = -1
-            think_open = ""
-            for open_tag, _close_tag in _THINK_TAG_PAIRS:
-                idx = self._buffer.lower().find(open_tag.lower())
-                if idx != -1 and (think_idx == -1 or idx < think_idx):
-                    think_idx = idx
-                    think_open = open_tag
-            if think_idx != -1:
-                if think_idx > 0:
-                    emitted.append(self._buffer[:think_idx])
-                    self._emitted = True
-                self._buffer = self._buffer[think_idx + len(think_open) :]
-                self._in_think = True
                 continue
 
             open_idx = self._buffer.find(_TOOL_OPEN)
@@ -364,33 +293,9 @@ class StreamingOutputSanitizer:
     def finish(self) -> list[str]:
         if not self._strip:
             return []
-        if self._in_tool_call or self._in_think:
+        if self._in_tool_call:
             self._buffer = ""
             self._in_tool_call = False
-            self._in_think = False
-        if self._reasoning_mode:
-            buf = self._buffer
-            self._buffer = ""
-            self._reasoning_mode = False
-            answer = _extract_after_thinking_process_block(buf)
-            if not answer:
-                answer = _extract_final_answer_from_reasoning(buf)
-            if answer:
-                self._emitted = True
-                return [answer]
-            if re.search(r"(?i)thinking process", buf) or re.search(
-                r"\d+\.\s*\*\*[^*]+$", buf
-            ):
-                return []
-            cleaned = strip_reasoning_leakage(buf)
-            if (
-                cleaned
-                and not _looks_like_reasoning_leak(cleaned)
-                and not _starts_reasoning_leak(cleaned)
-            ):
-                self._emitted = True
-                return [cleaned]
-            return []
         if not self._buffer:
             return []
         out = [self._buffer]
@@ -406,12 +311,7 @@ class StreamingOutputSanitizer:
 
     @staticmethod
     def _split_pending_prefixes(text: str) -> tuple[str, str]:
-        for prefixes in (
-            _PARTIAL_TOOL_PREFIXES,
-            _PARTIAL_REASONING_PREFIXES,
-            _PARTIAL_THINK_OPEN_PREFIXES,
-        ):
-            for prefix in reversed(prefixes):
-                if text.lower().endswith(prefix.lower()):
-                    return text[: -len(prefix)], prefix
+        for prefix in reversed(_PARTIAL_TOOL_PREFIXES):
+            if text.lower().endswith(prefix.lower()):
+                return text[: -len(prefix)], prefix
         return text, ""
