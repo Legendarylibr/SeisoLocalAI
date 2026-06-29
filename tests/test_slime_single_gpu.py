@@ -11,7 +11,14 @@ from seiso.slime_single_gpu.rewards import (
     numeric_reward,
     resolve_reward,
 )
-from seiso.slime_single_gpu.trainer import Rollout, _assign_grouped_advantages, _load_samples
+from seiso.slime_single_gpu.trainer import (
+    Rollout,
+    _assign_grouped_advantages,
+    _chunked,
+    _empty_stats,
+    _load_samples,
+    _merge_stats,
+)
 
 
 def test_single_gpu_slime_config_from_yaml(tmp_path: Path):
@@ -36,6 +43,8 @@ def test_single_gpu_slime_config_from_yaml(tmp_path: Path):
     assert cfg.output_dir == Path("outputs/slime")
     assert cfg.rollouts_per_prompt == 3
     assert cfg.max_vram_gb == 12
+    assert cfg.rollout_batch_size == 4
+    assert cfg.policy_micro_batch_size == 4
 
 
 def test_single_gpu_slime_defaults_do_not_load_reference_model(tmp_path: Path):
@@ -54,6 +63,7 @@ def test_example_single_gpu_slime_config_loads_samples():
 
     assert cfg.dataset == Path("data/slime_sample.jsonl")
     assert cfg.kl_coef == 0.0
+    assert cfg.policy_micro_batch_size == 2
     assert samples
     assert {"prompt", "answer"} <= set(samples[0])
 
@@ -79,6 +89,31 @@ def test_single_gpu_slime_config_rejects_invalid_vram_cap(tmp_path: Path):
     )
 
     with pytest.raises(ValueError, match="max_vram_gb"):
+        cfg.validate()
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("rollout_batch_size", 0),
+        ("policy_micro_batch_size", 0),
+        ("max_grad_norm", 0),
+    ],
+)
+def test_single_gpu_slime_config_rejects_invalid_optimization_knobs(
+    tmp_path: Path,
+    field: str,
+    value: int,
+):
+    kwargs = {
+        "model_id": "test/model",
+        "dataset": tmp_path / "data.jsonl",
+        "output_dir": tmp_path / "out",
+        field: value,
+    }
+    cfg = SingleGpuSlimeConfig(**kwargs)
+
+    with pytest.raises(ValueError, match=field):
         cfg.validate()
 
 
@@ -108,6 +143,23 @@ def test_grouped_advantages_are_normalized():
     _assign_grouped_advantages(rollouts, group_size=2)
 
     assert [r.advantage for r in rollouts] == [-1.0, 1.0, -1.0, 1.0]
+
+
+def test_chunked_splits_work_for_single_gpu_microbatches():
+    assert list(_chunked([1, 2, 3, 4, 5], 2)) == [[1, 2], [3, 4], [5]]
+
+
+def test_merge_stats_weighted_by_microbatch_size():
+    stats = _empty_stats()
+
+    _merge_stats(stats, {"loss": 2.0, "policy_loss": 4.0, "kl": 1.0, "reward_mean": 6.0, "reward_max": 7.0}, weight=0.25)
+    _merge_stats(stats, {"loss": 4.0, "policy_loss": 8.0, "kl": 3.0, "reward_mean": 10.0, "reward_max": 5.0}, weight=0.75)
+
+    assert stats["loss"] == 3.5
+    assert stats["policy_loss"] == 7.0
+    assert stats["kl"] == 2.5
+    assert stats["reward_mean"] == 9.0
+    assert stats["reward_max"] == 7.0
 
 
 def test_slime_cli_is_registered():

@@ -9,11 +9,13 @@ import random
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 from seiso.io.jsonl import iter_jsonl
 from seiso.slime_single_gpu.config import SingleGpuSlimeConfig
 from seiso.slime_single_gpu.rewards import resolve_reward
+
+T = TypeVar("T")
 
 
 @dataclass
@@ -102,8 +104,14 @@ def train_single_gpu_slime(config: SingleGpuSlimeConfig) -> Path:
             )
             if not rollouts:
                 continue
-            loss, stats = _policy_step(model, rollouts, tokenizer.pad_token_id, config, torch)
-            (loss / config.gradient_accumulation_steps).backward()
+            stats = _backprop_policy_step(
+                model,
+                rollouts,
+                tokenizer.pad_token_id,
+                config,
+                torch,
+                loss_scale=1.0 / config.gradient_accumulation_steps,
+            )
             pending_accumulation_steps += 1
 
             if pending_accumulation_steps >= config.gradient_accumulation_steps:
@@ -150,62 +158,94 @@ def _collect_rollouts(
             prompts.append(prompt)
             source_samples.append(sample)
 
-    encoded = tokenizer(
-        prompts,
-        return_tensors="pt",
-        padding=True,
-        truncation=True,
-        max_length=config.max_prompt_tokens,
-    ).to(config.device)
-    prompt_width = int(encoded["input_ids"].shape[1])
-    with torch.no_grad():
-        generated = model.generate(
-            **encoded,
-            do_sample=True,
-            temperature=config.temperature,
-            top_p=config.top_p,
-            max_new_tokens=config.max_new_tokens,
-            pad_token_id=tokenizer.pad_token_id,
-            eos_token_id=tokenizer.eos_token_id,
-            use_cache=True,
-        )
-
     rollouts: list[Rollout] = []
-    for idx, sample in enumerate(source_samples):
-        response_mask = torch.zeros_like(generated[idx], dtype=torch.bool)
-        response_mask[prompt_width:] = generated[idx, prompt_width:] != tokenizer.pad_token_id
-        completion_ids = generated[idx, prompt_width:]
-        completion = tokenizer.decode(completion_ids, skip_special_tokens=True)
-        rollouts.append(
-            Rollout(
-                sample=sample,
-                prompt=prompts[idx],
-                completion=completion,
-                input_ids=generated[idx].detach(),
-                attention_mask=(generated[idx] != tokenizer.pad_token_id).detach(),
-                response_mask=response_mask.detach(),
-                old_logprobs=None,
-                ref_logprobs=None,
-                reward=reward_fn(completion, _reward_sample(sample, config)),
+    for prompt_chunk, sample_chunk in zip(
+        _chunked(prompts, config.rollout_batch_size),
+        _chunked(source_samples, config.rollout_batch_size),
+        strict=True,
+    ):
+        encoded = tokenizer(
+            prompt_chunk,
+            return_tensors="pt",
+            padding=True,
+            truncation=True,
+            max_length=config.max_prompt_tokens,
+        ).to(config.device)
+        prompt_width = int(encoded["input_ids"].shape[1])
+        with torch.no_grad():
+            generated = model.generate(
+                **encoded,
+                do_sample=True,
+                temperature=config.temperature,
+                top_p=config.top_p,
+                max_new_tokens=config.max_new_tokens,
+                pad_token_id=tokenizer.pad_token_id,
+                eos_token_id=tokenizer.eos_token_id,
+                use_cache=True,
             )
-        )
 
-    padded = _pad_rollouts(rollouts, tokenizer.pad_token_id, config.device, torch)
-    with torch.no_grad():
-        old_logprobs = _sequence_logprobs(model, padded, torch).detach()
-        ref_logprobs = (
-            _sequence_logprobs(ref_model, padded, torch).detach() if ref_model is not None else None
-        )
-    for idx, rollout in enumerate(rollouts):
-        rollout.old_logprobs = old_logprobs[idx]
-        rollout.ref_logprobs = ref_logprobs[idx] if ref_logprobs is not None else None
+        chunk_rollouts: list[Rollout] = []
+        for idx, sample in enumerate(sample_chunk):
+            response_mask = torch.zeros_like(generated[idx], dtype=torch.bool)
+            response_mask[prompt_width:] = generated[idx, prompt_width:] != tokenizer.pad_token_id
+            completion_ids = generated[idx, prompt_width:]
+            completion = tokenizer.decode(completion_ids, skip_special_tokens=True)
+            chunk_rollouts.append(
+                Rollout(
+                    sample=sample,
+                    prompt=prompt_chunk[idx],
+                    completion=completion,
+                    input_ids=generated[idx].detach().cpu(),
+                    attention_mask=(generated[idx] != tokenizer.pad_token_id).detach().cpu(),
+                    response_mask=response_mask.detach().cpu(),
+                    old_logprobs=None,
+                    ref_logprobs=None,
+                    reward=reward_fn(completion, _reward_sample(sample, config)),
+                )
+            )
+
+        padded = _pad_rollouts(chunk_rollouts, tokenizer.pad_token_id, config.device, torch)
+        with torch.no_grad():
+            old_logprobs = _sequence_logprobs(model, padded, torch).detach().cpu()
+            ref_logprobs = (
+                _sequence_logprobs(ref_model, padded, torch).detach().cpu()
+                if ref_model is not None
+                else None
+            )
+        for idx, rollout in enumerate(chunk_rollouts):
+            rollout.old_logprobs = old_logprobs[idx]
+            rollout.ref_logprobs = ref_logprobs[idx] if ref_logprobs is not None else None
+        rollouts.extend(chunk_rollouts)
+        del encoded, generated, padded
+        _release_cuda(torch, config.device)
 
     _assign_grouped_advantages(rollouts, config.rollouts_per_prompt)
     model.train()
     return rollouts
 
 
-def _policy_step(
+def _backprop_policy_step(
+    model,
+    rollouts: list[Rollout],
+    pad_token_id: int,
+    config: SingleGpuSlimeConfig,
+    torch,
+    *,
+    loss_scale: float,
+):
+    total = len(rollouts)
+    stats = _empty_stats()
+    for chunk in _chunked(rollouts, config.policy_micro_batch_size):
+        loss, chunk_stats = _policy_loss(model, chunk, pad_token_id, config, torch)
+        weighted = len(chunk) / total
+        (loss * weighted * loss_scale).backward()
+        _merge_stats(stats, chunk_stats, weight=weighted)
+        del loss
+        _release_cuda(torch, config.device)
+    return stats
+
+
+def _policy_loss(
     model,
     rollouts: list[Rollout],
     pad_token_id: int,
@@ -236,6 +276,37 @@ def _policy_step(
         "reward_mean": float(sum(rewards) / len(rewards)),
         "reward_max": float(max(rewards)),
     }
+
+
+def _empty_stats() -> dict[str, float]:
+    return {
+        "loss": 0.0,
+        "policy_loss": 0.0,
+        "kl": 0.0,
+        "reward_mean": 0.0,
+        "reward_max": float("-inf"),
+    }
+
+
+def _merge_stats(
+    stats: dict[str, float],
+    chunk_stats: dict[str, float],
+    *,
+    weight: float,
+) -> None:
+    for key in ("loss", "policy_loss", "kl", "reward_mean"):
+        stats[key] += chunk_stats[key] * weight
+    stats["reward_max"] = max(stats["reward_max"], chunk_stats["reward_max"])
+
+
+def _policy_step(
+    model,
+    rollouts: list[Rollout],
+    pad_token_id: int,
+    config: SingleGpuSlimeConfig,
+    torch,
+):
+    return _policy_loss(model, rollouts, pad_token_id, config, torch)
 
 
 def _sequence_logprobs(model, batch: dict[str, Any], torch):
@@ -301,7 +372,7 @@ def _build_optimizer(model, config: SingleGpuSlimeConfig):
 
 
 def _optimizer_step(model, optimizer, torch, config: SingleGpuSlimeConfig) -> None:
-    torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+    torch.nn.utils.clip_grad_norm_(model.parameters(), config.max_grad_norm)
     optimizer.step()
     optimizer.zero_grad(set_to_none=True)
     _assert_vram_fit(torch, config.max_vram_gb, config.device)
@@ -394,6 +465,18 @@ def _set_seed(seed: int) -> None:
 def _batched(items: list[dict[str, Any]], batch_size: int) -> Iterable[list[dict[str, Any]]]:
     for start in range(0, len(items), batch_size):
         yield items[start : start + batch_size]
+
+
+def _chunked(items: list[T], chunk_size: int) -> Iterable[list[T]]:
+    for start in range(0, len(items), chunk_size):
+        yield items[start : start + chunk_size]
+
+
+def _release_cuda(torch, device: str) -> None:
+    if device != "cuda":
+        return
+    gc.collect()
+    torch.cuda.empty_cache()
 
 
 def _append_metrics(path: Path, record: dict[str, Any]) -> None:

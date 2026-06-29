@@ -23,10 +23,13 @@ class SingleGpuSlimeConfig:
     max_prompt_tokens: int = 512
     max_new_tokens: int = 256
     rollouts_per_prompt: int = 4
+    rollout_batch_size: int = 4
+    policy_micro_batch_size: int = 4
     train_batch_size: int = 1
     gradient_accumulation_steps: int = 8
     learning_rate: float = 5e-6
     weight_decay: float = 0.0
+    max_grad_norm: float = 1.0
     epochs: int = 1
     max_steps: int | None = None
     kl_coef: float = 0.0
@@ -59,8 +62,14 @@ class SingleGpuSlimeConfig:
             raise ValueError("rollouts_per_prompt must be at least 2 for grouped advantages")
         if self.train_batch_size < 1:
             raise ValueError("train_batch_size must be positive")
+        if self.rollout_batch_size < 1:
+            raise ValueError("rollout_batch_size must be positive")
+        if self.policy_micro_batch_size < 1:
+            raise ValueError("policy_micro_batch_size must be positive")
         if self.gradient_accumulation_steps < 1:
             raise ValueError("gradient_accumulation_steps must be positive")
+        if self.max_grad_norm <= 0:
+            raise ValueError("max_grad_norm must be positive")
         if self.max_prompt_tokens < 1 or self.max_new_tokens < 1:
             raise ValueError("token limits must be positive")
         if self.kl_coef < 0:
