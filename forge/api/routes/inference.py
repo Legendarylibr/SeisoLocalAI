@@ -82,6 +82,8 @@ class PreloadRequest(BaseModel):
     inference_backend: str = Field(
         default="auto", description="auto | llamacpp | mlx | torch"
     )
+    max_tokens: int = Field(default=2048, ge=1, le=8192)
+    n_ctx: int | None = Field(default=None, ge=2048, le=131072)
 
 
 @router.post("/threads")
@@ -308,7 +310,13 @@ async def preload_model(
     """Load a selected inventory model into the local inference engine."""
     _assert_inference_gpu_available()
     ctx = await resolve_preload_context(
-        db, user_id, settings, body.model_id, body.inference_backend
+        db,
+        user_id,
+        settings,
+        body.model_id,
+        body.inference_backend,
+        max_tokens=body.max_tokens,
+        n_ctx=body.n_ctx,
     )
 
     loop = asyncio.get_running_loop()
@@ -329,7 +337,13 @@ async def preload_model_stream(
 ):
     _assert_inference_gpu_available()
     ctx = await resolve_preload_context(
-        db, user_id, settings, body.model_id, body.inference_backend
+        db,
+        user_id,
+        settings,
+        body.model_id,
+        body.inference_backend,
+        max_tokens=body.max_tokens,
+        n_ctx=body.n_ctx,
     )
 
     runner = orchestrator._runner

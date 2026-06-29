@@ -43,6 +43,9 @@ async def resolve_preload_context(
     settings: ForgeSettings,
     model_id: str,
     inference_backend: str,
+    *,
+    max_tokens: int = 2048,
+    n_ctx: int | None = None,
 ) -> dict[str, Any]:
     selected = await get_inference_option(db, user_id, model_id)
     if not selected:
@@ -78,8 +81,10 @@ async def resolve_preload_context(
         "model_format": target.get("model_format") or selected.get("format"),
         "inference_backend": backend,
         "messages": [{"role": "user", "content": "ping"}],
-        "max_tokens": 1,
+        "max_tokens": max_tokens,
     }
+    if n_ctx is not None:
+        payload["n_ctx"] = n_ctx
     return {
         "payload": payload,
         "backend": backend,
