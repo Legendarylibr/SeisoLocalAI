@@ -134,10 +134,16 @@ def train_single_gpu_slime(config: SingleGpuSlimeConfig) -> Path:
         low_cpu_mem_usage=True,
     )
     model.config.use_cache = False
+    if config.gradient_checkpointing and hasattr(
+        model, "gradient_checkpointing_enable"
+    ):
+        model.gradient_checkpointing_enable()
     if config.use_lora:
         model = _apply_lora(model, config)
-    elif config.gradient_checkpointing and hasattr(model, "gradient_checkpointing_enable"):
-        model.gradient_checkpointing_enable()
+        if config.gradient_checkpointing and hasattr(
+            model, "enable_input_require_grads"
+        ):
+            model.enable_input_require_grads()
 
     ref_model = None
     if config.kl_coef > 0:
@@ -233,7 +239,11 @@ def train_single_gpu_slime(config: SingleGpuSlimeConfig) -> Path:
                         "stop_reason": decision.reason,
                     },
                 )
-            if config.save_every_steps and global_step and global_step % config.save_every_steps == 0:
+            if (
+                config.save_every_steps
+                and global_step
+                and global_step % config.save_every_steps == 0
+            ):
                 _save(model, tokenizer, config.output_dir / f"checkpoint-{global_step}")
 
             global_step += 1
@@ -307,14 +317,18 @@ def _collect_rollouts(
             sample_idx = idx // config.rollouts_per_prompt
             sample = sample_chunk[sample_idx]
             response_mask = torch.zeros_like(generated[idx], dtype=torch.bool)
-            response_mask[prompt_width:] = generated[idx, prompt_width:] != tokenizer.pad_token_id
+            response_mask[prompt_width:] = (
+                generated[idx, prompt_width:] != tokenizer.pad_token_id
+            )
             completion = completions[idx]
             reward_sample = _reward_sample(sample, config)
             reward = reward_fn(completion, reward_sample)
             chunk_rollouts.append(
                 Rollout(
                     input_ids=generated[idx].detach().cpu(),
-                    attention_mask=(generated[idx] != tokenizer.pad_token_id).detach().cpu(),
+                    attention_mask=(generated[idx] != tokenizer.pad_token_id)
+                    .detach()
+                    .cpu(),
                     response_mask=response_mask.detach().cpu(),
                     old_logprobs=None,
                     ref_logprobs=None,
@@ -339,17 +353,21 @@ def _collect_rollouts(
                     }
                 )
 
-        padded = _pad_rollouts(chunk_rollouts, tokenizer.pad_token_id, config.device, torch)
+        padded = _pad_rollouts(
+            chunk_rollouts, tokenizer.pad_token_id, config.device, torch
+        )
         with torch.no_grad():
             old_logprobs = _sequence_logprobs(model, padded, torch).detach().cpu()
             ref_logprobs = (
                 _sequence_logprobs(ref_model, padded, torch).detach().cpu()
                 if ref_model is not None
                 else None
-            )
+        )
         for idx, rollout in enumerate(chunk_rollouts):
             rollout.old_logprobs = old_logprobs[idx]
-            rollout.ref_logprobs = ref_logprobs[idx] if ref_logprobs is not None else None
+            rollout.ref_logprobs = (
+                ref_logprobs[idx] if ref_logprobs is not None else None
+            )
         if verifier_records:
             _append_jsonl_records(verifier_path, verifier_records)
         rollouts.extend(chunk_rollouts)
@@ -396,7 +414,10 @@ def _policy_loss(
 
     ratio = torch.exp(new_logprobs - old_logprobs)
     unclipped = ratio * advantages
-    clipped = torch.clamp(ratio, 1.0 - config.clip_ratio, 1.0 + config.clip_ratio) * advantages
+    clipped = (
+        torch.clamp(ratio, 1.0 - config.clip_ratio, 1.0 + config.clip_ratio)
+        * advantages
+    )
     policy_loss = -torch.minimum(unclipped, clipped).mean()
 
     kl_loss = torch.zeros((), device=config.device)
@@ -447,23 +468,37 @@ def _policy_step(
 
 
 def _sequence_logprobs(model, batch: dict[str, Any], torch):
-    outputs = model(input_ids=batch["input_ids"], attention_mask=batch["attention_mask"])
+    outputs = model(
+        input_ids=batch["input_ids"], attention_mask=batch["attention_mask"]
+    )
     logits = outputs.logits[:, :-1, :]
     labels = batch["input_ids"][:, 1:]
     mask = batch["response_mask"][:, 1:].float()
-    token_logprobs = torch.log_softmax(logits.float(), dim=-1).gather(
-        -1,
-        labels.unsqueeze(-1),
-    ).squeeze(-1)
+    token_logprobs = (
+        torch.log_softmax(logits.float(), dim=-1)
+        .gather(
+            -1,
+            labels.unsqueeze(-1),
+        )
+        .squeeze(-1)
+    )
     denom = mask.sum(dim=1).clamp_min(1.0)
     return (token_logprobs * mask).sum(dim=1) / denom
 
 
-def _pad_rollouts(rollouts: list[Rollout], pad_token_id: int, device: str, torch) -> dict[str, Any]:
+def _pad_rollouts(
+    rollouts: list[Rollout], pad_token_id: int, device: str, torch
+) -> dict[str, Any]:
     max_len = max(int(r.input_ids.numel()) for r in rollouts)
-    input_ids = torch.full((len(rollouts), max_len), pad_token_id, dtype=torch.long, device=device)
-    attention_mask = torch.zeros((len(rollouts), max_len), dtype=torch.long, device=device)
-    response_mask = torch.zeros((len(rollouts), max_len), dtype=torch.bool, device=device)
+    input_ids = torch.full(
+        (len(rollouts), max_len), pad_token_id, dtype=torch.long, device=device
+    )
+    attention_mask = torch.zeros(
+        (len(rollouts), max_len), dtype=torch.long, device=device
+    )
+    response_mask = torch.zeros(
+        (len(rollouts), max_len), dtype=torch.bool, device=device
+    )
     for idx, rollout in enumerate(rollouts):
         length = int(rollout.input_ids.numel())
         input_ids[idx, :length] = rollout.input_ids.to(device)
@@ -556,9 +591,7 @@ def _resolve_lora_target_modules(
         return sorted(set(configured))
 
     module_tails = {
-        name.rsplit(".", 1)[-1]
-        for name, _module in model.named_modules()
-        if name
+        name.rsplit(".", 1)[-1] for name, _module in model.named_modules() if name
     }
     preferred = [target for target in _PREFERRED_LORA_TARGETS if target in module_tails]
     if preferred:
@@ -592,7 +625,9 @@ def _iter_sample_batches(
     config: SingleGpuSlimeConfig,
     rng: random.Random,
 ) -> Iterable[list[dict[str, Any]]]:
-    yield from _batched_records(_iter_shuffled_samples(config, rng), config.train_batch_size)
+    yield from _batched_records(
+        _iter_shuffled_samples(config, rng), config.train_batch_size
+    )
 
 
 def _iter_shuffled_samples(
@@ -604,7 +639,10 @@ def _iter_shuffled_samples(
     for sample in _load_samples(config):
         buffer.append(sample)
         read += 1
-        if config.max_samples_per_epoch is not None and read >= config.max_samples_per_epoch:
+        if (
+            config.max_samples_per_epoch is not None
+            and read >= config.max_samples_per_epoch
+        ):
             break
         if len(buffer) < config.shuffle_buffer_size:
             continue
@@ -623,7 +661,9 @@ def _load_samples(config: SingleGpuSlimeConfig) -> Iterable[dict[str, Any]]:
         yield sample
 
 
-def _reward_sample(sample: dict[str, Any], config: SingleGpuSlimeConfig) -> dict[str, Any]:
+def _reward_sample(
+    sample: dict[str, Any], config: SingleGpuSlimeConfig
+) -> dict[str, Any]:
     if config.reward == "field":
         merged = dict(sample)
         merged["reward"] = sample.get(config.reward_field, 0.0)
@@ -700,7 +740,9 @@ def _set_seed(seed: int) -> None:
         return
 
 
-def _batched(items: list[dict[str, Any]], batch_size: int) -> Iterable[list[dict[str, Any]]]:
+def _batched(
+    items: list[dict[str, Any]], batch_size: int
+) -> Iterable[list[dict[str, Any]]]:
     for start in range(0, len(items), batch_size):
         yield items[start : start + batch_size]
 

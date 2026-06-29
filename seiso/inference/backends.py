@@ -338,4 +338,12 @@ def prepare_model_path(model_path: str, backend: BackendName) -> str:
     """Normalize model path (e.g. pick a GGUF file inside a directory)."""
     if backend == BACKEND_LLAMACPP:
         return str(resolve_gguf_file(model_path))
+    path = Path(model_path).expanduser()
+    if (
+        backend in {BACKEND_TORCH, BACKEND_MLX}
+        and path.is_file()
+        and path.suffix.lower() in {".safetensors", ".bin"}
+        and (path.parent / "config.json").is_file()
+    ):
+        return str(path.parent.absolute())
     return model_path

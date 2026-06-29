@@ -151,9 +151,7 @@ def test_ensure_load_fits_forwards_backend_to_pool(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(
         "seiso.inference.model_pool.ModelPool.prepare_for_load",
-        lambda self, target_path, backend=None: calls.append(
-            (target_path, backend)
-        )
+        lambda self, target_path, backend=None: calls.append((target_path, backend))
         or False,
     )
 

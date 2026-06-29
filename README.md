@@ -648,6 +648,9 @@ Seiso is licensed under the **GNU General Public License v3.0 (GPL-3.0)**. See [
 | External Smart Router | [Legendarylibr/SeisoModelRouter](https://github.com/Legendarylibr/SeisoModelRouter) |
 
 ---
+## RL Stack
+
+The single-GPU slime rl run is built on top of slime (https://github.com/THUDM/slime).
 
 ## Inference Stack
 

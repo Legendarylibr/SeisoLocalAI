@@ -18,6 +18,7 @@ from seiso.inference.backends import (
     gguf_block_count,
     gguf_context_length,
     gguf_uses_sliding_window_attention,
+    prepare_model_path,
     recommend_backend,
     resolve_gguf_file,
     resolve_local_backend,
@@ -262,6 +263,24 @@ def test_recommend_backend_detects_extensionless_hf_blob(tmp_path: Path):
     assert resolve_gguf_file(str(blob)) == blob.absolute()
 
 
+def test_prepare_model_path_uses_parent_for_hf_weight_file(tmp_path: Path):
+    model_dir = tmp_path / "snapshot"
+    model_dir.mkdir()
+    (model_dir / "config.json").write_text("{}", encoding="utf-8")
+    weights = model_dir / "model.safetensors"
+    weights.write_bytes(b"x")
+
+    assert prepare_model_path(str(weights), BACKEND_TORCH) == str(model_dir.absolute())
+    assert prepare_model_path(str(weights), BACKEND_MLX) == str(model_dir.absolute())
+
+
+def test_prepare_model_path_preserves_standalone_weight_file(tmp_path: Path):
+    weights = tmp_path / "model.safetensors"
+    weights.write_bytes(b"x")
+
+    assert prepare_model_path(str(weights), BACKEND_TORCH) == str(weights)
+
+
 def test_resolve_gguf_file_picks_largest(tmp_path: Path):
     small = tmp_path / "small.gguf"
     large = tmp_path / "large.gguf"
@@ -464,9 +483,7 @@ def test_warm_model_preloads_torch_speculative_pair(monkeypatch):
         lambda *_args, **_kwargs: pytest.fail("speculative preload used llama path"),
     )
 
-    runner.warm_model(
-        {"model_path": "/tmp/target", "draft_model_path": "/tmp/draft"}
-    )
+    runner.warm_model({"model_path": "/tmp/target", "draft_model_path": "/tmp/draft"})
 
     assert calls == [
         (
@@ -508,7 +525,9 @@ def test_warm_model_preloads_dflash_speculative_components(monkeypatch):
     monkeypatch.setattr(
         runner._pool,
         "get_torch_speculative",
-        lambda *_args, **_kwargs: pytest.fail("dflash preload should not load torch draft"),
+        lambda *_args, **_kwargs: pytest.fail(
+            "dflash preload should not load torch draft"
+        ),
     )
 
     runner.warm_model(

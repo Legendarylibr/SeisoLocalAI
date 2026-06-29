@@ -13,7 +13,9 @@ from seiso.models.lora_targets import (
 
 class _FakeModel:
     def __init__(self, names: list[str], model_type: str | None = None) -> None:
-        self.config = types.SimpleNamespace(model_type=model_type) if model_type else None
+        self.config = (
+            types.SimpleNamespace(model_type=model_type) if model_type else None
+        )
         self._names = names
 
     def named_parameters(self):
