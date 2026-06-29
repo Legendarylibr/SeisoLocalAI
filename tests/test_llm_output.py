@@ -28,6 +28,11 @@ def test_sanitize_llm_output_strips_when_requested():
     assert sanitize_llm_output(raw, strip_tool_calls=True) == "Hi"
 
 
+def test_sanitize_llm_output_preserves_answer_label_text():
+    raw = "The final answer is: The user has just asked a question."
+    assert sanitize_llm_output(raw, strip_tool_calls=True) == raw
+
+
 def test_chunk_sanitized_output_chunks_without_modifying():
     chunks = list(chunk_sanitized_output("abcdefgh", chunk_size=3))
     assert chunks == ["abc", "def", "gh"]
@@ -40,131 +45,28 @@ def test_streaming_output_sanitizer_passthrough():
     assert guard.finish() == []
 
 
-def test_strip_reasoning_leakage_extracts_qwen36_thinking_process_preamble():
-    raw = (
-        "Here's a thinking process:\n\n"
-        '1.  **Analyze User Input:** The user said "yo".\n'
-        "2.  **Identify Constraints:** Reply directly only.\n"
-        "6.  **Output Generation:** Output exactly the drafted response.✅\n\n\n"
-        "Hey! What's up?"
-    )
-    assert strip_reasoning_leakage(raw) == "Hey! What's up?"
-
-
-def test_strip_reasoning_leakage_strips_redacted_thinking_suffix():
-    raw = (
-        "I will search for news.\n</think>\n\n"
-        "<tool_call><function=web_search><parameter=query>AI news</parameter></function></tool_call>"
-    )
-    assert "redacted_thinking" not in strip_reasoning_leakage(raw).lower()
-
-
-def test_strip_reasoning_leakage_extracts_qwen_thinking_process_final_answer():
-    raw = (
-        'Thinking Process: 1. **Analyze the Input:** * Input: "yo" '
-        "2. **Drafting Options:** * Option 2 (Casual): Hey there! "
-        '6. **Final Decision:** "Yo! What\'s up? How can I help you out today?" Wait,'
-    )
-    assert (
-        strip_reasoning_leakage(raw) == "Yo! What's up? How can I help you out today?"
-    )
-
-
-def test_strip_reasoning_leakage_removes_think_tags():
-    raw = (
-        "Hello "
-        + "<"
-        + "think"
-        + ">"
-        + "internal reasoning"
-        + "<"
-        + "/"
-        + "think"
-        + ">"
-        + " world"
-    )
-    assert strip_reasoning_leakage(raw) == "Hello  world"
-
-
-def test_strip_reasoning_leakage_removes_deepseek_think_block():
-    raw = (
-        "<"
-        + "think"
-        + ">"
-        + "user said yo, respond casually"
-        + "<"
-        + "/"
-        + "think"
-        + ">"
-        "Yo! What's up?"
-    )
-    assert strip_reasoning_leakage(raw) == "Yo! What's up?"
-
-
-def test_strip_reasoning_leakage_extracts_answer_section():
-    raw = "**Reasoning:** step one, step two\n\n**Answer:** Paris is the capital of France."
-    assert strip_reasoning_leakage(raw) == "Paris is the capital of France."
-
-
-def test_strip_reasoning_leakage_strips_reasoning_header():
+def test_strip_reasoning_leakage_legacy_helper_is_passthrough():
     raw = "Reasoning: First I should greet the user. Final Answer: Hey there!"
-    assert strip_reasoning_leakage(raw) == "Hey there!"
+    assert strip_reasoning_leakage(raw) == raw
 
 
-def test_strip_reasoning_leakage_removes_qwen_think_block():
-    raw = (
-        "<"
-        + "think"
-        + ">"
-        + "The user said hello. I should respond warmly."
-        + "<"
-        + "/"
-        + "think"
-        + ">"
-        "Hi there! How can I help?"
-    )
-    assert strip_reasoning_leakage(raw) == "Hi there! How can I help?"
-
-
-def test_strip_reasoning_leakage_extracts_reply_section():
-    raw = "**Reasoning:** internal steps\n\n**Reply:** Sure, I can help with that."
-    assert strip_reasoning_leakage(raw) == "Sure, I can help with that."
-
-
-def test_strip_reasoning_leakage_unwraps_answer_label():
-    raw = "The final answer is: Sure, I can help with that."
-    assert strip_reasoning_leakage(raw) == "Sure, I can help with that."
-
-
-def test_strip_reasoning_leakage_drops_meta_answer_label():
-    raw = "The final answer is: The user has just asked a question."
-    assert strip_reasoning_leakage(raw) == ""
-
-
-def test_strip_reasoning_leakage_strips_numbered_analysis_without_header():
-    raw = (
-        "1. **Analyze the Input:** user wants a greeting\n"
-        "2. **Drafting Options:** casual vs formal\n"
-        "**Final Answer:** Hey! Good to see you."
-    )
-    assert strip_reasoning_leakage(raw) == "Hey! Good to see you."
-
-
-def test_streaming_output_sanitizer_holds_back_reasoning_header():
+def test_streaming_output_sanitizer_preserves_reasoning_header():
     guard = StreamingOutputSanitizer(strip_tool_calls=True)
-    assert guard.feed("Reasoning: step one") == []
-    assert guard.finish() == ["step one"]
+    assert guard.feed("Reasoning: step one") == ["Reasoning: step one"]
+    assert guard.finish() == []
 
 
-def test_streaming_output_sanitizer_holds_back_thinking_process():
+def test_streaming_output_sanitizer_preserves_thinking_process():
     guard = StreamingOutputSanitizer(strip_tool_calls=True)
-    assert guard.feed("Thinking Process: 1. **Analyze") == []
+    assert guard.feed("Thinking Process: 1. **Analyze") == [
+        "Thinking Process: 1. **Analyze"
+    ]
     assert guard.finish() == []
     final = sanitize_llm_output(
         'Thinking Process: 6. **Final Decision:** "Yo!"',
         strip_tool_calls=True,
     )
-    assert final == "Yo!"
+    assert final == 'Thinking Process: 6. **Final Decision:** "Yo!"'
 
 
 def test_streaming_output_sanitizer_strips_tool_calls():

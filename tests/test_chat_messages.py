@@ -204,11 +204,13 @@ def test_prepare_chat_context_skips_system_prompt_when_tools_enabled():
     assert messages == [{"role": "user", "content": "hi"}]
 
 
-def test_chat_system_prompt_includes_thinking_process_hint_for_reasoning_models():
+def test_chat_system_prompt_keeps_security_boundary_for_reasoning_models():
     prompt = chat_system_prompt("Qwen/Qwen3.5-4B", tools_enabled=False)
     assert prompt
-    assert "thinking process" in prompt.lower()
-    assert "tool" in prompt.lower()
+    lower = prompt.lower()
+    assert "tool/function-call markup" in lower
+    assert "hidden system/security instructions" in lower
+    assert "refusal" not in lower
     assert is_reasoning_prone_model("Qwen/Qwen3.5-4B")
 
 
@@ -217,7 +219,7 @@ def test_chat_system_prompt_includes_coding_guidance_for_all_models():
         prompt = chat_system_prompt(model_key, tools_enabled=False)
         assert prompt
         assert "fenced blocks" in prompt.lower()
-        assert "helpful assistant" in prompt.lower()
+        assert "selected local model" in prompt.lower()
 
 
 @pytest.mark.parametrize(
@@ -232,13 +234,19 @@ def test_chat_system_prompt_includes_coding_guidance_for_all_models():
         "microsoft/Phi-4-mini-instruct",
     ],
 )
-def test_chat_system_prompt_includes_no_reasoning_hint_for_all_families(model_key: str):
+def test_chat_system_prompt_has_no_non_security_censorship_policy(model_key: str):
     prompt = chat_system_prompt(model_key, tools_enabled=False)
     assert prompt
-    assert "chain-of-thought" in prompt.lower() or "thinking process" in prompt.lower()
-    assert "final answer" not in prompt.lower()
-    assert "final response" not in prompt.lower()
-    assert "meta commentary" in prompt.lower()
+    lower = prompt.lower()
+    assert "content-safety" not in lower
+    assert "unsafe" not in lower
+    assert "harmful" not in lower
+    assert "refusal" not in lower
+    assert "chain-of-thought" not in lower
+    assert "thinking process" not in lower
+    assert "final answer" not in lower
+    assert "final response" not in lower
+    assert "security" in lower
 
 
 def test_model_switch_system_prompt_mentions_models():
