@@ -138,6 +138,58 @@ def test_available_backends_allows_dflash_draft_for_speculative(tmp_path: Path):
     )  # may be filtered by other catalog logic in full flow
 
 
+@pytest.mark.asyncio
+async def test_resolve_preload_context_uses_chat_sized_context(monkeypatch, tmp_path):
+    from forge.services import inference_chat
+
+    model_path = tmp_path / "model.gguf"
+    model_path.write_bytes(b"gguf")
+
+    async def fake_get_inference_option(*_args, **_kwargs):
+        return {
+            "id": "m1",
+            "name": "Model",
+            "path": str(model_path),
+            "format": "gguf",
+            "size_bytes": 123,
+        }
+
+    monkeypatch.setattr(
+        inference_chat,
+        "get_inference_option",
+        fake_get_inference_option,
+    )
+    monkeypatch.setattr(
+        inference_chat,
+        "resolve_chat_target",
+        lambda selected, **_kwargs: {
+            "model_path": selected["path"],
+            "model_format": selected["format"],
+            "inference_backend": BACKEND_LLAMACPP,
+        },
+    )
+    monkeypatch.setattr(
+        inference_chat,
+        "assert_model_fits_for_load",
+        lambda *_args, **_kwargs: None,
+    )
+
+    ctx = await inference_chat.resolve_preload_context(
+        object(),
+        "u1",
+        SimpleNamespace(data_dir=tmp_path),
+        "m1",
+        "auto",
+        max_tokens=4096,
+        n_ctx=8192,
+    )
+
+    assert ctx["payload"]["max_tokens"] == 4096
+    assert ctx["payload"]["n_ctx"] == 8192
+    assert ctx["payload"]["model_path"] == str(model_path)
+    assert ctx["backend"] == BACKEND_LLAMACPP
+
+
 def test_recommend_backend_detects_extensionless_hf_blob(tmp_path: Path):
     blob = tmp_path / "hf_cache" / "models--org--Model-GGUF" / "blobs" / "abc123"
     blob.parent.mkdir(parents=True)
