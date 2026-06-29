@@ -19,6 +19,7 @@ def evaluate_pipeline(
     val_preferences_path: Path,
     prompt_library_path: Path | None,
     eval_max_prompts: int,
+    trust_remote_code: bool = False,
     on_log=None,
 ) -> dict[str, Any]:
     """Evaluate named checkpoints: perplexity, val preference accuracy, samples."""
@@ -38,11 +39,17 @@ def evaluate_pipeline(
             continue
         if on_log:
             on_log(f"Evaluate: {name} → {model_path}")
-        metrics = _evaluate_checkpoint(model_path, eval_texts, val_rows)
+        metrics = _evaluate_checkpoint(
+            model_path,
+            eval_texts,
+            val_rows,
+            trust_remote_code=trust_remote_code,
+        )
         metrics["samples"] = _write_samples(
             output_dir / f"samples_{name}.jsonl",
             model_path,
             eval_prompts,
+            trust_remote_code=trust_remote_code,
         )
         results["checkpoints"][name] = metrics
 
@@ -63,13 +70,18 @@ def _evaluate_checkpoint(
     model_path: str,
     eval_texts: list[str],
     val_rows: list[dict[str, Any]],
+    *,
+    trust_remote_code: bool = False,
 ) -> dict[str, Any]:
     from seiso.compress.bootstrap import require_codellama_compress
 
     require_codellama_compress()
     from seiso.codellama_compress.evaluate import compute_perplexity, measure_speed
 
-    model, tokenizer, device = load_causal_lm(model_path)
+    model, tokenizer, device = load_causal_lm(
+        model_path,
+        trust_remote_code=trust_remote_code,
+    )
     try:
         ppl = compute_perplexity(model, tokenizer, eval_texts, device)
         tps, ms = measure_speed(
@@ -160,7 +172,13 @@ def _sequence_logprob(
         return float(token_log_probs.sum().item())
 
 
-def _write_samples(path: Path, model_path: str, prompts: list[RolloutPrompt]) -> str:
+def _write_samples(
+    path: Path,
+    model_path: str,
+    prompts: list[RolloutPrompt],
+    *,
+    trust_remote_code: bool = False,
+) -> str:
     from seiso.distill_rl.rollouts import generate_completions
 
     outputs = generate_completions(
@@ -170,6 +188,7 @@ def _write_samples(path: Path, model_path: str, prompts: list[RolloutPrompt]) ->
         temperature=0.0,
         seed=0,
         use_chat_template=False,
+        trust_remote_code=trust_remote_code,
     )
     with path.open("w", encoding="utf-8") as handle:
         for prompt, completion in zip(prompts, outputs, strict=True):

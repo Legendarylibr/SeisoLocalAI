@@ -13,6 +13,7 @@ from seiso.compress.bootstrap import (
     require_codellama_compress,
 )
 from seiso.compress.config_builder import PRESETS, STAGE_ORDER, build_pipeline_config
+from seiso.compress.runner import _trust_remote_code
 
 
 def test_bundled_source_present():
@@ -42,6 +43,21 @@ def test_build_pipeline_config_smoke(tmp_path: Path):
     assert cfg["preset"] == "smoke"
     assert "distill" in cfg["stages"]
     assert str(tmp_path / "compress" / "user-1" / "job-1") in cfg["output_root"]
+    assert cfg["distill"].trust_remote_code is False
+    assert cfg["finetune"].trust_remote_code is False
+
+
+def test_build_pipeline_config_propagates_trust_remote_code(tmp_path: Path):
+    require_codellama_compress()
+    cfg = build_pipeline_config(
+        job_id="job-1",
+        user_id="user-1",
+        data_dir=tmp_path,
+        payload={"preset": "smoke", "trust_remote_code": True},
+    )
+    assert cfg["distill"].trust_remote_code is True
+    assert cfg["finetune"].trust_remote_code is True
+    assert _trust_remote_code(cfg) is True
 
 
 def test_presets_have_stages():

@@ -28,6 +28,7 @@ def _build_settings(args: argparse.Namespace) -> DPOSettings:
         use_lora=args.lora,
         use_qlora=args.qlora,
         use_chat_template=args.chat_template,
+        trust_remote_code=args.trust_remote_code,
         logging_steps=args.logging_steps,
         save_steps=args.save_steps,
         seed=args.seed,
@@ -76,6 +77,11 @@ def main(argv: Iterable[str] | None = None) -> None:
         "--chat-template",
         action="store_true",
         help="Format prompts with tokenizer.apply_chat_template.",
+    )
+    parser.add_argument(
+        "--trust-remote-code",
+        action="store_true",
+        help="Allow custom model code for trusted Hugging Face checkpoints.",
     )
     args = parser.parse_args(list(argv) if argv is not None else None)
 

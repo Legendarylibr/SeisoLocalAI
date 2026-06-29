@@ -22,6 +22,13 @@ def _pipeline_fingerprint(cfg: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _trust_remote_code(cfg: dict[str, Any]) -> bool:
+    return bool(
+        getattr(cfg.get("distill"), "trust_remote_code", False)
+        or getattr(cfg.get("finetune"), "trust_remote_code", False)
+    )
+
+
 def _resolve_model_dir(cfg: dict[str, Any], run_dir: Path, stage: str) -> Path:
     if cfg.get("model_dir") and stage == cfg["stages"][0]:
         return Path(cfg["model_dir"])
@@ -144,6 +151,7 @@ def run_compress_job(
                 ratio=cfg["prune"]["ratio"],
                 method=cfg["prune"]["method"],
                 seed=det.seed,
+                trust_remote_code=_trust_remote_code(cfg),
             )
             append_artifact_record(
                 run_dir, stage="prune", artifact_path=out_dir, role="output"
@@ -172,7 +180,11 @@ def run_compress_job(
             from seiso.codellama_compress.evaluate import evaluate_into_run_dir
 
             model_dir = _resolve_model_dir(cfg, run_dir, "evaluate")
-            result = evaluate_into_run_dir(run_dir=run_dir, model_dir=model_dir)
+            result = evaluate_into_run_dir(
+                run_dir=run_dir,
+                model_dir=model_dir,
+                trust_remote_code=_trust_remote_code(cfg),
+            )
             stage_results["evaluate"] = (
                 result.to_dict() if hasattr(result, "to_dict") else result
             )
@@ -206,6 +218,7 @@ def run_compress_job(
                 out_dir=out_dir,
                 dataset_cfg=cfg["dataset"],
                 cfg=cfg["gptq"],
+                trust_remote_code=_trust_remote_code(cfg),
             )
             append_artifact_record(
                 run_dir, stage="quantize_gptq", artifact_path=out_dir, role="output"
@@ -223,6 +236,7 @@ def run_compress_job(
                 out_dir=out_dir,
                 dataset_cfg=cfg["dataset"],
                 cfg=cfg["awq"],
+                trust_remote_code=_trust_remote_code(cfg),
             )
             append_artifact_record(
                 run_dir, stage="quantize_awq", artifact_path=out_dir, role="output"

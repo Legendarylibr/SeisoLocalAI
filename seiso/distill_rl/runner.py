@@ -194,6 +194,7 @@ def _run_single_job(
             val_preferences_path=val_path,
             prompt_library_path=config.prompt_library_path,
             eval_max_prompts=config.eval_max_prompts,
+            trust_remote_code=config.trust_remote_code,
             on_log=on_log,
         )
         stage_results["evaluation"] = evaluation.get("summary_path")
@@ -277,6 +278,7 @@ def _run_shared_stages(
             use_chat_template=bool(config.use_chat_template),
             teacher_revision=config.teacher_revision,
             student_revision=config.student_revision,
+            trust_remote_code=config.trust_remote_code,
             on_log=on_log,
         )
         stage_results["preferences_train"] = str(bundle.train_path)
@@ -443,6 +445,7 @@ def _run_dpo(
         use_lora=config.dpo_use_lora,
         use_qlora=config.dpo_use_qlora,
         use_chat_template=bool(config.use_chat_template),
+        trust_remote_code=config.trust_remote_code,
         gradient_checkpointing=True,
     )
 

@@ -105,6 +105,7 @@ class DistillRLConfig(BaseModel):
     rollout_max_new_tokens: int = 32
     rollout_temperature: float = 0.7
     use_chat_template: bool | None = None
+    trust_remote_code: bool = False
     train_val_fraction: float = 0.85
 
     dpo_beta: float = 0.1
@@ -292,6 +293,7 @@ def build_distill_rl_config(
         ),
         rollout_temperature=float(merged.get("rollout_temperature", 0.7)),
         use_chat_template=use_chat_template,
+        trust_remote_code=bool(merged.get("trust_remote_code", False)),
         train_val_fraction=float(
             merged.get("train_val_fraction", preset.get("train_val_fraction", 0.85))
         ),

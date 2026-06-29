@@ -60,6 +60,15 @@ def _load_awq_cfg(blob: dict) -> GPTQConfig:
     return _dc_from_blob(blob, "awq", base)
 
 
+def _hf_max_memory_for_auto_load() -> dict[int, str] | None:
+    try:
+        from seiso.memory.protection import build_hf_max_memory
+
+        return build_hf_max_memory()
+    except Exception:
+        return None
+
+
 def _pipeline_fingerprint(
     blob: dict, det: DeterminismConfig, config_path: str | None
 ) -> dict:
@@ -474,10 +483,13 @@ def _cmd_evaluate_run(args: argparse.Namespace) -> int:
         res = evaluate_into_run_dir(
             run_dir=Path(args.run_dir),
             model_dir=resolve_user_path(_p(args.model_dir), must_exist=True),
+            trust_remote_code=args.trust_remote_code,
         )
     else:
         res = evaluate_model_dir(
-            resolve_user_path(_p(args.model_dir), must_exist=True), out_path=out_path
+            resolve_user_path(_p(args.model_dir), must_exist=True),
+            out_path=out_path,
+            trust_remote_code=args.trust_remote_code,
         )
     print(res)
     return 0
@@ -560,6 +572,7 @@ def _cmd_evaluate_code(args: argparse.Namespace) -> int:
             "temperature": args.temperature,
             "top_p": args.top_p,
             "limit": args.limit,
+            "trust_remote_code": args.trust_remote_code,
         },
         "model_dir": str(args.model_dir),
         "determinism": det,
@@ -593,6 +606,7 @@ def _cmd_evaluate_code(args: argparse.Namespace) -> int:
         top_p=args.top_p,
         limit=args.limit,
         allow_insecure_code_exec=args.allow_insecure_code_exec,
+        trust_remote_code=args.trust_remote_code,
     )
     print(res)
     print(f"Wrote code-eval results to {run_dir / 'code_eval' / args.suite}")
@@ -632,13 +646,21 @@ def _cmd_util_verify_artifact(args: argparse.Namespace) -> int:
 
     model_dir = resolve_user_path(_p(args.model_dir), must_exist=True)
     tok = AutoTokenizer.from_pretrained(
-        model_dir, use_fast=True, trust_remote_code=False
+        model_dir, use_fast=True, trust_remote_code=args.trust_remote_code
     )
     model = AutoModelForCausalLM.from_pretrained(
         model_dir,
         device_map="auto",
         torch_dtype=torch.float16,
-        trust_remote_code=False,
+        trust_remote_code=args.trust_remote_code,
+        **(
+            {"max_memory": max_memory}
+            if (
+                torch.cuda.is_available()
+                and (max_memory := _hf_max_memory_for_auto_load())
+            )
+            else {}
+        ),
     )
     inputs = tok(args.prompt, return_tensors="pt").to(model.device)
     with torch.inference_mode():
@@ -679,6 +701,7 @@ def _cmd_util_speculative(args: argparse.Namespace) -> int:
         max_new_tokens=args.max_new_tokens,
         num_speculative_tokens=args.num_speculative_tokens,
         allow_mismatched_tokenizers=args.allow_mismatched_tokenizers,
+        trust_remote_code=args.trust_remote_code,
     )
     print(text)
     print(stats.to_dict())
@@ -852,6 +875,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="If set, also write research-grade metrics/provenance into this run directory.",
     )
+    ev_run.add_argument(
+        "--trust-remote-code",
+        action="store_true",
+        help="Allow custom model code for trusted Hugging Face checkpoints.",
+    )
     ev_run.add_argument("--config", default=None, help="JSON config file (reserved).")
     ev_run.set_defaults(func=_cmd_evaluate_run)
 
@@ -919,6 +947,11 @@ def build_parser() -> argparse.ArgumentParser:
             "unless running in a container/CI environment."
         ),
     )
+    ev_code.add_argument(
+        "--trust-remote-code",
+        action="store_true",
+        help="Allow custom model code for trusted Hugging Face checkpoints.",
+    )
     ev_code.set_defaults(func=_cmd_evaluate_code, allow_insecure_code_exec=False)
 
     # export bundle
@@ -947,6 +980,11 @@ def build_parser() -> argparse.ArgumentParser:
     va.add_argument("--model-dir", required=True)
     va.add_argument("--prompt", default="def fibonacci(n):")
     va.add_argument("--max-new-tokens", type=int, default=64)
+    va.add_argument(
+        "--trust-remote-code",
+        action="store_true",
+        help="Allow custom model code for trusted Hugging Face checkpoints.",
+    )
     va.set_defaults(func=_cmd_util_verify_artifact)
 
     mv = util_sp.add_parser(
@@ -976,6 +1014,11 @@ def build_parser() -> argparse.ArgumentParser:
     sd.add_argument("--max-new-tokens", type=int, default=256)
     sd.add_argument("--num-speculative-tokens", type=int, default=5)
     sd.add_argument("--allow-mismatched-tokenizers", action="store_true")
+    sd.add_argument(
+        "--trust-remote-code",
+        action="store_true",
+        help="Allow custom model code for trusted Hugging Face checkpoints.",
+    )
     sd.set_defaults(func=_cmd_util_speculative)
 
     return p

@@ -135,6 +135,7 @@ def build_pipeline_config(
                 payload.get("student_model") or model_defaults["student_model"]
             ),
             "steps": int(payload.get("distill_steps", preset.get("distill_steps", 2))),
+            "trust_remote_code": bool(payload.get("trust_remote_code", False)),
         },
     )
     finetune_cfg = merge_dataclass(
@@ -143,6 +144,7 @@ def build_pipeline_config(
             "steps": int(
                 payload.get("finetune_steps", preset.get("finetune_steps", 2))
             ),
+            "trust_remote_code": bool(payload.get("trust_remote_code", False)),
         },
     )
     gptq_cfg = merge_dataclass(
