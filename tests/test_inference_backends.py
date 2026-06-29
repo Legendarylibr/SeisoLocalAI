@@ -310,6 +310,31 @@ def test_torch_input_device_prefers_sharded_gpu():
     )
 
 
+def test_torch_input_device_handles_integer_device_map_entries():
+    import torch
+
+    from seiso.inference.runner import LocalInferenceRunner
+
+    class FakeModel:
+        hf_device_map = {"embed": "cpu", "layers.0": 0, "lm_head": "disk"}
+
+    assert LocalInferenceRunner._torch_input_device(FakeModel()) == torch.device(
+        "cuda:0"
+    )
+
+
+def test_torch_input_device_skips_offload_entries_and_falls_back_to_model_device():
+    import torch
+
+    from seiso.inference.runner import LocalInferenceRunner
+
+    class FakeModel:
+        hf_device_map = {"embed": "cpu", "layers.0": "disk", "lm_head": "meta"}
+        device = torch.device("cpu")
+
+    assert LocalInferenceRunner._torch_input_device(FakeModel()) == torch.device("cpu")
+
+
 @pytest.mark.asyncio
 async def test_cancel_generation_keeps_loaded_model(monkeypatch):
     from seiso.inference.runner import LocalInferenceRunner
