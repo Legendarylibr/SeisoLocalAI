@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from typing import Any
 
 # Architecture patterns → LoRA target modules
 _ARCHITECTURE_TARGETS: dict[str, list[str]] = {
@@ -107,9 +108,52 @@ _ARCHITECTURE_TARGETS: dict[str, list[str]] = {
 
 _DEFAULT_TARGETS = ["q_proj", "k_proj", "v_proj", "o_proj"]
 
+_COMMON_LINEAR_TARGETS = (
+    "q_proj",
+    "k_proj",
+    "v_proj",
+    "o_proj",
+    "query_key_value",
+    "qkv_proj",
+    "W_pack",
+    "in_proj",
+    "out_proj",
+    "c_attn",
+    "c_proj",
+    "dense",
+    "fc1",
+    "fc2",
+    "gate_proj",
+    "up_proj",
+    "down_proj",
+    "gate_up_proj",
+    "w1",
+    "w2",
+    "w3",
+)
 
-def detect_architecture(model_id: str, model=None) -> str:
+
+def _config_model_type(model: Any) -> str | None:
+    cfg = getattr(model, "config", None)
+    if cfg:
+        mt = getattr(cfg, "model_type", "")
+        if isinstance(mt, str) and mt.strip():
+            return mt.lower()
+        architectures = getattr(cfg, "architectures", None)
+        if isinstance(architectures, (list, tuple)):
+            for arch in architectures:
+                if isinstance(arch, str) and arch.strip():
+                    return arch.lower()
+    return None
+
+
+def detect_architecture(model_id: str, model=None) -> str | None:
     """Detect model architecture from ID or config."""
+    if model is not None:
+        mt = _config_model_type(model)
+        if mt in _ARCHITECTURE_TARGETS:
+            return mt
+
     mid = model_id.lower()
     patterns = [
         (r"llama|tinyllama", "llama"),
@@ -132,19 +176,50 @@ def detect_architecture(model_id: str, model=None) -> str:
             return arch
 
     if model is not None:
-        cfg = getattr(model, "config", None)
-        if cfg:
-            mt = getattr(cfg, "model_type", "").lower()
-            if mt in _ARCHITECTURE_TARGETS:
-                return mt
+        return _config_model_type(model)
 
-    return "llama"
+    return None
+
+
+def _target_suffix(name: str) -> str:
+    suffix = name.rsplit(".", 1)[-1]
+    if suffix == "weight":
+        parts = name.split(".")
+        if len(parts) >= 2:
+            return parts[-2]
+    return suffix
 
 
 def get_lora_target_modules(model_id: str, model=None) -> list[str]:
     """Return LoRA target modules for a given model."""
     arch = detect_architecture(model_id, model)
-    return _ARCHITECTURE_TARGETS.get(arch, _DEFAULT_TARGETS)
+    if arch in _ARCHITECTURE_TARGETS:
+        return _ARCHITECTURE_TARGETS[arch]
+    if model is not None:
+        inferred = infer_lora_target_modules(model)
+        if inferred:
+            return inferred
+    return _DEFAULT_TARGETS
+
+
+def infer_lora_target_modules(model) -> list[str]:
+    """Infer likely LoRA targets from the model's actual parameter names."""
+    try:
+        param_names = [n for n, _ in model.named_parameters()]
+    except Exception:
+        return []
+
+    suffixes = {_target_suffix(name) for name in param_names}
+    targets = [target for target in _COMMON_LINEAR_TARGETS if target in suffixes]
+    if targets:
+        return targets
+
+    generic = sorted(
+        suffix
+        for suffix in suffixes
+        if suffix.endswith(("proj", "dense", "linear", "fc"))
+    )
+    return generic
 
 
 def modules_exist_in_model(model, target_modules: list[str]) -> list[str]:
@@ -155,4 +230,4 @@ def modules_exist_in_model(model, target_modules: list[str]) -> list[str]:
         for t in target_modules:
             if name.endswith(t) or f".{t}." in name or name.endswith(f".{t}"):
                 found.add(t)
-    return list(found) if found else target_modules
+    return [t for t in target_modules if t in found]
