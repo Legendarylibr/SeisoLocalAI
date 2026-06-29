@@ -1,8 +1,8 @@
-from seiso.training.multi_gpu import detect_gpus, launch_worker_command
+from seiso.training.multi_gpu import detect_training_layout, launch_worker_command
 
 
-def test_detect_gpus():
-    layout = detect_gpus()
+def test_detect_training_layout():
+    layout = detect_training_layout()
     assert layout.world_size >= 1
     assert layout.local_rank >= 0
 

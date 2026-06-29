@@ -20,7 +20,6 @@ from seiso.models.catalog import CatalogEntry, get_by_repo
 from seiso.models.hub_errors import format_hub_error
 from seiso.models.trainable_snapshot import snapshot_has_trainable_weights
 from seiso.models.trusted_gguf import (
-    base_model_from_tags,
     filter_trusted_gguf_search_results,
     gguf_mirror_candidates,
 )
@@ -429,17 +428,6 @@ def resolve_gguf_artifact(
     }
     _gguf_artifact_cache.set(cache_key, info)
     return info
-
-
-def _catalog_base_repo(entry: CatalogEntry, repo_id: str) -> str | None:
-    tags = getattr(entry, "tags", ()) or ()
-    base = base_model_from_tags(list(tags))
-    if base:
-        return base
-    entry_repo = getattr(entry, "repo_id", None)
-    if entry_repo is not None and entry_repo != repo_id:
-        return repo_id
-    return None
 
 
 def resolve_gguf_repo(

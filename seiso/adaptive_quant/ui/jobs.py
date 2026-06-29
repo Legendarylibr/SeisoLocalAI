@@ -144,18 +144,6 @@ class JobManager:
             record._process = None
 
 
-def build_action_command(
-    *, action: str, repo: Path, python_bin: str
-) -> tuple[str, list[str]]:
-    """Backward-compatible wrapper around :func:`build_workflow_command`."""
-    return build_workflow_command(
-        workflow=action,
-        options={},
-        repo=repo,
-        python_bin=python_bin,
-    )
-
-
 def start_configured_workflow(
     *,
     jobs: JobManager,

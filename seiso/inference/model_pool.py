@@ -96,23 +96,6 @@ def _llama_gpu_offload_ok() -> bool:
     return False
 
 
-def _reset_llama_offload_cache() -> None:
-    """Clear the GPU offload probe cache (for tests / post-install)."""
-    global _llama_offload_checked, _llama_offload_supported
-    _llama_offload_checked = False
-    _llama_offload_supported = False
-
-
-def _default_llama_batch() -> int:
-    # Conservative default — clamp_llama_load_kwargs scales up on roomy hardware.
-    return 768
-
-
-def _default_llama_ubatch(n_batch: int) -> int:
-    # Smaller micro-batches cap peak VRAM during prompt prefill.
-    return min(n_batch, 256 if _default_llama_gpu_layers() != 0 else 512)
-
-
 def _llama_speed_scale_enabled() -> bool:
     return env_bool("SEISO_LLAMA_SPEED_SCALE", True)
 
