@@ -307,10 +307,15 @@ def available_backends(
     *, model_path: str, model_format: str | None = None
 ) -> list[BackendName]:
     """Backends that can serve this inventory model."""
-    if (model_format or "").lower() == "gguf" and not gguf_is_supported_by_llamacpp(
-        model_path
-    ):
+    fmt = (model_format or "").lower()
+    path = Path(model_path)
+    if fmt == "gguf" and not gguf_is_supported_by_llamacpp(model_path):
         return []
+    if fmt == "gguf" or _is_gguf_path(model_path) or path.suffix.lower() == ".gguf":
+        return [BACKEND_LLAMACPP]
+    if fmt in {"safetensors", "bin"} or path.is_dir():
+        preferred = recommend_backend(model_path=model_path, model_format=model_format)
+        return list(dict.fromkeys([preferred, BACKEND_TORCH, BACKEND_MLX]))
     return [recommend_backend(model_path=model_path, model_format=model_format)]
 
 
