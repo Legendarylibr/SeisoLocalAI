@@ -4,7 +4,6 @@ from forge.services.llm_output import (
     StreamingOutputSanitizer,
     chunk_sanitized_output,
     sanitize_llm_output,
-    strip_reasoning_leakage,
     strip_spurious_tool_syntax,
 )
 from forge.tools.registry import ToolRegistry, ToolSpec, tools_system_prompt
@@ -43,11 +42,6 @@ def test_streaming_output_sanitizer_passthrough():
     assert guard.feed("hello ") == ["hello "]
     assert guard.feed("world") == ["world"]
     assert guard.finish() == []
-
-
-def test_strip_reasoning_leakage_legacy_helper_is_passthrough():
-    raw = "Reasoning: First I should greet the user. Final Answer: Hey there!"
-    assert strip_reasoning_leakage(raw) == raw
 
 
 def test_streaming_output_sanitizer_preserves_reasoning_header():

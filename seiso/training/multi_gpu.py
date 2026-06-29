@@ -46,10 +46,6 @@ def detect_training_layout() -> GpuLayout:
     )
 
 
-# Backward-compatible alias — returns DDP layout, not hardware enumeration.
-detect_gpus = detect_training_layout
-
-
 def configure_training_args(
     base_args: dict, layout: GpuLayout, multi_gpu: bool
 ) -> dict:

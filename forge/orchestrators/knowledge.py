@@ -22,7 +22,6 @@ class KnowledgeOrchestrator(Orchestrator):
     CHUNK_SIZE = 512
     CHUNK_OVERLAP = 64
     MAX_INGEST_BYTES = 50 * 1024 * 1024
-    _index_cache: dict[str, tuple[float, list[dict]]] = {}
 
     async def execute(self, job_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         action = payload.get("action", "ingest")
@@ -77,25 +76,7 @@ class KnowledgeOrchestrator(Orchestrator):
                 }
                 f.write(json.dumps(record) + "\n")
 
-        self._index_cache.pop(str(index_path), None)
         return {"chunk_count": len(chunks), "index_path": str(index_path)}
-
-    def _load_index_chunks(self, index_path: Path) -> list[dict]:
-        cache_key = str(index_path)
-        try:
-            mtime = index_path.stat().st_mtime
-        except OSError:
-            mtime = 0.0
-        cached = self._index_cache.get(cache_key)
-        if cached and cached[0] == mtime:
-            return cached[1]
-
-        chunks: list[dict] = []
-        with index_path.open() as f:
-            for line in f:
-                chunks.append(json.loads(line))
-        self._index_cache[cache_key] = (mtime, chunks)
-        return chunks
 
     async def _retrieve(self, job_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         user_id = payload["user_id"]
