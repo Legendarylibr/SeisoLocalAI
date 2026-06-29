@@ -105,6 +105,12 @@ _ORPHAN_CLOSE_TAG_PATTERN = re.compile(
 _NUMBERED_ANALYSIS_START = re.compile(
     r"(?is)^\s*\d+\.\s*\*\*(?:Analyze|Determine|Draft|Select|Refine|Thought|Reasoning|Option)"
 )
+_ANSWER_LABEL_PREFIX = re.compile(
+    r"(?is)^\s*(?:the\s+)?(?:final\s+)?(?:answer|response|reply)\s*(?:is)?\s*:+\s*"
+)
+_META_ANSWER_PATTERN = re.compile(
+    r"(?is)^\s*(?:the\s+)?(?:user|prompt|question|request)\b.*\b(?:asked|asks|wants|requested|question)\b"
+)
 
 
 def _strip_redacted_thinking_block(content: str) -> str:
@@ -161,12 +167,20 @@ def _looks_like_reasoning_leak(content: str) -> bool:
     return bool(_PIPE_TAG_PATTERN.search(content))
 
 
+def _strip_answer_label_prefix(content: str) -> str:
+    cleaned = _ANSWER_LABEL_PREFIX.sub("", content, count=1).strip()
+    if cleaned != content.strip() and _META_ANSWER_PATTERN.search(cleaned):
+        return ""
+    return cleaned
+
+
 def _extract_final_answer_from_reasoning(content: str) -> str | None:
     for pattern in _FINAL_ANSWER_PATTERNS:
         matches = pattern.findall(content)
         if not matches:
             continue
         candidate = str(matches[-1]).strip().strip('"').strip("'")
+        candidate = _strip_answer_label_prefix(candidate)
         if (
             candidate
             and len(candidate) < 500
@@ -195,10 +209,12 @@ def strip_reasoning_leakage(content: str) -> str:
     if not content:
         return content
 
-    cleaned = _strip_redacted_thinking_block(content)
+    cleaned = _strip_answer_label_prefix(_strip_redacted_thinking_block(content))
+    if not cleaned:
+        return ""
     extracted = _extract_after_thinking_process_block(cleaned)
     if extracted:
-        return extracted.strip()
+        return _strip_answer_label_prefix(extracted.strip())
 
     cleaned = _THINK_TAG_PATTERN.sub("", cleaned)
     cleaned = _PIPE_TAG_PATTERN.sub("", cleaned)
@@ -207,7 +223,7 @@ def strip_reasoning_leakage(content: str) -> str:
     if _looks_like_reasoning_leak(cleaned):
         extracted = _extract_final_answer_from_reasoning(cleaned)
         if extracted:
-            return extracted.strip()
+            return _strip_answer_label_prefix(extracted.strip())
         cleaned = _REASONING_HEADER_PATTERN.sub("", cleaned)
 
     cleaned = re.sub(
@@ -221,7 +237,7 @@ def strip_reasoning_leakage(content: str) -> str:
         "",
         cleaned,
     )
-    return cleaned.strip()
+    return _strip_answer_label_prefix(cleaned.strip())
 
 
 def strip_spurious_tool_syntax(content: str) -> str:

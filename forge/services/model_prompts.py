@@ -7,7 +7,7 @@ import re
 _NO_REASONING = (
     "Never output thinking process, chain-of-thought, reasoning blocks, internal monologue, "
     "numbered analysis steps, draft options, or hidden scratchpad text. "
-    "Reply with only the final answer the user should read."
+    "Write only the message the user should read."
 )
 
 _REASONING_PRONE_PATTERN = re.compile(
@@ -22,9 +22,10 @@ _REASONING_PRONE_PATTERN = re.compile(
 
 _BASE_NO_TOOLS = (
     "You are a helpful assistant in a plain chat session. "
-    "Answer directly with the final response only. "
+    "Answer the latest user message directly in natural language. "
     "Never output tool calls, function calls, XML tool tags, JSON action blocks, "
-    "[TOOL_CALLS] sections, thinking process, chain-of-thought, or step-by-step internal analysis."
+    "[TOOL_CALLS] sections, labels, meta commentary, thinking process, chain-of-thought, "
+    "or step-by-step internal analysis."
 )
 
 _CODE_REPLY_GUIDANCE = (
@@ -33,8 +34,8 @@ _CODE_REPLY_GUIDANCE = (
 )
 
 _REASONING_PRONE_EXTRA = (
-    "This model tends to leak internal reasoning — respond directly with the final answer only, "
-    "with no preamble, no analysis headers, and no quoted draft options."
+    "This model tends to leak internal reasoning; respond directly, with no preamble, "
+    "no answer label, no analysis headers, and no quoted draft options."
 )
 
 

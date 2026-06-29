@@ -131,6 +131,16 @@ def test_strip_reasoning_leakage_extracts_reply_section():
     assert strip_reasoning_leakage(raw) == "Sure, I can help with that."
 
 
+def test_strip_reasoning_leakage_unwraps_answer_label():
+    raw = "The final answer is: Sure, I can help with that."
+    assert strip_reasoning_leakage(raw) == "Sure, I can help with that."
+
+
+def test_strip_reasoning_leakage_drops_meta_answer_label():
+    raw = "The final answer is: The user has just asked a question."
+    assert strip_reasoning_leakage(raw) == ""
+
+
 def test_strip_reasoning_leakage_strips_numbered_analysis_without_header():
     raw = (
         "1. **Analyze the Input:** user wants a greeting\n"
