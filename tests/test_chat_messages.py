@@ -236,7 +236,9 @@ def test_chat_system_prompt_includes_no_reasoning_hint_for_all_families(model_ke
     prompt = chat_system_prompt(model_key, tools_enabled=False)
     assert prompt
     assert "chain-of-thought" in prompt.lower() or "thinking process" in prompt.lower()
-    assert "final" in prompt.lower()
+    assert "final answer" not in prompt.lower()
+    assert "final response" not in prompt.lower()
+    assert "meta commentary" in prompt.lower()
 
 
 def test_model_switch_system_prompt_mentions_models():
