@@ -243,6 +243,43 @@ def test_dflash_loader_reuses_vram_aware_llama_loader(monkeypatch, tmp_path):
     assert calls == [(str(draft), 2048)]
 
 
+def test_dflash_cache_reloads_when_larger_context_is_needed(monkeypatch, tmp_path):
+    from seiso.inference import model_pool
+
+    model_pool.clear_dflash_draft_cache()
+    draft = tmp_path / "draft.gguf"
+    draft.write_bytes(b"gguf")
+    handles: list[object] = []
+    closed: list[object] = []
+
+    class FakeLlama:
+        def close(self) -> None:
+            closed.append(self)
+
+    def fake_load(_path, _n_ctx):
+        handle = FakeLlama()
+        handles.append(handle)
+        return handle
+
+    monkeypatch.setattr(
+        "seiso.inference.backends.prepare_model_path",
+        lambda path, _backend: str(path),
+    )
+    monkeypatch.setattr(model_pool, "_load_dflash_llm", fake_load)
+
+    first = model_pool.get_dflash_draft(str(draft), n_ctx=2048)
+    same = model_pool.get_dflash_draft(str(draft), n_ctx=1024)
+    larger = model_pool.get_dflash_draft(str(draft), n_ctx=4096)
+
+    assert first is same
+    assert larger is not first
+    assert first.n_ctx == 2048
+    assert larger.n_ctx == 4096
+    assert handles == [first.llm, larger.llm]
+    assert closed == [first.llm]
+    model_pool.clear_dflash_draft_cache()
+
+
 def test_llama_load_kwargs_are_tuned_and_overrideable(monkeypatch):
     monkeypatch.setenv("SEISO_LLAMA_THREADS", "6")
     monkeypatch.setenv("SEISO_LLAMA_GPU_LAYERS", "4")

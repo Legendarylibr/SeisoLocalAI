@@ -97,7 +97,9 @@ class LocalInferenceRunner:
                 raise ValueError("draft_model_path required for speculative preload")
             if is_dflash_draft(draft_path):
                 self._pool.get_torch(resolved_path, load_in_4bit=True)
-                get_dflash_draft(draft_path)
+                get_dflash_draft(
+                    draft_path, n_ctx=self._estimate_dflash_n_ctx(payload, draft_path)
+                )
             else:
                 self._pool.get_torch_speculative(
                     resolved_path, draft_path, load_in_4bit=True
@@ -308,6 +310,18 @@ class LocalInferenceRunner:
             return "torch", resolved
         return "llama", resolved
 
+    @staticmethod
+    def _estimate_dflash_n_ctx(payload: dict[str, Any], draft_path: str) -> int:
+        return int(
+            payload.get("n_ctx")
+            or estimate_llama_n_ctx(
+                payload.get("messages") or [],
+                max_tokens=int(payload.get("max_tokens", 512)),
+                model_path=draft_path,
+                model_format="gguf",
+            )
+        )
+
     def _iter_tokens(
         self,
         payload: dict[str, Any],
@@ -367,7 +381,9 @@ class LocalInferenceRunner:
             target_model, target_tok = self._pool.get_torch(
                 model_path, load_in_4bit=True
             )
-            draft_llm = get_dflash_draft(draft_path)
+            draft_llm = get_dflash_draft(
+                draft_path, n_ctx=self._estimate_dflash_n_ctx(payload, draft_path)
+            )
 
             bundle = DFlashDraftSpeculativeBundle(
                 target_model=target_model,
