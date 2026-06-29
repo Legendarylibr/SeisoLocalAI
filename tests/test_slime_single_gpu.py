@@ -195,7 +195,9 @@ def test_sample_batches_stream_with_bounded_shuffle(tmp_path: Path):
 
     assert [len(batch) for batch in batches] == [2, 1]
     assert sum(len(batch) for batch in batches) == 3
-    assert all({"prompt", "answer"} <= set(sample) for batch in batches for sample in batch)
+    assert all(
+        {"prompt", "answer"} <= set(sample) for batch in batches for sample in batch
+    )
 
 
 def test_reward_helpers():
@@ -288,8 +290,28 @@ def test_chunked_splits_work_for_single_gpu_microbatches():
 def test_merge_stats_weighted_by_microbatch_size():
     stats = _empty_stats()
 
-    _merge_stats(stats, {"loss": 2.0, "policy_loss": 4.0, "kl": 1.0, "reward_mean": 6.0, "reward_max": 7.0}, weight=0.25)
-    _merge_stats(stats, {"loss": 4.0, "policy_loss": 8.0, "kl": 3.0, "reward_mean": 10.0, "reward_max": 5.0}, weight=0.75)
+    _merge_stats(
+        stats,
+        {
+            "loss": 2.0,
+            "policy_loss": 4.0,
+            "kl": 1.0,
+            "reward_mean": 6.0,
+            "reward_max": 7.0,
+        },
+        weight=0.25,
+    )
+    _merge_stats(
+        stats,
+        {
+            "loss": 4.0,
+            "policy_loss": 8.0,
+            "kl": 3.0,
+            "reward_mean": 10.0,
+            "reward_max": 5.0,
+        },
+        weight=0.75,
+    )
 
     assert stats["loss"] == 3.5
     assert stats["policy_loss"] == 7.0

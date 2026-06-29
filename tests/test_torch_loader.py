@@ -13,9 +13,7 @@ def test_resolve_device_map_honors_explicit_balanced(monkeypatch):
     monkeypatch.setattr(torch_loader, "_cuda_available", lambda: True)
 
     assert (
-        torch_loader._resolve_device_map(
-            Backend.TORCH, requested="balanced_low_0"
-        )
+        torch_loader._resolve_device_map(Backend.TORCH, requested="balanced_low_0")
         == "balanced_low_0"
     )
 
@@ -213,9 +211,7 @@ def test_load_torch_retries_without_bitsandbytes_quantization(monkeypatch):
         def from_pretrained(_model_id, **kwargs):
             model_calls.append(kwargs)
             if len(model_calls) == 1:
-                raise RuntimeError(
-                    "bitsandbytes rejected this quantization_config"
-                )
+                raise RuntimeError("bitsandbytes rejected this quantization_config")
             return FakeModel()
 
     monkeypatch.setitem(__import__("sys").modules, "torch", fake_torch)

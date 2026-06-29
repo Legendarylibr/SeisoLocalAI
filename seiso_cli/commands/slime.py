@@ -10,7 +10,9 @@ from seiso_cli.console import console
 
 
 def slime(
-    config: str = typer.Option(..., "--config", "-c", help="Single-GPU slime YAML config"),
+    config: str = typer.Option(
+        ..., "--config", "-c", help="Single-GPU slime YAML config"
+    ),
 ) -> None:
     """Run a compact slime-style RL loop on one local GPU."""
     from seiso.inference.model_pool import get_model_pool

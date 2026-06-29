@@ -32,9 +32,7 @@ def _cuda_available() -> bool:
 def _mps_available() -> bool:
     import torch
 
-    return bool(
-        hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
-    )
+    return bool(hasattr(torch.backends, "mps") and torch.backends.mps.is_available())
 
 
 def _resolve_device_map(
