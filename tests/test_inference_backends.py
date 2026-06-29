@@ -10,6 +10,7 @@ import pytest
 
 from seiso.inference.backends import (
     BACKEND_LLAMACPP,
+    BACKEND_MLX,
     BACKEND_TORCH,
     available_backends,
     clear_gguf_caches,
@@ -59,6 +60,22 @@ def test_safetensors_recommends_torch_or_mlx(tmp_path: Path):
     (model_dir / "model.safetensors").write_bytes(b"x")
     backend = recommend_backend(model_path=str(model_dir), model_format="safetensors")
     assert backend in {BACKEND_TORCH, "mlx"}
+
+
+def test_safetensors_inventory_exposes_torch_and_mlx_fallbacks(
+    monkeypatch, tmp_path: Path
+):
+    from seiso.inference import backends
+    from seiso.models.loader import Backend
+
+    model_dir = tmp_path / "merged"
+    model_dir.mkdir()
+    (model_dir / "model.safetensors").write_bytes(b"x")
+    monkeypatch.setattr(backends, "detect_backend", lambda: Backend.MLX)
+
+    assert available_backends(
+        model_path=str(model_dir), model_format="safetensors"
+    ) == [BACKEND_MLX, BACKEND_TORCH]
 
 
 def _write_minimal_gguf(path: Path, architecture: str) -> None:
