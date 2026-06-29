@@ -91,6 +91,17 @@ class LocalInferenceRunner:
             self._pool.get_mlx(resolved_path)
         elif route == "torch":
             self._pool.get_torch(resolved_path)
+        elif route == "speculative":
+            draft_path = payload.get("draft_model_path")
+            if not draft_path:
+                raise ValueError("draft_model_path required for speculative preload")
+            if is_dflash_draft(draft_path):
+                self._pool.get_torch(resolved_path, load_in_4bit=True)
+                get_dflash_draft(draft_path)
+            else:
+                self._pool.get_torch_speculative(
+                    resolved_path, draft_path, load_in_4bit=True
+                )
         else:
             from seiso.inference.tuning import estimate_llama_n_ctx
 

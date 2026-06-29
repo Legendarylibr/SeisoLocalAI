@@ -299,6 +299,80 @@ async def test_local_inference_chat_uses_direct_completion(monkeypatch):
     assert calls == ["complete"]
 
 
+def test_warm_model_preloads_torch_speculative_pair(monkeypatch):
+    from seiso.inference.runner import LocalInferenceRunner
+
+    runner = LocalInferenceRunner()
+    calls: list[tuple[str, tuple, dict]] = []
+
+    monkeypatch.setattr(
+        runner,
+        "_resolve_route",
+        lambda _payload, _path: ("speculative", "/tmp/target"),
+    )
+    monkeypatch.setattr(
+        runner._pool,
+        "get_torch_speculative",
+        lambda *args, **kwargs: calls.append(("spec", args, kwargs)),
+    )
+    monkeypatch.setattr(
+        runner._pool,
+        "get_llama",
+        lambda *_args, **_kwargs: pytest.fail("speculative preload used llama path"),
+    )
+
+    runner.warm_model(
+        {"model_path": "/tmp/target", "draft_model_path": "/tmp/draft"}
+    )
+
+    assert calls == [
+        (
+            "spec",
+            ("/tmp/target", "/tmp/draft"),
+            {"load_in_4bit": True},
+        )
+    ]
+
+
+def test_warm_model_preloads_dflash_speculative_components(monkeypatch):
+    import seiso.inference.runner as runner_mod
+    from seiso.inference.runner import LocalInferenceRunner
+
+    runner = LocalInferenceRunner()
+    calls: list[tuple[str, tuple, dict]] = []
+
+    monkeypatch.setattr(
+        runner,
+        "_resolve_route",
+        lambda _payload, _path: ("speculative", "/tmp/target"),
+    )
+    monkeypatch.setattr(runner_mod, "is_dflash_draft", lambda _path: True)
+    monkeypatch.setattr(
+        runner_mod,
+        "get_dflash_draft",
+        lambda *args, **kwargs: calls.append(("dflash", args, kwargs)),
+    )
+    monkeypatch.setattr(
+        runner._pool,
+        "get_torch",
+        lambda *args, **kwargs: calls.append(("torch", args, kwargs)),
+    )
+    monkeypatch.setattr(
+        runner._pool,
+        "get_torch_speculative",
+        lambda *_args, **_kwargs: pytest.fail("dflash preload should not load torch draft"),
+    )
+
+    runner.warm_model(
+        {"model_path": "/tmp/target", "draft_model_path": "/tmp/dflash.gguf"}
+    )
+
+    assert calls == [
+        ("torch", ("/tmp/target",), {"load_in_4bit": True}),
+        ("dflash", ("/tmp/dflash.gguf",), {}),
+    ]
+
+
 def test_torch_input_device_prefers_sharded_gpu():
     import torch
 
