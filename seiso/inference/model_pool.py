@@ -1001,15 +1001,7 @@ _dflash_draft_lock = threading.Lock()
 
 
 def _load_dflash_llm(resolved_path: str, n_ctx: int) -> Any:
-    from llama_cpp import Llama
-
-    from seiso.inference.tuning import attach_llama_prompt_cache
-
-    kwargs = llama_load_kwargs(n_ctx, model_path=resolved_path)
-    kwargs.pop("_model_path", None)
-    llm = Llama(model_path=resolved_path, **kwargs)
-    attach_llama_prompt_cache(llm)
-    return llm
+    return _load_llama_model(resolved_path, n_ctx)
 
 
 def get_dflash_draft(model_path: str, *, n_ctx: int = 4096) -> DflashDraftHandle:
