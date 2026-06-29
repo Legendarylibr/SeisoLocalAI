@@ -989,10 +989,11 @@ class ModelPool:
 class DflashDraftHandle:
     """Thread-safe wrapper around a cached llama.cpp dflash/draft model."""
 
-    __slots__ = ("llm", "_infer_lock")
+    __slots__ = ("llm", "n_ctx", "_infer_lock")
 
-    def __init__(self, llm: Any) -> None:
+    def __init__(self, llm: Any, n_ctx: int = 0) -> None:
         self.llm = llm
+        self.n_ctx = n_ctx
         self._infer_lock = threading.Lock()
 
 
@@ -1012,21 +1013,27 @@ def get_dflash_draft(model_path: str, *, n_ctx: int = 4096) -> DflashDraftHandle
     norm = str(Path(resolved).resolve())
     with _dflash_draft_lock:
         cached = _dflash_draft_cache.get(norm)
-        if cached is not None:
+        if cached is not None and cached.n_ctx >= n_ctx:
             return cached
 
     llm = _load_dflash_llm(resolved, n_ctx)
 
     with _dflash_draft_lock:
         cached = _dflash_draft_cache.get(norm)
-        if cached is not None:
+        if cached is not None and cached.n_ctx >= n_ctx:
             try:
                 if hasattr(llm, "close"):
                     llm.close()
             except Exception:
                 pass
             return cached
-        handle = DflashDraftHandle(llm)
+        if cached is not None:
+            try:
+                if hasattr(cached.llm, "close"):
+                    cached.llm.close()
+            except Exception:
+                pass
+        handle = DflashDraftHandle(llm, n_ctx=n_ctx)
         _dflash_draft_cache[norm] = handle
         return handle
 

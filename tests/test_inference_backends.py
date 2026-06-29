@@ -353,6 +353,11 @@ def test_warm_model_preloads_dflash_speculative_components(monkeypatch):
         lambda *args, **kwargs: calls.append(("dflash", args, kwargs)),
     )
     monkeypatch.setattr(
+        runner_mod.LocalInferenceRunner,
+        "_estimate_dflash_n_ctx",
+        staticmethod(lambda _payload, _draft_path: 3072),
+    )
+    monkeypatch.setattr(
         runner._pool,
         "get_torch",
         lambda *args, **kwargs: calls.append(("torch", args, kwargs)),
@@ -369,8 +374,60 @@ def test_warm_model_preloads_dflash_speculative_components(monkeypatch):
 
     assert calls == [
         ("torch", ("/tmp/target",), {"load_in_4bit": True}),
-        ("dflash", ("/tmp/dflash.gguf",), {}),
+        ("dflash", ("/tmp/dflash.gguf",), {"n_ctx": 3072}),
     ]
+
+
+def test_dflash_speculative_stream_loads_draft_with_estimated_context(monkeypatch):
+    import seiso.inference.runner as runner_mod
+    from seiso.inference.runner import LocalInferenceRunner
+    from seiso.inference.streaming import StreamToken
+
+    runner = LocalInferenceRunner()
+    calls: list[tuple[str, tuple, dict]] = []
+
+    monkeypatch.setattr(runner_mod, "configure_torch_inference", lambda: None)
+    monkeypatch.setattr(runner_mod, "is_dflash_draft", lambda _path: True)
+    monkeypatch.setattr(
+        runner._pool,
+        "get_torch",
+        lambda *_args, **_kwargs: (object(), object()),
+    )
+    monkeypatch.setattr(
+        runner_mod.LocalInferenceRunner,
+        "_estimate_dflash_n_ctx",
+        staticmethod(lambda _payload, _draft_path: 6144),
+    )
+    monkeypatch.setattr(
+        runner_mod,
+        "get_dflash_draft",
+        lambda *args, **kwargs: calls.append(("dflash", args, kwargs)) or object(),
+    )
+    monkeypatch.setattr(
+        runner_mod,
+        "format_messages_for_prompt",
+        lambda _messages, _tokenizer: "prompt",
+    )
+    monkeypatch.setattr(
+        runner_mod,
+        "iter_speculative_tokens_dflash",
+        lambda **_kwargs: iter([StreamToken("x")]),
+    )
+
+    chunks = list(
+        runner._torch_speculative_stream(
+            {
+                "messages": [{"role": "user", "content": "hi"}],
+                "draft_model_path": "/tmp/dflash.gguf",
+                "max_tokens": 8,
+            },
+            "/tmp/target",
+            should_stop=lambda: False,
+        )
+    )
+
+    assert [chunk.text for chunk in chunks] == ["x"]
+    assert calls == [("dflash", ("/tmp/dflash.gguf",), {"n_ctx": 6144})]
 
 
 def test_torch_input_device_prefers_sharded_gpu():
