@@ -299,6 +299,34 @@ async def test_local_inference_chat_uses_direct_completion(monkeypatch):
     assert calls == ["complete"]
 
 
+@pytest.mark.asyncio
+async def test_dflash_switch_preserves_warmed_torch_target(monkeypatch):
+    from seiso.inference.runner import LocalInferenceRunner
+
+    runner = LocalInferenceRunner()
+    calls: list[tuple[str, str | None]] = []
+    monkeypatch.setattr(
+        runner._pool,
+        "status",
+        lambda: {
+            "active_model": "torch:/tmp/target",
+            "backend": "torch",
+            "path": "/tmp/target",
+            "draft_path": None,
+        },
+    )
+    monkeypatch.setattr("seiso.inference.runner.is_dflash_draft", lambda _path: True)
+    monkeypatch.setattr(
+        runner._pool,
+        "prepare_for_load",
+        lambda path, backend=None: calls.append((path, backend)),
+    )
+
+    await runner._ensure_model_switch("/tmp/target", draft_path="/tmp/dflash.gguf")
+
+    assert calls == [("/tmp/target", BACKEND_TORCH)]
+
+
 def test_warm_model_preloads_torch_speculative_pair(monkeypatch):
     from seiso.inference.runner import LocalInferenceRunner
 

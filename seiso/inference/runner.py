@@ -12,7 +12,6 @@ from typing import Any
 
 from seiso.env import env_int
 from seiso.inference.backends import (
-    BACKEND_LLAMACPP,
     BACKEND_MLX,
     BACKEND_TORCH,
     is_dflash_draft,
@@ -270,12 +269,6 @@ class LocalInferenceRunner:
             await loop.run_in_executor(
                 None, lambda: self._pool.prepare_for_load(model_path, BACKEND_TORCH)
             )
-            # For dflash draft also prep the fast llama draft
-            if is_dflash_draft(draft_path):
-                await loop.run_in_executor(
-                    None,
-                    lambda: self._pool.prepare_for_load(draft_path, BACKEND_LLAMACPP),
-                )
             return
 
         if active_draft:
