@@ -190,6 +190,52 @@ async def test_resolve_preload_context_uses_chat_sized_context(monkeypatch, tmp_
     assert ctx["backend"] == BACKEND_LLAMACPP
 
 
+@pytest.mark.asyncio
+async def test_resolve_explicit_model_path_checks_selected_backend(
+    monkeypatch, tmp_path
+):
+    from forge.services import inference_chat
+
+    model_path = tmp_path / "model.gguf"
+    model_path.write_bytes(b"gguf")
+    seen: dict[str, str | None] = {}
+
+    async def fake_resolve_model_path(*_args, **_kwargs):
+        return str(model_path)
+
+    def fake_assert_model_fits(path: str, *, mode: str, backend: str | None = None):
+        seen["path"] = path
+        seen["mode"] = mode
+        seen["backend"] = backend
+
+    monkeypatch.setattr(
+        inference_chat,
+        "resolve_model_path",
+        fake_resolve_model_path,
+    )
+    monkeypatch.setattr(
+        inference_chat,
+        "assert_model_fits_for_load",
+        fake_assert_model_fits,
+    )
+
+    updates = await inference_chat.resolve_explicit_model_path(
+        object(),
+        "u1",
+        SimpleNamespace(data_dir=tmp_path),
+        model_path=str(model_path),
+        inference_backend=BACKEND_LLAMACPP,
+    )
+
+    assert updates["model_path"] == str(model_path)
+    assert updates["inference_backend"] == BACKEND_LLAMACPP
+    assert seen == {
+        "path": str(model_path),
+        "mode": "chat",
+        "backend": BACKEND_LLAMACPP,
+    }
+
+
 def test_recommend_backend_detects_extensionless_hf_blob(tmp_path: Path):
     blob = tmp_path / "hf_cache" / "models--org--Model-GGUF" / "blobs" / "abc123"
     blob.parent.mkdir(parents=True)

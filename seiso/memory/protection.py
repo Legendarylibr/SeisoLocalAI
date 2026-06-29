@@ -378,9 +378,14 @@ def assess_path_memory_fit_for_load(
     return assess_path_memory_fit(path, mode=mode)
 
 
-def ensure_load_fits(path: str | Path, *, mode: str = "chat") -> dict[str, Any]:
+def ensure_load_fits(
+    path: str | Path,
+    *,
+    mode: str = "chat",
+    backend: str | None = None,
+) -> dict[str, Any]:
     """Block or warn before loading a model that exceeds headroom."""
-    fit = assess_path_memory_fit_for_load(path, mode=mode)
+    fit = assess_path_memory_fit_for_load(path, mode=mode, backend=backend)
     if fit.get("memory_load_blocked"):
         reason = (
             fit.get("memory_load_blocked_reason") or "Model exceeds available memory"

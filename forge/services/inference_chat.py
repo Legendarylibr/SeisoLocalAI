@@ -186,7 +186,7 @@ async def resolve_explicit_model_path(
     )
     if not path:
         raise HTTPException(400, "Invalid model_path")
-    assert_model_fits_for_load(path, mode="chat")
+    assert_model_fits_for_load(path, mode="chat", backend=inference_backend)
     return {
         "model_path": path,
         "inference_backend": inference_backend,

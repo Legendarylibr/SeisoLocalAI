@@ -140,6 +140,28 @@ def test_ensure_load_fits_blocks_oversized_gguf(tmp_path, monkeypatch):
         ensure_load_fits(gguf, mode="chat")
 
 
+def test_ensure_load_fits_forwards_backend_to_pool(tmp_path, monkeypatch):
+    gguf = tmp_path / "model.gguf"
+    gguf.write_bytes(b"\x00")
+    calls: list[tuple[str, str | None]] = []
+
+    monkeypatch.setattr(
+        "seiso.memory.protection.assess_path_memory_fit",
+        lambda _path, mode="chat": {"memory_load_blocked": False},
+    )
+    monkeypatch.setattr(
+        "seiso.inference.model_pool.ModelPool.prepare_for_load",
+        lambda self, target_path, backend=None: calls.append(
+            (target_path, backend)
+        )
+        or False,
+    )
+
+    ensure_load_fits(gguf, mode="chat", backend="llamacpp")
+
+    assert calls == [(str(gguf), "llamacpp")]
+
+
 def test_assess_path_memory_fit_for_small_file(tmp_path, monkeypatch):
     gguf = tmp_path / "tiny.gguf"
     gguf.write_bytes(b"\x00" * (32 * 1024**2))

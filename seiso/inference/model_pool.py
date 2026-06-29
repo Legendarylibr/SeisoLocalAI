@@ -793,7 +793,7 @@ class ModelPool:
                 _refresh_headroom_stats(force=True)
 
             logger.info("Loading model: %s (%s)", norm, backend.value)
-            ensure_load_fits(load_path, mode="chat")
+            ensure_load_fits(load_path, mode="chat", backend=backend.value)
             try:
                 handle = loader_fn(load_path)
             except Exception:
@@ -893,8 +893,8 @@ class ModelPool:
         def loader(_path: str) -> TorchSpeculativeBundle:
             from seiso.memory.protection import ensure_load_fits
 
-            ensure_load_fits(target_path, mode="chat")
-            ensure_load_fits(draft_path, mode="chat")
+            ensure_load_fits(target_path, mode="chat", backend=BackendKind.TORCH.value)
+            ensure_load_fits(draft_path, mode="chat", backend=BackendKind.TORCH.value)
             target_model, target_tokenizer = self._load_torch_pair(
                 target_path, load_in_4bit=load_in_4bit
             )
