@@ -93,6 +93,8 @@ def learning_rate_for_method(
         return 1e-5
     if method == TrainMethod.EMBEDDING:
         return 2e-5
+    if method == TrainMethod.SLIME:
+        return 5e-6
     return 2e-4
 
 

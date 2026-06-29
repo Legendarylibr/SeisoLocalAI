@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 _FINETUNE_TYPES = frozenset(
-    {"lora", "qlora", "full", "embedding", "rl_quant", "compress"}
+    {"lora", "qlora", "full", "embedding", "slime", "rl_quant", "compress"}
 )
 
 
@@ -194,6 +194,8 @@ def metadata_from_manifest(
         meta.finetune_type = "embedding"
         meta.pipeline_tag = "feature-extraction"
         meta.library_name = "sentence-transformers"
+    elif method == "slime":
+        meta.finetune_type = "slime"
 
     if not meta.base_model:
         meta.base_model = manifest.get("model_id")

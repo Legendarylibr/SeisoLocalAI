@@ -14,3 +14,75 @@ def test_train_config_from_dict():
     assert cfg.quant == QuantMode.INT4
     assert cfg.lora_r == 16
     assert cfg.use_fused_lora is True
+
+
+def test_train_config_accepts_slime_method():
+    cfg = TrainConfig.model_validate(
+        {
+            "model_id": "test/model",
+            "dataset": "./slime.jsonl",
+            "method": "slime",
+            "reward": "contains_answer",
+            "max_vram_gb": 12,
+            "logging_steps": 1,
+        }
+    )
+
+    assert cfg.method == TrainMethod.SLIME
+    assert cfg.training_methodology == "seiso_release_post_training"
+    assert cfg.auto_stop is True
+    assert cfg.write_verifier_data is True
+
+
+def test_train_config_projects_to_single_gpu_slime_config(tmp_path):
+    cfg = TrainConfig.model_validate(
+        {
+            "model_id": "test/model",
+            "dataset": tmp_path / "slime.jsonl",
+            "output_dir": tmp_path / "out",
+            "method": "slime",
+            "reward": "field",
+            "reward_field": "score",
+            "batch_size": 1,
+            "policy_micro_batch_size": 2,
+            "rollouts_per_prompt": 3,
+            "rollout_batch_size": 6,
+            "learning_rate": 5e-6,
+            "save_steps": 25,
+            "logging_steps": 1,
+            "extra": {
+                "max_steps": 5,
+                "lora_target_modules": ["q_proj"],
+                "lora_bias": "lora_only",
+            },
+        }
+    )
+
+    slime = cfg.to_single_gpu_slime_config()
+
+    assert slime.model_id == "test/model"
+    assert slime.dataset == tmp_path / "slime.jsonl"
+    assert slime.output_dir == tmp_path / "out"
+    assert slime.reward == "field"
+    assert slime.reward_field == "score"
+    assert slime.train_batch_size == 1
+    assert slime.policy_micro_batch_size == 2
+    assert slime.rollouts_per_prompt == 3
+    assert slime.rollout_batch_size == 6
+    assert slime.learning_rate == 5e-6
+    assert slime.save_every_steps == 25
+    assert slime.log_every_steps == 1
+    assert slime.max_steps == 5
+    assert slime.use_lora is True
+    assert slime.lora_target_modules == ["q_proj"]
+    assert slime.lora_bias == "lora_only"
+
+
+def test_example_training_slime_config_loads():
+    cfg = TrainConfig.from_yaml("configs/example_training_slime.yaml")
+    slime = cfg.to_single_gpu_slime_config()
+
+    assert cfg.method == TrainMethod.SLIME
+    assert slime.reward == "contains_answer"
+    assert slime.use_lora is True
+    assert slime.auto_stop is True

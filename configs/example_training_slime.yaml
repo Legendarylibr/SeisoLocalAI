@@ -1,6 +1,9 @@
 model_id: Qwen/Qwen2.5-0.5B-Instruct
 dataset: data/slime_sample.jsonl
-output_dir: outputs/slime-single-gpu
+output_dir: outputs/slime-train-method
+method: slime
+quant: 4bit
+training_methodology: seiso_release_post_training
 prompt_field: prompt
 answer_field: answer
 reward: contains_answer
@@ -10,7 +13,7 @@ max_new_tokens: 128
 rollouts_per_prompt: 4
 rollout_batch_size: 4
 policy_micro_batch_size: 2
-train_batch_size: 1
+batch_size: 1
 shuffle_buffer_size: 128
 gradient_accumulation_steps: 8
 learning_rate: 0.000005
@@ -21,13 +24,13 @@ clip_ratio: 0.2
 temperature: 0.9
 top_p: 0.95
 gradient_checkpointing: true
-use_lora: true
+slime_use_lora: true
 lora_r: 16
 lora_alpha: 32
 lora_dropout: 0.05
 use_8bit_optimizer: false
-save_every_steps: 100
-log_every_steps: 1
+save_steps: 100
+logging_steps: 1
 best_checkpoint_dir: checkpoint-best
 auto_stop: true
 auto_stop_metric: reward_mean

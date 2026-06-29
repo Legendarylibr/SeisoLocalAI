@@ -1,6 +1,6 @@
 # Training quickstart
 
-Fine-tune open models with QLoRA, LoRA, or full fine-tuning using Forge Training Studio or the CLI.
+Fine-tune open models with QLoRA, LoRA, full fine-tuning, or single-GPU slime-style post-training using Forge Training Studio or the CLI.
 
 **Prerequisites:** Seiso installed with `[train]` extra. See [install.md](../install.md).
 
@@ -62,6 +62,12 @@ export SEISO_NVIDIA_HOST_VENV_ACK=1
 seiso train --config configs/example_lora.yaml
 ```
 
+For release-style single-GPU post-training with rollout rewards, verifier data, best checkpoints, and auto-stop:
+
+```bash
+seiso train --config configs/example_training_slime.yaml
+```
+
 ---
 
 ## Example config
@@ -101,7 +107,7 @@ save_steps: 50
 | `model_id` | Hugging Face model ID or local safetensors path |
 | `dataset` | Hub ID, JSONL/JSON path, or directory |
 | `dataset_format` | `auto`, `chat`, `alpaca`, `sharegpt`, `preference`, or `text` |
-| `method` | `lora`, `full`, or `embedding` |
+| `method` | `lora`, `full`, `embedding`, or `slime` |
 | `quant` | `4bit`, `8bit`, `16bit`, or `none` |
 | `preprocess_dataset` | Normalize and clean rows before training |
 | `deduplicate_dataset` | Drop exact duplicate rows after normalization |
@@ -124,6 +130,54 @@ save_steps: 50
 | `multi_gpu` | Enable distributed training (or Forge checkbox) |
 
 Modern training defaults (bf16 compute on CUDA when supported, paged AdamW 8-bit for 4/8-bit quant, non-reentrant gradient checkpointing, cosine LR schedule) are applied automatically in `seiso/training/practices.py`.
+
+---
+
+## Slime Post-Training
+
+Use `method: slime` for single-GPU GRPO-style post-training when you want rollout generation, reward/verifier traces, checkpointing, and automatic stopping around one local causal LM. This path is optimized to keep CPU work bounded while the GPU does rollout and policy updates.
+
+Start from `configs/example_training_slime.yaml`:
+
+```yaml
+method: slime
+model_id: Qwen/Qwen2.5-0.5B-Instruct
+dataset: data/slime_sample.jsonl
+reward: contains_answer
+max_vram_gb: 16
+rollouts_per_prompt: 4
+rollout_batch_size: 4
+policy_micro_batch_size: 2
+batch_size: 1
+learning_rate: 0.000005
+slime_use_lora: true
+auto_stop: true
+auto_stop_metric: reward_mean
+write_verifier_data: true
+```
+
+Important fields:
+
+| Field | Description |
+|-------|-------------|
+| `max_vram_gb` | Upper VRAM cap used to fail before out-of-memory conditions |
+| `prompt_field`, `answer_field` | Dataset columns for prompts and target answers |
+| `reward` | Built-in reward name: `exact_match`, `contains_answer`, `numeric`, or `field` |
+| `reward_field` | Dataset reward column when `reward: field` |
+| `rollouts_per_prompt` | Number of sampled completions per prompt for grouped advantages |
+| `rollout_batch_size` | Generation batch size; keep at least `rollouts_per_prompt` |
+| `policy_micro_batch_size` | Policy update microbatch size to control VRAM |
+| `shuffle_buffer_size` | Bounded CPU shuffle buffer for long datasets |
+| `max_samples_per_epoch` | Optional per-epoch cap for smoke runs or data-efficient loops |
+| `slime_use_lora` | Train LoRA adapters instead of full model weights |
+| `auto_stop_*` | Plateau detection; defaults monitor `reward_mean` |
+| `best_checkpoint_dir` | Directory under `output_dir` for the best observed metric checkpoint |
+| `write_verifier_data` | Writes prompt/answer/completion/reward JSONL for verifier or reward-model data |
+| `verifier_max_text_chars` | Per-field text cap to keep verifier JSONL bounded |
+
+Slime checkpoints are exportable like other Seiso checkpoints. LoRA slime runs are treated as adapter checkpoints; non-LoRA slime runs are treated like full checkpoints.
+
+Current scope: slime training is single-GPU. For distributed supervised fine-tuning, keep using `method: lora` or `method: full` with `multi_gpu: true`.
 
 ---
 
@@ -189,6 +243,13 @@ Checkpoints land in `output_dir/checkpoint-<timestamp>/` with:
 - `dataset_analysis.json` — corpus analysis used for the run (when preprocessing ran)
 - `train_config_snapshot.json` — resolved `TrainConfig` at job start
 - Tokenizer files
+
+For `method: slime`, the final checkpoint lands in `output_dir` by default, or `output_dir/final_checkpoint_dir` when configured. Slime also writes:
+
+- `checkpoint-best/` — best metric checkpoint by `auto_stop_metric`
+- `slime_single_gpu_metrics.jsonl` — per-step loss, reward, best metric, and stop state
+- `slime_training_state.json` — final step, stop reason, and best checkpoint metadata
+- `slime_verifier_data.jsonl` — prompt/answer/completion/reward rows when `write_verifier_data: true`
 
 Export after training: [getting-started.md § Step 6](../getting-started.md#step-6--export-and-deploy) or **Export** page in Forge.
 

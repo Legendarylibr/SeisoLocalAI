@@ -46,6 +46,65 @@ class Rollout:
     advantage: float = 0.0
 
 
+@dataclass
+class _AutoStopDecision:
+    improved: bool = False
+    should_stop: bool = False
+    reason: str | None = None
+
+
+@dataclass
+class _AutoStopController:
+    enabled: bool
+    metric: str
+    patience: int
+    min_delta: float
+    warmup_steps: int
+    best_value: float | None = None
+    best_step: int | None = None
+    stale_steps: int = 0
+
+    @classmethod
+    def from_config(cls, config: SingleGpuSlimeConfig) -> _AutoStopController:
+        return cls(
+            enabled=config.auto_stop,
+            metric=config.auto_stop_metric,
+            patience=config.auto_stop_patience,
+            min_delta=config.auto_stop_min_delta,
+            warmup_steps=config.auto_stop_warmup_steps,
+        )
+
+    def update(self, step: int, stats: dict[str, float]) -> _AutoStopDecision:
+        value = stats.get(self.metric)
+        if value is None or not math.isfinite(value):
+            return _AutoStopDecision()
+
+        improved = self._is_better(value)
+        if improved:
+            self.best_value = value
+            self.best_step = step
+            self.stale_steps = 0
+            return _AutoStopDecision(improved=True)
+
+        if not self.enabled or step < self.warmup_steps:
+            return _AutoStopDecision()
+
+        self.stale_steps += 1
+        if self.stale_steps >= self.patience:
+            return _AutoStopDecision(
+                should_stop=True,
+                reason=f"auto_stop:{self.metric}_plateau",
+            )
+        return _AutoStopDecision()
+
+    def _is_better(self, value: float) -> bool:
+        if self.best_value is None:
+            return True
+        if _metric_is_minimized(self.metric):
+            return value < self.best_value - self.min_delta
+        return value > self.best_value + self.min_delta
+
+
 def train_single_gpu_slime(config: SingleGpuSlimeConfig) -> Path:
     """Run a compact slime-style rollout/reward/update loop on one GPU."""
 
@@ -105,6 +164,10 @@ def train_single_gpu_slime(config: SingleGpuSlimeConfig) -> Path:
 
     config.output_dir.mkdir(parents=True, exist_ok=True)
     metrics_path = config.output_dir / "slime_single_gpu_metrics.jsonl"
+    verifier_path = config.output_dir / config.verifier_data_file if config.write_verifier_data else None
+    final_output_dir = _final_output_dir(config)
+    best_checkpoint_dir = config.output_dir / config.best_checkpoint_dir
+    auto_stop = _AutoStopController.from_config(config)
     global_step = 0
     pending_accumulation_steps = 0
     saw_sample = False
@@ -122,6 +185,9 @@ def train_single_gpu_slime(config: SingleGpuSlimeConfig) -> Path:
                 config=config,
                 reward_fn=reward_fn,
                 torch=torch,
+                epoch=epoch,
+                global_step=global_step,
+                verifier_path=verifier_path,
             )
             if not rollouts:
                 continue
@@ -135,14 +201,43 @@ def train_single_gpu_slime(config: SingleGpuSlimeConfig) -> Path:
             )
             pending_accumulation_steps += 1
 
+            health_reason = _check_training_health(stats, config)
+            if health_reason:
+                optimizer.zero_grad(set_to_none=True)
+                if global_step % config.log_every_steps == 0:
+                    _append_metrics(
+                        metrics_path,
+                        {
+                            "step": global_step,
+                            "epoch": epoch,
+                            **stats,
+                            **_auto_stop_stats(auto_stop),
+                            "stop_reason": health_reason,
+                        },
+                    )
+                global_step += 1
+                _write_training_state(config, global_step, health_reason, auto_stop)
+                _save(model, tokenizer, final_output_dir)
+                return final_output_dir
+
             if pending_accumulation_steps >= config.gradient_accumulation_steps:
                 _optimizer_step(model, optimizer, torch, config)
                 pending_accumulation_steps = 0
 
+            decision = auto_stop.update(global_step, stats)
+            if decision.improved:
+                _save(model, tokenizer, best_checkpoint_dir)
+
             if global_step % config.log_every_steps == 0:
                 _append_metrics(
                     metrics_path,
-                    {"step": global_step, "epoch": epoch, **stats},
+                    {
+                        "step": global_step,
+                        "epoch": epoch,
+                        **stats,
+                        **_auto_stop_stats(auto_stop),
+                        "stop_reason": decision.reason,
+                    },
                 )
             if (
                 config.save_every_steps
@@ -152,18 +247,25 @@ def train_single_gpu_slime(config: SingleGpuSlimeConfig) -> Path:
                 _save(model, tokenizer, config.output_dir / f"checkpoint-{global_step}")
 
             global_step += 1
+            if decision.should_stop:
+                optimizer.zero_grad(set_to_none=True)
+                _write_training_state(config, global_step, decision.reason, auto_stop)
+                _save(model, tokenizer, final_output_dir)
+                return final_output_dir
             if config.max_steps is not None and global_step >= config.max_steps:
                 if pending_accumulation_steps:
                     _optimizer_step(model, optimizer, torch, config)
-                _save(model, tokenizer, config.output_dir)
-                return config.output_dir
+                _write_training_state(config, global_step, "max_steps", auto_stop)
+                _save(model, tokenizer, final_output_dir)
+                return final_output_dir
 
     if not saw_sample:
         raise ValueError(f"no samples found in {config.dataset}")
     if pending_accumulation_steps:
         _optimizer_step(model, optimizer, torch, config)
-    _save(model, tokenizer, config.output_dir)
-    return config.output_dir
+    _write_training_state(config, global_step, "complete", auto_stop)
+    _save(model, tokenizer, final_output_dir)
+    return final_output_dir
 
 
 def _collect_rollouts(
@@ -175,6 +277,9 @@ def _collect_rollouts(
     config: SingleGpuSlimeConfig,
     reward_fn,
     torch,
+    epoch: int,
+    global_step: int,
+    verifier_path: Path | None,
 ) -> list[Rollout]:
     model.eval()
     prompt_batch_size = max(1, config.rollout_batch_size // config.rollouts_per_prompt)
@@ -207,6 +312,7 @@ def _collect_rollouts(
             skip_special_tokens=True,
         )
         chunk_rollouts: list[Rollout] = []
+        verifier_records: list[dict[str, Any]] = []
         for idx in range(int(generated.shape[0])):
             sample_idx = idx // config.rollouts_per_prompt
             sample = sample_chunk[sample_idx]
@@ -215,6 +321,8 @@ def _collect_rollouts(
                 generated[idx, prompt_width:] != tokenizer.pad_token_id
             )
             completion = completions[idx]
+            reward_sample = _reward_sample(sample, config)
+            reward = reward_fn(completion, reward_sample)
             chunk_rollouts.append(
                 Rollout(
                     input_ids=generated[idx].detach().cpu(),
@@ -224,9 +332,26 @@ def _collect_rollouts(
                     response_mask=response_mask.detach().cpu(),
                     old_logprobs=None,
                     ref_logprobs=None,
-                    reward=reward_fn(completion, _reward_sample(sample, config)),
+                    reward=reward,
                 )
             )
+            if verifier_path is not None:
+                verifier_records.append(
+                    {
+                        "step": global_step,
+                        "epoch": epoch,
+                        "sample_index": sample_idx,
+                        "rollout_index": idx % config.rollouts_per_prompt,
+                        "reward": reward,
+                        "reward_name": config.reward,
+                        "prompt": _truncate_text(prompt_chunk[sample_idx], config.verifier_max_text_chars),
+                        "answer": _truncate_text(
+                            reward_sample.get("answer", ""),
+                            config.verifier_max_text_chars,
+                        ),
+                        "completion": _truncate_text(completion, config.verifier_max_text_chars),
+                    }
+                )
 
         padded = _pad_rollouts(
             chunk_rollouts, tokenizer.pad_token_id, config.device, torch
@@ -237,12 +362,14 @@ def _collect_rollouts(
                 _sequence_logprobs(ref_model, padded, torch).detach().cpu()
                 if ref_model is not None
                 else None
-            )
+        )
         for idx, rollout in enumerate(chunk_rollouts):
             rollout.old_logprobs = old_logprobs[idx]
             rollout.ref_logprobs = (
                 ref_logprobs[idx] if ref_logprobs is not None else None
             )
+        if verifier_records:
+            _append_jsonl_records(verifier_path, verifier_records)
         rollouts.extend(chunk_rollouts)
         del encoded, generated, padded
         _release_cuda(torch, config.device)
@@ -421,10 +548,26 @@ def _build_optimizer(model, config: SingleGpuSlimeConfig):
 
 def _apply_lora(model, config: SingleGpuSlimeConfig):
     try:
-        from peft import LoraConfig, TaskType, get_peft_model
+        from peft import (
+            LoraConfig,
+            TaskType,
+            get_peft_model,
+            prepare_model_for_kbit_training,
+        )
     except ImportError as exc:
-        raise RuntimeError("use_lora requires the optional peft dependency") from exc
+        raise RuntimeError(
+            "use_lora requires PEFT. Install training extras with "
+            "`pip install -e '.[train]'`."
+        ) from exc
 
+    if config.gradient_checkpointing:
+        try:
+            model = prepare_model_for_kbit_training(
+                model,
+                use_gradient_checkpointing=True,
+            )
+        except TypeError:
+            model = prepare_model_for_kbit_training(model)
     target_modules = _resolve_lora_target_modules(model, config.lora_target_modules)
     lora_config = LoraConfig(
         task_type=TaskType.CAUSAL_LM,
@@ -434,7 +577,10 @@ def _apply_lora(model, config: SingleGpuSlimeConfig):
         bias=config.lora_bias,
         target_modules=target_modules,
     )
-    return get_peft_model(model, lora_config)
+    model = get_peft_model(model, lora_config)
+    if config.gradient_checkpointing and hasattr(model, "enable_input_require_grads"):
+        model.enable_input_require_grads()
+    return model
 
 
 def _resolve_lora_target_modules(
@@ -631,6 +777,72 @@ def _release_cuda(torch, device: str) -> None:
 def _append_metrics(path: Path, record: dict[str, Any]) -> None:
     with path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(record, sort_keys=True) + "\n")
+
+
+def _append_jsonl_records(path: Path, records: list[dict[str, Any]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        for record in records:
+            handle.write(json.dumps(record, sort_keys=True) + "\n")
+
+
+def _truncate_text(text: Any, max_chars: int) -> str:
+    value = str(text)
+    if max_chars <= 0:
+        return ""
+    if len(value) <= max_chars:
+        return value
+    return value[:max_chars]
+
+
+def _metric_is_minimized(metric: str) -> bool:
+    return metric == "kl" or metric.endswith("loss") or metric.endswith("_loss")
+
+
+def _check_training_health(
+    stats: dict[str, float],
+    config: SingleGpuSlimeConfig,
+) -> str | None:
+    if not config.stop_on_nonfinite:
+        return None
+    for key, value in stats.items():
+        if isinstance(value, int | float) and not math.isfinite(float(value)):
+            return f"nonfinite:{key}"
+    return None
+
+
+def _auto_stop_stats(controller: _AutoStopController) -> dict[str, float | int | str | None]:
+    return {
+        "best_metric": controller.best_value,
+        "best_step": controller.best_step,
+        "auto_stop_metric": controller.metric,
+        "stale_steps": controller.stale_steps,
+    }
+
+
+def _final_output_dir(config: SingleGpuSlimeConfig) -> Path:
+    if config.final_checkpoint_dir:
+        return config.output_dir / config.final_checkpoint_dir
+    return config.output_dir
+
+
+def _write_training_state(
+    config: SingleGpuSlimeConfig,
+    global_step: int,
+    stop_reason: str | None,
+    controller: _AutoStopController,
+) -> None:
+    state = {
+        "global_step": global_step,
+        "stop_reason": stop_reason,
+        "best_checkpoint_dir": str(config.output_dir / config.best_checkpoint_dir),
+        "final_checkpoint_dir": str(_final_output_dir(config)),
+        **_auto_stop_stats(controller),
+    }
+    (config.output_dir / "slime_training_state.json").write_text(
+        json.dumps(state, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
 
 
 def _save(model, tokenizer, output_dir: Path) -> None:

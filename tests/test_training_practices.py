@@ -19,6 +19,7 @@ from seiso.training.practices import (
 def test_learning_rate_scales_with_method():
     assert learning_rate_for_method(TrainMethod.LORA) == 2e-4
     assert learning_rate_for_method(TrainMethod.FULL) == 1e-5
+    assert learning_rate_for_method(TrainMethod.SLIME) == 5e-6
 
 
 def test_warmup_ratio_scales_with_corpus():

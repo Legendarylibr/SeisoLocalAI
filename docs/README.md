@@ -22,6 +22,7 @@ Start with **[getting-started.md](getting-started.md)** — a step-by-step walkt
 | Diagnose install / HF / GPU | `seiso doctor` or `./scripts/doctor.sh` → [cli.md](cli.md) |
 | Chat with a local model | [getting-started.md § Step 4](getting-started.md#step-4--chat-with-a-local-model) |
 | Fine-tune with QLoRA / LoRA | [training/quickstart.md](training/quickstart.md) |
+| Single-GPU slime post-training | [training/quickstart.md § Slime Post-Training](training/quickstart.md#slime-post-training) |
 | RL quant from CLI | [cli.md § seiso rl-quant](cli.md#seiso-rl-quant) · [compression.md](compression.md) |
 | Use Cursor / Continue with local models | [getting-started.md § Connect external tools](getting-started.md#connect-external-tools-cursor-continue-etc) |
 | Export to GGUF or Hugging Face Hub | [getting-started.md § Step 6](getting-started.md#step-6--export-and-deploy) · [cli.md](cli.md) |
@@ -153,6 +154,9 @@ seiso forge    # → http://127.0.0.1:8765
 
 # Train (CLI → ./outputs/lora-run/ per example_lora.yaml)
 seiso train --config configs/example_lora.yaml
+
+# Slime post-training (CLI → ./outputs/slime-train-method/)
+seiso train --config configs/example_training_slime.yaml
 
 # RL quant (CLI → $SEISO_DATA_DIR/rl_quant/cli/<job_id>/)
 seiso rl-quant run --preset minimal --kernel-rl
