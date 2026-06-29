@@ -29,7 +29,7 @@ class SingleGpuSlimeConfig:
     weight_decay: float = 0.0
     epochs: int = 1
     max_steps: int | None = None
-    kl_coef: float = 0.02
+    kl_coef: float = 0.0
     clip_ratio: float = 0.2
     temperature: float = 0.9
     top_p: float = 0.95
@@ -67,3 +67,5 @@ class SingleGpuSlimeConfig:
             raise ValueError("kl_coef must be non-negative")
         if self.clip_ratio <= 0:
             raise ValueError("clip_ratio must be positive")
+        if self.max_vram_gb is not None and self.max_vram_gb <= 0:
+            raise ValueError("max_vram_gb must be positive")

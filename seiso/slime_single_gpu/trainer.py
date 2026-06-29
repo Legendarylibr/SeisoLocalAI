@@ -40,6 +40,7 @@ def train_single_gpu_slime(config: SingleGpuSlimeConfig) -> Path:
     import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
+    _configure_vram_cap(torch, config.max_vram_gb, config.device)
     dtype = _resolve_dtype(torch, config.dtype)
     tokenizer = AutoTokenizer.from_pretrained(
         config.model_id,
@@ -84,6 +85,7 @@ def train_single_gpu_slime(config: SingleGpuSlimeConfig) -> Path:
     config.output_dir.mkdir(parents=True, exist_ok=True)
     metrics_path = config.output_dir / "slime_single_gpu_metrics.jsonl"
     global_step = 0
+    pending_accumulation_steps = 0
     optimizer.zero_grad(set_to_none=True)
 
     for epoch in range(config.epochs):
@@ -102,12 +104,11 @@ def train_single_gpu_slime(config: SingleGpuSlimeConfig) -> Path:
                 continue
             loss, stats = _policy_step(model, rollouts, tokenizer.pad_token_id, config, torch)
             (loss / config.gradient_accumulation_steps).backward()
+            pending_accumulation_steps += 1
 
-            if (global_step + 1) % config.gradient_accumulation_steps == 0:
-                torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-                optimizer.step()
-                optimizer.zero_grad(set_to_none=True)
-                _assert_vram_fit(torch, config.max_vram_gb, config.device)
+            if pending_accumulation_steps >= config.gradient_accumulation_steps:
+                _optimizer_step(model, optimizer, torch, config)
+                pending_accumulation_steps = 0
 
             if global_step % config.log_every_steps == 0:
                 _append_metrics(
@@ -119,9 +120,13 @@ def train_single_gpu_slime(config: SingleGpuSlimeConfig) -> Path:
 
             global_step += 1
             if config.max_steps is not None and global_step >= config.max_steps:
+                if pending_accumulation_steps:
+                    _optimizer_step(model, optimizer, torch, config)
                 _save(model, tokenizer, config.output_dir)
                 return config.output_dir
 
+    if pending_accumulation_steps:
+        _optimizer_step(model, optimizer, torch, config)
     _save(model, tokenizer, config.output_dir)
     return config.output_dir
 
@@ -295,6 +300,13 @@ def _build_optimizer(model, config: SingleGpuSlimeConfig):
     )
 
 
+def _optimizer_step(model, optimizer, torch, config: SingleGpuSlimeConfig) -> None:
+    torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+    optimizer.step()
+    optimizer.zero_grad(set_to_none=True)
+    _assert_vram_fit(torch, config.max_vram_gb, config.device)
+
+
 def _load_samples(config: SingleGpuSlimeConfig) -> Iterable[dict[str, Any]]:
     for sample in iter_jsonl(config.dataset):
         if config.prompt_field not in sample:
@@ -342,16 +354,28 @@ def _require_single_gpu(config: SingleGpuSlimeConfig) -> None:
         torch.cuda.set_device(0)
 
 
+def _configure_vram_cap(torch, max_vram_gb: float | None, device: str) -> None:
+    if max_vram_gb is None or device != "cuda":
+        return
+    total_gb = torch.cuda.get_device_properties(0).total_memory / 1024**3
+    if max_vram_gb > total_gb:
+        raise RuntimeError(
+            f"VRAM cap {max_vram_gb:.2f} GiB exceeds device capacity {total_gb:.2f} GiB"
+        )
+    fraction = max_vram_gb / total_gb
+    torch.cuda.set_per_process_memory_fraction(fraction, device=0)
+
+
 def _assert_vram_fit(torch, max_vram_gb: float | None, device: str) -> None:
     if max_vram_gb is None or device != "cuda":
         return
     torch.cuda.synchronize()
-    used_gb = torch.cuda.max_memory_allocated() / 1024**3
+    used_gb = torch.cuda.memory_allocated() / 1024**3
     if used_gb > max_vram_gb:
         gc.collect()
         torch.cuda.empty_cache()
         raise RuntimeError(
-            f"VRAM cap exceeded: peak allocated {used_gb:.2f} GiB > {max_vram_gb:.2f} GiB"
+            f"VRAM cap exceeded: allocated {used_gb:.2f} GiB > {max_vram_gb:.2f} GiB"
         )
 
 

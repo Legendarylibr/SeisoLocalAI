@@ -11,7 +11,7 @@ from seiso.slime_single_gpu.rewards import (
     numeric_reward,
     resolve_reward,
 )
-from seiso.slime_single_gpu.trainer import Rollout, _assign_grouped_advantages
+from seiso.slime_single_gpu.trainer import Rollout, _assign_grouped_advantages, _load_samples
 
 
 def test_single_gpu_slime_config_from_yaml(tmp_path: Path):
@@ -38,6 +38,26 @@ def test_single_gpu_slime_config_from_yaml(tmp_path: Path):
     assert cfg.max_vram_gb == 12
 
 
+def test_single_gpu_slime_defaults_do_not_load_reference_model(tmp_path: Path):
+    cfg = SingleGpuSlimeConfig(
+        model_id="test/model",
+        dataset=tmp_path / "data.jsonl",
+        output_dir=tmp_path / "out",
+    )
+
+    assert cfg.kl_coef == 0.0
+
+
+def test_example_single_gpu_slime_config_loads_samples():
+    cfg = SingleGpuSlimeConfig.from_yaml(Path("configs/example_slime_single_gpu.yaml"))
+    samples = list(_load_samples(cfg))
+
+    assert cfg.dataset == Path("data/slime_sample.jsonl")
+    assert cfg.kl_coef == 0.0
+    assert samples
+    assert {"prompt", "answer"} <= set(samples[0])
+
+
 def test_single_gpu_slime_config_requires_grouped_rollouts(tmp_path: Path):
     cfg = SingleGpuSlimeConfig(
         model_id="test/model",
@@ -47,6 +67,18 @@ def test_single_gpu_slime_config_requires_grouped_rollouts(tmp_path: Path):
     )
 
     with pytest.raises(ValueError, match="rollouts_per_prompt"):
+        cfg.validate()
+
+
+def test_single_gpu_slime_config_rejects_invalid_vram_cap(tmp_path: Path):
+    cfg = SingleGpuSlimeConfig(
+        model_id="test/model",
+        dataset=tmp_path / "data.jsonl",
+        output_dir=tmp_path / "out",
+        max_vram_gb=0,
+    )
+
+    with pytest.raises(ValueError, match="max_vram_gb"):
         cfg.validate()
 
 
