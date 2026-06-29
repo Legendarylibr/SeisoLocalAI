@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import random
+import sys
+import types
 from pathlib import Path
 
 import pytest
@@ -14,6 +16,7 @@ from seiso.slime_single_gpu.rewards import (
 )
 from seiso.slime_single_gpu.trainer import (
     Rollout,
+    _apply_lora,
     _assign_grouped_advantages,
     _chunked,
     _empty_stats,
@@ -279,6 +282,73 @@ def test_lora_target_inference_honors_configured_modules():
         "q_proj",
         "v_proj",
     ]
+
+
+def test_apply_lora_reports_training_extra_when_peft_is_missing(monkeypatch, tmp_path: Path):
+    real_import = __import__
+
+    def fake_import(name, *args, **kwargs):
+        if name == "peft":
+            raise ImportError("missing peft")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr("builtins.__import__", fake_import)
+    cfg = SingleGpuSlimeConfig(
+        model_id="test/model",
+        dataset=tmp_path / "data.jsonl",
+        output_dir=tmp_path / "out",
+        use_lora=True,
+    )
+
+    with pytest.raises(RuntimeError, match=r"\.\[train\]"):
+        _apply_lora(_DummyModel([]), cfg)
+
+
+def test_apply_lora_prepares_model_before_wrapping(monkeypatch, tmp_path: Path):
+    calls: list[str] = []
+
+    class TaskType:
+        CAUSAL_LM = "CAUSAL_LM"
+
+    class LoraConfig:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    class WrappedModel(_DummyModel):
+        def enable_input_require_grads(self):
+            calls.append("input_grads")
+
+    def prepare_model_for_kbit_training(model, *, use_gradient_checkpointing):
+        assert use_gradient_checkpointing is True
+        calls.append("prepare")
+        return model
+
+    def get_peft_model(model, lora_config):
+        calls.append("wrap")
+        assert lora_config.kwargs["target_modules"] == ["q_proj"]
+        return WrappedModel(model._modules)
+
+    peft = types.ModuleType("peft")
+    peft.LoraConfig = LoraConfig
+    peft.TaskType = TaskType
+    peft.get_peft_model = get_peft_model
+    peft.prepare_model_for_kbit_training = prepare_model_for_kbit_training
+    monkeypatch.setitem(sys.modules, "peft", peft)
+
+    cfg = SingleGpuSlimeConfig(
+        model_id="test/model",
+        dataset=tmp_path / "data.jsonl",
+        output_dir=tmp_path / "out",
+        use_lora=True,
+        lora_target_modules=["q_proj"],
+        gradient_checkpointing=True,
+    )
+    model = _DummyModel([("model.layers.0.self_attn.q_proj", _Other())])
+
+    wrapped = _apply_lora(model, cfg)
+
+    assert isinstance(wrapped, WrappedModel)
+    assert calls == ["prepare", "wrap", "input_grads"]
 
 
 def test_chunked_splits_work_for_single_gpu_microbatches():

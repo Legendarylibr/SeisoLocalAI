@@ -75,12 +75,10 @@ def train_single_gpu_slime(config: SingleGpuSlimeConfig) -> Path:
         low_cpu_mem_usage=True,
     )
     model.config.use_cache = False
-    if config.gradient_checkpointing and hasattr(model, "gradient_checkpointing_enable"):
-        model.gradient_checkpointing_enable()
     if config.use_lora:
         model = _apply_lora(model, config)
-        if config.gradient_checkpointing and hasattr(model, "enable_input_require_grads"):
-            model.enable_input_require_grads()
+    elif config.gradient_checkpointing and hasattr(model, "gradient_checkpointing_enable"):
+        model.gradient_checkpointing_enable()
 
     ref_model = None
     if config.kl_coef > 0:
@@ -388,10 +386,26 @@ def _build_optimizer(model, config: SingleGpuSlimeConfig):
 
 def _apply_lora(model, config: SingleGpuSlimeConfig):
     try:
-        from peft import LoraConfig, TaskType, get_peft_model
+        from peft import (
+            LoraConfig,
+            TaskType,
+            get_peft_model,
+            prepare_model_for_kbit_training,
+        )
     except ImportError as exc:
-        raise RuntimeError("use_lora requires the optional peft dependency") from exc
+        raise RuntimeError(
+            "use_lora requires PEFT. Install training extras with "
+            "`pip install -e '.[train]'`."
+        ) from exc
 
+    if config.gradient_checkpointing:
+        try:
+            model = prepare_model_for_kbit_training(
+                model,
+                use_gradient_checkpointing=True,
+            )
+        except TypeError:
+            model = prepare_model_for_kbit_training(model)
     target_modules = _resolve_lora_target_modules(model, config.lora_target_modules)
     lora_config = LoraConfig(
         task_type=TaskType.CAUSAL_LM,
@@ -401,7 +415,10 @@ def _apply_lora(model, config: SingleGpuSlimeConfig):
         bias=config.lora_bias,
         target_modules=target_modules,
     )
-    return get_peft_model(model, lora_config)
+    model = get_peft_model(model, lora_config)
+    if config.gradient_checkpointing and hasattr(model, "enable_input_require_grads"):
+        model.enable_input_require_grads()
+    return model
 
 
 def _resolve_lora_target_modules(
