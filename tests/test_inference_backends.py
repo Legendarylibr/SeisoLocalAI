@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+from queue import Empty
+from types import SimpleNamespace
 
 import pytest
 
@@ -333,6 +335,66 @@ def test_torch_input_device_skips_offload_entries_and_falls_back_to_model_device
         device = torch.device("cpu")
 
     assert LocalInferenceRunner._torch_input_device(FakeModel()) == torch.device("cpu")
+
+
+def test_torch_stream_propagates_generation_thread_errors(monkeypatch):
+    import sys
+
+    import torch
+
+    from seiso.inference.runner import LocalInferenceRunner
+
+    class FakeStreamer:
+        def __init__(self, *_args, **_kwargs) -> None:
+            self.stopped = False
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            if self.stopped:
+                raise StopIteration
+            raise Empty
+
+        def on_finalized_text(self, _text: str, *, stream_end: bool = False) -> None:
+            self.stopped = stream_end
+
+    class FakeTokenizer:
+        pad_token_id = 0
+
+        def __call__(self, _prompt: str, return_tensors: str = "pt"):
+            return {"input_ids": torch.tensor([[1, 2, 3]])}
+
+    class FakeModel:
+        device = torch.device("cpu")
+
+        def generate(self, **_kwargs):
+            raise RuntimeError("generate failed")
+
+    runner = LocalInferenceRunner()
+    monkeypatch.setattr(
+        runner._pool,
+        "get_torch",
+        lambda *_args, **_kwargs: (FakeModel(), FakeTokenizer()),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "transformers",
+        SimpleNamespace(TextIteratorStreamer=FakeStreamer),
+    )
+
+    with pytest.raises(RuntimeError, match="generate failed"):
+        list(
+            runner._torch_stream(
+                {
+                    "messages": [{"role": "user", "content": "hi"}],
+                    "max_tokens": 4,
+                    "temperature": 0,
+                },
+                "/tmp/model",
+                should_stop=lambda: False,
+            )
+        )
 
 
 @pytest.mark.asyncio

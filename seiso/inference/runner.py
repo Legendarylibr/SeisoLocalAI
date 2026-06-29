@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import threading
 from collections.abc import AsyncIterator, Callable, Iterator
+from queue import Empty
 from typing import Any
 
 from seiso.env import env_int
@@ -51,6 +53,11 @@ _runner_lock = threading.Lock()
 def _stream_batch_chars() -> int:
     """Chars to batch after the first token; lower = snappier UI, higher = fewer SSE events."""
     return max(1, env_int("SEISO_STREAM_BATCH_CHARS", 24))
+
+
+def _torch_stream_timeout_s() -> int:
+    """Poll interval for detecting failed Torch generation threads."""
+    return max(1, env_int("SEISO_TORCH_STREAM_TIMEOUT_S", 2))
 
 
 class _StreamError:
@@ -562,7 +569,10 @@ class LocalInferenceRunner:
         }
 
         streamer = TextIteratorStreamer(
-            tokenizer, skip_prompt=True, skip_special_tokens=True
+            tokenizer,
+            skip_prompt=True,
+            skip_special_tokens=True,
+            timeout=_torch_stream_timeout_s(),
         )
         gen_kwargs = torch_generate_kwargs(
             payload,
@@ -570,6 +580,7 @@ class LocalInferenceRunner:
             streamer,
             pad_token_id=tokenizer.pad_token_id,
         )
+        generation_errors: list[BaseException] = []
 
         def _generate() -> None:
             with torch.inference_mode():
@@ -577,7 +588,10 @@ class LocalInferenceRunner:
                     generate_with_cache_fallback(model, gen_kwargs)
                 except Exception as exc:
                     if not is_oom_error(exc):
-                        raise
+                        generation_errors.append(exc)
+                        with contextlib.suppress(Exception):
+                            streamer.on_finalized_text("", stream_end=True)
+                        return
                     release_cached_memory(sync=True)
                     reduced = dict(gen_kwargs)
                     reduced["max_new_tokens"] = max(
@@ -587,16 +601,35 @@ class LocalInferenceRunner:
                         "Torch inference OOM — retrying with max_new_tokens=%s",
                         reduced["max_new_tokens"],
                     )
-                    generate_with_cache_fallback(model, reduced)
+                    try:
+                        generate_with_cache_fallback(model, reduced)
+                    except Exception as retry_exc:
+                        generation_errors.append(retry_exc)
+                        with contextlib.suppress(Exception):
+                            streamer.on_finalized_text("", stream_end=True)
 
         thread = threading.Thread(target=_generate, daemon=True)
         thread.start()
-        for text in streamer:
+        while True:
             if should_stop():
                 break
+            if generation_errors:
+                raise generation_errors[0]
+            try:
+                text = next(streamer)
+            except StopIteration:
+                break
+            except Empty:
+                if not thread.is_alive():
+                    if generation_errors:
+                        raise generation_errors[0] from None
+                    break
+                continue
             if text:
                 yield StreamToken(text)
         thread.join(timeout=0)
+        if generation_errors and not should_stop():
+            raise generation_errors[0]
 
     def _llama_complete(
         self,
