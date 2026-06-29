@@ -97,8 +97,8 @@ class LocalInferenceRunner:
             self._pool.get_llama(resolved_path, n_ctx=n_ctx)
 
     async def chat(self, payload: dict[str, Any]) -> str:
+        loop = asyncio.get_running_loop()
         if payload.get("tools_schemas"):
-            loop = asyncio.get_running_loop()
             payload = sanitize_inference_payload(payload)
             model_path = payload.get("model_path") or payload.get("model_id")
             if not model_path:
@@ -115,10 +115,20 @@ class LocalInferenceRunner:
                 lambda: self._llama_complete(payload, resolved_path, generation_id),
             )
 
-        chunks: list[str] = []
-        async for token in self.stream(payload):
-            chunks.append(token)
-        return "".join(chunks)
+        payload = sanitize_inference_payload(payload)
+        model_path = payload.get("model_path") or payload.get("model_id")
+        if not model_path:
+            raise ValueError("model_path or model_id required")
+
+        route, resolved_path = self._resolve_route(payload, model_path)
+        generation_id = self._pool.bump_generation()
+        await self._ensure_model_switch(
+            resolved_path, draft_path=payload.get("draft_model_path")
+        )
+        return await loop.run_in_executor(
+            None,
+            lambda: self._complete(payload, resolved_path, route, generation_id),
+        )
 
     async def stream(self, payload: dict[str, Any]) -> AsyncIterator[str]:
         async for update in self.stream_updates(payload):
@@ -296,6 +306,32 @@ class LocalInferenceRunner:
         else:
             yield from self._llama_stream(payload, model_path, should_stop)
 
+    def _complete(
+        self,
+        payload: dict[str, Any],
+        model_path: str,
+        route: str,
+        generation_id: int,
+    ) -> str:
+        if route == "speculative":
+            chunks: list[str] = []
+
+            def should_stop() -> bool:
+                return not self._pool.is_generation_active(generation_id)
+
+            for token in self._torch_speculative_stream(
+                payload, model_path, should_stop
+            ):
+                if should_stop():
+                    break
+                chunks.append(token.text)
+            return "".join(chunks)
+        if route == "mlx":
+            return self._mlx_complete(payload, model_path, generation_id)
+        if route == "torch":
+            return self._torch_complete(payload, model_path, generation_id)
+        return self._llama_complete(payload, model_path, generation_id)
+
     def _torch_speculative_stream(
         self,
         payload: dict[str, Any],
@@ -405,6 +441,87 @@ class LocalInferenceRunner:
         if not should_stop():
             yield StreamToken(generate(model, tokenizer, **gen_kwargs))
 
+    def _mlx_complete(
+        self,
+        payload: dict[str, Any],
+        model_path: str,
+        generation_id: int,
+    ) -> str:
+        try:
+            from mlx_lm import generate
+        except ImportError as exc:
+            raise RuntimeError("MLX not available — install mlx-lm on macOS") from exc
+
+        model, tokenizer = self._pool.get_mlx(model_path)
+        prompt = format_messages_for_prompt(payload.get("messages", []), tokenizer)
+        text = generate(model, tokenizer, prompt=prompt, **mlx_stream_kwargs(payload))
+        if not self._pool.is_generation_active(generation_id):
+            return ""
+        return str(text)
+
+    @staticmethod
+    def _torch_input_device(model: Any) -> Any:
+        import torch
+
+        device_map = getattr(model, "hf_device_map", None)
+        if isinstance(device_map, dict):
+            for raw_device in device_map.values():
+                text = str(raw_device)
+                if text and text not in {"cpu", "disk", "meta"}:
+                    return torch.device(text)
+        device = getattr(model, "device", None)
+        if device is not None:
+            return device
+        return next(model.parameters()).device
+
+    def _torch_complete(
+        self,
+        payload: dict[str, Any],
+        model_path: str,
+        generation_id: int,
+    ) -> str:
+        import torch
+
+        configure_torch_inference()
+        model, tokenizer = self._pool.get_torch(model_path, load_in_4bit=True)
+        prompt = format_messages_for_prompt(payload.get("messages", []), tokenizer)
+        inputs = tokenizer(prompt, return_tensors="pt")
+        device = self._torch_input_device(model)
+        inputs = {
+            k: v.to(device, non_blocking=getattr(device, "type", "") == "cuda")
+            for k, v in inputs.items()
+        }
+        input_len = int(inputs["input_ids"].shape[-1])
+        gen_kwargs = torch_generate_kwargs(
+            payload,
+            inputs,
+            streamer=None,
+            pad_token_id=tokenizer.pad_token_id,
+        )
+        gen_kwargs.pop("streamer", None)
+
+        with torch.inference_mode():
+            try:
+                generated = generate_with_cache_fallback(model, gen_kwargs)
+            except Exception as exc:
+                if not is_oom_error(exc):
+                    raise
+                release_cached_memory(sync=True)
+                reduced = dict(gen_kwargs)
+                reduced["max_new_tokens"] = max(
+                    32, int(reduced.get("max_new_tokens", 512)) // 2
+                )
+                logger.warning(
+                    "Torch inference OOM — retrying with max_new_tokens=%s",
+                    reduced["max_new_tokens"],
+                )
+                generated = generate_with_cache_fallback(model, reduced)
+
+        if not self._pool.is_generation_active(generation_id):
+            return ""
+        output_ids = generated[0][input_len:]
+        return str(tokenizer.decode(output_ids, skip_special_tokens=True))
+
     def _torch_stream(
         self,
         payload: dict[str, Any],
@@ -419,7 +536,7 @@ class LocalInferenceRunner:
         messages = payload.get("messages", [])
         prompt = format_messages_for_prompt(messages, tokenizer)
         inputs = tokenizer(prompt, return_tensors="pt")
-        device = model.device
+        device = self._torch_input_device(model)
         inputs = {
             k: v.to(device, non_blocking=getattr(device, "type", "") == "cuda")
             for k, v in inputs.items()

@@ -36,7 +36,7 @@ class LoadOptions:
     max_seq_length: int = 4096
     dtype: str | None = None
     trust_remote_code: bool = False
-    device_map: str = "auto"
+    device_map: str | dict[str, str] | None = "auto"
     use_flash_attention: bool = True
     revision: str | None = None
 
