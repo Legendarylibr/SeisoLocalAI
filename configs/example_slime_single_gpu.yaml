@@ -26,3 +26,15 @@ lora_r: 16
 lora_alpha: 32
 lora_dropout: 0.05
 use_8bit_optimizer: false
+save_every_steps: 100
+log_every_steps: 1
+best_checkpoint_dir: checkpoint-best
+auto_stop: true
+auto_stop_metric: reward_mean
+auto_stop_patience: 20
+auto_stop_min_delta: 0.0001
+auto_stop_warmup_steps: 10
+stop_on_nonfinite: true
+write_verifier_data: true
+verifier_data_file: slime_verifier_data.jsonl
+verifier_max_text_chars: 2048

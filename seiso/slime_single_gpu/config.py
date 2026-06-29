@@ -52,6 +52,17 @@ class SingleGpuSlimeConfig:
     trust_remote_code: bool = False
     save_every_steps: int = 100
     log_every_steps: int = 1
+    best_checkpoint_dir: str = "checkpoint-best"
+    final_checkpoint_dir: str = ""
+    auto_stop: bool = True
+    auto_stop_metric: str = "reward_mean"
+    auto_stop_patience: int = 20
+    auto_stop_min_delta: float = 1e-4
+    auto_stop_warmup_steps: int = 10
+    stop_on_nonfinite: bool = True
+    write_verifier_data: bool = True
+    verifier_data_file: str = "slime_verifier_data.jsonl"
+    verifier_max_text_chars: int = 2048
 
     @classmethod
     def from_yaml(cls, path: Path) -> SingleGpuSlimeConfig:
@@ -92,6 +103,10 @@ class SingleGpuSlimeConfig:
             raise ValueError("clip_ratio must be positive")
         if self.max_vram_gb is not None and self.max_vram_gb <= 0:
             raise ValueError("max_vram_gb must be positive")
+        if self.save_every_steps < 0:
+            raise ValueError("save_every_steps must be non-negative")
+        if self.log_every_steps < 1:
+            raise ValueError("log_every_steps must be positive")
         if self.use_lora:
             if self.lora_r < 1:
                 raise ValueError("lora_r must be positive")
@@ -101,5 +116,17 @@ class SingleGpuSlimeConfig:
                 raise ValueError("lora_dropout must be in [0, 1)")
             if self.lora_bias not in {"none", "all", "lora_only"}:
                 raise ValueError("lora_bias must be one of: none, all, lora_only")
-            if self.lora_target_modules is not None and not self.lora_target_modules:
-                raise ValueError("lora_target_modules must not be empty")
+        if self.lora_target_modules is not None and not self.lora_target_modules:
+            raise ValueError("lora_target_modules must not be empty")
+        if self.auto_stop_patience < 1:
+            raise ValueError("auto_stop_patience must be positive")
+        if self.auto_stop_min_delta < 0:
+            raise ValueError("auto_stop_min_delta must be non-negative")
+        if self.auto_stop_warmup_steps < 0:
+            raise ValueError("auto_stop_warmup_steps must be non-negative")
+        if self.verifier_max_text_chars < 0:
+            raise ValueError("verifier_max_text_chars must be non-negative")
+        if not self.best_checkpoint_dir:
+            raise ValueError("best_checkpoint_dir must not be empty")
+        if self.write_verifier_data and not self.verifier_data_file:
+            raise ValueError("verifier_data_file must not be empty")
