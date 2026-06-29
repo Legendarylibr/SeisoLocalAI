@@ -75,6 +75,23 @@ def _device_map_accepts_max_memory(device_map: str | dict[str, str] | None) -> b
     return isinstance(device_map, str) and device_map in _AUTO_DEVICE_MAPS
 
 
+def _looks_like_quantization_load_error(exc: BaseException) -> bool:
+    text = str(exc).lower()
+    return any(
+        marker in text
+        for marker in (
+            "bitsandbytes",
+            "bnb",
+            "quantization_config",
+            "load_in_4bit",
+            "load_in_8bit",
+            "4-bit",
+            "8-bit",
+            "quantized",
+            "cuda is required",
+        )
+    )
+
 
 def load_torch(
     options: LoadOptions,
@@ -188,9 +205,11 @@ def load_torch(
             use_4bit = False
             use_8bit = False
 
+    quantization_requested = False
     if use_4bit:
         from transformers import BitsAndBytesConfig
 
+        quantization_requested = True
         model_kwargs["quantization_config"] = BitsAndBytesConfig(
             load_in_4bit=True,
             bnb_4bit_compute_dtype=model_kwargs.get("torch_dtype"),
@@ -200,6 +219,7 @@ def load_torch(
     elif use_8bit:
         from transformers import BitsAndBytesConfig
 
+        quantization_requested = True
         model_kwargs["quantization_config"] = BitsAndBytesConfig(load_in_8bit=True)
 
     tokenizer = AutoTokenizer.from_pretrained(
@@ -208,9 +228,23 @@ def load_torch(
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    model = AutoModelForCausalLM.from_pretrained(
-        options.model_id, **model_kwargs
-    )  # nosec B615: revision pinned in model_kwargs
+    try:
+        model = AutoModelForCausalLM.from_pretrained(
+            options.model_id, **model_kwargs
+        )  # nosec B615: revision pinned in model_kwargs
+    except Exception as exc:
+        if not quantization_requested or not _looks_like_quantization_load_error(exc):
+            raise
+        retry_kwargs = dict(model_kwargs)
+        retry_kwargs.pop("quantization_config", None)
+        logger.warning(
+            "Quantized torch load failed (%s) - retrying without bitsandbytes "
+            "quantization",
+            exc,
+        )
+        model = AutoModelForCausalLM.from_pretrained(
+            options.model_id, **retry_kwargs
+        )  # nosec B615: revision pinned in model_kwargs
 
     if len(tokenizer) != model.get_input_embeddings().weight.shape[0]:
         model.resize_token_embeddings(len(tokenizer))
