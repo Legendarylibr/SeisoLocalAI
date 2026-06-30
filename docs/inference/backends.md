@@ -4,7 +4,8 @@ Seiso routes chat/inference by platform and model format.
 
 | Backend | Platform | Install | Use case |
 |---------|----------|---------|----------|
-| **llama.cpp (GGUF)** | All | `.[llamacpp]` | Default on NVIDIA when GGUF on disk |
+| **llama-swap (GGUF sidecar)** | macOS / NVIDIA | external `llama-swap` service | Optional GGUF router; defaults to llama.cpp on macOS and Ollama on NVIDIA |
+| **llama.cpp (GGUF)** | All | `.[llamacpp]` | In-process GGUF fallback and default when llama-swap is not enabled |
 | **MLX** | macOS Apple Silicon | `.[mlx]` | Fast local chat on M-series |
 | **PyTorch** | CUDA / MPS / CPU | `.[train]` | HF weights, 4-bit via bitsandbytes |
 
@@ -13,6 +14,17 @@ Seiso routes chat/inference by platform and model format.
 - `seiso.models.loader.detect_backend()` — inference
 - `forge/services/hardware.py` — `preferred_inference_backend` in UI
 - Forge Chat model picker shows backend per model
+
+## llama-swap setup (optional)
+
+Run llama-swap locally and point Forge at it:
+
+```bash
+export SEISO_LLAMASWAP_ENABLED=true
+export SEISO_LLAMASWAP_URL=http://127.0.0.1:8080
+```
+
+Seiso chooses `llamacpp` as the llama-swap engine on macOS and `ollama` when NVIDIA hardware is visible. Override with `SEISO_LLAMASWAP_ENGINE=llamacpp` or `SEISO_LLAMASWAP_ENGINE=ollama`. If your llama-swap config uses a model key rather than the GGUF file path, set `SEISO_LLAMASWAP_MODEL`.
 
 ## MLX setup (macOS)
 

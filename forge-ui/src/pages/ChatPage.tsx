@@ -48,6 +48,7 @@ import {
 
 const BACKEND_LABELS: Record<string, string> = {
   llamacpp: "llama.cpp",
+  llamaswap: "llama-swap",
   mlx: "MLX",
   torch: "PyTorch",
 };

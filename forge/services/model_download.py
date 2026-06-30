@@ -49,7 +49,7 @@ def resolve_download_variant(variant: str) -> str:
     if variant != "auto":
         return variant
     runtime = check_inference_runtime()
-    if runtime.llamacpp:
+    if runtime.llamacpp or getattr(runtime, "llamaswap", False):
         return "gguf"
     if runtime.mlx or runtime.torch:
         return "safetensors"

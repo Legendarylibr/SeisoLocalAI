@@ -46,19 +46,25 @@ class InferenceRuntimeStatus:
     """Local inference engine dependencies required to load models."""
 
     llamacpp: bool = False
+    llamaswap: bool = False
     mlx: bool = False
     torch: bool = False
     huggingface_hub: bool = False
     llamacpp_error: str | None = None
+    llamaswap_url: str | None = None
+    llamaswap_engine: str | None = None
     install_hints: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "llamacpp": self.llamacpp,
+            "llamaswap": self.llamaswap,
             "mlx": self.mlx,
             "torch": self.torch,
             "huggingface_hub": self.huggingface_hub,
             "llamacpp_error": self.llamacpp_error,
+            "llamaswap_url": self.llamaswap_url,
+            "llamaswap_engine": self.llamaswap_engine,
             "install_hints": self.install_hints,
         }
 
@@ -81,12 +87,18 @@ def _llamacpp_status() -> tuple[bool, str | None]:
 def check_inference_runtime() -> InferenceRuntimeStatus:
     """Report which local inference stacks are importable."""
     llamacpp_ok, llamacpp_error = _llamacpp_status()
+    from seiso.inference.llamaswap import llamaswap_status
+
+    swap = llamaswap_status()
     status = InferenceRuntimeStatus(
         llamacpp=llamacpp_ok,
+        llamaswap=swap.available,
         mlx=_dep_status("mlx_lm"),
         torch=_dep_status("torch"),
         huggingface_hub=_dep_status("huggingface_hub"),
         llamacpp_error=llamacpp_error,
+        llamaswap_url=swap.url,
+        llamaswap_engine=swap.engine,
     )
     hints: list[str] = []
     if not status.huggingface_hub:
@@ -111,6 +123,10 @@ def check_inference_runtime() -> InferenceRuntimeStatus:
             hints.append(f"{hint}  # GGUF chat via llama.cpp")
         if status.llamacpp_error:
             hints.append(f"Import error: {status.llamacpp_error}")
+    if not status.llamaswap:
+        hints.append(
+            "Optional: install/start llama-swap and set SEISO_LLAMASWAP_URL for sidecar GGUF routing"
+        )
     if not status.mlx and not status.torch:
         hints.append('pip install -e ".[mlx]" or ".[train]"  # safetensors inference')
     status.install_hints = hints
@@ -232,9 +248,9 @@ def build_hf_status(
         and (connectivity.anonymous_ok or connectivity.token_valid)
     )
     ready_for_upload = connectivity.token_valid
-    ready_for_gguf_chat = ready_for_download and runtime.llamacpp
+    ready_for_gguf_chat = ready_for_download and (runtime.llamacpp or runtime.llamaswap)
     ready_for_local_chat = ready_for_download and (
-        runtime.llamacpp or runtime.mlx or runtime.torch
+        runtime.llamacpp or runtime.llamaswap or runtime.mlx or runtime.torch
     )
 
     return {
@@ -252,10 +268,13 @@ def build_hf_status(
         "cache_dir": str(resolve_hf_cache_dir(data_dir)),
         "runtime": {
             "llamacpp": runtime.llamacpp,
+            "llamaswap": runtime.llamaswap,
             "mlx": runtime.mlx,
             "torch": runtime.torch,
             "huggingface_hub": runtime.huggingface_hub,
             "llamacpp_error": runtime.llamacpp_error,
+            "llamaswap_url": runtime.llamaswap_url,
+            "llamaswap_engine": runtime.llamaswap_engine,
             "install_hints": runtime.install_hints,
         },
         "ready_for_download": ready_for_download,

@@ -617,6 +617,7 @@ def _load_llama_model(path: str, n_ctx: int) -> Any:
 _POOL_BACKEND_BY_API: dict[str, str] = {
     "llamacpp": "llamacpp",
     "llama": "llamacpp",
+    "llamaswap": "llamaswap",
     "mlx": "mlx",
     "torch": "torch",
 }
@@ -624,6 +625,7 @@ _POOL_BACKEND_BY_API: dict[str, str] = {
 
 class BackendKind(StrEnum):
     LLAMACPP = "llamacpp"
+    LLAMASWAP = "llamaswap"
     MLX = "mlx"
     TORCH = "torch"
 
@@ -828,6 +830,22 @@ class ModelPool:
             model_path, BackendKind.LLAMA, loader, cache_key=key, meta={"n_ctx": n_ctx}
         )
 
+    def get_llamaswap(self, model_path: str) -> Any:
+        def loader(_path: str):
+            from seiso.inference.llamaswap import LlamaSwapClient
+
+            return LlamaSwapClient()
+
+        norm = self.normalize_path(model_path)
+        key = f"llamaswap:{norm}"
+        return self.switch(
+            model_path,
+            BackendKind.LLAMASWAP,
+            loader,
+            cache_key=key,
+            meta={"sidecar": True},
+        )
+
     def get_mlx(self, model_path: str) -> tuple[Any, Any]:
         def loader(path: str):
             from seiso.models.loader import LoadOptions, ModelKind
@@ -928,6 +946,9 @@ class ModelPool:
             except Exception:
                 pass
             del llm
+
+        elif backend == BackendKind.LLAMASWAP:
+            del handle
 
         elif backend == BackendKind.TORCH:
             try:

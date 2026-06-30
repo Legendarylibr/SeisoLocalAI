@@ -54,7 +54,7 @@ class ChatRequest(BaseModel):
     draft_model_path: str | None = None
     num_speculative_tokens: int | None = Field(default=None, ge=1, le=32)
     inference_backend: str = Field(
-        default="auto", description="auto | llamacpp | mlx | torch"
+        default="auto", description="auto | llamacpp | llamaswap | mlx | torch"
     )
     messages: list[dict[str, str]] = Field(default_factory=list)
     max_tokens: int = Field(default=2048, ge=1, le=8192)
@@ -80,7 +80,7 @@ class ThreadCreate(BaseModel):
 class PreloadRequest(BaseModel):
     model_id: str
     inference_backend: str = Field(
-        default="auto", description="auto | llamacpp | mlx | torch"
+        default="auto", description="auto | llamacpp | llamaswap | mlx | torch"
     )
     max_tokens: int = Field(default=2048, ge=1, le=8192)
     n_ctx: int | None = Field(default=None, ge=2048, le=131072)
