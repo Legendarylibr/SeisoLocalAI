@@ -76,6 +76,12 @@ def _sanitize_openai_content(content: str, *, tools_enabled: bool) -> str:
     return sanitize_llm_output(content, strip_tool_calls=not tools_enabled)
 
 
+def _default_openai_gguf_backend() -> str:
+    from seiso.inference.llamaswap import llamaswap_status
+
+    return "llamaswap" if llamaswap_status().available else "llamacpp"
+
+
 def _resolve_payload(
     body: ChatCompletionRequest,
     model_path: str | None,
@@ -93,7 +99,7 @@ def _resolve_payload(
     if model_format:
         payload["model_format"] = model_format
         if model_format.lower() == "gguf":
-            payload["inference_backend"] = "llamacpp"
+            payload["inference_backend"] = _default_openai_gguf_backend()
     return payload
 
 

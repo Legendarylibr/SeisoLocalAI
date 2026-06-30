@@ -60,18 +60,46 @@ def llamaswap_enabled() -> bool:
     return bool(os.environ.get("SEISO_LLAMASWAP_URL") or shutil.which("llama-swap"))
 
 
+def _llamaswap_health_timeout_s() -> float:
+    raw = env_str("SEISO_LLAMASWAP_HEALTH_TIMEOUT_S", "0.5").strip()
+    try:
+        return max(0.05, float(raw))
+    except ValueError:
+        return 0.5
+
+
+def llamaswap_health_ok(*, url: str | None = None) -> bool:
+    """Return True when the configured llama-swap sidecar is reachable."""
+    target = urllib.parse.urljoin(f"{(url or llamaswap_url()).rstrip('/')}/", "health")
+    req = urllib.request.Request(target, method="GET")
+    try:
+        with urllib.request.urlopen(req, timeout=_llamaswap_health_timeout_s()) as response:
+            return 200 <= int(getattr(response, "status", 200)) < 300
+    except (OSError, urllib.error.URLError, TimeoutError):
+        return False
+
+
 def llamaswap_status() -> LlamaSwapRuntime:
+    url = llamaswap_url()
+    engine = preferred_llamaswap_engine()
     if not llamaswap_enabled():
         return LlamaSwapRuntime(
             available=False,
-            url=llamaswap_url(),
-            engine=preferred_llamaswap_engine(),
+            url=url,
+            engine=engine,
             reason="Set SEISO_LLAMASWAP_URL or install llama-swap to enable it.",
+        )
+    if not llamaswap_health_ok(url=url):
+        return LlamaSwapRuntime(
+            available=False,
+            url=url,
+            engine=engine,
+            reason=f"llama-swap is configured but not reachable at {url}. Start the sidecar.",
         )
     return LlamaSwapRuntime(
         available=True,
-        url=llamaswap_url(),
-        engine=preferred_llamaswap_engine(),
+        url=url,
+        engine=engine,
     )
 
 

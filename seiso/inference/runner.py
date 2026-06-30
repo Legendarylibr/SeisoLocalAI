@@ -126,12 +126,19 @@ class LocalInferenceRunner:
             if not model_path:
                 raise ValueError("model_path or model_id required")
             route, resolved_path = self._resolve_route(payload, model_path)
-            if route != "llama":
+            if route not in {"llama", "llamaswap"}:
                 raise ValueError(
-                    "Tool calling is only supported with llama.cpp GGUF models"
+                    "Tool calling is only supported with GGUF local backends"
                 )
             generation_id = self._pool.bump_generation()
             await self._ensure_model_switch(resolved_path, route=route)
+            if route == "llamaswap":
+                return await loop.run_in_executor(
+                    None,
+                    lambda: self._llamaswap_complete(
+                        payload, resolved_path, generation_id
+                    ),
+                )
             return await loop.run_in_executor(
                 None,
                 lambda: self._llama_complete(payload, resolved_path, generation_id),
