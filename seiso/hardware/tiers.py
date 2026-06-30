@@ -102,6 +102,10 @@ def _vram_headroom_mb(gpus: list[dict[str, Any]]) -> int:
 
 
 _GPU_CAPACITY_RESERVE = 0.04
+_APPLE_UNIFIED_AVAILABLE_RATIO = 0.90
+_APPLE_UNIFIED_TOTAL_CAP_RATIO = 0.75
+_CPU_AVAILABLE_RATIO = 0.65
+_CPU_TOTAL_FALLBACK_RATIO = 0.40
 
 
 def discrete_vram_total_mb(profile: dict[str, Any]) -> int:
@@ -134,9 +138,18 @@ def vram_headroom_mb(profile: dict[str, Any]) -> int:
             import psutil  # type: ignore
 
             avail = psutil.virtual_memory().available / (1024**2)
-            return int(min(avail * 0.65, effective_budget_mb(profile)))
+            if tier == HardwareTier.APPLE_UNIFIED:
+                return int(
+                    min(
+                        avail * _APPLE_UNIFIED_AVAILABLE_RATIO,
+                        ram * 1024 * _APPLE_UNIFIED_TOTAL_CAP_RATIO,
+                    )
+                )
+            return int(min(avail * _CPU_AVAILABLE_RATIO, effective_budget_mb(profile)))
         except ImportError:
-            return int(ram * 1024 * 0.4)
+            if tier == HardwareTier.APPLE_UNIFIED:
+                return effective_budget_mb(profile)
+            return int(ram * 1024 * _CPU_TOTAL_FALLBACK_RATIO)
     return effective_budget_mb(profile)
 
 
