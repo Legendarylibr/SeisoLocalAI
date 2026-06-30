@@ -5,7 +5,15 @@ from dataclasses import replace
 from seiso.adaptive_quant.configuration import FrameworkConfig
 from seiso.adaptive_quant.features import summarize_precision_needs
 from seiso.adaptive_quant.kernel_rl import finalize_kernel_profile
-from seiso.adaptive_quant.math_utils import clamp, mean, variance
+from seiso.adaptive_quant.math_utils import (
+    clamp,
+    dynamic_layer_bits,
+    learned_layer_bits,
+    mean_variance,
+    moe_swap_cost,
+    moe_variant_summary,
+    variance,
+)
 from seiso.adaptive_quant.types import EpisodeState, QuantizationDecision, QuantMode
 
 
@@ -77,12 +85,13 @@ def _dynamic_bits(
     min_bits: int,
     max_bits: int,
 ) -> list[float]:
-    complexity = state.input_features.complexity_score
-    layer_bits: list[float] = []
-    for layer_stat in state.sensitivity.layer_stats:
-        adjustment = 2.2 * (complexity - 0.45) + 1.7 * (layer_stat - 0.55)
-        layer_bits.append(clamp(base_bit_width + adjustment, min_bits, max_bits))
-    return layer_bits
+    return dynamic_layer_bits(
+        base_bit_width,
+        state.sensitivity.layer_stats,
+        complexity=state.input_features.complexity_score,
+        min_bits=min_bits,
+        max_bits=max_bits,
+    )
 
 
 def _learned_bits(
@@ -93,31 +102,20 @@ def _learned_bits(
     min_bits: int,
     max_bits: int,
 ) -> list[float]:
-    learned_span = (max_bits - min_bits) * 0.75
-    base_bits = (
-        min_bits
-        + clamp(decision.precision_level, *config.precision_bounds) * learned_span
-    )
     scale_factor = clamp(decision.scale_factor, *config.scale_bounds)
     clipping_range = clamp(decision.clipping_range, *config.clip_bounds)
     precision_need = summarize_precision_needs(state.input_features, state.sensitivity)
 
-    layer_bits: list[float] = []
-    for layer_index, layer_stat in enumerate(state.sensitivity.layer_stats):
-        sensitivity_push = 1.05 * (layer_stat - 0.55) + 0.80 * (precision_need - 0.50)
-        scale_push = (scale_factor - 1.0) * 0.45
-        clipping_push = (clipping_range - 1.0) * 0.35
-        depth_bias = (
-            0.12 if layer_index >= len(state.sensitivity.layer_stats) // 2 else -0.04
-        )
-        layer_bits.append(
-            clamp(
-                base_bits + sensitivity_push + scale_push + clipping_push + depth_bias,
-                min_bits,
-                max_bits,
-            )
-        )
-    return layer_bits
+    return learned_layer_bits(
+        state.sensitivity.layer_stats,
+        precision_level=decision.precision_level,
+        precision_bounds=config.precision_bounds,
+        precision_need=precision_need,
+        scale_factor=scale_factor,
+        clipping_range=clipping_range,
+        min_bits=min_bits,
+        max_bits=max_bits,
+    )
 
 
 def finalize_decision(
@@ -179,8 +177,9 @@ def finalize_decision(
         raise ValueError(f"Unsupported decision mode: {finalized.mode}")
 
     finalized.metadata = dict(finalized.metadata)
-    finalized.metadata["average_bits"] = mean(finalized.effective_layer_bits)
-    finalized.metadata["bit_variance"] = variance(finalized.effective_layer_bits)
+    average_bits, bit_variance = mean_variance(finalized.effective_layer_bits)
+    finalized.metadata["average_bits"] = average_bits
+    finalized.metadata["bit_variance"] = bit_variance
     _finalize_moe_selection(finalized, state, config)
     finalize_kernel_profile(finalized, config)
 
@@ -252,20 +251,10 @@ def _finalize_moe_selection(
 
     decision.moe_variant_indices = normalized_indices
     decision.moe_variant_names = names
-    average_aggressiveness = (
-        mean([index / max(1, variant_count - 1) for index in normalized_indices])
-        if normalized_indices
-        else 0.0
-    )
-    variant_churn = (
-        mean(
-            [
-                abs(index - default_index) / max(1, variant_count - 1)
-                for index in normalized_indices
-            ]
-        )
-        if normalized_indices
-        else 0.0
+    average_aggressiveness, variant_churn = moe_variant_summary(
+        normalized_indices,
+        default_index=default_index,
+        variant_count=variant_count,
     )
     decision.metadata["moe_enabled"] = True
     decision.metadata["moe_selected_variants"] = names
@@ -331,13 +320,11 @@ def _predicted_moe_swap_cost(
 ) -> float:
     if state.moe_context is None or not indices:
         return 0.0
-    total = 0.0
-    for expert, index in zip(state.moe_context.experts, indices, strict=True):
-        aggressiveness = index / max(1, config.moe_variant_count() - 1)
-        if expert.resident_on_device < 0.5:
-            total += (
-                (1.2 + 3.4 * aggressiveness)
-                * (0.75 + expert.router_probability)
-                * (1.10 - 0.35 * expert.hotness)
-            )
-    return total
+    experts = state.moe_context.experts
+    return moe_swap_cost(
+        indices,
+        [expert.resident_on_device for expert in experts],
+        [expert.router_probability for expert in experts],
+        [expert.hotness for expert in experts],
+        variant_count=config.moe_variant_count(),
+    )

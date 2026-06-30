@@ -32,6 +32,8 @@ def stable_sigmoid(value: float) -> float:
 
 
 def mean(values: Sequence[float]) -> float:
+    if _math_ext is not None:
+        return float(_math_ext.mean(values))
     if not values:
         return 0.0
     return sum(values) / len(values)
@@ -44,6 +46,19 @@ def variance(values: Sequence[float]) -> float:
         return 0.0
     avg = mean(values)
     return sum((value - avg) ** 2 for value in values) / len(values)
+
+
+def mean_variance(values: Sequence[float]) -> tuple[float, float]:
+    """Return population mean and variance in one pass when native math is available."""
+    if _math_ext is not None:
+        avg, var = _math_ext.mean_variance(values)
+        return float(avg), float(var)
+    if not values:
+        return 0.0, 0.0
+    avg = sum(values) / len(values)
+    if len(values) < 2:
+        return avg, 0.0
+    return avg, sum((value - avg) ** 2 for value in values) / len(values)
 
 
 def dot(left: Sequence[float], right: Sequence[float]) -> float:
@@ -69,6 +84,214 @@ def softmax(logits: Sequence[float]) -> list[float]:
     if total <= 0.0:
         return [1.0 / len(logits)] * len(logits)
     return [value / total for value in shifted]
+
+
+def matrix_vector_add(
+    weights: Sequence[Sequence[float]],
+    bias: Sequence[float],
+    state_vector: Sequence[float],
+) -> list[float]:
+    """Compute ``weights @ state_vector + bias`` for policy heads."""
+    if _math_ext is not None:
+        return list(_math_ext.matrix_vector_add(weights, bias, state_vector))
+    return [
+        dot(row, state_vector) + bias_value
+        for row, bias_value in zip(weights, bias, strict=True)
+    ]
+
+
+def categorical_update(
+    weights: list[list[float]],
+    bias: list[float],
+    state_vector: Sequence[float],
+    selected_index: int,
+    probabilities: Sequence[float],
+    advantage: float,
+    learning_rate: float,
+) -> bool:
+    """Native in-place categorical policy update; returns True when accelerated."""
+    if _math_ext is None:
+        return False
+    _math_ext.categorical_update(
+        weights,
+        bias,
+        state_vector,
+        selected_index,
+        probabilities,
+        advantage,
+        learning_rate,
+    )
+    return True
+
+
+def gaussian_update(
+    weights: list[list[float]],
+    bias: list[float],
+    state_vector: Sequence[float],
+    raw_samples: Sequence[float],
+    raw_means: Sequence[float],
+    advantage: float,
+    learning_rate: float,
+    variance: float,
+) -> bool:
+    """Native in-place Gaussian policy update; returns True when accelerated."""
+    if _math_ext is None:
+        return False
+    _math_ext.gaussian_update(
+        weights,
+        bias,
+        state_vector,
+        raw_samples,
+        raw_means,
+        advantage,
+        learning_rate,
+        variance,
+    )
+    return True
+
+
+def value_update(
+    weights: list[float],
+    state_vector: Sequence[float],
+    error: float,
+    learning_rate: float,
+) -> bool:
+    """Native in-place value-head update; returns True when accelerated."""
+    if _math_ext is None:
+        return False
+    _math_ext.value_update(weights, state_vector, error, learning_rate)
+    return True
+
+
+def dynamic_layer_bits(
+    base_bit_width: int,
+    layer_stats: Sequence[float],
+    *,
+    complexity: float,
+    min_bits: int,
+    max_bits: int,
+) -> list[float]:
+    """Compute per-layer dynamic precision bits for a decision."""
+    if _math_ext is not None:
+        return list(
+            _math_ext.dynamic_layer_bits(
+                base_bit_width,
+                layer_stats,
+                complexity,
+                float(min_bits),
+                float(max_bits),
+            )
+        )
+    return [
+        clamp(
+            base_bit_width + 2.2 * (complexity - 0.45) + 1.7 * (layer_stat - 0.55),
+            min_bits,
+            max_bits,
+        )
+        for layer_stat in layer_stats
+    ]
+
+
+def learned_layer_bits(
+    layer_stats: Sequence[float],
+    *,
+    precision_level: float,
+    precision_bounds: tuple[float, float],
+    precision_need: float,
+    scale_factor: float,
+    clipping_range: float,
+    min_bits: int,
+    max_bits: int,
+) -> list[float]:
+    """Compute per-layer learned precision bits for a decision."""
+    if _math_ext is not None:
+        return list(
+            _math_ext.learned_layer_bits(
+                layer_stats,
+                precision_level,
+                precision_bounds[0],
+                precision_bounds[1],
+                precision_need,
+                scale_factor,
+                clipping_range,
+                float(min_bits),
+                float(max_bits),
+            )
+        )
+    learned_span = (max_bits - min_bits) * 0.75
+    base_bits = min_bits + clamp(precision_level, *precision_bounds) * learned_span
+    midpoint = len(layer_stats) // 2
+    return [
+        clamp(
+            base_bits
+            + 1.05 * (layer_stat - 0.55)
+            + 0.80 * (precision_need - 0.50)
+            + (scale_factor - 1.0) * 0.45
+            + (clipping_range - 1.0) * 0.35
+            + (0.12 if layer_index >= midpoint else -0.04),
+            min_bits,
+            max_bits,
+        )
+        for layer_index, layer_stat in enumerate(layer_stats)
+    ]
+
+
+def moe_variant_summary(
+    indices: Sequence[int],
+    *,
+    default_index: int,
+    variant_count: int,
+) -> tuple[float, float]:
+    """Return average variant aggressiveness and churn for MoE routing."""
+    if not indices:
+        return 0.0, 0.0
+    if _math_ext is not None:
+        aggressiveness, churn = _math_ext.moe_variant_summary(
+            indices,
+            default_index,
+            variant_count,
+        )
+        return float(aggressiveness), float(churn)
+    denom = max(1, variant_count - 1)
+    average_aggressiveness = sum(index / denom for index in indices) / len(indices)
+    variant_churn = sum(abs(index - default_index) / denom for index in indices) / len(
+        indices
+    )
+    return float(average_aggressiveness), float(variant_churn)
+
+
+def moe_swap_cost(
+    indices: Sequence[int],
+    resident_on_device: Sequence[float],
+    router_probabilities: Sequence[float],
+    hotness: Sequence[float],
+    *,
+    variant_count: int,
+) -> float:
+    """Predict MoE swap cost for selected variants."""
+    if not indices:
+        return 0.0
+    if _math_ext is not None:
+        return float(
+            _math_ext.moe_swap_cost(
+                indices,
+                resident_on_device,
+                router_probabilities,
+                hotness,
+                variant_count,
+            )
+        )
+    denom = max(1, variant_count - 1)
+    total = 0.0
+    for index, resident, probability, hot in zip(
+        indices, resident_on_device, router_probabilities, hotness, strict=True
+    ):
+        if resident < 0.5:
+            aggressiveness = index / denom
+            total += (1.2 + 3.4 * aggressiveness) * (0.75 + probability) * (
+                1.10 - 0.35 * hot
+            )
+    return float(total)
 
 
 def sample_categorical(probabilities: Sequence[float], rng: random.Random) -> int:
