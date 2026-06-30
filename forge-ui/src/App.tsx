@@ -1,4 +1,4 @@
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useState } from "react";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { AuthProvider, useAuth } from "@/hooks/useAuth";
 import { HardwareProfileProvider } from "@/context/HardwareProfileContext";
@@ -39,12 +39,24 @@ function PageLoading() {
   );
 }
 
-function Guard({ children, fullBleed = false }: { children: React.ReactNode; fullBleed?: boolean }) {
+function Guard({
+  children,
+  fullBleed = false,
+  dismissedHfOnboardingUserId,
+  onDismissHfOnboarding,
+}: {
+  children: React.ReactNode;
+  fullBleed?: boolean;
+  dismissedHfOnboardingUserId: string | null;
+  onDismissHfOnboarding: (userId: string) => void;
+}) {
   const { user, loading, needsOnboarding } = useAuth();
   const { hfStatus, loading: platformLoading } = usePlatformSettings();
 
   const dismissHfOnboarding = () => {
-    if (user) skipHfOnboarding(user.id);
+    if (!user) return;
+    skipHfOnboarding(user.id);
+    onDismissHfOnboarding(user.id);
   };
 
   if (loading) {
@@ -53,7 +65,11 @@ function Guard({ children, fullBleed = false }: { children: React.ReactNode; ful
   if (!user && !needsOnboarding) return <AuthPage />;
   if (needsOnboarding && !user) return <AuthPage />;
   if (platformLoading && user) return <PageLoading />;
-  if (user && needsHfTokenOnboarding(hfStatus, user.id)) {
+  if (
+    user &&
+    dismissedHfOnboardingUserId !== user.id &&
+    needsHfTokenOnboarding(hfStatus, user.id)
+  ) {
     return <HfTokenPage onDone={dismissHfOnboarding} />;
   }
   return (
@@ -64,21 +80,27 @@ function Guard({ children, fullBleed = false }: { children: React.ReactNode; ful
 }
 
 function AppRoutes() {
+  const [dismissedHfOnboardingUserId, setDismissedHfOnboardingUserId] = useState<string | null>(null);
+  const guardProps = {
+    dismissedHfOnboardingUserId,
+    onDismissHfOnboarding: setDismissedHfOnboardingUserId,
+  };
+
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/" element={<Guard><DashboardPage /></Guard>} />
-        <Route path="/hub" element={<Guard><HubPage /></Guard>} />
-        <Route path="/chat" element={<Guard fullBleed><ChatPage /></Guard>} />
-        <Route path="/export" element={<Guard><ExportPage /></Guard>} />
-        <Route path="/rl-quant" element={<Guard><RLQuantPage /></Guard>} />
-        <Route path="/compress" element={<Guard><CompressPage /></Guard>} />
-        <Route path="/distill-rl" element={<Guard><DistillRLPage /></Guard>} />
-        <Route path="/train" element={<Guard><TrainPage /></Guard>} />
-        <Route path="/knowledge" element={<Guard><KnowledgePage /></Guard>} />
-        <Route path="/recipes" element={<Guard><RecipesPage /></Guard>} />
-        <Route path="/integrations" element={<Guard><IntegrationsPage /></Guard>} />
-        <Route path="/settings" element={<Guard><SettingsPage /></Guard>} />
+        <Route path="/" element={<Guard {...guardProps}><DashboardPage /></Guard>} />
+        <Route path="/hub" element={<Guard {...guardProps}><HubPage /></Guard>} />
+        <Route path="/chat" element={<Guard {...guardProps} fullBleed><ChatPage /></Guard>} />
+        <Route path="/export" element={<Guard {...guardProps}><ExportPage /></Guard>} />
+        <Route path="/rl-quant" element={<Guard {...guardProps}><RLQuantPage /></Guard>} />
+        <Route path="/compress" element={<Guard {...guardProps}><CompressPage /></Guard>} />
+        <Route path="/distill-rl" element={<Guard {...guardProps}><DistillRLPage /></Guard>} />
+        <Route path="/train" element={<Guard {...guardProps}><TrainPage /></Guard>} />
+        <Route path="/knowledge" element={<Guard {...guardProps}><KnowledgePage /></Guard>} />
+        <Route path="/recipes" element={<Guard {...guardProps}><RecipesPage /></Guard>} />
+        <Route path="/integrations" element={<Guard {...guardProps}><IntegrationsPage /></Guard>} />
+        <Route path="/settings" element={<Guard {...guardProps}><SettingsPage /></Guard>} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>
