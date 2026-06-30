@@ -9,7 +9,7 @@ from seiso.adaptive_quant.backends.quality import (
     apply_external_quality,
 )
 from seiso.adaptive_quant.configuration import FrameworkConfig
-from seiso.adaptive_quant.math_utils import clamp, mean, variance
+from seiso.adaptive_quant.math_utils import clamp, mean, mean_variance
 from seiso.adaptive_quant.moe import ExpertBank
 from seiso.adaptive_quant.types import (
     BackendMetricDict,
@@ -68,8 +68,7 @@ class SimulatorBackend:
         self, state: EpisodeState, decision: QuantizationDecision
     ) -> BackendMetricDict:
         hardware = state.hardware_profile
-        avg_bits = mean(decision.effective_layer_bits)
-        bit_variance = variance(decision.effective_layer_bits)
+        avg_bits, bit_variance = mean_variance(decision.effective_layer_bits)
         complexity = state.input_features.complexity_score
         sensitivity = mean(state.sensitivity.layer_stats)
         prompt_length = max(8, state.input_features.prompt_length)

@@ -6,13 +6,16 @@ import random
 
 from seiso.adaptive_quant.math_utils import (
     argmax,
+    categorical_update,
     clamp,
-    dot,
     finite_float,
     gaussian_sample,
+    gaussian_update,
+    matrix_vector_add,
     sample_categorical,
     softmax,
     stable_sigmoid,
+    value_update,
 )
 
 
@@ -31,10 +34,7 @@ class CategoricalHead:
         self.bias = [0.0] * output_dim
 
     def logits(self, state_vector: list[float]) -> list[float]:
-        return [
-            dot(weights, state_vector) + bias
-            for weights, bias in zip(self.weights, self.bias, strict=True)
-        ]
+        return matrix_vector_add(self.weights, self.bias, state_vector)
 
     def sample(
         self,
@@ -59,6 +59,16 @@ class CategoricalHead:
         advantage: float,
         learning_rate: float,
     ) -> None:
+        if categorical_update(
+            self.weights,
+            self.bias,
+            state_vector,
+            selected_index,
+            probabilities,
+            advantage,
+            learning_rate,
+        ):
+            return
         for row_index, row in enumerate(self.weights):
             coefficient = (
                 (1.0 if row_index == selected_index else 0.0) - probabilities[row_index]
@@ -77,10 +87,7 @@ class GaussianHead:
         self.stddev = stddev
 
     def means(self, state_vector: list[float]) -> list[float]:
-        return [
-            dot(weights, state_vector) + bias
-            for weights, bias in zip(self.weights, self.bias, strict=True)
-        ]
+        return matrix_vector_add(self.weights, self.bias, state_vector)
 
     def sample(
         self,
@@ -112,6 +119,17 @@ class GaussianHead:
         learning_rate: float,
     ) -> None:
         variance = max(self.stddev * self.stddev, 1e-6)
+        if gaussian_update(
+            self.weights,
+            self.bias,
+            state_vector,
+            raw_samples,
+            raw_means,
+            advantage,
+            learning_rate,
+            variance,
+        ):
+            return
         for row_index, row in enumerate(self.weights):
             coefficient = (
                 (raw_samples[row_index] - raw_means[row_index]) / variance
@@ -133,13 +151,16 @@ class ValueHead:
         self.bias = 0.0
 
     def predict(self, state_vector: list[float]) -> float:
-        return dot(self.weights, state_vector) + self.bias
+        return matrix_vector_add([self.weights], [self.bias], state_vector)[0]
 
     def update(
         self, state_vector: list[float], target: float, learning_rate: float
     ) -> None:
         prediction = self.predict(state_vector)
         error = target - prediction
+        if value_update(self.weights, state_vector, error, learning_rate):
+            self.bias += learning_rate * error
+            return
         for index, value in enumerate(state_vector):
             self.weights[index] += learning_rate * error * value
         self.bias += learning_rate * error

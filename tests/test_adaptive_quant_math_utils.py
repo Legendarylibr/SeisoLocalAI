@@ -23,6 +23,13 @@ def test_core_math_helpers_match_python_semantics():
         sum((value - (sum(values) / len(values))) ** 2 for value in values)
         / len(values)
     )
+    assert math_utils.mean_variance(values) == pytest.approx(
+        (
+            sum(values) / len(values),
+            sum((value - (sum(values) / len(values))) ** 2 for value in values)
+            / len(values),
+        )
+    )
     assert math_utils.dot(values, other) == pytest.approx(
         sum(lhs * rhs for lhs, rhs in zip(values, other, strict=True))
     )
@@ -57,6 +64,96 @@ def test_ratio_and_std_helpers():
     )
 
 
+def test_layer_bit_transform_helpers_match_formulas():
+    layer_stats = [0.2, 0.55, 0.9, 1.2]
+    dynamic = math_utils.dynamic_layer_bits(
+        4,
+        layer_stats,
+        complexity=0.7,
+        min_bits=2,
+        max_bits=8,
+    )
+    assert dynamic == pytest.approx(
+        [
+            max(2, min(8, 4 + 2.2 * (0.7 - 0.45) + 1.7 * (layer_stat - 0.55)))
+            for layer_stat in layer_stats
+        ]
+    )
+
+    precision_level = 0.6
+    precision_bounds = (0.1, 0.9)
+    precision_need = 0.72
+    scale_factor = 1.1
+    clipping_range = 0.85
+    min_bits = 2
+    max_bits = 8
+    base_bits = min_bits + precision_level * ((max_bits - min_bits) * 0.75)
+    midpoint = len(layer_stats) // 2
+    learned = math_utils.learned_layer_bits(
+        layer_stats,
+        precision_level=precision_level,
+        precision_bounds=precision_bounds,
+        precision_need=precision_need,
+        scale_factor=scale_factor,
+        clipping_range=clipping_range,
+        min_bits=min_bits,
+        max_bits=max_bits,
+    )
+    assert learned == pytest.approx(
+        [
+            max(
+                min_bits,
+                min(
+                    max_bits,
+                    base_bits
+                    + 1.05 * (layer_stat - 0.55)
+                    + 0.80 * (precision_need - 0.50)
+                    + (scale_factor - 1.0) * 0.45
+                    + (clipping_range - 1.0) * 0.35
+                    + (0.12 if layer_index >= midpoint else -0.04),
+                ),
+            )
+            for layer_index, layer_stat in enumerate(layer_stats)
+        ]
+    )
+
+
+def test_moe_summary_helpers_match_formulas():
+    indices = [0, 2, 1, 2]
+    resident = [1.0, 0.0, 0.25, 0.0]
+    probabilities = [0.4, 0.3, 0.2, 0.1]
+    hotness = [0.9, 0.5, 0.2, 0.8]
+    default_index = 1
+    variant_count = 3
+    denom = max(1, variant_count - 1)
+
+    aggressiveness, churn = math_utils.moe_variant_summary(
+        indices,
+        default_index=default_index,
+        variant_count=variant_count,
+    )
+    assert aggressiveness == pytest.approx(sum(index / denom for index in indices) / len(indices))
+    assert churn == pytest.approx(
+        sum(abs(index - default_index) / denom for index in indices) / len(indices)
+    )
+
+    assert math_utils.moe_swap_cost(
+        indices,
+        resident,
+        probabilities,
+        hotness,
+        variant_count=variant_count,
+    ) == pytest.approx(
+        sum(
+            (1.2 + 3.4 * (index / denom)) * (0.75 + probability) * (1.10 - 0.35 * hot)
+            for index, res, probability, hot in zip(
+                indices, resident, probabilities, hotness, strict=True
+            )
+            if res < 0.5
+        )
+    )
+
+
 def test_dot_length_mismatch_raises_value_error():
     with pytest.raises(ValueError):
         math_utils.dot([1.0], [1.0, 2.0])
@@ -70,4 +167,99 @@ def test_native_extension_exports_expected_hotpath_functions():
     native = math_utils._math_ext
     assert native.mean([1.0, 2.0, 3.0]) == pytest.approx(2.0)
     assert native.variance([1.0, 2.0, 3.0]) == pytest.approx(2.0 / 3.0)
+    assert tuple(native.mean_variance([1.0, 2.0, 3.0])) == pytest.approx(
+        (2.0, 2.0 / 3.0)
+    )
     assert native.softmax([0.0, 1.0])[1] > native.softmax([0.0, 1.0])[0]
+
+
+@pytest.mark.skipif(
+    not math_utils.native_math_available(),
+    reason="pybind11 extension is not built in this environment",
+)
+def test_native_policy_head_hotpaths_match_python_semantics():
+    weights = [[0.2, -0.4, 0.1], [0.5, 0.0, -0.3]]
+    bias = [0.05, -0.2]
+    state = [1.0, 2.0, -1.0]
+    probabilities = [0.35, 0.65]
+
+    logits = math_utils.matrix_vector_add(weights, bias, state)
+    assert logits == pytest.approx(
+        [
+            sum(lhs * rhs for lhs, rhs in zip(row, state, strict=True)) + b
+            for row, b in zip(weights, bias, strict=True)
+        ]
+    )
+
+    expected_weights = [list(row) for row in weights]
+    expected_bias = list(bias)
+    selected_index = 1
+    advantage = 0.75
+    learning_rate = 0.03
+    for row_index, row in enumerate(expected_weights):
+        coefficient = (
+            (1.0 if row_index == selected_index else 0.0) - probabilities[row_index]
+        ) * advantage
+        for column_index, value in enumerate(state):
+            row[column_index] += learning_rate * coefficient * value
+        expected_bias[row_index] += learning_rate * coefficient
+
+    assert math_utils.categorical_update(
+        weights,
+        bias,
+        state,
+        selected_index,
+        probabilities,
+        advantage,
+        learning_rate,
+    )
+    for row, expected_row in zip(weights, expected_weights, strict=True):
+        assert row == pytest.approx(expected_row)
+    assert bias == pytest.approx(expected_bias)
+
+
+@pytest.mark.skipif(
+    not math_utils.native_math_available(),
+    reason="pybind11 extension is not built in this environment",
+)
+def test_native_gaussian_and_value_updates_match_python_semantics():
+    weights = [[0.1, 0.2], [-0.1, 0.4]]
+    bias = [0.0, 0.3]
+    state = [2.0, -1.0]
+    raw_samples = [0.6, -0.2]
+    raw_means = [0.1, -0.4]
+    advantage = 1.2
+    learning_rate = 0.05
+    variance = 0.25
+
+    expected_weights = [list(row) for row in weights]
+    expected_bias = list(bias)
+    for row_index, row in enumerate(expected_weights):
+        coefficient = (
+            (raw_samples[row_index] - raw_means[row_index]) / variance
+        ) * advantage
+        for column_index, value in enumerate(state):
+            row[column_index] += learning_rate * coefficient * value
+        expected_bias[row_index] += learning_rate * coefficient
+
+    assert math_utils.gaussian_update(
+        weights,
+        bias,
+        state,
+        raw_samples,
+        raw_means,
+        advantage,
+        learning_rate,
+        variance,
+    )
+    for row, expected_row in zip(weights, expected_weights, strict=True):
+        assert row == pytest.approx(expected_row)
+    assert bias == pytest.approx(expected_bias)
+
+    value_weights = [0.4, -0.2]
+    expected_value = [
+        weight + learning_rate * 0.9 * value
+        for weight, value in zip(value_weights, state, strict=True)
+    ]
+    assert math_utils.value_update(value_weights, state, 0.9, learning_rate)
+    assert value_weights == pytest.approx(expected_value)
