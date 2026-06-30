@@ -1,4 +1,4 @@
-"""Cross-cutting OOM prevention — headroom probes, clamps, and load guards."""
+"""Cross-cutting OOM prevention — headroom probes, cache release, and fallbacks."""
 
 from __future__ import annotations
 
@@ -252,7 +252,7 @@ def llama_batch_headroom_mb(
 
 
 def headroom_mb() -> int:
-    """Free memory headroom in MB for fit checks and clamps."""
+    """Free memory headroom in MB for fit labels and status reporting."""
     profile = hardware_profile()
     try:
         return int(vram_headroom_mb(profile))
@@ -317,7 +317,9 @@ def available_ram_mb() -> int:
 def build_hf_max_memory(
     *, reserve_ratio: float = _DEFAULT_RESERVE_RATIO
 ) -> dict[int, str] | None:
-    """Build HuggingFace ``max_memory`` map from live free VRAM."""
+    """Build HuggingFace ``max_memory`` unless caps are explicitly disabled."""
+    if env_bool("SEISO_DISABLE_MEMORY_CAPS", False):
+        return None
     try:
         import torch
     except ImportError:
@@ -345,16 +347,21 @@ def assess_path_memory_fit(path: str | Path, *, mode: str = "chat") -> dict[str,
     try:
         return assess_hardware_fit(est_gb, profile, mode=mode)
     except Exception:
-        from seiso.hardware.tiers import fit_headroom_mb
+        from seiso.hardware.tiers import fit_headroom_mb, vram_headroom_mb
 
-        budget = fit_headroom_mb(profile)
-        blocked = budget > 0 and est_mb > int(budget * 1.12)
+        capacity = int(fit_headroom_mb(profile))
+        free = int(vram_headroom_mb(profile))
+        raw_budget = free if free > 0 else capacity
+        reserve = max(256, int(raw_budget * 0.02)) if raw_budget > 0 else 0
+        budget = max(0, raw_budget - reserve)
+        blocked = budget > 0 and est_mb > budget
+        budget_gb = round(budget / 1024, 1)
         return {
             "hardware_fit": "unlikely" if blocked else "good",
             "est_vram_mb": est_mb,
             "memory_load_blocked": blocked,
             "memory_load_blocked_reason": (
-                f"Needs ~{est_gb:.1f} GB at runtime but this GPU has ~{round(budget / 1024, 1)} GB usable VRAM."
+                f"Needs ~{est_gb:.1f} GB at runtime but only ~{budget_gb} GB is safely available right now."
                 if blocked
                 else None
             ),
@@ -384,7 +391,7 @@ def ensure_load_fits(
     mode: str = "chat",
     backend: str | None = None,
 ) -> dict[str, Any]:
-    """Block or warn before loading a model that exceeds headroom."""
+    """Block model loads that exceed measured memory headroom."""
     fit = assess_path_memory_fit_for_load(path, mode=mode, backend=backend)
     if fit.get("memory_load_blocked"):
         reason = (
@@ -412,9 +419,12 @@ def sanitize_inference_payload(payload: dict[str, Any]) -> dict[str, Any]:
     max_tokens = int(out.get("max_tokens") or 2048)
     max_tokens = max(1, min(max_tokens, _MAX_INFERENCE_TOKENS))
 
-    # Reserve ~0.35 MB KV per 128 tokens — allow longer generations on mid-tier GPUs.
-    kv_budget_tokens = max(512, int((headroom - _INFERENCE_OVERHEAD_MB) * 128 / 1.15))
-    max_tokens = min(max_tokens, max(128, kv_budget_tokens - prompt_tokens - 32))
+    if headroom > _INFERENCE_OVERHEAD_MB:
+        kv_budget_tokens = max(
+            512,
+            int((headroom - _INFERENCE_OVERHEAD_MB) * 128 / 1.15),
+        )
+        max_tokens = min(max_tokens, max(128, kv_budget_tokens - prompt_tokens - 32))
     out["max_tokens"] = max_tokens
 
     if out.get("n_ctx") is not None:
@@ -457,36 +467,15 @@ def clamp_llama_n_ctx(
 
 
 def clamp_llama_load_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
-    """Scale llama.cpp batch/ubatch down on tight memory."""
+    """Normalize llama.cpp load kwargs without RAM/VRAM-based downscaling."""
     out = dict(kwargs)
-    model_path = out.pop("_model_path", None)
-    n_gpu_layers = int(out.get("n_gpu_layers") or 0)
-    headroom = llama_batch_headroom_mb(
-        headroom_mb(),
-        model_path=model_path,
-        n_gpu_layers=n_gpu_layers,
-    )
+    out.pop("_model_path", None)
     n_ctx = int(out.get("n_ctx") or _MIN_LLAMA_CTX)
 
-    if headroom < 4096:
-        cap_batch = 512
-    elif headroom < 8192:
-        cap_batch = 1024
-    elif headroom < 16384:
-        cap_batch = 1792
-    else:
-        cap_batch = _MAX_LLAMA_BATCH
-
-    cap_batch = max(_MIN_LLAMA_BATCH, min(cap_batch, _MAX_LLAMA_BATCH))
-    ctx_scale = max(1, n_ctx // 4096)
-    cap_batch = max(_MIN_LLAMA_BATCH, cap_batch // ctx_scale)
-    out["n_batch"] = min(int(out.get("n_batch") or cap_batch), cap_batch)
-    ubatch_cap = max(
-        _MIN_LLAMA_BATCH, min(out["n_batch"], cap_batch // 2 or _MIN_LLAMA_BATCH)
-    )
-    out["n_ubatch"] = min(
-        int(out.get("n_ubatch") or ubatch_cap), ubatch_cap, out["n_batch"]
-    )
+    n_batch = int(out.get("n_batch") or _MAX_LLAMA_BATCH)
+    out["n_batch"] = max(_MIN_LLAMA_BATCH, n_batch)
+    n_ubatch = int(out.get("n_ubatch") or out["n_batch"])
+    out["n_ubatch"] = max(_MIN_LLAMA_BATCH, min(n_ubatch, out["n_batch"]))
 
     ctx_cap = clamp_llama_n_ctx(n_ctx, max_tokens=512)
     if n_ctx > ctx_cap:
@@ -495,15 +484,8 @@ def clamp_llama_load_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
 
 
 def clamp_llama_cache_mb(default_mb: int) -> int:
-    """Disable or shrink RAM prompt cache when headroom is low."""
-    headroom = headroom_mb()
-    if headroom < 3072:
-        return 0
-    if headroom < 6144:
-        return min(default_mb, 384)
-    if headroom < 10240:
-        return min(default_mb, 768)
-    return min(default_mb, _MAX_LLAMA_CACHE_MB)
+    """Return the configured prompt cache size without memory-based shrinking."""
+    return int(default_mb)
 
 
 def training_pin_memory() -> bool:
@@ -517,7 +499,7 @@ def training_pin_memory() -> bool:
 
 
 def apply_training_memory_guards(config: Any) -> Any:
-    """Clamp training batch/seq to hardware headroom before the run."""
+    """Keep compatibility fixes while leaving user RAM/VRAM sizing untouched."""
     from seiso.training.config import TrainConfig
 
     if not isinstance(config, TrainConfig):
@@ -533,39 +515,7 @@ def apply_training_memory_guards(config: Any) -> Any:
             "max_seq_length": 2048,
         }
 
-    headroom = headroom_mb()
     updates: dict[str, Any] = {}
-    batch = int(config.batch_size)
-    accum = int(config.gradient_accumulation_steps)
-    max_seq = int(config.max_seq_length)
-
-    est_mb = estimate_path_vram_mb(config.model_id, mode="train")
-    try:
-        from seiso.kernels.training_profile import prepare_cuda_training_profile
-
-        cuda_profile = prepare_cuda_training_profile(
-            headroom_mb=headroom,
-            est_train_mb=est_mb,
-            model_id=config.model_id,
-            batch_size=batch,
-            max_seq_length=max_seq,
-        )
-        meta_keys = {"cuda_training_mode", "kernel_profile_id", "kernel_low_vram"}
-        respect_false = frozenset(
-            {"use_triton", "use_fused_ce", "use_fused_lora", "gradient_checkpointing"}
-        )
-        for key, value in cuda_profile.items():
-            if key in meta_keys:
-                continue
-            if key in respect_false and getattr(config, key, None) is False:
-                continue
-            updates[key] = value
-    except (ImportError, RuntimeError):
-        # training_profile or CUDA extension unavailable — use safe defaults.
-        if headroom > 0 and headroom < 8192:
-            os.environ.setdefault("SEISO_KERNEL_LOW_VRAM", "1")
-            updates.setdefault("gradient_checkpointing", True)
-            updates.setdefault("use_fused_ce", False)
 
     # Downgrade quant to the platform-recommended value when the requested mode
     # is unavailable (e.g. QLoRA/4-bit on macOS where bitsandbytes is absent,
@@ -591,43 +541,6 @@ def apply_training_memory_guards(config: Any) -> Any:
                     config.quant.value,
                     target.value,
                 )
-
-    if batch > defaults["batch_size"]:
-        updates["batch_size"] = defaults["batch_size"]
-        batch = defaults["batch_size"]
-    if accum < defaults["gradient_accumulation_steps"]:
-        updates["gradient_accumulation_steps"] = defaults["gradient_accumulation_steps"]
-    if max_seq > defaults["max_seq_length"]:
-        updates["max_seq_length"] = defaults["max_seq_length"]
-        max_seq = defaults["max_seq_length"]
-
-    if headroom > 0 and est_mb > int(headroom * 1.05) and batch > 1:
-        updates["batch_size"] = 1
-        updates["gradient_accumulation_steps"] = (
-            max(accum, defaults["gradient_accumulation_steps"]) * 2
-        )
-    if headroom > 0 and est_mb > int(headroom * 0.97) and max_seq > 1024:
-        updates["max_seq_length"] = min(max_seq, 1024)
-
-    from seiso.models.hub_quant import needs_tight_vram_training
-
-    trust_remote_code = bool(
-        getattr(config, "extra", {}).get("trust_remote_code", False)
-    )
-    if needs_tight_vram_training(
-        str(config.model_id),
-        trust_remote_code=trust_remote_code,
-        est_train_mb=est_mb,
-        headroom_mb=headroom,
-    ):
-        updates.setdefault("batch_size", 1)
-        updates.setdefault("gradient_accumulation_steps", max(accum, 32))
-        updates.setdefault("max_seq_length", min(max_seq, 512))
-        updates.setdefault("use_triton", False)
-        updates.setdefault("use_fused_lora", False)
-        updates.setdefault("use_fused_ce", False)
-        updates.setdefault("gradient_checkpointing", True)
-        updates.setdefault("packing", False)
 
     if not updates:
         return config
@@ -657,35 +570,8 @@ def apply_training_oom_fallback(config: Any) -> Any:
 
 
 def apply_rl_memory_guards(flat: dict[str, Any]) -> dict[str, Any]:
-    """Scale RL quant torch settings to free VRAM."""
+    """Leave RL quant sizing untouched; OOM fallback handles real failures."""
     out = dict(flat)
-    headroom = headroom_mb()
-    free_gb = headroom / 1024
-
-    preflight = int(out.get("torch_preflight_batch_size") or 4096)
-    if free_gb < 3:
-        out["torch_preflight_batch_size"] = min(preflight, 768)
-        out["replay_buffer_on_gpu"] = False
-    elif free_gb < 6:
-        out["torch_preflight_batch_size"] = min(preflight, 3072)
-        out["replay_buffer_on_gpu"] = bool(out.get("replay_buffer_on_gpu", True))
-    else:
-        out["torch_preflight_batch_size"] = preflight
-
-    batch_eps = int(out.get("torch_batch_episodes") or 256)
-    if free_gb < 4:
-        out["torch_batch_episodes"] = min(batch_eps, 384)
-    elif free_gb < 10:
-        out["torch_batch_episodes"] = min(batch_eps, 768)
-
-    minibatch = int(out.get("torch_minibatch_size") or 64)
-    if free_gb < 4:
-        out["torch_minibatch_size"] = min(minibatch, 48)
-
-    replay_cap = int(out.get("replay_buffer_capacity") or 0)
-    if replay_cap > 0 and free_gb < 6:
-        out["replay_buffer_capacity"] = min(replay_cap, 32_000)
-
     ctx = int(out.get("llama_cpp_context") or 0)
     if ctx > 0:
         out["llama_cpp_context"] = min(ctx, clamp_llama_n_ctx(ctx, max_tokens=512))

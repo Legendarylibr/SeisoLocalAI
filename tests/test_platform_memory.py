@@ -64,6 +64,33 @@ def test_platform_profile_darwin_16gb_apple(monkeypatch):
     assert os.environ.get("SEISO_SKIP_MLX_PROBE") == "1"
 
 
+def test_platform_profile_disable_memory_caps_keeps_full_defaults(monkeypatch):
+    profile = {"ram_gb": 16, "gpus": [], "backend": "metal", "platform": "Darwin"}
+    monkeypatch.setenv("SEISO_DISABLE_MEMORY_CAPS", "1")
+    monkeypatch.setattr(
+        "seiso.memory.platform_profile.classify_tier",
+        lambda _p: HardwareTier.APPLE_UNIFIED,
+    )
+    monkeypatch.setattr(
+        "seiso.memory.platform_profile.vram_headroom_mb", lambda _p: 3072
+    )
+    monkeypatch.setattr(
+        "seiso.memory.platform_profile.training_capabilities",
+        lambda: {
+            "supports_mlx_inference": True,
+            "gpu_count": 0,
+            "train_platform": "cpu",
+        },
+    )
+    monkeypatch.setattr("platform.system", lambda: "Darwin")
+
+    apply_platform_memory_profile(profile=profile)
+
+    assert os.environ["SEISO_LLAMA_PROMPT_CACHE"] == "true"
+    assert os.environ["SEISO_LLAMA_CACHE_MB"] == "1024"
+    assert "SEISO_LLAMA_BATCH" not in os.environ
+
+
 def test_platform_profile_darwin_intel_cpu_only(monkeypatch):
     profile = {"ram_gb": 16, "gpus": [], "backend": "cpu", "platform": "Darwin"}
     monkeypatch.setattr(

@@ -43,21 +43,21 @@ def test_clamp_llama_n_ctx_respects_headroom(monkeypatch):
     assert n_ctx % 512 == 0
 
 
-def test_clamp_llama_load_kwargs_reduces_batch_on_tight_memory(monkeypatch):
+def test_clamp_llama_load_kwargs_keeps_requested_batch_on_tight_memory(monkeypatch):
     monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 3500)
     kwargs = clamp_llama_load_kwargs(
         {"n_ctx": 4096, "n_batch": 2048, "n_ubatch": 2048, "n_gpu_layers": -1}
     )
-    assert kwargs["n_batch"] <= 512
-    assert kwargs["n_ubatch"] <= kwargs["n_batch"]
+    assert kwargs["n_batch"] == 2048
+    assert kwargs["n_ubatch"] == 2048
 
 
-def test_clamp_llama_load_kwargs_scales_batch_with_large_context(monkeypatch):
+def test_clamp_llama_load_kwargs_does_not_scale_batch_with_large_context(monkeypatch):
     monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 16384)
     kwargs = clamp_llama_load_kwargs(
         {"n_ctx": 8192, "n_batch": 2048, "n_ubatch": 512, "n_gpu_layers": -1}
     )
-    assert kwargs["n_batch"] <= 1024
+    assert kwargs["n_batch"] == 2048
 
 
 def test_llama_batch_headroom_accounts_for_model_weights(monkeypatch, tmp_path):
@@ -77,12 +77,12 @@ def test_llama_batch_headroom_accounts_for_model_weights(monkeypatch, tmp_path):
     assert remaining < 8192
 
 
-def test_clamp_llama_cache_mb_disabled_on_low_headroom(monkeypatch):
+def test_clamp_llama_cache_mb_keeps_configured_value_on_low_headroom(monkeypatch):
     monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 2048)
-    assert clamp_llama_cache_mb(1024) == 0
+    assert clamp_llama_cache_mb(1024) == 1024
 
 
-def test_apply_training_memory_guards_clamps_batch(monkeypatch):
+def test_apply_training_memory_guards_keeps_user_sizing(monkeypatch):
     from seiso.training.config import TrainConfig
 
     profile = {
@@ -101,22 +101,20 @@ def test_apply_training_memory_guards_clamps_batch(monkeypatch):
         max_seq_length=8192,
     )
     guarded = apply_training_memory_guards(cfg)
-    assert guarded.batch_size <= 2
-    assert guarded.max_seq_length <= 4096
+    assert guarded.batch_size == 8
+    assert guarded.gradient_accumulation_steps == 1
+    assert guarded.max_seq_length == 8192
 
 
-def test_apply_rl_memory_guards_scales_preflight(monkeypatch):
+def test_apply_rl_memory_guards_keeps_user_sizing(monkeypatch):
     monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 2048)
-    out = apply_rl_memory_guards(
-        {
-            "torch_preflight_batch_size": 16384,
-            "replay_buffer_on_gpu": True,
-            "torch_batch_episodes": 2048,
-        }
-    )
-    assert out["torch_preflight_batch_size"] <= 768
-    assert out["replay_buffer_on_gpu"] is False
-    assert out["torch_batch_episodes"] <= 384
+    flat = {
+        "torch_preflight_batch_size": 16384,
+        "replay_buffer_on_gpu": True,
+        "torch_batch_episodes": 2048,
+    }
+    out = apply_rl_memory_guards(flat)
+    assert out == flat
 
 
 def test_ensure_load_fits_blocks_oversized_gguf(tmp_path, monkeypatch):

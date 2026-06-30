@@ -461,7 +461,7 @@ def test_llama_speed_memory_profiles_skips_borderline(monkeypatch, tmp_path):
     assert profiles == []
 
 
-def test_llama_load_memory_profiles_adds_compact_for_borderline(monkeypatch, tmp_path):
+def test_llama_load_memory_profiles_adds_compact_after_base_for_borderline(monkeypatch, tmp_path):
     import seiso.inference.model_pool as mp
 
     gguf = tmp_path / "big.gguf"

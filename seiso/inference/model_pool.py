@@ -142,7 +142,7 @@ def _speed_llama_batch_defaults(headroom: int) -> tuple[int, int] | None:
 
 
 def fit_llama_gpu_layers(model_path: str, requested: int, headroom_mb: int) -> int:
-    """Estimate a GPU layer count that fits current free VRAM (conservative)."""
+    """Estimate a fallback GPU layer count after full offload fails."""
     if requested == 0 or headroom_mb <= 0 or not _llama_gpu_offload_ok():
         return 0
 
@@ -151,7 +151,6 @@ def fit_llama_gpu_layers(model_path: str, requested: int, headroom_mb: int) -> i
 
     weight_mb = max(int(estimate_path_vram_mb(model_path)), 256)
     total_layers = gguf_block_count(model_path) or 64
-    # Compact ctx/batch + KV quant can free ~1–2 GB on large models.
     kv_reserve_mb = max(256, min(int(headroom_mb * 0.08), 1024))
     avail_mb = headroom_mb - kv_reserve_mb
 
@@ -162,7 +161,7 @@ def fit_llama_gpu_layers(model_path: str, requested: int, headroom_mb: int) -> i
 
     if avail_mb < 256:
         logger.warning(
-            "VRAM too tight for GPU offload (~%.1f GB free) — running GGUF on CPU",
+            "VRAM too tight for GPU offload (~%.1f GB free) — falling back to CPU",
             headroom_mb / 1024,
         )
         return 0
@@ -225,10 +224,8 @@ def _llama_speed_memory_profiles(
 def _llama_load_memory_profiles(
     base_kwargs: dict[str, Any], n_ctx: int, model_path: str, free_mb: int
 ) -> list[dict[str, Any]]:
-    """Throughput-first, then base, then leaner VRAM profiles before partial layers."""
-    profiles: list[dict[str, Any]] = []
-    profiles.extend(_llama_speed_memory_profiles(base_kwargs, model_path, free_mb))
-    profiles.append({})
+    """Try requested settings first, then compact profiles only after failure."""
+    profiles: list[dict[str, Any]] = [{}]
     borderline = _llama_borderline_vram(model_path, free_mb)
     base_batch = int(base_kwargs.get("n_batch") or 512)
     base_ubatch = int(base_kwargs.get("n_ubatch") or 256)
@@ -314,7 +311,7 @@ def _llama_speed_extras(model_path: str) -> dict[str, Any]:
 
 
 def _llama_kv_quant_options(model_path: str) -> list[dict[str, Any]]:
-    """KV-cache quant tiers to try (leanest first) when VRAM is tight."""
+    """KV-cache quant tiers to try after the unquantized cache fails."""
     if not env_bool("SEISO_LLAMA_KV_QUANT", True):
         return [{}]
     try:
@@ -409,7 +406,11 @@ def _llama_cache_is_optimal(
 
 def llama_load_kwargs(n_ctx: int, *, model_path: str | None = None) -> dict[str, Any]:
     """Tuned llama.cpp defaults for faster preload/first token, overrideable by env."""
-    from seiso.memory.protection import clamp_llama_load_kwargs, headroom_mb
+    from seiso.memory.protection import (
+        clamp_llama_load_kwargs,
+        headroom_mb,
+        llama_batch_headroom_mb,
+    )
 
     n_threads = env_int("SEISO_LLAMA_THREADS", _default_llama_threads())
     n_gpu_layers = env_int("SEISO_LLAMA_GPU_LAYERS", _default_llama_gpu_layers())
@@ -421,7 +422,6 @@ def llama_load_kwargs(n_ctx: int, *, model_path: str | None = None) -> dict[str,
             "llama-cpp-python wheel lacks GPU offload support — forcing n_gpu_layers=0"
         )
         n_gpu_layers = 0
-    from seiso.memory.protection import llama_batch_headroom_mb
 
     free_mb = headroom_mb()
     layer_hint = n_gpu_layers
@@ -434,24 +434,15 @@ def llama_load_kwargs(n_ctx: int, *, model_path: str | None = None) -> dict[str,
     batch_headroom = llama_batch_headroom_mb(
         free_mb, model_path=model_path, n_gpu_layers=layer_hint
     )
-    borderline = bool(model_path and _llama_borderline_vram(model_path, free_mb))
-    speed_first = _llama_speed_scale_enabled() and n_gpu_layers != 0 and not borderline
-    batch_cap, ubatch_cap = _headroom_llama_batch_caps(
+    batch_default, ubatch_default = _headroom_llama_batch_caps(
         batch_headroom, speed_first=False
     )
     speed_defaults = _speed_llama_batch_defaults(batch_headroom)
     if speed_defaults is not None:
-        batch_cap, ubatch_cap = speed_defaults
-    if speed_first:
-        speed_batch, speed_ubatch = _headroom_llama_batch_caps(
-            batch_headroom, speed_first=True
-        )
-        batch_cap = max(batch_cap, speed_batch)
-        ubatch_cap = max(ubatch_cap, speed_ubatch)
-    n_batch = env_int("SEISO_LLAMA_BATCH", batch_cap)
-    n_ubatch = env_int("SEISO_LLAMA_UBATCH", min(n_batch, ubatch_cap))
-    n_batch = min(n_batch, batch_cap)
-    n_ubatch = min(n_ubatch, ubatch_cap, n_batch)
+        batch_default, ubatch_default = speed_defaults
+
+    n_batch = env_int("SEISO_LLAMA_BATCH", batch_default)
+    n_ubatch = min(env_int("SEISO_LLAMA_UBATCH", min(n_batch, ubatch_default)), n_batch)
     kwargs: dict[str, Any] = {
         "n_ctx": n_ctx,
         "n_threads": n_threads,

@@ -24,23 +24,12 @@ _OMISSION_MARKER = "[...older content omitted...]\n"
 def _context_char_budget() -> int:
     raw = os.environ.get("SEISO_CHAT_CONTEXT_CHARS", "").strip()
     if not raw:
-        base = _DEFAULT_CONTEXT_CHAR_BUDGET
+        return _DEFAULT_CONTEXT_CHAR_BUDGET
     else:
         try:
-            base = max(1_000, int(raw))
+            return max(1_000, int(raw))
         except ValueError:
-            base = _DEFAULT_CONTEXT_CHAR_BUDGET
-    try:
-        from seiso.memory.protection import headroom_mb
-
-        headroom = headroom_mb()
-        if headroom < 4096:
-            return min(base, 8_000)
-        if headroom < 8192:
-            return min(base, 16_000)
-    except Exception:
-        pass
-    return base
+            return _DEFAULT_CONTEXT_CHAR_BUDGET
 
 
 def _decay_half_life_seconds() -> float:
