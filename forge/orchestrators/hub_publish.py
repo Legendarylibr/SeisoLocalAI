@@ -17,11 +17,11 @@ class HubPublishOrchestrator(Orchestrator):
 
     async def execute(self, job_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         configure_hf_hub_cache(self.sandbox_root)
+        loop = asyncio.get_running_loop()
 
         def on_log(msg: str) -> None:
-            self._emit_log(job_id, msg)
+            loop.call_soon_threadsafe(self._emit_log, job_id, msg)
 
-        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
             None, lambda: self._run_publish(payload, on_log)
         )

@@ -54,7 +54,7 @@ class ExportOrchestrator(Orchestrator):
         loop = asyncio.get_running_loop()
 
         def on_log(msg: str) -> None:
-            self._emit_log(job_id, msg)
+            loop.call_soon_threadsafe(self._emit_log, job_id, msg)
 
         try:
             plan = prepare_export(
