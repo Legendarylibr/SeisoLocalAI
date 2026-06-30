@@ -9,7 +9,12 @@ from seiso.adaptive_quant.backends.quality import (
     apply_external_quality,
 )
 from seiso.adaptive_quant.configuration import FrameworkConfig
-from seiso.adaptive_quant.math_utils import clamp, mean, mean_variance
+from seiso.adaptive_quant.math_utils import (
+    clamp,
+    mean,
+    mean_variance,
+    simulator_core_metrics,
+)
 from seiso.adaptive_quant.moe import ExpertBank
 from seiso.adaptive_quant.types import (
     BackendMetricDict,
@@ -72,107 +77,45 @@ class SimulatorBackend:
         complexity = state.input_features.complexity_score
         sensitivity = mean(state.sensitivity.layer_stats)
         prompt_length = max(8, state.input_features.prompt_length)
-        compression = max(0.0, (8.0 - avg_bits) / 6.0)
-
-        mode_bonus = {
-            QuantMode.DISCRETE: 0.10,
-            QuantMode.GROUPED: 0.16,
-            QuantMode.PER_LAYER: 0.18,
-            QuantMode.DYNAMIC: 0.28,
-            QuantMode.LEARNED: 0.34,
-        }[decision.mode]
-
-        latency_ms = (
-            8.5
-            * prompt_length
-            * hardware.latency_bias
-            / max(0.35, hardware.compute_factor + (8.0 - avg_bits) * 0.12 + mode_bonus)
+        native_metrics = simulator_core_metrics(
+            mode=decision.mode.value,
+            hardware_type=hardware.hardware_type.value,
+            avg_bits=avg_bits,
+            bit_variance=bit_variance,
+            complexity=complexity,
+            sensitivity=sensitivity,
+            prompt_length=float(prompt_length),
+            latency_bias=hardware.latency_bias,
+            compute_factor=hardware.compute_factor,
+            throughput_bias=hardware.throughput_bias,
+            kernel_uniformity_preference=hardware.kernel_uniformity_preference,
+            preferred_bits=hardware.preferred_bits,
+            memory_budget_mb=hardware.memory_budget_mb,
+            scale_factor=decision.scale_factor,
+            clipping_range=decision.clipping_range,
         )
-        latency_ms *= (
-            1.0
-            + complexity * 0.55
-            + max(0.0, bit_variance - hardware.kernel_uniformity_preference) * 0.18
-        )
-
-        throughput_tps = (
-            140.0
-            * hardware.throughput_bias
-            * (1.0 + (8.0 - avg_bits) * 0.10 + mode_bonus * 0.40)
-            / (1.0 + complexity * 0.80 + hardware.latency_bias * 0.08)
-        )
-        if hardware.hardware_type == HardwareType.GPU:
-            throughput_tps *= 1.0 - min(0.12, bit_variance * 0.03)
+        if native_metrics is not None:
+            latency_ms, throughput_tps, perplexity, memory_mb = native_metrics
         else:
-            throughput_tps *= 1.0 + min(
-                0.10, max(0.0, hardware.preferred_bits - avg_bits) * 0.02
+            latency_ms, throughput_tps, perplexity, memory_mb = (
+                self._evaluate_python_core(
+                    mode=decision.mode,
+                    hardware_type=hardware.hardware_type,
+                    avg_bits=avg_bits,
+                    bit_variance=bit_variance,
+                    complexity=complexity,
+                    sensitivity=sensitivity,
+                    prompt_length=prompt_length,
+                    latency_bias=hardware.latency_bias,
+                    compute_factor=hardware.compute_factor,
+                    throughput_bias=hardware.throughput_bias,
+                    kernel_uniformity_preference=hardware.kernel_uniformity_preference,
+                    preferred_bits=hardware.preferred_bits,
+                    memory_budget_mb=hardware.memory_budget_mb,
+                    scale_factor=decision.scale_factor,
+                    clipping_range=decision.clipping_range,
+                )
             )
-
-        memory_mb = 4_800.0 * (avg_bits / 16.0) * (1.0 + complexity * 0.15)
-        if decision.mode in {QuantMode.PER_LAYER, QuantMode.LEARNED}:
-            memory_mb *= 1.02
-
-        perplexity = (
-            5.6
-            + complexity * 3.4
-            + max(0.0, 5.5 - avg_bits) * (0.60 + complexity * 0.90 + sensitivity * 0.35)
-            + abs(1.0 - decision.scale_factor) * 0.65
-            + max(0.0, 1.05 - decision.clipping_range) * 1.20
-            - mode_bonus * 0.70
-        )
-
-        hardware_alignment = abs(avg_bits - hardware.preferred_bits)
-        latency_ms *= 1.0 + hardware_alignment * 0.04
-        throughput_tps *= 1.0 - hardware_alignment * 0.02
-        perplexity += hardware_alignment * 0.15
-
-        if (
-            hardware.hardware_type in {HardwareType.CPU, HardwareType.LOW_RESOURCE}
-            and avg_bits > hardware.preferred_bits
-        ):
-            excess_bits = avg_bits - hardware.preferred_bits
-            latency_ms *= 1.0 + excess_bits * (
-                0.16 if hardware.hardware_type == HardwareType.CPU else 0.24
-            )
-            throughput_tps *= max(
-                0.55,
-                1.0
-                - excess_bits
-                * (0.07 if hardware.hardware_type == HardwareType.CPU else 0.12),
-            )
-            memory_mb *= 1.0 + excess_bits * (
-                0.10 if hardware.hardware_type == HardwareType.CPU else 0.18
-            )
-        elif (
-            hardware.hardware_type == HardwareType.GPU
-            and avg_bits < hardware.preferred_bits
-        ):
-            deficit_bits = hardware.preferred_bits - avg_bits
-            perplexity += deficit_bits * 0.45
-            throughput_tps *= max(0.78, 1.0 - deficit_bits * 0.03)
-
-        if decision.mode == QuantMode.DYNAMIC:
-            latency_ms *= 0.92
-            throughput_tps *= 1.06
-            perplexity -= 0.25 + complexity * 0.20
-        elif decision.mode == QuantMode.LEARNED:
-            latency_ms *= 0.82 - compression * 0.06
-            throughput_tps *= 1.12 + compression * 0.08
-            memory_mb *= 0.78 - compression * 0.04
-            perplexity -= 0.38 + sensitivity * 0.22
-        elif (
-            decision.mode == QuantMode.GROUPED
-            and hardware.hardware_type != HardwareType.GPU
-        ):
-            latency_ms *= 0.95
-            throughput_tps *= 1.03
-
-        overflow_ratio = (
-            max(0.0, memory_mb - hardware.memory_budget_mb) / hardware.memory_budget_mb
-        )
-        if overflow_ratio > 0.0:
-            latency_ms *= 1.0 + overflow_ratio * 2.50
-            throughput_tps *= 1.0 / (1.0 + overflow_ratio * 1.8)
-            perplexity += overflow_ratio * 1.50
 
         swap_cost_ms = 0.0
         cache_miss_count = 0.0
@@ -246,6 +189,119 @@ class SimulatorBackend:
         )
         apply_external_quality(metrics, state, self.external_quality)
         return metrics
+
+    @staticmethod
+    def _evaluate_python_core(
+        *,
+        mode: QuantMode,
+        hardware_type: HardwareType,
+        avg_bits: float,
+        bit_variance: float,
+        complexity: float,
+        sensitivity: float,
+        prompt_length: float,
+        latency_bias: float,
+        compute_factor: float,
+        throughput_bias: float,
+        kernel_uniformity_preference: float,
+        preferred_bits: float,
+        memory_budget_mb: float,
+        scale_factor: float,
+        clipping_range: float,
+    ) -> tuple[float, float, float, float]:
+        compression = max(0.0, (8.0 - avg_bits) / 6.0)
+        mode_bonus = {
+            QuantMode.DISCRETE: 0.10,
+            QuantMode.GROUPED: 0.16,
+            QuantMode.PER_LAYER: 0.18,
+            QuantMode.DYNAMIC: 0.28,
+            QuantMode.LEARNED: 0.34,
+        }[mode]
+
+        latency_ms = (
+            8.5
+            * prompt_length
+            * latency_bias
+            / max(0.35, compute_factor + (8.0 - avg_bits) * 0.12 + mode_bonus)
+        )
+        latency_ms *= (
+            1.0
+            + complexity * 0.55
+            + max(0.0, bit_variance - kernel_uniformity_preference) * 0.18
+        )
+
+        throughput_tps = (
+            140.0
+            * throughput_bias
+            * (1.0 + (8.0 - avg_bits) * 0.10 + mode_bonus * 0.40)
+            / (1.0 + complexity * 0.80 + latency_bias * 0.08)
+        )
+        if hardware_type == HardwareType.GPU:
+            throughput_tps *= 1.0 - min(0.12, bit_variance * 0.03)
+        else:
+            throughput_tps *= 1.0 + min(
+                0.10, max(0.0, preferred_bits - avg_bits) * 0.02
+            )
+
+        memory_mb = 4_800.0 * (avg_bits / 16.0) * (1.0 + complexity * 0.15)
+        if mode in {QuantMode.PER_LAYER, QuantMode.LEARNED}:
+            memory_mb *= 1.02
+
+        perplexity = (
+            5.6
+            + complexity * 3.4
+            + max(0.0, 5.5 - avg_bits) * (0.60 + complexity * 0.90 + sensitivity * 0.35)
+            + abs(1.0 - scale_factor) * 0.65
+            + max(0.0, 1.05 - clipping_range) * 1.20
+            - mode_bonus * 0.70
+        )
+
+        hardware_alignment = abs(avg_bits - preferred_bits)
+        latency_ms *= 1.0 + hardware_alignment * 0.04
+        throughput_tps *= 1.0 - hardware_alignment * 0.02
+        perplexity += hardware_alignment * 0.15
+
+        if (
+            hardware_type in {HardwareType.CPU, HardwareType.LOW_RESOURCE}
+            and avg_bits > preferred_bits
+        ):
+            excess_bits = avg_bits - preferred_bits
+            latency_ms *= 1.0 + excess_bits * (
+                0.16 if hardware_type == HardwareType.CPU else 0.24
+            )
+            throughput_tps *= max(
+                0.55,
+                1.0
+                - excess_bits
+                * (0.07 if hardware_type == HardwareType.CPU else 0.12),
+            )
+            memory_mb *= 1.0 + excess_bits * (
+                0.10 if hardware_type == HardwareType.CPU else 0.18
+            )
+        elif hardware_type == HardwareType.GPU and avg_bits < preferred_bits:
+            deficit_bits = preferred_bits - avg_bits
+            perplexity += deficit_bits * 0.45
+            throughput_tps *= max(0.78, 1.0 - deficit_bits * 0.03)
+
+        if mode == QuantMode.DYNAMIC:
+            latency_ms *= 0.92
+            throughput_tps *= 1.06
+            perplexity -= 0.25 + complexity * 0.20
+        elif mode == QuantMode.LEARNED:
+            latency_ms *= 0.82 - compression * 0.06
+            throughput_tps *= 1.12 + compression * 0.08
+            memory_mb *= 0.78 - compression * 0.04
+            perplexity -= 0.38 + sensitivity * 0.22
+        elif mode == QuantMode.GROUPED and hardware_type != HardwareType.GPU:
+            latency_ms *= 0.95
+            throughput_tps *= 1.03
+
+        overflow_ratio = max(0.0, memory_mb - memory_budget_mb) / memory_budget_mb
+        if overflow_ratio > 0.0:
+            latency_ms *= 1.0 + overflow_ratio * 2.50
+            throughput_tps *= 1.0 / (1.0 + overflow_ratio * 1.8)
+            perplexity += overflow_ratio * 1.50
+        return latency_ms, throughput_tps, perplexity, memory_mb
 
     def _apply_moe_adjustments(
         self,

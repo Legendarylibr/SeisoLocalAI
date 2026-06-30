@@ -13,7 +13,6 @@ Design constraints:
 from __future__ import annotations
 
 import hashlib
-import math
 import random
 from dataclasses import dataclass
 from typing import Any
@@ -24,7 +23,7 @@ from seiso.adaptive_quant.configuration.validation import (
     validate_router_task_text,
     validate_runtime_filesystem_path,
 )
-from seiso.adaptive_quant.math_utils import finite_float
+from seiso.adaptive_quant.math_utils import finite_float, norm
 from seiso.adaptive_quant.policy_heads import CategoricalHead, ValueHead
 
 
@@ -123,10 +122,10 @@ class RouterTrace:
 
 
 def _stable_l2_normalize(vector: list[float]) -> list[float]:
-    norm2 = sum(v * v for v in vector)
-    if norm2 <= 0.0:
+    length = norm(vector)
+    if length <= 0.0:
         return vector
-    inv = 1.0 / math.sqrt(norm2)
+    inv = 1.0 / length
     return [v * inv for v in vector]
 
 

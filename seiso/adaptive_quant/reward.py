@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
+from seiso.adaptive_quant.math_utils import weighted_reward
 from seiso.adaptive_quant.types import BackendMetricDict
 
 
@@ -39,6 +40,32 @@ def compute_weighted_reward(
     """
 
     weights = reward_weights
+    native_reward = weighted_reward(
+        alpha_latency=float(weights.alpha_latency),
+        beta_throughput=float(weights.beta_throughput),
+        gamma_perplexity=float(weights.gamma_perplexity),
+        delta_memory=float(weights.delta_memory),
+        epsilon_instability=float(weights.epsilon_instability),
+        eta_token_latency=float(weights.eta_token_latency),
+        zeta_perplexity_over_ref=float(weights.zeta_perplexity_over_ref),
+        theta_kernel_speedup=float(weights.theta_kernel_speedup),
+        iota_kernel_latency=float(weights.iota_kernel_latency),
+        latency_ms=float(metrics["latency_ms"]),
+        throughput_tps=float(metrics["throughput_tps"]),
+        perplexity=float(metrics["perplexity"]),
+        memory_mb=float(metrics["memory_mb"]),
+        latency_ms_per_token=float(
+            metrics.get("latency_ms_per_token", latency_ms_per_token_default)
+        ),
+        stability_penalty=float(stability_penalty),
+        include_instability=bool(include_instability),
+        perplexity_reference=perplexity_reference,
+        kernel_speedup=float(metrics.get("kernel_speedup", 0.0)),
+        kernel_latency_ms=float(metrics.get("kernel_latency_ms", 0.0)),
+    )
+    if native_reward is not None:
+        return native_reward
+
     reward = (
         -weights.alpha_latency * float(metrics["latency_ms"])
         + weights.beta_throughput * float(metrics["throughput_tps"])
