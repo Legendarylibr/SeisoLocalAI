@@ -114,7 +114,12 @@ Documentation = "https://github.com/Legendarylibr/SeisoLocalAI#readme"
 include = ["seiso*", "seiso_cli*", "forge*"]
 
 [tool.setuptools.package-data]
+"seiso.adaptive_quant.configs" = ["*.json"]
 "seiso.adaptive_quant.native" = ["*.cpp"]
+"seiso.adaptive_quant.prompts" = ["*.json"]
+"seiso.adaptive_quant.ui.static" = ["*.html", "*.css", "*.js"]
+"seiso.kernels.cuda" = ["*.cpp", "*.cu", "*.cuh"]
+"seiso.kernels.cuda.include" = ["*.cuh"]
 
 [tool.ruff]
 line-length = 100
@@ -189,7 +194,13 @@ ignored-modules = [
 ]
 
 [tool.pip-audit]
-ignore-vulns = ["CVE-2025-3000"]
+ignore-vulns = [
+  "CVE-2025-3000",
+  # llama-cpp-python depends on diskcache, but Seiso attaches LlamaRAMCache
+  # instead of diskcache's pickle-backed persistent cache. No fixed diskcache
+  # release is advertised by pip-audit for this CVE yet.
+  "CVE-2025-69872",
+]
 
 [tool.pylint.messages_control]
 disable = [

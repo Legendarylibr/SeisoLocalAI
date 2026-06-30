@@ -261,7 +261,7 @@ def job_lint(
             "--score=n",
         ],
         cwd=root,
-        env=env,
+        env={**env, "PYLINTHOME": str(root / ".cache" / "pylint")},
     )
 
 
@@ -294,9 +294,11 @@ def job_types(
     if version != CI_PYTHON:
         print(
             f"WARNING: mypy baseline is calibrated for Python {CI_PYTHON}; "
-            f"local interpreter is {version}. Use --python-bin with Python {CI_PYTHON} for authoritative results.",
+            f"local interpreter is {version}. Skipping mypy here; use --python-bin "
+            f"with Python {CI_PYTHON} for authoritative results.",
             file=sys.stderr,
         )
+        return
 
     baseline_path = root / "scripts" / "mypy-baseline.txt"
     result = subprocess.run(
@@ -379,6 +381,8 @@ def job_security(root: Path, python: str, env: dict[str, str]) -> None:
             "CVE-2025-3000",
             "--ignore-vuln",
             "PYSEC-2025-194",
+            "--ignore-vuln",
+            "CVE-2025-69872",
         ],
         cwd=root,
         env=env,

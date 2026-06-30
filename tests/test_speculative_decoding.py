@@ -394,7 +394,9 @@ async def test_runner_routes_to_speculative_stream(monkeypatch):
     runner = LocalInferenceRunner()
     seen: dict[str, str] = {}
 
-    async def _noop_switch(_path: str, *, draft_path: str | None = None) -> None:
+    async def _noop_switch(
+        _path: str, *, draft_path: str | None = None, route: str | None = None
+    ) -> None:
         seen["draft_path"] = draft_path or ""
 
     from seiso.inference.streaming import StreamToken
