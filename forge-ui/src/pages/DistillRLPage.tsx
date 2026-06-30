@@ -51,6 +51,8 @@ export function DistillRLPage() {
   const [evaluateTeacher, setEvaluateTeacher] = useState(false);
   const [hashRunId, setHashRunId] = useState(false);
   const [configFile, setConfigFile] = useState("");
+  const [configOverrides, setConfigOverrides] = useState("");
+  const [configError, setConfigError] = useState("");
   const [linkTrainingJob, setLinkTrainingJob] = useState("");
 
   useEffect(() => {
@@ -63,6 +65,7 @@ export function DistillRLPage() {
   }, [modelsReady, localModels, defaults.teacher_model, defaults.student_model]);
 
   const start = async () => {
+    setConfigError("");
     const body: Record<string, unknown> = {
       preset,
       teacher_model: teacherModel,
@@ -86,6 +89,14 @@ export function DistillRLPage() {
         .map((s) => s.trim())
         .filter(Boolean)
         .map((s) => Number(s));
+    }
+    if (configOverrides.trim()) {
+      try {
+        Object.assign(body, JSON.parse(configOverrides));
+      } catch {
+        setConfigError("Config overrides must be valid JSON.");
+        return;
+      }
     }
     await runPipeline(body);
   };
@@ -246,6 +257,16 @@ export function DistillRLPage() {
                   onChange={(e) => setConfigFile(e.target.value)}
                   placeholder="~/.seiso/configs/distill_rl_reproducible.json"
                 />
+              </div>
+              <div className="form-field">
+                <label>Inline config overrides (JSON)</label>
+                <textarea
+                  rows={5}
+                  value={configOverrides}
+                  onChange={(e) => setConfigOverrides(e.target.value)}
+                  placeholder='{"rollout_temperature": 0.8, "dpo_beta": 0.1}'
+                />
+                {configError && <p className="field-error">{configError}</p>}
               </div>
             </details>
           </FormSection>

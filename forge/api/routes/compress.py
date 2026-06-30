@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from forge.api.deps import get_compress_orchestrator
 from forge.api.routes._jobs import (
@@ -36,6 +36,8 @@ STAGE_HELP = {
 
 
 class CompressStartRequest(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     preset: str = Field(
         default="smoke",
         description="smoke | full | distill_only | prune_recover | quantize",

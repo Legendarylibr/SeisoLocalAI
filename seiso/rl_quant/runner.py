@@ -38,6 +38,10 @@ def run_rl_quant_job(
         if on_log:
             on_log(msg)
 
+    requested_stages = payload.get("stages")
+    if requested_stages:
+        _log(f"Requested stages: {', '.join(str(s) for s in requested_stages)}")
+
     sweep_result: dict[str, Any] | None = None
     if auto_sweep_enabled(payload):
         _log("Phase: auto hyperparameter sweep")

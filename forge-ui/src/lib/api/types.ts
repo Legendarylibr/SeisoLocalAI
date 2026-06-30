@@ -461,6 +461,7 @@ export type RLQuantPreset = {
   label: string;
   backend: string;
   training_backend: string;
+  stages: string[];
 };
 
 export type CompressJob = {

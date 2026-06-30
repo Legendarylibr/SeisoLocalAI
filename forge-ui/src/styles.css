@@ -637,6 +637,12 @@ input:focus, textarea:focus, select:focus {
 
 input::placeholder, textarea::placeholder { color: var(--muted); }
 
+.field-error {
+  color: var(--danger, #ff6b6b);
+  font-size: 0.78rem;
+  margin: -0.25rem 0 0.55rem;
+}
+
 label {
   display: block;
   font-size: 0.78rem;
