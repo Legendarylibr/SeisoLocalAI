@@ -304,6 +304,42 @@ def test_apple_silicon_without_mlx_probe_uses_unified_memory():
     assert classify_tier(profile).value == "apple_unified"
 
 
+def test_apple_unified_headroom_counts_reclaimable_ram(monkeypatch):
+    from seiso.hardware.tiers import vram_headroom_mb
+
+    class Memory:
+        available = int(11.37 * 1024**3)
+
+    monkeypatch.setattr("psutil.virtual_memory", lambda: Memory())
+    profile = {
+        "platform": "darwin",
+        "arch": "arm64",
+        "backend": "cpu",
+        "gpus": [],
+        "ram_gb": 24,
+    }
+
+    assert round(vram_headroom_mb(profile) / 1024, 1) == 10.2
+
+
+def test_cpu_only_headroom_stays_conservative(monkeypatch):
+    from seiso.hardware.tiers import vram_headroom_mb
+
+    class Memory:
+        available = int(11.37 * 1024**3)
+
+    monkeypatch.setattr("psutil.virtual_memory", lambda: Memory())
+    profile = {
+        "platform": "linux",
+        "arch": "x86_64",
+        "backend": "cpu",
+        "gpus": [],
+        "ram_gb": 24,
+    }
+
+    assert round(vram_headroom_mb(profile) / 1024, 1) == 7.4
+
+
 def test_apple_silicon_without_mlx_probe_prefers_llamacpp(monkeypatch):
     profile = {
         "platform": "darwin",
