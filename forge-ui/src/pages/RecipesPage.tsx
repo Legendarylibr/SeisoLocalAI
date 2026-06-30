@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { RecipeCanvas, RecipeGraph } from "@/components/RecipeCanvas";
 import { LogStream } from "@/components/research/LogStream";
 import { StudioCardHeader } from "@/components/studio/StudioCardHeader";
@@ -17,6 +17,11 @@ export function RecipesPage() {
     return () => {
       sseAbortRef.current?.();
     };
+  }, []);
+
+  const handleRecipeChange = useCallback((r: RecipeGraph) => {
+    recipeRef.current = r;
+    setRecipe(r);
   }, []);
 
   const run = async () => {
@@ -75,12 +80,7 @@ export function RecipesPage() {
       className="recipe-studio-page"
     >
       <div className="card recipe-studio-card">
-        <RecipeCanvas
-          onChange={(r) => {
-            recipeRef.current = r;
-            setRecipe(r);
-          }}
-        />
+        <RecipeCanvas onChange={handleRecipeChange} />
       </div>
 
       <div className="card studio-card recipe-run-bar">

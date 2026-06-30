@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ReactFlow,
   Background,
@@ -88,6 +88,7 @@ export function RecipeCanvas({ onChange }: Props) {
     filterMinLength: 20,
     sampleCount: 100,
   });
+  const lastRecipeJsonRef = useRef("");
 
   const selectedNode = useMemo(
     () => nodes.find((n) => n.id === selectedNodeId) ?? null,
@@ -111,7 +112,11 @@ export function RecipeCanvas({ onChange }: Props) {
   }, [nodes, edges, name, config]);
 
   useEffect(() => {
-    onChange?.(toRecipe());
+    const next = toRecipe();
+    const nextJson = JSON.stringify(next);
+    if (nextJson === lastRecipeJsonRef.current) return;
+    lastRecipeJsonRef.current = nextJson;
+    onChange?.(next);
   }, [onChange, toRecipe]);
 
   const addNode = (type: string) => {
