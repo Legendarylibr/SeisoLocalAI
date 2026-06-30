@@ -265,7 +265,9 @@ def run_training(
 def _write_slime_manifest(config: TrainConfig, output_dir: Path) -> None:
     payload = {
         "model_id": config.model_id,
-        "original_model_id": str(config.extra.get("original_model_id") or config.model_id),
+        "original_model_id": str(
+            config.extra.get("original_model_id") or config.model_id
+        ),
         "method": TrainMethod.SLIME.value,
         "methodology": config.training_methodology,
         "post_training_algorithm": "single_gpu_slime_grpo",

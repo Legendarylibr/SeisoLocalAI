@@ -57,9 +57,9 @@ def test_sigmoid_handles_extreme_values():
 def test_ratio_and_std_helpers():
     assert math_utils.safe_ratio(10.0, 2.0) == pytest.approx(5.0)
     assert math_utils.safe_ratio(10.0, 0.0) is None
-    assert math_utils.ratio_mean([10.0, 12.0, math.inf], [5.0, 3.0, 2.0]) == pytest.approx(
-        3.0
-    )
+    assert math_utils.ratio_mean(
+        [10.0, 12.0, math.inf], [5.0, 3.0, 2.0]
+    ) == pytest.approx(3.0)
     assert math_utils.ratio_mean([1000.0], [1.0], clamp=(0.01, 100.0)) == 1.0
     assert math_utils.sample_std([1.0, 2.0, 5.0]) == pytest.approx(
         statistics.stdev([1.0, 2.0, 5.0])
@@ -134,7 +134,9 @@ def test_moe_summary_helpers_match_formulas():
         default_index=default_index,
         variant_count=variant_count,
     )
-    assert aggressiveness == pytest.approx(sum(index / denom for index in indices) / len(indices))
+    assert aggressiveness == pytest.approx(
+        sum(index / denom for index in indices) / len(indices)
+    )
     assert churn == pytest.approx(
         sum(abs(index - default_index) / denom for index in indices) / len(indices)
     )

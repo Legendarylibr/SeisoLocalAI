@@ -161,8 +161,7 @@ def test_ensure_load_fits_forwards_backend_to_pool(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "seiso.memory.protection.assess_path_memory_fit_for_load",
         lambda path, mode="chat", backend=None: (
-            pool.prepare_for_load(str(path), backend)
-            or {"memory_load_blocked": False}
+            pool.prepare_for_load(str(path), backend) or {"memory_load_blocked": False}
         ),
     )
 
