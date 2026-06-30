@@ -6,6 +6,15 @@ import random
 import statistics
 from collections.abc import Sequence
 
+try:
+    from seiso.adaptive_quant.native import _math_ext
+except ImportError:  # pragma: no cover - depends on optional compiled extension
+    _math_ext = None
+
+
+def native_math_available() -> bool:
+    return _math_ext is not None
+
 
 def clamp(value: float, lower: float, upper: float) -> float:
     return max(lower, min(upper, value))
@@ -13,6 +22,8 @@ def clamp(value: float, lower: float, upper: float) -> float:
 
 def stable_sigmoid(value: float) -> float:
     """Numerically stable logistic (sigmoid) for a scalar."""
+    if _math_ext is not None:
+        return float(_math_ext.stable_sigmoid(value))
     if value >= 0:
         z = math.exp(-value)
         return 1.0 / (1.0 + z)
@@ -27,6 +38,8 @@ def mean(values: Sequence[float]) -> float:
 
 
 def variance(values: Sequence[float]) -> float:
+    if _math_ext is not None:
+        return float(_math_ext.variance(values))
     if len(values) < 2:
         return 0.0
     avg = mean(values)
@@ -34,14 +47,20 @@ def variance(values: Sequence[float]) -> float:
 
 
 def dot(left: Sequence[float], right: Sequence[float]) -> float:
+    if _math_ext is not None:
+        return float(_math_ext.dot(left, right))
     return sum(lhs * rhs for lhs, rhs in zip(left, right, strict=True))
 
 
 def norm(values: Sequence[float]) -> float:
+    if _math_ext is not None:
+        return float(_math_ext.norm(values))
     return math.sqrt(sum(value * value for value in values))
 
 
 def softmax(logits: Sequence[float]) -> list[float]:
+    if _math_ext is not None:
+        return list(_math_ext.softmax(logits))
     if not logits:
         return []
     max_logit = max(logits)
@@ -63,6 +82,8 @@ def sample_categorical(probabilities: Sequence[float], rng: random.Random) -> in
 
 
 def argmax(values: Sequence[float]) -> int:
+    if _math_ext is not None:
+        return int(_math_ext.argmax(values))
     best_index = 0
     best_value = values[0]
     for index, value in enumerate(values[1:], start=1):
@@ -102,6 +123,9 @@ def gaussian_sample(mean_value: float, stddev: float, rng: random.Random) -> flo
 
 
 def safe_ratio(numer: float, denom: float) -> float | None:
+    if _math_ext is not None:
+        ratio = _math_ext.safe_ratio(numer, denom)
+        return None if ratio is None else float(ratio)
     if not math.isfinite(numer) or not math.isfinite(denom) or denom <= 0:
         return None
     return numer / denom
@@ -114,6 +138,8 @@ def ratio_mean(
     clamp: tuple[float, float] = (0.01, 100.0),
 ) -> float:
     lower, upper = clamp
+    if _math_ext is not None:
+        return float(_math_ext.ratio_mean(observed, simulated, lower, upper))
     ratios = [
         r
         for o, s in zip(observed, simulated, strict=False)
@@ -123,6 +149,8 @@ def ratio_mean(
 
 
 def sample_std(values: list[float]) -> float:
+    if _math_ext is not None:
+        return float(_math_ext.sample_std(values))
     return float(statistics.stdev(values)) if len(values) >= 2 else 0.0
 
 

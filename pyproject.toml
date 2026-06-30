@@ -1,6 +1,6 @@
 [build-system]
-requires = ["hatchling", "setuptools>=61"]
-build-backend = "hatchling.build"
+requires = ["setuptools>=61", "wheel", "pybind11>=2.13"]
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "seiso"
@@ -110,8 +110,11 @@ seiso-bench-kernels = "seiso.kernels.benchmark:main"
 Homepage = "https://github.com/Legendarylibr/SeisoLocalAI"
 Documentation = "https://github.com/Legendarylibr/SeisoLocalAI#readme"
 
-[tool.hatch.build.targets.wheel]
-packages = ["seiso", "seiso_cli", "forge"]
+[tool.setuptools.packages.find]
+include = ["seiso*", "seiso_cli*", "forge*"]
+
+[tool.setuptools.package-data]
+"seiso.adaptive_quant.native" = ["*.cpp"]
 
 [tool.ruff]
 line-length = 100
