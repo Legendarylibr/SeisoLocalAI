@@ -16,7 +16,6 @@ from seiso.models.loader import Backend
 
 def preferred_inference_backend(profile: dict[str, Any]) -> str:
     tier = classify_tier(profile)
-    headroom = vram_headroom_mb(profile)
     try:
         backend = Backend(profile.get("backend", "cpu"))
     except ValueError:
@@ -33,10 +32,10 @@ def preferred_inference_backend(profile: dict[str, Any]) -> str:
 
     if tier == HardwareTier.CPU_ONLY:
         return str(InferenceBackend.LLAMACPP)
-    if headroom < 6000 or tier == HardwareTier.EDGE:
+    if tier == HardwareTier.EDGE:
         return str(InferenceBackend.LLAMACPP)
     if tier == HardwareTier.APPLE_UNIFIED:
-        if backend == Backend.MLX and headroom >= 16384:
+        if backend == Backend.MLX:
             return str(InferenceBackend.MLX)
         return str(InferenceBackend.LLAMACPP)
     if backend == Backend.MLX:
@@ -92,7 +91,7 @@ def training_defaults(profile: dict[str, Any]) -> dict[str, Any]:
         "max_recommended_params": max_params,
         "use_fused_kernels": caps["fused_kernels_available"],
         "use_fused_ce": caps["fused_ce_available"],
-        "kernel_low_vram": headroom > 0 and headroom < 8192,
+        "kernel_low_vram": False,
         "kernel_backend": caps["kernel_backend"],
         "train_platform": caps["train_platform"],
         "multi_gpu_available": caps["multi_gpu_available"],

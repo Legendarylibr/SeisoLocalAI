@@ -73,21 +73,17 @@ def classify_tier(profile: dict[str, Any]) -> HardwareTier:
 
 
 def effective_budget_mb(profile: dict[str, Any]) -> int:
-    """Memory budget for local inference — derived on-device only."""
+    """Memory budget for local inference — full local capacity minus a small reserve."""
     tier = classify_tier(profile)
     gpus = profile.get("gpus") or []
     ram = float(profile.get("ram_gb") or 0)
     vram_total = max((g.get("vram_total_mb") or 0) for g in gpus) if gpus else 0
 
     if tier == HardwareTier.APPLE_UNIFIED:
-        return int(ram * 1024 * 0.55)
+        return max(0, int(ram * 1024) - _RAM_HEADROOM_RESERVE_MB)
     if tier == HardwareTier.CPU_ONLY:
-        # CPU-only machines use system RAM for model weights.  Cap at a generous
-        # 32 GB so workstations with large RAM are not artificially limited to 8 GB
-        # (which blocks even small training runs).  The 35% ratio still protects
-        # low-RAM machines from OOM.
-        return int(min(ram * 1024 * 0.35, 32768))
-    return int(vram_total or min(ram * 1024 * 0.4, 8192))
+        return max(0, int(ram * 1024) - _RAM_HEADROOM_RESERVE_MB)
+    return int(vram_total or max(0, int(ram * 1024) - _RAM_HEADROOM_RESERVE_MB))
 
 
 def _vram_headroom_mb(gpus: list[dict[str, Any]]) -> int:
@@ -101,11 +97,8 @@ def _vram_headroom_mb(gpus: list[dict[str, Any]]) -> int:
     return best
 
 
-_GPU_CAPACITY_RESERVE = 0.04
-_APPLE_UNIFIED_AVAILABLE_RATIO = 0.90
-_APPLE_UNIFIED_TOTAL_CAP_RATIO = 0.75
-_CPU_AVAILABLE_RATIO = 0.65
-_CPU_TOTAL_FALLBACK_RATIO = 0.40
+_GPU_CAPACITY_RESERVE = 0.02
+_RAM_HEADROOM_RESERVE_MB = 1024
 
 
 def discrete_vram_total_mb(profile: dict[str, Any]) -> int:
@@ -125,31 +118,21 @@ def fit_headroom_mb(profile: dict[str, Any]) -> int:
 
 
 def vram_headroom_mb(profile: dict[str, Any]) -> int:
-    """Free memory headroom for fit checks."""
+    """Free memory headroom for fit checks, using measured available memory."""
     gpus = profile.get("gpus") or []
     if gpus:
         best = _vram_headroom_mb(gpus)
         if best > 0:
             return best
     tier = classify_tier(profile)
-    ram = float(profile.get("ram_gb") or 0)
     if tier in (HardwareTier.APPLE_UNIFIED, HardwareTier.CPU_ONLY):
         try:
             import psutil  # type: ignore
 
             avail = psutil.virtual_memory().available / (1024**2)
-            if tier == HardwareTier.APPLE_UNIFIED:
-                return int(
-                    min(
-                        avail * _APPLE_UNIFIED_AVAILABLE_RATIO,
-                        ram * 1024 * _APPLE_UNIFIED_TOTAL_CAP_RATIO,
-                    )
-                )
-            return int(min(avail * _CPU_AVAILABLE_RATIO, effective_budget_mb(profile)))
+            return max(0, int(avail) - _RAM_HEADROOM_RESERVE_MB)
         except ImportError:
-            if tier == HardwareTier.APPLE_UNIFIED:
-                return effective_budget_mb(profile)
-            return int(ram * 1024 * _CPU_TOTAL_FALLBACK_RATIO)
+            return effective_budget_mb(profile)
     return effective_budget_mb(profile)
 
 

@@ -13,6 +13,18 @@ from seiso.hardware.tiers import (
 )
 from seiso.memory.estimates import estimate_chat_vram_gb, guess_params_from_name
 
+_LOAD_RESERVE_RATIO = 0.02
+_LOAD_MIN_RESERVE_MB = 256
+
+
+def _usable_load_budget_mb(*, capacity_mb: int, free_mb: int) -> int:
+    """Full measured headroom minus a small reserve for allocator/runtime overhead."""
+    raw_budget = free_mb if free_mb > 0 else capacity_mb
+    if raw_budget <= 0:
+        return 0
+    reserve = max(_LOAD_MIN_RESERVE_MB, int(raw_budget * _LOAD_RESERVE_RATIO))
+    return max(0, raw_budget - reserve)
+
 
 def assess_hardware_fit(
     est_vram_gb: float,
@@ -54,18 +66,25 @@ def assess_hardware_fit(
     ):
         fit, label = "tight", "Tight fit — free VRAM is low; close other GPU apps first"
 
+    load_budget_mb = _usable_load_budget_mb(capacity_mb=capacity_mb, free_mb=free_mb)
     capacity_gb = round(capacity_mb / 1024, 1)
     free_gb = round(free_mb / 1024, 1)
+    load_budget_gb = round(load_budget_mb / 1024, 1)
     note = f"~{est_vram_gb:.1f} GB est. · {free_gb} GB free now · {capacity_gb} GB GPU budget"
     if fit == "unlikely" and tier != HardwareTier.CPU_ONLY:
         note = f"Needs ~{est_vram_gb:.1f} GB — GPU budget ~{capacity_gb} GB"
 
-    blocked = capacity_mb > 0 and est_mb > int(capacity_mb * 1.12)
+    blocked = load_budget_mb > 0 and est_mb > load_budget_mb
     block_reason = None
     if blocked:
+        label = "Blocked — would exceed available memory"
+        memory_label = (
+            "RAM" if tier in (HardwareTier.APPLE_UNIFIED, HardwareTier.CPU_ONLY) else "VRAM"
+        )
         block_reason = (
-            f"Needs ~{est_vram_gb:.1f} GB at runtime but this GPU has ~{capacity_gb} GB usable VRAM. "
-            "Choose a smaller or more quantized model."
+            f"Needs ~{est_vram_gb:.1f} GB at runtime but only ~{load_budget_gb} GB "
+            f"{memory_label} is safely available right now. Free memory or choose a "
+            "smaller/more quantized model."
         )
 
     return {

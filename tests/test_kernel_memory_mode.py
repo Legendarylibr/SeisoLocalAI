@@ -12,12 +12,12 @@ def test_kernel_low_vram_env_override(monkeypatch):
     assert kernel_low_vram_enabled() is False
 
 
-def test_kernel_low_vram_from_headroom(monkeypatch):
+def test_kernel_low_vram_not_enabled_from_headroom(monkeypatch):
     from seiso.kernels.memory_mode import kernel_low_vram_enabled
 
     monkeypatch.delenv("SEISO_KERNEL_LOW_VRAM", raising=False)
     monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 4096)
-    assert kernel_low_vram_enabled() is True
+    assert kernel_low_vram_enabled() is False
     monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 16384)
     assert kernel_low_vram_enabled() is False
 
@@ -85,8 +85,8 @@ def test_training_memory_guards_set_low_vram_env(monkeypatch):
     )
     import os
 
-    assert os.environ.get("SEISO_KERNEL_LOW_VRAM") == "1"
-    assert cfg.gradient_checkpointing is True
+    assert os.environ.get("SEISO_KERNEL_LOW_VRAM") is None
+    assert cfg.gradient_checkpointing is False
     # Explicit use_fused_ce=False is respected; tight VRAM also keeps fused CE off.
     assert cfg.use_fused_ce is False
-    assert cfg.max_seq_length <= 1024
+    assert cfg.max_seq_length == 2048

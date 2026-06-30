@@ -6,6 +6,7 @@ import os
 import platform
 from typing import Any
 
+from seiso.env import env_bool
 from seiso.hardware.tiers import HardwareTier, classify_tier, vram_headroom_mb
 from seiso.training.platform_caps import training_capabilities
 
@@ -39,21 +40,27 @@ def apply_platform_memory_profile(
     ram_gb = float(profile.get("ram_gb") or 0)
     caps = training_capabilities()
     system = platform.system()
+    memory_caps_disabled = env_bool("SEISO_DISABLE_MEMORY_CAPS", False)
     low = (
-        os.environ.get("SEISO_MEMORY_PROFILE", "").strip().lower() == "low"
-        or memory_profile_label(profile) == "low"
+        not memory_caps_disabled
+        and (
+            os.environ.get("SEISO_MEMORY_PROFILE", "").strip().lower() == "low"
+            or memory_profile_label(profile) == "low"
+        )
     )
 
     os.environ.setdefault("SEISO_LLAMA_USE_MMAP", "true")
     os.environ.setdefault("SEISO_LLAMA_USE_MLOCK", "false")
     os.environ.setdefault("SEISO_LLAMA_NO_PERF", "true")
 
-    if low or headroom < 6144:
+    if low or (not memory_caps_disabled and headroom < 6144):
         os.environ.setdefault("SEISO_LLAMA_PROMPT_CACHE", "false")
         os.environ.setdefault("SEISO_LLAMA_CACHE_MB", "0")
     else:
         os.environ.setdefault("SEISO_LLAMA_PROMPT_CACHE", "true")
-        if tier == HardwareTier.WORKSTATION and headroom >= 8192:
+        if memory_caps_disabled or (
+            tier == HardwareTier.WORKSTATION and headroom >= 8192
+        ):
             cache_mb = "1024"
         elif headroom < 12288:
             cache_mb = "512"
@@ -68,11 +75,12 @@ def apply_platform_memory_profile(
             os.environ.setdefault(
                 "SEISO_LLAMA_THREADS", str(min(max((os.cpu_count() or 4) - 2, 2), 8))
             )
-        elif tier == HardwareTier.APPLE_UNIFIED and (ram_gb <= 24 or headroom < 12288):
+        elif tier == HardwareTier.APPLE_UNIFIED:
             os.environ.setdefault("SEISO_LLAMA_GPU_LAYERS", "-1")
-            os.environ.setdefault(
-                "SEISO_LLAMA_BATCH", "512" if headroom >= 8192 else "256"
-            )
+            if not memory_caps_disabled and (ram_gb <= 24 or headroom < 12288):
+                os.environ.setdefault(
+                    "SEISO_LLAMA_BATCH", "512" if headroom >= 8192 else "256"
+                )
         if (
             tier == HardwareTier.APPLE_UNIFIED
             and ram_gb <= 24
@@ -88,7 +96,7 @@ def apply_platform_memory_profile(
         elif caps.get("train_platform") == "cpu" or not caps.get("gpu_count"):
             os.environ.setdefault("SEISO_LLAMA_GPU_LAYERS", "0")
             os.environ.setdefault("SEISO_LLAMA_BATCH", "512")
-        elif headroom < 8192:
+        elif not memory_caps_disabled and headroom < 8192:
             os.environ.setdefault("SEISO_LLAMA_BATCH", "512")
 
     elif system == "Linux":

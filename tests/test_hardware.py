@@ -304,7 +304,7 @@ def test_apple_silicon_without_mlx_probe_uses_unified_memory():
     assert classify_tier(profile).value == "apple_unified"
 
 
-def test_apple_unified_headroom_counts_reclaimable_ram(monkeypatch):
+def test_apple_unified_headroom_uses_available_ram_minus_reserve(monkeypatch):
     from seiso.hardware.tiers import vram_headroom_mb
 
     class Memory:
@@ -319,10 +319,10 @@ def test_apple_unified_headroom_counts_reclaimable_ram(monkeypatch):
         "ram_gb": 24,
     }
 
-    assert round(vram_headroom_mb(profile) / 1024, 1) == 10.2
+    assert round(vram_headroom_mb(profile) / 1024, 1) == 10.4
 
 
-def test_cpu_only_headroom_stays_conservative(monkeypatch):
+def test_cpu_only_headroom_uses_available_ram_minus_reserve(monkeypatch):
     from seiso.hardware.tiers import vram_headroom_mb
 
     class Memory:
@@ -337,7 +337,7 @@ def test_cpu_only_headroom_stays_conservative(monkeypatch):
         "ram_gb": 24,
     }
 
-    assert round(vram_headroom_mb(profile) / 1024, 1) == 7.4
+    assert round(vram_headroom_mb(profile) / 1024, 1) == 10.4
 
 
 def test_apple_silicon_without_mlx_probe_prefers_llamacpp(monkeypatch):
@@ -354,11 +354,11 @@ def test_apple_silicon_without_mlx_probe_prefers_llamacpp(monkeypatch):
     assert preferred_inference_backend(profile) == "llamacpp"
 
 
-def test_preferred_backend_apple_tight_memory_is_llamacpp(monkeypatch):
+def test_preferred_backend_apple_mlx_not_constrained_by_tight_memory(monkeypatch):
     profile = {"backend": "mlx", "gpus": [], "ram_gb": 16}
     monkeypatch.setattr("seiso.hardware.training.vram_headroom_mb", lambda _p: 10240)
     assert classify_tier(profile).value == "apple_unified"
-    assert preferred_inference_backend(profile) == "llamacpp"
+    assert preferred_inference_backend(profile) == "mlx"
 
 
 def test_preferred_backend_apple_plenty_is_mlx(monkeypatch):
@@ -410,7 +410,7 @@ def test_assess_hardware_fit_blocks_when_est_exceeds_headroom(monkeypatch):
     )
     assert fit["memory_load_blocked"] is True
     assert fit["memory_load_blocked_reason"]
-    assert "GB" in fit["memory_load_blocked_reason"]
+    assert fit["hardware_fit"] == "unlikely"
 
 
 def test_assess_hardware_fit_allows_when_est_within_headroom(monkeypatch):
@@ -429,7 +429,7 @@ def test_assess_hardware_fit_allows_when_est_within_headroom(monkeypatch):
     assert fit["memory_load_blocked_reason"] is None
 
 
-def test_assess_hardware_fit_allows_27b_q4_on_4090_when_vram_in_use():
+def test_assess_hardware_fit_blocks_27b_q4_on_4090_when_vram_in_use():
     profile = {
         "backend": "cuda",
         "gpus": [
@@ -451,5 +451,5 @@ def test_assess_hardware_fit_allows_27b_q4_on_4090_when_vram_in_use():
         },
         profile,
     )
-    assert fit["memory_load_blocked"] is False
+    assert fit["memory_load_blocked"] is True
     assert fit["hardware_fit"] in {"good", "tight", "ideal"}
