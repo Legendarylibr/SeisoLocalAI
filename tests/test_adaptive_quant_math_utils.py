@@ -6,6 +6,8 @@ import statistics
 import pytest
 
 from seiso.adaptive_quant import math_utils
+from seiso.adaptive_quant.backends.simulator import SimulatorBackend
+from seiso.adaptive_quant.types import HardwareType, QuantMode
 
 
 def test_native_math_availability_probe_returns_bool():
@@ -171,6 +173,8 @@ def test_native_extension_exports_expected_hotpath_functions():
         (2.0, 2.0 / 3.0)
     )
     assert native.softmax([0.0, 1.0])[1] > native.softmax([0.0, 1.0])[0]
+    assert hasattr(native, "simulator_core_metrics")
+    assert hasattr(native, "weighted_reward")
 
 
 @pytest.mark.skipif(
@@ -263,3 +267,124 @@ def test_native_gaussian_and_value_updates_match_python_semantics():
     ]
     assert math_utils.value_update(value_weights, state, 0.9, learning_rate)
     assert value_weights == pytest.approx(expected_value)
+
+
+@pytest.mark.skipif(
+    math_utils.simulator_core_metrics(
+        mode="discrete",
+        hardware_type="gpu",
+        avg_bits=4.0,
+        bit_variance=0.0,
+        complexity=0.5,
+        sensitivity=0.6,
+        prompt_length=32.0,
+        latency_bias=1.0,
+        compute_factor=1.0,
+        throughput_bias=1.0,
+        kernel_uniformity_preference=0.5,
+        preferred_bits=4.0,
+        memory_budget_mb=8192.0,
+        scale_factor=1.0,
+        clipping_range=1.0,
+    )
+    is None,
+    reason="pybind11 simulator core is not built in this environment",
+)
+def test_native_simulator_core_matches_python_formula():
+    kwargs = {
+        "mode": QuantMode.LEARNED,
+        "hardware_type": HardwareType.LOW_RESOURCE,
+        "avg_bits": 3.5,
+        "bit_variance": 0.7,
+        "complexity": 0.82,
+        "sensitivity": 0.64,
+        "prompt_length": 96.0,
+        "latency_bias": 1.35,
+        "compute_factor": 0.52,
+        "throughput_bias": 0.72,
+        "kernel_uniformity_preference": 0.45,
+        "preferred_bits": 4.0,
+        "memory_budget_mb": 1024.0,
+        "scale_factor": 0.9,
+        "clipping_range": 0.95,
+    }
+    native = math_utils.simulator_core_metrics(
+        mode=kwargs["mode"].value,
+        hardware_type=kwargs["hardware_type"].value,
+        avg_bits=kwargs["avg_bits"],
+        bit_variance=kwargs["bit_variance"],
+        complexity=kwargs["complexity"],
+        sensitivity=kwargs["sensitivity"],
+        prompt_length=kwargs["prompt_length"],
+        latency_bias=kwargs["latency_bias"],
+        compute_factor=kwargs["compute_factor"],
+        throughput_bias=kwargs["throughput_bias"],
+        kernel_uniformity_preference=kwargs["kernel_uniformity_preference"],
+        preferred_bits=kwargs["preferred_bits"],
+        memory_budget_mb=kwargs["memory_budget_mb"],
+        scale_factor=kwargs["scale_factor"],
+        clipping_range=kwargs["clipping_range"],
+    )
+    python = SimulatorBackend._evaluate_python_core(**kwargs)
+    assert native == pytest.approx(python)
+
+
+@pytest.mark.skipif(
+    math_utils.weighted_reward(
+        alpha_latency=0.0,
+        beta_throughput=0.0,
+        gamma_perplexity=0.0,
+        delta_memory=0.0,
+        epsilon_instability=0.0,
+        eta_token_latency=0.0,
+        zeta_perplexity_over_ref=0.0,
+        theta_kernel_speedup=0.0,
+        iota_kernel_latency=0.0,
+        latency_ms=1.0,
+        throughput_tps=1.0,
+        perplexity=1.0,
+        memory_mb=1.0,
+        latency_ms_per_token=0.0,
+        stability_penalty=0.0,
+        include_instability=True,
+        perplexity_reference=None,
+        kernel_speedup=0.0,
+        kernel_latency_ms=0.0,
+    )
+    is None,
+    reason="pybind11 reward core is not built in this environment",
+)
+def test_native_weighted_reward_matches_python_formula():
+    reward = math_utils.weighted_reward(
+        alpha_latency=0.2,
+        beta_throughput=0.05,
+        gamma_perplexity=0.7,
+        delta_memory=0.01,
+        epsilon_instability=0.3,
+        eta_token_latency=0.4,
+        zeta_perplexity_over_ref=0.9,
+        theta_kernel_speedup=1.1,
+        iota_kernel_latency=0.6,
+        latency_ms=12.0,
+        throughput_tps=44.0,
+        perplexity=8.0,
+        memory_mb=2048.0,
+        latency_ms_per_token=0.25,
+        stability_penalty=1.5,
+        include_instability=True,
+        perplexity_reference=6.5,
+        kernel_speedup=1.2,
+        kernel_latency_ms=0.4,
+    )
+    expected = (
+        -0.2 * 12.0
+        + 0.05 * 44.0
+        - 0.7 * 8.0
+        - 0.01 * 2048.0
+        - 0.4 * 0.25
+        - 0.3 * 1.5
+        - 0.9 * (8.0 - 6.5)
+        + 1.1 * 1.2
+        - 0.6 * 0.4
+    )
+    assert reward == pytest.approx(expected)

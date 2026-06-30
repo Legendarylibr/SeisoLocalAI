@@ -60,6 +60,25 @@ double clamp_value(double value, double lower, double upper) {
     return std::max(lower, std::min(upper, value));
 }
 
+double mode_bonus_for(const std::string &mode) {
+    if (mode == "discrete") {
+        return 0.10;
+    }
+    if (mode == "grouped") {
+        return 0.16;
+    }
+    if (mode == "per_layer") {
+        return 0.18;
+    }
+    if (mode == "dynamic") {
+        return 0.28;
+    }
+    if (mode == "learned") {
+        return 0.34;
+    }
+    throw py::value_error("unsupported quantization mode");
+}
+
 std::vector<double> dynamic_layer_bits(
     int base_bit_width,
     const py::sequence &layer_stats,
@@ -415,6 +434,149 @@ void value_update(
     }
 }
 
+py::tuple simulator_core_metrics(
+    const std::string &mode,
+    const std::string &hardware_type,
+    double avg_bits,
+    double bit_variance,
+    double complexity,
+    double sensitivity,
+    double prompt_length,
+    double latency_bias,
+    double compute_factor,
+    double throughput_bias,
+    double kernel_uniformity_preference,
+    double preferred_bits,
+    double memory_budget_mb,
+    double scale_factor,
+    double clipping_range
+) {
+    const double mode_bonus = mode_bonus_for(mode);
+    const double effective_prompt_length = std::max(8.0, prompt_length);
+    const double compression = std::max(0.0, (8.0 - avg_bits) / 6.0);
+
+    double latency_ms = (
+        8.5
+        * effective_prompt_length
+        * latency_bias
+        / std::max(0.35, compute_factor + (8.0 - avg_bits) * 0.12 + mode_bonus)
+    );
+    latency_ms *= (
+        1.0
+        + complexity * 0.55
+        + std::max(0.0, bit_variance - kernel_uniformity_preference) * 0.18
+    );
+
+    double throughput_tps = (
+        140.0
+        * throughput_bias
+        * (1.0 + (8.0 - avg_bits) * 0.10 + mode_bonus * 0.40)
+        / (1.0 + complexity * 0.80 + latency_bias * 0.08)
+    );
+    if (hardware_type == "gpu") {
+        throughput_tps *= 1.0 - std::min(0.12, bit_variance * 0.03);
+    } else {
+        throughput_tps *= 1.0 + std::min(0.10, std::max(0.0, preferred_bits - avg_bits) * 0.02);
+    }
+
+    double memory_mb = 4800.0 * (avg_bits / 16.0) * (1.0 + complexity * 0.15);
+    if (mode == "per_layer" || mode == "learned") {
+        memory_mb *= 1.02;
+    }
+
+    double perplexity = (
+        5.6
+        + complexity * 3.4
+        + std::max(0.0, 5.5 - avg_bits) * (0.60 + complexity * 0.90 + sensitivity * 0.35)
+        + std::abs(1.0 - scale_factor) * 0.65
+        + std::max(0.0, 1.05 - clipping_range) * 1.20
+        - mode_bonus * 0.70
+    );
+
+    const double hardware_alignment = std::abs(avg_bits - preferred_bits);
+    latency_ms *= 1.0 + hardware_alignment * 0.04;
+    throughput_tps *= 1.0 - hardware_alignment * 0.02;
+    perplexity += hardware_alignment * 0.15;
+
+    if ((hardware_type == "cpu" || hardware_type == "low_resource") && avg_bits > preferred_bits) {
+        const double excess_bits = avg_bits - preferred_bits;
+        latency_ms *= 1.0 + excess_bits * (hardware_type == "cpu" ? 0.16 : 0.24);
+        throughput_tps *= std::max(0.55, 1.0 - excess_bits * (hardware_type == "cpu" ? 0.07 : 0.12));
+        memory_mb *= 1.0 + excess_bits * (hardware_type == "cpu" ? 0.10 : 0.18);
+    } else if (hardware_type == "gpu" && avg_bits < preferred_bits) {
+        const double deficit_bits = preferred_bits - avg_bits;
+        perplexity += deficit_bits * 0.45;
+        throughput_tps *= std::max(0.78, 1.0 - deficit_bits * 0.03);
+    }
+
+    if (mode == "dynamic") {
+        latency_ms *= 0.92;
+        throughput_tps *= 1.06;
+        perplexity -= 0.25 + complexity * 0.20;
+    } else if (mode == "learned") {
+        latency_ms *= 0.82 - compression * 0.06;
+        throughput_tps *= 1.12 + compression * 0.08;
+        memory_mb *= 0.78 - compression * 0.04;
+        perplexity -= 0.38 + sensitivity * 0.22;
+    } else if (mode == "grouped" && hardware_type != "gpu") {
+        latency_ms *= 0.95;
+        throughput_tps *= 1.03;
+    }
+
+    const double overflow_ratio = std::max(0.0, memory_mb - memory_budget_mb) / memory_budget_mb;
+    if (overflow_ratio > 0.0) {
+        latency_ms *= 1.0 + overflow_ratio * 2.50;
+        throughput_tps *= 1.0 / (1.0 + overflow_ratio * 1.8);
+        perplexity += overflow_ratio * 1.50;
+    }
+
+    return py::make_tuple(latency_ms, throughput_tps, perplexity, memory_mb);
+}
+
+double weighted_reward(
+    double alpha_latency,
+    double beta_throughput,
+    double gamma_perplexity,
+    double delta_memory,
+    double epsilon_instability,
+    double eta_token_latency,
+    double zeta_perplexity_over_ref,
+    double theta_kernel_speedup,
+    double iota_kernel_latency,
+    double latency_ms,
+    double throughput_tps,
+    double perplexity,
+    double memory_mb,
+    double latency_ms_per_token,
+    double stability_penalty,
+    bool include_instability,
+    py::object perplexity_reference,
+    double kernel_speedup,
+    double kernel_latency_ms
+) {
+    double reward = (
+        -alpha_latency * latency_ms
+        + beta_throughput * throughput_tps
+        - gamma_perplexity * perplexity
+        - delta_memory * memory_mb
+        - eta_token_latency * latency_ms_per_token
+    );
+    if (include_instability) {
+        reward -= epsilon_instability * stability_penalty;
+    }
+    if (!perplexity_reference.is_none() && zeta_perplexity_over_ref > 0.0) {
+        const double ref = py::cast<double>(perplexity_reference);
+        reward -= zeta_perplexity_over_ref * std::max(0.0, perplexity - ref);
+    }
+    if (kernel_speedup > 0.0) {
+        reward += theta_kernel_speedup * kernel_speedup;
+    }
+    if (kernel_latency_ms > 0.0) {
+        reward -= iota_kernel_latency * kernel_latency_ms;
+    }
+    return reward;
+}
+
 }  // namespace
 
 PYBIND11_MODULE(_math_ext, module) {
@@ -512,5 +674,47 @@ PYBIND11_MODULE(_math_ext, module) {
         py::arg("state_vector"),
         py::arg("error"),
         py::arg("learning_rate")
+    );
+    module.def(
+        "simulator_core_metrics",
+        &simulator_core_metrics,
+        py::arg("mode"),
+        py::arg("hardware_type"),
+        py::arg("avg_bits"),
+        py::arg("bit_variance"),
+        py::arg("complexity"),
+        py::arg("sensitivity"),
+        py::arg("prompt_length"),
+        py::arg("latency_bias"),
+        py::arg("compute_factor"),
+        py::arg("throughput_bias"),
+        py::arg("kernel_uniformity_preference"),
+        py::arg("preferred_bits"),
+        py::arg("memory_budget_mb"),
+        py::arg("scale_factor"),
+        py::arg("clipping_range")
+    );
+    module.def(
+        "weighted_reward",
+        &weighted_reward,
+        py::arg("alpha_latency"),
+        py::arg("beta_throughput"),
+        py::arg("gamma_perplexity"),
+        py::arg("delta_memory"),
+        py::arg("epsilon_instability"),
+        py::arg("eta_token_latency"),
+        py::arg("zeta_perplexity_over_ref"),
+        py::arg("theta_kernel_speedup"),
+        py::arg("iota_kernel_latency"),
+        py::arg("latency_ms"),
+        py::arg("throughput_tps"),
+        py::arg("perplexity"),
+        py::arg("memory_mb"),
+        py::arg("latency_ms_per_token"),
+        py::arg("stability_penalty"),
+        py::arg("include_instability"),
+        py::arg("perplexity_reference"),
+        py::arg("kernel_speedup"),
+        py::arg("kernel_latency_ms")
     );
 }

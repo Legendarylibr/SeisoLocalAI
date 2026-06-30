@@ -163,6 +163,97 @@ def value_update(
     return True
 
 
+def simulator_core_metrics(
+    *,
+    mode: str,
+    hardware_type: str,
+    avg_bits: float,
+    bit_variance: float,
+    complexity: float,
+    sensitivity: float,
+    prompt_length: float,
+    latency_bias: float,
+    compute_factor: float,
+    throughput_bias: float,
+    kernel_uniformity_preference: float,
+    preferred_bits: float,
+    memory_budget_mb: float,
+    scale_factor: float,
+    clipping_range: float,
+) -> tuple[float, float, float, float] | None:
+    """Native simulator scoring kernel; returns ``None`` when unavailable."""
+    if _math_ext is None or not hasattr(_math_ext, "simulator_core_metrics"):
+        return None
+    latency, throughput, perplexity, memory = _math_ext.simulator_core_metrics(
+        mode,
+        hardware_type,
+        avg_bits,
+        bit_variance,
+        complexity,
+        sensitivity,
+        prompt_length,
+        latency_bias,
+        compute_factor,
+        throughput_bias,
+        kernel_uniformity_preference,
+        preferred_bits,
+        memory_budget_mb,
+        scale_factor,
+        clipping_range,
+    )
+    return float(latency), float(throughput), float(perplexity), float(memory)
+
+
+def weighted_reward(
+    *,
+    alpha_latency: float,
+    beta_throughput: float,
+    gamma_perplexity: float,
+    delta_memory: float,
+    epsilon_instability: float,
+    eta_token_latency: float,
+    zeta_perplexity_over_ref: float,
+    theta_kernel_speedup: float,
+    iota_kernel_latency: float,
+    latency_ms: float,
+    throughput_tps: float,
+    perplexity: float,
+    memory_mb: float,
+    latency_ms_per_token: float,
+    stability_penalty: float,
+    include_instability: bool,
+    perplexity_reference: float | None,
+    kernel_speedup: float,
+    kernel_latency_ms: float,
+) -> float | None:
+    """Native reward aggregation; returns ``None`` when unavailable."""
+    if _math_ext is None or not hasattr(_math_ext, "weighted_reward"):
+        return None
+    return float(
+        _math_ext.weighted_reward(
+            alpha_latency,
+            beta_throughput,
+            gamma_perplexity,
+            delta_memory,
+            epsilon_instability,
+            eta_token_latency,
+            zeta_perplexity_over_ref,
+            theta_kernel_speedup,
+            iota_kernel_latency,
+            latency_ms,
+            throughput_tps,
+            perplexity,
+            memory_mb,
+            latency_ms_per_token,
+            stability_penalty,
+            include_instability,
+            perplexity_reference,
+            kernel_speedup,
+            kernel_latency_ms,
+        )
+    )
+
+
 def dynamic_layer_bits(
     base_bit_width: int,
     layer_stats: Sequence[float],
