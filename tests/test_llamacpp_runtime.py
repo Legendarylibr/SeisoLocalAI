@@ -86,11 +86,11 @@ def test_ensure_llamacpp_runtime_installs_when_missing(monkeypatch):
         )
 
     monkeypatch.setattr(
-        "seiso.inference.llamacpp_install.llamacpp_import_ok", fake_import
+        "forge.services.llamacpp_runtime.llamacpp_import_ok", fake_import
     )
     monkeypatch.setattr(
-        "seiso.inference.llamacpp_install.pip_install_llamacpp",
-        lambda **kwargs: True,
+        "forge.services.llamacpp_runtime.ensure_llamacpp_installed",
+        lambda **kwargs: {"llamacpp": True, "installed": True, "error": None},
     )
 
     result = ensure_llamacpp_runtime(auto_install=True)

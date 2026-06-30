@@ -49,6 +49,11 @@ make fix   # auto-fix Ruff issues + format, then refresh baseline
 
 Mypy uses gradual typing settings in `pyproject.toml`. A **baseline** (`scripts/mypy-baseline.txt`) tracks known errors; CI fails only on *new* type errors.
 
+The baseline is calibrated for Python 3.10. When `scripts/run_ci_local.py` is
+run with another interpreter, the types job is skipped with a warning instead
+of comparing third-party stubs against the wrong Python version. Use
+`--python-bin` with Python 3.10 for an authoritative local type check.
+
 Refresh after fixing types:
 
 ```bash

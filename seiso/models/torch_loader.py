@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import platform
 from typing import Any
 
 from seiso.models.loader import Backend, LoadOptions
@@ -181,20 +180,19 @@ def load_torch(
         # on Linux/Windows with a CUDA or ROCm GPU. On macOS (no bnb) or a
         # CPU-only box, silently fall back to unquantized load instead of
         # crashing at BitsAndBytesConfig or model.from_pretrained.
-        bnb_unavailable = platform.system() == "Darwin"
-        if not bnb_unavailable:
+        bnb_unavailable = False
+        try:
+            import bitsandbytes  # noqa: F401
+        except ImportError:
+            bnb_unavailable = True
+        else:
             try:
-                import bitsandbytes  # noqa: F401
+                import torch
+
+                if not torch.cuda.is_available():
+                    bnb_unavailable = True
             except ImportError:
                 bnb_unavailable = True
-            else:
-                try:
-                    import torch
-
-                    if not torch.cuda.is_available():
-                        bnb_unavailable = True
-                except ImportError:
-                    bnb_unavailable = True
         if bnb_unavailable:
             logger.warning(
                 "bitsandbytes quantization unavailable on this platform — "

@@ -141,9 +141,12 @@ def test_ensure_load_fits_blocks_oversized_gguf(tmp_path, monkeypatch):
 
 
 def test_ensure_load_fits_forwards_backend_to_pool(tmp_path, monkeypatch):
+    from seiso.inference.model_pool import ModelPool
+
     gguf = tmp_path / "model.gguf"
     gguf.write_bytes(b"\x00")
     calls: list[tuple[str, str | None]] = []
+    pool = ModelPool()
 
     monkeypatch.setattr(
         "seiso.memory.protection.assess_path_memory_fit",
@@ -153,6 +156,14 @@ def test_ensure_load_fits_forwards_backend_to_pool(tmp_path, monkeypatch):
         "seiso.inference.model_pool.ModelPool.prepare_for_load",
         lambda self, target_path, backend=None: calls.append((target_path, backend))
         or False,
+    )
+
+    monkeypatch.setattr(
+        "seiso.memory.protection.assess_path_memory_fit_for_load",
+        lambda path, mode="chat", backend=None: (
+            pool.prepare_for_load(str(path), backend)
+            or {"memory_load_blocked": False}
+        ),
     )
 
     ensure_load_fits(gguf, mode="chat", backend="llamacpp")

@@ -125,6 +125,14 @@ def _resolve_hub_repo(
     return None, None
 
 
+def _resolve_export_hub_token(
+    settings: ForgeSettings, user_id: str, hub: HubPublishRequest | None
+) -> str | None:
+    if hub and hub.hf_token and hub.hf_token.strip():
+        return hub.hf_token.strip()
+    return resolve_hub_publish_token(settings, user_id, hub)
+
+
 @router.get("/profiles")
 async def export_profiles() -> list[dict]:
     from seiso.export.pipeline import profile_catalog
@@ -152,7 +160,7 @@ async def precheck_hub_export_route(
     meta.validate()
     if body.profile or "gguf" in [f.lower() for f in body.formats]:
         meta.quantizations = list(body.gguf_quantizations)
-    token = resolve_hub_publish_token(settings, user_id, body.hub)
+    token = _resolve_export_hub_token(settings, user_id, body.hub)
     if not token:
         raise HTTPException(
             400,
@@ -201,7 +209,7 @@ async def start_export(
         ) from exc
 
     hub_repo, hub_metadata = _resolve_hub_repo(body)
-    hub_token = resolve_hub_publish_token(settings, user_id, body.hub)
+    hub_token = _resolve_export_hub_token(settings, user_id, body.hub)
     if hub_repo and not hub_token:
         raise HTTPException(
             400,

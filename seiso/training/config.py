@@ -175,6 +175,7 @@ class TrainConfig(BaseModel):
         """Project a general training config into the release-grade slime runner."""
         from seiso.slime_single_gpu.config import SingleGpuSlimeConfig
 
+        extra: dict[str, Any] = getattr(self, "extra", {})
         policy_batch = self.policy_micro_batch_size or self.batch_size
         train_batch = self.train_batch_size or self.batch_size
         return SingleGpuSlimeConfig(
@@ -199,7 +200,7 @@ class TrainConfig(BaseModel):
             weight_decay=self.weight_decay,
             max_grad_norm=self.max_grad_norm,
             epochs=self.epochs,
-            max_steps=self.extra.get("max_steps"),
+            max_steps=extra.get("max_steps"),
             kl_coef=self.kl_coef,
             clip_ratio=self.clip_ratio,
             temperature=self.temperature,
@@ -212,8 +213,8 @@ class TrainConfig(BaseModel):
             lora_r=self.lora_r,
             lora_alpha=self.lora_alpha,
             lora_dropout=self.lora_dropout,
-            lora_target_modules=self.extra.get("lora_target_modules"),
-            lora_bias=str(self.extra.get("lora_bias", "none")),
+            lora_target_modules=extra.get("lora_target_modules"),
+            lora_bias=str(extra.get("lora_bias", "none")),
             use_8bit_optimizer=self.use_8bit_optimizer,
             trust_remote_code=self.trust_remote_code,
             save_every_steps=self.save_steps,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import uuid
 from abc import ABC, abstractmethod
@@ -116,14 +117,19 @@ class Orchestrator(ABC):
 
     async def stream_metrics(self, job_id: str) -> AsyncIterator[dict[str, Any]]:
         queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
-        self._metric_subscribers[job_id].append(queue)
-        for point in self._metric_buffers.get(job_id, []):
-            yield point
-        while True:
-            msg = await queue.get()
-            if msg is None:
-                break
-            yield msg
+        subscribers = self._metric_subscribers[job_id]
+        subscribers.append(queue)
+        try:
+            for point in self._metric_buffers.get(job_id, []):
+                yield point
+            while True:
+                msg = await queue.get()
+                if msg is None:
+                    break
+                yield msg
+        finally:
+            with contextlib.suppress(ValueError):
+                subscribers.remove(queue)
 
     def _finish_logs(self, job_id: str) -> None:
         for q in self._subscribers.get(job_id, []):
@@ -133,21 +139,26 @@ class Orchestrator(ABC):
     async def stream_logs(self, job_id: str) -> AsyncIterator[str]:
         """SSE-compatible log stream for a job."""
         queue: asyncio.Queue[str | None] = asyncio.Queue()
-        self._subscribers[job_id].append(queue)
-        for line in self._log_buffers.get(job_id, []):
-            yield line
-        job = self.get_job(job_id)
-        if job and job.status in (
-            JobStatus.COMPLETED,
-            JobStatus.FAILED,
-            JobStatus.CANCELLED,
-        ):
-            return
-        while True:
-            msg = await queue.get()
-            if msg is None:
-                break
-            yield msg
+        subscribers = self._subscribers[job_id]
+        subscribers.append(queue)
+        try:
+            for line in self._log_buffers.get(job_id, []):
+                yield line
+            job = self.get_job(job_id)
+            if job and job.status in (
+                JobStatus.COMPLETED,
+                JobStatus.FAILED,
+                JobStatus.CANCELLED,
+            ):
+                return
+            while True:
+                msg = await queue.get()
+                if msg is None:
+                    break
+                yield msg
+        finally:
+            with contextlib.suppress(ValueError):
+                subscribers.remove(queue)
 
     async def start(self, job_id: str, payload: dict[str, Any]) -> None:
         if job_id not in self._jobs:

@@ -1,5 +1,9 @@
 __pycache__/
 *.py[cod]
+*.so
+*.dylib
+*.pyd
+*.dll
 *.egg-info/
 .eggs/
 dist/

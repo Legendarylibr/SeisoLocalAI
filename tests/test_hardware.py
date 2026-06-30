@@ -168,7 +168,7 @@ def test_query_nvidia_gpus_cache(monkeypatch):
 
     calls = {"count": 0}
 
-    def fake_probe() -> list[dict[str, object]]:
+    def fake_probe(_exe: str | None = None) -> list[dict[str, object]]:
         calls["count"] += 1
         return [
             {"index": 0, "name": "NVIDIA GeForce RTX 4090", "memory_total_mb": 24564}
