@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import json
 import uuid
 from abc import ABC, abstractmethod
-from collections import defaultdict
+from collections import defaultdict, deque
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -50,14 +49,16 @@ class Orchestrator(ABC):
     def __init__(self, sandbox_root: Path) -> None:
         self.sandbox_root = sandbox_root
         self._jobs: dict[str, JobRecord] = {}
-        self._log_buffers: dict[str, list[str]] = defaultdict(list)
-        self._metric_buffers: dict[str, list[dict[str, Any]]] = defaultdict(list)
-        self._subscribers: dict[str, list[asyncio.Queue[str | None]]] = defaultdict(
-            list
+        self._log_buffers: dict[str, deque[str]] = defaultdict(
+            lambda: deque(maxlen=MAX_LOG_LINES)
         )
+        self._metric_buffers: dict[str, deque[dict[str, Any]]] = defaultdict(
+            lambda: deque(maxlen=MAX_METRIC_POINTS)
+        )
+        self._subscribers: dict[str, set[asyncio.Queue[str | None]]] = defaultdict(set)
         self._metric_subscribers: dict[
-            str, list[asyncio.Queue[dict[str, Any] | None]]
-        ] = defaultdict(list)
+            str, set[asyncio.Queue[dict[str, Any] | None]]
+        ] = defaultdict(set)
         self._tasks: dict[str, asyncio.Task[None]] = {}
         self._subprocesses: dict[str, asyncio.subprocess.Process] = {}
 
@@ -77,15 +78,15 @@ class Orchestrator(ABC):
         self._subprocesses[job_id] = proc
 
     def _evict_oldest_job(self) -> None:
-        finished = [
+        finished = (
             (jid, j)
             for jid, j in self._jobs.items()
             if j.status in (JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED)
-        ]
-        if not finished:
+        )
+        try:
+            jid, _ = min(finished, key=lambda x: x[1].created_at)
+        except ValueError:
             return
-        finished.sort(key=lambda x: x[1].created_at)
-        jid, _ = finished[0]
         self._jobs.pop(jid, None)
         self._log_buffers.pop(jid, None)
         self._metric_buffers.pop(jid, None)
@@ -95,44 +96,46 @@ class Orchestrator(ABC):
     def _emit_log(self, job_id: str, line: str) -> None:
         buf = self._log_buffers[job_id]
         buf.append(line)
-        if len(buf) > MAX_LOG_LINES:
-            del buf[: len(buf) - MAX_LOG_LINES]
-        for q in self._subscribers.get(job_id, []):
+        for q in tuple(self._subscribers.get(job_id, ())):
             q.put_nowait(line)
 
     def _emit_metric(self, job_id: str, metric: dict[str, Any]) -> None:
         buf = self._metric_buffers[job_id]
         buf.append(metric)
-        if len(buf) > MAX_METRIC_POINTS:
-            del buf[: len(buf) - MAX_METRIC_POINTS]
-        for q in self._metric_subscribers.get(job_id, []):
+        for q in tuple(self._metric_subscribers.get(job_id, ())):
             q.put_nowait(metric)
 
     def get_metrics(self, job_id: str) -> list[dict[str, Any]]:
         return list(self._metric_buffers.get(job_id, []))
 
     def _finish_metrics(self, job_id: str) -> None:
-        for q in self._metric_subscribers.get(job_id, []):
+        for q in tuple(self._metric_subscribers.get(job_id, ())):
             q.put_nowait(None)
 
     async def stream_metrics(self, job_id: str) -> AsyncIterator[dict[str, Any]]:
         queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
         subscribers = self._metric_subscribers[job_id]
-        subscribers.append(queue)
+        subscribers.add(queue)
         try:
             for point in self._metric_buffers.get(job_id, []):
                 yield point
+            job = self.get_job(job_id)
+            if job and job.status in (
+                JobStatus.COMPLETED,
+                JobStatus.FAILED,
+                JobStatus.CANCELLED,
+            ):
+                return
             while True:
                 msg = await queue.get()
                 if msg is None:
                     break
                 yield msg
         finally:
-            with contextlib.suppress(ValueError):
-                subscribers.remove(queue)
+            subscribers.discard(queue)
 
     def _finish_logs(self, job_id: str) -> None:
-        for q in self._subscribers.get(job_id, []):
+        for q in tuple(self._subscribers.get(job_id, ())):
             q.put_nowait(None)
         self._finish_metrics(job_id)
 
@@ -140,7 +143,7 @@ class Orchestrator(ABC):
         """SSE-compatible log stream for a job."""
         queue: asyncio.Queue[str | None] = asyncio.Queue()
         subscribers = self._subscribers[job_id]
-        subscribers.append(queue)
+        subscribers.add(queue)
         try:
             for line in self._log_buffers.get(job_id, []):
                 yield line
@@ -157,8 +160,7 @@ class Orchestrator(ABC):
                     break
                 yield msg
         finally:
-            with contextlib.suppress(ValueError):
-                subscribers.remove(queue)
+            subscribers.discard(queue)
 
     async def start(self, job_id: str, payload: dict[str, Any]) -> None:
         if job_id not in self._jobs:
