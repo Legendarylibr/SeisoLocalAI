@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from queue import Empty
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -390,6 +391,123 @@ def test_llamaswap_can_be_selected_as_local_backend(tmp_path: Path):
         == BACKEND_LLAMASWAP
     )
     assert prepare_model_path(str(gguf), BACKEND_LLAMASWAP) == str(gguf.absolute())
+
+
+def test_llamaswap_status_requires_reachable_sidecar(monkeypatch):
+    from seiso.inference import llamaswap
+
+    monkeypatch.setenv("SEISO_LLAMASWAP_ENABLED", "true")
+    monkeypatch.setattr(llamaswap, "llamaswap_health_ok", lambda *, url=None: False)
+
+    status = llamaswap.llamaswap_status()
+
+    assert status.available is False
+    assert "not reachable" in (status.reason or "")
+
+
+def test_llamaswap_request_body_forwards_tools_and_model_override(monkeypatch):
+    from seiso.inference.llamaswap import LlamaSwapClient
+
+    monkeypatch.setenv("SEISO_LLAMASWAP_MODEL", "local-qwen")
+    client = LlamaSwapClient(url="http://127.0.0.1:8080", engine="llamacpp")
+
+    body = client._request_body(
+        {
+            "messages": [{"role": "user", "content": "hi"}],
+            "max_tokens": 7,
+            "temperature": 0.25,
+            "top_p": 0.9,
+            "tools_schemas": [{"type": "function", "function": {"name": "search"}}],
+        },
+        "/tmp/model.gguf",
+        stream=True,
+    )
+
+    assert body == {
+        "model": "local-qwen",
+        "messages": [{"role": "user", "content": "hi"}],
+        "max_tokens": 7,
+        "temperature": 0.25,
+        "stream": True,
+        "top_p": 0.9,
+        "tools": [{"type": "function", "function": {"name": "search"}}],
+    }
+
+
+def test_openai_gguf_payload_uses_llamaswap_when_available(monkeypatch):
+    from forge.api.routes.openai import ChatCompletionRequest, _resolve_payload
+
+    monkeypatch.setattr(
+        "seiso.inference.llamaswap.llamaswap_status",
+        lambda: SimpleNamespace(available=True),
+    )
+
+    payload = _resolve_payload(
+        ChatCompletionRequest(
+            model="default",
+            messages=[{"role": "user", "content": "hi"}],
+        ),
+        "/tmp/model.gguf",
+        model_format="gguf",
+    )
+
+    assert payload["inference_backend"] == BACKEND_LLAMASWAP
+
+
+def test_openai_gguf_payload_falls_back_to_llamacpp(monkeypatch):
+    from forge.api.routes.openai import ChatCompletionRequest, _resolve_payload
+
+    monkeypatch.setattr(
+        "seiso.inference.llamaswap.llamaswap_status",
+        lambda: SimpleNamespace(available=False),
+    )
+
+    payload = _resolve_payload(
+        ChatCompletionRequest(
+            model="default",
+            messages=[{"role": "user", "content": "hi"}],
+        ),
+        "/tmp/model.gguf",
+        model_format="gguf",
+    )
+
+    assert payload["inference_backend"] == BACKEND_LLAMACPP
+
+
+@pytest.mark.asyncio
+async def test_runner_routes_tools_to_llamaswap(monkeypatch):
+    from seiso.inference.runner import LocalInferenceRunner
+
+    runner = LocalInferenceRunner()
+    seen: dict[str, object] = {}
+
+    class FakeClient:
+        def complete(self, payload, model_path):
+            seen["payload"] = payload
+            seen["model_path"] = model_path
+            return "tool-ready"
+
+    monkeypatch.setattr(
+        runner,
+        "_resolve_route",
+        lambda _payload, _model_path: ("llamaswap", "/tmp/model.gguf"),
+    )
+    monkeypatch.setattr(runner._pool, "get_llamaswap", lambda _path: FakeClient())
+    monkeypatch.setattr(runner._pool, "bump_generation", lambda: 1)
+    monkeypatch.setattr(runner._pool, "is_generation_active", lambda _gen: True)
+    monkeypatch.setattr(runner, "_ensure_model_switch", AsyncMock())
+
+    result = await runner.chat(
+        {
+            "model_path": "/tmp/model.gguf",
+            "messages": [{"role": "user", "content": "hi"}],
+            "tools_schemas": [{"type": "function", "function": {"name": "search"}}],
+        }
+    )
+
+    assert result == "tool-ready"
+    assert seen["model_path"] == "/tmp/model.gguf"
+    assert seen["payload"] and seen["payload"]["tools_schemas"]
 
 
 def test_get_inference_runner_is_singleton():
