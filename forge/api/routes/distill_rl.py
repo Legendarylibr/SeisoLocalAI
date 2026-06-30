@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from forge.api.deps import get_distill_rl_orchestrator
 from forge.api.routes._jobs import (
@@ -29,6 +29,8 @@ STAGE_HELP = {
 
 
 class DistillRLStartRequest(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     preset: str = Field(default="smoke", description="smoke | reproducible | full")
     config_file: str | None = None
     stages: list[str] | None = None

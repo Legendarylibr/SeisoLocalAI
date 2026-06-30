@@ -7,7 +7,7 @@ import uuid
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from forge.api.deps import get_db, get_rl_quant_orchestrator
 from forge.api.routes._jobs import (
@@ -27,7 +27,8 @@ from forge.orchestrators.rl_quant import RLQuantOrchestrator
 from forge.security.audit import audit_event
 from forge.security.auth import get_current_user_id
 from forge.services.model_registry import register_export_outputs
-from seiso.rl_quant.presets import rl_quant_presets_response
+from seiso.bundled.config_builder import validate_stages
+from seiso.rl_quant.presets import STAGE_ORDER, rl_quant_presets_response
 from seiso.rl_quant.recommendation import recommendation_to_gguf_quants
 
 router = APIRouter(prefix="/rl-quant", tags=["rl-quant"])
@@ -53,9 +54,12 @@ register_formatted_job_routes(
 
 
 class RLQuantStartRequest(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     preset: str = Field(
         default="reproducible", description="reproducible | minimal | post_train"
     )
+    stages: list[str] | None = None
     config_file: str | None = None
     run_name: str | None = None
     training_episodes: int | None = None
@@ -95,6 +99,8 @@ async def start_rl_quant(
 ) -> PipelineJobResponse:
     job_id = str(uuid.uuid4())
     config = body.model_dump()
+    if body.stages:
+        validate_stages(body.stages, STAGE_ORDER)
 
     if body.link_training_job_id:
         await resolve_linked_training_job(
@@ -160,4 +166,5 @@ async def start_rl_quant(
 async def list_presets(
     user_id: Annotated[str, Depends(get_current_user_id)],
 ) -> dict[str, Any]:
+    del user_id
     return rl_quant_presets_response()

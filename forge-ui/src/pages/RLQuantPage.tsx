@@ -25,6 +25,9 @@ export function RLQuantPage() {
   const [jobs, setJobs] = useState<RLQuantJob[]>([]);
   const [presets, setPresets] = useState<RLQuantPreset[]>([]);
   const [presetHints, setPresetHints] = useState<Record<string, string>>({});
+  const [allStages, setAllStages] = useState<string[]>([]);
+  const [stageHelp, setStageHelp] = useState<Record<string, string>>({});
+  const [selectedStages, setSelectedStages] = useState<string[]>([]);
   const [presetsLoading, setPresetsLoading] = useState(true);
   const [preset, setPreset] = useState("minimal");
   const [trainingEpisodes, setTrainingEpisodes] = useState(256);
@@ -41,6 +44,8 @@ export function RLQuantPage() {
   const [kernelHiddenDim, setKernelHiddenDim] = useState(4096);
   const [kernelBatchRows, setKernelBatchRows] = useState(4096);
   const [reward, setReward] = useState(DEFAULT_REWARD);
+  const [configOverrides, setConfigOverrides] = useState("");
+  const [configError, setConfigError] = useState("");
   const [recommendation, setRecommendation] = useState<Record<string, unknown> | null>(null);
   const [starting, setStarting] = useState(false);
   const { logs, activeJob, resetStream, watchJob } = usePipelineJobStream();
@@ -52,6 +57,8 @@ export function RLQuantPage() {
       .then((r) => {
         setPresets(r.presets);
         setPresetHints(r.preset_hints ?? {});
+        setAllStages(r.stages ?? []);
+        setStageHelp(r.help ?? {});
         if (r.presets.length > 0) {
           setPreset((current) => (r.presets.some((p) => p.id === current) ? current : r.presets[0].id));
         }
@@ -62,13 +69,27 @@ export function RLQuantPage() {
 
   const refreshJobs = () => api.listRLQuantJobs().then(setJobs).catch(console.error);
 
+  useEffect(() => {
+    const p = presets.find((x) => x.id === preset);
+    if (!p) return;
+    setSelectedStages(p.stages.length ? p.stages : allStages);
+  }, [preset, presets, allStages]);
+
+  const toggleStage = (stage: string) => {
+    setSelectedStages((prev) =>
+      prev.includes(stage) ? prev.filter((s) => s !== stage) : [...prev, stage],
+    );
+  };
+
   const start = async () => {
     setStarting(true);
     resetStream();
     setRecommendation(null);
+    setConfigError("");
     try {
-      const res = await api.startRLQuant({
+      const body: Record<string, unknown> = {
         preset,
+        stages: selectedStages,
         training_episodes: trainingEpisodes,
         evaluation_episodes: evaluationEpisodes,
         backend,
@@ -82,9 +103,21 @@ export function RLQuantPage() {
         kernel_live_benchmark: kernelLiveBenchmark,
         kernel_hidden_dim: kernelRlEnabled ? kernelHiddenDim : undefined,
         kernel_batch_rows: kernelRlEnabled ? kernelBatchRows : undefined,
+        auto_sweep: allStages.includes("auto_sweep")
+          ? selectedStages.includes("auto_sweep")
+          : true,
         reward_weights: reward,
         seed: 13,
-      });
+      };
+      if (configOverrides.trim()) {
+        try {
+          Object.assign(body, JSON.parse(configOverrides));
+        } catch {
+          setConfigError("Config overrides must be valid JSON.");
+          return;
+        }
+      }
+      const res = await api.startRLQuant(body);
       watchJob(`/rl-quant/jobs/${res.job_id}/stream`, res.job_id, {
         onEvent: (event, data) => {
           if (event === "recommendation") {
@@ -146,6 +179,26 @@ export function RLQuantPage() {
                   <p className="field-hint">
                     Backend {selectedPreset.backend} · trainer {selectedPreset.training_backend}
                   </p>
+                )}
+                {allStages.length > 0 && (
+                  <div className="form-field">
+                    <label>Stages</label>
+                    <div className="checkbox-group compress-stages">
+                      {allStages.map((stage) => (
+                        <label key={stage} title={stageHelp[stage]}>
+                          <input
+                            type="checkbox"
+                            checked={selectedStages.includes(stage)}
+                            onChange={() => toggleStage(stage)}
+                          />
+                          {stage.replace(/_/g, " ")}
+                          {stageHelp[stage] && (
+                            <span className="muted-text compress-stage-hint">{stageHelp[stage]}</span>
+                          )}
+                        </label>
+                      ))}
+                    </div>
+                  </div>
                 )}
               </FormSection>
 
@@ -260,6 +313,19 @@ export function RLQuantPage() {
 
               <FormSection title="Reward engineering" hint="Tune the multi-objective reward surface." collapsible defaultOpen={false}>
                 <RewardWeights weights={reward} onChange={(w) => setReward({ ...reward, ...w })} />
+              </FormSection>
+
+              <FormSection title="Dynamic config" hint="Optional flat FrameworkConfig overrides." collapsible defaultOpen={false}>
+                <div className="form-field">
+                  <label>Inline config overrides (JSON)</label>
+                  <textarea
+                    rows={6}
+                    value={configOverrides}
+                    onChange={(e) => setConfigOverrides(e.target.value)}
+                    placeholder='{"router_enabled": true, "hardware_modes": ["rtx4090"]}'
+                  />
+                  {configError && <p className="field-error">{configError}</p>}
+                </div>
               </FormSection>
             </div>
           </div>

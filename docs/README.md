@@ -22,6 +22,7 @@ Start with **[getting-started.md](getting-started.md)** — a step-by-step walkt
 | Diagnose install / HF / GPU | `seiso doctor` or `./scripts/doctor.sh` → [cli.md](cli.md) |
 | Chat with a local model | [getting-started.md § Step 4](getting-started.md#step-4--chat-with-a-local-model) |
 | Fine-tune with QLoRA / LoRA | [training/quickstart.md](training/quickstart.md) |
+| Run each training pipeline step by step | [training/pipelines.md](training/pipelines.md) |
 | Single-GPU slime post-training | [training/quickstart.md § Slime Post-Training](training/quickstart.md#slime-post-training) |
 | RL quant from CLI | [cli.md § seiso rl-quant](cli.md#seiso-rl-quant) · [compression.md](compression.md) |
 | Use Cursor / Continue with local models | [getting-started.md § Connect external tools](getting-started.md#connect-external-tools-cursor-continue-etc) |
@@ -73,15 +74,17 @@ See [install.md](install.md) and [forge.md](forge.md) for full details.
 1. [getting-started.md](getting-started.md) — install through first export
 2. [forge.md](forge.md) — pages, API routes, environment variables
 3. [training/quickstart.md](training/quickstart.md) — Training Studio details
-4. [compression.md](compression.md) — compression pipelines
-5. [troubleshooting.md](troubleshooting.md) — common fixes
+4. [training/pipelines.md](training/pipelines.md) — step-by-step pipeline runs
+5. [compression.md](compression.md) — compression pipelines
+6. [troubleshooting.md](troubleshooting.md) — common fixes
 
 ### Path B — CLI / automation
 
 1. [install.md](install.md) — pip extras per platform
 2. [cli.md](cli.md) — full command reference (`seiso experiment` for research studies)
 3. [training/quickstart.md](training/quickstart.md) — YAML config fields
-4. [inference/backends.md](inference/backends.md) — backend selection and [memory management](inference/backends.md#memory-management)
+4. [training/pipelines.md](training/pipelines.md) — CLI pipeline runbooks
+5. [inference/backends.md](inference/backends.md) — backend selection and [memory management](inference/backends.md#memory-management)
 
 ### Path C — Developer / contributor
 
@@ -120,6 +123,7 @@ See [install.md](install.md) and [forge.md](forge.md) for full details.
 | CLI commands | [cli.md](cli.md) |
 | Local CI / quality gate | [CI_LOCAL.md](CI_LOCAL.md) |
 | Training | [training/quickstart.md](training/quickstart.md) |
+| Training pipelines | [training/pipelines.md](training/pipelines.md) |
 | Fused GPU kernels | [training/kernels.md](training/kernels.md) |
 | Multi-GPU | [training/multi-gpu.md](training/multi-gpu.md) |
 | Inference backends | [inference/backends.md](inference/backends.md) |

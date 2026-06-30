@@ -19,6 +19,9 @@ from seiso.rl_quant.recommendation import recommendation_to_gguf_quants
 def test_rl_quant_presets_response_includes_hints():
     payload = rl_quant_presets_response()
     assert len(payload["presets"]) >= 3
+    assert "train" in payload["stages"]
+    assert payload["help"]["recommend"]
+    assert payload["defaults"]["training_episodes"] == 256
     assert payload["preset_hints"]["minimal"]
     assert payload["reward_weights_help"]["gamma_perplexity"]
     assert payload["auto_sweep_help"]["auto_sweep"]

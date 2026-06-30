@@ -6,6 +6,9 @@ export const rlQuantApi = {
   rlQuantPresets: () =>
     request<{
       presets: RLQuantPreset[];
+      stages: string[];
+      help: Record<string, string>;
+      defaults?: Record<string, string | number | boolean>;
       preset_hints?: Record<string, string>;
       reward_weights_help: Record<string, string>;
       kernel_rl_help?: Record<string, string | string[]>;

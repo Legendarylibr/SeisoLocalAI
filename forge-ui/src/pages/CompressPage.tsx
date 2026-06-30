@@ -59,6 +59,8 @@ export function CompressPage() {
   const [seed, setSeed] = useState(42);
   const [deterministic, setDeterministic] = useState(true);
   const [configFile, setConfigFile] = useState("");
+  const [configOverrides, setConfigOverrides] = useState("");
+  const [configError, setConfigError] = useState("");
   const [linkTrainingJob, setLinkTrainingJob] = useState("");
 
   useEffect(() => {
@@ -71,6 +73,7 @@ export function CompressPage() {
   }, [modelsReady, localModels, defaults.teacher_model, defaults.student_model]);
 
   const start = async () => {
+    setConfigError("");
     const body: Record<string, unknown> = {
       preset,
       teacher_model: teacherModel,
@@ -89,6 +92,14 @@ export function CompressPage() {
     if (maxTrainSamples !== "") body.max_train_samples = maxTrainSamples;
     if (calibrationSamples !== "") body.calibration_samples = calibrationSamples;
     if (linkTrainingJob) body.link_training_job_id = linkTrainingJob;
+    if (configOverrides.trim()) {
+      try {
+        Object.assign(body, JSON.parse(configOverrides));
+      } catch {
+        setConfigError("Config overrides must be valid JSON.");
+        return;
+      }
+    }
     await runPipeline(body);
   };
 
@@ -253,6 +264,16 @@ export function CompressPage() {
                   onChange={(e) => setConfigFile(e.target.value)}
                   placeholder="~/.seiso/configs/compress.json"
                 />
+              </div>
+              <div className="form-field">
+                <label>Inline config overrides (JSON)</label>
+                <textarea
+                  rows={5}
+                  value={configOverrides}
+                  onChange={(e) => setConfigOverrides(e.target.value)}
+                  placeholder='{"trust_remote_code": false, "min_free_gb": 8}'
+                />
+                {configError && <p className="field-error">{configError}</p>}
               </div>
             </details>
           </FormSection>

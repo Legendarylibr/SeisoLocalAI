@@ -4,24 +4,67 @@ from __future__ import annotations
 
 from typing import Any
 
-RL_QUANT_PRESETS: list[dict[str, str]] = [
+STAGE_ORDER = (
+    "auto_sweep",
+    "train",
+    "evaluate",
+    "recommend",
+    "benchmark",
+    "analysis",
+    "report",
+    "paper_bundle",
+)
+
+STAGE_HELP: dict[str, str] = {
+    "auto_sweep": "Optional hyperparameter sweep before the main policy run",
+    "train": "Train the adaptive quantization policy",
+    "evaluate": "Evaluate reward and quality tradeoffs",
+    "recommend": "Write deployable quantization recommendations",
+    "benchmark": "Run simulator or llama.cpp benchmark suite",
+    "analysis": "Generate analysis artifacts from logs and traces",
+    "report": "Write the markdown research report",
+    "paper_bundle": "Package reproducibility metadata and artifacts",
+}
+
+RL_QUANT_PRESETS: list[dict[str, Any]] = [
     {
         "id": "reproducible",
         "label": "Reproducible research (simulator)",
         "backend": "simulator",
         "training_backend": "stdlib",
+        "stages": [
+            "auto_sweep",
+            "train",
+            "evaluate",
+            "recommend",
+            "benchmark",
+            "analysis",
+            "report",
+            "paper_bundle",
+        ],
     },
     {
         "id": "minimal",
         "label": "Fast smoke (256 episodes)",
         "backend": "simulator",
         "training_backend": "stdlib",
+        "stages": ["train", "evaluate", "recommend", "benchmark"],
     },
     {
         "id": "post_train",
         "label": "Post fine-tune RL (continuous, router)",
         "backend": "simulator",
         "training_backend": "stdlib",
+        "stages": [
+            "auto_sweep",
+            "train",
+            "evaluate",
+            "recommend",
+            "benchmark",
+            "analysis",
+            "report",
+            "paper_bundle",
+        ],
     },
 ]
 
@@ -67,6 +110,15 @@ AUTO_SWEEP_HELP: dict[str, str] = {
 def rl_quant_presets_response() -> dict[str, Any]:
     return {
         "presets": RL_QUANT_PRESETS,
+        "stages": list(STAGE_ORDER),
+        "help": STAGE_HELP,
+        "defaults": {
+            "preset": "minimal",
+            "training_episodes": 256,
+            "evaluation_episodes": 64,
+            "backend": "simulator",
+            "training_backend": "stdlib",
+        },
         "preset_hints": RL_QUANT_PRESET_HINTS,
         "reward_weights_help": REWARD_WEIGHTS_HELP,
         "kernel_rl_help": KERNEL_RL_HELP,
