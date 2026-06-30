@@ -272,8 +272,7 @@ class SimulatorBackend:
             throughput_tps *= max(
                 0.55,
                 1.0
-                - excess_bits
-                * (0.07 if hardware_type == HardwareType.CPU else 0.12),
+                - excess_bits * (0.07 if hardware_type == HardwareType.CPU else 0.12),
             )
             memory_mb *= 1.0 + excess_bits * (
                 0.10 if hardware_type == HardwareType.CPU else 0.18

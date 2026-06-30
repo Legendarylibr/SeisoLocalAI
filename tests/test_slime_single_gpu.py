@@ -323,7 +323,9 @@ def test_lora_target_inference_honors_configured_modules():
     ]
 
 
-def test_apply_lora_reports_training_extra_when_peft_is_missing(monkeypatch, tmp_path: Path):
+def test_apply_lora_reports_training_extra_when_peft_is_missing(
+    monkeypatch, tmp_path: Path
+):
     real_import = __import__
 
     def fake_import(name, *args, **kwargs):
@@ -445,9 +447,14 @@ def test_training_health_stops_on_nonfinite_stats(tmp_path: Path):
 def test_verifier_jsonl_helpers_bound_text(tmp_path: Path):
     path = tmp_path / "nested" / "verifier.jsonl"
 
-    _append_jsonl_records(path, [{"prompt": _truncate_text("abcdef", 3)}, {"prompt": _truncate_text("x", 0)}])
+    _append_jsonl_records(
+        path,
+        [{"prompt": _truncate_text("abcdef", 3)}, {"prompt": _truncate_text("x", 0)}],
+    )
 
-    records = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+    records = [
+        json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()
+    ]
     assert records == [{"prompt": "abc"}, {"prompt": ""}]
 
 

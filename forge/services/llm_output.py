@@ -22,6 +22,7 @@ _FUNCTION_JSON_PATTERN = re.compile(
     re.DOTALL,
 )
 
+
 def strip_spurious_tool_syntax(content: str) -> str:
     """Remove accidental tool-call markup from plain chat replies."""
     if not content:

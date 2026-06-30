@@ -160,7 +160,11 @@ def train_single_gpu_slime(config: SingleGpuSlimeConfig) -> Path:
 
     config.output_dir.mkdir(parents=True, exist_ok=True)
     metrics_path = config.output_dir / "slime_single_gpu_metrics.jsonl"
-    verifier_path = config.output_dir / config.verifier_data_file if config.write_verifier_data else None
+    verifier_path = (
+        config.output_dir / config.verifier_data_file
+        if config.write_verifier_data
+        else None
+    )
     final_output_dir = _final_output_dir(config)
     best_checkpoint_dir = config.output_dir / config.best_checkpoint_dir
     auto_stop = _AutoStopController.from_config(config)
@@ -340,12 +344,16 @@ def _collect_rollouts(
                         "rollout_index": idx % config.rollouts_per_prompt,
                         "reward": reward,
                         "reward_name": config.reward,
-                        "prompt": _truncate_text(prompt_chunk[sample_idx], config.verifier_max_text_chars),
+                        "prompt": _truncate_text(
+                            prompt_chunk[sample_idx], config.verifier_max_text_chars
+                        ),
                         "answer": _truncate_text(
                             reward_sample.get("answer", ""),
                             config.verifier_max_text_chars,
                         ),
-                        "completion": _truncate_text(completion, config.verifier_max_text_chars),
+                        "completion": _truncate_text(
+                            completion, config.verifier_max_text_chars
+                        ),
                     }
                 )
 
@@ -358,7 +366,7 @@ def _collect_rollouts(
                 _sequence_logprobs(ref_model, padded, torch).detach().cpu()
                 if ref_model is not None
                 else None
-        )
+            )
         for idx, rollout in enumerate(chunk_rollouts):
             rollout.old_logprobs = old_logprobs[idx]
             rollout.ref_logprobs = (
@@ -780,7 +788,9 @@ def _check_training_health(
     return None
 
 
-def _auto_stop_stats(controller: _AutoStopController) -> dict[str, float | int | str | None]:
+def _auto_stop_stats(
+    controller: _AutoStopController,
+) -> dict[str, float | int | str | None]:
     return {
         "best_metric": controller.best_value,
         "best_step": controller.best_step,

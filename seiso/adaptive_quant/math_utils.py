@@ -379,8 +379,10 @@ def moe_swap_cost(
     ):
         if resident < 0.5:
             aggressiveness = index / denom
-            total += (1.2 + 3.4 * aggressiveness) * (0.75 + probability) * (
-                1.10 - 0.35 * hot
+            total += (
+                (1.2 + 3.4 * aggressiveness)
+                * (0.75 + probability)
+                * (1.10 - 0.35 * hot)
             )
     return float(total)
 
