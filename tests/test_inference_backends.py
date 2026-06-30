@@ -10,6 +10,7 @@ import pytest
 
 from seiso.inference.backends import (
     BACKEND_LLAMACPP,
+    BACKEND_LLAMASWAP,
     BACKEND_MLX,
     BACKEND_TORCH,
     available_backends,
@@ -151,9 +152,8 @@ def test_available_backends_allows_dflash_draft_for_speculative(tmp_path: Path):
 
     # dflash-draft is now allowed (via llama.cpp) when used as speculative draft model
     backends = available_backends(model_path=str(gguf), model_format="gguf")
-    assert (
-        backends == ["llamacpp"] or backends == []
-    )  # may be filtered by other catalog logic in full flow
+    assert BACKEND_LLAMACPP in backends
+    assert BACKEND_LLAMASWAP in backends
 
 
 @pytest.mark.asyncio
@@ -357,6 +357,41 @@ def test_resolve_local_backend_auto():
     )
 
 
+def test_llamaswap_engine_prefers_llamacpp_on_macos(monkeypatch):
+    from seiso.inference import llamaswap
+
+    monkeypatch.delenv("SEISO_LLAMASWAP_ENGINE", raising=False)
+    monkeypatch.setattr(llamaswap.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(llamaswap, "_nvidia_visible", lambda: True)
+
+    assert llamaswap.preferred_llamaswap_engine() == "llamacpp"
+
+
+def test_llamaswap_engine_prefers_ollama_on_nvidia(monkeypatch):
+    from seiso.inference import llamaswap
+
+    monkeypatch.delenv("SEISO_LLAMASWAP_ENGINE", raising=False)
+    monkeypatch.setattr(llamaswap.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(llamaswap, "_nvidia_visible", lambda: True)
+
+    assert llamaswap.preferred_llamaswap_engine() == "ollama"
+
+
+def test_llamaswap_can_be_selected_as_local_backend(tmp_path: Path):
+    gguf = tmp_path / "model.gguf"
+    gguf.write_bytes(b"gguf")
+
+    assert (
+        resolve_local_backend(
+            model_path=str(gguf),
+            model_format="gguf",
+            requested=BACKEND_LLAMASWAP,
+        )
+        == BACKEND_LLAMASWAP
+    )
+    assert prepare_model_path(str(gguf), BACKEND_LLAMASWAP) == str(gguf.absolute())
+
+
 def test_get_inference_runner_is_singleton():
     import seiso.inference.runner as runner_mod
 
@@ -382,7 +417,9 @@ def test_inference_orchestrator_uses_shared_runner():
 async def test_local_inference_stream_propagates_errors(monkeypatch):
     from seiso.inference.runner import LocalInferenceRunner
 
-    async def _noop_switch(_path: str, *, draft_path: str | None = None) -> None:
+    async def _noop_switch(
+        _path: str, *, draft_path: str | None = None, route: str = "llama"
+    ) -> None:
         return None
 
     runner = LocalInferenceRunner()
@@ -407,7 +444,9 @@ async def test_local_inference_stream_propagates_errors(monkeypatch):
 async def test_local_inference_chat_uses_direct_completion(monkeypatch):
     from seiso.inference.runner import LocalInferenceRunner
 
-    async def _noop_switch(_path: str, *, draft_path: str | None = None) -> None:
+    async def _noop_switch(
+        _path: str, *, draft_path: str | None = None, route: str = "llama"
+    ) -> None:
         return None
 
     runner = LocalInferenceRunner()
@@ -762,6 +801,59 @@ async def test_list_inference_options_filters_to_installed_backends(
     assert options[0]["id"]
     assert options[0]["backends"] == [BACKEND_LLAMACPP]
     assert options[0]["default_backend"] == BACKEND_LLAMACPP
+
+
+@pytest.mark.asyncio
+async def test_list_inference_options_defaults_to_llamaswap_on_nvidia(
+    monkeypatch, tmp_path
+):
+    from forge.db.crypto import generate_encryption_key
+    from forge.db.store import Database
+    from forge.services import inference_models
+    from forge.services.hf_connectivity import InferenceRuntimeStatus
+
+    model_path = tmp_path / "model-q4.gguf"
+    model_path.write_bytes(b"gguf")
+
+    db = Database(
+        tmp_path / "forge.db", encryption_key=generate_encryption_key(), ephemeral=True
+    )
+    await db.add_model(
+        user_id="u1",
+        name="Model Q4",
+        path=str(model_path),
+        source="hf:org/Model",
+        format="gguf",
+        size_bytes=model_path.stat().st_size,
+        metadata=_complete_hf_gguf_metadata(model_path.name),
+    )
+
+    monkeypatch.setattr(
+        inference_models,
+        "check_inference_runtime",
+        lambda: InferenceRuntimeStatus(
+            llamacpp=True, llamaswap=True, mlx=False, torch=False
+        ),
+    )
+    monkeypatch.setattr(
+        inference_models,
+        "get_gguf_file_size_bytes",
+        lambda _repo, _filename: model_path.stat().st_size,
+    )
+    monkeypatch.setattr("seiso.inference.llamaswap.llamaswap_enabled", lambda: True)
+
+    options = await inference_models.list_inference_options(
+        db,
+        "u1",
+        profile={
+            "backend": "cuda",
+            "gpus": [{"name": "NVIDIA RTX", "vram_total_mb": 24576}],
+            "ram_gb": 32,
+        },
+    )
+
+    assert options[0]["backends"] == [BACKEND_LLAMASWAP, BACKEND_LLAMACPP]
+    assert options[0]["default_backend"] == BACKEND_LLAMASWAP
 
 
 @pytest.mark.asyncio

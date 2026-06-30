@@ -16,6 +16,7 @@ BackendName = str
 
 class InferenceBackend(StrEnum):
     LLAMACPP = "llamacpp"
+    LLAMASWAP = "llamaswap"
     MLX = "mlx"
     TORCH = "torch"
     ROUTER = "router"
@@ -23,6 +24,7 @@ class InferenceBackend(StrEnum):
 
 
 BACKEND_LLAMACPP = InferenceBackend.LLAMACPP
+BACKEND_LLAMASWAP = InferenceBackend.LLAMASWAP
 BACKEND_MLX = InferenceBackend.MLX
 BACKEND_TORCH = InferenceBackend.TORCH
 BACKEND_ROUTER = InferenceBackend.ROUTER
@@ -30,6 +32,7 @@ BACKEND_AUTO = InferenceBackend.AUTO
 
 BACKEND_LABELS: dict[str, str] = {
     "llamacpp": "llama.cpp",
+    "llamaswap": "llama-swap",
     "mlx": "MLX",
     "torch": "PyTorch",
     "router": "Smart Router",
@@ -312,7 +315,7 @@ def available_backends(
     if fmt == "gguf" and not gguf_is_supported_by_llamacpp(model_path):
         return []
     if fmt == "gguf" or _is_gguf_path(model_path) or path.suffix.lower() == ".gguf":
-        return [BACKEND_LLAMACPP]
+        return [BACKEND_LLAMASWAP, BACKEND_LLAMACPP]
     if fmt in {"safetensors", "bin"} or path.is_dir():
         preferred = recommend_backend(model_path=model_path, model_format=model_format)
         return list(dict.fromkeys([preferred, BACKEND_TORCH, BACKEND_MLX]))
@@ -329,14 +332,14 @@ def resolve_local_backend(
     choice = (requested or BACKEND_AUTO).lower()
     if choice == BACKEND_AUTO:
         return recommend_backend(model_path=model_path, model_format=model_format)
-    if choice in {BACKEND_LLAMACPP, BACKEND_MLX, BACKEND_TORCH}:
+    if choice in {BACKEND_LLAMACPP, BACKEND_LLAMASWAP, BACKEND_MLX, BACKEND_TORCH}:
         return choice
     raise ValueError(f"Unsupported inference backend: {requested}")
 
 
 def prepare_model_path(model_path: str, backend: BackendName) -> str:
     """Normalize model path (e.g. pick a GGUF file inside a directory)."""
-    if backend == BACKEND_LLAMACPP:
+    if backend in {BACKEND_LLAMACPP, BACKEND_LLAMASWAP}:
         return str(resolve_gguf_file(model_path))
     path = Path(model_path).expanduser()
     if (

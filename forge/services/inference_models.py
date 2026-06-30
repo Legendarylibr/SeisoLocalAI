@@ -22,6 +22,7 @@ from forge.services.hf_hub import get_gguf_file_size_bytes
 from seiso.inference.backends import (
     BACKEND_LABELS,
     BACKEND_LLAMACPP,
+    BACKEND_LLAMASWAP,
     BACKEND_MLX,
     BACKEND_ROUTER,
     BACKEND_TORCH,
@@ -77,6 +78,7 @@ def _installed_backends() -> dict[str, bool]:
     runtime = check_inference_runtime()
     return {
         BACKEND_LLAMACPP: runtime.llamacpp,
+        BACKEND_LLAMASWAP: getattr(runtime, "llamaswap", False),
         BACKEND_MLX: runtime.mlx,
         BACKEND_TORCH: runtime.torch,
     }

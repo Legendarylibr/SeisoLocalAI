@@ -12,6 +12,7 @@ from typing import Any
 
 from seiso.env import env_int
 from seiso.inference.backends import (
+    BACKEND_LLAMASWAP,
     BACKEND_MLX,
     BACKEND_TORCH,
     is_dflash_draft,
@@ -90,6 +91,8 @@ class LocalInferenceRunner:
             self._pool.get_mlx(resolved_path)
         elif route == "torch":
             self._pool.get_torch(resolved_path)
+        elif route == "llamaswap":
+            self._pool.get_llamaswap(resolved_path)
         elif route == "speculative":
             draft_path = payload.get("draft_model_path")
             if not draft_path:
@@ -128,7 +131,7 @@ class LocalInferenceRunner:
                     "Tool calling is only supported with llama.cpp GGUF models"
                 )
             generation_id = self._pool.bump_generation()
-            await self._ensure_model_switch(resolved_path)
+            await self._ensure_model_switch(resolved_path, route=route)
             return await loop.run_in_executor(
                 None,
                 lambda: self._llama_complete(payload, resolved_path, generation_id),
@@ -142,7 +145,7 @@ class LocalInferenceRunner:
         route, resolved_path = self._resolve_route(payload, model_path)
         generation_id = self._pool.bump_generation()
         await self._ensure_model_switch(
-            resolved_path, draft_path=payload.get("draft_model_path")
+            resolved_path, draft_path=payload.get("draft_model_path"), route=route
         )
         return await loop.run_in_executor(
             None,
@@ -164,7 +167,9 @@ class LocalInferenceRunner:
         route, resolved_path = self._resolve_route(payload, model_path)
         draft_path = payload.get("draft_model_path")
         generation_id = self._pool.bump_generation()
-        await self._ensure_model_switch(resolved_path, draft_path=draft_path)
+        await self._ensure_model_switch(
+            resolved_path, draft_path=draft_path, route=route
+        )
 
         loop = asyncio.get_running_loop()
         queue: asyncio.Queue[StreamUpdate | object] = asyncio.Queue()
@@ -249,7 +254,7 @@ class LocalInferenceRunner:
         return self._pool.status()
 
     async def _ensure_model_switch(
-        self, model_path: str, *, draft_path: str | None = None
+        self, model_path: str, *, draft_path: str | None = None, route: str = "llama"
     ) -> None:
         status = self._pool.status()
         active_path = status.get("path")
@@ -277,9 +282,10 @@ class LocalInferenceRunner:
             )
             return
 
-        if self._pool.would_switch_model(model_path):
+        backend = BACKEND_LLAMASWAP if route == "llamaswap" else None
+        if self._pool.would_switch_model(model_path, backend):
             await loop.run_in_executor(
-                None, lambda: self._pool.prepare_for_load(model_path)
+                None, lambda: self._pool.prepare_for_load(model_path, backend)
             )
 
     def _resolve_route(
@@ -301,6 +307,8 @@ class LocalInferenceRunner:
             return "mlx", resolved
         if backend == BACKEND_TORCH:
             return "torch", resolved
+        if backend == BACKEND_LLAMASWAP:
+            return "llamaswap", resolved
         return "llama", resolved
 
     @staticmethod
@@ -328,6 +336,8 @@ class LocalInferenceRunner:
             yield from self._mlx_stream(payload, model_path, should_stop)
         elif route == "torch":
             yield from self._torch_stream(payload, model_path, should_stop)
+        elif route == "llamaswap":
+            yield from self._llamaswap_stream(payload, model_path, should_stop)
         else:
             yield from self._llama_stream(payload, model_path, should_stop)
 
@@ -355,6 +365,8 @@ class LocalInferenceRunner:
             return self._mlx_complete(payload, model_path, generation_id)
         if route == "torch":
             return self._torch_complete(payload, model_path, generation_id)
+        if route == "llamaswap":
+            return self._llamaswap_complete(payload, model_path, generation_id)
         return self._llama_complete(payload, model_path, generation_id)
 
     def _torch_speculative_stream(
@@ -675,6 +687,27 @@ class LocalInferenceRunner:
             return ""
         message = out["choices"][0].get("message") or {}
         return str(message.get("content") or "")
+
+    def _llamaswap_complete(
+        self,
+        payload: dict[str, Any],
+        model_path: str,
+        generation_id: int,
+    ) -> str:
+        client = self._pool.get_llamaswap(model_path)
+        text = client.complete(payload, model_path)
+        if not self._pool.is_generation_active(generation_id):
+            return ""
+        return text
+
+    def _llamaswap_stream(
+        self,
+        payload: dict[str, Any],
+        model_path: str,
+        should_stop: Callable[[], bool],
+    ) -> Iterator[StreamToken]:
+        client = self._pool.get_llamaswap(model_path)
+        yield from client.stream(payload, model_path, should_stop=should_stop)
 
     def _llama_stream(
         self,

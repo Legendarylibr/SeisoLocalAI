@@ -22,6 +22,15 @@ def preferred_inference_backend(profile: dict[str, Any]) -> str:
     except ValueError:
         backend = Backend.CPU
 
+    if _profile_has_nvidia(profile):
+        try:
+            from seiso.inference.llamaswap import llamaswap_enabled
+
+            if llamaswap_enabled():
+                return str(InferenceBackend.LLAMASWAP)
+        except ImportError:
+            pass
+
     if tier == HardwareTier.CPU_ONLY:
         return str(InferenceBackend.LLAMACPP)
     if headroom < 6000 or tier == HardwareTier.EDGE:
@@ -33,6 +42,18 @@ def preferred_inference_backend(profile: dict[str, Any]) -> str:
     if backend == Backend.MLX:
         return str(InferenceBackend.MLX)
     return str(InferenceBackend.LLAMACPP)
+
+
+def _profile_has_nvidia(profile: dict[str, Any]) -> bool:
+    if str(profile.get("backend", "")).lower() in {"cuda", "torch"}:
+        return True
+    for gpu in profile.get("gpus") or []:
+        text = " ".join(
+            str(gpu.get(key, "")) for key in ("name", "vendor", "type", "backend")
+        ).lower()
+        if "nvidia" in text or "cuda" in text:
+            return True
+    return False
 
 
 def training_defaults(profile: dict[str, Any]) -> dict[str, Any]:
