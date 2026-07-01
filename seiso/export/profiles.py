@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 from seiso.compat import StrEnum
 from seiso.export.formats import ExportFormat
+from seiso.io.jsonl import read_json_file
 
 
 class ExportProfile(StrEnum):
@@ -67,18 +67,15 @@ def detect_checkpoint_kind(checkpoint: Path) -> str:
         return "lora"
     if (checkpoint / "config.json").exists():
         return "full"
-    if (checkpoint / "seiso_manifest.json").exists():
-        try:
-            manifest = json.loads((checkpoint / "seiso_manifest.json").read_text())
-            method = str(manifest.get("method", "")).lower()
-            if method == "lora":
-                return "lora"
-            if method == "full":
-                return "full"
-            if method == "slime":
-                return "lora" if manifest.get("adapter") == "lora" else "full"
-        except (OSError, json.JSONDecodeError):
-            pass
+    manifest = read_json_file(checkpoint / "seiso_manifest.json", default={})
+    if isinstance(manifest, dict):
+        method = str(manifest.get("method", "")).lower()
+        if method == "lora":
+            return "lora"
+        if method == "full":
+            return "full"
+        if method == "slime":
+            return "lora" if manifest.get("adapter") == "lora" else "full"
     return "unknown"
 
 

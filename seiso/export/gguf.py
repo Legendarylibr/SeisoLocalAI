@@ -322,13 +322,56 @@ def _export_quants(
     log: Callable[[str], None],
 ) -> dict[str, Path]:
     results: dict[str, Path] = {}
-    for quant in quantizations:
-        quant_dir = output_root / quant
-        quant_dir.mkdir(parents=True, exist_ok=True)
-        gguf_path = quant_dir / f"model-{quant}.gguf"
-        if convert_hf_dir_to_gguf(merged, gguf_path, quant, log):
-            write_modelfile(quant_dir, gguf_path.name, model_name=model_name)
-            results[f"gguf_{quant}"] = gguf_path
+    f16_source: Path | None = None
+    f16_temp: tempfile.TemporaryDirectory[str] | None = None
+    f16_requested = "f16" in quantizations
+
+    def ensure_f16_source() -> Path | None:
+        nonlocal f16_source, f16_temp
+        if f16_source is not None:
+            return f16_source if f16_source.is_file() else None
+
+        if f16_requested:
+            f16_dir = output_root / "f16"
+            f16_dir.mkdir(parents=True, exist_ok=True)
+            f16_source = f16_dir / "model-f16.gguf"
+        else:
+            f16_temp = tempfile.TemporaryDirectory(prefix="seiso-gguf-f16-")
+            f16_source = Path(f16_temp.name) / "model-f16.gguf"
+
+        if _convert_hf_dir_direct(merged, f16_source, "f16", log):
+            return f16_source
+        return None
+
+    def record_export(quant: str, quant_dir: Path, gguf_path: Path) -> None:
+        write_modelfile(quant_dir, gguf_path.name, model_name=model_name)
+        results[f"gguf_{quant}"] = gguf_path
+
+    try:
+        for quant in quantizations:
+            quant_dir = output_root / quant
+            quant_dir.mkdir(parents=True, exist_ok=True)
+            gguf_path = quant_dir / f"model-{quant}.gguf"
+
+            if quant == "f16":
+                source = ensure_f16_source()
+                if source == gguf_path and gguf_path.is_file():
+                    record_export(quant, quant_dir, gguf_path)
+                continue
+
+            if quant in LLAMA_QUANTIZE_TYPES:
+                source = ensure_f16_source()
+                if source is not None and quantize_gguf_file(
+                    source, gguf_path, quant, log
+                ):
+                    record_export(quant, quant_dir, gguf_path)
+                continue
+
+            if convert_hf_dir_to_gguf(merged, gguf_path, quant, log):
+                record_export(quant, quant_dir, gguf_path)
+    finally:
+        if f16_temp is not None:
+            f16_temp.cleanup()
     return results
 
 

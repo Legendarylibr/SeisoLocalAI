@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, TypeVar
 
 from forge.services.download_progress import ProgressCallback, make_tqdm_class
+from seiso.io.files import path_size_bytes
 from seiso.models.catalog import CatalogEntry, get_by_repo
 from seiso.models.hub_errors import format_hub_error
 from seiso.models.trainable_snapshot import snapshot_has_trainable_weights
@@ -634,7 +635,7 @@ def download_training_snapshot(
         "repo_id": repo_id,
         "format": "safetensors",
         "cache_dir": str(cache_dir),
-        "size_bytes": dir_size(root),
+        "size_bytes": path_size_bytes(root),
     }
 
 
@@ -650,9 +651,3 @@ def link_inventory(inventory_dir: Path, inventory_name: str, target: Path) -> Pa
         return link
     link.symlink_to(target, target_is_directory=target.is_dir())
     return link
-
-
-def dir_size(path: Path) -> int:
-    if path.is_file():
-        return path.stat().st_size
-    return sum(f.stat().st_size for f in path.rglob("*") if f.is_file())

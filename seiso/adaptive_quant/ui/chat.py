@@ -24,6 +24,7 @@ from seiso.adaptive_quant.ui.model_selection import (
     save_selected_model_id,
     search_huggingface_gguf_repos,
 )
+from seiso.io.jsonl import read_json_file
 
 CHAT_TASKS_REL_PATH = "outputs/chat_tasks.jsonl"
 SESSION_DIR_REL = "outputs/.launcher_chat_session"
@@ -39,12 +40,7 @@ def default_chat_tasks_path(repo: Path) -> Path:
 
 def _read_session_meta(repo: Path) -> dict[str, Any]:
     config_path = repo / SESSION_DIR_REL / SESSION_CONFIG_NAME
-    if not config_path.is_file():
-        return {}
-    try:
-        payload = json.loads(config_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
+    payload = read_json_file(config_path, default=None)
     if not isinstance(payload, dict):
         return {}
     return {

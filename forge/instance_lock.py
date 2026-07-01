@@ -17,6 +17,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
+from seiso.io.jsonl import read_json_file
+
 _WINDOWS_ADDR_IN_USE = frozenset({10048, 10049})
 
 
@@ -56,15 +58,8 @@ def lock_held_by_current_process(path: Path) -> bool:
 
 
 def _read_lock_meta(path: Path) -> dict[str, object]:
-    try:
-        raw = path.read_text(encoding="utf-8").strip()
-        if raw:
-            data = json.loads(raw)
-            if isinstance(data, dict):
-                return data
-    except (OSError, json.JSONDecodeError):
-        pass
-    return {}
+    data = read_json_file(path, default={})
+    return data if isinstance(data, dict) else {}
 
 
 def _pid_alive(pid: int) -> bool:

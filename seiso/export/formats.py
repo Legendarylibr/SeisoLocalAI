@@ -21,6 +21,8 @@ from seiso.export.model_card import (
     metadata_from_manifest,
     write_hub_artifacts,
 )
+from seiso.io.files import path_size_bytes
+from seiso.io.jsonl import read_json_file
 from seiso.security import assert_within
 
 logger = logging.getLogger(__name__)
@@ -50,10 +52,6 @@ class _HubUploadLogWriter:
         if cleaned:
             self._log(cleaned)
         self._buf = ""
-
-
-def _folder_byte_size(folder: Path) -> int:
-    return sum(p.stat().st_size for p in folder.rglob("*") if p.is_file())
 
 
 class ExportFormat(StrEnum):
@@ -238,9 +236,9 @@ def _write_export_sidecar(dest: Path, ckpt: Path, fmt: ExportFormat, kind: str) 
         "file_checksums_sha256": directory_checksum_manifest(dest, max_files=100),
     }
     manifest = ckpt / "seiso_manifest.json"
-    if manifest.is_file():
-        with contextlib.suppress(OSError, json.JSONDecodeError):
-            payload["training_manifest"] = json.loads(manifest.read_text())
+    training_manifest = read_json_file(manifest, default=None)
+    if training_manifest is not None:
+        payload["training_manifest"] = training_manifest
     (dest / "seiso_export_metadata.json").write_text(
         json.dumps(payload, indent=2), encoding="utf-8"
     )
@@ -281,29 +279,23 @@ def _load_merge_deps() -> _MergeDeps:
 
 
 def _load_training_manifest(checkpoint: Path) -> dict:
-    manifest_path = checkpoint / "seiso_manifest.json"
-    if not manifest_path.is_file():
-        return {}
-    try:
-        return json.loads(manifest_path.read_text())
-    except (OSError, json.JSONDecodeError):
-        return {}
+    manifest = read_json_file(checkpoint / "seiso_manifest.json", default={})
+    return manifest if isinstance(manifest, dict) else {}
 
 
 def _resolve_merge_base_model(checkpoint: Path) -> str:
     """Resolve base model path/id for LoRA merge — prefers local cached weights."""
     adapter_config = checkpoint / "adapter_config.json"
-    if adapter_config.is_file():
-        try:
-            cfg = json.loads(adapter_config.read_text())
-            for key in ("base_model_name_or_path", "seiso_original_base_model"):
-                value = cfg.get(key)
-                if isinstance(value, str) and value.strip():
-                    candidate = Path(value).expanduser()
-                    if candidate.is_dir() and (candidate / "config.json").is_file():
-                        return str(candidate.resolve())
-        except (OSError, json.JSONDecodeError):
-            pass
+    adapter_cfg = read_json_file(adapter_config, default={})
+    if not isinstance(adapter_cfg, dict):
+        adapter_cfg = {}
+
+    for key in ("base_model_name_or_path", "seiso_original_base_model"):
+        value = adapter_cfg.get(key)
+        if isinstance(value, str) and value.strip():
+            candidate = Path(value).expanduser()
+            if candidate.is_dir() and (candidate / "config.json").is_file():
+                return str(candidate.resolve())
 
     manifest = _load_training_manifest(checkpoint)
     for key in (
@@ -321,14 +313,9 @@ def _resolve_merge_base_model(checkpoint: Path) -> str:
         if not candidate.is_dir():
             return value
 
-    if adapter_config.is_file():
-        try:
-            cfg = json.loads(adapter_config.read_text())
-            base_id = cfg.get("base_model_name_or_path", "")
-            if isinstance(base_id, str) and base_id.strip():
-                return base_id.strip()
-        except (OSError, json.JSONDecodeError):
-            pass
+    base_id = adapter_cfg.get("base_model_name_or_path", "")
+    if isinstance(base_id, str) and base_id.strip():
+        return base_id.strip()
 
     raise ValueError(
         f"Cannot resolve base model for merge from {checkpoint}. "
@@ -456,7 +443,7 @@ def _push_hub(
     except Exception:
         api.create_repo(repo, repo_type="model", exist_ok=True)
 
-    total_bytes = _folder_byte_size(folder)
+    total_bytes = path_size_bytes(folder)
     use_large = total_bytes >= _LARGE_HUB_UPLOAD_BYTES
     if use_large:
         log(

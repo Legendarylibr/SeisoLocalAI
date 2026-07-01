@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from seiso.adaptive_quant.ui.catalog import list_config_files
+from seiso.io.files import matching_file_stats
 
 
 def _repo_root() -> Path:
@@ -46,7 +47,7 @@ def _output_counts(repo: Path) -> dict[str, int | None]:
     for name in ("benchmarks", "logs", "analysis", "checkpoints", "reports"):
         directory = base / name
         counts[name] = (
-            sum(1 for path in directory.rglob("*") if path.is_file())
+            matching_file_stats(directory)[0]
             if directory.is_dir()
             else None
         )

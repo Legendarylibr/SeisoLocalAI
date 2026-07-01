@@ -8,6 +8,7 @@ from typing import Any
 from forge.db.store import Database
 from forge.services.inference_models import backend_for_path
 from forge.services.user_paths import assert_user_path
+from seiso.io.files import path_size_bytes
 from seiso.security import sanitize_filename
 
 
@@ -33,11 +34,7 @@ async def register_model_path(
     fmt = model_format or (
         resolved.suffix.lstrip(".") if resolved.is_file() else "safetensors"
     )
-    size = (
-        resolved.stat().st_size
-        if resolved.is_file()
-        else sum(f.stat().st_size for f in resolved.rglob("*") if f.is_file())
-    )
+    size = path_size_bytes(resolved)
 
     existing = await db.list_models(user_id)
     norm = str(resolved.resolve())
@@ -73,7 +70,7 @@ async def register_training_checkpoint(
     if not resolved.exists():
         return None
 
-    size = sum(f.stat().st_size for f in resolved.rglob("*") if f.is_file())
+    size = path_size_bytes(resolved)
     meta = {"job_id": job_id, "origin": "fine-tune"}
     norm = str(resolved.resolve())
     meta["default_backend"] = backend_for_path(norm, "safetensors")

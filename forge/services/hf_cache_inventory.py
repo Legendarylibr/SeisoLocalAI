@@ -14,12 +14,12 @@ from forge.services.artifact_integrity import gguf_files_complete_with_hub
 from forge.services.hf_hub import (
     _inventory_name_for_files,
     _pick_gguf_files,
-    dir_size,
     estimate_snapshot_download_bytes,
     link_inventory,
 )
 from forge.services.user_paths import user_dir
 from seiso.inference.backends import gguf_is_supported_by_llamacpp
+from seiso.io.files import matching_file_stats, path_size_bytes
 from seiso.models.catalog import CatalogEntry, get_by_gguf_mirror, get_by_repo
 from seiso.security import sanitize_filename
 
@@ -157,12 +157,10 @@ def _snapshot_record(
     user_id: str,
     hf_cache_dir: Path,
 ) -> dict[str, Any] | None:
-    weight_files: list[Path] = []
-    for pattern in ("*.safetensors", "*.bin"):
-        weight_files.extend(
-            path for path in snapshot_dir.rglob(pattern) if path.is_file()
-        )
-    if not weight_files:
+    weight_count, weight_size = matching_file_stats(
+        snapshot_dir, suffixes=frozenset({".safetensors", ".bin"})
+    )
+    if weight_count <= 0:
         return None
 
     entry = _catalog_entry_for_cached_repo(repo_id)
@@ -171,8 +169,7 @@ def _snapshot_record(
             expected_size = estimate_snapshot_download_bytes(repo_id)
         except Exception:
             expected_size = 0
-        actual_size = sum(path.stat().st_size for path in weight_files)
-        if expected_size > 0 and actual_size < expected_size:
+        if expected_size > 0 and weight_size < expected_size:
             return None
 
     inventory_repo = entry.repo_id if entry else repo_id
@@ -187,7 +184,7 @@ def _snapshot_record(
         "name": inventory_repo.split("/")[-1],
         "path": str(link.absolute()),
         "format": "safetensors",
-        "size_bytes": dir_size(snapshot_dir),
+        "size_bytes": path_size_bytes(snapshot_dir),
         "metadata": {"repo_id": inventory_repo, "cache_dir": str(hf_cache_dir)},
     }
 
