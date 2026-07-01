@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
 from forge.api.deps import get_db, get_inference_orchestrator
+from forge.api.routes.models import _schedule_hf_cache_inventory_sync
 from forge.config import ForgeSettings, get_settings
 from forge.db.store import Database
 from forge.orchestrators.inference import InferenceOrchestrator
@@ -18,7 +19,6 @@ from forge.security.auth import get_current_user_id
 from forge.services.chat_messages import build_trusted_messages
 from forge.services.download_progress import estimate_load_eta_seconds
 from forge.services.hardware import hardware_profile
-from forge.services.hf_cache_inventory import sync_hf_cache_inventory
 from forge.services.inference_chat import (
     resolve_draft_model,
     resolve_explicit_model_path,
@@ -108,15 +108,20 @@ async def inference_models(
     user_id: Annotated[str, Depends(get_current_user_id)],
     db: Annotated[Database, Depends(get_db)],
     settings: Annotated[ForgeSettings, Depends(get_settings)],
+    sync_cache: bool = Query(
+        False,
+        description="Synchronously refresh Hugging Face cache inventory before returning.",
+    ),
 ) -> dict[str, Any]:
     """Unified model dropdown: HF Hub inventory, CLI paths, fine-tune/export outputs."""
     from forge.services.hardware import hardware_summary
 
-    await sync_hf_cache_inventory(
+    await _schedule_hf_cache_inventory_sync(
         db,
         user_id,
         data_dir=settings.data_dir,
         hf_cache_dir=settings.hf_cache_dir,
+        sync_cache=sync_cache,
     )
     profile = hardware_profile()
     options = await list_inference_options(

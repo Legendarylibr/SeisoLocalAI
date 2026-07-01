@@ -124,47 +124,59 @@ def prepare_tokenized_dataset(
         encoded["labels"] = [list(ids) for ids in encoded["input_ids"]]
         return encoded
 
-    def tokenize(sample):
-        if mask_assistant_only:
+    def tokenize_masked_batch(batch):
+        rows = _rows_from_batch(batch)
+        full_texts: list[str] = []
+        prompt_texts: list[str | None] = []
+
+        for sample in rows:
             messages = extract_messages(sample, fmt)
             if messages and messages[-1].get("role") == "assistant":
-                full_text = format_messages_for_prompt(
-                    messages, tokenizer, add_generation_prompt=False
+                full_texts.append(
+                    format_messages_for_prompt(
+                        messages, tokenizer, add_generation_prompt=False
+                    )
                 )
                 prompt_messages = messages[:-1]
-                prompt_text = format_messages_for_prompt(
-                    prompt_messages, tokenizer, add_generation_prompt=True
+                prompt_texts.append(
+                    format_messages_for_prompt(
+                        prompt_messages, tokenizer, add_generation_prompt=True
+                    )
                 )
-                full_ids = tokenizer(
-                    full_text, truncation=True, max_length=max_seq_length, padding=False
-                )
-                prompt_ids = tokenizer(
-                    prompt_text,
-                    truncation=True,
-                    max_length=max_seq_length,
-                    padding=False,
-                )
-                labels = _build_labels(
-                    full_ids["input_ids"], len(prompt_ids["input_ids"])
-                )
-                return {
-                    "input_ids": full_ids["input_ids"],
-                    "attention_mask": full_ids["attention_mask"],
-                    "labels": labels,
-                }
+            else:
+                full_texts.append(format_sample(sample, fmt, tokenizer))
+                prompt_texts.append(None)
 
-        text = format_sample(sample, fmt, tokenizer)
-        encoded = tokenizer(
-            text, truncation=True, max_length=max_seq_length, padding=False
+        full = tokenizer(
+            full_texts, truncation=True, max_length=max_seq_length, padding=False
         )
-        encoded["labels"] = list(encoded["input_ids"])
-        return encoded
+        prompt_indices = [idx for idx, text in enumerate(prompt_texts) if text]
+        prompt_lengths: dict[int, int] = {}
+        if prompt_indices:
+            prompts = [prompt_texts[idx] for idx in prompt_indices]
+            prompt_encoded = tokenizer(
+                prompts,
+                truncation=True,
+                max_length=max_seq_length,
+                padding=False,
+            )
+            prompt_lengths = {
+                idx: len(ids)
+                for idx, ids in zip(
+                    prompt_indices, prompt_encoded["input_ids"], strict=True
+                )
+            }
+        full["labels"] = [
+            _build_labels(ids, prompt_lengths.get(idx, 0))
+            for idx, ids in enumerate(full["input_ids"])
+        ]
+        return full
 
     map_kwargs: dict[str, Any] = {"remove_columns": dataset.column_names}
     if num_proc and num_proc > 1:
         map_kwargs["num_proc"] = num_proc
     if mask_assistant_only:
-        tokenized = dataset.map(tokenize, **map_kwargs)
+        tokenized = dataset.map(tokenize_masked_batch, batched=True, **map_kwargs)
     else:
         tokenized = dataset.map(tokenize_batch, batched=True, **map_kwargs)
     return tokenized, fmt

@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any, TypeVar
 
 from forge.services.download_progress import ProgressCallback, make_tqdm_class
-from seiso.io.files import path_size_bytes
+from seiso.io.files import model_weight_size_bytes
 from seiso.models.catalog import CatalogEntry, get_by_repo
 from seiso.models.hub_errors import format_hub_error
 from seiso.models.trainable_snapshot import snapshot_has_trainable_weights
@@ -635,7 +635,7 @@ def download_training_snapshot(
         "repo_id": repo_id,
         "format": "safetensors",
         "cache_dir": str(cache_dir),
-        "size_bytes": path_size_bytes(root),
+        "size_bytes": model_weight_size_bytes(root),
     }
 
 

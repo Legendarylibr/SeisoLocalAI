@@ -32,7 +32,7 @@ from forge.services.hf_hub import _format_hub_download_error
 from forge.services.model_download import perform_model_download
 from forge.services.publishable import is_pushable_model
 from forge.services.user_paths import assert_user_path
-from seiso.io.files import path_size_bytes
+from seiso.io.files import model_weight_size_bytes
 from seiso.models.catalog import (
     HubSearchError,
     get_families,
@@ -63,6 +63,38 @@ async def _sync_hf_cache_inventory_background(
         )
     except Exception:
         logger.exception("Background Hugging Face cache inventory sync failed")
+
+
+async def _schedule_hf_cache_inventory_sync(
+    db: Database,
+    user_id: str,
+    *,
+    data_dir: Path,
+    hf_cache_dir: Path,
+    sync_cache: bool,
+) -> None:
+    if sync_cache:
+        await sync_hf_cache_inventory(
+            db,
+            user_id,
+            data_dir=data_dir,
+            hf_cache_dir=hf_cache_dir,
+        )
+        return
+
+    cache_key = f"{user_id}:{hf_cache_dir}"
+    now = time.monotonic()
+    last_sync = _model_cache_background_syncs.get(cache_key, 0.0)
+    if now - last_sync >= _MODEL_CACHE_BACKGROUND_SYNC_TTL_S:
+        _model_cache_background_syncs[cache_key] = now
+        asyncio.create_task(
+            _sync_hf_cache_inventory_background(
+                db,
+                user_id,
+                data_dir=data_dir,
+                hf_cache_dir=hf_cache_dir,
+            )
+        )
 
 
 class DownloadStreamClosed(RuntimeError):
@@ -195,27 +227,13 @@ async def list_models(
         description="Synchronously refresh Hugging Face cache inventory before returning.",
     ),
 ) -> list[dict]:
-    if sync_cache:
-        await sync_hf_cache_inventory(
-            db,
-            user_id,
-            data_dir=settings.data_dir,
-            hf_cache_dir=settings.hf_cache_dir,
-        )
-    else:
-        cache_key = f"{user_id}:{settings.hf_cache_dir}"
-        now = time.monotonic()
-        last_sync = _model_cache_background_syncs.get(cache_key, 0.0)
-        if now - last_sync >= _MODEL_CACHE_BACKGROUND_SYNC_TTL_S:
-            _model_cache_background_syncs[cache_key] = now
-            asyncio.create_task(
-                _sync_hf_cache_inventory_background(
-                    db,
-                    user_id,
-                    data_dir=settings.data_dir,
-                    hf_cache_dir=settings.hf_cache_dir,
-                )
-            )
+    await _schedule_hf_cache_inventory_sync(
+        db,
+        user_id,
+        data_dir=settings.data_dir,
+        hf_cache_dir=settings.hf_cache_dir,
+        sync_cache=sync_cache,
+    )
     models = await db.list_models(user_id)
     for m in models:
         m["pushable"] = is_pushable_model(m)
@@ -437,5 +455,5 @@ async def register_local(
         path=str(path),
         source=body.source or "manual",
         format=body.format or path.suffix.lstrip("."),
-        size_bytes=path_size_bytes(path),
+        size_bytes=model_weight_size_bytes(path),
     )

@@ -4,12 +4,24 @@ from __future__ import annotations
 
 from pathlib import Path
 
+MODEL_WEIGHT_SUFFIXES = frozenset({".gguf", ".safetensors", ".bin", ".pt", ".pth"})
+
 
 def path_size_bytes(path: Path) -> int:
     """Return byte size for a file or recursive byte size for a directory."""
     if path.is_file():
         return path.stat().st_size
     return sum(item.stat().st_size for item in path.rglob("*") if item.is_file())
+
+
+def model_weight_size_bytes(path: Path) -> int:
+    """Return weight-file bytes for a model path, falling back to full size if needed."""
+    if path.is_file():
+        return path.stat().st_size
+    count, total = matching_file_stats(path, suffixes=MODEL_WEIGHT_SUFFIXES)
+    if count > 0:
+        return total
+    return path_size_bytes(path)
 
 
 def matching_file_stats(

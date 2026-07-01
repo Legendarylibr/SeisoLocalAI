@@ -122,15 +122,15 @@ def _estimate_path_vram_mb_uncached(p: Path, *, mode: str = "chat") -> int:
             est = int(file_mb * 1.15 + _INFERENCE_OVERHEAD_MB)
     elif p.is_dir():
         weight_bytes = 0
+        has_gguf = False
         for pattern in ("*.gguf", "*.safetensors", "*.bin"):
             for f in p.rglob(pattern):
                 if f.is_file():
+                    has_gguf = has_gguf or f.suffix.lower() == ".gguf"
                     weight_bytes += f.stat().st_size
         if weight_bytes > 0:
             weight_mb = weight_bytes / (1024**2)
-            if any(
-                f.suffix.lower() == ".gguf" for f in p.rglob("*.gguf") if f.is_file()
-            ):
+            if has_gguf:
                 est = int(weight_mb + _INFERENCE_OVERHEAD_MB)
             else:
                 est = int(weight_mb * 1.15 + _INFERENCE_OVERHEAD_MB)

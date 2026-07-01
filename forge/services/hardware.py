@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
@@ -39,6 +40,17 @@ from seiso.memory.estimates import (
 
 _RECOMMENDED_REPO_TTL_SEC = 300.0
 _recommended_repo_cache: dict[tuple, tuple[float, str | None]] = {}
+_DEFAULT_CATALOG_VERIFY_LIMIT = 16
+
+
+def _catalog_verify_limit() -> int:
+    raw = os.environ.get("SEISO_CATALOG_VERIFY_LIMIT", "").strip()
+    if not raw:
+        return _DEFAULT_CATALOG_VERIFY_LIMIT
+    try:
+        return max(0, min(int(raw), 100))
+    except ValueError:
+        return _DEFAULT_CATALOG_VERIFY_LIMIT
 
 
 def enrich_profile(profile: dict[str, Any]) -> dict[str, Any]:
@@ -74,8 +86,10 @@ def enrich_catalog_models(
     download_info: dict[str, dict[str, Any]] = {}
     download_errors: dict[str, str] = {}
     if models and fetch_sizes:
-        candidates = models if token else models[:16]
+        candidates = models[: _catalog_verify_limit()]
         workers = min(3 if token else 2, len(candidates))
+        if workers <= 0:
+            candidates = []
 
         def fetch_info(repo_id: str) -> tuple[str, dict[str, Any] | None, str | None]:
             entry = get_by_repo(repo_id)
@@ -99,16 +113,18 @@ def enrich_catalog_models(
             except Exception as exc:
                 return repo_id, None, str(exc)
 
-        with ThreadPoolExecutor(max_workers=workers) as pool:
-            futures = {
-                pool.submit(fetch_info, m["repo_id"]): m["repo_id"] for m in candidates
-            }
-            for future in as_completed(futures):
-                repo_id, info, error = future.result()
-                if info:
-                    download_info[repo_id] = info
-                elif error:
-                    download_errors[repo_id] = error
+        if candidates:
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                futures = {
+                    pool.submit(fetch_info, m["repo_id"]): m["repo_id"]
+                    for m in candidates
+                }
+                for future in as_completed(futures):
+                    repo_id, info, error = future.result()
+                    if info:
+                        download_info[repo_id] = info
+                    elif error:
+                        download_errors[repo_id] = error
 
     headroom_gb = round(vram_headroom_mb(profile) / 1024, 1)
     tier = classify_tier(profile)
