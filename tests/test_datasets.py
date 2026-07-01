@@ -87,9 +87,16 @@ def test_chat_labels_mask_prompt():
             return self._rows[idx]
 
         def map(self, fn, remove_columns=None, **kwargs):
-            out = []
-            for row in self._rows:
-                out.append(fn(row))
+            assert kwargs.get("batched") is True
+            batch = {
+                key: [row[key] for row in self._rows]
+                for key in self.column_names
+            }
+            mapped = fn(batch)
+            out = [
+                {key: value[i] for key, value in mapped.items()}
+                for i in range(len(self._rows))
+            ]
             return _Rows(out)
 
     ds = _Rows(
