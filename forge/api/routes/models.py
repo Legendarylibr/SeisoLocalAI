@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import time
 from pathlib import Path
@@ -41,6 +42,27 @@ from seiso.models.catalog import (
 from seiso.security import SecurityError, sanitize_filename
 
 router = APIRouter(prefix="/models", tags=["models"])
+logger = logging.getLogger(__name__)
+_MODEL_CACHE_BACKGROUND_SYNC_TTL_S = 120.0
+_model_cache_background_syncs: dict[str, float] = {}
+
+
+async def _sync_hf_cache_inventory_background(
+    db: Database,
+    user_id: str,
+    *,
+    data_dir: Path,
+    hf_cache_dir: Path,
+) -> None:
+    try:
+        await sync_hf_cache_inventory(
+            db,
+            user_id,
+            data_dir=data_dir,
+            hf_cache_dir=hf_cache_dir,
+        )
+    except Exception:
+        logger.exception("Background Hugging Face cache inventory sync failed")
 
 
 class DownloadStreamClosed(RuntimeError):
@@ -168,13 +190,32 @@ async def list_models(
     user_id: Annotated[str, Depends(get_current_user_id)],
     db: Annotated[Database, Depends(get_db)],
     settings: Annotated[ForgeSettings, Depends(get_settings)],
+    sync_cache: bool = Query(
+        False,
+        description="Synchronously refresh Hugging Face cache inventory before returning.",
+    ),
 ) -> list[dict]:
-    await sync_hf_cache_inventory(
-        db,
-        user_id,
-        data_dir=settings.data_dir,
-        hf_cache_dir=settings.hf_cache_dir,
-    )
+    if sync_cache:
+        await sync_hf_cache_inventory(
+            db,
+            user_id,
+            data_dir=settings.data_dir,
+            hf_cache_dir=settings.hf_cache_dir,
+        )
+    else:
+        cache_key = f"{user_id}:{settings.hf_cache_dir}"
+        now = time.monotonic()
+        last_sync = _model_cache_background_syncs.get(cache_key, 0.0)
+        if now - last_sync >= _MODEL_CACHE_BACKGROUND_SYNC_TTL_S:
+            _model_cache_background_syncs[cache_key] = now
+            asyncio.create_task(
+                _sync_hf_cache_inventory_background(
+                    db,
+                    user_id,
+                    data_dir=settings.data_dir,
+                    hf_cache_dir=settings.hf_cache_dir,
+                )
+            )
     models = await db.list_models(user_id)
     for m in models:
         m["pushable"] = is_pushable_model(m)

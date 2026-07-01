@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import heapq
 import json
 from pathlib import Path
 
@@ -17,32 +18,42 @@ def retrieve_knowledge_chunks(
     top_k: int = 5,
 ) -> list[dict]:
     """Return top keyword-scored chunks from a user's knowledge base index."""
+    if top_k <= 0:
+        return []
+
     kb_dir = safe_join(data_dir, "knowledge", user_id, knowledge_base_id)
     index_path = kb_dir / "index.jsonl"
     if not index_path.is_file():
         return []
 
-    chunks: list[dict] = []
-    with index_path.open(encoding="utf-8") as handle:
-        for line in handle:
-            line = line.strip()
-            if line:
-                chunks.append(json.loads(line))
-
     q_tokens = set(query.lower().split())
     if not q_tokens:
         return []
 
-    scored: list[tuple[float, dict]] = []
-    for chunk in chunks:
-        text = str(chunk.get("text", ""))
-        t_tokens = set(text.lower().split())
-        score = len(q_tokens & t_tokens) / max(len(q_tokens), 1)
-        if score > 0:
-            scored.append((score, chunk))
+    top: list[tuple[float, int, dict]] = []
+    with index_path.open(encoding="utf-8") as handle:
+        for index, line in enumerate(handle):
+            line = line.strip()
+            if not line:
+                continue
+            chunk = json.loads(line)
+            text = str(chunk.get("text", ""))
+            t_tokens = set(text.lower().split())
+            score = len(q_tokens & t_tokens) / max(len(q_tokens), 1)
+            if score <= 0:
+                continue
+            item = (score, -index, chunk)
+            if len(top) < top_k:
+                heapq.heappush(top, item)
+            else:
+                heapq.heappushpop(top, item)
 
-    scored.sort(key=lambda pair: pair[0], reverse=True)
-    return [chunk for _, chunk in scored[:top_k]]
+    return [
+        chunk
+        for _score, _index, chunk in sorted(
+            top, key=lambda item: (item[0], item[1]), reverse=True
+        )
+    ]
 
 
 def format_knowledge_context(chunks: list[dict]) -> str:

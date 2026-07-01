@@ -18,10 +18,16 @@ export const trainingApi = {
       formats?: string[];
       gguf_quantizations?: string[];
     },
+    dataset_analysis_token?: string,
   ) =>
     request<{ job_id: string; status: string }>("/training/jobs", {
       method: "POST",
-      body: JSON.stringify({ config, multi_gpu, export_on_complete }),
+      body: JSON.stringify({
+        config,
+        multi_gpu,
+        export_on_complete,
+        dataset_analysis_token,
+      }),
     }),
   listTrainingJobs: () => request<TrainingJob[]>("/training/jobs"),
   listTrainingModels: () =>

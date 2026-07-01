@@ -87,6 +87,11 @@ export function TrainPage() {
   const [datasetError, setDatasetError] = useState<string | null>(null);
   const [analyzingDataset, setAnalyzingDataset] = useState(false);
   const [datasetAnalysis, setDatasetAnalysis] = useState<DatasetAnalysis | null>(null);
+  const lastDatasetAnalysisRef = useRef<{
+    dataset: string;
+    requestedFormat: string;
+    resolvedFormat: string;
+  } | null>(null);
 
   const analyzeDataset = useCallback(async (ds: string, fmt: string) => {
     if (!ds) {
@@ -102,6 +107,11 @@ export function TrainPage() {
         setDatasetValid(true);
         setDatasetError(null);
         setDatasetAnalysis(res);
+        lastDatasetAnalysisRef.current = {
+          dataset: ds,
+          requestedFormat: fmt,
+          resolvedFormat: res.resolved_format,
+        };
         const rec = res.recommended_config;
         if (rec?.dataset_format && rec.dataset_format !== "auto") {
           setDatasetFormat(rec.dataset_format);
@@ -240,6 +250,13 @@ export function TrainPage() {
 
   // Analyze the full dataset schema when selection changes (dataset-specialized training)
   useEffect(() => {
+    const last = lastDatasetAnalysisRef.current;
+    if (
+      last?.dataset === dataset &&
+      (last.requestedFormat === datasetFormat || last.resolvedFormat === datasetFormat)
+    ) {
+      return;
+    }
     const t = setTimeout(() => {
       analyzeDataset(dataset, datasetFormat);
     }, 350);
@@ -391,6 +408,7 @@ export function TrainPage() {
         },
         multiGpu,
         exportPayload,
+        datasetAnalysis?.analysis_token,
       );
       setActiveJob(res.job_id);
       setMetricsOpen(true);
