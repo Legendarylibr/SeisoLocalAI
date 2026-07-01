@@ -152,6 +152,9 @@ rollout_batch_size: 4
 policy_micro_batch_size: 2
 batch_size: 1
 learning_rate: 0.000005
+require_thinking_trace: true
+process_reward_weight: 0.25
+missing_thinking_penalty: 0.5
 slime_use_lora: true
 auto_stop: true
 auto_stop_metric: reward_mean
@@ -166,6 +169,11 @@ Important fields:
 | `prompt_field`, `answer_field` | Dataset columns for prompts and target answers |
 | `reward` | Built-in reward name: `exact_match`, `contains_answer`, `numeric`, or `field` |
 | `reward_field` | Dataset reward column when `reward: field` |
+| `require_thinking_trace` | Forces rollouts through `<think>...</think>` format before the final answer |
+| `outcome_reward_weight` | Weight for the correctness reward; built-in rewards score the final answer portion |
+| `process_reward_weight` | Weight for the rule-based reasoning trace score |
+| `missing_thinking_penalty` | Penalty when a rollout jumps to the final answer or leaves the trace unfinished |
+| `min_thinking_tokens` | Minimum trace length used by the simple process reward |
 | `rollouts_per_prompt` | Number of sampled completions per prompt for grouped advantages |
 | `rollout_batch_size` | Generation batch size; keep at least `rollouts_per_prompt` |
 | `policy_micro_batch_size` | Policy update microbatch size to control VRAM |
@@ -174,7 +182,7 @@ Important fields:
 | `slime_use_lora` | Train LoRA adapters instead of full model weights |
 | `auto_stop_*` | Plateau detection; defaults monitor `reward_mean` |
 | `best_checkpoint_dir` | Directory under `output_dir` for the best observed metric checkpoint |
-| `write_verifier_data` | Writes prompt/answer/completion/reward JSONL for verifier or reward-model data |
+| `write_verifier_data` | Writes prompt/answer/completion/reward plus outcome/process breakdown JSONL for verifier or reward-model data |
 | `verifier_max_text_chars` | Per-field text cap to keep verifier JSONL bounded |
 
 Slime checkpoints are exportable like other Seiso checkpoints. LoRA slime runs are treated as adapter checkpoints; non-LoRA slime runs are treated like full checkpoints.

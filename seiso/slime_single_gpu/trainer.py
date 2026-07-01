@@ -6,6 +6,7 @@ import gc
 import json
 import math
 import random
+import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
@@ -43,6 +44,11 @@ class Rollout:
     old_logprobs: Any
     ref_logprobs: Any | None
     reward: float
+    outcome_reward: float = 0.0
+    process_reward: float = 0.0
+    thinking_penalty: float = 0.0
+    final_answer: str = ""
+    thinking_trace: str = ""
     advantage: float = 0.0
 
 
@@ -285,7 +291,10 @@ def _collect_rollouts(
     prompt_batch_size = max(1, config.rollout_batch_size // config.rollouts_per_prompt)
     rollouts: list[Rollout] = []
     for sample_chunk in _chunked(samples, prompt_batch_size):
-        prompt_chunk = [str(sample[config.prompt_field]) for sample in sample_chunk]
+        prompt_chunk = [
+            _format_rollout_prompt(str(sample[config.prompt_field]), config)
+            for sample in sample_chunk
+        ]
         encoded = tokenizer(
             prompt_chunk,
             return_tensors="pt",
@@ -320,9 +329,9 @@ def _collect_rollouts(
             response_mask[prompt_width:] = (
                 generated[idx, prompt_width:] != tokenizer.pad_token_id
             )
-            completion = completions[idx]
+            completion = _force_completion_thinking_prefix(completions[idx], config)
             reward_sample = _reward_sample(sample, config)
-            reward = reward_fn(completion, reward_sample)
+            score = _score_completion(completion, reward_sample, config, reward_fn)
             chunk_rollouts.append(
                 Rollout(
                     input_ids=generated[idx].detach().cpu(),
@@ -332,7 +341,12 @@ def _collect_rollouts(
                     response_mask=response_mask.detach().cpu(),
                     old_logprobs=None,
                     ref_logprobs=None,
-                    reward=reward,
+                    reward=score["reward"],
+                    outcome_reward=score["outcome_reward"],
+                    process_reward=score["process_reward"],
+                    thinking_penalty=score["thinking_penalty"],
+                    final_answer=score["final_answer"],
+                    thinking_trace=score["thinking_trace"],
                 )
             )
             if verifier_path is not None:
@@ -342,7 +356,10 @@ def _collect_rollouts(
                         "epoch": epoch,
                         "sample_index": sample_idx,
                         "rollout_index": idx % config.rollouts_per_prompt,
-                        "reward": reward,
+                        "reward": score["reward"],
+                        "outcome_reward": score["outcome_reward"],
+                        "process_reward": score["process_reward"],
+                        "thinking_penalty": score["thinking_penalty"],
                         "reward_name": config.reward,
                         "prompt": _truncate_text(
                             prompt_chunk[sample_idx], config.verifier_max_text_chars
@@ -353,6 +370,12 @@ def _collect_rollouts(
                         ),
                         "completion": _truncate_text(
                             completion, config.verifier_max_text_chars
+                        ),
+                        "thinking_trace": _truncate_text(
+                            score["thinking_trace"], config.verifier_max_text_chars
+                        ),
+                        "final_answer": _truncate_text(
+                            score["final_answer"], config.verifier_max_text_chars
                         ),
                     }
                 )
@@ -380,6 +403,118 @@ def _collect_rollouts(
     _assign_grouped_advantages(rollouts, config.rollouts_per_prompt)
     model.train()
     return rollouts
+
+
+def _format_rollout_prompt(prompt: str, config: SingleGpuSlimeConfig) -> str:
+    if not config.require_thinking_trace:
+        return prompt
+    if "<think>" in prompt.lower():
+        return prompt
+    return f"{prompt.rstrip()}\n\n{config.thinking_instruction}\n<think>"
+
+
+def _force_completion_thinking_prefix(
+    completion: str,
+    config: SingleGpuSlimeConfig,
+) -> str:
+    if not config.require_thinking_trace:
+        return completion
+    if completion.lstrip().lower().startswith("<think>"):
+        return completion
+    return f"<think>{completion}"
+
+
+def _score_completion(
+    completion: str,
+    sample: dict[str, Any],
+    config: SingleGpuSlimeConfig,
+    reward_fn,
+) -> dict[str, float | str]:
+    thinking_trace, final_answer, has_trace = _split_thinking_trace(completion)
+    answer_for_outcome = final_answer if config.require_thinking_trace else completion
+    outcome = float(reward_fn(answer_for_outcome, sample))
+    process = (
+        _process_reward(thinking_trace, final_answer, config)
+        if config.require_thinking_trace
+        else 0.0
+    )
+    penalty = (
+        config.missing_thinking_penalty
+        if config.require_thinking_trace and not has_trace
+        else 0.0
+    )
+    reward = (
+        config.outcome_reward_weight * outcome
+        + config.process_reward_weight * process
+        - penalty
+    )
+    return {
+        "reward": float(reward),
+        "outcome_reward": outcome,
+        "process_reward": float(process),
+        "thinking_penalty": float(penalty),
+        "thinking_trace": thinking_trace,
+        "final_answer": final_answer,
+    }
+
+
+def _split_thinking_trace(completion: str) -> tuple[str, str, bool]:
+    match = re.search(
+        r"<think>(?P<trace>.*?)</think>(?P<final>.*)",
+        completion,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    if match is None:
+        open_match = re.search(
+            r"<think>(?P<trace>.*)",
+            completion,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        if open_match is not None:
+            return open_match.group("trace").strip(), "", False
+        return "", completion.strip(), False
+    trace = match.group("trace").strip()
+    final = match.group("final").strip()
+    return trace, final, True
+
+
+def _process_reward(
+    thinking_trace: str,
+    final_answer: str,
+    config: SingleGpuSlimeConfig,
+) -> float:
+    tokens = re.findall(r"\w+", thinking_trace)
+    if not tokens:
+        return 0.0
+
+    score = 0.0
+    if len(tokens) >= config.min_thinking_tokens:
+        score += 0.35
+    else:
+        score += 0.35 * (len(tokens) / max(config.min_thinking_tokens, 1))
+
+    lower = thinking_trace.lower()
+    transition_hits = sum(
+        marker in lower
+        for marker in (
+            "because",
+            "therefore",
+            "so",
+            "first",
+            "next",
+            "then",
+            "check",
+            "verify",
+        )
+    )
+    score += min(0.35, 0.07 * transition_hits)
+
+    if re.search(r"\b(wait|actually|however|but|correct|revise)\b", lower):
+        score += 0.15
+    if final_answer.strip():
+        score += 0.15
+
+    return min(1.0, score)
 
 
 def _backprop_policy_step(
@@ -435,6 +570,12 @@ def _policy_loss(
         "kl": float(kl_loss.detach().cpu()),
         "reward_mean": float(sum(rewards) / len(rewards)),
         "reward_max": float(max(rewards)),
+        "outcome_reward_mean": _mean(r.outcome_reward for r in rollouts),
+        "process_reward_mean": _mean(r.process_reward for r in rollouts),
+        "thinking_penalty_mean": _mean(r.thinking_penalty for r in rollouts),
+        "group_reward_spread_mean": _group_reward_spread_mean(
+            rollouts, config.rollouts_per_prompt
+        ),
     }
 
 
@@ -445,6 +586,10 @@ def _empty_stats() -> dict[str, float]:
         "kl": 0.0,
         "reward_mean": 0.0,
         "reward_max": float("-inf"),
+        "outcome_reward_mean": 0.0,
+        "process_reward_mean": 0.0,
+        "thinking_penalty_mean": 0.0,
+        "group_reward_spread_mean": 0.0,
     }
 
 
@@ -454,9 +599,18 @@ def _merge_stats(
     *,
     weight: float,
 ) -> None:
-    for key in ("loss", "policy_loss", "kl", "reward_mean"):
-        stats[key] += chunk_stats[key] * weight
-    stats["reward_max"] = max(stats["reward_max"], chunk_stats["reward_max"])
+    for key in (
+        "loss",
+        "policy_loss",
+        "kl",
+        "reward_mean",
+        "outcome_reward_mean",
+        "process_reward_mean",
+        "thinking_penalty_mean",
+        "group_reward_spread_mean",
+    ):
+        stats[key] += chunk_stats.get(key, 0.0) * weight
+    stats["reward_max"] = max(stats["reward_max"], chunk_stats.get("reward_max", 0.0))
 
 
 def _sequence_logprobs(model, batch: dict[str, Any], torch):
@@ -512,6 +666,23 @@ def _assign_grouped_advantages(rollouts: list[Rollout], group_size: int) -> None
         std = math.sqrt(variance) or 1.0
         for rollout in group:
             rollout.advantage = (rollout.reward - mean) / std
+
+
+def _mean(values: Iterable[float]) -> float:
+    items = [float(value) for value in values]
+    if not items:
+        return 0.0
+    return float(sum(items) / len(items))
+
+
+def _group_reward_spread_mean(rollouts: list[Rollout], group_size: int) -> float:
+    spreads: list[float] = []
+    for start in range(0, len(rollouts), group_size):
+        group = rollouts[start : start + group_size]
+        rewards = [r.reward for r in group]
+        if rewards:
+            spreads.append(max(rewards) - min(rewards))
+    return _mean(spreads)
 
 
 def _build_optimizer(model, config: SingleGpuSlimeConfig):

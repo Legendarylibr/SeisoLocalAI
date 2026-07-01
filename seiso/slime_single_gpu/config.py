@@ -38,6 +38,14 @@ class SingleGpuSlimeConfig:
     clip_ratio: float = 0.2
     temperature: float = 0.9
     top_p: float = 0.95
+    require_thinking_trace: bool = True
+    thinking_instruction: str = (
+        "Show your reasoning in <think>...</think>, then give the final answer."
+    )
+    outcome_reward_weight: float = 1.0
+    process_reward_weight: float = 0.25
+    missing_thinking_penalty: float = 0.5
+    min_thinking_tokens: int = 8
     seed: int = 17
     dtype: str = "auto"
     device: str = "cuda"
@@ -103,6 +111,16 @@ class SingleGpuSlimeConfig:
             raise ValueError("kl_coef must be non-negative")
         if self.clip_ratio <= 0:
             raise ValueError("clip_ratio must be positive")
+        if not self.thinking_instruction:
+            raise ValueError("thinking_instruction must not be empty")
+        if self.outcome_reward_weight < 0:
+            raise ValueError("outcome_reward_weight must be non-negative")
+        if self.process_reward_weight < 0:
+            raise ValueError("process_reward_weight must be non-negative")
+        if self.missing_thinking_penalty < 0:
+            raise ValueError("missing_thinking_penalty must be non-negative")
+        if self.min_thinking_tokens < 0:
+            raise ValueError("min_thinking_tokens must be non-negative")
         if self.max_vram_gb is not None and self.max_vram_gb <= 0:
             raise ValueError("max_vram_gb must be positive")
         if self.save_every_steps < 0:
