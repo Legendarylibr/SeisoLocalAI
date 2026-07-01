@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import importlib
-import importlib.util
 import platform
 import time
 from dataclasses import dataclass, field
@@ -48,7 +47,6 @@ class InferenceRuntimeStatus:
 
     llamacpp: bool = False
     llamaswap: bool = False
-    vllm: bool = False
     mlx: bool = False
     torch: bool = False
     huggingface_hub: bool = False
@@ -61,7 +59,6 @@ class InferenceRuntimeStatus:
         return {
             "llamacpp": self.llamacpp,
             "llamaswap": self.llamaswap,
-            "vllm": self.vllm,
             "mlx": self.mlx,
             "torch": self.torch,
             "huggingface_hub": self.huggingface_hub,
@@ -76,13 +73,6 @@ def _dep_status(module: str) -> bool:
     try:
         importlib.import_module(module)
         return True
-    except Exception:
-        return False
-
-
-def _dep_spec_status(module: str) -> bool:
-    try:
-        return importlib.util.find_spec(module) is not None
     except Exception:
         return False
 
@@ -103,7 +93,6 @@ def check_inference_runtime() -> InferenceRuntimeStatus:
     status = InferenceRuntimeStatus(
         llamacpp=llamacpp_ok,
         llamaswap=swap.available,
-        vllm=_dep_spec_status("vllm"),
         mlx=_dep_status("mlx_lm"),
         torch=_dep_status("torch"),
         huggingface_hub=_dep_status("huggingface_hub"),
@@ -135,16 +124,9 @@ def check_inference_runtime() -> InferenceRuntimeStatus:
         if status.llamacpp_error:
             hints.append(f"Import error: {status.llamacpp_error}")
     if not status.llamaswap:
-        if swap.engine == "vllm":
-            if not status.vllm:
-                hints.append("Optional native Linux NVIDIA: re-run start to install vLLM")
-            hints.append(
-                "Optional: install/start llama-swap and keep SEISO_LLAMASWAP_ENGINE=vllm for sidecar GGUF routing"
-            )
-        else:
-            hints.append(
-                "Optional: install/start llama-swap and set SEISO_LLAMASWAP_URL for sidecar GGUF routing"
-            )
+        hints.append(
+            "Optional: install/start llama-swap and set SEISO_LLAMASWAP_URL for sidecar GGUF routing"
+        )
     if not status.mlx and not status.torch:
         hints.append('pip install -e ".[mlx]" or ".[train]"  # safetensors inference')
     status.install_hints = hints
@@ -287,7 +269,6 @@ def build_hf_status(
         "runtime": {
             "llamacpp": runtime.llamacpp,
             "llamaswap": runtime.llamaswap,
-            "vllm": runtime.vllm,
             "mlx": runtime.mlx,
             "torch": runtime.torch,
             "huggingface_hub": runtime.huggingface_hub,

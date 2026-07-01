@@ -4,7 +4,7 @@ Seiso routes chat/inference by platform and model format.
 
 | Backend | Platform | Install | Use case |
 |---------|----------|---------|----------|
-| **llama-swap (GGUF sidecar)** | macOS / NVIDIA | external `llama-swap` service | Optional GGUF router; defaults to llama.cpp on macOS and vLLM on native Linux NVIDIA |
+| **llama-swap (GGUF sidecar)** | macOS / NVIDIA | external `llama-swap` service | Optional GGUF router; defaults to llama.cpp on macOS and Ollama on NVIDIA |
 | **llama.cpp (GGUF)** | All | `.[llamacpp]` | In-process GGUF fallback and default when llama-swap is not enabled |
 | **MLX** | macOS Apple Silicon | `.[mlx]` | Fast local chat on M-series |
 | **PyTorch** | CUDA / MPS / CPU | `.[train]` | HF weights, 4-bit via bitsandbytes |
@@ -24,9 +24,7 @@ export SEISO_LLAMASWAP_ENABLED=true
 export SEISO_LLAMASWAP_URL=http://127.0.0.1:8080
 ```
 
-On native Linux with NVIDIA hardware, `start` best-effort installs `vllm` into the Seiso venv and installs `llama-swap` with Go when `go` is available. Seiso chooses `llamacpp` as the llama-swap engine on macOS, `vllm` on native Linux with NVIDIA hardware, and keeps `ollama` for non-native Linux NVIDIA environments such as WSL. Override with `SEISO_LLAMASWAP_ENGINE=llamacpp`, `SEISO_LLAMASWAP_ENGINE=vllm`, or `SEISO_LLAMASWAP_ENGINE=ollama`. If your llama-swap config uses a model key rather than the GGUF file path, set `SEISO_LLAMASWAP_MODEL`.
-
-Forge exposes llama-swap only when its health endpoint is reachable. If llama-swap or vLLM is not installed, configured, or running, GGUF chat falls back to in-process llama.cpp.
+Seiso chooses `llamacpp` as the llama-swap engine on macOS and `ollama` when NVIDIA hardware is visible. Override with `SEISO_LLAMASWAP_ENGINE=llamacpp` or `SEISO_LLAMASWAP_ENGINE=ollama`. If your llama-swap config uses a model key rather than the GGUF file path, set `SEISO_LLAMASWAP_MODEL`.
 
 ## MLX setup (macOS)
 

@@ -116,26 +116,6 @@ def test_dep_status_handles_runtime_import_failures(monkeypatch):
     assert hf_connectivity._dep_status("mlx_lm") is False
 
 
-def test_inference_runtime_reports_vllm_without_importing(monkeypatch):
-    from seiso.inference.llamaswap import LlamaSwapRuntime
-
-    hf_connectivity.check_inference_runtime.cache_clear()
-    monkeypatch.setattr(hf_connectivity, "_llamacpp_status", lambda: (True, None))
-    monkeypatch.setattr(
-        "seiso.inference.llamaswap.llamaswap_status",
-        lambda: LlamaSwapRuntime(available=False, url="http://127.0.0.1:8080", engine="vllm"),
-    )
-    monkeypatch.setattr(hf_connectivity, "_dep_spec_status", lambda name: name == "vllm")
-    monkeypatch.setattr(hf_connectivity, "_dep_status", lambda name: name == "huggingface_hub")
-
-    runtime = hf_connectivity.check_inference_runtime()
-
-    assert runtime.vllm is True
-    assert runtime.llamaswap_engine == "vllm"
-    assert runtime.to_dict()["vllm"] is True
-    hf_connectivity.check_inference_runtime.cache_clear()
-
-
 def test_resolve_hf_token_ignores_env_placeholder(monkeypatch):
     monkeypatch.delenv("HF_TOKEN", raising=False)
     monkeypatch.delenv("HUGGING_FACE_HUB_TOKEN", raising=False)
