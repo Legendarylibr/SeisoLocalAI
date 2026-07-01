@@ -37,6 +37,7 @@ from forge.services.publishable import (
 from forge.services.user_paths import assert_user_path
 from seiso.export.formats import publish_folder_to_hub
 from seiso.export.model_card import HubModelMetadata
+from seiso.io.files import iter_matching_files
 from seiso.security import SecurityError
 
 router = APIRouter(prefix="/export", tags=["export"])
@@ -490,10 +491,10 @@ async def download_export_output(
         raise_forbidden(exc)
 
     if path.is_dir():
-        ggufs = sorted(path.glob("*.gguf"))
-        if not ggufs:
+        gguf = next(iter_matching_files(path, "*.gguf"), None)
+        if gguf is None:
             raise HTTPException(404, "No GGUF file in output directory")
-        path = ggufs[0]
+        path = gguf
 
     if not path.is_file():
         raise HTTPException(404, "File not found")

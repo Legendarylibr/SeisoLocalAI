@@ -32,7 +32,7 @@ from forge.services.hf_hub import _format_hub_download_error
 from forge.services.model_download import perform_model_download
 from forge.services.publishable import is_pushable_model
 from forge.services.user_paths import assert_user_path
-from seiso.io.files import model_weight_size_bytes
+from seiso.io.files import iter_matching_files, model_weight_size_bytes
 from seiso.models.catalog import (
     HubSearchError,
     get_families,
@@ -257,11 +257,10 @@ async def download_local_model(
         raise_forbidden(exc)
 
     if path.is_dir():
-        ggufs = sorted(path.glob("*.gguf"))
-        if ggufs:
-            path = ggufs[0]
-        else:
+        gguf = next(iter_matching_files(path, "*.gguf"), None)
+        if gguf is None:
             raise HTTPException(404, "No downloadable file in model directory")
+        path = gguf
 
     if not path.is_file():
         raise HTTPException(404, "File not found")

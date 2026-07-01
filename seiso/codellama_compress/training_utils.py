@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -49,8 +50,7 @@ def print_trust_remote_code_notice(
 
 
 def latest_checkpoint(checkpoint_root: Path) -> Path | None:
-    candidates = sorted(checkpoint_root.glob("step_*"), key=lambda p: p.name)
-    return candidates[-1] if candidates else None
+    return max(checkpoint_root.glob("step_*"), key=lambda p: p.name, default=None)
 
 
 def rotate_checkpoints(checkpoint_root: Path, *, keep: int | None) -> None:
@@ -58,12 +58,5 @@ def rotate_checkpoints(checkpoint_root: Path, *, keep: int | None) -> None:
         return
     all_ckpts = sorted(checkpoint_root.glob("step_*"), key=lambda p: p.name)
     for old in all_ckpts[:-keep]:
-        for child in old.rglob("*"):
-            if child.is_file():
-                child.unlink(missing_ok=True)
-        for child in sorted(old.rglob("*"), reverse=True):
-            if child.is_dir():
-                with contextlib.suppress(OSError):
-                    child.rmdir()
         with contextlib.suppress(OSError):
-            old.rmdir()
+            shutil.rmtree(old)

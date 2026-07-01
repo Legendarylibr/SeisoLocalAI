@@ -439,8 +439,7 @@ def _checkpoint_step(path: Path) -> int:
 
 
 def _latest_checkpoint(run_dir: Path) -> Path | None:
-    checkpoints = sorted(run_dir.glob("checkpoint-*"), key=_checkpoint_step)
-    return checkpoints[-1] if checkpoints else None
+    return max(run_dir.glob("checkpoint-*"), key=_checkpoint_step, default=None)
 
 
 def _run_dpo(

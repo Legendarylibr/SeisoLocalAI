@@ -241,15 +241,16 @@ class TrainingOrchestrator(Orchestrator):
         eval_losses: list[float] = []
         steps = 0
         try:
-            for line in metrics_path.read_text().splitlines():
-                if not line.strip():
-                    continue
-                point = json.loads(line)
-                steps = max(steps, int(point.get("step", 0)))
-                if point.get("loss") is not None:
-                    losses.append(float(point["loss"]))
-                if point.get("eval_loss") is not None:
-                    eval_losses.append(float(point["eval_loss"]))
+            with metrics_path.open(encoding="utf-8") as handle:
+                for line in handle:
+                    if not line.strip():
+                        continue
+                    point = json.loads(line)
+                    steps = max(steps, int(point.get("step", 0)))
+                    if point.get("loss") is not None:
+                        losses.append(float(point["loss"]))
+                    if point.get("eval_loss") is not None:
+                        eval_losses.append(float(point["eval_loss"]))
         except (OSError, json.JSONDecodeError, ValueError):
             return {}
         return {
