@@ -18,8 +18,9 @@ def test_detect_training_layout():
 
 def test_launch_worker_command():
     cmd = launch_worker_command("/tmp/cfg.yaml", 2)
-    assert cmd[0] == "torchrun"
-    assert "--nproc_per_node=2" in cmd
+    assert cmd[:4] == ["accelerate", "launch", "--multi_gpu", "--num_processes=2"]
+    assert "--module" in cmd
+    assert "seiso.training.worker" in cmd
 
 
 def test_resolve_distributed_plan_defaults_to_single_process():
@@ -106,11 +107,11 @@ def test_launch_worker_command_includes_multinode_args():
 
     cmd = launch_worker_command("/tmp/cfg.yaml", plan)
 
-    assert "--nproc_per_node=2" in cmd
-    assert "--nnodes=2" in cmd
-    assert "--node_rank=1" in cmd
-    assert "--master_addr=10.0.0.2" in cmd
-    assert "--master_port=29555" in cmd
+    assert "--num_processes=4" in cmd
+    assert "--num_machines=2" in cmd
+    assert "--machine_rank=1" in cmd
+    assert "--main_process_ip=10.0.0.2" in cmd
+    assert "--main_process_port=29555" in cmd
 
 
 def test_configure_distributed_training_args_honors_ddp_options(monkeypatch):

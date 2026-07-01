@@ -199,8 +199,8 @@ class TrainingOrchestrator(Orchestrator):
 
         self._emit_log(
             job_id,
-            f"Launching torchrun --nproc_per_node={plan.nproc_per_node} "
-            f"--nnodes={plan.nnodes} --node_rank={plan.node_rank}",
+            f"Launching accelerate --multi_gpu --num_processes={plan.world_size} "
+            f"--num_machines={plan.nnodes} --machine_rank={plan.node_rank}",
         )
 
         cmd = launch_worker_command(str(cfg_path), plan)

@@ -69,6 +69,15 @@ export function TrainPage() {
   const [distributedMasterPort, setDistributedMasterPort] = useState(29500);
   const [ddpBackend, setDdpBackend] = useState("");
   const [ddpFindUnused, setDdpFindUnused] = useState(false);
+  const [distributedOverridesEnabled, setDistributedOverridesEnabled] = useState(false);
+  const [distributedBatchSize, setDistributedBatchSize] = useState(2);
+  const [distributedGradAccum, setDistributedGradAccum] = useState(4);
+  const [distributedLearningRate, setDistributedLearningRate] = useState(0.0002);
+  const [distributedMaxSeq, setDistributedMaxSeq] = useState(2048);
+  const [distributedEpochs, setDistributedEpochs] = useState(5);
+  const [distributedLoggingSteps, setDistributedLoggingSteps] = useState(10);
+  const [distributedSaveSteps, setDistributedSaveSteps] = useState(100);
+  const [distributedMaxEvalSamples, setDistributedMaxEvalSamples] = useState(128);
   const [cloudGpuEnabled, setCloudGpuEnabled] = useState(false);
   const [cloudGpuProvider, setCloudGpuProvider] = useState("none");
   const [cloudGpuRegion, setCloudGpuRegion] = useState("");
@@ -334,6 +343,15 @@ export function TrainPage() {
     }
   }, [exportProfile, exportProfiles]);
 
+  useEffect(() => {
+    if (distributedOverridesEnabled) return;
+    setDistributedBatchSize(batchSize);
+    setDistributedGradAccum(gradAccum);
+    setDistributedLearningRate(lr);
+    setDistributedMaxSeq(maxSeq);
+    setDistributedEpochs(epochs);
+  }, [batchSize, gradAccum, lr, maxSeq, epochs, distributedOverridesEnabled]);
+
   const toggleExportQuant = (quant: string) => {
     setExportQuants((prev) =>
       prev.includes(quant) ? prev.filter((q) => q !== quant) : [...prev, quant],
@@ -346,6 +364,10 @@ export function TrainPage() {
   const distributedWorldSize =
     Math.max(1, Number(distributedNproc || LOCAL_GPU_COUNT || 1)) *
     Math.max(1, distributedNodes);
+  const distributedEffectiveBatch =
+    distributedWorldSize *
+    Math.max(1, distributedOverridesEnabled ? distributedBatchSize : batchSize) *
+    Math.max(1, distributedOverridesEnabled ? distributedGradAccum : gradAccum);
   const safeCloudLabel = (value: string) =>
     !/(token|secret|password|apikey|api_key|:\/\/)/i.test(value);
   const cloudConfigValid =
@@ -415,25 +437,50 @@ export function TrainPage() {
             }
           : undefined;
 
+      const baseTrainingConfig: Record<string, unknown> = {
+        model_id: modelId,
+        dataset,
+        method,
+        quant,
+        dataset_format: datasetFormat,
+        epochs,
+        batch_size: batchSize,
+        learning_rate: lr,
+        max_seq_length: maxSeq,
+        preprocess_dataset: preprocessDataset,
+        deduplicate_dataset: preprocessDataset,
+        early_stopping: earlyStopping,
+        early_stopping_patience: earlyStoppingPatience,
+        lora_r: loraR,
+        lora_alpha: loraAlpha,
+        gradient_accumulation_steps: gradAccum,
+        gradient_checkpointing: gradCkpt,
+        use_triton: useFusedKernels,
+        use_fused_ce: useFusedCe,
+        train_on_responses_only: trainResponsesOnly,
+        use_rslora: useRsLora,
+        packing,
+        output_dir: "./outputs",
+      };
+
+      const distributedTrainingOverrides =
+        distributedEnabled && distributedOverridesEnabled
+          ? {
+              epochs: distributedEpochs,
+              batch_size: distributedBatchSize,
+              learning_rate: distributedLearningRate,
+              max_seq_length: distributedMaxSeq,
+              gradient_accumulation_steps: distributedGradAccum,
+              logging_steps: distributedLoggingSteps,
+              save_steps: distributedSaveSteps,
+              max_eval_samples: distributedMaxEvalSamples,
+            }
+          : {};
+
       const res = await api.startTraining(
         {
-          model_id: modelId,
-          dataset,
-          method,
-          quant,
-          dataset_format: datasetFormat,
-          epochs,
-          batch_size: batchSize,
-          learning_rate: lr,
-          max_seq_length: maxSeq,
-          preprocess_dataset: preprocessDataset,
-          deduplicate_dataset: preprocessDataset,
-          early_stopping: earlyStopping,
-          early_stopping_patience: earlyStoppingPatience,
-          lora_r: loraR,
-          lora_alpha: loraAlpha,
-          gradient_accumulation_steps: gradAccum,
-          gradient_checkpointing: gradCkpt,
+          ...baseTrainingConfig,
+          ...distributedTrainingOverrides,
           multi_gpu: distributedEnabled,
           distributed_strategy: distributedStrategy,
           distributed_nproc_per_node: distributedNproc ? Number(distributedNproc) : undefined,
@@ -449,12 +496,6 @@ export function TrainPage() {
           cloud_gpu_instance_type: cloudGpuEnabled ? cloudGpuInstanceType.trim() : "",
           cloud_gpu_count: cloudGpuEnabled ? cloudGpuCount : undefined,
           cloud_gpu_project: cloudGpuEnabled ? cloudGpuProject.trim() : "",
-          use_triton: useFusedKernels,
-          use_fused_ce: useFusedCe,
-          train_on_responses_only: trainResponsesOnly,
-          use_rslora: useRsLora,
-          packing,
-          output_dir: "./outputs",
         },
         distributedEnabled,
         exportPayload,
@@ -559,7 +600,7 @@ export function TrainPage() {
           {
             id: "distributed",
             label: "Distributed",
-            description: "Local DDP and cloud GPU launch settings",
+            description: "Accelerate DDP and cloud GPU launch settings",
             icon: "②",
             badge: distributedEnabled || cloudGpuEnabled ? "on" : undefined,
           },
@@ -1010,7 +1051,7 @@ export function TrainPage() {
             <StudioCardHeader
               icon="D"
               title="Local distributed"
-              description="DDP launch policy for GPUs visible to this machine"
+              description="Accelerate launch policy for GPUs visible to this machine"
             />
             <StudioCardBody>
               <div className="studio-checkbox-grid">
@@ -1042,8 +1083,8 @@ export function TrainPage() {
                   <label>Strategy</label>
                   <select value={distributedStrategy} onChange={(e) => setDistributedStrategy(e.target.value)}>
                     <option value="auto">Auto</option>
-                    <option value="none">Single GPU / process</option>
-                    <option value="ddp">DDP via torchrun</option>
+                    <option value="none">Disable distributed launch</option>
+                    <option value="ddp">DDP via Accelerate</option>
                   </select>
                 </div>
                 <div className="form-field">
@@ -1109,9 +1150,131 @@ export function TrainPage() {
                   <strong className="status-callout-title">Launch plan</strong>
                   <div className="status-callout-text">
                     {distributedEnabled
-                      ? `Torchrun DDP across ${distributedWorldSize} process${distributedWorldSize === 1 ? "" : "es"}.`
-                      : "Single-process training remains active."}
+                      ? `Accelerate DDP across ${distributedWorldSize} process${distributedWorldSize === 1 ? "" : "es"}.`
+                      : "Distributed launch is disabled; the existing single-process trainer is unchanged."}
                     {LOCAL_GPU_COUNT > 0 && <> Local GPUs detected: {LOCAL_GPU_COUNT}.</>}
+                  </div>
+                </div>
+              </div>
+            </StudioCardBody>
+          </div>
+
+          <div className="card studio-card">
+            <StudioCardHeader
+              icon="T"
+              title="Training config"
+              description="Optional overrides used only when distributed launch is enabled"
+            />
+            <StudioCardBody>
+              <label className="studio-checkbox-item studio-checkbox-item-standalone">
+                <input
+                  type="checkbox"
+                  checked={distributedOverridesEnabled}
+                  onChange={(e) => setDistributedOverridesEnabled(e.target.checked)}
+                />
+                Override setup settings for distributed runs
+              </label>
+              <div className="option-grid">
+                <div className="form-field">
+                  <label>Per-device batch</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={64}
+                    value={distributedOverridesEnabled ? distributedBatchSize : batchSize}
+                    disabled={!distributedOverridesEnabled}
+                    onChange={(e) => setDistributedBatchSize(Math.max(1, Number(e.target.value) || 1))}
+                  />
+                </div>
+                <div className="form-field">
+                  <label>Grad accumulation</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={256}
+                    value={distributedOverridesEnabled ? distributedGradAccum : gradAccum}
+                    disabled={!distributedOverridesEnabled}
+                    onChange={(e) => setDistributedGradAccum(Math.max(1, Number(e.target.value) || 1))}
+                  />
+                </div>
+              </div>
+              <div className="option-grid">
+                <div className="form-field">
+                  <label>Learning rate</label>
+                  <input
+                    type="number"
+                    min={0}
+                    step={0.00001}
+                    value={distributedOverridesEnabled ? distributedLearningRate : lr}
+                    disabled={!distributedOverridesEnabled}
+                    onChange={(e) => setDistributedLearningRate(Math.max(0.000001, Number(e.target.value) || lr))}
+                  />
+                </div>
+                <div className="form-field">
+                  <label>Max seq length</label>
+                  <input
+                    type="number"
+                    min={128}
+                    step={128}
+                    value={distributedOverridesEnabled ? distributedMaxSeq : maxSeq}
+                    disabled={!distributedOverridesEnabled}
+                    onChange={(e) => setDistributedMaxSeq(Math.max(128, Number(e.target.value) || 128))}
+                  />
+                </div>
+              </div>
+              <div className="option-grid">
+                <div className="form-field">
+                  <label>Epochs</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={100}
+                    value={distributedOverridesEnabled ? distributedEpochs : epochs}
+                    disabled={!distributedOverridesEnabled}
+                    onChange={(e) => setDistributedEpochs(Math.max(1, Number(e.target.value) || 1))}
+                  />
+                </div>
+                <div className="form-field">
+                  <label>Max eval samples</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={10000}
+                    value={distributedMaxEvalSamples}
+                    disabled={!distributedOverridesEnabled}
+                    onChange={(e) => setDistributedMaxEvalSamples(Math.max(1, Number(e.target.value) || 1))}
+                  />
+                </div>
+              </div>
+              <div className="option-grid">
+                <div className="form-field">
+                  <label>Logging steps</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={10000}
+                    value={distributedLoggingSteps}
+                    disabled={!distributedOverridesEnabled}
+                    onChange={(e) => setDistributedLoggingSteps(Math.max(1, Number(e.target.value) || 1))}
+                  />
+                </div>
+                <div className="form-field">
+                  <label>Save steps</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={100000}
+                    value={distributedSaveSteps}
+                    disabled={!distributedOverridesEnabled}
+                    onChange={(e) => setDistributedSaveSteps(Math.max(1, Number(e.target.value) || 1))}
+                  />
+                </div>
+              </div>
+              <div className="status-callout status-callout-info train-rec-panel">
+                <div className="status-callout-body">
+                  <strong className="status-callout-title">Effective batch</strong>
+                  <div className="status-callout-text">
+                    {distributedEffectiveBatch.toLocaleString()} samples per optimizer step across {distributedWorldSize} process{distributedWorldSize === 1 ? "" : "es"}.
                   </div>
                 </div>
               </div>
@@ -1219,7 +1382,7 @@ export function TrainPage() {
                 <div className="status-callout-body">
                   <strong className="status-callout-title">Single-GPU fallback</strong>
                   <div className="status-callout-text">
-                    Choose “Single GPU / process” or leave local multi-GPU off to run the original single-GPU trainer.
+                    Choose “Disable distributed launch” or leave local multi-GPU off to run the existing single-GPU trainer unchanged.
                   </div>
                 </div>
               </div>

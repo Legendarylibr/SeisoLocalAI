@@ -34,7 +34,7 @@ def train(
     plan = resolve_distributed_plan(cfg, layout)
     if plan.enabled and not layout.use_ddp:
         console.print(
-            "[cyan]Distributed launch:[/] "
+            "[cyan]Accelerate distributed launch:[/] "
             f"{plan.strategy} x{plan.world_size} "
             f"({plan.nproc_per_node} process(es) per node)"
         )

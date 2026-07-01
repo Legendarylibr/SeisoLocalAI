@@ -44,10 +44,11 @@ Enable **Multi-GPU** in Training Studio or set `multi_gpu: true` in YAML. Forge 
 the CLI launch:
 
 ```bash
-torchrun --nproc_per_node=N -m seiso.training.worker --config <yaml>
+accelerate launch --multi_gpu --num_processes=N --module seiso.training.worker --config <yaml>
 ```
 
-Single-GPU training stays the default when `multi_gpu` is false.
+Distributed launches use [huggingface/accelerate](https://github.com/huggingface/accelerate).
+Single-GPU training is unchanged when distributed mode is disabled.
 
 See [multi-gpu.md](multi-gpu.md).
 
@@ -134,10 +135,10 @@ save_steps: 50
 | `padding_free` | Padding-free packing with flash attention (CUDA + packing) |
 | `multi_gpu` | Enable distributed training (or Forge checkbox) |
 | `distributed_strategy` | `auto`, `none`, or `ddp` high-level launch policy |
-| `distributed_nproc_per_node` | Local torchrun workers (`null` = all visible GPUs) |
-| `distributed_num_nodes` | Total nodes for multi-node torchrun |
+| `distributed_nproc_per_node` | Local Accelerate workers (`null` = all visible GPUs) |
+| `distributed_num_nodes` | Total machines for multi-machine Accelerate |
 | `distributed_node_rank` | Rank of this node in a multi-node run |
-| `distributed_master_addr` / `distributed_master_port` | Torchrun rendezvous endpoint |
+| `distributed_master_addr` / `distributed_master_port` | Accelerate rendezvous endpoint |
 | `ddp_backend` | Optional DDP backend (`null`, `nccl`, `gloo`, etc.) |
 
 Modern training defaults (bf16 compute on CUDA when supported, paged AdamW 8-bit for 4/8-bit quant, non-reentrant gradient checkpointing, cosine LR schedule) are applied automatically in `seiso/training/practices.py`.

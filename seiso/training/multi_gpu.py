@@ -1,4 +1,4 @@
-"""Multi-GPU training coordination via Accelerate DDP."""
+"""Distributed training coordination via Hugging Face Accelerate."""
 
 from __future__ import annotations
 
@@ -36,7 +36,7 @@ class DistributedPlan:
 
 
 def detect_training_layout() -> GpuLayout:
-    """Detect GPUs and distributed rank from torchrun/accelerate env vars."""
+    """Detect GPUs and distributed rank from Accelerate/PyTorch env vars."""
     try:
         import torch
     except ImportError:
@@ -77,7 +77,7 @@ def resolve_distributed_plan(
     config: Any,
     layout: GpuLayout | None = None,
 ) -> DistributedPlan:
-    """Resolve high-level distributed settings into a concrete torchrun plan."""
+    """Resolve high-level distributed settings into a concrete Accelerate plan."""
     layout = layout or detect_training_layout()
     strategy = str(getattr(config, "distributed_strategy", "auto")).lower()
     requested = distributed_requested(config)
@@ -174,7 +174,7 @@ def launch_worker_command(
     config_path: str,
     nproc: int | DistributedPlan,
 ) -> list[str]:
-    """Build torchrun command for Forge worker subprocess."""
+    """Build an Accelerate launch command for distributed worker subprocesses."""
     if isinstance(nproc, DistributedPlan):
         plan = nproc
         nproc_value = plan.nproc_per_node
@@ -183,21 +183,23 @@ def launch_worker_command(
         nproc_value = int(nproc)
 
     cmd = [
-        "torchrun",
-        f"--nproc_per_node={nproc_value}",
+        "accelerate",
+        "launch",
+        "--multi_gpu",
+        f"--num_processes={nproc_value * (plan.nnodes if plan else 1)}",
     ]
     if plan and plan.nnodes > 1:
         cmd.extend(
             [
-                f"--nnodes={plan.nnodes}",
-                f"--node_rank={plan.node_rank}",
-                f"--master_addr={plan.master_addr}",
-                f"--master_port={plan.master_port}",
+                f"--num_machines={plan.nnodes}",
+                f"--machine_rank={plan.node_rank}",
+                f"--main_process_ip={plan.master_addr}",
+                f"--main_process_port={plan.master_port}",
             ]
         )
     cmd.extend(
         [
-            "-m",
+            "--module",
             "seiso.training.worker",
             "--config",
             config_path,

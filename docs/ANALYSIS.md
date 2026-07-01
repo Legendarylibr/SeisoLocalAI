@@ -96,7 +96,7 @@ Entry points: `start` script, `seiso` CLI (`forge`, `train`, `chat`, `export`, `
 - Uses TRL SFTTrainer (+ optional fused CE). PEFT for LoRA.
 - Orchestrator + route: `forge/orchestrators/training.py`, `forge/api/routes/training.py`.
 - UI: TrainPage.tsx (rich form + recs + SSE logs + metrics).
-- Multi-GPU via torchrun + worker.
+- Distributed fine-tuning via Hugging Face Accelerate + worker.
 - Auto-export hook after success.
 - Fused kernels applied inside trainer.
 

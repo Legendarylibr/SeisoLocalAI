@@ -86,7 +86,7 @@ If compile fails, Seiso falls back to PyTorch (no fused ops).
 ## Multi-GPU
 
 ```powershell
-torchrun --nproc_per_node=2 -m seiso.training.worker --config configs\example_lora.yaml
+accelerate launch --multi_gpu --num_processes=2 --module seiso.training.worker --config configs\example_lora.yaml
 ```
 
 Or enable Multi-GPU in Forge when multiple NVIDIA GPUs are visible.

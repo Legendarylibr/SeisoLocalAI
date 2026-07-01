@@ -108,28 +108,28 @@ class TrainConfig(BaseModel):
     distributed_nproc_per_node: int | None = Field(
         default=None,
         ge=1,
-        description="Local torchrun worker count (None = all visible training GPUs).",
+        description="Local Accelerate worker count (None = all visible training GPUs).",
     )
     distributed_num_nodes: int = Field(
         default=1,
         ge=1,
-        description="Total torchrun nodes for distributed training.",
+        description="Total machines for Accelerate distributed training.",
     )
     distributed_node_rank: int = Field(
         default=0,
         ge=0,
-        description="Rank of this node for multi-node torchrun launches.",
+        description="Rank of this machine for multi-machine Accelerate launches.",
     )
     distributed_master_addr: str = Field(
         default="127.0.0.1",
         min_length=1,
-        description="Torchrun rendezvous address for multi-node launches.",
+        description="Accelerate rendezvous address for multi-machine launches.",
     )
     distributed_master_port: int = Field(
         default=29500,
         ge=1,
         le=65535,
-        description="Torchrun rendezvous port.",
+        description="Accelerate rendezvous port.",
     )
     ddp_backend: str | None = Field(
         default=None,

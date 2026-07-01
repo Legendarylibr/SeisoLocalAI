@@ -11,7 +11,7 @@ Install entry points:
 |---------|----------------|
 | `seiso` | `pip install -e ".[forge,train,...]"` |
 | `seiso-bench-kernels` | same (script entry point) |
-| `seiso-train-worker` | same (multi-GPU worker; used via `torchrun`) |
+| `seiso-train-worker` | same (distributed worker; used via Accelerate) |
 
 Helper scripts (repo `scripts/`, not on `PATH`):
 
@@ -273,14 +273,16 @@ seiso-bench-kernels --op all --rows 4096 --hidden 4096 --vocab 32000
 seiso-bench-kernels --op rms --dtype bfloat16
 ```
 
-## Multi-GPU training (`seiso-train-worker`)
+## Distributed training (`seiso-train-worker`)
 
-Distributed training uses the worker entry point via `torchrun` (not a top-level `seiso` subcommand):
+Distributed training uses Hugging Face Accelerate with the worker entry point.
+For most runs, set `multi_gpu: true` and use `seiso train --config ...`; the CLI
+launches Accelerate for you.
 
 ```bash
-torchrun --nproc_per_node=2 -m seiso.training.worker --config configs/example_lora.yaml
+accelerate launch --multi_gpu --num_processes=2 --module seiso.training.worker --config configs/example_lora.yaml
 # equivalent installed script:
-torchrun --nproc_per_node=2 seiso-train-worker --config configs/example_lora.yaml
+accelerate launch --multi_gpu --num_processes=2 seiso-train-worker --config configs/example_lora.yaml
 ```
 
 See [training/multi-gpu.md](training/multi-gpu.md).
