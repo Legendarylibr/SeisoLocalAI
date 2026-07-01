@@ -15,9 +15,11 @@ from seiso.models.hf_env import configure_hf_hub_cache
 from seiso.training.config import TrainConfig, run_training
 from seiso.training.metrics import parse_metric_line
 from seiso.training.multi_gpu import (
+    DistributedPlan,
     detect_training_layout,
     gpu_stats,
     launch_worker_command,
+    resolve_distributed_plan,
 )
 
 
@@ -74,6 +76,7 @@ class TrainingOrchestrator(Orchestrator):
         )
 
         layout = detect_training_layout()
+        distributed_plan = resolve_distributed_plan(config, layout)
         self._emit_log(job_id, f"Starting training: {config.model_id}")
         if resolved := config.extra.get("resolved_model_path"):
             self._emit_log(job_id, f"Using cached weights: {resolved}")
@@ -83,7 +86,8 @@ class TrainingOrchestrator(Orchestrator):
         self._emit_log(
             job_id,
             f"GPUs: {layout.device_count} visible, world_size={layout.world_size}, "
-            f"multi_gpu={multi_gpu}, fused_kernels={config.use_triton}, fused_ce={config.use_fused_ce}",
+            f"multi_gpu={multi_gpu}, distributed={distributed_plan.strategy}, "
+            f"fused_kernels={config.use_triton}, fused_ce={config.use_fused_ce}",
         )
 
         loop = asyncio.get_running_loop()
@@ -92,18 +96,18 @@ class TrainingOrchestrator(Orchestrator):
         metrics_summary: dict[str, Any] = {}
 
         try:
-            if multi_gpu and layout.device_count > 1:
+            if distributed_plan.enabled:
                 checkpoint = await self._run_distributed(
                     job_id,
                     config,
-                    layout.device_count,
+                    distributed_plan,
                     hf_token=payload.get("hf_token"),
                 )
             else:
-                if multi_gpu and layout.device_count <= 1:
+                if multi_gpu:
                     self._emit_log(
                         job_id,
-                        "multi_gpu requested but only one GPU — running single-process",
+                        f"distributed launch skipped: {distributed_plan.reason}",
                     )
 
                 def on_metric(metric: dict[str, Any]) -> None:
@@ -179,7 +183,7 @@ class TrainingOrchestrator(Orchestrator):
         self,
         job_id: str,
         config: TrainConfig,
-        nproc: int,
+        plan: DistributedPlan,
         *,
         hf_token: str | None = None,
     ) -> Path:
@@ -193,9 +197,13 @@ class TrainingOrchestrator(Orchestrator):
         )
         cfg_path.chmod(0o600)
 
-        self._emit_log(job_id, f"Launching torchrun --nproc_per_node={nproc}")
+        self._emit_log(
+            job_id,
+            f"Launching torchrun --nproc_per_node={plan.nproc_per_node} "
+            f"--nnodes={plan.nnodes} --node_rank={plan.node_rank}",
+        )
 
-        cmd = launch_worker_command(str(cfg_path), nproc)
+        cmd = launch_worker_command(str(cfg_path), plan)
         env = {**__import__("os").environ, "SEISO_EMIT_METRICS_STDOUT": "1"}
         if hf_token:
             env["HF_TOKEN"] = str(hf_token)

@@ -1303,6 +1303,7 @@ th { color: var(--muted); font-weight: 500; font-size: 0.78rem; text-transform: 
 .hub-tab-bar { margin-bottom: 0.85rem; }
 .settings-tab-bar { margin-bottom: 1.1rem; }
 .integrations-tab-bar { margin-bottom: 0.85rem; }
+.train-tab-bar { margin-bottom: 0.85rem; }
 
 .filters { margin-bottom: 0.75rem; }
 
@@ -1594,6 +1595,10 @@ th { color: var(--muted); font-weight: 500; font-size: 0.78rem; text-transform: 
 @media (min-width: 960px) {
   .train-layout--studio {
     grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .train-layout--distributed {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(300px, 0.85fr);
   }
 
   .train-layout--config-monitor {
@@ -2540,12 +2545,18 @@ th { color: var(--muted); font-weight: 500; font-size: 0.78rem; text-transform: 
     height: 100%;
   }
 
+  .studio-page--compact .train-layout--distributed {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(300px, 0.95fr);
+    height: 100%;
+  }
+
   .studio-page--compact .train-layout--config-monitor {
     grid-template-columns: minmax(0, 1.9fr) minmax(300px, 0.82fr);
     height: 100%;
   }
 
   .studio-page--compact .train-layout--studio-fit > .studio-card,
+  .studio-page--compact .train-layout--distributed > .studio-card,
   .studio-page--compact .train-layout--export-fit > .studio-card,
   .studio-page--compact .train-layout--config-monitor > .studio-card:first-child {
     display: flex;
@@ -2575,6 +2586,7 @@ th { color: var(--muted); font-weight: 500; font-size: 0.78rem; text-transform: 
 }
 
 .studio-page--compact .train-layout--studio-fit > .studio-card:not(.studio-card-scroll):not(.studio-card-compact),
+.studio-page--compact .train-layout--distributed > .studio-card:not(.studio-card-scroll):not(.studio-card-compact),
 .studio-page--compact .train-layout--export-fit > .studio-card:not(.studio-card-scroll) {
   border-color: rgba(255, 255, 255, 0.06);
   background:
@@ -2610,7 +2622,8 @@ th { color: var(--muted); font-weight: 500; font-size: 0.78rem; text-transform: 
 }
 
 .studio-page--compact .studio-monitor-stack > .studio-card-scroll,
-.studio-page--compact .train-layout--studio-fit > .studio-card-scroll {
+.studio-page--compact .train-layout--studio-fit > .studio-card-scroll,
+.studio-page--compact .train-layout--distributed > .studio-card-scroll {
   flex: 1;
   min-height: 0;
 }
@@ -5132,6 +5145,7 @@ th { color: var(--muted); font-weight: 500; font-size: 0.78rem; text-transform: 
 
   .train-layout,
   .train-layout--studio,
+  .train-layout--distributed,
   .train-layout--studio-monitor,
   .train-layout--config-monitor { grid-template-columns: 1fr; }
 

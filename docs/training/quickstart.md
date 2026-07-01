@@ -40,11 +40,14 @@ Preflight validation (`POST /api/training/validate-dataset`) and job start use t
 
 ### Multi-GPU
 
-Enable **Multi-GPU** in Training Studio or set `multi_gpu: true` in YAML. Forge launches:
+Enable **Multi-GPU** in Training Studio or set `multi_gpu: true` in YAML. Forge and
+the CLI launch:
 
 ```bash
 torchrun --nproc_per_node=N -m seiso.training.worker --config <yaml>
 ```
+
+Single-GPU training stays the default when `multi_gpu` is false.
 
 See [multi-gpu.md](multi-gpu.md).
 
@@ -130,6 +133,12 @@ save_steps: 50
 | `packing` | Sequence packing (large plain-text corpora) |
 | `padding_free` | Padding-free packing with flash attention (CUDA + packing) |
 | `multi_gpu` | Enable distributed training (or Forge checkbox) |
+| `distributed_strategy` | `auto`, `none`, or `ddp` high-level launch policy |
+| `distributed_nproc_per_node` | Local torchrun workers (`null` = all visible GPUs) |
+| `distributed_num_nodes` | Total nodes for multi-node torchrun |
+| `distributed_node_rank` | Rank of this node in a multi-node run |
+| `distributed_master_addr` / `distributed_master_port` | Torchrun rendezvous endpoint |
+| `ddp_backend` | Optional DDP backend (`null`, `nccl`, `gloo`, etc.) |
 
 Modern training defaults (bf16 compute on CUDA when supported, paged AdamW 8-bit for 4/8-bit quant, non-reentrant gradient checkpointing, cosine LR schedule) are applied automatically in `seiso/training/practices.py`.
 
