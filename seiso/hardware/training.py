@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import platform
 from typing import Any
 
 from seiso.hardware.tiers import (
@@ -12,6 +13,7 @@ from seiso.hardware.tiers import (
 )
 from seiso.inference.backends import InferenceBackend
 from seiso.models.loader import Backend
+from seiso.platform import is_native_linux
 
 
 def preferred_inference_backend(profile: dict[str, Any]) -> str:
@@ -20,15 +22,6 @@ def preferred_inference_backend(profile: dict[str, Any]) -> str:
         backend = Backend(profile.get("backend", "cpu"))
     except ValueError:
         backend = Backend.CPU
-
-    if _profile_has_nvidia(profile):
-        try:
-            from seiso.inference.llamaswap import llamaswap_enabled
-
-            if llamaswap_enabled():
-                return str(InferenceBackend.LLAMASWAP)
-        except ImportError:
-            pass
 
     if tier == HardwareTier.CPU_ONLY:
         return str(InferenceBackend.LLAMACPP)
@@ -40,7 +33,31 @@ def preferred_inference_backend(profile: dict[str, Any]) -> str:
         return str(InferenceBackend.LLAMACPP)
     if backend == Backend.MLX:
         return str(InferenceBackend.MLX)
+    if _profile_is_macos(profile):
+        return str(InferenceBackend.LLAMACPP)
+    if _profile_is_native_linux(profile) and _profile_has_nvidia(profile):
+        try:
+            from seiso.inference.llamaswap import llamaswap_enabled
+
+            if llamaswap_enabled():
+                return str(InferenceBackend.LLAMASWAP)
+        except ImportError:
+            pass
     return str(InferenceBackend.LLAMACPP)
+
+
+def _profile_platform(profile: dict[str, Any]) -> str:
+    return str(profile.get("platform") or platform.system()).lower()
+
+
+def _profile_is_macos(profile: dict[str, Any]) -> bool:
+    return _profile_platform(profile) == "darwin"
+
+
+def _profile_is_native_linux(profile: dict[str, Any]) -> bool:
+    if _profile_platform(profile) != "linux":
+        return False
+    return not bool(profile.get("wsl")) and is_native_linux()
 
 
 def _profile_has_nvidia(profile: dict[str, Any]) -> bool:
