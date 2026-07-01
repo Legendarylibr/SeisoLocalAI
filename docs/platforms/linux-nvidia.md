@@ -55,6 +55,11 @@ seiso forge
 
 Open **http://127.0.0.1:8765** — complete onboarding, then use **Training Studio** (`/train`).
 
+Local-only Forge startup auto-approves the trusted host-venv boundary for frontend
+training on native Linux + NVIDIA, so jobs launched from Training Studio inherit
+`SEISO_NVIDIA_HOST_VENV_ACK=1`. Remote Forge and CLI training still require an
+explicit acknowledgement.
+
 ## Train (CLI)
 
 Approve GPU training on bare Linux hosts (gates native kernel JIT):

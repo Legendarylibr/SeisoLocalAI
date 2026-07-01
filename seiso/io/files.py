@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import fnmatch
 import os
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Iterator, Protocol
+from typing import Protocol
 
 MODEL_WEIGHT_SUFFIXES = frozenset({".gguf", ".safetensors", ".bin", ".pt", ".pth"})
 
