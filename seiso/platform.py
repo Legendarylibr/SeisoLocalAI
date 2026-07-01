@@ -102,10 +102,3 @@ def detect_wsl2() -> bool:
     except OSError:
         return False
     return "microsoft" in version or "wsl2" in version
-
-
-def is_native_linux() -> bool:
-    """True on a real Linux host, false on WSL and non-Linux platforms."""
-    if sys.platform != "linux":
-        return False
-    return not detect_wsl2()

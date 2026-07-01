@@ -270,42 +270,24 @@ def test_preferred_backend_cpu_only_is_llamacpp():
     assert preferred_inference_backend(profile) == "llamacpp"
 
 
-def test_preferred_backend_native_linux_nvidia_uses_llamaswap_when_enabled(monkeypatch):
+def test_preferred_backend_nvidia_uses_llamaswap_when_enabled(monkeypatch):
     profile = {
-        "platform": "linux",
         "backend": "cuda",
         "gpus": [{"name": "NVIDIA GeForce RTX 4090", "vram_total_mb": 24576}],
         "ram_gb": 32,
     }
-    monkeypatch.setattr("seiso.hardware.training.is_native_linux", lambda: True)
     monkeypatch.setattr("seiso.inference.llamaswap.llamaswap_enabled", lambda: True)
 
     assert preferred_inference_backend(profile) == "llamaswap"
 
 
-def test_preferred_backend_native_linux_nvidia_without_llamaswap_stays_llamacpp(
-    monkeypatch,
-):
+def test_preferred_backend_nvidia_without_llamaswap_stays_llamacpp(monkeypatch):
     profile = {
-        "platform": "linux",
         "backend": "cuda",
         "gpus": [{"name": "NVIDIA GeForce RTX 4090", "vram_total_mb": 24576}],
         "ram_gb": 32,
     }
-    monkeypatch.setattr("seiso.hardware.training.is_native_linux", lambda: True)
     monkeypatch.setattr("seiso.inference.llamaswap.llamaswap_enabled", lambda: False)
-
-    assert preferred_inference_backend(profile) == "llamacpp"
-
-
-def test_preferred_backend_macos_nvidia_stays_llamacpp(monkeypatch):
-    profile = {
-        "platform": "darwin",
-        "backend": "cuda",
-        "gpus": [{"name": "NVIDIA GeForce RTX 4090", "vram_total_mb": 24576}],
-        "ram_gb": 32,
-    }
-    monkeypatch.setattr("seiso.inference.llamaswap.llamaswap_enabled", lambda: True)
 
     assert preferred_inference_backend(profile) == "llamacpp"
 
