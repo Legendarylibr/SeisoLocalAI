@@ -41,6 +41,12 @@ class DistillRLStartRequest(BaseModel):
     rollout_max_prompts: int | None = None
     dpo_epochs: int | None = None
     prompt_library: str | None = None
+    require_thinking_trace: bool = True
+    thinking_instruction: str | None = None
+    verifiable_outcome_rewards: bool = True
+    grpo_group_size: int = Field(default=4, ge=2)
+    benchmark_verifiable: bool = True
+    benchmark_tasks: list[str] = Field(default_factory=lambda: ["gsm8k", "gpqa", "aime"])
     seeds: list[int] | None = None
     seed: int = 42
     deterministic: bool = True

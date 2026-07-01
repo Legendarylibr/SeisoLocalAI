@@ -42,6 +42,12 @@ def build_preference_bundle(
     teacher_revision: str | None = None,
     student_revision: str | None = None,
     trust_remote_code: bool = False,
+    require_thinking_trace: bool = False,
+    thinking_instruction: str = (
+        "Show your reasoning in <think>...</think>, then give the final answer."
+    ),
+    verifiable_outcome_rewards: bool = False,
+    grpo_group_size: int = 1,
     on_log=None,
 ) -> PreferenceBundle:
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -68,6 +74,10 @@ def build_preference_bundle(
         teacher_revision=teacher_revision,
         student_revision=student_revision,
         trust_remote_code=trust_remote_code,
+        require_thinking_trace=require_thinking_trace,
+        thinking_instruction=thinking_instruction,
+        verifiable_outcome_rewards=verifiable_outcome_rewards,
+        grpo_group_size=grpo_group_size,
     )
     val_rows, val_filtered = _rows_for_split(
         teacher_model=teacher_model,
@@ -80,6 +90,10 @@ def build_preference_bundle(
         teacher_revision=teacher_revision,
         student_revision=student_revision,
         trust_remote_code=trust_remote_code,
+        require_thinking_trace=require_thinking_trace,
+        thinking_instruction=thinking_instruction,
+        verifiable_outcome_rewards=verifiable_outcome_rewards,
+        grpo_group_size=grpo_group_size,
     )
 
     train_path = output_dir / "preferences_train.jsonl"
@@ -97,6 +111,10 @@ def build_preference_bundle(
         "temperature": temperature,
         "max_new_tokens": max_new_tokens,
         "use_chat_template": use_chat_template,
+        "require_thinking_trace": require_thinking_trace,
+        "thinking_instruction": thinking_instruction,
+        "verifiable_outcome_rewards": verifiable_outcome_rewards,
+        "grpo_group_size": grpo_group_size,
         "train_fraction": train_fraction,
         "prompt_library": (
             str(prompt_library_path) if prompt_library_path else "default"
@@ -136,6 +154,12 @@ def _rows_for_split(
     teacher_revision: str | None = None,
     student_revision: str | None = None,
     trust_remote_code: bool = False,
+    require_thinking_trace: bool = False,
+    thinking_instruction: str = (
+        "Show your reasoning in <think>...</think>, then give the final answer."
+    ),
+    verifiable_outcome_rewards: bool = False,
+    grpo_group_size: int = 1,
 ) -> tuple[list[dict[str, Any]], int]:
     rows = generate_preference_rows(
         teacher_model=teacher_model,
@@ -148,6 +172,10 @@ def _rows_for_split(
         teacher_revision=teacher_revision,
         student_revision=student_revision,
         trust_remote_code=trust_remote_code,
+        require_thinking_trace=require_thinking_trace,
+        thinking_instruction=thinking_instruction,
+        verifiable_outcome_rewards=verifiable_outcome_rewards,
+        grpo_group_size=grpo_group_size,
     )
     filtered = 0
     kept: list[dict[str, Any]] = []

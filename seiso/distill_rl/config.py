@@ -99,11 +99,17 @@ class DistillRLConfig(BaseModel):
     distill_alpha: float = 0.5
     distill_temperature: float = 2.0
     align_distill_with_prompts: bool = True
+    require_thinking_trace: bool = True
+    thinking_instruction: str = (
+        "Show your reasoning in <think>...</think>, then give the final answer."
+    )
 
     prompt_library_path: Path | None = None
     rollout_max_prompts: int = 4
     rollout_max_new_tokens: int = 32
     rollout_temperature: float = 0.7
+    verifiable_outcome_rewards: bool = True
+    grpo_group_size: int = 4
     use_chat_template: bool | None = None
     trust_remote_code: bool = False
     train_val_fraction: float = 0.85
@@ -125,6 +131,8 @@ class DistillRLConfig(BaseModel):
 
     eval_max_prompts: int = 8
     evaluate_teacher: bool = False
+    benchmark_verifiable: bool = True
+    benchmark_tasks: list[str] = Field(default_factory=lambda: ["gsm8k", "gpqa", "aime"])
 
     @property
     def distilled_dir(self) -> Path:
@@ -282,6 +290,13 @@ def build_distill_rl_config(
                 preset.get("align_distill_with_prompts", True),
             )
         ),
+        require_thinking_trace=bool(merged.get("require_thinking_trace", True)),
+        thinking_instruction=str(
+            merged.get(
+                "thinking_instruction",
+                "Show your reasoning in <think>...</think>, then give the final answer.",
+            )
+        ),
         prompt_library_path=prompt_path,
         rollout_max_prompts=int(
             merged.get("rollout_max_prompts", preset.get("rollout_max_prompts", 4))
@@ -292,6 +307,10 @@ def build_distill_rl_config(
             )
         ),
         rollout_temperature=float(merged.get("rollout_temperature", 0.7)),
+        verifiable_outcome_rewards=bool(
+            merged.get("verifiable_outcome_rewards", True)
+        ),
+        grpo_group_size=int(merged.get("grpo_group_size", 4)),
         use_chat_template=use_chat_template,
         trust_remote_code=bool(merged.get("trust_remote_code", False)),
         train_val_fraction=float(
@@ -333,4 +352,9 @@ def build_distill_rl_config(
             merged.get("eval_max_prompts", preset.get("eval_max_prompts", 8))
         ),
         evaluate_teacher=bool(merged.get("evaluate_teacher", False)),
+        benchmark_verifiable=bool(merged.get("benchmark_verifiable", True)),
+        benchmark_tasks=[
+            str(task).lower()
+            for task in merged.get("benchmark_tasks", ["gsm8k", "gpqa", "aime"])
+        ],
     )

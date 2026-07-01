@@ -64,6 +64,28 @@ def _flatten_metrics(evaluation: dict[str, Any] | None) -> dict[str, float]:
                 continue
             if isinstance(value, (int, float)):
                 flat[f"{name}.{key}"] = float(value)
+    benchmarks = evaluation.get("verifiable_benchmarks")
+    if isinstance(benchmarks, dict):
+        for checkpoint, task_metrics in (benchmarks.get("checkpoints") or {}).items():
+            if not isinstance(task_metrics, dict):
+                continue
+            for task, metrics in task_metrics.items():
+                if isinstance(metrics, dict) and isinstance(
+                    metrics.get("accuracy"), (int, float)
+                ):
+                    flat[f"{checkpoint}.benchmark.{task}.accuracy"] = float(
+                        metrics["accuracy"]
+                    )
+        jumps = benchmarks.get("accuracy_jumps")
+        if isinstance(jumps, dict):
+            for checkpoint, task_jumps in (jumps.get("by_checkpoint") or {}).items():
+                if not isinstance(task_jumps, dict):
+                    continue
+                for task, delta in task_jumps.items():
+                    if isinstance(delta, (int, float)):
+                        flat[f"{checkpoint}.benchmark.{task}.accuracy_jump"] = float(
+                            delta
+                        )
     return flat
 
 

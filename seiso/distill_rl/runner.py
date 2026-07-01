@@ -195,14 +195,28 @@ def _run_single_job(
             prompt_library_path=config.prompt_library_path,
             eval_max_prompts=config.eval_max_prompts,
             trust_remote_code=config.trust_remote_code,
+            benchmark_verifiable=config.benchmark_verifiable,
+            benchmark_tasks=config.benchmark_tasks,
+            require_thinking_trace=config.require_thinking_trace,
+            thinking_instruction=config.thinking_instruction,
             on_log=on_log,
         )
         stage_results["evaluation"] = evaluation.get("summary_path")
+        benchmark_report = evaluation.get("verifiable_benchmarks")
+        if isinstance(benchmark_report, dict) and benchmark_report.get("summary_path"):
+            stage_results["verifiable_benchmarks"] = benchmark_report["summary_path"]
         append_artifact(
             config.output_root,
             stage="evaluate",
             artifact_path=Path(str(evaluation["summary_path"])),
         )
+        if isinstance(benchmark_report, dict) and benchmark_report.get("summary_path"):
+            append_artifact(
+                config.output_root,
+                stage="evaluate",
+                artifact_path=Path(str(benchmark_report["summary_path"])),
+                role="benchmark",
+            )
 
     manifest_report = verify_run_manifest(config.output_root)
     paper_bundle = create_paper_bundle(
@@ -217,6 +231,14 @@ def _run_single_job(
 
     final_model_dir = stage_results.get("dpo") or str(distilled_dir)
     _log("Distill-RL pipeline complete")
+    benchmark_jumps: list[str] = []
+    if isinstance(evaluation, dict):
+        from seiso.distill_rl.verifiable_benchmarks import summarize_accuracy_jumps
+
+        benchmark_jumps = summarize_accuracy_jumps(
+            evaluation.get("verifiable_benchmarks")
+        )
+
     result: dict[str, Any] = {
         "output_dir": str(config.output_root),
         "output_root": str(config.output_root),
@@ -232,6 +254,7 @@ def _run_single_job(
         "paper_bundle": paper_bundle,
         "final_model_dir": final_model_dir,
         "auto_sweep": auto_sweep_enabled(payload),
+        "benchmark_jumps": benchmark_jumps,
     }
     if sweep_result is not None:
         result["sweep"] = sweep_result
@@ -279,6 +302,10 @@ def _run_shared_stages(
             teacher_revision=config.teacher_revision,
             student_revision=config.student_revision,
             trust_remote_code=config.trust_remote_code,
+            require_thinking_trace=config.require_thinking_trace,
+            thinking_instruction=config.thinking_instruction,
+            verifiable_outcome_rewards=config.verifiable_outcome_rewards,
+            grpo_group_size=config.grpo_group_size,
             on_log=on_log,
         )
         stage_results["preferences_train"] = str(bundle.train_path)
@@ -332,10 +359,16 @@ def _write_effective_config(config: DistillRLConfig) -> None:
 
 
 def _distill_texts(config: DistillRLConfig) -> list[str]:
+    from seiso.distill_rl.outcome import format_thinking_prompt
     from seiso.distill_rl.prompts import load_rollout_prompts, prompt_texts
 
     limit = config.max_train_samples or config.rollout_max_prompts
     prompts = load_rollout_prompts(config.prompt_library_path, limit=limit)
+    if config.require_thinking_trace:
+        return [
+            format_thinking_prompt(text, config.thinking_instruction)
+            for text in prompt_texts(prompts)
+        ]
     return prompt_texts(prompts)
 
 

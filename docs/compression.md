@@ -128,6 +128,15 @@ Requires `.[train]` for GPU distillation/finetune stages. Optional `.[compress-q
 
 Teacher KL distillation into a smaller student, preference rollouts (teacher completions preferred over student), DPO alignment, and evaluation. Produces hash-chained manifests and optional multi-seed aggregation.
 
+Reasoning-focused runs can force rollout and prompt text through
+`<think>...</think>` by leaving `require_thinking_trace: true`. For verifiable
+math/code-style prompts that include an `answer` and optional `benchmark` field
+(`gsm8k`, `gpqa`, or `aime`), Distill-RL switches to pure outcome rewards:
+group-sample multiple student reasoning traces with `grpo_group_size`, score
+only final-answer correctness, and use the best/worst traces as the preference
+pair. Evaluation writes `verifiable_benchmarks.json` with GSM8K/GPQA/AIME
+accuracy and the jump versus the baseline checkpoint.
+
 **Auto-sweep (default on):** Before the final DPO stage, runs a compact grid search over DPO hyperparameters (`dpo_beta`, `dpo_learning_rate`, preset-dependent). Disable with `--no-auto-sweep` (CLI) or `auto_sweep: false` (API). Custom grids via `sweep_config` path or `sweep_grid` in JSON config.
 
 ### Presets
@@ -148,6 +157,8 @@ Stages: `distill`, `rollout`, `dpo`, `evaluate`.
 ├── preferences/
 ├── dpo/
 ├── evaluation/
+│   ├── evaluation_summary.json
+│   └── verifiable_benchmarks.json
 ├── sweep/              # when auto_sweep runs
 └── manifest.json
 ```
@@ -171,6 +182,12 @@ seiso distill-rl run --preset full \
 seiso distill-rl run --preset reproducible --seeds 13,42,99
 seiso distill-rl run --preset smoke --no-auto-sweep
 seiso distill-rl run --preset smoke --distilled-path ~/.seiso/distill_rl/cli/<job>/distilled
+seiso distill-rl run --preset smoke \
+  --thinking-trace \
+  --outcome-rewards \
+  --grpo-group-size 4 \
+  --benchmark-verifiable \
+  --benchmark-tasks gsm8k,gpqa,aime
 ```
 
 Config references: `configs/distill_rl_smoke.json`, `configs/distill_rl_reproducible.json`.
