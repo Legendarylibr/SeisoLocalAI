@@ -233,7 +233,11 @@ def preprocess_training_dataset(
             return {"_seiso_valid": False}
         if sum(len(str(v)) for v in norm.values()) < min_chars:
             return {"_seiso_valid": False}
-        return {**norm, "_seiso_valid": True}
+        return {
+            **norm,
+            "_seiso_valid": True,
+            "_seiso_fingerprint": _content_fingerprint(norm),
+        }
 
     map_kwargs = _datasets_map_kwargs(num_proc)
     mapped = dataset.map(transform, **map_kwargs)
@@ -244,9 +248,14 @@ def preprocess_training_dataset(
     if deduplicate and len(filtered) > 0:
         seen: set[str] = set()
         keep_indices: list[int] = []
-        for idx in range(len(filtered)):
-            row = {k: v for k, v in filtered[idx].items() if not k.startswith("_seiso")}
-            key = _content_fingerprint(row)
+        try:
+            fingerprints = filtered["_seiso_fingerprint"]
+        except (KeyError, TypeError):
+            fingerprints = [
+                str(filtered[idx].get("_seiso_fingerprint") or "")
+                for idx in range(len(filtered))
+            ]
+        for idx, key in enumerate(fingerprints):
             if key in seen:
                 continue
             seen.add(key)

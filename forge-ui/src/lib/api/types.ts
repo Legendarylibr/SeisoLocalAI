@@ -352,6 +352,7 @@ export type DatasetLengthStats = {
 
 export type DatasetAnalysis = {
   valid: boolean;
+  analysis_token?: string;
   dataset: string;
   split: string;
   columns: string[];

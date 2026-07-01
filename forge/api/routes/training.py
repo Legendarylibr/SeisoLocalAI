@@ -5,7 +5,9 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import time
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -44,6 +46,7 @@ class TrainingStartRequest(BaseModel):
     config: dict
     project_id: str | None = None
     multi_gpu: bool = False
+    dataset_analysis_token: str | None = None
     export_on_complete: dict | None = Field(
         default=None,
         description="Auto-export after training: formats, profile, gguf_quantizations, hub",
@@ -53,6 +56,66 @@ class TrainingStartRequest(BaseModel):
 class TrainingJobResponse(BaseModel):
     job_id: str
     status: str
+
+
+_DATASET_ANALYSIS_TTL_S = 10 * 60.0
+
+
+@dataclass(frozen=True)
+class _DatasetAnalysisCacheEntry:
+    user_id: str
+    dataset: str
+    requested_format: str
+    resolved_format: str
+    valid: bool
+    created_at: float
+
+
+_dataset_analysis_cache: dict[str, _DatasetAnalysisCacheEntry] = {}
+
+
+def _store_dataset_analysis_token(
+    *,
+    user_id: str,
+    dataset: str | Path,
+    requested_format: DatasetFormat,
+    resolved_format: str | None,
+    valid: bool,
+) -> str:
+    token = uuid.uuid4().hex
+    _dataset_analysis_cache[token] = _DatasetAnalysisCacheEntry(
+        user_id=user_id,
+        dataset=str(dataset),
+        requested_format=requested_format.value,
+        resolved_format=resolved_format or requested_format.value,
+        valid=valid,
+        created_at=time.monotonic(),
+    )
+    return token
+
+
+def _dataset_analysis_token_matches(
+    token: str | None,
+    *,
+    user_id: str,
+    dataset: str | Path,
+    dataset_format: DatasetFormat,
+) -> bool:
+    if not token:
+        return False
+    entry = _dataset_analysis_cache.get(token)
+    now = time.monotonic()
+    if entry is None:
+        return False
+    if now - entry.created_at > _DATASET_ANALYSIS_TTL_S:
+        _dataset_analysis_cache.pop(token, None)
+        return False
+    return (
+        entry.user_id == user_id
+        and entry.dataset == str(dataset)
+        and dataset_format.value in {entry.requested_format, entry.resolved_format}
+        and entry.valid
+    )
 
 
 def _serialize_metrics_payload(
@@ -215,6 +278,13 @@ async def analyze_dataset_endpoint(
             dataset_format=ds_fmt,
             sandbox_root=Path(settings.data_dir) / "uploads" / user_id,
         )
+        analysis["analysis_token"] = _store_dataset_analysis_token(
+            user_id=user_id,
+            dataset=ds,
+            requested_format=ds_fmt,
+            resolved_format=analysis.get("resolved_format"),
+            valid=bool(analysis.get("valid")),
+        )
         return analysis
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -242,6 +312,13 @@ async def validate_dataset_endpoint(
         )
         if not analysis.get("valid"):
             raise ValueError("No valid training samples after preprocessing")
+        analysis["analysis_token"] = _store_dataset_analysis_token(
+            user_id=user_id,
+            dataset=ds,
+            requested_format=ds_fmt,
+            resolved_format=analysis.get("resolved_format"),
+            valid=True,
+        )
         return {"valid": True, **analysis}
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -299,14 +376,20 @@ async def start_training(
     ds_fmt_str = training_config.get("dataset_format", "auto")
     try:
         ds_fmt = DatasetFormat(ds_fmt_str) if ds_fmt_str else DatasetFormat.AUTO
-        analysis = await asyncio.to_thread(
-            _run_dataset_analysis,
-            dataset_for_val,
+        if not _dataset_analysis_token_matches(
+            body.dataset_analysis_token,
+            user_id=user_id,
+            dataset=dataset_for_val,
             dataset_format=ds_fmt,
-            sandbox_root=Path(settings.data_dir) / "uploads" / user_id,
-        )
-        if not analysis.get("valid"):
-            raise ValueError("No valid training samples after preprocessing")
+        ):
+            analysis = await asyncio.to_thread(
+                _run_dataset_analysis,
+                dataset_for_val,
+                dataset_format=ds_fmt,
+                sandbox_root=Path(settings.data_dir) / "uploads" / user_id,
+            )
+            if not analysis.get("valid"):
+                raise ValueError("No valid training samples after preprocessing")
     except HTTPException:
         raise
     except Exception as exc:

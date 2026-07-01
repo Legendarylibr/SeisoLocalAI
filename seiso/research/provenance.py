@@ -64,7 +64,12 @@ def git_commit_optional() -> str | None:
     return None
 
 
-def directory_checksum_manifest(root: Path, *, max_files: int = 200) -> dict[str, str]:
+def directory_checksum_manifest(
+    root: Path,
+    *,
+    max_files: int = 200,
+    max_file_bytes: int | None = 512 * 1024 * 1024,
+) -> dict[str, str]:
     """SHA-256 manifest for files under root (relative paths → hex)."""
     manifest: dict[str, str] = {}
     if not root.is_dir():
@@ -77,7 +82,10 @@ def directory_checksum_manifest(root: Path, *, max_files: int = 200) -> dict[str
             break
         rel = str(path.relative_to(root))
         try:
-            manifest[rel] = sha256_file(path, max_bytes=512 * 1024 * 1024)
+            if max_file_bytes is not None and path.stat().st_size > max_file_bytes:
+                manifest[rel] = "skipped-large-file"
+            else:
+                manifest[rel] = sha256_file(path, max_bytes=max_file_bytes)
         except (OSError, ValueError):
             manifest[rel] = "error"
         count += 1

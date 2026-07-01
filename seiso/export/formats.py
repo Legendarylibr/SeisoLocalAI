@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
+import os
 import shutil
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -233,7 +234,18 @@ def _write_export_sidecar(dest: Path, ckpt: Path, fmt: ExportFormat, kind: str) 
         "source_checkpoint": str(ckpt),
         "exported_at": datetime.now(timezone.utc).isoformat(),
         "git_commit": git_commit_optional(),
-        "file_checksums_sha256": directory_checksum_manifest(dest, max_files=100),
+        "file_checksums_sha256": directory_checksum_manifest(
+            dest,
+            max_files=25,
+            max_file_bytes=(
+                None
+                if os.environ.get("SEISO_EXPORT_FULL_CHECKSUMS", "")
+                .strip()
+                .lower()
+                in {"1", "true", "yes"}
+                else 8 * 1024 * 1024
+            ),
+        ),
     }
     manifest = ckpt / "seiso_manifest.json"
     training_manifest = read_json_file(manifest, default=None)
