@@ -48,6 +48,10 @@ def test_train_config_projects_to_single_gpu_slime_config(tmp_path):
             "rollouts_per_prompt": 3,
             "rollout_batch_size": 6,
             "learning_rate": 5e-6,
+            "require_thinking_trace": True,
+            "process_reward_weight": 0.4,
+            "missing_thinking_penalty": 0.2,
+            "min_thinking_tokens": 6,
             "save_steps": 25,
             "logging_steps": 1,
             "extra": {
@@ -70,6 +74,10 @@ def test_train_config_projects_to_single_gpu_slime_config(tmp_path):
     assert slime.rollouts_per_prompt == 3
     assert slime.rollout_batch_size == 6
     assert slime.learning_rate == 5e-6
+    assert slime.require_thinking_trace is True
+    assert slime.process_reward_weight == 0.4
+    assert slime.missing_thinking_penalty == 0.2
+    assert slime.min_thinking_tokens == 6
     assert slime.save_every_steps == 25
     assert slime.log_every_steps == 1
     assert slime.max_steps == 5

@@ -138,6 +138,15 @@ class TrainConfig(BaseModel):
     clip_ratio: float = Field(default=0.2, gt=0)
     temperature: float = Field(default=0.9, gt=0)
     top_p: float = Field(default=0.95, gt=0, le=1)
+    require_thinking_trace: bool = True
+    thinking_instruction: str = Field(
+        default="Show your reasoning in <think>...</think>, then give the final answer.",
+        min_length=1,
+    )
+    outcome_reward_weight: float = Field(default=1.0, ge=0)
+    process_reward_weight: float = Field(default=0.25, ge=0)
+    missing_thinking_penalty: float = Field(default=0.5, ge=0)
+    min_thinking_tokens: int = Field(default=8, ge=0)
     dtype: str = "auto"
     device: str = "cuda"
     slime_use_lora: bool = True
@@ -205,6 +214,12 @@ class TrainConfig(BaseModel):
             clip_ratio=self.clip_ratio,
             temperature=self.temperature,
             top_p=self.top_p,
+            require_thinking_trace=self.require_thinking_trace,
+            thinking_instruction=self.thinking_instruction,
+            outcome_reward_weight=self.outcome_reward_weight,
+            process_reward_weight=self.process_reward_weight,
+            missing_thinking_penalty=self.missing_thinking_penalty,
+            min_thinking_tokens=self.min_thinking_tokens,
             seed=self.seed,
             dtype=self.dtype,
             device=self.device,
@@ -280,6 +295,11 @@ def _write_slime_manifest(config: TrainConfig, output_dir: Path) -> None:
         "gradient_accumulation_steps": config.gradient_accumulation_steps,
         "max_vram_gb": config.max_vram_gb,
         "reward": config.reward,
+        "require_thinking_trace": config.require_thinking_trace,
+        "outcome_reward_weight": config.outcome_reward_weight,
+        "process_reward_weight": config.process_reward_weight,
+        "missing_thinking_penalty": config.missing_thinking_penalty,
+        "min_thinking_tokens": config.min_thinking_tokens,
         "rollouts_per_prompt": config.rollouts_per_prompt,
         "auto_stop": config.auto_stop,
         "auto_stop_metric": config.auto_stop_metric,
