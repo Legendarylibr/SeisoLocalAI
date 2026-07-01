@@ -661,4 +661,8 @@ Seiso’s local chat builds on these inference projects:
 | [**llama.cpp**](https://github.com/ggml-org/llama.cpp) | Default GGUF chat backend (`llama-cpp-python`) |
 | [**vLLM**](https://github.com/vllm-project/vllm) | Optional provider endpoint for OpenAI-compatible local serving |
 
+## Distributed Training
+
+Distributed training integrates https://github.com/huggingface/accelerate to extend training configurations to multi-gpu distributed training.
+
 Smart Router backend orchestration now lives in [SeisoModelRouter](https://github.com/Legendarylibr/SeisoModelRouter).
