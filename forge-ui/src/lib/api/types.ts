@@ -88,11 +88,15 @@ export type HfHubStatus = {
   cache_dir: string;
   runtime: {
     llamacpp: boolean;
+    llamaswap?: boolean;
+    vllm?: boolean;
     mlx: boolean;
     torch: boolean;
     huggingface_hub: boolean;
     install_hints: string[];
     llamacpp_error?: string | null;
+    llamaswap_url?: string | null;
+    llamaswap_engine?: string | null;
   };
   ready_for_download: boolean;
   ready_for_upload: boolean;

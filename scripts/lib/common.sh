@@ -207,6 +207,103 @@ seiso_nvidia_gpu_detected() {
   return 1
 }
 
+seiso_detect_wsl() {
+  [[ -n "${WSL_INTEROP:-}" || -n "${WSL_DISTRO_NAME:-}" ]] && return 0
+  [[ -r /proc/version ]] && grep -qiE 'microsoft|wsl2' /proc/version
+}
+
+seiso_native_linux() {
+  [[ "$(uname -s)" == "Linux" ]] || return 1
+  seiso_detect_wsl && return 1
+  return 0
+}
+
+seiso_native_linux_nvidia() {
+  if [[ -n "${_SEISO_NATIVE_LINUX_NVIDIA:-}" ]]; then
+    [[ "$_SEISO_NATIVE_LINUX_NVIDIA" == "1" ]]
+    return $?
+  fi
+  seiso_native_linux || return 1
+  if seiso_nvidia_gpu_detected; then
+    _SEISO_NATIVE_LINUX_NVIDIA=1
+    return 0
+  fi
+  _SEISO_NATIVE_LINUX_NVIDIA=0
+  return 1
+}
+
+seiso_ensure_ollama() {
+  [[ "${SEISO_SKIP_OLLAMA_INSTALL:-0}" == "1" ]] && return 0
+  seiso_native_linux || return 0
+  command -v ollama >/dev/null 2>&1 && return 0
+  command -v curl >/dev/null 2>&1 || {
+    seiso_warn "curl is unavailable — skipping optional Ollama install"
+    return 0
+  }
+
+  seiso_log "Installing optional Ollama runtime for native Linux..."
+  if curl -fsSL https://ollama.com/install.sh | sh; then
+    return 0
+  fi
+  seiso_warn "Ollama install failed — continuing with llama.cpp fallback"
+  return 0
+}
+
+seiso_vllm_import_ok() {
+  local root="$1"
+  [[ -x "$root/.venv/bin/python" ]] || return 1
+  "$root/.venv/bin/python" -c "import vllm" >/dev/null 2>&1
+}
+
+seiso_ensure_vllm() {
+  local root="$1"
+  [[ "${SEISO_SKIP_VLLM_INSTALL:-0}" == "1" ]] && return 0
+  seiso_native_linux_nvidia || return 0
+  seiso_vllm_import_ok "$root" && return 0
+  [[ -x "$root/.venv/bin/python" ]] || return 0
+
+  seiso_log "Installing vLLM for native Linux NVIDIA llama-swap routing..."
+  if seiso_pip_install_for_venv "$root/.venv/bin/python" "${SEISO_VLLM_PACKAGE:-vllm}" --prefer-binary; then
+    return 0
+  fi
+  seiso_warn "vLLM install failed — continuing with llama.cpp fallback"
+  return 0
+}
+
+seiso_llamaswap_available() {
+  command -v llama-swap >/dev/null 2>&1 && return 0
+  [[ -x "$(seiso_start_bin_dir)/llama-swap" ]]
+}
+
+seiso_ensure_llamaswap() {
+  [[ "${SEISO_SKIP_LLAMASWAP_INSTALL:-0}" == "1" ]] && return 0
+  seiso_native_linux_nvidia || return 0
+  if seiso_llamaswap_available; then
+    seiso_ensure_bin_on_path "$(seiso_start_bin_dir)"
+    return 0
+  fi
+  command -v go >/dev/null 2>&1 || {
+    seiso_warn "Go is unavailable — skipping optional llama-swap install"
+    return 0
+  }
+
+  seiso_log "Installing llama-swap for native Linux NVIDIA routing..."
+  if GOBIN="$(seiso_start_bin_dir)" go install "${SEISO_LLAMASWAP_GO_PACKAGE:-github.com/mostlygeek/llama-swap@latest}"; then
+    seiso_ensure_bin_on_path "$(seiso_start_bin_dir)"
+    return 0
+  fi
+  seiso_warn "llama-swap install failed — continuing with llama.cpp fallback"
+  return 0
+}
+
+seiso_configure_native_linux_llamaswap() {
+  seiso_native_linux_nvidia || return 0
+  export SEISO_LLAMASWAP_ENGINE="${SEISO_LLAMASWAP_ENGINE:-vllm}"
+  if seiso_llamaswap_available || [[ -n "${SEISO_LLAMASWAP_URL:-}" ]]; then
+    export SEISO_LLAMASWAP_ENABLED="${SEISO_LLAMASWAP_ENABLED:-true}"
+  fi
+}
+
 seiso_python_version_ok() {
   python3 - <<'PY'
 import sys
@@ -586,6 +683,9 @@ seiso_run_install_worker() {
     return 1
   }
   seiso_verify_cli "$root" || return 1
+  seiso_ensure_vllm "$root"
+  seiso_ensure_llamaswap
+  seiso_configure_native_linux_llamaswap
 
   if [[ "$extras" == *llamacpp* ]]; then
     seiso_ensure_llamacpp "$root" &
@@ -651,6 +751,10 @@ seiso_ensure_installed() {
   if [[ -x "$root/.venv/bin/python" && "$extras" == *llamacpp* ]]; then
     seiso_ensure_llamacpp "$root" || true
   fi
+  seiso_ensure_ollama
+  seiso_ensure_vllm "$root"
+  seiso_ensure_llamaswap
+  seiso_configure_native_linux_llamaswap
 
   if [[ -x "$root/.venv/bin/seiso" && -f "$root/forge-ui/dist/index.html" ]] \
     && seiso_python_modules_available "$root" "$extras"; then

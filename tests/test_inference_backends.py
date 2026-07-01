@@ -368,11 +368,23 @@ def test_llamaswap_engine_prefers_llamacpp_on_macos(monkeypatch):
     assert llamaswap.preferred_llamaswap_engine() == "llamacpp"
 
 
-def test_llamaswap_engine_prefers_ollama_on_nvidia(monkeypatch):
+def test_llamaswap_engine_prefers_vllm_on_native_linux_nvidia(monkeypatch):
     from seiso.inference import llamaswap
 
     monkeypatch.delenv("SEISO_LLAMASWAP_ENGINE", raising=False)
     monkeypatch.setattr(llamaswap.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(llamaswap, "is_native_linux", lambda: True)
+    monkeypatch.setattr(llamaswap, "_nvidia_visible", lambda: True)
+
+    assert llamaswap.preferred_llamaswap_engine() == "vllm"
+
+
+def test_llamaswap_engine_keeps_ollama_for_non_native_linux_nvidia(monkeypatch):
+    from seiso.inference import llamaswap
+
+    monkeypatch.delenv("SEISO_LLAMASWAP_ENGINE", raising=False)
+    monkeypatch.setattr(llamaswap.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(llamaswap, "is_native_linux", lambda: False)
     monkeypatch.setattr(llamaswap, "_nvidia_visible", lambda: True)
 
     assert llamaswap.preferred_llamaswap_engine() == "ollama"
@@ -391,6 +403,20 @@ def test_llamaswap_can_be_selected_as_local_backend(tmp_path: Path):
         == BACKEND_LLAMASWAP
     )
     assert prepare_model_path(str(gguf), BACKEND_LLAMASWAP) == str(gguf.absolute())
+
+
+def test_llamaswap_enabled_finds_seiso_bin_dir(monkeypatch, tmp_path: Path):
+    from seiso.inference import llamaswap
+
+    binary = tmp_path / "llama-swap"
+    binary.write_text("#!/bin/sh\n")
+    monkeypatch.delenv("SEISO_LLAMASWAP_ENABLED", raising=False)
+    monkeypatch.delenv("SEISO_LLAMASWAP_URL", raising=False)
+    monkeypatch.setenv("SEISO_BIN_DIR", str(tmp_path))
+    monkeypatch.setattr(llamaswap.shutil, "which", lambda _name: None)
+
+    assert llamaswap.llamaswap_binary() == str(binary)
+    assert llamaswap.llamaswap_enabled() is True
 
 
 def test_llamaswap_status_requires_reachable_sidecar(monkeypatch):
@@ -922,7 +948,7 @@ async def test_list_inference_options_filters_to_installed_backends(
 
 
 @pytest.mark.asyncio
-async def test_list_inference_options_defaults_to_llamaswap_on_nvidia(
+async def test_list_inference_options_defaults_to_llamaswap_on_native_linux_nvidia(
     monkeypatch, tmp_path
 ):
     from forge.db.crypto import generate_encryption_key
@@ -959,11 +985,13 @@ async def test_list_inference_options_defaults_to_llamaswap_on_nvidia(
         lambda _repo, _filename: model_path.stat().st_size,
     )
     monkeypatch.setattr("seiso.inference.llamaswap.llamaswap_enabled", lambda: True)
+    monkeypatch.setattr("seiso.hardware.training.is_native_linux", lambda: True)
 
     options = await inference_models.list_inference_options(
         db,
         "u1",
         profile={
+            "platform": "linux",
             "backend": "cuda",
             "gpus": [{"name": "NVIDIA RTX", "vram_total_mb": 24576}],
             "ram_gb": 32,

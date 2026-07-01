@@ -16,6 +16,7 @@ from typing import Any
 
 from seiso.env import env_bool, env_str
 from seiso.inference.streaming import StreamToken
+from seiso.platform import is_native_linux
 
 DEFAULT_LLAMASWAP_URL = "http://127.0.0.1:8080"
 
@@ -44,9 +45,22 @@ def preferred_llamaswap_engine() -> str:
         return override
     if platform.system() == "Darwin":
         return "llamacpp"
+    if is_native_linux() and _nvidia_visible():
+        return "vllm"
     if _nvidia_visible():
         return "ollama"
     return "llamacpp"
+
+
+def llamaswap_binary() -> str | None:
+    found = shutil.which("llama-swap")
+    if found:
+        return found
+    bin_dir = env_str("SEISO_BIN_DIR", str(Path.home() / ".local" / "bin")).strip()
+    candidate = Path(bin_dir).expanduser() / "llama-swap"
+    if candidate.is_file():
+        return str(candidate)
+    return None
 
 
 def llamaswap_url() -> str:
@@ -57,7 +71,7 @@ def llamaswap_url() -> str:
 def llamaswap_enabled() -> bool:
     if "SEISO_LLAMASWAP_ENABLED" in os.environ:
         return env_bool("SEISO_LLAMASWAP_ENABLED", False)
-    return bool(os.environ.get("SEISO_LLAMASWAP_URL") or shutil.which("llama-swap"))
+    return bool(os.environ.get("SEISO_LLAMASWAP_URL") or llamaswap_binary())
 
 
 def _llamaswap_health_timeout_s() -> float:
