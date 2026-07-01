@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from seiso.compat import StrEnum
 
@@ -36,6 +36,23 @@ class DatasetFormat(StrEnum):
     CHAT = "chat"
     SHAREGPT = "sharegpt"
     PREFERENCE = "preference"
+
+
+class DistributedStrategy(StrEnum):
+    AUTO = "auto"
+    NONE = "none"
+    DDP = "ddp"
+
+
+class CloudGpuProvider(StrEnum):
+    NONE = "none"
+    AWS = "aws"
+    GCP = "gcp"
+    AZURE = "azure"
+    LAMBDA = "lambda"
+    RUNPOD = "runpod"
+    COREWEAVE = "coreweave"
+    CUSTOM = "custom"
 
 
 class TrainConfig(BaseModel):
@@ -84,6 +101,47 @@ class TrainConfig(BaseModel):
     seed: int = 42
     deterministic: bool = True
     multi_gpu: bool = False
+    distributed_strategy: DistributedStrategy = Field(
+        default=DistributedStrategy.AUTO,
+        description="High-level distributed training strategy (auto, none, ddp).",
+    )
+    distributed_nproc_per_node: int | None = Field(
+        default=None,
+        ge=1,
+        description="Local Accelerate worker count (None = all visible training GPUs).",
+    )
+    distributed_num_nodes: int = Field(
+        default=1,
+        ge=1,
+        description="Total machines for Accelerate distributed training.",
+    )
+    distributed_node_rank: int = Field(
+        default=0,
+        ge=0,
+        description="Rank of this machine for multi-machine Accelerate launches.",
+    )
+    distributed_master_addr: str = Field(
+        default="127.0.0.1",
+        min_length=1,
+        description="Accelerate rendezvous address for multi-machine launches.",
+    )
+    distributed_master_port: int = Field(
+        default=29500,
+        ge=1,
+        le=65535,
+        description="Accelerate rendezvous port.",
+    )
+    ddp_backend: str | None = Field(
+        default=None,
+        description="Optional HuggingFace/PyTorch DDP backend (for example nccl or gloo).",
+    )
+    ddp_find_unused_parameters: bool = False
+    cloud_gpu_enabled: bool = False
+    cloud_gpu_provider: CloudGpuProvider = CloudGpuProvider.NONE
+    cloud_gpu_region: str = ""
+    cloud_gpu_instance_type: str = ""
+    cloud_gpu_count: int | None = Field(default=None, ge=1, le=1024)
+    cloud_gpu_project: str = ""
     use_triton: bool = True
     use_fused_ce: bool = True
     use_fused_lora: bool = True
@@ -173,6 +231,36 @@ class TrainConfig(BaseModel):
         if v is None:
             return v
         return Path(v).expanduser()
+
+    @field_validator(
+        "distributed_master_addr",
+        "ddp_backend",
+        "cloud_gpu_region",
+        "cloud_gpu_instance_type",
+        "cloud_gpu_project",
+    )
+    @classmethod
+    def _validate_safe_runtime_label(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        lowered = v.lower()
+        forbidden = ("token", "secret", "password", "apikey", "api_key", "://")
+        if any(marker in lowered for marker in forbidden):
+            raise ValueError("runtime labels cannot contain secrets, URLs, or tokens")
+        allowed = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-:/ ")
+        if any(ch not in allowed for ch in v):
+            raise ValueError("runtime labels may only use letters, numbers, spaces, '.', '_', '-', ':', '/'")
+        return v
+
+    @model_validator(mode="after")
+    def _validate_cloud_gpu_config(self) -> TrainConfig:
+        if not self.cloud_gpu_enabled:
+            return self
+        if self.cloud_gpu_provider == CloudGpuProvider.NONE:
+            raise ValueError("cloud_gpu_provider is required when cloud_gpu_enabled is true")
+        if not self.cloud_gpu_instance_type.strip():
+            raise ValueError("cloud_gpu_instance_type is required when cloud_gpu_enabled is true")
+        return self
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> TrainConfig:

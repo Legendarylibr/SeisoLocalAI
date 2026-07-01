@@ -86,7 +86,7 @@ seiso-bench-kernels --rows 4096 --hidden 4096 --vocab 32000 --dtype bfloat16
 Enable **Multi-GPU** in Forge or set `multi_gpu: true` in config. Forge runs:
 
 ```bash
-torchrun --nproc_per_node=N -m seiso.training.worker --config <yaml>
+accelerate launch --multi_gpu --num_processes=N --module seiso.training.worker --config <yaml>
 ```
 
 See [../training/multi-gpu.md](../training/multi-gpu.md).

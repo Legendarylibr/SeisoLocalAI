@@ -35,7 +35,7 @@ from seiso.models.hf_env import configure_hf_hub_cache
 from seiso.models.hub_quant import native_quant_training_block_reason
 from seiso.models.trainable_snapshot import is_gguf_only_repo_id
 from seiso.security import SecurityError
-from seiso.training.config import DatasetFormat
+from seiso.training.config import DatasetFormat, TrainConfig
 from seiso.training.dataset_analysis import analyze_training_dataset
 from seiso.training.recommendations import recommend_training_config
 
@@ -369,6 +369,11 @@ async def start_training(
         assert_user_training_config(settings.data_dir, user_id, training_config)
     except SecurityError as exc:
         raise_forbidden(exc)
+
+    try:
+        TrainConfig.model_validate(training_config)
+    except Exception as exc:
+        raise HTTPException(400, f"Invalid training configuration: {exc}") from exc
 
     # Early dataset normalization check — fail fast with clear error *before* queuing the job
     # or downloading the base model. This fulfills "show error before training".

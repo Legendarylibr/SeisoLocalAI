@@ -43,7 +43,11 @@ from seiso.training.datasets import (
     load_training_dataset,
     prepare_tokenized_dataset,
 )
-from seiso.training.multi_gpu import configure_training_args, detect_training_layout
+from seiso.training.multi_gpu import (
+    configure_distributed_training_args,
+    detect_training_layout,
+    resolve_distributed_plan,
+)
 from seiso.training.practices import (
     default_pad_to_multiple_of,
     resolve_compute_dtype,
@@ -130,9 +134,8 @@ class SeisoTrainer:
             ) from exc
 
         layout = detect_training_layout()
-        multi_gpu = (
-            bool(cfg.multi_gpu or cfg.extra.get("multi_gpu", False)) and layout.use_ddp
-        )
+        distributed_plan = resolve_distributed_plan(cfg, layout)
+        multi_gpu = distributed_plan.enabled and layout.use_ddp
         use_triton = cfg.use_triton
         use_fused_ce = cfg.use_fused_ce
         use_fused_lora = cfg.use_fused_lora
@@ -143,7 +146,7 @@ class SeisoTrainer:
             cfg.model_id,
             cfg.method.value,
             cfg.quant.value,
-            layout.world_size,
+            distributed_plan.world_size,
         )
 
         if cfg.method == TrainMethod.EMBEDDING:
@@ -252,6 +255,7 @@ class SeisoTrainer:
             out,
             layout,
             multi_gpu,
+            distributed_plan.strategy,
             prepared.detected_format.value,
             preprocess_stats=prepared.preprocess_stats,
             train_samples=len(prepared.train_ds),
@@ -689,7 +693,7 @@ class SeisoTrainer:
                 pass
             self._kernel_meta["cuda_graphs_requested"] = True
 
-        args_dict = configure_training_args(base, layout, multi_gpu)
+        args_dict = configure_distributed_training_args(base, layout, cfg, multi_gpu)
         modern_sft = sft_modern_kwargs(
             cfg,
             train_on_responses_only=cfg.train_on_responses_only,
@@ -800,6 +804,7 @@ class SeisoTrainer:
         out: Path,
         layout,
         multi_gpu: bool,
+        distributed_strategy: str,
         dataset_format: str,
         *,
         preprocess_stats: dict[str, Any] | None = None,
@@ -862,6 +867,18 @@ class SeisoTrainer:
             "assistant_only_loss": cfg.assistant_only_loss,
             "save_safetensors": cfg.save_safetensors,
             "multi_gpu": multi_gpu,
+            "distributed_strategy": distributed_strategy,
+            "distributed_nproc_per_node": cfg.distributed_nproc_per_node,
+            "distributed_num_nodes": cfg.distributed_num_nodes,
+            "distributed_node_rank": cfg.distributed_node_rank,
+            "ddp_backend": cfg.ddp_backend,
+            "ddp_find_unused_parameters": cfg.ddp_find_unused_parameters,
+            "cloud_gpu_enabled": cfg.cloud_gpu_enabled,
+            "cloud_gpu_provider": cfg.cloud_gpu_provider.value,
+            "cloud_gpu_region": cfg.cloud_gpu_region,
+            "cloud_gpu_instance_type": cfg.cloud_gpu_instance_type,
+            "cloud_gpu_count": cfg.cloud_gpu_count,
+            "cloud_gpu_project": cfg.cloud_gpu_project,
             "world_size": layout.world_size,
             "kernels": self._kernel_meta,
             "created_at": datetime.now(timezone.utc).isoformat(),

@@ -1,4 +1,4 @@
-"""Distributed training worker entrypoint (torchrun)."""
+"""Distributed training worker entrypoint (Accelerate launch)."""
 
 from __future__ import annotations
 

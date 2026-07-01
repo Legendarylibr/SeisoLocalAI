@@ -25,8 +25,11 @@ import { LogStream } from "@/components/research/LogStream";
 import { StudioPageShell } from "@/components/StudioPageShell";
 import { StudioCardBody } from "@/components/studio/StudioCardBody";
 import { StudioCardHeader } from "@/components/studio/StudioCardHeader";
+import { Tabs } from "@/components/Tabs";
 import { TrainingMetricsDashboard } from "@/components/TrainingMetricsDashboard";
 import { useHardwareProfile } from "@/hooks/useHardware";
+
+type TrainStudioTab = "setup" | "distributed";
 
 export function TrainPage() {
   const { profile: hw } = useHardwareProfile();
@@ -57,6 +60,30 @@ export function TrainPage() {
   const [loraAlpha, setLoraAlpha] = useState(32);
   const [gradAccum, setGradAccum] = useState(4);
   const [multiGpu, setMultiGpu] = useState(false);
+  const [activeTab, setActiveTab] = useState<TrainStudioTab>("setup");
+  const [distributedStrategy, setDistributedStrategy] = useState("auto");
+  const [distributedNproc, setDistributedNproc] = useState("");
+  const [distributedNodes, setDistributedNodes] = useState(1);
+  const [distributedNodeRank, setDistributedNodeRank] = useState(0);
+  const [distributedMasterAddr, setDistributedMasterAddr] = useState("127.0.0.1");
+  const [distributedMasterPort, setDistributedMasterPort] = useState(29500);
+  const [ddpBackend, setDdpBackend] = useState("");
+  const [ddpFindUnused, setDdpFindUnused] = useState(false);
+  const [distributedOverridesEnabled, setDistributedOverridesEnabled] = useState(false);
+  const [distributedBatchSize, setDistributedBatchSize] = useState(2);
+  const [distributedGradAccum, setDistributedGradAccum] = useState(4);
+  const [distributedLearningRate, setDistributedLearningRate] = useState(0.0002);
+  const [distributedMaxSeq, setDistributedMaxSeq] = useState(2048);
+  const [distributedEpochs, setDistributedEpochs] = useState(5);
+  const [distributedLoggingSteps, setDistributedLoggingSteps] = useState(10);
+  const [distributedSaveSteps, setDistributedSaveSteps] = useState(100);
+  const [distributedMaxEvalSamples, setDistributedMaxEvalSamples] = useState(128);
+  const [cloudGpuEnabled, setCloudGpuEnabled] = useState(false);
+  const [cloudGpuProvider, setCloudGpuProvider] = useState("none");
+  const [cloudGpuRegion, setCloudGpuRegion] = useState("");
+  const [cloudGpuInstanceType, setCloudGpuInstanceType] = useState("");
+  const [cloudGpuCount, setCloudGpuCount] = useState(1);
+  const [cloudGpuProject, setCloudGpuProject] = useState("");
   const [useFusedKernels, setUseFusedKernels] = useState(true);
   const [useFusedCe, setUseFusedCe] = useState(true);
   const [gradCkpt, setGradCkpt] = useState(true);
@@ -316,6 +343,15 @@ export function TrainPage() {
     }
   }, [exportProfile, exportProfiles]);
 
+  useEffect(() => {
+    if (distributedOverridesEnabled) return;
+    setDistributedBatchSize(batchSize);
+    setDistributedGradAccum(gradAccum);
+    setDistributedLearningRate(lr);
+    setDistributedMaxSeq(maxSeq);
+    setDistributedEpochs(epochs);
+  }, [batchSize, gradAccum, lr, maxSeq, epochs, distributedOverridesEnabled]);
+
   const toggleExportQuant = (quant: string) => {
     setExportQuants((prev) =>
       prev.includes(quant) ? prev.filter((q) => q !== quant) : [...prev, quant],
@@ -323,6 +359,22 @@ export function TrainPage() {
   };
 
   const GGUF_QUANT_OPTIONS = ["q2_k", "q3_k_m", "q4_k_m", "q5_k_m", "q6_k", "q8_0", "f16"];
+  const LOCAL_GPU_COUNT = hw?.gpus?.length ?? 0;
+  const distributedEnabled = multiGpu || distributedStrategy === "ddp";
+  const distributedWorldSize =
+    Math.max(1, Number(distributedNproc || LOCAL_GPU_COUNT || 1)) *
+    Math.max(1, distributedNodes);
+  const distributedEffectiveBatch =
+    distributedWorldSize *
+    Math.max(1, distributedOverridesEnabled ? distributedBatchSize : batchSize) *
+    Math.max(1, distributedOverridesEnabled ? distributedGradAccum : gradAccum);
+  const safeCloudLabel = (value: string) =>
+    !/(token|secret|password|apikey|api_key|:\/\/)/i.test(value);
+  const cloudConfigValid =
+    !cloudGpuEnabled ||
+    (cloudGpuProvider !== "none" &&
+      cloudGpuInstanceType.trim().length > 0 &&
+      [cloudGpuRegion, cloudGpuInstanceType, cloudGpuProject].every(safeCloudLabel));
 
   const jobStatusBadge = (status: string) => (
     <span className={`badge badge-${status}`}>{status}</span>
@@ -363,6 +415,11 @@ export function TrainPage() {
       setDownloadError(datasetError || "Dataset cannot be normalized for training");
       return;
     }
+    if (!cloudConfigValid) {
+      setDownloadError("Cloud GPU settings must use non-secret labels only. Do not paste tokens, passwords, URLs, or shell commands.");
+      setActiveTab("distributed");
+      return;
+    }
     setStarting(true);
     setLogs([]);
     setTrainingMetrics([]);
@@ -380,33 +437,67 @@ export function TrainPage() {
             }
           : undefined;
 
+      const baseTrainingConfig: Record<string, unknown> = {
+        model_id: modelId,
+        dataset,
+        method,
+        quant,
+        dataset_format: datasetFormat,
+        epochs,
+        batch_size: batchSize,
+        learning_rate: lr,
+        max_seq_length: maxSeq,
+        preprocess_dataset: preprocessDataset,
+        deduplicate_dataset: preprocessDataset,
+        early_stopping: earlyStopping,
+        early_stopping_patience: earlyStoppingPatience,
+        lora_r: loraR,
+        lora_alpha: loraAlpha,
+        gradient_accumulation_steps: gradAccum,
+        gradient_checkpointing: gradCkpt,
+        use_triton: useFusedKernels,
+        use_fused_ce: useFusedCe,
+        train_on_responses_only: trainResponsesOnly,
+        use_rslora: useRsLora,
+        packing,
+        output_dir: "./outputs",
+      };
+
+      const distributedTrainingOverrides =
+        distributedEnabled && distributedOverridesEnabled
+          ? {
+              epochs: distributedEpochs,
+              batch_size: distributedBatchSize,
+              learning_rate: distributedLearningRate,
+              max_seq_length: distributedMaxSeq,
+              gradient_accumulation_steps: distributedGradAccum,
+              logging_steps: distributedLoggingSteps,
+              save_steps: distributedSaveSteps,
+              max_eval_samples: distributedMaxEvalSamples,
+            }
+          : {};
+
       const res = await api.startTraining(
         {
-          model_id: modelId,
-          dataset,
-          method,
-          quant,
-          dataset_format: datasetFormat,
-          epochs,
-          batch_size: batchSize,
-          learning_rate: lr,
-          max_seq_length: maxSeq,
-          preprocess_dataset: preprocessDataset,
-          deduplicate_dataset: preprocessDataset,
-          early_stopping: earlyStopping,
-          early_stopping_patience: earlyStoppingPatience,
-          lora_r: loraR,
-          lora_alpha: loraAlpha,
-          gradient_accumulation_steps: gradAccum,
-          gradient_checkpointing: gradCkpt,
-          use_triton: useFusedKernels,
-          use_fused_ce: useFusedCe,
-          train_on_responses_only: trainResponsesOnly,
-          use_rslora: useRsLora,
-          packing,
-          output_dir: "./outputs",
+          ...baseTrainingConfig,
+          ...distributedTrainingOverrides,
+          multi_gpu: distributedEnabled,
+          distributed_strategy: distributedStrategy,
+          distributed_nproc_per_node: distributedNproc ? Number(distributedNproc) : undefined,
+          distributed_num_nodes: distributedNodes,
+          distributed_node_rank: distributedNodeRank,
+          distributed_master_addr: distributedMasterAddr,
+          distributed_master_port: distributedMasterPort,
+          ddp_backend: ddpBackend || undefined,
+          ddp_find_unused_parameters: ddpFindUnused,
+          cloud_gpu_enabled: cloudGpuEnabled,
+          cloud_gpu_provider: cloudGpuEnabled ? cloudGpuProvider : "none",
+          cloud_gpu_region: cloudGpuEnabled ? cloudGpuRegion.trim() : "",
+          cloud_gpu_instance_type: cloudGpuEnabled ? cloudGpuInstanceType.trim() : "",
+          cloud_gpu_count: cloudGpuEnabled ? cloudGpuCount : undefined,
+          cloud_gpu_project: cloudGpuEnabled ? cloudGpuProject.trim() : "",
         },
-        multiGpu,
+        distributedEnabled,
         exportPayload,
         datasetAnalysis?.analysis_token,
       );
@@ -494,7 +585,30 @@ export function TrainPage() {
         </div>
       )}
 
-      <div className="train-layout train-layout--studio train-layout--studio-fit">
+      <Tabs<TrainStudioTab>
+        className="train-tab-bar"
+        value={activeTab}
+        onChange={setActiveTab}
+        aria-label="Training sections"
+        items={[
+          {
+            id: "setup",
+            label: "Setup",
+            description: "Model, data, hyperparameters, export",
+            icon: "①",
+          },
+          {
+            id: "distributed",
+            label: "Distributed",
+            description: "Accelerate DDP and cloud GPU launch settings",
+            icon: "②",
+            badge: distributedEnabled || cloudGpuEnabled ? "on" : undefined,
+          },
+        ]}
+      />
+
+      {activeTab === "setup" && (
+      <div className="train-layout train-layout--studio train-layout--studio-fit tab-panel">
         <div className="card studio-card">
           <StudioCardHeader
             icon="①"
@@ -751,13 +865,8 @@ export function TrainPage() {
                 Sequence packing
               </label>
               <label className="studio-checkbox-item">
-                <input
-                  type="checkbox"
-                  checked={multiGpu}
-                  onChange={(e) => setMultiGpu(e.target.checked)}
-                  disabled={hw?.training_defaults?.multi_gpu_available === false}
-                />
-                Multi-GPU
+                <input type="checkbox" checked={distributedEnabled} readOnly />
+                Distributed configured
               </label>
               <label
                 className="studio-checkbox-item"
@@ -934,6 +1043,373 @@ export function TrainPage() {
           />
         </div>
       </div>
+      )}
+
+      {activeTab === "distributed" && (
+        <div className="train-layout train-layout--distributed tab-panel">
+          <div className="card studio-card">
+            <StudioCardHeader
+              icon="D"
+              title="Local distributed"
+              description="Accelerate launch policy for GPUs visible to this machine"
+            />
+            <StudioCardBody>
+              <div className="studio-checkbox-grid">
+                <label className="studio-checkbox-item">
+                  <input
+                    type="checkbox"
+                    checked={multiGpu}
+                    onChange={(e) => {
+                      setMultiGpu(e.target.checked);
+                      if (e.target.checked && distributedStrategy === "none") {
+                        setDistributedStrategy("auto");
+                      }
+                    }}
+                    disabled={hw?.training_defaults?.multi_gpu_available === false}
+                  />
+                  Use local multi-GPU
+                </label>
+                <label className="studio-checkbox-item">
+                  <input
+                    type="checkbox"
+                    checked={ddpFindUnused}
+                    onChange={(e) => setDdpFindUnused(e.target.checked)}
+                  />
+                  Find unused DDP params
+                </label>
+              </div>
+              <div className="option-grid">
+                <div className="form-field">
+                  <label>Strategy</label>
+                  <select value={distributedStrategy} onChange={(e) => setDistributedStrategy(e.target.value)}>
+                    <option value="auto">Auto</option>
+                    <option value="none">Disable distributed launch</option>
+                    <option value="ddp">DDP via Accelerate</option>
+                  </select>
+                </div>
+                <div className="form-field">
+                  <label>Processes per node</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={Math.max(1, LOCAL_GPU_COUNT || 8)}
+                    placeholder={LOCAL_GPU_COUNT > 0 ? `Auto (${LOCAL_GPU_COUNT})` : "Auto"}
+                    value={distributedNproc}
+                    onChange={(e) => setDistributedNproc(e.target.value)}
+                  />
+                </div>
+              </div>
+              <div className="option-grid">
+                <div className="form-field">
+                  <label>Total nodes</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={256}
+                    value={distributedNodes}
+                    onChange={(e) => setDistributedNodes(Math.max(1, Number(e.target.value) || 1))}
+                  />
+                </div>
+                <div className="form-field">
+                  <label>This node rank</label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={Math.max(0, distributedNodes - 1)}
+                    value={distributedNodeRank}
+                    onChange={(e) => setDistributedNodeRank(Math.max(0, Number(e.target.value) || 0))}
+                  />
+                </div>
+              </div>
+              <div className="option-grid">
+                <div className="form-field">
+                  <label>Master address</label>
+                  <input value={distributedMasterAddr} onChange={(e) => setDistributedMasterAddr(e.target.value)} />
+                </div>
+                <div className="form-field">
+                  <label>Master port</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={65535}
+                    value={distributedMasterPort}
+                    onChange={(e) => setDistributedMasterPort(Math.max(1, Number(e.target.value) || 29500))}
+                  />
+                </div>
+              </div>
+              <div className="form-field">
+                <label>DDP backend</label>
+                <select value={ddpBackend} onChange={(e) => setDdpBackend(e.target.value)}>
+                  <option value="">Default</option>
+                  <option value="nccl">NCCL</option>
+                  <option value="gloo">Gloo</option>
+                </select>
+              </div>
+              <div className="status-callout status-callout-info train-rec-panel">
+                <div className="status-callout-body">
+                  <strong className="status-callout-title">Launch plan</strong>
+                  <div className="status-callout-text">
+                    {distributedEnabled
+                      ? `Accelerate DDP across ${distributedWorldSize} process${distributedWorldSize === 1 ? "" : "es"}.`
+                      : "Distributed launch is disabled; the existing single-process trainer is unchanged."}
+                    {LOCAL_GPU_COUNT > 0 && <> Local GPUs detected: {LOCAL_GPU_COUNT}.</>}
+                  </div>
+                </div>
+              </div>
+            </StudioCardBody>
+          </div>
+
+          <div className="card studio-card">
+            <StudioCardHeader
+              icon="T"
+              title="Training config"
+              description="Optional overrides used only when distributed launch is enabled"
+            />
+            <StudioCardBody>
+              <label className="studio-checkbox-item studio-checkbox-item-standalone">
+                <input
+                  type="checkbox"
+                  checked={distributedOverridesEnabled}
+                  onChange={(e) => setDistributedOverridesEnabled(e.target.checked)}
+                />
+                Override setup settings for distributed runs
+              </label>
+              <div className="option-grid">
+                <div className="form-field">
+                  <label>Per-device batch</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={64}
+                    value={distributedOverridesEnabled ? distributedBatchSize : batchSize}
+                    disabled={!distributedOverridesEnabled}
+                    onChange={(e) => setDistributedBatchSize(Math.max(1, Number(e.target.value) || 1))}
+                  />
+                </div>
+                <div className="form-field">
+                  <label>Grad accumulation</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={256}
+                    value={distributedOverridesEnabled ? distributedGradAccum : gradAccum}
+                    disabled={!distributedOverridesEnabled}
+                    onChange={(e) => setDistributedGradAccum(Math.max(1, Number(e.target.value) || 1))}
+                  />
+                </div>
+              </div>
+              <div className="option-grid">
+                <div className="form-field">
+                  <label>Learning rate</label>
+                  <input
+                    type="number"
+                    min={0}
+                    step={0.00001}
+                    value={distributedOverridesEnabled ? distributedLearningRate : lr}
+                    disabled={!distributedOverridesEnabled}
+                    onChange={(e) => setDistributedLearningRate(Math.max(0.000001, Number(e.target.value) || lr))}
+                  />
+                </div>
+                <div className="form-field">
+                  <label>Max seq length</label>
+                  <input
+                    type="number"
+                    min={128}
+                    step={128}
+                    value={distributedOverridesEnabled ? distributedMaxSeq : maxSeq}
+                    disabled={!distributedOverridesEnabled}
+                    onChange={(e) => setDistributedMaxSeq(Math.max(128, Number(e.target.value) || 128))}
+                  />
+                </div>
+              </div>
+              <div className="option-grid">
+                <div className="form-field">
+                  <label>Epochs</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={100}
+                    value={distributedOverridesEnabled ? distributedEpochs : epochs}
+                    disabled={!distributedOverridesEnabled}
+                    onChange={(e) => setDistributedEpochs(Math.max(1, Number(e.target.value) || 1))}
+                  />
+                </div>
+                <div className="form-field">
+                  <label>Max eval samples</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={10000}
+                    value={distributedMaxEvalSamples}
+                    disabled={!distributedOverridesEnabled}
+                    onChange={(e) => setDistributedMaxEvalSamples(Math.max(1, Number(e.target.value) || 1))}
+                  />
+                </div>
+              </div>
+              <div className="option-grid">
+                <div className="form-field">
+                  <label>Logging steps</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={10000}
+                    value={distributedLoggingSteps}
+                    disabled={!distributedOverridesEnabled}
+                    onChange={(e) => setDistributedLoggingSteps(Math.max(1, Number(e.target.value) || 1))}
+                  />
+                </div>
+                <div className="form-field">
+                  <label>Save steps</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={100000}
+                    value={distributedSaveSteps}
+                    disabled={!distributedOverridesEnabled}
+                    onChange={(e) => setDistributedSaveSteps(Math.max(1, Number(e.target.value) || 1))}
+                  />
+                </div>
+              </div>
+              <div className="status-callout status-callout-info train-rec-panel">
+                <div className="status-callout-body">
+                  <strong className="status-callout-title">Effective batch</strong>
+                  <div className="status-callout-text">
+                    {distributedEffectiveBatch.toLocaleString()} samples per optimizer step across {distributedWorldSize} process{distributedWorldSize === 1 ? "" : "es"}.
+                  </div>
+                </div>
+              </div>
+            </StudioCardBody>
+          </div>
+
+          <div className="card studio-card">
+            <StudioCardHeader
+              icon="C"
+              title="Cloud GPUs"
+              description="Record secure cloud launch metadata without storing credentials"
+            />
+            <StudioCardBody>
+              <label className="studio-checkbox-item studio-checkbox-item-standalone">
+                <input
+                  type="checkbox"
+                  checked={cloudGpuEnabled}
+                  onChange={(e) => {
+                    setCloudGpuEnabled(e.target.checked);
+                    if (!e.target.checked) setCloudGpuProvider("none");
+                  }}
+                />
+                Configure cloud GPU target
+              </label>
+              <div className="option-grid">
+                <div className="form-field">
+                  <label>Provider</label>
+                  <select
+                    value={cloudGpuProvider}
+                    onChange={(e) => setCloudGpuProvider(e.target.value)}
+                    disabled={!cloudGpuEnabled}
+                  >
+                    <option value="none">None</option>
+                    <option value="aws">AWS</option>
+                    <option value="gcp">Google Cloud</option>
+                    <option value="azure">Azure</option>
+                    <option value="lambda">Lambda</option>
+                    <option value="runpod">RunPod</option>
+                    <option value="coreweave">CoreWeave</option>
+                    <option value="custom">Custom scheduler</option>
+                  </select>
+                </div>
+                <div className="form-field">
+                  <label>GPU count</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={1024}
+                    value={cloudGpuCount}
+                    disabled={!cloudGpuEnabled}
+                    onChange={(e) => setCloudGpuCount(Math.max(1, Number(e.target.value) || 1))}
+                  />
+                </div>
+              </div>
+              <div className="option-grid">
+                <div className="form-field">
+                  <label>Region / zone</label>
+                  <input
+                    value={cloudGpuRegion}
+                    disabled={!cloudGpuEnabled}
+                    onChange={(e) => setCloudGpuRegion(e.target.value)}
+                    placeholder="us-east-1 or us-central1-a"
+                  />
+                </div>
+                <div className="form-field">
+                  <label>Instance type</label>
+                  <input
+                    value={cloudGpuInstanceType}
+                    disabled={!cloudGpuEnabled}
+                    onChange={(e) => setCloudGpuInstanceType(e.target.value)}
+                    placeholder="p5.48xlarge, a3-highgpu, etc."
+                  />
+                </div>
+              </div>
+              <div className="form-field">
+                <label>Project label</label>
+                <input
+                  value={cloudGpuProject}
+                  disabled={!cloudGpuEnabled}
+                  onChange={(e) => setCloudGpuProject(e.target.value)}
+                  placeholder="Optional billing or scheduler label"
+                />
+              </div>
+              <div className={`status-callout ${cloudConfigValid ? "status-callout-info" : "status-callout-error"} train-rec-panel`}>
+                <div className="status-callout-body">
+                  <strong className="status-callout-title">Secure cloud mode</strong>
+                  <div className="status-callout-text">
+                    Cloud settings are metadata for your launcher or scheduler. Seiso does not accept cloud API keys,
+                    SSH material, shell commands, or provider tokens in this form.
+                  </div>
+                </div>
+              </div>
+            </StudioCardBody>
+          </div>
+
+          <div className="card studio-card studio-card-scroll">
+            <StudioCardHeader
+              icon="R"
+              title="Run"
+              description="Start with the distributed settings on this tab"
+              meta={activeJob && jobStatus ? <span className={`badge badge-${jobStatus}`}>{jobStatus}</span> : undefined}
+            />
+            <StudioCardBody>
+              <div className="status-callout status-callout-info train-rec-panel">
+                <div className="status-callout-body">
+                  <strong className="status-callout-title">Single-GPU fallback</strong>
+                  <div className="status-callout-text">
+                    Choose “Disable distributed launch” or leave local multi-GPU off to run the existing single-GPU trainer unchanged.
+                  </div>
+                </div>
+              </div>
+              <LogStream
+                logs={logs}
+                emptyMessage="Start a training run to stream logs here."
+                fill
+                label="Training log"
+              />
+            </StudioCardBody>
+            <div className="studio-action-bar studio-action-bar-flush">
+              <button
+                className="btn btn-primary btn-lg"
+                onClick={start}
+                disabled={starting || downloadingModel || !canStart || !cloudConfigValid}
+              >
+                {starting ? "Starting…" : "Start training"}
+              </button>
+              {activeJob && (
+                <button type="button" className="btn" onClick={() => setMetricsOpen(true)}>
+                  View metrics
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </StudioPageShell>
   );
 }

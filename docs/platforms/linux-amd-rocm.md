@@ -62,4 +62,4 @@ Uses Triton backend when CUDA extension is unavailable.
 
 - No flash-attn from `[cuda]` (optional `[flash-attn]` extra on Linux NVIDIA only)
 - bitsandbytes support on ROCm varies by version — prefer 16-bit LoRA if quant fails
-- Multi-GPU via `torchrun` works when ROCm exposes multiple devices to PyTorch
+- Multi-GPU via Hugging Face Accelerate works when ROCm exposes multiple devices to PyTorch

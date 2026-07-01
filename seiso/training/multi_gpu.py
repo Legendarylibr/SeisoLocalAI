@@ -1,10 +1,11 @@
-"""Multi-GPU training coordination via Accelerate DDP."""
+"""Distributed training coordination via Hugging Face Accelerate."""
 
 from __future__ import annotations
 
 import logging
 import os
 from dataclasses import dataclass
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -18,8 +19,24 @@ class GpuLayout:
     device_count: int = 1
 
 
+@dataclass(frozen=True)
+class DistributedPlan:
+    enabled: bool
+    strategy: str
+    nproc_per_node: int
+    nnodes: int = 1
+    node_rank: int = 0
+    master_addr: str = "127.0.0.1"
+    master_port: int = 29500
+    reason: str = ""
+
+    @property
+    def world_size(self) -> int:
+        return self.nproc_per_node * self.nnodes if self.enabled else 1
+
+
 def detect_training_layout() -> GpuLayout:
-    """Detect GPUs and distributed rank from torchrun/accelerate env vars."""
+    """Detect GPUs and distributed rank from Accelerate/PyTorch env vars."""
     try:
         import torch
     except ImportError:
@@ -43,6 +60,70 @@ def detect_training_layout() -> GpuLayout:
         device=device,
         use_ddp=use_ddp,
         device_count=device_count,
+    )
+
+
+def distributed_requested(config: Any) -> bool:
+    """Return whether config asks Seiso to launch or honor distributed training."""
+    strategy = str(getattr(config, "distributed_strategy", "auto")).lower()
+    if strategy == "none":
+        return False
+    if strategy == "ddp":
+        return True
+    return bool(getattr(config, "multi_gpu", False) or getattr(config, "extra", {}).get("multi_gpu", False))
+
+
+def resolve_distributed_plan(
+    config: Any,
+    layout: GpuLayout | None = None,
+) -> DistributedPlan:
+    """Resolve high-level distributed settings into a concrete Accelerate plan."""
+    layout = layout or detect_training_layout()
+    strategy = str(getattr(config, "distributed_strategy", "auto")).lower()
+    requested = distributed_requested(config)
+    nnodes = int(getattr(config, "distributed_num_nodes", 1) or 1)
+    node_rank = int(getattr(config, "distributed_node_rank", 0) or 0)
+    nproc = getattr(config, "distributed_nproc_per_node", None)
+    nproc_per_node = int(nproc or max(layout.device_count, 1))
+
+    if strategy == "none" or not requested:
+        return DistributedPlan(
+            enabled=False,
+            strategy="none",
+            nproc_per_node=1,
+            reason="distributed training not requested",
+        )
+    if strategy not in {"auto", "ddp"}:
+        raise ValueError(f"Unsupported distributed strategy: {strategy}")
+    if node_rank >= nnodes:
+        raise ValueError("distributed_node_rank must be less than distributed_num_nodes")
+    if layout.device_count <= 0:
+        return DistributedPlan(
+            enabled=False,
+            strategy="none",
+            nproc_per_node=1,
+            reason="no CUDA/ROCm training GPUs detected",
+        )
+    if nproc_per_node > layout.device_count:
+        raise ValueError(
+            f"distributed_nproc_per_node={nproc_per_node} exceeds visible GPU count {layout.device_count}"
+        )
+    if nnodes == 1 and nproc_per_node <= 1:
+        return DistributedPlan(
+            enabled=False,
+            strategy="none",
+            nproc_per_node=1,
+            reason="only one local training process requested",
+        )
+
+    return DistributedPlan(
+        enabled=True,
+        strategy="ddp",
+        nproc_per_node=nproc_per_node,
+        nnodes=nnodes,
+        node_rank=node_rank,
+        master_addr=str(getattr(config, "distributed_master_addr", "127.0.0.1")),
+        master_port=int(getattr(config, "distributed_master_port", 29500)),
     )
 
 
@@ -71,15 +152,61 @@ def configure_training_args(
     return args
 
 
-def launch_worker_command(config_path: str, nproc: int) -> list[str]:
-    """Build torchrun command for Forge worker subprocess."""
+def configure_distributed_training_args(
+    base_args: dict,
+    layout: GpuLayout,
+    config: Any,
+    enabled: bool,
+) -> dict:
+    """Merge configured DDP settings into HuggingFace TrainingArguments."""
+    args = configure_training_args(base_args, layout, enabled)
+    if enabled and layout.use_ddp:
+        ddp_backend = getattr(config, "ddp_backend", None)
+        if ddp_backend:
+            args["ddp_backend"] = str(ddp_backend)
+        args["ddp_find_unused_parameters"] = bool(
+            getattr(config, "ddp_find_unused_parameters", False)
+        )
+    return args
+
+
+def launch_worker_command(
+    config_path: str,
+    nproc: int | DistributedPlan,
+) -> list[str]:
+    """Build an Accelerate launch command for distributed worker subprocesses."""
+    if isinstance(nproc, DistributedPlan):
+        plan = nproc
+        nproc_value = plan.nproc_per_node
+    else:
+        plan = None
+        nproc_value = int(nproc)
+
+    cmd = [
+        "accelerate",
+        "launch",
+        "--multi_gpu",
+        f"--num_processes={nproc_value * (plan.nnodes if plan else 1)}",
+    ]
+    if plan and plan.nnodes > 1:
+        cmd.extend(
+            [
+                f"--num_machines={plan.nnodes}",
+                f"--machine_rank={plan.node_rank}",
+                f"--main_process_ip={plan.master_addr}",
+                f"--main_process_port={plan.master_port}",
+            ]
+        )
+    cmd.extend(
+        [
+            "--module",
+            "seiso.training.worker",
+            "--config",
+            config_path,
+        ]
+    )
     return [
-        "torchrun",
-        f"--nproc_per_node={nproc}",
-        "-m",
-        "seiso.training.worker",
-        "--config",
-        config_path,
+        *cmd,
     ]
 
 
