@@ -30,7 +30,7 @@ from forge.services.hf_hub import (
     resolve_gguf_artifact,
 )
 from forge.services.user_paths import user_dir
-from seiso.io.files import path_size_bytes
+from seiso.io.files import iter_matching_files, path_size_bytes
 from seiso.models.catalog import get_by_repo
 from seiso.security import sanitize_filename
 
@@ -171,7 +171,14 @@ def _cached_download_result_if_usable(
     cached_variant = "gguf" if fmt == "gguf" else "safetensors"
     downloaded = [str(path)]
     if fmt == "gguf" and path.is_dir():
-        downloaded = [str(p) for p in sorted(path.rglob("*.gguf")) if p.is_file()]
+        if isinstance(gguf_files, list) and gguf_files:
+            downloaded = [
+                str(path / str(filename))
+                for filename in gguf_files
+                if (path / str(filename)).is_file()
+            ]
+        else:
+            downloaded = [str(p) for p in iter_matching_files(path, "*.gguf")]
     return {
         "downloaded": downloaded,
         "repo_id": repo_id,

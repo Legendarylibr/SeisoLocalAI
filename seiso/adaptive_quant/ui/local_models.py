@@ -16,6 +16,7 @@ from seiso.adaptive_quant.configuration.sections import (
 )
 from seiso.adaptive_quant.logging_utils import read_json
 from seiso.adaptive_quant.routing import parse_route
+from seiso.io.files import iter_matching_files
 
 _LLAMA_BINARY_NAMES = ("llama-cli", "llama-server", "main", "llama")
 _ENV_BINARY = "LLAMA_CPP_BINARY"
@@ -223,7 +224,7 @@ def _models_from_scan(repo: Path, entries: dict[str, LocalModelEntry]) -> None:
     models_dir = repo / default_route_models_dir("outputs")
     if not models_dir.is_dir():
         return
-    for path in sorted(models_dir.rglob("*.gguf")):
+    for path in iter_matching_files(models_dir, "*.gguf"):
         if not _is_gguf(path):
             continue
         rel = path.relative_to(repo)

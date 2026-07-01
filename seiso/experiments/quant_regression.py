@@ -495,21 +495,22 @@ def _read_training_metrics(checkpoint: Path) -> tuple[float | None, float | None
         return None, None
     train_loss: float | None = None
     eval_loss: float | None = None
-    for line in metrics.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            row = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if row.get("type") == "eval" or row.get("eval_loss") is not None:
-            eval_loss = (
-                finite_float(row.get("eval_loss") or row.get("loss")) or eval_loss
+    with metrics.open(encoding="utf-8") as handle:
+        for line in handle:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if row.get("type") == "eval" or row.get("eval_loss") is not None:
+                eval_loss = (
+                    finite_float(row.get("eval_loss") or row.get("loss")) or eval_loss
+                )
+            train_loss = (
+                finite_float(row.get("train_loss") or row.get("loss")) or train_loss
             )
-        train_loss = (
-            finite_float(row.get("train_loss") or row.get("loss")) or train_loss
-        )
     return train_loss, eval_loss
 
 
@@ -712,12 +713,15 @@ def _resolve_checkpoint(train_out: Path) -> Path | None:
         ckpt = data.get("checkpoint_path") or data.get("output_dir")
         if ckpt and Path(ckpt).exists():
             return Path(ckpt)
-    candidates = sorted(train_out.glob("checkpoint-*"), reverse=True)
-    for candidate in candidates:
-        if (candidate / "adapter_config.json").is_file() or (
-            candidate / "config.json"
-        ).is_file():
-            return candidate
+    candidates = (
+        candidate
+        for candidate in train_out.glob("checkpoint-*")
+        if (candidate / "adapter_config.json").is_file()
+        or (candidate / "config.json").is_file()
+    )
+    candidate = max(candidates, key=lambda path: path.name, default=None)
+    if candidate is not None:
+        return candidate
     if (train_out / "adapter_config.json").is_file():
         return train_out
     return None

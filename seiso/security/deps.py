@@ -95,27 +95,28 @@ def verify_python_lock_has_hashes(lock_path: Path) -> None:
     saw_hash = False
     missing_hashes: list[str] = []
 
-    for raw_line in lock_path.read_text(encoding="utf-8").splitlines():
-        line = raw_line.rstrip()
-        if not line or line.startswith("#"):
-            continue
+    with lock_path.open(encoding="utf-8") as handle:
+        for raw_line in handle:
+            line = raw_line.rstrip()
+            if not line or line.startswith("#"):
+                continue
 
-        if _PACKAGE_LINE.match(line):
-            if current_package is not None and not saw_hash:
-                missing_hashes.append(current_package)
-            current_package = line.split()[0]
-            saw_hash = _HASH_LINE.match(line) is not None
-            continue
+            if _PACKAGE_LINE.match(line):
+                if current_package is not None and not saw_hash:
+                    missing_hashes.append(current_package)
+                current_package = line.split()[0]
+                saw_hash = _HASH_LINE.match(line) is not None
+                continue
 
-        if _HASH_LINE.match(line):
-            saw_hash = True
-            continue
+            if _HASH_LINE.match(line):
+                saw_hash = True
+                continue
 
-        if current_package is not None and not line.startswith(" "):
-            if not saw_hash:
-                missing_hashes.append(current_package)
-            current_package = None
-            saw_hash = False
+            if current_package is not None and not line.startswith(" "):
+                if not saw_hash:
+                    missing_hashes.append(current_package)
+                current_package = None
+                saw_hash = False
 
     if current_package is not None and not saw_hash:
         missing_hashes.append(current_package)

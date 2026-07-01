@@ -5,6 +5,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from seiso.io.files import iter_matching_files
+
 _TRAINABLE_WEIGHT_SUFFIXES = frozenset({".safetensors", ".bin"})
 _GGUF_REPO_RE = re.compile(r"(?:^|/)[^/]*-gguf(?:$|/|-)", re.I)
 
@@ -36,12 +38,12 @@ def trainable_weight_files(root: Path) -> list[Path]:
     if path.is_file():
         return [path] if path.suffix.lower() in _TRAINABLE_WEIGHT_SUFFIXES else []
 
-    files: list[Path] = []
-    for pattern in ("*.safetensors", "*.bin"):
-        files.extend(p for p in path.rglob(pattern) if p.is_file())
-    return files
+    return list(iter_matching_files(path, suffixes=_TRAINABLE_WEIGHT_SUFFIXES))
 
 
 def snapshot_has_trainable_weights(root: Path) -> bool:
     """True when *root* contains at least one safetensors/bin weight file."""
-    return bool(trainable_weight_files(root))
+    path = root.expanduser()
+    if path.is_file():
+        return path.suffix.lower() in _TRAINABLE_WEIGHT_SUFFIXES
+    return any(iter_matching_files(path, suffixes=_TRAINABLE_WEIGHT_SUFFIXES))

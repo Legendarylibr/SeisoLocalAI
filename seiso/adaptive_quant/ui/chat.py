@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import threading
 import time
+from collections import deque
 from pathlib import Path
 from typing import Any
 
@@ -56,11 +57,8 @@ def build_chat_config(*, repo: Path) -> dict[str, Any]:
     tasks_path = default_chat_tasks_path(repo)
     task_count = 0
     if tasks_path.is_file():
-        task_count = sum(
-            1
-            for line in tasks_path.read_text(encoding="utf-8").splitlines()
-            if line.strip()
-        )
+        with tasks_path.open(encoding="utf-8") as handle:
+            task_count = sum(1 for line in handle if line.strip())
 
     backends: list[dict[str, Any]] = [
         {
@@ -360,18 +358,21 @@ class ChatSessionManager:
         path = default_chat_tasks_path(self.repo)
         if not path.is_file():
             return {"path": str(path.relative_to(self.repo)), "tasks": [], "count": 0}
-        tasks: list[dict[str, Any]] = []
-        for line in path.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            payload = json.loads(line)
-            if isinstance(payload, dict):
-                tasks.append(payload)
+        tasks: deque[dict[str, Any]] = deque(maxlen=50)
+        count = 0
+        with path.open(encoding="utf-8") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                payload = json.loads(line)
+                if isinstance(payload, dict):
+                    count += 1
+                    tasks.append(payload)
         return {
             "path": str(path.relative_to(self.repo)),
-            "tasks": tasks[-50:],
-            "count": len(tasks),
+            "tasks": list(tasks),
+            "count": count,
         }
 
     def reset_session(self) -> dict[str, str]:

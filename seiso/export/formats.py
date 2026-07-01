@@ -22,7 +22,7 @@ from seiso.export.model_card import (
     metadata_from_manifest,
     write_hub_artifacts,
 )
-from seiso.io.files import path_size_bytes
+from seiso.io.files import iter_matching_files, path_size_bytes
 from seiso.io.jsonl import read_json_file
 from seiso.security import assert_within
 
@@ -347,8 +347,11 @@ def validate_lora_checkpoint(checkpoint: Path) -> None:
         "adapter_model.pt",
     )
     if not any((checkpoint / name).is_file() for name in weight_names):
-        nested = list(checkpoint.glob("**/adapter_model.safetensors")) + list(
-            checkpoint.glob("**/adapter_model.bin")
+        nested = any(
+            path.name in {"adapter_model.safetensors", "adapter_model.bin"}
+            for path in iter_matching_files(
+                checkpoint, suffixes=frozenset({".safetensors", ".bin"})
+            )
         )
         if not nested:
             raise ValueError(f"LoRA checkpoint missing adapter weights: {checkpoint}")

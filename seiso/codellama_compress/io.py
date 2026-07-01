@@ -95,10 +95,21 @@ def dir_size_bytes(path: Path) -> int:
     if not path.exists():
         return 0
     total = 0
-    for p in path.rglob("*"):
+    stack = [str(path)]
+    while stack:
+        current = stack.pop()
         try:
-            if p.is_file() and not p.is_symlink():
-                total += p.stat().st_size
+            with os.scandir(current) as entries:
+                for entry in entries:
+                    try:
+                        if entry.is_symlink():
+                            continue
+                        if entry.is_dir(follow_symlinks=False):
+                            stack.append(entry.path)
+                        elif entry.is_file(follow_symlinks=False):
+                            total += entry.stat(follow_symlinks=False).st_size
+                    except OSError:
+                        continue
         except OSError:
             continue
     return total

@@ -212,12 +212,13 @@ def artifact_sha256_for_stage(
                 return s.get("sha256")
         return None
     last: str | None = None
-    for line in path.read_text(encoding="utf-8").splitlines():
-        if not line.strip():
-            continue
-        rec = json.loads(line)
-        if rec.get("stage") == stage and rec.get("role", "output") == role:
-            last = rec.get("sha256")
+    with path.open(encoding="utf-8") as handle:
+        for line in handle:
+            if not line.strip():
+                continue
+            rec = json.loads(line)
+            if rec.get("stage") == stage and rec.get("role", "output") == role:
+                last = rec.get("sha256")
     return last
 
 
@@ -288,9 +289,10 @@ def verify_manifest(run_dir: Path, *, strict_config: bool = True) -> dict[str, A
     artifacts_path = run_dir / ARTIFACTS_NAME
     records: list[dict[str, Any]] = []
     if artifacts_path.exists():
-        for line in artifacts_path.read_text(encoding="utf-8").splitlines():
-            if line.strip():
-                records.append(json.loads(line))
+        with artifacts_path.open(encoding="utf-8") as handle:
+            for line in handle:
+                if line.strip():
+                    records.append(json.loads(line))
     else:
         records = list(manifest.get("stages") or [])
 

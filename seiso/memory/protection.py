@@ -16,6 +16,7 @@ from seiso.hardware import (
     training_defaults,
     vram_headroom_mb,
 )
+from seiso.io.files import iter_matching_files
 from seiso.memory.estimates import (
     estimate_chat_vram_gb,
     estimate_training_vram_gb,
@@ -37,6 +38,7 @@ _MAX_LLAMA_BATCH = 2048
 _MIN_LLAMA_BATCH = 128
 _MAX_LLAMA_CACHE_MB = 1024
 _MAX_JSONL_LOAD_MB = 512
+_MODEL_WEIGHT_VRAM_SUFFIXES = frozenset({".gguf", ".safetensors", ".bin"})
 
 _VRAM_ESTIMATE_CACHE_MAX = 256
 _vram_estimate_cache: dict[tuple, int] = {}
@@ -123,11 +125,10 @@ def _estimate_path_vram_mb_uncached(p: Path, *, mode: str = "chat") -> int:
     elif p.is_dir():
         weight_bytes = 0
         has_gguf = False
-        for pattern in ("*.gguf", "*.safetensors", "*.bin"):
-            for f in p.rglob(pattern):
-                if f.is_file():
-                    has_gguf = has_gguf or f.suffix.lower() == ".gguf"
-                    weight_bytes += f.stat().st_size
+        for f in iter_matching_files(p, suffixes=_MODEL_WEIGHT_VRAM_SUFFIXES):
+            suffix = f.suffix.lower()
+            has_gguf = has_gguf or suffix == ".gguf"
+            weight_bytes += f.stat().st_size
         if weight_bytes > 0:
             weight_mb = weight_bytes / (1024**2)
             if has_gguf:

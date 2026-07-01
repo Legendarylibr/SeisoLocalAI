@@ -29,6 +29,7 @@ from seiso.adaptive_quant.model_routes import (
     RouteCatalog,
     default_route_catalog,
 )
+from seiso.io.files import iter_matching_files
 
 _ENV_BINARY = "LLAMA_CPP_BINARY"
 _ENV_MODEL = "LLAMA_CPP_MODEL"
@@ -240,7 +241,7 @@ def list_model_choices(*, repo: Path) -> list[ModelChoice]:
 
     models_dir = repo / default_route_models_dir("outputs")
     if models_dir.is_dir():
-        for path in sorted(models_dir.rglob("*.gguf")):
+        for path in iter_matching_files(models_dir, "*.gguf"):
             if not _is_gguf(path):
                 continue
             path_str = str(path.resolve())
@@ -370,9 +371,7 @@ def download_route_model(
         if candidate.is_file():
             resolved = candidate
     if resolved is None:
-        ggufs = sorted(local_dir.rglob("*.gguf"))
-        if ggufs:
-            resolved = ggufs[0]
+        resolved = next(iter_matching_files(local_dir, "*.gguf"), None)
     if resolved is None:
         resolved = local_dir
 
