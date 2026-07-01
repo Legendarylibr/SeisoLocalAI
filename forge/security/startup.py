@@ -11,10 +11,41 @@ logger = logging.getLogger(__name__)
 
 _REMOTE_ACK_ENV = "SEISO_REMOTE_ACK"
 _REMOTE_DANGEROUS_ACK_ENV = "SEISO_REMOTE_DANGEROUS_ACK"
+_NVIDIA_HOST_VENV_ACK_ENV = "SEISO_NVIDIA_HOST_VENV_ACK"
+_LEGACY_NVIDIA_HOST_VENV_ACK_ENV = "ADAPTIVE_RL_NVIDIA_HOST_VENV_ACK"
 
 
 def _env_enabled(name: str) -> bool:
     return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _set_native_linux_nvidia_boundary_for_local_forge(settings: ForgeSettings) -> bool:
+    """Approve local native-Linux Forge training jobs for trusted host-venv CUDA."""
+    from seiso.security.nvidia_boundary import (
+        approved_nvidia_boundary,
+        detect_wsl2,
+        in_ci,
+        is_linux_nvidia_host,
+    )
+
+    if (
+        settings.allow_remote
+        or detect_wsl2()
+        or in_ci()
+        or not is_linux_nvidia_host()
+        or approved_nvidia_boundary() is not None
+    ):
+        return False
+
+    os.environ[_NVIDIA_HOST_VENV_ACK_ENV] = "1"
+    os.environ[_LEGACY_NVIDIA_HOST_VENV_ACK_ENV] = "1"
+    logger.warning(
+        "Native Linux NVIDIA host detected on local-only Forge; approving host-venv "
+        "GPU training for this process via %s=1. Remote Forge still requires an "
+        "explicit secure-boundary acknowledgement.",
+        _NVIDIA_HOST_VENV_ACK_ENV,
+    )
+    return True
 
 
 def validate_security_settings(settings: ForgeSettings) -> None:
@@ -58,6 +89,8 @@ def validate_security_settings(settings: ForgeSettings) -> None:
 
     if settings.debug:
         logger.warning("SEISO_DEBUG=true exposes /api/docs — disable in production.")
+
+    _set_native_linux_nvidia_boundary_for_local_forge(settings)
 
     if is_linux_nvidia_host() and approved_nvidia_boundary() is None:
         ack = recommended_gpu_install_ack_env()

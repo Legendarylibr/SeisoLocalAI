@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -58,6 +59,53 @@ def test_enforce_boundary_wsl2_ack():
             with patch.dict(os.environ, env, clear=False):
                 report = enforce_nvidia_secure_boundary(context="test")
     assert report.get("approved_tier") == "wsl2"
+
+
+def test_forge_startup_sets_native_linux_boundary_for_local_training(monkeypatch):
+    from forge.security.startup import (
+        _LEGACY_NVIDIA_HOST_VENV_ACK_ENV,
+        _NVIDIA_HOST_VENV_ACK_ENV,
+        _set_native_linux_nvidia_boundary_for_local_forge,
+    )
+
+    monkeypatch.delenv(_NVIDIA_HOST_VENV_ACK_ENV, raising=False)
+    monkeypatch.delenv(_LEGACY_NVIDIA_HOST_VENV_ACK_ENV, raising=False)
+    monkeypatch.setattr("seiso.security.nvidia_boundary.detect_wsl2", lambda: False)
+    monkeypatch.setattr("seiso.security.nvidia_boundary.in_ci", lambda: False)
+    monkeypatch.setattr(
+        "seiso.security.nvidia_boundary.is_linux_nvidia_host", lambda: True
+    )
+    monkeypatch.setattr(
+        "seiso.security.nvidia_boundary.approved_nvidia_boundary", lambda: None
+    )
+
+    settings = SimpleNamespace(allow_remote=False)
+
+    assert _set_native_linux_nvidia_boundary_for_local_forge(settings) is True
+    assert os.environ[_NVIDIA_HOST_VENV_ACK_ENV] == "1"
+    assert os.environ[_LEGACY_NVIDIA_HOST_VENV_ACK_ENV] == "1"
+
+
+def test_forge_startup_does_not_auto_ack_remote_nvidia(monkeypatch):
+    from forge.security.startup import (
+        _NVIDIA_HOST_VENV_ACK_ENV,
+        _set_native_linux_nvidia_boundary_for_local_forge,
+    )
+
+    monkeypatch.delenv(_NVIDIA_HOST_VENV_ACK_ENV, raising=False)
+    monkeypatch.setattr("seiso.security.nvidia_boundary.detect_wsl2", lambda: False)
+    monkeypatch.setattr("seiso.security.nvidia_boundary.in_ci", lambda: False)
+    monkeypatch.setattr(
+        "seiso.security.nvidia_boundary.is_linux_nvidia_host", lambda: True
+    )
+    monkeypatch.setattr(
+        "seiso.security.nvidia_boundary.approved_nvidia_boundary", lambda: None
+    )
+
+    settings = SimpleNamespace(allow_remote=True)
+
+    assert _set_native_linux_nvidia_boundary_for_local_forge(settings) is False
+    assert _NVIDIA_HOST_VENV_ACK_ENV not in os.environ
 
 
 def test_gpu_platform_wsl2_field():
