@@ -7,6 +7,11 @@
   "dpo_epochs": 1,
   "train_val_fraction": 0.75,
   "eval_max_prompts": 4,
+  "require_thinking_trace": true,
+  "verifiable_outcome_rewards": true,
+  "grpo_group_size": 4,
+  "benchmark_verifiable": true,
+  "benchmark_tasks": ["gsm8k", "gpqa", "aime"],
   "align_distill_with_prompts": true,
   "stages": ["distill", "rollout", "dpo", "evaluate"]
 }

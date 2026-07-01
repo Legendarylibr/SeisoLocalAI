@@ -180,6 +180,29 @@ def distill_rl_run(
     prompt_library: str | None = typer.Option(
         None, help="Prompt JSON/JSONL for rollouts"
     ),
+    require_thinking_trace: bool = typer.Option(
+        True,
+        "--thinking-trace/--no-thinking-trace",
+        help="Force <think>...</think> before final answers during distill/rollout.",
+    ),
+    verifiable_outcome_rewards: bool = typer.Option(
+        True,
+        "--outcome-rewards/--teacher-preferences",
+        help="Use pure final-answer rewards for prompts with answers.",
+    ),
+    grpo_group_size: int = typer.Option(
+        4,
+        help="Number of sampled reasoning traces per verifiable prompt.",
+    ),
+    benchmark_verifiable: bool = typer.Option(
+        True,
+        "--benchmark-verifiable/--no-benchmark-verifiable",
+        help="Run GSM8K/GPQA/AIME-style strict outcome benchmarks.",
+    ),
+    benchmark_tasks: str = typer.Option(
+        "gsm8k,gpqa,aime",
+        help="Comma-separated verifiable benchmark tasks.",
+    ),
     stages: str | None = typer.Option(
         None, help="Comma-separated stages: distill,rollout,dpo,evaluate"
     ),
@@ -205,7 +228,18 @@ def distill_rl_run(
 
     settings = get_settings()
     job_id = f"cli-{uuid.uuid4().hex[:8]}"
-    payload: dict = {"preset": preset, "seed": seed, "auto_sweep": auto_sweep}
+    payload: dict = {
+        "preset": preset,
+        "seed": seed,
+        "auto_sweep": auto_sweep,
+        "require_thinking_trace": require_thinking_trace,
+        "verifiable_outcome_rewards": verifiable_outcome_rewards,
+        "grpo_group_size": grpo_group_size,
+        "benchmark_verifiable": benchmark_verifiable,
+        "benchmark_tasks": [
+            task.strip() for task in benchmark_tasks.split(",") if task.strip()
+        ],
+    }
     if config:
         payload["config_file"] = config
     if teacher_model:
@@ -244,6 +278,11 @@ def distill_rl_run(
     else:
         console.print(f"[green]Done:[/] {result.get('final_model_dir')}")
         console.print(f"Artifacts: {result.get('output_dir')}")
+        jumps = result.get("benchmark_jumps") or []
+        if jumps:
+            console.print("Benchmark jumps:")
+            for line in jumps:
+                console.print(f"  {line}")
 
 
 @compress_app.command("run")

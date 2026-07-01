@@ -20,6 +20,12 @@ def evaluate_pipeline(
     prompt_library_path: Path | None,
     eval_max_prompts: int,
     trust_remote_code: bool = False,
+    benchmark_verifiable: bool = False,
+    benchmark_tasks: list[str] | None = None,
+    require_thinking_trace: bool = False,
+    thinking_instruction: str = (
+        "Show your reasoning in <think>...</think>, then give the final answer."
+    ),
     on_log=None,
 ) -> dict[str, Any]:
     """Evaluate named checkpoints: perplexity, val preference accuracy, samples."""
@@ -52,6 +58,28 @@ def evaluate_pipeline(
             trust_remote_code=trust_remote_code,
         )
         results["checkpoints"][name] = metrics
+
+    if benchmark_verifiable:
+        from seiso.distill_rl.verifiable_benchmarks import (
+            evaluate_verifiable_benchmarks,
+        )
+
+        benchmark_checkpoints = {
+            name: str(_resolve_model_ref(model_ref))
+            for name, model_ref in checkpoints.items()
+            if _resolve_model_ref(model_ref) is not None
+        }
+        results["verifiable_benchmarks"] = evaluate_verifiable_benchmarks(
+            output_dir=output_dir,
+            checkpoints=benchmark_checkpoints,
+            prompt_library_path=prompt_library_path,
+            benchmark_tasks=benchmark_tasks or ["gsm8k", "gpqa", "aime"],
+            max_prompts_per_task=max(1, eval_max_prompts),
+            trust_remote_code=trust_remote_code,
+            require_thinking_trace=require_thinking_trace,
+            thinking_instruction=thinking_instruction,
+            on_log=on_log,
+        )
 
     summary_path = output_dir / "evaluation_summary.json"
     summary_path.write_text(json.dumps(results, indent=2) + "\n", encoding="utf-8")

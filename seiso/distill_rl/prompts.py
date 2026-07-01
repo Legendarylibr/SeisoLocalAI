@@ -13,6 +13,8 @@ from seiso.rl_quant.bootstrap import bundle_root
 class RolloutPrompt:
     prompt_id: str
     text: str
+    answer: str | None = None
+    benchmark: str | None = None
 
 
 def load_rollout_prompts(path: Path | None, *, limit: int) -> list[RolloutPrompt]:
@@ -95,4 +97,11 @@ def _normalize_prompt_row(row: object, *, fallback_id: str) -> RolloutPrompt:
         raise ValueError(f"Prompt row must be a string or object, got {type(row)!r}")
     text = str(row.get("prompt") or row.get("text") or row.get("instruction") or "")
     prompt_id = str(row.get("prompt_id") or row.get("id") or fallback_id)
-    return RolloutPrompt(prompt_id=prompt_id, text=text)
+    answer = row.get("answer")
+    benchmark = row.get("benchmark") or row.get("dataset") or row.get("task")
+    return RolloutPrompt(
+        prompt_id=prompt_id,
+        text=text,
+        answer=str(answer) if answer is not None else None,
+        benchmark=str(benchmark).lower() if benchmark is not None else None,
+    )

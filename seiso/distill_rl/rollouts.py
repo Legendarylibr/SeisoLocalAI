@@ -7,6 +7,11 @@ from typing import Any
 
 import torch
 
+from seiso.distill_rl.outcome import (
+    ensure_thinking_completion,
+    format_thinking_prompt,
+    outcome_reward,
+)
 from seiso.distill_rl.prompts import RolloutPrompt
 
 
@@ -22,8 +27,49 @@ def generate_preference_rows(
     teacher_revision: str | None = None,
     student_revision: str | None = None,
     trust_remote_code: bool = False,
+    require_thinking_trace: bool = False,
+    thinking_instruction: str = (
+        "Show your reasoning in <think>...</think>, then give the final answer."
+    ),
+    verifiable_outcome_rewards: bool = False,
+    grpo_group_size: int = 1,
 ) -> list[dict[str, Any]]:
     """Generate preference rows with deterministic per-prompt seeds."""
+    if verifiable_outcome_rewards and any(prompt.answer is not None for prompt in prompts):
+        outcome_rows = generate_outcome_preference_rows(
+            student_model=student_model,
+            prompts=[prompt for prompt in prompts if prompt.answer is not None],
+            max_new_tokens=max_new_tokens,
+            temperature=temperature,
+            seed=seed + 10_000,
+            use_chat_template=use_chat_template,
+            revision=student_revision,
+            trust_remote_code=trust_remote_code,
+            require_thinking_trace=require_thinking_trace,
+            thinking_instruction=thinking_instruction,
+            grpo_group_size=grpo_group_size,
+        )
+        remaining_prompts = [prompt for prompt in prompts if prompt.answer is None]
+        if not remaining_prompts:
+            return outcome_rows
+        teacher_rows = generate_preference_rows(
+            teacher_model=teacher_model,
+            student_model=student_model,
+            prompts=remaining_prompts,
+            max_new_tokens=max_new_tokens,
+            temperature=temperature,
+            seed=seed,
+            use_chat_template=use_chat_template,
+            teacher_revision=teacher_revision,
+            student_revision=student_revision,
+            trust_remote_code=trust_remote_code,
+            require_thinking_trace=require_thinking_trace,
+            thinking_instruction=thinking_instruction,
+            verifiable_outcome_rewards=False,
+            grpo_group_size=grpo_group_size,
+        )
+        return outcome_rows + teacher_rows
+
     teacher_outputs = generate_completions(
         teacher_model,
         prompts,
@@ -33,6 +79,8 @@ def generate_preference_rows(
         use_chat_template=use_chat_template,
         revision=teacher_revision,
         trust_remote_code=trust_remote_code,
+        require_thinking_trace=require_thinking_trace,
+        thinking_instruction=thinking_instruction,
     )
     student_outputs = generate_completions(
         student_model,
@@ -43,6 +91,8 @@ def generate_preference_rows(
         use_chat_template=use_chat_template,
         revision=student_revision,
         trust_remote_code=trust_remote_code,
+        require_thinking_trace=require_thinking_trace,
+        thinking_instruction=thinking_instruction,
     )
     rows: list[dict[str, Any]] = []
     for prompt, chosen, rejected in zip(
@@ -54,6 +104,72 @@ def generate_preference_rows(
                 "prompt": prompt.text,
                 "chosen": chosen,
                 "rejected": rejected,
+                "generation_seed": _prompt_seed(seed, prompt.prompt_id),
+            }
+        )
+    return rows
+
+
+def generate_outcome_preference_rows(
+    *,
+    student_model: str,
+    prompts: list[RolloutPrompt],
+    max_new_tokens: int,
+    temperature: float,
+    seed: int,
+    use_chat_template: bool,
+    revision: str | None = None,
+    trust_remote_code: bool = False,
+    require_thinking_trace: bool = True,
+    thinking_instruction: str = (
+        "Show your reasoning in <think>...</think>, then give the final answer."
+    ),
+    grpo_group_size: int = 4,
+) -> list[dict[str, Any]]:
+    """Generate grouped candidates and prefer the highest outcome-reward trace."""
+    verifiable_prompts = [prompt for prompt in prompts if prompt.answer is not None]
+    if not verifiable_prompts:
+        return []
+    grouped_outputs = generate_completion_groups(
+        student_model,
+        verifiable_prompts,
+        max_new_tokens,
+        temperature,
+        seed=seed,
+        use_chat_template=use_chat_template,
+        revision=revision,
+        trust_remote_code=trust_remote_code,
+        require_thinking_trace=require_thinking_trace,
+        thinking_instruction=thinking_instruction,
+        group_size=max(2, grpo_group_size),
+    )
+    rows: list[dict[str, Any]] = []
+    for prompt, completions in zip(verifiable_prompts, grouped_outputs, strict=True):
+        scored = [
+            {
+                "completion": completion,
+                "reward": outcome_reward(
+                    completion, prompt.answer, benchmark=prompt.benchmark
+                ),
+            }
+            for completion in completions
+        ]
+        ranked = sorted(scored, key=lambda item: float(item["reward"]), reverse=True)
+        chosen = str(ranked[0]["completion"])
+        rejected = str(ranked[-1]["completion"])
+        rows.append(
+            {
+                "prompt_id": prompt.prompt_id,
+                "prompt": prompt.text,
+                "answer": prompt.answer,
+                "benchmark": prompt.benchmark,
+                "chosen": chosen,
+                "rejected": rejected,
+                "chosen_reward": float(ranked[0]["reward"]),
+                "rejected_reward": float(ranked[-1]["reward"]),
+                "group_rewards": [float(item["reward"]) for item in scored],
+                "grpo_group_size": len(scored),
+                "reward_source": "verifiable_outcome",
                 "generation_seed": _prompt_seed(seed, prompt.prompt_id),
             }
         )
@@ -89,7 +205,43 @@ def generate_completions(
     use_chat_template: bool,
     revision: str | None = None,
     trust_remote_code: bool = False,
+    require_thinking_trace: bool = False,
+    thinking_instruction: str = (
+        "Show your reasoning in <think>...</think>, then give the final answer."
+    ),
 ) -> list[str]:
+    groups = generate_completion_groups(
+        model_path,
+        prompts,
+        max_new_tokens,
+        temperature,
+        seed=seed,
+        use_chat_template=use_chat_template,
+        revision=revision,
+        trust_remote_code=trust_remote_code,
+        require_thinking_trace=require_thinking_trace,
+        thinking_instruction=thinking_instruction,
+        group_size=1,
+    )
+    return [group[0] if group else "" for group in groups]
+
+
+def generate_completion_groups(
+    model_path: str,
+    prompts: list[RolloutPrompt],
+    max_new_tokens: int,
+    temperature: float,
+    *,
+    seed: int,
+    use_chat_template: bool,
+    revision: str | None = None,
+    trust_remote_code: bool = False,
+    require_thinking_trace: bool = False,
+    thinking_instruction: str = (
+        "Show your reasoning in <think>...</think>, then give the final answer."
+    ),
+    group_size: int = 1,
+) -> list[list[str]]:
     from seiso.distill_rl.model_utils import load_causal_lm, release_causal_lm
 
     model, tokenizer, device = load_causal_lm(
@@ -97,7 +249,7 @@ def generate_completions(
         revision=revision,
         trust_remote_code=trust_remote_code,
     )
-    outputs: list[str] = []
+    outputs: list[list[str]] = []
     try:
         for prompt in prompts:
             prompt_seed = _prompt_seed(seed, prompt.prompt_id)
@@ -107,7 +259,11 @@ def generate_completions(
 
             prompt_text = _format_generation_prompt(
                 tokenizer,
-                prompt.text,
+                (
+                    format_thinking_prompt(prompt.text, thinking_instruction)
+                    if require_thinking_trace
+                    else prompt.text
+                ),
                 use_chat_template=use_chat_template,
             )
             inputs = tokenizer(prompt_text, return_tensors="pt")
@@ -116,17 +272,40 @@ def generate_completions(
             generator = torch.Generator(device=device)
             generator.manual_seed(prompt_seed)
             with torch.inference_mode():
-                generated = model.generate(
-                    **inputs,
+                generated = _generate_with_optional_generator(
+                    model,
+                    inputs,
                     max_new_tokens=max_new_tokens,
                     do_sample=temperature > 0,
                     temperature=max(temperature, 1e-5),
                     pad_token_id=tokenizer.pad_token_id,
                     generator=generator,
+                    num_return_sequences=max(1, group_size),
                 )
-            new_tokens = generated[0, input_len:]
-            completion = tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
-            outputs.append(completion)
+            prompt_outputs: list[str] = []
+            for row in generated:
+                new_tokens = row[input_len:]
+                completion = tokenizer.decode(
+                    new_tokens, skip_special_tokens=True
+                ).strip()
+                prompt_outputs.append(
+                    ensure_thinking_completion(
+                        completion,
+                        enabled=require_thinking_trace,
+                    )
+                )
+            outputs.append(prompt_outputs)
     finally:
         release_causal_lm(model)
     return outputs
+
+
+def _generate_with_optional_generator(model, inputs: dict[str, Any], **kwargs):
+    try:
+        return model.generate(**inputs, **kwargs)
+    except ValueError as exc:
+        if "generator" not in str(exc):
+            raise
+        reduced = dict(kwargs)
+        reduced.pop("generator", None)
+        return model.generate(**inputs, **reduced)

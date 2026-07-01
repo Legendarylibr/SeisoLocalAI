@@ -37,6 +37,10 @@ def test_build_distill_rl_config_smoke_defaults(tmp_path: Path):
     assert cfg.align_distill_with_prompts is True
     assert cfg.train_val_fraction == 0.75
     assert cfg.trust_remote_code is False
+    assert cfg.require_thinking_trace is True
+    assert cfg.verifiable_outcome_rewards is True
+    assert cfg.grpo_group_size == 4
+    assert cfg.benchmark_tasks == ["gsm8k", "gpqa", "aime"]
 
 
 def test_build_distill_rl_config_accepts_trust_remote_code(tmp_path: Path):
@@ -75,7 +79,12 @@ def test_load_rollout_prompts_with_ids(tmp_path: Path):
             {
                 "prompts": [
                     {"prompt_id": "a", "text": "Explain backprop."},
-                    {"prompt_id": "b", "prompt": "Write quicksort."},
+                    {
+                        "prompt_id": "b",
+                        "prompt": "What is 6 * 7?",
+                        "answer": "42",
+                        "benchmark": "gsm8k",
+                    },
                 ]
             }
         ),
@@ -83,7 +92,30 @@ def test_load_rollout_prompts_with_ids(tmp_path: Path):
     )
     prompts = load_rollout_prompts(path, limit=10)
     assert prompts[0].prompt_id == "a"
-    assert prompts[1].text == "Write quicksort."
+    assert prompts[1].text == "What is 6 * 7?"
+    assert prompts[1].answer == "42"
+    assert prompts[1].benchmark == "gsm8k"
+
+
+def test_distill_texts_add_thinking_tokens(tmp_path: Path):
+    from seiso.distill_rl.runner import _distill_texts
+
+    path = tmp_path / "prompts.json"
+    path.write_text(
+        json.dumps({"prompts": [{"prompt_id": "p", "text": "Solve 1+1."}]}),
+        encoding="utf-8",
+    )
+    cfg = build_distill_rl_config(
+        job_id="job-1",
+        user_id="user-1",
+        data_dir=tmp_path,
+        payload={"preset": "smoke", "prompt_library": str(path)},
+    )
+
+    texts = _distill_texts(cfg)
+
+    assert texts[0].endswith("<think>")
+    assert cfg.thinking_instruction in texts[0]
 
 
 def test_split_train_val_is_deterministic():
@@ -185,6 +217,40 @@ def test_build_preference_bundle_forwards_trust_remote_code(
     manifest = json.loads(bundle.manifest_path.read_text(encoding="utf-8"))
     assert seen == [True, True]
     assert manifest["trust_remote_code"] is True
+
+
+def test_outcome_group_sampling_prefers_best_candidate(monkeypatch):
+    from seiso.distill_rl.rollouts import generate_outcome_preference_rows
+
+    prompts = [
+        RolloutPrompt(
+            prompt_id="gsm",
+            text="What is 40 + 2?",
+            answer="42",
+            benchmark="gsm8k",
+        )
+    ]
+
+    monkeypatch.setattr(
+        "seiso.distill_rl.rollouts.generate_completion_groups",
+        lambda *_args, **_kwargs: [["41", "<think>compute</think>42", "wrong"]],
+    )
+
+    rows = generate_outcome_preference_rows(
+        student_model="student",
+        prompts=prompts,
+        max_new_tokens=8,
+        temperature=0.7,
+        seed=13,
+        use_chat_template=False,
+        grpo_group_size=3,
+    )
+
+    assert rows[0]["chosen"] == "<think>compute</think>42"
+    assert rows[0]["chosen_reward"] == 1.0
+    assert rows[0]["rejected_reward"] == 0.0
+    assert rows[0]["reward_source"] == "verifiable_outcome"
+    assert rows[0]["grpo_group_size"] == 3
 
 
 def test_load_causal_lm_applies_trust_remote_code_and_max_memory(monkeypatch):
@@ -320,6 +386,86 @@ def test_val_preference_metrics_include_margin_and_alignment(monkeypatch):
     assert metrics["alignment_score"] < metrics["val_preference_accuracy"]
 
 
+def test_verifiable_benchmark_reports_accuracy_jump(tmp_path: Path, monkeypatch):
+    from seiso.distill_rl.verifiable_benchmarks import evaluate_verifiable_benchmarks
+
+    def fake_generate(model_path, prompts, *args, **kwargs):
+        if model_path == "base":
+            return ["0" for _prompt in prompts]
+        return [str(prompt.answer) for prompt in prompts]
+
+    monkeypatch.setattr(
+        "seiso.distill_rl.verifiable_benchmarks.generate_completions",
+        fake_generate,
+    )
+
+    report = evaluate_verifiable_benchmarks(
+        output_dir=tmp_path,
+        checkpoints={"student_base": "base", "dpo": "trained"},
+        prompt_library_path=None,
+        benchmark_tasks=["gsm8k", "gpqa", "aime"],
+        max_prompts_per_task=1,
+        trust_remote_code=False,
+        require_thinking_trace=True,
+        thinking_instruction="Think.",
+    )
+
+    assert report["checkpoints"]["dpo"]["gsm8k"]["accuracy"] == 1.0
+    assert report["accuracy_jumps"]["baseline"] == "student_base"
+    assert report["accuracy_jumps"]["by_checkpoint"]["dpo"]["gsm8k"] == 1.0
+    assert Path(report["summary_path"]).is_file()
+
+
+def test_verifiable_benchmark_records_generation_errors(tmp_path: Path, monkeypatch):
+    from seiso.distill_rl.verifiable_benchmarks import evaluate_verifiable_benchmarks
+
+    def fail_generate(*_args, **_kwargs):
+        raise RuntimeError("model unavailable")
+
+    monkeypatch.setattr(
+        "seiso.distill_rl.verifiable_benchmarks._generate_benchmark_outputs",
+        fail_generate,
+    )
+
+    report = evaluate_verifiable_benchmarks(
+        output_dir=tmp_path,
+        checkpoints={"student_base": "missing-model"},
+        prompt_library_path=None,
+        benchmark_tasks=["gsm8k"],
+        max_prompts_per_task=1,
+        trust_remote_code=False,
+        require_thinking_trace=True,
+        thinking_instruction="Think.",
+    )
+
+    task = report["checkpoints"]["student_base"]["gsm8k"]
+    assert task["accuracy"] == 0.0
+    assert task["error"] == "RuntimeError: model unavailable"
+    assert Path(report["summary_path"]).is_file()
+
+
+def test_paper_bundle_flattens_verifiable_benchmark_jumps():
+    from seiso.distill_rl.paper_bundle import _flatten_metrics
+
+    metrics = _flatten_metrics(
+        {
+            "checkpoints": {},
+            "verifiable_benchmarks": {
+                "checkpoints": {
+                    "dpo": {"gsm8k": {"accuracy": 0.75}},
+                },
+                "accuracy_jumps": {
+                    "baseline": "student_base",
+                    "by_checkpoint": {"dpo": {"gsm8k": 0.25}},
+                },
+            },
+        }
+    )
+
+    assert metrics["dpo.benchmark.gsm8k.accuracy"] == 0.75
+    assert metrics["dpo.benchmark.gsm8k.accuracy_jump"] == 0.25
+
+
 def test_run_distill_rl_job_orchestrates_stages(tmp_path: Path):
     from seiso.distill_rl.runner import run_distill_rl_job
 
@@ -385,7 +531,17 @@ def test_run_distill_rl_job_orchestrates_stages(tmp_path: Path):
         patch("seiso.distill_rl.runner._run_dpo", return_value=dpo_dir),
         patch(
             "seiso.distill_rl.evaluate.evaluate_pipeline",
-            return_value={"checkpoints": {}, "summary_path": str(eval_summary)},
+            return_value={
+                "checkpoints": {},
+                "summary_path": str(eval_summary),
+                "verifiable_benchmarks": {
+                    "summary_path": str(eval_summary.parent / "verifiable_benchmarks.json"),
+                    "accuracy_jumps": {
+                        "baseline": "student_base",
+                        "by_checkpoint": {"dpo": {"gsm8k": 0.25}},
+                    },
+                },
+            },
         ),
         patch(
             "seiso.distill_rl.runner.create_paper_bundle",
@@ -405,6 +561,8 @@ def test_run_distill_rl_job_orchestrates_stages(tmp_path: Path):
 
     assert result["final_model_dir"] == str(dpo_dir)
     assert result["paper_bundle"]["paper_bundle_dir"]
+    assert result["benchmark_jumps"] == ["dpo: gsm8k=+0.250"]
+    assert "verifiable_benchmarks" in result["stage_results"]
 
 
 def test_resolve_job_seeds_from_reproducible_preset(tmp_path: Path):
