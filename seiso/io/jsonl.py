@@ -31,3 +31,13 @@ def iter_jsonl(path: Path) -> Iterator[dict[str, Any]]:
             line = line.strip()
             if line:
                 yield json.loads(line)
+
+
+def read_json_file(path: Path, *, default: Any = None) -> Any:
+    """Read a JSON file, returning default when it is missing or malformed."""
+    if not path.is_file():
+        return default
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return default

@@ -9,6 +9,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from seiso.io.jsonl import read_json_file
+
 _FINETUNE_TYPES = frozenset(
     {"lora", "qlora", "full", "embedding", "slime", "rl_quant", "compress"}
 )
@@ -177,11 +179,8 @@ def metadata_from_manifest(
     manifest_path: Path,
 ) -> HubModelMetadata:
     """Enrich metadata from a training checkpoint seiso_manifest.json."""
-    if not manifest_path.is_file():
-        return meta
-    try:
-        manifest = json.loads(manifest_path.read_text())
-    except (OSError, json.JSONDecodeError):
+    manifest = read_json_file(manifest_path, default={})
+    if not isinstance(manifest, dict):
         return meta
 
     method = str(manifest.get("method", "")).lower()

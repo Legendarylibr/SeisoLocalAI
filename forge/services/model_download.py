@@ -22,7 +22,6 @@ from forge.services.hf_connectivity import (
     check_inference_runtime,
 )
 from forge.services.hf_hub import (
-    dir_size,
     download_gguf,
     download_training_snapshot,
     estimate_snapshot_download_bytes,
@@ -31,6 +30,7 @@ from forge.services.hf_hub import (
     resolve_gguf_artifact,
 )
 from forge.services.user_paths import user_dir
+from seiso.io.files import path_size_bytes
 from seiso.models.catalog import get_by_repo
 from seiso.security import sanitize_filename
 
@@ -307,7 +307,7 @@ def _sync_download_artifacts(
     )
     cached = Path(info["path"])
     inv = link_inventory(inventory_dir, info["inventory_name"], cached)
-    size_bytes = cached.stat().st_size if cached.is_file() else dir_size(cached)
+    size_bytes = path_size_bytes(cached)
     return {
         "variant": "gguf",
         "source": source,

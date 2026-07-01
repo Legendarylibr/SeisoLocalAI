@@ -7,7 +7,22 @@ from pathlib import Path
 from typing import Any
 
 from seiso.inference.backends import gguf_is_supported_by_llamacpp
+from seiso.io.files import matching_file_stats
 from seiso.models.catalog import CatalogEntry
+
+
+def _existing_files_total_size(
+    paths: list[Path], *, require_positive: bool
+) -> int | None:
+    total_size = 0
+    for path in paths:
+        if not path.is_file():
+            return None
+        size = path.stat().st_size
+        if require_positive and size <= 0:
+            return None
+        total_size += size
+    return total_size
 
 
 def path_has_complete_artifact(path: Path, fmt: str, expected_size: int) -> bool:
@@ -23,27 +38,25 @@ def path_has_complete_artifact(path: Path, fmt: str, expected_size: int) -> bool
                 and size > 0
                 and (expected_size <= 0 or size >= expected_size)
             )
-        ggufs = [p for p in path.rglob("*.gguf") if p.is_file()]
-        size = sum(p.stat().st_size for p in ggufs)
+        count, size = matching_file_stats(path, "*.gguf")
         return (
-            bool(ggufs) and size > 0 and (expected_size <= 0 or size >= expected_size)
+            count > 0 and size > 0 and (expected_size <= 0 or size >= expected_size)
         )
     if path.is_dir():
-        weight_files = [
-            p
-            for p in path.rglob("*")
-            if p.is_file() and p.suffix.lower() in {".safetensors", ".bin"}
-        ]
-        size = sum(p.stat().st_size for p in weight_files)
+        count, size = matching_file_stats(
+            path, suffixes=frozenset({".safetensors", ".bin"})
+        )
         return (
-            bool(weight_files)
+            count > 0
             and size > 0
             and (expected_size <= 0 or size >= expected_size)
         )
+    if not path.is_file():
+        return False
+    size = path.stat().st_size
     return (
-        path.is_file()
-        and path.stat().st_size > 0
-        and (expected_size <= 0 or path.stat().st_size >= expected_size)
+        size > 0
+        and (expected_size <= 0 or size >= expected_size)
     )
 
 
@@ -57,9 +70,9 @@ def gguf_files_complete_at_path(
         if path.is_file() and len(filenames) == 1
         else [path / filename for filename in filenames]
     )
-    if not all(item.is_file() and item.stat().st_size > 0 for item in files):
+    actual_size = _existing_files_total_size(files, require_positive=True)
+    if actual_size is None:
         return False
-    actual_size = sum(item.stat().st_size for item in files)
     return expected_size <= 0 or actual_size >= expected_size
 
 
@@ -73,7 +86,8 @@ def gguf_files_complete_with_hub(
 ) -> bool:
     if not filenames or len(filenames) != len(paths):
         return False
-    if not all(path.is_file() and path.stat().st_size > 0 for path in paths):
+    actual_size = _existing_files_total_size(paths, require_positive=True)
+    if actual_size is None:
         return False
     if size_lookup is None:
         from forge.services.hf_hub import get_gguf_file_size_bytes
@@ -83,8 +97,7 @@ def gguf_files_complete_with_hub(
         expected = sum(size_lookup(repo_id, filename) for filename in filenames)
     except Exception:
         return entry is None
-    actual = sum(path.stat().st_size for path in paths)
-    return expected <= 0 or actual >= expected
+    return expected <= 0 or actual_size >= expected
 
 
 def inventory_gguf_is_complete(
@@ -112,9 +125,9 @@ def inventory_gguf_is_complete(
     local_files = (
         [path] if path.is_file() else [path / str(filename) for filename in gguf_files]
     )
-    if not all(item.is_file() for item in local_files):
+    actual_size = _existing_files_total_size(local_files, require_positive=False)
+    if actual_size is None:
         return False
-    actual_size = sum(item.stat().st_size for item in local_files)
     if size_lookup is None:
         from forge.services.hf_hub import get_gguf_file_size_bytes
 

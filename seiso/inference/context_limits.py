@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-import json
 import re
 from pathlib import Path
+
+from seiso.io.jsonl import read_json_file
 
 # Presets shown in the chat UI (filtered to effective max).
 CONTEXT_WINDOW_PRESETS: tuple[int, ...] = (
@@ -30,12 +31,7 @@ def hf_config_context_length(model_path: str) -> int | None:
     path = Path(model_path)
     root = path.parent if path.is_file() else path
     config_path = root / "config.json"
-    if not config_path.is_file():
-        return None
-    try:
-        data = json.loads(config_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
-        return None
+    data = read_json_file(config_path, default=None)
     if not isinstance(data, dict):
         return None
 

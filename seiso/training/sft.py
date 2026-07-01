@@ -22,9 +22,26 @@ except ImportError:
 def _fused_compute_loss(
     trainer, model, inputs, return_outputs=False, num_items_in_batch=None
 ):
+    return _compute_fused_or_delegate_loss(
+        trainer._seiso_super_compute_loss,
+        model,
+        inputs,
+        return_outputs=return_outputs,
+        num_items_in_batch=num_items_in_batch,
+    )
+
+
+def _compute_fused_or_delegate_loss(
+    delegate,
+    model,
+    inputs,
+    *,
+    return_outputs=False,
+    num_items_in_batch=None,
+):
     labels = inputs.get("labels")
     if labels is None:
-        return trainer._seiso_super_compute_loss(
+        return delegate(
             model,
             inputs,
             return_outputs=return_outputs,
@@ -36,7 +53,7 @@ def _fused_compute_loss(
     logits = outputs.logits if hasattr(outputs, "logits") else outputs[0]
 
     if not logits.is_cuda:
-        return trainer._seiso_super_compute_loss(
+        return delegate(
             model,
             inputs,
             return_outputs=return_outputs,
@@ -249,32 +266,13 @@ def _fallback_trainer(
         def compute_loss(
             self, model, inputs, return_outputs=False, num_items_in_batch=None
         ):
-            labels = inputs.get("labels")
-            if labels is None:
-                return super().compute_loss(
-                    model,
-                    inputs,
-                    return_outputs=return_outputs,
-                    num_items_in_batch=num_items_in_batch,
-                )
-            model_inputs = {k: v for k, v in inputs.items() if k != "labels"}
-            outputs = model(**model_inputs)
-            logits = outputs.logits if hasattr(outputs, "logits") else outputs[0]
-            if not logits.is_cuda:
-                return super().compute_loss(
-                    model,
-                    inputs,
-                    return_outputs=return_outputs,
-                    num_items_in_batch=num_items_in_batch,
-                )
-            from seiso.kernels.loss import (
-                fused_cross_entropy_loss,
-                shift_logits_and_labels,
+            return _compute_fused_or_delegate_loss(
+                super().compute_loss,
+                model,
+                inputs,
+                return_outputs=return_outputs,
+                num_items_in_batch=num_items_in_batch,
             )
-
-            shift_logits, shift_labels = shift_logits_and_labels(logits, labels)
-            loss = fused_cross_entropy_loss(shift_logits, shift_labels)
-            return (loss, outputs) if return_outputs else loss
 
     return _FusedTrainer(
         model=model,

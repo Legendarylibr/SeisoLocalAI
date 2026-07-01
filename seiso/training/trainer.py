@@ -9,10 +9,12 @@ import json
 import logging
 import os
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from seiso.io.jsonl import read_json_file
 from seiso.kernels.hooks import (
     apply_fused_lora_kernels,
     apply_fused_lora_qkv_kernels,
@@ -58,6 +60,16 @@ from seiso.training.preprocess import (
 from seiso.training.sft import build_sft_trainer
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class PreparedTrainingDatasets:
+    train_ds: Any
+    eval_ds: Any | None
+    detected_format: DatasetFormat
+    data_collator: Any | None
+    dataset_text_field: str | None
+    preprocess_stats: dict[str, Any] | None
 
 
 class SeisoTrainer:
@@ -186,100 +198,7 @@ class SeisoTrainer:
 
         SeisoModel.for_training(model)
 
-        ds_fmt = cfg.dataset_format
-        raw_ds = load_training_dataset(cfg.dataset, sandbox_root=cfg.sandbox_root)
-        preprocess_stats: dict[str, Any] | None = None
-        if cfg.preprocess_dataset:
-            raw_ds, preprocess_stats, ds_fmt = preprocess_training_dataset(
-                raw_ds,
-                dataset_format=ds_fmt,
-                deduplicate=cfg.deduplicate_dataset,
-                min_chars=cfg.min_sample_chars,
-                num_proc=resolve_map_workers(cfg),
-            )
-            self._log(
-                f"Preprocessed dataset: {preprocess_stats['kept']}/{preprocess_stats['initial_samples']} "
-                f"samples kept (format={preprocess_stats['resolved_format']})"
-            )
-        max_samples = cfg.extra.get("max_samples")
-        if (
-            isinstance(max_samples, int)
-            and max_samples > 0
-            and len(raw_ds) > max_samples
-        ):
-            raw_ds = raw_ds.select(range(max_samples))
-            logger.info("Limited dataset to %d samples (max_samples)", max_samples)
-        eval_n = 0
-        if len(raw_ds) > 10 and (cfg.early_stopping or cfg.eval_split_ratio > 0):
-            split_ratio = cfg.eval_split_ratio if cfg.eval_split_ratio > 0 else 0.02
-            eval_n = compute_eval_split_size(
-                len(raw_ds),
-                split_ratio,
-                cfg.max_eval_samples,
-            )
-        if eval_n > 0:
-            split = raw_ds.train_test_split(test_size=eval_n, seed=cfg.seed)
-            train_ds, eval_ds = split["train"], split["test"]
-            self._log(
-                f"Train/eval split: {len(train_ds)} train, {len(eval_ds)} eval (max_eval={cfg.max_eval_samples})"
-            )
-        else:
-            train_ds, eval_ds = raw_ds, None
-
-        detected_fmt = ds_fmt
-        if cfg.packing and cfg.train_on_responses_only:
-            logger.warning("Sequence packing disables train-on-responses-only masking")
-        use_sft_text = cfg.packing
-        data_collator = None
-        dataset_text_field = None
-        map_workers = resolve_map_workers(cfg)
-
-        if use_sft_text:
-            train_ds, detected_fmt = format_dataset_text(
-                train_ds,
-                tokenizer,
-                ds_fmt,
-                num_proc=map_workers,
-            )
-            dataset_text_field = "text"
-            tokenized_eval = None
-            if eval_ds is not None:
-                tokenized_eval, _ = format_dataset_text(
-                    eval_ds,
-                    tokenizer,
-                    detected_fmt,
-                    num_proc=map_workers,
-                )
-                eval_ds = tokenized_eval
-        else:
-            train_ds, detected_fmt = prepare_tokenized_dataset(
-                train_ds,
-                tokenizer,
-                max_seq_length=cfg.max_seq_length,
-                dataset_format=ds_fmt,
-                train_on_inputs=not cfg.train_on_responses_only,
-                num_proc=map_workers,
-            )
-            tokenized_eval = None
-            if eval_ds is not None:
-                tokenized_eval, _ = prepare_tokenized_dataset(
-                    eval_ds,
-                    tokenizer,
-                    max_seq_length=cfg.max_seq_length,
-                    dataset_format=detected_fmt,
-                    train_on_inputs=not cfg.train_on_responses_only,
-                    num_proc=map_workers,
-                )
-                eval_ds = tokenized_eval
-            import torch
-
-            pad_multiple = default_pad_to_multiple_of(
-                cfg.pad_to_multiple_of,
-                cuda_available=torch.cuda.is_available(),
-            )
-            data_collator = self._make_collator(
-                tokenizer, pad_to_multiple_of=pad_multiple
-            )
+        prepared = self._prepare_datasets(tokenizer)
 
         from seiso.training.metrics import build_metrics_callback
 
@@ -291,27 +210,20 @@ class SeisoTrainer:
         )
         self._metrics_callback = metrics_cb
 
-        trainer_callbacks: list[Any] = [metrics_cb]
-        if eval_ds is not None and cfg.early_stopping:
-            from transformers import EarlyStoppingCallback
-
-            trainer_callbacks.append(
-                EarlyStoppingCallback(
-                    early_stopping_patience=cfg.early_stopping_patience,
-                    early_stopping_threshold=cfg.early_stopping_threshold,
-                )
-            )
+        trainer_callbacks = self._build_callbacks(
+            metrics_cb, eval_enabled=prepared.eval_ds is not None
+        )
 
         trainer = self._build_trainer(
             model,
             tokenizer,
-            train_ds,
-            eval_ds,
+            prepared.train_ds,
+            prepared.eval_ds,
             layout,
             multi_gpu,
-            data_collator=data_collator,
-            dataset_text_field=dataset_text_field,
-            dataset_format=detected_fmt,
+            data_collator=prepared.data_collator,
+            dataset_text_field=prepared.dataset_text_field,
+            dataset_format=prepared.detected_format,
             callbacks=trainer_callbacks,
         )
 
@@ -340,15 +252,146 @@ class SeisoTrainer:
             out,
             layout,
             multi_gpu,
-            detected_fmt.value,
-            preprocess_stats=preprocess_stats,
-            train_samples=len(train_ds),
-            eval_samples=len(eval_ds) if eval_ds is not None else 0,
+            prepared.detected_format.value,
+            preprocess_stats=prepared.preprocess_stats,
+            train_samples=len(prepared.train_ds),
+            eval_samples=len(prepared.eval_ds) if prepared.eval_ds is not None else 0,
         )
         release_training_memory(model)
         self._cleanup_gpu(None)
         logger.info("Training complete: %s", out)
         return out
+
+    def _prepare_datasets(self, tokenizer) -> PreparedTrainingDatasets:
+        cfg = self.config
+        ds_fmt = cfg.dataset_format
+        raw_ds = load_training_dataset(cfg.dataset, sandbox_root=cfg.sandbox_root)
+        preprocess_stats: dict[str, Any] | None = None
+
+        if cfg.preprocess_dataset:
+            raw_ds, preprocess_stats, ds_fmt = preprocess_training_dataset(
+                raw_ds,
+                dataset_format=ds_fmt,
+                deduplicate=cfg.deduplicate_dataset,
+                min_chars=cfg.min_sample_chars,
+                num_proc=resolve_map_workers(cfg),
+            )
+            self._log(
+                f"Preprocessed dataset: {preprocess_stats['kept']}/{preprocess_stats['initial_samples']} "
+                f"samples kept (format={preprocess_stats['resolved_format']})"
+            )
+
+        raw_ds = self._limit_training_samples(raw_ds)
+        train_ds, eval_ds = self._split_train_eval(raw_ds)
+        detected_fmt, train_ds, eval_ds, dataset_text_field, data_collator = (
+            self._format_or_tokenize_datasets(train_ds, eval_ds, tokenizer, ds_fmt)
+        )
+
+        return PreparedTrainingDatasets(
+            train_ds=train_ds,
+            eval_ds=eval_ds,
+            detected_format=detected_fmt,
+            data_collator=data_collator,
+            dataset_text_field=dataset_text_field,
+            preprocess_stats=preprocess_stats,
+        )
+
+    def _limit_training_samples(self, raw_ds):
+        max_samples = self.config.extra.get("max_samples")
+        if (
+            isinstance(max_samples, int)
+            and max_samples > 0
+            and len(raw_ds) > max_samples
+        ):
+            raw_ds = raw_ds.select(range(max_samples))
+            logger.info("Limited dataset to %d samples (max_samples)", max_samples)
+        return raw_ds
+
+    def _split_train_eval(self, raw_ds):
+        cfg = self.config
+        eval_n = 0
+        if len(raw_ds) > 10 and (cfg.early_stopping or cfg.eval_split_ratio > 0):
+            split_ratio = cfg.eval_split_ratio if cfg.eval_split_ratio > 0 else 0.02
+            eval_n = compute_eval_split_size(
+                len(raw_ds),
+                split_ratio,
+                cfg.max_eval_samples,
+            )
+        if eval_n <= 0:
+            return raw_ds, None
+
+        split = raw_ds.train_test_split(test_size=eval_n, seed=cfg.seed)
+        train_ds, eval_ds = split["train"], split["test"]
+        self._log(
+            f"Train/eval split: {len(train_ds)} train, {len(eval_ds)} eval (max_eval={cfg.max_eval_samples})"
+        )
+        return train_ds, eval_ds
+
+    def _format_or_tokenize_datasets(self, train_ds, eval_ds, tokenizer, ds_fmt):
+        cfg = self.config
+        map_workers = resolve_map_workers(cfg)
+        data_collator = None
+        dataset_text_field = None
+
+        if cfg.packing and cfg.train_on_responses_only:
+            logger.warning("Sequence packing disables train-on-responses-only masking")
+
+        if cfg.packing:
+            train_ds, detected_fmt = format_dataset_text(
+                train_ds,
+                tokenizer,
+                ds_fmt,
+                num_proc=map_workers,
+            )
+            dataset_text_field = "text"
+            if eval_ds is not None:
+                eval_ds, _ = format_dataset_text(
+                    eval_ds,
+                    tokenizer,
+                    detected_fmt,
+                    num_proc=map_workers,
+                )
+            return detected_fmt, train_ds, eval_ds, dataset_text_field, data_collator
+
+        train_ds, detected_fmt = prepare_tokenized_dataset(
+            train_ds,
+            tokenizer,
+            max_seq_length=cfg.max_seq_length,
+            dataset_format=ds_fmt,
+            train_on_inputs=not cfg.train_on_responses_only,
+            num_proc=map_workers,
+        )
+        if eval_ds is not None:
+            eval_ds, _ = prepare_tokenized_dataset(
+                eval_ds,
+                tokenizer,
+                max_seq_length=cfg.max_seq_length,
+                dataset_format=detected_fmt,
+                train_on_inputs=not cfg.train_on_responses_only,
+                num_proc=map_workers,
+            )
+        import torch
+
+        pad_multiple = default_pad_to_multiple_of(
+            cfg.pad_to_multiple_of,
+            cuda_available=torch.cuda.is_available(),
+        )
+        data_collator = self._make_collator(tokenizer, pad_to_multiple_of=pad_multiple)
+        return detected_fmt, train_ds, eval_ds, dataset_text_field, data_collator
+
+    def _build_callbacks(self, metrics_cb, *, eval_enabled: bool) -> list[Any]:
+        cfg = self.config
+        callbacks: list[Any] = [metrics_cb]
+        if eval_enabled and cfg.early_stopping:
+            from transformers import EarlyStoppingCallback
+
+            callbacks.append(
+                EarlyStoppingCallback(
+                    early_stopping_patience=cfg.early_stopping_patience,
+                    early_stopping_threshold=cfg.early_stopping_threshold,
+                )
+            )
+        return callbacks
 
     def _train_with_oom_recovery(
         self, trainer, *, resume_from_checkpoint: str | None = None
@@ -739,11 +782,8 @@ class SeisoTrainer:
     def _patch_adapter_metadata(self, out: Path) -> None:
         """Ensure adapter_config.json points at the local base for offline merge/export."""
         adapter_cfg_path = out / "adapter_config.json"
-        if not adapter_cfg_path.is_file():
-            return
-        try:
-            adapter_cfg = json.loads(adapter_cfg_path.read_text())
-        except (OSError, json.JSONDecodeError):
+        adapter_cfg = read_json_file(adapter_cfg_path, default=None)
+        if not isinstance(adapter_cfg, dict):
             return
 
         base_path = self._resolve_load_model_id()

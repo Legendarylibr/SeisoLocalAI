@@ -13,6 +13,7 @@ from seiso.export.formats import (
     validate_lora_checkpoint,
 )
 from seiso.export.gguf import (
+    _export_quants,
     normalize_gguf_quant,
     normalize_gguf_quants,
     resolve_gguf_converter,
@@ -45,6 +46,73 @@ def test_resolve_gguf_converter_llama_cpp_dir(monkeypatch, tmp_path: Path):
     assert str(script) in cmds[0][1]
 
 
+def test_export_quants_reuses_single_f16_intermediate(monkeypatch, tmp_path: Path):
+    calls: list[tuple[str, Path]] = []
+    quantized: list[tuple[str, Path]] = []
+
+    def fake_convert(_source: Path, dest: Path, outtype: str, _log):
+        calls.append((outtype, dest))
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(b"f16")
+        return True
+
+    def fake_quantize(source: Path, dest: Path, quant: str, _log):
+        assert source.is_file()
+        quantized.append((quant, source))
+        dest.write_bytes(quant.encode())
+        return True
+
+    monkeypatch.setattr("seiso.export.gguf._convert_hf_dir_direct", fake_convert)
+    monkeypatch.setattr("seiso.export.gguf.quantize_gguf_file", fake_quantize)
+
+    results = _export_quants(
+        tmp_path / "merged",
+        tmp_path / "out",
+        ["q4_k_m", "q5_k_m"],
+        "model",
+        lambda _msg: None,
+    )
+
+    assert [call[0] for call in calls] == ["f16"]
+    assert [item[0] for item in quantized] == ["q4_k_m", "q5_k_m"]
+    assert quantized[0][1] == quantized[1][1]
+    assert set(results) == {"gguf_q4_k_m", "gguf_q5_k_m"}
+
+
+def test_export_quants_reuses_requested_f16_for_later_k_quant(
+    monkeypatch, tmp_path: Path
+):
+    calls: list[tuple[str, Path]] = []
+    quantized: list[tuple[str, Path]] = []
+
+    def fake_convert(_source: Path, dest: Path, outtype: str, _log):
+        calls.append((outtype, dest))
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(b"f16")
+        return True
+
+    def fake_quantize(source: Path, dest: Path, quant: str, _log):
+        assert source == tmp_path / "out" / "f16" / "model-f16.gguf"
+        quantized.append((quant, source))
+        dest.write_bytes(quant.encode())
+        return True
+
+    monkeypatch.setattr("seiso.export.gguf._convert_hf_dir_direct", fake_convert)
+    monkeypatch.setattr("seiso.export.gguf.quantize_gguf_file", fake_quantize)
+
+    results = _export_quants(
+        tmp_path / "merged",
+        tmp_path / "out",
+        ["f16", "q4_k_m"],
+        "model",
+        lambda _msg: None,
+    )
+
+    assert [call[0] for call in calls] == ["f16"]
+    assert [item[0] for item in quantized] == ["q4_k_m"]
+    assert set(results) == {"gguf_f16", "gguf_q4_k_m"}
+
+
 def test_validate_lora_checkpoint_requires_weights(tmp_path: Path):
     ckpt = tmp_path / "lora"
     ckpt.mkdir()
@@ -74,6 +142,16 @@ def test_resolve_merge_base_model_from_manifest(tmp_path: Path):
     )
 
     assert _resolve_merge_base_model(ckpt) == str(base.resolve())
+
+
+def test_resolve_merge_base_model_falls_back_to_adapter_hub_id(tmp_path: Path):
+    ckpt = tmp_path / "adapter"
+    ckpt.mkdir()
+    (ckpt / "adapter_config.json").write_text(
+        '{"base_model_name_or_path": "remote/model"}'
+    )
+
+    assert _resolve_merge_base_model(ckpt) == "remote/model"
 
 
 @patch("seiso.export.formats._load_merge_deps")

@@ -27,10 +27,11 @@ from forge.services.hardware import (
 )
 from forge.services.hf_auth import resolve_hf_token_for_download
 from forge.services.hf_cache_inventory import sync_hf_cache_inventory
-from forge.services.hf_hub import _format_hub_download_error, dir_size
+from forge.services.hf_hub import _format_hub_download_error
 from forge.services.model_download import perform_model_download
 from forge.services.publishable import is_pushable_model
 from forge.services.user_paths import assert_user_path
+from seiso.io.files import path_size_bytes
 from seiso.models.catalog import (
     HubSearchError,
     get_families,
@@ -395,5 +396,5 @@ async def register_local(
         path=str(path),
         source=body.source or "manual",
         format=body.format or path.suffix.lstrip("."),
-        size_bytes=path.stat().st_size if path.is_file() else dir_size(path),
+        size_bytes=path_size_bytes(path),
     )
