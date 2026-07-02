@@ -16,6 +16,7 @@ from seiso.slime_single_gpu.rewards import (
     numeric_reward,
     resolve_reward,
 )
+from seiso.models.lora_targets import resolve_lora_target_modules
 from seiso.slime_single_gpu.trainer import (
     Rollout,
     _append_jsonl_records,
@@ -33,7 +34,6 @@ from seiso.slime_single_gpu.trainer import (
     _load_samples,
     _merge_stats,
     _process_reward,
-    _resolve_lora_target_modules,
     _score_completion,
     _split_thinking_trace,
     _truncate_text,
@@ -368,31 +368,51 @@ def test_lora_target_inference_prefers_common_projection_names():
         ]
     )
 
-    assert _resolve_lora_target_modules(model, None) == [
+    assert resolve_lora_target_modules("test/model", model) == [
         "q_proj",
         "v_proj",
-        "down_proj",
     ]
 
 
-def test_lora_target_inference_falls_back_to_linear_modules():
+def test_lora_target_inference_scopes_gemma4_to_language_model():
     model = _DummyModel(
         [
-            ("block.foo", Linear()),
-            ("block.bar", Linear()),
-            ("lm_head", Linear()),
+            (
+                "model.vision_tower.encoder.layers.0.self_attn.q_proj",
+                _Other(),
+            ),
+            (
+                "model.language_model.layers.0.self_attn.q_proj",
+                Linear(),
+            ),
+            (
+                "model.language_model.layers.0.self_attn.v_proj",
+                Linear(),
+            ),
         ]
     )
+    model.config = types.SimpleNamespace(model_type="gemma4")
 
-    assert _resolve_lora_target_modules(model, None) == ["bar", "foo"]
+    assert resolve_lora_target_modules("google/gemma-4-E4B-it", model) == (
+        r".*language_model\..*\.(q_proj|v_proj)"
+    )
 
 
 def test_lora_target_inference_honors_configured_modules():
-    model = _DummyModel([])
+    model = _DummyModel(
+        [
+            ("model.layers.0.self_attn.q_proj", _Other()),
+            ("model.layers.0.self_attn.v_proj", _Other()),
+        ]
+    )
 
-    assert _resolve_lora_target_modules(model, ["v_proj", "q_proj", "q_proj"]) == [
-        "q_proj",
+    assert resolve_lora_target_modules(
+        "test/model",
+        model,
+        configured=["v_proj", "q_proj", "q_proj"],
+    ) == [
         "v_proj",
+        "q_proj",
     ]
 
 
@@ -429,11 +449,15 @@ def test_apply_lora_prepares_model_before_wrapping(monkeypatch, tmp_path: Path):
             self.kwargs = kwargs
 
     class WrappedModel(_DummyModel):
+        def gradient_checkpointing_enable(self, **kwargs):
+            calls.append("grad_ckpt")
+            assert kwargs["gradient_checkpointing_kwargs"] == {"use_reentrant": False}
+
         def enable_input_require_grads(self):
             calls.append("input_grads")
 
     def prepare_model_for_kbit_training(model, *, use_gradient_checkpointing):
-        assert use_gradient_checkpointing is True
+        assert use_gradient_checkpointing is False
         calls.append("prepare")
         return model
 
@@ -462,7 +486,7 @@ def test_apply_lora_prepares_model_before_wrapping(monkeypatch, tmp_path: Path):
     wrapped = _apply_lora(model, cfg)
 
     assert isinstance(wrapped, WrappedModel)
-    assert calls == ["prepare", "wrap", "input_grads"]
+    assert calls == ["wrap", "grad_ckpt", "input_grads"]
 
 
 def test_auto_stop_controller_tracks_best_reward_and_plateau():

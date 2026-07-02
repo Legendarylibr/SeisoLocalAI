@@ -13,27 +13,14 @@ from pathlib import Path
 from typing import Any, TypeVar
 
 from seiso.io.jsonl import iter_jsonl
+from seiso.models.lora_targets import resolve_lora_target_modules
+from seiso.research.provenance import apply_determinism
 from seiso.slime_single_gpu.config import SingleGpuSlimeConfig
 from seiso.slime_single_gpu.rewards import resolve_reward
 
-T = TypeVar("T")
+_GRADIENT_CHECKPOINTING_KWARGS = {"use_reentrant": False}
 
-_PREFERRED_LORA_TARGETS = (
-    "q_proj",
-    "k_proj",
-    "v_proj",
-    "o_proj",
-    "gate_proj",
-    "up_proj",
-    "down_proj",
-    "query_key_value",
-    "dense",
-    "dense_h_to_4h",
-    "dense_4h_to_h",
-    "W_pack",
-    "c_attn",
-    "c_proj",
-)
+T = TypeVar("T")
 
 
 @dataclass
@@ -140,12 +127,13 @@ def train_single_gpu_slime(config: SingleGpuSlimeConfig) -> Path:
         low_cpu_mem_usage=True,
     )
     model.config.use_cache = False
-    if config.gradient_checkpointing and hasattr(
-        model, "gradient_checkpointing_enable"
-    ):
-        model.gradient_checkpointing_enable()
+    _freeze_multimodal_backbones(model)
     if config.use_lora:
         model = _apply_lora(model, config)
+    elif config.gradient_checkpointing and hasattr(model, "gradient_checkpointing_enable"):
+        model.gradient_checkpointing_enable(
+            gradient_checkpointing_kwargs=_GRADIENT_CHECKPOINTING_KWARGS
+        )
 
     ref_model = None
     if config.kl_coef > 0:
@@ -723,15 +711,20 @@ def _apply_lora(model, config: SingleGpuSlimeConfig):
             "`pip install -e '.[train]'`."
         ) from exc
 
-    if config.gradient_checkpointing:
+    if _model_loaded_in_kbit(model):
         try:
             model = prepare_model_for_kbit_training(
                 model,
-                use_gradient_checkpointing=True,
+                use_gradient_checkpointing=False,
             )
         except TypeError:
             model = prepare_model_for_kbit_training(model)
-    target_modules = _resolve_lora_target_modules(model, config.lora_target_modules)
+
+    target_modules = resolve_lora_target_modules(
+        config.model_id,
+        model,
+        configured=config.lora_target_modules,
+    )
     lora_config = LoraConfig(
         task_type=TaskType.CAUSAL_LM,
         r=config.lora_r,
@@ -741,37 +734,39 @@ def _apply_lora(model, config: SingleGpuSlimeConfig):
         target_modules=target_modules,
     )
     model = get_peft_model(model, lora_config)
+    if config.gradient_checkpointing and hasattr(model, "gradient_checkpointing_enable"):
+        model.gradient_checkpointing_enable(
+            gradient_checkpointing_kwargs=_GRADIENT_CHECKPOINTING_KWARGS
+        )
     if config.gradient_checkpointing and hasattr(model, "enable_input_require_grads"):
         model.enable_input_require_grads()
     return model
 
 
-def _resolve_lora_target_modules(
-    model,
-    configured: list[str] | None,
-) -> list[str]:
-    if configured is not None:
-        return sorted(set(configured))
+def _model_loaded_in_kbit(model) -> bool:
+    try:
+        parameters = model.parameters()
+    except AttributeError:
+        return False
+    for param in parameters:
+        if param.__class__.__name__ == "Params4bit":
+            return True
+    return False
 
-    module_tails = {
-        name.rsplit(".", 1)[-1] for name, _module in model.named_modules() if name
-    }
-    preferred = [target for target in _PREFERRED_LORA_TARGETS if target in module_tails]
-    if preferred:
-        return preferred
 
-    linear_like = {
-        name.rsplit(".", 1)[-1]
-        for name, module in model.named_modules()
-        if name
-        and name.rsplit(".", 1)[-1] != "lm_head"
-        and module.__class__.__name__.lower() in {"linear", "conv1d"}
-    }
-    if linear_like:
-        return sorted(linear_like)
-    raise RuntimeError(
-        "could not infer LoRA target modules; set lora_target_modules explicitly"
-    )
+def _freeze_multimodal_backbones(model) -> None:
+    """Keep vision/audio towers frozen for text-only slime on multimodal Gemma4."""
+    model_config = getattr(model, "config", None)
+    if getattr(model_config, "model_type", None) != "gemma4":
+        return
+    backbone = getattr(model, "model", None)
+    if backbone is None:
+        return
+    for name in ("vision_tower", "audio_tower", "embed_vision", "embed_audio"):
+        tower = getattr(backbone, name, None)
+        if tower is None:
+            continue
+        tower.requires_grad_(False)
 
 
 def _optimizer_step(model, optimizer, torch, config: SingleGpuSlimeConfig) -> None:
@@ -892,15 +887,7 @@ def _assert_vram_fit(torch, max_vram_gb: float | None, device: str) -> None:
 
 
 def _set_seed(seed: int) -> None:
-    random.seed(seed)
-    try:
-        import torch
-
-        torch.manual_seed(seed)
-        if torch.cuda.is_available():
-            torch.cuda.manual_seed_all(seed)
-    except ImportError:
-        return
+    apply_determinism(seed, deterministic=True)
 
 
 def _batched_records(

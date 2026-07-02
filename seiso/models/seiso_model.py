@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from seiso.models.loader import LoadOptions, ModelKind, load_model
-from seiso.models.lora_targets import get_lora_target_modules, modules_exist_in_model
+from seiso.models.lora_targets import resolve_lora_target_modules
 
 logger = logging.getLogger(__name__)
 
@@ -78,14 +78,11 @@ class SeisoModel:
         """Apply LoRA adapters via PEFT."""
         from peft import LoraConfig, TaskType, get_peft_model
 
-        if target_modules is None:
-            target_modules = get_lora_target_modules(model_id, model)
-        target_modules = modules_exist_in_model(model, target_modules)
-        if not target_modules:
-            raise ValueError(
-                "Could not infer LoRA target modules for this model. "
-                "Pass target_modules explicitly for this architecture."
-            )
+        target_modules = resolve_lora_target_modules(
+            model_id,
+            model,
+            configured=target_modules,
+        )
 
         if use_gradient_checkpointing and hasattr(
             model, "gradient_checkpointing_enable"
