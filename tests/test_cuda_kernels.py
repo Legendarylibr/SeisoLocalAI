@@ -140,3 +140,24 @@ def test_fused_lora_qkv_cache_invalidates_after_inplace_copy():
     static_x.copy_(torch.randn_like(static_x))
     second = _run(static_x)
     assert not torch.allclose(first[0], second[0], atol=1e-3)
+
+
+def test_fused_cross_entropy_all_ignored_labels():
+    """Batches with only -100 labels must not trip autograd mark_dirty."""
+    torch = pytest.importorskip("torch")
+    from seiso.kernels.loss import fused_cross_entropy_loss, shift_logits_and_labels
+
+    logits = torch.randn(4, 128, device="cuda", requires_grad=True)
+    labels = torch.full((4,), -100, device="cuda", dtype=torch.long)
+    loss = fused_cross_entropy_loss(logits, labels)
+    loss.backward()
+    assert float(loss) == 0.0
+    assert logits.grad is not None
+    assert torch.all(logits.grad == 0)
+
+    seq_logits = torch.randn(1, 32, 64, device="cuda", requires_grad=True)
+    seq_labels = torch.full((1, 32), -100, device="cuda", dtype=torch.long)
+    shift_logits, shift_labels = shift_logits_and_labels(seq_logits, seq_labels)
+    loss2 = fused_cross_entropy_loss(shift_logits, shift_labels)
+    loss2.backward()
+    assert float(loss2) == 0.0
