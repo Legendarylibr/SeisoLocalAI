@@ -105,25 +105,12 @@ def effective_context_ceiling(
     model_format: str | None = None,
     model_name: str | None = None,
 ) -> int:
-    """Maximum selectable context after model capability and free VRAM."""
-    from seiso.memory.protection import (
-        _INFERENCE_OVERHEAD_MB,
-        _MIN_LLAMA_CTX,
-        headroom_mb,
-    )
-
-    step = 512
-    headroom = headroom_mb()
-    vram_cap = max(_MIN_LLAMA_CTX, int((headroom - _INFERENCE_OVERHEAD_MB) * 5))
-    vram_cap = min(vram_cap, ABSOLUTE_MAX_CTX)
-    vram_cap = (vram_cap // step) * step or _MIN_LLAMA_CTX
-
-    model_cap = resolve_model_context_ceiling(
+    """Maximum selectable context from model capability only."""
+    return resolve_model_context_ceiling(
         model_path,
         model_format=model_format,
         model_name=model_name,
     )
-    return min(model_cap, vram_cap)
 
 
 def context_window_presets(max_ctx: int) -> list[int]:

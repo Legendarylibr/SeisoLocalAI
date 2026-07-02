@@ -323,17 +323,13 @@ def test_llama_load_kwargs_cuda_defaults(monkeypatch):
     monkeypatch.setattr(
         "seiso.inference.model_pool._llama_gpu_offload_ok", lambda: True
     )
-    monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 9000)
-    monkeypatch.setattr(
-        "seiso.inference.model_pool._speed_llama_batch_defaults", lambda _h: None
-    )
 
     kwargs = llama_load_kwargs(4096)
     assert kwargs["n_gpu_layers"] == -1
-    assert kwargs["n_threads"] == 12
+    assert kwargs["n_threads"] == 16
     assert kwargs["n_threads_batch"] == 24
-    assert kwargs["n_batch"] == 1792
-    assert kwargs["n_ubatch"] == 512
+    assert kwargs["n_batch"] == 4096
+    assert kwargs["n_ubatch"] == 1024
     assert kwargs["flash_attn"] is True
     assert kwargs["offload_kqv"] is True
     assert kwargs["op_offload"] is True
@@ -407,43 +403,26 @@ def test_llama_full_gpu_targets(monkeypatch):
     assert mp._llama_full_gpu_targets(0) == []
 
 
-def test_headroom_llama_batch_caps_speed_first():
+def test_llama_batch_defaults_are_speed_first():
     import seiso.inference.model_pool as mp
 
-    batch, ubatch = mp._headroom_llama_batch_caps(7000, speed_first=True)
-    assert batch == 1024
-    assert ubatch == 768
-
-    batch, ubatch = mp._headroom_llama_batch_caps(7000, speed_first=False)
-    assert batch == 1024
-    assert ubatch == 512
-
-    batch, ubatch = mp._headroom_llama_batch_caps(14000, speed_first=True)
-    assert batch == 2048
+    batch, ubatch = mp._llama_batch_defaults()
+    assert batch == 4096
     assert ubatch == 1024
 
 
-def test_llama_speed_memory_profiles_non_borderline(monkeypatch, tmp_path):
+def test_llama_speed_memory_profiles_ignore_headroom(monkeypatch, tmp_path):
     import seiso.inference.model_pool as mp
 
     gguf = tmp_path / "small.gguf"
     gguf.write_bytes(b"\x00" * 1024)
-    monkeypatch.setattr(mp, "_llama_borderline_vram", lambda _p, _f: False)
-    monkeypatch.setattr(
-        "seiso.memory.protection.estimate_path_vram_mb",
-        lambda _p: 4096,
-    )
-    monkeypatch.setattr(
-        "seiso.inference.backends.gguf_block_count",
-        lambda _p: 32,
-    )
 
     profiles = mp._llama_speed_memory_profiles(
         {"n_gpu_layers": -1, "n_ctx": 4096, "n_batch": 1024, "n_ubatch": 512},
         str(gguf),
-        24000,
+        1024,
     )
-    assert profiles == [{"n_batch": 3072, "n_ubatch": 1024}]
+    assert profiles == [{"n_batch": 4096, "n_ubatch": 1024}]
 
 
 def test_llama_load_model_tries_speed_profile_before_base(monkeypatch, tmp_path):
@@ -461,45 +440,60 @@ def test_llama_load_model_tries_speed_profile_before_base(monkeypatch, tmp_path)
 
     monkeypatch.setattr(mp, "_llama_gpu_offload_ok", lambda: True)
     monkeypatch.setattr(mp, "_default_llama_gpu_layers", lambda: -1)
-    monkeypatch.setattr(mp, "_llama_borderline_vram", lambda _p, _f=None: False)
     monkeypatch.setattr(mp, "_llama_kv_quant_options", lambda _p: [{}])
-    monkeypatch.setattr(mp, "_llama_speed_memory_profiles", lambda *_a: [{"n_batch": 3072, "n_ubatch": 1024}])
-    monkeypatch.setattr(mp, "_llama_load_memory_profiles", lambda *_a: [{}, {"n_batch": 512, "n_ubatch": 256}])
+    monkeypatch.setattr(
+        mp,
+        "_llama_speed_memory_profiles",
+        lambda *_a: [{"n_batch": 4096, "n_ubatch": 1024}],
+    )
+    monkeypatch.setattr(
+        mp,
+        "_llama_load_memory_profiles",
+        lambda *_a: [{}, {"n_batch": 512, "n_ubatch": 256}],
+    )
     monkeypatch.setattr(mp, "_llama_full_gpu_targets", lambda _r: [-1])
     monkeypatch.setattr(mp, "_llama_layer_attempts", lambda *_a: [0])
     monkeypatch.setattr(mp, "_refresh_headroom_stats", lambda *, force=False: None)
-    monkeypatch.setattr("seiso.memory.protection.release_cached_memory", lambda sync=False: None)
-    monkeypatch.setattr("seiso.memory.protection.estimate_path_vram_mb", lambda _p: 1024)
+    monkeypatch.setattr(
+        "seiso.memory.protection.release_cached_memory", lambda sync=False: None
+    )
+    monkeypatch.setattr(
+        "seiso.memory.protection.estimate_path_vram_mb", lambda _p: 1024
+    )
     monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 24000)
-    monkeypatch.setattr("seiso.inference.tuning.attach_llama_prompt_cache", lambda _llm: None)
-    monkeypatch.setitem(__import__("sys").modules, "llama_cpp", type("LlamaCpp", (), {"Llama": FakeLlama}))
+    monkeypatch.setattr(
+        "seiso.inference.tuning.attach_llama_prompt_cache", lambda _llm: None
+    )
+    monkeypatch.setitem(
+        __import__("sys").modules,
+        "llama_cpp",
+        type("LlamaCpp", (), {"Llama": FakeLlama}),
+    )
 
     mp._load_llama_model(str(gguf), 4096)
 
-    assert attempts[0] == (3072, 1024)
+    assert attempts[0] == (4096, 1024)
 
 
-def test_llama_speed_memory_profiles_skips_borderline(monkeypatch, tmp_path):
+def test_llama_speed_memory_profiles_skip_cpu_only(tmp_path):
     import seiso.inference.model_pool as mp
 
     gguf = tmp_path / "big.gguf"
     gguf.write_bytes(b"\x00" * 1024)
-    monkeypatch.setattr(mp, "_llama_borderline_vram", lambda _p, _f: True)
 
     profiles = mp._llama_speed_memory_profiles(
-        {"n_gpu_layers": -1, "n_ctx": 4096, "n_batch": 1024, "n_ubatch": 512},
+        {"n_gpu_layers": 0, "n_ctx": 4096, "n_batch": 1024, "n_ubatch": 512},
         str(gguf),
-        12000,
+        24000,
     )
     assert profiles == []
 
 
-def test_llama_load_memory_profiles_adds_compact_after_base_for_borderline(monkeypatch, tmp_path):
+def test_llama_load_memory_profiles_adds_compact_fallbacks(tmp_path):
     import seiso.inference.model_pool as mp
 
     gguf = tmp_path / "big.gguf"
     gguf.write_bytes(b"\x00" * 1024)
-    monkeypatch.setattr(mp, "_llama_borderline_vram", lambda _p, _f: True)
 
     profiles = mp._llama_load_memory_profiles(
         {"n_gpu_layers": -1, "n_batch": 2048, "n_ubatch": 512},
