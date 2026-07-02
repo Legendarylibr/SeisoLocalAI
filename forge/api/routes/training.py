@@ -58,6 +58,55 @@ class TrainingJobResponse(BaseModel):
     status: str
 
 
+class CloudGpuCredentialCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    provider: str = Field(min_length=1, max_length=32)
+    auth_kind: str = Field(default="api_key", max_length=32)
+    api_key: str = Field(default="", max_length=4096)
+    access_key_id: str = Field(default="", max_length=512)
+    secret_access_key: str = Field(default="", max_length=4096)
+    session_token: str = Field(default="", max_length=8192)
+    ssh_username: str = Field(default="", max_length=128)
+    ssh_private_key: str = Field(default="", max_length=16384)
+    bootstrap_command: str = Field(default="", max_length=4096)
+    region: str = Field(default="", max_length=128)
+    project: str = Field(default="", max_length=128)
+
+
+_CLOUD_GPU_PROVIDER_TYPE = "cloud_gpu"
+_CLOUD_SECRET_FIELDS = frozenset(
+    {
+        "api_key",
+        "access_key_id",
+        "secret_access_key",
+        "session_token",
+        "ssh_private_key",
+        "bootstrap_command",
+    }
+)
+
+
+def _mask_cloud_credential_config(config: dict[str, Any]) -> dict[str, Any]:
+    masked: dict[str, Any] = {}
+    for key, value in config.items():
+        if key in _CLOUD_SECRET_FIELDS:
+            masked[f"{key}_configured"] = bool(value)
+            continue
+        masked[key] = value
+    return masked
+
+
+def _cloud_credential_response(row: dict[str, Any]) -> dict[str, Any]:
+    config = json.loads(row["config_json"]) if "config_json" in row else row["config"]
+    return {
+        "id": row["id"],
+        "name": row["name"],
+        "provider_type": row["provider_type"],
+        "created_at": row["created_at"],
+        "config": _mask_cloud_credential_config(config),
+    }
+
+
 _DATASET_ANALYSIS_TTL_S = 10 * 60.0
 
 
@@ -324,6 +373,63 @@ async def validate_dataset_endpoint(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@router.get("/cloud-credentials")
+async def list_cloud_gpu_credentials(
+    user_id: Annotated[str, Depends(get_current_user_id)],
+    db: Annotated[Database, Depends(get_db)],
+) -> list[dict[str, Any]]:
+    rows = await db.list_providers(user_id)
+    return [
+        _cloud_credential_response(row)
+        for row in rows
+        if row["provider_type"] == _CLOUD_GPU_PROVIDER_TYPE
+    ]
+
+
+@router.post("/cloud-credentials", status_code=201)
+async def create_cloud_gpu_credential(
+    body: CloudGpuCredentialCreate,
+    user_id: Annotated[str, Depends(get_current_user_id)],
+    db: Annotated[Database, Depends(get_db)],
+) -> dict[str, Any]:
+    provider = body.provider.strip().lower()
+    config = body.model_dump()
+    config["provider"] = provider
+    row = await db.create_provider(
+        user_id,
+        body.name.strip(),
+        _CLOUD_GPU_PROVIDER_TYPE,
+        config,
+    )
+    audit_event(
+        "cloud_gpu_credential_create",
+        user_id=user_id,
+        provider_id=row["id"],
+        provider=provider,
+    )
+    return _cloud_credential_response(row)
+
+
+@router.delete("/cloud-credentials/{credential_id}")
+async def delete_cloud_gpu_credential(
+    credential_id: str,
+    user_id: Annotated[str, Depends(get_current_user_id)],
+    db: Annotated[Database, Depends(get_db)],
+) -> dict[str, str]:
+    row = await db.get_provider(credential_id, user_id)
+    if not row or row["provider_type"] != _CLOUD_GPU_PROVIDER_TYPE:
+        raise HTTPException(404, "Cloud GPU credential not found")
+    ok = await db.delete_provider(credential_id, user_id)
+    if not ok:
+        raise HTTPException(404, "Cloud GPU credential not found")
+    audit_event(
+        "cloud_gpu_credential_delete",
+        user_id=user_id,
+        provider_id=credential_id,
+    )
+    return {"status": "deleted"}
+
+
 @router.get("/jobs")
 async def list_jobs(
     user_id: Annotated[str, Depends(get_current_user_id)],
@@ -374,6 +480,11 @@ async def start_training(
         TrainConfig.model_validate(training_config)
     except Exception as exc:
         raise HTTPException(400, f"Invalid training configuration: {exc}") from exc
+    cloud_credential_id = training_config.get("cloud_gpu_credential_id")
+    if cloud_credential_id:
+        credential = await db.get_provider(str(cloud_credential_id), user_id)
+        if not credential or credential["provider_type"] != _CLOUD_GPU_PROVIDER_TYPE:
+            raise HTTPException(400, "Cloud GPU credential not found")
 
     # Early dataset normalization check — fail fast with clear error *before* queuing the job
     # or downloading the base model. This fulfills "show error before training".

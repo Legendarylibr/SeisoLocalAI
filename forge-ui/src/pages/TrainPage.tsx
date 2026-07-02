@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   api,
+  CloudGpuCredential,
   DatasetAnalysis,
   subscribeSSE,
   SystemMetrics,
@@ -29,7 +30,7 @@ import { Tabs } from "@/components/Tabs";
 import { TrainingMetricsDashboard } from "@/components/TrainingMetricsDashboard";
 import { useHardwareProfile } from "@/hooks/useHardware";
 
-type TrainStudioTab = "setup" | "distributed";
+type TrainStudioTab = "setup" | "distributed" | "cloud";
 
 export function TrainPage() {
   const { profile: hw } = useHardwareProfile();
@@ -84,6 +85,18 @@ export function TrainPage() {
   const [cloudGpuInstanceType, setCloudGpuInstanceType] = useState("");
   const [cloudGpuCount, setCloudGpuCount] = useState(1);
   const [cloudGpuProject, setCloudGpuProject] = useState("");
+  const [cloudCredentials, setCloudCredentials] = useState<CloudGpuCredential[]>([]);
+  const [selectedCloudCredentialId, setSelectedCloudCredentialId] = useState("");
+  const [cloudCredentialName, setCloudCredentialName] = useState("");
+  const [cloudAuthKind, setCloudAuthKind] = useState("api_key");
+  const [cloudApiKey, setCloudApiKey] = useState("");
+  const [cloudAccessKeyId, setCloudAccessKeyId] = useState("");
+  const [cloudSecretAccessKey, setCloudSecretAccessKey] = useState("");
+  const [cloudSessionToken, setCloudSessionToken] = useState("");
+  const [cloudSshUsername, setCloudSshUsername] = useState("");
+  const [cloudSshPrivateKey, setCloudSshPrivateKey] = useState("");
+  const [cloudBootstrapCommand, setCloudBootstrapCommand] = useState("");
+  const [cloudCredentialMsg, setCloudCredentialMsg] = useState("");
   const [useFusedKernels, setUseFusedKernels] = useState(true);
   const [useFusedCe, setUseFusedCe] = useState(true);
   const [gradCkpt, setGradCkpt] = useState(true);
@@ -179,6 +192,7 @@ export function TrainPage() {
   useEffect(() => {
     api.listTrainingJobs().then(setJobs).catch(console.error);
     api.listExportProfiles().then(setExportProfiles).catch(console.error);
+    api.listCloudGpuCredentials().then(setCloudCredentials).catch(console.error);
     if (pendingModel) setModelId(pendingModel);
   }, [pendingModel]);
 
@@ -372,7 +386,8 @@ export function TrainPage() {
     !/(token|secret|password|apikey|api_key|:\/\/)/i.test(value);
   const cloudConfigValid =
     !cloudGpuEnabled ||
-    (cloudGpuProvider !== "none" &&
+    (Boolean(selectedCloudCredentialId) &&
+      cloudGpuProvider !== "none" &&
       cloudGpuInstanceType.trim().length > 0 &&
       [cloudGpuRegion, cloudGpuInstanceType, cloudGpuProject].every(safeCloudLabel));
 
@@ -406,6 +421,55 @@ export function TrainPage() {
     }
   };
 
+  const refreshCloudCredentials = async () => {
+    const rows = await api.listCloudGpuCredentials();
+    setCloudCredentials(rows);
+    return rows;
+  };
+
+  const saveCloudCredential = async () => {
+    if (!cloudCredentialName.trim() || cloudGpuProvider === "none") return;
+    try {
+      const saved = await api.saveCloudGpuCredential({
+        name: cloudCredentialName.trim(),
+        provider: cloudGpuProvider,
+        auth_kind: cloudAuthKind,
+        api_key: cloudApiKey,
+        access_key_id: cloudAccessKeyId,
+        secret_access_key: cloudSecretAccessKey,
+        session_token: cloudSessionToken,
+        ssh_username: cloudSshUsername,
+        ssh_private_key: cloudSshPrivateKey,
+        bootstrap_command: cloudBootstrapCommand,
+        region: cloudGpuRegion,
+        project: cloudGpuProject,
+      });
+      setCloudCredentialMsg("Cloud access saved encrypted locally.");
+      setSelectedCloudCredentialId(saved.id);
+      setCloudCredentialName("");
+      setCloudApiKey("");
+      setCloudAccessKeyId("");
+      setCloudSecretAccessKey("");
+      setCloudSessionToken("");
+      setCloudSshPrivateKey("");
+      setCloudBootstrapCommand("");
+      await refreshCloudCredentials();
+    } catch (err) {
+      setCloudCredentialMsg((err as Error).message);
+    }
+  };
+
+  const deleteCloudCredential = async (credentialId: string) => {
+    try {
+      await api.deleteCloudGpuCredential(credentialId);
+      if (selectedCloudCredentialId === credentialId) setSelectedCloudCredentialId("");
+      setCloudCredentialMsg("Cloud access credential deleted.");
+      await refreshCloudCredentials();
+    } catch (err) {
+      setCloudCredentialMsg((err as Error).message);
+    }
+  };
+
   const start = async () => {
     if (modelBlocked) {
       setDownloadError(recommendations?.warnings[0] || "This model cannot be trained on your hardware.");
@@ -416,8 +480,8 @@ export function TrainPage() {
       return;
     }
     if (!cloudConfigValid) {
-      setDownloadError("Cloud GPU settings must use non-secret labels only. Do not paste tokens, passwords, URLs, or shell commands.");
-      setActiveTab("distributed");
+      setDownloadError("Select a saved cloud access credential and keep cloud target labels free of URLs or secret-looking text.");
+      setActiveTab("cloud");
       return;
     }
     setStarting(true);
@@ -496,6 +560,7 @@ export function TrainPage() {
           cloud_gpu_instance_type: cloudGpuEnabled ? cloudGpuInstanceType.trim() : "",
           cloud_gpu_count: cloudGpuEnabled ? cloudGpuCount : undefined,
           cloud_gpu_project: cloudGpuEnabled ? cloudGpuProject.trim() : "",
+          cloud_gpu_credential_id: cloudGpuEnabled ? selectedCloudCredentialId : undefined,
         },
         distributedEnabled,
         exportPayload,
@@ -602,7 +667,14 @@ export function TrainPage() {
             label: "Distributed",
             description: "Accelerate DDP and cloud GPU launch settings",
             icon: "②",
-            badge: distributedEnabled || cloudGpuEnabled ? "on" : undefined,
+            badge: distributedEnabled ? "on" : undefined,
+          },
+          {
+            id: "cloud",
+            label: "Cloud access",
+            description: "Encrypted provider keys, SSH, bootstrap",
+            icon: "③",
+            badge: selectedCloudCredentialId ? "saved" : undefined,
           },
         ]}
       />
@@ -1281,11 +1353,54 @@ export function TrainPage() {
             </StudioCardBody>
           </div>
 
+          <div className="card studio-card studio-card-scroll">
+            <StudioCardHeader
+              icon="R"
+              title="Run"
+              description="Start with the distributed settings on this tab"
+              meta={activeJob && jobStatus ? <span className={`badge badge-${jobStatus}`}>{jobStatus}</span> : undefined}
+            />
+            <StudioCardBody>
+              <div className="status-callout status-callout-info train-rec-panel">
+                <div className="status-callout-body">
+                  <strong className="status-callout-title">Single-GPU fallback</strong>
+                  <div className="status-callout-text">
+                    Choose “Disable distributed launch” or leave local multi-GPU off to run the existing single-GPU trainer unchanged.
+                  </div>
+                </div>
+              </div>
+              <LogStream
+                logs={logs}
+                emptyMessage="Start a training run to stream logs here."
+                fill
+                label="Training log"
+              />
+            </StudioCardBody>
+            <div className="studio-action-bar studio-action-bar-flush">
+              <button
+                className="btn btn-primary btn-lg"
+                onClick={start}
+                disabled={starting || downloadingModel || !canStart || !cloudConfigValid}
+              >
+                {starting ? "Starting…" : "Start training"}
+              </button>
+              {activeJob && (
+                <button type="button" className="btn" onClick={() => setMetricsOpen(true)}>
+                  View metrics
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {activeTab === "cloud" && (
+        <div className="train-layout train-layout--distributed tab-panel">
           <div className="card studio-card">
             <StudioCardHeader
               icon="C"
-              title="Cloud GPUs"
-              description="Record secure cloud launch metadata without storing credentials"
+              title="Cloud target"
+              description="Provider, region, and GPU capacity for distributed launchers"
             />
             <StudioCardBody>
               <label className="studio-checkbox-item studio-checkbox-item-standalone">
@@ -1294,10 +1409,13 @@ export function TrainPage() {
                   checked={cloudGpuEnabled}
                   onChange={(e) => {
                     setCloudGpuEnabled(e.target.checked);
-                    if (!e.target.checked) setCloudGpuProvider("none");
+                    if (!e.target.checked) {
+                      setCloudGpuProvider("none");
+                      setSelectedCloudCredentialId("");
+                    }
                   }}
                 />
-                Configure cloud GPU target
+                Use cloud GPUs for distributed training
               </label>
               <div className="option-grid">
                 <div className="form-field">
@@ -1358,55 +1476,190 @@ export function TrainPage() {
                   placeholder="Optional billing or scheduler label"
                 />
               </div>
+              <div className="form-field">
+                <label>Saved cloud access</label>
+                <select
+                  value={selectedCloudCredentialId}
+                  disabled={!cloudGpuEnabled}
+                  onChange={(e) => setSelectedCloudCredentialId(e.target.value)}
+                >
+                  <option value="">Select encrypted credential</option>
+                  {cloudCredentials.map((cred) => (
+                    <option key={cred.id} value={cred.id}>
+                      {cred.name} ({cred.config.provider || "cloud"})
+                    </option>
+                  ))}
+                </select>
+              </div>
               <div className={`status-callout ${cloudConfigValid ? "status-callout-info" : "status-callout-error"} train-rec-panel`}>
                 <div className="status-callout-body">
-                  <strong className="status-callout-title">Secure cloud mode</strong>
+                  <strong className="status-callout-title">Cloud launch readiness</strong>
                   <div className="status-callout-text">
-                    Cloud settings are metadata for your launcher or scheduler. Seiso does not accept cloud API keys,
-                    SSH material, shell commands, or provider tokens in this form.
+                    Cloud distributed jobs reference a saved encrypted credential by id. Secrets are not copied into the training job config.
                   </div>
                 </div>
               </div>
             </StudioCardBody>
           </div>
 
-          <div className="card studio-card studio-card-scroll">
+          <div className="card studio-card">
             <StudioCardHeader
-              icon="R"
-              title="Run"
-              description="Start with the distributed settings on this tab"
-              meta={activeJob && jobStatus ? <span className={`badge badge-${jobStatus}`}>{jobStatus}</span> : undefined}
+              icon="K"
+              title="Add cloud access"
+              description="API keys, provider tokens, SSH material, and bootstrap commands"
             />
             <StudioCardBody>
-              <div className="status-callout status-callout-info train-rec-panel">
-                <div className="status-callout-body">
-                  <strong className="status-callout-title">Single-GPU fallback</strong>
-                  <div className="status-callout-text">
-                    Choose “Disable distributed launch” or leave local multi-GPU off to run the existing single-GPU trainer unchanged.
-                  </div>
+              <div className="option-grid">
+                <div className="form-field">
+                  <label>Name</label>
+                  <input
+                    value={cloudCredentialName}
+                    onChange={(e) => setCloudCredentialName(e.target.value)}
+                    placeholder="prod-a100-pool"
+                  />
+                </div>
+                <div className="form-field">
+                  <label>Auth type</label>
+                  <select value={cloudAuthKind} onChange={(e) => setCloudAuthKind(e.target.value)}>
+                    <option value="api_key">API key / provider token</option>
+                    <option value="aws_keys">AWS access keys</option>
+                    <option value="ssh">SSH key</option>
+                    <option value="scheduler">Custom scheduler</option>
+                  </select>
                 </div>
               </div>
-              <LogStream
-                logs={logs}
-                emptyMessage="Start a training run to stream logs here."
-                fill
-                label="Training log"
-              />
+              <div className="form-field">
+                <label>API key / provider token</label>
+                <input
+                  type="password"
+                  value={cloudApiKey}
+                  onChange={(e) => setCloudApiKey(e.target.value)}
+                  autoComplete="off"
+                  placeholder="Stored encrypted locally"
+                />
+              </div>
+              <div className="option-grid">
+                <div className="form-field">
+                  <label>Access key id</label>
+                  <input
+                    type="password"
+                    value={cloudAccessKeyId}
+                    onChange={(e) => setCloudAccessKeyId(e.target.value)}
+                    autoComplete="off"
+                  />
+                </div>
+                <div className="form-field">
+                  <label>Secret access key</label>
+                  <input
+                    type="password"
+                    value={cloudSecretAccessKey}
+                    onChange={(e) => setCloudSecretAccessKey(e.target.value)}
+                    autoComplete="off"
+                  />
+                </div>
+              </div>
+              <div className="form-field">
+                <label>Session token</label>
+                <textarea
+                  value={cloudSessionToken}
+                  onChange={(e) => setCloudSessionToken(e.target.value)}
+                  rows={3}
+                  placeholder="Optional temporary provider session token"
+                />
+              </div>
+              <div className="form-field">
+                <label>SSH username</label>
+                <input
+                  value={cloudSshUsername}
+                  onChange={(e) => setCloudSshUsername(e.target.value)}
+                  placeholder="ubuntu, ec2-user, etc."
+                />
+              </div>
+              <div className="form-field">
+                <label>SSH private key</label>
+                <textarea
+                  value={cloudSshPrivateKey}
+                  onChange={(e) => setCloudSshPrivateKey(e.target.value)}
+                  rows={5}
+                  placeholder="Stored encrypted locally; never shown after save"
+                />
+              </div>
+              <div className="form-field">
+                <label>Bootstrap command</label>
+                <textarea
+                  value={cloudBootstrapCommand}
+                  onChange={(e) => setCloudBootstrapCommand(e.target.value)}
+                  rows={4}
+                  placeholder="Optional scheduler-side setup command"
+                />
+              </div>
             </StudioCardBody>
             <div className="studio-action-bar studio-action-bar-flush">
               <button
-                className="btn btn-primary btn-lg"
-                onClick={start}
-                disabled={starting || downloadingModel || !canStart || !cloudConfigValid}
+                type="button"
+                className="btn btn-primary"
+                onClick={saveCloudCredential}
+                disabled={!cloudCredentialName.trim() || cloudGpuProvider === "none"}
               >
-                {starting ? "Starting…" : "Start training"}
+                Save encrypted access
               </button>
-              {activeJob && (
-                <button type="button" className="btn" onClick={() => setMetricsOpen(true)}>
-                  View metrics
-                </button>
-              )}
             </div>
+          </div>
+
+          <div className="card studio-card studio-card-scroll">
+            <StudioCardHeader
+              icon="S"
+              title="Saved access"
+              description="Encrypted credentials available to distributed launchers"
+              meta={<span className="badge badge-dim">{cloudCredentials.length}</span>}
+            />
+            <StudioCardBody>
+              {cloudCredentialMsg && (
+                <div className="status-callout status-callout-info train-rec-panel">
+                  <div className="status-callout-body">
+                    <div className="status-callout-text">{cloudCredentialMsg}</div>
+                  </div>
+                </div>
+              )}
+              {cloudCredentials.length === 0 ? (
+                <p className="muted-text">No cloud access credentials saved yet.</p>
+              ) : (
+                <div className="studio-monitor-stack">
+                  {cloudCredentials.map((cred) => (
+                    <div key={cred.id} className="status-callout status-callout-info train-rec-panel">
+                      <div className="status-callout-body">
+                        <strong className="status-callout-title">{cred.name}</strong>
+                        <div className="status-callout-text">
+                          {cred.config.provider || "cloud"} · {cred.config.region || "region unset"} ·{" "}
+                          {cred.config.auth_kind || "auth"}
+                        </div>
+                        <div className="muted-text studio-field-hint studio-field-hint-compact">
+                          API key: {cred.config.api_key_configured ? "saved" : "none"} · SSH key:{" "}
+                          {cred.config.ssh_private_key_configured ? "saved" : "none"} · Bootstrap:{" "}
+                          {cred.config.bootstrap_command_configured ? "saved" : "none"}
+                        </div>
+                        <div className="form-actions">
+                          <button
+                            type="button"
+                            className="btn btn-sm"
+                            onClick={() => setSelectedCloudCredentialId(cred.id)}
+                          >
+                            Use for training
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-sm"
+                            onClick={() => deleteCloudCredential(cred.id)}
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </StudioCardBody>
           </div>
         </div>
       )}

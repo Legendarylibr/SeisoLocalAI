@@ -2,6 +2,7 @@ import { request } from "./client";
 import { cachedGet } from "./getCache";
 import type {
   CatalogDataset,
+  CloudGpuCredential,
   DatasetAnalysis,
   TrainableModel,
   TrainingJob,
@@ -52,5 +53,16 @@ export const trainingApi = {
     request<DatasetAnalysis & { valid: boolean; error?: string }>("/training/validate-dataset", {
       method: "POST",
       body: JSON.stringify({ dataset, dataset_format: datasetFormat }),
+    }),
+  listCloudGpuCredentials: () =>
+    request<CloudGpuCredential[]>("/training/cloud-credentials"),
+  saveCloudGpuCredential: (credential: Record<string, unknown>) =>
+    request<CloudGpuCredential>("/training/cloud-credentials", {
+      method: "POST",
+      body: JSON.stringify(credential),
+    }),
+  deleteCloudGpuCredential: (credentialId: string) =>
+    request<{ status: string }>(`/training/cloud-credentials/${credentialId}`, {
+      method: "DELETE",
     }),
 };
