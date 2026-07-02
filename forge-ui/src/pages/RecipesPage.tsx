@@ -1,5 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { RecipeCanvas, RecipeGraph } from "@/components/RecipeCanvas";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
+import type { RecipeGraph } from "@/components/RecipeCanvas";
+
+const RecipeCanvas = lazy(() =>
+  import("@/components/RecipeCanvas").then((m) => ({ default: m.RecipeCanvas })),
+);
 import { LogStream } from "@/components/research/LogStream";
 import { StudioCardHeader } from "@/components/studio/StudioCardHeader";
 import { StudioPageShell } from "@/components/StudioPageShell";
@@ -80,7 +84,9 @@ export function RecipesPage() {
       className="recipe-studio-page"
     >
       <div className="card recipe-studio-card">
-        <RecipeCanvas onChange={handleRecipeChange} />
+        <Suspense fallback={<p className="muted studio-field-hint">Loading recipe canvas…</p>}>
+          <RecipeCanvas onChange={handleRecipeChange} />
+        </Suspense>
       </div>
 
       <div className="card studio-card recipe-run-bar">

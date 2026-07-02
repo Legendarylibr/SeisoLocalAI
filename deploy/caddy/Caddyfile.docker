@@ -6,6 +6,10 @@ forge.example.com {
 
 	reverse_proxy host.docker.internal:8765 {
 		flush_interval -1
+		transport http {
+			read_timeout 24h
+			write_timeout 24h
+		}
 	}
 
 	header {
