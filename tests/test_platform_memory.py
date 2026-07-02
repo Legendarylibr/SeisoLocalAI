@@ -137,7 +137,7 @@ def test_platform_profile_windows_no_cuda(monkeypatch):
 
 def test_platform_profile_linux_nvidia_uses_gpu_layers(monkeypatch):
     profile = {
-        "ram_gb": 32,
+        "ram_gb": 64,
         "gpus": [{"name": "NVIDIA GeForce RTX 4090", "vram_total_mb": 24576}],
         "backend": "torch",
         "platform": "Linux",
@@ -166,9 +166,10 @@ def test_platform_profile_linux_nvidia_uses_gpu_layers(monkeypatch):
     apply_platform_memory_profile(profile=profile)
 
     assert os.environ["SEISO_LLAMA_GPU_LAYERS"] == "-1"
-    assert os.environ["SEISO_LLAMA_BATCH"] == "2048"
-    assert os.environ["SEISO_LLAMA_UBATCH"] == "512"
-    assert os.environ["SEISO_LLAMA_CACHE_MB"] == "1024"
+    assert os.environ["SEISO_LLAMA_BATCH"] == "4096"
+    assert os.environ["SEISO_LLAMA_UBATCH"] == "1024"
+    assert os.environ["SEISO_LLAMA_CACHE_MB"] == "2048"
+    assert os.environ["SEISO_STREAM_BATCH_CHARS"] == "4"
 
 
 def test_apply_only_setdefault(monkeypatch):
