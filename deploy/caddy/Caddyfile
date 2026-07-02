@@ -7,6 +7,10 @@ forge.example.com {
 	reverse_proxy 127.0.0.1:8765 {
 		# SSE: training logs, chat streaming, model downloads
 		flush_interval -1
+		transport http {
+			read_timeout 24h
+			write_timeout 24h
+		}
 	}
 
 	header {
