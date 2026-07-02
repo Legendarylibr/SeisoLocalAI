@@ -79,7 +79,9 @@ def assess_hardware_fit(
     if blocked:
         label = "Blocked — would exceed available memory"
         memory_label = (
-            "RAM" if tier in (HardwareTier.APPLE_UNIFIED, HardwareTier.CPU_ONLY) else "VRAM"
+            "RAM"
+            if tier in (HardwareTier.APPLE_UNIFIED, HardwareTier.CPU_ONLY)
+            else "VRAM"
         )
         block_reason = (
             f"Needs ~{est_vram_gb:.1f} GB at runtime but only ~{load_budget_gb} GB "

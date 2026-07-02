@@ -7,7 +7,9 @@ import pytest
 from forge.services import artifact_integrity
 
 
-def test_path_has_complete_artifact_short_circuits_unknown_directory_size(monkeypatch, tmp_path):
+def test_path_has_complete_artifact_short_circuits_unknown_directory_size(
+    monkeypatch, tmp_path
+):
     model_dir = tmp_path / "model"
     model_dir.mkdir()
     first = model_dir / "first.gguf"
@@ -22,7 +24,9 @@ def test_path_has_complete_artifact_short_circuits_unknown_directory_size(monkey
         yield first
         pytest.fail("unknown-size completeness should stop after first usable file")
 
-    monkeypatch.setattr(artifact_integrity, "iter_matching_files", fake_iter_matching_files)
+    monkeypatch.setattr(
+        artifact_integrity, "iter_matching_files", fake_iter_matching_files
+    )
 
     assert artifact_integrity.path_has_complete_artifact(model_dir, "gguf", 0)
     assert yielded == [first.name]

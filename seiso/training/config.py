@@ -251,9 +251,13 @@ class TrainConfig(BaseModel):
         forbidden = ("token", "secret", "password", "apikey", "api_key", "://")
         if any(marker in lowered for marker in forbidden):
             raise ValueError("runtime labels cannot contain secrets, URLs, or tokens")
-        allowed = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-:/ ")
+        allowed = set(
+            "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-:/ "
+        )
         if any(ch not in allowed for ch in v):
-            raise ValueError("runtime labels may only use letters, numbers, spaces, '.', '_', '-', ':', '/'")
+            raise ValueError(
+                "runtime labels may only use letters, numbers, spaces, '.', '_', '-', ':', '/'"
+            )
         return v
 
     @model_validator(mode="after")
@@ -261,9 +265,13 @@ class TrainConfig(BaseModel):
         if not self.cloud_gpu_enabled:
             return self
         if self.cloud_gpu_provider == CloudGpuProvider.NONE:
-            raise ValueError("cloud_gpu_provider is required when cloud_gpu_enabled is true")
+            raise ValueError(
+                "cloud_gpu_provider is required when cloud_gpu_enabled is true"
+            )
         if not self.cloud_gpu_instance_type.strip():
-            raise ValueError("cloud_gpu_instance_type is required when cloud_gpu_enabled is true")
+            raise ValueError(
+                "cloud_gpu_instance_type is required when cloud_gpu_enabled is true"
+            )
         return self
 
     @classmethod

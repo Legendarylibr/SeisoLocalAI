@@ -132,7 +132,9 @@ class DistillRLConfig(BaseModel):
     eval_max_prompts: int = 8
     evaluate_teacher: bool = False
     benchmark_verifiable: bool = True
-    benchmark_tasks: list[str] = Field(default_factory=lambda: ["gsm8k", "gpqa", "aime"])
+    benchmark_tasks: list[str] = Field(
+        default_factory=lambda: ["gsm8k", "gpqa", "aime"]
+    )
 
     @property
     def distilled_dir(self) -> Path:
@@ -307,9 +309,7 @@ def build_distill_rl_config(
             )
         ),
         rollout_temperature=float(merged.get("rollout_temperature", 0.7)),
-        verifiable_outcome_rewards=bool(
-            merged.get("verifiable_outcome_rewards", True)
-        ),
+        verifiable_outcome_rewards=bool(merged.get("verifiable_outcome_rewards", True)),
         grpo_group_size=int(merged.get("grpo_group_size", 4)),
         use_chat_template=use_chat_template,
         trust_remote_code=bool(merged.get("trust_remote_code", False)),

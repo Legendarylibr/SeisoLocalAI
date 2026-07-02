@@ -35,7 +35,9 @@ def generate_preference_rows(
     grpo_group_size: int = 1,
 ) -> list[dict[str, Any]]:
     """Generate preference rows with deterministic per-prompt seeds."""
-    if verifiable_outcome_rewards and any(prompt.answer is not None for prompt in prompts):
+    if verifiable_outcome_rewards and any(
+        prompt.answer is not None for prompt in prompts
+    ):
         outcome_rows = generate_outcome_preference_rows(
             student_model=student_model,
             prompts=[prompt for prompt in prompts if prompt.answer is not None],

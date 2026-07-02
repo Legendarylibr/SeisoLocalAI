@@ -70,7 +70,10 @@ def distributed_requested(config: Any) -> bool:
         return False
     if strategy == "ddp":
         return True
-    return bool(getattr(config, "multi_gpu", False) or getattr(config, "extra", {}).get("multi_gpu", False))
+    return bool(
+        getattr(config, "multi_gpu", False)
+        or getattr(config, "extra", {}).get("multi_gpu", False)
+    )
 
 
 def resolve_distributed_plan(
@@ -96,7 +99,9 @@ def resolve_distributed_plan(
     if strategy not in {"auto", "ddp"}:
         raise ValueError(f"Unsupported distributed strategy: {strategy}")
     if node_rank >= nnodes:
-        raise ValueError("distributed_node_rank must be less than distributed_num_nodes")
+        raise ValueError(
+            "distributed_node_rank must be less than distributed_num_nodes"
+        )
     if layout.device_count <= 0:
         return DistributedPlan(
             enabled=False,

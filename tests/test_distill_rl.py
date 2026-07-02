@@ -535,7 +535,9 @@ def test_run_distill_rl_job_orchestrates_stages(tmp_path: Path):
                 "checkpoints": {},
                 "summary_path": str(eval_summary),
                 "verifiable_benchmarks": {
-                    "summary_path": str(eval_summary.parent / "verifiable_benchmarks.json"),
+                    "summary_path": str(
+                        eval_summary.parent / "verifiable_benchmarks.json"
+                    ),
                     "accuracy_jumps": {
                         "baseline": "student_base",
                         "by_checkpoint": {"dpo": {"gsm8k": 0.25}},

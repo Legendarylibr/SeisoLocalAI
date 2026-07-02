@@ -41,12 +41,9 @@ def apply_platform_memory_profile(
     caps = training_capabilities()
     system = platform.system()
     memory_caps_disabled = env_bool("SEISO_DISABLE_MEMORY_CAPS", False)
-    low = (
-        not memory_caps_disabled
-        and (
-            os.environ.get("SEISO_MEMORY_PROFILE", "").strip().lower() == "low"
-            or memory_profile_label(profile) == "low"
-        )
+    low = not memory_caps_disabled and (
+        os.environ.get("SEISO_MEMORY_PROFILE", "").strip().lower() == "low"
+        or memory_profile_label(profile) == "low"
     )
 
     os.environ.setdefault("SEISO_LLAMA_USE_MMAP", "true")

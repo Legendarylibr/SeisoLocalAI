@@ -74,7 +74,9 @@ def iter_matching_files(
         tuple(suffix.lower() for suffix in suffixes) if suffixes is not None else None
     )
     for entry in _iter_file_entries(path, pattern):
-        if normalized_suffixes is not None and not entry.name.lower().endswith(normalized_suffixes):
+        if normalized_suffixes is not None and not entry.name.lower().endswith(
+            normalized_suffixes
+        ):
             continue
         yield Path(entry.path)
 
@@ -102,7 +104,9 @@ def matching_file_stats(
         tuple(suffix.lower() for suffix in suffixes) if suffixes is not None else None
     )
     for entry in _iter_file_entries(path, pattern):
-        if normalized_suffixes is not None and not entry.name.lower().endswith(normalized_suffixes):
+        if normalized_suffixes is not None and not entry.name.lower().endswith(
+            normalized_suffixes
+        ):
             continue
         count += 1
         total_size += entry.stat().st_size

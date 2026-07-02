@@ -46,11 +46,7 @@ def _output_counts(repo: Path) -> dict[str, int | None]:
     counts: dict[str, int | None] = {}
     for name in ("benchmarks", "logs", "analysis", "checkpoints", "reports"):
         directory = base / name
-        counts[name] = (
-            matching_file_stats(directory)[0]
-            if directory.is_dir()
-            else None
-        )
+        counts[name] = matching_file_stats(directory)[0] if directory.is_dir() else None
     return counts
 
 

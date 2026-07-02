@@ -37,7 +37,9 @@ from seiso.security import sanitize_filename
 _DOWNLOAD_LOCKS: dict[str, asyncio.Lock] = {}
 
 
-def _emit_progress(on_progress: ProgressCallback | None, payload: dict[str, Any]) -> None:
+def _emit_progress(
+    on_progress: ProgressCallback | None, payload: dict[str, Any]
+) -> None:
     if on_progress:
         on_progress(payload)
 
@@ -151,14 +153,19 @@ def _cached_download_result_if_usable(
             with contextlib.suppress(Exception):
                 expected_size = max(
                     expected_size,
-                    sum(get_gguf_file_size_bytes(gguf_repo, str(item)) for item in gguf_files),
+                    sum(
+                        get_gguf_file_size_bytes(gguf_repo, str(item))
+                        for item in gguf_files
+                    ),
                 )
             if not gguf_files_complete_at_path(
                 path, [str(item) for item in gguf_files], expected_size
             ):
                 return None
             exact_gguf_files_complete = True
-    if not exact_gguf_files_complete and not path_has_complete_artifact(path, fmt, expected_size):
+    if not exact_gguf_files_complete and not path_has_complete_artifact(
+        path, fmt, expected_size
+    ):
         return None
     requested = variant.lower()
     if requested == "gguf" and fmt != "gguf":
@@ -445,5 +452,9 @@ async def perform_model_download(
             "variant": artifacts["variant"],
             "model_id": record["id"],
             "cache_dir": artifacts["cache_dir"],
-            **({"gguf_repo": artifacts["gguf_repo"]} if "gguf_repo" in artifacts else {}),
+            **(
+                {"gguf_repo": artifacts["gguf_repo"]}
+                if "gguf_repo" in artifacts
+                else {}
+            ),
         }
