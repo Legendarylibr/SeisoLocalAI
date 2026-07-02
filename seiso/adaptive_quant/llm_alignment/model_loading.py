@@ -5,10 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from seiso.adaptive_quant.llm_alignment.config import DPOSettings
-from seiso.models.lora_targets import (
-    get_lora_target_modules,
-    modules_exist_in_model,
-)
+from seiso.models.lora_targets import resolve_lora_target_modules
 
 
 def _require_transformers() -> Any:
@@ -40,21 +37,14 @@ def _build_quantization_config(settings: DPOSettings) -> Any | None:
 def resolve_alignment_lora_target_modules(
     model: Any,
     settings: DPOSettings,
-) -> list[str]:
+) -> list[str] | str:
     """Resolve DPO LoRA targets from configured names or the model itself."""
-    configured = list(settings.lora_target_modules)
-    target_modules = modules_exist_in_model(model, configured) if configured else []
-    if not target_modules:
-        target_modules = modules_exist_in_model(
-            model,
-            get_lora_target_modules(settings.sft_model_path, model),
-        )
-    if not target_modules:
-        raise ValueError(
-            "Could not infer LoRA target modules for this alignment model. "
-            "Set lora_target_modules explicitly for this architecture."
-        )
-    return target_modules
+    configured = list(settings.lora_target_modules) or None
+    return resolve_lora_target_modules(
+        settings.sft_model_path,
+        model,
+        configured=configured,
+    )
 
 
 def _build_lora_config(settings: DPOSettings, model: Any) -> Any:

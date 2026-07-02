@@ -5,10 +5,17 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import warnings
 from pathlib import Path
 from typing import Any
 
 from seiso.security.deps import sha256_file
+
+_ATTENTION_DETERMINISM_WARNINGS = (
+    "Memory Efficient attention defaults to a non-deterministic algorithm",
+    "Flash Attention defaults to a non-deterministic algorithm",
+    "Flash Attention backward for head dim",
+)
 
 
 def apply_determinism(seed: int, *, deterministic: bool = True) -> None:
@@ -37,6 +44,12 @@ def apply_determinism(seed: int, *, deterministic: bool = True) -> None:
             torch.backends.cudnn.benchmark = False
             with contextlib.suppress(Exception):
                 torch.use_deterministic_algorithms(True, warn_only=True)
+            for fragment in _ATTENTION_DETERMINISM_WARNINGS:
+                warnings.filterwarnings(
+                    "ignore",
+                    message=fragment,
+                    category=UserWarning,
+                )
     except ImportError:
         pass
 

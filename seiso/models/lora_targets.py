@@ -5,8 +5,12 @@ from __future__ import annotations
 import re
 from typing import Any
 
-# Architecture patterns → LoRA target modules
-_ARCHITECTURE_TARGETS: dict[str, list[str]] = {
+# PEFT uses a regex for multimodal Gemma4 so LoRA skips vision/audio
+# Gemma4ClippableLinear wrappers and only hits language_model Linear layers.
+_GEMMA4_LORA_TARGET_REGEX = r".*language_model\..*\.(q_proj|v_proj)"
+
+# Architecture patterns → LoRA target modules (regex for special multimodal cases)
+_ARCHITECTURE_TARGETS: dict[str, list[str] | str] = {
     "llama": [
         "q_proj",
         "k_proj",
@@ -72,6 +76,16 @@ _ARCHITECTURE_TARGETS: dict[str, list[str]] = {
         "down_proj",
     ],
     "gemma2": [
+        "q_proj",
+        "k_proj",
+        "v_proj",
+        "o_proj",
+        "gate_proj",
+        "up_proj",
+        "down_proj",
+    ],
+    "gemma4": _GEMMA4_LORA_TARGET_REGEX,
+    "gemma4_text": [
         "q_proj",
         "k_proj",
         "v_proj",
@@ -164,6 +178,7 @@ def detect_architecture(model_id: str, model=None) -> str | None:
         (r"mistral|codestral|magistral", "mistral"),
         (r"qwq|qwen3\.5|qwen3", "qwen3"),
         (r"qwen2|qwen", "qwen2"),
+        (r"gemma-4|gemma4", "gemma4"),
         (r"gemma-3|gemma3", "gemma3"),
         (r"gemma-2|gemma2", "gemma2"),
         (r"gemma", "gemma"),
@@ -193,7 +208,7 @@ def _target_suffix(name: str) -> str:
     return suffix
 
 
-def get_lora_target_modules(model_id: str, model=None) -> list[str]:
+def get_lora_target_modules(model_id: str, model=None) -> list[str] | str:
     """Return LoRA target modules for a given model."""
     arch = detect_architecture(model_id, model)
     if arch in _ARCHITECTURE_TARGETS:
@@ -225,11 +240,85 @@ def infer_lora_target_modules(model) -> list[str]:
     return generic
 
 
-def modules_exist_in_model(model, target_modules: list[str]) -> list[str]:
+_LINEAR_MODULE_TYPES = frozenset({"linear", "conv1d"})
+
+
+def infer_lora_target_modules_from_module_tree(model) -> list[str]:
+    """Infer LoRA targets from module names when parameter naming is opaque."""
+    try:
+        modules = list(model.named_modules())
+    except Exception:
+        return []
+
+    tails = {name.rsplit(".", 1)[-1] for name, _module in modules if name}
+    preferred = [target for target in _COMMON_LINEAR_TARGETS if target in tails]
+    if preferred:
+        return preferred
+
+    return sorted(
+        {
+            name.rsplit(".", 1)[-1]
+            for name, module in modules
+            if name
+            and name.rsplit(".", 1)[-1] != "lm_head"
+            and module.__class__.__name__.lower() in _LINEAR_MODULE_TYPES
+        }
+    )
+
+
+def resolve_lora_target_modules(
+    model_id: str,
+    model,
+    configured: list[str] | None = None,
+) -> list[str] | str:
+    """Pick LoRA targets for any model: explicit config → arch map → param → module tree."""
+    if configured is not None:
+        unique_configured = list(dict.fromkeys(configured))
+        resolved = modules_exist_in_model(model, unique_configured)
+        if resolved:
+            return resolved
+
+    for candidates in (
+        get_lora_target_modules(model_id, model),
+        infer_lora_target_modules(model),
+        infer_lora_target_modules_from_module_tree(model),
+    ):
+        if not candidates:
+            continue
+        resolved = modules_exist_in_model(model, candidates)
+        if resolved:
+            return resolved
+
+    raise ValueError(
+        "Could not infer LoRA target modules for this model. "
+        "Pass lora_target_modules explicitly for this architecture."
+    )
+
+
+def modules_exist_in_model(
+    model, target_modules: list[str] | str
+) -> list[str] | str:
     """Filter target modules to those actually present in the model."""
-    param_names = {n for n, _ in model.named_parameters()}
+    if isinstance(target_modules, str):
+        try:
+            module_names = [name for name, _ in model.named_modules() if name]
+        except Exception:
+            return []
+        if any(re.fullmatch(target_modules, name) for name in module_names):
+            return target_modules
+        return []
+
+    names: set[str] = set()
+    try:
+        names.update(name for name, _ in model.named_parameters())
+    except Exception:
+        pass
+    try:
+        names.update(name for name, _ in model.named_modules() if name)
+    except Exception:
+        pass
     found: set[str] = set()
-    for name in param_names:
+    for name in names:
         for t in target_modules:
             if name.endswith(t) or f".{t}." in name or name.endswith(f".{t}"):
                 found.add(t)
