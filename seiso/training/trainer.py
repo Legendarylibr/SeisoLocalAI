@@ -201,6 +201,16 @@ class SeisoTrainer:
 
         SeisoModel.for_training(model)
 
+        from seiso.training.torch_dynamo import apply_compile_checkpoint_workarounds
+
+        model = apply_compile_checkpoint_workarounds(
+            model,
+            torch_compile=cfg.torch_compile,
+            gradient_checkpointing=cfg.gradient_checkpointing,
+        )
+        if self._loaded:
+            self._loaded.model = model
+
         prepared = self._prepare_datasets(tokenizer)
 
         from seiso.training.metrics import build_metrics_callback
