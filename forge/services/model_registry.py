@@ -31,7 +31,9 @@ async def register_model_path(
     if not resolved.exists():
         return None
 
-    fmt = model_format or (resolved.suffix.lstrip(".") if resolved.is_file() else "safetensors")
+    fmt = model_format or (
+        resolved.suffix.lstrip(".") if resolved.is_file() else "safetensors"
+    )
     norm = str(resolved.resolve())
     if await db.get_model_by_path(user_id, str(resolved)):
         return None
@@ -102,7 +104,9 @@ async def register_export_outputs(
             fmt = "gguf"
             name = path.parent.name if path.is_file() else path.name
             meta = {"job_id": job_id, "export_key": key}
-            modelfile = path.parent / "Modelfile" if path.is_file() else path / "Modelfile"
+            modelfile = (
+                path.parent / "Modelfile" if path.is_file() else path / "Modelfile"
+            )
             if modelfile.is_file():
                 meta["modelfile"] = str(modelfile)
             entry = await register_model_path(

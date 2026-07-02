@@ -239,9 +239,7 @@ def _write_export_sidecar(dest: Path, ckpt: Path, fmt: ExportFormat, kind: str) 
             max_files=25,
             max_file_bytes=(
                 None
-                if os.environ.get("SEISO_EXPORT_FULL_CHECKSUMS", "")
-                .strip()
-                .lower()
+                if os.environ.get("SEISO_EXPORT_FULL_CHECKSUMS", "").strip().lower()
                 in {"1", "true", "yes"}
                 else 8 * 1024 * 1024
             ),

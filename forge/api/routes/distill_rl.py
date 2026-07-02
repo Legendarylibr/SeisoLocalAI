@@ -46,7 +46,9 @@ class DistillRLStartRequest(BaseModel):
     verifiable_outcome_rewards: bool = True
     grpo_group_size: int = Field(default=4, ge=2)
     benchmark_verifiable: bool = True
-    benchmark_tasks: list[str] = Field(default_factory=lambda: ["gsm8k", "gpqa", "aime"])
+    benchmark_tasks: list[str] = Field(
+        default_factory=lambda: ["gsm8k", "gpqa", "aime"]
+    )
     seeds: list[int] | None = None
     seed: int = 42
     deterministic: bool = True

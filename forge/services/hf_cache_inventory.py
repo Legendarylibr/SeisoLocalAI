@@ -84,7 +84,10 @@ def _latest_snapshot_dirs(repo_cache_dir: Path) -> list[Path]:
             snapshots.append((path.stat().st_mtime, path))
         except OSError:
             continue
-    return [path for _mtime, path in sorted(snapshots, key=lambda item: item[0], reverse=True)]
+    return [
+        path
+        for _mtime, path in sorted(snapshots, key=lambda item: item[0], reverse=True)
+    ]
 
 
 def _gguf_record_from_snapshot(
@@ -96,7 +99,8 @@ def _gguf_record_from_snapshot(
     hf_cache_dir: Path,
 ) -> dict[str, Any] | None:
     rel_files = [
-        str(path.relative_to(snapshot_dir)) for path in iter_matching_files(snapshot_dir, "*.gguf")
+        str(path.relative_to(snapshot_dir))
+        for path in iter_matching_files(snapshot_dir, "*.gguf")
     ]
     if not rel_files:
         return None
@@ -105,7 +109,9 @@ def _gguf_record_from_snapshot(
 
     inventory_repo = entry.repo_id if entry else repo_id
     quant = entry.quant if entry else "Q4_K_M"
-    filenames = _pick_gguf_files(rel_files, preferred_quant=quant, repo_id=inventory_repo)
+    filenames = _pick_gguf_files(
+        rel_files, preferred_quant=quant, repo_id=inventory_repo
+    )
     if not filenames:
         return None
 
@@ -139,7 +145,9 @@ def _gguf_record_from_snapshot(
 
     return {
         "source": f"hf:{inventory_repo}",
-        "name": (target.name if target.is_file() else _display_name_for_shards(filenames[0])),
+        "name": (
+            target.name if target.is_file() else _display_name_for_shards(filenames[0])
+        ),
         "path": str(link.absolute()),
         "format": "gguf",
         "size_bytes": size_bytes,

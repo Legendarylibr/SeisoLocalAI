@@ -179,7 +179,10 @@ def _generate_gguf_outputs(
 ) -> list[str]:
     from llama_cpp import Llama
 
-    from seiso.distill_rl.outcome import ensure_thinking_completion, format_thinking_prompt
+    from seiso.distill_rl.outcome import (
+        ensure_thinking_completion,
+        format_thinking_prompt,
+    )
 
     last_error: Exception | None = None
     llm = None
@@ -258,14 +261,16 @@ def _load_benchmark_tasks(
     tasks: dict[str, list[RolloutPrompt]] = {}
     for task in requested:
         prompts = from_library.get(task) or _BUILTIN_BENCHMARKS.get(task, [])
-        tasks[task] = prompts[:max(1, max_prompts_per_task)]
+        tasks[task] = prompts[: max(1, max_prompts_per_task)]
     return tasks
 
 
 def _accuracy_jumps(checkpoints: dict[str, Any]) -> dict[str, Any]:
     if not checkpoints:
         return {}
-    baseline_name = "student_base" if "student_base" in checkpoints else next(iter(checkpoints))
+    baseline_name = (
+        "student_base" if "student_base" in checkpoints else next(iter(checkpoints))
+    )
     baseline = checkpoints[baseline_name]
     jumps: dict[str, Any] = {"baseline": baseline_name, "by_checkpoint": {}}
     for name, task_metrics in checkpoints.items():

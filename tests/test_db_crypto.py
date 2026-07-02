@@ -111,7 +111,9 @@ async def test_provider_config_encrypted_at_rest(db: Database):
     assert str(row["config_json"]).startswith("enc:v1:")
 
     providers = await db.list_providers(user["id"])
-    assert json.loads(providers[0]["config_json"]) == {"base_url": "http://127.0.0.1:8000"}
+    assert json.loads(providers[0]["config_json"]) == {
+        "base_url": "http://127.0.0.1:8000"
+    }
 
 
 @pytest.mark.asyncio
@@ -262,12 +264,16 @@ async def test_get_thread_with_messages_batches_load(db: Database):
     thread = await db.create_thread(user["id"], "Chat", model_id="model-a")
     await db.add_message(thread["id"], "user", "hello")
 
-    loaded_thread, messages = await db.get_thread_with_messages(thread["id"], user["id"])
+    loaded_thread, messages = await db.get_thread_with_messages(
+        thread["id"], user["id"]
+    )
     assert loaded_thread is not None
     assert loaded_thread["model_id"] == "model-a"
     assert messages[0]["content"] == "hello"
 
-    missing_thread, missing_messages = await db.get_thread_with_messages("missing", user["id"])
+    missing_thread, missing_messages = await db.get_thread_with_messages(
+        "missing", user["id"]
+    )
     assert missing_thread is None
     assert missing_messages == []
 

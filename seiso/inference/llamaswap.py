@@ -73,7 +73,9 @@ def llamaswap_health_ok(*, url: str | None = None) -> bool:
     target = urllib.parse.urljoin(f"{(url or llamaswap_url()).rstrip('/')}/", "health")
     req = urllib.request.Request(target, method="GET")
     try:
-        with urllib.request.urlopen(req, timeout=_llamaswap_health_timeout_s()) as response:
+        with urllib.request.urlopen(
+            req, timeout=_llamaswap_health_timeout_s()
+        ) as response:
             return 200 <= int(getattr(response, "status", 200)) < 300
     except (OSError, urllib.error.URLError, TimeoutError):
         return False

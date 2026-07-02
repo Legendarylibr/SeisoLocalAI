@@ -36,7 +36,9 @@ def final_answer_text(completion: str) -> str:
     return _THINK_RE.sub("", completion).strip()
 
 
-def outcome_reward(completion: str, answer: str | None, *, benchmark: str | None) -> float:
+def outcome_reward(
+    completion: str, answer: str | None, *, benchmark: str | None
+) -> float:
     """Score verifiable tasks with a pure 0/1 outcome reward."""
     if answer is None or not str(answer).strip():
         return 0.0
@@ -55,7 +57,11 @@ def _numeric_match(actual: str, expected: str) -> float:
     expected_value = _last_number(expected)
     if actual_value is None or expected_value is None:
         return _choice_or_exact_match(actual, expected)
-    return 1.0 if math.isclose(actual_value, expected_value, rel_tol=1e-4, abs_tol=1e-4) else 0.0
+    return (
+        1.0
+        if math.isclose(actual_value, expected_value, rel_tol=1e-4, abs_tol=1e-4)
+        else 0.0
+    )
 
 
 def _choice_or_exact_match(actual: str, expected: str) -> float:
