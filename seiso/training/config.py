@@ -142,6 +142,10 @@ class TrainConfig(BaseModel):
     cloud_gpu_instance_type: str = ""
     cloud_gpu_count: int | None = Field(default=None, ge=1, le=1024)
     cloud_gpu_project: str = ""
+    cloud_gpu_credential_id: str | None = Field(
+        default=None,
+        description="Encrypted cloud GPU credential record to use for external launchers.",
+    )
     use_triton: bool = True
     use_fused_ce: bool = True
     use_fused_lora: bool = True

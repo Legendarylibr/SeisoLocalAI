@@ -879,6 +879,7 @@ class SeisoTrainer:
             "cloud_gpu_instance_type": cfg.cloud_gpu_instance_type,
             "cloud_gpu_count": cfg.cloud_gpu_count,
             "cloud_gpu_project": cfg.cloud_gpu_project,
+            "cloud_gpu_credential_id": cfg.cloud_gpu_credential_id,
             "world_size": layout.world_size,
             "kernels": self._kernel_meta,
             "created_at": datetime.now(timezone.utc).isoformat(),

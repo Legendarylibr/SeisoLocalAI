@@ -59,9 +59,13 @@ or set `distributed_strategy: none` to run the existing single-process trainer.
   `--main_process_ip`, and `--main_process_port`
 - Keep `ddp_find_unused_parameters: false` unless the model graph really has unused trainable parameters
 
-## Cloud GPU metadata
+## Cloud access
 
-The **Distributed** tab also lets you record a cloud GPU target:
+The **Cloud access** tab stores provider credentials separately from training
+configs. API keys, provider tokens, SSH private keys, temporary session tokens,
+and optional bootstrap commands are encrypted in Seiso's local provider store.
+Training jobs reference the saved credential by id and keep only non-secret target
+metadata in the job config:
 
 ```yaml
 cloud_gpu_enabled: true
@@ -70,11 +74,12 @@ cloud_gpu_region: us-east-1
 cloud_gpu_instance_type: p5.48xlarge
 cloud_gpu_count: 8
 cloud_gpu_project: finetune-prod
+cloud_gpu_credential_id: <encrypted-credential-id>
 ```
 
-This is metadata for a secure external launcher or scheduler. Seiso does not accept
-cloud API keys, SSH keys, shell commands, or provider tokens in training configs.
-Secret-looking labels and URLs are rejected before the job is stored.
+Keep cloud API keys, SSH material, and bootstrap commands in the **Cloud access**
+tab. They are never echoed back to the UI after save, and they are not copied into
+training job history.
 
 ## macOS / single GPU
 

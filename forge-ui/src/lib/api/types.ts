@@ -416,6 +416,25 @@ export type TrainingRecommendations = {
   dataset_analysis?: DatasetAnalysis;
 };
 
+export type CloudGpuCredential = {
+  id: string;
+  name: string;
+  provider_type: string;
+  created_at: string;
+  config: {
+    provider?: string;
+    auth_kind?: string;
+    region?: string;
+    project?: string;
+    api_key_configured?: boolean;
+    access_key_id_configured?: boolean;
+    secret_access_key_configured?: boolean;
+    session_token_configured?: boolean;
+    ssh_private_key_configured?: boolean;
+    bootstrap_command_configured?: boolean;
+  };
+};
+
 export type TrainableModel = {
   id: string;
   name: string;
