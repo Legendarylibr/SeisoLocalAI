@@ -18,18 +18,35 @@ logger = logging.getLogger(__name__)
 
 
 def _default_llama_threads() -> int:
-    cpus = os.cpu_count() or 4
+    cpus = _available_cpu_count()
     if _default_llama_gpu_layers() != 0:
-        return max(2, min(cpus // 2, 12))
-    return max(2, min(cpus - 2 if cpus > 4 else cpus, 12))
+        # Decode is latency-sensitive; leave cores free for OS, driver, and
+        # Python streaming while still giving llama.cpp enough workers.
+        return max(2, min(cpus // 2, 16))
+    return max(2, min(cpus - 2 if cpus > 4 else cpus, 16))
 
 
 def _default_llama_threads_batch(n_threads: int) -> int:
     """Use wider CPU parallelism for prompt prefill without changing decode threads."""
     if "SEISO_LLAMA_THREADS" in os.environ:
         return n_threads
-    cpus = os.cpu_count() or 4
-    return max(n_threads, min(cpus, 16))
+    cpus = _available_cpu_count()
+    if _default_llama_gpu_layers() != 0:
+        return max(n_threads, min(cpus, 32))
+    return max(n_threads, min(cpus - 1 if cpus > 4 else cpus, 24))
+
+
+def _available_cpu_count() -> int:
+    """CPU count honoring Linux affinity masks when present."""
+    try:
+        affinity = getattr(os, "sched_getaffinity", None)
+        if callable(affinity):
+            # pylint cannot infer the callable guard for this Linux-only attr.
+            # pylint: disable-next=not-callable
+            return max(1, len(affinity(0)))
+    except Exception:
+        pass
+    return os.cpu_count() or 4
 
 
 def _cuda_available() -> bool:
@@ -120,6 +137,12 @@ def _headroom_llama_batch_caps(
             ubatch = min(batch, 1024)
         if headroom >= 12288 and batch < 2048:
             batch = min(2048, batch + 256)
+        if headroom >= 24576:
+            batch = 4096
+            ubatch = 1024
+        elif headroom >= 18432:
+            batch = max(batch, 3072)
+            ubatch = 1024
     return batch, ubatch
 
 
@@ -514,7 +537,10 @@ def _load_llama_model(path: str, n_ctx: int) -> Any:
         requested = 0
 
     free_mb = headroom_mb()
-    memory_profiles = _llama_load_memory_profiles(kwargs, n_ctx, path, free_mb)
+    memory_profiles = [
+        *_llama_speed_memory_profiles(kwargs, path, free_mb),
+        *_llama_load_memory_profiles(kwargs, n_ctx, path, free_mb),
+    ]
     kv_options = _llama_kv_quant_options(path)
     full_targets = _llama_full_gpu_targets(requested)
     partial_targets = (
