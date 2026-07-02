@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import threading
 import time
+from collections import OrderedDict
 from typing import Generic, TypeVar
 
 K = TypeVar("K")
@@ -16,11 +17,11 @@ class TtlCache(Generic[K, V]):
     def __init__(self, *, ttl_s: float, max_entries: int = 512) -> None:
         self._ttl_s = ttl_s
         self._max_entries = max(1, max_entries)
-        self._data: dict[K, tuple[float, V]] = {}
+        self._data: OrderedDict[K, tuple[float, V]] = OrderedDict()
         self._lock = threading.Lock()
 
     def get(self, key: K) -> V | None:
-        now = time.time()
+        now = time.monotonic()
         with self._lock:
             entry = self._data.get(key)
             if entry is None:
@@ -29,15 +30,18 @@ class TtlCache(Generic[K, V]):
             if now - ts >= self._ttl_s:
                 del self._data[key]
                 return None
+            self._data.move_to_end(key)
             return value
 
     def set(self, key: K, value: V) -> None:
-        now = time.time()
+        now = time.monotonic()
         with self._lock:
-            self._purge_expired(now)
+            if key not in self._data and len(self._data) >= self._max_entries:
+                self._purge_expired(now)
             self._data[key] = (now, value)
+            self._data.move_to_end(key)
             while len(self._data) > self._max_entries:
-                self._evict_oldest()
+                self._data.popitem(last=False)
 
     def clear(self) -> None:
         with self._lock:
@@ -49,9 +53,3 @@ class TtlCache(Generic[K, V]):
         ]
         for key in expired:
             del self._data[key]
-
-    def _evict_oldest(self) -> None:
-        if not self._data:
-            return
-        oldest_key = min(self._data, key=lambda key: self._data[key][0])
-        del self._data[oldest_key]

@@ -111,9 +111,7 @@ async def test_provider_config_encrypted_at_rest(db: Database):
     assert str(row["config_json"]).startswith("enc:v1:")
 
     providers = await db.list_providers(user["id"])
-    assert json.loads(providers[0]["config_json"]) == {
-        "base_url": "http://127.0.0.1:8000"
-    }
+    assert json.loads(providers[0]["config_json"]) == {"base_url": "http://127.0.0.1:8000"}
 
 
 @pytest.mark.asyncio
@@ -177,21 +175,99 @@ async def test_upsert_model_preserves_id_on_update(db: Database):
 
 
 @pytest.mark.asyncio
+async def test_model_path_lookup_index_exists(db: Database):
+    conn = await db._ensure_conn()
+    async with conn.execute("PRAGMA index_list(local_models)") as cur:
+        indexes = {row["name"] for row in await cur.fetchall()}
+    assert "idx_models_user_created" in indexes
+    assert "idx_models_user_path" in indexes
+    assert "idx_models_user_name" in indexes
+
+
+@pytest.mark.asyncio
+async def test_list_models_merges_user_and_global_rows_by_created_at(db: Database):
+    user = await db.create_user("hashed", "User", email="u@local.dev")
+    conn = await db._ensure_conn()
+    rows = [
+        (
+            "global-new",
+            None,
+            "Global new",
+            "/models/global-new",
+            "global:new",
+            "gguf",
+            1,
+            "{}",
+            "2026-01-03T00:00:00+00:00",
+        ),
+        (
+            "user-mid",
+            user["id"],
+            "User mid",
+            "/models/user-mid",
+            "hf:user/mid",
+            "gguf",
+            1,
+            "{}",
+            "2026-01-02T00:00:00+00:00",
+        ),
+        (
+            "global-old",
+            None,
+            "Global old",
+            "/models/global-old",
+            "global:old",
+            "gguf",
+            1,
+            "{}",
+            "2026-01-01T00:00:00+00:00",
+        ),
+    ]
+    await conn.executemany(
+        """INSERT INTO local_models
+           (id, user_id, name, path, source, format, size_bytes, metadata_json, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        rows,
+    )
+    await conn.commit()
+
+    assert [row["id"] for row in await db.list_models(user["id"])] == [
+        "global-new",
+        "user-mid",
+        "global-old",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_ordered_list_indexes_exist(db: Database):
+    conn = await db._ensure_conn()
+    expected = {
+        "training_jobs": "idx_jobs_user_created",
+        "chat_messages": "idx_messages_thread_created",
+        "export_jobs": "idx_export_jobs_user_created",
+        "compress_jobs": "idx_compress_jobs_user_created",
+        "distill_rl_jobs": "idx_distill_rl_jobs_user_created",
+        "rl_quant_jobs": "idx_rl_quant_jobs_user_created",
+        "providers": "idx_providers_user_created",
+    }
+    for table, index in expected.items():
+        async with conn.execute(f"PRAGMA index_list({table})") as cur:
+            indexes = {row["name"] for row in await cur.fetchall()}
+        assert index in indexes
+
+
+@pytest.mark.asyncio
 async def test_get_thread_with_messages_batches_load(db: Database):
     user = await db.create_user("hashed", "User", email="u@local.dev")
     thread = await db.create_thread(user["id"], "Chat", model_id="model-a")
     await db.add_message(thread["id"], "user", "hello")
 
-    loaded_thread, messages = await db.get_thread_with_messages(
-        thread["id"], user["id"]
-    )
+    loaded_thread, messages = await db.get_thread_with_messages(thread["id"], user["id"])
     assert loaded_thread is not None
     assert loaded_thread["model_id"] == "model-a"
     assert messages[0]["content"] == "hello"
 
-    missing_thread, missing_messages = await db.get_thread_with_messages(
-        "missing", user["id"]
-    )
+    missing_thread, missing_messages = await db.get_thread_with_messages("missing", user["id"])
     assert missing_thread is None
     assert missing_messages == []
 

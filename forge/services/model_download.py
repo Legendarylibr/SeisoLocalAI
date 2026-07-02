@@ -37,9 +37,7 @@ from seiso.security import sanitize_filename
 _DOWNLOAD_LOCKS: dict[str, asyncio.Lock] = {}
 
 
-def _emit_progress(
-    on_progress: ProgressCallback | None, payload: dict[str, Any]
-) -> None:
+def _emit_progress(on_progress: ProgressCallback | None, payload: dict[str, Any]) -> None:
     if on_progress:
         on_progress(payload)
 
@@ -140,6 +138,7 @@ def _cached_download_result_if_usable(
         metadata = json.loads(existing.get("metadata_json") or "{}")
     except json.JSONDecodeError:
         metadata = {}
+    exact_gguf_files_complete = False
     if fmt == "gguf":
         gguf_repo = str(metadata.get("gguf_repo") or metadata.get("repo_id") or repo_id)
         gguf_files = metadata.get("gguf_files") or metadata.get("gguf_file")
@@ -152,16 +151,14 @@ def _cached_download_result_if_usable(
             with contextlib.suppress(Exception):
                 expected_size = max(
                     expected_size,
-                    sum(
-                        get_gguf_file_size_bytes(gguf_repo, str(item))
-                        for item in gguf_files
-                    ),
+                    sum(get_gguf_file_size_bytes(gguf_repo, str(item)) for item in gguf_files),
                 )
             if not gguf_files_complete_at_path(
                 path, [str(item) for item in gguf_files], expected_size
             ):
                 return None
-    if not path_has_complete_artifact(path, fmt, expected_size):
+            exact_gguf_files_complete = True
+    if not exact_gguf_files_complete and not path_has_complete_artifact(path, fmt, expected_size):
         return None
     requested = variant.lower()
     if requested == "gguf" and fmt != "gguf":
@@ -314,7 +311,11 @@ def _sync_download_artifacts(
     )
     cached = Path(info["path"])
     inv = link_inventory(inventory_dir, info["inventory_name"], cached)
-    size_bytes = path_size_bytes(cached)
+    downloaded_paths = [Path(raw) for raw in info.get("paths") or [info["path"]]]
+    try:
+        size_bytes = sum(path.stat().st_size for path in downloaded_paths)
+    except OSError:
+        size_bytes = path_size_bytes(cached)
     return {
         "variant": "gguf",
         "source": source,
@@ -329,7 +330,7 @@ def _sync_download_artifacts(
             "gguf_file": info["filename"],
             "gguf_files": info.get("filenames") or [info["filename"]],
         },
-        "downloaded": info.get("paths") or [info["path"]],
+        "downloaded": [str(path) for path in downloaded_paths],
         "repo_id": catalog_repo,
         "gguf_repo": gguf_repo,
         "cache_dir": str(cache_dir),
@@ -444,9 +445,5 @@ async def perform_model_download(
             "variant": artifacts["variant"],
             "model_id": record["id"],
             "cache_dir": artifacts["cache_dir"],
-            **(
-                {"gguf_repo": artifacts["gguf_repo"]}
-                if "gguf_repo" in artifacts
-                else {}
-            ),
+            **({"gguf_repo": artifacts["gguf_repo"]} if "gguf_repo" in artifacts else {}),
         }

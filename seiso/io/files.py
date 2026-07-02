@@ -20,8 +20,9 @@ class _StatEntry(Protocol):
 
 def _iter_file_entries(path: Path, pattern: str = "*") -> Iterator[_StatEntry]:
     """Yield matching files under *path* with minimal Path allocations."""
+    match_all = pattern == "*"
     if path.is_file():
-        if fnmatch.fnmatchcase(path.name, pattern):
+        if match_all or fnmatch.fnmatchcase(path.name, pattern):
             yield _PathStatEntry(path)
         return
     stack = [str(path)]
@@ -33,8 +34,8 @@ def _iter_file_entries(path: Path, pattern: str = "*") -> Iterator[_StatEntry]:
                     try:
                         if entry.is_dir(follow_symlinks=False):
                             stack.append(entry.path)
-                        elif entry.is_file() and fnmatch.fnmatchcase(
-                            entry.name, pattern
+                        elif entry.is_file() and (
+                            match_all or fnmatch.fnmatchcase(entry.name, pattern)
                         ):
                             yield entry
                     except OSError:
@@ -70,13 +71,10 @@ def iter_matching_files(
 ) -> Iterator[Path]:
     """Yield matching files below *path* without allocating Paths for non-matches."""
     normalized_suffixes = (
-        {suffix.lower() for suffix in suffixes} if suffixes is not None else None
+        tuple(suffix.lower() for suffix in suffixes) if suffixes is not None else None
     )
     for entry in _iter_file_entries(path, pattern):
-        if (
-            normalized_suffixes is not None
-            and os.path.splitext(entry.name)[1].lower() not in normalized_suffixes
-        ):
+        if normalized_suffixes is not None and not entry.name.lower().endswith(normalized_suffixes):
             continue
         yield Path(entry.path)
 
@@ -101,13 +99,10 @@ def matching_file_stats(
     count = 0
     total_size = 0
     normalized_suffixes = (
-        {suffix.lower() for suffix in suffixes} if suffixes is not None else None
+        tuple(suffix.lower() for suffix in suffixes) if suffixes is not None else None
     )
     for entry in _iter_file_entries(path, pattern):
-        if (
-            normalized_suffixes is not None
-            and os.path.splitext(entry.name)[1].lower() not in normalized_suffixes
-        ):
+        if normalized_suffixes is not None and not entry.name.lower().endswith(normalized_suffixes):
             continue
         count += 1
         total_size += entry.stat().st_size

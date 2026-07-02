@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+import pytest
+
 from forge.config import ForgeSettings
 from forge.services import hf_auth
 from forge.services.hf_auth import (
@@ -13,7 +15,12 @@ from forge.services.hf_auth import (
     save_user_hf_token,
 )
 from forge.services.hub_publish import HubPublishRequest, resolve_hub_publish_token
-from forge.services.publishable import is_pushable_model
+from forge.services.publishable import (
+    assert_pushable_checkpoint,
+    assert_pushable_path,
+    get_model_for_user,
+    is_pushable_model,
+)
 from seiso.export.model_card import HubModelMetadata, render_readme, write_hub_artifacts
 
 
@@ -52,6 +59,96 @@ def test_pushable_sources():
     assert not is_pushable_model({"source": "hf:meta-llama/Llama"})
     assert not is_pushable_model({"source": "scan"})
     assert not is_pushable_model({"source": "manual"})
+
+
+@pytest.mark.asyncio
+async def test_get_model_for_user_uses_single_model_lookup():
+    class FakeDb:
+        async def get_model(self, model_id: str, user_id: str) -> dict:
+            return {"id": model_id, "user_id": user_id}
+
+        async def list_models(self, _user_id: str) -> list[dict]:
+            pytest.fail("single model lookup should not scan the full inventory")
+
+    assert await get_model_for_user(FakeDb(), "m1", "u1") == {
+        "id": "m1",
+        "user_id": "u1",
+    }
+
+
+@pytest.mark.asyncio
+async def test_assert_pushable_path_allows_exports_without_inventory_scan(tmp_path):
+    export_path = tmp_path / "exports" / "u1" / "job" / "model.gguf"
+    export_path.parent.mkdir(parents=True)
+    export_path.write_bytes(b"gguf")
+
+    class FakeDb:
+        async def list_models(self, _user_id: str) -> list[dict]:
+            pytest.fail("exports path should not scan model inventory")
+
+    assert (
+        await assert_pushable_path(
+            FakeDb(),
+            data_dir=tmp_path,
+            user_id="u1",
+            target=export_path,
+        )
+        == export_path
+    )
+
+
+@pytest.mark.asyncio
+async def test_assert_pushable_path_uses_exact_path_lookup(tmp_path):
+    model_path = tmp_path / "models" / "u1" / "export" / "model.gguf"
+    model_path.parent.mkdir(parents=True)
+    model_path.write_bytes(b"gguf")
+
+    class FakeDb:
+        async def get_model_by_path(self, user_id: str, path: str) -> dict | None:
+            assert user_id == "u1"
+            if path == str(model_path):
+                return {"source": "export", "path": path}
+            return None
+
+        async def list_models(self, _user_id: str) -> list[dict]:
+            pytest.fail("exact registered path should not scan model inventory")
+
+    assert (
+        await assert_pushable_path(
+            FakeDb(),
+            data_dir=tmp_path,
+            user_id="u1",
+            target=model_path,
+        )
+        == model_path
+    )
+
+
+@pytest.mark.asyncio
+async def test_assert_pushable_checkpoint_uses_exact_path_lookup(tmp_path):
+    model_path = tmp_path / "models" / "u1" / "merged"
+    model_path.mkdir(parents=True)
+    (model_path / "model.safetensors").write_bytes(b"weights")
+
+    class FakeDb:
+        async def get_model_by_path(self, user_id: str, path: str) -> dict | None:
+            assert user_id == "u1"
+            if path == str(model_path):
+                return {"source": "training", "path": path}
+            return None
+
+        async def list_models(self, _user_id: str) -> list[dict]:
+            pytest.fail("exact checkpoint path should not scan model inventory")
+
+    assert (
+        await assert_pushable_checkpoint(
+            FakeDb(),
+            data_dir=tmp_path,
+            user_id="u1",
+            checkpoint=model_path,
+        )
+        == model_path
+    )
 
 
 def test_resolve_hf_token_priority(monkeypatch, tmp_path):
