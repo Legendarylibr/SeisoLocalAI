@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api, ChatMessage, ChatThread, CatalogModel, InferenceModelOption, ModelVariantsResponse, streamChat, VramStatus } from "@/lib/api";
 import { usePlatformSettings } from "@/context/PlatformSettingsContext";
@@ -63,6 +63,39 @@ function resolveBackendLabel(
   return optionLabels?.[backend] || labels[backend] || BACKEND_LABELS[backend] || backend;
 }
 
+function showStreamingTyping(el: HTMLElement) {
+  el.classList.add("chat-typing");
+  el.replaceChildren();
+  for (let i = 0; i < 3; i += 1) {
+    el.appendChild(document.createElement("span"));
+  }
+}
+
+function showStreamingText(el: HTMLElement, text: string) {
+  el.classList.remove("chat-typing");
+  el.textContent = text;
+}
+
+/** Isolated from ChatPage re-renders so imperative stream text is not wiped. */
+const StreamingBubble = memo(function StreamingBubble({
+  contentRef,
+}: {
+  contentRef: React.RefObject<HTMLDivElement | null>;
+}) {
+  return (
+    <div className="chat-bubble chat-bubble-assistant chat-bubble-streaming">
+      <div className="chat-avatar">
+        <IconAssistant size={14} />
+      </div>
+      <div className="chat-bubble-content chat-typing" ref={contentRef}>
+        <span />
+        <span />
+        <span />
+      </div>
+    </div>
+  );
+});
+
 type OpenTab = { threadId: string; title: string };
 
 export function ChatPage() {
@@ -86,7 +119,6 @@ export function ChatPage() {
   const [messagesByThread, setMessagesByThread] = useState<Record<string, ChatMessage[]>>({});
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
-  const [streamDraftStarted, setStreamDraftStarted] = useState(false);
   const [streamTps, setStreamTps] = useState<number | null>(null);
   const [lastTps, setLastTps] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -127,6 +159,8 @@ export function ChatPage() {
   const streamThreadRef = useRef<string | null>(null);
   const genStartRef = useRef<number | null>(null);
   const outputTokensRef = useRef(0);
+  const tpsFrameRef = useRef<number | null>(null);
+  const pendingTpsRef = useRef<number | null>(null);
   const userPickedBackendRef = useRef(false);
   const bootstrapGenRef = useRef(0);
   const bootstrapAbortRef = useRef<AbortController | null>(null);
@@ -604,6 +638,9 @@ export function ChatPage() {
     if (scrollFrameRef.current !== null) {
       window.cancelAnimationFrame(scrollFrameRef.current);
     }
+    if (tpsFrameRef.current !== null) {
+      window.cancelAnimationFrame(tpsFrameRef.current);
+    }
   }, []);
 
   const messageCount = messages.length;
@@ -742,7 +779,6 @@ export function ChatPage() {
     const content = input.trim();
     setInput("");
     setStreaming(true);
-    setStreamDraftStarted(false);
     setError(null);
 
     let threadId = active;
@@ -792,7 +828,21 @@ export function ChatPage() {
       }));
     };
 
-    const recordThroughput = (finalize = false) => {
+    const flushTpsUpdate = (finalize = false) => {
+      if (tpsFrameRef.current !== null) {
+        window.cancelAnimationFrame(tpsFrameRef.current);
+        tpsFrameRef.current = null;
+      }
+      if (finalize) {
+        pendingTpsRef.current = null;
+        setStreamTps(null);
+        return;
+      }
+      const pending = pendingTpsRef.current;
+      if (pending !== null) setStreamTps(pending);
+    };
+
+    const scheduleTpsUpdate = (finalize = false) => {
       const tokenCount = resolveOutputTokenCount(outputTokensRef.current, assistantText);
       if (tokenCount <= 0) return;
       const now = performance.now();
@@ -800,26 +850,31 @@ export function ChatPage() {
       const tps = computeTokensPerSec(tokenCount, now - genStartRef.current);
       if (tps === null) return;
       if (finalize) {
+        flushTpsUpdate(true);
         setLastTps(tps);
-        setStreamTps(null);
-      } else {
-        setStreamTps(tps);
+        return;
       }
+      pendingTpsRef.current = tps;
+      if (tpsFrameRef.current !== null) return;
+      tpsFrameRef.current = window.requestAnimationFrame(() => {
+        tpsFrameRef.current = null;
+        flushTpsUpdate();
+      });
     };
 
     const streamDisplay = createStreamDisplaySink(
       (text) => {
-        if (text) setStreamDraftStarted(true);
-        if (streamingElRef.current) {
-          streamingElRef.current.textContent = text;
-        }
+        const el = streamingElRef.current;
+        if (!el) return;
+        if (text) showStreamingText(el, text);
+        else showStreamingTyping(el);
       },
       () => scrollToBottom("auto"),
     );
     streamDisplayRef.current = streamDisplay;
     streamDisplay.reset();
     if (streamingElRef.current) {
-      streamingElRef.current.textContent = "";
+      showStreamingTyping(streamingElRef.current);
     }
 
     try {
@@ -865,18 +920,18 @@ export function ChatPage() {
             if (event === "stats") {
               const stats = parseStreamStats(data);
               if (stats) outputTokensRef.current = stats.output_tokens;
-              recordThroughput();
+              scheduleTpsUpdate();
               return;
             }
             if (event === "done") {
-              recordThroughput(true);
+              scheduleTpsUpdate(true);
               return;
             }
             if (event === "token" || event === "message") {
               if (event === "message") assistantText = data;
               else assistantText += data;
               streamDisplay.push(assistantText);
-              recordThroughput();
+              scheduleTpsUpdate();
             }
           },
         },
@@ -906,8 +961,7 @@ export function ChatPage() {
       outputTokensRef.current = 0;
       streamThreadRef.current = null;
       streamAbortRef.current = null;
-      setStreamTps(null);
-      setStreamDraftStarted(false);
+      flushTpsUpdate(true);
       setStreaming(false);
     }
   };
@@ -1261,25 +1315,7 @@ export function ChatPage() {
               {messages.map((m) => (
                 <ChatBubble key={m.id} message={m} />
               ))}
-              {streaming && (
-                <div className="chat-bubble chat-bubble-assistant chat-bubble-streaming">
-                  <div className="chat-avatar">
-                    <IconAssistant size={14} />
-                  </div>
-                  <div
-                    className={`chat-bubble-content${streamDraftStarted ? "" : " chat-typing"}`}
-                    ref={streamingElRef}
-                  >
-                    {!streamDraftStarted && (
-                      <>
-                        <span />
-                        <span />
-                        <span />
-                      </>
-                    )}
-                  </div>
-                </div>
-              )}
+              {streaming && <StreamingBubble contentRef={streamingElRef} />}
               <div ref={bottomRef} />
             </div>
           )}
