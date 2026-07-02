@@ -58,7 +58,14 @@ def apply_platform_memory_profile(
         if memory_caps_disabled or (
             tier == HardwareTier.WORKSTATION and headroom >= 8192
         ):
-            cache_mb = "1024"
+            if (
+                tier == HardwareTier.WORKSTATION
+                and headroom >= 16384
+                and ram_gb >= 32
+            ):
+                cache_mb = "2048"
+            else:
+                cache_mb = "1024"
         elif headroom < 12288:
             cache_mb = "512"
         else:
@@ -126,8 +133,9 @@ def apply_platform_memory_profile(
                 os.environ.setdefault("SEISO_LLAMA_OP_OFFLOAD", "true")
                 os.environ.setdefault("SEISO_LLAMA_OFFLOAD_KQV", "true")
                 if tier == HardwareTier.WORKSTATION:
-                    os.environ.setdefault("SEISO_LLAMA_BATCH", "2048")
-                    os.environ.setdefault("SEISO_LLAMA_UBATCH", "512")
+                    os.environ.setdefault("SEISO_LLAMA_BATCH", "4096")
+                    os.environ.setdefault("SEISO_LLAMA_UBATCH", "1024")
+                    os.environ.setdefault("SEISO_STREAM_BATCH_CHARS", "4")
                 else:
                     os.environ.setdefault("SEISO_LLAMA_BATCH", "1536")
                     os.environ.setdefault("SEISO_LLAMA_UBATCH", "512")

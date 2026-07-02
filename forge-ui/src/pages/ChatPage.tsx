@@ -8,6 +8,7 @@ import { streamHubModelDownload } from "@/lib/hubDownload";
 import { invalidateApiCache } from "@/lib/api/getCache";
 import { useHardwareProfile } from "@/hooks/useHardware";
 import { writeStoredModel } from "@/lib/modelSelection";
+import { createStreamDisplaySink } from "@/lib/streamDisplay";
 import {
   computeTokensPerSec,
   formatTokensPerSec,
@@ -29,6 +30,7 @@ import {
 import type { ChatContextStatus } from "@/lib/api/types";
 import { ROUTER_MODEL_ID } from "@/lib/api/types";
 import { ModelProgressState, initialDownloadProgress, initialLoadProgress } from "@/lib/modelProgress";
+import { ChatBubble } from "@/components/ChatBubble";
 import { ChatModelPicker } from "@/components/ChatModelPicker";
 import { ChatContextBar } from "@/components/ChatContextBar";
 import { ChatInferencePanel } from "@/components/ChatInferencePanel";
@@ -84,6 +86,7 @@ export function ChatPage() {
   const [messagesByThread, setMessagesByThread] = useState<Record<string, ChatMessage[]>>({});
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
+  const [streamDraftStarted, setStreamDraftStarted] = useState(false);
   const [streamTps, setStreamTps] = useState<number | null>(null);
   const [lastTps, setLastTps] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -119,8 +122,8 @@ export function ChatPage() {
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollFrameRef = useRef<number | null>(null);
   const streamAbortRef = useRef<(() => void) | null>(null);
-  const streamTextRef = useRef("");
-  const streamFlushRef = useRef<number | null>(null);
+  const streamingElRef = useRef<HTMLDivElement>(null);
+  const streamDisplayRef = useRef<ReturnType<typeof createStreamDisplaySink> | null>(null);
   const streamThreadRef = useRef<string | null>(null);
   const genStartRef = useRef<number | null>(null);
   const outputTokensRef = useRef(0);
@@ -583,15 +586,19 @@ export function ChatPage() {
     if (active && !messagesByThread[active]) loadMessages(active).catch(console.error);
   }, [active, messagesByThread, loadMessages]);
 
-  useEffect(() => {
+  const scrollToBottom = useCallback((behavior: ScrollBehavior = "auto") => {
     if (scrollFrameRef.current !== null) {
       window.cancelAnimationFrame(scrollFrameRef.current);
     }
     scrollFrameRef.current = window.requestAnimationFrame(() => {
       scrollFrameRef.current = null;
-      bottomRef.current?.scrollIntoView({ behavior: streaming ? "auto" : "smooth" });
+      bottomRef.current?.scrollIntoView({ behavior });
     });
-  }, [messages, active, streaming]);
+  }, []);
+
+  useEffect(() => {
+    scrollToBottom(streaming ? "auto" : "smooth");
+  }, [messages, active, streaming, scrollToBottom]);
 
   useEffect(() => () => {
     if (scrollFrameRef.current !== null) {
@@ -735,6 +742,7 @@ export function ChatPage() {
     const content = input.trim();
     setInput("");
     setStreaming(true);
+    setStreamDraftStarted(false);
     setError(null);
 
     let threadId = active;
@@ -762,11 +770,27 @@ export function ChatPage() {
 
     let assistantText = "";
     let progressText = "";
-    streamTextRef.current = "";
     streamThreadRef.current = threadId;
     genStartRef.current = null;
     outputTokensRef.current = 0;
     setStreamTps(null);
+
+    const commitAssistantMessage = (text: string) => {
+      const tid = streamThreadRef.current;
+      if (!tid || !text.trim()) return;
+      setMessagesByThread((prev) => ({
+        ...prev,
+        [tid]: [
+          ...(prev[tid] ?? []),
+          {
+            id: crypto.randomUUID(),
+            role: "assistant" as const,
+            content: text,
+            created_at: new Date().toISOString(),
+          },
+        ],
+      }));
+    };
 
     const recordThroughput = (finalize = false) => {
       const tokenCount = resolveOutputTokenCount(outputTokensRef.current, assistantText);
@@ -783,27 +807,20 @@ export function ChatPage() {
       }
     };
 
-    const flushStreamText = () => {
-      streamFlushRef.current = null;
-      const text = streamTextRef.current;
-      const tid = streamThreadRef.current;
-      if (!tid) return;
-      setMessagesByThread((prev) => {
-        const list = [...(prev[tid] ?? [])];
-        const last = list[list.length - 1];
-        if (last?.role === "assistant") {
-          list[list.length - 1] = { ...last, content: text };
-        } else {
-          list.push({
-            id: crypto.randomUUID(),
-            role: "assistant",
-            content: text,
-            created_at: new Date().toISOString(),
-          });
+    const streamDisplay = createStreamDisplaySink(
+      (text) => {
+        if (text) setStreamDraftStarted(true);
+        if (streamingElRef.current) {
+          streamingElRef.current.textContent = text;
         }
-        return { ...prev, [tid]: list };
-      });
-    };
+      },
+      () => scrollToBottom("auto"),
+    );
+    streamDisplayRef.current = streamDisplay;
+    streamDisplay.reset();
+    if (streamingElRef.current) {
+      streamingElRef.current.textContent = "";
+    }
 
     try {
       const { promise, abort } = streamChat(
@@ -841,10 +858,7 @@ export function ChatPage() {
             if (event === "log") {
               progressText = `${progressText}${progressText ? "\n" : ""}${data}`;
               if (!assistantText) {
-                streamTextRef.current = progressText;
-                if (streamFlushRef.current === null) {
-                  streamFlushRef.current = window.requestAnimationFrame(flushStreamText);
-                }
+                streamDisplay.push(progressText);
               }
               return;
             }
@@ -861,11 +875,8 @@ export function ChatPage() {
             if (event === "token" || event === "message") {
               if (event === "message") assistantText = data;
               else assistantText += data;
-              streamTextRef.current = assistantText;
+              streamDisplay.push(assistantText);
               recordThroughput();
-              if (streamFlushRef.current === null) {
-                streamFlushRef.current = window.requestAnimationFrame(flushStreamText);
-              }
             }
           },
         },
@@ -877,11 +888,15 @@ export function ChatPage() {
         setError(e instanceof Error ? e.message : "Request failed");
       }
     } finally {
-      if (streamFlushRef.current !== null) {
-        window.cancelAnimationFrame(streamFlushRef.current);
-        streamFlushRef.current = null;
+      streamDisplayRef.current?.flush();
+      streamDisplayRef.current?.reset();
+      streamDisplayRef.current = null;
+      if (streamingElRef.current) {
+        streamingElRef.current.textContent = "";
       }
-      if (streamTextRef.current) flushStreamText();
+      if (assistantText.trim()) {
+        commitAssistantMessage(assistantText);
+      }
       if (assistantText.trim() && genStartRef.current !== null) {
         const tokenCount = resolveOutputTokenCount(outputTokensRef.current, assistantText);
         const tps = computeTokensPerSec(tokenCount, performance.now() - genStartRef.current);
@@ -892,6 +907,7 @@ export function ChatPage() {
       streamThreadRef.current = null;
       streamAbortRef.current = null;
       setStreamTps(null);
+      setStreamDraftStarted(false);
       setStreaming(false);
     }
   };
@@ -1243,23 +1259,25 @@ export function ChatPage() {
           ) : (
             <div className="chat-messages">
               {messages.map((m) => (
-                <div key={m.id} className={`chat-bubble chat-bubble-${m.role}`}>
-                  <div className="chat-avatar">
-                    {m.role === "user" ? (
-                      <span className="chat-avatar-text">You</span>
-                    ) : (
-                      <IconAssistant size={14} />
-                    )}
-                  </div>
-                  <div className="chat-bubble-content">{m.content}</div>
-                </div>
+                <ChatBubble key={m.id} message={m} />
               ))}
-              {streaming && messages[messages.length - 1]?.role !== "assistant" && (
-                <div className="chat-bubble chat-bubble-assistant">
+              {streaming && (
+                <div className="chat-bubble chat-bubble-assistant chat-bubble-streaming">
                   <div className="chat-avatar">
                     <IconAssistant size={14} />
                   </div>
-                  <div className="chat-bubble-content chat-typing"><span /><span /><span /></div>
+                  <div
+                    className={`chat-bubble-content${streamDraftStarted ? "" : " chat-typing"}`}
+                    ref={streamingElRef}
+                  >
+                    {!streamDraftStarted && (
+                      <>
+                        <span />
+                        <span />
+                        <span />
+                      </>
+                    )}
+                  </div>
                 </div>
               )}
               <div ref={bottomRef} />

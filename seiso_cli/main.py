@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import typer
 
+from seiso_cli.bootstrap import bootstrap_runtime
 from seiso_cli.commands.chat import bench_inference_cmd, chat, inference_cmd
 from seiso_cli.commands.experiment import experiment_app
 from seiso_cli.commands.export import export_cmd
@@ -11,6 +12,8 @@ from seiso_cli.commands.forge import doctor, forge
 from seiso_cli.commands.pipelines import compress_app, distill_rl_app, rl_quant_app
 from seiso_cli.commands.slime import slime
 from seiso_cli.commands.train import train
+
+bootstrap_runtime()
 
 app = typer.Typer(
     name="seiso",
