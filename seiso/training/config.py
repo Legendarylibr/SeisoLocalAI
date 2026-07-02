@@ -366,6 +366,12 @@ def run_training(
         configure_hf_hub_cache(config.sandbox_root)
     ensure_cuda_library_path()
     enforce_nvidia_secure_boundary(context="training")
+    from seiso.training.torch_dynamo import configure_compile_checkpoint_compat
+
+    configure_compile_checkpoint_compat(
+        torch_compile=config.torch_compile,
+        gradient_checkpointing=config.gradient_checkpointing,
+    )
     if config.method == TrainMethod.SLIME:
         from seiso.slime_single_gpu.trainer import train_single_gpu_slime
 
