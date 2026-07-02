@@ -12,13 +12,14 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from forge.api.deps import get_db, get_inference_orchestrator
+from forge.api.http_errors import raise_forbidden
 from forge.config import ForgeSettings, get_settings
 from forge.db.store import Database
 from forge.orchestrators.inference import InferenceOrchestrator
 from forge.security.openai_auth import get_openai_user_id
 from forge.services.llm_output import StreamingOutputSanitizer, sanitize_llm_output
-from forge.services.models import resolve_model_path
-from forge.services.user_paths import is_local_filesystem_path
+from forge.services.user_paths import assert_user_path, is_local_filesystem_path
+from seiso.security import SecurityError
 
 router = APIRouter(tags=["openai"])
 
@@ -109,51 +110,40 @@ async def _resolve_openai_model_path(
     db: Database,
     settings: ForgeSettings,
 ) -> tuple[str, str | None]:
-    models = await db.list_models(user_id)
+    def _validated_path(raw_path: str, *, missing_message: str | None = None) -> str:
+        try:
+            path = assert_user_path(settings.data_dir, user_id, raw_path)
+        except SecurityError as exc:
+            raise_forbidden(exc)
+        if not path.exists():
+            detail = missing_message or f"Model file missing on disk: {raw_path}"
+            raise HTTPException(404, detail)
+        return str(path)
 
-    async def _path_for(model_id: str | None, model_path: str | None) -> str | None:
-        return await resolve_model_path(
-            db,
-            user_id,
-            model_id=model_id,
-            model_path=model_path,
-            data_dir=settings.data_dir,
-        )
-
-    def _format_for(model_id: str | None, model_path: str | None) -> str | None:
-        if model_id:
-            match = next(
-                (m for m in models if m["id"] == model_id or m["name"] == model_id),
-                None,
-            )
-            if match:
-                return match.get("format")
-        if model_path:
-            match = next((m for m in models if m.get("path") == model_path), None)
-            if match:
-                return match.get("format")
-        return None
+    def _row_path(row: dict[str, Any]) -> str:
+        return _validated_path(str(row["path"]))
 
     if body.model in ("default", "seiso"):
-        chat_first = sorted(
-            models,
-            key=lambda row: 0 if (row.get("format") or "").lower() == "gguf" else 1,
-        )
-        for row in chat_first:
-            path = await _path_for(row["id"], None)
-            if path:
-                return path, row.get("format")
+        models = await db.list_models(user_id)
+        for row in models:
+            if (row.get("format") or "").lower() != "gguf":
+                continue
+            return _row_path(row), row.get("format")
+        for row in models:
+            return _row_path(row), row.get("format")
         raise HTTPException(400, "No local model available — download from Hub")
 
     if is_local_filesystem_path(body.model):
-        path = await _path_for(None, body.model)
-        if path:
-            return path, _format_for(None, body.model)
+        path = _validated_path(body.model, missing_message=f"Model path not found: {body.model}")
+        match = await db.get_model_by_path(user_id, path)
+        return path, match.get("format") if match else None
 
-    path = await _path_for(body.model, None)
-    if path:
-        return path, _format_for(body.model, None)
-    raise HTTPException(400, "No local model available — download from Hub")
+    match = await db.get_model(body.model, user_id)
+    if match is None:
+        match = await db.get_model_by_name(user_id, body.model)
+    if not match:
+        raise HTTPException(404, f"Model not found in inventory: {body.model}")
+    return _row_path(match), match.get("format")
 
 
 @router.get("/v1/models")
@@ -162,13 +152,14 @@ async def list_models(
     db: Annotated[Database, Depends(get_db)],
 ) -> dict:
     models = await db.list_models(user_id)
+    created = int(time.time())
     return {
         "object": "list",
         "data": [
             {
                 "id": m["id"],
                 "object": "model",
-                "created": int(time.time()),
+                "created": created,
                 "owned_by": "seiso",
             }
             for m in models
@@ -186,9 +177,7 @@ async def chat_completions(
 ):
     """OpenAI-compatible chat endpoint for Cursor, Continue, and other clients."""
     if body.tools and not settings.allow_openai_tools:
-        raise HTTPException(
-            403, "Tool calling is disabled on the OpenAI-compatible API"
-        )
+        raise HTTPException(403, "Tool calling is disabled on the OpenAI-compatible API")
 
     path, model_format = await _resolve_openai_model_path(body, user_id, db, settings)
     payload = _resolve_payload(body, path, model_format=model_format)
@@ -269,9 +258,7 @@ async def chat_completions(
             if job and job.status.value == "failed":
                 yield f"data: {json.dumps({'error': job.error or 'Inference failed'})}\n\n"
             elif content:
-                content = _sanitize_openai_content(
-                    content, tools_enabled=bool(body.tools)
-                )
+                content = _sanitize_openai_content(content, tools_enabled=bool(body.tools))
                 chunk = {
                     "id": completion_id,
                     "object": "chat.completion.chunk",

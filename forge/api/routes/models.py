@@ -129,12 +129,8 @@ async def model_catalog(
     purpose: str = Query(
         "chat", description="chat = GGUF Hub catalog; train = safetensors checkpoints"
     ),
-    hardware_aware: bool = Query(
-        True, description="Rank and annotate by local hardware fit"
-    ),
-    fits_only: bool = Query(
-        False, description="Show only ideal/good fits for this machine"
-    ),
+    hardware_aware: bool = Query(True, description="Rank and annotate by local hardware fit"),
+    fits_only: bool = Query(False, description="Show only ideal/good fits for this machine"),
     limit: int = Query(50, ge=1, le=100),
     cursor: str | None = Query(None, description="Hugging Face Hub pagination cursor"),
 ) -> dict:
@@ -144,11 +140,7 @@ async def model_catalog(
         encryption_key=settings.hf_token_encryption_key,
         settings_token=settings.hf_token or None,
     )
-    search_fn = (
-        search_trainable_catalog
-        if purpose.strip().lower() == "train"
-        else search_catalog
-    )
+    search_fn = search_trainable_catalog if purpose.strip().lower() == "train" else search_catalog
     try:
         result = search_fn(
             q,
@@ -257,7 +249,16 @@ async def download_local_model(
         raise_forbidden(exc)
 
     if path.is_dir():
-        gguf = next(iter_matching_files(path, "*.gguf"), None)
+        try:
+            metadata = json.loads(model.get("metadata_json") or "{}")
+        except json.JSONDecodeError:
+            metadata = {}
+        gguf_file = metadata.get("gguf_file")
+        gguf = path / str(gguf_file) if isinstance(gguf_file, str) else None
+        if gguf is not None and not gguf.is_file():
+            gguf = None
+        if gguf is None:
+            gguf = next(iter_matching_files(path, "*.gguf"), None)
         if gguf is None:
             raise HTTPException(404, "No downloadable file in model directory")
         path = gguf
@@ -448,6 +449,9 @@ async def register_local(
         raise_forbidden(exc)
     if not path.exists():
         raise HTTPException(404, "Model path not found")
+    existing = await db.get_model_by_path(user_id, str(path))
+    if existing:
+        return existing
     return await db.add_model(
         user_id=user_id,
         name=body.name,

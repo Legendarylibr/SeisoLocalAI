@@ -7,13 +7,11 @@ from pathlib import Path
 from typing import Any
 
 from seiso.inference.backends import gguf_is_supported_by_llamacpp
-from seiso.io.files import matching_file_stats
+from seiso.io.files import iter_matching_files, matching_file_stats
 from seiso.models.catalog import CatalogEntry
 
 
-def _existing_files_total_size(
-    paths: list[Path], *, require_positive: bool
-) -> int | None:
+def _existing_files_total_size(paths: list[Path], *, require_positive: bool) -> int | None:
     total_size = 0
     for path in paths:
         if not path.is_file():
@@ -38,31 +36,25 @@ def path_has_complete_artifact(path: Path, fmt: str, expected_size: int) -> bool
                 and size > 0
                 and (expected_size <= 0 or size >= expected_size)
             )
+        if expected_size <= 0:
+            return any(file.stat().st_size > 0 for file in iter_matching_files(path, "*.gguf"))
         count, size = matching_file_stats(path, "*.gguf")
-        return (
-            count > 0 and size > 0 and (expected_size <= 0 or size >= expected_size)
-        )
+        return count > 0 and size > 0 and (expected_size <= 0 or size >= expected_size)
     if path.is_dir():
-        count, size = matching_file_stats(
-            path, suffixes=frozenset({".safetensors", ".bin"})
-        )
-        return (
-            count > 0
-            and size > 0
-            and (expected_size <= 0 or size >= expected_size)
-        )
+        suffixes = frozenset({".safetensors", ".bin"})
+        if expected_size <= 0:
+            return any(
+                file.stat().st_size > 0 for file in iter_matching_files(path, suffixes=suffixes)
+            )
+        count, size = matching_file_stats(path, suffixes=suffixes)
+        return count > 0 and size > 0 and (expected_size <= 0 or size >= expected_size)
     if not path.is_file():
         return False
     size = path.stat().st_size
-    return (
-        size > 0
-        and (expected_size <= 0 or size >= expected_size)
-    )
+    return size > 0 and (expected_size <= 0 or size >= expected_size)
 
 
-def gguf_files_complete_at_path(
-    path: Path, filenames: list[str], expected_size: int
-) -> bool:
+def gguf_files_complete_at_path(path: Path, filenames: list[str], expected_size: int) -> bool:
     if not filenames:
         return False
     files = (
@@ -112,30 +104,28 @@ def inventory_gguf_is_complete(
     fmt = str(row.get("format") or "").lower()
     if fmt != "gguf":
         return True
-    if not gguf_is_supported_by_llamacpp(str(path)):
-        return False
 
     gguf_repo = str(metadata.get("gguf_repo") or metadata.get("repo_id") or "")
     gguf_files = metadata.get("gguf_files") or metadata.get("gguf_file")
     if isinstance(gguf_files, str):
         gguf_files = [gguf_files]
     if not gguf_repo or not isinstance(gguf_files, list) or not gguf_files:
+        if not gguf_is_supported_by_llamacpp(str(path)):
+            return False
         return not str(row.get("source") or "").startswith("hf:")
 
-    local_files = (
-        [path] if path.is_file() else [path / str(filename) for filename in gguf_files]
-    )
+    local_files = [path] if path.is_file() else [path / str(filename) for filename in gguf_files]
     actual_size = _existing_files_total_size(local_files, require_positive=False)
     if actual_size is None:
+        return False
+    if not gguf_is_supported_by_llamacpp(str(local_files[0])):
         return False
     if size_lookup is None:
         from forge.services.hf_hub import get_gguf_file_size_bytes
 
         size_lookup = get_gguf_file_size_bytes
     try:
-        expected_size = sum(
-            size_lookup(gguf_repo, str(filename)) for filename in gguf_files
-        )
+        expected_size = sum(size_lookup(gguf_repo, str(filename)) for filename in gguf_files)
     except Exception:
         return True
     return expected_size <= 0 or actual_size >= expected_size

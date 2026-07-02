@@ -13,8 +13,7 @@ PUSHABLE_SOURCES = frozenset({"training", "export", "rl_quant"})
 
 
 async def get_model_for_user(db: Database, model_id: str, user_id: str) -> dict | None:
-    models = await db.list_models(user_id)
-    return next((m for m in models if m["id"] == model_id), None)
+    return await db.get_model(model_id, user_id)
 
 
 def _parse_metadata(model: dict) -> dict:
@@ -50,6 +49,16 @@ async def assert_pushable_path(
 ) -> Path:
     """Path must be a registered pushable model or under exports/{user_id}/ from a completed job."""
     resolved = assert_user_path(data_dir, user_id, target)
+    rel = resolved.relative_to(data_dir.resolve())
+    if rel.parts[:2] == ("exports", user_id):
+        return resolved
+
+    exact = await db.get_model_by_path(user_id, str(resolved))
+    if exact and is_pushable_model(exact):
+        return resolved
+    parent = await db.get_model_by_path(user_id, str(resolved.parent))
+    if parent and is_pushable_model(parent):
+        return resolved
 
     models = await db.list_models(user_id)
     for model in models:
@@ -63,10 +72,6 @@ async def assert_pushable_path(
             pass
         if model_path == resolved or model_path == resolved.parent:
             return resolved
-
-    rel = resolved.relative_to(data_dir.resolve())
-    if rel.parts[:2] == ("exports", user_id):
-        return resolved
 
     raise ValueError("Only Seiso export outputs can be published to Hugging Face")
 
@@ -85,15 +90,17 @@ async def assert_pushable_checkpoint(
     if rel.parts[:2] == ("checkpoints", user_id):
         return resolved
 
-    models = await db.list_models(user_id)
     norm = str(resolved.resolve())
+    exact = await db.get_model_by_path(user_id, str(resolved))
+    if exact and is_pushable_model(exact):
+        return resolved
+
+    models = await db.list_models(user_id)
     for m in models:
         if str(Path(m["path"]).resolve()) == norm and is_pushable_model(m):
             return resolved
 
-    raise ValueError(
-        "Checkpoint must be a Seiso training checkpoint or a prior export output"
-    )
+    raise ValueError("Checkpoint must be a Seiso training checkpoint or a prior export output")
 
 
 async def list_publishable_models(db: Database, user_id: str) -> list[dict]:

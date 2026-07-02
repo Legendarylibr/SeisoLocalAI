@@ -171,15 +171,25 @@ CREATE TABLE IF NOT EXISTS providers (
 );
 
 CREATE INDEX IF NOT EXISTS idx_models_user ON local_models(user_id);
+CREATE INDEX IF NOT EXISTS idx_models_user_created ON local_models(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_models_user_path ON local_models(user_id, path);
+CREATE INDEX IF NOT EXISTS idx_models_user_name ON local_models(user_id, name);
 CREATE INDEX IF NOT EXISTS idx_threads_user ON chat_threads(user_id);
 CREATE INDEX IF NOT EXISTS idx_jobs_user ON training_jobs(user_id);
+CREATE INDEX IF NOT EXISTS idx_jobs_user_created ON training_jobs(user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_messages_thread ON chat_messages(thread_id);
+CREATE INDEX IF NOT EXISTS idx_messages_thread_created ON chat_messages(thread_id, created_at ASC);
 CREATE INDEX IF NOT EXISTS idx_export_jobs_user ON export_jobs(user_id);
+CREATE INDEX IF NOT EXISTS idx_export_jobs_user_created ON export_jobs(user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_compress_jobs_user ON compress_jobs(user_id);
+CREATE INDEX IF NOT EXISTS idx_compress_jobs_user_created ON compress_jobs(user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_distill_rl_jobs_user ON distill_rl_jobs(user_id);
+CREATE INDEX IF NOT EXISTS idx_distill_rl_jobs_user_created ON distill_rl_jobs(user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_rl_quant_jobs_user ON rl_quant_jobs(user_id);
+CREATE INDEX IF NOT EXISTS idx_rl_quant_jobs_user_created ON rl_quant_jobs(user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_recipe_jobs_user ON recipe_jobs(user_id);
 CREATE INDEX IF NOT EXISTS idx_providers_user ON providers(user_id);
+CREATE INDEX IF NOT EXISTS idx_providers_user_created ON providers(user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_knowledge_bases_user ON knowledge_bases(user_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_models_user_source ON local_models(user_id, source);
 CREATE INDEX IF NOT EXISTS idx_threads_user_updated ON chat_threads(user_id, updated_at DESC);
@@ -267,9 +277,7 @@ class Database:
         try:
             return decrypt_field(value, self._encryption_key)
         except Exception as exc:
-            raise DatabaseCryptoError(
-                "Encrypted database field could not be decrypted"
-            ) from exc
+            raise DatabaseCryptoError("Encrypted database field could not be decrypted") from exc
 
     def _decrypt_row(self, table: str, row: dict[str, Any]) -> dict[str, Any]:
         out = dict(row)
@@ -298,8 +306,27 @@ class Database:
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_models_user_source ON local_models(user_id, source)"
         )
         await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_models_user_created ON local_models(user_id, created_at DESC)"
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_models_user_path ON local_models(user_id, path)"
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_models_user_name ON local_models(user_id, name)"
+        )
+        await conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_threads_user_updated ON chat_threads(user_id, updated_at DESC)"
         )
+        for statement in (
+            "CREATE INDEX IF NOT EXISTS idx_jobs_user_created ON training_jobs(user_id, created_at DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_messages_thread_created ON chat_messages(thread_id, created_at ASC)",
+            "CREATE INDEX IF NOT EXISTS idx_export_jobs_user_created ON export_jobs(user_id, created_at DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_compress_jobs_user_created ON compress_jobs(user_id, created_at DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_distill_rl_jobs_user_created ON distill_rl_jobs(user_id, created_at DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_rl_quant_jobs_user_created ON rl_quant_jobs(user_id, created_at DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_providers_user_created ON providers(user_id, created_at DESC)",
+        ):
+            await conn.execute(statement)
 
     async def _ensure_conn(self) -> aiosqlite.Connection:
         if self._conn_holder is None:
@@ -415,9 +442,7 @@ class Database:
     async def get_user_by_email(self, email: str) -> dict | None:
         async with (
             self._conn() as conn,
-            conn.execute(
-                "SELECT * FROM users WHERE email = ?", (email.lower(),)
-            ) as cur,
+            conn.execute("SELECT * FROM users WHERE email = ?", (email.lower(),)) as cur,
         ):
             row = await cur.fetchone()
             return dict(row) if row else None
@@ -433,12 +458,22 @@ class Database:
     async def list_models(self, user_id: str | None = None) -> list[dict]:
         async with self._conn() as conn:
             if user_id:
-                q = "SELECT * FROM local_models WHERE user_id = ? OR user_id IS NULL ORDER BY created_at DESC"
-                params: tuple[Any, ...] = (user_id,)
-            else:
-                q = "SELECT * FROM local_models ORDER BY created_at DESC"
-                params = ()
-            async with conn.execute(q, params) as cur:
+                async with conn.execute(
+                    "SELECT * FROM local_models WHERE user_id = ? ORDER BY created_at DESC",
+                    (user_id,),
+                ) as cur:
+                    user_rows = [dict(r) for r in await cur.fetchall()]
+                async with conn.execute(
+                    "SELECT * FROM local_models WHERE user_id IS NULL ORDER BY created_at DESC"
+                ) as cur:
+                    global_rows = [dict(r) for r in await cur.fetchall()]
+                return sorted(
+                    [*user_rows, *global_rows],
+                    key=lambda row: str(row.get("created_at") or ""),
+                    reverse=True,
+                )
+
+            async with conn.execute("SELECT * FROM local_models ORDER BY created_at DESC") as cur:
                 rows = await cur.fetchall()
                 return [dict(r) for r in rows]
 
@@ -448,6 +483,28 @@ class Database:
             conn.execute(
                 "SELECT * FROM local_models WHERE id = ? AND (user_id = ? OR user_id IS NULL)",
                 (model_id, user_id),
+            ) as cur,
+        ):
+            row = await cur.fetchone()
+            return dict(row) if row else None
+
+    async def get_model_by_path(self, user_id: str, path: str) -> dict | None:
+        async with (
+            self._conn() as conn,
+            conn.execute(
+                "SELECT * FROM local_models WHERE path = ? AND (user_id = ? OR user_id IS NULL) ORDER BY created_at DESC LIMIT 1",
+                (path, user_id),
+            ) as cur,
+        ):
+            row = await cur.fetchone()
+            return dict(row) if row else None
+
+    async def get_model_by_name(self, user_id: str, name: str) -> dict | None:
+        async with (
+            self._conn() as conn,
+            conn.execute(
+                "SELECT * FROM local_models WHERE name = ? AND (user_id = ? OR user_id IS NULL) ORDER BY created_at DESC LIMIT 1",
+                (name, user_id),
             ) as cur,
         ):
             row = await cur.fetchone()
@@ -566,8 +623,7 @@ class Database:
                 (thread_id,),
             ) as cur:
                 messages = [
-                    self._decrypt_row("chat_messages", dict(r))
-                    for r in await cur.fetchall()
+                    self._decrypt_row("chat_messages", dict(r)) for r in await cur.fetchall()
                 ]
             return dict(thread_row), messages
 
@@ -652,9 +708,7 @@ class Database:
         ):
             return [dict(r) for r in await cur.fetchall()]
 
-    async def create_thread(
-        self, user_id: str, title: str, model_id: str | None = None
-    ) -> dict:
+    async def create_thread(self, user_id: str, title: str, model_id: str | None = None) -> dict:
         tid = str(uuid.uuid4())
         now = _now()
         async with self._conn() as conn:
@@ -693,9 +747,7 @@ class Database:
             )
             if not await cur.fetchone():
                 return False
-            await conn.execute(
-                "DELETE FROM chat_messages WHERE thread_id = ?", (thread_id,)
-            )
+            await conn.execute("DELETE FROM chat_messages WHERE thread_id = ?", (thread_id,))
             await conn.execute("DELETE FROM chat_threads WHERE id = ?", (thread_id,))
             await conn.commit()
             return True
@@ -707,9 +759,7 @@ class Database:
                 "DELETE FROM chat_messages WHERE thread_id IN (SELECT id FROM chat_threads WHERE user_id = ?)",
                 (user_id,),
             )
-            cur = await conn.execute(
-                "DELETE FROM chat_threads WHERE user_id = ?", (user_id,)
-            )
+            cur = await conn.execute("DELETE FROM chat_threads WHERE user_id = ?", (user_id,))
             await conn.commit()
             return cur.rowcount
 
@@ -759,10 +809,7 @@ class Database:
                 (thread_id,),
             ) as cur,
         ):
-            return [
-                self._decrypt_row("chat_messages", dict(r))
-                for r in await cur.fetchall()
-            ]
+            return [self._decrypt_row("chat_messages", dict(r)) for r in await cur.fetchall()]
 
     # --- Providers ---
 
@@ -774,9 +821,7 @@ class Database:
                 (user_id,),
             ) as cur,
         ):
-            return [
-                self._decrypt_row("providers", dict(r)) for r in await cur.fetchall()
-            ]
+            return [self._decrypt_row("providers", dict(r)) for r in await cur.fetchall()]
 
     async def create_provider(
         self, user_id: str, name: str, provider_type: str, config: dict
@@ -908,9 +953,7 @@ class Database:
             await conn.commit()
         return {"id": jid, "status": "pending", "config": config, "created_at": now}
 
-    async def _get_config_job(
-        self, table: str, job_id: str, user_id: str
-    ) -> dict | None:
+    async def _get_config_job(self, table: str, job_id: str, user_id: str) -> dict | None:
         table = _config_job_table(table)
         query = f"SELECT * FROM {table} WHERE id = ? AND user_id = ?"  # nosec B608
         async with (
@@ -987,9 +1030,7 @@ class Database:
     async def create_rl_quant_job(
         self, user_id: str, config: dict, job_id: str | None = None
     ) -> dict:
-        return await self._create_config_job(
-            "rl_quant_jobs", user_id, config, job_id=job_id
-        )
+        return await self._create_config_job("rl_quant_jobs", user_id, config, job_id=job_id)
 
     async def get_rl_quant_job(self, job_id: str, user_id: str) -> dict | None:
         return await self._get_config_job("rl_quant_jobs", job_id, user_id)
@@ -1020,11 +1061,7 @@ class Database:
                     now,
                     output_dir,
                     recommendation_path,
-                    (
-                        json.dumps(recommendation_json)
-                        if recommendation_json is not None
-                        else None
-                    ),
+                    (json.dumps(recommendation_json) if recommendation_json is not None else None),
                     json.dumps(gguf_quants) if gguf_quants is not None else None,
                     error_text,
                     job_id,
@@ -1042,9 +1079,7 @@ class Database:
     async def create_compress_job(
         self, user_id: str, config: dict, job_id: str | None = None
     ) -> dict:
-        return await self._create_config_job(
-            "compress_jobs", user_id, config, job_id=job_id
-        )
+        return await self._create_config_job("compress_jobs", user_id, config, job_id=job_id)
 
     async def get_compress_job(self, job_id: str, user_id: str) -> dict | None:
         return await self._get_config_job("compress_jobs", job_id, user_id)
@@ -1081,9 +1116,7 @@ class Database:
     async def create_distill_rl_job(
         self, user_id: str, config: dict, job_id: str | None = None
     ) -> dict:
-        return await self._create_config_job(
-            "distill_rl_jobs", user_id, config, job_id=job_id
-        )
+        return await self._create_config_job("distill_rl_jobs", user_id, config, job_id=job_id)
 
     async def get_distill_rl_job(self, job_id: str, user_id: str) -> dict | None:
         return await self._get_config_job("distill_rl_jobs", job_id, user_id)

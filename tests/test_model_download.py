@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -131,9 +132,7 @@ def test_cached_download_rejects_hf_gguf_without_metadata(tmp_path):
     assert result is None
 
 
-def test_cached_download_validates_specific_gguf_files_in_directory(
-    monkeypatch, tmp_path
-):
+def test_cached_download_validates_specific_gguf_files_in_directory(monkeypatch, tmp_path):
     model_dir = tmp_path / "model"
     model_dir.mkdir()
     q4 = model_dir / "model-Q4_K_M.gguf"
@@ -166,17 +165,124 @@ def test_cached_download_validates_specific_gguf_files_in_directory(
     assert result is None
 
 
+def test_cached_download_skips_generic_scan_after_exact_gguf_validation(monkeypatch, tmp_path):
+    model_dir = tmp_path / "model"
+    model_dir.mkdir()
+    q4 = model_dir / "model-Q4_K_M.gguf"
+    q4.write_bytes(b"x" * 10)
+
+    monkeypatch.setattr(
+        model_download,
+        "get_gguf_file_size_bytes",
+        lambda _repo, _filename: q4.stat().st_size,
+    )
+    monkeypatch.setattr(
+        model_download,
+        "path_has_complete_artifact",
+        lambda *_args, **_kwargs: pytest.fail("exact GGUF validation is sufficient"),
+    )
+
+    result = model_download._cached_download_result_if_usable(
+        {
+            "id": "m1",
+            "path": str(model_dir),
+            "source": "hf:org/Model",
+            "format": "gguf",
+            "size_bytes": q4.stat().st_size,
+            "metadata_json": (
+                '{"repo_id": "org/Model", "gguf_repo": "mirror/Model-GGUF", '
+                '"gguf_files": ["model-Q4_K_M.gguf"]}'
+            ),
+        },
+        repo_id="org/Model",
+        variant="gguf",
+    )
+
+    assert result is not None
+    assert result["cached"] is True
+    assert result["downloaded"] == [str(q4)]
+
+
 @pytest.mark.asyncio
-async def test_perform_gguf_download_registers_llamacpp_inventory(
-    monkeypatch, tmp_path
-):
+async def test_download_local_model_uses_metadata_gguf_file(monkeypatch, tmp_path):
+    from forge.api.routes import models as model_routes
+
+    model_dir = tmp_path / "models" / "u1" / "model"
+    model_dir.mkdir(parents=True)
+    gguf = model_dir / "model-Q4_K_M.gguf"
+    gguf.write_bytes(b"gguf")
+
+    class FakeDb:
+        async def get_model(self, model_id: str, user_id: str) -> dict:
+            return {
+                "id": model_id,
+                "user_id": user_id,
+                "path": str(model_dir),
+                "metadata_json": '{"gguf_file": "model-Q4_K_M.gguf"}',
+            }
+
+    monkeypatch.setattr(
+        model_routes,
+        "iter_matching_files",
+        lambda *_args, **_kwargs: pytest.fail("metadata file should avoid scan"),
+    )
+
+    response = await model_routes.download_local_model(
+        "m1",
+        user_id="u1",
+        db=FakeDb(),
+        settings=SimpleNamespace(data_dir=tmp_path),
+    )
+
+    assert Path(response.path) == gguf
+
+
+@pytest.mark.asyncio
+async def test_register_local_reuses_existing_path_without_size_scan(monkeypatch, tmp_path):
+    from forge.api.routes import models as model_routes
+
+    model_path = tmp_path / "models" / "u1" / "model.gguf"
+    model_path.parent.mkdir(parents=True)
+    model_path.write_bytes(b"gguf")
+    existing = {
+        "id": "m1",
+        "name": "Existing",
+        "path": str(model_path),
+        "format": "gguf",
+    }
+
+    class FakeDb:
+        async def get_model_by_path(self, user_id: str, path: str) -> dict | None:
+            assert user_id == "u1"
+            assert path == str(model_path)
+            return existing
+
+        async def add_model(self, **_fields):
+            pytest.fail("existing path should not insert another model")
+
+    monkeypatch.setattr(
+        model_routes,
+        "model_weight_size_bytes",
+        lambda _path: pytest.fail("existing path should not scan size"),
+    )
+
+    result = await model_routes.register_local(
+        model_routes.LocalModelCreate(name="Model", path=str(model_path)),
+        user_id="u1",
+        db=FakeDb(),
+        settings=SimpleNamespace(data_dir=tmp_path),
+    )
+
+    assert result is existing
+
+
+@pytest.mark.asyncio
+async def test_perform_gguf_download_registers_llamacpp_inventory(monkeypatch, tmp_path):
     cached = tmp_path / "hf_cache" / "model-q4.gguf"
     cached.parent.mkdir()
     cached.write_bytes(b"gguf-bytes")
 
-    monkeypatch.setattr(
-        model_download, "assert_hub_ready_for_download", lambda **_kwargs: None
-    )
+    monkeypatch.setattr(model_download, "assert_hub_ready_for_download", lambda **_kwargs: None)
     monkeypatch.setattr(
         model_download,
         "resolve_hf_token_for_download",
@@ -192,22 +298,24 @@ async def test_perform_gguf_download_registers_llamacpp_inventory(
             "size_bytes": cached.stat().st_size,
         },
     )
-    monkeypatch.setattr(
-        model_download, "_assert_disk_space_for_download", lambda *_args: None
-    )
+    monkeypatch.setattr(model_download, "_assert_disk_space_for_download", lambda *_args: None)
     monkeypatch.setattr(
         model_download,
         "download_gguf",
         lambda *_args, **_kwargs: {
             "path": str(cached),
+            "paths": [str(cached)],
             "filename": "model-q4.gguf",
             "inventory_name": "org--Model/model-q4.gguf",
         },
     )
-
-    db = Database(
-        tmp_path / "forge.db", encryption_key=generate_encryption_key(), ephemeral=True
+    monkeypatch.setattr(
+        model_download,
+        "path_size_bytes",
+        lambda _path: pytest.fail("exact downloaded paths should be sized directly"),
     )
+
+    db = Database(tmp_path / "forge.db", encryption_key=generate_encryption_key(), ephemeral=True)
     result = await model_download.perform_model_download(
         user_id="u1",
         db=db,
@@ -229,9 +337,7 @@ async def test_perform_gguf_download_registers_llamacpp_inventory(
 
 
 @pytest.mark.asyncio
-async def test_perform_download_returns_cached_inventory_without_redownload(
-    monkeypatch, tmp_path
-):
+async def test_perform_download_returns_cached_inventory_without_redownload(monkeypatch, tmp_path):
     cached = tmp_path / "hf_cache" / "model-q4.gguf"
     cached.parent.mkdir()
     cached.write_bytes(b"gguf-bytes")
@@ -239,9 +345,7 @@ async def test_perform_download_returns_cached_inventory_without_redownload(
     inv.parent.mkdir(parents=True)
     inv.symlink_to(cached)
 
-    db = Database(
-        tmp_path / "forge.db", encryption_key=generate_encryption_key(), ephemeral=True
-    )
+    db = Database(tmp_path / "forge.db", encryption_key=generate_encryption_key(), ephemeral=True)
     row = await db.add_model(
         user_id="u1",
         source="hf:org/Model",
@@ -288,12 +392,7 @@ def test_link_inventory_preserves_hf_snapshot_symlink(tmp_path):
     blob.parent.mkdir(parents=True)
     blob.write_bytes(b"gguf-bytes")
     snapshot_file = (
-        tmp_path
-        / "hf_cache"
-        / "models--org--Model-GGUF"
-        / "snapshots"
-        / "rev"
-        / "model-q4.gguf"
+        tmp_path / "hf_cache" / "models--org--Model-GGUF" / "snapshots" / "rev" / "model-q4.gguf"
     )
     snapshot_file.parent.mkdir(parents=True)
     snapshot_file.symlink_to("../../blobs/abc")
@@ -317,9 +416,7 @@ async def test_find_inventory_for_catalog_repo_matches_metadata(monkeypatch, tmp
     inv.parent.mkdir(parents=True)
     inv.symlink_to(cached)
 
-    db = Database(
-        tmp_path / "forge.db", encryption_key=generate_encryption_key(), ephemeral=True
-    )
+    db = Database(tmp_path / "forge.db", encryption_key=generate_encryption_key(), ephemeral=True)
     await db.add_model(
         user_id="u1",
         source="hf:mirror/Model-GGUF",
@@ -364,16 +461,12 @@ async def test_find_inventory_for_catalog_repo_matches_metadata(monkeypatch, tmp
 
 @pytest.mark.asyncio
 async def test_sync_hf_cache_inventory_registers_any_cached_gguf(tmp_path):
-    snapshot = (
-        tmp_path / "hf_cache" / "models--random-user--Kimi-DFlash" / "snapshots" / "abc"
-    )
+    snapshot = tmp_path / "hf_cache" / "models--random-user--Kimi-DFlash" / "snapshots" / "abc"
     snapshot.mkdir(parents=True)
     gguf = snapshot / "model-Q4_K_M.gguf"
     gguf.write_bytes(b"gguf-bytes")
 
-    db = Database(
-        tmp_path / "forge.db", encryption_key=generate_encryption_key(), ephemeral=True
-    )
+    db = Database(tmp_path / "forge.db", encryption_key=generate_encryption_key(), ephemeral=True)
     count = await sync_hf_cache_inventory(
         db,
         "u1",
@@ -389,16 +482,12 @@ async def test_sync_hf_cache_inventory_registers_any_cached_gguf(tmp_path):
 
 @pytest.mark.asyncio
 async def test_sync_hf_cache_inventory_registers_cached_gguf(tmp_path):
-    snapshot = (
-        tmp_path / "hf_cache" / "models--bartowski--Model-GGUF" / "snapshots" / "abc"
-    )
+    snapshot = tmp_path / "hf_cache" / "models--bartowski--Model-GGUF" / "snapshots" / "abc"
     snapshot.mkdir(parents=True)
     gguf = snapshot / "model-Q4_K_M.gguf"
     gguf.write_bytes(b"gguf-bytes")
 
-    db = Database(
-        tmp_path / "forge.db", encryption_key=generate_encryption_key(), ephemeral=True
-    )
+    db = Database(tmp_path / "forge.db", encryption_key=generate_encryption_key(), ephemeral=True)
     count = await sync_hf_cache_inventory(
         db,
         "u1",
@@ -410,18 +499,12 @@ async def test_sync_hf_cache_inventory_registers_cached_gguf(tmp_path):
     assert count == 1
     assert rows[0]["source"] == "hf:bartowski/Model-GGUF"
     assert rows[0]["format"] == "gguf"
-    assert (
-        tmp_path / "models" / "u1" / "bartowski--Model-GGUF" / "model-Q4_K_M.gguf"
-    ).is_symlink()
+    assert (tmp_path / "models" / "u1" / "bartowski--Model-GGUF" / "model-Q4_K_M.gguf").is_symlink()
 
 
 @pytest.mark.asyncio
-async def test_sync_hf_cache_inventory_skips_partial_catalog_gguf(
-    monkeypatch, tmp_path
-):
-    snapshot = (
-        tmp_path / "hf_cache" / "models--mirror--Model-GGUF" / "snapshots" / "abc"
-    )
+async def test_sync_hf_cache_inventory_skips_partial_catalog_gguf(monkeypatch, tmp_path):
+    snapshot = tmp_path / "hf_cache" / "models--mirror--Model-GGUF" / "snapshots" / "abc"
     snapshot.mkdir(parents=True)
     gguf = snapshot / "model-Q4_K_M.gguf"
     gguf.write_bytes(b"partial")
@@ -435,9 +518,7 @@ async def test_sync_hf_cache_inventory_skips_partial_catalog_gguf(
         lambda _repo, _filename: 10_000,
     )
 
-    db = Database(
-        tmp_path / "forge.db", encryption_key=generate_encryption_key(), ephemeral=True
-    )
+    db = Database(tmp_path / "forge.db", encryption_key=generate_encryption_key(), ephemeral=True)
     count = await sync_hf_cache_inventory(
         db,
         "u1",
@@ -465,9 +546,7 @@ async def test_sync_hf_cache_inventory_skips_partial_safetensors(monkeypatch, tm
         lambda _repo: 10_000,
     )
 
-    db = Database(
-        tmp_path / "forge.db", encryption_key=generate_encryption_key(), ephemeral=True
-    )
+    db = Database(tmp_path / "forge.db", encryption_key=generate_encryption_key(), ephemeral=True)
     count = await sync_hf_cache_inventory(
         db,
         "u1",
@@ -549,9 +628,7 @@ async def test_perform_download_auto_skips_gguf_cache_when_safetensors_preferred
     inv.parent.mkdir(parents=True)
     inv.symlink_to(cached)
 
-    db = Database(
-        tmp_path / "forge.db", encryption_key=generate_encryption_key(), ephemeral=True
-    )
+    db = Database(tmp_path / "forge.db", encryption_key=generate_encryption_key(), ephemeral=True)
     await db.add_model(
         user_id="u1",
         source="hf:org/Model",
@@ -583,10 +660,9 @@ async def test_sync_hf_cache_inventory_registers_cached_safetensors(tmp_path):
     snapshot.mkdir(parents=True)
     weights = snapshot / "model.safetensors"
     weights.write_bytes(b"weights")
+    (snapshot / "tokenizer.json").write_bytes(b"tokenizer-overhead")
 
-    db = Database(
-        tmp_path / "forge.db", encryption_key=generate_encryption_key(), ephemeral=True
-    )
+    db = Database(tmp_path / "forge.db", encryption_key=generate_encryption_key(), ephemeral=True)
     count = await sync_hf_cache_inventory(
         db,
         "u1",
@@ -598,6 +674,7 @@ async def test_sync_hf_cache_inventory_registers_cached_safetensors(tmp_path):
     assert count == 1
     assert rows[0]["source"] == "hf:org/Model"
     assert rows[0]["format"] == "safetensors"
+    assert rows[0]["size_bytes"] == weights.stat().st_size
     link = tmp_path / "models" / "u1" / "org--Model"
     assert link.is_symlink()
     assert link.resolve() == snapshot.resolve()

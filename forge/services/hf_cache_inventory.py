@@ -19,7 +19,7 @@ from forge.services.hf_hub import (
 )
 from forge.services.user_paths import user_dir
 from seiso.inference.backends import gguf_is_supported_by_llamacpp
-from seiso.io.files import iter_matching_files, matching_file_stats, path_size_bytes
+from seiso.io.files import iter_matching_files, matching_file_stats
 from seiso.models.catalog import CatalogEntry, get_by_gguf_mirror, get_by_repo
 from seiso.security import sanitize_filename
 
@@ -76,11 +76,15 @@ def _latest_snapshot_dirs(repo_cache_dir: Path) -> list[Path]:
     snapshots_dir = repo_cache_dir / "snapshots"
     if not snapshots_dir.is_dir():
         return []
-    return sorted(
-        (p for p in snapshots_dir.iterdir() if p.is_dir()),
-        key=lambda p: p.stat().st_mtime,
-        reverse=True,
-    )
+    snapshots: list[tuple[float, Path]] = []
+    for path in snapshots_dir.iterdir():
+        if not path.is_dir():
+            continue
+        try:
+            snapshots.append((path.stat().st_mtime, path))
+        except OSError:
+            continue
+    return [path for _mtime, path in sorted(snapshots, key=lambda item: item[0], reverse=True)]
 
 
 def _gguf_record_from_snapshot(
@@ -92,8 +96,7 @@ def _gguf_record_from_snapshot(
     hf_cache_dir: Path,
 ) -> dict[str, Any] | None:
     rel_files = [
-        str(path.relative_to(snapshot_dir))
-        for path in iter_matching_files(snapshot_dir, "*.gguf")
+        str(path.relative_to(snapshot_dir)) for path in iter_matching_files(snapshot_dir, "*.gguf")
     ]
     if not rel_files:
         return None
@@ -102,9 +105,7 @@ def _gguf_record_from_snapshot(
 
     inventory_repo = entry.repo_id if entry else repo_id
     quant = entry.quant if entry else "Q4_K_M"
-    filenames = _pick_gguf_files(
-        rel_files, preferred_quant=quant, repo_id=inventory_repo
-    )
+    filenames = _pick_gguf_files(rel_files, preferred_quant=quant, repo_id=inventory_repo)
     if not filenames:
         return None
 
@@ -138,9 +139,7 @@ def _gguf_record_from_snapshot(
 
     return {
         "source": f"hf:{inventory_repo}",
-        "name": (
-            target.name if target.is_file() else _display_name_for_shards(filenames[0])
-        ),
+        "name": (target.name if target.is_file() else _display_name_for_shards(filenames[0])),
         "path": str(link.absolute()),
         "format": "gguf",
         "size_bytes": size_bytes,
@@ -183,7 +182,7 @@ def _snapshot_record(
         "name": inventory_repo.split("/")[-1],
         "path": str(link.absolute()),
         "format": "safetensors",
-        "size_bytes": path_size_bytes(snapshot_dir),
+        "size_bytes": weight_size,
         "metadata": {"repo_id": inventory_repo, "cache_dir": str(hf_cache_dir)},
     }
 

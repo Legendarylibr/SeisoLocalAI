@@ -21,15 +21,27 @@ def test_ttl_cache_expires_entries():
     assert cache.get("a") is None
 
 
-def test_ttl_cache_evicts_oldest_at_capacity():
+def test_ttl_cache_evicts_least_recently_used_at_capacity():
     cache: TtlCache[str, int] = TtlCache(ttl_s=60.0, max_entries=2)
     cache.set("first", 1)
     time.sleep(0.01)
     cache.set("second", 2)
+    assert cache.get("first") == 1
     cache.set("third", 3)
-    assert cache.get("first") is None
-    assert cache.get("second") == 2
+    assert cache.get("first") == 1
+    assert cache.get("second") is None
     assert cache.get("third") == 3
+
+
+def test_ttl_cache_purges_expired_entries_on_capacity_pressure():
+    cache: TtlCache[str, int] = TtlCache(ttl_s=0.05, max_entries=2)
+    cache.set("expired", 1)
+    time.sleep(0.06)
+    cache.set("fresh", 2)
+    cache.set("new", 3)
+    assert cache.get("expired") is None
+    assert cache.get("fresh") == 2
+    assert cache.get("new") == 3
 
 
 def test_ttl_cache_clear():
