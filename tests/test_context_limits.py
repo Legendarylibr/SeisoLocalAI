@@ -45,7 +45,7 @@ def test_context_window_presets_includes_effective_max():
     assert 65536 not in presets
 
 
-def test_effective_context_ceiling_clamps_to_vram(monkeypatch, tmp_path: Path):
+def test_effective_context_ceiling_uses_model_cap_not_vram(monkeypatch, tmp_path: Path):
     monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 4096)
     model_dir = tmp_path / "big"
     model_dir.mkdir()
@@ -54,9 +54,7 @@ def test_effective_context_ceiling_clamps_to_vram(monkeypatch, tmp_path: Path):
         encoding="utf-8",
     )
     ceiling = effective_context_ceiling(str(model_dir), model_format="safetensors")
-    # (headroom - overhead) * 5, rounded down to 512-token steps
-    assert ceiling == 18944
-    assert ceiling >= 2048
+    assert ceiling == 131072
 
 
 def test_gguf_context_length_reads_metadata(monkeypatch, tmp_path: Path):

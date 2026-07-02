@@ -19,11 +19,9 @@ logger = logging.getLogger(__name__)
 
 def _default_llama_threads() -> int:
     cpus = _available_cpu_count()
-    if _default_llama_gpu_layers() != 0:
-        # Decode is latency-sensitive; leave cores free for OS, driver, and
-        # Python streaming while still giving llama.cpp enough workers.
-        return max(2, min(cpus // 2, 16))
-    return max(2, min(cpus - 2 if cpus > 4 else cpus, 16))
+    # Decode is latency-sensitive; leave one core free for OS, driver, and
+    # Python streaming while still giving llama.cpp enough workers.
+    return max(2, min(cpus - 1 if cpus > 4 else cpus, 16))
 
 
 def _default_llama_threads_batch(n_threads: int) -> int:
@@ -31,9 +29,7 @@ def _default_llama_threads_batch(n_threads: int) -> int:
     if "SEISO_LLAMA_THREADS" in os.environ:
         return n_threads
     cpus = _available_cpu_count()
-    if _default_llama_gpu_layers() != 0:
-        return max(n_threads, min(cpus, 32))
-    return max(n_threads, min(cpus - 1 if cpus > 4 else cpus, 24))
+    return max(n_threads, min(cpus, 32))
 
 
 def _available_cpu_count() -> int:
@@ -117,51 +113,9 @@ def _llama_speed_scale_enabled() -> bool:
     return env_bool("SEISO_LLAMA_SPEED_SCALE", True)
 
 
-def _headroom_llama_batch_caps(
-    headroom: int, *, speed_first: bool = False
-) -> tuple[int, int]:
-    """Return (n_batch, n_ubatch) ceilings from post-weight VRAM headroom."""
-    if headroom < 4096:
-        batch, ubatch = 512, 256
-    elif headroom < 8192:
-        batch, ubatch = 1024, 512
-    elif headroom < 16384:
-        batch, ubatch = 1792, 512
-    else:
-        batch, ubatch = 2048, 512
-
-    if speed_first and _llama_speed_scale_enabled():
-        if headroom >= 6144:
-            ubatch = min(batch, 768)
-        if headroom >= 10240:
-            ubatch = min(batch, 1024)
-        if headroom >= 12288 and batch < 2048:
-            batch = min(2048, batch + 256)
-        if headroom >= 24576:
-            batch = 4096
-            ubatch = 1024
-        elif headroom >= 18432:
-            batch = max(batch, 3072)
-            ubatch = 1024
-    return batch, ubatch
-
-
-def _speed_llama_batch_defaults(headroom: int) -> tuple[int, int] | None:
-    """Workstation-tier defaults when env vars are unset."""
-    if "SEISO_LLAMA_BATCH" in os.environ or "SEISO_LLAMA_UBATCH" in os.environ:
-        return None
-    try:
-        from seiso.hardware.profile import hardware_profile
-        from seiso.hardware.tiers import HardwareTier, classify_tier
-
-        tier = classify_tier(hardware_profile())
-    except Exception:
-        return None
-    if tier == HardwareTier.WORKSTATION and headroom >= 8192:
-        return 2048, 512
-    if tier == HardwareTier.CAPABLE and headroom >= 8192:
-        return 1536, 512
-    return None
+def _llama_batch_defaults() -> tuple[int, int]:
+    """Speed-first llama.cpp prompt/decode batch defaults."""
+    return 4096, 1024
 
 
 def fit_llama_gpu_layers(model_path: str, requested: int, headroom_mb: int) -> int:
@@ -196,47 +150,20 @@ def fit_llama_gpu_layers(model_path: str, requested: int, headroom_mb: int) -> i
     return partial
 
 
-def _llama_borderline_vram(model_path: str, free_mb: int | None = None) -> bool:
-    """True when weights are close to free VRAM and lean load settings may help."""
-    from seiso.memory.protection import estimate_path_vram_mb, headroom_mb
-
-    weight_mb = int(estimate_path_vram_mb(model_path))
-    free = int(free_mb if free_mb is not None else headroom_mb())
-    return weight_mb > int(free * 0.68)
-
-
 def _llama_speed_memory_profiles(
     base_kwargs: dict[str, Any], model_path: str, free_mb: int
 ) -> list[dict[str, Any]]:
-    """Higher batch/ubatch when spare VRAM exists beyond model weights."""
+    """Speed-first load profiles tried before OOM/load fallback profiles."""
     if not _llama_speed_scale_enabled():
         return []
     if int(base_kwargs.get("n_gpu_layers") or 0) == 0:
         return []
-    if _llama_borderline_vram(model_path, free_mb):
-        return []
 
-    from seiso.inference.backends import gguf_block_count
-    from seiso.memory.protection import (
-        _MIN_LLAMA_BATCH,
-        _MIN_LLAMA_CTX,
-        llama_batch_headroom_mb,
-    )
-
-    requested = int(base_kwargs.get("n_gpu_layers") or -1)
-    layer_hint = requested if requested > 0 else (gguf_block_count(model_path) or 64)
-    batch_headroom = llama_batch_headroom_mb(
-        free_mb, model_path=model_path, n_gpu_layers=layer_hint
-    )
-    n_ctx = int(base_kwargs.get("n_ctx") or _MIN_LLAMA_CTX)
-    ctx_scale = max(1, n_ctx // 4096)
+    _ = (model_path, free_mb)
 
     base_batch = int(base_kwargs.get("n_batch") or 512)
     base_ubatch = int(base_kwargs.get("n_ubatch") or 256)
-    speed_batch, speed_ubatch = _headroom_llama_batch_caps(
-        batch_headroom, speed_first=True
-    )
-    speed_batch = max(_MIN_LLAMA_BATCH, speed_batch // ctx_scale)
+    speed_batch, speed_ubatch = _llama_batch_defaults()
     speed_ubatch = min(speed_ubatch, speed_batch)
 
     if speed_batch <= base_batch and speed_ubatch <= base_ubatch:
@@ -247,28 +174,26 @@ def _llama_speed_memory_profiles(
 def _llama_load_memory_profiles(
     base_kwargs: dict[str, Any], n_ctx: int, model_path: str, free_mb: int
 ) -> list[dict[str, Any]]:
-    """Try requested settings first, then compact profiles only after failure."""
+    """Load fallback profiles tried only after faster profiles fail."""
+    _ = (model_path, free_mb)
     profiles: list[dict[str, Any]] = [{}]
-    borderline = _llama_borderline_vram(model_path, free_mb)
     base_batch = int(base_kwargs.get("n_batch") or 512)
     base_ubatch = int(base_kwargs.get("n_ubatch") or 256)
 
-    if borderline or n_ctx > 2048:
-        profiles.append(
-            {
-                "n_ctx": min(n_ctx, 2048),
-                "n_batch": min(base_batch, 512),
-                "n_ubatch": min(base_ubatch, 256),
-            }
-        )
-    if borderline:
-        profiles.append(
-            {
-                "n_ctx": min(n_ctx, 2048),
-                "n_batch": 256,
-                "n_ubatch": 128,
-            }
-        )
+    profiles.append(
+        {
+            "n_ctx": min(n_ctx, 2048),
+            "n_batch": min(base_batch, 512),
+            "n_ubatch": min(base_ubatch, 256),
+        }
+    )
+    profiles.append(
+        {
+            "n_ctx": min(n_ctx, 2048),
+            "n_batch": 256,
+            "n_ubatch": 128,
+        }
+    )
 
     unique: list[dict[str, Any]] = []
     seen: set[tuple[tuple[str, Any], ...]] = set()
@@ -340,31 +265,23 @@ def _llama_kv_quant_options(model_path: str) -> list[dict[str, Any]]:
     try:
         from llama_cpp import llama_cpp as lc
 
-        from seiso.memory.protection import estimate_path_vram_mb, headroom_mb
-
-        weight_mb = int(estimate_path_vram_mb(model_path))
-        free_mb = headroom_mb()
     except (ImportError, Exception):
         return [{}]
 
     options: list[dict[str, Any]] = [{}]
-    if weight_mb < 6000:
-        return options
-
-    if _llama_borderline_vram(model_path, free_mb) or weight_mb >= 12000:
-        options.append(
-            {
-                "type_k": lc.GGML_TYPE_Q4_K,
-                "type_v": lc.GGML_TYPE_Q4_K,
-            }
-        )
-    if weight_mb >= 10000 and free_mb >= int(weight_mb * 0.42):
-        options.append(
-            {
-                "type_k": lc.GGML_TYPE_Q8_0,
-                "type_v": lc.GGML_TYPE_Q8_0,
-            }
-        )
+    _ = model_path
+    options.append(
+        {
+            "type_k": lc.GGML_TYPE_Q8_0,
+            "type_v": lc.GGML_TYPE_Q8_0,
+        }
+    )
+    options.append(
+        {
+            "type_k": lc.GGML_TYPE_Q4_K,
+            "type_v": lc.GGML_TYPE_Q4_K,
+        }
+    )
 
     unique: list[dict[str, Any]] = []
     seen: set[tuple[tuple[str, Any], ...]] = set()
@@ -429,11 +346,7 @@ def _llama_cache_is_optimal(
 
 def llama_load_kwargs(n_ctx: int, *, model_path: str | None = None) -> dict[str, Any]:
     """Tuned llama.cpp defaults for faster preload/first token, overrideable by env."""
-    from seiso.memory.protection import (
-        clamp_llama_load_kwargs,
-        headroom_mb,
-        llama_batch_headroom_mb,
-    )
+    from seiso.memory.protection import clamp_llama_load_kwargs
 
     n_threads = env_int("SEISO_LLAMA_THREADS", _default_llama_threads())
     n_gpu_layers = env_int("SEISO_LLAMA_GPU_LAYERS", _default_llama_gpu_layers())
@@ -446,23 +359,7 @@ def llama_load_kwargs(n_ctx: int, *, model_path: str | None = None) -> dict[str,
         )
         n_gpu_layers = 0
 
-    free_mb = headroom_mb()
-    layer_hint = n_gpu_layers
-    if n_gpu_layers != 0 and model_path:
-        from seiso.inference.backends import gguf_block_count
-
-        layer_hint = (
-            n_gpu_layers if n_gpu_layers > 0 else (gguf_block_count(model_path) or 64)
-        )
-    batch_headroom = llama_batch_headroom_mb(
-        free_mb, model_path=model_path, n_gpu_layers=layer_hint
-    )
-    batch_default, ubatch_default = _headroom_llama_batch_caps(
-        batch_headroom, speed_first=False
-    )
-    speed_defaults = _speed_llama_batch_defaults(batch_headroom)
-    if speed_defaults is not None:
-        batch_default, ubatch_default = speed_defaults
+    batch_default, ubatch_default = _llama_batch_defaults()
 
     n_batch = env_int("SEISO_LLAMA_BATCH", batch_default)
     n_ubatch = min(env_int("SEISO_LLAMA_UBATCH", min(n_batch, ubatch_default)), n_batch)
