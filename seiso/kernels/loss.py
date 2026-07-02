@@ -26,10 +26,6 @@ class _FusedCrossEntropyFn(torch.autograd.Function):
 
         mask = labels != ignore_index
         valid = int(mask.sum().item())
-        if valid == 0:
-            ctx.mark_dirty(logits)
-            return logits.sum() * 0.0
-
         loss = row_loss[mask].mean()
         ctx.save_for_backward(logits, labels, row_max, row_lse)
         ctx.ignore_index = ignore_index
@@ -77,6 +73,9 @@ def fused_cross_entropy_loss(
         raise ValueError("logits must be 2D")
     if labels.dim() != 1:
         raise ValueError("labels must be 1D")
+
+    if (labels != ignore_index).sum().item() == 0:
+        return logits.sum() * 0.0
 
     return _FusedCrossEntropyFn.apply(logits, labels, ignore_index)
 
