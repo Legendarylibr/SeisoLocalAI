@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from seiso.training.torch_dynamo import (
     apply_compile_checkpoint_workarounds,
     configure_compile_checkpoint_compat,
@@ -25,8 +23,9 @@ def test_needs_compile_checkpoint_workaround():
 
 
 def test_configure_compile_checkpoint_compat_disables_lru_cache(monkeypatch):
-    import seiso.training.torch_dynamo as mod
     import torch
+
+    import seiso.training.torch_dynamo as mod
 
     monkeypatch.setattr(mod, "_LRU_CACHE_CONFIGURED", False)
     calls: list[bool] = []
@@ -50,8 +49,9 @@ def test_configure_compile_checkpoint_compat_disables_lru_cache(monkeypatch):
 
 
 def test_configure_compile_checkpoint_compat_noop_when_disabled(monkeypatch):
-    import seiso.training.torch_dynamo as mod
     import torch
+
+    import seiso.training.torch_dynamo as mod
 
     monkeypatch.setattr(mod, "_LRU_CACHE_CONFIGURED", False)
     calls: list[bool] = []
