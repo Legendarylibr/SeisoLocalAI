@@ -168,6 +168,63 @@ def test_ensure_load_fits_forwards_backend_to_pool(tmp_path, monkeypatch):
     assert calls == [(str(gguf), "llamacpp")]
 
 
+def test_apple_llamacpp_load_gets_best_effort_cpu_offload(tmp_path, monkeypatch):
+    gguf = tmp_path / "tight.gguf"
+    gguf.write_bytes(b"\x00" * (7 * 1024**3))
+    profile = {"backend": "mlx", "gpus": [], "ram_gb": 24, "platform": "darwin"}
+    monkeypatch.setattr(
+        "seiso.memory.protection.hardware_profile", lambda force_refresh=False: profile
+    )
+    monkeypatch.setattr(
+        "seiso.inference.model_pool.ModelPool.prepare_for_load",
+        lambda self, *args, **kwargs: False,
+    )
+    monkeypatch.setattr("seiso.hardware.fit.fit_headroom_mb", lambda _p: 24 * 1024)
+    monkeypatch.setattr("seiso.hardware.fit.vram_headroom_mb", lambda _p: 5200)
+
+    fit = ensure_load_fits(gguf, mode="chat", backend="llamacpp")
+
+    assert fit["memory_load_blocked"] is False
+    assert fit["memory_load_blocked_reason"] is None
+    assert "Mac CPU offload fallback" in fit["memory_load_warning"]
+
+
+def test_apple_non_llamacpp_load_still_blocks(tmp_path, monkeypatch):
+    gguf = tmp_path / "tight.gguf"
+    gguf.write_bytes(b"\x00" * (7 * 1024**3))
+    profile = {"backend": "mlx", "gpus": [], "ram_gb": 24, "platform": "darwin"}
+    monkeypatch.setattr(
+        "seiso.memory.protection.hardware_profile", lambda force_refresh=False: profile
+    )
+    monkeypatch.setattr(
+        "seiso.inference.model_pool.ModelPool.prepare_for_load",
+        lambda self, *args, **kwargs: False,
+    )
+    monkeypatch.setattr("seiso.hardware.fit.fit_headroom_mb", lambda _p: 24 * 1024)
+    monkeypatch.setattr("seiso.hardware.fit.vram_headroom_mb", lambda _p: 5200)
+
+    with pytest.raises(MemoryLoadBlockedError):
+        ensure_load_fits(gguf, mode="chat", backend="mlx")
+
+
+def test_apple_llamacpp_preflight_bypass_requires_blocked_fit(monkeypatch):
+    import seiso.memory.protection as protection
+
+    profile = {"backend": "mlx", "gpus": [], "ram_gb": 24, "platform": "darwin"}
+    monkeypatch.setattr(
+        "seiso.memory.protection.hardware_profile", lambda force_refresh=False: profile
+    )
+
+    assert (
+        protection._bypass_apple_llamacpp_preflight_block(
+            {"memory_load_blocked": False},
+            backend="llamacpp",
+            mode="chat",
+        )
+        is False
+    )
+
+
 def test_assess_path_memory_fit_for_small_file(tmp_path, monkeypatch):
     gguf = tmp_path / "tiny.gguf"
     gguf.write_bytes(b"\x00" * (32 * 1024**2))
