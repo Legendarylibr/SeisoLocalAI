@@ -17,6 +17,13 @@ class _FakeMlxToken:
         self.text = text
 
 
+def test_stream_batch_chars_speed_default(monkeypatch):
+    from seiso.inference.runner import _stream_batch_chars
+
+    monkeypatch.delenv("SEISO_STREAM_BATCH_CHARS", raising=False)
+    assert _stream_batch_chars() == 16
+
+
 def test_extract_mlx_token_text_from_response_object():
     assert extract_mlx_token_text(_FakeMlxToken("hello")) == "hello"
     assert extract_mlx_token_text(_FakeMlxToken("")) is None
@@ -57,7 +64,7 @@ def test_torch_generate_kwargs_greedy():
     assert kwargs["do_sample"] is False
     assert kwargs["num_beams"] == 1
     assert kwargs["use_cache"] is True
-    assert kwargs["cache_implementation"] == "dynamic"
+    assert kwargs["cache_implementation"] == "static"
     assert kwargs["return_dict_in_generate"] is False
     assert kwargs["output_scores"] is False
     assert kwargs["max_new_tokens"] == 256

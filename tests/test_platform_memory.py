@@ -169,7 +169,7 @@ def test_platform_profile_linux_nvidia_uses_gpu_layers(monkeypatch):
     assert os.environ["SEISO_LLAMA_BATCH"] == "4096"
     assert os.environ["SEISO_LLAMA_UBATCH"] == "1024"
     assert os.environ["SEISO_LLAMA_CACHE_MB"] == "2048"
-    assert os.environ["SEISO_STREAM_BATCH_CHARS"] == "4"
+    assert os.environ["SEISO_STREAM_BATCH_CHARS"] == "16"
 
 
 def test_apply_only_setdefault(monkeypatch):
