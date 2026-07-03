@@ -383,7 +383,36 @@ def assess_path_memory_fit_for_load(
     active_pool = pool or get_model_pool()
     if unload_if_needed:
         active_pool.prepare_for_load(str(path), backend)
-    return assess_path_memory_fit(path, mode=mode)
+    fit = assess_path_memory_fit(path, mode=mode)
+    if _bypass_apple_llamacpp_preflight_block(fit, backend=backend, mode=mode):
+        fit = dict(fit)
+        fit["memory_load_blocked"] = False
+        fit["memory_load_blocked_reason"] = None
+        fit["memory_load_warning"] = (
+            "Low free unified memory — trying llama.cpp with mmap plus Mac CPU "
+            "offload fallback. Close apps if loading still fails."
+        )
+    return fit
+
+
+def _bypass_apple_llamacpp_preflight_block(
+    fit: dict[str, Any],
+    *,
+    backend: str | None,
+    mode: str,
+) -> bool:
+    """Skip only the preflight block; llama.cpp load still handles OOM/fallback."""
+    if mode != "chat" or not fit.get("memory_load_blocked"):
+        return False
+    if str(backend or "").lower() not in {"llamacpp", "llama"}:
+        return False
+    profile = hardware_profile()
+    try:
+        from seiso.hardware.tiers import HardwareTier, classify_tier
+
+        return classify_tier(profile) == HardwareTier.APPLE_UNIFIED
+    except Exception:
+        return False
 
 
 def ensure_load_fits(
