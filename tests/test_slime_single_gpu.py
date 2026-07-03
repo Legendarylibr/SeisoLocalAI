@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from seiso.models.lora_targets import resolve_lora_target_modules
 from seiso.slime_single_gpu.config import SingleGpuSlimeConfig
 from seiso.slime_single_gpu.rewards import (
     contains_answer_reward,
@@ -16,7 +17,6 @@ from seiso.slime_single_gpu.rewards import (
     numeric_reward,
     resolve_reward,
 )
-from seiso.models.lora_targets import resolve_lora_target_modules
 from seiso.slime_single_gpu.trainer import (
     Rollout,
     _append_jsonl_records,
@@ -29,6 +29,7 @@ from seiso.slime_single_gpu.trainer import (
     _final_output_dir,
     _force_completion_thinking_prefix,
     _format_rollout_prompt,
+    _freeze_multimodal_backbones,
     _group_reward_spread_mean,
     _iter_sample_batches,
     _load_samples,
@@ -374,7 +375,7 @@ def test_lora_target_inference_prefers_common_projection_names():
     ]
 
 
-def test_lora_target_inference_scopes_gemma4_to_language_model():
+def test_lora_target_inference_scopes_multimodal_to_language_model():
     model = _DummyModel(
         [
             (
@@ -396,6 +397,37 @@ def test_lora_target_inference_scopes_gemma4_to_language_model():
     assert resolve_lora_target_modules("google/gemma-4-E4B-it", model) == (
         r".*language_model\..*\.(q_proj|v_proj)"
     )
+
+
+class _Tower:
+    def __init__(self) -> None:
+        self.requires_grad_calls: list[bool] = []
+
+    def requires_grad_(self, enabled: bool):
+        self.requires_grad_calls.append(enabled)
+        return self
+
+
+def test_freeze_multimodal_backbones_detects_generic_wrapper():
+    vision_tower = _Tower()
+    audio_tower = _Tower()
+    model = _DummyModel(
+        [
+            ("model.language_model.layers.0.self_attn.q_proj", Linear()),
+            ("model.vision_tower.encoder.layers.0.self_attn.q_proj", Linear()),
+            ("model.audio_tower.encoder.layers.0.self_attn.q_proj", Linear()),
+        ]
+    )
+    model.model = types.SimpleNamespace(
+        vision_tower=vision_tower,
+        audio_tower=audio_tower,
+    )
+    model.config = types.SimpleNamespace(model_type="brand_new_multimodal")
+
+    _freeze_multimodal_backbones(model)
+
+    assert vision_tower.requires_grad_calls == [False]
+    assert audio_tower.requires_grad_calls == [False]
 
 
 def test_lora_target_inference_honors_configured_modules():

@@ -9,6 +9,7 @@ import pytest
 from seiso.models.lora_targets import (
     detect_architecture,
     get_lora_target_modules,
+    has_multimodal_language_model_backbone,
     infer_lora_target_modules_from_module_tree,
     modules_exist_in_model,
     resolve_lora_target_modules,
@@ -79,7 +80,7 @@ def test_modules_exist_in_model_does_not_return_missing_targets():
     assert modules_exist_in_model(model, ["q_proj", "k_proj"]) == []
 
 
-def test_gemma4_targets_use_language_model_regex():
+def test_multimodal_language_model_targets_use_language_model_regex():
     model = _FakeModel(
         [
             "model.language_model.layers.0.self_attn.q_proj.weight",
@@ -98,13 +99,33 @@ def test_gemma4_targets_use_language_model_regex():
         ],
     )
 
-    assert detect_architecture("google/gemma-4-E4B-it", model) == "gemma4"
+    assert has_multimodal_language_model_backbone(model) is True
+    assert detect_architecture("google/gemma-4-E4B-it", model) == "gemma"
     assert get_lora_target_modules("google/gemma-4-E4B-it", model) == (
         r".*language_model\..*\.(q_proj|v_proj)"
     )
     assert modules_exist_in_model(
         model, r".*language_model\..*\.(q_proj|v_proj)"
     ) == (r".*language_model\..*\.(q_proj|v_proj)")
+
+
+def test_generic_multimodal_wrapper_uses_language_model_regex():
+    model = _FakeModel(
+        [
+            "model.language_model.layers.0.self_attn.q_proj.weight",
+            "model.vision_model.encoder.layers.0.self_attn.q_proj.weight",
+        ],
+        model_type="brand_new_multimodal",
+        modules=[
+            ("model.language_model.layers.0.self_attn.q_proj", Linear()),
+            ("model.language_model.layers.0.self_attn.v_proj", Linear()),
+            ("model.vision_model.encoder.layers.0.self_attn.q_proj", Linear()),
+        ],
+    )
+
+    assert resolve_lora_target_modules("org/new-mm-model", model) == (
+        r".*language_model\..*\.(q_proj|v_proj)"
+    )
 
 
 def test_resolve_lora_targets_for_llama_models():

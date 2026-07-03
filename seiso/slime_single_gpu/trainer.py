@@ -13,7 +13,10 @@ from pathlib import Path
 from typing import Any, TypeVar
 
 from seiso.io.jsonl import iter_jsonl
-from seiso.models.lora_targets import resolve_lora_target_modules
+from seiso.models.lora_targets import (
+    has_multimodal_language_model_backbone,
+    resolve_lora_target_modules,
+)
 from seiso.research.provenance import apply_determinism
 from seiso.slime_single_gpu.config import SingleGpuSlimeConfig
 from seiso.slime_single_gpu.rewards import resolve_reward
@@ -748,25 +751,30 @@ def _model_loaded_in_kbit(model) -> bool:
         parameters = model.parameters()
     except AttributeError:
         return False
-    for param in parameters:
-        if param.__class__.__name__ == "Params4bit":
-            return True
-    return False
+    return any(param.__class__.__name__ == "Params4bit" for param in parameters)
 
 
 def _freeze_multimodal_backbones(model) -> None:
-    """Keep vision/audio towers frozen for text-only slime on multimodal Gemma4."""
-    model_config = getattr(model, "config", None)
-    if getattr(model_config, "model_type", None) != "gemma4":
+    """Keep non-text towers frozen for text-only slime on multimodal wrappers."""
+    if not has_multimodal_language_model_backbone(model):
         return
-    backbone = getattr(model, "model", None)
-    if backbone is None:
-        return
-    for name in ("vision_tower", "audio_tower", "embed_vision", "embed_audio"):
-        tower = getattr(backbone, name, None)
-        if tower is None:
+    for container in (model, getattr(model, "model", None)):
+        if container is None:
             continue
-        tower.requires_grad_(False)
+        for name in (
+            "vision_tower",
+            "audio_tower",
+            "vision_model",
+            "audio_model",
+            "visual",
+            "multi_modal_projector",
+            "mm_projector",
+            "embed_vision",
+            "embed_audio",
+        ):
+            tower = getattr(container, name, None)
+            if tower is not None and hasattr(tower, "requires_grad_"):
+                tower.requires_grad_(False)
 
 
 def _optimizer_step(model, optimizer, torch, config: SingleGpuSlimeConfig) -> None:

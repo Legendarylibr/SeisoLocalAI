@@ -3,11 +3,26 @@
 from __future__ import annotations
 
 import re
+from contextlib import suppress
 from typing import Any
 
-# PEFT uses a regex for multimodal Gemma4 so LoRA skips vision/audio
-# Gemma4ClippableLinear wrappers and only hits language_model Linear layers.
-_GEMMA4_LORA_TARGET_REGEX = r".*language_model\..*\.(q_proj|v_proj)"
+# PEFT accepts a regex target. Use it for multimodal wrappers so LoRA skips
+# vision/audio towers and only hits the text backbone under language_model.
+_MULTIMODAL_LANGUAGE_MODEL_LORA_TARGET_REGEX = r".*language_model\..*\.(q_proj|v_proj)"
+_LANGUAGE_MODEL_MARKER = "language_model"
+_MULTIMODAL_BACKBONE_MARKERS = frozenset(
+    {
+        "vision_tower",
+        "audio_tower",
+        "vision_model",
+        "audio_model",
+        "visual",
+        "multi_modal_projector",
+        "mm_projector",
+        "embed_vision",
+        "embed_audio",
+    }
+)
 
 # Architecture patterns → LoRA target modules (regex for special multimodal cases)
 _ARCHITECTURE_TARGETS: dict[str, list[str] | str] = {
@@ -76,16 +91,6 @@ _ARCHITECTURE_TARGETS: dict[str, list[str] | str] = {
         "down_proj",
     ],
     "gemma2": [
-        "q_proj",
-        "k_proj",
-        "v_proj",
-        "o_proj",
-        "gate_proj",
-        "up_proj",
-        "down_proj",
-    ],
-    "gemma4": _GEMMA4_LORA_TARGET_REGEX,
-    "gemma4_text": [
         "q_proj",
         "k_proj",
         "v_proj",
@@ -178,7 +183,6 @@ def detect_architecture(model_id: str, model=None) -> str | None:
         (r"mistral|codestral|magistral", "mistral"),
         (r"qwq|qwen3\.5|qwen3", "qwen3"),
         (r"qwen2|qwen", "qwen2"),
-        (r"gemma-4|gemma4", "gemma4"),
         (r"gemma-3|gemma3", "gemma3"),
         (r"gemma-2|gemma2", "gemma2"),
         (r"gemma", "gemma"),
@@ -210,6 +214,8 @@ def _target_suffix(name: str) -> str:
 
 def get_lora_target_modules(model_id: str, model=None) -> list[str] | str:
     """Return LoRA target modules for a given model."""
+    if model is not None and has_multimodal_language_model_backbone(model):
+        return _MULTIMODAL_LANGUAGE_MODEL_LORA_TARGET_REGEX
     arch = detect_architecture(model_id, model)
     if arch in _ARCHITECTURE_TARGETS:
         return _ARCHITECTURE_TARGETS[arch]
@@ -238,6 +244,27 @@ def infer_lora_target_modules(model) -> list[str]:
         if suffix.endswith(("proj", "dense", "linear", "fc"))
     )
     return generic
+
+
+def has_multimodal_language_model_backbone(model) -> bool:
+    """Return true for multimodal wrappers with a trainable text LM subtree."""
+    try:
+        module_names = [name for name, _ in model.named_modules() if name]
+    except Exception:
+        module_names = []
+
+    if not module_names:
+        with suppress(Exception):
+            module_names = [name for name, _ in model.named_parameters()]
+
+    has_language_model = any(
+        _LANGUAGE_MODEL_MARKER in name.split(".") for name in module_names
+    )
+    has_multimodal_backbone = any(
+        any(part in _MULTIMODAL_BACKBONE_MARKERS for part in name.split("."))
+        for name in module_names
+    )
+    return has_language_model and has_multimodal_backbone
 
 
 _LINEAR_MODULE_TYPES = frozenset({"linear", "conv1d"})
@@ -309,14 +336,10 @@ def modules_exist_in_model(
         return []
 
     names: set[str] = set()
-    try:
+    with suppress(Exception):
         names.update(name for name, _ in model.named_parameters())
-    except Exception:
-        pass
-    try:
+    with suppress(Exception):
         names.update(name for name, _ in model.named_modules() if name)
-    except Exception:
-        pass
     found: set[str] = set()
     for name in names:
         for t in target_modules:
