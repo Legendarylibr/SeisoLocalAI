@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import os
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -19,7 +20,6 @@ from forge.services.hf_hub import (
 )
 from forge.services.user_paths import user_dir
 from seiso.inference.backends import gguf_is_supported_by_llamacpp
-from seiso.io.files import iter_matching_files, matching_file_stats
 from seiso.models.catalog import CatalogEntry, get_by_gguf_mirror, get_by_repo
 from seiso.security import sanitize_filename
 
@@ -42,6 +42,51 @@ def _display_name_for_shards(filename: str) -> str:
     if marker in stem:
         return stem.split(marker, 1)[0]
     return stem
+
+
+@dataclass(frozen=True)
+class _SnapshotInventory:
+    gguf_files: list[str]
+    weight_count: int
+    weight_size: int
+
+
+_SNAPSHOT_WEIGHT_SUFFIXES = (".safetensors", ".bin")
+
+
+def _snapshot_inventory(snapshot_dir: Path) -> _SnapshotInventory:
+    """Collect model-file facts from a snapshot with a single directory walk."""
+    gguf_files: list[str] = []
+    weight_count = 0
+    weight_size = 0
+    root = str(snapshot_dir)
+    stack = [root]
+    while stack:
+        current = stack.pop()
+        try:
+            with os.scandir(current) as entries:
+                for entry in entries:
+                    try:
+                        if entry.is_dir(follow_symlinks=False):
+                            stack.append(entry.path)
+                            continue
+                        if not entry.is_file():
+                            continue
+                        name = entry.name.lower()
+                        if name.endswith(".gguf"):
+                            gguf_files.append(os.path.relpath(entry.path, root))
+                        elif name.endswith(_SNAPSHOT_WEIGHT_SUFFIXES):
+                            weight_count += 1
+                            weight_size += entry.stat().st_size
+                    except OSError:
+                        continue
+        except OSError:
+            continue
+    return _SnapshotInventory(
+        gguf_files=gguf_files,
+        weight_count=weight_count,
+        weight_size=weight_size,
+    )
 
 
 def _cache_tree_mtime(hf_cache_dir: Path) -> float:
@@ -94,14 +139,12 @@ def _gguf_record_from_snapshot(
     *,
     repo_id: str,
     snapshot_dir: Path,
+    inventory: _SnapshotInventory,
     data_dir: Path,
     user_id: str,
     hf_cache_dir: Path,
 ) -> dict[str, Any] | None:
-    rel_files = [
-        str(path.relative_to(snapshot_dir))
-        for path in iter_matching_files(snapshot_dir, "*.gguf")
-    ]
+    rel_files = inventory.gguf_files
     if not rel_files:
         return None
 
@@ -159,13 +202,13 @@ def _snapshot_record(
     *,
     repo_id: str,
     snapshot_dir: Path,
+    inventory: _SnapshotInventory,
     data_dir: Path,
     user_id: str,
     hf_cache_dir: Path,
 ) -> dict[str, Any] | None:
-    weight_count, weight_size = matching_file_stats(
-        snapshot_dir, suffixes=frozenset({".safetensors", ".bin"})
-    )
+    weight_count = inventory.weight_count
+    weight_size = inventory.weight_size
     if weight_count <= 0:
         return None
 
@@ -219,15 +262,18 @@ def _scan_hf_cache_records(
         if not repo_id:
             continue
         for snapshot_dir in _latest_snapshot_dirs(repo_cache_dir):
+            inventory = _snapshot_inventory(snapshot_dir)
             record = _gguf_record_from_snapshot(
                 repo_id=repo_id,
                 snapshot_dir=snapshot_dir,
+                inventory=inventory,
                 data_dir=data_dir,
                 user_id=user_id,
                 hf_cache_dir=hf_cache_dir,
             ) or _snapshot_record(
                 repo_id=repo_id,
                 snapshot_dir=snapshot_dir,
+                inventory=inventory,
                 data_dir=data_dir,
                 user_id=user_id,
                 hf_cache_dir=hf_cache_dir,
@@ -271,13 +317,6 @@ async def sync_hf_cache_inventory(
         data_dir=data_dir,
         user_id=user_id,
     )
-    registered = 0
-    for record in records:
-        await db.upsert_model(
-            user_id=user_id,
-            source=record.pop("source"),
-            **record,
-        )
-        registered += 1
+    registered = await db.upsert_models(user_id, records)
     _sync_states[cache_key] = _SyncState(synced_at=now, cache_mtime=cache_mtime)
     return registered
