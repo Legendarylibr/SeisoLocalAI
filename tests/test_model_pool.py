@@ -375,6 +375,7 @@ def test_llama_load_retryable_detects_context_and_file_errors():
     assert mp._llama_load_retryable(
         ValueError("Failed to load model from file: x.gguf")
     )
+    assert mp._llama_load_retryable(RuntimeError("failed to allocate Metal buffer"))
     assert not mp._llama_load_retryable(ValueError("invalid n_ctx"))
 
 
@@ -392,6 +393,66 @@ def test_llama_layer_attempts_partial_descending(monkeypatch, tmp_path):
     assert 24 in attempts
     assert attempts[-1] == 0
     assert attempts[0] >= 24
+
+
+def test_llama_layer_attempts_mac_cpu_offload_ladder(monkeypatch, tmp_path):
+    import seiso.inference.model_pool as mp
+
+    gguf = tmp_path / "apple-big.gguf"
+    gguf.write_bytes(b"\x00" * 1024)
+    monkeypatch.setattr(platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(platform, "machine", lambda: "arm64")
+    monkeypatch.setattr(mp, "_llama_gpu_offload_ok", lambda: True)
+    monkeypatch.setattr("seiso.inference.backends.gguf_block_count", lambda _p: 40)
+
+    attempts = mp._llama_layer_attempts(str(gguf), -1, 32768)
+
+    assert attempts[:3] == [39, 35, 30]
+    assert 20 in attempts
+    assert attempts[-1] == 0
+
+
+def test_llama_layer_attempts_mac_cpu_offload_can_be_disabled(
+    monkeypatch, tmp_path
+):
+    import seiso.inference.model_pool as mp
+
+    gguf = tmp_path / "apple-big.gguf"
+    gguf.write_bytes(b"\x00" * 1024)
+    monkeypatch.setattr(platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(platform, "machine", lambda: "arm64")
+    monkeypatch.setenv("SEISO_LLAMA_MAC_CPU_OFFLOAD", "0")
+    monkeypatch.setattr(mp, "_llama_gpu_offload_ok", lambda: True)
+    monkeypatch.setattr(mp, "fit_llama_gpu_layers", lambda _p, _r, _h: 16)
+    monkeypatch.setattr("seiso.inference.backends.gguf_block_count", lambda _p: 40)
+
+    attempts = mp._llama_layer_attempts(str(gguf), -1, 32768)
+
+    assert attempts[0] >= 16
+    assert attempts[-1] == 0
+    assert 16 in attempts
+
+
+def test_llama_partial_profiles_mac_preserve_fast_attempts(monkeypatch):
+    import seiso.inference.model_pool as mp
+
+    monkeypatch.setattr(platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(platform, "machine", lambda: "arm64")
+    profiles = [{"n_batch": 4096}, {}, {"n_batch": 256}]
+
+    assert mp._llama_partial_memory_profiles(profiles) == profiles
+    assert mp._llama_partial_kqv_options() == [{}, {"offload_kqv": False}]
+
+
+def test_llama_partial_profiles_non_mac_use_lean_fallback(monkeypatch):
+    import seiso.inference.model_pool as mp
+
+    monkeypatch.setattr(platform, "system", lambda: "Linux")
+    monkeypatch.setattr(platform, "machine", lambda: "x86_64")
+    profiles = [{"n_batch": 4096}, {}, {"n_batch": 256}]
+
+    assert mp._llama_partial_memory_profiles(profiles) == [{"n_batch": 256}]
+    assert mp._llama_partial_kqv_options() == [{}]
 
 
 def test_llama_full_gpu_targets(monkeypatch):

@@ -63,8 +63,16 @@ def _nvidia_hardware_visible() -> bool:
         return False
 
 
+def _apple_silicon_metal() -> bool:
+    return platform.system() == "Darwin" and platform.machine() in {"arm64", "aarch64"}
+
+
+def _mac_cpu_offload_enabled() -> bool:
+    return env_bool("SEISO_LLAMA_MAC_CPU_OFFLOAD", True)
+
+
 def _default_llama_gpu_layers() -> int:
-    if platform.system() == "Darwin" and platform.machine() in {"arm64", "aarch64"}:
+    if _apple_silicon_metal():
         return -1
     if (_cuda_available() or _nvidia_hardware_visible()) and _llama_gpu_offload_ok():
         # Only request full GPU offload when the installed llama-cpp-python
@@ -213,6 +221,24 @@ def _llama_layer_attempts(model_path: str, requested: int, free_mb: int) -> list
     from seiso.inference.backends import gguf_block_count
 
     total_layers = gguf_block_count(model_path) or 64
+
+    if _apple_silicon_metal() and _mac_cpu_offload_enabled():
+        max_layers = total_layers if requested == -1 else min(requested, total_layers)
+        candidates = [
+            max_layers - 1,
+            int(max_layers * 0.875),
+            int(max_layers * 0.75),
+            int(max_layers * 0.5),
+            int(max_layers * 0.25),
+        ]
+        attempts: list[int] = []
+        for layers in candidates:
+            if 0 < layers < max_layers and layers not in attempts:
+                attempts.append(layers)
+        if 0 not in attempts:
+            attempts.append(0)
+        return attempts
+
     fitted = fit_llama_gpu_layers(model_path, requested, free_mb)
     if fitted in (-1, 0):
         return [0]
@@ -230,6 +256,22 @@ def _llama_layer_attempts(model_path: str, requested: int, free_mb: int) -> list
     if 0 not in attempts:
         attempts.append(0)
     return attempts
+
+
+def _llama_partial_memory_profiles(
+    memory_profiles: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Profiles to try for partial GPU offload after full offload fails."""
+    if _apple_silicon_metal() and _mac_cpu_offload_enabled():
+        return memory_profiles or [{}]
+    return [memory_profiles[-1] if memory_profiles else {}]
+
+
+def _llama_partial_kqv_options() -> list[dict[str, Any]]:
+    """Mac can run larger models by keeping some KV/KQV work off Metal."""
+    if not (_apple_silicon_metal() and _mac_cpu_offload_enabled()):
+        return [{}]
+    return [{}, {"offload_kqv": False}]
 
 
 def _llama_full_gpu_targets(requested: int) -> list[int]:
@@ -388,13 +430,20 @@ def llama_load_kwargs(n_ctx: int, *, model_path: str | None = None) -> dict[str,
     return clamp_llama_load_kwargs(kwargs)
 
 
-def _llama_load_retryable(exc: ValueError) -> bool:
+def _llama_load_retryable(exc: BaseException) -> bool:
     """True when llama.cpp init failed due to VRAM pressure and a smaller offload may work."""
     msg = str(exc)
-    return (
+    if (
         "Failed to load model from file" in msg
         or "Failed to create llama_context" in msg
-    )
+    ):
+        return True
+    try:
+        from seiso.memory.protection import is_oom_error
+
+        return is_oom_error(exc)
+    except Exception:
+        return False
 
 
 def _load_llama_model(path: str, n_ctx: int) -> Any:
@@ -467,7 +516,12 @@ def _load_llama_model(path: str, n_ctx: int) -> Any:
         load_kwargs.update(profile)
         load_kwargs.update(kv_quant)
         load_kwargs["n_gpu_layers"] = layers
-        load_kwargs["offload_kqv"] = layers != 0
+        if layers == 0:
+            load_kwargs["offload_kqv"] = False
+        else:
+            load_kwargs["offload_kqv"] = bool(
+                load_kwargs.get("offload_kqv", layers != 0)
+            )
         load_kwargs.pop("_model_path", None)
         try:
             llm = Llama(model_path=path, **load_kwargs)
@@ -487,7 +541,7 @@ def _load_llama_model(path: str, n_ctx: int) -> Any:
                     )
             attach_llama_prompt_cache(llm)
             return llm
-        except ValueError as exc:
+        except Exception as exc:
             if not _llama_load_retryable(exc):
                 raise
             last_exc = exc
@@ -509,15 +563,26 @@ def _load_llama_model(path: str, n_ctx: int) -> Any:
                 if llm is not None:
                     return llm
 
-    lean_profile = memory_profiles[-1] if memory_profiles else {}
+    partial_profiles = _llama_partial_memory_profiles(memory_profiles)
+    partial_kqv_options = _llama_partial_kqv_options()
     for layer_idx, layers in enumerate(partial_targets):
         if layers in full_targets:
             continue
-        # KV-quantized caches can crash llama.cpp on partial offload (Qwen/MoE).
-        log_retry = layer_idx == 0 or layer_idx == len(partial_targets) - 1
-        llm = _try_load(layers, lean_profile, {}, log_retry=log_retry)
-        if llm is not None:
-            return llm
+        for profile_idx, profile in enumerate(partial_profiles):
+            for kqv_idx, kqv_option in enumerate(partial_kqv_options):
+                # KV-quantized caches can crash llama.cpp on partial offload (Qwen/MoE).
+                first_partial_attempt = (
+                    layer_idx == 0 and profile_idx == 0 and kqv_idx == 0
+                )
+                final_partial_attempt = (
+                    layer_idx == len(partial_targets) - 1
+                    and profile_idx == len(partial_profiles) - 1
+                    and kqv_idx == len(partial_kqv_options) - 1
+                )
+                log_retry = first_partial_attempt or final_partial_attempt
+                llm = _try_load(layers, profile, kqv_option, log_retry=log_retry)
+                if llm is not None:
+                    return llm
 
     free_gb = round(headroom_mb() / 1024, 1)
     need_gb = round(estimate_path_vram_mb(path) / 1024, 1)
