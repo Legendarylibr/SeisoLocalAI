@@ -135,7 +135,7 @@ def apply_platform_memory_profile(
                 if tier == HardwareTier.WORKSTATION:
                     os.environ.setdefault("SEISO_LLAMA_BATCH", "4096")
                     os.environ.setdefault("SEISO_LLAMA_UBATCH", "1024")
-                    os.environ.setdefault("SEISO_STREAM_BATCH_CHARS", "4")
+                    os.environ.setdefault("SEISO_STREAM_BATCH_CHARS", "16")
                 else:
                     os.environ.setdefault("SEISO_LLAMA_BATCH", "1536")
                     os.environ.setdefault("SEISO_LLAMA_UBATCH", "512")

@@ -236,7 +236,7 @@ def _torch_cache_implementation(payload: dict[str, Any]) -> str | None:
     """Resolve Transformers generation cache implementation for faster decode when supported."""
     raw = payload.get("cache_implementation")
     if raw is None:
-        raw = env_str("SEISO_TORCH_CACHE_IMPLEMENTATION", "dynamic")
+        raw = env_str("SEISO_TORCH_CACHE_IMPLEMENTATION", "static")
     text = str(raw).strip().lower()
     if not text or text in {"none", "false", "off", "disable", "disabled"}:
         return None
