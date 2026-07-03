@@ -59,8 +59,8 @@ def test_platform_profile_darwin_16gb_apple(monkeypatch):
     assert result["memory_profile"] == "low"
     assert os.environ["SEISO_LLAMA_USE_MMAP"] == "true"
     assert os.environ["SEISO_LLAMA_USE_MLOCK"] == "false"
-    assert os.environ["SEISO_LLAMA_PROMPT_CACHE"] == "false"
-    assert os.environ["SEISO_LLAMA_CACHE_MB"] == "0"
+    assert os.environ["SEISO_LLAMA_PROMPT_CACHE"] == "true"
+    assert os.environ["SEISO_LLAMA_CACHE_MB"] == "1024"
     assert os.environ.get("SEISO_SKIP_MLX_PROBE") == "1"
 
 
