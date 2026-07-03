@@ -109,11 +109,18 @@ def _build_local_option(
     metadata = json.loads(row.get("metadata_json") or "{}")
     if not _inventory_artifact_is_complete(row, metadata):
         return None
-    backends = _filter_installed_backends(
-        available_backends(
+    model_format = row.get("format")
+    is_gguf = (model_format or "").lower() == "gguf"
+    candidate_backends = (
+        [BACKEND_LLAMASWAP, BACKEND_LLAMACPP]
+        if is_gguf
+        else available_backends(
             model_path=row["path"],
-            model_format=row.get("format"),
-        ),
+            model_format=model_format,
+        )
+    )
+    backends = _filter_installed_backends(
+        candidate_backends,
         installed,
     )
     opt: dict[str, Any] = {
@@ -122,7 +129,7 @@ def _build_local_option(
         "name": row["name"],
         "source": row.get("source") or "manual",
         "source_label": _source_label(row.get("source")),
-        "format": row.get("format"),
+        "format": model_format,
         "path": row["path"],
         "default_backend": _pick_default_backend(backends, profile) if backends else "",
         "backends": backends,
@@ -184,7 +191,7 @@ async def list_inference_options(
 ) -> list[dict[str, Any]]:
     """Build dropdown options for chat inference."""
     use_cache = profile is None
-    cache_key = (user_id, hardware_aware, id(db))
+    cache_key = (user_id, hardware_aware, model_router_enabled, id(db))
     if use_cache:
         now = time.monotonic()
         cached = _options_cache.get(cache_key)

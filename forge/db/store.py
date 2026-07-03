@@ -226,6 +226,15 @@ _RL_QUANT_LIST_COLUMNS = (
     "created_at",
     "updated_at",
 )
+_UPSERT_MODEL_SQL = """INSERT INTO local_models
+   (id, user_id, name, path, source, format, size_bytes, metadata_json, created_at)
+   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+   ON CONFLICT(user_id, source) DO UPDATE SET
+   name = excluded.name,
+   path = excluded.path,
+   format = excluded.format,
+   size_bytes = excluded.size_bytes,
+   metadata_json = excluded.metadata_json"""
 
 
 def _column_list(columns: tuple[str, ...]) -> str:
@@ -463,19 +472,13 @@ class Database:
         async with self._conn() as conn:
             if user_id:
                 async with conn.execute(
-                    "SELECT * FROM local_models WHERE user_id = ? ORDER BY created_at DESC",
+                    """SELECT * FROM local_models
+                       WHERE user_id = ? OR user_id IS NULL
+                       ORDER BY created_at DESC, user_id IS NULL ASC""",
                     (user_id,),
                 ) as cur:
-                    user_rows = [dict(r) for r in await cur.fetchall()]
-                async with conn.execute(
-                    "SELECT * FROM local_models WHERE user_id IS NULL ORDER BY created_at DESC"
-                ) as cur:
-                    global_rows = [dict(r) for r in await cur.fetchall()]
-                return sorted(
-                    [*user_rows, *global_rows],
-                    key=lambda row: str(row.get("created_at") or ""),
-                    reverse=True,
-                )
+                    rows = await cur.fetchall()
+                    return [dict(r) for r in rows]
 
             async with conn.execute(
                 "SELECT * FROM local_models ORDER BY created_at DESC"
@@ -555,15 +558,7 @@ class Database:
         now = _now()
         async with self._conn() as conn:
             await conn.execute(
-                """INSERT INTO local_models
-                   (id, user_id, name, path, source, format, size_bytes, metadata_json, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                   ON CONFLICT(user_id, source) DO UPDATE SET
-                   name = excluded.name,
-                   path = excluded.path,
-                   format = excluded.format,
-                   size_bytes = excluded.size_bytes,
-                   metadata_json = excluded.metadata_json""",
+                _UPSERT_MODEL_SQL,
                 (
                     mid,
                     user_id,
@@ -581,6 +576,29 @@ class Database:
         if row is None:
             raise RuntimeError("upsert_model failed to persist row")
         return row
+
+    async def upsert_models(self, user_id: str, records: list[dict[str, Any]]) -> int:
+        if not records:
+            return 0
+        now = _now()
+        rows = [
+            (
+                str(uuid.uuid4()),
+                user_id,
+                record["name"],
+                record["path"],
+                record["source"],
+                record.get("format"),
+                record.get("size_bytes", 0),
+                json.dumps(record.get("metadata", {})),
+                now,
+            )
+            for record in records
+        ]
+        async with self._conn() as conn:
+            await conn.executemany(_UPSERT_MODEL_SQL, rows)
+            await conn.commit()
+        return len(rows)
 
     async def create_training_job(
         self,

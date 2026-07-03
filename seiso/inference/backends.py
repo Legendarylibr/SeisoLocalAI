@@ -5,6 +5,7 @@ from __future__ import annotations
 import mmap
 import re
 import struct
+from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -136,7 +137,10 @@ def resolve_gguf_file(model_path: str) -> Path:
     raise ValueError(f"No GGUF file found at {model_path}")
 
 
-_gguf_metadata_cache: dict[tuple[str, float, int], _GGUFMetadata] = {}
+_GGUF_METADATA_CACHE_MAX_ENTRIES = 256
+_gguf_metadata_cache: OrderedDict[tuple[str, float, int], _GGUFMetadata] = (
+    OrderedDict()
+)
 
 
 def clear_gguf_caches() -> None:
@@ -257,9 +261,13 @@ def _gguf_metadata(model_path: str) -> _GGUFMetadata:
         return _read_gguf_metadata(path)
     cached = _gguf_metadata_cache.get(cache_key)
     if cached is not None:
+        _gguf_metadata_cache.move_to_end(cache_key)
         return cached
     meta = _read_gguf_metadata(path)
     _gguf_metadata_cache[cache_key] = meta
+    _gguf_metadata_cache.move_to_end(cache_key)
+    while len(_gguf_metadata_cache) > _GGUF_METADATA_CACHE_MAX_ENTRIES:
+        _gguf_metadata_cache.popitem(last=False)
     return meta
 
 
