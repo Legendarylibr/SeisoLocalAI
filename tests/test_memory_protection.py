@@ -14,6 +14,7 @@ from seiso.memory.protection import (
     clamp_llama_n_ctx,
     ensure_load_fits,
     is_oom_error,
+    llama_batch_limits_for_headroom,
     sanitize_inference_payload,
 )
 
@@ -60,6 +61,13 @@ def test_clamp_llama_load_kwargs_does_not_scale_batch_with_large_context(monkeyp
     assert kwargs["n_batch"] == 2048
 
 
+def test_llama_batch_limits_scale_by_gpu_headroom():
+    assert llama_batch_limits_for_headroom(1024) == (256, 128)
+    assert llama_batch_limits_for_headroom(8192) == (1024, 256)
+    assert llama_batch_limits_for_headroom(24576) == (2048, 512)
+    assert llama_batch_limits_for_headroom(49152) == (4096, 1024)
+
+
 def test_clamp_llama_load_kwargs_scales_batch_for_large_gpu_gguf(
     monkeypatch, tmp_path
 ):
@@ -85,8 +93,37 @@ def test_clamp_llama_load_kwargs_scales_batch_for_large_gpu_gguf(
         }
     )
 
-    assert kwargs["n_batch"] == 512
+    assert kwargs["n_batch"] == 256
     assert kwargs["n_ubatch"] == 128
+
+
+def test_clamp_llama_load_kwargs_uses_high_batch_when_large_gpu_has_room(
+    monkeypatch, tmp_path
+):
+    gguf = tmp_path / "small-q4.gguf"
+    gguf.write_bytes(b"\x00" * 1024)
+    monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 49152)
+    monkeypatch.setattr(
+        "seiso.memory.protection.estimate_path_vram_mb",
+        lambda _path: 8192,
+    )
+    monkeypatch.setattr(
+        "seiso.inference.backends.gguf_block_count",
+        lambda _path: 64,
+    )
+
+    kwargs = clamp_llama_load_kwargs(
+        {
+            "_model_path": str(gguf),
+            "n_ctx": 4096,
+            "n_batch": 4096,
+            "n_ubatch": 1024,
+            "n_gpu_layers": -1,
+        }
+    )
+
+    assert kwargs["n_batch"] == 4096
+    assert kwargs["n_ubatch"] == 1024
 
 
 def test_llama_batch_headroom_accounts_for_model_weights(monkeypatch, tmp_path):

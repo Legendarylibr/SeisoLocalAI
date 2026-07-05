@@ -104,17 +104,23 @@ def apply_platform_memory_profile(
                 os.environ.setdefault("SEISO_LLAMA_GPU_LAYERS", "-1")
             else:
                 os.environ.setdefault("SEISO_LLAMA_GPU_LAYERS", "0")
+            if tier in (
+                HardwareTier.WORKSTATION,
+                HardwareTier.CAPABLE,
+                HardwareTier.MODEST,
+                HardwareTier.EDGE,
+            ):
+                from seiso.memory.protection import llama_batch_limits_for_headroom
+
+                batch, ubatch = llama_batch_limits_for_headroom(headroom)
+                os.environ.setdefault("SEISO_LLAMA_BATCH", str(batch))
+                os.environ.setdefault("SEISO_LLAMA_UBATCH", str(ubatch))
             if not low and tier in (HardwareTier.WORKSTATION, HardwareTier.CAPABLE):
                 os.environ.setdefault("SEISO_LLAMA_FLASH_ATTN", "true")
                 os.environ.setdefault("SEISO_LLAMA_OP_OFFLOAD", "true")
                 os.environ.setdefault("SEISO_LLAMA_OFFLOAD_KQV", "true")
                 if tier == HardwareTier.WORKSTATION:
-                    os.environ.setdefault("SEISO_LLAMA_BATCH", "2048")
-                    os.environ.setdefault("SEISO_LLAMA_UBATCH", "512")
                     os.environ.setdefault("SEISO_STREAM_BATCH_CHARS", "16")
-                else:
-                    os.environ.setdefault("SEISO_LLAMA_BATCH", "1024")
-                    os.environ.setdefault("SEISO_LLAMA_UBATCH", "256")
         elif caps.get("train_platform") == "cpu" or not caps.get("gpu_count"):
             os.environ.setdefault("SEISO_LLAMA_GPU_LAYERS", "0")
 

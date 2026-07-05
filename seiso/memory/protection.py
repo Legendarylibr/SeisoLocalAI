@@ -34,7 +34,7 @@ _TRAINING_OVERHEAD_RATIO = 2.0
 _MAX_INFERENCE_TOKENS = 8192
 _MAX_LLAMA_CTX = 131072
 _MIN_LLAMA_CTX = 2048
-_MAX_LLAMA_BATCH = 2048
+_MAX_LLAMA_BATCH = 4096
 _MIN_LLAMA_BATCH = 128
 _MAX_LLAMA_CACHE_MB = 1024
 _MAX_JSONL_LOAD_MB = 512
@@ -250,6 +250,19 @@ def llama_batch_headroom_mb(
         return max(_MIN_LLAMA_BATCH * 2, free_mb - gpu_weight_mb - kv_mb)
     except Exception:
         return free_mb
+
+
+def llama_batch_limits_for_headroom(headroom_mb_value: int) -> tuple[int, int]:
+    """Largest conservative llama.cpp batch/ubatch pair for available headroom."""
+    if headroom_mb_value < 2048:
+        return 256, 128
+    if headroom_mb_value < 4096:
+        return 512, 128
+    if headroom_mb_value < 16384:
+        return 1024, 256
+    if headroom_mb_value < 32768:
+        return 2048, 512
+    return 4096, 1024
 
 
 def headroom_mb() -> int:
@@ -512,12 +525,7 @@ def clamp_llama_load_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
         batch_headroom = llama_batch_headroom_mb(
             headroom_mb(), model_path=model_path, n_gpu_layers=n_gpu_layers
         )
-        if batch_headroom < 3072:
-            max_batch, max_ubatch = 512, 128
-        elif batch_headroom < 6144:
-            max_batch, max_ubatch = 1024, 256
-        else:
-            max_batch, max_ubatch = 2048, 512
+        max_batch, max_ubatch = llama_batch_limits_for_headroom(batch_headroom)
         out["n_batch"] = max(_MIN_LLAMA_BATCH, min(out["n_batch"], max_batch))
         out["n_ubatch"] = max(
             _MIN_LLAMA_BATCH,
