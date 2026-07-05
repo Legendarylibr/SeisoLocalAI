@@ -7,6 +7,7 @@ import contextlib
 import logging
 import threading
 from collections.abc import AsyncIterator, Callable, Iterator
+from pathlib import Path
 from queue import Empty
 from typing import Any
 
@@ -777,6 +778,27 @@ class LocalInferenceRunner:
         completion_kwargs = llama_completion_kwargs(payload)
         emitted_text = False
         recoveries = 0
+        # #region agent log
+        from seiso.agent_debug_log import agent_debug_enabled, agent_debug_log
+
+        if agent_debug_enabled():
+            agent_debug_log(
+                hypothesis_id="C",
+                location="runner.py:_llama_stream:before_prefill",
+                message="starting llama.cpp chat prefill",
+                data={
+                    "model": Path(model_path).name,
+                    "n_ctx": n_ctx,
+                    "max_tokens": completion_kwargs.get("max_tokens"),
+                    "load_tier": getattr(llm, "_seiso_load_tier", None),
+                    "n_gpu_layers": getattr(llm, "_seiso_n_gpu_layers", None),
+                    "message_count": len(messages),
+                    "prompt_chars": sum(
+                        len(str(m.get("content") or "")) for m in messages
+                    ),
+                },
+            )
+        # #endregion
         while True:
             try:
                 stream = llm.create_chat_completion(

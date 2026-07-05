@@ -859,6 +859,36 @@ def clamp_llama_load_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
     ctx_cap = clamp_llama_n_ctx(n_ctx, max_tokens=512)
     if n_ctx > ctx_cap:
         out["n_ctx"] = ctx_cap
+    # #region agent log
+    if model_path:
+        from seiso.agent_debug_log import agent_debug_enabled, agent_debug_log
+
+        if agent_debug_enabled():
+            tight = (
+                n_gpu_layers != 0
+                and llama_model_is_tight_vram_fit(
+                    model_path=model_path,
+                    free_mb=headroom_mb(),
+                    n_gpu_layers=n_gpu_layers,
+                    n_ctx=int(out.get("n_ctx") or n_ctx),
+                )
+            )
+            agent_debug_log(
+                hypothesis_id="B",
+                location="protection.py:clamp_llama_load_kwargs",
+                message="clamped llama load kwargs",
+                data={
+                    "model": Path(model_path).name,
+                    "tight_fit": tight,
+                    "free_mb": headroom_mb(),
+                    "n_gpu_layers": n_gpu_layers,
+                    "n_ctx": out.get("n_ctx"),
+                    "n_batch": out.get("n_batch"),
+                    "n_ubatch": out.get("n_ubatch"),
+                    "flash_attn": out.get("flash_attn"),
+                },
+            )
+    # #endregion
     return out
 
 

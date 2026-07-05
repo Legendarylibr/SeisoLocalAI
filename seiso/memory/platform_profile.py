@@ -173,10 +173,55 @@ def apply_platform_memory_profile(
         elif caps.get("train_platform") == "cpu" or not caps.get("gpu_count"):
             os.environ.setdefault("SEISO_LLAMA_GPU_LAYERS", "0")
 
-    return {
+    result = {
         "memory_profile": memory_profile_label(profile),
         "tier": tier.value,
         "headroom_mb": headroom,
         "ram_gb": ram_gb,
         "os": system,
     }
+    _log_platform_profile_applied(
+        profile=profile,
+        system=system,
+        tier=tier,
+        headroom=headroom,
+        low=low,
+    )
+    return result
+
+
+def _log_platform_profile_applied(
+    *,
+    profile: dict[str, Any],
+    system: str,
+    tier: HardwareTier,
+    headroom: int,
+    low: bool,
+) -> None:
+    from seiso.agent_debug_log import agent_debug_log
+
+    # #region agent log
+    try:
+        from seiso.platform import is_native_linux_nvidia
+
+        native = is_native_linux_nvidia(profile=profile)
+    except ImportError:
+        native = False
+    agent_debug_log(
+        hypothesis_id="A",
+        location="platform_profile.py:apply_platform_memory_profile",
+        message="platform memory profile applied",
+        data={
+            "system": system,
+            "native_linux_nvidia": native,
+            "tier": tier.value,
+            "headroom_mb": headroom,
+            "low": low,
+            "SEISO_LLAMA_BATCH": os.environ.get("SEISO_LLAMA_BATCH"),
+            "SEISO_LLAMA_UBATCH": os.environ.get("SEISO_LLAMA_UBATCH"),
+            "SEISO_LLAMA_FLASH_ATTN": os.environ.get("SEISO_LLAMA_FLASH_ATTN"),
+            "SEISO_LLAMA_SPEED_SCALE": os.environ.get("SEISO_LLAMA_SPEED_SCALE"),
+            "SEISO_LLAMA_GPU_LAYERS": os.environ.get("SEISO_LLAMA_GPU_LAYERS"),
+        },
+    )
+    # #endregion
