@@ -14,6 +14,8 @@ from seiso.hardware.tiers import (
     classify_tier,
     effective_budget_mb,
     memory_headroom_label,
+    performance_headroom_mb,
+    ui_headroom_mb,
     vram_headroom_mb,
 )
 from seiso.hardware.training import preferred_inference_backend, training_defaults
@@ -35,5 +37,7 @@ __all__ = [
     "memory_headroom_label",
     "preferred_inference_backend",
     "training_defaults",
+    "performance_headroom_mb",
+    "ui_headroom_mb",
     "vram_headroom_mb",
 ]

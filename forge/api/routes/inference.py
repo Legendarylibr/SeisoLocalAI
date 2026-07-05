@@ -377,10 +377,11 @@ async def preload_model_stream(
                     }
                 ),
             }
-            await loop.run_in_executor(
-                None,
-                lambda: runner.pool.prepare_for_load(target_path, ctx["backend"]),
-            )
+        # Always reconcile pool state before warm load — unloads when switching models/backends.
+        await loop.run_in_executor(
+            None,
+            lambda: runner.pool.prepare_for_load(target_path, ctx["backend"]),
+        )
 
         yield {
             "event": "progress",

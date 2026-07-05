@@ -7,8 +7,38 @@ import platform
 from typing import Any
 
 from seiso.env import env_bool
-from seiso.hardware.tiers import HardwareTier, classify_tier, vram_headroom_mb
+from seiso.hardware.tiers import (
+    HardwareTier,
+    classify_tier,
+    performance_headroom_mb,
+    vram_headroom_mb,
+)
+from seiso.memory.protection import llama_batch_limits_for_headroom
 from seiso.training.platform_caps import training_capabilities
+
+
+def native_linux_nvidia_llama_batch_caps(
+    *,
+    tier: HardwareTier,
+    headroom_mb: int,
+    low: bool,
+) -> tuple[int, int, int]:
+    """Tier-aware llama.cpp batch/ubatch/cache caps for native Linux NVIDIA."""
+    batch, ubatch = llama_batch_limits_for_headroom(headroom_mb)
+    cache_cap = 256 if low else 512
+
+    if not low and tier == HardwareTier.WORKSTATION:
+        batch, ubatch = 4096, 1024
+    elif not low and tier == HardwareTier.CAPABLE:
+        batch, ubatch = min(batch, 1536), min(ubatch, 512)
+    else:
+        batch = min(batch, 4096)
+        ubatch = min(ubatch, 1024)
+        if low:
+            batch = min(batch, 512)
+            ubatch = min(ubatch, 256)
+
+    return batch, ubatch, cache_cap
 
 
 def _refresh_native_linux_llama_env(
@@ -33,8 +63,8 @@ def _refresh_native_linux_llama_env(
 
 
 def memory_profile_label(profile: dict[str, Any]) -> str:
-    """Derive low vs balanced from live headroom."""
-    headroom = vram_headroom_mb(profile)
+    """Derive low vs balanced from hardware budget (not transient free VRAM)."""
+    headroom = performance_headroom_mb(profile)
     ram_gb = float(profile.get("ram_gb") or 0)
     if headroom < 4096 or (ram_gb > 0 and ram_gb <= 12):
         return "low"
@@ -57,7 +87,8 @@ def apply_platform_memory_profile(
         profile = hardware_profile()
 
     tier = classify_tier(profile)
-    headroom = vram_headroom_mb(profile)
+    free_headroom = vram_headroom_mb(profile)
+    headroom = performance_headroom_mb(profile)
     ram_gb = float(profile.get("ram_gb") or 0)
     caps = training_capabilities()
     system = platform.system()
@@ -140,28 +171,30 @@ def apply_platform_memory_profile(
                 HardwareTier.MODEST,
                 HardwareTier.EDGE,
             ):
-                from seiso.memory.protection import llama_batch_limits_for_headroom
                 from seiso.platform import is_native_linux_nvidia
 
-                batch, ubatch = llama_batch_limits_for_headroom(headroom)
-                cache_cap = 256 if low else 512
+                os.environ.setdefault(
+                    "SEISO_LLAMA_THREADS",
+                    str(
+                        min(
+                            max((os.cpu_count() or 4) - 2, 4),
+                            14 if tier == HardwareTier.WORKSTATION else 10,
+                        )
+                    ),
+                )
                 if is_native_linux_nvidia(profile=profile):
-                    if not low and tier == HardwareTier.WORKSTATION:
-                        batch, ubatch = 4096, 1024
-                    elif not low and tier == HardwareTier.CAPABLE:
-                        batch, ubatch = min(batch, 1536), min(ubatch, 512)
-                    else:
-                        batch = min(batch, 4096)
-                        ubatch = min(ubatch, 1024)
-                        if low:
-                            batch = min(batch, 512)
-                            ubatch = min(ubatch, 256)
+                    batch, ubatch, cache_cap = native_linux_nvidia_llama_batch_caps(
+                        tier=tier,
+                        headroom_mb=headroom,
+                        low=low,
+                    )
                     _refresh_native_linux_llama_env(
                         batch_cap=batch,
                         ubatch_cap=ubatch,
                         cache_cap=cache_cap,
                     )
                 else:
+                    batch, ubatch = llama_batch_limits_for_headroom(headroom)
                     os.environ.setdefault("SEISO_LLAMA_BATCH", str(batch))
                     os.environ.setdefault("SEISO_LLAMA_UBATCH", str(ubatch))
             if not low and tier in (HardwareTier.WORKSTATION, HardwareTier.CAPABLE):
@@ -184,6 +217,7 @@ def apply_platform_memory_profile(
         "memory_profile": memory_profile_label(profile),
         "tier": tier.value,
         "headroom_mb": headroom,
+        "free_headroom_mb": free_headroom,
         "ram_gb": ram_gb,
         "os": system,
     }

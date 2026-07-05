@@ -8,6 +8,7 @@ from seiso.hardware.tiers import (
     TIER_LABELS,
     HardwareTier,
     classify_tier,
+    performance_headroom_mb,
     vram_headroom_mb,
 )
 from seiso.inference.backends import InferenceBackend
@@ -59,23 +60,32 @@ def training_defaults(profile: dict[str, Any]) -> dict[str, Any]:
     from seiso.training.platform_caps import training_capabilities
 
     tier = classify_tier(profile)
-    headroom = vram_headroom_mb(profile)
+    budget = performance_headroom_mb(profile)
+    free_mb = vram_headroom_mb(profile)
     ram = float(profile.get("ram_gb") or 0)
     caps = training_capabilities()
 
-    if tier in (HardwareTier.WORKSTATION, HardwareTier.CAPABLE) and headroom >= 16000:
+    if tier in (HardwareTier.WORKSTATION, HardwareTier.CAPABLE) and budget >= 16000:
         batch, accum, max_seq, max_params = 2, 4, 4096, "14B"
-    elif headroom >= 10000 or tier == HardwareTier.APPLE_UNIFIED:
+    elif budget >= 10000 or tier == HardwareTier.APPLE_UNIFIED:
         batch, accum, max_seq, max_params = 1, 8, 2048, "7B"
-    elif headroom >= 6000:
+    elif budget >= 6000:
         batch, accum, max_seq, max_params = 1, 16, 2048, "3B"
     else:
         batch, accum, max_seq, max_params = 1, 16, 1024, "1B"
 
     quant = caps["recommended_quant"]
-    note = (
-        f"Tuned for {TIER_LABELS[tier]} ({ram:.0f} GB RAM, ~{headroom // 1024} GB free)"
+    memory_label = (
+        "VRAM"
+        if tier not in (HardwareTier.APPLE_UNIFIED, HardwareTier.CPU_ONLY)
+        else "RAM"
     )
+    note = (
+        f"Tuned for {TIER_LABELS[tier]} ({ram:.0f} GB RAM, ~{budget // 1024} GB {memory_label} budget"
+    )
+    if free_mb > 0 and free_mb < budget * 0.5:
+        note += f", ~{free_mb // 1024} GB free now"
+    note += ")"
     if not caps["supports_qlora"]:
         note += " — use 16-bit LoRA on macOS (no bitsandbytes)"
     if caps["fused_kernels_available"]:

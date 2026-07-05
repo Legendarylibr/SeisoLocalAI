@@ -23,6 +23,7 @@ from seiso.hardware import (
     memory_headroom_label,
     preferred_inference_backend,
     training_defaults,
+    ui_headroom_mb,
     vram_headroom_mb,
 )
 from seiso.hardware import (
@@ -61,6 +62,8 @@ def enrich_profile(profile: dict[str, Any]) -> dict[str, Any]:
     recommended_chat = recommended_catalog_repo(enriched, task="chat")
     return {
         **enriched,
+        # Forge UI uses total GPU capacity on discrete cards (July-3 behavior).
+        "vram_headroom_mb": ui_headroom_mb(enriched),
         "recommended_chat_repo": recommended_chat,
         "inference_backend_labels": dict(BACKEND_LABELS),
     }
@@ -135,7 +138,7 @@ def enrich_catalog_models(
                     elif error:
                         download_errors[repo_id] = error
 
-    headroom_gb = round(vram_headroom_mb(profile) / 1024, 1)
+    headroom_gb = round(ui_headroom_mb(profile) / 1024, 1)
     tier = classify_tier(profile)
     enriched: list[dict[str, Any]] = []
     for m in models:
@@ -226,7 +229,7 @@ def enrich_trainable_catalog_models(
     """Annotate safetensors training candidates with download + VRAM fit."""
     from seiso.models.catalog import diversify_by_family
 
-    headroom_gb = round(vram_headroom_mb(profile) / 1024, 1)
+    headroom_gb = round(ui_headroom_mb(profile) / 1024, 1)
     tier = classify_tier(profile)
     enriched: list[dict[str, Any]] = []
     for m in models:
@@ -308,12 +311,15 @@ def recommended_catalog_repo(
 
 def build_vram_status(orchestrator: Any) -> dict[str, Any]:
     """Unified VRAM/RAM status for API responses."""
-    from seiso.hardware.tiers import HardwareTier, classify_tier, vram_headroom_mb
+    from seiso.hardware.tiers import HardwareTier, classify_tier, ui_headroom_mb
     from seiso.memory.platform_profile import memory_profile_label
+
+    from seiso.hardware.tiers import vram_headroom_mb as free_vram_headroom_mb
 
     profile = hardware_profile(force_refresh=False)
     tier = classify_tier(profile)
-    headroom = vram_headroom_mb(profile)
+    headroom = ui_headroom_mb(profile)
+    free_mb = free_vram_headroom_mb(profile)
     local = orchestrator._runner._pool.status()
     try:
         from seiso.hardware.vram_processes import vram_contention_summary
@@ -324,6 +330,7 @@ def build_vram_status(orchestrator: Any) -> dict[str, Any]:
     return {
         "local": local,
         "headroom_mb": headroom,
+        "free_vram_mb": free_mb,
         "memory_label": memory_headroom_label(profile),
         "ram_gb": profile.get("ram_gb"),
         "apple_unified": tier == HardwareTier.APPLE_UNIFIED,
@@ -331,6 +338,7 @@ def build_vram_status(orchestrator: Any) -> dict[str, Any]:
         "memory_profile": memory_profile_label(profile),
         "recommended_max_chat": recommended_catalog_repo(profile, task="chat"),
         "active_model": local.get("active_model"),
+        "platform": profile.get("platform"),
         "vram_contention": vram_contention,
     }
 
@@ -342,11 +350,12 @@ def hardware_summary(profile: dict[str, Any]) -> dict[str, Any]:
     return {
         "tier": tier.value,
         "tier_label": TIER_LABELS[tier],
+        "platform": profile.get("platform"),
         "backend": profile.get("backend"),
         "ram_gb": profile.get("ram_gb"),
         "gpu_count": len(profile.get("gpus") or []),
         "effective_vram_mb": effective_budget_mb(profile),
-        "vram_headroom_mb": vram_headroom_mb(profile),
+        "vram_headroom_mb": ui_headroom_mb(profile),
         "memory_headroom_label": memory_headroom_label(profile),
         "preferred_inference_backend": preferred,
         "preferred_inference_backend_label": BACKEND_LABELS.get(preferred, preferred),
