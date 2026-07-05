@@ -329,8 +329,8 @@ def test_llama_load_kwargs_cuda_defaults(monkeypatch):
     assert kwargs["n_gpu_layers"] == -1
     assert kwargs["n_threads"] == 16
     assert kwargs["n_threads_batch"] == 24
-    assert kwargs["n_batch"] == 2048
-    assert kwargs["n_ubatch"] == 512
+    assert kwargs["n_batch"] == 4096
+    assert kwargs["n_ubatch"] == 1024
     assert kwargs["flash_attn"] is True
     assert kwargs["offload_kqv"] is True
     assert kwargs["op_offload"] is True
@@ -465,20 +465,8 @@ def test_llama_full_gpu_targets(monkeypatch):
     assert mp._llama_full_gpu_targets(0) == []
 
 
-def test_llama_batch_defaults_are_speed_first(monkeypatch):
+def test_llama_batch_defaults_are_speed_first():
     import seiso.inference.model_pool as mp
-
-    monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 24576)
-
-    batch, ubatch = mp._llama_batch_defaults()
-    assert batch == 2048
-    assert ubatch == 512
-
-
-def test_llama_batch_defaults_use_larger_batches_on_big_gpus(monkeypatch):
-    import seiso.inference.model_pool as mp
-
-    monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 49152)
 
     batch, ubatch = mp._llama_batch_defaults()
     assert batch == 4096
