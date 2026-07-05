@@ -15,6 +15,11 @@ from seiso.memory.protection import (
     ensure_load_fits,
     is_oom_error,
     llama_batch_limits_for_headroom,
+    llama_batch_limits_for_model,
+    llama_effective_batch_headroom_mb,
+    llama_host_batch_headroom_mb,
+    llama_load_profile_ladder,
+    llama_next_recovery_tier,
     sanitize_inference_payload,
 )
 
@@ -63,6 +68,7 @@ def test_clamp_llama_load_kwargs_does_not_scale_batch_with_large_context(monkeyp
 
 def test_llama_batch_limits_scale_by_gpu_headroom():
     assert llama_batch_limits_for_headroom(1024) == (256, 128)
+    assert llama_batch_limits_for_headroom(4096) == (512, 256)
     assert llama_batch_limits_for_headroom(8192) == (1024, 256)
     assert llama_batch_limits_for_headroom(24576) == (2048, 512)
     assert llama_batch_limits_for_headroom(49152) == (4096, 1024)
@@ -144,8 +150,131 @@ def test_llama_batch_headroom_accounts_for_model_weights(monkeypatch, tmp_path):
 
 
 def test_clamp_llama_cache_mb_keeps_configured_value_on_low_headroom(monkeypatch):
+    monkeypatch.setattr("platform.system", lambda: "Darwin")
     monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 2048)
     assert clamp_llama_cache_mb(1024) == 1024
+
+
+def test_clamp_llama_cache_mb_caps_on_linux(monkeypatch):
+    monkeypatch.setattr("platform.system", lambda: "Linux")
+    monkeypatch.setattr("seiso.memory.protection.available_ram_mb", lambda: 8192)
+    assert clamp_llama_cache_mb(1024) == 341
+
+
+def test_clamp_llama_cache_mb_accounts_for_model_mmap_on_native_linux(
+    monkeypatch, tmp_path
+):
+    gguf = tmp_path / "model.gguf"
+    gguf.write_bytes(b"\x00" * 1024)
+    monkeypatch.setattr("platform.system", lambda: "Linux")
+    monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: True)
+    monkeypatch.setattr("seiso.memory.protection.available_ram_mb", lambda: 16384)
+    monkeypatch.setattr(
+        "seiso.memory.protection.estimate_path_vram_mb",
+        lambda _path: 12000,
+    )
+    assert clamp_llama_cache_mb(1024, model_path=gguf) < 1024
+
+
+def test_llama_effective_batch_headroom_uses_host_ram_on_native_linux(
+    monkeypatch, tmp_path
+):
+    from seiso.memory.protection import llama_batch_headroom_mb
+
+    gguf = tmp_path / "big.gguf"
+    gguf.write_bytes(b"\x00" * 1024)
+    monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: True)
+    monkeypatch.setattr("seiso.memory.protection.available_ram_mb", lambda: 8192)
+    monkeypatch.setattr(
+        "seiso.memory.protection.estimate_path_vram_mb",
+        lambda _path: 6000,
+    )
+    monkeypatch.setattr(
+        "seiso.inference.backends.gguf_block_count",
+        lambda _path: 64,
+    )
+    gpu_only = llama_batch_headroom_mb(8192, model_path=gguf, n_gpu_layers=-1)
+    host_only = llama_host_batch_headroom_mb(
+        model_path=gguf, n_gpu_layers=-1, free_vram_mb=8192
+    )
+    effective = llama_effective_batch_headroom_mb(
+        8192, model_path=gguf, n_gpu_layers=-1
+    )
+    assert host_only is not None
+    assert effective == min(gpu_only, host_only)
+
+
+def test_llama_load_profile_ladder_upscales_small_model_on_big_gpu(
+    monkeypatch, tmp_path
+):
+    gguf = tmp_path / "small.gguf"
+    gguf.write_bytes(b"\x00" * 1024)
+    monkeypatch.setattr(
+        "seiso.memory.protection.estimate_path_vram_mb",
+        lambda _path: 1024,
+    )
+    monkeypatch.setattr(
+        "seiso.inference.backends.gguf_block_count",
+        lambda _path: 32,
+    )
+    monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: False)
+
+    profiles = llama_load_profile_ladder(
+        model_path=str(gguf),
+        n_ctx=4096,
+        n_gpu_layers=-1,
+        free_mb=24576,
+        base_batch=1024,
+        base_ubatch=512,
+        tier="normal",
+    )
+    assert profiles[0]["n_batch"] == 2048
+    assert profiles[0]["n_ubatch"] == 512
+
+
+def test_llama_load_profile_ladder_skips_upscale_when_model_fills_gpu(
+    monkeypatch, tmp_path
+):
+    gguf = tmp_path / "big.gguf"
+    gguf.write_bytes(b"\x00" * 1024)
+    monkeypatch.setattr(
+        "seiso.memory.protection.estimate_path_vram_mb",
+        lambda _path: 22000,
+    )
+    monkeypatch.setattr(
+        "seiso.inference.backends.gguf_block_count",
+        lambda _path: 64,
+    )
+    monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: False)
+
+    profiles = llama_load_profile_ladder(
+        model_path=str(gguf),
+        n_ctx=4096,
+        n_gpu_layers=-1,
+        free_mb=24576,
+        base_batch=512,
+        base_ubatch=128,
+        tier="normal",
+    )
+    assert profiles[0]["n_batch"] <= 512
+
+
+def test_llama_batch_limits_for_model_uses_post_weight_headroom(monkeypatch, tmp_path):
+    gguf = tmp_path / "big.gguf"
+    gguf.write_bytes(b"\x00" * 1024)
+    monkeypatch.setattr(
+        "seiso.memory.protection.estimate_path_vram_mb",
+        lambda _path: 22000,
+    )
+    monkeypatch.setattr(
+        "seiso.inference.backends.gguf_block_count",
+        lambda _path: 64,
+    )
+    batch, ubatch = llama_batch_limits_for_model(
+        24576, model_path=gguf, n_gpu_layers=-1
+    )
+    assert batch == 256
+    assert ubatch == 128
 
 
 def test_apply_training_memory_guards_keeps_user_sizing(monkeypatch):

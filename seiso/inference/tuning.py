@@ -175,7 +175,7 @@ def estimate_llama_n_ctx(
     )
 
 
-def attach_llama_prompt_cache(llm: Any) -> None:
+def attach_llama_prompt_cache(llm: Any, *, model_path: str | None = None) -> None:
     """Enable RAM prefix cache for multi-turn / repeated prompts."""
     if not env_bool("SEISO_LLAMA_PROMPT_CACHE", True):
         return
@@ -187,7 +187,7 @@ def attach_llama_prompt_cache(llm: Any) -> None:
         cache_mb = env_int("SEISO_LLAMA_CACHE_MB", 1024)
         from seiso.memory.protection import clamp_llama_cache_mb
 
-        cache_mb = clamp_llama_cache_mb(cache_mb)
+        cache_mb = clamp_llama_cache_mb(cache_mb, model_path=model_path)
         if cache_mb <= 0:
             return
         llm.set_cache(LlamaRAMCache(capacity_bytes=cache_mb * 1024 * 1024))

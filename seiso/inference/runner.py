@@ -37,7 +37,9 @@ from seiso.inference.tuning import (
     torch_generate_kwargs,
 )
 from seiso.memory.protection import (
+    LlamaLoadTier,
     is_oom_error,
+    llama_next_recovery_tier,
     release_cached_memory,
     sanitize_inference_payload,
 )
@@ -670,6 +672,28 @@ class LocalInferenceRunner:
         if generation_errors and not should_stop():
             raise generation_errors[0]
 
+    def _llama_handle_tier(self, llm: Any) -> LlamaLoadTier:
+        return getattr(llm, "_seiso_load_tier", "normal") or "normal"
+
+    def _llama_recover_from_oom(
+        self,
+        llm: Any,
+        *,
+        model_path: str,
+        n_ctx: int,
+    ) -> Any:
+        current = self._llama_handle_tier(llm)
+        next_tier = llama_next_recovery_tier(current)
+        if next_tier is None:
+            raise RuntimeError("llama.cpp inference OOM — recovery tiers exhausted")
+        logger.warning(
+            "llama.cpp inference OOM at tier=%s — reloading at tier=%s",
+            current,
+            next_tier,
+        )
+        release_cached_memory(sync=True)
+        return self._pool.reload_llama(model_path, n_ctx, tier=next_tier)
+
     def _llama_complete(
         self,
         payload: dict[str, Any],
@@ -689,7 +713,16 @@ class LocalInferenceRunner:
         tools = payload.get("tools_schemas")
         if tools:
             kwargs["tools"] = tools
-        out = llm.create_chat_completion(messages=messages, **kwargs)
+        while True:
+            try:
+                out = llm.create_chat_completion(messages=messages, **kwargs)
+                break
+            except Exception as exc:
+                if not is_oom_error(exc):
+                    raise
+                llm = self._llama_recover_from_oom(
+                    llm, model_path=model_path, n_ctx=n_ctx
+                )
         if not self._pool.is_generation_active(generation_id):
             return ""
         message = out["choices"][0].get("message") or {}
@@ -734,18 +767,27 @@ class LocalInferenceRunner:
         except ImportError as exc:
             raise RuntimeError("llama-cpp-python not installed") from exc
 
-        messages = payload.get("messages", [])
-        stream = llm.create_chat_completion(
-            messages=messages,
-            **llama_completion_kwargs(payload),
-        )
-        for chunk in stream:
-            if should_stop():
-                break
-            delta = chunk["choices"][0].get("delta", {})
-            content = delta.get("content")
-            if content:
-                yield StreamToken(content)
+        completion_kwargs = llama_completion_kwargs(payload)
+        while True:
+            try:
+                stream = llm.create_chat_completion(
+                    messages=messages,
+                    **completion_kwargs,
+                )
+                for chunk in stream:
+                    if should_stop():
+                        break
+                    delta = chunk["choices"][0].get("delta", {})
+                    content = delta.get("content")
+                    if content:
+                        yield StreamToken(content)
+                return
+            except Exception as exc:
+                if not is_oom_error(exc):
+                    raise
+                llm = self._llama_recover_from_oom(
+                    llm, model_path=model_path, n_ctx=n_ctx
+                )
 
 
 def get_inference_runner() -> LocalInferenceRunner:
