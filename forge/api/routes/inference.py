@@ -325,9 +325,12 @@ async def preload_model(
     )
 
     loop = asyncio.get_running_loop()
-    await loop.run_in_executor(
-        None, lambda: orchestrator._runner.warm_model(ctx["payload"])
-    )
+    try:
+        await loop.run_in_executor(
+            None, lambda: orchestrator._runner.warm_model(ctx["payload"])
+        )
+    except Exception as exc:
+        raise HTTPException(503, str(exc)) from exc
     status = orchestrator._runner.pool.status()
     return {"status": "loaded", "backend": ctx["backend"], **status}
 

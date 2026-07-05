@@ -305,6 +305,45 @@ def llama_kv_cache_reserve_mb(
     return max(legacy_floor, estimated)
 
 
+def llama_offload_fits_headroom(
+    model_path: str | Path,
+    *,
+    headroom_mb: int,
+    n_gpu_layers: int,
+    n_ctx: int = 2048,
+    weight_mb: int | None = None,
+    total_layers: int | None = None,
+) -> bool:
+    """True when estimated GPU weight + KV for ``n_gpu_layers`` fits within headroom."""
+    if n_gpu_layers == 0:
+        return True
+    if headroom_mb <= 0:
+        return False
+
+    path = Path(model_path)
+    if weight_mb is None:
+        weight_mb = int(estimate_path_vram_mb(path))
+    if total_layers is None:
+        total_layers = gguf_total_layers(path)
+
+    if n_gpu_layers == -1:
+        gpu_weight_mb = weight_mb
+    else:
+        gpu_weight_mb = (
+            int(weight_mb * _gpu_layer_fraction(n_gpu_layers, total_layers)) + 256
+        )
+
+    kv_mb = llama_kv_cache_reserve_mb(
+        path,
+        n_ctx=n_ctx,
+        n_gpu_layers=n_gpu_layers,
+        total_layers=total_layers,
+        weight_mb=weight_mb,
+        free_mb=headroom_mb,
+    )
+    return gpu_weight_mb + kv_mb <= headroom_mb
+
+
 def llama_host_batch_headroom_mb(
     *,
     model_path: str | Path,
@@ -475,7 +514,7 @@ def headroom_mb() -> int:
 def available_ram_mb() -> int:
     """Cross-platform available RAM in MB (Linux, macOS, Windows)."""
     try:
-        import psutil  # type: ignore
+        import psutil
 
         return int(psutil.virtual_memory().available / (1024**2))
     except Exception:
@@ -499,7 +538,10 @@ def available_ram_mb() -> int:
 
             stat = MEMORYSTATUSEX()
             stat.dwLength = ctypes.sizeof(MEMORYSTATUSEX)
-            if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(stat)):
+            windll = getattr(ctypes, "windll", None)
+            if windll is not None and windll.kernel32.GlobalMemoryStatusEx(
+                ctypes.byref(stat)
+            ):
                 return int(stat.ullAvailPhys / (1024**2))
         except Exception:
             pass
