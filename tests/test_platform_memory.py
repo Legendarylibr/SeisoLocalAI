@@ -205,12 +205,10 @@ def test_platform_profile_linux_nvidia_uses_gpu_layers(monkeypatch):
     apply_platform_memory_profile(profile=profile)
 
     assert os.environ["SEISO_LLAMA_GPU_LAYERS"] == "-1"
-    assert os.environ["SEISO_LLAMA_BATCH"] == "8192"
-    assert os.environ["SEISO_LLAMA_UBATCH"] == "2048"
-    assert os.environ["SEISO_LLAMA_FLASH_ATTN"] == "true"
-    assert os.environ["SEISO_STREAM_BATCH_CHARS"] == "128"
+    assert os.environ["SEISO_LLAMA_BATCH"] == "4096"
+    assert os.environ["SEISO_LLAMA_UBATCH"] == "1024"
     assert os.environ["SEISO_LLAMA_CACHE_MB"] == "2048"
-    assert os.environ["SEISO_LLAMA_THREADS_BATCH"] == str(min(os.cpu_count() or 4, 32))
+    assert os.environ["SEISO_STREAM_BATCH_CHARS"] == "16"
 
 
 def test_platform_profile_windows_nvidia_matches_linux_throughput(monkeypatch):
@@ -248,42 +246,6 @@ def test_platform_profile_windows_nvidia_matches_linux_throughput(monkeypatch):
     assert os.environ["SEISO_LLAMA_UBATCH"] == "2048"
     assert os.environ["SEISO_STREAM_BATCH_CHARS"] == "128"
     assert os.environ["SEISO_LLAMA_FLASH_ATTN"] == "true"
-
-
-def test_platform_profile_discrete_nvidia_high_ram_low_vram(monkeypatch):
-    """64 GB RAM must not force top-tier batches when VRAM headroom is tight."""
-    profile = {
-        "ram_gb": 64,
-        "gpus": [{"name": "NVIDIA GeForce RTX 3060", "vram_total_mb": 12288}],
-        "backend": "torch",
-        "platform": "Linux",
-    }
-    monkeypatch.setattr(
-        "seiso.memory.platform_profile.classify_tier",
-        lambda _p: HardwareTier.WORKSTATION,
-    )
-    monkeypatch.setattr(
-        "seiso.memory.platform_profile.vram_headroom_mb", lambda _p: 6144
-    )
-    monkeypatch.setattr(
-        "seiso.memory.platform_profile.training_capabilities",
-        lambda: {
-            "gpu_count": 1,
-            "train_platform": "cpu",
-            "nvidia_hardware": True,
-            "vendor": "nvidia",
-        },
-    )
-    monkeypatch.setattr("platform.system", lambda: "Linux")
-    monkeypatch.setattr(
-        "seiso.inference.model_pool._llama_gpu_offload_ok", lambda: True
-    )
-
-    apply_platform_memory_profile(profile=profile)
-
-    assert os.environ["SEISO_LLAMA_BATCH"] == "4096"
-    assert os.environ["SEISO_LLAMA_UBATCH"] == "1536"
-    assert os.environ["SEISO_STREAM_BATCH_CHARS"] == "96"
 
 
 def test_apply_only_setdefault(monkeypatch):

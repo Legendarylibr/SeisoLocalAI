@@ -251,15 +251,18 @@ def llama_batch_headroom_mb(
         else:
             gpu_fraction = max(0.0, min(float(n_gpu_layers) / float(total_layers), 1.0))
             gpu_weight_mb = int(weight_mb * gpu_fraction) + 256
-        try:
-            from seiso.inference.model_pool import _gpu_offload_budget_mb
+        if platform.system() == "Linux":
+            kv_mb = max(256, min(int(free_mb * 0.08), 1024))
+        else:
+            try:
+                from seiso.inference.model_pool import _gpu_offload_budget_mb
 
-            budget = _gpu_offload_budget_mb()
-        except ImportError:
-            budget = 0
-        kv_pct = 0.05 if budget >= 20 * 1024 else 0.08
-        kv_cap = 768 if kv_pct <= 0.05 else 1024
-        kv_mb = max(256, min(int(free_mb * kv_pct), kv_cap))
+                budget = _gpu_offload_budget_mb()
+            except ImportError:
+                budget = 0
+            kv_pct = 0.05 if budget >= 20 * 1024 else 0.08
+            kv_cap = 768 if kv_pct <= 0.05 else 1024
+            kv_mb = max(256, min(int(free_mb * kv_pct), kv_cap))
         return max(_MIN_LLAMA_BATCH * 2, free_mb - gpu_weight_mb - kv_mb)
     except Exception:
         return free_mb
