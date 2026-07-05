@@ -1241,3 +1241,38 @@ def test_llama_complete_retries_after_inference_oom(monkeypatch):
 
     assert reply == "ok"
     assert calls == ["get:normal", "reload:compact"]
+
+
+def test_llama_stream_does_not_retry_after_emitting_text(monkeypatch):
+    from seiso.inference.runner import LocalInferenceRunner
+
+    runner = LocalInferenceRunner()
+    reloads: list[str] = []
+
+    class FakeLlama:
+        _seiso_load_tier = "normal"
+
+        def create_chat_completion(self, **_kwargs):
+            def _stream():
+                yield {"choices": [{"delta": {"content": "hello"}}]}
+                raise RuntimeError("CUDA out of memory. Tried to allocate 2.00 GiB")
+
+            return _stream()
+
+    monkeypatch.setattr(runner._pool, "get_llama", lambda *_a, **_k: FakeLlama())
+    monkeypatch.setattr(
+        runner._pool,
+        "reload_llama",
+        lambda *_a, **kwargs: reloads.append(kwargs.get("tier", "")) or FakeLlama(),
+    )
+
+    stream = runner._llama_stream(
+        {"messages": [{"role": "user", "content": "hi"}], "max_tokens": 32},
+        "/tmp/model.gguf",
+        should_stop=lambda: False,
+    )
+
+    assert next(stream).text == "hello"
+    with pytest.raises(RuntimeError, match="after streaming began"):
+        next(stream)
+    assert reloads == []

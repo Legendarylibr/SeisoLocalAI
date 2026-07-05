@@ -768,6 +768,7 @@ class LocalInferenceRunner:
             raise RuntimeError("llama-cpp-python not installed") from exc
 
         completion_kwargs = llama_completion_kwargs(payload)
+        emitted_text = False
         while True:
             try:
                 stream = llm.create_chat_completion(
@@ -780,11 +781,17 @@ class LocalInferenceRunner:
                     delta = chunk["choices"][0].get("delta", {})
                     content = delta.get("content")
                     if content:
+                        emitted_text = True
                         yield StreamToken(content)
                 return
             except Exception as exc:
                 if not is_oom_error(exc):
                     raise
+                if emitted_text:
+                    raise RuntimeError(
+                        "llama.cpp inference OOM after streaming began — aborting "
+                        "instead of replaying partial output"
+                    ) from exc
                 llm = self._llama_recover_from_oom(
                     llm, model_path=model_path, n_ctx=n_ctx
                 )

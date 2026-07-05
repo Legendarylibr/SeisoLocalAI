@@ -77,15 +77,19 @@ def test_llama_gpu_layers_optimal_uses_short_ttl_cache(monkeypatch, tmp_path):
     calls: list[int] = []
 
     monkeypatch.setattr(
-        mp, "fit_llama_gpu_layers", lambda _p, _r, _h, **_k: calls.append(1) or 32
+        mp,
+        "fit_llama_gpu_layers",
+        lambda _p, _r, _h, **kwargs: calls.append(kwargs.get("n_ctx", 0)) or 32,
     )
 
-    first = mp._llama_gpu_layers_optimal(str(gguf), -1)
-    second = mp._llama_gpu_layers_optimal(str(gguf), -1)
+    first = mp._llama_gpu_layers_optimal(str(gguf), -1, n_ctx=4096)
+    second = mp._llama_gpu_layers_optimal(str(gguf), -1, n_ctx=4096)
+    third = mp._llama_gpu_layers_optimal(str(gguf), -1, n_ctx=8192)
 
     assert first == 32
     assert second == 32
-    assert len(calls) == 1
+    assert third == 32
+    assert calls == [4096, 8192]
 
 
 def test_prepare_for_load_keeps_same_model(tmp_path, monkeypatch):
