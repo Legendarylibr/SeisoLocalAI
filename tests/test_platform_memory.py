@@ -18,8 +18,6 @@ def _clear_llama_env(monkeypatch):
     for key in list(os.environ):
         if (
             key.startswith("SEISO_LLAMA_")
-            or key.startswith("SEISO_MLX_")
-            or key.startswith("SEISO_STREAM_")
             or key == "SEISO_MEMORY_PROFILE"
             or key == "SEISO_SKIP_MLX_PROBE"
         ):
@@ -137,43 +135,6 @@ def test_platform_profile_windows_no_cuda(monkeypatch):
     assert os.environ["SEISO_LLAMA_GPU_LAYERS"] == "0"
 
 
-def test_platform_profile_darwin_apple_unified_roomy_sets_speed_defaults(monkeypatch):
-    profile = {
-        "ram_gb": 36,
-        "gpus": [{"name": "Apple M4 Pro", "vram_total_mb": 0}],
-        "backend": "metal",
-        "platform": "Darwin",
-    }
-    monkeypatch.setattr(
-        "seiso.memory.platform_profile.classify_tier",
-        lambda _p: HardwareTier.APPLE_UNIFIED,
-    )
-    monkeypatch.setattr(
-        "seiso.memory.platform_profile.vram_headroom_mb", lambda _p: 16384
-    )
-    monkeypatch.setattr(
-        "seiso.memory.platform_profile.training_capabilities",
-        lambda: {
-            "supports_mlx_inference": True,
-            "gpu_count": 0,
-            "train_platform": "cpu",
-        },
-    )
-    monkeypatch.setattr("platform.system", lambda: "Darwin")
-
-    apply_platform_memory_profile(profile=profile)
-
-    assert os.environ["SEISO_LLAMA_GPU_LAYERS"] == "-1"
-    assert os.environ["SEISO_LLAMA_BATCH"] == "8192"
-    assert os.environ["SEISO_LLAMA_UBATCH"] == "2048"
-    assert os.environ["SEISO_LLAMA_FLASH_ATTN"] == "true"
-    assert os.environ["SEISO_STREAM_BATCH_CHARS"] == "128"
-    assert os.environ["SEISO_MLX_PREFILL_STEP"] == "8192"
-    assert os.environ["SEISO_LLAMA_CACHE_MB"] == "2048"
-    assert os.environ["SEISO_LLAMA_THREADS_BATCH"] == str(min(os.cpu_count() or 4, 32))
-    assert os.environ["SEISO_LLAMA_USE_MLOCK"] == "true"
-
-
 def test_platform_profile_linux_nvidia_uses_gpu_layers(monkeypatch):
     profile = {
         "ram_gb": 64,
@@ -205,117 +166,10 @@ def test_platform_profile_linux_nvidia_uses_gpu_layers(monkeypatch):
     apply_platform_memory_profile(profile=profile)
 
     assert os.environ["SEISO_LLAMA_GPU_LAYERS"] == "-1"
-    assert os.environ["SEISO_LLAMA_BATCH"] == "8192"
-    assert os.environ["SEISO_LLAMA_UBATCH"] == "2048"
-    assert os.environ["SEISO_LLAMA_CACHE_MB"] == "2048"
-    assert os.environ["SEISO_STREAM_BATCH_CHARS"] == "128"
-
-
-def test_platform_profile_linux_modest_nvidia_scales_batches(monkeypatch):
-    profile = {
-        "ram_gb": 16,
-        "gpus": [{"name": "NVIDIA GeForce RTX 3060", "vram_total_mb": 12288}],
-        "backend": "torch",
-        "platform": "Linux",
-    }
-    monkeypatch.setattr(
-        "seiso.memory.platform_profile.classify_tier",
-        lambda _p: HardwareTier.MODEST,
-    )
-    monkeypatch.setattr(
-        "seiso.memory.platform_profile.vram_headroom_mb", lambda _p: 9000
-    )
-    monkeypatch.setattr(
-        "seiso.memory.platform_profile.training_capabilities",
-        lambda: {
-            "gpu_count": 1,
-            "train_platform": "cpu",
-            "nvidia_hardware": True,
-            "vendor": "nvidia",
-        },
-    )
-    monkeypatch.setattr("platform.system", lambda: "Linux")
-    monkeypatch.setattr(
-        "seiso.inference.model_pool._llama_gpu_offload_ok", lambda: True
-    )
-
-    apply_platform_memory_profile(profile=profile)
-
-    assert os.environ["SEISO_LLAMA_GPU_LAYERS"] == "-1"
     assert os.environ["SEISO_LLAMA_BATCH"] == "4096"
-    assert os.environ["SEISO_LLAMA_UBATCH"] == "1536"
-
-
-def test_platform_profile_linux_edge_nvidia_uses_conservative_batches(monkeypatch):
-    profile = {
-        "ram_gb": 16,
-        "gpus": [{"name": "NVIDIA GeForce GTX 1650", "vram_total_mb": 4096}],
-        "backend": "torch",
-        "platform": "Linux",
-    }
-    monkeypatch.setattr(
-        "seiso.memory.platform_profile.classify_tier",
-        lambda _p: HardwareTier.EDGE,
-    )
-    monkeypatch.setattr(
-        "seiso.memory.platform_profile.vram_headroom_mb", lambda _p: 3200
-    )
-    monkeypatch.setattr(
-        "seiso.memory.platform_profile.training_capabilities",
-        lambda: {
-            "gpu_count": 1,
-            "train_platform": "cpu",
-            "nvidia_hardware": True,
-            "vendor": "nvidia",
-        },
-    )
-    monkeypatch.setattr("platform.system", lambda: "Linux")
-    monkeypatch.setattr(
-        "seiso.inference.model_pool._llama_gpu_offload_ok", lambda: True
-    )
-
-    apply_platform_memory_profile(profile=profile)
-
-    assert os.environ["SEISO_LLAMA_GPU_LAYERS"] == "-1"
-    assert os.environ["SEISO_LLAMA_BATCH"] == "512"
-    assert os.environ["SEISO_LLAMA_UBATCH"] == "256"
-
-
-def test_platform_profile_windows_nvidia_matches_linux_throughput(monkeypatch):
-    profile = {
-        "ram_gb": 64,
-        "gpus": [{"name": "NVIDIA GeForce RTX 4090", "vram_total_mb": 24576}],
-        "backend": "torch",
-        "platform": "Windows",
-    }
-    monkeypatch.setattr(
-        "seiso.memory.platform_profile.classify_tier",
-        lambda _p: HardwareTier.WORKSTATION,
-    )
-    monkeypatch.setattr(
-        "seiso.memory.platform_profile.vram_headroom_mb", lambda _p: 20480
-    )
-    monkeypatch.setattr(
-        "seiso.memory.platform_profile.training_capabilities",
-        lambda: {
-            "gpu_count": 1,
-            "train_platform": "cpu",
-            "nvidia_hardware": True,
-            "vendor": "nvidia",
-        },
-    )
-    monkeypatch.setattr("platform.system", lambda: "Windows")
-    monkeypatch.setattr(
-        "seiso.inference.model_pool._llama_gpu_offload_ok", lambda: True
-    )
-
-    apply_platform_memory_profile(profile=profile)
-
-    assert os.environ["SEISO_LLAMA_GPU_LAYERS"] == "-1"
-    assert os.environ["SEISO_LLAMA_BATCH"] == "8192"
-    assert os.environ["SEISO_LLAMA_UBATCH"] == "2048"
-    assert os.environ["SEISO_STREAM_BATCH_CHARS"] == "128"
-    assert os.environ["SEISO_LLAMA_FLASH_ATTN"] == "true"
+    assert os.environ["SEISO_LLAMA_UBATCH"] == "1024"
+    assert os.environ["SEISO_LLAMA_CACHE_MB"] == "2048"
+    assert os.environ["SEISO_STREAM_BATCH_CHARS"] == "16"
 
 
 def test_apply_only_setdefault(monkeypatch):

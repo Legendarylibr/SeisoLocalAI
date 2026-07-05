@@ -8,7 +8,6 @@ from dataclasses import dataclass
 from typing import Any
 
 from seiso.env import env_bool, env_int
-from seiso.inference.model_pool import DflashDraftSession
 from seiso.inference.streaming import StreamToken
 
 logger = logging.getLogger(__name__)
@@ -84,67 +83,38 @@ def _can_crop_past_key_values(past_key_values: Any) -> bool:
     return past_key_values is not None and hasattr(past_key_values, "crop")
 
 
-def _leading_match_count(preds: Any, proposed_ids_t: Any) -> int:
-    """Count consecutive greedy matches from the start of proposed_ids_t."""
-    k = int(proposed_ids_t.shape[1])
-    if k == 0:
-        return 0
-    matches = preds.eq(proposed_ids_t)
-    if bool(matches.all()):
-        return k
-    mismatch = (~matches[0]).nonzero(as_tuple=False)
-    if mismatch.numel() == 0:
-        return k
-    return int(mismatch[0, 0].item())
-
-
 def _verify_proposed(
     prefix_logits: Any,
     verify_logits: Any,
     proposed_ids_t: Any,
 ) -> int:
-    import torch
-
     k = int(proposed_ids_t.shape[1])
-    if k == 0:
-        return 0
-    first_pred = prefix_logits.argmax(dim=-1, keepdim=True)
-    if k == 1:
-        preds = first_pred
-    else:
-        rest_preds = verify_logits[:, : k - 1, :].argmax(dim=-1)
-        preds = torch.cat([first_pred, rest_preds], dim=1)
-    return _leading_match_count(preds, proposed_ids_t)
-
-
-def _verify_proposed_from_logits(
-    logits: Any, prefix_len: int, proposed_ids_t: Any
-) -> int:
-    """Greedy-verify proposed tokens against a full forward pass logits tensor."""
-    k = int(proposed_ids_t.shape[1])
-    if k == 0:
-        return 0
-    preds = logits[:, prefix_len - 1 : prefix_len + k - 1, :].argmax(dim=-1)
-    return _leading_match_count(preds, proposed_ids_t)
+    accept = 0
+    for j in range(k):
+        pred = (
+            prefix_logits.argmax(dim=-1)
+            if j == 0
+            else verify_logits[:, j - 1, :].argmax(dim=-1)
+        )
+        if int(pred.item()) == int(proposed_ids_t[0, j].item()):
+            accept += 1
+        else:
+            break
+    return accept
 
 
 def _propose_with_dflash_draft(
-    draft: DflashDraftSession | Any,
+    draft_llm: Any,
     target_tokenizer: Any,
     current_text: str,
     k: int,
     temperature: float = 0.0,
 ) -> list[int]:
-    """Use fast dflash (llama.cpp) draft to propose k tokens in target tokenizer space."""
-    if isinstance(draft, DflashDraftSession):
-        return draft.propose_token_ids(
-            current_text, max_tokens=k, temperature=temperature
-        )[:k]
-
+    """Use fast dflash (llama.cpp) draft to propose k tokens, return token ids in *target* tokenizer space."""
     from seiso.inference.model_pool import dflash_draft_infer
 
     proposed_text = dflash_draft_infer(
-        draft,
+        draft_llm,
         current_text,
         max_tokens=k,
         temperature=temperature,
@@ -210,7 +180,14 @@ def _iter_speculative_tokens_naive(
             logits = t_out.logits
 
             prefix_len = input_ids_t.shape[1]
-            accept = _verify_proposed_from_logits(logits, prefix_len, proposed_ids_t)
+            accept = 0
+            for j in range(k):
+                pos = prefix_len + j - 1
+                greedy = torch.argmax(logits[:, pos, :], dim=-1)
+                if int(greedy.item()) == int(proposed_ids_t[0, j].item()):
+                    accept += 1
+                else:
+                    break
 
             if accept > 0:
                 input_ids_t = torch.cat(
@@ -413,14 +390,6 @@ def iter_speculative_tokens(
     )
 
 
-def _dflash_draft_session(draft_llm: Any) -> DflashDraftSession | Any:
-    from seiso.inference.model_pool import DflashDraftHandle
-
-    if isinstance(draft_llm, DflashDraftHandle):
-        return DflashDraftSession(draft_llm)
-    return draft_llm
-
-
 def _iter_speculative_tokens_dflash_cached(
     *,
     bundle: DFlashDraftSpeculativeBundle,
@@ -434,7 +403,7 @@ def _iter_speculative_tokens_dflash_cached(
 
     target = bundle.target_model
     target_tok = bundle.target_tokenizer
-    draft = _dflash_draft_session(bundle.draft_llm)
+    draft_llm = bundle.draft_llm
 
     target_device = _model_device(target)
 
@@ -460,7 +429,7 @@ def _iter_speculative_tokens_dflash_cached(
             saved_prefix_logits = prefix_logits
 
             proposed_ids = _propose_with_dflash_draft(
-                draft,
+                draft_llm,
                 target_tok,
                 current_text,
                 k,
@@ -561,7 +530,7 @@ def _iter_speculative_tokens_dflash_naive(
 
     target = bundle.target_model
     target_tok = bundle.target_tokenizer
-    draft = _dflash_draft_session(bundle.draft_llm)
+    draft_llm = bundle.draft_llm
 
     target_device = _model_device(target)
 
@@ -580,7 +549,7 @@ def _iter_speculative_tokens_dflash_naive(
             k = min(num_speculative_tokens, max_new_tokens - tokens_generated)
 
             proposed_ids = _propose_with_dflash_draft(
-                draft,
+                draft_llm,
                 target_tok,
                 current_text,
                 k,
@@ -609,7 +578,14 @@ def _iter_speculative_tokens_dflash_naive(
             logits = t_out.logits
 
             prefix_len = input_ids_t.shape[1]
-            accept = _verify_proposed_from_logits(logits, prefix_len, proposed_ids_t)
+            accept = 0
+            for j in range(len(proposed_ids)):
+                pos = prefix_len + j - 1
+                greedy = torch.argmax(logits[:, pos, :], dim=-1)
+                if int(greedy.item()) == int(proposed_ids_t[0, j].item()):
+                    accept += 1
+                else:
+                    break
 
             if accept > 0:
                 input_ids_t = torch.cat(

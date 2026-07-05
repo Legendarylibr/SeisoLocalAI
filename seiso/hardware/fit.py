@@ -9,10 +9,8 @@ from seiso.hardware.tiers import (
     HardwareTier,
     classify_tier,
     fit_headroom_mb,
-    ram_headroom_mb,
     vram_headroom_mb,
 )
-from seiso.platform import is_native_linux_nvidia
 from seiso.memory.estimates import estimate_chat_vram_gb, guess_params_from_name
 
 _LOAD_RESERVE_RATIO = 0.02
@@ -68,47 +66,23 @@ def assess_hardware_fit(
     ):
         fit, label = "tight", "Tight fit — free VRAM is low; close other GPU apps first"
 
-    ram_free_mb = ram_headroom_mb(profile)
-    ram_budget_mb = _usable_load_budget_mb(
-        capacity_mb=ram_free_mb, free_mb=ram_free_mb
-    )
-    vram_budget_mb = _usable_load_budget_mb(
-        capacity_mb=capacity_mb, free_mb=free_mb
-    )
-    native_linux_gguf_chat = (
-        mode == "chat"
-        and is_native_linux_nvidia(profile=profile)
-        and tier not in (HardwareTier.APPLE_UNIFIED, HardwareTier.CPU_ONLY)
-    )
-    if native_linux_gguf_chat:
-        # GGUF mmap on Linux needs host RAM; full GPU offload is tried at load time.
-        load_budget_mb = ram_budget_mb
-        memory_label = "RAM"
-    else:
-        load_budget_mb = vram_budget_mb
-        memory_label = (
-            "RAM"
-            if tier in (HardwareTier.APPLE_UNIFIED, HardwareTier.CPU_ONLY)
-            else "VRAM"
-        )
-
+    load_budget_mb = _usable_load_budget_mb(capacity_mb=capacity_mb, free_mb=free_mb)
     capacity_gb = round(capacity_mb / 1024, 1)
     free_gb = round(free_mb / 1024, 1)
-    ram_free_gb = round(ram_free_mb / 1024, 1)
     load_budget_gb = round(load_budget_mb / 1024, 1)
     note = f"~{est_vram_gb:.1f} GB est. · {free_gb} GB free now · {capacity_gb} GB GPU budget"
-    if native_linux_gguf_chat:
-        note = (
-            f"~{est_vram_gb:.1f} GB est. · {ram_free_gb} GB RAM free · "
-            f"{free_gb} GB VRAM free"
-        )
-    elif fit == "unlikely" and tier != HardwareTier.CPU_ONLY:
+    if fit == "unlikely" and tier != HardwareTier.CPU_ONLY:
         note = f"Needs ~{est_vram_gb:.1f} GB — GPU budget ~{capacity_gb} GB"
 
     blocked = load_budget_mb > 0 and est_mb > load_budget_mb
     block_reason = None
     if blocked:
         label = "Blocked — would exceed available memory"
+        memory_label = (
+            "RAM"
+            if tier in (HardwareTier.APPLE_UNIFIED, HardwareTier.CPU_ONLY)
+            else "VRAM"
+        )
         block_reason = (
             f"Needs ~{est_vram_gb:.1f} GB at runtime but only ~{load_budget_gb} GB "
             f"{memory_label} is safely available right now. Free memory or choose a "

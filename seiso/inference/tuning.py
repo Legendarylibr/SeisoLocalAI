@@ -45,11 +45,6 @@ def configure_torch_inference() -> None:
                 torch.backends.cuda.enable_math_sdp(False)
             with contextlib.suppress(Exception):
                 torch.set_float32_matmul_precision("high")
-        else:
-            mps = getattr(torch.backends, "mps", None)
-            if mps is not None and mps.is_available():
-                with contextlib.suppress(Exception):
-                    torch.set_float32_matmul_precision("high")
 
         _torch_configured = True
         logger.debug("PyTorch inference backends configured")
@@ -122,16 +117,6 @@ def build_mlx_sampler(payload: dict[str, Any]) -> Any | None:
 
 
 def _default_mlx_prefill_step() -> int:
-    try:
-        import platform
-
-        if platform.system() == "Darwin" and platform.machine() in {"arm64", "aarch64"}:
-            from seiso.inference.model_pool import _unified_memory_budget_mb
-
-            if _unified_memory_budget_mb() >= 20 * 1024:
-                return 8192
-    except Exception:
-        pass
     return 4096
 
 
@@ -148,22 +133,6 @@ def mlx_stream_kwargs(payload: dict[str, Any]) -> dict[str, Any]:
         kwargs["kv_bits"] = kv_bits
         kwargs["kv_group_size"] = env_int("SEISO_MLX_KV_GROUP_SIZE", 64)
     return kwargs
-
-
-def resolve_llama_n_ctx(payload: dict[str, Any], model_path: str) -> int:
-    """Resolve llama.cpp context once per request and cache on the payload."""
-    cached = payload.get("n_ctx")
-    if cached is not None:
-        return int(cached)
-    messages = payload.get("messages") or []
-    n_ctx = estimate_llama_n_ctx(
-        messages,
-        max_tokens=int(payload.get("max_tokens", 512)),
-        model_path=model_path,
-        model_format=payload.get("model_format"),
-    )
-    payload["n_ctx"] = n_ctx
-    return n_ctx
 
 
 def estimate_llama_n_ctx(

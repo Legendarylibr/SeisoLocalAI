@@ -57,12 +57,9 @@ def user_path(data_dir: Path, user_id: str, category: str, *parts: str) -> Path:
 
 
 @pytest.fixture
-def enable_tools(monkeypatch, tmp_path):
+def enable_tools(monkeypatch):
     """Enable agent tool features and reload settings."""
-    workspace = (tmp_path.parent / f"ws_{tmp_path.name}").resolve()
-    workspace.mkdir(parents=True, exist_ok=True)
     monkeypatch.setenv("SEISO_ALLOW_TOOLS", "true")
-    monkeypatch.setenv("SEISO_CODE_WORKSPACE", str(workspace))
     clear_dependency_caches()
     yield
     clear_dependency_caches()

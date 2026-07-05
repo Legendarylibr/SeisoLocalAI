@@ -396,7 +396,6 @@ def test_assess_hardware_fit_blocks_when_est_exceeds_headroom(monkeypatch):
         "gpus": [{"vram_total_mb": 8192, "vram_used_mb": 7000}],
         "ram_gb": 16,
     }
-    monkeypatch.setattr("seiso.hardware.fit.is_native_linux_nvidia", lambda **_: False)
     monkeypatch.setattr("seiso.hardware.fit.fit_headroom_mb", lambda _p: 4096)
     monkeypatch.setattr("seiso.hardware.fit.vram_headroom_mb", lambda _p: 1192)
     fit = assess_catalog_fit(
@@ -420,7 +419,6 @@ def test_assess_hardware_fit_allows_when_est_within_headroom(monkeypatch):
         "gpus": [{"vram_total_mb": 24576, "vram_used_mb": 0}],
         "ram_gb": 32,
     }
-    monkeypatch.setattr("seiso.hardware.fit.is_native_linux_nvidia", lambda **_: False)
     monkeypatch.setattr("seiso.hardware.fit.fit_headroom_mb", lambda _p: 20480)
     monkeypatch.setattr("seiso.hardware.fit.vram_headroom_mb", lambda _p: 20480)
     fit = assess_catalog_fit(
@@ -431,7 +429,7 @@ def test_assess_hardware_fit_allows_when_est_within_headroom(monkeypatch):
     assert fit["memory_load_blocked_reason"] is None
 
 
-def test_assess_hardware_fit_blocks_27b_q4_on_4090_when_vram_in_use(monkeypatch):
+def test_assess_hardware_fit_blocks_27b_q4_on_4090_when_vram_in_use():
     profile = {
         "backend": "cuda",
         "gpus": [
@@ -443,7 +441,6 @@ def test_assess_hardware_fit_blocks_27b_q4_on_4090_when_vram_in_use(monkeypatch)
         ],
         "ram_gb": 32,
     }
-    monkeypatch.setattr("seiso.hardware.fit.is_native_linux_nvidia", lambda **_: False)
     fit = assess_catalog_fit(
         {
             "params": "27B",
@@ -456,84 +453,3 @@ def test_assess_hardware_fit_blocks_27b_q4_on_4090_when_vram_in_use(monkeypatch)
     )
     assert fit["memory_load_blocked"] is True
     assert fit["hardware_fit"] in {"good", "tight", "ideal"}
-
-
-def test_native_linux_blocks_load_on_ram_not_vram(monkeypatch):
-    profile = {
-        "backend": "cuda",
-        "gpus": [
-            {
-                "vram_total_mb": 24564,
-                "vram_used_mb": 17000,
-                "name": "NVIDIA GeForce RTX 4090",
-            }
-        ],
-        "ram_gb": 32,
-    }
-    monkeypatch.setattr("seiso.hardware.fit.is_native_linux_nvidia", lambda **_: True)
-    monkeypatch.setattr("seiso.hardware.fit.ram_headroom_mb", lambda _p: 2048)
-    monkeypatch.setattr("seiso.hardware.fit.fit_headroom_mb", lambda _p: 24000)
-    monkeypatch.setattr("seiso.hardware.fit.vram_headroom_mb", lambda _p: 7000)
-    fit = assess_catalog_fit(
-        {
-            "params": "27B",
-            "quant": "Q4_K_M",
-            "tags": [],
-            "repo_id": "lmstudio-community/Qwen3.6-27B-GGUF",
-            "task": "chat",
-        },
-        profile,
-    )
-    assert fit["memory_load_blocked"] is True
-    assert "RAM" in (fit.get("memory_load_blocked_reason") or "")
-
-
-def test_native_linux_allows_load_when_ram_ok_despite_tight_vram(monkeypatch):
-    profile = {
-        "backend": "cuda",
-        "gpus": [
-            {
-                "vram_total_mb": 24564,
-                "vram_used_mb": 17000,
-                "name": "NVIDIA GeForce RTX 4090",
-            }
-        ],
-        "ram_gb": 64,
-    }
-    monkeypatch.setattr("seiso.hardware.fit.is_native_linux_nvidia", lambda **_: True)
-    monkeypatch.setattr("seiso.hardware.fit.ram_headroom_mb", lambda _p: 48000)
-    monkeypatch.setattr("seiso.hardware.fit.fit_headroom_mb", lambda _p: 24000)
-    monkeypatch.setattr("seiso.hardware.fit.vram_headroom_mb", lambda _p: 7000)
-    fit = assess_catalog_fit(
-        {
-            "params": "27B",
-            "quant": "Q4_K_M",
-            "tags": [],
-            "repo_id": "lmstudio-community/Qwen3.6-27B-GGUF",
-            "task": "chat",
-        },
-        profile,
-    )
-    assert fit["memory_load_blocked"] is False
-    assert fit["memory_load_blocked_reason"] is None
-
-
-def test_native_linux_train_blocks_on_vram_not_ram(monkeypatch):
-    from seiso.hardware.fit import assess_hardware_fit
-
-    profile = {
-        "backend": "cuda",
-        "gpus": [{"vram_total_mb": 8192, "vram_used_mb": 7000, "name": "GTX 1660"}],
-        "ram_gb": 32,
-    }
-    monkeypatch.setattr("seiso.hardware.fit.is_native_linux_nvidia", lambda **_: True)
-    monkeypatch.setattr("seiso.hardware.fit.ram_headroom_mb", lambda _p: 28000)
-    monkeypatch.setattr("seiso.hardware.fit.fit_headroom_mb", lambda _p: 8192)
-    monkeypatch.setattr("seiso.hardware.fit.vram_headroom_mb", lambda _p: 1192)
-
-    chat = assess_hardware_fit(14.0, profile, mode="chat")
-    train = assess_hardware_fit(14.0, profile, mode="train")
-
-    assert chat["memory_load_blocked"] is False
-    assert train["memory_load_blocked"] is True
-    assert "VRAM" in (train.get("memory_load_blocked_reason") or "")

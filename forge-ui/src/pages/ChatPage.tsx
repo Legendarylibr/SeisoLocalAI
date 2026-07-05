@@ -448,49 +448,6 @@ export function ChatPage() {
     }
   }, [showFreeMemory, freeingMemory, streaming, releaseInferenceMemory]);
 
-  const handleBackendChange = useCallback(
-    async (next: string) => {
-      if (next === inferenceBackend) return;
-      streamAbortRef.current?.();
-      streamAbortRef.current = null;
-      if (streaming) setStreaming(false);
-      try {
-        await releaseInferenceMemory();
-      } catch {
-        /* ignore */
-      }
-      setInferenceBackend(next);
-      writeStoredModel(CHAT_BACKEND_STORAGE_KEY, next);
-      userPickedBackendRef.current = true;
-      if (selection && !providerId) {
-        const model = models.find((m) => m.id === selection);
-        try {
-          setSwitchingModel(true);
-          setLoadProgress(initialLoadProgress(model?.name || "model", model?.size_bytes ?? 0));
-          const loaded = await preloadWithProgress(selection, next, setLoadProgress);
-          setLoadedModelId(selection);
-          setLoadedBackend(loaded);
-          writeStoredModel(CHAT_BACKEND_STORAGE_KEY, loaded);
-        } catch (e) {
-          setLoadedModelId(null);
-          setLoadedBackend(null);
-          setError(e instanceof Error ? e.message : "Failed to load model into inference engine");
-        } finally {
-          setSwitchingModel(false);
-          setLoadProgress(null);
-        }
-      }
-    },
-    [
-      inferenceBackend,
-      streaming,
-      releaseInferenceMemory,
-      selection,
-      providerId,
-      models,
-    ],
-  );
-
   const handleProviderChange = async (nextProvider: string) => {
     if (nextProvider === providerId) return;
     streamAbortRef.current?.();
@@ -1116,67 +1073,146 @@ export function ChatPage() {
               <IconChevronRight size={18} strokeWidth={2.25} />
             )}
           </button>
-          <div className="chat-topbar-primary">
-            <div className="chat-model-controls">
-              <ChatModelPicker
-                models={models}
-                selection={selection}
-                disabled={!!providerId}
-                switching={switchingModel}
-                headroomMb={hwProfile?.vram_headroom_mb}
-                modelLabel={modelLabel}
-                onSelectLocal={handleModelChange}
-                onSelectCatalog={handleCatalogSelect}
-              />
-              {showFreeMemory && (
-                <button
-                  type="button"
-                  className="chat-free-memory"
-                  onClick={() => void handleFreeMemory()}
-                  disabled={freeingMemory || switchingModel}
-                  title="Free memory — unload model from RAM/VRAM (keeps selection)"
-                  aria-label="Free memory"
-                >
-                  <IconEject size={15} />
-                </button>
-              )}
-            </div>
-            <button
-              type="button"
-              className="chat-refresh-models"
-              onClick={refreshModels}
-              title="Refresh model list"
-              aria-label="Refresh models"
-            >
-              <IconRefresh size={15} />
-            </button>
-          </div>
-          <div className="chat-topbar-status">
-            {isRouterMode && !providerId && (
-              <span className="chat-status-pill" title="Routes to vLLM specialists via classifier + RL policy">
-                Smart Router
-              </span>
-            )}
-            {switchingModel && !loadProgress && !isRouterMode && (
-              <span className="chat-status-pill chat-status-pill-muted">Preparing model…</span>
-            )}
-            {streaming && !providerId && (
-              <span className="chat-status-pill chat-status-pill-muted">Generating</span>
-            )}
-            {streaming && (
-              <button type="button" className="btn btn-sm chat-stop-btn" onClick={stopStreaming}>
-                Stop
+          <div className="chat-model-controls">
+            <ChatModelPicker
+              models={models}
+              selection={selection}
+              disabled={!!providerId}
+              switching={switchingModel}
+              headroomMb={hwProfile?.vram_headroom_mb}
+              modelLabel={modelLabel}
+              onSelectLocal={handleModelChange}
+              onSelectCatalog={handleCatalogSelect}
+            />
+            {showFreeMemory && (
+              <button
+                type="button"
+                className="chat-free-memory"
+                onClick={() => void handleFreeMemory()}
+                disabled={freeingMemory || switchingModel}
+                title="Free memory — unload model from RAM/VRAM (keeps selection)"
+                aria-label="Free memory"
+              >
+                <IconEject size={15} />
               </button>
             )}
-            {selected && selectedFit && !providerId && (
-              <HardwareFitBadge fit={selectedFit} label={selected.hardware_fit_label} />
-            )}
-            {hwProfile?.tier_label && !providerId && (
-              <span className="chat-hw-tier muted-text" title={hwProfile.privacy}>
-                {hwProfile.tier_label}
-              </span>
-            )}
           </div>
+          <button
+            type="button"
+            className="chat-refresh-models"
+            onClick={refreshModels}
+            title="Refresh model list"
+            aria-label="Refresh models"
+          >
+            <IconRefresh size={15} />
+          </button>
+          {selected && backendOptions.length > 1 && !providerId && (
+            <select
+              className="chat-engine-select"
+              value={inferenceBackend}
+              onChange={async (e) => {
+                const next = e.target.value;
+                if (next !== inferenceBackend) {
+                  streamAbortRef.current?.();
+                  streamAbortRef.current = null;
+                  if (streaming) setStreaming(false);
+                  try {
+                    await releaseInferenceMemory();
+                  } catch {
+                    /* ignore */
+                  }
+                }
+                setInferenceBackend(next);
+                writeStoredModel(CHAT_BACKEND_STORAGE_KEY, next);
+                userPickedBackendRef.current = true;
+                if (selection && !providerId) {
+                  const model = models.find((m) => m.id === selection);
+                  try {
+                    setSwitchingModel(true);
+                    setLoadProgress(
+                      initialLoadProgress(model?.name || "model", model?.size_bytes ?? 0),
+                    );
+                    const loaded = await preloadWithProgress(selection, next, setLoadProgress);
+                    setLoadedModelId(selection);
+                    setLoadedBackend(loaded);
+                    writeStoredModel(CHAT_BACKEND_STORAGE_KEY, loaded);
+                  } catch (e) {
+                    setLoadedModelId(null);
+                    setLoadedBackend(null);
+                    setError(e instanceof Error ? e.message : "Failed to load model into inference engine");
+                  } finally {
+                    setSwitchingModel(false);
+                    setLoadProgress(null);
+                  }
+                }
+              }}
+            >
+              {backendOptions.map((b) => (
+                <option key={b} value={b}>{resolveBackendLabel(b, backendLabels, selected.backend_labels)}</option>
+              ))}
+            </select>
+          )}
+          {providers.length > 0 ? (
+            <select
+              className="chat-provider-select"
+              value={providerId}
+              onChange={(e) => void handleProviderChange(e.target.value)}
+            >
+              <option value="">Local</option>
+              {providers.map((p) => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </select>
+          ) : (
+            <span className="chat-provider-label muted-text">Local</span>
+          )}
+          {knowledgeBases.length > 0 && (
+            <select
+              className="chat-knowledge-select"
+              value={knowledgeBaseId}
+              onChange={(e) => setKnowledgeBaseId(e.target.value)}
+              title="Inject knowledge base context into chat"
+            >
+              <option value="">No knowledge base</option>
+              {knowledgeBases.map((kb) => (
+                <option key={kb.id} value={kb.id}>
+                  KB: {kb.id} ({kb.chunk_count})
+                </option>
+              ))}
+            </select>
+          )}
+          <label className="chat-tools-toggle">
+            <input type="checkbox" checked={useTools} disabled={!toolsAvailable} onChange={(e) => setUseTools(e.target.checked)} />
+            Tools
+          </label>
+          {isRouterMode && !providerId && (
+            <span className="chat-vram-hint" title="Routes to vLLM specialists via classifier + RL policy">
+              Smart Router · auto-route
+            </span>
+          )}
+          {switchingModel && !loadProgress && !isRouterMode && (
+            <span className="chat-vram-hint">Preparing model…</span>
+          )}
+          {streaming && !providerId && (
+            <span className="chat-vram-hint muted-text">Generating — switch model anytime</span>
+          )}
+          {streaming && (
+            <button type="button" className="btn" onClick={stopStreaming}>
+              Stop
+            </button>
+          )}
+          {selected && selectedFit && !providerId && (
+            <HardwareFitBadge fit={selectedFit} label={selected.hardware_fit_label} />
+          )}
+          {hwProfile?.tier_label && !providerId && (
+            <span className="chat-hw-tier muted-text" title={hwProfile.privacy}>{hwProfile.tier_label}</span>
+          )}
+          {useTools && codeExecAvailable && (
+            <label className="chat-tools-toggle chat-tools-warn">
+              <input type="checkbox" checked={allowCodeExec} onChange={(e) => setAllowCodeExec(e.target.checked)} />
+              Code
+            </label>
+          )}
         </header>
 
         <ChatContextBar
@@ -1201,22 +1237,6 @@ export function ChatPage() {
           onDownloadHubVariant={(repo, filename, quant) =>
             void handleDownloadHubVariant(repo, filename, quant)
           }
-          backendOptions={backendOptions}
-          inferenceBackend={inferenceBackend}
-          onBackendChange={(b) => void handleBackendChange(b)}
-          resolveBackendLabel={(b) => resolveBackendLabel(b, backendLabels, selected?.backend_labels)}
-          providers={providers}
-          providerId={providerId}
-          onProviderChange={(id) => void handleProviderChange(id)}
-          knowledgeBases={knowledgeBases}
-          knowledgeBaseId={knowledgeBaseId}
-          onKnowledgeBaseChange={setKnowledgeBaseId}
-          useTools={useTools}
-          onUseToolsChange={setUseTools}
-          toolsAvailable={toolsAvailable}
-          allowCodeExec={allowCodeExec}
-          onAllowCodeExecChange={setAllowCodeExec}
-          codeExecAvailable={codeExecAvailable}
         />
 
         {showModelStatus && (

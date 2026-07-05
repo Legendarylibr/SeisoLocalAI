@@ -125,8 +125,6 @@ def test_ensure_load_fits_blocks_oversized_gguf(tmp_path, monkeypatch):
         "gpus": [{"vram_total_mb": 4096, "vram_used_mb": 0}],
         "ram_gb": 16,
     }
-    monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: False)
-    monkeypatch.setattr("seiso.hardware.fit.is_native_linux_nvidia", lambda **_: False)
     monkeypatch.setattr(
         "seiso.memory.protection.hardware_profile", lambda force_refresh=False: profile
     )
@@ -233,19 +231,6 @@ def test_assess_path_memory_fit_for_small_file(tmp_path, monkeypatch):
     monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 16384)
     fit = assess_path_memory_fit(gguf, mode="chat")
     assert fit.get("memory_load_blocked") is False
-
-
-def test_build_hf_max_memory_respects_free_vram_on_native_linux(monkeypatch):
-    monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: True)
-    import torch
-
-    from seiso.memory.protection import build_hf_max_memory
-
-    if not torch.cuda.is_available():
-        pytest.skip("CUDA required")
-    caps = build_hf_max_memory()
-    assert caps is not None
-    assert 0 in caps
 
 
 def test_allow_memory_overcommit_skips_block(tmp_path, monkeypatch):

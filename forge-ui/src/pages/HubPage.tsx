@@ -3,7 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { api, CatalogModel, HardwareSummary, LocalModel, VramStatus } from "@/lib/api";
 import { usePlatformSettings } from "@/context/PlatformSettingsContext";
 import { chatPath, chatPathForLocalModel, modelMemoryBlocked, modelMemoryBlockReason } from "@/lib/chatModel";
-import { formatLoadedModelLabel, formatMemoryHeadroom, hasLoadedInferenceMemory, hubRamTierHint } from "@/lib/hubHardware";
+import { formatLoadedModelLabel, hasLoadedInferenceMemory, hubRamTierHint } from "@/lib/hubHardware";
 import { trainPath } from "@/lib/hubDownload";
 import { HardwareFitBadge } from "@/components/HardwareFitBadge";
 import { ModelCardSkeleton } from "@/components/ModelCardSkeleton";
@@ -29,14 +29,11 @@ const FAMILY_LABELS: Record<string, string> = {
   other: "Other",
 };
 
-const PRIMARY_FILTERS = [
+const QUICK_FILTERS = [
   { label: "Fits your GPU", task: "", q: "", fitsOnly: true },
   { label: "Featured", task: "", q: "new", fitsOnly: false },
   { label: "Chat", task: "chat", q: "", fitsOnly: false },
   { label: "Code", task: "code", q: "", fitsOnly: false },
-] as const;
-
-const FAMILY_FILTERS = [
   { label: "Llama", task: "", q: "llama", fitsOnly: false },
   { label: "Phi-4", task: "", q: "phi-4", fitsOnly: false },
   { label: "Llama 4", task: "", q: "llama 4", fitsOnly: false },
@@ -82,7 +79,6 @@ export function HubPage() {
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [catalogSearchError, setCatalogSearchError] = useState<string | null>(null);
-  const [showFamilyFilters, setShowFamilyFilters] = useState(false);
   const PAGE_SIZE = 50;
 
   const refreshVram = () =>
@@ -187,15 +183,14 @@ export function HubPage() {
     setFitsOnly(fits);
   };
 
-  const isFilterActive = (q: string, t: string, fits: boolean) =>
-    search === q && task === t && fitsOnly === fits;
-
-  const activeQuickFilter = useMemo(() => {
-    const match = [...PRIMARY_FILTERS, ...FAMILY_FILTERS].find((f) =>
-      isFilterActive(f.q, f.task, f.fitsOnly),
-    );
-    return match?.label ?? null;
-  }, [search, task, fitsOnly]);
+  const activeFilters = useMemo(() => {
+    const parts: string[] = [];
+    if (fitsOnly) parts.push("fits your hardware");
+    if (search) parts.push(`"${search}"`);
+    if (family) parts.push(FAMILY_LABELS[family] || family);
+    if (task) parts.push(TASK_LABELS[task] || task);
+    return parts;
+  }, [search, family, task, fitsOnly]);
 
   const fmtSize = (n: number) => {
     const gib = 1024 ** 3;
@@ -216,7 +211,8 @@ export function HubPage() {
           <div className="hub-hw-strip-main">
             <span className="trust-badge">{hwSummary.tier_label}</span>
             <span className="muted-text">
-              {formatMemoryHeadroom(hwSummary, vramStatus)}
+              ~{Math.round((vramStatus?.headroom_mb ?? hwSummary.vram_headroom_mb) / 1024)} GB{" "}
+              {vramStatus?.memory_label || hwSummary.memory_headroom_label || "memory"} free
               {" · "}
               loaded: {formatLoadedModelLabel(vramStatus)}
             </span>
@@ -329,79 +325,39 @@ export function HubPage() {
                 </button>
               )}
             </div>
-            <div className="hub-filter-tiers">
-              <div className="hub-quick-filters">
-                {PRIMARY_FILTERS.map((f) => (
-                  <button
-                    key={f.label}
-                    type="button"
-                    className={`hub-chip${isFilterActive(f.q, f.task, f.fitsOnly) ? " active" : ""}`}
-                    onClick={() => applyQuickFilter(f.q, f.task, f.fitsOnly)}
-                  >
-                    {f.label}
-                  </button>
-                ))}
+            <div className="hub-quick-filters">
+              {QUICK_FILTERS.map((f) => (
                 <button
+                  key={f.label}
                   type="button"
-                  className={`hub-chip hub-chip-toggle${showFamilyFilters ? " active" : ""}`}
-                  onClick={() => setShowFamilyFilters((v) => !v)}
-                  aria-expanded={showFamilyFilters}
+                  className={`hub-chip${search === f.q && task === f.task && fitsOnly === f.fitsOnly ? " active" : ""}`}
+                  onClick={() => applyQuickFilter(f.q, f.task, f.fitsOnly)}
                 >
-                  {showFamilyFilters ? "Hide families" : "Browse by family"}
+                  {f.label}
                 </button>
-              </div>
-              {showFamilyFilters && (
-                <div className="hub-family-filters">
-                  {FAMILY_FILTERS.map((f) => (
-                    <button
-                      key={f.label}
-                      type="button"
-                      className={`hub-chip hub-chip-family${isFilterActive(f.q, f.task, f.fitsOnly) ? " active" : ""}`}
-                      onClick={() => applyQuickFilter(f.q, f.task, f.fitsOnly)}
-                    >
-                      {f.label}
-                    </button>
-                  ))}
-                </div>
-              )}
+              ))}
             </div>
-            <div className="filter-row hub-advanced-filters">
-              <select value={family} onChange={(e) => setFamily(e.target.value)} aria-label="Model family">
+            <div className="filter-row">
+              <select value={family} onChange={(e) => setFamily(e.target.value)}>
                 <option value="">All families</option>
                 {families.map((f) => (
                   <option key={f} value={f}>{FAMILY_LABELS[f] || f}</option>
                 ))}
               </select>
-              <select value={task} onChange={(e) => setTask(e.target.value)} aria-label="Task type">
+              <select value={task} onChange={(e) => setTask(e.target.value)}>
                 <option value="">All tasks</option>
                 <option value="chat">Chat</option>
                 <option value="code">Code</option>
                 <option value="vision">Vision</option>
                 <option value="embedding">Embedding</option>
               </select>
-              {(search || family || task || fitsOnly || activeQuickFilter) && (
-                <button
-                  type="button"
-                  className="btn btn-sm hub-clear-filters"
-                  onClick={() => {
-                    setSearch("");
-                    setFamily("");
-                    setTask("");
-                    setFitsOnly(false);
-                  }}
-                >
-                  Clear all
-                </button>
-              )}
             </div>
             <p className="hub-results-meta">
               {catalogLoading ? "Searching Hugging Face Hub…" : (
                 <>
                   {catalog.length} result{catalog.length === 1 ? "" : "s"}
                   {search ? " from Hugging Face" : " · popular models on Hugging Face"}
-                  {activeQuickFilter && <> · {activeQuickFilter}</>}
-                  {family && <> · {FAMILY_LABELS[family] || family}</>}
-                  {task && !activeQuickFilter && <> · {TASK_LABELS[task] || task}</>}
+                  {activeFilters.length > 0 && <> · filtered by {activeFilters.join(" · ")}</>}
                 </>
               )}
             </p>

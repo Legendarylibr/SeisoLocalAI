@@ -71,86 +71,6 @@ def _mac_cpu_offload_enabled() -> bool:
     return env_bool("SEISO_LLAMA_MAC_CPU_OFFLOAD", True)
 
 
-def _unified_memory_budget_mb() -> int:
-    """Total Apple unified-memory budget (installed RAM minus reserve), or 0 off Mac."""
-    if not _apple_silicon_metal():
-        return 0
-    try:
-        from seiso.hardware.profile import hardware_profile
-        from seiso.hardware.tiers import HardwareTier, classify_tier, effective_budget_mb
-
-        profile = hardware_profile()
-        if classify_tier(profile) != HardwareTier.APPLE_UNIFIED:
-            return 0
-        return effective_budget_mb(profile)
-    except Exception:
-        return 0
-
-
-def _gpu_offload_budget_mb() -> int:
-    """Memory budget for llama.cpp batch tuning — free headroom, capped on unified Mac."""
-    unified = _unified_memory_budget_mb()
-    try:
-        from seiso.memory.protection import headroom_mb
-
-        free = headroom_mb()
-    except Exception:
-        free = 0
-    if unified > 0:
-        if free > 0:
-            return min(unified, free)
-        return unified
-    return free
-
-
-def _effective_offload_headroom_mb(free_mb: int) -> int:
-    """Headroom for offload fit — unified memory uses pool budget, not just free pages."""
-    if not _apple_silicon_metal():
-        return free_mb
-    budget = _unified_memory_budget_mb()
-    if budget <= 0:
-        return free_mb
-    # mmap + unified pool: a low free-RAM snapshot should not force partial Metal offload
-    # when the model still fits the machine's total unified budget.
-    return max(free_mb, int(budget * 0.88))
-
-
-def _mac_hybrid_layer_ladder(total_layers: int, requested: int) -> list[int]:
-    """Fallback partial offload — keep some KV/attention work on CPU for tight unified memory."""
-    max_layers = total_layers if requested == -1 else min(requested, total_layers)
-    candidates = [
-        max_layers - 1,
-        int(max_layers * 0.875),
-        int(max_layers * 0.75),
-        int(max_layers * 0.5),
-        int(max_layers * 0.25),
-    ]
-    attempts: list[int] = []
-    for layers in candidates:
-        if 0 < layers < max_layers and layers not in attempts:
-            attempts.append(layers)
-    if 0 not in attempts:
-        attempts.append(0)
-    return attempts
-
-
-def _headroom_fitted_layer_attempts(fitted: int, total_layers: int) -> list[int]:
-    """Step down from the headroom-fitted layer count toward CPU."""
-    if fitted <= 0:
-        return [0]
-    attempts: list[int] = []
-    # Full Metal already failed — start at the fitted count, not max_layers-1.
-    step = 2 if fitted > 16 else 1
-    for layers in range(min(fitted, total_layers - 1), max(fitted // 2 - 1, 0), -step):
-        if 0 < layers <= total_layers and layers not in attempts:
-            attempts.append(layers)
-    if fitted > 8 and fitted // 2 not in attempts:
-        attempts.append(fitted // 2)
-    if 0 not in attempts:
-        attempts.append(0)
-    return attempts
-
-
 def _default_llama_gpu_layers() -> int:
     if _apple_silicon_metal():
         return -1
@@ -202,23 +122,8 @@ def _llama_speed_scale_enabled() -> bool:
 
 
 def _llama_batch_defaults() -> tuple[int, int]:
-    """Speed-first llama.cpp prompt/decode batch defaults scaled to free VRAM."""
-    batch_env = os.environ.get("SEISO_LLAMA_BATCH", "").strip()
-    ubatch_env = os.environ.get("SEISO_LLAMA_UBATCH", "").strip()
-    if batch_env.isdigit() and ubatch_env.isdigit():
-        batch = int(batch_env)
-        return batch, min(int(ubatch_env), batch)
-
-    budget = _gpu_offload_budget_mb()
-    if budget >= 32 * 1024:
-        return 8192, 2048
-    if budget >= 24 * 1024:
-        return 4096, 1536
-    if budget >= 12 * 1024:
-        return 4096, 1024
-    if budget >= 5120:
-        return 2048, 512
-    return 512, 256
+    """Speed-first llama.cpp prompt/decode batch defaults."""
+    return 4096, 1024
 
 
 def fit_llama_gpu_layers(model_path: str, requested: int, headroom_mb: int) -> int:
@@ -226,19 +131,12 @@ def fit_llama_gpu_layers(model_path: str, requested: int, headroom_mb: int) -> i
     if requested == 0 or headroom_mb <= 0 or not _llama_gpu_offload_ok():
         return 0
 
-    headroom_mb = _effective_offload_headroom_mb(headroom_mb)
-
     from seiso.inference.backends import gguf_block_count
     from seiso.memory.protection import estimate_path_vram_mb
 
     weight_mb = max(int(estimate_path_vram_mb(model_path)), 256)
     total_layers = gguf_block_count(model_path) or 64
-    if platform.system() == "Linux":
-        kv_reserve_mb = max(256, min(int(headroom_mb * 0.08), 1024))
-    else:
-        kv_pct = 0.05 if _gpu_offload_budget_mb() >= 20 * 1024 else 0.08
-        kv_cap = 768 if kv_pct <= 0.05 else 1024
-        kv_reserve_mb = max(256, min(int(headroom_mb * kv_pct), kv_cap))
+    kv_reserve_mb = max(256, min(int(headroom_mb * 0.08), 1024))
     avail_mb = headroom_mb - kv_reserve_mb
 
     if avail_mb >= int(weight_mb * 0.92):
@@ -325,13 +223,21 @@ def _llama_layer_attempts(model_path: str, requested: int, free_mb: int) -> list
     total_layers = gguf_block_count(model_path) or 64
 
     if _apple_silicon_metal() and _mac_cpu_offload_enabled():
-        effective_free = _effective_offload_headroom_mb(free_mb)
-        fitted = fit_llama_gpu_layers(model_path, requested, effective_free)
-        if fitted == -1:
-            return _mac_hybrid_layer_ladder(total_layers, requested)
-        if fitted > 0:
-            return _headroom_fitted_layer_attempts(fitted, total_layers)
-        return [0]
+        max_layers = total_layers if requested == -1 else min(requested, total_layers)
+        candidates = [
+            max_layers - 1,
+            int(max_layers * 0.875),
+            int(max_layers * 0.75),
+            int(max_layers * 0.5),
+            int(max_layers * 0.25),
+        ]
+        attempts: list[int] = []
+        for layers in candidates:
+            if 0 < layers < max_layers and layers not in attempts:
+                attempts.append(layers)
+        if 0 not in attempts:
+            attempts.append(0)
+        return attempts
 
     fitted = fit_llama_gpu_layers(model_path, requested, free_mb)
     if fitted in (-1, 0):
@@ -442,13 +348,6 @@ def _refresh_headroom_stats(*, force: bool = False) -> None:
         hardware_profile(force_refresh=force)
     except ImportError:
         pass
-    if force:
-        try:
-            from seiso.memory.protection import invalidate_headroom_cache
-
-            invalidate_headroom_cache()
-        except ImportError:
-            pass
 
 
 def _clear_optimal_layers_cache() -> None:
@@ -460,7 +359,7 @@ def _llama_gpu_layers_optimal(model_path: str, requested: int) -> int:
     now = time.time()
     from seiso.memory.protection import headroom_mb
 
-    free_mb = _effective_offload_headroom_mb(headroom_mb())
+    free_mb = headroom_mb()
     cache_key = (model_path, requested, free_mb // 512)
     with _optimal_layers_lock:
         cached = _optimal_layers_cache.get(cache_key)
@@ -564,7 +463,7 @@ def _load_llama_model(path: str, n_ctx: int) -> Any:
         release_cached_memory,
     )
 
-    release_cached_memory(sync=False)
+    release_cached_memory(sync=True)
     _clear_optimal_layers_cache()
     _refresh_headroom_stats(force=True)
 
@@ -583,7 +482,7 @@ def _load_llama_model(path: str, n_ctx: int) -> Any:
     if requested != 0 and not _llama_gpu_offload_ok():
         requested = 0
 
-    free_mb = _effective_offload_headroom_mb(headroom_mb())
+    free_mb = headroom_mb()
     memory_profiles = [
         *_llama_speed_memory_profiles(kwargs, path, free_mb),
         *_llama_load_memory_profiles(kwargs, n_ctx, path, free_mb),
@@ -641,13 +540,12 @@ def _load_llama_model(path: str, n_ctx: int) -> Any:
                         headroom_mb() / 1024,
                     )
             attach_llama_prompt_cache(llm)
-            _refresh_headroom_stats(force=True)
             return llm
         except Exception as exc:
             if not _llama_load_retryable(exc):
                 raise
             last_exc = exc
-            release_cached_memory(sync=False)
+            release_cached_memory(sync=True)
             if log_retry:
                 logger.warning(
                     "llama.cpp load failed at n_gpu_layers=%s — retrying", layers
@@ -688,7 +586,6 @@ def _load_llama_model(path: str, n_ctx: int) -> Any:
 
     free_gb = round(headroom_mb() / 1024, 1)
     need_gb = round(estimate_path_vram_mb(path) / 1024, 1)
-    release_cached_memory(sync=True)
     raise RuntimeError(
         f"Could not load model — needs ~{need_gb} GB GPU/RAM headroom but only ~{free_gb} GB is free. "
         "Close other GPU apps (browser, games, other llama.cpp sessions), unload the previous model, "
@@ -759,31 +656,21 @@ class ModelPool:
             self._generation += 1
             return self._generation
 
-    def current_generation(self) -> int:
-        """Latest generation id (no bump)."""
-        return self._generation
-
     def is_generation_active(self, generation_id: int) -> bool:
-        # Hot-path read without lock — int compare is atomic in CPython; bump stays under lock.
-        return generation_id == self._generation
+        with self._lock:
+            return generation_id == self._generation
 
-    def cancel_and_unload(self) -> int:
-        """Stop lagging streams and release VRAM/RAM. Returns the new generation id."""
-        generation = self.bump_generation()
+    def cancel_and_unload(self) -> None:
+        """Stop lagging streams and release VRAM/RAM."""
+        self.bump_generation()
         self.unload_all()
         clear_dflash_draft_cache()
-        return generation
 
     def would_switch_model(
-        self,
-        target_path: str,
-        backend: str | BackendKind | None = None,
-        *,
-        status: dict[str, Any] | None = None,
+        self, target_path: str, backend: str | BackendKind | None = None
     ) -> bool:
         """True when loading target_path would replace the active inference model."""
-        if status is None:
-            status = self.status()
+        status = self.status()
         if not status.get("active_model"):
             return False
         if backend is not None:
@@ -804,18 +691,19 @@ class ModelPool:
         self,
         target_path: str | None = None,
         backend: str | BackendKind | None = None,
-    ) -> int | None:
-        """Unload the active model when switching. Returns generation id if unloaded."""
+    ) -> bool:
+        """Unload the active model when switching and refresh GPU memory stats."""
         should_unload = target_path is None or self.would_switch_model(
             target_path, backend
         )
-        generation: int | None = None
+        unloaded = False
         if should_unload and self.active_key:
-            generation = self.cancel_and_unload()
-        if generation is not None:
+            self.cancel_and_unload()
+            unloaded = True
+        if unloaded:
             _clear_optimal_layers_cache()
             _refresh_headroom_stats(force=True)
-        return generation
+        return unloaded
 
     def switch(
         self,
@@ -860,8 +748,7 @@ class ModelPool:
             )
 
             est_mb = int(estimate_path_vram_mb(load_path))
-            free_mb = headroom_mb()
-            if est_mb >= 8000 and free_mb < int(est_mb * 0.98):
+            if est_mb >= 8000 and headroom_mb() < int(est_mb * 0.98):
                 if self._active:
                     self.cancel_and_unload()
                 self._free_memory()
@@ -1093,121 +980,6 @@ class DflashDraftHandle:
         self._infer_lock = threading.Lock()
 
 
-class DflashDraftSession:
-    """Incremental dflash draft — reuses llama.cpp KV across speculative steps."""
-
-    __slots__ = ("_handle", "_aligned_tokens", "_aligned_text")
-
-    def __init__(self, handle: DflashDraftHandle) -> None:
-        self._handle = handle
-        self._aligned_tokens: tuple[int, ...] = ()
-        self._aligned_text: str = ""
-
-    def _llm(self) -> Any:
-        return self._handle.llm
-
-    def _tokenize(self, text: str) -> list[int]:
-        llm = self._llm()
-        if not text:
-            return []
-        return llm.tokenize(text.encode("utf-8"), add_bos=False, special=True)
-
-    def _align_to_text(self, text: str) -> list[int]:
-        """Match draft KV to *text* — truncate or eval only the new suffix."""
-        if text == self._aligned_text and self._aligned_tokens:
-            return list(self._aligned_tokens)
-
-        from llama_cpp import Llama
-
-        llm = self._llm()
-        desired = self._tokenize(text)
-        if not desired:
-            llm.reset()
-            self._aligned_tokens = ()
-            self._aligned_text = ""
-            return []
-
-        current = list(llm.eval_tokens)
-        prefix = Llama.longest_token_prefix(current, desired)
-
-        if prefix == 0 and llm.n_tokens > 0:
-            llm.reset()
-        elif llm.n_tokens > prefix:
-            llm.n_tokens = prefix
-            llm._ctx.kv_cache_seq_rm(-1, prefix, -1)
-            llm._requires_eval = True
-
-        suffix = desired[prefix:]
-        if suffix:
-            llm.eval(suffix)
-
-        self._aligned_tokens = tuple(desired)
-        self._aligned_text = text
-        return desired
-
-    def _generate_completion_ids(
-        self,
-        *,
-        max_tokens: int,
-        temperature: float,
-    ) -> list[int]:
-        import llama_cpp.llama_cpp as lc
-
-        llm = self._llm()
-        completion: list[int] = []
-        temp = max(temperature, 0.01) if temperature > 0 else 0.0
-        top_k = 40 if temperature > 0 else 1
-
-        for token in llm.generate([], temp=temp, top_k=top_k, reset=False):
-            if lc.llama_vocab_is_eog(llm._model.vocab, token):
-                break
-            completion.append(int(token))
-            if len(completion) >= max_tokens:
-                break
-        return completion
-
-    def propose_token_ids(
-        self,
-        current_text: str,
-        *,
-        max_tokens: int,
-        temperature: float = 0.0,
-    ) -> list[int]:
-        """Propose up to *max_tokens* token ids after *current_text* (no text round-trip)."""
-        if max_tokens < 1:
-            return []
-
-        with self._handle._infer_lock:
-            self._align_to_text(current_text)
-            return self._generate_completion_ids(
-                max_tokens=max_tokens, temperature=temperature
-            )
-
-    def propose(
-        self,
-        current_text: str,
-        *,
-        max_tokens: int,
-        temperature: float = 0.0,
-    ) -> str:
-        """Propose up to *max_tokens* new chars after *current_text* using cached KV."""
-        if max_tokens < 1:
-            return ""
-
-        with self._handle._infer_lock:
-            llm = self._llm()
-            prompt_tokens = self._align_to_text(current_text)
-            completion = self._generate_completion_ids(
-                max_tokens=max_tokens, temperature=temperature
-            )
-            if not completion:
-                return ""
-
-            return llm.detokenize(completion, prev_tokens=prompt_tokens).decode(
-                "utf-8", errors="ignore"
-            )
-
-
 _dflash_draft_cache: dict[str, DflashDraftHandle] = {}
 _dflash_draft_lock = threading.Lock()
 
@@ -1258,11 +1030,12 @@ def dflash_draft_infer(
 ) -> str:
     """Run a single dflash draft completion under the per-handle inference lock."""
     if isinstance(draft, DflashDraftHandle):
-        return DflashDraftSession(draft).propose(
-            current_text, max_tokens=max_tokens, temperature=temperature
-        )
+        llm = draft.llm
+        infer_lock = draft._infer_lock
+    else:
+        llm = draft
+        infer_lock = None
 
-    llm = draft
     gen_kwargs: dict[str, Any] = {
         "max_tokens": max_tokens,
         "echo": False,
@@ -1271,7 +1044,12 @@ def dflash_draft_infer(
     if temperature <= 0:
         gen_kwargs["temperature"] = 0.0
 
-    out = llm(current_text, **gen_kwargs)
+    if infer_lock is not None:
+        with infer_lock:
+            out = llm(current_text, **gen_kwargs)
+    else:
+        out = llm(current_text, **gen_kwargs)
+
     return out["choices"][0]["text"] if out.get("choices") else ""
 
 

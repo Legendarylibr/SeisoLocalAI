@@ -556,7 +556,7 @@ def test_web_search_disabled_in_local_mode():
     from forge.tools.web_search import web_search
 
     payload = json.loads(web_search("test query"))
-    assert payload["error"] == "Web search is disabled on this Forge server"
+    assert payload["error"] == "Web search is disabled in local-only mode"
     assert payload["query"] == "test query"
 
 

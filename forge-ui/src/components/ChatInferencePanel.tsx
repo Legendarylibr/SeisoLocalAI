@@ -23,23 +23,6 @@ type ChatInferencePanelProps = {
   providerActive?: boolean;
   onSelectLocalVariant: (modelId: string) => void;
   onDownloadHubVariant: (repo: string, filename: string, quant: string) => void;
-  // Session settings (moved from topbar)
-  backendOptions?: string[];
-  inferenceBackend?: string;
-  onBackendChange?: (backend: string) => void;
-  resolveBackendLabel?: (backend: string) => string;
-  providers?: Array<{ id: string; name: string }>;
-  providerId?: string;
-  onProviderChange?: (id: string) => void;
-  knowledgeBases?: Array<{ id: string; chunk_count: number }>;
-  knowledgeBaseId?: string;
-  onKnowledgeBaseChange?: (id: string) => void;
-  useTools?: boolean;
-  onUseToolsChange?: (value: boolean) => void;
-  toolsAvailable?: boolean;
-  allowCodeExec?: boolean;
-  onAllowCodeExecChange?: (value: boolean) => void;
-  codeExecAvailable?: boolean;
 };
 
 const MAX_TOKEN_OPTIONS = [512, 1024, 2048, 4096, 8192];
@@ -65,22 +48,6 @@ export function ChatInferencePanel({
   providerActive = false,
   onSelectLocalVariant,
   onDownloadHubVariant,
-  backendOptions = [],
-  inferenceBackend = "llamacpp",
-  onBackendChange,
-  resolveBackendLabel,
-  providers = [],
-  providerId = "",
-  onProviderChange,
-  knowledgeBases = [],
-  knowledgeBaseId = "",
-  onKnowledgeBaseChange,
-  useTools = false,
-  onUseToolsChange,
-  toolsAvailable = false,
-  allowCodeExec = false,
-  onAllowCodeExecChange,
-  codeExecAvailable = false,
 }: ChatInferencePanelProps) {
   const contextOptions = useMemo<ContextWindowSetting[]>(
     () => ["auto", ...contextWindowOptions],
@@ -144,24 +111,12 @@ export function ChatInferencePanel({
     formatMaxTokens(settings.maxTokens),
     `temp ${settings.temperature.toFixed(1)}`,
   ];
-  if (providerId) {
-    const provider = providers.find((p) => p.id === providerId);
-    summaryParts.unshift(provider?.name || "Remote");
-  }
-  if (knowledgeBaseId) summaryParts.push("KB");
-  if (useTools) summaryParts.push("tools");
   if (settings.specEnabled && settings.draftModelId) {
     summaryParts.push("spec decode");
   }
   if (variants?.current_quant) {
     summaryParts.push(variants.current_quant);
   }
-
-  const showSessionSettings =
-    backendOptions.length > 1 ||
-    providers.length > 0 ||
-    knowledgeBases.length > 0 ||
-    toolsAvailable;
 
   return (
     <section className={`chat-inference-panel${open ? " chat-inference-panel-open" : ""}`}>
@@ -172,7 +127,7 @@ export function ChatInferencePanel({
         aria-expanded={open}
       >
         <span className="chat-inference-toggle-text">
-          <span className="chat-inference-title">Chat settings</span>
+          <span className="chat-inference-title">Inference settings</span>
           <span className="chat-inference-summary muted-text">{summaryParts.join(" · ")}</span>
         </span>
         <IconChevronDown size={16} className="chat-inference-chevron" />
@@ -180,104 +135,6 @@ export function ChatInferencePanel({
 
       {open && (
         <div className="chat-inference-body">
-          {showSessionSettings && (
-            <div className="chat-inference-section">
-              <div className="chat-inference-section-head">
-                <span className="chat-inference-section-title">Session</span>
-                <span className="muted-text">Provider, knowledge, and tools</span>
-              </div>
-              <div className="chat-inference-grid">
-                {backendOptions.length > 1 && !providerId && onBackendChange && resolveBackendLabel && (
-                  <label className="chat-inference-field">
-                    <span className="muted-text">Inference engine</span>
-                    <select
-                      value={inferenceBackend}
-                      disabled={disabled}
-                      onChange={(e) => onBackendChange(e.target.value)}
-                    >
-                      {backendOptions.map((b) => (
-                        <option key={b} value={b}>
-                          {resolveBackendLabel(b)}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                )}
-
-                {providers.length > 0 && onProviderChange && (
-                  <label className="chat-inference-field">
-                    <span className="muted-text">Provider</span>
-                    <select
-                      value={providerId}
-                      disabled={disabled}
-                      onChange={(e) => onProviderChange(e.target.value)}
-                    >
-                      <option value="">Local inference</option>
-                      {providers.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                )}
-
-                {knowledgeBases.length > 0 && onKnowledgeBaseChange && (
-                  <label className="chat-inference-field">
-                    <span className="muted-text">Knowledge base</span>
-                    <select
-                      value={knowledgeBaseId}
-                      disabled={disabled}
-                      onChange={(e) => onKnowledgeBaseChange(e.target.value)}
-                    >
-                      <option value="">None</option>
-                      {knowledgeBases.map((kb) => (
-                        <option key={kb.id} value={kb.id}>
-                          {kb.id} ({kb.chunk_count} chunks)
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                )}
-
-                {toolsAvailable && onUseToolsChange && (
-                  <label className="chat-inference-field chat-inference-field-check">
-                    <span className="muted-text">Agent tools</span>
-                    <div className="chat-inference-inline">
-                      <input
-                        type="checkbox"
-                        checked={useTools}
-                        disabled={disabled}
-                        onChange={(e) => onUseToolsChange(e.target.checked)}
-                      />
-                      <span>Enable tool calling</span>
-                    </div>
-                  </label>
-                )}
-
-                {useTools && codeExecAvailable && onAllowCodeExecChange && (
-                  <label className="chat-inference-field chat-inference-field-check chat-inference-field-warn">
-                    <span className="muted-text">Code execution</span>
-                    <div className="chat-inference-inline">
-                      <input
-                        type="checkbox"
-                        checked={allowCodeExec}
-                        disabled={disabled}
-                        onChange={(e) => onAllowCodeExecChange(e.target.checked)}
-                      />
-                      <span>Allow sandboxed code</span>
-                    </div>
-                  </label>
-                )}
-              </div>
-            </div>
-          )}
-
-          <div className="chat-inference-section">
-            <div className="chat-inference-section-head">
-              <span className="chat-inference-section-title">Generation</span>
-              <span className="muted-text">Context, sampling, and quant variants</span>
-            </div>
           <div className="chat-inference-grid">
             <label className="chat-inference-field">
               <span className="muted-text">Context window</span>
@@ -352,7 +209,6 @@ export function ChatInferencePanel({
                 </span>
               </div>
             </label>
-          </div>
           </div>
 
           {showQuants && (
