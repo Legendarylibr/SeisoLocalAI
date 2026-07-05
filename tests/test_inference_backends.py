@@ -1238,6 +1238,60 @@ def test_llama_complete_retries_after_inference_oom(monkeypatch):
     assert calls == ["get:normal", "reload:compact"]
 
 
+def test_llama_complete_prefill_guard_reloads_before_native_linux_segfault(
+    monkeypatch,
+):
+    from seiso.inference.runner import LocalInferenceRunner
+
+    runner = LocalInferenceRunner()
+    calls: list[str] = []
+    seen_overrides: list[tuple[int, int] | None] = []
+
+    class FakeLlama:
+        def __init__(self, *, batch: int, tier: str = "normal") -> None:
+            self._seiso_load_tier = tier
+            self._seiso_n_batch = batch
+            self._seiso_n_ubatch = min(batch, 1024)
+            self._seiso_n_gpu_layers = -1
+            self._seiso_load_headroom_mb = 24576
+            self._seiso_model_path = "/tmp/model.gguf"
+
+        def create_chat_completion(self, **_kwargs):
+            calls.append(f"complete:{self._seiso_n_batch}")
+            return {"choices": [{"message": {"content": "ok"}}]}
+
+    def get_llama(_path, n_ctx=4096, *, tier="normal"):
+        calls.append(f"get:{tier}")
+        return FakeLlama(batch=4096, tier=tier)
+
+    def reload_llama(_path, n_ctx, *, tier, batch_override=None):
+        calls.append(f"reload:{tier}")
+        seen_overrides.append(batch_override)
+        batch = batch_override[0] if batch_override else 4096
+        return FakeLlama(batch=batch, tier=tier)
+
+    monkeypatch.setattr(runner._pool, "get_llama", get_llama)
+    monkeypatch.setattr(runner._pool, "reload_llama", reload_llama)
+    monkeypatch.setattr(runner._pool, "is_generation_active", lambda _gid: True)
+    monkeypatch.setattr(
+        "seiso.inference.runner.release_cached_memory", lambda sync=False: None
+    )
+    monkeypatch.setattr(
+        "seiso.inference.runner.llama_prefill_needs_reload",
+        lambda **_kwargs: (True, 512, 128),
+    )
+
+    reply = runner._llama_complete(
+        {"messages": [{"role": "user", "content": "x" * 20000}], "max_tokens": 32},
+        "/tmp/model.gguf",
+        generation_id=1,
+    )
+
+    assert reply == "ok"
+    assert calls == ["get:normal", "reload:normal", "complete:512"]
+    assert seen_overrides == [(512, 128)]
+
+
 def test_llama_stream_does_not_retry_after_emitting_text(monkeypatch):
     from seiso.inference.runner import LocalInferenceRunner
 

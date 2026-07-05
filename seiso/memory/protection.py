@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import gc
 import logging
 import os
@@ -41,6 +42,8 @@ _MAX_LLAMA_BATCH = 4096
 _MIN_LLAMA_BATCH = 128
 # Post-weight headroom below this on native Linux → clamp batches (prefill crash zone).
 _NATIVE_LINUX_PREFILL_CLAMP_MB = 6144
+_NATIVE_LINUX_PREFILL_HEADROOM_DROP_RATIO = 0.85
+_NATIVE_LINUX_PREFILL_RESERVE_PER_256TOK_MB = 192
 _MAX_JSONL_LOAD_MB = 512
 _MODEL_WEIGHT_VRAM_SUFFIXES = frozenset({".gguf", ".safetensors", ".bin"})
 
@@ -476,6 +479,61 @@ def llama_batch_limits_for_headroom(headroom_mb_value: int) -> tuple[int, int]:
     return 4096, 1024
 
 
+def llama_prefill_needs_reload(
+    *,
+    model_path: str,
+    messages: list[dict[str, Any]],
+    n_ctx: int,
+    loaded_n_batch: int,
+    loaded_n_gpu_layers: int,
+    load_tier: LlamaLoadTier = "normal",
+    loaded_headroom_mb: int | None = None,
+) -> tuple[bool, int, int]:
+    """True when a cached native-Linux llama handle should reload before prefill."""
+    try:
+        native_linux_nvidia = seiso_platform.is_native_linux_nvidia()
+    except Exception:
+        native_linux_nvidia = False
+    if not native_linux_nvidia or loaded_n_gpu_layers == 0:
+        batch = max(_MIN_LLAMA_BATCH, int(loaded_n_batch or _MAX_LLAMA_BATCH))
+        return False, batch, min(batch, 1024)
+
+    with contextlib.suppress(Exception):
+        hardware_profile(force_refresh=True)
+
+    free_mb = headroom_mb()
+    prompt_tokens = _estimate_prompt_tokens(messages)
+    effective = llama_effective_batch_headroom_mb(
+        free_mb,
+        model_path=model_path,
+        n_gpu_layers=loaded_n_gpu_layers,
+        n_ctx=n_ctx,
+    )
+    prefill_tokens = min(max(prompt_tokens, _MIN_LLAMA_BATCH), max(loaded_n_batch, 1))
+    reserve_steps = max(1, (prefill_tokens + 255) // 256)
+    reserve_mb = reserve_steps * _NATIVE_LINUX_PREFILL_RESERVE_PER_256TOK_MB
+    effective = max(_MIN_LLAMA_BATCH * 2, effective - reserve_mb)
+
+    safe_batch, safe_ubatch = llama_batch_limits_for_headroom(effective)
+    if load_tier == "compact":
+        safe_batch = min(safe_batch, 512)
+        safe_ubatch = min(safe_ubatch, 128)
+    elif load_tier == "minimal":
+        safe_batch = min(safe_batch, 256)
+        safe_ubatch = min(safe_ubatch, 128)
+
+    headroom_dropped = (
+        loaded_headroom_mb is not None
+        and loaded_headroom_mb > 0
+        and free_mb < int(loaded_headroom_mb * _NATIVE_LINUX_PREFILL_HEADROOM_DROP_RATIO)
+    )
+    long_prefill = prompt_tokens > max(1024, min(loaded_n_batch, _MAX_LLAMA_BATCH) // 2)
+    needs_reload = (long_prefill and int(loaded_n_batch or 0) > safe_batch) or (
+        headroom_dropped and int(loaded_n_batch or 0) > safe_batch
+    )
+    return needs_reload, safe_batch, min(safe_ubatch, safe_batch)
+
+
 def llama_load_profile_ladder(
     *,
     model_path: str,
@@ -883,10 +941,8 @@ def clamp_llama_load_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
             n_ctx=n_ctx,
         )
         native_linux_nvidia = False
-        try:
+        with contextlib.suppress(Exception):
             native_linux_nvidia = seiso_platform.is_native_linux_nvidia()
-        except Exception:
-            pass
         batch_headroom = llama_effective_batch_headroom_mb(
             free_mb,
             model_path=model_path,
