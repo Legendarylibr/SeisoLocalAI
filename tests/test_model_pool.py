@@ -363,12 +363,12 @@ def test_llama_load_kwargs_native_linux_nvidia_defaults(monkeypatch):
     monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 24576)
 
     kwargs = llama_load_kwargs(4096, model_path="/tmp/model.gguf")
-    assert kwargs["n_batch"] <= 512
-    assert kwargs["n_ubatch"] <= 128
-    assert "flash_attn" not in kwargs
+    assert kwargs["n_batch"] == 4096
+    assert kwargs["n_ubatch"] == 1024
+    assert kwargs["flash_attn"] is True
 
 
-def test_native_linux_unsafe_flash_requires_explicit_unsafe_opt_in(monkeypatch):
+def test_native_linux_flash_attn_can_be_disabled_by_env(monkeypatch):
     for key in list(os.environ):
         if key.startswith("SEISO_LLAMA_"):
             monkeypatch.delenv(key, raising=False)
@@ -380,14 +380,10 @@ def test_native_linux_unsafe_flash_requires_explicit_unsafe_opt_in(monkeypatch):
     monkeypatch.setattr(
         "seiso.inference.model_pool._native_linux_nvidia", lambda: True
     )
-    monkeypatch.setenv("SEISO_LLAMA_FLASH_ATTN", "true")
+    monkeypatch.setenv("SEISO_LLAMA_FLASH_ATTN", "false")
 
     kwargs = llama_load_kwargs(4096, model_path="/tmp/model.gguf")
     assert "flash_attn" not in kwargs
-
-    monkeypatch.setenv("SEISO_LLAMA_UNSAFE_FLASH_ATTN", "true")
-    kwargs = llama_load_kwargs(4096, model_path="/tmp/model.gguf")
-    assert kwargs["flash_attn"] is True
 
 
 def test_llama_load_kwargs_threads_batch_override(monkeypatch):
@@ -528,13 +524,13 @@ def test_llama_batch_defaults_are_speed_first(monkeypatch):
     assert ubatch == 1024
 
 
-def test_llama_batch_defaults_conservative_on_native_linux_nvidia(monkeypatch):
+def test_llama_batch_defaults_match_july3_speed_first(monkeypatch):
     import seiso.inference.model_pool as mp
 
     monkeypatch.setattr(mp, "_native_linux_nvidia", lambda: True)
     batch, ubatch = mp._llama_batch_defaults()
-    assert batch == 512
-    assert ubatch == 128
+    assert batch == 4096
+    assert ubatch == 1024
 
 
 def test_llama_load_model_tries_speed_profile_before_base(monkeypatch, tmp_path):

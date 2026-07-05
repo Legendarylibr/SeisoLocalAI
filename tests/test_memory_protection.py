@@ -247,6 +247,38 @@ def test_clamp_llama_cache_mb_accounts_for_model_mmap_on_native_linux(
     assert clamp_llama_cache_mb(1024, model_path=gguf) < 1024
 
 
+def test_llama_effective_batch_headroom_skips_margin_for_comfortable_models(
+    monkeypatch, tmp_path
+):
+    from seiso.memory.protection import (
+        llama_batch_headroom_mb,
+        llama_model_is_tight_vram_fit,
+    )
+
+    gguf = tmp_path / "gemma-14b-q4.gguf"
+    gguf.write_bytes(b"\x00" * 1024)
+    monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: True)
+    monkeypatch.setattr(
+        "seiso.memory.protection.estimate_path_vram_mb",
+        lambda _path: 9000,
+    )
+    monkeypatch.setattr(
+        "seiso.inference.backends.gguf_block_count",
+        lambda _path: 48,
+    )
+
+    assert not llama_model_is_tight_vram_fit(
+        model_path=gguf, free_mb=24576, n_gpu_layers=-1, n_ctx=4096
+    )
+    gpu_only = llama_batch_headroom_mb(
+        24576, model_path=gguf, n_gpu_layers=-1, n_ctx=4096
+    )
+    effective = llama_effective_batch_headroom_mb(
+        24576, model_path=gguf, n_gpu_layers=-1, n_ctx=4096
+    )
+    assert effective == gpu_only
+
+
 def test_llama_effective_batch_headroom_uses_host_ram_on_native_linux(
     monkeypatch, tmp_path
 ):
@@ -306,7 +338,7 @@ def test_llama_load_profile_ladder_upscales_small_model_on_big_gpu(
     assert profiles[0]["n_ubatch"] == 512
 
 
-def test_llama_load_profile_ladder_native_linux_avoids_speed_and_flash(
+def test_llama_load_profile_ladder_native_linux_keeps_july3_speed_for_roomy_models(
     monkeypatch, tmp_path
 ):
     gguf = tmp_path / "small.gguf"
@@ -332,9 +364,10 @@ def test_llama_load_profile_ladder_native_linux_avoids_speed_and_flash(
         tier="normal",
     )
 
-    assert profiles[0]["n_batch"] <= 2048
-    assert profiles[0]["n_ubatch"] <= 512
-    assert all(profile.get("flash_attn") is False for profile in profiles)
+    assert profiles[0]["n_batch"] == 4096
+    assert profiles[0]["n_ubatch"] == 1024
+    assert profiles[0].get("flash_attn") is not False
+    assert profiles[-1].get("flash_attn") is False
 
 
 def test_llama_load_profile_ladder_skips_upscale_when_model_fills_gpu(

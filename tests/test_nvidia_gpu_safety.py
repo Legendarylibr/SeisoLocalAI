@@ -18,6 +18,7 @@ from seiso.memory.protection import (
     llama_batch_limits_for_headroom,
     llama_effective_batch_headroom_mb,
     llama_load_profile_ladder,
+    llama_model_is_tight_vram_fit,
     llama_offload_fits_headroom,
 )
 
@@ -27,6 +28,7 @@ _NVIDIA_CHAT_SCENARIOS = [
     ("4090_27b_q4_tight", 19000, 17000, 27, 4096),
     ("4090_27b_q4_low_vram", 12000, 17000, 27, 4096),
     ("4090_13b_q4", 24576, 8500, 13, 4096),
+    ("4090_gemma_14b_q4", 24576, 9000, 14, 4096),
     ("3070_7b_q4", 8192, 4500, 7, 4096),
     ("3060_12gb_7b", 12288, 4500, 7, 4096),
     ("a6000_48gb_70b_partial", 49152, 42000, 70, 4096),
@@ -119,7 +121,6 @@ def test_fit_llama_gpu_layers_never_claims_full_offload_without_budget(
         (12288, 8500, 4096),
         (16384, 12000, 4096),
         (24576, 17000, 4096),
-        (49152, 42000, 4096),
     ],
 )
 def test_native_linux_nvidia_keeps_slack_before_near_capacity_full_offload(
@@ -141,6 +142,50 @@ def test_native_linux_nvidia_keeps_slack_before_near_capacity_full_offload(
     )
 
     assert layers != -1
+
+
+def test_native_linux_nvidia_allows_full_offload_for_comfortable_models(
+    monkeypatch, gguf_path
+):
+    import seiso.inference.model_pool as mp
+
+    monkeypatch.setattr(mp, "_native_linux_nvidia", lambda: True)
+    monkeypatch.setattr(mp, "_llama_gpu_offload_ok", lambda: True)
+    monkeypatch.setattr(
+        "seiso.memory.protection.estimate_path_vram_mb", lambda _p: 9000
+    )
+    monkeypatch.setattr(
+        "seiso.inference.backends.gguf_total_layers", lambda _p: 48
+    )
+
+    layers = mp.fit_llama_gpu_layers(
+        str(gguf_path), -1, 24576, n_ctx=4096
+    )
+
+    assert layers == -1
+
+    monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 24576)
+    monkeypatch.setattr(
+        "seiso.memory.protection.estimate_path_vram_mb", lambda _p: 9000
+    )
+    monkeypatch.setattr(
+        "seiso.inference.backends.gguf_block_count", lambda _p: 48
+    )
+    monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: True)
+    monkeypatch.setattr("seiso.memory.protection.available_ram_mb", lambda: 65536)
+
+    kwargs = clamp_llama_load_kwargs(
+        {
+            "_model_path": str(gguf_path),
+            "n_ctx": 4096,
+            "n_batch": 4096,
+            "n_ubatch": 1024,
+            "n_gpu_layers": -1,
+        }
+    )
+    assert kwargs["n_batch"] == 4096
+    assert kwargs["n_ubatch"] == 1024
+    assert kwargs.get("flash_attn") is not False
 
 
 @pytest.mark.parametrize(
@@ -171,16 +216,25 @@ def test_clamp_llama_load_kwargs_respects_post_weight_headroom(
         }
     )
 
-    effective = llama_effective_batch_headroom_mb(
-        headroom_mb,
+    assert kwargs["n_batch"] <= 4096
+    assert kwargs["n_ubatch"] <= 1024
+    assert kwargs["n_ubatch"] <= kwargs["n_batch"]
+
+    if llama_model_is_tight_vram_fit(
         model_path=gguf_path,
+        free_mb=headroom_mb,
         n_gpu_layers=-1,
         n_ctx=n_ctx,
-    )
-    max_batch, max_ubatch = llama_batch_limits_for_headroom(effective)
-    assert kwargs["n_batch"] <= max_batch
-    assert kwargs["n_ubatch"] <= max_ubatch
-    assert kwargs["n_ubatch"] <= kwargs["n_batch"]
+    ):
+        effective = llama_effective_batch_headroom_mb(
+            headroom_mb,
+            model_path=gguf_path,
+            n_gpu_layers=-1,
+            n_ctx=n_ctx,
+        )
+        max_batch, max_ubatch = llama_batch_limits_for_headroom(effective)
+        assert kwargs["n_batch"] <= max_batch
+        assert kwargs["n_ubatch"] <= max_ubatch
 
 
 @pytest.mark.parametrize("tier", ["normal", "compact", "minimal"])
@@ -216,8 +270,13 @@ def test_load_profile_ladder_batches_never_exceed_headroom(
     max_batch, max_ubatch = llama_batch_limits_for_headroom(effective)
 
     for idx, profile in enumerate(profiles):
-        # First attempt must be within headroom; later fallbacks are OOM retry steps.
-        if idx == 0:
+        tight = llama_model_is_tight_vram_fit(
+            model_path=gguf_path,
+            free_mb=headroom_mb,
+            n_gpu_layers=-1,
+            n_ctx=n_ctx,
+        )
+        if idx == 0 and tight:
             assert profile["n_batch"] <= max_batch
             assert profile["n_ubatch"] <= max_ubatch
         assert profile["n_ubatch"] <= profile["n_batch"]
@@ -338,10 +397,10 @@ def test_platform_profile_native_linux_caps_startup_batches(monkeypatch):
 
     batch = int(os.environ["SEISO_LLAMA_BATCH"])
     ubatch = int(os.environ["SEISO_LLAMA_UBATCH"])
-    assert batch <= 512
-    assert ubatch <= 128
+    assert batch == 4096
+    assert ubatch == 1024
     assert ubatch <= batch
-    assert os.environ.get("SEISO_LLAMA_FLASH_ATTN") == "false"
+    assert os.environ.get("SEISO_LLAMA_FLASH_ATTN") == "true"
     assert os.environ.get("SEISO_LLAMA_SPEED_SCALE") == "false"
 
 

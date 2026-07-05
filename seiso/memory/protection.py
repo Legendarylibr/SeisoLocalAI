@@ -376,6 +376,25 @@ def llama_host_batch_headroom_mb(
     )
 
 
+def llama_model_is_tight_vram_fit(
+    *,
+    model_path: str | Path,
+    free_mb: int,
+    n_gpu_layers: int = -1,
+    n_ctx: int = 2048,
+) -> bool:
+    """True when a model consumes most of the available GPU budget."""
+    path = Path(model_path)
+    weight_mb = int(estimate_path_vram_mb(path))
+    kv_mb = llama_kv_cache_reserve_mb(
+        path,
+        n_ctx=n_ctx,
+        n_gpu_layers=n_gpu_layers,
+        free_mb=free_mb,
+    )
+    return weight_mb + kv_mb >= int(free_mb * 0.65)
+
+
 def llama_effective_batch_headroom_mb(
     free_mb: int,
     *,
@@ -400,8 +419,13 @@ def llama_effective_batch_headroom_mb(
     try:
         from seiso.platform import is_native_linux_nvidia
 
-        if is_native_linux_nvidia():
-            # Reserve headroom for prefill activations beyond load-time estimates.
+        if is_native_linux_nvidia() and llama_model_is_tight_vram_fit(
+            model_path=model_path,
+            free_mb=free_mb,
+            n_gpu_layers=n_gpu_layers,
+            n_ctx=n_ctx,
+        ):
+            # Reserve headroom for prefill activations on near-capacity models only.
             effective = max(_MIN_LLAMA_BATCH * 2, int(effective * 0.85) - 256)
     except ImportError:
         pass
@@ -434,15 +458,28 @@ def llama_load_profile_ladder(
     tier: LlamaLoadTier = "normal",
 ) -> list[dict[str, Any]]:
     """Ordered llama.cpp memory profiles from fastest safe settings to compact fallbacks."""
+    tight = llama_model_is_tight_vram_fit(
+        model_path=model_path,
+        free_mb=free_mb,
+        n_gpu_layers=n_gpu_layers,
+        n_ctx=n_ctx,
+    )
+    base_batch = max(_MIN_LLAMA_BATCH, int(base_batch))
+    base_ubatch = max(_MIN_LLAMA_BATCH, min(int(base_ubatch), base_batch))
     effective = llama_effective_batch_headroom_mb(
         free_mb, model_path=model_path, n_gpu_layers=n_gpu_layers, n_ctx=n_ctx
     )
     top_batch, top_ubatch = llama_batch_limits_for_headroom(effective)
-    base_batch = max(_MIN_LLAMA_BATCH, min(int(base_batch), top_batch))
-    base_ubatch = max(
-        _MIN_LLAMA_BATCH,
-        min(int(base_ubatch), top_ubatch, base_batch),
-    )
+
+    if tight:
+        base_batch = max(_MIN_LLAMA_BATCH, min(base_batch, top_batch))
+        base_ubatch = max(
+            _MIN_LLAMA_BATCH,
+            min(base_ubatch, top_ubatch, base_batch),
+        )
+    else:
+        base_batch = min(base_batch, _MAX_LLAMA_BATCH)
+        base_ubatch = min(base_ubatch, 1024, base_batch)
 
     steps: list[tuple[int, int, int | None, bool]] = []
     try:
@@ -452,6 +489,9 @@ def llama_load_profile_ladder(
     except ImportError:
         native_linux_nvidia = False
     speed_scale = env_bool("SEISO_LLAMA_SPEED_SCALE", not native_linux_nvidia)
+    primary_flash = (
+        n_gpu_layers != 0 and not tight and env_bool("SEISO_LLAMA_FLASH_ATTN", True)
+    )
 
     if tier == "normal":
         if (
@@ -461,14 +501,14 @@ def llama_load_profile_ladder(
             and (top_batch > base_batch or top_ubatch > base_ubatch)
         ):
             steps.append((top_batch, top_ubatch, None, True))
-        steps.append((base_batch, base_ubatch, None, not native_linux_nvidia))
+        steps.append((base_batch, base_ubatch, None, primary_flash))
         steps.extend(
             [
                 (
                     min(base_batch, 512),
                     min(base_ubatch, 256),
                     min(n_ctx, 4096),
-                    not native_linux_nvidia,
+                    False,
                 ),
                 (512, 128, min(n_ctx, 4096), False),
                 (256, 128, min(n_ctx, 2048), False),
@@ -794,18 +834,27 @@ def clamp_llama_load_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
 
     n_gpu_layers = int(out.get("n_gpu_layers") or 0)
     if model_path and n_gpu_layers != 0:
-        batch_headroom = llama_effective_batch_headroom_mb(
-            headroom_mb(),
+        free_mb = headroom_mb()
+        out["n_batch"] = min(out["n_batch"], _MAX_LLAMA_BATCH)
+        out["n_ubatch"] = min(out["n_ubatch"], 1024, out["n_batch"])
+        if llama_model_is_tight_vram_fit(
             model_path=model_path,
+            free_mb=free_mb,
             n_gpu_layers=n_gpu_layers,
             n_ctx=n_ctx,
-        )
-        max_batch, max_ubatch = llama_batch_limits_for_headroom(batch_headroom)
-        out["n_batch"] = max(_MIN_LLAMA_BATCH, min(out["n_batch"], max_batch))
-        out["n_ubatch"] = max(
-            _MIN_LLAMA_BATCH,
-            min(out["n_ubatch"], out["n_batch"], max_ubatch),
-        )
+        ):
+            batch_headroom = llama_effective_batch_headroom_mb(
+                free_mb,
+                model_path=model_path,
+                n_gpu_layers=n_gpu_layers,
+                n_ctx=n_ctx,
+            )
+            max_batch, max_ubatch = llama_batch_limits_for_headroom(batch_headroom)
+            out["n_batch"] = max(_MIN_LLAMA_BATCH, min(out["n_batch"], max_batch))
+            out["n_ubatch"] = max(
+                _MIN_LLAMA_BATCH,
+                min(out["n_ubatch"], out["n_batch"], max_ubatch),
+            )
 
     ctx_cap = clamp_llama_n_ctx(n_ctx, max_tokens=512)
     if n_ctx > ctx_cap:

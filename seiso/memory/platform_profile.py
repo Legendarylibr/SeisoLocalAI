@@ -11,6 +11,27 @@ from seiso.hardware.tiers import HardwareTier, classify_tier, vram_headroom_mb
 from seiso.training.platform_caps import training_capabilities
 
 
+def _refresh_native_linux_llama_env(
+    *, batch_cap: int, ubatch_cap: int, cache_cap: int
+) -> None:
+    """Clamp stale shell env to July-3-style caps on every Forge start."""
+    if env_bool("SEISO_DISABLE_MEMORY_CAPS", False):
+        return
+
+    os.environ["SEISO_LLAMA_SPEED_SCALE"] = "false"
+    os.environ["SEISO_LLAMA_FLASH_ATTN"] = "true"
+    batch = int(os.environ.get("SEISO_LLAMA_BATCH", batch_cap))
+    ubatch = int(os.environ.get("SEISO_LLAMA_UBATCH", ubatch_cap))
+    cache = int(os.environ.get("SEISO_LLAMA_CACHE_MB", cache_cap))
+    os.environ["SEISO_LLAMA_BATCH"] = str(min(batch, batch_cap))
+    os.environ["SEISO_LLAMA_UBATCH"] = str(
+        min(ubatch, ubatch_cap, int(os.environ["SEISO_LLAMA_BATCH"]))
+    )
+    os.environ["SEISO_LLAMA_CACHE_MB"] = str(min(cache, cache_cap))
+    if env_bool("SEISO_LLAMA_UNSAFE_SPEED_SCALE", False):
+        os.environ["SEISO_LLAMA_SPEED_SCALE"] = "true"
+
+
 def memory_profile_label(profile: dict[str, Any]) -> str:
     """Derive low vs balanced from live headroom."""
     headroom = vram_headroom_mb(profile)
@@ -123,21 +144,28 @@ def apply_platform_memory_profile(
                 from seiso.platform import is_native_linux_nvidia
 
                 batch, ubatch = llama_batch_limits_for_headroom(headroom)
+                cache_cap = 256 if low else 512
                 if is_native_linux_nvidia(profile=profile):
-                    batch = min(batch, 512)
-                    ubatch = min(ubatch, 128)
-                    if low:
-                        batch = min(batch, 256)
-                        ubatch = min(ubatch, 128)
-                    os.environ.setdefault("SEISO_LLAMA_SPEED_SCALE", "false")
-                    os.environ.setdefault("SEISO_LLAMA_FLASH_ATTN", "false")
-                os.environ.setdefault("SEISO_LLAMA_BATCH", str(batch))
-                os.environ.setdefault("SEISO_LLAMA_UBATCH", str(ubatch))
+                    if not low and tier == HardwareTier.WORKSTATION:
+                        batch, ubatch = 4096, 1024
+                    elif not low and tier == HardwareTier.CAPABLE:
+                        batch, ubatch = min(batch, 1536), min(ubatch, 512)
+                    else:
+                        batch = min(batch, 4096)
+                        ubatch = min(ubatch, 1024)
+                        if low:
+                            batch = min(batch, 512)
+                            ubatch = min(ubatch, 256)
+                    _refresh_native_linux_llama_env(
+                        batch_cap=batch,
+                        ubatch_cap=ubatch,
+                        cache_cap=cache_cap,
+                    )
+                else:
+                    os.environ.setdefault("SEISO_LLAMA_BATCH", str(batch))
+                    os.environ.setdefault("SEISO_LLAMA_UBATCH", str(ubatch))
             if not low and tier in (HardwareTier.WORKSTATION, HardwareTier.CAPABLE):
-                from seiso.platform import is_native_linux_nvidia
-
-                if not is_native_linux_nvidia(profile=profile):
-                    os.environ.setdefault("SEISO_LLAMA_FLASH_ATTN", "true")
+                os.environ.setdefault("SEISO_LLAMA_FLASH_ATTN", "true")
                 os.environ.setdefault("SEISO_LLAMA_OP_OFFLOAD", "true")
                 os.environ.setdefault("SEISO_LLAMA_OFFLOAD_KQV", "true")
                 if tier == HardwareTier.WORKSTATION:
