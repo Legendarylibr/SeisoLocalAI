@@ -92,6 +92,29 @@ def test_llama_gpu_layers_optimal_uses_short_ttl_cache(monkeypatch, tmp_path):
     assert calls == [4096, 8192]
 
 
+def test_native_linux_full_offload_cache_invalidates_when_partial_is_now_optimal(
+    monkeypatch, tmp_path
+):
+    import seiso.inference.model_pool as mp
+
+    gguf = tmp_path / "model.gguf"
+    gguf.write_bytes(b"gguf")
+    monkeypatch.setattr(mp, "_native_linux_nvidia", lambda: True)
+    monkeypatch.setattr(mp, "_llama_gpu_layers_optimal", lambda *_a, **_k: 32)
+
+    assert not mp._llama_cache_is_optimal(str(gguf), -1, -1, n_ctx=4096)
+
+
+def test_non_native_full_offload_cache_stays_optimal(monkeypatch, tmp_path):
+    import seiso.inference.model_pool as mp
+
+    gguf = tmp_path / "model.gguf"
+    gguf.write_bytes(b"gguf")
+    monkeypatch.setattr(mp, "_native_linux_nvidia", lambda: False)
+
+    assert mp._llama_cache_is_optimal(str(gguf), -1, -1, n_ctx=4096)
+
+
 def test_prepare_for_load_keeps_same_model(tmp_path, monkeypatch):
     pool = ModelPool()
     model = tmp_path / "same.gguf"
@@ -675,7 +698,7 @@ def test_native_linux_load_model_uses_crash_resistant_kwargs(monkeypatch, tmp_pa
         type("LlamaCpp", (), {"Llama": FakeLlama}),
     )
 
-    mp._load_llama_model(str(gguf), 4096)
+    llm = mp._load_llama_model(str(gguf), 4096)
 
     first = attempts[0]
     assert first["n_batch"] <= 512
@@ -684,6 +707,11 @@ def test_native_linux_load_model_uses_crash_resistant_kwargs(monkeypatch, tmp_pa
     assert first["offload_kqv"] is False
     assert first["op_offload"] is False
     assert "flash_attn" not in first
+    assert llm._seiso_n_batch == first["n_batch"]
+    assert llm._seiso_n_ubatch == first["n_ubatch"]
+    assert llm._seiso_n_ctx == first["n_ctx"]
+    assert llm._seiso_model_path == str(gguf)
+    assert llm._seiso_load_headroom_mb == 24576
 
 
 def test_llama_load_model_skips_full_offload_when_kv_reserve_does_not_fit(

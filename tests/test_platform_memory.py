@@ -169,7 +169,7 @@ def test_platform_profile_linux_nvidia_uses_gpu_layers(monkeypatch):
     assert os.environ["SEISO_LLAMA_GPU_LAYERS"] == "-1"
     assert os.environ["SEISO_LLAMA_BATCH"] == "4096"
     assert os.environ["SEISO_LLAMA_UBATCH"] == "1024"
-    assert os.environ["SEISO_LLAMA_CACHE_MB"] == "512"
+    assert os.environ["SEISO_LLAMA_CACHE_MB"] == "1024"
     assert os.environ.get("SEISO_LLAMA_FLASH_ATTN") == "false"
     assert os.environ.get("SEISO_LLAMA_SPEED_SCALE") == "false"
     assert os.environ["SEISO_STREAM_BATCH_CHARS"] == "16"
@@ -249,8 +249,8 @@ def test_platform_profile_linux_nvidia_modest_sets_safe_batch(monkeypatch):
         ("NVIDIA GeForce RTX 3070", 8192, HardwareTier.MODEST, 32, "512"),
         ("NVIDIA GeForce RTX 3060", 12288, HardwareTier.CAPABLE, 32, "512"),
         ("NVIDIA GeForce RTX 5080", 16384, HardwareTier.CAPABLE, 48, "512"),
-        ("NVIDIA GeForce RTX 4090", 24576, HardwareTier.WORKSTATION, 64, "512"),
-        ("NVIDIA RTX 6000 Ada", 49152, HardwareTier.WORKSTATION, 128, "512"),
+        ("NVIDIA GeForce RTX 4090", 24576, HardwareTier.WORKSTATION, 64, "1024"),
+        ("NVIDIA RTX 6000 Ada", 49152, HardwareTier.WORKSTATION, 128, "1024"),
     ],
 )
 def test_platform_profile_native_linux_nvidia_all_tiers_are_crash_resistant(
