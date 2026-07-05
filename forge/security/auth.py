@@ -6,7 +6,7 @@ import secrets
 import time
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
-from typing import Annotated
+from typing import Annotated, cast
 
 import bcrypt
 from fastapi import Depends, HTTPException, Request, status
@@ -44,7 +44,7 @@ def create_access_token(
         "iat": datetime.now(timezone.utc),
         "jti": secrets.token_hex(16),
     }
-    return jwt.encode(payload, settings.secret_key, algorithm=ALGORITHM)
+    return cast(str, jwt.encode(payload, settings.secret_key, algorithm=ALGORITHM))
 
 
 def revoke_access_token(token: str, settings: ForgeSettings) -> None:
