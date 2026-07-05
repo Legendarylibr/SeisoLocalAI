@@ -497,15 +497,32 @@ def clamp_llama_n_ctx(
 
 
 def clamp_llama_load_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
-    """Normalize llama.cpp load kwargs without RAM/VRAM-based downscaling."""
+    """Normalize llama.cpp load kwargs and trim oversized batches near VRAM limits."""
     out = dict(kwargs)
-    out.pop("_model_path", None)
+    model_path = out.pop("_model_path", None)
     n_ctx = int(out.get("n_ctx") or _MIN_LLAMA_CTX)
 
     n_batch = int(out.get("n_batch") or _MAX_LLAMA_BATCH)
     out["n_batch"] = max(_MIN_LLAMA_BATCH, n_batch)
     n_ubatch = int(out.get("n_ubatch") or out["n_batch"])
     out["n_ubatch"] = max(_MIN_LLAMA_BATCH, min(n_ubatch, out["n_batch"]))
+
+    n_gpu_layers = int(out.get("n_gpu_layers") or 0)
+    if model_path and n_gpu_layers != 0:
+        batch_headroom = llama_batch_headroom_mb(
+            headroom_mb(), model_path=model_path, n_gpu_layers=n_gpu_layers
+        )
+        if batch_headroom < 3072:
+            max_batch, max_ubatch = 512, 128
+        elif batch_headroom < 6144:
+            max_batch, max_ubatch = 1024, 256
+        else:
+            max_batch, max_ubatch = 2048, 512
+        out["n_batch"] = max(_MIN_LLAMA_BATCH, min(out["n_batch"], max_batch))
+        out["n_ubatch"] = max(
+            _MIN_LLAMA_BATCH,
+            min(out["n_ubatch"], out["n_batch"], max_ubatch),
+        )
 
     ctx_cap = clamp_llama_n_ctx(n_ctx, max_tokens=512)
     if n_ctx > ctx_cap:

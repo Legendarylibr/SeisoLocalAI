@@ -122,8 +122,8 @@ def _llama_speed_scale_enabled() -> bool:
 
 
 def _llama_batch_defaults() -> tuple[int, int]:
-    """Speed-first llama.cpp prompt/decode batch defaults."""
-    return 4096, 1024
+    """Balanced llama.cpp prompt/decode batch defaults for 24 GB GPUs."""
+    return 2048, 512
 
 
 def fit_llama_gpu_layers(model_path: str, requested: int, headroom_mb: int) -> int:

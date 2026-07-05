@@ -166,8 +166,8 @@ def test_platform_profile_linux_nvidia_uses_gpu_layers(monkeypatch):
     apply_platform_memory_profile(profile=profile)
 
     assert os.environ["SEISO_LLAMA_GPU_LAYERS"] == "-1"
-    assert os.environ["SEISO_LLAMA_BATCH"] == "4096"
-    assert os.environ["SEISO_LLAMA_UBATCH"] == "1024"
+    assert os.environ["SEISO_LLAMA_BATCH"] == "2048"
+    assert os.environ["SEISO_LLAMA_UBATCH"] == "512"
     assert os.environ["SEISO_LLAMA_CACHE_MB"] == "2048"
     assert os.environ["SEISO_STREAM_BATCH_CHARS"] == "16"
 
