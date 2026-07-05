@@ -18,6 +18,7 @@ from seiso.memory.protection import (
     llama_batch_limits_for_model,
     llama_effective_batch_headroom_mb,
     llama_host_batch_headroom_mb,
+    llama_kv_cache_reserve_mb,
     llama_load_profile_ladder,
     llama_next_recovery_tier,
     sanitize_inference_payload,
@@ -72,6 +73,12 @@ def test_llama_batch_limits_scale_by_gpu_headroom():
     assert llama_batch_limits_for_headroom(8192) == (1024, 256)
     assert llama_batch_limits_for_headroom(24576) == (2048, 512)
     assert llama_batch_limits_for_headroom(49152) == (4096, 1024)
+
+
+def test_llama_next_recovery_tier_sequence():
+    assert llama_next_recovery_tier("normal") == "compact"
+    assert llama_next_recovery_tier("compact") == "minimal"
+    assert llama_next_recovery_tier("minimal") is None
 
 
 def test_clamp_llama_load_kwargs_scales_batch_for_large_gpu_gguf(
@@ -147,6 +154,35 @@ def test_llama_batch_headroom_accounts_for_model_weights(monkeypatch, tmp_path):
     )
     remaining = llama_batch_headroom_mb(16384, model_path=gguf, n_gpu_layers=-1)
     assert remaining < 8192
+
+
+def test_llama_kv_cache_reserve_scales_with_model_and_context(monkeypatch, tmp_path):
+    gguf = tmp_path / "qwen-27b-q4.gguf"
+    gguf.write_bytes(b"\x00" * 1024)
+    monkeypatch.setattr(
+        "seiso.memory.protection.estimate_path_vram_mb",
+        lambda _path: 22000,
+    )
+
+    small_ctx = llama_kv_cache_reserve_mb(
+        gguf,
+        n_ctx=2048,
+        n_gpu_layers=-1,
+        total_layers=64,
+        weight_mb=22000,
+        free_mb=24576,
+    )
+    large_ctx = llama_kv_cache_reserve_mb(
+        gguf,
+        n_ctx=8192,
+        n_gpu_layers=-1,
+        total_layers=64,
+        weight_mb=22000,
+        free_mb=24576,
+    )
+
+    assert small_ctx > 1024
+    assert large_ctx > small_ctx
 
 
 def test_clamp_llama_cache_mb_keeps_configured_value_on_low_headroom(monkeypatch):

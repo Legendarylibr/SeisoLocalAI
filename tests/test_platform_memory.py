@@ -166,8 +166,8 @@ def test_platform_profile_linux_nvidia_uses_gpu_layers(monkeypatch):
     apply_platform_memory_profile(profile=profile)
 
     assert os.environ["SEISO_LLAMA_GPU_LAYERS"] == "-1"
-    assert os.environ["SEISO_LLAMA_BATCH"] == "4096"
-    assert os.environ["SEISO_LLAMA_UBATCH"] == "1024"
+    assert os.environ["SEISO_LLAMA_BATCH"] == "2048"
+    assert os.environ["SEISO_LLAMA_UBATCH"] == "512"
     assert os.environ["SEISO_LLAMA_CACHE_MB"] == "2048"
     assert os.environ["SEISO_STREAM_BATCH_CHARS"] == "16"
 
@@ -202,11 +202,11 @@ def test_platform_profile_linux_nvidia_workstation_uses_speed_batches(monkeypatc
 
     apply_platform_memory_profile(profile=profile)
 
-    assert os.environ["SEISO_LLAMA_BATCH"] == "4096"
-    assert os.environ["SEISO_LLAMA_UBATCH"] == "1024"
+    assert os.environ["SEISO_LLAMA_BATCH"] == "2048"
+    assert os.environ["SEISO_LLAMA_UBATCH"] == "512"
 
 
-def test_platform_profile_linux_nvidia_modest_does_not_set_batch(monkeypatch):
+def test_platform_profile_linux_nvidia_modest_sets_safe_batch(monkeypatch):
     profile = {
         "ram_gb": 32,
         "gpus": [{"name": "NVIDIA GeForce RTX 3070", "vram_total_mb": 8192}],
@@ -236,8 +236,8 @@ def test_platform_profile_linux_nvidia_modest_does_not_set_batch(monkeypatch):
 
     apply_platform_memory_profile(profile=profile)
 
-    assert "SEISO_LLAMA_BATCH" not in os.environ
-    assert "SEISO_LLAMA_UBATCH" not in os.environ
+    assert os.environ["SEISO_LLAMA_BATCH"] == "1024"
+    assert os.environ["SEISO_LLAMA_UBATCH"] == "256"
 
 
 def test_apply_only_setdefault(monkeypatch):
