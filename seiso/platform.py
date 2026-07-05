@@ -8,10 +8,10 @@ import site
 import sys
 from pathlib import Path
 
-_CUDA_PRELOAD_LIBS: tuple[str, ...] = (
-    "libcudart.so.12",
-    "libcublas.so.12",
-    "libcublasLt.so.12",
+# Prefer newer pip CUDA wheels when present (cu13/cu12); fall back per library.
+_CUDA_PRELOAD_LIB_CANDIDATES: tuple[tuple[str, ...], ...] = (
+    ("libcudart.so.13", "libcublas.so.13", "libcublasLt.so.13"),
+    ("libcudart.so.12", "libcublas.so.12", "libcublasLt.so.12"),
 )
 _cuda_preloaded = False
 
@@ -62,20 +62,31 @@ def preload_cuda_shared_libraries(*, lib_dirs: list[str] | None = None) -> list[
         return []
     dirs = lib_dirs if lib_dirs is not None else pip_nvidia_cuda_lib_dirs()
     loaded: list[str] = []
-    for lib_name in _CUDA_PRELOAD_LIBS:
-        for lib_dir in dirs:
-            candidate = Path(lib_dir) / lib_name
-            if not candidate.is_file():
-                continue
-            key = str(candidate.resolve())
-            if key in loaded:
+    for lib_set in _CUDA_PRELOAD_LIB_CANDIDATES:
+        resolved: list[str] = []
+        for lib_name in lib_set:
+            found: str | None = None
+            for lib_dir in dirs:
+                candidate = Path(lib_dir) / lib_name
+                if candidate.is_file():
+                    found = str(candidate.resolve())
+                    break
+            if not found:
                 break
+            resolved.append(found)
+        if len(resolved) != len(lib_set):
+            continue
+        attempt: list[str] = []
+        for key in resolved:
             try:
                 ctypes.CDLL(key, mode=ctypes.RTLD_GLOBAL)
-                loaded.append(key)
-                break
+                attempt.append(key)
             except OSError:
-                continue
+                attempt.clear()
+                break
+        if attempt:
+            loaded = attempt
+            break
     _cuda_preloaded = bool(loaded)
     return loaded
 
@@ -102,3 +113,24 @@ def detect_wsl2() -> bool:
     except OSError:
         return False
     return "microsoft" in version or "wsl2" in version
+
+
+def is_native_linux() -> bool:
+    """True on bare-metal Linux (not WSL2)."""
+    return sys.platform.startswith("linux") and not detect_wsl2()
+
+
+def is_native_linux_nvidia(*, profile: dict | None = None) -> bool:
+    """Bare-metal Linux with discrete NVIDIA VRAM (excludes WSL2, Apple, CPU-only)."""
+    if not is_native_linux():
+        return False
+    try:
+        from seiso.hardware.tiers import discrete_vram_total_mb
+
+        if profile is None:
+            from seiso.hardware.profile import hardware_profile
+
+            profile = hardware_profile()
+        return discrete_vram_total_mb(profile) > 0
+    except ImportError:
+        return False

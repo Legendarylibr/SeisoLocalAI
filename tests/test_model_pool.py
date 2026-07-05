@@ -77,6 +77,7 @@ def test_llama_gpu_layers_optimal_uses_short_ttl_cache(monkeypatch, tmp_path):
     gguf.write_bytes(b"gguf")
     calls: list[int] = []
 
+    monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: False)
     monkeypatch.setattr(
         mp, "fit_llama_gpu_layers", lambda _p, _r, _h: calls.append(1) or 32
     )
@@ -321,6 +322,9 @@ def test_llama_load_kwargs_cuda_defaults(monkeypatch):
     monkeypatch.setattr(platform, "system", lambda: "Linux")
     monkeypatch.setattr(platform, "machine", lambda: "x86_64")
     monkeypatch.setattr(os, "cpu_count", lambda: 24)
+    monkeypatch.setattr(
+        "seiso.inference.model_pool._available_cpu_count", lambda: 24
+    )
     monkeypatch.setattr("seiso.inference.model_pool._cuda_available", lambda: True)
     monkeypatch.setattr(
         "seiso.inference.model_pool._llama_gpu_offload_ok", lambda: True
@@ -386,6 +390,7 @@ def test_llama_layer_attempts_partial_descending(monkeypatch, tmp_path):
 
     gguf = tmp_path / "big.gguf"
     gguf.write_bytes(b"\x00" * 1024)
+    monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: False)
     monkeypatch.setattr(mp, "_llama_gpu_offload_ok", lambda: True)
     monkeypatch.setattr(mp, "fit_llama_gpu_layers", lambda _p, _r, _h: 24)
     monkeypatch.setattr("seiso.inference.backends.gguf_block_count", lambda _p: 32)
@@ -429,6 +434,7 @@ def test_llama_layer_attempts_unified_prefers_fitted_layers(monkeypatch, tmp_pat
 
     gguf = tmp_path / "heavy.gguf"
     gguf.write_bytes(b"\x00" * 1024)
+    monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: False)
     monkeypatch.setattr(platform, "system", lambda: "Darwin")
     monkeypatch.setattr(platform, "machine", lambda: "arm64")
     monkeypatch.setattr(mp, "_llama_gpu_offload_ok", lambda: True)
@@ -453,6 +459,7 @@ def test_llama_layer_attempts_mac_cpu_offload_can_be_disabled(
 
     gguf = tmp_path / "apple-big.gguf"
     gguf.write_bytes(b"\x00" * 1024)
+    monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: False)
     monkeypatch.setattr(platform, "system", lambda: "Darwin")
     monkeypatch.setattr(platform, "machine", lambda: "arm64")
     monkeypatch.setenv("SEISO_LLAMA_MAC_CPU_OFFLOAD", "0")
@@ -501,11 +508,38 @@ def test_llama_full_gpu_targets(monkeypatch):
 def test_llama_batch_defaults_are_speed_first(monkeypatch):
     import seiso.inference.model_pool as mp
 
-    monkeypatch.setattr(platform, "system", lambda: "Linux")
-    monkeypatch.setattr(platform, "machine", lambda: "x86_64")
+    monkeypatch.setattr(mp, "_gpu_offload_budget_mb", lambda: 24 * 1024)
     batch, ubatch = mp._llama_batch_defaults()
     assert batch == 4096
-    assert ubatch == 1024
+    assert ubatch == 1536
+
+
+def test_llama_batch_defaults_scale_for_edge_vram(monkeypatch):
+    import seiso.inference.model_pool as mp
+
+    for key in list(os.environ):
+        if key.startswith("SEISO_LLAMA_"):
+            monkeypatch.delenv(key, raising=False)
+    monkeypatch.setattr(mp, "_gpu_offload_budget_mb", lambda: 6144)
+    batch, ubatch = mp._llama_batch_defaults()
+    assert batch == 2048
+    assert ubatch == 512
+
+
+def test_native_linux_layer_attempts_use_vram_headroom(monkeypatch, tmp_path):
+    import seiso.inference.model_pool as mp
+
+    gguf = tmp_path / "big.gguf"
+    gguf.write_bytes(b"\x00" * 1024)
+    monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: True)
+    monkeypatch.setattr(mp, "_llama_gpu_offload_ok", lambda: True)
+    monkeypatch.setattr("seiso.inference.backends.gguf_block_count", lambda _p: 32)
+    monkeypatch.setattr(mp, "fit_llama_gpu_layers", lambda _p, _r, _h: 16)
+
+    attempts = mp._llama_layer_attempts(str(gguf), -1, 4096)
+
+    assert 16 in attempts
+    assert attempts[-1] == 0
 
 
 def test_gpu_offload_budget_mb_caps_unified_by_free_headroom(monkeypatch):
@@ -562,6 +596,7 @@ def test_refresh_headroom_stats_force_invalidates_cache(monkeypatch):
 def test_llama_batch_defaults_scale_on_apple_unified(monkeypatch):
     import seiso.inference.model_pool as mp
 
+    monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: False)
     monkeypatch.setattr(platform, "system", lambda: "Darwin")
     monkeypatch.setattr(platform, "machine", lambda: "arm64")
     monkeypatch.setattr(mp, "_gpu_offload_budget_mb", lambda: 36 * 1024)

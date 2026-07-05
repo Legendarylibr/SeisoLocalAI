@@ -97,10 +97,17 @@ def _configure_discrete_nvidia_llama_defaults(
     else:
         os.environ.setdefault("SEISO_LLAMA_GPU_LAYERS", "0")
         return
-    if not low and tier in (HardwareTier.WORKSTATION, HardwareTier.CAPABLE):
+    if not low and tier in (
+        HardwareTier.WORKSTATION,
+        HardwareTier.CAPABLE,
+        HardwareTier.MODEST,
+    ):
         _apply_llama_throughput_defaults(
             low=low, headroom=headroom, ram_gb=ram_gb, mlx=False
         )
+    elif tier == HardwareTier.EDGE and headroom >= 2560:
+        os.environ.setdefault("SEISO_LLAMA_BATCH", "512")
+        os.environ.setdefault("SEISO_LLAMA_UBATCH", "256")
 
 
 def apply_platform_memory_profile(
@@ -185,28 +192,13 @@ def apply_platform_memory_profile(
                 logging.getLogger(__name__).warning(
                     "SEISO_DATA_DIR on /mnt/ (Windows filesystem) — move to ~/ for better mmap performance"
                 )
-        if caps.get("nvidia_hardware") or (
-            caps.get("gpu_count", 0) > 0 and caps.get("vendor") == "nvidia"
-        ):
-            # Only request GPU offload when the installed llama-cpp-python
-            # wheel actually supports it; a CPU-only wheel would crash.
-            if _llama_nvidia_offload_ok():
-                os.environ.setdefault("SEISO_LLAMA_GPU_LAYERS", "-1")
-            else:
-                os.environ.setdefault("SEISO_LLAMA_GPU_LAYERS", "0")
-            if not low and tier in (HardwareTier.WORKSTATION, HardwareTier.CAPABLE):
-                os.environ.setdefault("SEISO_LLAMA_FLASH_ATTN", "true")
-                os.environ.setdefault("SEISO_LLAMA_OP_OFFLOAD", "true")
-                os.environ.setdefault("SEISO_LLAMA_OFFLOAD_KQV", "true")
-                if tier == HardwareTier.WORKSTATION:
-                    os.environ.setdefault("SEISO_LLAMA_BATCH", "4096")
-                    os.environ.setdefault("SEISO_LLAMA_UBATCH", "1024")
-                    os.environ.setdefault("SEISO_STREAM_BATCH_CHARS", "16")
-                else:
-                    os.environ.setdefault("SEISO_LLAMA_BATCH", "1536")
-                    os.environ.setdefault("SEISO_LLAMA_UBATCH", "512")
-        elif caps.get("train_platform") == "cpu" or not caps.get("gpu_count"):
-            os.environ.setdefault("SEISO_LLAMA_GPU_LAYERS", "0")
+        _configure_discrete_nvidia_llama_defaults(
+            low=low,
+            headroom=headroom,
+            ram_gb=ram_gb,
+            tier=tier,
+            caps=caps,
+        )
 
     return {
         "memory_profile": memory_profile_label(profile),
