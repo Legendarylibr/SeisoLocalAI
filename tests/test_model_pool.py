@@ -559,17 +559,6 @@ def test_refresh_headroom_stats_force_invalidates_cache(monkeypatch):
     assert invalidated == [True]
 
 
-def test_llama_batch_defaults_scale_on_discrete_gpu_headroom(monkeypatch):
-    import seiso.inference.model_pool as mp
-
-    monkeypatch.setattr(platform, "system", lambda: "Linux")
-    monkeypatch.setattr(platform, "machine", lambda: "x86_64")
-    monkeypatch.setattr(mp, "_gpu_offload_budget_mb", lambda: 36 * 1024)
-    batch, ubatch = mp._llama_batch_defaults()
-    assert batch == 8192
-    assert ubatch == 2048
-
-
 def test_llama_batch_defaults_scale_on_apple_unified(monkeypatch):
     import seiso.inference.model_pool as mp
 

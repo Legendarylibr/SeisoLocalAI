@@ -203,6 +203,8 @@ def _llama_speed_scale_enabled() -> bool:
 
 def _llama_batch_defaults() -> tuple[int, int]:
     """Speed-first llama.cpp prompt/decode batch defaults."""
+    if platform.system() == "Linux":
+        return 4096, 1024
     budget = _gpu_offload_budget_mb()
     if budget >= 32 * 1024:
         return 8192, 2048
@@ -223,9 +225,12 @@ def fit_llama_gpu_layers(model_path: str, requested: int, headroom_mb: int) -> i
 
     weight_mb = max(int(estimate_path_vram_mb(model_path)), 256)
     total_layers = gguf_block_count(model_path) or 64
-    kv_pct = 0.05 if _gpu_offload_budget_mb() >= 20 * 1024 else 0.08
-    kv_cap = 768 if kv_pct <= 0.05 else 1024
-    kv_reserve_mb = max(256, min(int(headroom_mb * kv_pct), kv_cap))
+    if platform.system() == "Linux":
+        kv_reserve_mb = max(256, min(int(headroom_mb * 0.08), 1024))
+    else:
+        kv_pct = 0.05 if _gpu_offload_budget_mb() >= 20 * 1024 else 0.08
+        kv_cap = 768 if kv_pct <= 0.05 else 1024
+        kv_reserve_mb = max(256, min(int(headroom_mb * kv_pct), kv_cap))
     avail_mb = headroom_mb - kv_reserve_mb
 
     if avail_mb >= int(weight_mb * 0.92):
