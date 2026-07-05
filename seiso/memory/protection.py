@@ -247,11 +247,9 @@ def llama_batch_headroom_mb(
     if not model_path or n_gpu_layers == 0:
         return free_mb
     path = Path(model_path)
-    if not path.is_file():
-        return free_mb
     try:
         weight_mb = int(estimate_path_vram_mb(path))
-        total_layers = gguf_total_layers(path)
+        total_layers = gguf_total_layers(path) if path.is_file() else 64
         if n_gpu_layers == -1:
             gpu_weight_mb = weight_mb
         else:

@@ -316,6 +316,53 @@ def test_platform_profile_native_linux_caps_startup_batches(monkeypatch):
     assert ubatch <= batch
 
 
+def test_platform_profile_native_linux_low_ram_caps_startup_batches(monkeypatch):
+    """Low host RAM on native Linux must not inherit large VRAM-only batch defaults."""
+    from seiso.hardware.tiers import HardwareTier
+    from seiso.memory.platform_profile import apply_platform_memory_profile
+
+    for key in list(os.environ):
+        if key.startswith("SEISO_LLAMA_"):
+            monkeypatch.delenv(key, raising=False)
+
+    profile = {
+        "ram_gb": 12,
+        "gpus": [{"name": "NVIDIA GeForce RTX 4090", "vram_total_mb": 24576}],
+        "backend": "cuda",
+        "platform": "Linux",
+    }
+    monkeypatch.setattr(platform, "system", lambda: "Linux")
+    monkeypatch.setattr("seiso.platform.detect_wsl2", lambda: False)
+    monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: True)
+    monkeypatch.setattr(
+        "seiso.memory.platform_profile.classify_tier",
+        lambda _p: HardwareTier.WORKSTATION,
+    )
+    monkeypatch.setattr(
+        "seiso.memory.platform_profile.vram_headroom_mb", lambda _p: 24576
+    )
+    monkeypatch.setattr(
+        "seiso.memory.platform_profile.training_capabilities",
+        lambda: {
+            "gpu_count": 1,
+            "train_platform": "cpu",
+            "nvidia_hardware": True,
+            "vendor": "nvidia",
+        },
+    )
+    monkeypatch.setattr(
+        "seiso.inference.model_pool._llama_gpu_offload_ok", lambda: True
+    )
+
+    apply_platform_memory_profile(profile=profile)
+
+    batch = int(os.environ["SEISO_LLAMA_BATCH"])
+    ubatch = int(os.environ["SEISO_LLAMA_UBATCH"])
+    assert batch <= 512
+    assert ubatch <= 256
+    assert ubatch <= batch
+
+
 def test_deferred_preflight_never_bypasses_when_model_exceeds_gpu_capacity(
     tmp_path, monkeypatch
 ):

@@ -117,6 +117,9 @@ def apply_platform_memory_profile(
                 if is_native_linux_nvidia(profile=profile):
                     batch = min(batch, 2048)
                     ubatch = min(ubatch, 512)
+                    if low:
+                        batch = min(batch, 512)
+                        ubatch = min(ubatch, 256)
                 os.environ.setdefault("SEISO_LLAMA_BATCH", str(batch))
                 os.environ.setdefault("SEISO_LLAMA_UBATCH", str(ubatch))
             if not low and tier in (HardwareTier.WORKSTATION, HardwareTier.CAPABLE):
