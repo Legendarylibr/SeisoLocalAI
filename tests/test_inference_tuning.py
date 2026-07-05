@@ -8,7 +8,6 @@ from seiso.inference.tuning import (
     generate_with_cache_fallback,
     llama_completion_kwargs,
     mlx_stream_kwargs,
-    resolve_llama_n_ctx,
     torch_generate_kwargs,
 )
 
@@ -25,39 +24,12 @@ def test_stream_batch_chars_speed_default(monkeypatch):
     assert _stream_batch_chars() == 16
 
 
-def test_torch_stream_timeout_default_is_responsive(monkeypatch):
-    from seiso.inference.runner import _torch_stream_timeout_s
-
-    monkeypatch.delenv("SEISO_TORCH_STREAM_TIMEOUT_S", raising=False)
-    assert _torch_stream_timeout_s() == 0.25
-
-
 def test_extract_mlx_token_text_from_response_object():
     assert extract_mlx_token_text(_FakeMlxToken("hello")) == "hello"
     assert extract_mlx_token_text(_FakeMlxToken("")) is None
 
 
-def test_configure_torch_inference_mps_sets_matmul_precision(monkeypatch):
-    pytest = __import__("pytest")
-    torch = pytest.importorskip("torch")
-    if not getattr(getattr(torch.backends, "mps", None), "is_available", lambda: False)():
-        pytest.skip("MPS not available")
-
-    from seiso.inference import tuning
-
-    tuning._torch_configured = False
-    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
-
-    tuning.configure_torch_inference()
-
-    assert torch.get_float32_matmul_precision() == "high"
-
-
-def test_mlx_stream_kwargs_greedy_by_default(monkeypatch):
-    monkeypatch.delenv("SEISO_MLX_PREFILL_STEP", raising=False)
-    monkeypatch.setattr(
-        "seiso.inference.tuning._default_mlx_prefill_step", lambda: 4096
-    )
+def test_mlx_stream_kwargs_greedy_by_default():
     assert mlx_stream_kwargs({"max_tokens": 128}) == {
         "max_tokens": 128,
         "prefill_step_size": 4096,
@@ -65,10 +37,6 @@ def test_mlx_stream_kwargs_greedy_by_default(monkeypatch):
 
 
 def test_mlx_stream_kwargs_does_not_scale_prefill_by_headroom(monkeypatch):
-    monkeypatch.delenv("SEISO_MLX_PREFILL_STEP", raising=False)
-    monkeypatch.setattr(
-        "seiso.inference.tuning._default_mlx_prefill_step", lambda: 4096
-    )
     monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 3072)
     assert mlx_stream_kwargs({"max_tokens": 64})["prefill_step_size"] == 4096
 
@@ -153,29 +121,6 @@ def test_estimate_llama_n_ctx_sizes_to_prompt(monkeypatch):
     n_ctx = estimate_llama_n_ctx(messages, max_tokens=256)
     assert 2048 <= n_ctx <= 131072
     assert n_ctx % 512 == 0
-
-
-def test_resolve_llama_n_ctx_caches_on_payload(monkeypatch):
-    monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 16384)
-    calls = {"count": 0}
-    original = estimate_llama_n_ctx
-
-    def _counting_estimate(*args, **kwargs):
-        calls["count"] += 1
-        return original(*args, **kwargs)
-
-    monkeypatch.setattr(
-        "seiso.inference.tuning.estimate_llama_n_ctx", _counting_estimate
-    )
-    payload = {
-        "messages": [{"role": "user", "content": "hello"}],
-        "max_tokens": 128,
-    }
-    first = resolve_llama_n_ctx(payload, "/tmp/model.gguf")
-    second = resolve_llama_n_ctx(payload, "/tmp/model.gguf")
-    assert first == second
-    assert payload["n_ctx"] == first
-    assert calls["count"] == 1
 
 
 def test_llama_completion_kwargs_greedy():

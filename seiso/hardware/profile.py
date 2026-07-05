@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import platform
 import shutil
+import subprocess
 import time
 from typing import Any
 
@@ -69,9 +70,44 @@ def _cpu_cores() -> int:
 
 
 def _nvidia_smi_metrics() -> dict[int, dict[str, float]]:
-    from seiso.security.nvidia_boundary import query_nvidia_gpu_live_metrics
+    from seiso.security.nvidia_boundary import resolve_nvidia_smi_executable
 
-    return query_nvidia_gpu_live_metrics()
+    out: dict[int, dict[str, float]] = {}
+    smi = resolve_nvidia_smi_executable()
+    if not smi:
+        return out
+    try:
+        result = subprocess.run(
+            [
+                smi,
+                "--query-gpu=index,utilization.gpu,memory.used,memory.total,temperature.gpu",
+                "--format=csv,noheader,nounits",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=3,
+            check=False,
+        )
+        if result.returncode != 0:
+            return out
+        for line in result.stdout.strip().splitlines():
+            parts = [p.strip() for p in line.split(",")]
+            if len(parts) < 5:
+                continue
+            idx = int(parts[0])
+            out[idx] = {
+                "utilization_pct": (
+                    float(parts[1]) if parts[1] not in ("[N/A]", "N/A") else 0.0
+                ),
+                "vram_used_mb": float(parts[2]),
+                "vram_total_mb": float(parts[3]),
+                "temperature_c": (
+                    float(parts[4]) if parts[4] not in ("[N/A]", "N/A") else 0.0
+                ),
+            }
+    except (FileNotFoundError, subprocess.TimeoutExpired, ValueError, OSError):
+        pass
+    return out
 
 
 def detect_gpus() -> list[dict[str, Any]]:
@@ -142,12 +178,6 @@ def enrich_profile_base(profile: dict[str, Any]) -> dict[str, Any]:
         "preferred_inference_backend": preferred_inference_backend(profile),
         "training_defaults": training_defaults(profile),
     }
-
-
-def invalidate_hardware_profile_cache() -> None:
-    """Mark cached profile stale — next read refreshes without blocking the caller."""
-    global _profile_cache_ts
-    _profile_cache_ts = 0.0
 
 
 def hardware_profile(*, force_refresh: bool = False) -> dict[str, Any]:

@@ -5,7 +5,6 @@ import { HardwareProfileProvider } from "@/context/HardwareProfileContext";
 import { MetricsProvider } from "@/context/MetricsContext";
 import { PlatformSettingsProvider, usePlatformSettings } from "@/context/PlatformSettingsContext";
 import { TrainingModelsProvider } from "@/context/TrainingModelsContext";
-import { ToastProvider } from "@/context/ToastContext";
 import { Layout } from "@/components/Layout";
 import { SeisoLogoMark } from "@/components/SeisoLogo";
 import { AuthPage } from "@/pages/AuthPage";
@@ -111,17 +110,15 @@ function AppRoutes() {
 export function App() {
   return (
     <AuthProvider>
-      <ToastProvider>
-        <PlatformSettingsProvider>
-          <HardwareProfileProvider>
-            <TrainingModelsProvider>
-              <MetricsProvider>
-                <AppRoutes />
-              </MetricsProvider>
-            </TrainingModelsProvider>
-          </HardwareProfileProvider>
-        </PlatformSettingsProvider>
-      </ToastProvider>
+      <PlatformSettingsProvider>
+        <HardwareProfileProvider>
+          <TrainingModelsProvider>
+            <MetricsProvider>
+              <AppRoutes />
+            </MetricsProvider>
+          </TrainingModelsProvider>
+        </HardwareProfileProvider>
+      </PlatformSettingsProvider>
     </AuthProvider>
   );
 }

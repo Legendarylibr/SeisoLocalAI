@@ -50,9 +50,6 @@ class KnowledgeOrchestrator(Orchestrator):
         kb_dir.mkdir(parents=True, exist_ok=True)
 
         text = source.read_text(encoding="utf-8", errors="replace")
-        from forge.tools.sanitize import normalize_text
-
-        text = normalize_text(text)
         source_hash = sha256_file(source)
         chunks = self._chunk(text)
         self._emit_log(job_id, f"Ingested {source.name}: {len(chunks)} chunks")

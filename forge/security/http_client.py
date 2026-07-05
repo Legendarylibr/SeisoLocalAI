@@ -51,19 +51,6 @@ async def pinned_async_client(endpoint: PinnedEndpoint, *, timeout: float = 120.
             yield client
 
 
-async def pinned_get(
-    endpoint: PinnedEndpoint,
-    path: str,
-    *,
-    params: dict[str, str] | None = None,
-    headers: dict[str, str] | None = None,
-    timeout: float = 120.0,
-) -> httpx.Response:
-    url = f"{endpoint.base_url.rstrip('/')}{path}"
-    async with pinned_async_client(endpoint, timeout=timeout) as client:
-        return await client.get(url, params=params or {}, headers=headers or {})
-
-
 async def pinned_post(
     endpoint: PinnedEndpoint,
     path: str,

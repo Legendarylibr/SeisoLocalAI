@@ -117,18 +117,6 @@ def fit_headroom_mb(profile: dict[str, Any]) -> int:
     return vram_headroom_mb(profile)
 
 
-def ram_headroom_mb(profile: dict[str, Any]) -> int:
-    """Free system RAM for mmap and host-side llama.cpp allocations."""
-    try:
-        import psutil  # type: ignore
-
-        avail = psutil.virtual_memory().available / (1024**2)
-        return max(0, int(avail) - _RAM_HEADROOM_RESERVE_MB)
-    except ImportError:
-        ram = float(profile.get("ram_gb") or 8)
-        return max(0, int(ram * 1024 * 0.45) - _RAM_HEADROOM_RESERVE_MB)
-
-
 def vram_headroom_mb(profile: dict[str, Any]) -> int:
     """Free memory headroom for fit checks, using measured available memory."""
     gpus = profile.get("gpus") or []
@@ -138,7 +126,13 @@ def vram_headroom_mb(profile: dict[str, Any]) -> int:
             return best
     tier = classify_tier(profile)
     if tier in (HardwareTier.APPLE_UNIFIED, HardwareTier.CPU_ONLY):
-        return ram_headroom_mb(profile)
+        try:
+            import psutil  # type: ignore
+
+            avail = psutil.virtual_memory().available / (1024**2)
+            return max(0, int(avail) - _RAM_HEADROOM_RESERVE_MB)
+        except ImportError:
+            return effective_budget_mb(profile)
     return effective_budget_mb(profile)
 
 

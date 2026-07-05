@@ -19,47 +19,6 @@ def _env_enabled(name: str) -> bool:
     return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
 
 
-def _validate_code_workspace(settings: ForgeSettings) -> None:
-    from forge.services.code_workspace import (
-        code_workspace_explicitly_configured,
-        resolve_code_workspace,
-        warn_workspace_data_overlap,
-        workspace_overlaps_data_dir,
-    )
-
-    tools_enabled = (
-        settings.allow_tools
-        or settings.allow_code_exec
-        or settings.allow_openai_tools
-    )
-    if tools_enabled and not code_workspace_explicitly_configured(settings):
-        raise RuntimeError(
-            "Tools or code execution require an explicit code workspace outside "
-            "SEISO_DATA_DIR. Set SEISO_CODE_WORKSPACE to your project directory."
-        )
-
-    try:
-        root = resolve_code_workspace(settings)
-    except FileNotFoundError as exc:
-        if tools_enabled:
-            raise RuntimeError(
-                "Tools or code execution require a valid SEISO_CODE_WORKSPACE directory"
-            ) from exc
-        logger.warning("Code workspace not configured yet: %s", exc)
-        return
-
-    if workspace_overlaps_data_dir(root, settings.data_dir):
-        if tools_enabled:
-            raise RuntimeError(
-                f"Code workspace {root} overlaps SEISO data directory "
-                f"{settings.data_dir}. Point SEISO_CODE_WORKSPACE at a separate "
-                "project directory before enabling tools."
-            )
-        warn_workspace_data_overlap(root, settings.data_dir)
-    else:
-        logger.info("Seiso Code workspace: %s", root)
-
-
 def _set_native_linux_nvidia_boundary_for_local_forge(settings: ForgeSettings) -> bool:
     """Approve local native-Linux Forge training jobs for trusted host-venv CUDA."""
     from seiso.security.nvidia_boundary import (
@@ -130,8 +89,6 @@ def validate_security_settings(settings: ForgeSettings) -> None:
 
     if settings.debug:
         logger.warning("SEISO_DEBUG=true exposes /api/docs — disable in production.")
-
-    _validate_code_workspace(settings)
 
     _set_native_linux_nvidia_boundary_for_local_forge(settings)
 
