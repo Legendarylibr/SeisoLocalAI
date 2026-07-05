@@ -276,6 +276,21 @@ def _estimate_gguf_params_b(path: Path, weight_mb: int) -> float:
     return max(1.0, float(weight_mb) / 1024.0 / 0.55)
 
 
+def _gguf_exact_kv_per_token_mb(path: Path) -> float | None:
+    """Exact fp16 KV MB/token from GGUF attention metadata, or None."""
+    if not path.is_file():
+        return None
+    try:
+        from seiso.inference.backends import gguf_kv_bytes_per_token
+
+        kv_bytes = gguf_kv_bytes_per_token(str(path))
+    except Exception:
+        return None
+    if not kv_bytes:
+        return None
+    return kv_bytes / (1024**2)
+
+
 def llama_kv_cache_reserve_mb(
     model_path: str | Path,
     *,
@@ -285,7 +300,12 @@ def llama_kv_cache_reserve_mb(
     weight_mb: int | None = None,
     free_mb: int = 0,
 ) -> int:
-    """Conservative VRAM reserve for llama.cpp KV cache at the requested context."""
+    """VRAM reserve for llama.cpp KV cache at the requested context.
+
+    Prefers exact GGUF attention geometry (GQA-aware, correct on every NVIDIA
+    card); falls back to a conservative parameter-count heuristic when the
+    metadata is unavailable.
+    """
     if n_gpu_layers == 0:
         return 0
     path = Path(model_path)
@@ -295,11 +315,18 @@ def llama_kv_cache_reserve_mb(
         total_layers = gguf_total_layers(path)
 
     layer_fraction = _gpu_layer_fraction(n_gpu_layers, total_layers)
+    ctx = max(_MIN_LLAMA_CTX, min(int(n_ctx), _MAX_LLAMA_CTX))
+
+    exact_per_token_mb = _gguf_exact_kv_per_token_mb(path)
+    if exact_per_token_mb is not None:
+        # 10% covers KV padding and per-sequence bookkeeping.
+        estimated = int(ctx * exact_per_token_mb * 1.10 * layer_fraction)
+        return max(256, estimated)
+
     params_b = _estimate_gguf_params_b(path, int(weight_mb))
     # Approximate fp16 K+V cache per token. The coefficient tracks observed
     # llama-family/GQA memory by parameter scale while keeping small models fast.
     per_token_mb = max(0.16, min(params_b * 0.045, 3.5))
-    ctx = max(_MIN_LLAMA_CTX, min(int(n_ctx), _MAX_LLAMA_CTX))
     estimated = int(ctx * per_token_mb * layer_fraction)
     legacy_floor = max(256, min(int(max(free_mb, 0) * 0.08), 1024))
     return max(legacy_floor, estimated)
