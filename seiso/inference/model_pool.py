@@ -561,6 +561,7 @@ def _load_llama_model(
         use_prompt_cache = profile_opts.pop("_seiso_prompt_cache", load_tier == "normal")
         if profile_opts.get("flash_attn") is False:
             load_kwargs.pop("flash_attn", None)
+            profile_opts.pop("flash_attn", None)
         load_kwargs.update(profile_opts)
         load_kwargs.update(kv_quant)
         load_kwargs["n_gpu_layers"] = layers
