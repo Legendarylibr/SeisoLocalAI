@@ -4,6 +4,7 @@ import { api, GuideStep } from "@/lib/api";
 import { useLiveMetrics } from "@/context/MetricsContext";
 import { useHardwareProfile } from "@/hooks/useHardware";
 import { chatPath } from "@/lib/chatModel";
+import { uiHeadroomMbFromProfile } from "@/lib/hubHardware";
 import { PageHeader } from "@/components/PageHeader";
 import {
   IconChat,
@@ -77,8 +78,7 @@ export function DashboardPage() {
     return activeGoal.path;
   }, [activeGoal, hw?.recommended_chat_repo]);
 
-  const vramTotal = hw?.gpus[0]?.vram_total_mb;
-  const vramUsed = hw?.gpus[0]?.vram_used_mb;
+  const vramBudgetMb = uiHeadroomMbFromProfile(hw);
 
   return (
     <div className="dashboard">
@@ -213,9 +213,9 @@ export function DashboardPage() {
               </li>
             ))}
           </ol>
-          {vramTotal != null && vramTotal > 0 && (
+          {vramBudgetMb != null && vramBudgetMb > 0 && (
             <p className="muted-text guide-vram">
-              VRAM headroom: ~{Math.max(0, Math.round((vramTotal - (vramUsed ?? 0)) / 1024))} GB available
+              VRAM budget: ~{Math.round(vramBudgetMb / 1024)} GB on this machine
             </p>
           )}
         </section>

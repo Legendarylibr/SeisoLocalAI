@@ -120,8 +120,10 @@ def fit_headroom_mb(profile: dict[str, Any]) -> int:
 def vram_headroom_mb(profile: dict[str, Any]) -> int:
     """Free memory headroom for fit checks, using measured available memory."""
     gpus = profile.get("gpus") or []
-    if gpus:
-        best = _vram_headroom_mb(gpus)
+    discrete = _discrete_gpu_entries(gpus)
+    probe = discrete or gpus
+    if probe:
+        best = _vram_headroom_mb(probe)
         if best > 0:
             return best
     tier = classify_tier(profile)
@@ -134,6 +136,22 @@ def vram_headroom_mb(profile: dict[str, Any]) -> int:
         except ImportError:
             return effective_budget_mb(profile)
     return effective_budget_mb(profile)
+
+
+def performance_headroom_mb(profile: dict[str, Any]) -> int:
+    """Headroom for tuning/UI — GPU capacity on discrete cards, live free memory elsewhere."""
+    tier = classify_tier(profile)
+    if tier in (HardwareTier.APPLE_UNIFIED, HardwareTier.CPU_ONLY):
+        return vram_headroom_mb(profile)
+    total = discrete_vram_total_mb(profile)
+    if total > 0:
+        return total
+    return vram_headroom_mb(profile)
+
+
+def ui_headroom_mb(profile: dict[str, Any]) -> int:
+    """Alias for performance_headroom_mb (Forge UI + platform tuning)."""
+    return performance_headroom_mb(profile)
 
 
 def memory_headroom_label(profile: dict[str, Any]) -> str:

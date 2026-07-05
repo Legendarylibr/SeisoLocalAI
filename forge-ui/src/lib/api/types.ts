@@ -179,10 +179,12 @@ export type VramStatus = {
   };
   active_model: string | null;
   headroom_mb: number;
+  free_vram_mb?: number;
   memory_label: string;
   ram_gb?: number;
   apple_unified?: boolean;
   tier?: string;
+  platform?: string;
   memory_profile?: "low" | "balanced";
   recommended_max_chat?: string | null;
 };
@@ -190,6 +192,7 @@ export type VramStatus = {
 export type HardwareSummary = {
   tier: string;
   tier_label: string;
+  platform?: string;
   backend: string;
   ram_gb: number;
   gpu_count: number;

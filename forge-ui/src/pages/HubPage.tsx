@@ -3,7 +3,15 @@ import { Link, useNavigate } from "react-router-dom";
 import { api, CatalogModel, HardwareSummary, LocalModel, VramStatus } from "@/lib/api";
 import { usePlatformSettings } from "@/context/PlatformSettingsContext";
 import { chatPath, chatPathForLocalModel, modelMemoryBlocked, modelMemoryBlockReason } from "@/lib/chatModel";
-import { formatLoadedModelLabel, hasLoadedInferenceMemory, hubRamTierHint } from "@/lib/hubHardware";
+import { FreeMemoryButton } from "@/components/FreeMemoryButton";
+import {
+  formatLoadedModelLabel,
+  hasLoadedInferenceMemory,
+  hubRamTierHint,
+  isDiscreteGpuPlatform,
+  loadHeadroomMb,
+  uiHeadroomMbFromSummary,
+} from "@/lib/hubHardware";
 import { trainPath } from "@/lib/hubDownload";
 import { HardwareFitBadge } from "@/components/HardwareFitBadge";
 import { ModelCardSkeleton } from "@/components/ModelCardSkeleton";
@@ -160,8 +168,11 @@ export function HubPage() {
     return () => clearTimeout(t);
   }, [refreshCatalog]);
 
+  const hubHeadroomMb = uiHeadroomMbFromSummary(hwSummary);
+  const hubLoadHeadroomMb = loadHeadroomMb(hwSummary, vramStatus?.free_vram_mb);
+
   const openChat = (model: CatalogModel) => {
-    if (modelMemoryBlocked(model, hwSummary?.vram_headroom_mb)) {
+    if (modelMemoryBlocked(model, hubLoadHeadroomMb)) {
       window.alert(modelMemoryBlockReason(model));
       return;
     }
@@ -211,21 +222,33 @@ export function HubPage() {
           <div className="hub-hw-strip-main">
             <span className="trust-badge">{hwSummary.tier_label}</span>
             <span className="muted-text">
-              ~{Math.round((vramStatus?.headroom_mb ?? hwSummary.vram_headroom_mb) / 1024)} GB{" "}
-              {vramStatus?.memory_label || hwSummary.memory_headroom_label || "memory"} free
+              ~{Math.round((vramStatus?.headroom_mb ?? hubHeadroomMb ?? 0) / 1024)} GB{" "}
+              {vramStatus?.memory_label || hwSummary.memory_headroom_label || "memory"}
+              {(vramStatus?.apple_unified ||
+                hwSummary.tier === "apple_unified" ||
+                hwSummary.tier === "cpu_only")
+                ? " free"
+                : ""}
               {" · "}
               loaded: {formatLoadedModelLabel(vramStatus)}
             </span>
             {hasLoadedInferenceMemory(vramStatus) && (
-              <button
-                type="button"
-                className="btn btn-sm"
+              <FreeMemoryButton
+                hw={hwSummary}
+                vram={vramStatus}
+                loading={freeingMemory}
                 onClick={() => void handleFreeMemory()}
-                disabled={freeingMemory}
-              >
-                {freeingMemory ? "Freeing…" : "Free memory"}
-              </button>
+              />
             )}
+            {isDiscreteGpuPlatform(hwSummary) &&
+              hasLoadedInferenceMemory(vramStatus) &&
+              vramStatus?.free_vram_mb != null &&
+              vramStatus.free_vram_mb < 4096 && (
+                <span className="free-memory-vram-hint">
+                  Low free VRAM — unload before loading another model, or switch models in Chat (auto-releases
+                  the previous one).
+                </span>
+              )}
           </div>
           {ramTierHint && <p className="muted-text hub-hw-tier-hint">{ramTierHint}</p>}
           {recommendedRepo && (

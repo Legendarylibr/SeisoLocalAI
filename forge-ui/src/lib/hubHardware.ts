@@ -1,4 +1,82 @@
-import type { HardwareSummary, VramStatus } from "@/lib/api";
+import type { HardwareProfile, HardwareSummary, VramStatus } from "@/lib/api";
+
+type HeadroomSource = {
+  tier?: string;
+  effective_vram_mb?: number;
+  vram_headroom_mb?: number;
+};
+
+/** GPU capacity on discrete cards; live free RAM/VRAM on Apple unified and CPU-only. */
+export function uiHeadroomMb(hw: HeadroomSource | null | undefined): number | undefined {
+  if (!hw) return undefined;
+  if (hw.tier === "apple_unified" || hw.tier === "cpu_only") {
+    return hw.vram_headroom_mb;
+  }
+  return hw.effective_vram_mb ?? hw.vram_headroom_mb;
+}
+
+/**
+ * Runtime load budget — on discrete GPUs uses the smaller of capacity and live free VRAM
+ * so model blocking stays accurate when another model or app already occupies VRAM.
+ */
+export function loadHeadroomMb(
+  hw: HeadroomSource | null | undefined,
+  freeVramMb?: number | null,
+): number | undefined {
+  const capacity = uiHeadroomMb(hw);
+  if (capacity == null) return freeVramMb ?? undefined;
+  if (isDiscreteGpuPlatform(hw) && freeVramMb != null && freeVramMb > 0) {
+    return Math.min(capacity, freeVramMb);
+  }
+  return capacity;
+}
+
+export function uiHeadroomMbFromSummary(
+  summary: HardwareSummary | null | undefined,
+): number | undefined {
+  return uiHeadroomMb(summary);
+}
+
+export function uiHeadroomMbFromProfile(
+  profile: HardwareProfile | null | undefined,
+): number | undefined {
+  return uiHeadroomMb(profile);
+}
+
+/** Discrete NVIDIA/AMD GPU — not Apple unified or CPU-only. */
+export function isDiscreteGpuPlatform(hw: HeadroomSource | null | undefined): boolean {
+  if (!hw?.tier) return false;
+  return hw.tier !== "apple_unified" && hw.tier !== "cpu_only";
+}
+
+/** Native Linux workstation path — discrete GPU VRAM wording. */
+export function isNativeLinuxVramPlatform(
+  hw: (HeadroomSource & { platform?: string }) | null | undefined,
+): boolean {
+  if (!isDiscreteGpuPlatform(hw)) return false;
+  const platform = hw?.platform?.toLowerCase() ?? "";
+  return platform === "linux" || platform === "";
+}
+
+export function freeMemoryButtonLabel(hw: HeadroomSource | null | undefined): string {
+  return isDiscreteGpuPlatform(hw) ? "Free VRAM" : "Free memory";
+}
+
+export function freeMemoryButtonHint(
+  hw: (HeadroomSource & { platform?: string }) | null | undefined,
+  loadedLabel: string | null | undefined,
+): string {
+  const action = freeMemoryButtonLabel(hw);
+  const loaded = loadedLabel && loadedLabel !== "Nothing loaded" ? loadedLabel : null;
+  if (isNativeLinuxVramPlatform(hw)) {
+    return loaded
+      ? `Unload ${loaded} from GPU VRAM before switching models (${action} keeps your selection).`
+      : `${action} — unload the active model from GPU VRAM (keeps your selection).`;
+  }
+  return loaded
+    ? `Unload ${loaded} from RAM/VRAM (${action} keeps your selection).`
+    : `${action} — unload the active model from RAM/VRAM (keeps your selection).`;
+}
 
 /** RAM-tier hint for Hub hardware strip (Mac + generic tiers). */
 export function hubRamTierHint(hw: HardwareSummary | null, vram: VramStatus | null): string | null {
