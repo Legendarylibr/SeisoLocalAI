@@ -6,259 +6,28 @@ import json
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 import aiosqlite
 
 from forge.db.crypto import decrypt_field, encrypt_field
-
-ENCRYPTED_COLUMNS: dict[str, tuple[str, ...]] = {
-    "chat_messages": ("content", "metadata_json"),
-    "providers": ("config_json",),
-}
+from forge.db.schema import (
+    ENCRYPTED_COLUMNS,
+    EXPORT_LIST_COLUMNS,
+    JOB_ERROR_TABLES,
+    RL_QUANT_LIST_COLUMNS,
+    SCHEMA,
+    STAGE_PIPELINE_LIST_COLUMNS,
+    TRAINING_LIST_COLUMNS,
+    UPSERT_MODEL_SQL,
+)
+from forge.db.sql_helpers import column_list, config_job_table
+from forge.db.sql_helpers import now as utc_now
 
 
 class DatabaseCryptoError(RuntimeError):
     """Raised when encrypted database fields cannot be decrypted safely."""
-
-
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS users (
-    id TEXT PRIMARY KEY,
-    email TEXT UNIQUE NOT NULL,
-    password_hash TEXT NOT NULL,
-    display_name TEXT,
-    created_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS projects (
-    id TEXT PRIMARY KEY,
-    user_id TEXT NOT NULL,
-    name TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    FOREIGN KEY (user_id) REFERENCES users(id)
-);
-
-CREATE TABLE IF NOT EXISTS local_models (
-    id TEXT PRIMARY KEY,
-    user_id TEXT,
-    name TEXT NOT NULL,
-    path TEXT NOT NULL,
-    source TEXT,
-    format TEXT,
-    size_bytes INTEGER DEFAULT 0,
-    metadata_json TEXT DEFAULT '{}',
-    created_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS training_jobs (
-    id TEXT PRIMARY KEY,
-    user_id TEXT NOT NULL,
-    project_id TEXT,
-    status TEXT NOT NULL,
-    config_json TEXT NOT NULL,
-    checkpoint_path TEXT,
-    metrics_json TEXT DEFAULT '{}',
-    error_text TEXT,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS export_jobs (
-    id TEXT PRIMARY KEY,
-    user_id TEXT NOT NULL,
-    status TEXT NOT NULL,
-    config_json TEXT NOT NULL,
-    output_paths_json TEXT DEFAULT '{}',
-    error_text TEXT,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS rl_quant_jobs (
-    id TEXT PRIMARY KEY,
-    user_id TEXT NOT NULL,
-    status TEXT NOT NULL,
-    config_json TEXT NOT NULL,
-    output_dir TEXT,
-    recommendation_path TEXT,
-    recommendation_json TEXT DEFAULT '{}',
-    gguf_quants_json TEXT DEFAULT '[]',
-    error_text TEXT,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS compress_jobs (
-    id TEXT PRIMARY KEY,
-    user_id TEXT NOT NULL,
-    status TEXT NOT NULL,
-    config_json TEXT NOT NULL,
-    output_dir TEXT,
-    run_dir TEXT,
-    model_dir TEXT,
-    stages_json TEXT DEFAULT '[]',
-    stage_results_json TEXT DEFAULT '{}',
-    error_text TEXT,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS distill_rl_jobs (
-    id TEXT PRIMARY KEY,
-    user_id TEXT NOT NULL,
-    status TEXT NOT NULL,
-    config_json TEXT NOT NULL,
-    output_dir TEXT,
-    run_dir TEXT,
-    model_dir TEXT,
-    stages_json TEXT DEFAULT '[]',
-    stage_results_json TEXT DEFAULT '{}',
-    error_text TEXT,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS chat_threads (
-    id TEXT PRIMARY KEY,
-    user_id TEXT NOT NULL,
-    project_id TEXT,
-    title TEXT NOT NULL,
-    model_id TEXT,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS chat_messages (
-    id TEXT PRIMARY KEY,
-    thread_id TEXT NOT NULL,
-    role TEXT NOT NULL,
-    content TEXT NOT NULL,
-    metadata_json TEXT DEFAULT '{}',
-    created_at TEXT NOT NULL,
-    FOREIGN KEY (thread_id) REFERENCES chat_threads(id)
-);
-
-CREATE TABLE IF NOT EXISTS knowledge_bases (
-    id TEXT PRIMARY KEY,
-    user_id TEXT NOT NULL,
-    name TEXT NOT NULL,
-    path TEXT NOT NULL,
-    chunk_count INTEGER DEFAULT 0,
-    created_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS recipe_jobs (
-    id TEXT PRIMARY KEY,
-    user_id TEXT NOT NULL,
-    name TEXT NOT NULL,
-    status TEXT NOT NULL,
-    recipe_json TEXT NOT NULL,
-    output_path TEXT,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS providers (
-    id TEXT PRIMARY KEY,
-    user_id TEXT NOT NULL,
-    name TEXT NOT NULL,
-    provider_type TEXT NOT NULL,
-    config_json TEXT NOT NULL,
-    created_at TEXT NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_models_user ON local_models(user_id);
-CREATE INDEX IF NOT EXISTS idx_models_user_created ON local_models(user_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_models_user_path ON local_models(user_id, path);
-CREATE INDEX IF NOT EXISTS idx_models_user_name ON local_models(user_id, name);
-CREATE INDEX IF NOT EXISTS idx_threads_user ON chat_threads(user_id);
-CREATE INDEX IF NOT EXISTS idx_jobs_user ON training_jobs(user_id);
-CREATE INDEX IF NOT EXISTS idx_jobs_user_created ON training_jobs(user_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_messages_thread ON chat_messages(thread_id);
-CREATE INDEX IF NOT EXISTS idx_messages_thread_created ON chat_messages(thread_id, created_at ASC);
-CREATE INDEX IF NOT EXISTS idx_export_jobs_user ON export_jobs(user_id);
-CREATE INDEX IF NOT EXISTS idx_export_jobs_user_created ON export_jobs(user_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_compress_jobs_user ON compress_jobs(user_id);
-CREATE INDEX IF NOT EXISTS idx_compress_jobs_user_created ON compress_jobs(user_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_distill_rl_jobs_user ON distill_rl_jobs(user_id);
-CREATE INDEX IF NOT EXISTS idx_distill_rl_jobs_user_created ON distill_rl_jobs(user_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_rl_quant_jobs_user ON rl_quant_jobs(user_id);
-CREATE INDEX IF NOT EXISTS idx_rl_quant_jobs_user_created ON rl_quant_jobs(user_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_recipe_jobs_user ON recipe_jobs(user_id);
-CREATE INDEX IF NOT EXISTS idx_providers_user ON providers(user_id);
-CREATE INDEX IF NOT EXISTS idx_providers_user_created ON providers(user_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_knowledge_bases_user ON knowledge_bases(user_id);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_models_user_source ON local_models(user_id, source);
-CREATE INDEX IF NOT EXISTS idx_threads_user_updated ON chat_threads(user_id, updated_at DESC);
-"""
-
-_TRAINING_LIST_COLUMNS = (
-    "id",
-    "user_id",
-    "project_id",
-    "status",
-    "config_json",
-    "created_at",
-    "updated_at",
-)
-_EXPORT_LIST_COLUMNS = ("id", "user_id", "status", "created_at", "updated_at")
-_STAGE_PIPELINE_LIST_COLUMNS = (
-    "id",
-    "user_id",
-    "status",
-    "output_dir",
-    "run_dir",
-    "model_dir",
-    "stages_json",
-    "created_at",
-    "updated_at",
-)
-_RL_QUANT_LIST_COLUMNS = (
-    "id",
-    "user_id",
-    "status",
-    "output_dir",
-    "recommendation_path",
-    "gguf_quants_json",
-    "created_at",
-    "updated_at",
-)
-_UPSERT_MODEL_SQL = """INSERT INTO local_models
-   (id, user_id, name, path, source, format, size_bytes, metadata_json, created_at)
-   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-   ON CONFLICT(user_id, source) DO UPDATE SET
-   name = excluded.name,
-   path = excluded.path,
-   format = excluded.format,
-   size_bytes = excluded.size_bytes,
-   metadata_json = excluded.metadata_json"""
-
-
-def _column_list(columns: tuple[str, ...]) -> str:
-    return ", ".join(columns)
-
-
-_JOB_ERROR_TABLES = (
-    "training_jobs",
-    "export_jobs",
-    "rl_quant_jobs",
-    "compress_jobs",
-    "distill_rl_jobs",
-)
-_CONFIG_JOB_TABLES = frozenset({"rl_quant_jobs", "compress_jobs", "distill_rl_jobs"})
-
-
-def _config_job_table(table: str) -> str:
-    if table not in _CONFIG_JOB_TABLES:
-        raise ValueError(f"Unsupported config job table: {table}")
-    return table
-
-
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 class Database:
@@ -308,7 +77,7 @@ class Database:
             await conn.execute("PRAGMA mmap_size = 268435456")
 
     async def _migrate_schema(self, conn: aiosqlite.Connection) -> None:
-        for table in _JOB_ERROR_TABLES:
+        for table in JOB_ERROR_TABLES:
             async with conn.execute(f"PRAGMA table_info({table})") as cur:
                 cols = {row[1] for row in await cur.fetchall()}
             if "error_text" not in cols:
@@ -384,7 +153,7 @@ class Database:
     ) -> dict:
         """Atomically create the sole local user (registration is single-tenant)."""
         uid = str(uuid.uuid4())
-        now = _now()
+        now = utc_now()
         normalized_name = display_name.strip()
         resolved_email = (email or f"{uid}@local.seiso").lower()
         async with self._conn() as conn:
@@ -414,7 +183,7 @@ class Database:
         email: str | None = None,
     ) -> dict:
         uid = str(uuid.uuid4())
-        now = _now()
+        now = utc_now()
         normalized_name = display_name.strip()
         resolved_email = (email or f"{uid}@local.seiso").lower()
         async with self._conn() as conn:
@@ -521,7 +290,7 @@ class Database:
 
     async def add_model(self, **fields: Any) -> dict:
         mid = str(uuid.uuid4())
-        now = _now()
+        now = utc_now()
         async with self._conn() as conn:
             await conn.execute(
                 """INSERT INTO local_models
@@ -555,10 +324,10 @@ class Database:
 
     async def upsert_model(self, user_id: str, source: str, **fields: Any) -> dict:
         mid = str(uuid.uuid4())
-        now = _now()
+        now = utc_now()
         async with self._conn() as conn:
             await conn.execute(
-                _UPSERT_MODEL_SQL,
+                UPSERT_MODEL_SQL,
                 (
                     mid,
                     user_id,
@@ -580,7 +349,7 @@ class Database:
     async def upsert_models(self, user_id: str, records: list[dict[str, Any]]) -> int:
         if not records:
             return 0
-        now = _now()
+        now = utc_now()
         rows = [
             (
                 str(uuid.uuid4()),
@@ -596,7 +365,7 @@ class Database:
             for record in records
         ]
         async with self._conn() as conn:
-            await conn.executemany(_UPSERT_MODEL_SQL, rows)
+            await conn.executemany(UPSERT_MODEL_SQL, rows)
             await conn.commit()
         return len(rows)
 
@@ -608,7 +377,7 @@ class Database:
         job_id: str | None = None,
     ) -> dict:
         jid = job_id or str(uuid.uuid4())
-        now = _now()
+        now = utc_now()
         async with self._conn() as conn:
             await conn.execute(
                 """INSERT INTO training_jobs
@@ -653,7 +422,7 @@ class Database:
             return dict(thread_row), messages
 
     async def update_thread_model(self, thread_id: str, model_id: str | None) -> None:
-        now = _now()
+        now = utc_now()
         async with self._conn() as conn:
             await conn.execute(
                 "UPDATE chat_threads SET model_id = ?, updated_at = ? WHERE id = ?",
@@ -682,7 +451,7 @@ class Database:
         error_text: str | None = None,
         user_id: str | None = None,
     ) -> None:
-        now = _now()
+        now = utc_now()
         owner_clause = " AND user_id = ?" if user_id else ""
         async with self._conn() as conn:
             if checkpoint_path or metrics is not None or error_text is not None:
@@ -713,7 +482,7 @@ class Database:
     async def update_training_metrics(
         self, job_id: str, metrics: dict, *, user_id: str | None = None
     ) -> None:
-        now = _now()
+        now = utc_now()
         owner_clause = " AND user_id = ?" if user_id else ""
         async with self._conn() as conn:
             await conn.execute(
@@ -723,7 +492,7 @@ class Database:
             await conn.commit()
 
     async def list_training_jobs(self, user_id: str) -> list[dict]:
-        cols = _column_list(_TRAINING_LIST_COLUMNS)
+        cols = column_list(TRAINING_LIST_COLUMNS)
         async with (
             self._conn() as conn,
             conn.execute(
@@ -737,7 +506,7 @@ class Database:
         self, user_id: str, title: str, model_id: str | None = None
     ) -> dict:
         tid = str(uuid.uuid4())
-        now = _now()
+        now = utc_now()
         async with self._conn() as conn:
             await conn.execute(
                 """INSERT INTO chat_threads (id, user_id, title, model_id, created_at, updated_at)
@@ -804,7 +573,7 @@ class Database:
         model_id: str | None = None,
     ) -> dict:
         mid = str(uuid.uuid4())
-        now = _now()
+        now = utc_now()
         enc_content = self._enc(content)
         enc_metadata = self._enc(json.dumps(metadata or {}))
         async with self._conn() as conn:
@@ -863,7 +632,7 @@ class Database:
         self, user_id: str, name: str, provider_type: str, config: dict
     ) -> dict:
         pid = str(uuid.uuid4())
-        now = _now()
+        now = utc_now()
         enc_config = self._enc(json.dumps(config))
         async with self._conn() as conn:
             await conn.execute(
@@ -906,7 +675,7 @@ class Database:
         self, user_id: str, config: dict, job_id: str | None = None
     ) -> dict:
         jid = job_id or str(uuid.uuid4())
-        now = _now()
+        now = utc_now()
         async with self._conn() as conn:
             await conn.execute(
                 """INSERT INTO export_jobs
@@ -936,7 +705,7 @@ class Database:
         output_paths: dict | None = None,
         error_text: str | None = None,
     ) -> None:
-        now = _now()
+        now = utc_now()
         async with self._conn() as conn:
             if output_paths is not None or error_text is not None:
                 await conn.execute(
@@ -960,7 +729,7 @@ class Database:
             await conn.commit()
 
     async def list_export_jobs(self, user_id: str) -> list[dict]:
-        cols = _column_list(_EXPORT_LIST_COLUMNS)
+        cols = column_list(EXPORT_LIST_COLUMNS)
         async with (
             self._conn() as conn,
             conn.execute(
@@ -975,9 +744,9 @@ class Database:
     async def _create_config_job(
         self, table: str, user_id: str, config: dict, job_id: str | None = None
     ) -> dict:
-        table = _config_job_table(table)
+        table = config_job_table(table)
         jid = job_id or str(uuid.uuid4())
-        now = _now()
+        now = utc_now()
         async with self._conn() as conn:
             query = f"""INSERT INTO {table}
                    (id, user_id, status, config_json, created_at, updated_at)
@@ -992,7 +761,7 @@ class Database:
     async def _get_config_job(
         self, table: str, job_id: str, user_id: str
     ) -> dict | None:
-        table = _config_job_table(table)
+        table = config_job_table(table)
         query = f"SELECT * FROM {table} WHERE id = ? AND user_id = ?"  # nosec B608
         async with (
             self._conn() as conn,
@@ -1009,10 +778,10 @@ class Database:
         table: str,
         user_id: str,
         *,
-        columns: tuple[str, ...] = _STAGE_PIPELINE_LIST_COLUMNS,
+        columns: tuple[str, ...] = STAGE_PIPELINE_LIST_COLUMNS,
     ) -> list[dict]:
-        table = _config_job_table(table)
-        cols = _column_list(columns)
+        table = config_job_table(table)
+        cols = column_list(columns)
         query = f"SELECT {cols} FROM {table} WHERE user_id = ? ORDER BY created_at DESC"  # nosec B608
         async with (
             self._conn() as conn,
@@ -1036,8 +805,8 @@ class Database:
         stage_results: dict | None = None,
         error_text: str | None = None,
     ) -> None:
-        table = _config_job_table(table)
-        now = _now()
+        table = config_job_table(table)
+        now = utc_now()
         async with self._conn() as conn:
             query = f"""UPDATE {table} SET status = ?, updated_at = ?,
                    output_dir = COALESCE(?, output_dir),
@@ -1086,7 +855,7 @@ class Database:
         gguf_quants: list[str] | None = None,
         error_text: str | None = None,
     ) -> None:
-        now = _now()
+        now = utc_now()
         async with self._conn() as conn:
             await conn.execute(
                 """UPDATE rl_quant_jobs SET status = ?, updated_at = ?,
@@ -1115,7 +884,7 @@ class Database:
 
     async def list_rl_quant_jobs(self, user_id: str) -> list[dict]:
         return await self._list_config_jobs(
-            "rl_quant_jobs", user_id, columns=_RL_QUANT_LIST_COLUMNS
+            "rl_quant_jobs", user_id, columns=RL_QUANT_LIST_COLUMNS
         )
 
     # --- Compression jobs ---
@@ -1200,10 +969,10 @@ class Database:
         self, *, reason: str = "Server restarted while job was active"
     ) -> int:
         """Mark in-flight jobs as failed after Forge restart (orchestrator state is in-memory only)."""
-        now = _now()
+        now = utc_now()
         total = 0
         async with self._conn() as conn:
-            for table in _JOB_ERROR_TABLES:
+            for table in JOB_ERROR_TABLES:
                 query = f"""UPDATE {table}
                         SET status = 'failed', updated_at = ?,
                             error_text = COALESCE(error_text, ?)
