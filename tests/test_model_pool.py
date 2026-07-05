@@ -328,8 +328,8 @@ def test_llama_load_kwargs_cuda_defaults(monkeypatch):
     assert kwargs["n_gpu_layers"] == -1
     assert kwargs["n_threads"] == 16
     assert kwargs["n_threads_batch"] == 24
-    assert kwargs["n_batch"] == 4096
-    assert kwargs["n_ubatch"] == 1024
+    assert kwargs["n_batch"] == 2048
+    assert kwargs["n_ubatch"] == 512
     assert kwargs["flash_attn"] is True
     assert kwargs["offload_kqv"] is True
     assert kwargs["op_offload"] is True
@@ -468,8 +468,8 @@ def test_llama_batch_defaults_are_speed_first():
     import seiso.inference.model_pool as mp
 
     batch, ubatch = mp._llama_batch_defaults()
-    assert batch == 4096
-    assert ubatch == 1024
+    assert batch == 2048
+    assert ubatch == 512
 
 
 def test_llama_speed_memory_profiles_ignore_headroom(monkeypatch, tmp_path):
@@ -483,7 +483,7 @@ def test_llama_speed_memory_profiles_ignore_headroom(monkeypatch, tmp_path):
         str(gguf),
         1024,
     )
-    assert profiles == [{"n_batch": 4096, "n_ubatch": 1024}]
+    assert profiles == [{"n_batch": 2048, "n_ubatch": 512}]
 
 
 def test_llama_load_model_tries_speed_profile_before_base(monkeypatch, tmp_path):

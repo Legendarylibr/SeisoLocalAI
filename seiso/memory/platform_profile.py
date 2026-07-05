@@ -109,12 +109,12 @@ def apply_platform_memory_profile(
                 os.environ.setdefault("SEISO_LLAMA_OP_OFFLOAD", "true")
                 os.environ.setdefault("SEISO_LLAMA_OFFLOAD_KQV", "true")
                 if tier == HardwareTier.WORKSTATION:
-                    os.environ.setdefault("SEISO_LLAMA_BATCH", "4096")
-                    os.environ.setdefault("SEISO_LLAMA_UBATCH", "1024")
+                    os.environ.setdefault("SEISO_LLAMA_BATCH", "2048")
+                    os.environ.setdefault("SEISO_LLAMA_UBATCH", "512")
                     os.environ.setdefault("SEISO_STREAM_BATCH_CHARS", "16")
                 else:
-                    os.environ.setdefault("SEISO_LLAMA_BATCH", "1536")
-                    os.environ.setdefault("SEISO_LLAMA_UBATCH", "512")
+                    os.environ.setdefault("SEISO_LLAMA_BATCH", "1024")
+                    os.environ.setdefault("SEISO_LLAMA_UBATCH", "256")
         elif caps.get("train_platform") == "cpu" or not caps.get("gpu_count"):
             os.environ.setdefault("SEISO_LLAMA_GPU_LAYERS", "0")
 
