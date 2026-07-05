@@ -166,13 +166,15 @@ def test_platform_profile_linux_nvidia_uses_gpu_layers(monkeypatch):
     apply_platform_memory_profile(profile=profile)
 
     assert os.environ["SEISO_LLAMA_GPU_LAYERS"] == "-1"
-    assert os.environ["SEISO_LLAMA_BATCH"] == "2048"
-    assert os.environ["SEISO_LLAMA_UBATCH"] == "512"
-    assert os.environ["SEISO_LLAMA_CACHE_MB"] == "2048"
+    assert os.environ["SEISO_LLAMA_BATCH"] == "512"
+    assert os.environ["SEISO_LLAMA_UBATCH"] == "128"
+    assert os.environ["SEISO_LLAMA_CACHE_MB"] == "512"
+    assert os.environ.get("SEISO_LLAMA_FLASH_ATTN") == "false"
+    assert os.environ.get("SEISO_LLAMA_SPEED_SCALE") == "false"
     assert os.environ["SEISO_STREAM_BATCH_CHARS"] == "16"
 
 
-def test_platform_profile_linux_nvidia_workstation_uses_speed_batches(monkeypatch):
+def test_platform_profile_linux_nvidia_workstation_uses_conservative_batches(monkeypatch):
     profile = {
         "ram_gb": 128,
         "gpus": [{"name": "NVIDIA RTX 6000 Ada", "vram_total_mb": 49152}],
@@ -202,8 +204,8 @@ def test_platform_profile_linux_nvidia_workstation_uses_speed_batches(monkeypatc
 
     apply_platform_memory_profile(profile=profile)
 
-    assert os.environ["SEISO_LLAMA_BATCH"] == "2048"
-    assert os.environ["SEISO_LLAMA_UBATCH"] == "512"
+    assert os.environ["SEISO_LLAMA_BATCH"] == "512"
+    assert os.environ["SEISO_LLAMA_UBATCH"] == "128"
 
 
 def test_platform_profile_linux_nvidia_modest_sets_safe_batch(monkeypatch):
@@ -236,8 +238,8 @@ def test_platform_profile_linux_nvidia_modest_sets_safe_batch(monkeypatch):
 
     apply_platform_memory_profile(profile=profile)
 
-    assert os.environ["SEISO_LLAMA_BATCH"] == "1024"
-    assert os.environ["SEISO_LLAMA_UBATCH"] == "256"
+    assert os.environ["SEISO_LLAMA_BATCH"] == "512"
+    assert os.environ["SEISO_LLAMA_UBATCH"] == "128"
 
 
 def test_apply_only_setdefault(monkeypatch):

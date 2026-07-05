@@ -52,6 +52,15 @@ def apply_platform_memory_profile(
 
     os.environ.setdefault("SEISO_LLAMA_PROMPT_CACHE", "true")
     cache_mb = "2048" if tier == HardwareTier.WORKSTATION and ram_gb >= 32 else "1024"
+    if system == "Linux":
+        try:
+            from seiso.platform import is_native_linux_nvidia
+
+            if is_native_linux_nvidia(profile=profile):
+                cache_cap = 256 if low else 512
+                cache_mb = str(min(int(cache_mb), cache_cap))
+        except ImportError:
+            pass
     os.environ.setdefault("SEISO_LLAMA_CACHE_MB", cache_mb)
 
     if system == "Darwin":
@@ -115,15 +124,20 @@ def apply_platform_memory_profile(
 
                 batch, ubatch = llama_batch_limits_for_headroom(headroom)
                 if is_native_linux_nvidia(profile=profile):
-                    batch = min(batch, 2048)
-                    ubatch = min(ubatch, 512)
+                    batch = min(batch, 512)
+                    ubatch = min(ubatch, 128)
                     if low:
-                        batch = min(batch, 512)
-                        ubatch = min(ubatch, 256)
+                        batch = min(batch, 256)
+                        ubatch = min(ubatch, 128)
+                    os.environ.setdefault("SEISO_LLAMA_SPEED_SCALE", "false")
+                    os.environ.setdefault("SEISO_LLAMA_FLASH_ATTN", "false")
                 os.environ.setdefault("SEISO_LLAMA_BATCH", str(batch))
                 os.environ.setdefault("SEISO_LLAMA_UBATCH", str(ubatch))
             if not low and tier in (HardwareTier.WORKSTATION, HardwareTier.CAPABLE):
-                os.environ.setdefault("SEISO_LLAMA_FLASH_ATTN", "true")
+                from seiso.platform import is_native_linux_nvidia
+
+                if not is_native_linux_nvidia(profile=profile):
+                    os.environ.setdefault("SEISO_LLAMA_FLASH_ATTN", "true")
                 os.environ.setdefault("SEISO_LLAMA_OP_OFFLOAD", "true")
                 os.environ.setdefault("SEISO_LLAMA_OFFLOAD_KQV", "true")
                 if tier == HardwareTier.WORKSTATION:
