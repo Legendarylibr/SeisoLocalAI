@@ -25,8 +25,8 @@ class _FusedCrossEntropyFn(torch.autograd.Function):
             )
 
         mask = labels != ignore_index
-        valid = int(mask.sum().item())
-        loss = row_loss[mask].mean()
+        valid = mask.sum().to(dtype=logits.dtype)
+        loss = row_loss.sum() / valid.clamp_min(1)
         ctx.save_for_backward(logits, labels, row_max, row_lse)
         ctx.ignore_index = ignore_index
         ctx.valid = valid
@@ -35,7 +35,7 @@ class _FusedCrossEntropyFn(torch.autograd.Function):
     @staticmethod
     def backward(ctx, grad_output: torch.Tensor):
         logits, labels, row_max, row_lse = ctx.saved_tensors
-        inv = float(grad_output) / max(ctx.valid, 1)
+        inv = grad_output / ctx.valid.clamp_min(1)
         backend = active_backend()
 
         if backend == "cuda":
@@ -73,9 +73,6 @@ def fused_cross_entropy_loss(
         raise ValueError("logits must be 2D")
     if labels.dim() != 1:
         raise ValueError("labels must be 1D")
-
-    if (labels != ignore_index).sum().item() == 0:
-        return logits.sum() * 0.0
 
     return _FusedCrossEntropyFn.apply(logits, labels, ignore_index)
 

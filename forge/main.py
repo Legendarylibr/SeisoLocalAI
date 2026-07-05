@@ -37,6 +37,8 @@ from forge.instance_lock import (
 from seiso.memory.platform_profile import apply_platform_memory_profile
 from seiso.models.hf_env import configure_hf_hub_cache
 
+_spa_index_cache: tuple[float, str] | None = None
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -181,7 +183,14 @@ def create_app() -> FastAPI:
 
                 settings = get_settings()
                 nonce = secrets.token_urlsafe(16)
-                html = index.read_text(encoding="utf-8")
+                global _spa_index_cache
+                try:
+                    mtime = index.stat().st_mtime
+                except OSError:
+                    mtime = 0.0
+                if _spa_index_cache is None or _spa_index_cache[0] != mtime:
+                    _spa_index_cache = (mtime, index.read_text(encoding="utf-8"))
+                html = _spa_index_cache[1]
                 html = html.replace("<script ", f'<script nonce="{nonce}" ', 1)
                 return HTMLResponse(
                     html,

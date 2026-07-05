@@ -1136,7 +1136,7 @@ async def test_list_inference_options_skips_partial_hf_gguf(monkeypatch, tmp_pat
         path=str(model_path),
         source="hf:org/Model",
         format="gguf",
-        size_bytes=model_path.stat().st_size,
+        size_bytes=10_000,
         metadata={
             "repo_id": "org/Model",
             "gguf_repo": "mirror/Model-GGUF",
@@ -1148,11 +1148,6 @@ async def test_list_inference_options_skips_partial_hf_gguf(monkeypatch, tmp_pat
         inference_models,
         "check_inference_runtime",
         lambda: InferenceRuntimeStatus(llamacpp=True, mlx=False, torch=False),
-    )
-    monkeypatch.setattr(
-        inference_models,
-        "get_gguf_file_size_bytes",
-        lambda _repo, _filename: 10_000,
     )
 
     options = await inference_models.list_inference_options(

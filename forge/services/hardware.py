@@ -40,6 +40,8 @@ from seiso.memory.estimates import (
 
 _RECOMMENDED_REPO_TTL_SEC = 300.0
 _recommended_repo_cache: dict[tuple, tuple[float, str | None]] = {}
+_FORGE_PROFILE_TTL_SEC = 30.0
+_forge_profile_cache: tuple[float, dict[str, Any]] | None = None
 _DEFAULT_CATALOG_VERIFY_LIMIT = 16
 
 
@@ -66,7 +68,14 @@ def enrich_profile(profile: dict[str, Any]) -> dict[str, Any]:
 
 def hardware_profile(*, force_refresh: bool = False) -> dict[str, Any]:
     """Full hardware profile for Forge API — includes Hub recommendations."""
-    return enrich_profile(_core_hardware_profile(force_refresh=force_refresh))
+    global _forge_profile_cache
+    if not force_refresh and _forge_profile_cache is not None:
+        cached_ts, cached = _forge_profile_cache
+        if time.monotonic() - cached_ts < _FORGE_PROFILE_TTL_SEC:
+            return cached
+    profile = enrich_profile(_core_hardware_profile(force_refresh=force_refresh))
+    _forge_profile_cache = (time.monotonic(), profile)
+    return profile
 
 
 def enrich_catalog_models(

@@ -91,12 +91,16 @@ def _filter_installed_backends(
 
 
 def _inventory_artifact_is_complete(
-    row: dict[str, Any], metadata: dict[str, Any]
+    row: dict[str, Any],
+    metadata: dict[str, Any],
+    *,
+    trust_local_size: bool = True,
 ) -> bool:
     return inventory_gguf_is_complete(
         row,
         metadata,
-        size_lookup=get_gguf_file_size_bytes,
+        size_lookup=None if trust_local_size else get_gguf_file_size_bytes,
+        trust_local_size=trust_local_size,
     )
 
 

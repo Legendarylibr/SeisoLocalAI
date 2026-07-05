@@ -210,9 +210,10 @@ async def get_thread_messages(
     user_id: Annotated[str, Depends(get_current_user_id)],
     db: Annotated[Database, Depends(get_db)],
 ) -> list[dict]:
-    if not await db.get_thread_for_user(thread_id, user_id):
+    _thread, messages = await db.get_thread_with_messages(thread_id, user_id)
+    if _thread is None:
         raise HTTPException(404, "Thread not found")
-    return await db.get_messages(thread_id)
+    return messages
 
 
 @router.get("/context")
@@ -460,7 +461,8 @@ async def chat(
         user_query = (
             str(body.messages[-1].get("content", "")).strip() if body.messages else ""
         )
-        chunks = retrieve_knowledge_chunks(
+        chunks = await asyncio.to_thread(
+            retrieve_knowledge_chunks,
             settings.data_dir,
             user_id=user_id,
             knowledge_base_id=kb_id,
@@ -545,6 +547,16 @@ async def chat(
         can_stream_local = not body.tools and not body.provider_id and not use_router
 
         async def event_gen():
+            _STATS_EVERY_N = 8
+
+            def _maybe_stats_event(output_tokens: int) -> dict | None:
+                if output_tokens <= 1 or output_tokens % _STATS_EVERY_N == 0:
+                    return {
+                        "event": "stats",
+                        "data": json.dumps({"output_tokens": output_tokens}),
+                    }
+                return None
+
             if can_stream_router:
                 parts: list[str] = []
                 output_tokens = 0
@@ -553,10 +565,9 @@ async def chat(
                     async for token in orchestrator.stream_router(payload):
                         parts.append(token)
                         output_tokens += 1
-                        yield {
-                            "event": "stats",
-                            "data": json.dumps({"output_tokens": output_tokens}),
-                        }
+                        stats_evt = _maybe_stats_event(output_tokens)
+                        if stats_evt:
+                            yield stats_evt
                         yield {"event": "token", "data": token}
                     content = "".join(parts)
                     if body.thread_id:
@@ -577,22 +588,32 @@ async def chat(
                     else (payload.get("inference_backend") or "local")
                 )
                 cancelled = False
+                last_output_tokens = 0
                 try:
                     orchestrator._emit_log(
                         job_id, f"Streaming inference ({backend_label})"
                     )
                     async for update in orchestrator.stream_local_updates(payload):
                         raw_parts.append(update.text)
-                        yield {
-                            "event": "stats",
-                            "data": json.dumps({"output_tokens": update.output_tokens}),
-                        }
+                        last_output_tokens = update.output_tokens
+                        stats_evt = _maybe_stats_event(update.output_tokens)
+                        if stats_evt:
+                            yield stats_evt
                         for chunk in sanitizer.feed(update.text):
                             streamed.append(chunk)
                             yield {"event": "token", "data": chunk}
                     for chunk in sanitizer.finish():
                         streamed.append(chunk)
                         yield {"event": "token", "data": chunk}
+                    if last_output_tokens and _maybe_stats_event(
+                        last_output_tokens
+                    ) is None:
+                        yield {
+                            "event": "stats",
+                            "data": json.dumps(
+                                {"output_tokens": last_output_tokens}
+                            ),
+                        }
                     content = sanitize_llm_output(
                         "".join(raw_parts), strip_tool_calls=not body.tools
                     )

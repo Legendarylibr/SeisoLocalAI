@@ -553,8 +553,8 @@ async def test_sync_hf_cache_inventory_skips_partial_catalog_gguf(
         lambda _repo: SimpleNamespace(repo_id="org/Model", quant="Q4_K_M"),
     )
     monkeypatch.setattr(
-        "forge.services.hf_hub.get_gguf_file_size_bytes",
-        lambda _repo, _filename: 10_000,
+        "forge.services.hf_cache_inventory.gguf_is_supported_by_llamacpp",
+        lambda _path: False,
     )
 
     db = Database(
@@ -572,7 +572,10 @@ async def test_sync_hf_cache_inventory_skips_partial_catalog_gguf(
 
 
 @pytest.mark.asyncio
-async def test_sync_hf_cache_inventory_skips_partial_safetensors(monkeypatch, tmp_path):
+async def test_sync_hf_cache_inventory_registers_partial_safetensors_without_hub(
+    monkeypatch, tmp_path
+):
+    """Local cache scan trusts on-disk weights — no Hub size API round-trip."""
     snapshot = tmp_path / "hf_cache" / "models--org--Model" / "snapshots" / "abc"
     snapshot.mkdir(parents=True)
     weights = snapshot / "model.safetensors"
@@ -581,10 +584,6 @@ async def test_sync_hf_cache_inventory_skips_partial_safetensors(monkeypatch, tm
     monkeypatch.setattr(
         "forge.services.hf_cache_inventory._catalog_entry_for_cached_repo",
         lambda _repo: SimpleNamespace(repo_id="org/Model"),
-    )
-    monkeypatch.setattr(
-        "forge.services.hf_cache_inventory.estimate_snapshot_download_bytes",
-        lambda _repo: 10_000,
     )
 
     db = Database(
@@ -597,8 +596,10 @@ async def test_sync_hf_cache_inventory_skips_partial_safetensors(monkeypatch, tm
         hf_cache_dir=tmp_path / "hf_cache",
     )
 
-    assert count == 0
-    assert await db.list_models("u1") == []
+    assert count == 1
+    rows = await db.list_models("u1")
+    assert len(rows) == 1
+    assert rows[0]["format"] == "safetensors"
 
 
 def test_resolve_download_variant_prefers_safetensors_without_llamacpp(monkeypatch):

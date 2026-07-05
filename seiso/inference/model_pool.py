@@ -469,7 +469,7 @@ def _load_llama_model(
         release_cached_memory,
     )
 
-    release_cached_memory(sync=True)
+    release_cached_memory(sync=False)
     _clear_optimal_layers_cache()
     _refresh_headroom_stats(force=True)
 

@@ -3,14 +3,19 @@
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import logging
 import os
+import time
 from pathlib import Path
 from typing import Any
 
 from seiso.security import resolve_data_dir
 
 logger = logging.getLogger(__name__)
+
+_AUTH_VALIDATE_TTL_S = 300.0
+_auth_validated: tuple[str, float] | None = None
 
 
 def resolve_hf_cache_dir(data_dir: Path | None = None) -> Path:
@@ -116,16 +121,25 @@ def configure_hf_hub_auth(token: str | None = None) -> str | None:
     resolved = (token or _read_hub_token() or "").strip() or None
     if not resolved:
         return None
-    try:
-        from huggingface_hub import HfApi
+    global _auth_validated
+    token_key = hashlib.sha256(resolved.encode()).hexdigest()[:24]
+    now = time.monotonic()
+    if (
+        _auth_validated is None
+        or _auth_validated[0] != token_key
+        or now - _auth_validated[1] >= _AUTH_VALIDATE_TTL_S
+    ):
+        try:
+            from huggingface_hub import HfApi
 
-        HfApi(token=resolved).whoami()
-    except Exception:
-        logger.warning(
-            "Hugging Face token is missing or invalid — gated models and some datasets "
-            "will fail until you run `hf auth login` or save a token in Seiso Settings."
-        )
-        return None
+            HfApi(token=resolved).whoami()
+        except Exception:
+            logger.warning(
+                "Hugging Face token is missing or invalid — gated models and some datasets "
+                "will fail until you run `hf auth login` or save a token in Seiso Settings."
+            )
+            return None
+        _auth_validated = (token_key, now)
     os.environ["HF_TOKEN"] = resolved
     os.environ["HUGGING_FACE_HUB_TOKEN"] = resolved
     hf_home = os.environ.get("HF_HOME", "").strip()
