@@ -17,7 +17,7 @@ def default_dataset_num_proc(explicit: int | None = None) -> int | None:
     cpu = os.cpu_count() or 4
     if cpu <= 2:
         return None
-    return min(4, max(1, cpu // 2))
+    return min(8, max(1, cpu // 4))
 
 
 def default_pad_to_multiple_of(
@@ -47,7 +47,7 @@ def default_dataloader_num_workers(
     cpu = cpu_count if cpu_count is not None else (os.cpu_count() or 4)
     if cpu <= 2:
         return 0
-    return min(4, max(1, cpu // 2))
+    return min(8, max(1, cpu // 4))
 
 
 def default_dataloader_prefetch_factor(

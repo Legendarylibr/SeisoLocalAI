@@ -311,6 +311,39 @@ class Database:
             await conn.commit()
         return {"id": mid, **fields, "created_at": now}
 
+    async def add_models(self, records: list[dict[str, Any]]) -> list[dict]:
+        """Batch insert models in a single transaction."""
+        if not records:
+            return []
+        now = utc_now()
+        results: list[dict] = []
+        rows: list[tuple] = []
+        for fields in records:
+            mid = str(uuid.uuid4())
+            results.append({"id": mid, **fields, "created_at": now})
+            rows.append(
+                (
+                    mid,
+                    fields.get("user_id"),
+                    fields["name"],
+                    fields["path"],
+                    fields.get("source"),
+                    fields.get("format"),
+                    fields.get("size_bytes", 0),
+                    json.dumps(fields.get("metadata", {})),
+                    now,
+                )
+            )
+        async with self._conn() as conn:
+            await conn.executemany(
+                """INSERT INTO local_models
+                   (id, user_id, name, path, source, format, size_bytes, metadata_json, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                rows,
+            )
+            await conn.commit()
+        return results
+
     async def get_model_by_source(self, user_id: str, source: str) -> dict | None:
         async with (
             self._conn() as conn,

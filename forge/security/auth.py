@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import secrets
 import time
-from collections import defaultdict
+from collections import defaultdict, deque
 from datetime import datetime, timedelta, timezone
-from typing import Annotated, cast
+from typing import Annotated, Deque, cast
 
 import bcrypt
 from fastapi import Depends, HTTPException, Request, status
@@ -98,18 +98,19 @@ class RateLimiter:
 
     def __init__(self, max_per_minute: int = 120) -> None:
         self.max_per_minute = max_per_minute
-        self._hits: dict[str, list[float]] = defaultdict(list)
+        self._hits: dict[str, Deque[float]] = defaultdict(deque)
 
     def check(self, client_ip: str) -> None:
         now = time.monotonic()
         window = self._hits[client_ip]
         cutoff = now - 60.0
-        self._hits[client_ip] = [t for t in window if t > cutoff]
-        if len(self._hits[client_ip]) >= self.max_per_minute:
+        while window and window[0] <= cutoff:
+            window.popleft()
+        if len(window) >= self.max_per_minute:
             raise HTTPException(
                 status.HTTP_429_TOO_MANY_REQUESTS, "Rate limit exceeded"
             )
-        self._hits[client_ip].append(now)
+        window.append(now)
 
 
 class LoginRateLimiter(RateLimiter):

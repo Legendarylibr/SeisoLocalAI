@@ -14,6 +14,8 @@ _LOCK = threading.Lock()
 _revoked: dict[str, float] = {}  # jti -> exp (unix seconds)
 _store_path: Path | None = None
 _MAX_ENTRIES = 50_000
+_PRUNE_INTERVAL_S = 60.0
+_last_prune_ts = 0.0
 
 
 def configure_revocation_store(data_dir: Path) -> None:
@@ -48,32 +50,46 @@ def _persist() -> None:
         logger.warning("Could not persist revoked JTIs")
 
 
-def _prune(now: float | None = None) -> None:
+def _prune_expired(now: float | None = None) -> None:
     ts = now if now is not None else time.time()
     expired = [jti for jti, exp in _revoked.items() if exp <= ts]
     for jti in expired:
         del _revoked[jti]
-    if len(_revoked) > _MAX_ENTRIES:
-        overflow = len(_revoked) - _MAX_ENTRIES
-        for jti, _ in sorted(_revoked.items(), key=lambda item: item[1])[:overflow]:
-            del _revoked[jti]
-        logger.warning(
-            "Evicted %d revoked JTIs to enforce store cap (%d)",
-            overflow,
-            _MAX_ENTRIES,
-        )
+
+
+def _enforce_cap() -> None:
+    if len(_revoked) <= _MAX_ENTRIES:
+        return
+    overflow = len(_revoked) - _MAX_ENTRIES
+    for jti, _ in sorted(_revoked.items(), key=lambda item: item[1])[:overflow]:
+        del _revoked[jti]
+    logger.warning(
+        "Evicted %d revoked JTIs to enforce store cap (%d)",
+        overflow,
+        _MAX_ENTRIES,
+    )
+
+
+def _maybe_prune_expired(now: float | None = None) -> None:
+    global _last_prune_ts
+    ts = now if now is not None else time.time()
+    if ts - _last_prune_ts < _PRUNE_INTERVAL_S:
+        return
+    _last_prune_ts = ts
+    _prune_expired(ts)
 
 
 def revoke_jti(jti: str, exp: float) -> None:
     with _LOCK:
         _revoked[str(jti)] = float(exp)
-        _prune()
+        _enforce_cap()
+        _maybe_prune_expired()
         _persist()
 
 
 def is_jti_revoked(jti: str) -> bool:
     with _LOCK:
-        _prune()
+        _maybe_prune_expired()
         exp = _revoked.get(str(jti))
         if exp is None:
             return False

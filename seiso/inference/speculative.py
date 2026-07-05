@@ -88,19 +88,17 @@ def _verify_proposed(
     verify_logits: Any,
     proposed_ids_t: Any,
 ) -> int:
+    import torch
+
     k = int(proposed_ids_t.shape[1])
-    accept = 0
-    for j in range(k):
-        pred = (
-            prefix_logits.argmax(dim=-1)
-            if j == 0
-            else verify_logits[:, j - 1, :].argmax(dim=-1)
-        )
-        if int(pred.item()) == int(proposed_ids_t[0, j].item()):
-            accept += 1
-        else:
-            break
-    return accept
+    if k == 0:
+        return 0
+    preds = proposed_ids_t.new_empty((1, k))
+    preds[:, 0] = prefix_logits.argmax(dim=-1)
+    if k > 1:
+        preds[:, 1:] = verify_logits[:, : k - 1, :].argmax(dim=-1)
+    match = (preds == proposed_ids_t).to(torch.int32)
+    return int(match.cumprod(dim=1).sum(dim=1).item())
 
 
 def _propose_with_dflash_draft(
@@ -180,14 +178,12 @@ def _iter_speculative_tokens_naive(
             logits = t_out.logits
 
             prefix_len = input_ids_t.shape[1]
-            accept = 0
-            for j in range(k):
-                pos = prefix_len + j - 1
-                greedy = torch.argmax(logits[:, pos, :], dim=-1)
-                if int(greedy.item()) == int(proposed_ids_t[0, j].item()):
-                    accept += 1
-                else:
-                    break
+            verify_slice = logits[:, prefix_len - 1 : prefix_len + k - 1, :]
+            accept = _verify_proposed(
+                logits[:, prefix_len - 1, :],
+                verify_slice,
+                proposed_ids_t,
+            )
 
             if accept > 0:
                 input_ids_t = torch.cat(
@@ -578,14 +574,12 @@ def _iter_speculative_tokens_dflash_naive(
             logits = t_out.logits
 
             prefix_len = input_ids_t.shape[1]
-            accept = 0
-            for j in range(len(proposed_ids)):
-                pos = prefix_len + j - 1
-                greedy = torch.argmax(logits[:, pos, :], dim=-1)
-                if int(greedy.item()) == int(proposed_ids_t[0, j].item()):
-                    accept += 1
-                else:
-                    break
+            verify_slice = logits[:, prefix_len - 1 : prefix_len + len(proposed_ids) - 1, :]
+            accept = _verify_proposed(
+                logits[:, prefix_len - 1, :],
+                verify_slice,
+                proposed_ids_t,
+            )
 
             if accept > 0:
                 input_ids_t = torch.cat(

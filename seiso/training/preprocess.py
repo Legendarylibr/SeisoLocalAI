@@ -247,22 +247,19 @@ def preprocess_training_dataset(
 
     if deduplicate and len(filtered) > 0:
         seen: set[str] = set()
-        keep_indices: list[int] = []
-        try:
-            fingerprints = filtered["_seiso_fingerprint"]
-        except (KeyError, TypeError):
-            fingerprints = [
-                str(filtered[idx].get("_seiso_fingerprint") or "")
-                for idx in range(len(filtered))
-            ]
-        for idx, key in enumerate(fingerprints):
+
+        def _keep_first(row: dict) -> bool:
+            key = str(row.get("_seiso_fingerprint") or "")
             if key in seen:
-                continue
+                return False
             seen.add(key)
-            keep_indices.append(idx)
-        if len(keep_indices) < len(filtered):
-            stats["removed_duplicate"] = len(filtered) - len(keep_indices)
-            filtered = filtered.select(keep_indices)
+            return True
+
+        before_dedup = len(filtered)
+        filtered = filtered.filter(_keep_first)
+        removed = before_dedup - len(filtered)
+        if removed > 0:
+            stats["removed_duplicate"] = removed
 
     drop_cols = [c for c in filtered.column_names if c.startswith("_seiso")]
     final = filtered.remove_columns(drop_cols) if drop_cols else filtered

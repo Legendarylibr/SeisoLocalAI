@@ -151,8 +151,12 @@ def list_trainable_models(
             continue
         if not path.exists():
             continue
-        if not snapshot_has_trainable_weights(path):
+        metadata = json.loads(row.get("metadata_json") or "{}")
+        if metadata.get("has_trainable_weights") is False:
             continue
+        if metadata.get("has_trainable_weights") is not True:
+            if not snapshot_has_trainable_weights(path):
+                continue
         options.append(
             {
                 "id": row["id"],
