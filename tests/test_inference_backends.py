@@ -1198,3 +1198,46 @@ async def test_list_inference_options_skips_hf_gguf_without_metadata(
     )
 
     assert options == []
+
+
+def test_llama_complete_retries_after_inference_oom(monkeypatch):
+    from seiso.inference.runner import LocalInferenceRunner
+
+    runner = LocalInferenceRunner()
+    calls: list[str] = []
+
+    fail_once = {"remaining": 1}
+
+    class FakeLlama:
+        def __init__(self, *, tier: str = "normal") -> None:
+            self._seiso_load_tier = tier
+
+        def create_chat_completion(self, **_kwargs):
+            if fail_once["remaining"] > 0:
+                fail_once["remaining"] -= 1
+                raise RuntimeError("CUDA out of memory. Tried to allocate 2.00 GiB")
+            return {"choices": [{"message": {"content": "ok"}}]}
+
+    def get_llama(_path, n_ctx=4096, *, tier="normal"):
+        calls.append(f"get:{tier}")
+        return FakeLlama(tier=tier)
+
+    def reload_llama(_path, n_ctx, *, tier):
+        calls.append(f"reload:{tier}")
+        return FakeLlama(tier=tier)
+
+    monkeypatch.setattr(runner._pool, "get_llama", get_llama)
+    monkeypatch.setattr(runner._pool, "reload_llama", reload_llama)
+    monkeypatch.setattr(runner._pool, "is_generation_active", lambda _gid: True)
+    monkeypatch.setattr(
+        "seiso.inference.runner.release_cached_memory", lambda sync=False: None
+    )
+
+    reply = runner._llama_complete(
+        {"messages": [{"role": "user", "content": "hi"}], "max_tokens": 32},
+        "/tmp/model.gguf",
+        generation_id=1,
+    )
+
+    assert reply == "ok"
+    assert calls == ["get:normal", "reload:compact"]

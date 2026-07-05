@@ -202,8 +202,8 @@ def test_platform_profile_linux_nvidia_scales_batches_by_headroom(monkeypatch):
 
     apply_platform_memory_profile(profile=profile)
 
-    assert os.environ["SEISO_LLAMA_BATCH"] == "4096"
-    assert os.environ["SEISO_LLAMA_UBATCH"] == "1024"
+    assert os.environ["SEISO_LLAMA_BATCH"] == "2048"
+    assert os.environ["SEISO_LLAMA_UBATCH"] == "512"
 
 
 def test_platform_profile_linux_nvidia_modest_uses_safe_batch(monkeypatch):

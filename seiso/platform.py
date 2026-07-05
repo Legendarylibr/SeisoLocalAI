@@ -102,3 +102,37 @@ def detect_wsl2() -> bool:
     except OSError:
         return False
     return "microsoft" in version or "wsl2" in version
+
+
+def is_native_linux_nvidia(*, profile: dict | None = None) -> bool:
+    """True on bare-metal Linux with a discrete NVIDIA GPU (not WSL, not CPU-only)."""
+    import platform as _platform
+
+    if _platform.system() != "Linux" or detect_wsl2():
+        return False
+    if profile is None:
+        try:
+            from seiso.hardware.profile import hardware_profile
+
+            profile = hardware_profile()
+        except ImportError:
+            return False
+    gpus = profile.get("gpus") or []
+    if not gpus:
+        return False
+    try:
+        from seiso.hardware.tiers import HardwareTier, classify_tier
+
+        tier = classify_tier(profile)
+        if tier in (HardwareTier.APPLE_UNIFIED, HardwareTier.CPU_ONLY):
+            return False
+    except ImportError:
+        pass
+    vendor = str(profile.get("vendor") or "").lower()
+    if vendor == "nvidia":
+        return True
+    for gpu in gpus:
+        name = str(gpu.get("name") or "").lower()
+        if "nvidia" in name or "geforce" in name or "rtx" in name or "quadro" in name:
+            return True
+    return False

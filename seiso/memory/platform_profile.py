@@ -111,8 +111,12 @@ def apply_platform_memory_profile(
                 HardwareTier.EDGE,
             ):
                 from seiso.memory.protection import llama_batch_limits_for_headroom
+                from seiso.platform import is_native_linux_nvidia
 
                 batch, ubatch = llama_batch_limits_for_headroom(headroom)
+                if is_native_linux_nvidia(profile=profile):
+                    batch = min(batch, 2048)
+                    ubatch = min(ubatch, 512)
                 os.environ.setdefault("SEISO_LLAMA_BATCH", str(batch))
                 os.environ.setdefault("SEISO_LLAMA_UBATCH", str(ubatch))
             if not low and tier in (HardwareTier.WORKSTATION, HardwareTier.CAPABLE):

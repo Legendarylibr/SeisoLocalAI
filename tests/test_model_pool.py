@@ -178,7 +178,7 @@ def test_llama_reuses_cached_model_when_context_grows(monkeypatch, tmp_path):
     class FakeLlama:
         pass
 
-    def fake_load(path, n_ctx):
+    def fake_load(path, n_ctx, **_kwargs):
         load_ctx.append(n_ctx)
         return FakeLlama()
 
@@ -206,7 +206,7 @@ def test_llama_reuses_larger_preloaded_context(monkeypatch, tmp_path):
     class FakeLlama:
         pass
 
-    def fake_load(path, n_ctx):
+    def fake_load(path, n_ctx, **_kwargs):
         load_paths.append(path)
         return FakeLlama()
 
@@ -485,21 +485,6 @@ def test_llama_batch_defaults_use_larger_batches_on_big_gpus(monkeypatch):
     assert ubatch == 1024
 
 
-def test_llama_speed_memory_profiles_ignore_headroom(monkeypatch, tmp_path):
-    import seiso.inference.model_pool as mp
-
-    monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 24576)
-    gguf = tmp_path / "small.gguf"
-    gguf.write_bytes(b"\x00" * 1024)
-
-    profiles = mp._llama_speed_memory_profiles(
-        {"n_gpu_layers": -1, "n_ctx": 4096, "n_batch": 1024, "n_ubatch": 512},
-        str(gguf),
-        1024,
-    )
-    assert profiles == [{"n_batch": 2048, "n_ubatch": 512}]
-
-
 def test_llama_load_model_tries_speed_profile_before_base(monkeypatch, tmp_path):
     import seiso.inference.model_pool as mp
 
@@ -517,14 +502,11 @@ def test_llama_load_model_tries_speed_profile_before_base(monkeypatch, tmp_path)
     monkeypatch.setattr(mp, "_default_llama_gpu_layers", lambda: -1)
     monkeypatch.setattr(mp, "_llama_kv_quant_options", lambda _p: [{}])
     monkeypatch.setattr(
-        mp,
-        "_llama_speed_memory_profiles",
-        lambda *_a: [{"n_batch": 4096, "n_ubatch": 1024}],
-    )
-    monkeypatch.setattr(
-        mp,
-        "_llama_load_memory_profiles",
-        lambda *_a: [{}, {"n_batch": 512, "n_ubatch": 256}],
+        "seiso.memory.protection.llama_load_profile_ladder",
+        lambda **_kwargs: [
+            {"n_batch": 4096, "n_ubatch": 1024},
+            {"n_batch": 512, "n_ubatch": 256},
+        ],
     )
     monkeypatch.setattr(mp, "_llama_full_gpu_targets", lambda _r: [-1])
     monkeypatch.setattr(mp, "_llama_layer_attempts", lambda *_a: [0])
@@ -537,7 +519,8 @@ def test_llama_load_model_tries_speed_profile_before_base(monkeypatch, tmp_path)
     )
     monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 24000)
     monkeypatch.setattr(
-        "seiso.inference.tuning.attach_llama_prompt_cache", lambda _llm: None
+        "seiso.inference.tuning.attach_llama_prompt_cache",
+        lambda _llm, **_: None,
     )
     monkeypatch.setitem(
         __import__("sys").modules,
@@ -550,35 +533,23 @@ def test_llama_load_model_tries_speed_profile_before_base(monkeypatch, tmp_path)
     assert attempts[0] == (4096, 1024)
 
 
-def test_llama_speed_memory_profiles_skip_cpu_only(tmp_path):
-    import seiso.inference.model_pool as mp
+def test_llama_load_profile_ladder_compact_tier(tmp_path):
+    from seiso.memory.protection import llama_load_profile_ladder
 
     gguf = tmp_path / "big.gguf"
     gguf.write_bytes(b"\x00" * 1024)
 
-    profiles = mp._llama_speed_memory_profiles(
-        {"n_gpu_layers": 0, "n_ctx": 4096, "n_batch": 1024, "n_ubatch": 512},
-        str(gguf),
-        24000,
+    profiles = llama_load_profile_ladder(
+        model_path=str(gguf),
+        n_ctx=8192,
+        n_gpu_layers=-1,
+        free_mb=12000,
+        base_batch=2048,
+        base_ubatch=512,
+        tier="compact",
     )
-    assert profiles == []
-
-
-def test_llama_load_memory_profiles_adds_compact_fallbacks(tmp_path):
-    import seiso.inference.model_pool as mp
-
-    gguf = tmp_path / "big.gguf"
-    gguf.write_bytes(b"\x00" * 1024)
-
-    profiles = mp._llama_load_memory_profiles(
-        {"n_gpu_layers": -1, "n_batch": 2048, "n_ubatch": 512},
-        8192,
-        str(gguf),
-        12000,
-    )
-    assert profiles[0] == {}
-    assert profiles[1]["n_ctx"] == 2048
-    assert profiles[-1]["n_batch"] == 256
+    assert profiles[0]["n_batch"] <= 512
+    assert profiles[0].get("_seiso_prompt_cache") is False
 
 
 def test_llama_load_kwargs_forces_zero_gpu_layers_on_cpu_only_wheel(monkeypatch):
