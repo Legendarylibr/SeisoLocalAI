@@ -130,12 +130,20 @@ def _native_linux_nvidia() -> bool:
 
 def _llama_speed_scale_enabled() -> bool:
     # Upscaled batches OOM during prefill after weights land on GPU.
+    if _native_linux_nvidia() and not env_bool(
+        "SEISO_LLAMA_UNSAFE_SPEED_SCALE", False
+    ):
+        return False
     default = not _native_linux_nvidia()
     return env_bool("SEISO_LLAMA_SPEED_SCALE", default)
 
 
 def _default_llama_flash_attn() -> bool:
     # flash_attn can segfault llama.cpp on some CUDA/model combos at inference time.
+    if _native_linux_nvidia() and not env_bool(
+        "SEISO_LLAMA_UNSAFE_FLASH_ATTN", False
+    ):
+        return False
     default = not _native_linux_nvidia()
     return env_bool("SEISO_LLAMA_FLASH_ATTN", default)
 
@@ -157,6 +165,11 @@ def fit_llama_gpu_layers(
     """Estimate a fallback GPU layer count after full offload fails."""
     if requested == 0 or headroom_mb <= 0 or not _llama_gpu_offload_ok():
         return 0
+    if _native_linux_nvidia():
+        # Avoid hard driver/llama.cpp crashes during first-message prefill by
+        # leaving real VRAM slack beyond static weight+KV estimates.
+        reserve_mb = max(2048, int(headroom_mb * 0.15))
+        headroom_mb = max(0, headroom_mb - reserve_mb)
 
     from seiso.memory.protection import (
         estimate_path_vram_mb,
@@ -574,6 +587,9 @@ def _load_llama_model(
         total_layers = gguf_total_layers(path)
         if layers > 0 and layers < total_layers:
             load_kwargs.pop("flash_attn", None)
+            if _native_linux_nvidia():
+                load_kwargs["offload_kqv"] = False
+                load_kwargs["op_offload"] = False
         from seiso.memory.protection import clamp_llama_load_kwargs
 
         load_kwargs["_model_path"] = path

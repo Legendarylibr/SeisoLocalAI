@@ -114,6 +114,36 @@ def test_fit_llama_gpu_layers_never_claims_full_offload_without_budget(
 
 
 @pytest.mark.parametrize(
+    "headroom_mb,weight_mb,n_ctx",
+    [
+        (12288, 8500, 4096),
+        (16384, 12000, 4096),
+        (24576, 17000, 4096),
+        (49152, 42000, 4096),
+    ],
+)
+def test_native_linux_nvidia_keeps_slack_before_near_capacity_full_offload(
+    monkeypatch, gguf_path, headroom_mb, weight_mb, n_ctx
+):
+    import seiso.inference.model_pool as mp
+
+    monkeypatch.setattr(mp, "_native_linux_nvidia", lambda: True)
+    monkeypatch.setattr(mp, "_llama_gpu_offload_ok", lambda: True)
+    monkeypatch.setattr(
+        "seiso.memory.protection.estimate_path_vram_mb", lambda _p: weight_mb
+    )
+    monkeypatch.setattr(
+        "seiso.inference.backends.gguf_total_layers", lambda _p: 64
+    )
+
+    layers = mp.fit_llama_gpu_layers(
+        str(gguf_path), -1, headroom_mb, n_ctx=n_ctx
+    )
+
+    assert layers != -1
+
+
+@pytest.mark.parametrize(
     "label,headroom_mb,weight_mb,params_b,n_ctx",
     _NVIDIA_CHAT_SCENARIOS,
     ids=[s[0] for s in _NVIDIA_CHAT_SCENARIOS],
