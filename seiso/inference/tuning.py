@@ -112,7 +112,8 @@ def build_mlx_sampler(payload: dict[str, Any]) -> Any | None:
 
         top_p = float(payload.get("top_p") or 0.0)
         return make_sampler(temp=temperature, top_p=top_p)
-    except ImportError:
+    except Exception as exc:
+        logger.debug("MLX sampler unavailable: %s", exc)
         return None
 
 

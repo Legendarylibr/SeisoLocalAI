@@ -126,17 +126,30 @@ def _llama_batch_defaults() -> tuple[int, int]:
     return 4096, 1024
 
 
-def fit_llama_gpu_layers(model_path: str, requested: int, headroom_mb: int) -> int:
+def fit_llama_gpu_layers(
+    model_path: str,
+    requested: int,
+    headroom_mb: int,
+    *,
+    n_ctx: int = 2048,
+) -> int:
     """Estimate a fallback GPU layer count after full offload fails."""
     if requested == 0 or headroom_mb <= 0 or not _llama_gpu_offload_ok():
         return 0
 
     from seiso.inference.backends import gguf_block_count
-    from seiso.memory.protection import estimate_path_vram_mb
+    from seiso.memory.protection import estimate_path_vram_mb, llama_kv_cache_reserve_mb
 
     weight_mb = max(int(estimate_path_vram_mb(model_path)), 256)
     total_layers = gguf_block_count(model_path) or 64
-    kv_reserve_mb = max(256, min(int(headroom_mb * 0.08), 1024))
+    kv_reserve_mb = llama_kv_cache_reserve_mb(
+        model_path,
+        n_ctx=n_ctx,
+        n_gpu_layers=-1 if requested == -1 else min(requested, total_layers),
+        total_layers=total_layers,
+        weight_mb=weight_mb,
+        free_mb=headroom_mb,
+    )
     avail_mb = headroom_mb - kv_reserve_mb
 
     if avail_mb >= int(weight_mb * 0.92):
@@ -158,7 +171,14 @@ def fit_llama_gpu_layers(model_path: str, requested: int, headroom_mb: int) -> i
     return partial
 
 
-def _llama_layer_attempts(model_path: str, requested: int, free_mb: int) -> list[int]:
+def _llama_layer_attempts(
+    model_path: str,
+    requested: int,
+    free_mb: int,
+    *,
+    n_ctx: int = 2048,
+    fitted: int | None = None,
+) -> list[int]:
     """Layer counts for partial offload — full GPU is handled separately."""
     if requested == 0 or not _llama_gpu_offload_ok():
         return [0]
@@ -184,7 +204,8 @@ def _llama_layer_attempts(model_path: str, requested: int, free_mb: int) -> list
             attempts.append(0)
         return attempts
 
-    fitted = fit_llama_gpu_layers(model_path, requested, free_mb)
+    if fitted is None:
+        fitted = fit_llama_gpu_layers(model_path, requested, free_mb, n_ctx=n_ctx)
     if fitted in (-1, 0):
         return [0]
 
@@ -437,9 +458,10 @@ def _load_llama_model(
 
     free_mb = headroom_mb()
     n_gpu_layers = int(kwargs.get("n_gpu_layers") or 0)
+    effective_n_ctx = int(kwargs.get("n_ctx") or n_ctx)
     memory_profiles = llama_load_profile_ladder(
         model_path=path,
-        n_ctx=n_ctx,
+        n_ctx=effective_n_ctx,
         n_gpu_layers=n_gpu_layers,
         free_mb=free_mb,
         base_batch=int(kwargs.get("n_batch") or 512),
@@ -447,9 +469,20 @@ def _load_llama_model(
         tier=load_tier,
     )
     kv_options = _llama_kv_quant_options(path)
-    full_targets = _llama_full_gpu_targets(requested)
+    fitted_layers = fit_llama_gpu_layers(
+        path, requested, free_mb, n_ctx=effective_n_ctx
+    )
+    full_targets = _llama_full_gpu_targets(requested) if fitted_layers == -1 else []
     partial_targets = (
-        _llama_layer_attempts(path, requested, free_mb) if requested != 0 else [0]
+        _llama_layer_attempts(
+            path,
+            requested,
+            free_mb,
+            n_ctx=effective_n_ctx,
+            fitted=fitted_layers,
+        )
+        if requested != 0
+        else [0]
     )
 
     last_exc: Exception | None = None

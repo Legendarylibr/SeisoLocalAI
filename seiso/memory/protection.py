@@ -231,6 +231,7 @@ def llama_batch_headroom_mb(
     *,
     model_path: str | Path | None = None,
     n_gpu_layers: int = -1,
+    n_ctx: int = 2048,
 ) -> int:
     """VRAM left for llama.cpp batch/KV after estimated weight offload."""
     if not model_path or n_gpu_layers == 0:
@@ -248,10 +249,64 @@ def llama_batch_headroom_mb(
         else:
             gpu_fraction = max(0.0, min(float(n_gpu_layers) / float(total_layers), 1.0))
             gpu_weight_mb = int(weight_mb * gpu_fraction) + 256
-        kv_mb = max(256, min(int(free_mb * 0.08), 1024))
+        kv_mb = llama_kv_cache_reserve_mb(
+            path,
+            n_ctx=n_ctx,
+            n_gpu_layers=n_gpu_layers,
+            total_layers=total_layers,
+            weight_mb=weight_mb,
+            free_mb=free_mb,
+        )
         return max(_MIN_LLAMA_BATCH * 2, free_mb - gpu_weight_mb - kv_mb)
     except Exception:
         return free_mb
+
+
+def _estimate_gguf_params_b(path: Path, weight_mb: int) -> float:
+    guessed = guess_params_from_name(path.name) or guess_params_from_name(str(path))
+    if guessed:
+        return float(guessed)
+    # Most local chat GGUFs are Q4/Q5. Inferring params from file size is
+    # intentionally conservative because underestimating KV cache causes OOM.
+    return max(1.0, float(weight_mb) / 1024.0 / 0.55)
+
+
+def llama_kv_cache_reserve_mb(
+    model_path: str | Path,
+    *,
+    n_ctx: int,
+    n_gpu_layers: int,
+    total_layers: int | None = None,
+    weight_mb: int | None = None,
+    free_mb: int = 0,
+) -> int:
+    """Conservative VRAM reserve for llama.cpp KV cache at the requested context."""
+    if n_gpu_layers == 0:
+        return 0
+    path = Path(model_path)
+    if weight_mb is None:
+        weight_mb = int(estimate_path_vram_mb(path))
+    if total_layers is None:
+        try:
+            from seiso.inference.backends import gguf_block_count
+
+            total_layers = gguf_block_count(path) or 64
+        except Exception:
+            total_layers = 64
+
+    layer_fraction = (
+        1.0
+        if n_gpu_layers == -1
+        else max(0.0, min(float(n_gpu_layers) / float(total_layers or 64), 1.0))
+    )
+    params_b = _estimate_gguf_params_b(path, int(weight_mb))
+    # Approximate fp16 K+V cache per token. The coefficient tracks observed
+    # llama-family/GQA memory by parameter scale while keeping small models fast.
+    per_token_mb = max(0.16, min(params_b * 0.045, 3.5))
+    ctx = max(_MIN_LLAMA_CTX, min(int(n_ctx), _MAX_LLAMA_CTX))
+    estimated = int(ctx * per_token_mb * layer_fraction)
+    legacy_floor = max(256, min(int(max(free_mb, 0) * 0.08), 1024))
+    return max(legacy_floor, estimated)
 
 
 def llama_host_batch_headroom_mb(
@@ -296,10 +351,11 @@ def llama_effective_batch_headroom_mb(
     *,
     model_path: str | Path | None = None,
     n_gpu_layers: int = -1,
+    n_ctx: int = 2048,
 ) -> int:
     """Conservative batch/KV budget — minimum of GPU post-weight and host RAM headroom."""
     gpu_headroom = llama_batch_headroom_mb(
-        free_mb, model_path=model_path, n_gpu_layers=n_gpu_layers
+        free_mb, model_path=model_path, n_gpu_layers=n_gpu_layers, n_ctx=n_ctx
     )
     if not model_path:
         return gpu_headroom
@@ -333,10 +389,11 @@ def llama_batch_limits_for_model(
     *,
     model_path: str | Path | None,
     n_gpu_layers: int = -1,
+    n_ctx: int = 2048,
 ) -> tuple[int, int]:
     """Batch limits after estimated GPU weight offload and host RAM budget."""
     headroom = llama_effective_batch_headroom_mb(
-        free_mb, model_path=model_path, n_gpu_layers=n_gpu_layers
+        free_mb, model_path=model_path, n_gpu_layers=n_gpu_layers, n_ctx=n_ctx
     )
     return llama_batch_limits_for_headroom(headroom)
 
@@ -353,7 +410,7 @@ def llama_load_profile_ladder(
 ) -> list[dict[str, Any]]:
     """Ordered llama.cpp memory profiles from fastest safe settings to compact fallbacks."""
     effective = llama_effective_batch_headroom_mb(
-        free_mb, model_path=model_path, n_gpu_layers=n_gpu_layers
+        free_mb, model_path=model_path, n_gpu_layers=n_gpu_layers, n_ctx=n_ctx
     )
     top_batch, top_ubatch = llama_batch_limits_for_headroom(effective)
     base_batch = max(_MIN_LLAMA_BATCH, min(int(base_batch), top_batch))
@@ -677,6 +734,7 @@ def clamp_llama_load_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
             headroom_mb(),
             model_path=model_path,
             n_gpu_layers=n_gpu_layers,
+            n_ctx=n_ctx,
         )
         max_batch, max_ubatch = llama_batch_limits_for_headroom(batch_headroom)
         out["n_batch"] = max(_MIN_LLAMA_BATCH, min(out["n_batch"], max_batch))

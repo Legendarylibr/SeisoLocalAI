@@ -77,7 +77,7 @@ def test_llama_gpu_layers_optimal_uses_short_ttl_cache(monkeypatch, tmp_path):
     calls: list[int] = []
 
     monkeypatch.setattr(
-        mp, "fit_llama_gpu_layers", lambda _p, _r, _h: calls.append(1) or 32
+        mp, "fit_llama_gpu_layers", lambda _p, _r, _h, **_k: calls.append(1) or 32
     )
 
     first = mp._llama_gpu_layers_optimal(str(gguf), -1)
@@ -386,7 +386,7 @@ def test_llama_layer_attempts_partial_descending(monkeypatch, tmp_path):
     gguf = tmp_path / "big.gguf"
     gguf.write_bytes(b"\x00" * 1024)
     monkeypatch.setattr(mp, "_llama_gpu_offload_ok", lambda: True)
-    monkeypatch.setattr(mp, "fit_llama_gpu_layers", lambda _p, _r, _h: 24)
+    monkeypatch.setattr(mp, "fit_llama_gpu_layers", lambda _p, _r, _h, **_k: 24)
     monkeypatch.setattr("seiso.inference.backends.gguf_block_count", lambda _p: 32)
 
     attempts = mp._llama_layer_attempts(str(gguf), -1, 4096)
@@ -424,7 +424,7 @@ def test_llama_layer_attempts_mac_cpu_offload_can_be_disabled(
     monkeypatch.setattr(platform, "machine", lambda: "arm64")
     monkeypatch.setenv("SEISO_LLAMA_MAC_CPU_OFFLOAD", "0")
     monkeypatch.setattr(mp, "_llama_gpu_offload_ok", lambda: True)
-    monkeypatch.setattr(mp, "fit_llama_gpu_layers", lambda _p, _r, _h: 16)
+    monkeypatch.setattr(mp, "fit_llama_gpu_layers", lambda _p, _r, _h, **_k: 16)
     monkeypatch.setattr("seiso.inference.backends.gguf_block_count", lambda _p: 40)
 
     attempts = mp._llama_layer_attempts(str(gguf), -1, 32768)
@@ -497,7 +497,7 @@ def test_llama_load_model_tries_speed_profile_before_base(monkeypatch, tmp_path)
         ],
     )
     monkeypatch.setattr(mp, "_llama_full_gpu_targets", lambda _r: [-1])
-    monkeypatch.setattr(mp, "_llama_layer_attempts", lambda *_a: [0])
+    monkeypatch.setattr(mp, "_llama_layer_attempts", lambda *_a, **_k: [0])
     monkeypatch.setattr(mp, "_refresh_headroom_stats", lambda *, force=False: None)
     monkeypatch.setattr(
         "seiso.memory.protection.release_cached_memory", lambda sync=False: None
@@ -519,6 +519,55 @@ def test_llama_load_model_tries_speed_profile_before_base(monkeypatch, tmp_path)
     mp._load_llama_model(str(gguf), 4096)
 
     assert attempts[0] == (4096, 1024)
+
+
+def test_llama_load_model_skips_full_offload_when_kv_reserve_does_not_fit(
+    monkeypatch, tmp_path
+):
+    import seiso.inference.model_pool as mp
+
+    gguf = tmp_path / "qwen-27b-q4.gguf"
+    gguf.write_bytes(b"gguf")
+    layers_attempted: list[int] = []
+
+    class FakeLlama:
+        def __init__(self, *, model_path: str, **kwargs):
+            assert model_path == str(gguf)
+            layers_attempted.append(kwargs["n_gpu_layers"])
+            self._seiso_n_gpu_layers = kwargs["n_gpu_layers"]
+
+    monkeypatch.setattr(mp, "_llama_gpu_offload_ok", lambda: True)
+    monkeypatch.setattr(mp, "_default_llama_gpu_layers", lambda: -1)
+    monkeypatch.setattr(mp, "fit_llama_gpu_layers", lambda _p, _r, _h, **_k: 30)
+    monkeypatch.setattr(mp, "_llama_kv_quant_options", lambda _p: [{}])
+    monkeypatch.setattr(mp, "_refresh_headroom_stats", lambda *, force=False: None)
+    monkeypatch.setattr(
+        "seiso.memory.protection.llama_load_profile_ladder",
+        lambda **_kwargs: [{"n_batch": 256, "n_ubatch": 128}],
+    )
+    monkeypatch.setattr(
+        "seiso.memory.protection.release_cached_memory", lambda sync=False: None
+    )
+    monkeypatch.setattr(
+        "seiso.memory.protection.estimate_path_vram_mb", lambda _p: 22000
+    )
+    monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 24576)
+    monkeypatch.setattr("seiso.inference.backends.gguf_block_count", lambda _p: 64)
+    monkeypatch.setattr(
+        "seiso.inference.tuning.attach_llama_prompt_cache",
+        lambda _llm, **_: None,
+    )
+    monkeypatch.setitem(
+        __import__("sys").modules,
+        "llama_cpp",
+        type("LlamaCpp", (), {"Llama": FakeLlama}),
+    )
+
+    mp._load_llama_model(str(gguf), 4096)
+
+    assert layers_attempted
+    assert layers_attempted[0] != -1
+    assert layers_attempted[0] >= 30
 
 
 def test_llama_load_profile_ladder_compact_tier(tmp_path):
