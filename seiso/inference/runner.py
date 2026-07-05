@@ -7,10 +7,11 @@ import contextlib
 import logging
 import threading
 from collections.abc import AsyncIterator, Callable, Iterator
+from concurrent.futures import ThreadPoolExecutor
 from queue import Empty
 from typing import Any
 
-from seiso.env import env_int
+from seiso.env import env_int, env_str
 from seiso.inference.backends import (
     BACKEND_LLAMASWAP,
     BACKEND_MLX,
@@ -26,14 +27,14 @@ from seiso.inference.speculative import (
     iter_speculative_tokens,
     iter_speculative_tokens_dflash,
 )
-from seiso.inference.streaming import StreamToken, StreamUpdate
+from seiso.inference.streaming import StreamToken, StreamUpdate, merge_stream_updates
 from seiso.inference.tuning import (
     configure_torch_inference,
-    estimate_llama_n_ctx,
     extract_mlx_token_text,
     generate_with_cache_fallback,
     llama_completion_kwargs,
     mlx_stream_kwargs,
+    resolve_llama_n_ctx,
     torch_generate_kwargs,
 )
 from seiso.memory.protection import (
@@ -48,6 +49,22 @@ logger = logging.getLogger(__name__)
 _STREAM_DONE = object()
 _runner: LocalInferenceRunner | None = None
 _runner_lock = threading.Lock()
+_inference_executor: ThreadPoolExecutor | None = None
+_inference_executor_lock = threading.Lock()
+
+
+def get_inference_executor() -> ThreadPoolExecutor:
+    """Dedicated pool for blocking inference work — avoids default executor contention."""
+    global _inference_executor
+    if _inference_executor is None:
+        with _inference_executor_lock:
+            if _inference_executor is None:
+                workers = max(2, env_int("SEISO_INFERENCE_WORKERS", 2))
+                _inference_executor = ThreadPoolExecutor(
+                    max_workers=workers,
+                    thread_name_prefix="seiso-infer",
+                )
+    return _inference_executor
 
 
 def _stream_batch_chars() -> int:
@@ -55,9 +72,52 @@ def _stream_batch_chars() -> int:
     return max(1, env_int("SEISO_STREAM_BATCH_CHARS", 16))
 
 
-def _torch_stream_timeout_s() -> int:
-    """Poll interval for detecting failed Torch generation threads."""
-    return max(1, env_int("SEISO_TORCH_STREAM_TIMEOUT_S", 2))
+def _stream_producer_batch_chars(route: str) -> int:
+    """Backend-local batching (llama/MLX) already coalesces — avoid re-buffering in the producer."""
+    if route in {"llama", "mlx", "llamaswap"}:
+        return 1
+    return _stream_batch_chars()
+
+
+class _DecodeBatcher:
+    """Flush the first decode chunk immediately, then batch for throughput."""
+
+    __slots__ = ("batch_chars", "buf", "buffered", "pending", "first")
+
+    def __init__(self, batch_chars: int) -> None:
+        self.batch_chars = batch_chars
+        self.buf: list[str] = []
+        self.buffered = 0
+        self.pending = 0
+        self.first = True
+
+    def push(self, text: str) -> StreamToken | None:
+        if self.first:
+            self.first = False
+            return StreamToken(text, 1)
+        self.buf.append(text)
+        self.buffered += len(text)
+        self.pending += 1
+        if self.buffered < self.batch_chars:
+            return None
+        chunk = StreamToken("".join(self.buf), self.pending)
+        self.buf.clear()
+        self.buffered = 0
+        self.pending = 0
+        return chunk
+
+    def flush(self) -> StreamToken | None:
+        if not self.buf:
+            return None
+        return StreamToken("".join(self.buf), max(1, self.pending))
+
+
+def _torch_stream_timeout_s() -> float:
+    """Seconds to wait for the next stream chunk before polling cancel / thread health."""
+    try:
+        return max(0.05, float(env_str("SEISO_TORCH_STREAM_TIMEOUT_S", "0.25")))
+    except ValueError:
+        return 0.25
 
 
 class _StreamError:
@@ -107,15 +167,7 @@ class LocalInferenceRunner:
                     resolved_path, draft_path, load_in_4bit=True
                 )
         else:
-            from seiso.inference.tuning import estimate_llama_n_ctx
-
-            messages = payload.get("messages") or []
-            n_ctx = payload.get("n_ctx") or estimate_llama_n_ctx(
-                messages,
-                max_tokens=int(payload.get("max_tokens", 1)),
-                model_path=resolved_path,
-                model_format=payload.get("model_format"),
-            )
+            n_ctx = resolve_llama_n_ctx(payload, resolved_path)
             self._pool.get_llama(resolved_path, n_ctx=n_ctx)
 
     async def chat(self, payload: dict[str, Any]) -> str:
@@ -130,17 +182,18 @@ class LocalInferenceRunner:
                 raise ValueError(
                     "Tool calling is only supported with GGUF local backends"
                 )
-            generation_id = self._pool.bump_generation()
-            await self._ensure_model_switch(resolved_path, route=route)
+            generation_id = await self._prepare_generation(
+                resolved_path, draft_path=None, route=route
+            )
             if route == "llamaswap":
                 return await loop.run_in_executor(
-                    None,
+                    get_inference_executor(),
                     lambda: self._llamaswap_complete(
                         payload, resolved_path, generation_id
                     ),
                 )
             return await loop.run_in_executor(
-                None,
+                get_inference_executor(),
                 lambda: self._llama_complete(payload, resolved_path, generation_id),
             )
 
@@ -150,12 +203,13 @@ class LocalInferenceRunner:
             raise ValueError("model_path or model_id required")
 
         route, resolved_path = self._resolve_route(payload, model_path)
-        generation_id = self._pool.bump_generation()
-        await self._ensure_model_switch(
-            resolved_path, draft_path=payload.get("draft_model_path"), route=route
+        generation_id = await self._prepare_generation(
+            resolved_path,
+            draft_path=payload.get("draft_model_path"),
+            route=route,
         )
         return await loop.run_in_executor(
-            None,
+            get_inference_executor(),
             lambda: self._complete(payload, resolved_path, route, generation_id),
         )
 
@@ -173,8 +227,7 @@ class LocalInferenceRunner:
 
         route, resolved_path = self._resolve_route(payload, model_path)
         draft_path = payload.get("draft_model_path")
-        generation_id = self._pool.bump_generation()
-        await self._ensure_model_switch(
+        generation_id = await self._prepare_generation(
             resolved_path, draft_path=draft_path, route=route
         )
 
@@ -189,7 +242,7 @@ class LocalInferenceRunner:
             buffered = 0
             output_tokens = 0
             flushed_once = False
-            batch_chars = _stream_batch_chars()
+            batch_chars = _stream_producer_batch_chars(route)
             try:
                 for part in self._iter_tokens(
                     payload, resolved_path, route, should_stop
@@ -234,7 +287,7 @@ class LocalInferenceRunner:
             finally:
                 loop.call_soon_threadsafe(queue.put_nowait, _STREAM_DONE)
 
-        threading.Thread(target=producer, daemon=True).start()
+        get_inference_executor().submit(producer)
 
         while True:
             if should_stop():
@@ -244,12 +297,33 @@ class LocalInferenceRunner:
                 break
             if isinstance(item, _StreamError):
                 raise item.exc
-            yield item
+
+            # Coalesce any already-queued updates into a single SSE frame. This
+            # keeps up with fast backends (fewer event-loop round-trips) without
+            # adding latency — we only merge what is immediately available.
+            pending: list[StreamUpdate] = [item]
+            done = False
+            error: _StreamError | None = None
+            while not queue.empty():
+                nxt = queue.get_nowait()
+                if nxt is _STREAM_DONE:
+                    done = True
+                    break
+                if isinstance(nxt, _StreamError):
+                    error = nxt
+                    break
+                pending.append(nxt)
+
+            yield merge_stream_updates(pending)
+            if error is not None:
+                raise error.exc
+            if done:
+                break
 
     async def unload(self) -> dict:
         loop = asyncio.get_running_loop()
 
-        await loop.run_in_executor(None, self._pool.cancel_and_unload)
+        await loop.run_in_executor(get_inference_executor(), self._pool.cancel_and_unload)
         return self._pool.status()
 
     async def cancel_and_unload(self) -> dict:
@@ -260,9 +334,24 @@ class LocalInferenceRunner:
         self._pool.bump_generation()
         return self._pool.status()
 
+    async def _prepare_generation(
+        self,
+        model_path: str,
+        *,
+        draft_path: str | None = None,
+        route: str = "llama",
+    ) -> int:
+        """Switch models if needed, then return a generation id (single bump when possible)."""
+        unload_generation = await self._ensure_model_switch(
+            model_path, draft_path=draft_path, route=route
+        )
+        if unload_generation is not None:
+            return unload_generation
+        return self._pool.bump_generation()
+
     async def _ensure_model_switch(
         self, model_path: str, *, draft_path: str | None = None, route: str = "llama"
-    ) -> None:
+    ) -> int | None:
         status = self._pool.status()
         active_path = status.get("path")
         active_draft = status.get("draft_path")
@@ -276,24 +365,24 @@ class LocalInferenceRunner:
                 and self._pool.normalize_path(active_draft)
                 == self._pool.normalize_path(draft_path)
             ):
-                return
-            # prepare target (torch for verification in dflash case too)
-            await loop.run_in_executor(
-                None, lambda: self._pool.prepare_for_load(model_path, BACKEND_TORCH)
+                return None
+            return await loop.run_in_executor(
+                get_inference_executor(),
+                lambda: self._pool.prepare_for_load(model_path, BACKEND_TORCH),
             )
-            return
 
         if active_draft:
-            await loop.run_in_executor(
-                None, lambda: self._pool.prepare_for_load(model_path)
+            return await loop.run_in_executor(
+                get_inference_executor(), lambda: self._pool.prepare_for_load(model_path)
             )
-            return
 
         backend = BACKEND_LLAMASWAP if route == "llamaswap" else None
-        if self._pool.would_switch_model(model_path, backend):
-            await loop.run_in_executor(
-                None, lambda: self._pool.prepare_for_load(model_path, backend)
-            )
+        if not self._pool.would_switch_model(model_path, backend, status=status):
+            return None
+        return await loop.run_in_executor(
+            get_inference_executor(),
+            lambda: self._pool.prepare_for_load(model_path, backend),
+        )
 
     def _resolve_route(
         self, payload: dict[str, Any], model_path: str
@@ -320,15 +409,10 @@ class LocalInferenceRunner:
 
     @staticmethod
     def _estimate_dflash_n_ctx(payload: dict[str, Any], draft_path: str) -> int:
-        return int(
-            payload.get("n_ctx")
-            or estimate_llama_n_ctx(
-                payload.get("messages") or [],
-                max_tokens=int(payload.get("max_tokens", 512)),
-                model_path=draft_path,
-                model_format="gguf",
-            )
-        )
+        if payload.get("n_ctx") is not None:
+            return int(payload["n_ctx"])
+        payload.setdefault("model_format", "gguf")
+        return resolve_llama_n_ctx(payload, draft_path)
 
     def _iter_tokens(
         self,
@@ -474,12 +558,21 @@ class LocalInferenceRunner:
         try:
             from mlx_lm import stream_generate
 
+            batch_chars = _stream_batch_chars()
+            batcher = _DecodeBatcher(batch_chars)
             for token in stream_generate(model, tokenizer, **gen_kwargs):
                 if should_stop():
                     break
                 text = extract_mlx_token_text(token)
-                if text:
-                    yield StreamToken(text)
+                if not text:
+                    continue
+                out = batcher.push(text)
+                if out is not None:
+                    yield out
+            if not should_stop():
+                tail = batcher.flush()
+                if tail is not None:
+                    yield tail
             return
         except (ImportError, TypeError):
             pass
@@ -677,12 +770,7 @@ class LocalInferenceRunner:
         generation_id: int,
     ) -> str:
         messages = payload.get("messages", [])
-        n_ctx = payload.get("n_ctx") or estimate_llama_n_ctx(
-            messages,
-            max_tokens=int(payload.get("max_tokens", 512)),
-            model_path=model_path,
-            model_format=payload.get("model_format"),
-        )
+        n_ctx = resolve_llama_n_ctx(payload, model_path)
         llm = self._pool.get_llama(model_path, n_ctx=n_ctx)
         kwargs = llama_completion_kwargs(payload)
         kwargs["stream"] = False
@@ -723,29 +811,32 @@ class LocalInferenceRunner:
         should_stop: Callable[[], bool],
     ) -> Iterator[StreamToken]:
         messages = payload.get("messages", [])
-        n_ctx = payload.get("n_ctx") or estimate_llama_n_ctx(
-            messages,
-            max_tokens=int(payload.get("max_tokens", 512)),
-            model_path=model_path,
-            model_format=payload.get("model_format"),
-        )
+        n_ctx = resolve_llama_n_ctx(payload, model_path)
         try:
             llm = self._pool.get_llama(model_path, n_ctx=n_ctx)
         except ImportError as exc:
             raise RuntimeError("llama-cpp-python not installed") from exc
 
-        messages = payload.get("messages", [])
         stream = llm.create_chat_completion(
             messages=messages,
             **llama_completion_kwargs(payload),
         )
+        batch_chars = _stream_batch_chars()
+        batcher = _DecodeBatcher(batch_chars)
         for chunk in stream:
             if should_stop():
                 break
             delta = chunk["choices"][0].get("delta", {})
             content = delta.get("content")
-            if content:
-                yield StreamToken(content)
+            if not content:
+                continue
+            out = batcher.push(content)
+            if out is not None:
+                yield out
+        if not should_stop():
+            tail = batcher.flush()
+            if tail is not None:
+                yield tail
 
 
 def get_inference_runner() -> LocalInferenceRunner:

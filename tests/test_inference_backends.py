@@ -717,6 +717,24 @@ async def test_dflash_switch_preserves_warmed_torch_target(monkeypatch):
     assert calls == [("/tmp/target", BACKEND_TORCH)]
 
 
+@pytest.mark.asyncio
+async def test_prepare_generation_captures_unload_generation(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from seiso.inference.runner import LocalInferenceRunner
+
+    runner = LocalInferenceRunner()
+    monkeypatch.setattr(
+        runner, "_ensure_model_switch", AsyncMock(return_value=7)
+    )
+
+    assert await runner._prepare_generation("/tmp/model.gguf") == 7
+
+    monkeypatch.setattr(runner, "_ensure_model_switch", AsyncMock(return_value=None))
+    before = runner._pool.current_generation()
+    assert await runner._prepare_generation("/tmp/model.gguf") == before + 1
+
+
 def test_warm_model_preloads_torch_speculative_pair(monkeypatch):
     from seiso.inference.runner import LocalInferenceRunner
 

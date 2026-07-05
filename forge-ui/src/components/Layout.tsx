@@ -1,14 +1,19 @@
 import { useEffect, useState } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import { SystemMonitor } from "@/components/SystemMonitor";
-import { IconMenu, NavIcon, type NavIconName } from "@/components/Icons";
+import { CommandPalette } from "@/components/CommandPalette";
+import { IconMenu, IconSearch, NavIcon, type NavIconName } from "@/components/Icons";
 import { SeisoLogoMark } from "@/components/SeisoLogo";
 import { useAuth } from "@/hooks/useAuth";
+import { useToast } from "@/context/ToastContext";
 import "../styles.css";
 
-type NavItem = { to: string; label: string; icon: NavIconName; desc?: string; end?: boolean };
+const isMac =
+  typeof navigator !== "undefined" && /mac|iphone|ipad/i.test(navigator.platform || navigator.userAgent);
 
-const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
+export type NavItem = { to: string; label: string; icon: NavIconName; desc?: string; end?: boolean };
+
+export const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
   {
     label: "Overview",
     items: [{ to: "/", label: "Dashboard", icon: "dashboard", desc: "Hardware & workflows", end: true }],
@@ -27,27 +32,43 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
       { to: "/train", label: "Train", icon: "train", desc: "LoRA fine-tuning" },
       { to: "/rl-quant", label: "RL Quant", icon: "quant", desc: "Reward-guided quant" },
       { to: "/compress", label: "Compress", icon: "compress", desc: "Distill & prune LLMs" },
-      { to: "/distill-rl", label: "Distill-RL", icon: "train", desc: "Distill + DPO alignment" },
+      { to: "/distill-rl", label: "Distill-RL", icon: "recipes", desc: "Distill + DPO alignment" },
       { to: "/export", label: "Export", icon: "export", desc: "Publish to Hub" },
       { to: "/recipes", label: "Recipes", icon: "recipes", desc: "Visual pipelines" },
     ],
   },
   {
     label: "Platform",
-    items: [{ to: "/integrations", label: "Integrations", icon: "integrations", desc: "External LLM providers" }],
+    items: [
+      { to: "/integrations", label: "Integrations", icon: "integrations", desc: "External LLM providers" },
+      { to: "/settings", label: "Settings", icon: "settings", desc: "Account, tokens & security" },
+    ],
   },
 ];
 
 export function Layout({ children, fullBleed = false }: { children: React.ReactNode; fullBleed?: boolean }) {
   const location = useLocation();
   const { logout } = useAuth();
+  const { notify } = useToast();
   const isChat = location.pathname === "/chat";
   const isStudioCompact = /^\/(train|rl-quant|compress|distill-rl|export|recipes)(\/|$)/.test(location.pathname);
   const [navOpen, setNavOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
 
   useEffect(() => {
     setNavOpen(false);
   }, [location.pathname]);
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setPaletteOpen((v) => !v);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   return (
     <div className={`layout${fullBleed ? " layout-fullbleed" : ""}`}>
@@ -82,6 +103,17 @@ export function Layout({ children, fullBleed = false }: { children: React.ReactN
           </span>
         </NavLink>
 
+        <button
+          type="button"
+          className="sidebar-search sidebar-elevated"
+          onClick={() => setPaletteOpen(true)}
+          aria-label="Open command palette"
+        >
+          <IconSearch size={15} className="sidebar-search-icon" />
+          <span className="sidebar-search-text">Search…</span>
+          <kbd className="sidebar-search-kbd">{isMac ? "⌘" : "Ctrl"} K</kbd>
+        </button>
+
         <div className="sidebar-nav sidebar-elevated">
           {NAV_GROUPS.map((group) => (
             <div key={group.label} className="nav-group">
@@ -109,16 +141,14 @@ export function Layout({ children, fullBleed = false }: { children: React.ReactN
         </div>
 
         <div className="sidebar-foot sidebar-elevated">
-          <NavLink
-            to="/settings"
-            className={({ isActive }) => `sidebar-foot-link${isActive ? " active-nav" : ""}`}
+          <button
+            type="button"
+            className="sidebar-foot-link sidebar-foot-btn"
+            onClick={() => {
+              notify("Signing out…", { tone: "info" });
+              void logout();
+            }}
           >
-            Settings
-          </NavLink>
-          <span className="sidebar-foot-sep" aria-hidden>
-            /
-          </span>
-          <button type="button" className="sidebar-foot-link sidebar-foot-btn" onClick={() => logout()}>
             Sign out
           </button>
         </div>
@@ -126,6 +156,7 @@ export function Layout({ children, fullBleed = false }: { children: React.ReactN
 
       <main className={`content${isChat ? " content-chat" : ""}${isStudioCompact ? " content-studio-compact" : ""}`}>{children}</main>
       <SystemMonitor />
+      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
     </div>
   );
 }

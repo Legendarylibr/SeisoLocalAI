@@ -32,6 +32,7 @@ def test_generation_invalidation():
     pool = ModelPool.get()
     gen_a = pool.bump_generation()
     assert pool.is_generation_active(gen_a)
+    assert pool.current_generation() == gen_a
     gen_b = pool.bump_generation()
     assert not pool.is_generation_active(gen_a)
     assert pool.is_generation_active(gen_b)
@@ -63,7 +64,7 @@ def test_prepare_for_load_unloads_when_switching(tmp_path, monkeypatch):
 
     monkeypatch.setattr("seiso.hardware.profile.hardware_profile", _refresh)
     unloaded = pool.prepare_for_load(str(second), BackendKind.LLAMA)
-    assert unloaded is True
+    assert isinstance(unloaded, int)
     assert pool.active_key is None
     assert refreshed["calls"] == 1
 
@@ -107,7 +108,7 @@ def test_prepare_for_load_keeps_same_model(tmp_path, monkeypatch):
 
     monkeypatch.setattr("seiso.hardware.profile.hardware_profile", _refresh)
     unloaded = pool.prepare_for_load(str(model), BackendKind.LLAMA)
-    assert unloaded is False
+    assert unloaded is None
     assert pool.active_key is not None
     assert refreshed["calls"] == 0
 
@@ -284,6 +285,7 @@ def test_llama_load_kwargs_are_tuned_and_overrideable(monkeypatch):
     monkeypatch.setenv("SEISO_LLAMA_THREADS", "6")
     monkeypatch.setenv("SEISO_LLAMA_GPU_LAYERS", "4")
     monkeypatch.setenv("SEISO_LLAMA_USE_MMAP", "false")
+    monkeypatch.delenv("SEISO_LLAMA_THREADS_BATCH", raising=False)
     monkeypatch.setattr(
         "seiso.inference.model_pool._llama_gpu_offload_ok", lambda: True
     )
@@ -412,6 +414,38 @@ def test_llama_layer_attempts_mac_cpu_offload_ladder(monkeypatch, tmp_path):
     assert attempts[-1] == 0
 
 
+def test_effective_offload_headroom_unified_uses_pool_budget(monkeypatch):
+    import seiso.inference.model_pool as mp
+
+    monkeypatch.setattr(platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(platform, "machine", lambda: "arm64")
+    monkeypatch.setattr(mp, "_unified_memory_budget_mb", lambda: 24 * 1024)
+
+    assert mp._effective_offload_headroom_mb(3000) >= int(24 * 1024 * 0.88)
+
+
+def test_llama_layer_attempts_unified_prefers_fitted_layers(monkeypatch, tmp_path):
+    import seiso.inference.model_pool as mp
+
+    gguf = tmp_path / "heavy.gguf"
+    gguf.write_bytes(b"\x00" * 1024)
+    monkeypatch.setattr(platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(platform, "machine", lambda: "arm64")
+    monkeypatch.setattr(mp, "_llama_gpu_offload_ok", lambda: True)
+    monkeypatch.setattr("seiso.inference.backends.gguf_block_count", lambda _p: 40)
+    monkeypatch.setattr(
+        "seiso.memory.protection.estimate_path_vram_mb",
+        lambda _p, **_: 23000,
+    )
+    monkeypatch.setattr(mp, "_unified_memory_budget_mb", lambda: 24 * 1024)
+
+    attempts = mp._llama_layer_attempts(str(gguf), -1, 8000)
+
+    assert attempts[0] < 39
+    assert attempts[0] >= 30
+    assert attempts[-1] == 0
+
+
 def test_llama_layer_attempts_mac_cpu_offload_can_be_disabled(
     monkeypatch, tmp_path
 ):
@@ -464,12 +498,87 @@ def test_llama_full_gpu_targets(monkeypatch):
     assert mp._llama_full_gpu_targets(0) == []
 
 
-def test_llama_batch_defaults_are_speed_first():
+def test_llama_batch_defaults_are_speed_first(monkeypatch):
     import seiso.inference.model_pool as mp
 
+    monkeypatch.setattr(platform, "system", lambda: "Linux")
+    monkeypatch.setattr(platform, "machine", lambda: "x86_64")
     batch, ubatch = mp._llama_batch_defaults()
     assert batch == 4096
     assert ubatch == 1024
+
+
+def test_gpu_offload_budget_mb_caps_unified_by_free_headroom(monkeypatch):
+    import seiso.inference.model_pool as mp
+
+    monkeypatch.setattr(mp, "_unified_memory_budget_mb", lambda: 36 * 1024)
+    monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 4096)
+
+    assert mp._gpu_offload_budget_mb() == 4096
+
+
+def test_prepare_for_load_returns_generation_id(tmp_path, monkeypatch):
+    pool = ModelPool()
+    first = tmp_path / "a.gguf"
+    second = tmp_path / "b.gguf"
+    first.write_bytes(b"a")
+    second.write_bytes(b"b")
+    pool._active = LoadedModel(
+        key="llama:a",
+        backend=BackendKind.LLAMA,
+        handle=object(),
+        meta={"path": str(first), "norm_path": str(first.resolve())},
+    )
+    monkeypatch.setattr("seiso.hardware.profile.hardware_profile", lambda **_: {})
+
+    generation = pool.prepare_for_load(str(second), BackendKind.LLAMA)
+
+    assert generation == pool.current_generation()
+
+
+def test_refresh_headroom_stats_force_invalidates_cache(monkeypatch):
+    import seiso.inference.model_pool as mp
+    import seiso.memory.protection as protection
+
+    protection._headroom_cache = (1234, 0.0)
+    invalidated: list[bool] = []
+
+    monkeypatch.setattr(
+        "seiso.hardware.profile.hardware_profile", lambda force_refresh=False: {}
+    )
+    monkeypatch.setattr(
+        "seiso.memory.protection.invalidate_headroom_cache",
+        lambda: invalidated.append(True),
+    )
+
+    mp._refresh_headroom_stats(force=False)
+    assert protection._headroom_cache == (1234, 0.0)
+    assert invalidated == []
+
+    mp._refresh_headroom_stats(force=True)
+    assert invalidated == [True]
+
+
+def test_llama_batch_defaults_scale_on_discrete_gpu_headroom(monkeypatch):
+    import seiso.inference.model_pool as mp
+
+    monkeypatch.setattr(platform, "system", lambda: "Linux")
+    monkeypatch.setattr(platform, "machine", lambda: "x86_64")
+    monkeypatch.setattr(mp, "_gpu_offload_budget_mb", lambda: 36 * 1024)
+    batch, ubatch = mp._llama_batch_defaults()
+    assert batch == 8192
+    assert ubatch == 2048
+
+
+def test_llama_batch_defaults_scale_on_apple_unified(monkeypatch):
+    import seiso.inference.model_pool as mp
+
+    monkeypatch.setattr(platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(platform, "machine", lambda: "arm64")
+    monkeypatch.setattr(mp, "_gpu_offload_budget_mb", lambda: 36 * 1024)
+    batch, ubatch = mp._llama_batch_defaults()
+    assert batch == 8192
+    assert ubatch == 2048
 
 
 def test_llama_speed_memory_profiles_ignore_headroom(monkeypatch, tmp_path):
