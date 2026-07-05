@@ -258,6 +258,7 @@ def test_llama_effective_batch_headroom_skips_margin_for_comfortable_models(
     gguf = tmp_path / "gemma-14b-q4.gguf"
     gguf.write_bytes(b"\x00" * 1024)
     monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: True)
+    monkeypatch.setattr("seiso.memory.protection.available_ram_mb", lambda: 65536)
     monkeypatch.setattr(
         "seiso.memory.protection.estimate_path_vram_mb",
         lambda _path: 9000,
@@ -366,8 +367,133 @@ def test_llama_load_profile_ladder_native_linux_keeps_july3_speed_for_roomy_mode
 
     assert profiles[0]["n_batch"] == 4096
     assert profiles[0]["n_ubatch"] == 1024
-    assert profiles[0].get("flash_attn") is not False
+    assert profiles[0].get("flash_attn") is False
     assert profiles[-1].get("flash_attn") is False
+
+
+def test_clamp_llama_load_kwargs_native_linux_roomy_keeps_july3_batches(
+    monkeypatch, tmp_path
+):
+    gguf = tmp_path / "small.gguf"
+    gguf.write_bytes(b"\x00" * 1024)
+    monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 24576)
+    monkeypatch.setattr(
+        "seiso.memory.protection.estimate_path_vram_mb", lambda _p: 1024
+    )
+    monkeypatch.setattr(
+        "seiso.inference.backends.gguf_block_count", lambda _p: 32
+    )
+    monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: True)
+
+    kwargs = clamp_llama_load_kwargs(
+        {
+            "_model_path": str(gguf),
+            "n_ctx": 4096,
+            "n_batch": 4096,
+            "n_ubatch": 1024,
+            "n_gpu_layers": -1,
+            "flash_attn": True,
+        }
+    )
+    assert kwargs["n_batch"] == 4096
+    assert kwargs["n_ubatch"] == 1024
+    assert "flash_attn" not in kwargs
+
+
+def test_clamp_llama_load_kwargs_native_linux_borderline_roomy(
+    monkeypatch, tmp_path
+):
+    """~60% VRAM: not tight, but native Linux still strips flash-attn."""
+    gguf = tmp_path / "mid.gguf"
+    gguf.write_bytes(b"\x00" * 1024)
+    monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 24576)
+    monkeypatch.setattr(
+        "seiso.memory.protection.estimate_path_vram_mb", lambda _p: 13000
+    )
+    monkeypatch.setattr(
+        "seiso.inference.backends.gguf_block_count", lambda _p: 48
+    )
+    monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: True)
+
+    kwargs = clamp_llama_load_kwargs(
+        {
+            "_model_path": str(gguf),
+            "n_ctx": 4096,
+            "n_batch": 4096,
+            "n_ubatch": 1024,
+            "n_gpu_layers": -1,
+            "flash_attn": True,
+        }
+    )
+    assert "flash_attn" not in kwargs
+    assert kwargs["n_batch"] <= 4096
+    assert kwargs["n_ubatch"] <= kwargs["n_batch"]
+
+
+def test_clamp_llama_load_kwargs_partial_offload_allows_larger_batch_than_full(
+    monkeypatch, tmp_path
+):
+    gguf = tmp_path / "big.gguf"
+    gguf.write_bytes(b"\x00" * 1024)
+    monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 24576)
+    monkeypatch.setattr(
+        "seiso.memory.protection.estimate_path_vram_mb", lambda _p: 17000
+    )
+    monkeypatch.setattr(
+        "seiso.inference.backends.gguf_block_count", lambda _p: 64
+    )
+    monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: True)
+
+    full = clamp_llama_load_kwargs(
+        {
+            "_model_path": str(gguf),
+            "n_ctx": 4096,
+            "n_batch": 4096,
+            "n_ubatch": 1024,
+            "n_gpu_layers": -1,
+        }
+    )
+    partial = clamp_llama_load_kwargs(
+        {
+            "_model_path": str(gguf),
+            "n_ctx": 4096,
+            "n_batch": 4096,
+            "n_ubatch": 1024,
+            "n_gpu_layers": 32,
+        }
+    )
+    assert partial["n_batch"] >= full["n_batch"]
+
+
+def test_clamp_llama_load_kwargs_native_linux_tight_strips_flash_attn(
+    monkeypatch, tmp_path
+):
+    gguf = tmp_path / "big.gguf"
+    gguf.write_bytes(b"\x00" * 1024)
+    monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 24576)
+    monkeypatch.setattr(
+        "seiso.memory.protection.estimate_path_vram_mb", lambda _p: 17000
+    )
+    monkeypatch.setattr(
+        "seiso.inference.backends.gguf_block_count", lambda _p: 64
+    )
+    monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: True)
+
+    kwargs = clamp_llama_load_kwargs(
+        {
+            "_model_path": str(gguf),
+            "n_ctx": 4096,
+            "n_batch": 4096,
+            "n_ubatch": 1024,
+            "n_gpu_layers": -1,
+            "flash_attn": True,
+        }
+    )
+    assert "flash_attn" not in kwargs
+    assert kwargs["n_batch"] <= 512
+    assert kwargs["n_ubatch"] <= 128
+    assert kwargs.get("op_offload") is False
+    assert kwargs.get("offload_kqv") is False
 
 
 def test_llama_load_profile_ladder_skips_upscale_when_model_fills_gpu(

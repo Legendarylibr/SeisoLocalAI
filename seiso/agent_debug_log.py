@@ -12,7 +12,7 @@ _SESSION_ID = "15b90d"
 
 
 def agent_debug_enabled() -> bool:
-    return os.environ.get("SEISO_AGENT_DEBUG", "1").strip().lower() not in {
+    return os.environ.get("SEISO_AGENT_DEBUG", "0").strip().lower() not in {
         "0",
         "false",
         "no",

@@ -68,13 +68,25 @@ def _elf_needed_sonames(path: Path) -> list[str]:
 def _llamacpp_lib_dirs() -> list[Path]:
     dirs: list[Path] = []
     seen: set[str] = set()
+
+    def _add(lib_dir: Path) -> None:
+        if not lib_dir.is_dir():
+            return
+        key = str(lib_dir.resolve())
+        if key not in seen:
+            seen.add(key)
+            dirs.append(lib_dir)
+
     for entry in sys.path:
-        lib_dir = Path(entry) / "llama_cpp" / "lib"
-        if lib_dir.is_dir():
-            key = str(lib_dir.resolve())
-            if key not in seen:
-                seen.add(key)
-                dirs.append(lib_dir)
+        _add(Path(entry) / "llama_cpp" / "lib")
+    try:
+        import importlib.util
+
+        spec = importlib.util.find_spec("llama_cpp")
+        if spec and spec.origin:
+            _add(Path(spec.origin).resolve().parent / "lib")
+    except (ImportError, ValueError, TypeError):
+        pass
     return dirs
 
 
@@ -167,19 +179,35 @@ def preload_cuda_shared_libraries(*, lib_dirs: list[str] | None = None) -> list[
                 continue
         return False
 
+    def _load_family(family: str) -> bool:
+        for version in _CUDA_PRELOAD_VERSIONS:
+            if _load(f"{family}.so.{version}"):
+                return True
+        return False
+
     required = required_cuda_sonames()
     if required:
         for soname in required:
-            _load(soname)
+            if _load(soname):
+                continue
+            for family in _CUDA_PRELOAD_FAMILIES:
+                if soname.startswith(f"{family}.so."):
+                    _load_family(family)
+                    break
     else:
         # llama_cpp missing or CPU-only: preload one runtime major per family
         # (cu12 preferred) so a CUDA wheel installed later still imports.
         for family in _CUDA_PRELOAD_FAMILIES:
-            for version in _CUDA_PRELOAD_VERSIONS:
-                if _load(f"{family}.so.{version}"):
-                    break
-    _cuda_preloaded = bool(loaded)
+            _load_family(family)
+    # Mark complete when libs mapped, or when there is nowhere left to search.
+    _cuda_preloaded = bool(loaded) or not dirs
     return loaded
+
+
+def reset_cuda_preload_state() -> None:
+    """Allow CUDA preload to retry (tests / post-install repair)."""
+    global _cuda_preloaded
+    _cuda_preloaded = False
 
 
 def ensure_cuda_library_path() -> list[str]:
@@ -191,7 +219,14 @@ def ensure_cuda_library_path() -> list[str]:
     current_parts = [p for p in current.split(":") if p]
     merged = dirs + [p for p in current_parts if p not in dirs]
     os.environ["LD_LIBRARY_PATH"] = ":".join(merged)
-    preload_cuda_shared_libraries(lib_dirs=dirs)
+    loaded = preload_cuda_shared_libraries(lib_dirs=dirs)
+    if loaded:
+        try:
+            from seiso.inference.model_pool import reset_llama_gpu_offload_cache
+
+            reset_llama_gpu_offload_cache()
+        except ImportError:
+            pass
     return dirs
 
 

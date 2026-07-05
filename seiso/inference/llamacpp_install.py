@@ -45,6 +45,12 @@ def nvidia_hardware_visible() -> bool:
 def llamacpp_gpu_offload_supported() -> bool:
     """True when the installed wheel can offload layers to GPU (CUDA/Metal)."""
     try:
+        from seiso.platform import ensure_cuda_library_path
+
+        ensure_cuda_library_path()
+    except ImportError:
+        pass
+    try:
         import llama_cpp
 
         for candidate in (

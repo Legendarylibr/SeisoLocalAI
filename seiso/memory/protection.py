@@ -39,6 +39,8 @@ _MAX_LLAMA_CTX = 131072
 _MIN_LLAMA_CTX = 2048
 _MAX_LLAMA_BATCH = 4096
 _MIN_LLAMA_BATCH = 128
+# Post-weight headroom below this on native Linux → clamp batches (prefill crash zone).
+_NATIVE_LINUX_PREFILL_CLAMP_MB = 6144
 _MAX_JSONL_LOAD_MB = 512
 _MODEL_WEIGHT_VRAM_SUFFIXES = frozenset({".gguf", ".safetensors", ".bin"})
 
@@ -498,7 +500,16 @@ def llama_load_profile_ladder(
     )
     top_batch, top_ubatch = llama_batch_limits_for_headroom(effective)
 
-    if tight:
+    try:
+        from seiso.platform import is_native_linux_nvidia
+
+        native_linux_nvidia = is_native_linux_nvidia()
+    except ImportError:
+        native_linux_nvidia = False
+
+    if tight or (
+        native_linux_nvidia and effective < _NATIVE_LINUX_PREFILL_CLAMP_MB
+    ):
         base_batch = max(_MIN_LLAMA_BATCH, min(base_batch, top_batch))
         base_ubatch = max(
             _MIN_LLAMA_BATCH,
@@ -509,15 +520,16 @@ def llama_load_profile_ladder(
         base_ubatch = min(base_ubatch, 1024, base_batch)
 
     steps: list[tuple[int, int, int | None, bool]] = []
-    try:
-        from seiso.platform import is_native_linux_nvidia
-
-        native_linux_nvidia = is_native_linux_nvidia()
-    except ImportError:
-        native_linux_nvidia = False
     speed_scale = env_bool("SEISO_LLAMA_SPEED_SCALE", not native_linux_nvidia)
+    native_flash_ok = (
+        not native_linux_nvidia
+        or env_bool("SEISO_LLAMA_UNSAFE_FLASH_ATTN", False)
+    )
     primary_flash = (
-        n_gpu_layers != 0 and not tight and env_bool("SEISO_LLAMA_FLASH_ATTN", True)
+        n_gpu_layers != 0
+        and not tight
+        and native_flash_ok
+        and env_bool("SEISO_LLAMA_FLASH_ATTN", True)
     )
 
     if tier == "normal":
@@ -864,24 +876,48 @@ def clamp_llama_load_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
         free_mb = headroom_mb()
         out["n_batch"] = min(out["n_batch"], _MAX_LLAMA_BATCH)
         out["n_ubatch"] = min(out["n_ubatch"], 1024, out["n_batch"])
-        if llama_model_is_tight_vram_fit(
+        tight = llama_model_is_tight_vram_fit(
             model_path=model_path,
             free_mb=free_mb,
             n_gpu_layers=n_gpu_layers,
             n_ctx=n_ctx,
+        )
+        native_linux_nvidia = False
+        try:
+            native_linux_nvidia = seiso_platform.is_native_linux_nvidia()
+        except Exception:
+            pass
+        batch_headroom = llama_effective_batch_headroom_mb(
+            free_mb,
+            model_path=model_path,
+            n_gpu_layers=n_gpu_layers,
+            n_ctx=n_ctx,
+        )
+        if tight or (
+            native_linux_nvidia
+            and batch_headroom < _NATIVE_LINUX_PREFILL_CLAMP_MB
         ):
-            batch_headroom = llama_effective_batch_headroom_mb(
-                free_mb,
-                model_path=model_path,
-                n_gpu_layers=n_gpu_layers,
-                n_ctx=n_ctx,
-            )
             max_batch, max_ubatch = llama_batch_limits_for_headroom(batch_headroom)
             out["n_batch"] = max(_MIN_LLAMA_BATCH, min(out["n_batch"], max_batch))
             out["n_ubatch"] = max(
                 _MIN_LLAMA_BATCH,
                 min(out["n_ubatch"], out["n_batch"], max_ubatch),
             )
+        if (
+            native_linux_nvidia
+            and not env_bool("SEISO_LLAMA_UNSAFE_FLASH_ATTN", False)
+        ):
+            out.pop("flash_attn", None)
+        if (
+            native_linux_nvidia
+            and tight
+            and n_gpu_layers != 0
+            and not env_bool("SEISO_LLAMA_UNSAFE_OP_OFFLOAD", False)
+        ):
+            out["op_offload"] = False
+            total_layers = gguf_total_layers(model_path)
+            if n_gpu_layers == -1 or n_gpu_layers >= total_layers:
+                out["offload_kqv"] = False
 
     ctx_cap = clamp_llama_n_ctx(n_ctx, max_tokens=512)
     if n_ctx > ctx_cap:
@@ -891,7 +927,7 @@ def clamp_llama_load_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
         from seiso.agent_debug_log import agent_debug_enabled, agent_debug_log
 
         if agent_debug_enabled():
-            tight = (
+            log_tight = (
                 n_gpu_layers != 0
                 and llama_model_is_tight_vram_fit(
                     model_path=model_path,
@@ -906,7 +942,10 @@ def clamp_llama_load_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
                 message="clamped llama load kwargs",
                 data={
                     "model": Path(model_path).name,
-                    "tight_fit": tight,
+                    "tight_fit": log_tight,
+                    "native_linux_nvidia": native_linux_nvidia
+                    if model_path and n_gpu_layers != 0
+                    else False,
                     "free_mb": headroom_mb(),
                     "n_gpu_layers": n_gpu_layers,
                     "n_ctx": out.get("n_ctx"),

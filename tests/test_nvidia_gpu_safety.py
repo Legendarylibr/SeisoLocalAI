@@ -185,7 +185,7 @@ def test_native_linux_nvidia_allows_full_offload_for_comfortable_models(
     )
     assert kwargs["n_batch"] == 4096
     assert kwargs["n_ubatch"] == 1024
-    assert kwargs.get("flash_attn") is not False
+    assert "flash_attn" not in kwargs
 
 
 @pytest.mark.parametrize(
@@ -400,8 +400,50 @@ def test_platform_profile_native_linux_caps_startup_batches(monkeypatch):
     assert batch == 4096
     assert ubatch == 1024
     assert ubatch <= batch
-    assert os.environ.get("SEISO_LLAMA_FLASH_ATTN") == "true"
+    assert os.environ.get("SEISO_LLAMA_FLASH_ATTN") == "false"
     assert os.environ.get("SEISO_LLAMA_SPEED_SCALE") == "false"
+
+
+def test_platform_profile_native_linux_respects_user_flash_attn_env(monkeypatch):
+    from seiso.hardware.tiers import HardwareTier
+    from seiso.memory.platform_profile import apply_platform_memory_profile
+
+    for key in list(os.environ):
+        if key.startswith("SEISO_LLAMA_"):
+            monkeypatch.delenv(key, raising=False)
+
+    profile = {
+        "ram_gb": 64,
+        "gpus": [{"name": "NVIDIA GeForce RTX 4090", "vram_total_mb": 24576}],
+        "backend": "cuda",
+        "platform": "Linux",
+    }
+    monkeypatch.setenv("SEISO_LLAMA_FLASH_ATTN", "false")
+    monkeypatch.setattr(
+        "seiso.memory.platform_profile.classify_tier",
+        lambda _p: HardwareTier.WORKSTATION,
+    )
+    monkeypatch.setattr(
+        "seiso.memory.platform_profile.vram_headroom_mb", lambda _p: 24576
+    )
+    monkeypatch.setattr(
+        "seiso.memory.platform_profile.training_capabilities",
+        lambda: {
+            "gpu_count": 1,
+            "train_platform": "cpu",
+            "nvidia_hardware": True,
+            "vendor": "nvidia",
+        },
+    )
+    monkeypatch.setattr("platform.system", lambda: "Linux")
+    monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: True)
+    monkeypatch.setattr(
+        "seiso.inference.model_pool._llama_gpu_offload_ok", lambda: True
+    )
+
+    apply_platform_memory_profile(profile=profile)
+
+    assert os.environ["SEISO_LLAMA_FLASH_ATTN"] == "false"
 
 
 def test_platform_profile_native_linux_low_ram_caps_startup_batches(monkeypatch):
