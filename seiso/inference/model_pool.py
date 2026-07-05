@@ -320,33 +320,35 @@ def _clear_optimal_layers_cache() -> None:
     _optimal_layers_cache.clear()
 
 
-def _llama_gpu_layers_optimal(model_path: str, requested: int) -> int:
+def _llama_gpu_layers_optimal(
+    model_path: str, requested: int, *, n_ctx: int = 2048
+) -> int:
     """Best layer count for current free VRAM — used to decide cache reload."""
     now = time.time()
     from seiso.memory.protection import headroom_mb
 
     free_mb = headroom_mb()
-    cache_key = (model_path, requested, free_mb // 512)
+    cache_key = (model_path, requested, free_mb // 512, max(int(n_ctx), 2048) // 512)
     with _optimal_layers_lock:
         cached = _optimal_layers_cache.get(cache_key)
         if cached and now - cached[1] < _OPTIMAL_LAYERS_TTL_S:
             return cached[0]
 
-    layers = fit_llama_gpu_layers(model_path, requested, free_mb)
+    layers = fit_llama_gpu_layers(model_path, requested, free_mb, n_ctx=n_ctx)
     with _optimal_layers_lock:
         _optimal_layers_cache[cache_key] = (layers, now)
     return layers
 
 
 def _llama_cache_is_optimal(
-    model_path: str, cached_layers: int, requested: int
+    model_path: str, cached_layers: int, requested: int, *, n_ctx: int = 2048
 ) -> bool:
     """True when a cached llama handle already uses the best GPU offload available."""
     if requested == 0:
         return cached_layers == 0
     if cached_layers == -1:
         return True
-    optimal = _llama_gpu_layers_optimal(model_path, requested)
+    optimal = _llama_gpu_layers_optimal(model_path, requested, n_ctx=n_ctx)
     if optimal == -1:
         return False
     return cached_layers >= optimal
@@ -733,7 +735,10 @@ class ModelPool:
                         "SEISO_LLAMA_GPU_LAYERS", _default_llama_gpu_layers()
                     )
                     if _llama_cache_is_optimal(
-                        load_path, cached_layers, requested_layers
+                        load_path,
+                        cached_layers,
+                        requested_layers,
+                        n_ctx=needed_ctx or cached_ctx or 2048,
                     ):
                         return self._active.handle
 
@@ -807,6 +812,7 @@ class ModelPool:
                     str(self._active.meta.get("path") or model_path),
                     cached_layers,
                     requested_layers,
+                    n_ctx=n_ctx,
                 ):
                     return self._active.handle
 
