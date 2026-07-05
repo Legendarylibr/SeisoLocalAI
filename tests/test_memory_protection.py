@@ -306,6 +306,37 @@ def test_llama_load_profile_ladder_upscales_small_model_on_big_gpu(
     assert profiles[0]["n_ubatch"] == 512
 
 
+def test_llama_load_profile_ladder_native_linux_avoids_speed_and_flash(
+    monkeypatch, tmp_path
+):
+    gguf = tmp_path / "small.gguf"
+    gguf.write_bytes(b"\x00" * 1024)
+    monkeypatch.delenv("SEISO_LLAMA_SPEED_SCALE", raising=False)
+    monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: True)
+    monkeypatch.setattr(
+        "seiso.memory.protection.estimate_path_vram_mb",
+        lambda _path: 1024,
+    )
+    monkeypatch.setattr(
+        "seiso.inference.backends.gguf_block_count",
+        lambda _path: 32,
+    )
+
+    profiles = llama_load_profile_ladder(
+        model_path=str(gguf),
+        n_ctx=4096,
+        n_gpu_layers=-1,
+        free_mb=24576,
+        base_batch=4096,
+        base_ubatch=1024,
+        tier="normal",
+    )
+
+    assert profiles[0]["n_batch"] <= 2048
+    assert profiles[0]["n_ubatch"] <= 512
+    assert all(profile.get("flash_attn") is False for profile in profiles)
+
+
 def test_llama_load_profile_ladder_skips_upscale_when_model_fills_gpu(
     monkeypatch, tmp_path
 ):

@@ -564,6 +564,53 @@ def test_llama_load_model_tries_speed_profile_before_base(monkeypatch, tmp_path)
     assert attempts[0][1] <= 1024
 
 
+def test_native_linux_load_model_uses_crash_resistant_kwargs(monkeypatch, tmp_path):
+    import seiso.inference.model_pool as mp
+
+    gguf = tmp_path / "qwen-27b-q4.gguf"
+    gguf.write_bytes(b"gguf")
+    attempts: list[dict[str, object]] = []
+
+    class FakeLlama:
+        def __init__(self, *, model_path: str, **kwargs):
+            assert model_path == str(gguf)
+            attempts.append(dict(kwargs))
+            self._seiso_n_gpu_layers = kwargs["n_gpu_layers"]
+
+    monkeypatch.setattr(mp, "_native_linux_nvidia", lambda: True)
+    monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: True)
+    monkeypatch.setattr(mp, "_llama_gpu_offload_ok", lambda: True)
+    monkeypatch.setattr(mp, "_default_llama_gpu_layers", lambda: -1)
+    monkeypatch.setattr(mp, "_llama_kv_quant_options", lambda _p: [{}])
+    monkeypatch.setattr(mp, "_llama_full_gpu_targets", lambda _r: [-1])
+    monkeypatch.setattr(mp, "_llama_layer_attempts", lambda *_a, **_k: [24, 0])
+    monkeypatch.setattr(mp, "gguf_total_layers", lambda _p: 64)
+    monkeypatch.setattr(mp, "_refresh_headroom_stats", lambda *, force=False: None)
+    monkeypatch.setattr(
+        "seiso.memory.protection.release_cached_memory", lambda sync=False: None
+    )
+    monkeypatch.setattr(
+        "seiso.memory.protection.estimate_path_vram_mb", lambda _p: 17000
+    )
+    monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 24576)
+    monkeypatch.setattr(
+        "seiso.inference.tuning.attach_llama_prompt_cache",
+        lambda _llm, **_: None,
+    )
+    monkeypatch.setitem(
+        __import__("sys").modules,
+        "llama_cpp",
+        type("LlamaCpp", (), {"Llama": FakeLlama}),
+    )
+
+    mp._load_llama_model(str(gguf), 4096)
+
+    first = attempts[0]
+    assert first["n_batch"] <= 512
+    assert first["n_ubatch"] <= 128
+    assert "flash_attn" not in first
+
+
 def test_llama_load_model_skips_full_offload_when_kv_reserve_does_not_fit(
     monkeypatch, tmp_path
 ):
