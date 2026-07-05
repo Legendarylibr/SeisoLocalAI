@@ -65,17 +65,17 @@ def estimate_path_vram_mb(path: str | Path, *, mode: str = "chat") -> int:
     """Conservative runtime memory estimate from path, size, or name."""
     p = Path(path).expanduser()
     cache_key = _path_stat_key(p)
-    if cache_key is not None and mode == "chat":
-        cached = _vram_estimate_cache.get(cache_key)
+    if cache_key is not None:
+        cached = _vram_estimate_cache.get((cache_key, mode))
         if cached is not None:
             return cached
 
     est = _estimate_path_vram_mb_uncached(p, mode=mode)
 
-    if cache_key is not None and mode == "chat":
+    if cache_key is not None:
         if len(_vram_estimate_cache) >= _VRAM_ESTIMATE_CACHE_MAX:
             _vram_estimate_cache.pop(next(iter(_vram_estimate_cache)))
-        _vram_estimate_cache[cache_key] = est
+        _vram_estimate_cache[(cache_key, mode)] = est
     return est
 
 
@@ -767,12 +767,11 @@ def clamp_llama_cache_mb(
         return min(default_mb, 512)
 
     cap = min(default_mb, max(128, ram_mb // 24))
-    if model_path:
-        if seiso_platform.is_native_linux_nvidia():
-            weight_mb = int(estimate_path_vram_mb(model_path))
-            mmap_reserve = max(512, int(weight_mb * 0.12))
-            host_budget = max(128, ram_mb - mmap_reserve - _host_os_reserve_mb(ram_mb))
-            cap = min(cap, max(0, host_budget // 8))
+    if model_path and seiso_platform.is_native_linux_nvidia():
+        weight_mb = int(estimate_path_vram_mb(model_path))
+        mmap_reserve = max(512, int(weight_mb * 0.12))
+        host_budget = max(128, ram_mb - mmap_reserve - _host_os_reserve_mb(ram_mb))
+        cap = min(cap, max(0, host_budget // 8))
     return max(0, cap)
 
 
