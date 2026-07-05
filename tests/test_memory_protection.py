@@ -272,7 +272,9 @@ def test_llama_effective_batch_headroom_uses_host_ram_on_native_linux(
         8192, model_path=gguf, n_gpu_layers=-1
     )
     assert host_only is not None
-    assert effective == min(gpu_only, host_only)
+    raw = min(gpu_only, host_only)
+    expected = max(128, int(raw * 0.85) - 256)
+    assert effective == expected
 
 
 def test_llama_load_profile_ladder_upscales_small_model_on_big_gpu(
@@ -289,6 +291,7 @@ def test_llama_load_profile_ladder_upscales_small_model_on_big_gpu(
         lambda _path: 32,
     )
     monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: False)
+    monkeypatch.delenv("SEISO_LLAMA_SPEED_SCALE", raising=False)
 
     profiles = llama_load_profile_ladder(
         model_path=str(gguf),

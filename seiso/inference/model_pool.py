@@ -118,12 +118,32 @@ def _llama_gpu_offload_ok() -> bool:
     return False
 
 
+def _native_linux_nvidia() -> bool:
+    """Bare-metal Linux with discrete NVIDIA — inference uses llama.cpp GGUF."""
+    try:
+        from seiso.platform import is_native_linux_nvidia
+
+        return is_native_linux_nvidia()
+    except ImportError:
+        return False
+
+
 def _llama_speed_scale_enabled() -> bool:
-    return env_bool("SEISO_LLAMA_SPEED_SCALE", True)
+    # Upscaled batches OOM during prefill after weights land on GPU.
+    default = not _native_linux_nvidia()
+    return env_bool("SEISO_LLAMA_SPEED_SCALE", default)
+
+
+def _default_llama_flash_attn() -> bool:
+    # flash_attn can segfault llama.cpp on some CUDA/model combos at inference time.
+    default = not _native_linux_nvidia()
+    return env_bool("SEISO_LLAMA_FLASH_ATTN", default)
 
 
 def _llama_batch_defaults() -> tuple[int, int]:
     """Speed-first llama.cpp prompt/decode batch defaults (clamped at load by model headroom)."""
+    if _native_linux_nvidia():
+        return 512, 128
     return 4096, 1024
 
 
@@ -419,7 +439,7 @@ def llama_load_kwargs(n_ctx: int, *, model_path: str | None = None) -> dict[str,
     }
     if n_gpu_layers != 0:
         kwargs["op_offload"] = env_bool("SEISO_LLAMA_OP_OFFLOAD", True)
-    if n_gpu_layers != 0 and env_bool("SEISO_LLAMA_FLASH_ATTN", True):
+    if n_gpu_layers != 0 and _default_llama_flash_attn():
         kwargs["flash_attn"] = True
     if model_path:
         kwargs["_model_path"] = model_path
@@ -469,7 +489,7 @@ def _load_llama_model(
         release_cached_memory,
     )
 
-    release_cached_memory(sync=False)
+    release_cached_memory(sync=True)
     _clear_optimal_layers_cache()
     _refresh_headroom_stats(force=True)
 
@@ -550,6 +570,13 @@ def _load_llama_model(
             load_kwargs["offload_kqv"] = bool(
                 load_kwargs.get("offload_kqv", layers != 0)
             )
+        total_layers = gguf_total_layers(path)
+        if layers > 0 and layers < total_layers:
+            load_kwargs.pop("flash_attn", None)
+        from seiso.memory.protection import clamp_llama_load_kwargs
+
+        load_kwargs["_model_path"] = path
+        load_kwargs = clamp_llama_load_kwargs(load_kwargs)
         load_kwargs.pop("_model_path", None)
         try:
             llm = Llama(model_path=path, **load_kwargs)

@@ -308,9 +308,11 @@ def test_platform_profile_native_linux_caps_startup_batches(monkeypatch):
 
     batch = int(os.environ["SEISO_LLAMA_BATCH"])
     ubatch = int(os.environ["SEISO_LLAMA_UBATCH"])
-    assert batch <= 2048
-    assert ubatch <= 512
+    assert batch <= 512
+    assert ubatch <= 128
     assert ubatch <= batch
+    assert os.environ.get("SEISO_LLAMA_FLASH_ATTN") == "false"
+    assert os.environ.get("SEISO_LLAMA_SPEED_SCALE") == "false"
 
 
 def test_platform_profile_native_linux_low_ram_caps_startup_batches(monkeypatch):

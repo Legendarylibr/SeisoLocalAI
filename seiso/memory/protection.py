@@ -396,7 +396,16 @@ def llama_effective_batch_headroom_mb(
     )
     if host_headroom is None:
         return gpu_headroom
-    return min(gpu_headroom, host_headroom)
+    effective = min(gpu_headroom, host_headroom)
+    try:
+        from seiso.platform import is_native_linux_nvidia
+
+        if is_native_linux_nvidia():
+            # Reserve headroom for prefill activations beyond load-time estimates.
+            effective = max(_MIN_LLAMA_BATCH * 2, int(effective * 0.85) - 256)
+    except ImportError:
+        pass
+    return effective
 
 
 def llama_batch_limits_for_headroom(headroom_mb_value: int) -> tuple[int, int]:
@@ -436,17 +445,31 @@ def llama_load_profile_ladder(
     )
 
     steps: list[tuple[int, int, int | None, bool]] = []
-    speed_scale = env_bool("SEISO_LLAMA_SPEED_SCALE", True)
+    try:
+        from seiso.platform import is_native_linux_nvidia
+
+        native_linux_nvidia = is_native_linux_nvidia()
+    except ImportError:
+        native_linux_nvidia = False
+    speed_scale = env_bool("SEISO_LLAMA_SPEED_SCALE", not native_linux_nvidia)
 
     if tier == "normal":
-        if speed_scale and n_gpu_layers != 0 and (
-            top_batch > base_batch or top_ubatch > base_ubatch
+        if (
+            speed_scale
+            and not native_linux_nvidia
+            and n_gpu_layers != 0
+            and (top_batch > base_batch or top_ubatch > base_ubatch)
         ):
             steps.append((top_batch, top_ubatch, None, True))
-        steps.append((base_batch, base_ubatch, None, True))
+        steps.append((base_batch, base_ubatch, None, not native_linux_nvidia))
         steps.extend(
             [
-                (min(base_batch, 512), min(base_ubatch, 256), min(n_ctx, 4096), True),
+                (
+                    min(base_batch, 512),
+                    min(base_ubatch, 256),
+                    min(n_ctx, 4096),
+                    not native_linux_nvidia,
+                ),
                 (512, 128, min(n_ctx, 4096), False),
                 (256, 128, min(n_ctx, 2048), False),
             ]

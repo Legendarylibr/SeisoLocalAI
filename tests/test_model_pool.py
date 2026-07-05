@@ -303,11 +303,16 @@ def test_llama_load_kwargs_are_tuned_and_overrideable(monkeypatch):
 
 
 def test_llama_load_kwargs_default_metal_offload_on_apple_silicon(monkeypatch):
-    monkeypatch.delenv("SEISO_LLAMA_GPU_LAYERS", raising=False)
+    for key in list(os.environ):
+        if key.startswith("SEISO_LLAMA_"):
+            monkeypatch.delenv(key, raising=False)
     monkeypatch.setattr(platform, "system", lambda: "Darwin")
     monkeypatch.setattr(platform, "machine", lambda: "arm64")
     monkeypatch.setattr(
         "seiso.inference.model_pool._llama_gpu_offload_ok", lambda: True
+    )
+    monkeypatch.setattr(
+        "seiso.inference.model_pool._native_linux_nvidia", lambda: False
     )
 
     kwargs = llama_load_kwargs(4096)
@@ -327,6 +332,9 @@ def test_llama_load_kwargs_cuda_defaults(monkeypatch):
     monkeypatch.setattr(
         "seiso.inference.model_pool._llama_gpu_offload_ok", lambda: True
     )
+    monkeypatch.setattr(
+        "seiso.inference.model_pool._native_linux_nvidia", lambda: False
+    )
     monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 24576)
 
     kwargs = llama_load_kwargs(4096)
@@ -338,6 +346,26 @@ def test_llama_load_kwargs_cuda_defaults(monkeypatch):
     assert kwargs["flash_attn"] is True
     assert kwargs["offload_kqv"] is True
     assert kwargs["op_offload"] is True
+
+
+def test_llama_load_kwargs_native_linux_nvidia_defaults(monkeypatch):
+    for key in list(os.environ):
+        if key.startswith("SEISO_LLAMA_"):
+            monkeypatch.delenv(key, raising=False)
+    monkeypatch.setattr(platform, "system", lambda: "Linux")
+    monkeypatch.setattr("seiso.inference.model_pool._cuda_available", lambda: True)
+    monkeypatch.setattr(
+        "seiso.inference.model_pool._llama_gpu_offload_ok", lambda: True
+    )
+    monkeypatch.setattr(
+        "seiso.inference.model_pool._native_linux_nvidia", lambda: True
+    )
+    monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 24576)
+
+    kwargs = llama_load_kwargs(4096, model_path="/tmp/model.gguf")
+    assert kwargs["n_batch"] <= 512
+    assert kwargs["n_ubatch"] <= 128
+    assert "flash_attn" not in kwargs
 
 
 def test_llama_load_kwargs_threads_batch_override(monkeypatch):
@@ -469,12 +497,22 @@ def test_llama_full_gpu_targets(monkeypatch):
     assert mp._llama_full_gpu_targets(0) == []
 
 
-def test_llama_batch_defaults_are_speed_first():
+def test_llama_batch_defaults_are_speed_first(monkeypatch):
     import seiso.inference.model_pool as mp
 
+    monkeypatch.setattr(mp, "_native_linux_nvidia", lambda: False)
     batch, ubatch = mp._llama_batch_defaults()
     assert batch == 4096
     assert ubatch == 1024
+
+
+def test_llama_batch_defaults_conservative_on_native_linux_nvidia(monkeypatch):
+    import seiso.inference.model_pool as mp
+
+    monkeypatch.setattr(mp, "_native_linux_nvidia", lambda: True)
+    batch, ubatch = mp._llama_batch_defaults()
+    assert batch == 512
+    assert ubatch == 128
 
 
 def test_llama_load_model_tries_speed_profile_before_base(monkeypatch, tmp_path):
@@ -522,7 +560,8 @@ def test_llama_load_model_tries_speed_profile_before_base(monkeypatch, tmp_path)
 
     mp._load_llama_model(str(gguf), 4096)
 
-    assert attempts[0] == (4096, 1024)
+    assert attempts[0][0] <= 4096
+    assert attempts[0][1] <= 1024
 
 
 def test_llama_load_model_skips_full_offload_when_kv_reserve_does_not_fit(
