@@ -291,6 +291,11 @@ def gguf_block_count(model_path: str) -> int | None:
     return _gguf_metadata(model_path).block_count
 
 
+def gguf_total_layers(model_path: str | Path) -> int:
+    """Block count with a conservative fallback when GGUF metadata is missing."""
+    return gguf_block_count(str(model_path)) or 64
+
+
 def gguf_is_supported_by_llamacpp(model_path: str) -> bool:
     architecture = gguf_architecture(model_path)
     return architecture not in _UNSUPPORTED_GGUF_ARCHITECTURES

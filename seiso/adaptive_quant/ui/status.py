@@ -9,20 +9,11 @@ from typing import Any
 
 from seiso.adaptive_quant.ui.catalog import list_config_files
 from seiso.io.files import matching_file_stats
+from seiso.platform import detect_wsl2
 
 
 def _repo_root() -> Path:
     return Path(__file__).resolve().parents[3]
-
-
-def _detect_wsl2() -> bool:
-    if os.environ.get("WSL_INTEROP") or os.environ.get("WSL_DISTRO_NAME"):
-        return True
-    try:
-        version = Path("/proc/version").read_text(encoding="utf-8").lower()
-    except OSError:
-        return False
-    return "microsoft" in version or "wsl2" in version
 
 
 def _git(repo: Path, *args: str) -> str | None:
@@ -164,7 +155,7 @@ def dashboard_status(*, repo: Path | None = None) -> dict[str, Any]:
     """Structured environment snapshot for the launcher dashboard."""
     root = repo if repo is not None else _repo_root()
     on_windows_mount = root.resolve().as_posix().startswith("/mnt/")
-    is_wsl2 = _detect_wsl2()
+    is_wsl2 = detect_wsl2()
     head = _git(root, "rev-parse", "--short", "HEAD")
     dirty = _git(root, "status", "--porcelain")
     setup = _setup_ready(root)

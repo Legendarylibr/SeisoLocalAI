@@ -13,6 +13,7 @@ from typing import Any
 
 from seiso.compat import StrEnum
 from seiso.env import env_bool, env_int
+from seiso.inference.backends import gguf_total_layers
 
 logger = logging.getLogger(__name__)
 
@@ -137,11 +138,10 @@ def fit_llama_gpu_layers(
     if requested == 0 or headroom_mb <= 0 or not _llama_gpu_offload_ok():
         return 0
 
-    from seiso.inference.backends import gguf_block_count
     from seiso.memory.protection import estimate_path_vram_mb, llama_kv_cache_reserve_mb
 
     weight_mb = max(int(estimate_path_vram_mb(model_path)), 256)
-    total_layers = gguf_block_count(model_path) or 64
+    total_layers = gguf_total_layers(model_path)
     kv_reserve_mb = llama_kv_cache_reserve_mb(
         model_path,
         n_ctx=n_ctx,
@@ -183,9 +183,7 @@ def _llama_layer_attempts(
     if requested == 0 or not _llama_gpu_offload_ok():
         return [0]
 
-    from seiso.inference.backends import gguf_block_count
-
-    total_layers = gguf_block_count(model_path) or 64
+    total_layers = gguf_total_layers(model_path)
 
     if _apple_silicon_metal() and _mac_cpu_offload_enabled():
         max_layers = total_layers if requested == -1 else min(requested, total_layers)
@@ -526,9 +524,7 @@ def _load_llama_model(
             llm._seiso_n_gpu_layers = layers  # noqa: SLF001
             llm._seiso_load_tier = load_tier  # noqa: SLF001
             if layers > 0:
-                from seiso.inference.backends import gguf_block_count
-
-                total_layers = gguf_block_count(path) or 64
+                total_layers = gguf_total_layers(path)
                 if layers < total_layers:
                     logger.warning(
                         "Partial GPU offload for %s: %d/%d layers (~%.1f GB free) — "
