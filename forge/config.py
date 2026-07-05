@@ -23,7 +23,7 @@ from seiso.security import generate_secret_key, resolve_data_dir
 StorageMode = Literal["persistent", "ephemeral"]
 
 # Local Forge + Vite dev — 127.0.0.1 and localhost are different browser origins.
-DEFAULT_CORS_ORIGINS = "http://127.0.0.1:8765,http://localhost:8765,http://127.0.0.1:5173,http://localhost:5173"
+DEFAULT_CORS_ORIGINS = "http://127.0.0.1:8765,http://localhost:8765,http://127.0.0.1:5173,http://localhost:5173,http://127.0.0.1:5174,http://localhost:5174,http://127.0.0.1:5175,http://localhost:5175"
 
 
 class ForgeSettings(BaseSettings):
@@ -56,6 +56,9 @@ class ForgeSettings(BaseSettings):
     model_router_enabled: bool = False
     model_router_url: str = "http://127.0.0.1:8780"
     model_router_api_key: str = ""
+    code_workspace: Path = Field(default=Path(""))
+    web_search_enabled: bool = False
+    brave_search_api_key: str = ""
 
     @field_validator("data_dir", mode="before")
     @classmethod

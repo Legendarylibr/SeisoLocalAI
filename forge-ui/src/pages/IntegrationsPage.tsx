@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
-import { PageHeader } from "@/components/PageHeader";
-import { IconIntegrations } from "@/components/Icons";
+import { StudioPageShell } from "@/components/StudioPageShell";
+import { FormSection } from "@/components/research/FormSection";
+import { DataTable } from "@/components/research/DataTable";
 
 type Provider = { id: string; name: string; provider_type: string; config: Record<string, unknown> };
 
@@ -40,87 +41,105 @@ export function IntegrationsPage() {
   };
 
   return (
-    <div>
-      <PageHeader
-        title="Integrations"
-        subtitle="Local inference backends — vLLM."
-        group="Platform"
-      />
+    <StudioPageShell
+      title="Integrations"
+      subtitle="Connect local vLLM servers and other inference backends for chat routing."
+      group="Platform"
+    >
+      <div className="card studio-card">
+        <FormSection
+          title="Add provider"
+          hint="Optional API keys are encrypted at rest. Local vLLM servers often need no key."
+        >
+          <div className="grid integrations-form-grid">
+            <div className="form-field">
+              <label htmlFor="provider-name">Name</label>
+              <input
+                id="provider-name"
+                value={pName}
+                onChange={(e) => setPName(e.target.value)}
+                placeholder="My vLLM server"
+              />
+            </div>
+            <div className="form-field">
+              <label htmlFor="provider-type">Type</label>
+              <select id="provider-type" value={pType} onChange={(e) => setPType(e.target.value)}>
+                <option value="vllm">vLLM</option>
+              </select>
+            </div>
+            <div className="form-field">
+              <label htmlFor="provider-key">API key</label>
+              <input
+                id="provider-key"
+                type="password"
+                value={pKey}
+                onChange={(e) => setPKey(e.target.value)}
+                autoComplete="off"
+                placeholder="sk-… (optional for local servers)"
+              />
+            </div>
+            <div className="form-field">
+              <label htmlFor="provider-url">Base URL</label>
+              <input
+                id="provider-url"
+                value={pBaseUrl}
+                onChange={(e) => setPBaseUrl(e.target.value)}
+                placeholder="http://127.0.0.1:8000/v1"
+              />
+            </div>
+            <div className="form-field">
+              <label htmlFor="provider-model">Model</label>
+              <input
+                id="provider-model"
+                value={pModel}
+                onChange={(e) => setPModel(e.target.value)}
+                placeholder="default"
+              />
+            </div>
+          </div>
+          <div className="form-actions">
+            <button className="btn btn-primary" onClick={addProvider} disabled={!pName || (!pKey && pType !== "vllm")}>
+              Add provider
+            </button>
+          </div>
+        </FormSection>
 
-      <div className="card">
-        <div className="card-head">
-          <span className="card-head-icon" aria-hidden>
-            <IconIntegrations size={18} />
-          </span>
-          <div className="card-head-text">
-            <h3>Local backends</h3>
-            <p>Connect a local vLLM server. Optional API keys are encrypted at rest.</p>
-          </div>
-        </div>
-        <div className="grid" style={{ marginBottom: "1rem" }}>
-          <div>
-            <label>Name</label>
-            <input value={pName} onChange={(e) => setPName(e.target.value)} placeholder="My vLLM server" />
-          </div>
-          <div>
-            <label>Type</label>
-            <select value={pType} onChange={(e) => setPType(e.target.value)}>
-              <option value="vllm">vLLM</option>
-            </select>
-          </div>
-          <div>
-            <label>API key</label>
-            <input
-              type="password"
-              value={pKey}
-              onChange={(e) => setPKey(e.target.value)}
-              autoComplete="off"
-              placeholder="sk-… (optional for local servers)"
-            />
-          </div>
-          <div>
-            <label>Base URL (optional)</label>
-            <input
-              value={pBaseUrl}
-              onChange={(e) => setPBaseUrl(e.target.value)}
-              placeholder="http://127.0.0.1:8000/v1"
-            />
-          </div>
-          <div>
-            <label>Model (optional)</label>
-            <input
-              value={pModel}
-              onChange={(e) => setPModel(e.target.value)}
-              placeholder="default"
-            />
-          </div>
-        </div>
-        <button className="btn btn-primary" onClick={addProvider} disabled={!pName || (!pKey && pType !== "vllm")}>
-          Add provider
-        </button>
-        {providers.length === 0 ? (
-          <p className="muted-text" style={{ marginTop: "1rem" }}>No providers configured yet.</p>
-        ) : (
-          <table style={{ marginTop: "1rem" }}>
-            <thead>
-                  <tr><th>Name</th><th>Type</th><th>Model</th><th>Key</th><th></th></tr>
-            </thead>
-            <tbody>
-              {providers.map((p) => (
-                <tr key={p.id}>
-                  <td>{p.name}</td>
-                  <td><span className="badge">{p.provider_type}</span></td>
-                  <td className="muted-text">{String(p.config.model || "—")}</td>
-                  <td className="muted-text">Key: {String(p.config.api_key || "—")}</td>
-                  <td>
-                    <button className="btn" onClick={() => api.deleteProvider(p.id).then(refresh)}>Remove</button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+        <FormSection title="Configured providers" hint="Providers appear in Chat under Session settings.">
+          <DataTable
+            columns={[
+              { key: "name", header: "Name" },
+              {
+                key: "provider_type",
+                header: "Type",
+                render: (p) => <span className="badge">{p.provider_type}</span>,
+              },
+              {
+                key: "model",
+                header: "Model",
+                render: (p) => <span className="muted-text">{String(p.config.model || "—")}</span>,
+              },
+              {
+                key: "api_key",
+                header: "Key",
+                render: (p) => <span className="muted-text">{String(p.config.api_key || "—")}</span>,
+                mono: true,
+              },
+              {
+                key: "actions",
+                header: "",
+                render: (p) => (
+                  <button className="btn btn-sm" onClick={() => api.deleteProvider(p.id).then(refresh)}>
+                    Remove
+                  </button>
+                ),
+              },
+            ]}
+            rows={providers}
+            getRowKey={(p) => p.id}
+            emptyMessage="No providers configured yet. Add a vLLM server above to route chat through it."
+          />
+        </FormSection>
       </div>
-    </div>
+    </StudioPageShell>
   );
 }

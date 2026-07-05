@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections import OrderedDict
 from pathlib import Path
 
 from seiso.io.jsonl import read_json_file
@@ -25,16 +26,42 @@ _DEFAULT_UNKNOWN_CTX = 8192
 
 _CTX_NAME_RE = re.compile(r"(?:^|[-_.])(?:(\d+)k|(\d{5,6}))\b", re.I)
 
+_HF_CONFIG_CACHE_MAX = 64
+_hf_config_cache: OrderedDict[tuple[str, float, int], int | None] = OrderedDict()
+
+
+def _hf_config_cache_key(config_path: Path) -> tuple[str, float, int] | None:
+    try:
+        stat = config_path.stat()
+        return (str(config_path), stat.st_mtime, stat.st_size)
+    except OSError:
+        return None
+
 
 def hf_config_context_length(model_path: str) -> int | None:
     """Read max context from a local Hugging Face model directory."""
     path = Path(model_path)
     root = path.parent if path.is_file() else path
     config_path = root / "config.json"
-    data = read_json_file(config_path, default=None)
-    if not isinstance(data, dict):
-        return None
+    cache_key = _hf_config_cache_key(config_path)
+    if cache_key is not None and cache_key in _hf_config_cache:
+        _hf_config_cache.move_to_end(cache_key)
+        return _hf_config_cache[cache_key]
 
+    data = read_json_file(config_path, default=None)
+    result = (
+        None if not isinstance(data, dict) else _context_length_from_hf_config(data)
+    )
+
+    if cache_key is not None:
+        _hf_config_cache[cache_key] = result
+        _hf_config_cache.move_to_end(cache_key)
+        while len(_hf_config_cache) > _HF_CONFIG_CACHE_MAX:
+            _hf_config_cache.popitem(last=False)
+    return result
+
+
+def _context_length_from_hf_config(data: dict) -> int | None:
     for key in (
         "max_position_embeddings",
         "model_max_length",

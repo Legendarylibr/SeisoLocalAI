@@ -17,7 +17,7 @@ from forge.services.inference_models import (
 from forge.services.model_router_client import ROUTER_MODEL_ID
 from forge.services.models import resolve_model_path
 from seiso.inference.backends import BACKEND_LLAMACPP, BACKEND_ROUTER, BACKEND_TORCH
-from seiso.inference.runner import LocalInferenceRunner
+from seiso.inference.runner import LocalInferenceRunner, get_inference_executor
 
 
 def assert_model_fits_for_load(
@@ -97,7 +97,9 @@ async def release_active_local_model(runner: LocalInferenceRunner) -> None:
     if not runner.pool.active_key:
         return
     loop = asyncio.get_running_loop()
-    await loop.run_in_executor(None, runner.pool.cancel_and_unload)
+    await loop.run_in_executor(
+        get_inference_executor(), runner.pool.cancel_and_unload
+    )
 
 
 async def resolve_inventory_model_path(

@@ -44,9 +44,13 @@ _NVIDIA_SMI_PATHS = (
 
 _BOUNDARY_DOC = "docs/platforms/linux-nvidia.md"
 _QUERY_TTL_S = 30.0
+_METRICS_QUERY_TTL_S = 1.5
 _query_cache: list[dict[str, object]] | None = None
 _query_cache_ts: float = 0.0
 _query_cache_exe: str | None = None
+_live_metrics_cache: dict[int, dict[str, float]] | None = None
+_live_metrics_cache_ts: float = 0.0
+_live_metrics_cache_exe: str | None = None
 
 
 def _env_enabled(name: str) -> bool:
@@ -235,10 +239,69 @@ def query_nvidia_gpus(*, force_refresh: bool = False) -> list[dict[str, object]]
 def clear_nvidia_gpu_query_cache() -> None:
     """Clear cached nvidia-smi probe results (tests / post-install)."""
     global _query_cache, _query_cache_ts, _query_cache_exe
+    global _live_metrics_cache, _live_metrics_cache_ts, _live_metrics_cache_exe
 
     _query_cache = None
     _query_cache_ts = 0.0
     _query_cache_exe = None
+    _live_metrics_cache = None
+    _live_metrics_cache_ts = 0.0
+    _live_metrics_cache_exe = None
+
+
+def query_nvidia_gpu_live_metrics(
+    *, force_refresh: bool = False
+) -> dict[int, dict[str, float]]:
+    """VRAM/util/temp per GPU index via one nvidia-smi query (cached ~1.5s)."""
+    global _live_metrics_cache, _live_metrics_cache_ts, _live_metrics_cache_exe
+
+    now = time.time()
+    exe = _resolve_nvidia_smi()
+    if (
+        not force_refresh
+        and _live_metrics_cache is not None
+        and _live_metrics_cache_exe == exe
+        and now - _live_metrics_cache_ts < _METRICS_QUERY_TTL_S
+    ):
+        return _live_metrics_cache
+
+    out: dict[int, dict[str, float]] = {}
+    if not exe:
+        _live_metrics_cache = out
+        _live_metrics_cache_ts = now
+        _live_metrics_cache_exe = exe
+        return out
+
+    proc = _run_nvidia_smi(
+        exe,
+        "--query-gpu=index,utilization.gpu,memory.used,memory.total,temperature.gpu",
+        "--format=csv,noheader,nounits",
+        timeout=3,
+    )
+    if proc is not None and proc.returncode == 0:
+        for line in proc.stdout.strip().splitlines():
+            parts = [p.strip() for p in line.split(",")]
+            if len(parts) < 5:
+                continue
+            try:
+                idx = int(parts[0])
+            except ValueError:
+                continue
+            out[idx] = {
+                "utilization_pct": (
+                    float(parts[1]) if parts[1] not in ("[N/A]", "N/A") else 0.0
+                ),
+                "vram_used_mb": float(parts[2]),
+                "vram_total_mb": float(parts[3]),
+                "temperature_c": (
+                    float(parts[4]) if parts[4] not in ("[N/A]", "N/A") else 0.0
+                ),
+            }
+
+    _live_metrics_cache = out
+    _live_metrics_cache_ts = now
+    _live_metrics_cache_exe = exe
+    return out
 
 
 def nvidia_smi_visible() -> bool:
@@ -354,6 +417,7 @@ __all__ = [
     "nvidia_boundary_report",
     "nvidia_smi_visible",
     "query_nvidia_gpus",
+    "query_nvidia_gpu_live_metrics",
     "recommended_gpu_install_ack_env",
     "resolve_nvidia_smi_executable",
 ]

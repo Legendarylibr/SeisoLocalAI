@@ -17,9 +17,12 @@ _GPU_TASK_KINDS = frozenset(
 
 def _refresh_hardware_profile() -> None:
     try:
-        from seiso.hardware.profile import hardware_profile
+        from seiso.hardware.profile import invalidate_hardware_profile_cache
 
-        hardware_profile(force_refresh=True)
+        invalidate_hardware_profile_cache()
+        from seiso.memory.protection import invalidate_headroom_cache
+
+        invalidate_headroom_cache()
     except ImportError:
         pass
 

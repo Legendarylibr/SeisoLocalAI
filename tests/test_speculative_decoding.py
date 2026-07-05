@@ -447,21 +447,56 @@ def test_iter_speculative_tokens_kv_cache_can_be_disabled(monkeypatch):
     assert chunks
 
 
-def test_dflash_draft_infer_serializes_concurrent_calls():
+def test_dflash_draft_infer_serializes_concurrent_calls(monkeypatch):
     from seiso.inference.model_pool import DflashDraftHandle, dflash_draft_infer
 
     active = {"count": 0, "max": 0}
 
+    class _FakeCtx:
+        def kv_cache_seq_rm(self, _seq: int, start: int, end: int) -> bool:
+            return True
+
     class _FakeDraftLlm:
-        def __call__(self, _text, **kwargs):
-            active["count"] += 1
-            active["max"] = max(active["max"], active["count"])
+        def __init__(self) -> None:
+            self.n_tokens = 0
+            self.input_ids = [0] * 128
+            self._ctx = _FakeCtx()
+            self._requires_eval = False
+            self._model = type("M", (), {"vocab": object()})()
+
+        @property
+        def eval_tokens(self):
+            from collections import deque
+
+            return deque(self.input_ids[: self.n_tokens])
+
+        def reset(self) -> None:
+            self.n_tokens = 0
+
+        def tokenize(self, text: bytes, add_bos: bool = False, special: bool = False):
+            return [1] * max(1, len(text.decode().split()))
+
+        def detokenize(self, tokens, prev_tokens=None):
+            return b"x" * len(tokens)
+
+        def eval(self, tokens) -> None:
             import time
 
+            active["count"] += 1
+            active["max"] = max(active["max"], active["count"])
             time.sleep(0.05)
+            self.n_tokens += len(tokens)
             active["count"] -= 1
-            return {"choices": [{"text": "x"}]}
 
+        def generate(self, tokens, temp=0.0, top_k=1, reset=True):
+            tok = 99
+            self.input_ids[self.n_tokens] = tok
+            self.n_tokens += 1
+            yield tok
+
+    monkeypatch.setattr(
+        "llama_cpp.llama_cpp.llama_vocab_is_eog", lambda _vocab, _tok: False
+    )
     handle = DflashDraftHandle(_FakeDraftLlm())
     errors: list[BaseException] = []
 
@@ -479,6 +514,116 @@ def test_dflash_draft_infer_serializes_concurrent_calls():
 
     assert not errors
     assert active["max"] == 1
+
+
+def test_dflash_session_reuses_prefix_eval(monkeypatch):
+    from seiso.inference.model_pool import DflashDraftHandle, DflashDraftSession
+
+    monkeypatch.setattr(
+        "llama_cpp.llama_cpp.llama_vocab_is_eog", lambda _vocab, _tok: False
+    )
+
+    class _FakeCtx:
+        def kv_cache_seq_rm(self, _seq: int, start: int, end: int) -> bool:
+            return True
+
+    class _FakeDraftLlm:
+        def __init__(self) -> None:
+            self.n_tokens = 0
+            self.input_ids = [10, 11, 12, 13, 14]
+            self._ctx = _FakeCtx()
+            self._requires_eval = False
+            self._model = type("M", (), {"vocab": object()})()
+            self.eval_calls: list[list[int]] = []
+
+        @property
+        def eval_tokens(self):
+            from collections import deque
+
+            return deque(self.input_ids[: self.n_tokens])
+
+        def reset(self) -> None:
+            self.n_tokens = 0
+
+        def tokenize(self, text: bytes, add_bos: bool = False, special: bool = False):
+            mapping = {b"a": [10], b"a b": [10, 11], b"a b c": [10, 11, 12]}
+            return list(mapping.get(text, [10]))
+
+        def detokenize(self, tokens, prev_tokens=None):
+            return b"c" * len(tokens)
+
+        def eval(self, tokens) -> None:
+            if tokens:
+                self.eval_calls.append(list(tokens))
+            self.n_tokens += len(tokens)
+
+        def generate(self, tokens, temp=0.0, top_k=1, reset=True):
+            tok = 12
+            self.input_ids[self.n_tokens] = tok
+            self.n_tokens += 1
+            yield tok
+
+    llm = _FakeDraftLlm()
+    session = DflashDraftSession(DflashDraftHandle(llm))
+
+    assert session.propose("a", max_tokens=1) == "c"
+    assert session.propose("a b", max_tokens=1) == "c"
+    assert llm.eval_calls == [[10], [11]]
+
+
+def test_dflash_session_propose_token_ids_skips_text_roundtrip(monkeypatch):
+    from seiso.inference.model_pool import DflashDraftHandle, DflashDraftSession
+
+    monkeypatch.setattr(
+        "llama_cpp.llama_cpp.llama_vocab_is_eog", lambda _vocab, _tok: False
+    )
+
+    class _FakeCtx:
+        def kv_cache_seq_rm(self, _seq: int, start: int, end: int) -> bool:
+            return True
+
+    class _FakeDraftLlm:
+        def __init__(self) -> None:
+            self.n_tokens = 0
+            self.input_ids = [10, 11, 12, 99]
+            self._ctx = _FakeCtx()
+            self._requires_eval = False
+            self._model = type("M", (), {"vocab": object()})()
+            self.eval_calls: list[list[int]] = []
+
+        @property
+        def eval_tokens(self):
+            from collections import deque
+
+            return deque(self.input_ids[: self.n_tokens])
+
+        def reset(self) -> None:
+            self.n_tokens = 0
+
+        def tokenize(self, text: bytes, add_bos: bool = False, special: bool = False):
+            return [10, 11] if text == b"hi" else [10]
+
+        def eval(self, tokens) -> None:
+            if tokens:
+                self.eval_calls.append(list(tokens))
+            self.n_tokens += len(tokens)
+
+        def generate(self, tokens, temp=0.0, top_k=1, reset=True):
+            tok = 99
+            if self.n_tokens < len(self.input_ids):
+                self.input_ids[self.n_tokens] = tok
+            else:
+                self.input_ids.append(tok)
+            self.n_tokens += 1
+            yield tok
+
+    llm = _FakeDraftLlm()
+    session = DflashDraftSession(DflashDraftHandle(llm))
+
+    assert session.propose_token_ids("hi", max_tokens=1) == [99]
+    eval_before = len(llm.eval_calls)
+    assert session.propose_token_ids("hi", max_tokens=1) == [99]
+    assert len(llm.eval_calls) == eval_before
 
 
 def test_unload_all_clears_dflash_draft_cache(monkeypatch, tmp_path):

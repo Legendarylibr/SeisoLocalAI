@@ -33,6 +33,7 @@ from forge.services.knowledge_context import (
 from forge.services.knowledge_paths import validate_kb_id
 from forge.services.llm_output import StreamingOutputSanitizer, sanitize_llm_output
 from forge.services.model_router_client import ROUTER_MODEL_ID, fetch_router_status
+from seiso.inference.runner import get_inference_executor
 
 router = APIRouter(prefix="/inference", tags=["inference"])
 
@@ -374,7 +375,7 @@ async def preload_model_stream(
                 ),
             }
             await loop.run_in_executor(
-                None,
+                get_inference_executor(),
                 lambda: runner.pool.prepare_for_load(target_path, ctx["backend"]),
             )
 
@@ -394,7 +395,9 @@ async def preload_model_stream(
             ),
         }
         try:
-            await loop.run_in_executor(None, lambda: runner.warm_model(ctx["payload"]))
+            await loop.run_in_executor(
+                get_inference_executor(), lambda: runner.warm_model(ctx["payload"])
+            )
         except Exception as exc:
             yield {"event": "error", "data": str(exc)}
             return
@@ -574,22 +577,38 @@ async def chat(
                     else (payload.get("inference_backend") or "local")
                 )
                 cancelled = False
+                last_stats_tokens = 0
+                final_output_tokens = 0
                 try:
                     orchestrator._emit_log(
                         job_id, f"Streaming inference ({backend_label})"
                     )
                     async for update in orchestrator.stream_local_updates(payload):
                         raw_parts.append(update.text)
-                        yield {
-                            "event": "stats",
-                            "data": json.dumps({"output_tokens": update.output_tokens}),
-                        }
+                        tokens = update.output_tokens
+                        final_output_tokens = tokens
+                        if tokens and (
+                            last_stats_tokens == 0
+                            or tokens - last_stats_tokens >= 4
+                        ):
+                            yield {
+                                "event": "stats",
+                                "data": json.dumps({"output_tokens": tokens}),
+                            }
+                            last_stats_tokens = tokens
                         for chunk in sanitizer.feed(update.text):
                             streamed.append(chunk)
                             yield {"event": "token", "data": chunk}
                     for chunk in sanitizer.finish():
                         streamed.append(chunk)
                         yield {"event": "token", "data": chunk}
+                    if final_output_tokens > last_stats_tokens:
+                        yield {
+                            "event": "stats",
+                            "data": json.dumps(
+                                {"output_tokens": final_output_tokens}
+                            ),
+                        }
                     content = sanitize_llm_output(
                         "".join(raw_parts), strip_tool_calls=not body.tools
                     )

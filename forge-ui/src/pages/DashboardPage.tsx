@@ -9,7 +9,6 @@ import {
   IconChat,
   IconTrain,
   IconCompress,
-  IconInference,
   IconChevronRight,
   IconCpu,
   IconMemory,
@@ -21,10 +20,9 @@ import {
 import { PipelineStrip } from "@/components/research/PipelineStrip";
 
 const GOALS = [
-  { id: "chat", label: "Chat", path: "/chat", Icon: IconChat, desc: "Run models locally with encrypted session memory" },
-  { id: "train", label: "Train/Finetune", path: "/train", Icon: IconTrain, desc: "Fine-tune with LoRA on your hardware" },
-  { id: "compress", label: "Compress", path: "/compress", Icon: IconCompress, desc: "Quantize and shrink models" },
-  { id: "inference", label: "Local LLM Inference", path: "/chat", Icon: IconInference, desc: "Chat with local GGUF or MLX engines" },
+  { id: "chat", label: "Chat & Inference", path: "/chat", Icon: IconChat, desc: "Run GGUF, MLX, or PyTorch models locally with encrypted sessions" },
+  { id: "train", label: "Train & Finetune", path: "/train", Icon: IconTrain, desc: "Fine-tune with LoRA on your hardware" },
+  { id: "compress", label: "Compress", path: "/compress", Icon: IconCompress, desc: "Quantize and shrink models for faster inference" },
 ] as const;
 
 const RESEARCH_PIPELINES = [
@@ -38,7 +36,7 @@ const RESEARCH_PIPELINES = [
   },
   {
     id: "compress",
-    title: "Code Compression",
+    title: "Model Compression",
     desc: "Distill → prune → recover → GPTQ/AWQ with lm-eval benchmarks.",
     path: "/compress",
     Icon: IconCompress,
@@ -71,7 +69,7 @@ export function DashboardPage() {
 
   const activeGoal = GOALS.find((g) => g.id === goal) ?? GOALS[0];
   const goalPath = useMemo(() => {
-    if (activeGoal.id === "chat" || activeGoal.id === "inference") {
+    if (activeGoal.id === "chat") {
       return chatPath({ repo: hw?.recommended_chat_repo ?? null });
     }
     return activeGoal.path;
@@ -79,6 +77,10 @@ export function DashboardPage() {
 
   const vramTotal = hw?.gpus[0]?.vram_total_mb;
   const vramUsed = hw?.gpus[0]?.vram_used_mb;
+  const headroomGb = hw?.vram_headroom_mb != null
+    ? Math.max(0, Math.round(hw.vram_headroom_mb / 1024))
+    : null;
+  const isAppleUnified = hw?.tier_label?.toLowerCase().includes("unified");
 
   return (
     <div className="dashboard">
@@ -109,9 +111,15 @@ export function DashboardPage() {
             <div className="hw-card-icon"><IconMemory size={18} /></div>
             <div className="hw-card-label">Memory</div>
             <div className="hw-card-value">{hw.ram_gb} GB RAM</div>
+            {headroomGb != null && (
+              <div className="hw-card-meta">
+                ~{headroomGb} GB free now
+                {isAppleUnified && hw.ram_gb ? ` · ${Math.round(hw.ram_gb)} GB unified pool` : ""}
+              </div>
+            )}
           </div>
           <div className="card hw-card">
-            <div className="hw-card-icon"><IconInference size={18} /></div>
+            <div className="hw-card-icon"><IconChat size={18} /></div>
             <div className="hw-card-label">Inference backend</div>
             <div className="hw-card-value">{hw.backend.toUpperCase()}</div>
             <div className="hw-card-meta">{hw.platform}</div>
@@ -154,14 +162,6 @@ export function DashboardPage() {
         </div>
       )}
 
-      <section className="research-section">
-        <div className="section-head">
-          <h2 className="section-title">Research pipelines</h2>
-          <p className="section-desc">Reproducible compression, quantization, and retrieval workflows — all local.</p>
-        </div>
-        <PipelineStrip pipelines={[...RESEARCH_PIPELINES]} />
-      </section>
-
       <section className="goal-section">
         <div className="section-head">
           <h2 className="section-title">What do you want to do?</h2>
@@ -185,6 +185,14 @@ export function DashboardPage() {
             </button>
           ))}
         </div>
+      </section>
+
+      <section className="research-section">
+        <div className="section-head">
+          <h2 className="section-title">Research pipelines</h2>
+          <p className="section-desc">Reproducible compression, quantization, and retrieval workflows — all local.</p>
+        </div>
+        <PipelineStrip pipelines={[...RESEARCH_PIPELINES]} />
       </section>
 
       {steps.length > 0 && (
@@ -213,11 +221,15 @@ export function DashboardPage() {
               </li>
             ))}
           </ol>
-          {vramTotal != null && vramTotal > 0 && (
+          {vramTotal != null && vramTotal > 0 ? (
             <p className="muted-text guide-vram">
               VRAM headroom: ~{Math.max(0, Math.round((vramTotal - (vramUsed ?? 0)) / 1024))} GB available
             </p>
-          )}
+          ) : headroomGb != null && isAppleUnified ? (
+            <p className="muted-text guide-vram">
+              Memory: ~{headroomGb} GB free of {Math.round(hw?.ram_gb ?? 0)} GB unified — close other apps if models look blocked.
+            </p>
+          ) : null}
         </section>
       )}
     </div>

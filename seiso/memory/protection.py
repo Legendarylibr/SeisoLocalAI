@@ -6,6 +6,7 @@ import gc
 import logging
 import os
 import platform
+import time
 from pathlib import Path
 from typing import Any
 
@@ -42,6 +43,8 @@ _MODEL_WEIGHT_VRAM_SUFFIXES = frozenset({".gguf", ".safetensors", ".bin"})
 
 _VRAM_ESTIMATE_CACHE_MAX = 256
 _vram_estimate_cache: dict[tuple, int] = {}
+_HEADROOM_CACHE_TTL_S = 2.0
+_headroom_cache: tuple[int, float] | None = None
 
 
 def _path_stat_key(p: Path) -> tuple | None:
@@ -222,6 +225,8 @@ def release_cached_memory(*, sync: bool = False) -> None:
             torch.mps.empty_cache()
     except ImportError:
         pass
+    if sync:
+        invalidate_headroom_cache()
 
 
 def llama_batch_headroom_mb(
@@ -246,7 +251,15 @@ def llama_batch_headroom_mb(
         else:
             gpu_fraction = max(0.0, min(float(n_gpu_layers) / float(total_layers), 1.0))
             gpu_weight_mb = int(weight_mb * gpu_fraction) + 256
-        kv_mb = max(256, min(int(free_mb * 0.08), 1024))
+        try:
+            from seiso.inference.model_pool import _gpu_offload_budget_mb
+
+            budget = _gpu_offload_budget_mb()
+        except ImportError:
+            budget = 0
+        kv_pct = 0.05 if budget >= 20 * 1024 else 0.08
+        kv_cap = 768 if kv_pct <= 0.05 else 1024
+        kv_mb = max(256, min(int(free_mb * kv_pct), kv_cap))
         return max(_MIN_LLAMA_BATCH * 2, free_mb - gpu_weight_mb - kv_mb)
     except Exception:
         return free_mb
@@ -254,9 +267,14 @@ def llama_batch_headroom_mb(
 
 def headroom_mb() -> int:
     """Free memory headroom in MB for fit labels and status reporting."""
+    global _headroom_cache
+    now = time.time()
+    if _headroom_cache is not None and now - _headroom_cache[1] < _HEADROOM_CACHE_TTL_S:
+        return _headroom_cache[0]
     profile = hardware_profile()
+    value: int
     try:
-        return int(vram_headroom_mb(profile))
+        value = int(vram_headroom_mb(profile))
     except Exception:
         gpus = profile.get("gpus") or []
         if gpus:
@@ -266,19 +284,31 @@ def headroom_mb() -> int:
                 used = int(gpu.get("vram_used_mb") or 0)
                 if total > 0:
                     best = max(best, max(total - used, 0))
-            if best > 0:
-                return best
-        ram = float(profile.get("ram_gb") or 8)
-        try:
-            import psutil  # type: ignore
+            value = best if best > 0 else _headroom_from_ram(profile)
+        else:
+            value = _headroom_from_ram(profile)
+    _headroom_cache = (value, now)
+    return value
 
-            avail = psutil.virtual_memory().available / (1024**2)
+
+def _headroom_from_ram(profile: dict[str, Any]) -> int:
+    ram = float(profile.get("ram_gb") or 8)
+    try:
+        import psutil  # type: ignore
+
+        avail = psutil.virtual_memory().available / (1024**2)
+        return int(min(avail * 0.72, ram * 1024 * 0.45))
+    except Exception:
+        avail = available_ram_mb()
+        if avail > 0:
             return int(min(avail * 0.72, ram * 1024 * 0.45))
-        except Exception:
-            avail = available_ram_mb()
-            if avail > 0:
-                return int(min(avail * 0.72, ram * 1024 * 0.45))
-            return int(ram * 1024 * 0.35)
+        return int(ram * 1024 * 0.35)
+
+
+def invalidate_headroom_cache() -> None:
+    """Drop cached headroom (call after unload/load changes VRAM)."""
+    global _headroom_cache
+    _headroom_cache = None
 
 
 def available_ram_mb() -> int:
@@ -441,10 +471,18 @@ def _estimate_prompt_tokens(messages: list[dict[str, Any]]) -> int:
 
 def sanitize_inference_payload(payload: dict[str, Any]) -> dict[str, Any]:
     """Clamp generation limits to available memory without changing intent."""
+    if payload.get("_sanitized"):
+        return payload
     out = dict(payload)
     messages = out.get("messages") or []
     prompt_tokens = _estimate_prompt_tokens(messages)
     headroom = headroom_mb()
+    try:
+        from seiso.inference.model_pool import _effective_offload_headroom_mb
+
+        headroom = _effective_offload_headroom_mb(headroom)
+    except ImportError:
+        pass
 
     max_tokens = int(out.get("max_tokens") or 2048)
     max_tokens = max(1, min(max_tokens, _MAX_INFERENCE_TOKENS))
@@ -465,6 +503,7 @@ def sanitize_inference_payload(payload: dict[str, Any]) -> dict[str, Any]:
             model_path=out.get("model_path"),
             model_format=out.get("model_format"),
         )
+    out["_sanitized"] = True
     return out
 
 

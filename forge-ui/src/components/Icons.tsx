@@ -357,6 +357,20 @@ export function IconKnowledge({ size = defaults.size, className, strokeWidth = d
   );
 }
 
+export function IconSettings({ size = defaults.size, className, strokeWidth = defaults.strokeWidth }: IconProps) {
+  return (
+    <Svg size={size} className={className}>
+      <circle cx="12" cy="12" r="2.75" stroke="currentColor" strokeWidth={strokeWidth} />
+      <path
+        d="M12 2.5V5M12 19V21.5M4.2 4.2L6 6M18 18L19.8 19.8M2.5 12H5M19 12H21.5M4.2 19.8L6 18M18 6L19.8 4.2"
+        stroke="currentColor"
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+      />
+    </Svg>
+  );
+}
+
 export type NavIconName =
   | "dashboard"
   | "hub"
@@ -368,7 +382,8 @@ export type NavIconName =
   | "image"
   | "export"
   | "recipes"
-  | "integrations";
+  | "integrations"
+  | "settings";
 
 const NAV_ICONS: Record<NavIconName, FC<IconProps>> = {
   dashboard: IconDashboard,
@@ -382,6 +397,7 @@ const NAV_ICONS: Record<NavIconName, FC<IconProps>> = {
   export: IconExport,
   recipes: IconRecipes,
   integrations: IconIntegrations,
+  settings: IconSettings,
 };
 
 export function NavIcon({ name, ...props }: IconProps & { name: NavIconName }) {
