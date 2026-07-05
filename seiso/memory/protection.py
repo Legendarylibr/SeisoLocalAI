@@ -9,6 +9,7 @@ import platform
 from pathlib import Path
 from typing import Any, Literal
 
+from seiso import platform as seiso_platform
 from seiso.env import env_bool
 from seiso.hardware import (
     assess_hardware_fit,
@@ -24,7 +25,6 @@ from seiso.memory.estimates import (
     estimate_training_vram_gb,
     guess_params_from_name,
 )
-from seiso.platform import is_native_linux_nvidia, llamacpp_deferred_preflight_platform
 
 logger = logging.getLogger(__name__)
 
@@ -314,7 +314,7 @@ def llama_host_batch_headroom_mb(
     free_vram_mb: int,
 ) -> int | None:
     """Host RAM budget for mmap pages, prompt cache, and CPU-side KV on Linux NVIDIA."""
-    if not is_native_linux_nvidia():
+    if not seiso_platform.is_native_linux_nvidia():
         return None
     ram_mb = available_ram_mb()
     if ram_mb <= 0:
@@ -615,7 +615,7 @@ def _llamacpp_deferred_preflight_platform(
     if str(backend or "").lower() not in {"llamacpp", "llama"}:
         return None
 
-    defer = llamacpp_deferred_preflight_platform(profile=profile)
+    defer = seiso_platform.llamacpp_deferred_preflight_platform(profile=profile)
     if not defer:
         return None
 
@@ -768,7 +768,7 @@ def clamp_llama_cache_mb(
 
     cap = min(default_mb, max(128, ram_mb // 24))
     if model_path:
-        if is_native_linux_nvidia():
+        if seiso_platform.is_native_linux_nvidia():
             weight_mb = int(estimate_path_vram_mb(model_path))
             mmap_reserve = max(512, int(weight_mb * 0.12))
             host_budget = max(128, ram_mb - mmap_reserve - _host_os_reserve_mb(ram_mb))
