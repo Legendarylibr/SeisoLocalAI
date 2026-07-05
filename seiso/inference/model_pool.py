@@ -122,16 +122,8 @@ def _llama_speed_scale_enabled() -> bool:
 
 
 def _llama_batch_defaults() -> tuple[int, int]:
-    """Conservative llama.cpp batch defaults from current free VRAM (no model context)."""
-    try:
-        from seiso.memory.protection import (
-            headroom_mb,
-            llama_batch_limits_for_headroom,
-        )
-
-        return llama_batch_limits_for_headroom(headroom_mb())
-    except Exception:
-        return 2048, 512
+    """Speed-first llama.cpp prompt/decode batch defaults (clamped at load by model headroom)."""
+    return 4096, 1024
 
 
 def fit_llama_gpu_layers(model_path: str, requested: int, headroom_mb: int) -> int:
