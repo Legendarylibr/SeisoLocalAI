@@ -422,11 +422,26 @@ def _llama_cache_is_optimal(
     if requested == 0:
         return cached_layers == 0
     if cached_layers == -1:
-        return True
+        if not _native_linux_nvidia():
+            return True
+        return _llama_gpu_layers_optimal(model_path, requested, n_ctx=n_ctx) == -1
     optimal = _llama_gpu_layers_optimal(model_path, requested, n_ctx=n_ctx)
     if optimal == -1:
         return False
     return cached_layers >= optimal
+
+
+def _llama_cache_headroom_ok(handle: Any) -> bool:
+    """Native Linux cache hit guard for handles loaded before VRAM changed."""
+    if not _native_linux_nvidia():
+        return True
+    loaded_headroom = getattr(handle, "_seiso_load_headroom_mb", None)
+    if not loaded_headroom:
+        return True
+    _refresh_headroom_stats(force=True)
+    from seiso.memory.protection import headroom_mb
+
+    return headroom_mb() >= int(int(loaded_headroom) * 0.85)
 
 
 def llama_load_kwargs(n_ctx: int, *, model_path: str | None = None) -> dict[str, Any]:
@@ -494,6 +509,7 @@ def _load_llama_model(
     n_ctx: int,
     *,
     tier: str = "normal",
+    batch_override: tuple[int, int] | None = None,
 ) -> Any:
     """Load a GGUF with VRAM-aware layer offload and clear OOM errors."""
     from seiso.memory.protection import LlamaLoadTier, llama_load_profile_ladder
@@ -530,6 +546,10 @@ def _load_llama_model(
             pass
 
     kwargs = llama_load_kwargs(n_ctx, model_path=path)
+    if batch_override is not None:
+        override_batch, override_ubatch = batch_override
+        kwargs["n_batch"] = max(128, int(override_batch))
+        kwargs["n_ubatch"] = max(128, min(int(override_ubatch), kwargs["n_batch"]))
     speed_extras = _llama_speed_extras(path)
     requested = env_int("SEISO_LLAMA_GPU_LAYERS", _default_llama_gpu_layers())
     if requested != 0 and not _llama_gpu_offload_ok():
@@ -644,6 +664,11 @@ def _load_llama_model(
             llm = Llama(model_path=path, **load_kwargs)
             llm._seiso_n_gpu_layers = layers  # noqa: SLF001
             llm._seiso_load_tier = load_tier  # noqa: SLF001
+            llm._seiso_n_batch = int(load_kwargs.get("n_batch") or 0)  # noqa: SLF001
+            llm._seiso_n_ubatch = int(load_kwargs.get("n_ubatch") or 0)  # noqa: SLF001
+            llm._seiso_n_ctx = int(load_kwargs.get("n_ctx") or effective_n_ctx)  # noqa: SLF001
+            llm._seiso_model_path = path  # noqa: SLF001
+            llm._seiso_load_headroom_mb = headroom_mb()  # noqa: SLF001
             if layers > 0:
                 total_layers = gguf_total_layers(path)
                 if layers < total_layers:
@@ -945,7 +970,7 @@ class ModelPool:
                     cached_layers,
                     requested_layers,
                     n_ctx=n_ctx,
-                ):
+                ) and _llama_cache_headroom_ok(self._active.handle):
                     return self._active.handle
 
         key = f"llama:{norm}" if tier == "normal" else f"llama:{norm}:{tier}"
@@ -957,10 +982,33 @@ class ModelPool:
             meta={"n_ctx": n_ctx, "load_tier": tier},
         )
 
-    def reload_llama(self, model_path: str, n_ctx: int, *, tier: str) -> Any:
+    def reload_llama(
+        self,
+        model_path: str,
+        n_ctx: int,
+        *,
+        tier: str,
+        batch_override: tuple[int, int] | None = None,
+    ) -> Any:
         """Unload and reload llama.cpp at a lower memory tier after inference OOM."""
         self.cancel_and_unload()
-        return self.get_llama(model_path, n_ctx=n_ctx, tier=tier)
+        if batch_override is None:
+            return self.get_llama(model_path, n_ctx=n_ctx, tier=tier)
+
+        def loader(path: str):
+            return _load_llama_model(
+                path, n_ctx, tier=tier, batch_override=batch_override
+            )
+
+        norm = self.normalize_path(model_path)
+        key = f"llama:{norm}:{tier}:batch:{batch_override[0]}:{batch_override[1]}"
+        return self.switch(
+            model_path,
+            BackendKind.LLAMA,
+            loader,
+            cache_key=key,
+            meta={"n_ctx": n_ctx, "load_tier": tier},
+        )
 
     def reload_llama_compact(self, model_path: str, n_ctx: int) -> Any:
         """Backward-compatible alias for compact-tier reload."""

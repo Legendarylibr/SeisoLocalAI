@@ -41,6 +41,7 @@ from seiso.memory.protection import (
     LlamaLoadTier,
     is_oom_error,
     llama_next_recovery_tier,
+    llama_prefill_needs_reload,
     release_cached_memory,
     sanitize_inference_payload,
 )
@@ -696,6 +697,41 @@ class LocalInferenceRunner:
         release_cached_memory(sync=True)
         return self._pool.reload_llama(model_path, n_ctx, tier=next_tier)
 
+    def _llama_guard_prefill(
+        self,
+        llm: Any,
+        *,
+        model_path: str,
+        messages: list[dict[str, Any]],
+        n_ctx: int,
+    ) -> Any:
+        current_tier = self._llama_handle_tier(llm)
+        needs_reload, safe_batch, safe_ubatch = llama_prefill_needs_reload(
+            model_path=getattr(llm, "_seiso_model_path", model_path) or model_path,
+            messages=messages,
+            n_ctx=n_ctx,
+            loaded_n_batch=int(getattr(llm, "_seiso_n_batch", 4096) or 4096),
+            loaded_n_gpu_layers=int(getattr(llm, "_seiso_n_gpu_layers", 0) or 0),
+            load_tier=current_tier,
+            loaded_headroom_mb=getattr(llm, "_seiso_load_headroom_mb", None),
+        )
+        if not needs_reload:
+            return llm
+        logger.warning(
+            "llama.cpp prefill headroom changed before chat — reloading tier=%s "
+            "with n_batch=%d n_ubatch=%d",
+            current_tier,
+            safe_batch,
+            safe_ubatch,
+        )
+        release_cached_memory(sync=True)
+        return self._pool.reload_llama(
+            model_path,
+            n_ctx,
+            tier=current_tier,
+            batch_override=(safe_batch, safe_ubatch),
+        )
+
     def _llama_complete(
         self,
         payload: dict[str, Any],
@@ -710,6 +746,9 @@ class LocalInferenceRunner:
             model_format=payload.get("model_format"),
         )
         llm = self._pool.get_llama(model_path, n_ctx=n_ctx)
+        llm = self._llama_guard_prefill(
+            llm, model_path=model_path, messages=messages, n_ctx=n_ctx
+        )
         kwargs = llama_completion_kwargs(payload)
         kwargs["stream"] = False
         tools = payload.get("tools_schemas")
@@ -774,6 +813,9 @@ class LocalInferenceRunner:
             llm = self._pool.get_llama(model_path, n_ctx=n_ctx)
         except ImportError as exc:
             raise RuntimeError("llama-cpp-python not installed") from exc
+        llm = self._llama_guard_prefill(
+            llm, model_path=model_path, messages=messages, n_ctx=n_ctx
+        )
 
         completion_kwargs = llama_completion_kwargs(payload)
         emitted_text = False

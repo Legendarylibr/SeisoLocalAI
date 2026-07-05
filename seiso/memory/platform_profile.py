@@ -109,7 +109,11 @@ def apply_platform_memory_profile(
             from seiso.platform import is_native_linux_nvidia
 
             if is_native_linux_nvidia(profile=profile):
-                cache_cap = 256 if low else 512
+                cache_cap = (
+                    1024 if not low and tier == HardwareTier.WORKSTATION else 512
+                )
+                if low:
+                    cache_cap = 256
                 cache_mb = str(min(int(cache_mb), cache_cap))
         except ImportError:
             pass
@@ -182,6 +186,12 @@ def apply_platform_memory_profile(
                         )
                     ),
                 )
+                batch, ubatch = llama_batch_limits_for_headroom(headroom)
+                cache_cap = (
+                    1024 if not low and tier == HardwareTier.WORKSTATION else 512
+                )
+                if low:
+                    cache_cap = 256
                 if is_native_linux_nvidia(profile=profile):
                     batch, ubatch, cache_cap = native_linux_nvidia_llama_batch_caps(
                         tier=tier,
