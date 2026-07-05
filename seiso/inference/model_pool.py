@@ -202,15 +202,23 @@ def _llama_speed_scale_enabled() -> bool:
 
 
 def _llama_batch_defaults() -> tuple[int, int]:
-    """Speed-first llama.cpp prompt/decode batch defaults."""
-    if platform.system() == "Linux":
-        return 4096, 1024
+    """Speed-first llama.cpp prompt/decode batch defaults scaled to free VRAM."""
+    batch_env = os.environ.get("SEISO_LLAMA_BATCH", "").strip()
+    ubatch_env = os.environ.get("SEISO_LLAMA_UBATCH", "").strip()
+    if batch_env.isdigit() and ubatch_env.isdigit():
+        batch = int(batch_env)
+        return batch, min(int(ubatch_env), batch)
+
     budget = _gpu_offload_budget_mb()
     if budget >= 32 * 1024:
         return 8192, 2048
     if budget >= 24 * 1024:
         return 4096, 1536
-    return 4096, 1024
+    if budget >= 12 * 1024:
+        return 4096, 1024
+    if budget >= 5120:
+        return 2048, 512
+    return 512, 256
 
 
 def fit_llama_gpu_layers(model_path: str, requested: int, headroom_mb: int) -> int:
