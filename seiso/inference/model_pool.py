@@ -139,19 +139,11 @@ def _llama_speed_scale_enabled() -> bool:
 
 
 def _default_llama_flash_attn() -> bool:
-    # flash_attn can segfault llama.cpp on some CUDA/model combos at inference time.
-    if _native_linux_nvidia() and not env_bool(
-        "SEISO_LLAMA_UNSAFE_FLASH_ATTN", False
-    ):
-        return False
-    default = not _native_linux_nvidia()
-    return env_bool("SEISO_LLAMA_FLASH_ATTN", default)
+    return env_bool("SEISO_LLAMA_FLASH_ATTN", True)
 
 
 def _llama_batch_defaults() -> tuple[int, int]:
-    """Speed-first llama.cpp prompt/decode batch defaults (clamped at load by model headroom)."""
-    if _native_linux_nvidia():
-        return 512, 128
+    """Speed-first llama.cpp prompt/decode batch defaults (tight-fit models clamp at load)."""
     return 4096, 1024
 
 
@@ -165,19 +157,25 @@ def fit_llama_gpu_layers(
     """Estimate a fallback GPU layer count after full offload fails."""
     if requested == 0 or headroom_mb <= 0 or not _llama_gpu_offload_ok():
         return 0
-    if _native_linux_nvidia():
-        # Avoid hard driver/llama.cpp crashes during first-message prefill by
-        # leaving real VRAM slack beyond static weight+KV estimates.
-        reserve_mb = max(2048, int(headroom_mb * 0.15))
-        headroom_mb = max(0, headroom_mb - reserve_mb)
 
     from seiso.memory.protection import (
         estimate_path_vram_mb,
         llama_kv_cache_reserve_mb,
+        llama_model_is_tight_vram_fit,
         llama_offload_fits_headroom,
     )
 
     weight_mb = max(int(estimate_path_vram_mb(model_path)), 256)
+    if _native_linux_nvidia() and llama_model_is_tight_vram_fit(
+        model_path=model_path,
+        free_mb=headroom_mb,
+        n_gpu_layers=-1 if requested == -1 else max(requested, 1),
+        n_ctx=n_ctx,
+    ):
+        # Leave real VRAM slack for near-capacity models during first-message prefill.
+        reserve_mb = max(2048, int(headroom_mb * 0.15))
+        headroom_mb = max(0, headroom_mb - reserve_mb)
+
     total_layers = gguf_total_layers(model_path)
 
     def _fits(layers: int) -> bool:
@@ -330,6 +328,8 @@ def _llama_speed_extras(model_path: str) -> dict[str, Any]:
 def _llama_kv_quant_options(model_path: str) -> list[dict[str, Any]]:
     """KV-cache quant tiers to try after the unquantized cache fails."""
     if not env_bool("SEISO_LLAMA_KV_QUANT", True):
+        return [{}]
+    if _native_linux_nvidia() and not env_bool("SEISO_LLAMA_UNSAFE_KV_QUANT", False):
         return [{}]
     try:
         from llama_cpp import llama_cpp as lc
