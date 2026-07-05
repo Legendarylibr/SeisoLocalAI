@@ -34,7 +34,7 @@ _TRAINING_OVERHEAD_RATIO = 2.0
 _MAX_INFERENCE_TOKENS = 8192
 _MAX_LLAMA_CTX = 131072
 _MIN_LLAMA_CTX = 2048
-_MAX_LLAMA_BATCH = 2048
+_MAX_LLAMA_BATCH = 4096
 _MIN_LLAMA_BATCH = 128
 _MAX_LLAMA_CACHE_MB = 1024
 _MAX_JSONL_LOAD_MB = 512
@@ -250,6 +250,19 @@ def llama_batch_headroom_mb(
         return max(_MIN_LLAMA_BATCH * 2, free_mb - gpu_weight_mb - kv_mb)
     except Exception:
         return free_mb
+
+
+def llama_batch_limits_for_headroom(headroom_mb_value: int) -> tuple[int, int]:
+    """Largest conservative llama.cpp batch/ubatch pair for available headroom."""
+    if headroom_mb_value < 2048:
+        return 256, 128
+    if headroom_mb_value < 4096:
+        return 512, 128
+    if headroom_mb_value < 16384:
+        return 1024, 256
+    if headroom_mb_value < 32768:
+        return 2048, 512
+    return 4096, 1024
 
 
 def headroom_mb() -> int:
@@ -497,15 +510,27 @@ def clamp_llama_n_ctx(
 
 
 def clamp_llama_load_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
-    """Normalize llama.cpp load kwargs without RAM/VRAM-based downscaling."""
+    """Normalize llama.cpp load kwargs and trim oversized batches near VRAM limits."""
     out = dict(kwargs)
-    out.pop("_model_path", None)
+    model_path = out.pop("_model_path", None)
     n_ctx = int(out.get("n_ctx") or _MIN_LLAMA_CTX)
 
     n_batch = int(out.get("n_batch") or _MAX_LLAMA_BATCH)
     out["n_batch"] = max(_MIN_LLAMA_BATCH, n_batch)
     n_ubatch = int(out.get("n_ubatch") or out["n_batch"])
     out["n_ubatch"] = max(_MIN_LLAMA_BATCH, min(n_ubatch, out["n_batch"]))
+
+    n_gpu_layers = int(out.get("n_gpu_layers") or 0)
+    if model_path and n_gpu_layers != 0:
+        batch_headroom = llama_batch_headroom_mb(
+            headroom_mb(), model_path=model_path, n_gpu_layers=n_gpu_layers
+        )
+        max_batch, max_ubatch = llama_batch_limits_for_headroom(batch_headroom)
+        out["n_batch"] = max(_MIN_LLAMA_BATCH, min(out["n_batch"], max_batch))
+        out["n_ubatch"] = max(
+            _MIN_LLAMA_BATCH,
+            min(out["n_ubatch"], out["n_batch"], max_ubatch),
+        )
 
     ctx_cap = clamp_llama_n_ctx(n_ctx, max_tokens=512)
     if n_ctx > ctx_cap:

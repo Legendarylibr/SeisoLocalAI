@@ -323,13 +323,14 @@ def test_llama_load_kwargs_cuda_defaults(monkeypatch):
     monkeypatch.setattr(
         "seiso.inference.model_pool._llama_gpu_offload_ok", lambda: True
     )
+    monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 24576)
 
     kwargs = llama_load_kwargs(4096)
     assert kwargs["n_gpu_layers"] == -1
     assert kwargs["n_threads"] == 16
     assert kwargs["n_threads_batch"] == 24
-    assert kwargs["n_batch"] == 4096
-    assert kwargs["n_ubatch"] == 1024
+    assert kwargs["n_batch"] == 2048
+    assert kwargs["n_ubatch"] == 512
     assert kwargs["flash_attn"] is True
     assert kwargs["offload_kqv"] is True
     assert kwargs["op_offload"] is True
@@ -464,8 +465,20 @@ def test_llama_full_gpu_targets(monkeypatch):
     assert mp._llama_full_gpu_targets(0) == []
 
 
-def test_llama_batch_defaults_are_speed_first():
+def test_llama_batch_defaults_are_speed_first(monkeypatch):
     import seiso.inference.model_pool as mp
+
+    monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 24576)
+
+    batch, ubatch = mp._llama_batch_defaults()
+    assert batch == 2048
+    assert ubatch == 512
+
+
+def test_llama_batch_defaults_use_larger_batches_on_big_gpus(monkeypatch):
+    import seiso.inference.model_pool as mp
+
+    monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 49152)
 
     batch, ubatch = mp._llama_batch_defaults()
     assert batch == 4096
@@ -475,6 +488,7 @@ def test_llama_batch_defaults_are_speed_first():
 def test_llama_speed_memory_profiles_ignore_headroom(monkeypatch, tmp_path):
     import seiso.inference.model_pool as mp
 
+    monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 24576)
     gguf = tmp_path / "small.gguf"
     gguf.write_bytes(b"\x00" * 1024)
 
@@ -483,7 +497,7 @@ def test_llama_speed_memory_profiles_ignore_headroom(monkeypatch, tmp_path):
         str(gguf),
         1024,
     )
-    assert profiles == [{"n_batch": 4096, "n_ubatch": 1024}]
+    assert profiles == [{"n_batch": 2048, "n_ubatch": 512}]
 
 
 def test_llama_load_model_tries_speed_profile_before_base(monkeypatch, tmp_path):
