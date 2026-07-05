@@ -87,12 +87,18 @@ _llama_offload_checked = False
 _llama_offload_supported = False
 
 
+def reset_llama_gpu_offload_cache() -> None:
+    """Allow GPU offload probe to retry after CUDA libs become available."""
+    global _llama_offload_checked, _llama_offload_supported
+    _llama_offload_checked = False
+    _llama_offload_supported = False
+
+
 def _llama_gpu_offload_ok() -> bool:
     """True when the installed llama-cpp-python can offload to GPU."""
     global _llama_offload_checked, _llama_offload_supported
     if _llama_offload_checked:
         return _llama_offload_supported
-    _llama_offload_checked = True
     try:
         from seiso.platform import ensure_cuda_library_path
 
@@ -112,9 +118,12 @@ def _llama_gpu_offload_ok() -> bool:
         ):
             if callable(candidate):
                 _llama_offload_supported = bool(candidate())
+                _llama_offload_checked = True
                 return _llama_offload_supported
     except Exception:
-        pass
+        # Do not cache failure — CUDA preload may succeed on a later call.
+        return False
+    _llama_offload_checked = True
     return False
 
 
@@ -139,6 +148,11 @@ def _llama_speed_scale_enabled() -> bool:
 
 
 def _default_llama_flash_attn() -> bool:
+    # flash_attn can segfault llama.cpp on some native Linux CUDA/model combos.
+    if _native_linux_nvidia() and not env_bool(
+        "SEISO_LLAMA_UNSAFE_FLASH_ATTN", False
+    ):
+        return False
     return env_bool("SEISO_LLAMA_FLASH_ATTN", True)
 
 
@@ -590,6 +604,7 @@ def _load_llama_model(
             if _native_linux_nvidia():
                 load_kwargs["offload_kqv"] = False
                 load_kwargs["op_offload"] = False
+        _refresh_headroom_stats(force=True)
         from seiso.memory.protection import clamp_llama_load_kwargs
 
         load_kwargs["_model_path"] = path

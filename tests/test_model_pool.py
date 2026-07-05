@@ -365,10 +365,10 @@ def test_llama_load_kwargs_native_linux_nvidia_defaults(monkeypatch):
     kwargs = llama_load_kwargs(4096, model_path="/tmp/model.gguf")
     assert kwargs["n_batch"] == 4096
     assert kwargs["n_ubatch"] == 1024
-    assert kwargs["flash_attn"] is True
+    assert "flash_attn" not in kwargs
 
 
-def test_native_linux_flash_attn_can_be_disabled_by_env(monkeypatch):
+def test_native_linux_unsafe_flash_attn_opt_in(monkeypatch):
     for key in list(os.environ):
         if key.startswith("SEISO_LLAMA_"):
             monkeypatch.delenv(key, raising=False)
@@ -380,10 +380,64 @@ def test_native_linux_flash_attn_can_be_disabled_by_env(monkeypatch):
     monkeypatch.setattr(
         "seiso.inference.model_pool._native_linux_nvidia", lambda: True
     )
-    monkeypatch.setenv("SEISO_LLAMA_FLASH_ATTN", "false")
+    monkeypatch.setenv("SEISO_LLAMA_UNSAFE_FLASH_ATTN", "true")
+    monkeypatch.setenv("SEISO_LLAMA_FLASH_ATTN", "true")
+
+    kwargs = llama_load_kwargs(4096, model_path="/tmp/model.gguf")
+    assert kwargs["flash_attn"] is True
+
+
+def test_native_linux_flash_attn_env_alone_is_ignored_without_unsafe(monkeypatch):
+    for key in list(os.environ):
+        if key.startswith("SEISO_LLAMA_"):
+            monkeypatch.delenv(key, raising=False)
+    monkeypatch.setattr(platform, "system", lambda: "Linux")
+    monkeypatch.setattr("seiso.inference.model_pool._cuda_available", lambda: True)
+    monkeypatch.setattr(
+        "seiso.inference.model_pool._llama_gpu_offload_ok", lambda: True
+    )
+    monkeypatch.setattr(
+        "seiso.inference.model_pool._native_linux_nvidia", lambda: True
+    )
+    monkeypatch.setenv("SEISO_LLAMA_FLASH_ATTN", "true")
 
     kwargs = llama_load_kwargs(4096, model_path="/tmp/model.gguf")
     assert "flash_attn" not in kwargs
+
+
+def test_llama_gpu_offload_ok_retries_after_import_failure(monkeypatch):
+    import builtins
+    import sys
+
+    import seiso.inference.model_pool as mp
+
+    mp.reset_llama_gpu_offload_cache()
+    attempts = {"n": 0}
+    orig_import = builtins.__import__
+
+    class FakeLlamaCpp:
+        @staticmethod
+        def llama_supports_gpu_offload():
+            return True
+
+    def fake_import(name, *args, **kwargs):
+        if name == "llama_cpp":
+            attempts["n"] += 1
+            if attempts["n"] == 1:
+                raise ImportError("libcudart.so.12: cannot open shared object file")
+            return sys.modules["llama_cpp"]
+        return orig_import(name, *args, **kwargs)
+
+    monkeypatch.setattr("seiso.platform.ensure_cuda_library_path", lambda: [])
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+
+    assert mp._llama_gpu_offload_ok() is False
+    assert mp._llama_offload_checked is False
+
+    monkeypatch.setitem(sys.modules, "llama_cpp", FakeLlamaCpp())
+    assert mp._llama_gpu_offload_ok() is True
+    assert mp._llama_offload_checked is True
+    assert attempts["n"] == 2
 
 
 def test_llama_load_kwargs_threads_batch_override(monkeypatch):

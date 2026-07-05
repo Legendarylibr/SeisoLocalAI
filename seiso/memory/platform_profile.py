@@ -19,7 +19,7 @@ def _refresh_native_linux_llama_env(
         return
 
     os.environ["SEISO_LLAMA_SPEED_SCALE"] = "false"
-    os.environ["SEISO_LLAMA_FLASH_ATTN"] = "true"
+    os.environ.setdefault("SEISO_LLAMA_FLASH_ATTN", "false")
     batch = int(os.environ.get("SEISO_LLAMA_BATCH", batch_cap))
     ubatch = int(os.environ.get("SEISO_LLAMA_UBATCH", ubatch_cap))
     cache = int(os.environ.get("SEISO_LLAMA_CACHE_MB", cache_cap))
@@ -165,7 +165,14 @@ def apply_platform_memory_profile(
                     os.environ.setdefault("SEISO_LLAMA_BATCH", str(batch))
                     os.environ.setdefault("SEISO_LLAMA_UBATCH", str(ubatch))
             if not low and tier in (HardwareTier.WORKSTATION, HardwareTier.CAPABLE):
-                os.environ.setdefault("SEISO_LLAMA_FLASH_ATTN", "true")
+                try:
+                    from seiso.platform import is_native_linux_nvidia
+
+                    _native_linux = is_native_linux_nvidia(profile=profile)
+                except ImportError:
+                    _native_linux = False
+                if not _native_linux:
+                    os.environ.setdefault("SEISO_LLAMA_FLASH_ATTN", "true")
                 os.environ.setdefault("SEISO_LLAMA_OP_OFFLOAD", "true")
                 os.environ.setdefault("SEISO_LLAMA_OFFLOAD_KQV", "true")
                 if tier == HardwareTier.WORKSTATION:
