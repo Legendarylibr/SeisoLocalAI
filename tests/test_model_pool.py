@@ -368,6 +368,28 @@ def test_llama_load_kwargs_native_linux_nvidia_defaults(monkeypatch):
     assert "flash_attn" not in kwargs
 
 
+def test_native_linux_unsafe_flash_requires_explicit_unsafe_opt_in(monkeypatch):
+    for key in list(os.environ):
+        if key.startswith("SEISO_LLAMA_"):
+            monkeypatch.delenv(key, raising=False)
+    monkeypatch.setattr(platform, "system", lambda: "Linux")
+    monkeypatch.setattr("seiso.inference.model_pool._cuda_available", lambda: True)
+    monkeypatch.setattr(
+        "seiso.inference.model_pool._llama_gpu_offload_ok", lambda: True
+    )
+    monkeypatch.setattr(
+        "seiso.inference.model_pool._native_linux_nvidia", lambda: True
+    )
+    monkeypatch.setenv("SEISO_LLAMA_FLASH_ATTN", "true")
+
+    kwargs = llama_load_kwargs(4096, model_path="/tmp/model.gguf")
+    assert "flash_attn" not in kwargs
+
+    monkeypatch.setenv("SEISO_LLAMA_UNSAFE_FLASH_ATTN", "true")
+    kwargs = llama_load_kwargs(4096, model_path="/tmp/model.gguf")
+    assert kwargs["flash_attn"] is True
+
+
 def test_llama_load_kwargs_threads_batch_override(monkeypatch):
     for key in list(os.environ):
         if key.startswith("SEISO_LLAMA_"):
@@ -608,6 +630,9 @@ def test_native_linux_load_model_uses_crash_resistant_kwargs(monkeypatch, tmp_pa
     first = attempts[0]
     assert first["n_batch"] <= 512
     assert first["n_ubatch"] <= 128
+    assert first["n_gpu_layers"] != -1
+    assert first["offload_kqv"] is False
+    assert first["op_offload"] is False
     assert "flash_attn" not in first
 
 
