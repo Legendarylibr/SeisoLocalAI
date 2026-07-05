@@ -122,8 +122,16 @@ def _llama_speed_scale_enabled() -> bool:
 
 
 def _llama_batch_defaults() -> tuple[int, int]:
-    """Balanced llama.cpp prompt/decode batch defaults for 24 GB GPUs."""
-    return 2048, 512
+    """Highest conservative llama.cpp prompt/decode batch for current headroom."""
+    try:
+        from seiso.memory.protection import (
+            headroom_mb,
+            llama_batch_limits_for_headroom,
+        )
+
+        return llama_batch_limits_for_headroom(headroom_mb())
+    except Exception:
+        return 2048, 512
 
 
 def fit_llama_gpu_layers(model_path: str, requested: int, headroom_mb: int) -> int:
