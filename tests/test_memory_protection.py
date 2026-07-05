@@ -155,6 +155,20 @@ def test_llama_batch_headroom_accounts_for_model_weights(monkeypatch, tmp_path):
     assert remaining < 8192
 
 
+def test_llama_batch_headroom_estimates_directory_models(monkeypatch, tmp_path):
+    from seiso.memory.protection import llama_batch_headroom_mb
+
+    model_dir = tmp_path / "hf-model"
+    model_dir.mkdir()
+    (model_dir / "model.safetensors").write_bytes(b"\x00" * (4 * 1024**2))
+    monkeypatch.setattr(
+        "seiso.memory.protection.estimate_path_vram_mb",
+        lambda _path: 6144,
+    )
+    remaining = llama_batch_headroom_mb(16384, model_path=model_dir, n_gpu_layers=-1)
+    assert remaining < 16384
+
+
 def test_llama_kv_cache_reserve_scales_with_model_and_context(monkeypatch, tmp_path):
     gguf = tmp_path / "qwen-27b-q4.gguf"
     gguf.write_bytes(b"\x00" * 1024)
