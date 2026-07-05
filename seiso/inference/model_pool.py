@@ -138,24 +138,44 @@ def fit_llama_gpu_layers(
     if requested == 0 or headroom_mb <= 0 or not _llama_gpu_offload_ok():
         return 0
 
-    from seiso.memory.protection import estimate_path_vram_mb, llama_kv_cache_reserve_mb
+    from seiso.memory.protection import (
+        estimate_path_vram_mb,
+        llama_kv_cache_reserve_mb,
+        llama_offload_fits_headroom,
+    )
 
     weight_mb = max(int(estimate_path_vram_mb(model_path)), 256)
     total_layers = gguf_total_layers(model_path)
+
+    def _fits(layers: int) -> bool:
+        return llama_offload_fits_headroom(
+            model_path,
+            headroom_mb=headroom_mb,
+            n_gpu_layers=layers,
+            n_ctx=n_ctx,
+            weight_mb=weight_mb,
+            total_layers=total_layers,
+        )
+
+    if requested == -1 and _fits(-1):
+        return -1
+
+    if requested > 0:
+        capped = min(requested, total_layers)
+        if capped >= total_layers and _fits(-1):
+            return capped
+        if _fits(capped):
+            return capped
+
     kv_reserve_mb = llama_kv_cache_reserve_mb(
         model_path,
         n_ctx=n_ctx,
-        n_gpu_layers=-1 if requested == -1 else min(requested, total_layers),
+        n_gpu_layers=-1 if requested == -1 else min(max(requested, 1), total_layers),
         total_layers=total_layers,
         weight_mb=weight_mb,
         free_mb=headroom_mb,
     )
     avail_mb = headroom_mb - kv_reserve_mb
-
-    if avail_mb >= int(weight_mb * 0.92):
-        if requested == -1:
-            return -1
-        return max(0, min(requested, total_layers))
 
     if avail_mb < 256:
         logger.warning(
@@ -168,6 +188,16 @@ def fit_llama_gpu_layers(
     partial = max(1, int(total_layers * fraction))
     if requested not in (-1, 0) and requested > 0:
         partial = min(partial, requested)
+
+    while partial > 0 and not _fits(partial):
+        partial -= 1
+
+    if partial <= 0:
+        logger.warning(
+            "VRAM too tight for GPU offload (~%.1f GB free) — falling back to CPU",
+            headroom_mb / 1024,
+        )
+        return 0
     return partial
 
 
@@ -207,19 +237,19 @@ def _llama_layer_attempts(
     if fitted in (-1, 0):
         return [0]
 
-    attempts: list[int] = []
+    fallback_attempts: list[int] = []
     high = min(total_layers - 1, fitted + 6)
     step = 4 if high - fitted > 12 else 2
     for layers in range(high, fitted - 1, -step):
-        if layers > 0 and layers not in attempts:
-            attempts.append(layers)
-    if fitted not in attempts:
-        attempts.append(fitted)
-    if fitted > 8 and (fitted // 2) not in attempts:
-        attempts.append(fitted // 2)
-    if 0 not in attempts:
-        attempts.append(0)
-    return attempts
+        if layers > 0 and layers not in fallback_attempts:
+            fallback_attempts.append(layers)
+    if fitted not in fallback_attempts:
+        fallback_attempts.append(fitted)
+    if fitted > 8 and (fitted // 2) not in fallback_attempts:
+        fallback_attempts.append(fitted // 2)
+    if 0 not in fallback_attempts:
+        fallback_attempts.append(0)
+    return fallback_attempts
 
 
 def _llama_partial_memory_profiles(
@@ -299,7 +329,7 @@ def _llama_kv_quant_options(model_path: str) -> list[dict[str, Any]]:
     return unique
 
 
-_optimal_layers_cache: dict[tuple[str, int], tuple[int, float]] = {}
+_optimal_layers_cache: dict[tuple[str, int, int, int], tuple[int, float]] = {}
 _optimal_layers_lock = threading.Lock()
 _OPTIMAL_LAYERS_TTL_S = 8.0
 
@@ -421,7 +451,9 @@ def _load_llama_model(
     """Load a GGUF with VRAM-aware layer offload and clear OOM errors."""
     from seiso.memory.protection import LlamaLoadTier, llama_load_profile_ladder
 
-    load_tier: LlamaLoadTier = tier if tier in {"normal", "compact", "minimal"} else "normal"
+    load_tier: LlamaLoadTier = (
+        tier if tier in {"normal", "compact", "minimal"} else "normal"  # type: ignore[assignment]
+    )
     try:
         from seiso.platform import ensure_cuda_library_path
 

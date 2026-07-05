@@ -20,8 +20,30 @@ from seiso.memory.protection import (
     llama_kv_cache_reserve_mb,
     llama_load_profile_ladder,
     llama_next_recovery_tier,
+    llama_offload_fits_headroom,
     sanitize_inference_payload,
 )
+
+
+def test_llama_offload_fits_headroom_requires_weight_plus_kv(tmp_path):
+    gguf = tmp_path / "model.gguf"
+    gguf.write_bytes(b"\x00" * 1024)
+    assert llama_offload_fits_headroom(
+        gguf,
+        headroom_mb=24576,
+        n_gpu_layers=-1,
+        n_ctx=4096,
+        weight_mb=17000,
+        total_layers=64,
+    )
+    assert not llama_offload_fits_headroom(
+        gguf,
+        headroom_mb=18500,
+        n_gpu_layers=-1,
+        n_ctx=2048,
+        weight_mb=17000,
+        total_layers=64,
+    )
 
 
 def test_is_oom_error_detects_cuda_message():

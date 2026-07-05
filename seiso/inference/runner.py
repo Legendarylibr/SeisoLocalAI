@@ -48,6 +48,7 @@ from seiso.models.chat_format import format_messages_for_prompt
 logger = logging.getLogger(__name__)
 
 _STREAM_DONE = object()
+_MAX_LLAMA_OOM_RECOVERIES = 3
 _runner: LocalInferenceRunner | None = None
 _runner_lock = threading.Lock()
 
@@ -713,6 +714,7 @@ class LocalInferenceRunner:
         tools = payload.get("tools_schemas")
         if tools:
             kwargs["tools"] = tools
+        recoveries = 0
         while True:
             try:
                 out = llm.create_chat_completion(messages=messages, **kwargs)
@@ -720,6 +722,11 @@ class LocalInferenceRunner:
             except Exception as exc:
                 if not is_oom_error(exc):
                     raise
+                recoveries += 1
+                if recoveries > _MAX_LLAMA_OOM_RECOVERIES:
+                    raise RuntimeError(
+                        "llama.cpp inference OOM — recovery attempts exhausted"
+                    ) from exc
                 llm = self._llama_recover_from_oom(
                     llm, model_path=model_path, n_ctx=n_ctx
                 )
@@ -769,6 +776,7 @@ class LocalInferenceRunner:
 
         completion_kwargs = llama_completion_kwargs(payload)
         emitted_text = False
+        recoveries = 0
         while True:
             try:
                 stream = llm.create_chat_completion(
@@ -791,6 +799,11 @@ class LocalInferenceRunner:
                     raise RuntimeError(
                         "llama.cpp inference OOM after streaming began — aborting "
                         "instead of replaying partial output"
+                    ) from exc
+                recoveries += 1
+                if recoveries > _MAX_LLAMA_OOM_RECOVERIES:
+                    raise RuntimeError(
+                        "llama.cpp inference OOM — recovery attempts exhausted"
                     ) from exc
                 llm = self._llama_recover_from_oom(
                     llm, model_path=model_path, n_ctx=n_ctx

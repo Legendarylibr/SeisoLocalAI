@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import platform
+from itertools import product
 
 import pytest
 
@@ -16,8 +17,8 @@ from seiso.memory.protection import (
     clamp_llama_load_kwargs,
     llama_batch_limits_for_headroom,
     llama_effective_batch_headroom_mb,
-    llama_kv_cache_reserve_mb,
     llama_load_profile_ladder,
+    llama_offload_fits_headroom,
 )
 
 # Realistic NVIDIA chat scenarios: (label, free_vram_mb, weight_mb, params_b, n_ctx)
@@ -27,17 +28,17 @@ _NVIDIA_CHAT_SCENARIOS = [
     ("4090_27b_q4_low_vram", 12000, 17000, 27, 4096),
     ("4090_13b_q4", 24576, 8500, 13, 4096),
     ("3070_7b_q4", 8192, 4500, 7, 4096),
+    ("3060_12gb_7b", 12288, 4500, 7, 4096),
+    ("a6000_48gb_70b_partial", 49152, 42000, 70, 4096),
+    ("5080_16gb_13b", 16384, 8500, 13, 4096),
     ("4090_70b_q4_impossible", 24576, 42000, 70, 4096),
+    ("4090_27b_q4_long_ctx", 24576, 17000, 27, 8192),
 ]
 
-
-def _gpu_weight_mb(weight_mb: int, n_gpu_layers: int, total_layers: int = 64) -> int:
-    if n_gpu_layers == 0:
-        return 0
-    if n_gpu_layers == -1:
-        return weight_mb
-    frac = max(0.0, min(float(n_gpu_layers) / float(total_layers), 1.0))
-    return int(weight_mb * frac) + 256
+# Swept grid for cross-hardware simulation (no real GPU).
+_HEADROOM_GRID_MB = (4096, 8192, 12288, 16384, 24576, 49152)
+_WEIGHT_GRID_MB = (2000, 4500, 8500, 17000, 32000, 42000)
+_CTX_GRID = (2048, 4096, 8192)
 
 
 def _assert_layers_fit_vram(
@@ -50,20 +51,16 @@ def _assert_layers_fit_vram(
     total_layers: int = 64,
 ) -> None:
     """Full offload claim must leave room for weights + KV within headroom."""
-    if n_gpu_layers == 0:
-        return
-    kv_mb = llama_kv_cache_reserve_mb(
+    assert llama_offload_fits_headroom(
         model_path,
-        n_ctx=n_ctx,
+        headroom_mb=headroom_mb,
         n_gpu_layers=n_gpu_layers,
-        total_layers=total_layers,
+        n_ctx=n_ctx,
         weight_mb=weight_mb,
-        free_mb=headroom_mb,
-    )
-    gpu_weight = _gpu_weight_mb(weight_mb, n_gpu_layers, total_layers)
-    assert gpu_weight + kv_mb <= headroom_mb, (
-        f"layers={n_gpu_layers} needs {gpu_weight + kv_mb} MB "
-        f"but only {headroom_mb} MB headroom"
+        total_layers=total_layers,
+    ), (
+        f"layers={n_gpu_layers} needs more than {headroom_mb} MB headroom "
+        f"(weight={weight_mb}, n_ctx={n_ctx})"
     )
 
 
@@ -402,3 +399,88 @@ def test_deferred_preflight_never_bypasses_when_model_exceeds_gpu_capacity(
 
     with pytest.raises(MemoryLoadBlockedError):
         ensure_load_fits(gguf, mode="chat", backend="llamacpp")
+
+
+def test_fit_llama_gpu_layers_rejects_full_offload_when_kv_exceeds_headroom(
+    monkeypatch, gguf_path
+):
+    """Old 0.92 weight-only heuristic could claim full offload here — must not."""
+    import seiso.inference.model_pool as mp
+
+    headroom_mb = 18500
+    weight_mb = 17000
+    n_ctx = 2048
+
+    monkeypatch.setattr(mp, "_llama_gpu_offload_ok", lambda: True)
+    monkeypatch.setattr(
+        "seiso.memory.protection.estimate_path_vram_mb", lambda _p: weight_mb
+    )
+    monkeypatch.setattr("seiso.inference.backends.gguf_total_layers", lambda _p: 64)
+
+    layers = mp.fit_llama_gpu_layers(
+        str(gguf_path), -1, headroom_mb, n_ctx=n_ctx
+    )
+
+    assert layers != -1
+    if layers > 0:
+        _assert_layers_fit_vram(
+            headroom_mb=headroom_mb,
+            weight_mb=weight_mb,
+            n_ctx=n_ctx,
+            n_gpu_layers=layers,
+            model_path=str(gguf_path),
+        )
+
+
+def test_fit_llama_gpu_layers_grid_never_overclaims_across_hardware(
+    monkeypatch, gguf_path
+):
+    """Simulate layer fitting across VRAM/model/context combinations — no overcommit."""
+    import seiso.inference.model_pool as mp
+
+    monkeypatch.setattr(mp, "_llama_gpu_offload_ok", lambda: True)
+    monkeypatch.setattr("seiso.inference.backends.gguf_total_layers", lambda _p: 64)
+
+    for headroom_mb, weight_mb, n_ctx in product(
+        _HEADROOM_GRID_MB, _WEIGHT_GRID_MB, _CTX_GRID
+    ):
+        monkeypatch.setattr(
+            "seiso.memory.protection.estimate_path_vram_mb",
+            lambda _p, w=weight_mb: w,
+        )
+        layers = mp.fit_llama_gpu_layers(
+            str(gguf_path), -1, headroom_mb, n_ctx=n_ctx
+        )
+        assert layers == -1 or 0 <= layers <= 64
+        if layers == -1:
+            _assert_layers_fit_vram(
+                headroom_mb=headroom_mb,
+                weight_mb=weight_mb,
+                n_ctx=n_ctx,
+                n_gpu_layers=-1,
+                model_path=str(gguf_path),
+            )
+        elif layers > 0:
+            _assert_layers_fit_vram(
+                headroom_mb=headroom_mb,
+                weight_mb=weight_mb,
+                n_ctx=n_ctx,
+                n_gpu_layers=layers,
+                model_path=str(gguf_path),
+            )
+
+
+def test_fit_llama_gpu_layers_keeps_full_offload_on_comfortable_hardware(
+    monkeypatch, gguf_path
+):
+    """Generous headroom must still get full GPU offload — no performance regression."""
+    import seiso.inference.model_pool as mp
+
+    monkeypatch.setattr(mp, "_llama_gpu_offload_ok", lambda: True)
+    monkeypatch.setattr(
+        "seiso.memory.protection.estimate_path_vram_mb", lambda _p: 4500
+    )
+    monkeypatch.setattr("seiso.inference.backends.gguf_total_layers", lambda _p: 64)
+
+    layers = mp.fit_llama_gpu_layers(str(gguf_path), -1, 49152, n_ctx=4096)
+    assert layers == -1
