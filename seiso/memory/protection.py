@@ -16,12 +16,15 @@ from seiso.hardware import (
     training_defaults,
     vram_headroom_mb,
 )
+from seiso.hardware.tiers import fit_headroom_mb
+from seiso.inference.backends import gguf_total_layers
 from seiso.io.files import iter_matching_files
 from seiso.memory.estimates import (
     estimate_chat_vram_gb,
     estimate_training_vram_gb,
     guess_params_from_name,
 )
+from seiso.platform import is_native_linux_nvidia, llamacpp_deferred_preflight_platform
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +39,6 @@ _MAX_LLAMA_CTX = 131072
 _MIN_LLAMA_CTX = 2048
 _MAX_LLAMA_BATCH = 4096
 _MIN_LLAMA_BATCH = 128
-_MAX_LLAMA_CACHE_MB = 1024
 _MAX_JSONL_LOAD_MB = 512
 _MODEL_WEIGHT_VRAM_SUFFIXES = frozenset({".gguf", ".safetensors", ".bin"})
 
@@ -105,6 +107,7 @@ def _hub_model_vram_mb(path_str: str, *, mode: str) -> int | None:
 def _estimate_path_vram_mb_uncached(p: Path, *, mode: str = "chat") -> int:
     name = p.name.lower()
     path_str = str(p)
+    from_hub = False
 
     if not p.exists():
         hub_est = _hub_model_vram_mb(path_str, mode=mode)
@@ -144,6 +147,7 @@ def _estimate_path_vram_mb_uncached(p: Path, *, mode: str = "chat") -> int:
         hub_est = _hub_model_vram_mb(path_str, mode=mode)
         if hub_est is not None:
             est = hub_est
+            from_hub = True
         else:
             guessed = (
                 guess_params_from_name(name) or guess_params_from_name(path_str) or 7.0
@@ -159,11 +163,7 @@ def _estimate_path_vram_mb_uncached(p: Path, *, mode: str = "chat") -> int:
                     * 1024
                 )
 
-    if (
-        mode == "train"
-        and _hub_model_vram_mb(path_str, mode=mode) is None
-        and p.exists()
-    ):
+    if mode == "train" and not from_hub and p.exists():
         est = int(est * _TRAINING_OVERHEAD_RATIO)
     return max(est, 256)
 
@@ -226,6 +226,16 @@ def release_cached_memory(*, sync: bool = False) -> None:
         pass
 
 
+def _host_os_reserve_mb(ram_mb: int) -> int:
+    return max(512, int(ram_mb * 0.08))
+
+
+def _gpu_layer_fraction(n_gpu_layers: int, total_layers: int) -> float:
+    if n_gpu_layers == -1:
+        return 1.0
+    return max(0.0, min(float(n_gpu_layers) / float(total_layers or 64), 1.0))
+
+
 def llama_batch_headroom_mb(
     free_mb: int,
     *,
@@ -240,15 +250,12 @@ def llama_batch_headroom_mb(
     if not path.is_file():
         return free_mb
     try:
-        from seiso.inference.backends import gguf_block_count
-
         weight_mb = int(estimate_path_vram_mb(path))
-        total_layers = gguf_block_count(path) or 64
+        total_layers = gguf_total_layers(path)
         if n_gpu_layers == -1:
             gpu_weight_mb = weight_mb
         else:
-            gpu_fraction = max(0.0, min(float(n_gpu_layers) / float(total_layers), 1.0))
-            gpu_weight_mb = int(weight_mb * gpu_fraction) + 256
+            gpu_weight_mb = int(weight_mb * _gpu_layer_fraction(n_gpu_layers, total_layers)) + 256
         kv_mb = llama_kv_cache_reserve_mb(
             path,
             n_ctx=n_ctx,
@@ -287,18 +294,9 @@ def llama_kv_cache_reserve_mb(
     if weight_mb is None:
         weight_mb = int(estimate_path_vram_mb(path))
     if total_layers is None:
-        try:
-            from seiso.inference.backends import gguf_block_count
+        total_layers = gguf_total_layers(path)
 
-            total_layers = gguf_block_count(path) or 64
-        except Exception:
-            total_layers = 64
-
-    layer_fraction = (
-        1.0
-        if n_gpu_layers == -1
-        else max(0.0, min(float(n_gpu_layers) / float(total_layers or 64), 1.0))
-    )
+    layer_fraction = _gpu_layer_fraction(n_gpu_layers, total_layers)
     params_b = _estimate_gguf_params_b(path, int(weight_mb))
     # Approximate fp16 K+V cache per token. The coefficient tracks observed
     # llama-family/GQA memory by parameter scale while keeping small models fast.
@@ -316,8 +314,6 @@ def llama_host_batch_headroom_mb(
     free_vram_mb: int,
 ) -> int | None:
     """Host RAM budget for mmap pages, prompt cache, and CPU-side KV on Linux NVIDIA."""
-    from seiso.platform import is_native_linux_nvidia
-
     if not is_native_linux_nvidia():
         return None
     ram_mb = available_ram_mb()
@@ -326,24 +322,21 @@ def llama_host_batch_headroom_mb(
 
     path = Path(model_path)
     weight_mb = int(estimate_path_vram_mb(path))
-    try:
-        from seiso.inference.backends import gguf_block_count
-
-        total_layers = gguf_block_count(path) or 64
-    except Exception:
-        total_layers = 64
+    total_layers = gguf_total_layers(path)
 
     if n_gpu_layers == 0:
         host_weight_mb = weight_mb
     elif n_gpu_layers == -1:
         host_weight_mb = max(256, int(weight_mb * 0.12))
     else:
-        cpu_fraction = max(0.0, 1.0 - float(n_gpu_layers) / float(total_layers))
+        cpu_fraction = 1.0 - _gpu_layer_fraction(n_gpu_layers, total_layers)
         host_weight_mb = int(weight_mb * cpu_fraction) + 256
 
-    os_reserve_mb = max(512, int(ram_mb * 0.08))
     spill_mb = max(256, min(int(free_vram_mb * 0.05), 512))
-    return max(_MIN_LLAMA_BATCH * 2, ram_mb - host_weight_mb - os_reserve_mb - spill_mb)
+    return max(
+        _MIN_LLAMA_BATCH * 2,
+        ram_mb - host_weight_mb - _host_os_reserve_mb(ram_mb) - spill_mb,
+    )
 
 
 def llama_effective_batch_headroom_mb(
@@ -384,20 +377,6 @@ def llama_batch_limits_for_headroom(headroom_mb_value: int) -> tuple[int, int]:
     return 4096, 1024
 
 
-def llama_batch_limits_for_model(
-    free_mb: int,
-    *,
-    model_path: str | Path | None,
-    n_gpu_layers: int = -1,
-    n_ctx: int = 2048,
-) -> tuple[int, int]:
-    """Batch limits after estimated GPU weight offload and host RAM budget."""
-    headroom = llama_effective_batch_headroom_mb(
-        free_mb, model_path=model_path, n_gpu_layers=n_gpu_layers, n_ctx=n_ctx
-    )
-    return llama_batch_limits_for_headroom(headroom)
-
-
 def llama_load_profile_ladder(
     *,
     model_path: str,
@@ -418,7 +397,6 @@ def llama_load_profile_ladder(
         _MIN_LLAMA_BATCH,
         min(int(base_ubatch), top_ubatch, base_batch),
     )
-    top_ubatch = min(top_ubatch, top_batch)
 
     steps: list[tuple[int, int, int | None, bool]] = []
     speed_scale = env_bool("SEISO_LLAMA_SPEED_SCALE", True)
@@ -490,16 +468,10 @@ def headroom_mb() -> int:
             if best > 0:
                 return best
         ram = float(profile.get("ram_gb") or 8)
-        try:
-            import psutil  # type: ignore
-
-            avail = psutil.virtual_memory().available / (1024**2)
+        avail = available_ram_mb()
+        if avail > 0:
             return int(min(avail * 0.72, ram * 1024 * 0.45))
-        except Exception:
-            avail = available_ram_mb()
-            if avail > 0:
-                return int(min(avail * 0.72, ram * 1024 * 0.45))
-            return int(ram * 1024 * 0.35)
+        return int(ram * 1024 * 0.35)
 
 
 def available_ram_mb() -> int:
@@ -569,8 +541,6 @@ def assess_path_memory_fit(path: str | Path, *, mode: str = "chat") -> dict[str,
     try:
         return assess_hardware_fit(est_gb, profile, mode=mode)
     except Exception:
-        from seiso.hardware.tiers import fit_headroom_mb, vram_headroom_mb
-
         capacity = int(fit_headroom_mb(profile))
         free = int(vram_headroom_mb(profile))
         raw_budget = free if free > 0 else capacity
@@ -590,6 +560,18 @@ def assess_path_memory_fit(path: str | Path, *, mode: str = "chat") -> dict[str,
         }
 
 
+_LLAMACPP_DEFER_WARNINGS: dict[str, str] = {
+    "apple_unified": (
+        "Low free unified memory — trying llama.cpp with mmap plus Mac CPU "
+        "offload fallback. Close apps if loading still fails."
+    ),
+    "linux_nvidia": (
+        "Low free VRAM — trying llama.cpp with mmap, partial GPU offload, and "
+        "memory-tier fallback. Close other GPU apps if loading still fails."
+    ),
+}
+
+
 def assess_path_memory_fit_for_load(
     path: str | Path,
     *,
@@ -605,35 +587,54 @@ def assess_path_memory_fit_for_load(
     if unload_if_needed:
         active_pool.prepare_for_load(str(path), backend)
     fit = assess_path_memory_fit(path, mode=mode)
-    if _bypass_apple_llamacpp_preflight_block(fit, backend=backend, mode=mode):
+    profile = hardware_profile()
+    defer = _llamacpp_deferred_preflight_platform(
+        fit, backend=backend, mode=mode, profile=profile
+    )
+    if defer:
         fit = dict(fit)
         fit["memory_load_blocked"] = False
         fit["memory_load_blocked_reason"] = None
-        fit["memory_load_warning"] = (
-            "Low free unified memory — trying llama.cpp with mmap plus Mac CPU "
-            "offload fallback. Close apps if loading still fails."
+        fit["memory_load_warning"] = _LLAMACPP_DEFER_WARNINGS.get(
+            defer,
+            "Low free memory — trying llama.cpp with conservative fallbacks.",
         )
     return fit
 
 
-def _bypass_apple_llamacpp_preflight_block(
+def _llamacpp_deferred_preflight_platform(
     fit: dict[str, Any],
     *,
     backend: str | None,
     mode: str,
-) -> bool:
-    """Skip only the preflight block; llama.cpp load still handles OOM/fallback."""
+    profile: dict[str, Any] | None = None,
+) -> str | None:
+    """Return platform id when llama.cpp should try load despite preflight block."""
     if mode != "chat" or not fit.get("memory_load_blocked"):
-        return False
+        return None
     if str(backend or "").lower() not in {"llamacpp", "llama"}:
-        return False
-    profile = hardware_profile()
-    try:
-        from seiso.hardware.tiers import HardwareTier, classify_tier
+        return None
 
-        return classify_tier(profile) == HardwareTier.APPLE_UNIFIED
-    except Exception:
-        return False
+    defer = llamacpp_deferred_preflight_platform(profile=profile)
+    if not defer:
+        return None
+
+    if defer == "linux_nvidia":
+        est_mb = int(fit.get("est_vram_mb") or 0)
+        try:
+            capacity_mb = fit_headroom_mb(profile or hardware_profile())
+        except Exception:
+            return None
+        if est_mb <= 0 or capacity_mb <= 0 or est_mb > capacity_mb:
+            return None
+        try:
+            from seiso.inference.model_pool import _llama_gpu_offload_ok
+
+            if not _llama_gpu_offload_ok():
+                return None
+        except ImportError:
+            pass
+    return defer
 
 
 def ensure_load_fits(
@@ -767,12 +768,10 @@ def clamp_llama_cache_mb(
 
     cap = min(default_mb, max(128, ram_mb // 24))
     if model_path:
-        from seiso.platform import is_native_linux_nvidia
-
         if is_native_linux_nvidia():
             weight_mb = int(estimate_path_vram_mb(model_path))
             mmap_reserve = max(512, int(weight_mb * 0.12))
-            host_budget = max(128, ram_mb - mmap_reserve - max(512, int(ram_mb * 0.08)))
+            host_budget = max(128, ram_mb - mmap_reserve - _host_os_reserve_mb(ram_mb))
             cap = min(cap, max(0, host_budget // 8))
     return max(0, cap)
 
@@ -880,8 +879,6 @@ def resolve_training_device_map(
     device: str | None = None,
 ) -> str | dict[str, str] | None:
     """Single-device placement for DDP; auto only for single-process CUDA."""
-    import os
-
     world_size = int(os.environ.get("WORLD_SIZE", "1"))
     if world_size > 1:
         local_rank = int(os.environ.get("LOCAL_RANK", os.environ.get("RANK", "0")))

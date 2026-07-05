@@ -1,0 +1,357 @@
+"""NVIDIA GPU safety invariants — prevent VRAM overcommit that crashes drivers/cards.
+
+These tests use mocked hardware/files and verify sizing math + load ladders stay
+within conservative budgets. No real GPU required.
+"""
+
+from __future__ import annotations
+
+import os
+import platform
+
+import pytest
+
+from seiso.memory.protection import (
+    build_hf_max_memory,
+    clamp_llama_load_kwargs,
+    llama_batch_limits_for_headroom,
+    llama_effective_batch_headroom_mb,
+    llama_kv_cache_reserve_mb,
+    llama_load_profile_ladder,
+)
+
+# Realistic NVIDIA chat scenarios: (label, free_vram_mb, weight_mb, params_b, n_ctx)
+_NVIDIA_CHAT_SCENARIOS = [
+    ("4090_27b_q4_comfortable", 24576, 17000, 27, 4096),
+    ("4090_27b_q4_tight", 19000, 17000, 27, 4096),
+    ("4090_27b_q4_low_vram", 12000, 17000, 27, 4096),
+    ("4090_13b_q4", 24576, 8500, 13, 4096),
+    ("3070_7b_q4", 8192, 4500, 7, 4096),
+    ("4090_70b_q4_impossible", 24576, 42000, 70, 4096),
+]
+
+
+def _gpu_weight_mb(weight_mb: int, n_gpu_layers: int, total_layers: int = 64) -> int:
+    if n_gpu_layers == 0:
+        return 0
+    if n_gpu_layers == -1:
+        return weight_mb
+    frac = max(0.0, min(float(n_gpu_layers) / float(total_layers), 1.0))
+    return int(weight_mb * frac) + 256
+
+
+def _assert_layers_fit_vram(
+    *,
+    headroom_mb: int,
+    weight_mb: int,
+    n_ctx: int,
+    n_gpu_layers: int,
+    model_path: str,
+    total_layers: int = 64,
+) -> None:
+    """Full offload claim must leave room for weights + KV within headroom."""
+    if n_gpu_layers == 0:
+        return
+    kv_mb = llama_kv_cache_reserve_mb(
+        model_path,
+        n_ctx=n_ctx,
+        n_gpu_layers=n_gpu_layers,
+        total_layers=total_layers,
+        weight_mb=weight_mb,
+        free_mb=headroom_mb,
+    )
+    gpu_weight = _gpu_weight_mb(weight_mb, n_gpu_layers, total_layers)
+    assert gpu_weight + kv_mb <= headroom_mb, (
+        f"layers={n_gpu_layers} needs {gpu_weight + kv_mb} MB "
+        f"but only {headroom_mb} MB headroom"
+    )
+
+
+@pytest.fixture
+def gguf_path(tmp_path):
+    path = tmp_path / "model.gguf"
+    path.write_bytes(b"gguf")
+    return path
+
+
+@pytest.mark.parametrize(
+    "label,headroom_mb,weight_mb,params_b,n_ctx",
+    _NVIDIA_CHAT_SCENARIOS,
+    ids=[s[0] for s in _NVIDIA_CHAT_SCENARIOS],
+)
+def test_fit_llama_gpu_layers_never_claims_full_offload_without_budget(
+    monkeypatch, gguf_path, label, headroom_mb, weight_mb, params_b, n_ctx
+):
+    import seiso.inference.model_pool as mp
+
+    monkeypatch.setattr(mp, "_llama_gpu_offload_ok", lambda: True)
+    monkeypatch.setattr(
+        "seiso.memory.protection.estimate_path_vram_mb", lambda _p: weight_mb
+    )
+    monkeypatch.setattr(
+        "seiso.inference.backends.gguf_total_layers", lambda _p: 64
+    )
+
+    layers = mp.fit_llama_gpu_layers(
+        str(gguf_path), -1, headroom_mb, n_ctx=n_ctx
+    )
+
+    if layers == -1:
+        _assert_layers_fit_vram(
+            headroom_mb=headroom_mb,
+            weight_mb=weight_mb,
+            n_ctx=n_ctx,
+            n_gpu_layers=-1,
+            model_path=str(gguf_path),
+        )
+    elif layers > 0:
+        _assert_layers_fit_vram(
+            headroom_mb=headroom_mb,
+            weight_mb=weight_mb,
+            n_ctx=n_ctx,
+            n_gpu_layers=layers,
+            model_path=str(gguf_path),
+        )
+    else:
+        assert layers == 0
+
+
+@pytest.mark.parametrize(
+    "label,headroom_mb,weight_mb,params_b,n_ctx",
+    _NVIDIA_CHAT_SCENARIOS,
+    ids=[s[0] for s in _NVIDIA_CHAT_SCENARIOS],
+)
+def test_clamp_llama_load_kwargs_respects_post_weight_headroom(
+    monkeypatch, gguf_path, label, headroom_mb, weight_mb, params_b, n_ctx
+):
+    monkeypatch.setattr(
+        "seiso.memory.protection.headroom_mb", lambda: headroom_mb
+    )
+    monkeypatch.setattr(
+        "seiso.memory.protection.estimate_path_vram_mb", lambda _p: weight_mb
+    )
+    monkeypatch.setattr(
+        "seiso.inference.backends.gguf_block_count", lambda _p: 64
+    )
+
+    kwargs = clamp_llama_load_kwargs(
+        {
+            "_model_path": str(gguf_path),
+            "n_ctx": n_ctx,
+            "n_batch": 4096,
+            "n_ubatch": 1024,
+            "n_gpu_layers": -1,
+        }
+    )
+
+    effective = llama_effective_batch_headroom_mb(
+        headroom_mb,
+        model_path=gguf_path,
+        n_gpu_layers=-1,
+        n_ctx=n_ctx,
+    )
+    max_batch, max_ubatch = llama_batch_limits_for_headroom(effective)
+    assert kwargs["n_batch"] <= max_batch
+    assert kwargs["n_ubatch"] <= max_ubatch
+    assert kwargs["n_ubatch"] <= kwargs["n_batch"]
+
+
+@pytest.mark.parametrize("tier", ["normal", "compact", "minimal"])
+@pytest.mark.parametrize(
+    "headroom_mb,weight_mb,n_ctx",
+    [(24576, 17000, 4096), (12000, 17000, 4096), (8192, 4500, 4096)],
+)
+def test_load_profile_ladder_batches_never_exceed_headroom(
+    monkeypatch, gguf_path, tier, headroom_mb, weight_mb, n_ctx
+):
+    monkeypatch.setattr(
+        "seiso.memory.protection.estimate_path_vram_mb", lambda _p: weight_mb
+    )
+    monkeypatch.setattr(
+        "seiso.inference.backends.gguf_block_count", lambda _p: 64
+    )
+
+    profiles = llama_load_profile_ladder(
+        model_path=str(gguf_path),
+        n_ctx=n_ctx,
+        n_gpu_layers=-1,
+        free_mb=headroom_mb,
+        base_batch=4096,
+        base_ubatch=1024,
+        tier=tier,
+    )
+    effective = llama_effective_batch_headroom_mb(
+        headroom_mb,
+        model_path=gguf_path,
+        n_gpu_layers=-1,
+        n_ctx=n_ctx,
+    )
+    max_batch, max_ubatch = llama_batch_limits_for_headroom(effective)
+
+    for idx, profile in enumerate(profiles):
+        # First attempt must be within headroom; later fallbacks are OOM retry steps.
+        if idx == 0:
+            assert profile["n_batch"] <= max_batch
+            assert profile["n_ubatch"] <= max_ubatch
+        assert profile["n_ubatch"] <= profile["n_batch"]
+        assert profile["n_batch"] <= 4096
+        assert profile["n_ubatch"] <= 1024
+
+
+def test_load_llama_model_attempt_count_is_bounded_on_repeated_oom(
+    monkeypatch, tmp_path
+):
+    """OOM retries must terminate — no infinite GPU allocation loop."""
+    import seiso.inference.model_pool as mp
+
+    gguf = tmp_path / "qwen-27b-q4.gguf"
+    gguf.write_bytes(b"gguf")
+    attempts = 0
+
+    class FakeLlama:
+        def __init__(self, *, model_path: str, **kwargs):
+            nonlocal attempts
+            attempts += 1
+            raise RuntimeError("CUDA out of memory. Tried to allocate 2.00 GiB")
+
+    monkeypatch.setattr(mp, "_llama_gpu_offload_ok", lambda: True)
+    monkeypatch.setattr(mp, "_default_llama_gpu_layers", lambda: -1)
+    monkeypatch.setattr(mp, "fit_llama_gpu_layers", lambda _p, _r, _h, **_k: 24)
+    monkeypatch.setattr(
+        mp,
+        "_llama_kv_quant_options",
+        lambda _p: [{}, {"type_k": 8, "type_v": 8}],
+    )
+    monkeypatch.setattr(mp, "_refresh_headroom_stats", lambda *, force=False: None)
+    monkeypatch.setattr(
+        "seiso.memory.protection.release_cached_memory", lambda sync=False: None
+    )
+    monkeypatch.setattr(
+        "seiso.memory.protection.estimate_path_vram_mb", lambda _p: 17000
+    )
+    monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 24576)
+    monkeypatch.setattr("seiso.inference.backends.gguf_total_layers", lambda _p: 64)
+    monkeypatch.setitem(
+        __import__("sys").modules,
+        "llama_cpp",
+        type("LlamaCpp", (), {"Llama": FakeLlama}),
+    )
+
+    with pytest.raises(RuntimeError, match="Could not load model"):
+        mp._load_llama_model(str(gguf), 4096)
+
+    # full_targets empty (fitted=24), partial attempts only — must be finite
+    assert 0 < attempts < 200
+
+
+def test_build_hf_max_memory_reserves_vram(monkeypatch):
+    class FakeCudaModule:
+        @staticmethod
+        def is_available():
+            return True
+
+        @staticmethod
+        def device_count():
+            return 1
+
+        @staticmethod
+        def mem_get_info(_device):
+            return (20 * 1024**3, 24 * 1024**3)
+
+    class FakeTorch:
+        cuda = FakeCudaModule
+
+    monkeypatch.setitem(__import__("sys").modules, "torch", FakeTorch())
+    max_mem = build_hf_max_memory(reserve_ratio=0.03)
+    assert max_mem is not None
+    usable_mb = int(max_mem[0].replace("MiB", ""))
+    total_mb = 24 * 1024
+    assert usable_mb < total_mb * 0.95
+
+
+def test_platform_profile_native_linux_caps_startup_batches(monkeypatch):
+    """Startup batch defaults on native Linux must not exceed safe post-weight caps."""
+    from seiso.hardware.tiers import HardwareTier
+    from seiso.memory.platform_profile import apply_platform_memory_profile
+
+    for key in list(os.environ):
+        if key.startswith("SEISO_LLAMA_"):
+            monkeypatch.delenv(key, raising=False)
+
+    profile = {
+        "ram_gb": 32,
+        "gpus": [{"name": "NVIDIA GeForce RTX 4090", "vram_total_mb": 24576}],
+        "backend": "cuda",
+        "platform": "Linux",
+    }
+    monkeypatch.setattr(platform, "system", lambda: "Linux")
+    monkeypatch.setattr("seiso.platform.detect_wsl2", lambda: False)
+    monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: True)
+    monkeypatch.setattr(
+        "seiso.memory.platform_profile.classify_tier",
+        lambda _p: HardwareTier.WORKSTATION,
+    )
+    monkeypatch.setattr(
+        "seiso.memory.platform_profile.vram_headroom_mb", lambda _p: 24576
+    )
+    monkeypatch.setattr(
+        "seiso.memory.platform_profile.training_capabilities",
+        lambda: {
+            "gpu_count": 1,
+            "train_platform": "cpu",
+            "nvidia_hardware": True,
+            "vendor": "nvidia",
+        },
+    )
+    monkeypatch.setattr(
+        "seiso.inference.model_pool._llama_gpu_offload_ok", lambda: True
+    )
+
+    apply_platform_memory_profile(profile=profile)
+
+    batch = int(os.environ["SEISO_LLAMA_BATCH"])
+    ubatch = int(os.environ["SEISO_LLAMA_UBATCH"])
+    assert batch <= 2048
+    assert ubatch <= 512
+    assert ubatch <= batch
+
+
+def test_deferred_preflight_never_bypasses_when_model_exceeds_gpu_capacity(
+    tmp_path, monkeypatch
+):
+    from seiso.memory.protection import MemoryLoadBlockedError, ensure_load_fits
+
+    gguf = tmp_path / "too-big.gguf"
+    gguf.write_bytes(b"\x00" * 1024)
+    profile = {
+        "backend": "cuda",
+        "gpus": [{"name": "NVIDIA GeForce RTX 4090", "vram_total_mb": 24564}],
+        "ram_gb": 32,
+        "platform": "Linux",
+    }
+    monkeypatch.setattr(
+        "seiso.memory.protection.hardware_profile", lambda force_refresh=False: profile
+    )
+    monkeypatch.setattr("seiso.platform.detect_wsl2", lambda: False)
+    monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: True)
+    monkeypatch.setattr(
+        "seiso.inference.model_pool.ModelPool.prepare_for_load",
+        lambda self, *args, **kwargs: False,
+    )
+    monkeypatch.setattr("seiso.hardware.fit.fit_headroom_mb", lambda _p: 24564)
+    monkeypatch.setattr("seiso.hardware.fit.vram_headroom_mb", lambda _p: 24564)
+    monkeypatch.setattr(
+        "seiso.inference.model_pool._llama_gpu_offload_ok", lambda: True
+    )
+    monkeypatch.setattr(
+        "seiso.memory.protection.assess_path_memory_fit",
+        lambda _path, mode="chat": {
+            "hardware_fit": "unlikely",
+            "est_vram_mb": 50000,
+            "memory_load_blocked": True,
+            "memory_load_blocked_reason": "exceeds GPU",
+        },
+    )
+
+    with pytest.raises(MemoryLoadBlockedError):
+        ensure_load_fits(gguf, mode="chat", backend="llamacpp")

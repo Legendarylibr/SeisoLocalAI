@@ -44,14 +44,7 @@ def in_ci() -> bool:
     return _env_enabled("CI")
 
 
-def detect_wsl2() -> bool:
-    if os.environ.get("WSL_INTEROP") or os.environ.get("WSL_DISTRO_NAME"):
-        return True
-    try:
-        version = Path("/proc/version").read_text(encoding="utf-8").lower()
-    except OSError:
-        return False
-    return "microsoft" in version or "wsl2" in version
+from seiso.platform import detect_wsl2
 
 
 def recommended_gpu_install_ack_env() -> str:

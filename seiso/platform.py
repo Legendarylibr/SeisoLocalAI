@@ -26,8 +26,6 @@ def pip_nvidia_cuda_lib_dirs() -> list[str]:
     user_site = site.getusersitepackages()
     if user_site:
         roots.append(Path(user_site))
-    if hasattr(site, "getusersitepackages"):
-        pass
     # Editable installs / venv: also scan sys.prefix site-packages.
     roots.append(
         Path(sys.prefix)
@@ -104,19 +102,50 @@ def detect_wsl2() -> bool:
     return "microsoft" in version or "wsl2" in version
 
 
+def _resolve_hardware_profile(profile: dict | None) -> dict | None:
+    if profile is not None:
+        return profile
+    try:
+        from seiso.hardware.profile import hardware_profile
+
+        return hardware_profile()
+    except ImportError:
+        return None
+
+
+def llamacpp_deferred_preflight_platform(*, profile: dict | None = None) -> str | None:
+    """Platform id when llama.cpp load ladder should defer strict preflight blocking.
+
+    Returns ``apple_unified`` or ``linux_nvidia`` when chat loads may succeed via
+    mmap, partial GPU offload, and OOM tier recovery even though static fit math
+    blocks on current free memory. Returns ``None`` when preflight should stand.
+    """
+    profile = _resolve_hardware_profile(profile)
+    if profile is None:
+        return None
+
+    try:
+        from seiso.hardware.tiers import HardwareTier, classify_tier
+
+        if classify_tier(profile) == HardwareTier.APPLE_UNIFIED:
+            return "apple_unified"
+    except ImportError:
+        pass
+
+    if is_native_linux_nvidia(profile=profile):
+        return "linux_nvidia"
+    return None
+
+
 def is_native_linux_nvidia(*, profile: dict | None = None) -> bool:
     """True on bare-metal Linux with a discrete NVIDIA GPU (not WSL, not CPU-only)."""
     import platform as _platform
 
     if _platform.system() != "Linux" or detect_wsl2():
         return False
+    profile = _resolve_hardware_profile(profile)
     if profile is None:
-        try:
-            from seiso.hardware.profile import hardware_profile
-
-            profile = hardware_profile()
-        except ImportError:
-            return False
+        return False
     gpus = profile.get("gpus") or []
     if not gpus:
         return False

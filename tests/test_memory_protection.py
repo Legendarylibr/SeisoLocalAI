@@ -15,7 +15,6 @@ from seiso.memory.protection import (
     ensure_load_fits,
     is_oom_error,
     llama_batch_limits_for_headroom,
-    llama_batch_limits_for_model,
     llama_effective_batch_headroom_mb,
     llama_host_batch_headroom_mb,
     llama_kv_cache_reserve_mb,
@@ -306,9 +305,10 @@ def test_llama_batch_limits_for_model_uses_post_weight_headroom(monkeypatch, tmp
         "seiso.inference.backends.gguf_block_count",
         lambda _path: 64,
     )
-    batch, ubatch = llama_batch_limits_for_model(
+    headroom = llama_effective_batch_headroom_mb(
         24576, model_path=gguf, n_gpu_layers=-1
     )
+    batch, ubatch = llama_batch_limits_for_headroom(headroom)
     assert batch == 256
     assert ubatch == 128
 
@@ -447,13 +447,103 @@ def test_apple_llamacpp_preflight_bypass_requires_blocked_fit(monkeypatch):
     )
 
     assert (
-        protection._bypass_apple_llamacpp_preflight_block(
+        protection._llamacpp_deferred_preflight_platform(
             {"memory_load_blocked": False},
             backend="llamacpp",
             mode="chat",
         )
-        is False
+        is None
     )
+
+
+def test_native_linux_llamacpp_load_defers_preflight_when_model_fits_gpu(
+    tmp_path, monkeypatch
+):
+    gguf = tmp_path / "qwen27b.gguf"
+    gguf.write_bytes(b"\x00" * (16 * 1024**3))
+    profile = {
+        "backend": "cuda",
+        "gpus": [
+            {
+                "name": "NVIDIA GeForce RTX 4090",
+                "vram_total_mb": 24564,
+                "vram_used_mb": 17000,
+            }
+        ],
+        "ram_gb": 32,
+        "platform": "Linux",
+    }
+    monkeypatch.setattr(
+        "seiso.memory.protection.hardware_profile", lambda force_refresh=False: profile
+    )
+    monkeypatch.setattr("seiso.platform.detect_wsl2", lambda: False)
+    monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: True)
+    monkeypatch.setattr(
+        "seiso.hardware.tiers.classify_tier",
+        lambda _p: __import__(
+            "seiso.hardware.tiers", fromlist=["HardwareTier"]
+        ).HardwareTier.WORKSTATION,
+    )
+    monkeypatch.setattr(
+        "seiso.inference.model_pool.ModelPool.prepare_for_load",
+        lambda self, *args, **kwargs: False,
+    )
+    monkeypatch.setattr("seiso.hardware.fit.fit_headroom_mb", lambda _p: 24564)
+    monkeypatch.setattr("seiso.hardware.fit.vram_headroom_mb", lambda _p: 7564)
+    monkeypatch.setattr(
+        "seiso.inference.model_pool._llama_gpu_offload_ok", lambda: True
+    )
+
+    fit = ensure_load_fits(gguf, mode="chat", backend="llamacpp")
+
+    assert fit["memory_load_blocked"] is False
+    assert fit["memory_load_blocked_reason"] is None
+    assert "partial GPU offload" in fit["memory_load_warning"]
+
+
+def test_native_linux_llamacpp_preflight_still_blocks_when_exceeds_gpu_capacity(
+    tmp_path, monkeypatch
+):
+    gguf = tmp_path / "huge.gguf"
+    gguf.write_bytes(b"\x00" * 1024)
+    profile = {
+        "backend": "cuda",
+        "gpus": [{"name": "NVIDIA GeForce RTX 4090", "vram_total_mb": 24564}],
+        "ram_gb": 32,
+        "platform": "Linux",
+    }
+    monkeypatch.setattr(
+        "seiso.memory.protection.hardware_profile", lambda force_refresh=False: profile
+    )
+    monkeypatch.setattr("seiso.platform.detect_wsl2", lambda: False)
+    monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: True)
+    monkeypatch.setattr(
+        "seiso.hardware.tiers.classify_tier",
+        lambda _p: __import__(
+            "seiso.hardware.tiers", fromlist=["HardwareTier"]
+        ).HardwareTier.WORKSTATION,
+    )
+    monkeypatch.setattr(
+        "seiso.inference.model_pool.ModelPool.prepare_for_load",
+        lambda self, *args, **kwargs: False,
+    )
+    monkeypatch.setattr("seiso.hardware.fit.fit_headroom_mb", lambda _p: 24564)
+    monkeypatch.setattr("seiso.hardware.fit.vram_headroom_mb", lambda _p: 24564)
+    monkeypatch.setattr(
+        "seiso.inference.model_pool._llama_gpu_offload_ok", lambda: True
+    )
+    monkeypatch.setattr(
+        "seiso.memory.protection.assess_path_memory_fit",
+        lambda _path, mode="chat": {
+            "hardware_fit": "unlikely",
+            "est_vram_mb": 32000,
+            "memory_load_blocked": True,
+            "memory_load_blocked_reason": "Needs ~31.2 GB at runtime but only ~24.0 GB VRAM is safely available right now.",
+        },
+    )
+
+    with pytest.raises(MemoryLoadBlockedError):
+        ensure_load_fits(gguf, mode="chat", backend="llamacpp")
 
 
 def test_assess_path_memory_fit_for_small_file(tmp_path, monkeypatch):
