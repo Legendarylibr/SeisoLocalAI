@@ -7,77 +7,38 @@ from __future__ import annotations
 
 import logging
 import os
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+from seiso.hardware.probes.common import GpuMemoryProcess
+from seiso.hardware.probes.nvidia import (
+    parse_nvidia_smi_process_csv,
+    query_nvidia_compute_processes,
+)
 
 logger = logging.getLogger(__name__)
 
 # Ignore tiny holders when listing processes (noise floor, not a model-size gate).
 _MIN_VISIBLE_PROCESS_MB = 256
 
+# Back-compat aliases for tests.
+_parse_nvidia_smi_process_csv = parse_nvidia_smi_process_csv
 
-@dataclass(frozen=True)
-class GpuMemoryProcess:
-    pid: int
-    process_name: str
-    used_mb: int
-
-
-def _parse_nvidia_smi_process_csv(stdout: str) -> list[GpuMemoryProcess]:
-    processes: list[GpuMemoryProcess] = []
-    for line in stdout.strip().splitlines():
-        parts = [part.strip() for part in line.split(",")]
-        if len(parts) < 3:
-            continue
-        try:
-            pid = int(parts[0])
-        except ValueError:
-            continue
-        name = parts[1] or "unknown"
-        used_raw = parts[2].replace(" MiB", "").strip()
-        if used_raw in ("", "[N/A]", "N/A"):
-            continue
-        try:
-            used_mb = int(float(used_raw))
-        except ValueError:
-            continue
-        if used_mb <= 0:
-            continue
-        processes.append(GpuMemoryProcess(pid=pid, process_name=name, used_mb=used_mb))
-    return processes
+__all__ = [
+    "GpuMemoryProcess",
+    "external_gpu_compute_processes",
+    "log_vram_contention_at_startup",
+    "query_gpu_compute_processes",
+    "vram_contention_summary",
+    "warn_before_large_model_load",
+    "warn_before_model_load",
+    "warn_vram_contention",
+]
 
 
 def query_gpu_compute_processes() -> list[GpuMemoryProcess]:
     """Return CUDA/compute processes currently using discrete GPU memory."""
-    try:
-        from seiso.security.nvidia_boundary import (
-            _run_nvidia_smi,
-            resolve_nvidia_smi_executable,
-        )
-    except ImportError:
-        return []
-
-    exe = resolve_nvidia_smi_executable()
-    if not exe:
-        return []
-
-    for fields in (
-        "pid,process_name,used_gpu_memory",
-        "pid,process_name,used_memory",
-    ):
-        proc = _run_nvidia_smi(
-            exe,
-            f"--query-compute-apps={fields}",
-            "--format=csv,noheader,nounits",
-            timeout=3,
-        )
-        if proc is None or proc.returncode != 0 or not proc.stdout.strip():
-            continue
-        parsed = _parse_nvidia_smi_process_csv(proc.stdout)
-        if parsed:
-            return parsed
-    return []
+    return query_nvidia_compute_processes()
 
 
 def external_gpu_compute_processes(

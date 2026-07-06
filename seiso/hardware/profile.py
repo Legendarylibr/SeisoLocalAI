@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-import os
 import platform
 import shutil
-import subprocess
 import time
 from typing import Any
 
-from seiso.hardware.gpus import sanitize_hardware_label
+from seiso.hardware.platforms import probe_for
+from seiso.hardware.probes.nvidia import nvidia_gpu_metrics
 from seiso.hardware.tiers import (
     TIER_LABELS,
     classify_tier,
@@ -28,86 +27,29 @@ _metrics_cache_ts: float = 0.0
 _cpu_percent_primed = False
 
 
+def _platform_probe():
+    return probe_for(platform.system())
+
+
 def _disk_usage_root() -> str:
     """Filesystem root used for free-space reporting (OS-appropriate)."""
-    if platform.system().lower() == "windows":
-        return os.environ.get("SYSTEMDRIVE", "C:") + "\\"
-    return "/"
+    return _platform_probe().disk_usage_root()
 
 
 def _ram_gb() -> float:
-    try:
-        import psutil  # type: ignore
-
-        return round(psutil.virtual_memory().total / (1024**3), 1)
-    except ImportError:
-        pass
-    try:
-        page_size = __import__("os").sysconf("SC_PAGE_SIZE")
-        phys_pages = __import__("os").sysconf("SC_PHYS_PAGES")
-        return round((page_size * phys_pages) / (1024**3), 1)
-    except (AttributeError, OSError, ValueError):
-        return 0.0
+    return _platform_probe().ram_gb()
 
 
 def _cpu_brand() -> str:
-    try:
-        import cpuinfo  # type: ignore
-
-        brand = cpuinfo.get_cpu_info().get("brand_raw", "")
-        if brand:
-            return sanitize_hardware_label(brand)
-    except ImportError:
-        pass
-    proc = platform.processor() or platform.machine()
-    if platform.system() == "Darwin" and platform.machine() in ("arm64", "aarch64"):
-        return "Apple Silicon"
-    return sanitize_hardware_label(proc)
+    return _platform_probe().cpu_brand()
 
 
 def _cpu_cores() -> int:
-    return __import__("os").cpu_count() or 1
+    return _platform_probe().cpu_cores()
 
 
-def _nvidia_smi_metrics() -> dict[int, dict[str, float]]:
-    from seiso.security.nvidia_boundary import resolve_nvidia_smi_executable
-
-    out: dict[int, dict[str, float]] = {}
-    smi = resolve_nvidia_smi_executable()
-    if not smi:
-        return out
-    try:
-        result = subprocess.run(
-            [
-                smi,
-                "--query-gpu=index,utilization.gpu,memory.used,memory.total,temperature.gpu",
-                "--format=csv,noheader,nounits",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=3,
-            check=False,
-        )
-        if result.returncode != 0:
-            return out
-        for line in result.stdout.strip().splitlines():
-            parts = [p.strip() for p in line.split(",")]
-            if len(parts) < 5:
-                continue
-            idx = int(parts[0])
-            out[idx] = {
-                "utilization_pct": (
-                    float(parts[1]) if parts[1] not in ("[N/A]", "N/A") else 0.0
-                ),
-                "vram_used_mb": float(parts[2]),
-                "vram_total_mb": float(parts[3]),
-                "temperature_c": (
-                    float(parts[4]) if parts[4] not in ("[N/A]", "N/A") else 0.0
-                ),
-            }
-    except (FileNotFoundError, subprocess.TimeoutExpired, ValueError, OSError):
-        pass
-    return out
+# Back-compat alias for tests and monkeypatching.
+_nvidia_smi_metrics = nvidia_gpu_metrics
 
 
 def detect_gpus() -> list[dict[str, Any]]:
