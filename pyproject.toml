@@ -52,12 +52,11 @@ mlx = [
 cuda = [
   "triton>=2.2; platform_system == 'Linux'",
   "ninja>=1.11",
-  # 13.0.2 ptxas caps at PTX 9.0 while nvcc emits 9.3 — needs >=13.1.0 for fused kernels.
-  "cuda-toolkit[nvcc]>=13.1.0; platform_system == 'Linux'",
   "cuda-cccl>=1.0; platform_system == 'Linux'",
   # llama-cpp-python CUDA wheels link libcudart.so.12; PyTorch 2.12 ships cu13 only.
   "nvidia-cuda-runtime-cu12; platform_system == 'Linux'",
   "nvidia-cublas-cu12; platform_system == 'Linux'",
+  # cuda-toolkit comes via torch==13.0.2; install.sh upgrades to >=13.1.0 when ptxas is too old.
 ]
 # Optional — build from source on Linux NVIDIA; not pulled in by [cuda] (see scripts/install_flash_attn.sh).
 flash-attn = [
