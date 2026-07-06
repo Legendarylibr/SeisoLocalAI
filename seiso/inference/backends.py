@@ -386,24 +386,13 @@ def gguf_swa_layer_fraction(model_path: str) -> float | None:
     return _gguf_metadata(model_path).swa_layer_fraction
 
 
-_MOE_ARCH_MARKERS = (
-    "moe",
-    "deepseek2",
-    "deepseek3",
-    "deepseekv2",
-    "deepseekv3",
-    "mixtral",
-    "arctic",
-)
-
-
 def gguf_is_moe(model_path: str) -> bool:
     """True when GGUF metadata indicates a mixture-of-experts architecture."""
     meta = _gguf_metadata(model_path)
     if meta.expert_count and meta.expert_count > 1:
         return True
     arch = (meta.architecture or "").lower()
-    return any(marker in arch for marker in _MOE_ARCH_MARKERS)
+    return "moe" in arch
 
 
 def gguf_block_count(model_path: str) -> int | None:

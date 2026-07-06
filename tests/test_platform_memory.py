@@ -10,7 +10,18 @@ from seiso.hardware.tiers import HardwareTier
 from seiso.memory.platform_profile import (
     apply_platform_memory_profile,
     memory_profile_label,
+    native_linux_nvidia_llama_batch_caps,
 )
+from seiso.memory.protection import gpu_batch_tier_caps
+
+
+def _expected_native_caps(vram_mb: int, *, low: bool = False) -> tuple[int, int, int]:
+    return native_linux_nvidia_llama_batch_caps(
+        tier=HardwareTier.WORKSTATION,
+        headroom_mb=vram_mb,
+        low=low,
+        gpu_total_mb=vram_mb,
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -169,10 +180,11 @@ def test_platform_profile_linux_nvidia_uses_gpu_layers(monkeypatch):
 
     apply_platform_memory_profile(profile=profile)
 
+    expected_batch, expected_ubatch, expected_cache = _expected_native_caps(24576)
     assert os.environ["SEISO_LLAMA_GPU_LAYERS"] == "-1"
-    assert os.environ["SEISO_LLAMA_BATCH"] == "1024"
-    assert os.environ["SEISO_LLAMA_UBATCH"] == "256"
-    assert os.environ["SEISO_LLAMA_CACHE_MB"] == "512"
+    assert os.environ["SEISO_LLAMA_BATCH"] == str(expected_batch)
+    assert os.environ["SEISO_LLAMA_UBATCH"] == str(expected_ubatch)
+    assert os.environ["SEISO_LLAMA_CACHE_MB"] == str(min(2048, expected_cache))
     assert os.environ.get("SEISO_LLAMA_FLASH_ATTN") == "false"
     assert os.environ.get("SEISO_LLAMA_SPEED_SCALE") == "false"
     assert os.environ["SEISO_STREAM_BATCH_CHARS"] == "16"
@@ -253,13 +265,13 @@ def test_platform_profile_linux_nvidia_workstation_uses_conservative_batches(mon
 @pytest.mark.parametrize(
     "name,vram_mb,tier,expected_batch,expected_ubatch,expected_cache",
     [
-        ("NVIDIA GeForce GTX 1650", 4096, HardwareTier.EDGE, 512, 128, 256),
-        ("NVIDIA GeForce RTX 3050", 6144, HardwareTier.EDGE, 512, 128, 256),
-        ("NVIDIA GeForce RTX 3070", 8192, HardwareTier.MODEST, 512, 128, 256),
-        ("NVIDIA GeForce RTX 3060", 12288, HardwareTier.CAPABLE, 512, 128, 256),
-        ("NVIDIA GeForce RTX 4080", 16384, HardwareTier.CAPABLE, 512, 128, 256),
-        ("NVIDIA GeForce RTX 4090", 24576, HardwareTier.WORKSTATION, 1024, 256, 512),
-        ("NVIDIA RTX 6000 Ada", 49152, HardwareTier.WORKSTATION, 1024, 256, 512),
+        ("NVIDIA GeForce GTX 1650", 4096, HardwareTier.EDGE, 172, 128, 344),
+        ("NVIDIA GeForce RTX 3050", 6144, HardwareTier.EDGE, 258, 128, 516),
+        ("NVIDIA GeForce RTX 3070", 8192, HardwareTier.MODEST, 344, 128, 688),
+        ("NVIDIA GeForce RTX 3060", 12288, HardwareTier.CAPABLE, 516, 129, 1032),
+        ("NVIDIA GeForce RTX 4080", 16384, HardwareTier.CAPABLE, 688, 172, 1376),
+        ("NVIDIA GeForce RTX 4090", 24576, HardwareTier.WORKSTATION, 1032, 258, 2048),
+        ("NVIDIA RTX 6000 Ada", 49152, HardwareTier.WORKSTATION, 2064, 516, 2048),
     ],
 )
 def test_native_linux_nvidia_batch_caps_all_gpu_tiers(
@@ -271,6 +283,7 @@ def test_native_linux_nvidia_batch_caps_all_gpu_tiers(
         tier=tier,
         headroom_mb=vram_mb,
         low=False,
+        gpu_total_mb=vram_mb,
     )
     assert batch == expected_batch
     assert ubatch == expected_ubatch
@@ -314,8 +327,9 @@ def test_platform_profile_remote_forge_keeps_native_linux_tuning(monkeypatch):
     assert result["memory_profile"] == "balanced"
     assert result["headroom_mb"] == 24576
     assert result["free_headroom_mb"] == 1024
-    assert os.environ["SEISO_LLAMA_BATCH"] == "1024"
-    assert os.environ["SEISO_LLAMA_UBATCH"] == "256"
+    expected_batch, expected_ubatch, _ = _expected_native_caps(24576)
+    assert os.environ["SEISO_LLAMA_BATCH"] == str(expected_batch)
+    assert os.environ["SEISO_LLAMA_UBATCH"] == str(expected_ubatch)
     assert os.environ.get("SEISO_LLAMA_FLASH_ATTN") == "false"
 
 
@@ -343,14 +357,16 @@ def test_platform_profile_linux_nvidia_modest_sets_safe_batch(monkeypatch):
         },
     )
     monkeypatch.setattr("platform.system", lambda: "Linux")
+    monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: True)
     monkeypatch.setattr(
         "seiso.inference.model_pool._llama_gpu_offload_ok", lambda: True
     )
 
     apply_platform_memory_profile(profile=profile)
 
-    assert os.environ["SEISO_LLAMA_BATCH"] == "512"
-    assert os.environ["SEISO_LLAMA_UBATCH"] == "128"
+    expected_batch, expected_ubatch, _ = _expected_native_caps(8192)
+    assert os.environ["SEISO_LLAMA_BATCH"] == str(expected_batch)
+    assert os.environ["SEISO_LLAMA_UBATCH"] == str(expected_ubatch)
 
 
 @pytest.mark.parametrize(
@@ -396,10 +412,12 @@ def test_platform_profile_native_linux_nvidia_all_tiers_are_crash_resistant(
 
     apply_platform_memory_profile(profile=profile)
 
+    expected_batch, expected_ubatch, expected_cache = _expected_native_caps(vram_mb)
+    default_cache_mb = 2048 if tier == HardwareTier.WORKSTATION and ram_gb >= 32 else 1024
     assert os.environ["SEISO_LLAMA_GPU_LAYERS"] == "-1"
-    assert int(os.environ["SEISO_LLAMA_BATCH"]) <= 1024
-    assert int(os.environ["SEISO_LLAMA_UBATCH"]) <= 256
-    assert os.environ["SEISO_LLAMA_CACHE_MB"] == expected_cache
+    assert os.environ["SEISO_LLAMA_BATCH"] == str(expected_batch)
+    assert os.environ["SEISO_LLAMA_UBATCH"] == str(expected_ubatch)
+    assert os.environ["SEISO_LLAMA_CACHE_MB"] == str(min(default_cache_mb, expected_cache))
     assert os.environ["SEISO_LLAMA_FLASH_ATTN"] == "false"
     assert os.environ["SEISO_LLAMA_SPEED_SCALE"] == "false"
 
@@ -445,9 +463,11 @@ def test_platform_profile_workstation_keeps_speed_when_vram_in_use(monkeypatch):
     assert result["memory_profile"] == "balanced"
     assert result["headroom_mb"] == 24564
     assert result["free_headroom_mb"] == 1364
-    assert os.environ["SEISO_LLAMA_BATCH"] == "1024"
-    assert os.environ["SEISO_LLAMA_UBATCH"] == "256"
-    assert os.environ["SEISO_LLAMA_CACHE_MB"] == "512"
+    expected_batch, expected_ubatch, expected_cache = _expected_native_caps(24564)
+    default_cache_mb = 2048
+    assert os.environ["SEISO_LLAMA_BATCH"] == str(expected_batch)
+    assert os.environ["SEISO_LLAMA_UBATCH"] == str(expected_ubatch)
+    assert os.environ["SEISO_LLAMA_CACHE_MB"] == str(min(default_cache_mb, expected_cache))
 
 
 def test_platform_profile_native_linux_clamps_stale_batch_env(monkeypatch):
@@ -483,8 +503,9 @@ def test_platform_profile_native_linux_clamps_stale_batch_env(monkeypatch):
 
     apply_platform_memory_profile(profile=profile)
 
-    assert os.environ["SEISO_LLAMA_BATCH"] == "1024"
-    assert os.environ["SEISO_LLAMA_UBATCH"] == "256"
+    expected_batch, expected_ubatch, _ = _expected_native_caps(24576)
+    assert os.environ["SEISO_LLAMA_BATCH"] == str(expected_batch)
+    assert os.environ["SEISO_LLAMA_UBATCH"] == str(expected_ubatch)
     profile = {"ram_gb": 16, "gpus": [], "backend": "cpu", "platform": "Darwin"}
     monkeypatch.setattr(
         "seiso.memory.platform_profile.classify_tier", lambda _p: HardwareTier.CPU_ONLY

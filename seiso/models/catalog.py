@@ -53,6 +53,18 @@ class ModelFamily(StrEnum):
     DEEPSEEK = "deepseek"
     KIMI = "kimi"
     GLM = "glm"
+    OLMO = "olmo"
+    GRANITE = "granite"
+    YI = "yi"
+    FALCON = "falcon"
+    INTERNLM = "internlm"
+    BAICHUAN = "baichuan"
+    STABLELM = "stablelm"
+    COMMAND = "command"
+    SMOLLM = "smollm"
+    GPT_OSS = "gpt-oss"
+    EXAONE = "exaone"
+    NOVA = "nova"
     OTHER = "other"
 
 
@@ -64,15 +76,53 @@ class ModelTask(StrEnum):
     BASE = "base"
 
 
-_FAMILY_NEEDLES: tuple[tuple[ModelFamily, tuple[str, ...]], ...] = (
-    (ModelFamily.QWEN, ("qwen",)),
-    (ModelFamily.LLAMA, ("llama", "meta-llama")),
-    (ModelFamily.GEMMA, ("gemma", "google/gemma")),
-    (ModelFamily.PHI, ("phi", "microsoft/phi")),
-    (ModelFamily.MISTRAL, ("mistral", "devstral", "mixtral")),
-    (ModelFamily.DEEPSEEK, ("deepseek",)),
-    (ModelFamily.KIMI, ("kimi", "moonshot")),
-    (ModelFamily.GLM, ("glm", "zai-org")),
+# Hugging Face org → family (providers only; no per-model ids).
+_FAMILY_BY_PROVIDER: tuple[tuple[ModelFamily, frozenset[str]], ...] = (
+    (ModelFamily.QWEN, frozenset({"qwen", "alibaba", "qwenlm"})),
+    (ModelFamily.LLAMA, frozenset({"meta-llama", "lmsys"})),
+    (ModelFamily.MISTRAL, frozenset({"mistralai"})),
+    (ModelFamily.DEEPSEEK, frozenset({"deepseek-ai"})),
+    (ModelFamily.KIMI, frozenset({"moonshotai", "moonshot"})),
+    (ModelFamily.GLM, frozenset({"zai-org", "thudm"})),
+    (ModelFamily.OLMO, frozenset({"allenai"})),
+    (ModelFamily.GRANITE, frozenset({"ibm-granite"})),
+    (ModelFamily.YI, frozenset({"01-ai"})),
+    (ModelFamily.FALCON, frozenset({"tiiuae"})),
+    (ModelFamily.INTERNLM, frozenset({"internlm"})),
+    (ModelFamily.BAICHUAN, frozenset({"baichuan-inc", "baichuan"})),
+    (ModelFamily.STABLELM, frozenset({"stabilityai"})),
+    (ModelFamily.COMMAND, frozenset({"cohere", "c4ai"})),
+    (ModelFamily.EXAONE, frozenset({"lg-ai-exaone", "lgailab"})),
+)
+
+# Repo slug / tag roots — match any version (qwen3.6, llama-3.1, etc.), not model ids.
+_FAMILY_ROOT_RE: tuple[tuple[ModelFamily, re.Pattern[str]], ...] = (
+    (ModelFamily.QWEN, re.compile(r"(^|[-_/])qwen", re.I)),
+    (ModelFamily.LLAMA, re.compile(r"(^|[-_/])(llama|vicuna|alpaca|tinyllama)", re.I)),
+    (ModelFamily.GEMMA, re.compile(r"(^|[-_/])(gemma|codegemma|paligemma)", re.I)),
+    (ModelFamily.PHI, re.compile(r"(^|[-_/])phi", re.I)),
+    (
+        ModelFamily.MISTRAL,
+        re.compile(
+            r"(^|[-_/])(mistral|mixtral|devstral|pixtral|ministral|codestral|magistral)",
+            re.I,
+        ),
+    ),
+    (ModelFamily.DEEPSEEK, re.compile(r"(^|[-_/])deepseek", re.I)),
+    (ModelFamily.KIMI, re.compile(r"(^|[-_/])kimi", re.I)),
+    (ModelFamily.GLM, re.compile(r"(^|[-_/])(glm|chatglm)", re.I)),
+    (ModelFamily.OLMO, re.compile(r"(^|[-_/])olmo", re.I)),
+    (ModelFamily.GRANITE, re.compile(r"(^|[-_/])granite", re.I)),
+    (ModelFamily.YI, re.compile(r"(^|[-_/])yi(?:[-_/]|$)", re.I)),
+    (ModelFamily.FALCON, re.compile(r"(^|[-_/])falcon", re.I)),
+    (ModelFamily.INTERNLM, re.compile(r"(^|[-_/])internlm", re.I)),
+    (ModelFamily.BAICHUAN, re.compile(r"(^|[-_/])baichuan", re.I)),
+    (ModelFamily.STABLELM, re.compile(r"(^|[-_/])stablelm", re.I)),
+    (ModelFamily.COMMAND, re.compile(r"(^|[-_/])(command|c4ai)", re.I)),
+    (ModelFamily.SMOLLM, re.compile(r"(^|[-_/])(smollm|smol-)", re.I)),
+    (ModelFamily.GPT_OSS, re.compile(r"(^|[-_/])gpt[-_]?oss", re.I)),
+    (ModelFamily.EXAONE, re.compile(r"(^|[-_/])exaone", re.I)),
+    (ModelFamily.NOVA, re.compile(r"(^|[-_/])nova", re.I)),
 )
 
 
@@ -259,12 +309,39 @@ def _parse_iso_ts(value: str | None) -> datetime | None:
         return None
 
 
-def _infer_family(repo_id: str, tags: list[str]) -> ModelFamily:
-    hay = f"{repo_id} {' '.join(tags)}".lower()
-    for family, needles in _FAMILY_NEEDLES:
-        if any(needle in hay for needle in needles):
+def _base_model_from_tags(tags: list[str]) -> str | None:
+    for tag in tags:
+        if tag.startswith("base_model:") and not tag.startswith(
+            "base_model:quantized:"
+        ):
+            return tag.split(":", 1)[1]
+    return None
+
+
+def infer_model_family(
+    repo_id: str, tags: list[str] | tuple[str, ...] = ()
+) -> ModelFamily:
+    """Classify a Hub repo by provider org and family slug roots (not model ids)."""
+    tag_list = list(tags)
+    org = repo_id.split("/", 1)[0].lower() if "/" in repo_id else ""
+    for family, providers in _FAMILY_BY_PROVIDER:
+        if org in providers:
+            return family
+
+    hay_parts = [repo_id.lower(), " ".join(t.lower() for t in tag_list)]
+    base = _base_model_from_tags(tag_list)
+    if base:
+        hay_parts.append(base.lower())
+    hay = " ".join(hay_parts)
+
+    for family, pattern in _FAMILY_ROOT_RE:
+        if pattern.search(hay):
             return family
     return ModelFamily.OTHER
+
+
+def _infer_family(repo_id: str, tags: list[str]) -> ModelFamily:
+    return infer_model_family(repo_id, tags)
 
 
 def _infer_task(repo_id: str, pipeline_tag: str | None, tags: list[str]) -> ModelTask:

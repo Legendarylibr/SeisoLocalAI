@@ -201,34 +201,20 @@ def fit_llama_gpu_layers(
     )
 
     weight_mb = max(int(estimate_path_vram_mb(model_path)), 256)
-    native_mid_size_dense = False
-    if _native_linux_nvidia():
+
+    if _native_linux_nvidia() and llama_model_is_tight_vram_fit(
+        model_path=model_path,
+        free_mb=headroom_mb,
+        n_gpu_layers=-1 if requested == -1 else max(requested, 1),
+        n_ctx=n_ctx,
+    ):
         try:
             from seiso.inference.family_policy import policy_for_gguf
 
             policy = policy_for_gguf(model_path)
-            native_mid_size_dense = (
-                policy.kind == "dense"
-                and policy.prefill_tightness > 1.0
-                and 7 * 1024 <= weight_mb <= 16 * 1024
-                and headroom_mb <= 32 * 1024
-            )
+            reserve_ratio = min(0.25, 0.12 + (policy.prefill_tightness - 1.0) * 0.20)
         except Exception:
-            native_mid_size_dense = False
-
-    if _native_linux_nvidia() and (
-        native_mid_size_dense
-        or llama_model_is_tight_vram_fit(
-            model_path=model_path,
-            free_mb=headroom_mb,
-            n_gpu_layers=-1 if requested == -1 else max(requested, 1),
-            n_ctx=n_ctx,
-        )
-    ):
-        # Leave real VRAM slack for near-capacity models during first-message prefill.
-        reserve_ratio = 0.15
-        if native_mid_size_dense:
-            reserve_ratio = 0.20
+            reserve_ratio = 0.15
         reserve_mb = max(2048, int(headroom_mb * reserve_ratio))
         headroom_mb = max(0, headroom_mb - reserve_mb)
 

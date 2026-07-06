@@ -52,7 +52,7 @@ class _Other:
 def test_detect_architecture_prefers_config_over_path_name():
     model = _FakeModel([], model_type="qwen2")
 
-    assert detect_architecture("/tmp/not-a-qwen-checkpoint", model) == "qwen2"
+    assert detect_architecture("/tmp/not-a-qwen-checkpoint", model) == "qwen"
 
 
 def test_unknown_architecture_infers_common_targets_from_parameters():
