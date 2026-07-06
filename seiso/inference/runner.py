@@ -40,6 +40,7 @@ from seiso.inference.tuning import (
 )
 from seiso.memory.protection import (
     LlamaLoadTier,
+    clamp_llama_n_ctx,
     is_oom_error,
     llama_next_recovery_tier,
     llama_oom_recovery_batch,
@@ -66,6 +67,29 @@ def _stream_batch_chars() -> int:
 def _torch_stream_timeout_s() -> int:
     """Poll interval for detecting failed Torch generation threads."""
     return max(1, env_int("SEISO_TORCH_STREAM_TIMEOUT_S", 2))
+
+
+def _llama_n_ctx_for_payload(
+    payload: dict[str, Any],
+    messages: list[dict[str, Any]],
+    *,
+    model_path: str,
+) -> int:
+    max_tokens = int(payload.get("max_tokens", 512))
+    if payload.get("n_ctx"):
+        return clamp_llama_n_ctx(
+            int(payload["n_ctx"]),
+            messages=messages,
+            max_tokens=max_tokens,
+            model_path=model_path,
+            model_format=payload.get("model_format"),
+        )
+    return estimate_llama_n_ctx(
+        messages,
+        max_tokens=max_tokens,
+        model_path=model_path,
+        model_format=payload.get("model_format"),
+    )
 
 
 class _StreamError:
@@ -744,10 +768,11 @@ class LocalInferenceRunner:
             current,
             next_tier,
         )
+        recovery_ctx = min(int(n_ctx), 4096 if next_tier == "compact" else 2048)
         release_cached_memory(sync=True)
         return self._pool.reload_llama(
             model_path,
-            n_ctx,
+            recovery_ctx,
             tier=next_tier,
             batch_override=batch_override,
         )
@@ -809,24 +834,14 @@ class LocalInferenceRunner:
         generation_id: int,
     ) -> str:
         messages = payload.get("messages", [])
-        n_ctx = payload.get("n_ctx") or estimate_llama_n_ctx(
-            messages,
-            max_tokens=int(payload.get("max_tokens", 512)),
-            model_path=model_path,
-            model_format=payload.get("model_format"),
-        )
+        n_ctx = _llama_n_ctx_for_payload(payload, messages, model_path=model_path)
         messages = trim_llama_messages_to_context(
             messages,
             n_ctx=int(n_ctx),
             max_tokens=int(payload.get("max_tokens", 512)),
         )
         if not payload.get("n_ctx"):
-            n_ctx = estimate_llama_n_ctx(
-                messages,
-                max_tokens=int(payload.get("max_tokens", 512)),
-                model_path=model_path,
-                model_format=payload.get("model_format"),
-            )
+            n_ctx = _llama_n_ctx_for_payload(payload, messages, model_path=model_path)
         llm = self._pool.get_llama(model_path, n_ctx=n_ctx)
         llm = self._llama_guard_prefill(
             llm, model_path=model_path, messages=messages, n_ctx=n_ctx
@@ -908,24 +923,14 @@ class LocalInferenceRunner:
         should_stop: Callable[[], bool],
     ) -> Iterator[StreamToken]:
         messages = payload.get("messages", [])
-        n_ctx = payload.get("n_ctx") or estimate_llama_n_ctx(
-            messages,
-            max_tokens=int(payload.get("max_tokens", 512)),
-            model_path=model_path,
-            model_format=payload.get("model_format"),
-        )
+        n_ctx = _llama_n_ctx_for_payload(payload, messages, model_path=model_path)
         messages = trim_llama_messages_to_context(
             messages,
             n_ctx=int(n_ctx),
             max_tokens=int(payload.get("max_tokens", 512)),
         )
         if not payload.get("n_ctx"):
-            n_ctx = estimate_llama_n_ctx(
-                messages,
-                max_tokens=int(payload.get("max_tokens", 512)),
-                model_path=model_path,
-                model_format=payload.get("model_format"),
-            )
+            n_ctx = _llama_n_ctx_for_payload(payload, messages, model_path=model_path)
         try:
             llm = self._pool.get_llama(model_path, n_ctx=n_ctx)
         except ImportError as exc:

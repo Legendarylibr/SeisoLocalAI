@@ -117,7 +117,7 @@ def gpu_batch_tier_caps(gpu_total_mb: int, load_tier: LlamaLoadTier) -> tuple[in
     gpu_gb = max(1.0, gpu_total_mb / 1024)
     normal_batch = min(
         _MAX_LLAMA_BATCH,
-        max(_MIN_LLAMA_BATCH, int(gpu_gb * 43)),
+        max(_MIN_LLAMA_BATCH, int(gpu_gb * 32)),
     )
     normal_ubatch = min(1024, max(_MIN_LLAMA_BATCH, normal_batch // 4))
     if load_tier == "compact":
@@ -568,6 +568,41 @@ def llama_offload_fits_headroom(
     return gpu_weight_mb + kv_mb <= headroom_mb
 
 
+def native_linux_llama_context_cap(
+    model_path: str | Path | None,
+    *,
+    free_mb: int,
+    n_gpu_layers: int = -1,
+    ceiling: int | None = None,
+) -> int:
+    """Largest native Linux llama.cpp context that leaves VRAM for prefill."""
+    if not model_path or free_mb <= 0:
+        return _MAX_LLAMA_CTX if ceiling is None else max(1, int(ceiling))
+    try:
+        if not seiso_platform.use_linux_nvidia_inference_guards():
+            return _MAX_LLAMA_CTX if ceiling is None else max(1, int(ceiling))
+    except Exception:
+        return _MAX_LLAMA_CTX if ceiling is None else max(1, int(ceiling))
+
+    cap = _MAX_LLAMA_CTX if ceiling is None else max(1, int(ceiling))
+    # Keep allocator/prefill slack outside the KV estimate; long prompts were
+    # hitting OOM even when the static weight+KV estimate barely fit.
+    budget = max(0, int(free_mb * 0.88) - 512)
+    candidates = sorted(
+        {2048, *[bucket for bucket in _NATIVE_LINUX_CTX_BUCKETS if bucket <= cap]},
+        reverse=True,
+    )
+    for candidate in candidates:
+        if llama_offload_fits_headroom(
+            model_path,
+            headroom_mb=budget,
+            n_gpu_layers=n_gpu_layers,
+            n_ctx=candidate,
+        ):
+            return min(candidate, cap)
+    return min(2048, cap)
+
+
 def llama_host_batch_headroom_mb(
     *,
     model_path: str | Path,
@@ -824,24 +859,19 @@ def llama_prefill_needs_reload(
         and loaded_headroom_mb > 0
         and free_mb < int(loaded_headroom_mb * _NATIVE_LINUX_PREFILL_HEADROOM_SHRINK_RATIO)
     )
-    # Reload only when the loaded batch is unsafe for this prefill. Do not
-    # thrash on "long prompt" alone — that caused mid-conversation reloads
-    # (and OOM risk) as chat history grew on native Linux.
+    # Reload whenever the cached handle's batch is above the current safe cap.
+    # Native Linux llama.cpp allocates prefill buffers from the loaded batch
+    # settings, so even short prompts can OOM when a stale handle was loaded
+    # under roomier headroom.
     batch_unsafe = loaded_batch > safe_batch
-    batch_far_over = loaded_batch > max(safe_batch * 2, safe_batch + 256)
     ubatch_far_over = loaded_ubatch > max(safe_ubatch * 2, safe_ubatch + 128)
-    needs_reload = batch_unsafe and (
-        prefill_exceeds_safe
-        or headroom_dropped
-        or headroom_shrank
-        or vision_prefill
-        or batch_far_over
-    )
+    needs_reload = batch_unsafe
     if (
         loaded_ubatch_explicit
         and loaded_ubatch > safe_ubatch
         and (
-            headroom_dropped
+            batch_unsafe
+            or headroom_dropped
             or headroom_shrank
             or vision_prefill
             or prefill_exceeds_safe
@@ -1469,6 +1499,16 @@ def clamp_llama_n_ctx(
         model_format=model_format,
         model_name=model_name,
     )
+    if model_path:
+        ctx_cap = min(
+            ctx_cap,
+            native_linux_llama_context_cap(
+                model_path,
+                free_mb=headroom_mb(),
+                n_gpu_layers=-1,
+                ceiling=ctx_cap,
+            ),
+        )
     sized = bucket_llama_n_ctx(needed, ceiling=ctx_cap)
     return min(max(int(n_ctx), sized), ctx_cap)
 
@@ -1641,8 +1681,55 @@ def training_pin_memory() -> bool:
         return False
 
 
+def _training_caps_for_model(
+    config: Any,
+    defaults: dict[str, Any],
+    profile: dict[str, Any],
+) -> dict[str, int]:
+    batch = max(1, int(defaults.get("batch_size") or 1))
+    accum = max(1, int(defaults.get("gradient_accumulation_steps") or 8))
+    max_seq = max(128, int(defaults.get("max_seq_length") or 2048))
+
+    params_b = guess_params_from_name(str(getattr(config, "model_id", "")))
+    if params_b is not None:
+        if params_b <= 1.0:
+            model_batch, model_accum, model_seq = 4, 2, max_seq
+        elif params_b <= 3.0:
+            model_batch, model_accum, model_seq = 2, 4, max_seq
+        elif params_b <= 7.0:
+            model_batch, model_accum, model_seq = 1, 8, min(max_seq, 2048)
+        elif params_b <= 14.0:
+            model_batch, model_accum, model_seq = 1, 16, min(max_seq, 2048)
+        else:
+            model_batch, model_accum, model_seq = 1, 32, min(max_seq, 1024)
+        batch = min(batch, model_batch)
+        accum = max(accum, model_accum)
+        max_seq = min(max_seq, model_seq)
+
+    try:
+        native_linux_nvidia = seiso_platform.use_linux_nvidia_inference_guards()
+    except Exception:
+        native_linux_nvidia = False
+    headroom = vram_headroom_mb(profile)
+    if (
+        native_linux_nvidia
+        and headroom <= 24576
+        and params_b is not None
+        and params_b > 7.0
+    ):
+        max_seq = min(max_seq, 1024)
+    elif headroom > 0 and headroom < 8192:
+        max_seq = min(max_seq, 1024)
+
+    return {
+        "batch_size": batch,
+        "gradient_accumulation_steps": accum,
+        "max_seq_length": max_seq,
+    }
+
+
 def apply_training_memory_guards(config: Any) -> Any:
-    """Keep compatibility fixes while leaving user RAM/VRAM sizing untouched."""
+    """Clamp memory-sensitive training knobs to hardware/model-safe ceilings."""
     from seiso.training.config import TrainConfig
 
     if not isinstance(config, TrainConfig):
@@ -1659,6 +1746,26 @@ def apply_training_memory_guards(config: Any) -> Any:
         }
 
     updates: dict[str, Any] = {}
+
+    if not env_bool("SEISO_TRAINING_UNSAFE_BATCH", False):
+        caps = _training_caps_for_model(config, defaults, profile)
+        current_batch = max(1, int(config.batch_size))
+        capped_batch = min(current_batch, caps["batch_size"])
+        if capped_batch < current_batch:
+            updates["batch_size"] = capped_batch
+            effective_batch = current_batch * max(1, int(config.gradient_accumulation_steps))
+            preserved_accum = max(
+                caps["gradient_accumulation_steps"],
+                (effective_batch + capped_batch - 1) // capped_batch,
+            )
+            if preserved_accum > int(config.gradient_accumulation_steps):
+                updates["gradient_accumulation_steps"] = preserved_accum
+        elif int(config.gradient_accumulation_steps) < caps["gradient_accumulation_steps"]:
+            updates["gradient_accumulation_steps"] = caps["gradient_accumulation_steps"]
+
+        capped_seq = min(int(config.max_seq_length), caps["max_seq_length"])
+        if capped_seq < int(config.max_seq_length):
+            updates["max_seq_length"] = capped_seq
 
     # Downgrade quant to the platform-recommended value when the requested mode
     # is unavailable (e.g. QLoRA/4-bit on macOS where bitsandbytes is absent,
@@ -1712,12 +1819,62 @@ def apply_training_oom_fallback(config: Any) -> Any:
     )
 
 
+def _rl_batch_caps_for_headroom(free_mb: int) -> dict[str, int]:
+    if free_mb <= 0:
+        return {}
+    if free_mb < 4096:
+        return {
+            "torch_preflight_batch_size": 512,
+            "torch_batch_episodes": 128,
+            "torch_minibatch_size": 64,
+            "online_batch_size": 32,
+            "continuous_batch_size": 16,
+        }
+    if free_mb < 8192:
+        return {
+            "torch_preflight_batch_size": 1024,
+            "torch_batch_episodes": 256,
+            "torch_minibatch_size": 128,
+            "online_batch_size": 64,
+            "continuous_batch_size": 32,
+        }
+    if free_mb < 16384:
+        return {
+            "torch_preflight_batch_size": 2048,
+            "torch_batch_episodes": 512,
+            "torch_minibatch_size": 256,
+            "online_batch_size": 96,
+            "continuous_batch_size": 48,
+        }
+    return {
+        "torch_preflight_batch_size": 4096,
+        "torch_batch_episodes": 1024,
+        "torch_minibatch_size": 512,
+        "online_batch_size": 128,
+        "continuous_batch_size": 64,
+    }
+
+
 def apply_rl_memory_guards(flat: dict[str, Any]) -> dict[str, Any]:
-    """Leave RL quant sizing untouched; OOM fallback handles real failures."""
+    """Clamp RL quant batch-like knobs before torch allocates large tensors."""
     out = dict(flat)
     ctx = int(out.get("llama_cpp_context") or 0)
     if ctx > 0:
         out["llama_cpp_context"] = min(ctx, clamp_llama_n_ctx(ctx, max_tokens=512))
+
+    if not env_bool("SEISO_RL_UNSAFE_BATCH", False):
+        for key, cap in _rl_batch_caps_for_headroom(headroom_mb()).items():
+            value = out.get(key)
+            if value is not None:
+                out[key] = min(int(value), cap)
+        if (
+            out.get("torch_minibatch_size") is not None
+            and out.get("torch_batch_episodes") is not None
+        ):
+            out["torch_minibatch_size"] = min(
+                int(out["torch_minibatch_size"]),
+                int(out["torch_batch_episodes"]),
+            )
 
     return out
 
