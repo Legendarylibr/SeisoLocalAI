@@ -82,11 +82,8 @@ def vram_contention_summary(
     visible = [proc for proc in processes if proc.used_mb >= min_process_mb]
     total_mb = sum(proc.used_mb for proc in visible)
     free_mb = _safe_free_vram_mb()
-    if model_est_mb > 0:
-        # Contended when this model may not fully fit and others hold VRAM.
-        contended = total_mb > 0 and free_mb < model_est_mb
-    else:
-        contended = total_mb > 0
+    # Contended when this model may not fully fit and others hold VRAM.
+    contended = total_mb > 0 and free_mb < model_est_mb if model_est_mb > 0 else total_mb > 0
     return {
         "external_vram_mb": total_mb,
         "free_vram_mb": free_mb,

@@ -7,6 +7,8 @@ import pytest
 
 def test_mlp_forward_skips_fused_mlp_for_bitsandbytes_layers(monkeypatch):
     torch = pytest.importorskip("torch")
+    if not torch.cuda.is_available():
+        pytest.skip("CUDA is required for fused MLP inference kernel coverage")
     from torch import nn
 
     from seiso.kernels.hooks import apply_training_kernels

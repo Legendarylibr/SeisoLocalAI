@@ -418,6 +418,7 @@ async def resolve_draft_model(
             model_path=draft_model_path,
             data_dir=settings.data_dir,
         )
+        compatibility_checked = False
     elif draft_model_id:
         draft_selected = await get_inference_option(db, user_id, draft_model_id)
         if not draft_selected:
@@ -428,6 +429,14 @@ async def resolve_draft_model(
                 draft_selected.get("hardware_note")
                 or "Draft model download is incomplete",
             )
+        selected_path = str(draft_selected.get("path") or "")
+        if not selected_path:
+            raise HTTPException(
+                400, "Draft model must be a local safetensors/checkpoint path"
+            )
+        if target_model_path:
+            _assert_draft_compatible(target_model_path, selected_path)
+        compatibility_checked = bool(target_model_path)
         draft_path = await resolve_model_path(
             db,
             user_id,
@@ -447,7 +456,8 @@ async def resolve_draft_model(
 
     from seiso.inference.backends import is_dflash_draft
 
-    _assert_draft_compatible(target_model_path, draft_path)
+    if not compatibility_checked:
+        _assert_draft_compatible(target_model_path, draft_path)
 
     draft_backend = BACKEND_LLAMACPP if is_dflash_draft(draft_path) else BACKEND_TORCH
     assert_model_fits_for_load(draft_path, mode="chat", backend=draft_backend)

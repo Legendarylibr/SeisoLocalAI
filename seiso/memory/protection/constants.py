@@ -2,32 +2,8 @@
 
 from __future__ import annotations
 
-import contextlib
-import gc
-import json
 import logging
-import os
-import platform
-import re
-from pathlib import Path
-from typing import Any, Literal
-
-from seiso import platform as seiso_platform
-from seiso.env import env_bool
-from seiso.hardware import (
-    assess_hardware_fit,
-    hardware_profile,
-    training_defaults,
-    vram_headroom_mb,
-)
-from seiso.hardware.tiers import fit_headroom_mb
-from seiso.inference.backends import gguf_total_layers
-from seiso.io.files import iter_matching_files
-from seiso.memory.estimates import (
-    estimate_chat_vram_gb,
-    estimate_training_vram_gb,
-    guess_params_from_name,
-)
+from typing import Literal
 
 logger = logging.getLogger(__name__)
 

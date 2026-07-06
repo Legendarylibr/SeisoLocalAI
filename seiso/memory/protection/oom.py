@@ -5,7 +5,8 @@ from __future__ import annotations
 import gc
 import os
 
-from seiso.memory.protection.constants import *  # noqa: F403
+from seiso.env import env_bool
+
 
 class MemoryLoadBlockedError(RuntimeError):
     """Raised when a model load would exceed available memory."""

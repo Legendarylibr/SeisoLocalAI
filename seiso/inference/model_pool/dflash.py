@@ -7,9 +7,9 @@ import threading
 from pathlib import Path
 from typing import Any
 
-logger = logging.getLogger(__name__)
-
 from seiso.inference.model_pool._facade import model_pool as _mp
+
+logger = logging.getLogger(__name__)
 
 
 class DflashDraftHandle:

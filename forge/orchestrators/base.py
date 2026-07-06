@@ -143,7 +143,7 @@ class Orchestrator(ABC):
         """SSE-compatible log stream for a job."""
         queue: asyncio.Queue[str | None] = asyncio.Queue()
         subscribers = self._subscribers[job_id]
-        tail = len(self._log_buffers.get(job_id, []))
+        tail = 0
         subscribers.add(queue)
         try:
             buf = self._log_buffers.get(job_id, deque())

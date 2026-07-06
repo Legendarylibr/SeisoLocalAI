@@ -11,14 +11,11 @@ from seiso import platform as seiso_platform
 from seiso.env import env_bool
 from seiso.hardware import assess_hardware_fit, hardware_profile, vram_headroom_mb
 from seiso.hardware.tiers import fit_headroom_mb
-from seiso.memory.protection.constants import *  # noqa: F403
+from seiso.memory.protection._facade import protection
+from seiso.memory.protection.constants import _DEFAULT_RESERVE_RATIO
 from seiso.memory.protection.oom import MemoryLoadBlockedError, allow_memory_overcommit
-from seiso.memory.protection.path_vram import estimate_path_vram_mb
 
 logger = logging.getLogger(__name__)
-
-
-from seiso.memory.protection._facade import protection
 
 
 def headroom_mb() -> int:

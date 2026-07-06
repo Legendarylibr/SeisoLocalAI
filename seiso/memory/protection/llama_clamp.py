@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import contextlib
-import logging
 import platform
 from pathlib import Path
 from typing import Any
@@ -11,17 +10,26 @@ from typing import Any
 from seiso import platform as seiso_platform
 from seiso.env import env_bool
 from seiso.inference.backends import gguf_total_layers
-from seiso.memory.protection.constants import *  # noqa: F403
+from seiso.memory.protection._facade import protection
 from seiso.memory.protection.chat_guards import _estimate_prompt_tokens, _gguf_has_mmproj_sibling
-from seiso.memory.protection.llama_batch import clamp_llama_batch_pair, roomy_native_linux_batch_floor
+from seiso.memory.protection.constants import (
+    _LLAMA_CTX_BUCKETS,
+    _MAX_LLAMA_BATCH,
+    _MAX_LLAMA_CTX,
+    _MIN_LLAMA_BATCH,
+    _MIN_LLAMA_CTX,
+    _NATIVE_LINUX_CTX_BUCKETS,
+)
+from seiso.memory.protection.llama_batch import (
+    clamp_llama_batch_pair,
+    roomy_native_linux_batch_floor,
+)
 from seiso.memory.protection.llama_kv import _host_os_reserve_mb
 from seiso.memory.protection.llama_runtime import (
     llama_host_batch_headroom_mb,
-    llama_model_is_tight_vram_fit,
     native_linux_llama_context_cap,
-    resolve_llama_model_batches,
 )
-from seiso.memory.protection._facade import protection
+
 
 def bucket_llama_n_ctx(needed: int, *, ceiling: int | None = None) -> int:
     """Snap context to coarse buckets so multi-turn chat reuses one loaded KV size."""
@@ -189,36 +197,6 @@ def clamp_llama_load_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
     )
     if n_ctx > ctx_cap:
         out["n_ctx"] = ctx_cap
-    # #region agent log
-    if model_path:
-        from seiso.agent_debug_log import agent_debug_enabled, agent_debug_log
-
-        if agent_debug_enabled():
-            log_tight = n_gpu_layers != 0 and protection().llama_model_is_tight_vram_fit(
-                model_path=model_path,
-                free_mb=protection().headroom_mb(),
-                n_gpu_layers=n_gpu_layers,
-                n_ctx=int(out.get("n_ctx") or n_ctx),
-            )
-            agent_debug_log(
-                hypothesis_id="B",
-                location="protection.py:clamp_llama_load_kwargs",
-                message="clamped llama load kwargs",
-                data={
-                    "model": Path(model_path).name,
-                    "tight_fit": log_tight,
-                    "native_linux_nvidia": native_linux_nvidia
-                    if model_path and n_gpu_layers != 0
-                    else False,
-                    "free_mb": protection().headroom_mb(),
-                    "n_gpu_layers": n_gpu_layers,
-                    "n_ctx": out.get("n_ctx"),
-                    "n_batch": out.get("n_batch"),
-                    "n_ubatch": out.get("n_ubatch"),
-                    "flash_attn": out.get("flash_attn"),
-                },
-            )
-    # #endregion
     return out
 
 
