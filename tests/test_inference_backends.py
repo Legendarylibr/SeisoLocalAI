@@ -439,85 +439,111 @@ def test_llamaswap_request_body_forwards_tools_and_model_override(monkeypatch):
     }
 
 
-def test_openai_gguf_payload_uses_llamaswap_when_available(monkeypatch):
-    from forge.api.routes.openai import ChatCompletionRequest, _resolve_payload
+@pytest.mark.asyncio
+async def test_openai_prepare_payload_passes_through_backend(monkeypatch, tmp_path):
+    from forge.api.routes.openai import ChatCompletionRequest, _prepare_openai_chat_payload
+    from forge.services import inference_models
 
+    async def fake_list(*_args, **_kwargs):
+        return [{"id": "m1", "selectable": True, "format": "gguf", "kind": "local"}]
+
+    async def prepare_llamaswap(*_args, **_kwargs):
+        return {
+            "model_path": "/tmp/model.gguf",
+            "inference_backend": BACKEND_LLAMASWAP,
+            "model_format": "gguf",
+            "max_tokens": 512,
+            "messages": [{"role": "user", "content": "hi"}],
+        }
+
+    monkeypatch.setattr(inference_models, "list_inference_options", fake_list)
     monkeypatch.setattr(
-        "seiso.inference.llamaswap.llamaswap_status",
-        lambda: SimpleNamespace(available=True),
+        "forge.api.routes.openai.prepare_local_chat_target", prepare_llamaswap
     )
 
-    payload = _resolve_payload(
+    payload = await _prepare_openai_chat_payload(
         ChatCompletionRequest(
             model="default",
             messages=[{"role": "user", "content": "hi"}],
         ),
-        "/tmp/model.gguf",
-        model_format="gguf",
+        "u1",
+        object(),
+        SimpleNamespace(data_dir=tmp_path),
     )
-
     assert payload["inference_backend"] == BACKEND_LLAMASWAP
 
 
-def test_openai_gguf_payload_falls_back_to_llamacpp(monkeypatch):
-    from forge.api.routes.openai import ChatCompletionRequest, _resolve_payload
+@pytest.mark.asyncio
+async def test_openai_prepare_payload_falls_back_to_llamacpp(monkeypatch, tmp_path):
+    from forge.api.routes.openai import ChatCompletionRequest, _prepare_openai_chat_payload
+    from forge.services import inference_models
 
+    async def fake_list(*_args, **_kwargs):
+        return [{"id": "m1", "selectable": True, "format": "gguf", "kind": "local"}]
+
+    async def prepare_llamacpp(*_args, **_kwargs):
+        return {
+            "model_path": "/tmp/model.gguf",
+            "inference_backend": BACKEND_LLAMACPP,
+            "model_format": "gguf",
+            "max_tokens": 512,
+            "messages": [{"role": "user", "content": "hi"}],
+        }
+
+    monkeypatch.setattr(inference_models, "list_inference_options", fake_list)
     monkeypatch.setattr(
-        "seiso.inference.llamaswap.llamaswap_status",
-        lambda: SimpleNamespace(available=False),
+        "forge.api.routes.openai.prepare_local_chat_target", prepare_llamacpp
     )
 
-    payload = _resolve_payload(
+    payload = await _prepare_openai_chat_payload(
         ChatCompletionRequest(
             model="default",
             messages=[{"role": "user", "content": "hi"}],
         ),
-        "/tmp/model.gguf",
-        model_format="gguf",
+        "u1",
+        object(),
+        SimpleNamespace(data_dir=tmp_path),
     )
-
     assert payload["inference_backend"] == BACKEND_LLAMACPP
 
 
 @pytest.mark.asyncio
-async def test_openai_default_model_resolution_reuses_inventory(tmp_path):
-    from forge.api.routes.openai import (
-        ChatCompletionRequest,
-        _resolve_openai_model_path,
-    )
+async def test_openai_default_model_resolution_reuses_inventory(tmp_path, monkeypatch):
+    from forge.api.routes.openai import ChatCompletionRequest, _prepare_openai_chat_payload
+    from forge.db.crypto import generate_encryption_key
+    from forge.db.store import Database
+    from forge.services import inference_models
+    from forge.services.hf_connectivity import InferenceRuntimeStatus
 
-    model_root = tmp_path / "models" / "u1"
-    model_root.mkdir(parents=True)
-    model = model_root / "model.gguf"
+    model = tmp_path / "model.gguf"
     model.write_bytes(b"gguf")
-    fallback = model_root / "model.safetensors"
+    fallback = tmp_path / "model.safetensors"
     fallback.write_bytes(b"weights")
 
-    class FakeDb:
-        calls = 0
+    db = Database(
+        tmp_path / "forge.db", encryption_key=generate_encryption_key(), ephemeral=True
+    )
+    await db.add_model(
+        user_id="u1",
+        name="fallback",
+        path=str(fallback),
+        format="safetensors",
+        size_bytes=fallback.stat().st_size,
+    )
+    await db.add_model(
+        user_id="u1",
+        name="model",
+        path=str(model),
+        format="gguf",
+        size_bytes=model.stat().st_size,
+    )
+    monkeypatch.setattr(
+        inference_models,
+        "check_inference_runtime",
+        lambda: InferenceRuntimeStatus(llamacpp=True, mlx=False, torch=False),
+    )
 
-        async def list_models(self, _user_id):
-            self.calls += 1
-            return [
-                {
-                    "id": "m0",
-                    "name": "fallback",
-                    "path": str(fallback),
-                    "format": "safetensors",
-                },
-                {
-                    "id": "m1",
-                    "name": "model",
-                    "path": str(model),
-                    "format": "gguf",
-                },
-            ]
-
-        async def get_model_by_path(self, _user_id, _path):
-            return None
-
-    db = FakeDb()
-    path, fmt = await _resolve_openai_model_path(
+    payload = await _prepare_openai_chat_payload(
         ChatCompletionRequest(
             model="default",
             messages=[{"role": "user", "content": "hi"}],
@@ -527,52 +553,49 @@ async def test_openai_default_model_resolution_reuses_inventory(tmp_path):
         SimpleNamespace(data_dir=tmp_path),
     )
 
-    assert path == str(model)
-    assert fmt == "gguf"
-    assert db.calls == 1
+    assert payload["model_path"] == str(model)
+    assert payload["model_format"] == "gguf"
 
 
 @pytest.mark.asyncio
-async def test_openai_named_model_resolution_uses_indexed_lookup(tmp_path):
-    from forge.api.routes.openai import (
-        ChatCompletionRequest,
-        _resolve_openai_model_path,
-    )
+async def test_openai_named_model_resolution_uses_indexed_lookup(tmp_path, monkeypatch):
+    from forge.api.routes.openai import ChatCompletionRequest, _prepare_openai_chat_payload
+    from forge.db.crypto import generate_encryption_key
+    from forge.db.store import Database
+    from forge.services import inference_models
+    from forge.services.hf_connectivity import InferenceRuntimeStatus
 
-    model_root = tmp_path / "models" / "u1"
-    model_root.mkdir(parents=True)
-    model = model_root / "model.gguf"
+    model = tmp_path / "model.gguf"
     model.write_bytes(b"gguf")
 
-    class FakeDb:
-        async def get_model(self, _model_id, _user_id):
-            return None
+    db = Database(
+        tmp_path / "forge.db", encryption_key=generate_encryption_key(), ephemeral=True
+    )
+    row = await db.add_model(
+        user_id="u1",
+        name="friendly",
+        path=str(model),
+        format="gguf",
+        size_bytes=model.stat().st_size,
+    )
+    monkeypatch.setattr(
+        inference_models,
+        "check_inference_runtime",
+        lambda: InferenceRuntimeStatus(llamacpp=True, mlx=False, torch=False),
+    )
 
-        async def get_model_by_name(self, user_id, name):
-            assert user_id == "u1"
-            assert name == "friendly"
-            return {
-                "id": "m1",
-                "name": "friendly",
-                "path": str(model),
-                "format": "gguf",
-            }
-
-        async def list_models(self, _user_id):
-            pytest.fail("named model lookup should not scan inventory")
-
-    path, fmt = await _resolve_openai_model_path(
+    payload = await _prepare_openai_chat_payload(
         ChatCompletionRequest(
-            model="friendly",
+            model=row["id"],
             messages=[{"role": "user", "content": "hi"}],
         ),
         "u1",
-        FakeDb(),
+        db,
         SimpleNamespace(data_dir=tmp_path),
     )
 
-    assert path == str(model)
-    assert fmt == "gguf"
+    assert payload["model_path"] == str(model)
+    assert payload["model_format"] == "gguf"
 
 
 @pytest.mark.asyncio
@@ -1156,7 +1179,9 @@ async def test_list_inference_options_skips_partial_hf_gguf(monkeypatch, tmp_pat
         db, "u1", hardware_aware=False
     )
 
-    assert options == []
+    assert len(options) == 1
+    assert options[0]["selectable"] is False
+    assert options[0]["status"] == "incomplete"
 
 
 @pytest.mark.asyncio
@@ -1194,7 +1219,9 @@ async def test_list_inference_options_skips_hf_gguf_without_metadata(
         db, "u1", hardware_aware=False
     )
 
-    assert options == []
+    assert len(options) == 1
+    assert options[0]["selectable"] is False
+    assert options[0]["status"] == "incomplete"
 
 
 def test_llama_complete_retries_after_inference_oom(monkeypatch):

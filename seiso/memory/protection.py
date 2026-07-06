@@ -625,11 +625,8 @@ def llama_load_profile_ladder(
         base_ubatch = min(base_ubatch, 1024, base_batch)
 
     steps: list[tuple[int, int, int | None, bool]] = []
-    speed_scale = env_bool("SEISO_LLAMA_SPEED_SCALE", not native_linux_nvidia)
-    native_flash_ok = (
-        not native_linux_nvidia
-        or env_bool("SEISO_LLAMA_UNSAFE_FLASH_ATTN", False)
-    )
+    speed_scale = env_bool("SEISO_LLAMA_SPEED_SCALE", True)
+    native_flash_ok = env_bool("SEISO_LLAMA_FLASH_ATTN", True)
     primary_flash = (
         n_gpu_layers != 0
         and not tight
@@ -1006,25 +1003,6 @@ def clamp_llama_load_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
                 _MIN_LLAMA_BATCH,
                 min(out["n_ubatch"], out["n_batch"], max_ubatch),
             )
-        if (
-            native_linux_nvidia
-            and out.get("flash_attn")
-            and not env_bool("SEISO_LLAMA_UNSAFE_FLASH_ATTN", False)
-        ):
-            # MoE/SWA flash_attn stays blocked; dense may opt in via SEISO_LLAMA_FLASH_ATTN.
-            try:
-                from seiso.inference.backends import (
-                    gguf_is_moe,
-                    gguf_uses_sliding_window_attention,
-                )
-
-                if model_path and (
-                    gguf_uses_sliding_window_attention(model_path)
-                    or gguf_is_moe(model_path)
-                ):
-                    out.pop("flash_attn", None)
-            except Exception:
-                out.pop("flash_attn", None)
         if (
             native_linux_nvidia
             and tight

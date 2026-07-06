@@ -369,7 +369,7 @@ def test_llama_load_profile_ladder_native_linux_keeps_july3_speed_for_roomy_mode
 
     assert profiles[0]["n_batch"] == 4096
     assert profiles[0]["n_ubatch"] == 1024
-    assert profiles[0].get("flash_attn") is False
+    assert profiles[0].get("flash_attn") is not False
     assert profiles[-1].get("flash_attn") is False
 
 
@@ -575,7 +575,7 @@ def test_clamp_llama_load_kwargs_partial_offload_allows_larger_batch_than_full(
     assert partial["n_batch"] >= full["n_batch"]
 
 
-def test_clamp_llama_load_kwargs_native_linux_tight_strips_flash_attn(
+def test_clamp_llama_load_kwargs_native_linux_tight_disables_flash_attn(
     monkeypatch, tmp_path
 ):
     gguf = tmp_path / "big.gguf"
@@ -606,7 +606,7 @@ def test_clamp_llama_load_kwargs_native_linux_tight_strips_flash_attn(
             "flash_attn": True,
         }
     )
-    # MoE/SWA still lose flash_attn without UNSAFE.
+    # Tight-fit native Linux loads avoid first-prefill SWA/flash-attn crash paths.
     assert "flash_attn" not in kwargs
     assert kwargs["n_batch"] <= 512
     assert kwargs["n_ubatch"] <= 128

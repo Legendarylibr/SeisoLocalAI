@@ -138,49 +138,22 @@ def _native_linux_nvidia() -> bool:
 
 
 def _llama_skip_partial_offload(model_path: str) -> bool:
-    """Partial GPU offload paths that crash llama.cpp on native Linux NVIDIA."""
+    """Opt-in block for partial GPU offload on native Linux NVIDIA."""
     if not _native_linux_nvidia():
         return False
     if env_bool("SEISO_LLAMA_UNSAFE_PARTIAL_OFFLOAD", False):
         return False
-    try:
-        from seiso.inference.backends import (
-            gguf_is_moe,
-            gguf_uses_sliding_window_attention,
-        )
-
-        return gguf_uses_sliding_window_attention(model_path) or gguf_is_moe(
-            model_path
-        )
-    except Exception:
-        return False
+    return env_bool("SEISO_LLAMA_SKIP_PARTIAL_OFFLOAD", False)
 
 
 def _llama_speed_scale_enabled() -> bool:
-    # Upscaled batches OOM during prefill after weights land on GPU.
-    if _native_linux_nvidia() and not env_bool(
-        "SEISO_LLAMA_UNSAFE_SPEED_SCALE", False
-    ):
-        return False
-    default = not _native_linux_nvidia()
-    return env_bool("SEISO_LLAMA_SPEED_SCALE", default)
+    return env_bool("SEISO_LLAMA_SPEED_SCALE", True)
 
 
 def _default_llama_flash_attn(model_path: str | None = None) -> bool:
-    """Family-aware flash_attn policy on Linux NVIDIA; defaults stay conservative.
-
-    Dense families may opt in via ``SEISO_LLAMA_FLASH_ATTN=true``.
-    MoE / SWA still require ``SEISO_LLAMA_UNSAFE_FLASH_ATTN=1``.
-    """
-    if not _native_linux_nvidia():
-        return env_bool("SEISO_LLAMA_FLASH_ATTN", True)
-    unsafe = env_bool("SEISO_LLAMA_UNSAFE_FLASH_ATTN", False)
-    if model_path and _llama_skip_partial_offload(model_path):
-        return unsafe
-    if unsafe:
-        return True
-    # Default false on native Linux (platform_profile setdefault); dense may opt in.
-    return env_bool("SEISO_LLAMA_FLASH_ATTN", False)
+    """flash_attn policy — enabled by default, disable via ``SEISO_LLAMA_FLASH_ATTN=false``."""
+    _ = model_path
+    return env_bool("SEISO_LLAMA_FLASH_ATTN", True)
 
 
 def _llama_batch_defaults() -> tuple[int, int]:
@@ -270,12 +243,6 @@ def fit_llama_gpu_layers(
             headroom_mb / 1024,
         )
         return 0
-    if partial < total_layers and _llama_skip_partial_offload(model_path):
-        logger.warning(
-            "Partial GPU offload is unsafe for SWA/MoE model %s — using CPU",
-            Path(model_path).name,
-        )
-        return 0
     return partial
 
 
@@ -362,26 +329,18 @@ def _llama_full_gpu_targets(requested: int) -> list[int]:
 
 def _llama_speed_extras(model_path: str) -> dict[str, Any]:
     """GGUF-metadata-driven llama.cpp knobs for throughput and VRAM headroom."""
+    _ = model_path
     extras: dict[str, Any] = {}
-    try:
-        from seiso.inference.backends import gguf_uses_sliding_window_attention
-
-        if gguf_uses_sliding_window_attention(model_path) and not env_bool(
-            "SEISO_LLAMA_SWA_FULL", False
-        ):
-            extras["swa_full"] = False
-    except Exception:
-        pass
+    if env_bool("SEISO_LLAMA_SWA_FULL", False):
+        extras["swa_full"] = True
+    elif env_bool("SEISO_LLAMA_SWA_LOCAL", False):
+        extras["swa_full"] = False
     return extras
 
 
 def _llama_kv_quant_options(model_path: str) -> list[dict[str, Any]]:
-    """KV-cache quant tiers to try after the unquantized cache fails.
-
-    Linux NVIDIA defaults stay conservative (no KV quant). Dense families may
-    opt into tier-1 Q8_0 via ``SEISO_LLAMA_KV_QUANT=true``; Q4_K and MoE/SWA
-    still require ``SEISO_LLAMA_UNSAFE_KV_QUANT=1``.
-    """
+    """KV-cache quant tiers to try after the unquantized cache fails."""
+    _ = model_path
     try:
         from llama_cpp import llama_cpp as lc
     except (ImportError, Exception):
@@ -391,16 +350,10 @@ def _llama_kv_quant_options(model_path: str) -> list[dict[str, Any]]:
     q8 = {"type_k": lc.GGML_TYPE_Q8_0, "type_v": lc.GGML_TYPE_Q8_0}
     q4 = {"type_k": lc.GGML_TYPE_Q4_K, "type_v": lc.GGML_TYPE_Q4_K}
 
-    if _native_linux_nvidia():
-        unsafe = env_bool("SEISO_LLAMA_UNSAFE_KV_QUANT", False)
-        if _llama_skip_partial_offload(model_path) and not unsafe:
-            return [{}]
-        if unsafe:
-            options.extend((q8, q4))
-        elif env_bool("SEISO_LLAMA_KV_QUANT", False):
-            options.append(q8)
-    elif env_bool("SEISO_LLAMA_KV_QUANT", True):
+    if env_bool("SEISO_LLAMA_UNSAFE_KV_QUANT", False):
         options.extend((q8, q4))
+    elif env_bool("SEISO_LLAMA_KV_QUANT", True):
+        options.append(q8)
 
     unique: list[dict[str, Any]] = []
     seen: set[tuple[tuple[str, Any], ...]] = set()
@@ -657,9 +610,6 @@ def _load_llama_model(
         total_layers = gguf_total_layers(path)
         if layers > 0 and layers < total_layers:
             load_kwargs.pop("flash_attn", None)
-            if _native_linux_nvidia():
-                load_kwargs["offload_kqv"] = False
-                load_kwargs["op_offload"] = False
         _refresh_headroom_stats(force=True)
         from seiso.memory.protection import clamp_llama_load_kwargs
 
