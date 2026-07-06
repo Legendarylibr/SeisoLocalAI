@@ -45,6 +45,8 @@ _MIN_LLAMA_BATCH = 128
 # Post-weight headroom below this on native Linux → clamp batches (prefill crash zone).
 _NATIVE_LINUX_PREFILL_CLAMP_MB = 6144
 _NATIVE_LINUX_PREFILL_HEADROOM_DROP_RATIO = 0.85
+# Reload when VRAM shrinks enough to matter but before the 15% hard-drop threshold.
+_NATIVE_LINUX_PREFILL_HEADROOM_SHRINK_RATIO = 0.92
 _NATIVE_LINUX_PREFILL_RESERVE_PER_256TOK_MB = 192
 _TIGHT_VRAM_FIT_RATIO = 0.65
 _NATIVE_LINUX_TIGHT_VRAM_FIT_RATIO = 0.60
@@ -584,10 +586,17 @@ def llama_prefill_needs_reload(
         n_ctx=n_ctx,
     )
     loaded_batch = int(loaded_n_batch or 0)
+    headroom_shrank = (
+        loaded_headroom_mb is not None
+        and loaded_headroom_mb > 0
+        and free_mb
+        < int(loaded_headroom_mb * _NATIVE_LINUX_PREFILL_HEADROOM_SHRINK_RATIO)
+    )
     needs_reload = loaded_batch > safe_batch and (
         prefill_exceeds_safe
         or long_prefill
         or headroom_dropped
+        or headroom_shrank
         or tight_prefill
         or vision_prefill
     )
@@ -793,7 +802,17 @@ def build_hf_max_memory(
 
 def assess_path_memory_fit(path: str | Path, *, mode: str = "chat") -> dict[str, Any]:
     """Return fit metadata compatible with Forge hardware assessments."""
-    est_mb = estimate_path_vram_mb(path, mode=mode)
+    p = Path(path).expanduser()
+    est_mb = estimate_path_vram_mb(p, mode=mode)
+    if p.is_file() and p.suffix.lower() == ".gguf":
+        try:
+            from seiso.inference.llama_vision import resolve_mmproj_path
+
+            mmproj = resolve_mmproj_path(p)
+            if mmproj:
+                est_mb += estimate_path_vram_mb(mmproj, mode=mode)
+        except ImportError:
+            pass
     est_gb = round(est_mb / 1024, 2)
     profile = hardware_profile()
     try:

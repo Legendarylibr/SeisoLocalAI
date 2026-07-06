@@ -263,6 +263,77 @@ def test_llama_reuses_cached_model_when_context_grows(monkeypatch, tmp_path):
     assert load_ctx == [4096, 8192]
 
 
+def test_get_llama_unloads_previous_handle_when_reloading(monkeypatch, tmp_path):
+    from seiso.inference import model_pool
+
+    pool = ModelPool()
+    model_path = tmp_path / "model.gguf"
+    model_path.write_bytes(b"gguf")
+    handles: list[object] = []
+
+    class FakeLlama:
+        def __init__(self, n_ctx: int) -> None:
+            self.n_ctx = n_ctx
+            self.closed = False
+
+        def close(self) -> None:
+            self.closed = True
+
+    def fake_load(_path, n_ctx, **_kwargs):
+        llm = FakeLlama(n_ctx)
+        handles.append(llm)
+        return llm
+
+    monkeypatch.setattr(model_pool, "_load_llama_model", fake_load)
+    monkeypatch.setattr(
+        "seiso.inference.tuning.attach_llama_prompt_cache",
+        lambda _llm: None,
+    )
+
+    pool.get_llama(str(model_path), n_ctx=4096)
+    pool.get_llama(str(model_path), n_ctx=8192)
+
+    assert len(handles) == 2
+    assert handles[0].closed is True
+
+
+def test_get_llama_reloads_when_cached_headroom_stale(monkeypatch, tmp_path):
+    from seiso.inference import model_pool
+
+    pool = ModelPool()
+    model_path = tmp_path / "model.gguf"
+    model_path.write_bytes(b"gguf")
+    load_count = {"n": 0}
+
+    class FakeLlama:
+        _seiso_n_gpu_layers = -1
+        _seiso_load_headroom_mb = 24576
+
+    def fake_load(_path, n_ctx, **_kwargs):
+        load_count["n"] += 1
+        return FakeLlama()
+
+    monkeypatch.setattr(model_pool, "_load_llama_model", fake_load)
+    monkeypatch.setattr(model_pool, "_native_linux_nvidia", lambda: True)
+    monkeypatch.setattr(
+        "seiso.inference.tuning.attach_llama_prompt_cache",
+        lambda _llm: None,
+    )
+    monkeypatch.setattr(model_pool, "_llama_cache_is_optimal", lambda *_a, **_k: True)
+    headroom_ok = {"value": True}
+    monkeypatch.setattr(
+        model_pool,
+        "_llama_cache_headroom_ok",
+        lambda _handle: headroom_ok["value"],
+    )
+
+    pool.get_llama(str(model_path), n_ctx=4096)
+    headroom_ok["value"] = False
+    pool.get_llama(str(model_path), n_ctx=4096)
+
+    assert load_count["n"] == 2
+
+
 def test_llama_reuses_larger_preloaded_context(monkeypatch, tmp_path):
     from seiso.inference import model_pool
 
@@ -759,6 +830,56 @@ def test_native_linux_load_model_uses_crash_resistant_kwargs(monkeypatch, tmp_pa
     assert llm._seiso_n_ctx == first["n_ctx"]
     assert llm._seiso_model_path == str(gguf)
     assert llm._seiso_load_headroom_mb == 24576
+
+
+def test_load_llama_model_records_last_safe_batch_from_override(
+    monkeypatch, tmp_path
+):
+    import seiso.inference.model_pool as mp
+
+    gguf = tmp_path / "model.gguf"
+    gguf.write_bytes(b"gguf")
+
+    class FakeLlama:
+        def __init__(self, *, model_path: str, **kwargs):
+            assert model_path == str(gguf)
+            self._seiso_n_gpu_layers = kwargs["n_gpu_layers"]
+
+    monkeypatch.setattr(mp, "_llama_gpu_offload_ok", lambda: True)
+    monkeypatch.setattr(mp, "_default_llama_gpu_layers", lambda: 0)
+    monkeypatch.setattr(mp, "_llama_kv_quant_options", lambda _p: [{}])
+    monkeypatch.setattr(
+        "seiso.memory.protection.llama_load_profile_ladder",
+        lambda **_kwargs: [{"n_batch": 512, "n_ubatch": 128}],
+    )
+    monkeypatch.setattr(mp, "_llama_full_gpu_targets", lambda _r: [])
+    monkeypatch.setattr(mp, "_llama_layer_attempts", lambda *_a, **_k: [0])
+    monkeypatch.setattr(mp, "_refresh_headroom_stats", lambda *, force=False: None)
+    monkeypatch.setattr(
+        "seiso.memory.protection.release_cached_memory", lambda sync=False: None
+    )
+    monkeypatch.setattr(
+        "seiso.memory.protection.estimate_path_vram_mb", lambda _p: 1024
+    )
+    monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 8192)
+    monkeypatch.setattr(
+        "seiso.inference.tuning.attach_llama_prompt_cache",
+        lambda _llm, **_: None,
+    )
+    monkeypatch.setattr(
+        "seiso.inference.llama_vision.apply_llama_vision_load_kwargs",
+        lambda kwargs, _path: kwargs,
+    )
+    monkeypatch.setitem(
+        __import__("sys").modules,
+        "llama_cpp",
+        type("LlamaCpp", (), {"Llama": FakeLlama}),
+    )
+
+    llm = mp._load_llama_model(str(gguf), 2048, batch_override=(512, 128))
+
+    assert llm._seiso_last_safe_batch == 512
+    assert llm._seiso_last_safe_ubatch == 128
 
 
 def test_llama_load_model_skips_full_offload_when_kv_reserve_does_not_fit(

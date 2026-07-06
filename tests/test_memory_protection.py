@@ -367,8 +367,8 @@ def test_llama_load_profile_ladder_native_linux_keeps_july3_speed_for_roomy_mode
         tier="normal",
     )
 
-    assert profiles[0]["n_batch"] == 4096
-    assert profiles[0]["n_ubatch"] == 1024
+    assert profiles[0]["n_batch"] == 1024
+    assert profiles[0]["n_ubatch"] == 256
     assert profiles[0].get("flash_attn") is False
     assert profiles[-1].get("flash_attn") is False
 
@@ -463,6 +463,34 @@ def test_llama_prefill_guard_keeps_roomy_short_prompt(monkeypatch, tmp_path):
     assert safe_ubatch == 512
 
 
+def test_llama_prefill_guard_keeps_roomy_short_prompt_on_small_headroom_fluctuation(
+    monkeypatch, tmp_path
+):
+    gguf = tmp_path / "small.gguf"
+    gguf.write_bytes(b"\x00" * 1024)
+    monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: True)
+    monkeypatch.setattr("seiso.memory.protection.hardware_profile", lambda **_: {})
+    monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 24500)
+    monkeypatch.setattr(
+        "seiso.memory.protection.llama_effective_batch_headroom_mb",
+        lambda *_args, **_kwargs: 24500,
+    )
+
+    needs_reload, safe_batch, safe_ubatch = llama_prefill_needs_reload(
+        model_path=str(gguf),
+        messages=[{"role": "user", "content": "hi"}],
+        n_ctx=4096,
+        loaded_n_batch=4096,
+        loaded_n_gpu_layers=-1,
+        load_tier="normal",
+        loaded_headroom_mb=24576,
+    )
+
+    assert needs_reload is False
+    assert safe_batch == 2048
+    assert safe_ubatch == 512
+
+
 def test_llama_prefill_guard_reloads_growing_native_linux_prompt(
     monkeypatch, tmp_path
 ):
@@ -522,6 +550,36 @@ def test_llama_prefill_guard_reloads_short_prompt_for_borderline_24gb_q4(
     assert needs_reload is True
     assert safe_batch <= 512
     assert safe_ubatch <= 256
+
+
+def test_llama_prefill_guard_reloads_when_headroom_shrank_without_15pct_drop(
+    monkeypatch, tmp_path
+):
+    gguf = tmp_path / "mid.gguf"
+    gguf.write_bytes(b"\x00" * 1024)
+    monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: True)
+    monkeypatch.setattr("seiso.memory.protection.hardware_profile", lambda **_: {})
+    monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 11000)
+    monkeypatch.setattr(
+        "seiso.memory.protection.llama_effective_batch_headroom_mb",
+        lambda *_args, **_kwargs: 7600,
+    )
+    monkeypatch.setattr(
+        "seiso.memory.protection.llama_model_is_tight_vram_fit", lambda **_k: False
+    )
+
+    needs_reload, safe_batch, _safe_ubatch = llama_prefill_needs_reload(
+        model_path=str(gguf),
+        messages=[{"role": "user", "content": "hi"}],
+        n_ctx=4096,
+        loaded_n_batch=1024,
+        loaded_n_gpu_layers=-1,
+        load_tier="normal",
+        loaded_headroom_mb=12000,
+    )
+
+    assert needs_reload is True
+    assert safe_batch <= 512
 
 
 def test_llama_prefill_guard_noops_off_native_linux(monkeypatch, tmp_path):
