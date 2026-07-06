@@ -31,7 +31,7 @@ from forge.services.hf_auth import resolve_hf_token_for_download
 from forge.services.hf_cache_inventory import sync_hf_cache_inventory
 from forge.services.hf_hub import _format_hub_download_error
 from forge.services.model_download import perform_model_download
-from forge.services.publishable import is_pushable_model
+from forge.services.publishable import PUSHABLE_SOURCES, is_pushable_model
 from forge.services.user_paths import assert_user_path
 from seiso.io.files import iter_matching_files, model_weight_size_bytes
 from seiso.models.catalog import (
@@ -455,11 +455,18 @@ async def register_local(
     existing = await db.get_model_by_path(user_id, str(path))
     if existing:
         return existing
+    # Clients may not claim Seiso-created provenance (training/export/rl_quant).
+    source = (body.source or "manual").strip() or "manual"
+    if source.split(":")[0] in PUSHABLE_SOURCES:
+        raise HTTPException(
+            400,
+            "source cannot be training, export, or rl_quant for manual registration",
+        )
     return await db.add_model(
         user_id=user_id,
         name=body.name,
         path=str(path),
-        source=body.source or "manual",
+        source=source,
         format=body.format or path.suffix.lstrip("."),
         size_bytes=model_weight_size_bytes(path),
     )

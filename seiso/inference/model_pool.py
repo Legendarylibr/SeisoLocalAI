@@ -885,30 +885,103 @@ class ModelPool:
         self.unload_all()
         clear_dflash_draft_cache()
 
-    def _wait_for_inference_idle(self, timeout_s: float = 30.0) -> None:
-        """Wait for active completions/streams to release their pool refs."""
+    def _wait_for_inference_idle(self, timeout_s: float = 30.0) -> bool:
+        """Wait for active completions/streams to release their pool refs.
+
+        Returns True when idle. On timeout, does not force-clear refs.
+        """
         deadline = time.time() + timeout_s
         while time.time() < deadline:
             with self._lock:
                 if self._inference_refs == 0:
-                    return
+                    return True
             time.sleep(0.05)
         with self._lock:
-            if self._inference_refs > 0:
-                logger.warning(
-                    "Inference still active after %.1fs — forcing unload",
-                    timeout_s,
+            still_busy = self._inference_refs > 0
+        if still_busy:
+            logger.warning(
+                "Inference still active after %.1fs — proceeding with forced unload",
+                timeout_s,
+            )
+        return not still_busy
+
+    def _release_handle(self, active: LoadedModel) -> None:
+        """Close one pool handle and free GPU caches."""
+        backend = active.backend
+        key = active.key
+        handle = active.handle
+        logger.info("Unloading model from VRAM: %s", key)
+
+        if backend == BackendKind.LLAMA:
+            llm = handle
+            try:
+                if hasattr(llm, "close"):
+                    llm.close()
+            except Exception:
+                logger.debug("Failed to close llama handle for %s", key, exc_info=True)
+            del llm
+
+        elif backend == BackendKind.LLAMASWAP:
+            del handle
+
+        elif backend == BackendKind.TORCH:
+            try:
+                from seiso.inference.speculative import TorchSpeculativeBundle
+                from seiso.kernels.lifecycle import release_training_memory
+
+                if isinstance(handle, TorchSpeculativeBundle):
+                    release_training_memory(handle.target_model, sync=False)
+                    release_training_memory(handle.draft_model, sync=False)
+                else:
+                    model = (
+                        handle[0] if isinstance(handle, tuple) and handle else handle
+                    )
+                    release_training_memory(model, sync=False)
+            except Exception:
+                logger.debug(
+                    "Failed to release torch handle for %s", key, exc_info=True
                 )
-                self._inference_refs = 0
+            del handle
+
+        elif backend == BackendKind.MLX:
+            del handle
+
+        self._free_memory(sync=True)
+        clear_dflash_draft_cache()
+
+    def _unload_active_immediate(self) -> None:
+        """Drop the active handle without canceling the in-flight request.
+
+        Used by OOM/prefill recovery: the caller already holds an inference ref
+        and will replace the handle, so we must not wait on our own ref or
+        invalidate generation_id.
+        """
+        with self._lock:
+            active = self._active
+            self._active = None
+            self._unload_pending = False
+        if active is not None:
+            self._release_handle(active)
+        else:
+            clear_dflash_draft_cache()
 
     def _clear_active_for_switch(self) -> None:
         """Stop streams, wait for idle, then unload so a new model can load."""
         self.bump_generation()
-        self._wait_for_inference_idle()
+        idle = self._wait_for_inference_idle()
         with self._lock:
             self._unload_pending = False
-        self.unload_all()
-        clear_dflash_draft_cache()
+            if not idle and self._inference_refs > 0:
+                # Streams are already cancelled via generation bump; force the
+                # unload path so a new model can load. Native work may still
+                # be finishing, but holding the old model blocks all GPU tasks.
+                self._inference_refs = 0
+            active = self._active
+            self._active = None
+        if active is not None:
+            self._release_handle(active)
+        else:
+            clear_dflash_draft_cache()
 
     def would_switch_model(
         self, target_path: str, backend: str | BackendKind | None = None
@@ -1146,8 +1219,14 @@ class ModelPool:
         tier: str,
         batch_override: tuple[int, int] | None = None,
     ) -> Any:
-        """Unload and reload llama.cpp at a lower memory tier after inference OOM."""
-        self.cancel_and_unload()
+        """Unload and reload llama.cpp at a lower memory tier after inference OOM.
+
+        Preserves the active generation id and does not wait on the caller's
+        own inference ref (recovery always runs under begin_inference).
+        """
+        self._unload_active_immediate()
+        _clear_optimal_layers_cache()
+        _refresh_headroom_stats(force=True)
         if batch_override is None:
             return self.get_llama(model_path, n_ctx=n_ctx, tier=tier)
 
@@ -1275,50 +1354,11 @@ class ModelPool:
                 self._unload_pending = False
                 clear_dflash_draft_cache()
                 return
-            backend = self._active.backend
-            key = self._active.key
-            handle = self._active.handle
+            active = self._active
             self._active = None
             self._unload_pending = False
 
-        logger.info("Unloading model from VRAM: %s", key)
-
-        if backend == BackendKind.LLAMA:
-            llm = handle
-            try:
-                if hasattr(llm, "close"):
-                    llm.close()
-            except Exception:
-                logger.debug("Failed to close llama handle for %s", key, exc_info=True)
-            del llm
-
-        elif backend == BackendKind.LLAMASWAP:
-            del handle
-
-        elif backend == BackendKind.TORCH:
-            try:
-                from seiso.inference.speculative import TorchSpeculativeBundle
-                from seiso.kernels.lifecycle import release_training_memory
-
-                if isinstance(handle, TorchSpeculativeBundle):
-                    release_training_memory(handle.target_model, sync=False)
-                    release_training_memory(handle.draft_model, sync=False)
-                else:
-                    model = (
-                        handle[0] if isinstance(handle, tuple) and handle else handle
-                    )
-                    release_training_memory(model, sync=False)
-            except Exception:
-                logger.debug(
-                    "Failed to release torch handle for %s", key, exc_info=True
-                )
-            del handle
-
-        elif backend == BackendKind.MLX:
-            del handle
-
-        self._free_memory(sync=True)
-        clear_dflash_draft_cache()
+        self._release_handle(active)
 
     def _free_memory(self, *, sync: bool = False) -> None:
         from seiso.memory.protection import release_cached_memory

@@ -117,7 +117,10 @@ def _vision_handler_specs(model_path: str) -> list[str]:
     if "qwen" in name and ("vl" in name or "vision" in arch):
         specs.append("Qwen25VLChatHandler")
     if "gemma" in name or "gemma" in arch:
-        specs.extend(["Gemma4ChatHandler", "Gemma3ChatHandler"])
+        if _name_suggests_vision(name) or any(
+            token in arch for token in ("vision", "clip", "mmproj", "vl")
+        ):
+            specs.extend(["Gemma4ChatHandler", "Gemma3ChatHandler"])
     if "llava" in name or "llava" in arch:
         specs.extend(["Llava16ChatHandler", "Llava15ChatHandler"])
     if "moondream" in name:
@@ -183,10 +186,18 @@ def build_llama_vision_chat_handler(model_path: str, mmproj_path: str) -> Any | 
 def apply_llama_vision_load_kwargs(
     load_kwargs: dict[str, Any], model_path: str
 ) -> dict[str, Any]:
-    """Attach a vision chat handler to llama.cpp load kwargs when mmproj exists."""
+    """Attach a vision chat handler to llama.cpp load kwargs when appropriate."""
     mmproj = resolve_mmproj_path(model_path)
     if not mmproj:
         return load_kwargs
+    name = Path(model_path).name.lower()
+    # Text-only Gemma in a shared download dir must not pick up a sibling mmproj.
+    if "gemma" in name and not _name_suggests_vision(name):
+        from seiso.inference.backends import gguf_architecture
+
+        arch = (gguf_architecture(model_path) or "").lower()
+        if not any(token in arch for token in ("vision", "clip", "mmproj", "vl")):
+            return load_kwargs
     handler = build_llama_vision_chat_handler(model_path, mmproj)
     if handler is None:
         return load_kwargs

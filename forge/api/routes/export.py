@@ -43,6 +43,17 @@ from seiso.security import SecurityError
 router = APIRouter(prefix="/export", tags=["export"])
 
 
+def _loads_json(raw: Any, fallback: Any) -> Any:
+    if not raw:
+        return fallback
+    if not isinstance(raw, str):
+        return raw
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return fallback
+
+
 class ExportStartRequest(BaseModel):
     checkpoint: str
     formats: list[str] = Field(default_factory=lambda: ["merged"])
@@ -89,14 +100,14 @@ async def _resolve_publish_folder(
             raise HTTPException(
                 403 if isinstance(exc, SecurityError) else 400, str(exc)
             ) from exc
-        meta_raw = json.loads(model.get("metadata_json") or "{}")
+        meta_raw = _loads_json(model.get("metadata_json") or "{}", {})
         job_id = meta_raw.get("job_id")
         source = model.get("source") or "export"
     elif body.export_job_id:
         job = await db.get_export_job(body.export_job_id, user_id)
         if not job or job.get("status") != "completed":
             raise HTTPException(400, "Export job not found or not completed")
-        outputs = json.loads(job.get("output_paths_json") or "{}")
+        outputs = _loads_json(job.get("output_paths_json") or "{}", {})
         if not outputs:
             raise HTTPException(400, "Export job has no outputs")
         preferred = next((v for k, v in outputs.items() if "gguf" in k.lower()), None)
@@ -248,7 +259,7 @@ async def start_export(
         if rl_job.get("status") != "completed":
             raise HTTPException(400, "RL quant job is not completed")
         stored = rl_job.get("gguf_quants_json") or "[]"
-        parsed = json.loads(stored)
+        parsed = _loads_json(stored, [])
         if parsed:
             gguf_quants = parsed
         config["rl_quant_job_id"] = body.rl_quant_job_id
@@ -495,7 +506,7 @@ async def download_export_output(
     if not job or job.get("status") != "completed":
         raise HTTPException(404, "Export job not found or not completed")
 
-    outputs = json.loads(job.get("output_paths_json") or "{}")
+    outputs = _loads_json(job.get("output_paths_json") or "{}", {})
     target_raw = outputs.get(key)
     if not target_raw:
         for k, v in outputs.items():
