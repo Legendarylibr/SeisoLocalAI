@@ -42,6 +42,7 @@ from seiso.memory.protection import (
     LlamaLoadTier,
     is_oom_error,
     llama_next_recovery_tier,
+    llama_oom_recovery_batch,
     llama_prefill_needs_reload,
     release_cached_memory,
     sanitize_inference_payload,
@@ -727,19 +728,12 @@ class LocalInferenceRunner:
         next_tier = llama_next_recovery_tier(current)
         if next_tier is None:
             raise RuntimeError("llama.cpp inference OOM — recovery tiers exhausted")
-        safe_batch = int(getattr(llm, "_seiso_last_safe_batch", 0) or 0)
-        safe_ubatch = int(getattr(llm, "_seiso_last_safe_ubatch", 0) or 0)
-        loaded_batch = int(getattr(llm, "_seiso_n_batch", 0) or 0)
-        batch_override: tuple[int, int] | None = None
-        if safe_batch > 0 and safe_ubatch > 0:
-            batch_override = (
-                max(128, min(safe_batch, loaded_batch or safe_batch) // 2),
-                max(128, safe_ubatch // 2),
-            )
-        elif next_tier == "compact":
-            batch_override = (256, 128)
-        elif next_tier == "minimal":
-            batch_override = (128, 128)
+        batch_override = llama_oom_recovery_batch(
+            safe_batch=int(getattr(llm, "_seiso_last_safe_batch", 0) or 0),
+            safe_ubatch=int(getattr(llm, "_seiso_last_safe_ubatch", 0) or 0),
+            loaded_batch=int(getattr(llm, "_seiso_n_batch", 0) or 0),
+            next_tier=next_tier,
+        )
         logger.warning(
             "llama.cpp inference OOM at tier=%s — reloading at tier=%s",
             current,
