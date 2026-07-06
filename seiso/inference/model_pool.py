@@ -858,8 +858,9 @@ class ModelPool:
         self, target_path: str, backend: str | BackendKind | None = None
     ) -> bool:
         """True when loading target_path would replace the active inference model."""
-        status = self.status()
-        if not status.get("active_model"):
+        with self._lock:
+            active = self._active
+        if not active:
             return False
         if backend is not None:
             raw = (
@@ -868,12 +869,20 @@ class ModelPool:
                 else str(backend).lower()
             )
             expected = _POOL_BACKEND_BY_API.get(raw, raw)
-            if status.get("backend") != expected:
+            if active.backend.value != expected:
                 return True
-        active_path = status.get("path")
+        active_path = active.meta.get("path") or active.meta.get("norm_path")
         if not active_path:
             return False
-        return self.normalize_path(active_path) != self.normalize_path(target_path)
+        norm_target = self.normalize_path(target_path)
+        norm_active = self.normalize_path(str(active_path))
+        if norm_active != norm_target:
+            return True
+        # Speculative bundles (spec:target:draft) are not interchangeable with
+        # single-model pool handles that share the same target path.
+        if active.key.startswith("spec:"):
+            return True
+        return False
 
     def prepare_for_load(
         self,

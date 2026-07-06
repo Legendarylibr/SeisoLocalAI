@@ -287,16 +287,20 @@ class LocalInferenceRunner:
                 # a warmed single target before loading target+draft together.
                 await loop.run_in_executor(None, lambda: self._pool.prepare_for_load())
                 return
-            # prepare target (torch for verification in dflash case too)
-            await loop.run_in_executor(
-                None, lambda: self._pool.prepare_for_load(model_path, BACKEND_TORCH)
-            )
+            # dFlash reuses the torch target handle; drop torch+torch bundles first.
+            active_key = status.get("active_model") or ""
+            if active_key.startswith("spec:"):
+                await loop.run_in_executor(None, lambda: self._pool.prepare_for_load())
+            else:
+                await loop.run_in_executor(
+                    None,
+                    lambda: self._pool.prepare_for_load(model_path, BACKEND_TORCH),
+                )
             return
 
         if active_draft:
-            await loop.run_in_executor(
-                None, lambda: self._pool.prepare_for_load(model_path)
-            )
+            # Turning off speculative decoding must drop the target+draft bundle.
+            await loop.run_in_executor(None, lambda: self._pool.prepare_for_load())
             return
 
         backend = BACKEND_LLAMASWAP if route == "llamaswap" else None
