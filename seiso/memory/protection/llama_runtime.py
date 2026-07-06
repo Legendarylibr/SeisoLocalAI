@@ -111,7 +111,7 @@ def llama_model_is_tight_vram_fit(
     """True when a model consumes most of the available GPU budget."""
     path = Path(model_path)
     weight_mb = int(protection().estimate_path_vram_mb(path))
-    kv_mb = llama_kv_cache_reserve_mb(
+    kv_mb = protection().llama_kv_cache_reserve_mb(
         path,
         n_ctx=n_ctx,
         n_gpu_layers=n_gpu_layers,
@@ -228,7 +228,8 @@ def resolve_llama_model_batches(
             n_ctx=n_ctx,
             weights_resident=False,
         )
-        effective = min(effective, load_effective)
+        if tight:
+            effective = min(effective, load_effective)
 
     if prompt_tokens is not None:
         prefill_tokens = max(prompt_tokens, _MIN_LLAMA_BATCH)
@@ -369,6 +370,10 @@ def llama_load_profile_ladder(
     except ImportError:
         native_linux_nvidia = False
 
+    gpu_total = protection().discrete_gpu_total_mb()
+    if native_linux_nvidia and gpu_total <= 0 and free_mb > 0:
+        gpu_total = int(free_mb)
+
     top_batch, top_ubatch = resolve_llama_batch_limits(
         effective,
         native_linux_nvidia=native_linux_nvidia,
@@ -385,7 +390,20 @@ def llama_load_profile_ladder(
         native_linux_nvidia=native_linux_nvidia,
         load_tier=tier,
         tight=tight,
+        gpu_total_mb=gpu_total if native_linux_nvidia else None,
     )
+    if (
+        native_linux_nvidia
+        and tier == "normal"
+        and not tight
+        and n_gpu_layers != 0
+        and gpu_total > 0
+    ):
+        weight_mb = int(protection().estimate_path_vram_mb(model_path))
+        if weight_mb > 0 and weight_mb <= free_mb // 8:
+            tier_batch, tier_ubatch = gpu_batch_tier_caps(gpu_total, "normal")
+            base_batch = max(base_batch, tier_batch)
+            base_ubatch = max(base_ubatch, min(tier_ubatch, base_batch))
 
     steps: list[tuple[int, int, int | None, bool]] = []
     speed_scale = env_bool("SEISO_LLAMA_SPEED_SCALE", not native_linux_nvidia)

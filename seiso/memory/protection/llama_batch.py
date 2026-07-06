@@ -37,7 +37,7 @@ def gpu_batch_tier_caps(gpu_total_mb: int, load_tier: LlamaLoadTier) -> tuple[in
     gpu_gb = max(1.0, gpu_total_mb / 1024)
     normal_batch = min(
         _MAX_LLAMA_BATCH,
-        max(_MIN_LLAMA_BATCH, int(gpu_gb * 32)),
+        max(_MIN_LLAMA_BATCH, int(gpu_gb * 43)),
     )
     normal_ubatch = min(1024, max(_MIN_LLAMA_BATCH, normal_batch // 4))
     if load_tier == "compact":
@@ -60,11 +60,16 @@ def clamp_llama_batch_pair(
     native_linux_nvidia: bool = False,
     load_tier: LlamaLoadTier = "normal",
     tight: bool = False,
+    gpu_total_mb: int | None = None,
 ) -> tuple[int, int]:
     """Normalize a llama.cpp batch/ubatch pair (single source of ceilings)."""
     batch = max(_MIN_LLAMA_BATCH, int(batch))
     ubatch = max(_MIN_LLAMA_BATCH, min(int(ubatch), batch))
-    gpu_total = protection().discrete_gpu_total_mb() if native_linux_nvidia else 0
+    gpu_total = (
+        int(gpu_total_mb)
+        if gpu_total_mb is not None and gpu_total_mb > 0
+        else (protection().discrete_gpu_total_mb() if native_linux_nvidia else 0)
+    )
     if native_linux_nvidia and gpu_total > 0:
         tier_batch, tier_ubatch = gpu_batch_tier_caps(gpu_total, load_tier)
         if tight:
