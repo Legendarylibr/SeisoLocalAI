@@ -24,26 +24,6 @@ from seiso.security import SecurityError
 router = APIRouter(tags=["openai"])
 
 
-def _sse_content_chunk(
-    completion_id: str, created: int, model: str, content: str
-) -> str:
-    """Format a streaming chunk — json.dumps only the dynamic content field."""
-    return (
-        f"data: {{\"id\":\"{completion_id}\",\"object\":\"chat.completion.chunk\","
-        f"\"created\":{created},\"model\":{json.dumps(model)},"
-        f"\"choices\":[{{\"index\":0,\"delta\":{{\"content\":{json.dumps(content)}}},"
-        f"\"finish_reason\":null}}]}}\n\n"
-    )
-
-
-def _sse_final_chunk(completion_id: str, created: int, model: str) -> str:
-    return (
-        f"data: {{\"id\":\"{completion_id}\",\"object\":\"chat.completion.chunk\","
-        f"\"created\":{created},\"model\":{json.dumps(model)},"
-        f"\"choices\":[{{\"index\":0,\"delta\":{{}},\"finish_reason\":\"stop\"}}]}}\n\n"
-    )
-
-
 class ChatMessage(BaseModel):
     role: str
     content: str | list[Any] = ""
@@ -220,14 +200,43 @@ async def chat_completions(
                 async for token in orchestrator.stream_local(payload):
                     raw_parts.append(token)
                     for chunk in sanitizer.feed(token):
-                        yield _sse_content_chunk(
-                            completion_id, created, body.model, chunk
-                        )
+                        chunk_payload = {
+                            "id": completion_id,
+                            "object": "chat.completion.chunk",
+                            "created": created,
+                            "model": body.model,
+                            "choices": [
+                                {
+                                    "index": 0,
+                                    "delta": {"content": chunk},
+                                    "finish_reason": None,
+                                }
+                            ],
+                        }
+                        yield f"data: {json.dumps(chunk_payload)}\n\n"
                 for chunk in sanitizer.finish():
-                    yield _sse_content_chunk(
-                        completion_id, created, body.model, chunk
-                    )
-                yield _sse_final_chunk(completion_id, created, body.model)
+                    chunk_payload = {
+                        "id": completion_id,
+                        "object": "chat.completion.chunk",
+                        "created": created,
+                        "model": body.model,
+                        "choices": [
+                            {
+                                "index": 0,
+                                "delta": {"content": chunk},
+                                "finish_reason": None,
+                            }
+                        ],
+                    }
+                    yield f"data: {json.dumps(chunk_payload)}\n\n"
+                final = {
+                    "id": completion_id,
+                    "object": "chat.completion.chunk",
+                    "created": created,
+                    "model": body.model,
+                    "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+                }
+                yield f"data: {json.dumps(final)}\n\n"
                 yield "data: [DONE]\n\n"
             except Exception:
                 err = {

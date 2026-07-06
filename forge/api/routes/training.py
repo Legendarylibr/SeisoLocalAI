@@ -691,8 +691,7 @@ async def get_training_metrics(
     db: Annotated[Database, Depends(get_db)],
     orchestrator: Annotated[TrainingOrchestrator, Depends(get_training_orchestrator)],
 ) -> dict:
-    row = await db.get_training_job(job_id, user_id)
-    if not row:
+    if not await db.get_training_job(job_id, user_id):
         raise HTTPException(404, "Job not found")
     assert_job_owner(orchestrator, job_id, user_id)
 
@@ -700,7 +699,8 @@ async def get_training_metrics(
     if live:
         return _serialize_metrics_payload(live)
 
-    raw = row.get("metrics_json")
+    row = await db.get_training_job(job_id, user_id)
+    raw = row.get("metrics_json") if row else None
     if isinstance(raw, str) and raw.strip():
         try:
             return json.loads(raw)

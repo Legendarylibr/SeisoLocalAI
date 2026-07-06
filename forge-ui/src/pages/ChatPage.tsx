@@ -3,8 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import { api, ChatMessage, ChatThread, CatalogModel, InferenceModelOption, ModelVariantsResponse, streamChat, VramStatus } from "@/lib/api";
 import { usePlatformSettings } from "@/context/PlatformSettingsContext";
 import { bootstrapChatSession, CHAT_BACKEND_STORAGE_KEY, CHAT_MODEL_STORAGE_KEY, hasChatNavTarget, initializeChatSession, isChatModelReady, modelMemoryBlocked, modelMemoryBlockReason, needsHubDownload, preloadWithProgress, resolveInferenceBackend } from "@/lib/chatModel";
-import { FreeMemoryButton } from "@/components/FreeMemoryButton";
-import { hasLoadedInferenceMemory, isDiscreteGpuPlatform, loadHeadroomMb } from "@/lib/hubHardware";
+import { hasLoadedInferenceMemory } from "@/lib/hubHardware";
 import { streamHubModelDownload } from "@/lib/hubDownload";
 import { invalidateApiCache } from "@/lib/api/getCache";
 import { useHardwareProfile } from "@/hooks/useHardware";
@@ -45,6 +44,7 @@ import {
   IconLock,
   IconPlus,
   IconRefresh,
+  IconEject,
   IconSend,
 } from "@/components/Icons";
 
@@ -149,10 +149,6 @@ export function ChatPage() {
   const [loadedModelId, setLoadedModelId] = useState<string | null>(null);
   const [loadedBackend, setLoadedBackend] = useState<string | null>(null);
   const [vramStatus, setVramStatus] = useState<VramStatus | null>(null);
-  const chatLoadHeadroomMb = useMemo(
-    () => loadHeadroomMb(hwProfile, vramStatus?.free_vram_mb),
-    [hwProfile, vramStatus?.free_vram_mb],
-  );
   const [, setRouterStatus] = useState<Record<string, unknown> | null>(null);
   const [freeingMemory, setFreeingMemory] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -218,7 +214,7 @@ export function ChatPage() {
       ? initialDownloadProgress(pendingRepo, pendingDownloadBytes)
       : null);
   const selectedFit = selected?.hardware_fit;
-  const modelBlocked = !providerId && modelMemoryBlocked(selected, chatLoadHeadroomMb);
+  const modelBlocked = !providerId && modelMemoryBlocked(selected, hwProfile?.vram_headroom_mb);
 
   const memoryBlockHint = useCallback(
     (model: InferenceModelOption | CatalogModel | null | undefined) => {
@@ -352,7 +348,7 @@ export function ChatPage() {
 
   const handleModelChange = async (modelId: string) => {
     const next = models.find((m) => m.id === modelId);
-    if (modelMemoryBlocked(next, chatLoadHeadroomMb)) {
+    if (modelMemoryBlocked(next, hwProfile?.vram_headroom_mb)) {
       setError(memoryBlockHint(next));
       return;
     }
@@ -369,11 +365,11 @@ export function ChatPage() {
     streamAbortRef.current?.();
     streamAbortRef.current = null;
     if (streaming) setStreaming(false);
-    if (!providerId && (loadedModelId || hasLoadedInferenceMemory(vramStatus))) {
+    if (!providerId) {
       try {
         await releaseInferenceMemory();
-      } catch (e) {
-        console.warn("Pre-switch unload failed; preload will release the previous model", e);
+      } catch {
+        /* best-effort memory release */
       }
     }
     try {
@@ -410,7 +406,7 @@ export function ChatPage() {
   };
 
   const handleCatalogSelect = (model: CatalogModel) => {
-    if (modelMemoryBlocked(model, chatLoadHeadroomMb)) {
+    if (modelMemoryBlocked(model, hwProfile?.vram_headroom_mb)) {
       setError(memoryBlockHint(model));
       return;
     }
@@ -556,7 +552,6 @@ export function ChatPage() {
           onProgress: setLoadProgress,
           initialModels,
           hwProfile,
-          freeVramMb: vramStatus?.free_vram_mb,
           signal: controller.signal,
         };
 
@@ -1084,25 +1079,22 @@ export function ChatPage() {
               selection={selection}
               disabled={!!providerId}
               switching={switchingModel}
-              headroomMb={chatLoadHeadroomMb}
+              headroomMb={hwProfile?.vram_headroom_mb}
               modelLabel={modelLabel}
               onSelectLocal={handleModelChange}
               onSelectCatalog={handleCatalogSelect}
             />
             {showFreeMemory && (
-              <FreeMemoryButton
-                hw={hwProfile}
-                vram={vramStatus}
-                variant="chat"
-                loading={freeingMemory}
-                disabled={switchingModel}
+              <button
+                type="button"
+                className="chat-free-memory"
                 onClick={() => void handleFreeMemory()}
-              />
-            )}
-            {showFreeMemory && isDiscreteGpuPlatform(hwProfile) && (
-              <span className="chat-model-vram-note" title="Switching models unloads the previous one from VRAM first">
-                Switching unloads previous
-              </span>
+                disabled={freeingMemory || switchingModel}
+                title="Free memory — unload model from RAM/VRAM (keeps selection)"
+                aria-label="Free memory"
+              >
+                <IconEject size={15} />
+              </button>
             )}
           </div>
           <button

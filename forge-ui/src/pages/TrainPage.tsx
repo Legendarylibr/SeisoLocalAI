@@ -14,10 +14,6 @@ import { invalidateApiCache } from "@/lib/api/getCache";
 import { appendBoundedLog } from "@/lib/api/sse";
 import { initialDownloadProgress, ModelProgressState } from "@/lib/modelProgress";
 import { ensureTrainHubModel, isTrainModelCached } from "@/lib/trainModel";
-import {
-  pickAutoRecommendationFields,
-  shouldAutoApplyRecommendationFields,
-} from "@/lib/trainRecommendations";
 
 import { useTrainingModels } from "@/context/TrainingModelsContext";
 import { readStoredModel, writeStoredModel } from "@/lib/modelSelection";
@@ -309,16 +305,13 @@ export function TrainPage() {
   }, [dataset, datasetFormat, analyzeDataset]);
 
   useEffect(() => {
-    const rec = recommendations?.config;
-    if (!shouldAutoApplyRecommendationFields(configCustomized, rec, datasetAnalysis)) {
-      return;
+    if (configCustomized || !recommendations?.config || datasetAnalysis) return;
+    const rec = recommendations.config;
+    if (rec.dataset_format && rec.dataset_format !== "auto") {
+      setDatasetFormat(rec.dataset_format);
     }
-    const fields = pickAutoRecommendationFields(rec!);
-    if (fields.datasetFormat) {
-      setDatasetFormat(fields.datasetFormat);
-    }
-    if (fields.trainOnResponsesOnly != null) {
-      setTrainResponsesOnly(fields.trainOnResponsesOnly);
+    if (rec.train_on_responses_only != null) {
+      setTrainResponsesOnly(rec.train_on_responses_only);
     }
   }, [recommendations, configCustomized, datasetAnalysis]);
 

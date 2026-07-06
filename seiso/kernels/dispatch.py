@@ -10,24 +10,6 @@ from seiso.kernels.platform import GpuPlatform, detect_gpu
 
 logger = logging.getLogger(__name__)
 
-_lora_a_cat_cache: dict[tuple[int, ...], object] = {}
-
-
-def clear_lora_cat_cache() -> None:
-    _lora_a_cat_cache.clear()
-
-
-def _cached_lora_a_cat(*tensors) -> object:
-    import torch
-
-    key = tuple(int(t.data_ptr()) for t in tensors)
-    cached = _lora_a_cat_cache.get(key)
-    if cached is not None:
-        return cached
-    cat = torch.cat(tensors, dim=0)
-    _lora_a_cat_cache[key] = cat
-    return cat
-
 
 def _needs_pytorch_autograd(*tensors) -> bool:
     """Native CUDA/Triton fused ops lack autograd — route training to PyTorch."""
@@ -166,11 +148,11 @@ def _fused_lora_qkv_delta_torch(
     rank_k = lora_A_k.size(0)
     rank_v = lora_A_v.size(0)
     if rank_q == rank_k == rank_v:
-        hidden_all = x @ _cached_lora_a_cat(lora_A_q, lora_A_k, lora_A_v).t()
+        hidden_all = x @ torch.cat((lora_A_q, lora_A_k, lora_A_v), dim=0).t()
         h_q, h_k, h_v = hidden_all.split((rank_q, rank_k, rank_v), dim=-1)
     elif rank_k == rank_v:
         h_q = x @ lora_A_q.t()
-        hidden_kv = x @ _cached_lora_a_cat(lora_A_k, lora_A_v).t()
+        hidden_kv = x @ torch.cat((lora_A_k, lora_A_v), dim=0).t()
         h_k, h_v = hidden_kv.split((rank_k, rank_v), dim=-1)
     else:
         h_q = x @ lora_A_q.t()

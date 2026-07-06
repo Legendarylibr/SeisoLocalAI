@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import json
 import os
 import time
 from dataclasses import dataclass
@@ -12,10 +11,11 @@ from pathlib import Path
 from typing import Any
 
 from forge.db.store import Database
-from forge.services.artifact_integrity import gguf_files_complete_at_path
+from forge.services.artifact_integrity import gguf_files_complete_with_hub
 from forge.services.hf_hub import (
     _inventory_name_for_files,
     _pick_gguf_files,
+    estimate_snapshot_download_bytes,
     link_inventory,
 )
 from forge.services.user_paths import user_dir
@@ -159,9 +159,12 @@ def _gguf_record_from_snapshot(
         return None
 
     paths = [snapshot_dir / filename for filename in filenames]
-    expected = sum(path.stat().st_size for path in paths if path.is_file())
-    root = paths[0] if len(paths) == 1 else paths[0].parent
-    if not gguf_files_complete_at_path(root, filenames, expected):
+    if not gguf_files_complete_with_hub(
+        repo_id=repo_id,
+        filenames=filenames,
+        paths=paths,
+        entry=entry,
+    ):
         return None
     if not gguf_is_supported_by_llamacpp(str(paths[0])):
         return None
@@ -210,6 +213,14 @@ def _snapshot_record(
         return None
 
     entry = _catalog_entry_for_cached_repo(repo_id)
+    if entry:
+        try:
+            expected_size = estimate_snapshot_download_bytes(repo_id)
+        except Exception:
+            expected_size = 0
+        if expected_size > 0 and weight_size < expected_size:
+            return None
+
     inventory_repo = entry.repo_id if entry else repo_id
     inventory_dir = user_dir(data_dir, user_id, "models")
     link = link_inventory(
@@ -223,12 +234,7 @@ def _snapshot_record(
         "path": str(link.absolute()),
         "format": "safetensors",
         "size_bytes": weight_size,
-        "metadata": {
-            "repo_id": inventory_repo,
-            "cache_dir": str(hf_cache_dir),
-            "has_trainable_weights": True,
-            "trainable_weight_bytes": weight_size,
-        },
+        "metadata": {"repo_id": inventory_repo, "cache_dir": str(hf_cache_dir)},
     }
 
 
@@ -242,59 +248,6 @@ class _SyncState:
 
 
 _sync_states: dict[str, _SyncState] = {}
-_manifest_cache: dict[str, dict[str, float]] = {}
-
-
-def _manifest_path(data_dir: Path, user_id: str) -> Path:
-    return user_dir(data_dir, user_id, "models").parent / ".hf_cache_sync_manifest.json"
-
-
-def _load_manifest(data_dir: Path, user_id: str) -> dict[str, float]:
-    cache_key = f"{user_id}:{data_dir.resolve()}"
-    cached = _manifest_cache.get(cache_key)
-    if cached is not None:
-        return cached
-    path = _manifest_path(data_dir, user_id)
-    if not path.is_file():
-        _manifest_cache[cache_key] = {}
-        return {}
-    try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
-        manifest = (
-            {str(k): float(v) for k, v in raw.items()} if isinstance(raw, dict) else {}
-        )
-    except (OSError, json.JSONDecodeError, TypeError, ValueError):
-        manifest = {}
-    _manifest_cache[cache_key] = manifest
-    return manifest
-
-
-def _save_manifest(data_dir: Path, user_id: str, manifest: dict[str, float]) -> None:
-    cache_key = f"{user_id}:{data_dir.resolve()}"
-    _manifest_cache[cache_key] = manifest
-    path = _manifest_path(data_dir, user_id)
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(manifest, separators=(",", ":")), encoding="utf-8")
-        path.chmod(0o600)
-    except OSError:
-        pass
-
-
-def _repo_cache_mtime(repo_cache_dir: Path) -> float:
-    try:
-        latest = repo_cache_dir.stat().st_mtime
-    except OSError:
-        return 0.0
-    snapshots = repo_cache_dir / "snapshots"
-    if snapshots.is_dir():
-        with contextlib.suppress(OSError):
-            latest = max(latest, snapshots.stat().st_mtime)
-        for snap in snapshots.iterdir():
-            if snap.is_dir():
-                with contextlib.suppress(OSError):
-                    latest = max(latest, snap.stat().st_mtime)
-    return latest
 
 
 def _scan_hf_cache_records(
@@ -302,16 +255,11 @@ def _scan_hf_cache_records(
     hf_cache_dir: Path,
     data_dir: Path,
     user_id: str,
-    manifest: dict[str, float] | None = None,
-) -> tuple[list[dict[str, Any]], dict[str, float]]:
+) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
-    new_manifest = dict(manifest or {})
     for repo_cache_dir in hf_cache_dir.iterdir():
         repo_id = _repo_id_from_cache_dir(repo_cache_dir)
         if not repo_id:
-            continue
-        repo_mtime = _repo_cache_mtime(repo_cache_dir)
-        if manifest is not None and manifest.get(repo_id) == repo_mtime:
             continue
         for snapshot_dir in _latest_snapshot_dirs(repo_cache_dir):
             inventory = _snapshot_inventory(snapshot_dir)
@@ -332,9 +280,8 @@ def _scan_hf_cache_records(
             )
             if record:
                 records.append(record)
-                new_manifest[repo_id] = repo_mtime
                 break
-    return records, new_manifest
+    return records
 
 
 async def sync_hf_cache_inventory(
@@ -364,14 +311,12 @@ async def sync_hf_cache_inventory(
     ):
         return 0
 
-    records, manifest = await asyncio.to_thread(
+    records = await asyncio.to_thread(
         _scan_hf_cache_records,
         hf_cache_dir=hf_cache_dir,
         data_dir=data_dir,
         user_id=user_id,
-        manifest=_load_manifest(data_dir, user_id),
     )
-    registered = await db.upsert_models(user_id, records) if records else 0
-    _save_manifest(data_dir, user_id, manifest)
+    registered = await db.upsert_models(user_id, records)
     _sync_states[cache_key] = _SyncState(synced_at=now, cache_mtime=cache_mtime)
     return registered

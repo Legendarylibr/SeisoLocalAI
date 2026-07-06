@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import re
 from pathlib import Path
 from typing import Annotated
@@ -65,11 +64,10 @@ async def list_bases(
             if not entry.is_dir():
                 continue
             index_path = entry / "index.jsonl"
-            chunk_count = await asyncio.to_thread(_count_chunks, index_path)
             bases.append(
                 {
                     "id": entry.name,
-                    "chunk_count": chunk_count,
+                    "chunk_count": _count_chunks(index_path),
                     "has_index": index_path.exists(),
                 }
             )

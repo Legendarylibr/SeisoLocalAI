@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import hashlib
 import os
 import shutil
 import sys
-import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -16,24 +14,6 @@ from forge.db.crypto import decrypt_field, encrypt_field
 TokenSource = Literal[
     "request", "user_store", "env_seiso", "env_hf", "cli_cache", "none"
 ]
-
-_PROBE_CACHE_TTL_S = 300.0
-_probe_cache: dict[str, tuple[float, object]] = {}
-
-
-def _probe_hf_hub_cached(token: str):
-    """Cached HF whoami probe — avoids ~200–500 ms network per hot-path call."""
-    cache_key = hashlib.sha256(token.encode()).hexdigest()[:24]
-    now = time.monotonic()
-    cached = _probe_cache.get(cache_key)
-    if cached and now - cached[0] < _PROBE_CACHE_TTL_S:
-        return cached[1]
-
-    from forge.services.hf_connectivity import probe_hf_hub
-
-    result = probe_hf_hub(token=token)
-    _probe_cache[cache_key] = (now, result)
-    return result
 
 
 @dataclass
@@ -196,7 +176,9 @@ def resolve_hf_token_for_upload(
     if not token:
         return None, "none"
 
-    result = _probe_hf_hub_cached(token)
+    from forge.services.hf_connectivity import probe_hf_hub
+
+    result = probe_hf_hub(token=token)
     if result.token_valid:
         return token, source
     return None, "none"
@@ -221,7 +203,9 @@ def resolve_hf_token_for_download(
     if not token:
         return None, "none"
 
-    result = _probe_hf_hub_cached(token)
+    from forge.services.hf_connectivity import probe_hf_hub
+
+    result = probe_hf_hub(token=token)
     if result.token_valid:
         return token, source
     if not getattr(result, "reachable", True):

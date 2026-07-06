@@ -292,7 +292,6 @@ async def scan_folder(
         raise HTTPException(400, "Path is not a directory")
 
     found: list[dict] = []
-    pending: list[dict] = []
     for root, _, files in os.walk(folder, followlinks=False):
         for fname in files:
             if not fname.endswith((".gguf", ".safetensors", ".bin")):
@@ -305,18 +304,15 @@ async def scan_folder(
             except SecurityError:
                 continue
             fmt = validated.suffix.lstrip(".")
-            pending.append(
-                {
-                    "user_id": user_id,
-                    "name": sanitize_filename(validated.name),
-                    "path": str(validated),
-                    "source": "scan",
-                    "format": fmt,
-                    "size_bytes": validated.stat().st_size,
-                }
+            entry = await db.add_model(
+                user_id=user_id,
+                name=sanitize_filename(validated.name),
+                path=str(validated),
+                source="scan",
+                format=fmt,
+                size_bytes=validated.stat().st_size,
             )
-    if pending:
-        found = await db.add_models(pending)
+            found.append(entry)
     return found
 
 

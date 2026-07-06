@@ -46,10 +46,10 @@ def test_mlx_stream_kwargs_with_temperature():
     try:
         mlx_lm = pytest.importorskip("mlx_lm")
         _ = mlx_lm  # used for skip only
-    except Exception as exc:
+    except RuntimeError as exc:
         if "No Metal device available" in str(exc):
             pytest.skip(str(exc))
-        pytest.skip(f"mlx_lm import failed in this environment: {exc}")
+        raise
     kwargs = mlx_stream_kwargs({"max_tokens": 64, "temperature": 0.7, "top_p": 0.9})
     assert kwargs["max_tokens"] == 64
     assert kwargs["sampler"] is not None

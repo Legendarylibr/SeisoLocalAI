@@ -4232,65 +4232,19 @@ th { color: var(--muted); font-weight: 500; font-size: 0.78rem; text-transform: 
 }
 .chat-refresh-models:hover { color: var(--text); border-color: var(--border-strong); }
 
-.free-memory-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  border: 1px solid var(--border-strong);
+.chat-free-memory {
+  border: 1px solid var(--border);
   background: var(--surface-raised);
-  color: var(--text);
-  border-radius: var(--radius-sm);
-  padding: 0.42rem 0.72rem;
-  cursor: pointer;
-  font-size: 0.82rem;
-  font-weight: 600;
-  line-height: 1.1;
-  flex-shrink: 0;
-  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
-}
-.free-memory-btn:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--accent) 12%, var(--surface-raised));
-  border-color: color-mix(in srgb, var(--accent) 45%, var(--border-strong));
-}
-.free-memory-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-.free-memory-btn--vram {
-  border-color: color-mix(in srgb, #c084fc 55%, var(--border-strong));
-  background: color-mix(in srgb, #c084fc 10%, var(--surface-raised));
-  color: #e9d5ff;
-  box-shadow: 0 0 0 1px color-mix(in srgb, #c084fc 18%, transparent);
-}
-.free-memory-btn--vram:hover:not(:disabled) {
-  background: color-mix(in srgb, #c084fc 22%, var(--surface-raised));
-  border-color: #c084fc;
-  color: #f3e8ff;
-}
-.free-memory-btn--chat {
-  padding: 0.38rem 0.62rem;
-}
-.free-memory-btn-label { white-space: nowrap; }
-.free-memory-btn-meta {
-  max-width: 12rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 0.74rem;
-  font-weight: 500;
   color: var(--text-secondary);
+  border-radius: var(--radius-sm);
+  padding: 0.35rem 0.5rem;
+  cursor: pointer;
+  font-size: 0.9rem;
+  line-height: 1;
+  flex-shrink: 0;
 }
-.free-memory-vram-hint {
-  width: 100%;
-  margin: 0;
-  font-size: 0.78rem;
-  color: color-mix(in srgb, #c084fc 70%, var(--text-secondary));
-}
-.chat-model-vram-note {
-  font-size: 0.72rem;
-  color: color-mix(in srgb, #c084fc 65%, var(--text-secondary));
-  white-space: nowrap;
-}
+.chat-free-memory:hover:not(:disabled) { color: var(--text); border-color: var(--border-strong); }
+.chat-free-memory:disabled { opacity: 0.45; cursor: not-allowed; }
 
 .chat-vram-hint {
   font-size: 0.72rem;

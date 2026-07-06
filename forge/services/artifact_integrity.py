@@ -104,7 +104,6 @@ def inventory_gguf_is_complete(
     metadata: dict[str, Any],
     *,
     size_lookup: Callable[[str, str], int] | None = None,
-    trust_local_size: bool = False,
 ) -> bool:
     path = Path(str(row.get("path") or ""))
     if not path.exists():
@@ -130,9 +129,6 @@ def inventory_gguf_is_complete(
         return False
     if not gguf_is_supported_by_llamacpp(str(local_files[0])):
         return False
-    if trust_local_size:
-        stored = int(row.get("size_bytes") or 0)
-        return stored <= 0 or actual_size >= stored
     if size_lookup is None:
         from forge.services.hf_hub import get_gguf_file_size_bytes
 

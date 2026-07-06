@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import secrets
 import time
-from collections import defaultdict, deque
+from collections import defaultdict
 from datetime import datetime, timedelta, timezone
-from typing import Annotated, Deque, cast
+from typing import Annotated
 
 import bcrypt
 from fastapi import Depends, HTTPException, Request, status
@@ -44,7 +44,7 @@ def create_access_token(
         "iat": datetime.now(timezone.utc),
         "jti": secrets.token_hex(16),
     }
-    return cast(str, jwt.encode(payload, settings.secret_key, algorithm=ALGORITHM))
+    return jwt.encode(payload, settings.secret_key, algorithm=ALGORITHM)
 
 
 def revoke_access_token(token: str, settings: ForgeSettings) -> None:
@@ -98,19 +98,18 @@ class RateLimiter:
 
     def __init__(self, max_per_minute: int = 120) -> None:
         self.max_per_minute = max_per_minute
-        self._hits: dict[str, Deque[float]] = defaultdict(deque)
+        self._hits: dict[str, list[float]] = defaultdict(list)
 
     def check(self, client_ip: str) -> None:
         now = time.monotonic()
         window = self._hits[client_ip]
         cutoff = now - 60.0
-        while window and window[0] <= cutoff:
-            window.popleft()
-        if len(window) >= self.max_per_minute:
+        self._hits[client_ip] = [t for t in window if t > cutoff]
+        if len(self._hits[client_ip]) >= self.max_per_minute:
             raise HTTPException(
                 status.HTTP_429_TOO_MANY_REQUESTS, "Rate limit exceeded"
             )
-        window.append(now)
+        self._hits[client_ip].append(now)
 
 
 class LoginRateLimiter(RateLimiter):

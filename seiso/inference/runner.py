@@ -7,7 +7,6 @@ import contextlib
 import logging
 import threading
 from collections.abc import AsyncIterator, Callable, Iterator
-from pathlib import Path
 from queue import Empty
 from typing import Any
 
@@ -38,10 +37,7 @@ from seiso.inference.tuning import (
     torch_generate_kwargs,
 )
 from seiso.memory.protection import (
-    LlamaLoadTier,
     is_oom_error,
-    llama_next_recovery_tier,
-    llama_prefill_needs_reload,
     release_cached_memory,
     sanitize_inference_payload,
 )
@@ -50,7 +46,6 @@ from seiso.models.chat_format import format_messages_for_prompt
 logger = logging.getLogger(__name__)
 
 _STREAM_DONE = object()
-_MAX_LLAMA_OOM_RECOVERIES = 3
 _runner: LocalInferenceRunner | None = None
 _runner_lock = threading.Lock()
 
@@ -675,63 +670,6 @@ class LocalInferenceRunner:
         if generation_errors and not should_stop():
             raise generation_errors[0]
 
-    def _llama_handle_tier(self, llm: Any) -> LlamaLoadTier:
-        return getattr(llm, "_seiso_load_tier", "normal") or "normal"
-
-    def _llama_recover_from_oom(
-        self,
-        llm: Any,
-        *,
-        model_path: str,
-        n_ctx: int,
-    ) -> Any:
-        current = self._llama_handle_tier(llm)
-        next_tier = llama_next_recovery_tier(current)
-        if next_tier is None:
-            raise RuntimeError("llama.cpp inference OOM — recovery tiers exhausted")
-        logger.warning(
-            "llama.cpp inference OOM at tier=%s — reloading at tier=%s",
-            current,
-            next_tier,
-        )
-        release_cached_memory(sync=True)
-        return self._pool.reload_llama(model_path, n_ctx, tier=next_tier)
-
-    def _llama_guard_prefill(
-        self,
-        llm: Any,
-        *,
-        model_path: str,
-        messages: list[dict[str, Any]],
-        n_ctx: int,
-    ) -> Any:
-        current_tier = self._llama_handle_tier(llm)
-        needs_reload, safe_batch, safe_ubatch = llama_prefill_needs_reload(
-            model_path=getattr(llm, "_seiso_model_path", model_path) or model_path,
-            messages=messages,
-            n_ctx=n_ctx,
-            loaded_n_batch=int(getattr(llm, "_seiso_n_batch", 4096) or 4096),
-            loaded_n_gpu_layers=int(getattr(llm, "_seiso_n_gpu_layers", 0) or 0),
-            load_tier=current_tier,
-            loaded_headroom_mb=getattr(llm, "_seiso_load_headroom_mb", None),
-        )
-        if not needs_reload:
-            return llm
-        logger.warning(
-            "llama.cpp prefill headroom changed before chat — reloading tier=%s "
-            "with n_batch=%d n_ubatch=%d",
-            current_tier,
-            safe_batch,
-            safe_ubatch,
-        )
-        release_cached_memory(sync=True)
-        return self._pool.reload_llama(
-            model_path,
-            n_ctx,
-            tier=current_tier,
-            batch_override=(safe_batch, safe_ubatch),
-        )
-
     def _llama_complete(
         self,
         payload: dict[str, Any],
@@ -746,30 +684,12 @@ class LocalInferenceRunner:
             model_format=payload.get("model_format"),
         )
         llm = self._pool.get_llama(model_path, n_ctx=n_ctx)
-        llm = self._llama_guard_prefill(
-            llm, model_path=model_path, messages=messages, n_ctx=n_ctx
-        )
         kwargs = llama_completion_kwargs(payload)
         kwargs["stream"] = False
         tools = payload.get("tools_schemas")
         if tools:
             kwargs["tools"] = tools
-        recoveries = 0
-        while True:
-            try:
-                out = llm.create_chat_completion(messages=messages, **kwargs)
-                break
-            except Exception as exc:
-                if not is_oom_error(exc):
-                    raise
-                recoveries += 1
-                if recoveries > _MAX_LLAMA_OOM_RECOVERIES:
-                    raise RuntimeError(
-                        "llama.cpp inference OOM — recovery attempts exhausted"
-                    ) from exc
-                llm = self._llama_recover_from_oom(
-                    llm, model_path=model_path, n_ctx=n_ctx
-                )
+        out = llm.create_chat_completion(messages=messages, **kwargs)
         if not self._pool.is_generation_active(generation_id):
             return ""
         message = out["choices"][0].get("message") or {}
@@ -813,65 +733,19 @@ class LocalInferenceRunner:
             llm = self._pool.get_llama(model_path, n_ctx=n_ctx)
         except ImportError as exc:
             raise RuntimeError("llama-cpp-python not installed") from exc
-        llm = self._llama_guard_prefill(
-            llm, model_path=model_path, messages=messages, n_ctx=n_ctx
+
+        messages = payload.get("messages", [])
+        stream = llm.create_chat_completion(
+            messages=messages,
+            **llama_completion_kwargs(payload),
         )
-
-        completion_kwargs = llama_completion_kwargs(payload)
-        emitted_text = False
-        recoveries = 0
-        # #region agent log
-        from seiso.agent_debug_log import agent_debug_enabled, agent_debug_log
-
-        if agent_debug_enabled():
-            agent_debug_log(
-                hypothesis_id="C",
-                location="runner.py:_llama_stream:before_prefill",
-                message="starting llama.cpp chat prefill",
-                data={
-                    "model": Path(model_path).name,
-                    "n_ctx": n_ctx,
-                    "max_tokens": completion_kwargs.get("max_tokens"),
-                    "load_tier": getattr(llm, "_seiso_load_tier", None),
-                    "n_gpu_layers": getattr(llm, "_seiso_n_gpu_layers", None),
-                    "message_count": len(messages),
-                    "prompt_chars": sum(
-                        len(str(m.get("content") or "")) for m in messages
-                    ),
-                },
-            )
-        # #endregion
-        while True:
-            try:
-                stream = llm.create_chat_completion(
-                    messages=messages,
-                    **completion_kwargs,
-                )
-                for chunk in stream:
-                    if should_stop():
-                        break
-                    delta = chunk["choices"][0].get("delta", {})
-                    content = delta.get("content")
-                    if content:
-                        emitted_text = True
-                        yield StreamToken(content)
-                return
-            except Exception as exc:
-                if not is_oom_error(exc):
-                    raise
-                if emitted_text:
-                    raise RuntimeError(
-                        "llama.cpp inference OOM after streaming began — aborting "
-                        "instead of replaying partial output"
-                    ) from exc
-                recoveries += 1
-                if recoveries > _MAX_LLAMA_OOM_RECOVERIES:
-                    raise RuntimeError(
-                        "llama.cpp inference OOM — recovery attempts exhausted"
-                    ) from exc
-                llm = self._llama_recover_from_oom(
-                    llm, model_path=model_path, n_ctx=n_ctx
-                )
+        for chunk in stream:
+            if should_stop():
+                break
+            delta = chunk["choices"][0].get("delta", {})
+            content = delta.get("content")
+            if content:
+                yield StreamToken(content)
 
 
 def get_inference_runner() -> LocalInferenceRunner:
