@@ -636,6 +636,7 @@ def llama_prefill_needs_reload(
     messages: list[dict[str, Any]],
     n_ctx: int,
     loaded_n_batch: int,
+    loaded_n_ubatch: int | None = None,
     loaded_n_gpu_layers: int,
     load_tier: LlamaLoadTier = "normal",
     loaded_headroom_mb: int | None = None,
@@ -693,6 +694,7 @@ def llama_prefill_needs_reload(
     )
     prefill_exceeds_safe = prompt_tokens > safe_batch
     loaded_batch = int(loaded_n_batch or 0)
+    loaded_ubatch = int(loaded_n_ubatch or loaded_batch or 0)
     headroom_shrank = (
         loaded_headroom_mb is not None
         and loaded_headroom_mb > 0
@@ -709,6 +711,14 @@ def llama_prefill_needs_reload(
         or tight_prefill
         or vision_prefill
     )
+    if loaded_ubatch > safe_ubatch and (
+        headroom_dropped
+        or headroom_shrank
+        or tight_prefill
+        or vision_prefill
+        or prefill_exceeds_safe
+    ):
+        needs_reload = True
     return needs_reload, safe_batch, safe_ubatch
 
 
@@ -1057,6 +1067,7 @@ _VISION_CONTENT_MARKERS = (
     '"type": "image"',
     "data:image/",
 )
+_CONTEXT_TRIM_MARKER = "[...older content omitted...]\n"
 
 
 def _text_chars_to_tokens(chars: int) -> int:
@@ -1145,6 +1156,94 @@ def _gguf_has_mmproj_sibling(model_path: str | Path) -> bool:
 def _estimate_prompt_tokens(messages: list[dict[str, Any]]) -> int:
     total = sum(_message_content_token_estimate(m.get("content", "")) for m in messages)
     return max(64, total)
+
+
+def _trim_text_to_token_budget(text: str, token_budget: int) -> str:
+    if token_budget <= 0:
+        return ""
+    char_budget = max(1, int(token_budget * 3.2))
+    if len(text) <= char_budget:
+        return text
+    if char_budget <= len(_CONTEXT_TRIM_MARKER):
+        return text[-char_budget:]
+    keep = char_budget - len(_CONTEXT_TRIM_MARKER)
+    return f"{_CONTEXT_TRIM_MARKER}{text[-keep:]}"
+
+
+def _trim_message_content_to_token_budget(content: Any, token_budget: int) -> Any:
+    if isinstance(content, str):
+        return _trim_text_to_token_budget(content, token_budget)
+    if isinstance(content, list):
+        remaining = max(0, token_budget)
+        out: list[Any] = []
+        for part in content:
+            if not isinstance(part, dict):
+                out.append(part)
+                continue
+            part_type = str(part.get("type", "text")).lower()
+            if part_type not in {"text", "input_text"}:
+                out.append(part)
+                continue
+            text = str(part.get("text") or part.get("content") or "")
+            trimmed = _trim_text_to_token_budget(text, remaining)
+            remaining = max(0, remaining - _text_chars_to_tokens(len(trimmed)))
+            key = "text" if "text" in part else "content"
+            out.append({**part, key: trimmed})
+        return out
+    return content
+
+
+def trim_llama_messages_to_context(
+    messages: list[dict[str, Any]],
+    *,
+    n_ctx: int,
+    max_tokens: int,
+) -> list[dict[str, Any]]:
+    """Trim prompt content so llama.cpp prefill stays within the loaded context."""
+    if not messages:
+        return []
+
+    prompt_budget = max(256, int(n_ctx) - max(1, int(max_tokens)) - 128)
+    if _estimate_prompt_tokens(messages) <= prompt_budget:
+        return messages
+
+    trimmed = [dict(message) for message in messages]
+    latest_idx = len(trimmed) - 1
+
+    # Drop oldest conversational turns first; keep system/knowledge instructions
+    # until content trimming is required.
+    idx = 0
+    while _estimate_prompt_tokens(trimmed) > prompt_budget and idx < latest_idx:
+        role = str(trimmed[idx].get("role", "")).lower()
+        if role in {"user", "assistant"}:
+            trimmed.pop(idx)
+            latest_idx -= 1
+            continue
+        idx += 1
+
+    # Then trim oversized message bodies, newest user last.
+    order = sorted(
+        range(len(trimmed)),
+        key=lambda i: (
+            i == len(trimmed) - 1,
+            str(trimmed[i].get("role", "")).lower() == "system" and i == 0,
+            -_message_content_token_estimate(trimmed[i].get("content", "")),
+        ),
+    )
+    for idx in order:
+        current = _estimate_prompt_tokens(trimmed)
+        if current <= prompt_budget:
+            break
+        content = trimmed[idx].get("content", "")
+        content_tokens = _message_content_token_estimate(content)
+        if content_tokens <= 0:
+            continue
+        target = max(32, content_tokens - (current - prompt_budget))
+        trimmed[idx]["content"] = _trim_message_content_to_token_budget(
+            content, target
+        )
+
+    return trimmed
 
 
 def sanitize_inference_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -1298,7 +1397,12 @@ def clamp_llama_load_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
             ):
                 out["offload_kqv"] = False
 
-    ctx_cap = clamp_llama_n_ctx(n_ctx, max_tokens=512)
+    ctx_cap = clamp_llama_n_ctx(
+        n_ctx,
+        max_tokens=512,
+        model_path=str(model_path) if model_path else None,
+        model_format="gguf" if model_path else None,
+    )
     if n_ctx > ctx_cap:
         out["n_ctx"] = ctx_cap
     # #region agent log

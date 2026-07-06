@@ -418,6 +418,35 @@ def test_llama_reuses_cached_model_when_context_grows(monkeypatch, tmp_path):
     assert load_ctx == [4096, 8192]
 
 
+def test_get_llama_uses_actual_loaded_context_for_cache(monkeypatch, tmp_path):
+    from seiso.inference import model_pool
+
+    pool = ModelPool()
+    model_path = tmp_path / "model.gguf"
+    model_path.write_bytes(b"gguf")
+    load_ctx: list[int] = []
+
+    class FakeLlama:
+        def __init__(self, actual_ctx: int) -> None:
+            self._seiso_n_ctx = actual_ctx
+            self._seiso_n_gpu_layers = -1
+            self._seiso_load_headroom_mb = 24576
+
+    def fake_load(_path, n_ctx, **_kwargs):
+        load_ctx.append(n_ctx)
+        # Simulate a successful fallback profile that lowered n_ctx to survive OOM.
+        return FakeLlama(2048 if n_ctx == 8192 else n_ctx)
+
+    monkeypatch.setattr(model_pool, "_load_llama_model", fake_load)
+    monkeypatch.setattr(model_pool, "_llama_cache_is_optimal", lambda *_a, **_k: True)
+    monkeypatch.setattr(model_pool, "_llama_cache_headroom_ok", lambda _h: True)
+
+    pool.get_llama(str(model_path), n_ctx=8192)
+    pool.get_llama(str(model_path), n_ctx=4096)
+
+    assert load_ctx == [8192, 4096]
+
+
 def test_get_llama_unloads_previous_handle_when_reloading(monkeypatch, tmp_path):
     from seiso.inference import model_pool
 
@@ -994,6 +1023,67 @@ def test_native_linux_load_model_uses_crash_resistant_kwargs(monkeypatch, tmp_pa
     assert llm._seiso_n_ctx == first["n_ctx"]
     assert llm._seiso_model_path == str(gguf)
     assert llm._seiso_load_headroom_mb == 24576
+
+
+def test_native_linux_partial_offload_disables_kqv_and_op_offload(
+    monkeypatch, tmp_path
+):
+    import seiso.inference.model_pool as mp
+
+    gguf = tmp_path / "qwen-14b-q4.gguf"
+    gguf.write_bytes(b"gguf")
+    attempts: list[dict[str, object]] = []
+
+    class FakeLlama:
+        def __init__(self, *, model_path: str, **kwargs):
+            assert model_path == str(gguf)
+            attempts.append(dict(kwargs))
+            self._seiso_n_gpu_layers = kwargs["n_gpu_layers"]
+
+    monkeypatch.setattr(mp, "_native_linux_nvidia", lambda: True)
+    monkeypatch.setattr(mp, "_llama_gpu_offload_ok", lambda: True)
+    monkeypatch.setattr(mp, "_default_llama_gpu_layers", lambda: -1)
+    monkeypatch.setattr(mp, "fit_llama_gpu_layers", lambda *_a, **_k: 24)
+    monkeypatch.setattr(mp, "_llama_full_gpu_targets", lambda _r: [])
+    monkeypatch.setattr(mp, "_llama_layer_attempts", lambda *_a, **_k: [24])
+    monkeypatch.setattr(mp, "_llama_kv_quant_options", lambda _p: [{}])
+    monkeypatch.setattr(mp, "gguf_total_layers", lambda _p: 64)
+    monkeypatch.setattr(mp, "_refresh_headroom_stats", lambda *, force=False: None)
+    monkeypatch.setattr(
+        "seiso.memory.protection.llama_load_profile_ladder",
+        lambda **_kwargs: [{"n_batch": 1024, "n_ubatch": 256}],
+    )
+    monkeypatch.setattr(
+        "seiso.memory.protection.llama_model_is_tight_vram_fit",
+        lambda **_kwargs: False,
+    )
+    monkeypatch.setattr(
+        "seiso.memory.protection.release_cached_memory", lambda sync=False: None
+    )
+    monkeypatch.setattr(
+        "seiso.memory.protection.estimate_path_vram_mb", lambda _p: 9000
+    )
+    monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 24576)
+    monkeypatch.setattr(
+        "seiso.inference.tuning.attach_llama_prompt_cache",
+        lambda _llm, **_: None,
+    )
+    monkeypatch.setattr(
+        "seiso.inference.llama_vision.apply_llama_vision_load_kwargs",
+        lambda kwargs, _path: kwargs,
+    )
+    monkeypatch.setitem(
+        __import__("sys").modules,
+        "llama_cpp",
+        type("LlamaCpp", (), {"Llama": FakeLlama}),
+    )
+
+    mp._load_llama_model(str(gguf), 4096)
+
+    assert attempts[0]["n_gpu_layers"] == 24
+    assert attempts[0]["offload_kqv"] is False
+    assert attempts[0]["op_offload"] is False
+    assert "flash_attn" not in attempts[0]
 
 
 def test_load_llama_model_records_last_safe_batch_from_override(
