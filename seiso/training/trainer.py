@@ -216,41 +216,51 @@ class SeisoTrainer:
             if self._loaded:
                 self._loaded.model = model
 
-            prepared = self._prepare_datasets(tokenizer)
-
             from seiso.training.metrics import build_metrics_callback
 
-            emit_stdout = multi_gpu or bool(os.environ.get("SEISO_EMIT_METRICS_STDOUT"))
-            metrics_cb = build_metrics_callback(
-                cfg.output_dir,
-                on_metric=self._on_metric,
-                emit_stdout=emit_stdout,
-            )
-            self._metrics_callback = metrics_cb
+            prepared: PreparedTrainingDatasets
 
-            trainer_callbacks = self._build_callbacks(
-                metrics_cb, eval_enabled=prepared.eval_ds is not None
-            )
+            def build_current_trainer():
+                nonlocal prepared
+                prepared = self._prepare_datasets(tokenizer)
+                current_cfg = self.config
+                emit_stdout = multi_gpu or bool(
+                    os.environ.get("SEISO_EMIT_METRICS_STDOUT")
+                )
+                metrics_cb = build_metrics_callback(
+                    current_cfg.output_dir,
+                    on_metric=self._on_metric,
+                    emit_stdout=emit_stdout,
+                )
+                self._metrics_callback = metrics_cb
+                trainer_callbacks = self._build_callbacks(
+                    metrics_cb, eval_enabled=prepared.eval_ds is not None
+                )
+                return self._build_trainer(
+                    model,
+                    tokenizer,
+                    prepared.train_ds,
+                    prepared.eval_ds,
+                    layout,
+                    multi_gpu,
+                    data_collator=prepared.data_collator,
+                    dataset_text_field=prepared.dataset_text_field,
+                    dataset_format=prepared.detected_format,
+                    callbacks=trainer_callbacks,
+                )
 
-            trainer = self._build_trainer(
-                model,
-                tokenizer,
-                prepared.train_ds,
-                prepared.eval_ds,
-                layout,
-                multi_gpu,
-                data_collator=prepared.data_collator,
-                dataset_text_field=prepared.dataset_text_field,
-                dataset_format=prepared.detected_format,
-                callbacks=trainer_callbacks,
-            )
+            trainer = build_current_trainer()
 
             if cfg.resume_from:
                 self._train_with_oom_recovery(
-                    trainer, resume_from_checkpoint=str(cfg.resume_from)
+                    trainer,
+                    resume_from_checkpoint=str(cfg.resume_from),
+                    rebuild_trainer=build_current_trainer,
                 )
             else:
-                self._train_with_oom_recovery(trainer)
+                self._train_with_oom_recovery(
+                    trainer, rebuild_trainer=build_current_trainer
+                )
 
             is_main = int(os.environ.get("LOCAL_RANK", os.environ.get("RANK", "0"))) == 0
             if not is_main:
@@ -458,7 +468,11 @@ class SeisoTrainer:
         return callbacks
 
     def _train_with_oom_recovery(
-        self, trainer, *, resume_from_checkpoint: str | None = None
+        self,
+        trainer,
+        *,
+        resume_from_checkpoint: str | None = None,
+        rebuild_trainer: Callable[[], Any] | None = None,
     ) -> None:
         attempts = 0
         while True:
@@ -475,11 +489,14 @@ class SeisoTrainer:
                 release_cached_memory(sync=True)
                 self.config = apply_training_oom_fallback(self.config)
                 cfg = self.config
-                trainer.args.per_device_train_batch_size = cfg.batch_size
-                trainer.args.per_device_eval_batch_size = cfg.batch_size
-                trainer.args.gradient_accumulation_steps = (
-                    cfg.gradient_accumulation_steps
-                )
+                if rebuild_trainer is not None:
+                    trainer = rebuild_trainer()
+                else:
+                    trainer.args.per_device_train_batch_size = cfg.batch_size
+                    trainer.args.per_device_eval_batch_size = cfg.batch_size
+                    trainer.args.gradient_accumulation_steps = (
+                        cfg.gradient_accumulation_steps
+                    )
                 resume_from_checkpoint = None
 
     def _resolve_load_model_id(self) -> str:

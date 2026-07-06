@@ -43,7 +43,7 @@ def write_export_bundle(
         "COPY . /app\n"
         "RUN python3 -m pip install --upgrade pip && pip install . && pip install vllm\n"
         f"EXPOSE {port}\n"
-        f'CMD ["bash", "output/export/vllm_server.sh"]\n'
+        f'CMD ["bash", "/app/vllm_server.sh"]\n'
     )
 
     # Dockerfile with optional quant deps (larger supply-chain footprint)
@@ -54,7 +54,7 @@ def write_export_bundle(
         "COPY . /app\n"
         'RUN python3 -m pip install --upgrade pip && pip install ".[quant]" && pip install vllm\n'
         f"EXPOSE {port}\n"
-        f'CMD ["bash", "output/export/vllm_server.sh"]\n'
+        f'CMD ["bash", "/app/vllm_server.sh"]\n'
     )
 
     # Modelfile (points at GGUF output produced by convert script)

@@ -29,13 +29,16 @@ class InferenceOrchestrator(Orchestrator):
             and self._active_generation_user_id != user_id
         )
 
+    def assert_generation_available_for_user(self, user_id: str | None) -> None:
+        if self._generation_owned_by_other(user_id):
+            raise PermissionError("Another user has active inference")
+
     async def cancel_and_unload_for_user(self, user_id: str | None) -> dict[str, Any]:
         return await self.release_all_inference_memory(user_id)
 
     async def release_all_inference_memory(self, user_id: str | None) -> dict[str, Any]:
         """Unload local pool and refresh headroom for the next model load."""
-        if self._generation_owned_by_other(user_id):
-            raise PermissionError("Another user has active inference")
+        self.assert_generation_available_for_user(user_id)
         await self._runner.cancel_and_unload()
         from seiso.memory.protection import release_cached_memory
 
@@ -49,8 +52,7 @@ class InferenceOrchestrator(Orchestrator):
         return build_vram_status(self)
 
     async def cancel_generation_for_user(self, user_id: str | None) -> dict[str, Any]:
-        if self._generation_owned_by_other(user_id):
-            raise PermissionError("Another user has active inference")
+        self.assert_generation_available_for_user(user_id)
         return await self._runner.cancel_generation()
 
     async def execute(self, job_id: str, payload: dict[str, Any]) -> dict[str, Any]:

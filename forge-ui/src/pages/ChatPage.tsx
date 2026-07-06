@@ -502,7 +502,7 @@ export function ChatPage() {
           const preloadOpts = preloadInferenceOptions(selection, models);
           const loaded = await preloadWithProgress(
             selection,
-            resolveInferenceBackend(next, hwProfile, inferenceBackend),
+            chatBackend,
             setLoadProgress,
             undefined,
             { maxTokens: preloadOpts.maxTokens, nCtx: preloadOpts.nCtx },
@@ -800,7 +800,7 @@ export function ChatPage() {
       setSwitchingModel(true);
       setError(null);
       try {
-        await activateModel(selection, models);
+        await activateModel(selection, models, chatBackend);
       } catch (e) {
         setError(e instanceof Error ? e.message : "Failed to load model into inference engine");
         return;
@@ -839,6 +839,7 @@ export function ChatPage() {
 
     let assistantText = "";
     let progressText = "";
+    let streamFailed = false;
     streamThreadRef.current = threadId;
     genStartRef.current = null;
     outputTokensRef.current = 0;
@@ -940,6 +941,7 @@ export function ChatPage() {
         {
           onEvent: (event, data) => {
             if (event === "error") {
+              streamFailed = true;
               setError(data);
               return;
             }
@@ -973,6 +975,7 @@ export function ChatPage() {
       await promise;
     } catch (e) {
       if (!(e instanceof DOMException && e.name === "AbortError")) {
+        streamFailed = true;
         setError(e instanceof Error ? e.message : "Request failed");
       }
     } finally {
@@ -982,7 +985,7 @@ export function ChatPage() {
       if (streamingElRef.current) {
         streamingElRef.current.textContent = "";
       }
-      if (assistantText.trim()) {
+      if (!streamFailed && assistantText.trim()) {
         commitAssistantMessage(assistantText);
       }
       if (assistantText.trim() && genStartRef.current !== null) {
@@ -1003,7 +1006,7 @@ export function ChatPage() {
     streamAbortRef.current?.();
     streamAbortRef.current = null;
     setStreaming(false);
-    setError("Generation stopped.");
+    setError(null);
   };
 
   const modelLabel = (m: InferenceModelOption) => {

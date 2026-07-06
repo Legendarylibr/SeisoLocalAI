@@ -92,7 +92,9 @@ def _vram_headroom_mb(gpus: list[dict[str, Any]]) -> int:
     best = 0
     for g in gpus:
         total = g.get("vram_total_mb") or 0
-        used = g.get("vram_used_mb") or 0
+        used = g.get("vram_used_mb")
+        if used is None:
+            continue
         best = max(best, int(total - used))
     return best
 
@@ -124,8 +126,7 @@ def vram_headroom_mb(profile: dict[str, Any]) -> int:
     probe = discrete or gpus
     if probe:
         best = _vram_headroom_mb(probe)
-        if best > 0:
-            return best
+        return max(0, best)
     tier = classify_tier(profile)
     if tier in (HardwareTier.APPLE_UNIFIED, HardwareTier.CPU_ONLY):
         try:

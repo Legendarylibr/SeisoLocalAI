@@ -124,14 +124,18 @@ class LocalInferenceRunner:
                 model_path=resolved_path,
                 model_format=payload.get("model_format"),
             )
-            llm = self._pool.get_llama(resolved_path, n_ctx=n_ctx)
-            if messages:
-                llm = self._llama_guard_prefill(
-                    llm,
-                    model_path=resolved_path,
-                    messages=messages,
-                    n_ctx=n_ctx,
-                )
+            self._pool.acquire_llama_inference()
+            try:
+                llm = self._pool.get_llama(resolved_path, n_ctx=n_ctx)
+                if messages:
+                    llm = self._llama_guard_prefill(
+                        llm,
+                        model_path=resolved_path,
+                        messages=messages,
+                        n_ctx=n_ctx,
+                    )
+            finally:
+                self._pool.release_llama_inference()
 
     async def chat(self, payload: dict[str, Any]) -> str:
         loop = asyncio.get_running_loop()
@@ -792,6 +796,18 @@ class LocalInferenceRunner:
         model_path: str,
         generation_id: int,
     ) -> str:
+        self._pool.acquire_llama_inference()
+        try:
+            return self._llama_complete_locked(payload, model_path, generation_id)
+        finally:
+            self._pool.release_llama_inference()
+
+    def _llama_complete_locked(
+        self,
+        payload: dict[str, Any],
+        model_path: str,
+        generation_id: int,
+    ) -> str:
         messages = payload.get("messages", [])
         n_ctx = payload.get("n_ctx") or estimate_llama_n_ctx(
             messages,
@@ -874,6 +890,18 @@ class LocalInferenceRunner:
         yield from client.stream(payload, model_path, should_stop=should_stop)
 
     def _llama_stream(
+        self,
+        payload: dict[str, Any],
+        model_path: str,
+        should_stop: Callable[[], bool],
+    ) -> Iterator[StreamToken]:
+        self._pool.acquire_llama_inference()
+        try:
+            yield from self._llama_stream_locked(payload, model_path, should_stop)
+        finally:
+            self._pool.release_llama_inference()
+
+    def _llama_stream_locked(
         self,
         payload: dict[str, Any],
         model_path: str,

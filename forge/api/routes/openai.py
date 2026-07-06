@@ -216,6 +216,13 @@ async def chat_completions(
             403, "Tool calling is disabled on the OpenAI-compatible API"
         )
 
+    from forge.services.memory_release import assert_gpu_available_for_inference
+
+    try:
+        assert_gpu_available_for_inference()
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
     payload = await _prepare_openai_chat_payload(body, user_id, db, settings)
     payload["user_id"] = user_id
     completion_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"

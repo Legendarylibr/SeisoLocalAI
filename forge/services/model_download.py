@@ -411,7 +411,7 @@ async def perform_model_download(
         loop = asyncio.get_running_loop()
         await loop.run_in_executor(
             None,
-            lambda: prepare_for_gpu_task(task="download"),
+            lambda: prepare_for_gpu_task(task="download", user_id=user_id),
         )
         _emit_progress(
             on_progress,

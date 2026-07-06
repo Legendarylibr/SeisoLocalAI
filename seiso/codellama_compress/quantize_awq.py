@@ -44,7 +44,7 @@ def run_awq_quantization(
         trust_remote_code=trust_remote_code,
     )
     quant_config = {
-        "w_bit": 4,
+        "w_bit": int(cfg.bits),
         "q_group_size": 128,
         "zero_point": True,
         "version": "GEMM",
@@ -62,7 +62,11 @@ def run_awq_quantization(
         {
             "input_model": str(in_model_dir),
             "output_model": str(out_dir),
-            "awq": {"calibration_samples": cfg.calibration_samples, "seed": cfg.seed},
+            "awq": {
+                "bits": int(cfg.bits),
+                "calibration_samples": cfg.calibration_samples,
+                "seed": cfg.seed,
+            },
             "dataset": dataset_cfg,
             "calibration_fingerprint": calib_fingerprint,
         },
@@ -72,6 +76,7 @@ def run_awq_quantization(
         stage="quantize_awq",
         metrics={
             "output_dir": str(out_dir),
+            "bits": int(cfg.bits),
             "calibration_samples": cfg.calibration_samples,
         },
     )

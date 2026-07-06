@@ -12,9 +12,12 @@ def resolve_preset(
     *,
     default: str = "smoke",
 ) -> tuple[str, dict[str, Any]]:
-    """Return (canonical_name, preset_dict) with fallback to default."""
+    """Return (canonical_name, preset_dict), rejecting unknown preset names."""
     name = str(preset_name or default)
-    return name, dict(presets.get(name, presets[default]))
+    if name not in presets:
+        known = ", ".join(sorted(presets))
+        raise ValueError(f"Unknown preset: {name}. Choose one of: {known}")
+    return name, dict(presets[name])
 
 
 def job_output_root(data_dir: Path, pipeline: str, user_id: str, job_id: str) -> Path:
