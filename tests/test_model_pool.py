@@ -139,6 +139,48 @@ def test_prepare_for_load_keeps_same_model(tmp_path, monkeypatch):
     assert refreshed["calls"] == 0
 
 
+def test_would_switch_model_spec_bundle_same_torch_path(tmp_path):
+    pool = ModelPool()
+    target = tmp_path / "target"
+    target.mkdir()
+    norm = str(target.resolve())
+    pool._active = LoadedModel(
+        key=f"spec:{norm}:{norm}-draft",
+        backend=BackendKind.TORCH,
+        handle=object(),
+        meta={
+            "path": str(target),
+            "norm_path": norm,
+            "draft_path": str(tmp_path / "draft"),
+        },
+    )
+
+    assert pool.would_switch_model(str(target), BackendKind.TORCH) is True
+
+
+def test_prepare_for_load_unloads_spec_bundle_for_same_torch_path(tmp_path, monkeypatch):
+    pool = ModelPool()
+    target = tmp_path / "target"
+    target.mkdir()
+    norm = str(target.resolve())
+    pool._active = LoadedModel(
+        key=f"spec:{norm}:{norm}-draft",
+        backend=BackendKind.TORCH,
+        handle=object(),
+        meta={
+            "path": str(target),
+            "norm_path": norm,
+            "draft_path": str(tmp_path / "draft"),
+        },
+    )
+    monkeypatch.setattr("seiso.hardware.profile.hardware_profile", lambda **_: {})
+
+    unloaded = pool.prepare_for_load(str(target), BackendKind.TORCH)
+
+    assert unloaded is True
+    assert pool.active_key is None
+
+
 def test_switch_serializes_concurrent_loads_for_same_model(tmp_path):
     pool = ModelPool()
     model_path = tmp_path / "model.gguf"
