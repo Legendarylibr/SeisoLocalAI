@@ -13,7 +13,7 @@ from seiso.env import env_bool
 from seiso.inference.backends import gguf_total_layers
 from seiso.memory.protection.constants import *  # noqa: F403
 from seiso.memory.protection.chat_guards import _estimate_prompt_tokens, _gguf_has_mmproj_sibling
-from seiso.memory.protection.llama_batch import clamp_llama_batch_pair
+from seiso.memory.protection.llama_batch import clamp_llama_batch_pair, roomy_native_linux_batch_floor
 from seiso.memory.protection.llama_kv import _host_os_reserve_mb
 from seiso.memory.protection.llama_runtime import (
     llama_host_batch_headroom_mb,
@@ -133,11 +133,16 @@ def clamp_llama_load_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
             batch_headroom = max_batch
         if native_linux_nvidia and not tight and n_gpu_layers != 0:
             gpu_total = protection().discrete_gpu_total_mb()
-            weight_mb = int(protection().estimate_path_vram_mb(model_path))
-            if gpu_total > 0 and weight_mb > 0 and weight_mb <= free_mb // 8:
-                tier_batch, tier_ubatch = protection().gpu_batch_tier_caps(
-                    gpu_total, "normal"
-                )
+            floor = roomy_native_linux_batch_floor(
+                model_path=model_path,
+                free_mb=free_mb,
+                gpu_total_mb=gpu_total,
+                n_gpu_layers=n_gpu_layers,
+                load_tier="normal",
+                tight=tight,
+            )
+            if floor is not None:
+                tier_batch, tier_ubatch = floor
                 max_batch = max(max_batch, tier_batch)
                 max_ubatch = max(max_ubatch, min(tier_ubatch, max_batch))
                 batch_headroom = max(batch_headroom, max_batch)
