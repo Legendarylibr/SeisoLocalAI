@@ -170,9 +170,9 @@ def test_platform_profile_linux_nvidia_uses_gpu_layers(monkeypatch):
     apply_platform_memory_profile(profile=profile)
 
     assert os.environ["SEISO_LLAMA_GPU_LAYERS"] == "-1"
-    assert os.environ["SEISO_LLAMA_BATCH"] == "4096"
-    assert os.environ["SEISO_LLAMA_UBATCH"] == "1024"
-    assert os.environ["SEISO_LLAMA_CACHE_MB"] == "1024"
+    assert os.environ["SEISO_LLAMA_BATCH"] == "1024"
+    assert os.environ["SEISO_LLAMA_UBATCH"] == "256"
+    assert os.environ["SEISO_LLAMA_CACHE_MB"] == "512"
     assert os.environ.get("SEISO_LLAMA_FLASH_ATTN") == "false"
     assert os.environ.get("SEISO_LLAMA_SPEED_SCALE") == "false"
     assert os.environ["SEISO_STREAM_BATCH_CHARS"] == "16"
@@ -253,13 +253,13 @@ def test_platform_profile_linux_nvidia_workstation_uses_conservative_batches(mon
 @pytest.mark.parametrize(
     "name,vram_mb,tier,expected_batch,expected_ubatch,expected_cache",
     [
-        ("NVIDIA GeForce GTX 1650", 4096, HardwareTier.EDGE, 512, 256, 512),
-        ("NVIDIA GeForce RTX 3050", 6144, HardwareTier.EDGE, 512, 256, 512),
-        ("NVIDIA GeForce RTX 3070", 8192, HardwareTier.MODEST, 1024, 256, 512),
-        ("NVIDIA GeForce RTX 3060", 12288, HardwareTier.CAPABLE, 1024, 256, 512),
-        ("NVIDIA GeForce RTX 4080", 16384, HardwareTier.CAPABLE, 1536, 512, 512),
-        ("NVIDIA GeForce RTX 4090", 24576, HardwareTier.WORKSTATION, 4096, 1024, 1024),
-        ("NVIDIA RTX 6000 Ada", 49152, HardwareTier.WORKSTATION, 4096, 1024, 1024),
+        ("NVIDIA GeForce GTX 1650", 4096, HardwareTier.EDGE, 512, 128, 256),
+        ("NVIDIA GeForce RTX 3050", 6144, HardwareTier.EDGE, 512, 128, 256),
+        ("NVIDIA GeForce RTX 3070", 8192, HardwareTier.MODEST, 512, 128, 256),
+        ("NVIDIA GeForce RTX 3060", 12288, HardwareTier.CAPABLE, 512, 128, 256),
+        ("NVIDIA GeForce RTX 4080", 16384, HardwareTier.CAPABLE, 512, 128, 256),
+        ("NVIDIA GeForce RTX 4090", 24576, HardwareTier.WORKSTATION, 1024, 256, 512),
+        ("NVIDIA RTX 6000 Ada", 49152, HardwareTier.WORKSTATION, 1024, 256, 512),
     ],
 )
 def test_native_linux_nvidia_batch_caps_all_gpu_tiers(
@@ -314,8 +314,8 @@ def test_platform_profile_remote_forge_keeps_native_linux_tuning(monkeypatch):
     assert result["memory_profile"] == "balanced"
     assert result["headroom_mb"] == 24576
     assert result["free_headroom_mb"] == 1024
-    assert os.environ["SEISO_LLAMA_BATCH"] == "4096"
-    assert os.environ["SEISO_LLAMA_UBATCH"] == "1024"
+    assert os.environ["SEISO_LLAMA_BATCH"] == "1024"
+    assert os.environ["SEISO_LLAMA_UBATCH"] == "256"
     assert os.environ.get("SEISO_LLAMA_FLASH_ATTN") == "false"
 
 
@@ -349,18 +349,18 @@ def test_platform_profile_linux_nvidia_modest_sets_safe_batch(monkeypatch):
 
     apply_platform_memory_profile(profile=profile)
 
-    assert os.environ["SEISO_LLAMA_BATCH"] == "1024"
-    assert os.environ["SEISO_LLAMA_UBATCH"] == "256"
+    assert os.environ["SEISO_LLAMA_BATCH"] == "512"
+    assert os.environ["SEISO_LLAMA_UBATCH"] == "128"
 
 
 @pytest.mark.parametrize(
     "name,vram_mb,tier,ram_gb,expected_cache",
     [
-        ("NVIDIA GeForce RTX 3070", 8192, HardwareTier.MODEST, 32, "512"),
-        ("NVIDIA GeForce RTX 3060", 12288, HardwareTier.CAPABLE, 32, "512"),
-        ("NVIDIA GeForce RTX 5080", 16384, HardwareTier.CAPABLE, 48, "512"),
-        ("NVIDIA GeForce RTX 4090", 24576, HardwareTier.WORKSTATION, 64, "1024"),
-        ("NVIDIA RTX 6000 Ada", 49152, HardwareTier.WORKSTATION, 128, "1024"),
+        ("NVIDIA GeForce RTX 3070", 8192, HardwareTier.MODEST, 32, "256"),
+        ("NVIDIA GeForce RTX 3060", 12288, HardwareTier.CAPABLE, 32, "256"),
+        ("NVIDIA GeForce RTX 5080", 16384, HardwareTier.CAPABLE, 48, "256"),
+        ("NVIDIA GeForce RTX 4090", 24576, HardwareTier.WORKSTATION, 64, "512"),
+        ("NVIDIA RTX 6000 Ada", 49152, HardwareTier.WORKSTATION, 128, "512"),
     ],
 )
 def test_platform_profile_native_linux_nvidia_all_tiers_are_crash_resistant(
@@ -397,8 +397,8 @@ def test_platform_profile_native_linux_nvidia_all_tiers_are_crash_resistant(
     apply_platform_memory_profile(profile=profile)
 
     assert os.environ["SEISO_LLAMA_GPU_LAYERS"] == "-1"
-    assert int(os.environ["SEISO_LLAMA_BATCH"]) <= 4096
-    assert int(os.environ["SEISO_LLAMA_UBATCH"]) <= 1024
+    assert int(os.environ["SEISO_LLAMA_BATCH"]) <= 1024
+    assert int(os.environ["SEISO_LLAMA_UBATCH"]) <= 256
     assert os.environ["SEISO_LLAMA_CACHE_MB"] == expected_cache
     assert os.environ["SEISO_LLAMA_FLASH_ATTN"] == "false"
     assert os.environ["SEISO_LLAMA_SPEED_SCALE"] == "false"
@@ -445,9 +445,9 @@ def test_platform_profile_workstation_keeps_speed_when_vram_in_use(monkeypatch):
     assert result["memory_profile"] == "balanced"
     assert result["headroom_mb"] == 24564
     assert result["free_headroom_mb"] == 1364
-    assert os.environ["SEISO_LLAMA_BATCH"] == "4096"
-    assert os.environ["SEISO_LLAMA_UBATCH"] == "1024"
-    assert os.environ["SEISO_LLAMA_CACHE_MB"] == "1024"
+    assert os.environ["SEISO_LLAMA_BATCH"] == "1024"
+    assert os.environ["SEISO_LLAMA_UBATCH"] == "256"
+    assert os.environ["SEISO_LLAMA_CACHE_MB"] == "512"
 
 
 def test_platform_profile_native_linux_clamps_stale_batch_env(monkeypatch):
@@ -483,11 +483,8 @@ def test_platform_profile_native_linux_clamps_stale_batch_env(monkeypatch):
 
     apply_platform_memory_profile(profile=profile)
 
-    assert os.environ["SEISO_LLAMA_BATCH"] == "4096"
-    assert os.environ["SEISO_LLAMA_UBATCH"] == "1024"
-
-
-def test_apply_only_setdefault(monkeypatch):
+    assert os.environ["SEISO_LLAMA_BATCH"] == "1024"
+    assert os.environ["SEISO_LLAMA_UBATCH"] == "256"
     profile = {"ram_gb": 16, "gpus": [], "backend": "cpu", "platform": "Darwin"}
     monkeypatch.setattr(
         "seiso.memory.platform_profile.classify_tier", lambda _p: HardwareTier.CPU_ONLY

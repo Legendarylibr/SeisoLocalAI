@@ -455,15 +455,15 @@ def test_llama_prefill_guard_keeps_roomy_short_prompt(monkeypatch, tmp_path):
         model_path=str(gguf),
         messages=[{"role": "user", "content": "hi"}],
         n_ctx=4096,
-        loaded_n_batch=4096,
+        loaded_n_batch=1024,
         loaded_n_gpu_layers=-1,
         load_tier="normal",
         loaded_headroom_mb=24576,
     )
 
     assert needs_reload is False
-    assert safe_batch == 2048
-    assert safe_ubatch == 512
+    assert safe_batch == 1024
+    assert safe_ubatch == 256
 
 
 def test_llama_prefill_guard_keeps_roomy_short_prompt_on_small_headroom_fluctuation(
@@ -483,15 +483,15 @@ def test_llama_prefill_guard_keeps_roomy_short_prompt_on_small_headroom_fluctuat
         model_path=str(gguf),
         messages=[{"role": "user", "content": "hi"}],
         n_ctx=4096,
-        loaded_n_batch=4096,
+        loaded_n_batch=1024,
         loaded_n_gpu_layers=-1,
         load_tier="normal",
         loaded_headroom_mb=24576,
     )
 
     assert needs_reload is False
-    assert safe_batch == 2048
-    assert safe_ubatch == 512
+    assert safe_batch == 1024
+    assert safe_ubatch == 256
 
 
 def test_llama_prefill_guard_reloads_growing_native_linux_prompt(
