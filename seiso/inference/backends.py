@@ -335,8 +335,13 @@ def _read_gguf_metadata(path: Path) -> _GGUFMetadata:
                         offset = _skip_gguf_mmap_value(mm, offset, value_type)
                     if offset > size:
                         break
-    except (OSError, ValueError, struct.error):
+    except OSError:
         return _GGUFMetadata()
+    except (ValueError, struct.error):
+        # Some community GGUFs contain newer metadata value types before the
+        # tensor table. Keep fields parsed before the unknown entry so safety
+        # policy does not silently fall back to an unsafe dense default.
+        return meta
     return meta
 
 

@@ -9,6 +9,7 @@ import pytest
 
 from seiso.inference.backends import (
     clear_gguf_caches,
+    gguf_architecture,
     gguf_is_moe,
     gguf_uses_sliding_window_attention,
 )
@@ -97,6 +98,48 @@ def test_gguf_family_metadata_flags(
 
     assert gguf_uses_sliding_window_attention(str(gguf)) is expect_swa
     assert gguf_is_moe(str(gguf)) is expect_moe
+
+
+def test_gguf_metadata_preserves_architecture_before_unknown_value(tmp_path: Path):
+    import struct
+
+    gguf = tmp_path / "gemma3-new-metadata.gguf"
+    arch_key = b"general.architecture"
+    arch_value = b"gemma3"
+    unknown_key = b"gemma3.future_metadata"
+    payload = [
+        struct.pack("<Q", len(arch_key)),
+        arch_key,
+        struct.pack("<I", 8),
+        struct.pack("<Q", len(arch_value)),
+        arch_value,
+        struct.pack("<Q", len(unknown_key)),
+        unknown_key,
+        struct.pack("<I", 99),
+    ]
+    gguf.write_bytes(b"GGUF" + struct.pack("<IQQ", 3, 0, 2) + b"".join(payload))
+
+    assert gguf_architecture(str(gguf)) == "gemma3"
+
+
+@pytest.mark.parametrize(
+    ("name", "expect_kind", "expect_partial"),
+    [
+        ("Gemma-3-27B-Q4_K_M.gguf", "swa", False),
+        ("gemma3n-e4b-it-Q4_K_M.gguf", "swa", False),
+        ("Mixtral-8x7B-Q4_K_M.gguf", "moe", True),
+    ],
+)
+def test_family_policy_uses_filename_hints_when_metadata_unreadable(
+    tmp_path: Path, name: str, expect_kind: str, expect_partial: bool
+):
+    gguf = tmp_path / name
+    gguf.write_bytes(b"GGUF")
+
+    policy = policy_for_gguf(str(gguf))
+
+    assert policy.kind == expect_kind
+    assert policy.allow_partial_offload is expect_partial
 
 
 @pytest.mark.parametrize(

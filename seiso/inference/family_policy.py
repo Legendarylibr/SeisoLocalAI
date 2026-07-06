@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Literal
 
 FamilyKind = Literal["dense", "swa", "moe"]
@@ -10,6 +12,10 @@ FamilyKind = Literal["dense", "swa", "moe"]
 # Baseline fp16 KV bytes/token for a 7B-class model — used to scale prefill risk.
 _KV_TIGHTNESS_BASELINE_BYTES = 64 * 1024
 _KV_TIGHTNESS_MAX = 1.35
+_GEMMA_SWA_HINT_RE = re.compile(r"(^|[^a-z0-9])gemma[-_ ]?(3|4|3n)([^a-z0-9]|$)")
+_MOE_HINT_RE = re.compile(
+    r"(^|[^a-z0-9])(mixtral|qwen[-_ ]?2?moe|deepseek[-_ ]?(v2|2)|moe)([^a-z0-9]|$)"
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,18 +44,35 @@ def _prefill_tightness_for_dense(model_path: str) -> float:
     return min(_KV_TIGHTNESS_MAX, 1.0 + excess / span)
 
 
+def _model_hint_text(model_path: str, architecture: str) -> str:
+    name = Path(model_path).name.lower()
+    return f"{architecture.lower()} {name}"
+
+
+def _looks_like_swa_family(model_path: str, architecture: str) -> bool:
+    return bool(_GEMMA_SWA_HINT_RE.search(_model_hint_text(model_path, architecture)))
+
+
+def _looks_like_moe_family(model_path: str, architecture: str) -> bool:
+    return bool(_MOE_HINT_RE.search(_model_hint_text(model_path, architecture)))
+
+
 def policy_for_gguf(model_path: str) -> InferenceFamilyPolicy:
     """Return family policy from GGUF metadata, falling back conservatively."""
     try:
         from seiso.inference import backends
 
         architecture = (backends.gguf_architecture(model_path) or "").lower()
-        uses_swa = backends.gguf_uses_sliding_window_attention(model_path)
-        is_moe = backends.gguf_is_moe(model_path)
+        uses_swa = backends.gguf_uses_sliding_window_attention(
+            model_path
+        ) or _looks_like_swa_family(model_path, architecture)
+        is_moe = backends.gguf_is_moe(model_path) or _looks_like_moe_family(
+            model_path, architecture
+        )
     except Exception:
         architecture = ""
-        uses_swa = False
-        is_moe = False
+        uses_swa = _looks_like_swa_family(model_path, architecture)
+        is_moe = _looks_like_moe_family(model_path, architecture)
 
     if uses_swa:
         return InferenceFamilyPolicy(
