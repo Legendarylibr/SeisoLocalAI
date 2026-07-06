@@ -4,10 +4,12 @@ Full Seiso support: fused CUDA kernels, QLoRA, multi-GPU, Forge UI.
 
 ## Install
 
-**Recommended** — one command installs deps, builds the UI, and starts Forge:
+**Recommended** — auto-detect, or pin the Linux + NVIDIA stack:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
+# or explicitly:
+SEISO_INSTALL_PROFILE=linux-nvidia curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
 ```
 
 Manual:

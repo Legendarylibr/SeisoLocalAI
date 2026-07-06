@@ -80,10 +80,32 @@ In config files and Python, `~/.seiso` expands correctly on every OS. In shell c
 
 ### Linux, macOS, and WSL2 (recommended)
 
-One command installs missing system tools (Python, Node, git when possible), clones the repo, builds the UI, and **starts Forge automatically** (browser opens when ready):
+One command installs missing system tools (Python, Node, git, build deps when possible), clones the repo, builds the UI, and **starts Forge automatically** (browser opens when ready):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
+```
+
+Auto-detects your OS and GPU. **Install only what you need** — set `SEISO_INSTALL_PROFILE` before the same one-liner:
+
+```bash
+# Linux native + NVIDIA — CUDA training + GGUF GPU chat
+SEISO_INSTALL_PROFILE=linux-nvidia curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
+
+# Linux native CPU (or force CPU stack even if NVIDIA is present)
+SEISO_INSTALL_PROFILE=linux-cpu curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
+
+# Linux AMD ROCm — install PyTorch ROCm wheel separately after (see docs/platforms/linux-amd-rocm.md)
+SEISO_INSTALL_PROFILE=linux-rocm curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
+
+# WSL2 + NVIDIA — keep the clone on the Linux filesystem (~/Seiso, not /mnt/c/...)
+SEISO_INSTALL_PROFILE=wsl-nvidia curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
+
+# macOS Apple Silicon — includes MLX for fast safetensors chat
+SEISO_INSTALL_PROFILE=macos curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
+
+# Chat-only — Forge + GGUF; skips PyTorch / training download
+SEISO_INSTALL_PROFILE=chat curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
 ```
 
 What the installer does:
@@ -97,10 +119,10 @@ What the installer does:
 **Install only** (no auto-start):
 
 ```bash
-SEISO_START=0 curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
+SEISO_START=0 SEISO_INSTALL_PROFILE=linux-nvidia curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
 ```
 
-**Fast install** (Forge + GGUF chat — skips PyTorch/training):
+**Fast install** (same as `SEISO_INSTALL_PROFILE=chat`):
 
 ```bash
 SEISO_FAST_INSTALL=1 curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
@@ -201,7 +223,13 @@ Stop Forge with `Ctrl+C` in the terminal where it is running.
 
 ### Windows (native PowerShell)
 
-There is no Windows installer script — use manual steps. **WSL2 + NVIDIA** is recommended on Windows for full CUDA/Triton support ([docs/platforms/wsl.md](docs/platforms/wsl.md)).
+There is no `curl | bash` installer on Windows — use this one-liner (clone, venv, Forge UI, start) or follow the manual steps below. **WSL2 + NVIDIA** is recommended on Windows for full CUDA/Triton support ([docs/platforms/wsl.md](docs/platforms/wsl.md)).
+
+```powershell
+git clone https://github.com/Legendarylibr/SeisoLocalAI.git "$env:USERPROFILE\Seiso"; cd "$env:USERPROFILE\Seiso"; python -m venv .venv; .\.venv\Scripts\Activate.ps1; pip install -U pip wheel setuptools; pip install -e ".[forge,train,dev]"; if (-not (Test-Path .env)) { Copy-Item .env.example .env }; cd forge-ui; npm ci; npm run build; cd ..; seiso doctor; seiso forge
+```
+
+Manual steps (same result, easier to read):
 
 ```powershell
 git clone https://github.com/Legendarylibr/SeisoLocalAI.git "$env:USERPROFILE\Seiso"
