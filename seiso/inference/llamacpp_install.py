@@ -121,6 +121,11 @@ def pip_install_llamacpp(*, prefer_cuda: bool | None = None) -> bool:
     if prefer_cuda is None:
         prefer_cuda = nvidia_hardware_visible()
 
+    if prefer_cuda:
+        from seiso.platform import ensure_cu12_runtime_packages
+
+        ensure_cu12_runtime_packages()
+
     for cmd in pip_install_strategies(prefer_cuda=prefer_cuda):
         try:
             proc = subprocess.run(

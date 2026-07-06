@@ -426,6 +426,17 @@ seiso_open_forge_when_ready() {
   fi
 }
 
+seiso_ensure_cu12_runtime() {
+  local root="$1"
+  [[ "$(uname -s)" == "Linux" ]] || return 0
+  seiso_nvidia_gpu_detected || return 0
+  [[ -x "$root/.venv/bin/python" ]] || return 0
+  seiso_log "Ensuring CUDA 12 runtime (llama.cpp GPU offload)..."
+  seiso_pip_install_for_venv "$root/.venv/bin/python" \
+    nvidia-cuda-runtime-cu12 nvidia-cublas-cu12 --prefer-binary \
+    || seiso_warn "CUDA 12 runtime install failed — GGUF GPU chat may be CPU-only"
+}
+
 seiso_llamacpp_import_ok() {
   local root="$1"
   [[ -x "$root/.venv/bin/python" ]] || return 1
@@ -451,12 +462,8 @@ seiso_repair_cuda_ptxas() {
 seiso_ensure_llamacpp() {
   local root="$1"
   [[ -x "$root/.venv/bin/python" ]] || return 1
+  seiso_ensure_cu12_runtime "$root"
   seiso_log "Ensuring llama.cpp (GGUF chat) runtime..."
-  if [[ "$(uname -s)" == "Linux" ]]; then
-    seiso_pip_install_for_venv "$root/.venv/bin/python" \
-      nvidia-cuda-runtime-cu12 nvidia-cublas-cu12 --prefer-binary \
-      || true
-  fi
   if "$root/.venv/bin/python" -m seiso.inference.llamacpp_install --quiet; then
     return 0
   fi
@@ -578,6 +585,9 @@ seiso_run_install_worker() {
   # shellcheck disable=SC1091
   source "$root/.venv/bin/activate"
   seiso_pip_bootstrap
+  if [[ "$extras" == *cuda* || "$extras" == *llamacpp* ]]; then
+    seiso_ensure_cu12_runtime "$root"
+  fi
   seiso_pip_install_extras "$root" "$extras" || {
     if [[ "$ui_pid" -ne 0 ]]; then
       kill "$ui_pid" 2>/dev/null || true
@@ -646,6 +656,7 @@ seiso_ensure_installed() {
 
   if [[ "$extras" == *cuda* ]]; then
     seiso_log "NVIDIA GPU detected — installing with CUDA extras"
+    seiso_ensure_cu12_runtime "$root"
   fi
 
   if [[ -x "$root/.venv/bin/python" && "$extras" == *llamacpp* ]]; then

@@ -11,8 +11,9 @@ def bootstrap_runtime() -> None:
     if _bootstrap_done:
         return
     try:
-        from seiso.platform import ensure_cuda_library_path
+        from seiso.platform import ensure_cuda_library_path, repair_linux_cuda_stack
 
+        repair_linux_cuda_stack()
         ensure_cuda_library_path()
     except ImportError:
         pass

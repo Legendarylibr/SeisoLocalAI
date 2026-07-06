@@ -105,10 +105,10 @@ else
   bad "install worker missing hatchling bootstrap (editable install may fail on fresh venvs)"
 fi
 
-if rg -q 'cuda-toolkit\[nvcc\]==13\.0\.2' "$ROOT/pyproject.toml" 2>/dev/null; then
-  ok "cuda-toolkit pin matches torch 2.12 (13.0.2)"
+if rg -q 'cuda-toolkit\[nvcc\]>=13\.1\.0' "$ROOT/pyproject.toml" 2>/dev/null; then
+  ok "cuda-toolkit requires >=13.1.0 for PTX 9.3 compatibility"
 else
-  bad "cuda-toolkit pin should be 13.0.2 to match torch 2.12"
+  bad "cuda-toolkit should be >=13.1.0 (13.0.2 ptxas caps at PTX 9.0)"
 fi
 
 if rg -q 'seiso_use_uv' "$ROOT/scripts/lib/common.sh" 2>/dev/null; then
