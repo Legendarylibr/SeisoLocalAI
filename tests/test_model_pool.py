@@ -388,10 +388,10 @@ def test_llama_load_kwargs_native_linux_nvidia_defaults(monkeypatch):
     kwargs = llama_load_kwargs(4096, model_path="/tmp/model.gguf")
     assert kwargs["n_batch"] == 4096
     assert kwargs["n_ubatch"] == 1024
-    assert kwargs.get("flash_attn") is True
+    assert "flash_attn" not in kwargs
 
 
-def test_native_linux_flash_attn_opt_out(monkeypatch):
+def test_native_linux_flash_attn_opt_in(monkeypatch):
     for key in list(os.environ):
         if key.startswith("SEISO_LLAMA_"):
             monkeypatch.delenv(key, raising=False)
@@ -403,13 +403,13 @@ def test_native_linux_flash_attn_opt_out(monkeypatch):
     monkeypatch.setattr(
         "seiso.inference.model_pool._native_linux_nvidia", lambda: True
     )
-    monkeypatch.setenv("SEISO_LLAMA_FLASH_ATTN", "false")
+    monkeypatch.setenv("SEISO_LLAMA_FLASH_ATTN", "true")
 
     kwargs = llama_load_kwargs(4096, model_path="/tmp/model.gguf")
-    assert "flash_attn" not in kwargs
+    assert kwargs["flash_attn"] is True
 
 
-def test_native_linux_flash_attn_defaults_on_dense_opt_out(monkeypatch, tmp_path):
+def test_native_linux_flash_attn_defaults_off_dense_opt_in(monkeypatch, tmp_path):
     for key in list(os.environ):
         if key.startswith("SEISO_LLAMA_"):
             monkeypatch.delenv(key, raising=False)
@@ -426,11 +426,11 @@ def test_native_linux_flash_attn_defaults_on_dense_opt_out(monkeypatch, tmp_path
     )
 
     kwargs = llama_load_kwargs(4096, model_path="/tmp/model.gguf")
-    assert kwargs.get("flash_attn") is True
-
-    monkeypatch.setenv("SEISO_LLAMA_FLASH_ATTN", "false")
-    kwargs = llama_load_kwargs(4096, model_path="/tmp/model.gguf")
     assert "flash_attn" not in kwargs
+
+    monkeypatch.setenv("SEISO_LLAMA_FLASH_ATTN", "true")
+    kwargs = llama_load_kwargs(4096, model_path="/tmp/model.gguf")
+    assert kwargs.get("flash_attn") is True
 
 
 def test_llama_gpu_offload_ok_retries_after_import_failure(monkeypatch):
@@ -943,7 +943,7 @@ def test_platform_caps_bnb_unavailable_on_linux(monkeypatch):
     detect_gpu.cache_clear()
 
 
-def test_fit_llama_gpu_layers_allows_partial_for_swa_on_linux(monkeypatch, tmp_path):
+def test_fit_llama_gpu_layers_skips_partial_for_swa_on_linux(monkeypatch, tmp_path):
     import seiso.inference.model_pool as mp
 
     gguf = tmp_path / "gemma.gguf"
@@ -976,10 +976,10 @@ def test_fit_llama_gpu_layers_allows_partial_for_swa_on_linux(monkeypatch, tmp_p
 
     layers = mp.fit_llama_gpu_layers(str(gguf), -1, 12000, n_ctx=4096)
 
-    assert layers == 27
+    assert layers == 0
 
 
-def test_llama_layer_attempts_partial_for_swa_on_linux(monkeypatch, tmp_path):
+def test_llama_layer_attempts_cpu_only_for_swa_on_linux(monkeypatch, tmp_path):
     import seiso.inference.model_pool as mp
 
     gguf = tmp_path / "gemma.gguf"
@@ -994,20 +994,7 @@ def test_llama_layer_attempts_partial_for_swa_on_linux(monkeypatch, tmp_path):
     monkeypatch.setattr(
         "seiso.inference.backends.gguf_total_layers", lambda _p: 42
     )
-    monkeypatch.setattr(
-        "seiso.memory.protection.llama_offload_fits_headroom",
-        lambda _path, **k: k.get("n_gpu_layers") in (24, 27),
-    )
-    monkeypatch.setattr(
-        "seiso.memory.protection.llama_kv_cache_reserve_mb",
-        lambda *_a, **_k: 512,
-    )
-    monkeypatch.setattr(
-        "seiso.memory.protection.llama_model_is_tight_vram_fit",
-        lambda **_k: False,
-    )
 
     attempts = mp._llama_layer_attempts(str(gguf), -1, 12000, n_ctx=4096, fitted=24)
 
-    assert 24 in attempts
-    assert 0 in attempts
+    assert attempts == [0]
