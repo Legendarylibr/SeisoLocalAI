@@ -8,7 +8,7 @@ from seiso.hardware import vram_processes as vp
 
 
 def test_parse_nvidia_smi_process_csv():
-    stdout = "60526, /home/c/Seiso/.venv/bin/python3, 8334\n5874, firefox, 188"
+    stdout = "60526, /app/.venv/bin/python3, 8334\n5874, firefox, 188"
     parsed = vp._parse_nvidia_smi_process_csv(stdout)
     assert len(parsed) == 2
     assert parsed[0].pid == 60526

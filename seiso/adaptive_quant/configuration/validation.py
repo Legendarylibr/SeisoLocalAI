@@ -638,7 +638,7 @@ def validate_gguf_export_settings(
 ) -> None:
     if not gguf_export_enabled:
         return
-    from seiso.adaptive_quant.model_routes import QUANT_BITS
+    from seiso.models.gguf_quant import normalize_quant_label
 
     if (
         not isinstance(gguf_export_quant_type, str)
@@ -647,11 +647,10 @@ def validate_gguf_export_settings(
         raise ValueError(
             "llama_cpp_gguf_export_quant_type must be a non-empty string when export is enabled"
         )
-    quant_key = gguf_export_quant_type.strip().upper()
-    if quant_key not in QUANT_BITS:
-        allowed = ", ".join(sorted(QUANT_BITS))
+    quant_key = normalize_quant_label(gguf_export_quant_type)
+    if not quant_key:
         raise ValueError(
-            f"llama_cpp_gguf_export_quant_type must be one of [{allowed}], got {gguf_export_quant_type!r}"
+            "llama_cpp_gguf_export_quant_type must be a non-empty string when export is enabled"
         )
     source = gguf_export_source or llama_cpp_model
     if not source:

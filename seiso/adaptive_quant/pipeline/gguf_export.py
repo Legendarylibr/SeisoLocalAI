@@ -11,7 +11,6 @@ from seiso.adaptive_quant.configuration import FrameworkConfig
 from seiso.adaptive_quant.configuration.validation import (
     validate_llama_cpp_binary_allowlist,
 )
-from seiso.adaptive_quant.model_routes import QUANT_BITS
 
 _BIT_WIDTH_TO_QUANT: dict[int, str] = {
     2: "Q2_K",
@@ -84,9 +83,6 @@ def export_gguf(
     """Run llama.cpp quantize to produce an exported GGUF from a source model."""
     source_path = resolve_gguf_export_source(config)
     quant_type = resolve_gguf_quant_type(config, recommendation)
-    if quant_type not in QUANT_BITS:
-        raise ValueError(f"Unsupported GGUF quant type {quant_type!r}")
-
     output_path = config.gguf_export_path(quant_type=quant_type)
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
     quantize_binary = derive_quantize_binary(config)

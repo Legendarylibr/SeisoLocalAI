@@ -393,11 +393,6 @@ def _cmd_list(catalog_path: Path, *, output_format: str) -> None:
 def _cmd_register(catalog_path: Path, args: argparse.Namespace) -> None:
     catalog = _load_catalog(catalog_path, allow_missing=True)
     quant_label = args.quant.strip().upper()
-    if args.effective_bits is None and quant_label not in QUANT_BITS:
-        raise SystemExit(
-            f"Unknown quant label {quant_label!r}. Pass --effective-bits to register a novel quant. "
-            f"Built-in labels: {sorted(QUANT_BITS)}"
-        )
 
     route = ModelRoute(
         route_id=args.route_id,

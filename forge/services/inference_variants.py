@@ -9,12 +9,15 @@ from typing import Any
 
 from forge.db.store import Database
 from forge.services.inference_models import get_inference_option, list_inference_options
+from seiso.models.gguf_quant import extract_quant_label as _extract_quant_label
 from seiso.models.trusted_gguf import base_model_from_tags
 
-_GGUF_QUANT_RE = re.compile(
-    r"(?:^|[-_.])(Q\d+(?:_K(?:_S|M|_L)?|_0)?|IQ\d+(?:_[A-Z0-9]+)?|F16|BF16|Q8_0|Q6_K|Q5_K_M|Q4_K_M|Q3_K_M|Q2_K)",
-    re.I,
-)
+
+def extract_quant_label(
+    *, name: str, path: str = "", metadata: dict[str, Any] | None = None
+) -> str:
+    label = _extract_quant_label(name=name, path=path, metadata=metadata)
+    return label or "GGUF"
 
 
 def _metadata(row_or_opt: dict[str, Any]) -> dict[str, Any]:
@@ -28,31 +31,6 @@ def _metadata(row_or_opt: dict[str, Any]) -> dict[str, Any]:
         except json.JSONDecodeError:
             return {}
     return {}
-
-
-def extract_quant_label(
-    *, name: str, path: str = "", metadata: dict[str, Any] | None = None
-) -> str:
-    meta = metadata or {}
-    for candidate in (
-        meta.get("gguf_file"),
-        (
-            meta.get("gguf_files", [None])[0]
-            if isinstance(meta.get("gguf_files"), list)
-            else None
-        ),
-        Path(path).name if path else None,
-        name,
-    ):
-        if not candidate or not isinstance(candidate, str):
-            continue
-        match = _GGUF_QUANT_RE.search(candidate)
-        if match:
-            return match.group(1).upper().replace("__", "_")
-    quant = meta.get("quant")
-    if isinstance(quant, str) and quant.strip():
-        return quant.strip().upper()
-    return "GGUF"
 
 
 def variant_group_key(opt: dict[str, Any]) -> str:
