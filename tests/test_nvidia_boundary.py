@@ -215,6 +215,7 @@ def test_platform_caps_install_hint_without_cuda_runtime(monkeypatch):
 
     class _FakeTorch:
         cuda = _FakeCuda()
+        library = type("Library", (), {})()
         backends = type(
             "Backends",
             (),
@@ -222,6 +223,11 @@ def test_platform_caps_install_hint_without_cuda_runtime(monkeypatch):
         )()
 
     monkeypatch.setitem(__import__("sys").modules, "torch", _FakeTorch())
+    monkeypatch.setitem(
+        __import__("sys").modules,
+        "bitsandbytes",
+        __import__("types").ModuleType("bitsandbytes"),
+    )
     monkeypatch.setattr("seiso.training.platform_caps.platform.system", lambda: "Linux")
 
     caps = training_capabilities()

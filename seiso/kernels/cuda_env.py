@@ -288,6 +288,13 @@ def cuda_link_flags() -> list[str]:
     return [f"-L{lib_dir}", "-lcudart"]
 
 
+def clear_cuda_env_caches() -> None:
+    """Clear cached toolkit discovery (after pip upgrade)."""
+    discover_cuda_home.cache_clear()
+    discover_cccl_include.cache_clear()
+    discover_cudart_lib_dir.cache_clear()
+
+
 def cuda_toolkit_ready() -> bool:
     return discover_cuda_home() is not None
 
