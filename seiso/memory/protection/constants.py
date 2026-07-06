@@ -1,0 +1,113 @@
+"""Cross-cutting OOM prevention — headroom probes, cache release, and fallbacks."""
+
+from __future__ import annotations
+
+import contextlib
+import gc
+import json
+import logging
+import os
+import platform
+import re
+from pathlib import Path
+from typing import Any, Literal
+
+from seiso import platform as seiso_platform
+from seiso.env import env_bool
+from seiso.hardware import (
+    assess_hardware_fit,
+    hardware_profile,
+    training_defaults,
+    vram_headroom_mb,
+)
+from seiso.hardware.tiers import fit_headroom_mb
+from seiso.inference.backends import gguf_total_layers
+from seiso.io.files import iter_matching_files
+from seiso.memory.estimates import (
+    estimate_chat_vram_gb,
+    estimate_training_vram_gb,
+    guess_params_from_name,
+)
+
+logger = logging.getLogger(__name__)
+
+# Reserve a slice of free memory for OS / display / other processes.
+_DEFAULT_RESERVE_RATIO = 0.03
+# Generation + activations overhead on top of weight estimate.
+_INFERENCE_OVERHEAD_MB = 256
+_TRAINING_OVERHEAD_RATIO = 2.0
+# Absolute ceilings — never exceed even on large machines.
+_MAX_INFERENCE_TOKENS = 8192
+_MAX_LLAMA_CTX = 131072
+_MIN_LLAMA_CTX = 2048
+_MAX_LLAMA_BATCH = 4096
+_MIN_LLAMA_BATCH = 128
+# Coarse n_ctx buckets — avoid reloading the model every few chat turns.
+_LLAMA_CTX_BUCKETS = (
+    2048,
+    4096,
+    8192,
+    12288,
+    16384,
+    24576,
+    32768,
+    49152,
+    65536,
+    98304,
+    131072,
+)
+_NATIVE_LINUX_CTX_BUCKETS = (
+    4096,
+    8192,
+    12288,
+    16384,
+    24576,
+    32768,
+    65536,
+    131072,
+)
+# Post-weight headroom below this on native Linux → clamp batches (prefill crash zone).
+_NATIVE_LINUX_PREFILL_CLAMP_MB = 6144
+_NATIVE_LINUX_PREFILL_HEADROOM_DROP_RATIO = 0.85
+_NATIVE_LINUX_PREFILL_HEADROOM_SHRINK_RATIO = 0.92
+_NATIVE_LINUX_PREFILL_RESERVE_PER_256TOK_MB = 256
+_TIGHT_VRAM_FIT_RATIO = 0.65
+_NATIVE_LINUX_TIGHT_VRAM_FIT_RATIO = 0.60
+_MAX_JSONL_LOAD_MB = 512
+_MODEL_WEIGHT_VRAM_SUFFIXES = frozenset({".gguf", ".safetensors", ".bin"})
+
+_VRAM_ESTIMATE_CACHE_MAX = 256
+_vram_estimate_cache: dict[tuple, int] = {}
+
+LlamaLoadTier = Literal["normal", "compact", "minimal"]
+
+# Load-tier recovery ceilings — absolute fallbacks when GPU total is unknown.
+_LOAD_TIER_BATCH_CAPS: dict[LlamaLoadTier, tuple[int, int]] = {
+    "normal": (_MAX_LLAMA_BATCH, 1024),
+    "compact": (512, 128),
+    "minimal": (256, 128),
+}
+
+__all__ = [
+    "LlamaLoadTier",
+    "_DEFAULT_RESERVE_RATIO",
+    "_INFERENCE_OVERHEAD_MB",
+    "_LLAMA_CTX_BUCKETS",
+    "_LOAD_TIER_BATCH_CAPS",
+    "_MAX_INFERENCE_TOKENS",
+    "_MAX_JSONL_LOAD_MB",
+    "_MAX_LLAMA_BATCH",
+    "_MAX_LLAMA_CTX",
+    "_MIN_LLAMA_BATCH",
+    "_MIN_LLAMA_CTX",
+    "_MODEL_WEIGHT_VRAM_SUFFIXES",
+    "_NATIVE_LINUX_CTX_BUCKETS",
+    "_NATIVE_LINUX_PREFILL_CLAMP_MB",
+    "_NATIVE_LINUX_PREFILL_HEADROOM_DROP_RATIO",
+    "_NATIVE_LINUX_PREFILL_RESERVE_PER_256TOK_MB",
+    "_NATIVE_LINUX_PREFILL_HEADROOM_SHRINK_RATIO",
+    "_NATIVE_LINUX_TIGHT_VRAM_FIT_RATIO",
+    "_TIGHT_VRAM_FIT_RATIO",
+    "_VRAM_ESTIMATE_CACHE_MAX",
+    "_vram_estimate_cache",
+]
