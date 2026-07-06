@@ -152,6 +152,29 @@ def test_clamp_llama_n_ctx_respects_headroom(monkeypatch):
     assert n_ctx % 512 == 0
 
 
+def test_clamp_llama_n_ctx_caps_long_native_linux_prompt_for_mid_model(
+    monkeypatch, tmp_path
+):
+    gguf = tmp_path / "qwen2.5-30b-q4.gguf"
+    _write_arch_gguf(gguf, "qwen2")
+    monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: True)
+    monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 24576)
+    monkeypatch.setattr("seiso.memory.protection.estimate_path_vram_mb", lambda _p: 15000)
+
+    messages = [{"role": "user", "content": "x" * 24000}]
+    n_ctx = clamp_llama_n_ctx(
+        8192,
+        messages=messages,
+        max_tokens=512,
+        model_path=str(gguf),
+        model_format="gguf",
+    )
+    trimmed = trim_llama_messages_to_context(messages, n_ctx=n_ctx, max_tokens=512)
+
+    assert n_ctx <= 4096
+    assert trimmed[0]["content"] != messages[0]["content"]
+
+
 def test_clamp_llama_load_kwargs_keeps_requested_batch_on_tight_memory(monkeypatch):
     monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 3500)
     kwargs = clamp_llama_load_kwargs(
@@ -1025,6 +1048,31 @@ def test_llama_prefill_guard_cpu_only_gemma_short_prompt(monkeypatch, tmp_path):
     assert safe_ubatch <= 128
 
 
+def test_llama_prefill_guard_reloads_stale_oversized_batch(monkeypatch, tmp_path):
+    gguf = tmp_path / "gemma3-12b-q4.gguf"
+    _write_arch_gguf(gguf, "gemma3", extra=[(b"gemma3.attention.sliding_window", 512)])
+    monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: True)
+    monkeypatch.setattr("seiso.memory.protection.hardware_profile", lambda **_: {})
+    monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 24576)
+    monkeypatch.setattr("seiso.memory.protection.available_ram_mb", lambda: 12000)
+    monkeypatch.setattr("seiso.memory.protection.estimate_path_vram_mb", lambda _p: 9000)
+
+    needs_reload, safe_batch, safe_ubatch = llama_prefill_needs_reload(
+        model_path=str(gguf),
+        messages=[{"role": "user", "content": "hi"}],
+        n_ctx=4096,
+        loaded_n_batch=1024,
+        loaded_n_ubatch=512,
+        loaded_n_gpu_layers=0,
+        load_tier="normal",
+        loaded_headroom_mb=24576,
+    )
+
+    assert needs_reload is True
+    assert safe_batch <= 256
+    assert safe_ubatch <= 128
+
+
 def test_llama_prefill_guard_cpu_only_gemma_long_prompt(monkeypatch, tmp_path):
     gguf = tmp_path / "gemma3-12b-q4.gguf"
     _write_arch_gguf(gguf, "gemma3", extra=[(b"gemma3.attention.sliding_window", 512)])
@@ -1121,7 +1169,7 @@ def test_llama_batch_limits_for_model_uses_post_weight_headroom(monkeypatch, tmp
     assert ubatch == 128
 
 
-def test_apply_training_memory_guards_keeps_user_sizing(monkeypatch):
+def test_apply_training_memory_guards_caps_unsafe_user_sizing(monkeypatch):
     from seiso.training.config import TrainConfig
 
     profile = {
@@ -1130,7 +1178,16 @@ def test_apply_training_memory_guards_keeps_user_sizing(monkeypatch):
         "ram_gb": 16,
     }
     monkeypatch.setattr("seiso.memory.protection.hardware_profile", lambda: profile)
-    monkeypatch.setattr("forge.services.hardware.vram_headroom_mb", lambda _p: 5000)
+    monkeypatch.setattr("seiso.memory.protection.vram_headroom_mb", lambda _p: 5000)
+    monkeypatch.setattr(
+        "seiso.memory.protection.training_defaults",
+        lambda _p: {
+            "batch_size": 1,
+            "gradient_accumulation_steps": 16,
+            "max_seq_length": 1024,
+            "quant": "4bit",
+        },
+    )
 
     cfg = TrainConfig(
         model_id="meta-llama/Llama-3.2-1B",
@@ -1140,20 +1197,26 @@ def test_apply_training_memory_guards_keeps_user_sizing(monkeypatch):
         max_seq_length=8192,
     )
     guarded = apply_training_memory_guards(cfg)
-    assert guarded.batch_size == 8
-    assert guarded.gradient_accumulation_steps == 1
-    assert guarded.max_seq_length == 8192
+    assert guarded.batch_size == 1
+    assert guarded.gradient_accumulation_steps == 16
+    assert guarded.max_seq_length == 1024
 
 
-def test_apply_rl_memory_guards_keeps_user_sizing(monkeypatch):
+def test_apply_rl_memory_guards_caps_large_batches(monkeypatch):
     monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 2048)
     flat = {
         "torch_preflight_batch_size": 16384,
         "replay_buffer_on_gpu": True,
         "torch_batch_episodes": 2048,
+        "torch_minibatch_size": 4096,
+        "online_batch_size": 128,
     }
     out = apply_rl_memory_guards(flat)
-    assert out == flat
+    assert out["torch_preflight_batch_size"] == 512
+    assert out["torch_batch_episodes"] == 128
+    assert out["torch_minibatch_size"] == 64
+    assert out["online_batch_size"] == 32
+    assert out["replay_buffer_on_gpu"] is True
 
 
 def test_ensure_load_fits_allows_oversized_chat_gguf(tmp_path, monkeypatch):

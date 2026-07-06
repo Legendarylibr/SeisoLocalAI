@@ -67,13 +67,13 @@ class TrainConfig(BaseModel):
         ge=1,
         description="Maximum training epochs (early stopping may finish earlier)",
     )
-    batch_size: int = Field(default=2, ge=1)
+    batch_size: int = Field(default=1, ge=1)
     learning_rate: float = Field(default=2e-4, gt=0)
     max_seq_length: int = Field(default=2048, ge=128)
     lora_r: int = Field(default=16, ge=1)
     lora_alpha: int = Field(default=32, ge=1)
     lora_dropout: float = Field(default=0.05, ge=0, le=0.5)
-    gradient_accumulation_steps: int = Field(default=4, ge=1)
+    gradient_accumulation_steps: int = Field(default=8, ge=1)
     gradient_checkpointing: bool = True
     warmup_ratio: float = Field(default=0.03, ge=0, le=1)
     weight_decay: float = Field(default=0.01, ge=0)
