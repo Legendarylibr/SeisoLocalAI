@@ -58,7 +58,6 @@ _GGUF_VALUE_SIZE = {
 _GGUF_TYPE_U32 = 4
 _GGUF_TYPE_STRING = 8
 _GGUF_TYPE_ARRAY = 9
-_GGUF_UINT_FMT = {4: "<I", 5: "<i", 10: "<Q", 11: "<q"}
 _GGUF_MAGIC = b"GGUF"
 _GGUF_HEADER_FMT = "<IQQ"
 _GGUF_KEY_ARCH = b"general.architecture"
@@ -66,11 +65,6 @@ _GGUF_SUFFIX_CTX_LEN = b".context_length"
 _GGUF_SUFFIX_BLOCK_CNT = b".block_count"
 _GGUF_SUFFIX_SLIDING_WIN = b".attention.sliding_window"
 _GGUF_SUFFIX_SLIDING_PAT = b".attention.sliding_window_pattern"
-_GGUF_SUFFIX_HEAD_CNT = b".attention.head_count"
-_GGUF_SUFFIX_HEAD_CNT_KV = b".attention.head_count_kv"
-_GGUF_SUFFIX_KEY_LEN = b".attention.key_length"
-_GGUF_SUFFIX_VAL_LEN = b".attention.value_length"
-_GGUF_SUFFIX_EMBED_LEN = b".embedding_length"
 # dflash-draft are specialized tiny draft models. We allow llama.cpp backend for them
 # (especially when used as speculative drafts). They are filtered from main catalogs
 # via other hints.
@@ -85,11 +79,6 @@ class _GGUFMetadata:
     context_length: int | None = None
     block_count: int | None = None
     has_sliding_window: bool = False
-    head_count: int | None = None
-    head_count_kv: float | None = None
-    key_length: int | None = None
-    value_length: int | None = None
-    embedding_length: int | None = None
 
 
 def is_dflash_draft(model_path: str) -> bool:
@@ -167,36 +156,6 @@ def _gguf_cache_key(path: Path) -> tuple[str, float, int] | None:
         return None
 
 
-def _unpack_gguf_uint(
-    mm: mmap.mmap, offset: int, value_type: int
-) -> tuple[int | None, int]:
-    """Read a scalar integer GGUF value, returning (value, new_offset)."""
-    fmt = _GGUF_UINT_FMT.get(value_type)
-    if fmt is None:
-        return None, _skip_gguf_mmap_value(mm, offset, value_type)
-    (value,) = struct.unpack_from(fmt, mm, offset)
-    return int(value), offset + _GGUF_VALUE_SIZE[value_type]
-
-
-def _mean_gguf_uint_array(
-    mm: mmap.mmap, offset: int, value_type: int
-) -> tuple[float | None, int]:
-    """Mean of an integer GGUF array value (e.g. per-layer head_count_kv)."""
-    if value_type != _GGUF_TYPE_ARRAY:
-        return None, _skip_gguf_mmap_value(mm, offset, value_type)
-    item_type, count = struct.unpack_from("<IQ", mm, offset)
-    fmt = _GGUF_UINT_FMT.get(item_type)
-    if fmt is None or count == 0:
-        return None, _skip_gguf_mmap_value(mm, offset, value_type)
-    item_size = _GGUF_VALUE_SIZE[item_type]
-    start = offset + 12
-    values = [
-        int(struct.unpack_from(fmt, mm, start + i * item_size)[0])
-        for i in range(count)
-    ]
-    return sum(values) / len(values), start + item_size * count
-
-
 def _skip_gguf_mmap_value(mm: mmap.mmap, offset: int, value_type: int) -> int:
     if value_type == _GGUF_TYPE_STRING:
         (length,) = struct.unpack_from("<Q", mm, offset)
@@ -257,49 +216,29 @@ def _read_gguf_metadata(path: Path) -> _GGUFMetadata:
                                 "utf-8", errors="replace"
                             )
                         offset = end
-                    elif key.endswith(_GGUF_SUFFIX_CTX_LEN):
-                        value, offset = _unpack_gguf_uint(mm, offset, value_type)
-                        if value is not None:
-                            meta.context_length = value
-                    elif key.endswith(_GGUF_SUFFIX_BLOCK_CNT):
-                        value, offset = _unpack_gguf_uint(mm, offset, value_type)
-                        if value is not None:
-                            meta.block_count = value
-                    elif key.endswith(_GGUF_SUFFIX_SLIDING_WIN):
-                        value, offset = _unpack_gguf_uint(mm, offset, value_type)
-                        if value is not None:
-                            meta.has_sliding_window = (
-                                value > 0 or meta.has_sliding_window
-                            )
-                    elif key.endswith(_GGUF_SUFFIX_HEAD_CNT_KV):
-                        # Per-layer arrays appear on mixed-attention models
-                        # (e.g. gemma); the mean is exact for total KV size.
-                        if value_type == _GGUF_TYPE_ARRAY:
-                            mean, offset = _mean_gguf_uint_array(
-                                mm, offset, value_type
-                            )
-                            if mean is not None:
-                                meta.head_count_kv = mean
-                        else:
-                            value, offset = _unpack_gguf_uint(mm, offset, value_type)
-                            if value is not None:
-                                meta.head_count_kv = float(value)
-                    elif key.endswith(_GGUF_SUFFIX_HEAD_CNT):
-                        value, offset = _unpack_gguf_uint(mm, offset, value_type)
-                        if value is not None:
-                            meta.head_count = value
-                    elif key.endswith(_GGUF_SUFFIX_KEY_LEN):
-                        value, offset = _unpack_gguf_uint(mm, offset, value_type)
-                        if value is not None:
-                            meta.key_length = value
-                    elif key.endswith(_GGUF_SUFFIX_VAL_LEN):
-                        value, offset = _unpack_gguf_uint(mm, offset, value_type)
-                        if value is not None:
-                            meta.value_length = value
-                    elif key.endswith(_GGUF_SUFFIX_EMBED_LEN):
-                        value, offset = _unpack_gguf_uint(mm, offset, value_type)
-                        if value is not None:
-                            meta.embedding_length = value
+                    elif (
+                        key.endswith(_GGUF_SUFFIX_CTX_LEN)
+                        and value_type == _GGUF_TYPE_U32
+                    ):
+                        meta.context_length = int(
+                            struct.unpack_from("<I", mm, offset)[0]
+                        )
+                        offset += 4
+                    elif (
+                        key.endswith(_GGUF_SUFFIX_BLOCK_CNT)
+                        and value_type == _GGUF_TYPE_U32
+                    ):
+                        meta.block_count = int(struct.unpack_from("<I", mm, offset)[0])
+                        offset += 4
+                    elif (
+                        key.endswith(_GGUF_SUFFIX_SLIDING_WIN)
+                        and value_type == _GGUF_TYPE_U32
+                    ):
+                        meta.has_sliding_window = (
+                            int(struct.unpack_from("<I", mm, offset)[0]) > 0
+                            or meta.has_sliding_window
+                        )
+                        offset += 4
                     else:
                         if key.endswith(_GGUF_SUFFIX_SLIDING_PAT):
                             meta.has_sliding_window = True
@@ -350,42 +289,6 @@ def gguf_uses_sliding_window_attention(model_path: str) -> bool:
 def gguf_block_count(model_path: str) -> int | None:
     """Read transformer block count from GGUF metadata when available."""
     return _gguf_metadata(model_path).block_count
-
-
-def gguf_total_layers(model_path: str | Path) -> int:
-    """Block count with a conservative fallback when GGUF metadata is missing."""
-    return gguf_block_count(str(model_path)) or 64
-
-
-def gguf_kv_bytes_per_token(model_path: str) -> int | None:
-    """Exact fp16 KV-cache bytes per context token from GGUF metadata.
-
-    Uses attention geometry (GQA-aware) instead of parameter-count heuristics:
-    ``block_count * head_count_kv * (key_length + value_length) * 2 bytes``.
-    Returns ``None`` when the metadata is insufficient.
-    """
-    meta = _gguf_metadata(model_path)
-    if not meta.block_count:
-        return None
-
-    kv_heads = meta.head_count_kv
-    if kv_heads is None:
-        kv_heads = float(meta.head_count) if meta.head_count else None
-
-    key_length = meta.key_length
-    value_length = meta.value_length
-    if (key_length is None or value_length is None) and (
-        meta.embedding_length and meta.head_count
-    ):
-        head_dim = meta.embedding_length // meta.head_count
-        key_length = key_length if key_length is not None else head_dim
-        value_length = value_length if value_length is not None else head_dim
-
-    if not kv_heads or not key_length or not value_length:
-        return None
-
-    bytes_per_token = meta.block_count * kv_heads * (key_length + value_length) * 2
-    return int(bytes_per_token) or None
 
 
 def gguf_is_supported_by_llamacpp(model_path: str) -> bool:

@@ -361,63 +361,6 @@ def test_preferred_backend_apple_mlx_not_constrained_by_tight_memory(monkeypatch
     assert preferred_inference_backend(profile) == "mlx"
 
 
-def test_ui_headroom_uses_gpu_capacity_on_discrete_cards():
-    from seiso.hardware.tiers import ui_headroom_mb, vram_headroom_mb
-
-    profile = {
-        "backend": "cuda",
-        "gpus": [
-            {
-                "name": "NVIDIA GeForce RTX 4090",
-                "vram_total_mb": 24564,
-                "vram_used_mb": 23200,
-            }
-        ],
-        "ram_gb": 32,
-    }
-
-    assert ui_headroom_mb(profile) == 24564
-    assert vram_headroom_mb(profile) == 1364
-
-
-def test_ui_headroom_ignores_integrated_gpu_when_discrete_present():
-    from seiso.hardware.tiers import performance_headroom_mb, vram_headroom_mb
-
-    profile = {
-        "backend": "cuda",
-        "gpus": [
-            {"name": "Intel UHD Graphics", "vram_total_mb": 128, "vram_used_mb": 64},
-            {
-                "name": "NVIDIA GeForce RTX 3070",
-                "vram_total_mb": 8192,
-                "vram_used_mb": 2048,
-            },
-        ],
-        "ram_gb": 32,
-    }
-
-    assert performance_headroom_mb(profile) == 8192
-    assert vram_headroom_mb(profile) == 6144
-
-
-def test_ui_headroom_uses_free_ram_on_apple_unified(monkeypatch):
-    from seiso.hardware.tiers import ui_headroom_mb, vram_headroom_mb
-
-    class Memory:
-        available = int(11.37 * 1024**3)
-
-    monkeypatch.setattr("psutil.virtual_memory", lambda: Memory())
-    profile = {
-        "platform": "darwin",
-        "arch": "arm64",
-        "backend": "cpu",
-        "gpus": [],
-        "ram_gb": 24,
-    }
-
-    assert ui_headroom_mb(profile) == vram_headroom_mb(profile)
-
-
 def test_preferred_backend_apple_plenty_is_mlx(monkeypatch):
     profile = {"backend": "mlx", "gpus": [], "ram_gb": 64}
     monkeypatch.setattr("seiso.hardware.training.vram_headroom_mb", lambda _p: 20480)

@@ -1,5 +1,4 @@
 import { api, HardwareProfile, InferenceModelOption, LocalModel } from "@/lib/api";
-import { loadHeadroomMb } from "@/lib/hubHardware";
 import { ROUTER_MODEL_ID } from "@/lib/api/types";
 import { bindAbort, throwIfAborted } from "@/lib/abort";
 import { inventoryHasRepo, inventoryMatchesRepo, streamHubModelDownload, ModelProgressHandler } from "@/lib/hubDownload";
@@ -44,7 +43,6 @@ type BootstrapOptions = {
   onProgress?: ModelProgressHandler;
   initialModels?: InferenceModelOption[];
   hwProfile?: HardwareProfile | null;
-  freeVramMb?: number | null;
   signal?: AbortSignal;
 };
 
@@ -250,7 +248,7 @@ export async function bootstrapChatSession(
     throw new Error(hint);
   }
 
-  const headroomMb = loadHeadroomMb(options.hwProfile, options.freeVramMb);
+  const headroomMb = options.hwProfile?.vram_headroom_mb;
   if (selected && modelMemoryBlocked(selected, headroomMb)) {
     throw new Error(modelMemoryBlockReason(selected));
   }

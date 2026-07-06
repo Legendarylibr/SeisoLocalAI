@@ -11,8 +11,6 @@ import platform
 import sys
 from pathlib import Path
 
-from seiso.platform import detect_wsl2
-
 _ACK_HOST_VENV_ENV = "ADAPTIVE_RL_NVIDIA_HOST_VENV_ACK"
 _ACK_SECURE_VM_ENV = "ADAPTIVE_RL_NVIDIA_SECURE_VM"
 _ACK_WSL_ENV = "ADAPTIVE_RL_NVIDIA_WSL_ACK"
@@ -44,6 +42,16 @@ def in_ci() -> bool:
     if os.environ.get("GITHUB_ACTIONS", "").strip().lower() == "true":
         return True
     return _env_enabled("CI")
+
+
+def detect_wsl2() -> bool:
+    if os.environ.get("WSL_INTEROP") or os.environ.get("WSL_DISTRO_NAME"):
+        return True
+    try:
+        version = Path("/proc/version").read_text(encoding="utf-8").lower()
+    except OSError:
+        return False
+    return "microsoft" in version or "wsl2" in version
 
 
 def recommended_gpu_install_ack_env() -> str:
