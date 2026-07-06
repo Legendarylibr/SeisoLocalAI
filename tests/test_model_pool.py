@@ -674,6 +674,9 @@ def test_llama_load_kwargs_cuda_defaults(monkeypatch):
     monkeypatch.setattr(platform, "system", lambda: "Linux")
     monkeypatch.setattr(platform, "machine", lambda: "x86_64")
     monkeypatch.setattr(os, "cpu_count", lambda: 24)
+    monkeypatch.setattr(
+        "seiso.inference.model_pool._available_cpu_count", lambda: 24
+    )
     monkeypatch.setattr("seiso.inference.model_pool._cuda_available", lambda: True)
     monkeypatch.setattr("seiso.inference.model_pool._llama_gpu_offload_ok", lambda: True)
     monkeypatch.setattr("seiso.inference.model_pool._native_linux_nvidia", lambda: False)
@@ -702,10 +705,14 @@ def test_llama_load_kwargs_native_linux_nvidia_defaults(monkeypatch):
     monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 24576)
     monkeypatch.setattr("seiso.memory.protection.estimate_path_vram_mb", lambda _p: 1024)
     monkeypatch.setattr("seiso.inference.backends.gguf_block_count", lambda _p: 32)
+    monkeypatch.setattr("seiso.memory.protection.discrete_gpu_total_mb", lambda _p=None: 24576)
 
     kwargs = llama_load_kwargs(4096, model_path="/tmp/model.gguf")
-    assert kwargs["n_batch"] == 1024
-    assert kwargs["n_ubatch"] == 256
+    from seiso.memory.protection import gpu_batch_tier_caps
+
+    expected_batch, expected_ubatch = gpu_batch_tier_caps(24576, "normal")
+    assert kwargs["n_batch"] == expected_batch
+    assert kwargs["n_ubatch"] == expected_ubatch
     assert "flash_attn" not in kwargs
 
 
@@ -906,11 +913,17 @@ def test_llama_batch_defaults_are_speed_first(monkeypatch):
 
 def test_llama_batch_defaults_match_july3_speed_first(monkeypatch):
     import seiso.inference.model_pool as mp
+    from seiso.memory.protection import gpu_batch_tier_caps
 
     monkeypatch.setattr(mp, "_native_linux_nvidia", lambda: True)
+    monkeypatch.setattr(
+        "seiso.memory.protection.discrete_gpu_total_mb",
+        lambda _profile=None: 24576,
+    )
     batch, ubatch = mp._llama_batch_defaults()
-    assert batch == 4096
-    assert ubatch == 1024
+    expected_batch, expected_ubatch = gpu_batch_tier_caps(24576, "normal")
+    assert batch == expected_batch
+    assert ubatch == expected_ubatch
 
 
 def test_llama_load_model_tries_speed_profile_before_base(monkeypatch, tmp_path):
@@ -998,7 +1011,7 @@ def test_native_linux_load_model_uses_crash_resistant_kwargs(monkeypatch, tmp_pa
     first = attempts[0]
     assert first["n_batch"] <= 512
     assert first["n_ubatch"] <= 128
-    assert first["n_gpu_layers"] != -1
+    assert first["n_gpu_layers"] == -1
     assert first["offload_kqv"] is False
     assert first["op_offload"] is False
     assert "flash_attn" not in first
@@ -1065,7 +1078,7 @@ def test_native_linux_partial_offload_disables_kqv_and_op_offload(monkeypatch, t
     assert "flash_attn" not in attempts[0]
 
 
-def test_qwen36_27b_native_linux_starts_at_fitted_partial_offload(monkeypatch, tmp_path):
+def test_qwen36_27b_native_linux_falls_back_to_partial_when_full_offload_fails(monkeypatch, tmp_path):
     import seiso.inference.model_pool as mp
 
     gguf = tmp_path / "Qwen3.6-27B-UD-Q4_K_XL.gguf"
@@ -1075,6 +1088,8 @@ def test_qwen36_27b_native_linux_starts_at_fitted_partial_offload(monkeypatch, t
     class FakeLlama:
         def __init__(self, *, model_path: str, **kwargs):
             assert model_path == str(gguf)
+            if kwargs["n_gpu_layers"] == -1:
+                raise RuntimeError("Failed to create llama_context")
             attempts.append(dict(kwargs))
             self._seiso_n_gpu_layers = kwargs["n_gpu_layers"]
 
@@ -1174,7 +1189,7 @@ def test_qwen36_27b_native_linux_full_offloads_when_it_fits(monkeypatch, tmp_pat
     assert llm._seiso_n_gpu_layers == -1
 
 
-def test_qwen3_14b_24gb_load_uses_safe_full_gpu_kwargs(monkeypatch, tmp_path):
+def test_qwen3_14b_24gb_load_uses_full_gpu_kwargs(monkeypatch, tmp_path):
     import seiso.inference.model_pool as mp
 
     gguf = tmp_path / "qwen3-14b-q4.gguf"
@@ -1221,8 +1236,8 @@ def test_qwen3_14b_24gb_load_uses_safe_full_gpu_kwargs(monkeypatch, tmp_path):
     assert attempts
     first = attempts[0]
     assert first["n_gpu_layers"] == -1
-    assert first["n_batch"] <= 512
-    assert first["n_ubatch"] <= 128
+    assert first["n_batch"] >= 512
+    assert first["n_ubatch"] >= 128
     assert "flash_attn" not in first
 
 
@@ -1270,7 +1285,7 @@ def test_load_llama_model_records_last_safe_batch_from_override(monkeypatch, tmp
     assert llm._seiso_last_safe_ubatch == 128
 
 
-def test_llama_load_model_skips_full_offload_when_kv_reserve_does_not_fit(monkeypatch, tmp_path):
+def test_llama_load_model_tries_full_offload_before_partial_fallback(monkeypatch, tmp_path):
     import seiso.inference.model_pool as mp
 
     gguf = tmp_path / "qwen-27b-q4.gguf"
@@ -1280,6 +1295,8 @@ def test_llama_load_model_skips_full_offload_when_kv_reserve_does_not_fit(monkey
     class FakeLlama:
         def __init__(self, *, model_path: str, **kwargs):
             assert model_path == str(gguf)
+            if kwargs["n_gpu_layers"] == -1:
+                raise RuntimeError("Failed to create llama_context")
             layers_attempted.append(kwargs["n_gpu_layers"])
             self._seiso_n_gpu_layers = kwargs["n_gpu_layers"]
 
@@ -1309,12 +1326,15 @@ def test_llama_load_model_skips_full_offload_when_kv_reserve_does_not_fit(monkey
     mp._load_llama_model(str(gguf), 4096)
 
     assert layers_attempted
-    assert layers_attempted[0] != -1
     assert layers_attempted[0] >= 30
 
 
 def test_llama_load_profile_ladder_compact_tier(tmp_path):
-    from seiso.memory.protection import llama_load_profile_ladder
+    from seiso.memory.protection import (
+        discrete_gpu_total_mb,
+        gpu_batch_tier_caps,
+        llama_load_profile_ladder,
+    )
 
     gguf = tmp_path / "big.gguf"
     gguf.write_bytes(b"\x00" * 1024)
@@ -1328,7 +1348,9 @@ def test_llama_load_profile_ladder_compact_tier(tmp_path):
         base_ubatch=512,
         tier="compact",
     )
-    assert profiles[0]["n_batch"] <= 512
+    gpu_total = discrete_gpu_total_mb() or 8192
+    compact_batch, _ = gpu_batch_tier_caps(gpu_total, "compact")
+    assert profiles[0]["n_batch"] <= compact_batch
     assert profiles[0].get("_seiso_prompt_cache") is False
 
 

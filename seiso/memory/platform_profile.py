@@ -14,8 +14,9 @@ from seiso.hardware.tiers import (
     vram_headroom_mb,
 )
 from seiso.memory.protection import (
+    discrete_gpu_total_mb,
+    gpu_batch_tier_caps,
     llama_batch_limits_for_headroom,
-    resolve_llama_batch_limits,
 )
 from seiso.training.platform_caps import training_capabilities
 
@@ -25,21 +26,16 @@ def native_linux_nvidia_llama_batch_caps(
     tier: HardwareTier,
     headroom_mb: int,
     low: bool,
+    gpu_total_mb: int = 0,
 ) -> tuple[int, int, int]:
-    """Tier-aware llama.cpp batch/ubatch/cache caps for native Linux NVIDIA.
-
-    Prefill activations spike well above weight+KV; keep batches low so
-    multi-turn chat does not OOM after the model is already loaded.
-    """
-    batch, ubatch = resolve_llama_batch_limits(
-        headroom_mb, native_linux_nvidia=True
-    )
-    # Sub-workstation / low-memory profiles stay more conservative.
-    if tier != HardwareTier.WORKSTATION or low:
-        cap_batch, cap_ubatch = (256, 128) if low else (512, 128)
-        batch = min(batch, cap_batch)
-        ubatch = min(ubatch, cap_ubatch, batch)
-    cache_cap = 256 if low else (512 if tier == HardwareTier.WORKSTATION else 256)
+    """VRAM-derived llama.cpp batch/ubatch/cache caps for native Linux NVIDIA."""
+    total = gpu_total_mb or discrete_gpu_total_mb()
+    batch, ubatch = gpu_batch_tier_caps(total, "normal")
+    if low:
+        low_batch, low_ubatch = gpu_batch_tier_caps(total, "compact")
+        batch = min(batch, low_batch)
+        ubatch = min(ubatch, low_ubatch, batch)
+    cache_cap = min(2048, max(256, batch * 2))
     return batch, ubatch, cache_cap
 
 
@@ -196,6 +192,7 @@ def apply_platform_memory_profile(
                         tier=tier,
                         headroom_mb=headroom,
                         low=low,
+                        gpu_total_mb=headroom,
                     )
                     _refresh_native_linux_llama_env(
                         batch_cap=batch,

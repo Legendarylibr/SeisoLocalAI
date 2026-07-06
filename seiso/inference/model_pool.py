@@ -177,8 +177,17 @@ def _default_llama_flash_attn(model_path: str | None = None) -> bool:
         return False
 
 
-def _llama_batch_defaults() -> tuple[int, int]:
+def _llama_batch_defaults(model_path: str | None = None) -> tuple[int, int]:
     """Speed-first llama.cpp prompt/decode batch defaults (tight-fit models clamp at load)."""
+    if _native_linux_nvidia():
+        try:
+            from seiso.memory.protection import discrete_gpu_total_mb, gpu_batch_tier_caps
+
+            total = discrete_gpu_total_mb()
+            if total > 0:
+                return gpu_batch_tier_caps(total, "normal")
+        except Exception:
+            pass
     return 4096, 1024
 
 
@@ -201,58 +210,81 @@ def fit_llama_gpu_layers(
     )
 
     weight_mb = max(int(estimate_path_vram_mb(model_path)), 256)
-    native_mid_size_dense = False
-    if _native_linux_nvidia():
-        try:
-            from seiso.inference.family_policy import policy_for_gguf
-
-            policy = policy_for_gguf(model_path)
-            native_mid_size_dense = (
-                policy.kind == "dense"
-                and policy.prefill_tightness > 1.0
-                and 7 * 1024 <= weight_mb <= 16 * 1024
-                and headroom_mb <= 32 * 1024
-            )
-        except Exception:
-            native_mid_size_dense = False
-
-    if _native_linux_nvidia() and (
-        native_mid_size_dense
-        or llama_model_is_tight_vram_fit(
-            model_path=model_path,
-            free_mb=headroom_mb,
-            n_gpu_layers=-1 if requested == -1 else max(requested, 1),
-            n_ctx=n_ctx,
-        )
-    ):
-        # Leave real VRAM slack for near-capacity models during first-message prefill.
-        reserve_ratio = 0.15
-        if native_mid_size_dense:
-            reserve_ratio = 0.20
-        reserve_mb = max(2048, int(headroom_mb * reserve_ratio))
-        headroom_mb = max(0, headroom_mb - reserve_mb)
-
     total_layers = gguf_total_layers(model_path)
 
-    def _fits(layers: int) -> bool:
+    try:
+        from seiso.memory.protection import discrete_gpu_total_mb
+
+        capacity_mb = discrete_gpu_total_mb() or 0
+    except Exception:
+        capacity_mb = 0
+
+    def _fits(layers: int, budget_mb: int) -> bool:
         return llama_offload_fits_headroom(
             model_path,
-            headroom_mb=headroom_mb,
+            headroom_mb=budget_mb,
             n_gpu_layers=layers,
             n_ctx=n_ctx,
             weight_mb=weight_mb,
             total_layers=total_layers,
         )
 
-    if requested == -1 and _fits(-1):
-        return -1
+    # Prefer full GPU offload whenever weight+KV fits free VRAM or total GPU capacity.
+    if requested == -1:
+        if _fits(-1, headroom_mb):
+            return -1
+        if capacity_mb > headroom_mb and _fits(-1, capacity_mb):
+            return -1
 
     if requested > 0:
         capped = min(requested, total_layers)
-        if capped >= total_layers and _fits(-1):
+        if capped >= total_layers and (
+            _fits(-1, headroom_mb) or (capacity_mb > headroom_mb and _fits(-1, capacity_mb))
+        ):
             return capped
-        if _fits(capped):
+        if _fits(capped, headroom_mb):
             return capped
+        if capacity_mb > headroom_mb and _fits(capped, capacity_mb):
+            return capped
+
+    partial_budget = headroom_mb
+    if _native_linux_nvidia() and llama_model_is_tight_vram_fit(
+        model_path=model_path,
+        free_mb=headroom_mb,
+        n_gpu_layers=-1 if requested == -1 else max(requested, 1),
+        n_ctx=n_ctx,
+    ):
+        try:
+            from seiso.inference.family_policy import policy_for_gguf
+
+            policy = policy_for_gguf(model_path)
+            reserve_ratio = min(0.25, 0.12 + (policy.prefill_tightness - 1.0) * 0.20)
+        except Exception:
+            reserve_ratio = 0.15
+        reserve_mb = max(2048, int(headroom_mb * reserve_ratio))
+        partial_budget = max(0, headroom_mb - reserve_mb)
+
+    if _llama_skip_partial_offload(model_path):
+        try:
+            from seiso.memory.protection import discrete_gpu_total_mb
+
+            capacity_mb = discrete_gpu_total_mb() or headroom_mb
+        except Exception:
+            capacity_mb = headroom_mb
+        if capacity_mb > 0 and llama_offload_fits_headroom(
+            model_path,
+            headroom_mb=capacity_mb,
+            n_gpu_layers=-1,
+            n_ctx=n_ctx,
+            weight_mb=weight_mb,
+            total_layers=total_layers,
+        ):
+            return -1
+        logger.warning(
+            "Partial GPU offload is unsafe for SWA model %s — using CPU",
+            Path(model_path).name,
+        )
+        return 0
 
     kv_reserve_mb = llama_kv_cache_reserve_mb(
         model_path,
@@ -260,14 +292,14 @@ def fit_llama_gpu_layers(
         n_gpu_layers=-1 if requested == -1 else min(max(requested, 1), total_layers),
         total_layers=total_layers,
         weight_mb=weight_mb,
-        free_mb=headroom_mb,
+        free_mb=partial_budget,
     )
-    avail_mb = headroom_mb - kv_reserve_mb
+    avail_mb = partial_budget - kv_reserve_mb
 
     if avail_mb < 256:
         logger.warning(
             "VRAM too tight for GPU offload (~%.1f GB free) — falling back to CPU",
-            headroom_mb / 1024,
+            partial_budget / 1024,
         )
         return 0
 
@@ -276,7 +308,7 @@ def fit_llama_gpu_layers(
     if requested not in (-1, 0) and requested > 0:
         partial = min(partial, requested)
 
-    while partial > 0 and not _fits(partial):
+    while partial > 0 and not _fits(partial, partial_budget):
         partial -= 1
 
     if partial <= 0:
@@ -509,7 +541,7 @@ def llama_load_kwargs(n_ctx: int, *, model_path: str | None = None) -> dict[str,
         logger.debug("llama-cpp-python wheel lacks GPU offload support — forcing n_gpu_layers=0")
         n_gpu_layers = 0
 
-    batch_default, ubatch_default = _llama_batch_defaults()
+    batch_default, ubatch_default = _llama_batch_defaults(model_path)
 
     n_batch = env_int("SEISO_LLAMA_BATCH", batch_default)
     n_ubatch = min(env_int("SEISO_LLAMA_UBATCH", min(n_batch, ubatch_default)), n_batch)
@@ -628,7 +660,7 @@ def _load_llama_model(
     ]
     kv_options = _llama_kv_quant_options(path)
     fitted_layers = fit_llama_gpu_layers(path, requested, free_mb, n_ctx=effective_n_ctx)
-    full_targets = _llama_full_gpu_targets(requested) if fitted_layers == -1 else []
+    full_targets = _llama_full_gpu_targets(requested) if requested != 0 else []
     partial_targets = (
         _llama_layer_attempts(
             path,
