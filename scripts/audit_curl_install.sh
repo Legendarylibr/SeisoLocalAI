@@ -105,10 +105,17 @@ else
   bad "install worker missing hatchling bootstrap (editable install may fail on fresh venvs)"
 fi
 
-if rg -q 'cuda-toolkit\[nvcc\]>=13\.1\.0' "$ROOT/pyproject.toml" 2>/dev/null; then
-  ok "cuda-toolkit requires >=13.1.0 for PTX 9.3 compatibility"
+if rg -q 'seiso_repair_linux_cuda_stack' "$ROOT/scripts/lib/common.sh" 2>/dev/null \
+  && rg -q 'cuda-toolkit\[nvcc\]>=13\.1\.0' "$ROOT/scripts/lib/common.sh" 2>/dev/null; then
+  ok "install repairs cuda-toolkit ptxas to >=13.1.0 after torch (PTX 9.3 / RTX 4090)"
 else
-  bad "cuda-toolkit should be >=13.1.0 (13.0.2 ptxas caps at PTX 9.0)"
+  bad "install should upgrade cuda-toolkit via seiso_repair_linux_cuda_stack (13.0.2 ptxas caps at PTX 9.0)"
+fi
+
+if rg -q 'nvidia-cuda-runtime-cu12' "$ROOT/pyproject.toml" 2>/dev/null; then
+  ok "pyproject ships cu12 runtime for llama.cpp GPU offload"
+else
+  bad "pyproject missing nvidia-cuda-runtime-cu12 (llama.cpp needs libcudart.so.12)"
 fi
 
 if rg -q 'seiso_use_uv' "$ROOT/scripts/lib/common.sh" 2>/dev/null; then

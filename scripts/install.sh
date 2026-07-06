@@ -235,6 +235,13 @@ main() {
     install_failed "$root"
   fi
 
+  if [[ "$extras" == *cuda* || "$extras" == *llamacpp* ]]; then
+    seiso_repair_linux_cuda_stack "$root" || true
+    if [[ "$extras" == *llamacpp* ]]; then
+      seiso_verify_cuda_inference_stack "$root" || true
+    fi
+  fi
+
   seiso_install_start_command "$root"
 
   install_tui_outro "$root"

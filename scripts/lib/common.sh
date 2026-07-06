@@ -454,9 +454,53 @@ seiso_repair_cuda_ptxas() {
   if "$py" -c "from seiso.kernels.cuda_env import cuda_toolkit_status; s=cuda_toolkit_status(); raise SystemExit(0 if s.get('ptxas_compatible') else 1)" 2>/dev/null; then
     return 0
   fi
-  seiso_log "Repairing CUDA toolkit ptxas (PTX 9.3 required for kernel JIT)..."
+  seiso_log "Repairing CUDA toolkit ptxas (PTX 9.3 required for RTX 4090 kernel JIT)..."
   seiso_pip_install_for_venv "$py" 'cuda-toolkit[nvcc]>=13.1.0' || return 1
   rm -rf "${HOME:-/tmp}/.cache/torch_extensions"/*/seiso_cuda_kernels 2>/dev/null || true
+}
+
+seiso_repair_linux_cuda_stack() {
+  local root="$1"
+  local py="$root/.venv/bin/python"
+  [[ "$(uname -s)" == "Linux" ]] || return 0
+  [[ -x "$py" ]] || return 0
+  seiso_nvidia_gpu_detected || return 0
+
+  seiso_ensure_cu12_runtime "$root"
+  seiso_repair_cuda_ptxas "$root" \
+    || seiso_warn "CUDA ptxas repair skipped — fused kernels may fall back to PyTorch"
+
+  if "$py" -c "from seiso.platform import repair_linux_cuda_stack; repair_linux_cuda_stack(auto_install=False)" >/dev/null 2>&1; then
+    return 0
+  fi
+  seiso_warn "CUDA stack repair incomplete — try: pip install 'cuda-toolkit[nvcc]>=13.1.0' nvidia-cuda-runtime-cu12"
+  return 1
+}
+
+seiso_verify_cuda_inference_stack() {
+  local root="$1"
+  local py="$root/.venv/bin/python"
+  [[ -x "$py" ]] || return 0
+  seiso_nvidia_gpu_detected || return 0
+  if "$py" -c "
+from seiso.platform import ensure_cuda_library_path, repair_linux_cuda_stack
+report = repair_linux_cuda_stack(auto_install=False)
+ensure_cuda_library_path()
+import llama_cpp
+gpu = llama_cpp.llama_supports_gpu_offload()
+if not report.get('cu12_runtime'):
+    raise SystemExit('missing cu12 runtime')
+if not report.get('ptxas_compatible'):
+    raise SystemExit('ptxas incompatible with nvcc (need cuda-toolkit>=13.1.0)')
+if not gpu:
+    raise SystemExit('llama-cpp-python lacks GPU offload')
+print('cuda stack ok')
+" 2>/dev/null; then
+    seiso_log "CUDA inference stack verified (llama.cpp GPU + fused kernel JIT)"
+    return 0
+  fi
+  seiso_warn "CUDA inference stack not fully ready — GGUF GPU chat or fused kernels may fail"
+  return 1
 }
 
 seiso_ensure_llamacpp() {
@@ -613,8 +657,11 @@ seiso_run_install_worker() {
     wait "$llamacpp_pid" || true
   fi
   [[ "$ui_status" -eq 0 ]] || return 1
-  if [[ "$extras" == *cuda* ]]; then
-    seiso_repair_cuda_ptxas "$root" || seiso_warn "CUDA ptxas repair skipped — fused kernels may fall back to PyTorch"
+  if [[ "$extras" == *cuda* || "$extras" == *llamacpp* ]]; then
+    seiso_repair_linux_cuda_stack "$root" || true
+    if [[ "$extras" == *llamacpp* ]]; then
+      seiso_verify_cuda_inference_stack "$root" || true
+    fi
   fi
   seiso_verify_cli "$root"
 }
@@ -665,8 +712,8 @@ seiso_ensure_installed() {
 
   if [[ -x "$root/.venv/bin/seiso" && -f "$root/forge-ui/dist/index.html" ]] \
     && seiso_python_modules_available "$root" "$extras"; then
-    if [[ "$extras" == *cuda* ]]; then
-      seiso_repair_cuda_ptxas "$root" || seiso_warn "CUDA ptxas repair skipped — fused kernels may fall back to PyTorch"
+    if [[ "$extras" == *cuda* || "$extras" == *llamacpp* ]]; then
+      seiso_repair_linux_cuda_stack "$root" || true
     fi
     return 0
   fi
