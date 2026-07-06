@@ -25,13 +25,11 @@ type SelectableModel = MemoryFitModel & {
 /** True when a model cannot be loaded for chat (memory, incomplete download, etc.). */
 export function modelMemoryBlocked(
   model: SelectableModel | null | undefined,
-  headroomMb?: number,
+  _headroomMb?: number,
 ): boolean {
   if (!model) return false;
   if (model.selectable === false || model.status === "incomplete") return true;
-  if (model.memory_load_blocked && model.hardware_fit === "unlikely") return true;
-  if (headroomMb && model.est_vram_mb) return model.est_vram_mb > headroomMb * 1.12;
-  return false;
+  return Boolean(model.memory_load_blocked);
 }
 
 export function modelMemoryBlockReason(model: MemoryFitModel | null | undefined): string {
