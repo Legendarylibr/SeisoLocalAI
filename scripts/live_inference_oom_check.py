@@ -12,9 +12,9 @@ import re
 import subprocess
 import sys
 import time
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Iterable
 
 REPO = Path(__file__).resolve().parents[1]
 if str(REPO) not in sys.path:

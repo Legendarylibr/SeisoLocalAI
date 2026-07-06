@@ -48,7 +48,6 @@ from seiso.adaptive_quant.huggingface_cli import (
 )
 from seiso.adaptive_quant.logging_utils import md_table
 from seiso.adaptive_quant.model_routes import (
-    QUANT_BITS,
     ModelRoute,
     QuantSpec,
     RouteCatalog,

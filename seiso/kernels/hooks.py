@@ -179,6 +179,8 @@ def apply_training_kernels(
             eps = getattr(module, "variance_epsilon", getattr(module, "eps", 1e-6))
 
             def _rms_forward(self, hidden_states, _eps=eps):
+                if isinstance(hidden_states, tuple) and len(hidden_states) == 1:
+                    hidden_states = hidden_states[0]
                 if _use_fused_cuda_kernels(hidden_states):
                     return fused_rms_norm(hidden_states, self.weight, eps=_eps)
                 return self._seiso_orig_forward(hidden_states)
@@ -588,7 +590,8 @@ def apply_fused_lora_qkv_kernels(
     """
     Fuse LoRA Q/K/V delta computation per attention layer (single input read).
 
-    Active on NVIDIA CUDA when q/k/v PEFT layers share rank <= max_rank.
+    Active on NVIDIA CUDA tensors when q/k/v PEFT layers share rank <= max_rank.
+    If native CUDA extensions are unavailable, dispatch falls back to Torch/cuBLAS.
     """
     if low_vram is None:
         low_vram = kernel_low_vram_enabled()
@@ -598,7 +601,10 @@ def apply_fused_lora_qkv_kernels(
         "lora_qkv_patched": 0,
         "kernel_low_vram": low_vram,
     }
-    if not detect_gpu().uses_optimized_cuda_kernels or active_backend() != "cuda":
+    if not detect_gpu().uses_optimized_cuda_kernels or active_backend() not in {
+        "cuda",
+        "triton",
+    }:
         return meta
 
     patched = 0
@@ -718,16 +724,7 @@ def _patch_fused_residual_decoder_forward(model: Any, decoder: Any) -> bool:
         else:
             hidden_states = post_attn_skip + hidden_states
 
-        # Match HF decoder-layer contract: parents index outputs[0].
-        outputs: tuple[Any, ...] = (hidden_states,)
-        if output_attentions and isinstance(attn_out, tuple) and len(attn_out) > 1:
-            outputs += (attn_out[1],)
-        if use_cache and isinstance(attn_out, tuple):
-            # present_key_value is typically the last element when use_cache=True.
-            present = attn_out[-1] if len(attn_out) > (2 if output_attentions else 1) else None
-            if present is not None and present is not hidden_states:
-                outputs += (present,)
-        return outputs
+        return hidden_states
 
     decoder._seiso_residual_decoder_forward = _decoder_forward
     decoder._seiso_orig_forward = orig
@@ -739,7 +736,7 @@ def _patch_fused_residual_decoder_forward(model: Any, decoder: Any) -> bool:
 def apply_fused_residual_norm_kernels(model: Any) -> dict[str, Any]:
     """Patch decoder layers to fuse residual+RMSNorm on post-attention norms."""
     meta = {"fused_residual_norm_patched": 0, "fused_residual_decoder_patched": 0}
-    if active_backend() != "cuda":
+    if active_backend() not in {"cuda", "triton"}:
         return meta
 
     norm_patched = 0

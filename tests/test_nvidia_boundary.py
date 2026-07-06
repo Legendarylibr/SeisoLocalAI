@@ -39,12 +39,21 @@ def test_enforce_boundary_skips_non_linux():
 
 
 def test_enforce_boundary_requires_ack_on_linux_nvidia():
+    env_clear = {
+        "SEISO_NVIDIA_HOST_VENV_ACK": "",
+        "SEISO_NVIDIA_SECURE_VM": "",
+        "SEISO_NVIDIA_WSL_ACK": "",
+        "ADAPTIVE_RL_NVIDIA_HOST_VENV_ACK": "",
+        "ADAPTIVE_RL_NVIDIA_SECURE_VM": "",
+        "ADAPTIVE_RL_NVIDIA_WSL_ACK": "",
+    }
     with patch(
         "seiso.security.nvidia_boundary.is_linux_nvidia_host", return_value=True
     ):
         with patch("seiso.security.nvidia_boundary.in_ci", return_value=False):
-            with pytest.raises(SystemExit):
-                enforce_nvidia_secure_boundary(context="test")
+            with patch.dict(os.environ, env_clear, clear=False):
+                with pytest.raises(SystemExit):
+                    enforce_nvidia_secure_boundary(context="test")
 
 
 def test_enforce_boundary_wsl2_ack():

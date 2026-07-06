@@ -12,7 +12,6 @@ from seiso.memory.platform_profile import (
     memory_profile_label,
     native_linux_nvidia_llama_batch_caps,
 )
-from seiso.memory.protection import gpu_batch_tier_caps
 
 
 def _expected_native_caps(vram_mb: int, *, low: bool = False) -> tuple[int, int, int]:

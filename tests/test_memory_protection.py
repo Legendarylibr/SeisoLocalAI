@@ -14,7 +14,6 @@ from seiso.memory.protection import (
     clamp_llama_cache_mb,
     clamp_llama_load_kwargs,
     clamp_llama_n_ctx,
-    discrete_gpu_total_mb,
     ensure_load_fits,
     gpu_batch_tier_caps,
     is_oom_error,
