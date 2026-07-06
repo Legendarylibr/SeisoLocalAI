@@ -83,6 +83,7 @@ class SeisoTrainer:
         *,
         on_metric: Callable[[dict[str, Any]], None] | None = None,
         on_log: Callable[[str], None] | None = None,
+        job_id: str | None = None,
     ) -> None:
         self.config = config
         self.config.output_dir.mkdir(parents=True, exist_ok=True)
@@ -90,6 +91,7 @@ class SeisoTrainer:
         self._loaded: SeisoModel | None = None
         self._on_metric = on_metric
         self._on_log = on_log
+        self._job_id = job_id
         self._metrics_callback = None
 
     def _log(self, message: str) -> None:
@@ -103,6 +105,7 @@ class SeisoTrainer:
     def run(self) -> Path:
         self.config = apply_training_memory_guards(self.config)
         cfg = self.config
+        self._apply_cuda_training_profile()
         apply_determinism(cfg.seed, deterministic=cfg.deterministic)
         try:
             from seiso.kernels.training_profile import apply_cuda_speedopts
@@ -395,9 +398,54 @@ class SeisoTrainer:
         data_collator = self._make_collator(tokenizer, pad_to_multiple_of=pad_multiple)
         return detected_fmt, train_ds, eval_ds, dataset_text_field, data_collator
 
+    def _apply_cuda_training_profile(self) -> None:
+        cfg = self.config
+        try:
+            from seiso.hardware import hardware_profile, vram_headroom_mb
+            from seiso.kernels.training_profile import prepare_cuda_training_profile
+
+            profile_hw = hardware_profile()
+            headroom = vram_headroom_mb(profile_hw)
+            profile = prepare_cuda_training_profile(
+                headroom_mb=headroom,
+                model_id=str(cfg.model_id),
+                batch_size=cfg.batch_size,
+                max_seq_length=cfg.max_seq_length,
+            )
+            updates = {
+                key: profile[key]
+                for key in (
+                    "gradient_checkpointing",
+                    "use_fused_ce",
+                    "use_triton",
+                    "use_fused_lora",
+                    "use_fused_lora_qkv",
+                    "use_cuda_graphs",
+                    "max_seq_length",
+                )
+                if key in profile and getattr(cfg, key, None) != profile[key]
+            }
+            if updates:
+                self.config = cfg.model_copy(update=updates)
+        except Exception:
+            logger.debug("CUDA training profile skipped", exc_info=True)
+
     def _build_callbacks(self, metrics_cb, *, eval_enabled: bool) -> list[Any]:
         cfg = self.config
+        from seiso.training.cancel import should_stop
+
         callbacks: list[Any] = [metrics_cb]
+        stop_fn = should_stop(self._job_id)
+        if self._job_id:
+            from transformers import TrainerCallback
+
+            class _CancelTrainingCallback(TrainerCallback):
+                def on_step_end(self, args, state, control, **kwargs):
+                    if stop_fn():
+                        control.should_training_stop = True
+                        control.should_epoch_stop = True
+
+            callbacks.append(_CancelTrainingCallback())
         if eval_enabled and cfg.early_stopping:
             from transformers import EarlyStoppingCallback
 

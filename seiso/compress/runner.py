@@ -264,6 +264,8 @@ def run_compress_job(
         "stages": cfg["stages"],
         "stage_results": stage_results,
         "model_dir": stage_results.get("finetuned")
+        or stage_results.get("quantized_awq")
+        or stage_results.get("quantized_gptq")
         or stage_results.get("pruned")
         or stage_results.get("distilled")
         or cfg.get("model_dir"),

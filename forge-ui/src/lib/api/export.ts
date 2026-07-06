@@ -33,7 +33,7 @@ export const exportApi = {
         checkpoint,
         formats,
         profile: profile || null,
-        gguf_quantizations: ggufQuantizations?.length ? ggufQuantizations : null,
+        gguf_quantizations: ggufQuantizations?.length ? ggufQuantizations : undefined,
         hub: hub || null,
         rl_quant_job_id: rlQuantJobId || null,
       }),

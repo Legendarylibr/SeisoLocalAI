@@ -57,6 +57,10 @@ export function useStagePipelinePage<TJob extends { id: string }>({
           },
         });
         refreshJobs();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Failed to start pipeline";
+        console.error(err);
+        throw new Error(message);
       } finally {
         setStarting(false);
       }

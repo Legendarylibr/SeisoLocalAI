@@ -353,6 +353,7 @@ def run_training(
     *,
     on_metric=None,
     on_log: Callable[[str], None] | None = None,
+    job_id: str | None = None,
 ) -> Path:
     """Execute training job; returns output checkpoint directory."""
     from seiso.env import configure_transformers_env
@@ -379,7 +380,7 @@ def run_training(
         out = train_single_gpu_slime(slime_config)
         _write_slime_manifest(config, out)
         return out
-    trainer = SeisoTrainer(config, on_metric=on_metric, on_log=on_log)
+    trainer = SeisoTrainer(config, on_metric=on_metric, on_log=on_log, job_id=job_id)
     return trainer.run()
 
 

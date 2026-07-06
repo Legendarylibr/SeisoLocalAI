@@ -10,4 +10,4 @@ from seiso.security import SecurityError
 
 
 def raise_forbidden(exc: SecurityError) -> NoReturn:
-    raise HTTPException(403, str(exc)) from exc
+    raise HTTPException(403, "Access denied") from exc

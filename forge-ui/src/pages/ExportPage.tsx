@@ -90,32 +90,42 @@ export function ExportPage() {
       setLogs([UPLOAD_TOKEN_MSG]);
       return;
     }
+    const hubPayload = pushOnExport ? hubFields() : undefined;
+    if (pushOnExport && !hubPayload) {
+      setLogs(["Complete Hub username, model name, and author before publishing."]);
+      return;
+    }
     setBusy(true);
     setLogs([]);
     try {
       const res = await api.startExport(
         checkpoint,
         formats,
-        pushOnExport ? hubFields() : undefined,
+        hubPayload,
         rlQuantJobId || undefined,
         profile || undefined,
         rlQuantJobId ? undefined : ggufQuants,
       );
       setLastExportJobId(res.job_id);
       streamAbortRef.current?.();
-      streamAbortRef.current = subscribeSSE(`/export/jobs/${res.job_id}/stream`, (event, data) => {
-        if (event === "log" || event === "result") {
-          setLogs((l) => {
-            const next = appendBoundedLog(l, data);
-            return next;
-          });
-        }
-        if (event === "error") setLogs((l) => appendBoundedLog(l, `ERROR: ${data}`));
-        if (event === "result") {
-          invalidateApiCache("/inference/models");
-          invalidateApiCache("/training/models");
-        }
-      });
+      streamAbortRef.current = subscribeSSE(
+        `/export/jobs/${res.job_id}/stream`,
+        (event, data) => {
+          if (event === "log" || event === "result") {
+            setLogs((l) => {
+              const next = appendBoundedLog(l, data);
+              return next;
+            });
+          }
+          if (event === "error") setLogs((l) => appendBoundedLog(l, `ERROR: ${data}`));
+          if (event === "result" || event === "error") {
+            invalidateApiCache("/inference/models");
+            invalidateApiCache("/training/models");
+            api.listExportJobs().then(setExportJobs).catch(console.error);
+          }
+        },
+        (err) => setLogs((l) => appendBoundedLog(l, `ERROR: ${err.message}`)),
+      );
       setTimeout(() => api.listPublishableOutputs().then(setPublishable).catch(console.error), 2000);
       setTimeout(() => api.listExportJobs().then(setExportJobs).catch(console.error), 2000);
     } catch (err) {
