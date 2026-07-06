@@ -661,6 +661,11 @@ def _load_llama_model(
         total_layers = gguf_total_layers(path)
         if layers > 0 and layers < total_layers:
             load_kwargs.pop("flash_attn", None)
+            if _native_linux_nvidia():
+                if not env_bool("SEISO_LLAMA_UNSAFE_PARTIAL_KQV", False):
+                    load_kwargs["offload_kqv"] = False
+                if not env_bool("SEISO_LLAMA_UNSAFE_OP_OFFLOAD", False):
+                    load_kwargs["op_offload"] = False
         _refresh_headroom_stats(force=True)
         from seiso.memory.protection import clamp_llama_load_kwargs
 
@@ -1017,9 +1022,7 @@ class ModelPool:
             return True
         # Speculative bundles (spec:target:draft) are not interchangeable with
         # single-model pool handles that share the same target path.
-        if active.key.startswith("spec:"):
-            return True
-        return False
+        return active.key.startswith("spec:")
 
     def prepare_for_load(
         self,
@@ -1136,6 +1139,12 @@ class ModelPool:
                 layer_meta["n_gpu_layers"] = int(
                     getattr(handle, "_seiso_n_gpu_layers", -1)
                 )
+                requested_ctx = int((meta or {}).get("n_ctx") or 0)
+                layer_meta["n_ctx"] = int(
+                    getattr(handle, "_seiso_n_ctx", requested_ctx)
+                    or requested_ctx
+                    or 0
+                )
             with self._lock:
                 if (
                     self._active
@@ -1166,8 +1175,8 @@ class ModelPool:
                     meta={
                         "path": load_path,
                         "norm_path": norm,
-                        **layer_meta,
                         **(meta or {}),
+                        **layer_meta,
                     },
                 )
             if stale is not None:

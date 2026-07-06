@@ -1475,6 +1475,175 @@ def test_llama_complete_prefill_guard_reloads_before_native_linux_segfault(
     assert seen_overrides == [(512, 128)]
 
 
+def test_llama_complete_trims_prompt_to_loaded_context(monkeypatch):
+    from seiso.inference.runner import LocalInferenceRunner
+
+    runner = LocalInferenceRunner()
+    seen_messages: list[list[dict]] = []
+    seen_ctx: list[int] = []
+
+    class FakeLlama:
+        _seiso_load_tier = "normal"
+        _seiso_n_batch = 512
+        _seiso_n_ubatch = 128
+        _seiso_n_gpu_layers = -1
+        _seiso_load_headroom_mb = 24576
+        _seiso_model_path = "/tmp/model.gguf"
+
+        def create_chat_completion(self, **kwargs):
+            seen_messages.append(kwargs["messages"])
+            return {"choices": [{"message": {"content": "ok"}}]}
+
+    def get_llama(_path, n_ctx=4096, *, tier="normal"):
+        seen_ctx.append(n_ctx)
+        return FakeLlama()
+
+    monkeypatch.setattr(runner._pool, "get_llama", get_llama)
+    monkeypatch.setattr(runner._pool, "is_generation_active", lambda _gid: True)
+    monkeypatch.setattr(
+        "seiso.inference.runner.llama_prefill_needs_reload",
+        lambda **_kwargs: (False, 512, 128),
+    )
+
+    reply = runner._llama_complete(
+        {
+            "messages": [
+                {"role": "system", "content": "You are concise."},
+                {"role": "user", "content": "old " * 10000},
+                {"role": "assistant", "content": "history " * 10000},
+                {"role": "user", "content": "answer this"},
+            ],
+            "max_tokens": 128,
+            "n_ctx": 2048,
+        },
+        "/tmp/model.gguf",
+        generation_id=1,
+    )
+
+    assert reply == "ok"
+    assert seen_ctx == [2048]
+    assert seen_messages
+    assert seen_messages[0][-1]["content"] == "answer this"
+    assert len(seen_messages[0]) < 4
+
+
+def test_llama_complete_recomputes_context_after_prompt_trim(monkeypatch):
+    from seiso.inference.runner import LocalInferenceRunner
+
+    runner = LocalInferenceRunner()
+    seen_ctx: list[int] = []
+
+    class FakeLlama:
+        _seiso_load_tier = "normal"
+        _seiso_n_batch = 512
+        _seiso_n_ubatch = 128
+        _seiso_n_gpu_layers = -1
+        _seiso_load_headroom_mb = 24576
+        _seiso_model_path = "/tmp/model.gguf"
+
+        def create_chat_completion(self, **_kwargs):
+            return {"choices": [{"message": {"content": "ok"}}]}
+
+    def get_llama(_path, n_ctx=4096, *, tier="normal"):
+        seen_ctx.append(n_ctx)
+        return FakeLlama()
+
+    monkeypatch.setattr(runner._pool, "get_llama", get_llama)
+    monkeypatch.setattr(runner._pool, "is_generation_active", lambda _gid: True)
+    monkeypatch.setattr(
+        "seiso.inference.context_limits.effective_context_ceiling",
+        lambda *_a, **_k: 8192,
+    )
+    monkeypatch.setattr(
+        "seiso.inference.runner.llama_prefill_needs_reload",
+        lambda **_kwargs: (False, 512, 128),
+    )
+
+    reply = runner._llama_complete(
+        {
+            "messages": [
+                {"role": "system", "content": "You are concise."},
+                {"role": "user", "content": "old " * 10000},
+                {"role": "assistant", "content": "history " * 10000},
+                {"role": "user", "content": "answer this"},
+            ],
+            "max_tokens": 128,
+        },
+        "/tmp/model.gguf",
+        generation_id=1,
+    )
+
+    assert reply == "ok"
+    assert seen_ctx == [2048]
+
+
+def test_llama_complete_retrims_after_oom_recovery_smaller_context(monkeypatch):
+    from seiso.inference.runner import LocalInferenceRunner
+
+    runner = LocalInferenceRunner()
+    seen_lengths: list[int] = []
+    first = {"fail": True}
+
+    class FakeLlama:
+        def __init__(self, *, tier: str, actual_ctx: int) -> None:
+            self._seiso_load_tier = tier
+            self._seiso_n_ctx = actual_ctx
+            self._seiso_n_batch = 512
+            self._seiso_n_ubatch = 128
+            self._seiso_n_gpu_layers = -1
+            self._seiso_load_headroom_mb = 24576
+            self._seiso_model_path = "/tmp/model.gguf"
+            self._seiso_last_safe_batch = 512
+            self._seiso_last_safe_ubatch = 128
+
+        def create_chat_completion(self, **kwargs):
+            seen_lengths.append(
+                sum(len(str(m.get("content", ""))) for m in kwargs["messages"])
+            )
+            if first["fail"]:
+                first["fail"] = False
+                raise RuntimeError("CUDA out of memory. Tried to allocate 2.00 GiB")
+            return {"choices": [{"message": {"content": "ok"}}]}
+
+    monkeypatch.setattr(
+        runner._pool,
+        "get_llama",
+        lambda *_a, **_k: FakeLlama(tier="normal", actual_ctx=4096),
+    )
+    monkeypatch.setattr(
+        runner._pool,
+        "reload_llama",
+        lambda *_a, **_k: FakeLlama(tier="compact", actual_ctx=2048),
+    )
+    monkeypatch.setattr(runner._pool, "is_generation_active", lambda _gid: True)
+    monkeypatch.setattr(
+        "seiso.inference.runner.release_cached_memory", lambda sync=False: None
+    )
+    monkeypatch.setattr(
+        "seiso.inference.runner.llama_prefill_needs_reload",
+        lambda **_kwargs: (False, 512, 128),
+    )
+
+    reply = runner._llama_complete(
+        {
+            "messages": [
+                {"role": "system", "content": "You are concise."},
+                {"role": "user", "content": "old " * 800},
+                {"role": "assistant", "content": "history " * 500},
+                {"role": "user", "content": "answer this"},
+            ],
+            "max_tokens": 128,
+            "n_ctx": 4096,
+        },
+        "/tmp/model.gguf",
+        generation_id=1,
+    )
+
+    assert reply == "ok"
+    assert len(seen_lengths) == 2
+    assert seen_lengths[1] < seen_lengths[0]
+
+
 def test_llama_stream_does_not_retry_after_emitting_text(monkeypatch):
     from seiso.inference.runner import LocalInferenceRunner
 

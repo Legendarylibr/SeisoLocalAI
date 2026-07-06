@@ -24,6 +24,7 @@ from seiso.memory.protection import (
     llama_offload_fits_headroom,
     llama_prefill_needs_reload,
     sanitize_inference_payload,
+    trim_llama_messages_to_context,
 )
 
 
@@ -67,6 +68,34 @@ def test_sanitize_inference_payload_clamps_max_tokens(monkeypatch):
     assert 1 <= out["max_tokens"] <= 8192
 
 
+def test_trim_llama_messages_to_context_drops_old_history_before_prefill():
+    messages = [
+        {"role": "system", "content": "You are concise."},
+        {"role": "user", "content": "old question " * 3000},
+        {"role": "assistant", "content": "old answer " * 3000},
+        {"role": "user", "content": "current question"},
+    ]
+
+    trimmed = trim_llama_messages_to_context(messages, n_ctx=2048, max_tokens=256)
+
+    assert trimmed[0]["role"] == "system"
+    assert trimmed[-1]["content"] == "current question"
+    assert len(trimmed) < len(messages)
+    assert sum(len(str(m.get("content", ""))) for m in trimmed) < 4000
+
+
+def test_trim_llama_messages_to_context_leaves_short_prompt_unchanged():
+    messages = [
+        {"role": "system", "content": "You are concise."},
+        {"role": "user", "content": "current question"},
+    ]
+
+    assert (
+        trim_llama_messages_to_context(messages, n_ctx=4096, max_tokens=256)
+        is messages
+    )
+
+
 def test_clamp_llama_n_ctx_respects_headroom(monkeypatch):
     monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 3072)
     n_ctx = clamp_llama_n_ctx(
@@ -91,6 +120,37 @@ def test_clamp_llama_load_kwargs_does_not_scale_batch_with_large_context(monkeyp
         {"n_ctx": 8192, "n_batch": 2048, "n_ubatch": 512, "n_gpu_layers": -1}
     )
     assert kwargs["n_batch"] == 2048
+
+
+def test_clamp_llama_load_kwargs_uses_model_context_ceiling(monkeypatch, tmp_path):
+    gguf = tmp_path / "short-context.gguf"
+    gguf.write_bytes(b"\x00" * 1024)
+    seen: dict[str, object] = {}
+
+    def fake_ceiling(model_path, *, model_format=None, model_name=None):
+        seen["model_path"] = model_path
+        seen["model_format"] = model_format
+        seen["model_name"] = model_name
+        return 4096
+
+    monkeypatch.setattr(
+        "seiso.inference.context_limits.effective_context_ceiling",
+        fake_ceiling,
+    )
+
+    kwargs = clamp_llama_load_kwargs(
+        {
+            "_model_path": str(gguf),
+            "n_ctx": 131072,
+            "n_batch": 512,
+            "n_ubatch": 128,
+            "n_gpu_layers": 0,
+        }
+    )
+
+    assert kwargs["n_ctx"] == 4096
+    assert seen["model_path"] == str(gguf)
+    assert seen["model_format"] == "gguf"
 
 
 def test_llama_batch_limits_scale_by_gpu_headroom():
@@ -553,6 +613,39 @@ def test_llama_prefill_guard_reloads_short_prompt_for_borderline_24gb_q4(
     assert needs_reload is True
     assert safe_batch <= 512
     assert safe_ubatch <= 256
+
+
+def test_llama_prefill_guard_reloads_when_loaded_ubatch_exceeds_safe(
+    monkeypatch, tmp_path
+):
+    gguf = tmp_path / "qwen-30b-q4.gguf"
+    gguf.write_bytes(b"\x00" * 1024)
+    monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: True)
+    monkeypatch.setattr("seiso.memory.protection.hardware_profile", lambda **_: {})
+    monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 24576)
+    monkeypatch.setattr(
+        "seiso.memory.protection.estimate_path_vram_mb", lambda _p: 15000
+    )
+    monkeypatch.setattr(
+        "seiso.memory.protection.llama_kv_cache_reserve_mb",
+        lambda *_args, **_kwargs: 512,
+    )
+    monkeypatch.setattr("seiso.memory.protection.available_ram_mb", lambda: 65536)
+
+    needs_reload, safe_batch, safe_ubatch = llama_prefill_needs_reload(
+        model_path=str(gguf),
+        messages=[{"role": "user", "content": "hi"}],
+        n_ctx=4096,
+        loaded_n_batch=256,
+        loaded_n_ubatch=512,
+        loaded_n_gpu_layers=-1,
+        load_tier="normal",
+        loaded_headroom_mb=24576,
+    )
+
+    assert needs_reload is True
+    assert safe_batch == 256
+    assert safe_ubatch == 128
 
 
 def test_llama_prefill_guard_reloads_when_headroom_shrank_without_15pct_drop(

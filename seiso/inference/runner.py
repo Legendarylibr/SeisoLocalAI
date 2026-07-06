@@ -46,6 +46,7 @@ from seiso.memory.protection import (
     llama_prefill_needs_reload,
     release_cached_memory,
     sanitize_inference_payload,
+    trim_llama_messages_to_context,
 )
 from seiso.models.chat_format import format_messages_for_prompt
 
@@ -761,6 +762,7 @@ class LocalInferenceRunner:
             messages=messages,
             n_ctx=n_ctx,
             loaded_n_batch=int(getattr(llm, "_seiso_n_batch", 4096) or 4096),
+            loaded_n_ubatch=int(getattr(llm, "_seiso_n_ubatch", 1024) or 1024),
             loaded_n_gpu_layers=int(getattr(llm, "_seiso_n_gpu_layers", 0) or 0),
             load_tier=current_tier,
             loaded_headroom_mb=getattr(llm, "_seiso_load_headroom_mb", None),
@@ -797,6 +799,18 @@ class LocalInferenceRunner:
             model_path=model_path,
             model_format=payload.get("model_format"),
         )
+        messages = trim_llama_messages_to_context(
+            messages,
+            n_ctx=int(n_ctx),
+            max_tokens=int(payload.get("max_tokens", 512)),
+        )
+        if not payload.get("n_ctx"):
+            n_ctx = estimate_llama_n_ctx(
+                messages,
+                max_tokens=int(payload.get("max_tokens", 512)),
+                model_path=model_path,
+                model_format=payload.get("model_format"),
+            )
         llm = self._pool.get_llama(model_path, n_ctx=n_ctx)
         llm = self._llama_guard_prefill(
             llm, model_path=model_path, messages=messages, n_ctx=n_ctx
@@ -822,6 +836,14 @@ class LocalInferenceRunner:
                 llm = self._llama_recover_from_oom(
                     llm, model_path=model_path, n_ctx=n_ctx
                 )
+                actual_ctx = int(getattr(llm, "_seiso_n_ctx", n_ctx) or n_ctx)
+                if actual_ctx < int(n_ctx):
+                    n_ctx = actual_ctx
+                    messages = trim_llama_messages_to_context(
+                        messages,
+                        n_ctx=actual_ctx,
+                        max_tokens=int(payload.get("max_tokens", 512)),
+                    )
         if not self._pool.is_generation_active(generation_id):
             return ""
         choices = out.get("choices") or []
@@ -864,6 +886,18 @@ class LocalInferenceRunner:
             model_path=model_path,
             model_format=payload.get("model_format"),
         )
+        messages = trim_llama_messages_to_context(
+            messages,
+            n_ctx=int(n_ctx),
+            max_tokens=int(payload.get("max_tokens", 512)),
+        )
+        if not payload.get("n_ctx"):
+            n_ctx = estimate_llama_n_ctx(
+                messages,
+                max_tokens=int(payload.get("max_tokens", 512)),
+                model_path=model_path,
+                model_format=payload.get("model_format"),
+            )
         try:
             llm = self._pool.get_llama(model_path, n_ctx=n_ctx)
         except ImportError as exc:
@@ -927,6 +961,14 @@ class LocalInferenceRunner:
                 llm = self._llama_recover_from_oom(
                     llm, model_path=model_path, n_ctx=n_ctx
                 )
+                actual_ctx = int(getattr(llm, "_seiso_n_ctx", n_ctx) or n_ctx)
+                if actual_ctx < int(n_ctx):
+                    n_ctx = actual_ctx
+                    messages = trim_llama_messages_to_context(
+                        messages,
+                        n_ctx=actual_ctx,
+                        max_tokens=int(payload.get("max_tokens", 512)),
+                    )
 
 
 def get_inference_runner() -> LocalInferenceRunner:

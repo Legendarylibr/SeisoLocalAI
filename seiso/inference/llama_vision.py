@@ -127,11 +127,11 @@ def _vision_handler_specs(model_path: str) -> list[str]:
 
     if "qwen" in name and ("vl" in name or "vision" in arch):
         specs.append("Qwen25VLChatHandler")
-    if "gemma" in name or "gemma" in arch:
-        if _name_suggests_vision(name) or any(
-            token in arch for token in ("vision", "clip", "mmproj", "vl")
-        ):
-            specs.extend(["Gemma4ChatHandler", "Gemma3ChatHandler"])
+    if ("gemma" in name or "gemma" in arch) and (
+        _name_suggests_vision(name)
+        or any(token in arch for token in ("vision", "clip", "mmproj", "vl"))
+    ):
+        specs.extend(["Gemma4ChatHandler", "Gemma3ChatHandler"])
     if "llava" in name or "llava" in arch:
         specs.extend(["Llava16ChatHandler", "Llava15ChatHandler"])
     if "moondream" in name:
