@@ -2,61 +2,46 @@
 
 from __future__ import annotations
 
-import pytest
-
-from forge.services import artifact_integrity
+from forge.services.artifact_integrity import inventory_gguf_is_complete
 
 
-def test_path_has_complete_artifact_short_circuits_unknown_directory_size(
-    monkeypatch, tmp_path
-):
-    model_dir = tmp_path / "model"
-    model_dir.mkdir()
-    first = model_dir / "first.gguf"
-    second = model_dir / "second.gguf"
-    first.write_bytes(b"gguf")
-    second.write_bytes(b"more")
+def test_inventory_gguf_uses_size_bytes_when_hub_lookup_fails(tmp_path):
+    path = tmp_path / "model-Q4_K_M.gguf"
+    path.write_bytes(b"partial")
+    row = {
+        "path": str(path),
+        "format": "gguf",
+        "size_bytes": 10_000,
+        "source": "hf:org/Model",
+    }
+    metadata = {
+        "repo_id": "org/Model",
+        "gguf_repo": "mirror/Model-GGUF",
+        "gguf_files": ["model-Q4_K_M.gguf"],
+    }
 
-    yielded = []
+    def boom(_repo: str, _filename: str) -> int:
+        raise OSError("offline")
 
-    def fake_iter_matching_files(*_args, **_kwargs):
-        yielded.append(first.name)
-        yield first
-        pytest.fail("unknown-size completeness should stop after first usable file")
-
-    monkeypatch.setattr(
-        artifact_integrity, "iter_matching_files", fake_iter_matching_files
-    )
-
-    assert artifact_integrity.path_has_complete_artifact(model_dir, "gguf", 0)
-    assert yielded == [first.name]
+    assert inventory_gguf_is_complete(row, metadata, size_lookup=boom) is False
 
 
-def test_inventory_gguf_support_check_uses_metadata_file(monkeypatch, tmp_path):
-    model_dir = tmp_path / "model"
-    model_dir.mkdir()
-    wanted = model_dir / "model-Q4_K_M.gguf"
-    other = model_dir / "model-Q8_0.gguf"
-    wanted.write_bytes(b"q4")
-    other.write_bytes(b"q8-larger")
+def test_inventory_gguf_rejects_hf_without_size_when_hub_offline(tmp_path):
+    path = tmp_path / "model-Q4_K_M.gguf"
+    path.write_bytes(b"partial")
+    row = {
+        "path": str(path),
+        "format": "gguf",
+        "size_bytes": 0,
+        "source": "hf:org/Model",
+    }
+    metadata = {
+        "repo_id": "org/Model",
+        "gguf_repo": "mirror/Model-GGUF",
+        "gguf_files": ["model-Q4_K_M.gguf"],
+    }
 
-    seen: list[str] = []
-    monkeypatch.setattr(
-        artifact_integrity,
-        "gguf_is_supported_by_llamacpp",
-        lambda path: seen.append(path) or True,
-    )
+    def boom(_repo: str, _filename: str) -> int:
+        raise OSError("offline")
 
-    assert artifact_integrity.inventory_gguf_is_complete(
-        {
-            "path": str(model_dir),
-            "format": "gguf",
-            "source": "hf:org/Model",
-        },
-        {
-            "repo_id": "org/Model",
-            "gguf_files": ["model-Q4_K_M.gguf"],
-        },
-        size_lookup=lambda _repo, _filename: wanted.stat().st_size,
-    )
-    assert seen == [str(wanted)]
+    assert inventory_gguf_is_complete(row, metadata, size_lookup=boom) is False

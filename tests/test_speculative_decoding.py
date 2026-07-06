@@ -12,6 +12,7 @@ from seiso.inference.speculative import (
     DFlashDraftSpeculativeBundle,
     TorchSpeculativeBundle,
     _decode_new_text,
+    _verify_proposed,
     default_num_speculative_tokens,
     iter_speculative_tokens,
     iter_speculative_tokens_dflash,
@@ -178,6 +179,20 @@ def test_default_num_speculative_tokens_from_payload():
 def test_default_num_speculative_tokens_env_fallback(monkeypatch):
     monkeypatch.setenv("SEISO_SPECULATIVE_TOKENS", "7")
     assert default_num_speculative_tokens({}) == 7
+
+
+def test_verify_proposed_accepts_prefix_then_rejects():
+    import torch
+
+    k = 3
+    proposed_ids_t = torch.tensor([[4, 5, 6]], dtype=torch.long)
+    prefix_logits = torch.zeros(1, 16)
+    prefix_logits[0, 4] = 10.0
+    verify_logits = torch.zeros(1, k - 1, 16)
+    verify_logits[0, 0, 5] = 10.0
+    verify_logits[0, 1, 7] = 10.0
+
+    assert _verify_proposed(prefix_logits, verify_logits, proposed_ids_t) == 2
 
 
 def test_decode_new_text_is_bpe_safe():

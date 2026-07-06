@@ -248,7 +248,14 @@ def ensure_cuda_library_path() -> list[str]:
     current_parts = [p for p in current.split(":") if p]
     merged = dirs + [p for p in current_parts if p not in dirs]
     os.environ["LD_LIBRARY_PATH"] = ":".join(merged)
-    preload_cuda_shared_libraries(lib_dirs=dirs)
+    loaded = preload_cuda_shared_libraries(lib_dirs=dirs)
+    if loaded:
+        try:
+            from seiso.inference.model_pool import reset_llama_gpu_offload_cache
+
+            reset_llama_gpu_offload_cache()
+        except ImportError:
+            pass
     return dirs
 
 
@@ -261,3 +268,61 @@ def detect_wsl2() -> bool:
     except OSError:
         return False
     return "microsoft" in version or "wsl2" in version
+
+
+def _resolve_hardware_profile(profile: dict | None) -> dict | None:
+    if profile is not None:
+        return profile
+    try:
+        from seiso.hardware.profile import hardware_profile
+
+        return hardware_profile()
+    except ImportError:
+        return None
+
+
+def llamacpp_deferred_preflight_platform(*, profile: dict | None = None) -> str | None:
+    """Platform id when llama.cpp load ladder should defer strict preflight blocking."""
+    profile = _resolve_hardware_profile(profile)
+    if profile is None:
+        return None
+
+    try:
+        from seiso.hardware.tiers import HardwareTier, classify_tier
+
+        if classify_tier(profile) == HardwareTier.APPLE_UNIFIED:
+            return "apple_unified"
+    except ImportError:
+        pass
+
+    if is_native_linux_nvidia(profile=profile):
+        return "linux_nvidia"
+    return None
+
+
+def is_native_linux_nvidia(*, profile: dict | None = None) -> bool:
+    """True on bare-metal Linux with a discrete NVIDIA GPU (not WSL, not CPU-only)."""
+    if platform.system() != "Linux" or detect_wsl2():
+        return False
+    profile = _resolve_hardware_profile(profile)
+    if profile is None:
+        return False
+    gpus = profile.get("gpus") or []
+    if not gpus:
+        return False
+    try:
+        from seiso.hardware.tiers import HardwareTier, classify_tier
+
+        tier = classify_tier(profile)
+        if tier in (HardwareTier.APPLE_UNIFIED, HardwareTier.CPU_ONLY):
+            return False
+    except ImportError:
+        pass
+    vendor = str(profile.get("vendor") or "").lower()
+    if vendor == "nvidia":
+        return True
+    for gpu in gpus:
+        name = str(gpu.get("name") or "").lower()
+        if "nvidia" in name or "geforce" in name or "rtx" in name or "quadro" in name:
+            return True
+    return False
