@@ -1,25 +1,26 @@
 #!/usr/bin/env python3
-"""Live NVIDIA inference OOM guard + throughput check on real GGUF models."""
+"""Live NVIDIA inference OOM guard check using Hugging Face Hub repo ids only."""
 
 from __future__ import annotations
 
+import argparse
 import asyncio
+import gc
 import json
 import os
+import re
 import subprocess
 import sys
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+from typing import Iterable
 
 REPO = Path(__file__).resolve().parents[1]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
-DEFAULT_MODELS = [
-    "/home/c/.cache/huggingface/hub/models--unsloth--Qwen3.5-4B-GGUF/snapshots/e87f176479d0855a907a41277aca2f8ee7a09523/Qwen3.5-4B-UD-Q4_K_XL.gguf",
-    "/home/c/.cache/huggingface/hub/models--unsloth--Qwen3.6-27B-MTP-GGUF/snapshots/b3a58239d8d40b953e34936c9afeb28baa518230/Qwen3.6-27B-UD-Q4_K_XL.gguf",
-]
+_HF_REPO_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 
 @dataclass
@@ -31,6 +32,7 @@ class GpuSnapshot:
 
 @dataclass
 class ModelLiveResult:
+    repo_id: str
     model_path: str
     ok: bool
     error: str = ""
@@ -66,6 +68,112 @@ def gpu_snapshot() -> GpuSnapshot:
         return GpuSnapshot(used_mb=0, free_mb=0, total_mb=0)
 
 
+def _init_seiso_hub(*, token: str | None = None) -> Path:
+    from seiso.models.hf_env import configure_hf_hub_auth, configure_hf_hub_cache
+
+    cache = configure_hf_hub_cache()
+    configure_hf_hub_auth(token)
+    return cache
+
+
+def _seiso_hub_cache() -> Path:
+    from seiso.models.hf_env import resolve_hf_cache_dir
+
+    return resolve_hf_cache_dir()
+
+
+def _validate_repo_id(repo_id: str) -> str:
+    repo = repo_id.strip()
+    if not _HF_REPO_RE.match(repo):
+        raise ValueError(f"Invalid Hugging Face repo id: {repo_id!r} (expected org/name)")
+    return repo
+
+
+def _is_chat_gguf_filename(name: str) -> bool:
+    lower = name.lower()
+    return (
+        lower.endswith(".gguf")
+        and "mmproj" not in lower
+        and not lower.startswith("mtp-")
+    )
+
+
+def _is_chat_gguf_file(path: Path) -> bool:
+    if not _is_chat_gguf_filename(path.name):
+        return False
+    try:
+        from seiso.inference.backends import gguf_is_supported_by_llamacpp, is_dflash_draft
+
+        if is_dflash_draft(str(path)):
+            return False
+        return gguf_is_supported_by_llamacpp(str(path))
+    except Exception:
+        return True
+
+
+def _pick_repo_gguf_file(repo_files: list[str]) -> str | None:
+    from seiso.models.gguf_quant import rank_gguf_filenames
+
+    ggufs = [name for name in repo_files if _is_chat_gguf_filename(name)]
+    if not ggufs:
+        return None
+
+    def is_huge(name: str) -> bool:
+        lower = name.lower()
+        return any(x in lower for x in ("270b", "235b", "100b"))
+
+    pool = [name for name in ggufs if not is_huge(name)] or ggufs
+    ranked = rank_gguf_filenames(pool, preferred="Q4_K_M")
+    return ranked[0] if ranked else None
+
+
+def resolve_hf_repo(repo_id: str, *, token: str | None = None) -> str | None:
+    """Download or refresh a compatible chat GGUF from a Hugging Face repo id."""
+    repo_id = _validate_repo_id(repo_id)
+    cache = _seiso_hub_cache()
+
+    try:
+        from huggingface_hub import HfApi, hf_hub_download
+
+        api = HfApi(token=token)
+        filename = _pick_repo_gguf_file(api.list_repo_files(repo_id))
+        if not filename:
+            print(f"SKIP: {repo_id} has no compatible chat GGUF files on Hugging Face", flush=True)
+            return None
+        downloaded = hf_hub_download(
+            repo_id,
+            filename,
+            token=token,
+            cache_dir=str(cache),
+        )
+        path = Path(downloaded)
+        if not _is_chat_gguf_file(path):
+            print(f"SKIP: {repo_id}/{filename} is not supported by llama.cpp", flush=True)
+            return None
+        return str(path.resolve())
+    except Exception as exc:
+        print(f"SKIP: failed to fetch {repo_id} from Hugging Face: {exc}", flush=True)
+        return None
+
+
+def discover_hf_repos(*, limit: int = 2, token: str | None = None) -> list[str]:
+    """Pick compatible GGUF repos from live Hugging Face Hub search (not local disk)."""
+    from seiso.models.catalog import search_catalog
+
+    result = search_catalog(limit=max(limit * 4, 8), token=token)
+    repos: list[str] = []
+    for row in result.models:
+        repo_id = row.get("repo_id")
+        if not isinstance(repo_id, str) or not row.get("gguf_repo"):
+            continue
+        if not _HF_REPO_RE.match(repo_id):
+            continue
+        repos.append(repo_id)
+        if len(repos) >= limit:
+            break
+    return repos
+
+
 def _long_messages() -> list[dict[str, str]]:
     chunk = (
         "Summarize the key ideas from this paragraph in one sentence. "
@@ -86,6 +194,8 @@ def _analyze_model(model_path: str, *, n_ctx: int = 4096) -> dict:
     from seiso.inference.model_pool import fit_llama_gpu_layers, llama_load_kwargs
     from seiso.memory.platform_profile import apply_platform_memory_profile
     from seiso.memory.protection import (
+        clamp_llama_load_kwargs,
+        discrete_gpu_total_mb,
         gpu_batch_tier_caps,
         headroom_mb,
         llama_model_is_tight_vram_fit,
@@ -97,8 +207,6 @@ def _analyze_model(model_path: str, *, n_ctx: int = 4096) -> dict:
     free_mb = headroom_mb()
     kwargs = llama_load_kwargs(n_ctx, model_path=model_path)
     kwargs["_model_path"] = model_path
-    from seiso.memory.protection import clamp_llama_load_kwargs
-
     kwargs = clamp_llama_load_kwargs(kwargs)
     gpu_layers = fit_llama_gpu_layers(model_path, -1, free_mb, n_ctx=n_ctx)
     tight = llama_model_is_tight_vram_fit(
@@ -126,20 +234,16 @@ def _analyze_model(model_path: str, *, n_ctx: int = 4096) -> dict:
         loaded_n_gpu_layers=gpu_layers,
         loaded_headroom_mb=free_mb,
     )
-    gpu_total = free_mb
-    try:
-        from seiso.memory.protection import discrete_gpu_total_mb
-
-        gpu_total = discrete_gpu_total_mb() or free_mb
-    except Exception:
-        pass
+    gpu_total = discrete_gpu_total_mb() or free_mb
     tier_batch, tier_ubatch = gpu_batch_tier_caps(gpu_total, "normal")
+    compact_batch, _ = gpu_batch_tier_caps(gpu_total, "compact")
     return {
         "native_guards": use_linux_nvidia_inference_guards(),
         "free_mb": free_mb,
         "gpu_total_mb": gpu_total,
         "tier_batch": tier_batch,
         "tier_ubatch": tier_ubatch,
+        "compact_batch_cap": compact_batch,
         "kwargs": {
             k: kwargs[k]
             for k in (
@@ -227,70 +331,137 @@ async def _run_inference(model_path: str, *, max_tokens: int = 64) -> dict:
         pool.cancel_and_unload()
 
 
-async def run_live(models: list[str]) -> list[ModelLiveResult]:
+async def run_live(
+    repo_jobs: Iterable[tuple[str, str]], *, max_tokens: int
+) -> list[ModelLiveResult]:
     from seiso.inference.model_pool import get_model_pool
     from seiso.memory.protection import release_cached_memory
 
     results: list[ModelLiveResult] = []
     pool = get_model_pool()
-    for model_path in models:
-        path = Path(model_path)
-        name = path.name
-        print(f"\n=== {name} ===", flush=True)
-        if not path.is_file():
-            results.append(
-                ModelLiveResult(model_path=model_path, ok=False, error="model file missing")
-            )
-            print("SKIP: missing file", flush=True)
-            continue
+    for repo_id, model_path in repo_jobs:
+        name = Path(model_path).name
+        print(f"\n=== {repo_id} -> {name} ===", flush=True)
 
         pool.cancel_and_unload()
         release_cached_memory(sync=True)
-        import gc
-
         gc.collect()
         await asyncio.sleep(2.5)
 
         analysis = _analyze_model(model_path)
         print("analysis:", json.dumps(analysis, indent=2, default=str), flush=True)
 
-        infer = await _run_inference(model_path)
+        infer = await _run_inference(model_path, max_tokens=max_tokens)
         print("inference:", json.dumps(infer, indent=2), flush=True)
 
+        compact_cap = int(analysis.get("compact_batch_cap") or 512)
         ok = infer["ok"] and not analysis["prefill_reload"]
-        if analysis["tight_fit"] and analysis["kwargs"].get("n_batch", 0) > 512:
+        if analysis["tight_fit"] and analysis["kwargs"].get("n_batch", 0) > compact_cap:
             ok = False
-            infer["error"] = infer["error"] or "tight model loaded with batch > 512"
+            infer["error"] = (
+                infer["error"]
+                or f"tight model loaded with batch > compact cap ({compact_cap})"
+            )
 
-        result = ModelLiveResult(
-            model_path=model_path,
-            ok=ok,
-            error=infer["error"],
-            load_kwargs=analysis["kwargs"],
-            tight_fit=analysis["tight_fit"],
-            prefill_reload=analysis["prefill_reload"],
-            long_prefill_reload=analysis["long_prefill_reload"],
-            safe_batch=analysis["safe_batch"],
-            safe_ubatch=analysis["safe_ubatch"],
-            gpu_layers=analysis["gpu_layers"],
-            vram_before_mb=infer["vram_before_mb"],
-            vram_peak_mb=infer["vram_peak_mb"],
-            vram_after_mb=infer["vram_after_mb"],
-            ttft_ms=infer["ttft_ms"],
-            generate_ms=infer["generate_ms"],
-            tokens_per_sec=infer["tokens_per_sec"],
-            output_tokens=infer["output_tokens"],
+        results.append(
+            ModelLiveResult(
+                repo_id=repo_id,
+                model_path=model_path,
+                ok=ok,
+                error=infer["error"],
+                load_kwargs=analysis["kwargs"],
+                tight_fit=analysis["tight_fit"],
+                prefill_reload=analysis["prefill_reload"],
+                long_prefill_reload=analysis["long_prefill_reload"],
+                safe_batch=analysis["safe_batch"],
+                safe_ubatch=analysis["safe_ubatch"],
+                gpu_layers=analysis["gpu_layers"],
+                vram_before_mb=infer["vram_before_mb"],
+                vram_peak_mb=infer["vram_peak_mb"],
+                vram_after_mb=infer["vram_after_mb"],
+                ttft_ms=infer["ttft_ms"],
+                generate_ms=infer["generate_ms"],
+                tokens_per_sec=infer["tokens_per_sec"],
+                output_tokens=infer["output_tokens"],
+            )
         )
-        results.append(result)
-        mark = "PASS" if ok else "FAIL"
-        print(f"{mark}: {name}", flush=True)
+        print(f"{'PASS' if ok else 'FAIL'}: {repo_id}", flush=True)
     return results
 
 
-def main() -> int:
-    models = [p for p in (sys.argv[1:] or DEFAULT_MODELS)]
+def _resolve_repos(
+    repo_ids: list[str], *, token: str | None, discover_limit: int
+) -> list[tuple[str, str]]:
+    if not repo_ids:
+        repo_ids = discover_hf_repos(limit=discover_limit, token=token)
+        if not repo_ids:
+            print(
+                "No compatible GGUF repos found on Hugging Face Hub. "
+                "Pass one or more repo ids (org/model).",
+                flush=True,
+            )
+            return []
+        print("Selected from Hugging Face Hub:", flush=True)
+        for repo_id in repo_ids:
+            print(f"  - {repo_id}", flush=True)
+
+    jobs: list[tuple[str, str]] = []
+    for raw in repo_ids:
+        try:
+            repo_id = _validate_repo_id(raw)
+        except ValueError as exc:
+            print(f"SKIP: {exc}", flush=True)
+            continue
+        path = resolve_hf_repo(repo_id, token=token)
+        if path:
+            jobs.append((repo_id, path))
+    return jobs
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Live NVIDIA inference OOM guard check using Hugging Face repo ids only."
+        )
+    )
+    parser.add_argument(
+        "repos",
+        nargs="*",
+        metavar="ORG/MODEL",
+        help="Hugging Face GGUF repo id(s), e.g. org/model-GGUF",
+    )
+    parser.add_argument(
+        "--discover",
+        type=int,
+        default=2,
+        metavar="N",
+        help="When no repos are passed, pick N compatible GGUF repos from live Hub search.",
+    )
+    parser.add_argument(
+        "--max-tokens",
+        type=int,
+        default=64,
+        help="Generation length for the live inference probe (default: 64).",
+    )
+    parser.add_argument(
+        "--hf-token",
+        default=os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN"),
+        help="Optional Hugging Face token for gated repo downloads.",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv)
+    cache = _init_seiso_hub(token=args.hf_token)
     print("GPU:", gpu_snapshot(), flush=True)
-    results = asyncio.run(run_live(models))
+    print("Seiso HF cache:", cache, flush=True)
+
+    jobs = _resolve_repos(args.repos, token=args.hf_token, discover_limit=args.discover)
+    if not jobs:
+        return 2
+
+    results = asyncio.run(run_live(jobs, max_tokens=args.max_tokens))
     summary = {
         "gpu": asdict(gpu_snapshot()),
         "results": [asdict(r) for r in results],
