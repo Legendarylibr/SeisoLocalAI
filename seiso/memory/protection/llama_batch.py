@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from seiso.hardware import hardware_profile
@@ -51,6 +52,34 @@ def tight_batch_caps(gpu_total_mb: int) -> tuple[int, int]:
     """Conservative batch pair for tight VRAM fits on any GPU size."""
     batch, ubatch = gpu_batch_tier_caps(gpu_total_mb, "compact")
     return min(batch, 256), min(ubatch, 128)
+
+
+def roomy_native_linux_batch_floor(
+    *,
+    model_path: str | Path,
+    free_mb: int,
+    gpu_total_mb: int,
+    n_gpu_layers: int,
+    load_tier: LlamaLoadTier = "normal",
+    tight: bool = False,
+) -> tuple[int, int] | None:
+    """July-3-style GPU tier batch floor for tiny models on mostly-empty VRAM.
+
+    Only applies when the model is small relative to *free* VRAM and most of the
+    GPU capacity is still available (other processes have not consumed the card).
+    """
+    if (
+        load_tier != "normal"
+        or tight
+        or n_gpu_layers == 0
+        or gpu_total_mb <= 0
+        or free_mb < int(gpu_total_mb * 0.65)
+    ):
+        return None
+    weight_mb = int(protection().estimate_path_vram_mb(Path(model_path)))
+    if weight_mb <= 0 or weight_mb > free_mb // 8:
+        return None
+    return gpu_batch_tier_caps(gpu_total_mb, "normal")
 
 
 def clamp_llama_batch_pair(

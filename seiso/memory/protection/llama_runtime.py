@@ -17,6 +17,7 @@ from seiso.memory.protection.llama_batch import (
     discrete_gpu_total_mb,
     gpu_batch_tier_caps,
     resolve_llama_batch_limits,
+    roomy_native_linux_batch_floor,
     tight_batch_caps,
 )
 from seiso.memory.protection.llama_kv import (
@@ -392,16 +393,17 @@ def llama_load_profile_ladder(
         tight=tight,
         gpu_total_mb=gpu_total if native_linux_nvidia else None,
     )
-    if (
-        native_linux_nvidia
-        and tier == "normal"
-        and not tight
-        and n_gpu_layers != 0
-        and gpu_total > 0
-    ):
-        weight_mb = int(protection().estimate_path_vram_mb(model_path))
-        if weight_mb > 0 and weight_mb <= free_mb // 8:
-            tier_batch, tier_ubatch = gpu_batch_tier_caps(gpu_total, "normal")
+    if native_linux_nvidia:
+        floor = roomy_native_linux_batch_floor(
+            model_path=model_path,
+            free_mb=free_mb,
+            gpu_total_mb=gpu_total,
+            n_gpu_layers=n_gpu_layers,
+            load_tier=tier,
+            tight=tight,
+        )
+        if floor is not None:
+            tier_batch, tier_ubatch = floor
             base_batch = max(base_batch, tier_batch)
             base_ubatch = max(base_ubatch, min(tier_ubatch, base_batch))
 
