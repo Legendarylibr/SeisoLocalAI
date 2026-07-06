@@ -7,6 +7,10 @@ from typing import Literal
 
 FamilyKind = Literal["dense", "swa", "moe"]
 
+# Baseline fp16 KV bytes/token for a 7B-class model — used to scale prefill risk.
+_KV_TIGHTNESS_BASELINE_BYTES = 64 * 1024
+_KV_TIGHTNESS_MAX = 1.35
+
 
 @dataclass(frozen=True, slots=True)
 class InferenceFamilyPolicy:
@@ -19,29 +23,19 @@ class InferenceFamilyPolicy:
     prefill_tightness: float
 
 
-_DENSE_ARCH_MARKERS = (
-    "llama",
-    "qwen2",
-    "qwen3",
-    "qwen",
-    "mistral",
-    "gemma2",
-    "phi",
-    "phi3",
-    "phi-3",
-    "olmo",
-    "granite",
-    "internlm",
-    "baichuan",
-    "yi",
-)
+def _prefill_tightness_for_dense(model_path: str) -> float:
+    """Scale prefill conservatism from measured KV geometry, not architecture names."""
+    try:
+        from seiso.inference.backends import gguf_kv_bytes_per_token
 
-
-def _dense_prefill_tightness(architecture: str) -> float:
-    arch = architecture.lower()
-    if any(marker in arch for marker in ("qwen3", "qwen2", "qwen")):
-        return 1.20
-    return 1.0
+        kv_bytes = gguf_kv_bytes_per_token(model_path)
+    except Exception:
+        kv_bytes = None
+    if not kv_bytes or kv_bytes <= 0:
+        return 1.0
+    excess = max(0, kv_bytes - _KV_TIGHTNESS_BASELINE_BYTES)
+    span = max(_KV_TIGHTNESS_BASELINE_BYTES * 4, 1)
+    return min(_KV_TIGHTNESS_MAX, 1.0 + excess / span)
 
 
 def policy_for_gguf(model_path: str) -> InferenceFamilyPolicy:
@@ -68,6 +62,8 @@ def policy_for_gguf(model_path: str) -> InferenceFamilyPolicy:
             prefill_tightness=1.25,
         )
     if is_moe:
+        tightness = max(1.1, _prefill_tightness_for_dense(model_path))
+        tightness = min(_KV_TIGHTNESS_MAX, tightness)
         return InferenceFamilyPolicy(
             architecture=architecture,
             kind="moe",
@@ -75,10 +71,9 @@ def policy_for_gguf(model_path: str) -> InferenceFamilyPolicy:
             allow_flash_attn=False,
             allow_kv_quant=False,
             swa_full_default=True,
-            prefill_tightness=1.15,
+            prefill_tightness=tightness,
         )
 
-    known_dense = any(marker in architecture for marker in _DENSE_ARCH_MARKERS)
     return InferenceFamilyPolicy(
         architecture=architecture,
         kind="dense",
@@ -86,5 +81,5 @@ def policy_for_gguf(model_path: str) -> InferenceFamilyPolicy:
         allow_flash_attn=True,
         allow_kv_quant=True,
         swa_full_default=True,
-        prefill_tightness=_dense_prefill_tightness(architecture) if known_dense else 1.0,
+        prefill_tightness=_prefill_tightness_for_dense(model_path),
     )

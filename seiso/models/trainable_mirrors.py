@@ -10,14 +10,24 @@ from seiso.models.hub_errors import format_hub_error, is_gated_hub_error
 
 logger = logging.getLogger(__name__)
 
-# Official id -> open trainable mirror (same architecture, safetensors for QLoRA).
-TRAINABLE_HUB_MIRRORS: dict[str, str] = {
-    "google/gemma-3-12b-it": "unsloth/gemma-3-12b-it",
-    "google/gemma-3-12b-pt": "unsloth/gemma-3-12b-it",
-    "google/gemma-3-27b-it": "unsloth/gemma-3-27b-it",
-    "google/gemma-3-4b-it": "unsloth/gemma-3-4b-it",
-    "google/gemma-3-1b-it": "unsloth/gemma-3-1b-it",
-}
+# Open training mirror providers — same model slug, different org (no per-model map).
+_TRAINABLE_MIRROR_PROVIDERS: tuple[str, ...] = ("unsloth",)
+
+
+def _trainable_mirror_candidates(repo_id: str) -> list[str]:
+    repo = repo_id.strip()
+    if "/" not in repo:
+        return []
+    _owner, name = repo.split("/", 1)
+    seen: set[str] = {repo.lower()}
+    candidates: list[str] = []
+    for provider in _TRAINABLE_MIRROR_PROVIDERS:
+        candidate = f"{provider}/{name}"
+        key = candidate.lower()
+        if key not in seen:
+            seen.add(key)
+            candidates.append(candidate)
+    return candidates
 
 
 def _probe_hub_config_download(
@@ -48,9 +58,9 @@ def resolve_trainable_hub_id(
     """
     Return a Hub repo id that can actually download weights for training.
 
-    When the requested repo is gated (license not accepted), fall back to a known
-    trainable mirror and return a user-facing note. Transient Hub/network errors
-    are raised instead of silently switching mirrors.
+    When the requested repo is gated (license not accepted), probe known open
+    mirror providers with the same model slug. Transient Hub/network errors are
+    raised instead of silently switching mirrors.
     """
     repo = model_id.strip()
     if not repo or Path(repo).exists():
@@ -59,19 +69,15 @@ def resolve_trainable_hub_id(
     if _probe_hub_config_download(repo, token=token) == "ok":
         return repo, None
 
-    mirror = TRAINABLE_HUB_MIRRORS.get(repo.lower())
-    if (
-        mirror
-        and mirror.lower() != repo.lower()
-        and _probe_hub_config_download(mirror, token=token) == "ok"
-    ):
-        note = (
-            f"{repo} is gated on Hugging Face (accept the license at "
-            f"https://huggingface.co/{repo} to use the official weights). "
-            f"Training with mirror {mirror} instead."
-        )
-        logger.warning(note)
-        return mirror, note
+    for mirror in _trainable_mirror_candidates(repo):
+        if _probe_hub_config_download(mirror, token=token) == "ok":
+            note = (
+                f"{repo} is gated on Hugging Face (accept the license at "
+                f"https://huggingface.co/{repo} to use the official weights). "
+                f"Training with mirror {mirror} instead."
+            )
+            logger.warning(note)
+            return mirror, note
 
     return repo, (
         f"Cannot download {repo}. If it is gated, open "
