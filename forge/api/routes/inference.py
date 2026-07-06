@@ -275,7 +275,9 @@ async def get_chat_context(
             knowledge_base_id=kb_id,
             query=last_user,
         )
-        knowledge_context = format_knowledge_context(chunks) or None
+        knowledge_context = (
+            format_knowledge_context(chunks, knowledge_base_id=kb_id) or None
+        )
 
     return context_status_for_history(
         history,
@@ -473,7 +475,9 @@ async def chat(
             knowledge_base_id=kb_id,
             query=user_query,
         )
-        knowledge_context = format_knowledge_context(chunks) or None
+        knowledge_context = (
+            format_knowledge_context(chunks, knowledge_base_id=kb_id) or None
+        )
 
     trusted_messages, _user_content = await build_trusted_messages(
         db,
