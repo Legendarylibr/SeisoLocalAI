@@ -19,6 +19,7 @@ from seiso.memory.protection import (
     llama_host_batch_headroom_mb,
     llama_kv_cache_reserve_mb,
     llama_load_profile_ladder,
+    llama_model_is_tight_vram_fit,
     llama_next_recovery_tier,
     llama_offload_fits_headroom,
     llama_prefill_needs_reload,
@@ -457,6 +458,38 @@ def test_llama_prefill_guard_reloads_growing_native_linux_prompt(
     assert safe_ubatch <= 256
 
 
+def test_llama_prefill_guard_reloads_short_prompt_for_borderline_24gb_q4(
+    monkeypatch, tmp_path
+):
+    gguf = tmp_path / "qwen-30b-q4.gguf"
+    gguf.write_bytes(b"\x00" * 1024)
+    monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: True)
+    monkeypatch.setattr("seiso.memory.protection.hardware_profile", lambda **_: {})
+    monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 24576)
+    monkeypatch.setattr(
+        "seiso.memory.protection.estimate_path_vram_mb", lambda _p: 15000
+    )
+    monkeypatch.setattr(
+        "seiso.memory.protection.llama_kv_cache_reserve_mb",
+        lambda *_args, **_kwargs: 512,
+    )
+    monkeypatch.setattr("seiso.memory.protection.available_ram_mb", lambda: 65536)
+
+    needs_reload, safe_batch, safe_ubatch = llama_prefill_needs_reload(
+        model_path=str(gguf),
+        messages=[{"role": "user", "content": "hi"}],
+        n_ctx=4096,
+        loaded_n_batch=4096,
+        loaded_n_gpu_layers=-1,
+        load_tier="normal",
+        loaded_headroom_mb=24576,
+    )
+
+    assert needs_reload is True
+    assert safe_batch <= 512
+    assert safe_ubatch <= 256
+
+
 def test_llama_prefill_guard_noops_off_native_linux(monkeypatch, tmp_path):
     gguf = tmp_path / "small.gguf"
     gguf.write_bytes(b"\x00" * 1024)
@@ -578,6 +611,48 @@ def test_clamp_llama_load_kwargs_native_linux_tight_strips_flash_attn(
     assert kwargs["n_batch"] <= 512
     assert kwargs["n_ubatch"] <= 128
     assert kwargs.get("op_offload") is False
+    assert kwargs.get("offload_kqv") is False
+
+
+def test_clamp_llama_load_kwargs_borderline_24gb_q4_uses_safe_prefill(
+    monkeypatch, tmp_path
+):
+    gguf = tmp_path / "qwen-30b-q4.gguf"
+    gguf.write_bytes(b"\x00" * 1024)
+    monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 24576)
+    monkeypatch.setattr(
+        "seiso.memory.protection.estimate_path_vram_mb", lambda _p: 15000
+    )
+    monkeypatch.setattr(
+        "seiso.memory.protection.llama_kv_cache_reserve_mb",
+        lambda *_args, **_kwargs: 512,
+    )
+    monkeypatch.setattr("seiso.memory.protection.available_ram_mb", lambda: 65536)
+    monkeypatch.setattr(
+        "seiso.inference.backends.gguf_block_count", lambda _p: 64
+    )
+    monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: True)
+
+    assert llama_model_is_tight_vram_fit(
+        model_path=gguf,
+        free_mb=24576,
+        n_gpu_layers=-1,
+        n_ctx=4096,
+    )
+    kwargs = clamp_llama_load_kwargs(
+        {
+            "_model_path": str(gguf),
+            "n_ctx": 4096,
+            "n_batch": 4096,
+            "n_ubatch": 1024,
+            "n_gpu_layers": -1,
+            "flash_attn": True,
+        }
+    )
+
+    assert kwargs["n_batch"] <= 512
+    assert kwargs["n_ubatch"] <= 256
+    assert "flash_attn" not in kwargs
     assert kwargs.get("offload_kqv") is False
 
 
