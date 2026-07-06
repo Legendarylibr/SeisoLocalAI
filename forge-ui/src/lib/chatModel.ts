@@ -22,14 +22,14 @@ type SelectableModel = MemoryFitModel & {
   status?: string;
 };
 
-/** True when a model cannot be loaded for chat (memory, incomplete download, etc.). */
+/** True when a model cannot be loaded for chat because the artifact is unavailable. */
 export function modelMemoryBlocked(
   model: SelectableModel | null | undefined,
   _headroomMb?: number,
 ): boolean {
   if (!model) return false;
   if (model.selectable === false || model.status === "incomplete") return true;
-  return Boolean(model.memory_load_blocked);
+  return false;
 }
 
 export function modelMemoryBlockReason(model: MemoryFitModel | null | undefined): string {

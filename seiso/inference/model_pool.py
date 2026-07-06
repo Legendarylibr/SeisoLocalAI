@@ -621,13 +621,12 @@ def _load_llama_model(
     _refresh_headroom_stats(force=True)
 
     est_mb = int(estimate_path_vram_mb(path))
-    if est_mb >= 6000:
-        try:
-            from seiso.hardware.vram_processes import warn_before_large_model_load
+    try:
+        from seiso.hardware.vram_processes import warn_before_model_load
 
-            warn_before_large_model_load(model_path=path, est_mb=est_mb)
-        except ImportError:
-            pass
+        warn_before_model_load(model_path=path, est_mb=est_mb)
+    except Exception:
+        pass
 
     kwargs = llama_load_kwargs(n_ctx, model_path=path)
     if batch_override is not None:
@@ -1166,7 +1165,8 @@ class ModelPool:
                     est_mb += int(estimate_path_vram_mb(mmproj))
             else:
                 est_mb = int(estimate_path_vram_mb(load_path))
-            if est_mb >= 8000 and headroom_mb() < int(est_mb * 0.98):
+            # Interpret this model vs free headroom; free caches if short (non-blocking load prep).
+            if est_mb > 0 and headroom_mb() < int(est_mb * 0.98):
                 if self._active:
                     self._clear_active_for_switch()
                 self._free_memory()
@@ -1368,8 +1368,6 @@ class ModelPool:
 
         def loader(_path: str) -> TorchSpeculativeBundle:
             from seiso.memory.protection import (
-                MemoryLoadBlockedError,
-                allow_memory_overcommit,
                 ensure_load_fits,
                 estimate_path_vram_mb,
                 headroom_mb,
@@ -1379,10 +1377,14 @@ class ModelPool:
             draft_mb = int(estimate_path_vram_mb(draft_path, mode="chat"))
             needed_mb = target_mb + draft_mb
             free_mb = headroom_mb()
-            if needed_mb > free_mb and not allow_memory_overcommit():
-                raise MemoryLoadBlockedError(
-                    f"Speculative pair needs ~{needed_mb}MB "
-                    f"(target={target_mb}MB + draft={draft_mb}MB) but only {free_mb}MB free"
+            if needed_mb > free_mb:
+                logger.warning(
+                    "Speculative pair may exceed free memory: needs ~%dMB "
+                    "(target=%dMB + draft=%dMB), free=%dMB. Trying load anyway.",
+                    needed_mb,
+                    target_mb,
+                    draft_mb,
+                    free_mb,
                 )
             ensure_load_fits(target_path, mode="chat", backend=BackendKind.TORCH.value)
             ensure_load_fits(draft_path, mode="chat", backend=BackendKind.TORCH.value)

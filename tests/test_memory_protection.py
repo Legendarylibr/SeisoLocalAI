@@ -7,7 +7,6 @@ from pathlib import Path
 import pytest
 
 from seiso.memory.protection import (
-    MemoryLoadBlockedError,
     apply_rl_memory_guards,
     apply_training_memory_guards,
     assess_path_memory_fit,
@@ -1157,7 +1156,7 @@ def test_apply_rl_memory_guards_keeps_user_sizing(monkeypatch):
     assert out == flat
 
 
-def test_ensure_load_fits_blocks_oversized_gguf(tmp_path, monkeypatch):
+def test_ensure_load_fits_allows_oversized_chat_gguf(tmp_path, monkeypatch):
     gguf = tmp_path / "huge.gguf"
     gguf.write_bytes(b"\x00" * (9 * 1024**3))
     profile = {
@@ -1174,8 +1173,9 @@ def test_ensure_load_fits_blocks_oversized_gguf(tmp_path, monkeypatch):
         "seiso.inference.model_pool.ModelPool.prepare_for_load",
         lambda self, *args, **kwargs: False,
     )
-    with pytest.raises(MemoryLoadBlockedError):
-        ensure_load_fits(gguf, mode="chat")
+    fit = ensure_load_fits(gguf, mode="chat")
+    assert fit["memory_load_blocked"] is False
+    assert fit["memory_load_budget_exceeded"] is True
 
 
 def test_ensure_load_fits_forwards_backend_to_pool(tmp_path, monkeypatch):
@@ -1228,7 +1228,7 @@ def test_apple_llamacpp_load_gets_best_effort_cpu_offload(tmp_path, monkeypatch)
     assert "Mac CPU offload fallback" in fit["memory_load_warning"]
 
 
-def test_apple_non_llamacpp_load_still_blocks(tmp_path, monkeypatch):
+def test_apple_non_llamacpp_load_is_advisory(tmp_path, monkeypatch):
     gguf = tmp_path / "tight.gguf"
     gguf.write_bytes(b"\x00" * (7 * 1024**3))
     profile = {"backend": "mlx", "gpus": [], "ram_gb": 24, "platform": "darwin"}
@@ -1242,8 +1242,9 @@ def test_apple_non_llamacpp_load_still_blocks(tmp_path, monkeypatch):
     monkeypatch.setattr("seiso.hardware.fit.fit_headroom_mb", lambda _p: 24 * 1024)
     monkeypatch.setattr("seiso.hardware.fit.vram_headroom_mb", lambda _p: 5200)
 
-    with pytest.raises(MemoryLoadBlockedError):
-        ensure_load_fits(gguf, mode="chat", backend="mlx")
+    fit = ensure_load_fits(gguf, mode="chat", backend="mlx")
+    assert fit["memory_load_blocked"] is False
+    assert fit["memory_load_budget_exceeded"] is True
 
 
 def test_apple_llamacpp_preflight_bypass_requires_blocked_fit(monkeypatch):
@@ -1305,7 +1306,7 @@ def test_native_linux_llamacpp_load_defers_preflight_when_model_fits_gpu(tmp_pat
     assert "full GPU offload" in fit["memory_load_warning"]
 
 
-def test_native_linux_llamacpp_preflight_still_blocks_when_exceeds_gpu_capacity(
+def test_native_linux_llamacpp_preflight_is_advisory_when_exceeds_gpu_capacity(
     tmp_path, monkeypatch
 ):
     gguf = tmp_path / "huge.gguf"
@@ -1344,8 +1345,10 @@ def test_native_linux_llamacpp_preflight_still_blocks_when_exceeds_gpu_capacity(
         },
     )
 
-    with pytest.raises(MemoryLoadBlockedError):
-        ensure_load_fits(gguf, mode="chat", backend="llamacpp")
+    fit = ensure_load_fits(gguf, mode="chat", backend="llamacpp")
+    assert fit["memory_load_blocked"] is False
+    assert fit["memory_load_blocked_reason"] is None
+    assert "31.2 GB" in fit["memory_load_warning"]
 
 
 def test_assess_path_memory_fit_for_small_file(tmp_path, monkeypatch):
@@ -1356,7 +1359,7 @@ def test_assess_path_memory_fit_for_small_file(tmp_path, monkeypatch):
     assert fit.get("memory_load_blocked") is False
 
 
-def test_allow_memory_overcommit_skips_block(tmp_path, monkeypatch):
+def test_chat_preflight_normalizes_blocked_fit_to_warning(tmp_path, monkeypatch):
     gguf = tmp_path / "big.gguf"
     gguf.write_bytes(b"\x00" * (4 * 1024**3))
     monkeypatch.setattr(
@@ -1367,9 +1370,10 @@ def test_allow_memory_overcommit_skips_block(tmp_path, monkeypatch):
             "hardware_fit": "unlikely",
         },
     )
-    monkeypatch.setenv("SEISO_ALLOW_MEMORY_OVERCOMMIT", "1")
     fit = ensure_load_fits(gguf, mode="chat")
-    assert fit.get("memory_load_blocked") is True
+    assert fit.get("memory_load_blocked") is False
+    assert fit.get("memory_load_blocked_reason") is None
+    assert fit.get("memory_load_warning") == "Model exceeds available memory"
 
 
 def test_llama_kv_cache_reserve_uses_sliding_window_cap(monkeypatch, tmp_path):

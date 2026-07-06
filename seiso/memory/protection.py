@@ -1084,12 +1084,14 @@ def assess_path_memory_fit(path: str | Path, *, mode: str = "chat") -> dict[str,
         raw_budget = free if free > 0 else capacity
         reserve = max(256, int(raw_budget * 0.02)) if raw_budget > 0 else 0
         budget = max(0, raw_budget - reserve)
-        blocked = budget > 0 and est_mb > budget
+        budget_exceeded = budget > 0 and est_mb > budget
+        blocked = mode != "chat" and budget_exceeded
         budget_gb = round(budget / 1024, 1)
         return {
-            "hardware_fit": "unlikely" if blocked else "good",
+            "hardware_fit": "unlikely" if budget_exceeded else "good",
             "est_vram_mb": est_mb,
             "memory_load_blocked": blocked,
+            "memory_load_budget_exceeded": budget_exceeded,
             "memory_load_blocked_reason": (
                 f"Needs ~{est_gb:.1f} GB at runtime but only ~{budget_gb} GB is safely available right now."
                 if blocked
@@ -1184,13 +1186,19 @@ def ensure_load_fits(
     mode: str = "chat",
     backend: str | None = None,
 ) -> dict[str, Any]:
-    """Block model loads that exceed measured memory headroom."""
+    """Apply load preflight policy while leaving chat loads best-effort."""
     fit = assess_path_memory_fit_for_load(path, mode=mode, backend=backend)
     backend_key = str(backend or "").lower()
     llamacpp_backend = backend_key in {"llamacpp", "llama"}
     if fit.get("memory_load_blocked"):
         reason = fit.get("memory_load_blocked_reason") or "Model exceeds available memory"
-        if allow_memory_overcommit():
+        if mode == "chat":
+            fit = dict(fit)
+            fit["memory_load_blocked"] = False
+            fit["memory_load_blocked_reason"] = None
+            fit["memory_load_warning"] = reason
+            logger.warning("Inference memory preflight advisory: %s", reason)
+        elif allow_memory_overcommit():
             logger.warning("Memory overcommit allowed: %s", reason)
         else:
             raise MemoryLoadBlockedError(reason)
@@ -1204,10 +1212,7 @@ def ensure_load_fits(
             f"Needs ~{est_gb:.1f} GB at runtime but free memory is low right now. "
             "Free memory or use llama.cpp for tiered GPU load fallbacks."
         )
-        if allow_memory_overcommit():
-            logger.warning("Memory overcommit allowed: %s", reason)
-        else:
-            raise MemoryLoadBlockedError(reason)
+        logger.warning("Inference memory preflight advisory: %s", reason)
     return fit
 
 

@@ -392,7 +392,7 @@ def test_cpu_only_large_model_fit_uses_memory_guard(monkeypatch):
     assert fit["hardware_fit"] in {"ideal", "good", "tight"}
 
 
-def test_assess_hardware_fit_blocks_when_est_exceeds_headroom(monkeypatch):
+def test_assess_hardware_fit_marks_unlikely_without_blocking_chat(monkeypatch):
     profile = {
         "backend": "cuda",
         "gpus": [{"vram_total_mb": 8192, "vram_used_mb": 7000}],
@@ -410,8 +410,9 @@ def test_assess_hardware_fit_blocks_when_est_exceeds_headroom(monkeypatch):
         },
         profile,
     )
-    assert fit["memory_load_blocked"] is True
-    assert fit["memory_load_blocked_reason"]
+    assert fit["memory_load_blocked"] is False
+    assert fit["memory_load_blocked_reason"] is None
+    assert fit["memory_load_budget_exceeded"] is True
     assert fit["hardware_fit"] == "unlikely"
 
 
