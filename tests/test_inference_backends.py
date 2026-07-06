@@ -742,6 +742,34 @@ async def test_dflash_switch_preserves_warmed_torch_target(monkeypatch):
     assert calls == [("/tmp/target", BACKEND_TORCH)]
 
 
+@pytest.mark.asyncio
+async def test_torch_speculative_switch_unloads_warmed_single_target(monkeypatch):
+    from seiso.inference.runner import LocalInferenceRunner
+
+    runner = LocalInferenceRunner()
+    calls: list[tuple[str | None, str | None]] = []
+    monkeypatch.setattr(
+        runner._pool,
+        "status",
+        lambda: {
+            "active_model": "torch:/tmp/target",
+            "backend": "torch",
+            "path": "/tmp/target",
+            "draft_path": None,
+        },
+    )
+    monkeypatch.setattr("seiso.inference.runner.is_dflash_draft", lambda _path: False)
+    monkeypatch.setattr(
+        runner._pool,
+        "prepare_for_load",
+        lambda target_path=None, backend=None: calls.append((target_path, backend)),
+    )
+
+    await runner._ensure_model_switch("/tmp/target", draft_path="/tmp/draft")
+
+    assert calls == [(None, None)]
+
+
 def test_warm_model_preloads_torch_speculative_pair(monkeypatch):
     from seiso.inference.runner import LocalInferenceRunner
 

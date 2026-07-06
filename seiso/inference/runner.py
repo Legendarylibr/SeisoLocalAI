@@ -282,6 +282,11 @@ class LocalInferenceRunner:
                 == self._pool.normalize_path(draft_path)
             ):
                 return
+            if not is_dflash_draft(draft_path):
+                # Torch+Torch speculative bundles are distinct pool handles; unload
+                # a warmed single target before loading target+draft together.
+                await loop.run_in_executor(None, lambda: self._pool.prepare_for_load())
+                return
             # prepare target (torch for verification in dflash case too)
             await loop.run_in_executor(
                 None, lambda: self._pool.prepare_for_load(model_path, BACKEND_TORCH)
