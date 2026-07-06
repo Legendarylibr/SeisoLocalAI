@@ -240,6 +240,28 @@ def fit_llama_gpu_layers(
         if _fits(capped):
             return capped
 
+    if _llama_skip_partial_offload(model_path):
+        try:
+            from seiso.hardware.tiers import discrete_gpu_total_mb
+
+            capacity_mb = discrete_gpu_total_mb() or headroom_mb
+        except Exception:
+            capacity_mb = headroom_mb
+        if capacity_mb > 0 and llama_offload_fits_headroom(
+            model_path,
+            headroom_mb=capacity_mb,
+            n_gpu_layers=-1,
+            n_ctx=n_ctx,
+            weight_mb=weight_mb,
+            total_layers=total_layers,
+        ):
+            return -1
+        logger.warning(
+            "Partial GPU offload is unsafe for SWA model %s — using CPU",
+            Path(model_path).name,
+        )
+        return 0
+
     kv_reserve_mb = llama_kv_cache_reserve_mb(
         model_path,
         n_ctx=n_ctx,
@@ -614,7 +636,7 @@ def _load_llama_model(
     ]
     kv_options = _llama_kv_quant_options(path)
     fitted_layers = fit_llama_gpu_layers(path, requested, free_mb, n_ctx=effective_n_ctx)
-    full_targets = _llama_full_gpu_targets(requested) if fitted_layers == -1 else []
+    full_targets = _llama_full_gpu_targets(requested) if requested != 0 else []
     partial_targets = (
         _llama_layer_attempts(
             path,

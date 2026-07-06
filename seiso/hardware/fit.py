@@ -74,7 +74,13 @@ def assess_hardware_fit(
     if fit == "unlikely" and tier != HardwareTier.CPU_ONLY:
         note = f"Needs ~{est_vram_gb:.1f} GB — GPU budget ~{capacity_gb} GB"
 
-    blocked = load_budget_mb > 0 and est_mb > load_budget_mb
+    # Chat/inference: block only when the estimate exceeds total GPU capacity.
+    # Current free VRAM can be temporarily low; llama.cpp load uses tiered fallbacks.
+    # Training keeps the stricter free-memory guard.
+    if mode == "chat" and capacity_mb > 0:
+        blocked = est_mb > capacity_mb
+    else:
+        blocked = load_budget_mb > 0 and est_mb > load_budget_mb
     block_reason = None
     if blocked:
         label = "Blocked — would exceed available memory"
@@ -83,11 +89,17 @@ def assess_hardware_fit(
             if tier in (HardwareTier.APPLE_UNIFIED, HardwareTier.CPU_ONLY)
             else "VRAM"
         )
-        block_reason = (
-            f"Needs ~{est_vram_gb:.1f} GB at runtime but only ~{load_budget_gb} GB "
-            f"{memory_label} is safely available right now. Free memory or choose a "
-            "smaller/more quantized model."
-        )
+        if mode == "chat" and capacity_mb > 0:
+            block_reason = (
+                f"Needs ~{est_vram_gb:.1f} GB at runtime but this GPU has "
+                f"~{capacity_gb} GB budget. Choose a smaller or more quantized model."
+            )
+        else:
+            block_reason = (
+                f"Needs ~{est_vram_gb:.1f} GB at runtime but only ~{load_budget_gb} GB "
+                f"{memory_label} is safely available right now. Free memory or choose a "
+                "smaller/more quantized model."
+            )
 
     return {
         "hardware_fit": fit,

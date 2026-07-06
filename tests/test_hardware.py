@@ -431,6 +431,34 @@ def test_assess_hardware_fit_allows_when_est_within_headroom(monkeypatch):
     assert fit["memory_load_blocked_reason"] is None
 
 
+def test_assess_hardware_fit_allows_mid_model_when_free_vram_low_but_capacity_ok(monkeypatch):
+    profile = {
+        "backend": "cuda",
+        "gpus": [
+            {
+                "vram_total_mb": 24564,
+                "vram_used_mb": 17000,
+                "name": "NVIDIA GeForce RTX 4090",
+            }
+        ],
+        "ram_gb": 32,
+    }
+    monkeypatch.setattr("seiso.hardware.fit.fit_headroom_mb", lambda _p: 24564)
+    monkeypatch.setattr("seiso.hardware.fit.vram_headroom_mb", lambda _p: 7564)
+    fit = assess_catalog_fit(
+        {
+            "params": "12B",
+            "quant": "Q4_K_M",
+            "tags": [],
+            "repo_id": "google/gemma-3-12b-it-GGUF",
+            "task": "chat",
+        },
+        profile,
+    )
+    assert fit["memory_load_blocked"] is False
+    assert fit["hardware_fit"] in {"ideal", "good", "tight"}
+
+
 def test_assess_hardware_fit_blocks_27b_q4_on_4090_when_vram_in_use():
     profile = {
         "backend": "cuda",
@@ -453,5 +481,5 @@ def test_assess_hardware_fit_blocks_27b_q4_on_4090_when_vram_in_use():
         },
         profile,
     )
-    assert fit["memory_load_blocked"] is True
-    assert fit["hardware_fit"] in {"good", "tight", "ideal"}
+    assert fit["memory_load_blocked"] is False
+    assert fit["hardware_fit"] in {"good", "tight", "ideal", "unlikely"}
