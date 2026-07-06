@@ -30,7 +30,7 @@ def assert_model_fits_for_load(
     from seiso.memory.protection import assess_path_memory_fit_for_load
 
     fit = assess_path_memory_fit_for_load(path, mode=mode, backend=backend)
-    if fit.get("memory_load_blocked"):
+    if mode != "chat" and fit.get("memory_load_blocked"):
         raise HTTPException(
             400,
             fit.get("memory_load_blocked_reason")

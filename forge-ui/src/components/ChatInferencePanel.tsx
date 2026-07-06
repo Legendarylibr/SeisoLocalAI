@@ -240,7 +240,7 @@ export function ChatInferencePanel({
                         key={row.key}
                         type="button"
                         className={`chat-quant-chip${row.selected ? " chat-quant-chip-active" : ""}${row.blocked ? " chat-quant-chip-blocked" : ""}`}
-                        disabled={disabled || busy || row.selected || row.blocked}
+                        disabled={disabled || busy || row.selected}
                         title={title}
                         onClick={() => onSelectLocalVariant(row.localId!)}
                       >

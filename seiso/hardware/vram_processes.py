@@ -1,18 +1,20 @@
-"""Detect other GPU processes that can block full model offload."""
+"""Detect other GPU processes that can affect full model offload.
+
+Advisory only: never blocks inference or model load.
+"""
 
 from __future__ import annotations
 
 import logging
 import os
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# Compute workloads above this are worth surfacing before large GGUF loads.
-_DEFAULT_WARN_EXTERNAL_MB = 2048
-_DEFAULT_STARTUP_WARN_MB = 4096
-_LARGE_MODEL_MB = 6000
+# Ignore tiny holders when listing processes (noise floor, not a model-size gate).
+_MIN_VISIBLE_PROCESS_MB = 256
 
 
 @dataclass(frozen=True)
@@ -86,19 +88,49 @@ def external_gpu_compute_processes(
     return [proc for proc in query_gpu_compute_processes() if proc.pid != current]
 
 
+def _safe_free_vram_mb() -> int:
+    try:
+        from seiso.memory.protection import headroom_mb
+
+        return max(int(headroom_mb()), 0)
+    except Exception:
+        return 0
+
+
+def _estimate_model_mb(model_path: str | None, est_mb: int = 0) -> int:
+    if est_mb > 0:
+        return int(est_mb)
+    if not model_path:
+        return 0
+    try:
+        from seiso.memory.protection import estimate_path_vram_mb
+
+        return max(int(estimate_path_vram_mb(model_path)), 0)
+    except Exception:
+        return 0
+
+
 def vram_contention_summary(
     *,
     exclude_pid: int | None = None,
-    min_process_mb: int = 256,
-    warn_external_mb: int = _DEFAULT_WARN_EXTERNAL_MB,
+    min_process_mb: int = _MIN_VISIBLE_PROCESS_MB,
+    model_est_mb: int = 0,
 ) -> dict[str, Any]:
     """Summarize non-Seiso GPU memory use for API/logging."""
     processes = external_gpu_compute_processes(exclude_pid=exclude_pid)
     visible = [proc for proc in processes if proc.used_mb >= min_process_mb]
     total_mb = sum(proc.used_mb for proc in visible)
+    free_mb = _safe_free_vram_mb()
+    if model_est_mb > 0:
+        # Contended when this model may not fully fit and others hold VRAM.
+        contended = total_mb > 0 and free_mb < model_est_mb
+    else:
+        contended = total_mb > 0
     return {
         "external_vram_mb": total_mb,
-        "contended": total_mb >= warn_external_mb,
+        "free_vram_mb": free_mb,
+        "model_est_mb": int(model_est_mb),
+        "contended": contended,
         "processes": [
             {
                 "pid": proc.pid,
@@ -125,59 +157,71 @@ def warn_vram_contention(
     *,
     model_est_mb: int = 0,
     model_name: str | None = None,
+    model_path: str | None = None,
     context: str = "model load",
-    warn_external_mb: int = _DEFAULT_WARN_EXTERNAL_MB,
-    large_model_mb: int = _LARGE_MODEL_MB,
 ) -> dict[str, Any] | None:
     """
-    Log a warning when other GPU processes may force partial offload.
+    Advisory-only log when other GPU processes may limit offload for this model.
 
-    Returns the contention summary when a warning is emitted.
+    Interprets the model being loaded (estimate from path when est is omitted).
+    Never raises and never blocks inference or load.
     """
-    summary = vram_contention_summary(warn_external_mb=warn_external_mb)
-    if not summary["contended"]:
-        return None
+    try:
+        est_mb = _estimate_model_mb(model_path, model_est_mb)
+        if est_mb <= 0:
+            # No model to interpret yet (startup / unknown path).
+            return None
 
-    if model_est_mb >= large_model_mb:
-        should_warn = True
-    elif model_est_mb > 0:
-        should_warn = summary["external_vram_mb"] >= max(
-            warn_external_mb, model_est_mb // 4
+        summary = vram_contention_summary(model_est_mb=est_mb)
+        external_mb = int(summary.get("external_vram_mb") or 0)
+        if external_mb <= 0 or not summary.get("processes"):
+            return None
+
+        free_mb = int(summary.get("free_vram_mb") or 0)
+        # Only surface when free headroom is short of this model's estimate.
+        if free_mb >= est_mb:
+            return None
+
+        model_label = model_name or (Path(model_path).name if model_path else "model")
+        model_label = f"{model_label} (~{est_mb / 1024:.1f} GB)"
+
+        logger.warning(
+            "GPU VRAM contention before %s: ~%.1f GB used by other processes while loading %s "
+            "(free ~%.1f GB).\n%s\n"
+            "Close those processes for fuller GPU offload if generation is slow. "
+            "Load continues without waiting.",
+            context,
+            external_mb / 1024,
+            model_label,
+            free_mb / 1024,
+            _format_process_lines(summary["processes"]),
         )
-    else:
-        should_warn = summary["external_vram_mb"] >= _DEFAULT_STARTUP_WARN_MB
-
-    if not should_warn:
+        return summary
+    except Exception:
+        logger.debug("vram contention check failed", exc_info=True)
         return None
-
-    model_label = model_name or "large model"
-    if model_est_mb > 0:
-        model_label = f"{model_label} (~{model_est_mb / 1024:.1f} GB)"
-
-    logger.warning(
-        "GPU VRAM contention before %s: ~%.1f GB used by other processes while loading %s.\n%s\n"
-        "Close those processes for full GPU offload and faster generation.",
-        context,
-        summary["external_vram_mb"] / 1024,
-        model_label,
-        _format_process_lines(summary["processes"]),
-    )
-    return summary
 
 
 def log_vram_contention_at_startup() -> dict[str, Any] | None:
-    """Forge/runtime startup hook — warn when GPU is already heavily occupied."""
-    return warn_vram_contention(context="startup")
+    """Startup hook kept for compatibility — contention is judged when a model loads."""
+    return None
 
 
-def warn_before_large_model_load(
-    *, model_path: str, est_mb: int
+def warn_before_model_load(
+    *, model_path: str, est_mb: int | None = None
 ) -> dict[str, Any] | None:
-    """Pre-load hook for GGUF models that benefit from a clean GPU."""
-    from pathlib import Path
+    """Non-blocking pre-load advisory based on the model being opened."""
+    try:
+        return warn_vram_contention(
+            model_est_mb=int(est_mb or 0),
+            model_path=model_path,
+            model_name=Path(model_path).name,
+            context="model load",
+        )
+    except Exception:
+        logger.debug("pre-load VRAM advisory failed", exc_info=True)
+        return None
 
-    return warn_vram_contention(
-        model_est_mb=est_mb,
-        model_name=Path(model_path).name,
-        context="model load",
-    )
+
+# Back-compat alias.
+warn_before_large_model_load = warn_before_model_load
