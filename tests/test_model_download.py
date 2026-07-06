@@ -132,9 +132,7 @@ def test_cached_download_rejects_hf_gguf_without_metadata(tmp_path):
     assert result is None
 
 
-def test_cached_download_validates_specific_gguf_files_in_directory(
-    monkeypatch, tmp_path
-):
+def test_cached_download_validates_specific_gguf_files_in_directory(monkeypatch, tmp_path):
     model_dir = tmp_path / "model"
     model_dir.mkdir()
     q4 = model_dir / "model-Q4_K_M.gguf"
@@ -226,8 +224,7 @@ async def test_download_local_model_uses_metadata_gguf_file(monkeypatch, tmp_pat
             }
 
     monkeypatch.setattr(
-        model_routes,
-        "iter_matching_files",
+        "seiso.io.files.iter_matching_files",
         lambda *_args, **_kwargs: pytest.fail("metadata file should avoid scan"),
     )
 
