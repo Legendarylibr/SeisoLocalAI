@@ -195,6 +195,7 @@ def apply_training_kernels(
                     _use_fused_cuda_kernels(hidden_states)
                     and not _is_peft_lora_linear(self.gate_proj)
                     and not _is_peft_lora_linear(self.up_proj)
+                    and _supports_einsum_batch((self.gate_proj, self.up_proj))
                 ):
                     flat = hidden_states.reshape(-1, hidden_states.shape[-1])
                     inter = fused_mlp_swiglu(
