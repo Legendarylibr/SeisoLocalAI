@@ -29,45 +29,11 @@ from seiso.adaptive_quant.configuration.validation import (
     validate_safe_identifier,
 )
 from seiso.adaptive_quant.logging_utils import read_json, write_json
-
-# llama.cpp / GGUF effective bits per weight. K-quant family figures from llama.cpp release notes
-# (e.g. "Q4_K_M ~= 4.83 bpw"). Plain Q4_0/Q4_1 are slightly lower because they lack the K-quant
-# super-block overhead; F16/F32 are exact baselines.
-QUANT_BITS: dict[str, float] = {
-    # 2-bit
-    "Q2_K": 2.625,
-    "IQ2_XXS": 2.0625,
-    "IQ2_XS": 2.31,
-    "IQ2_S": 2.50,
-    "IQ2_M": 2.70,
-    # 3-bit
-    "Q3_K_S": 3.50,
-    "Q3_K_M": 3.91,
-    "Q3_K_L": 4.27,
-    "IQ3_XXS": 3.06,
-    "IQ3_S": 3.44,
-    "IQ3_M": 3.66,
-    # 4-bit
-    "Q4_0": 4.55,
-    "Q4_1": 4.75,
-    "Q4_K_S": 4.58,
-    "Q4_K_M": 4.83,
-    "IQ4_XS": 4.25,
-    "IQ4_NL": 4.50,
-    # 5-bit
-    "Q5_0": 5.54,
-    "Q5_1": 5.74,
-    "Q5_K_S": 5.54,
-    "Q5_K_M": 5.69,
-    # 6-bit
-    "Q6_K": 6.56,
-    # 8-bit
-    "Q8_0": 8.50,
-    # baselines
-    "F16": 16.0,
-    "BF16": 16.0,
-    "F32": 32.0,
-}
+from seiso.models.gguf_quant import (
+    QUANT_BITS,
+    effective_bits_for_quant,
+    normalize_quant_label,
+)
 
 # Acceptable hardware affinity labels — used as soft hints for the bandit.
 _HARDWARE_HINTS: frozenset[str] = frozenset({"gpu", "cpu", "low_resource", "any"})
@@ -88,14 +54,12 @@ class QuantSpec:
 
     @classmethod
     def from_label(cls, label: str, *, family: str = "gguf") -> QuantSpec:
-        normalized = label.strip().upper()
-        bits = QUANT_BITS.get(normalized)
-        if bits is None:
-            raise KeyError(
-                f"Unknown quant label {label!r}. Known: {sorted(QUANT_BITS)}. "
-                "Pass effective_bits explicitly via ModelRoute(effective_bits=...) for novel quants."
-            )
-        return cls(label=normalized, effective_bits=float(bits), family=family)
+        normalized = normalize_quant_label(label)
+        return cls(
+            label=normalized,
+            effective_bits=effective_bits_for_quant(normalized),
+            family=family,
+        )
 
 
 @dataclass

@@ -15,6 +15,11 @@ def test_pick_gguf_prefers_quant():
     assert _pick_gguf_file(files, preferred_quant="Q4_K_M") == "model-Q4_K_M.gguf"
 
 
+def test_pick_gguf_prefers_novel_quant():
+    files = ["model-Q8_0.gguf", "model-Q4_K_XL.gguf", "model-Q5_K_M.gguf"]
+    assert _pick_gguf_file(files, preferred_quant="Q4_K_XL") == "model-Q4_K_XL.gguf"
+
+
 def test_pick_gguf_fallback():
     files = ["tiny.gguf", "big-model.gguf"]
     assert _pick_gguf_file(files) in files

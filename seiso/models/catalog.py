@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from seiso.compat import StrEnum
+from seiso.models.gguf_quant import extract_quant_label_from_text
 from seiso.models.hub_errors import format_hub_error
 from seiso.models.trainable_snapshot import is_gguf_only_repo_id
 
@@ -454,6 +455,12 @@ def _hub_row_to_entry(
     name = _display_name(repo_id, tags)
     catalog_tags = tuple(dict.fromkeys(["popular", *tags[:6]]))
     priority = _compute_priority(downloads, created_at, list(catalog_tags))
+    if is_gguf:
+        quant = extract_quant_label_from_text(repo_id) or "Q4_K_M"
+    elif task == ModelTask.EMBEDDING:
+        quant = "F16"
+    else:
+        quant = "bf16"
 
     return CatalogEntry(
         repo_id=repo_id,
@@ -461,9 +468,7 @@ def _hub_row_to_entry(
         family=family,
         params=params,
         task=task,
-        quant=(
-            "Q4_K_M" if is_gguf else ("F16" if task == ModelTask.EMBEDDING else "bf16")
-        ),
+        quant=quant,
         tags=catalog_tags,
         gguf_repo=repo_id if is_gguf else None,
         priority=priority,

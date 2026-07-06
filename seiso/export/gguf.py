@@ -145,8 +145,10 @@ def quantize_gguf_file(
     """Re-quantize an existing GGUF (typically F16) with llama-quantize."""
     normalized = normalize_gguf_quant(quant)
     quant_type = LLAMA_QUANTIZE_TYPES.get(normalized)
+    if quant_type is None:
+        quant_type = quant.strip().upper().replace("-", "_")
     binary = resolve_llama_quantize_binary()
-    if quant_type is None or binary is None:
+    if binary is None:
         return False
     if dest.exists():
         dest.unlink()
@@ -225,20 +227,14 @@ def convert_hf_dir_to_gguf(
     if direct is not None:
         return _convert_hf_dir_direct(source, dest, direct, log)
 
-    if quant in LLAMA_QUANTIZE_TYPES:
-        with tempfile.NamedTemporaryFile(suffix=".gguf", delete=False) as tmp:
-            f16_path = Path(tmp.name)
-        try:
-            if not _convert_hf_dir_direct(source, f16_path, "f16", log):
-                return False
-            return quantize_gguf_file(f16_path, dest, quant, log)
-        finally:
-            f16_path.unlink(missing_ok=True)
-
-    log(
-        f"GGUF conversion failed for {quant}: unsupported quant for installed llama.cpp"
-    )
-    return False
+    with tempfile.NamedTemporaryFile(suffix=".gguf", delete=False) as tmp:
+        f16_path = Path(tmp.name)
+    try:
+        if not _convert_hf_dir_direct(source, f16_path, "f16", log):
+            return False
+        return quantize_gguf_file(f16_path, dest, quant, log)
+    finally:
+        f16_path.unlink(missing_ok=True)
 
 
 def _convert_hf_dir_direct(
@@ -359,7 +355,7 @@ def _export_quants(
                     record_export(quant, quant_dir, gguf_path)
                 continue
 
-            if quant in LLAMA_QUANTIZE_TYPES:
+            if quant in LLAMA_QUANTIZE_TYPES or quant not in DIRECT_CONVERT_OUTTYPES:
                 source = ensure_f16_source()
                 if source is not None and quantize_gguf_file(
                     source, gguf_path, quant, log

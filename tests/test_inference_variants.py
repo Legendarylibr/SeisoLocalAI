@@ -14,9 +14,13 @@ from forge.services.inference_variants import (
 def test_extract_quant_label_from_filename():
     assert (
         extract_quant_label(name="model-Q4_K_M.gguf", path="model-Q4_K_M.gguf")
-        == "Q4_K"
+        == "Q4_K_M"
     )
     assert extract_quant_label(name="model", path="weights-IQ4_XS.gguf") == "IQ4_XS"
+    assert (
+        extract_quant_label(name="model", path="model-Q4_K_XL.gguf")
+        == "Q4_K_XL"
+    )
     assert (
         extract_quant_label(
             name="model", path="model-q8_0.gguf", metadata={"quant": "Q8_0"}
