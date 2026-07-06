@@ -4,6 +4,7 @@
 # Usage:
 #   start                            # after install (on PATH via ~/.local/bin)
 #   SEISO_START=0 start              # install only (no auto-start)
+#   SEISO_INSTALL_PROFILE=… Target install: linux-nvidia, linux-cpu, linux-rocm, wsl-nvidia, macos, chat
 #   curl -fsSL …/main/start | bash   # one-liner without cloning first
 set -euo pipefail
 

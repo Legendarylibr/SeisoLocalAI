@@ -19,6 +19,7 @@ from typing import Any, TypeVar
 from forge.services.download_progress import ProgressCallback, make_tqdm_class
 from seiso.io.files import model_weight_size_bytes
 from seiso.models.catalog import CatalogEntry, get_by_repo
+from seiso.models.gguf_quant import rank_gguf_filenames
 from seiso.models.hub_errors import format_hub_error
 from seiso.models.trainable_snapshot import snapshot_has_trainable_weights
 from seiso.models.trusted_gguf import (
@@ -203,14 +204,15 @@ def _pick_gguf_files(
     preferred_quant = preferred_quant.upper()
 
     def quant_matches(candidates: list[str]) -> list[str]:
-        exact = [f for f in candidates if preferred_quant in f.upper()]
+        normalized_preferred = preferred_quant.replace("-", "_")
+        exact = [
+            f
+            for f in candidates
+            if normalized_preferred in f.upper().replace("-", "_")
+        ]
         if exact:
             return exact
-        for hint in ("Q4_K_M", "Q5_K_M", "Q4_0", "Q8_0", "IQ4_XS"):
-            matched = [f for f in candidates if hint in f.upper()]
-            if matched:
-                return matched
-        return candidates
+        return rank_gguf_filenames(candidates, preferred=preferred_quant)
 
     pool = quant_matches(ggufs)
 

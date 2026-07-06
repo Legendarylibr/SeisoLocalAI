@@ -1,7 +1,7 @@
 # SeisoLocalAI Project Analysis
 
 **Date:** 2026-06-25  
-**Source:** Local clone at `/home/c/Seiso` — [github.com/Legendarylibr/SeisoLocalAI](https://github.com/Legendarylibr/SeisoLocalAI)  
+**Source:** Local clone — [github.com/Legendarylibr/SeisoLocalAI](https://github.com/Legendarylibr/SeisoLocalAI)  
 **Analyst context:** Full source tree + populated `~/.seiso`, prior usage artifacts, successful UI build + partial CI runs on RTX 4090 Linux host.
 
 This document provides a software engineering analysis: architecture, features, code health, security, platform notes, WIP status, and actionable recommendations.

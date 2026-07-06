@@ -19,11 +19,23 @@ This guide walks you from a fresh machine to your first chat, training run, and 
 
 ### Linux, macOS, and WSL2 (fastest)
 
-One command installs dependencies, builds the UI, and **starts Forge** (browser opens automatically):
+One command installs dependencies (including native Linux build tools), builds the UI, and **starts Forge** (browser opens automatically):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
 ```
+
+**Per-OS profiles** — install only what you need:
+
+```bash
+SEISO_INSTALL_PROFILE=linux-nvidia curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
+SEISO_INSTALL_PROFILE=linux-cpu curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
+SEISO_INSTALL_PROFILE=wsl-nvidia curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
+SEISO_INSTALL_PROFILE=macos curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
+SEISO_INSTALL_PROFILE=chat curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
+```
+
+See [install.md](install.md) for `linux-rocm`, Windows PowerShell, and all installer options.
 
 No separate start step is needed after a successful install.
 

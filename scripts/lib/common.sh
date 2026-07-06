@@ -134,18 +134,58 @@ seiso_needs_install() {
   return 1
 }
 
+seiso_is_wsl() {
+  [[ -f /proc/version ]] && grep -qiE 'microsoft|WSL' /proc/version 2>/dev/null
+}
+
+seiso_install_profile_extras() {
+  local profile="${1,,}"
+  case "$profile" in
+    linux-nvidia|linux-nvidia-native)
+      printf '%s\n' "forge,train,cuda,llamacpp"
+      ;;
+    linux-cpu|linux)
+      printf '%s\n' "forge,train,llamacpp"
+      ;;
+    linux-rocm|rocm)
+      printf '%s\n' "forge,train,llamacpp"
+      ;;
+    wsl-nvidia|wsl)
+      printf '%s\n' "forge,train,cuda,llamacpp"
+      ;;
+    macos|darwin|apple-silicon)
+      printf '%s\n' "forge,train,llamacpp,mlx"
+      ;;
+    chat|fast|chat-only)
+      if [[ "$(uname -s)" == "Darwin" ]]; then
+        printf '%s\n' "forge,llamacpp,mlx"
+      else
+        printf '%s\n' "forge,llamacpp"
+      fi
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
 seiso_detect_platform_extras() {
   if [[ -n "${SEISO_INSTALL_EXTRAS:-}" ]]; then
     printf '%s\n' "$SEISO_INSTALL_EXTRAS"
     return 0
   fi
 
-  local os extras
-  if [[ "${SEISO_FAST_INSTALL:-0}" == "1" ]]; then
-    extras="forge,llamacpp"
-    if [[ "$(uname -s)" == "Darwin" ]]; then
-      extras="${extras},mlx"
-    fi
+  local profile extras os
+  if [[ -n "${SEISO_INSTALL_PROFILE:-}" ]]; then
+    extras="$(seiso_install_profile_extras "$SEISO_INSTALL_PROFILE")" \
+      || seiso_die "Unknown SEISO_INSTALL_PROFILE=${SEISO_INSTALL_PROFILE!r}. Use: linux-nvidia, linux-cpu, linux-rocm, wsl-nvidia, macos, chat"
+    case "${SEISO_INSTALL_PROFILE,,}" in
+      wsl|wsl-nvidia)
+        export SEISO_NVIDIA_WSL_ACK="${SEISO_NVIDIA_WSL_ACK:-1}"
+        ;;
+    esac
+  elif [[ "${SEISO_FAST_INSTALL:-0}" == "1" ]]; then
+    extras="$(seiso_install_profile_extras chat)"
   else
     os="$(uname -s)"
     case "$os" in
@@ -317,7 +357,8 @@ seiso_ensure_system_deps() {
     fi
     "${apt_cmd[@]}" update -qq
     "${apt_cmd[@]}" install -y \
-      python3 python3-venv python3-pip git curl ca-certificates \
+      python3 python3-venv python3-dev python3-pip git curl ca-certificates \
+      build-essential pkg-config cmake \
       || return 1
     return 0
   fi
@@ -327,7 +368,21 @@ seiso_ensure_system_deps() {
     if [[ "$(id -u)" -ne 0 ]] && command -v sudo >/dev/null 2>&1; then
       dnf_cmd=(sudo dnf)
     fi
-    "${dnf_cmd[@]}" install -y python3 python3-pip git curl ca-certificates \
+    "${dnf_cmd[@]}" install -y \
+      python3 python3-pip python3-devel git curl ca-certificates \
+      gcc gcc-c++ make cmake pkgconfig \
+      || return 1
+    return 0
+  fi
+
+  if command -v zypper >/dev/null 2>&1; then
+    local zypper_cmd=(zypper)
+    if [[ "$(id -u)" -ne 0 ]] && command -v sudo >/dev/null 2>&1; then
+      zypper_cmd=(sudo zypper)
+    fi
+    "${zypper_cmd[@]}" --non-interactive install \
+      python3 python3-pip python3-devel git curl ca-certificates \
+      gcc gcc-c++ make cmake pkg-config \
       || return 1
     return 0
   fi
@@ -337,7 +392,8 @@ seiso_ensure_system_deps() {
     if [[ "$(id -u)" -ne 0 ]] && command -v sudo >/dev/null 2>&1; then
       pacman_cmd=(sudo pacman)
     fi
-    "${pacman_cmd[@]}" -Sy --noconfirm python python-pip git curl ca-certificates \
+    "${pacman_cmd[@]}" -Sy --noconfirm \
+      python python-pip base-devel git curl ca-certificates cmake pkgconf \
       || return 1
     return 0
   fi

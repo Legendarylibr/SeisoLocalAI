@@ -1,10 +1,12 @@
-"""Model-specific LoRA target module detection."""
+"""Family-level LoRA target module detection for Hugging Face models."""
 
 from __future__ import annotations
 
 import re
 from contextlib import suppress
 from typing import Any
+
+from seiso.models.catalog import ModelFamily, infer_model_family
 
 # PEFT accepts a regex target. Use it for multimodal wrappers so LoRA skips
 # vision/audio towers and only hits the text backbone under language_model.
@@ -24,105 +26,46 @@ _MULTIMODAL_BACKBONE_MARKERS = frozenset(
     }
 )
 
-# Architecture patterns → LoRA target modules (regex for special multimodal cases)
+_LLAMA_STYLE_TARGETS = [
+    "q_proj",
+    "k_proj",
+    "v_proj",
+    "o_proj",
+    "gate_proj",
+    "up_proj",
+    "down_proj",
+]
+
+# Family → LoRA targets. Most open LLM families share llama-style linear names.
+_FAMILY_TARGETS: dict[ModelFamily, list[str]] = {
+    ModelFamily.LLAMA: _LLAMA_STYLE_TARGETS,
+    ModelFamily.QWEN: _LLAMA_STYLE_TARGETS,
+    ModelFamily.GEMMA: _LLAMA_STYLE_TARGETS,
+    ModelFamily.MISTRAL: _LLAMA_STYLE_TARGETS,
+    ModelFamily.DEEPSEEK: _LLAMA_STYLE_TARGETS,
+    ModelFamily.KIMI: _LLAMA_STYLE_TARGETS,
+    ModelFamily.GLM: _LLAMA_STYLE_TARGETS,
+    ModelFamily.OLMO: _LLAMA_STYLE_TARGETS,
+    ModelFamily.GRANITE: _LLAMA_STYLE_TARGETS,
+    ModelFamily.YI: _LLAMA_STYLE_TARGETS,
+    ModelFamily.INTERNLM: _LLAMA_STYLE_TARGETS,
+    ModelFamily.BAICHUAN: _LLAMA_STYLE_TARGETS,
+    ModelFamily.STABLELM: _LLAMA_STYLE_TARGETS,
+    ModelFamily.COMMAND: _LLAMA_STYLE_TARGETS,
+    ModelFamily.SMOLLM: _LLAMA_STYLE_TARGETS,
+    ModelFamily.GPT_OSS: _LLAMA_STYLE_TARGETS,
+    ModelFamily.EXAONE: _LLAMA_STYLE_TARGETS,
+    ModelFamily.NOVA: _LLAMA_STYLE_TARGETS,
+}
+
+# Architectures whose module names differ from the llama-style default.
 _ARCHITECTURE_TARGETS: dict[str, list[str] | str] = {
-    "llama": [
-        "q_proj",
-        "k_proj",
-        "v_proj",
-        "o_proj",
-        "gate_proj",
-        "up_proj",
-        "down_proj",
-    ],
-    "mistral": [
-        "q_proj",
-        "k_proj",
-        "v_proj",
-        "o_proj",
-        "gate_proj",
-        "up_proj",
-        "down_proj",
-    ],
     "mixtral": ["q_proj", "k_proj", "v_proj", "o_proj", "w1", "w2", "w3"],
-    "qwen": [
-        "q_proj",
-        "k_proj",
-        "v_proj",
-        "o_proj",
-        "gate_proj",
-        "up_proj",
-        "down_proj",
-    ],
-    "qwen2": [
-        "q_proj",
-        "k_proj",
-        "v_proj",
-        "o_proj",
-        "gate_proj",
-        "up_proj",
-        "down_proj",
-    ],
-    "qwen3": [
-        "q_proj",
-        "k_proj",
-        "v_proj",
-        "o_proj",
-        "gate_proj",
-        "up_proj",
-        "down_proj",
-    ],
-    "gemma3": [
-        "q_proj",
-        "k_proj",
-        "v_proj",
-        "o_proj",
-        "gate_proj",
-        "up_proj",
-        "down_proj",
-    ],
-    "gemma": [
-        "q_proj",
-        "k_proj",
-        "v_proj",
-        "o_proj",
-        "gate_proj",
-        "up_proj",
-        "down_proj",
-    ],
-    "gemma2": [
-        "q_proj",
-        "k_proj",
-        "v_proj",
-        "o_proj",
-        "gate_proj",
-        "up_proj",
-        "down_proj",
-    ],
     "phi": ["q_proj", "k_proj", "v_proj", "dense", "fc1", "fc2"],
     "phi3": ["qkv_proj", "o_proj", "gate_up_proj", "down_proj"],
     "falcon": ["query_key_value", "dense", "dense_h_to_4h", "dense_4h_to_h"],
     "gpt2": ["c_attn", "c_proj", "c_fc"],
     "gpt_neox": ["query_key_value", "dense", "dense_h_to_4h", "dense_4h_to_h"],
-    "gpt_oss": [
-        "q_proj",
-        "k_proj",
-        "v_proj",
-        "o_proj",
-        "gate_proj",
-        "up_proj",
-        "down_proj",
-    ],
-    "deepseek": [
-        "q_proj",
-        "k_proj",
-        "v_proj",
-        "o_proj",
-        "gate_proj",
-        "up_proj",
-        "down_proj",
-    ],
-    "yi": ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
 }
 
 _DEFAULT_TARGETS = ["q_proj", "k_proj", "v_proj", "o_proj"]
@@ -154,6 +97,8 @@ _COMMON_LINEAR_TARGETS = (
     "w3",
 )
 
+_PHI3_RE = re.compile(r"(^|[-_/])phi[-_]?[34]", re.I)
+
 
 def _config_model_type(model: Any) -> str | None:
     cfg = getattr(model, "config", None)
@@ -169,38 +114,39 @@ def _config_model_type(model: Any) -> str | None:
     return None
 
 
-def detect_architecture(model_id: str, model=None) -> str | None:
-    """Detect model architecture from ID or config."""
-    if model is not None:
-        mt = _config_model_type(model)
-        if mt in _ARCHITECTURE_TARGETS:
-            return mt
-
-    mid = model_id.lower()
-    patterns = [
-        (r"llama|tinyllama", "llama"),
-        (r"mixtral", "mixtral"),
-        (r"mistral|codestral|magistral", "mistral"),
-        (r"qwq|qwen3\.5|qwen3", "qwen3"),
-        (r"qwen2|qwen", "qwen2"),
-        (r"gemma-3|gemma3", "gemma3"),
-        (r"gemma-2|gemma2", "gemma2"),
-        (r"gemma", "gemma"),
-        (r"phi-3|phi3|phi-4|phi4", "phi3"),
-        (r"phi", "phi"),
-        (r"deepseek-r1|deepseek_r1|deepseek", "deepseek"),
-        (r"falcon", "falcon"),
-        (r"yi-", "yi"),
-        (r"gpt-oss|gpt_oss", "gpt_oss"),
-    ]
-    for pat, arch in patterns:
-        if re.search(pat, mid):
-            return arch
-
-    if model is not None:
-        return _config_model_type(model)
-
+def _special_architecture(model_id: str, model_type: str | None) -> str | None:
+    hay = f"{model_id} {model_type or ''}".lower()
+    if "mixtral" in hay or model_type == "mixtral":
+        return "mixtral"
+    if _PHI3_RE.search(hay) or model_type in {"phi3", "phi4"}:
+        return "phi3"
+    if "phi" in hay or model_type == "phi":
+        return "phi"
+    if "falcon" in hay or model_type == "falcon":
+        return "falcon"
+    if model_type in {"gpt2"}:
+        return "gpt2"
+    if model_type in {"gpt_neox", "gptj"}:
+        return "gpt_neox"
     return None
+
+
+def detect_architecture(model_id: str, model=None) -> str | None:
+    """Detect model architecture from Hub id, config, or family classification."""
+    model_type = _config_model_type(model) if model is not None else None
+    if model_type in _ARCHITECTURE_TARGETS:
+        return model_type
+
+    tag_hints = [model_type] if model_type else []
+    special = _special_architecture(model_id, model_type)
+    if special:
+        return special
+
+    family = infer_model_family(model_id, tag_hints)
+    if family != ModelFamily.OTHER:
+        return family.value
+
+    return model_type
 
 
 def _target_suffix(name: str) -> str:
@@ -219,6 +165,12 @@ def get_lora_target_modules(model_id: str, model=None) -> list[str] | str:
     arch = detect_architecture(model_id, model)
     if arch in _ARCHITECTURE_TARGETS:
         return _ARCHITECTURE_TARGETS[arch]
+    try:
+        family = ModelFamily(arch) if arch else ModelFamily.OTHER
+    except ValueError:
+        family = ModelFamily.OTHER
+    if family in _FAMILY_TARGETS:
+        return _FAMILY_TARGETS[family]
     if model is not None:
         inferred = infer_lora_target_modules(model)
         if inferred:

@@ -9,7 +9,7 @@ Training works with ROCm PyTorch. Fused kernels use **Triton** (native `.cu` ker
 2. Install Seiso (after ROCm PyTorch is installed):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
+SEISO_INSTALL_PROFILE=linux-rocm curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
 source "$HOME/Seiso/.venv/bin/activate" && pip install triton
 ```
 

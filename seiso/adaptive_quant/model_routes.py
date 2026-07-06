@@ -29,45 +29,11 @@ from seiso.adaptive_quant.configuration.validation import (
     validate_safe_identifier,
 )
 from seiso.adaptive_quant.logging_utils import read_json, write_json
-
-# llama.cpp / GGUF effective bits per weight. K-quant family figures from llama.cpp release notes
-# (e.g. "Q4_K_M ~= 4.83 bpw"). Plain Q4_0/Q4_1 are slightly lower because they lack the K-quant
-# super-block overhead; F16/F32 are exact baselines.
-QUANT_BITS: dict[str, float] = {
-    # 2-bit
-    "Q2_K": 2.625,
-    "IQ2_XXS": 2.0625,
-    "IQ2_XS": 2.31,
-    "IQ2_S": 2.50,
-    "IQ2_M": 2.70,
-    # 3-bit
-    "Q3_K_S": 3.50,
-    "Q3_K_M": 3.91,
-    "Q3_K_L": 4.27,
-    "IQ3_XXS": 3.06,
-    "IQ3_S": 3.44,
-    "IQ3_M": 3.66,
-    # 4-bit
-    "Q4_0": 4.55,
-    "Q4_1": 4.75,
-    "Q4_K_S": 4.58,
-    "Q4_K_M": 4.83,
-    "IQ4_XS": 4.25,
-    "IQ4_NL": 4.50,
-    # 5-bit
-    "Q5_0": 5.54,
-    "Q5_1": 5.74,
-    "Q5_K_S": 5.54,
-    "Q5_K_M": 5.69,
-    # 6-bit
-    "Q6_K": 6.56,
-    # 8-bit
-    "Q8_0": 8.50,
-    # baselines
-    "F16": 16.0,
-    "BF16": 16.0,
-    "F32": 32.0,
-}
+from seiso.models.gguf_quant import (
+    QUANT_BITS,
+    effective_bits_for_quant,
+    normalize_quant_label,
+)
 
 # Acceptable hardware affinity labels — used as soft hints for the bandit.
 _HARDWARE_HINTS: frozenset[str] = frozenset({"gpu", "cpu", "low_resource", "any"})
@@ -88,14 +54,12 @@ class QuantSpec:
 
     @classmethod
     def from_label(cls, label: str, *, family: str = "gguf") -> QuantSpec:
-        normalized = label.strip().upper()
-        bits = QUANT_BITS.get(normalized)
-        if bits is None:
-            raise KeyError(
-                f"Unknown quant label {label!r}. Known: {sorted(QUANT_BITS)}. "
-                "Pass effective_bits explicitly via ModelRoute(effective_bits=...) for novel quants."
-            )
-        return cls(label=normalized, effective_bits=float(bits), family=family)
+        normalized = normalize_quant_label(label)
+        return cls(
+            label=normalized,
+            effective_bits=effective_bits_for_quant(normalized),
+            family=family,
+        )
 
 
 @dataclass
@@ -313,101 +277,59 @@ class RouteCatalog:
         raise KeyError(f"Unknown route_id: {route_id!r}")
 
 
-def default_route_catalog() -> RouteCatalog:
-    """A small curated default registry covering popular open GGUF quants.
+def default_route_catalog(*, token: str | None = None) -> RouteCatalog:
+    """Build a starter route catalog from live Hub search.
 
-    These entries reference well-known community quantizations on the Hub. Users are expected
-    to extend / replace this list for their own deployments via ``adaptive-rl-quant-route register``
-    (see :mod:`run_route_learning`). The defaults are intentionally diverse along three axes —
-    parameter count (1B-8B), quantization tier (2-bit through 8-bit), and hardware affinity —
-    so the bandit has signal to learn from on day one.
+    Returns an empty catalog when Hub search is unavailable. Users extend routes via
+    ``adaptive-rl-quant-route register`` (see :mod:`run_route_learning`).
     """
-    return RouteCatalog(
-        routes=[
+    try:
+        from seiso.models.catalog import search_catalog
+
+        result = search_catalog(limit=16, token=token)
+    except Exception:
+        return RouteCatalog(routes=[])
+
+    routes: list[ModelRoute] = []
+    seen_repos: set[str] = set()
+    for row in result.models:
+        repo_id = row.get("repo_id")
+        if not isinstance(repo_id, str) or not row.get("gguf_repo"):
+            continue
+        if repo_id in seen_repos:
+            continue
+        seen_repos.add(repo_id)
+
+        quant_raw = row.get("quant")
+        quant_label = (
+            str(quant_raw).strip().upper() if isinstance(quant_raw, str) else "Q4_K_M"
+        )
+        params_raw = row.get("params")
+        parameters_b = None
+        if isinstance(params_raw, str) and params_raw.strip().upper() not in {"", "?"}:
+            try:
+                parameters_b = float(params_raw.strip().upper().rstrip("B"))
+            except ValueError:
+                parameters_b = None
+
+        slug = repo_id.split("/")[-1].lower()
+        slug = "".join(ch if ch.isalnum() else "-" for ch in slug).strip("-")
+        route_id = f"{slug}-{quant_label.lower().replace('_', '')}"[:80]
+
+        routes.append(
             ModelRoute(
-                route_id="llama31-8b-q4km",
-                repo_id="bartowski/Meta-Llama-3.1-8B-Instruct-GGUF",
-                filename="Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf",
-                quant_label="Q4_K_M",
-                parameters_b=8.0,
-                size_mb=4920.0,
+                route_id=route_id,
+                repo_id=repo_id,
+                quant_label=quant_label,
+                parameters_b=parameters_b,
                 hardware_hints=("gpu", "cpu"),
-                notes="Balanced general-purpose route; common community default.",
-            ),
-            ModelRoute(
-                route_id="llama31-8b-q5km",
-                repo_id="bartowski/Meta-Llama-3.1-8B-Instruct-GGUF",
-                filename="Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf",
-                quant_label="Q5_K_M",
-                parameters_b=8.0,
-                size_mb=5730.0,
-                hardware_hints=("gpu",),
-                notes="Higher quality 8B route; prefers GPU memory budgets.",
-            ),
-            ModelRoute(
-                route_id="llama31-8b-q8",
-                repo_id="bartowski/Meta-Llama-3.1-8B-Instruct-GGUF",
-                filename="Meta-Llama-3.1-8B-Instruct-Q8_0.gguf",
-                quant_label="Q8_0",
-                parameters_b=8.0,
-                size_mb=8540.0,
-                hardware_hints=("gpu",),
-                notes="High-fidelity 8-bit route; best on >=12 GB VRAM.",
-            ),
-            ModelRoute(
-                route_id="llama31-8b-q3km",
-                repo_id="bartowski/Meta-Llama-3.1-8B-Instruct-GGUF",
-                filename="Meta-Llama-3.1-8B-Instruct-Q3_K_M.gguf",
-                quant_label="Q3_K_M",
-                parameters_b=8.0,
-                size_mb=4020.0,
-                hardware_hints=("cpu", "low_resource"),
-                notes="Memory-efficient 8B variant for CPU / small GPU.",
-            ),
-            ModelRoute(
-                route_id="qwen25-7b-q4km",
-                repo_id="bartowski/Qwen2.5-7B-Instruct-GGUF",
-                filename="Qwen2.5-7B-Instruct-Q4_K_M.gguf",
-                quant_label="Q4_K_M",
-                parameters_b=7.0,
-                size_mb=4540.0,
-                hardware_hints=("gpu", "cpu"),
-                domain_hints=("code", "reasoning"),
-                notes="Strong code / reasoning baseline at 7B.",
-            ),
-            ModelRoute(
-                route_id="qwen25-7b-q6k",
-                repo_id="bartowski/Qwen2.5-7B-Instruct-GGUF",
-                filename="Qwen2.5-7B-Instruct-Q6_K.gguf",
-                quant_label="Q6_K",
-                parameters_b=7.0,
-                size_mb=6260.0,
-                hardware_hints=("gpu",),
-                domain_hints=("code", "reasoning"),
-                notes="Higher quality Qwen 7B for GPU.",
-            ),
-            ModelRoute(
-                route_id="phi35-mini-q4km",
-                repo_id="bartowski/Phi-3.5-mini-instruct-GGUF",
-                filename="Phi-3.5-mini-instruct-Q4_K_M.gguf",
-                quant_label="Q4_K_M",
-                parameters_b=3.8,
-                size_mb=2390.0,
-                hardware_hints=("cpu", "low_resource", "gpu"),
-                notes="Compact instruction model; great fit on small CPU/edge.",
-            ),
-            ModelRoute(
-                route_id="llama32-1b-q8",
-                repo_id="bartowski/Llama-3.2-1B-Instruct-GGUF",
-                filename="Llama-3.2-1B-Instruct-Q8_0.gguf",
-                quant_label="Q8_0",
-                parameters_b=1.24,
-                size_mb=1320.0,
-                hardware_hints=("low_resource", "cpu"),
-                notes="Smallest viable route for low-resource devices; fast and high-quality at this size.",
-            ),
-        ]
-    )
+                notes="Discovered from Hugging Face Hub catalog search.",
+            )
+        )
+        if len(routes) >= 8:
+            break
+
+    return RouteCatalog(routes=routes)
 
 
 __all__ = [
