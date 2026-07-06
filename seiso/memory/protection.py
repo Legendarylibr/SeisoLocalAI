@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import contextlib
 import gc
+import json
 import logging
 import os
 import platform
+import re
 from pathlib import Path
 from typing import Any, Literal
 
@@ -549,10 +551,15 @@ def llama_prefill_needs_reload(
         n_gpu_layers=loaded_n_gpu_layers,
         n_ctx=n_ctx,
     )
-    prefill_tokens = min(max(prompt_tokens, _MIN_LLAMA_BATCH), max(loaded_n_batch, 1))
+    prefill_tokens = max(prompt_tokens, _MIN_LLAMA_BATCH)
     reserve_steps = max(1, (prefill_tokens + 255) // 256)
     reserve_mb = reserve_steps * _NATIVE_LINUX_PREFILL_RESERVE_PER_256TOK_MB
     effective = max(_MIN_LLAMA_BATCH * 2, effective - reserve_mb)
+    if _messages_have_vision_content(messages):
+        # Vision encoder + patch embeddings spike VRAM beyond text-only prefill.
+        effective = max(_MIN_LLAMA_BATCH * 2, effective - 512)
+    elif _gguf_has_mmproj_sibling(model_path):
+        effective = max(_MIN_LLAMA_BATCH * 2, effective - 256)
 
     safe_batch, safe_ubatch = llama_batch_limits_for_headroom(effective)
     if load_tier == "compact":
@@ -568,6 +575,8 @@ def llama_prefill_needs_reload(
         and free_mb < int(loaded_headroom_mb * _NATIVE_LINUX_PREFILL_HEADROOM_DROP_RATIO)
     )
     long_prefill = prompt_tokens > max(1024, min(loaded_n_batch, _MAX_LLAMA_BATCH) // 2)
+    prefill_exceeds_safe = prompt_tokens > safe_batch
+    vision_prefill = _messages_have_vision_content(messages)
     tight_prefill = llama_model_is_tight_vram_fit(
         model_path=model_path,
         free_mb=free_mb,
@@ -576,7 +585,11 @@ def llama_prefill_needs_reload(
     )
     loaded_batch = int(loaded_n_batch or 0)
     needs_reload = loaded_batch > safe_batch and (
-        long_prefill or headroom_dropped or tight_prefill
+        prefill_exceeds_safe
+        or long_prefill
+        or headroom_dropped
+        or tight_prefill
+        or vision_prefill
     )
     return needs_reload, safe_batch, min(safe_ubatch, safe_batch)
 
@@ -903,9 +916,98 @@ def ensure_load_fits(
     return fit
 
 
+_VISION_TOKENS_PER_IMAGE = 1024
+_DATA_IMAGE_RE = re.compile(r"data:image/[^;]+;base64,", re.I)
+_VISION_CONTENT_MARKERS = (
+    "image_url",
+    '"type":"image"',
+    '"type": "image"',
+    "data:image/",
+)
+
+
+def _text_chars_to_tokens(chars: int) -> int:
+    return max(0, int(chars / 3.2))
+
+
+def _count_images_in_content(content: Any) -> int:
+    if isinstance(content, list):
+        count = 0
+        for part in content:
+            if not isinstance(part, dict):
+                continue
+            part_type = str(part.get("type", "")).lower()
+            if part_type in {"image", "image_url"}:
+                count += 1
+        return count
+    if not isinstance(content, str):
+        return 0
+    stripped = content.lstrip()
+    if stripped.startswith("["):
+        with contextlib.suppress(json.JSONDecodeError, TypeError, ValueError):
+            parsed = json.loads(content)
+            if isinstance(parsed, list):
+                return _count_images_in_content(parsed)
+    lower = content.lower()
+    embedded = len(_DATA_IMAGE_RE.findall(content))
+    if embedded:
+        return embedded
+    if any(marker in lower for marker in _VISION_CONTENT_MARKERS):
+        return max(1, lower.count("image_url"))
+    return 0
+
+
+def _text_chars_from_content(content: Any) -> int:
+    if isinstance(content, list):
+        chars = 0
+        for part in content:
+            if not isinstance(part, dict):
+                continue
+            part_type = str(part.get("type", "text")).lower()
+            if part_type in {"text", "input_text"}:
+                chars += len(str(part.get("text") or part.get("content") or ""))
+        return chars
+    if isinstance(content, str):
+        stripped = content.lstrip()
+        if stripped.startswith("["):
+            with contextlib.suppress(json.JSONDecodeError, TypeError, ValueError):
+                parsed = json.loads(content)
+                if isinstance(parsed, list):
+                    return _text_chars_from_content(parsed)
+        if _count_images_in_content(content):
+            # OpenAI-style JSON with embedded base64 — avoid treating payload as text.
+            with contextlib.suppress(json.JSONDecodeError, TypeError, ValueError):
+                parsed = json.loads(content)
+                if isinstance(parsed, list):
+                    return _text_chars_from_content(parsed)
+            return min(len(content), 512)
+        return len(content)
+    return len(str(content))
+
+
+def _message_content_token_estimate(content: Any) -> int:
+    images = _count_images_in_content(content)
+    text_tokens = _text_chars_to_tokens(_text_chars_from_content(content))
+    if images:
+        return text_tokens + images * _VISION_TOKENS_PER_IMAGE
+    return text_tokens
+
+
+def _messages_have_vision_content(messages: list[dict[str, Any]]) -> bool:
+    return any(_count_images_in_content(m.get("content")) > 0 for m in messages)
+
+
+def _gguf_has_mmproj_sibling(model_path: str | Path) -> bool:
+    """True when a colocated mmproj GGUF suggests a vision-capable chat model."""
+    path = Path(model_path)
+    if not path.is_file():
+        return False
+    return any(path.parent.glob("mmproj*.gguf"))
+
+
 def _estimate_prompt_tokens(messages: list[dict[str, Any]]) -> int:
-    chars = sum(len(str(m.get("content", ""))) for m in messages)
-    return max(64, int(chars / 3.2))
+    total = sum(_message_content_token_estimate(m.get("content", "")) for m in messages)
+    return max(64, total)
 
 
 def sanitize_inference_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -996,6 +1098,8 @@ def clamp_llama_load_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
             n_gpu_layers=n_gpu_layers,
             n_ctx=n_ctx,
         )
+        if native_linux_nvidia and model_path and _gguf_has_mmproj_sibling(model_path):
+            batch_headroom = max(_MIN_LLAMA_BATCH * 2, batch_headroom - 512)
         if tight or (
             native_linux_nvidia
             and batch_headroom < _NATIVE_LINUX_PREFILL_CLAMP_MB

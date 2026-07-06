@@ -509,6 +509,89 @@ def test_llama_prefill_guard_noops_off_native_linux(monkeypatch, tmp_path):
     assert safe_ubatch == 1024
 
 
+def test_estimate_prompt_tokens_counts_vision_parts_without_base64_chars():
+    from seiso.memory.protection import _estimate_prompt_tokens
+
+    messages = [
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "describe this"},
+                {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}},
+            ],
+        }
+    ]
+    est = _estimate_prompt_tokens(messages)
+    assert est >= 1024
+    assert est < 2000
+
+
+def test_llama_prefill_guard_reloads_short_text_with_vision_content(
+    monkeypatch, tmp_path
+):
+    gguf = tmp_path / "gemma-vision.gguf"
+    gguf.write_bytes(b"\x00" * 1024)
+    monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: True)
+    monkeypatch.setattr("seiso.memory.protection.hardware_profile", lambda **_: {})
+    monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 24576)
+    monkeypatch.setattr(
+        "seiso.memory.protection.llama_effective_batch_headroom_mb",
+        lambda *_args, **_kwargs: 7600,
+    )
+    messages = [
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "hi"},
+                {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}},
+            ],
+        }
+    ]
+
+    needs_reload, safe_batch, safe_ubatch = llama_prefill_needs_reload(
+        model_path=str(gguf),
+        messages=messages,
+        n_ctx=8192,
+        loaded_n_batch=4096,
+        loaded_n_gpu_layers=-1,
+        load_tier="normal",
+        loaded_headroom_mb=24576,
+    )
+
+    assert needs_reload is True
+    assert safe_batch <= 512
+    assert safe_ubatch <= 256
+
+
+def test_clamp_llama_load_kwargs_native_linux_vision_mmproj_clamps_batch(
+    monkeypatch, tmp_path
+):
+    gguf = tmp_path / "llava.gguf"
+    mmproj = tmp_path / "mmproj-Q8_0.gguf"
+    gguf.write_bytes(b"\x00" * 1024)
+    mmproj.write_bytes(b"\x00" * 512)
+    monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: True)
+    monkeypatch.setattr(
+        "seiso.memory.protection.llama_effective_batch_headroom_mb",
+        lambda *_a, **_k: 6500,
+    )
+    monkeypatch.setattr(
+        "seiso.memory.protection.llama_model_is_tight_vram_fit", lambda **_k: False
+    )
+
+    kwargs = clamp_llama_load_kwargs(
+        {
+            "_model_path": str(gguf),
+            "n_ctx": 4096,
+            "n_batch": 4096,
+            "n_ubatch": 1024,
+            "n_gpu_layers": -1,
+        }
+    )
+    assert kwargs["n_batch"] <= 512
+    assert kwargs["n_ubatch"] <= 256
+
+
 def test_clamp_llama_load_kwargs_native_linux_borderline_roomy(
     monkeypatch, tmp_path
 ):

@@ -159,8 +159,9 @@ def estimate_llama_n_ctx(
     if not env_bool("SEISO_LLAMA_DYNAMIC_CTX", True):
         sized = default
     else:
-        chars = sum(len(str(m.get("content", ""))) for m in messages)
-        est_prompt = max(256, int(chars / 3.2))
+        from seiso.memory.protection import _estimate_prompt_tokens
+
+        est_prompt = max(256, _estimate_prompt_tokens(messages))
         needed = est_prompt + max_tokens + 128
         step = 512
         sized = min(ceiling, max(floor, ((needed + step - 1) // step) * step))
