@@ -625,9 +625,7 @@ def llama_load_profile_ladder(
     except ImportError:
         native_linux_nvidia = False
 
-    if tight or (
-        native_linux_nvidia and effective < _NATIVE_LINUX_PREFILL_CLAMP_MB
-    ):
+    if native_linux_nvidia or tight or effective < _NATIVE_LINUX_PREFILL_CLAMP_MB:
         base_batch = max(_MIN_LLAMA_BATCH, min(base_batch, top_batch))
         base_ubatch = max(
             _MIN_LLAMA_BATCH,
@@ -1100,11 +1098,8 @@ def clamp_llama_load_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
         )
         if native_linux_nvidia and model_path and _gguf_has_mmproj_sibling(model_path):
             batch_headroom = max(_MIN_LLAMA_BATCH * 2, batch_headroom - 512)
-        if tight or (
-            native_linux_nvidia
-            and batch_headroom < _NATIVE_LINUX_PREFILL_CLAMP_MB
-        ):
-            max_batch, max_ubatch = llama_batch_limits_for_headroom(batch_headroom)
+        max_batch, max_ubatch = llama_batch_limits_for_headroom(batch_headroom)
+        if native_linux_nvidia or tight:
             out["n_batch"] = max(_MIN_LLAMA_BATCH, min(out["n_batch"], max_batch))
             out["n_ubatch"] = max(
                 _MIN_LLAMA_BATCH,
