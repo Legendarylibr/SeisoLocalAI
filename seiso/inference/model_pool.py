@@ -177,8 +177,17 @@ def _default_llama_flash_attn(model_path: str | None = None) -> bool:
         return False
 
 
-def _llama_batch_defaults() -> tuple[int, int]:
+def _llama_batch_defaults(model_path: str | None = None) -> tuple[int, int]:
     """Speed-first llama.cpp prompt/decode batch defaults (tight-fit models clamp at load)."""
+    if _native_linux_nvidia():
+        try:
+            from seiso.memory.protection import discrete_gpu_total_mb, gpu_batch_tier_caps
+
+            total = discrete_gpu_total_mb()
+            if total > 0:
+                return gpu_batch_tier_caps(total, "normal")
+        except Exception:
+            pass
     return 4096, 1024
 
 
@@ -204,7 +213,7 @@ def fit_llama_gpu_layers(
     total_layers = gguf_total_layers(model_path)
 
     try:
-        from seiso.hardware.tiers import discrete_gpu_total_mb
+        from seiso.memory.protection import discrete_gpu_total_mb
 
         capacity_mb = discrete_gpu_total_mb() or 0
     except Exception:
@@ -257,7 +266,7 @@ def fit_llama_gpu_layers(
 
     if _llama_skip_partial_offload(model_path):
         try:
-            from seiso.hardware.tiers import discrete_gpu_total_mb
+            from seiso.memory.protection import discrete_gpu_total_mb
 
             capacity_mb = discrete_gpu_total_mb() or headroom_mb
         except Exception:
@@ -532,7 +541,7 @@ def llama_load_kwargs(n_ctx: int, *, model_path: str | None = None) -> dict[str,
         logger.debug("llama-cpp-python wheel lacks GPU offload support — forcing n_gpu_layers=0")
         n_gpu_layers = 0
 
-    batch_default, ubatch_default = _llama_batch_defaults()
+    batch_default, ubatch_default = _llama_batch_defaults(model_path)
 
     n_batch = env_int("SEISO_LLAMA_BATCH", batch_default)
     n_ubatch = min(env_int("SEISO_LLAMA_UBATCH", min(n_batch, ubatch_default)), n_batch)

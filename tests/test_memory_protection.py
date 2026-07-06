@@ -642,6 +642,41 @@ def test_llama_prefill_guard_keeps_roomy_12b_after_load(monkeypatch, tmp_path):
     assert safe_ubatch >= 128
 
 
+def test_llama_prefill_guard_tight_gemma_27b_caps_safe_at_loaded_batch(
+    monkeypatch, tmp_path
+):
+    gguf = tmp_path / "gemma3-27b-q4.gguf"
+    _write_arch_gguf(gguf, "gemma3", extra=[(b"gemma3.attention.sliding_window", 512)])
+    monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: True)
+    monkeypatch.setattr("seiso.memory.protection.hardware_profile", lambda **_: {"gpus": [{"vram_total_mb": 24576}]})
+    monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 6500)
+    monkeypatch.setattr("seiso.memory.protection.estimate_path_vram_mb", lambda _p: 16000)
+    monkeypatch.setattr(
+        "seiso.memory.protection.llama_kv_cache_reserve_mb",
+        lambda *_args, **_kwargs: 1024,
+    )
+    monkeypatch.setattr(
+        "seiso.hardware.tiers.discrete_vram_total_mb",
+        lambda _profile: 24576,
+    )
+
+    needs_reload, safe_batch, safe_ubatch = llama_prefill_needs_reload(
+        model_path=str(gguf),
+        messages=[{"role": "user", "content": "hi"}],
+        n_ctx=4096,
+        loaded_n_batch=256,
+        loaded_n_ubatch=128,
+        loaded_n_gpu_layers=-1,
+        load_tier="normal",
+        loaded_headroom_mb=24576,
+    )
+
+    assert needs_reload is False
+    assert safe_batch <= 256
+    assert safe_ubatch <= 128
+    assert safe_ubatch <= safe_batch
+
+
 def test_llama_prefill_guard_reloads_short_prompt_for_borderline_24gb_q4(monkeypatch, tmp_path):
     gguf = tmp_path / "qwen-30b-q4.gguf"
     gguf.write_bytes(b"\x00" * 1024)

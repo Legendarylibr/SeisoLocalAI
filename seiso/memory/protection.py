@@ -701,6 +701,69 @@ def llama_batch_limits_for_headroom(headroom_mb_value: int) -> tuple[int, int]:
     return 4096, 1024
 
 
+def resolve_llama_model_batches(
+    *,
+    model_path: str | Path,
+    free_mb: int,
+    n_ctx: int,
+    n_gpu_layers: int,
+    load_tier: LlamaLoadTier = "normal",
+    weights_resident: bool = False,
+    load_budget_mb: int | None = None,
+    prompt_tokens: int | None = None,
+    vision_prefill: bool = False,
+    has_mmproj_sibling: bool = False,
+) -> tuple[int, int, bool]:
+    """Model-aware n_batch (prefill) and n_ubatch (decode chunk) for llama.cpp."""
+    budget_mb = load_budget_mb if load_budget_mb is not None else free_mb
+    tight = llama_model_is_tight_vram_fit(
+        model_path=model_path,
+        free_mb=budget_mb,
+        n_gpu_layers=n_gpu_layers,
+        n_ctx=n_ctx,
+        weights_resident=False,
+    )
+    try:
+        native_linux_nvidia = seiso_platform.use_linux_nvidia_inference_guards()
+    except Exception:
+        native_linux_nvidia = False
+
+    effective = llama_effective_batch_headroom_mb(
+        free_mb,
+        model_path=model_path,
+        n_gpu_layers=n_gpu_layers,
+        n_ctx=n_ctx,
+        weights_resident=weights_resident,
+    )
+    if weights_resident and load_budget_mb is not None:
+        load_effective = llama_effective_batch_headroom_mb(
+            load_budget_mb,
+            model_path=model_path,
+            n_gpu_layers=n_gpu_layers,
+            n_ctx=n_ctx,
+            weights_resident=False,
+        )
+        effective = min(effective, load_effective)
+
+    if prompt_tokens is not None:
+        prefill_tokens = max(prompt_tokens, _MIN_LLAMA_BATCH)
+        reserve_steps = max(1, (prefill_tokens + 255) // 256)
+        reserve_mb = reserve_steps * _NATIVE_LINUX_PREFILL_RESERVE_PER_256TOK_MB
+        effective = max(_MIN_LLAMA_BATCH * 2, effective - reserve_mb)
+    if vision_prefill:
+        effective = max(_MIN_LLAMA_BATCH * 2, effective - 512)
+    elif has_mmproj_sibling:
+        effective = max(_MIN_LLAMA_BATCH * 2, effective - 256)
+
+    batch, ubatch = resolve_llama_batch_limits(
+        effective,
+        native_linux_nvidia=native_linux_nvidia,
+        load_tier=load_tier,
+        tight=tight,
+    )
+    return batch, ubatch, tight
+
+
 def llama_prefill_needs_reload(
     *,
     model_path: str,
@@ -729,36 +792,19 @@ def llama_prefill_needs_reload(
 
     free_mb = headroom_mb()
     prompt_tokens = _estimate_prompt_tokens(messages)
-    effective = llama_effective_batch_headroom_mb(
-        free_mb,
-        model_path=model_path,
-        n_gpu_layers=loaded_n_gpu_layers,
-        n_ctx=n_ctx,
-        weights_resident=True,
-    )
-    prefill_tokens = max(prompt_tokens, _MIN_LLAMA_BATCH)
-    reserve_steps = max(1, (prefill_tokens + 255) // 256)
-    reserve_mb = reserve_steps * _NATIVE_LINUX_PREFILL_RESERVE_PER_256TOK_MB
-    effective = max(_MIN_LLAMA_BATCH * 2, effective - reserve_mb)
-    if _messages_have_vision_content(messages):
-        # Vision encoder + patch embeddings spike VRAM beyond text-only prefill.
-        effective = max(_MIN_LLAMA_BATCH * 2, effective - 512)
-    elif _gguf_has_mmproj_sibling(model_path):
-        effective = max(_MIN_LLAMA_BATCH * 2, effective - 256)
-
     vision_prefill = _messages_have_vision_content(messages)
-    tight_prefill = llama_model_is_tight_vram_fit(
+    load_budget_mb = loaded_headroom_mb if loaded_headroom_mb else free_mb
+    safe_batch, safe_ubatch, tight_prefill = resolve_llama_model_batches(
         model_path=model_path,
         free_mb=free_mb,
-        n_gpu_layers=loaded_n_gpu_layers,
         n_ctx=n_ctx,
-        weights_resident=True,
-    )
-    safe_batch, safe_ubatch = resolve_llama_batch_limits(
-        effective,
-        native_linux_nvidia=True,
+        n_gpu_layers=loaded_n_gpu_layers,
         load_tier=load_tier,
-        tight=tight_prefill,
+        weights_resident=True,
+        load_budget_mb=load_budget_mb,
+        prompt_tokens=prompt_tokens,
+        vision_prefill=vision_prefill,
+        has_mmproj_sibling=_gguf_has_mmproj_sibling(model_path),
     )
     headroom_dropped = (
         loaded_headroom_mb is not None
@@ -800,6 +846,11 @@ def llama_prefill_needs_reload(
         )
     ):
         needs_reload = True
+    if not needs_reload and tight_prefill:
+        if loaded_batch > 0:
+            safe_batch = min(safe_batch, loaded_batch)
+        if loaded_ubatch > 0:
+            safe_ubatch = min(safe_ubatch, loaded_ubatch)
     return needs_reload, safe_batch, safe_ubatch
 
 
@@ -1444,22 +1495,31 @@ def clamp_llama_load_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
             )
             if batch_headroom is None:
                 batch_headroom = free_mb
-        else:
-            batch_headroom = llama_effective_batch_headroom_mb(
-                free_mb,
+            max_batch, max_ubatch, _tight = resolve_llama_model_batches(
                 model_path=model_path,
-                n_gpu_layers=n_gpu_layers,
+                free_mb=free_mb,
                 n_ctx=n_ctx,
+                n_gpu_layers=n_gpu_layers,
+                load_tier="normal",
+                weights_resident=False,
             )
+            max_batch = min(max_batch, batch_headroom)
+            max_ubatch = min(max_ubatch, max_batch)
+        else:
+            max_batch, max_ubatch, _tight = resolve_llama_model_batches(
+                model_path=model_path,
+                free_mb=free_mb,
+                n_ctx=n_ctx,
+                n_gpu_layers=n_gpu_layers,
+                load_tier="normal",
+                weights_resident=False,
+            )
+            batch_headroom = max_batch
         if native_linux_nvidia and _gguf_has_mmproj_sibling(model_path):
             batch_headroom = max(_MIN_LLAMA_BATCH * 2, batch_headroom - 512)
-        if native_linux_nvidia or tight:
-            max_batch, max_ubatch = resolve_llama_batch_limits(
-                batch_headroom,
-                native_linux_nvidia=native_linux_nvidia,
-                tight=tight,
-            )
-        else:
+            max_batch = min(max_batch, batch_headroom)
+            max_ubatch = min(max_ubatch, max_batch)
+        elif not (native_linux_nvidia or tight):
             max_batch, max_ubatch = clamp_llama_batch_pair(_MAX_LLAMA_BATCH, 1024)
         out["n_batch"], out["n_ubatch"] = clamp_llama_batch_pair(
             min(out["n_batch"], max_batch),

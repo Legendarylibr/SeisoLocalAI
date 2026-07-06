@@ -1359,6 +1359,10 @@ def test_llama_complete_retries_after_inference_oom(monkeypatch):
     monkeypatch.setattr(
         "seiso.inference.runner.release_cached_memory", lambda sync=False: None
     )
+    monkeypatch.setattr(
+        "seiso.inference.runner.llama_prefill_needs_reload",
+        lambda **_kwargs: (False, 512, 128),
+    )
 
     reply = runner._llama_complete(
         {"messages": [{"role": "user", "content": "hi"}], "max_tokens": 32},
@@ -1574,7 +1578,8 @@ def test_llama_complete_recomputes_context_after_prompt_trim(monkeypatch):
     )
 
     assert reply == "ok"
-    assert seen_ctx == [2048]
+    # Native Linux NVIDIA uses 4096 as the minimum ctx bucket; other platforms use 2048.
+    assert seen_ctx == [4096]
 
 
 def test_llama_complete_retrims_after_oom_recovery_smaller_context(monkeypatch):
@@ -1665,6 +1670,11 @@ def test_llama_stream_does_not_retry_after_emitting_text(monkeypatch):
         runner._pool,
         "reload_llama",
         lambda *_a, **kwargs: reloads.append(kwargs.get("tier", "")) or FakeLlama(),
+    )
+
+    monkeypatch.setattr(
+        "seiso.inference.runner.llama_prefill_needs_reload",
+        lambda **_kwargs: (False, 512, 128),
     )
 
     stream = runner._llama_stream(

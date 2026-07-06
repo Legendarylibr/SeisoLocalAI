@@ -913,11 +913,17 @@ def test_llama_batch_defaults_are_speed_first(monkeypatch):
 
 def test_llama_batch_defaults_match_july3_speed_first(monkeypatch):
     import seiso.inference.model_pool as mp
+    from seiso.memory.protection import gpu_batch_tier_caps
 
     monkeypatch.setattr(mp, "_native_linux_nvidia", lambda: True)
+    monkeypatch.setattr(
+        "seiso.memory.protection.discrete_gpu_total_mb",
+        lambda _profile=None: 24576,
+    )
     batch, ubatch = mp._llama_batch_defaults()
-    assert batch == 4096
-    assert ubatch == 1024
+    expected_batch, expected_ubatch = gpu_batch_tier_caps(24576, "normal")
+    assert batch == expected_batch
+    assert ubatch == expected_ubatch
 
 
 def test_llama_load_model_tries_speed_profile_before_base(monkeypatch, tmp_path):
