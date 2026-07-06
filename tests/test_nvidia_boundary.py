@@ -176,7 +176,7 @@ def test_detect_gpu_nvidia_smi_fallback(monkeypatch):
             {"index": 0, "name": "NVIDIA GeForce RTX 4090", "memory_total_mb": 24564}
         ],
     )
-    monkeypatch.setattr("seiso.hardware.gpus.platform.system", lambda: "Linux")
+    monkeypatch.setattr("seiso.hardware.probes.nvidia.platform.system", lambda: "Linux")
     monkeypatch.setattr("seiso.hardware.gpus._torch_gpus", lambda: [])
     clear_gpu_enumeration_cache()
 
