@@ -121,7 +121,14 @@ class LocalInferenceRunner:
                 model_path=resolved_path,
                 model_format=payload.get("model_format"),
             )
-            self._pool.get_llama(resolved_path, n_ctx=n_ctx)
+            llm = self._pool.get_llama(resolved_path, n_ctx=n_ctx)
+            if messages:
+                llm = self._llama_guard_prefill(
+                    llm,
+                    model_path=resolved_path,
+                    messages=messages,
+                    n_ctx=n_ctx,
+                )
 
     async def chat(self, payload: dict[str, Any]) -> str:
         loop = asyncio.get_running_loop()
@@ -697,13 +704,31 @@ class LocalInferenceRunner:
         next_tier = llama_next_recovery_tier(current)
         if next_tier is None:
             raise RuntimeError("llama.cpp inference OOM — recovery tiers exhausted")
+        safe_batch = int(getattr(llm, "_seiso_last_safe_batch", 0) or 0)
+        safe_ubatch = int(getattr(llm, "_seiso_last_safe_ubatch", 0) or 0)
+        loaded_batch = int(getattr(llm, "_seiso_n_batch", 0) or 0)
+        batch_override: tuple[int, int] | None = None
+        if safe_batch > 0 and safe_ubatch > 0:
+            batch_override = (
+                max(256, min(safe_batch, loaded_batch or safe_batch) // 2),
+                max(128, safe_ubatch // 2),
+            )
+        elif next_tier == "compact":
+            batch_override = (512, 128)
+        elif next_tier == "minimal":
+            batch_override = (256, 128)
         logger.warning(
             "llama.cpp inference OOM at tier=%s — reloading at tier=%s",
             current,
             next_tier,
         )
         release_cached_memory(sync=True)
-        return self._pool.reload_llama(model_path, n_ctx, tier=next_tier)
+        return self._pool.reload_llama(
+            model_path,
+            n_ctx,
+            tier=next_tier,
+            batch_override=batch_override,
+        )
 
     def _llama_guard_prefill(
         self,
@@ -723,6 +748,8 @@ class LocalInferenceRunner:
             load_tier=current_tier,
             loaded_headroom_mb=getattr(llm, "_seiso_load_headroom_mb", None),
         )
+        llm._seiso_last_safe_batch = safe_batch  # noqa: SLF001
+        llm._seiso_last_safe_ubatch = safe_ubatch  # noqa: SLF001
         if not needs_reload:
             return llm
         logger.warning(

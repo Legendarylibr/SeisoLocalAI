@@ -1329,7 +1329,7 @@ def test_llama_complete_retries_after_inference_oom(monkeypatch):
         calls.append(f"get:{tier}")
         return FakeLlama(tier=tier)
 
-    def reload_llama(_path, n_ctx, *, tier):
+    def reload_llama(_path, n_ctx, *, tier, batch_override=None):
         calls.append(f"reload:{tier}")
         return FakeLlama(tier=tier)
 
@@ -1348,6 +1348,57 @@ def test_llama_complete_retries_after_inference_oom(monkeypatch):
 
     assert reply == "ok"
     assert calls == ["get:normal", "reload:compact"]
+
+
+def test_llama_complete_oom_recovery_passes_batch_override(monkeypatch):
+    from seiso.inference.runner import LocalInferenceRunner
+
+    runner = LocalInferenceRunner()
+    seen_overrides: list[tuple[int, int] | None] = []
+    fail_once = {"remaining": 1}
+
+    class FakeLlama:
+        def __init__(self, *, batch: int = 1024, tier: str = "normal") -> None:
+            self._seiso_load_tier = tier
+            self._seiso_n_batch = batch
+            self._seiso_n_ubatch = min(batch, 256)
+            self._seiso_last_safe_batch = 512
+            self._seiso_last_safe_ubatch = 128
+
+        def create_chat_completion(self, **_kwargs):
+            if fail_once["remaining"] > 0:
+                fail_once["remaining"] -= 1
+                raise RuntimeError("CUDA out of memory. Tried to allocate 2.00 GiB")
+            return {"choices": [{"message": {"content": "ok"}}]}
+
+    monkeypatch.setattr(
+        runner._pool,
+        "get_llama",
+        lambda *_a, **_k: FakeLlama(),
+    )
+
+    def reload_llama(_path, n_ctx, *, tier, batch_override=None):
+        seen_overrides.append(batch_override)
+        return FakeLlama(batch=batch_override[0] if batch_override else 512, tier=tier)
+
+    monkeypatch.setattr(runner._pool, "reload_llama", reload_llama)
+    monkeypatch.setattr(runner._pool, "is_generation_active", lambda _gid: True)
+    monkeypatch.setattr(
+        "seiso.inference.runner.release_cached_memory", lambda sync=False: None
+    )
+    monkeypatch.setattr(
+        "seiso.inference.runner.llama_prefill_needs_reload",
+        lambda **_kwargs: (False, 512, 128),
+    )
+
+    reply = runner._llama_complete(
+        {"messages": [{"role": "user", "content": "hi"}], "max_tokens": 32},
+        "/tmp/model.gguf",
+        generation_id=1,
+    )
+
+    assert reply == "ok"
+    assert seen_overrides == [(256, 128)]
 
 
 def test_llama_complete_prefill_guard_reloads_before_native_linux_segfault(

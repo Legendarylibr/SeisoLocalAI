@@ -658,6 +658,9 @@ def _load_llama_model(
         load_kwargs["_model_path"] = path
         load_kwargs = clamp_llama_load_kwargs(load_kwargs)
         load_kwargs.pop("_model_path", None)
+        from seiso.inference.llama_vision import apply_llama_vision_load_kwargs
+
+        load_kwargs = apply_llama_vision_load_kwargs(load_kwargs, path)
         # #region agent log
         from seiso.agent_debug_log import agent_debug_enabled, agent_debug_log
         from seiso.memory.protection import llama_model_is_tight_vram_fit
@@ -697,6 +700,9 @@ def _load_llama_model(
             llm._seiso_n_ctx = int(load_kwargs.get("n_ctx") or effective_n_ctx)  # noqa: SLF001
             llm._seiso_model_path = path  # noqa: SLF001
             llm._seiso_load_headroom_mb = headroom_mb()  # noqa: SLF001
+            if batch_override is not None:
+                llm._seiso_last_safe_batch = int(load_kwargs.get("n_batch") or 0)  # noqa: SLF001
+                llm._seiso_last_safe_ubatch = int(load_kwargs.get("n_ubatch") or 0)  # noqa: SLF001
             if layers > 0:
                 total_layers = gguf_total_layers(path)
                 if layers < total_layers:
@@ -936,10 +942,12 @@ class ModelPool:
                         cached_layers,
                         requested_layers,
                         n_ctx=needed_ctx or cached_ctx or 2048,
-                    ):
+                    ) and _llama_cache_headroom_ok(self._active.handle):
                         return self._active.handle
 
             self.prepare_for_load(load_path, backend)
+            if self._active:
+                self.unload_all()
             from seiso.memory.protection import (
                 ensure_load_fits,
                 estimate_path_vram_mb,
@@ -947,7 +955,15 @@ class ModelPool:
                 release_cached_memory,
             )
 
-            est_mb = int(estimate_path_vram_mb(load_path))
+            if backend == BackendKind.LLAMA:
+                from seiso.inference.llama_vision import resolve_mmproj_path
+
+                est_mb = int(estimate_path_vram_mb(load_path))
+                mmproj = resolve_mmproj_path(load_path)
+                if mmproj:
+                    est_mb += int(estimate_path_vram_mb(mmproj))
+            else:
+                est_mb = int(estimate_path_vram_mb(load_path))
             if est_mb >= 8000 and headroom_mb() < int(est_mb * 0.98):
                 if self._active:
                     self.cancel_and_unload()

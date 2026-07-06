@@ -1,0 +1,174 @@
+"""llama.cpp multimodal (mmproj) helpers for vision-capable GGUF chat models."""
+
+from __future__ import annotations
+
+import logging
+from pathlib import Path
+from typing import Any
+
+logger = logging.getLogger(__name__)
+
+_QUANT_HINTS = (
+    "Q8_0",
+    "Q6_K",
+    "Q5_K_M",
+    "Q4_K_M",
+    "Q4_0",
+    "IQ4_XS",
+    "F16",
+    "F32",
+    "BF16",
+)
+_VISION_NAME_MARKERS = (
+    "vision",
+    "-vl",
+    "vl-",
+    "llava",
+    "pixtral",
+    "gemma-3",
+    "gemma3",
+    "gemma-4",
+    "gemma4",
+    "qwen-vl",
+    "qwen2-vl",
+    "qwen2.5-vl",
+    "minicpm-v",
+    "smolvlm",
+    "moondream",
+)
+
+
+def gguf_filename_suggests_vision(filename: str | None) -> bool:
+    """True when a GGUF filename or repo id likely denotes a vision chat model."""
+    hay = (filename or "").lower()
+    return any(marker in hay for marker in _VISION_NAME_MARKERS)
+
+
+def repo_likely_needs_mmproj(
+    catalog_repo_id: str,
+    *,
+    gguf_filename: str | None = None,
+    tags: tuple[str, ...] | list[str] | None = None,
+    task: str | None = None,
+) -> bool:
+    """True when a Hub download should also fetch a colocated mmproj file."""
+    tag_set = {str(tag).lower() for tag in (tags or ())}
+    if "vision" in tag_set or "multimodal" in tag_set:
+        return True
+    if task and str(task).lower() == "vision":
+        return True
+    hay = f"{catalog_repo_id} {gguf_filename or ''}".lower()
+    return any(marker in hay for marker in _VISION_NAME_MARKERS)
+
+
+def _quant_hints_from_name(name: str) -> list[str]:
+    upper = name.upper()
+    return [hint for hint in _QUANT_HINTS if hint in upper]
+
+
+def resolve_mmproj_path(model_path: str | Path) -> str | None:
+    """Return the best colocated mmproj GGUF for a chat model, if present."""
+    path = Path(model_path).expanduser()
+    if not path.is_file():
+        return None
+    candidates = sorted(path.parent.glob("mmproj*.gguf"), key=lambda item: item.name)
+    if not candidates:
+        return None
+    if len(candidates) == 1:
+        return str(candidates[0].resolve())
+
+    model_hints = _quant_hints_from_name(path.name)
+    for hint in model_hints:
+        matched = [item for item in candidates if hint in item.name.upper()]
+        if matched:
+            return str(matched[0].resolve())
+    return str(candidates[0].resolve())
+
+
+def _vision_handler_specs(model_path: str) -> list[str]:
+    """Ordered llama-cpp-python chat handler class names to try."""
+    from seiso.inference.backends import gguf_architecture
+
+    arch = (gguf_architecture(model_path) or "").lower()
+    name = Path(model_path).name.lower()
+    specs: list[str] = []
+
+    if "qwen" in name and ("vl" in name or "vision" in arch):
+        specs.append("Qwen25VLChatHandler")
+    if "gemma" in name or "gemma" in arch:
+        specs.extend(["Gemma4ChatHandler", "Gemma3ChatHandler"])
+    if "llava" in name or "llava" in arch:
+        specs.extend(["Llava16ChatHandler", "Llava15ChatHandler"])
+    if "moondream" in name:
+        specs.append("MoondreamChatHandler")
+    if "minicpm" in name and "v" in name:
+        specs.append("MiniCPMv26ChatHandler")
+
+    specs.append("MTMDChatHandler")
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for item in specs:
+        if item not in seen:
+            seen.add(item)
+            ordered.append(item)
+    return ordered
+
+
+def build_llama_vision_chat_handler(model_path: str, mmproj_path: str) -> Any | None:
+    """Build a llama.cpp vision chat handler when mmproj is available."""
+    if not mmproj_path or not Path(mmproj_path).is_file():
+        return None
+
+    try:
+        import llama_cpp.llama_chat_format as chat_format
+    except ImportError:
+        logger.debug("llama_cpp.llama_chat_format unavailable — skipping vision handler")
+        return None
+
+    last_exc: Exception | None = None
+    warned = False
+    for class_name in _vision_handler_specs(model_path):
+        cls = getattr(chat_format, class_name, None)
+        if cls is None:
+            continue
+        try:
+            return cls(clip_model_path=mmproj_path, verbose=False)
+        except ImportError:
+            continue
+        except Exception as exc:
+            last_exc = exc
+            if not warned:
+                logger.warning(
+                    "Vision handler %s failed for %s: %s",
+                    class_name,
+                    Path(model_path).name,
+                    exc,
+                )
+                warned = True
+            logger.debug(
+                "Vision handler %s failed for %s: %s", class_name, model_path, exc
+            )
+
+    if last_exc is not None:
+        logger.warning(
+            "Could not initialize vision handler for %s (mmproj=%s): %s",
+            Path(model_path).name,
+            Path(mmproj_path).name,
+            last_exc,
+        )
+    return None
+
+
+def apply_llama_vision_load_kwargs(
+    load_kwargs: dict[str, Any], model_path: str
+) -> dict[str, Any]:
+    """Attach a vision chat handler to llama.cpp load kwargs when mmproj exists."""
+    mmproj = resolve_mmproj_path(model_path)
+    if not mmproj:
+        return load_kwargs
+    handler = build_llama_vision_chat_handler(model_path, mmproj)
+    if handler is None:
+        return load_kwargs
+    out = dict(load_kwargs)
+    out["chat_handler"] = handler
+    return out

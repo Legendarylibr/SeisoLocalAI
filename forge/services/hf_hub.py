@@ -102,6 +102,49 @@ def _pick_gguf_file(
     return files[0] if files else None
 
 
+def _pick_mmproj_files(files: list[str]) -> list[str]:
+    return sorted(
+        f
+        for f in files
+        if f.lower().endswith(".gguf")
+        and ("mmproj" in f.lower() or f.lower().startswith("mmproj"))
+    )
+
+
+def _gguf_artifact_likely_vision(
+    catalog_repo_id: str,
+    *,
+    gguf_filename: str | None = None,
+    entry: CatalogEntry | None = None,
+) -> bool:
+    from seiso.inference.llama_vision import repo_likely_needs_mmproj
+
+    task = getattr(entry, "task", None)
+    task_value = task.value if hasattr(task, "value") else task
+    return repo_likely_needs_mmproj(
+        catalog_repo_id,
+        gguf_filename=gguf_filename,
+        tags=getattr(entry, "tags", None),
+        task=task_value,
+    )
+
+
+def _pick_mmproj_file(
+    files: list[str],
+    *,
+    preferred_quant: str = "Q8_0",
+) -> str | None:
+    mmprojs = _pick_mmproj_files(files)
+    if not mmprojs:
+        return None
+    preferred_quant = preferred_quant.upper()
+    for hint in (preferred_quant, "Q8_0", "Q6_K", "F16", "F32", "BF16"):
+        matched = [f for f in mmprojs if hint in f.upper()]
+        if matched:
+            return sorted(matched)[0]
+    return mmprojs[0]
+
+
 def _pick_gguf_files(
     files: list[str],
     *,
@@ -403,9 +446,9 @@ def resolve_gguf_artifact(
     )
     quant = entry.quant if entry else "Q4_K_M"
 
+    files = _list_repo_files(gguf_repo, token=token, revision=revision)
     filenames: list[str]
     if not filename:
-        files = _list_repo_files(gguf_repo, token=token, revision=revision)
         filenames = _pick_gguf_files(
             files, preferred_quant=quant, repo_id=catalog_repo_id
         )
@@ -419,6 +462,17 @@ def resolve_gguf_artifact(
         get_gguf_file_size_bytes(gguf_repo, item, token=token, revision=revision)
         for item in filenames
     )
+    mmproj_filename: str | None = None
+    if _gguf_artifact_likely_vision(
+        catalog_repo_id,
+        gguf_filename=filename,
+        entry=entry,
+    ):
+        mmproj_filename = _pick_mmproj_file(files, preferred_quant=quant)
+    if mmproj_filename:
+        size_bytes += get_gguf_file_size_bytes(
+            gguf_repo, mmproj_filename, token=token, revision=revision
+        )
     info: dict[str, Any] = {
         "catalog_repo": catalog_repo_id,
         "gguf_repo": gguf_repo,
@@ -427,6 +481,8 @@ def resolve_gguf_artifact(
         "size_bytes": size_bytes,
         "quant": quant,
     }
+    if mmproj_filename:
+        info["mmproj_filename"] = mmproj_filename
     _gguf_artifact_cache.set(cache_key, info)
     return info
 
@@ -495,6 +551,7 @@ def download_gguf(
     revision: str = "main",
     filename: str | None = None,
     filenames: list[str] | None = None,
+    mmproj_filename: str | None = None,
     entry: CatalogEntry | None = None,
     inventory_repo_id: str | None = None,
     on_progress: ProgressCallback | None = None,
@@ -516,11 +573,15 @@ def download_gguf(
     else:
         filenames = [filename]
 
+    download_names = list(filenames)
+    if mmproj_filename and mmproj_filename not in download_names:
+        download_names.append(mmproj_filename)
+
     if on_progress and (total_bytes is None or total_bytes <= 0):
         try:
             total_bytes = sum(
                 get_gguf_file_size_bytes(repo_id, item, token=token, revision=revision)
-                for item in filenames
+                for item in download_names
             )
         except Exception:
             total_bytes = 0
@@ -540,7 +601,8 @@ def download_gguf(
 
     cache_dir.mkdir(parents=True, exist_ok=True)
     cached_paths: list[Path] = []
-    for item in filenames:
+    cached_by_name: dict[str, Path] = {}
+    for item in download_names:
         download_kwargs: dict[str, Any] = {
             "repo_id": repo_id,
             "filename": item,
@@ -550,22 +612,22 @@ def download_gguf(
         }
         if on_progress:
             download_kwargs["tqdm_class"] = make_tqdm_class(on_progress)
-        cached_paths.append(
-            Path(
-                _with_download_retries(
-                    partial(
-                        hf_hub_download, **download_kwargs
-                    ),  # nosec B615: revision pinned in download_kwargs
-                    repo_id=repo_id,
-                )
+        cached = Path(
+            _with_download_retries(
+                partial(
+                    hf_hub_download, **download_kwargs
+                ),  # nosec B615: revision pinned in download_kwargs
+                repo_id=repo_id,
             )
         )
+        cached_paths.append(cached)
+        cached_by_name[item] = cached
 
     cached_target = (
         cached_paths[0] if len(cached_paths) == 1 else cached_paths[0].parent
     )
 
-    return {
+    result: dict[str, Any] = {
         "path": str(cached_target),
         "paths": [str(path) for path in cached_paths],
         "filename": filename,
@@ -575,6 +637,12 @@ def download_gguf(
         "cache_dir": str(cache_dir),
         "inventory_name": str(_inventory_name_for_files(inv_repo, filenames)),
     }
+    if mmproj_filename:
+        mmproj_cached = cached_by_name.get(mmproj_filename)
+        if mmproj_cached is not None:
+            result["mmproj_filename"] = mmproj_filename
+            result["mmproj_path"] = str(mmproj_cached)
+    return result
 
 
 def estimate_snapshot_download_bytes(

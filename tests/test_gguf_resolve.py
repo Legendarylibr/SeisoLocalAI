@@ -96,6 +96,7 @@ def test_resolve_gguf_artifact_composes_mirror_file_and_size(monkeypatch):
     class Entry:
         gguf_repo = None
         quant = "Q4_K_M"
+        tags = ("vision",)
 
     monkeypatch.setattr(
         hf_hub, "resolve_gguf_repo", lambda *_a, **_k: "mirror/Model-GGUF"
@@ -110,11 +111,44 @@ def test_resolve_gguf_artifact_composes_mirror_file_and_size(monkeypatch):
     )
 
     artifact = hf_hub.resolve_gguf_artifact(
-        "org/Qwen3.6-35B-A3B", entry=Entry(), use_cache=False
+        "org/Gemma-3-4B-Vision", entry=Entry(), use_cache=False
     )
     assert artifact["gguf_repo"] == "mirror/Model-GGUF"
     assert artifact["filename"] == "Model-Q4_K_M.gguf"
+    assert artifact["mmproj_filename"] == "mmproj-Q6_K.gguf"
+    assert artifact["size_bytes"] == 10_000_000_000
+
+
+def test_resolve_gguf_artifact_skips_mmproj_for_text_only_repo(monkeypatch):
+    class Entry:
+        gguf_repo = None
+        quant = "Q4_K_M"
+        tags = ("gguf",)
+
+    monkeypatch.setattr(
+        hf_hub, "resolve_gguf_repo", lambda *_a, **_k: "mirror/Llama-GGUF"
+    )
+    monkeypatch.setattr(
+        hf_hub,
+        "_list_repo_files",
+        lambda *_a, **_k: ["Llama-Q4_K_M.gguf", "mmproj-Q6_K.gguf"],
+    )
+    monkeypatch.setattr(
+        hf_hub, "get_gguf_file_size_bytes", lambda *_a, **_k: 5_000_000_000
+    )
+
+    artifact = hf_hub.resolve_gguf_artifact(
+        "org/Llama-3.1-8B-Instruct", entry=Entry(), use_cache=False
+    )
+
+    assert artifact["filename"] == "Llama-Q4_K_M.gguf"
+    assert "mmproj_filename" not in artifact
     assert artifact["size_bytes"] == 5_000_000_000
+
+
+def test_pick_mmproj_file_prefers_requested_quant():
+    files = ["Model-Q4_K_M.gguf", "mmproj-Q8_0.gguf", "mmproj-F16.gguf"]
+    assert hf_hub._pick_mmproj_file(files, preferred_quant="Q8_0") == "mmproj-Q8_0.gguf"
 
 
 def test_pick_gguf_file_prefers_active_moe_quant():
