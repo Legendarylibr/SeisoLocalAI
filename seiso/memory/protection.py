@@ -713,6 +713,7 @@ def resolve_llama_model_batches(
     prompt_tokens: int | None = None,
     vision_prefill: bool = False,
     has_mmproj_sibling: bool = False,
+    native_linux_nvidia: bool | None = None,
 ) -> tuple[int, int, bool]:
     """Model-aware n_batch (prefill) and n_ubatch (decode chunk) for llama.cpp."""
     budget_mb = load_budget_mb if load_budget_mb is not None else free_mb
@@ -723,10 +724,11 @@ def resolve_llama_model_batches(
         n_ctx=n_ctx,
         weights_resident=False,
     )
-    try:
-        native_linux_nvidia = seiso_platform.use_linux_nvidia_inference_guards()
-    except Exception:
-        native_linux_nvidia = False
+    if native_linux_nvidia is None:
+        try:
+            native_linux_nvidia = seiso_platform.use_linux_nvidia_inference_guards()
+        except Exception:
+            native_linux_nvidia = False
 
     effective = llama_effective_batch_headroom_mb(
         free_mb,
@@ -1468,6 +1470,7 @@ def clamp_llama_load_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
     """Normalize llama.cpp load kwargs and trim oversized batches near VRAM limits."""
     out = dict(kwargs)
     model_path = out.pop("_model_path", None)
+    native_linux_hint = out.pop("_native_linux_nvidia", None)
     n_ctx = int(out.get("n_ctx") or _MIN_LLAMA_CTX)
     out["n_batch"] = max(_MIN_LLAMA_BATCH, int(out.get("n_batch") or _MAX_LLAMA_BATCH))
     out["n_ubatch"] = max(
@@ -1485,8 +1488,11 @@ def clamp_llama_load_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
             n_gpu_layers=n_gpu_layers,
             n_ctx=n_ctx,
         )
-        with contextlib.suppress(Exception):
-            native_linux_nvidia = seiso_platform.use_linux_nvidia_inference_guards()
+        if native_linux_hint is not None:
+            native_linux_nvidia = bool(native_linux_hint)
+        else:
+            with contextlib.suppress(Exception):
+                native_linux_nvidia = seiso_platform.use_linux_nvidia_inference_guards()
         if native_linux_nvidia and n_gpu_layers == 0:
             batch_headroom = llama_host_batch_headroom_mb(
                 model_path=model_path,
@@ -1502,6 +1508,7 @@ def clamp_llama_load_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
                 n_gpu_layers=n_gpu_layers,
                 load_tier="normal",
                 weights_resident=False,
+                native_linux_nvidia=native_linux_nvidia,
             )
             max_batch = min(max_batch, batch_headroom)
             max_ubatch = min(max_ubatch, max_batch)
@@ -1513,6 +1520,7 @@ def clamp_llama_load_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
                 n_gpu_layers=n_gpu_layers,
                 load_tier="normal",
                 weights_resident=False,
+                native_linux_nvidia=native_linux_nvidia,
             )
             batch_headroom = max_batch
         if native_linux_nvidia and _gguf_has_mmproj_sibling(model_path):

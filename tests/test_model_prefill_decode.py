@@ -103,12 +103,31 @@ def test_load_kwargs_prefill_decode_invariants_per_model(
 ):
     import seiso.inference.model_pool as mp
 
+    for env_name in (
+        "SEISO_LLAMA_BATCH",
+        "SEISO_LLAMA_UBATCH",
+        "SEISO_LLAMA_GPU_LAYERS",
+    ):
+        monkeypatch.delenv(env_name, raising=False)
+
     gguf = tmp_path / name
     _write_arch_gguf(gguf, arch, extra=extra)
     monkeypatch.setattr(mp, "_native_linux_nvidia", lambda: True)
+    monkeypatch.setattr(mp, "_llama_gpu_offload_ok", lambda: True)
     monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: True)
+    monkeypatch.setattr(
+        "seiso.platform.use_linux_nvidia_inference_guards", lambda **_: True
+    )
+    monkeypatch.setattr(
+        "seiso.memory.protection.seiso_platform.use_linux_nvidia_inference_guards",
+        lambda **_: True,
+    )
     monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 24576)
     monkeypatch.setattr("seiso.memory.protection.estimate_path_vram_mb", lambda _p: weight_mb)
+    monkeypatch.setattr(
+        "seiso.memory.protection.discrete_gpu_total_mb",
+        lambda *_args, **_kwargs: 24576,
+    )
     monkeypatch.setattr(
         "seiso.hardware.tiers.discrete_vram_total_mb",
         lambda _profile: 24576,
@@ -119,7 +138,9 @@ def test_load_kwargs_prefill_decode_invariants_per_model(
         model_path=str(gguf),
         free_mb=24576,
         n_ctx=4096,
-        n_gpu_layers=int(kwargs.get("n_gpu_layers") or -1),
+        n_gpu_layers=int(
+            kwargs["n_gpu_layers"] if kwargs.get("n_gpu_layers") is not None else -1
+        ),
         weights_resident=False,
     )
 
@@ -147,12 +168,34 @@ def test_prefill_guard_keeps_loaded_batches_for_short_prompt(
     weight_mb: int,
     post_load_free_mb: int,
 ):
+    import seiso.inference.model_pool as mp
+
+    for env_name in (
+        "SEISO_LLAMA_BATCH",
+        "SEISO_LLAMA_UBATCH",
+        "SEISO_LLAMA_GPU_LAYERS",
+    ):
+        monkeypatch.delenv(env_name, raising=False)
+
     gguf = tmp_path / name
     _write_arch_gguf(gguf, arch, extra=extra)
+    monkeypatch.setattr(mp, "_native_linux_nvidia", lambda: True)
+    monkeypatch.setattr(mp, "_llama_gpu_offload_ok", lambda: True)
     monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: True)
+    monkeypatch.setattr(
+        "seiso.platform.use_linux_nvidia_inference_guards", lambda **_: True
+    )
+    monkeypatch.setattr(
+        "seiso.memory.protection.seiso_platform.use_linux_nvidia_inference_guards",
+        lambda **_: True,
+    )
     monkeypatch.setattr("seiso.memory.protection.hardware_profile", lambda **_: {"gpus": [{"vram_total_mb": 24576}]})
     monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 24576)
     monkeypatch.setattr("seiso.memory.protection.estimate_path_vram_mb", lambda _p: weight_mb)
+    monkeypatch.setattr(
+        "seiso.memory.protection.discrete_gpu_total_mb",
+        lambda *_args, **_kwargs: 24576,
+    )
     monkeypatch.setattr(
         "seiso.hardware.tiers.discrete_vram_total_mb",
         lambda _profile: 24576,
@@ -165,7 +208,11 @@ def test_prefill_guard_keeps_loaded_batches_for_short_prompt(
         model_path=str(gguf),
         free_mb=24576,
         n_ctx=4096,
-        n_gpu_layers=-1,
+        n_gpu_layers=int(
+            load_kwargs["n_gpu_layers"]
+            if load_kwargs.get("n_gpu_layers") is not None
+            else -1
+        ),
         weights_resident=False,
     )
 
@@ -177,7 +224,11 @@ def test_prefill_guard_keeps_loaded_batches_for_short_prompt(
         n_ctx=4096,
         loaded_n_batch=loaded_batch,
         loaded_n_ubatch=loaded_ubatch,
-        loaded_n_gpu_layers=-1,
+        loaded_n_gpu_layers=int(
+            load_kwargs["n_gpu_layers"]
+            if load_kwargs.get("n_gpu_layers") is not None
+            else -1
+        ),
         load_tier="normal",
         loaded_headroom_mb=24576,
     )

@@ -85,6 +85,9 @@ async def test_training_job_e2e(app, auth_client, monkeypatch):
     dataset.write_text(
         '{"messages":[{"role":"user","content":"hi"},{"role":"assistant","content":"hey"}]}\n'
     )
+    model_dir = user_path(data_dir, user["id"], "models", "trainable-e2e")
+    model_dir.mkdir(parents=True, exist_ok=True)
+    (model_dir / "model.safetensors").write_text("fake-weights")
 
     def fake_run_training(config, on_metric=None, on_log=None, **_kwargs):
         if on_metric:
@@ -105,13 +108,14 @@ async def test_training_job_e2e(app, auth_client, monkeypatch):
         return out
 
     monkeypatch.setattr("forge.orchestrators.training.run_training", fake_run_training)
+    monkeypatch.setattr("seiso.training.config.run_training", fake_run_training)
 
     res = await client.post(
         "/api/training/jobs",
         headers=headers,
         json={
             "config": {
-                "model_id": "meta-llama/Llama-3.2-1B-Instruct",
+                "model_id": str(model_dir),
                 "dataset": str(dataset),
                 "method": "lora",
                 "quant": "4bit",
