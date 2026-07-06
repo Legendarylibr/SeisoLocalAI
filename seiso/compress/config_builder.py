@@ -162,6 +162,11 @@ def build_pipeline_config(
     model_dir = payload.get("model_dir")
     if model_dir:
         model_dir = str(Path(model_dir).expanduser().resolve())
+    elif stages and stages[0] != "distill":
+        raise ValueError(
+            f"Preset {preset_name!r} starts with {stages[0]!r}; provide --model-dir "
+            "with an existing model artifact directory."
+        )
 
     return {
         "job_id": job_id,

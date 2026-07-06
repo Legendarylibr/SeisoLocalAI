@@ -785,7 +785,9 @@ def llama_prefill_needs_reload(
     if not native_linux_nvidia:
         batch, ubatch = clamp_llama_batch_pair(
             loaded_n_batch or _MAX_LLAMA_BATCH,
-            loaded_n_batch or _MAX_LLAMA_BATCH,
+            loaded_n_ubatch
+            if loaded_n_ubatch is not None
+            else loaded_n_batch or _MAX_LLAMA_BATCH,
         )
         return False, batch, ubatch
 

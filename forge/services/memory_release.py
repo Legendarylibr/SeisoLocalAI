@@ -95,6 +95,7 @@ def prepare_for_gpu_task(
     task: str,
     log: LogFn = None,
     job_id: str | None = None,
+    user_id: str | None = None,
 ) -> dict[str, Any]:
     """Eject inference weights and refresh headroom before a heavy local task."""
     blocking = running_gpu_task_kinds(exclude_job_id=job_id)
@@ -106,6 +107,15 @@ def prepare_for_gpu_task(
         if log:
             log(msg)
         raise RuntimeError(msg)
+    if user_id is not None:
+        try:
+            from forge.api import deps
+
+            deps.get_inference_orchestrator().assert_generation_available_for_user(
+                user_id
+            )
+        except PermissionError as exc:
+            raise RuntimeError(str(exc)) from exc
     return release_inference_memory(reason=task, log=log)
 
 

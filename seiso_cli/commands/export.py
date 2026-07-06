@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import typer
@@ -28,6 +29,7 @@ def export_cmd(
 
     settings = get_settings()
     ckpt = Path(checkpoint)
+    output_dir = settings.exports_dir / ckpt.name
     fmt_list = [f.strip() for f in formats.split(",")] if not profile else None
 
     if profile and profile == "list":
@@ -37,7 +39,7 @@ def export_cmd(
 
     plan = prepare_export(
         checkpoint=ckpt,
-        output_dir=settings.exports_dir / ckpt.name,
+        output_dir=output_dir,
         formats=fmt_list,
         profile=profile,
         hub_repo=hub_repo,
@@ -52,8 +54,9 @@ def export_cmd(
             console.print("No Hub precheck requested (set --hub-repo)")
         return
 
+    sandbox_root = Path(os.path.commonpath([ckpt.resolve(), output_dir.resolve()]))
     results = run_export_plan(
-        plan, hub_token=settings.hf_token or None, sandbox_root=settings.data_dir
+        plan, hub_token=settings.hf_token or None, sandbox_root=sandbox_root
     )
     for k, v in results.items():
         console.print(f"  [green]{k}[/] → {v}")

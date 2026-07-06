@@ -197,15 +197,15 @@ def run_distillation(
                     }
                 )
 
-        if (
-            accelerator.is_local_main_process
-            and cfg.save_every_steps > 0
-            and (step + 1) % cfg.save_every_steps == 0
-        ):
-            ckpt_dir = ckpt_root / f"step_{step + 1:07d}"
-            ckpt_dir.mkdir(parents=True, exist_ok=True)
-            accelerator.save_state(ckpt_dir / "accelerate_state")
-            rotate_checkpoints(ckpt_root, keep=cfg.keep_last_n_checkpoints)
+            if (
+                accelerator.is_local_main_process
+                and cfg.save_every_steps > 0
+                and (step + 1) % cfg.save_every_steps == 0
+            ):
+                ckpt_dir = ckpt_root / f"step_{step + 1:07d}"
+                ckpt_dir.mkdir(parents=True, exist_ok=True)
+                accelerator.save_state(ckpt_dir / "accelerate_state")
+                rotate_checkpoints(ckpt_root, keep=cfg.keep_last_n_checkpoints)
 
     # Save final model (main process only)
     if accelerator.is_local_main_process:

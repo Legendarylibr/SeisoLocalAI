@@ -212,13 +212,6 @@ def fit_llama_gpu_layers(
     weight_mb = max(int(estimate_path_vram_mb(model_path)), 256)
     total_layers = gguf_total_layers(model_path)
 
-    try:
-        from seiso.memory.protection import discrete_gpu_total_mb
-
-        capacity_mb = discrete_gpu_total_mb() or 0
-    except Exception:
-        capacity_mb = 0
-
     def _fits(layers: int, budget_mb: int) -> bool:
         return llama_offload_fits_headroom(
             model_path,
@@ -229,22 +222,16 @@ def fit_llama_gpu_layers(
             total_layers=total_layers,
         )
 
-    # Prefer full GPU offload whenever weight+KV fits free VRAM or total GPU capacity.
+    # Prefer full GPU offload only when weight+KV fits currently free VRAM.
     if requested == -1:
         if _fits(-1, headroom_mb):
-            return -1
-        if capacity_mb > headroom_mb and _fits(-1, capacity_mb):
             return -1
 
     if requested > 0:
         capped = min(requested, total_layers)
-        if capped >= total_layers and (
-            _fits(-1, headroom_mb) or (capacity_mb > headroom_mb and _fits(-1, capacity_mb))
-        ):
+        if capped >= total_layers and _fits(-1, headroom_mb):
             return capped
         if _fits(capped, headroom_mb):
-            return capped
-        if capacity_mb > headroom_mb and _fits(capped, capacity_mb):
             return capped
 
     partial_budget = headroom_mb
@@ -887,6 +874,7 @@ class ModelPool:
         self._generation = 0
         self._inference_refs = 0
         self._unload_pending = False
+        self._llama_infer_lock = threading.RLock()
 
     @classmethod
     def get(cls) -> ModelPool:
@@ -927,6 +915,13 @@ class ModelPool:
                 should_unload = True
         if should_unload:
             self.unload_all()
+
+    def acquire_llama_inference(self) -> None:
+        """Serialize use of the shared llama.cpp context."""
+        self._llama_infer_lock.acquire()
+
+    def release_llama_inference(self) -> None:
+        self._llama_infer_lock.release()
 
     def cancel_and_unload(self) -> None:
         """Stop lagging streams and release VRAM/RAM."""
@@ -1033,10 +1028,10 @@ class ModelPool:
         with self._lock:
             self._unload_pending = False
             if not idle and self._inference_refs > 0:
-                # Streams are already cancelled via generation bump; force the
-                # unload path so a new model can load. Native work may still
-                # be finishing, but holding the old model blocks all GPU tasks.
-                self._inference_refs = 0
+                self._unload_pending = True
+                raise RuntimeError(
+                    "Inference is still active; retry after the current generation stops"
+                )
             active = self._active
             self._active = None
         if active is not None:

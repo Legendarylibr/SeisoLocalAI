@@ -326,6 +326,10 @@ async def preload_model(
 ) -> dict[str, Any]:
     """Load a selected inventory model into the local inference engine."""
     _assert_inference_gpu_available()
+    try:
+        orchestrator.assert_generation_available_for_user(user_id)
+    except PermissionError as exc:
+        raise HTTPException(403, str(exc)) from exc
     ctx = await resolve_preload_context(
         db,
         user_id,
@@ -353,6 +357,10 @@ async def preload_model_stream(
     settings: Annotated[ForgeSettings, Depends(get_settings)],
 ):
     _assert_inference_gpu_available()
+    try:
+        orchestrator.assert_generation_available_for_user(user_id)
+    except PermissionError as exc:
+        raise HTTPException(403, str(exc)) from exc
     ctx = await resolve_preload_context(
         db,
         user_id,

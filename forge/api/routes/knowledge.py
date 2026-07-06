@@ -153,4 +153,6 @@ async def retrieve(
     payload = {"action": "retrieve", "user_id": user_id, **body.model_dump()}
     await orchestrator.start(job_id, payload)
     job = await orchestrator.wait_for(job_id)
+    if job and job.status.value == "failed":
+        raise HTTPException(400, job.error or "Retrieve failed")
     return job.result if job else {"results": []}

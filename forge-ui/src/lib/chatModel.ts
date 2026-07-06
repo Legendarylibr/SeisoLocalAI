@@ -28,6 +28,7 @@ export function modelMemoryBlocked(
   _headroomMb?: number,
 ): boolean {
   if (!model) return false;
+  if (model.memory_load_blocked) return true;
   if (model.selectable === false || model.status === "incomplete") return true;
   return false;
 }

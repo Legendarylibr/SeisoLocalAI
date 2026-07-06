@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api } from "@/lib/api";
 import { usePlatformSettings } from "@/context/PlatformSettingsContext";
@@ -23,6 +23,13 @@ export function SettingsPage() {
   const { settings, hfStatus, refresh } = usePlatformSettings();
   const [hfToken, setHfToken] = useState("");
   const [hfMsg, setHfMsg] = useState("");
+
+  useEffect(() => {
+    const requested = searchParams.get("tab");
+    if (requested === "huggingface" || requested === "server" || requested === "hardening" || requested === "account") {
+      setTab(requested);
+    }
+  }, [searchParams]);
 
   const saveToken = async () => {
     if (!hfToken.trim()) return;
