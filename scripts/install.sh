@@ -19,6 +19,7 @@
 #   SEISO_NO_OPEN=1     Do not open the browser after Forge starts
 #   SEISO_SKIP_FLASH_ATTN=0  Try optional Flash Attention during install (NVIDIA Linux)
 #   SEISO_FAST_INSTALL=1    Skip PyTorch/training extras (Forge + GGUF chat only)
+#   SEISO_INSTALL_PROFILE=… Target install: linux-nvidia, linux-cpu, linux-rocm, wsl-nvidia, macos, chat
 #   SEISO_INSTALL_DEV=1     Include dev extras (pytest, ruff, mypy, …)
 #   SEISO_INSTALL_EXTRAS=…  Override auto-detected pip extras (e.g. forge,train,cuda)
 set -euo pipefail
@@ -176,6 +177,10 @@ resolve_root() {
 
 warn_windows_mount() {
   local root="$1"
+  if seiso_is_wsl && [[ "$root" == /mnt/* ]]; then
+    warn "WSL install path is on a Windows mount ($root). Use SEISO_INSTALL_DIR=~/Seiso on the Linux filesystem for CUDA and native builds."
+    return 0
+  fi
   [[ "$root" == /mnt/* ]] || return 0
   warn "Install path is on a Windows mount ($root). Use SEISO_INSTALL_DIR=~/Seiso on WSL."
 }
@@ -218,7 +223,11 @@ main() {
   warn_windows_mount "$root"
 
   extras="$(detect_platform_extras)"
-  log_unless_quiet "Installing Python extras: [$extras]"
+  if [[ -n "${SEISO_INSTALL_PROFILE:-}" ]]; then
+    log_unless_quiet "Install profile: ${SEISO_INSTALL_PROFILE} → [$extras]"
+  else
+    log_unless_quiet "Installing Python extras: [$extras]"
+  fi
 
   install_log="$root/.seiso-install.log"
 

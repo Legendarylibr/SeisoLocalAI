@@ -46,10 +46,38 @@ Seiso config files accept `~/.seiso` and expand it correctly on all platforms. S
 
 ## Linux & macOS — one command (recommended)
 
-No manual prerequisites on most systems — the installer installs Python, Node, and git via Homebrew or your package manager when they are missing.
+No manual prerequisites on most systems — the installer installs Python, Node, git, and native build tools (gcc, cmake, python dev headers) via your package manager when they are missing.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
+```
+
+Auto-detects OS and GPU. **Per-OS / per-hardware profiles** — prepend `SEISO_INSTALL_PROFILE=…` to install only the extras you need:
+
+```bash
+# Linux native + NVIDIA
+SEISO_INSTALL_PROFILE=linux-nvidia curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
+
+# Linux native CPU (skip CUDA extras even when nvidia-smi works)
+SEISO_INSTALL_PROFILE=linux-cpu curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
+
+# Linux AMD ROCm (install PyTorch ROCm wheel after — see linux-amd-rocm.md)
+SEISO_INSTALL_PROFILE=linux-rocm curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
+
+# WSL2 + NVIDIA (use ~/Seiso on the Linux filesystem, not /mnt/c/...)
+SEISO_INSTALL_PROFILE=wsl-nvidia curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
+
+# macOS Apple Silicon (MLX included)
+SEISO_INSTALL_PROFILE=macos curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
+
+# Chat-only — Forge + GGUF; no PyTorch / training stack
+SEISO_INSTALL_PROFILE=chat curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
+```
+
+**Windows (native)** — no bash installer; use PowerShell:
+
+```powershell
+git clone https://github.com/Legendarylibr/SeisoLocalAI.git "$env:USERPROFILE\Seiso"; cd "$env:USERPROFILE\Seiso"; python -m venv .venv; .\.venv\Scripts\Activate.ps1; pip install -U pip wheel setuptools; pip install -e ".[forge,train,dev]"; if (-not (Test-Path .env)) { Copy-Item .env.example .env }; cd forge-ui; npm ci; npm run build; cd ..; seiso forge
 ```
 
 Forge starts when install finishes and your browser opens automatically at **http://127.0.0.1:8765**. You do **not** need to run `start` again immediately after a successful install. If anything fails, **doctor runs automatically** with a guided diagnosis.
@@ -96,7 +124,9 @@ bash start
 | `SEISO_VERBOSE=1` | off | Show full pip/Bun output |
 | `SEISO_USE_NPM=1` | off | Use npm instead of Bun for `forge-ui` (Bun is default) |
 | `SEISO_USE_UV=0` | on (use uv if installed) | Use pip instead of uv for Python deps |
-| `SEISO_FAST_INSTALL=1` | off | Forge + GGUF chat only — skip PyTorch/training extras |
+| `SEISO_FAST_INSTALL=1` | off | Forge + GGUF chat only — skip PyTorch/training extras (same as `SEISO_INSTALL_PROFILE=chat`) |
+| `SEISO_INSTALL_PROFILE` | auto | Target stack: `linux-nvidia`, `linux-cpu`, `linux-rocm`, `wsl-nvidia`, `macos`, `chat` |
+| `SEISO_INSTALL_EXTRAS` | auto | Override pip extras directly (e.g. `forge,train,cuda,llamacpp`) |
 
 Custom location:
 

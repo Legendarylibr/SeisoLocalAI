@@ -14,6 +14,8 @@ Treat WSL2 as **Linux** for Seiso. This is the recommended Windows path for full
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
+# or explicitly for WSL + NVIDIA:
+SEISO_INSTALL_PROFILE=wsl-nvidia curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
 # installs to $HOME/Seiso by default
 
 # Or from an existing clone under $HOME:
