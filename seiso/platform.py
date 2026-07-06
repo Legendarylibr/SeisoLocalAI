@@ -300,9 +300,9 @@ def llamacpp_deferred_preflight_platform(*, profile: dict | None = None) -> str 
     return None
 
 
-def is_native_linux_nvidia(*, profile: dict | None = None) -> bool:
-    """True on bare-metal Linux with a discrete NVIDIA GPU (not WSL, not CPU-only)."""
-    if platform.system() != "Linux" or detect_wsl2():
+def _linux_nvidia_gpu_present(*, profile: dict | None = None) -> bool:
+    """True when profile reports a discrete NVIDIA GPU on Linux."""
+    if platform.system() != "Linux":
         return False
     profile = _resolve_hardware_profile(profile)
     if profile is None:
@@ -326,3 +326,23 @@ def is_native_linux_nvidia(*, profile: dict | None = None) -> bool:
         if "nvidia" in name or "geforce" in name or "rtx" in name or "quadro" in name:
             return True
     return False
+
+
+def is_native_linux_nvidia(*, profile: dict | None = None) -> bool:
+    """True on bare-metal Linux with a discrete NVIDIA GPU (not WSL, not CPU-only)."""
+    if detect_wsl2():
+        return False
+    return _linux_nvidia_gpu_present(profile=profile)
+
+
+def use_linux_nvidia_inference_guards(*, profile: dict | None = None) -> bool:
+    """Native Linux NVIDIA always; WSL only when ``SEISO_NVIDIA_WSL_ACK=1``."""
+    if is_native_linux_nvidia(profile=profile):
+        return True
+    if not detect_wsl2():
+        return False
+    from seiso.env import env_bool
+
+    if not env_bool("SEISO_NVIDIA_WSL_ACK", False):
+        return False
+    return _linux_nvidia_gpu_present(profile=profile)

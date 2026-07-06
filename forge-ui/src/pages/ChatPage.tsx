@@ -19,8 +19,8 @@ import {
   ContextWindowSetting,
   contextWindowOptionsFromStatus,
   normalizeContextWindow,
-  readStoredContextWindow,
-  writeStoredContextWindow,
+  readStoredContextWindowForModel,
+  writeStoredContextWindowForModel,
 } from "@/lib/chatContext";
 import {
   ChatInferenceSettings,
@@ -129,7 +129,7 @@ export function ChatPage() {
   const [knowledgeBases, setKnowledgeBases] = useState<Array<{ id: string; chunk_count: number; has_index: boolean }>>([]);
   const [knowledgeBaseId, setKnowledgeBaseId] = useState("");
   const [inferenceSettings, setInferenceSettings] = useState<ChatInferenceSettings>(() => readChatInferenceSettings());
-  const [contextWindow, setContextWindow] = useState<ContextWindowSetting>(() => readStoredContextWindow());
+  const [contextWindow, setContextWindow] = useState<ContextWindowSetting>("auto");
   const [contextStatus, setContextStatus] = useState<ChatContextStatus | null>(null);
   const [contextLoading, setContextLoading] = useState(false);
   const [modelVariants, setModelVariants] = useState<ModelVariantsResponse | null>(null);
@@ -230,8 +230,8 @@ export function ChatPage() {
   const modelBlockReason = memoryBlockHint(selected);
 
   const contextWindowOptions = useMemo(
-    () => contextWindowOptionsFromStatus(contextStatus),
-    [contextStatus],
+    () => contextWindowOptionsFromStatus(contextStatus, selected),
+    [contextStatus, selected],
   );
 
   const refreshVramStatus = useCallback(async () => {
@@ -316,12 +316,35 @@ export function ChatPage() {
     return status;
   }, [refreshHwProfile, refreshModels]);
 
+  const preloadInferenceOptions = useCallback(
+    (modelId: string, list: InferenceModelOption[], ctxOverride?: ContextWindowSetting) => {
+      const model = list.find((m) => m.id === modelId) ?? null;
+      const options = contextWindowOptionsFromStatus(null, model);
+      const ctx = normalizeContextWindow(
+        ctxOverride ?? readStoredContextWindowForModel(modelId, options[options.length - 1] ?? 131072),
+        options,
+      );
+      return {
+        maxTokens: inferenceSettings.maxTokens,
+        nCtx: ctx === "auto" ? null : ctx,
+        contextWindow: ctx,
+      };
+    },
+    [inferenceSettings.maxTokens],
+  );
+
   const activateModel = useCallback(
     async (modelId: string, list: InferenceModelOption[], backendOverride?: string) => {
       const next = list.find((m) => m.id === modelId);
       if (!next) {
         throw new Error("Model not found in inventory after download");
       }
+      if (modelMemoryBlocked(next, hwProfile?.vram_headroom_mb)) {
+        throw new Error(modelMemoryBlockReason(next));
+      }
+      const preloadOpts = preloadInferenceOptions(modelId, list);
+      setContextWindow(preloadOpts.contextWindow);
+      writeStoredContextWindowForModel(modelId, preloadOpts.contextWindow);
       setSelection(modelId);
       writeStoredModel(CHAT_MODEL_STORAGE_KEY, modelId);
       const backend =
@@ -337,13 +360,16 @@ export function ChatPage() {
       }
       if (providerId) return backend;
       setLoadProgress(initialLoadProgress(next.name, next.size_bytes));
-      const loaded = await preloadWithProgress(modelId, backend, setLoadProgress);
+      const loaded = await preloadWithProgress(modelId, backend, setLoadProgress, undefined, {
+        maxTokens: preloadOpts.maxTokens,
+        nCtx: preloadOpts.nCtx,
+      });
       setLoadedModelId(modelId);
       setLoadedBackend(loaded);
       writeStoredModel(CHAT_BACKEND_STORAGE_KEY, loaded);
       return loaded;
     },
-    [providerId, hwProfile, inferenceBackend],
+    [providerId, hwProfile, inferenceBackend, preloadInferenceOptions],
   );
 
   const handleModelChange = async (modelId: string) => {
@@ -473,10 +499,13 @@ export function ChatPage() {
       if (next) {
         try {
           setLoadProgress(initialLoadProgress(next.name, next.size_bytes));
+          const preloadOpts = preloadInferenceOptions(selection, models);
           const loaded = await preloadWithProgress(
             selection,
             resolveInferenceBackend(next, hwProfile, inferenceBackend),
             setLoadProgress,
+            undefined,
+            { maxTokens: preloadOpts.maxTokens, nCtx: preloadOpts.nCtx },
           );
           setLoadedModelId(selection);
           setLoadedBackend(loaded);
@@ -526,6 +555,9 @@ export function ChatPage() {
     }) => {
       setModels(result.models);
       if (!result.selectedId) return;
+      const preloadOpts = preloadInferenceOptions(result.selectedId, result.models);
+      setContextWindow(preloadOpts.contextWindow);
+      writeStoredContextWindowForModel(result.selectedId, preloadOpts.contextWindow);
       setSelection(result.selectedId);
       setInferenceBackend(result.backend);
       if (!providerId) {
@@ -553,6 +585,7 @@ export function ChatPage() {
           initialModels,
           hwProfile,
           signal: controller.signal,
+          maxTokens: inferenceSettings.maxTokens,
         };
 
         if (pendingRepo) {
@@ -695,9 +728,9 @@ export function ChatPage() {
     const normalized = normalizeContextWindow(contextWindow, contextWindowOptions);
     if (normalized !== contextWindow) {
       setContextWindow(normalized);
-      writeStoredContextWindow(normalized);
+      writeStoredContextWindowForModel(selection, normalized);
     }
-  }, [contextWindow, contextWindowOptions]);
+  }, [contextWindow, contextWindowOptions, selection]);
 
   const openThread = (t: ChatThread) => {
     setActive(t.id);
@@ -989,7 +1022,31 @@ export function ChatPage() {
 
   const handleContextWindowChange = (value: ContextWindowSetting) => {
     setContextWindow(value);
-    writeStoredContextWindow(value);
+    writeStoredContextWindowForModel(selection, value);
+    if (!providerId && selection && loadedModelId === selection && !streaming) {
+      const model = models.find((m) => m.id === selection);
+      const backend =
+        inferenceBackend ||
+        resolveInferenceBackend(model ?? null, hwProfile, inferenceBackend);
+      if (!backend || model?.kind === "router") return;
+      void (async () => {
+        try {
+          setSwitchingModel(true);
+          setLoadProgress(initialLoadProgress(model?.name || "model", model?.size_bytes ?? 0));
+          const loaded = await preloadWithProgress(selection, backend, setLoadProgress, undefined, {
+            maxTokens: inferenceSettings.maxTokens,
+            nCtx: value === "auto" ? null : value,
+          });
+          setLoadedModelId(selection);
+          setLoadedBackend(loaded);
+        } catch (e) {
+          setError(e instanceof Error ? e.message : "Failed to apply context window");
+        } finally {
+          setSwitchingModel(false);
+          setLoadProgress(null);
+        }
+      })();
+    }
   };
 
   const handleInferencePanelOpenChange = (open: boolean) => {
@@ -1132,7 +1189,14 @@ export function ChatPage() {
                     setLoadProgress(
                       initialLoadProgress(model?.name || "model", model?.size_bytes ?? 0),
                     );
-                    const loaded = await preloadWithProgress(selection, next, setLoadProgress);
+                    const preloadOpts = preloadInferenceOptions(selection, models);
+                    const loaded = await preloadWithProgress(
+                      selection,
+                      next,
+                      setLoadProgress,
+                      undefined,
+                      { maxTokens: preloadOpts.maxTokens, nCtx: preloadOpts.nCtx },
+                    );
                     setLoadedModelId(selection);
                     setLoadedBackend(loaded);
                     writeStoredModel(CHAT_BACKEND_STORAGE_KEY, loaded);

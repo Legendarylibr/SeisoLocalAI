@@ -412,29 +412,31 @@ def llama_host_batch_headroom_mb(
     free_vram_mb: int,
 ) -> int | None:
     """Host RAM budget for mmap pages, prompt cache, and CPU-side KV on Linux NVIDIA."""
-    if not seiso_platform.is_native_linux_nvidia():
+    if not seiso_platform.use_linux_nvidia_inference_guards():
         return None
     ram_mb = available_ram_mb()
     if ram_mb <= 0:
         return None
 
     path = Path(model_path)
-    weight_mb = int(estimate_path_vram_mb(path))
-    total_layers = gguf_total_layers(path)
+    weight_mb = max(int(estimate_path_vram_mb(path)), 0)
+    total_layers = max(gguf_total_layers(path), 1)
 
     if n_gpu_layers == 0:
         host_weight_mb = weight_mb
     elif n_gpu_layers == -1:
+        # Fully offloaded weights stay mostly in VRAM; reserve modest mmap pages.
         host_weight_mb = max(256, int(weight_mb * 0.12))
     else:
         cpu_fraction = 1.0 - _gpu_layer_fraction(n_gpu_layers, total_layers)
-        host_weight_mb = int(weight_mb * cpu_fraction) + 256
+        host_weight_mb = max(256, int(weight_mb * cpu_fraction) + 256)
 
-    spill_mb = max(256, min(int(free_vram_mb * 0.05), 512))
-    return max(
-        _MIN_LLAMA_BATCH * 2,
-        ram_mb - host_weight_mb - _host_os_reserve_mb(ram_mb) - spill_mb,
-    )
+    spill_mb = max(256, min(int(max(free_vram_mb, 0) * 0.05), 512))
+    reserve_mb = _host_os_reserve_mb(ram_mb)
+    # When host weight exceeds free RAM, force the minimum batch budget so
+    # clamp_llama_load_kwargs still reduces n_batch instead of over-allocating.
+    remaining = ram_mb - host_weight_mb - reserve_mb - spill_mb
+    return max(_MIN_LLAMA_BATCH * 2, remaining)
 
 
 def llama_model_is_tight_vram_fit(
@@ -478,9 +480,9 @@ def llama_effective_batch_headroom_mb(
         return gpu_headroom
     effective = min(gpu_headroom, host_headroom)
     try:
-        from seiso.platform import is_native_linux_nvidia
+        from seiso.platform import use_linux_nvidia_inference_guards
 
-        if is_native_linux_nvidia() and llama_model_is_tight_vram_fit(
+        if use_linux_nvidia_inference_guards() and llama_model_is_tight_vram_fit(
             model_path=model_path,
             free_mb=free_mb,
             n_gpu_layers=n_gpu_layers,
@@ -520,7 +522,7 @@ def llama_prefill_needs_reload(
 ) -> tuple[bool, int, int]:
     """True when a cached native-Linux llama handle should reload before prefill."""
     try:
-        native_linux_nvidia = seiso_platform.is_native_linux_nvidia()
+        native_linux_nvidia = seiso_platform.use_linux_nvidia_inference_guards()
     except Exception:
         native_linux_nvidia = False
     if not native_linux_nvidia or loaded_n_gpu_layers == 0:
@@ -588,9 +590,9 @@ def llama_load_profile_ladder(
     top_batch, top_ubatch = llama_batch_limits_for_headroom(effective)
 
     try:
-        from seiso.platform import is_native_linux_nvidia
+        from seiso.platform import use_linux_nvidia_inference_guards
 
-        native_linux_nvidia = is_native_linux_nvidia()
+        native_linux_nvidia = use_linux_nvidia_inference_guards()
     except ImportError:
         native_linux_nvidia = False
 
@@ -971,7 +973,7 @@ def clamp_llama_load_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
         )
         native_linux_nvidia = False
         with contextlib.suppress(Exception):
-            native_linux_nvidia = seiso_platform.is_native_linux_nvidia()
+            native_linux_nvidia = seiso_platform.use_linux_nvidia_inference_guards()
         batch_headroom = llama_effective_batch_headroom_mb(
             free_mb,
             model_path=model_path,
@@ -990,9 +992,23 @@ def clamp_llama_load_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
             )
         if (
             native_linux_nvidia
+            and out.get("flash_attn")
             and not env_bool("SEISO_LLAMA_UNSAFE_FLASH_ATTN", False)
         ):
-            out.pop("flash_attn", None)
+            # MoE/SWA flash_attn stays blocked; dense may opt in via SEISO_LLAMA_FLASH_ATTN.
+            try:
+                from seiso.inference.backends import (
+                    gguf_is_moe,
+                    gguf_uses_sliding_window_attention,
+                )
+
+                if model_path and (
+                    gguf_uses_sliding_window_attention(model_path)
+                    or gguf_is_moe(model_path)
+                ):
+                    out.pop("flash_attn", None)
+            except Exception:
+                out.pop("flash_attn", None)
         if (
             native_linux_nvidia
             and tight
@@ -1060,7 +1076,7 @@ def clamp_llama_cache_mb(
         return min(default_mb, 512)
 
     cap = min(default_mb, max(128, ram_mb // 24))
-    if model_path and seiso_platform.is_native_linux_nvidia():
+    if model_path and seiso_platform.use_linux_nvidia_inference_guards():
         weight_mb = int(estimate_path_vram_mb(model_path))
         mmap_reserve = max(512, int(weight_mb * 0.12))
         host_budget = max(128, ram_mb - mmap_reserve - _host_os_reserve_mb(ram_mb))

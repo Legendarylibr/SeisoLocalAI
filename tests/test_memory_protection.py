@@ -398,7 +398,8 @@ def test_clamp_llama_load_kwargs_native_linux_roomy_keeps_july3_batches(
     )
     assert kwargs["n_batch"] == 4096
     assert kwargs["n_ubatch"] == 1024
-    assert "flash_attn" not in kwargs
+    # Dense/unknown models may keep flash_attn when opted in.
+    assert kwargs.get("flash_attn") is True
 
 
 def test_llama_prefill_guard_keeps_roomy_short_prompt(monkeypatch, tmp_path):
@@ -500,7 +501,8 @@ def test_clamp_llama_load_kwargs_native_linux_borderline_roomy(
             "flash_attn": True,
         }
     )
-    assert "flash_attn" not in kwargs
+    # Dense/unknown keep flash_attn; batch may still clamp for headroom.
+    assert kwargs.get("flash_attn") is True
     assert kwargs["n_batch"] <= 4096
     assert kwargs["n_ubatch"] <= kwargs["n_batch"]
 
@@ -553,6 +555,13 @@ def test_clamp_llama_load_kwargs_native_linux_tight_strips_flash_attn(
         "seiso.inference.backends.gguf_block_count", lambda _p: 64
     )
     monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: True)
+    monkeypatch.setattr(
+        "seiso.inference.backends.gguf_is_moe", lambda _p: True
+    )
+    monkeypatch.setattr(
+        "seiso.inference.backends.gguf_uses_sliding_window_attention",
+        lambda _p: False,
+    )
 
     kwargs = clamp_llama_load_kwargs(
         {
@@ -564,6 +573,7 @@ def test_clamp_llama_load_kwargs_native_linux_tight_strips_flash_attn(
             "flash_attn": True,
         }
     )
+    # MoE/SWA still lose flash_attn without UNSAFE.
     assert "flash_attn" not in kwargs
     assert kwargs["n_batch"] <= 512
     assert kwargs["n_ubatch"] <= 128

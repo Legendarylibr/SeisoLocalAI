@@ -12,14 +12,13 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from forge.api.deps import get_db, get_inference_orchestrator
-from forge.api.http_errors import raise_forbidden
 from forge.config import ForgeSettings, get_settings
 from forge.db.store import Database
 from forge.orchestrators.inference import InferenceOrchestrator
 from forge.security.openai_auth import get_openai_user_id
+from forge.services.inference_chat import prepare_local_chat_target
 from forge.services.llm_output import StreamingOutputSanitizer, sanitize_llm_output
-from forge.services.user_paths import assert_user_path, is_local_filesystem_path
-from seiso.security import SecurityError
+from forge.services.user_paths import is_local_filesystem_path
 
 router = APIRouter(tags=["openai"])
 
@@ -77,75 +76,95 @@ def _sanitize_openai_content(content: str, *, tools_enabled: bool) -> str:
     return sanitize_llm_output(content, strip_tool_calls=not tools_enabled)
 
 
-def _default_openai_gguf_backend() -> str:
-    from seiso.inference.llamaswap import llamaswap_status
-
-    return "llamaswap" if llamaswap_status().available else "llamacpp"
-
-
-def _resolve_payload(
-    body: ChatCompletionRequest,
-    model_path: str | None,
-    *,
-    model_format: str | None = None,
-) -> dict[str, Any]:
-    messages = _normalize_openai_messages(body)
-    payload = {
-        "model_path": model_path,
-        "messages": messages,
-        "max_tokens": body.max_tokens or 512,
-        "temperature": body.temperature,
-        "tools": bool(body.tools),
-    }
-    if model_format:
-        payload["model_format"] = model_format
-        if model_format.lower() == "gguf":
-            payload["inference_backend"] = _default_openai_gguf_backend()
-    return payload
-
-
-async def _resolve_openai_model_path(
+async def _prepare_openai_chat_payload(
     body: ChatCompletionRequest,
     user_id: str,
     db: Database,
     settings: ForgeSettings,
-) -> tuple[str, str | None]:
-    def _validated_path(raw_path: str, *, missing_message: str | None = None) -> str:
-        try:
-            path = assert_user_path(settings.data_dir, user_id, raw_path)
-        except SecurityError as exc:
-            raise_forbidden(exc)
-        if not path.exists():
-            detail = missing_message or f"Model file missing on disk: {raw_path}"
-            raise HTTPException(404, detail)
-        return str(path)
-
-    def _row_path(row: dict[str, Any]) -> str:
-        return _validated_path(str(row["path"]))
+) -> dict[str, Any]:
+    """Resolve and sanitize via the shared local-chat path."""
+    messages = _normalize_openai_messages(body)
+    max_tokens = body.max_tokens or 512
 
     if body.model in ("default", "seiso"):
-        models = await db.list_models(user_id)
-        for row in models:
-            if (row.get("format") or "").lower() != "gguf":
-                continue
-            return _row_path(row), row.get("format")
-        for row in models:
-            return _row_path(row), row.get("format")
-        raise HTTPException(400, "No local model available — download from Hub")
+        from forge.services.inference_models import list_inference_options
 
-    if is_local_filesystem_path(body.model):
-        path = _validated_path(
-            body.model, missing_message=f"Model path not found: {body.model}"
+        options = await list_inference_options(db, user_id, hardware_aware=False)
+        selected = next(
+            (
+                o
+                for o in options
+                if o.get("selectable", True)
+                and (o.get("format") or "").lower() == "gguf"
+                and o.get("kind") == "local"
+            ),
+            None,
         )
-        match = await db.get_model_by_path(user_id, path)
-        return path, match.get("format") if match else None
+        if selected is None:
+            selected = next(
+                (
+                    o
+                    for o in options
+                    if o.get("selectable", True) and o.get("kind") == "local"
+                ),
+                None,
+            )
+        if selected is None:
+            raise HTTPException(400, "No local model available — download from Hub")
+        target = await prepare_local_chat_target(
+            db,
+            user_id,
+            settings,
+            model_id=selected["id"],
+            inference_backend="auto",
+            max_tokens=max_tokens,
+            messages=messages,
+            check_memory=True,
+            sanitize=True,
+        )
+    elif is_local_filesystem_path(body.model):
+        target = await prepare_local_chat_target(
+            db,
+            user_id,
+            settings,
+            model_path=body.model,
+            inference_backend="auto",
+            max_tokens=max_tokens,
+            messages=messages,
+            check_memory=True,
+            sanitize=True,
+        )
+    else:
+        match = await db.get_model(body.model, user_id)
+        if match is None:
+            match = await db.get_model_by_name(user_id, body.model)
+        if not match:
+            raise HTTPException(404, f"Model not found in inventory: {body.model}")
+        target = await prepare_local_chat_target(
+            db,
+            user_id,
+            settings,
+            model_id=match["id"],
+            inference_backend="auto",
+            max_tokens=max_tokens,
+            messages=messages,
+            check_memory=True,
+            sanitize=True,
+        )
 
-    match = await db.get_model(body.model, user_id)
-    if match is None:
-        match = await db.get_model_by_name(user_id, body.model)
-    if not match:
-        raise HTTPException(404, f"Model not found in inventory: {body.model}")
-    return _row_path(match), match.get("format")
+    payload: dict[str, Any] = {
+        "model_path": target.get("model_path"),
+        "messages": messages,
+        "max_tokens": target.get("max_tokens", max_tokens),
+        "temperature": body.temperature,
+        "tools": bool(body.tools),
+        "inference_backend": target.get("inference_backend", "auto"),
+    }
+    if target.get("model_format"):
+        payload["model_format"] = target["model_format"]
+    if target.get("n_ctx") is not None:
+        payload["n_ctx"] = target["n_ctx"]
+    return payload
 
 
 @router.get("/v1/models")
@@ -183,8 +202,7 @@ async def chat_completions(
             403, "Tool calling is disabled on the OpenAI-compatible API"
         )
 
-    path, model_format = await _resolve_openai_model_path(body, user_id, db, settings)
-    payload = _resolve_payload(body, path, model_format=model_format)
+    payload = await _prepare_openai_chat_payload(body, user_id, db, settings)
     payload["user_id"] = user_id
     completion_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
     created = int(time.time())

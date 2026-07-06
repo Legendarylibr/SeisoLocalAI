@@ -1,10 +1,33 @@
-import type { ChatContextStatus } from "@/lib/api/types";
+import type { ChatContextStatus, InferenceModelOption } from "@/lib/api/types";
 
 export const CHAT_CTX_STORAGE_KEY = "seiso.chat.context_window";
+export const CHAT_CTX_BY_MODEL_KEY = "seiso.chat.context_window_by_model";
 
 export type ContextWindowSetting = "auto" | number;
 
 export const DEFAULT_CONTEXT_WINDOW_OPTIONS = [2048, 4096, 8192, 16384, 32768];
+
+function readByModelMap(): Record<string, ContextWindowSetting> {
+  try {
+    const raw = localStorage.getItem(CHAT_CTX_BY_MODEL_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const out: Record<string, ContextWindowSetting> = {};
+    for (const [key, value] of Object.entries(parsed)) {
+      if (value === "auto") {
+        out[key] = "auto";
+        continue;
+      }
+      const num = Number(value);
+      if (Number.isFinite(num) && num >= 2048 && num <= 131072) {
+        out[key] = num;
+      }
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
 
 export function readStoredContextWindow(maxAllowed = 131072): ContextWindowSetting {
   try {
@@ -20,6 +43,20 @@ export function readStoredContextWindow(maxAllowed = 131072): ContextWindowSetti
   return "auto";
 }
 
+export function readStoredContextWindowForModel(
+  modelId: string | null | undefined,
+  maxAllowed = 131072,
+): ContextWindowSetting {
+  if (modelId) {
+    const byModel = readByModelMap()[modelId];
+    if (byModel === "auto") return "auto";
+    if (typeof byModel === "number" && byModel >= 2048 && byModel <= maxAllowed) {
+      return byModel;
+    }
+  }
+  return readStoredContextWindow(maxAllowed);
+}
+
 export function writeStoredContextWindow(value: ContextWindowSetting): void {
   try {
     localStorage.setItem(CHAT_CTX_STORAGE_KEY, String(value));
@@ -28,11 +65,41 @@ export function writeStoredContextWindow(value: ContextWindowSetting): void {
   }
 }
 
+export function writeStoredContextWindowForModel(
+  modelId: string | null | undefined,
+  value: ContextWindowSetting,
+): void {
+  writeStoredContextWindow(value);
+  if (!modelId) return;
+  try {
+    const map = readByModelMap();
+    map[modelId] = value;
+    localStorage.setItem(CHAT_CTX_BY_MODEL_KEY, JSON.stringify(map));
+  } catch {
+    /* ignore */
+  }
+}
+
 export function contextWindowOptionsFromStatus(
   status: ChatContextStatus | null | undefined,
+  model?: InferenceModelOption | null,
 ): number[] {
+  const ceiling =
+    status?.n_ctx_max ||
+    (typeof model?.context_ceiling === "number" ? model.context_ceiling : undefined);
   const options = status?.context_window_options?.filter((n) => n >= 2048) ?? [];
-  return options.length ? options : DEFAULT_CONTEXT_WINDOW_OPTIONS;
+  if (options.length) {
+    if (ceiling && ceiling >= 2048 && !options.includes(ceiling)) {
+      return [...options, ceiling].sort((a, b) => a - b);
+    }
+    return options;
+  }
+  if (ceiling && ceiling >= 2048) {
+    return DEFAULT_CONTEXT_WINDOW_OPTIONS.filter((n) => n <= ceiling).concat(
+      DEFAULT_CONTEXT_WINDOW_OPTIONS.includes(ceiling) ? [] : [ceiling],
+    );
+  }
+  return DEFAULT_CONTEXT_WINDOW_OPTIONS;
 }
 
 export function normalizeContextWindow(

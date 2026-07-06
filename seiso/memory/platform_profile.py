@@ -54,6 +54,8 @@ def _refresh_native_linux_llama_env(
 
     os.environ["SEISO_LLAMA_SPEED_SCALE"] = "false"
     os.environ.setdefault("SEISO_LLAMA_FLASH_ATTN", "false")
+    # Dense families may opt into tier-1 Q8 KV quant; default stays off.
+    os.environ.setdefault("SEISO_LLAMA_KV_QUANT", "false")
     batch = int(os.environ.get("SEISO_LLAMA_BATCH", batch_cap))
     ubatch = int(os.environ.get("SEISO_LLAMA_UBATCH", ubatch_cap))
     cache = int(os.environ.get("SEISO_LLAMA_CACHE_MB", cache_cap))
