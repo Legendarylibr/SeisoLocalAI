@@ -149,13 +149,23 @@ def build_stage_pipeline_router(config: StagePipelineRouterConfig) -> APIRouter:
                         error_text=job.error if job.status.value == "failed" else None,
                     )
                     if model_dir := result.get("model_dir"):
-                        await register_export_outputs(
-                            db,
-                            user_id=user_id,
-                            data_dir=settings.data_dir,
-                            outputs={config.export_registry_key: str(model_dir)},
-                            job_id=job_id,
-                        )
+                        try:
+                            await register_export_outputs(
+                                db,
+                                user_id=user_id,
+                                data_dir=settings.data_dir,
+                                outputs={config.export_registry_key: str(model_dir)},
+                                job_id=job_id,
+                            )
+                        except Exception:
+                            import logging
+
+                            logging.getLogger(__name__).exception(
+                                "Pipeline inventory registration failed for job %s "
+                                "(job remains %s)",
+                                job_id,
+                                job.status.value,
+                            )
             except Exception as exc:
                 await config.update_status(
                     db,

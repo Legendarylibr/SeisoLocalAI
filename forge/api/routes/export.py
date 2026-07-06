@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from pathlib import Path
 from typing import Annotated, Any
@@ -250,6 +251,10 @@ async def start_export(
 
     job_id = str(uuid.uuid4())
     config = body.model_dump()
+    # Never persist secrets in job config_json.
+    hub_cfg = config.get("hub")
+    if isinstance(hub_cfg, dict) and hub_cfg.get("hf_token"):
+        config["hub"] = {**hub_cfg, "hf_token": None}
     gguf_quants = list(body.gguf_quantizations)
 
     if body.rl_quant_job_id:
@@ -318,13 +323,20 @@ async def start_export(
                 if job.status.value == "completed" and job.result.get("outputs"):
                     from forge.services.model_registry import register_export_outputs
 
-                    await register_export_outputs(
-                        db,
-                        user_id=user_id,
-                        data_dir=settings.data_dir,
-                        outputs=job.result["outputs"],
-                        job_id=job_id,
-                    )
+                    try:
+                        await register_export_outputs(
+                            db,
+                            user_id=user_id,
+                            data_dir=settings.data_dir,
+                            outputs=job.result["outputs"],
+                            job_id=job_id,
+                        )
+                    except Exception:
+                        logging.getLogger(__name__).exception(
+                            "Export inventory registration failed for job %s "
+                            "(export remains completed)",
+                            job_id,
+                        )
         except Exception as exc:
             await db.update_export_job_status(
                 job_id,

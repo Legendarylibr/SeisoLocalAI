@@ -564,14 +564,16 @@ def test_dflash_cache_reloads_when_larger_context_is_needed(monkeypatch, tmp_pat
 
     first = model_pool.get_dflash_draft(str(draft), n_ctx=2048)
     same = model_pool.get_dflash_draft(str(draft), n_ctx=1024)
+    first_llm = first.llm
     larger = model_pool.get_dflash_draft(str(draft), n_ctx=4096)
 
     assert first is same
     assert larger is not first
     assert first.n_ctx == 2048
     assert larger.n_ctx == 4096
-    assert handles == [first.llm, larger.llm]
-    assert closed == [first.llm]
+    assert handles == [first_llm, larger.llm]
+    assert closed == [first_llm]
+    assert first.llm is None  # disposed under lock
     model_pool.clear_dflash_draft_cache()
 
 

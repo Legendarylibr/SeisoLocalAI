@@ -194,7 +194,7 @@ class Orchestrator(ABC):
         except asyncio.CancelledError:
             rec.status = JobStatus.CANCELLED
             self._emit_log(job_id, "Job cancelled")
-            raise
+            # Do not re-raise: wait_for must observe CANCELLED and persist it to DB.
         except SystemExit as exc:
             rec.status = JobStatus.FAILED
             rec.error = str(exc) or "Job exited unexpectedly"

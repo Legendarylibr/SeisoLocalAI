@@ -195,6 +195,8 @@ def apply_training_kernels(
                     _use_fused_cuda_kernels(hidden_states)
                     and not _is_peft_lora_linear(self.gate_proj)
                     and not _is_peft_lora_linear(self.up_proj)
+                    # bitsandbytes / quantized weights are packed; fused MLP needs FP weights.
+                    and _supports_einsum_batch((self.gate_proj, self.up_proj))
                 ):
                     flat = hidden_states.reshape(-1, hidden_states.shape[-1])
                     inter = fused_mlp_swiglu(
@@ -384,7 +386,10 @@ def _supports_einsum_batch(layers: tuple[Any, ...]) -> bool:
     """Quantized (bitsandbytes) base layers must use their own forward."""
     for layer in layers:
         cls = type(layer).__name__.lower()
-        if "bnb" in cls or "bitsandbytes" in cls:
+        if any(
+            token in cls
+            for token in ("bnb", "bitsandbytes", "linear4bit", "linear8bit")
+        ):
             return False
         weight = getattr(layer, "weight", None)
         if weight is not None and hasattr(weight, "quant_state"):
@@ -672,6 +677,7 @@ def _patch_fused_residual_decoder_forward(model: Any, decoder: Any) -> bool:
         attention_mask=None,
         position_ids=None,
         past_key_values=None,
+        output_attentions=False,
         use_cache=False,
         position_embeddings=None,
         **kwargs,
@@ -684,6 +690,7 @@ def _patch_fused_residual_decoder_forward(model: Any, decoder: Any) -> bool:
             attention_mask=attention_mask,
             position_ids=position_ids,
             past_key_values=past_key_values,
+            output_attentions=output_attentions,
             use_cache=use_cache,
             position_embeddings=position_embeddings,
             **kwargs,
@@ -708,7 +715,17 @@ def _patch_fused_residual_decoder_forward(model: Any, decoder: Any) -> bool:
             hidden_states = post_attn_skip + mlp_dropout(hidden_states)
         else:
             hidden_states = post_attn_skip + hidden_states
-        return hidden_states
+
+        # Match HF decoder-layer contract: parents index outputs[0].
+        outputs: tuple[Any, ...] = (hidden_states,)
+        if output_attentions and isinstance(attn_out, tuple) and len(attn_out) > 1:
+            outputs += (attn_out[1],)
+        if use_cache and isinstance(attn_out, tuple):
+            # present_key_value is typically the last element when use_cache=True.
+            present = attn_out[-1] if len(attn_out) > (2 if output_attentions else 1) else None
+            if present is not None and present is not hidden_states:
+                outputs += (present,)
+        return outputs
 
     decoder._seiso_residual_decoder_forward = _decoder_forward
     decoder._seiso_orig_forward = orig

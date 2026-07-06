@@ -110,3 +110,23 @@ def test_apply_llama_vision_skips_text_gemma_with_sibling_mmproj(monkeypatch, tm
     kwargs = apply_llama_vision_load_kwargs({"n_ctx": 2048}, str(model))
 
     assert "chat_handler" not in kwargs
+
+
+def test_apply_llama_vision_skips_text_llama_with_sibling_mmproj(monkeypatch, tmp_path):
+    model = tmp_path / "Llama-3.1-8B-Instruct-Q4_K_M.gguf"
+    mmproj = tmp_path / "mmproj-Q8_0.gguf"
+    model.write_bytes(b"model")
+    mmproj.write_bytes(b"mmproj")
+
+    monkeypatch.setattr(
+        "seiso.inference.backends.gguf_architecture",
+        lambda _path: "llama",
+    )
+    monkeypatch.setattr(
+        "seiso.inference.llama_vision.build_llama_vision_chat_handler",
+        lambda *_a, **_k: object(),
+    )
+
+    kwargs = apply_llama_vision_load_kwargs({"n_ctx": 2048}, str(model))
+
+    assert "chat_handler" not in kwargs

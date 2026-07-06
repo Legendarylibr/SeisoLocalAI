@@ -50,10 +50,13 @@ def test_llama_offload_fits_headroom_requires_weight_plus_kv(tmp_path):
 
 def test_is_oom_error_detects_cuda_message():
     assert is_oom_error(RuntimeError("CUDA out of memory. Tried to allocate 2.00 GiB"))
+    assert is_oom_error(RuntimeError("failed to allocate Metal buffer"))
 
 
 def test_is_oom_error_ignores_other_errors():
     assert not is_oom_error(ValueError("bad batch"))
+    assert not is_oom_error(RuntimeError("allocation strategy unavailable"))
+    assert not is_oom_error(RuntimeError("custom allocator callback"))
 
 
 def test_sanitize_inference_payload_clamps_max_tokens(monkeypatch):
