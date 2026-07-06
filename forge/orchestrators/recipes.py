@@ -198,7 +198,13 @@ class RecipeOrchestrator(Orchestrator):
         """Simple topological sort by edge dependencies."""
         deps: dict[str, set[str]] = {n["id"]: set() for n in nodes}
         for e in edges:
-            deps[e["target"]].add(e["source"])
+            target = e.get("target")
+            source = e.get("source")
+            if target not in deps:
+                raise ValueError(f"Recipe edge target not found: {target!r}")
+            if source not in deps:
+                raise ValueError(f"Recipe edge source not found: {source!r}")
+            deps[target].add(source)
         ordered: list[dict] = []
         done: set[str] = set()
         while len(ordered) < len(nodes):

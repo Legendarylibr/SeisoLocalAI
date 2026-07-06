@@ -90,3 +90,23 @@ def test_apply_llama_vision_load_kwargs_attaches_handler(monkeypatch, tmp_path):
 
     assert isinstance(kwargs["chat_handler"], FakeHandler)
     assert kwargs["chat_handler"].clip_model_path == str(mmproj.resolve())
+
+
+def test_apply_llama_vision_skips_text_gemma_with_sibling_mmproj(monkeypatch, tmp_path):
+    model = tmp_path / "gemma-3-12b-it-Q4_K_M.gguf"
+    mmproj = tmp_path / "mmproj-Q8_0.gguf"
+    model.write_bytes(b"model")
+    mmproj.write_bytes(b"mmproj")
+
+    monkeypatch.setattr(
+        "seiso.inference.backends.gguf_architecture",
+        lambda _path: "gemma3",
+    )
+    monkeypatch.setattr(
+        "seiso.inference.llama_vision.build_llama_vision_chat_handler",
+        lambda *_a, **_k: object(),
+    )
+
+    kwargs = apply_llama_vision_load_kwargs({"n_ctx": 2048}, str(model))
+
+    assert "chat_handler" not in kwargs

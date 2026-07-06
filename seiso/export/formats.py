@@ -409,18 +409,22 @@ def merge_lora_checkpoint(
         tok = deps.auto_tokenizer.from_pretrained(
             str(tok_path), revision="main"
         )  # nosec B615: revision pinned
-        model = deps.auto_model.from_pretrained(
-            base_id, device_map="cpu", low_cpu_mem_usage=True, revision="main"
-        )  # nosec B615: revision pinned
-        if len(tok) != model.get_input_embeddings().weight.shape[0]:
-            model.resize_token_embeddings(len(tok))
-        model = deps.peft_model.from_pretrained(model, str(checkpoint))
-        merged = model.merge_and_unload()
-        merged.save_pretrained(str(dest))
-        del model, merged
-        release_cached_memory()
-        tok.save_pretrained(str(dest))
-        log(f"Merged model saved to {dest}")
+        model = None
+        merged = None
+        try:
+            model = deps.auto_model.from_pretrained(
+                base_id, device_map="cpu", low_cpu_mem_usage=True, revision="main"
+            )  # nosec B615: revision pinned
+            if len(tok) != model.get_input_embeddings().weight.shape[0]:
+                model.resize_token_embeddings(len(tok))
+            model = deps.peft_model.from_pretrained(model, str(checkpoint))
+            merged = model.merge_and_unload()
+            merged.save_pretrained(str(dest))
+            tok.save_pretrained(str(dest))
+            log(f"Merged model saved to {dest}")
+        finally:
+            del model, merged
+            release_cached_memory()
     elif (checkpoint / "config.json").is_file():
         shutil.copytree(checkpoint, dest, dirs_exist_ok=True)
         log(f"Copied full checkpoint to {dest}")

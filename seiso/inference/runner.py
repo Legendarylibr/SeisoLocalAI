@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import logging
 import threading
+import time
 from collections.abc import AsyncIterator, Callable, Iterator
 from pathlib import Path
 from queue import Empty
@@ -694,7 +695,17 @@ class LocalInferenceRunner:
                 if text:
                     yield StreamToken(text)
         finally:
-            thread.join(timeout=_torch_stream_timeout_s())
+            # HF generate is not cooperatively cancellable. Wait for the
+            # worker to finish so pool unload cannot free the model under it.
+            deadline = time.time() + max(_torch_stream_timeout_s(), 600.0)
+            while thread.is_alive() and time.time() < deadline:
+                thread.join(timeout=0.5)
+            if thread.is_alive():
+                logger.warning(
+                    "Torch generate thread still running after cancel wait — "
+                    "deferring pool release until it exits"
+                )
+                thread.join()
         if generation_errors and not should_stop():
             raise generation_errors[0]
 

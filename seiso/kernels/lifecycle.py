@@ -23,6 +23,10 @@ def restore_kernel_patches(model: Any | None = None) -> int:
 
     Returns the number of modules restored. Call after every training run so
     patched closures never pin model graphs in memory.
+
+    When ``model`` is given, restores that id and any remaining registry entries
+    (LoRA/PeftModel wrap changes ``id(model)`` after patches were registered
+    on the base module).
     """
     restored = 0
 
@@ -34,6 +38,9 @@ def restore_kernel_patches(model: Any | None = None) -> int:
                 module.forward = module._seiso_orig_forward  # type: ignore[method-assign]
                 delattr(module, "_seiso_orig_forward")
                 restored += 1
+        # PeftModel / compile wrappers use a different id than register_patch.
+        if _PATCH_REGISTRY:
+            restored += restore_kernel_patches()
         return restored
 
     for modules in list(_PATCH_REGISTRY.values()):

@@ -157,124 +157,126 @@ class SeisoTrainer:
         if cfg.method not in (TrainMethod.LORA, TrainMethod.FULL):
             raise ValueError(f"Unsupported training method: {cfg.method.value}")
 
-        model, tokenizer = self._load_model()
-        if use_triton:
-            self._kernel_meta = apply_training_kernels(
-                model,
-                use_cuda=True,
-                use_triton=True,
-            )
-            self._kernel_meta["fused_ce"] = use_fused_ce
-            try:
-                from seiso.kernels.training_profile import last_cuda_training_profile
-
-                profile = last_cuda_training_profile()
-                if profile:
-                    self._kernel_meta["cuda_training_profile"] = profile
-            except ImportError:
-                pass
-
-        if use_triton:
-            residual_meta = apply_fused_residual_norm_kernels(model)
-            self._kernel_meta.update(residual_meta)
-
-        if cfg.method == TrainMethod.LORA:
-            model = self._apply_lora(model)
-            fused_lora_rank = min(cfg.lora_r, 64)
-            if use_fused_lora_qkv:
-                qkv_meta = apply_fused_lora_qkv_kernels(model, max_rank=fused_lora_rank)
-                self._kernel_meta.update(qkv_meta)
-            if use_fused_lora or use_fused_lora_qkv:
-                lora_meta = apply_fused_lora_kernels(
+        model = None
+        try:
+            model, tokenizer = self._load_model()
+            if use_triton:
+                self._kernel_meta = apply_training_kernels(
                     model,
-                    max_rank=fused_lora_rank,
-                    skip_qkv=use_fused_lora_qkv,
+                    use_cuda=True,
+                    use_triton=True,
                 )
-                self._kernel_meta.update(lora_meta)
-        elif cfg.method == TrainMethod.FULL and cfg.quant in (
-            QuantMode.INT4,
-            QuantMode.INT8,
-        ):
-            logger.warning(
-                "Full fine-tune with quantization — consider LoRA for memory efficiency"
+                self._kernel_meta["fused_ce"] = use_fused_ce
+                try:
+                    from seiso.kernels.training_profile import last_cuda_training_profile
+
+                    profile = last_cuda_training_profile()
+                    if profile:
+                        self._kernel_meta["cuda_training_profile"] = profile
+                except ImportError:
+                    pass
+
+            if use_triton:
+                residual_meta = apply_fused_residual_norm_kernels(model)
+                self._kernel_meta.update(residual_meta)
+
+            if cfg.method == TrainMethod.LORA:
+                model = self._apply_lora(model)
+                fused_lora_rank = min(cfg.lora_r, 64)
+                if use_fused_lora_qkv:
+                    qkv_meta = apply_fused_lora_qkv_kernels(model, max_rank=fused_lora_rank)
+                    self._kernel_meta.update(qkv_meta)
+                if use_fused_lora or use_fused_lora_qkv:
+                    lora_meta = apply_fused_lora_kernels(
+                        model,
+                        max_rank=fused_lora_rank,
+                        skip_qkv=use_fused_lora_qkv,
+                    )
+                    self._kernel_meta.update(lora_meta)
+            elif cfg.method == TrainMethod.FULL and cfg.quant in (
+                QuantMode.INT4,
+                QuantMode.INT8,
+            ):
+                logger.warning(
+                    "Full fine-tune with quantization — consider LoRA for memory efficiency"
+                )
+
+            SeisoModel.for_training(model)
+
+            from seiso.training.torch_dynamo import apply_compile_checkpoint_workarounds
+
+            model = apply_compile_checkpoint_workarounds(
+                model,
+                torch_compile=cfg.torch_compile,
+                gradient_checkpointing=cfg.gradient_checkpointing,
+            )
+            if self._loaded:
+                self._loaded.model = model
+
+            prepared = self._prepare_datasets(tokenizer)
+
+            from seiso.training.metrics import build_metrics_callback
+
+            emit_stdout = multi_gpu or bool(os.environ.get("SEISO_EMIT_METRICS_STDOUT"))
+            metrics_cb = build_metrics_callback(
+                cfg.output_dir,
+                on_metric=self._on_metric,
+                emit_stdout=emit_stdout,
+            )
+            self._metrics_callback = metrics_cb
+
+            trainer_callbacks = self._build_callbacks(
+                metrics_cb, eval_enabled=prepared.eval_ds is not None
             )
 
-        SeisoModel.for_training(model)
-
-        from seiso.training.torch_dynamo import apply_compile_checkpoint_workarounds
-
-        model = apply_compile_checkpoint_workarounds(
-            model,
-            torch_compile=cfg.torch_compile,
-            gradient_checkpointing=cfg.gradient_checkpointing,
-        )
-        if self._loaded:
-            self._loaded.model = model
-
-        prepared = self._prepare_datasets(tokenizer)
-
-        from seiso.training.metrics import build_metrics_callback
-
-        emit_stdout = multi_gpu or bool(os.environ.get("SEISO_EMIT_METRICS_STDOUT"))
-        metrics_cb = build_metrics_callback(
-            cfg.output_dir,
-            on_metric=self._on_metric,
-            emit_stdout=emit_stdout,
-        )
-        self._metrics_callback = metrics_cb
-
-        trainer_callbacks = self._build_callbacks(
-            metrics_cb, eval_enabled=prepared.eval_ds is not None
-        )
-
-        trainer = self._build_trainer(
-            model,
-            tokenizer,
-            prepared.train_ds,
-            prepared.eval_ds,
-            layout,
-            multi_gpu,
-            data_collator=prepared.data_collator,
-            dataset_text_field=prepared.dataset_text_field,
-            dataset_format=prepared.detected_format,
-            callbacks=trainer_callbacks,
-        )
-
-        if cfg.resume_from:
-            self._train_with_oom_recovery(
-                trainer, resume_from_checkpoint=str(cfg.resume_from)
+            trainer = self._build_trainer(
+                model,
+                tokenizer,
+                prepared.train_ds,
+                prepared.eval_ds,
+                layout,
+                multi_gpu,
+                data_collator=prepared.data_collator,
+                dataset_text_field=prepared.dataset_text_field,
+                dataset_format=prepared.detected_format,
+                callbacks=trainer_callbacks,
             )
-        else:
-            self._train_with_oom_recovery(trainer)
 
-        is_main = int(os.environ.get("LOCAL_RANK", os.environ.get("RANK", "0"))) == 0
-        if not is_main:
+            if cfg.resume_from:
+                self._train_with_oom_recovery(
+                    trainer, resume_from_checkpoint=str(cfg.resume_from)
+                )
+            else:
+                self._train_with_oom_recovery(trainer)
+
+            is_main = int(os.environ.get("LOCAL_RANK", os.environ.get("RANK", "0"))) == 0
+            if not is_main:
+                logger.info("Non-main rank finished training (no checkpoint write)")
+                return cfg.output_dir
+
+            out = (
+                cfg.output_dir
+                / f"checkpoint-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}"
+            )
+            trainer.save_model(str(out))
+            tokenizer.save_pretrained(str(out))
+            if cfg.method == TrainMethod.LORA:
+                self._patch_adapter_metadata(out)
+            self._write_manifest(
+                out,
+                layout,
+                multi_gpu,
+                distributed_plan.strategy,
+                prepared.detected_format.value,
+                preprocess_stats=prepared.preprocess_stats,
+                train_samples=len(prepared.train_ds),
+                eval_samples=len(prepared.eval_ds) if prepared.eval_ds is not None else 0,
+            )
+            logger.info("Training complete: %s", out)
+            return out
+        finally:
             release_training_memory(model)
-            logger.info("Non-main rank finished training (no checkpoint write)")
-            return cfg.output_dir
-
-        out = (
-            cfg.output_dir
-            / f"checkpoint-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}"
-        )
-        trainer.save_model(str(out))
-        tokenizer.save_pretrained(str(out))
-        if cfg.method == TrainMethod.LORA:
-            self._patch_adapter_metadata(out)
-        self._write_manifest(
-            out,
-            layout,
-            multi_gpu,
-            distributed_plan.strategy,
-            prepared.detected_format.value,
-            preprocess_stats=prepared.preprocess_stats,
-            train_samples=len(prepared.train_ds),
-            eval_samples=len(prepared.eval_ds) if prepared.eval_ds is not None else 0,
-        )
-        release_training_memory(model)
-        self._cleanup_gpu(None)
-        logger.info("Training complete: %s", out)
-        return out
+            self._cleanup_gpu(None)
 
     def _prepare_datasets(self, tokenizer) -> PreparedTrainingDatasets:
         cfg = self.config

@@ -11,5 +11,5 @@ def assert_job_owner(orchestrator: Orchestrator, job_id: str, user_id: str) -> N
     job = orchestrator.get_job(job_id)
     if not job:
         raise HTTPException(404, "Job not found")
-    if job.user_id and job.user_id != user_id:
+    if not job.user_id or job.user_id != user_id:
         raise HTTPException(403, "Not authorized for this job")

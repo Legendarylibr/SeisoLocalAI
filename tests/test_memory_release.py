@@ -16,9 +16,10 @@ def test_release_inference_memory_unloads_active(monkeypatch):
         def status(self):
             return {"active_model": "model-a", "path": "/tmp/a.gguf"}
 
-        def cancel_and_unload(self):
+        def prepare_for_load(self, target_path=None, backend=None):
             calls.append("unload")
             self.active_key = None
+            return True
 
     fake = FakePool()
     monkeypatch.setattr(

@@ -38,6 +38,16 @@ def test_resolve_compute_dtype_prefers_bf16_on_cuda():
     assert use_fp16 is False
 
 
+def test_resolve_compute_dtype_uses_fp16_without_bf16():
+    use_bf16, use_fp16 = resolve_compute_dtype(
+        cuda_available=True,
+        bf16_supported=False,
+        quant="4bit",
+    )
+    assert use_bf16 is False
+    assert use_fp16 is True
+
+
 def test_sft_modern_kwargs_chat_assistant_only():
     cfg = TrainConfig.model_validate(
         {

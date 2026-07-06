@@ -1019,7 +1019,7 @@ def _gguf_has_mmproj_sibling(model_path: str | Path) -> bool:
     path = Path(model_path)
     if not path.is_file():
         return False
-    return any(path.parent.glob("mmproj*.gguf"))
+    return any("mmproj" in item.name.lower() for item in path.parent.glob("*.gguf"))
 
 
 def _estimate_prompt_tokens(messages: list[dict[str, Any]]) -> int:

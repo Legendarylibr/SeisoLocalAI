@@ -295,8 +295,8 @@ async def chat_completions(
             if job and job.status.value == "failed":
                 yield f"data: {json.dumps({'error': job.error or 'Inference failed'})}\n\n"
             elif content:
-                content = _sanitize_openai_content(
-                    content, tools_enabled=bool(body.tools)
+                content = sanitize_llm_output(
+                    content, strip_tool_calls=bool(body.tools)
                 )
                 chunk = {
                     "id": completion_id,
@@ -320,8 +320,8 @@ async def chat_completions(
     if not job or job.status.value == "failed":
         raise HTTPException(500, job.error if job else "Inference failed")
 
-    content = _sanitize_openai_content(
-        job.result.get("content", ""), tools_enabled=bool(body.tools)
+    content = sanitize_llm_output(
+        job.result.get("content", ""), strip_tool_calls=bool(body.tools)
     )
     prompt_tokens = _prompt_token_estimate(body.messages)
     completion_tokens = _estimate_token_count(content)

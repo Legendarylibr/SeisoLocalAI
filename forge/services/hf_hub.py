@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import time
 import urllib.error
 import urllib.parse
@@ -143,6 +144,45 @@ def _pick_mmproj_file(
         if matched:
             return sorted(matched)[0]
     return mmprojs[0]
+
+
+def _complete_shard_group_for(files: list[str], filename: str) -> list[str]:
+    """Return the full shard group for an explicit GGUF, or raise if incomplete."""
+    name = Path(filename).name
+    match = _GGUF_SHARD_RE.match(name)
+    if not match:
+        return [filename]
+    prefix = match.group("prefix")
+    total = match.group("total")
+    key_prefix = str(Path(filename).parent / prefix)
+    group: list[str] = []
+    indices: set[int] = set()
+    for item in files:
+        item_name = Path(item).name
+        item_match = _GGUF_SHARD_RE.match(item_name)
+        if not item_match:
+            continue
+        item_key = (
+            str(Path(item).parent / item_match.group("prefix")),
+            item_match.group("total"),
+        )
+        if item_key != (key_prefix, total):
+            continue
+        group.append(item)
+        try:
+            indices.add(int(item_match.group("index")))
+        except ValueError:
+            continue
+    try:
+        expected = int(total)
+    except ValueError as exc:
+        raise ValueError(f"Invalid GGUF shard total in {filename}") from exc
+    if len(group) != expected or indices != set(range(1, expected + 1)):
+        raise ValueError(
+            f"Incomplete GGUF shard group for {filename} "
+            f"(found {len(group)}/{expected} shards)"
+        )
+    return sorted(group)
 
 
 def _pick_gguf_files(
@@ -470,7 +510,8 @@ def resolve_gguf_artifact(
             raise ValueError(f"No GGUF files found in {gguf_repo}")
         filename = filenames[0]
     else:
-        filenames = [filename]
+        filenames = _complete_shard_group_for(files, filename)
+        filename = filenames[0]
 
     size_bytes = sum(
         get_gguf_file_size_bytes(gguf_repo, item, token=token, revision=revision)
@@ -730,6 +771,6 @@ def link_inventory(inventory_dir: Path, inventory_name: str, target: Path) -> Pa
     if link.is_symlink() or link.is_file():
         link.unlink()
     elif link.exists() and link.is_dir():
-        return link
+        shutil.rmtree(link)
     link.symlink_to(target, target_is_directory=target.is_dir())
     return link

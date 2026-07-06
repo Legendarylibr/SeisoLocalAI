@@ -65,12 +65,14 @@ def release_inference_memory(*, reason: str, log: LogFn = None) -> dict[str, Any
             log(msg)
         else:
             logger.info(msg)
-        pool.cancel_and_unload()
+        # Wait for in-flight inference so VRAM is actually freed before GPU tasks.
+        pool.prepare_for_load()
 
+    unloaded = pool.active_key is None and had_active
     release_cached_memory(sync=had_active)
     _refresh_hardware_profile()
     return {
-        "unloaded_inference": had_active,
+        "unloaded_inference": unloaded,
         "previous_model": status_before.get("active_model"),
         "previous_path": status_before.get("path"),
     }
