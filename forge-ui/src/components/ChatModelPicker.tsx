@@ -118,7 +118,13 @@ export function ChatModelPicker({
               <div className="chat-model-picker-section">
                 <div className="chat-model-picker-section-title">Downloaded</div>
                 {filteredLocal.map((m) => {
-                  const blocked = modelMemoryBlocked(m, headroomMb);
+                  const incomplete = m.selectable === false || m.status === "incomplete";
+                  const blocked = incomplete || modelMemoryBlocked(m, headroomMb);
+                  const note = incomplete
+                    ? m.status_note || m.hardware_note || "Download incomplete — re-download from Hub"
+                    : blocked
+                      ? modelMemoryBlockReason(m)
+                      : undefined;
                   return (
                   <button
                     key={m.id}
@@ -127,16 +133,14 @@ export function ChatModelPicker({
                     aria-selected={m.id === selection}
                     aria-disabled={blocked}
                     disabled={blocked}
-                    className={`chat-model-picker-option${m.id === selection ? " active" : ""}${blocked ? " blocked" : ""}`}
-                    title={blocked ? modelMemoryBlockReason(m) : undefined}
+                    className={`chat-model-picker-option${m.id === selection ? " active" : ""}${blocked ? " blocked" : ""}${incomplete ? " incomplete" : ""}`}
+                    title={note}
                     onClick={() => !blocked && pickLocal(m.id)}
                   >
                     <span className="chat-model-picker-option-name">{modelLabel(m)}</span>
-                    {m.source_label && (
-                      <span className="chat-model-picker-option-meta">
-                        {blocked ? modelMemoryBlockReason(m) : m.source_label}
-                      </span>
-                    )}
+                    <span className="chat-model-picker-option-meta">
+                      {note || m.source_label}
+                    </span>
                   </button>
                   );
                 })}

@@ -410,7 +410,7 @@ def test_native_linux_unsafe_flash_attn_opt_in(monkeypatch):
     assert kwargs["flash_attn"] is True
 
 
-def test_native_linux_flash_attn_env_alone_is_ignored_without_unsafe(monkeypatch):
+def test_native_linux_flash_attn_defaults_off_dense_opt_in(monkeypatch, tmp_path):
     for key in list(os.environ):
         if key.startswith("SEISO_LLAMA_"):
             monkeypatch.delenv(key, raising=False)
@@ -422,10 +422,19 @@ def test_native_linux_flash_attn_env_alone_is_ignored_without_unsafe(monkeypatch
     monkeypatch.setattr(
         "seiso.inference.model_pool._native_linux_nvidia", lambda: True
     )
-    monkeypatch.setenv("SEISO_LLAMA_FLASH_ATTN", "true")
+    monkeypatch.setattr(
+        "seiso.inference.model_pool._llama_skip_partial_offload", lambda _p: False
+    )
 
+    # Conservative default: flash_attn stays off on Linux NVIDIA.
+    monkeypatch.setenv("SEISO_LLAMA_FLASH_ATTN", "false")
     kwargs = llama_load_kwargs(4096, model_path="/tmp/model.gguf")
     assert "flash_attn" not in kwargs
+
+    # Dense families may opt in via SEISO_LLAMA_FLASH_ATTN without UNSAFE.
+    monkeypatch.setenv("SEISO_LLAMA_FLASH_ATTN", "true")
+    kwargs = llama_load_kwargs(4096, model_path="/tmp/model.gguf")
+    assert kwargs.get("flash_attn") is True
 
 
 def test_llama_gpu_offload_ok_retries_after_import_failure(monkeypatch):

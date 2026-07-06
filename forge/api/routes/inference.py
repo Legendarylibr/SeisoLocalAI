@@ -20,9 +20,8 @@ from forge.services.chat_messages import build_trusted_messages
 from forge.services.download_progress import estimate_load_eta_seconds
 from forge.services.hardware import hardware_profile
 from forge.services.inference_chat import (
+    prepare_local_chat_target,
     resolve_draft_model,
-    resolve_explicit_model_path,
-    resolve_inventory_model_path,
     resolve_preload_context,
 )
 from forge.services.inference_models import get_inference_option, list_inference_options
@@ -245,11 +244,23 @@ async def get_chat_context(
     model_format: str | None = None
     model_name: str | None = None
     if model_id:
-        selected = await get_inference_option(db, user_id, model_id)
-        if selected:
-            model_path = selected.get("path")
-            model_format = selected.get("format")
-            model_name = selected.get("name")
+        target = await prepare_local_chat_target(
+            db,
+            user_id,
+            settings,
+            model_id=model_id,
+            model_router_enabled=settings.model_router_enabled,
+            check_memory=False,
+            sanitize=False,
+        )
+        if target.get("use_model_router"):
+            model_path = None
+            model_format = None
+            model_name = "Smart Router"
+        else:
+            model_path = target.get("model_path")
+            model_format = target.get("model_format")
+            model_name = target.get("model_name")
 
     knowledge_context: str | None = None
     if knowledge_base_id:
@@ -491,35 +502,33 @@ async def chat(
     if not body.provider_id:
         if body.model_id != ROUTER_MODEL_ID:
             _assert_inference_gpu_available()
-        if body.model_path and body.model_id:
-            raise HTTPException(403, "Provide model_id or model_path, not both")
-        if body.model_path:
-            payload.update(
-                await resolve_explicit_model_path(
-                    db,
-                    user_id,
-                    settings,
-                    model_path=body.model_path,
-                    inference_backend=body.inference_backend,
-                )
-            )
-        elif body.model_id:
-            model_updates = await resolve_inventory_model_path(
-                db,
-                user_id,
-                settings,
-                model_id=body.model_id,
-                model_path=body.model_path,
-                inference_backend=body.inference_backend,
-                model_router_enabled=settings.model_router_enabled,
-            )
-            payload.update(model_updates)
-            if model_updates.get("use_model_router"):
-                payload["router_model"] = body.router_model
-        else:
-            raise HTTPException(
-                400, "Select a model from inventory or provide model_path"
-            )
+        model_updates = await prepare_local_chat_target(
+            db,
+            user_id,
+            settings,
+            model_id=body.model_id,
+            model_path=body.model_path,
+            inference_backend=body.inference_backend,
+            model_router_enabled=settings.model_router_enabled,
+            max_tokens=body.max_tokens,
+            n_ctx=body.n_ctx,
+            messages=trusted_messages,
+            check_memory=True,
+            sanitize=True,
+        )
+        # Runner also sanitizes; keep n_ctx/max_tokens aligned with preload.
+        for key in (
+            "model_path",
+            "inference_backend",
+            "model_format",
+            "use_model_router",
+            "max_tokens",
+            "n_ctx",
+        ):
+            if key in model_updates and model_updates[key] is not None:
+                payload[key] = model_updates[key]
+        if model_updates.get("use_model_router"):
+            payload["router_model"] = body.router_model
 
     if body.draft_model_id or body.draft_model_path:
         if body.provider_id:
@@ -533,6 +542,7 @@ async def chat(
                 settings,
                 draft_model_id=body.draft_model_id,
                 draft_model_path=body.draft_model_path,
+                target_model_path=payload.get("model_path"),
             )
         )
 

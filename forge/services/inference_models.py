@@ -100,6 +100,61 @@ def _inventory_artifact_is_complete(
     )
 
 
+def _enrich_model_runtime_meta(
+    opt: dict[str, Any],
+    *,
+    metadata: dict[str, Any],
+) -> None:
+    """Attach context/architecture fields once so callers need not re-read GGUF/HF."""
+    model_path = opt.get("path")
+    model_format = opt.get("format")
+    model_name = opt.get("name")
+    cached_ceiling = metadata.get("context_ceiling")
+    if isinstance(cached_ceiling, int) and cached_ceiling >= 2048:
+        opt["context_ceiling"] = cached_ceiling
+    else:
+        try:
+            from seiso.inference.context_limits import effective_context_ceiling
+
+            opt["context_ceiling"] = effective_context_ceiling(
+                model_path,
+                model_format=model_format,
+                model_name=model_name,
+            )
+        except Exception:
+            opt["context_ceiling"] = 8192
+
+    if (model_format or "").lower() == "gguf" and model_path:
+        try:
+            from seiso.inference.backends import (
+                gguf_architecture,
+                gguf_is_moe,
+                gguf_uses_sliding_window_attention,
+            )
+
+            opt["architecture"] = metadata.get("architecture") or gguf_architecture(
+                model_path
+            )
+            opt["is_moe"] = (
+                bool(metadata["is_moe"])
+                if "is_moe" in metadata
+                else gguf_is_moe(model_path)
+            )
+            opt["uses_swa"] = (
+                bool(metadata["uses_swa"])
+                if "uses_swa" in metadata
+                else gguf_uses_sliding_window_attention(model_path)
+            )
+        except Exception:
+            opt.setdefault("architecture", metadata.get("architecture"))
+            opt.setdefault("is_moe", False)
+            opt.setdefault("uses_swa", False)
+    else:
+        opt.setdefault("architecture", metadata.get("architecture"))
+        opt.setdefault("is_moe", False)
+        opt.setdefault("uses_swa", False)
+
+
 def _build_local_option(
     row: dict[str, Any],
     *,
@@ -107,10 +162,43 @@ def _build_local_option(
     profile: dict[str, Any] | None,
 ) -> dict[str, Any] | None:
     metadata = json.loads(row.get("metadata_json") or "{}")
-    if not _inventory_artifact_is_complete(row, metadata):
-        return None
+    complete = _inventory_artifact_is_complete(row, metadata)
     model_format = row.get("format")
     is_gguf = (model_format or "").lower() == "gguf"
+    if not complete:
+        opt: dict[str, Any] = {
+            "id": row["id"],
+            "kind": "local",
+            "name": row["name"],
+            "source": row.get("source") or "manual",
+            "source_label": _source_label(row.get("source")),
+            "format": model_format,
+            "path": row.get("path"),
+            "default_backend": "",
+            "backends": [],
+            "backend_labels": {},
+            "size_bytes": row.get("size_bytes", 0),
+            "metadata": metadata,
+            "selectable": False,
+            "status": "incomplete",
+            "status_note": "Download incomplete — re-download from Hub to chat with this model.",
+            "hardware_note": "Download incomplete — re-download from Hub to chat with this model.",
+            "hardware_fit": "unlikely",
+            "hardware_fit_label": "Incomplete",
+            "hardware_fit_rank": -1,
+            "memory_load_blocked": True,
+            "memory_load_blocked_reason": "Download incomplete — re-download from Hub.",
+        }
+        from forge.services.inference_variants import extract_quant_label, variant_group_key
+
+        opt["quant_label"] = extract_quant_label(
+            name=row["name"],
+            path=row.get("path") or "",
+            metadata=metadata,
+        )
+        opt["variant_group"] = variant_group_key(opt)
+        return opt
+
     candidate_backends = (
         [BACKEND_LLAMASWAP, BACKEND_LLAMACPP]
         if is_gguf
@@ -123,7 +211,7 @@ def _build_local_option(
         candidate_backends,
         installed,
     )
-    opt: dict[str, Any] = {
+    opt = {
         "id": row["id"],
         "kind": "local",
         "name": row["name"],
@@ -136,6 +224,8 @@ def _build_local_option(
         "backend_labels": {b: BACKEND_LABELS.get(b, b) for b in backends},
         "size_bytes": row.get("size_bytes", 0),
         "metadata": metadata,
+        "selectable": True,
+        "status": "ready",
     }
     from forge.services.inference_variants import extract_quant_label, variant_group_key
 
@@ -145,6 +235,7 @@ def _build_local_option(
         metadata=metadata,
     )
     opt["variant_group"] = variant_group_key(opt)
+    _enrich_model_runtime_meta(opt, metadata=metadata)
     if not backends and (row.get("format") or "").lower() == "gguf":
         runtime = check_inference_runtime()
         opt["install_hints"] = [
@@ -221,6 +312,8 @@ async def list_inference_options(
                 "backend_labels": {BACKEND_ROUTER: BACKEND_LABELS[BACKEND_ROUTER]},
                 "size_bytes": 0,
                 "metadata": {"description": "External local router service"},
+                "selectable": True,
+                "status": "ready",
                 "hardware_fit": "ideal",
                 "hardware_fit_label": "Managed routing",
                 "hardware_fit_rank": 100,
@@ -287,11 +380,7 @@ def resolve_chat_target(
         }
 
     if model_id:
-        return {
-            "model_id": model_id,
-            "model_path": None,
-            "inference_backend": backend,
-        }
+        raise ValueError("Model not found in inventory")
     raise ValueError("Select a model")
 
 

@@ -128,11 +128,11 @@ def _llama_gpu_offload_ok() -> bool:
 
 
 def _native_linux_nvidia() -> bool:
-    """Bare-metal Linux with discrete NVIDIA — inference uses llama.cpp GGUF."""
+    """Linux NVIDIA inference guards — bare metal, or WSL when acknowledged."""
     try:
-        from seiso.platform import is_native_linux_nvidia
+        from seiso.platform import use_linux_nvidia_inference_guards
 
-        return is_native_linux_nvidia()
+        return use_linux_nvidia_inference_guards()
     except ImportError:
         return False
 
@@ -166,13 +166,21 @@ def _llama_speed_scale_enabled() -> bool:
     return env_bool("SEISO_LLAMA_SPEED_SCALE", default)
 
 
-def _default_llama_flash_attn() -> bool:
-    # flash_attn can segfault llama.cpp on some native Linux CUDA/model combos.
-    if _native_linux_nvidia() and not env_bool(
-        "SEISO_LLAMA_UNSAFE_FLASH_ATTN", False
-    ):
-        return False
-    return env_bool("SEISO_LLAMA_FLASH_ATTN", True)
+def _default_llama_flash_attn(model_path: str | None = None) -> bool:
+    """Family-aware flash_attn policy on Linux NVIDIA; defaults stay conservative.
+
+    Dense families may opt in via ``SEISO_LLAMA_FLASH_ATTN=true``.
+    MoE / SWA still require ``SEISO_LLAMA_UNSAFE_FLASH_ATTN=1``.
+    """
+    if not _native_linux_nvidia():
+        return env_bool("SEISO_LLAMA_FLASH_ATTN", True)
+    unsafe = env_bool("SEISO_LLAMA_UNSAFE_FLASH_ATTN", False)
+    if model_path and _llama_skip_partial_offload(model_path):
+        return unsafe
+    if unsafe:
+        return True
+    # Default false on native Linux (platform_profile setdefault); dense may opt in.
+    return env_bool("SEISO_LLAMA_FLASH_ATTN", False)
 
 
 def _llama_batch_defaults() -> tuple[int, int]:
@@ -368,31 +376,31 @@ def _llama_speed_extras(model_path: str) -> dict[str, Any]:
 
 
 def _llama_kv_quant_options(model_path: str) -> list[dict[str, Any]]:
-    """KV-cache quant tiers to try after the unquantized cache fails."""
-    if not env_bool("SEISO_LLAMA_KV_QUANT", True):
-        return [{}]
-    if _native_linux_nvidia() and not env_bool("SEISO_LLAMA_UNSAFE_KV_QUANT", False):
-        return [{}]
+    """KV-cache quant tiers to try after the unquantized cache fails.
+
+    Linux NVIDIA defaults stay conservative (no KV quant). Dense families may
+    opt into tier-1 Q8_0 via ``SEISO_LLAMA_KV_QUANT=true``; Q4_K and MoE/SWA
+    still require ``SEISO_LLAMA_UNSAFE_KV_QUANT=1``.
+    """
     try:
         from llama_cpp import llama_cpp as lc
-
     except (ImportError, Exception):
         return [{}]
 
     options: list[dict[str, Any]] = [{}]
-    _ = model_path
-    options.append(
-        {
-            "type_k": lc.GGML_TYPE_Q8_0,
-            "type_v": lc.GGML_TYPE_Q8_0,
-        }
-    )
-    options.append(
-        {
-            "type_k": lc.GGML_TYPE_Q4_K,
-            "type_v": lc.GGML_TYPE_Q4_K,
-        }
-    )
+    q8 = {"type_k": lc.GGML_TYPE_Q8_0, "type_v": lc.GGML_TYPE_Q8_0}
+    q4 = {"type_k": lc.GGML_TYPE_Q4_K, "type_v": lc.GGML_TYPE_Q4_K}
+
+    if _native_linux_nvidia():
+        unsafe = env_bool("SEISO_LLAMA_UNSAFE_KV_QUANT", False)
+        if _llama_skip_partial_offload(model_path) and not unsafe:
+            return [{}]
+        if unsafe:
+            options.extend((q8, q4))
+        elif env_bool("SEISO_LLAMA_KV_QUANT", False):
+            options.append(q8)
+    elif env_bool("SEISO_LLAMA_KV_QUANT", True):
+        options.extend((q8, q4))
 
     unique: list[dict[str, Any]] = []
     seen: set[tuple[tuple[str, Any], ...]] = set()
@@ -509,7 +517,7 @@ def llama_load_kwargs(n_ctx: int, *, model_path: str | None = None) -> dict[str,
     }
     if n_gpu_layers != 0:
         kwargs["op_offload"] = env_bool("SEISO_LLAMA_OP_OFFLOAD", True)
-    if n_gpu_layers != 0 and _default_llama_flash_attn():
+    if n_gpu_layers != 0 and _default_llama_flash_attn(model_path):
         kwargs["flash_attn"] = True
     if model_path:
         kwargs["_model_path"] = model_path

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -137,18 +138,76 @@ def test_dense_families_allow_partial_offload_on_linux(
     assert _llama_skip_partial_offload(str(gguf)) is False
 
 
-def test_native_linux_flash_attn_disabled_for_all_families(monkeypatch, tmp_path: Path):
+def test_native_linux_flash_attn_family_policy(monkeypatch, tmp_path: Path):
     import seiso.inference.model_pool as mp
+    from seiso.inference.backends import clear_gguf_caches
 
-    for arch in ("llama", "qwen2", "gemma3", "deepseek2"):
-        monkeypatch.delenv("SEISO_LLAMA_UNSAFE_FLASH_ATTN", raising=False)
-        monkeypatch.setenv("SEISO_LLAMA_FLASH_ATTN", "true")
-        monkeypatch.setattr(mp, "_native_linux_nvidia", lambda: True)
-        monkeypatch.setattr(mp, "_llama_gpu_offload_ok", lambda: True)
-        gguf = tmp_path / f"{arch}.gguf"
+    clear_gguf_caches()
+    monkeypatch.setattr(mp, "_native_linux_nvidia", lambda: True)
+    monkeypatch.setattr(mp, "_llama_gpu_offload_ok", lambda: True)
+    monkeypatch.setattr(
+        "seiso.platform.use_linux_nvidia_inference_guards", lambda **_: True
+    )
+    for key in list(os.environ):
+        if key.startswith("SEISO_LLAMA_"):
+            monkeypatch.delenv(key, raising=False)
+    monkeypatch.delenv("SEISO_LLAMA_UNSAFE_FLASH_ATTN", raising=False)
+
+    # Default remains off even for dense families.
+    monkeypatch.setenv("SEISO_LLAMA_FLASH_ATTN", "false")
+    dense = tmp_path / "llama.gguf"
+    _write_arch_gguf(dense, "llama")
+    assert "flash_attn" not in llama_load_kwargs(4096, model_path=str(dense))
+
+    # Dense may opt in via SEISO_LLAMA_FLASH_ATTN=true.
+    monkeypatch.setenv("SEISO_LLAMA_FLASH_ATTN", "true")
+    for arch in ("llama", "qwen2", "qwen3", "mistral"):
+        gguf = tmp_path / f"{arch}-optin.gguf"
         _write_arch_gguf(gguf, arch)
+        clear_gguf_caches()
+        kwargs = llama_load_kwargs(4096, model_path=str(gguf))
+        assert kwargs.get("flash_attn") is True, arch
+
+    # MoE / SWA stay blocked without UNSAFE.
+    for arch, extra in (
+        ("gemma3", [(b"gemma3.attention.sliding_window", 512)]),
+        ("deepseek2", [(b"deepseek2.expert_count", 8)]),
+    ):
+        gguf = tmp_path / f"{arch}-blocked.gguf"
+        _write_arch_gguf(gguf, arch, extra=extra)
+        clear_gguf_caches()
         kwargs = llama_load_kwargs(4096, model_path=str(gguf))
         assert "flash_attn" not in kwargs, arch
+
+
+def test_native_linux_kv_quant_dense_opt_in(monkeypatch, tmp_path: Path):
+    import types
+    import sys
+
+    import seiso.inference.model_pool as mp
+
+    fake_lc = types.SimpleNamespace(GGML_TYPE_Q8_0=8, GGML_TYPE_Q4_K=4)
+    fake_mod = types.ModuleType("llama_cpp")
+    fake_mod.llama_cpp = fake_lc
+    monkeypatch.setitem(sys.modules, "llama_cpp", fake_mod)
+
+    monkeypatch.setattr(mp, "_native_linux_nvidia", lambda: True)
+    monkeypatch.delenv("SEISO_LLAMA_UNSAFE_KV_QUANT", raising=False)
+    monkeypatch.setenv("SEISO_LLAMA_KV_QUANT", "false")
+    llama = tmp_path / "llama.gguf"
+    _write_arch_gguf(llama, "llama")
+    assert mp._llama_kv_quant_options(str(llama)) == [{}]
+
+    monkeypatch.setenv("SEISO_LLAMA_KV_QUANT", "true")
+    opts = mp._llama_kv_quant_options(str(llama))
+    assert len(opts) == 2  # default + Q8
+    assert opts[1]["type_k"] == 8
+
+    gemma = tmp_path / "gemma3.gguf"
+    _write_arch_gguf(
+        gemma, "gemma3", extra=[(b"gemma3.attention.sliding_window", 512)]
+    )
+    assert mp._llama_kv_quant_options(str(gemma)) == [{}]
 
 
 def test_dense_qwen_allows_partial_while_swa_gemma_falls_back_to_cpu(

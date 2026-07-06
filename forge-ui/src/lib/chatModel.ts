@@ -4,6 +4,7 @@ import { bindAbort, throwIfAborted } from "@/lib/abort";
 import { inventoryHasRepo, inventoryMatchesRepo, streamHubModelDownload, ModelProgressHandler } from "@/lib/hubDownload";
 import { readStoredModel, writeStoredModel } from "@/lib/modelSelection";
 import { progressFromPreloadEvent } from "@/lib/modelProgress";
+import { readStoredContextWindowForModel } from "@/lib/chatContext";
 
 export const CHAT_MODEL_STORAGE_KEY = "chat";
 export const CHAT_BACKEND_STORAGE_KEY = "chat-backend";
@@ -16,12 +17,18 @@ type MemoryFitModel = {
   hardware_fit?: string;
 };
 
-/** True when a model's estimated runtime memory clearly exceeds free VRAM/RAM headroom. */
+type SelectableModel = MemoryFitModel & {
+  selectable?: boolean;
+  status?: string;
+};
+
+/** True when a model cannot be loaded for chat (memory, incomplete download, etc.). */
 export function modelMemoryBlocked(
-  model: MemoryFitModel | null | undefined,
+  model: SelectableModel | null | undefined,
   headroomMb?: number,
 ): boolean {
   if (!model) return false;
+  if (model.selectable === false || model.status === "incomplete") return true;
   if (model.memory_load_blocked && model.hardware_fit === "unlikely") return true;
   if (headroomMb && model.est_vram_mb) return model.est_vram_mb > headroomMb * 1.12;
   return false;
@@ -44,6 +51,8 @@ type BootstrapOptions = {
   initialModels?: InferenceModelOption[];
   hwProfile?: HardwareProfile | null;
   signal?: AbortSignal;
+  maxTokens?: number;
+  nCtx?: number | null;
 };
 
 export function chatPath(target: ChatNavTarget = {}): string {
@@ -91,18 +100,25 @@ export function resolveInferenceBackend(
   return available[0];
 }
 
+function isSelectableChatModel(model: InferenceModelOption | undefined): boolean {
+  if (!model) return false;
+  if (model.selectable === false || model.status === "incomplete") return false;
+  return true;
+}
+
 export function pickInferenceModel(
   list: InferenceModelOption[],
   target: ChatNavTarget = {},
   storedId?: string | null,
 ): string {
+  const ready = list.filter(isSelectableChatModel);
   return (
-    (target.modelId && list.find((m) => m.id === target.modelId)?.id) ||
-    (target.repo && list.find((m) => inventoryMatchesRepo(m, target.repo!))?.id) ||
-    (storedId && list.find((m) => m.id === storedId)?.id) ||
-    list.find((m) => !modelMemoryBlocked(m) && (m.hardware_fit === "ideal" || m.hardware_fit === "good"))?.id ||
-    list.find((m) => !modelMemoryBlocked(m))?.id ||
-    (list.length ? list[0].id : "")
+    (target.modelId && ready.find((m) => m.id === target.modelId)?.id) ||
+    (target.repo && ready.find((m) => inventoryMatchesRepo(m, target.repo!))?.id) ||
+    (storedId && ready.find((m) => m.id === storedId)?.id) ||
+    ready.find((m) => !modelMemoryBlocked(m) && (m.hardware_fit === "ideal" || m.hardware_fit === "good"))?.id ||
+    ready.find((m) => !modelMemoryBlocked(m))?.id ||
+    (ready.length ? ready[0].id : "")
   );
 }
 
@@ -151,11 +167,17 @@ export async function ensureHubChatModel(
   return downloadChatModel(repo, onProgress, { signal, downloadBytes });
 }
 
+export type PreloadInferenceOptions = {
+  maxTokens?: number;
+  nCtx?: number | null;
+};
+
 export function preloadWithProgress(
   modelId: string,
   backend: string,
   onProgress?: ModelProgressHandler,
   signal?: AbortSignal,
+  inference?: PreloadInferenceOptions,
 ): Promise<string> {
   throwIfAborted(signal);
   return new Promise((resolve, reject) => {
@@ -173,6 +195,10 @@ export function preloadWithProgress(
           onProgress?.(null);
           reject(new Error(msg));
         },
+      },
+      {
+        max_tokens: inference?.maxTokens,
+        n_ctx: inference?.nCtx,
       },
     );
     bindAbort(signal, abort, promise).catch((err) => {
@@ -261,7 +287,20 @@ export async function bootstrapChatSession(
     selected.kind !== "router" &&
     !options.providerActive
   ) {
-    loadedBackend = await preloadWithProgress(selectedId, backend, options.onProgress, options.signal);
+    let nCtx = options.nCtx;
+    if (nCtx === undefined) {
+      const ceiling =
+        typeof selected.context_ceiling === "number" ? selected.context_ceiling : 131072;
+      const stored = readStoredContextWindowForModel(selectedId, ceiling);
+      nCtx = stored === "auto" ? null : stored;
+    }
+    loadedBackend = await preloadWithProgress(
+      selectedId,
+      backend,
+      options.onProgress,
+      options.signal,
+      { maxTokens: options.maxTokens, nCtx },
+    );
     writeStoredModel(CHAT_MODEL_STORAGE_KEY, selectedId);
     writeStoredModel(CHAT_BACKEND_STORAGE_KEY, loadedBackend);
   }
