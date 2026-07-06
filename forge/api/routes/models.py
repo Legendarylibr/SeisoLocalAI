@@ -177,6 +177,8 @@ async def model_catalog(
                 profile,
                 token=hf_token,
                 diversify=False,
+                # Keep Hub relevance order for typed search; browse stays download-ranked.
+                preserve_order=bool(q.strip()),
             )
     if fits_only:
         models = [m for m in models if m.get("hardware_fit") in ("ideal", "good")]
