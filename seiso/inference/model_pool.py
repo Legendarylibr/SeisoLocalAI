@@ -567,6 +567,7 @@ def llama_load_kwargs(n_ctx: int, *, model_path: str | None = None) -> dict[str,
         kwargs["flash_attn"] = True
     if model_path:
         kwargs["_model_path"] = model_path
+        kwargs["_native_linux_nvidia"] = _native_linux_nvidia()
     return clamp_llama_load_kwargs(kwargs)
 
 
