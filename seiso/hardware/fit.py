@@ -79,10 +79,7 @@ def assess_hardware_fit(
     # and recover from real OOMs; preflight estimates should not stop an attempt.
     # Training keeps the stricter free-memory guard because it has less graceful
     # runtime fallback.
-    if mode == "chat":
-        blocked = False
-    else:
-        blocked = load_budget_mb > 0 and est_mb > load_budget_mb
+    blocked = False if mode == "chat" else load_budget_mb > 0 and est_mb > load_budget_mb
     block_reason = None
     if blocked:
         label = "Blocked — would exceed available memory"

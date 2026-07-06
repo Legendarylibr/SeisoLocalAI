@@ -8,14 +8,23 @@ from typing import Any
 
 from seiso import platform as seiso_platform
 from seiso.env import env_bool
-from seiso.hardware import hardware_profile
 from seiso.inference.backends import gguf_total_layers
-from seiso.memory.protection.constants import *  # noqa: F403
+from seiso.memory.protection._facade import protection
+from seiso.memory.protection.constants import (
+    _MAX_LLAMA_BATCH,
+    _MAX_LLAMA_CTX,
+    _MIN_LLAMA_BATCH,
+    _NATIVE_LINUX_CTX_BUCKETS,
+    _NATIVE_LINUX_PREFILL_CLAMP_MB,
+    _NATIVE_LINUX_PREFILL_HEADROOM_DROP_RATIO,
+    _NATIVE_LINUX_PREFILL_HEADROOM_SHRINK_RATIO,
+    _NATIVE_LINUX_PREFILL_RESERVE_PER_256TOK_MB,
+    _NATIVE_LINUX_TIGHT_VRAM_FIT_RATIO,
+    _TIGHT_VRAM_FIT_RATIO,
+    LlamaLoadTier,
+)
 from seiso.memory.protection.llama_batch import (
     clamp_llama_batch_pair,
-    comfortable_vram_slack_ratio,
-    discrete_gpu_total_mb,
-    gpu_batch_tier_caps,
     resolve_llama_batch_limits,
     roomy_native_linux_batch_floor,
     tight_batch_caps,
@@ -25,12 +34,9 @@ from seiso.memory.protection.llama_kv import (
     _host_os_reserve_mb,
     _llama_model_likely_resident,
     llama_batch_headroom_mb,
-    llama_kv_cache_reserve_mb,
     llama_offload_fits_headroom,
 )
-from seiso.memory.protection._facade import protection
-from seiso.memory.protection.load_fit import available_ram_mb
-from seiso.memory.protection.path_vram import estimate_path_vram_mb
+
 
 def native_linux_llama_context_cap(
     model_path: str | Path | None,

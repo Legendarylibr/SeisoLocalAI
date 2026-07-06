@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from seiso.memory.protection import (
     apply_rl_memory_guards,
     apply_training_memory_guards,

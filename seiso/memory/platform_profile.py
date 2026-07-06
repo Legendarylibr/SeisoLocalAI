@@ -243,30 +243,4 @@ def _log_platform_profile_applied(
     headroom: int,
     low: bool,
 ) -> None:
-    from seiso.agent_debug_log import agent_debug_enabled, agent_debug_log
-
-    if not agent_debug_enabled():
-        return
-    try:
-        from seiso.platform import is_native_linux_nvidia
-
-        native = is_native_linux_nvidia(profile=profile)
-    except ImportError:
-        native = False
-    agent_debug_log(
-        hypothesis_id="A",
-        location="platform_profile.py:apply_platform_memory_profile",
-        message="platform memory profile applied",
-        data={
-            "system": system,
-            "native_linux_nvidia": native,
-            "tier": tier.value,
-            "headroom_mb": headroom,
-            "low": low,
-            "SEISO_LLAMA_BATCH": os.environ.get("SEISO_LLAMA_BATCH"),
-            "SEISO_LLAMA_UBATCH": os.environ.get("SEISO_LLAMA_UBATCH"),
-            "SEISO_LLAMA_FLASH_ATTN": os.environ.get("SEISO_LLAMA_FLASH_ATTN"),
-            "SEISO_LLAMA_SPEED_SCALE": os.environ.get("SEISO_LLAMA_SPEED_SCALE"),
-            "SEISO_LLAMA_GPU_LAYERS": os.environ.get("SEISO_LLAMA_GPU_LAYERS"),
-        },
-    )
+    _ = (profile, system, tier, headroom, low)

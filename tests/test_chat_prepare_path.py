@@ -10,6 +10,21 @@ from fastapi import HTTPException
 from seiso.inference.backends import BACKEND_LLAMACPP
 
 
+class _FakeModelDb:
+    def __init__(self, row):
+        self._row = row
+
+    async def get_model(self, model_id, user_id):
+        if self._row and self._row.get("id") == model_id:
+            return self._row
+        return None
+
+    async def get_model_by_name(self, user_id, model_id):
+        if self._row and self._row.get("name") == model_id:
+            return self._row
+        return None
+
+
 @pytest.mark.asyncio
 async def test_prepare_local_chat_target_missing_model_is_404(monkeypatch):
     from forge.services import inference_chat
@@ -157,7 +172,13 @@ async def test_resolve_draft_rejects_vocab_mismatch(monkeypatch, tmp_path):
 
     with pytest.raises(HTTPException) as exc:
         await inference_chat.resolve_draft_model(
-            object(),
+            _FakeModelDb(
+                {
+                    "id": "d1",
+                    "name": "Draft",
+                    "path": str(draft),
+                }
+            ),
             "u1",
             SimpleNamespace(data_dir=tmp_path),
             draft_model_id="d1",
@@ -166,6 +187,43 @@ async def test_resolve_draft_rejects_vocab_mismatch(monkeypatch, tmp_path):
         )
     assert exc.value.status_code == 400
     assert "vocab_size" in str(exc.value.detail)
+
+
+@pytest.mark.asyncio
+async def test_resolve_draft_model_id_validates_inventory_path(monkeypatch, tmp_path):
+    from forge.services import inference_chat
+
+    sandbox = tmp_path / "sandbox"
+    sandbox.mkdir()
+    outside = tmp_path / "outside.gguf"
+    outside.write_bytes(b"gguf")
+
+    async def draft_option(*_a, **_k):
+        return {
+            "id": "d1",
+            "path": str(outside),
+            "format": "gguf",
+            "selectable": True,
+        }
+
+    monkeypatch.setattr(inference_chat, "get_inference_option", draft_option)
+
+    with pytest.raises(HTTPException) as exc:
+        await inference_chat.resolve_draft_model(
+            _FakeModelDb(
+                {
+                    "id": "d1",
+                    "name": "Draft",
+                    "path": str(outside),
+                }
+            ),
+            "u1",
+            SimpleNamespace(data_dir=sandbox),
+            draft_model_id="d1",
+            draft_model_path=None,
+        )
+
+    assert exc.value.status_code == 403
 
 
 def test_build_local_option_surfaces_incomplete(monkeypatch, tmp_path):

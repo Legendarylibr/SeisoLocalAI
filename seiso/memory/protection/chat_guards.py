@@ -8,8 +8,8 @@ import re
 from pathlib import Path
 from typing import Any
 
-from seiso.memory.protection.constants import *  # noqa: F403
 from seiso.memory.protection._facade import protection
+from seiso.memory.protection.constants import _INFERENCE_OVERHEAD_MB, _MAX_INFERENCE_TOKENS
 
 _VISION_TOKENS_PER_IMAGE = 1024
 _DATA_IMAGE_RE = re.compile(r"data:image/[^;]+;base64,", re.I)

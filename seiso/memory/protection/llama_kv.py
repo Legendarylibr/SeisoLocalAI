@@ -2,16 +2,18 @@
 
 from __future__ import annotations
 
-import contextlib
 from pathlib import Path
 
 from seiso.env import env_bool
 from seiso.inference.backends import gguf_total_layers
 from seiso.memory.estimates import guess_params_from_name
-from seiso.memory.protection.constants import *  # noqa: F403
-from seiso.memory.protection.llama_batch import comfortable_vram_slack_ratio
-from seiso.memory.protection.path_vram import estimate_path_vram_mb
 from seiso.memory.protection._facade import protection
+from seiso.memory.protection.constants import (
+    _MAX_LLAMA_CTX,
+    _MIN_LLAMA_BATCH,
+    _MIN_LLAMA_CTX,
+)
+
 
 def _host_os_reserve_mb(ram_mb: int) -> int:
     return max(512, int(ram_mb * 0.08))

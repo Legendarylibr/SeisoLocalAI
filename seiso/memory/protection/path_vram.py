@@ -10,7 +10,14 @@ from seiso.memory.estimates import (
     estimate_training_vram_gb,
     guess_params_from_name,
 )
-from seiso.memory.protection.constants import *  # noqa: F403
+from seiso.memory.protection.constants import (
+    _INFERENCE_OVERHEAD_MB,
+    _MODEL_WEIGHT_VRAM_SUFFIXES,
+    _TRAINING_OVERHEAD_RATIO,
+    _VRAM_ESTIMATE_CACHE_MAX,
+    _vram_estimate_cache,
+)
+
 
 def _path_stat_key(p: Path) -> tuple | None:
     try:

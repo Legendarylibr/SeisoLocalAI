@@ -7,6 +7,7 @@ from pathlib import Path
 
 from seiso.memory.protection.constants import _MAX_JSONL_LOAD_MB
 
+
 def jsonl_load_safe(path: Path) -> bool:
     """True when JSONL should use datasets loader instead of in-memory list."""
     try:

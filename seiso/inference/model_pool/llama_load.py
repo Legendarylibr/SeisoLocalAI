@@ -10,15 +10,12 @@ import time
 from pathlib import Path
 from typing import Any
 
-from seiso.compat import StrEnum
 from seiso.env import env_bool, env_int
-from seiso.inference.backends import gguf_total_layers
-
-logger = logging.getLogger(__name__)
-
 from seiso.inference.model_pool._facade import model_pool as _mp
 from seiso.memory.protection._facade import protection as _prot
 from seiso.memory.protection.constants import LlamaLoadTier
+
+logger = logging.getLogger(__name__)
 
 
 def _default_llama_threads() -> int:
@@ -218,9 +215,8 @@ def fit_llama_gpu_layers(
         )
 
     # Prefer full GPU offload only when weight+KV fits currently free VRAM.
-    if requested == -1:
-        if _fits(-1, headroom_mb):
-            return -1
+    if requested == -1 and _fits(-1, headroom_mb):
+        return -1
 
     if requested > 0:
         capped = min(requested, total_layers)
@@ -248,7 +244,7 @@ def fit_llama_gpu_layers(
 
     if _llama_skip_partial_offload(model_path):
         try:
-                capacity_mb = _prot().discrete_gpu_total_mb() or headroom_mb
+            capacity_mb = _prot().discrete_gpu_total_mb() or headroom_mb
         except Exception:
             capacity_mb = headroom_mb
         if capacity_mb > 0 and _prot().llama_offload_fits_headroom(
@@ -678,34 +674,6 @@ def _load_llama_model(
         from seiso.inference.llama_vision import apply_llama_vision_load_kwargs
 
         load_kwargs = apply_llama_vision_load_kwargs(load_kwargs, path)
-        # #region agent log
-        from seiso.agent_debug_log import agent_debug_enabled, agent_debug_log
-        if agent_debug_enabled():
-            agent_debug_log(
-                hypothesis_id="D",
-                location="model_pool.py:_try_load:before_llama_init",
-                message="attempting llama.cpp load",
-                data={
-                    "model": Path(path).name,
-                    "layers": layers,
-                    "total_layers": total_layers,
-                    "partial_offload": layers > 0 and layers < total_layers,
-                    "load_tier": load_tier,
-                    "tight_fit": _prot().llama_model_is_tight_vram_fit(
-                        model_path=path,
-                        free_mb=_prot().headroom_mb(),
-                        n_gpu_layers=layers,
-                        n_ctx=int(load_kwargs.get("n_ctx") or effective_n_ctx),
-                    ),
-                    "n_ctx": load_kwargs.get("n_ctx"),
-                    "n_batch": load_kwargs.get("n_batch"),
-                    "n_ubatch": load_kwargs.get("n_ubatch"),
-                    "flash_attn": load_kwargs.get("flash_attn"),
-                    "offload_kqv": load_kwargs.get("offload_kqv"),
-                    "op_offload": load_kwargs.get("op_offload"),
-                },
-            )
-        # #endregion
         try:
             llm = Llama(model_path=path, **load_kwargs)
             llm._seiso_n_gpu_layers = layers  # noqa: SLF001
@@ -731,21 +699,6 @@ def _load_llama_model(
                     )
             if use_prompt_cache:
                 attach_llama_prompt_cache(llm, model_path=path)
-            # #region agent log
-            if agent_debug_enabled():
-                agent_debug_log(
-                    hypothesis_id="E",
-                    location="model_pool.py:_try_load:load_success",
-                    message="llama.cpp load succeeded",
-                    data={
-                        "model": Path(path).name,
-                        "layers": layers,
-                        "load_tier": load_tier,
-                        "n_ctx": load_kwargs.get("n_ctx"),
-                        "n_batch": load_kwargs.get("n_batch"),
-                    },
-                )
-            # #endregion
             return llm
         except Exception as exc:
             if not _llama_load_retryable(exc):

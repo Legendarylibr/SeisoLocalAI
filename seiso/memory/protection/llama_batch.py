@@ -6,8 +6,13 @@ from pathlib import Path
 from typing import Any
 
 from seiso.hardware import hardware_profile
-from seiso.memory.protection.constants import *  # noqa: F403
 from seiso.memory.protection._facade import protection
+from seiso.memory.protection.constants import (
+    _LOAD_TIER_BATCH_CAPS,
+    _MAX_LLAMA_BATCH,
+    _MIN_LLAMA_BATCH,
+    LlamaLoadTier,
+)
 
 
 def discrete_gpu_total_mb(profile: dict[str, Any] | None = None) -> int:

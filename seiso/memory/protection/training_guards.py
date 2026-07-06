@@ -7,8 +7,9 @@ from typing import Any
 
 from seiso import platform as seiso_platform
 from seiso.env import env_bool
-from seiso.hardware import hardware_profile, training_defaults, vram_headroom_mb
+from seiso.hardware import vram_headroom_mb
 from seiso.memory.estimates import guess_params_from_name
+from seiso.memory.protection._facade import protection
 
 logger = logging.getLogger(__name__)
 
@@ -53,14 +54,9 @@ def _training_caps_for_model(
     except Exception:
         native_linux_nvidia = False
     headroom = vram_headroom_mb(profile)
-    if (
-        native_linux_nvidia
-        and headroom <= 24576
-        and params_b is not None
-        and params_b > 7.0
+    if (native_linux_nvidia and headroom <= 24576 and params_b is not None and params_b > 7.0) or (
+        headroom > 0 and headroom < 8192
     ):
-        max_seq = min(max_seq, 1024)
-    elif headroom > 0 and headroom < 8192:
         max_seq = min(max_seq, 1024)
 
     return {
@@ -69,8 +65,6 @@ def _training_caps_for_model(
         "max_seq_length": max_seq,
     }
 
-
-from seiso.memory.protection._facade import protection
 
 
 def apply_training_memory_guards(config: Any) -> Any:

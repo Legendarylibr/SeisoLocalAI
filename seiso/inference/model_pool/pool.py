@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import threading
 import time
 from dataclasses import dataclass, field
@@ -11,20 +10,11 @@ from pathlib import Path
 from typing import Any
 
 from seiso.compat import StrEnum
-from seiso.env import env_bool, env_int
+from seiso.env import env_int
+from seiso.inference.model_pool._facade import model_pool as _mp
 from seiso.inference.model_pool.dflash import clear_dflash_draft_cache
-from seiso.inference.model_pool.llama_load import (
-    _clear_optimal_layers_cache,
-    _default_llama_gpu_layers,
-    _llama_cache_headroom_ok,
-    _llama_cache_is_optimal,
-    _load_llama_model,
-    _refresh_headroom_stats,
-)
 
 logger = logging.getLogger(__name__)
-
-from seiso.inference.model_pool._facade import model_pool as _mp
 
 _POOL_BACKEND_BY_API: dict[str, str] = {
     "llamacpp": "llamacpp",

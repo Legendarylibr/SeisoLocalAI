@@ -8,7 +8,6 @@ import logging
 import threading
 import time
 from collections.abc import AsyncIterator, Callable, Iterator
-from pathlib import Path
 from queue import Empty
 from typing import Any
 
@@ -77,20 +76,21 @@ def _llama_n_ctx_for_payload(
 ) -> int:
     max_tokens = int(payload.get("max_tokens", 512))
     if payload.get("n_ctx"):
-        return clamp_llama_n_ctx(
-            int(payload["n_ctx"]),
+        requested = int(payload["n_ctx"])
+        sized = clamp_llama_n_ctx(
+            requested,
             messages=messages,
             max_tokens=max_tokens,
             model_path=model_path,
             model_format=payload.get("model_format"),
         )
+        return min(requested, sized)
     return estimate_llama_n_ctx(
         messages,
         max_tokens=max_tokens,
         model_path=model_path,
         model_format=payload.get("model_format"),
     )
-
 
 class _StreamError:
     __slots__ = ("exc",)
@@ -841,7 +841,13 @@ class LocalInferenceRunner:
             max_tokens=int(payload.get("max_tokens", 512)),
         )
         if not payload.get("n_ctx"):
-            n_ctx = _llama_n_ctx_for_payload(payload, messages, model_path=model_path)
+            n_ctx = estimate_llama_n_ctx(
+                messages,
+                max_tokens=int(payload.get("max_tokens", 512)),
+                floor=4096,
+                model_path=model_path,
+                model_format=payload.get("model_format"),
+            )
         llm = self._pool.get_llama(model_path, n_ctx=n_ctx)
         llm = self._llama_guard_prefill(
             llm, model_path=model_path, messages=messages, n_ctx=n_ctx
@@ -930,7 +936,13 @@ class LocalInferenceRunner:
             max_tokens=int(payload.get("max_tokens", 512)),
         )
         if not payload.get("n_ctx"):
-            n_ctx = _llama_n_ctx_for_payload(payload, messages, model_path=model_path)
+            n_ctx = estimate_llama_n_ctx(
+                messages,
+                max_tokens=int(payload.get("max_tokens", 512)),
+                floor=4096,
+                model_path=model_path,
+                model_format=payload.get("model_format"),
+            )
         try:
             llm = self._pool.get_llama(model_path, n_ctx=n_ctx)
         except ImportError as exc:
@@ -942,27 +954,6 @@ class LocalInferenceRunner:
         completion_kwargs = llama_completion_kwargs(payload)
         emitted_text = False
         recoveries = 0
-        # #region agent log
-        from seiso.agent_debug_log import agent_debug_enabled, agent_debug_log
-
-        if agent_debug_enabled():
-            agent_debug_log(
-                hypothesis_id="C",
-                location="runner.py:_llama_stream:before_prefill",
-                message="starting llama.cpp chat prefill",
-                data={
-                    "model": Path(model_path).name,
-                    "n_ctx": n_ctx,
-                    "max_tokens": completion_kwargs.get("max_tokens"),
-                    "load_tier": getattr(llm, "_seiso_load_tier", None),
-                    "n_gpu_layers": getattr(llm, "_seiso_n_gpu_layers", None),
-                    "message_count": len(messages),
-                    "prompt_chars": sum(
-                        len(str(m.get("content") or "")) for m in messages
-                    ),
-                },
-            )
-        # #endregion
         while True:
             try:
                 stream = llm.create_chat_completion(
