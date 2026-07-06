@@ -544,7 +544,11 @@ def _load_llama_model(
     batch_override: tuple[int, int] | None = None,
 ) -> Any:
     """Load a GGUF with VRAM-aware layer offload and clear OOM errors."""
-    from seiso.memory.protection import LlamaLoadTier, llama_load_profile_ladder
+    from seiso.memory.protection import (
+        LlamaLoadTier,
+        clamp_llama_batch_pair,
+        llama_load_profile_ladder,
+    )
 
     load_tier: LlamaLoadTier = (
         tier if tier in {"normal", "compact", "minimal"} else "normal"  # type: ignore[assignment]
@@ -580,8 +584,12 @@ def _load_llama_model(
     kwargs = llama_load_kwargs(n_ctx, model_path=path)
     if batch_override is not None:
         override_batch, override_ubatch = batch_override
-        kwargs["n_batch"] = max(128, int(override_batch))
-        kwargs["n_ubatch"] = max(128, min(int(override_ubatch), kwargs["n_batch"]))
+        kwargs["n_batch"], kwargs["n_ubatch"] = clamp_llama_batch_pair(
+            override_batch,
+            override_ubatch,
+            native_linux_nvidia=_native_linux_nvidia(),
+            load_tier=load_tier,
+        )
     speed_extras = _llama_speed_extras(path)
     requested = env_int("SEISO_LLAMA_GPU_LAYERS", _default_llama_gpu_layers())
     if requested != 0 and not _llama_gpu_offload_ok():

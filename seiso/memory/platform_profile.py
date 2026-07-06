@@ -13,7 +13,10 @@ from seiso.hardware.tiers import (
     performance_headroom_mb,
     vram_headroom_mb,
 )
-from seiso.memory.protection import llama_batch_limits_for_headroom
+from seiso.memory.protection import (
+    llama_batch_limits_for_headroom,
+    resolve_llama_batch_limits,
+)
 from seiso.training.platform_caps import training_capabilities
 
 
@@ -28,24 +31,15 @@ def native_linux_nvidia_llama_batch_caps(
     Prefill activations spike well above weight+KV; keep batches low so
     multi-turn chat does not OOM after the model is already loaded.
     """
-    batch, ubatch = llama_batch_limits_for_headroom(headroom_mb)
-    cache_cap = (
-        256
-        if low
-        else (512 if tier == HardwareTier.WORKSTATION else 256)
+    batch, ubatch = resolve_llama_batch_limits(
+        headroom_mb, native_linux_nvidia=True
     )
-
-    if not low and tier == HardwareTier.WORKSTATION:
-        batch, ubatch = min(batch, 1024), min(ubatch, 256)
-    elif not low and tier == HardwareTier.CAPABLE:
-        batch, ubatch = min(batch, 512), min(ubatch, 128)
-    else:
-        batch = min(batch, 512)
-        ubatch = min(ubatch, 128)
-        if low:
-            batch = min(batch, 256)
-            ubatch = min(ubatch, 128)
-
+    # Sub-workstation / low-memory profiles stay more conservative.
+    if tier != HardwareTier.WORKSTATION or low:
+        cap_batch, cap_ubatch = (256, 128) if low else (512, 128)
+        batch = min(batch, cap_batch)
+        ubatch = min(ubatch, cap_ubatch, batch)
+    cache_cap = 256 if low else (512 if tier == HardwareTier.WORKSTATION else 256)
     return batch, ubatch, cache_cap
 
 
@@ -120,20 +114,17 @@ def apply_platform_memory_profile(
 
     os.environ.setdefault("SEISO_LLAMA_PROMPT_CACHE", "true")
     cache_mb = "2048" if tier == HardwareTier.WORKSTATION and ram_gb >= 32 else "1024"
+    native_linux_nvidia = False
     if system == "Linux":
         try:
             from seiso.platform import is_native_linux_nvidia
 
-            if is_native_linux_nvidia(profile=profile):
-                cache_cap = (
-                    1024 if not low and tier == HardwareTier.WORKSTATION else 512
-                )
-                if low:
-                    cache_cap = 256
-                cache_mb = str(min(int(cache_mb), cache_cap))
+            native_linux_nvidia = is_native_linux_nvidia(profile=profile)
         except ImportError:
             pass
-    os.environ.setdefault("SEISO_LLAMA_CACHE_MB", cache_mb)
+    # Native Linux sets cache from batch_caps once below; avoid a second, looser cap.
+    if not native_linux_nvidia:
+        os.environ.setdefault("SEISO_LLAMA_CACHE_MB", cache_mb)
 
     if system == "Darwin":
         if tier == HardwareTier.CPU_ONLY:
@@ -191,8 +182,6 @@ def apply_platform_memory_profile(
                 HardwareTier.MODEST,
                 HardwareTier.EDGE,
             ):
-                from seiso.platform import is_native_linux_nvidia
-
                 os.environ.setdefault(
                     "SEISO_LLAMA_THREADS",
                     str(
@@ -202,13 +191,7 @@ def apply_platform_memory_profile(
                         )
                     ),
                 )
-                batch, ubatch = llama_batch_limits_for_headroom(headroom)
-                cache_cap = (
-                    1024 if not low and tier == HardwareTier.WORKSTATION else 512
-                )
-                if low:
-                    cache_cap = 256
-                if is_native_linux_nvidia(profile=profile):
+                if native_linux_nvidia:
                     batch, ubatch, cache_cap = native_linux_nvidia_llama_batch_caps(
                         tier=tier,
                         headroom_mb=headroom,
@@ -217,20 +200,16 @@ def apply_platform_memory_profile(
                     _refresh_native_linux_llama_env(
                         batch_cap=batch,
                         ubatch_cap=ubatch,
-                        cache_cap=cache_cap,
+                        cache_cap=min(int(cache_mb), cache_cap),
                     )
                 else:
                     batch, ubatch = llama_batch_limits_for_headroom(headroom)
                     os.environ.setdefault("SEISO_LLAMA_BATCH", str(batch))
                     os.environ.setdefault("SEISO_LLAMA_UBATCH", str(ubatch))
+            elif native_linux_nvidia:
+                os.environ.setdefault("SEISO_LLAMA_CACHE_MB", "256")
             if not low and tier in (HardwareTier.WORKSTATION, HardwareTier.CAPABLE):
-                try:
-                    from seiso.platform import is_native_linux_nvidia
-
-                    _native_linux = is_native_linux_nvidia(profile=profile)
-                except ImportError:
-                    _native_linux = False
-                if not _native_linux:
+                if not native_linux_nvidia:
                     os.environ.setdefault("SEISO_LLAMA_FLASH_ATTN", "true")
                 os.environ.setdefault("SEISO_LLAMA_OP_OFFLOAD", "true")
                 os.environ.setdefault("SEISO_LLAMA_OFFLOAD_KQV", "true")
@@ -238,6 +217,8 @@ def apply_platform_memory_profile(
                     os.environ.setdefault("SEISO_STREAM_BATCH_CHARS", "16")
         elif caps.get("train_platform") == "cpu" or not caps.get("gpu_count"):
             os.environ.setdefault("SEISO_LLAMA_GPU_LAYERS", "0")
+            if native_linux_nvidia:
+                os.environ.setdefault("SEISO_LLAMA_CACHE_MB", "256")
 
     result = {
         "memory_profile": memory_profile_label(profile),

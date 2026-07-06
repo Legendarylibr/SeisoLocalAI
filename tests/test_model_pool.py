@@ -653,11 +653,18 @@ def test_llama_load_kwargs_native_linux_nvidia_defaults(monkeypatch):
     monkeypatch.setattr(
         "seiso.inference.model_pool._native_linux_nvidia", lambda: True
     )
+    monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: True)
     monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 24576)
+    monkeypatch.setattr(
+        "seiso.memory.protection.estimate_path_vram_mb", lambda _p: 1024
+    )
+    monkeypatch.setattr(
+        "seiso.inference.backends.gguf_block_count", lambda _p: 32
+    )
 
     kwargs = llama_load_kwargs(4096, model_path="/tmp/model.gguf")
-    assert kwargs["n_batch"] == 4096
-    assert kwargs["n_ubatch"] == 1024
+    assert kwargs["n_batch"] == 1024
+    assert kwargs["n_ubatch"] == 256
     assert "flash_attn" not in kwargs
 
 
