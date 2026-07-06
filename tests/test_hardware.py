@@ -188,7 +188,7 @@ def test_query_nvidia_gpus_cache(monkeypatch):
     clear_nvidia_gpu_query_cache()
 
 
-def test_enrich_catalog_ranks_priority_first():
+def test_enrich_catalog_ranks_downloads_then_priority():
     profile = {
         "backend": "cpu",
         "gpus": [],
@@ -204,6 +204,7 @@ def test_enrich_catalog_ranks_priority_first():
             "quant": "Q4_K_M",
             "tags": [],
             "priority": 90,
+            "downloads": 1000,
             "task": "chat",
         },
         {
@@ -213,13 +214,14 @@ def test_enrich_catalog_ranks_priority_first():
             "quant": "Q4_K_M",
             "tags": [],
             "priority": 50,
+            "downloads": 50_000,
             "task": "chat",
         },
     ]
     ranked = enrich_catalog_models(models, profile, fetch_sizes=False)
-    assert ranked[0]["params"] == "70B"
-    assert ranked[0]["priority"] == 90
-    assert ranked[1]["hardware_fit"] in ("ideal", "good")
+    assert ranked[0]["repo_id"] == "small"
+    assert ranked[0]["downloads"] == 50_000
+    assert ranked[1]["repo_id"] == "big"
 
 
 def test_format_catalog_note_shows_download_and_runtime():

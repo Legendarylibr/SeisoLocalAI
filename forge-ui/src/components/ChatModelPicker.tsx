@@ -36,8 +36,9 @@ export function ChatModelPicker({
 
   const refreshCatalog = useCallback((q: string) => {
     setCatalogLoading(true);
+    // Empty browse: popular chat models. Typed search: any Hub model.
     api
-      .catalog(q, undefined, "chat", false)
+      .catalog(q, undefined, q.trim() ? undefined : "chat", false)
       .then((r) => setCatalog(r.models))
       .catch(() => setCatalog([]))
       .finally(() => setCatalogLoading(false));

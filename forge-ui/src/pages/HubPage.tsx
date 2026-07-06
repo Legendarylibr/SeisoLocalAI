@@ -31,7 +31,7 @@ const FAMILY_LABELS: Record<string, string> = {
 
 const QUICK_FILTERS = [
   { label: "Fits your GPU", task: "", q: "", fitsOnly: true },
-  { label: "Featured", task: "", q: "new", fitsOnly: false },
+  { label: "Popular", task: "", q: "", fitsOnly: false },
   { label: "Chat", task: "chat", q: "", fitsOnly: false },
   { label: "Code", task: "code", q: "", fitsOnly: false },
   { label: "Llama", task: "", q: "llama", fitsOnly: false },
