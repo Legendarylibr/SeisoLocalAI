@@ -42,6 +42,30 @@ _MAX_LLAMA_CTX = 131072
 _MIN_LLAMA_CTX = 2048
 _MAX_LLAMA_BATCH = 4096
 _MIN_LLAMA_BATCH = 128
+# Coarse n_ctx buckets — avoid reloading the model every few chat turns.
+_LLAMA_CTX_BUCKETS = (
+    2048,
+    4096,
+    8192,
+    12288,
+    16384,
+    24576,
+    32768,
+    49152,
+    65536,
+    98304,
+    131072,
+)
+_NATIVE_LINUX_CTX_BUCKETS = (
+    4096,
+    8192,
+    12288,
+    16384,
+    24576,
+    32768,
+    65536,
+    131072,
+)
 # Post-weight headroom below this on native Linux → clamp batches (prefill crash zone).
 _NATIVE_LINUX_PREFILL_CLAMP_MB = 6144
 _NATIVE_LINUX_PREFILL_HEADROOM_DROP_RATIO = 0.85
@@ -576,7 +600,6 @@ def llama_prefill_needs_reload(
         and loaded_headroom_mb > 0
         and free_mb < int(loaded_headroom_mb * _NATIVE_LINUX_PREFILL_HEADROOM_DROP_RATIO)
     )
-    long_prefill = prompt_tokens > max(1024, min(loaded_n_batch, _MAX_LLAMA_BATCH) // 2)
     prefill_exceeds_safe = prompt_tokens > safe_batch
     vision_prefill = _messages_have_vision_content(messages)
     tight_prefill = llama_model_is_tight_vram_fit(
@@ -592,9 +615,11 @@ def llama_prefill_needs_reload(
         and free_mb
         < int(loaded_headroom_mb * _NATIVE_LINUX_PREFILL_HEADROOM_SHRINK_RATIO)
     )
+    # Reload only when the loaded batch is unsafe for this prefill. Do not
+    # thrash on "long prompt" alone — that caused mid-conversation reloads
+    # (and OOM risk) as chat history grew on native Linux.
     needs_reload = loaded_batch > safe_batch and (
         prefill_exceeds_safe
-        or long_prefill
         or headroom_dropped
         or headroom_shrank
         or tight_prefill
@@ -1060,6 +1085,22 @@ def sanitize_inference_payload(payload: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def bucket_llama_n_ctx(needed: int, *, ceiling: int | None = None) -> int:
+    """Snap context to coarse buckets so multi-turn chat reuses one loaded KV size."""
+    try:
+        native_linux = seiso_platform.use_linux_nvidia_inference_guards()
+    except Exception:
+        native_linux = False
+    buckets = _NATIVE_LINUX_CTX_BUCKETS if native_linux else _LLAMA_CTX_BUCKETS
+    floor = buckets[0]
+    cap = _MAX_LLAMA_CTX if ceiling is None else max(1, int(ceiling))
+    need = max(min(floor, cap), int(needed))
+    for bucket in buckets:
+        if need <= bucket:
+            return min(bucket, cap)
+    return min(cap, max(min(floor, cap), need))
+
+
 def clamp_llama_n_ctx(
     n_ctx: int,
     *,
@@ -1075,17 +1116,14 @@ def clamp_llama_n_ctx(
     messages = messages or []
     prompt_tokens = _estimate_prompt_tokens(messages)
     needed = prompt_tokens + max_tokens + 128
-    step = 512
-    sized = ((needed + step - 1) // step) * step
-    sized = max(_MIN_LLAMA_CTX, min(_MAX_LLAMA_CTX, sized))
 
     ctx_cap = effective_context_ceiling(
         model_path,
         model_format=model_format,
         model_name=model_name,
     )
-
-    return min(max(n_ctx, sized), ctx_cap)
+    sized = bucket_llama_n_ctx(needed, ceiling=ctx_cap)
+    return min(max(int(n_ctx), sized), ctx_cap)
 
 
 def clamp_llama_load_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:

@@ -147,8 +147,13 @@ def estimate_llama_n_ctx(
     model_format: str | None = None,
     model_name: str | None = None,
 ) -> int:
-    """Right-size context window to prompt + generation (faster KV cache)."""
+    """Right-size context window to prompt + generation (faster KV cache).
+
+    Uses coarse buckets so multi-turn chat reuses one loaded context size instead
+    of reloading every few hundred tokens of history growth.
+    """
     from seiso.inference.context_limits import effective_context_ceiling
+    from seiso.memory.protection import bucket_llama_n_ctx, clamp_llama_n_ctx
 
     if ceiling is None:
         ceiling = effective_context_ceiling(
@@ -157,15 +162,13 @@ def estimate_llama_n_ctx(
             model_name=model_name,
         )
     if not env_bool("SEISO_LLAMA_DYNAMIC_CTX", True):
-        sized = default
+        sized = bucket_llama_n_ctx(default, ceiling=ceiling)
     else:
         from seiso.memory.protection import _estimate_prompt_tokens
 
         est_prompt = max(256, _estimate_prompt_tokens(messages))
         needed = est_prompt + max_tokens + 128
-        step = 512
-        sized = min(ceiling, max(floor, ((needed + step - 1) // step) * step))
-    from seiso.memory.protection import clamp_llama_n_ctx
+        sized = bucket_llama_n_ctx(max(floor, needed), ceiling=ceiling)
 
     return clamp_llama_n_ctx(
         sized,
