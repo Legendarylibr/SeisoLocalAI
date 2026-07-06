@@ -12,6 +12,7 @@ from seiso.inference.backends import (
     gguf_is_moe,
     gguf_uses_sliding_window_attention,
 )
+from seiso.inference.family_policy import policy_for_gguf
 from seiso.inference.model_pool import (
     _llama_skip_partial_offload,
     fit_llama_gpu_layers,
@@ -65,9 +66,12 @@ def _write_arch_gguf(
 
 FAMILY_CASES = [
     pytest.param("llama", "llama", False, False, id="llama"),
+    pytest.param("llama3", "llama3", False, False, id="llama3"),
     pytest.param("qwen2", "qwen2", False, False, id="qwen2"),
     pytest.param("qwen3", "qwen3", False, False, id="qwen3"),
     pytest.param("mistral", "mistral", False, False, id="mistral"),
+    pytest.param("gemma2", "gemma2", False, False, id="gemma2"),
+    pytest.param("phi3", "phi3", False, False, id="phi3"),
     pytest.param("gemma3", "gemma3", True, False, id="gemma3-swa"),
     pytest.param("gemma4", "gemma4", True, False, id="gemma4-swa"),
     pytest.param("deepseek2", "deepseek2", False, True, id="deepseek2-moe"),
@@ -93,6 +97,38 @@ def test_gguf_family_metadata_flags(
 
     assert gguf_uses_sliding_window_attention(str(gguf)) is expect_swa
     assert gguf_is_moe(str(gguf)) is expect_moe
+
+
+@pytest.mark.parametrize(
+    ("arch", "prefix", "expect_kind", "expect_partial"),
+    [
+        ("llama3", "llama3", "dense", True),
+        ("qwen3", "qwen3", "dense", True),
+        ("gemma2", "gemma2", "dense", True),
+        ("phi3", "phi3", "dense", True),
+        ("mistral", "mistral", "dense", True),
+        ("gemma3", "gemma3", "swa", False),
+        ("gemma4", "gemma4", "swa", False),
+        ("mixtral", "mixtral", "moe", True),
+        ("qwen2moe", "qwen2moe", "moe", True),
+        ("deepseek2", "deepseek2", "moe", True),
+    ],
+)
+def test_gguf_family_policy_matrix(
+    tmp_path: Path, arch: str, prefix: str, expect_kind: str, expect_partial: bool
+):
+    extra: list[tuple[bytes, int]] = []
+    if expect_kind == "swa":
+        extra.append((prefix.encode() + b".attention.sliding_window", 512))
+    if expect_kind == "moe":
+        extra.append((prefix.encode() + b".expert_count", 8))
+    gguf = tmp_path / f"{arch}.gguf"
+    _write_arch_gguf(gguf, arch, extra=extra)
+
+    policy = policy_for_gguf(str(gguf))
+
+    assert policy.kind == expect_kind
+    assert policy.allow_partial_offload is expect_partial
 
 
 SWA_PARTIAL_FAMILIES = [
@@ -165,10 +201,8 @@ def test_unsafe_partial_offload_allows_swa_on_linux(
     assert _llama_skip_partial_offload(str(gguf)) is False
 
 
-@pytest.mark.parametrize("arch", ["llama", "qwen2", "qwen3", "mistral"])
-def test_dense_families_allow_partial_offload_on_linux(
-    monkeypatch, tmp_path: Path, arch: str
-):
+@pytest.mark.parametrize("arch", ["llama", "llama3", "qwen2", "qwen3", "mistral", "gemma2", "phi3"])
+def test_dense_families_allow_partial_offload_on_linux(monkeypatch, tmp_path: Path, arch: str):
     import seiso.inference.model_pool as mp
 
     gguf = tmp_path / f"{arch}.gguf"
@@ -185,9 +219,7 @@ def test_native_linux_flash_attn_family_policy(monkeypatch, tmp_path: Path):
     clear_gguf_caches()
     monkeypatch.setattr(mp, "_native_linux_nvidia", lambda: True)
     monkeypatch.setattr(mp, "_llama_gpu_offload_ok", lambda: True)
-    monkeypatch.setattr(
-        "seiso.platform.use_linux_nvidia_inference_guards", lambda **_: True
-    )
+    monkeypatch.setattr("seiso.platform.use_linux_nvidia_inference_guards", lambda **_: True)
     for key in list(os.environ):
         if key.startswith("SEISO_LLAMA_"):
             monkeypatch.delenv(key, raising=False)
@@ -201,7 +233,7 @@ def test_native_linux_flash_attn_family_policy(monkeypatch, tmp_path: Path):
 
     # Dense may opt in via SEISO_LLAMA_FLASH_ATTN=true.
     monkeypatch.setenv("SEISO_LLAMA_FLASH_ATTN", "true")
-    for arch in ("llama", "qwen2", "qwen3", "mistral"):
+    for arch in ("llama", "llama3", "qwen2", "qwen3", "mistral", "gemma2", "phi3"):
         gguf = tmp_path / f"{arch}-optin.gguf"
         _write_arch_gguf(gguf, arch)
         clear_gguf_caches()
@@ -244,14 +276,13 @@ def test_native_linux_kv_quant_dense_opt_in(monkeypatch, tmp_path: Path):
     assert opts[1]["type_k"] == 8
 
     gemma = tmp_path / "gemma3.gguf"
-    _write_arch_gguf(
-        gemma, "gemma3", extra=[(b"gemma3.attention.sliding_window", 512)]
-    )
+    _write_arch_gguf(gemma, "gemma3", extra=[(b"gemma3.attention.sliding_window", 512)])
     assert mp._llama_kv_quant_options(str(gemma)) == [{}]
 
 
 def test_dense_qwen_allows_partial_while_swa_gemma_falls_back_to_cpu(
-    monkeypatch, tmp_path: Path,
+    monkeypatch,
+    tmp_path: Path,
 ):
     import seiso.inference.model_pool as mp
 
@@ -266,15 +297,9 @@ def test_dense_qwen_allows_partial_while_swa_gemma_falls_back_to_cpu(
     monkeypatch.setattr(mp, "_native_linux_nvidia", lambda: True)
     monkeypatch.setattr(mp, "_llama_gpu_offload_ok", lambda: True)
     monkeypatch.setattr("seiso.inference.backends.gguf_total_layers", lambda _p: 32)
-    monkeypatch.setattr(
-        "seiso.memory.protection.estimate_path_vram_mb", lambda _p: 9000
-    )
-    monkeypatch.setattr(
-        "seiso.memory.protection.llama_model_is_tight_vram_fit", lambda **_k: False
-    )
-    monkeypatch.setattr(
-        "seiso.memory.protection.llama_kv_cache_reserve_mb", lambda *_a, **_k: 512
-    )
+    monkeypatch.setattr("seiso.memory.protection.estimate_path_vram_mb", lambda _p: 9000)
+    monkeypatch.setattr("seiso.memory.protection.llama_model_is_tight_vram_fit", lambda **_k: False)
+    monkeypatch.setattr("seiso.memory.protection.llama_kv_cache_reserve_mb", lambda *_a, **_k: 512)
 
     def fits(path, **k):
         layers = k.get("n_gpu_layers")
@@ -291,3 +316,78 @@ def test_dense_qwen_allows_partial_while_swa_gemma_falls_back_to_cpu(
 
     assert fit_llama_gpu_layers(str(qwen), -1, 12000, n_ctx=4096) == 27
     assert fit_llama_gpu_layers(str(gemma), -1, 12000, n_ctx=4096) == 0
+
+
+def test_swa_gemma_uses_full_gpu_when_it_fits(monkeypatch, tmp_path: Path):
+    import seiso.inference.model_pool as mp
+
+    gemma = tmp_path / "gemma3.gguf"
+    _write_arch_gguf(
+        gemma,
+        "gemma3",
+        extra=[(b"gemma3.attention.sliding_window", 512)],
+    )
+    monkeypatch.setattr(mp, "_native_linux_nvidia", lambda: True)
+    monkeypatch.setattr(mp, "_llama_gpu_offload_ok", lambda: True)
+    monkeypatch.setattr("seiso.inference.backends.gguf_total_layers", lambda _p: 32)
+    monkeypatch.setattr("seiso.memory.protection.estimate_path_vram_mb", lambda _p: 9000)
+    monkeypatch.setattr("seiso.memory.protection.llama_model_is_tight_vram_fit", lambda **_k: False)
+    monkeypatch.setattr(
+        "seiso.memory.protection.llama_offload_fits_headroom",
+        lambda _path, **k: k.get("n_gpu_layers") == -1,
+    )
+
+    assert fit_llama_gpu_layers(str(gemma), -1, 24576, n_ctx=4096) == -1
+
+
+def test_qwen36_27b_24gb_uses_full_offload_when_estimate_fits(monkeypatch, tmp_path: Path):
+    import seiso.inference.model_pool as mp
+
+    qwen = tmp_path / "Qwen3.6-27B-UD-Q4_K_XL.gguf"
+    _write_arch_gguf(qwen, "qwen3")
+    monkeypatch.setattr(mp, "_native_linux_nvidia", lambda: True)
+    monkeypatch.setattr(mp, "_llama_gpu_offload_ok", lambda: True)
+    monkeypatch.setattr("seiso.inference.backends.gguf_total_layers", lambda _p: 64)
+    monkeypatch.setattr("seiso.memory.protection.estimate_path_vram_mb", lambda _p: 17_000)
+    monkeypatch.setattr("seiso.memory.protection.llama_model_is_tight_vram_fit", lambda **_k: False)
+    monkeypatch.setattr("seiso.memory.protection.llama_kv_cache_reserve_mb", lambda *_a, **_k: 1024)
+
+    def fits(_path, **kwargs):
+        layers = kwargs.get("n_gpu_layers")
+        budget = int(kwargs.get("headroom_mb") or 0)
+        if layers == -1:
+            return budget >= 18_024
+        return layers <= 48
+
+    monkeypatch.setattr("seiso.memory.protection.llama_offload_fits_headroom", fits)
+
+    layers = fit_llama_gpu_layers(str(qwen), -1, 24_576, n_ctx=4096)
+
+    assert layers == -1
+
+
+def test_qwen36_27b_24gb_uses_partial_offload_when_full_does_not_fit(
+    monkeypatch, tmp_path: Path
+):
+    import seiso.inference.model_pool as mp
+
+    qwen = tmp_path / "Qwen3.6-27B-UD-Q4_K_XL.gguf"
+    _write_arch_gguf(qwen, "qwen3")
+    monkeypatch.setattr(mp, "_native_linux_nvidia", lambda: True)
+    monkeypatch.setattr(mp, "_llama_gpu_offload_ok", lambda: True)
+    monkeypatch.setattr("seiso.inference.backends.gguf_total_layers", lambda _p: 64)
+    monkeypatch.setattr("seiso.memory.protection.estimate_path_vram_mb", lambda _p: 17_000)
+    monkeypatch.setattr("seiso.memory.protection.llama_model_is_tight_vram_fit", lambda **_k: True)
+    monkeypatch.setattr("seiso.memory.protection.llama_kv_cache_reserve_mb", lambda *_a, **_k: 4096)
+
+    def fits(_path, **kwargs):
+        layers = kwargs.get("n_gpu_layers")
+        if layers == -1:
+            return False
+        return layers <= 48
+
+    monkeypatch.setattr("seiso.memory.protection.llama_offload_fits_headroom", fits)
+
+    layers = fit_llama_gpu_layers(str(qwen), -1, 24_576, n_ctx=8192)
+
+    assert 0 < layers <= 48

@@ -96,6 +96,9 @@ _NATIVE_LINUX_BATCH_CAPS: dict[LlamaLoadTier, tuple[int, int]] = {
     "minimal": (128, 128),
 }
 _NATIVE_LINUX_TIGHT_BATCH = (256, 128)
+_NATIVE_LINUX_DENSE_MID_MIN_MB = 7 * 1024
+_NATIVE_LINUX_DENSE_MID_MAX_MB = 16 * 1024
+_NATIVE_LINUX_DENSE_MID_HEADROOM_MB = 32 * 1024
 
 
 def clamp_llama_batch_pair(
@@ -109,9 +112,7 @@ def clamp_llama_batch_pair(
     """Normalize a llama.cpp batch/ubatch pair (single source of ceilings)."""
     batch = max(_MIN_LLAMA_BATCH, int(batch))
     ubatch = max(_MIN_LLAMA_BATCH, min(int(ubatch), batch))
-    caps = (
-        _NATIVE_LINUX_BATCH_CAPS if native_linux_nvidia else _LOAD_TIER_BATCH_CAPS
-    )
+    caps = _NATIVE_LINUX_BATCH_CAPS if native_linux_nvidia else _LOAD_TIER_BATCH_CAPS
     tier_batch, tier_ubatch = caps.get(load_tier, caps["normal"])
     if native_linux_nvidia and tight:
         tier_batch = min(tier_batch, _NATIVE_LINUX_TIGHT_BATCH[0])
@@ -267,9 +268,7 @@ def _estimate_path_vram_mb_uncached(p: Path, *, mode: str = "chat") -> int:
             est = hub_est
             from_hub = True
         else:
-            guessed = (
-                guess_params_from_name(name) or guess_params_from_name(path_str) or 7.0
-            )
+            guessed = guess_params_from_name(name) or guess_params_from_name(path_str) or 7.0
             est = int(estimate_chat_vram_gb(f"{guessed}B", repo_id=path_str) * 1024)
             if mode == "train":
                 est = int(
@@ -425,9 +424,7 @@ def _llama_effective_kv_ctx(path: Path, n_ctx: int) -> int:
             sw = gguf_sliding_window(str(path))
             local_ctx = min(ctx, int(sw)) if sw and sw > 0 else min(ctx, 4096)
             swa_frac = gguf_swa_layer_fraction(str(path))
-            swa_frac = (
-                0.85 if swa_frac is None else max(0.0, min(float(swa_frac), 1.0))
-            )
+            swa_frac = 0.85 if swa_frac is None else max(0.0, min(float(swa_frac), 1.0))
             global_frac = 1.0 - swa_frac
             return max(
                 local_ctx,
@@ -503,9 +500,7 @@ def llama_offload_fits_headroom(
     if n_gpu_layers == -1:
         gpu_weight_mb = weight_mb
     else:
-        gpu_weight_mb = (
-            int(weight_mb * _gpu_layer_fraction(n_gpu_layers, total_layers)) + 256
-        )
+        gpu_weight_mb = int(weight_mb * _gpu_layer_fraction(n_gpu_layers, total_layers)) + 256
 
     kv_mb = llama_kv_cache_reserve_mb(
         path,
@@ -552,6 +547,28 @@ def llama_host_batch_headroom_mb(
     return max(_MIN_LLAMA_BATCH * 2, remaining)
 
 
+def _native_dense_mid_size_prefill_risk(
+    *,
+    model_path: str | Path,
+    free_mb: int,
+) -> bool:
+    """True for dense 7B-16B models that can load on 24 GB but spike at prefill."""
+    try:
+        if not seiso_platform.use_linux_nvidia_inference_guards():
+            return False
+        weight_mb = int(estimate_path_vram_mb(model_path))
+        if not (_NATIVE_LINUX_DENSE_MID_MIN_MB <= weight_mb <= _NATIVE_LINUX_DENSE_MID_MAX_MB):
+            return False
+        if free_mb > _NATIVE_LINUX_DENSE_MID_HEADROOM_MB:
+            return False
+        from seiso.inference.family_policy import policy_for_gguf
+
+        policy = policy_for_gguf(str(model_path))
+        return policy.kind == "dense" and policy.prefill_tightness > 1.0
+    except Exception:
+        return False
+
+
 def llama_model_is_tight_vram_fit(
     *,
     model_path: str | Path,
@@ -570,11 +587,11 @@ def llama_model_is_tight_vram_fit(
     )
     ratio = _TIGHT_VRAM_FIT_RATIO
     with contextlib.suppress(Exception):
-        if (
-            n_gpu_layers != 0
-            and seiso_platform.use_linux_nvidia_inference_guards()
-        ):
+        if seiso_platform.use_linux_nvidia_inference_guards():
             ratio = _NATIVE_LINUX_TIGHT_VRAM_FIT_RATIO
+            from seiso.inference.family_policy import policy_for_gguf
+
+            ratio = ratio / max(policy_for_gguf(str(path)).prefill_tightness, 1.0)
     return weight_mb + kv_mb >= int(free_mb * ratio)
 
 
@@ -646,7 +663,7 @@ def llama_prefill_needs_reload(
         native_linux_nvidia = seiso_platform.use_linux_nvidia_inference_guards()
     except Exception:
         native_linux_nvidia = False
-    if not native_linux_nvidia or loaded_n_gpu_layers == 0:
+    if not native_linux_nvidia:
         batch, ubatch = clamp_llama_batch_pair(
             loaded_n_batch or _MAX_LLAMA_BATCH,
             loaded_n_batch or _MAX_LLAMA_BATCH,
@@ -680,6 +697,9 @@ def llama_prefill_needs_reload(
         free_mb=free_mb,
         n_gpu_layers=loaded_n_gpu_layers,
         n_ctx=n_ctx,
+    ) or _native_dense_mid_size_prefill_risk(
+        model_path=model_path,
+        free_mb=free_mb,
     )
     safe_batch, safe_ubatch = resolve_llama_batch_limits(
         effective,
@@ -698,8 +718,7 @@ def llama_prefill_needs_reload(
     headroom_shrank = (
         loaded_headroom_mb is not None
         and loaded_headroom_mb > 0
-        and free_mb
-        < int(loaded_headroom_mb * _NATIVE_LINUX_PREFILL_HEADROOM_SHRINK_RATIO)
+        and free_mb < int(loaded_headroom_mb * _NATIVE_LINUX_PREFILL_HEADROOM_SHRINK_RATIO)
     )
     # Reload only when the loaded batch is unsafe for this prefill. Do not
     # thrash on "long prompt" alone — that caused mid-conversation reloads
@@ -738,6 +757,9 @@ def llama_load_profile_ladder(
         free_mb=free_mb,
         n_gpu_layers=n_gpu_layers,
         n_ctx=n_ctx,
+    ) or _native_dense_mid_size_prefill_risk(
+        model_path=model_path,
+        free_mb=free_mb,
     )
     effective = llama_effective_batch_headroom_mb(
         free_mb, model_path=model_path, n_gpu_layers=n_gpu_layers, n_ctx=n_ctx
@@ -755,9 +777,7 @@ def llama_load_profile_ladder(
         load_tier=tier,
         tight=tight,
     )
-    apply_headroom_cap = (
-        native_linux_nvidia or tight or effective < _NATIVE_LINUX_PREFILL_CLAMP_MB
-    )
+    apply_headroom_cap = native_linux_nvidia or tight or effective < _NATIVE_LINUX_PREFILL_CLAMP_MB
     if apply_headroom_cap:
         base_batch = min(int(base_batch), top_batch)
         base_ubatch = min(int(base_ubatch), top_ubatch)
@@ -771,10 +791,7 @@ def llama_load_profile_ladder(
 
     steps: list[tuple[int, int, int | None, bool]] = []
     speed_scale = env_bool("SEISO_LLAMA_SPEED_SCALE", not native_linux_nvidia)
-    native_flash_ok = (
-        not native_linux_nvidia
-        or env_bool("SEISO_LLAMA_UNSAFE_FLASH_ATTN", False)
-    )
+    native_flash_ok = not native_linux_nvidia or env_bool("SEISO_LLAMA_UNSAFE_FLASH_ATTN", False)
     primary_flash = (
         n_gpu_layers != 0
         and not tight
@@ -783,6 +800,15 @@ def llama_load_profile_ladder(
     )
 
     if tier == "normal":
+        if tight:
+            steps.append(
+                (
+                    min(base_batch, _NATIVE_LINUX_TIGHT_BATCH[0]),
+                    min(base_ubatch, _NATIVE_LINUX_TIGHT_BATCH[1]),
+                    min(n_ctx, 2048),
+                    False,
+                )
+            )
         if (
             speed_scale
             and not native_linux_nvidia
@@ -892,18 +918,14 @@ def available_ram_mb() -> int:
             stat = MEMORYSTATUSEX()
             stat.dwLength = ctypes.sizeof(MEMORYSTATUSEX)
             windll = getattr(ctypes, "windll", None)
-            if windll is not None and windll.kernel32.GlobalMemoryStatusEx(
-                ctypes.byref(stat)
-            ):
+            if windll is not None and windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(stat)):
                 return int(stat.ullAvailPhys / (1024**2))
         except Exception:
             pass
     return int(float(hardware_profile().get("ram_gb") or 8) * 1024 * 0.5)
 
 
-def build_hf_max_memory(
-    *, reserve_ratio: float = _DEFAULT_RESERVE_RATIO
-) -> dict[int, str] | None:
+def build_hf_max_memory(*, reserve_ratio: float = _DEFAULT_RESERVE_RATIO) -> dict[int, str] | None:
     """Build HuggingFace ``max_memory`` unless caps are explicitly disabled."""
     if env_bool("SEISO_DISABLE_MEMORY_CAPS", False):
         return None
@@ -991,9 +1013,7 @@ def assess_path_memory_fit_for_load(
         active_pool.prepare_for_load(str(path), backend)
     fit = assess_path_memory_fit(path, mode=mode)
     profile = hardware_profile()
-    defer = _llamacpp_deferred_preflight_platform(
-        fit, backend=backend, mode=mode, profile=profile
-    )
+    defer = _llamacpp_deferred_preflight_platform(fit, backend=backend, mode=mode, profile=profile)
     if defer:
         fit = dict(fit)
         fit["memory_load_blocked"] = False
@@ -1049,9 +1069,7 @@ def ensure_load_fits(
     """Block model loads that exceed measured memory headroom."""
     fit = assess_path_memory_fit_for_load(path, mode=mode, backend=backend)
     if fit.get("memory_load_blocked"):
-        reason = (
-            fit.get("memory_load_blocked_reason") or "Model exceeds available memory"
-        )
+        reason = fit.get("memory_load_blocked_reason") or "Model exceeds available memory"
         if allow_memory_overcommit():
             logger.warning("Memory overcommit allowed: %s", reason)
         else:
@@ -1239,9 +1257,7 @@ def trim_llama_messages_to_context(
         if content_tokens <= 0:
             continue
         target = max(32, content_tokens - (current - prompt_budget))
-        trimmed[idx]["content"] = _trim_message_content_to_token_budget(
-            content, target
-        )
+        trimmed[idx]["content"] = _trim_message_content_to_token_budget(content, target)
 
     return trimmed
 
@@ -1329,22 +1345,34 @@ def clamp_llama_load_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
 
     n_gpu_layers = int(out.get("n_gpu_layers") or 0)
     native_linux_nvidia = False
-    if model_path and n_gpu_layers != 0:
+    if model_path:
         free_mb = headroom_mb()
         tight = llama_model_is_tight_vram_fit(
             model_path=model_path,
             free_mb=free_mb,
             n_gpu_layers=n_gpu_layers,
             n_ctx=n_ctx,
+        ) or _native_dense_mid_size_prefill_risk(
+            model_path=model_path,
+            free_mb=free_mb,
         )
         with contextlib.suppress(Exception):
             native_linux_nvidia = seiso_platform.use_linux_nvidia_inference_guards()
-        batch_headroom = llama_effective_batch_headroom_mb(
-            free_mb,
-            model_path=model_path,
-            n_gpu_layers=n_gpu_layers,
-            n_ctx=n_ctx,
-        )
+        if native_linux_nvidia and n_gpu_layers == 0:
+            batch_headroom = llama_host_batch_headroom_mb(
+                model_path=model_path,
+                n_gpu_layers=n_gpu_layers,
+                free_vram_mb=free_mb,
+            )
+            if batch_headroom is None:
+                batch_headroom = free_mb
+        else:
+            batch_headroom = llama_effective_batch_headroom_mb(
+                free_mb,
+                model_path=model_path,
+                n_gpu_layers=n_gpu_layers,
+                n_ctx=n_ctx,
+            )
         if native_linux_nvidia and _gguf_has_mmproj_sibling(model_path):
             batch_headroom = max(_MIN_LLAMA_BATCH * 2, batch_headroom - 512)
         if native_linux_nvidia or tight:
@@ -1354,9 +1382,7 @@ def clamp_llama_load_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
                 tight=tight,
             )
         else:
-            max_batch, max_ubatch = clamp_llama_batch_pair(
-                _MAX_LLAMA_BATCH, 1024
-            )
+            max_batch, max_ubatch = clamp_llama_batch_pair(_MAX_LLAMA_BATCH, 1024)
         out["n_batch"], out["n_ubatch"] = clamp_llama_batch_pair(
             min(out["n_batch"], max_batch),
             min(out["n_ubatch"], max_ubatch),
@@ -1369,31 +1395,20 @@ def clamp_llama_load_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
             and not env_bool("SEISO_LLAMA_UNSAFE_FLASH_ATTN", False)
         ):
             try:
-                from seiso.inference.backends import (
-                    gguf_is_moe,
-                    gguf_uses_sliding_window_attention,
-                )
+                from seiso.inference.family_policy import policy_for_gguf
 
-                if model_path and (
-                    gguf_uses_sliding_window_attention(model_path)
-                    or gguf_is_moe(model_path)
-                ):
+                if model_path and not policy_for_gguf(str(model_path)).allow_flash_attn:
                     out.pop("flash_attn", None)
             except (ImportError, OSError, ValueError):
                 pass
-        if (
-            native_linux_nvidia
-            and tight
-            and n_gpu_layers != 0
-        ):
+        if native_linux_nvidia and tight and n_gpu_layers != 0:
             if not env_bool("SEISO_LLAMA_UNSAFE_FLASH_ATTN", False):
                 out.pop("flash_attn", None)
             if not env_bool("SEISO_LLAMA_UNSAFE_OP_OFFLOAD", False):
                 out["op_offload"] = False
             total_layers = gguf_total_layers(model_path)
-            if (
-                not env_bool("SEISO_LLAMA_UNSAFE_OP_OFFLOAD", False)
-                and (n_gpu_layers == -1 or n_gpu_layers >= total_layers)
+            if not env_bool("SEISO_LLAMA_UNSAFE_OP_OFFLOAD", False) and (
+                n_gpu_layers == -1 or n_gpu_layers >= total_layers
             ):
                 out["offload_kqv"] = False
 
@@ -1410,14 +1425,11 @@ def clamp_llama_load_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
         from seiso.agent_debug_log import agent_debug_enabled, agent_debug_log
 
         if agent_debug_enabled():
-            log_tight = (
-                n_gpu_layers != 0
-                and llama_model_is_tight_vram_fit(
-                    model_path=model_path,
-                    free_mb=headroom_mb(),
-                    n_gpu_layers=n_gpu_layers,
-                    n_ctx=int(out.get("n_ctx") or n_ctx),
-                )
+            log_tight = n_gpu_layers != 0 and llama_model_is_tight_vram_fit(
+                model_path=model_path,
+                free_mb=headroom_mb(),
+                n_gpu_layers=n_gpu_layers,
+                n_ctx=int(out.get("n_ctx") or n_ctx),
             )
             agent_debug_log(
                 hypothesis_id="B",

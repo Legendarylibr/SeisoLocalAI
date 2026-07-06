@@ -146,18 +146,16 @@ def _llama_skip_partial_offload(model_path: str) -> bool:
     if env_bool("SEISO_LLAMA_SKIP_PARTIAL_OFFLOAD", False):
         return True
     try:
-        from seiso.inference.backends import gguf_uses_sliding_window_attention
+        from seiso.inference.family_policy import policy_for_gguf
 
-        return gguf_uses_sliding_window_attention(model_path)
+        return not policy_for_gguf(model_path).allow_partial_offload
     except Exception:
         return False
 
 
 def _llama_speed_scale_enabled() -> bool:
     # Upscaled batches OOM during prefill after weights land on GPU.
-    if _native_linux_nvidia() and not env_bool(
-        "SEISO_LLAMA_UNSAFE_SPEED_SCALE", False
-    ):
+    if _native_linux_nvidia() and not env_bool("SEISO_LLAMA_UNSAFE_SPEED_SCALE", False):
         return False
     default = not _native_linux_nvidia()
     return env_bool("SEISO_LLAMA_SPEED_SCALE", default)
@@ -165,10 +163,18 @@ def _llama_speed_scale_enabled() -> bool:
 
 def _default_llama_flash_attn(model_path: str | None = None) -> bool:
     """flash_attn policy on Linux NVIDIA; defaults off, opt in via ``SEISO_LLAMA_FLASH_ATTN=true``."""
-    _ = model_path
     if not _native_linux_nvidia():
         return env_bool("SEISO_LLAMA_FLASH_ATTN", True)
-    return env_bool("SEISO_LLAMA_FLASH_ATTN", False)
+    if not env_bool("SEISO_LLAMA_FLASH_ATTN", False):
+        return False
+    if not model_path:
+        return True
+    try:
+        from seiso.inference.family_policy import policy_for_gguf
+
+        return policy_for_gguf(model_path).allow_flash_attn
+    except Exception:
+        return False
 
 
 def _llama_batch_defaults() -> tuple[int, int]:
@@ -195,14 +201,35 @@ def fit_llama_gpu_layers(
     )
 
     weight_mb = max(int(estimate_path_vram_mb(model_path)), 256)
-    if _native_linux_nvidia() and llama_model_is_tight_vram_fit(
-        model_path=model_path,
-        free_mb=headroom_mb,
-        n_gpu_layers=-1 if requested == -1 else max(requested, 1),
-        n_ctx=n_ctx,
+    native_mid_size_dense = False
+    if _native_linux_nvidia():
+        try:
+            from seiso.inference.family_policy import policy_for_gguf
+
+            policy = policy_for_gguf(model_path)
+            native_mid_size_dense = (
+                policy.kind == "dense"
+                and policy.prefill_tightness > 1.0
+                and 7 * 1024 <= weight_mb <= 16 * 1024
+                and headroom_mb <= 32 * 1024
+            )
+        except Exception:
+            native_mid_size_dense = False
+
+    if _native_linux_nvidia() and (
+        native_mid_size_dense
+        or llama_model_is_tight_vram_fit(
+            model_path=model_path,
+            free_mb=headroom_mb,
+            n_gpu_layers=-1 if requested == -1 else max(requested, 1),
+            n_ctx=n_ctx,
+        )
     ):
         # Leave real VRAM slack for near-capacity models during first-message prefill.
-        reserve_mb = max(2048, int(headroom_mb * 0.15))
+        reserve_ratio = 0.15
+        if native_mid_size_dense:
+            reserve_ratio = 0.20
+        reserve_mb = max(2048, int(headroom_mb * reserve_ratio))
         headroom_mb = max(0, headroom_mb - reserve_mb)
 
     total_layers = gguf_total_layers(model_path)
@@ -284,7 +311,7 @@ def _llama_layer_attempts(
 
     total_layers = gguf_total_layers(model_path)
 
-    if _apple_silicon_metal() and _mac_cpu_offload_enabled():
+    if not _native_linux_nvidia() and _apple_silicon_metal() and _mac_cpu_offload_enabled():
         max_layers = total_layers if requested == -1 else min(requested, total_layers)
         candidates = [
             max_layers - 1,
@@ -307,7 +334,7 @@ def _llama_layer_attempts(
         return [0]
 
     fallback_attempts: list[int] = []
-    high = min(total_layers - 1, fitted + 6)
+    high = fitted if _native_linux_nvidia() else min(total_layers - 1, fitted + 6)
     step = 4 if high - fitted > 12 else 2
     for layers in range(high, fitted - 1, -step):
         if layers > 0 and layers not in fallback_attempts:
@@ -352,9 +379,9 @@ def _llama_speed_extras(model_path: str) -> dict[str, Any]:
     """GGUF-metadata-driven llama.cpp knobs for throughput and VRAM headroom."""
     extras: dict[str, Any] = {}
     try:
-        from seiso.inference.backends import gguf_uses_sliding_window_attention
+        from seiso.inference.family_policy import policy_for_gguf
 
-        if gguf_uses_sliding_window_attention(model_path) and not env_bool(
+        if not policy_for_gguf(model_path).swa_full_default and not env_bool(
             "SEISO_LLAMA_SWA_FULL", False
         ):
             extras["swa_full"] = False
@@ -379,14 +406,9 @@ def _llama_kv_quant_options(model_path: str) -> list[dict[str, Any]]:
         unsafe = env_bool("SEISO_LLAMA_UNSAFE_KV_QUANT", False)
         if not unsafe and model_path:
             try:
-                from seiso.inference.backends import (
-                    gguf_is_moe,
-                    gguf_uses_sliding_window_attention,
-                )
+                from seiso.inference.family_policy import policy_for_gguf
 
-                if gguf_uses_sliding_window_attention(model_path) or gguf_is_moe(
-                    model_path
-                ):
+                if not policy_for_gguf(model_path).allow_kv_quant:
                     return [{}]
             except Exception:
                 pass
@@ -427,9 +449,7 @@ def _clear_optimal_layers_cache() -> None:
         _optimal_layers_cache.clear()
 
 
-def _llama_gpu_layers_optimal(
-    model_path: str, requested: int, *, n_ctx: int = 2048
-) -> int:
+def _llama_gpu_layers_optimal(model_path: str, requested: int, *, n_ctx: int = 2048) -> int:
     """Best layer count for current free VRAM — used to decide cache reload."""
     now = time.time()
     from seiso.memory.protection import headroom_mb
@@ -486,9 +506,7 @@ def llama_load_kwargs(n_ctx: int, *, model_path: str | None = None) -> dict[str,
     # installed llama-cpp-python wheel can't actually offload (e.g. CPU-only
     # wheel on an NVIDIA Linux box), force 0 to avoid a crash at Llama init.
     if n_gpu_layers != 0 and not _llama_gpu_offload_ok():
-        logger.debug(
-            "llama-cpp-python wheel lacks GPU offload support — forcing n_gpu_layers=0"
-        )
+        logger.debug("llama-cpp-python wheel lacks GPU offload support — forcing n_gpu_layers=0")
         n_gpu_layers = 0
 
     batch_default, ubatch_default = _llama_batch_defaults()
@@ -523,10 +541,7 @@ def llama_load_kwargs(n_ctx: int, *, model_path: str | None = None) -> dict[str,
 def _llama_load_retryable(exc: BaseException) -> bool:
     """True when llama.cpp init failed due to VRAM pressure and a smaller offload may work."""
     msg = str(exc)
-    if (
-        "Failed to load model from file" in msg
-        or "Failed to create llama_context" in msg
-    ):
+    if "Failed to load model from file" in msg or "Failed to create llama_context" in msg:
         return True
     try:
         from seiso.memory.protection import is_oom_error
@@ -607,10 +622,12 @@ def _load_llama_model(
         base_ubatch=int(kwargs.get("n_ubatch") or 256),
         tier=load_tier,
     )
+    full_gpu_profiles = [
+        *memory_profiles,
+        {"n_batch": 128, "n_ubatch": 128, "n_ctx": min(effective_n_ctx, 2048)},
+    ]
     kv_options = _llama_kv_quant_options(path)
-    fitted_layers = fit_llama_gpu_layers(
-        path, requested, free_mb, n_ctx=effective_n_ctx
-    )
+    fitted_layers = fit_llama_gpu_layers(path, requested, free_mb, n_ctx=effective_n_ctx)
     full_targets = _llama_full_gpu_targets(requested) if fitted_layers == -1 else []
     partial_targets = (
         _llama_layer_attempts(
@@ -625,9 +642,7 @@ def _load_llama_model(
     )
 
     last_exc: Exception | None = None
-    seen: set[tuple[int, tuple[tuple[str, Any], ...], tuple[tuple[str, Any], ...]]] = (
-        set()
-    )
+    seen: set[tuple[int, tuple[tuple[str, Any], ...], tuple[tuple[str, Any], ...]]] = set()
 
     def _try_load(
         layers: int,
@@ -655,9 +670,7 @@ def _load_llama_model(
         if layers == 0:
             load_kwargs["offload_kqv"] = False
         else:
-            load_kwargs["offload_kqv"] = bool(
-                load_kwargs.get("offload_kqv", layers != 0)
-            )
+            load_kwargs["offload_kqv"] = bool(load_kwargs.get("offload_kqv", layers != 0))
         total_layers = gguf_total_layers(path)
         if layers > 0 and layers < total_layers:
             load_kwargs.pop("flash_attn", None)
@@ -752,17 +765,14 @@ def _load_llama_model(
             last_exc = exc
             release_cached_memory(sync=True)
             if log_retry:
-                logger.warning(
-                    "llama.cpp load failed at n_gpu_layers=%s — retrying", layers
-                )
+                logger.warning("llama.cpp load failed at n_gpu_layers=%s — retrying", layers)
             return None
 
     for layers in full_targets:
-        for profile_idx, profile in enumerate(memory_profiles):
+        for profile_idx, profile in enumerate(full_gpu_profiles):
             for kv_idx, kv_quant in enumerate(kv_options):
                 log_retry = (
-                    profile_idx == len(memory_profiles) - 1
-                    and kv_idx == len(kv_options) - 1
+                    profile_idx == len(full_gpu_profiles) - 1 and kv_idx == len(kv_options) - 1
                 )
                 llm = _try_load(layers, profile, kv_quant, log_retry=log_retry)
                 if llm is not None:
@@ -779,9 +789,7 @@ def _load_llama_model(
         for profile_idx, profile in enumerate(partial_profiles):
             for kqv_idx, kqv_option in enumerate(partial_kqv_options):
                 # KV-quantized caches can crash llama.cpp on partial offload (Qwen/MoE).
-                first_partial_attempt = (
-                    layer_idx == 0 and profile_idx == 0 and kqv_idx == 0
-                )
+                first_partial_attempt = layer_idx == 0 and profile_idx == 0 and kqv_idx == 0
                 final_partial_attempt = (
                     layer_idx == len(partial_targets) - 1
                     and profile_idx == len(partial_profiles) - 1
@@ -946,14 +954,10 @@ class ModelPool:
                     release_training_memory(handle.target_model, sync=False)
                     release_training_memory(handle.draft_model, sync=False)
                 else:
-                    model = (
-                        handle[0] if isinstance(handle, tuple) and handle else handle
-                    )
+                    model = handle[0] if isinstance(handle, tuple) and handle else handle
                     release_training_memory(model, sync=False)
             except Exception:
-                logger.debug(
-                    "Failed to release torch handle for %s", key, exc_info=True
-                )
+                logger.debug("Failed to release torch handle for %s", key, exc_info=True)
             del handle
 
         elif backend == BackendKind.MLX:
@@ -1005,11 +1009,7 @@ class ModelPool:
         if not active:
             return False
         if backend is not None:
-            raw = (
-                backend.value
-                if isinstance(backend, BackendKind)
-                else str(backend).lower()
-            )
+            raw = backend.value if isinstance(backend, BackendKind) else str(backend).lower()
             expected = _POOL_BACKEND_BY_API.get(raw, raw)
             if active.backend.value != expected:
                 return True
@@ -1030,9 +1030,7 @@ class ModelPool:
         backend: str | BackendKind | None = None,
     ) -> bool:
         """Unload the active model when switching and refresh GPU memory stats."""
-        should_unload = target_path is None or self.would_switch_model(
-            target_path, backend
-        )
+        should_unload = target_path is None or self.would_switch_model(target_path, backend)
         unloaded = False
         if should_unload and self.active_key:
             # Wait for in-flight inference so VRAM is actually freed before load.
@@ -1060,9 +1058,7 @@ class ModelPool:
             if backend != BackendKind.LLAMA:
                 return self._active.handle
             cached_layers = int(self._active.meta.get("n_gpu_layers", -1))
-            requested_layers = env_int(
-                "SEISO_LLAMA_GPU_LAYERS", _default_llama_gpu_layers()
-            )
+            requested_layers = env_int("SEISO_LLAMA_GPU_LAYERS", _default_llama_gpu_layers())
             if _llama_cache_is_optimal(
                 load_path,
                 cached_layers,
@@ -1136,14 +1132,10 @@ class ModelPool:
                 raise
             layer_meta: dict[str, Any] = {}
             if backend == BackendKind.LLAMA:
-                layer_meta["n_gpu_layers"] = int(
-                    getattr(handle, "_seiso_n_gpu_layers", -1)
-                )
+                layer_meta["n_gpu_layers"] = int(getattr(handle, "_seiso_n_gpu_layers", -1))
                 requested_ctx = int((meta or {}).get("n_ctx") or 0)
                 layer_meta["n_ctx"] = int(
-                    getattr(handle, "_seiso_n_ctx", requested_ctx)
-                    or requested_ctx
-                    or 0
+                    getattr(handle, "_seiso_n_ctx", requested_ctx) or requested_ctx or 0
                 )
             with self._lock:
                 if (
@@ -1198,9 +1190,7 @@ class ModelPool:
             return _load_llama_model(path, n_ctx, tier=tier)
 
         norm = self.normalize_path(model_path)
-        requested_layers = env_int(
-            "SEISO_LLAMA_GPU_LAYERS", _default_llama_gpu_layers()
-        )
+        requested_layers = env_int("SEISO_LLAMA_GPU_LAYERS", _default_llama_gpu_layers())
         with self._lock:
             if (
                 tier == "normal"
@@ -1211,12 +1201,16 @@ class ModelPool:
             ):
                 cached_ctx = int(self._active.meta.get("n_ctx") or 0)
                 cached_layers = int(self._active.meta.get("n_gpu_layers", -1))
-                if cached_ctx >= n_ctx and _llama_cache_is_optimal(
-                    str(self._active.meta.get("path") or model_path),
-                    cached_layers,
-                    requested_layers,
-                    n_ctx=n_ctx,
-                ) and _llama_cache_headroom_ok(self._active.handle):
+                if (
+                    cached_ctx >= n_ctx
+                    and _llama_cache_is_optimal(
+                        str(self._active.meta.get("path") or model_path),
+                        cached_layers,
+                        requested_layers,
+                        n_ctx=n_ctx,
+                    )
+                    and _llama_cache_headroom_ok(self._active.handle)
+                ):
                     return self._active.handle
 
         key = f"llama:{norm}" if tier == "normal" else f"llama:{norm}:{tier}"
@@ -1248,9 +1242,7 @@ class ModelPool:
             return self.get_llama(model_path, n_ctx=n_ctx, tier=tier)
 
         def loader(path: str):
-            return _load_llama_model(
-                path, n_ctx, tier=tier, batch_override=batch_override
-            )
+            return _load_llama_model(path, n_ctx, tier=tier, batch_override=batch_override)
 
         norm = self.normalize_path(model_path)
         key = f"llama:{norm}:{tier}:batch:{batch_override[0]}:{batch_override[1]}"
@@ -1291,17 +1283,13 @@ class ModelPool:
 
         return self.switch(model_path, BackendKind.MLX, loader)
 
-    def get_torch(
-        self, model_path: str, *, load_in_4bit: bool = True
-    ) -> tuple[Any, Any]:
+    def get_torch(self, model_path: str, *, load_in_4bit: bool = True) -> tuple[Any, Any]:
         def loader(path: str):
             return self._load_torch_pair(path, load_in_4bit=load_in_4bit)
 
         return self.switch(model_path, BackendKind.TORCH, loader)
 
-    def _load_torch_pair(
-        self, model_path: str, *, load_in_4bit: bool = True
-    ) -> tuple[Any, Any]:
+    def _load_torch_pair(self, model_path: str, *, load_in_4bit: bool = True) -> tuple[Any, Any]:
         from seiso.inference.tuning import apply_inference_kernels, prepare_torch_model
         from seiso.models.loader import LoadOptions, ModelKind, load_model
 
