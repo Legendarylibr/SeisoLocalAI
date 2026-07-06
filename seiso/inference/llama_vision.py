@@ -48,6 +48,17 @@ def _name_suggests_vision(name: str) -> bool:
     return any(marker in hay for marker in _GEMMA_VISION_MARKERS)
 
 
+def model_suggests_vision(model_path: str | Path) -> bool:
+    """True when the chat model itself looks vision-capable (not just a sibling mmproj)."""
+    name = Path(model_path).name.lower()
+    if _name_suggests_vision(name):
+        return True
+    from seiso.inference.backends import gguf_architecture
+
+    arch = (gguf_architecture(str(model_path)) or "").lower()
+    return any(token in arch for token in ("vision", "clip", "mmproj", "vl"))
+
+
 def gguf_filename_suggests_vision(filename: str | None) -> bool:
     """True when a GGUF filename or repo id likely denotes a vision chat model."""
     return _name_suggests_vision(filename or "")
@@ -190,14 +201,9 @@ def apply_llama_vision_load_kwargs(
     mmproj = resolve_mmproj_path(model_path)
     if not mmproj:
         return load_kwargs
-    name = Path(model_path).name.lower()
-    # Text-only Gemma in a shared download dir must not pick up a sibling mmproj.
-    if "gemma" in name and not _name_suggests_vision(name):
-        from seiso.inference.backends import gguf_architecture
-
-        arch = (gguf_architecture(model_path) or "").lower()
-        if not any(token in arch for token in ("vision", "clip", "mmproj", "vl")):
-            return load_kwargs
+    # Text-only models in a shared download dir must not pick up a sibling mmproj.
+    if not model_suggests_vision(model_path):
+        return load_kwargs
     handler = build_llama_vision_chat_handler(model_path, mmproj)
     if handler is None:
         return load_kwargs

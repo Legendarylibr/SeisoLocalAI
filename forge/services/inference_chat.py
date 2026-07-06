@@ -428,7 +428,13 @@ async def resolve_draft_model(
                 draft_selected.get("hardware_note")
                 or "Draft model download is incomplete",
             )
-        draft_path = draft_selected.get("path")
+        draft_path = await resolve_model_path(
+            db,
+            user_id,
+            model_id=draft_model_id,
+            model_path=None,
+            data_dir=settings.data_dir,
+        )
         if not draft_path:
             raise HTTPException(
                 400, "Draft model must be a local safetensors/checkpoint path"

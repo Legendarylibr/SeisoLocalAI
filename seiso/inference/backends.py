@@ -97,13 +97,14 @@ class _GGUFMetadata:
 
 
 def is_dflash_draft(model_path: str) -> bool:
-    """Detect if a GGUF path is a dflash/draft model (specialized small draft for speculative decoding)."""
+    """Detect if a GGUF path is a dflash draft model for speculative decoding."""
+    if not _is_gguf_path(model_path):
+        return False
     arch = gguf_architecture(model_path)
     if arch and "dflash" in arch.lower():
         return True
-    name = Path(model_path).name.lower()
-    # Require an explicit draft marker; bare "draft" in community names is too broad.
-    return "dflash" in name or "-draft" in name or name.startswith("draft-")
+    # Name must explicitly say dflash; bare "-draft" matches too many community models.
+    return "dflash" in Path(model_path).name.lower()
 
 
 def _looks_like_gguf_file(path: Path) -> bool:

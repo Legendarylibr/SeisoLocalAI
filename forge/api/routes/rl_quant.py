@@ -143,13 +143,22 @@ async def start_rl_quant(
                     if isinstance(artifacts, dict):
                         gguf_path = artifacts.get("exported_gguf")
                 if gguf_path:
-                    await register_export_outputs(
-                        db,
-                        user_id=user_id,
-                        data_dir=settings.data_dir,
-                        outputs={"gguf_rl": str(gguf_path)},
-                        job_id=job_id,
-                    )
+                    try:
+                        await register_export_outputs(
+                            db,
+                            user_id=user_id,
+                            data_dir=settings.data_dir,
+                            outputs={"gguf_rl": str(gguf_path)},
+                            job_id=job_id,
+                        )
+                    except Exception:
+                        import logging
+
+                        logging.getLogger(__name__).exception(
+                            "RL quant inventory registration failed for job %s "
+                            "(job remains completed)",
+                            job_id,
+                        )
         except Exception as exc:
             await db.update_rl_quant_job_status(
                 job_id,

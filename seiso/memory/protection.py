@@ -200,9 +200,9 @@ def is_oom_error(exc: BaseException) -> bool:
         "out of memory",
         "cuda out of memory",
         "mps out of memory",
-        "allocat",
         "insufficient memory",
         "failed to allocate",
+        "cannot allocate memory",
     )
     return any(n in msg for n in needles)
 
@@ -1015,11 +1015,15 @@ def _messages_have_vision_content(messages: list[dict[str, Any]]) -> bool:
 
 
 def _gguf_has_mmproj_sibling(model_path: str | Path) -> bool:
-    """True when a colocated mmproj GGUF suggests a vision-capable chat model."""
+    """True when a colocated mmproj GGUF is present for a vision-capable chat model."""
     path = Path(model_path)
     if not path.is_file():
         return False
-    return any("mmproj" in item.name.lower() for item in path.parent.glob("*.gguf"))
+    from seiso.inference.llama_vision import model_suggests_vision, resolve_mmproj_path
+
+    if not model_suggests_vision(path):
+        return False
+    return resolve_mmproj_path(path) is not None
 
 
 def _estimate_prompt_tokens(messages: list[dict[str, Any]]) -> int:

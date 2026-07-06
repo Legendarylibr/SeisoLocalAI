@@ -162,6 +162,26 @@ def test_available_backends_allows_dflash_draft_for_speculative(tmp_path: Path):
     assert BACKEND_LLAMASWAP in backends
 
 
+def test_is_dflash_draft_requires_gguf_and_name_or_arch(tmp_path: Path):
+    from seiso.inference.backends import is_dflash_draft
+
+    dflash = tmp_path / "model-dflash.gguf"
+    _write_minimal_gguf(dflash, "llama")
+    assert is_dflash_draft(str(dflash))
+
+    arch = tmp_path / "draft.gguf"
+    _write_minimal_gguf(arch, "dflash")
+    assert is_dflash_draft(str(arch))
+
+    # Bare "-draft" / draft- prefix without dflash signal is not enough
+    plain = tmp_path / "my-draft-model.gguf"
+    _write_minimal_gguf(plain, "llama")
+    assert not is_dflash_draft(str(plain))
+
+    # Non-GGUF paths are never dflash drafts
+    assert not is_dflash_draft(str(tmp_path / "draft-model"))
+
+
 @pytest.mark.asyncio
 async def test_resolve_preload_context_uses_chat_sized_context(monkeypatch, tmp_path):
     from forge.services import inference_chat

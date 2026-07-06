@@ -1311,8 +1311,23 @@ class ModelPool:
         key = f"spec:{target_norm}:{draft_norm}"
 
         def loader(_path: str) -> TorchSpeculativeBundle:
-            from seiso.memory.protection import ensure_load_fits
+            from seiso.memory.protection import (
+                MemoryLoadBlockedError,
+                allow_memory_overcommit,
+                ensure_load_fits,
+                estimate_path_vram_mb,
+                headroom_mb,
+            )
 
+            target_mb = int(estimate_path_vram_mb(target_path, mode="chat"))
+            draft_mb = int(estimate_path_vram_mb(draft_path, mode="chat"))
+            needed_mb = target_mb + draft_mb
+            free_mb = headroom_mb()
+            if needed_mb > free_mb and not allow_memory_overcommit():
+                raise MemoryLoadBlockedError(
+                    f"Speculative pair needs ~{needed_mb}MB "
+                    f"(target={target_mb}MB + draft={draft_mb}MB) but only {free_mb}MB free"
+                )
             ensure_load_fits(target_path, mode="chat", backend=BackendKind.TORCH.value)
             ensure_load_fits(draft_path, mode="chat", backend=BackendKind.TORCH.value)
             target_model, target_tokenizer = self._load_torch_pair(
@@ -1387,6 +1402,19 @@ class DflashDraftHandle:
         self.n_ctx = n_ctx
         self._infer_lock = threading.Lock()
 
+    def dispose(self) -> None:
+        """Close the native handle only after in-flight infer finishes."""
+        with self._infer_lock:
+            llm = self.llm
+            self.llm = None
+            if llm is None:
+                return
+            try:
+                if hasattr(llm, "close"):
+                    llm.close()
+            except Exception:
+                logger.debug("Failed to close dflash draft handle", exc_info=True)
+
 
 _dflash_draft_cache: dict[str, DflashDraftHandle] = {}
 _dflash_draft_lock = threading.Lock()
@@ -1410,14 +1438,15 @@ def get_dflash_draft(model_path: str, *, n_ctx: int = 4096) -> DflashDraftHandle
     with _dflash_lock_for(norm):
         with _dflash_draft_lock:
             cached = _dflash_draft_cache.get(norm)
-            if cached is not None and cached.n_ctx >= n_ctx:
+            if cached is not None and cached.n_ctx >= n_ctx and cached.llm is not None:
                 return cached
 
         llm = _load_dflash_llm(resolved, n_ctx)
 
+        old_cached: DflashDraftHandle | None = None
         with _dflash_draft_lock:
             cached = _dflash_draft_cache.get(norm)
-            if cached is not None and cached.n_ctx >= n_ctx:
+            if cached is not None and cached.n_ctx >= n_ctx and cached.llm is not None:
                 try:
                     if hasattr(llm, "close"):
                         llm.close()
@@ -1425,14 +1454,14 @@ def get_dflash_draft(model_path: str, *, n_ctx: int = 4096) -> DflashDraftHandle
                     logger.debug("Failed to close duplicate dflash draft", exc_info=True)
                 return cached
             if cached is not None:
-                try:
-                    if hasattr(cached.llm, "close"):
-                        cached.llm.close()
-                except Exception:
-                    logger.debug("Failed to close replaced dflash draft", exc_info=True)
+                # Drop from cache first so new callers do not receive a disposed handle.
+                _dflash_draft_cache.pop(norm, None)
+                old_cached = cached
             handle = DflashDraftHandle(llm, n_ctx=n_ctx)
             _dflash_draft_cache[norm] = handle
-            return handle
+        if old_cached is not None:
+            old_cached.dispose()
+        return handle
 
 
 def dflash_draft_infer(
@@ -1453,13 +1482,16 @@ def dflash_draft_infer(
     gen_kwargs: dict[str, Any] = {
         "max_tokens": max_tokens,
         "echo": False,
-        "temperature": max(temperature, 0.0) if temperature > 0 else 0.0,
+        "temperature": max(temperature, 0.0) if temperature and temperature > 0 else 0.0,
     }
-    if temperature <= 0:
+    if not temperature or temperature <= 0:
         gen_kwargs["temperature"] = 0.0
 
     if infer_lock is not None:
         with infer_lock:
+            llm = draft.llm
+            if llm is None:
+                return ""
             out = llm(current_text, **gen_kwargs)
     else:
         out = llm(current_text, **gen_kwargs)
@@ -1470,13 +1502,10 @@ def dflash_draft_infer(
 def clear_dflash_draft_cache() -> None:
     """Release cached dflash draft models."""
     with _dflash_draft_lock:
-        for handle in _dflash_draft_cache.values():
-            try:
-                if hasattr(handle.llm, "close"):
-                    handle.llm.close()
-            except Exception:
-                logger.debug("Failed to close cached dflash draft", exc_info=True)
+        handles = list(_dflash_draft_cache.values())
         _dflash_draft_cache.clear()
+    for handle in handles:
+        handle.dispose()
 
 
 def get_model_pool() -> ModelPool:

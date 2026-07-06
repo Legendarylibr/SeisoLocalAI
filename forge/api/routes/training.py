@@ -779,4 +779,6 @@ async def cancel_training(
         raise HTTPException(404, "Job not found")
     assert_job_owner(orchestrator, job_id, user_id)
     ok = await orchestrator.cancel(job_id)
+    if ok:
+        await db.update_job_status(job_id, "cancelled", user_id=user_id)
     return {"cancelled": ok}

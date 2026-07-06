@@ -80,7 +80,7 @@ async def register_training_checkpoint(
 
     return await db.upsert_model(
         user_id,
-        "training",
+        f"training:{job_id}",
         name=sanitize_filename(f"checkpoint-{job_id[:8]}"),
         path=str(resolved),
         format="safetensors",
@@ -100,6 +100,8 @@ async def register_export_outputs(
     registered: list[dict] = []
     for key, raw_path in outputs.items():
         path = Path(raw_path)
+        # Unique per job/key so multi-format exports do not hit (user_id, source).
+        source = f"export:{job_id}:{key}"
         if "gguf" in key.lower() or path.suffix.lower() == ".gguf":
             fmt = "gguf"
             name = path.parent.name if path.is_file() else path.name
@@ -115,7 +117,7 @@ async def register_export_outputs(
                 data_dir=data_dir,
                 path=path if path.is_dir() else path.parent,
                 name=name,
-                source="export",
+                source=source,
                 model_format=fmt,
                 metadata=meta,
             )
@@ -126,7 +128,7 @@ async def register_export_outputs(
                 data_dir=data_dir,
                 path=path,
                 name=f"{key}-{job_id[:8]}",
-                source="export",
+                source=source,
                 model_format="safetensors",
                 metadata={"job_id": job_id, "export_key": key},
             )
