@@ -41,15 +41,11 @@ def test_mlx_stream_kwargs_does_not_scale_prefill_by_headroom(monkeypatch):
     assert mlx_stream_kwargs({"max_tokens": 64})["prefill_step_size"] == 4096
 
 
-def test_mlx_stream_kwargs_with_temperature():
-    pytest = __import__("pytest")
-    try:
-        mlx_lm = pytest.importorskip("mlx_lm")
-        _ = mlx_lm  # used for skip only
-    except RuntimeError as exc:
-        if "No Metal device available" in str(exc):
-            pytest.skip(str(exc))
-        raise
+def test_mlx_stream_kwargs_with_temperature(monkeypatch):
+    monkeypatch.setattr(
+        "seiso.inference.tuning.build_mlx_sampler",
+        lambda payload: object() if float(payload.get("temperature", 0)) > 0 else None,
+    )
     kwargs = mlx_stream_kwargs({"max_tokens": 64, "temperature": 0.7, "top_p": 0.9})
     assert kwargs["max_tokens"] == 64
     assert kwargs["sampler"] is not None

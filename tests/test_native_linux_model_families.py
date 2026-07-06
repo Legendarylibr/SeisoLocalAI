@@ -108,7 +108,7 @@ UNSAFE_PARTIAL_FAMILIES = [
     ("arch", "prefix", "expect_swa", "expect_moe"),
     UNSAFE_PARTIAL_FAMILIES,
 )
-def test_unsafe_partial_offload_for_swa_and_moe_on_linux(
+def test_swa_and_moe_allow_partial_offload_by_default_on_linux(
     monkeypatch, tmp_path: Path, arch: str, prefix: str, expect_swa: bool, expect_moe: bool
 ):
     import seiso.inference.model_pool as mp
@@ -121,6 +121,28 @@ def test_unsafe_partial_offload_for_swa_and_moe_on_linux(
     gguf = tmp_path / f"{arch}.gguf"
     _write_arch_gguf(gguf, arch, extra=extra)
     monkeypatch.setattr(mp, "_native_linux_nvidia", lambda: True)
+
+    assert _llama_skip_partial_offload(str(gguf)) is False
+
+
+@pytest.mark.parametrize(
+    ("arch", "prefix", "expect_swa", "expect_moe"),
+    UNSAFE_PARTIAL_FAMILIES,
+)
+def test_skip_partial_offload_opt_in_on_linux(
+    monkeypatch, tmp_path: Path, arch: str, prefix: str, expect_swa: bool, expect_moe: bool
+):
+    import seiso.inference.model_pool as mp
+
+    extra: list[tuple[bytes, int]] = []
+    if expect_swa:
+        extra.append((prefix.encode() + b".attention.sliding_window", 512))
+    if expect_moe:
+        extra.append((prefix.encode() + b".expert_count", 8))
+    gguf = tmp_path / f"{arch}.gguf"
+    _write_arch_gguf(gguf, arch, extra=extra)
+    monkeypatch.setattr(mp, "_native_linux_nvidia", lambda: True)
+    monkeypatch.setenv("SEISO_LLAMA_SKIP_PARTIAL_OFFLOAD", "1")
 
     assert _llama_skip_partial_offload(str(gguf)) is True
 
@@ -151,38 +173,30 @@ def test_native_linux_flash_attn_family_policy(monkeypatch, tmp_path: Path):
     for key in list(os.environ):
         if key.startswith("SEISO_LLAMA_"):
             monkeypatch.delenv(key, raising=False)
-    monkeypatch.delenv("SEISO_LLAMA_UNSAFE_FLASH_ATTN", raising=False)
 
-    # Default remains off even for dense families.
-    monkeypatch.setenv("SEISO_LLAMA_FLASH_ATTN", "false")
-    dense = tmp_path / "llama.gguf"
-    _write_arch_gguf(dense, "llama")
-    assert "flash_attn" not in llama_load_kwargs(4096, model_path=str(dense))
-
-    # Dense may opt in via SEISO_LLAMA_FLASH_ATTN=true.
-    monkeypatch.setenv("SEISO_LLAMA_FLASH_ATTN", "true")
-    for arch in ("llama", "qwen2", "qwen3", "mistral"):
-        gguf = tmp_path / f"{arch}-optin.gguf"
-        _write_arch_gguf(gguf, arch)
+    # Default on for all families.
+    for arch in ("llama", "qwen2", "qwen3", "mistral", "gemma3", "deepseek2"):
+        extra = []
+        if arch == "gemma3":
+            extra = [(b"gemma3.attention.sliding_window", 512)]
+        if arch == "deepseek2":
+            extra = [(b"deepseek2.expert_count", 8)]
+        gguf = tmp_path / f"{arch}-default.gguf"
+        _write_arch_gguf(gguf, arch, extra=extra)
         clear_gguf_caches()
         kwargs = llama_load_kwargs(4096, model_path=str(gguf))
         assert kwargs.get("flash_attn") is True, arch
 
-    # MoE / SWA stay blocked without UNSAFE.
-    for arch, extra in (
-        ("gemma3", [(b"gemma3.attention.sliding_window", 512)]),
-        ("deepseek2", [(b"deepseek2.expert_count", 8)]),
-    ):
-        gguf = tmp_path / f"{arch}-blocked.gguf"
-        _write_arch_gguf(gguf, arch, extra=extra)
-        clear_gguf_caches()
-        kwargs = llama_load_kwargs(4096, model_path=str(gguf))
-        assert "flash_attn" not in kwargs, arch
+    # May opt out globally.
+    monkeypatch.setenv("SEISO_LLAMA_FLASH_ATTN", "false")
+    dense = tmp_path / "llama-off.gguf"
+    _write_arch_gguf(dense, "llama")
+    assert "flash_attn" not in llama_load_kwargs(4096, model_path=str(dense))
 
 
 def test_native_linux_kv_quant_dense_opt_in(monkeypatch, tmp_path: Path):
-    import types
     import sys
+    import types
 
     import seiso.inference.model_pool as mp
 
@@ -207,10 +221,12 @@ def test_native_linux_kv_quant_dense_opt_in(monkeypatch, tmp_path: Path):
     _write_arch_gguf(
         gemma, "gemma3", extra=[(b"gemma3.attention.sliding_window", 512)]
     )
-    assert mp._llama_kv_quant_options(str(gemma)) == [{}]
+    gemma_opts = mp._llama_kv_quant_options(str(gemma))
+    assert len(gemma_opts) == 2
+    assert gemma_opts[1]["type_k"] == 8
 
 
-def test_dense_qwen_allows_partial_while_swa_gemma_falls_back_to_cpu(
+def test_swa_gemma_allows_partial_offload_like_dense(
     monkeypatch, tmp_path: Path,
 ):
     import seiso.inference.model_pool as mp
@@ -238,8 +254,6 @@ def test_dense_qwen_allows_partial_while_swa_gemma_falls_back_to_cpu(
 
     def fits(path, **k):
         layers = k.get("n_gpu_layers")
-        if "gemma" in str(path):
-            return layers == 0
         if layers == -1:
             return False
         return layers == 27
@@ -250,4 +264,4 @@ def test_dense_qwen_allows_partial_while_swa_gemma_falls_back_to_cpu(
     )
 
     assert fit_llama_gpu_layers(str(qwen), -1, 12000, n_ctx=4096) == 27
-    assert fit_llama_gpu_layers(str(gemma), -1, 12000, n_ctx=4096) == 0
+    assert fit_llama_gpu_layers(str(gemma), -1, 12000, n_ctx=4096) == 27

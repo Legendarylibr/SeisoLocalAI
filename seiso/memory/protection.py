@@ -44,6 +44,8 @@ _MIN_LLAMA_BATCH = 128
 _NATIVE_LINUX_PREFILL_CLAMP_MB = 6144
 _NATIVE_LINUX_PREFILL_HEADROOM_DROP_RATIO = 0.85
 _NATIVE_LINUX_PREFILL_RESERVE_PER_256TOK_MB = 192
+_TIGHT_VRAM_FIT_RATIO = 0.65
+_NATIVE_LINUX_TIGHT_VRAM_FIT_RATIO = 0.60
 _MAX_JSONL_LOAD_MB = 512
 _MODEL_WEIGHT_VRAM_SUFFIXES = frozenset({".gguf", ".safetensors", ".bin"})
 
@@ -455,7 +457,14 @@ def llama_model_is_tight_vram_fit(
         n_gpu_layers=n_gpu_layers,
         free_mb=free_mb,
     )
-    return weight_mb + kv_mb >= int(free_mb * 0.65)
+    ratio = _TIGHT_VRAM_FIT_RATIO
+    with contextlib.suppress(Exception):
+        if (
+            n_gpu_layers != 0
+            and seiso_platform.use_linux_nvidia_inference_guards()
+        ):
+            ratio = _NATIVE_LINUX_TIGHT_VRAM_FIT_RATIO
+    return weight_mb + kv_mb >= int(free_mb * ratio)
 
 
 def llama_effective_batch_headroom_mb(
@@ -559,8 +568,15 @@ def llama_prefill_needs_reload(
         and free_mb < int(loaded_headroom_mb * _NATIVE_LINUX_PREFILL_HEADROOM_DROP_RATIO)
     )
     long_prefill = prompt_tokens > max(1024, min(loaded_n_batch, _MAX_LLAMA_BATCH) // 2)
-    needs_reload = (long_prefill and int(loaded_n_batch or 0) > safe_batch) or (
-        headroom_dropped and int(loaded_n_batch or 0) > safe_batch
+    tight_prefill = llama_model_is_tight_vram_fit(
+        model_path=model_path,
+        free_mb=free_mb,
+        n_gpu_layers=loaded_n_gpu_layers,
+        n_ctx=n_ctx,
+    )
+    loaded_batch = int(loaded_n_batch or 0)
+    needs_reload = loaded_batch > safe_batch and (
+        long_prefill or headroom_dropped or tight_prefill
     )
     return needs_reload, safe_batch, min(safe_ubatch, safe_batch)
 
@@ -609,11 +625,8 @@ def llama_load_profile_ladder(
         base_ubatch = min(base_ubatch, 1024, base_batch)
 
     steps: list[tuple[int, int, int | None, bool]] = []
-    speed_scale = env_bool("SEISO_LLAMA_SPEED_SCALE", not native_linux_nvidia)
-    native_flash_ok = (
-        not native_linux_nvidia
-        or env_bool("SEISO_LLAMA_UNSAFE_FLASH_ATTN", False)
-    )
+    speed_scale = env_bool("SEISO_LLAMA_SPEED_SCALE", True)
+    native_flash_ok = env_bool("SEISO_LLAMA_FLASH_ATTN", True)
     primary_flash = (
         n_gpu_layers != 0
         and not tight
@@ -992,32 +1005,18 @@ def clamp_llama_load_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
             )
         if (
             native_linux_nvidia
-            and out.get("flash_attn")
-            and not env_bool("SEISO_LLAMA_UNSAFE_FLASH_ATTN", False)
-        ):
-            # MoE/SWA flash_attn stays blocked; dense may opt in via SEISO_LLAMA_FLASH_ATTN.
-            try:
-                from seiso.inference.backends import (
-                    gguf_is_moe,
-                    gguf_uses_sliding_window_attention,
-                )
-
-                if model_path and (
-                    gguf_uses_sliding_window_attention(model_path)
-                    or gguf_is_moe(model_path)
-                ):
-                    out.pop("flash_attn", None)
-            except Exception:
-                out.pop("flash_attn", None)
-        if (
-            native_linux_nvidia
             and tight
             and n_gpu_layers != 0
-            and not env_bool("SEISO_LLAMA_UNSAFE_OP_OFFLOAD", False)
         ):
-            out["op_offload"] = False
+            if not env_bool("SEISO_LLAMA_UNSAFE_FLASH_ATTN", False):
+                out.pop("flash_attn", None)
+            if not env_bool("SEISO_LLAMA_UNSAFE_OP_OFFLOAD", False):
+                out["op_offload"] = False
             total_layers = gguf_total_layers(model_path)
-            if n_gpu_layers == -1 or n_gpu_layers >= total_layers:
+            if (
+                not env_bool("SEISO_LLAMA_UNSAFE_OP_OFFLOAD", False)
+                and (n_gpu_layers == -1 or n_gpu_layers >= total_layers)
+            ):
                 out["offload_kqv"] = False
 
     ctx_cap = clamp_llama_n_ctx(n_ctx, max_tokens=512)

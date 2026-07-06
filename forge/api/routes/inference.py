@@ -228,7 +228,6 @@ async def get_chat_context(
 ) -> dict[str, Any]:
     """Context window usage for the chat UI."""
     from forge.services.chat_context import context_status_for_history
-    from forge.services.inference_models import get_inference_option
     from forge.services.knowledge_context import (
         format_knowledge_context,
         retrieve_knowledge_chunks,
