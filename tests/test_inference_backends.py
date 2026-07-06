@@ -19,6 +19,7 @@ from seiso.inference.backends import (
     gguf_architecture,
     gguf_block_count,
     gguf_context_length,
+    gguf_sliding_window,
     gguf_uses_sliding_window_attention,
     prepare_model_path,
     recommend_backend,
@@ -148,6 +149,7 @@ def test_gguf_metadata_reader_collects_context_blocks_and_swa(tmp_path: Path):
     assert gguf_context_length(str(gguf)) == 8192
     assert gguf_block_count(str(gguf)) == 32
     assert gguf_uses_sliding_window_attention(str(gguf)) is True
+    assert gguf_sliding_window(str(gguf)) == 4096
 
 
 def test_available_backends_allows_dflash_draft_for_speculative(tmp_path: Path):
@@ -1136,7 +1138,7 @@ async def test_list_inference_options_skips_partial_hf_gguf(monkeypatch, tmp_pat
         path=str(model_path),
         source="hf:org/Model",
         format="gguf",
-        size_bytes=model_path.stat().st_size,
+        size_bytes=10_000,
         metadata={
             "repo_id": "org/Model",
             "gguf_repo": "mirror/Model-GGUF",
@@ -1148,11 +1150,6 @@ async def test_list_inference_options_skips_partial_hf_gguf(monkeypatch, tmp_pat
         inference_models,
         "check_inference_runtime",
         lambda: InferenceRuntimeStatus(llamacpp=True, mlx=False, torch=False),
-    )
-    monkeypatch.setattr(
-        inference_models,
-        "get_gguf_file_size_bytes",
-        lambda _repo, _filename: 10_000,
     )
 
     options = await inference_models.list_inference_options(
@@ -1198,3 +1195,135 @@ async def test_list_inference_options_skips_hf_gguf_without_metadata(
     )
 
     assert options == []
+
+
+def test_llama_complete_retries_after_inference_oom(monkeypatch):
+    from seiso.inference.runner import LocalInferenceRunner
+
+    runner = LocalInferenceRunner()
+    calls: list[str] = []
+
+    fail_once = {"remaining": 1}
+
+    class FakeLlama:
+        def __init__(self, *, tier: str = "normal") -> None:
+            self._seiso_load_tier = tier
+
+        def create_chat_completion(self, **_kwargs):
+            if fail_once["remaining"] > 0:
+                fail_once["remaining"] -= 1
+                raise RuntimeError("CUDA out of memory. Tried to allocate 2.00 GiB")
+            return {"choices": [{"message": {"content": "ok"}}]}
+
+    def get_llama(_path, n_ctx=4096, *, tier="normal"):
+        calls.append(f"get:{tier}")
+        return FakeLlama(tier=tier)
+
+    def reload_llama(_path, n_ctx, *, tier):
+        calls.append(f"reload:{tier}")
+        return FakeLlama(tier=tier)
+
+    monkeypatch.setattr(runner._pool, "get_llama", get_llama)
+    monkeypatch.setattr(runner._pool, "reload_llama", reload_llama)
+    monkeypatch.setattr(runner._pool, "is_generation_active", lambda _gid: True)
+    monkeypatch.setattr(
+        "seiso.inference.runner.release_cached_memory", lambda sync=False: None
+    )
+
+    reply = runner._llama_complete(
+        {"messages": [{"role": "user", "content": "hi"}], "max_tokens": 32},
+        "/tmp/model.gguf",
+        generation_id=1,
+    )
+
+    assert reply == "ok"
+    assert calls == ["get:normal", "reload:compact"]
+
+
+def test_llama_complete_prefill_guard_reloads_before_native_linux_segfault(
+    monkeypatch,
+):
+    from seiso.inference.runner import LocalInferenceRunner
+
+    runner = LocalInferenceRunner()
+    calls: list[str] = []
+    seen_overrides: list[tuple[int, int] | None] = []
+
+    class FakeLlama:
+        def __init__(self, *, batch: int, tier: str = "normal") -> None:
+            self._seiso_load_tier = tier
+            self._seiso_n_batch = batch
+            self._seiso_n_ubatch = min(batch, 1024)
+            self._seiso_n_gpu_layers = -1
+            self._seiso_load_headroom_mb = 24576
+            self._seiso_model_path = "/tmp/model.gguf"
+
+        def create_chat_completion(self, **_kwargs):
+            calls.append(f"complete:{self._seiso_n_batch}")
+            return {"choices": [{"message": {"content": "ok"}}]}
+
+    def get_llama(_path, n_ctx=4096, *, tier="normal"):
+        calls.append(f"get:{tier}")
+        return FakeLlama(batch=4096, tier=tier)
+
+    def reload_llama(_path, n_ctx, *, tier, batch_override=None):
+        calls.append(f"reload:{tier}")
+        seen_overrides.append(batch_override)
+        batch = batch_override[0] if batch_override else 4096
+        return FakeLlama(batch=batch, tier=tier)
+
+    monkeypatch.setattr(runner._pool, "get_llama", get_llama)
+    monkeypatch.setattr(runner._pool, "reload_llama", reload_llama)
+    monkeypatch.setattr(runner._pool, "is_generation_active", lambda _gid: True)
+    monkeypatch.setattr(
+        "seiso.inference.runner.release_cached_memory", lambda sync=False: None
+    )
+    monkeypatch.setattr(
+        "seiso.inference.runner.llama_prefill_needs_reload",
+        lambda **_kwargs: (True, 512, 128),
+    )
+
+    reply = runner._llama_complete(
+        {"messages": [{"role": "user", "content": "x" * 20000}], "max_tokens": 32},
+        "/tmp/model.gguf",
+        generation_id=1,
+    )
+
+    assert reply == "ok"
+    assert calls == ["get:normal", "reload:normal", "complete:512"]
+    assert seen_overrides == [(512, 128)]
+
+
+def test_llama_stream_does_not_retry_after_emitting_text(monkeypatch):
+    from seiso.inference.runner import LocalInferenceRunner
+
+    runner = LocalInferenceRunner()
+    reloads: list[str] = []
+
+    class FakeLlama:
+        _seiso_load_tier = "normal"
+
+        def create_chat_completion(self, **_kwargs):
+            def _stream():
+                yield {"choices": [{"delta": {"content": "hello"}}]}
+                raise RuntimeError("CUDA out of memory. Tried to allocate 2.00 GiB")
+
+            return _stream()
+
+    monkeypatch.setattr(runner._pool, "get_llama", lambda *_a, **_k: FakeLlama())
+    monkeypatch.setattr(
+        runner._pool,
+        "reload_llama",
+        lambda *_a, **kwargs: reloads.append(kwargs.get("tier", "")) or FakeLlama(),
+    )
+
+    stream = runner._llama_stream(
+        {"messages": [{"role": "user", "content": "hi"}], "max_tokens": 32},
+        "/tmp/model.gguf",
+        should_stop=lambda: False,
+    )
+
+    assert next(stream).text == "hello"
+    with pytest.raises(RuntimeError, match="after streaming began"):
+        next(stream)
+    assert reloads == []

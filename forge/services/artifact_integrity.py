@@ -138,5 +138,7 @@ def inventory_gguf_is_complete(
             size_lookup(gguf_repo, str(filename)) for filename in gguf_files
         )
     except Exception:
-        return True
+        expected_size = int(row.get("size_bytes") or 0)
+        if expected_size <= 0 and str(row.get("source") or "").startswith("hf:"):
+            return False
     return expected_size <= 0 or actual_size >= expected_size
