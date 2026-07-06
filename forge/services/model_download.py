@@ -10,6 +10,8 @@ import shutil
 from pathlib import Path
 from typing import Any
 
+import threading
+
 from forge.db.store import Database
 from forge.services.artifact_integrity import (
     gguf_files_complete_at_path,
@@ -35,6 +37,7 @@ from seiso.models.catalog import get_by_repo
 from seiso.security import sanitize_filename
 
 _DOWNLOAD_LOCKS: dict[str, asyncio.Lock] = {}
+_DOWNLOAD_LOCKS_GUARD = threading.Lock()
 
 
 def _emit_progress(
@@ -97,11 +100,8 @@ def _download_lock_key(
 
 
 def _get_download_lock(key: str) -> asyncio.Lock:
-    lock = _DOWNLOAD_LOCKS.get(key)
-    if lock is None:
-        lock = asyncio.Lock()
-        _DOWNLOAD_LOCKS[key] = lock
-    return lock
+    with _DOWNLOAD_LOCKS_GUARD:
+        return _DOWNLOAD_LOCKS.setdefault(key, asyncio.Lock())
 
 
 async def find_inventory_for_catalog_repo(

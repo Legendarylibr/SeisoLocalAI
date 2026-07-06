@@ -33,6 +33,25 @@ def test_pick_gguf_files_rejects_incomplete_shard_group():
     assert _pick_gguf_files(files, preferred_quant="Q4_K_M") == []
 
 
+def test_pick_gguf_files_rejects_duplicate_shard_indices():
+    files = [
+        "model-Q4_K_M-00001-of-00003.gguf",
+        "model-Q4_K_M-00001-of-00003.gguf",
+        "model-Q4_K_M-00002-of-00003.gguf",
+    ]
+
+    assert _pick_gguf_files(files, preferred_quant="Q4_K_M") == []
+
+
+def test_pick_gguf_files_rejects_incomplete_even_with_non_sharded():
+    files = [
+        "model-Q4_K_M-00001-of-00002.gguf",
+        "other-Q4_K_M.gguf",
+    ]
+
+    assert _pick_gguf_files(files, preferred_quant="Q4_K_M") == []
+
+
 def test_resolve_hf_cache_env(monkeypatch, tmp_path):
     monkeypatch.delenv("HUGGINGFACE_HUB_CACHE", raising=False)
     monkeypatch.delenv("HF_HOME", raising=False)

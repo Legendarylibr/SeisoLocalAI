@@ -202,6 +202,7 @@ class LocalInferenceRunner:
             output_tokens = 0
             flushed_once = False
             batch_chars = _stream_batch_chars()
+            self._pool.begin_inference()
             try:
                 for part in self._iter_tokens(
                     payload, resolved_path, route, should_stop
@@ -244,6 +245,7 @@ class LocalInferenceRunner:
                 if not should_stop():
                     loop.call_soon_threadsafe(queue.put_nowait, _StreamError(exc))
             finally:
+                self._pool.end_inference()
                 loop.call_soon_threadsafe(queue.put_nowait, _STREAM_DONE)
 
         threading.Thread(target=producer, daemon=True).start()
@@ -375,26 +377,30 @@ class LocalInferenceRunner:
         route: str,
         generation_id: int,
     ) -> str:
-        if route == "speculative":
-            chunks: list[str] = []
+        self._pool.begin_inference()
+        try:
+            if route == "speculative":
+                chunks: list[str] = []
 
-            def should_stop() -> bool:
-                return not self._pool.is_generation_active(generation_id)
+                def should_stop() -> bool:
+                    return not self._pool.is_generation_active(generation_id)
 
-            for token in self._torch_speculative_stream(
-                payload, model_path, should_stop
-            ):
-                if should_stop():
-                    break
-                chunks.append(token.text)
-            return "".join(chunks)
-        if route == "mlx":
-            return self._mlx_complete(payload, model_path, generation_id)
-        if route == "torch":
-            return self._torch_complete(payload, model_path, generation_id)
-        if route == "llamaswap":
-            return self._llamaswap_complete(payload, model_path, generation_id)
-        return self._llama_complete(payload, model_path, generation_id)
+                for token in self._torch_speculative_stream(
+                    payload, model_path, should_stop
+                ):
+                    if should_stop():
+                        break
+                    chunks.append(token.text)
+                return "".join(chunks)
+            if route == "mlx":
+                return self._mlx_complete(payload, model_path, generation_id)
+            if route == "torch":
+                return self._torch_complete(payload, model_path, generation_id)
+            if route == "llamaswap":
+                return self._llamaswap_complete(payload, model_path, generation_id)
+            return self._llama_complete(payload, model_path, generation_id)
+        finally:
+            self._pool.end_inference()
 
     def _torch_speculative_stream(
         self,
@@ -669,24 +675,26 @@ class LocalInferenceRunner:
 
         thread = threading.Thread(target=_generate, daemon=True)
         thread.start()
-        while True:
-            if should_stop():
-                break
-            if generation_errors:
-                raise generation_errors[0]
-            try:
-                text = next(streamer)
-            except StopIteration:
-                break
-            except Empty:
-                if not thread.is_alive():
-                    if generation_errors:
-                        raise generation_errors[0] from None
+        try:
+            while True:
+                if should_stop():
                     break
-                continue
-            if text:
-                yield StreamToken(text)
-        thread.join(timeout=0)
+                if generation_errors:
+                    raise generation_errors[0]
+                try:
+                    text = next(streamer)
+                except StopIteration:
+                    break
+                except Empty:
+                    if not thread.is_alive():
+                        if generation_errors:
+                            raise generation_errors[0] from None
+                        break
+                    continue
+                if text:
+                    yield StreamToken(text)
+        finally:
+            thread.join(timeout=_torch_stream_timeout_s())
         if generation_errors and not should_stop():
             raise generation_errors[0]
 
@@ -807,7 +815,10 @@ class LocalInferenceRunner:
                 )
         if not self._pool.is_generation_active(generation_id):
             return ""
-        message = out["choices"][0].get("message") or {}
+        choices = out.get("choices") or []
+        if not choices:
+            return ""
+        message = choices[0].get("message") or {}
         return str(message.get("content") or "")
 
     def _llamaswap_complete(

@@ -1140,8 +1140,8 @@ def clamp_llama_load_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
                     or gguf_is_moe(model_path)
                 ):
                     out.pop("flash_attn", None)
-            except Exception:
-                out.pop("flash_attn", None)
+            except (ImportError, OSError, ValueError):
+                pass
         if (
             native_linux_nvidia
             and tight

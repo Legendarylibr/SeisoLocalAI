@@ -423,7 +423,8 @@ def _refresh_headroom_stats(*, force: bool = False) -> None:
 
 
 def _clear_optimal_layers_cache() -> None:
-    _optimal_layers_cache.clear()
+    with _optimal_layers_lock:
+        _optimal_layers_cache.clear()
 
 
 def _llama_gpu_layers_optimal(
@@ -806,6 +807,11 @@ class BackendKind(StrEnum):
     LLAMA = LLAMACPP
 
 
+_switch_load_lock = threading.Lock()
+_dflash_key_locks: dict[str, threading.Lock] = {}
+_dflash_key_locks_guard = threading.Lock()
+
+
 @dataclass
 class LoadedModel:
     key: str
@@ -826,6 +832,8 @@ class ModelPool:
     def __init__(self) -> None:
         self._active: LoadedModel | None = None
         self._generation = 0
+        self._inference_refs = 0
+        self._unload_pending = False
 
     @classmethod
     def get(cls) -> ModelPool:
@@ -854,9 +862,51 @@ class ModelPool:
         with self._lock:
             return generation_id == self._generation
 
+    def begin_inference(self) -> None:
+        with self._lock:
+            self._inference_refs += 1
+
+    def end_inference(self) -> None:
+        should_unload = False
+        with self._lock:
+            self._inference_refs = max(0, self._inference_refs - 1)
+            if self._inference_refs == 0 and self._unload_pending:
+                should_unload = True
+        if should_unload:
+            self.unload_all()
+
     def cancel_and_unload(self) -> None:
         """Stop lagging streams and release VRAM/RAM."""
         self.bump_generation()
+        with self._lock:
+            self._unload_pending = True
+            if self._inference_refs > 0:
+                return
+        self.unload_all()
+        clear_dflash_draft_cache()
+
+    def _wait_for_inference_idle(self, timeout_s: float = 30.0) -> None:
+        """Wait for active completions/streams to release their pool refs."""
+        deadline = time.time() + timeout_s
+        while time.time() < deadline:
+            with self._lock:
+                if self._inference_refs == 0:
+                    return
+            time.sleep(0.05)
+        with self._lock:
+            if self._inference_refs > 0:
+                logger.warning(
+                    "Inference still active after %.1fs — forcing unload",
+                    timeout_s,
+                )
+                self._inference_refs = 0
+
+    def _clear_active_for_switch(self) -> None:
+        """Stop streams, wait for idle, then unload so a new model can load."""
+        self.bump_generation()
+        self._wait_for_inference_idle()
+        with self._lock:
+            self._unload_pending = False
         self.unload_all()
         clear_dflash_draft_cache()
 
@@ -901,12 +951,42 @@ class ModelPool:
         )
         unloaded = False
         if should_unload and self.active_key:
-            self.cancel_and_unload()
+            # Wait for in-flight inference so VRAM is actually freed before load.
+            self._clear_active_for_switch()
             unloaded = True
         if unloaded:
             _clear_optimal_layers_cache()
             _refresh_headroom_stats(force=True)
         return unloaded
+
+    def _switch_cache_hit(
+        self,
+        key: str,
+        backend: BackendKind,
+        load_path: str,
+        meta: dict[str, Any],
+    ) -> Any | None:
+        with self._lock:
+            if not self._active or self._active.key != key:
+                return None
+            needed_ctx = int(meta.get("n_ctx") or 0)
+            cached_ctx = int(self._active.meta.get("n_ctx") or 0)
+            if needed_ctx > 0 and cached_ctx < needed_ctx:
+                return None
+            if backend != BackendKind.LLAMA:
+                return self._active.handle
+            cached_layers = int(self._active.meta.get("n_gpu_layers", -1))
+            requested_layers = env_int(
+                "SEISO_LLAMA_GPU_LAYERS", _default_llama_gpu_layers()
+            )
+            if _llama_cache_is_optimal(
+                load_path,
+                cached_layers,
+                requested_layers,
+                n_ctx=needed_ctx or cached_ctx or 2048,
+            ) and _llama_cache_headroom_ok(self._active.handle):
+                return self._active.handle
+            return None
 
     def switch(
         self,
@@ -926,28 +1006,19 @@ class ModelPool:
         load_path = str(raw.absolute()) if raw.exists() else str(model_path)
         key = cache_key or f"{backend.value}:{norm}"
         meta = meta or {}
-        with self._lock:
-            if self._active and self._active.key == key:
-                needed_ctx = int(meta.get("n_ctx") or 0)
-                cached_ctx = int(self._active.meta.get("n_ctx") or 0)
-                if needed_ctx <= 0 or cached_ctx >= needed_ctx:
-                    if backend != BackendKind.LLAMA:
-                        return self._active.handle
-                    cached_layers = int(self._active.meta.get("n_gpu_layers", -1))
-                    requested_layers = env_int(
-                        "SEISO_LLAMA_GPU_LAYERS", _default_llama_gpu_layers()
-                    )
-                    if _llama_cache_is_optimal(
-                        load_path,
-                        cached_layers,
-                        requested_layers,
-                        n_ctx=needed_ctx or cached_ctx or 2048,
-                    ) and _llama_cache_headroom_ok(self._active.handle):
-                        return self._active.handle
+        cached = self._switch_cache_hit(key, backend, load_path, meta)
+        if cached is not None:
+            return cached
 
-            self.prepare_for_load(load_path, backend)
+        with _switch_load_lock:
+            cached = self._switch_cache_hit(key, backend, load_path, meta)
+            if cached is not None:
+                return cached
+
             if self._active:
-                self.unload_all()
+                self._clear_active_for_switch()
+                _clear_optimal_layers_cache()
+                _refresh_headroom_stats(force=True)
             from seiso.memory.protection import (
                 ensure_load_fits,
                 estimate_path_vram_mb,
@@ -966,7 +1037,7 @@ class ModelPool:
                 est_mb = int(estimate_path_vram_mb(load_path))
             if est_mb >= 8000 and headroom_mb() < int(est_mb * 0.98):
                 if self._active:
-                    self.cancel_and_unload()
+                    self._clear_active_for_switch()
                 self._free_memory()
                 release_cached_memory(sync=True)
                 _clear_optimal_layers_cache()
@@ -984,17 +1055,46 @@ class ModelPool:
                 layer_meta["n_gpu_layers"] = int(
                     getattr(handle, "_seiso_n_gpu_layers", -1)
                 )
-            self._active = LoadedModel(
-                key=key,
-                backend=backend,
-                handle=handle,
-                meta={
-                    "path": load_path,
-                    "norm_path": norm,
-                    **layer_meta,
-                    **(meta or {}),
-                },
-            )
+            with self._lock:
+                if (
+                    self._active
+                    and self._active.key == key
+                    and self._switch_cache_hit(key, backend, load_path, meta) is not None
+                ):
+                    try:
+                        if hasattr(handle, "close"):
+                            handle.close()
+                    except Exception:
+                        logger.debug(
+                            "Failed to close duplicate load handle",
+                            exc_info=True,
+                        )
+                    return self._active.handle
+                if self._active:
+                    # Force-clear any stale active handle before install.
+                    stale = self._active
+                    self._active = None
+                    self._unload_pending = False
+                else:
+                    stale = None
+                    self._unload_pending = False
+                self._active = LoadedModel(
+                    key=key,
+                    backend=backend,
+                    handle=handle,
+                    meta={
+                        "path": load_path,
+                        "norm_path": norm,
+                        **layer_meta,
+                        **(meta or {}),
+                    },
+                )
+            if stale is not None:
+                try:
+                    if hasattr(stale.handle, "close"):
+                        stale.handle.close()
+                except Exception:
+                    logger.debug("Failed to close stale pool handle", exc_info=True)
             return handle
 
     def get_llama(
@@ -1168,13 +1268,18 @@ class ModelPool:
     def unload_all(self) -> None:
         """Release all loaded models and clear GPU memory."""
         with self._lock:
+            if self._inference_refs > 0:
+                self._unload_pending = True
+                return
             if not self._active:
+                self._unload_pending = False
                 clear_dflash_draft_cache()
                 return
             backend = self._active.backend
             key = self._active.key
             handle = self._active.handle
             self._active = None
+            self._unload_pending = False
 
         logger.info("Unloading model from VRAM: %s", key)
 
@@ -1184,7 +1289,7 @@ class ModelPool:
                 if hasattr(llm, "close"):
                     llm.close()
             except Exception:
-                pass
+                logger.debug("Failed to close llama handle for %s", key, exc_info=True)
             del llm
 
         elif backend == BackendKind.LLAMASWAP:
@@ -1204,7 +1309,9 @@ class ModelPool:
                     )
                     release_training_memory(model, sync=False)
             except Exception:
-                pass
+                logger.debug(
+                    "Failed to release torch handle for %s", key, exc_info=True
+                )
             del handle
 
         elif backend == BackendKind.MLX:
@@ -1249,37 +1356,43 @@ def _load_dflash_llm(resolved_path: str, n_ctx: int) -> Any:
     return _load_llama_model(resolved_path, n_ctx)
 
 
+def _dflash_lock_for(norm: str) -> threading.Lock:
+    with _dflash_key_locks_guard:
+        return _dflash_key_locks.setdefault(norm, threading.Lock())
+
+
 def get_dflash_draft(model_path: str, *, n_ctx: int = 4096) -> DflashDraftHandle:
     """Return a cached, thread-safe llama.cpp handle for dflash/draft GGUF models."""
     from seiso.inference.backends import BACKEND_LLAMACPP, prepare_model_path
 
     resolved = prepare_model_path(model_path, BACKEND_LLAMACPP)
     norm = str(Path(resolved).resolve())
-    with _dflash_draft_lock:
-        cached = _dflash_draft_cache.get(norm)
-        if cached is not None and cached.n_ctx >= n_ctx:
-            return cached
+    with _dflash_lock_for(norm):
+        with _dflash_draft_lock:
+            cached = _dflash_draft_cache.get(norm)
+            if cached is not None and cached.n_ctx >= n_ctx:
+                return cached
 
-    llm = _load_dflash_llm(resolved, n_ctx)
+        llm = _load_dflash_llm(resolved, n_ctx)
 
-    with _dflash_draft_lock:
-        cached = _dflash_draft_cache.get(norm)
-        if cached is not None and cached.n_ctx >= n_ctx:
-            try:
-                if hasattr(llm, "close"):
-                    llm.close()
-            except Exception:
-                pass
-            return cached
-        if cached is not None:
-            try:
-                if hasattr(cached.llm, "close"):
-                    cached.llm.close()
-            except Exception:
-                pass
-        handle = DflashDraftHandle(llm, n_ctx=n_ctx)
-        _dflash_draft_cache[norm] = handle
-        return handle
+        with _dflash_draft_lock:
+            cached = _dflash_draft_cache.get(norm)
+            if cached is not None and cached.n_ctx >= n_ctx:
+                try:
+                    if hasattr(llm, "close"):
+                        llm.close()
+                except Exception:
+                    logger.debug("Failed to close duplicate dflash draft", exc_info=True)
+                return cached
+            if cached is not None:
+                try:
+                    if hasattr(cached.llm, "close"):
+                        cached.llm.close()
+                except Exception:
+                    logger.debug("Failed to close replaced dflash draft", exc_info=True)
+            handle = DflashDraftHandle(llm, n_ctx=n_ctx)
+            _dflash_draft_cache[norm] = handle
+            return handle
 
 
 def dflash_draft_infer(
@@ -1322,7 +1435,7 @@ def clear_dflash_draft_cache() -> None:
                 if hasattr(handle.llm, "close"):
                     handle.llm.close()
             except Exception:
-                pass
+                logger.debug("Failed to close cached dflash draft", exc_info=True)
         _dflash_draft_cache.clear()
 
 

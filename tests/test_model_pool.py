@@ -43,6 +43,56 @@ def test_cancel_and_unload_clears_active():
     assert pool.active_key is None
 
 
+def test_cancel_and_unload_defers_while_inference_active(tmp_path):
+    pool = ModelPool()
+    model = tmp_path / "model.gguf"
+    model.write_bytes(b"gguf")
+    pool._active = LoadedModel(
+        key="llama:model",
+        backend=BackendKind.LLAMA,
+        handle=object(),
+        meta={"path": str(model), "norm_path": str(model.resolve())},
+    )
+    pool.begin_inference()
+    pool.cancel_and_unload()
+    assert pool.active_key is not None
+    pool.end_inference()
+    assert pool.active_key is None
+
+
+def test_switch_waits_for_inference_before_replacing(tmp_path):
+    pool = ModelPool()
+    first_path = tmp_path / "first.gguf"
+    second_path = tmp_path / "second.gguf"
+    first_path.write_bytes(b"gguf")
+    second_path.write_bytes(b"gguf")
+
+    class FakeLlama:
+        def __init__(self) -> None:
+            self.closed = False
+
+        def close(self) -> None:
+            self.closed = True
+
+    first = FakeLlama()
+    second = FakeLlama()
+    pool.switch(str(first_path), BackendKind.LLAMA, lambda _path: first)
+    pool.begin_inference()
+
+    def delayed_end() -> None:
+        time.sleep(0.15)
+        pool.end_inference()
+
+    threading.Thread(target=delayed_end, daemon=True).start()
+    started = time.time()
+    pool.switch(str(second_path), BackendKind.LLAMA, lambda _path: second)
+    elapsed = time.time() - started
+
+    assert first.closed is True
+    assert pool.status()["path"] == str(second_path.absolute())
+    assert elapsed >= 0.1
+
+
 def test_prepare_for_load_unloads_when_switching(tmp_path, monkeypatch):
     pool = ModelPool()
     first = tmp_path / "a.gguf"
@@ -66,6 +116,45 @@ def test_prepare_for_load_unloads_when_switching(tmp_path, monkeypatch):
     assert unloaded is True
     assert pool.active_key is None
     assert refreshed["calls"] == 1
+
+
+def test_prepare_for_load_waits_for_inference(tmp_path, monkeypatch):
+    pool = ModelPool()
+    first = tmp_path / "a.gguf"
+    second = tmp_path / "b.gguf"
+    first.write_bytes(b"a")
+    second.write_bytes(b"b")
+
+    class FakeLlama:
+        def __init__(self) -> None:
+            self.closed = False
+
+        def close(self) -> None:
+            self.closed = True
+
+    handle = FakeLlama()
+    pool._active = LoadedModel(
+        key="llama:a",
+        backend=BackendKind.LLAMA,
+        handle=handle,
+        meta={"path": str(first), "norm_path": str(first.resolve())},
+    )
+    monkeypatch.setattr("seiso.hardware.profile.hardware_profile", lambda **_: {})
+    pool.begin_inference()
+
+    def delayed_end() -> None:
+        time.sleep(0.15)
+        pool.end_inference()
+
+    threading.Thread(target=delayed_end, daemon=True).start()
+    started = time.time()
+    unloaded = pool.prepare_for_load(str(second), BackendKind.LLAMA)
+    elapsed = time.time() - started
+
+    assert unloaded is True
+    assert pool.active_key is None
+    assert handle.closed is True
+    assert elapsed >= 0.1
 
 
 def test_llama_gpu_layers_optimal_uses_short_ttl_cache(monkeypatch, tmp_path):

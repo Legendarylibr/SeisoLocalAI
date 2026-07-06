@@ -25,10 +25,6 @@ _VISION_NAME_MARKERS = (
     "vl-",
     "llava",
     "pixtral",
-    "gemma-3",
-    "gemma3",
-    "gemma-4",
-    "gemma4",
     "qwen-vl",
     "qwen2-vl",
     "qwen2.5-vl",
@@ -36,12 +32,25 @@ _VISION_NAME_MARKERS = (
     "smolvlm",
     "moondream",
 )
+_GEMMA_VISION_MARKERS = (
+    "gemma-vision",
+    "gemma3-vision",
+    "gemma-3-vision",
+    "gemma4-vision",
+    "gemma-4-vision",
+)
+
+
+def _name_suggests_vision(name: str) -> bool:
+    hay = name.lower()
+    if any(marker in hay for marker in _VISION_NAME_MARKERS):
+        return True
+    return any(marker in hay for marker in _GEMMA_VISION_MARKERS)
 
 
 def gguf_filename_suggests_vision(filename: str | None) -> bool:
     """True when a GGUF filename or repo id likely denotes a vision chat model."""
-    hay = (filename or "").lower()
-    return any(marker in hay for marker in _VISION_NAME_MARKERS)
+    return _name_suggests_vision(filename or "")
 
 
 def repo_likely_needs_mmproj(
@@ -57,8 +66,9 @@ def repo_likely_needs_mmproj(
         return True
     if task and str(task).lower() == "vision":
         return True
-    hay = f"{catalog_repo_id} {gguf_filename or ''}".lower()
-    return any(marker in hay for marker in _VISION_NAME_MARKERS)
+    if gguf_filename and _name_suggests_vision(gguf_filename):
+        return True
+    return _name_suggests_vision(catalog_repo_id)
 
 
 def _quant_hints_from_name(name: str) -> list[str]:
@@ -66,12 +76,23 @@ def _quant_hints_from_name(name: str) -> list[str]:
     return [hint for hint in _QUANT_HINTS if hint in upper]
 
 
+def _mmproj_candidates(parent: Path) -> list[Path]:
+    return sorted(
+        (
+            item
+            for item in parent.glob("*.gguf")
+            if "mmproj" in item.name.lower()
+        ),
+        key=lambda item: item.name,
+    )
+
+
 def resolve_mmproj_path(model_path: str | Path) -> str | None:
     """Return the best colocated mmproj GGUF for a chat model, if present."""
     path = Path(model_path).expanduser()
     if not path.is_file():
         return None
-    candidates = sorted(path.parent.glob("mmproj*.gguf"), key=lambda item: item.name)
+    candidates = _mmproj_candidates(path.parent)
     if not candidates:
         return None
     if len(candidates) == 1:

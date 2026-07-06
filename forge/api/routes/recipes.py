@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from typing import Annotated
 
 from fastapi import APIRouter, Depends
@@ -10,7 +9,7 @@ from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
 from forge.api.deps import get_recipe_orchestrator
-from forge.api.routes._stream import job_log_event_gen
+from forge.api.routes._stream import job_log_event_gen, spawn_background
 from forge.orchestrators.recipes import RecipeOrchestrator
 from forge.security.auth import get_current_user_id
 from forge.services.jobs import assert_job_owner
@@ -29,7 +28,7 @@ async def run_recipe(
     orchestrator: Annotated[RecipeOrchestrator, Depends(get_recipe_orchestrator)],
 ) -> dict:
     job_id = orchestrator.create_job(user_id=user_id)
-    asyncio.create_task(
+    spawn_background(
         orchestrator.start(job_id, {**body.model_dump(), "user_id": user_id})
     )
     return {"job_id": job_id, "status": "pending"}

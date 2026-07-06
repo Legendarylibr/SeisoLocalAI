@@ -41,10 +41,24 @@ def test_repo_likely_needs_mmproj_detects_vision_tags():
         tags=("gguf",),
         gguf_filename="Llama-Q4_K_M.gguf",
     )
+    assert not repo_likely_needs_mmproj(
+        "google/gemma-3-12b-it",
+        tags=("gguf",),
+        gguf_filename="gemma-3-12b-it-Q4_K_M.gguf",
+    )
     assert repo_likely_needs_mmproj(
         "org/Qwen2.5-VL-7B",
         gguf_filename="Qwen2.5-VL-Q4_K_M.gguf",
     )
+
+
+def test_resolve_mmproj_path_finds_non_prefix_filename(tmp_path):
+    model = tmp_path / "gemma-vision-Q4_K_M.gguf"
+    mmproj = tmp_path / "model-mmproj-Q8_0.gguf"
+    model.write_bytes(b"model")
+    mmproj.write_bytes(b"mmproj")
+
+    assert resolve_mmproj_path(model) == str(mmproj.resolve())
 
 
 def test_apply_llama_vision_load_kwargs_without_mmproj(tmp_path):

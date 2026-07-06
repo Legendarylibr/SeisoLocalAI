@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
 from forge.api.deps import get_db, get_inference_orchestrator
+from forge.api.routes._stream import spawn_background
 from forge.api.http_errors import raise_forbidden
 from forge.config import ForgeSettings, get_settings
 from forge.db.store import Database
@@ -87,7 +88,7 @@ async def _schedule_hf_cache_inventory_sync(
     last_sync = _model_cache_background_syncs.get(cache_key, 0.0)
     if now - last_sync >= _MODEL_CACHE_BACKGROUND_SYNC_TTL_S:
         _model_cache_background_syncs[cache_key] = now
-        asyncio.create_task(
+        spawn_background(
             _sync_hf_cache_inventory_background(
                 db,
                 user_id,
@@ -95,10 +96,6 @@ async def _schedule_hf_cache_inventory_sync(
                 hf_cache_dir=hf_cache_dir,
             )
         )
-
-
-class DownloadStreamClosed(RuntimeError):
-    """Raised inside the download worker when the SSE client disconnects."""
 
 
 class ModelScanRequest(BaseModel):
@@ -373,8 +370,6 @@ async def download_model_stream(
             )
             if stream_open:
                 await queue.put(("complete", result))
-        except DownloadStreamClosed:
-            return
         except Exception as exc:
             if stream_open:
                 msg = (
