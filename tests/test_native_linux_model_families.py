@@ -95,9 +95,12 @@ def test_gguf_family_metadata_flags(
     assert gguf_is_moe(str(gguf)) is expect_moe
 
 
-UNSAFE_PARTIAL_FAMILIES = [
+SWA_PARTIAL_FAMILIES = [
     ("gemma3", "gemma3", True, False),
     ("gemma4", "gemma4", True, False),
+]
+
+MOE_PARTIAL_FAMILIES = [
     ("deepseek2", "deepseek2", False, True),
     ("qwen2moe", "qwen2moe", False, True),
     ("mixtral", "mixtral", False, True),
@@ -106,9 +109,9 @@ UNSAFE_PARTIAL_FAMILIES = [
 
 @pytest.mark.parametrize(
     ("arch", "prefix", "expect_swa", "expect_moe"),
-    UNSAFE_PARTIAL_FAMILIES,
+    SWA_PARTIAL_FAMILIES,
 )
-def test_swa_and_moe_allow_partial_offload_by_default_on_linux(
+def test_swa_blocks_partial_offload_on_linux(
     monkeypatch, tmp_path: Path, arch: str, prefix: str, expect_swa: bool, expect_moe: bool
 ):
     import seiso.inference.model_pool as mp
@@ -116,6 +119,23 @@ def test_swa_and_moe_allow_partial_offload_by_default_on_linux(
     extra: list[tuple[bytes, int]] = []
     if expect_swa:
         extra.append((prefix.encode() + b".attention.sliding_window", 512))
+    gguf = tmp_path / f"{arch}.gguf"
+    _write_arch_gguf(gguf, arch, extra=extra)
+    monkeypatch.setattr(mp, "_native_linux_nvidia", lambda: True)
+
+    assert _llama_skip_partial_offload(str(gguf)) is True
+
+
+@pytest.mark.parametrize(
+    ("arch", "prefix", "expect_swa", "expect_moe"),
+    MOE_PARTIAL_FAMILIES,
+)
+def test_moe_allows_partial_offload_on_linux(
+    monkeypatch, tmp_path: Path, arch: str, prefix: str, expect_swa: bool, expect_moe: bool
+):
+    import seiso.inference.model_pool as mp
+
+    extra: list[tuple[bytes, int]] = []
     if expect_moe:
         extra.append((prefix.encode() + b".expert_count", 8))
     gguf = tmp_path / f"{arch}.gguf"
@@ -127,9 +147,9 @@ def test_swa_and_moe_allow_partial_offload_by_default_on_linux(
 
 @pytest.mark.parametrize(
     ("arch", "prefix", "expect_swa", "expect_moe"),
-    UNSAFE_PARTIAL_FAMILIES,
+    SWA_PARTIAL_FAMILIES,
 )
-def test_skip_partial_offload_opt_in_on_linux(
+def test_unsafe_partial_offload_allows_swa_on_linux(
     monkeypatch, tmp_path: Path, arch: str, prefix: str, expect_swa: bool, expect_moe: bool
 ):
     import seiso.inference.model_pool as mp
@@ -137,14 +157,12 @@ def test_skip_partial_offload_opt_in_on_linux(
     extra: list[tuple[bytes, int]] = []
     if expect_swa:
         extra.append((prefix.encode() + b".attention.sliding_window", 512))
-    if expect_moe:
-        extra.append((prefix.encode() + b".expert_count", 8))
     gguf = tmp_path / f"{arch}.gguf"
     _write_arch_gguf(gguf, arch, extra=extra)
     monkeypatch.setattr(mp, "_native_linux_nvidia", lambda: True)
-    monkeypatch.setenv("SEISO_LLAMA_SKIP_PARTIAL_OFFLOAD", "1")
+    monkeypatch.setenv("SEISO_LLAMA_UNSAFE_PARTIAL_OFFLOAD", "1")
 
-    assert _llama_skip_partial_offload(str(gguf)) is True
+    assert _llama_skip_partial_offload(str(gguf)) is False
 
 
 @pytest.mark.parametrize("arch", ["llama", "qwen2", "qwen3", "mistral"])
@@ -173,25 +191,33 @@ def test_native_linux_flash_attn_family_policy(monkeypatch, tmp_path: Path):
     for key in list(os.environ):
         if key.startswith("SEISO_LLAMA_"):
             monkeypatch.delenv(key, raising=False)
+    monkeypatch.delenv("SEISO_LLAMA_UNSAFE_FLASH_ATTN", raising=False)
 
-    # Default on for all families.
-    for arch in ("llama", "qwen2", "qwen3", "mistral", "gemma3", "deepseek2"):
-        extra = []
-        if arch == "gemma3":
-            extra = [(b"gemma3.attention.sliding_window", 512)]
-        if arch == "deepseek2":
-            extra = [(b"deepseek2.expert_count", 8)]
-        gguf = tmp_path / f"{arch}-default.gguf"
-        _write_arch_gguf(gguf, arch, extra=extra)
+    # Default off even for dense families.
+    monkeypatch.setenv("SEISO_LLAMA_FLASH_ATTN", "false")
+    dense = tmp_path / "llama.gguf"
+    _write_arch_gguf(dense, "llama")
+    assert "flash_attn" not in llama_load_kwargs(4096, model_path=str(dense))
+
+    # Dense may opt in via SEISO_LLAMA_FLASH_ATTN=true.
+    monkeypatch.setenv("SEISO_LLAMA_FLASH_ATTN", "true")
+    for arch in ("llama", "qwen2", "qwen3", "mistral"):
+        gguf = tmp_path / f"{arch}-optin.gguf"
+        _write_arch_gguf(gguf, arch)
         clear_gguf_caches()
         kwargs = llama_load_kwargs(4096, model_path=str(gguf))
         assert kwargs.get("flash_attn") is True, arch
 
-    # May opt out globally.
-    monkeypatch.setenv("SEISO_LLAMA_FLASH_ATTN", "false")
-    dense = tmp_path / "llama-off.gguf"
-    _write_arch_gguf(dense, "llama")
-    assert "flash_attn" not in llama_load_kwargs(4096, model_path=str(dense))
+    # MoE / SWA stay blocked without UNSAFE.
+    for arch, extra in (
+        ("gemma3", [(b"gemma3.attention.sliding_window", 512)]),
+        ("deepseek2", [(b"deepseek2.expert_count", 8)]),
+    ):
+        gguf = tmp_path / f"{arch}-blocked.gguf"
+        _write_arch_gguf(gguf, arch, extra=extra)
+        clear_gguf_caches()
+        kwargs = llama_load_kwargs(4096, model_path=str(gguf))
+        assert "flash_attn" not in kwargs, arch
 
 
 def test_native_linux_kv_quant_dense_opt_in(monkeypatch, tmp_path: Path):
@@ -221,12 +247,10 @@ def test_native_linux_kv_quant_dense_opt_in(monkeypatch, tmp_path: Path):
     _write_arch_gguf(
         gemma, "gemma3", extra=[(b"gemma3.attention.sliding_window", 512)]
     )
-    gemma_opts = mp._llama_kv_quant_options(str(gemma))
-    assert len(gemma_opts) == 2
-    assert gemma_opts[1]["type_k"] == 8
+    assert mp._llama_kv_quant_options(str(gemma)) == [{}]
 
 
-def test_swa_gemma_allows_partial_offload_like_dense(
+def test_dense_qwen_allows_partial_while_swa_gemma_falls_back_to_cpu(
     monkeypatch, tmp_path: Path,
 ):
     import seiso.inference.model_pool as mp
@@ -254,6 +278,8 @@ def test_swa_gemma_allows_partial_offload_like_dense(
 
     def fits(path, **k):
         layers = k.get("n_gpu_layers")
+        if "gemma" in str(path):
+            return layers == 0
         if layers == -1:
             return False
         return layers == 27
@@ -264,4 +290,4 @@ def test_swa_gemma_allows_partial_offload_like_dense(
     )
 
     assert fit_llama_gpu_layers(str(qwen), -1, 12000, n_ctx=4096) == 27
-    assert fit_llama_gpu_layers(str(gemma), -1, 12000, n_ctx=4096) == 27
+    assert fit_llama_gpu_layers(str(gemma), -1, 12000, n_ctx=4096) == 0

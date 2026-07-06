@@ -173,8 +173,8 @@ def test_platform_profile_linux_nvidia_uses_gpu_layers(monkeypatch):
     assert os.environ["SEISO_LLAMA_BATCH"] == "4096"
     assert os.environ["SEISO_LLAMA_UBATCH"] == "1024"
     assert os.environ["SEISO_LLAMA_CACHE_MB"] == "1024"
-    assert os.environ.get("SEISO_LLAMA_FLASH_ATTN") == "true"
-    assert os.environ.get("SEISO_LLAMA_SPEED_SCALE") == "true"
+    assert os.environ.get("SEISO_LLAMA_FLASH_ATTN") == "false"
+    assert os.environ.get("SEISO_LLAMA_SPEED_SCALE") == "false"
     assert os.environ["SEISO_STREAM_BATCH_CHARS"] == "16"
 
 
@@ -316,7 +316,7 @@ def test_platform_profile_remote_forge_keeps_native_linux_tuning(monkeypatch):
     assert result["free_headroom_mb"] == 1024
     assert os.environ["SEISO_LLAMA_BATCH"] == "4096"
     assert os.environ["SEISO_LLAMA_UBATCH"] == "1024"
-    assert os.environ.get("SEISO_LLAMA_FLASH_ATTN") == "true"
+    assert os.environ.get("SEISO_LLAMA_FLASH_ATTN") == "false"
 
 
 def test_platform_profile_linux_nvidia_modest_sets_safe_batch(monkeypatch):
@@ -400,8 +400,8 @@ def test_platform_profile_native_linux_nvidia_all_tiers_are_crash_resistant(
     assert int(os.environ["SEISO_LLAMA_BATCH"]) <= 4096
     assert int(os.environ["SEISO_LLAMA_UBATCH"]) <= 1024
     assert os.environ["SEISO_LLAMA_CACHE_MB"] == expected_cache
-    assert os.environ["SEISO_LLAMA_FLASH_ATTN"] == "true"
-    assert os.environ["SEISO_LLAMA_SPEED_SCALE"] == "true"
+    assert os.environ["SEISO_LLAMA_FLASH_ATTN"] == "false"
+    assert os.environ["SEISO_LLAMA_SPEED_SCALE"] == "false"
 
 
 def test_platform_profile_workstation_keeps_speed_when_vram_in_use(monkeypatch):

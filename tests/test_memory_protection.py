@@ -369,7 +369,7 @@ def test_llama_load_profile_ladder_native_linux_keeps_july3_speed_for_roomy_mode
 
     assert profiles[0]["n_batch"] == 4096
     assert profiles[0]["n_ubatch"] == 1024
-    assert profiles[0].get("flash_attn") is not False
+    assert profiles[0].get("flash_attn") is False
     assert profiles[-1].get("flash_attn") is False
 
 
@@ -512,7 +512,7 @@ def test_llama_prefill_guard_noops_off_native_linux(monkeypatch, tmp_path):
 def test_clamp_llama_load_kwargs_native_linux_borderline_roomy(
     monkeypatch, tmp_path
 ):
-    """~60% VRAM: not tight, but native Linux still strips flash-attn."""
+    """~60% VRAM roomy dense model may keep explicit flash_attn."""
     gguf = tmp_path / "mid.gguf"
     gguf.write_bytes(b"\x00" * 1024)
     monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 24576)
@@ -523,6 +523,9 @@ def test_clamp_llama_load_kwargs_native_linux_borderline_roomy(
         "seiso.inference.backends.gguf_block_count", lambda _p: 48
     )
     monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: True)
+    monkeypatch.setattr(
+        "seiso.memory.protection.llama_model_is_tight_vram_fit", lambda **_k: False
+    )
 
     kwargs = clamp_llama_load_kwargs(
         {
@@ -534,7 +537,7 @@ def test_clamp_llama_load_kwargs_native_linux_borderline_roomy(
             "flash_attn": True,
         }
     )
-    # Dense/unknown keep flash_attn; batch may still clamp for headroom.
+    # Dense/unknown keep flash_attn when not tight; batch may still clamp for headroom.
     assert kwargs.get("flash_attn") is True
     assert kwargs["n_batch"] <= 4096
     assert kwargs["n_ubatch"] <= kwargs["n_batch"]
