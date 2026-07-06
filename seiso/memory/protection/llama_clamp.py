@@ -131,6 +131,16 @@ def clamp_llama_load_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
                 native_linux_nvidia=native_linux_nvidia,
             )
             batch_headroom = max_batch
+        if native_linux_nvidia and not tight and n_gpu_layers != 0:
+            gpu_total = protection().discrete_gpu_total_mb()
+            weight_mb = int(protection().estimate_path_vram_mb(model_path))
+            if gpu_total > 0 and weight_mb > 0 and weight_mb <= free_mb // 8:
+                tier_batch, tier_ubatch = protection().gpu_batch_tier_caps(
+                    gpu_total, "normal"
+                )
+                max_batch = max(max_batch, tier_batch)
+                max_ubatch = max(max_ubatch, min(tier_ubatch, max_batch))
+                batch_headroom = max(batch_headroom, max_batch)
         if native_linux_nvidia and _gguf_has_mmproj_sibling(model_path):
             batch_headroom = max(_MIN_LLAMA_BATCH * 2, batch_headroom - 512)
             max_batch = min(max_batch, batch_headroom)

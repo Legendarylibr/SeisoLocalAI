@@ -1456,7 +1456,11 @@ def test_llama_load_model_tries_full_offload_before_partial_fallback(monkeypatch
     assert layers_attempted[0] >= 30
 
 
-def test_llama_load_profile_ladder_compact_tier(tmp_path):
+def test_llama_load_profile_ladder_compact_tier(tmp_path, monkeypatch):
+    monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: True)
+    monkeypatch.setattr(
+        "seiso.memory.protection.discrete_gpu_total_mb", lambda _profile=None: 8192
+    )
     from seiso.memory.protection import (
         discrete_gpu_total_mb,
         gpu_batch_tier_caps,

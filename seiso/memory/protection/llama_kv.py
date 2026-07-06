@@ -53,7 +53,7 @@ def llama_batch_headroom_mb(
             gpu_weight_mb = weight_mb
         else:
             gpu_weight_mb = int(weight_mb * _gpu_layer_fraction(n_gpu_layers, total_layers)) + 256
-        kv_mb = llama_kv_cache_reserve_mb(
+        kv_mb = protection().llama_kv_cache_reserve_mb(
             path,
             n_ctx=n_ctx,
             n_gpu_layers=n_gpu_layers,
@@ -189,7 +189,7 @@ def llama_offload_fits_headroom(
     else:
         gpu_weight_mb = int(weight_mb * _gpu_layer_fraction(n_gpu_layers, total_layers)) + 256
 
-    kv_mb = llama_kv_cache_reserve_mb(
+    kv_mb = protection().llama_kv_cache_reserve_mb(
         path,
         n_ctx=n_ctx,
         n_gpu_layers=n_gpu_layers,
