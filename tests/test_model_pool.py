@@ -253,6 +253,108 @@ def test_reload_llama_preserves_generation_and_skips_self_wait(tmp_path, monkeyp
     assert pool._inference_refs == 1
 
 
+def test_get_llama_same_model_reload_preserves_generation(tmp_path, monkeypatch):
+    from seiso.inference import model_pool as pool_mod
+
+    pool = ModelPool()
+    model = tmp_path / "model.gguf"
+    model.write_bytes(b"gguf")
+
+    class FakeLlama:
+        def __init__(self, *, n_ctx: int) -> None:
+            self.closed = False
+            self._seiso_n_ctx = n_ctx
+            self._seiso_n_gpu_layers = -1
+
+        def close(self) -> None:
+            self.closed = True
+
+    warm = FakeLlama(n_ctx=2048)
+    upgraded = FakeLlama(n_ctx=8192)
+    pool._active = LoadedModel(
+        key=f"llama:{model.resolve()}",
+        backend=BackendKind.LLAMA,
+        handle=warm,
+        meta={
+            "path": str(model),
+            "norm_path": str(model.resolve()),
+            "n_ctx": 2048,
+            "load_tier": "normal",
+            "n_gpu_layers": -1,
+        },
+    )
+    gen_id = pool.bump_generation()
+    pool.begin_inference()
+
+    def fake_load(path, n_ctx, tier="normal", batch_override=None):
+        return upgraded
+
+    monkeypatch.setattr(pool_mod, "_load_llama_model", fake_load)
+    monkeypatch.setattr(pool_mod, "_clear_optimal_layers_cache", lambda: None)
+    monkeypatch.setattr(pool_mod, "_refresh_headroom_stats", lambda force=False: None)
+    monkeypatch.setattr(pool_mod, "_llama_cache_is_optimal", lambda *a, **k: True)
+    monkeypatch.setattr(pool_mod, "_llama_cache_headroom_ok", lambda *a, **k: True)
+    monkeypatch.setattr("seiso.memory.protection.ensure_load_fits", lambda *a, **k: {})
+    monkeypatch.setattr("seiso.memory.protection.estimate_path_vram_mb", lambda *a, **k: 100)
+    monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 10_000)
+    monkeypatch.setattr("seiso.memory.protection.release_cached_memory", lambda **k: None)
+    monkeypatch.setattr("seiso.inference.llama_vision.resolve_mmproj_path", lambda *a, **k: None)
+
+    started = time.time()
+    handle = pool.get_llama(str(model), n_ctx=8192)
+    elapsed = time.time() - started
+
+    assert handle is upgraded
+    assert pool.is_generation_active(gen_id)
+    assert warm.closed is True
+    assert elapsed < 1.0
+    assert pool._inference_refs == 1
+
+
+def test_torch_same_path_different_cache_key_invalidates_generation(tmp_path, monkeypatch):
+    from seiso.inference import model_pool as pool_mod
+
+    pool = ModelPool()
+    target = tmp_path / "target"
+    target.mkdir()
+
+    class FakeHandle:
+        pass
+
+    old_handle = FakeHandle()
+    new_handle = FakeHandle()
+    norm = str(target.resolve())
+    pool._active = LoadedModel(
+        key=f"spec:{norm}:/tmp/draft",
+        backend=BackendKind.TORCH,
+        handle=old_handle,
+        meta={
+            "path": str(target),
+            "norm_path": norm,
+            "draft_path": "/tmp/draft",
+        },
+    )
+    gen_id = pool.bump_generation()
+
+    monkeypatch.setattr(pool_mod, "_clear_optimal_layers_cache", lambda: None)
+    monkeypatch.setattr(pool_mod, "_refresh_headroom_stats", lambda force=False: None)
+    monkeypatch.setattr("seiso.memory.protection.ensure_load_fits", lambda *a, **k: {})
+    monkeypatch.setattr("seiso.memory.protection.estimate_path_vram_mb", lambda *a, **k: 100)
+    monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 10_000)
+    monkeypatch.setattr("seiso.memory.protection.release_cached_memory", lambda **k: None)
+
+    handle = pool.switch(
+        str(target),
+        BackendKind.TORCH,
+        lambda _path: new_handle,
+        cache_key=f"torch:{norm}",
+    )
+
+    assert handle is new_handle
+    assert not pool.is_generation_active(gen_id)
+    assert pool.active_key == f"torch:{norm}"
+
+
 def test_llama_gpu_layers_optimal_uses_short_ttl_cache(monkeypatch, tmp_path):
     import seiso.inference.model_pool as mp
 

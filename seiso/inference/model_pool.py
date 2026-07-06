@@ -1014,6 +1014,18 @@ class ModelPool:
         else:
             clear_dflash_draft_cache()
 
+    def _is_same_model_reload(
+        self,
+        key: str,
+        backend: BackendKind,
+    ) -> bool:
+        """True when switch() is reloading the same llama.cpp pool entry."""
+        if backend != BackendKind.LLAMA:
+            return False
+        with self._lock:
+            active = self._active
+        return bool(active and active.backend == backend and active.key == key)
+
     def _clear_active_for_switch(self) -> None:
         """Stop streams, wait for idle, then unload so a new model can load."""
         self.bump_generation()
@@ -1128,7 +1140,13 @@ class ModelPool:
                 return cached
 
             if self._active:
-                self._clear_active_for_switch()
+                if self._is_same_model_reload(key, backend):
+                    # Preload/chat often reload the warmed handle (larger n_ctx,
+                    # safer batch, layer fit). Preserve generation so the active
+                    # chat request is not discarded after reload completes.
+                    self._unload_active_immediate()
+                else:
+                    self._clear_active_for_switch()
                 _clear_optimal_layers_cache()
                 _refresh_headroom_stats(force=True)
             from seiso.memory.protection import (
