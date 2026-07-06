@@ -733,13 +733,13 @@ class LocalInferenceRunner:
         batch_override: tuple[int, int] | None = None
         if safe_batch > 0 and safe_ubatch > 0:
             batch_override = (
-                max(256, min(safe_batch, loaded_batch or safe_batch) // 2),
+                max(128, min(safe_batch, loaded_batch or safe_batch) // 2),
                 max(128, safe_ubatch // 2),
             )
         elif next_tier == "compact":
-            batch_override = (512, 128)
-        elif next_tier == "minimal":
             batch_override = (256, 128)
+        elif next_tier == "minimal":
+            batch_override = (128, 128)
         logger.warning(
             "llama.cpp inference OOM at tier=%s — reloading at tier=%s",
             current,
