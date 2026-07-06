@@ -34,10 +34,16 @@ export const inferenceApi = {
       onComplete: (data: Record<string, unknown>) => void;
       onError?: (message: string) => void;
     },
+    options?: { max_tokens?: number; n_ctx?: number | null },
   ) =>
     streamPostSSE(
       "/inference/preload/stream",
-      { model_id, inference_backend },
+      {
+        model_id,
+        inference_backend,
+        ...(options?.max_tokens != null ? { max_tokens: options.max_tokens } : {}),
+        ...(options?.n_ctx != null ? { n_ctx: options.n_ctx } : {}),
+      },
       {
         progress: (data) => handlers.onProgress(JSON.parse(data)),
         complete: (data) => handlers.onComplete(JSON.parse(data)),

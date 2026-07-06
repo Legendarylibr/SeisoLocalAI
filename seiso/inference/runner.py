@@ -6,7 +6,9 @@ import asyncio
 import contextlib
 import logging
 import threading
+import time
 from collections.abc import AsyncIterator, Callable, Iterator
+from pathlib import Path
 from queue import Empty
 from typing import Any
 
@@ -37,15 +39,21 @@ from seiso.inference.tuning import (
     torch_generate_kwargs,
 )
 from seiso.memory.protection import (
+    LlamaLoadTier,
     is_oom_error,
+    llama_next_recovery_tier,
+    llama_oom_recovery_batch,
+    llama_prefill_needs_reload,
     release_cached_memory,
     sanitize_inference_payload,
+    trim_llama_messages_to_context,
 )
 from seiso.models.chat_format import format_messages_for_prompt
 
 logger = logging.getLogger(__name__)
 
 _STREAM_DONE = object()
+_MAX_LLAMA_OOM_RECOVERIES = 3
 _runner: LocalInferenceRunner | None = None
 _runner_lock = threading.Lock()
 
@@ -116,7 +124,14 @@ class LocalInferenceRunner:
                 model_path=resolved_path,
                 model_format=payload.get("model_format"),
             )
-            self._pool.get_llama(resolved_path, n_ctx=n_ctx)
+            llm = self._pool.get_llama(resolved_path, n_ctx=n_ctx)
+            if messages:
+                llm = self._llama_guard_prefill(
+                    llm,
+                    model_path=resolved_path,
+                    messages=messages,
+                    n_ctx=n_ctx,
+                )
 
     async def chat(self, payload: dict[str, Any]) -> str:
         loop = asyncio.get_running_loop()
@@ -132,17 +147,21 @@ class LocalInferenceRunner:
                 )
             generation_id = self._pool.bump_generation()
             await self._ensure_model_switch(resolved_path, route=route)
-            if route == "llamaswap":
+            self._pool.begin_inference()
+            try:
+                if route == "llamaswap":
+                    return await loop.run_in_executor(
+                        None,
+                        lambda: self._llamaswap_complete(
+                            payload, resolved_path, generation_id
+                        ),
+                    )
                 return await loop.run_in_executor(
                     None,
-                    lambda: self._llamaswap_complete(
-                        payload, resolved_path, generation_id
-                    ),
+                    lambda: self._llama_complete(payload, resolved_path, generation_id),
                 )
-            return await loop.run_in_executor(
-                None,
-                lambda: self._llama_complete(payload, resolved_path, generation_id),
-            )
+            finally:
+                self._pool.end_inference()
 
         payload = sanitize_inference_payload(payload)
         model_path = payload.get("model_path") or payload.get("model_id")
@@ -190,6 +209,7 @@ class LocalInferenceRunner:
             output_tokens = 0
             flushed_once = False
             batch_chars = _stream_batch_chars()
+            self._pool.begin_inference()
             try:
                 for part in self._iter_tokens(
                     payload, resolved_path, route, should_stop
@@ -232,6 +252,7 @@ class LocalInferenceRunner:
                 if not should_stop():
                     loop.call_soon_threadsafe(queue.put_nowait, _StreamError(exc))
             finally:
+                self._pool.end_inference()
                 loop.call_soon_threadsafe(queue.put_nowait, _STREAM_DONE)
 
         threading.Thread(target=producer, daemon=True).start()
@@ -277,16 +298,25 @@ class LocalInferenceRunner:
                 == self._pool.normalize_path(draft_path)
             ):
                 return
-            # prepare target (torch for verification in dflash case too)
-            await loop.run_in_executor(
-                None, lambda: self._pool.prepare_for_load(model_path, BACKEND_TORCH)
-            )
+            if not is_dflash_draft(draft_path):
+                # Torch+Torch speculative bundles are distinct pool handles; unload
+                # a warmed single target before loading target+draft together.
+                await loop.run_in_executor(None, lambda: self._pool.prepare_for_load())
+                return
+            # dFlash reuses the torch target handle; drop torch+torch bundles first.
+            active_key = status.get("active_model") or ""
+            if active_key.startswith("spec:"):
+                await loop.run_in_executor(None, lambda: self._pool.prepare_for_load())
+            else:
+                await loop.run_in_executor(
+                    None,
+                    lambda: self._pool.prepare_for_load(model_path, BACKEND_TORCH),
+                )
             return
 
         if active_draft:
-            await loop.run_in_executor(
-                None, lambda: self._pool.prepare_for_load(model_path)
-            )
+            # Turning off speculative decoding must drop the target+draft bundle.
+            await loop.run_in_executor(None, lambda: self._pool.prepare_for_load())
             return
 
         backend = BACKEND_LLAMASWAP if route == "llamaswap" else None
@@ -299,7 +329,6 @@ class LocalInferenceRunner:
         self, payload: dict[str, Any], model_path: str
     ) -> tuple[str, str]:
         if payload.get("draft_model_path"):
-            payload.get("draft_model_path")
             # dflash drafts are fast GGUF; we still run verification on torch target path for now
             resolved = prepare_model_path(model_path, BACKEND_TORCH)
             return "speculative", resolved
@@ -355,26 +384,30 @@ class LocalInferenceRunner:
         route: str,
         generation_id: int,
     ) -> str:
-        if route == "speculative":
-            chunks: list[str] = []
+        self._pool.begin_inference()
+        try:
+            if route == "speculative":
+                chunks: list[str] = []
 
-            def should_stop() -> bool:
-                return not self._pool.is_generation_active(generation_id)
+                def should_stop() -> bool:
+                    return not self._pool.is_generation_active(generation_id)
 
-            for token in self._torch_speculative_stream(
-                payload, model_path, should_stop
-            ):
-                if should_stop():
-                    break
-                chunks.append(token.text)
-            return "".join(chunks)
-        if route == "mlx":
-            return self._mlx_complete(payload, model_path, generation_id)
-        if route == "torch":
-            return self._torch_complete(payload, model_path, generation_id)
-        if route == "llamaswap":
-            return self._llamaswap_complete(payload, model_path, generation_id)
-        return self._llama_complete(payload, model_path, generation_id)
+                for token in self._torch_speculative_stream(
+                    payload, model_path, should_stop
+                ):
+                    if should_stop():
+                        break
+                    chunks.append(token.text)
+                return "".join(chunks)
+            if route == "mlx":
+                return self._mlx_complete(payload, model_path, generation_id)
+            if route == "torch":
+                return self._torch_complete(payload, model_path, generation_id)
+            if route == "llamaswap":
+                return self._llamaswap_complete(payload, model_path, generation_id)
+            return self._llama_complete(payload, model_path, generation_id)
+        finally:
+            self._pool.end_inference()
 
     def _torch_speculative_stream(
         self,
@@ -649,26 +682,109 @@ class LocalInferenceRunner:
 
         thread = threading.Thread(target=_generate, daemon=True)
         thread.start()
-        while True:
-            if should_stop():
-                break
-            if generation_errors:
-                raise generation_errors[0]
-            try:
-                text = next(streamer)
-            except StopIteration:
-                break
-            except Empty:
-                if not thread.is_alive():
-                    if generation_errors:
-                        raise generation_errors[0] from None
+        try:
+            while True:
+                if should_stop():
                     break
-                continue
-            if text:
-                yield StreamToken(text)
-        thread.join(timeout=0)
+                if generation_errors:
+                    raise generation_errors[0]
+                try:
+                    text = next(streamer)
+                except StopIteration:
+                    break
+                except Empty:
+                    if not thread.is_alive():
+                        if generation_errors:
+                            raise generation_errors[0] from None
+                        break
+                    continue
+                if text:
+                    yield StreamToken(text)
+        finally:
+            # HF generate is not cooperatively cancellable. Wait for the
+            # worker to finish so pool unload cannot free the model under it.
+            deadline = time.time() + max(_torch_stream_timeout_s(), 600.0)
+            while thread.is_alive() and time.time() < deadline:
+                thread.join(timeout=0.5)
+            if thread.is_alive():
+                logger.warning(
+                    "Torch generate thread still running after cancel wait — "
+                    "deferring pool release until it exits"
+                )
+                thread.join()
         if generation_errors and not should_stop():
             raise generation_errors[0]
+
+    def _llama_handle_tier(self, llm: Any) -> LlamaLoadTier:
+        return getattr(llm, "_seiso_load_tier", "normal") or "normal"
+
+    def _llama_recover_from_oom(
+        self,
+        llm: Any,
+        *,
+        model_path: str,
+        n_ctx: int,
+    ) -> Any:
+        current = self._llama_handle_tier(llm)
+        next_tier = llama_next_recovery_tier(current)
+        if next_tier is None:
+            raise RuntimeError("llama.cpp inference OOM — recovery tiers exhausted")
+        batch_override = llama_oom_recovery_batch(
+            safe_batch=int(getattr(llm, "_seiso_last_safe_batch", 0) or 0),
+            safe_ubatch=int(getattr(llm, "_seiso_last_safe_ubatch", 0) or 0),
+            loaded_batch=int(getattr(llm, "_seiso_n_batch", 0) or 0),
+            next_tier=next_tier,
+        )
+        logger.warning(
+            "llama.cpp inference OOM at tier=%s — reloading at tier=%s",
+            current,
+            next_tier,
+        )
+        release_cached_memory(sync=True)
+        return self._pool.reload_llama(
+            model_path,
+            n_ctx,
+            tier=next_tier,
+            batch_override=batch_override,
+        )
+
+    def _llama_guard_prefill(
+        self,
+        llm: Any,
+        *,
+        model_path: str,
+        messages: list[dict[str, Any]],
+        n_ctx: int,
+    ) -> Any:
+        current_tier = self._llama_handle_tier(llm)
+        needs_reload, safe_batch, safe_ubatch = llama_prefill_needs_reload(
+            model_path=getattr(llm, "_seiso_model_path", model_path) or model_path,
+            messages=messages,
+            n_ctx=n_ctx,
+            loaded_n_batch=int(getattr(llm, "_seiso_n_batch", 4096) or 4096),
+            loaded_n_ubatch=int(getattr(llm, "_seiso_n_ubatch", 1024) or 1024),
+            loaded_n_gpu_layers=int(getattr(llm, "_seiso_n_gpu_layers", 0) or 0),
+            load_tier=current_tier,
+            loaded_headroom_mb=getattr(llm, "_seiso_load_headroom_mb", None),
+        )
+        llm._seiso_last_safe_batch = safe_batch  # noqa: SLF001
+        llm._seiso_last_safe_ubatch = safe_ubatch  # noqa: SLF001
+        if not needs_reload:
+            return llm
+        logger.warning(
+            "llama.cpp prefill headroom changed before chat — reloading tier=%s "
+            "with n_batch=%d n_ubatch=%d",
+            current_tier,
+            safe_batch,
+            safe_ubatch,
+        )
+        release_cached_memory(sync=True)
+        return self._pool.reload_llama(
+            model_path,
+            n_ctx,
+            tier=current_tier,
+            batch_override=(safe_batch, safe_ubatch),
+        )
 
     def _llama_complete(
         self,
@@ -683,16 +799,57 @@ class LocalInferenceRunner:
             model_path=model_path,
             model_format=payload.get("model_format"),
         )
+        messages = trim_llama_messages_to_context(
+            messages,
+            n_ctx=int(n_ctx),
+            max_tokens=int(payload.get("max_tokens", 512)),
+        )
+        if not payload.get("n_ctx"):
+            n_ctx = estimate_llama_n_ctx(
+                messages,
+                max_tokens=int(payload.get("max_tokens", 512)),
+                model_path=model_path,
+                model_format=payload.get("model_format"),
+            )
         llm = self._pool.get_llama(model_path, n_ctx=n_ctx)
+        llm = self._llama_guard_prefill(
+            llm, model_path=model_path, messages=messages, n_ctx=n_ctx
+        )
         kwargs = llama_completion_kwargs(payload)
         kwargs["stream"] = False
         tools = payload.get("tools_schemas")
         if tools:
             kwargs["tools"] = tools
-        out = llm.create_chat_completion(messages=messages, **kwargs)
+        recoveries = 0
+        while True:
+            try:
+                out = llm.create_chat_completion(messages=messages, **kwargs)
+                break
+            except Exception as exc:
+                if not is_oom_error(exc):
+                    raise
+                recoveries += 1
+                if recoveries > _MAX_LLAMA_OOM_RECOVERIES:
+                    raise RuntimeError(
+                        "llama.cpp inference OOM — recovery attempts exhausted"
+                    ) from exc
+                llm = self._llama_recover_from_oom(
+                    llm, model_path=model_path, n_ctx=n_ctx
+                )
+                actual_ctx = int(getattr(llm, "_seiso_n_ctx", n_ctx) or n_ctx)
+                if actual_ctx < int(n_ctx):
+                    n_ctx = actual_ctx
+                    messages = trim_llama_messages_to_context(
+                        messages,
+                        n_ctx=actual_ctx,
+                        max_tokens=int(payload.get("max_tokens", 512)),
+                    )
         if not self._pool.is_generation_active(generation_id):
             return ""
-        message = out["choices"][0].get("message") or {}
+        choices = out.get("choices") or []
+        if not choices:
+            return ""
+        message = choices[0].get("message") or {}
         return str(message.get("content") or "")
 
     def _llamaswap_complete(
@@ -729,23 +886,89 @@ class LocalInferenceRunner:
             model_path=model_path,
             model_format=payload.get("model_format"),
         )
+        messages = trim_llama_messages_to_context(
+            messages,
+            n_ctx=int(n_ctx),
+            max_tokens=int(payload.get("max_tokens", 512)),
+        )
+        if not payload.get("n_ctx"):
+            n_ctx = estimate_llama_n_ctx(
+                messages,
+                max_tokens=int(payload.get("max_tokens", 512)),
+                model_path=model_path,
+                model_format=payload.get("model_format"),
+            )
         try:
             llm = self._pool.get_llama(model_path, n_ctx=n_ctx)
         except ImportError as exc:
             raise RuntimeError("llama-cpp-python not installed") from exc
-
-        messages = payload.get("messages", [])
-        stream = llm.create_chat_completion(
-            messages=messages,
-            **llama_completion_kwargs(payload),
+        llm = self._llama_guard_prefill(
+            llm, model_path=model_path, messages=messages, n_ctx=n_ctx
         )
-        for chunk in stream:
-            if should_stop():
-                break
-            delta = chunk["choices"][0].get("delta", {})
-            content = delta.get("content")
-            if content:
-                yield StreamToken(content)
+
+        completion_kwargs = llama_completion_kwargs(payload)
+        emitted_text = False
+        recoveries = 0
+        # #region agent log
+        from seiso.agent_debug_log import agent_debug_enabled, agent_debug_log
+
+        if agent_debug_enabled():
+            agent_debug_log(
+                hypothesis_id="C",
+                location="runner.py:_llama_stream:before_prefill",
+                message="starting llama.cpp chat prefill",
+                data={
+                    "model": Path(model_path).name,
+                    "n_ctx": n_ctx,
+                    "max_tokens": completion_kwargs.get("max_tokens"),
+                    "load_tier": getattr(llm, "_seiso_load_tier", None),
+                    "n_gpu_layers": getattr(llm, "_seiso_n_gpu_layers", None),
+                    "message_count": len(messages),
+                    "prompt_chars": sum(
+                        len(str(m.get("content") or "")) for m in messages
+                    ),
+                },
+            )
+        # #endregion
+        while True:
+            try:
+                stream = llm.create_chat_completion(
+                    messages=messages,
+                    **completion_kwargs,
+                )
+                for chunk in stream:
+                    if should_stop():
+                        break
+                    delta = chunk["choices"][0].get("delta", {})
+                    content = delta.get("content")
+                    if content:
+                        emitted_text = True
+                        yield StreamToken(content)
+                return
+            except Exception as exc:
+                if not is_oom_error(exc):
+                    raise
+                if emitted_text:
+                    raise RuntimeError(
+                        "llama.cpp inference OOM after streaming began — aborting "
+                        "instead of replaying partial output"
+                    ) from exc
+                recoveries += 1
+                if recoveries > _MAX_LLAMA_OOM_RECOVERIES:
+                    raise RuntimeError(
+                        "llama.cpp inference OOM — recovery attempts exhausted"
+                    ) from exc
+                llm = self._llama_recover_from_oom(
+                    llm, model_path=model_path, n_ctx=n_ctx
+                )
+                actual_ctx = int(getattr(llm, "_seiso_n_ctx", n_ctx) or n_ctx)
+                if actual_ctx < int(n_ctx):
+                    n_ctx = actual_ctx
+                    messages = trim_llama_messages_to_context(
+                        messages,
+                        n_ctx=actual_ctx,
+                        max_tokens=int(payload.get("max_tokens", 512)),
+                    )
 
 
 def get_inference_runner() -> LocalInferenceRunner:

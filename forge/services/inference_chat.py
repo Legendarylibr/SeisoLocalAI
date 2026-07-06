@@ -1,8 +1,9 @@
-"""Forge inference chat helpers — model resolution, memory checks, preload."""
+"""Forge inference chat helpers — single resolve/sanitize path for chat, preload, OpenAI, context."""
 
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from typing import Any
 
 from fastapi import HTTPException
@@ -37,19 +38,131 @@ def assert_model_fits_for_load(
         )
 
 
-async def resolve_preload_context(
+def _sanitize_chat_fields(
+    *,
+    model_path: str | None,
+    model_format: str | None,
+    max_tokens: int | None,
+    n_ctx: int | None,
+    messages: list[dict[str, Any]] | None,
+) -> dict[str, Any]:
+    from seiso.memory.protection import sanitize_inference_payload
+
+    payload: dict[str, Any] = {
+        "model_path": model_path,
+        "model_format": model_format,
+        "messages": messages or [],
+        "max_tokens": max_tokens if max_tokens is not None else 2048,
+    }
+    if n_ctx is not None:
+        payload["n_ctx"] = n_ctx
+    sanitized = sanitize_inference_payload(payload)
+    out: dict[str, Any] = {"max_tokens": sanitized["max_tokens"]}
+    if "n_ctx" in sanitized:
+        out["n_ctx"] = sanitized["n_ctx"]
+    return out
+
+
+async def _lookup_inference_option(
+    db: Database,
+    user_id: str,
+    model_id: str,
+    *,
+    model_router_enabled: bool,
+) -> dict[str, Any] | None:
+    selected = await get_inference_option(db, user_id, model_id)
+    if selected is not None:
+        return selected
+    if model_router_enabled and model_id == ROUTER_MODEL_ID:
+        return next(
+            (
+                o
+                for o in await list_inference_options(
+                    db,
+                    user_id,
+                    model_router_enabled=True,
+                )
+                if o["id"] == model_id
+            ),
+            None,
+        )
+    return None
+
+
+async def prepare_local_chat_target(
     db: Database,
     user_id: str,
     settings: ForgeSettings,
-    model_id: str,
-    inference_backend: str,
     *,
-    max_tokens: int = 2048,
+    model_id: str | None = None,
+    model_path: str | None = None,
+    inference_backend: str = "auto",
+    model_router_enabled: bool = False,
+    max_tokens: int | None = None,
     n_ctx: int | None = None,
+    messages: list[dict[str, Any]] | None = None,
+    check_memory: bool = True,
+    sanitize: bool = False,
 ) -> dict[str, Any]:
-    selected = await get_inference_option(db, user_id, model_id)
-    if not selected:
+    """Canonical resolve path for inventory/explicit local chat models.
+
+    Used by Forge chat, preload, context, and OpenAI-compatible routes.
+    """
+    if model_id and model_path:
+        raise HTTPException(403, "Provide model_id or model_path, not both")
+
+    if model_path and not model_id:
+        path = await resolve_model_path(
+            db,
+            user_id,
+            model_id=None,
+            model_path=model_path,
+            data_dir=settings.data_dir,
+        )
+        if not path:
+            raise HTTPException(400, "Invalid model_path")
+        backend = (inference_backend or "auto").lower()
+        if backend == "auto":
+            from seiso.inference.backends import recommend_backend
+
+            backend = recommend_backend(model_path=path)
+        if check_memory:
+            assert_model_fits_for_load(path, mode="chat", backend=backend)
+        updates: dict[str, Any] = {
+            "model_path": path,
+            "inference_backend": backend,
+        }
+        if sanitize:
+            updates.update(
+                _sanitize_chat_fields(
+                    model_path=path,
+                    model_format=None,
+                    max_tokens=max_tokens,
+                    n_ctx=n_ctx,
+                    messages=messages,
+                )
+            )
+        return updates
+
+    if not model_id:
+        raise HTTPException(400, "Select a model from inventory or provide model_path")
+
+    selected = await _lookup_inference_option(
+        db,
+        user_id,
+        model_id,
+        model_router_enabled=model_router_enabled,
+    )
+    if selected is None:
         raise HTTPException(404, "Model not found in inventory")
+
+    if not selected.get("selectable", True) and selected.get("kind") != "router":
+        raise HTTPException(
+            400,
+            selected.get("hardware_note")
+            or selected.get("status_note")
+            or "Download incomplete or model path missing. Re-download from Hub.",
+        )
 
     try:
         target = resolve_chat_target(
@@ -60,7 +173,26 @@ async def resolve_preload_context(
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
 
-    backend = target.get("inference_backend", inference_backend)
+    updates = {
+        "inference_backend": target.get("inference_backend", inference_backend),
+        "model_format": target.get("model_format") or selected.get("format"),
+        "model_name": selected.get("name") or model_id,
+        "size_bytes": int(selected.get("size_bytes") or 0),
+        "context_ceiling": selected.get("context_ceiling"),
+        "architecture": selected.get("architecture"),
+        "is_moe": selected.get("is_moe"),
+        "uses_swa": selected.get("uses_swa"),
+    }
+
+    if target.get("inference_backend") == BACKEND_ROUTER:
+        if not model_router_enabled:
+            raise HTTPException(
+                400,
+                "Smart Router is not enabled (set SEISO_MODEL_ROUTER_ENABLED=true)",
+            )
+        updates["use_model_router"] = True
+        updates["model_path"] = None
+        return updates
 
     path = target.get("model_path")
     if not path:
@@ -72,24 +204,79 @@ async def resolve_preload_context(
             data_dir=settings.data_dir,
         )
     if not path:
+        raise HTTPException(
+            400,
+            "Download incomplete or model path missing. Re-download from Hub.",
+        )
+
+    if check_memory:
+        assert_model_fits_for_load(
+            path,
+            mode="chat",
+            backend=updates.get("inference_backend"),
+        )
+    updates["model_path"] = path
+
+    if sanitize:
+        updates.update(
+            _sanitize_chat_fields(
+                model_path=path,
+                model_format=updates.get("model_format"),
+                max_tokens=max_tokens,
+                n_ctx=n_ctx,
+                messages=messages,
+            )
+        )
+    return updates
+
+
+async def resolve_preload_context(
+    db: Database,
+    user_id: str,
+    settings: ForgeSettings,
+    model_id: str,
+    inference_backend: str,
+    *,
+    max_tokens: int = 2048,
+    n_ctx: int | None = None,
+) -> dict[str, Any]:
+    target = await prepare_local_chat_target(
+        db,
+        user_id,
+        settings,
+        model_id=model_id,
+        inference_backend=inference_backend,
+        model_router_enabled=False,
+        max_tokens=max_tokens,
+        n_ctx=n_ctx,
+        messages=[{"role": "user", "content": "ping"}],
+        check_memory=True,
+        sanitize=True,
+    )
+    if target.get("use_model_router"):
+        raise HTTPException(400, "Smart Router does not support model preload")
+
+    path = target.get("model_path")
+    if not path:
         raise HTTPException(400, "Model path not found")
 
-    assert_model_fits_for_load(path, mode="chat", backend=backend)
-
-    payload = {
+    payload: dict[str, Any] = {
         "model_path": path,
-        "model_format": target.get("model_format") or selected.get("format"),
-        "inference_backend": backend,
+        "model_format": target.get("model_format"),
+        "inference_backend": target["inference_backend"],
         "messages": [{"role": "user", "content": "ping"}],
-        "max_tokens": max_tokens,
+        "max_tokens": target.get("max_tokens", max_tokens),
     }
-    if n_ctx is not None:
+    if target.get("n_ctx") is not None:
+        payload["n_ctx"] = target["n_ctx"]
+    elif n_ctx is not None:
         payload["n_ctx"] = n_ctx
+
     return {
         "payload": payload,
-        "backend": backend,
-        "model_name": selected.get("name") or model_id,
-        "size_bytes": int(selected.get("size_bytes") or 0),
+        "backend": target["inference_backend"],
+        "model_name": target.get("model_name") or model_id,
+        "size_bytes": int(target.get("size_bytes") or 0),
     }
 
 
@@ -109,64 +296,26 @@ async def resolve_inventory_model_path(
     model_path: str | None,
     inference_backend: str,
     model_router_enabled: bool,
+    max_tokens: int | None = None,
+    n_ctx: int | None = None,
+    messages: list[dict[str, Any]] | None = None,
+    sanitize: bool = False,
 ) -> dict[str, Any]:
     """Resolve model_id to payload fields (path, backend, router flags)."""
-    selected = await get_inference_option(db, user_id, model_id)
-    if selected is None and model_router_enabled and model_id == ROUTER_MODEL_ID:
-        selected = next(
-            (
-                o
-                for o in await list_inference_options(
-                    db,
-                    user_id,
-                    model_router_enabled=True,
-                )
-                if o["id"] == model_id
-            ),
-            None,
-        )
-    try:
-        target = resolve_chat_target(
-            selected,
-            model_id=model_id,
-            inference_backend=inference_backend,
-        )
-    except ValueError as exc:
-        raise HTTPException(400, str(exc)) from exc
-
-    updates: dict[str, Any] = {
-        "inference_backend": target.get("inference_backend", inference_backend),
-        "model_format": target.get("model_format"),
-    }
-
-    if target.get("inference_backend") == BACKEND_ROUTER:
-        if not model_router_enabled:
-            raise HTTPException(
-                400,
-                "Smart Router is not enabled (set SEISO_MODEL_ROUTER_ENABLED=true)",
-            )
-        updates["use_model_router"] = True
-        return updates
-
-    path = target.get("model_path")
-    if not path and model_id:
-        path = await resolve_model_path(
-            db,
-            user_id,
-            model_id=model_id,
-            model_path=model_path,
-            data_dir=settings.data_dir,
-        )
-    if not path:
-        raise HTTPException(400, "Select a model from inventory or provide model_path")
-
-    assert_model_fits_for_load(
-        path,
-        mode="chat",
-        backend=updates.get("inference_backend"),
+    return await prepare_local_chat_target(
+        db,
+        user_id,
+        settings,
+        model_id=model_id,
+        model_path=model_path,
+        inference_backend=inference_backend,
+        model_router_enabled=model_router_enabled,
+        max_tokens=max_tokens,
+        n_ctx=n_ctx,
+        messages=messages,
+        check_memory=True,
+        sanitize=sanitize,
     )
-    updates["model_path"] = path
-    return updates
 
 
 async def resolve_explicit_model_path(
@@ -176,21 +325,77 @@ async def resolve_explicit_model_path(
     *,
     model_path: str,
     inference_backend: str,
+    max_tokens: int | None = None,
+    n_ctx: int | None = None,
+    messages: list[dict[str, Any]] | None = None,
+    sanitize: bool = False,
 ) -> dict[str, Any]:
-    path = await resolve_model_path(
+    return await prepare_local_chat_target(
         db,
         user_id,
-        model_id=None,
+        settings,
         model_path=model_path,
-        data_dir=settings.data_dir,
+        inference_backend=inference_backend,
+        max_tokens=max_tokens,
+        n_ctx=n_ctx,
+        messages=messages,
+        check_memory=True,
+        sanitize=sanitize,
     )
-    if not path:
-        raise HTTPException(400, "Invalid model_path")
-    assert_model_fits_for_load(path, mode="chat", backend=inference_backend)
-    return {
-        "model_path": path,
-        "inference_backend": inference_backend,
-    }
+
+
+def _vocab_size_from_path(model_path: str) -> int | None:
+    root = Path(model_path)
+    if root.is_file():
+        root = root.parent
+    config = root / "config.json"
+    if not config.is_file():
+        return None
+    try:
+        from seiso.io.jsonl import read_json_file
+
+        data = read_json_file(config, default=None)
+    except Exception:
+        return None
+    if not isinstance(data, dict):
+        return None
+    for key in ("vocab_size", "padded_vocab_size"):
+        value = data.get(key)
+        if isinstance(value, int) and value > 0:
+            return value
+    return None
+
+
+def _assert_draft_compatible(target_path: str | None, draft_path: str) -> None:
+    from seiso.inference.backends import (
+        gguf_architecture,
+        is_dflash_draft,
+    )
+
+    if is_dflash_draft(draft_path):
+        draft_arch = (gguf_architecture(draft_path) or "").lower()
+        if target_path:
+            target_arch = (gguf_architecture(target_path) or "").lower()
+            if target_arch and draft_arch and "dflash" not in draft_arch:
+                target_family = target_arch.split("-", 1)[0]
+                draft_family = draft_arch.split("-", 1)[0]
+                if target_family and draft_family and target_family != draft_family:
+                    raise HTTPException(
+                        400,
+                        f"Draft architecture {draft_arch!r} is incompatible with target {target_arch!r}",
+                    )
+        return
+
+    if not target_path:
+        return
+
+    target_vocab = _vocab_size_from_path(target_path)
+    draft_vocab = _vocab_size_from_path(draft_path)
+    if target_vocab is not None and draft_vocab is not None and target_vocab != draft_vocab:
+        raise HTTPException(
+            400,
+            f"Draft/target tokenizers appear incompatible: vocab_size target={target_vocab} draft={draft_vocab}",
+        )
 
 
 async def resolve_draft_model(
@@ -200,6 +405,7 @@ async def resolve_draft_model(
     *,
     draft_model_id: str | None,
     draft_model_path: str | None,
+    target_model_path: str | None = None,
 ) -> dict[str, Any]:
     if draft_model_id and draft_model_path:
         raise HTTPException(403, "Provide draft_model_id or draft_model_path, not both")
@@ -216,7 +422,15 @@ async def resolve_draft_model(
         draft_selected = await get_inference_option(db, user_id, draft_model_id)
         if not draft_selected:
             raise HTTPException(404, "Draft model not found")
-        draft_path = draft_selected.get("path")
+        if not draft_selected.get("selectable", True):
+            raise HTTPException(
+                400,
+                draft_selected.get("hardware_note")
+                or "Draft model download is incomplete",
+            )
+        draft_path = str(draft_selected.get("path") or "")
+        if draft_path and not Path(draft_path).exists():
+            raise HTTPException(404, f"Draft model file missing on disk: {draft_path}")
         if not draft_path:
             raise HTTPException(
                 400, "Draft model must be a local safetensors/checkpoint path"
@@ -228,6 +442,8 @@ async def resolve_draft_model(
         raise HTTPException(400, "Invalid draft model path")
 
     from seiso.inference.backends import is_dflash_draft
+
+    _assert_draft_compatible(target_model_path, draft_path)
 
     draft_backend = BACKEND_LLAMACPP if is_dflash_draft(draft_path) else BACKEND_TORCH
     assert_model_fits_for_load(draft_path, mode="chat", backend=draft_backend)

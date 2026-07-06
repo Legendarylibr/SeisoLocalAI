@@ -112,7 +112,8 @@ def build_mlx_sampler(payload: dict[str, Any]) -> Any | None:
 
         top_p = float(payload.get("top_p") or 0.0)
         return make_sampler(temp=temperature, top_p=top_p)
-    except ImportError:
+    except Exception as exc:
+        logger.debug("MLX sampler unavailable: %s", exc)
         return None
 
 
@@ -146,8 +147,13 @@ def estimate_llama_n_ctx(
     model_format: str | None = None,
     model_name: str | None = None,
 ) -> int:
-    """Right-size context window to prompt + generation (faster KV cache)."""
+    """Right-size context window to prompt + generation (faster KV cache).
+
+    Uses coarse buckets so multi-turn chat reuses one loaded context size instead
+    of reloading every few hundred tokens of history growth.
+    """
     from seiso.inference.context_limits import effective_context_ceiling
+    from seiso.memory.protection import bucket_llama_n_ctx, clamp_llama_n_ctx
 
     if ceiling is None:
         ceiling = effective_context_ceiling(
@@ -156,14 +162,13 @@ def estimate_llama_n_ctx(
             model_name=model_name,
         )
     if not env_bool("SEISO_LLAMA_DYNAMIC_CTX", True):
-        sized = default
+        sized = bucket_llama_n_ctx(default, ceiling=ceiling)
     else:
-        chars = sum(len(str(m.get("content", ""))) for m in messages)
-        est_prompt = max(256, int(chars / 3.2))
+        from seiso.memory.protection import _estimate_prompt_tokens
+
+        est_prompt = max(256, _estimate_prompt_tokens(messages))
         needed = est_prompt + max_tokens + 128
-        step = 512
-        sized = min(ceiling, max(floor, ((needed + step - 1) // step) * step))
-    from seiso.memory.protection import clamp_llama_n_ctx
+        sized = bucket_llama_n_ctx(max(floor, needed), ceiling=ceiling)
 
     return clamp_llama_n_ctx(
         sized,
@@ -175,7 +180,7 @@ def estimate_llama_n_ctx(
     )
 
 
-def attach_llama_prompt_cache(llm: Any) -> None:
+def attach_llama_prompt_cache(llm: Any, *, model_path: str | None = None) -> None:
     """Enable RAM prefix cache for multi-turn / repeated prompts."""
     if not env_bool("SEISO_LLAMA_PROMPT_CACHE", True):
         return
@@ -187,7 +192,7 @@ def attach_llama_prompt_cache(llm: Any) -> None:
         cache_mb = env_int("SEISO_LLAMA_CACHE_MB", 1024)
         from seiso.memory.protection import clamp_llama_cache_mb
 
-        cache_mb = clamp_llama_cache_mb(cache_mb)
+        cache_mb = clamp_llama_cache_mb(cache_mb, model_path=model_path)
         if cache_mb <= 0:
             return
         llm.set_cache(LlamaRAMCache(capacity_bytes=cache_mb * 1024 * 1024))

@@ -45,6 +45,9 @@ def test_platform_profile_darwin_16gb_apple(monkeypatch):
         "seiso.memory.platform_profile.vram_headroom_mb", lambda _p: 3072
     )
     monkeypatch.setattr(
+        "seiso.memory.platform_profile.performance_headroom_mb", lambda _p: 3072
+    )
+    monkeypatch.setattr(
         "seiso.memory.platform_profile.training_capabilities",
         lambda: {
             "supports_mlx_inference": False,
@@ -159,6 +162,7 @@ def test_platform_profile_linux_nvidia_uses_gpu_layers(monkeypatch):
         },
     )
     monkeypatch.setattr("platform.system", lambda: "Linux")
+    monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: True)
     monkeypatch.setattr(
         "seiso.inference.model_pool._llama_gpu_offload_ok", lambda: True
     )
@@ -166,13 +170,321 @@ def test_platform_profile_linux_nvidia_uses_gpu_layers(monkeypatch):
     apply_platform_memory_profile(profile=profile)
 
     assert os.environ["SEISO_LLAMA_GPU_LAYERS"] == "-1"
-    assert os.environ["SEISO_LLAMA_BATCH"] == "4096"
-    assert os.environ["SEISO_LLAMA_UBATCH"] == "1024"
-    assert os.environ["SEISO_LLAMA_CACHE_MB"] == "2048"
+    assert os.environ["SEISO_LLAMA_BATCH"] == "1024"
+    assert os.environ["SEISO_LLAMA_UBATCH"] == "256"
+    assert os.environ["SEISO_LLAMA_CACHE_MB"] == "512"
+    assert os.environ.get("SEISO_LLAMA_FLASH_ATTN") == "false"
+    assert os.environ.get("SEISO_LLAMA_SPEED_SCALE") == "false"
     assert os.environ["SEISO_STREAM_BATCH_CHARS"] == "16"
 
 
-def test_apply_only_setdefault(monkeypatch):
+def test_platform_profile_linux_nvidia_wsl_uses_non_native_batches(monkeypatch):
+    """WSL / non-native Linux NVIDIA keeps flash-attn and headroom-derived batches."""
+    profile = {
+        "ram_gb": 64,
+        "gpus": [{"name": "NVIDIA GeForce RTX 4090", "vram_total_mb": 24576}],
+        "backend": "torch",
+        "platform": "Linux",
+    }
+    monkeypatch.setattr(
+        "seiso.memory.platform_profile.classify_tier",
+        lambda _p: HardwareTier.WORKSTATION,
+    )
+    monkeypatch.setattr(
+        "seiso.memory.platform_profile.vram_headroom_mb", lambda _p: 24576
+    )
+    monkeypatch.setattr(
+        "seiso.memory.platform_profile.training_capabilities",
+        lambda: {
+            "gpu_count": 1,
+            "train_platform": "cpu",
+            "nvidia_hardware": True,
+            "vendor": "nvidia",
+        },
+    )
+    monkeypatch.setattr("platform.system", lambda: "Linux")
+    monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: False)
+    monkeypatch.setattr(
+        "seiso.inference.model_pool._llama_gpu_offload_ok", lambda: True
+    )
+
+    apply_platform_memory_profile(profile=profile)
+
+    assert os.environ["SEISO_LLAMA_BATCH"] == "2048"
+    assert os.environ["SEISO_LLAMA_UBATCH"] == "512"
+    assert os.environ.get("SEISO_LLAMA_FLASH_ATTN") == "true"
+
+
+def test_platform_profile_linux_nvidia_workstation_uses_conservative_batches(monkeypatch):
+    profile = {
+        "ram_gb": 128,
+        "gpus": [{"name": "NVIDIA RTX 6000 Ada", "vram_total_mb": 49152}],
+        "backend": "torch",
+        "platform": "Linux",
+    }
+    monkeypatch.setattr(
+        "seiso.memory.platform_profile.classify_tier",
+        lambda _p: HardwareTier.WORKSTATION,
+    )
+    monkeypatch.setattr(
+        "seiso.memory.platform_profile.vram_headroom_mb", lambda _p: 49152
+    )
+    monkeypatch.setattr(
+        "seiso.memory.platform_profile.training_capabilities",
+        lambda: {
+            "gpu_count": 1,
+            "train_platform": "cpu",
+            "nvidia_hardware": True,
+            "vendor": "nvidia",
+        },
+    )
+    monkeypatch.setattr("platform.system", lambda: "Linux")
+    monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: False)
+    monkeypatch.setattr(
+        "seiso.inference.model_pool._llama_gpu_offload_ok", lambda: True
+    )
+
+    apply_platform_memory_profile(profile=profile)
+
+    assert os.environ["SEISO_LLAMA_BATCH"] == "4096"
+    assert os.environ["SEISO_LLAMA_UBATCH"] == "1024"
+
+
+@pytest.mark.parametrize(
+    "name,vram_mb,tier,expected_batch,expected_ubatch,expected_cache",
+    [
+        ("NVIDIA GeForce GTX 1650", 4096, HardwareTier.EDGE, 512, 128, 256),
+        ("NVIDIA GeForce RTX 3050", 6144, HardwareTier.EDGE, 512, 128, 256),
+        ("NVIDIA GeForce RTX 3070", 8192, HardwareTier.MODEST, 512, 128, 256),
+        ("NVIDIA GeForce RTX 3060", 12288, HardwareTier.CAPABLE, 512, 128, 256),
+        ("NVIDIA GeForce RTX 4080", 16384, HardwareTier.CAPABLE, 512, 128, 256),
+        ("NVIDIA GeForce RTX 4090", 24576, HardwareTier.WORKSTATION, 1024, 256, 512),
+        ("NVIDIA RTX 6000 Ada", 49152, HardwareTier.WORKSTATION, 1024, 256, 512),
+    ],
+)
+def test_native_linux_nvidia_batch_caps_all_gpu_tiers(
+    monkeypatch, name, vram_mb, tier, expected_batch, expected_ubatch, expected_cache
+):
+    from seiso.memory.platform_profile import native_linux_nvidia_llama_batch_caps
+
+    batch, ubatch, cache = native_linux_nvidia_llama_batch_caps(
+        tier=tier,
+        headroom_mb=vram_mb,
+        low=False,
+    )
+    assert batch == expected_batch
+    assert ubatch == expected_ubatch
+    assert cache == expected_cache
+
+
+def test_platform_profile_remote_forge_keeps_native_linux_tuning(monkeypatch):
+    """allow_remote is a security/bind setting — it must not change memory tuning."""
+    profile = {
+        "ram_gb": 32,
+        "gpus": [{"name": "NVIDIA GeForce RTX 4090", "vram_total_mb": 24576}],
+        "backend": "cuda",
+        "platform": "Linux",
+    }
+    monkeypatch.setenv("SEISO_ALLOW_REMOTE", "1")
+    monkeypatch.setenv("SEISO_REMOTE_ACK", "1")
+    monkeypatch.setattr(
+        "seiso.memory.platform_profile.classify_tier",
+        lambda _p: HardwareTier.WORKSTATION,
+    )
+    monkeypatch.setattr(
+        "seiso.memory.platform_profile.vram_headroom_mb", lambda _p: 1024
+    )
+    monkeypatch.setattr(
+        "seiso.memory.platform_profile.training_capabilities",
+        lambda: {
+            "gpu_count": 1,
+            "train_platform": "cpu",
+            "nvidia_hardware": True,
+            "vendor": "nvidia",
+        },
+    )
+    monkeypatch.setattr("platform.system", lambda: "Linux")
+    monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: True)
+    monkeypatch.setattr(
+        "seiso.inference.model_pool._llama_gpu_offload_ok", lambda: True
+    )
+
+    result = apply_platform_memory_profile(profile=profile)
+
+    assert result["memory_profile"] == "balanced"
+    assert result["headroom_mb"] == 24576
+    assert result["free_headroom_mb"] == 1024
+    assert os.environ["SEISO_LLAMA_BATCH"] == "1024"
+    assert os.environ["SEISO_LLAMA_UBATCH"] == "256"
+    assert os.environ.get("SEISO_LLAMA_FLASH_ATTN") == "false"
+
+
+def test_platform_profile_linux_nvidia_modest_sets_safe_batch(monkeypatch):
+    profile = {
+        "ram_gb": 32,
+        "gpus": [{"name": "NVIDIA GeForce RTX 3070", "vram_total_mb": 8192}],
+        "backend": "torch",
+        "platform": "Linux",
+    }
+    monkeypatch.setattr(
+        "seiso.memory.platform_profile.classify_tier",
+        lambda _p: HardwareTier.MODEST,
+    )
+    monkeypatch.setattr(
+        "seiso.memory.platform_profile.vram_headroom_mb", lambda _p: 8192
+    )
+    monkeypatch.setattr(
+        "seiso.memory.platform_profile.training_capabilities",
+        lambda: {
+            "gpu_count": 1,
+            "train_platform": "cpu",
+            "nvidia_hardware": True,
+            "vendor": "nvidia",
+        },
+    )
+    monkeypatch.setattr("platform.system", lambda: "Linux")
+    monkeypatch.setattr(
+        "seiso.inference.model_pool._llama_gpu_offload_ok", lambda: True
+    )
+
+    apply_platform_memory_profile(profile=profile)
+
+    assert os.environ["SEISO_LLAMA_BATCH"] == "512"
+    assert os.environ["SEISO_LLAMA_UBATCH"] == "128"
+
+
+@pytest.mark.parametrize(
+    "name,vram_mb,tier,ram_gb,expected_cache",
+    [
+        ("NVIDIA GeForce RTX 3070", 8192, HardwareTier.MODEST, 32, "256"),
+        ("NVIDIA GeForce RTX 3060", 12288, HardwareTier.CAPABLE, 32, "256"),
+        ("NVIDIA GeForce RTX 5080", 16384, HardwareTier.CAPABLE, 48, "256"),
+        ("NVIDIA GeForce RTX 4090", 24576, HardwareTier.WORKSTATION, 64, "512"),
+        ("NVIDIA RTX 6000 Ada", 49152, HardwareTier.WORKSTATION, 128, "512"),
+    ],
+)
+def test_platform_profile_native_linux_nvidia_all_tiers_are_crash_resistant(
+    monkeypatch, name, vram_mb, tier, ram_gb, expected_cache
+):
+    profile = {
+        "ram_gb": ram_gb,
+        "gpus": [{"name": name, "vram_total_mb": vram_mb}],
+        "backend": "cuda",
+        "platform": "Linux",
+    }
+    monkeypatch.setattr(
+        "seiso.memory.platform_profile.classify_tier",
+        lambda _p: tier,
+    )
+    monkeypatch.setattr(
+        "seiso.memory.platform_profile.vram_headroom_mb", lambda _p: vram_mb
+    )
+    monkeypatch.setattr(
+        "seiso.memory.platform_profile.training_capabilities",
+        lambda: {
+            "gpu_count": 1,
+            "train_platform": "cpu",
+            "nvidia_hardware": True,
+            "vendor": "nvidia",
+        },
+    )
+    monkeypatch.setattr("platform.system", lambda: "Linux")
+    monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: True)
+    monkeypatch.setattr(
+        "seiso.inference.model_pool._llama_gpu_offload_ok", lambda: True
+    )
+
+    apply_platform_memory_profile(profile=profile)
+
+    assert os.environ["SEISO_LLAMA_GPU_LAYERS"] == "-1"
+    assert int(os.environ["SEISO_LLAMA_BATCH"]) <= 1024
+    assert int(os.environ["SEISO_LLAMA_UBATCH"]) <= 256
+    assert os.environ["SEISO_LLAMA_CACHE_MB"] == expected_cache
+    assert os.environ["SEISO_LLAMA_FLASH_ATTN"] == "false"
+    assert os.environ["SEISO_LLAMA_SPEED_SCALE"] == "false"
+
+
+def test_platform_profile_workstation_keeps_speed_when_vram_in_use(monkeypatch):
+    """Loaded models shrink free VRAM — tuning must use GPU capacity, not free bytes."""
+    profile = {
+        "ram_gb": 62,
+        "gpus": [
+            {
+                "name": "NVIDIA GeForce RTX 4090",
+                "vram_total_mb": 24564,
+                "vram_used_mb": 23200,
+            }
+        ],
+        "backend": "cuda",
+        "platform": "Linux",
+    }
+    monkeypatch.setattr(
+        "seiso.memory.platform_profile.classify_tier",
+        lambda _p: HardwareTier.WORKSTATION,
+    )
+    monkeypatch.setattr(
+        "seiso.memory.platform_profile.vram_headroom_mb", lambda _p: 1364
+    )
+    monkeypatch.setattr(
+        "seiso.memory.platform_profile.training_capabilities",
+        lambda: {
+            "gpu_count": 1,
+            "train_platform": "cpu",
+            "nvidia_hardware": True,
+            "vendor": "nvidia",
+        },
+    )
+    monkeypatch.setattr("platform.system", lambda: "Linux")
+    monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: True)
+    monkeypatch.setattr(
+        "seiso.inference.model_pool._llama_gpu_offload_ok", lambda: True
+    )
+
+    result = apply_platform_memory_profile(profile=profile)
+
+    assert result["memory_profile"] == "balanced"
+    assert result["headroom_mb"] == 24564
+    assert result["free_headroom_mb"] == 1364
+    assert os.environ["SEISO_LLAMA_BATCH"] == "1024"
+    assert os.environ["SEISO_LLAMA_UBATCH"] == "256"
+    assert os.environ["SEISO_LLAMA_CACHE_MB"] == "512"
+
+
+def test_platform_profile_native_linux_clamps_stale_batch_env(monkeypatch):
+    profile = {
+        "ram_gb": 64,
+        "gpus": [{"name": "NVIDIA GeForce RTX 4090", "vram_total_mb": 24576}],
+        "backend": "cuda",
+        "platform": "Linux",
+    }
+    monkeypatch.setenv("SEISO_LLAMA_BATCH", "8192")
+    monkeypatch.setenv("SEISO_LLAMA_UBATCH", "2048")
+    monkeypatch.setattr(
+        "seiso.memory.platform_profile.classify_tier",
+        lambda _p: HardwareTier.WORKSTATION,
+    )
+    monkeypatch.setattr(
+        "seiso.memory.platform_profile.vram_headroom_mb", lambda _p: 24576
+    )
+    monkeypatch.setattr(
+        "seiso.memory.platform_profile.training_capabilities",
+        lambda: {
+            "gpu_count": 1,
+            "train_platform": "cpu",
+            "nvidia_hardware": True,
+            "vendor": "nvidia",
+        },
+    )
+    monkeypatch.setattr("platform.system", lambda: "Linux")
+    monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: True)
+    monkeypatch.setattr(
+        "seiso.inference.model_pool._llama_gpu_offload_ok", lambda: True
+    )
+
+    apply_platform_memory_profile(profile=profile)
+
+    assert os.environ["SEISO_LLAMA_BATCH"] == "1024"
+    assert os.environ["SEISO_LLAMA_UBATCH"] == "256"
     profile = {"ram_gb": 16, "gpus": [], "backend": "cpu", "platform": "Darwin"}
     monkeypatch.setattr(
         "seiso.memory.platform_profile.classify_tier", lambda _p: HardwareTier.CPU_ONLY

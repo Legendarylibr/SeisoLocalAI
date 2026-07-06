@@ -301,11 +301,13 @@ def compress_run(
     seed: int = typer.Option(42),
 ) -> None:
     """Run compression pipeline from CLI."""
+    import uuid
+
     from forge.config import get_settings
     from seiso.compress.runner import run_compress_job
 
     settings = get_settings()
-    job_id = "cli"
+    job_id = f"cli-{uuid.uuid4().hex[:8]}"
     user_id = "local"
     payload: dict = {
         "preset": preset,

@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import contextlib
 import gc
+import json
 import logging
 import os
 import platform
+import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
+from seiso import platform as seiso_platform
 from seiso.env import env_bool
 from seiso.hardware import (
     assess_hardware_fit,
@@ -16,6 +20,8 @@ from seiso.hardware import (
     training_defaults,
     vram_headroom_mb,
 )
+from seiso.hardware.tiers import fit_headroom_mb
+from seiso.inference.backends import gguf_total_layers
 from seiso.io.files import iter_matching_files
 from seiso.memory.estimates import (
     estimate_chat_vram_gb,
@@ -34,14 +40,131 @@ _TRAINING_OVERHEAD_RATIO = 2.0
 _MAX_INFERENCE_TOKENS = 8192
 _MAX_LLAMA_CTX = 131072
 _MIN_LLAMA_CTX = 2048
-_MAX_LLAMA_BATCH = 2048
+_MAX_LLAMA_BATCH = 4096
 _MIN_LLAMA_BATCH = 128
-_MAX_LLAMA_CACHE_MB = 1024
+# Coarse n_ctx buckets — avoid reloading the model every few chat turns.
+_LLAMA_CTX_BUCKETS = (
+    2048,
+    4096,
+    8192,
+    12288,
+    16384,
+    24576,
+    32768,
+    49152,
+    65536,
+    98304,
+    131072,
+)
+_NATIVE_LINUX_CTX_BUCKETS = (
+    4096,
+    8192,
+    12288,
+    16384,
+    24576,
+    32768,
+    65536,
+    131072,
+)
+# Post-weight headroom below this on native Linux → clamp batches (prefill crash zone).
+_NATIVE_LINUX_PREFILL_CLAMP_MB = 6144
+_NATIVE_LINUX_PREFILL_HEADROOM_DROP_RATIO = 0.85
+# Reload when VRAM shrinks enough to matter but before the 15% hard-drop threshold.
+_NATIVE_LINUX_PREFILL_HEADROOM_SHRINK_RATIO = 0.92
+_NATIVE_LINUX_PREFILL_RESERVE_PER_256TOK_MB = 256
+_TIGHT_VRAM_FIT_RATIO = 0.65
+_NATIVE_LINUX_TIGHT_VRAM_FIT_RATIO = 0.60
 _MAX_JSONL_LOAD_MB = 512
 _MODEL_WEIGHT_VRAM_SUFFIXES = frozenset({".gguf", ".safetensors", ".bin"})
 
 _VRAM_ESTIMATE_CACHE_MAX = 256
 _vram_estimate_cache: dict[tuple, int] = {}
+
+LlamaLoadTier = Literal["normal", "compact", "minimal"]
+
+# Load-tier ceilings shared by profile ladder + OOM recovery.
+_LOAD_TIER_BATCH_CAPS: dict[LlamaLoadTier, tuple[int, int]] = {
+    "normal": (_MAX_LLAMA_BATCH, 1024),
+    "compact": (512, 128),
+    "minimal": (256, 128),
+}
+# Tighter native Linux NVIDIA ceilings — prefill activations spike well above
+# weight+KV, so multi-turn chat OOMs unless batches stay low.
+_NATIVE_LINUX_BATCH_CAPS: dict[LlamaLoadTier, tuple[int, int]] = {
+    "normal": (1024, 256),
+    "compact": (256, 128),
+    "minimal": (128, 128),
+}
+_NATIVE_LINUX_TIGHT_BATCH = (256, 128)
+_NATIVE_LINUX_DENSE_MID_MIN_MB = 7 * 1024
+_NATIVE_LINUX_DENSE_MID_MAX_MB = 16 * 1024
+_NATIVE_LINUX_DENSE_MID_HEADROOM_MB = 32 * 1024
+
+
+def clamp_llama_batch_pair(
+    batch: int,
+    ubatch: int,
+    *,
+    native_linux_nvidia: bool = False,
+    load_tier: LlamaLoadTier = "normal",
+    tight: bool = False,
+) -> tuple[int, int]:
+    """Normalize a llama.cpp batch/ubatch pair (single source of ceilings)."""
+    batch = max(_MIN_LLAMA_BATCH, int(batch))
+    ubatch = max(_MIN_LLAMA_BATCH, min(int(ubatch), batch))
+    caps = _NATIVE_LINUX_BATCH_CAPS if native_linux_nvidia else _LOAD_TIER_BATCH_CAPS
+    tier_batch, tier_ubatch = caps.get(load_tier, caps["normal"])
+    if native_linux_nvidia and tight:
+        tier_batch = min(tier_batch, _NATIVE_LINUX_TIGHT_BATCH[0])
+        tier_ubatch = min(tier_ubatch, _NATIVE_LINUX_TIGHT_BATCH[1])
+    batch = min(batch, tier_batch)
+    ubatch = min(ubatch, tier_ubatch, batch)
+    return batch, ubatch
+
+
+def resolve_llama_batch_limits(
+    headroom_mb_value: int,
+    *,
+    native_linux_nvidia: bool = False,
+    load_tier: LlamaLoadTier = "normal",
+    tight: bool = False,
+) -> tuple[int, int]:
+    """Headroom table plus platform/tier ceilings for a batch/ubatch pair."""
+    batch, ubatch = llama_batch_limits_for_headroom(headroom_mb_value)
+    return clamp_llama_batch_pair(
+        batch,
+        ubatch,
+        native_linux_nvidia=native_linux_nvidia,
+        load_tier=load_tier,
+        tight=tight,
+    )
+
+
+def llama_oom_recovery_batch(
+    *,
+    safe_batch: int,
+    safe_ubatch: int,
+    loaded_batch: int,
+    next_tier: LlamaLoadTier,
+) -> tuple[int, int]:
+    """Next batch/ubatch after an inference OOM, clipped to the recovery tier."""
+    # Always use the tighter native tier table — we already blew up once.
+    if safe_batch > 0 and safe_ubatch > 0:
+        return clamp_llama_batch_pair(
+            min(safe_batch, loaded_batch or safe_batch) // 2,
+            safe_ubatch // 2,
+            native_linux_nvidia=True,
+            load_tier=next_tier,
+        )
+    tier_batch, tier_ubatch = _NATIVE_LINUX_BATCH_CAPS.get(
+        next_tier, _NATIVE_LINUX_BATCH_CAPS["normal"]
+    )
+    return clamp_llama_batch_pair(
+        tier_batch,
+        tier_ubatch,
+        native_linux_nvidia=True,
+        load_tier=next_tier,
+    )
 
 
 def _path_stat_key(p: Path) -> tuple | None:
@@ -61,17 +184,17 @@ def estimate_path_vram_mb(path: str | Path, *, mode: str = "chat") -> int:
     """Conservative runtime memory estimate from path, size, or name."""
     p = Path(path).expanduser()
     cache_key = _path_stat_key(p)
-    if cache_key is not None and mode == "chat":
-        cached = _vram_estimate_cache.get(cache_key)
+    if cache_key is not None:
+        cached = _vram_estimate_cache.get((cache_key, mode))
         if cached is not None:
             return cached
 
     est = _estimate_path_vram_mb_uncached(p, mode=mode)
 
-    if cache_key is not None and mode == "chat":
+    if cache_key is not None:
         if len(_vram_estimate_cache) >= _VRAM_ESTIMATE_CACHE_MAX:
             _vram_estimate_cache.pop(next(iter(_vram_estimate_cache)))
-        _vram_estimate_cache[cache_key] = est
+        _vram_estimate_cache[(cache_key, mode)] = est
     return est
 
 
@@ -103,6 +226,7 @@ def _hub_model_vram_mb(path_str: str, *, mode: str) -> int | None:
 def _estimate_path_vram_mb_uncached(p: Path, *, mode: str = "chat") -> int:
     name = p.name.lower()
     path_str = str(p)
+    from_hub = False
 
     if not p.exists():
         hub_est = _hub_model_vram_mb(path_str, mode=mode)
@@ -142,10 +266,9 @@ def _estimate_path_vram_mb_uncached(p: Path, *, mode: str = "chat") -> int:
         hub_est = _hub_model_vram_mb(path_str, mode=mode)
         if hub_est is not None:
             est = hub_est
+            from_hub = True
         else:
-            guessed = (
-                guess_params_from_name(name) or guess_params_from_name(path_str) or 7.0
-            )
+            guessed = guess_params_from_name(name) or guess_params_from_name(path_str) or 7.0
             est = int(estimate_chat_vram_gb(f"{guessed}B", repo_id=path_str) * 1024)
             if mode == "train":
                 est = int(
@@ -157,11 +280,7 @@ def _estimate_path_vram_mb_uncached(p: Path, *, mode: str = "chat") -> int:
                     * 1024
                 )
 
-    if (
-        mode == "train"
-        and _hub_model_vram_mb(path_str, mode=mode) is None
-        and p.exists()
-    ):
+    if mode == "train" and not from_hub and p.exists():
         est = int(est * _TRAINING_OVERHEAD_RATIO)
     return max(est, 256)
 
@@ -187,9 +306,9 @@ def is_oom_error(exc: BaseException) -> bool:
         "out of memory",
         "cuda out of memory",
         "mps out of memory",
-        "allocat",
         "insufficient memory",
         "failed to allocate",
+        "cannot allocate memory",
     )
     return any(n in msg for n in needles)
 
@@ -224,32 +343,528 @@ def release_cached_memory(*, sync: bool = False) -> None:
         pass
 
 
+def _host_os_reserve_mb(ram_mb: int) -> int:
+    return max(512, int(ram_mb * 0.08))
+
+
+def _gpu_layer_fraction(n_gpu_layers: int, total_layers: int) -> float:
+    if n_gpu_layers == -1:
+        return 1.0
+    return max(0.0, min(float(n_gpu_layers) / float(total_layers or 64), 1.0))
+
+
 def llama_batch_headroom_mb(
     free_mb: int,
     *,
     model_path: str | Path | None = None,
     n_gpu_layers: int = -1,
+    n_ctx: int = 2048,
 ) -> int:
     """VRAM left for llama.cpp batch/KV after estimated weight offload."""
     if not model_path or n_gpu_layers == 0:
         return free_mb
     path = Path(model_path)
-    if not path.is_file():
-        return free_mb
     try:
-        from seiso.inference.backends import gguf_block_count
-
         weight_mb = int(estimate_path_vram_mb(path))
-        total_layers = gguf_block_count(path) or 64
+        total_layers = gguf_total_layers(path) if path.is_file() else 64
         if n_gpu_layers == -1:
             gpu_weight_mb = weight_mb
         else:
-            gpu_fraction = max(0.0, min(float(n_gpu_layers) / float(total_layers), 1.0))
-            gpu_weight_mb = int(weight_mb * gpu_fraction) + 256
-        kv_mb = max(256, min(int(free_mb * 0.08), 1024))
+            gpu_weight_mb = int(weight_mb * _gpu_layer_fraction(n_gpu_layers, total_layers)) + 256
+        kv_mb = llama_kv_cache_reserve_mb(
+            path,
+            n_ctx=n_ctx,
+            n_gpu_layers=n_gpu_layers,
+            total_layers=total_layers,
+            weight_mb=weight_mb,
+            free_mb=free_mb,
+        )
         return max(_MIN_LLAMA_BATCH * 2, free_mb - gpu_weight_mb - kv_mb)
     except Exception:
         return free_mb
+
+
+def _estimate_gguf_params_b(path: Path, weight_mb: int) -> float:
+    guessed = guess_params_from_name(path.name) or guess_params_from_name(str(path))
+    if guessed:
+        return float(guessed)
+    # Most local chat GGUFs are Q4/Q5. Inferring params from file size is
+    # intentionally conservative because underestimating KV cache causes OOM.
+    return max(1.0, float(weight_mb) / 1024.0 / 0.55)
+
+
+def _gguf_exact_kv_per_token_mb(path: Path) -> float | None:
+    """Exact fp16 KV MB/token from GGUF attention metadata, or None."""
+    if not path.is_file():
+        return None
+    try:
+        from seiso.inference.backends import gguf_kv_bytes_per_token
+
+        kv_bytes = gguf_kv_bytes_per_token(str(path))
+    except Exception:
+        return None
+    if not kv_bytes:
+        return None
+    return kv_bytes / (1024**2)
+
+
+def _llama_effective_kv_ctx(path: Path, n_ctx: int) -> int:
+    """Context tokens used for KV sizing (SWA models cap at the sliding window)."""
+    ctx = max(_MIN_LLAMA_CTX, min(int(n_ctx), _MAX_LLAMA_CTX))
+    if env_bool("SEISO_LLAMA_SWA_FULL", False):
+        return ctx
+    try:
+        from seiso.inference.backends import (
+            gguf_sliding_window,
+            gguf_swa_layer_fraction,
+            gguf_uses_sliding_window_attention,
+        )
+
+        if gguf_uses_sliding_window_attention(str(path)):
+            sw = gguf_sliding_window(str(path))
+            local_ctx = min(ctx, int(sw)) if sw and sw > 0 else min(ctx, 4096)
+            swa_frac = gguf_swa_layer_fraction(str(path))
+            swa_frac = 0.85 if swa_frac is None else max(0.0, min(float(swa_frac), 1.0))
+            global_frac = 1.0 - swa_frac
+            return max(
+                local_ctx,
+                int(swa_frac * local_ctx + global_frac * ctx),
+            )
+    except Exception:
+        pass
+    return ctx
+
+
+def llama_kv_cache_reserve_mb(
+    model_path: str | Path,
+    *,
+    n_ctx: int,
+    n_gpu_layers: int,
+    total_layers: int | None = None,
+    weight_mb: int | None = None,
+    free_mb: int = 0,
+) -> int:
+    """VRAM reserve for llama.cpp KV cache at the requested context.
+
+    Prefers exact GGUF attention geometry (GQA-aware, correct on every NVIDIA
+    card); falls back to a conservative parameter-count heuristic when the
+    metadata is unavailable.
+    """
+    if n_gpu_layers == 0:
+        return 0
+    path = Path(model_path)
+    if weight_mb is None:
+        weight_mb = int(estimate_path_vram_mb(path))
+    if total_layers is None:
+        total_layers = gguf_total_layers(path)
+
+    layer_fraction = _gpu_layer_fraction(n_gpu_layers, total_layers)
+    ctx = _llama_effective_kv_ctx(path, n_ctx)
+
+    exact_per_token_mb = _gguf_exact_kv_per_token_mb(path)
+    if exact_per_token_mb is not None:
+        # 10% covers KV padding and per-sequence bookkeeping.
+        estimated = int(ctx * exact_per_token_mb * 1.10 * layer_fraction)
+        return max(256, estimated)
+
+    params_b = _estimate_gguf_params_b(path, int(weight_mb))
+    # Approximate fp16 K+V cache per token. The coefficient tracks observed
+    # llama-family/GQA memory by parameter scale while keeping small models fast.
+    per_token_mb = max(0.16, min(params_b * 0.045, 3.5))
+    estimated = int(ctx * per_token_mb * layer_fraction)
+    legacy_floor = max(256, min(int(max(free_mb, 0) * 0.08), 1024))
+    return max(legacy_floor, estimated)
+
+
+def llama_offload_fits_headroom(
+    model_path: str | Path,
+    *,
+    headroom_mb: int,
+    n_gpu_layers: int,
+    n_ctx: int = 2048,
+    weight_mb: int | None = None,
+    total_layers: int | None = None,
+) -> bool:
+    """True when estimated GPU weight + KV for ``n_gpu_layers`` fits within headroom."""
+    if n_gpu_layers == 0:
+        return True
+    if headroom_mb <= 0:
+        return False
+
+    path = Path(model_path)
+    if weight_mb is None:
+        weight_mb = int(estimate_path_vram_mb(path))
+    if total_layers is None:
+        total_layers = gguf_total_layers(path)
+
+    if n_gpu_layers == -1:
+        gpu_weight_mb = weight_mb
+    else:
+        gpu_weight_mb = int(weight_mb * _gpu_layer_fraction(n_gpu_layers, total_layers)) + 256
+
+    kv_mb = llama_kv_cache_reserve_mb(
+        path,
+        n_ctx=n_ctx,
+        n_gpu_layers=n_gpu_layers,
+        total_layers=total_layers,
+        weight_mb=weight_mb,
+        free_mb=headroom_mb,
+    )
+    return gpu_weight_mb + kv_mb <= headroom_mb
+
+
+def llama_host_batch_headroom_mb(
+    *,
+    model_path: str | Path,
+    n_gpu_layers: int,
+    free_vram_mb: int,
+) -> int | None:
+    """Host RAM budget for mmap pages, prompt cache, and CPU-side KV on Linux NVIDIA."""
+    if not seiso_platform.use_linux_nvidia_inference_guards():
+        return None
+    ram_mb = available_ram_mb()
+    if ram_mb <= 0:
+        return None
+
+    path = Path(model_path)
+    weight_mb = max(int(estimate_path_vram_mb(path)), 0)
+    total_layers = max(gguf_total_layers(path), 1)
+
+    if n_gpu_layers == 0:
+        host_weight_mb = weight_mb
+    elif n_gpu_layers == -1:
+        # Fully offloaded weights stay mostly in VRAM; reserve modest mmap pages.
+        host_weight_mb = max(256, int(weight_mb * 0.12))
+    else:
+        cpu_fraction = 1.0 - _gpu_layer_fraction(n_gpu_layers, total_layers)
+        host_weight_mb = max(256, int(weight_mb * cpu_fraction) + 256)
+
+    spill_mb = max(256, min(int(max(free_vram_mb, 0) * 0.05), 512))
+    reserve_mb = _host_os_reserve_mb(ram_mb)
+    # When host weight exceeds free RAM, force the minimum batch budget so
+    # clamp_llama_load_kwargs still reduces n_batch instead of over-allocating.
+    remaining = ram_mb - host_weight_mb - reserve_mb - spill_mb
+    return max(_MIN_LLAMA_BATCH * 2, remaining)
+
+
+def _native_dense_mid_size_prefill_risk(
+    *,
+    model_path: str | Path,
+    free_mb: int,
+) -> bool:
+    """True for dense 7B-16B models that can load on 24 GB but spike at prefill."""
+    try:
+        if not seiso_platform.use_linux_nvidia_inference_guards():
+            return False
+        weight_mb = int(estimate_path_vram_mb(model_path))
+        if not (_NATIVE_LINUX_DENSE_MID_MIN_MB <= weight_mb <= _NATIVE_LINUX_DENSE_MID_MAX_MB):
+            return False
+        if free_mb > _NATIVE_LINUX_DENSE_MID_HEADROOM_MB:
+            return False
+        from seiso.inference.family_policy import policy_for_gguf
+
+        policy = policy_for_gguf(str(model_path))
+        return policy.kind == "dense" and policy.prefill_tightness > 1.0
+    except Exception:
+        return False
+
+
+def llama_model_is_tight_vram_fit(
+    *,
+    model_path: str | Path,
+    free_mb: int,
+    n_gpu_layers: int = -1,
+    n_ctx: int = 2048,
+) -> bool:
+    """True when a model consumes most of the available GPU budget."""
+    path = Path(model_path)
+    weight_mb = int(estimate_path_vram_mb(path))
+    kv_mb = llama_kv_cache_reserve_mb(
+        path,
+        n_ctx=n_ctx,
+        n_gpu_layers=n_gpu_layers,
+        free_mb=free_mb,
+    )
+    ratio = _TIGHT_VRAM_FIT_RATIO
+    with contextlib.suppress(Exception):
+        if seiso_platform.use_linux_nvidia_inference_guards():
+            ratio = _NATIVE_LINUX_TIGHT_VRAM_FIT_RATIO
+            from seiso.inference.family_policy import policy_for_gguf
+
+            ratio = ratio / max(policy_for_gguf(str(path)).prefill_tightness, 1.0)
+    return weight_mb + kv_mb >= int(free_mb * ratio)
+
+
+def llama_effective_batch_headroom_mb(
+    free_mb: int,
+    *,
+    model_path: str | Path | None = None,
+    n_gpu_layers: int = -1,
+    n_ctx: int = 2048,
+) -> int:
+    """Conservative batch/KV budget — minimum of GPU post-weight and host RAM headroom."""
+    gpu_headroom = llama_batch_headroom_mb(
+        free_mb, model_path=model_path, n_gpu_layers=n_gpu_layers, n_ctx=n_ctx
+    )
+    if not model_path:
+        return gpu_headroom
+    host_headroom = llama_host_batch_headroom_mb(
+        model_path=model_path,
+        n_gpu_layers=n_gpu_layers,
+        free_vram_mb=free_mb,
+    )
+    if host_headroom is None:
+        return gpu_headroom
+    effective = min(gpu_headroom, host_headroom)
+    try:
+        from seiso.platform import use_linux_nvidia_inference_guards
+
+        if use_linux_nvidia_inference_guards() and llama_model_is_tight_vram_fit(
+            model_path=model_path,
+            free_mb=free_mb,
+            n_gpu_layers=n_gpu_layers,
+            n_ctx=n_ctx,
+        ):
+            # Reserve headroom for prefill activations on near-capacity models only.
+            effective = max(_MIN_LLAMA_BATCH * 2, int(effective * 0.85) - 256)
+    except ImportError:
+        pass
+    return effective
+
+
+def llama_batch_limits_for_headroom(headroom_mb_value: int) -> tuple[int, int]:
+    """Largest llama.cpp batch/ubatch pair for available headroom (no platform cap)."""
+    if headroom_mb_value < 2048:
+        return 256, 128
+    if headroom_mb_value < 4096:
+        return 512, 128
+    if headroom_mb_value < 8192:
+        return 512, 256
+    if headroom_mb_value < 16384:
+        return 1024, 256
+    if headroom_mb_value < 32768:
+        return 2048, 512
+    return 4096, 1024
+
+
+def llama_prefill_needs_reload(
+    *,
+    model_path: str,
+    messages: list[dict[str, Any]],
+    n_ctx: int,
+    loaded_n_batch: int,
+    loaded_n_ubatch: int | None = None,
+    loaded_n_gpu_layers: int,
+    load_tier: LlamaLoadTier = "normal",
+    loaded_headroom_mb: int | None = None,
+) -> tuple[bool, int, int]:
+    """True when a cached native-Linux llama handle should reload before prefill."""
+    try:
+        native_linux_nvidia = seiso_platform.use_linux_nvidia_inference_guards()
+    except Exception:
+        native_linux_nvidia = False
+    if not native_linux_nvidia:
+        batch, ubatch = clamp_llama_batch_pair(
+            loaded_n_batch or _MAX_LLAMA_BATCH,
+            loaded_n_batch or _MAX_LLAMA_BATCH,
+        )
+        return False, batch, ubatch
+
+    with contextlib.suppress(Exception):
+        hardware_profile(force_refresh=True)
+
+    free_mb = headroom_mb()
+    prompt_tokens = _estimate_prompt_tokens(messages)
+    effective = llama_effective_batch_headroom_mb(
+        free_mb,
+        model_path=model_path,
+        n_gpu_layers=loaded_n_gpu_layers,
+        n_ctx=n_ctx,
+    )
+    prefill_tokens = max(prompt_tokens, _MIN_LLAMA_BATCH)
+    reserve_steps = max(1, (prefill_tokens + 255) // 256)
+    reserve_mb = reserve_steps * _NATIVE_LINUX_PREFILL_RESERVE_PER_256TOK_MB
+    effective = max(_MIN_LLAMA_BATCH * 2, effective - reserve_mb)
+    if _messages_have_vision_content(messages):
+        # Vision encoder + patch embeddings spike VRAM beyond text-only prefill.
+        effective = max(_MIN_LLAMA_BATCH * 2, effective - 512)
+    elif _gguf_has_mmproj_sibling(model_path):
+        effective = max(_MIN_LLAMA_BATCH * 2, effective - 256)
+
+    vision_prefill = _messages_have_vision_content(messages)
+    tight_prefill = llama_model_is_tight_vram_fit(
+        model_path=model_path,
+        free_mb=free_mb,
+        n_gpu_layers=loaded_n_gpu_layers,
+        n_ctx=n_ctx,
+    ) or _native_dense_mid_size_prefill_risk(
+        model_path=model_path,
+        free_mb=free_mb,
+    )
+    safe_batch, safe_ubatch = resolve_llama_batch_limits(
+        effective,
+        native_linux_nvidia=True,
+        load_tier=load_tier,
+        tight=tight_prefill,
+    )
+    headroom_dropped = (
+        loaded_headroom_mb is not None
+        and loaded_headroom_mb > 0
+        and free_mb < int(loaded_headroom_mb * _NATIVE_LINUX_PREFILL_HEADROOM_DROP_RATIO)
+    )
+    prefill_exceeds_safe = prompt_tokens > safe_batch
+    loaded_batch = int(loaded_n_batch or 0)
+    loaded_ubatch = int(loaded_n_ubatch or loaded_batch or 0)
+    headroom_shrank = (
+        loaded_headroom_mb is not None
+        and loaded_headroom_mb > 0
+        and free_mb < int(loaded_headroom_mb * _NATIVE_LINUX_PREFILL_HEADROOM_SHRINK_RATIO)
+    )
+    # Reload only when the loaded batch is unsafe for this prefill. Do not
+    # thrash on "long prompt" alone — that caused mid-conversation reloads
+    # (and OOM risk) as chat history grew on native Linux.
+    needs_reload = loaded_batch > safe_batch and (
+        prefill_exceeds_safe
+        or headroom_dropped
+        or headroom_shrank
+        or tight_prefill
+        or vision_prefill
+    )
+    if loaded_ubatch > safe_ubatch and (
+        headroom_dropped
+        or headroom_shrank
+        or tight_prefill
+        or vision_prefill
+        or prefill_exceeds_safe
+    ):
+        needs_reload = True
+    return needs_reload, safe_batch, safe_ubatch
+
+
+def llama_load_profile_ladder(
+    *,
+    model_path: str,
+    n_ctx: int,
+    n_gpu_layers: int,
+    free_mb: int,
+    base_batch: int,
+    base_ubatch: int,
+    tier: LlamaLoadTier = "normal",
+) -> list[dict[str, Any]]:
+    """Ordered llama.cpp memory profiles from fastest safe settings to compact fallbacks."""
+    tight = llama_model_is_tight_vram_fit(
+        model_path=model_path,
+        free_mb=free_mb,
+        n_gpu_layers=n_gpu_layers,
+        n_ctx=n_ctx,
+    ) or _native_dense_mid_size_prefill_risk(
+        model_path=model_path,
+        free_mb=free_mb,
+    )
+    effective = llama_effective_batch_headroom_mb(
+        free_mb, model_path=model_path, n_gpu_layers=n_gpu_layers, n_ctx=n_ctx
+    )
+    try:
+        from seiso.platform import use_linux_nvidia_inference_guards
+
+        native_linux_nvidia = use_linux_nvidia_inference_guards()
+    except ImportError:
+        native_linux_nvidia = False
+
+    top_batch, top_ubatch = resolve_llama_batch_limits(
+        effective,
+        native_linux_nvidia=native_linux_nvidia,
+        load_tier=tier,
+        tight=tight,
+    )
+    apply_headroom_cap = native_linux_nvidia or tight or effective < _NATIVE_LINUX_PREFILL_CLAMP_MB
+    if apply_headroom_cap:
+        base_batch = min(int(base_batch), top_batch)
+        base_ubatch = min(int(base_ubatch), top_ubatch)
+    base_batch, base_ubatch = clamp_llama_batch_pair(
+        base_batch,
+        base_ubatch,
+        native_linux_nvidia=native_linux_nvidia,
+        load_tier=tier,
+        tight=tight,
+    )
+
+    steps: list[tuple[int, int, int | None, bool]] = []
+    speed_scale = env_bool("SEISO_LLAMA_SPEED_SCALE", not native_linux_nvidia)
+    native_flash_ok = not native_linux_nvidia or env_bool("SEISO_LLAMA_UNSAFE_FLASH_ATTN", False)
+    primary_flash = (
+        n_gpu_layers != 0
+        and not tight
+        and native_flash_ok
+        and env_bool("SEISO_LLAMA_FLASH_ATTN", True)
+    )
+
+    if tier == "normal":
+        if tight:
+            steps.append(
+                (
+                    min(base_batch, _NATIVE_LINUX_TIGHT_BATCH[0]),
+                    min(base_ubatch, _NATIVE_LINUX_TIGHT_BATCH[1]),
+                    min(n_ctx, 2048),
+                    False,
+                )
+            )
+        if (
+            speed_scale
+            and not native_linux_nvidia
+            and n_gpu_layers != 0
+            and (top_batch > base_batch or top_ubatch > base_ubatch)
+        ):
+            steps.append((top_batch, top_ubatch, None, True))
+        steps.append((base_batch, base_ubatch, None, primary_flash))
+        for batch, ubatch, ctx_cap in (
+            (512, 256, min(n_ctx, 4096)),
+            (512, 128, min(n_ctx, 4096)),
+            (256, 128, min(n_ctx, 2048)),
+        ):
+            steps.append(
+                (
+                    min(base_batch, batch),
+                    min(base_ubatch, ubatch),
+                    ctx_cap,
+                    False,
+                )
+            )
+    else:
+        steps.append(
+            (
+                base_batch,
+                base_ubatch,
+                min(n_ctx, 4096 if tier == "compact" else 2048),
+                False,
+            )
+        )
+
+    profiles: list[dict[str, Any]] = []
+    seen: set[tuple[tuple[str, Any], ...]] = set()
+    for batch, ubatch, ctx_cap, flash in steps:
+        profile: dict[str, Any] = {"n_batch": batch, "n_ubatch": ubatch}
+        if ctx_cap is not None:
+            profile["n_ctx"] = ctx_cap
+        if not flash:
+            profile["flash_attn"] = False
+        if tier != "normal":
+            profile["_seiso_prompt_cache"] = False
+        key = tuple(sorted(profile.items()))
+        if key in seen:
+            continue
+        seen.add(key)
+        profiles.append(profile)
+    return profiles
+
+
+def llama_next_recovery_tier(current: LlamaLoadTier) -> LlamaLoadTier | None:
+    """Next load tier after an inference OOM, or None when exhausted."""
+    if current == "normal":
+        return "compact"
+    if current == "compact":
+        return "minimal"
+    return None
 
 
 def headroom_mb() -> int:
@@ -269,22 +884,16 @@ def headroom_mb() -> int:
             if best > 0:
                 return best
         ram = float(profile.get("ram_gb") or 8)
-        try:
-            import psutil  # type: ignore
-
-            avail = psutil.virtual_memory().available / (1024**2)
+        avail = available_ram_mb()
+        if avail > 0:
             return int(min(avail * 0.72, ram * 1024 * 0.45))
-        except Exception:
-            avail = available_ram_mb()
-            if avail > 0:
-                return int(min(avail * 0.72, ram * 1024 * 0.45))
-            return int(ram * 1024 * 0.35)
+        return int(ram * 1024 * 0.35)
 
 
 def available_ram_mb() -> int:
     """Cross-platform available RAM in MB (Linux, macOS, Windows)."""
     try:
-        import psutil  # type: ignore
+        import psutil
 
         return int(psutil.virtual_memory().available / (1024**2))
     except Exception:
@@ -308,16 +917,15 @@ def available_ram_mb() -> int:
 
             stat = MEMORYSTATUSEX()
             stat.dwLength = ctypes.sizeof(MEMORYSTATUSEX)
-            if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(stat)):
+            windll = getattr(ctypes, "windll", None)
+            if windll is not None and windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(stat)):
                 return int(stat.ullAvailPhys / (1024**2))
         except Exception:
             pass
     return int(float(hardware_profile().get("ram_gb") or 8) * 1024 * 0.5)
 
 
-def build_hf_max_memory(
-    *, reserve_ratio: float = _DEFAULT_RESERVE_RATIO
-) -> dict[int, str] | None:
+def build_hf_max_memory(*, reserve_ratio: float = _DEFAULT_RESERVE_RATIO) -> dict[int, str] | None:
     """Build HuggingFace ``max_memory`` unless caps are explicitly disabled."""
     if env_bool("SEISO_DISABLE_MEMORY_CAPS", False):
         return None
@@ -342,14 +950,22 @@ def build_hf_max_memory(
 
 def assess_path_memory_fit(path: str | Path, *, mode: str = "chat") -> dict[str, Any]:
     """Return fit metadata compatible with Forge hardware assessments."""
-    est_mb = estimate_path_vram_mb(path, mode=mode)
+    p = Path(path).expanduser()
+    est_mb = estimate_path_vram_mb(p, mode=mode)
+    if p.is_file() and p.suffix.lower() == ".gguf":
+        try:
+            from seiso.inference.llama_vision import resolve_mmproj_path
+
+            mmproj = resolve_mmproj_path(p)
+            if mmproj:
+                est_mb += estimate_path_vram_mb(mmproj, mode=mode)
+        except ImportError:
+            pass
     est_gb = round(est_mb / 1024, 2)
     profile = hardware_profile()
     try:
         return assess_hardware_fit(est_gb, profile, mode=mode)
     except Exception:
-        from seiso.hardware.tiers import fit_headroom_mb, vram_headroom_mb
-
         capacity = int(fit_headroom_mb(profile))
         free = int(vram_headroom_mb(profile))
         raw_budget = free if free > 0 else capacity
@@ -369,6 +985,18 @@ def assess_path_memory_fit(path: str | Path, *, mode: str = "chat") -> dict[str,
         }
 
 
+_LLAMACPP_DEFER_WARNINGS: dict[str, str] = {
+    "apple_unified": (
+        "Low free unified memory — trying llama.cpp with mmap plus Mac CPU "
+        "offload fallback. Close apps if loading still fails."
+    ),
+    "linux_nvidia": (
+        "Low free VRAM — trying llama.cpp with mmap, partial GPU offload, and "
+        "memory-tier fallback. Close other GPU apps if loading still fails."
+    ),
+}
+
+
 def assess_path_memory_fit_for_load(
     path: str | Path,
     *,
@@ -384,35 +1012,52 @@ def assess_path_memory_fit_for_load(
     if unload_if_needed:
         active_pool.prepare_for_load(str(path), backend)
     fit = assess_path_memory_fit(path, mode=mode)
-    if _bypass_apple_llamacpp_preflight_block(fit, backend=backend, mode=mode):
+    profile = hardware_profile()
+    defer = _llamacpp_deferred_preflight_platform(fit, backend=backend, mode=mode, profile=profile)
+    if defer:
         fit = dict(fit)
         fit["memory_load_blocked"] = False
         fit["memory_load_blocked_reason"] = None
-        fit["memory_load_warning"] = (
-            "Low free unified memory — trying llama.cpp with mmap plus Mac CPU "
-            "offload fallback. Close apps if loading still fails."
+        fit["memory_load_warning"] = _LLAMACPP_DEFER_WARNINGS.get(
+            defer,
+            "Low free memory — trying llama.cpp with conservative fallbacks.",
         )
     return fit
 
 
-def _bypass_apple_llamacpp_preflight_block(
+def _llamacpp_deferred_preflight_platform(
     fit: dict[str, Any],
     *,
     backend: str | None,
     mode: str,
-) -> bool:
-    """Skip only the preflight block; llama.cpp load still handles OOM/fallback."""
+    profile: dict[str, Any] | None = None,
+) -> str | None:
+    """Return platform id when llama.cpp should try load despite preflight block."""
     if mode != "chat" or not fit.get("memory_load_blocked"):
-        return False
+        return None
     if str(backend or "").lower() not in {"llamacpp", "llama"}:
-        return False
-    profile = hardware_profile()
-    try:
-        from seiso.hardware.tiers import HardwareTier, classify_tier
+        return None
 
-        return classify_tier(profile) == HardwareTier.APPLE_UNIFIED
-    except Exception:
-        return False
+    defer = seiso_platform.llamacpp_deferred_preflight_platform(profile=profile)
+    if not defer:
+        return None
+
+    if defer == "linux_nvidia":
+        est_mb = int(fit.get("est_vram_mb") or 0)
+        try:
+            capacity_mb = fit_headroom_mb(profile or hardware_profile())
+        except Exception:
+            return None
+        if est_mb <= 0 or capacity_mb <= 0 or est_mb > capacity_mb:
+            return None
+        try:
+            from seiso.inference.model_pool import _llama_gpu_offload_ok
+
+            if not _llama_gpu_offload_ok():
+                return None
+        except ImportError:
+            pass
+    return defer
 
 
 def ensure_load_fits(
@@ -424,9 +1069,7 @@ def ensure_load_fits(
     """Block model loads that exceed measured memory headroom."""
     fit = assess_path_memory_fit_for_load(path, mode=mode, backend=backend)
     if fit.get("memory_load_blocked"):
-        reason = (
-            fit.get("memory_load_blocked_reason") or "Model exceeds available memory"
-        )
+        reason = fit.get("memory_load_blocked_reason") or "Model exceeds available memory"
         if allow_memory_overcommit():
             logger.warning("Memory overcommit allowed: %s", reason)
         else:
@@ -434,9 +1077,189 @@ def ensure_load_fits(
     return fit
 
 
+_VISION_TOKENS_PER_IMAGE = 1024
+_DATA_IMAGE_RE = re.compile(r"data:image/[^;]+;base64,", re.I)
+_VISION_CONTENT_MARKERS = (
+    "image_url",
+    '"type":"image"',
+    '"type": "image"',
+    "data:image/",
+)
+_CONTEXT_TRIM_MARKER = "[...older content omitted...]\n"
+
+
+def _text_chars_to_tokens(chars: int) -> int:
+    return max(0, int(chars / 3.2))
+
+
+def _count_images_in_content(content: Any) -> int:
+    if isinstance(content, list):
+        count = 0
+        for part in content:
+            if not isinstance(part, dict):
+                continue
+            part_type = str(part.get("type", "")).lower()
+            if part_type in {"image", "image_url"}:
+                count += 1
+        return count
+    if not isinstance(content, str):
+        return 0
+    stripped = content.lstrip()
+    if stripped.startswith("["):
+        with contextlib.suppress(json.JSONDecodeError, TypeError, ValueError):
+            parsed = json.loads(content)
+            if isinstance(parsed, list):
+                return _count_images_in_content(parsed)
+    lower = content.lower()
+    embedded = len(_DATA_IMAGE_RE.findall(content))
+    if embedded:
+        return embedded
+    if any(marker in lower for marker in _VISION_CONTENT_MARKERS):
+        return max(1, lower.count("image_url"))
+    return 0
+
+
+def _text_chars_from_content(content: Any) -> int:
+    if isinstance(content, list):
+        chars = 0
+        for part in content:
+            if not isinstance(part, dict):
+                continue
+            part_type = str(part.get("type", "text")).lower()
+            if part_type in {"text", "input_text"}:
+                chars += len(str(part.get("text") or part.get("content") or ""))
+        return chars
+    if isinstance(content, str):
+        stripped = content.lstrip()
+        if stripped.startswith("["):
+            with contextlib.suppress(json.JSONDecodeError, TypeError, ValueError):
+                parsed = json.loads(content)
+                if isinstance(parsed, list):
+                    return _text_chars_from_content(parsed)
+        if _count_images_in_content(content):
+            # OpenAI-style JSON with embedded base64 — avoid treating payload as text.
+            with contextlib.suppress(json.JSONDecodeError, TypeError, ValueError):
+                parsed = json.loads(content)
+                if isinstance(parsed, list):
+                    return _text_chars_from_content(parsed)
+            return min(len(content), 512)
+        return len(content)
+    return len(str(content))
+
+
+def _message_content_token_estimate(content: Any) -> int:
+    images = _count_images_in_content(content)
+    text_tokens = _text_chars_to_tokens(_text_chars_from_content(content))
+    if images:
+        return text_tokens + images * _VISION_TOKENS_PER_IMAGE
+    return text_tokens
+
+
+def _messages_have_vision_content(messages: list[dict[str, Any]]) -> bool:
+    return any(_count_images_in_content(m.get("content")) > 0 for m in messages)
+
+
+def _gguf_has_mmproj_sibling(model_path: str | Path) -> bool:
+    """True when a colocated mmproj GGUF is present for a vision-capable chat model."""
+    path = Path(model_path)
+    if not path.is_file():
+        return False
+    from seiso.inference.llama_vision import model_suggests_vision, resolve_mmproj_path
+
+    if not model_suggests_vision(path):
+        return False
+    return resolve_mmproj_path(path) is not None
+
+
 def _estimate_prompt_tokens(messages: list[dict[str, Any]]) -> int:
-    chars = sum(len(str(m.get("content", ""))) for m in messages)
-    return max(64, int(chars / 3.2))
+    total = sum(_message_content_token_estimate(m.get("content", "")) for m in messages)
+    return max(64, total)
+
+
+def _trim_text_to_token_budget(text: str, token_budget: int) -> str:
+    if token_budget <= 0:
+        return ""
+    char_budget = max(1, int(token_budget * 3.2))
+    if len(text) <= char_budget:
+        return text
+    if char_budget <= len(_CONTEXT_TRIM_MARKER):
+        return text[-char_budget:]
+    keep = char_budget - len(_CONTEXT_TRIM_MARKER)
+    return f"{_CONTEXT_TRIM_MARKER}{text[-keep:]}"
+
+
+def _trim_message_content_to_token_budget(content: Any, token_budget: int) -> Any:
+    if isinstance(content, str):
+        return _trim_text_to_token_budget(content, token_budget)
+    if isinstance(content, list):
+        remaining = max(0, token_budget)
+        out: list[Any] = []
+        for part in content:
+            if not isinstance(part, dict):
+                out.append(part)
+                continue
+            part_type = str(part.get("type", "text")).lower()
+            if part_type not in {"text", "input_text"}:
+                out.append(part)
+                continue
+            text = str(part.get("text") or part.get("content") or "")
+            trimmed = _trim_text_to_token_budget(text, remaining)
+            remaining = max(0, remaining - _text_chars_to_tokens(len(trimmed)))
+            key = "text" if "text" in part else "content"
+            out.append({**part, key: trimmed})
+        return out
+    return content
+
+
+def trim_llama_messages_to_context(
+    messages: list[dict[str, Any]],
+    *,
+    n_ctx: int,
+    max_tokens: int,
+) -> list[dict[str, Any]]:
+    """Trim prompt content so llama.cpp prefill stays within the loaded context."""
+    if not messages:
+        return []
+
+    prompt_budget = max(256, int(n_ctx) - max(1, int(max_tokens)) - 128)
+    if _estimate_prompt_tokens(messages) <= prompt_budget:
+        return messages
+
+    trimmed = [dict(message) for message in messages]
+    latest_idx = len(trimmed) - 1
+
+    # Drop oldest conversational turns first; keep system/knowledge instructions
+    # until content trimming is required.
+    idx = 0
+    while _estimate_prompt_tokens(trimmed) > prompt_budget and idx < latest_idx:
+        role = str(trimmed[idx].get("role", "")).lower()
+        if role in {"user", "assistant"}:
+            trimmed.pop(idx)
+            latest_idx -= 1
+            continue
+        idx += 1
+
+    # Then trim oversized message bodies, newest user last.
+    order = sorted(
+        range(len(trimmed)),
+        key=lambda i: (
+            i == len(trimmed) - 1,
+            str(trimmed[i].get("role", "")).lower() == "system" and i == 0,
+            -_message_content_token_estimate(trimmed[i].get("content", "")),
+        ),
+    )
+    for idx in order:
+        current = _estimate_prompt_tokens(trimmed)
+        if current <= prompt_budget:
+            break
+        content = trimmed[idx].get("content", "")
+        content_tokens = _message_content_token_estimate(content)
+        if content_tokens <= 0:
+            continue
+        target = max(32, content_tokens - (current - prompt_budget))
+        trimmed[idx]["content"] = _trim_message_content_to_token_budget(content, target)
+
+    return trimmed
 
 
 def sanitize_inference_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -468,6 +1291,22 @@ def sanitize_inference_payload(payload: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def bucket_llama_n_ctx(needed: int, *, ceiling: int | None = None) -> int:
+    """Snap context to coarse buckets so multi-turn chat reuses one loaded KV size."""
+    try:
+        native_linux = seiso_platform.use_linux_nvidia_inference_guards()
+    except Exception:
+        native_linux = False
+    buckets = _NATIVE_LINUX_CTX_BUCKETS if native_linux else _LLAMA_CTX_BUCKETS
+    floor = buckets[0]
+    cap = _MAX_LLAMA_CTX if ceiling is None else max(1, int(ceiling))
+    need = max(min(floor, cap), int(needed))
+    for bucket in buckets:
+        if need <= bucket:
+            return min(bucket, cap)
+    return min(cap, max(min(floor, cap), need))
+
+
 def clamp_llama_n_ctx(
     n_ctx: int,
     *,
@@ -483,39 +1322,160 @@ def clamp_llama_n_ctx(
     messages = messages or []
     prompt_tokens = _estimate_prompt_tokens(messages)
     needed = prompt_tokens + max_tokens + 128
-    step = 512
-    sized = ((needed + step - 1) // step) * step
-    sized = max(_MIN_LLAMA_CTX, min(_MAX_LLAMA_CTX, sized))
 
     ctx_cap = effective_context_ceiling(
         model_path,
         model_format=model_format,
         model_name=model_name,
     )
-
-    return min(max(n_ctx, sized), ctx_cap)
+    sized = bucket_llama_n_ctx(needed, ceiling=ctx_cap)
+    return min(max(int(n_ctx), sized), ctx_cap)
 
 
 def clamp_llama_load_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
-    """Normalize llama.cpp load kwargs without RAM/VRAM-based downscaling."""
+    """Normalize llama.cpp load kwargs and trim oversized batches near VRAM limits."""
     out = dict(kwargs)
-    out.pop("_model_path", None)
+    model_path = out.pop("_model_path", None)
     n_ctx = int(out.get("n_ctx") or _MIN_LLAMA_CTX)
+    out["n_batch"] = max(_MIN_LLAMA_BATCH, int(out.get("n_batch") or _MAX_LLAMA_BATCH))
+    out["n_ubatch"] = max(
+        _MIN_LLAMA_BATCH,
+        min(int(out.get("n_ubatch") or out["n_batch"]), out["n_batch"]),
+    )
 
-    n_batch = int(out.get("n_batch") or _MAX_LLAMA_BATCH)
-    out["n_batch"] = max(_MIN_LLAMA_BATCH, n_batch)
-    n_ubatch = int(out.get("n_ubatch") or out["n_batch"])
-    out["n_ubatch"] = max(_MIN_LLAMA_BATCH, min(n_ubatch, out["n_batch"]))
+    n_gpu_layers = int(out.get("n_gpu_layers") or 0)
+    native_linux_nvidia = False
+    if model_path:
+        free_mb = headroom_mb()
+        tight = llama_model_is_tight_vram_fit(
+            model_path=model_path,
+            free_mb=free_mb,
+            n_gpu_layers=n_gpu_layers,
+            n_ctx=n_ctx,
+        ) or _native_dense_mid_size_prefill_risk(
+            model_path=model_path,
+            free_mb=free_mb,
+        )
+        with contextlib.suppress(Exception):
+            native_linux_nvidia = seiso_platform.use_linux_nvidia_inference_guards()
+        if native_linux_nvidia and n_gpu_layers == 0:
+            batch_headroom = llama_host_batch_headroom_mb(
+                model_path=model_path,
+                n_gpu_layers=n_gpu_layers,
+                free_vram_mb=free_mb,
+            )
+            if batch_headroom is None:
+                batch_headroom = free_mb
+        else:
+            batch_headroom = llama_effective_batch_headroom_mb(
+                free_mb,
+                model_path=model_path,
+                n_gpu_layers=n_gpu_layers,
+                n_ctx=n_ctx,
+            )
+        if native_linux_nvidia and _gguf_has_mmproj_sibling(model_path):
+            batch_headroom = max(_MIN_LLAMA_BATCH * 2, batch_headroom - 512)
+        if native_linux_nvidia or tight:
+            max_batch, max_ubatch = resolve_llama_batch_limits(
+                batch_headroom,
+                native_linux_nvidia=native_linux_nvidia,
+                tight=tight,
+            )
+        else:
+            max_batch, max_ubatch = clamp_llama_batch_pair(_MAX_LLAMA_BATCH, 1024)
+        out["n_batch"], out["n_ubatch"] = clamp_llama_batch_pair(
+            min(out["n_batch"], max_batch),
+            min(out["n_ubatch"], max_ubatch),
+            native_linux_nvidia=native_linux_nvidia,
+            tight=tight,
+        )
+        if (
+            native_linux_nvidia
+            and out.get("flash_attn")
+            and not env_bool("SEISO_LLAMA_UNSAFE_FLASH_ATTN", False)
+        ):
+            try:
+                from seiso.inference.family_policy import policy_for_gguf
 
-    ctx_cap = clamp_llama_n_ctx(n_ctx, max_tokens=512)
+                if model_path and not policy_for_gguf(str(model_path)).allow_flash_attn:
+                    out.pop("flash_attn", None)
+            except (ImportError, OSError, ValueError):
+                pass
+        if native_linux_nvidia and tight and n_gpu_layers != 0:
+            if not env_bool("SEISO_LLAMA_UNSAFE_FLASH_ATTN", False):
+                out.pop("flash_attn", None)
+            if not env_bool("SEISO_LLAMA_UNSAFE_OP_OFFLOAD", False):
+                out["op_offload"] = False
+            total_layers = gguf_total_layers(model_path)
+            if not env_bool("SEISO_LLAMA_UNSAFE_OP_OFFLOAD", False) and (
+                n_gpu_layers == -1 or n_gpu_layers >= total_layers
+            ):
+                out["offload_kqv"] = False
+
+    ctx_cap = clamp_llama_n_ctx(
+        n_ctx,
+        max_tokens=512,
+        model_path=str(model_path) if model_path else None,
+        model_format="gguf" if model_path else None,
+    )
     if n_ctx > ctx_cap:
         out["n_ctx"] = ctx_cap
+    # #region agent log
+    if model_path:
+        from seiso.agent_debug_log import agent_debug_enabled, agent_debug_log
+
+        if agent_debug_enabled():
+            log_tight = n_gpu_layers != 0 and llama_model_is_tight_vram_fit(
+                model_path=model_path,
+                free_mb=headroom_mb(),
+                n_gpu_layers=n_gpu_layers,
+                n_ctx=int(out.get("n_ctx") or n_ctx),
+            )
+            agent_debug_log(
+                hypothesis_id="B",
+                location="protection.py:clamp_llama_load_kwargs",
+                message="clamped llama load kwargs",
+                data={
+                    "model": Path(model_path).name,
+                    "tight_fit": log_tight,
+                    "native_linux_nvidia": native_linux_nvidia
+                    if model_path and n_gpu_layers != 0
+                    else False,
+                    "free_mb": headroom_mb(),
+                    "n_gpu_layers": n_gpu_layers,
+                    "n_ctx": out.get("n_ctx"),
+                    "n_batch": out.get("n_batch"),
+                    "n_ubatch": out.get("n_ubatch"),
+                    "flash_attn": out.get("flash_attn"),
+                },
+            )
+    # #endregion
     return out
 
 
-def clamp_llama_cache_mb(default_mb: int) -> int:
-    """Return the configured prompt cache size without memory-based shrinking."""
-    return int(default_mb)
+def clamp_llama_cache_mb(
+    default_mb: int,
+    *,
+    model_path: str | Path | None = None,
+) -> int:
+    """Cap llama.cpp RAM prompt cache using host memory and model mmap footprint."""
+    default_mb = max(0, int(default_mb))
+    if default_mb <= 0:
+        return 0
+    if platform.system() != "Linux":
+        return default_mb
+
+    ram_mb = available_ram_mb()
+    if ram_mb <= 0:
+        return min(default_mb, 512)
+
+    cap = min(default_mb, max(128, ram_mb // 24))
+    if model_path and seiso_platform.use_linux_nvidia_inference_guards():
+        weight_mb = int(estimate_path_vram_mb(model_path))
+        mmap_reserve = max(512, int(weight_mb * 0.12))
+        host_budget = max(128, ram_mb - mmap_reserve - _host_os_reserve_mb(ram_mb))
+        cap = min(cap, max(0, host_budget // 8))
+    return max(0, cap)
 
 
 def training_pin_memory() -> bool:
@@ -621,8 +1581,6 @@ def resolve_training_device_map(
     device: str | None = None,
 ) -> str | dict[str, str] | None:
     """Single-device placement for DDP; auto only for single-process CUDA."""
-    import os
-
     world_size = int(os.environ.get("WORLD_SIZE", "1"))
     if world_size > 1:
         local_rank = int(os.environ.get("LOCAL_RANK", os.environ.get("RANK", "0")))

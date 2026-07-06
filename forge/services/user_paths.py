@@ -156,6 +156,64 @@ def assert_user_path(sandbox_root: Path, user_id: str, target: str | Path) -> Pa
     return resolved
 
 
+def assert_user_download_file(
+    sandbox_root: Path,
+    user_id: str,
+    file_path: str | Path,
+    *,
+    container_dir: Path | None = None,
+) -> Path:
+    """Return a sandbox-scoped file safe to stream via FileResponse.
+
+    Re-validates the resolved path so directory scans and metadata joins cannot
+    escape the per-user sandbox via symlinks or absolute path segments.
+    """
+    source = Path(file_path)
+    if container_dir is not None:
+        container = assert_user_path(sandbox_root, user_id, container_dir)
+        if source.is_absolute():
+            raise SecurityError("Download file must be relative to the model directory")
+        candidate = (container / source).resolve()
+        try:
+            candidate.relative_to(container.resolve())
+        except ValueError as exc:
+            raise SecurityError(
+                "Download file must be inside the model directory"
+            ) from exc
+        source = candidate
+    return assert_user_path(sandbox_root, user_id, source)
+
+
+def pick_user_download_file(
+    sandbox_root: Path,
+    user_id: str,
+    directory: Path,
+    *,
+    pattern: str = "*.gguf",
+    relative_name: str | None = None,
+) -> Path:
+    """Pick the first sandbox-safe file under *directory* for download."""
+    from seiso.io.files import iter_matching_files
+
+    container = assert_user_path(sandbox_root, user_id, directory)
+    if container.is_file():
+        return container
+
+    if relative_name is not None:
+        if Path(relative_name).is_absolute():
+            raise SecurityError("Download file must be a relative path")
+        return assert_user_download_file(
+            sandbox_root,
+            user_id,
+            relative_name,
+            container_dir=container,
+        )
+
+    for match in iter_matching_files(container, pattern):
+        return assert_user_path(sandbox_root, user_id, match)
+    raise SecurityError(f"No downloadable file matching {pattern!r}")
+
+
 def assert_llama_cpp_binary(target: str | Path) -> Path:
     """Ensure llama.cpp binary path is an existing regular file in allowed locations."""
     source = Path(target).expanduser()

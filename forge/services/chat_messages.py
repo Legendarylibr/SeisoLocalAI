@@ -16,20 +16,34 @@ from forge.services.model_prompts import (
 
 _UNTRUSTED_ROLES = frozenset({"tool", "function", "system", "developer"})
 _DEFAULT_CONTEXT_CHAR_BUDGET = 24_000
+# Native Linux NVIDIA multi-turn chats OOM more easily as history grows;
+# keep a tighter default so prefill stays within safe VRAM.
+_NATIVE_LINUX_CONTEXT_CHAR_BUDGET = 12_000
 _DEFAULT_DECAY_HALF_LIFE_SECONDS = 3600.0
 _DEFAULT_DECAY_MIN_WEIGHT = 0.05
 _OMISSION_MARKER = "[...older content omitted...]\n"
 
 
+def _default_context_char_budget() -> int:
+    try:
+        from seiso.platform import use_linux_nvidia_inference_guards
+
+        if use_linux_nvidia_inference_guards():
+            return _NATIVE_LINUX_CONTEXT_CHAR_BUDGET
+    except Exception:
+        pass
+    return _DEFAULT_CONTEXT_CHAR_BUDGET
+
+
 def _context_char_budget() -> int:
     raw = os.environ.get("SEISO_CHAT_CONTEXT_CHARS", "").strip()
     if not raw:
-        return _DEFAULT_CONTEXT_CHAR_BUDGET
+        return _default_context_char_budget()
     else:
         try:
             return max(1_000, int(raw))
         except ValueError:
-            return _DEFAULT_CONTEXT_CHAR_BUDGET
+            return _default_context_char_budget()
 
 
 def _decay_half_life_seconds() -> float:

@@ -1,4 +1,4 @@
-# Seiso Local AI
+# Seiso Local AI--RUN AT OWN RISK CURRENTLY, NEEDS WORK, YOU WILL OOM
 
 [![CI](https://github.com/Legendarylibr/SeisoLocalAI/actions/workflows/ci.yml/badge.svg)](https://github.com/Legendarylibr/SeisoLocalAI/actions/workflows/ci.yml)
 

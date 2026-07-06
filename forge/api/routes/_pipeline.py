@@ -73,10 +73,23 @@ def register_formatted_job_routes(
     ):
         if not await routes.get_job(db, job_id, user_id):
             raise HTTPException(404, "Job not found")
-        assert_job_owner(orchestrator, job_id, user_id)
-        return EventSourceResponse(
-            job_log_event_gen(orchestrator, job_id, before_result=routes.before_result)
-        )
+        if orchestrator.get_job(job_id):
+            assert_job_owner(orchestrator, job_id, user_id)
+            return EventSourceResponse(
+                job_log_event_gen(
+                    orchestrator, job_id, before_result=routes.before_result
+                )
+            )
+
+        row = await routes.get_job(db, job_id, user_id)
+
+        async def db_event_gen():
+            if row and row.get("error_text"):
+                yield {"event": "error", "data": row["error_text"]}
+            if row and row.get("stage_results_json"):
+                yield {"event": "result", "data": row["stage_results_json"]}
+
+        return EventSourceResponse(db_event_gen())
 
 
 @dataclass(frozen=True)
@@ -149,13 +162,23 @@ def build_stage_pipeline_router(config: StagePipelineRouterConfig) -> APIRouter:
                         error_text=job.error if job.status.value == "failed" else None,
                     )
                     if model_dir := result.get("model_dir"):
-                        await register_export_outputs(
-                            db,
-                            user_id=user_id,
-                            data_dir=settings.data_dir,
-                            outputs={config.export_registry_key: str(model_dir)},
-                            job_id=job_id,
-                        )
+                        try:
+                            await register_export_outputs(
+                                db,
+                                user_id=user_id,
+                                data_dir=settings.data_dir,
+                                outputs={config.export_registry_key: str(model_dir)},
+                                job_id=job_id,
+                            )
+                        except Exception:
+                            import logging
+
+                            logging.getLogger(__name__).exception(
+                                "Pipeline inventory registration failed for job %s "
+                                "(job remains %s)",
+                                job_id,
+                                job.status.value,
+                            )
             except Exception as exc:
                 await config.update_status(
                     db,

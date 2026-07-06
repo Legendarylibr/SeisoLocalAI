@@ -188,6 +188,9 @@ def _mock_hub_search(request, monkeypatch):
     if request.node.name in {
         "test_fetch_hub_page_returns_cursor",
         "test_hub_search_raises_on_rate_limit",
+        "test_query_hub_page_omits_pipeline_tag_when_searching",
+        "test_search_catalog_keeps_non_text_generation_when_querying",
+        "test_search_catalog_browse_still_filters_task",
     }:
         yield
         return
@@ -405,3 +408,70 @@ def test_fetch_hub_page_returns_cursor(monkeypatch):
     rows, next_cursor = _fetch_hub_page(filter_tag="gguf", limit=1)
     assert len(rows) == 1
     assert next_cursor == "abc123"
+
+
+def test_query_hub_page_omits_pipeline_tag_when_searching(monkeypatch):
+    captured: list[dict] = []
+
+    def _fetch(**kwargs):
+        captured.append(kwargs)
+        return [], None
+
+    monkeypatch.setattr("seiso.models.catalog._fetch_hub_page", _fetch)
+    from seiso.models.catalog import _query_hub_page
+
+    _query_hub_page(query="meta-llama/Llama-3.1-8B", limit=20)
+    assert captured[0].get("pipeline_tag") is None
+    assert "Llama-3.1-8B" in (captured[0].get("search") or "")
+
+    captured.clear()
+    _query_hub_page(query="", limit=50)
+    assert captured[0].get("pipeline_tag") == "text-generation"
+
+
+def test_search_catalog_keeps_non_text_generation_when_querying(monkeypatch):
+    def _query_page(**kwargs):
+        return [
+            {
+                "id": "org/whisper-large",
+                "downloads": 10_000,
+                "pipeline_tag": "automatic-speech-recognition",
+                "tags": ["asr"],
+            },
+            {
+                "id": "org/chat-model",
+                "downloads": 50_000,
+                "pipeline_tag": "text-generation",
+                "tags": ["text-generation"],
+            },
+        ], None
+
+    monkeypatch.setattr("seiso.models.catalog._query_hub_page", _query_page)
+    results = search_catalog("whisper").models
+    repos = {m["repo_id"] for m in results}
+    assert "org/whisper-large" in repos
+    assert "org/chat-model" in repos
+
+
+def test_search_catalog_browse_still_filters_task(monkeypatch):
+    def _query_page(**kwargs):
+        return [
+            {
+                "id": "org/vision-model",
+                "downloads": 10_000,
+                "pipeline_tag": "image-text-to-text",
+                "tags": ["vision"],
+            },
+            {
+                "id": "org/chat-model",
+                "downloads": 50_000,
+                "pipeline_tag": "text-generation",
+                "tags": ["text-generation"],
+            },
+        ], None
+
+    monkeypatch.setattr("seiso.models.catalog._query_hub_page", _query_page)
+    results = search_catalog(task="chat").models
+    repos = {m["repo_id"] for m in results}
+    assert "org/chat-model" in repos
+    assert "org/vision-model" not in repos

@@ -161,7 +161,7 @@ def build_pipeline_config(
 
     model_dir = payload.get("model_dir")
     if model_dir:
-        model_dir = str(Path(model_dir).resolve())
+        model_dir = str(Path(model_dir).expanduser().resolve())
 
     return {
         "job_id": job_id,

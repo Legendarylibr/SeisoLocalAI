@@ -76,6 +76,7 @@ def enrich_catalog_models(
     token: str | None = None,
     fetch_sizes: bool = True,
     diversify: bool = False,
+    preserve_order: bool = False,
 ) -> list[dict[str, Any]]:
     from forge.services.hf_hub import (
         estimate_snapshot_download_bytes,
@@ -186,13 +187,16 @@ def enrich_catalog_models(
             )
         enriched.append(row)
 
-    enriched.sort(
-        key=lambda m: (
-            -(m.get("priority") or 0),
-            -m.get("hardware_fit_rank", 0),
-            m.get("name", ""),
+    if not preserve_order:
+        # Browse: downloads first (Hub popularity), then local priority / fit.
+        enriched.sort(
+            key=lambda m: (
+                -(m.get("downloads") or 0),
+                -(m.get("priority") or 0),
+                -m.get("hardware_fit_rank", 0),
+                m.get("name", ""),
+            )
         )
-    )
     if diversify:
         enriched = diversify_by_family(enriched)
         indexed = list(enumerate(enriched))

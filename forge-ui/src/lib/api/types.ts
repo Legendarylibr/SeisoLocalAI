@@ -113,6 +113,13 @@ export type InferenceModelOption = {
   backends: string[];
   backend_labels: Record<string, string>;
   size_bytes: number;
+  selectable?: boolean;
+  status?: "ready" | "incomplete" | string;
+  status_note?: string;
+  context_ceiling?: number;
+  architecture?: string | null;
+  is_moe?: boolean;
+  uses_swa?: boolean;
   hardware_fit?: "ideal" | "good" | "tight" | "unlikely";
   hardware_fit_label?: string;
   hardware_note?: string;

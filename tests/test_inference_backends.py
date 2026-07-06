@@ -19,6 +19,7 @@ from seiso.inference.backends import (
     gguf_architecture,
     gguf_block_count,
     gguf_context_length,
+    gguf_sliding_window,
     gguf_uses_sliding_window_attention,
     prepare_model_path,
     recommend_backend,
@@ -148,6 +149,7 @@ def test_gguf_metadata_reader_collects_context_blocks_and_swa(tmp_path: Path):
     assert gguf_context_length(str(gguf)) == 8192
     assert gguf_block_count(str(gguf)) == 32
     assert gguf_uses_sliding_window_attention(str(gguf)) is True
+    assert gguf_sliding_window(str(gguf)) == 4096
 
 
 def test_available_backends_allows_dflash_draft_for_speculative(tmp_path: Path):
@@ -158,6 +160,26 @@ def test_available_backends_allows_dflash_draft_for_speculative(tmp_path: Path):
     backends = available_backends(model_path=str(gguf), model_format="gguf")
     assert BACKEND_LLAMACPP in backends
     assert BACKEND_LLAMASWAP in backends
+
+
+def test_is_dflash_draft_requires_gguf_and_name_or_arch(tmp_path: Path):
+    from seiso.inference.backends import is_dflash_draft
+
+    dflash = tmp_path / "model-dflash.gguf"
+    _write_minimal_gguf(dflash, "llama")
+    assert is_dflash_draft(str(dflash))
+
+    arch = tmp_path / "draft.gguf"
+    _write_minimal_gguf(arch, "dflash")
+    assert is_dflash_draft(str(arch))
+
+    # Bare "-draft" / draft- prefix without dflash signal is not enough
+    plain = tmp_path / "my-draft-model.gguf"
+    _write_minimal_gguf(plain, "llama")
+    assert not is_dflash_draft(str(plain))
+
+    # Non-GGUF paths are never dflash drafts
+    assert not is_dflash_draft(str(tmp_path / "draft-model"))
 
 
 @pytest.mark.asyncio
@@ -437,85 +459,111 @@ def test_llamaswap_request_body_forwards_tools_and_model_override(monkeypatch):
     }
 
 
-def test_openai_gguf_payload_uses_llamaswap_when_available(monkeypatch):
-    from forge.api.routes.openai import ChatCompletionRequest, _resolve_payload
+@pytest.mark.asyncio
+async def test_openai_prepare_payload_passes_through_backend(monkeypatch, tmp_path):
+    from forge.api.routes.openai import ChatCompletionRequest, _prepare_openai_chat_payload
+    from forge.services import inference_models
 
+    async def fake_list(*_args, **_kwargs):
+        return [{"id": "m1", "selectable": True, "format": "gguf", "kind": "local"}]
+
+    async def prepare_llamaswap(*_args, **_kwargs):
+        return {
+            "model_path": "/tmp/model.gguf",
+            "inference_backend": BACKEND_LLAMASWAP,
+            "model_format": "gguf",
+            "max_tokens": 512,
+            "messages": [{"role": "user", "content": "hi"}],
+        }
+
+    monkeypatch.setattr(inference_models, "list_inference_options", fake_list)
     monkeypatch.setattr(
-        "seiso.inference.llamaswap.llamaswap_status",
-        lambda: SimpleNamespace(available=True),
+        "forge.api.routes.openai.prepare_local_chat_target", prepare_llamaswap
     )
 
-    payload = _resolve_payload(
+    payload = await _prepare_openai_chat_payload(
         ChatCompletionRequest(
             model="default",
             messages=[{"role": "user", "content": "hi"}],
         ),
-        "/tmp/model.gguf",
-        model_format="gguf",
+        "u1",
+        object(),
+        SimpleNamespace(data_dir=tmp_path),
     )
-
     assert payload["inference_backend"] == BACKEND_LLAMASWAP
 
 
-def test_openai_gguf_payload_falls_back_to_llamacpp(monkeypatch):
-    from forge.api.routes.openai import ChatCompletionRequest, _resolve_payload
+@pytest.mark.asyncio
+async def test_openai_prepare_payload_falls_back_to_llamacpp(monkeypatch, tmp_path):
+    from forge.api.routes.openai import ChatCompletionRequest, _prepare_openai_chat_payload
+    from forge.services import inference_models
 
+    async def fake_list(*_args, **_kwargs):
+        return [{"id": "m1", "selectable": True, "format": "gguf", "kind": "local"}]
+
+    async def prepare_llamacpp(*_args, **_kwargs):
+        return {
+            "model_path": "/tmp/model.gguf",
+            "inference_backend": BACKEND_LLAMACPP,
+            "model_format": "gguf",
+            "max_tokens": 512,
+            "messages": [{"role": "user", "content": "hi"}],
+        }
+
+    monkeypatch.setattr(inference_models, "list_inference_options", fake_list)
     monkeypatch.setattr(
-        "seiso.inference.llamaswap.llamaswap_status",
-        lambda: SimpleNamespace(available=False),
+        "forge.api.routes.openai.prepare_local_chat_target", prepare_llamacpp
     )
 
-    payload = _resolve_payload(
+    payload = await _prepare_openai_chat_payload(
         ChatCompletionRequest(
             model="default",
             messages=[{"role": "user", "content": "hi"}],
         ),
-        "/tmp/model.gguf",
-        model_format="gguf",
+        "u1",
+        object(),
+        SimpleNamespace(data_dir=tmp_path),
     )
-
     assert payload["inference_backend"] == BACKEND_LLAMACPP
 
 
 @pytest.mark.asyncio
-async def test_openai_default_model_resolution_reuses_inventory(tmp_path):
-    from forge.api.routes.openai import (
-        ChatCompletionRequest,
-        _resolve_openai_model_path,
-    )
+async def test_openai_default_model_resolution_reuses_inventory(tmp_path, monkeypatch):
+    from forge.api.routes.openai import ChatCompletionRequest, _prepare_openai_chat_payload
+    from forge.db.crypto import generate_encryption_key
+    from forge.db.store import Database
+    from forge.services import inference_models
+    from forge.services.hf_connectivity import InferenceRuntimeStatus
 
-    model_root = tmp_path / "models" / "u1"
-    model_root.mkdir(parents=True)
-    model = model_root / "model.gguf"
+    model = tmp_path / "model.gguf"
     model.write_bytes(b"gguf")
-    fallback = model_root / "model.safetensors"
+    fallback = tmp_path / "model.safetensors"
     fallback.write_bytes(b"weights")
 
-    class FakeDb:
-        calls = 0
+    db = Database(
+        tmp_path / "forge.db", encryption_key=generate_encryption_key(), ephemeral=True
+    )
+    await db.add_model(
+        user_id="u1",
+        name="fallback",
+        path=str(fallback),
+        format="safetensors",
+        size_bytes=fallback.stat().st_size,
+    )
+    await db.add_model(
+        user_id="u1",
+        name="model",
+        path=str(model),
+        format="gguf",
+        size_bytes=model.stat().st_size,
+    )
+    monkeypatch.setattr(
+        inference_models,
+        "check_inference_runtime",
+        lambda: InferenceRuntimeStatus(llamacpp=True, mlx=False, torch=False),
+    )
 
-        async def list_models(self, _user_id):
-            self.calls += 1
-            return [
-                {
-                    "id": "m0",
-                    "name": "fallback",
-                    "path": str(fallback),
-                    "format": "safetensors",
-                },
-                {
-                    "id": "m1",
-                    "name": "model",
-                    "path": str(model),
-                    "format": "gguf",
-                },
-            ]
-
-        async def get_model_by_path(self, _user_id, _path):
-            return None
-
-    db = FakeDb()
-    path, fmt = await _resolve_openai_model_path(
+    payload = await _prepare_openai_chat_payload(
         ChatCompletionRequest(
             model="default",
             messages=[{"role": "user", "content": "hi"}],
@@ -525,52 +573,49 @@ async def test_openai_default_model_resolution_reuses_inventory(tmp_path):
         SimpleNamespace(data_dir=tmp_path),
     )
 
-    assert path == str(model)
-    assert fmt == "gguf"
-    assert db.calls == 1
+    assert payload["model_path"] == str(model)
+    assert payload["model_format"] == "gguf"
 
 
 @pytest.mark.asyncio
-async def test_openai_named_model_resolution_uses_indexed_lookup(tmp_path):
-    from forge.api.routes.openai import (
-        ChatCompletionRequest,
-        _resolve_openai_model_path,
-    )
+async def test_openai_named_model_resolution_uses_indexed_lookup(tmp_path, monkeypatch):
+    from forge.api.routes.openai import ChatCompletionRequest, _prepare_openai_chat_payload
+    from forge.db.crypto import generate_encryption_key
+    from forge.db.store import Database
+    from forge.services import inference_models
+    from forge.services.hf_connectivity import InferenceRuntimeStatus
 
-    model_root = tmp_path / "models" / "u1"
-    model_root.mkdir(parents=True)
-    model = model_root / "model.gguf"
+    model = tmp_path / "model.gguf"
     model.write_bytes(b"gguf")
 
-    class FakeDb:
-        async def get_model(self, _model_id, _user_id):
-            return None
+    db = Database(
+        tmp_path / "forge.db", encryption_key=generate_encryption_key(), ephemeral=True
+    )
+    row = await db.add_model(
+        user_id="u1",
+        name="friendly",
+        path=str(model),
+        format="gguf",
+        size_bytes=model.stat().st_size,
+    )
+    monkeypatch.setattr(
+        inference_models,
+        "check_inference_runtime",
+        lambda: InferenceRuntimeStatus(llamacpp=True, mlx=False, torch=False),
+    )
 
-        async def get_model_by_name(self, user_id, name):
-            assert user_id == "u1"
-            assert name == "friendly"
-            return {
-                "id": "m1",
-                "name": "friendly",
-                "path": str(model),
-                "format": "gguf",
-            }
-
-        async def list_models(self, _user_id):
-            pytest.fail("named model lookup should not scan inventory")
-
-    path, fmt = await _resolve_openai_model_path(
+    payload = await _prepare_openai_chat_payload(
         ChatCompletionRequest(
-            model="friendly",
+            model=row["id"],
             messages=[{"role": "user", "content": "hi"}],
         ),
         "u1",
-        FakeDb(),
+        db,
         SimpleNamespace(data_dir=tmp_path),
     )
 
-    assert path == str(model)
-    assert fmt == "gguf"
+    assert payload["model_path"] == str(model)
+    assert payload["model_format"] == "gguf"
 
 
 @pytest.mark.asyncio
@@ -715,6 +760,89 @@ async def test_dflash_switch_preserves_warmed_torch_target(monkeypatch):
     await runner._ensure_model_switch("/tmp/target", draft_path="/tmp/dflash.gguf")
 
     assert calls == [("/tmp/target", BACKEND_TORCH)]
+
+
+@pytest.mark.asyncio
+async def test_torch_speculative_switch_unloads_warmed_single_target(monkeypatch):
+    from seiso.inference.runner import LocalInferenceRunner
+
+    runner = LocalInferenceRunner()
+    calls: list[tuple[str | None, str | None]] = []
+    monkeypatch.setattr(
+        runner._pool,
+        "status",
+        lambda: {
+            "active_model": "torch:/tmp/target",
+            "backend": "torch",
+            "path": "/tmp/target",
+            "draft_path": None,
+        },
+    )
+    monkeypatch.setattr("seiso.inference.runner.is_dflash_draft", lambda _path: False)
+    monkeypatch.setattr(
+        runner._pool,
+        "prepare_for_load",
+        lambda target_path=None, backend=None: calls.append((target_path, backend)),
+    )
+
+    await runner._ensure_model_switch("/tmp/target", draft_path="/tmp/draft")
+
+    assert calls == [(None, None)]
+
+
+@pytest.mark.asyncio
+async def test_disable_speculative_unloads_active_bundle(monkeypatch):
+    from seiso.inference.runner import LocalInferenceRunner
+
+    runner = LocalInferenceRunner()
+    calls: list[tuple[str | None, str | None]] = []
+    monkeypatch.setattr(
+        runner._pool,
+        "status",
+        lambda: {
+            "active_model": "spec:/tmp/target:/tmp/draft",
+            "backend": "torch",
+            "path": "/tmp/target",
+            "draft_path": "/tmp/draft",
+        },
+    )
+    monkeypatch.setattr(
+        runner._pool,
+        "prepare_for_load",
+        lambda target_path=None, backend=None: calls.append((target_path, backend)),
+    )
+
+    await runner._ensure_model_switch("/tmp/target")
+
+    assert calls == [(None, None)]
+
+
+@pytest.mark.asyncio
+async def test_dflash_switch_unloads_torch_spec_bundle(monkeypatch):
+    from seiso.inference.runner import LocalInferenceRunner
+
+    runner = LocalInferenceRunner()
+    calls: list[tuple[str | None, str | None]] = []
+    monkeypatch.setattr(
+        runner._pool,
+        "status",
+        lambda: {
+            "active_model": "spec:/tmp/target:/tmp/draft",
+            "backend": "torch",
+            "path": "/tmp/target",
+            "draft_path": "/tmp/draft",
+        },
+    )
+    monkeypatch.setattr("seiso.inference.runner.is_dflash_draft", lambda _path: True)
+    monkeypatch.setattr(
+        runner._pool,
+        "prepare_for_load",
+        lambda target_path=None, backend=None: calls.append((target_path, backend)),
+    )
+
+    await runner._ensure_model_switch("/tmp/target", draft_path="/tmp/dflash.gguf")
+
+    assert calls == [(None, None)]
 
 
 def test_warm_model_preloads_torch_speculative_pair(monkeypatch):
@@ -1136,7 +1264,7 @@ async def test_list_inference_options_skips_partial_hf_gguf(monkeypatch, tmp_pat
         path=str(model_path),
         source="hf:org/Model",
         format="gguf",
-        size_bytes=model_path.stat().st_size,
+        size_bytes=10_000,
         metadata={
             "repo_id": "org/Model",
             "gguf_repo": "mirror/Model-GGUF",
@@ -1149,17 +1277,14 @@ async def test_list_inference_options_skips_partial_hf_gguf(monkeypatch, tmp_pat
         "check_inference_runtime",
         lambda: InferenceRuntimeStatus(llamacpp=True, mlx=False, torch=False),
     )
-    monkeypatch.setattr(
-        inference_models,
-        "get_gguf_file_size_bytes",
-        lambda _repo, _filename: 10_000,
-    )
 
     options = await inference_models.list_inference_options(
         db, "u1", hardware_aware=False
     )
 
-    assert options == []
+    assert len(options) == 1
+    assert options[0]["selectable"] is False
+    assert options[0]["status"] == "incomplete"
 
 
 @pytest.mark.asyncio
@@ -1197,4 +1322,358 @@ async def test_list_inference_options_skips_hf_gguf_without_metadata(
         db, "u1", hardware_aware=False
     )
 
-    assert options == []
+    assert len(options) == 1
+    assert options[0]["selectable"] is False
+    assert options[0]["status"] == "incomplete"
+
+
+def test_llama_complete_retries_after_inference_oom(monkeypatch):
+    from seiso.inference.runner import LocalInferenceRunner
+
+    runner = LocalInferenceRunner()
+    calls: list[str] = []
+
+    fail_once = {"remaining": 1}
+
+    class FakeLlama:
+        def __init__(self, *, tier: str = "normal") -> None:
+            self._seiso_load_tier = tier
+
+        def create_chat_completion(self, **_kwargs):
+            if fail_once["remaining"] > 0:
+                fail_once["remaining"] -= 1
+                raise RuntimeError("CUDA out of memory. Tried to allocate 2.00 GiB")
+            return {"choices": [{"message": {"content": "ok"}}]}
+
+    def get_llama(_path, n_ctx=4096, *, tier="normal"):
+        calls.append(f"get:{tier}")
+        return FakeLlama(tier=tier)
+
+    def reload_llama(_path, n_ctx, *, tier, batch_override=None):
+        calls.append(f"reload:{tier}")
+        return FakeLlama(tier=tier)
+
+    monkeypatch.setattr(runner._pool, "get_llama", get_llama)
+    monkeypatch.setattr(runner._pool, "reload_llama", reload_llama)
+    monkeypatch.setattr(runner._pool, "is_generation_active", lambda _gid: True)
+    monkeypatch.setattr(
+        "seiso.inference.runner.release_cached_memory", lambda sync=False: None
+    )
+
+    reply = runner._llama_complete(
+        {"messages": [{"role": "user", "content": "hi"}], "max_tokens": 32},
+        "/tmp/model.gguf",
+        generation_id=1,
+    )
+
+    assert reply == "ok"
+    assert calls == ["get:normal", "reload:compact"]
+
+
+def test_llama_complete_oom_recovery_passes_batch_override(monkeypatch):
+    from seiso.inference.runner import LocalInferenceRunner
+
+    runner = LocalInferenceRunner()
+    seen_overrides: list[tuple[int, int] | None] = []
+    fail_once = {"remaining": 1}
+
+    class FakeLlama:
+        def __init__(self, *, batch: int = 1024, tier: str = "normal") -> None:
+            self._seiso_load_tier = tier
+            self._seiso_n_batch = batch
+            self._seiso_n_ubatch = min(batch, 256)
+            self._seiso_last_safe_batch = 512
+            self._seiso_last_safe_ubatch = 128
+
+        def create_chat_completion(self, **_kwargs):
+            if fail_once["remaining"] > 0:
+                fail_once["remaining"] -= 1
+                raise RuntimeError("CUDA out of memory. Tried to allocate 2.00 GiB")
+            return {"choices": [{"message": {"content": "ok"}}]}
+
+    monkeypatch.setattr(
+        runner._pool,
+        "get_llama",
+        lambda *_a, **_k: FakeLlama(),
+    )
+
+    def reload_llama(_path, n_ctx, *, tier, batch_override=None):
+        seen_overrides.append(batch_override)
+        return FakeLlama(batch=batch_override[0] if batch_override else 512, tier=tier)
+
+    monkeypatch.setattr(runner._pool, "reload_llama", reload_llama)
+    monkeypatch.setattr(runner._pool, "is_generation_active", lambda _gid: True)
+    monkeypatch.setattr(
+        "seiso.inference.runner.release_cached_memory", lambda sync=False: None
+    )
+    monkeypatch.setattr(
+        "seiso.inference.runner.llama_prefill_needs_reload",
+        lambda **_kwargs: (False, 512, 128),
+    )
+
+    reply = runner._llama_complete(
+        {"messages": [{"role": "user", "content": "hi"}], "max_tokens": 32},
+        "/tmp/model.gguf",
+        generation_id=1,
+    )
+
+    assert reply == "ok"
+    assert seen_overrides == [(256, 128)]
+
+
+def test_llama_complete_prefill_guard_reloads_before_native_linux_segfault(
+    monkeypatch,
+):
+    from seiso.inference.runner import LocalInferenceRunner
+
+    runner = LocalInferenceRunner()
+    calls: list[str] = []
+    seen_overrides: list[tuple[int, int] | None] = []
+
+    class FakeLlama:
+        def __init__(self, *, batch: int, tier: str = "normal") -> None:
+            self._seiso_load_tier = tier
+            self._seiso_n_batch = batch
+            self._seiso_n_ubatch = min(batch, 1024)
+            self._seiso_n_gpu_layers = -1
+            self._seiso_load_headroom_mb = 24576
+            self._seiso_model_path = "/tmp/model.gguf"
+
+        def create_chat_completion(self, **_kwargs):
+            calls.append(f"complete:{self._seiso_n_batch}")
+            return {"choices": [{"message": {"content": "ok"}}]}
+
+    def get_llama(_path, n_ctx=4096, *, tier="normal"):
+        calls.append(f"get:{tier}")
+        return FakeLlama(batch=4096, tier=tier)
+
+    def reload_llama(_path, n_ctx, *, tier, batch_override=None):
+        calls.append(f"reload:{tier}")
+        seen_overrides.append(batch_override)
+        batch = batch_override[0] if batch_override else 4096
+        return FakeLlama(batch=batch, tier=tier)
+
+    monkeypatch.setattr(runner._pool, "get_llama", get_llama)
+    monkeypatch.setattr(runner._pool, "reload_llama", reload_llama)
+    monkeypatch.setattr(runner._pool, "is_generation_active", lambda _gid: True)
+    monkeypatch.setattr(
+        "seiso.inference.runner.release_cached_memory", lambda sync=False: None
+    )
+    monkeypatch.setattr(
+        "seiso.inference.runner.llama_prefill_needs_reload",
+        lambda **_kwargs: (True, 512, 128),
+    )
+
+    reply = runner._llama_complete(
+        {"messages": [{"role": "user", "content": "x" * 20000}], "max_tokens": 32},
+        "/tmp/model.gguf",
+        generation_id=1,
+    )
+
+    assert reply == "ok"
+    assert calls == ["get:normal", "reload:normal", "complete:512"]
+    assert seen_overrides == [(512, 128)]
+
+
+def test_llama_complete_trims_prompt_to_loaded_context(monkeypatch):
+    from seiso.inference.runner import LocalInferenceRunner
+
+    runner = LocalInferenceRunner()
+    seen_messages: list[list[dict]] = []
+    seen_ctx: list[int] = []
+
+    class FakeLlama:
+        _seiso_load_tier = "normal"
+        _seiso_n_batch = 512
+        _seiso_n_ubatch = 128
+        _seiso_n_gpu_layers = -1
+        _seiso_load_headroom_mb = 24576
+        _seiso_model_path = "/tmp/model.gguf"
+
+        def create_chat_completion(self, **kwargs):
+            seen_messages.append(kwargs["messages"])
+            return {"choices": [{"message": {"content": "ok"}}]}
+
+    def get_llama(_path, n_ctx=4096, *, tier="normal"):
+        seen_ctx.append(n_ctx)
+        return FakeLlama()
+
+    monkeypatch.setattr(runner._pool, "get_llama", get_llama)
+    monkeypatch.setattr(runner._pool, "is_generation_active", lambda _gid: True)
+    monkeypatch.setattr(
+        "seiso.inference.runner.llama_prefill_needs_reload",
+        lambda **_kwargs: (False, 512, 128),
+    )
+
+    reply = runner._llama_complete(
+        {
+            "messages": [
+                {"role": "system", "content": "You are concise."},
+                {"role": "user", "content": "old " * 10000},
+                {"role": "assistant", "content": "history " * 10000},
+                {"role": "user", "content": "answer this"},
+            ],
+            "max_tokens": 128,
+            "n_ctx": 2048,
+        },
+        "/tmp/model.gguf",
+        generation_id=1,
+    )
+
+    assert reply == "ok"
+    assert seen_ctx == [2048]
+    assert seen_messages
+    assert seen_messages[0][-1]["content"] == "answer this"
+    assert len(seen_messages[0]) < 4
+
+
+def test_llama_complete_recomputes_context_after_prompt_trim(monkeypatch):
+    from seiso.inference.runner import LocalInferenceRunner
+
+    runner = LocalInferenceRunner()
+    seen_ctx: list[int] = []
+
+    class FakeLlama:
+        _seiso_load_tier = "normal"
+        _seiso_n_batch = 512
+        _seiso_n_ubatch = 128
+        _seiso_n_gpu_layers = -1
+        _seiso_load_headroom_mb = 24576
+        _seiso_model_path = "/tmp/model.gguf"
+
+        def create_chat_completion(self, **_kwargs):
+            return {"choices": [{"message": {"content": "ok"}}]}
+
+    def get_llama(_path, n_ctx=4096, *, tier="normal"):
+        seen_ctx.append(n_ctx)
+        return FakeLlama()
+
+    monkeypatch.setattr(runner._pool, "get_llama", get_llama)
+    monkeypatch.setattr(runner._pool, "is_generation_active", lambda _gid: True)
+    monkeypatch.setattr(
+        "seiso.inference.context_limits.effective_context_ceiling",
+        lambda *_a, **_k: 8192,
+    )
+    monkeypatch.setattr(
+        "seiso.inference.runner.llama_prefill_needs_reload",
+        lambda **_kwargs: (False, 512, 128),
+    )
+
+    reply = runner._llama_complete(
+        {
+            "messages": [
+                {"role": "system", "content": "You are concise."},
+                {"role": "user", "content": "old " * 10000},
+                {"role": "assistant", "content": "history " * 10000},
+                {"role": "user", "content": "answer this"},
+            ],
+            "max_tokens": 128,
+        },
+        "/tmp/model.gguf",
+        generation_id=1,
+    )
+
+    assert reply == "ok"
+    assert seen_ctx == [2048]
+
+
+def test_llama_complete_retrims_after_oom_recovery_smaller_context(monkeypatch):
+    from seiso.inference.runner import LocalInferenceRunner
+
+    runner = LocalInferenceRunner()
+    seen_lengths: list[int] = []
+    first = {"fail": True}
+
+    class FakeLlama:
+        def __init__(self, *, tier: str, actual_ctx: int) -> None:
+            self._seiso_load_tier = tier
+            self._seiso_n_ctx = actual_ctx
+            self._seiso_n_batch = 512
+            self._seiso_n_ubatch = 128
+            self._seiso_n_gpu_layers = -1
+            self._seiso_load_headroom_mb = 24576
+            self._seiso_model_path = "/tmp/model.gguf"
+            self._seiso_last_safe_batch = 512
+            self._seiso_last_safe_ubatch = 128
+
+        def create_chat_completion(self, **kwargs):
+            seen_lengths.append(
+                sum(len(str(m.get("content", ""))) for m in kwargs["messages"])
+            )
+            if first["fail"]:
+                first["fail"] = False
+                raise RuntimeError("CUDA out of memory. Tried to allocate 2.00 GiB")
+            return {"choices": [{"message": {"content": "ok"}}]}
+
+    monkeypatch.setattr(
+        runner._pool,
+        "get_llama",
+        lambda *_a, **_k: FakeLlama(tier="normal", actual_ctx=4096),
+    )
+    monkeypatch.setattr(
+        runner._pool,
+        "reload_llama",
+        lambda *_a, **_k: FakeLlama(tier="compact", actual_ctx=2048),
+    )
+    monkeypatch.setattr(runner._pool, "is_generation_active", lambda _gid: True)
+    monkeypatch.setattr(
+        "seiso.inference.runner.release_cached_memory", lambda sync=False: None
+    )
+    monkeypatch.setattr(
+        "seiso.inference.runner.llama_prefill_needs_reload",
+        lambda **_kwargs: (False, 512, 128),
+    )
+
+    reply = runner._llama_complete(
+        {
+            "messages": [
+                {"role": "system", "content": "You are concise."},
+                {"role": "user", "content": "old " * 800},
+                {"role": "assistant", "content": "history " * 500},
+                {"role": "user", "content": "answer this"},
+            ],
+            "max_tokens": 128,
+            "n_ctx": 4096,
+        },
+        "/tmp/model.gguf",
+        generation_id=1,
+    )
+
+    assert reply == "ok"
+    assert len(seen_lengths) == 2
+    assert seen_lengths[1] < seen_lengths[0]
+
+
+def test_llama_stream_does_not_retry_after_emitting_text(monkeypatch):
+    from seiso.inference.runner import LocalInferenceRunner
+
+    runner = LocalInferenceRunner()
+    reloads: list[str] = []
+
+    class FakeLlama:
+        _seiso_load_tier = "normal"
+
+        def create_chat_completion(self, **_kwargs):
+            def _stream():
+                yield {"choices": [{"delta": {"content": "hello"}}]}
+                raise RuntimeError("CUDA out of memory. Tried to allocate 2.00 GiB")
+
+            return _stream()
+
+    monkeypatch.setattr(runner._pool, "get_llama", lambda *_a, **_k: FakeLlama())
+    monkeypatch.setattr(
+        runner._pool,
+        "reload_llama",
+        lambda *_a, **kwargs: reloads.append(kwargs.get("tier", "")) or FakeLlama(),
+    )
+
+    stream = runner._llama_stream(
+        {"messages": [{"role": "user", "content": "hi"}], "max_tokens": 32},
+        "/tmp/model.gguf",
+        should_stop=lambda: False,
+    )
+
+    assert next(stream).text == "hello"
+    with pytest.raises(RuntimeError, match="after streaming began"):
+        next(stream)
+    assert reloads == []

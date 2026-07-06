@@ -7,9 +7,17 @@ from fastapi import HTTPException
 from forge.orchestrators.base import Orchestrator
 
 
-def assert_job_owner(orchestrator: Orchestrator, job_id: str, user_id: str) -> None:
+def assert_job_owner(
+    orchestrator: Orchestrator,
+    job_id: str,
+    user_id: str,
+    *,
+    allow_missing: bool = False,
+) -> None:
     job = orchestrator.get_job(job_id)
     if not job:
+        if allow_missing:
+            return
         raise HTTPException(404, "Job not found")
-    if job.user_id and job.user_id != user_id:
+    if not job.user_id or job.user_id != user_id:
         raise HTTPException(403, "Not authorized for this job")

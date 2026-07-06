@@ -7,6 +7,7 @@ import contextlib
 import json
 import os
 import shutil
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -35,6 +36,7 @@ from seiso.models.catalog import get_by_repo
 from seiso.security import sanitize_filename
 
 _DOWNLOAD_LOCKS: dict[str, asyncio.Lock] = {}
+_DOWNLOAD_LOCKS_GUARD = threading.Lock()
 
 
 def _emit_progress(
@@ -97,11 +99,8 @@ def _download_lock_key(
 
 
 def _get_download_lock(key: str) -> asyncio.Lock:
-    lock = _DOWNLOAD_LOCKS.get(key)
-    if lock is None:
-        lock = asyncio.Lock()
-        _DOWNLOAD_LOCKS[key] = lock
-    return lock
+    with _DOWNLOAD_LOCKS_GUARD:
+        return _DOWNLOAD_LOCKS.setdefault(key, asyncio.Lock())
 
 
 async def find_inventory_for_catalog_repo(
@@ -288,6 +287,7 @@ def _sync_download_artifacts(
     gguf_repo = artifact["gguf_repo"]
     gguf_file = artifact["filename"]
     gguf_files = list(artifact.get("filenames") or [gguf_file])
+    mmproj_file = artifact.get("mmproj_filename")
     total_bytes = int(artifact.get("size_bytes") or 0)
     _assert_disk_space_for_download(cache_dir, total_bytes)
     initial_eta = int(total_bytes / (8 * 1024 * 1024)) if total_bytes > 0 else None
@@ -311,6 +311,7 @@ def _sync_download_artifacts(
         revision=revision,
         filename=gguf_file,
         filenames=gguf_files,
+        mmproj_filename=mmproj_file,
         entry=entry,
         inventory_repo_id=catalog_repo,
         on_progress=on_progress,
@@ -318,6 +319,10 @@ def _sync_download_artifacts(
     )
     cached = Path(info["path"])
     inv = link_inventory(inventory_dir, info["inventory_name"], cached)
+    if info.get("mmproj_path") and info.get("mmproj_filename"):
+        inv_parent = Path(info["inventory_name"]).parent
+        mmproj_inventory = str(inv_parent / Path(info["mmproj_filename"]).name)
+        link_inventory(inventory_dir, mmproj_inventory, Path(info["mmproj_path"]))
     downloaded_paths = [Path(raw) for raw in info.get("paths") or [info["path"]]]
     try:
         size_bytes = sum(path.stat().st_size for path in downloaded_paths)
@@ -336,6 +341,11 @@ def _sync_download_artifacts(
             "cache_dir": str(cache_dir),
             "gguf_file": info["filename"],
             "gguf_files": info.get("filenames") or [info["filename"]],
+            **(
+                {"mmproj_file": info["mmproj_filename"]}
+                if info.get("mmproj_filename")
+                else {}
+            ),
         },
         "downloaded": [str(path) for path in downloaded_paths],
         "repo_id": catalog_repo,

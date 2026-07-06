@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from pathlib import Path
 from typing import Annotated, Any
@@ -34,13 +35,23 @@ from forge.services.publishable import (
     assert_pushable_path,
     list_publishable_models,
 )
-from forge.services.user_paths import assert_user_path
+from forge.services.user_paths import assert_user_path, pick_user_download_file
 from seiso.export.formats import publish_folder_to_hub
 from seiso.export.model_card import HubModelMetadata
-from seiso.io.files import iter_matching_files
 from seiso.security import SecurityError
 
 router = APIRouter(prefix="/export", tags=["export"])
+
+
+def _loads_json(raw: Any, fallback: Any) -> Any:
+    if not raw:
+        return fallback
+    if not isinstance(raw, str):
+        return raw
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return fallback
 
 
 class ExportStartRequest(BaseModel):
@@ -50,7 +61,10 @@ class ExportStartRequest(BaseModel):
         default=None,
         description="Export profile: lora_adapter, lora_bundle, full_finetune, full_bundle, inference, gguf_only, hub_ready",
     )
-    gguf_quantizations: list[str] = Field(default_factory=lambda: ["q4_k_m"])
+    gguf_quantizations: list[str] | None = Field(
+        default=None,
+        description="GGUF quant names; defaults to q4_k_m when omitted",
+    )
     hub: HubPublishRequest | None = None
     hub_repo: str | None = Field(
         default=None, description="Deprecated — use hub.username + hub.model_name"
@@ -78,21 +92,41 @@ async def _resolve_publish_folder(
     """Return (folder, job_id, source) for a publish request."""
     if body.model_id:
         model = await assert_pushable_model(db, model_id=body.model_id, user_id=user_id)
-        folder = Path(model["path"])
-        meta_raw = json.loads(model.get("metadata_json") or "{}")
+        try:
+            folder = await assert_pushable_path(
+                db,
+                data_dir=data_dir,
+                user_id=user_id,
+                target=model["path"],
+            )
+        except (SecurityError, ValueError) as exc:
+            raise HTTPException(
+                403 if isinstance(exc, SecurityError) else 400, str(exc)
+            ) from exc
+        meta_raw = _loads_json(model.get("metadata_json") or "{}", {})
         job_id = meta_raw.get("job_id")
         source = model.get("source") or "export"
     elif body.export_job_id:
         job = await db.get_export_job(body.export_job_id, user_id)
         if not job or job.get("status") != "completed":
             raise HTTPException(400, "Export job not found or not completed")
-        outputs = json.loads(job.get("output_paths_json") or "{}")
+        outputs = _loads_json(job.get("output_paths_json") or "{}", {})
         if not outputs:
             raise HTTPException(400, "Export job has no outputs")
         preferred = next((v for k, v in outputs.items() if "gguf" in k.lower()), None)
         if not preferred:
             preferred = outputs.get("merged") or next(iter(outputs.values()))
-        folder = Path(preferred)
+        try:
+            folder = await assert_pushable_path(
+                db,
+                data_dir=data_dir,
+                user_id=user_id,
+                target=preferred,
+            )
+        except (SecurityError, ValueError) as exc:
+            raise HTTPException(
+                403 if isinstance(exc, SecurityError) else 400, str(exc)
+            ) from exc
         job_id = body.export_job_id
         source = "export"
     elif body.output_path:
@@ -219,7 +253,11 @@ async def start_export(
 
     job_id = str(uuid.uuid4())
     config = body.model_dump()
-    gguf_quants = list(body.gguf_quantizations)
+    # Never persist secrets in job config_json.
+    hub_cfg = config.get("hub")
+    if isinstance(hub_cfg, dict) and hub_cfg.get("hf_token"):
+        config["hub"] = {**hub_cfg, "hf_token": None}
+    gguf_quants = list(body.gguf_quantizations or ["q4_k_m"])
 
     if body.rl_quant_job_id:
         rl_job = await db.get_rl_quant_job(body.rl_quant_job_id, user_id)
@@ -228,7 +266,7 @@ async def start_export(
         if rl_job.get("status") != "completed":
             raise HTTPException(400, "RL quant job is not completed")
         stored = rl_job.get("gguf_quants_json") or "[]"
-        parsed = json.loads(stored)
+        parsed = _loads_json(stored, [])
         if parsed:
             gguf_quants = parsed
         config["rl_quant_job_id"] = body.rl_quant_job_id
@@ -287,13 +325,20 @@ async def start_export(
                 if job.status.value == "completed" and job.result.get("outputs"):
                     from forge.services.model_registry import register_export_outputs
 
-                    await register_export_outputs(
-                        db,
-                        user_id=user_id,
-                        data_dir=settings.data_dir,
-                        outputs=job.result["outputs"],
-                        job_id=job_id,
-                    )
+                    try:
+                        await register_export_outputs(
+                            db,
+                            user_id=user_id,
+                            data_dir=settings.data_dir,
+                            outputs=job.result["outputs"],
+                            job_id=job_id,
+                        )
+                    except Exception:
+                        logging.getLogger(__name__).exception(
+                            "Export inventory registration failed for job %s "
+                            "(export remains completed)",
+                            job_id,
+                        )
         except Exception as exc:
             await db.update_export_job_status(
                 job_id,
@@ -475,7 +520,7 @@ async def download_export_output(
     if not job or job.get("status") != "completed":
         raise HTTPException(404, "Export job not found or not completed")
 
-    outputs = json.loads(job.get("output_paths_json") or "{}")
+    outputs = _loads_json(job.get("output_paths_json") or "{}", {})
     target_raw = outputs.get(key)
     if not target_raw:
         for k, v in outputs.items():
@@ -491,10 +536,20 @@ async def download_export_output(
         raise_forbidden(exc)
 
     if path.is_dir():
-        gguf = next(iter_matching_files(path, "*.gguf"), None)
-        if gguf is None:
-            raise HTTPException(404, "No GGUF file in output directory")
-        path = gguf
+        try:
+            path = pick_user_download_file(
+                settings.data_dir,
+                user_id,
+                path,
+                pattern="*.gguf",
+            )
+        except SecurityError as exc:
+            raise_forbidden(exc)
+    else:
+        try:
+            path = assert_user_path(settings.data_dir, user_id, path)
+        except SecurityError as exc:
+            raise_forbidden(exc)
 
     if not path.is_file():
         raise HTTPException(404, "File not found")
@@ -511,15 +566,27 @@ async def stream_export(
 ):
     if not await db.get_export_job(job_id, user_id):
         raise HTTPException(404, "Job not found")
-    assert_job_owner(orchestrator, job_id, user_id)
+    if orchestrator.get_job(job_id):
+        assert_job_owner(orchestrator, job_id, user_id)
 
     async def event_gen():
-        async for line in orchestrator.stream_logs(job_id):
-            yield {"event": "log", "data": line}
-        j = orchestrator.get_job(job_id)
-        if j and j.error:
+        if orchestrator.get_job(job_id):
+            async for line in orchestrator.stream_logs(job_id):
+                yield {"event": "log", "data": line}
+            j = orchestrator.get_job(job_id)
+        else:
+            j = None
+        if not j:
+            row = await db.get_export_job(job_id, user_id)
+            if row and row.get("error_text"):
+                yield {"event": "error", "data": row["error_text"]}
+            outputs = _loads_json(row.get("output_paths_json") if row else None, {})
+            if outputs:
+                yield {"event": "result", "data": json.dumps({"outputs": outputs})}
+            return
+        if j.error:
             yield {"event": "error", "data": j.error}
-        if j and j.result:
-            yield {"event": "result", "data": str(j.result)}
+        if j.result:
+            yield {"event": "result", "data": json.dumps(j.result, default=str)}
 
     return EventSourceResponse(event_gen())

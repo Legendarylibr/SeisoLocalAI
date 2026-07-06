@@ -6,6 +6,7 @@ type StreamHandlers = {
   onError?: (message: string) => void;
   onResult?: (data: string) => void;
   onEvent?: (event: string, data: string) => void;
+  onStreamError?: (message: string) => void;
 };
 
 export function usePipelineJobStream() {
@@ -28,26 +29,36 @@ export function usePipelineJobStream() {
   const watchJob = useCallback((streamPath: string, jobId: string, handlers: StreamHandlers = {}) => {
     stopStream();
     setActiveJob(jobId);
-    abortRef.current = subscribeSSE(streamPath, (event, data) => {
-      handlers.onEvent?.(event, data);
-      if (event === "log") {
-        setLogs((prev) => appendBoundedLog(prev, data));
-        handlers.onLog?.(data);
-      }
-      if (event === "error") {
-        const line = `ERROR: ${data}`;
-        setLogs((prev) => appendBoundedLog(prev, line));
-        handlers.onError?.(data);
-      }
-      if (event === "result") {
-        handlers.onResult?.(data);
-        try {
-          setResult(JSON.parse(data));
-        } catch {
-          /* ignore malformed payloads */
+    abortRef.current = subscribeSSE(
+      streamPath,
+      (event, data) => {
+        handlers.onEvent?.(event, data);
+        if (event === "log") {
+          setLogs((prev) => appendBoundedLog(prev, data));
+          handlers.onLog?.(data);
         }
-      }
-    });
+        if (event === "error") {
+          const line = `ERROR: ${data}`;
+          setLogs((prev) => appendBoundedLog(prev, line));
+          handlers.onError?.(data);
+          handlers.onResult?.(data);
+        }
+        if (event === "result") {
+          handlers.onResult?.(data);
+          try {
+            setResult(JSON.parse(data));
+          } catch {
+            /* ignore malformed payloads */
+          }
+        }
+      },
+      (err) => {
+        const line = `ERROR: ${err.message}`;
+        setLogs((prev) => appendBoundedLog(prev, line));
+        handlers.onStreamError?.(err.message);
+        handlers.onResult?.(err.message);
+      },
+    );
   }, [stopStream]);
 
   useEffect(() => () => stopStream(), [stopStream]);

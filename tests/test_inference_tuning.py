@@ -41,15 +41,11 @@ def test_mlx_stream_kwargs_does_not_scale_prefill_by_headroom(monkeypatch):
     assert mlx_stream_kwargs({"max_tokens": 64})["prefill_step_size"] == 4096
 
 
-def test_mlx_stream_kwargs_with_temperature():
-    pytest = __import__("pytest")
-    try:
-        mlx_lm = pytest.importorskip("mlx_lm")
-        _ = mlx_lm  # used for skip only
-    except RuntimeError as exc:
-        if "No Metal device available" in str(exc):
-            pytest.skip(str(exc))
-        raise
+def test_mlx_stream_kwargs_with_temperature(monkeypatch):
+    monkeypatch.setattr(
+        "seiso.inference.tuning.build_mlx_sampler",
+        lambda payload: object() if float(payload.get("temperature", 0)) > 0 else None,
+    )
     kwargs = mlx_stream_kwargs({"max_tokens": 64, "temperature": 0.7, "top_p": 0.9})
     assert kwargs["max_tokens"] == 64
     assert kwargs["sampler"] is not None
@@ -117,10 +113,29 @@ def test_generate_with_cache_fallback_keeps_unrelated_errors():
 
 def test_estimate_llama_n_ctx_sizes_to_prompt(monkeypatch):
     monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 16384)
+    monkeypatch.setattr(
+        "seiso.platform.use_linux_nvidia_inference_guards", lambda **_: False
+    )
     messages = [{"role": "user", "content": "x" * 4000}]
     n_ctx = estimate_llama_n_ctx(messages, max_tokens=256)
     assert 2048 <= n_ctx <= 131072
     assert n_ctx % 512 == 0
+
+
+def test_estimate_llama_n_ctx_uses_coarse_buckets(monkeypatch):
+    monkeypatch.setattr(
+        "seiso.platform.use_linux_nvidia_inference_guards", lambda: False
+    )
+    short = estimate_llama_n_ctx(
+        [{"role": "user", "content": "hi"}], max_tokens=128
+    )
+    medium = estimate_llama_n_ctx(
+        [{"role": "user", "content": "x" * 8000}], max_tokens=256
+    )
+    assert short == 2048
+    # Growing history should jump buckets, not 512-token steps.
+    assert medium in (2048, 4096, 8192)
+    assert medium >= short
 
 
 def test_llama_completion_kwargs_greedy():

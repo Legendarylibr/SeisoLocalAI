@@ -192,8 +192,11 @@ def _query_hub_page(
             cursor=cursor,
             token=token,
         )
+    # Empty browse: popular text-generation by downloads.
+    # Typed search: any Hub model matching the string (no pipeline straitjacket).
+    pipeline = None if (query or "").strip() else "text-generation"
     return _fetch_hub_page(
-        pipeline_tag="text-generation",
+        pipeline_tag=pipeline,
         search=hf_search,
         limit=limit,
         cursor=cursor,
@@ -219,8 +222,11 @@ def _query_trainable_hub_page(
             cursor=cursor,
             token=token,
         )
+    # Train browse stays text-generation; search still omits the tag so
+    # exact repo names resolve even when Hub tags are incomplete.
+    pipeline = None if (query or "").strip() else "text-generation"
     return _fetch_hub_page(
-        pipeline_tag="text-generation",
+        pipeline_tag=pipeline,
         search=hf_search,
         limit=limit,
         cursor=cursor,
@@ -339,7 +345,10 @@ def _compute_priority(downloads: int, created_at: str | None, tags: list[str]) -
 
 
 def _hub_row_to_entry(
-    row: dict, *, force_task: ModelTask | None = None
+    row: dict,
+    *,
+    force_task: ModelTask | None = None,
+    skip_pipeline_filter: bool = False,
 ) -> CatalogEntry | None:
     repo_id = row.get("id") or row.get("modelId")
     if not isinstance(repo_id, str) or not repo_id.strip():
@@ -356,7 +365,7 @@ def _hub_row_to_entry(
     pipeline_tag = (
         row.get("pipeline_tag") if isinstance(row.get("pipeline_tag"), str) else None
     )
-    if pipeline_tag in _SKIP_PIPELINE_TAGS:
+    if not skip_pipeline_filter and pipeline_tag in _SKIP_PIPELINE_TAGS:
         return None
 
     task = force_task or _infer_task(repo_id, pipeline_tag, tags)
@@ -514,6 +523,7 @@ def search_catalog(
 ) -> CatalogSearchResult:
     """Query Hugging Face Hub live via huggingface_hub; popular models rank first."""
     limit = max(1, min(limit, _MAX_LIMIT))
+    searching = bool(query.strip())
     rows, next_cursor = _query_hub_page(
         query=query,
         family=family,
@@ -527,7 +537,11 @@ def search_catalog(
     entries: list[CatalogEntry] = []
     seen: set[str] = set()
     for row in rows:
-        entry = _hub_row_to_entry(row, force_task=force_task)
+        entry = _hub_row_to_entry(
+            row,
+            force_task=force_task,
+            skip_pipeline_filter=searching,
+        )
         if entry is None or entry.repo_id in seen:
             continue
         seen.add(entry.repo_id)
@@ -535,9 +549,10 @@ def search_catalog(
 
     scored: list[tuple[float, dict]] = []
     for entry in entries:
-        if family and not query.strip() and entry.family.value != family.lower():
+        if family and not searching and entry.family.value != family.lower():
             continue
-        if task and not _matches_task(entry, task):
+        # Browse filters by task; typed search returns any Hub hit (boost ranks matches).
+        if task and not searching and not _matches_task(entry, task):
             continue
         if max_params and _parse_param_size(entry.params) > _parse_param_size(
             max_params
@@ -545,7 +560,7 @@ def search_catalog(
             continue
         scored.append((_boost_score(entry, query), _entry_to_dict(entry)))
 
-    if query.strip():
+    if searching:
         scored.sort(
             key=lambda pair: (
                 -pair[0],
