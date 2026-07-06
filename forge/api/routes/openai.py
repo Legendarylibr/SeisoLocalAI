@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 import uuid
 from typing import Annotated, Any
@@ -21,6 +22,7 @@ from forge.services.llm_output import StreamingOutputSanitizer, sanitize_llm_out
 from forge.services.user_paths import is_local_filesystem_path
 
 router = APIRouter(tags=["openai"])
+logger = logging.getLogger(__name__)
 
 
 class ChatMessage(BaseModel):
@@ -72,8 +74,20 @@ def _normalize_openai_messages(body: ChatCompletionRequest) -> list[dict[str, st
     return messages
 
 
-def _sanitize_openai_content(content: str, *, tools_enabled: bool) -> str:
-    return sanitize_llm_output(content, strip_tool_calls=not tools_enabled)
+def _estimate_token_count(text: str) -> int:
+    stripped = text.strip()
+    if not stripped:
+        return 0
+    return max(1, len(stripped.split()))
+
+
+def _prompt_token_estimate(messages: list[ChatMessage]) -> int:
+    return sum(
+        _estimate_token_count(
+            m.content if isinstance(m.content, str) else json.dumps(m.content)
+        )
+        for m in messages
+    )
 
 
 async def _prepare_openai_chat_payload(
@@ -256,10 +270,11 @@ async def chat_completions(
                 }
                 yield f"data: {json.dumps(final)}\n\n"
                 yield "data: [DONE]\n\n"
-            except Exception:
+            except Exception as exc:
+                logger.exception("OpenAI-compatible inference stream failed")
                 err = {
                     "error": {
-                        "message": "Inference stream failed",
+                        "message": str(exc) or "Inference stream failed",
                         "type": "server_error",
                     }
                 }
@@ -308,6 +323,8 @@ async def chat_completions(
     content = _sanitize_openai_content(
         job.result.get("content", ""), tools_enabled=bool(body.tools)
     )
+    prompt_tokens = _prompt_token_estimate(body.messages)
+    completion_tokens = _estimate_token_count(content)
     return JSONResponse(
         {
             "id": completion_id,
@@ -322,9 +339,9 @@ async def chat_completions(
                 }
             ],
             "usage": {
-                "prompt_tokens": 0,
-                "completion_tokens": len(content.split()),
-                "total_tokens": len(content.split()),
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": prompt_tokens + completion_tokens,
             },
         }
     )

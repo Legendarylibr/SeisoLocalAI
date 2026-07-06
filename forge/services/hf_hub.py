@@ -190,13 +190,27 @@ def _pick_gguf_files(
         key = (str(Path(filename).parent / match.group("prefix")), match.group("total"))
         shard_groups.setdefault(key, []).append(filename)
     complete_groups: list[list[str]] = []
+    incomplete_shards = False
     for (_prefix, total), group in shard_groups.items():
         try:
             expected = int(total)
         except ValueError:
             continue
-        if len(group) == expected:
+        indices: set[int] = set()
+        for filename in group:
+            match = _GGUF_SHARD_RE.match(Path(filename).name)
+            if not match:
+                continue
+            try:
+                indices.add(int(match.group("index")))
+            except ValueError:
+                continue
+        if len(group) == expected and indices == set(range(1, expected + 1)):
             complete_groups.append(sorted(group))
+        elif group:
+            incomplete_shards = True
+    if incomplete_shards and not complete_groups:
+        return []
     if complete_groups:
         return sorted(
             complete_groups, key=lambda group: (len(group), len(group[0]), group[0])
@@ -245,7 +259,7 @@ def repo_has_gguf(
         files = _list_repo_files(repo_id, token=token, revision=revision)
         has_gguf = any(f.lower().endswith(".gguf") for f in files)
     except Exception:
-        has_gguf = False
+        return False
     _repo_gguf_cache.set(cache_key, has_gguf)
     return has_gguf
 

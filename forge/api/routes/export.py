@@ -78,7 +78,17 @@ async def _resolve_publish_folder(
     """Return (folder, job_id, source) for a publish request."""
     if body.model_id:
         model = await assert_pushable_model(db, model_id=body.model_id, user_id=user_id)
-        folder = Path(model["path"])
+        try:
+            folder = await assert_pushable_path(
+                db,
+                data_dir=data_dir,
+                user_id=user_id,
+                target=model["path"],
+            )
+        except (SecurityError, ValueError) as exc:
+            raise HTTPException(
+                403 if isinstance(exc, SecurityError) else 400, str(exc)
+            ) from exc
         meta_raw = json.loads(model.get("metadata_json") or "{}")
         job_id = meta_raw.get("job_id")
         source = model.get("source") or "export"
@@ -92,7 +102,17 @@ async def _resolve_publish_folder(
         preferred = next((v for k, v in outputs.items() if "gguf" in k.lower()), None)
         if not preferred:
             preferred = outputs.get("merged") or next(iter(outputs.values()))
-        folder = Path(preferred)
+        try:
+            folder = await assert_pushable_path(
+                db,
+                data_dir=data_dir,
+                user_id=user_id,
+                target=preferred,
+            )
+        except (SecurityError, ValueError) as exc:
+            raise HTTPException(
+                403 if isinstance(exc, SecurityError) else 400, str(exc)
+            ) from exc
         job_id = body.export_job_id
         source = "export"
     elif body.output_path:

@@ -258,13 +258,11 @@ async def training_recommendations(
     profile = hardware_profile()
     resolved_dataset = dataset
     if isinstance(dataset, str) and dataset.strip():
-        with contextlib.suppress(Exception):
-            resolved_dataset = resolve_training_dataset_path(
-                settings.data_dir,
-                user_id,
-                dataset,
-                install_root=Path(__file__).resolve().parents[3],
-            )
+        resolved_dataset = _resolve_dataset_for_user(
+            dataset,
+            user_id=user_id,
+            settings=settings,
+        )
     return recommend_training_config(
         profile,
         model_id=model_id,
