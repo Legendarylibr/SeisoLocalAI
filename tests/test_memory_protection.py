@@ -397,10 +397,44 @@ def test_clamp_llama_load_kwargs_native_linux_roomy_keeps_july3_batches(
             "flash_attn": True,
         }
     )
-    assert kwargs["n_batch"] == 4096
-    assert kwargs["n_ubatch"] == 1024
+    assert kwargs["n_batch"] == 1024
+    assert kwargs["n_ubatch"] == 256
     # Dense/unknown models may keep flash_attn when opted in.
     assert kwargs.get("flash_attn") is True
+
+
+def test_clamp_llama_load_kwargs_native_linux_borderline_non_tight_caps_batch(
+    monkeypatch, tmp_path
+):
+    gguf = tmp_path / "mid.gguf"
+    gguf.write_bytes(b"\x00" * 1024)
+    monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 24576)
+    monkeypatch.setattr(
+        "seiso.memory.protection.estimate_path_vram_mb", lambda _p: 13000
+    )
+    monkeypatch.setattr(
+        "seiso.inference.backends.gguf_block_count", lambda _p: 48
+    )
+    monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: True)
+    monkeypatch.setattr(
+        "seiso.memory.protection.llama_model_is_tight_vram_fit", lambda **_k: False
+    )
+    monkeypatch.setattr(
+        "seiso.memory.protection.llama_kv_cache_reserve_mb",
+        lambda *_a, **_k: 800,
+    )
+
+    kwargs = clamp_llama_load_kwargs(
+        {
+            "_model_path": str(gguf),
+            "n_ctx": 4096,
+            "n_batch": 4096,
+            "n_ubatch": 1024,
+            "n_gpu_layers": -1,
+        }
+    )
+    assert kwargs["n_batch"] == 1024
+    assert kwargs["n_ubatch"] == 256
 
 
 def test_llama_prefill_guard_keeps_roomy_short_prompt(monkeypatch, tmp_path):
