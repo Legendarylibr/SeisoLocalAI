@@ -201,7 +201,44 @@ def fit_llama_gpu_layers(
     )
 
     weight_mb = max(int(estimate_path_vram_mb(model_path)), 256)
+    total_layers = gguf_total_layers(model_path)
 
+    try:
+        from seiso.hardware.tiers import discrete_gpu_total_mb
+
+        capacity_mb = discrete_gpu_total_mb() or 0
+    except Exception:
+        capacity_mb = 0
+
+    def _fits(layers: int, budget_mb: int) -> bool:
+        return llama_offload_fits_headroom(
+            model_path,
+            headroom_mb=budget_mb,
+            n_gpu_layers=layers,
+            n_ctx=n_ctx,
+            weight_mb=weight_mb,
+            total_layers=total_layers,
+        )
+
+    # Prefer full GPU offload whenever weight+KV fits free VRAM or total GPU capacity.
+    if requested == -1:
+        if _fits(-1, headroom_mb):
+            return -1
+        if capacity_mb > headroom_mb and _fits(-1, capacity_mb):
+            return -1
+
+    if requested > 0:
+        capped = min(requested, total_layers)
+        if capped >= total_layers and (
+            _fits(-1, headroom_mb) or (capacity_mb > headroom_mb and _fits(-1, capacity_mb))
+        ):
+            return capped
+        if _fits(capped, headroom_mb):
+            return capped
+        if capacity_mb > headroom_mb and _fits(capped, capacity_mb):
+            return capped
+
+    partial_budget = headroom_mb
     if _native_linux_nvidia() and llama_model_is_tight_vram_fit(
         model_path=model_path,
         free_mb=headroom_mb,
@@ -216,29 +253,7 @@ def fit_llama_gpu_layers(
         except Exception:
             reserve_ratio = 0.15
         reserve_mb = max(2048, int(headroom_mb * reserve_ratio))
-        headroom_mb = max(0, headroom_mb - reserve_mb)
-
-    total_layers = gguf_total_layers(model_path)
-
-    def _fits(layers: int) -> bool:
-        return llama_offload_fits_headroom(
-            model_path,
-            headroom_mb=headroom_mb,
-            n_gpu_layers=layers,
-            n_ctx=n_ctx,
-            weight_mb=weight_mb,
-            total_layers=total_layers,
-        )
-
-    if requested == -1 and _fits(-1):
-        return -1
-
-    if requested > 0:
-        capped = min(requested, total_layers)
-        if capped >= total_layers and _fits(-1):
-            return capped
-        if _fits(capped):
-            return capped
+        partial_budget = max(0, headroom_mb - reserve_mb)
 
     if _llama_skip_partial_offload(model_path):
         try:
@@ -268,14 +283,14 @@ def fit_llama_gpu_layers(
         n_gpu_layers=-1 if requested == -1 else min(max(requested, 1), total_layers),
         total_layers=total_layers,
         weight_mb=weight_mb,
-        free_mb=headroom_mb,
+        free_mb=partial_budget,
     )
-    avail_mb = headroom_mb - kv_reserve_mb
+    avail_mb = partial_budget - kv_reserve_mb
 
     if avail_mb < 256:
         logger.warning(
             "VRAM too tight for GPU offload (~%.1f GB free) — falling back to CPU",
-            headroom_mb / 1024,
+            partial_budget / 1024,
         )
         return 0
 
@@ -284,7 +299,7 @@ def fit_llama_gpu_layers(
     if requested not in (-1, 0) and requested > 0:
         partial = min(partial, requested)
 
-    while partial > 0 and not _fits(partial):
+    while partial > 0 and not _fits(partial, partial_budget):
         partial -= 1
 
     if partial <= 0:

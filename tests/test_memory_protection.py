@@ -1268,7 +1268,7 @@ def test_native_linux_llamacpp_load_defers_preflight_when_model_fits_gpu(tmp_pat
 
     assert fit["memory_load_blocked"] is False
     assert fit["memory_load_blocked_reason"] is None
-    assert "partial GPU offload" in fit["memory_load_warning"]
+    assert "full GPU offload" in fit["memory_load_warning"]
 
 
 def test_native_linux_llamacpp_preflight_still_blocks_when_exceeds_gpu_capacity(

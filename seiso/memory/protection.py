@@ -1051,8 +1051,8 @@ _LLAMACPP_DEFER_WARNINGS: dict[str, str] = {
         "offload fallback. Close apps if loading still fails."
     ),
     "linux_nvidia": (
-        "Low free VRAM — trying llama.cpp with mmap, partial GPU offload, and "
-        "memory-tier fallback. Close other GPU apps if loading still fails."
+        "Low free VRAM — trying full GPU offload with conservative batch limits. "
+        "Close other GPU apps if loading still fails."
     ),
 }
 
@@ -1093,9 +1093,14 @@ def _llamacpp_deferred_preflight_platform(
     profile: dict[str, Any] | None = None,
 ) -> str | None:
     """Return platform id when llama.cpp should try load despite preflight block."""
-    if mode != "chat" or not fit.get("memory_load_blocked"):
+    if mode != "chat":
         return None
     if str(backend or "").lower() not in {"llamacpp", "llama"}:
+        return None
+
+    blocked = bool(fit.get("memory_load_blocked"))
+    low_free = bool(fit.get("memory_load_budget_exceeded")) and not blocked
+    if not blocked and not low_free:
         return None
 
     defer = seiso_platform.llamacpp_deferred_preflight_platform(profile=profile)
@@ -1128,8 +1133,24 @@ def ensure_load_fits(
 ) -> dict[str, Any]:
     """Block model loads that exceed measured memory headroom."""
     fit = assess_path_memory_fit_for_load(path, mode=mode, backend=backend)
+    backend_key = str(backend or "").lower()
+    llamacpp_backend = backend_key in {"llamacpp", "llama"}
     if fit.get("memory_load_blocked"):
         reason = fit.get("memory_load_blocked_reason") or "Model exceeds available memory"
+        if allow_memory_overcommit():
+            logger.warning("Memory overcommit allowed: %s", reason)
+        else:
+            raise MemoryLoadBlockedError(reason)
+    if (
+        mode == "chat"
+        and fit.get("memory_load_budget_exceeded")
+        and not llamacpp_backend
+    ):
+        est_gb = round(int(fit.get("est_vram_mb") or 0) / 1024, 1)
+        reason = (
+            f"Needs ~{est_gb:.1f} GB at runtime but free memory is low right now. "
+            "Free memory or use llama.cpp for tiered GPU load fallbacks."
+        )
         if allow_memory_overcommit():
             logger.warning("Memory overcommit allowed: %s", reason)
         else:

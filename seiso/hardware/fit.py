@@ -67,6 +67,7 @@ def assess_hardware_fit(
         fit, label = "tight", "Tight fit — free VRAM is low; close other GPU apps first"
 
     load_budget_mb = _usable_load_budget_mb(capacity_mb=capacity_mb, free_mb=free_mb)
+    load_budget_exceeded = load_budget_mb > 0 and est_mb > load_budget_mb
     capacity_gb = round(capacity_mb / 1024, 1)
     free_gb = round(free_mb / 1024, 1)
     load_budget_gb = round(load_budget_mb / 1024, 1)
@@ -109,6 +110,7 @@ def assess_hardware_fit(
         "hardware_fit_rank": FIT_RANK[fit],
         "memory_load_blocked": blocked,
         "memory_load_blocked_reason": block_reason,
+        "memory_load_budget_exceeded": load_budget_exceeded,
     }
 
 

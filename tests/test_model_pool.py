@@ -1005,7 +1005,7 @@ def test_native_linux_load_model_uses_crash_resistant_kwargs(monkeypatch, tmp_pa
     first = attempts[0]
     assert first["n_batch"] <= 512
     assert first["n_ubatch"] <= 128
-    assert first["n_gpu_layers"] != -1
+    assert first["n_gpu_layers"] == -1
     assert first["offload_kqv"] is False
     assert first["op_offload"] is False
     assert "flash_attn" not in first
@@ -1072,7 +1072,7 @@ def test_native_linux_partial_offload_disables_kqv_and_op_offload(monkeypatch, t
     assert "flash_attn" not in attempts[0]
 
 
-def test_qwen36_27b_native_linux_starts_at_fitted_partial_offload(monkeypatch, tmp_path):
+def test_qwen36_27b_native_linux_falls_back_to_partial_when_full_offload_fails(monkeypatch, tmp_path):
     import seiso.inference.model_pool as mp
 
     gguf = tmp_path / "Qwen3.6-27B-UD-Q4_K_XL.gguf"
@@ -1082,6 +1082,8 @@ def test_qwen36_27b_native_linux_starts_at_fitted_partial_offload(monkeypatch, t
     class FakeLlama:
         def __init__(self, *, model_path: str, **kwargs):
             assert model_path == str(gguf)
+            if kwargs["n_gpu_layers"] == -1:
+                raise RuntimeError("Failed to create llama_context")
             attempts.append(dict(kwargs))
             self._seiso_n_gpu_layers = kwargs["n_gpu_layers"]
 
@@ -1277,7 +1279,7 @@ def test_load_llama_model_records_last_safe_batch_from_override(monkeypatch, tmp
     assert llm._seiso_last_safe_ubatch == 128
 
 
-def test_llama_load_model_skips_full_offload_when_kv_reserve_does_not_fit(monkeypatch, tmp_path):
+def test_llama_load_model_tries_full_offload_before_partial_fallback(monkeypatch, tmp_path):
     import seiso.inference.model_pool as mp
 
     gguf = tmp_path / "qwen-27b-q4.gguf"
@@ -1287,6 +1289,8 @@ def test_llama_load_model_skips_full_offload_when_kv_reserve_does_not_fit(monkey
     class FakeLlama:
         def __init__(self, *, model_path: str, **kwargs):
             assert model_path == str(gguf)
+            if kwargs["n_gpu_layers"] == -1:
+                raise RuntimeError("Failed to create llama_context")
             layers_attempted.append(kwargs["n_gpu_layers"])
             self._seiso_n_gpu_layers = kwargs["n_gpu_layers"]
 
@@ -1316,7 +1320,6 @@ def test_llama_load_model_skips_full_offload_when_kv_reserve_does_not_fit(monkey
     mp._load_llama_model(str(gguf), 4096)
 
     assert layers_attempted
-    assert layers_attempted[0] != -1
     assert layers_attempted[0] >= 30
 
 
