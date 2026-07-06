@@ -39,9 +39,31 @@ class TrainingOrchestrator(Orchestrator):
         import os
 
         hf_token = payload.get("hf_token")
+        prev_hf_token = os.environ.get("HF_TOKEN")
+        prev_hub_token = None
+        token_applied = False
         if hf_token:
+            prev_hf_token = os.environ.get("HF_TOKEN")
+            prev_hub_token = os.environ.get("HUGGING_FACE_HUB_TOKEN")
             os.environ["HF_TOKEN"] = str(hf_token)
             os.environ.pop("HUGGING_FACE_HUB_TOKEN", None)
+            token_applied = True
+        try:
+            return await self._execute_training(job_id, payload)
+        finally:
+            if token_applied:
+                if prev_hf_token is None:
+                    os.environ.pop("HF_TOKEN", None)
+                else:
+                    os.environ["HF_TOKEN"] = prev_hf_token
+                if prev_hub_token is None:
+                    os.environ.pop("HUGGING_FACE_HUB_TOKEN", None)
+                else:
+                    os.environ["HUGGING_FACE_HUB_TOKEN"] = prev_hub_token
+
+    async def _execute_training(
+        self, job_id: str, payload: dict[str, Any]
+    ) -> dict[str, Any]:
         configure_hf_hub_cache(self.sandbox_root)
         from forge.services.memory_release import (
             prepare_for_gpu_task,

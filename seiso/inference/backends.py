@@ -102,7 +102,8 @@ def is_dflash_draft(model_path: str) -> bool:
     if arch and "dflash" in arch.lower():
         return True
     name = Path(model_path).name.lower()
-    return "dflash" in name or "-draft" in name or "draft" in name and "gguf" in name
+    # Require an explicit draft marker; bare "draft" in community names is too broad.
+    return "dflash" in name or "-draft" in name or name.startswith("draft-")
 
 
 def _looks_like_gguf_file(path: Path) -> bool:

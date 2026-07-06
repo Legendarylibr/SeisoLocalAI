@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import logging
 import time
 import uuid
 from dataclasses import dataclass
@@ -40,6 +41,7 @@ from seiso.training.dataset_analysis import analyze_training_dataset
 from seiso.training.recommendations import recommend_training_config
 
 router = APIRouter(prefix="/training", tags=["training"])
+logger = logging.getLogger(__name__)
 
 
 class TrainingStartRequest(BaseModel):
@@ -602,67 +604,77 @@ async def start_training(
                 if job.status.value == "completed" and job.result.get(
                     "checkpoint_path"
                 ):
-                    from forge.services.model_registry import (
-                        register_export_outputs,
-                        register_training_checkpoint,
-                    )
-
-                    await register_training_checkpoint(
-                        db,
-                        user_id=user_id,
-                        data_dir=settings.data_dir,
-                        checkpoint_path=job.result["checkpoint_path"],
-                        job_id=job_id,
-                    )
-
-                    if body.export_on_complete:
-                        from forge.services.hub_publish import (
-                            HubPublishRequest,
-                            hub_metadata_from_request,
-                            resolve_hub_publish_token,
+                    try:
+                        from forge.services.model_registry import (
+                            register_export_outputs,
+                            register_training_checkpoint,
                         )
-                        from seiso.export.pipeline import auto_export_after_training
 
-                        export_cfg = dict(body.export_on_complete)
-                        hub_req = export_cfg.pop("hub", None)
-                        hub_repo = None
-                        hub_metadata = None
-                        hub_token = None
-                        if hub_req:
-                            hub = HubPublishRequest(**hub_req)
-                            hub_metadata = hub_metadata_from_request(
-                                hub, job_id=job_id, source="training"
-                            )
-                            hub_metadata.validate()
-                            hub_repo = hub_metadata.repo_id
-                            hub_token = resolve_hub_publish_token(
-                                settings, user_id, hub
-                            )
-
-                        export_dir = (
-                            settings.data_dir / "exports" / user_id / f"train-{job_id}"
-                        )
-                        export_cfg.update(
-                            {
-                                "hub_repo": hub_repo,
-                                "hub_token": hub_token,
-                                "hub_metadata": (
-                                    hub_metadata.__dict__ if hub_metadata else None
-                                ),
-                            }
-                        )
-                        outputs = auto_export_after_training(
-                            Path(job.result["checkpoint_path"]),
-                            export_dir,
-                            export_cfg,
-                            sandbox_root=settings.data_dir,
-                        )
-                        await register_export_outputs(
+                        await register_training_checkpoint(
                             db,
                             user_id=user_id,
                             data_dir=settings.data_dir,
-                            outputs={k: str(v) for k, v in outputs.items()},
-                            job_id=f"train-{job_id}",
+                            checkpoint_path=job.result["checkpoint_path"],
+                            job_id=job_id,
+                        )
+
+                        if body.export_on_complete:
+                            from forge.services.hub_publish import (
+                                HubPublishRequest,
+                                hub_metadata_from_request,
+                                resolve_hub_publish_token,
+                            )
+                            from seiso.export.pipeline import auto_export_after_training
+
+                            export_cfg = dict(body.export_on_complete)
+                            hub_req = export_cfg.pop("hub", None)
+                            hub_repo = None
+                            hub_metadata = None
+                            hub_token = None
+                            if hub_req:
+                                hub = HubPublishRequest(**hub_req)
+                                hub_metadata = hub_metadata_from_request(
+                                    hub, job_id=job_id, source="training"
+                                )
+                                hub_metadata.validate()
+                                hub_repo = hub_metadata.repo_id
+                                hub_token = resolve_hub_publish_token(
+                                    settings, user_id, hub
+                                )
+
+                            export_dir = (
+                                settings.data_dir
+                                / "exports"
+                                / user_id
+                                / f"train-{job_id}"
+                            )
+                            export_cfg.update(
+                                {
+                                    "hub_repo": hub_repo,
+                                    "hub_token": hub_token,
+                                    "hub_metadata": (
+                                        hub_metadata.__dict__ if hub_metadata else None
+                                    ),
+                                }
+                            )
+                            outputs = auto_export_after_training(
+                                Path(job.result["checkpoint_path"]),
+                                export_dir,
+                                export_cfg,
+                                sandbox_root=settings.data_dir,
+                            )
+                            await register_export_outputs(
+                                db,
+                                user_id=user_id,
+                                data_dir=settings.data_dir,
+                                outputs={k: str(v) for k, v in outputs.items()},
+                                job_id=f"train-{job_id}",
+                            )
+                    except Exception:
+                        logger.exception(
+                            "Post-training registration/export failed for job %s "
+                            "(training remains completed)",
+                            job_id,
                         )
         except Exception as exc:
             await db.update_job_status(

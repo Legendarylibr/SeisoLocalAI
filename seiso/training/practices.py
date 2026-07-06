@@ -141,7 +141,8 @@ def resolve_compute_dtype(
         return False, True
     if bf16_supported:
         return True, False
-    return False, quant == "16bit"
+    # Non-bf16 GPUs (e.g. V100/T4): use fp16 for QLoRA/LoRA compute.
+    return False, True
 
 
 def sft_modern_kwargs(

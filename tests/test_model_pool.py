@@ -157,6 +157,72 @@ def test_prepare_for_load_waits_for_inference(tmp_path, monkeypatch):
     assert elapsed >= 0.1
 
 
+def test_reload_llama_preserves_generation_and_skips_self_wait(tmp_path, monkeypatch):
+    from seiso.inference import model_pool as pool_mod
+
+    pool = ModelPool()
+    model = tmp_path / "model.gguf"
+    model.write_bytes(b"gguf")
+
+    class FakeLlama:
+        def __init__(self) -> None:
+            self.closed = False
+
+        def close(self) -> None:
+            self.closed = True
+
+    first = FakeLlama()
+    second = FakeLlama()
+    pool._active = LoadedModel(
+        key="llama:model",
+        backend=BackendKind.LLAMA,
+        handle=first,
+        meta={
+            "path": str(model),
+            "norm_path": str(model.resolve()),
+            "n_ctx": 4096,
+            "load_tier": "normal",
+        },
+    )
+    gen_id = pool.bump_generation()
+    pool.begin_inference()
+
+    def fake_load(path, n_ctx, tier="normal", batch_override=None):
+        return second
+
+    monkeypatch.setattr(pool_mod, "_load_llama_model", fake_load)
+    monkeypatch.setattr(pool_mod, "_clear_optimal_layers_cache", lambda: None)
+    monkeypatch.setattr(pool_mod, "_refresh_headroom_stats", lambda force=False: None)
+    monkeypatch.setattr(
+        "seiso.memory.protection.ensure_load_fits", lambda *a, **k: {}
+    )
+    monkeypatch.setattr(
+        "seiso.memory.protection.estimate_path_vram_mb", lambda *a, **k: 100
+    )
+    monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 10_000)
+    monkeypatch.setattr(
+        "seiso.memory.protection.release_cached_memory", lambda **k: None
+    )
+    monkeypatch.setattr(
+        "seiso.inference.llama_vision.resolve_mmproj_path", lambda *a, **k: None
+    )
+
+    started = time.time()
+    handle = pool.reload_llama(
+        str(model),
+        4096,
+        tier="compact",
+        batch_override=(512, 128),
+    )
+    elapsed = time.time() - started
+
+    assert handle is second
+    assert pool.is_generation_active(gen_id)
+    assert first.closed is True
+    assert elapsed < 1.0
+    assert pool._inference_refs == 1
+
+
 def test_llama_gpu_layers_optimal_uses_short_ttl_cache(monkeypatch, tmp_path):
     import seiso.inference.model_pool as mp
 

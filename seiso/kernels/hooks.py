@@ -650,6 +650,8 @@ def _patch_post_attention_residual_norm(model: Any, decoder: Any) -> bool:
         return _fallback(hidden_states)
 
     norm._seiso_residual_norm_forward = _residual_norm_forward
+    if not hasattr(norm, "_seiso_orig_forward"):
+        norm._seiso_orig_forward = fallback
     norm.forward = types.MethodType(_residual_norm_forward, norm)
     register_patch(model, norm)
     return True

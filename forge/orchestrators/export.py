@@ -11,7 +11,7 @@ from forge.services.user_paths import assert_user_path
 from seiso.export.hub_precheck import hub_precheck_from_dict
 from seiso.export.model_card import HubModelMetadata
 from seiso.export.pipeline import prepare_export, run_export_plan
-from seiso.security import SecurityError
+from seiso.security import SecurityError, assert_within
 
 
 class ExportOrchestrator(Orchestrator):
@@ -45,9 +45,15 @@ class ExportOrchestrator(Orchestrator):
 
         hub_meta_raw = payload.get("hub_metadata")
         hub_metadata = HubModelMetadata(**hub_meta_raw) if hub_meta_raw else None
-        output_dir = Path(
-            payload.get("output_dir", self.sandbox_root / "exports" / user_id / job_id)
-        )
+        user_exports = (self.sandbox_root / "exports" / user_id).resolve()
+        default_output = user_exports / job_id
+        raw_output = Path(payload.get("output_dir", default_output))
+        if not raw_output.is_absolute():
+            raw_output = user_exports / raw_output
+        try:
+            output_dir = assert_within(user_exports, raw_output)
+        except SecurityError as exc:
+            raise PermissionError(str(exc)) from exc
 
         self._emit_log(job_id, f"Exporting checkpoint: {checkpoint.name}")
 
