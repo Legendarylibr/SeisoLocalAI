@@ -7,10 +7,9 @@ import contextlib
 import json
 import os
 import shutil
+import threading
 from pathlib import Path
 from typing import Any
-
-import threading
 
 from forge.db.store import Database
 from forge.services.artifact_integrity import (

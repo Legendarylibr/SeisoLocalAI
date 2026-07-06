@@ -49,7 +49,13 @@ async def test_openai_chat_with_inventory_model(app, auth_client, monkeypatch):
     )
 
     from forge.api.deps import get_inference_orchestrator
+    from forge.services import inference_models
 
+    monkeypatch.setattr(
+        inference_models,
+        "_installed_backends",
+        lambda: {"llamacpp": True, "llamaswap": False, "mlx": False, "torch": False},
+    )
     mock_runner = AsyncMock()
     mock_runner.chat = AsyncMock(return_value="Hello from Seiso")
     get_inference_orchestrator()._runner = mock_runner
@@ -80,7 +86,7 @@ async def test_training_job_e2e(app, auth_client, monkeypatch):
         '{"messages":[{"role":"user","content":"hi"},{"role":"assistant","content":"hey"}]}\n'
     )
 
-    def fake_run_training(config, on_metric=None, on_log=None):
+    def fake_run_training(config, on_metric=None, on_log=None, **_kwargs):
         if on_metric:
             on_metric(
                 {
@@ -95,9 +101,7 @@ async def test_training_job_e2e(app, auth_client, monkeypatch):
             on_log("mock training complete")
         out = Path(config.output_dir) / "checkpoint-e2e"
         out.mkdir(parents=True, exist_ok=True)
-        (out / "adapter_config.json").write_text(
-            '{"base_model_name_or_path": "test/model"}'
-        )
+        (out / "adapter_config.json").write_text('{"base_model_name_or_path": "test/model"}')
         return out
 
     monkeypatch.setattr("forge.orchestrators.training.run_training", fake_run_training)
