@@ -180,7 +180,7 @@ export function streamChat(
     }
 
     const reader = res.body?.getReader();
-    if (!reader) return;
+    if (!reader) throw new Error("Streaming response unavailable");
 
     await consumeSSEStream(reader, handlers.onEvent, controller.signal);
   })();

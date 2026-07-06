@@ -41,6 +41,8 @@ def run_rl_quant_job(
     requested_stages = payload.get("stages")
     if requested_stages:
         _log(f"Requested stages: {', '.join(str(s) for s in requested_stages)}")
+        if "auto_sweep" not in requested_stages:
+            payload = {**payload, "auto_sweep": False}
 
     sweep_result: dict[str, Any] | None = None
     if auto_sweep_enabled(payload):
@@ -62,7 +64,10 @@ def run_rl_quant_job(
     )
     _log(f"Artifacts: {config.artifacts.outputs_dir}")
 
-    pipeline = ResearchPipeline(config)
+    enabled_stages = (
+        frozenset(str(s) for s in requested_stages) if requested_stages else None
+    )
+    pipeline = ResearchPipeline(config, enabled_stages=enabled_stages)
     _log("Phase: research pipeline (train → eval → recommend → benchmark → analysis)")
     summary = pipeline.run()
     _log("RL quantization pipeline complete")

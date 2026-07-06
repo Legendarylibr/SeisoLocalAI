@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -21,6 +22,8 @@ from seiso.training.multi_gpu import (
     launch_worker_command,
     resolve_distributed_plan,
 )
+
+_HF_TOKEN_LOCK = threading.Lock()
 
 
 class TrainingOrchestrator(Orchestrator):
@@ -39,27 +42,32 @@ class TrainingOrchestrator(Orchestrator):
         import os
 
         hf_token = payload.get("hf_token")
-        prev_hf_token = os.environ.get("HF_TOKEN")
-        prev_hub_token = None
-        token_applied = False
-        if hf_token:
+        with _HF_TOKEN_LOCK:
             prev_hf_token = os.environ.get("HF_TOKEN")
             prev_hub_token = os.environ.get("HUGGING_FACE_HUB_TOKEN")
-            os.environ["HF_TOKEN"] = str(hf_token)
-            os.environ.pop("HUGGING_FACE_HUB_TOKEN", None)
-            token_applied = True
-        try:
-            return await self._execute_training(job_id, payload)
-        finally:
-            if token_applied:
-                if prev_hf_token is None:
-                    os.environ.pop("HF_TOKEN", None)
-                else:
-                    os.environ["HF_TOKEN"] = prev_hf_token
-                if prev_hub_token is None:
-                    os.environ.pop("HUGGING_FACE_HUB_TOKEN", None)
-                else:
-                    os.environ["HUGGING_FACE_HUB_TOKEN"] = prev_hub_token
+            token_applied = False
+            if hf_token:
+                os.environ["HF_TOKEN"] = str(hf_token)
+                os.environ.pop("HUGGING_FACE_HUB_TOKEN", None)
+                token_applied = True
+            try:
+                return await self._execute_training(job_id, payload)
+            finally:
+                if token_applied:
+                    if prev_hf_token is None:
+                        os.environ.pop("HF_TOKEN", None)
+                    else:
+                        os.environ["HF_TOKEN"] = prev_hf_token
+                    if prev_hub_token is None:
+                        os.environ.pop("HUGGING_FACE_HUB_TOKEN", None)
+                    else:
+                        os.environ["HUGGING_FACE_HUB_TOKEN"] = prev_hub_token
+
+    async def cancel(self, job_id: str) -> bool:
+        from seiso.training.cancel import request
+
+        request(job_id)
+        return await super().cancel(job_id)
 
     async def _execute_training(
         self, job_id: str, payload: dict[str, Any]
@@ -116,7 +124,9 @@ class TrainingOrchestrator(Orchestrator):
         stop_poll = asyncio.Event()
         poll_task = asyncio.create_task(self._poll_system_metrics(job_id, stop_poll))
         metrics_summary: dict[str, Any] = {}
+        from seiso.training.cancel import clear, register
 
+        register(job_id)
         try:
             if distributed_plan.enabled:
                 checkpoint = await self._run_distributed(
@@ -139,10 +149,30 @@ class TrainingOrchestrator(Orchestrator):
                 def on_log(line: str) -> None:
                     loop.call_soon_threadsafe(self._emit_log, job_id, line)
 
-                checkpoint = await loop.run_in_executor(
+                training_future = loop.run_in_executor(
                     None,
-                    lambda: run_training(config, on_metric=on_metric, on_log=on_log),
+                    lambda: run_training(
+                        config,
+                        on_metric=on_metric,
+                        on_log=on_log,
+                        job_id=job_id,
+                    ),
                 )
+                try:
+                    checkpoint = await training_future
+                except asyncio.CancelledError:
+                    from seiso.training.cancel import request
+
+                    request(job_id)
+                    with contextlib.suppress(asyncio.TimeoutError, Exception):
+                        await asyncio.wait_for(
+                            asyncio.shield(training_future), timeout=600
+                        )
+                    raise
+                from seiso.training.cancel import is_requested
+
+                if is_requested(job_id):
+                    raise asyncio.CancelledError()
 
             metrics_path = config.output_dir / "metrics.jsonl"
             if metrics_path.exists():
@@ -150,6 +180,7 @@ class TrainingOrchestrator(Orchestrator):
             else:
                 metrics_summary = self._summarize_buffered_metrics(job_id)
         finally:
+            clear(job_id)
             release_after_task(
                 reason="training complete",
                 log=lambda msg: self._emit_log(job_id, msg),

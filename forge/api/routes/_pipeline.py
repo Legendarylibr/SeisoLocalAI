@@ -73,10 +73,23 @@ def register_formatted_job_routes(
     ):
         if not await routes.get_job(db, job_id, user_id):
             raise HTTPException(404, "Job not found")
-        assert_job_owner(orchestrator, job_id, user_id)
-        return EventSourceResponse(
-            job_log_event_gen(orchestrator, job_id, before_result=routes.before_result)
-        )
+        if orchestrator.get_job(job_id):
+            assert_job_owner(orchestrator, job_id, user_id)
+            return EventSourceResponse(
+                job_log_event_gen(
+                    orchestrator, job_id, before_result=routes.before_result
+                )
+            )
+
+        row = await routes.get_job(db, job_id, user_id)
+
+        async def db_event_gen():
+            if row and row.get("error_text"):
+                yield {"event": "error", "data": row["error_text"]}
+            if row and row.get("stage_results_json"):
+                yield {"event": "result", "data": row["stage_results_json"]}
+
+        return EventSourceResponse(db_event_gen())
 
 
 @dataclass(frozen=True)

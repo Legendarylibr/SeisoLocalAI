@@ -145,17 +145,21 @@ class LocalInferenceRunner:
                 )
             generation_id = self._pool.bump_generation()
             await self._ensure_model_switch(resolved_path, route=route)
-            if route == "llamaswap":
+            self._pool.begin_inference()
+            try:
+                if route == "llamaswap":
+                    return await loop.run_in_executor(
+                        None,
+                        lambda: self._llamaswap_complete(
+                            payload, resolved_path, generation_id
+                        ),
+                    )
                 return await loop.run_in_executor(
                     None,
-                    lambda: self._llamaswap_complete(
-                        payload, resolved_path, generation_id
-                    ),
+                    lambda: self._llama_complete(payload, resolved_path, generation_id),
                 )
-            return await loop.run_in_executor(
-                None,
-                lambda: self._llama_complete(payload, resolved_path, generation_id),
-            )
+            finally:
+                self._pool.end_inference()
 
         payload = sanitize_inference_payload(payload)
         model_path = payload.get("model_path") or payload.get("model_id")

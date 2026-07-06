@@ -143,10 +143,13 @@ class Orchestrator(ABC):
         """SSE-compatible log stream for a job."""
         queue: asyncio.Queue[str | None] = asyncio.Queue()
         subscribers = self._subscribers[job_id]
+        tail = len(self._log_buffers.get(job_id, []))
         subscribers.add(queue)
         try:
-            for line in self._log_buffers.get(job_id, []):
-                yield line
+            buf = self._log_buffers.get(job_id, deque())
+            while tail < len(buf):
+                yield buf[tail]
+                tail += 1
             job = self.get_job(job_id)
             if job and job.status in (
                 JobStatus.COMPLETED,
@@ -155,10 +158,23 @@ class Orchestrator(ABC):
             ):
                 return
             while True:
-                msg = await queue.get()
+                buf = self._log_buffers.get(job_id, deque())
+                while tail < len(buf):
+                    yield buf[tail]
+                    tail += 1
+                try:
+                    msg = await asyncio.wait_for(queue.get(), timeout=0.05)
+                except asyncio.TimeoutError:
+                    job = self.get_job(job_id)
+                    if job and job.status in (
+                        JobStatus.COMPLETED,
+                        JobStatus.FAILED,
+                        JobStatus.CANCELLED,
+                    ):
+                        break
+                    continue
                 if msg is None:
                     break
-                yield msg
         finally:
             subscribers.discard(queue)
 

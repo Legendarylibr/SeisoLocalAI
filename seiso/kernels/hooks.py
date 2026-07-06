@@ -330,7 +330,9 @@ def apply_fused_lora_kernels(
 
                 if rank <= max_rank and x_mod.dim() >= 2:
                     flat_x = x_mod.reshape(-1, x_mod.shape[-1])
-                    if low_vram:
+                    import torch
+
+                    if low_vram and not torch.is_grad_enabled():
                         flat_out = result.reshape(-1, result.shape[-1])
                         fused_lora_delta(
                             flat_x,

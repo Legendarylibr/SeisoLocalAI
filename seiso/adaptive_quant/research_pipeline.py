@@ -94,10 +94,15 @@ class ResearchPipeline:
         requested_profile: str | None = None,
         *,
         cli_startup_overrides: dict[str, object] | None = None,
+        enabled_stages: frozenset[str] | None = None,
     ) -> None:
         self.original_config = config
         self.requested_profile = requested_profile
         self.cli_startup_overrides = cli_startup_overrides
+        self.enabled_stages = enabled_stages
+
+    def _runs(self, stage: str) -> bool:
+        return self.enabled_stages is None or stage in self.enabled_stages
 
     def run(self) -> dict[str, object]:
         enforce_security_bypass_policy(context="research pipeline")
@@ -116,36 +121,49 @@ class ResearchPipeline:
         replay_report: dict[str, object] | None = None
         pipeline_error: Exception | None = None
         try:
-            trainer = self._build_trainer(config)
-            if config.training_backend == "pytorch" and config.torch_preflight:
-                from seiso.adaptive_quant.torch_preflight import run_torch_preflight
+            if self._runs("train"):
+                trainer = self._build_trainer(config)
+                if config.training_backend == "pytorch" and config.torch_preflight:
+                    from seiso.adaptive_quant.torch_preflight import run_torch_preflight
 
-                preflight_report = run_torch_preflight(config, trainer.policy)
-                preflight_report["gpu_profile"] = gpu_profile_report
-                write_json(
-                    f"{config.benchmark_dir}/{config.run_name}_preflight.json",
-                    preflight_report,
-                )
+                    preflight_report = run_torch_preflight(config, trainer.policy)
+                    preflight_report["gpu_profile"] = gpu_profile_report
+                    write_json(
+                        f"{config.benchmark_dir}/{config.run_name}_preflight.json",
+                        preflight_report,
+                    )
 
-            train_summary = trainer.train()
-            vram_report = self._collect_vram_report(trainer)
-            eval_summary = trainer.evaluate()
-            log_path = getattr(trainer.env.logger, "path", None)
-            if log_path is not None:
-                flush = getattr(trainer.env.logger, "flush", None)
-                if callable(flush):
-                    flush()
-                replay_report = finalize_replay_artifacts(
-                    config, log_path, git_commit=commit
-                )
-            recommendation_summary = self._recommend_quantization(config, trainer)
-            from seiso.adaptive_quant.pipeline.gguf_export import maybe_export_gguf
+                train_summary = trainer.train()
+                vram_report = self._collect_vram_report(trainer)
+            if self._runs("evaluate"):
+                if trainer is None:
+                    trainer = self._build_trainer(config)
+                eval_summary = trainer.evaluate()
+            if trainer is not None:
+                log_path = getattr(trainer.env.logger, "path", None)
+                if log_path is not None:
+                    flush = getattr(trainer.env.logger, "flush", None)
+                    if callable(flush):
+                        flush()
+                    replay_report = finalize_replay_artifacts(
+                        config, log_path, git_commit=commit
+                    )
+            if self._runs("recommend"):
+                if trainer is None:
+                    trainer = self._build_trainer(config)
+                recommendation_summary = self._recommend_quantization(config, trainer)
+            if self._runs("gguf_export") or (
+                self.enabled_stages is None and config.llama_cpp_gguf_export_enabled
+            ):
+                from seiso.adaptive_quant.pipeline.gguf_export import maybe_export_gguf
 
-            gguf_export_summary = maybe_export_gguf(config, recommendation_summary)
-            recommendation_path = config.recommendation_path()
-            write_json(recommendation_path, recommendation_summary)
-            history_path = write_training_history(config, trainer)
-            checkpoint_path = maybe_save_final_checkpoint(config, trainer)
+                gguf_export_summary = maybe_export_gguf(config, recommendation_summary)
+            if recommendation_summary is not None:
+                recommendation_path = config.recommendation_path()
+                write_json(recommendation_path, recommendation_summary)
+            if trainer is not None:
+                history_path = write_training_history(config, trainer)
+                checkpoint_path = maybe_save_final_checkpoint(config, trainer)
         except KeyboardInterrupt:
             raise
         except Exception as exc:
@@ -159,18 +177,23 @@ class ResearchPipeline:
 
         from seiso.adaptive_quant.benchmark import BenchmarkSuite
 
-        warn_if_benchmarks_are_large(config)
-        benchmark_summary = BenchmarkSuite(config).run()
+        benchmark_summary: dict[str, object] = {}
+        if self._runs("benchmark"):
+            warn_if_benchmarks_are_large(config)
+            benchmark_summary = BenchmarkSuite(config).run()
         frontier_summary = None
-        try:
-            from seiso.adaptive_quant.frontier_eval import maybe_run_frontier_eval
+        if self._runs("frontier_eval"):
+            try:
+                from seiso.adaptive_quant.frontier_eval import maybe_run_frontier_eval
 
-            frontier_summary = maybe_run_frontier_eval(config)
-        except RuntimeError as exc:
-            if config.frontier_auto_compare_in_pipeline:
-                raise
-            frontier_summary = {"skipped": True, "reason": str(exc)}
-        analysis = run_research_analysis(config, history_path)
+                frontier_summary = maybe_run_frontier_eval(config)
+            except RuntimeError as exc:
+                if config.frontier_auto_compare_in_pipeline:
+                    raise
+                frontier_summary = {"skipped": True, "reason": str(exc)}
+        analysis: dict[str, object] = {}
+        if self._runs("analysis"):
+            analysis = run_research_analysis(config, history_path)
         phases = [
             "train",
             "evaluate",
@@ -217,24 +240,26 @@ class ResearchPipeline:
         )
 
         provisional_index = build_research_artifact_index(config, artifact_payload)
-        report_path = write_research_report_markdown(
-            config,
-            git_commit=commit,
-            train_summary=train_summary,
-            eval_summary=eval_summary,
-            benchmark_summary=benchmark_summary,
-            gpu_profile_report=gpu_profile_report,
-            preflight_report=preflight_report,
-            vram_report=vram_report,
-            analysis=analysis,
-            history_path=history_path,
-            checkpoint_path=checkpoint_path,
-            recommendation_summary=recommendation_summary,
-            gguf_export_summary=gguf_export_summary,
-            research=research,
-            artifact_index=provisional_index,
-        )
-        artifact_payload["report"] = report_path
+        report_path = None
+        if self._runs("report"):
+            report_path = write_research_report_markdown(
+                config,
+                git_commit=commit,
+                train_summary=train_summary,
+                eval_summary=eval_summary,
+                benchmark_summary=benchmark_summary,
+                gpu_profile_report=gpu_profile_report,
+                preflight_report=preflight_report,
+                vram_report=vram_report,
+                analysis=analysis,
+                history_path=history_path,
+                checkpoint_path=checkpoint_path,
+                recommendation_summary=recommendation_summary,
+                gguf_export_summary=gguf_export_summary,
+                research=research,
+                artifact_index=provisional_index,
+            )
+            artifact_payload["report"] = report_path
         summary = {
             "config": config_to_flat_dict(config),
             "git_commit": commit,
@@ -257,8 +282,9 @@ class ResearchPipeline:
             "artifacts": artifact_payload,
         }
         summary["seiso.analysis"] = slim_analysis_for_summary(analysis, config)
-        paper_bundle = create_pipeline_paper_bundle(config=config, summary=summary)
-        summary["artifacts"]["paper_bundle"] = paper_bundle
+        if self._runs("paper_bundle"):
+            paper_bundle = create_pipeline_paper_bundle(config=config, summary=summary)
+            summary["artifacts"]["paper_bundle"] = paper_bundle
         summary["artifact_index"] = build_research_artifact_index(
             config, summary["artifacts"]
         )

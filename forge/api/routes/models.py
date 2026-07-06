@@ -16,8 +16,8 @@ from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
 from forge.api.deps import get_db, get_inference_orchestrator
-from forge.api.routes._stream import spawn_background
 from forge.api.http_errors import raise_forbidden
+from forge.api.routes._stream import spawn_background
 from forge.config import ForgeSettings, get_settings
 from forge.db.store import Database
 from forge.orchestrators.inference import InferenceOrchestrator
@@ -32,8 +32,8 @@ from forge.services.hf_cache_inventory import sync_hf_cache_inventory
 from forge.services.hf_hub import _format_hub_download_error
 from forge.services.model_download import perform_model_download
 from forge.services.publishable import PUSHABLE_SOURCES, is_pushable_model
-from forge.services.user_paths import assert_user_path
-from seiso.io.files import iter_matching_files, model_weight_size_bytes
+from forge.services.user_paths import assert_user_path, pick_user_download_file
+from seiso.io.files import model_weight_size_bytes
 from seiso.models.catalog import (
     HubSearchError,
     get_families,
@@ -259,14 +259,22 @@ async def download_local_model(
         except json.JSONDecodeError:
             metadata = {}
         gguf_file = metadata.get("gguf_file")
-        gguf = path / str(gguf_file) if isinstance(gguf_file, str) else None
-        if gguf is not None and not gguf.is_file():
-            gguf = None
-        if gguf is None:
-            gguf = next(iter_matching_files(path, "*.gguf"), None)
-        if gguf is None:
-            raise HTTPException(404, "No downloadable file in model directory")
-        path = gguf
+        relative_name = gguf_file if isinstance(gguf_file, str) else None
+        try:
+            path = pick_user_download_file(
+                settings.data_dir,
+                user_id,
+                path,
+                pattern="*.gguf",
+                relative_name=relative_name,
+            )
+        except SecurityError as exc:
+            raise_forbidden(exc)
+    else:
+        try:
+            path = assert_user_path(settings.data_dir, user_id, path)
+        except SecurityError as exc:
+            raise_forbidden(exc)
 
     if not path.is_file():
         raise HTTPException(404, "File not found")
