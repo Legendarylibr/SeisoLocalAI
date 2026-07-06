@@ -23,24 +23,28 @@ def native_linux_nvidia_llama_batch_caps(
     headroom_mb: int,
     low: bool,
 ) -> tuple[int, int, int]:
-    """Tier-aware llama.cpp batch/ubatch/cache caps for native Linux NVIDIA."""
+    """Tier-aware llama.cpp batch/ubatch/cache caps for native Linux NVIDIA.
+
+    Prefill activations spike well above weight+KV; keep batches low so
+    multi-turn chat does not OOM after the model is already loaded.
+    """
     batch, ubatch = llama_batch_limits_for_headroom(headroom_mb)
     cache_cap = (
         256
         if low
-        else (1024 if tier == HardwareTier.WORKSTATION else 512)
+        else (512 if tier == HardwareTier.WORKSTATION else 256)
     )
 
     if not low and tier == HardwareTier.WORKSTATION:
-        batch, ubatch = 4096, 1024
+        batch, ubatch = min(batch, 1024), min(ubatch, 256)
     elif not low and tier == HardwareTier.CAPABLE:
-        batch, ubatch = min(batch, 1536), min(ubatch, 512)
+        batch, ubatch = min(batch, 512), min(ubatch, 128)
     else:
-        batch = min(batch, 4096)
-        ubatch = min(ubatch, 1024)
+        batch = min(batch, 512)
+        ubatch = min(ubatch, 128)
         if low:
-            batch = min(batch, 512)
-            ubatch = min(ubatch, 256)
+            batch = min(batch, 256)
+            ubatch = min(ubatch, 128)
 
     return batch, ubatch, cache_cap
 

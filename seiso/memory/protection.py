@@ -71,7 +71,7 @@ _NATIVE_LINUX_PREFILL_CLAMP_MB = 6144
 _NATIVE_LINUX_PREFILL_HEADROOM_DROP_RATIO = 0.85
 # Reload when VRAM shrinks enough to matter but before the 15% hard-drop threshold.
 _NATIVE_LINUX_PREFILL_HEADROOM_SHRINK_RATIO = 0.92
-_NATIVE_LINUX_PREFILL_RESERVE_PER_256TOK_MB = 192
+_NATIVE_LINUX_PREFILL_RESERVE_PER_256TOK_MB = 256
 _TIGHT_VRAM_FIT_RATIO = 0.65
 _NATIVE_LINUX_TIGHT_VRAM_FIT_RATIO = 0.60
 _MAX_JSONL_LOAD_MB = 512
@@ -588,11 +588,15 @@ def llama_prefill_needs_reload(
         effective = max(_MIN_LLAMA_BATCH * 2, effective - 256)
 
     safe_batch, safe_ubatch = llama_batch_limits_for_headroom(effective)
+    # Prefill is the crash zone — never keep a large batch just because
+    # free VRAM looked high before weights/KV settled.
+    safe_batch = min(safe_batch, 1024)
+    safe_ubatch = min(safe_ubatch, 256, safe_batch)
     if load_tier == "compact":
-        safe_batch = min(safe_batch, 512)
+        safe_batch = min(safe_batch, 256)
         safe_ubatch = min(safe_ubatch, 128)
     elif load_tier == "minimal":
-        safe_batch = min(safe_batch, 256)
+        safe_batch = min(safe_batch, 128)
         safe_ubatch = min(safe_ubatch, 128)
 
     headroom_dropped = (
@@ -608,6 +612,9 @@ def llama_prefill_needs_reload(
         n_gpu_layers=loaded_n_gpu_layers,
         n_ctx=n_ctx,
     )
+    if tight_prefill:
+        safe_batch = min(safe_batch, 256)
+        safe_ubatch = min(safe_ubatch, 128, safe_batch)
     loaded_batch = int(loaded_n_batch or 0)
     headroom_shrank = (
         loaded_headroom_mb is not None
