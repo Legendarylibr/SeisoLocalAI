@@ -366,6 +366,7 @@ def llama_prefill_needs_reload(
     loaded_n_gpu_layers: int,
     load_tier: LlamaLoadTier = "normal",
     loaded_headroom_mb: int | None = None,
+    prompt_tokens: int | None = None,
 ) -> tuple[bool, int, int]:
     """True when a cached native-Linux llama handle should reload before prefill."""
     try:
@@ -389,7 +390,11 @@ def llama_prefill_needs_reload(
         _messages_have_vision_content,
     )
 
-    prompt_tokens = _estimate_prompt_tokens(messages)
+    prompt_tokens = (
+        max(0, int(prompt_tokens))
+        if prompt_tokens is not None
+        else _estimate_prompt_tokens(messages)
+    )
     vision_prefill = _messages_have_vision_content(messages)
     load_budget_mb = loaded_headroom_mb if loaded_headroom_mb else free_mb
     safe_batch, safe_ubatch, tight_prefill = resolve_llama_model_batches(
@@ -436,6 +441,10 @@ def llama_prefill_needs_reload(
     batch_unsafe = loaded_batch > safe_batch
     ubatch_far_over = loaded_ubatch > max(safe_ubatch * 2, safe_ubatch + 128)
     needs_reload = batch_unsafe and not trust_loaded_handle
+    if (headroom_dropped or headroom_shrank) and (
+        tight_prefill or prefill_exceeds_safe or loaded_batch > safe_batch
+    ):
+        needs_reload = True
     if (
         loaded_ubatch_explicit
         and loaded_ubatch > safe_ubatch

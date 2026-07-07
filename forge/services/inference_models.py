@@ -64,6 +64,17 @@ def _filter_installed_backends(
     return [b for b in backends if installed.get(b, False)]
 
 
+def _no_backend_status_note(model_format: str | None, install_hints: list[str]) -> str:
+    fmt = (model_format or "").lower()
+    if fmt == "gguf":
+        return (
+            install_hints[0]
+            if install_hints
+            else "GGUF chat requires a reachable isolated backend on this machine. Start Ollama or llama-swap."
+        )
+    return "No installed inference engine can load this model. Install MLX or PyTorch support."
+
+
 def _inventory_artifact_is_complete(
     row: dict[str, Any], metadata: dict[str, Any]
 ) -> bool:
@@ -220,9 +231,24 @@ def _build_local_option(
         runtime = check_inference_runtime()
         opt["install_hints"] = [
             hint for hint in runtime.install_hints if "llama" in hint.lower()
-        ] or ['pip install -e ".[llamacpp]"  # GGUF chat via llama.cpp']
+        ] or ["Start Ollama or llama-swap for GGUF chat"]
     if profile:
         opt.update(assess_inference_option_fit(opt, profile))
+    if not backends:
+        note = _no_backend_status_note(model_format, opt.get("install_hints") or [])
+        opt.update(
+            {
+                "selectable": False,
+                "status": "unavailable",
+                "status_note": note,
+                "hardware_note": note,
+                "memory_load_blocked": True,
+                "memory_load_blocked_reason": note,
+                "hardware_fit": "unavailable",
+                "hardware_fit_label": "Backend unavailable",
+                "hardware_fit_rank": -1,
+            }
+        )
     return opt
 
 
@@ -337,17 +363,19 @@ def resolve_chat_target(
         if backend == "auto":
             backend = option["default_backend"]
         if not backend:
-            fmt = (option.get("format") or "").lower()
-            if fmt == "gguf":
-                raise ValueError(
-                    f"{option['name']!r} is a GGUF file, but its architecture is not supported by this llama.cpp runtime. "
-                    "Choose another GGUF quant."
-                )
             raise ValueError(
-                "No installed inference engine can load this model. Install MLX or PyTorch support."
+                option.get("status_note")
+                or option.get("hardware_note")
+                or _no_backend_status_note(option.get("format"), option.get("install_hints") or [])
             )
         allowed = set(option.get("backends") or [])
-        if allowed and backend not in allowed:
+        if not allowed:
+            raise ValueError(
+                option.get("status_note")
+                or option.get("hardware_note")
+                or _no_backend_status_note(option.get("format"), option.get("install_hints") or [])
+            )
+        if backend not in allowed:
             raise ValueError(
                 f"Backend {backend!r} is not available for {option['name']!r}. "
                 f"Available: {', '.join(sorted(allowed))}"

@@ -8,6 +8,7 @@ core flags and prints timing lines that ``parse_llama_cpp_metrics`` understands.
 from __future__ import annotations
 
 import argparse
+import platform
 import sys
 import time
 from pathlib import Path
@@ -28,6 +29,24 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("-st", action="store_true")
     parser.add_argument("--version", action="store_true")
     return parser.parse_args(argv)
+
+
+def _native_linux_requires_safe_llama_cpp() -> bool:
+    try:
+        from seiso.inference.backends import _native_linux_requires_isolated_gguf
+
+        return _native_linux_requires_isolated_gguf()
+    except Exception:
+        return platform.system() == "Linux"
+
+
+def _safe_llama_args(args: argparse.Namespace) -> tuple[int, int, int]:
+    n_gpu_layers = int(args.ngl)
+    n_ctx = int(args.context)
+    tokens = max(1, int(args.tokens))
+    if not _native_linux_requires_safe_llama_cpp():
+        return n_gpu_layers, n_ctx, tokens
+    return 0, max(512, min(n_ctx, 2048)), max(1, min(tokens, 256))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -62,10 +81,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: model not found: {model_path}", file=sys.stderr)
         return 2
 
-    n_gpu_layers = int(args.ngl)
+    n_gpu_layers, n_ctx, max_tokens = _safe_llama_args(args)
     llm = Llama(
         model_path=str(model_path),
-        n_ctx=int(args.context),
+        n_ctx=n_ctx,
         n_threads=int(args.threads),
         n_gpu_layers=n_gpu_layers,
         verbose=False,
@@ -75,7 +94,7 @@ def main(argv: list[str] | None = None) -> int:
     started = time.perf_counter()
     out = llm(
         prompt,
-        max_tokens=max(1, int(args.tokens)),
+        max_tokens=max_tokens,
         echo=False,
     )
     elapsed_ms = (time.perf_counter() - started) * 1000.0
@@ -84,7 +103,7 @@ def main(argv: list[str] | None = None) -> int:
         choices = out.get("choices") or []
         if choices and isinstance(choices[0], dict):
             text = str(choices[0].get("text") or "").strip()
-    token_count = max(1, int(args.tokens))
+    token_count = max_tokens
     per_token_ms = elapsed_ms / token_count
     tok_s = 1000.0 / per_token_ms if per_token_ms > 0 else 0.0
     if text:

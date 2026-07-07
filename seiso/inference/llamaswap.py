@@ -7,6 +7,7 @@ lives in ``ollama_registry``.
 from __future__ import annotations
 
 import json
+import platform
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -113,15 +114,38 @@ _SIDECAR_VRAM_BUDGET_RATIO = 0.85
 
 def _sidecar_native_linux_nvidia() -> bool:
     try:
-        from seiso.platform import use_linux_nvidia_inference_guards
+        from seiso.inference.backends import _native_linux_requires_isolated_gguf
 
-        return use_linux_nvidia_inference_guards()
+        return _native_linux_requires_isolated_gguf()
     except Exception:
-        return False
+        # Match native GGUF routing: if Linux detection is broken, do not fail
+        # open into an oversized sidecar allocation on a possible NVIDIA host.
+        return platform.system() == "Linux"
 
 
 def _sidecar_vram_clamp_enabled() -> bool:
     return env_bool("SEISO_SIDECAR_VRAM_CLAMP", True)
+
+
+def _sidecar_native_max_tokens(max_tokens: int) -> int:
+    if not _sidecar_native_linux_nvidia():
+        return max_tokens
+    if env_bool("SEISO_LLAMA_UNSAFE_LONG_COMPLETIONS", False):
+        return max_tokens
+    try:
+        from seiso.memory.protection import headroom_mb
+        from seiso.memory.protection.constants import (
+            _NATIVE_LINUX_LOW_HEADROOM_MAX_COMPLETION_TOKENS,
+            _NATIVE_LINUX_MAX_COMPLETION_TOKENS,
+            _NATIVE_LINUX_PREFILL_CLAMP_MB,
+        )
+
+        cap = _NATIVE_LINUX_MAX_COMPLETION_TOKENS
+        if headroom_mb() < _NATIVE_LINUX_PREFILL_CLAMP_MB:
+            cap = min(cap, _NATIVE_LINUX_LOW_HEADROOM_MAX_COMPLETION_TOKENS)
+    except Exception:
+        cap = 512
+    return max(1, min(int(max_tokens), int(cap)))
 
 
 def _sidecar_context_ceiling(payload: dict[str, Any], model_path: str) -> int:
@@ -161,6 +185,8 @@ def sidecar_vram_context_cap(model_path: str, ceiling: int) -> int:
             ceiling=ceiling,
         )
     except Exception:
+        if _sidecar_native_linux_nvidia():
+            return max(2048, min(int(ceiling), 4096))
         return ceiling
     return max(2048, min(int(ceiling), int(cap)))
 
@@ -189,11 +215,13 @@ def sidecar_ollama_num_gpu(model_path: str, *, num_ctx: int) -> int | None:
         from seiso.memory.protection import estimate_path_vram_mb, headroom_mb
         from seiso.memory.protection.llama_kv import llama_offload_fits_headroom
     except Exception:
+        if _sidecar_native_linux_nvidia():
+            return 0
         return None
 
     free_mb = int(headroom_mb())
     if free_mb <= 0:
-        return None
+        return 0
     budget = int(free_mb * _SIDECAR_VRAM_BUDGET_RATIO)
     try:
         weight_mb = int(estimate_path_vram_mb(model_path))
@@ -218,6 +246,8 @@ def sidecar_ollama_num_gpu(model_path: str, *, num_ctx: int) -> int | None:
             ):
                 return layers
     except Exception:
+        if _sidecar_native_linux_nvidia():
+            return 0
         return None
     return 0
 
@@ -265,7 +295,7 @@ def plan_sidecar_request(
     from seiso.memory.protection.chat_guards import trim_llama_messages_to_context
 
     messages = payload.get("messages") or []
-    max_tokens = int(payload.get("max_tokens", 512))
+    max_tokens = _sidecar_native_max_tokens(int(payload.get("max_tokens", 512)))
     ceiling = _sidecar_context_ceiling(payload, model_path)
     ceiling = sidecar_vram_context_cap(model_path, ceiling)
     num_ctx = sidecar_num_ctx(messages, max_tokens=max_tokens, ceiling=ceiling)
@@ -327,6 +357,7 @@ class OllamaClient:
     ) -> Iterator[StreamToken]:
         body = self._request_body(payload, model_path, stream=True)
         req = self._build_request("/api/chat", body)
+        tool_buffer = ToolCallDeltaBuffer()
         try:
             with urllib.request.urlopen(req, timeout=None) as response:
                 # Native API streams one JSON object per line (not SSE).
@@ -353,13 +384,19 @@ class OllamaClient:
                             text_content,
                             new_tokens=estimate_chunk_tokens(text_content),
                         )
-                    tool_text = tool_calls_to_text(message.get("tool_calls"))
+                    tool_text = tool_buffer.add(message.get("tool_calls"))
                     if tool_text:
                         yield StreamToken(
                             tool_text,
                             new_tokens=estimate_chunk_tokens(tool_text),
                         )
                     if chunk.get("done"):
+                        tool_text = tool_buffer.flush()
+                        if tool_text and not should_stop():
+                            yield StreamToken(
+                                tool_text,
+                                new_tokens=estimate_chunk_tokens(tool_text),
+                            )
                         break
         except urllib.error.URLError as exc:
             raise RuntimeError(

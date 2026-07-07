@@ -136,7 +136,7 @@ def _llama_n_ctx_for_payload(
             model_path=model_path,
             model_format=payload.get("model_format"),
         )
-        return min(requested, sized)
+        return sized
     return estimate_llama_n_ctx(
         messages,
         max_tokens=max_tokens,
@@ -433,6 +433,7 @@ class LocalInferenceRunner:
         """Load a model into the pool without generating (preload / ping)."""
         model_path = payload["model_path"]
         route, resolved_path = self._resolve_route(payload, model_path)
+        payload = sanitize_inference_payload(payload, isolated=route == "llamaswap")
         if route == "mlx":
             self._pool.get_mlx(resolved_path)
         elif route == "torch":
@@ -476,6 +477,7 @@ class LocalInferenceRunner:
                         model_path=resolved_path,
                         messages=messages,
                         n_ctx=n_ctx,
+                        prompt_tokens=budget.input_tokens,
                     )
             finally:
                 self._pool.release_llama_inference()
@@ -1108,6 +1110,7 @@ class LocalInferenceRunner:
         model_path: str,
         messages: list[dict[str, Any]],
         n_ctx: int,
+        prompt_tokens: int | None = None,
     ) -> Any:
         current_tier = self._llama_handle_tier(llm)
         fallback_batch, fallback_ubatch = _llama_loaded_batch_fallback()
@@ -1120,6 +1123,7 @@ class LocalInferenceRunner:
             loaded_n_gpu_layers=int(getattr(llm, "_seiso_n_gpu_layers", 0) or 0),
             load_tier=current_tier,
             loaded_headroom_mb=getattr(llm, "_seiso_load_headroom_mb", None),
+            prompt_tokens=prompt_tokens,
         )
         llm._seiso_last_safe_batch = safe_batch  # noqa: SLF001
         llm._seiso_last_safe_ubatch = safe_ubatch  # noqa: SLF001
@@ -1149,6 +1153,7 @@ class LocalInferenceRunner:
         messages: list[dict[str, Any]],
         n_ctx: int,
         stream: bool,
+        prompt_tokens: int | None = None,
     ) -> tuple[Any, dict[str, Any], list[dict[str, Any]], int]:
         """Clamp decode shape and reload before tokens when native Linux headroom is tight."""
         try:
@@ -1159,11 +1164,37 @@ class LocalInferenceRunner:
                 max_tokens=int(payload.get("max_tokens", 512)),
                 n_gpu_layers=int(getattr(llm, "_seiso_n_gpu_layers", 0) or 0),
                 load_tier=self._llama_handle_tier(llm),
-                prompt_tokens=_estimate_prompt_tokens(messages),
+                prompt_tokens=(
+                    prompt_tokens
+                    if prompt_tokens is not None
+                    else _estimate_prompt_tokens(messages)
+                ),
                 weights_resident=True,
                 stream=stream,
             )
-        except Exception:
+        except Exception as exc:
+            logger.warning(
+                "llama.cpp decode preflight failed; applying conservative fallback",
+                exc_info=True,
+            )
+            try:
+                from seiso.platform import use_linux_nvidia_inference_guards
+
+                native_linux_nvidia = use_linux_nvidia_inference_guards()
+            except Exception:
+                native_linux_nvidia = False
+            if native_linux_nvidia:
+                adjusted = dict(payload)
+                adjusted["max_tokens"] = max(
+                    1, min(int(payload.get("max_tokens", 512)), 256)
+                )
+                safe_ctx = min(int(n_ctx), 2048)
+                messages = trim_llama_messages_to_context(
+                    messages,
+                    n_ctx=safe_ctx,
+                    max_tokens=int(adjusted["max_tokens"]),
+                )
+                return llm, adjusted, messages, safe_ctx
             return llm, payload, messages, n_ctx
 
         adjusted = payload
@@ -1246,7 +1277,11 @@ class LocalInferenceRunner:
             payload = dict(payload)
             payload["max_tokens"] = budget.max_tokens
         llm = self._llama_guard_prefill(
-            llm, model_path=model_path, messages=messages, n_ctx=n_ctx
+            llm,
+            model_path=model_path,
+            messages=messages,
+            n_ctx=n_ctx,
+            prompt_tokens=budget.input_tokens,
         )
         llm, payload, messages, n_ctx = self._llama_preflight_decode(
             llm,
@@ -1255,6 +1290,7 @@ class LocalInferenceRunner:
             messages=messages,
             n_ctx=n_ctx,
             stream=False,
+            prompt_tokens=budget.input_tokens,
         )
         budget = _fit_llama_messages_to_context(
             llm,
@@ -1284,7 +1320,6 @@ class LocalInferenceRunner:
                     raise RuntimeError(
                         "llama.cpp inference OOM — recovery attempts exhausted"
                     ) from exc
-                tool_buffer = ToolCallDeltaBuffer()
                 llm = self._llama_recover_from_oom(
                     llm, model_path=model_path, n_ctx=n_ctx
                 )
@@ -1296,20 +1331,46 @@ class LocalInferenceRunner:
                         n_ctx=actual_ctx,
                         max_tokens=int(payload.get("max_tokens", 512)),
                     )
-                    budget = _fit_llama_messages_to_context(
-                        llm,
-                        messages,
-                        n_ctx=n_ctx,
-                        max_tokens=int(payload.get("max_tokens", 512)),
-                    )
-                    messages = budget.messages
-                    if budget.max_tokens != int(payload.get("max_tokens", 512)):
-                        payload = dict(payload)
-                        payload["max_tokens"] = budget.max_tokens
-                        kwargs = llama_completion_kwargs(payload)
-                        kwargs["stream"] = False
-                        if tools:
-                            kwargs["tools"] = tools
+                budget = _fit_llama_messages_to_context(
+                    llm,
+                    messages,
+                    n_ctx=n_ctx,
+                    max_tokens=int(payload.get("max_tokens", 512)),
+                )
+                messages = budget.messages
+                if budget.max_tokens != int(payload.get("max_tokens", 512)):
+                    payload = dict(payload)
+                    payload["max_tokens"] = budget.max_tokens
+                llm = self._llama_guard_prefill(
+                    llm,
+                    model_path=model_path,
+                    messages=messages,
+                    n_ctx=n_ctx,
+                    prompt_tokens=budget.input_tokens,
+                )
+                llm, payload, messages, n_ctx = self._llama_preflight_decode(
+                    llm,
+                    payload,
+                    model_path=model_path,
+                    messages=messages,
+                    n_ctx=n_ctx,
+                    stream=False,
+                    prompt_tokens=budget.input_tokens,
+                )
+                budget = _fit_llama_messages_to_context(
+                    llm,
+                    messages,
+                    n_ctx=n_ctx,
+                    max_tokens=int(payload.get("max_tokens", 512)),
+                )
+                messages = budget.messages
+                if budget.max_tokens != int(payload.get("max_tokens", 512)):
+                    payload = dict(payload)
+                    payload["max_tokens"] = budget.max_tokens
+                kwargs = llama_completion_kwargs(payload)
+                kwargs["stream"] = False
+                if tools:
+                    kwargs["tools"] = tools
         if not self._pool.is_generation_active(generation_id):
             return ""
         choices = out.get("choices") or []
@@ -1373,7 +1434,11 @@ class LocalInferenceRunner:
             payload = dict(payload)
             payload["max_tokens"] = budget.max_tokens
         llm = self._llama_guard_prefill(
-            llm, model_path=model_path, messages=messages, n_ctx=n_ctx
+            llm,
+            model_path=model_path,
+            messages=messages,
+            n_ctx=n_ctx,
+            prompt_tokens=budget.input_tokens,
         )
         llm, payload, messages, n_ctx = self._llama_preflight_decode(
             llm,
@@ -1382,6 +1447,7 @@ class LocalInferenceRunner:
             messages=messages,
             n_ctx=n_ctx,
             stream=True,
+            prompt_tokens=budget.input_tokens,
         )
         budget = _fit_llama_messages_to_context(
             llm,
@@ -1395,6 +1461,9 @@ class LocalInferenceRunner:
             payload["max_tokens"] = budget.max_tokens
 
         completion_kwargs = llama_completion_kwargs(payload)
+        tools = payload.get("tools_schemas")
+        if tools:
+            completion_kwargs["tools"] = tools
         tool_buffer = ToolCallDeltaBuffer()
         emitted_text = False
         recoveries = 0
@@ -1434,6 +1503,7 @@ class LocalInferenceRunner:
                     raise RuntimeError(
                         "llama.cpp inference OOM — recovery attempts exhausted"
                     ) from exc
+                tool_buffer = ToolCallDeltaBuffer()
                 llm = self._llama_recover_from_oom(
                     llm, model_path=model_path, n_ctx=n_ctx
                 )
@@ -1445,17 +1515,45 @@ class LocalInferenceRunner:
                         n_ctx=actual_ctx,
                         max_tokens=int(payload.get("max_tokens", 512)),
                     )
-                    budget = _fit_llama_messages_to_context(
-                        llm,
-                        messages,
-                        n_ctx=n_ctx,
-                        max_tokens=int(payload.get("max_tokens", 512)),
-                    )
-                    messages = budget.messages
-                    if budget.max_tokens != int(payload.get("max_tokens", 512)):
-                        payload = dict(payload)
-                        payload["max_tokens"] = budget.max_tokens
-                        completion_kwargs = llama_completion_kwargs(payload)
+                budget = _fit_llama_messages_to_context(
+                    llm,
+                    messages,
+                    n_ctx=n_ctx,
+                    max_tokens=int(payload.get("max_tokens", 512)),
+                )
+                messages = budget.messages
+                if budget.max_tokens != int(payload.get("max_tokens", 512)):
+                    payload = dict(payload)
+                    payload["max_tokens"] = budget.max_tokens
+                llm = self._llama_guard_prefill(
+                    llm,
+                    model_path=model_path,
+                    messages=messages,
+                    n_ctx=n_ctx,
+                    prompt_tokens=budget.input_tokens,
+                )
+                llm, payload, messages, n_ctx = self._llama_preflight_decode(
+                    llm,
+                    payload,
+                    model_path=model_path,
+                    messages=messages,
+                    n_ctx=n_ctx,
+                    stream=True,
+                    prompt_tokens=budget.input_tokens,
+                )
+                budget = _fit_llama_messages_to_context(
+                    llm,
+                    messages,
+                    n_ctx=n_ctx,
+                    max_tokens=int(payload.get("max_tokens", 512)),
+                )
+                messages = budget.messages
+                if budget.max_tokens != int(payload.get("max_tokens", 512)):
+                    payload = dict(payload)
+                    payload["max_tokens"] = budget.max_tokens
+                completion_kwargs = llama_completion_kwargs(payload)
+                if tools:
+                    completion_kwargs["tools"] = tools
 
 
 def get_inference_runner() -> LocalInferenceRunner:

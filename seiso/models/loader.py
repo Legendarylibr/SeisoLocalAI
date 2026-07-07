@@ -68,7 +68,7 @@ def detect_backend() -> Backend:
         except ImportError:
             pass
 
-    if os.environ.get("SEISO_SKIP_MLX_PROBE", "").strip().lower() not in {
+    if platform.system() == "Darwin" and os.environ.get("SEISO_SKIP_MLX_PROBE", "").strip().lower() not in {
         "1",
         "true",
         "yes",

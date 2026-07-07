@@ -61,6 +61,7 @@ def rl_quant_run(
     import uuid
 
     from forge.config import get_settings
+    from seiso.memory.gpu_task import gpu_task
     from seiso.rl_quant.runner import run_rl_quant_job
 
     settings = get_settings()
@@ -98,13 +99,14 @@ def rl_quant_run(
         + (" kernel_rl=on" if kernel_rl else "")
     )
 
-    result = run_rl_quant_job(
-        job_id=job_id,
-        user_id=user_id,
-        data_dir=settings.data_dir,
-        payload=payload,
-        on_log=lambda m: console.print(m),
-    )
+    with gpu_task("rl_quant"):
+        result = run_rl_quant_job(
+            job_id=job_id,
+            user_id=user_id,
+            data_dir=settings.data_dir,
+            payload=payload,
+            on_log=lambda m: console.print(m),
+        )
 
     if json_out:
         console.print(json.dumps(result, indent=2, default=str))
@@ -224,6 +226,7 @@ def distill_rl_run(
     import uuid
 
     from forge.config import get_settings
+    from seiso.memory.gpu_task import gpu_task
     from seiso.distill_rl.runner import run_distill_rl_job
 
     settings = get_settings()
@@ -266,13 +269,14 @@ def distill_rl_run(
         f"teacher={teacher_model or '(preset default)'} "
         f"student={student_model or '(preset default)'}"
     )
-    result = run_distill_rl_job(
-        job_id=job_id,
-        user_id="cli",
-        data_dir=settings.data_dir,
-        payload=payload,
-        on_log=lambda m: console.print(m),
-    )
+    with gpu_task("distill_rl"):
+        result = run_distill_rl_job(
+            job_id=job_id,
+            user_id="cli",
+            data_dir=settings.data_dir,
+            payload=payload,
+            on_log=lambda m: console.print(m),
+        )
     if json_out:
         console.print(json_mod.dumps(result, indent=2, default=str))
     else:
@@ -305,6 +309,7 @@ def compress_run(
 
     from forge.config import get_settings
     from seiso.compress.runner import run_compress_job
+    from seiso.memory.gpu_task import gpu_task
 
     settings = get_settings()
     job_id = f"cli-{uuid.uuid4().hex[:8]}"
@@ -325,13 +330,14 @@ def compress_run(
         payload["prune_ratio"] = prune_ratio
 
     console.print(f"[bold]Compression pipeline[/] preset={preset}")
-    result = run_compress_job(
-        job_id=job_id,
-        user_id=user_id,
-        data_dir=settings.data_dir,
-        payload=payload,
-        on_log=lambda m: console.print(m),
-    )
+    with gpu_task("compress"):
+        result = run_compress_job(
+            job_id=job_id,
+            user_id=user_id,
+            data_dir=settings.data_dir,
+            payload=payload,
+            on_log=lambda m: console.print(m),
+        )
     console.print(f"[green]Done:[/] {result.get('run_dir')}")
 
 
@@ -361,16 +367,18 @@ def compress_speculative(
 ) -> None:
     """Run speculative decoding with draft + target models."""
     from seiso.compress.bootstrap import require_codellama_compress
+    from seiso.memory.gpu_task import gpu_task
 
     require_codellama_compress()
     from seiso.codellama_compress.speculative import speculative_generate
 
-    text, stats = speculative_generate(
-        prompt=prompt,
-        target_model=target_model,
-        draft_model=draft_model,
-        max_new_tokens=max_new_tokens,
-        num_speculative_tokens=num_speculative_tokens,
-    )
+    with gpu_task("compress"):
+        text, stats = speculative_generate(
+            prompt=prompt,
+            target_model=target_model,
+            draft_model=draft_model,
+            max_new_tokens=max_new_tokens,
+            num_speculative_tokens=num_speculative_tokens,
+        )
     console.print(text)
     console.print(stats.to_dict())

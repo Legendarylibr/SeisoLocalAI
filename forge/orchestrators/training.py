@@ -80,11 +80,6 @@ class TrainingOrchestrator(Orchestrator):
             release_after_task,
         )
 
-        prepare_for_gpu_task(
-            task="training",
-            job_id=job_id,
-            log=lambda msg: self._emit_log(job_id, msg),
-        )
         config = TrainConfig.model_validate(payload["config"])
         config.output_dir = Path(
             payload.get("output_dir", self.sandbox_root / "checkpoints" / job_id)
@@ -122,6 +117,11 @@ class TrainingOrchestrator(Orchestrator):
             f"fused_kernels={config.use_triton}, fused_ce={config.use_fused_ce}",
         )
 
+        prepare_for_gpu_task(
+            task="training",
+            job_id=job_id,
+            log=lambda msg: self._emit_log(job_id, msg),
+        )
         loop = asyncio.get_running_loop()
         stop_poll = asyncio.Event()
         poll_task = asyncio.create_task(self._poll_system_metrics(job_id, stop_poll))

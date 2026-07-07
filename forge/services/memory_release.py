@@ -13,7 +13,17 @@ logger = logging.getLogger(__name__)
 LogFn = Callable[[str], None] | None
 
 _GPU_TASK_KINDS = frozenset(
-    {"training", "export", "compress", "distill_rl", "rl_quant", "download"}
+    {
+        "training",
+        "export",
+        "compress",
+        "distill_rl",
+        "rl_quant",
+        "download",
+        "experiment",
+        "inference",
+        "slime",
+    }
 )
 _GPU_TASK_LOCK = threading.RLock()
 _ACTIVE_GPU_TASKS: dict[str, dict[str, str | None]] = {}
@@ -219,6 +229,33 @@ def prepare_for_gpu_task(
 
         release_gpu_resource_lock()
         raise
+    release_notes = [str(note) for note in result.get("release_notes") or []]
+    sidecar_unload_uncertain = any(
+        "Could not confirm llama-swap external model unload" in note
+        or "Ollama unload" in note
+        for note in release_notes
+    )
+    if sidecar_unload_uncertain:
+        try:
+            from seiso.inference.backends import _native_linux_requires_isolated_gguf
+
+            native_linux_isolated = _native_linux_requires_isolated_gguf()
+        except Exception:
+            try:
+                import platform
+
+                native_linux_isolated = platform.system() == "Linux"
+            except Exception:
+                native_linux_isolated = True
+        if native_linux_isolated:
+            _unregister_gpu_task(resource_token=resource_token, job_id=job_id)
+            from seiso.memory.gpu_resource_lock import release_gpu_resource_lock
+
+            release_gpu_resource_lock()
+            raise RuntimeError(
+                "Could not confirm sidecar inference model unload; refusing to start "
+                f"{task} until Ollama/llama-swap releases GPU memory."
+            )
     result["resource_token"] = resource_token
     return result
 
@@ -230,4 +267,17 @@ def assert_gpu_available_for_inference() -> None:
         raise RuntimeError(
             f"Cannot load chat models while {', '.join(blocking)} is running. "
             "Wait for the job to finish or cancel it first."
+        )
+    try:
+        from seiso.memory.gpu_resource_lock import (
+            gpu_resource_lock_held_by_other_process,
+        )
+
+        locked_by_other = gpu_resource_lock_held_by_other_process()
+    except Exception:
+        locked_by_other = False
+    if locked_by_other:
+        raise RuntimeError(
+            "Cannot load chat models while another Seiso GPU task is running. "
+            "Wait for the task to finish before starting inference."
         )

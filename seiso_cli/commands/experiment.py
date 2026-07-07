@@ -70,6 +70,7 @@ def experiment_quant_regression(
         format_report_table,
         run_quant_regression_study,
     )
+    from seiso.memory.gpu_task import gpu_task
     from seiso.training.config import TrainConfig
 
     root = Path(__file__).resolve().parents[2]
@@ -86,24 +87,25 @@ def experiment_quant_regression(
     cfg = TrainConfig.from_yaml(cfg_path)
     settings = get_settings()
 
-    report = run_quant_regression_study(
-        cfg,
-        data_dir=settings.data_dir,
-        study_dir=Path(study_dir) if study_dir else None,
-        train_quants=[q.strip() for q in quants.split(",") if q.strip()],
-        gguf_quants=[q.strip() for q in gguf_quants.split(",") if q.strip()],
-        deploy_quants=[q.strip() for q in deploy_quants.split(",") if q.strip()],
-        measurement=rl_backend or measurement,
-        llama_cpp_binary=llama_cpp_binary,
-        llama_cpp_timeout_s=llama_cpp_timeout_s,
-        route_prompt_limit=route_prompt_limit,
-        max_eval_samples=max_eval_samples,
-        max_reward_regression=max_reward_regression,
-        max_perplexity_regression=max_perplexity_regression,
-        skip_training=skip_training,
-        skip_rl=skip_rl,
-        on_log=lambda msg: console.print(msg),
-    )
+    with gpu_task("experiment"):
+        report = run_quant_regression_study(
+            cfg,
+            data_dir=settings.data_dir,
+            study_dir=Path(study_dir) if study_dir else None,
+            train_quants=[q.strip() for q in quants.split(",") if q.strip()],
+            gguf_quants=[q.strip() for q in gguf_quants.split(",") if q.strip()],
+            deploy_quants=[q.strip() for q in deploy_quants.split(",") if q.strip()],
+            measurement=rl_backend or measurement,
+            llama_cpp_binary=llama_cpp_binary,
+            llama_cpp_timeout_s=llama_cpp_timeout_s,
+            route_prompt_limit=route_prompt_limit,
+            max_eval_samples=max_eval_samples,
+            max_reward_regression=max_reward_regression,
+            max_perplexity_regression=max_perplexity_regression,
+            skip_training=skip_training,
+            skip_rl=skip_rl,
+            on_log=lambda msg: console.print(msg),
+        )
 
     if json_out:
         console.print(json.dumps(report.to_dict(), indent=2))
