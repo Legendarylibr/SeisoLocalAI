@@ -78,6 +78,15 @@ def clamp_llama_n_ctx(
             ),
         )
     sized = bucket_llama_n_ctx(needed, ceiling=ctx_cap)
+    try:
+        native_linux_nvidia = seiso_platform.use_linux_nvidia_inference_guards()
+    except Exception:
+        native_linux_nvidia = False
+    if native_linux_nvidia and not env_bool("SEISO_LLAMA_UNSAFE_STICKY_CTX", False):
+        # On native Linux NVIDIA, a sticky oversized n_ctx keeps extra KV cache
+        # resident even after old history has been trimmed. Decay to the bucket
+        # the current prompt actually needs unless explicitly overridden.
+        return min(max(sized, _MIN_LLAMA_CTX), ctx_cap)
     return min(max(int(n_ctx), sized), ctx_cap)
 
 
