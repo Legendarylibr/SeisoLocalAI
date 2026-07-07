@@ -986,6 +986,97 @@ def test_ollama_request_body_uses_native_chat_options(monkeypatch):
     }
 
 
+def test_sidecar_vram_context_cap_passthrough_off_native_linux(monkeypatch):
+    from seiso.inference import llamaswap
+
+    monkeypatch.setattr(llamaswap, "_sidecar_native_linux_nvidia", lambda: False)
+    assert llamaswap.sidecar_vram_context_cap("/tmp/model.gguf", 131072) == 131072
+
+
+def test_sidecar_vram_context_cap_clamps_to_free_vram(monkeypatch):
+    import seiso.memory.protection as protection_mod
+    import seiso.memory.protection.llama_runtime as runtime_mod
+    from seiso.inference import llamaswap
+
+    monkeypatch.setattr(llamaswap, "_sidecar_native_linux_nvidia", lambda: True)
+    monkeypatch.setattr(protection_mod, "headroom_mb", lambda: 6000)
+    monkeypatch.setattr(
+        runtime_mod,
+        "native_linux_llama_context_cap",
+        lambda model_path, *, free_mb, n_gpu_layers, ceiling: 8192,
+    )
+
+    # KV that would fit a 131072 window is bounded to what free VRAM supports.
+    assert llamaswap.sidecar_vram_context_cap("/tmp/model.gguf", 131072) == 8192
+
+
+def test_sidecar_vram_context_cap_disabled_by_env(monkeypatch):
+    from seiso.inference import llamaswap
+
+    monkeypatch.setenv("SEISO_SIDECAR_VRAM_CLAMP", "0")
+    monkeypatch.setattr(llamaswap, "_sidecar_native_linux_nvidia", lambda: True)
+    assert llamaswap.sidecar_vram_context_cap("/tmp/model.gguf", 131072) == 131072
+
+
+def test_sidecar_ollama_num_gpu_env_override(monkeypatch):
+    from seiso.inference import llamaswap
+
+    monkeypatch.setenv("SEISO_OLLAMA_NUM_GPU", "12")
+    # Explicit override wins even off native Linux.
+    monkeypatch.setattr(llamaswap, "_sidecar_native_linux_nvidia", lambda: False)
+    assert llamaswap.sidecar_ollama_num_gpu("/tmp/model.gguf", num_ctx=4096) == 12
+
+
+def test_sidecar_ollama_num_gpu_none_off_native_linux(monkeypatch):
+    from seiso.inference import llamaswap
+
+    monkeypatch.delenv("SEISO_OLLAMA_NUM_GPU", raising=False)
+    monkeypatch.setattr(llamaswap, "_sidecar_native_linux_nvidia", lambda: False)
+    assert llamaswap.sidecar_ollama_num_gpu("/tmp/model.gguf", num_ctx=4096) is None
+
+
+def test_sidecar_ollama_num_gpu_full_offload_returns_none(monkeypatch):
+    import seiso.inference.backends as backends_mod
+    import seiso.memory.protection as protection_mod
+    import seiso.memory.protection.llama_kv as kv_mod
+    from seiso.inference import llamaswap
+
+    monkeypatch.delenv("SEISO_OLLAMA_NUM_GPU", raising=False)
+    monkeypatch.setattr(llamaswap, "_sidecar_native_linux_nvidia", lambda: True)
+    monkeypatch.setattr(protection_mod, "headroom_mb", lambda: 24000)
+    monkeypatch.setattr(protection_mod, "estimate_path_vram_mb", lambda p: 4000)
+    monkeypatch.setattr(backends_mod, "gguf_total_layers", lambda p: 32)
+    # Full offload (-1) fits comfortably.
+    monkeypatch.setattr(
+        kv_mod,
+        "llama_offload_fits_headroom",
+        lambda model_path, *, headroom_mb, n_gpu_layers, n_ctx, weight_mb, total_layers: True,
+    )
+    assert llamaswap.sidecar_ollama_num_gpu("/tmp/model.gguf", num_ctx=4096) is None
+
+
+def test_sidecar_ollama_num_gpu_partial_offload(monkeypatch):
+    import seiso.inference.backends as backends_mod
+    import seiso.memory.protection as protection_mod
+    import seiso.memory.protection.llama_kv as kv_mod
+    from seiso.inference import llamaswap
+
+    monkeypatch.delenv("SEISO_OLLAMA_NUM_GPU", raising=False)
+    monkeypatch.setattr(llamaswap, "_sidecar_native_linux_nvidia", lambda: True)
+    monkeypatch.setattr(protection_mod, "headroom_mb", lambda: 4000)
+    monkeypatch.setattr(protection_mod, "estimate_path_vram_mb", lambda p: 8000)
+    monkeypatch.setattr(backends_mod, "gguf_total_layers", lambda p: 32)
+
+    # Only <= 16 layers fit in the reduced free-VRAM budget; full offload OOMs.
+    def _fits(model_path, *, headroom_mb, n_gpu_layers, n_ctx, weight_mb, total_layers):
+        if n_gpu_layers == -1:
+            return False
+        return n_gpu_layers <= 16
+
+    monkeypatch.setattr(kv_mod, "llama_offload_fits_headroom", _fits)
+    assert llamaswap.sidecar_ollama_num_gpu("/tmp/model.gguf", num_ctx=4096) == 16
+
+
 class _FakeStreamResponse:
     def __init__(self, lines):
         self._lines = lines
