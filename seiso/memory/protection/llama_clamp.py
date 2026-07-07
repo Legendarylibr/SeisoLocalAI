@@ -20,10 +20,7 @@ from seiso.memory.protection.constants import (
     _MIN_LLAMA_CTX,
     _NATIVE_LINUX_CTX_BUCKETS,
 )
-from seiso.memory.protection.llama_batch import (
-    clamp_llama_batch_pair,
-    roomy_native_linux_batch_floor,
-)
+from seiso.memory.protection.llama_batch import clamp_llama_batch_pair
 from seiso.memory.protection.llama_kv import _host_os_reserve_mb
 from seiso.memory.protection.llama_runtime import (
     llama_host_batch_headroom_mb,
@@ -139,21 +136,6 @@ def clamp_llama_load_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
                 native_linux_nvidia=native_linux_nvidia,
             )
             batch_headroom = max_batch
-        if native_linux_nvidia and not tight and n_gpu_layers != 0:
-            gpu_total = protection().discrete_gpu_total_mb()
-            floor = roomy_native_linux_batch_floor(
-                model_path=model_path,
-                free_mb=free_mb,
-                gpu_total_mb=gpu_total,
-                n_gpu_layers=n_gpu_layers,
-                load_tier="normal",
-                tight=tight,
-            )
-            if floor is not None:
-                tier_batch, tier_ubatch = floor
-                max_batch = max(max_batch, tier_batch)
-                max_ubatch = max(max_ubatch, min(tier_ubatch, max_batch))
-                batch_headroom = max(batch_headroom, max_batch)
         if native_linux_nvidia and _gguf_has_mmproj_sibling(model_path):
             batch_headroom = max(_MIN_LLAMA_BATCH * 2, batch_headroom - 512)
             max_batch = min(max_batch, batch_headroom)

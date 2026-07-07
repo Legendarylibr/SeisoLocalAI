@@ -508,9 +508,12 @@ def llama_load_kwargs(n_ctx: int, *, model_path: str | None = None) -> dict[str,
         n_gpu_layers = 0
 
     batch_default, ubatch_default = _llama_batch_defaults(model_path)
-
-    n_batch = env_int("SEISO_LLAMA_BATCH", batch_default)
-    n_ubatch = min(env_int("SEISO_LLAMA_UBATCH", min(n_batch, ubatch_default)), n_batch)
+    if _mp()._native_linux_nvidia():
+        n_batch = batch_default
+        n_ubatch = min(batch_default, ubatch_default)
+    else:
+        n_batch = env_int("SEISO_LLAMA_BATCH", batch_default)
+        n_ubatch = min(env_int("SEISO_LLAMA_UBATCH", min(n_batch, ubatch_default)), n_batch)
     kwargs: dict[str, Any] = {
         "n_ctx": n_ctx,
         "n_threads": n_threads,

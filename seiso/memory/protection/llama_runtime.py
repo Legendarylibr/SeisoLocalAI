@@ -26,7 +26,6 @@ from seiso.memory.protection.constants import (
 from seiso.memory.protection.llama_batch import (
     clamp_llama_batch_pair,
     resolve_llama_batch_limits,
-    roomy_native_linux_batch_floor,
     tight_batch_caps,
 )
 from seiso.memory.protection.llama_kv import (
@@ -399,19 +398,6 @@ def llama_load_profile_ladder(
         tight=tight,
         gpu_total_mb=gpu_total if native_linux_nvidia else None,
     )
-    if native_linux_nvidia:
-        floor = roomy_native_linux_batch_floor(
-            model_path=model_path,
-            free_mb=free_mb,
-            gpu_total_mb=gpu_total,
-            n_gpu_layers=n_gpu_layers,
-            load_tier=tier,
-            tight=tight,
-        )
-        if floor is not None:
-            tier_batch, tier_ubatch = floor
-            base_batch = max(base_batch, tier_batch)
-            base_ubatch = max(base_ubatch, min(tier_ubatch, base_batch))
 
     steps: list[tuple[int, int, int | None, bool]] = []
     native_flash_ok = not native_linux_nvidia or env_bool("SEISO_LLAMA_UNSAFE_FLASH_ATTN", False)
