@@ -33,6 +33,8 @@ _TIMING_RE = re.compile(
     rf"(?P<throughput>{_NUMBER_RE})\s*tok/s",
     re.IGNORECASE,
 )
+_NATIVE_LINUX_DIRECT_LLAMA_CTX = 2048
+_NATIVE_LINUX_DIRECT_LLAMA_TOKENS = 256
 
 
 def extract_numeric(text: str, marker: str, default: float) -> float:
@@ -117,6 +119,29 @@ def _output_excerpt(text: str, *, limit: int = 240) -> str:
     return compact[: limit - 3] + "..."
 
 
+def _native_linux_requires_safe_llama_cpp() -> bool:
+    try:
+        from seiso.inference.backends import _native_linux_requires_isolated_gguf
+
+        return _native_linux_requires_isolated_gguf()
+    except Exception:
+        import platform
+
+        return platform.system() == "Linux"
+
+
+def _direct_llama_cpp_args(
+    *, ngl: int, context: int, tokens: int
+) -> tuple[int, int, int]:
+    if not _native_linux_requires_safe_llama_cpp():
+        return int(ngl), int(context), int(tokens)
+    return (
+        0,
+        max(512, min(int(context), _NATIVE_LINUX_DIRECT_LLAMA_CTX)),
+        max(1, min(int(tokens), _NATIVE_LINUX_DIRECT_LLAMA_TOKENS)),
+    )
+
+
 def extract_llama_cpp_generated_text(raw_output: str, *, prompt_text: str = "") -> str:
     """Best-effort extraction of generated text from llama.cpp stdout/stderr."""
     kept_lines: list[str] = []
@@ -195,6 +220,11 @@ def _llama_cpp_command(
     max_chars = int(config.llama_cpp_max_prompt_chars)
     if max_chars > 0 and len(prompt_text) > max_chars:
         prompt_text = prompt_text[:max_chars]
+    ngl, context, tokens = _direct_llama_cpp_args(
+        ngl=ngl,
+        context=int(config.llama_cpp_context),
+        tokens=int(config.llama_cpp_generate_tokens),
+    )
     return [
         llama_cpp_binary,
         "-m",
@@ -206,9 +236,9 @@ def _llama_cpp_command(
         "-t",
         str(config.llama_cpp_threads),
         "-c",
-        str(config.llama_cpp_context),
+        str(context),
         "-n",
-        str(config.llama_cpp_generate_tokens),
+        str(tokens),
         "-st",
     ]
 

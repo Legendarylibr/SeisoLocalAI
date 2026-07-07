@@ -97,6 +97,31 @@ def release_gpu_resource_lock() -> None:
         handle.close()
 
 
+def gpu_resource_lock_held_by_other_process() -> bool:
+    """Return True when another process owns the shared GPU lock."""
+    with _guard:
+        if _depth > 0:
+            return False
+    if fcntl is None:
+        return False
+    path = _lock_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        handle = path.open("a+")
+    except OSError:
+        fallback = Path(tempfile.gettempdir()) / "seiso-gpu-resource.lock"
+        handle = fallback.open("a+")
+    try:
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return True
+        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        return False
+    finally:
+        handle.close()
+
+
 @contextmanager
 def gpu_resource_lock() -> Iterator[None]:
     acquire_gpu_resource_lock()

@@ -22,9 +22,10 @@ def gpu_task(task: str) -> Iterator[None]:
         try:
             from seiso.inference.model_pool import get_model_pool
 
-            get_model_pool().cancel_and_unload()
+            get_model_pool().prepare_for_load()
         except Exception:
             logger.debug("Failed to unload inference before %s", task, exc_info=True)
+            raise
         from seiso.memory.protection import release_cached_memory
 
         release_cached_memory(sync=True)

@@ -232,6 +232,8 @@ def _build_local_option(
         opt["install_hints"] = [
             hint for hint in runtime.install_hints if "llama" in hint.lower()
         ] or ["Start Ollama or llama-swap for GGUF chat"]
+    if profile:
+        opt.update(assess_inference_option_fit(opt, profile))
     if not backends:
         note = _no_backend_status_note(model_format, opt.get("install_hints") or [])
         opt.update(
@@ -242,10 +244,11 @@ def _build_local_option(
                 "hardware_note": note,
                 "memory_load_blocked": True,
                 "memory_load_blocked_reason": note,
+                "hardware_fit": "unavailable",
+                "hardware_fit_label": "Backend unavailable",
+                "hardware_fit_rank": -1,
             }
         )
-    if profile:
-        opt.update(assess_inference_option_fit(opt, profile))
     return opt
 
 

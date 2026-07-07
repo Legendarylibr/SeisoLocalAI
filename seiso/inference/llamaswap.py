@@ -215,6 +215,8 @@ def sidecar_ollama_num_gpu(model_path: str, *, num_ctx: int) -> int | None:
         from seiso.memory.protection import estimate_path_vram_mb, headroom_mb
         from seiso.memory.protection.llama_kv import llama_offload_fits_headroom
     except Exception:
+        if _sidecar_native_linux_nvidia():
+            return 0
         return None
 
     free_mb = int(headroom_mb())
@@ -355,6 +357,7 @@ class OllamaClient:
     ) -> Iterator[StreamToken]:
         body = self._request_body(payload, model_path, stream=True)
         req = self._build_request("/api/chat", body)
+        tool_buffer = ToolCallDeltaBuffer()
         try:
             with urllib.request.urlopen(req, timeout=None) as response:
                 # Native API streams one JSON object per line (not SSE).
@@ -381,13 +384,19 @@ class OllamaClient:
                             text_content,
                             new_tokens=estimate_chunk_tokens(text_content),
                         )
-                    tool_text = tool_calls_to_text(message.get("tool_calls"))
+                    tool_text = tool_buffer.add(message.get("tool_calls"))
                     if tool_text:
                         yield StreamToken(
                             tool_text,
                             new_tokens=estimate_chunk_tokens(tool_text),
                         )
                     if chunk.get("done"):
+                        tool_text = tool_buffer.flush()
+                        if tool_text and not should_stop():
+                            yield StreamToken(
+                                tool_text,
+                                new_tokens=estimate_chunk_tokens(tool_text),
+                            )
                         break
         except urllib.error.URLError as exc:
             raise RuntimeError(

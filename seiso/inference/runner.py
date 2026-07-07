@@ -477,6 +477,7 @@ class LocalInferenceRunner:
                         model_path=resolved_path,
                         messages=messages,
                         n_ctx=n_ctx,
+                        prompt_tokens=budget.input_tokens,
                     )
             finally:
                 self._pool.release_llama_inference()
@@ -1502,6 +1503,7 @@ class LocalInferenceRunner:
                     raise RuntimeError(
                         "llama.cpp inference OOM — recovery attempts exhausted"
                     ) from exc
+                tool_buffer = ToolCallDeltaBuffer()
                 llm = self._llama_recover_from_oom(
                     llm, model_path=model_path, n_ctx=n_ctx
                 )
