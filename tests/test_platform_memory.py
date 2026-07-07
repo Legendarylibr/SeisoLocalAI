@@ -45,7 +45,7 @@ def test_native_linux_nvidia_llama_batch_caps_unknown_total_low_steps_down():
     )
 
     assert batch == 64
-    assert ubatch == 64
+    assert ubatch == 32
     assert cache == 256
 
 

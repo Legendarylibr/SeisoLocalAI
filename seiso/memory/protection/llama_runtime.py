@@ -391,6 +391,8 @@ def llama_load_profile_ladder(
     if apply_headroom_cap:
         base_batch = min(int(base_batch), top_batch)
         base_ubatch = min(int(base_ubatch), top_ubatch)
+    requested_batch = int(base_batch)
+    requested_ubatch = int(base_ubatch)
     base_batch, base_ubatch = clamp_llama_batch_pair(
         base_batch,
         base_ubatch,
@@ -399,6 +401,9 @@ def llama_load_profile_ladder(
         tight=tight,
         gpu_total_mb=gpu_total if native_linux_nvidia else None,
     )
+    if native_linux_nvidia and tier != "normal":
+        base_batch = min(base_batch, requested_batch)
+        base_ubatch = min(base_ubatch, requested_ubatch, base_batch)
 
     steps: list[tuple[int, int, int | None, bool]] = []
     native_flash_ok = not native_linux_nvidia or env_bool("SEISO_LLAMA_UNSAFE_FLASH_ATTN", False)
