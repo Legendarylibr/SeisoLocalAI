@@ -184,6 +184,15 @@ def attach_llama_prompt_cache(llm: Any, *, model_path: str | None = None) -> Non
     """Enable RAM prefix cache for multi-turn / repeated prompts."""
     if not env_bool("SEISO_LLAMA_PROMPT_CACHE", True):
         return
+    try:
+        from seiso.platform import use_linux_nvidia_inference_guards
+
+        if use_linux_nvidia_inference_guards() and not env_bool(
+            "SEISO_LLAMA_UNSAFE_PROMPT_CACHE", False
+        ):
+            return
+    except Exception:
+        pass
     if getattr(llm, "_seiso_cache_attached", False):
         return
     try:

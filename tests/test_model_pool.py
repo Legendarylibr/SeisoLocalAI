@@ -820,6 +820,54 @@ def test_llama_load_kwargs_cuda_defaults(monkeypatch):
     assert kwargs["op_offload"] is True
 
 
+def test_attach_llama_prompt_cache_skips_native_linux_without_unsafe_opt_in(monkeypatch):
+    from seiso.inference.tuning import attach_llama_prompt_cache
+
+    class FakeLlama:
+        def __init__(self) -> None:
+            self.cache_attached = False
+
+        def set_cache(self, _cache) -> None:
+            self.cache_attached = True
+
+    monkeypatch.setattr("seiso.platform.use_linux_nvidia_inference_guards", lambda **_: True)
+    monkeypatch.setitem(
+        __import__("sys").modules,
+        "llama_cpp",
+        type("LlamaCpp", (), {"LlamaRAMCache": lambda **_kwargs: object()}),
+    )
+
+    llm = FakeLlama()
+    attach_llama_prompt_cache(llm)
+
+    assert llm.cache_attached is False
+
+
+def test_attach_llama_prompt_cache_native_linux_unsafe_opt_in(monkeypatch):
+    from seiso.inference.tuning import attach_llama_prompt_cache
+
+    class FakeLlama:
+        def __init__(self) -> None:
+            self.cache_attached = False
+
+        def set_cache(self, _cache) -> None:
+            self.cache_attached = True
+
+    monkeypatch.setenv("SEISO_LLAMA_UNSAFE_PROMPT_CACHE", "1")
+    monkeypatch.setenv("SEISO_LLAMA_CACHE_MB", "128")
+    monkeypatch.setattr("seiso.platform.use_linux_nvidia_inference_guards", lambda **_: True)
+    monkeypatch.setitem(
+        __import__("sys").modules,
+        "llama_cpp",
+        type("LlamaCpp", (), {"LlamaRAMCache": lambda **_kwargs: object()}),
+    )
+
+    llm = FakeLlama()
+    attach_llama_prompt_cache(llm)
+
+    assert llm.cache_attached is True
+
+
 def test_llama_load_kwargs_native_linux_nvidia_defaults(monkeypatch):
     for key in list(os.environ):
         if key.startswith("SEISO_LLAMA_"):
@@ -841,6 +889,30 @@ def test_llama_load_kwargs_native_linux_nvidia_defaults(monkeypatch):
     assert kwargs["n_batch"] == expected_batch
     assert kwargs["n_ubatch"] == expected_ubatch
     assert "flash_attn" not in kwargs
+    assert kwargs["offload_kqv"] is False
+    assert "op_offload" not in kwargs
+
+
+def test_llama_load_kwargs_native_linux_unsafe_offloads_opt_in(monkeypatch):
+    for key in list(os.environ):
+        if key.startswith("SEISO_LLAMA_"):
+            monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("SEISO_LLAMA_UNSAFE_KQV_OFFLOAD", "1")
+    monkeypatch.setenv("SEISO_LLAMA_UNSAFE_OP_OFFLOAD", "1")
+    monkeypatch.setattr(platform, "system", lambda: "Linux")
+    monkeypatch.setattr("seiso.inference.model_pool._cuda_available", lambda: True)
+    monkeypatch.setattr("seiso.inference.model_pool._llama_gpu_offload_ok", lambda: True)
+    monkeypatch.setattr("seiso.inference.model_pool._native_linux_nvidia", lambda: True)
+    monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: True)
+    monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 24576)
+    monkeypatch.setattr("seiso.memory.protection.estimate_path_vram_mb", lambda _p: 1024)
+    monkeypatch.setattr("seiso.inference.backends.gguf_block_count", lambda _p: 32)
+    monkeypatch.setattr("seiso.memory.protection.discrete_gpu_total_mb", lambda _p=None: 24576)
+
+    kwargs = llama_load_kwargs(4096, model_path="/tmp/model.gguf")
+
+    assert kwargs["offload_kqv"] is True
+    assert kwargs["op_offload"] is True
 
 
 def test_llama_load_kwargs_native_linux_ignores_batch_env(monkeypatch):

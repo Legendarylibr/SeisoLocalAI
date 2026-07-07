@@ -514,6 +514,10 @@ def llama_load_kwargs(n_ctx: int, *, model_path: str | None = None) -> dict[str,
     else:
         n_batch = env_int("SEISO_LLAMA_BATCH", batch_default)
         n_ubatch = min(env_int("SEISO_LLAMA_UBATCH", min(n_batch, ubatch_default)), n_batch)
+    native_linux_nvidia = _mp()._native_linux_nvidia()
+    native_offload_kqv = n_gpu_layers != 0 and env_bool(
+        "SEISO_LLAMA_UNSAFE_KQV_OFFLOAD", False
+    )
     kwargs: dict[str, Any] = {
         "n_ctx": n_ctx,
         "n_threads": n_threads,
@@ -527,16 +531,22 @@ def llama_load_kwargs(n_ctx: int, *, model_path: str | None = None) -> dict[str,
         "use_mmap": env_bool("SEISO_LLAMA_USE_MMAP", True),
         "use_mlock": env_bool("SEISO_LLAMA_USE_MLOCK", False),
         "verbose": env_bool("SEISO_LLAMA_VERBOSE", False),
-        "offload_kqv": env_bool("SEISO_LLAMA_OFFLOAD_KQV", n_gpu_layers != 0),
+        "offload_kqv": (
+            native_offload_kqv
+            if native_linux_nvidia
+            else env_bool("SEISO_LLAMA_OFFLOAD_KQV", n_gpu_layers != 0)
+        ),
         "no_perf": env_bool("SEISO_LLAMA_NO_PERF", True),
     }
-    if n_gpu_layers != 0:
+    if n_gpu_layers != 0 and (
+        not native_linux_nvidia or env_bool("SEISO_LLAMA_UNSAFE_OP_OFFLOAD", False)
+    ):
         kwargs["op_offload"] = env_bool("SEISO_LLAMA_OP_OFFLOAD", True)
     if n_gpu_layers != 0 and _default_llama_flash_attn(model_path):
         kwargs["flash_attn"] = True
     if model_path:
         kwargs["_model_path"] = model_path
-        kwargs["_native_linux_nvidia"] = _mp()._native_linux_nvidia()
+        kwargs["_native_linux_nvidia"] = native_linux_nvidia
     return _prot().clamp_llama_load_kwargs(kwargs)
 
 

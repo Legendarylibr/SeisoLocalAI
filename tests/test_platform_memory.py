@@ -207,6 +207,7 @@ def test_platform_profile_linux_nvidia_uses_gpu_layers(monkeypatch):
 
     expected_batch, expected_ubatch, expected_cache = _expected_native_caps(24576)
     assert os.environ["SEISO_LLAMA_GPU_LAYERS"] == "-1"
+    assert os.environ["SEISO_LLAMA_PROMPT_CACHE"] == "false"
     assert os.environ["SEISO_LLAMA_BATCH"] == str(expected_batch)
     assert os.environ["SEISO_LLAMA_UBATCH"] == str(expected_ubatch)
     assert os.environ["SEISO_LLAMA_CACHE_MB"] == str(min(2048, expected_cache))

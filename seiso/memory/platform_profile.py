@@ -97,7 +97,6 @@ def apply_platform_memory_profile(
     os.environ.setdefault("SEISO_LLAMA_USE_MLOCK", "false")
     os.environ.setdefault("SEISO_LLAMA_NO_PERF", "true")
 
-    os.environ.setdefault("SEISO_LLAMA_PROMPT_CACHE", "true")
     cache_mb = "2048" if tier == HardwareTier.WORKSTATION and ram_gb >= 32 else "1024"
     native_linux_nvidia = False
     if system == "Linux":
@@ -107,6 +106,10 @@ def apply_platform_memory_profile(
             native_linux_nvidia = is_native_linux_nvidia(profile=profile)
         except ImportError:
             pass
+    os.environ.setdefault(
+        "SEISO_LLAMA_PROMPT_CACHE",
+        "false" if native_linux_nvidia else "true",
+    )
     # Native Linux sets cache from batch_caps once below; avoid a second, looser cap.
     if not native_linux_nvidia:
         os.environ.setdefault("SEISO_LLAMA_CACHE_MB", cache_mb)
