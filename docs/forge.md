@@ -93,7 +93,7 @@ For production behind a reverse proxy, terminate TLS upstream and run **one** Fo
 |------|------|---------|
 | `/` | Dashboard | Workspace overview and quick links |
 | `/hub` | Model Hub | Browse and download catalog models |
-| `/chat` | Chat | Local inference (GGUF, MLX, PyTorch); **Free memory** unloads models from RAM/VRAM without changing selection |
+| `/chat` | Chat | Local inference (GGUF, MLX, PyTorch); native Linux NVIDIA GGUF uses llama-swap sidecar by default; **Free memory** unloads models from RAM/VRAM without changing selection |
 | `/train` | Training Studio | LoRA / QLoRA fine-tuning with live SSE logs |
 | `/export` | Export | Merge LoRA, GGUF, Hub publish from checkpoints |
 | `/compress` | Compress | LLM distillation / prune (Llama-family) / quant pipeline |
@@ -188,6 +188,9 @@ Copy `.env.example` to `.env` in the repo root. Key settings:
 | `SEISO_RATE_LIMIT` | `120` | Requests/minute per IP (≥240 on localhost) |
 | `SEISO_SESSION_HOURS` | `24` | Signed session lifetime |
 | `SEISO_MEMORY_PROFILE` | — | Set to `low` for lean RAM / llama.cpp tuning (see `.env.example`) |
+| `SEISO_SIDECAR_AUTOSTART` | `1` | `start` auto-starts Ollama/llama-swap before Forge when needed |
+| `SEISO_LLAMASWAP_ENGINE` | auto | Sidecar engine override: `ollama` or `llamacpp` |
+| `SEISO_LLAMA_ALLOW_INPROCESS_NATIVE_LINUX` | off | Explicitly allow unsafe in-process llama.cpp on native Linux NVIDIA |
 | `SEISO_MODEL_ROUTER_ENABLED` | `false` | Enable Smart Router model in Chat |
 | `SEISO_MODEL_ROUTER_URL` | — | Router base URL (e.g. `http://127.0.0.1:8780`) |
 

@@ -19,7 +19,7 @@ _UNTRUSTED_ROLES = frozenset({"tool", "function", "system", "developer"})
 _DEFAULT_CONTEXT_CHAR_BUDGET = 24_000
 # Native Linux NVIDIA multi-turn chats OOM more easily as history grows;
 # keep a tighter default so prefill stays within safe VRAM.
-_NATIVE_LINUX_CONTEXT_CHAR_BUDGET = 12_000
+_NATIVE_LINUX_CONTEXT_CHAR_BUDGET = 8_000
 _DEFAULT_DECAY_HALF_LIFE_SECONDS = 3600.0
 _DEFAULT_DECAY_MIN_WEIGHT = 0.05
 _OMISSION_MARKER = "[...older content omitted...]\n"

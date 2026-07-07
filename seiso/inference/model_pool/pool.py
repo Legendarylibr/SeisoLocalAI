@@ -61,6 +61,7 @@ class ModelPool:
         self._inference_refs = 0
         self._unload_pending = False
         self._llama_infer_lock = threading.RLock()
+        self._release_notes: list[str] = []
 
     @classmethod
     def get(cls) -> ModelPool:
@@ -82,6 +83,12 @@ class ModelPool:
 
     def has_active_inference(self) -> bool:
         return self.active_inference_refs > 0
+
+    def drain_release_notes(self) -> list[str]:
+        with self._lock:
+            notes = list(self._release_notes)
+            self._release_notes.clear()
+        return notes
 
     @staticmethod
     def normalize_path(model_path: str) -> str:
@@ -164,6 +171,21 @@ class ModelPool:
             del llm
 
         elif backend == BackendKind.LLAMASWAP:
+            model_path = active.meta.get("path") or active.meta.get("norm_path")
+            release = getattr(handle, "release_external_memory", None)
+            if callable(release):
+                ok, reason = release(str(model_path) if model_path else None)
+                if ok:
+                    note = "Released llama-swap managed model processes"
+                    logger.info(note)
+                else:
+                    note = (
+                        "Could not confirm llama-swap external model unload"
+                        + (f": {reason}" if reason else "")
+                    )
+                    logger.warning(note)
+                with self._lock:
+                    self._release_notes.append(note)
             del handle
 
         elif backend == BackendKind.TORCH:
@@ -502,17 +524,23 @@ class ModelPool:
         def loader(_path: str):
             from seiso.inference.llamaswap import LlamaSwapClient
 
-            return LlamaSwapClient()
+            client = LlamaSwapClient()
+            client.ensure_ready()
+            return client
 
         norm = self.normalize_path(model_path)
         key = f"llamaswap:{norm}"
-        return self.switch(
+        client = self.switch(
             model_path,
             BackendKind.LLAMASWAP,
             loader,
             cache_key=key,
             meta={"sidecar": True},
         )
+        ensure_ready = getattr(client, "ensure_ready", None)
+        if callable(ensure_ready):
+            ensure_ready()
+        return client
 
     def get_mlx(self, model_path: str) -> tuple[Any, Any]:
         def loader(path: str):
@@ -636,6 +664,7 @@ class ModelPool:
                 "backend": active.backend.value if active else None,
                 "path": active.meta.get("path") if active else None,
                 "draft_path": active.meta.get("draft_path") if active else None,
+                "release_notes": list(self._release_notes),
             }
 
 

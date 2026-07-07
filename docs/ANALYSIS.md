@@ -17,7 +17,7 @@ Seiso is a **mature, ambitious local-first AI workspace** (GPL-3.0) that combine
 - Strong emphasis on **privacy, hardware optimization, reproducibility, and security sandboxing**.
 
 **Core workflows supported end-to-end:**
-- Model discovery (HF Hub GGUF catalog) + download + chat (llama.cpp / MLX / PyTorch).
+- Model discovery (HF Hub GGUF catalog) + download + chat (llama-swap / llama.cpp / MLX / PyTorch).
 - QLoRA / LoRA / full fine-tuning with live metrics/SSE.
 - Export (LoRA merge, GGUF multi-quant, Hub publish + model cards).
 - Advanced research pipelines: LLM compression (distill + optional prune + FT + quant), Distill-RL (KL + DPO), RL quantization (adaptive + optional kernel policy co-training).
@@ -57,7 +57,7 @@ User
 ### Job & Orchestration Model
 - `forge/orchestrators/base.py`: `Orchestrator` ABC, `JobRecord`, status, SSE log/metrics queues, cancellation, subprocess tracking.
 - Feature orchestrators (thin wrappers around core `run_*_job` or direct calls).
-- Memory release hooks before/after GPU tasks.
+- Shared resource-aware memory hooks before/after GPU-heavy tasks, including inference unload and download/task blocking.
 - Results/artifacts written under user-scoped paths in `SEISO_DATA_DIR` (default `~/.seiso`).
 
 ### Data & Paths
@@ -75,7 +75,7 @@ User
 - **Kernels**: CUDA/Triton/PyTorch dispatch + monkey-patch lifecycle (restore guaranteed).
 - **Security**: JWT auth + onboarding, CSRF, rate limit, CSP (nonce), URL policy, token revocation, nvidia boundary reporting, path sandbox.
 - **Repro**: Manifests (hash chained via bundled replay), provenance, seeds, snapshots.
-- **Inference**: Model pool with unload, backends auto-select, speculative, context limits, external router client mode.
+- **Inference**: Model pool with unload, native Linux sidecar isolation, backends auto-select, speculative, context limits, external router client mode.
 
 Entry points: `start` script, `seiso` CLI (`forge`, `train`, `chat`, `export`, `compress`, `distill-rl`, `rl-quant`, `experiment`, …), `forge.main:create_app`, `seiso-train-worker`, `seiso-bench-kernels`.
 
@@ -84,7 +84,7 @@ Entry points: `start` script, `seiso` CLI (`forge`, `train`, `chat`, `export`, `
 ## Feature Deep Dives (with pointers)
 
 ### Inference & Chat
-- Backends: llama.cpp (GGUF primary), MLX (macOS), PyTorch.
+- Backends: llama-swap sidecar for native Linux NVIDIA GGUF, llama.cpp for CPU/macOS/explicit override, MLX (macOS), PyTorch.
 - `seiso/inference/{runner,backends,model_pool,speculative,tuning}.py`
 - Forge: `forge/api/routes/inference.py`, services (inference_models, model_pool, llamacpp_runtime).
 - UI: ChatPage.tsx (model picker, context bar, streaming, router status, memory free).

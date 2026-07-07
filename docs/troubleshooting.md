@@ -5,13 +5,26 @@
 **Symptom:** Chat or Hub blocks a model, or load fails with an out-of-memory error.
 
 **Fix:**
-1. Click **Free memory** in Chat or Model Hub (unloads llama.cpp / MLX / PyTorch from RAM — does not delete `hf_cache/` files).
+1. Click **Free memory** in Chat or Model Hub (unloads llama.cpp / MLX / PyTorch from RAM; with llama-swap it also asks the sidecar to unload running model processes — downloaded `hf_cache/` files are kept).
 2. Close other memory-heavy apps (browsers, other LLM tools).
 3. Pick a smaller model or more aggressive quant (Q4_K_M, Q4_0).
 4. On Mac ≤24 GB, prefer **llama.cpp + GGUF**; use MLX only when headroom is ample.
 5. Optional escape hatch: `SEISO_ALLOW_MEMORY_OVERCOMMIT=1` (not recommended).
 
 See [inference/backends.md](inference/backends.md#memory-management) for RAM-tier guidance.
+
+## Native Linux GGUF chat says llama-swap is required
+
+**Symptom:** Chat fails with setup guidance for `llama-swap`, Ollama, or `SEISO_LLAMA_ALLOW_INPROCESS_NATIVE_LINUX=1`.
+
+**Cause:** On native Linux NVIDIA, Seiso does not silently fall back to in-process llama.cpp because CUDA failures there can kill Forge. The safe default is an isolated sidecar.
+
+**Fix:**
+1. Run `start` so Seiso can auto-start installed sidecars.
+2. Install/start Ollama if you want the preferred Linux NVIDIA engine.
+3. Install/start `llama-swap` and set `SEISO_LLAMASWAP_URL=http://127.0.0.1:8080` if it is not on the default URL.
+4. Set `SEISO_LLAMASWAP_ENGINE=llamacpp` to use llama-swap-managed llama.cpp instead of Ollama.
+5. Only set `SEISO_LLAMA_ALLOW_INPROCESS_NATIVE_LINUX=1` if you accept that an in-process llama.cpp crash can stop Forge.
 
 ## CUDA kernels fail to compile
 

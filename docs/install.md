@@ -102,7 +102,7 @@ bash start
 
 1. **Clones** Seiso to `$HOME/Seiso` on Linux/macOS/WSL (override with `SEISO_INSTALL_DIR`; Windows uses manual clone — see below)
 2. **Creates** a Python virtualenv at `.venv`
-3. **Installs** platform extras automatically (includes GGUF chat via `llamacpp`):
+3. **Installs** platform extras automatically (includes GGUF support; native Linux NVIDIA uses a sidecar by default):
    - **Linux + NVIDIA** (`nvidia-smi` detected) → `[forge,train,cuda,llamacpp,dev]`
    - **Linux (no NVIDIA)** → `[forge,train,llamacpp,dev]`
    - **macOS** → `[forge,train,llamacpp,dev]` (optional: `[mlx]` for safetensors)
@@ -127,6 +127,9 @@ bash start
 | `SEISO_FAST_INSTALL=1` | off | Forge + GGUF chat only — skip PyTorch/training extras (same as `SEISO_INSTALL_PROFILE=chat`) |
 | `SEISO_INSTALL_PROFILE` | auto | Target stack: `linux-nvidia`, `linux-cpu`, `linux-rocm`, `wsl-nvidia`, `macos`, `chat` |
 | `SEISO_INSTALL_EXTRAS` | auto | Override pip extras directly (e.g. `forge,train,cuda,llamacpp`) |
+| `SEISO_SIDECAR_AUTOSTART=0` | on | Do not auto-start Ollama/llama-swap before Forge |
+| `SEISO_LLAMASWAP_ENGINE` | auto | Sidecar engine: `ollama` or `llamacpp` |
+| `SEISO_LLAMA_ALLOW_INPROCESS_NATIVE_LINUX=1` | off | Explicitly allow unsafe in-process llama.cpp on native Linux NVIDIA |
 
 Custom location:
 
@@ -151,6 +154,11 @@ start
 Install registers `start` on your PATH (`~/.local/bin`). Open a new terminal if the command is not found yet.
 
 First launch: open **http://127.0.0.1:8765** and create your local admin password.
+
+On native Linux + NVIDIA, `start` also tries to start the isolated GGUF chat
+sidecar before Forge: Ollama when available/healthy, then `llama-swap`. If the
+sidecar tools are not installed, Forge still starts and chat shows setup
+guidance instead of falling back to unsafe in-process llama.cpp.
 
 ---
 
@@ -301,7 +309,7 @@ Full guide: [platforms/wsl.md](platforms/wsl.md)
 | `cuda` | Triton fused-kernel support | **Linux NVIDIA only** |
 | `flash-attn` | Flash Attention 2 (optional; build from source) | **Linux NVIDIA only** |
 | `mlx` | mlx-lm | **macOS only** |
-| `llamacpp` | llama-cpp-python (GGUF inference) | All |
+| `llamacpp` | llama-cpp-python (GGUF inference; unsafe native Linux NVIDIA fallback only by explicit opt-in) | All |
 | `compress-quant` | auto-gptq, autoawq (requires `torch`; Linux NVIDIA) | CUDA recommended |
 | `compress-eval` | lm-eval harness | All |
 | `dev` | pytest, ruff, mypy, bandit | All |
@@ -372,7 +380,7 @@ The `--network` option also checks `huggingface.co` reachability.
 
 Model storage notes:
 
-- Catalog chat downloads fetch a GGUF file into Seiso's Hugging Face cache (`$SEISO_DATA_DIR/hf_cache` by default) and register a local inventory link for llama.cpp.
+- Catalog chat downloads fetch a GGUF file into Seiso's Hugging Face cache (`$SEISO_DATA_DIR/hf_cache` by default) and register a local inventory link for GGUF chat. Native Linux NVIDIA serves GGUF through the llama-swap sidecar by default.
 - The Hub page shows the expected GGUF download size, usually 2-8 GB for small/medium Q4 models and 10-30+ GB for larger models.
 
 Walkthrough: [getting-started.md](getting-started.md)

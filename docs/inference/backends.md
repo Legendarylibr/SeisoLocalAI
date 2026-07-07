@@ -4,8 +4,8 @@ Seiso routes chat/inference by platform and model format.
 
 | Backend | Platform | Install | Use case |
 |---------|----------|---------|----------|
-| **llama-swap (GGUF sidecar)** | macOS / NVIDIA | external `llama-swap` service | Optional GGUF router; defaults to llama.cpp on macOS and Ollama on NVIDIA |
-| **llama.cpp (GGUF)** | All | `.[llamacpp]` | In-process GGUF fallback and default when llama-swap is not enabled |
+| **llama-swap (GGUF sidecar)** | NVIDIA Linux / optional elsewhere | external `llama-swap` service | Required default for GGUF on native Linux NVIDIA; isolates crashes from Forge |
+| **llama.cpp (GGUF)** | CPU / macOS / explicit override | `.[llamacpp]` | In-process GGUF backend; blocked by default on native Linux NVIDIA |
 | **MLX** | macOS Apple Silicon | `.[mlx]` | Fast local chat on M-series |
 | **PyTorch** | CUDA / MPS / CPU | `.[train]` | HF weights, 4-bit via bitsandbytes |
 
@@ -15,16 +15,37 @@ Seiso routes chat/inference by platform and model format.
 - `forge/services/hardware.py` — `preferred_inference_backend` in UI
 - Forge Chat model picker shows backend per model
 
-## llama-swap setup (optional)
+## llama-swap setup
 
-Run llama-swap locally and point Forge at it:
+On native Linux NVIDIA, GGUF chat defaults to the llama-swap sidecar so CUDA
+crashes in an inference engine do not kill Forge. Run llama-swap locally and
+point Forge at it:
 
 ```bash
 export SEISO_LLAMASWAP_ENABLED=true
 export SEISO_LLAMASWAP_URL=http://127.0.0.1:8080
 ```
 
-Seiso chooses `llamacpp` as the llama-swap engine on macOS and `ollama` when NVIDIA hardware is visible. Override with `SEISO_LLAMASWAP_ENGINE=llamacpp` or `SEISO_LLAMASWAP_ENGINE=ollama`. If your llama-swap config uses a model key rather than the GGUF file path, set `SEISO_LLAMASWAP_MODEL`.
+The `start` launcher will try to start the right local sidecars before Forge:
+on native Linux NVIDIA it starts Ollama when available, chooses `ollama` only
+when healthy, then starts `llama-swap` if the binary is installed. On macOS,
+llama-swap uses its `llamacpp` engine when explicitly enabled. Disable launcher
+sidecar startup with `SEISO_SIDECAR_AUTOSTART=0`.
+
+Seiso chooses `llamacpp` as the llama-swap engine on macOS. On native Linux
+NVIDIA, it prefers `ollama` only when Ollama's local API is healthy, then falls
+back to `llamacpp` as a llama-swap-managed subprocess engine. Override with
+`SEISO_LLAMASWAP_ENGINE=llamacpp` or `SEISO_LLAMASWAP_ENGINE=ollama`. If your
+llama-swap config uses a model key rather than the GGUF file path, set
+`SEISO_LLAMASWAP_MODEL`. If your llama-swap config is not in the default
+location, set `SEISO_LLAMASWAP_CONFIG=/path/to/config.yaml`.
+
+Forge does not silently fall back to in-process llama.cpp on native Linux
+NVIDIA. To accept that risk explicitly, set:
+
+```bash
+export SEISO_LLAMA_ALLOW_INPROCESS_NATIVE_LINUX=1
+```
 
 ## MLX setup (macOS)
 
@@ -51,6 +72,7 @@ Training **never** uses MLX — `load_model(..., for_training=True)` forces PyTo
 ## Memory management
 
 - **Free Memory** (Chat or Model Hub) unloads llama.cpp, MLX, and PyTorch models from RAM/VRAM. Disk cache under `{SEISO_DATA_DIR}/hf_cache/` is unchanged.
+- With llama-swap, **Free Memory** also calls `POST /api/models/unload` on the sidecar so Ollama/llama.cpp subprocesses can release external VRAM before training/export jobs. Set `SEISO_LLAMASWAP_UNLOAD_SCOPE=model` to request model-specific unload first, or `SEISO_LLAMASWAP_UNLOAD_SCOPE=none` to disable sidecar unload calls.
 - Seiso keeps **one inference model** loaded at a time in the local pool; switching models unloads the previous one.
 - **Headroom refresh:** after Free memory, hardware fit labels update immediately so the next model is not falsely blocked.
 - **API:** `GET /api/models/vram` · `POST /api/models/vram/unload` (alias: `POST /api/inference/cancel`)

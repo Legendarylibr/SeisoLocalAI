@@ -98,6 +98,7 @@ class ExportOrchestrator(Orchestrator):
             release_after_task(
                 reason="export complete",
                 log=lambda msg: self._emit_log(job_id, msg),
+                job_id=job_id,
             )
 
         paths = {k: str(v) for k, v in results.items()}

@@ -111,10 +111,15 @@ SEISO_INSTALL_PROFILE=chat curl -fsSL https://raw.githubusercontent.com/Legendar
 What the installer does:
 
 1. Clones to `$HOME/Seiso` (or `SEISO_INSTALL_DIR`)
-2. Creates `.venv` and installs platform extras (CUDA on Linux + NVIDIA, MLX on macOS, GGUF via `llamacpp`)
+2. Creates `.venv` and installs platform extras (CUDA on Linux + NVIDIA, MLX on macOS, GGUF support)
 3. Copies `.env.example` → `.env` if missing
 4. Builds `forge-ui/dist`
 5. Runs `seiso forge` and opens the browser
+
+On native Linux + NVIDIA, `start` also tries to start the isolated GGUF sidecar
+path before Forge: healthy Ollama first, then `llama-swap` with its `llamacpp`
+engine. If those tools are not installed, Forge still starts and chat shows
+setup guidance instead of silently using in-process llama.cpp.
 
 **Install only** (no auto-start):
 

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import threading
+import uuid
 from collections.abc import Callable
 from typing import Any
 
@@ -13,6 +15,8 @@ LogFn = Callable[[str], None] | None
 _GPU_TASK_KINDS = frozenset(
     {"training", "export", "compress", "distill_rl", "rl_quant", "download"}
 )
+_GPU_TASK_LOCK = threading.RLock()
+_ACTIVE_GPU_TASKS: dict[str, dict[str, str | None]] = {}
 
 
 def _refresh_hardware_profile() -> None:
@@ -24,14 +28,62 @@ def _refresh_hardware_profile() -> None:
         pass
 
 
+def _gpu_resource_token(
+    *, task: str, job_id: str | None = None, user_id: str | None = None
+) -> str:
+    if job_id:
+        return str(job_id)
+    return f"{task}:{user_id or 'global'}:{uuid.uuid4().hex}"
+
+
+def _register_gpu_task(
+    *,
+    task: str,
+    job_id: str | None = None,
+    user_id: str | None = None,
+) -> str:
+    token = _gpu_resource_token(task=task, job_id=job_id, user_id=user_id)
+    with _GPU_TASK_LOCK:
+        _ACTIVE_GPU_TASKS[token] = {
+            "task": task,
+            "job_id": str(job_id) if job_id else None,
+            "user_id": str(user_id) if user_id else None,
+        }
+    return token
+
+
+def _unregister_gpu_task(
+    *, resource_token: str | None = None, job_id: str | None = None
+) -> None:
+    with _GPU_TASK_LOCK:
+        if resource_token:
+            _ACTIVE_GPU_TASKS.pop(resource_token, None)
+            return
+        if job_id:
+            _ACTIVE_GPU_TASKS.pop(str(job_id), None)
+
+
+def _active_tracked_gpu_task_kinds(*, exclude_job_id: str | None = None) -> list[str]:
+    with _GPU_TASK_LOCK:
+        tasks = list(_ACTIVE_GPU_TASKS.values())
+    active: list[str] = []
+    for task in tasks:
+        if exclude_job_id and task.get("job_id") == str(exclude_job_id):
+            continue
+        kind = str(task.get("task") or "gpu")
+        if kind not in active:
+            active.append(kind)
+    return active
+
+
 def running_gpu_task_kinds(*, exclude_job_id: str | None = None) -> list[str]:
-    """Return in-process GPU-heavy orchestrator kinds with RUNNING jobs."""
+    """Return active GPU-heavy orchestrator and service task kinds."""
     from forge.orchestrators.base import JobStatus
 
     try:
         from forge.api import deps
     except ImportError:
-        return []
+        return _active_tracked_gpu_task_kinds(exclude_job_id=exclude_job_id)
 
     getters = [
         deps.get_training_orchestrator,
@@ -40,14 +92,15 @@ def running_gpu_task_kinds(*, exclude_job_id: str | None = None) -> list[str]:
         deps.get_distill_rl_orchestrator,
         deps.get_rl_quant_orchestrator,
     ]
-    active: list[str] = []
+    active: list[str] = _active_tracked_gpu_task_kinds(exclude_job_id=exclude_job_id)
     for getter in getters:
         orch = getter()
         if any(
             job.status == JobStatus.RUNNING and job.id != exclude_job_id
             for job in orch._jobs.values()
         ):
-            active.append(orch.kind)
+            if orch.kind not in active:
+                active.append(orch.kind)
     return active
 
 
@@ -57,6 +110,8 @@ def release_inference_memory(*, reason: str, log: LogFn = None) -> dict[str, Any
     from seiso.memory.protection import release_cached_memory
 
     pool = get_model_pool()
+    if hasattr(pool, "drain_release_notes"):
+        pool.drain_release_notes()
     status_before = pool.status()
     had_active = bool(pool.active_key)
     if had_active:
@@ -69,23 +124,43 @@ def release_inference_memory(*, reason: str, log: LogFn = None) -> dict[str, Any
         pool.prepare_for_load()
 
     unloaded = pool.active_key is None and had_active
+    if hasattr(pool, "drain_release_notes"):
+        release_notes = pool.drain_release_notes()
+    else:
+        status_after = pool.status()
+        release_notes = list(status_after.get("release_notes") or [])
+    for note in release_notes:
+        if log:
+            log(note)
+        else:
+            logger.info(note)
     release_cached_memory(sync=had_active)
     _refresh_hardware_profile()
     return {
         "unloaded_inference": unloaded,
         "previous_model": status_before.get("active_model"),
         "previous_path": status_before.get("path"),
+        "release_notes": release_notes,
     }
 
 
-def release_after_task(*, reason: str, log: LogFn = None) -> None:
+def release_after_task(
+    *,
+    reason: str,
+    log: LogFn = None,
+    job_id: str | None = None,
+    resource_token: str | None = None,
+) -> None:
     """Post-task cleanup: restore kernel patches and empty GPU caches."""
     from seiso.kernels.lifecycle import restore_kernel_patches
     from seiso.memory.protection import release_cached_memory
 
-    restore_kernel_patches()
-    release_cached_memory(sync=True)
-    _refresh_hardware_profile()
+    try:
+        restore_kernel_patches()
+        release_cached_memory(sync=True)
+        _refresh_hardware_profile()
+    finally:
+        _unregister_gpu_task(resource_token=resource_token, job_id=job_id)
     if log:
         log(f"Released GPU/RAM caches ({reason})")
 
@@ -98,6 +173,9 @@ def prepare_for_gpu_task(
     user_id: str | None = None,
 ) -> dict[str, Any]:
     """Eject inference weights and refresh headroom before a heavy local task."""
+    task = str(task)
+    if task not in _GPU_TASK_KINDS:
+        logger.warning("Unregistered GPU task kind requested memory prep: %s", task)
     blocking = running_gpu_task_kinds(exclude_job_id=job_id)
     if blocking:
         msg = (
@@ -117,7 +195,14 @@ def prepare_for_gpu_task(
         pass
     except PermissionError as exc:
         raise RuntimeError(str(exc)) from exc
-    return release_inference_memory(reason=task, log=log)
+    resource_token = _register_gpu_task(task=task, job_id=job_id, user_id=user_id)
+    try:
+        result = release_inference_memory(reason=task, log=log)
+    except Exception:
+        _unregister_gpu_task(resource_token=resource_token, job_id=job_id)
+        raise
+    result["resource_token"] = resource_token
+    return result
 
 
 def assert_gpu_available_for_inference() -> None:

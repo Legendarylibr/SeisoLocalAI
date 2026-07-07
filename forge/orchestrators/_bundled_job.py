@@ -62,6 +62,7 @@ async def run_bundled_job(
         release_after_task(
             reason=f"{orchestrator.kind} complete",
             log=lambda msg: orchestrator._emit_log(job_id, msg),
+            job_id=job_id,
         )
 
     orchestrator._emit_log(job_id, result_log(result))

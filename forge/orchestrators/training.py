@@ -186,6 +186,7 @@ class TrainingOrchestrator(Orchestrator):
             release_after_task(
                 reason="training complete",
                 log=lambda msg: self._emit_log(job_id, msg),
+                job_id=job_id,
             )
             stop_poll.set()
             poll_task.cancel()

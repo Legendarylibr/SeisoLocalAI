@@ -104,7 +104,8 @@ Before loading a larger model, use **Free memory** in Chat or Model Hub to unloa
 | Your hardware | Typical backend |
 |---------------|-----------------|
 | macOS Apple Silicon | MLX (with `[mlx]` extra) |
-| NVIDIA GPU + GGUF on disk | llama.cpp |
+| Native Linux NVIDIA + GGUF on disk | llama-swap sidecar (Ollama if healthy, else sidecar llama.cpp) |
+| CPU / macOS + GGUF on disk | llama.cpp |
 | NVIDIA GPU + safetensors | PyTorch 4-bit |
 | CPU only | GGUF |
 

@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from seiso.compat import StrEnum
+from seiso.env import env_bool
 from seiso.models.loader import Backend, detect_backend
 
 BackendName = str
@@ -446,18 +447,48 @@ def gguf_is_supported_by_llamacpp(model_path: str) -> bool:
     return architecture not in _UNSUPPORTED_GGUF_ARCHITECTURES
 
 
+def _is_gguf_model(model_path: str, model_format: str | None = None) -> bool:
+    fmt = (model_format or "").lower()
+    path = Path(model_path)
+    return fmt == "gguf" or _is_gguf_path(model_path) or path.suffix.lower() == ".gguf"
+
+
+def _native_linux_requires_isolated_gguf() -> bool:
+    if env_bool("SEISO_LLAMA_ALLOW_INPROCESS_NATIVE_LINUX", False):
+        return False
+    try:
+        from seiso.platform import use_linux_nvidia_inference_guards
+
+        return use_linux_nvidia_inference_guards()
+    except Exception:
+        return False
+
+
+def _llamaswap_unavailable_error(reason: str | None = None) -> RuntimeError:
+    detail = f" {reason}" if reason else ""
+    return RuntimeError(
+        "Native Linux NVIDIA GGUF chat requires an isolated backend to prevent "
+        "llama.cpp CUDA crashes from killing Forge. Start llama-swap/Ollama or set "
+        "SEISO_LLAMA_ALLOW_INPROCESS_NATIVE_LINUX=1 to explicitly accept in-process "
+        f"llama.cpp risk.{detail}"
+    )
+
+
 def recommend_backend(
     *, model_path: str, model_format: str | None = None
 ) -> BackendName:
     """Pick the default local inference engine from model path/format."""
     fmt = (model_format or "").lower()
     path = Path(model_path)
-    if fmt == "gguf" or _is_gguf_path(model_path):
+    if _is_gguf_model(model_path, model_format):
         try:
             from seiso.inference.llamaswap import llamaswap_status
             from seiso.platform import use_linux_nvidia_inference_guards
 
-            if use_linux_nvidia_inference_guards() and llamaswap_status().available:
+            native_linux_nvidia = use_linux_nvidia_inference_guards()
+            if native_linux_nvidia and _native_linux_requires_isolated_gguf():
+                return BACKEND_LLAMASWAP
+            if native_linux_nvidia and llamaswap_status().available:
                 return BACKEND_LLAMASWAP
         except Exception:
             pass
@@ -480,7 +511,9 @@ def available_backends(
     path = Path(model_path)
     if fmt == "gguf" and not gguf_is_supported_by_llamacpp(model_path):
         return []
-    if fmt == "gguf" or _is_gguf_path(model_path) or path.suffix.lower() == ".gguf":
+    if _is_gguf_model(model_path, model_format):
+        if _native_linux_requires_isolated_gguf():
+            return [BACKEND_LLAMASWAP]
         return [BACKEND_LLAMASWAP, BACKEND_LLAMACPP]
     if fmt in {"safetensors", "bin"} or path.is_dir():
         preferred = recommend_backend(model_path=model_path, model_format=model_format)
@@ -497,7 +530,26 @@ def resolve_local_backend(
     """Resolve auto/requested backend for a filesystem model."""
     choice = (requested or BACKEND_AUTO).lower()
     if choice == BACKEND_AUTO:
+        if (
+            _is_gguf_model(model_path, model_format)
+            and _native_linux_requires_isolated_gguf()
+        ):
+            from seiso.inference.llamaswap import llamaswap_status
+
+            status = llamaswap_status()
+            if not status.available:
+                raise _llamaswap_unavailable_error(status.reason)
+            return BACKEND_LLAMASWAP
         return recommend_backend(model_path=model_path, model_format=model_format)
+    if (
+        choice == BACKEND_LLAMACPP
+        and _is_gguf_model(model_path, model_format)
+        and _native_linux_requires_isolated_gguf()
+    ):
+        raise _llamaswap_unavailable_error(
+            "The requested backend was llamacpp; use llamaswap or set "
+            "SEISO_LLAMA_ALLOW_INPROCESS_NATIVE_LINUX=1."
+        )
     if choice in {BACKEND_LLAMACPP, BACKEND_LLAMASWAP, BACKEND_MLX, BACKEND_TORCH}:
         return choice
     raise ValueError(f"Unsupported inference backend: {requested}")

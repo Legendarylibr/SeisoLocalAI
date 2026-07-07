@@ -18,6 +18,7 @@ from seiso.env import env_bool, env_str
 from seiso.inference.streaming import StreamToken
 
 DEFAULT_LLAMASWAP_URL = "http://127.0.0.1:8080"
+DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434"
 
 
 @dataclass(frozen=True)
@@ -37,6 +38,32 @@ def _nvidia_visible() -> bool:
         return False
 
 
+def ollama_url() -> str:
+    raw = env_str("SEISO_OLLAMA_URL", DEFAULT_OLLAMA_URL).strip()
+    return raw.rstrip("/") or DEFAULT_OLLAMA_URL
+
+
+def _ollama_health_timeout_s() -> float:
+    raw = env_str("SEISO_OLLAMA_HEALTH_TIMEOUT_S", "0.35").strip()
+    try:
+        return max(0.05, float(raw))
+    except ValueError:
+        return 0.35
+
+
+def ollama_health_ok(*, url: str | None = None) -> bool:
+    """Return True when Ollama's local API is reachable."""
+    target = urllib.parse.urljoin(f"{(url or ollama_url()).rstrip('/')}/", "api/tags")
+    req = urllib.request.Request(target, method="GET")
+    try:
+        with urllib.request.urlopen(
+            req, timeout=_ollama_health_timeout_s()
+        ) as response:
+            return 200 <= int(getattr(response, "status", 200)) < 300
+    except (OSError, urllib.error.URLError, TimeoutError):
+        return False
+
+
 def preferred_llamaswap_engine() -> str:
     """Choose the llama-swap managed engine for this machine."""
     override = env_str("SEISO_LLAMASWAP_ENGINE", "").strip().lower()
@@ -44,7 +71,7 @@ def preferred_llamaswap_engine() -> str:
         return override
     if platform.system() == "Darwin":
         return "llamacpp"
-    if _nvidia_visible():
+    if _nvidia_visible() and ollama_health_ok():
         return "ollama"
     return "llamacpp"
 
@@ -58,6 +85,27 @@ def llamaswap_enabled() -> bool:
     if "SEISO_LLAMASWAP_ENABLED" in os.environ:
         return env_bool("SEISO_LLAMASWAP_ENABLED", False)
     return bool(os.environ.get("SEISO_LLAMASWAP_URL") or shutil.which("llama-swap"))
+
+
+def llamaswap_setup_hint(*, url: str | None = None, engine: str | None = None) -> str:
+    """Actionable setup text for the native Linux sidecar path."""
+    target = (url or llamaswap_url()).rstrip("/")
+    selected = engine or preferred_llamaswap_engine()
+    if selected == "ollama":
+        engine_hint = (
+            f"Start Ollama at {ollama_url()} or set SEISO_LLAMASWAP_ENGINE=llamacpp "
+            "to use a llama.cpp subprocess through llama-swap."
+        )
+    else:
+        engine_hint = (
+            "Configure llama-swap to launch its llama.cpp engine, or set "
+            "SEISO_LLAMASWAP_ENGINE=ollama after starting Ollama."
+        )
+    return (
+        f"Start llama-swap at {target} (or set SEISO_LLAMASWAP_URL). "
+        f"{engine_hint} Set SEISO_LLAMA_ALLOW_INPROCESS_NATIVE_LINUX=1 only "
+        "if you accept that in-process llama.cpp can crash Forge."
+    )
 
 
 def _llamaswap_health_timeout_s() -> float:
@@ -89,14 +137,17 @@ def llamaswap_status() -> LlamaSwapRuntime:
             available=False,
             url=url,
             engine=engine,
-            reason="Set SEISO_LLAMASWAP_URL or install llama-swap to enable it.",
+            reason=llamaswap_setup_hint(url=url, engine=engine),
         )
     if not llamaswap_health_ok(url=url):
         return LlamaSwapRuntime(
             available=False,
             url=url,
             engine=engine,
-            reason=f"llama-swap is configured but not reachable at {url}. Start the sidecar.",
+            reason=(
+                f"llama-swap is configured but not reachable at {url}. "
+                f"{llamaswap_setup_hint(url=url, engine=engine)}"
+            ),
         )
     return LlamaSwapRuntime(
         available=True,
@@ -119,6 +170,19 @@ class LlamaSwapClient:
     def __init__(self, *, url: str | None = None, engine: str | None = None) -> None:
         self.url = (url or llamaswap_url()).rstrip("/")
         self.engine = engine or preferred_llamaswap_engine()
+
+    def ensure_ready(self) -> None:
+        """Verify the sidecar and selected engine are reachable before preload."""
+        status = llamaswap_status()
+        if not status.available:
+            raise RuntimeError(
+                status.reason or llamaswap_setup_hint(url=self.url, engine=self.engine)
+            )
+        if self.engine == "ollama" and not ollama_health_ok():
+            raise RuntimeError(
+                f"Ollama is not reachable at {ollama_url()}. "
+                f"{llamaswap_setup_hint(url=self.url, engine=self.engine)}"
+            )
 
     def complete(self, payload: dict[str, Any], model_path: str) -> str:
         body = self._request_body(payload, model_path, stream=False)
@@ -162,7 +226,8 @@ class LlamaSwapClient:
                         yield StreamToken(str(content))
         except urllib.error.URLError as exc:
             raise RuntimeError(
-                f"llama-swap is unavailable at {self.url}. Start llama-swap or switch to llama.cpp."
+                f"llama-swap is unavailable at {self.url}. "
+                f"{llamaswap_setup_hint(url=self.url, engine=self.engine)}"
             ) from exc
 
     def _request_body(
@@ -195,6 +260,39 @@ class LlamaSwapClient:
             headers["Authorization"] = f"Bearer {api_key}"
         return urllib.request.Request(target, data=data, headers=headers, method="POST")
 
+    def release_external_memory(
+        self, model_path: str | None = None
+    ) -> tuple[bool, str | None]:
+        """Best-effort unload of llama-swap managed processes."""
+        scope = env_str("SEISO_LLAMASWAP_UNLOAD_SCOPE", "all").strip().lower()
+        if scope in {"0", "false", "none", "disabled"}:
+            return False, "llama-swap unload disabled by SEISO_LLAMASWAP_UNLOAD_SCOPE"
+        if scope == "model" and model_path:
+            model = urllib.parse.quote(llamaswap_model_name(model_path), safe="")
+            ok, reason = self._post_management(f"/api/models/unload/{model}")
+            if ok:
+                return True, None
+            # Fall through to all-model unload to favor freeing VRAM before heavy jobs.
+        return self._post_management("/api/models/unload")
+
+    def _post_management(self, path: str) -> tuple[bool, str | None]:
+        target = urllib.parse.urljoin(f"{self.url}/", path.lstrip("/"))
+        headers = {"Content-Type": "application/json"}
+        api_key = env_str("SEISO_LLAMASWAP_API_KEY", "").strip()
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+        req = urllib.request.Request(
+            target,
+            data=b"{}",
+            headers=headers,
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=30):
+                return True, None
+        except (OSError, urllib.error.URLError, TimeoutError) as exc:
+            return False, str(exc)
+
     def _post_json(self, path: str, body: dict[str, Any]) -> dict[str, Any]:
         req = self._build_request(path, body)
         try:
@@ -202,6 +300,7 @@ class LlamaSwapClient:
                 raw = response.read().decode("utf-8", errors="replace")
         except urllib.error.URLError as exc:
             raise RuntimeError(
-                f"llama-swap is unavailable at {self.url}. Start llama-swap or switch to llama.cpp."
+                f"llama-swap is unavailable at {self.url}. "
+                f"{llamaswap_setup_hint(url=self.url, engine=self.engine)}"
             ) from exc
         return json.loads(raw)
