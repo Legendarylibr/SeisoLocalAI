@@ -145,6 +145,8 @@ def test_load_kwargs_prefill_decode_invariants_per_model(
     )
 
     assert kwargs["n_ubatch"] <= kwargs["n_batch"]
+    assert kwargs["offload_kqv"] is False
+    assert "op_offload" not in kwargs
     assert ubatch <= batch
     assert tight is expect_tight
     assert kwargs["n_batch"] <= batch
