@@ -23,6 +23,19 @@ def _expected_native_caps(vram_mb: int, *, low: bool = False) -> tuple[int, int,
     )
 
 
+def test_native_linux_nvidia_llama_batch_caps_unknown_total_uses_safe_caps():
+    batch, ubatch, cache = native_linux_nvidia_llama_batch_caps(
+        tier=HardwareTier.WORKSTATION,
+        headroom_mb=0,
+        low=False,
+        gpu_total_mb=0,
+    )
+
+    assert batch == 256
+    assert ubatch == 128
+    assert cache == 512
+
+
 @pytest.fixture(autouse=True)
 def _clear_llama_env(monkeypatch):
     for key in list(os.environ):

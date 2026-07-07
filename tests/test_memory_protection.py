@@ -541,8 +541,8 @@ def test_clamp_llama_load_kwargs_skips_roomy_floor_when_gpu_mostly_in_use(
         }
     )
 
-    assert kwargs["n_batch"] <= 512
-    assert kwargs["n_ubatch"] <= 256
+    assert kwargs["n_batch"] <= 256
+    assert kwargs["n_ubatch"] <= 128
 
 
 def test_clamp_llama_load_kwargs_native_linux_borderline_non_tight_caps_batch(
@@ -569,7 +569,7 @@ def test_clamp_llama_load_kwargs_native_linux_borderline_non_tight_caps_batch(
             "n_gpu_layers": -1,
         }
     )
-    assert kwargs["n_batch"] == 512
+    assert kwargs["n_batch"] == 256
     assert kwargs["n_ubatch"] == 128
 
 
@@ -589,7 +589,7 @@ def test_llama_prefill_guard_keeps_roomy_short_prompt(monkeypatch, tmp_path):
         model_path=str(gguf),
         messages=[{"role": "user", "content": "hi"}],
         n_ctx=4096,
-        loaded_n_batch=512,
+        loaded_n_batch=256,
         loaded_n_gpu_layers=-1,
         load_tier="normal",
         loaded_headroom_mb=24576,
@@ -619,7 +619,7 @@ def test_llama_prefill_guard_keeps_roomy_short_prompt_on_small_headroom_fluctuat
         model_path=str(gguf),
         messages=[{"role": "user", "content": "hi"}],
         n_ctx=4096,
-        loaded_n_batch=512,
+        loaded_n_batch=256,
         loaded_n_gpu_layers=-1,
         load_tier="normal",
         loaded_headroom_mb=24576,
@@ -654,8 +654,8 @@ def test_llama_prefill_guard_reloads_growing_native_linux_prompt(monkeypatch, tm
     )
 
     assert needs_reload is True
-    assert safe_batch <= 512
-    assert safe_ubatch <= 256
+    assert safe_batch <= 256
+    assert safe_ubatch <= 128
 
 
 def test_llama_prefill_guard_keeps_roomy_12b_after_load(monkeypatch, tmp_path):
@@ -679,7 +679,7 @@ def test_llama_prefill_guard_keeps_roomy_12b_after_load(monkeypatch, tmp_path):
         model_path=str(gguf),
         messages=[{"role": "user", "content": "hi"}],
         n_ctx=4096,
-        loaded_n_batch=512,
+        loaded_n_batch=256,
         loaded_n_ubatch=128,
         loaded_n_gpu_layers=-1,
         load_tier="normal",
@@ -687,7 +687,7 @@ def test_llama_prefill_guard_keeps_roomy_12b_after_load(monkeypatch, tmp_path):
     )
 
     assert needs_reload is False
-    assert safe_batch >= 512
+    assert safe_batch >= 256
     assert safe_ubatch >= 128
 
 
@@ -806,7 +806,7 @@ def test_llama_prefill_guard_reloads_when_headroom_shrank_without_15pct_drop(mon
     )
 
     assert needs_reload is True
-    assert safe_batch <= 512
+    assert safe_batch <= 256
 
 
 def test_llama_prefill_guard_noops_off_native_linux(monkeypatch, tmp_path):
@@ -876,7 +876,7 @@ def test_llama_prefill_guard_reloads_short_text_with_vision_content(monkeypatch,
     )
 
     assert needs_reload is True
-    assert safe_batch <= 512
+    assert safe_batch <= 256
     assert safe_ubatch <= 256
 
 
@@ -1151,7 +1151,7 @@ def test_qwen3_14b_roomy_4090_uses_normal_first_profile(monkeypatch, tmp_path):
         tier="normal",
     )
 
-    assert profiles[0]["n_batch"] >= 512
+    assert profiles[0]["n_batch"] >= 256
     assert profiles[0]["n_ubatch"] >= 128
 
 

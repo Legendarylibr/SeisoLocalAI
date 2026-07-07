@@ -1053,6 +1053,21 @@ def test_llama_batch_defaults_match_native_linux_safe_caps(monkeypatch):
     assert ubatch == expected_ubatch
 
 
+def test_llama_batch_defaults_native_linux_unknown_gpu_uses_safe_caps(monkeypatch):
+    import seiso.inference.model_pool as mp
+
+    monkeypatch.setattr(mp, "_native_linux_nvidia", lambda: True)
+    monkeypatch.setattr(
+        "seiso.memory.protection.discrete_gpu_total_mb",
+        lambda _profile=None: 0,
+    )
+
+    batch, ubatch = mp._llama_batch_defaults()
+
+    assert batch == 256
+    assert ubatch == 128
+
+
 def test_llama_load_model_tries_speed_profile_before_base(monkeypatch, tmp_path):
     import seiso.inference.model_pool as mp
 
@@ -1363,7 +1378,7 @@ def test_qwen3_14b_24gb_load_uses_full_gpu_kwargs(monkeypatch, tmp_path):
     assert attempts
     first = attempts[0]
     assert first["n_gpu_layers"] == -1
-    assert first["n_batch"] >= 512
+    assert first["n_batch"] >= 256
     assert first["n_ubatch"] >= 128
     assert "flash_attn" not in first
 

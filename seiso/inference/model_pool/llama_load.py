@@ -178,7 +178,7 @@ def _default_llama_flash_attn(model_path: str | None = None) -> bool:
 
 
 def _llama_batch_defaults(model_path: str | None = None) -> tuple[int, int]:
-    """Speed-first llama.cpp prompt/decode batch defaults (tight-fit models clamp at load)."""
+    """llama.cpp prompt/decode batch defaults before model-aware load clamps."""
     if _mp()._native_linux_nvidia():
         try:
             total = _prot().discrete_gpu_total_mb()
@@ -187,6 +187,7 @@ def _llama_batch_defaults(model_path: str | None = None) -> tuple[int, int]:
                 return gpu_batch_tier_caps(total, "normal")
         except Exception:
             pass
+        return 256, 128
     return 4096, 1024
 
 
