@@ -67,6 +67,7 @@ export const inferenceApi = {
     tools?: boolean;
     knowledge_base_id?: string | null;
     model_id?: string | null;
+    draft_message?: string | null;
   }) => {
     const q = new URLSearchParams();
     if (params.thread_id) q.set("thread_id", params.thread_id);
@@ -75,6 +76,7 @@ export const inferenceApi = {
     if (params.tools) q.set("tools", "true");
     if (params.knowledge_base_id) q.set("knowledge_base_id", params.knowledge_base_id);
     if (params.model_id) q.set("model_id", params.model_id);
+    if (params.draft_message) q.set("draft_message", params.draft_message);
     const suffix = q.toString();
     return request<ChatContextStatus>(`/inference/context${suffix ? `?${suffix}` : ""}`);
   },

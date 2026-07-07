@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
@@ -42,6 +43,18 @@ class ChatCompletionRequest(BaseModel):
 
 _UNTRUSTED_OPENAI_ROLES = frozenset({"tool", "function", "system", "developer"})
 _UNVERIFIED_ASSISTANT_PREFIX = "[UNVERIFIED_PRIOR_ASSISTANT]\n"
+
+
+def _begin_generation_or_raise(
+    orchestrator: InferenceOrchestrator,
+    user_id: str | None,
+) -> None:
+    try:
+        orchestrator.begin_generation_for_user(user_id)
+    except PermissionError as exc:
+        raise HTTPException(403, str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
 
 
 def _normalize_openai_messages(body: ChatCompletionRequest) -> list[dict[str, str]]:
@@ -224,10 +237,12 @@ async def chat_completions(
     use_local_stream = body.stream and not body.tools
 
     if use_local_stream:
+        _begin_generation_or_raise(orchestrator, user_id)
 
         async def sse_stream():
             sanitizer = StreamingOutputSanitizer(strip_tool_calls=not body.tools)
             raw_parts: list[str] = []
+            completed = False
             try:
                 async for token in orchestrator.stream_local(payload):
                     raw_parts.append(token)
@@ -270,8 +285,13 @@ async def chat_completions(
                 }
                 yield f"data: {json.dumps(final)}\n\n"
                 yield "data: [DONE]\n\n"
+                completed = True
+            except asyncio.CancelledError:
+                await orchestrator.cancel_generation_for_user(user_id)
+                raise
             except Exception as exc:
                 logger.exception("OpenAI-compatible inference stream failed")
+                await orchestrator.cancel_generation_for_user(user_id)
                 err = {
                     "error": {
                         "message": str(exc) or "Inference stream failed",
@@ -279,42 +299,63 @@ async def chat_completions(
                     }
                 }
                 yield f"data: {json.dumps(err)}\n\n"
+                yield "data: [DONE]\n\n"
+            finally:
+                if completed:
+                    orchestrator.end_generation_for_user(user_id)
 
         return StreamingResponse(sse_stream(), media_type="text/event-stream")
 
     job_id = orchestrator.create_job(user_id=user_id)
-    await orchestrator.start(job_id, payload)
+    _begin_generation_or_raise(orchestrator, user_id)
+    try:
+        await orchestrator.start(job_id, payload)
+    except Exception:
+        await orchestrator.cancel_generation_for_user(user_id)
+        raise
 
     if body.stream:
 
         async def job_sse_stream():
-            async for line in orchestrator.stream_logs(job_id):
-                yield f"data: {json.dumps({'log': line})}\n\n"
-            job = await orchestrator.wait_for(job_id)
-            content = job.result.get("content", "") if job and job.result else ""
-            if job and job.status.value == "failed":
-                yield f"data: {json.dumps({'error': job.error or 'Inference failed'})}\n\n"
-            elif content:
-                content = sanitize_llm_output(content, strip_tool_calls=bool(body.tools))
-                chunk = {
-                    "id": completion_id,
-                    "object": "chat.completion.chunk",
-                    "created": created,
-                    "model": body.model,
-                    "choices": [
-                        {
-                            "index": 0,
-                            "delta": {"content": content},
-                            "finish_reason": "stop",
-                        }
-                    ],
-                }
-                yield f"data: {json.dumps(chunk)}\n\n"
-            yield "data: [DONE]\n\n"
+            try:
+                async for line in orchestrator.stream_logs(job_id):
+                    yield f"data: {json.dumps({'log': line})}\n\n"
+                job = await orchestrator.wait_for(job_id)
+                content = job.result.get("content", "") if job and job.result else ""
+                if job and job.status.value == "failed":
+                    yield f"data: {json.dumps({'error': job.error or 'Inference failed'})}\n\n"
+                elif content:
+                    content = sanitize_llm_output(content, strip_tool_calls=bool(body.tools))
+                    chunk = {
+                        "id": completion_id,
+                        "object": "chat.completion.chunk",
+                        "created": created,
+                        "model": body.model,
+                        "choices": [
+                            {
+                                "index": 0,
+                                "delta": {"content": content},
+                                "finish_reason": "stop",
+                            }
+                        ],
+                    }
+                    yield f"data: {json.dumps(chunk)}\n\n"
+                yield "data: [DONE]\n\n"
+            except asyncio.CancelledError:
+                await orchestrator.cancel_generation_for_user(user_id)
+                raise
+            except Exception as exc:
+                await orchestrator.cancel_generation_for_user(user_id)
+                yield f"data: {json.dumps({'error': str(exc) or 'Inference failed'})}\n\n"
+                yield "data: [DONE]\n\n"
 
         return StreamingResponse(job_sse_stream(), media_type="text/event-stream")
 
-    job = await orchestrator.wait_for(job_id)
+    try:
+        job = await orchestrator.wait_for(job_id)
+    except Exception:
+        await orchestrator.cancel_generation_for_user(user_id)
+        raise
     if not job or job.status.value == "failed":
         raise HTTPException(500, job.error if job else "Inference failed")
 
