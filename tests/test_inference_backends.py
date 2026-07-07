@@ -107,6 +107,10 @@ def test_gguf_explicit_llamacpp_requires_unsafe_native_linux_override(
     gguf = tmp_path / "model-q4.gguf"
     gguf.write_bytes(b"gguf")
     monkeypatch.setattr("seiso.platform.use_linux_nvidia_inference_guards", lambda: True)
+    monkeypatch.setattr(
+        "seiso.inference.llamaswap.llamaswap_status",
+        lambda: SimpleNamespace(available=False, reason="sidecar down"),
+    )
 
     with pytest.raises(RuntimeError, match="requested backend was llamacpp"):
         resolve_local_backend(
@@ -123,6 +127,27 @@ def test_gguf_explicit_llamacpp_requires_unsafe_native_linux_override(
             requested="llamacpp",
         )
         == BACKEND_LLAMACPP
+    )
+
+
+def test_gguf_explicit_llamacpp_uses_healthy_sidecar_on_native_linux(
+    monkeypatch, tmp_path: Path
+):
+    gguf = tmp_path / "model-q4.gguf"
+    gguf.write_bytes(b"gguf")
+    monkeypatch.setattr("seiso.platform.use_linux_nvidia_inference_guards", lambda: True)
+    monkeypatch.setattr(
+        "seiso.inference.llamaswap.llamaswap_status",
+        lambda: SimpleNamespace(available=True),
+    )
+
+    assert (
+        resolve_local_backend(
+            model_path=str(gguf),
+            model_format="gguf",
+            requested="llamacpp",
+        )
+        == BACKEND_LLAMASWAP
     )
 
 

@@ -597,6 +597,10 @@ def resolve_local_backend(
         and _is_gguf_model(model_path, model_format)
         and _native_linux_requires_isolated_gguf()
     ):
+        from seiso.inference.llamaswap import llamaswap_status
+
+        if llamaswap_status().available:
+            return BACKEND_LLAMASWAP
         raise _llamaswap_unavailable_error(
             "The requested backend was llamacpp; use llamaswap or set "
             "SEISO_LLAMA_ALLOW_INPROCESS_NATIVE_LINUX=1."

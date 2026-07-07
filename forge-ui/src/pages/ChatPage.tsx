@@ -137,7 +137,7 @@ export function ChatPage() {
   const [downloadingQuant, setDownloadingQuant] = useState<string | null>(null);
   const [providerId, setProviderId] = useState("");
   const [selection, setSelection] = useState("");
-  const [inferenceBackend, setInferenceBackend] = useState("llamacpp");
+  const [inferenceBackend, setInferenceBackend] = useState("auto");
   const [models, setModels] = useState<InferenceModelOption[]>([]);
   const [providers, setProviders] = useState<Array<{ id: string; name: string; provider_type: string }>>([]);
   const { settings } = usePlatformSettings();
