@@ -28,6 +28,14 @@ class JobStatus(StrEnum):
     CANCELLED = "cancelled"
 
 
+class ResourceConflictError(RuntimeError):
+    """Raised when an orchestrator job would overlap a reserved local resource."""
+
+
+_RESOURCE_LOCK = asyncio.Lock()
+_ACTIVE_RESOURCES: dict[str, tuple[str, str]] = {}
+
+
 @dataclass
 class JobRecord:
     id: str
@@ -45,6 +53,7 @@ class Orchestrator(ABC):
     """Spawns isolated worker processes and streams logs via SSE."""
 
     kind: str = "base"
+    resource_key: str | None = None
 
     def __init__(self, sandbox_root: Path) -> None:
         self.sandbox_root = sandbox_root
@@ -182,6 +191,9 @@ class Orchestrator(ABC):
         if job_id not in self._jobs:
             raise KeyError(f"Unknown job: {job_id}")
         rec = self._jobs[job_id]
+        if rec.status != JobStatus.PENDING:
+            raise RuntimeError(f"Job {job_id} is already {rec.status}")
+        await self._reserve_resource(job_id, rec)
         rec.status = JobStatus.RUNNING
 
         async def _wrapper() -> None:
@@ -191,8 +203,35 @@ class Orchestrator(ABC):
                 import logging
 
                 logging.getLogger(__name__).exception("Job %s failed: %s", job_id, exc)
+            finally:
+                await self._release_resource(job_id)
 
         self._tasks[job_id] = asyncio.create_task(_wrapper())
+
+    async def _reserve_resource(self, job_id: str, rec: JobRecord) -> None:
+        if self.resource_key is None:
+            return
+        async with _RESOURCE_LOCK:
+            active = _ACTIVE_RESOURCES.get(self.resource_key)
+            if active and active != (self.kind, job_id):
+                active_kind, active_job_id = active
+                rec.status = JobStatus.FAILED
+                rec.error = (
+                    f"Cannot start {self.kind} while {active_kind} job "
+                    f"{active_job_id} is running"
+                )
+                self._emit_log(rec.id, f"ERROR: {rec.error}")
+                self._finish_logs(rec.id)
+                raise ResourceConflictError(rec.error)
+            _ACTIVE_RESOURCES[self.resource_key] = (self.kind, job_id)
+
+    async def _release_resource(self, job_id: str) -> None:
+        if self.resource_key is None:
+            return
+        async with _RESOURCE_LOCK:
+            active = _ACTIVE_RESOURCES.get(self.resource_key)
+            if active == (self.kind, job_id):
+                _ACTIVE_RESOURCES.pop(self.resource_key, None)
 
     async def wait_for(self, job_id: str) -> JobRecord | None:
         """Block until the job task finishes (or was never started)."""

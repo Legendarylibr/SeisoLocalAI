@@ -16,6 +16,7 @@ from seiso.security import SecurityError, assert_within
 
 class ExportOrchestrator(Orchestrator):
     kind = "export"
+    resource_key = "gpu"
 
     async def execute(self, job_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         from forge.services.memory_release import (

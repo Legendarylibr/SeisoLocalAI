@@ -28,6 +28,7 @@ _HF_TOKEN_LOCK = threading.Lock()
 
 class TrainingOrchestrator(Orchestrator):
     kind = "training"
+    resource_key = "gpu"
 
     def __init__(self, sandbox_root: Path) -> None:
         super().__init__(sandbox_root)
