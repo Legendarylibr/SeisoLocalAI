@@ -125,7 +125,7 @@ def test_register_reference_tag_for_safetensors(tmp_path, monkeypatch):
 
 
 def test_ollama_subprocess_sets_cli_host(monkeypatch):
-    from forge.services import ollama_registry
+    from seiso.inference import ollama_registry
 
     monkeypatch.setenv("SEISO_OLLAMA_URL", "http://127.0.0.1:11434")
     env = ollama_registry._ollama_subprocess_env()

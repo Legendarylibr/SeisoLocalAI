@@ -682,6 +682,44 @@ def test_llamaswap_status_does_not_fallback_to_ollama_for_llamacpp_engine(
     assert status.llamaswap_ready is False
 
 
+def test_resolve_backend_label_for_sidecar_engine():
+    from seiso.inference.backends import BACKEND_LLAMASWAP, resolve_backend_label
+
+    assert resolve_backend_label(BACKEND_LLAMASWAP, sidecar_engine="ollama") == "Ollama sidecar"
+    assert resolve_backend_label(BACKEND_LLAMASWAP, sidecar_engine="llamacpp") == "llama-swap"
+    assert resolve_backend_label(BACKEND_LLAMASWAP) == "GGUF sidecar"
+
+
+def test_ollama_registration_available_when_engine_llamacpp(monkeypatch):
+    import shutil
+
+    from seiso.inference import sidecar_runtime
+
+    monkeypatch.setenv("SEISO_LLAMASWAP_ENGINE", "llamacpp")
+    monkeypatch.setattr(sidecar_runtime, "ollama_health_ok", lambda *, url=None: True)
+    monkeypatch.setattr(
+        shutil,
+        "which",
+        lambda name: "/usr/bin/ollama" if name == "ollama" else None,
+    )
+
+    assert sidecar_runtime.ollama_registration_available() is True
+    assert sidecar_runtime.preferred_sidecar_engine() == "llamacpp"
+
+
+def test_sidecar_status_prefers_ollama_on_native_linux(monkeypatch):
+    from seiso.inference import sidecar_runtime
+
+    monkeypatch.setenv("SEISO_LLAMASWAP_ENABLED", "true")
+    monkeypatch.setattr(sidecar_runtime, "_nvidia_visible", lambda: True)
+    monkeypatch.setattr(sidecar_runtime, "ollama_health_ok", lambda *, url=None: True)
+    monkeypatch.setattr(sidecar_runtime, "llamaswap_health_ok", lambda *, url=None: False)
+
+    status = sidecar_runtime.sidecar_status()
+    assert status.available is True
+    assert status.engine == "ollama"
+
+
 def test_create_isolated_gguf_client_prefers_ollama(monkeypatch):
     from seiso.inference import llamaswap
     from seiso.inference.llamaswap import OllamaClient, create_isolated_gguf_client
