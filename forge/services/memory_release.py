@@ -107,15 +107,14 @@ def prepare_for_gpu_task(
         if log:
             log(msg)
         raise RuntimeError(msg)
-    if user_id is not None:
-        try:
-            from forge.api import deps
+    try:
+        from forge.api import deps
 
-            deps.get_inference_orchestrator().assert_generation_available_for_user(
-                user_id
-            )
-        except PermissionError as exc:
-            raise RuntimeError(str(exc)) from exc
+        deps.get_inference_orchestrator().assert_generation_available_for_user(None)
+    except ImportError:
+        pass
+    except PermissionError as exc:
+        raise RuntimeError(str(exc)) from exc
     return release_inference_memory(reason=task, log=log)
 
 

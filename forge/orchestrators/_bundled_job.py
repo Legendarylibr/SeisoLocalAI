@@ -81,6 +81,8 @@ def bundled_orchestrator(
     """Build a thin Orchestrator subclass for a bundled pipeline runner."""
 
     class _BundledOrchestrator(Orchestrator):
+        resource_key = "gpu"
+
         async def execute(self, job_id: str, payload: dict[str, Any]) -> dict[str, Any]:
             return await run_bundled_job(
                 self,
