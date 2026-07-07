@@ -148,8 +148,11 @@ ensure_inference_sidecars() {
     if ! sidecar_health_ok "$ollama_url" "/api/tags"; then
       if command -v ollama >/dev/null 2>&1; then
         log "Starting Ollama sidecar at $ollama_url"
+        if declare -F seiso_export_ollama_cli_env >/dev/null 2>&1; then
+          seiso_export_ollama_cli_env "$ollama_url"
+        fi
         start_background_sidecar "ollama" "$run_dir/ollama.log" ollama serve
-        wait_sidecar_health "$ollama_url" "/api/tags" 12 || true
+        wait_sidecar_health "$ollama_url" "/api/tags" 60 || true
       else
         log "Ollama not found; llama-swap will use llama.cpp engine if configured"
       fi

@@ -65,6 +65,16 @@ def ollama_url() -> str:
     return raw.rstrip("/") or DEFAULT_OLLAMA_URL
 
 
+def ollama_cli_host(*, url: str | None = None) -> str:
+    """Host:port for the Ollama CLI (OLLAMA_HOST) matching SEISO_OLLAMA_URL."""
+    parsed = urllib.parse.urlparse(f"{(url or ollama_url()).rstrip('/')}/")
+    if not parsed.hostname:
+        return "127.0.0.1:11434"
+    if parsed.port:
+        return f"{parsed.hostname}:{parsed.port}"
+    return parsed.hostname
+
+
 def _ollama_health_timeout_s() -> float:
     raw = env_str("SEISO_OLLAMA_HEALTH_TIMEOUT_S", "0.35").strip()
     try:
@@ -220,7 +230,12 @@ def create_isolated_gguf_client(
 ) -> IsolatedGgufClient:
     """Return OllamaClient when Ollama is the active engine, else LlamaSwapClient."""
     selected = engine or preferred_llamaswap_engine()
-    if selected == "ollama" and ollama_health_ok():
+    if selected == "ollama":
+        if not ollama_health_ok():
+            raise RuntimeError(
+                f"Ollama is not reachable at {ollama_url()}. "
+                f"{llamaswap_setup_hint(engine='ollama')}"
+            )
         return OllamaClient(url=url)
     return LlamaSwapClient(url=url, engine="llamacpp")
 

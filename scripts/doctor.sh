@@ -90,8 +90,10 @@ if declare -F seiso_native_linux_nvidia >/dev/null 2>&1 && seiso_native_linux_nv
   fi
   if declare -F seiso_ollama_health_ok >/dev/null 2>&1 && seiso_ollama_health_ok; then
     ok "Ollama API healthy at ${SEISO_OLLAMA_URL:-http://127.0.0.1:11434}"
+  elif declare -F seiso_llamaswap_health_ok >/dev/null 2>&1 && seiso_llamaswap_health_ok; then
+    ok "llama-swap fallback healthy at ${SEISO_LLAMASWAP_URL:-http://127.0.0.1:8080}"
   else
-    fail "Ollama API not reachable — run: ollama serve"
+    fail "Neither Ollama nor llama-swap is reachable — run: ollama serve (or configure llama-swap)"
   fi
   if command -v llama-swap >/dev/null 2>&1; then
     ok "llama-swap fallback: $(command -v llama-swap)"

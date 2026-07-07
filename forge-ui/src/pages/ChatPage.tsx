@@ -50,7 +50,7 @@ import {
 
 const BACKEND_LABELS: Record<string, string> = {
   llamacpp: "llama.cpp",
-  llamaswap: "llama-swap",
+  llamaswap: "Ollama sidecar",
   mlx: "MLX",
   torch: "PyTorch",
 };
@@ -1324,7 +1324,7 @@ export function ChatPage() {
                     {effectiveBackend
                       ? resolveBackendLabel(effectiveBackend, backendLabels, selected.backend_labels)
                       : selected.format === "gguf"
-                        ? "Missing llama.cpp runtime"
+                        ? "Missing Ollama sidecar"
                         : "Missing local inference runtime"}
                   </span>
                 )}

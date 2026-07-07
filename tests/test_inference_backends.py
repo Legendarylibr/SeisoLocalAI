@@ -693,6 +693,27 @@ def test_create_isolated_gguf_client_prefers_ollama(monkeypatch):
     assert isinstance(client, OllamaClient)
 
 
+def test_create_isolated_gguf_client_raises_when_ollama_engine_unhealthy(
+    monkeypatch,
+):
+    from seiso.inference import llamaswap
+    from seiso.inference.llamaswap import create_isolated_gguf_client
+
+    monkeypatch.setenv("SEISO_LLAMASWAP_ENGINE", "ollama")
+    monkeypatch.setattr(llamaswap, "ollama_health_ok", lambda *, url=None: False)
+
+    with pytest.raises(RuntimeError, match="Ollama is not reachable"):
+        create_isolated_gguf_client()
+
+
+def test_ollama_cli_host_matches_seiso_url(monkeypatch):
+    from seiso.inference.llamaswap import ollama_cli_host
+
+    monkeypatch.setenv("SEISO_OLLAMA_URL", "http://127.0.0.1:11434")
+    assert ollama_cli_host() == "127.0.0.1:11434"
+    assert ollama_cli_host(url="http://10.0.0.5:11500") == "10.0.0.5:11500"
+
+
 def test_llamaswap_request_body_forwards_tools_and_model_override(monkeypatch):
     from seiso.inference.llamaswap import LlamaSwapClient
 

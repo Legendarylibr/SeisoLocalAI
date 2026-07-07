@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 import re
 import shutil
 import subprocess
@@ -283,6 +284,14 @@ def _ollama_available() -> bool:
     return ollama_health_ok()
 
 
+def _ollama_subprocess_env() -> dict[str, str]:
+    from seiso.inference.llamaswap import ollama_cli_host
+
+    env = dict(os.environ)
+    env["OLLAMA_HOST"] = ollama_cli_host()
+    return env
+
+
 def _ollama_model_exists(tag: str) -> bool:
     if not shutil.which("ollama"):
         return False
@@ -293,6 +302,7 @@ def _ollama_model_exists(tag: str) -> bool:
             timeout=30,
             capture_output=True,
             text=True,
+            env=_ollama_subprocess_env(),
         )
         return proc.returncode == 0
     except (OSError, subprocess.TimeoutExpired):
@@ -302,13 +312,13 @@ def _ollama_model_exists(tag: str) -> bool:
 def _run_ollama_create(tag: str, modelfile: Path) -> None:
     cmd = ["ollama", "create", tag, "-f", str(modelfile)]
     logger.info("Registering model with Ollama: %s", " ".join(cmd))
-    subprocess.run(cmd, check=True, timeout=900, capture_output=True, text=True)
+    subprocess.run(cmd, check=True, timeout=900, capture_output=True, text=True, env=_ollama_subprocess_env())
 
 
 def _run_ollama_pull(pull_name: str) -> None:
     cmd = ["ollama", "pull", pull_name]
     logger.info("Pulling Ollama model: %s", " ".join(cmd))
-    subprocess.run(cmd, check=True, timeout=1800, capture_output=True, text=True)
+    subprocess.run(cmd, check=True, timeout=1800, capture_output=True, text=True, env=_ollama_subprocess_env())
 
 
 def register_model_with_ollama(

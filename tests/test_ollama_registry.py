@@ -124,6 +124,14 @@ def test_register_reference_tag_for_safetensors(tmp_path, monkeypatch):
     assert saved[str(model_dir.resolve())]["tag"] == "llama3.2"
 
 
+def test_ollama_subprocess_sets_cli_host(monkeypatch):
+    from forge.services import ollama_registry
+
+    monkeypatch.setenv("SEISO_OLLAMA_URL", "http://127.0.0.1:11434")
+    env = ollama_registry._ollama_subprocess_env()
+    assert env["OLLAMA_HOST"] == "127.0.0.1:11434"
+
+
 def test_register_gguf_directory(tmp_path, monkeypatch):
     from forge.services import ollama_registry
 
