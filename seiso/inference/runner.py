@@ -863,6 +863,11 @@ class LocalInferenceRunner:
                 model_path=model_path,
                 model_format=payload.get("model_format"),
             )
+            messages = trim_llama_messages_to_context(
+                messages,
+                n_ctx=int(n_ctx),
+                max_tokens=int(payload.get("max_tokens", 512)),
+            )
         llm = self._pool.get_llama(model_path, n_ctx=n_ctx)
         llm = self._llama_guard_prefill(
             llm, model_path=model_path, messages=messages, n_ctx=n_ctx
@@ -957,6 +962,11 @@ class LocalInferenceRunner:
                 floor=4096,
                 model_path=model_path,
                 model_format=payload.get("model_format"),
+            )
+            messages = trim_llama_messages_to_context(
+                messages,
+                n_ctx=int(n_ctx),
+                max_tokens=int(payload.get("max_tokens", 512)),
             )
         try:
             llm = self._pool.get_llama(model_path, n_ctx=n_ctx)

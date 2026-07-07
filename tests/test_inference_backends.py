@@ -1586,6 +1586,58 @@ def test_llama_complete_recomputes_context_after_prompt_trim(monkeypatch):
     assert seen_ctx == [4096]
 
 
+def test_llama_complete_retrims_after_context_recompute(monkeypatch):
+    import seiso.inference.runner as runner_mod
+    from seiso.inference.runner import LocalInferenceRunner
+
+    runner = LocalInferenceRunner()
+    seen_ctx: list[int] = []
+    trim_ctxs: list[int] = []
+    estimates = iter([8192, 4096])
+
+    class FakeLlama:
+        _seiso_load_tier = "normal"
+        _seiso_n_batch = 512
+        _seiso_n_ubatch = 128
+        _seiso_n_gpu_layers = -1
+        _seiso_load_headroom_mb = 24576
+        _seiso_model_path = "/tmp/model.gguf"
+
+        def create_chat_completion(self, **_kwargs):
+            return {"choices": [{"message": {"content": "ok"}}]}
+
+    monkeypatch.setattr(
+        runner_mod,
+        "estimate_llama_n_ctx",
+        lambda *_a, **_k: next(estimates),
+    )
+    monkeypatch.setattr(
+        runner_mod,
+        "trim_llama_messages_to_context",
+        lambda messages, *, n_ctx, **_k: trim_ctxs.append(int(n_ctx)) or messages,
+    )
+    monkeypatch.setattr(
+        runner._pool,
+        "get_llama",
+        lambda _path, n_ctx=4096, *, tier="normal": seen_ctx.append(n_ctx) or FakeLlama(),
+    )
+    monkeypatch.setattr(runner._pool, "is_generation_active", lambda _gid: True)
+    monkeypatch.setattr(
+        "seiso.inference.runner.llama_prefill_needs_reload",
+        lambda **_kwargs: (False, 512, 128),
+    )
+
+    reply = runner._llama_complete(
+        {"messages": [{"role": "user", "content": "hello"}], "max_tokens": 128},
+        "/tmp/model.gguf",
+        generation_id=1,
+    )
+
+    assert reply == "ok"
+    assert seen_ctx == [4096]
+    assert trim_ctxs == [8192, 4096]
+
+
 def test_llama_complete_retrims_after_oom_recovery_smaller_context(monkeypatch):
     from seiso.inference.runner import LocalInferenceRunner
 

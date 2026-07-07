@@ -98,6 +98,25 @@ def test_llama_offload_fits_headroom_requires_weight_plus_kv(tmp_path):
     )
 
 
+def test_llama_effective_kv_ctx_respects_swa_fraction(monkeypatch, tmp_path):
+    from seiso.memory.protection.llama_kv import _llama_effective_kv_ctx
+
+    gguf = tmp_path / "gemma3.gguf"
+    gguf.write_bytes(b"\x00" * 1024)
+    monkeypatch.delenv("SEISO_LLAMA_SWA_FULL", raising=False)
+    monkeypatch.setattr(
+        "seiso.inference.backends.gguf_uses_sliding_window_attention",
+        lambda _p: True,
+    )
+    monkeypatch.setattr("seiso.inference.backends.gguf_sliding_window", lambda _p: 512)
+    monkeypatch.setattr("seiso.inference.backends.gguf_swa_layer_fraction", lambda _p: 0.75)
+
+    assert _llama_effective_kv_ctx(gguf, 8192) == 2432
+
+    monkeypatch.setenv("SEISO_LLAMA_SWA_FULL", "true")
+    assert _llama_effective_kv_ctx(gguf, 8192) == 8192
+
+
 def test_is_oom_error_detects_cuda_message():
     assert is_oom_error(RuntimeError("CUDA out of memory. Tried to allocate 2.00 GiB"))
     assert is_oom_error(RuntimeError("failed to allocate Metal buffer"))

@@ -14,7 +14,7 @@ _KV_TIGHTNESS_BASELINE_BYTES = 64 * 1024
 _KV_TIGHTNESS_MAX = 1.35
 _GEMMA_SWA_HINT_RE = re.compile(r"(^|[^a-z0-9])gemma[-_ ]?(3|4|3n)([^a-z0-9]|$)")
 _MOE_HINT_RE = re.compile(
-    r"(^|[^a-z0-9])(mixtral|qwen[-_ ]?2?moe|deepseek[-_ ]?(v2|2)|moe)([^a-z0-9]|$)"
+    r"(^|[^a-z0-9])(mixtral|qwen[-_ ]?\d+(?:\.\d+)?[-_ ]?moe|deepseek[-_ ]?(v2|2)|moe)([^a-z0-9]|$)"
 )
 
 

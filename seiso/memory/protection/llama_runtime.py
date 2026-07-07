@@ -15,6 +15,7 @@ from seiso.memory.protection.constants import (
     _MAX_LLAMA_CTX,
     _MIN_LLAMA_BATCH,
     _NATIVE_LINUX_CTX_BUCKETS,
+    _NATIVE_LINUX_MMPROJ_RESERVE_MB,
     _NATIVE_LINUX_PREFILL_CLAMP_MB,
     _NATIVE_LINUX_PREFILL_HEADROOM_DROP_RATIO,
     _NATIVE_LINUX_PREFILL_HEADROOM_SHRINK_RATIO,
@@ -244,9 +245,9 @@ def resolve_llama_model_batches(
         reserve_mb = reserve_steps * _NATIVE_LINUX_PREFILL_RESERVE_PER_256TOK_MB
         effective = max(_MIN_LLAMA_BATCH * 2, effective - reserve_mb)
     if vision_prefill:
-        effective = max(_MIN_LLAMA_BATCH * 2, effective - 512)
+        effective = max(_MIN_LLAMA_BATCH * 2, effective - _NATIVE_LINUX_MMPROJ_RESERVE_MB)
     elif has_mmproj_sibling:
-        effective = max(_MIN_LLAMA_BATCH * 2, effective - 256)
+        effective = max(_MIN_LLAMA_BATCH * 2, effective - _NATIVE_LINUX_MMPROJ_RESERVE_MB)
 
     batch, ubatch = resolve_llama_batch_limits(
         effective,
