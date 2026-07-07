@@ -13,6 +13,10 @@ from seiso.compat import StrEnum
 from seiso.env import env_int
 from seiso.inference.model_pool._facade import model_pool as _mp
 from seiso.inference.model_pool.dflash import clear_dflash_draft_cache
+from seiso.memory.gpu_resource_lock import (
+    acquire_gpu_resource_lock,
+    release_gpu_resource_lock,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +66,7 @@ class ModelPool:
         self._unload_pending = False
         self._llama_infer_lock = threading.RLock()
         self._release_notes: list[str] = []
+        self._resident_gpu_resource_lock = False
 
     @classmethod
     def get(cls) -> ModelPool:
@@ -105,17 +110,40 @@ class ModelPool:
             return generation_id == self._generation
 
     def begin_inference(self) -> None:
+        acquire_gpu_resource_lock()
         with self._lock:
             self._inference_refs += 1
 
     def end_inference(self) -> None:
         should_unload = False
+        had_ref = False
         with self._lock:
+            had_ref = self._inference_refs > 0
             self._inference_refs = max(0, self._inference_refs - 1)
             if self._inference_refs == 0 and self._unload_pending:
                 should_unload = True
         if should_unload:
             self.unload_all()
+        if had_ref:
+            release_gpu_resource_lock()
+
+    def _ensure_resident_gpu_resource_lock(self) -> None:
+        with self._lock:
+            if self._resident_gpu_resource_lock:
+                return
+        acquire_gpu_resource_lock()
+        with self._lock:
+            if self._resident_gpu_resource_lock:
+                release_gpu_resource_lock()
+                return
+            self._resident_gpu_resource_lock = True
+
+    def _release_resident_gpu_resource_lock(self) -> None:
+        with self._lock:
+            if not self._resident_gpu_resource_lock:
+                return
+            self._resident_gpu_resource_lock = False
+        release_gpu_resource_lock()
 
     def acquire_llama_inference(self) -> None:
         """Serialize use of the shared llama.cpp context."""
@@ -208,6 +236,7 @@ class ModelPool:
 
         self._free_memory(sync=True)
         clear_dflash_draft_cache()
+        self._release_resident_gpu_resource_lock()
 
     def _unload_active_immediate(self) -> None:
         """Drop the active handle without canceling the in-flight request.
@@ -387,10 +416,12 @@ class ModelPool:
 
             logger.info("Loading model: %s (%s)", norm, backend.value)
             ensure_load_fits(load_path, mode="chat", backend=backend.value)
+            self._ensure_resident_gpu_resource_lock()
             try:
                 handle = loader_fn(load_path)
             except Exception:
                 self._free_memory()
+                self._release_resident_gpu_resource_lock()
                 raise
             layer_meta: dict[str, Any] = {}
             if backend == BackendKind.LLAMA:

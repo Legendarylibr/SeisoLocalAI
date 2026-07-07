@@ -525,50 +525,33 @@ def _llamaswap_unavailable_error(reason: str | None = None) -> RuntimeError:
 def recommend_backend(
     *, model_path: str, model_format: str | None = None
 ) -> BackendName:
-    """Pick the default local inference engine from model path/format."""
+    """Pick the single local inference engine from model format and host policy."""
     fmt = (model_format or "").lower()
     path = Path(model_path)
     if _is_gguf_model(model_path, model_format):
-        # Never downgrade GGUF to in-process llama.cpp on a host that requires
-        # isolation — a CUDA fault there would crash Forge. This check is
-        # fail-closed and nvidia-smi-aware, so it stands even if the guard/
-        # sidecar-status probes below raise.
-        if _native_linux_requires_isolated_gguf():
-            return BACKEND_LLAMASWAP
-        try:
-            from seiso.inference.llamaswap import llamaswap_status
-            from seiso.platform import use_linux_nvidia_inference_guards
-
-            if use_linux_nvidia_inference_guards() and llamaswap_status().available:
-                return BACKEND_LLAMASWAP
-        except Exception:
-            pass
-        return BACKEND_LLAMACPP
+        return (
+            BACKEND_LLAMASWAP
+            if _native_linux_requires_isolated_gguf()
+            else BACKEND_LLAMACPP
+        )
     if fmt in {"safetensors", "bin"} or path.is_dir():
-        backend = detect_backend()
-        if backend == Backend.MLX:
+        if detect_backend() == Backend.MLX:
             return BACKEND_MLX
         return BACKEND_TORCH
-    if path.suffix.lower() == ".gguf":
-        return BACKEND_LLAMACPP
     return BACKEND_TORCH
 
 
 def available_backends(
     *, model_path: str, model_format: str | None = None
 ) -> list[BackendName]:
-    """Backends that can serve this inventory model."""
+    """Local backends exposed for this model.
+
+    Keep this deterministic. Complex model selection belongs to the optional
+    external router, not the local backend resolver.
+    """
     fmt = (model_format or "").lower()
-    path = Path(model_path)
     if fmt == "gguf" and not gguf_is_supported_by_llamacpp(model_path):
         return []
-    if _is_gguf_model(model_path, model_format):
-        if _native_linux_requires_isolated_gguf():
-            return [BACKEND_LLAMASWAP]
-        return [BACKEND_LLAMASWAP, BACKEND_LLAMACPP]
-    if fmt in {"safetensors", "bin"} or path.is_dir():
-        preferred = recommend_backend(model_path=model_path, model_format=model_format)
-        return list(dict.fromkeys([preferred, BACKEND_TORCH, BACKEND_MLX]))
     return [recommend_backend(model_path=model_path, model_format=model_format)]
 
 
@@ -580,11 +563,9 @@ def resolve_local_backend(
 ) -> BackendName:
     """Resolve auto/requested backend for a filesystem model."""
     choice = (requested or BACKEND_AUTO).lower()
+    is_gguf = _is_gguf_model(model_path, model_format)
     if choice == BACKEND_AUTO:
-        if (
-            _is_gguf_model(model_path, model_format)
-            and _native_linux_requires_isolated_gguf()
-        ):
+        if is_gguf and _native_linux_requires_isolated_gguf():
             from seiso.inference.llamaswap import llamaswap_status
 
             status = llamaswap_status()
@@ -594,17 +575,25 @@ def resolve_local_backend(
         return recommend_backend(model_path=model_path, model_format=model_format)
     if (
         choice == BACKEND_LLAMACPP
-        and _is_gguf_model(model_path, model_format)
+        and is_gguf
         and _native_linux_requires_isolated_gguf()
     ):
-        from seiso.inference.llamaswap import llamaswap_status
-
-        if llamaswap_status().available:
-            return BACKEND_LLAMASWAP
         raise _llamaswap_unavailable_error(
             "The requested backend was llamacpp; use llamaswap or set "
             "SEISO_LLAMA_ALLOW_INPROCESS_NATIVE_LINUX=1."
         )
+
+    if is_gguf:
+        if choice in {BACKEND_LLAMACPP, BACKEND_LLAMASWAP}:
+            return choice
+        if choice in {BACKEND_MLX, BACKEND_TORCH}:
+            raise ValueError(f"Backend {choice!r} cannot load GGUF models")
+    else:
+        if choice in {BACKEND_MLX, BACKEND_TORCH}:
+            return choice
+        if choice in {BACKEND_LLAMACPP, BACKEND_LLAMASWAP}:
+            raise ValueError(f"Backend {choice!r} requires a GGUF model")
+
     if choice in {BACKEND_LLAMACPP, BACKEND_LLAMASWAP, BACKEND_MLX, BACKEND_TORCH}:
         return choice
     raise ValueError(f"Unsupported inference backend: {requested}")

@@ -46,6 +46,33 @@ def test_cancel_and_unload_clears_active():
     assert pool.active_key is None
 
 
+def test_switch_holds_gpu_resource_lock_until_unload(monkeypatch, tmp_path):
+    from seiso.inference.model_pool import pool as pool_mod
+
+    events: list[str] = []
+    monkeypatch.setattr(
+        pool_mod,
+        "acquire_gpu_resource_lock",
+        lambda: events.append("acquire"),
+    )
+    monkeypatch.setattr(
+        pool_mod,
+        "release_gpu_resource_lock",
+        lambda: events.append("release"),
+    )
+
+    pool = ModelPool()
+    model = tmp_path / "model"
+    model.mkdir()
+    handle = object()
+
+    assert pool.switch(str(model), BackendKind.MLX, lambda _path: handle) is handle
+    assert events == ["acquire"]
+
+    pool.unload_all()
+    assert events == ["acquire", "release"]
+
+
 def test_cancel_and_unload_defers_while_inference_active(tmp_path):
     pool = ModelPool()
     model = tmp_path / "model.gguf"

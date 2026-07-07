@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from queue import Empty
 from types import SimpleNamespace
@@ -130,6 +131,19 @@ def test_gguf_explicit_llamacpp_requires_unsafe_native_linux_override(
     )
 
 
+def test_recommend_backend_honors_unsafe_native_linux_override(
+    monkeypatch, tmp_path: Path
+):
+    gguf = tmp_path / "model-q4.gguf"
+    gguf.write_bytes(b"gguf")
+    monkeypatch.setattr("seiso.platform.use_linux_nvidia_inference_guards", lambda: True)
+    monkeypatch.setenv("SEISO_LLAMA_ALLOW_INPROCESS_NATIVE_LINUX", "1")
+
+    assert (
+        recommend_backend(model_path=str(gguf), model_format="gguf") == BACKEND_LLAMACPP
+    )
+
+
 def test_gguf_explicit_llamacpp_uses_healthy_sidecar_on_native_linux(
     monkeypatch, tmp_path: Path
 ):
@@ -141,14 +155,12 @@ def test_gguf_explicit_llamacpp_uses_healthy_sidecar_on_native_linux(
         lambda: SimpleNamespace(available=True),
     )
 
-    assert (
+    with pytest.raises(RuntimeError, match="requested backend was llamacpp"):
         resolve_local_backend(
             model_path=str(gguf),
             model_format="gguf",
             requested="llamacpp",
         )
-        == BACKEND_LLAMASWAP
-    )
 
 
 def _force_bare_metal_linux(monkeypatch, *, nvidia_smi: bool) -> None:
@@ -438,11 +450,8 @@ def test_safetensors_inventory_exposes_torch_and_mlx_fallbacks(
     (model_dir / "model.safetensors").write_bytes(b"x")
     monkeypatch.setattr(backends, "detect_backend", lambda: Backend.MLX)
 
-    assert available_backends(
-        model_path=str(model_dir), model_format="safetensors"
-    ) == [
-        BACKEND_MLX,
-        BACKEND_TORCH,
+    assert available_backends(model_path=str(model_dir), model_format="safetensors") == [
+        BACKEND_MLX
     ]
 
 
@@ -475,10 +484,9 @@ def test_available_backends_allows_dflash_draft_for_speculative(tmp_path: Path):
     gguf = tmp_path / "draft.gguf"
     _write_arch_gguf(gguf, "dflash-draft")
 
-    # dflash-draft is now allowed (via llama.cpp) when used as speculative draft model
+    # dflash-draft is allowed by the local host policy when used as speculative draft model.
     backends = available_backends(model_path=str(gguf), model_format="gguf")
     assert BACKEND_LLAMACPP in backends
-    assert BACKEND_LLAMASWAP in backends
 
 
 def test_is_dflash_draft_requires_gguf_and_name_or_arch(tmp_path: Path):
@@ -581,6 +589,11 @@ async def test_resolve_explicit_model_path_checks_selected_backend(
         "assert_model_fits_for_load",
         fake_assert_model_fits,
     )
+    monkeypatch.setattr(
+        inference_chat,
+        "assert_backend_runtime_available",
+        lambda _backend: None,
+    )
 
     updates = await inference_chat.resolve_explicit_model_path(
         object(),
@@ -597,6 +610,81 @@ async def test_resolve_explicit_model_path_checks_selected_backend(
         "mode": "chat",
         "backend": BACKEND_LLAMACPP,
     }
+
+
+@pytest.mark.asyncio
+async def test_resolve_explicit_model_path_rejects_unavailable_backend(
+    monkeypatch, tmp_path
+):
+    from fastapi import HTTPException
+
+    from forge.services import inference_chat
+
+    model_path = tmp_path / "model.gguf"
+    model_path.write_bytes(b"gguf")
+
+    async def fake_resolve_model_path(*_args, **_kwargs):
+        return str(model_path)
+
+    monkeypatch.setattr(
+        inference_chat,
+        "resolve_model_path",
+        fake_resolve_model_path,
+    )
+
+    def unavailable(_backend):
+        raise HTTPException(400, "Inference backend 'llamacpp' is not available")
+
+    monkeypatch.setattr(
+        inference_chat,
+        "assert_backend_runtime_available",
+        unavailable,
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await inference_chat.resolve_explicit_model_path(
+            object(),
+            "u1",
+            SimpleNamespace(data_dir=tmp_path),
+            model_path=str(model_path),
+            inference_backend=BACKEND_LLAMACPP,
+        )
+
+    assert exc_info.value.status_code == 400
+    assert "not available" in str(exc_info.value.detail)
+
+
+@pytest.mark.asyncio
+async def test_resolve_explicit_model_path_rejects_incompatible_backend(
+    monkeypatch, tmp_path
+):
+    from fastapi import HTTPException
+
+    from forge.services import inference_chat
+
+    model_path = tmp_path / "model.gguf"
+    model_path.write_bytes(b"gguf")
+
+    async def fake_resolve_model_path(*_args, **_kwargs):
+        return str(model_path)
+
+    monkeypatch.setattr(
+        inference_chat,
+        "resolve_model_path",
+        fake_resolve_model_path,
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await inference_chat.resolve_explicit_model_path(
+            object(),
+            "u1",
+            SimpleNamespace(data_dir=tmp_path),
+            model_path=str(model_path),
+            inference_backend=BACKEND_TORCH,
+        )
+
+    assert exc_info.value.status_code == 400
+    assert "cannot load GGUF" in str(exc_info.value.detail)
 
 
 def test_recommend_backend_detects_extensionless_hf_blob(tmp_path: Path):
@@ -700,6 +788,28 @@ def test_resolve_local_backend_auto():
         )
         == BACKEND_LLAMACPP
     )
+
+
+def test_resolve_local_backend_rejects_incompatible_explicit_backend(tmp_path: Path):
+    gguf = tmp_path / "model.gguf"
+    gguf.write_bytes(b"gguf")
+    model_dir = tmp_path / "hf-model"
+    model_dir.mkdir()
+    (model_dir / "model.safetensors").write_bytes(b"x")
+
+    with pytest.raises(ValueError, match="cannot load GGUF"):
+        resolve_local_backend(
+            model_path=str(gguf),
+            model_format="gguf",
+            requested=BACKEND_TORCH,
+        )
+
+    with pytest.raises(ValueError, match="requires a GGUF"):
+        resolve_local_backend(
+            model_path=str(model_dir),
+            model_format="safetensors",
+            requested=BACKEND_LLAMASWAP,
+        )
 
 
 def test_llamaswap_engine_prefers_llamacpp_on_macos(monkeypatch):
@@ -905,6 +1015,42 @@ def test_llamaswap_request_body_forwards_tools_and_model_override(monkeypatch):
     }
 
 
+def test_llamaswap_complete_serializes_native_tool_calls(monkeypatch):
+    from seiso.inference.llamaswap import LlamaSwapClient
+
+    client = LlamaSwapClient(url="http://127.0.0.1:8080", engine="llamacpp")
+    monkeypatch.setattr(
+        client,
+        "_post_json",
+        lambda _path, _body: {
+            "choices": [
+                {
+                    "message": {
+                        "tool_calls": [
+                            {
+                                "function": {
+                                    "name": "search",
+                                    "arguments": '{"query":"linux"}',
+                                }
+                            }
+                        ]
+                    }
+                }
+            ]
+        },
+    )
+
+    text = client.complete(
+        {"messages": [{"role": "user", "content": "hi"}], "max_tokens": 8},
+        "/tmp/model.gguf",
+    )
+
+    assert (
+        '<tool_call>{"name":"search","arguments":{"query":"linux"}}</tool_call>'
+        in text
+    )
+
+
 def test_sidecar_num_ctx_buckets_to_prompt_and_generation():
     from seiso.inference.llamaswap import sidecar_num_ctx
 
@@ -984,6 +1130,40 @@ def test_ollama_request_body_uses_native_chat_options(monkeypatch):
         },
         "tools": [{"type": "function", "function": {"name": "search"}}],
     }
+
+
+def test_ollama_complete_serializes_native_tool_calls(monkeypatch):
+    from seiso.inference.llamaswap import OllamaClient
+
+    client = OllamaClient(url="http://127.0.0.1:11434")
+    monkeypatch.setattr(client, "_resolve_model", lambda model_path, payload: "tag")
+    monkeypatch.setattr(
+        client,
+        "_post_json",
+        lambda _path, _body: {
+            "message": {
+                "content": "",
+                "tool_calls": [
+                    {
+                        "function": {
+                            "name": "search",
+                            "arguments": {"query": "linux"},
+                        }
+                    }
+                ],
+            }
+        },
+    )
+
+    text = client.complete(
+        {"messages": [{"role": "user", "content": "hi"}], "max_tokens": 8},
+        "/tmp/model.gguf",
+    )
+
+    assert (
+        '<tool_call>{"name":"search","arguments":{"query":"linux"}}</tool_call>'
+        in text
+    )
 
 
 def test_sidecar_vram_context_cap_passthrough_off_native_linux(monkeypatch):
@@ -1091,6 +1271,87 @@ class _FakeStreamResponse:
         return iter(self._lines)
 
 
+def test_llamaswap_stream_buffers_fragmented_tool_calls(monkeypatch):
+    import urllib.request
+
+    from seiso.inference.llamaswap import LlamaSwapClient
+
+    client = LlamaSwapClient(url="http://127.0.0.1:8080", engine="llamacpp")
+
+    def event(payload: dict) -> bytes:
+        return f"data: {json.dumps(payload)}\n".encode("utf-8")
+
+    lines = [
+        event(
+            {
+                "choices": [
+                    {
+                        "delta": {
+                            "tool_calls": [
+                                {
+                                    "index": 0,
+                                    "function": {"name": "search", "arguments": ""},
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+        ),
+        event(
+            {
+                "choices": [
+                    {
+                        "delta": {
+                            "tool_calls": [
+                                {
+                                    "index": 0,
+                                    "function": {"arguments": '{"query":'},
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+        ),
+        event(
+            {
+                "choices": [
+                    {
+                        "delta": {
+                            "tool_calls": [
+                                {
+                                    "index": 0,
+                                    "function": {"arguments": '"linux"}'},
+                                }
+                            ]
+                        },
+                        "finish_reason": "tool_calls",
+                    }
+                ]
+            }
+        ),
+        b"data: [DONE]\n",
+    ]
+    monkeypatch.setattr(
+        urllib.request,
+        "urlopen",
+        lambda req, timeout=None: _FakeStreamResponse(lines),
+    )
+
+    tokens = list(
+        client.stream(
+            {"messages": [{"role": "user", "content": "hi"}], "max_tokens": 8},
+            "/tmp/model.gguf",
+            should_stop=lambda: False,
+        )
+    )
+
+    assert [token.text for token in tokens] == [
+        '<tool_call>{"name":"search","arguments":{"query":"linux"}}</tool_call>'
+    ]
+
+
 def test_ollama_stream_parses_native_jsonl(monkeypatch):
     import urllib.request
 
@@ -1123,6 +1384,50 @@ def test_ollama_stream_parses_native_jsonl(monkeypatch):
 
     assert tokens == ["Hel", "lo"]
     assert captured["url"].endswith("/api/chat")
+
+
+def test_ollama_stream_preserves_tool_calls_and_estimates_tokens(monkeypatch):
+    import urllib.request
+
+    from seiso.inference.llamaswap import OllamaClient
+
+    client = OllamaClient(url="http://127.0.0.1:11434")
+    monkeypatch.setattr(client, "_resolve_model", lambda model_path, payload: "tag")
+    lines = [
+        json.dumps(
+            {
+                "message": {
+                    "tool_calls": [
+                        {
+                            "function": {
+                                "name": "search",
+                                "arguments": {"query": "linux"},
+                            }
+                        }
+                    ]
+                },
+                "done": False,
+            }
+        ).encode("utf-8")
+        + b"\n",
+        b'{"message": {}, "done": true}\n',
+    ]
+    monkeypatch.setattr(
+        urllib.request,
+        "urlopen",
+        lambda req, timeout=None: _FakeStreamResponse(lines),
+    )
+
+    tokens = list(
+        client.stream(
+            {"messages": [{"role": "user", "content": "hi"}], "max_tokens": 8},
+            "/tmp/model.gguf",
+            should_stop=lambda: False,
+        )
+    )
+
+    assert tokens[0].text.startswith("<tool_call>")
+    assert tokens[0].new_tokens > 1
 
 
 def test_ollama_stream_raises_on_error_event(monkeypatch):
@@ -1704,6 +2009,64 @@ def test_dflash_speculative_stream_loads_draft_with_estimated_context(monkeypatc
     assert calls == [("dflash", ("/tmp/dflash.gguf",), {"n_ctx": 6144})]
 
 
+def test_dflash_speculative_blocked_on_native_linux_nvidia(monkeypatch, tmp_path: Path):
+    from seiso.inference.runner import LocalInferenceRunner
+
+    target = tmp_path / "target"
+    target.mkdir()
+    draft = tmp_path / "draft-dflash.gguf"
+    _write_arch_gguf(draft, "dflash")
+
+    monkeypatch.setattr(
+        "seiso.inference.runner._native_linux_requires_isolated_gguf",
+        lambda: True,
+    )
+
+    runner = LocalInferenceRunner()
+    with pytest.raises(RuntimeError, match="dFlash speculative decoding"):
+        runner._resolve_route(
+            {"draft_model_path": str(draft)},
+            str(target),
+        )
+
+
+@pytest.mark.asyncio
+async def test_resolve_dflash_draft_rejected_on_native_linux_nvidia(
+    monkeypatch, tmp_path: Path
+):
+    from fastapi import HTTPException
+
+    from forge.services import inference_chat
+
+    draft = tmp_path / "draft-dflash.gguf"
+    _write_arch_gguf(draft, "dflash")
+
+    async def fake_resolve_model_path(*_args, **_kwargs):
+        return str(draft)
+
+    monkeypatch.setattr(
+        inference_chat,
+        "resolve_model_path",
+        fake_resolve_model_path,
+    )
+    monkeypatch.setattr(
+        "seiso.inference.backends._native_linux_requires_isolated_gguf",
+        lambda: True,
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await inference_chat.resolve_draft_model(
+            object(),
+            "u1",
+            SimpleNamespace(data_dir=tmp_path),
+            draft_model_id=None,
+            draft_model_path=str(draft),
+        )
+
+    assert exc_info.value.status_code == 400
+    assert "dFlash speculative decoding" in str(exc_info.value.detail)
+
+
 def test_torch_input_device_prefers_sharded_gpu():
     import torch
 
@@ -1925,7 +2288,7 @@ async def test_list_inference_options_defaults_to_llamaswap_on_nvidia(
         },
     )
 
-    assert options[0]["backends"] == [BACKEND_LLAMASWAP, BACKEND_LLAMACPP]
+    assert options[0]["backends"] == [BACKEND_LLAMASWAP]
     assert options[0]["default_backend"] == BACKEND_LLAMASWAP
 
 

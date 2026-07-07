@@ -17,6 +17,7 @@ from seiso.inference.backends import (
     BACKEND_LLAMASWAP,
     BACKEND_MLX,
     BACKEND_TORCH,
+    _native_linux_requires_isolated_gguf,
     is_dflash_draft,
     prepare_model_path,
     resolve_local_backend,
@@ -29,6 +30,7 @@ from seiso.inference.speculative import (
     iter_speculative_tokens_dflash,
 )
 from seiso.inference.streaming import StreamToken, StreamUpdate
+from seiso.inference.tool_calls import ToolCallDeltaBuffer, message_content_with_tool_calls
 from seiso.inference.tuning import (
     configure_torch_inference,
     estimate_llama_n_ctx,
@@ -104,6 +106,18 @@ def _llama_loaded_batch_fallback() -> tuple[int, int]:
 def _torch_stream_timeout_s() -> int:
     """Poll interval for detecting failed Torch generation threads."""
     return max(1, env_int("SEISO_TORCH_STREAM_TIMEOUT_S", 2))
+
+
+def _raise_if_dflash_inprocess_blocked(draft_path: str | None) -> None:
+    if not draft_path or not is_dflash_draft(draft_path):
+        return
+    if _native_linux_requires_isolated_gguf():
+        raise RuntimeError(
+            "dFlash speculative decoding uses an in-process llama.cpp GGUF draft, "
+            "which is blocked on native Linux NVIDIA. Disable speculative decoding "
+            "or set SEISO_LLAMA_ALLOW_INPROCESS_NATIVE_LINUX=1 to explicitly accept "
+            "the in-process llama.cpp risk."
+        )
 
 
 def _llama_n_ctx_for_payload(
@@ -660,6 +674,7 @@ class LocalInferenceRunner:
         self, payload: dict[str, Any], model_path: str
     ) -> tuple[str, str]:
         if payload.get("draft_model_path"):
+            _raise_if_dflash_inprocess_blocked(payload.get("draft_model_path"))
             # dflash drafts are fast GGUF; we still run verification on torch target path for now
             resolved = prepare_model_path(model_path, BACKEND_TORCH)
             return "speculative", resolved
@@ -749,6 +764,7 @@ class LocalInferenceRunner:
         draft_path = payload.get("draft_model_path")
         if not draft_path:
             raise ValueError("draft_model_path required for speculative decoding")
+        _raise_if_dflash_inprocess_blocked(draft_path)
 
         configure_torch_inference()
 
@@ -1268,6 +1284,7 @@ class LocalInferenceRunner:
                     raise RuntimeError(
                         "llama.cpp inference OOM — recovery attempts exhausted"
                     ) from exc
+                tool_buffer = ToolCallDeltaBuffer()
                 llm = self._llama_recover_from_oom(
                     llm, model_path=model_path, n_ctx=n_ctx
                 )
@@ -1299,7 +1316,7 @@ class LocalInferenceRunner:
         if not choices:
             return ""
         message = choices[0].get("message") or {}
-        return str(message.get("content") or "")
+        return message_content_with_tool_calls(message)
 
     def _llamaswap_complete(
         self,
@@ -1378,6 +1395,7 @@ class LocalInferenceRunner:
             payload["max_tokens"] = budget.max_tokens
 
         completion_kwargs = llama_completion_kwargs(payload)
+        tool_buffer = ToolCallDeltaBuffer()
         emitted_text = False
         recoveries = 0
         while True:
@@ -1394,6 +1412,14 @@ class LocalInferenceRunner:
                     if content:
                         emitted_text = True
                         yield StreamToken(content)
+                    tool_text = tool_buffer.add(delta.get("tool_calls"))
+                    if tool_text:
+                        emitted_text = True
+                        yield StreamToken(tool_text)
+                tool_text = tool_buffer.flush()
+                if tool_text and not should_stop():
+                    emitted_text = True
+                    yield StreamToken(tool_text)
                 return
             except Exception as exc:
                 if not is_oom_error(exc):
