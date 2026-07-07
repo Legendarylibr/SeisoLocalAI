@@ -258,13 +258,18 @@ class ModelPool:
         self,
         key: str,
         backend: BackendKind,
+        norm_path: str | None = None,
     ) -> bool:
         """True when switch() is reloading the same llama.cpp pool entry."""
         if backend != BackendKind.LLAMA:
             return False
         with self._lock:
             active = self._active
-        return bool(active and active.backend == backend and active.key == key)
+        if not active or active.backend != backend:
+            return False
+        if active.key == key:
+            return True
+        return bool(norm_path and active.meta.get("norm_path") == norm_path)
 
     def _clear_active_for_switch(self) -> None:
         """Stop streams, wait for idle, then unload so a new model can load."""
@@ -336,11 +341,17 @@ class ModelPool:
             if not self._active or self._active.key != key:
                 return None
             needed_ctx = int(meta.get("n_ctx") or 0)
+            needed_tokens = int(meta.get("max_tokens") or 0)
             cached_ctx = int(self._active.meta.get("n_ctx") or 0)
             if needed_ctx > 0 and cached_ctx < needed_ctx:
                 return None
             if backend != BackendKind.LLAMA:
                 return self._active.handle
+            cached_tokens = int(
+                getattr(self._active.handle, "_seiso_max_tokens", 512) or 512
+            )
+            if needed_tokens > 0 and cached_tokens < needed_tokens:
+                return None
             cached_layers = int(self._active.meta.get("n_gpu_layers", -1))
             requested_layers = env_int("SEISO_LLAMA_GPU_LAYERS", _mp()._default_llama_gpu_layers())
             if _mp()._llama_cache_is_optimal(
@@ -348,7 +359,9 @@ class ModelPool:
                 cached_layers,
                 requested_layers,
                 n_ctx=needed_ctx or cached_ctx or 2048,
-            ) and _mp()._llama_cache_headroom_ok(self._active.handle):
+            ) and _mp()._llama_cache_headroom_ok(
+                self._active.handle, max_tokens=needed_tokens or cached_tokens
+            ):
                 return self._active.handle
             return None
 
@@ -380,7 +393,7 @@ class ModelPool:
                 return cached
 
             if self._active:
-                if self._is_same_model_reload(key, backend):
+                if self._is_same_model_reload(key, backend, norm_path=norm):
                     # Preload/chat often reload the warmed handle (larger n_ctx,
                     # safer batch, layer fit). Preserve generation so the active
                     # chat request is not discarded after reload completes.
@@ -495,8 +508,12 @@ class ModelPool:
             ):
                 cached_ctx = int(self._active.meta.get("n_ctx") or 0)
                 cached_layers = int(self._active.meta.get("n_gpu_layers", -1))
+                cached_max_tokens = int(
+                    getattr(self._active.handle, "_seiso_max_tokens", 512) or 512
+                )
                 if (
                     cached_ctx >= n_ctx
+                    and cached_max_tokens >= max_tokens
                     and _mp()._llama_cache_is_optimal(
                         str(self._active.meta.get("path") or model_path),
                         cached_layers,
@@ -509,13 +526,17 @@ class ModelPool:
                 ):
                     return self._active.handle
 
-        key = f"llama:{norm}" if tier == "normal" else f"llama:{norm}:{tier}"
+        key = (
+            f"llama:{norm}:tokens:{max_tokens}"
+            if tier == "normal"
+            else f"llama:{norm}:{tier}:tokens:{max_tokens}"
+        )
         return self.switch(
             model_path,
             BackendKind.LLAMA,
             loader,
             cache_key=key,
-            meta={"n_ctx": n_ctx, "load_tier": tier},
+            meta={"n_ctx": n_ctx, "load_tier": tier, "max_tokens": max_tokens},
         )
 
     def reload_llama(
@@ -548,13 +569,16 @@ class ModelPool:
             )
 
         norm = self.normalize_path(model_path)
-        key = f"llama:{norm}:{tier}:batch:{batch_override[0]}:{batch_override[1]}"
+        key = (
+            f"llama:{norm}:{tier}:batch:{batch_override[0]}:{batch_override[1]}"
+            f":tokens:{max_tokens}"
+        )
         return self.switch(
             model_path,
             BackendKind.LLAMA,
             loader,
             cache_key=key,
-            meta={"n_ctx": n_ctx, "load_tier": tier},
+            meta={"n_ctx": n_ctx, "load_tier": tier, "max_tokens": max_tokens},
         )
 
     def reload_llama_compact(self, model_path: str, n_ctx: int) -> Any:

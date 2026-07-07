@@ -129,9 +129,11 @@ def _llama_n_ctx_for_payload(
     max_tokens = int(payload.get("max_tokens", 512))
     if payload.get("n_ctx"):
         requested = int(payload["n_ctx"])
+        # Treat explicit n_ctx as a user/request cap. Do not grow it to fit old
+        # history, because that silently increases KV VRAM; trim messages later.
         sized = clamp_llama_n_ctx(
             requested,
-            messages=messages,
+            messages=[],
             max_tokens=max_tokens,
             model_path=model_path,
             model_format=payload.get("model_format"),

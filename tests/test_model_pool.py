@@ -244,7 +244,7 @@ def test_reload_llama_preserves_generation_and_skips_self_wait(tmp_path, monkeyp
     gen_id = pool.bump_generation()
     pool.begin_inference()
 
-    def fake_load(path, n_ctx, tier="normal", batch_override=None):
+    def fake_load(path, n_ctx, tier="normal", batch_override=None, **_kwargs):
         return second
 
     monkeypatch.setattr(pool_mod, "_load_llama_model", fake_load)
@@ -305,7 +305,7 @@ def test_get_llama_same_model_reload_preserves_generation(tmp_path, monkeypatch)
     gen_id = pool.bump_generation()
     pool.begin_inference()
 
-    def fake_load(path, n_ctx, tier="normal", batch_override=None):
+    def fake_load(path, n_ctx, tier="normal", batch_override=None, **_kwargs):
         return upgraded
 
     monkeypatch.setattr(pool_mod, "_load_llama_model", fake_load)
@@ -615,12 +615,41 @@ def test_get_llama_uses_actual_loaded_context_for_cache(monkeypatch, tmp_path):
 
     monkeypatch.setattr(model_pool, "_load_llama_model", fake_load)
     monkeypatch.setattr(model_pool, "_llama_cache_is_optimal", lambda *_a, **_k: True)
-    monkeypatch.setattr(model_pool, "_llama_cache_headroom_ok", lambda _h: True)
+    monkeypatch.setattr(model_pool, "_llama_cache_headroom_ok", lambda *_a, **_k: True)
 
     pool.get_llama(str(model_path), n_ctx=8192)
     pool.get_llama(str(model_path), n_ctx=4096)
 
     assert load_ctx == [8192, 4096]
+
+
+def test_get_llama_reloads_when_cached_completion_budget_too_small(monkeypatch, tmp_path):
+    from seiso.inference import model_pool
+
+    pool = ModelPool()
+    model_path = tmp_path / "model.gguf"
+    model_path.write_bytes(b"gguf")
+    load_tokens: list[int] = []
+
+    class FakeLlama:
+        def __init__(self, max_tokens: int) -> None:
+            self._seiso_n_ctx = 8192
+            self._seiso_n_gpu_layers = -1
+            self._seiso_max_tokens = max_tokens
+            self._seiso_load_headroom_mb = 24576
+
+    def fake_load(_path, _n_ctx, *, max_tokens=512, **_kwargs):
+        load_tokens.append(max_tokens)
+        return FakeLlama(max_tokens)
+
+    monkeypatch.setattr(model_pool, "_load_llama_model", fake_load)
+    monkeypatch.setattr(model_pool, "_llama_cache_is_optimal", lambda *_a, **_k: True)
+    monkeypatch.setattr(model_pool, "_llama_cache_headroom_ok", lambda *_a, **_k: True)
+
+    pool.get_llama(str(model_path), n_ctx=8192, max_tokens=512)
+    pool.get_llama(str(model_path), n_ctx=8192, max_tokens=2048)
+
+    assert load_tokens == [512, 2048]
 
 
 def test_get_llama_unloads_previous_handle_when_reloading(monkeypatch, tmp_path):
@@ -684,7 +713,7 @@ def test_get_llama_reloads_when_cached_headroom_stale(monkeypatch, tmp_path):
     monkeypatch.setattr(
         model_pool,
         "_llama_cache_headroom_ok",
-        lambda _handle: headroom_ok["value"],
+        lambda *_a, **_k: headroom_ok["value"],
     )
 
     pool.get_llama(str(model_path), n_ctx=4096)
@@ -957,7 +986,9 @@ def test_llama_load_kwargs_native_linux_ignores_batch_env(monkeypatch):
     assert kwargs["n_batch"] < 8192
 
 
-def test_native_linux_flash_attn_opt_in(monkeypatch):
+def test_native_linux_flash_attn_opt_in(monkeypatch, tmp_path):
+    gguf = tmp_path / "dense.gguf"
+    _write_arch_gguf(gguf, "llama")
     for key in list(os.environ):
         if key.startswith("SEISO_LLAMA_"):
             monkeypatch.delenv(key, raising=False)
@@ -965,13 +996,16 @@ def test_native_linux_flash_attn_opt_in(monkeypatch):
     monkeypatch.setattr("seiso.inference.model_pool._cuda_available", lambda: True)
     monkeypatch.setattr("seiso.inference.model_pool._llama_gpu_offload_ok", lambda: True)
     monkeypatch.setattr("seiso.inference.model_pool._native_linux_nvidia", lambda: True)
+    monkeypatch.setattr("seiso.memory.protection.llama_model_is_tight_vram_fit", lambda **_k: False)
     monkeypatch.setenv("SEISO_LLAMA_FLASH_ATTN", "true")
 
-    kwargs = llama_load_kwargs(4096, model_path="/tmp/model.gguf")
+    kwargs = llama_load_kwargs(4096, model_path=str(gguf))
     assert kwargs["flash_attn"] is True
 
 
 def test_native_linux_flash_attn_defaults_off_dense_opt_in(monkeypatch, tmp_path):
+    gguf = tmp_path / "dense.gguf"
+    _write_arch_gguf(gguf, "llama")
     for key in list(os.environ):
         if key.startswith("SEISO_LLAMA_"):
             monkeypatch.delenv(key, raising=False)
@@ -980,12 +1014,13 @@ def test_native_linux_flash_attn_defaults_off_dense_opt_in(monkeypatch, tmp_path
     monkeypatch.setattr("seiso.inference.model_pool._llama_gpu_offload_ok", lambda: True)
     monkeypatch.setattr("seiso.inference.model_pool._native_linux_nvidia", lambda: True)
     monkeypatch.setattr("seiso.inference.model_pool._llama_skip_partial_offload", lambda _p: False)
+    monkeypatch.setattr("seiso.memory.protection.llama_model_is_tight_vram_fit", lambda **_k: False)
 
-    kwargs = llama_load_kwargs(4096, model_path="/tmp/model.gguf")
+    kwargs = llama_load_kwargs(4096, model_path=str(gguf))
     assert "flash_attn" not in kwargs
 
     monkeypatch.setenv("SEISO_LLAMA_FLASH_ATTN", "true")
-    kwargs = llama_load_kwargs(4096, model_path="/tmp/model.gguf")
+    kwargs = llama_load_kwargs(4096, model_path=str(gguf))
     assert kwargs.get("flash_attn") is True
 
 

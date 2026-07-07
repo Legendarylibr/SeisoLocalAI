@@ -237,6 +237,7 @@ def test_native_linux_flash_attn_family_policy(monkeypatch, tmp_path: Path):
     clear_gguf_caches()
     monkeypatch.setattr(mp, "_native_linux_nvidia", lambda: True)
     monkeypatch.setattr(mp, "_llama_gpu_offload_ok", lambda: True)
+    monkeypatch.setattr("seiso.memory.protection.llama_model_is_tight_vram_fit", lambda **_k: False)
     monkeypatch.setattr("seiso.platform.use_linux_nvidia_inference_guards", lambda **_: True)
     for key in list(os.environ):
         if key.startswith("SEISO_LLAMA_"):

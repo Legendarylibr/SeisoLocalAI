@@ -2508,11 +2508,11 @@ def test_llama_complete_retries_after_inference_oom(monkeypatch):
                 raise RuntimeError("CUDA out of memory. Tried to allocate 2.00 GiB")
             return {"choices": [{"message": {"content": "ok"}}]}
 
-    def get_llama(_path, n_ctx=4096, *, tier="normal"):
+    def get_llama(_path, n_ctx=4096, *, tier="normal", max_tokens=512):
         calls.append(f"get:{tier}")
         return FakeLlama(tier=tier)
 
-    def reload_llama(_path, n_ctx, *, tier, batch_override=None):
+    def reload_llama(_path, n_ctx, *, tier, batch_override=None, max_tokens=512):
         calls.append(f"reload:{tier}")
         return FakeLlama(tier=tier)
 
@@ -2564,7 +2564,7 @@ def test_llama_complete_oom_recovery_passes_batch_override(monkeypatch):
         lambda *_a, **_k: FakeLlama(),
     )
 
-    def reload_llama(_path, n_ctx, *, tier, batch_override=None):
+    def reload_llama(_path, n_ctx, *, tier, batch_override=None, max_tokens=512):
         seen_overrides.append(batch_override)
         return FakeLlama(batch=batch_override[0] if batch_override else 512, tier=tier)
 
@@ -2614,11 +2614,11 @@ def test_llama_complete_prefill_guard_reloads_before_native_linux_segfault(
             calls.append(f"complete:{self._seiso_n_batch}")
             return {"choices": [{"message": {"content": "ok"}}]}
 
-    def get_llama(_path, n_ctx=4096, *, tier="normal"):
+    def get_llama(_path, n_ctx=4096, *, tier="normal", max_tokens=512):
         calls.append(f"get:{tier}")
         return FakeLlama(batch=4096, tier=tier)
 
-    def reload_llama(_path, n_ctx, *, tier, batch_override=None):
+    def reload_llama(_path, n_ctx, *, tier, batch_override=None, max_tokens=512):
         calls.append(f"reload:{tier}")
         seen_overrides.append(batch_override)
         batch = batch_override[0] if batch_override else 4096
@@ -2665,7 +2665,7 @@ def test_llama_complete_trims_prompt_to_loaded_context(monkeypatch):
             seen_messages.append(kwargs["messages"])
             return {"choices": [{"message": {"content": "ok"}}]}
 
-    def get_llama(_path, n_ctx=4096, *, tier="normal"):
+    def get_llama(_path, n_ctx=4096, *, tier="normal", max_tokens=512):
         seen_ctx.append(n_ctx)
         return FakeLlama()
 
@@ -2715,7 +2715,7 @@ def test_llama_complete_recomputes_context_after_prompt_trim(monkeypatch):
         def create_chat_completion(self, **_kwargs):
             return {"choices": [{"message": {"content": "ok"}}]}
 
-    def get_llama(_path, n_ctx=4096, *, tier="normal"):
+    def get_llama(_path, n_ctx=4096, *, tier="normal", max_tokens=512):
         seen_ctx.append(n_ctx)
         return FakeLlama()
 
@@ -2781,7 +2781,8 @@ def test_llama_complete_retrims_after_context_recompute(monkeypatch):
     monkeypatch.setattr(
         runner._pool,
         "get_llama",
-        lambda _path, n_ctx=4096, *, tier="normal": seen_ctx.append(n_ctx) or FakeLlama(),
+        lambda _path, n_ctx=4096, *, tier="normal", max_tokens=512: seen_ctx.append(n_ctx)
+        or FakeLlama(),
     )
     monkeypatch.setattr(runner._pool, "is_generation_active", lambda _gid: True)
     monkeypatch.setattr(
@@ -2797,7 +2798,8 @@ def test_llama_complete_retrims_after_context_recompute(monkeypatch):
 
     assert reply == "ok"
     assert seen_ctx == [4096]
-    assert trim_ctxs == [8192, 4096]
+    assert trim_ctxs[:2] == [8192, 4096]
+    assert all(ctx <= 4096 for ctx in trim_ctxs[1:])
 
 
 def test_llama_complete_retrims_after_oom_recovery_smaller_context(monkeypatch):
@@ -2933,7 +2935,7 @@ def test_llama_stream_preflight_reloads_before_first_token(monkeypatch):
         lambda *_a, **_k: FakeLlama(batch=1024, ubatch=512),
     )
 
-    def reload_llama(_path, _n_ctx, *, tier, batch_override=None):
+    def reload_llama(_path, _n_ctx, *, tier, batch_override=None, max_tokens=512):
         events.append(("reload", batch_override))
         return FakeLlama(batch=batch_override[0], ubatch=batch_override[1])
 
