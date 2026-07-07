@@ -44,6 +44,7 @@ _LLAMA_CTX_BUCKETS = (
     131072,
 )
 _NATIVE_LINUX_CTX_BUCKETS = (
+    2048,
     4096,
     8192,
     12288,

@@ -196,6 +196,17 @@ def fit_llama_gpu_layers(
 
     weight_mb = max(int(_prot().estimate_path_vram_mb(model_path)), 256)
     total_layers = _mp().gguf_total_layers(model_path)
+    decode_reserve_mb = (
+        _prot().llama_decode_reserve_mb(
+            gpu_total_mb=_prot().discrete_gpu_total_mb(),
+            free_mb=headroom_mb,
+            max_tokens=512,
+            model_path=model_path,
+        )
+        if _mp()._native_linux_nvidia()
+        else 0
+    )
+    fit_budget_mb = max(0, headroom_mb - decode_reserve_mb)
 
     def _fits(layers: int, budget_mb: int) -> bool:
         return _prot().llama_offload_fits_headroom(
@@ -208,17 +219,17 @@ def fit_llama_gpu_layers(
         )
 
     # Prefer full GPU offload only when weight+KV fits currently free VRAM.
-    if requested == -1 and _fits(-1, headroom_mb):
+    if requested == -1 and _fits(-1, fit_budget_mb):
         return -1
 
     if requested > 0:
         capped = min(requested, total_layers)
-        if capped >= total_layers and _fits(-1, headroom_mb):
+        if capped >= total_layers and _fits(-1, fit_budget_mb):
             return capped
-        if _fits(capped, headroom_mb):
+        if _fits(capped, fit_budget_mb):
             return capped
 
-    partial_budget = headroom_mb
+    partial_budget = fit_budget_mb
     if _mp()._native_linux_nvidia() and _prot().llama_model_is_tight_vram_fit(
         model_path=model_path,
         free_mb=headroom_mb,
@@ -238,9 +249,10 @@ def fit_llama_gpu_layers(
             capacity_mb = _prot().discrete_gpu_total_mb() or headroom_mb
         except Exception:
             capacity_mb = headroom_mb
+        capacity_budget_mb = max(0, capacity_mb - decode_reserve_mb)
         if capacity_mb > 0 and _prot().llama_offload_fits_headroom(
             model_path,
-            headroom_mb=capacity_mb,
+            headroom_mb=capacity_budget_mb,
             n_gpu_layers=-1,
             n_ctx=n_ctx,
             weight_mb=weight_mb,
@@ -487,7 +499,18 @@ def _llama_cache_headroom_ok(handle: Any) -> bool:
     if not loaded_headroom:
         return True
     _mp()._refresh_headroom_stats(force=True)
-    return _prot().headroom_mb() >= int(int(loaded_headroom) * 0.85)
+    current = _prot().headroom_mb()
+    if current < int(int(loaded_headroom) * 0.85):
+        return False
+    if _mp()._native_linux_nvidia():
+        reserve = _prot().llama_decode_reserve_mb(
+            gpu_total_mb=_prot().discrete_gpu_total_mb(),
+            free_mb=current,
+            max_tokens=512,
+            model_path=getattr(handle, "_seiso_model_path", None),
+        )
+        return current > reserve
+    return True
 
 
 def llama_load_kwargs(n_ctx: int, *, model_path: str | None = None) -> dict[str, Any]:

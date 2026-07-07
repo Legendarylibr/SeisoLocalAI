@@ -20,7 +20,6 @@ from seiso.inference.model_pool import (
     llama_load_kwargs,
 )
 
-
 FAMILY_CASES = [
     pytest.param("llama", "llama", False, False, id="llama"),
     pytest.param("llama3", "llama3", False, False, id="llama3"),

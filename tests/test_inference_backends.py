@@ -8,7 +8,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-
 from gguf_fixtures import write_arch_gguf as _write_arch_gguf
 from gguf_fixtures import write_gguf_u32_metadata as _write_gguf_with_u32_metadata
 
@@ -1543,8 +1542,7 @@ def test_llama_complete_recomputes_context_after_prompt_trim(monkeypatch):
     )
 
     assert reply == "ok"
-    # Native Linux NVIDIA uses 4096 as the minimum ctx bucket; other platforms use 2048.
-    assert seen_ctx == [4096]
+    assert seen_ctx == [2048]
 
 
 def test_llama_complete_retrims_after_context_recompute(monkeypatch):
@@ -1704,3 +1702,63 @@ def test_llama_stream_does_not_retry_after_emitting_text(monkeypatch):
     with pytest.raises(RuntimeError, match="after streaming began"):
         next(stream)
     assert reloads == []
+
+
+def test_llama_stream_preflight_reloads_before_first_token(monkeypatch):
+    from seiso.inference.runner import LocalInferenceRunner
+
+    runner = LocalInferenceRunner()
+    events: list[tuple[str, object]] = []
+
+    class FakeLlama:
+        def __init__(self, *, batch: int, ubatch: int) -> None:
+            self._seiso_load_tier = "normal"
+            self._seiso_n_ctx = 4096
+            self._seiso_n_batch = batch
+            self._seiso_n_ubatch = ubatch
+            self._seiso_n_gpu_layers = -1
+            self._seiso_load_headroom_mb = 24576
+            self._seiso_model_path = "/tmp/model.gguf"
+
+        def create_chat_completion(self, **kwargs):
+            events.append(("generate", kwargs.get("max_tokens")))
+            return iter([{"choices": [{"delta": {"content": "ok"}}]}])
+
+    monkeypatch.setattr(
+        runner._pool,
+        "get_llama",
+        lambda *_a, **_k: FakeLlama(batch=1024, ubatch=512),
+    )
+
+    def reload_llama(_path, _n_ctx, *, tier, batch_override=None):
+        events.append(("reload", batch_override))
+        return FakeLlama(batch=batch_override[0], ubatch=batch_override[1])
+
+    monkeypatch.setattr(runner._pool, "reload_llama", reload_llama)
+    monkeypatch.setattr("seiso.inference.runner.release_cached_memory", lambda sync=False: None)
+    monkeypatch.setattr(
+        "seiso.inference.runner.llama_prefill_needs_reload",
+        lambda **_kwargs: (False, 1024, 512),
+    )
+    monkeypatch.setattr(
+        "seiso.inference.runner.resolve_llama_decode_budget",
+        lambda **_kwargs: SimpleNamespace(
+            n_ctx=4096,
+            max_tokens=16,
+            n_batch=128,
+            n_ubatch=64,
+            reserve_mb=1024,
+            tight=True,
+        ),
+    )
+
+    chunks = list(
+        runner._llama_stream(
+            {"messages": [{"role": "user", "content": "hi"}], "max_tokens": 128},
+            "/tmp/model.gguf",
+            should_stop=lambda: False,
+        )
+    )
+
+    assert [chunk.text for chunk in chunks] == ["ok"]
+    assert events == [("reload", (128, 64)), ("generate", 16)]
