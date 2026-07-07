@@ -159,6 +159,46 @@ def test_torch_prepare_inputs_returns_clamped_generation_budget():
     assert max_tokens < 128
 
 
+def test_torch_prompt_trim_raises_when_prompt_cannot_fit_context():
+    from seiso.inference.runner import _trim_torch_messages_to_context
+
+    class FakeTokenizer:
+        model_max_length = 4
+
+        def __call__(self, prompt: str, **_kwargs):
+            return {"input_ids": prompt.split()}
+
+    model = SimpleNamespace(config=SimpleNamespace(max_position_embeddings=4))
+
+    with pytest.raises(RuntimeError, match="exceeds model context"):
+        _trim_torch_messages_to_context(
+            [{"role": "user", "content": ["untrimmable", "payload"]}],
+            model=model,
+            tokenizer=FakeTokenizer(),
+            max_tokens=8,
+        )
+
+
+def test_torch_oom_retry_does_not_increase_clamped_generation(monkeypatch):
+    from seiso.inference import runner
+
+    seen: list[int] = []
+
+    def fake_generate(_model, gen_kwargs):
+        seen.append(gen_kwargs["max_new_tokens"])
+        if len(seen) == 1:
+            raise RuntimeError("CUDA out of memory")
+        return "ok"
+
+    monkeypatch.setattr(runner, "generate_with_cache_fallback", fake_generate)
+    monkeypatch.setattr(runner, "release_cached_memory", lambda sync=False: None)
+
+    result = runner._torch_generate_with_oom_retry(None, {"max_new_tokens": 5})
+
+    assert result == "ok"
+    assert seen == [5, 2]
+
+
 def _complete_hf_gguf_metadata(filename: str = "model-q4.gguf") -> dict:
     return {
         "repo_id": "org/Model",
