@@ -16,7 +16,13 @@ from forge.services.inference_models import (
 )
 from forge.services.model_router_client import ROUTER_MODEL_ID
 from forge.services.models import resolve_model_path
-from seiso.inference.backends import BACKEND_LLAMACPP, BACKEND_ROUTER, BACKEND_TORCH
+from seiso.inference.backends import (
+    BACKEND_LLAMACPP,
+    BACKEND_LLAMASWAP,
+    BACKEND_MLX,
+    BACKEND_ROUTER,
+    BACKEND_TORCH,
+)
 
 
 def assert_model_fits_for_load(
@@ -34,6 +40,20 @@ def assert_model_fits_for_load(
             fit.get("memory_load_blocked_reason")
             or "Model exceeds available memory on this machine",
         )
+
+
+def assert_backend_runtime_available(backend: str) -> None:
+    from forge.services.hf_connectivity import check_inference_runtime
+
+    runtime = check_inference_runtime()
+    available = {
+        BACKEND_LLAMACPP: runtime.llamacpp,
+        BACKEND_LLAMASWAP: runtime.llamaswap,
+        BACKEND_MLX: runtime.mlx,
+        BACKEND_TORCH: runtime.torch,
+    }
+    if not available.get(backend, False):
+        raise HTTPException(400, f"Inference backend {backend!r} is not available")
 
 
 def _sanitize_chat_fields(
@@ -140,10 +160,17 @@ async def prepare_local_chat_target(
         if not path:
             raise HTTPException(400, "Invalid model_path")
         backend = (inference_backend or "auto").lower()
-        if backend == "auto":
-            from seiso.inference.backends import recommend_backend
+        from seiso.inference.backends import resolve_local_backend
 
-            backend = recommend_backend(model_path=path)
+        try:
+            backend = resolve_local_backend(
+                model_path=path,
+                model_format=None,
+                requested=backend,
+            )
+        except (RuntimeError, ValueError) as exc:
+            raise HTTPException(400, str(exc)) from exc
+        assert_backend_runtime_available(backend)
         if check_memory:
             assert_model_fits_for_load(path, mode="chat", backend=backend)
         from seiso.inference.ollama_registry import metadata_for_model_path
@@ -476,12 +503,26 @@ async def resolve_draft_model(
     if not draft_path:
         raise HTTPException(400, "Invalid draft model path")
 
-    from seiso.inference.backends import is_dflash_draft
+    from seiso.inference.backends import (
+        _native_linux_requires_isolated_gguf,
+        is_dflash_draft,
+    )
 
     if not compatibility_checked:
         _assert_draft_compatible(target_model_path, draft_path)
 
-    draft_backend = BACKEND_LLAMACPP if is_dflash_draft(draft_path) else BACKEND_TORCH
+    is_dflash = is_dflash_draft(draft_path)
+    if is_dflash and _native_linux_requires_isolated_gguf():
+        raise HTTPException(
+            400,
+            "dFlash speculative decoding uses an in-process llama.cpp GGUF draft, "
+            "which is blocked on native Linux NVIDIA. Disable speculative decoding "
+            "or set SEISO_LLAMA_ALLOW_INPROCESS_NATIVE_LINUX=1 to explicitly accept "
+            "the in-process llama.cpp risk.",
+        )
+
+    draft_backend = BACKEND_LLAMACPP if is_dflash else BACKEND_TORCH
+    assert_backend_runtime_available(draft_backend)
     assert_model_fits_for_load(draft_path, mode="chat", backend=draft_backend)
     return {
         "draft_model_path": draft_path,

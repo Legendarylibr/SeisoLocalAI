@@ -5,6 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
+def estimate_chunk_tokens(text: str) -> int:
+    """Best-effort token count for sidecar chunks that do not report token IDs."""
+    return max(1, (len(text.encode("utf-8")) + 3) // 4)
+
+
 @dataclass(frozen=True)
 class StreamToken:
     """One decoded chunk from the model and how many tokens it represents."""

@@ -10,12 +10,8 @@ from typing import Any
 from forge.db.store import Database
 from forge.services.artifact_integrity import inventory_gguf_is_complete
 from forge.services.hardware import (
-    HardwareTier,
     assess_inference_option_fit,
-    classify_tier,
     hardware_profile,
-    preferred_inference_backend,
-    vram_headroom_mb,
 )
 from forge.services.hf_connectivity import check_inference_runtime
 from forge.services.hf_hub import get_gguf_file_size_bytes
@@ -43,29 +39,6 @@ SOURCE_LABELS = {
     "training": "Fine-tune output",
     "export": "Export output",
 }
-
-
-def _pick_default_backend(
-    backends: list[str],
-    profile: dict[str, Any] | None,
-) -> str:
-    """Hardware-aware default when a model supports multiple inference engines."""
-    if not backends:
-        return BACKEND_LLAMACPP
-    if len(backends) == 1:
-        return backends[0]
-    if profile:
-        preferred = preferred_inference_backend(profile)
-        if preferred in backends:
-            return preferred
-        if BACKEND_LLAMACPP in backends:
-            tier = classify_tier(profile)
-            if tier in (HardwareTier.CPU_ONLY, HardwareTier.EDGE):
-                return BACKEND_LLAMACPP
-            if vram_headroom_mb(profile) >= 8000:
-                return backends[0]
-            return BACKEND_LLAMACPP
-    return backends[0]
 
 
 def _source_label(source: str | None) -> str:
@@ -176,7 +149,6 @@ def _build_local_option(
     metadata = json.loads(row.get("metadata_json") or "{}")
     complete = _inventory_artifact_is_complete(row, metadata)
     model_format = row.get("format")
-    is_gguf = (model_format or "").lower() == "gguf"
     if not complete:
         opt: dict[str, Any] = {
             "id": row["id"],
@@ -211,13 +183,9 @@ def _build_local_option(
         opt["variant_group"] = variant_group_key(opt)
         return opt
 
-    candidate_backends = (
-        [BACKEND_LLAMASWAP, BACKEND_LLAMACPP]
-        if is_gguf
-        else available_backends(
-            model_path=row["path"],
-            model_format=model_format,
-        )
+    candidate_backends = available_backends(
+        model_path=row["path"],
+        model_format=model_format,
     )
     backends = _filter_installed_backends(
         candidate_backends,
@@ -231,7 +199,7 @@ def _build_local_option(
         "source_label": _source_label(row.get("source")),
         "format": model_format,
         "path": row["path"],
-        "default_backend": _pick_default_backend(backends, profile) if backends else "",
+        "default_backend": backends[0] if backends else "",
         "backends": backends,
         "backend_labels": _backend_labels_for(backends),
         "size_bytes": row.get("size_bytes", 0),

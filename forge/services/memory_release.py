@@ -17,6 +17,7 @@ _GPU_TASK_KINDS = frozenset(
 )
 _GPU_TASK_LOCK = threading.RLock()
 _ACTIVE_GPU_TASKS: dict[str, dict[str, str | None]] = {}
+_GPU_RESOURCE_LOCK_HELD = "gpu_resource_lock_held"
 
 
 def _refresh_hardware_profile() -> None:
@@ -41,6 +42,7 @@ def _register_gpu_task(
     task: str,
     job_id: str | None = None,
     user_id: str | None = None,
+    gpu_resource_lock_held: bool = False,
 ) -> str:
     token = _gpu_resource_token(task=task, job_id=job_id, user_id=user_id)
     with _GPU_TASK_LOCK:
@@ -48,19 +50,20 @@ def _register_gpu_task(
             "task": task,
             "job_id": str(job_id) if job_id else None,
             "user_id": str(user_id) if user_id else None,
+            _GPU_RESOURCE_LOCK_HELD: "1" if gpu_resource_lock_held else None,
         }
     return token
 
 
 def _unregister_gpu_task(
     *, resource_token: str | None = None, job_id: str | None = None
-) -> None:
+) -> dict[str, str | None] | None:
     with _GPU_TASK_LOCK:
         if resource_token:
-            _ACTIVE_GPU_TASKS.pop(resource_token, None)
-            return
+            return _ACTIVE_GPU_TASKS.pop(resource_token, None)
         if job_id:
-            _ACTIVE_GPU_TASKS.pop(str(job_id), None)
+            return _ACTIVE_GPU_TASKS.pop(str(job_id), None)
+    return None
 
 
 def _active_tracked_gpu_task_kinds(*, exclude_job_id: str | None = None) -> list[str]:
@@ -153,14 +156,18 @@ def release_after_task(
 ) -> None:
     """Post-task cleanup: restore kernel patches and empty GPU caches."""
     from seiso.kernels.lifecycle import restore_kernel_patches
+    from seiso.memory.gpu_resource_lock import release_gpu_resource_lock
     from seiso.memory.protection import release_cached_memory
 
+    task = None
     try:
         restore_kernel_patches()
         release_cached_memory(sync=True)
         _refresh_hardware_profile()
     finally:
-        _unregister_gpu_task(resource_token=resource_token, job_id=job_id)
+        task = _unregister_gpu_task(resource_token=resource_token, job_id=job_id)
+        if task and task.get(_GPU_RESOURCE_LOCK_HELD) == "1":
+            release_gpu_resource_lock()
     if log:
         log(f"Released GPU/RAM caches ({reason})")
 
@@ -195,11 +202,22 @@ def prepare_for_gpu_task(
         pass
     except PermissionError as exc:
         raise RuntimeError(str(exc)) from exc
-    resource_token = _register_gpu_task(task=task, job_id=job_id, user_id=user_id)
+    from seiso.memory.gpu_resource_lock import acquire_gpu_resource_lock
+
+    acquire_gpu_resource_lock()
+    resource_token = _register_gpu_task(
+        task=task,
+        job_id=job_id,
+        user_id=user_id,
+        gpu_resource_lock_held=True,
+    )
     try:
         result = release_inference_memory(reason=task, log=log)
     except Exception:
         _unregister_gpu_task(resource_token=resource_token, job_id=job_id)
+        from seiso.memory.gpu_resource_lock import release_gpu_resource_lock
+
+        release_gpu_resource_lock()
         raise
     result["resource_token"] = resource_token
     return result

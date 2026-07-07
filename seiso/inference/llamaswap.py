@@ -35,7 +35,12 @@ from seiso.inference.sidecar_runtime import (
     sidecar_stack_ready,
     sidecar_status,
 )
-from seiso.inference.streaming import StreamToken
+from seiso.inference.streaming import StreamToken, estimate_chunk_tokens
+from seiso.inference.tool_calls import (
+    ToolCallDeltaBuffer,
+    message_content_with_tool_calls,
+    tool_calls_to_text,
+)
 
 # Re-export runtime surface (implemented in sidecar_runtime).
 __all__ = [
@@ -311,7 +316,7 @@ class OllamaClient:
         message = data.get("message") if isinstance(data, dict) else None
         if not isinstance(message, dict):
             return ""
-        return str(message.get("content") or "")
+        return message_content_with_tool_calls(message)
 
     def stream(
         self,
@@ -343,7 +348,17 @@ class OllamaClient:
                     message = chunk.get("message") or {}
                     content = message.get("content")
                     if content:
-                        yield StreamToken(str(content))
+                        text_content = str(content)
+                        yield StreamToken(
+                            text_content,
+                            new_tokens=estimate_chunk_tokens(text_content),
+                        )
+                    tool_text = tool_calls_to_text(message.get("tool_calls"))
+                    if tool_text:
+                        yield StreamToken(
+                            tool_text,
+                            new_tokens=estimate_chunk_tokens(tool_text),
+                        )
                     if chunk.get("done"):
                         break
         except urllib.error.URLError as exc:
@@ -471,7 +486,7 @@ class LlamaSwapClient:
         if not choices:
             return ""
         message = choices[0].get("message") or {}
-        return str(message.get("content") or "")
+        return message_content_with_tool_calls(message)
 
     def stream(
         self,
@@ -482,6 +497,7 @@ class LlamaSwapClient:
     ) -> Iterator[StreamToken]:
         body = self._request_body(payload, model_path, stream=True)
         req = self._build_request("/v1/chat/completions", body)
+        tool_buffer = ToolCallDeltaBuffer()
         try:
             with urllib.request.urlopen(req, timeout=None) as response:
                 for raw in response:
@@ -492,6 +508,12 @@ class LlamaSwapClient:
                         continue
                     event = text[5:].strip()
                     if event == "[DONE]":
+                        tool_text = tool_buffer.flush()
+                        if tool_text and not should_stop():
+                            yield StreamToken(
+                                tool_text,
+                                new_tokens=estimate_chunk_tokens(tool_text),
+                            )
                         break
                     try:
                         chunk = json.loads(event)
@@ -503,7 +525,24 @@ class LlamaSwapClient:
                     delta = choices[0].get("delta") or {}
                     content = delta.get("content")
                     if content:
-                        yield StreamToken(str(content))
+                        text_content = str(content)
+                        yield StreamToken(
+                            text_content,
+                            new_tokens=estimate_chunk_tokens(text_content),
+                        )
+                    tool_text = tool_buffer.add(delta.get("tool_calls"))
+                    if tool_text:
+                        yield StreamToken(
+                            tool_text,
+                            new_tokens=estimate_chunk_tokens(tool_text),
+                        )
+                    if choices[0].get("finish_reason") == "tool_calls":
+                        tool_text = tool_buffer.flush()
+                        if tool_text:
+                            yield StreamToken(
+                                tool_text,
+                                new_tokens=estimate_chunk_tokens(tool_text),
+                            )
         except urllib.error.URLError as exc:
             raise RuntimeError(
                 f"llama-swap is unavailable at {self.url}. "

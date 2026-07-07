@@ -46,6 +46,15 @@ def test_prepare_for_gpu_task_blocks_other_running_jobs(monkeypatch):
 
     memory_release._ACTIVE_GPU_TASKS.clear()
     monkeypatch.setattr(memory_release, "release_inference_memory", lambda **kwargs: {})
+    lock_events: list[str] = []
+    monkeypatch.setattr(
+        "seiso.memory.gpu_resource_lock.acquire_gpu_resource_lock",
+        lambda: lock_events.append("acquire"),
+    )
+    monkeypatch.setattr(
+        "seiso.memory.gpu_resource_lock.release_gpu_resource_lock",
+        lambda: lock_events.append("release"),
+    )
     monkeypatch.setattr(
         memory_release,
         "running_gpu_task_kinds",
@@ -57,6 +66,7 @@ def test_prepare_for_gpu_task_blocks_other_running_jobs(monkeypatch):
     result = memory_release.prepare_for_gpu_task(task="export", job_id="job-2")
     memory_release.release_after_task(reason="export complete", job_id="job-2")
     assert result["resource_token"] == "job-2"
+    assert lock_events == ["acquire", "release"]
 
     with pytest.raises(RuntimeError, match="Another GPU task"):
         memory_release.prepare_for_gpu_task(task="export", job_id="job-3")
@@ -79,8 +89,21 @@ def test_download_resource_blocks_inference_and_gpu_tasks(monkeypatch):
     from forge.services import memory_release
 
     memory_release._ACTIVE_GPU_TASKS.clear()
-    monkeypatch.setattr(memory_release, "running_gpu_task_kinds", memory_release.running_gpu_task_kinds)
+    monkeypatch.setattr(
+        memory_release,
+        "running_gpu_task_kinds",
+        memory_release.running_gpu_task_kinds,
+    )
     monkeypatch.setattr(memory_release, "release_inference_memory", lambda **kwargs: {})
+    lock_events: list[str] = []
+    monkeypatch.setattr(
+        "seiso.memory.gpu_resource_lock.acquire_gpu_resource_lock",
+        lambda: lock_events.append("acquire"),
+    )
+    monkeypatch.setattr(
+        "seiso.memory.gpu_resource_lock.release_gpu_resource_lock",
+        lambda: lock_events.append("release"),
+    )
     monkeypatch.setattr(
         "seiso.memory.protection.release_cached_memory",
         lambda sync=False: None,
@@ -101,4 +124,32 @@ def test_download_resource_blocks_inference_and_gpu_tasks(monkeypatch):
         resource_token=result["resource_token"],
     )
 
+    assert memory_release.running_gpu_task_kinds() == []
+    assert lock_events == ["acquire", "release"]
+
+
+def test_prepare_for_gpu_task_releases_lock_on_unload_failure(monkeypatch):
+    from forge.services import memory_release
+
+    memory_release._ACTIVE_GPU_TASKS.clear()
+    lock_events: list[str] = []
+    monkeypatch.setattr(memory_release, "running_gpu_task_kinds", lambda **_kwargs: [])
+    monkeypatch.setattr(
+        "seiso.memory.gpu_resource_lock.acquire_gpu_resource_lock",
+        lambda: lock_events.append("acquire"),
+    )
+    monkeypatch.setattr(
+        "seiso.memory.gpu_resource_lock.release_gpu_resource_lock",
+        lambda: lock_events.append("release"),
+    )
+    monkeypatch.setattr(
+        memory_release,
+        "release_inference_memory",
+        lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("unload failed")),
+    )
+
+    with pytest.raises(RuntimeError, match="unload failed"):
+        memory_release.prepare_for_gpu_task(task="training", job_id="train-1")
+
+    assert lock_events == ["acquire", "release"]
     assert memory_release.running_gpu_task_kinds() == []
