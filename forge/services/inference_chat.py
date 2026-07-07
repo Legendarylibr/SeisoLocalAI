@@ -43,8 +43,28 @@ def _sanitize_chat_fields(
     max_tokens: int | None,
     n_ctx: int | None,
     messages: list[dict[str, Any]] | None,
+    inference_backend: str | None = None,
 ) -> dict[str, Any]:
     from seiso.memory.protection import sanitize_inference_payload
+
+    isolated = False
+    if model_path:
+        try:
+            from seiso.inference.backends import (
+                BACKEND_LLAMASWAP,
+                resolve_local_backend,
+            )
+
+            isolated = (
+                resolve_local_backend(
+                    model_path=model_path,
+                    model_format=model_format,
+                    requested=inference_backend,
+                )
+                == BACKEND_LLAMASWAP
+            )
+        except Exception:
+            isolated = False
 
     payload: dict[str, Any] = {
         "model_path": model_path,
@@ -54,7 +74,7 @@ def _sanitize_chat_fields(
     }
     if n_ctx is not None:
         payload["n_ctx"] = n_ctx
-    sanitized = sanitize_inference_payload(payload)
+    sanitized = sanitize_inference_payload(payload, isolated=isolated)
     out: dict[str, Any] = {"max_tokens": sanitized["max_tokens"]}
     if "n_ctx" in sanitized:
         out["n_ctx"] = sanitized["n_ctx"]
@@ -143,6 +163,7 @@ async def prepare_local_chat_target(
                     max_tokens=max_tokens,
                     n_ctx=n_ctx,
                     messages=messages,
+                    inference_backend=backend,
                 )
             )
         return updates
@@ -230,6 +251,7 @@ async def prepare_local_chat_target(
                 max_tokens=max_tokens,
                 n_ctx=n_ctx,
                 messages=messages,
+                inference_backend=updates.get("inference_backend"),
             )
         )
     return updates

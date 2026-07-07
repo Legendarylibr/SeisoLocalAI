@@ -177,6 +177,29 @@ def test_sanitize_inference_payload_tightens_native_linux_low_headroom(monkeypat
     assert out["max_tokens"] == 512
 
 
+def test_sanitize_inference_payload_isolated_skips_in_process_caps(monkeypatch):
+    monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 24576)
+    monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: True)
+
+    out = sanitize_inference_payload(
+        {"messages": [{"role": "user", "content": "hi"}], "max_tokens": 4096},
+        isolated=True,
+    )
+
+    assert out["max_tokens"] == 4096
+
+
+def test_sanitize_inference_payload_isolated_keeps_absolute_ceiling(monkeypatch):
+    monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 24576)
+
+    out = sanitize_inference_payload(
+        {"messages": [{"role": "user", "content": "hi"}], "max_tokens": 99999},
+        isolated=True,
+    )
+
+    assert out["max_tokens"] == 8192
+
+
 def test_sanitize_inference_payload_allows_native_linux_long_completion_override(
     monkeypatch,
 ):

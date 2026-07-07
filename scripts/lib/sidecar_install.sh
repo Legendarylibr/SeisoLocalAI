@@ -41,6 +41,19 @@ seiso_export_ollama_cli_env() {
   export OLLAMA_HOST="$(seiso_ollama_cli_host "$url")"
 }
 
+# Long-context defaults for the Ollama server (user overrides win):
+# flash attention keeps large contexts efficient and a single parallel slot
+# keeps the whole context budget for one chat. Quantized KV cache (q8_0) is
+# left opt-in — forcing it globally can trigger CUDA errors in Ollama for
+# models/GPUs that don't support it, so only export it when the user set it.
+seiso_export_ollama_server_env() {
+  export OLLAMA_FLASH_ATTENTION="${OLLAMA_FLASH_ATTENTION:-1}"
+  export OLLAMA_NUM_PARALLEL="${OLLAMA_NUM_PARALLEL:-1}"
+  if [[ -n "${OLLAMA_KV_CACHE_TYPE:-}" ]]; then
+    export OLLAMA_KV_CACHE_TYPE
+  fi
+}
+
 seiso_native_linux_nvidia() {
   [[ "$(uname -s)" == "Linux" ]] || return 1
   seiso_is_wsl && return 1
@@ -92,6 +105,7 @@ seiso_install_ollama() {
   if ! seiso_ollama_health_ok "$ollama_url"; then
     seiso_log "Starting Ollama at $ollama_url"
     seiso_export_ollama_cli_env "$ollama_url"
+    seiso_export_ollama_server_env
     seiso_start_background_sidecar "$run_dir/ollama.log" ollama serve
   fi
 

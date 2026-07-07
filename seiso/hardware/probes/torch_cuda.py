@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from seiso.hardware.probes.common import sanitize_hardware_label
+
+logger = logging.getLogger(__name__)
 
 
 def probe_torch_gpus() -> list[dict[str, Any]]:
@@ -36,4 +39,10 @@ def probe_torch_gpus() -> list[dict[str, Any]]:
             )
     except ImportError:
         pass
+    except Exception:
+        # A broken CUDA runtime (e.g. the cu12/cu13 driver split) makes
+        # torch.cuda.* raise RuntimeError. Swallow it so enumerate_gpus() can
+        # fall through to the nvidia-smi probe instead of erasing GPU detection
+        # (which would silently disable the native-Linux inference guards).
+        logger.debug("torch CUDA GPU probe failed; deferring to nvidia-smi", exc_info=True)
     return gpus

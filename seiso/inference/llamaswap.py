@@ -14,7 +14,7 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any, Protocol
 
-from seiso.env import env_str
+from seiso.env import env_int, env_str
 from seiso.inference.sidecar_runtime import (
     DEFAULT_LLAMASWAP_URL,
     DEFAULT_OLLAMA_URL,
@@ -56,9 +56,11 @@ __all__ = [
     "ollama_cli_host",
     "ollama_health_ok",
     "ollama_url",
+    "plan_sidecar_request",
     "preferred_llamaswap_engine",
     "preferred_sidecar_engine",
     "sidecar_enabled",
+    "sidecar_num_ctx",
     "sidecar_setup_hint",
     "sidecar_stack_ready",
     "sidecar_status",
@@ -93,6 +95,71 @@ def llamaswap_model_name(model_path: str) -> str:
     return str(Path(model_path).expanduser())
 
 
+# Headroom kept free between prompt + generation and the context edge.
+_SIDECAR_CTX_MARGIN_TOKENS = 256
+
+
+def _sidecar_context_ceiling(payload: dict[str, Any], model_path: str) -> int:
+    from seiso.inference.context_limits import effective_context_ceiling
+
+    return effective_context_ceiling(
+        model_path,
+        model_format=payload.get("model_format"),
+        model_name=Path(model_path).name,
+    )
+
+
+def sidecar_num_ctx(
+    messages: list[dict[str, Any]],
+    *,
+    max_tokens: int,
+    ceiling: int,
+) -> int:
+    """Right-size the sidecar context window to prompt + generation.
+
+    Snaps to the same coarse presets as the chat UI so multi-turn history growth
+    reuses one loaded KV size instead of forcing a model reload per message.
+    The sidecar owns VRAM safety (it can spill to CPU instead of crashing), so
+    no VRAM clamp is applied here — only the model's native context ceiling.
+    """
+    from seiso.inference.context_limits import CONTEXT_WINDOW_PRESETS
+    from seiso.memory.protection.chat_guards import _estimate_prompt_tokens
+
+    override = env_int("SEISO_SIDECAR_NUM_CTX", 0)
+    if override > 0:
+        return max(2048, min(override, ceiling))
+
+    needed = (
+        _estimate_prompt_tokens(messages) + max(1, max_tokens) + _SIDECAR_CTX_MARGIN_TOKENS
+    )
+    for preset in CONTEXT_WINDOW_PRESETS:
+        if needed <= preset:
+            return min(preset, ceiling)
+    return ceiling
+
+
+def plan_sidecar_request(
+    payload: dict[str, Any], model_path: str
+) -> tuple[list[dict[str, Any]], int, int]:
+    """Return (messages, num_ctx, max_tokens) for a sidecar chat request.
+
+    Long inputs are trimmed (oldest turns first, with an explicit omission
+    marker) only when they exceed the model's native context ceiling, so the
+    sidecar never silently truncates the prompt from the front and drops the
+    system message.
+    """
+    from seiso.memory.protection.chat_guards import trim_llama_messages_to_context
+
+    messages = payload.get("messages") or []
+    max_tokens = int(payload.get("max_tokens", 512))
+    ceiling = _sidecar_context_ceiling(payload, model_path)
+    num_ctx = sidecar_num_ctx(messages, max_tokens=max_tokens, ceiling=ceiling)
+    messages = trim_llama_messages_to_context(
+        messages, n_ctx=num_ctx, max_tokens=max_tokens
+    )
+    return messages, num_ctx, max_tokens
+
+
 def create_isolated_gguf_client(
     *, url: str | None = None, engine: str | None = None
 ) -> IsolatedGgufClient:
@@ -109,7 +176,13 @@ def create_isolated_gguf_client(
 
 
 class OllamaClient:
-    """OpenAI-compatible client for Ollama's local /v1/chat/completions API."""
+    """Client for Ollama's native /api/chat API.
+
+    Uses the native endpoint (not the OpenAI-compatible one) because only
+    /api/chat accepts per-request ``options.num_ctx``. Without it Ollama runs
+    at its server default context (typically 4096) and silently truncates
+    long prompts from the front.
+    """
 
     def __init__(self, *, url: str | None = None) -> None:
         self.url = (url or ollama_url()).rstrip("/")
@@ -124,11 +197,10 @@ class OllamaClient:
 
     def complete(self, payload: dict[str, Any], model_path: str) -> str:
         body = self._request_body(payload, model_path, stream=False)
-        data = self._post_json("/v1/chat/completions", body)
-        choices = data.get("choices") if isinstance(data, dict) else None
-        if not choices:
+        data = self._post_json("/api/chat", body)
+        message = data.get("message") if isinstance(data, dict) else None
+        if not isinstance(message, dict):
             return ""
-        message = choices[0].get("message") or {}
         return str(message.get("content") or "")
 
     def stream(
@@ -139,29 +211,31 @@ class OllamaClient:
         should_stop,
     ) -> Iterator[StreamToken]:
         body = self._request_body(payload, model_path, stream=True)
-        req = self._build_request("/v1/chat/completions", body)
+        req = self._build_request("/api/chat", body)
         try:
             with urllib.request.urlopen(req, timeout=None) as response:
+                # Native API streams one JSON object per line (not SSE).
                 for raw in response:
                     if should_stop():
                         break
                     text = raw.decode("utf-8", errors="replace").strip()
-                    if not text or not text.startswith("data:"):
+                    if not text:
                         continue
-                    event = text[5:].strip()
-                    if event == "[DONE]":
-                        break
                     try:
-                        chunk = json.loads(event)
+                        chunk = json.loads(text)
                     except json.JSONDecodeError:
                         continue
-                    choices = chunk.get("choices") or []
-                    if not choices:
+                    if not isinstance(chunk, dict):
                         continue
-                    delta = choices[0].get("delta") or {}
-                    content = delta.get("content")
+                    error = chunk.get("error")
+                    if error:
+                        raise RuntimeError(f"Ollama error: {error}")
+                    message = chunk.get("message") or {}
+                    content = message.get("content")
                     if content:
                         yield StreamToken(str(content))
+                    if chunk.get("done"):
+                        break
         except urllib.error.URLError as exc:
             raise RuntimeError(
                 f"Ollama is unavailable at {self.url}. "
@@ -217,16 +291,21 @@ class OllamaClient:
     def _request_body(
         self, payload: dict[str, Any], model_path: str, *, stream: bool
     ) -> dict[str, Any]:
-        body: dict[str, Any] = {
-            "model": self._resolve_model(model_path, payload),
-            "messages": payload.get("messages") or [],
-            "max_tokens": int(payload.get("max_tokens", 512)),
+        messages, num_ctx, max_tokens = plan_sidecar_request(payload, model_path)
+        options: dict[str, Any] = {
+            "num_ctx": num_ctx,
+            "num_predict": max_tokens,
             "temperature": float(payload.get("temperature", 0.0)),
-            "stream": stream,
         }
         top_p = payload.get("top_p")
         if top_p is not None:
-            body["top_p"] = float(top_p)
+            options["top_p"] = float(top_p)
+        body: dict[str, Any] = {
+            "model": self._resolve_model(model_path, payload),
+            "messages": messages,
+            "stream": stream,
+            "options": options,
+        }
         tools = payload.get("tools_schemas")
         if tools:
             body["tools"] = tools
@@ -319,10 +398,13 @@ class LlamaSwapClient:
     def _request_body(
         self, payload: dict[str, Any], model_path: str, *, stream: bool
     ) -> dict[str, Any]:
+        # llama-server's context size is fixed at launch, so only the trim step
+        # of the plan applies here; num_ctx cannot be resized per request.
+        messages, _num_ctx, max_tokens = plan_sidecar_request(payload, model_path)
         body: dict[str, Any] = {
             "model": llamaswap_model_name(model_path),
-            "messages": payload.get("messages") or [],
-            "max_tokens": int(payload.get("max_tokens", 512)),
+            "messages": messages,
+            "max_tokens": max_tokens,
             "temperature": float(payload.get("temperature", 0.0)),
             "stream": stream,
         }
