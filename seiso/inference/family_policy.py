@@ -20,7 +20,6 @@ _MOE_HINT_RE = re.compile(
 
 @dataclass(frozen=True, slots=True)
 class InferenceFamilyPolicy:
-    architecture: str
     kind: FamilyKind
     allow_partial_offload: bool
     allow_flash_attn: bool
@@ -76,7 +75,6 @@ def policy_for_gguf(model_path: str) -> InferenceFamilyPolicy:
 
     if uses_swa:
         return InferenceFamilyPolicy(
-            architecture=architecture,
             kind="swa",
             allow_partial_offload=False,
             allow_flash_attn=False,
@@ -88,7 +86,6 @@ def policy_for_gguf(model_path: str) -> InferenceFamilyPolicy:
         tightness = max(1.1, _prefill_tightness_for_dense(model_path))
         tightness = min(_KV_TIGHTNESS_MAX, tightness)
         return InferenceFamilyPolicy(
-            architecture=architecture,
             kind="moe",
             allow_partial_offload=True,
             allow_flash_attn=False,
@@ -98,7 +95,6 @@ def policy_for_gguf(model_path: str) -> InferenceFamilyPolicy:
         )
 
     return InferenceFamilyPolicy(
-        architecture=architecture,
         kind="dense",
         allow_partial_offload=True,
         allow_flash_attn=True,

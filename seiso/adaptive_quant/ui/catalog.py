@@ -324,29 +324,6 @@ _WORKFLOW_DEFINITIONS: list[dict[str, Any]] = [
         "fields": [],
     },
     {
-        "id": "setup_tests",
-        "title": "Setup tests",
-        "description": "Hardware-aware unittest subset used during ./setup.sh.",
-        "category": "verify",
-        "fields": [
-            {
-                "name": "full",
-                "label": "Full unittest suite",
-                "type": "checkbox",
-            },
-            {
-                "name": "no_torch",
-                "label": "Skip torch modules",
-                "type": "checkbox",
-            },
-            {
-                "name": "no_nvidia",
-                "label": "Skip NVIDIA modules",
-                "type": "checkbox",
-            },
-        ],
-    },
-    {
         "id": "doctor",
         "title": "Environment report",
         "description": "Detailed doctor output (make doctor).",

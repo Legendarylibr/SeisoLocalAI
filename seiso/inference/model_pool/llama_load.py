@@ -11,11 +11,12 @@ from pathlib import Path
 from typing import Any
 
 from seiso.env import env_bool, env_int
+from seiso.inference.family_policy import policy_for_gguf
 from seiso.inference.model_pool._facade import model_pool as _mp
 from seiso.memory.protection._facade import protection as _prot
 from seiso.memory.protection.constants import (
-    LlamaLoadTier,
     _NATIVE_LINUX_UNKNOWN_GPU_BATCH_CAPS,
+    LlamaLoadTier,
 )
 
 logger = logging.getLogger(__name__)
@@ -78,7 +79,9 @@ def _mac_cpu_offload_enabled() -> bool:
 def _default_llama_gpu_layers() -> int:
     if _mp()._apple_silicon_metal():
         return -1
-    if (_mp()._cuda_available() or _mp()._nvidia_hardware_visible()) and _mp()._llama_gpu_offload_ok():
+    if (
+        _mp()._cuda_available() or _mp()._nvidia_hardware_visible()
+    ) and _mp()._llama_gpu_offload_ok():
         # Only request full GPU offload when the installed llama-cpp-python
         # wheel actually supports it. A CPU-only wheel on an NVIDIA box will
         # crash if n_gpu_layers != 0.
@@ -146,11 +149,7 @@ def _llama_skip_partial_offload(model_path: str) -> bool:
         return False
     if env_bool("SEISO_LLAMA_UNSAFE_PARTIAL_OFFLOAD", False):
         return False
-    if env_bool("SEISO_LLAMA_SKIP_PARTIAL_OFFLOAD", False):
-        return True
     try:
-        from seiso.inference.family_policy import policy_for_gguf
-
         return not policy_for_gguf(model_path).allow_partial_offload
     except Exception:
         return False
@@ -165,8 +164,6 @@ def _default_llama_flash_attn(model_path: str | None = None) -> bool:
     if not model_path:
         return True
     try:
-        from seiso.inference.family_policy import policy_for_gguf
-
         return policy_for_gguf(model_path).allow_flash_attn
     except Exception:
         return False
@@ -229,8 +226,6 @@ def fit_llama_gpu_layers(
         n_ctx=n_ctx,
     ):
         try:
-            from seiso.inference.family_policy import policy_for_gguf
-
             policy = policy_for_gguf(model_path)
             reserve_ratio = min(0.25, 0.12 + (policy.prefill_tightness - 1.0) * 0.20)
         except Exception:
@@ -315,7 +310,11 @@ def _llama_layer_attempts(
 
     total_layers = _mp().gguf_total_layers(model_path)
 
-    if not _mp()._native_linux_nvidia() and _mp()._apple_silicon_metal() and _mp()._mac_cpu_offload_enabled():
+    if (
+        not _mp()._native_linux_nvidia()
+        and _mp()._apple_silicon_metal()
+        and _mp()._mac_cpu_offload_enabled()
+    ):
         max_layers = total_layers if requested == -1 else min(requested, total_layers)
         candidates = [
             max_layers - 1,
@@ -383,8 +382,6 @@ def _llama_speed_extras(model_path: str) -> dict[str, Any]:
     """GGUF-metadata-driven llama.cpp knobs for throughput and VRAM headroom."""
     extras: dict[str, Any] = {}
     try:
-        from seiso.inference.family_policy import policy_for_gguf
-
         if not policy_for_gguf(model_path).swa_full_default and not env_bool(
             "SEISO_LLAMA_SWA_FULL", False
         ):
@@ -396,7 +393,6 @@ def _llama_speed_extras(model_path: str) -> dict[str, Any]:
 
 def _llama_kv_quant_options(model_path: str) -> list[dict[str, Any]]:
     """KV-cache quant tiers to try after the unquantized cache fails."""
-    _ = model_path
     try:
         from llama_cpp import llama_cpp as lc
     except (ImportError, Exception):
@@ -410,8 +406,6 @@ def _llama_kv_quant_options(model_path: str) -> list[dict[str, Any]]:
         unsafe = env_bool("SEISO_LLAMA_UNSAFE_KV_QUANT", False)
         if not unsafe and model_path:
             try:
-                from seiso.inference.family_policy import policy_for_gguf
-
                 if not policy_for_gguf(model_path).allow_kv_quant:
                     return [{}]
             except Exception:
@@ -515,9 +509,7 @@ def llama_load_kwargs(n_ctx: int, *, model_path: str | None = None) -> dict[str,
         n_batch = env_int("SEISO_LLAMA_BATCH", batch_default)
         n_ubatch = min(env_int("SEISO_LLAMA_UBATCH", min(n_batch, ubatch_default)), n_batch)
     native_linux_nvidia = _mp()._native_linux_nvidia()
-    native_offload_kqv = n_gpu_layers != 0 and env_bool(
-        "SEISO_LLAMA_UNSAFE_KQV_OFFLOAD", False
-    )
+    native_offload_kqv = n_gpu_layers != 0 and env_bool("SEISO_LLAMA_UNSAFE_KQV_OFFLOAD", False)
     kwargs: dict[str, Any] = {
         "n_ctx": n_ctx,
         "n_threads": n_threads,
@@ -581,6 +573,7 @@ def _load_llama_model(
     from llama_cpp import Llama
 
     from seiso.inference.tuning import attach_llama_prompt_cache
+
     _prot().release_cached_memory(sync=True)
     _mp()._clear_optimal_layers_cache()
     _mp()._refresh_headroom_stats(force=True)
@@ -678,7 +671,7 @@ def _load_llama_model(
                 if not env_bool("SEISO_LLAMA_UNSAFE_PARTIAL_KQV", False):
                     load_kwargs["offload_kqv"] = False
                 if not env_bool("SEISO_LLAMA_UNSAFE_OP_OFFLOAD", False):
-                    load_kwargs["op_offload"] = False
+                    load_kwargs.pop("op_offload", None)
         _mp()._refresh_headroom_stats(force=True)
         load_kwargs["_model_path"] = path
         load_kwargs = _prot().clamp_llama_load_kwargs(load_kwargs)

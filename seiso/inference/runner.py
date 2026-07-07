@@ -64,6 +64,23 @@ def _stream_batch_chars() -> int:
     return max(1, env_int("SEISO_STREAM_BATCH_CHARS", 16))
 
 
+def _torch_generate_with_oom_retry(model: Any, gen_kwargs: dict[str, Any]) -> Any:
+    """Run torch generate once, halving max_new_tokens on OOM."""
+    try:
+        return generate_with_cache_fallback(model, gen_kwargs)
+    except Exception as exc:
+        if not is_oom_error(exc):
+            raise
+        release_cached_memory(sync=True)
+        reduced = dict(gen_kwargs)
+        reduced["max_new_tokens"] = max(32, int(reduced.get("max_new_tokens", 512)) // 2)
+        logger.warning(
+            "Torch inference OOM — retrying with max_new_tokens=%s",
+            reduced["max_new_tokens"],
+        )
+        return generate_with_cache_fallback(model, reduced)
+
+
 def _llama_loaded_batch_fallback() -> tuple[int, int]:
     """Conservative batch pair when a cached llama handle lacks metadata."""
     try:
@@ -105,6 +122,36 @@ def _llama_n_ctx_for_payload(
         model_format=payload.get("model_format"),
     )
 
+
+def _prepare_llama_messages(
+    payload: dict[str, Any],
+    model_path: str,
+) -> tuple[list[dict[str, Any]], int]:
+    """Size context, trim messages, and optionally re-estimate when n_ctx is unset."""
+    messages = payload.get("messages", [])
+    max_tokens = int(payload.get("max_tokens", 512))
+    n_ctx = _llama_n_ctx_for_payload(payload, messages, model_path=model_path)
+    messages = trim_llama_messages_to_context(
+        messages,
+        n_ctx=int(n_ctx),
+        max_tokens=max_tokens,
+    )
+    if not payload.get("n_ctx"):
+        n_ctx = estimate_llama_n_ctx(
+            messages,
+            max_tokens=max_tokens,
+            floor=4096,
+            model_path=model_path,
+            model_format=payload.get("model_format"),
+        )
+        messages = trim_llama_messages_to_context(
+            messages,
+            n_ctx=int(n_ctx),
+            max_tokens=max_tokens,
+        )
+    return messages, int(n_ctx)
+
+
 class _StreamError:
     __slots__ = ("exc",)
 
@@ -122,11 +169,6 @@ class LocalInferenceRunner:
     def pool(self):
         """Active model pool (public accessor for Forge services)."""
         return self._pool
-
-    def resolve_route(
-        self, payload: dict[str, Any], model_path: str
-    ) -> tuple[str, str]:
-        return self._resolve_route(payload, model_path)
 
     def warm_model(self, payload: dict[str, Any]) -> None:
         """Load a model into the pool without generating (preload / ping)."""
@@ -152,8 +194,6 @@ class LocalInferenceRunner:
                     resolved_path, draft_path, load_in_4bit=True
                 )
         else:
-            from seiso.inference.tuning import estimate_llama_n_ctx
-
             messages = payload.get("messages") or []
             n_ctx = payload.get("n_ctx") or estimate_llama_n_ctx(
                 messages,
@@ -308,14 +348,10 @@ class LocalInferenceRunner:
                 raise item.exc
             yield item
 
-    async def unload(self) -> dict:
+    async def cancel_and_unload(self) -> dict:
         loop = asyncio.get_running_loop()
-
         await loop.run_in_executor(None, self._pool.cancel_and_unload)
         return self._pool.status()
-
-    async def cancel_and_unload(self) -> dict:
-        return await self.unload()
 
     async def cancel_generation(self) -> dict:
         """Stop active streams without unloading the warmed model."""
@@ -580,6 +616,21 @@ class LocalInferenceRunner:
         return str(text)
 
     @staticmethod
+    def _torch_prepare_inputs(
+        model: Any,
+        messages: list[dict[str, Any]],
+        tokenizer: Any,
+    ) -> tuple[dict[str, Any], int]:
+        prompt = format_messages_for_prompt(messages, tokenizer)
+        inputs = tokenizer(prompt, return_tensors="pt")
+        device = LocalInferenceRunner._torch_input_device(model)
+        moved = {
+            k: v.to(device, non_blocking=getattr(device, "type", "") == "cuda")
+            for k, v in inputs.items()
+        }
+        return moved, int(moved["input_ids"].shape[-1])
+
+    @staticmethod
     def _torch_input_device(model: Any) -> Any:
         device_map = getattr(model, "hf_device_map", None)
         if isinstance(device_map, dict):
@@ -623,14 +674,9 @@ class LocalInferenceRunner:
 
         configure_torch_inference()
         model, tokenizer = self._pool.get_torch(model_path, load_in_4bit=True)
-        prompt = format_messages_for_prompt(payload.get("messages", []), tokenizer)
-        inputs = tokenizer(prompt, return_tensors="pt")
-        device = self._torch_input_device(model)
-        inputs = {
-            k: v.to(device, non_blocking=getattr(device, "type", "") == "cuda")
-            for k, v in inputs.items()
-        }
-        input_len = int(inputs["input_ids"].shape[-1])
+        inputs, input_len = self._torch_prepare_inputs(
+            model, payload.get("messages", []), tokenizer
+        )
         gen_kwargs = torch_generate_kwargs(
             payload,
             inputs,
@@ -640,21 +686,7 @@ class LocalInferenceRunner:
         gen_kwargs.pop("streamer", None)
 
         with torch.inference_mode():
-            try:
-                generated = generate_with_cache_fallback(model, gen_kwargs)
-            except Exception as exc:
-                if not is_oom_error(exc):
-                    raise
-                release_cached_memory(sync=True)
-                reduced = dict(gen_kwargs)
-                reduced["max_new_tokens"] = max(
-                    32, int(reduced.get("max_new_tokens", 512)) // 2
-                )
-                logger.warning(
-                    "Torch inference OOM — retrying with max_new_tokens=%s",
-                    reduced["max_new_tokens"],
-                )
-                generated = generate_with_cache_fallback(model, reduced)
+            generated = _torch_generate_with_oom_retry(model, gen_kwargs)
 
         if not self._pool.is_generation_active(generation_id):
             return ""
@@ -673,13 +705,7 @@ class LocalInferenceRunner:
         configure_torch_inference()
         model, tokenizer = self._pool.get_torch(model_path, load_in_4bit=True)
         messages = payload.get("messages", [])
-        prompt = format_messages_for_prompt(messages, tokenizer)
-        inputs = tokenizer(prompt, return_tensors="pt")
-        device = self._torch_input_device(model)
-        inputs = {
-            k: v.to(device, non_blocking=getattr(device, "type", "") == "cuda")
-            for k, v in inputs.items()
-        }
+        inputs, _input_len = self._torch_prepare_inputs(model, messages, tokenizer)
 
         streamer = TextIteratorStreamer(
             tokenizer,
@@ -698,28 +724,11 @@ class LocalInferenceRunner:
         def _generate() -> None:
             with torch.inference_mode():
                 try:
-                    generate_with_cache_fallback(model, gen_kwargs)
+                    _torch_generate_with_oom_retry(model, gen_kwargs)
                 except Exception as exc:
-                    if not is_oom_error(exc):
-                        generation_errors.append(exc)
-                        with contextlib.suppress(Exception):
-                            streamer.on_finalized_text("", stream_end=True)
-                        return
-                    release_cached_memory(sync=True)
-                    reduced = dict(gen_kwargs)
-                    reduced["max_new_tokens"] = max(
-                        32, int(reduced.get("max_new_tokens", 512)) // 2
-                    )
-                    logger.warning(
-                        "Torch inference OOM — retrying with max_new_tokens=%s",
-                        reduced["max_new_tokens"],
-                    )
-                    try:
-                        generate_with_cache_fallback(model, reduced)
-                    except Exception as retry_exc:
-                        generation_errors.append(retry_exc)
-                        with contextlib.suppress(Exception):
-                            streamer.on_finalized_text("", stream_end=True)
+                    generation_errors.append(exc)
+                    with contextlib.suppress(Exception):
+                        streamer.on_finalized_text("", stream_end=True)
 
         thread = threading.Thread(target=_generate, daemon=True)
         thread.start()
@@ -848,26 +857,7 @@ class LocalInferenceRunner:
         model_path: str,
         generation_id: int,
     ) -> str:
-        messages = payload.get("messages", [])
-        n_ctx = _llama_n_ctx_for_payload(payload, messages, model_path=model_path)
-        messages = trim_llama_messages_to_context(
-            messages,
-            n_ctx=int(n_ctx),
-            max_tokens=int(payload.get("max_tokens", 512)),
-        )
-        if not payload.get("n_ctx"):
-            n_ctx = estimate_llama_n_ctx(
-                messages,
-                max_tokens=int(payload.get("max_tokens", 512)),
-                floor=4096,
-                model_path=model_path,
-                model_format=payload.get("model_format"),
-            )
-            messages = trim_llama_messages_to_context(
-                messages,
-                n_ctx=int(n_ctx),
-                max_tokens=int(payload.get("max_tokens", 512)),
-            )
+        messages, n_ctx = _prepare_llama_messages(payload, model_path)
         llm = self._pool.get_llama(model_path, n_ctx=n_ctx)
         llm = self._llama_guard_prefill(
             llm, model_path=model_path, messages=messages, n_ctx=n_ctx
@@ -948,26 +938,7 @@ class LocalInferenceRunner:
         model_path: str,
         should_stop: Callable[[], bool],
     ) -> Iterator[StreamToken]:
-        messages = payload.get("messages", [])
-        n_ctx = _llama_n_ctx_for_payload(payload, messages, model_path=model_path)
-        messages = trim_llama_messages_to_context(
-            messages,
-            n_ctx=int(n_ctx),
-            max_tokens=int(payload.get("max_tokens", 512)),
-        )
-        if not payload.get("n_ctx"):
-            n_ctx = estimate_llama_n_ctx(
-                messages,
-                max_tokens=int(payload.get("max_tokens", 512)),
-                floor=4096,
-                model_path=model_path,
-                model_format=payload.get("model_format"),
-            )
-            messages = trim_llama_messages_to_context(
-                messages,
-                n_ctx=int(n_ctx),
-                max_tokens=int(payload.get("max_tokens", 512)),
-            )
+        messages, n_ctx = _prepare_llama_messages(payload, model_path)
         try:
             llm = self._pool.get_llama(model_path, n_ctx=n_ctx)
         except ImportError as exc:

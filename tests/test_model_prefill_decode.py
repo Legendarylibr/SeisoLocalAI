@@ -5,57 +5,12 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
-from seiso.inference.backends import clear_gguf_caches
+from gguf_fixtures import write_arch_gguf as _write_arch_gguf
 from seiso.inference.model_pool import llama_load_kwargs
 from seiso.memory.protection import (
     llama_prefill_needs_reload,
     resolve_llama_model_batches,
 )
-
-
-@pytest.fixture(autouse=True)
-def _reset_gguf_cache():
-    clear_gguf_caches()
-    yield
-    clear_gguf_caches()
-
-
-def _write_arch_gguf(
-    path: Path, architecture: str, *, extra: list[tuple[bytes, int]] | None = None
-) -> None:
-    import struct
-
-    arch_key = b"general.architecture"
-    arch_value = architecture.encode()
-    prefix = architecture.split("-", 1)[0]
-    payload = [
-        struct.pack("<Q", len(arch_key)),
-        arch_key,
-        struct.pack("<I", 8),
-        struct.pack("<Q", len(arch_value)),
-        arch_value,
-    ]
-    for key, value in extra or []:
-        payload.extend(
-            [
-                struct.pack("<Q", len(key)),
-                key,
-                struct.pack("<I", 4),
-                struct.pack("<I", value),
-            ]
-        )
-    block_key = prefix.encode() + b".block_count"
-    payload.extend(
-        [
-            struct.pack("<Q", len(block_key)),
-            block_key,
-            struct.pack("<I", 4),
-            struct.pack("<I", 32),
-        ]
-    )
-    kv_count = 2 + len(extra or [])
-    path.write_bytes(b"GGUF" + struct.pack("<IQQ", 3, 0, kv_count) + b"".join(payload))
 
 
 MODEL_CASES = [
@@ -115,9 +70,7 @@ def test_load_kwargs_prefill_decode_invariants_per_model(
     monkeypatch.setattr(mp, "_native_linux_nvidia", lambda: True)
     monkeypatch.setattr(mp, "_llama_gpu_offload_ok", lambda: True)
     monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: True)
-    monkeypatch.setattr(
-        "seiso.platform.use_linux_nvidia_inference_guards", lambda **_: True
-    )
+    monkeypatch.setattr("seiso.platform.use_linux_nvidia_inference_guards", lambda **_: True)
     monkeypatch.setattr(
         "seiso.memory.protection.seiso_platform.use_linux_nvidia_inference_guards",
         lambda **_: True,
@@ -138,9 +91,7 @@ def test_load_kwargs_prefill_decode_invariants_per_model(
         model_path=str(gguf),
         free_mb=24576,
         n_ctx=4096,
-        n_gpu_layers=int(
-            kwargs["n_gpu_layers"] if kwargs.get("n_gpu_layers") is not None else -1
-        ),
+        n_gpu_layers=int(kwargs["n_gpu_layers"] if kwargs.get("n_gpu_layers") is not None else -1),
         weights_resident=False,
     )
 
@@ -184,14 +135,14 @@ def test_prefill_guard_keeps_loaded_batches_for_short_prompt(
     monkeypatch.setattr(mp, "_native_linux_nvidia", lambda: True)
     monkeypatch.setattr(mp, "_llama_gpu_offload_ok", lambda: True)
     monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: True)
-    monkeypatch.setattr(
-        "seiso.platform.use_linux_nvidia_inference_guards", lambda **_: True
-    )
+    monkeypatch.setattr("seiso.platform.use_linux_nvidia_inference_guards", lambda **_: True)
     monkeypatch.setattr(
         "seiso.memory.protection.seiso_platform.use_linux_nvidia_inference_guards",
         lambda **_: True,
     )
-    monkeypatch.setattr("seiso.memory.protection.hardware_profile", lambda **_: {"gpus": [{"vram_total_mb": 24576}]})
+    monkeypatch.setattr(
+        "seiso.memory.protection.hardware_profile", lambda **_: {"gpus": [{"vram_total_mb": 24576}]}
+    )
     monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 24576)
     monkeypatch.setattr("seiso.memory.protection.estimate_path_vram_mb", lambda _p: weight_mb)
     monkeypatch.setattr(
@@ -211,9 +162,7 @@ def test_prefill_guard_keeps_loaded_batches_for_short_prompt(
         free_mb=24576,
         n_ctx=4096,
         n_gpu_layers=int(
-            load_kwargs["n_gpu_layers"]
-            if load_kwargs.get("n_gpu_layers") is not None
-            else -1
+            load_kwargs["n_gpu_layers"] if load_kwargs.get("n_gpu_layers") is not None else -1
         ),
         weights_resident=False,
     )
@@ -227,9 +176,7 @@ def test_prefill_guard_keeps_loaded_batches_for_short_prompt(
         loaded_n_batch=loaded_batch,
         loaded_n_ubatch=loaded_ubatch,
         loaded_n_gpu_layers=int(
-            load_kwargs["n_gpu_layers"]
-            if load_kwargs.get("n_gpu_layers") is not None
-            else -1
+            load_kwargs["n_gpu_layers"] if load_kwargs.get("n_gpu_layers") is not None else -1
         ),
         load_tier="normal",
         loaded_headroom_mb=24576,

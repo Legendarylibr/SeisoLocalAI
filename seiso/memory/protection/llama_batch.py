@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 
 from seiso.hardware import hardware_profile
@@ -14,9 +13,9 @@ from seiso.memory.protection.constants import (
     _NATIVE_LINUX_BATCH_TOKENS_PER_GB,
     _NATIVE_LINUX_COMPACT_BATCH_FLOOR,
     _NATIVE_LINUX_COMPACT_UBATCH_FLOOR,
+    _NATIVE_LINUX_MAX_NORMAL_BATCH,
     _NATIVE_LINUX_MINIMAL_BATCH_FLOOR,
     _NATIVE_LINUX_MINIMAL_UBATCH_FLOOR,
-    _NATIVE_LINUX_MAX_NORMAL_BATCH,
     _NATIVE_LINUX_UNKNOWN_GPU_BATCH_CAPS,
     LlamaLoadTier,
 )
@@ -199,9 +198,7 @@ def llama_oom_recovery_batch(
             load_tier=next_tier,
         )
         return cap_to_loaded(batch, ubatch)
-    tier_batch, tier_ubatch = gpu_batch_tier_caps(
-        protection().discrete_gpu_total_mb(), next_tier
-    )
+    tier_batch, tier_ubatch = gpu_batch_tier_caps(protection().discrete_gpu_total_mb(), next_tier)
     batch, ubatch = clamp_llama_batch_pair(
         tier_batch,
         tier_ubatch,
@@ -209,5 +206,3 @@ def llama_oom_recovery_batch(
         load_tier=next_tier,
     )
     return cap_to_loaded(batch, ubatch)
-
-

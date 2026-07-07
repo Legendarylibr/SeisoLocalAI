@@ -256,7 +256,9 @@ async def start_export(
     # Never persist secrets in job config_json.
     hub_cfg = config.get("hub")
     if isinstance(hub_cfg, dict) and hub_cfg.get("hf_token"):
-        config["hub"] = {**hub_cfg, "hf_token": None}
+        redacted_hub = {**hub_cfg}
+        redacted_hub.pop("hf_token", None)
+        config["hub"] = redacted_hub
     gguf_quants = list(body.gguf_quantizations or ["q4_k_m"])
 
     if body.rl_quant_job_id:
