@@ -406,10 +406,10 @@ async def perform_model_download(
             )
             return cached
 
-        from forge.services.memory_release import prepare_for_gpu_task
+        from forge.services.memory_release import prepare_for_gpu_task, release_after_task
 
         loop = asyncio.get_running_loop()
-        await loop.run_in_executor(
+        prep = await loop.run_in_executor(
             None,
             lambda: prepare_for_gpu_task(task="download", user_id=user_id),
         )
@@ -423,21 +423,30 @@ async def perform_model_download(
             },
         )
 
-        artifacts = await loop.run_in_executor(
-            None,
-            lambda: _sync_download_artifacts(
-                catalog_repo=repo_id,
-                data_dir=data_dir,
-                hf_cache_dir=hf_cache_dir,
-                settings_hf_token=settings_hf_token,
-                db_encryption_key=db_encryption_key,
-                user_id=user_id,
-                filename=filename,
-                revision=revision,
-                variant=variant,
-                on_progress=on_progress,
-            ),
-        )
+        try:
+            artifacts = await loop.run_in_executor(
+                None,
+                lambda: _sync_download_artifacts(
+                    catalog_repo=repo_id,
+                    data_dir=data_dir,
+                    hf_cache_dir=hf_cache_dir,
+                    settings_hf_token=settings_hf_token,
+                    db_encryption_key=db_encryption_key,
+                    user_id=user_id,
+                    filename=filename,
+                    revision=revision,
+                    variant=variant,
+                    on_progress=on_progress,
+                ),
+            )
+        finally:
+            await loop.run_in_executor(
+                None,
+                lambda: release_after_task(
+                    reason="download complete",
+                    resource_token=str(prep.get("resource_token") or ""),
+                ),
+            )
         _emit_progress(
             on_progress,
             {

@@ -63,6 +63,33 @@ def test_cancel_and_unload_defers_while_inference_active(tmp_path):
     assert pool.active_key is None
 
 
+def test_llamaswap_release_attempts_external_unload(tmp_path):
+    pool = ModelPool()
+    model = tmp_path / "model.gguf"
+    model.write_bytes(b"gguf")
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.released: list[str | None] = []
+
+        def release_external_memory(self, model_path: str | None = None):
+            self.released.append(model_path)
+            return True, None
+
+    client = FakeClient()
+    pool._active = LoadedModel(
+        key="llamaswap:model",
+        backend=BackendKind.LLAMASWAP,
+        handle=client,
+        meta={"path": str(model), "norm_path": str(model.resolve())},
+    )
+
+    pool.unload_all()
+
+    assert client.released == [str(model)]
+    assert pool.drain_release_notes() == ["Released llama-swap managed model processes"]
+
+
 def test_switch_waits_for_inference_before_replacing(tmp_path):
     pool = ModelPool()
     first_path = tmp_path / "first.gguf"

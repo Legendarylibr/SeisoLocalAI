@@ -44,6 +44,7 @@ def test_release_inference_memory_unloads_active(monkeypatch):
 def test_prepare_for_gpu_task_blocks_other_running_jobs(monkeypatch):
     from forge.services import memory_release
 
+    memory_release._ACTIVE_GPU_TASKS.clear()
     monkeypatch.setattr(memory_release, "release_inference_memory", lambda **kwargs: {})
     monkeypatch.setattr(
         memory_release,
@@ -53,10 +54,13 @@ def test_prepare_for_gpu_task_blocks_other_running_jobs(monkeypatch):
         ),
     )
 
-    memory_release.prepare_for_gpu_task(task="export", job_id="job-2")
+    result = memory_release.prepare_for_gpu_task(task="export", job_id="job-2")
+    memory_release.release_after_task(reason="export complete", job_id="job-2")
+    assert result["resource_token"] == "job-2"
 
     with pytest.raises(RuntimeError, match="Another GPU task"):
         memory_release.prepare_for_gpu_task(task="export", job_id="job-3")
+    memory_release._ACTIVE_GPU_TASKS.clear()
 
 
 def test_assert_gpu_available_for_inference_blocks_training(monkeypatch):
@@ -69,3 +73,32 @@ def test_assert_gpu_available_for_inference_blocks_training(monkeypatch):
 
     with pytest.raises(RuntimeError, match="Cannot load chat models"):
         assert_gpu_available_for_inference()
+
+
+def test_download_resource_blocks_inference_and_gpu_tasks(monkeypatch):
+    from forge.services import memory_release
+
+    memory_release._ACTIVE_GPU_TASKS.clear()
+    monkeypatch.setattr(memory_release, "running_gpu_task_kinds", memory_release.running_gpu_task_kinds)
+    monkeypatch.setattr(memory_release, "release_inference_memory", lambda **kwargs: {})
+    monkeypatch.setattr(
+        "seiso.memory.protection.release_cached_memory",
+        lambda sync=False: None,
+    )
+    monkeypatch.setattr(memory_release, "_refresh_hardware_profile", lambda: None)
+
+    result = memory_release.prepare_for_gpu_task(task="download", user_id="u1")
+
+    assert result["resource_token"].startswith("download:u1:")
+    assert memory_release.running_gpu_task_kinds() == ["download"]
+    with pytest.raises(RuntimeError, match="Cannot load chat models while download"):
+        memory_release.assert_gpu_available_for_inference()
+    with pytest.raises(RuntimeError, match="Another GPU task is still running"):
+        memory_release.prepare_for_gpu_task(task="training", job_id="train-1")
+
+    memory_release.release_after_task(
+        reason="download complete",
+        resource_token=result["resource_token"],
+    )
+
+    assert memory_release.running_gpu_task_kinds() == []

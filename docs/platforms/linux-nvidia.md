@@ -26,7 +26,9 @@ Requirements:
 - NVIDIA driver + `nvidia-smi` working
 - CUDA toolkit (`nvcc`) for JIT-compiled fused kernels (first training run compiles)
 - PyTorch CUDA wheel (installed automatically via `torch` dependency)
-- `[llamacpp]` for local GGUF chat in Forge (included in `start` and the manual install above)
+- `llama-swap` sidecar for default GGUF chat isolation. `start` auto-starts
+  Ollama/llama-swap when installed; set `SEISO_LLAMASWAP_ENGINE=llamacpp` to use
+  llama-swap-managed llama.cpp instead of Ollama.
 
 ### Optional: Flash Attention 2
 
@@ -45,6 +47,10 @@ Skip during install: `SEISO_SKIP_FLASH_ATTN=1 start`
 ```bash
 cd "$HOME/Seiso" && start
 ```
+
+`start` checks the native Linux NVIDIA sidecar path before Forge. It prefers a
+healthy Ollama API at `SEISO_OLLAMA_URL` and otherwise uses the `llamacpp`
+engine through llama-swap. Disable this with `SEISO_SIDECAR_AUTOSTART=0`.
 
 Or from a clone with venv active:
 

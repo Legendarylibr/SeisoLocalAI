@@ -161,8 +161,25 @@ def estimate_llama_n_ctx(
             model_format=model_format,
             model_name=model_name,
         )
-    if not env_bool("SEISO_LLAMA_DYNAMIC_CTX", True):
+    try:
+        from seiso.platform import use_linux_nvidia_inference_guards
+
+        native_linux_nvidia = use_linux_nvidia_inference_guards()
+    except Exception:
+        native_linux_nvidia = False
+    dynamic_ctx = env_bool("SEISO_LLAMA_DYNAMIC_CTX", not native_linux_nvidia)
+    if not dynamic_ctx:
+        if native_linux_nvidia:
+            default = env_int("SEISO_LLAMA_NATIVE_STABLE_N_CTX", default)
         sized = bucket_llama_n_ctx(default, ceiling=ceiling)
+        return clamp_llama_n_ctx(
+            sized,
+            messages=[],
+            max_tokens=max_tokens,
+            model_path=model_path,
+            model_format=model_format,
+            model_name=model_name,
+        )
     else:
         from seiso.memory.protection import _estimate_prompt_tokens
 

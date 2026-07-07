@@ -63,6 +63,11 @@ Start with **[getting-started.md](getting-started.md)** — a step-by-step walkt
 
 First launch opens onboarding — create your local admin password. Copy `.env.example` to `.env` to override host, port, or data directory.
 
+On native Linux + NVIDIA, `start` also prepares the isolated GGUF chat sidecar:
+healthy Ollama first, otherwise llama-swap's `llamacpp` engine. See
+[inference/backends.md](inference/backends.md#llama-swap-setup) for overrides
+and the explicit unsafe in-process llama.cpp opt-in.
+
 See [install.md](install.md) and [forge.md](forge.md) for full details.
 
 ---
@@ -147,8 +152,8 @@ cd "$HOME/Seiso" && start
 git clone https://github.com/Legendarylibr/SeisoLocalAI.git "$HOME/Seiso" && cd "$HOME/Seiso"
 start
 
-# Linux NVIDIA (manual pip)
-pip install -e ".[forge,train,cuda,dev]"
+# Linux NVIDIA (manual pip; use start for sidecar autostart)
+pip install -e ".[forge,train,cuda,llamacpp,dev]"
 
 # Build UI (first launch or after UI changes)
 cd forge-ui && npm ci && npm run build && cd ..

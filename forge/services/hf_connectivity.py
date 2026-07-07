@@ -87,7 +87,7 @@ def _llamacpp_status() -> tuple[bool, str | None]:
 def check_inference_runtime() -> InferenceRuntimeStatus:
     """Report which local inference stacks are importable."""
     llamacpp_ok, llamacpp_error = _llamacpp_status()
-    from seiso.inference.llamaswap import llamaswap_status
+    from seiso.inference.llamaswap import llamaswap_setup_hint, llamaswap_status
 
     swap = llamaswap_status()
     status = InferenceRuntimeStatus(
@@ -105,17 +105,24 @@ def check_inference_runtime() -> InferenceRuntimeStatus:
         hints.append('pip install -e ".[forge]"  # includes huggingface-hub')
     if not status.llamacpp:
         hint = 'pip install "llama-cpp-python>=0.3"  # or: pip install -e ".[llamacpp]"'
+        native_linux_nvidia = False
         try:
             from seiso.security.nvidia_boundary import nvidia_smi_visible
 
-            if nvidia_smi_visible():
+            native_linux_nvidia = platform.system() == "Linux" and nvidia_smi_visible()
+            if native_linux_nvidia:
                 hint = (
                     'pip install -U "llama-cpp-python>=0.3" '
                     "--extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu124"
                 )
         except ImportError:
             pass
-        if platform.system() == "Linux":
+        if native_linux_nvidia:
+            hints.append(
+                "Native Linux NVIDIA GGUF chat uses the llama-swap sidecar by default; "
+                "llama-cpp-python is only needed for the explicit unsafe in-process override."
+            )
+        elif platform.system() == "Linux":
             hints.append(
                 f"{hint} — required for GGUF chat (re-run start to auto-install)"
             )
@@ -124,9 +131,7 @@ def check_inference_runtime() -> InferenceRuntimeStatus:
         if status.llamacpp_error:
             hints.append(f"Import error: {status.llamacpp_error}")
     if not status.llamaswap:
-        hints.append(
-            "Optional: install/start llama-swap and set SEISO_LLAMASWAP_URL for sidecar GGUF routing"
-        )
+        hints.append(llamaswap_setup_hint(url=swap.url, engine=swap.engine))
     if not status.mlx and not status.torch:
         hints.append('pip install -e ".[mlx]" or ".[train]"  # safetensors inference')
     status.install_hints = hints

@@ -48,7 +48,7 @@ def _refresh_native_linux_llama_env(
 
     os.environ.setdefault("SEISO_LLAMA_FLASH_ATTN", "false")
     os.environ.setdefault("SEISO_LLAMA_KV_QUANT", "false")
-    os.environ.setdefault("SEISO_CHAT_CONTEXT_CHARS", "12000")
+    os.environ.setdefault("SEISO_CHAT_CONTEXT_CHARS", "8000")
     os.environ["SEISO_LLAMA_BATCH"] = str(batch_cap)
     os.environ["SEISO_LLAMA_UBATCH"] = str(min(ubatch_cap, batch_cap))
     os.environ["SEISO_LLAMA_CACHE_MB"] = str(cache_cap)

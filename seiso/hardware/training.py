@@ -22,13 +22,7 @@ def preferred_inference_backend(profile: dict[str, Any]) -> str:
         backend = Backend.CPU
 
     if _profile_has_nvidia(profile):
-        try:
-            from seiso.inference.llamaswap import llamaswap_enabled
-
-            if llamaswap_enabled():
-                return str(InferenceBackend.LLAMASWAP)
-        except ImportError:
-            pass
+        return str(InferenceBackend.LLAMASWAP)
 
     if tier == HardwareTier.CPU_ONLY:
         return str(InferenceBackend.LLAMACPP)

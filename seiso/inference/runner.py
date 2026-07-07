@@ -53,6 +53,7 @@ from seiso.memory.protection import (
     sanitize_inference_payload,
     trim_llama_messages_to_context,
 )
+from seiso.memory.protection.chat_guards import _trim_message_content_to_token_budget
 from seiso.models.chat_format import format_messages_for_prompt
 
 logger = logging.getLogger(__name__)
@@ -181,6 +182,95 @@ def _tokenized_length(tokenizer: Any, prompt: str) -> int:
     if input_ids and isinstance(input_ids[0], list):
         return len(input_ids[0])
     return len(input_ids)
+
+
+class _PlainChatFormatter:
+    """Minimal formatter sentinel for llama.cpp token counting fallback."""
+
+
+@dataclass(frozen=True)
+class LlamaPromptBudget:
+    messages: list[dict[str, Any]]
+    max_tokens: int
+    input_tokens: int
+    context_limit: int
+
+
+def _llama_prompt_token_length(llm: Any, messages: list[dict[str, Any]]) -> int:
+    prompt = format_messages_for_prompt(messages, _PlainChatFormatter())
+    tokenize = getattr(llm, "tokenize", None)
+    if callable(tokenize):
+        for kwargs in ({"add_bos": False, "special": True}, {"add_bos": False}, {}):
+            with contextlib.suppress(Exception):
+                return len(tokenize(prompt.encode("utf-8"), **kwargs))
+    return _estimate_prompt_tokens(messages)
+
+
+def _fit_llama_messages_to_context(
+    llm: Any,
+    messages: list[dict[str, Any]],
+    *,
+    n_ctx: int,
+    max_tokens: int,
+) -> LlamaPromptBudget:
+    """Hard cap llama.cpp prompt by tokenizer count before prefill starts."""
+    limit = max(2, int(n_ctx))
+    reserve = min(128, max(1, limit // 8))
+    clamped_max_tokens = max(1, min(int(max_tokens), limit - reserve - 1))
+    prompt_budget = max(1, limit - clamped_max_tokens - reserve)
+    trimmed = trim_llama_messages_to_context(
+        messages,
+        n_ctx=limit,
+        max_tokens=clamped_max_tokens,
+    )
+    current = _llama_prompt_token_length(llm, trimmed)
+
+    while current > prompt_budget and len(trimmed) > 1:
+        for idx, message in enumerate(trimmed[:-1]):
+            if str(message.get("role", "")).lower() in {"user", "assistant"}:
+                trimmed.pop(idx)
+                current = _llama_prompt_token_length(llm, trimmed)
+                break
+        else:
+            break
+
+    for _ in range(24):
+        if current <= prompt_budget:
+            break
+        if not trimmed:
+            break
+        idx = max(
+            range(len(trimmed)),
+            key=lambda i: _estimate_prompt_tokens([trimmed[i]]),
+        )
+        content_est = _estimate_prompt_tokens([trimmed[idx]])
+        if content_est <= 1:
+            break
+        ratio = max(0.02, min(0.9, prompt_budget / max(current, 1)))
+        target_tokens = max(1, int(content_est * ratio * 0.85))
+        updated = dict(trimmed[idx])
+        updated["content"] = _trim_message_content_to_token_budget(
+            updated.get("content", ""),
+            target_tokens,
+        )
+        if updated.get("content") == trimmed[idx].get("content"):
+            break
+        trimmed[idx] = updated
+        current = _llama_prompt_token_length(llm, trimmed)
+
+    available_tokens = limit - current - reserve
+    if available_tokens < 1:
+        raise RuntimeError(
+            "llama.cpp prompt exceeds context after trimming; reduce prompt size, "
+            "knowledge context, or max_tokens"
+        )
+    clamped_max_tokens = max(1, min(clamped_max_tokens, available_tokens))
+    return LlamaPromptBudget(
+        messages=trimmed,
+        max_tokens=clamped_max_tokens,
+        input_tokens=current,
+        context_limit=limit,
+    )
 
 
 @dataclass(frozen=True)
@@ -360,6 +450,13 @@ class LocalInferenceRunner:
             try:
                 llm = self._pool.get_llama(resolved_path, n_ctx=n_ctx)
                 if messages:
+                    budget = _fit_llama_messages_to_context(
+                        llm,
+                        messages,
+                        n_ctx=n_ctx,
+                        max_tokens=int(payload.get("max_tokens", 1)),
+                    )
+                    messages = budget.messages
                     llm = self._llama_guard_prefill(
                         llm,
                         model_path=resolved_path,
@@ -1120,6 +1217,16 @@ class LocalInferenceRunner:
     ) -> str:
         messages, n_ctx = _prepare_llama_messages(payload, model_path)
         llm = self._pool.get_llama(model_path, n_ctx=n_ctx)
+        budget = _fit_llama_messages_to_context(
+            llm,
+            messages,
+            n_ctx=n_ctx,
+            max_tokens=int(payload.get("max_tokens", 512)),
+        )
+        messages = budget.messages
+        if budget.max_tokens != int(payload.get("max_tokens", 512)):
+            payload = dict(payload)
+            payload["max_tokens"] = budget.max_tokens
         llm = self._llama_guard_prefill(
             llm, model_path=model_path, messages=messages, n_ctx=n_ctx
         )
@@ -1131,6 +1238,16 @@ class LocalInferenceRunner:
             n_ctx=n_ctx,
             stream=False,
         )
+        budget = _fit_llama_messages_to_context(
+            llm,
+            messages,
+            n_ctx=n_ctx,
+            max_tokens=int(payload.get("max_tokens", 512)),
+        )
+        messages = budget.messages
+        if budget.max_tokens != int(payload.get("max_tokens", 512)):
+            payload = dict(payload)
+            payload["max_tokens"] = budget.max_tokens
         kwargs = llama_completion_kwargs(payload)
         kwargs["stream"] = False
         tools = payload.get("tools_schemas")
@@ -1160,6 +1277,20 @@ class LocalInferenceRunner:
                         n_ctx=actual_ctx,
                         max_tokens=int(payload.get("max_tokens", 512)),
                     )
+                    budget = _fit_llama_messages_to_context(
+                        llm,
+                        messages,
+                        n_ctx=n_ctx,
+                        max_tokens=int(payload.get("max_tokens", 512)),
+                    )
+                    messages = budget.messages
+                    if budget.max_tokens != int(payload.get("max_tokens", 512)):
+                        payload = dict(payload)
+                        payload["max_tokens"] = budget.max_tokens
+                        kwargs = llama_completion_kwargs(payload)
+                        kwargs["stream"] = False
+                        if tools:
+                            kwargs["tools"] = tools
         if not self._pool.is_generation_active(generation_id):
             return ""
         choices = out.get("choices") or []
@@ -1212,6 +1343,16 @@ class LocalInferenceRunner:
             llm = self._pool.get_llama(model_path, n_ctx=n_ctx)
         except ImportError as exc:
             raise RuntimeError("llama-cpp-python not installed") from exc
+        budget = _fit_llama_messages_to_context(
+            llm,
+            messages,
+            n_ctx=n_ctx,
+            max_tokens=int(payload.get("max_tokens", 512)),
+        )
+        messages = budget.messages
+        if budget.max_tokens != int(payload.get("max_tokens", 512)):
+            payload = dict(payload)
+            payload["max_tokens"] = budget.max_tokens
         llm = self._llama_guard_prefill(
             llm, model_path=model_path, messages=messages, n_ctx=n_ctx
         )
@@ -1223,6 +1364,16 @@ class LocalInferenceRunner:
             n_ctx=n_ctx,
             stream=True,
         )
+        budget = _fit_llama_messages_to_context(
+            llm,
+            messages,
+            n_ctx=n_ctx,
+            max_tokens=int(payload.get("max_tokens", 512)),
+        )
+        messages = budget.messages
+        if budget.max_tokens != int(payload.get("max_tokens", 512)):
+            payload = dict(payload)
+            payload["max_tokens"] = budget.max_tokens
 
         completion_kwargs = llama_completion_kwargs(payload)
         emitted_text = False
@@ -1266,6 +1417,17 @@ class LocalInferenceRunner:
                         n_ctx=actual_ctx,
                         max_tokens=int(payload.get("max_tokens", 512)),
                     )
+                    budget = _fit_llama_messages_to_context(
+                        llm,
+                        messages,
+                        n_ctx=n_ctx,
+                        max_tokens=int(payload.get("max_tokens", 512)),
+                    )
+                    messages = budget.messages
+                    if budget.max_tokens != int(payload.get("max_tokens", 512)):
+                        payload = dict(payload)
+                        payload["max_tokens"] = budget.max_tokens
+                        completion_kwargs = llama_completion_kwargs(payload)
 
 
 def get_inference_runner() -> LocalInferenceRunner:

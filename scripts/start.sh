@@ -42,6 +42,114 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-}")" 2>/dev/null && pwd || echo "
 log() { seiso_log "$@"; }
 die() { seiso_die "$@"; }
 
+sidecar_url_base() {
+  local raw="$1"
+  printf '%s\n' "${raw%/}"
+}
+
+sidecar_health_ok() {
+  local url="$1" path="${2:-/health}"
+  curl -fsS --max-time 1 "$(sidecar_url_base "$url")$path" >/dev/null 2>&1
+}
+
+wait_sidecar_health() {
+  local url="$1" path="${2:-/health}" attempts="${3:-10}"
+  local i
+  for ((i = 0; i < attempts; i++)); do
+    sidecar_health_ok "$url" "$path" && return 0
+    sleep 0.5
+  done
+  return 1
+}
+
+native_linux_nvidia() {
+  [[ "$(uname -s)" == "Linux" ]] || return 1
+  seiso_is_wsl && return 1
+  seiso_nvidia_gpu_detected
+}
+
+start_background_sidecar() {
+  local name="$1" log_file="$2"
+  shift 2
+  mkdir -p "$(dirname "$log_file")"
+  nohup "$@" >>"$log_file" 2>&1 &
+  printf '%s\n' "$!" >"${log_file%.log}.pid"
+}
+
+preferred_sidecar_engine() {
+  local override
+  override="$(printf '%s' "${SEISO_LLAMASWAP_ENGINE:-auto}" | tr '[:upper:]' '[:lower:]')"
+  if [[ -n "$override" && "$override" != "auto" ]]; then
+    printf '%s\n' "$override"
+    return
+  fi
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    printf 'llamacpp\n'
+    return
+  fi
+  if native_linux_nvidia && sidecar_health_ok "${SEISO_OLLAMA_URL:-http://127.0.0.1:11434}" "/api/tags"; then
+    printf 'ollama\n'
+    return
+  fi
+  printf 'llamacpp\n'
+}
+
+ensure_inference_sidecars() {
+  [[ "${SEISO_SIDECAR_AUTOSTART:-1}" == "1" ]] || return 0
+
+  local run_dir="${SEISO_DATA_DIR:-$HOME/.seiso}/run"
+  local ollama_url="${SEISO_OLLAMA_URL:-http://127.0.0.1:11434}"
+  local swap_url="${SEISO_LLAMASWAP_URL:-http://127.0.0.1:8080}"
+  local needs_swap=0
+
+  if native_linux_nvidia && [[ "${SEISO_LLAMA_ALLOW_INPROCESS_NATIVE_LINUX:-0}" != "1" ]]; then
+    needs_swap=1
+    export SEISO_LLAMASWAP_ENABLED="${SEISO_LLAMASWAP_ENABLED:-true}"
+    export SEISO_LLAMASWAP_URL="$swap_url"
+  elif [[ "${SEISO_LLAMASWAP_ENABLED:-}" == "true" || -n "${SEISO_LLAMASWAP_URL:-}" ]]; then
+    needs_swap=1
+    export SEISO_LLAMASWAP_URL="$swap_url"
+  fi
+
+  [[ "$needs_swap" == "1" ]] || return 0
+
+  if native_linux_nvidia && [[ "${SEISO_LLAMASWAP_ENGINE:-auto}" =~ ^(auto|ollama)?$ ]]; then
+    if ! sidecar_health_ok "$ollama_url" "/api/tags"; then
+      if command -v ollama >/dev/null 2>&1; then
+        log "Starting Ollama sidecar at $ollama_url"
+        start_background_sidecar "ollama" "$run_dir/ollama.log" ollama serve
+        wait_sidecar_health "$ollama_url" "/api/tags" 12 || true
+      else
+        log "Ollama not found; llama-swap will use llama.cpp engine if configured"
+      fi
+    fi
+  fi
+
+  local engine
+  engine="$(preferred_sidecar_engine)"
+  export SEISO_LLAMASWAP_ENGINE="${SEISO_LLAMASWAP_ENGINE:-$engine}"
+
+  if sidecar_health_ok "$swap_url" "/health"; then
+    log "llama-swap sidecar is ready at $swap_url (engine=${SEISO_LLAMASWAP_ENGINE})"
+    return 0
+  fi
+
+  if ! command -v llama-swap >/dev/null 2>&1; then
+    log "llama-swap is not installed; native Linux NVIDIA GGUF chat will show setup guidance instead of using in-process llama.cpp"
+    return 0
+  fi
+
+  local -a cmd=(llama-swap)
+  if [[ -n "${SEISO_LLAMASWAP_CONFIG:-}" ]]; then
+    cmd+=(--config "$SEISO_LLAMASWAP_CONFIG")
+  fi
+  log "Starting llama-swap sidecar at $swap_url (engine=${SEISO_LLAMASWAP_ENGINE})"
+  start_background_sidecar "llama-swap" "$run_dir/llama-swap.log" "${cmd[@]}"
+  if ! wait_sidecar_health "$swap_url" "/health" 12; then
+    log "llama-swap did not become ready yet; check $run_dir/llama-swap.log or set SEISO_LLAMASWAP_URL/SEISO_LLAMASWAP_CONFIG"
+  fi
+}
+
 resolve_root() {
   if root="$(seiso_resolve_repo_for_start "${BASH_SOURCE[0]:-}")"; then
     printf '%s\n' "$root"
@@ -88,6 +196,7 @@ main() {
   fi
 
   seiso_bin="$(seiso_require_cli "$root")"
+  ensure_inference_sidecars
 
   forge_url="$(seiso_forge_url)"
   open_flag=""

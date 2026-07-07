@@ -77,20 +77,50 @@ def test_gguf_auto_prefers_llamaswap_on_native_linux_when_enabled(
     )
 
 
-def test_gguf_auto_falls_back_when_llamaswap_is_unhealthy(monkeypatch, tmp_path: Path):
+def test_gguf_auto_requires_healthy_llamaswap_on_native_linux(monkeypatch, tmp_path: Path):
     gguf = tmp_path / "model-q4.gguf"
     gguf.write_bytes(b"gguf")
     monkeypatch.setattr("seiso.platform.use_linux_nvidia_inference_guards", lambda: True)
     monkeypatch.setattr(
         "seiso.inference.llamaswap.llamaswap_status",
-        lambda: SimpleNamespace(available=False),
+        lambda: SimpleNamespace(available=False, reason="sidecar down"),
     )
 
     assert (
+        recommend_backend(model_path=str(gguf), model_format="gguf")
+        == BACKEND_LLAMASWAP
+    )
+    assert available_backends(model_path=str(gguf), model_format="gguf") == [
+        BACKEND_LLAMASWAP
+    ]
+    with pytest.raises(RuntimeError, match="requires an isolated backend"):
         resolve_local_backend(
             model_path=str(gguf),
             model_format="gguf",
             requested="auto",
+        )
+
+
+def test_gguf_explicit_llamacpp_requires_unsafe_native_linux_override(
+    monkeypatch, tmp_path: Path
+):
+    gguf = tmp_path / "model-q4.gguf"
+    gguf.write_bytes(b"gguf")
+    monkeypatch.setattr("seiso.platform.use_linux_nvidia_inference_guards", lambda: True)
+
+    with pytest.raises(RuntimeError, match="requested backend was llamacpp"):
+        resolve_local_backend(
+            model_path=str(gguf),
+            model_format="gguf",
+            requested="llamacpp",
+        )
+
+    monkeypatch.setenv("SEISO_LLAMA_ALLOW_INPROCESS_NATIVE_LINUX", "1")
+    assert (
+        resolve_local_backend(
+            model_path=str(gguf),
+            model_format="gguf",
+            requested="llamacpp",
         )
         == BACKEND_LLAMACPP
     )
@@ -197,6 +227,64 @@ def test_torch_oom_retry_does_not_increase_clamped_generation(monkeypatch):
 
     assert result == "ok"
     assert seen == [5, 2]
+
+
+def test_llama_prompt_budget_uses_tokenizer_and_drops_old_turns():
+    from seiso.inference.runner import _fit_llama_messages_to_context
+
+    class FakeLlama:
+        def tokenize(self, prompt: bytes, **_kwargs):
+            return prompt.decode("utf-8").split()
+
+    messages = [
+        {"role": "system", "content": "You are concise."},
+        {"role": "user", "content": "old " * 200},
+        {"role": "assistant", "content": "history " * 200},
+        {"role": "user", "content": "answer now"},
+    ]
+
+    budget = _fit_llama_messages_to_context(
+        FakeLlama(),
+        messages,
+        n_ctx=64,
+        max_tokens=20,
+    )
+
+    assert budget.messages[-1]["content"] == "answer now"
+    assert all("history" not in str(message["content"]) for message in budget.messages)
+    assert budget.input_tokens + budget.max_tokens < budget.context_limit
+
+
+def test_llama_prompt_budget_raises_before_prefill_when_prompt_cannot_fit():
+    from seiso.inference.runner import _fit_llama_messages_to_context
+
+    class FakeLlama:
+        def tokenize(self, prompt: bytes, **_kwargs):
+            return list(prompt)
+
+    with pytest.raises(RuntimeError, match="llama.cpp prompt exceeds context"):
+        _fit_llama_messages_to_context(
+            FakeLlama(),
+            [{"role": "user", "content": ["untrimmable"]}],
+            n_ctx=8,
+            max_tokens=4,
+        )
+
+
+def test_native_linux_llama_context_defaults_to_stable_bucket(monkeypatch):
+    from seiso.inference.tuning import estimate_llama_n_ctx
+
+    monkeypatch.delenv("SEISO_LLAMA_DYNAMIC_CTX", raising=False)
+    monkeypatch.delenv("SEISO_LLAMA_NATIVE_STABLE_N_CTX", raising=False)
+    monkeypatch.setattr("seiso.platform.use_linux_nvidia_inference_guards", lambda: True)
+
+    n_ctx = estimate_llama_n_ctx(
+        [{"role": "user", "content": "long prompt " * 4000}],
+        max_tokens=512,
+        default=4096,
+    )
+
+    assert n_ctx == 4096
 
 
 def _complete_hf_gguf_metadata(filename: str = "model-q4.gguf") -> dict:
@@ -506,6 +594,27 @@ def test_llamaswap_engine_prefers_ollama_on_nvidia(monkeypatch):
     monkeypatch.delenv("SEISO_LLAMASWAP_ENGINE", raising=False)
     monkeypatch.setattr(llamaswap.platform, "system", lambda: "Linux")
     monkeypatch.setattr(llamaswap, "_nvidia_visible", lambda: True)
+    monkeypatch.setattr(llamaswap, "ollama_health_ok", lambda *, url=None: True)
+
+    assert llamaswap.preferred_llamaswap_engine() == "ollama"
+
+
+def test_llamaswap_engine_falls_back_to_llamacpp_when_ollama_unhealthy(monkeypatch):
+    from seiso.inference import llamaswap
+
+    monkeypatch.delenv("SEISO_LLAMASWAP_ENGINE", raising=False)
+    monkeypatch.setattr(llamaswap.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(llamaswap, "_nvidia_visible", lambda: True)
+    monkeypatch.setattr(llamaswap, "ollama_health_ok", lambda *, url=None: False)
+
+    assert llamaswap.preferred_llamaswap_engine() == "llamacpp"
+
+
+def test_llamaswap_engine_override_skips_ollama_health(monkeypatch):
+    from seiso.inference import llamaswap
+
+    monkeypatch.setenv("SEISO_LLAMASWAP_ENGINE", "ollama")
+    monkeypatch.setattr(llamaswap, "ollama_health_ok", lambda *, url=None: False)
 
     assert llamaswap.preferred_llamaswap_engine() == "ollama"
 
@@ -529,12 +638,15 @@ def test_llamaswap_status_requires_reachable_sidecar(monkeypatch):
     from seiso.inference import llamaswap
 
     monkeypatch.setenv("SEISO_LLAMASWAP_ENABLED", "true")
+    monkeypatch.setattr(llamaswap, "ollama_health_ok", lambda *, url=None: False)
     monkeypatch.setattr(llamaswap, "llamaswap_health_ok", lambda *, url=None: False)
 
     status = llamaswap.llamaswap_status()
 
     assert status.available is False
+    assert status.engine == "llamacpp"
     assert "not reachable" in (status.reason or "")
+    assert "SEISO_LLAMA_ALLOW_INPROCESS_NATIVE_LINUX" in (status.reason or "")
 
 
 def test_llamaswap_request_body_forwards_tools_and_model_override(monkeypatch):
@@ -564,6 +676,48 @@ def test_llamaswap_request_body_forwards_tools_and_model_override(monkeypatch):
         "top_p": 0.9,
         "tools": [{"type": "function", "function": {"name": "search"}}],
     }
+
+
+def test_llamaswap_client_ensure_ready_checks_sidecar_and_ollama(monkeypatch):
+    from seiso.inference import llamaswap
+    from seiso.inference.llamaswap import LlamaSwapClient, LlamaSwapRuntime
+
+    monkeypatch.setattr(
+        llamaswap,
+        "llamaswap_status",
+        lambda: LlamaSwapRuntime(True, "http://127.0.0.1:8080", "ollama"),
+    )
+    monkeypatch.setattr(llamaswap, "ollama_health_ok", lambda *, url=None: False)
+
+    with pytest.raises(RuntimeError, match="Ollama is not reachable"):
+        LlamaSwapClient(engine="ollama").ensure_ready()
+
+
+def test_llamaswap_release_external_memory_uses_management_api(monkeypatch):
+    from seiso.inference.llamaswap import LlamaSwapClient
+
+    calls: list[tuple[str, str]] = []
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+    def fake_urlopen(req, timeout=None):
+        calls.append((req.get_method(), req.full_url))
+        return FakeResponse()
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+    ok, reason = LlamaSwapClient(url="http://127.0.0.1:8080").release_external_memory(
+        "/models/qwen.gguf"
+    )
+
+    assert ok is True
+    assert reason is None
+    assert calls == [("POST", "http://127.0.0.1:8080/api/models/unload")]
 
 
 @pytest.mark.asyncio
