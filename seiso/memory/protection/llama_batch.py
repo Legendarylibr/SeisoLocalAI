@@ -41,11 +41,13 @@ def gpu_batch_tier_caps(gpu_total_mb: int, load_tier: LlamaLoadTier) -> tuple[in
     if gpu_total_mb <= 0:
         return _LOAD_TIER_BATCH_CAPS.get(load_tier, _LOAD_TIER_BATCH_CAPS["normal"])
     gpu_gb = max(1.0, gpu_total_mb / 1024)
+    scaled_batch = int(gpu_gb * 22)
+    rounded_batch = (scaled_batch // _MIN_LLAMA_BATCH) * _MIN_LLAMA_BATCH
     normal_batch = min(
         _MAX_LLAMA_BATCH,
-        max(_MIN_LLAMA_BATCH, int(gpu_gb * 43)),
+        max(_MIN_LLAMA_BATCH, rounded_batch),
     )
-    normal_ubatch = min(1024, max(_MIN_LLAMA_BATCH, normal_batch // 4))
+    normal_ubatch = min(512, max(_MIN_LLAMA_BATCH, normal_batch // 4))
     if load_tier == "compact":
         return min(normal_batch, max(256, normal_batch // 2)), min(normal_ubatch, 128)
     if load_tier == "minimal":
@@ -104,12 +106,19 @@ def clamp_llama_batch_pair(
         if gpu_total_mb is not None and gpu_total_mb > 0
         else (protection().discrete_gpu_total_mb() if native_linux_nvidia else 0)
     )
-    if native_linux_nvidia and gpu_total > 0:
-        tier_batch, tier_ubatch = gpu_batch_tier_caps(gpu_total, load_tier)
-        if tight:
-            tight_batch, tight_ubatch = tight_batch_caps(gpu_total)
-            tier_batch = min(tier_batch, tight_batch)
-            tier_ubatch = min(tier_ubatch, tight_ubatch)
+    if native_linux_nvidia:
+        if gpu_total > 0:
+            tier_batch, tier_ubatch = gpu_batch_tier_caps(gpu_total, load_tier)
+            if tight:
+                tight_batch, tight_ubatch = tight_batch_caps(gpu_total)
+                tier_batch = min(tier_batch, tight_batch)
+                tier_ubatch = min(tier_ubatch, tight_ubatch)
+        else:
+            tier_batch, tier_ubatch = {
+                "normal": (512, 128),
+                "compact": (256, 128),
+                "minimal": (256, 128),
+            }.get(load_tier, (512, 128))
     else:
         tier_batch, tier_ubatch = _LOAD_TIER_BATCH_CAPS.get(
             load_tier, _LOAD_TIER_BATCH_CAPS["normal"]
