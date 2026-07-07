@@ -167,6 +167,7 @@ async def inference_model_variants(
 
 @router.get("/router/status")
 async def router_status(
+    user_id: Annotated[str, Depends(get_current_user_id)],
     settings: Annotated[ForgeSettings, Depends(get_settings)],
 ) -> dict[str, Any]:
     if not settings.model_router_enabled:
@@ -275,9 +276,7 @@ async def get_chat_context(
             knowledge_base_id=kb_id,
             query=last_user,
         )
-        knowledge_context = (
-            format_knowledge_context(chunks, knowledge_base_id=kb_id) or None
-        )
+        knowledge_context = format_knowledge_context(chunks, knowledge_base_id=kb_id) or None
 
     return context_status_for_history(
         history,
@@ -341,9 +340,7 @@ async def preload_model(
     )
 
     loop = asyncio.get_running_loop()
-    await loop.run_in_executor(
-        None, lambda: orchestrator._runner.warm_model(ctx["payload"])
-    )
+    await loop.run_in_executor(None, lambda: orchestrator._runner.warm_model(ctx["payload"]))
     status = orchestrator._runner.pool.status()
     return {"status": "loaded", "backend": ctx["backend"], **status}
 
@@ -474,18 +471,14 @@ async def chat(
     knowledge_context: str | None = None
     if body.knowledge_base_id:
         kb_id = validate_kb_id(body.knowledge_base_id)
-        user_query = (
-            str(body.messages[-1].get("content", "")).strip() if body.messages else ""
-        )
+        user_query = str(body.messages[-1].get("content", "")).strip() if body.messages else ""
         chunks = retrieve_knowledge_chunks(
             settings.data_dir,
             user_id=user_id,
             knowledge_base_id=kb_id,
             query=user_query,
         )
-        knowledge_context = (
-            format_knowledge_context(chunks, knowledge_base_id=kb_id) or None
-        )
+        knowledge_context = format_knowledge_context(chunks, knowledge_base_id=kb_id) or None
 
     trusted_messages, _user_content = await build_trusted_messages(
         db,
@@ -543,9 +536,7 @@ async def chat(
 
     if body.draft_model_id or body.draft_model_path:
         if body.provider_id:
-            raise HTTPException(
-                400, "Speculative decoding is not available for cloud providers"
-            )
+            raise HTTPException(400, "Speculative decoding is not available for cloud providers")
         payload.update(
             await resolve_draft_model(
                 db,
@@ -596,9 +587,7 @@ async def chat(
                 )
                 cancelled = False
                 try:
-                    orchestrator._emit_log(
-                        job_id, f"Streaming inference ({backend_label})"
-                    )
+                    orchestrator._emit_log(job_id, f"Streaming inference ({backend_label})")
                     async for update in orchestrator.stream_local_updates(payload):
                         raw_parts.append(update.text)
                         yield {
@@ -653,13 +642,9 @@ async def chat(
     if job.status.value == "failed":
         raise HTTPException(500, job.error or "Inference failed")
     if body.thread_id and job.result.get("content"):
-        content = sanitize_llm_output(
-            job.result["content"], strip_tool_calls=not body.tools
-        )
+        content = sanitize_llm_output(job.result["content"], strip_tool_calls=not body.tools)
         await db.add_message(body.thread_id, "assistant", content)
     result = dict(job.result)
     if result.get("content") and not body.tools:
-        result["content"] = sanitize_llm_output(
-            result["content"], strip_tool_calls=True
-        )
+        result["content"] = sanitize_llm_output(result["content"], strip_tool_calls=True)
     return {"job_id": job_id, **result}

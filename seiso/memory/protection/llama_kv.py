@@ -25,17 +25,6 @@ def _gpu_layer_fraction(n_gpu_layers: int, total_layers: int) -> float:
     return max(0.0, min(float(n_gpu_layers) / float(total_layers or 64), 1.0))
 
 
-def _llama_model_likely_resident(
-    free_mb: int,
-    total_need_mb: int,
-    *,
-    weights_resident: bool = False,
-) -> bool:
-    """True when ``free_mb`` is post-load residual VRAM, not a pre-load budget."""
-    _ = (free_mb, total_need_mb)
-    return weights_resident
-
-
 def llama_batch_headroom_mb(
     free_mb: int,
     *,
@@ -64,9 +53,7 @@ def llama_batch_headroom_mb(
             free_mb=free_mb,
         )
         total_need = gpu_weight_mb + kv_mb
-        if _llama_model_likely_resident(
-            free_mb, total_need, weights_resident=weights_resident
-        ):
+        if weights_resident:
             return max(_MIN_LLAMA_BATCH * 2, free_mb)
         return max(_MIN_LLAMA_BATCH * 2, free_mb - total_need)
     except Exception:

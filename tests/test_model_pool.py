@@ -7,49 +7,14 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+from gguf_fixtures import write_arch_gguf as _write_arch_gguf
+
 from seiso.inference.model_pool import (
     BackendKind,
     LoadedModel,
     ModelPool,
     llama_load_kwargs,
 )
-
-
-def _write_arch_gguf(
-    path: Path, architecture: str, *, extra: list[tuple[bytes, int]] | None = None
-) -> None:
-    import struct
-
-    arch_key = b"general.architecture"
-    arch_value = architecture.encode()
-    prefix = architecture.split("-", 1)[0]
-    payload = [
-        struct.pack("<Q", len(arch_key)),
-        arch_key,
-        struct.pack("<I", 8),
-        struct.pack("<Q", len(arch_value)),
-        arch_value,
-    ]
-    for key, value in extra or []:
-        payload.extend(
-            [
-                struct.pack("<Q", len(key)),
-                key,
-                struct.pack("<I", 4),
-                struct.pack("<I", value),
-            ]
-        )
-    block_key = prefix.encode() + b".block_count"
-    payload.extend(
-        [
-            struct.pack("<Q", len(block_key)),
-            block_key,
-            struct.pack("<I", 4),
-            struct.pack("<I", 40),
-        ]
-    )
-    kv_count = 2 + len(extra or [])
-    path.write_bytes(b"GGUF" + struct.pack("<IQQ", 3, 0, kv_count) + b"".join(payload))
 
 
 def test_pool_singleton():
@@ -801,9 +766,7 @@ def test_llama_load_kwargs_cuda_defaults(monkeypatch):
     monkeypatch.setattr(platform, "system", lambda: "Linux")
     monkeypatch.setattr(platform, "machine", lambda: "x86_64")
     monkeypatch.setattr(os, "cpu_count", lambda: 24)
-    monkeypatch.setattr(
-        "seiso.inference.model_pool._available_cpu_count", lambda: 24
-    )
+    monkeypatch.setattr("seiso.inference.model_pool._available_cpu_count", lambda: 24)
     monkeypatch.setattr("seiso.inference.model_pool._cuda_available", lambda: True)
     monkeypatch.setattr("seiso.inference.model_pool._llama_gpu_offload_ok", lambda: True)
     monkeypatch.setattr("seiso.inference.model_pool._native_linux_nvidia", lambda: False)
@@ -1255,7 +1218,7 @@ def test_native_linux_load_model_uses_crash_resistant_kwargs(monkeypatch, tmp_pa
     assert first["n_ubatch"] <= tier_ubatch
     assert first["n_gpu_layers"] == -1
     assert first["offload_kqv"] is False
-    assert first["op_offload"] is False
+    assert "op_offload" not in first
     assert "flash_attn" not in first
     assert llm._seiso_n_batch == first["n_batch"]
     assert llm._seiso_n_ubatch == first["n_ubatch"]
@@ -1316,11 +1279,13 @@ def test_native_linux_partial_offload_disables_kqv_and_op_offload(monkeypatch, t
 
     assert attempts[0]["n_gpu_layers"] == 24
     assert attempts[0]["offload_kqv"] is False
-    assert attempts[0]["op_offload"] is False
+    assert "op_offload" not in attempts[0]
     assert "flash_attn" not in attempts[0]
 
 
-def test_qwen36_27b_native_linux_falls_back_to_partial_when_full_offload_fails(monkeypatch, tmp_path):
+def test_qwen36_27b_native_linux_falls_back_to_partial_when_full_offload_fails(
+    monkeypatch, tmp_path
+):
     import seiso.inference.model_pool as mp
 
     gguf = tmp_path / "Qwen3.6-27B-UD-Q4_K_XL.gguf"
@@ -1371,14 +1336,13 @@ def test_qwen36_27b_native_linux_falls_back_to_partial_when_full_offload_fails(m
     first = attempts[0]
     assert first["n_gpu_layers"] == 48
     assert first["offload_kqv"] is False
-    assert first["op_offload"] is False
+    assert "op_offload" not in first
     assert "flash_attn" not in first
     assert llm._seiso_n_gpu_layers == 48
 
 
 def test_qwen36_27b_native_linux_full_offloads_when_it_fits(monkeypatch, tmp_path):
     import seiso.inference.model_pool as mp
-
     from seiso.memory.protection import gpu_batch_tier_caps
 
     gguf = tmp_path / "Qwen3.6-27B-UD-Q4_K_XL.gguf"
@@ -1436,7 +1400,6 @@ def test_qwen36_27b_native_linux_full_offloads_when_it_fits(monkeypatch, tmp_pat
 
 def test_qwen3_14b_24gb_load_uses_full_gpu_kwargs(monkeypatch, tmp_path):
     import seiso.inference.model_pool as mp
-
     from seiso.memory.protection import gpu_batch_tier_caps
 
     gguf = tmp_path / "qwen3-14b-q4.gguf"
@@ -1579,9 +1542,7 @@ def test_llama_load_model_tries_full_offload_before_partial_fallback(monkeypatch
 
 def test_llama_load_profile_ladder_compact_tier(tmp_path, monkeypatch):
     monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: True)
-    monkeypatch.setattr(
-        "seiso.memory.protection.discrete_gpu_total_mb", lambda _profile=None: 8192
-    )
+    monkeypatch.setattr("seiso.memory.protection.discrete_gpu_total_mb", lambda _profile=None: 8192)
     from seiso.memory.protection import (
         discrete_gpu_total_mb,
         gpu_batch_tier_caps,

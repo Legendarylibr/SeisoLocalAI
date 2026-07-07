@@ -205,15 +205,6 @@ def action_catalog(status: dict[str, Any]) -> list[dict[str, Any]]:
             "enabled": ready,
         },
         {
-            "id": "setup_tests",
-            "workflow": "setup_tests",
-            "title": "Setup tests",
-            "description": "Re-run hardware-aware setup tests.",
-            "category": "verify",
-            "enabled": ready,
-            "options": {},
-        },
-        {
             "id": "doctor",
             "workflow": "doctor",
             "title": "Environment report",

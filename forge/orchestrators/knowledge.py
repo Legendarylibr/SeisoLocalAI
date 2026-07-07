@@ -11,7 +11,7 @@ from forge.orchestrators.base import Orchestrator
 from forge.security.audit import audit_event
 from forge.services.knowledge_context import retrieve_knowledge_chunks
 from forge.services.knowledge_paths import assert_ingest_source
-from forge.tools.sanitize import wrap_tool_result
+from forge.tools.sanitize import prepare_kb_chunk_text, wrap_tool_result
 from seiso.security import safe_join
 from seiso.security.deps import sha256_file
 
@@ -38,9 +38,7 @@ class KnowledgeOrchestrator(Orchestrator):
     async def _ingest(self, job_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         user_id = payload["user_id"]
         kb_id = payload["knowledge_base_id"]
-        source = assert_ingest_source(
-            self.sandbox_root, user_id, payload["source_path"]
-        )
+        source = assert_ingest_source(self.sandbox_root, user_id, payload["source_path"])
         size = source.stat().st_size
         if size > self.MAX_INGEST_BYTES:
             raise ValueError(
@@ -52,6 +50,20 @@ class KnowledgeOrchestrator(Orchestrator):
         text = source.read_text(encoding="utf-8", errors="replace")
         source_hash = sha256_file(source)
         chunks = self._chunk(text)
+        safe_chunks: list[str] = []
+        skipped = 0
+        for chunk in chunks:
+            body, flagged = prepare_kb_chunk_text(chunk)
+            if flagged or not body:
+                skipped += 1
+                continue
+            safe_chunks.append(body)
+        chunks = safe_chunks
+        if skipped:
+            self._emit_log(
+                job_id,
+                f"Skipped {skipped} instruction-like or empty chunk(s) from {source.name}",
+            )
         self._emit_log(job_id, f"Ingested {source.name}: {len(chunks)} chunks")
         audit_event(
             "kb_ingest",
@@ -65,14 +77,13 @@ class KnowledgeOrchestrator(Orchestrator):
         with index_path.open("a") as f:
             for i, chunk in enumerate(chunks):
                 record = {
-                    "id": hashlib.sha256(
-                        f"{kb_id}:{i}:{chunk[:32]}".encode()
-                    ).hexdigest()[:16],
+                    "id": hashlib.sha256(f"{kb_id}:{i}:{chunk[:32]}".encode()).hexdigest()[:16],
                     "text": chunk,
                     "source": str(source.name),
                     "source_path": str(source),
                     "source_sha256": source_hash,
                     "chunk_index": i,
+                    "instruction_flagged": False,
                 }
                 f.write(json.dumps(record) + "\n")
 
@@ -91,9 +102,7 @@ class KnowledgeOrchestrator(Orchestrator):
             query=query,
             top_k=top_k,
         )
-        results = [
-            {**c, "text": wrap_tool_result(f"kb:{kb_id}", c["text"])} for c in chunks
-        ]
+        results = [{**c, "text": wrap_tool_result(f"kb:{kb_id}", c["text"])} for c in chunks]
         self._emit_log(job_id, f"Retrieved {len(results)} chunks for query")
         return {"results": results}
 

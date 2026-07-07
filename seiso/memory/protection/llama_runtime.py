@@ -9,6 +9,7 @@ from typing import Any
 from seiso import platform as seiso_platform
 from seiso.env import env_bool
 from seiso.inference.backends import gguf_total_layers
+from seiso.inference.family_policy import policy_for_gguf
 from seiso.memory.protection._facade import protection
 from seiso.memory.protection.constants import (
     _MAX_LLAMA_BATCH,
@@ -33,7 +34,6 @@ from seiso.memory.protection.llama_batch import (
 from seiso.memory.protection.llama_kv import (
     _gpu_layer_fraction,
     _host_os_reserve_mb,
-    _llama_model_likely_resident,
     llama_batch_headroom_mb,
     llama_offload_fits_headroom,
 )
@@ -130,13 +130,9 @@ def llama_model_is_tight_vram_fit(
     with contextlib.suppress(Exception):
         if seiso_platform.use_linux_nvidia_inference_guards():
             ratio = _NATIVE_LINUX_TIGHT_VRAM_FIT_RATIO
-            from seiso.inference.family_policy import policy_for_gguf
-
             ratio = ratio / max(policy_for_gguf(str(path)).prefill_tightness, 1.0)
 
-    if _llama_model_likely_resident(
-        free_mb, total_need, weights_resident=weights_resident
-    ):
+    if weights_resident:
         required = max(_MIN_LLAMA_BATCH * 4, int(total_need * 0.15))
         if seiso_platform.use_linux_nvidia_inference_guards():
             required = max(required, int(total_need * 0.20))
@@ -244,9 +240,7 @@ def resolve_llama_model_batches(
         reserve_steps = max(1, (prefill_tokens + 255) // 256)
         reserve_mb = reserve_steps * _NATIVE_LINUX_PREFILL_RESERVE_PER_256TOK_MB
         effective = max(_MIN_LLAMA_BATCH * 2, effective - reserve_mb)
-    if vision_prefill:
-        effective = max(_MIN_LLAMA_BATCH * 2, effective - _NATIVE_LINUX_MMPROJ_RESERVE_MB)
-    elif has_mmproj_sibling:
+    if vision_prefill or has_mmproj_sibling:
         effective = max(_MIN_LLAMA_BATCH * 2, effective - _NATIVE_LINUX_MMPROJ_RESERVE_MB)
 
     batch, ubatch = resolve_llama_batch_limits(
@@ -277,9 +271,7 @@ def llama_prefill_needs_reload(
     if not native_linux_nvidia:
         batch, ubatch = clamp_llama_batch_pair(
             loaded_n_batch or _MAX_LLAMA_BATCH,
-            loaded_n_ubatch
-            if loaded_n_ubatch is not None
-            else loaded_n_batch or _MAX_LLAMA_BATCH,
+            loaded_n_ubatch if loaded_n_ubatch is not None else loaded_n_batch or _MAX_LLAMA_BATCH,
         )
         return False, batch, ubatch
 
@@ -317,6 +309,17 @@ def llama_prefill_needs_reload(
     loaded_batch = int(loaded_n_batch or 0)
     loaded_ubatch_explicit = loaded_n_ubatch is not None
     loaded_ubatch = int(loaded_n_ubatch if loaded_ubatch_explicit else loaded_batch or 0)
+    gpu_total = protection().discrete_gpu_total_mb()
+    tier_batch, tier_ubatch = gpu_batch_tier_caps(gpu_total or free_mb, load_tier)
+    handle_within_tier = loaded_batch <= tier_batch and (
+        not loaded_ubatch_explicit or loaded_ubatch <= tier_ubatch
+    )
+    trust_loaded_handle = (
+        tight_prefill
+        and not prefill_exceeds_safe
+        and not vision_prefill
+        and handle_within_tier
+    )
     headroom_shrank = (
         loaded_headroom_mb is not None
         and loaded_headroom_mb > 0
@@ -328,7 +331,7 @@ def llama_prefill_needs_reload(
     # under roomier headroom.
     batch_unsafe = loaded_batch > safe_batch
     ubatch_far_over = loaded_ubatch > max(safe_ubatch * 2, safe_ubatch + 128)
-    needs_reload = batch_unsafe
+    needs_reload = batch_unsafe and not trust_loaded_handle
     if (
         loaded_ubatch_explicit
         and loaded_ubatch > safe_ubatch
@@ -341,6 +344,7 @@ def llama_prefill_needs_reload(
             or ubatch_far_over
             or loaded_batch <= safe_batch
         )
+        and not trust_loaded_handle
     ):
         needs_reload = True
     if not needs_reload and tight_prefill:
@@ -484,5 +488,3 @@ def llama_next_recovery_tier(current: LlamaLoadTier) -> LlamaLoadTier | None:
     if current == "compact":
         return "minimal"
     return None
-
-

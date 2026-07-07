@@ -23,7 +23,7 @@ Key commands:
 - Prefer the documented entry points (`start`, `seiso`, `scripts/doctor.sh`) over raw `python ...`. They set up paths, HF cache, and runtime config.
 - **Smoke first**: Use `configs/*_smoke.*` presets for fast iteration. They exist precisely for CI + agent loops.
 - **Never delete** `~/.seiso` or its subdirs (user data, caches, checkpoints). Use `SEISO_DATA_DIR` overrides for throwaway experiments.
-- Memory-sensitive work: the platform applies guards (`seiso/memory/protection.py`, `forge/services/memory_release.py`). Call `prepare_for_gpu_task` patterns when adding new heavy GPU jobs.
+- Memory-sensitive work: the platform applies guards (`seiso/memory/protection/`, `forge/services/memory_release.py`). Call `prepare_for_gpu_task` patterns when adding new heavy GPU jobs.
 - Kernels are **monkey-patched temporarily** — always ensure restore paths run (see `lifecycle.py`, trainer cleanup, memory release). Test both success and exception cases.
 - Bundled compression and RL quant code lives under `seiso/` (`seiso/codellama_compress/`, `seiso/adaptive_quant/`, `seiso/analysis/`). Prefer the Seiso wrappers (`config_builder.py`, `runner.py`, `bootstrap.py`, `kernel_integration.py`) when changing integrated workflows.
 - Forge jobs stream logs/metrics via orchestrators + SSE. When adding features, update the matching orchestrator + route + UI page together.

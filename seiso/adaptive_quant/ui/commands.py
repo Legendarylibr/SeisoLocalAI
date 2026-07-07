@@ -221,16 +221,6 @@ def build_workflow_command(
             [python_bin, "scripts/install_cuda_torch.py", "--check-only"],
         )
 
-    if workflow == "setup_tests":
-        command = [python_bin, "scripts/run_setup_tests.py"]
-        if opts.get("full"):
-            command.append("--full")
-        if opts.get("no_torch"):
-            command.append("--no-torch")
-        if opts.get("no_nvidia"):
-            command.append("--no-nvidia")
-        return ("Setup tests", command)
-
     if workflow == "doctor":
         return ("Environment report", [python_bin, "scripts/env_report.py"])
 

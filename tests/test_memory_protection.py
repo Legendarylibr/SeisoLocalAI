@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from gguf_fixtures import write_arch_gguf as _write_arch_gguf
+from memory_fixtures import gpu_normal_caps as _gpu_normal_caps
+from memory_fixtures import mock_gpu_total as _mock_gpu_total
 
 from seiso.memory.protection import (
     apply_rl_memory_guards,
@@ -21,60 +23,12 @@ from seiso.memory.protection import (
     llama_load_profile_ladder,
     llama_model_is_tight_vram_fit,
     llama_next_recovery_tier,
-    llama_oom_recovery_batch,
     llama_offload_fits_headroom,
+    llama_oom_recovery_batch,
     llama_prefill_needs_reload,
     sanitize_inference_payload,
     trim_llama_messages_to_context,
 )
-
-
-def _mock_gpu_total(monkeypatch, vram_mb: int) -> None:
-    monkeypatch.setattr(
-        "seiso.memory.protection.discrete_gpu_total_mb",
-        lambda _profile=None: vram_mb,
-    )
-
-
-def _gpu_normal_caps(vram_mb: int) -> tuple[int, int]:
-    return gpu_batch_tier_caps(vram_mb, "normal")
-
-
-def _write_arch_gguf(
-    path: Path, architecture: str, *, extra: list[tuple[bytes, int]] | None = None
-) -> None:
-    import struct
-
-    arch_key = b"general.architecture"
-    arch_value = architecture.encode()
-    prefix = architecture.split("-", 1)[0]
-    payload = [
-        struct.pack("<Q", len(arch_key)),
-        arch_key,
-        struct.pack("<I", 8),
-        struct.pack("<Q", len(arch_value)),
-        arch_value,
-    ]
-    for key, value in extra or []:
-        payload.extend(
-            [
-                struct.pack("<Q", len(key)),
-                key,
-                struct.pack("<I", 4),
-                struct.pack("<I", value),
-            ]
-        )
-    block_key = prefix.encode() + b".block_count"
-    payload.extend(
-        [
-            struct.pack("<Q", len(block_key)),
-            block_key,
-            struct.pack("<I", 4),
-            struct.pack("<I", 32),
-        ]
-    )
-    kv_count = 2 + len(extra or [])
-    path.write_bytes(b"GGUF" + struct.pack("<IQQ", 3, 0, kv_count) + b"".join(payload))
 
 
 def test_llama_offload_fits_headroom_requires_weight_plus_kv(tmp_path):
@@ -206,9 +160,7 @@ def test_clamp_llama_n_ctx_respects_headroom(monkeypatch):
     assert n_ctx % 512 == 0
 
 
-def test_clamp_llama_n_ctx_caps_long_native_linux_prompt_for_mid_model(
-    monkeypatch, tmp_path
-):
+def test_clamp_llama_n_ctx_caps_long_native_linux_prompt_for_mid_model(monkeypatch, tmp_path):
     gguf = tmp_path / "qwen2.5-30b-q4.gguf"
     _write_arch_gguf(gguf, "qwen2")
     monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: True)
@@ -569,9 +521,7 @@ def test_clamp_llama_load_kwargs_native_linux_roomy_uses_safe_batches(monkeypatc
     assert kwargs.get("flash_attn") is True
 
 
-def test_clamp_llama_load_kwargs_skips_roomy_floor_when_gpu_mostly_in_use(
-    monkeypatch, tmp_path
-):
+def test_clamp_llama_load_kwargs_skips_roomy_floor_when_gpu_mostly_in_use(monkeypatch, tmp_path):
     """Do not speed-bump n_batch when other processes hold most of the GPU."""
     gguf = tmp_path / "small.gguf"
     gguf.write_bytes(b"\x00" * 1024)
@@ -777,7 +727,9 @@ def test_llama_prefill_guard_keeps_roomy_12b_after_load(monkeypatch, tmp_path):
     gguf = tmp_path / "qwen2.5-12b-q4.gguf"
     _write_arch_gguf(gguf, "qwen2")
     monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: True)
-    monkeypatch.setattr("seiso.memory.protection.hardware_profile", lambda **_: {"gpus": [{"vram_total_mb": 24576}]})
+    monkeypatch.setattr(
+        "seiso.memory.protection.hardware_profile", lambda **_: {"gpus": [{"vram_total_mb": 24576}]}
+    )
     monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 15500)
     monkeypatch.setattr("seiso.memory.protection.estimate_path_vram_mb", lambda _p: 8000)
     monkeypatch.setattr(
@@ -807,13 +759,13 @@ def test_llama_prefill_guard_keeps_roomy_12b_after_load(monkeypatch, tmp_path):
     assert safe_ubatch >= expected_ubatch
 
 
-def test_llama_prefill_guard_tight_gemma_27b_caps_safe_at_loaded_batch(
-    monkeypatch, tmp_path
-):
+def test_llama_prefill_guard_tight_gemma_27b_caps_safe_at_loaded_batch(monkeypatch, tmp_path):
     gguf = tmp_path / "gemma3-27b-q4.gguf"
     _write_arch_gguf(gguf, "gemma3", extra=[(b"gemma3.attention.sliding_window", 512)])
     monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: True)
-    monkeypatch.setattr("seiso.memory.protection.hardware_profile", lambda **_: {"gpus": [{"vram_total_mb": 24576}]})
+    monkeypatch.setattr(
+        "seiso.memory.protection.hardware_profile", lambda **_: {"gpus": [{"vram_total_mb": 24576}]}
+    )
     monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 6500)
     monkeypatch.setattr("seiso.memory.protection.estimate_path_vram_mb", lambda _p: 16000)
     monkeypatch.setattr(
@@ -1105,7 +1057,7 @@ def test_clamp_llama_load_kwargs_native_linux_tight_disables_flash_attn(monkeypa
     assert "flash_attn" not in kwargs
     assert kwargs["n_batch"] <= 256
     assert kwargs["n_ubatch"] <= 128
-    assert kwargs.get("op_offload") is False
+    assert "op_offload" not in kwargs
     assert kwargs.get("offload_kqv") is False
 
 
@@ -1271,9 +1223,7 @@ def test_qwen3_14b_roomy_4090_uses_normal_first_profile(monkeypatch, tmp_path):
     assert profiles[0]["n_ubatch"] >= 128
 
 
-def test_llama_load_profile_ladder_native_linux_fallbacks_step_down(
-    monkeypatch, tmp_path
-):
+def test_llama_load_profile_ladder_native_linux_fallbacks_step_down(monkeypatch, tmp_path):
     gguf = tmp_path / "small.gguf"
     gguf.write_bytes(b"\x00" * 1024)
     monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: True)

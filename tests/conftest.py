@@ -7,6 +7,9 @@ import contextlib
 from pathlib import Path
 
 import pytest
+
+pytest_plugins = ("gguf_fixtures",)
+
 from httpx import ASGITransport, AsyncClient
 
 from forge.api.deps import clear_dependency_caches, close_dependency_caches, get_db

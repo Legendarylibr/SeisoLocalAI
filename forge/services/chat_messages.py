@@ -13,6 +13,7 @@ from forge.services.model_prompts import (
     model_switch_system_prompt,
     resolve_model_key,
 )
+from forge.tools.sanitize import normalize_text
 
 _UNTRUSTED_ROLES = frozenset({"tool", "function", "system", "developer"})
 _DEFAULT_CONTEXT_CHAR_BUDGET = 24_000
@@ -211,7 +212,7 @@ async def build_trusted_messages(
     last = client_messages[-1]
     if last.get("role") != "user":
         raise HTTPException(400, "Last message must be from user")
-    content = str(last.get("content", "")).strip()
+    content = normalize_text(str(last.get("content", ""))).strip()
     if not content:
         raise HTTPException(400, "Empty message")
 
@@ -240,9 +241,7 @@ async def build_trusted_messages(
             track_model and thread and (thread.get("model_id") or None) != track_model
         )
         need_persist = (
-            not history
-            or history[-1]["role"] != "user"
-            or history[-1]["content"] != content
+            not history or history[-1]["role"] != "user" or history[-1]["content"] != content
         )
         if need_persist:
             if persist_user:

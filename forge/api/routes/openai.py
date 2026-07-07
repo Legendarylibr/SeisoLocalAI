@@ -20,6 +20,7 @@ from forge.security.openai_auth import get_openai_user_id
 from forge.services.inference_chat import prepare_local_chat_target
 from forge.services.llm_output import StreamingOutputSanitizer, sanitize_llm_output
 from forge.services.user_paths import is_local_filesystem_path
+from forge.tools.sanitize import normalize_text
 
 router = APIRouter(tags=["openai"])
 logger = logging.getLogger(__name__)
@@ -55,7 +56,7 @@ def _normalize_openai_messages(body: ChatCompletionRequest) -> list[dict[str, st
         role = m.role.lower()
         if role in _UNTRUSTED_OPENAI_ROLES:
             raise HTTPException(400, f"Untrusted message role: {m.role}")
-        content = m.content if isinstance(m.content, str) else json.dumps(m.content)
+        content = normalize_text(m.content if isinstance(m.content, str) else json.dumps(m.content))
         if role == "assistant":
             messages.append(
                 {
@@ -83,9 +84,7 @@ def _estimate_token_count(text: str) -> int:
 
 def _prompt_token_estimate(messages: list[ChatMessage]) -> int:
     return sum(
-        _estimate_token_count(
-            m.content if isinstance(m.content, str) else json.dumps(m.content)
-        )
+        _estimate_token_count(m.content if isinstance(m.content, str) else json.dumps(m.content))
         for m in messages
     )
 
@@ -116,11 +115,7 @@ async def _prepare_openai_chat_payload(
         )
         if selected is None:
             selected = next(
-                (
-                    o
-                    for o in options
-                    if o.get("selectable", True) and o.get("kind") == "local"
-                ),
+                (o for o in options if o.get("selectable", True) and o.get("kind") == "local"),
                 None,
             )
         if selected is None:
@@ -212,9 +207,7 @@ async def chat_completions(
 ):
     """OpenAI-compatible chat endpoint for Cursor, Continue, and other clients."""
     if body.tools and not settings.allow_openai_tools:
-        raise HTTPException(
-            403, "Tool calling is disabled on the OpenAI-compatible API"
-        )
+        raise HTTPException(403, "Tool calling is disabled on the OpenAI-compatible API")
 
     from forge.services.memory_release import assert_gpu_available_for_inference
 
@@ -302,9 +295,7 @@ async def chat_completions(
             if job and job.status.value == "failed":
                 yield f"data: {json.dumps({'error': job.error or 'Inference failed'})}\n\n"
             elif content:
-                content = sanitize_llm_output(
-                    content, strip_tool_calls=bool(body.tools)
-                )
+                content = sanitize_llm_output(content, strip_tool_calls=bool(body.tools))
                 chunk = {
                     "id": completion_id,
                     "object": "chat.completion.chunk",
@@ -327,9 +318,7 @@ async def chat_completions(
     if not job or job.status.value == "failed":
         raise HTTPException(500, job.error if job else "Inference failed")
 
-    content = sanitize_llm_output(
-        job.result.get("content", ""), strip_tool_calls=bool(body.tools)
-    )
+    content = sanitize_llm_output(job.result.get("content", ""), strip_tool_calls=bool(body.tools))
     prompt_tokens = _prompt_token_estimate(body.messages)
     completion_tokens = _estimate_token_count(content)
     return JSONResponse(

@@ -6,7 +6,11 @@ import heapq
 import json
 from pathlib import Path
 
-from forge.tools.sanitize import wrap_tool_result
+from forge.tools.sanitize import (
+    is_instruction_like,
+    prepare_kb_chunk_text,
+    wrap_tool_result,
+)
 from seiso.security import safe_join
 
 
@@ -39,6 +43,8 @@ def retrieve_knowledge_chunks(
                 continue
             chunk = json.loads(line)
             text = str(chunk.get("text", ""))
+            if chunk.get("instruction_flagged") or is_instruction_like(text):
+                continue
             t_tokens = set(text.lower().split())
             score = len(q_tokens & t_tokens) / max(len(q_tokens), 1)
             if score <= 0:
@@ -51,15 +57,11 @@ def retrieve_knowledge_chunks(
 
     return [
         chunk
-        for _score, _index, chunk in sorted(
-            top, key=lambda item: (item[0], item[1]), reverse=True
-        )
+        for _score, _index, chunk in sorted(top, key=lambda item: (item[0], item[1]), reverse=True)
     ]
 
 
-def format_knowledge_context(
-    chunks: list[dict], *, knowledge_base_id: str | None = None
-) -> str:
+def format_knowledge_context(chunks: list[dict], *, knowledge_base_id: str | None = None) -> str:
     """Format retrieved chunks as untrusted reference data for the model."""
     if not chunks:
         return ""
@@ -75,11 +77,10 @@ def format_knowledge_context(
         text = str(chunk.get("text", "")).strip()
         if not text:
             continue
-        envelope_source = (
-            f"kb:{knowledge_base_id}"
-            if knowledge_base_id
-            else f"kb:{source}"
-        )
+        text, _flagged = prepare_kb_chunk_text(text)
+        if not text:
+            continue
+        envelope_source = f"kb:{knowledge_base_id}" if knowledge_base_id else f"kb:{source}"
         label = f"[{index}] ({source})"
         parts.append(wrap_tool_result(envelope_source, f"{label}\n{text}"))
         parts.append("")

@@ -9,6 +9,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from gguf_fixtures import write_arch_gguf as _write_arch_gguf
+from gguf_fixtures import write_gguf_u32_metadata as _write_gguf_with_u32_metadata
+
 from seiso.inference.backends import (
     BACKEND_LLAMACPP,
     BACKEND_LLAMASWAP,
@@ -85,51 +88,9 @@ def test_safetensors_inventory_exposes_torch_and_mlx_fallbacks(
     ]
 
 
-def _write_minimal_gguf(path: Path, architecture: str) -> None:
-    import struct
-
-    key = b"general.architecture"
-    value = architecture.encode()
-    path.write_bytes(
-        b"GGUF"
-        + struct.pack("<IQQ", 3, 0, 1)
-        + struct.pack("<Q", len(key))
-        + key
-        + struct.pack("<I", 8)
-        + struct.pack("<Q", len(value))
-        + value
-    )
-
-
-def _write_gguf_with_u32_metadata(path: Path, pairs: list[tuple[bytes, int]]) -> None:
-    import struct
-
-    arch_key = b"general.architecture"
-    arch_value = b"llama"
-    payload = [
-        struct.pack("<Q", len(arch_key)),
-        arch_key,
-        struct.pack("<I", 8),
-        struct.pack("<Q", len(arch_value)),
-        arch_value,
-    ]
-    for key, value in pairs:
-        payload.extend(
-            [
-                struct.pack("<Q", len(key)),
-                key,
-                struct.pack("<I", 4),
-                struct.pack("<I", value),
-            ]
-        )
-    path.write_bytes(
-        b"GGUF" + struct.pack("<IQQ", 3, 0, 1 + len(pairs)) + b"".join(payload)
-    )
-
-
 def test_gguf_architecture_reads_metadata(tmp_path: Path):
     gguf = tmp_path / "model.gguf"
-    _write_minimal_gguf(gguf, "llama")
+    _write_arch_gguf(gguf, "llama")
 
     assert gguf_architecture(str(gguf)) == "llama"
 
@@ -154,7 +115,7 @@ def test_gguf_metadata_reader_collects_context_blocks_and_swa(tmp_path: Path):
 
 def test_available_backends_allows_dflash_draft_for_speculative(tmp_path: Path):
     gguf = tmp_path / "draft.gguf"
-    _write_minimal_gguf(gguf, "dflash-draft")
+    _write_arch_gguf(gguf, "dflash-draft")
 
     # dflash-draft is now allowed (via llama.cpp) when used as speculative draft model
     backends = available_backends(model_path=str(gguf), model_format="gguf")
@@ -166,16 +127,16 @@ def test_is_dflash_draft_requires_gguf_and_name_or_arch(tmp_path: Path):
     from seiso.inference.backends import is_dflash_draft
 
     dflash = tmp_path / "model-dflash.gguf"
-    _write_minimal_gguf(dflash, "llama")
+    _write_arch_gguf(dflash, "llama")
     assert is_dflash_draft(str(dflash))
 
     arch = tmp_path / "draft.gguf"
-    _write_minimal_gguf(arch, "dflash")
+    _write_arch_gguf(arch, "dflash")
     assert is_dflash_draft(str(arch))
 
     # Bare "-draft" / draft- prefix without dflash signal is not enough
     plain = tmp_path / "my-draft-model.gguf"
-    _write_minimal_gguf(plain, "llama")
+    _write_arch_gguf(plain, "llama")
     assert not is_dflash_draft(str(plain))
 
     # Non-GGUF paths are never dflash drafts
@@ -283,7 +244,7 @@ async def test_resolve_explicit_model_path_checks_selected_backend(
 def test_recommend_backend_detects_extensionless_hf_blob(tmp_path: Path):
     blob = tmp_path / "hf_cache" / "models--org--Model-GGUF" / "blobs" / "abc123"
     blob.parent.mkdir(parents=True)
-    _write_minimal_gguf(blob, "llama")
+    _write_arch_gguf(blob, "llama")
 
     assert recommend_backend(model_path=str(blob)) == BACKEND_LLAMACPP
     assert resolve_gguf_file(str(blob)) == blob.absolute()
@@ -1297,7 +1258,7 @@ async def test_list_inference_options_skips_hf_gguf_without_metadata(
     from forge.services.hf_connectivity import InferenceRuntimeStatus
 
     model_path = tmp_path / "model-Q4_K_M.gguf"
-    _write_minimal_gguf(model_path, "llama")
+    _write_arch_gguf(model_path, "llama")
 
     db = Database(
         tmp_path / "forge.db", encryption_key=generate_encryption_key(), ephemeral=True

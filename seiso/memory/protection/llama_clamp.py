@@ -10,6 +10,7 @@ from typing import Any
 from seiso import platform as seiso_platform
 from seiso.env import env_bool
 from seiso.inference.backends import gguf_total_layers
+from seiso.inference.family_policy import policy_for_gguf
 from seiso.memory.protection._facade import protection
 from seiso.memory.protection.chat_guards import _estimate_prompt_tokens, _gguf_has_mmproj_sibling
 from seiso.memory.protection.constants import (
@@ -111,7 +112,8 @@ def clamp_llama_load_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
             n_gpu_layers=n_gpu_layers,
             n_ctx=n_ctx,
         )
-        if native_linux_nvidia and n_gpu_layers == 0:
+        host_only = native_linux_nvidia and n_gpu_layers == 0
+        if host_only:
             batch_headroom = llama_host_batch_headroom_mb(
                 model_path=model_path,
                 n_gpu_layers=n_gpu_layers,
@@ -119,27 +121,19 @@ def clamp_llama_load_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
             )
             if batch_headroom is None:
                 batch_headroom = free_mb
-            max_batch, max_ubatch, _tight = protection().resolve_llama_model_batches(
-                model_path=model_path,
-                free_mb=free_mb,
-                n_ctx=n_ctx,
-                n_gpu_layers=n_gpu_layers,
-                load_tier="normal",
-                weights_resident=False,
-                native_linux_nvidia=native_linux_nvidia,
-            )
+        max_batch, max_ubatch, _tight = protection().resolve_llama_model_batches(
+            model_path=model_path,
+            free_mb=free_mb,
+            n_ctx=n_ctx,
+            n_gpu_layers=n_gpu_layers,
+            load_tier="normal",
+            weights_resident=False,
+            native_linux_nvidia=native_linux_nvidia,
+        )
+        if host_only:
             max_batch = min(max_batch, batch_headroom)
             max_ubatch = min(max_ubatch, max_batch)
         else:
-            max_batch, max_ubatch, _tight = protection().resolve_llama_model_batches(
-                model_path=model_path,
-                free_mb=free_mb,
-                n_ctx=n_ctx,
-                n_gpu_layers=n_gpu_layers,
-                load_tier="normal",
-                weights_resident=False,
-                native_linux_nvidia=native_linux_nvidia,
-            )
             batch_headroom = max_batch
         if native_linux_nvidia and _gguf_has_mmproj_sibling(model_path):
             batch_headroom = max(
@@ -162,8 +156,6 @@ def clamp_llama_load_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
             and not env_bool("SEISO_LLAMA_UNSAFE_FLASH_ATTN", False)
         ):
             try:
-                from seiso.inference.family_policy import policy_for_gguf
-
                 if model_path and not policy_for_gguf(str(model_path)).allow_flash_attn:
                     out.pop("flash_attn", None)
             except (ImportError, OSError, ValueError):
@@ -172,7 +164,7 @@ def clamp_llama_load_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
             if not env_bool("SEISO_LLAMA_UNSAFE_FLASH_ATTN", False):
                 out.pop("flash_attn", None)
             if not env_bool("SEISO_LLAMA_UNSAFE_OP_OFFLOAD", False):
-                out["op_offload"] = False
+                out.pop("op_offload", None)
             total_layers = gguf_total_layers(model_path)
             if not env_bool("SEISO_LLAMA_UNSAFE_OP_OFFLOAD", False) and (
                 n_gpu_layers == -1 or n_gpu_layers >= total_layers

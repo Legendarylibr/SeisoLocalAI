@@ -6,9 +6,9 @@ import os
 from pathlib import Path
 
 import pytest
+from gguf_fixtures import write_arch_gguf as _write_arch_gguf
 
 from seiso.inference.backends import (
-    clear_gguf_caches,
     gguf_architecture,
     gguf_is_moe,
     gguf_uses_sliding_window_attention,
@@ -19,50 +19,6 @@ from seiso.inference.model_pool import (
     fit_llama_gpu_layers,
     llama_load_kwargs,
 )
-
-
-@pytest.fixture(autouse=True)
-def _reset_gguf_cache():
-    clear_gguf_caches()
-    yield
-    clear_gguf_caches()
-
-
-def _write_arch_gguf(
-    path: Path, architecture: str, *, extra: list[tuple[bytes, int]] | None = None
-) -> None:
-    import struct
-
-    arch_key = b"general.architecture"
-    arch_value = architecture.encode()
-    prefix = architecture.split("-", 1)[0]
-    payload = [
-        struct.pack("<Q", len(arch_key)),
-        arch_key,
-        struct.pack("<I", 8),
-        struct.pack("<Q", len(arch_value)),
-        arch_value,
-    ]
-    for key, value in extra or []:
-        payload.extend(
-            [
-                struct.pack("<Q", len(key)),
-                key,
-                struct.pack("<I", 4),
-                struct.pack("<I", value),
-            ]
-        )
-    block_key = prefix.encode() + b".block_count"
-    payload.extend(
-        [
-            struct.pack("<Q", len(block_key)),
-            block_key,
-            struct.pack("<I", 4),
-            struct.pack("<I", 32),
-        ]
-    )
-    kv_count = 2 + len(extra or [])
-    path.write_bytes(b"GGUF" + struct.pack("<IQQ", 3, 0, kv_count) + b"".join(payload))
 
 
 FAMILY_CASES = [
@@ -429,9 +385,7 @@ def test_qwen36_27b_24gb_uses_full_offload_when_estimate_fits(monkeypatch, tmp_p
     assert layers == -1
 
 
-def test_qwen36_27b_24gb_uses_partial_offload_when_full_does_not_fit(
-    monkeypatch, tmp_path: Path
-):
+def test_qwen36_27b_24gb_uses_partial_offload_when_full_does_not_fit(monkeypatch, tmp_path: Path):
     import seiso.inference.model_pool as mp
 
     qwen = tmp_path / "Qwen3.6-27B-UD-Q4_K_XL.gguf"
