@@ -545,8 +545,17 @@ def test_clamp_llama_load_kwargs_skips_roomy_floor_when_gpu_mostly_in_use(
 
 def test_gpu_batch_tier_caps_unknown_gpu_uses_safe_native_caps():
     assert gpu_batch_tier_caps(0, "normal") == (128, 128)
-    assert gpu_batch_tier_caps(0, "compact") == (128, 128)
-    assert gpu_batch_tier_caps(0, "minimal") == (128, 128)
+    assert gpu_batch_tier_caps(0, "compact") == (64, 64)
+    assert gpu_batch_tier_caps(0, "minimal") == (32, 32)
+
+
+def test_gpu_batch_tier_caps_native_recovery_tiers_step_down():
+    assert gpu_batch_tier_caps(24576, "normal") == (128, 128)
+    assert gpu_batch_tier_caps(24576, "compact") == (64, 64)
+    assert gpu_batch_tier_caps(24576, "minimal") == (32, 32)
+    assert gpu_batch_tier_caps(49152, "normal") == (256, 128)
+    assert gpu_batch_tier_caps(49152, "compact") == (128, 64)
+    assert gpu_batch_tier_caps(49152, "minimal") == (64, 32)
 
 
 def test_clamp_llama_load_kwargs_native_linux_without_model_path(monkeypatch):
@@ -1172,6 +1181,32 @@ def test_qwen3_14b_roomy_4090_uses_normal_first_profile(monkeypatch, tmp_path):
 
     assert profiles[0]["n_batch"] >= _gpu_normal_caps(24576)[0]
     assert profiles[0]["n_ubatch"] >= 128
+
+
+def test_llama_load_profile_ladder_native_linux_fallbacks_step_down(
+    monkeypatch, tmp_path
+):
+    gguf = tmp_path / "small.gguf"
+    gguf.write_bytes(b"\x00" * 1024)
+    monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: True)
+    _mock_gpu_total(monkeypatch, 49152)
+    monkeypatch.setattr("seiso.memory.protection.estimate_path_vram_mb", lambda _p: 1024)
+    monkeypatch.setattr("seiso.inference.backends.gguf_block_count", lambda _p: 32)
+
+    profiles = llama_load_profile_ladder(
+        model_path=str(gguf),
+        n_ctx=8192,
+        n_gpu_layers=-1,
+        free_mb=49152,
+        base_batch=4096,
+        base_ubatch=1024,
+        tier="normal",
+    )
+
+    assert [profile["n_batch"] for profile in profiles[:3]] == [256, 128, 64]
+    assert [profile["n_ubatch"] for profile in profiles[:3]] == [128, 64, 32]
+    assert profiles[1]["n_ctx"] == 4096
+    assert profiles[2]["n_ctx"] == 2048
 
 
 def test_llama_load_profile_ladder_skips_upscale_when_model_fills_gpu(monkeypatch, tmp_path):

@@ -12,6 +12,8 @@ from seiso.memory.protection.constants import (
     _MAX_LLAMA_BATCH,
     _MIN_LLAMA_BATCH,
     _NATIVE_LINUX_BATCH_TOKENS_PER_GB,
+    _NATIVE_LINUX_COMPACT_BATCH_FLOOR,
+    _NATIVE_LINUX_MINIMAL_BATCH_FLOOR,
     _NATIVE_LINUX_MAX_NORMAL_BATCH,
     _NATIVE_LINUX_UNKNOWN_GPU_BATCH_CAPS,
     LlamaLoadTier,
@@ -42,6 +44,10 @@ def comfortable_vram_slack_ratio(*, gpu_total_mb: int | None = None) -> float:
 def gpu_batch_tier_caps(gpu_total_mb: int, load_tier: LlamaLoadTier) -> tuple[int, int]:
     """Scale llama.cpp batch ceilings with GPU VRAM instead of fixed tier tables."""
     if gpu_total_mb <= 0:
+        if load_tier == "compact":
+            return _NATIVE_LINUX_COMPACT_BATCH_FLOOR, _NATIVE_LINUX_COMPACT_BATCH_FLOOR
+        if load_tier == "minimal":
+            return _NATIVE_LINUX_MINIMAL_BATCH_FLOOR, _NATIVE_LINUX_MINIMAL_BATCH_FLOOR
         return _NATIVE_LINUX_UNKNOWN_GPU_BATCH_CAPS
     gpu_gb = max(1.0, gpu_total_mb / 1024)
     scaled_batch = int(gpu_gb * _NATIVE_LINUX_BATCH_TOKENS_PER_GB)
@@ -53,9 +59,20 @@ def gpu_batch_tier_caps(gpu_total_mb: int, load_tier: LlamaLoadTier) -> tuple[in
     )
     normal_ubatch = min(128, max(_MIN_LLAMA_BATCH, normal_batch // 4))
     if load_tier == "compact":
-        return min(normal_batch, max(256, normal_batch // 2)), min(normal_ubatch, 128)
+        compact_batch = max(_NATIVE_LINUX_COMPACT_BATCH_FLOOR, normal_batch // 2)
+        compact_ubatch = max(
+            _NATIVE_LINUX_COMPACT_BATCH_FLOOR,
+            min(normal_ubatch, compact_batch // 2),
+        )
+        return compact_batch, compact_ubatch
     if load_tier == "minimal":
-        return min(normal_batch, 256), min(normal_ubatch, 128)
+        compact_batch, compact_ubatch = gpu_batch_tier_caps(gpu_total_mb, "compact")
+        minimal_batch = max(_NATIVE_LINUX_MINIMAL_BATCH_FLOOR, compact_batch // 2)
+        minimal_ubatch = max(
+            _NATIVE_LINUX_MINIMAL_BATCH_FLOOR,
+            min(compact_ubatch, minimal_batch // 2),
+        )
+        return minimal_batch, minimal_ubatch
     return normal_batch, normal_ubatch
 
 
@@ -87,8 +104,14 @@ def clamp_llama_batch_pair(
     gpu_total_mb: int | None = None,
 ) -> tuple[int, int]:
     """Normalize a llama.cpp batch/ubatch pair (single source of ceilings)."""
-    batch = max(_MIN_LLAMA_BATCH, int(batch))
-    ubatch = max(_MIN_LLAMA_BATCH, min(int(ubatch), batch))
+    min_batch = _MIN_LLAMA_BATCH
+    if native_linux_nvidia:
+        if load_tier == "compact":
+            min_batch = _NATIVE_LINUX_COMPACT_BATCH_FLOOR
+        elif load_tier == "minimal":
+            min_batch = _NATIVE_LINUX_MINIMAL_BATCH_FLOOR
+    batch = max(min_batch, int(batch))
+    ubatch = max(min_batch, min(int(ubatch), batch))
     gpu_total = (
         int(gpu_total_mb)
         if gpu_total_mb is not None and gpu_total_mb > 0

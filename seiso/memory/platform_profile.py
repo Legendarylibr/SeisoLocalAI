@@ -18,7 +18,6 @@ from seiso.memory.protection import (
     gpu_batch_tier_caps,
     llama_batch_limits_for_headroom,
 )
-from seiso.memory.protection.constants import _NATIVE_LINUX_UNKNOWN_GPU_BATCH_CAPS
 from seiso.training.platform_caps import training_capabilities
 
 
@@ -31,15 +30,9 @@ def native_linux_nvidia_llama_batch_caps(
 ) -> tuple[int, int, int]:
     """VRAM-derived llama.cpp batch/ubatch/cache caps for native Linux NVIDIA."""
     total = gpu_total_mb or discrete_gpu_total_mb()
-    if total > 0:
-        batch, ubatch = gpu_batch_tier_caps(total, "normal")
-    else:
-        batch, ubatch = _NATIVE_LINUX_UNKNOWN_GPU_BATCH_CAPS
+    batch, ubatch = gpu_batch_tier_caps(total, "normal")
     if low:
-        if total > 0:
-            low_batch, low_ubatch = gpu_batch_tier_caps(total, "compact")
-        else:
-            low_batch, low_ubatch = _NATIVE_LINUX_UNKNOWN_GPU_BATCH_CAPS
+        low_batch, low_ubatch = gpu_batch_tier_caps(total, "compact")
         batch = min(batch, low_batch)
         ubatch = min(ubatch, low_ubatch, batch)
     cache_cap = min(2048, max(256, batch * 2))

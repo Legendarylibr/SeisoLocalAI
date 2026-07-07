@@ -36,6 +36,19 @@ def test_native_linux_nvidia_llama_batch_caps_unknown_total_uses_safe_caps():
     assert cache == 256
 
 
+def test_native_linux_nvidia_llama_batch_caps_unknown_total_low_steps_down():
+    batch, ubatch, cache = native_linux_nvidia_llama_batch_caps(
+        tier=HardwareTier.WORKSTATION,
+        headroom_mb=0,
+        low=True,
+        gpu_total_mb=0,
+    )
+
+    assert batch == 64
+    assert ubatch == 64
+    assert cache == 256
+
+
 @pytest.fixture(autouse=True)
 def _clear_llama_env(monkeypatch):
     for key in list(os.environ):
