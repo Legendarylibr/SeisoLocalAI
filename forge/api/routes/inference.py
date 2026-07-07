@@ -353,7 +353,6 @@ async def preload_model(
         orchestrator.assert_generation_available_for_user(user_id)
     except PermissionError as exc:
         raise HTTPException(403, str(exc)) from exc
-    _begin_generation_or_raise(orchestrator, user_id)
     ctx = await resolve_preload_context(
         db,
         user_id,
@@ -365,6 +364,7 @@ async def preload_model(
     )
 
     loop = asyncio.get_running_loop()
+    _begin_generation_or_raise(orchestrator, user_id)
     try:
         await loop.run_in_executor(None, lambda: orchestrator._runner.warm_model(ctx["payload"]))
         status = orchestrator._runner.pool.status()
