@@ -78,3 +78,38 @@ def test_dispatch_and_patch_restore(monkeypatch):
     clear_kernel_patches(model)
     assert not hasattr(model[0], "_seiso_orig_forward")
     assert restore_kernel_patches(model) == 0
+
+
+def test_kernel_patch_session_restores_on_exception(monkeypatch):
+    pytest = __import__("pytest")
+    torch = pytest.importorskip("torch")
+    from torch import nn
+
+    from seiso.kernels.hooks import apply_training_kernels
+    from seiso.kernels.lifecycle import KernelPatchSession, restore_kernel_patches
+
+    monkeypatch.setattr(
+        "seiso.kernels.hooks.detect_gpu",
+        lambda: GpuPlatform(GpuVendor.NVIDIA, "test-gpu", 1, True, False),
+    )
+
+    class FakeRMSNorm(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.weight = nn.Parameter(torch.ones(4))
+            self.variance_epsilon = 1e-6
+
+        def forward(self, hidden):
+            return hidden
+
+    model = nn.Sequential(FakeRMSNorm())
+    model[0].__class__.__name__ = "LlamaRMSNorm"
+
+    with pytest.raises(RuntimeError, match="boom"):
+        with KernelPatchSession(model):
+            apply_training_kernels(model)
+            assert hasattr(model[0], "_seiso_orig_forward")
+            raise RuntimeError("boom")
+
+    assert not hasattr(model[0], "_seiso_orig_forward")
+    assert restore_kernel_patches() == 0

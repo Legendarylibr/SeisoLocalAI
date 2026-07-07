@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from forge.orchestrators._bundled_job import bundled_orchestrator
+from forge.orchestrators._bundled_job import BundledJobContract, bundled_orchestrator
 from seiso.distill_rl.runner import run_distill_rl_job
 
 DistillRLOrchestrator = bundled_orchestrator(
@@ -13,4 +13,5 @@ DistillRLOrchestrator = bundled_orchestrator(
     start_message="Starting distill-RL pipeline (distill → rollout → DPO → evaluate)",
     runner=run_distill_rl_job,
     result_log=lambda result: f"Artifacts: {result.get('output_dir')}",
+    contract=BundledJobContract(),
 )

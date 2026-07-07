@@ -1461,6 +1461,13 @@ def test_apply_training_memory_guards_caps_unsafe_user_sizing(monkeypatch):
     assert guarded.gradient_accumulation_steps == 16
     assert guarded.max_seq_length == 1024
 
+    from seiso.memory.protection import describe_training_memory_policy
+
+    policy = describe_training_memory_policy(cfg, guarded, reason="initial_guard")
+    assert policy["changed"] is True
+    assert policy["changes"]["batch_size"] == {"from": 8, "to": 1}
+    assert policy["changes"]["max_seq_length"] == {"from": 8192, "to": 1024}
+
 
 def test_apply_rl_memory_guards_caps_large_batches(monkeypatch):
     monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 2048)

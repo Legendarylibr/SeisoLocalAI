@@ -12,7 +12,7 @@ from sse_starlette.sse import EventSourceResponse
 from forge.api.deps import get_db
 from forge.api.routes._jobs import format_stage_pipeline_job, stage_presets_response
 from forge.api.routes._stream import (
-    job_failure_message,
+    durable_job_events,
     job_log_event_gen,
     spawn_background,
 )
@@ -22,6 +22,7 @@ from forge.orchestrators.base import Orchestrator
 from forge.security.audit import audit_event
 from forge.security.auth import get_current_user_id
 from forge.services.jobs import assert_job_owner
+from forge.services.job_runtime import run_orchestrated_job
 from forge.services.model_registry import register_export_outputs
 
 
@@ -77,13 +78,19 @@ def register_formatted_job_routes(
             assert_job_owner(orchestrator, job_id, user_id)
             return EventSourceResponse(
                 job_log_event_gen(
-                    orchestrator, job_id, before_result=routes.before_result
+                    orchestrator,
+                    job_id,
+                    db=db,
+                    user_id=user_id,
+                    before_result=routes.before_result,
                 )
             )
 
         row = await routes.get_job(db, job_id, user_id)
 
         async def db_event_gen():
+            async for event in durable_job_events(db, job_id, user_id):
+                yield event
             if row and row.get("error_text"):
                 yield {"event": "error", "data": row["error_text"]}
             if row and row.get("stage_results_json"):
@@ -143,49 +150,50 @@ def build_stage_pipeline_router(config: StagePipelineRouterConfig) -> APIRouter:
         orchestrator.create_job(job_id=job_id, user_id=user_id)
         payload = {**config_payload, "user_id": user_id}
 
-        async def _run() -> None:
-            try:
-                await orchestrator.start(job_id, payload)
-                job = await orchestrator.wait_for(job_id)
-                if job:
-                    result = job.result or {}
-                    stage_results = config.enrich_stage_results(result)
-                    await config.update_status(
+        async def _finished(job) -> None:
+            result = job.result or {}
+            stage_results = config.enrich_stage_results(result)
+            await config.update_status(
+                db,
+                job_id,
+                job.status.value,
+                output_dir=result.get("output_root"),
+                run_dir=result.get("run_dir"),
+                model_dir=result.get("model_dir"),
+                stages=result.get("stages"),
+                stage_results=stage_results,
+                error_text=job.error if job.status.value == "failed" else None,
+            )
+            if model_dir := result.get("model_dir"):
+                try:
+                    await register_export_outputs(
                         db,
+                        user_id=user_id,
+                        data_dir=settings.data_dir,
+                        outputs={config.export_registry_key: str(model_dir)},
+                        job_id=job_id,
+                    )
+                except Exception:
+                    import logging
+
+                    logging.getLogger(__name__).exception(
+                        "Pipeline inventory registration failed for job %s "
+                        "(job remains %s)",
                         job_id,
                         job.status.value,
-                        output_dir=result.get("output_root"),
-                        run_dir=result.get("run_dir"),
-                        model_dir=result.get("model_dir"),
-                        stages=result.get("stages"),
-                        stage_results=stage_results,
-                        error_text=job.error if job.status.value == "failed" else None,
                     )
-                    if model_dir := result.get("model_dir"):
-                        try:
-                            await register_export_outputs(
-                                db,
-                                user_id=user_id,
-                                data_dir=settings.data_dir,
-                                outputs={config.export_registry_key: str(model_dir)},
-                                job_id=job_id,
-                            )
-                        except Exception:
-                            import logging
 
-                            logging.getLogger(__name__).exception(
-                                "Pipeline inventory registration failed for job %s "
-                                "(job remains %s)",
-                                job_id,
-                                job.status.value,
-                            )
-            except Exception as exc:
-                await config.update_status(
-                    db,
-                    job_id,
-                    "failed",
-                    error_text=job_failure_message(orchestrator, job_id, exc),
-                )
+        async def _failed(message: str) -> None:
+            await config.update_status(db, job_id, "failed", error_text=message)
+
+        async def _run() -> None:
+            await run_orchestrated_job(
+                orchestrator=orchestrator,
+                job_id=job_id,
+                payload=payload,
+                on_finished=_finished,
+                on_failed=_failed,
+            )
 
         spawn_background(_run())
         preset = config_payload.get("preset", "")

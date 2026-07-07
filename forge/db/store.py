@@ -170,6 +170,17 @@ CREATE TABLE IF NOT EXISTS providers (
     created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS job_events (
+    id TEXT PRIMARY KEY,
+    job_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    sequence INTEGER NOT NULL,
+    created_at TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_models_user ON local_models(user_id);
 CREATE INDEX IF NOT EXISTS idx_models_user_created ON local_models(user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_models_user_path ON local_models(user_id, path);
@@ -191,6 +202,9 @@ CREATE INDEX IF NOT EXISTS idx_recipe_jobs_user ON recipe_jobs(user_id);
 CREATE INDEX IF NOT EXISTS idx_providers_user ON providers(user_id);
 CREATE INDEX IF NOT EXISTS idx_providers_user_created ON providers(user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_knowledge_bases_user ON knowledge_bases(user_id);
+CREATE INDEX IF NOT EXISTS idx_job_events_job_sequence ON job_events(job_id, sequence ASC);
+CREATE INDEX IF NOT EXISTS idx_job_events_user_created ON job_events(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_job_events_kind ON job_events(kind, job_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_models_user_source ON local_models(user_id, source);
 CREATE INDEX IF NOT EXISTS idx_threads_user_updated ON chat_threads(user_id, updated_at DESC);
 """
@@ -748,6 +762,108 @@ class Database:
                 (json.dumps(metrics), now, job_id, *([user_id] if user_id else [])),
             )
             await conn.commit()
+
+    async def append_job_event(
+        self,
+        *,
+        job_id: str,
+        user_id: str,
+        kind: str,
+        event_type: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Append a durable log/metric/status event for restart-safe streams."""
+        now = _now()
+        event_id = str(uuid.uuid4())
+        async with self._conn() as conn:
+            await conn.execute("BEGIN IMMEDIATE")
+            cur = await conn.execute(
+                """SELECT COALESCE(MAX(sequence), 0) + 1 AS next_sequence
+                   FROM job_events WHERE job_id = ?""",
+                (job_id,),
+            )
+            row = await cur.fetchone()
+            sequence = int(row["next_sequence"]) if row else 1
+            await conn.execute(
+                """INSERT INTO job_events
+                   (id, job_id, user_id, kind, event_type, payload_json, sequence, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    event_id,
+                    job_id,
+                    user_id,
+                    kind,
+                    event_type,
+                    json.dumps(payload, default=str),
+                    sequence,
+                    now,
+                ),
+            )
+            await conn.commit()
+        return {
+            "id": event_id,
+            "job_id": job_id,
+            "user_id": user_id,
+            "kind": kind,
+            "event_type": event_type,
+            "payload": payload,
+            "sequence": sequence,
+            "created_at": now,
+        }
+
+    async def list_job_events(
+        self,
+        job_id: str,
+        user_id: str,
+        *,
+        event_types: tuple[str, ...] | None = None,
+        after_sequence: int = 0,
+        limit: int = 5000,
+    ) -> list[dict[str, Any]]:
+        """Return decoded durable job events in sequence order."""
+        limit = max(1, min(int(limit), 10000))
+        params: list[Any] = [job_id, user_id, after_sequence]
+        type_clause = ""
+        if event_types:
+            placeholders = ",".join("?" for _ in event_types)
+            type_clause = f" AND event_type IN ({placeholders})"
+            params.extend(event_types)
+        params.append(limit)
+        query = f"""SELECT * FROM job_events
+                   WHERE job_id = ? AND user_id = ? AND sequence > ?{type_clause}
+                   ORDER BY sequence ASC
+                   LIMIT ?"""  # nosec B608
+        async with (
+            self._conn() as conn,
+            conn.execute(query, params) as cur,
+        ):
+            rows = [dict(r) for r in await cur.fetchall()]
+        for row in rows:
+            try:
+                row["payload"] = json.loads(row.get("payload_json") or "{}")
+            except json.JSONDecodeError:
+                row["payload"] = {}
+        return rows
+
+    async def prune_job_events(
+        self, job_id: str, user_id: str, *, keep_last: int = 5000
+    ) -> int:
+        """Keep the newest N events for a job and delete older rows."""
+        keep_last = max(1, int(keep_last))
+        async with self._conn() as conn:
+            cur = await conn.execute(
+                """DELETE FROM job_events
+                   WHERE job_id = ? AND user_id = ?
+                     AND sequence NOT IN (
+                       SELECT sequence FROM job_events
+                       WHERE job_id = ? AND user_id = ?
+                       ORDER BY sequence DESC
+                       LIMIT ?
+                     )""",
+                (job_id, user_id, job_id, user_id, keep_last),
+            )
+            await conn.commit()
+            return int(cur.rowcount or 0)
 
     async def list_training_jobs(self, user_id: str) -> list[dict]:
         cols = _column_list(_TRAINING_LIST_COLUMNS)

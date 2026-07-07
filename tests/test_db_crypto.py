@@ -177,6 +177,40 @@ async def test_upsert_model_preserves_id_on_update(db: Database):
 
 
 @pytest.mark.asyncio
+async def test_job_events_append_tail_and_prune(db: Database):
+    user = await db.create_user("hashed", "User", email="events@local.dev")
+    await db.append_job_event(
+        job_id="job-1",
+        user_id=user["id"],
+        kind="training",
+        event_type="log",
+        payload={"line": "starting"},
+    )
+    await db.append_job_event(
+        job_id="job-1",
+        user_id=user["id"],
+        kind="training",
+        event_type="metric",
+        payload={"loss": 1.0},
+    )
+
+    rows = await db.list_job_events("job-1", user["id"])
+    assert [row["sequence"] for row in rows] == [1, 2]
+    assert rows[0]["payload"] == {"line": "starting"}
+    assert rows[1]["payload"] == {"loss": 1.0}
+
+    metric_rows = await db.list_job_events(
+        "job-1", user["id"], event_types=("metric",)
+    )
+    assert len(metric_rows) == 1
+
+    deleted = await db.prune_job_events("job-1", user["id"], keep_last=1)
+    assert deleted == 1
+    remaining = await db.list_job_events("job-1", user["id"])
+    assert [row["event_type"] for row in remaining] == ["metric"]
+
+
+@pytest.mark.asyncio
 async def test_model_path_lookup_index_exists(db: Database):
     conn = await db._ensure_conn()
     async with conn.execute("PRAGMA index_list(local_models)") as cur:

@@ -149,6 +149,14 @@ class TrainingOrchestrator(Orchestrator):
                     self._schedule_metrics_persist(job_id, loop)
 
                 def on_log(line: str) -> None:
+                    if line.startswith("MEMORY_POLICY "):
+                        try:
+                            policy = json.loads(line.removeprefix("MEMORY_POLICY "))
+                            loop.call_soon_threadsafe(
+                                self._emit_event, job_id, "memory_policy", policy
+                            )
+                        except json.JSONDecodeError:
+                            pass
                     loop.call_soon_threadsafe(self._emit_log, job_id, line)
 
                 training_future = loop.run_in_executor(
@@ -286,6 +294,15 @@ class TrainingOrchestrator(Orchestrator):
                 loop = asyncio.get_running_loop()
                 self._schedule_metrics_persist(job_id, loop)
             else:
+                if text.startswith("MEMORY_POLICY "):
+                    try:
+                        self._emit_event(
+                            job_id,
+                            "memory_policy",
+                            json.loads(text.removeprefix("MEMORY_POLICY ")),
+                        )
+                    except json.JSONDecodeError:
+                        pass
                 self._emit_log(job_id, text)
 
         code = await proc.wait()

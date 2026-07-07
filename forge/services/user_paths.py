@@ -7,7 +7,18 @@ from pathlib import Path
 from seiso.security import SecurityError, assert_within, safe_join
 
 _USER_SCOPED_ROOTS = frozenset(
-    {"uploads", "knowledge", "artifacts", "sandbox", "models", "checkpoints", "exports"}
+    {
+        "uploads",
+        "knowledge",
+        "artifacts",
+        "sandbox",
+        "models",
+        "checkpoints",
+        "exports",
+        "compress",
+        "distill_rl",
+        "rl_quant",
+    }
 )
 _SHARED_CACHE_ROOTS = frozenset({"hf_cache"})
 
