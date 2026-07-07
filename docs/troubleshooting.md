@@ -13,18 +13,18 @@
 
 See [inference/backends.md](inference/backends.md#memory-management) for RAM-tier guidance.
 
-## Native Linux GGUF chat says llama-swap is required
+## Native Linux GGUF chat says Ollama or llama-swap is required
 
-**Symptom:** Chat fails with setup guidance for `llama-swap`, Ollama, or `SEISO_LLAMA_ALLOW_INPROCESS_NATIVE_LINUX=1`.
+**Symptom:** Chat fails with setup guidance for Ollama, `llama-swap`, or `SEISO_LLAMA_ALLOW_INPROCESS_NATIVE_LINUX=1`.
 
-**Cause:** On native Linux NVIDIA, Seiso does not silently fall back to in-process llama.cpp because CUDA failures there can kill Forge. The safe default is an isolated sidecar.
+**Cause:** On native Linux NVIDIA, Seiso does not silently fall back to in-process llama.cpp because CUDA failures there can kill Forge. The safe default is Ollama-first isolated chat.
 
 **Fix:**
-1. Run `start` so Seiso can auto-start installed sidecars.
-2. Install/start Ollama if you want the preferred Linux NVIDIA engine.
-3. Install/start `llama-swap` and set `SEISO_LLAMASWAP_URL=http://127.0.0.1:8080` if it is not on the default URL.
-4. Set `SEISO_LLAMASWAP_ENGINE=llamacpp` to use llama-swap-managed llama.cpp instead of Ollama.
-5. Only set `SEISO_LLAMA_ALLOW_INPROCESS_NATIVE_LINUX=1` if you accept that an in-process llama.cpp crash can stop Forge.
+1. Re-run the Linux NVIDIA bootstrap: `curl -fsSL …/scripts/bootstrap/linux-nvidia.sh | bash`
+2. Or install/start Ollama manually: `curl -fsSL https://ollama.com/install.sh | sh && ollama serve`
+3. Run `seiso doctor` — Ollama API should show OK at `http://127.0.0.1:11434`
+4. Optional fallback: install `llama-swap` when Ollama is down
+5. Only set `SEISO_LLAMA_ALLOW_INPROCESS_NATIVE_LINUX=1` if you accept that an in-process llama.cpp crash can stop Forge
 
 ## CUDA kernels fail to compile
 

@@ -82,11 +82,34 @@ In config files and Python, `~/.seiso` expands correctly on every OS. In shell c
 
 One command installs missing system tools (Python, Node, git, build deps when possible), clones the repo, builds the UI, and **starts Forge automatically** (browser opens when ready):
 
+#### Quick install
+
+**Recommended: one command per OS** (installs the right stack, including Ollama on native Linux NVIDIA):
+
+```bash
+# Linux native + NVIDIA — CUDA training + Ollama-first GGUF chat (recommended)
+curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/bootstrap/linux-nvidia.sh | bash
+
+# Linux native CPU
+curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/bootstrap/linux-cpu.sh | bash
+
+# Linux AMD ROCm — install PyTorch ROCm wheel separately after (see docs/platforms/linux-amd-rocm.md)
+curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/bootstrap/linux-rocm.sh | bash
+
+# WSL2 + NVIDIA — keep the clone on the Linux filesystem (~/Seiso, not /mnt/c/...)
+curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/bootstrap/wsl-nvidia.sh | bash
+
+# macOS Apple Silicon — includes MLX for fast safetensors chat
+curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/bootstrap/macos.sh | bash
+```
+
+Generic auto-detect (legacy — on native Linux NVIDIA prefer `linux-nvidia.sh` above):
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
 ```
 
-Auto-detects your OS and GPU. **Install only what you need** — set `SEISO_INSTALL_PROFILE` before the same one-liner:
+Profile variants via env prefix on the generic installer:
 
 ```bash
 # Linux native + NVIDIA — CUDA training + GGUF GPU chat
@@ -116,15 +139,15 @@ What the installer does:
 4. Builds `forge-ui/dist`
 5. Runs `seiso forge` and opens the browser
 
-On native Linux + NVIDIA, `start` also tries to start the isolated GGUF sidecar
-path before Forge: healthy Ollama first, then `llama-swap` with its `llamacpp`
-engine. If those tools are not installed, Forge still starts and chat shows
-setup guidance instead of silently using in-process llama.cpp.
+On native Linux + NVIDIA, the `linux-nvidia.sh` bootstrap installs **Ollama**
+(Ollama-first isolated GGUF chat), seeds sidecar `.env` defaults, and verifies
+the stack before Forge opens. `start` also auto-starts Ollama when installed;
+llama-swap is an optional fallback when Ollama is down.
 
 **Install only** (no auto-start):
 
 ```bash
-SEISO_START=0 SEISO_INSTALL_PROFILE=linux-nvidia curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
+SEISO_START=0 curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/bootstrap/linux-nvidia.sh | bash
 ```
 
 **Fast install** (same as `SEISO_INSTALL_PROFILE=chat`):

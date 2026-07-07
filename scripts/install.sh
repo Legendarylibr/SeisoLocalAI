@@ -55,6 +55,10 @@ load_seiso_common() {
 
 load_seiso_common
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-}")" 2>/dev/null && pwd || echo "")"
+if [[ -f "${SCRIPT_DIR}/lib/sidecar_install.sh" ]]; then
+  # shellcheck source=lib/sidecar_install.sh
+  source "${SCRIPT_DIR}/lib/sidecar_install.sh"
+fi
 
 log() { seiso_log "$@"; }
 warn() { seiso_warn "$@"; }
@@ -217,6 +221,9 @@ main() {
 
   log_unless_quiet "Checking system dependencies"
   seiso_require_system_deps
+  if declare -F seiso_warn_native_linux_nvidia_banner >/dev/null 2>&1; then
+    seiso_warn_native_linux_nvidia_banner
+  fi
 
   root="$(resolve_root)"
   log_unless_quiet "Using repository at $root"
@@ -225,8 +232,16 @@ main() {
   extras="$(detect_platform_extras)"
   if [[ -n "${SEISO_INSTALL_PROFILE:-}" ]]; then
     log_unless_quiet "Install profile: ${SEISO_INSTALL_PROFILE} → [$extras]"
+    case "${SEISO_INSTALL_PROFILE,,}" in
+      linux-nvidia|linux-nvidia-native)
+        export SEISO_REQUIRE_SIDECAR="${SEISO_REQUIRE_SIDECAR:-1}"
+        ;;
+    esac
   else
     log_unless_quiet "Installing Python extras: [$extras]"
+    if declare -F seiso_native_linux_nvidia >/dev/null 2>&1 && seiso_native_linux_nvidia; then
+      export SEISO_REQUIRE_SIDECAR="${SEISO_REQUIRE_SIDECAR:-1}"
+    fi
   fi
 
   install_log="$root/.seiso-install.log"
@@ -252,6 +267,10 @@ main() {
   fi
 
   seiso_install_start_command "$root"
+
+  if declare -F seiso_run_sidecar_install_phase >/dev/null 2>&1; then
+    seiso_run_sidecar_install_phase "$root"
+  fi
 
   install_tui_outro "$root"
 

@@ -38,6 +38,10 @@ load_seiso_common() {
 
 load_seiso_common
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-}")" 2>/dev/null && pwd || echo "")"
+if [[ -f "${SCRIPT_DIR}/lib/sidecar_install.sh" ]]; then
+  # shellcheck source=lib/sidecar_install.sh
+  source "${SCRIPT_DIR}/lib/sidecar_install.sh"
+fi
 
 log() { seiso_log "$@"; }
 die() { seiso_die "$@"; }
@@ -129,13 +133,18 @@ ensure_inference_sidecars() {
   engine="$(preferred_sidecar_engine)"
   export SEISO_LLAMASWAP_ENGINE="${SEISO_LLAMASWAP_ENGINE:-$engine}"
 
+  if sidecar_health_ok "$ollama_url" "/api/tags"; then
+    log "Ollama sidecar is ready at $ollama_url (engine=${SEISO_LLAMASWAP_ENGINE})"
+    return 0
+  fi
+
   if sidecar_health_ok "$swap_url" "/health"; then
-    log "llama-swap sidecar is ready at $swap_url (engine=${SEISO_LLAMASWAP_ENGINE})"
+    log "llama-swap fallback is ready at $swap_url"
     return 0
   fi
 
   if ! command -v llama-swap >/dev/null 2>&1; then
-    log "llama-swap is not installed; native Linux NVIDIA GGUF chat will show setup guidance instead of using in-process llama.cpp"
+    log "llama-swap is not installed; install Ollama or llama-swap for native Linux NVIDIA GGUF chat"
     return 0
   fi
 
@@ -197,6 +206,9 @@ main() {
 
   seiso_bin="$(seiso_require_cli "$root")"
   ensure_inference_sidecars
+  if declare -F seiso_verify_sidecar_stack >/dev/null 2>&1; then
+    seiso_verify_sidecar_stack
+  fi
 
   forge_url="$(seiso_forge_url)"
   open_flag=""

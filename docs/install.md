@@ -48,11 +48,32 @@ Seiso config files accept `~/.seiso` and expand it correctly on all platforms. S
 
 No manual prerequisites on most systems — the installer installs Python, Node, git, and native build tools (gcc, cmake, python dev headers) via your package manager when they are missing.
 
+**Recommended: OS-specific bootstrap scripts** (install the right sidecar stack):
+
+```bash
+# Linux native + NVIDIA — installs Ollama + verifies sidecar before Forge opens
+curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/bootstrap/linux-nvidia.sh | bash
+
+# Linux native CPU
+curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/bootstrap/linux-cpu.sh | bash
+
+# Linux AMD ROCm
+curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/bootstrap/linux-rocm.sh | bash
+
+# WSL2 + NVIDIA
+curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/bootstrap/wsl-nvidia.sh | bash
+
+# macOS Apple Silicon
+curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/bootstrap/macos.sh | bash
+```
+
+Generic auto-detect (legacy):
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
 ```
 
-Auto-detects OS and GPU. **Per-OS / per-hardware profiles** — prepend `SEISO_INSTALL_PROFILE=…` to install only the extras you need:
+**Profile env prefixes** on the generic installer:
 
 ```bash
 # Linux native + NVIDIA
@@ -108,7 +129,8 @@ bash start
    - **macOS** → `[forge,train,llamacpp,dev]` (optional: `[mlx]` for safetensors)
 4. **Copies** `.env.example` → `.env` if missing
 5. **Builds** the Forge UI (`forge-ui/dist`)
-6. **Starts** Forge (unless `SEISO_START=0`)
+6. **Installs sidecar stack** on native Linux NVIDIA (`linux-nvidia.sh`: Ollama + health gate)
+7. **Starts** Forge (unless `SEISO_START=0`)
 
 ### Installer options
 
@@ -128,6 +150,9 @@ bash start
 | `SEISO_INSTALL_PROFILE` | auto | Target stack: `linux-nvidia`, `linux-cpu`, `linux-rocm`, `wsl-nvidia`, `macos`, `chat` |
 | `SEISO_INSTALL_EXTRAS` | auto | Override pip extras directly (e.g. `forge,train,cuda,llamacpp`) |
 | `SEISO_SIDECAR_AUTOSTART=0` | on | Do not auto-start Ollama/llama-swap before Forge |
+| `SEISO_REQUIRE_SIDECAR=1` | on for linux-nvidia | Fail install/start when Ollama/llama-swap unavailable |
+| `SEISO_SKIP_OLLAMA_INSTALL=1` | off | Skip official Ollama installer during bootstrap |
+| `SEISO_SIDECAR_OPTIONAL=1` | off | Warn instead of hard-fail when sidecar missing |
 | `SEISO_LLAMASWAP_ENGINE` | auto | Sidecar engine: `ollama` or `llamacpp` |
 | `SEISO_LLAMA_ALLOW_INPROCESS_NATIVE_LINUX=1` | off | Explicitly allow unsafe in-process llama.cpp on native Linux NVIDIA |
 

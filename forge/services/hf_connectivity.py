@@ -47,6 +47,8 @@ class InferenceRuntimeStatus:
 
     llamacpp: bool = False
     llamaswap: bool = False
+    ollama_ready: bool = False
+    llamaswap_ready: bool = False
     mlx: bool = False
     torch: bool = False
     huggingface_hub: bool = False
@@ -59,6 +61,8 @@ class InferenceRuntimeStatus:
         return {
             "llamacpp": self.llamacpp,
             "llamaswap": self.llamaswap,
+            "ollama_ready": self.ollama_ready,
+            "llamaswap_ready": self.llamaswap_ready,
             "mlx": self.mlx,
             "torch": self.torch,
             "huggingface_hub": self.huggingface_hub,
@@ -83,16 +87,27 @@ def _llamacpp_status() -> tuple[bool, str | None]:
     return llamacpp_import_ok()
 
 
+def _native_linux_nvidia_gguf_isolated() -> bool:
+    try:
+        from seiso.platform import use_linux_nvidia_inference_guards
+
+        return use_linux_nvidia_inference_guards()
+    except Exception:
+        return False
+
+
 @lru_cache(maxsize=1)
 def check_inference_runtime() -> InferenceRuntimeStatus:
     """Report which local inference stacks are importable."""
     llamacpp_ok, llamacpp_error = _llamacpp_status()
-    from seiso.inference.llamaswap import llamaswap_setup_hint, llamaswap_status
+    from seiso.inference.llamaswap import llamaswap_setup_hint, llamaswap_status, ollama_url
 
     swap = llamaswap_status()
     status = InferenceRuntimeStatus(
         llamacpp=llamacpp_ok,
         llamaswap=swap.available,
+        ollama_ready=swap.ollama_ready,
+        llamaswap_ready=swap.llamaswap_ready,
         mlx=_dep_status("mlx_lm"),
         torch=_dep_status("torch"),
         huggingface_hub=_dep_status("huggingface_hub"),
@@ -132,6 +147,8 @@ def check_inference_runtime() -> InferenceRuntimeStatus:
             hints.append(f"Import error: {status.llamacpp_error}")
     if not status.llamaswap:
         hints.append(llamaswap_setup_hint(url=swap.url, engine=swap.engine))
+    elif status.ollama_ready:
+        hints.append(f"Ollama sidecar ready at {ollama_url()}")
     if not status.mlx and not status.torch:
         hints.append('pip install -e ".[mlx]" or ".[train]"  # safetensors inference')
     status.install_hints = hints
@@ -253,7 +270,12 @@ def build_hf_status(
         and (connectivity.anonymous_ok or connectivity.token_valid)
     )
     ready_for_upload = connectivity.token_valid
-    ready_for_gguf_chat = ready_for_download and (runtime.llamacpp or runtime.llamaswap)
+    if _native_linux_nvidia_gguf_isolated():
+        ready_for_gguf_chat = ready_for_download and runtime.llamaswap
+    else:
+        ready_for_gguf_chat = ready_for_download and (
+            runtime.llamacpp or runtime.llamaswap
+        )
     ready_for_local_chat = ready_for_download and (
         runtime.llamacpp or runtime.llamaswap or runtime.mlx or runtime.torch
     )
@@ -274,6 +296,8 @@ def build_hf_status(
         "runtime": {
             "llamacpp": runtime.llamacpp,
             "llamaswap": runtime.llamaswap,
+            "ollama_ready": runtime.ollama_ready,
+            "llamaswap_ready": runtime.llamaswap_ready,
             "mlx": runtime.mlx,
             "torch": runtime.torch,
             "huggingface_hub": runtime.huggingface_hub,

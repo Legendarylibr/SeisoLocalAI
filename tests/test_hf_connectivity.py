@@ -235,6 +235,45 @@ def test_assert_hub_ready_raises_when_unreachable(monkeypatch):
         hf_connectivity.assert_hub_ready_for_download()
 
 
+def test_ready_for_gguf_chat_requires_sidecar_on_native_linux(monkeypatch):
+    monkeypatch.setattr(
+        hf_connectivity,
+        "_native_linux_nvidia_gguf_isolated",
+        lambda: True,
+    )
+    monkeypatch.setattr(
+        hf_connectivity,
+        "probe_hf_hub",
+        lambda **_: hf_connectivity.HfConnectivityResult(
+            reachable=True,
+            anonymous_ok=True,
+        ),
+    )
+    monkeypatch.setattr(
+        hf_connectivity,
+        "check_inference_runtime",
+        lambda: hf_connectivity.InferenceRuntimeStatus(
+            huggingface_hub=True,
+            llamacpp=True,
+            llamaswap=False,
+        ),
+    )
+    status = hf_connectivity.build_hf_status(probe=False)
+    assert status["ready_for_gguf_chat"] is False
+
+    monkeypatch.setattr(
+        hf_connectivity,
+        "check_inference_runtime",
+        lambda: hf_connectivity.InferenceRuntimeStatus(
+            huggingface_hub=True,
+            llamaswap=True,
+            ollama_ready=True,
+        ),
+    )
+    status = hf_connectivity.build_hf_status(probe=False)
+    assert status["ready_for_gguf_chat"] is True
+
+
 def test_with_download_retries_transient(monkeypatch):
     calls = {"n": 0}
 

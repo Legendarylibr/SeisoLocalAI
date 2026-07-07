@@ -4,11 +4,15 @@ Full Seiso support: fused CUDA kernels, QLoRA, multi-GPU, Forge UI.
 
 ## Install
 
-**Recommended** — auto-detect, or pin the Linux + NVIDIA stack:
+**Recommended** — Ollama-first bootstrap (installs Ollama + verifies sidecar):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
-# or explicitly:
+curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/bootstrap/linux-nvidia.sh | bash
+```
+
+Legacy profile prefix:
+
+```bash
 SEISO_INSTALL_PROFILE=linux-nvidia curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
 ```
 
@@ -26,9 +30,9 @@ Requirements:
 - NVIDIA driver + `nvidia-smi` working
 - CUDA toolkit (`nvcc`) for JIT-compiled fused kernels (first training run compiles)
 - PyTorch CUDA wheel (installed automatically via `torch` dependency)
-- `llama-swap` sidecar for default GGUF chat isolation. `start` auto-starts
-  Ollama/llama-swap when installed; set `SEISO_LLAMASWAP_ENGINE=llamacpp` to use
-  llama-swap-managed llama.cpp instead of Ollama.
+- **Ollama** for default GGUF chat isolation (installed by `linux-nvidia.sh` bootstrap).
+  Downloaded Hub GGUFs are registered in Ollama automatically. llama-swap is an
+  optional fallback when Ollama is unavailable.
 
 ### Optional: Flash Attention 2
 

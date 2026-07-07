@@ -66,9 +66,39 @@ check_cmd() {
 }
 
 root="$(resolve_root)"
+
+if [[ -f "$root/scripts/lib/common.sh" ]]; then
+  # shellcheck source=lib/common.sh
+  source "$root/scripts/lib/common.sh"
+  seiso_ensure_bun_on_path
+fi
+if [[ -f "$root/scripts/lib/sidecar_install.sh" ]]; then
+  # shellcheck source=lib/sidecar_install.sh
+  source "$root/scripts/lib/sidecar_install.sh"
+fi
+
 printf '\nSeiso Doctor\n'
 printf '============\n'
 info "repo: $root"
+
+if declare -F seiso_native_linux_nvidia >/dev/null 2>&1 && seiso_native_linux_nvidia; then
+  printf '\nSidecar stack (native Linux NVIDIA)\n'
+  if command -v ollama >/dev/null 2>&1; then
+    ok "ollama: $(command -v ollama)"
+  else
+    fail "ollama missing. Run: curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/bootstrap/linux-nvidia.sh | bash"
+  fi
+  if declare -F seiso_ollama_health_ok >/dev/null 2>&1 && seiso_ollama_health_ok; then
+    ok "Ollama API healthy at ${SEISO_OLLAMA_URL:-http://127.0.0.1:11434}"
+  else
+    fail "Ollama API not reachable — run: ollama serve"
+  fi
+  if command -v llama-swap >/dev/null 2>&1; then
+    ok "llama-swap fallback: $(command -v llama-swap)"
+  else
+    warn "llama-swap not installed (optional Ollama-down fallback)"
+  fi
+fi
 
 if [[ ! -f "$root/pyproject.toml" || ! -d "$root/seiso_cli" ]]; then
   fail "Seiso repository not found. Set SEISO_INSTALL_DIR or run from the repo root."
@@ -77,12 +107,6 @@ fi
 
 check_cmd git "Install git, then rerun start."
 check_cmd python3 "Install Python 3.10+."
-
-if [[ -f "$root/scripts/lib/common.sh" ]]; then
-  # shellcheck source=lib/common.sh
-  source "$root/scripts/lib/common.sh"
-  seiso_ensure_bun_on_path
-fi
 
 if command -v bun >/dev/null 2>&1; then
   ok "bun version: $(bun --version 2>&1)"

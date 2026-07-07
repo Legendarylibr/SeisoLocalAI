@@ -328,6 +328,28 @@ def _sync_download_artifacts(
         size_bytes = sum(path.stat().st_size for path in downloaded_paths)
     except OSError:
         size_bytes = path_size_bytes(cached)
+    metadata: dict[str, Any] = {
+        "repo_id": catalog_repo,
+        "gguf_repo": gguf_repo,
+        "cache_dir": str(cache_dir),
+        "gguf_file": info["filename"],
+        "gguf_files": info.get("filenames") or [info["filename"]],
+        **(
+            {"mmproj_file": info["mmproj_filename"]}
+            if info.get("mmproj_filename")
+            else {}
+        ),
+    }
+    try:
+        from forge.services.ollama_registry import register_gguf_with_ollama
+
+        metadata["ollama_tag"] = register_gguf_with_ollama(
+            str(inv.absolute()),
+            repo_id=catalog_repo,
+            metadata=metadata,
+        )
+    except Exception:
+        pass
     return {
         "variant": "gguf",
         "source": source,
@@ -335,18 +357,7 @@ def _sync_download_artifacts(
         "path": str(inv.absolute()),
         "format": "gguf",
         "size_bytes": size_bytes,
-        "metadata": {
-            "repo_id": catalog_repo,
-            "gguf_repo": gguf_repo,
-            "cache_dir": str(cache_dir),
-            "gguf_file": info["filename"],
-            "gguf_files": info.get("filenames") or [info["filename"]],
-            **(
-                {"mmproj_file": info["mmproj_filename"]}
-                if info.get("mmproj_filename")
-                else {}
-            ),
-        },
+        "metadata": metadata,
         "downloaded": [str(path) for path in downloaded_paths],
         "repo_id": catalog_repo,
         "gguf_repo": gguf_repo,
