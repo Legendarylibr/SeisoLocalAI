@@ -586,12 +586,14 @@ def _load_llama_model(
     kwargs = _mp().llama_load_kwargs(n_ctx, model_path=path)
     if batch_override is not None:
         override_batch, override_ubatch = batch_override
-        kwargs["n_batch"], kwargs["n_ubatch"] = _prot().clamp_llama_batch_pair(
+        clamped_batch, clamped_ubatch = _prot().clamp_llama_batch_pair(
             override_batch,
             override_ubatch,
             native_linux_nvidia=_mp()._native_linux_nvidia(),
             load_tier=load_tier,
         )
+        kwargs["n_batch"] = min(clamped_batch, override_batch)
+        kwargs["n_ubatch"] = min(clamped_ubatch, override_ubatch, kwargs["n_batch"])
     speed_extras = _mp()._llama_speed_extras(path)
     requested = env_int("SEISO_LLAMA_GPU_LAYERS", _mp()._default_llama_gpu_layers())
     if requested != 0 and not _mp()._llama_gpu_offload_ok():

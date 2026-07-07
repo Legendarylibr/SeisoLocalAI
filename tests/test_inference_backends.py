@@ -1426,7 +1426,7 @@ def test_llama_complete_oom_recovery_passes_batch_override(monkeypatch):
     )
 
     assert reply == "ok"
-    assert seen_overrides == [(64, 64)]
+    assert seen_overrides == [(64, 32)]
 
 
 def test_llama_complete_prefill_guard_reloads_before_native_linux_segfault(

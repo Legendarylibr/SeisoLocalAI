@@ -774,6 +774,7 @@ class LocalInferenceRunner:
             safe_batch=int(getattr(llm, "_seiso_last_safe_batch", 0) or 0),
             safe_ubatch=int(getattr(llm, "_seiso_last_safe_ubatch", 0) or 0),
             loaded_batch=int(getattr(llm, "_seiso_n_batch", 0) or 0),
+            loaded_ubatch=int(getattr(llm, "_seiso_n_ubatch", 0) or 0),
             next_tier=next_tier,
         )
         logger.warning(
