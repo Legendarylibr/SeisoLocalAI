@@ -34,12 +34,27 @@ BACKEND_AUTO = InferenceBackend.AUTO
 
 BACKEND_LABELS: dict[str, str] = {
     "llamacpp": "llama.cpp",
-    "llamaswap": "llama-swap",
+    "llamaswap": "GGUF sidecar",
     "mlx": "MLX",
     "torch": "PyTorch",
     "router": "Smart Router",
     "auto": "Auto",
 }
+
+
+def resolve_backend_label(
+    backend: str,
+    *,
+    sidecar_engine: str | None = None,
+) -> str:
+    """Human label for a backend; sidecar label reflects active engine when known."""
+    if backend == BACKEND_LLAMASWAP:
+        if sidecar_engine == "ollama":
+            return "Ollama sidecar"
+        if sidecar_engine == "llamacpp":
+            return "llama-swap"
+        return BACKEND_LABELS[BACKEND_LLAMASWAP]
+    return BACKEND_LABELS.get(backend, backend)
 _GGUF_SHARD_RE = re.compile(
     r"^(?P<prefix>.+)-(?P<index>\d{5})-of-(?P<total>\d{5})\.gguf$", re.I
 )

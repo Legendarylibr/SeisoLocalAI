@@ -126,7 +126,7 @@ async def prepare_local_chat_target(
             backend = recommend_backend(model_path=path)
         if check_memory:
             assert_model_fits_for_load(path, mode="chat", backend=backend)
-        from forge.services.ollama_registry import metadata_for_model_path
+        from seiso.inference.ollama_registry import metadata_for_model_path
 
         path_meta = metadata_for_model_path(path)
         updates: dict[str, Any] = {

@@ -21,6 +21,7 @@ from forge.services.hf_connectivity import check_inference_runtime
 from forge.services.hf_hub import get_gguf_file_size_bytes
 from seiso.inference.backends import (
     BACKEND_LABELS,
+    resolve_backend_label,
     BACKEND_LLAMACPP,
     BACKEND_LLAMASWAP,
     BACKEND_MLX,
@@ -155,6 +156,17 @@ def _enrich_model_runtime_meta(
         opt.setdefault("uses_swa", False)
 
 
+def _backend_labels_for(backends: list[str]) -> dict[str, str]:
+    sidecar_engine = None
+    if BACKEND_LLAMASWAP in backends:
+        from seiso.inference.sidecar_runtime import sidecar_status
+
+        sidecar_engine = sidecar_status().engine
+    return {
+        b: resolve_backend_label(b, sidecar_engine=sidecar_engine) for b in backends
+    }
+
+
 def _build_local_option(
     row: dict[str, Any],
     *,
@@ -221,7 +233,7 @@ def _build_local_option(
         "path": row["path"],
         "default_backend": _pick_default_backend(backends, profile) if backends else "",
         "backends": backends,
-        "backend_labels": {b: BACKEND_LABELS.get(b, b) for b in backends},
+        "backend_labels": _backend_labels_for(backends),
         "size_bytes": row.get("size_bytes", 0),
         "metadata": metadata,
         "selectable": True,
