@@ -156,14 +156,6 @@ def _llama_skip_partial_offload(model_path: str) -> bool:
         return False
 
 
-def _llama_speed_scale_enabled() -> bool:
-    # Upscaled batches OOM during prefill after weights land on GPU.
-    if _mp()._native_linux_nvidia() and not env_bool("SEISO_LLAMA_UNSAFE_SPEED_SCALE", False):
-        return False
-    default = not _mp()._native_linux_nvidia()
-    return env_bool("SEISO_LLAMA_SPEED_SCALE", default)
-
-
 def _default_llama_flash_attn(model_path: str | None = None) -> bool:
     """flash_attn policy on Linux NVIDIA; defaults off, opt in via ``SEISO_LLAMA_FLASH_ATTN=true``."""
     if not _mp()._native_linux_nvidia():
@@ -516,9 +508,12 @@ def llama_load_kwargs(n_ctx: int, *, model_path: str | None = None) -> dict[str,
         n_gpu_layers = 0
 
     batch_default, ubatch_default = _llama_batch_defaults(model_path)
-
-    n_batch = env_int("SEISO_LLAMA_BATCH", batch_default)
-    n_ubatch = min(env_int("SEISO_LLAMA_UBATCH", min(n_batch, ubatch_default)), n_batch)
+    if _mp()._native_linux_nvidia():
+        n_batch = batch_default
+        n_ubatch = min(batch_default, ubatch_default)
+    else:
+        n_batch = env_int("SEISO_LLAMA_BATCH", batch_default)
+        n_ubatch = min(env_int("SEISO_LLAMA_UBATCH", min(n_batch, ubatch_default)), n_batch)
     kwargs: dict[str, Any] = {
         "n_ctx": n_ctx,
         "n_threads": n_threads,
@@ -605,13 +600,14 @@ def _load_llama_model(
     free_mb = _prot().headroom_mb()
     n_gpu_layers = int(kwargs.get("n_gpu_layers") or 0)
     effective_n_ctx = int(kwargs.get("n_ctx") or n_ctx)
+    ladder_batch, ladder_ubatch = _mp()._llama_batch_defaults(path)
     memory_profiles = _prot().llama_load_profile_ladder(
         model_path=path,
         n_ctx=effective_n_ctx,
         n_gpu_layers=n_gpu_layers,
         free_mb=free_mb,
-        base_batch=int(kwargs.get("n_batch") or 512),
-        base_ubatch=int(kwargs.get("n_ubatch") or 256),
+        base_batch=int(kwargs.get("n_batch") or ladder_batch),
+        base_ubatch=int(kwargs.get("n_ubatch") or ladder_ubatch),
         tier=load_tier,
     )
     full_gpu_profiles = [

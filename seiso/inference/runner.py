@@ -44,6 +44,7 @@ from seiso.memory.protection import (
     llama_next_recovery_tier,
     llama_oom_recovery_batch,
     llama_prefill_needs_reload,
+    native_linux_batch_defaults,
     release_cached_memory,
     sanitize_inference_payload,
     trim_llama_messages_to_context,
@@ -61,6 +62,18 @@ _runner_lock = threading.Lock()
 def _stream_batch_chars() -> int:
     """Chars to batch after the first token; lower = snappier UI, higher = fewer SSE events."""
     return max(1, env_int("SEISO_STREAM_BATCH_CHARS", 16))
+
+
+def _llama_loaded_batch_fallback() -> tuple[int, int]:
+    """Conservative batch pair when a cached llama handle lacks metadata."""
+    try:
+        from seiso.platform import use_linux_nvidia_inference_guards
+
+        if use_linux_nvidia_inference_guards():
+            return native_linux_batch_defaults()
+    except ImportError:
+        pass
+    return 4096, 1024
 
 
 def _torch_stream_timeout_s() -> int:
@@ -786,12 +799,13 @@ class LocalInferenceRunner:
         n_ctx: int,
     ) -> Any:
         current_tier = self._llama_handle_tier(llm)
+        fallback_batch, fallback_ubatch = _llama_loaded_batch_fallback()
         needs_reload, safe_batch, safe_ubatch = llama_prefill_needs_reload(
             model_path=getattr(llm, "_seiso_model_path", model_path) or model_path,
             messages=messages,
             n_ctx=n_ctx,
-            loaded_n_batch=int(getattr(llm, "_seiso_n_batch", 4096) or 4096),
-            loaded_n_ubatch=int(getattr(llm, "_seiso_n_ubatch", 1024) or 1024),
+            loaded_n_batch=int(getattr(llm, "_seiso_n_batch", fallback_batch) or fallback_batch),
+            loaded_n_ubatch=int(getattr(llm, "_seiso_n_ubatch", fallback_ubatch) or fallback_ubatch),
             loaded_n_gpu_layers=int(getattr(llm, "_seiso_n_gpu_layers", 0) or 0),
             load_tier=current_tier,
             loaded_headroom_mb=getattr(llm, "_seiso_load_headroom_mb", None),

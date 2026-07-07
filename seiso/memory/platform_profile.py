@@ -49,28 +49,17 @@ def native_linux_nvidia_llama_batch_caps(
 def _refresh_native_linux_llama_env(
     *, batch_cap: int, ubatch_cap: int, cache_cap: int
 ) -> None:
-    """Clamp stale shell env to native Linux safety caps on every Forge start."""
+    """Pin native Linux llama.cpp batch env to VRAM-derived caps on every Forge start."""
     if env_bool("SEISO_DISABLE_MEMORY_CAPS", False):
         return
 
-    os.environ["SEISO_LLAMA_SPEED_SCALE"] = "false"
     os.environ.setdefault("SEISO_LLAMA_FLASH_ATTN", "false")
-    # Dense families may opt into tier-1 Q8 KV quant; default stays off.
     os.environ.setdefault("SEISO_LLAMA_KV_QUANT", "false")
-    # Bound multi-turn prompt size — long threads were the main Linux crash path.
     os.environ.setdefault("SEISO_CHAT_CONTEXT_CHARS", "12000")
-    batch = int(os.environ.get("SEISO_LLAMA_BATCH", batch_cap))
-    ubatch = int(os.environ.get("SEISO_LLAMA_UBATCH", ubatch_cap))
-    cache = int(os.environ.get("SEISO_LLAMA_CACHE_MB", cache_cap))
-    os.environ["SEISO_LLAMA_BATCH"] = str(min(batch, batch_cap))
-    os.environ["SEISO_LLAMA_UBATCH"] = str(
-        min(ubatch, ubatch_cap, int(os.environ["SEISO_LLAMA_BATCH"]))
-    )
-    os.environ["SEISO_LLAMA_CACHE_MB"] = str(min(cache, cache_cap))
-    if env_bool("SEISO_LLAMA_UNSAFE_SPEED_SCALE", False):
-        os.environ["SEISO_LLAMA_SPEED_SCALE"] = "true"
+    os.environ["SEISO_LLAMA_BATCH"] = str(batch_cap)
+    os.environ["SEISO_LLAMA_UBATCH"] = str(min(ubatch_cap, batch_cap))
+    os.environ["SEISO_LLAMA_CACHE_MB"] = str(cache_cap)
     if env_bool("SEISO_LLAMA_CONSERVATIVE", False):
-        os.environ["SEISO_LLAMA_SPEED_SCALE"] = "false"
         os.environ["SEISO_LLAMA_FLASH_ATTN"] = "false"
         os.environ["SEISO_LLAMA_KV_QUANT"] = "false"
 
@@ -212,7 +201,18 @@ def apply_platform_memory_profile(
                     os.environ.setdefault("SEISO_LLAMA_BATCH", str(batch))
                     os.environ.setdefault("SEISO_LLAMA_UBATCH", str(ubatch))
             elif native_linux_nvidia:
-                os.environ.setdefault("SEISO_LLAMA_CACHE_MB", "256")
+                gpu_total = discrete_gpu_total_mb(profile)
+                batch, ubatch, cache_cap = native_linux_nvidia_llama_batch_caps(
+                    tier=tier,
+                    headroom_mb=headroom,
+                    low=low,
+                    gpu_total_mb=gpu_total,
+                )
+                _refresh_native_linux_llama_env(
+                    batch_cap=batch,
+                    ubatch_cap=ubatch,
+                    cache_cap=cache_cap,
+                )
             if not low and tier in (HardwareTier.WORKSTATION, HardwareTier.CAPABLE):
                 if not native_linux_nvidia:
                     os.environ.setdefault("SEISO_LLAMA_FLASH_ATTN", "true")

@@ -440,7 +440,6 @@ def test_llama_load_profile_ladder_upscales_small_model_on_big_gpu(monkeypatch, 
         lambda _path: 32,
     )
     monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: False)
-    monkeypatch.delenv("SEISO_LLAMA_SPEED_SCALE", raising=False)
 
     profiles = llama_load_profile_ladder(
         model_path=str(gguf),
@@ -451,7 +450,7 @@ def test_llama_load_profile_ladder_upscales_small_model_on_big_gpu(monkeypatch, 
         base_ubatch=512,
         tier="normal",
     )
-    assert profiles[0]["n_batch"] == 2048
+    assert profiles[0]["n_batch"] == 1024
     assert profiles[0]["n_ubatch"] == 512
 
 
@@ -460,7 +459,6 @@ def test_llama_load_profile_ladder_native_linux_uses_safe_caps_for_roomy_models(
 ):
     gguf = tmp_path / "small.gguf"
     gguf.write_bytes(b"\x00" * 1024)
-    monkeypatch.delenv("SEISO_LLAMA_SPEED_SCALE", raising=False)
     monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: True)
     _mock_gpu_total(monkeypatch, 24576)
     monkeypatch.setattr(
@@ -545,39 +543,24 @@ def test_clamp_llama_load_kwargs_skips_roomy_floor_when_gpu_mostly_in_use(
     assert kwargs["n_ubatch"] <= 128
 
 
-def test_clamp_llama_load_kwargs_native_linux_skips_roomy_floor_without_speed_scale(
-    monkeypatch, tmp_path
-):
-    gguf = tmp_path / "small.gguf"
-    gguf.write_bytes(b"\x00" * 1024)
-    monkeypatch.delenv("SEISO_LLAMA_SPEED_SCALE", raising=False)
-    monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 24576)
-    monkeypatch.setattr("seiso.memory.protection.estimate_path_vram_mb", lambda _p: 1024)
-    monkeypatch.setattr("seiso.inference.backends.gguf_block_count", lambda _p: 32)
-    monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: True)
-    _mock_gpu_total(monkeypatch, 24576)
-    monkeypatch.setattr(
-        "seiso.memory.protection.llama_clamp.roomy_native_linux_batch_floor",
-        lambda **_k: (512, 128),
-    )
-
-    kwargs = clamp_llama_load_kwargs(
-        {
-            "_model_path": str(gguf),
-            "n_ctx": 4096,
-            "n_batch": 4096,
-            "n_ubatch": 1024,
-            "n_gpu_layers": -1,
-        }
-    )
-
-    assert kwargs["n_batch"] < 512
-
-
 def test_gpu_batch_tier_caps_unknown_gpu_uses_safe_native_caps():
-    assert gpu_batch_tier_caps(0, "normal") == (256, 128)
-    assert gpu_batch_tier_caps(0, "compact") == (256, 128)
-    assert gpu_batch_tier_caps(0, "minimal") == (256, 128)
+    assert gpu_batch_tier_caps(0, "normal") == (128, 128)
+    assert gpu_batch_tier_caps(0, "compact") == (128, 128)
+    assert gpu_batch_tier_caps(0, "minimal") == (128, 128)
+
+
+def test_clamp_llama_load_kwargs_native_linux_without_model_path(monkeypatch):
+    monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: True)
+    monkeypatch.setattr(
+        "seiso.memory.protection.discrete_gpu_total_mb",
+        lambda _profile=None: 24576,
+    )
+
+    kwargs = clamp_llama_load_kwargs({"n_batch": 4096, "n_ubatch": 1024, "n_ctx": 4096})
+
+    expected_batch, expected_ubatch = _gpu_normal_caps(24576)
+    assert kwargs["n_batch"] == expected_batch
+    assert kwargs["n_ubatch"] == expected_ubatch
 
 
 def test_clamp_llama_load_kwargs_native_linux_borderline_non_tight_caps_batch(
@@ -604,8 +587,8 @@ def test_clamp_llama_load_kwargs_native_linux_borderline_non_tight_caps_batch(
             "n_gpu_layers": -1,
         }
     )
-    assert kwargs["n_batch"] == 256
-    assert kwargs["n_ubatch"] == 128
+    assert kwargs["n_batch"] <= _gpu_normal_caps(24576)[0]
+    assert kwargs["n_ubatch"] <= 128
 
 
 def test_llama_prefill_guard_keeps_roomy_short_prompt(monkeypatch, tmp_path):
@@ -624,7 +607,7 @@ def test_llama_prefill_guard_keeps_roomy_short_prompt(monkeypatch, tmp_path):
         model_path=str(gguf),
         messages=[{"role": "user", "content": "hi"}],
         n_ctx=4096,
-        loaded_n_batch=256,
+        loaded_n_batch=_gpu_normal_caps(24576)[0],
         loaded_n_gpu_layers=-1,
         load_tier="normal",
         loaded_headroom_mb=24576,
@@ -654,7 +637,7 @@ def test_llama_prefill_guard_keeps_roomy_short_prompt_on_small_headroom_fluctuat
         model_path=str(gguf),
         messages=[{"role": "user", "content": "hi"}],
         n_ctx=4096,
-        loaded_n_batch=256,
+        loaded_n_batch=_gpu_normal_caps(24576)[0],
         loaded_n_gpu_layers=-1,
         load_tier="normal",
         loaded_headroom_mb=24576,
@@ -714,7 +697,7 @@ def test_llama_prefill_guard_keeps_roomy_12b_after_load(monkeypatch, tmp_path):
         model_path=str(gguf),
         messages=[{"role": "user", "content": "hi"}],
         n_ctx=4096,
-        loaded_n_batch=256,
+        loaded_n_batch=_gpu_normal_caps(24576)[0],
         loaded_n_ubatch=128,
         loaded_n_gpu_layers=-1,
         load_tier="normal",
@@ -722,8 +705,9 @@ def test_llama_prefill_guard_keeps_roomy_12b_after_load(monkeypatch, tmp_path):
     )
 
     assert needs_reload is False
-    assert safe_batch >= 256
-    assert safe_ubatch >= 128
+    expected_batch, expected_ubatch = _gpu_normal_caps(24576)
+    assert safe_batch >= expected_batch
+    assert safe_ubatch >= expected_ubatch
 
 
 def test_llama_prefill_guard_tight_gemma_27b_caps_safe_at_loaded_batch(
@@ -748,7 +732,7 @@ def test_llama_prefill_guard_tight_gemma_27b_caps_safe_at_loaded_batch(
         model_path=str(gguf),
         messages=[{"role": "user", "content": "hi"}],
         n_ctx=4096,
-        loaded_n_batch=256,
+        loaded_n_batch=_gpu_normal_caps(24576)[0],
         loaded_n_ubatch=128,
         loaded_n_gpu_layers=-1,
         load_tier="normal",
@@ -806,7 +790,7 @@ def test_llama_prefill_guard_reloads_when_loaded_ubatch_exceeds_safe(monkeypatch
         model_path=str(gguf),
         messages=[{"role": "user", "content": "hi"}],
         n_ctx=4096,
-        loaded_n_batch=256,
+        loaded_n_batch=_gpu_normal_caps(24576)[0],
         loaded_n_ubatch=512,
         loaded_n_gpu_layers=-1,
         load_tier="normal",
@@ -1099,7 +1083,7 @@ def test_llama_prefill_guard_cpu_only_gemma_short_prompt(monkeypatch, tmp_path):
         model_path=str(gguf),
         messages=[{"role": "user", "content": "hi"}],
         n_ctx=4096,
-        loaded_n_batch=256,
+        loaded_n_batch=_gpu_normal_caps(24576)[0],
         loaded_n_ubatch=128,
         loaded_n_gpu_layers=0,
         load_tier="normal",
@@ -1186,7 +1170,7 @@ def test_qwen3_14b_roomy_4090_uses_normal_first_profile(monkeypatch, tmp_path):
         tier="normal",
     )
 
-    assert profiles[0]["n_batch"] >= 256
+    assert profiles[0]["n_batch"] >= _gpu_normal_caps(24576)[0]
     assert profiles[0]["n_ubatch"] >= 128
 
 

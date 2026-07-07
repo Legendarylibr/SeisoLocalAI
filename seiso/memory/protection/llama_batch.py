@@ -11,6 +11,8 @@ from seiso.memory.protection.constants import (
     _LOAD_TIER_BATCH_CAPS,
     _MAX_LLAMA_BATCH,
     _MIN_LLAMA_BATCH,
+    _NATIVE_LINUX_BATCH_TOKENS_PER_GB,
+    _NATIVE_LINUX_MAX_NORMAL_BATCH,
     _NATIVE_LINUX_UNKNOWN_GPU_BATCH_CAPS,
     LlamaLoadTier,
 )
@@ -42,9 +44,10 @@ def gpu_batch_tier_caps(gpu_total_mb: int, load_tier: LlamaLoadTier) -> tuple[in
     if gpu_total_mb <= 0:
         return _NATIVE_LINUX_UNKNOWN_GPU_BATCH_CAPS
     gpu_gb = max(1.0, gpu_total_mb / 1024)
-    scaled_batch = int(gpu_gb * 12)
+    scaled_batch = int(gpu_gb * _NATIVE_LINUX_BATCH_TOKENS_PER_GB)
     rounded_batch = (scaled_batch // _MIN_LLAMA_BATCH) * _MIN_LLAMA_BATCH
     normal_batch = min(
+        _NATIVE_LINUX_MAX_NORMAL_BATCH,
         _MAX_LLAMA_BATCH,
         max(_MIN_LLAMA_BATCH, rounded_batch),
     )
@@ -56,38 +59,22 @@ def gpu_batch_tier_caps(gpu_total_mb: int, load_tier: LlamaLoadTier) -> tuple[in
     return normal_batch, normal_ubatch
 
 
+def native_linux_batch_defaults(gpu_total_mb: int | None = None) -> tuple[int, int]:
+    """VRAM-tier batch pair for native Linux when no model-specific headroom is available."""
+    total = (
+        int(gpu_total_mb)
+        if gpu_total_mb is not None and gpu_total_mb > 0
+        else protection().discrete_gpu_total_mb()
+    )
+    if total > 0:
+        return gpu_batch_tier_caps(total, "normal")
+    return _NATIVE_LINUX_UNKNOWN_GPU_BATCH_CAPS
+
+
 def tight_batch_caps(gpu_total_mb: int) -> tuple[int, int]:
     """Conservative batch pair for tight VRAM fits on any GPU size."""
     batch, ubatch = gpu_batch_tier_caps(gpu_total_mb, "compact")
     return min(batch, 256), min(ubatch, 128)
-
-
-def roomy_native_linux_batch_floor(
-    *,
-    model_path: str | Path,
-    free_mb: int,
-    gpu_total_mb: int,
-    n_gpu_layers: int,
-    load_tier: LlamaLoadTier = "normal",
-    tight: bool = False,
-) -> tuple[int, int] | None:
-    """GPU tier batch floor for tiny models on mostly-empty native Linux VRAM.
-
-    Only applies when the model is small relative to *free* VRAM and most of the
-    GPU capacity is still available (other processes have not consumed the card).
-    """
-    if (
-        load_tier != "normal"
-        or tight
-        or n_gpu_layers == 0
-        or gpu_total_mb <= 0
-        or free_mb < int(gpu_total_mb * 0.65)
-    ):
-        return None
-    weight_mb = int(protection().estimate_path_vram_mb(Path(model_path)))
-    if weight_mb <= 0 or weight_mb > free_mb // 8:
-        return None
-    return gpu_batch_tier_caps(gpu_total_mb, "normal")
 
 
 def clamp_llama_batch_pair(

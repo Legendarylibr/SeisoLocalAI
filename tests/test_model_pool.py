@@ -843,6 +843,31 @@ def test_llama_load_kwargs_native_linux_nvidia_defaults(monkeypatch):
     assert "flash_attn" not in kwargs
 
 
+def test_llama_load_kwargs_native_linux_ignores_batch_env(monkeypatch):
+    for key in list(os.environ):
+        if key.startswith("SEISO_LLAMA_"):
+            monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("SEISO_LLAMA_BATCH", "8192")
+    monkeypatch.setenv("SEISO_LLAMA_UBATCH", "2048")
+    monkeypatch.setattr(platform, "system", lambda: "Linux")
+    monkeypatch.setattr("seiso.inference.model_pool._cuda_available", lambda: True)
+    monkeypatch.setattr("seiso.inference.model_pool._llama_gpu_offload_ok", lambda: True)
+    monkeypatch.setattr("seiso.inference.model_pool._native_linux_nvidia", lambda: True)
+    monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: True)
+    monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 24576)
+    monkeypatch.setattr("seiso.memory.protection.estimate_path_vram_mb", lambda _p: 1024)
+    monkeypatch.setattr("seiso.inference.backends.gguf_block_count", lambda _p: 32)
+    monkeypatch.setattr("seiso.memory.protection.discrete_gpu_total_mb", lambda _p=None: 24576)
+
+    kwargs = llama_load_kwargs(4096, model_path="/tmp/model.gguf")
+    from seiso.memory.protection import gpu_batch_tier_caps
+
+    expected_batch, expected_ubatch = gpu_batch_tier_caps(24576, "normal")
+    assert kwargs["n_batch"] == expected_batch
+    assert kwargs["n_ubatch"] == expected_ubatch
+    assert kwargs["n_batch"] < 8192
+
+
 def test_native_linux_flash_attn_opt_in(monkeypatch):
     for key in list(os.environ):
         if key.startswith("SEISO_LLAMA_"):
@@ -1064,7 +1089,7 @@ def test_llama_batch_defaults_native_linux_unknown_gpu_uses_safe_caps(monkeypatc
 
     batch, ubatch = mp._llama_batch_defaults()
 
-    assert batch == 256
+    assert batch == 128
     assert ubatch == 128
 
 
@@ -1150,9 +1175,12 @@ def test_native_linux_load_model_uses_crash_resistant_kwargs(monkeypatch, tmp_pa
 
     llm = mp._load_llama_model(str(gguf), 4096)
 
+    from seiso.memory.protection import gpu_batch_tier_caps
+
+    tier_batch, tier_ubatch = gpu_batch_tier_caps(24576, "normal")
     first = attempts[0]
-    assert first["n_batch"] <= 256
-    assert first["n_ubatch"] <= 128
+    assert first["n_batch"] <= tier_batch
+    assert first["n_ubatch"] <= tier_ubatch
     assert first["n_gpu_layers"] == -1
     assert first["offload_kqv"] is False
     assert first["op_offload"] is False
@@ -1279,6 +1307,8 @@ def test_qwen36_27b_native_linux_falls_back_to_partial_when_full_offload_fails(m
 def test_qwen36_27b_native_linux_full_offloads_when_it_fits(monkeypatch, tmp_path):
     import seiso.inference.model_pool as mp
 
+    from seiso.memory.protection import gpu_batch_tier_caps
+
     gguf = tmp_path / "Qwen3.6-27B-UD-Q4_K_XL.gguf"
     _write_arch_gguf(gguf, "qwen3")
     attempts: list[dict[str, object]] = []
@@ -1324,8 +1354,9 @@ def test_qwen36_27b_native_linux_full_offloads_when_it_fits(monkeypatch, tmp_pat
     assert attempts
     first = attempts[0]
     assert first["n_gpu_layers"] == -1
-    assert first["n_batch"] <= 256
-    assert first["n_ubatch"] <= 128
+    tier_batch, tier_ubatch = gpu_batch_tier_caps(24576, "normal")
+    assert first["n_batch"] <= tier_batch
+    assert first["n_ubatch"] <= tier_ubatch
     assert "flash_attn" not in first
     assert first.get("offload_kqv") is False
     assert llm._seiso_n_gpu_layers == -1
@@ -1333,6 +1364,8 @@ def test_qwen36_27b_native_linux_full_offloads_when_it_fits(monkeypatch, tmp_pat
 
 def test_qwen3_14b_24gb_load_uses_full_gpu_kwargs(monkeypatch, tmp_path):
     import seiso.inference.model_pool as mp
+
+    from seiso.memory.protection import gpu_batch_tier_caps
 
     gguf = tmp_path / "qwen3-14b-q4.gguf"
     _write_arch_gguf(gguf, "qwen3")
@@ -1378,8 +1411,9 @@ def test_qwen3_14b_24gb_load_uses_full_gpu_kwargs(monkeypatch, tmp_path):
     assert attempts
     first = attempts[0]
     assert first["n_gpu_layers"] == -1
-    assert first["n_batch"] >= 256
-    assert first["n_ubatch"] >= 128
+    tier_batch, tier_ubatch = gpu_batch_tier_caps(24576, "normal")
+    assert 128 <= first["n_batch"] <= tier_batch
+    assert 128 <= first["n_ubatch"] <= tier_ubatch
     assert "flash_attn" not in first
 
 
