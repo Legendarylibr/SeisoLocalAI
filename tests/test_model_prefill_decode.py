@@ -6,12 +6,12 @@ from pathlib import Path
 
 import pytest
 from gguf_fixtures import write_arch_gguf as _write_arch_gguf
+
 from seiso.inference.model_pool import llama_load_kwargs
 from seiso.memory.protection import (
     llama_prefill_needs_reload,
     resolve_llama_model_batches,
 )
-
 
 MODEL_CASES = [
     pytest.param(

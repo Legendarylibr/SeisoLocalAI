@@ -39,13 +39,16 @@ from seiso.inference.tuning import (
 )
 from seiso.memory.protection import (
     LlamaLoadTier,
+    _estimate_prompt_tokens,
     clamp_llama_n_ctx,
+    headroom_mb,
     is_oom_error,
     llama_next_recovery_tier,
     llama_oom_recovery_batch,
     llama_prefill_needs_reload,
     native_linux_batch_defaults,
     release_cached_memory,
+    resolve_llama_decode_budget,
     sanitize_inference_payload,
     trim_llama_messages_to_context,
 )
@@ -140,7 +143,7 @@ def _prepare_llama_messages(
         n_ctx = estimate_llama_n_ctx(
             messages,
             max_tokens=max_tokens,
-            floor=4096,
+            floor=2048,
             model_path=model_path,
             model_format=payload.get("model_format"),
         )
@@ -839,6 +842,81 @@ class LocalInferenceRunner:
             batch_override=(safe_batch, safe_ubatch),
         )
 
+    def _llama_preflight_decode(
+        self,
+        llm: Any,
+        payload: dict[str, Any],
+        *,
+        model_path: str,
+        messages: list[dict[str, Any]],
+        n_ctx: int,
+        stream: bool,
+    ) -> tuple[Any, dict[str, Any], list[dict[str, Any]], int]:
+        """Clamp decode shape and reload before tokens when native Linux headroom is tight."""
+        try:
+            budget = resolve_llama_decode_budget(
+                model_path=getattr(llm, "_seiso_model_path", model_path) or model_path,
+                free_mb=headroom_mb(),
+                n_ctx=n_ctx,
+                max_tokens=int(payload.get("max_tokens", 512)),
+                n_gpu_layers=int(getattr(llm, "_seiso_n_gpu_layers", 0) or 0),
+                load_tier=self._llama_handle_tier(llm),
+                prompt_tokens=_estimate_prompt_tokens(messages),
+                weights_resident=True,
+                stream=stream,
+            )
+        except Exception:
+            return llm, payload, messages, n_ctx
+
+        adjusted = payload
+        requested_tokens = int(payload.get("max_tokens", 512))
+        if budget.max_tokens < requested_tokens:
+            adjusted = dict(payload)
+            adjusted["max_tokens"] = budget.max_tokens
+            messages = trim_llama_messages_to_context(
+                messages,
+                n_ctx=budget.n_ctx,
+                max_tokens=budget.max_tokens,
+            )
+
+        loaded_batch = int(getattr(llm, "_seiso_n_batch", 0) or 0)
+        loaded_ubatch = int(getattr(llm, "_seiso_n_ubatch", 0) or 0)
+        needs_reload = (
+            loaded_batch > budget.n_batch
+            or (loaded_ubatch > 0 and loaded_ubatch > budget.n_ubatch)
+        )
+        if not needs_reload:
+            llm._seiso_last_safe_batch = budget.n_batch  # noqa: SLF001
+            llm._seiso_last_safe_ubatch = budget.n_ubatch  # noqa: SLF001
+            return llm, adjusted, messages, n_ctx
+
+        current_tier = self._llama_handle_tier(llm)
+        logger.warning(
+            "llama.cpp decode headroom tight before %s — reloading tier=%s "
+            "with n_batch=%d n_ubatch=%d max_tokens=%d",
+            "stream" if stream else "completion",
+            current_tier,
+            budget.n_batch,
+            budget.n_ubatch,
+            budget.max_tokens,
+        )
+        release_cached_memory(sync=True)
+        llm = self._pool.reload_llama(
+            model_path,
+            budget.n_ctx,
+            tier=current_tier,
+            batch_override=(budget.n_batch, budget.n_ubatch),
+        )
+        actual_ctx = int(getattr(llm, "_seiso_n_ctx", budget.n_ctx) or budget.n_ctx)
+        if actual_ctx < n_ctx:
+            n_ctx = actual_ctx
+            messages = trim_llama_messages_to_context(
+                messages,
+                n_ctx=actual_ctx,
+                max_tokens=budget.max_tokens,
+            )
+        return llm, adjusted, messages, n_ctx
+
     def _llama_complete(
         self,
         payload: dict[str, Any],
@@ -861,6 +939,14 @@ class LocalInferenceRunner:
         llm = self._pool.get_llama(model_path, n_ctx=n_ctx)
         llm = self._llama_guard_prefill(
             llm, model_path=model_path, messages=messages, n_ctx=n_ctx
+        )
+        llm, payload, messages, n_ctx = self._llama_preflight_decode(
+            llm,
+            payload,
+            model_path=model_path,
+            messages=messages,
+            n_ctx=n_ctx,
+            stream=False,
         )
         kwargs = llama_completion_kwargs(payload)
         kwargs["stream"] = False
@@ -945,6 +1031,14 @@ class LocalInferenceRunner:
             raise RuntimeError("llama-cpp-python not installed") from exc
         llm = self._llama_guard_prefill(
             llm, model_path=model_path, messages=messages, n_ctx=n_ctx
+        )
+        llm, payload, messages, n_ctx = self._llama_preflight_decode(
+            llm,
+            payload,
+            model_path=model_path,
+            messages=messages,
+            n_ctx=n_ctx,
+            stream=True,
         )
 
         completion_kwargs = llama_completion_kwargs(payload)

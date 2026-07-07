@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +16,7 @@ from seiso.memory.protection.constants import (
     _MAX_LLAMA_BATCH,
     _MAX_LLAMA_CTX,
     _MIN_LLAMA_BATCH,
+    _MIN_LLAMA_CTX,
     _NATIVE_LINUX_CTX_BUCKETS,
     _NATIVE_LINUX_MMPROJ_RESERVE_MB,
     _NATIVE_LINUX_PREFILL_CLAMP_MB,
@@ -39,6 +41,38 @@ from seiso.memory.protection.llama_kv import (
 )
 
 
+@dataclass(frozen=True, slots=True)
+class LlamaDecodeBudget:
+    """Safe llama.cpp request shape for the current native Linux GPU headroom."""
+
+    n_ctx: int
+    max_tokens: int
+    n_batch: int
+    n_ubatch: int
+    reserve_mb: int
+    tight: bool
+
+
+def llama_decode_reserve_mb(
+    *,
+    gpu_total_mb: int,
+    free_mb: int,
+    max_tokens: int,
+    prompt_tokens: int = 0,
+    model_path: str | Path | None = None,
+) -> int:
+    """Native Linux allocator/decode workspace reserve beyond static weight+KV."""
+    total = max(int(gpu_total_mb or 0), int(free_mb or 0), 1024)
+    token_steps = max(1, (max(1, int(max_tokens)) + 255) // 256)
+    prompt_steps = max(0, int(prompt_tokens) // 1024)
+    base = max(384, min(int(total * 0.025), 1536))
+    reserve = base + token_steps * 128 + min(prompt_steps * 64, 512)
+    if model_path:
+        with contextlib.suppress(Exception):
+            reserve = int(reserve * max(policy_for_gguf(str(model_path)).prefill_tightness, 1.0))
+    return max(512, reserve)
+
+
 def native_linux_llama_context_cap(
     model_path: str | Path | None,
     *,
@@ -58,7 +92,14 @@ def native_linux_llama_context_cap(
     cap = _MAX_LLAMA_CTX if ceiling is None else max(1, int(ceiling))
     # Keep allocator/prefill slack outside the KV estimate; long prompts were
     # hitting OOM even when the static weight+KV estimate barely fit.
-    budget = max(0, int(free_mb * 0.88) - 512)
+    gpu_total = protection().discrete_gpu_total_mb()
+    decode_reserve = llama_decode_reserve_mb(
+        gpu_total_mb=gpu_total,
+        free_mb=free_mb,
+        max_tokens=512,
+        model_path=model_path,
+    )
+    budget = max(0, int(free_mb * 0.88) - decode_reserve)
     candidates = sorted(
         {2048, *[bucket for bucket in _NATIVE_LINUX_CTX_BUCKETS if bucket <= cap]},
         reverse=True,
@@ -72,6 +113,69 @@ def native_linux_llama_context_cap(
         ):
             return min(candidate, cap)
     return min(2048, cap)
+
+
+def resolve_llama_decode_budget(
+    *,
+    model_path: str | Path,
+    free_mb: int,
+    n_ctx: int,
+    max_tokens: int,
+    n_gpu_layers: int,
+    load_tier: LlamaLoadTier = "normal",
+    prompt_tokens: int = 0,
+    weights_resident: bool = True,
+    stream: bool = False,
+) -> LlamaDecodeBudget:
+    """Clamp decode shape from GPU-size-aware headroom before generation starts."""
+    try:
+        native_linux_nvidia = seiso_platform.use_linux_nvidia_inference_guards()
+    except Exception:
+        native_linux_nvidia = False
+    requested_tokens = max(1, int(max_tokens))
+    ctx = max(_MIN_LLAMA_CTX, int(n_ctx))
+    prompt = max(0, int(prompt_tokens))
+    context_limited_tokens = max(1, ctx - prompt - 128)
+    safe_tokens = min(requested_tokens, context_limited_tokens)
+    if not native_linux_nvidia:
+        batch, ubatch = clamp_llama_batch_pair(_MAX_LLAMA_BATCH, 1024)
+        return LlamaDecodeBudget(ctx, safe_tokens, batch, ubatch, 0, False)
+
+    gpu_total = protection().discrete_gpu_total_mb()
+    if gpu_total <= 0:
+        gpu_total = max(int(free_mb), 0)
+    if not env_bool("SEISO_LLAMA_UNSAFE_LONG_COMPLETIONS", False):
+        from seiso.memory.protection.constants import (
+            _NATIVE_LINUX_LOW_HEADROOM_MAX_COMPLETION_TOKENS,
+            _NATIVE_LINUX_MAX_COMPLETION_TOKENS,
+        )
+
+        native_cap = _NATIVE_LINUX_MAX_COMPLETION_TOKENS
+        if free_mb < _NATIVE_LINUX_PREFILL_CLAMP_MB:
+            native_cap = min(native_cap, _NATIVE_LINUX_LOW_HEADROOM_MAX_COMPLETION_TOKENS)
+        safe_tokens = min(safe_tokens, native_cap)
+
+    reserve = llama_decode_reserve_mb(
+        gpu_total_mb=gpu_total,
+        free_mb=free_mb,
+        max_tokens=safe_tokens,
+        prompt_tokens=prompt,
+        model_path=model_path,
+    )
+    if stream:
+        reserve = int(reserve * 1.15)
+    budget_free = max(_MIN_LLAMA_BATCH * 2, int(free_mb) - reserve)
+    batch, ubatch, tight = resolve_llama_model_batches(
+        model_path=model_path,
+        free_mb=budget_free,
+        n_ctx=ctx,
+        n_gpu_layers=n_gpu_layers,
+        load_tier=load_tier,
+        weights_resident=weights_resident,
+        prompt_tokens=prompt,
+        native_linux_nvidia=True,
+    )
+    return LlamaDecodeBudget(ctx, safe_tokens, batch, ubatch, reserve, tight)
 
 
 def llama_host_batch_headroom_mb(

@@ -26,6 +26,7 @@ from seiso.memory.protection import (
     llama_offload_fits_headroom,
     llama_oom_recovery_batch,
     llama_prefill_needs_reload,
+    resolve_llama_decode_budget,
     sanitize_inference_payload,
     trim_llama_messages_to_context,
 )
@@ -70,6 +71,70 @@ def test_llama_effective_kv_ctx_respects_swa_fraction(monkeypatch, tmp_path):
     monkeypatch.setenv("SEISO_LLAMA_SWA_FULL", "true")
     assert _llama_effective_kv_ctx(gguf, 8192) == 8192
 
+
+def test_llama_decode_budget_scales_with_native_gpu_size(monkeypatch, tmp_path):
+    gguf = tmp_path / "qwen3.gguf"
+    _write_arch_gguf(gguf, "qwen3")
+    monkeypatch.setattr("seiso.platform.use_linux_nvidia_inference_guards", lambda **_: True)
+    monkeypatch.setattr("seiso.memory.protection.estimate_path_vram_mb", lambda _p: 9000)
+    monkeypatch.setattr("seiso.memory.protection.llama_kv_cache_reserve_mb", lambda *_a, **_k: 512)
+    monkeypatch.setattr("seiso.memory.protection.available_ram_mb", lambda: 65536)
+
+    budgets = []
+    for total in (12288, 16384, 24576, 49152):
+        monkeypatch.setattr(
+            "seiso.memory.protection.discrete_gpu_total_mb",
+            lambda *_a, total=total, **_k: total,
+        )
+        budgets.append(
+            resolve_llama_decode_budget(
+                model_path=gguf,
+                free_mb=total // 2,
+                n_ctx=8192,
+                max_tokens=1024,
+                n_gpu_layers=-1,
+                prompt_tokens=512,
+            )
+        )
+
+    assert [budget.n_batch for budget in budgets] == sorted(
+        budget.n_batch for budget in budgets
+    )
+    assert all(budget.max_tokens <= 768 for budget in budgets)
+    assert all(budget.n_ubatch <= budget.n_batch for budget in budgets)
+
+
+def test_llama_decode_budget_stream_is_more_conservative(monkeypatch, tmp_path):
+    gguf = tmp_path / "gemma3.gguf"
+    _write_arch_gguf(gguf, "gemma3", extra=[(b"gemma3.attention.sliding_window", 512)])
+    monkeypatch.setattr("seiso.platform.use_linux_nvidia_inference_guards", lambda **_: True)
+    monkeypatch.setattr("seiso.memory.protection.discrete_gpu_total_mb", lambda *_a, **_k: 24576)
+    monkeypatch.setattr("seiso.memory.protection.estimate_path_vram_mb", lambda _p: 16000)
+    monkeypatch.setattr("seiso.memory.protection.llama_kv_cache_reserve_mb", lambda *_a, **_k: 1024)
+    monkeypatch.setattr("seiso.memory.protection.available_ram_mb", lambda: 65536)
+
+    complete = resolve_llama_decode_budget(
+        model_path=gguf,
+        free_mb=6500,
+        n_ctx=4096,
+        max_tokens=768,
+        n_gpu_layers=-1,
+        prompt_tokens=512,
+        stream=False,
+    )
+    stream = resolve_llama_decode_budget(
+        model_path=gguf,
+        free_mb=6500,
+        n_ctx=4096,
+        max_tokens=768,
+        n_gpu_layers=-1,
+        prompt_tokens=512,
+        stream=True,
+    )
+
+    assert stream.reserve_mb > complete.reserve_mb
+    assert stream.n_batch <= complete.n_batch
+    assert stream.n_ubatch <= complete.n_ubatch
 
 def test_is_oom_error_detects_cuda_message():
     assert is_oom_error(RuntimeError("CUDA out of memory. Tried to allocate 2.00 GiB"))
