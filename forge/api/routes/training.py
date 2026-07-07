@@ -17,7 +17,11 @@ from sse_starlette.sse import EventSourceResponse
 
 from forge.api.deps import get_db, get_training_orchestrator
 from forge.api.http_errors import raise_forbidden
-from forge.api.routes._stream import job_failure_message, spawn_background
+from forge.api.routes._stream import (
+    durable_job_events,
+    job_failure_message,
+    spawn_background,
+)
 from forge.config import ForgeSettings, get_settings
 from forge.db.store import Database
 from forge.orchestrators.training import TrainingOrchestrator
@@ -708,6 +712,14 @@ async def get_training_metrics(
     if live:
         return _serialize_metrics_payload(live)
 
+    durable_metrics = await db.list_job_events(
+        job_id, user_id, event_types=("metric",), limit=5000
+    )
+    if durable_metrics:
+        return _serialize_metrics_payload(
+            [row.get("payload") or {} for row in durable_metrics]
+        )
+
     row = await db.get_training_job(job_id, user_id)
     raw = row.get("metrics_json") if row else None
     if isinstance(raw, str) and raw.strip():
@@ -731,6 +743,17 @@ async def stream_training(
 
     async def event_gen():
         queue: asyncio.Queue[tuple[str, str] | None] = asyncio.Queue()
+        live_job = orchestrator.get_job(job_id)
+
+        if not live_job:
+            async for event in durable_job_events(db, job_id, user_id):
+                yield event
+            row = await db.get_training_job(job_id, user_id)
+            if row and row.get("error_text"):
+                yield {"event": "error", "data": row["error_text"]}
+            status = row.get("status", "unknown") if row else "unknown"
+            yield {"event": "status", "data": status}
+            return
 
         async def forward_logs() -> None:
             try:

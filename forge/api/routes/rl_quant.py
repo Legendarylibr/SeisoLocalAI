@@ -20,13 +20,14 @@ from forge.api.routes._pipeline import (
     PipelineJobResponse,
     register_formatted_job_routes,
 )
-from forge.api.routes._stream import job_failure_message, spawn_background
+from forge.api.routes._stream import spawn_background
 from forge.config import ForgeSettings, get_settings
 from forge.db.store import Database
 from forge.orchestrators.rl_quant import RLQuantOrchestrator
 from forge.security.audit import audit_event
 from forge.security.auth import get_current_user_id
 from forge.services.model_registry import register_export_outputs
+from forge.services.job_runtime import run_orchestrated_job
 from seiso.bundled.config_builder import validate_stages
 from seiso.rl_quant.presets import STAGE_ORDER, rl_quant_presets_response
 from seiso.rl_quant.recommendation import recommendation_to_gguf_quants
@@ -120,51 +121,53 @@ async def start_rl_quant(
     orchestrator.create_job(job_id=job_id, user_id=user_id)
     payload = {**config, "user_id": user_id}
 
-    async def _run() -> None:
-        try:
-            await orchestrator.start(job_id, payload)
-            job = await orchestrator.wait_for(job_id)
-            if job:
-                rec = (job.result or {}).get("recommendation")
-                gguf_quants = recommendation_to_gguf_quants(rec or {})
-                await db.update_rl_quant_job_status(
-                    job_id,
-                    job.status.value,
-                    output_dir=(job.result or {}).get("output_dir"),
-                    recommendation_path=(job.result or {}).get("recommendation_path"),
-                    recommendation_json=rec,
-                    gguf_quants=gguf_quants,
-                    error_text=job.error if job.status.value == "failed" else None,
+    async def _finished(job) -> None:
+        rec = (job.result or {}).get("recommendation")
+        gguf_quants = recommendation_to_gguf_quants(rec or {})
+        await db.update_rl_quant_job_status(
+            job_id,
+            job.status.value,
+            output_dir=(job.result or {}).get("output_dir"),
+            recommendation_path=(job.result or {}).get("recommendation_path"),
+            recommendation_json=rec,
+            gguf_quants=gguf_quants,
+            error_text=job.error if job.status.value == "failed" else None,
+        )
+        exported = (job.result or {}).get("summary", {})
+        gguf_path = None
+        if isinstance(exported, dict):
+            artifacts = exported.get("artifacts") or {}
+            if isinstance(artifacts, dict):
+                gguf_path = artifacts.get("exported_gguf")
+        if gguf_path:
+            try:
+                await register_export_outputs(
+                    db,
+                    user_id=user_id,
+                    data_dir=settings.data_dir,
+                    outputs={"gguf_rl": str(gguf_path)},
+                    job_id=job_id,
                 )
-                exported = (job.result or {}).get("summary", {})
-                gguf_path = None
-                if isinstance(exported, dict):
-                    artifacts = exported.get("artifacts") or {}
-                    if isinstance(artifacts, dict):
-                        gguf_path = artifacts.get("exported_gguf")
-                if gguf_path:
-                    try:
-                        await register_export_outputs(
-                            db,
-                            user_id=user_id,
-                            data_dir=settings.data_dir,
-                            outputs={"gguf_rl": str(gguf_path)},
-                            job_id=job_id,
-                        )
-                    except Exception:
-                        import logging
+            except Exception:
+                import logging
 
-                        logging.getLogger(__name__).exception(
-                            "RL quant inventory registration failed for job %s "
-                            "(job remains completed)",
-                            job_id,
-                        )
-        except Exception as exc:
-            await db.update_rl_quant_job_status(
-                job_id,
-                "failed",
-                error_text=job_failure_message(orchestrator, job_id, exc),
-            )
+                logging.getLogger(__name__).exception(
+                    "RL quant inventory registration failed for job %s "
+                    "(job remains completed)",
+                    job_id,
+                )
+
+    async def _failed(message: str) -> None:
+        await db.update_rl_quant_job_status(job_id, "failed", error_text=message)
+
+    async def _run() -> None:
+        await run_orchestrated_job(
+            orchestrator=orchestrator,
+            job_id=job_id,
+            payload=payload,
+            on_finished=_finished,
+            on_failed=_failed,
+        )
 
     spawn_background(_run())
     audit_event("rl_quant_start", user_id=user_id, job_id=job_id, preset=body.preset)

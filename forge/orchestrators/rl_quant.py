@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from forge.orchestrators._bundled_job import bundled_orchestrator
+from forge.orchestrators._bundled_job import BundledJobContract, bundled_orchestrator
 from seiso.rl_quant.runner import run_rl_quant_job
 
 RLQuantOrchestrator = bundled_orchestrator(
@@ -13,4 +13,5 @@ RLQuantOrchestrator = bundled_orchestrator(
     start_message="Starting adaptive RL quantization pipeline",
     runner=run_rl_quant_job,
     result_log=lambda result: f"Artifacts: {result.get('output_dir')}",
+    contract=BundledJobContract(),
 )

@@ -12,6 +12,12 @@ from seiso.memory.estimates import guess_params_from_name
 from seiso.memory.protection._facade import protection
 
 logger = logging.getLogger(__name__)
+_MEMORY_POLICY_FIELDS = (
+    "batch_size",
+    "gradient_accumulation_steps",
+    "max_seq_length",
+    "quant",
+)
 
 
 def training_pin_memory() -> bool:
@@ -122,7 +128,12 @@ def apply_training_memory_guards(config: Any) -> Any:
             target = None
         if target is not None and target != config.quant:
             # Only downgrade — never upgrade beyond what the user asked for.
-            rank = {QuantMode.NONE: 0, QuantMode.INT16: 1, QuantMode.INT8: 2, QuantMode.INT4: 3}  # type: ignore[name-defined]
+            rank = {
+                QuantMode.NONE: 0,
+                QuantMode.INT16: 1,
+                QuantMode.INT8: 2,
+                QuantMode.INT4: 3,
+            }  # type: ignore[name-defined]
             if rank.get(target, 0) < rank.get(config.quant, 0):
                 updates["quant"] = target
                 logger.info(
@@ -136,6 +147,28 @@ def apply_training_memory_guards(config: Any) -> Any:
 
     logger.info("Training memory guards applied: %s", updates)
     return config.model_copy(update=updates)
+
+
+def describe_training_memory_policy(
+    original: Any,
+    guarded: Any,
+    *,
+    reason: str,
+) -> dict[str, Any]:
+    """Return user-visible details about guard/fallback changes."""
+    changes: dict[str, dict[str, Any]] = {}
+    for field in _MEMORY_POLICY_FIELDS:
+        before = getattr(original, field, None)
+        after = getattr(guarded, field, None)
+        before_value = getattr(before, "value", before)
+        after_value = getattr(after, "value", after)
+        if before_value != after_value:
+            changes[field] = {"from": before_value, "to": after_value}
+    return {
+        "reason": reason,
+        "changed": bool(changes),
+        "changes": changes,
+    }
 
 
 def apply_training_oom_fallback(config: Any) -> Any:

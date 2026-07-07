@@ -4,12 +4,67 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from forge.orchestrators.base import Orchestrator
-from forge.services.user_paths import assert_user_path
+from forge.services.user_paths import assert_user_path, is_local_filesystem_path
 from seiso.security import SecurityError
+
+
+@dataclass(frozen=True)
+class BundledJobContract:
+    """Boundary contract for research-code runners integrated into Forge."""
+
+    artifact_keys: tuple[str, ...] = (
+        "output_dir",
+        "output_root",
+        "run_dir",
+        "model_dir",
+        "recommendation_path",
+        "paper_bundle",
+    )
+    nested_artifact_keys: tuple[str, ...] = ("stage_results", "artifacts", "summary")
+    requires_manifest: bool = False
+
+
+def _validate_artifact_value(
+    sandbox_root: Path,
+    user_id: str,
+    key: str,
+    value: Any,
+) -> None:
+    if isinstance(value, str) and is_local_filesystem_path(value):
+        try:
+            assert_user_path(sandbox_root, user_id, value)
+        except SecurityError as exc:
+            raise PermissionError(f"Bundled artifact {key!r} is outside sandbox: {exc}") from exc
+    elif isinstance(value, dict):
+        for nested_key, nested_value in value.items():
+            _validate_artifact_value(
+                sandbox_root, user_id, f"{key}.{nested_key}", nested_value
+            )
+    elif isinstance(value, list):
+        for idx, item in enumerate(value):
+            _validate_artifact_value(sandbox_root, user_id, f"{key}[{idx}]", item)
+
+
+def validate_bundled_result(
+    sandbox_root: Path,
+    user_id: str,
+    result: dict[str, Any],
+    contract: BundledJobContract,
+) -> None:
+    """Validate runner-returned artifact paths before routes persist them."""
+    if contract.requires_manifest and not result.get("manifest"):
+        raise RuntimeError("Bundled job did not return a manifest")
+    for key in contract.artifact_keys:
+        if key in result and result[key]:
+            _validate_artifact_value(sandbox_root, user_id, key, result[key])
+    for key in contract.nested_artifact_keys:
+        if key in result and result[key]:
+            _validate_artifact_value(sandbox_root, user_id, key, result[key])
 
 
 async def run_bundled_job(
@@ -22,6 +77,7 @@ async def run_bundled_job(
     start_message: str,
     runner: Callable[..., dict[str, Any]],
     result_log: Callable[[dict[str, Any]], str],
+    contract: BundledJobContract = BundledJobContract(),
 ) -> dict[str, Any]:
     from forge.services.memory_release import prepare_for_gpu_task, release_after_task
 
@@ -41,6 +97,11 @@ async def run_bundled_job(
         job_id=job_id,
         log=lambda msg: orchestrator._emit_log(job_id, msg),
     )
+    policy = {
+        "trust_remote_code": bool(payload.get("trust_remote_code", False)),
+        "external_tools": True,
+    }
+    orchestrator._emit_event(job_id, "policy", {"bundled": policy})
     orchestrator._emit_log(job_id, start_message)
     loop = asyncio.get_running_loop()
 
@@ -65,6 +126,7 @@ async def run_bundled_job(
             job_id=job_id,
         )
 
+    validate_bundled_result(orchestrator.sandbox_root, user_id, result, contract)
     orchestrator._emit_log(job_id, result_log(result))
     return result
 
@@ -78,6 +140,7 @@ def bundled_orchestrator(
     start_message: str,
     runner: Callable[..., dict[str, Any]],
     result_log: Callable[[dict[str, Any]], str],
+    contract: BundledJobContract = BundledJobContract(),
 ) -> type[Orchestrator]:
     """Build a thin Orchestrator subclass for a bundled pipeline runner."""
 
@@ -94,6 +157,7 @@ def bundled_orchestrator(
                 start_message=start_message,
                 runner=runner,
                 result_log=result_log,
+                contract=contract,
             )
 
     _BundledOrchestrator.kind = kind

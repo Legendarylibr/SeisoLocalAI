@@ -16,7 +16,7 @@ from sse_starlette.sse import EventSourceResponse
 from forge.api.deps import get_db, get_export_orchestrator, get_hub_publish_orchestrator
 from forge.api.http_errors import raise_forbidden
 from forge.api.routes._pipeline import PipelineJobResponse
-from forge.api.routes._stream import job_failure_message, spawn_background
+from forge.api.routes._stream import durable_job_events, spawn_background
 from forge.config import ForgeSettings, get_settings
 from forge.db.store import Database
 from forge.orchestrators.export import ExportOrchestrator
@@ -29,6 +29,7 @@ from forge.services.hub_publish import (
     resolve_hub_publish_token,
 )
 from forge.services.jobs import assert_job_owner
+from forge.services.job_runtime import run_orchestrated_job
 from forge.services.publishable import (
     assert_pushable_checkpoint,
     assert_pushable_model,
@@ -313,40 +314,42 @@ async def start_export(
         "hub_precheck": hub_precheck_dict,
     }
 
-    async def _run() -> None:
-        try:
-            await orchestrator.start(job_id, payload)
-            job = await orchestrator.wait_for(job_id)
-            if job:
-                await db.update_export_job_status(
-                    job_id,
-                    job.status.value,
-                    output_paths=job.result.get("outputs"),
-                    error_text=job.error if job.status.value == "failed" else None,
-                )
-                if job.status.value == "completed" and job.result.get("outputs"):
-                    from forge.services.model_registry import register_export_outputs
+    async def _finished(job) -> None:
+        await db.update_export_job_status(
+            job_id,
+            job.status.value,
+            output_paths=job.result.get("outputs"),
+            error_text=job.error if job.status.value == "failed" else None,
+        )
+        if job.status.value == "completed" and job.result.get("outputs"):
+            from forge.services.model_registry import register_export_outputs
 
-                    try:
-                        await register_export_outputs(
-                            db,
-                            user_id=user_id,
-                            data_dir=settings.data_dir,
-                            outputs=job.result["outputs"],
-                            job_id=job_id,
-                        )
-                    except Exception:
-                        logging.getLogger(__name__).exception(
-                            "Export inventory registration failed for job %s "
-                            "(export remains completed)",
-                            job_id,
-                        )
-        except Exception as exc:
-            await db.update_export_job_status(
-                job_id,
-                "failed",
-                error_text=job_failure_message(orchestrator, job_id, exc),
-            )
+            try:
+                await register_export_outputs(
+                    db,
+                    user_id=user_id,
+                    data_dir=settings.data_dir,
+                    outputs=job.result["outputs"],
+                    job_id=job_id,
+                )
+            except Exception:
+                logging.getLogger(__name__).exception(
+                    "Export inventory registration failed for job %s "
+                    "(export remains completed)",
+                    job_id,
+                )
+
+    async def _failed(message: str) -> None:
+        await db.update_export_job_status(job_id, "failed", error_text=message)
+
+    async def _run() -> None:
+        await run_orchestrated_job(
+            orchestrator=orchestrator,
+            job_id=job_id,
+            payload=payload,
+            on_finished=_finished,
+            on_failed=_failed,
+        )
 
     spawn_background(_run())
     audit_event("export_start", user_id=user_id, job_id=job_id, formats=body.formats)
@@ -577,6 +580,8 @@ async def stream_export(
                 yield {"event": "log", "data": line}
             j = orchestrator.get_job(job_id)
         else:
+            async for event in durable_job_events(db, job_id, user_id):
+                yield event
             j = None
         if not j:
             row = await db.get_export_job(job_id, user_id)

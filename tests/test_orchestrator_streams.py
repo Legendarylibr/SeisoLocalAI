@@ -1,13 +1,19 @@
 from __future__ import annotations
 
+import base64
+
 import pytest
 
+from forge.db.crypto import resolve_encryption_key
+from forge.db.store import Database
 from forge.orchestrators.base import (
     MAX_LOG_LINES,
     MAX_METRIC_POINTS,
     JobStatus,
     Orchestrator,
 )
+
+_TEST_KEY = base64.b64encode(b"\x02" * 32).decode()
 
 
 class DummyOrchestrator(Orchestrator):
@@ -94,3 +100,46 @@ def test_metric_buffer_is_capped_without_manual_eviction(tmp_path):
     assert list(orchestrator._metric_buffers[job_id]) == [
         {"step": idx} for idx in range(2, MAX_METRIC_POINTS + 2)
     ]
+
+
+@pytest.mark.asyncio
+async def test_live_only_stream_skips_buffer_replay(tmp_path):
+    orchestrator = DummyOrchestrator(tmp_path)
+    job_id = orchestrator.create_job(user_id="u1")
+    orchestrator._emit_log(job_id, "persisted")
+    orchestrator.get_job(job_id).status = JobStatus.COMPLETED  # type: ignore[union-attr]
+
+    assert [
+        line async for line in orchestrator.stream_logs(job_id, replay_buffer=False)
+    ] == []
+
+
+@pytest.mark.asyncio
+async def test_durable_job_events_replay_as_sse(tmp_path):
+    from forge.api.routes._stream import durable_job_events
+
+    db = Database(
+        tmp_path / "forge.db",
+        encryption_key=resolve_encryption_key(_TEST_KEY),
+        ephemeral=True,
+    )
+    user = await db.create_user("hashed", "User", email="stream@local.dev")
+    await db.append_job_event(
+        job_id="job-1",
+        user_id=user["id"],
+        kind="training",
+        event_type="log",
+        payload={"line": "hello"},
+    )
+    await db.append_job_event(
+        job_id="job-1",
+        user_id=user["id"],
+        kind="training",
+        event_type="memory_policy",
+        payload={"reason": "oom_fallback"},
+    )
+
+    events = [event async for event in durable_job_events(db, "job-1", user["id"])]
+    assert events[0] == {"event": "log", "data": "hello"}
+    assert events[1]["event"] == "memory_policy"
+    assert "oom_fallback" in events[1]["data"]

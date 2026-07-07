@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from forge.orchestrators._bundled_job import bundled_orchestrator
+from forge.orchestrators._bundled_job import BundledJobContract, bundled_orchestrator
 from seiso.compress.runner import run_compress_job
 
 CompressOrchestrator = bundled_orchestrator(
@@ -13,4 +13,5 @@ CompressOrchestrator = bundled_orchestrator(
     start_message="Starting LLM compression pipeline",
     runner=run_compress_job,
     result_log=lambda result: f"Run directory: {result.get('run_dir')}",
+    contract=BundledJobContract(requires_manifest=True),
 )

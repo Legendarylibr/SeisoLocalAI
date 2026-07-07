@@ -14,7 +14,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from seiso.compat import StrEnum
 
@@ -33,6 +33,20 @@ class JobStatus(StrEnum):
 
 class ResourceConflictError(RuntimeError):
     """Raised when an orchestrator job would overlap a reserved local resource."""
+
+
+class JobEventSink(Protocol):
+    """Optional durable event sink used by Forge routes for restart-safe streams."""
+
+    def emit(
+        self,
+        *,
+        job_id: str,
+        user_id: str,
+        kind: str,
+        event_type: str,
+        payload: dict[str, Any],
+    ) -> None: ...
 
 
 _RESOURCE_LOCK = asyncio.Lock()
@@ -74,12 +88,18 @@ class Orchestrator(ABC):
         self._tasks: dict[str, asyncio.Task[None]] = {}
         self._subprocesses: dict[str, asyncio.subprocess.Process] = {}
         self._subprocess_groups: set[str] = set()
+        self._event_sink: JobEventSink | None = None
+
+    def set_event_sink(self, sink: JobEventSink | None) -> None:
+        """Attach a durable sink for logs, metrics, status, and result events."""
+        self._event_sink = sink
 
     def create_job(self, job_id: str | None = None, user_id: str | None = None) -> str:
         if len(self._jobs) >= MAX_JOBS:
             self._evict_oldest_job()
         jid = job_id or str(uuid.uuid4())
         self._jobs[jid] = JobRecord(id=jid, kind=self.kind, user_id=user_id)
+        self._emit_event(jid, "status", {"status": JobStatus.PENDING.value})
         return jid
 
     def get_job(self, job_id: str) -> JobRecord | None:
@@ -116,14 +136,31 @@ class Orchestrator(ABC):
     def _emit_log(self, job_id: str, line: str) -> None:
         buf = self._log_buffers[job_id]
         buf.append(line)
+        self._emit_event(job_id, "log", {"line": line})
         for q in tuple(self._subscribers.get(job_id, ())):
             q.put_nowait(line)
 
     def _emit_metric(self, job_id: str, metric: dict[str, Any]) -> None:
         buf = self._metric_buffers[job_id]
         buf.append(metric)
+        self._emit_event(job_id, "metric", metric)
         for q in tuple(self._metric_subscribers.get(job_id, ())):
             q.put_nowait(metric)
+
+    def _emit_event(
+        self, job_id: str, event_type: str, payload: dict[str, Any]
+    ) -> None:
+        sink = self._event_sink
+        rec = self._jobs.get(job_id)
+        if sink is None or rec is None or not rec.user_id:
+            return
+        sink.emit(
+            job_id=job_id,
+            user_id=rec.user_id,
+            kind=self.kind,
+            event_type=event_type,
+            payload=payload,
+        )
 
     def get_metrics(self, job_id: str) -> list[dict[str, Any]]:
         return list(self._metric_buffers.get(job_id, []))
@@ -132,13 +169,16 @@ class Orchestrator(ABC):
         for q in tuple(self._metric_subscribers.get(job_id, ())):
             q.put_nowait(None)
 
-    async def stream_metrics(self, job_id: str) -> AsyncIterator[dict[str, Any]]:
+    async def stream_metrics(
+        self, job_id: str, *, replay_buffer: bool = True
+    ) -> AsyncIterator[dict[str, Any]]:
         queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
         subscribers = self._metric_subscribers[job_id]
         subscribers.add(queue)
         try:
-            for point in self._metric_buffers.get(job_id, []):
-                yield point
+            if replay_buffer:
+                for point in self._metric_buffers.get(job_id, []):
+                    yield point
             job = self.get_job(job_id)
             if job and job.status in (
                 JobStatus.COMPLETED,
@@ -159,7 +199,9 @@ class Orchestrator(ABC):
             q.put_nowait(None)
         self._finish_metrics(job_id)
 
-    async def stream_logs(self, job_id: str) -> AsyncIterator[str]:
+    async def stream_logs(
+        self, job_id: str, *, replay_buffer: bool = True
+    ) -> AsyncIterator[str]:
         """SSE-compatible log stream for a job."""
         queue: asyncio.Queue[str | None] = asyncio.Queue()
         subscribers = self._subscribers[job_id]
@@ -167,9 +209,12 @@ class Orchestrator(ABC):
         subscribers.add(queue)
         try:
             buf = self._log_buffers.get(job_id, deque())
-            while tail < len(buf):
-                yield buf[tail]
-                tail += 1
+            if replay_buffer:
+                while tail < len(buf):
+                    yield buf[tail]
+                    tail += 1
+            else:
+                tail = len(buf)
             job = self.get_job(job_id)
             if job and job.status in (
                 JobStatus.COMPLETED,
@@ -206,6 +251,7 @@ class Orchestrator(ABC):
             raise RuntimeError(f"Job {job_id} is already {rec.status}")
         await self._reserve_resource(job_id, rec)
         rec.status = JobStatus.RUNNING
+        self._emit_event(job_id, "status", {"status": JobStatus.RUNNING.value})
 
         async def _wrapper() -> None:
             try:
@@ -232,6 +278,11 @@ class Orchestrator(ABC):
                     f"{active_job_id} is running"
                 )
                 self._emit_log(rec.id, f"ERROR: {rec.error}")
+                self._emit_event(
+                    rec.id,
+                    "status",
+                    {"status": JobStatus.FAILED.value, "error": rec.error},
+                )
                 self._finish_logs(rec.id)
                 raise ResourceConflictError(rec.error)
             _ACTIVE_RESOURCES[self.resource_key] = (self.kind, job_id)
@@ -257,18 +308,35 @@ class Orchestrator(ABC):
             result = await self.execute(job_id, payload)
             rec.result = result
             rec.status = JobStatus.COMPLETED
+            self._emit_event(
+                job_id, "status", {"status": JobStatus.COMPLETED.value}
+            )
+            self._emit_event(job_id, "result", result)
         except asyncio.CancelledError:
             rec.status = JobStatus.CANCELLED
             self._emit_log(job_id, "Job cancelled")
+            self._emit_event(
+                job_id, "status", {"status": JobStatus.CANCELLED.value}
+            )
             # Do not re-raise: wait_for must observe CANCELLED and persist it to DB.
         except SystemExit as exc:
             rec.status = JobStatus.FAILED
             rec.error = str(exc) or "Job exited unexpectedly"
             self._emit_log(job_id, f"ERROR: {rec.error}")
+            self._emit_event(
+                job_id,
+                "status",
+                {"status": JobStatus.FAILED.value, "error": rec.error},
+            )
         except Exception as exc:
             rec.status = JobStatus.FAILED
             rec.error = str(exc)
             self._emit_log(job_id, f"ERROR: {exc}")
+            self._emit_event(
+                job_id,
+                "status",
+                {"status": JobStatus.FAILED.value, "error": rec.error},
+            )
         finally:
             self._subprocesses.pop(job_id, None)
             self._subprocess_groups.discard(job_id)

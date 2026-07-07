@@ -24,7 +24,11 @@ _ORCHESTRATOR_GETTERS: list[Callable[[], Orchestrator]] = []
 def _orchestrator_dep(cls: type[Orchestrator]) -> Callable[[], Orchestrator]:
     @lru_cache
     def _get() -> Orchestrator:
-        return cls(get_settings().data_dir)
+        from forge.services.job_events import DurableJobEventSink
+
+        orchestrator = cls(get_settings().data_dir)
+        orchestrator.set_event_sink(DurableJobEventSink(get_db()))
+        return orchestrator
 
     _ORCHESTRATOR_GETTERS.append(_get)
     return _get

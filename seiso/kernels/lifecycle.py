@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import gc
+from contextvars import ContextVar, Token
 from typing import Any
 
 # model_id -> weakref to model (for validation) + list of modules patched
 _PATCH_REGISTRY: dict[int, list[Any]] = {}
+_ACTIVE_PATCH_SESSION: ContextVar["KernelPatchSession | None"] = ContextVar(
+    "seiso_kernel_patch_session", default=None
+)
 
 
 def register_patch(model: Any, module: Any) -> None:
@@ -15,6 +19,53 @@ def register_patch(model: Any, module: Any) -> None:
     if model_id not in _PATCH_REGISTRY:
         _PATCH_REGISTRY[model_id] = []
     _PATCH_REGISTRY[model_id].append(module)
+    if session := _ACTIVE_PATCH_SESSION.get():
+        session.record(module)
+
+
+def _unregister_module(module: Any) -> None:
+    for model_id, modules in list(_PATCH_REGISTRY.items()):
+        _PATCH_REGISTRY[model_id] = [m for m in modules if m is not module]
+        if not _PATCH_REGISTRY[model_id]:
+            _PATCH_REGISTRY.pop(model_id, None)
+
+
+class KernelPatchSession:
+    """Transaction-like scope that restores patched forwards in LIFO order."""
+
+    def __init__(self, model: Any | None = None) -> None:
+        self.model = model
+        self._modules: list[Any] = []
+        self._token: Token[KernelPatchSession | None] | None = None
+        self._restored = False
+
+    def __enter__(self) -> "KernelPatchSession":
+        self._token = _ACTIVE_PATCH_SESSION.set(self)
+        return self
+
+    def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
+        self.restore()
+        if self._token is not None:
+            _ACTIVE_PATCH_SESSION.reset(self._token)
+            self._token = None
+
+    def record(self, module: Any) -> None:
+        if module not in self._modules:
+            self._modules.append(module)
+
+    def restore(self) -> int:
+        if self._restored:
+            return 0
+        restored = 0
+        for module in reversed(self._modules):
+            if hasattr(module, "_seiso_orig_forward"):
+                module.forward = module._seiso_orig_forward  # type: ignore[method-assign]
+                delattr(module, "_seiso_orig_forward")
+                restored += 1
+            _unregister_module(module)
+        self._modules.clear()
+        self._restored = True
+        return restored
 
 
 def restore_kernel_patches(model: Any | None = None) -> int:

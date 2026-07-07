@@ -21,10 +21,11 @@ from seiso.kernels.hooks import (
     apply_fused_residual_norm_kernels,
     apply_training_kernels,
 )
-from seiso.kernels.lifecycle import release_training_memory
+from seiso.kernels.lifecycle import KernelPatchSession, release_training_memory
 from seiso.memory.protection import (
     apply_training_memory_guards,
     apply_training_oom_fallback,
+    describe_training_memory_policy,
     ensure_load_fits,
     is_oom_error,
     release_cached_memory,
@@ -103,7 +104,13 @@ class SeisoTrainer:
                 logger.exception("on_log callback failed")
 
     def run(self) -> Path:
+        original_config = self.config
         self.config = apply_training_memory_guards(self.config)
+        policy = describe_training_memory_policy(
+            original_config, self.config, reason="initial_guard"
+        )
+        if policy["changed"]:
+            self._log("MEMORY_POLICY " + json.dumps(policy, sort_keys=True))
         cfg = self.config
         self._apply_cuda_training_profile()
         apply_determinism(cfg.seed, deterministic=cfg.deterministic)
@@ -161,8 +168,11 @@ class SeisoTrainer:
             raise ValueError(f"Unsupported training method: {cfg.method.value}")
 
         model = None
+        patch_session: KernelPatchSession | None = None
         try:
             model, tokenizer = self._load_model()
+            patch_session = KernelPatchSession(model)
+            patch_session.__enter__()
             if use_triton:
                 self._kernel_meta = apply_training_kernels(
                     model,
@@ -288,6 +298,8 @@ class SeisoTrainer:
             logger.info("Training complete: %s", out)
             return out
         finally:
+            if patch_session is not None:
+                patch_session.__exit__(None, None, None)
             release_training_memory(model)
             self._cleanup_gpu(None)
 
@@ -487,7 +499,12 @@ class SeisoTrainer:
                     raise
                 attempts += 1
                 release_cached_memory(sync=True)
+                original_config = self.config
                 self.config = apply_training_oom_fallback(self.config)
+                policy = describe_training_memory_policy(
+                    original_config, self.config, reason="oom_fallback"
+                )
+                self._log("MEMORY_POLICY " + json.dumps(policy, sort_keys=True))
                 cfg = self.config
                 if rebuild_trainer is not None:
                     trainer = rebuild_trainer()

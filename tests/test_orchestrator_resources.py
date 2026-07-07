@@ -61,6 +61,34 @@ async def test_gpu_resource_jobs_do_not_overlap(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_job_runtime_persists_resource_conflict_failure(tmp_path: Path):
+    from forge.services.job_runtime import run_orchestrated_job
+
+    started = asyncio.Event()
+    stop = asyncio.Event()
+    first = _GpuOrchestratorA(tmp_path, started, stop)
+    second = _GpuOrchestratorB(tmp_path)
+    failures: list[str] = []
+
+    first_job = first.create_job(user_id="user-a")
+    await first.start(first_job, {})
+    await asyncio.wait_for(started.wait(), timeout=2)
+
+    second_job = second.create_job(user_id="user-a")
+    await run_orchestrated_job(
+        orchestrator=second,
+        job_id=second_job,
+        payload={},
+        on_finished=lambda _job: asyncio.sleep(0),
+        on_failed=lambda message: asyncio.sleep(0, result=failures.append(message)),
+    )
+
+    stop.set()
+    await first.wait_for(first_job)
+    assert failures and "Cannot start gpu-b while gpu-a job" in failures[0]
+
+
+@pytest.mark.asyncio
 async def test_job_start_is_single_use(tmp_path: Path):
     orchestrator = _GpuOrchestratorB(tmp_path)
     job_id = orchestrator.create_job(user_id="user-a")
