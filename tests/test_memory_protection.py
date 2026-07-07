@@ -248,6 +248,34 @@ def test_clamp_llama_n_ctx_respects_headroom(monkeypatch):
     assert n_ctx % 512 == 0
 
 
+def test_clamp_llama_n_ctx_decays_native_linux_sticky_request(monkeypatch):
+    monkeypatch.delenv("SEISO_LLAMA_UNSAFE_STICKY_CTX", raising=False)
+    monkeypatch.setattr("seiso.platform.use_linux_nvidia_inference_guards", lambda: True)
+    monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 24576)
+
+    n_ctx = clamp_llama_n_ctx(
+        8192,
+        messages=[{"role": "user", "content": "short prompt"}],
+        max_tokens=256,
+    )
+
+    assert n_ctx == 2048
+
+
+def test_clamp_llama_n_ctx_preserves_sticky_request_with_override(monkeypatch):
+    monkeypatch.setenv("SEISO_LLAMA_UNSAFE_STICKY_CTX", "1")
+    monkeypatch.setattr("seiso.platform.use_linux_nvidia_inference_guards", lambda: True)
+    monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 24576)
+
+    n_ctx = clamp_llama_n_ctx(
+        8192,
+        messages=[{"role": "user", "content": "short prompt"}],
+        max_tokens=256,
+    )
+
+    assert n_ctx == 8192
+
+
 def test_clamp_llama_n_ctx_caps_long_native_linux_prompt_for_mid_model(monkeypatch, tmp_path):
     gguf = tmp_path / "qwen2.5-30b-q4.gguf"
     _write_arch_gguf(gguf, "qwen2")

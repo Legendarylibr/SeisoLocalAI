@@ -109,7 +109,7 @@ _SIDECAR_CTX_MARGIN_TOKENS = 256
 # Fraction of *free* (not total) VRAM the sidecar may commit to weights + KV.
 # Leaves slack for the display/compositor and the engine's compute graph so a
 # display-attached consumer GPU cannot be driven into a driver-resetting hang.
-_SIDECAR_VRAM_BUDGET_RATIO = 0.85
+_SIDECAR_VRAM_BUDGET_RATIO = 0.75
 
 
 def _sidecar_native_linux_nvidia() -> bool:
@@ -125,6 +125,16 @@ def _sidecar_native_linux_nvidia() -> bool:
 
 def _sidecar_vram_clamp_enabled() -> bool:
     return env_bool("SEISO_SIDECAR_VRAM_CLAMP", True)
+
+
+def _sidecar_vram_budget_ratio() -> float:
+    raw = env_str("SEISO_SIDECAR_VRAM_BUDGET_RATIO", "").strip()
+    if raw:
+        try:
+            return max(0.50, min(float(raw), 0.95))
+        except ValueError:
+            pass
+    return _SIDECAR_VRAM_BUDGET_RATIO
 
 
 def _sidecar_native_max_tokens(max_tokens: int) -> int:
@@ -222,7 +232,7 @@ def sidecar_ollama_num_gpu(model_path: str, *, num_ctx: int) -> int | None:
     free_mb = int(headroom_mb())
     if free_mb <= 0:
         return 0
-    budget = int(free_mb * _SIDECAR_VRAM_BUDGET_RATIO)
+    budget = int(free_mb * _sidecar_vram_budget_ratio())
     try:
         weight_mb = int(estimate_path_vram_mb(model_path))
         total_layers = max(1, gguf_total_layers(model_path))

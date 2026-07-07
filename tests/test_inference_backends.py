@@ -1257,6 +1257,54 @@ def test_sidecar_ollama_num_gpu_partial_offload(monkeypatch):
     assert llamaswap.sidecar_ollama_num_gpu("/tmp/model.gguf", num_ctx=4096) == 16
 
 
+def test_sidecar_ollama_num_gpu_uses_safer_default_vram_budget(monkeypatch):
+    import seiso.inference.backends as backends_mod
+    import seiso.memory.protection as protection_mod
+    import seiso.memory.protection.llama_kv as kv_mod
+    from seiso.inference import llamaswap
+
+    monkeypatch.delenv("SEISO_OLLAMA_NUM_GPU", raising=False)
+    monkeypatch.delenv("SEISO_SIDECAR_VRAM_BUDGET_RATIO", raising=False)
+    monkeypatch.setattr(llamaswap, "_sidecar_native_linux_nvidia", lambda: True)
+    monkeypatch.setattr(protection_mod, "headroom_mb", lambda: 10_000)
+    monkeypatch.setattr(protection_mod, "estimate_path_vram_mb", lambda p: 5000)
+    monkeypatch.setattr(backends_mod, "gguf_total_layers", lambda p: 32)
+
+    seen: list[int] = []
+
+    def _fits(model_path, *, headroom_mb, n_gpu_layers, n_ctx, weight_mb, total_layers):
+        seen.append(headroom_mb)
+        return True
+
+    monkeypatch.setattr(kv_mod, "llama_offload_fits_headroom", _fits)
+    assert llamaswap.sidecar_ollama_num_gpu("/tmp/model.gguf", num_ctx=4096) is None
+    assert seen[0] == 7500
+
+
+def test_sidecar_ollama_num_gpu_budget_ratio_env_override(monkeypatch):
+    import seiso.inference.backends as backends_mod
+    import seiso.memory.protection as protection_mod
+    import seiso.memory.protection.llama_kv as kv_mod
+    from seiso.inference import llamaswap
+
+    monkeypatch.delenv("SEISO_OLLAMA_NUM_GPU", raising=False)
+    monkeypatch.setenv("SEISO_SIDECAR_VRAM_BUDGET_RATIO", "0.9")
+    monkeypatch.setattr(llamaswap, "_sidecar_native_linux_nvidia", lambda: True)
+    monkeypatch.setattr(protection_mod, "headroom_mb", lambda: 10_000)
+    monkeypatch.setattr(protection_mod, "estimate_path_vram_mb", lambda p: 5000)
+    monkeypatch.setattr(backends_mod, "gguf_total_layers", lambda p: 32)
+
+    seen: list[int] = []
+
+    def _fits(model_path, *, headroom_mb, n_gpu_layers, n_ctx, weight_mb, total_layers):
+        seen.append(headroom_mb)
+        return True
+
+    monkeypatch.setattr(kv_mod, "llama_offload_fits_headroom", _fits)
+    assert llamaswap.sidecar_ollama_num_gpu("/tmp/model.gguf", num_ctx=4096) is None
+    assert seen[0] == 9000
+
+
 class _FakeStreamResponse:
     def __init__(self, lines):
         self._lines = lines
