@@ -420,11 +420,18 @@ def llama_load_profile_ladder(
                 )
             )
         steps.append((base_batch, base_ubatch, None, primary_flash))
-        for batch, ubatch, ctx_cap in (
-            (512, 256, min(n_ctx, 4096)),
-            (512, 128, min(n_ctx, 4096)),
-            (256, 128, min(n_ctx, 2048)),
-        ):
+        if native_linux_nvidia:
+            fallback_steps = (
+                (256, 128, min(n_ctx, 4096)),
+                (128, 128, min(n_ctx, 2048)),
+            )
+        else:
+            fallback_steps = (
+                (512, 256, min(n_ctx, 4096)),
+                (512, 128, min(n_ctx, 4096)),
+                (256, 128, min(n_ctx, 2048)),
+            )
+        for batch, ubatch, ctx_cap in fallback_steps:
             steps.append(
                 (
                     min(base_batch, batch),

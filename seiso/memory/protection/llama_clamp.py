@@ -20,7 +20,7 @@ from seiso.memory.protection.constants import (
     _MIN_LLAMA_CTX,
     _NATIVE_LINUX_CTX_BUCKETS,
 )
-from seiso.memory.protection.llama_batch import clamp_llama_batch_pair
+from seiso.memory.protection.llama_batch import clamp_llama_batch_pair, native_linux_batch_defaults
 from seiso.memory.protection.llama_kv import _host_os_reserve_mb
 from seiso.memory.protection.llama_runtime import (
     llama_host_batch_headroom_mb,
@@ -85,14 +85,23 @@ def clamp_llama_load_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
     model_path = out.pop("_model_path", None)
     native_linux_hint = out.pop("_native_linux_nvidia", None)
     n_ctx = int(out.get("n_ctx") or _MIN_LLAMA_CTX)
-    out["n_batch"] = max(_MIN_LLAMA_BATCH, int(out.get("n_batch") or _MAX_LLAMA_BATCH))
+    native_linux_nvidia = False
+    if native_linux_hint is not None:
+        native_linux_nvidia = bool(native_linux_hint)
+    else:
+        with contextlib.suppress(Exception):
+            native_linux_nvidia = seiso_platform.use_linux_nvidia_inference_guards()
+    if native_linux_nvidia:
+        default_batch, default_ubatch = native_linux_batch_defaults()
+    else:
+        default_batch, default_ubatch = _MAX_LLAMA_BATCH, 1024
+    out["n_batch"] = max(_MIN_LLAMA_BATCH, int(out.get("n_batch") or default_batch))
     out["n_ubatch"] = max(
         _MIN_LLAMA_BATCH,
-        min(int(out.get("n_ubatch") or out["n_batch"]), out["n_batch"]),
+        min(int(out.get("n_ubatch") or min(out["n_batch"], default_ubatch)), out["n_batch"]),
     )
 
     n_gpu_layers = int(out.get("n_gpu_layers") or 0)
-    native_linux_nvidia = False
     if model_path:
         free_mb = protection().headroom_mb()
         tight = protection().llama_model_is_tight_vram_fit(
@@ -101,11 +110,6 @@ def clamp_llama_load_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
             n_gpu_layers=n_gpu_layers,
             n_ctx=n_ctx,
         )
-        if native_linux_hint is not None:
-            native_linux_nvidia = bool(native_linux_hint)
-        else:
-            with contextlib.suppress(Exception):
-                native_linux_nvidia = seiso_platform.use_linux_nvidia_inference_guards()
         if native_linux_nvidia and n_gpu_layers == 0:
             batch_headroom = llama_host_batch_headroom_mb(
                 model_path=model_path,
@@ -170,6 +174,13 @@ def clamp_llama_load_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
                 n_gpu_layers == -1 or n_gpu_layers >= total_layers
             ):
                 out["offload_kqv"] = False
+
+    elif native_linux_nvidia:
+        out["n_batch"], out["n_ubatch"] = clamp_llama_batch_pair(
+            out["n_batch"],
+            out["n_ubatch"],
+            native_linux_nvidia=True,
+        )
 
     ctx_cap = clamp_llama_n_ctx(
         n_ctx,

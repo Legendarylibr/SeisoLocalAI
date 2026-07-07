@@ -59,6 +59,18 @@ def gpu_batch_tier_caps(gpu_total_mb: int, load_tier: LlamaLoadTier) -> tuple[in
     return normal_batch, normal_ubatch
 
 
+def native_linux_batch_defaults(gpu_total_mb: int | None = None) -> tuple[int, int]:
+    """VRAM-tier batch pair for native Linux when no model-specific headroom is available."""
+    total = (
+        int(gpu_total_mb)
+        if gpu_total_mb is not None and gpu_total_mb > 0
+        else protection().discrete_gpu_total_mb()
+    )
+    if total > 0:
+        return gpu_batch_tier_caps(total, "normal")
+    return _NATIVE_LINUX_UNKNOWN_GPU_BATCH_CAPS
+
+
 def tight_batch_caps(gpu_total_mb: int) -> tuple[int, int]:
     """Conservative batch pair for tight VRAM fits on any GPU size."""
     batch, ubatch = gpu_batch_tier_caps(gpu_total_mb, "compact")

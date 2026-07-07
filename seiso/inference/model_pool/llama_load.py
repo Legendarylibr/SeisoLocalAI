@@ -600,13 +600,14 @@ def _load_llama_model(
     free_mb = _prot().headroom_mb()
     n_gpu_layers = int(kwargs.get("n_gpu_layers") or 0)
     effective_n_ctx = int(kwargs.get("n_ctx") or n_ctx)
+    ladder_batch, ladder_ubatch = _mp()._llama_batch_defaults(path)
     memory_profiles = _prot().llama_load_profile_ladder(
         model_path=path,
         n_ctx=effective_n_ctx,
         n_gpu_layers=n_gpu_layers,
         free_mb=free_mb,
-        base_batch=int(kwargs.get("n_batch") or 512),
-        base_ubatch=int(kwargs.get("n_ubatch") or 256),
+        base_batch=int(kwargs.get("n_batch") or ladder_batch),
+        base_ubatch=int(kwargs.get("n_ubatch") or ladder_ubatch),
         tier=load_tier,
     )
     full_gpu_profiles = [

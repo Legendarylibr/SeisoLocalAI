@@ -549,6 +549,20 @@ def test_gpu_batch_tier_caps_unknown_gpu_uses_safe_native_caps():
     assert gpu_batch_tier_caps(0, "minimal") == (128, 128)
 
 
+def test_clamp_llama_load_kwargs_native_linux_without_model_path(monkeypatch):
+    monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: True)
+    monkeypatch.setattr(
+        "seiso.memory.protection.discrete_gpu_total_mb",
+        lambda _profile=None: 24576,
+    )
+
+    kwargs = clamp_llama_load_kwargs({"n_batch": 4096, "n_ubatch": 1024, "n_ctx": 4096})
+
+    expected_batch, expected_ubatch = _gpu_normal_caps(24576)
+    assert kwargs["n_batch"] == expected_batch
+    assert kwargs["n_ubatch"] == expected_ubatch
+
+
 def test_clamp_llama_load_kwargs_native_linux_borderline_non_tight_caps_batch(
     monkeypatch, tmp_path
 ):

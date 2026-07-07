@@ -201,7 +201,18 @@ def apply_platform_memory_profile(
                     os.environ.setdefault("SEISO_LLAMA_BATCH", str(batch))
                     os.environ.setdefault("SEISO_LLAMA_UBATCH", str(ubatch))
             elif native_linux_nvidia:
-                os.environ.setdefault("SEISO_LLAMA_CACHE_MB", "256")
+                gpu_total = discrete_gpu_total_mb(profile)
+                batch, ubatch, cache_cap = native_linux_nvidia_llama_batch_caps(
+                    tier=tier,
+                    headroom_mb=headroom,
+                    low=low,
+                    gpu_total_mb=gpu_total,
+                )
+                _refresh_native_linux_llama_env(
+                    batch_cap=batch,
+                    ubatch_cap=ubatch,
+                    cache_cap=cache_cap,
+                )
             if not low and tier in (HardwareTier.WORKSTATION, HardwareTier.CAPABLE):
                 if not native_linux_nvidia:
                     os.environ.setdefault("SEISO_LLAMA_FLASH_ATTN", "true")
