@@ -30,9 +30,15 @@ def native_linux_nvidia_llama_batch_caps(
 ) -> tuple[int, int, int]:
     """VRAM-derived llama.cpp batch/ubatch/cache caps for native Linux NVIDIA."""
     total = gpu_total_mb or discrete_gpu_total_mb()
-    batch, ubatch = gpu_batch_tier_caps(total, "normal")
+    if total > 0:
+        batch, ubatch = gpu_batch_tier_caps(total, "normal")
+    else:
+        batch, ubatch = 256, 128
     if low:
-        low_batch, low_ubatch = gpu_batch_tier_caps(total, "compact")
+        if total > 0:
+            low_batch, low_ubatch = gpu_batch_tier_caps(total, "compact")
+        else:
+            low_batch, low_ubatch = 256, 128
         batch = min(batch, low_batch)
         ubatch = min(ubatch, low_ubatch, batch)
     cache_cap = min(2048, max(256, batch * 2))
@@ -42,7 +48,7 @@ def native_linux_nvidia_llama_batch_caps(
 def _refresh_native_linux_llama_env(
     *, batch_cap: int, ubatch_cap: int, cache_cap: int
 ) -> None:
-    """Clamp stale shell env to July-3-style caps on every Forge start."""
+    """Clamp stale shell env to native Linux safety caps on every Forge start."""
     if env_bool("SEISO_DISABLE_MEMORY_CAPS", False):
         return
 
