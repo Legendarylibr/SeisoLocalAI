@@ -126,10 +126,15 @@ async def prepare_local_chat_target(
             backend = recommend_backend(model_path=path)
         if check_memory:
             assert_model_fits_for_load(path, mode="chat", backend=backend)
+        from forge.services.ollama_registry import metadata_for_model_path
+
+        path_meta = metadata_for_model_path(path)
         updates: dict[str, Any] = {
             "model_path": path,
             "inference_backend": backend,
         }
+        if path_meta:
+            updates["model_metadata"] = path_meta
         if sanitize:
             updates.update(
                 _sanitize_chat_fields(
@@ -181,6 +186,8 @@ async def prepare_local_chat_target(
         "is_moe": selected.get("is_moe"),
         "uses_swa": selected.get("uses_swa"),
     }
+    if selected.get("metadata"):
+        updates["model_metadata"] = selected["metadata"]
 
     if target.get("inference_backend") == BACKEND_ROUTER:
         if not model_router_enabled:
@@ -265,6 +272,8 @@ async def resolve_preload_context(
         "messages": [{"role": "user", "content": "ping"}],
         "max_tokens": target.get("max_tokens", max_tokens),
     }
+    if target.get("model_metadata"):
+        payload["model_metadata"] = target["model_metadata"]
     if target.get("n_ctx") is not None:
         payload["n_ctx"] = target["n_ctx"]
     elif n_ctx is not None:

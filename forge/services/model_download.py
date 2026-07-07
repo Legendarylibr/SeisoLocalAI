@@ -193,6 +193,28 @@ def _cached_download_result_if_usable(
     }
 
 
+def _maybe_register_with_ollama(
+    model_path: str,
+    *,
+    catalog_repo: str,
+    metadata: dict[str, Any],
+    model_format: str,
+) -> None:
+    try:
+        from forge.services.ollama_registry import register_model_with_ollama
+
+        metadata["ollama_tag"] = register_model_with_ollama(
+            str(model_path),
+            repo_id=catalog_repo,
+            metadata=metadata,
+            model_format=model_format,
+        )
+    except ValueError:
+        return
+    except Exception:
+        return
+
+
 def _sync_download_artifacts(
     *,
     catalog_repo: str,
@@ -255,6 +277,13 @@ def _sync_download_artifacts(
             sanitize_filename(catalog_repo.replace("/", "--")),
             Path(info["path"]),
         )
+        metadata: dict[str, Any] = {"repo_id": catalog_repo, "cache_dir": str(cache_dir)}
+        _maybe_register_with_ollama(
+            str(inv.absolute()),
+            catalog_repo=catalog_repo,
+            metadata=metadata,
+            model_format="safetensors",
+        )
         return {
             "variant": "safetensors",
             "source": source,
@@ -262,7 +291,7 @@ def _sync_download_artifacts(
             "path": str(inv.absolute()),
             "format": "safetensors",
             "size_bytes": info["size_bytes"],
-            "metadata": {"repo_id": catalog_repo, "cache_dir": str(cache_dir)},
+            "metadata": metadata,
             "downloaded": [info["path"]],
             "repo_id": catalog_repo,
             "cache_dir": str(cache_dir),
@@ -341,12 +370,11 @@ def _sync_download_artifacts(
         ),
     }
     try:
-        from forge.services.ollama_registry import register_gguf_with_ollama
-
-        metadata["ollama_tag"] = register_gguf_with_ollama(
+        _maybe_register_with_ollama(
             str(inv.absolute()),
-            repo_id=catalog_repo,
+            catalog_repo=catalog_repo,
             metadata=metadata,
+            model_format="gguf",
         )
     except Exception:
         pass

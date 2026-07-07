@@ -664,6 +664,24 @@ def test_llamaswap_status_available_when_ollama_healthy(monkeypatch):
     assert status.ollama_ready is True
 
 
+def test_llamaswap_status_does_not_fallback_to_ollama_for_llamacpp_engine(
+    monkeypatch,
+):
+    from seiso.inference import llamaswap
+
+    monkeypatch.setenv("SEISO_LLAMASWAP_ENABLED", "true")
+    monkeypatch.setenv("SEISO_LLAMASWAP_ENGINE", "llamacpp")
+    monkeypatch.setattr(llamaswap, "ollama_health_ok", lambda *, url=None: True)
+    monkeypatch.setattr(llamaswap, "llamaswap_health_ok", lambda *, url=None: False)
+
+    status = llamaswap.llamaswap_status()
+
+    assert status.available is False
+    assert status.engine == "llamacpp"
+    assert status.ollama_ready is True
+    assert status.llamaswap_ready is False
+
+
 def test_create_isolated_gguf_client_prefers_ollama(monkeypatch):
     from seiso.inference import llamaswap
     from seiso.inference.llamaswap import OllamaClient, create_isolated_gguf_client

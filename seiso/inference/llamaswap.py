@@ -194,15 +194,6 @@ def llamaswap_status() -> LlamaSwapRuntime:
             llamaswap_ready=True,
         )
 
-    if ollama_ready:
-        return LlamaSwapRuntime(
-            available=True,
-            url=ollama_url(),
-            engine="ollama",
-            ollama_ready=True,
-            llamaswap_ready=False,
-        )
-
     return LlamaSwapRuntime(
         available=False,
         url=url,
@@ -211,7 +202,7 @@ def llamaswap_status() -> LlamaSwapRuntime:
             f"Neither Ollama ({ollama_url()}) nor llama-swap ({url}) is reachable. "
             f"{llamaswap_setup_hint(url=url, engine=engine)}"
         ),
-        ollama_ready=False,
+        ollama_ready=ollama_ready,
         llamaswap_ready=False,
     )
 
@@ -301,9 +292,13 @@ class OllamaClient:
         if not model_path:
             return False, "Ollama unload requires a model path"
         try:
-            from forge.services.ollama_registry import resolve_ollama_tag
+            from forge.services.ollama_registry import (
+                metadata_for_model_path,
+                resolve_ollama_tag,
+            )
 
-            tag = resolve_ollama_tag(model_path)
+            meta = metadata_for_model_path(model_path)
+            tag = resolve_ollama_tag(model_path, meta)
         except Exception as exc:
             return False, str(exc)
         body = json.dumps({"model": tag, "keep_alive": 0}).encode("utf-8")
@@ -320,16 +315,27 @@ class OllamaClient:
         except (OSError, urllib.error.URLError, TimeoutError) as exc:
             return False, str(exc)
 
-    def _resolve_model(self, model_path: str) -> str:
-        from forge.services.ollama_registry import ensure_gguf_registered
+    def _resolve_model(self, model_path: str, payload: dict[str, Any]) -> str:
+        from forge.services.ollama_registry import (
+            ensure_model_registered,
+            metadata_for_model_path,
+        )
 
-        return ensure_gguf_registered(model_path)
+        meta = metadata_for_model_path(
+            model_path, payload.get("model_metadata")
+        )
+        return ensure_model_registered(
+            model_path,
+            repo_id=meta.get("repo_id") if isinstance(meta.get("repo_id"), str) else None,
+            metadata=meta,
+            model_format=payload.get("model_format"),
+        )
 
     def _request_body(
         self, payload: dict[str, Any], model_path: str, *, stream: bool
     ) -> dict[str, Any]:
         body: dict[str, Any] = {
-            "model": self._resolve_model(model_path),
+            "model": self._resolve_model(model_path, payload),
             "messages": payload.get("messages") or [],
             "max_tokens": int(payload.get("max_tokens", 512)),
             "temperature": float(payload.get("temperature", 0.0)),

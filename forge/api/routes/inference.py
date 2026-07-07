@@ -567,6 +567,7 @@ async def chat(
             "model_path",
             "inference_backend",
             "model_format",
+            "model_metadata",
             "use_model_router",
             "max_tokens",
             "n_ctx",

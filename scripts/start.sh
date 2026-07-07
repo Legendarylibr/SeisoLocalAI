@@ -37,11 +37,38 @@ load_seiso_common() {
 }
 
 load_seiso_common
+
+load_seiso_sidecar_install() {
+  local root="${1:-}"
+  local lib_path=""
+  if [[ -n "${BASH_SOURCE[0]:-}" && -f "${BASH_SOURCE[0]}" ]]; then
+    lib_path="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/sidecar_install.sh"
+  fi
+  if [[ -f "$lib_path" ]]; then
+    # shellcheck source=lib/sidecar_install.sh
+    source "$lib_path"
+    return 0
+  fi
+  if [[ -n "$root" && -f "$root/scripts/lib/sidecar_install.sh" ]]; then
+    # shellcheck source=lib/sidecar_install.sh
+    source "$root/scripts/lib/sidecar_install.sh"
+    return 0
+  fi
+  local raw_base="${SEISO_RAW_BASE:-https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main}"
+  local tmp
+  tmp="$(mktemp)"
+  if ! curl -fsSL "${raw_base}/scripts/lib/sidecar_install.sh" -o "$tmp"; then
+    rm -f "$tmp"
+    return 1
+  fi
+  # shellcheck source=/dev/null
+  source "$tmp"
+  rm -f "$tmp"
+}
+
+load_seiso_sidecar_install
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-}")" 2>/dev/null && pwd || echo "")"
-if [[ -f "${SCRIPT_DIR}/lib/sidecar_install.sh" ]]; then
-  # shellcheck source=lib/sidecar_install.sh
-  source "${SCRIPT_DIR}/lib/sidecar_install.sh"
-fi
 
 log() { seiso_log "$@"; }
 die() { seiso_die "$@"; }
@@ -188,6 +215,8 @@ main() {
   if ! seiso_ensure_installed "$root"; then
     die "Could not complete install. See doctor output above."
   fi
+
+  load_seiso_sidecar_install "$root"
 
   seiso_install_start_command "$root"
 

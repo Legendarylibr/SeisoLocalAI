@@ -184,6 +184,8 @@ async def _prepare_openai_chat_payload(
     }
     if target.get("model_format"):
         payload["model_format"] = target["model_format"]
+    if target.get("model_metadata"):
+        payload["model_metadata"] = target["model_metadata"]
     if target.get("n_ctx") is not None:
         payload["n_ctx"] = target["n_ctx"]
     return payload
