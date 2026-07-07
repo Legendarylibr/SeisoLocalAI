@@ -77,7 +77,10 @@ def _torch_generate_with_oom_retry(model: Any, gen_kwargs: dict[str, Any]) -> An
             raise
         release_cached_memory(sync=True)
         reduced = dict(gen_kwargs)
-        reduced["max_new_tokens"] = max(32, int(reduced.get("max_new_tokens", 512)) // 2)
+        reduced["max_new_tokens"] = max(
+            1,
+            int(reduced.get("max_new_tokens", 512)) // 2,
+        )
         logger.warning(
             "Torch inference OOM — retrying with max_new_tokens=%s",
             reduced["max_new_tokens"],
@@ -272,8 +275,30 @@ def _trim_torch_messages_to_context(
         prompt = format_messages_for_prompt(trimmed, tokenizer)
         current = _tokenized_length(tokenizer, prompt)
 
-    if current + clamped_max_tokens + reserve > limit:
-        clamped_max_tokens = max(1, min(clamped_max_tokens, limit - current - reserve))
+    hard_prompt_budget = max(1, limit - reserve - 1)
+    for _ in range(16):
+        if current <= hard_prompt_budget:
+            break
+        if not trimmed:
+            break
+        last = dict(trimmed[-1])
+        content = last.get("content", "")
+        if not isinstance(content, str) or len(content) <= 1:
+            break
+        keep = max(1, int(len(content) * max(0.02, hard_prompt_budget / max(current, 1))))
+        if keep >= len(content):
+            keep = max(1, len(content) - 1)
+        last["content"] = content[-keep:]
+        trimmed[-1] = last
+        prompt = format_messages_for_prompt(trimmed, tokenizer)
+        current = _tokenized_length(tokenizer, prompt)
+
+    available_tokens = limit - current - reserve
+    if available_tokens < 1:
+        raise RuntimeError(
+            "Torch prompt exceeds model context after trimming; reduce prompt size or max_tokens"
+        )
+    clamped_max_tokens = max(1, min(clamped_max_tokens, available_tokens))
     return TorchPromptBudget(
         messages=trimmed,
         max_tokens=clamped_max_tokens,
