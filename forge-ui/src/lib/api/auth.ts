@@ -18,6 +18,16 @@ export const authApi = {
       method: "POST",
       body: JSON.stringify({ password }),
     }),
+  resetSession: (confirmation: string) =>
+    request<{
+      status: string;
+      needs_onboarding: boolean;
+      sessions_rotated: boolean;
+      rows_deleted: number;
+    }>("/auth/reset-session", {
+      method: "POST",
+      body: JSON.stringify({ confirmation }),
+    }),
   me: () => request<AuthUser & { created_at: string }>("/auth/me"),
   logout: () => request<{ status: string }>("/auth/logout", { method: "POST" }),
 };
