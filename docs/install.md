@@ -48,51 +48,36 @@ Seiso config files accept `~/.seiso` and expand it correctly on all platforms. S
 
 No manual prerequisites on most systems — the installer installs Python, Node, git, and native build tools (gcc, cmake, python dev headers) via your package manager when they are missing.
 
-**Recommended: OS-specific bootstrap scripts** (install the right sidecar stack):
-
-```bash
-# Linux native + NVIDIA — installs Ollama + verifies sidecar before Forge opens
-curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/bootstrap/linux-nvidia.sh | bash
-
-# Linux native CPU
-curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/bootstrap/linux-cpu.sh | bash
-
-# Linux AMD ROCm
-curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/bootstrap/linux-rocm.sh | bash
-
-# WSL2 + NVIDIA
-curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/bootstrap/wsl-nvidia.sh | bash
-
-# macOS Apple Silicon
-curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/bootstrap/macos.sh | bash
-```
-
-Generic auto-detect (legacy):
+**Main one-liner** — auto-detects Linux, macOS, and WSL2, installs dependencies, builds Forge, and starts the app:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
 ```
 
-**Profile env prefixes** on the generic installer:
+**Quick installs** — use these when you already know the target platform. Each command is isolated so it can be copied individually.
+
+Linux native + NVIDIA:
 
 ```bash
-# Linux native + NVIDIA
 SEISO_INSTALL_PROFILE=linux-nvidia curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
+```
 
-# Linux native CPU (skip CUDA extras even when nvidia-smi works)
+Linux native CPU:
+
+```bash
 SEISO_INSTALL_PROFILE=linux-cpu curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
+```
 
-# Linux AMD ROCm (install PyTorch ROCm wheel after — see linux-amd-rocm.md)
-SEISO_INSTALL_PROFILE=linux-rocm curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
+WSL2 + NVIDIA:
 
-# WSL2 + NVIDIA (use ~/Seiso on the Linux filesystem, not /mnt/c/...)
+```bash
 SEISO_INSTALL_PROFILE=wsl-nvidia curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
+```
 
-# macOS Apple Silicon (MLX included)
+macOS Apple Silicon:
+
+```bash
 SEISO_INSTALL_PROFILE=macos curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
-
-# Chat-only — Forge + GGUF; no PyTorch / training stack
-SEISO_INSTALL_PROFILE=chat curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
 ```
 
 **Windows (native)** — no bash installer; use PowerShell:
@@ -123,13 +108,13 @@ bash start
 
 1. **Clones** Seiso to `$HOME/Seiso` on Linux/macOS/WSL (override with `SEISO_INSTALL_DIR`; Windows uses manual clone — see below)
 2. **Creates** a Python virtualenv at `.venv`
-3. **Installs** platform extras automatically (includes GGUF support; native Linux NVIDIA uses a sidecar by default):
+3. **Installs** platform extras with `uv` when available, or pip as a fallback (includes GGUF support; native Linux NVIDIA uses a sidecar by default):
    - **Linux + NVIDIA** (`nvidia-smi` detected) → `[forge,train,cuda,llamacpp,dev]`
    - **Linux (no NVIDIA)** → `[forge,train,llamacpp,dev]`
    - **macOS** → `[forge,train,llamacpp,dev]` (optional: `[mlx]` for safetensors)
 4. **Copies** `.env.example` → `.env` if missing
-5. **Builds** the Forge UI (`forge-ui/dist`)
-6. **Installs sidecar stack** on native Linux NVIDIA (`linux-nvidia.sh`: Ollama + health gate)
+5. **Builds** the Forge UI with Bun when available, or npm as a fallback (`forge-ui/dist`)
+6. **Installs sidecar stack** on native Linux NVIDIA (`linux-nvidia` profile: Ollama + health gate)
 7. **Starts** Forge (unless `SEISO_START=0`)
 
 ### Installer options
@@ -233,7 +218,7 @@ Build the UI and launch:
 ```bash
 cd "$HOME/Seiso"    # or your REPO path
 source .venv/bin/activate
-cd forge-ui && npm ci && npm run build && cd ..
+cd forge-ui && bun install --frozen-lockfile && bun run build && cd ..
 seiso doctor
 seiso forge
 ```
@@ -246,7 +231,7 @@ seiso doctor
 seiso forge
 ```
 
-Use `npm install` instead of `npm ci` only when you intentionally want to refresh the lockfile.
+Use `npm ci && npm run build` instead when Bun is unavailable. Use `bun install` or `npm install` only when you intentionally want to refresh lockfiles.
 
 ---
 
@@ -448,6 +433,21 @@ make ci-fast
 `seiso forge` should bind `127.0.0.1:8765`; `make ci-fast` runs lint, type checks, tests, and security checks.
 
 Dev dependencies: `pip install -r requirements-dev.txt` ([CI_LOCAL.md](CI_LOCAL.md))
+
+### Refresh dependency locks
+
+Python dependencies are declared in `pyproject.toml` and locked in `locks/python.lock` with hashes. The updater prefers `uv pip compile --upgrade` when `uv` is installed, falls back to `pip-compile`, and refreshes `locks/digests.json`:
+
+```bash
+python scripts/update_dep_locks.py
+```
+
+Forge UI dependencies are declared in `forge-ui/package.json`; keep both npm and Bun locks in sync after changing frontend dependencies:
+
+```bash
+cd forge-ui && npm install && bun install && cd ..
+python scripts/update_dep_locks.py --skip-python
+```
 
 Hardware detection:
 

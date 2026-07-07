@@ -84,51 +84,36 @@ One command installs missing system tools (Python, Node, git, build deps when po
 
 #### Quick install
 
-**Recommended: one command per OS** (installs the right stack, including Ollama on native Linux NVIDIA):
-
-```bash
-# Linux native + NVIDIA — CUDA training + Ollama-first GGUF chat (recommended)
-curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/bootstrap/linux-nvidia.sh | bash
-
-# Linux native CPU
-curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/bootstrap/linux-cpu.sh | bash
-
-# Linux AMD ROCm — install PyTorch ROCm wheel separately after (see docs/platforms/linux-amd-rocm.md)
-curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/bootstrap/linux-rocm.sh | bash
-
-# WSL2 + NVIDIA — keep the clone on the Linux filesystem (~/Seiso, not /mnt/c/...)
-curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/bootstrap/wsl-nvidia.sh | bash
-
-# macOS Apple Silicon — includes MLX for fast safetensors chat
-curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/bootstrap/macos.sh | bash
-```
-
-Generic auto-detect (legacy — on native Linux NVIDIA prefer `linux-nvidia.sh` above):
+**Main one-liner** — auto-detects Linux, macOS, and WSL2, installs dependencies, builds Forge, and starts the app:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
 ```
 
-Profile variants via env prefix on the generic installer:
+**Quick installs** — use these when you already know the target platform:
+
+Linux native + NVIDIA:
 
 ```bash
-# Linux native + NVIDIA — CUDA training + GGUF GPU chat
 SEISO_INSTALL_PROFILE=linux-nvidia curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
+```
 
-# Linux native CPU (or force CPU stack even if NVIDIA is present)
+Linux native CPU:
+
+```bash
 SEISO_INSTALL_PROFILE=linux-cpu curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
+```
 
-# Linux AMD ROCm — install PyTorch ROCm wheel separately after (see docs/platforms/linux-amd-rocm.md)
-SEISO_INSTALL_PROFILE=linux-rocm curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
+WSL2 + NVIDIA:
 
-# WSL2 + NVIDIA — keep the clone on the Linux filesystem (~/Seiso, not /mnt/c/...)
+```bash
 SEISO_INSTALL_PROFILE=wsl-nvidia curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
+```
 
-# macOS Apple Silicon — includes MLX for fast safetensors chat
+macOS Apple Silicon:
+
+```bash
 SEISO_INSTALL_PROFILE=macos curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
-
-# Chat-only — Forge + GGUF; skips PyTorch / training download
-SEISO_INSTALL_PROFILE=chat curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
 ```
 
 What the installer does:
@@ -139,28 +124,12 @@ What the installer does:
 4. Builds `forge-ui/dist`
 5. Runs `seiso forge` and opens the browser
 
-On native Linux + NVIDIA, the `linux-nvidia.sh` bootstrap installs **Ollama**
+On native Linux + NVIDIA, the `linux-nvidia` profile installs **Ollama**
 (Ollama-first isolated GGUF chat), seeds sidecar `.env` defaults, and verifies
 the stack before Forge opens. `start` also auto-starts Ollama when installed;
 llama-swap is an optional fallback when Ollama is down.
 
-**Install only** (no auto-start):
-
-```bash
-SEISO_START=0 curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/bootstrap/linux-nvidia.sh | bash
-```
-
-**Fast install** (same as `SEISO_INSTALL_PROFILE=chat`):
-
-```bash
-SEISO_FAST_INSTALL=1 curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
-```
-
-**Custom install location:**
-
-```bash
-SEISO_INSTALL_DIR="$HOME/code/Seiso" curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
-```
+See [docs/install.md](docs/install.md) for custom paths, install-only mode, Windows PowerShell, and advanced installer options.
 
 **Already cloned?** From the repository root:
 
