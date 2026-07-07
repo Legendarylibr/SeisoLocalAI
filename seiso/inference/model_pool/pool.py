@@ -478,9 +478,10 @@ class ModelPool:
         n_ctx: int = 4096,
         *,
         tier: str = "normal",
+        max_tokens: int = 512,
     ) -> Any:
         def loader(path: str):
-            return _mp()._load_llama_model(path, n_ctx, tier=tier)
+            return _mp()._load_llama_model(path, n_ctx, tier=tier, max_tokens=max_tokens)
 
         norm = self.normalize_path(model_path)
         requested_layers = env_int("SEISO_LLAMA_GPU_LAYERS", _mp()._default_llama_gpu_layers())
@@ -502,7 +503,9 @@ class ModelPool:
                         requested_layers,
                         n_ctx=n_ctx,
                     )
-                    and _mp()._llama_cache_headroom_ok(self._active.handle)
+                    and _mp()._llama_cache_headroom_ok(
+                        self._active.handle, max_tokens=max_tokens
+                    )
                 ):
                     return self._active.handle
 
@@ -522,6 +525,7 @@ class ModelPool:
         *,
         tier: str,
         batch_override: tuple[int, int] | None = None,
+        max_tokens: int = 512,
     ) -> Any:
         """Unload and reload llama.cpp at a lower memory tier after inference OOM.
 
@@ -532,10 +536,16 @@ class ModelPool:
         _mp()._clear_optimal_layers_cache()
         _mp()._refresh_headroom_stats(force=True)
         if batch_override is None:
-            return self.get_llama(model_path, n_ctx=n_ctx, tier=tier)
+            return self.get_llama(model_path, n_ctx=n_ctx, tier=tier, max_tokens=max_tokens)
 
         def loader(path: str):
-            return _mp()._load_llama_model(path, n_ctx, tier=tier, batch_override=batch_override)
+            return _mp()._load_llama_model(
+                path,
+                n_ctx,
+                tier=tier,
+                batch_override=batch_override,
+                max_tokens=max_tokens,
+            )
 
         norm = self.normalize_path(model_path)
         key = f"llama:{norm}:{tier}:batch:{batch_override[0]}:{batch_override[1]}"

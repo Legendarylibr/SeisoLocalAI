@@ -40,7 +40,6 @@ from seiso.inference.streaming import StreamToken, estimate_chunk_tokens
 from seiso.inference.tool_calls import (
     ToolCallDeltaBuffer,
     message_content_with_tool_calls,
-    tool_calls_to_text,
 )
 
 # Re-export runtime surface (implemented in sidecar_runtime).
@@ -168,7 +167,9 @@ def _sidecar_context_ceiling(payload: dict[str, Any], model_path: str) -> int:
     )
 
 
-def sidecar_vram_context_cap(model_path: str, ceiling: int) -> int:
+def sidecar_vram_context_cap(
+    model_path: str, ceiling: int, *, max_tokens: int = 512
+) -> int:
     """Bound the sidecar KV context to what free VRAM can hold on native Linux.
 
     Ollama sizes its KV cache to ``num_ctx`` and places it on the GPU, so an
@@ -193,6 +194,7 @@ def sidecar_vram_context_cap(model_path: str, ceiling: int) -> int:
             free_mb=int(headroom_mb()),
             n_gpu_layers=-1,
             ceiling=ceiling,
+            max_tokens=max_tokens,
         )
     except Exception:
         if _sidecar_native_linux_nvidia():
@@ -307,7 +309,7 @@ def plan_sidecar_request(
     messages = payload.get("messages") or []
     max_tokens = _sidecar_native_max_tokens(int(payload.get("max_tokens", 512)))
     ceiling = _sidecar_context_ceiling(payload, model_path)
-    ceiling = sidecar_vram_context_cap(model_path, ceiling)
+    ceiling = sidecar_vram_context_cap(model_path, ceiling, max_tokens=max_tokens)
     num_ctx = sidecar_num_ctx(messages, max_tokens=max_tokens, ceiling=ceiling)
     messages = trim_llama_messages_to_context(
         messages, n_ctx=num_ctx, max_tokens=max_tokens

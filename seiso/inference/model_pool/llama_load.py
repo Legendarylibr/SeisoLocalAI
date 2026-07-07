@@ -491,7 +491,7 @@ def _llama_cache_is_optimal(
     return cached_layers >= optimal
 
 
-def _llama_cache_headroom_ok(handle: Any) -> bool:
+def _llama_cache_headroom_ok(handle: Any, *, max_tokens: int = 512) -> bool:
     """Native Linux cache hit guard for handles loaded before VRAM changed."""
     if not _mp()._native_linux_nvidia():
         return True
@@ -506,14 +506,16 @@ def _llama_cache_headroom_ok(handle: Any) -> bool:
         reserve = _prot().llama_decode_reserve_mb(
             gpu_total_mb=_prot().discrete_gpu_total_mb(),
             free_mb=current,
-            max_tokens=512,
+            max_tokens=max_tokens,
             model_path=getattr(handle, "_seiso_model_path", None),
         )
         return current > reserve
     return True
 
 
-def llama_load_kwargs(n_ctx: int, *, model_path: str | None = None) -> dict[str, Any]:
+def llama_load_kwargs(
+    n_ctx: int, *, model_path: str | None = None, max_tokens: int = 512
+) -> dict[str, Any]:
     """Tuned llama.cpp defaults for faster preload/first token, overrideable by env."""
     n_threads = env_int("SEISO_LLAMA_THREADS", _default_llama_threads())
     n_gpu_layers = env_int("SEISO_LLAMA_GPU_LAYERS", _mp()._default_llama_gpu_layers())
@@ -562,6 +564,7 @@ def llama_load_kwargs(n_ctx: int, *, model_path: str | None = None) -> dict[str,
     if model_path:
         kwargs["_model_path"] = model_path
         kwargs["_native_linux_nvidia"] = native_linux_nvidia
+        kwargs["_max_tokens"] = max_tokens
     return _prot().clamp_llama_load_kwargs(kwargs)
 
 
@@ -582,6 +585,7 @@ def _load_llama_model(
     *,
     tier: str = "normal",
     batch_override: tuple[int, int] | None = None,
+    max_tokens: int = 512,
 ) -> Any:
     """Load a GGUF with VRAM-aware layer offload and clear OOM errors."""
     load_tier: LlamaLoadTier = (
@@ -609,7 +613,7 @@ def _load_llama_model(
     except Exception:
         pass
 
-    kwargs = _mp().llama_load_kwargs(n_ctx, model_path=path)
+    kwargs = _mp().llama_load_kwargs(n_ctx, model_path=path, max_tokens=max_tokens)
     if batch_override is not None:
         override_batch, override_ubatch = batch_override
         clamped_batch, clamped_ubatch = _prot().clamp_llama_batch_pair(
@@ -697,6 +701,7 @@ def _load_llama_model(
                     load_kwargs.pop("op_offload", None)
         _mp()._refresh_headroom_stats(force=True)
         load_kwargs["_model_path"] = path
+        load_kwargs["_max_tokens"] = max_tokens
         load_kwargs = _prot().clamp_llama_load_kwargs(load_kwargs)
         load_kwargs.pop("_model_path", None)
         from seiso.inference.llama_vision import apply_llama_vision_load_kwargs
@@ -710,6 +715,7 @@ def _load_llama_model(
             llm._seiso_n_ubatch = int(load_kwargs.get("n_ubatch") or 0)  # noqa: SLF001
             llm._seiso_n_ctx = int(load_kwargs.get("n_ctx") or effective_n_ctx)  # noqa: SLF001
             llm._seiso_model_path = path  # noqa: SLF001
+            llm._seiso_max_tokens = max_tokens  # noqa: SLF001
             llm._seiso_load_headroom_mb = _prot().headroom_mb()  # noqa: SLF001
             if batch_override is not None:
                 llm._seiso_last_safe_batch = int(load_kwargs.get("n_batch") or 0)  # noqa: SLF001

@@ -12,6 +12,10 @@ from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
 from forge.api.deps import get_db, get_inference_orchestrator
+from forge.api.routes._inference_common import (
+    _assert_inference_gpu_available,
+    _begin_generation_or_raise,
+)
 from forge.api.routes.models import _schedule_hf_cache_inventory_sync
 from forge.config import ForgeSettings, get_settings
 from forge.db.store import Database
@@ -36,27 +40,6 @@ from forge.services.model_router_client import ROUTER_MODEL_ID, fetch_router_sta
 from forge.tools.sanitize import normalize_text
 
 router = APIRouter(prefix="/inference", tags=["inference"])
-
-
-def _assert_inference_gpu_available() -> None:
-    from forge.services.memory_release import assert_gpu_available_for_inference
-
-    try:
-        assert_gpu_available_for_inference()
-    except RuntimeError as exc:
-        raise HTTPException(409, str(exc)) from exc
-
-
-def _begin_generation_or_raise(
-    orchestrator: InferenceOrchestrator,
-    user_id: str | None,
-) -> None:
-    try:
-        orchestrator.begin_generation_for_user(user_id)
-    except PermissionError as exc:
-        raise HTTPException(403, str(exc)) from exc
-    except RuntimeError as exc:
-        raise HTTPException(409, str(exc)) from exc
 
 
 class ChatRequest(BaseModel):

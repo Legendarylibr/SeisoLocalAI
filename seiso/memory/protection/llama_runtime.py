@@ -79,6 +79,7 @@ def native_linux_llama_context_cap(
     free_mb: int,
     n_gpu_layers: int = -1,
     ceiling: int | None = None,
+    max_tokens: int = 512,
 ) -> int:
     """Largest native Linux llama.cpp context that leaves VRAM for prefill."""
     if not model_path or free_mb <= 0:
@@ -96,7 +97,7 @@ def native_linux_llama_context_cap(
     decode_reserve = llama_decode_reserve_mb(
         gpu_total_mb=gpu_total,
         free_mb=free_mb,
-        max_tokens=512,
+        max_tokens=max_tokens,
         model_path=model_path,
     )
     budget = max(0, int(free_mb * 0.88) - decode_reserve)
@@ -441,7 +442,7 @@ def llama_prefill_needs_reload(
     batch_unsafe = loaded_batch > safe_batch
     ubatch_far_over = loaded_ubatch > max(safe_ubatch * 2, safe_ubatch + 128)
     needs_reload = batch_unsafe and not trust_loaded_handle
-    if (headroom_dropped or headroom_shrank) and (
+    if not trust_loaded_handle and (headroom_dropped or headroom_shrank) and (
         tight_prefill or prefill_exceeds_safe or loaded_batch > safe_batch
     ):
         needs_reload = True
