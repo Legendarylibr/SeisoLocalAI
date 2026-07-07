@@ -17,9 +17,15 @@ Seiso routes chat/inference by platform and model format.
 
 ## llama-swap setup
 
-On native Linux NVIDIA, GGUF chat defaults to the llama-swap sidecar so CUDA
-crashes in an inference engine do not kill Forge. Run llama-swap locally and
-point Forge at it:
+On native Linux NVIDIA, GGUF chat defaults to **Ollama-first** isolation (direct
+`/v1/chat/completions` at `SEISO_OLLAMA_URL`). llama-swap is an optional fallback
+when Ollama is unavailable. Install with:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/bootstrap/linux-nvidia.sh | bash
+```
+
+For manual setup, point Forge at Ollama:
 
 ```bash
 export SEISO_LLAMASWAP_ENABLED=true

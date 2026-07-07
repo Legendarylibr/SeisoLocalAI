@@ -522,9 +522,9 @@ class ModelPool:
 
     def get_llamaswap(self, model_path: str) -> Any:
         def loader(_path: str):
-            from seiso.inference.llamaswap import LlamaSwapClient
+            from seiso.inference.llamaswap import create_isolated_gguf_client
 
-            client = LlamaSwapClient()
+            client = create_isolated_gguf_client()
             client.ensure_ready()
             return client
 

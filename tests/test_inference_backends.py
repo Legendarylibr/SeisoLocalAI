@@ -645,8 +645,34 @@ def test_llamaswap_status_requires_reachable_sidecar(monkeypatch):
 
     assert status.available is False
     assert status.engine == "llamacpp"
-    assert "not reachable" in (status.reason or "")
+    assert "Neither Ollama" in (status.reason or "")
     assert "SEISO_LLAMA_ALLOW_INPROCESS_NATIVE_LINUX" in (status.reason or "")
+
+
+def test_llamaswap_status_available_when_ollama_healthy(monkeypatch):
+    from seiso.inference import llamaswap
+
+    monkeypatch.setenv("SEISO_LLAMASWAP_ENABLED", "true")
+    monkeypatch.setattr(llamaswap, "ollama_health_ok", lambda *, url=None: True)
+    monkeypatch.setattr(llamaswap, "llamaswap_health_ok", lambda *, url=None: False)
+    monkeypatch.setattr(llamaswap, "_nvidia_visible", lambda: True)
+
+    status = llamaswap.llamaswap_status()
+
+    assert status.available is True
+    assert status.engine == "ollama"
+    assert status.ollama_ready is True
+
+
+def test_create_isolated_gguf_client_prefers_ollama(monkeypatch):
+    from seiso.inference import llamaswap
+    from seiso.inference.llamaswap import OllamaClient, create_isolated_gguf_client
+
+    monkeypatch.setattr(llamaswap, "ollama_health_ok", lambda *, url=None: True)
+    monkeypatch.setattr(llamaswap, "_nvidia_visible", lambda: True)
+
+    client = create_isolated_gguf_client()
+    assert isinstance(client, OllamaClient)
 
 
 def test_llamaswap_request_body_forwards_tools_and_model_override(monkeypatch):
@@ -678,19 +704,14 @@ def test_llamaswap_request_body_forwards_tools_and_model_override(monkeypatch):
     }
 
 
-def test_llamaswap_client_ensure_ready_checks_sidecar_and_ollama(monkeypatch):
+def test_ollama_client_ensure_ready_checks_health(monkeypatch):
     from seiso.inference import llamaswap
-    from seiso.inference.llamaswap import LlamaSwapClient, LlamaSwapRuntime
+    from seiso.inference.llamaswap import OllamaClient
 
-    monkeypatch.setattr(
-        llamaswap,
-        "llamaswap_status",
-        lambda: LlamaSwapRuntime(True, "http://127.0.0.1:8080", "ollama"),
-    )
     monkeypatch.setattr(llamaswap, "ollama_health_ok", lambda *, url=None: False)
 
     with pytest.raises(RuntimeError, match="Ollama is not reachable"):
-        LlamaSwapClient(engine="ollama").ensure_ready()
+        OllamaClient().ensure_ready()
 
 
 def test_llamaswap_release_external_memory_uses_management_api(monkeypatch):
