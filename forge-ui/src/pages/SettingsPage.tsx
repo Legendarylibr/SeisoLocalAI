@@ -10,6 +10,31 @@ import { IconGlobe, IconServer, IconShield, IconUser } from "@/components/Icons"
 
 type SettingsTab = "account" | "huggingface" | "server" | "hardening";
 
+function ggufSidecarRuntimeLabel(
+  ready: boolean,
+  runtime: {
+    ollama_ready?: boolean;
+    llamaswap_ready?: boolean;
+    llamaswap_engine?: string | null;
+  },
+): string {
+  if (ready) {
+    if (runtime.ollama_ready) {
+      return runtime.llamaswap_engine === "ollama"
+        ? "Ready (Ollama)"
+        : "Ready (Ollama sidecar)";
+    }
+    if (runtime.llamaswap_ready) {
+      return "Ready (llama-swap fallback)";
+    }
+    return "Ready";
+  }
+  if (runtime.ollama_ready) {
+    return "Ollama up — sidecar routing unavailable";
+  }
+  return "Missing Ollama sidecar";
+}
+
 export function SettingsPage() {
   const { logout } = useAuth();
   const [searchParams] = useSearchParams();
@@ -217,8 +242,21 @@ export function SettingsPage() {
                   </tr>
                   <tr>
                     <td>GGUF chat runtime</td>
-                    <td>{hfStatus.ready_for_gguf_chat ? "Ready" : "Missing llama.cpp"}</td>
+                    <td>
+                      {hfStatus
+                        ? ggufSidecarRuntimeLabel(
+                            hfStatus.ready_for_gguf_chat,
+                            hfStatus.runtime,
+                          )
+                        : "—"}
+                    </td>
                   </tr>
+                  {hfStatus?.runtime.llamaswap_engine && (
+                    <tr>
+                      <td>GGUF sidecar engine</td>
+                      <td>{hfStatus.runtime.llamaswap_engine}</td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             )}

@@ -27,6 +27,20 @@ seiso_wait_ollama_health() {
   return 1
 }
 
+seiso_ollama_cli_host() {
+  local url="${1:-${SEISO_OLLAMA_URL:-http://127.0.0.1:11434}}"
+  url="$(seiso_sidecar_url_base "$url")"
+  url="${url#http://}"
+  url="${url#https://}"
+  url="${url%%/*}"
+  printf '%s\n' "$url"
+}
+
+seiso_export_ollama_cli_env() {
+  local url="${1:-${SEISO_OLLAMA_URL:-http://127.0.0.1:11434}}"
+  export OLLAMA_HOST="$(seiso_ollama_cli_host "$url")"
+}
+
 seiso_native_linux_nvidia() {
   [[ "$(uname -s)" == "Linux" ]] || return 1
   seiso_is_wsl && return 1
@@ -77,6 +91,7 @@ seiso_install_ollama() {
 
   if ! seiso_ollama_health_ok "$ollama_url"; then
     seiso_log "Starting Ollama at $ollama_url"
+    seiso_export_ollama_cli_env "$ollama_url"
     seiso_start_background_sidecar "$run_dir/ollama.log" ollama serve
   fi
 
@@ -107,6 +122,7 @@ seiso_seed_sidecar_env() {
   seiso_env_set_default "SEISO_LLAMASWAP_URL" "http://127.0.0.1:8080"
   seiso_env_set_default "SEISO_OLLAMA_URL" "http://127.0.0.1:11434"
   seiso_env_set_default "SEISO_LLAMASWAP_ENGINE" "auto"
+  seiso_env_set_default "SEISO_REQUIRE_SIDECAR" "1"
 }
 
 seiso_sidecar_fallback_config_path() {

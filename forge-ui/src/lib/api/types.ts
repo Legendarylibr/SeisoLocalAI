@@ -91,6 +91,11 @@ export type HfHubStatus = {
     mlx: boolean;
     torch: boolean;
     huggingface_hub: boolean;
+    llamaswap?: boolean;
+    ollama_ready?: boolean;
+    llamaswap_ready?: boolean;
+    llamaswap_engine?: string | null;
+    llamaswap_url?: string | null;
     install_hints: string[];
     llamacpp_error?: string | null;
   };
