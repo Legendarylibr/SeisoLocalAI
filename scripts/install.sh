@@ -54,11 +54,36 @@ load_seiso_common() {
 }
 
 load_seiso_common
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-}")" 2>/dev/null && pwd || echo "")"
-if [[ -f "${SCRIPT_DIR}/lib/sidecar_install.sh" ]]; then
-  # shellcheck source=lib/sidecar_install.sh
-  source "${SCRIPT_DIR}/lib/sidecar_install.sh"
-fi
+
+load_seiso_sidecar_install() {
+  local root="${1:-}"
+  local lib_path=""
+  if [[ -n "${BASH_SOURCE[0]:-}" && -f "${BASH_SOURCE[0]}" ]]; then
+    lib_path="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/sidecar_install.sh"
+  fi
+  if [[ -f "$lib_path" ]]; then
+    # shellcheck source=lib/sidecar_install.sh
+    source "$lib_path"
+    return 0
+  fi
+  if [[ -n "$root" && -f "$root/scripts/lib/sidecar_install.sh" ]]; then
+    # shellcheck source=lib/sidecar_install.sh
+    source "$root/scripts/lib/sidecar_install.sh"
+    return 0
+  fi
+  local raw_base="${SEISO_RAW_BASE:-https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/${SEISO_BRANCH:-main}}"
+  local tmp
+  tmp="$(mktemp)"
+  if ! curl -fsSL "${raw_base}/scripts/lib/sidecar_install.sh" -o "$tmp"; then
+    rm -f "$tmp"
+    return 1
+  fi
+  # shellcheck source=/dev/null
+  source "$tmp"
+  rm -f "$tmp"
+}
+
+load_seiso_sidecar_install
 
 log() { seiso_log "$@"; }
 warn() { seiso_warn "$@"; }
@@ -221,11 +246,13 @@ main() {
 
   log_unless_quiet "Checking system dependencies"
   seiso_require_system_deps
+
+  root="$(resolve_root)"
+  load_seiso_sidecar_install "$root"
   if declare -F seiso_warn_native_linux_nvidia_banner >/dev/null 2>&1; then
     seiso_warn_native_linux_nvidia_banner
   fi
 
-  root="$(resolve_root)"
   log_unless_quiet "Using repository at $root"
   warn_windows_mount "$root"
 
