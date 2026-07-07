@@ -545,6 +545,41 @@ def test_clamp_llama_load_kwargs_skips_roomy_floor_when_gpu_mostly_in_use(
     assert kwargs["n_ubatch"] <= 128
 
 
+def test_clamp_llama_load_kwargs_native_linux_skips_roomy_floor_without_speed_scale(
+    monkeypatch, tmp_path
+):
+    gguf = tmp_path / "small.gguf"
+    gguf.write_bytes(b"\x00" * 1024)
+    monkeypatch.delenv("SEISO_LLAMA_SPEED_SCALE", raising=False)
+    monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 24576)
+    monkeypatch.setattr("seiso.memory.protection.estimate_path_vram_mb", lambda _p: 1024)
+    monkeypatch.setattr("seiso.inference.backends.gguf_block_count", lambda _p: 32)
+    monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: True)
+    _mock_gpu_total(monkeypatch, 24576)
+    monkeypatch.setattr(
+        "seiso.memory.protection.llama_clamp.roomy_native_linux_batch_floor",
+        lambda **_k: (512, 128),
+    )
+
+    kwargs = clamp_llama_load_kwargs(
+        {
+            "_model_path": str(gguf),
+            "n_ctx": 4096,
+            "n_batch": 4096,
+            "n_ubatch": 1024,
+            "n_gpu_layers": -1,
+        }
+    )
+
+    assert kwargs["n_batch"] < 512
+
+
+def test_gpu_batch_tier_caps_unknown_gpu_uses_safe_native_caps():
+    assert gpu_batch_tier_caps(0, "normal") == (256, 128)
+    assert gpu_batch_tier_caps(0, "compact") == (256, 128)
+    assert gpu_batch_tier_caps(0, "minimal") == (256, 128)
+
+
 def test_clamp_llama_load_kwargs_native_linux_borderline_non_tight_caps_batch(
     monkeypatch, tmp_path
 ):
@@ -901,8 +936,8 @@ def test_clamp_llama_load_kwargs_native_linux_vision_mmproj_clamps_batch(monkeyp
             "n_gpu_layers": -1,
         }
     )
-    assert kwargs["n_batch"] <= 512
-    assert kwargs["n_ubatch"] <= 256
+    assert kwargs["n_batch"] <= 256
+    assert kwargs["n_ubatch"] <= 128
 
 
 def test_clamp_llama_load_kwargs_native_linux_borderline_roomy(monkeypatch, tmp_path):
@@ -987,7 +1022,7 @@ def test_clamp_llama_load_kwargs_native_linux_tight_disables_flash_attn(monkeypa
     )
     # Tight-fit native Linux loads avoid first-prefill SWA/flash-attn crash paths.
     assert "flash_attn" not in kwargs
-    assert kwargs["n_batch"] <= 512
+    assert kwargs["n_batch"] <= 256
     assert kwargs["n_ubatch"] <= 128
     assert kwargs.get("op_offload") is False
     assert kwargs.get("offload_kqv") is False
@@ -1023,8 +1058,8 @@ def test_clamp_llama_load_kwargs_borderline_24gb_q4_uses_safe_prefill(monkeypatc
         }
     )
 
-    assert kwargs["n_batch"] <= 512
-    assert kwargs["n_ubatch"] <= 256
+    assert kwargs["n_batch"] <= 256
+    assert kwargs["n_ubatch"] <= 128
     assert "flash_attn" not in kwargs
     assert kwargs.get("offload_kqv") is False
 

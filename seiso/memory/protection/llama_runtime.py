@@ -400,14 +400,16 @@ def llama_load_profile_ladder(
         gpu_total_mb=gpu_total if native_linux_nvidia else None,
     )
     if native_linux_nvidia:
-        floor = roomy_native_linux_batch_floor(
-            model_path=model_path,
-            free_mb=free_mb,
-            gpu_total_mb=gpu_total,
-            n_gpu_layers=n_gpu_layers,
-            load_tier=tier,
-            tight=tight,
-        )
+        floor = None
+        if env_bool("SEISO_LLAMA_SPEED_SCALE", False):
+            floor = roomy_native_linux_batch_floor(
+                model_path=model_path,
+                free_mb=free_mb,
+                gpu_total_mb=gpu_total,
+                n_gpu_layers=n_gpu_layers,
+                load_tier=tier,
+                tight=tight,
+            )
         if floor is not None:
             tier_batch, tier_ubatch = floor
             base_batch = max(base_batch, tier_batch)

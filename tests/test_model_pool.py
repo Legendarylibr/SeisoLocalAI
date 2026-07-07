@@ -1151,7 +1151,7 @@ def test_native_linux_load_model_uses_crash_resistant_kwargs(monkeypatch, tmp_pa
     llm = mp._load_llama_model(str(gguf), 4096)
 
     first = attempts[0]
-    assert first["n_batch"] <= 512
+    assert first["n_batch"] <= 256
     assert first["n_ubatch"] <= 128
     assert first["n_gpu_layers"] == -1
     assert first["offload_kqv"] is False
