@@ -18,6 +18,7 @@ from seiso.memory.protection import (
     gpu_batch_tier_caps,
     llama_batch_limits_for_headroom,
 )
+from seiso.memory.protection.constants import _NATIVE_LINUX_UNKNOWN_GPU_BATCH_CAPS
 from seiso.training.platform_caps import training_capabilities
 
 
@@ -33,12 +34,12 @@ def native_linux_nvidia_llama_batch_caps(
     if total > 0:
         batch, ubatch = gpu_batch_tier_caps(total, "normal")
     else:
-        batch, ubatch = 256, 128
+        batch, ubatch = _NATIVE_LINUX_UNKNOWN_GPU_BATCH_CAPS
     if low:
         if total > 0:
             low_batch, low_ubatch = gpu_batch_tier_caps(total, "compact")
         else:
-            low_batch, low_ubatch = 256, 128
+            low_batch, low_ubatch = _NATIVE_LINUX_UNKNOWN_GPU_BATCH_CAPS
         batch = min(batch, low_batch)
         ubatch = min(ubatch, low_ubatch, batch)
     cache_cap = min(2048, max(256, batch * 2))
@@ -194,11 +195,12 @@ def apply_platform_memory_profile(
                     ),
                 )
                 if native_linux_nvidia:
+                    gpu_total = discrete_gpu_total_mb(profile)
                     batch, ubatch, cache_cap = native_linux_nvidia_llama_batch_caps(
                         tier=tier,
                         headroom_mb=headroom,
                         low=low,
-                        gpu_total_mb=headroom,
+                        gpu_total_mb=gpu_total,
                     )
                     _refresh_native_linux_llama_env(
                         batch_cap=batch,

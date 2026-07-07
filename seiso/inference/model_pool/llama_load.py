@@ -13,7 +13,10 @@ from typing import Any
 from seiso.env import env_bool, env_int
 from seiso.inference.model_pool._facade import model_pool as _mp
 from seiso.memory.protection._facade import protection as _prot
-from seiso.memory.protection.constants import LlamaLoadTier
+from seiso.memory.protection.constants import (
+    LlamaLoadTier,
+    _NATIVE_LINUX_UNKNOWN_GPU_BATCH_CAPS,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -187,7 +190,7 @@ def _llama_batch_defaults(model_path: str | None = None) -> tuple[int, int]:
                 return gpu_batch_tier_caps(total, "normal")
         except Exception:
             pass
-        return 256, 128
+        return _NATIVE_LINUX_UNKNOWN_GPU_BATCH_CAPS
     return 4096, 1024
 
 

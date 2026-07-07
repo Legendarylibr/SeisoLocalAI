@@ -18,6 +18,8 @@ _MAX_LLAMA_CTX = 131072
 _MIN_LLAMA_CTX = 2048
 _MAX_LLAMA_BATCH = 4096
 _MIN_LLAMA_BATCH = 128
+# Conservative llama.cpp batch pair when native Linux GPU total is unknown.
+_NATIVE_LINUX_UNKNOWN_GPU_BATCH_CAPS: tuple[int, int] = (256, 128)
 # Coarse n_ctx buckets — avoid reloading the model every few chat turns.
 _LLAMA_CTX_BUCKETS = (
     2048,
@@ -76,6 +78,7 @@ __all__ = [
     "_MAX_LLAMA_CTX",
     "_MIN_LLAMA_BATCH",
     "_MIN_LLAMA_CTX",
+    "_NATIVE_LINUX_UNKNOWN_GPU_BATCH_CAPS",
     "_MODEL_WEIGHT_VRAM_SUFFIXES",
     "_NATIVE_LINUX_CTX_BUCKETS",
     "_NATIVE_LINUX_PREFILL_CLAMP_MB",

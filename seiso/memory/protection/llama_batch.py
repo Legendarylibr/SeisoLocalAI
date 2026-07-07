@@ -11,6 +11,7 @@ from seiso.memory.protection.constants import (
     _LOAD_TIER_BATCH_CAPS,
     _MAX_LLAMA_BATCH,
     _MIN_LLAMA_BATCH,
+    _NATIVE_LINUX_UNKNOWN_GPU_BATCH_CAPS,
     LlamaLoadTier,
 )
 
@@ -39,7 +40,7 @@ def comfortable_vram_slack_ratio(*, gpu_total_mb: int | None = None) -> float:
 def gpu_batch_tier_caps(gpu_total_mb: int, load_tier: LlamaLoadTier) -> tuple[int, int]:
     """Scale llama.cpp batch ceilings with GPU VRAM instead of fixed tier tables."""
     if gpu_total_mb <= 0:
-        return _LOAD_TIER_BATCH_CAPS.get(load_tier, _LOAD_TIER_BATCH_CAPS["normal"])
+        return _NATIVE_LINUX_UNKNOWN_GPU_BATCH_CAPS
     gpu_gb = max(1.0, gpu_total_mb / 1024)
     scaled_batch = int(gpu_gb * 12)
     rounded_batch = (scaled_batch // _MIN_LLAMA_BATCH) * _MIN_LLAMA_BATCH
@@ -114,11 +115,7 @@ def clamp_llama_batch_pair(
                 tier_batch = min(tier_batch, tight_batch)
                 tier_ubatch = min(tier_ubatch, tight_ubatch)
         else:
-            tier_batch, tier_ubatch = {
-                "normal": (256, 128),
-                "compact": (256, 128),
-                "minimal": (256, 128),
-            }.get(load_tier, (256, 128))
+            tier_batch, tier_ubatch = _NATIVE_LINUX_UNKNOWN_GPU_BATCH_CAPS
     else:
         tier_batch, tier_ubatch = _LOAD_TIER_BATCH_CAPS.get(
             load_tier, _LOAD_TIER_BATCH_CAPS["normal"]
