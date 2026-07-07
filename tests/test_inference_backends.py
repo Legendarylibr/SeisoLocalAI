@@ -1414,6 +1414,10 @@ def test_llama_complete_oom_recovery_passes_batch_override(monkeypatch):
         "seiso.inference.runner.llama_prefill_needs_reload",
         lambda **_kwargs: (False, 512, 128),
     )
+    monkeypatch.setattr(
+        "seiso.memory.protection.discrete_gpu_total_mb",
+        lambda _profile=None: 24576,
+    )
 
     reply = runner._llama_complete(
         {"messages": [{"role": "user", "content": "hi"}], "max_tokens": 32},
@@ -1422,7 +1426,7 @@ def test_llama_complete_oom_recovery_passes_batch_override(monkeypatch):
     )
 
     assert reply == "ok"
-    assert seen_overrides == [(256, 128)]
+    assert seen_overrides == [(64, 64)]
 
 
 def test_llama_complete_prefill_guard_reloads_before_native_linux_segfault(

@@ -21,6 +21,8 @@ _MIN_LLAMA_BATCH = 128
 # Native Linux NVIDIA: tokens-per-GB batch ceiling and absolute normal-tier cap.
 _NATIVE_LINUX_BATCH_TOKENS_PER_GB = 8
 _NATIVE_LINUX_MAX_NORMAL_BATCH = 256
+_NATIVE_LINUX_COMPACT_BATCH_FLOOR = 64
+_NATIVE_LINUX_MINIMAL_BATCH_FLOOR = 32
 # Conservative llama.cpp batch pair when native Linux GPU total is unknown.
 _NATIVE_LINUX_UNKNOWN_GPU_BATCH_CAPS: tuple[int, int] = (128, 128)
 # Coarse n_ctx buckets — avoid reloading the model every few chat turns.
@@ -82,6 +84,8 @@ __all__ = [
     "_MIN_LLAMA_BATCH",
     "_MIN_LLAMA_CTX",
     "_NATIVE_LINUX_BATCH_TOKENS_PER_GB",
+    "_NATIVE_LINUX_COMPACT_BATCH_FLOOR",
+    "_NATIVE_LINUX_MINIMAL_BATCH_FLOOR",
     "_NATIVE_LINUX_MAX_NORMAL_BATCH",
     "_NATIVE_LINUX_UNKNOWN_GPU_BATCH_CAPS",
     "_MODEL_WEIGHT_VRAM_SUFFIXES",

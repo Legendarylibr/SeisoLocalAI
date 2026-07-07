@@ -25,6 +25,7 @@ from seiso.memory.protection.constants import (
 )
 from seiso.memory.protection.llama_batch import (
     clamp_llama_batch_pair,
+    gpu_batch_tier_caps,
     resolve_llama_batch_limits,
     tight_batch_caps,
 )
@@ -421,9 +422,11 @@ def llama_load_profile_ladder(
             )
         steps.append((base_batch, base_ubatch, None, primary_flash))
         if native_linux_nvidia:
+            compact_batch, compact_ubatch = gpu_batch_tier_caps(gpu_total, "compact")
+            minimal_batch, minimal_ubatch = gpu_batch_tier_caps(gpu_total, "minimal")
             fallback_steps = (
-                (256, 128, min(n_ctx, 4096)),
-                (128, 128, min(n_ctx, 2048)),
+                (compact_batch, compact_ubatch, min(n_ctx, 4096)),
+                (minimal_batch, minimal_ubatch, min(n_ctx, 2048)),
             )
         else:
             fallback_steps = (
