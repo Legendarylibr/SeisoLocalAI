@@ -8,8 +8,15 @@ import re
 from pathlib import Path
 from typing import Any
 
+from seiso.env import env_bool, env_int
 from seiso.memory.protection._facade import protection
-from seiso.memory.protection.constants import _INFERENCE_OVERHEAD_MB, _MAX_INFERENCE_TOKENS
+from seiso.memory.protection.constants import (
+    _INFERENCE_OVERHEAD_MB,
+    _MAX_INFERENCE_TOKENS,
+    _NATIVE_LINUX_LOW_HEADROOM_MAX_COMPLETION_TOKENS,
+    _NATIVE_LINUX_MAX_COMPLETION_TOKENS,
+    _NATIVE_LINUX_PREFILL_CLAMP_MB,
+)
 
 _VISION_TOKENS_PER_IMAGE = 1024
 _DATA_IMAGE_RE = re.compile(r"data:image/[^;]+;base64,", re.I)
@@ -212,6 +219,20 @@ def sanitize_inference_payload(payload: dict[str, Any]) -> dict[str, Any]:
             int((headroom - _INFERENCE_OVERHEAD_MB) * 128 / 1.15),
         )
         max_tokens = min(max_tokens, max(128, kv_budget_tokens - prompt_tokens - 32))
+    try:
+        from seiso.platform import use_linux_nvidia_inference_guards
+
+        native_linux_nvidia = use_linux_nvidia_inference_guards()
+    except Exception:
+        native_linux_nvidia = False
+    if native_linux_nvidia and not env_bool("SEISO_LLAMA_UNSAFE_LONG_COMPLETIONS", False):
+        native_cap = env_int(
+            "SEISO_LLAMA_NATIVE_MAX_TOKENS",
+            _NATIVE_LINUX_MAX_COMPLETION_TOKENS,
+        )
+        if headroom < _NATIVE_LINUX_PREFILL_CLAMP_MB:
+            native_cap = min(native_cap, _NATIVE_LINUX_LOW_HEADROOM_MAX_COMPLETION_TOKENS)
+        max_tokens = min(max_tokens, max(1, native_cap))
     out["max_tokens"] = max_tokens
 
     if out.get("n_ctx") is not None:
