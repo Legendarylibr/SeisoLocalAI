@@ -141,16 +141,14 @@ def clamp_llama_load_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
             batch_headroom = max_batch
         if native_linux_nvidia and not tight and n_gpu_layers != 0:
             gpu_total = protection().discrete_gpu_total_mb()
-            floor = None
-            if env_bool("SEISO_LLAMA_SPEED_SCALE", False):
-                floor = roomy_native_linux_batch_floor(
-                    model_path=model_path,
-                    free_mb=free_mb,
-                    gpu_total_mb=gpu_total,
-                    n_gpu_layers=n_gpu_layers,
-                    load_tier="normal",
-                    tight=tight,
-                )
+            floor = roomy_native_linux_batch_floor(
+                model_path=model_path,
+                free_mb=free_mb,
+                gpu_total_mb=gpu_total,
+                n_gpu_layers=n_gpu_layers,
+                load_tier="normal",
+                tight=tight,
+            )
             if floor is not None:
                 tier_batch, tier_ubatch = floor
                 max_batch = max(max_batch, tier_batch)

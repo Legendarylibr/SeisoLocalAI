@@ -156,14 +156,6 @@ def _llama_skip_partial_offload(model_path: str) -> bool:
         return False
 
 
-def _llama_speed_scale_enabled() -> bool:
-    # Upscaled batches OOM during prefill after weights land on GPU.
-    if _mp()._native_linux_nvidia() and not env_bool("SEISO_LLAMA_UNSAFE_SPEED_SCALE", False):
-        return False
-    default = not _mp()._native_linux_nvidia()
-    return env_bool("SEISO_LLAMA_SPEED_SCALE", default)
-
-
 def _default_llama_flash_attn(model_path: str | None = None) -> bool:
     """flash_attn policy on Linux NVIDIA; defaults off, opt in via ``SEISO_LLAMA_FLASH_ATTN=true``."""
     if not _mp()._native_linux_nvidia():

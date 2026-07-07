@@ -400,23 +400,20 @@ def llama_load_profile_ladder(
         gpu_total_mb=gpu_total if native_linux_nvidia else None,
     )
     if native_linux_nvidia:
-        floor = None
-        if env_bool("SEISO_LLAMA_SPEED_SCALE", False):
-            floor = roomy_native_linux_batch_floor(
-                model_path=model_path,
-                free_mb=free_mb,
-                gpu_total_mb=gpu_total,
-                n_gpu_layers=n_gpu_layers,
-                load_tier=tier,
-                tight=tight,
-            )
+        floor = roomy_native_linux_batch_floor(
+            model_path=model_path,
+            free_mb=free_mb,
+            gpu_total_mb=gpu_total,
+            n_gpu_layers=n_gpu_layers,
+            load_tier=tier,
+            tight=tight,
+        )
         if floor is not None:
             tier_batch, tier_ubatch = floor
             base_batch = max(base_batch, tier_batch)
             base_ubatch = max(base_ubatch, min(tier_ubatch, base_batch))
 
     steps: list[tuple[int, int, int | None, bool]] = []
-    speed_scale = env_bool("SEISO_LLAMA_SPEED_SCALE", not native_linux_nvidia)
     native_flash_ok = not native_linux_nvidia or env_bool("SEISO_LLAMA_UNSAFE_FLASH_ATTN", False)
     primary_flash = (
         n_gpu_layers != 0
@@ -436,13 +433,6 @@ def llama_load_profile_ladder(
                     False,
                 )
             )
-        if (
-            speed_scale
-            and not native_linux_nvidia
-            and n_gpu_layers != 0
-            and (top_batch > base_batch or top_ubatch > base_ubatch)
-        ):
-            steps.append((top_batch, top_ubatch, None, True))
         steps.append((base_batch, base_ubatch, None, primary_flash))
         for batch, ubatch, ctx_cap in (
             (512, 256, min(n_ctx, 4096)),

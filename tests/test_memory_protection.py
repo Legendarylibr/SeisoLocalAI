@@ -440,7 +440,6 @@ def test_llama_load_profile_ladder_upscales_small_model_on_big_gpu(monkeypatch, 
         lambda _path: 32,
     )
     monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: False)
-    monkeypatch.delenv("SEISO_LLAMA_SPEED_SCALE", raising=False)
 
     profiles = llama_load_profile_ladder(
         model_path=str(gguf),
@@ -451,7 +450,7 @@ def test_llama_load_profile_ladder_upscales_small_model_on_big_gpu(monkeypatch, 
         base_ubatch=512,
         tier="normal",
     )
-    assert profiles[0]["n_batch"] == 2048
+    assert profiles[0]["n_batch"] == 1024
     assert profiles[0]["n_ubatch"] == 512
 
 
@@ -460,7 +459,6 @@ def test_llama_load_profile_ladder_native_linux_uses_safe_caps_for_roomy_models(
 ):
     gguf = tmp_path / "small.gguf"
     gguf.write_bytes(b"\x00" * 1024)
-    monkeypatch.delenv("SEISO_LLAMA_SPEED_SCALE", raising=False)
     monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: True)
     _mock_gpu_total(monkeypatch, 24576)
     monkeypatch.setattr(
@@ -545,21 +543,14 @@ def test_clamp_llama_load_kwargs_skips_roomy_floor_when_gpu_mostly_in_use(
     assert kwargs["n_ubatch"] <= 128
 
 
-def test_clamp_llama_load_kwargs_native_linux_skips_roomy_floor_without_speed_scale(
-    monkeypatch, tmp_path
-):
+def test_clamp_llama_load_kwargs_native_linux_applies_roomy_floor(monkeypatch, tmp_path):
     gguf = tmp_path / "small.gguf"
     gguf.write_bytes(b"\x00" * 1024)
-    monkeypatch.delenv("SEISO_LLAMA_SPEED_SCALE", raising=False)
     monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 24576)
     monkeypatch.setattr("seiso.memory.protection.estimate_path_vram_mb", lambda _p: 1024)
     monkeypatch.setattr("seiso.inference.backends.gguf_block_count", lambda _p: 32)
     monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: True)
     _mock_gpu_total(monkeypatch, 24576)
-    monkeypatch.setattr(
-        "seiso.memory.protection.llama_clamp.roomy_native_linux_batch_floor",
-        lambda **_k: (512, 128),
-    )
 
     kwargs = clamp_llama_load_kwargs(
         {
@@ -571,7 +562,9 @@ def test_clamp_llama_load_kwargs_native_linux_skips_roomy_floor_without_speed_sc
         }
     )
 
-    assert kwargs["n_batch"] < 512
+    expected_batch, expected_ubatch = _gpu_normal_caps(24576)
+    assert kwargs["n_batch"] == expected_batch
+    assert kwargs["n_ubatch"] == expected_ubatch
 
 
 def test_gpu_batch_tier_caps_unknown_gpu_uses_safe_native_caps():

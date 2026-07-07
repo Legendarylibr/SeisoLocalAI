@@ -53,7 +53,6 @@ def _refresh_native_linux_llama_env(
     if env_bool("SEISO_DISABLE_MEMORY_CAPS", False):
         return
 
-    os.environ["SEISO_LLAMA_SPEED_SCALE"] = "false"
     os.environ.setdefault("SEISO_LLAMA_FLASH_ATTN", "false")
     # Dense families may opt into tier-1 Q8 KV quant; default stays off.
     os.environ.setdefault("SEISO_LLAMA_KV_QUANT", "false")
@@ -67,10 +66,7 @@ def _refresh_native_linux_llama_env(
         min(ubatch, ubatch_cap, int(os.environ["SEISO_LLAMA_BATCH"]))
     )
     os.environ["SEISO_LLAMA_CACHE_MB"] = str(min(cache, cache_cap))
-    if env_bool("SEISO_LLAMA_UNSAFE_SPEED_SCALE", False):
-        os.environ["SEISO_LLAMA_SPEED_SCALE"] = "true"
     if env_bool("SEISO_LLAMA_CONSERVATIVE", False):
-        os.environ["SEISO_LLAMA_SPEED_SCALE"] = "false"
         os.environ["SEISO_LLAMA_FLASH_ATTN"] = "false"
         os.environ["SEISO_LLAMA_KV_QUANT"] = "false"
 
