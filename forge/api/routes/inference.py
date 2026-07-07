@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import uuid
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -32,6 +33,7 @@ from forge.services.knowledge_context import (
 from forge.services.knowledge_paths import validate_kb_id
 from forge.services.llm_output import StreamingOutputSanitizer, sanitize_llm_output
 from forge.services.model_router_client import ROUTER_MODEL_ID, fetch_router_status
+from forge.tools.sanitize import normalize_text
 
 router = APIRouter(prefix="/inference", tags=["inference"])
 
@@ -41,6 +43,18 @@ def _assert_inference_gpu_available() -> None:
 
     try:
         assert_gpu_available_for_inference()
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+def _begin_generation_or_raise(
+    orchestrator: InferenceOrchestrator,
+    user_id: str | None,
+) -> None:
+    try:
+        orchestrator.begin_generation_for_user(user_id)
+    except PermissionError as exc:
+        raise HTTPException(403, str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(409, str(exc)) from exc
 
@@ -226,6 +240,7 @@ async def get_chat_context(
     tools: bool = False,
     knowledge_base_id: str | None = None,
     model_id: str | None = None,
+    draft_message: str | None = None,
 ) -> dict[str, Any]:
     """Context window usage for the chat UI."""
     from forge.services.chat_context import context_status_for_history
@@ -239,6 +254,15 @@ async def get_chat_context(
         if not await db.get_thread_for_user(thread_id, user_id):
             raise HTTPException(404, "Thread not found")
         history = await db.get_messages(thread_id)
+    draft_content = normalize_text(draft_message or "").strip()
+    if draft_content:
+        draft_matches_last = (
+            history
+            and history[-1].get("role") == "user"
+            and history[-1].get("content") == draft_content
+        )
+        if not draft_matches_last:
+            history = [*history, {"role": "user", "content": draft_content}]
 
     model_path: str | None = None
     model_format: str | None = None
@@ -268,7 +292,7 @@ async def get_chat_context(
         last_user = ""
         for msg in reversed(history):
             if msg.get("role") == "user":
-                last_user = str(msg.get("content", "")).strip()
+                last_user = normalize_text(str(msg.get("content", ""))).strip()
                 break
         chunks = retrieve_knowledge_chunks(
             settings.data_dir,
@@ -329,6 +353,7 @@ async def preload_model(
         orchestrator.assert_generation_available_for_user(user_id)
     except PermissionError as exc:
         raise HTTPException(403, str(exc)) from exc
+    _begin_generation_or_raise(orchestrator, user_id)
     ctx = await resolve_preload_context(
         db,
         user_id,
@@ -340,9 +365,12 @@ async def preload_model(
     )
 
     loop = asyncio.get_running_loop()
-    await loop.run_in_executor(None, lambda: orchestrator._runner.warm_model(ctx["payload"]))
-    status = orchestrator._runner.pool.status()
-    return {"status": "loaded", "backend": ctx["backend"], **status}
+    try:
+        await loop.run_in_executor(None, lambda: orchestrator._runner.warm_model(ctx["payload"]))
+        status = orchestrator._runner.pool.status()
+        return {"status": "loaded", "backend": ctx["backend"], **status}
+    finally:
+        orchestrator.end_generation_for_user(user_id)
 
 
 @router.post("/preload/stream")
@@ -376,45 +404,50 @@ async def preload_model_stream(
     loop = asyncio.get_running_loop()
 
     async def event_gen():
+        try:
+            _begin_generation_or_raise(orchestrator, user_id)
+            switching = runner.pool.would_switch_model(target_path, ctx["backend"])
+            if switching:
+                yield {
+                    "event": "progress",
+                    "data": json.dumps(
+                        {
+                            "phase": "unloading",
+                            "label": "Releasing previous model from VRAM",
+                            "percent": 5,
+                            "eta_seconds": 2,
+                        }
+                    ),
+                }
+                await loop.run_in_executor(
+                    None,
+                    lambda: runner.pool.prepare_for_load(target_path, ctx["backend"]),
+                )
 
-        switching = runner.pool.would_switch_model(target_path, ctx["backend"])
-        if switching:
             yield {
                 "event": "progress",
                 "data": json.dumps(
                     {
-                        "phase": "unloading",
-                        "label": "Releasing previous model from VRAM",
-                        "percent": 5,
-                        "eta_seconds": 2,
+                        "phase": "loading",
+                        "label": f"Loading {ctx['model_name']} into inference engine",
+                        "percent": 15,
+                        "eta_seconds": eta,
+                        "model_id": body.model_id,
+                        "model_name": ctx["model_name"],
+                        "backend": ctx["backend"],
+                        "size_bytes": size_bytes,
                     }
                 ),
             }
-            await loop.run_in_executor(
-                None,
-                lambda: runner.pool.prepare_for_load(target_path, ctx["backend"]),
-            )
-
-        yield {
-            "event": "progress",
-            "data": json.dumps(
-                {
-                    "phase": "loading",
-                    "label": f"Loading {ctx['model_name']} into inference engine",
-                    "percent": 15,
-                    "eta_seconds": eta,
-                    "model_id": body.model_id,
-                    "model_name": ctx["model_name"],
-                    "backend": ctx["backend"],
-                    "size_bytes": size_bytes,
-                }
-            ),
-        }
-        try:
             await loop.run_in_executor(None, lambda: runner.warm_model(ctx["payload"]))
+        except asyncio.CancelledError:
+            await orchestrator.cancel_and_unload_for_user(user_id)
+            raise
         except Exception as exc:
             yield {"event": "error", "data": str(exc)}
             return
+        finally:
+            orchestrator.end_generation_for_user(user_id)
 
         status = pool.status()
         yield {
@@ -464,22 +497,10 @@ async def chat(
     if body.allow_code_exec and not settings.allow_code_exec:
         raise HTTPException(403, "Code execution is disabled on this server")
 
-    job_id = orchestrator.create_job(user_id=user_id)
     payload = body.model_dump(exclude={"messages"})
     payload["user_id"] = user_id
 
     knowledge_context: str | None = None
-    if body.knowledge_base_id:
-        kb_id = validate_kb_id(body.knowledge_base_id)
-        user_query = str(body.messages[-1].get("content", "")).strip() if body.messages else ""
-        chunks = retrieve_knowledge_chunks(
-            settings.data_dir,
-            user_id=user_id,
-            knowledge_base_id=kb_id,
-            query=user_query,
-        )
-        knowledge_context = format_knowledge_context(chunks, knowledge_base_id=kb_id) or None
-
     trusted_messages, _user_content = await build_trusted_messages(
         db,
         thread_id=body.thread_id,
@@ -491,6 +512,27 @@ async def chat(
         tools_enabled=body.tools,
         knowledge_context=knowledge_context,
     )
+    if body.knowledge_base_id:
+        kb_id = validate_kb_id(body.knowledge_base_id)
+        user_query = normalize_text(_user_content or "").strip()
+        chunks = retrieve_knowledge_chunks(
+            settings.data_dir,
+            user_id=user_id,
+            knowledge_base_id=kb_id,
+            query=user_query,
+        )
+        knowledge_context = format_knowledge_context(chunks, knowledge_base_id=kb_id) or None
+        trusted_messages, _user_content = await build_trusted_messages(
+            db,
+            thread_id=body.thread_id,
+            client_messages=body.messages,
+            persist_user=bool(body.thread_id),
+            user_id=user_id,
+            model_id=body.model_id,
+            model_path=body.model_path,
+            tools_enabled=body.tools,
+            knowledge_context=knowledge_context,
+        )
     payload["messages"] = trusted_messages
 
     if body.provider_id:
@@ -552,11 +594,14 @@ async def chat(
         use_router = bool(payload.get("use_model_router"))
         can_stream_router = use_router and not body.tools and not body.provider_id
         can_stream_local = not body.tools and not body.provider_id and not use_router
+        job_id = str(uuid.uuid4()) if (can_stream_router or can_stream_local) else orchestrator.create_job(user_id=user_id)
+        _begin_generation_or_raise(orchestrator, user_id)
 
         async def event_gen():
             if can_stream_router:
                 parts: list[str] = []
                 output_tokens = 0
+                completed = False
                 try:
                     orchestrator._emit_log(job_id, "Streaming inference (smart router)")
                     async for token in orchestrator.stream_router(payload):
@@ -572,8 +617,16 @@ async def chat(
                         await db.add_message(body.thread_id, "assistant", content)
                     yield {"event": "message", "data": content}
                     yield {"event": "done", "data": job_id}
+                    completed = True
+                except asyncio.CancelledError:
+                    await orchestrator.cancel_generation_for_user(user_id)
+                    raise
                 except Exception as exc:
+                    await orchestrator.cancel_generation_for_user(user_id)
                     yield {"event": "error", "data": str(exc)}
+                finally:
+                    if completed:
+                        orchestrator.end_generation_for_user(user_id)
                 return
 
             if can_stream_local:
@@ -586,6 +639,7 @@ async def chat(
                     else (payload.get("inference_backend") or "local")
                 )
                 cancelled = False
+                completed = False
                 try:
                     orchestrator._emit_log(job_id, f"Streaming inference ({backend_label})")
                     async for update in orchestrator.stream_local_updates(payload):
@@ -607,36 +661,53 @@ async def chat(
                         await db.add_message(body.thread_id, "assistant", content)
                     yield {"event": "message", "data": content}
                     yield {"event": "done", "data": job_id}
-                except Exception as exc:
-                    yield {"event": "error", "data": str(exc)}
+                    completed = True
                 except asyncio.CancelledError:
                     cancelled = True
                     raise
+                except Exception as exc:
+                    await orchestrator.cancel_generation_for_user(user_id)
+                    yield {"event": "error", "data": str(exc)}
                 finally:
                     if cancelled:
-                        await orchestrator._runner.cancel_generation()
+                        await orchestrator.cancel_generation_for_user(user_id)
+                    elif completed:
+                        orchestrator.end_generation_for_user(user_id)
                 return
 
-            await orchestrator.start(job_id, payload)
-            async for line in orchestrator.stream_logs(job_id):
-                yield {"event": "log", "data": line}
-            job = await orchestrator.wait_for(job_id)
-            if job and job.status.value == "failed":
-                yield {"event": "error", "data": job.error or "Inference failed"}
-            elif job and job.result.get("content"):
-                content = sanitize_llm_output(
-                    job.result["content"],
-                    strip_tool_calls=not body.tools,
-                )
-                if body.thread_id:
-                    await db.add_message(body.thread_id, "assistant", content)
-                yield {"event": "message", "data": content}
-            yield {"event": "done", "data": job_id}
+            try:
+                await orchestrator.start(job_id, payload)
+                async for line in orchestrator.stream_logs(job_id):
+                    yield {"event": "log", "data": line}
+                job = await orchestrator.wait_for(job_id)
+                if job and job.status.value == "failed":
+                    yield {"event": "error", "data": job.error or "Inference failed"}
+                elif job and job.result.get("content"):
+                    content = sanitize_llm_output(
+                        job.result["content"],
+                        strip_tool_calls=not body.tools,
+                    )
+                    if body.thread_id:
+                        await db.add_message(body.thread_id, "assistant", content)
+                    yield {"event": "message", "data": content}
+                yield {"event": "done", "data": job_id}
+            except asyncio.CancelledError:
+                await orchestrator.cancel_generation_for_user(user_id)
+                raise
+            except Exception as exc:
+                await orchestrator.cancel_generation_for_user(user_id)
+                yield {"event": "error", "data": str(exc)}
 
         return EventSourceResponse(event_gen())
 
-    await orchestrator.start(job_id, payload)
-    job = await orchestrator.wait_for(job_id)
+    job_id = orchestrator.create_job(user_id=user_id)
+    _begin_generation_or_raise(orchestrator, user_id)
+    try:
+        await orchestrator.start(job_id, payload)
+        job = await orchestrator.wait_for(job_id)
+    except Exception:
+        await orchestrator.cancel_generation_for_user(user_id)
+        raise
     if not job:
         raise HTTPException(500, "Job lost")
     if job.status.value == "failed":
