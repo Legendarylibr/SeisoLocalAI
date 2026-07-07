@@ -455,7 +455,7 @@ def test_llama_load_profile_ladder_upscales_small_model_on_big_gpu(monkeypatch, 
     assert profiles[0]["n_ubatch"] == 512
 
 
-def test_llama_load_profile_ladder_native_linux_keeps_july3_speed_for_roomy_models(
+def test_llama_load_profile_ladder_native_linux_uses_safe_caps_for_roomy_models(
     monkeypatch, tmp_path
 ):
     gguf = tmp_path / "small.gguf"
@@ -489,7 +489,7 @@ def test_llama_load_profile_ladder_native_linux_keeps_july3_speed_for_roomy_mode
     assert profiles[-1].get("flash_attn") is False
 
 
-def test_clamp_llama_load_kwargs_native_linux_roomy_keeps_july3_batches(monkeypatch, tmp_path):
+def test_clamp_llama_load_kwargs_native_linux_roomy_uses_safe_batches(monkeypatch, tmp_path):
     gguf = tmp_path / "small.gguf"
     gguf.write_bytes(b"\x00" * 1024)
     monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 24576)
@@ -569,8 +569,8 @@ def test_clamp_llama_load_kwargs_native_linux_borderline_non_tight_caps_batch(
             "n_gpu_layers": -1,
         }
     )
-    assert kwargs["n_batch"] == 1024
-    assert kwargs["n_ubatch"] == 256
+    assert kwargs["n_batch"] == 512
+    assert kwargs["n_ubatch"] == 128
 
 
 def test_llama_prefill_guard_keeps_roomy_short_prompt(monkeypatch, tmp_path):
@@ -589,7 +589,7 @@ def test_llama_prefill_guard_keeps_roomy_short_prompt(monkeypatch, tmp_path):
         model_path=str(gguf),
         messages=[{"role": "user", "content": "hi"}],
         n_ctx=4096,
-        loaded_n_batch=1024,
+        loaded_n_batch=512,
         loaded_n_gpu_layers=-1,
         load_tier="normal",
         loaded_headroom_mb=24576,
@@ -619,7 +619,7 @@ def test_llama_prefill_guard_keeps_roomy_short_prompt_on_small_headroom_fluctuat
         model_path=str(gguf),
         messages=[{"role": "user", "content": "hi"}],
         n_ctx=4096,
-        loaded_n_batch=1024,
+        loaded_n_batch=512,
         loaded_n_gpu_layers=-1,
         load_tier="normal",
         loaded_headroom_mb=24576,
@@ -679,8 +679,8 @@ def test_llama_prefill_guard_keeps_roomy_12b_after_load(monkeypatch, tmp_path):
         model_path=str(gguf),
         messages=[{"role": "user", "content": "hi"}],
         n_ctx=4096,
-        loaded_n_batch=1024,
-        loaded_n_ubatch=256,
+        loaded_n_batch=512,
+        loaded_n_ubatch=128,
         loaded_n_gpu_layers=-1,
         load_tier="normal",
         loaded_headroom_mb=15500,

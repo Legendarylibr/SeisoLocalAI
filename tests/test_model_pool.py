@@ -1038,7 +1038,7 @@ def test_llama_batch_defaults_are_speed_first(monkeypatch):
     assert ubatch == 1024
 
 
-def test_llama_batch_defaults_match_july3_speed_first(monkeypatch):
+def test_llama_batch_defaults_match_native_linux_safe_caps(monkeypatch):
     import seiso.inference.model_pool as mp
     from seiso.memory.protection import gpu_batch_tier_caps
 
