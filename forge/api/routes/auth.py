@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import os
 from typing import Annotated, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
 
-from forge.api.deps import clear_dependency_caches, get_db
+from forge.api.deps import clear_dependency_caches, close_dependency_caches, get_db
 from forge.config import ForgeSettings, StorageMode, get_settings
 from forge.db.store import Database
 from forge.security.audit import audit_event
@@ -26,6 +27,7 @@ from forge.security.csrf import (
     generate_csrf_token,
     set_csrf_cookie,
 )
+from seiso.security import generate_secret_key
 
 _login_limiter = LoginRateLimiter()
 
@@ -41,6 +43,10 @@ class RegisterRequest(BaseModel):
 
 class LoginRequest(BaseModel):
     password: str = Field(min_length=1, max_length=128)
+
+
+class ResetSessionRequest(BaseModel):
+    confirmation: str = Field(min_length=1, max_length=32)
 
 
 class AuthResponse(BaseModel):
@@ -147,6 +153,47 @@ async def login(
             "display_name": user["display_name"],
         },
     )
+
+
+@router.post("/reset-session")
+async def reset_session(
+    body: ResetSessionRequest,
+    response: Response,
+    db: Annotated[Database, Depends(get_db)],
+    settings: Annotated[ForgeSettings, Depends(get_settings)],
+) -> dict:
+    """Reset a forgotten-password local instance back to onboarding."""
+    if settings.allow_remote:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Password reset is only available on local-only Forge instances",
+        )
+    if body.confirmation.strip().upper() != "RESET":
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Type RESET to confirm starting a new local session",
+        )
+
+    counts = await db.reset_local_session()
+    sessions_rotated = False
+    if "SEISO_SECRET_KEY" not in os.environ:
+        key_file = settings.data_dir / ".secret_key"
+        key_file.parent.mkdir(parents=True, exist_ok=True)
+        key_file.write_text(generate_secret_key(), encoding="utf-8")
+        key_file.chmod(0o600)
+        sessions_rotated = True
+
+    response.delete_cookie("seiso_token")
+    clear_csrf_cookie(response)
+    audit_event("auth_reset_session", rows_deleted=sum(counts.values()))
+    await close_dependency_caches()
+    clear_dependency_caches()
+    return {
+        "status": "reset",
+        "needs_onboarding": True,
+        "sessions_rotated": sessions_rotated,
+        "rows_deleted": sum(counts.values()),
+    }
 
 
 @router.post("/logout")
