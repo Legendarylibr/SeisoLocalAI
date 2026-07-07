@@ -117,6 +117,42 @@ def test_sanitize_inference_payload_clamps_max_tokens(monkeypatch):
     assert 1 <= out["max_tokens"] <= 8192
 
 
+def test_sanitize_inference_payload_caps_native_linux_long_completions(monkeypatch):
+    monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 24576)
+    monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: True)
+
+    out = sanitize_inference_payload(
+        {"messages": [{"role": "user", "content": "hi"}], "max_tokens": 2048}
+    )
+
+    assert out["max_tokens"] == 768
+
+
+def test_sanitize_inference_payload_tightens_native_linux_low_headroom(monkeypatch):
+    monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 4096)
+    monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: True)
+
+    out = sanitize_inference_payload(
+        {"messages": [{"role": "user", "content": "hi"}], "max_tokens": 2048}
+    )
+
+    assert out["max_tokens"] == 512
+
+
+def test_sanitize_inference_payload_allows_native_linux_long_completion_override(
+    monkeypatch,
+):
+    monkeypatch.setenv("SEISO_LLAMA_UNSAFE_LONG_COMPLETIONS", "1")
+    monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 24576)
+    monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: True)
+
+    out = sanitize_inference_payload(
+        {"messages": [{"role": "user", "content": "hi"}], "max_tokens": 2048}
+    )
+
+    assert out["max_tokens"] == 2048
+
+
 def test_trim_llama_messages_to_context_drops_old_history_before_prefill():
     messages = [
         {"role": "system", "content": "You are concise."},
