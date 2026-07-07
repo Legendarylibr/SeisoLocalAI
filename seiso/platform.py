@@ -277,8 +277,42 @@ def _resolve_hardware_profile(profile: dict | None) -> dict | None:
         from seiso.hardware.profile import hardware_profile
 
         return hardware_profile()
-    except ImportError:
+    except Exception:
+        # A detection error (e.g. a broken CUDA runtime) must not erase GPU
+        # detection — return None so callers fall back to the nvidia-smi probe.
         return None
+
+
+def _nvidia_smi_reports_gpu() -> bool:
+    """Torch-free NVIDIA presence check via nvidia-smi (cached ~30s)."""
+    try:
+        from seiso.security.nvidia_boundary import nvidia_smi_visible
+
+        return nvidia_smi_visible()
+    except Exception:
+        return False
+
+
+def _profile_reports_nvidia(profile: dict) -> bool:
+    gpus = profile.get("gpus") or []
+    if not gpus:
+        return False
+    try:
+        from seiso.hardware.tiers import HardwareTier, classify_tier
+
+        tier = classify_tier(profile)
+        if tier in (HardwareTier.APPLE_UNIFIED, HardwareTier.CPU_ONLY):
+            return False
+    except ImportError:
+        pass
+    vendor = str(profile.get("vendor") or "").lower()
+    if vendor == "nvidia":
+        return True
+    for gpu in gpus:
+        name = str(gpu.get("name") or "").lower()
+        if "nvidia" in name or "geforce" in name or "rtx" in name or "quadro" in name:
+            return True
+    return False
 
 
 def llamacpp_deferred_preflight_platform(*, profile: dict | None = None) -> str | None:
@@ -301,31 +335,23 @@ def llamacpp_deferred_preflight_platform(*, profile: dict | None = None) -> str 
 
 
 def _linux_nvidia_gpu_present(*, profile: dict | None = None) -> bool:
-    """True when profile reports a discrete NVIDIA GPU on Linux."""
+    """True when a discrete NVIDIA GPU is present on Linux.
+
+    Uses the hardware profile first, then falls back to a torch-free nvidia-smi
+    probe so detection matches the installer (``scripts/lib/common.sh``) even
+    when the profile is empty/unavailable (e.g. a broken torch CUDA runtime) or
+    a datacenter GPU name lacks the nvidia/geforce/rtx/quadro tokens.
+    """
     if platform.system() != "Linux":
         return False
-    profile = _resolve_hardware_profile(profile)
-    if profile is None:
-        return False
-    gpus = profile.get("gpus") or []
-    if not gpus:
-        return False
-    try:
-        from seiso.hardware.tiers import HardwareTier, classify_tier
-
-        tier = classify_tier(profile)
-        if tier in (HardwareTier.APPLE_UNIFIED, HardwareTier.CPU_ONLY):
-            return False
-    except ImportError:
-        pass
-    vendor = str(profile.get("vendor") or "").lower()
-    if vendor == "nvidia":
+    resolved = _resolve_hardware_profile(profile)
+    if resolved is not None and _profile_reports_nvidia(resolved):
         return True
-    for gpu in gpus:
-        name = str(gpu.get("name") or "").lower()
-        if "nvidia" in name or "geforce" in name or "rtx" in name or "quadro" in name:
-            return True
-    return False
+    # An explicitly-supplied profile is authoritative (tests and callers that
+    # pass a synthetic profile); only the live host consults nvidia-smi.
+    if profile is not None:
+        return False
+    return _nvidia_smi_reports_gpu()
 
 
 def is_native_linux_nvidia(*, profile: dict | None = None) -> bool:

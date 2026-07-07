@@ -126,6 +126,105 @@ def test_gguf_explicit_llamacpp_requires_unsafe_native_linux_override(
     )
 
 
+def _force_bare_metal_linux(monkeypatch, *, nvidia_smi: bool) -> None:
+    """Simulate a bare-metal Linux host with/without an nvidia-smi GPU signal."""
+    import seiso.inference.backends as backends_mod
+
+    monkeypatch.setattr(backends_mod.platform, "system", lambda: "Linux")
+    monkeypatch.setattr("seiso.platform.detect_wsl2", lambda: False)
+    monkeypatch.setattr(
+        "seiso.security.nvidia_boundary.nvidia_smi_visible", lambda: nvidia_smi
+    )
+    monkeypatch.delenv("SEISO_LLAMA_ALLOW_INPROCESS_NATIVE_LINUX", raising=False)
+
+
+def test_isolation_required_when_guard_detection_raises(monkeypatch):
+    """A torch CUDA probe error must not re-enable the in-process CUDA path."""
+    from seiso.inference.backends import _native_linux_requires_isolated_gguf
+
+    def _boom() -> bool:
+        raise RuntimeError("CUDA driver/runtime version mismatch")
+
+    monkeypatch.setattr("seiso.platform.use_linux_nvidia_inference_guards", _boom)
+    _force_bare_metal_linux(monkeypatch, nvidia_smi=True)
+
+    assert _native_linux_requires_isolated_gguf() is True
+
+
+def test_isolation_required_when_only_nvidia_smi_detects_gpu(monkeypatch):
+    """Profile-based detection missed the GPU; nvidia-smi fallback still isolates."""
+    from seiso.inference.backends import _native_linux_requires_isolated_gguf
+
+    monkeypatch.setattr(
+        "seiso.platform.use_linux_nvidia_inference_guards", lambda: False
+    )
+    _force_bare_metal_linux(monkeypatch, nvidia_smi=True)
+
+    assert _native_linux_requires_isolated_gguf() is True
+
+
+def test_no_isolation_on_cpu_only_linux(monkeypatch):
+    """CPU-only Linux (no nvidia-smi) keeps in-process llama.cpp available."""
+    from seiso.inference.backends import _native_linux_requires_isolated_gguf
+
+    monkeypatch.setattr(
+        "seiso.platform.use_linux_nvidia_inference_guards", lambda: False
+    )
+    _force_bare_metal_linux(monkeypatch, nvidia_smi=False)
+
+    assert _native_linux_requires_isolated_gguf() is False
+
+
+def test_resolve_local_backend_never_inprocess_gguf_via_nvidia_smi(
+    monkeypatch, tmp_path: Path
+):
+    """GGUF chat on a Linux+NVIDIA host raises instead of falling to CUDA."""
+    gguf = tmp_path / "model-q4.gguf"
+    gguf.write_bytes(b"gguf")
+
+    monkeypatch.setattr(
+        "seiso.platform.use_linux_nvidia_inference_guards", lambda: False
+    )
+    _force_bare_metal_linux(monkeypatch, nvidia_smi=True)
+    monkeypatch.setattr(
+        "seiso.inference.llamaswap.llamaswap_status",
+        lambda: SimpleNamespace(available=False, reason="sidecar down"),
+    )
+
+    # Recommended backend is the sidecar, never in-process llama.cpp.
+    assert (
+        recommend_backend(model_path=str(gguf), model_format="gguf")
+        == BACKEND_LLAMASWAP
+    )
+    # Dispatch refuses to run in-process on CUDA when the sidecar is down.
+    with pytest.raises(RuntimeError, match="requires an isolated backend"):
+        resolve_local_backend(
+            model_path=str(gguf),
+            model_format="gguf",
+            requested="auto",
+        )
+
+
+def test_probe_torch_gpus_swallows_cuda_runtime_error(monkeypatch):
+    """A broken CUDA runtime yields an empty probe, not a propagated exception."""
+    import sys
+    import types
+
+    from seiso.hardware.probes.torch_cuda import probe_torch_gpus
+
+    fake_torch = types.ModuleType("torch")
+
+    class _Cuda:
+        @staticmethod
+        def is_available() -> bool:
+            raise RuntimeError("CUDA unknown error")
+
+    fake_torch.cuda = _Cuda()  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "torch", fake_torch)
+
+    assert probe_torch_gpus() == []
+
+
 def test_torch_prompt_trim_drops_old_turns_and_clamps_generation():
     from seiso.inference.runner import _trim_torch_messages_to_context
 
@@ -779,6 +878,160 @@ def test_llamaswap_request_body_forwards_tools_and_model_override(monkeypatch):
         "top_p": 0.9,
         "tools": [{"type": "function", "function": {"name": "search"}}],
     }
+
+
+def test_sidecar_num_ctx_buckets_to_prompt_and_generation():
+    from seiso.inference.llamaswap import sidecar_num_ctx
+
+    short = [{"role": "user", "content": "hi"}]
+    assert sidecar_num_ctx(short, max_tokens=512, ceiling=131072) == 2048
+
+    # ~7500 prompt tokens + 1024 generation lands in the 16384 bucket.
+    long = [{"role": "user", "content": "word " * 6000}]
+    assert sidecar_num_ctx(long, max_tokens=1024, ceiling=131072) == 16384
+
+    # Never exceed the model's native context ceiling.
+    assert sidecar_num_ctx(long, max_tokens=1024, ceiling=8192) == 8192
+
+
+def test_sidecar_num_ctx_env_override(monkeypatch):
+    from seiso.inference.llamaswap import sidecar_num_ctx
+
+    monkeypatch.setenv("SEISO_SIDECAR_NUM_CTX", "32768")
+    short = [{"role": "user", "content": "hi"}]
+    assert sidecar_num_ctx(short, max_tokens=512, ceiling=131072) == 32768
+    assert sidecar_num_ctx(short, max_tokens=512, ceiling=16384) == 16384
+
+
+def test_plan_sidecar_request_trims_only_at_model_ceiling():
+    from seiso.inference.llamaswap import plan_sidecar_request
+
+    payload = {
+        "messages": [{"role": "user", "content": "hi"}],
+        "max_tokens": 256,
+    }
+    messages, num_ctx, max_tokens = plan_sidecar_request(payload, "/tmp/model.gguf")
+    assert messages == payload["messages"]
+    assert num_ctx == 2048
+    assert max_tokens == 256
+
+    # Unknown-model ceiling defaults to 8192; an oversized prompt is trimmed
+    # to fit instead of letting the sidecar truncate silently.
+    huge = {
+        "messages": [{"role": "user", "content": "word " * 60000}],
+        "max_tokens": 1024,
+    }
+    messages, num_ctx, _ = plan_sidecar_request(huge, "/tmp/model.gguf")
+    assert num_ctx == 8192
+    total_chars = sum(len(str(m.get("content", ""))) for m in messages)
+    assert total_chars < len(huge["messages"][0]["content"])
+
+
+def test_ollama_request_body_uses_native_chat_options(monkeypatch):
+    from seiso.inference.llamaswap import OllamaClient
+
+    client = OllamaClient(url="http://127.0.0.1:11434")
+    monkeypatch.setattr(
+        client, "_resolve_model", lambda model_path, payload: "seiso/test-model"
+    )
+
+    body = client._request_body(
+        {
+            "messages": [{"role": "user", "content": "hi"}],
+            "max_tokens": 700,
+            "temperature": 0.25,
+            "top_p": 0.9,
+            "tools_schemas": [{"type": "function", "function": {"name": "search"}}],
+        },
+        "/tmp/model.gguf",
+        stream=True,
+    )
+
+    assert body == {
+        "model": "seiso/test-model",
+        "messages": [{"role": "user", "content": "hi"}],
+        "stream": True,
+        "options": {
+            "num_ctx": 2048,
+            "num_predict": 700,
+            "temperature": 0.25,
+            "top_p": 0.9,
+        },
+        "tools": [{"type": "function", "function": {"name": "search"}}],
+    }
+
+
+class _FakeStreamResponse:
+    def __init__(self, lines):
+        self._lines = lines
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+    def __iter__(self):
+        return iter(self._lines)
+
+
+def test_ollama_stream_parses_native_jsonl(monkeypatch):
+    import urllib.request
+
+    from seiso.inference.llamaswap import OllamaClient
+
+    client = OllamaClient(url="http://127.0.0.1:11434")
+    monkeypatch.setattr(client, "_resolve_model", lambda model_path, payload: "tag")
+
+    captured: dict[str, str] = {}
+    lines = [
+        b'{"message": {"content": "Hel"}, "done": false}\n',
+        b'{"message": {"content": "lo"}, "done": false}\n',
+        b'{"message": {"content": ""}, "done": true}\n',
+    ]
+
+    def fake_urlopen(req, timeout=None):
+        captured["url"] = req.full_url
+        return _FakeStreamResponse(lines)
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+    tokens = [
+        token.text
+        for token in client.stream(
+            {"messages": [{"role": "user", "content": "hi"}], "max_tokens": 8},
+            "/tmp/model.gguf",
+            should_stop=lambda: False,
+        )
+    ]
+
+    assert tokens == ["Hel", "lo"]
+    assert captured["url"].endswith("/api/chat")
+
+
+def test_ollama_stream_raises_on_error_event(monkeypatch):
+    import urllib.request
+
+    from seiso.inference.llamaswap import OllamaClient
+
+    client = OllamaClient(url="http://127.0.0.1:11434")
+    monkeypatch.setattr(client, "_resolve_model", lambda model_path, payload: "tag")
+    monkeypatch.setattr(
+        urllib.request,
+        "urlopen",
+        lambda req, timeout=None: _FakeStreamResponse(
+            [b'{"error": "model requires more system memory"}\n']
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="more system memory"):
+        list(
+            client.stream(
+                {"messages": [{"role": "user", "content": "hi"}], "max_tokens": 8},
+                "/tmp/model.gguf",
+                should_stop=lambda: False,
+            )
+        )
 
 
 def test_ollama_client_ensure_ready_checks_health(monkeypatch):

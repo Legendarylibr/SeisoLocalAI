@@ -469,11 +469,13 @@ class LocalInferenceRunner:
     async def chat(self, payload: dict[str, Any]) -> str:
         loop = asyncio.get_running_loop()
         if payload.get("tools_schemas"):
-            payload = sanitize_inference_payload(payload)
             model_path = payload.get("model_path") or payload.get("model_id")
             if not model_path:
                 raise ValueError("model_path or model_id required")
             route, resolved_path = self._resolve_route(payload, model_path)
+            payload = sanitize_inference_payload(
+                payload, isolated=route == "llamaswap"
+            )
             if route not in {"llama", "llamaswap"}:
                 raise ValueError(
                     "Tool calling is only supported with GGUF local backends"
@@ -496,12 +498,12 @@ class LocalInferenceRunner:
             finally:
                 self._pool.end_inference()
 
-        payload = sanitize_inference_payload(payload)
         model_path = payload.get("model_path") or payload.get("model_id")
         if not model_path:
             raise ValueError("model_path or model_id required")
 
         route, resolved_path = self._resolve_route(payload, model_path)
+        payload = sanitize_inference_payload(payload, isolated=route == "llamaswap")
         generation_id = self._pool.bump_generation()
         await self._ensure_model_switch(
             resolved_path, draft_path=payload.get("draft_model_path"), route=route
@@ -518,12 +520,12 @@ class LocalInferenceRunner:
     async def stream_updates(
         self, payload: dict[str, Any]
     ) -> AsyncIterator[StreamUpdate]:
-        payload = sanitize_inference_payload(payload)
         model_path = payload.get("model_path") or payload.get("model_id")
         if not model_path:
             raise ValueError("model_path or model_id required")
 
         route, resolved_path = self._resolve_route(payload, model_path)
+        payload = sanitize_inference_payload(payload, isolated=route == "llamaswap")
         draft_path = payload.get("draft_model_path")
         generation_id = self._pool.bump_generation()
         await self._ensure_model_switch(

@@ -151,6 +151,16 @@ ensure_inference_sidecars() {
         if declare -F seiso_export_ollama_cli_env >/dev/null 2>&1; then
           seiso_export_ollama_cli_env "$ollama_url"
         fi
+        if declare -F seiso_export_ollama_server_env >/dev/null 2>&1; then
+          seiso_export_ollama_server_env
+        else
+          export OLLAMA_FLASH_ATTENTION="${OLLAMA_FLASH_ATTENTION:-1}"
+          export OLLAMA_NUM_PARALLEL="${OLLAMA_NUM_PARALLEL:-1}"
+          # Quantized KV cache stays opt-in (can trigger CUDA errors in Ollama).
+          if [[ -n "${OLLAMA_KV_CACHE_TYPE:-}" ]]; then
+            export OLLAMA_KV_CACHE_TYPE
+          fi
+        fi
         start_background_sidecar "ollama" "$run_dir/ollama.log" ollama serve
         wait_sidecar_health "$ollama_url" "/api/tags" 60 || true
       else

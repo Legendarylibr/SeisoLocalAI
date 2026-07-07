@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import mmap
+import platform
 import re
 import struct
 from collections import OrderedDict
@@ -469,14 +470,46 @@ def _is_gguf_model(model_path: str, model_format: str | None = None) -> bool:
 
 
 def _native_linux_requires_isolated_gguf() -> bool:
+    """True when GGUF chat must run out-of-process (Ollama/llama-swap).
+
+    Fails **closed** on bare-metal Linux: a detection error (e.g. a broken CUDA
+    runtime making the torch probe raise) must never re-enable the in-process
+    ``llama.cpp`` path, because a CUDA fault there would crash Forge.
+    """
     if env_bool("SEISO_LLAMA_ALLOW_INPROCESS_NATIVE_LINUX", False):
         return False
+
+    # Primary signal — also governs WSL via SEISO_NVIDIA_WSL_ACK.
     try:
         from seiso.platform import use_linux_nvidia_inference_guards
 
-        return use_linux_nvidia_inference_guards()
+        if use_linux_nvidia_inference_guards():
+            return True
     except Exception:
+        # Detection hiccup (e.g. torch CUDA probe error); fall through to the
+        # torch-free nvidia-smi signal below instead of failing open.
+        pass
+
+    # Only bare-metal Linux uses the nvidia-smi fallback. Non-Linux hosts and
+    # WSL keep the result above (WSL requires an explicit ack via the guards).
+    if platform.system() != "Linux":
         return False
+    try:
+        from seiso.platform import detect_wsl2
+
+        if detect_wsl2():
+            return False
+    except Exception:
+        pass
+
+    try:
+        from seiso.security.nvidia_boundary import nvidia_smi_visible
+
+        return nvidia_smi_visible()
+    except Exception:
+        # Cannot rule out an NVIDIA GPU on bare-metal Linux; fail closed so a
+        # llama.cpp CUDA fault cannot crash Forge in-process.
+        return True
 
 
 def _llamaswap_unavailable_error(reason: str | None = None) -> RuntimeError:
@@ -496,14 +529,17 @@ def recommend_backend(
     fmt = (model_format or "").lower()
     path = Path(model_path)
     if _is_gguf_model(model_path, model_format):
+        # Never downgrade GGUF to in-process llama.cpp on a host that requires
+        # isolation — a CUDA fault there would crash Forge. This check is
+        # fail-closed and nvidia-smi-aware, so it stands even if the guard/
+        # sidecar-status probes below raise.
+        if _native_linux_requires_isolated_gguf():
+            return BACKEND_LLAMASWAP
         try:
             from seiso.inference.llamaswap import llamaswap_status
             from seiso.platform import use_linux_nvidia_inference_guards
 
-            native_linux_nvidia = use_linux_nvidia_inference_guards()
-            if native_linux_nvidia and _native_linux_requires_isolated_gguf():
-                return BACKEND_LLAMASWAP
-            if native_linux_nvidia and llamaswap_status().available:
+            if use_linux_nvidia_inference_guards() and llamaswap_status().available:
                 return BACKEND_LLAMASWAP
         except Exception:
             pass

@@ -203,8 +203,16 @@ def trim_llama_messages_to_context(
     return trimmed
 
 
-def sanitize_inference_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    """Clamp generation limits to available memory without changing intent."""
+def sanitize_inference_payload(
+    payload: dict[str, Any], *, isolated: bool = False
+) -> dict[str, Any]:
+    """Clamp generation limits to available memory without changing intent.
+
+    ``isolated=True`` means the request is served by an out-of-process sidecar
+    (Ollama/llama-swap) that manages its own memory and cannot crash Forge, so
+    the in-process VRAM-motivated completion caps are skipped and only the
+    absolute token ceiling applies.
+    """
     out = dict(payload)
     messages = out.get("messages") or []
     prompt_tokens = _estimate_prompt_tokens(messages)
@@ -213,7 +221,7 @@ def sanitize_inference_payload(payload: dict[str, Any]) -> dict[str, Any]:
     max_tokens = int(out.get("max_tokens") or 2048)
     max_tokens = max(1, min(max_tokens, _MAX_INFERENCE_TOKENS))
 
-    if headroom > _INFERENCE_OVERHEAD_MB:
+    if not isolated and headroom > _INFERENCE_OVERHEAD_MB:
         kv_budget_tokens = max(
             512,
             int((headroom - _INFERENCE_OVERHEAD_MB) * 128 / 1.15),
@@ -225,7 +233,11 @@ def sanitize_inference_payload(payload: dict[str, Any]) -> dict[str, Any]:
         native_linux_nvidia = use_linux_nvidia_inference_guards()
     except Exception:
         native_linux_nvidia = False
-    if native_linux_nvidia and not env_bool("SEISO_LLAMA_UNSAFE_LONG_COMPLETIONS", False):
+    if (
+        native_linux_nvidia
+        and not isolated
+        and not env_bool("SEISO_LLAMA_UNSAFE_LONG_COMPLETIONS", False)
+    ):
         native_cap = env_int(
             "SEISO_LLAMA_NATIVE_MAX_TOKENS",
             _NATIVE_LINUX_MAX_COMPLETION_TOKENS,
