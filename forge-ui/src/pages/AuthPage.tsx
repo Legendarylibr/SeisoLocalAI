@@ -21,10 +21,11 @@ const STORAGE_OPTIONS = [
 ];
 
 export function AuthPage() {
-  const { needsOnboarding, storageModeConfigured, login, register } = useAuth();
+  const { needsOnboarding, storageModeConfigured, login, register, resetSession } = useAuth();
   const [password, setPassword] = useState("");
   const [storageMode, setStorageMode] = useState<"persistent" | "ephemeral">("persistent");
   const [error, setError] = useState("");
+  const [resetting, setResetting] = useState(false);
   const mode = needsOnboarding ? "register" : "login";
 
   const submit = async (e: React.FormEvent) => {
@@ -35,6 +36,23 @@ export function AuthPage() {
       else await login(password);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Auth failed");
+    }
+  };
+
+  const resetForgottenPassword = async () => {
+    setError("");
+    const confirmed = window.confirm(
+      "Start a new local Seiso session? This clears the current local account, chats, jobs, providers, and model registry entries. Downloaded model files remain on disk.",
+    );
+    if (!confirmed) return;
+    setResetting(true);
+    try {
+      await resetSession();
+      setPassword("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Reset failed");
+    } finally {
+      setResetting(false);
     }
   };
 
@@ -134,6 +152,16 @@ export function AuthPage() {
             <button type="submit" className="btn btn-primary auth-submit">
               {mode === "register" ? "Set password and continue" : "Sign in"}
             </button>
+            {mode === "login" && (
+              <button
+                type="button"
+                className="auth-reset-link"
+                onClick={resetForgottenPassword}
+                disabled={resetting}
+              >
+                {resetting ? "Starting a new session..." : "Forgot password? Start a new session"}
+              </button>
+            )}
           </form>
         </div>
       </div>

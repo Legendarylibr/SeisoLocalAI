@@ -9,6 +9,7 @@ type AuthState = {
   storageMode: "persistent" | "ephemeral";
   login: (password: string) => Promise<void>;
   register: (password: string, storageMode?: "persistent" | "ephemeral") => Promise<void>;
+  resetSession: () => Promise<void>;
   logout: () => Promise<void>;
 };
 
@@ -60,6 +61,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (nextStorageMode) setStorageMode(nextStorageMode);
   }, []);
 
+  const resetSession = useCallback(async () => {
+    const res = await api.resetSession("RESET");
+    setUser(null);
+    setNeedsOnboarding(res.needs_onboarding);
+    const status = await api.authStatus();
+    setStorageModeConfigured(status.storage_mode_configured);
+    setStorageMode(status.storage_mode);
+  }, []);
+
   const logout = useCallback(async () => {
     await api.logout();
     setUser(null);
@@ -74,9 +84,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       storageMode,
       login,
       register,
+      resetSession,
       logout,
     }),
-    [user, loading, needsOnboarding, storageModeConfigured, storageMode, login, register, logout],
+    [
+      user,
+      loading,
+      needsOnboarding,
+      storageModeConfigured,
+      storageMode,
+      login,
+      register,
+      resetSession,
+      logout,
+    ],
   );
 
   return (

@@ -81,6 +81,53 @@ async def test_onboarding_requires_storage_choice_when_unconfigured(
 
 
 @pytest.mark.asyncio
+async def test_reset_session_returns_instance_to_onboarding(app):
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        reg = await client.post(
+            "/api/auth/register",
+            json={"password": "securepass1"},
+        )
+        assert reg.status_code == 201
+        token = reg.json()["access_token"]
+        headers = {"Authorization": f"Bearer {token}"}
+
+        thread = await client.post(
+            "/api/inference/threads",
+            json={"title": "old session"},
+            headers=headers,
+        )
+        assert thread.status_code == 200
+
+        bad = await client.post(
+            "/api/auth/reset-session",
+            json={"confirmation": "wrong"},
+        )
+        assert bad.status_code == 400
+
+        reset = await client.post(
+            "/api/auth/reset-session",
+            json={"confirmation": "RESET"},
+        )
+        assert reset.status_code == 200
+        assert reset.json()["needs_onboarding"] is True
+        assert reset.json()["rows_deleted"] >= 2
+
+        status = await client.get("/api/auth/status")
+        assert status.status_code == 200
+        assert status.json()["needs_onboarding"] is True
+
+        old_me = await client.get("/api/auth/me", headers=headers)
+        assert old_me.status_code in {401, 404}
+
+        reg2 = await client.post(
+            "/api/auth/register",
+            json={"password": "securepass2"},
+        )
+        assert reg2.status_code == 201
+
+
+@pytest.mark.asyncio
 async def test_ephemeral_onboarding_preserves_existing_forge_db(monkeypatch, tmp_path):
     legacy = tmp_path / "forge.db"
     legacy.write_text("do-not-delete", encoding="utf-8")

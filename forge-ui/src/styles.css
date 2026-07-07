@@ -903,6 +903,20 @@ label {
 .auth-brand { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; }
 .auth-error { color: var(--danger); margin-bottom: 0.75rem; font-size: 0.88rem; }
 .auth-submit { width: 100%; margin-top: 0.35rem; padding: 0.65rem; }
+.auth-reset-link {
+  width: 100%;
+  margin-top: 0.75rem;
+  background: transparent;
+  border: none;
+  color: var(--danger);
+  cursor: pointer;
+  font-size: 0.82rem;
+  text-decoration: underline;
+}
+.auth-reset-link:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
 .hf-token-page .hf-token-layout {
   max-width: 920px;
 }
