@@ -26,6 +26,7 @@ def export_cmd(
     """Export checkpoint to merged/GGUF/LoRA/full fine-tune."""
     from forge.config import get_settings
     from seiso.export.pipeline import prepare_export, profile_catalog, run_export_plan
+    from seiso.memory.gpu_task import gpu_task
 
     settings = get_settings()
     ckpt = Path(checkpoint)
@@ -37,26 +38,27 @@ def export_cmd(
             console.print(f"  [cyan]{entry['id']}[/] → {', '.join(entry['formats'])}")
         return
 
-    plan = prepare_export(
-        checkpoint=ckpt,
-        output_dir=output_dir,
-        formats=fmt_list,
-        profile=profile,
-        hub_repo=hub_repo,
-        hub_token=settings.hf_token or None,
-        on_log=lambda m: console.print(m),
-    )
+    with gpu_task("export"):
+        plan = prepare_export(
+            checkpoint=ckpt,
+            output_dir=output_dir,
+            formats=fmt_list,
+            profile=profile,
+            hub_repo=hub_repo,
+            hub_token=settings.hf_token or None,
+            on_log=lambda m: console.print(m),
+        )
 
-    if precheck_only:
-        if plan.precheck:
-            console.print(plan.precheck.to_dict())
-        else:
-            console.print("No Hub precheck requested (set --hub-repo)")
-        return
+        if precheck_only:
+            if plan.precheck:
+                console.print(plan.precheck.to_dict())
+            else:
+                console.print("No Hub precheck requested (set --hub-repo)")
+            return
 
-    sandbox_root = Path(os.path.commonpath([ckpt.resolve(), output_dir.resolve()]))
-    results = run_export_plan(
-        plan, hub_token=settings.hf_token or None, sandbox_root=sandbox_root
-    )
+        sandbox_root = Path(os.path.commonpath([ckpt.resolve(), output_dir.resolve()]))
+        results = run_export_plan(
+            plan, hub_token=settings.hf_token or None, sandbox_root=sandbox_root
+        )
     for k, v in results.items():
         console.print(f"  [green]{k}[/] → {v}")

@@ -23,6 +23,8 @@ def preferred_inference_backend(profile: dict[str, Any]) -> str:
 
     if _profile_has_nvidia(profile):
         return str(InferenceBackend.LLAMASWAP)
+    if _profile_has_rocm(profile):
+        return str(InferenceBackend.TORCH)
 
     if tier == HardwareTier.CPU_ONLY:
         return str(InferenceBackend.LLAMACPP)
@@ -45,6 +47,18 @@ def _profile_has_nvidia(profile: dict[str, Any]) -> bool:
             str(gpu.get(key, "")) for key in ("name", "vendor", "type", "backend")
         ).lower()
         if "nvidia" in text or "cuda" in text:
+            return True
+    return False
+
+
+def _profile_has_rocm(profile: dict[str, Any]) -> bool:
+    if str(profile.get("backend", "")).lower() in {"rocm", "hip"}:
+        return True
+    for gpu in profile.get("gpus") or []:
+        text = " ".join(
+            str(gpu.get(key, "")) for key in ("name", "vendor", "type", "backend")
+        ).lower()
+        if any(marker in text for marker in ("amd", "rocm", "radeon", "hip")):
             return True
     return False
 

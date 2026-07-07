@@ -96,6 +96,7 @@ def bench_inference_cmd(
         run_bench_inference,
         run_compare_inference_profiles,
     )
+    from seiso.memory.gpu_task import gpu_task
 
     text = prompt or DEFAULT_PROMPT
     console.print(
@@ -103,12 +104,13 @@ def bench_inference_cmd(
     )
 
     if compare:
-        report = run_compare_inference_profiles(
-            model_path=model,
-            prompt=text,
-            max_tokens=max_tokens,
-            backend=backend,
-        )
+        with gpu_task("inference"):
+            report = run_compare_inference_profiles(
+                model_path=model,
+                prompt=text,
+                max_tokens=max_tokens,
+                backend=backend,
+            )
         if json_out:
             import json
 
@@ -129,13 +131,14 @@ def bench_inference_cmd(
         )
         return
 
-    result = run_bench_inference(
-        model_path=model,
-        prompt=text,
-        max_tokens=max_tokens,
-        backend=backend,
-        warmup=True,
-    )
+    with gpu_task("inference"):
+        result = run_bench_inference(
+            model_path=model,
+            prompt=text,
+            max_tokens=max_tokens,
+            backend=backend,
+            warmup=True,
+        )
     if json_out:
         import json
 

@@ -219,6 +219,28 @@ def prepare_for_gpu_task(
 
         release_gpu_resource_lock()
         raise
+    release_notes = [str(note) for note in result.get("release_notes") or []]
+    sidecar_unload_uncertain = any(
+        "Could not confirm llama-swap external model unload" in note
+        or "Ollama unload" in note
+        for note in release_notes
+    )
+    if sidecar_unload_uncertain:
+        try:
+            from seiso.inference.backends import _native_linux_requires_isolated_gguf
+
+            native_linux_isolated = _native_linux_requires_isolated_gguf()
+        except Exception:
+            native_linux_isolated = False
+        if native_linux_isolated:
+            _unregister_gpu_task(resource_token=resource_token, job_id=job_id)
+            from seiso.memory.gpu_resource_lock import release_gpu_resource_lock
+
+            release_gpu_resource_lock()
+            raise RuntimeError(
+                "Could not confirm sidecar inference model unload; refusing to start "
+                f"{task} until Ollama/llama-swap releases GPU memory."
+            )
     result["resource_token"] = resource_token
     return result
 

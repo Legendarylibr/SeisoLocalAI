@@ -466,6 +466,10 @@ def gguf_is_supported_by_llamacpp(model_path: str) -> bool:
 def _is_gguf_model(model_path: str, model_format: str | None = None) -> bool:
     fmt = (model_format or "").lower()
     path = Path(model_path)
+    if fmt and fmt != "gguf":
+        # Inventory metadata is authoritative. Mixed export/cache directories can
+        # contain helper GGUFs next to safetensors; do not reroute those to GGUF.
+        return False
     return fmt == "gguf" or _is_gguf_path(model_path) or path.suffix.lower() == ".gguf"
 
 
@@ -522,6 +526,14 @@ def _llamaswap_unavailable_error(reason: str | None = None) -> RuntimeError:
     )
 
 
+def _assert_llamaswap_available() -> None:
+    from seiso.inference.llamaswap import llamaswap_status
+
+    status = llamaswap_status()
+    if not status.available:
+        raise _llamaswap_unavailable_error(status.reason)
+
+
 def recommend_backend(
     *, model_path: str, model_format: str | None = None
 ) -> BackendName:
@@ -535,7 +547,7 @@ def recommend_backend(
             else BACKEND_LLAMACPP
         )
     if fmt in {"safetensors", "bin"} or path.is_dir():
-        if detect_backend() == Backend.MLX:
+        if platform.system() == "Darwin" and detect_backend() == Backend.MLX:
             return BACKEND_MLX
         return BACKEND_TORCH
     return BACKEND_TORCH
@@ -566,11 +578,7 @@ def resolve_local_backend(
     is_gguf = _is_gguf_model(model_path, model_format)
     if choice == BACKEND_AUTO:
         if is_gguf and _native_linux_requires_isolated_gguf():
-            from seiso.inference.llamaswap import llamaswap_status
-
-            status = llamaswap_status()
-            if not status.available:
-                raise _llamaswap_unavailable_error(status.reason)
+            _assert_llamaswap_available()
             return BACKEND_LLAMASWAP
         return recommend_backend(model_path=model_path, model_format=model_format)
     if (
@@ -585,6 +593,8 @@ def resolve_local_backend(
 
     if is_gguf:
         if choice in {BACKEND_LLAMACPP, BACKEND_LLAMASWAP}:
+            if choice == BACKEND_LLAMASWAP:
+                _assert_llamaswap_available()
             return choice
         if choice in {BACKEND_MLX, BACKEND_TORCH}:
             raise ValueError(f"Backend {choice!r} cannot load GGUF models")

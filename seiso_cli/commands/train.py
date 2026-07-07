@@ -14,8 +14,7 @@ def train(
     config: str = typer.Option(..., "--config", "-c", help="Training YAML config"),
 ) -> None:
     """Fine-tune a model from config."""
-    from seiso.inference.model_pool import get_model_pool
-    from seiso.memory.protection import release_cached_memory
+    from seiso.memory.gpu_task import gpu_task
     from seiso.training.config import TrainConfig, run_training
     from seiso.training.multi_gpu import (
         detect_training_layout,
@@ -23,24 +22,20 @@ def train(
         resolve_distributed_plan,
     )
 
-    pool = get_model_pool()
-    if pool.active_key:
-        pool.cancel_and_unload()
-    release_cached_memory(sync=False)
-
     cfg = TrainConfig.from_yaml(Path(config))
     console.print(f"Training [cyan]{cfg.model_id}[/] ({cfg.method.value})")
     layout = detect_training_layout()
     plan = resolve_distributed_plan(cfg, layout)
-    if plan.enabled and not layout.use_ddp:
-        console.print(
-            "[cyan]Accelerate distributed launch:[/] "
-            f"{plan.strategy} x{plan.world_size} "
-            f"({plan.nproc_per_node} process(es) per node)"
-        )
-        subprocess.run(launch_worker_command(str(Path(config)), plan), check=True)
-        console.print(f"[green]Done:[/] {cfg.output_dir}")
-        return
+    with gpu_task("training"):
+        if plan.enabled and not layout.use_ddp:
+            console.print(
+                "[cyan]Accelerate distributed launch:[/] "
+                f"{plan.strategy} x{plan.world_size} "
+                f"({plan.nproc_per_node} process(es) per node)"
+            )
+            subprocess.run(launch_worker_command(str(Path(config)), plan), check=True)
+            console.print(f"[green]Done:[/] {cfg.output_dir}")
+            return
 
-    out = run_training(cfg)
+        out = run_training(cfg)
     console.print(f"[green]Done:[/] {out}")

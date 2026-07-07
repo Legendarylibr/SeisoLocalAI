@@ -89,11 +89,13 @@ def _llamacpp_status() -> tuple[bool, str | None]:
 
 def _native_linux_nvidia_gguf_isolated() -> bool:
     try:
-        from seiso.platform import use_linux_nvidia_inference_guards
+        from seiso.inference.backends import _native_linux_requires_isolated_gguf
 
-        return use_linux_nvidia_inference_guards()
+        return _native_linux_requires_isolated_gguf()
     except Exception:
-        return False
+        # Match chat routing's fail-closed posture for Hub readiness. A broken
+        # probe should not advertise unsafe in-process GGUF chat as ready.
+        return platform.system() == "Linux"
 
 
 @lru_cache(maxsize=1)
