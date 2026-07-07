@@ -19,6 +19,7 @@ from seiso.memory.protection.constants import (
     _MIN_LLAMA_BATCH,
     _MIN_LLAMA_CTX,
     _NATIVE_LINUX_CTX_BUCKETS,
+    _NATIVE_LINUX_MMPROJ_RESERVE_MB,
 )
 from seiso.memory.protection.llama_batch import clamp_llama_batch_pair, native_linux_batch_defaults
 from seiso.memory.protection.llama_kv import _host_os_reserve_mb
@@ -141,7 +142,10 @@ def clamp_llama_load_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
             )
             batch_headroom = max_batch
         if native_linux_nvidia and _gguf_has_mmproj_sibling(model_path):
-            batch_headroom = max(_MIN_LLAMA_BATCH * 2, batch_headroom - 512)
+            batch_headroom = max(
+                _MIN_LLAMA_BATCH * 2,
+                batch_headroom - _NATIVE_LINUX_MMPROJ_RESERVE_MB,
+            )
             max_batch = min(max_batch, batch_headroom)
             max_ubatch = min(max_ubatch, max_batch)
         elif not (native_linux_nvidia or tight):

@@ -128,6 +128,7 @@ def test_gguf_metadata_preserves_architecture_before_unknown_value(tmp_path: Pat
         ("Gemma-3-27B-Q4_K_M.gguf", "swa", False),
         ("gemma3n-e4b-it-Q4_K_M.gguf", "swa", False),
         ("Mixtral-8x7B-Q4_K_M.gguf", "moe", True),
+        ("Qwen3MoE-30B-A3B-Q4_K_M.gguf", "moe", True),
     ],
 )
 def test_family_policy_uses_filename_hints_when_metadata_unreadable(
@@ -140,6 +141,25 @@ def test_family_policy_uses_filename_hints_when_metadata_unreadable(
 
     assert policy.kind == expect_kind
     assert policy.allow_partial_offload is expect_partial
+
+
+def test_swa_speed_extras_disable_swa_full_by_default(monkeypatch, tmp_path: Path):
+    import seiso.inference.model_pool as mp
+
+    gemma = tmp_path / "gemma3.gguf"
+    llama = tmp_path / "llama.gguf"
+    _write_arch_gguf(
+        gemma,
+        "gemma3",
+        extra=[(b"gemma3.attention.sliding_window", 512)],
+    )
+    _write_arch_gguf(llama, "llama")
+
+    assert mp._llama_speed_extras(str(gemma)) == {"swa_full": False}
+    assert mp._llama_speed_extras(str(llama)) == {}
+
+    monkeypatch.setenv("SEISO_LLAMA_SWA_FULL", "true")
+    assert mp._llama_speed_extras(str(gemma)) == {}
 
 
 @pytest.mark.parametrize(
