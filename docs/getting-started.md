@@ -25,17 +25,33 @@ One command installs dependencies (including native Linux build tools), builds t
 curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
 ```
 
-**Per-OS profiles** — install only what you need:
+**Quick installs** — use one of these four when you already know the target platform:
+
+Linux native + NVIDIA:
 
 ```bash
 SEISO_INSTALL_PROFILE=linux-nvidia curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
-SEISO_INSTALL_PROFILE=linux-cpu curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
-SEISO_INSTALL_PROFILE=wsl-nvidia curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
-SEISO_INSTALL_PROFILE=macos curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
-SEISO_INSTALL_PROFILE=chat curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
 ```
 
-See [install.md](install.md) for `linux-rocm`, Windows PowerShell, and all installer options.
+Linux native CPU:
+
+```bash
+SEISO_INSTALL_PROFILE=linux-cpu curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
+```
+
+WSL2 + NVIDIA:
+
+```bash
+SEISO_INSTALL_PROFILE=wsl-nvidia curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
+```
+
+macOS Apple Silicon:
+
+```bash
+SEISO_INSTALL_PROFILE=macos curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
+```
+
+See [install.md](install.md) for Windows PowerShell, custom paths, and all installer options.
 
 No separate start step is needed after a successful install.
 

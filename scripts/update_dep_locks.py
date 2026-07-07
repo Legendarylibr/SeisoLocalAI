@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -21,8 +22,11 @@ from seiso.security.deps import (  # noqa: E402
 
 PYTHON_LOCK = Path("locks/python.lock")
 NPM_LOCK = Path("forge-ui/package-lock.json")
-PIP_COMPILE_CMD = [
-    "pip-compile",
+PIP_COMPILE_DISPLAY_CMD = (
+    "pip-compile --allow-unsafe --extra=dev --extra=forge --extra=train "
+    "--generate-hashes --output-file=locks/python.lock --strip-extras pyproject.toml"
+)
+PIP_COMPILE_ARGS = [
     "pyproject.toml",
     "--extra",
     "forge",
@@ -33,9 +37,31 @@ PIP_COMPILE_CMD = [
     "--generate-hashes",
     "--strip-extras",
     "--allow-unsafe",
+    "--upgrade",
     "--output-file",
     str(PYTHON_LOCK),
 ]
+UV_COMPILE_CMD = [
+    "uv",
+    "pip",
+    "compile",
+    *PIP_COMPILE_ARGS,
+    "--custom-compile-command",
+    PIP_COMPILE_DISPLAY_CMD,
+]
+PIP_COMPILE_CMD = [
+    "pip-compile",
+    *PIP_COMPILE_ARGS,
+]
+
+
+def compile_python_lock(repo_root: Path) -> int:
+    if shutil.which("uv"):
+        return subprocess.run(UV_COMPILE_CMD, cwd=repo_root, check=False).returncode
+    if shutil.which("pip-compile"):
+        return subprocess.run(PIP_COMPILE_CMD, cwd=repo_root, check=False).returncode
+    print("missing uv or pip-compile; install uv or pip-tools and retry", file=sys.stderr)
+    return 127
 
 
 def main() -> int:
@@ -58,10 +84,10 @@ def main() -> int:
     digests_path = repo_root / DEFAULT_DIGESTS_REL
 
     if not args.skip_python:
-        result = subprocess.run(PIP_COMPILE_CMD, cwd=repo_root, check=False)
-        if result.returncode != 0:
-            print("pip-compile failed; install pip-tools and retry", file=sys.stderr)
-            return result.returncode
+        result = compile_python_lock(repo_root)
+        if result != 0:
+            print("Python lock compilation failed", file=sys.stderr)
+            return result
 
     if not python_lock.is_file():
         print(f"missing {python_lock}", file=sys.stderr)
