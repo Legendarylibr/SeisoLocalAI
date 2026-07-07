@@ -14,7 +14,7 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any, Protocol
 
-from seiso.env import env_int, env_str
+from seiso.env import env_bool, env_int, env_str
 from seiso.inference.sidecar_runtime import (
     DEFAULT_LLAMASWAP_URL,
     DEFAULT_OLLAMA_URL,
@@ -61,9 +61,11 @@ __all__ = [
     "preferred_sidecar_engine",
     "sidecar_enabled",
     "sidecar_num_ctx",
+    "sidecar_ollama_num_gpu",
     "sidecar_setup_hint",
     "sidecar_stack_ready",
     "sidecar_status",
+    "sidecar_vram_context_cap",
 ]
 
 
@@ -98,6 +100,24 @@ def llamaswap_model_name(model_path: str) -> str:
 # Headroom kept free between prompt + generation and the context edge.
 _SIDECAR_CTX_MARGIN_TOKENS = 256
 
+# Fraction of *free* (not total) VRAM the sidecar may commit to weights + KV.
+# Leaves slack for the display/compositor and the engine's compute graph so a
+# display-attached consumer GPU cannot be driven into a driver-resetting hang.
+_SIDECAR_VRAM_BUDGET_RATIO = 0.85
+
+
+def _sidecar_native_linux_nvidia() -> bool:
+    try:
+        from seiso.platform import use_linux_nvidia_inference_guards
+
+        return use_linux_nvidia_inference_guards()
+    except Exception:
+        return False
+
+
+def _sidecar_vram_clamp_enabled() -> bool:
+    return env_bool("SEISO_SIDECAR_VRAM_CLAMP", True)
+
 
 def _sidecar_context_ceiling(payload: dict[str, Any], model_path: str) -> int:
     from seiso.inference.context_limits import effective_context_ceiling
@@ -109,6 +129,94 @@ def _sidecar_context_ceiling(payload: dict[str, Any], model_path: str) -> int:
     )
 
 
+def sidecar_vram_context_cap(model_path: str, ceiling: int) -> int:
+    """Bound the sidecar KV context to what free VRAM can hold on native Linux.
+
+    Ollama sizes its KV cache to ``num_ctx`` and places it on the GPU, so an
+    oversized context can exhaust VRAM on a display-attached card and hang the
+    whole machine (driver reset). This mirrors the in-process llama.cpp guard
+    (``native_linux_llama_context_cap``) so the out-of-process path is equally
+    safe. Non-native-Linux hosts (macOS, WSL without ack) are returned
+    unchanged. Disable via ``SEISO_SIDECAR_VRAM_CLAMP=0``.
+    """
+    if ceiling <= 0 or not _sidecar_vram_clamp_enabled():
+        return ceiling
+    if not _sidecar_native_linux_nvidia():
+        return ceiling
+    try:
+        from seiso.memory.protection import headroom_mb
+        from seiso.memory.protection.llama_runtime import (
+            native_linux_llama_context_cap,
+        )
+
+        cap = native_linux_llama_context_cap(
+            model_path,
+            free_mb=int(headroom_mb()),
+            n_gpu_layers=-1,
+            ceiling=ceiling,
+        )
+    except Exception:
+        return ceiling
+    return max(2048, min(int(ceiling), int(cap)))
+
+
+def sidecar_ollama_num_gpu(model_path: str, *, num_ctx: int) -> int | None:
+    """Layer offload count so Ollama keeps weights + KV within free VRAM.
+
+    Ollama's scheduler estimates offload against *total* VRAM, so on a
+    display-attached consumer GPU it can put every layer on the GPU and OOM the
+    device (hanging the machine) even though free VRAM was insufficient. Return
+    an explicit layer count to force partial CPU offload, or ``None`` to let
+    Ollama auto-decide when a full offload comfortably fits. Override with
+    ``SEISO_OLLAMA_NUM_GPU`` (``-1`` = all layers); disable the auto guard with
+    ``SEISO_SIDECAR_VRAM_CLAMP=0``.
+    """
+    override = env_str("SEISO_OLLAMA_NUM_GPU", "").strip()
+    if override:
+        try:
+            return int(override)
+        except ValueError:
+            pass
+    if not _sidecar_vram_clamp_enabled() or not _sidecar_native_linux_nvidia():
+        return None
+    try:
+        from seiso.inference.backends import gguf_total_layers
+        from seiso.memory.protection import estimate_path_vram_mb, headroom_mb
+        from seiso.memory.protection.llama_kv import llama_offload_fits_headroom
+    except Exception:
+        return None
+
+    free_mb = int(headroom_mb())
+    if free_mb <= 0:
+        return None
+    budget = int(free_mb * _SIDECAR_VRAM_BUDGET_RATIO)
+    try:
+        weight_mb = int(estimate_path_vram_mb(model_path))
+        total_layers = max(1, gguf_total_layers(model_path))
+        if llama_offload_fits_headroom(
+            model_path,
+            headroom_mb=budget,
+            n_gpu_layers=-1,
+            n_ctx=num_ctx,
+            weight_mb=weight_mb,
+            total_layers=total_layers,
+        ):
+            return None
+        for layers in range(total_layers, -1, -1):
+            if llama_offload_fits_headroom(
+                model_path,
+                headroom_mb=budget,
+                n_gpu_layers=layers,
+                n_ctx=num_ctx,
+                weight_mb=weight_mb,
+                total_layers=total_layers,
+            ):
+                return layers
+    except Exception:
+        return None
+    return 0
+
+
 def sidecar_num_ctx(
     messages: list[dict[str, Any]],
     *,
@@ -118,9 +226,10 @@ def sidecar_num_ctx(
     """Right-size the sidecar context window to prompt + generation.
 
     Snaps to the same coarse presets as the chat UI so multi-turn history growth
-    reuses one loaded KV size instead of forcing a model reload per message.
-    The sidecar owns VRAM safety (it can spill to CPU instead of crashing), so
-    no VRAM clamp is applied here — only the model's native context ceiling.
+    reuses one loaded KV size instead of forcing a model reload per message. The
+    ``ceiling`` passed in is already bounded by both the model's native context
+    and (on native Linux NVIDIA) free VRAM via ``sidecar_vram_context_cap`` so
+    the KV cache cannot exhaust a display-attached GPU and hang the machine.
     """
     from seiso.inference.context_limits import CONTEXT_WINDOW_PRESETS
     from seiso.memory.protection.chat_guards import _estimate_prompt_tokens
@@ -153,6 +262,7 @@ def plan_sidecar_request(
     messages = payload.get("messages") or []
     max_tokens = int(payload.get("max_tokens", 512))
     ceiling = _sidecar_context_ceiling(payload, model_path)
+    ceiling = sidecar_vram_context_cap(model_path, ceiling)
     num_ctx = sidecar_num_ctx(messages, max_tokens=max_tokens, ceiling=ceiling)
     messages = trim_llama_messages_to_context(
         messages, n_ctx=num_ctx, max_tokens=max_tokens
@@ -297,6 +407,11 @@ class OllamaClient:
             "num_predict": max_tokens,
             "temperature": float(payload.get("temperature", 0.0)),
         }
+        num_gpu = sidecar_ollama_num_gpu(model_path, num_ctx=num_ctx)
+        if num_gpu is not None:
+            # Force partial CPU offload so weights + KV stay within free VRAM;
+            # prevents a display-attached GPU from OOM-hanging the machine.
+            options["num_gpu"] = num_gpu
         top_p = payload.get("top_p")
         if top_p is not None:
             options["top_p"] = float(top_p)
