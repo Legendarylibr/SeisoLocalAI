@@ -80,11 +80,6 @@ class TrainingOrchestrator(Orchestrator):
             release_after_task,
         )
 
-        prepare_for_gpu_task(
-            task="training",
-            job_id=job_id,
-            log=lambda msg: self._emit_log(job_id, msg),
-        )
         config = TrainConfig.model_validate(payload["config"])
         config.output_dir = Path(
             payload.get("output_dir", self.sandbox_root / "checkpoints" / job_id)
@@ -129,6 +124,11 @@ class TrainingOrchestrator(Orchestrator):
         from seiso.training.cancel import clear, register
 
         register(job_id)
+        prepare_for_gpu_task(
+            task="training",
+            job_id=job_id,
+            log=lambda msg: self._emit_log(job_id, msg),
+        )
         try:
             if distributed_plan.enabled:
                 checkpoint = await self._run_distributed(

@@ -34,12 +34,6 @@ class ExportOrchestrator(Orchestrator):
         except SecurityError as exc:
             raise PermissionError(str(exc)) from exc
 
-        prepare_for_gpu_task(
-            task="export",
-            job_id=job_id,
-            log=lambda msg: self._emit_log(job_id, msg),
-        )
-
         from seiso.models.hf_env import configure_hf_hub_cache
 
         configure_hf_hub_cache(self.sandbox_root)
@@ -63,6 +57,11 @@ class ExportOrchestrator(Orchestrator):
         def on_log(msg: str) -> None:
             loop.call_soon_threadsafe(self._emit_log, job_id, msg)
 
+        prepare_for_gpu_task(
+            task="export",
+            job_id=job_id,
+            log=lambda msg: self._emit_log(job_id, msg),
+        )
         try:
             plan = prepare_export(
                 checkpoint=checkpoint,

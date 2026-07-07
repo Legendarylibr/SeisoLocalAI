@@ -43,6 +43,17 @@ def assert_model_fits_for_load(
 
 
 def assert_backend_runtime_available(backend: str) -> None:
+    if backend == BACKEND_LLAMASWAP:
+        from seiso.inference.llamaswap import llamaswap_status
+
+        status = llamaswap_status()
+        if not status.available:
+            raise HTTPException(
+                400,
+                status.reason or "Inference backend 'llamaswap' is not available",
+            )
+        return
+
     from forge.services.hf_connectivity import check_inference_runtime
 
     runtime = check_inference_runtime()
@@ -268,6 +279,18 @@ async def prepare_local_chat_target(
             mode="chat",
             backend=updates.get("inference_backend"),
         )
+    from seiso.inference.backends import resolve_local_backend
+
+    try:
+        backend = resolve_local_backend(
+            model_path=path,
+            model_format=updates.get("model_format"),
+            requested=updates.get("inference_backend"),
+        )
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+    assert_backend_runtime_available(backend)
+    updates["inference_backend"] = backend
     updates["model_path"] = path
 
     if sanitize:
@@ -504,6 +527,7 @@ async def resolve_draft_model(
         raise HTTPException(400, "Invalid draft model path")
 
     from seiso.inference.backends import (
+        _is_gguf_model,
         _native_linux_requires_isolated_gguf,
         is_dflash_draft,
     )
@@ -512,6 +536,11 @@ async def resolve_draft_model(
         _assert_draft_compatible(target_model_path, draft_path)
 
     is_dflash = is_dflash_draft(draft_path)
+    if _is_gguf_model(draft_path, None) and not is_dflash:
+        raise HTTPException(
+            400,
+            "GGUF draft models are only supported for dFlash speculative decoding.",
+        )
     if is_dflash and _native_linux_requires_isolated_gguf():
         raise HTTPException(
             400,
@@ -526,5 +555,5 @@ async def resolve_draft_model(
     assert_model_fits_for_load(draft_path, mode="chat", backend=draft_backend)
     return {
         "draft_model_path": draft_path,
-        "inference_backend": BACKEND_TORCH,
+        "inference_backend": draft_backend,
     }

@@ -31,6 +31,9 @@ def is_oom_error(exc: BaseException) -> bool:
         "mps out of memory",
         "insufficient memory",
         "failed to allocate",
+        "failed to create llama_context",
+        "failed to create llama context",
+        "llama_context",
         "cannot allocate memory",
     )
     return any(n in msg for n in needles)
