@@ -75,6 +75,14 @@ class ModelPool:
         with self._lock:
             return self._active.key if self._active else None
 
+    @property
+    def active_inference_refs(self) -> int:
+        with self._lock:
+            return self._inference_refs
+
+    def has_active_inference(self) -> bool:
+        return self.active_inference_refs > 0
+
     @staticmethod
     def normalize_path(model_path: str) -> str:
         return str(Path(model_path).expanduser().resolve())

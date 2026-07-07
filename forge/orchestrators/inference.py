@@ -37,6 +37,12 @@ class InferenceOrchestrator(Orchestrator):
         if self._generation_owned_by_other(user_id):
             raise PermissionError("Another user has active inference")
 
+    def assert_backend_idle(self) -> None:
+        if self._runner.pool.has_active_inference():
+            raise RuntimeError(
+                "Inference backend is still stopping; retry after the current generation releases GPU memory"
+            )
+
     def begin_generation_for_user(self, user_id: str | None) -> None:
         """Reserve the singleton inference runner for a request before work starts."""
         owner = self._normalize_generation_user(user_id)
@@ -44,6 +50,7 @@ class InferenceOrchestrator(Orchestrator):
             if self._active_generation_user_id == owner:
                 raise RuntimeError("Inference is already running for this user")
             raise PermissionError("Another user has active inference")
+        self.assert_backend_idle()
         self._active_generation_user_id = owner
 
     def end_generation_for_user(self, user_id: str | None) -> None:

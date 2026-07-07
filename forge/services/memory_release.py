@@ -110,7 +110,9 @@ def prepare_for_gpu_task(
     try:
         from forge.api import deps
 
-        deps.get_inference_orchestrator().assert_generation_available_for_user(None)
+        inference = deps.get_inference_orchestrator()
+        inference.assert_generation_available_for_user(None)
+        inference.assert_backend_idle()
     except ImportError:
         pass
     except PermissionError as exc:

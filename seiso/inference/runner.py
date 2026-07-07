@@ -8,6 +8,7 @@ import logging
 import threading
 import time
 from collections.abc import AsyncIterator, Callable, Iterator
+from dataclasses import dataclass
 from queue import Empty
 from typing import Any
 
@@ -153,6 +154,132 @@ def _prepare_llama_messages(
             max_tokens=max_tokens,
         )
     return messages, int(n_ctx)
+
+
+def _torch_context_limit(model: Any, tokenizer: Any) -> int:
+    """Best-effort text-generation context limit before tensors move to CUDA."""
+    candidates: list[int] = []
+    for raw in (
+        getattr(tokenizer, "model_max_length", None),
+        getattr(getattr(model, "config", None), "max_position_embeddings", None),
+        getattr(getattr(model, "config", None), "max_sequence_length", None),
+        getattr(getattr(model, "config", None), "n_positions", None),
+    ):
+        with contextlib.suppress(TypeError, ValueError):
+            value = int(raw)
+            if 0 < value < 1_000_000:
+                candidates.append(value)
+    return min(candidates) if candidates else 4096
+
+
+def _tokenized_length(tokenizer: Any, prompt: str) -> int:
+    encoded = tokenizer(prompt, add_special_tokens=False)
+    input_ids = encoded.get("input_ids", []) if isinstance(encoded, dict) else []
+    if input_ids and isinstance(input_ids[0], list):
+        return len(input_ids[0])
+    return len(input_ids)
+
+
+@dataclass(frozen=True)
+class TorchPromptBudget:
+    messages: list[dict[str, Any]]
+    max_tokens: int
+    input_tokens: int
+    context_limit: int
+
+
+def _trim_torch_messages_to_context(
+    messages: list[dict[str, Any]],
+    *,
+    model: Any,
+    tokenizer: Any,
+    max_tokens: int,
+) -> TorchPromptBudget:
+    limit = max(2, _torch_context_limit(model, tokenizer))
+    reserve = min(8, max(1, limit // 8))
+    requested_max_tokens = max(1, int(max_tokens))
+    clamped_max_tokens = max(1, min(requested_max_tokens, limit - reserve - 1))
+    prompt_budget = max(1, limit - clamped_max_tokens - reserve)
+    trimmed = trim_llama_messages_to_context(
+        messages,
+        n_ctx=limit,
+        max_tokens=clamped_max_tokens,
+    )
+    while len(trimmed) > 1:
+        prompt = format_messages_for_prompt(trimmed, tokenizer)
+        current = _tokenized_length(tokenizer, prompt)
+        if current <= prompt_budget:
+            return TorchPromptBudget(
+                messages=trimmed,
+                max_tokens=clamped_max_tokens,
+                input_tokens=current,
+                context_limit=limit,
+            )
+        for idx, message in enumerate(trimmed[:-1]):
+            if str(message.get("role", "")).lower() in {"user", "assistant"}:
+                trimmed.pop(idx)
+                break
+        else:
+            break
+
+    prompt = format_messages_for_prompt(trimmed, tokenizer)
+    current = _tokenized_length(tokenizer, prompt)
+    if current <= prompt_budget:
+        return TorchPromptBudget(
+            messages=trimmed,
+            max_tokens=clamped_max_tokens,
+            input_tokens=current,
+            context_limit=limit,
+        )
+    trimmed = trim_llama_messages_to_context(
+        trimmed,
+        n_ctx=prompt_budget + clamped_max_tokens + reserve,
+        max_tokens=clamped_max_tokens,
+    )
+    for _ in range(8):
+        prompt = format_messages_for_prompt(trimmed, tokenizer)
+        current = _tokenized_length(tokenizer, prompt)
+        if current <= prompt_budget:
+            break
+        if not trimmed:
+            break
+        last = dict(trimmed[-1])
+        content = last.get("content", "")
+        if not isinstance(content, str) or len(content) <= 32:
+            break
+        keep = max(32, int(len(content) * max(0.1, prompt_budget / max(current, 1))))
+        last["content"] = content[-keep:]
+        trimmed[-1] = last
+
+    prompt = format_messages_for_prompt(trimmed, tokenizer)
+    current = _tokenized_length(tokenizer, prompt)
+    if current + clamped_max_tokens + reserve > limit:
+        clamped_max_tokens = max(1, min(clamped_max_tokens, limit - current - reserve))
+        prompt_budget = max(1, limit - clamped_max_tokens - reserve)
+
+    for _ in range(8):
+        if current <= prompt_budget:
+            break
+        if not trimmed:
+            break
+        last = dict(trimmed[-1])
+        content = last.get("content", "")
+        if not isinstance(content, str) or len(content) <= 1:
+            break
+        keep = max(1, int(len(content) * max(0.05, prompt_budget / max(current, 1))))
+        last["content"] = content[-keep:]
+        trimmed[-1] = last
+        prompt = format_messages_for_prompt(trimmed, tokenizer)
+        current = _tokenized_length(tokenizer, prompt)
+
+    if current + clamped_max_tokens + reserve > limit:
+        clamped_max_tokens = max(1, min(clamped_max_tokens, limit - current - reserve))
+    return TorchPromptBudget(
+        messages=trimmed,
+        max_tokens=clamped_max_tokens,
+        input_tokens=current,
+        context_limit=limit,
+    )
 
 
 class _StreamError:
@@ -517,10 +644,16 @@ class LocalInferenceRunner:
                 draft_tokenizer=target_tok,  # vocab alignment expected for dflash
             )
 
-            messages = payload.get("messages", [])
+            budget = _trim_torch_messages_to_context(
+                payload.get("messages", []),
+                model=target_model,
+                tokenizer=target_tok,
+                max_tokens=int(payload.get("max_tokens", 512)),
+            )
+            messages = budget.messages
             prompt = format_messages_for_prompt(messages, target_tok)
             temperature = float(payload.get("temperature", 0.0))
-            max_new_tokens = int(payload.get("max_tokens", 512))
+            max_new_tokens = budget.max_tokens
             num_speculative_tokens = default_num_speculative_tokens(payload)
 
             yield from iter_speculative_tokens_dflash(
@@ -537,10 +670,16 @@ class LocalInferenceRunner:
         bundle = self._pool.get_torch_speculative(
             model_path, draft_path, load_in_4bit=True
         )
-        messages = payload.get("messages", [])
+        budget = _trim_torch_messages_to_context(
+            payload.get("messages", []),
+            model=bundle.target_model,
+            tokenizer=bundle.target_tokenizer,
+            max_tokens=int(payload.get("max_tokens", 512)),
+        )
+        messages = budget.messages
         prompt = format_messages_for_prompt(messages, bundle.target_tokenizer)
         temperature = float(payload.get("temperature", 0.0))
-        max_new_tokens = int(payload.get("max_tokens", 512))
+        max_new_tokens = budget.max_tokens
         num_speculative_tokens = default_num_speculative_tokens(payload)
 
         try:
@@ -623,7 +762,16 @@ class LocalInferenceRunner:
         model: Any,
         messages: list[dict[str, Any]],
         tokenizer: Any,
-    ) -> tuple[dict[str, Any], int]:
+        *,
+        max_tokens: int,
+    ) -> tuple[dict[str, Any], int, int]:
+        budget = _trim_torch_messages_to_context(
+            messages,
+            model=model,
+            tokenizer=tokenizer,
+            max_tokens=max_tokens,
+        )
+        messages = budget.messages
         prompt = format_messages_for_prompt(messages, tokenizer)
         inputs = tokenizer(prompt, return_tensors="pt")
         device = LocalInferenceRunner._torch_input_device(model)
@@ -631,7 +779,7 @@ class LocalInferenceRunner:
             k: v.to(device, non_blocking=getattr(device, "type", "") == "cuda")
             for k, v in inputs.items()
         }
-        return moved, int(moved["input_ids"].shape[-1])
+        return moved, int(moved["input_ids"].shape[-1]), budget.max_tokens
 
     @staticmethod
     def _torch_input_device(model: Any) -> Any:
@@ -677,9 +825,13 @@ class LocalInferenceRunner:
 
         configure_torch_inference()
         model, tokenizer = self._pool.get_torch(model_path, load_in_4bit=True)
-        inputs, input_len = self._torch_prepare_inputs(
-            model, payload.get("messages", []), tokenizer
+        inputs, input_len, max_tokens = self._torch_prepare_inputs(
+            model,
+            payload.get("messages", []),
+            tokenizer,
+            max_tokens=int(payload.get("max_tokens", 512)),
         )
+        payload = {**payload, "max_tokens": max_tokens}
         gen_kwargs = torch_generate_kwargs(
             payload,
             inputs,
@@ -708,7 +860,13 @@ class LocalInferenceRunner:
         configure_torch_inference()
         model, tokenizer = self._pool.get_torch(model_path, load_in_4bit=True)
         messages = payload.get("messages", [])
-        inputs, _input_len = self._torch_prepare_inputs(model, messages, tokenizer)
+        inputs, _input_len, max_tokens = self._torch_prepare_inputs(
+            model,
+            messages,
+            tokenizer,
+            max_tokens=int(payload.get("max_tokens", 512)),
+        )
+        payload = {**payload, "max_tokens": max_tokens}
 
         streamer = TextIteratorStreamer(
             tokenizer,

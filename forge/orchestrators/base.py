@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
+import os
+import signal
 import uuid
 from abc import ABC, abstractmethod
 from collections import defaultdict, deque
@@ -70,6 +73,7 @@ class Orchestrator(ABC):
         ] = defaultdict(set)
         self._tasks: dict[str, asyncio.Task[None]] = {}
         self._subprocesses: dict[str, asyncio.subprocess.Process] = {}
+        self._subprocess_groups: set[str] = set()
 
     def create_job(self, job_id: str | None = None, user_id: str | None = None) -> str:
         if len(self._jobs) >= MAX_JOBS:
@@ -82,9 +86,15 @@ class Orchestrator(ABC):
         return self._jobs.get(job_id)
 
     def register_subprocess(
-        self, job_id: str, proc: asyncio.subprocess.Process
+        self,
+        job_id: str,
+        proc: asyncio.subprocess.Process,
+        *,
+        process_group: bool = False,
     ) -> None:
         self._subprocesses[job_id] = proc
+        if process_group:
+            self._subprocess_groups.add(job_id)
 
     def _evict_oldest_job(self) -> None:
         finished = (
@@ -101,6 +111,7 @@ class Orchestrator(ABC):
         self._metric_buffers.pop(jid, None)
         self._tasks.pop(jid, None)
         self._subprocesses.pop(jid, None)
+        self._subprocess_groups.discard(jid)
 
     def _emit_log(self, job_id: str, line: str) -> None:
         buf = self._log_buffers[job_id]
@@ -260,16 +271,41 @@ class Orchestrator(ABC):
             self._emit_log(job_id, f"ERROR: {exc}")
         finally:
             self._subprocesses.pop(job_id, None)
+            self._subprocess_groups.discard(job_id)
             self._finish_logs(job_id)
+
+    def _terminate_subprocess(self, job_id: str, proc: asyncio.subprocess.Process) -> None:
+        if job_id in self._subprocess_groups and os.name == "posix":
+            try:
+                os.killpg(proc.pid, signal.SIGTERM)
+                return
+            except ProcessLookupError:
+                return
+            except OSError:
+                pass
+        proc.terminate()
+
+    def _kill_subprocess(self, job_id: str, proc: asyncio.subprocess.Process) -> None:
+        if job_id in self._subprocess_groups and os.name == "posix":
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+                return
+            except ProcessLookupError:
+                return
+            except OSError:
+                pass
+        proc.kill()
 
     async def cancel(self, job_id: str) -> bool:
         proc = self._subprocesses.get(job_id)
         if proc and proc.returncode is None:
-            proc.terminate()
+            self._terminate_subprocess(job_id, proc)
             try:
                 await asyncio.wait_for(proc.wait(), timeout=5)
             except asyncio.TimeoutError:
-                proc.kill()
+                self._kill_subprocess(job_id, proc)
+                with contextlib.suppress(asyncio.TimeoutError):
+                    await asyncio.wait_for(proc.wait(), timeout=5)
         task = self._tasks.get(job_id)
         if task and not task.done():
             task.cancel()
