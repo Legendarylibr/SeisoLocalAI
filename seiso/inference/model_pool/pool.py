@@ -347,10 +347,15 @@ class ModelPool:
                 return None
             if backend != BackendKind.LLAMA:
                 return self._active.handle
+            native_linux_nvidia = _mp()._native_linux_nvidia()
+            if native_linux_nvidia and needed_ctx > 0 and cached_ctx != needed_ctx:
+                return None
             cached_tokens = int(
                 getattr(self._active.handle, "_seiso_max_tokens", 512) or 512
             )
             if needed_tokens > 0 and cached_tokens < needed_tokens:
+                return None
+            if native_linux_nvidia and needed_tokens > 0 and cached_tokens != needed_tokens:
                 return None
             cached_layers = int(self._active.meta.get("n_gpu_layers", -1))
             requested_layers = env_int("SEISO_LLAMA_GPU_LAYERS", _mp()._default_llama_gpu_layers())
@@ -511,9 +516,20 @@ class ModelPool:
                 cached_max_tokens = int(
                     getattr(self._active.handle, "_seiso_max_tokens", 512) or 512
                 )
+                native_linux_nvidia = _mp()._native_linux_nvidia()
+                ctx_ok = (
+                    cached_ctx == n_ctx
+                    if native_linux_nvidia
+                    else cached_ctx >= n_ctx
+                )
+                tokens_ok = (
+                    cached_max_tokens == max_tokens
+                    if native_linux_nvidia
+                    else cached_max_tokens >= max_tokens
+                )
                 if (
-                    cached_ctx >= n_ctx
-                    and cached_max_tokens >= max_tokens
+                    ctx_ok
+                    and tokens_ok
                     and _mp()._llama_cache_is_optimal(
                         str(self._active.meta.get("path") or model_path),
                         cached_layers,

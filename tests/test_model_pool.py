@@ -739,6 +739,7 @@ def test_llama_reuses_larger_preloaded_context(monkeypatch, tmp_path):
         load_paths.append(path)
         return FakeLlama()
 
+    monkeypatch.setattr(model_pool, "_native_linux_nvidia", lambda: False)
     monkeypatch.setattr(model_pool, "_load_llama_model", fake_load)
     monkeypatch.setattr(
         "seiso.inference.tuning.attach_llama_prompt_cache",
@@ -752,6 +753,68 @@ def test_llama_reuses_larger_preloaded_context(monkeypatch, tmp_path):
     assert first is not None
     assert second is handle
     assert load_paths == [str(model_path.absolute())]
+
+
+def test_native_linux_llama_does_not_reuse_larger_cached_context(monkeypatch, tmp_path):
+    from seiso.inference import model_pool
+
+    pool = ModelPool()
+    model_path = tmp_path / "model.gguf"
+    model_path.write_bytes(b"gguf")
+    load_ctx: list[int] = []
+
+    class FakeLlama:
+        def __init__(self, n_ctx: int) -> None:
+            self._seiso_n_ctx = n_ctx
+            self._seiso_n_gpu_layers = -1
+            self._seiso_max_tokens = 512
+            self._seiso_load_headroom_mb = 24576
+
+    def fake_load(_path, n_ctx, **_kwargs):
+        load_ctx.append(n_ctx)
+        return FakeLlama(n_ctx)
+
+    monkeypatch.setattr(model_pool, "_native_linux_nvidia", lambda: True)
+    monkeypatch.setattr(model_pool, "_load_llama_model", fake_load)
+    monkeypatch.setattr(model_pool, "_llama_cache_is_optimal", lambda *_a, **_k: True)
+    monkeypatch.setattr(model_pool, "_llama_cache_headroom_ok", lambda *_a, **_k: True)
+
+    pool.get_llama(str(model_path), n_ctx=4096, max_tokens=512)
+    pool.get_llama(str(model_path), n_ctx=2048, max_tokens=512)
+
+    assert load_ctx == [4096, 2048]
+
+
+def test_native_linux_llama_does_not_reuse_larger_cached_completion_budget(
+    monkeypatch, tmp_path
+):
+    from seiso.inference import model_pool
+
+    pool = ModelPool()
+    model_path = tmp_path / "model.gguf"
+    model_path.write_bytes(b"gguf")
+    load_tokens: list[int] = []
+
+    class FakeLlama:
+        def __init__(self, max_tokens: int) -> None:
+            self._seiso_n_ctx = 4096
+            self._seiso_n_gpu_layers = -1
+            self._seiso_max_tokens = max_tokens
+            self._seiso_load_headroom_mb = 24576
+
+    def fake_load(_path, _n_ctx, *, max_tokens=512, **_kwargs):
+        load_tokens.append(max_tokens)
+        return FakeLlama(max_tokens)
+
+    monkeypatch.setattr(model_pool, "_native_linux_nvidia", lambda: True)
+    monkeypatch.setattr(model_pool, "_load_llama_model", fake_load)
+    monkeypatch.setattr(model_pool, "_llama_cache_is_optimal", lambda *_a, **_k: True)
+    monkeypatch.setattr(model_pool, "_llama_cache_headroom_ok", lambda *_a, **_k: True)
+
+    pool.get_llama(str(model_path), n_ctx=4096, max_tokens=2048)
+    pool.get_llama(str(model_path), n_ctx=4096, max_tokens=512)
+
+    assert load_tokens == [2048, 512]
 
 
 def test_dflash_loader_reuses_vram_aware_llama_loader(monkeypatch, tmp_path):
