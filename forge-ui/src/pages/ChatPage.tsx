@@ -696,6 +696,7 @@ export function ChatPage() {
             tools: useTools && toolsAvailable,
             knowledge_base_id: knowledgeBaseId || null,
             model_id: providerId ? null : selection || null,
+            draft_message: input.trim() || null,
           });
           if (!cancelled) setContextStatus(status);
         } catch {
@@ -714,6 +715,7 @@ export function ChatPage() {
   }, [
     active,
     messageCount,
+    input,
     streaming,
     inferenceSettings.maxTokens,
     contextWindow,

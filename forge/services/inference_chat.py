@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path
 from typing import Any
 
@@ -18,7 +17,6 @@ from forge.services.inference_models import (
 from forge.services.model_router_client import ROUTER_MODEL_ID
 from forge.services.models import resolve_model_path
 from seiso.inference.backends import BACKEND_LLAMACPP, BACKEND_ROUTER, BACKEND_TORCH
-from seiso.inference.runner import LocalInferenceRunner
 
 
 def assert_model_fits_for_load(
@@ -278,13 +276,6 @@ async def resolve_preload_context(
         "model_name": target.get("model_name") or model_id,
         "size_bytes": int(target.get("size_bytes") or 0),
     }
-
-
-async def release_active_local_model(runner: LocalInferenceRunner) -> None:
-    if not runner.pool.active_key:
-        return
-    loop = asyncio.get_running_loop()
-    await loop.run_in_executor(None, runner.pool.cancel_and_unload)
 
 
 async def resolve_inventory_model_path(

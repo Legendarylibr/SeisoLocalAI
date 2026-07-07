@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from forge.config import get_settings
-from forge.orchestrators.base import Orchestrator
+from forge.orchestrators.base import JobStatus, Orchestrator
 from forge.providers.router import chat_completion
 from forge.security.audit import audit_event
 from forge.tools.registry import build_default_registry
@@ -23,15 +23,45 @@ class InferenceOrchestrator(Orchestrator):
         self._runner = get_inference_runner()
         self._active_generation_user_id: str | None = None
 
+    def _normalize_generation_user(self, user_id: str | None) -> str | None:
+        return str(user_id) if user_id else None
+
     def _generation_owned_by_other(self, user_id: str | None) -> bool:
+        owner = self._normalize_generation_user(user_id)
         return bool(
             self._active_generation_user_id
-            and self._active_generation_user_id != user_id
+            and self._active_generation_user_id != owner
         )
 
     def assert_generation_available_for_user(self, user_id: str | None) -> None:
         if self._generation_owned_by_other(user_id):
             raise PermissionError("Another user has active inference")
+
+    def begin_generation_for_user(self, user_id: str | None) -> None:
+        """Reserve the singleton inference runner for a request before work starts."""
+        owner = self._normalize_generation_user(user_id)
+        if self._active_generation_user_id:
+            if self._active_generation_user_id == owner:
+                raise RuntimeError("Inference is already running for this user")
+            raise PermissionError("Another user has active inference")
+        self._active_generation_user_id = owner
+
+    def end_generation_for_user(self, user_id: str | None) -> None:
+        owner = self._normalize_generation_user(user_id)
+        if self._active_generation_user_id == owner:
+            self._active_generation_user_id = None
+
+    async def _cancel_running_jobs_for_user(self, user_id: str | None) -> None:
+        owner = self._normalize_generation_user(user_id)
+        job_ids = [
+            job_id
+            for job_id, job in self._jobs.items()
+            if job.status == JobStatus.RUNNING
+            and (owner is None or self._normalize_generation_user(job.user_id) == owner)
+        ]
+        for job_id in job_ids:
+            await self.cancel(job_id)
+            await self.wait_for(job_id)
 
     async def cancel_and_unload_for_user(self, user_id: str | None) -> dict[str, Any]:
         return await self.release_all_inference_memory(user_id)
@@ -39,7 +69,9 @@ class InferenceOrchestrator(Orchestrator):
     async def release_all_inference_memory(self, user_id: str | None) -> dict[str, Any]:
         """Unload local pool and refresh headroom for the next model load."""
         self.assert_generation_available_for_user(user_id)
+        await self._cancel_running_jobs_for_user(user_id)
         await self._runner.cancel_and_unload()
+        self.end_generation_for_user(user_id)
         from seiso.memory.protection import release_cached_memory
 
         release_cached_memory(sync=False)
@@ -53,7 +85,10 @@ class InferenceOrchestrator(Orchestrator):
 
     async def cancel_generation_for_user(self, user_id: str | None) -> dict[str, Any]:
         self.assert_generation_available_for_user(user_id)
-        return await self._runner.cancel_generation()
+        await self._cancel_running_jobs_for_user(user_id)
+        status = await self._runner.cancel_generation()
+        self.end_generation_for_user(user_id)
+        return status
 
     async def execute(self, job_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         messages = payload.get("messages", [])
@@ -73,7 +108,8 @@ class InferenceOrchestrator(Orchestrator):
             self._emit_log(job_id, msg)
 
         result_router_meta: dict[str, Any] | None = None
-        self._active_generation_user_id = str(user_id) if user_id else None
+        if not self._active_generation_user_id:
+            self.begin_generation_for_user(user_id)
         try:
             if provider:
                 reply = await self._provider_chat(
@@ -106,8 +142,7 @@ class InferenceOrchestrator(Orchestrator):
                 reply = await self._local_chat(payload)
                 backend = payload.get("inference_backend") or active
         finally:
-            if self._active_generation_user_id == (str(user_id) if user_id else None):
-                self._active_generation_user_id = None
+            self.end_generation_for_user(user_id)
 
         self._emit_log(job_id, f"Generated {len(reply)} chars")
         result: dict[str, Any] = {
@@ -128,14 +163,20 @@ class InferenceOrchestrator(Orchestrator):
             raise RuntimeError("Model router is not enabled on this server")
 
         messages = list(payload.get("messages", []))
-        async for token in router_stream_chat(
-            settings,
-            messages,
-            model=payload.get("router_model"),
-            max_tokens=payload.get("max_tokens", 512),
-            temperature=float(payload.get("temperature", 0.7)),
-        ):
-            yield token
+        user_id = payload.get("user_id")
+        if not self._active_generation_user_id:
+            self.begin_generation_for_user(user_id)
+        try:
+            async for token in router_stream_chat(
+                settings,
+                messages,
+                model=payload.get("router_model"),
+                max_tokens=payload.get("max_tokens", 512),
+                temperature=float(payload.get("temperature", 0.7)),
+            ):
+                yield token
+        finally:
+            self.end_generation_for_user(user_id)
 
     async def _router_chat(
         self,
@@ -163,13 +204,13 @@ class InferenceOrchestrator(Orchestrator):
     async def stream_local_updates(self, payload: dict[str, Any]) -> AsyncIterator[Any]:
         """Stream local inference with cumulative output token counts."""
         user_id = payload.get("user_id")
-        self._active_generation_user_id = str(user_id) if user_id else None
+        if not self._active_generation_user_id:
+            self.begin_generation_for_user(user_id)
         try:
             async for update in self._runner.stream_updates(payload):
                 yield update
         finally:
-            if self._active_generation_user_id == (str(user_id) if user_id else None):
-                self._active_generation_user_id = None
+            self.end_generation_for_user(user_id)
 
     def _active_backend(self, payload: dict[str, Any]) -> str:
         explicit = (payload.get("inference_backend") or "").lower()

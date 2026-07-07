@@ -294,6 +294,68 @@ async def test_cross_user_inference_cancel_rejected(app, auth_client):
     assert allowed.status_code == 200
 
 
+@pytest.mark.asyncio
+async def test_router_stream_sets_generation_owner(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+
+    from forge.orchestrators.inference import InferenceOrchestrator
+
+    orchestrator = InferenceOrchestrator(tmp_path)
+
+    async def fake_router_stream(*_args, **_kwargs):
+        assert orchestrator._active_generation_user_id == "user-a"
+        yield "hello"
+
+    monkeypatch.setattr(
+        "forge.orchestrators.inference.get_settings",
+        lambda: SimpleNamespace(model_router_enabled=True),
+    )
+    monkeypatch.setattr(
+        "forge.services.model_router_client.router_stream_chat",
+        fake_router_stream,
+    )
+
+    tokens = [
+        token
+        async for token in orchestrator.stream_router(
+            {"user_id": "user-a", "messages": []}
+        )
+    ]
+
+    assert tokens == ["hello"]
+    assert orchestrator._active_generation_user_id is None
+
+
+@pytest.mark.asyncio
+async def test_cancel_generation_cancels_running_inference_job(monkeypatch, tmp_path):
+    import asyncio
+    from types import MethodType
+
+    from forge.orchestrators.base import JobStatus
+    from forge.orchestrators.inference import InferenceOrchestrator
+
+    orchestrator = InferenceOrchestrator(tmp_path)
+    job_id = orchestrator.create_job(user_id="user-a")
+    started = asyncio.Event()
+
+    async def execute(self, _job_id, _payload):
+        started.set()
+        await asyncio.Event().wait()
+        return {}
+
+    monkeypatch.setattr(orchestrator, "execute", MethodType(execute, orchestrator))
+    orchestrator.begin_generation_for_user("user-a")
+    await orchestrator.start(job_id, {"user_id": "user-a"})
+    await started.wait()
+
+    await orchestrator.cancel_generation_for_user("user-a")
+
+    job = orchestrator.get_job(job_id)
+    assert job is not None
+    assert job.status == JobStatus.CANCELLED
+    assert orchestrator._active_generation_user_id is None
+
+
 def test_trainer_dataset_sandbox_blocks_other_user_path(tmp_path):
     from seiso.training.config import TrainConfig
     from seiso.training.datasets import load_training_dataset
