@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 from typing import Any
 
+from seiso.env import env_bool
 from seiso.security import resolve_data_dir
 
 logger = logging.getLogger(__name__)
@@ -54,12 +55,7 @@ def hf_transfer_stack() -> dict[str, Any]:
 
         xet_version = getattr(hf_xet, "__version__", None)
 
-    high_perf = os.environ.get("HF_XET_HIGH_PERFORMANCE", "").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
+    high_perf = env_bool("HF_XET_HIGH_PERFORMANCE", False)
     num_threads = os.environ.get(
         "HF_HUB_NUM_THREADS", default_hub_num_threads()
     ).strip()

@@ -463,7 +463,11 @@ class LocalInferenceRunner:
             )
             self._pool.acquire_llama_inference()
             try:
-                llm = self._pool.get_llama(resolved_path, n_ctx=n_ctx)
+                llm = self._pool.get_llama(
+                    resolved_path,
+                    n_ctx=n_ctx,
+                    max_tokens=int(payload.get("max_tokens", 512)),
+                )
                 if messages:
                     budget = _fit_llama_messages_to_context(
                         llm,
@@ -1077,6 +1081,7 @@ class LocalInferenceRunner:
         *,
         model_path: str,
         n_ctx: int,
+        max_tokens: int,
     ) -> Any:
         current = self._llama_handle_tier(llm)
         next_tier = llama_next_recovery_tier(current)
@@ -1101,6 +1106,7 @@ class LocalInferenceRunner:
             recovery_ctx,
             tier=next_tier,
             batch_override=batch_override,
+            max_tokens=max_tokens,
         )
 
     def _llama_guard_prefill(
@@ -1142,6 +1148,7 @@ class LocalInferenceRunner:
             n_ctx,
             tier=current_tier,
             batch_override=(safe_batch, safe_ubatch),
+            max_tokens=int(getattr(llm, "_seiso_max_tokens", 512) or 512),
         )
 
     def _llama_preflight_decode(
@@ -1172,7 +1179,7 @@ class LocalInferenceRunner:
                 weights_resident=True,
                 stream=stream,
             )
-        except Exception as exc:
+        except Exception:
             logger.warning(
                 "llama.cpp decode preflight failed; applying conservative fallback",
                 exc_info=True,
@@ -1235,6 +1242,7 @@ class LocalInferenceRunner:
             budget.n_ctx,
             tier=current_tier,
             batch_override=(budget.n_batch, budget.n_ubatch),
+            max_tokens=budget.max_tokens,
         )
         actual_ctx = int(getattr(llm, "_seiso_n_ctx", budget.n_ctx) or budget.n_ctx)
         if actual_ctx < n_ctx:
@@ -1265,7 +1273,11 @@ class LocalInferenceRunner:
         generation_id: int,
     ) -> str:
         messages, n_ctx = _prepare_llama_messages(payload, model_path)
-        llm = self._pool.get_llama(model_path, n_ctx=n_ctx)
+        llm = self._pool.get_llama(
+            model_path,
+            n_ctx=n_ctx,
+            max_tokens=int(payload.get("max_tokens", 512)),
+        )
         budget = _fit_llama_messages_to_context(
             llm,
             messages,
@@ -1321,7 +1333,10 @@ class LocalInferenceRunner:
                         "llama.cpp inference OOM — recovery attempts exhausted"
                     ) from exc
                 llm = self._llama_recover_from_oom(
-                    llm, model_path=model_path, n_ctx=n_ctx
+                    llm,
+                    model_path=model_path,
+                    n_ctx=n_ctx,
+                    max_tokens=int(payload.get("max_tokens", 512)),
                 )
                 actual_ctx = int(getattr(llm, "_seiso_n_ctx", n_ctx) or n_ctx)
                 if actual_ctx < int(n_ctx):
@@ -1420,7 +1435,11 @@ class LocalInferenceRunner:
     ) -> Iterator[StreamToken]:
         messages, n_ctx = _prepare_llama_messages(payload, model_path)
         try:
-            llm = self._pool.get_llama(model_path, n_ctx=n_ctx)
+            llm = self._pool.get_llama(
+                model_path,
+                n_ctx=n_ctx,
+                max_tokens=int(payload.get("max_tokens", 512)),
+            )
         except ImportError as exc:
             raise RuntimeError("llama-cpp-python not installed") from exc
         budget = _fit_llama_messages_to_context(
@@ -1505,7 +1524,10 @@ class LocalInferenceRunner:
                     ) from exc
                 tool_buffer = ToolCallDeltaBuffer()
                 llm = self._llama_recover_from_oom(
-                    llm, model_path=model_path, n_ctx=n_ctx
+                    llm,
+                    model_path=model_path,
+                    n_ctx=n_ctx,
+                    max_tokens=int(payload.get("max_tokens", 512)),
                 )
                 actual_ctx = int(getattr(llm, "_seiso_n_ctx", n_ctx) or n_ctx)
                 if actual_ctx < int(n_ctx):

@@ -75,6 +75,7 @@ def clamp_llama_n_ctx(
                 free_mb=protection().headroom_mb(),
                 n_gpu_layers=-1,
                 ceiling=ctx_cap,
+                max_tokens=max_tokens,
             ),
         )
     sized = bucket_llama_n_ctx(needed, ceiling=ctx_cap)
@@ -95,6 +96,7 @@ def clamp_llama_load_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
     out = dict(kwargs)
     model_path = out.pop("_model_path", None)
     native_linux_hint = out.pop("_native_linux_nvidia", None)
+    max_tokens = int(out.pop("_max_tokens", 512) or 512)
     n_ctx = int(out.get("n_ctx") or _MIN_LLAMA_CTX)
     native_linux_nvidia = False
     if native_linux_hint is not None:
@@ -189,7 +191,7 @@ def clamp_llama_load_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
 
     ctx_cap = clamp_llama_n_ctx(
         n_ctx,
-        max_tokens=512,
+        max_tokens=max_tokens,
         model_path=str(model_path) if model_path else None,
         model_format="gguf" if model_path else None,
     )

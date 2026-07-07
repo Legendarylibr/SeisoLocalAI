@@ -1183,11 +1183,35 @@ def test_sidecar_vram_context_cap_clamps_to_free_vram(monkeypatch):
     monkeypatch.setattr(
         runtime_mod,
         "native_linux_llama_context_cap",
-        lambda model_path, *, free_mb, n_gpu_layers, ceiling: 8192,
+        lambda model_path, *, free_mb, n_gpu_layers, ceiling, max_tokens=512: 8192,
     )
 
     # KV that would fit a 131072 window is bounded to what free VRAM supports.
     assert llamaswap.sidecar_vram_context_cap("/tmp/model.gguf", 131072) == 8192
+
+
+def test_sidecar_vram_context_cap_forwards_requested_completion(monkeypatch):
+    import seiso.memory.protection as protection_mod
+    import seiso.memory.protection.llama_runtime as runtime_mod
+    from seiso.inference import llamaswap
+
+    seen: dict[str, int] = {}
+    monkeypatch.setattr(llamaswap, "_sidecar_native_linux_nvidia", lambda: True)
+    monkeypatch.setattr(protection_mod, "headroom_mb", lambda: 6000)
+
+    def fake_cap(model_path, *, free_mb, n_gpu_layers, ceiling, max_tokens=512):
+        seen["max_tokens"] = max_tokens
+        return 4096 if max_tokens > 512 else int(ceiling)
+
+    monkeypatch.setattr(runtime_mod, "native_linux_llama_context_cap", fake_cap)
+
+    assert (
+        llamaswap.sidecar_vram_context_cap(
+            "/tmp/model.gguf", 131072, max_tokens=2048
+        )
+        == 4096
+    )
+    assert seen["max_tokens"] == 2048
 
 
 def test_sidecar_vram_context_cap_disabled_by_env(monkeypatch):
@@ -1327,7 +1351,7 @@ def test_llamaswap_stream_buffers_fragmented_tool_calls(monkeypatch):
     client = LlamaSwapClient(url="http://127.0.0.1:8080", engine="llamacpp")
 
     def event(payload: dict) -> bytes:
-        return f"data: {json.dumps(payload)}\n".encode("utf-8")
+        return f"data: {json.dumps(payload)}\n".encode()
 
     lines = [
         event(

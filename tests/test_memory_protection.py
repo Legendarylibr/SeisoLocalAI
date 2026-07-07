@@ -345,6 +345,76 @@ def test_clamp_llama_load_kwargs_uses_model_context_ceiling(monkeypatch, tmp_pat
     assert seen["model_format"] == "gguf"
 
 
+def test_native_linux_context_cap_reserves_requested_completion(monkeypatch, tmp_path):
+    from seiso.memory.protection.llama_runtime import native_linux_llama_context_cap
+
+    gguf = tmp_path / "small-128k.gguf"
+    gguf.write_bytes(b"\x00" * 1024)
+    monkeypatch.setattr("seiso.platform.use_linux_nvidia_inference_guards", lambda: True)
+    monkeypatch.setattr("seiso.memory.protection.discrete_gpu_total_mb", lambda: 24576)
+    monkeypatch.setattr(
+        "seiso.memory.protection.llama_runtime.llama_decode_reserve_mb",
+        lambda **kwargs: int(kwargs["max_tokens"]),
+    )
+    monkeypatch.setattr(
+        "seiso.memory.protection.llama_runtime.llama_offload_fits_headroom",
+        lambda _path, *, headroom_mb, n_ctx, **_kwargs: headroom_mb >= n_ctx,
+    )
+
+    short = native_linux_llama_context_cap(
+        gguf, free_mb=10000, ceiling=8192, max_tokens=512
+    )
+    long = native_linux_llama_context_cap(
+        gguf, free_mb=10000, ceiling=8192, max_tokens=4096
+    )
+
+    assert short == 8192
+    assert long == 4096
+
+
+def test_clamp_llama_load_kwargs_forwards_requested_max_tokens(monkeypatch, tmp_path):
+    gguf = tmp_path / "small-128k.gguf"
+    gguf.write_bytes(b"\x00" * 1024)
+    seen: dict[str, object] = {}
+
+    def fake_clamp(
+        n_ctx,
+        *,
+        messages=None,
+        max_tokens=512,
+        model_path=None,
+        model_format=None,
+        model_name=None,
+    ):
+        seen["n_ctx"] = n_ctx
+        seen["max_tokens"] = max_tokens
+        seen["model_path"] = model_path
+        seen["model_format"] = model_format
+        return 4096 if max_tokens == 2048 else int(n_ctx)
+
+    monkeypatch.setattr("seiso.memory.protection.llama_clamp.clamp_llama_n_ctx", fake_clamp)
+
+    kwargs = clamp_llama_load_kwargs(
+        {
+            "_model_path": str(gguf),
+            "_max_tokens": 2048,
+            "n_ctx": 8192,
+            "n_batch": 512,
+            "n_ubatch": 128,
+            "n_gpu_layers": 0,
+        }
+    )
+
+    assert kwargs["n_ctx"] == 4096
+    assert "_max_tokens" not in kwargs
+    assert seen == {
+        "n_ctx": 8192,
+        "max_tokens": 2048,
+        "model_path": str(gguf),
+        "model_format": "gguf",
+    }
+
+
 def test_llama_batch_limits_scale_by_gpu_headroom():
     assert llama_batch_limits_for_headroom(1024) == (256, 128)
     assert llama_batch_limits_for_headroom(4096) == (512, 256)

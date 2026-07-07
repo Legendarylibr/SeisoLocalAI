@@ -14,6 +14,10 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from forge.api.deps import get_db, get_inference_orchestrator
+from forge.api.routes._inference_common import (
+    _assert_inference_gpu_available,
+    _begin_generation_or_raise,
+)
 from forge.config import ForgeSettings, get_settings
 from forge.db.store import Database
 from forge.orchestrators.inference import InferenceOrchestrator
@@ -43,18 +47,6 @@ class ChatCompletionRequest(BaseModel):
 
 _UNTRUSTED_OPENAI_ROLES = frozenset({"tool", "function", "system", "developer"})
 _UNVERIFIED_ASSISTANT_PREFIX = "[UNVERIFIED_PRIOR_ASSISTANT]\n"
-
-
-def _begin_generation_or_raise(
-    orchestrator: InferenceOrchestrator,
-    user_id: str | None,
-) -> None:
-    try:
-        orchestrator.begin_generation_for_user(user_id)
-    except PermissionError as exc:
-        raise HTTPException(403, str(exc)) from exc
-    except RuntimeError as exc:
-        raise HTTPException(409, str(exc)) from exc
 
 
 def _normalize_openai_messages(body: ChatCompletionRequest) -> list[dict[str, str]]:
@@ -224,12 +216,7 @@ async def chat_completions(
     if body.tools and not settings.allow_openai_tools:
         raise HTTPException(403, "Tool calling is disabled on the OpenAI-compatible API")
 
-    from forge.services.memory_release import assert_gpu_available_for_inference
-
-    try:
-        assert_gpu_available_for_inference()
-    except RuntimeError as exc:
-        raise HTTPException(409, str(exc)) from exc
+    _assert_inference_gpu_available()
 
     payload = await _prepare_openai_chat_payload(body, user_id, db, settings)
     payload["user_id"] = user_id

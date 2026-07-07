@@ -2,17 +2,12 @@
 
 from __future__ import annotations
 
-import os
+from seiso.env import env_bool
 
 
 def kernel_low_vram_enabled() -> bool:
     """True when fused kernels should prefer lowest VRAM paths by explicit opt-in."""
-    raw = os.environ.get("SEISO_KERNEL_LOW_VRAM", "").strip().lower()
-    if raw in {"1", "true", "yes", "on"}:
-        return True
-    if raw in {"0", "false", "no", "off"}:
-        return False
-    return False
+    return env_bool("SEISO_KERNEL_LOW_VRAM", False)
 
 
 def apply_low_vram_kernel_tuning() -> None:

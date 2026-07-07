@@ -17,6 +17,7 @@ import sys
 import time
 from pathlib import Path
 
+from seiso.env import env_bool
 from seiso.platform import detect_wsl2
 
 _ACK_HOST_VENV_ENV = "SEISO_NVIDIA_HOST_VENV_ACK"
@@ -50,13 +51,11 @@ _query_cache_exe: str | None = None
 
 
 def _env_enabled(name: str) -> bool:
-    raw = os.environ.get(name, "").strip().lower()
-    if raw in {"1", "true", "yes", "on"}:
+    if env_bool(name, False):
         return True
     legacy = _LEGACY_ACK.get(name)
     if legacy:
-        raw = os.environ.get(legacy, "").strip().lower()
-        return raw in {"1", "true", "yes", "on"}
+        return env_bool(legacy, False)
     return False
 
 
