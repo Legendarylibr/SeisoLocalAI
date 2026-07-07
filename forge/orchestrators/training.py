@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import os
 import threading
 import time
 from pathlib import Path
@@ -268,8 +269,9 @@ class TrainingOrchestrator(Orchestrator):
             stderr=asyncio.subprocess.STDOUT,
             cwd=str(self.sandbox_root),
             env=env,
+            start_new_session=os.name == "posix",
         )
-        self.register_subprocess(job_id, proc)
+        self.register_subprocess(job_id, proc, process_group=os.name == "posix")
 
         assert proc.stdout
         while True:

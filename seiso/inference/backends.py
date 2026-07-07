@@ -453,6 +453,14 @@ def recommend_backend(
     fmt = (model_format or "").lower()
     path = Path(model_path)
     if fmt == "gguf" or _is_gguf_path(model_path):
+        try:
+            from seiso.inference.llamaswap import llamaswap_status
+            from seiso.platform import use_linux_nvidia_inference_guards
+
+            if use_linux_nvidia_inference_guards() and llamaswap_status().available:
+                return BACKEND_LLAMASWAP
+        except Exception:
+            pass
         return BACKEND_LLAMACPP
     if fmt in {"safetensors", "bin"} or path.is_dir():
         backend = detect_backend()

@@ -44,12 +44,119 @@ def _reset_inference_caches():
     clear_gguf_caches()
 
 
-def test_gguf_recommends_llamacpp(tmp_path: Path):
+def test_gguf_recommends_llamacpp(monkeypatch, tmp_path: Path):
     gguf = tmp_path / "model-q4.gguf"
     gguf.write_bytes(b"gguf")
+    monkeypatch.setattr("seiso.platform.use_linux_nvidia_inference_guards", lambda: False)
     assert (
         recommend_backend(model_path=str(gguf), model_format="gguf") == BACKEND_LLAMACPP
     )
+
+
+def test_gguf_auto_prefers_llamaswap_on_native_linux_when_enabled(
+    monkeypatch, tmp_path: Path
+):
+    gguf = tmp_path / "model-q4.gguf"
+    gguf.write_bytes(b"gguf")
+    monkeypatch.setattr("seiso.platform.use_linux_nvidia_inference_guards", lambda: True)
+    monkeypatch.setattr(
+        "seiso.inference.llamaswap.llamaswap_status",
+        lambda: SimpleNamespace(available=True),
+    )
+
+    assert (
+        recommend_backend(model_path=str(gguf), model_format="gguf") == BACKEND_LLAMASWAP
+    )
+    assert (
+        resolve_local_backend(
+            model_path=str(gguf),
+            model_format="gguf",
+            requested="auto",
+        )
+        == BACKEND_LLAMASWAP
+    )
+
+
+def test_gguf_auto_falls_back_when_llamaswap_is_unhealthy(monkeypatch, tmp_path: Path):
+    gguf = tmp_path / "model-q4.gguf"
+    gguf.write_bytes(b"gguf")
+    monkeypatch.setattr("seiso.platform.use_linux_nvidia_inference_guards", lambda: True)
+    monkeypatch.setattr(
+        "seiso.inference.llamaswap.llamaswap_status",
+        lambda: SimpleNamespace(available=False),
+    )
+
+    assert (
+        resolve_local_backend(
+            model_path=str(gguf),
+            model_format="gguf",
+            requested="auto",
+        )
+        == BACKEND_LLAMACPP
+    )
+
+
+def test_torch_prompt_trim_drops_old_turns_and_clamps_generation():
+    from seiso.inference.runner import _trim_torch_messages_to_context
+
+    class FakeTokenizer:
+        model_max_length = 48
+
+        def __call__(self, prompt: str, **_kwargs):
+            return {"input_ids": prompt.split()}
+
+    model = SimpleNamespace(config=SimpleNamespace(max_position_embeddings=48))
+    tokenizer = FakeTokenizer()
+    messages = [
+        {"role": "system", "content": "You are concise."},
+        {"role": "user", "content": "old " * 200},
+        {"role": "assistant", "content": "history " * 200},
+        {"role": "user", "content": "answer this now"},
+    ]
+
+    budget = _trim_torch_messages_to_context(
+        messages,
+        model=model,
+        tokenizer=tokenizer,
+        max_tokens=128,
+    )
+
+    assert budget.messages[-1]["content"] == "answer this now"
+    assert all("history" not in message["content"] for message in budget.messages)
+    assert budget.max_tokens < 128
+    assert budget.input_tokens + budget.max_tokens <= budget.context_limit
+
+
+def test_torch_prepare_inputs_returns_clamped_generation_budget():
+    from seiso.inference.runner import LocalInferenceRunner
+
+    class FakeTensor:
+        shape = (1, 4)
+
+        def to(self, *_args, **_kwargs):
+            return self
+
+    class FakeTokenizer:
+        model_max_length = 16
+
+        def __call__(self, prompt: str, **kwargs):
+            if kwargs.get("return_tensors"):
+                return {"input_ids": FakeTensor()}
+            return {"input_ids": prompt.split()}
+
+    model = SimpleNamespace(
+        config=SimpleNamespace(max_position_embeddings=16),
+        device=SimpleNamespace(type="cpu"),
+    )
+
+    _inputs, _input_len, max_tokens = LocalInferenceRunner._torch_prepare_inputs(
+        model,
+        [{"role": "user", "content": "hello"}],
+        FakeTokenizer(),
+        max_tokens=128,
+    )
+
+    assert max_tokens < 128
 
 
 def _complete_hf_gguf_metadata(filename: str = "model-q4.gguf") -> dict:
