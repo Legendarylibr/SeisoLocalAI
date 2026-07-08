@@ -18,10 +18,7 @@ from forge.services.artifact_integrity import (
 )
 from forge.services.download_progress import ProgressCallback
 from forge.services.hf_auth import resolve_hf_token_for_download
-from forge.services.hf_connectivity import (
-    assert_hub_ready_for_download,
-    check_inference_runtime,
-)
+from forge.services.hf_connectivity import assert_hub_ready_for_download, check_inference_runtime
 from forge.services.hf_hub import (
     download_gguf,
     download_training_snapshot,
@@ -30,10 +27,26 @@ from forge.services.hf_hub import (
     link_inventory,
     resolve_gguf_artifact,
 )
-from forge.services.user_paths import user_dir
+from forge.services.model_download_worker import sync_download_artifacts
 from seiso.io.files import iter_matching_files, path_size_bytes
 from seiso.models.catalog import get_by_repo
-from seiso.security import sanitize_filename
+
+__all__ = [
+    "_assert_disk_space_for_download",
+    "_sync_download_artifacts",
+    "assert_hub_ready_for_download",
+    "download_gguf",
+    "download_training_snapshot",
+    "estimate_snapshot_download_bytes",
+    "find_inventory_for_catalog_repo",
+    "get_by_repo",
+    "link_inventory",
+    "perform_model_download",
+    "path_size_bytes",
+    "resolve_download_variant",
+    "resolve_gguf_artifact",
+    "resolve_hf_token_for_download",
+]
 
 _DOWNLOAD_LOCKS: dict[str, asyncio.Lock] = {}
 _DOWNLOAD_LOCKS_GUARD = threading.Lock()
@@ -193,206 +206,6 @@ def _cached_download_result_if_usable(
     }
 
 
-def _maybe_register_with_ollama(
-    model_path: str,
-    *,
-    catalog_repo: str,
-    metadata: dict[str, Any],
-    model_format: str,
-) -> None:
-    try:
-        from forge.services.ollama_registry import register_model_with_ollama
-
-        metadata["ollama_tag"] = register_model_with_ollama(
-            str(model_path),
-            repo_id=catalog_repo,
-            metadata=metadata,
-            model_format=model_format,
-        )
-    except ValueError:
-        return
-    except Exception:
-        return
-
-
-def _sync_download_artifacts(
-    *,
-    catalog_repo: str,
-    data_dir: Path,
-    hf_cache_dir: Path,
-    settings_hf_token: str | None,
-    db_encryption_key: bytes,
-    user_id: str,
-    filename: str | None = None,
-    revision: str = "main",
-    variant: str = "auto",
-    on_progress: ProgressCallback | None = None,
-) -> dict[str, Any]:
-    """Blocking Hugging Face download — safe to run in a thread pool."""
-    resolved_variant = resolve_download_variant(variant)
-    use_safetensors = resolved_variant == "safetensors"
-    assert_hub_ready_for_download(
-        user_id=user_id,
-        data_dir=data_dir,
-        encryption_key=db_encryption_key,
-        settings_token=settings_hf_token or None,
-    )
-    token, _ = resolve_hf_token_for_download(
-        user_id=user_id,
-        data_dir=data_dir,
-        encryption_key=db_encryption_key,
-        settings_token=settings_hf_token or None,
-    )
-    cache_dir = hf_cache_dir
-    inventory_dir = user_dir(data_dir, user_id, "models")
-    source = f"hf:{catalog_repo}"
-
-    if use_safetensors:
-        _emit_progress(
-            on_progress,
-            {
-                "phase": "resolving",
-                "label": f"Preparing training snapshot for {catalog_repo}",
-                "percent": 0,
-            },
-        )
-        try:
-            snapshot_bytes = estimate_snapshot_download_bytes(
-                catalog_repo,
-                token=token,
-                revision=revision,
-            )
-        except Exception:
-            snapshot_bytes = 0
-        _assert_disk_space_for_download(cache_dir, snapshot_bytes)
-        info = download_training_snapshot(
-            catalog_repo,
-            cache_dir=cache_dir,
-            token=token,
-            revision=revision,
-            on_progress=on_progress,
-        )
-        inv = link_inventory(
-            inventory_dir,
-            sanitize_filename(catalog_repo.replace("/", "--")),
-            Path(info["path"]),
-        )
-        metadata: dict[str, Any] = {"repo_id": catalog_repo, "cache_dir": str(cache_dir)}
-        _maybe_register_with_ollama(
-            str(inv.absolute()),
-            catalog_repo=catalog_repo,
-            metadata=metadata,
-            model_format="safetensors",
-        )
-        return {
-            "variant": "safetensors",
-            "source": source,
-            "name": catalog_repo.split("/")[-1],
-            "path": str(inv.absolute()),
-            "format": "safetensors",
-            "size_bytes": info["size_bytes"],
-            "metadata": metadata,
-            "downloaded": [info["path"]],
-            "repo_id": catalog_repo,
-            "cache_dir": str(cache_dir),
-        }
-
-    _emit_progress(
-        on_progress,
-        {
-            "phase": "resolving",
-            "label": f"Finding GGUF quant for {catalog_repo}",
-            "percent": 0,
-        },
-    )
-    entry = get_by_repo(catalog_repo, token=token)
-    artifact = resolve_gguf_artifact(
-        catalog_repo,
-        token=token,
-        revision=revision,
-        entry=entry,
-        filename=filename,
-    )
-    gguf_repo = artifact["gguf_repo"]
-    gguf_file = artifact["filename"]
-    gguf_files = list(artifact.get("filenames") or [gguf_file])
-    mmproj_file = artifact.get("mmproj_filename")
-    total_bytes = int(artifact.get("size_bytes") or 0)
-    _assert_disk_space_for_download(cache_dir, total_bytes)
-    initial_eta = int(total_bytes / (8 * 1024 * 1024)) if total_bytes > 0 else None
-    _emit_progress(
-        on_progress,
-        {
-            "phase": "download",
-            "label": f"Downloading {gguf_file} from {gguf_repo}",
-            "repo_id": gguf_repo,
-            "total_bytes": total_bytes,
-            "bytes": 0,
-            "percent": 0,
-            "eta_seconds": initial_eta,
-            "speed_bps": 0,
-        },
-    )
-    info = download_gguf(
-        gguf_repo,
-        cache_dir=cache_dir,
-        token=token,
-        revision=revision,
-        filename=gguf_file,
-        filenames=gguf_files,
-        mmproj_filename=mmproj_file,
-        entry=entry,
-        inventory_repo_id=catalog_repo,
-        on_progress=on_progress,
-        total_bytes=total_bytes if total_bytes > 0 else None,
-    )
-    cached = Path(info["path"])
-    inv = link_inventory(inventory_dir, info["inventory_name"], cached)
-    if info.get("mmproj_path") and info.get("mmproj_filename"):
-        inv_parent = Path(info["inventory_name"]).parent
-        mmproj_inventory = str(inv_parent / Path(info["mmproj_filename"]).name)
-        link_inventory(inventory_dir, mmproj_inventory, Path(info["mmproj_path"]))
-    downloaded_paths = [Path(raw) for raw in info.get("paths") or [info["path"]]]
-    try:
-        size_bytes = sum(path.stat().st_size for path in downloaded_paths)
-    except OSError:
-        size_bytes = path_size_bytes(cached)
-    metadata: dict[str, Any] = {
-        "repo_id": catalog_repo,
-        "gguf_repo": gguf_repo,
-        "cache_dir": str(cache_dir),
-        "gguf_file": info["filename"],
-        "gguf_files": info.get("filenames") or [info["filename"]],
-        **(
-            {"mmproj_file": info["mmproj_filename"]}
-            if info.get("mmproj_filename")
-            else {}
-        ),
-    }
-    try:
-        _maybe_register_with_ollama(
-            str(inv.absolute()),
-            catalog_repo=catalog_repo,
-            metadata=metadata,
-            model_format="gguf",
-        )
-    except Exception:
-        pass
-    return {
-        "variant": "gguf",
-        "source": source,
-        "name": cached.name if cached.is_file() else Path(info["filename"]).stem,
-        "path": str(inv.absolute()),
-        "format": "gguf",
-        "size_bytes": size_bytes,
-        "metadata": metadata,
-        "downloaded": [str(path) for path in downloaded_paths],
-        "repo_id": catalog_repo,
-        "gguf_repo": gguf_repo,
-        "cache_dir": str(cache_dir),
-    }
-
-
 async def perform_model_download(
     *,
     user_id: str,
@@ -465,7 +278,7 @@ async def perform_model_download(
         try:
             artifacts = await loop.run_in_executor(
                 None,
-                lambda: _sync_download_artifacts(
+                lambda: sync_download_artifacts(
                     catalog_repo=repo_id,
                     data_dir=data_dir,
                     hf_cache_dir=hf_cache_dir,
@@ -516,3 +329,7 @@ async def perform_model_download(
                 else {}
             ),
         }
+
+
+# Backward-compatible alias for tests and callers that patch the worker.
+_sync_download_artifacts = sync_download_artifacts

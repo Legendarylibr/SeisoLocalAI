@@ -5,35 +5,37 @@ from __future__ import annotations
 import json
 import logging
 import uuid
-from pathlib import Path
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
 from forge.api.deps import get_db, get_export_orchestrator, get_hub_publish_orchestrator
 from forge.api.http_errors import raise_forbidden
 from forge.api.routes._pipeline import PipelineJobResponse
 from forge.api.routes._stream import durable_job_events, spawn_background
+from forge.api.schemas.export import (
+    ExportStartRequest,
+    HubPrecheckRequest,
+    PublishToHubRequest,
+)
 from forge.config import ForgeSettings, get_settings
 from forge.db.store import Database
 from forge.orchestrators.export import ExportOrchestrator
 from forge.orchestrators.hub_publish import HubPublishOrchestrator
 from forge.security.audit import audit_event
 from forge.security.auth import get_current_user_id
+from forge.services.export_publish import loads_json_field, resolve_publish_folder
 from forge.services.hub_publish import (
     HubPublishRequest,
     hub_metadata_from_request,
     resolve_hub_publish_token,
 )
-from forge.services.jobs import assert_job_owner
 from forge.services.job_runtime import run_orchestrated_job
+from forge.services.jobs import assert_job_owner
 from forge.services.publishable import (
     assert_pushable_checkpoint,
-    assert_pushable_model,
-    assert_pushable_path,
     list_publishable_models,
 )
 from forge.services.user_paths import assert_user_path, pick_user_download_file
@@ -42,111 +44,6 @@ from seiso.export.model_card import HubModelMetadata
 from seiso.security import SecurityError
 
 router = APIRouter(prefix="/export", tags=["export"])
-
-
-def _loads_json(raw: Any, fallback: Any) -> Any:
-    if not raw:
-        return fallback
-    if not isinstance(raw, str):
-        return raw
-    try:
-        return json.loads(raw)
-    except json.JSONDecodeError:
-        return fallback
-
-
-class ExportStartRequest(BaseModel):
-    checkpoint: str
-    formats: list[str] = Field(default_factory=lambda: ["merged"])
-    profile: str | None = Field(
-        default=None,
-        description="Export profile: lora_adapter, lora_bundle, full_finetune, full_bundle, inference, gguf_only, hub_ready",
-    )
-    gguf_quantizations: list[str] | None = Field(
-        default=None,
-        description="GGUF quant names; defaults to q4_k_m when omitted",
-    )
-    hub: HubPublishRequest | None = None
-    hub_repo: str | None = Field(
-        default=None, description="Deprecated — use hub.username + hub.model_name"
-    )
-    rl_quant_job_id: str | None = Field(
-        default=None,
-        description="Apply GGUF quants from a completed RL quant recommendation job",
-    )
-
-
-class PublishToHubRequest(BaseModel):
-    model_id: str | None = None
-    output_path: str | None = None
-    export_job_id: str | None = None
-    hub: HubPublishRequest
-
-
-async def _resolve_publish_folder(
-    body: PublishToHubRequest,
-    *,
-    user_id: str,
-    db: Database,
-    data_dir: Path,
-) -> tuple[Path, str | None, str]:
-    """Return (folder, job_id, source) for a publish request."""
-    if body.model_id:
-        model = await assert_pushable_model(db, model_id=body.model_id, user_id=user_id)
-        try:
-            folder = await assert_pushable_path(
-                db,
-                data_dir=data_dir,
-                user_id=user_id,
-                target=model["path"],
-            )
-        except (SecurityError, ValueError) as exc:
-            raise HTTPException(
-                403 if isinstance(exc, SecurityError) else 400, str(exc)
-            ) from exc
-        meta_raw = _loads_json(model.get("metadata_json") or "{}", {})
-        job_id = meta_raw.get("job_id")
-        source = model.get("source") or "export"
-    elif body.export_job_id:
-        job = await db.get_export_job(body.export_job_id, user_id)
-        if not job or job.get("status") != "completed":
-            raise HTTPException(400, "Export job not found or not completed")
-        outputs = _loads_json(job.get("output_paths_json") or "{}", {})
-        if not outputs:
-            raise HTTPException(400, "Export job has no outputs")
-        preferred = next((v for k, v in outputs.items() if "gguf" in k.lower()), None)
-        if not preferred:
-            preferred = outputs.get("merged") or next(iter(outputs.values()))
-        try:
-            folder = await assert_pushable_path(
-                db,
-                data_dir=data_dir,
-                user_id=user_id,
-                target=preferred,
-            )
-        except (SecurityError, ValueError) as exc:
-            raise HTTPException(
-                403 if isinstance(exc, SecurityError) else 400, str(exc)
-            ) from exc
-        job_id = body.export_job_id
-        source = "export"
-    elif body.output_path:
-        try:
-            folder = await assert_pushable_path(
-                db, data_dir=data_dir, user_id=user_id, target=body.output_path
-            )
-        except (SecurityError, ValueError) as exc:
-            raise HTTPException(
-                403 if isinstance(exc, SecurityError) else 400, str(exc)
-            ) from exc
-        job_id = None
-        source = "export"
-    else:
-        raise HTTPException(400, "Provide model_id, export_job_id, or output_path")
-
-    if folder.is_file():
-        folder = folder.parent
-    return folder, job_id, source
 
 
 def _resolve_hub_repo(
@@ -174,13 +71,6 @@ async def export_profiles() -> list[dict]:
     from seiso.export.pipeline import profile_catalog
 
     return profile_catalog()
-
-
-class HubPrecheckRequest(BaseModel):
-    hub: HubPublishRequest
-    formats: list[str] = Field(default_factory=lambda: ["merged"])
-    profile: str | None = None
-    gguf_quantizations: list[str] = Field(default_factory=lambda: ["q4_k_m"])
 
 
 @router.post("/precheck")
@@ -269,7 +159,7 @@ async def start_export(
         if rl_job.get("status") != "completed":
             raise HTTPException(400, "RL quant job is not completed")
         stored = rl_job.get("gguf_quants_json") or "[]"
-        parsed = _loads_json(stored, [])
+        parsed = loads_json_field(stored, [])
         if parsed:
             gguf_quants = parsed
         config["rl_quant_job_id"] = body.rl_quant_job_id
@@ -378,7 +268,7 @@ async def start_publish_to_hub(
     meta.validate()
     repo_id = meta.repo_id
 
-    folder, job_id, source = await _resolve_publish_folder(
+    folder, job_id, source = await resolve_publish_folder(
         body,
         user_id=user_id,
         db=db,
@@ -467,7 +357,7 @@ async def publish_to_hub(
     meta.validate()
     repo_id = meta.repo_id
 
-    folder, job_id, source = await _resolve_publish_folder(
+    folder, job_id, source = await resolve_publish_folder(
         body,
         user_id=user_id,
         db=db,
@@ -525,7 +415,7 @@ async def download_export_output(
     if not job or job.get("status") != "completed":
         raise HTTPException(404, "Export job not found or not completed")
 
-    outputs = _loads_json(job.get("output_paths_json") or "{}", {})
+    outputs = loads_json_field(job.get("output_paths_json") or "{}", {})
     target_raw = outputs.get(key)
     if not target_raw:
         for k, v in outputs.items():
@@ -587,7 +477,7 @@ async def stream_export(
             row = await db.get_export_job(job_id, user_id)
             if row and row.get("error_text"):
                 yield {"event": "error", "data": row["error_text"]}
-            outputs = _loads_json(row.get("output_paths_json") if row else None, {})
+            outputs = loads_json_field(row.get("output_paths_json") if row else None, {})
             if outputs:
                 yield {"event": "result", "data": json.dumps({"outputs": outputs})}
             return

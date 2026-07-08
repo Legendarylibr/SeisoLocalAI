@@ -1,0 +1,164 @@
+"""Chat thread and message persistence."""
+
+from __future__ import annotations
+
+import json
+import uuid
+
+from forge.db.stores.constants import now_iso
+
+
+class ChatMixin:
+    async def get_thread_for_user(self, thread_id: str, user_id: str) -> dict | None:
+        async with (
+            self._conn() as conn,
+            conn.execute(
+                "SELECT * FROM chat_threads WHERE id = ? AND user_id = ?",
+                (thread_id, user_id),
+            ) as cur,
+        ):
+            row = await cur.fetchone()
+            return dict(row) if row else None
+
+    async def get_thread_with_messages(
+        self, thread_id: str, user_id: str
+    ) -> tuple[dict | None, list[dict]]:
+        """Load a thread and its messages in one connection acquisition."""
+        async with self._conn() as conn:
+            async with conn.execute(
+                "SELECT * FROM chat_threads WHERE id = ? AND user_id = ?",
+                (thread_id, user_id),
+            ) as cur:
+                thread_row = await cur.fetchone()
+            if not thread_row:
+                return None, []
+            async with conn.execute(
+                "SELECT * FROM chat_messages WHERE thread_id = ? ORDER BY created_at ASC",
+                (thread_id,),
+            ) as cur:
+                messages = [
+                    self._decrypt_row("chat_messages", dict(r))
+                    for r in await cur.fetchall()
+                ]
+            return dict(thread_row), messages
+
+    async def update_thread_model(self, thread_id: str, model_id: str | None) -> None:
+        now = now_iso()
+        async with self._conn() as conn:
+            await conn.execute(
+                "UPDATE chat_threads SET model_id = ?, updated_at = ? WHERE id = ?",
+                (model_id, now, thread_id),
+            )
+            await conn.commit()
+
+    async def create_thread(
+        self, user_id: str, title: str, model_id: str | None = None
+    ) -> dict:
+        tid = str(uuid.uuid4())
+        now = now_iso()
+        async with self._conn() as conn:
+            await conn.execute(
+                """INSERT INTO chat_threads (id, user_id, title, model_id, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (tid, user_id, title, model_id, now, now),
+            )
+            await conn.commit()
+        return {"id": tid, "title": title, "model_id": model_id, "created_at": now}
+
+    async def count_threads(self, user_id: str) -> int:
+        async with self._conn() as conn:
+            cur = await conn.execute(
+                "SELECT COUNT(*) FROM chat_threads WHERE user_id = ?",
+                (user_id,),
+            )
+            row = await cur.fetchone()
+            return int(row[0]) if row else 0
+
+    async def list_threads(self, user_id: str) -> list[dict]:
+        async with (
+            self._conn() as conn,
+            conn.execute(
+                "SELECT * FROM chat_threads WHERE user_id = ? ORDER BY updated_at DESC",
+                (user_id,),
+            ) as cur,
+        ):
+            return [dict(r) for r in await cur.fetchall()]
+
+    async def delete_thread(self, thread_id: str, user_id: str) -> bool:
+        async with self._conn() as conn:
+            cur = await conn.execute(
+                "SELECT id FROM chat_threads WHERE id = ? AND user_id = ?",
+                (thread_id, user_id),
+            )
+            if not await cur.fetchone():
+                return False
+            await conn.execute(
+                "DELETE FROM chat_messages WHERE thread_id = ?", (thread_id,)
+            )
+            await conn.execute("DELETE FROM chat_threads WHERE id = ?", (thread_id,))
+            await conn.commit()
+            return True
+
+    async def purge_user_chat(self, user_id: str) -> int:
+        """Remove all chat threads and encrypted messages for a user (session end)."""
+        async with self._conn() as conn:
+            await conn.execute(
+                "DELETE FROM chat_messages WHERE thread_id IN (SELECT id FROM chat_threads WHERE user_id = ?)",
+                (user_id,),
+            )
+            cur = await conn.execute(
+                "DELETE FROM chat_threads WHERE user_id = ?", (user_id,)
+            )
+            await conn.commit()
+            return cur.rowcount
+
+    async def add_message(
+        self,
+        thread_id: str,
+        role: str,
+        content: str,
+        metadata: dict | None = None,
+        *,
+        model_id: str | None = None,
+    ) -> dict:
+        mid = str(uuid.uuid4())
+        now = now_iso()
+        enc_content = self._enc(content)
+        enc_metadata = self._enc(json.dumps(metadata or {}))
+        async with self._conn() as conn:
+            await conn.execute(
+                """INSERT INTO chat_messages (id, thread_id, role, content, metadata_json, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (mid, thread_id, role, enc_content, enc_metadata, now),
+            )
+            if model_id is not None:
+                await conn.execute(
+                    "UPDATE chat_threads SET model_id = ?, updated_at = ? WHERE id = ?",
+                    (model_id, now, thread_id),
+                )
+            else:
+                await conn.execute(
+                    "UPDATE chat_threads SET updated_at = ? WHERE id = ?",
+                    (now, thread_id),
+                )
+            await conn.commit()
+        return {
+            "id": mid,
+            "thread_id": thread_id,
+            "role": role,
+            "content": content,
+            "created_at": now,
+        }
+
+    async def get_messages(self, thread_id: str) -> list[dict]:
+        async with (
+            self._conn() as conn,
+            conn.execute(
+                "SELECT * FROM chat_messages WHERE thread_id = ? ORDER BY created_at ASC",
+                (thread_id,),
+            ) as cur,
+        ):
+            return [
+                self._decrypt_row("chat_messages", dict(r))
+                for r in await cur.fetchall()
+            ]
