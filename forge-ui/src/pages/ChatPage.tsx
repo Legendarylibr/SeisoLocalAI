@@ -356,10 +356,14 @@ export function ChatPage() {
         ctxOverride ?? contextDefault,
         options,
       );
+      const safeMax = Math.max(1, Math.min(8192, model?.recommended_max_tokens ?? 2048));
       const maxTokens =
-        readStoredMaxTokensForModel(modelId) ??
-        model?.recommended_max_tokens ??
-        inferenceSettings.maxTokens;
+        Math.min(
+          readStoredMaxTokensForModel(modelId) ??
+            model?.recommended_max_tokens ??
+            inferenceSettings.maxTokens,
+          safeMax,
+        );
       return {
         maxTokens,
         nCtx: ctx === "auto" ? null : ctx,
