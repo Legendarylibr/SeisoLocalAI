@@ -58,12 +58,12 @@ def gpu_batch_tier_caps(gpu_total_mb: int, load_tier: LlamaLoadTier) -> tuple[in
         _MAX_LLAMA_BATCH,
         max(_MIN_LLAMA_BATCH, rounded_batch),
     )
-    normal_ubatch = min(128, max(_MIN_LLAMA_BATCH, normal_batch // 4))
+    normal_ubatch = min(64, max(_NATIVE_LINUX_COMPACT_UBATCH_FLOOR, normal_batch // 4))
     if load_tier == "compact":
         compact_batch = max(_NATIVE_LINUX_COMPACT_BATCH_FLOOR, normal_batch // 2)
         compact_ubatch = max(
             _NATIVE_LINUX_COMPACT_UBATCH_FLOOR,
-            min(normal_ubatch, compact_batch // 2),
+            min(32, normal_ubatch, compact_batch // 2),
         )
         return compact_batch, compact_ubatch
     if load_tier == "minimal":
@@ -75,6 +75,21 @@ def gpu_batch_tier_caps(gpu_total_mb: int, load_tier: LlamaLoadTier) -> tuple[in
         )
         return minimal_batch, minimal_ubatch
     return normal_batch, normal_ubatch
+
+
+def cap_llama_batch_for_context(batch: int, ubatch: int, n_ctx: int) -> tuple[int, int]:
+    """Reduce native Linux prefill/decode batches as KV context gets large."""
+    ctx = max(0, int(n_ctx))
+    if ctx >= 32768:
+        batch = min(batch, 32)
+        ubatch = min(ubatch, 16)
+    elif ctx >= 16384:
+        batch = min(batch, 64)
+        ubatch = min(ubatch, 32)
+    elif ctx >= 8192:
+        batch = min(batch, 128)
+        ubatch = min(ubatch, 64)
+    return max(1, batch), max(1, min(ubatch, batch))
 
 
 def native_linux_batch_defaults(gpu_total_mb: int | None = None) -> tuple[int, int]:
@@ -108,6 +123,8 @@ def clamp_llama_batch_pair(
     min_batch = _MIN_LLAMA_BATCH
     min_ubatch = _MIN_LLAMA_BATCH
     if native_linux_nvidia:
+        min_batch = _NATIVE_LINUX_COMPACT_BATCH_FLOOR
+        min_ubatch = _NATIVE_LINUX_COMPACT_UBATCH_FLOOR
         if load_tier == "compact":
             min_batch = _NATIVE_LINUX_COMPACT_BATCH_FLOOR
             min_ubatch = _NATIVE_LINUX_COMPACT_UBATCH_FLOOR

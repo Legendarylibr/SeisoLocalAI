@@ -642,10 +642,10 @@ def _load_llama_model(
         base_ubatch=int(kwargs.get("n_ubatch") or ladder_ubatch),
         tier=load_tier,
     )
-    full_gpu_profiles = [
-        *memory_profiles,
-        {"n_batch": 128, "n_ubatch": 128, "n_ctx": min(effective_n_ctx, 2048)},
-    ]
+    final_fallback = {"n_batch": 128, "n_ubatch": 128, "n_ctx": min(effective_n_ctx, 2048)}
+    if _mp()._native_linux_nvidia():
+        final_fallback = {"n_batch": 64, "n_ubatch": 32, "n_ctx": min(effective_n_ctx, 2048)}
+    full_gpu_profiles = [*memory_profiles, final_fallback]
     kv_options = _mp()._llama_kv_quant_options(path)
     fitted_layers = _mp().fit_llama_gpu_layers(path, requested, free_mb, n_ctx=effective_n_ctx)
     full_targets = _mp()._llama_full_gpu_targets(requested) if requested != 0 else []
@@ -701,6 +701,7 @@ def _load_llama_model(
                     load_kwargs.pop("op_offload", None)
         _mp()._refresh_headroom_stats(force=True)
         load_kwargs["_model_path"] = path
+        load_kwargs["_native_linux_nvidia"] = _mp()._native_linux_nvidia()
         load_kwargs["_max_tokens"] = max_tokens
         load_kwargs = _prot().clamp_llama_load_kwargs(load_kwargs)
         load_kwargs.pop("_model_path", None)
