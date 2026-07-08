@@ -153,11 +153,11 @@ def _safe_chat_profile(opt: dict[str, Any]) -> dict[str, Any]:
     if model_format == "gguf" and backend == BACKEND_LLAMASWAP and model_path:
         try:
             from seiso.inference.llamaswap import (
-                _sidecar_native_max_tokens,
+                sidecar_max_tokens,
                 sidecar_vram_context_cap,
             )
 
-            max_tokens = int(_sidecar_native_max_tokens(max_tokens))
+            max_tokens = int(sidecar_max_tokens(max_tokens))
             safe_context_max = int(
                 sidecar_vram_context_cap(
                     str(model_path),
