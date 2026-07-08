@@ -68,6 +68,8 @@ __all__ = [
     "sidecar_enabled",
     "sidecar_max_tokens",
     "sidecar_num_ctx",
+    "sidecar_ollama_keep_alive",
+    "sidecar_ollama_num_batch",
     "sidecar_ollama_num_gpu",
     "sidecar_setup_hint",
     "sidecar_stack_ready",
@@ -110,7 +112,7 @@ _SIDECAR_CTX_MARGIN_TOKENS = 256
 # Fraction of *free* (not total) VRAM the sidecar may commit to weights + KV.
 # Leaves slack for the display/compositor and the engine's compute graph so a
 # display-attached consumer GPU cannot be driven into a driver-resetting hang.
-_SIDECAR_VRAM_BUDGET_RATIO = 0.60
+_SIDECAR_VRAM_BUDGET_RATIO = 0.55
 _SIDECAR_VRAM_BUDGET_RATIO_32GB = 0.65
 _SIDECAR_VRAM_BUDGET_RATIO_48GB = 0.70
 _SIDECAR_VRAM_BUDGET_RATIO_WORKSTATION = 0.80
@@ -118,6 +120,21 @@ _SIDECAR_VRAM_RESERVE_MB = 4096
 _SIDECAR_CONSUMER_VRAM_RESERVE_MB = 5120
 _SIDECAR_CONSUMER_LARGE_VRAM_RESERVE_MB = 6144
 _CONSUMER_NVIDIA_RE = re.compile(r"\brtx\s*(?:20|30|40|50)[5-9]0\b", re.I)
+_SIDECAR_CONSUMER_SMALL_FOOTPRINT_RATIO = 0.35
+_SIDECAR_CONSUMER_MEDIUM_FOOTPRINT_RATIO = 0.55
+_SIDECAR_CONSUMER_LARGE_FOOTPRINT_RATIO = 0.75
+_SIDECAR_CONSUMER_SMALL_LAYER_RATIO = 0.50
+_SIDECAR_CONSUMER_MEDIUM_LAYER_RATIO = 0.65
+_SIDECAR_CONSUMER_LARGE_LAYER_RATIO = 0.80
+_SIDECAR_NATIVE_OLLAMA_NUM_BATCH_LOW = 128
+_SIDECAR_NATIVE_OLLAMA_NUM_BATCH = 256
+_SIDECAR_NATIVE_OLLAMA_NUM_BATCH_ROOMY = 512
+_SIDECAR_LOW_HEADROOM_MB = 4096
+_SIDECAR_MID_HEADROOM_MB = 8192
+_SIDECAR_ROOMY_HEADROOM_MB = 16384
+_SIDECAR_NATIVE_OLLAMA_KEEP_ALIVE_LOW = "30s"
+_SIDECAR_NATIVE_OLLAMA_KEEP_ALIVE_MID = "1m"
+_SIDECAR_NATIVE_OLLAMA_KEEP_ALIVE = "2m"
 
 
 def _sidecar_native_linux_nvidia() -> bool:
@@ -215,6 +232,87 @@ def _sidecar_vram_budget_mb(free_mb: int) -> int:
     reserve = _sidecar_vram_reserve_mb(total_mb=total_mb, consumer=consumer)
     reserve_budget = max(0, free - reserve)
     return min(ratio_budget, reserve_budget)
+
+
+def _sidecar_ollama_manual_layer_ratio() -> float | None:
+    """Optional explicit native NVIDIA layer cap for Ollama sidecar acceleration."""
+    raw = env_str("SEISO_OLLAMA_GPU_LAYER_RATIO", "").strip()
+    if raw:
+        try:
+            return max(0.0, min(float(raw), 1.0))
+        except ValueError:
+            pass
+    return None
+
+
+def _sidecar_ollama_manual_layer_cap(total_layers: int) -> int | None:
+    total = max(1, int(total_layers))
+    ratio = _sidecar_ollama_manual_layer_ratio()
+    if ratio is None or ratio >= 1.0:
+        return None
+    return max(0, min(total, int(total * ratio)))
+
+
+def _sidecar_ollama_dynamic_layer_cap(
+    model_path: str,
+    *,
+    budget_mb: int,
+    weight_mb: int,
+    total_layers: int,
+    num_ctx: int,
+) -> int | None:
+    """Consumer NVIDIA offload target based on model footprint and live VRAM budget."""
+    if _sidecar_ollama_manual_layer_ratio() is not None:
+        return _sidecar_ollama_manual_layer_cap(total_layers)
+    manual_cap = _sidecar_ollama_manual_layer_cap(total_layers)
+    if not _sidecar_consumer_nvidia_gpu():
+        return manual_cap
+    budget = max(0, int(budget_mb))
+    if budget <= 0:
+        return 0
+    try:
+        from seiso.memory.protection.llama_kv import llama_kv_cache_reserve_mb
+
+        full_kv_mb = int(
+            llama_kv_cache_reserve_mb(
+                model_path,
+                n_ctx=num_ctx,
+                n_gpu_layers=-1,
+                total_layers=total_layers,
+                weight_mb=weight_mb,
+                free_mb=budget,
+            )
+        )
+    except Exception:
+        # If KV geometry is unavailable, fall back to the fit loop without
+        # applying a small-model throttle.
+        return manual_cap
+
+    full_need_mb = max(1, int(weight_mb) + full_kv_mb)
+    footprint_ratio = full_need_mb / max(1, budget)
+    if footprint_ratio <= _SIDECAR_CONSUMER_SMALL_FOOTPRINT_RATIO:
+        ratio = _SIDECAR_CONSUMER_SMALL_LAYER_RATIO
+    elif footprint_ratio <= _SIDECAR_CONSUMER_MEDIUM_FOOTPRINT_RATIO:
+        ratio = _SIDECAR_CONSUMER_MEDIUM_LAYER_RATIO
+    elif footprint_ratio <= _SIDECAR_CONSUMER_LARGE_FOOTPRINT_RATIO:
+        ratio = _SIDECAR_CONSUMER_LARGE_LAYER_RATIO
+    else:
+        ratio = 1.0
+    dynamic_cap = None if ratio >= 1.0 else max(0, int(max(1, total_layers) * ratio))
+    if manual_cap is None:
+        return dynamic_cap
+    if dynamic_cap is None:
+        return manual_cap
+    return min(manual_cap, dynamic_cap)
+
+
+def _sidecar_headroom_mb() -> int:
+    try:
+        from seiso.memory.protection import headroom_mb
+
+        return max(0, int(headroom_mb()))
+    except Exception:
+        return 0
 
 
 def _sidecar_native_max_tokens(max_tokens: int) -> int:
@@ -324,6 +422,13 @@ def sidecar_ollama_num_gpu(model_path: str, *, num_ctx: int) -> int | None:
     try:
         weight_mb = int(estimate_path_vram_mb(model_path))
         total_layers = max(1, gguf_total_layers(model_path))
+        layer_cap = _sidecar_ollama_dynamic_layer_cap(
+            model_path,
+            budget_mb=budget,
+            weight_mb=weight_mb,
+            total_layers=total_layers,
+            num_ctx=num_ctx,
+        )
         if llama_offload_fits_headroom(
             model_path,
             headroom_mb=budget,
@@ -332,8 +437,11 @@ def sidecar_ollama_num_gpu(model_path: str, *, num_ctx: int) -> int | None:
             weight_mb=weight_mb,
             total_layers=total_layers,
         ):
+            if layer_cap is not None:
+                return layer_cap
             return None
-        for layers in range(total_layers, -1, -1):
+        start_layers = total_layers if layer_cap is None else min(total_layers, layer_cap)
+        for layers in range(start_layers, -1, -1):
             if llama_offload_fits_headroom(
                 model_path,
                 headroom_mb=budget,
@@ -348,6 +456,40 @@ def sidecar_ollama_num_gpu(model_path: str, *, num_ctx: int) -> int | None:
             return 0
         return None
     return 0
+
+
+def sidecar_ollama_num_batch() -> int | None:
+    """Bound Ollama prompt prefill bursts on native NVIDIA hosts."""
+    override = env_str("SEISO_OLLAMA_NUM_BATCH", "").strip()
+    if override:
+        try:
+            value = int(override)
+        except ValueError:
+            value = 0
+        return max(1, value) if value > 0 else None
+    if _sidecar_native_linux_nvidia():
+        free_mb = _sidecar_headroom_mb()
+        if 0 < free_mb < _SIDECAR_MID_HEADROOM_MB:
+            return _SIDECAR_NATIVE_OLLAMA_NUM_BATCH_LOW
+        if free_mb >= _SIDECAR_ROOMY_HEADROOM_MB and not _sidecar_consumer_nvidia_gpu():
+            return _SIDECAR_NATIVE_OLLAMA_NUM_BATCH_ROOMY
+        return _SIDECAR_NATIVE_OLLAMA_NUM_BATCH
+    return None
+
+
+def sidecar_ollama_keep_alive() -> str | None:
+    """Keep GPU residency short so idle models release VRAM promptly."""
+    override = env_str("SEISO_OLLAMA_KEEP_ALIVE", "").strip()
+    if override:
+        return override
+    if _sidecar_native_linux_nvidia():
+        free_mb = _sidecar_headroom_mb()
+        if 0 < free_mb < _SIDECAR_LOW_HEADROOM_MB:
+            return _SIDECAR_NATIVE_OLLAMA_KEEP_ALIVE_LOW
+        if 0 < free_mb < _SIDECAR_MID_HEADROOM_MB:
+            return _SIDECAR_NATIVE_OLLAMA_KEEP_ALIVE_MID
+        return _SIDECAR_NATIVE_OLLAMA_KEEP_ALIVE
+    return None
 
 
 def sidecar_num_ctx(
@@ -559,6 +701,10 @@ class OllamaClient:
             "num_predict": max_tokens,
             "temperature": float(payload.get("temperature", 0.0)),
         }
+        num_batch = sidecar_ollama_num_batch()
+        if num_batch is not None:
+            # Bound prompt prefill bursts on display-attached GPUs.
+            options["num_batch"] = num_batch
         num_gpu = sidecar_ollama_num_gpu(model_path, num_ctx=num_ctx)
         if num_gpu is not None:
             # Force partial CPU offload so weights + KV stay within free VRAM;
@@ -573,6 +719,9 @@ class OllamaClient:
             "stream": stream,
             "options": options,
         }
+        keep_alive = sidecar_ollama_keep_alive()
+        if keep_alive:
+            body["keep_alive"] = keep_alive
         tools = payload.get("tools_schemas")
         if tools:
             body["tools"] = tools

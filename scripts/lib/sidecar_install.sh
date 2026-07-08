@@ -42,16 +42,14 @@ seiso_export_ollama_cli_env() {
 }
 
 # Long-context defaults for the Ollama server (user overrides win):
-# flash attention keeps large contexts efficient and a single parallel slot
-# keeps the whole context budget for one chat. Quantized KV cache (q8_0) is
-# left opt-in — forcing it globally can trigger CUDA errors in Ollama for
-# models/GPUs that don't support it, so only export it when the user set it.
+# flash attention keeps large contexts efficient, q8_0 halves KV memory vs f16,
+# one parallel slot keeps the whole context budget for one chat, and one loaded
+# model prevents multiple resident GGUFs from stacking VRAM on consumer GPUs.
 seiso_export_ollama_server_env() {
   export OLLAMA_FLASH_ATTENTION="${OLLAMA_FLASH_ATTENTION:-1}"
+  export OLLAMA_KV_CACHE_TYPE="${OLLAMA_KV_CACHE_TYPE:-q8_0}"
   export OLLAMA_NUM_PARALLEL="${OLLAMA_NUM_PARALLEL:-1}"
-  if [[ -n "${OLLAMA_KV_CACHE_TYPE:-}" ]]; then
-    export OLLAMA_KV_CACHE_TYPE
-  fi
+  export OLLAMA_MAX_LOADED_MODELS="${OLLAMA_MAX_LOADED_MODELS:-1}"
 }
 
 seiso_native_linux_nvidia() {
@@ -137,6 +135,10 @@ seiso_seed_sidecar_env() {
   seiso_env_set_default "SEISO_OLLAMA_URL" "http://127.0.0.1:11434"
   seiso_env_set_default "SEISO_LLAMASWAP_ENGINE" "auto"
   seiso_env_set_default "SEISO_REQUIRE_SIDECAR" "1"
+  seiso_env_set_default "OLLAMA_FLASH_ATTENTION" "1"
+  seiso_env_set_default "OLLAMA_KV_CACHE_TYPE" "q8_0"
+  seiso_env_set_default "OLLAMA_NUM_PARALLEL" "1"
+  seiso_env_set_default "OLLAMA_MAX_LOADED_MODELS" "1"
 }
 
 seiso_sidecar_fallback_config_path() {

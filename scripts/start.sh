@@ -155,11 +155,9 @@ ensure_inference_sidecars() {
           seiso_export_ollama_server_env
         else
           export OLLAMA_FLASH_ATTENTION="${OLLAMA_FLASH_ATTENTION:-1}"
+          export OLLAMA_KV_CACHE_TYPE="${OLLAMA_KV_CACHE_TYPE:-q8_0}"
           export OLLAMA_NUM_PARALLEL="${OLLAMA_NUM_PARALLEL:-1}"
-          # Quantized KV cache stays opt-in (can trigger CUDA errors in Ollama).
-          if [[ -n "${OLLAMA_KV_CACHE_TYPE:-}" ]]; then
-            export OLLAMA_KV_CACHE_TYPE
-          fi
+          export OLLAMA_MAX_LOADED_MODELS="${OLLAMA_MAX_LOADED_MODELS:-1}"
         fi
         start_background_sidecar "ollama" "$run_dir/ollama.log" ollama serve
         wait_sidecar_health "$ollama_url" "/api/tags" 60 || true

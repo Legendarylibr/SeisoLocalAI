@@ -100,7 +100,7 @@ def _probe_bind(host: str, port: int) -> None:
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
         if hasattr(socket, "SO_REUSEADDR"):
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 0)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         sock.bind((bind_host, port))
     except OSError as exc:
         if _is_addr_in_use(exc):

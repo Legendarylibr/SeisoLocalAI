@@ -1138,6 +1138,8 @@ def test_ollama_request_body_uses_native_chat_options(monkeypatch):
     from seiso.inference.llamaswap import OllamaClient
 
     client = OllamaClient(url="http://127.0.0.1:11434")
+    monkeypatch.setenv("SEISO_OLLAMA_NUM_BATCH", "256")
+    monkeypatch.setenv("SEISO_OLLAMA_KEEP_ALIVE", "30s")
     monkeypatch.setattr(
         client, "_resolve_model", lambda model_path, payload: "seiso/test-model"
     )
@@ -1162,8 +1164,10 @@ def test_ollama_request_body_uses_native_chat_options(monkeypatch):
             "num_ctx": 2048,
             "num_predict": 700,
             "temperature": 0.25,
+            "num_batch": 256,
             "top_p": 0.9,
         },
+        "keep_alive": "30s",
         "tools": [{"type": "function", "function": {"name": "search"}}],
     }
 
@@ -1267,11 +1271,130 @@ def test_sidecar_ollama_num_gpu_env_override(monkeypatch):
     assert llamaswap.sidecar_ollama_num_gpu("/tmp/model.gguf", num_ctx=4096) == 12
 
 
+def test_sidecar_ollama_num_batch_defaults_on_native_linux(monkeypatch):
+    from seiso.inference import llamaswap
+
+    monkeypatch.delenv("SEISO_OLLAMA_NUM_BATCH", raising=False)
+    monkeypatch.setattr(llamaswap, "_sidecar_native_linux_nvidia", lambda: True)
+    monkeypatch.setattr(llamaswap, "_sidecar_headroom_mb", lambda: 10_000)
+    assert llamaswap.sidecar_ollama_num_batch() == 256
+
+
+def test_sidecar_ollama_num_batch_reduces_when_headroom_low(monkeypatch):
+    from seiso.inference import llamaswap
+
+    monkeypatch.delenv("SEISO_OLLAMA_NUM_BATCH", raising=False)
+    monkeypatch.setattr(llamaswap, "_sidecar_native_linux_nvidia", lambda: True)
+    monkeypatch.setattr(llamaswap, "_sidecar_headroom_mb", lambda: 6000)
+    assert llamaswap.sidecar_ollama_num_batch() == 128
+
+
+def test_sidecar_ollama_keep_alive_defaults_on_native_linux(monkeypatch):
+    from seiso.inference import llamaswap
+
+    monkeypatch.delenv("SEISO_OLLAMA_KEEP_ALIVE", raising=False)
+    monkeypatch.setattr(llamaswap, "_sidecar_native_linux_nvidia", lambda: True)
+    monkeypatch.setattr(llamaswap, "_sidecar_headroom_mb", lambda: 10_000)
+    assert llamaswap.sidecar_ollama_keep_alive() == "2m"
+
+
+def test_sidecar_ollama_keep_alive_shortens_when_headroom_low(monkeypatch):
+    from seiso.inference import llamaswap
+
+    monkeypatch.delenv("SEISO_OLLAMA_KEEP_ALIVE", raising=False)
+    monkeypatch.setattr(llamaswap, "_sidecar_native_linux_nvidia", lambda: True)
+    monkeypatch.setattr(llamaswap, "_sidecar_headroom_mb", lambda: 3000)
+    assert llamaswap.sidecar_ollama_keep_alive() == "30s"
+
+
 def test_sidecar_ollama_num_gpu_none_off_native_linux(monkeypatch):
     from seiso.inference import llamaswap
 
     monkeypatch.delenv("SEISO_OLLAMA_NUM_GPU", raising=False)
     monkeypatch.setattr(llamaswap, "_sidecar_native_linux_nvidia", lambda: False)
+    assert llamaswap.sidecar_ollama_num_gpu("/tmp/model.gguf", num_ctx=4096) is None
+
+
+def test_sidecar_ollama_num_gpu_throttles_small_consumer_full_fit(monkeypatch):
+    import seiso.inference.backends as backends_mod
+    import seiso.memory.protection as protection_mod
+    import seiso.memory.protection.llama_kv as kv_mod
+    from seiso.inference import llamaswap
+
+    monkeypatch.delenv("SEISO_OLLAMA_NUM_GPU", raising=False)
+    monkeypatch.delenv("SEISO_OLLAMA_GPU_LAYER_RATIO", raising=False)
+    monkeypatch.setattr(llamaswap, "_sidecar_native_linux_nvidia", lambda: True)
+    monkeypatch.setattr(llamaswap, "_sidecar_consumer_nvidia_gpu", lambda: True)
+    monkeypatch.setattr(protection_mod, "headroom_mb", lambda: 24_000)
+    monkeypatch.setattr(protection_mod, "discrete_gpu_total_mb", lambda: 24_576)
+    monkeypatch.setattr(protection_mod, "estimate_path_vram_mb", lambda p: 3000)
+    monkeypatch.setattr(backends_mod, "gguf_total_layers", lambda p: 32)
+    monkeypatch.setattr(
+        kv_mod,
+        "llama_kv_cache_reserve_mb",
+        lambda *args, **kwargs: 1000,
+    )
+    monkeypatch.setattr(
+        kv_mod,
+        "llama_offload_fits_headroom",
+        lambda model_path, *, headroom_mb, n_gpu_layers, n_ctx, weight_mb, total_layers: True,
+    )
+
+    assert llamaswap.sidecar_ollama_num_gpu("/tmp/model.gguf", num_ctx=4096) == 16
+
+
+def test_sidecar_ollama_num_gpu_allows_more_layers_for_medium_footprint(monkeypatch):
+    import seiso.inference.backends as backends_mod
+    import seiso.memory.protection as protection_mod
+    import seiso.memory.protection.llama_kv as kv_mod
+    from seiso.inference import llamaswap
+
+    monkeypatch.delenv("SEISO_OLLAMA_NUM_GPU", raising=False)
+    monkeypatch.delenv("SEISO_OLLAMA_GPU_LAYER_RATIO", raising=False)
+    monkeypatch.setattr(llamaswap, "_sidecar_native_linux_nvidia", lambda: True)
+    monkeypatch.setattr(llamaswap, "_sidecar_consumer_nvidia_gpu", lambda: True)
+    monkeypatch.setattr(protection_mod, "headroom_mb", lambda: 24_000)
+    monkeypatch.setattr(protection_mod, "discrete_gpu_total_mb", lambda: 24_576)
+    monkeypatch.setattr(protection_mod, "estimate_path_vram_mb", lambda p: 5000)
+    monkeypatch.setattr(backends_mod, "gguf_total_layers", lambda p: 32)
+    monkeypatch.setattr(
+        kv_mod,
+        "llama_kv_cache_reserve_mb",
+        lambda *args, **kwargs: 1000,
+    )
+    monkeypatch.setattr(
+        kv_mod,
+        "llama_offload_fits_headroom",
+        lambda model_path, *, headroom_mb, n_gpu_layers, n_ctx, weight_mb, total_layers: True,
+    )
+
+    assert llamaswap.sidecar_ollama_num_gpu("/tmp/model.gguf", num_ctx=4096) == 20
+
+
+def test_sidecar_ollama_gpu_layer_ratio_override_disables_dynamic_cap(monkeypatch):
+    import seiso.inference.backends as backends_mod
+    import seiso.memory.protection as protection_mod
+    import seiso.memory.protection.llama_kv as kv_mod
+    from seiso.inference import llamaswap
+
+    monkeypatch.delenv("SEISO_OLLAMA_NUM_GPU", raising=False)
+    monkeypatch.setenv("SEISO_OLLAMA_GPU_LAYER_RATIO", "1")
+    monkeypatch.setattr(llamaswap, "_sidecar_native_linux_nvidia", lambda: True)
+    monkeypatch.setattr(llamaswap, "_sidecar_consumer_nvidia_gpu", lambda: True)
+    monkeypatch.setattr(protection_mod, "headroom_mb", lambda: 24_000)
+    monkeypatch.setattr(protection_mod, "estimate_path_vram_mb", lambda p: 3000)
+    monkeypatch.setattr(backends_mod, "gguf_total_layers", lambda p: 32)
+    monkeypatch.setattr(
+        kv_mod,
+        "llama_kv_cache_reserve_mb",
+        lambda *args, **kwargs: 1000,
+    )
+    monkeypatch.setattr(
+        kv_mod,
+        "llama_offload_fits_headroom",
+        lambda model_path, *, headroom_mb, n_gpu_layers, n_ctx, weight_mb, total_layers: True,
+    )
+
     assert llamaswap.sidecar_ollama_num_gpu("/tmp/model.gguf", num_ctx=4096) is None
 
 
@@ -1282,6 +1405,7 @@ def test_sidecar_ollama_num_gpu_full_offload_returns_none(monkeypatch):
     from seiso.inference import llamaswap
 
     monkeypatch.delenv("SEISO_OLLAMA_NUM_GPU", raising=False)
+    monkeypatch.setenv("SEISO_OLLAMA_GPU_LAYER_RATIO", "1")
     monkeypatch.setattr(llamaswap, "_sidecar_native_linux_nvidia", lambda: True)
     monkeypatch.setattr(protection_mod, "headroom_mb", lambda: 24000)
     monkeypatch.setattr(protection_mod, "estimate_path_vram_mb", lambda p: 4000)
@@ -1302,6 +1426,7 @@ def test_sidecar_ollama_num_gpu_partial_offload(monkeypatch):
     from seiso.inference import llamaswap
 
     monkeypatch.delenv("SEISO_OLLAMA_NUM_GPU", raising=False)
+    monkeypatch.setenv("SEISO_OLLAMA_GPU_LAYER_RATIO", "1")
     monkeypatch.setattr(llamaswap, "_sidecar_native_linux_nvidia", lambda: True)
     monkeypatch.setattr(protection_mod, "headroom_mb", lambda: 4000)
     monkeypatch.setattr(protection_mod, "estimate_path_vram_mb", lambda p: 8000)
@@ -1324,6 +1449,7 @@ def test_sidecar_ollama_num_gpu_uses_safer_default_vram_budget(monkeypatch):
     from seiso.inference import llamaswap
 
     monkeypatch.delenv("SEISO_OLLAMA_NUM_GPU", raising=False)
+    monkeypatch.setenv("SEISO_OLLAMA_GPU_LAYER_RATIO", "1")
     monkeypatch.delenv("SEISO_SIDECAR_VRAM_BUDGET_RATIO", raising=False)
     monkeypatch.setattr(llamaswap, "_sidecar_native_linux_nvidia", lambda: True)
     monkeypatch.setattr(protection_mod, "discrete_gpu_total_mb", lambda: 24576)
@@ -1355,6 +1481,7 @@ def test_sidecar_ollama_num_gpu_keeps_consumer_nvidia_budget_at_32gb(
     from seiso.inference import llamaswap
 
     monkeypatch.delenv("SEISO_OLLAMA_NUM_GPU", raising=False)
+    monkeypatch.setenv("SEISO_OLLAMA_GPU_LAYER_RATIO", "1")
     monkeypatch.delenv("SEISO_SIDECAR_VRAM_BUDGET_RATIO", raising=False)
     monkeypatch.setattr(llamaswap, "_sidecar_native_linux_nvidia", lambda: True)
     monkeypatch.setattr(protection_mod, "discrete_gpu_total_mb", lambda: 32768)
@@ -1374,7 +1501,7 @@ def test_sidecar_ollama_num_gpu_keeps_consumer_nvidia_budget_at_32gb(
 
     monkeypatch.setattr(kv_mod, "llama_offload_fits_headroom", _fits)
     assert llamaswap.sidecar_ollama_num_gpu("/tmp/model.gguf", num_ctx=4096) is None
-    assert seen[0] == 12_000
+    assert seen[0] == 11_000
 
 
 def test_sidecar_ollama_num_gpu_budget_ratio_scales_for_larger_nvidia(
@@ -1386,6 +1513,7 @@ def test_sidecar_ollama_num_gpu_budget_ratio_scales_for_larger_nvidia(
     from seiso.inference import llamaswap
 
     monkeypatch.delenv("SEISO_OLLAMA_NUM_GPU", raising=False)
+    monkeypatch.setenv("SEISO_OLLAMA_GPU_LAYER_RATIO", "1")
     monkeypatch.delenv("SEISO_SIDECAR_VRAM_BUDGET_RATIO", raising=False)
     monkeypatch.setattr(llamaswap, "_sidecar_native_linux_nvidia", lambda: True)
     monkeypatch.setattr(protection_mod, "discrete_gpu_total_mb", lambda: 49152)
@@ -1415,6 +1543,7 @@ def test_sidecar_ollama_num_gpu_budget_ratio_env_override(monkeypatch):
     from seiso.inference import llamaswap
 
     monkeypatch.delenv("SEISO_OLLAMA_NUM_GPU", raising=False)
+    monkeypatch.setenv("SEISO_OLLAMA_GPU_LAYER_RATIO", "1")
     monkeypatch.setenv("SEISO_SIDECAR_VRAM_BUDGET_RATIO", "0.9")
     monkeypatch.setenv("SEISO_SIDECAR_VRAM_RESERVE_MB", "0")
     monkeypatch.setattr(llamaswap, "_sidecar_native_linux_nvidia", lambda: True)
@@ -1440,6 +1569,7 @@ def test_sidecar_ollama_num_gpu_fixed_reserve_env_override(monkeypatch):
     from seiso.inference import llamaswap
 
     monkeypatch.delenv("SEISO_OLLAMA_NUM_GPU", raising=False)
+    monkeypatch.setenv("SEISO_OLLAMA_GPU_LAYER_RATIO", "1")
     monkeypatch.delenv("SEISO_SIDECAR_VRAM_BUDGET_RATIO", raising=False)
     monkeypatch.setenv("SEISO_SIDECAR_VRAM_RESERVE_MB", "7000")
     monkeypatch.setattr(llamaswap, "_sidecar_native_linux_nvidia", lambda: True)
