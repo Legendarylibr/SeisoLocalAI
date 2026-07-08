@@ -66,6 +66,7 @@ __all__ = [
     "preferred_llamaswap_engine",
     "preferred_sidecar_engine",
     "sidecar_enabled",
+    "sidecar_max_tokens",
     "sidecar_num_ctx",
     "sidecar_ollama_num_gpu",
     "sidecar_setup_hint",
@@ -235,6 +236,11 @@ def _sidecar_native_max_tokens(max_tokens: int) -> int:
     except Exception:
         cap = 512
     return max(1, min(int(max_tokens), int(cap)))
+
+
+def sidecar_max_tokens(max_tokens: int) -> int:
+    """Public sidecar-safe completion cap for UI defaults and request planning."""
+    return _sidecar_native_max_tokens(max_tokens)
 
 
 def _sidecar_context_ceiling(payload: dict[str, Any], model_path: str) -> int:

@@ -173,7 +173,7 @@ export function ChatInferencePanel({
                 {replyOptions.map((opt) => (
                   <option key={opt} value={opt}>
                     {opt === replyOptions[replyOptions.length - 1]
-                      ? `${formatMaxTokens(opt)} (recommended)`
+                      ? `${formatMaxTokens(opt)} (max safe)`
                       : formatMaxTokens(opt)}
                   </option>
                 ))}
