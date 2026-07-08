@@ -545,7 +545,6 @@ async def chat(
             if can_stream_router:
                 parts: list[str] = []
                 output_tokens = 0
-                completed = False
                 try:
                     orchestrator._emit_log(job_id, "Streaming inference (smart router)")
                     async for token in orchestrator.stream_router(payload):
@@ -561,7 +560,6 @@ async def chat(
                         await db.add_message(body.thread_id, "assistant", content)
                     yield {"event": "message", "data": content}
                     yield {"event": "done", "data": job_id}
-                    completed = True
                 except asyncio.CancelledError:
                     await orchestrator.cancel_generation_for_user(user_id)
                     raise
@@ -569,8 +567,7 @@ async def chat(
                     await orchestrator.cancel_generation_for_user(user_id)
                     yield {"event": "error", "data": str(exc)}
                 finally:
-                    if completed:
-                        orchestrator.end_generation_for_user(user_id)
+                    orchestrator.end_generation_for_user(user_id)
                 return
 
             if can_stream_local:
@@ -583,7 +580,6 @@ async def chat(
                     else (payload.get("inference_backend") or "local")
                 )
                 cancelled = False
-                completed = False
                 try:
                     orchestrator._emit_log(job_id, f"Streaming inference ({backend_label})")
                     async for update in orchestrator.stream_local_updates(payload):
@@ -605,7 +601,6 @@ async def chat(
                         await db.add_message(body.thread_id, "assistant", content)
                     yield {"event": "message", "data": content}
                     yield {"event": "done", "data": job_id}
-                    completed = True
                 except asyncio.CancelledError:
                     cancelled = True
                     raise
@@ -615,7 +610,7 @@ async def chat(
                 finally:
                     if cancelled:
                         await orchestrator.cancel_generation_for_user(user_id)
-                    elif completed:
+                    else:
                         orchestrator.end_generation_for_user(user_id)
                 return
 

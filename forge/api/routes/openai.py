@@ -83,7 +83,6 @@ async def chat_completions(
         async def sse_stream():
             sanitizer = StreamingOutputSanitizer(strip_tool_calls=not body.tools)
             raw_parts: list[str] = []
-            completed = False
             try:
                 async for token in orchestrator.stream_local(payload):
                     raw_parts.append(token)
@@ -126,7 +125,6 @@ async def chat_completions(
                 }
                 yield f"data: {json.dumps(final)}\n\n"
                 yield "data: [DONE]\n\n"
-                completed = True
             except asyncio.CancelledError:
                 await orchestrator.cancel_generation_for_user(user_id)
                 raise
@@ -142,8 +140,7 @@ async def chat_completions(
                 yield f"data: {json.dumps(err)}\n\n"
                 yield "data: [DONE]\n\n"
             finally:
-                if completed:
-                    orchestrator.end_generation_for_user(user_id)
+                orchestrator.end_generation_for_user(user_id)
 
         return StreamingResponse(sse_stream(), media_type="text/event-stream")
 
@@ -189,6 +186,8 @@ async def chat_completions(
                 await orchestrator.cancel_generation_for_user(user_id)
                 yield f"data: {json.dumps({'error': str(exc) or 'Inference failed'})}\n\n"
                 yield "data: [DONE]\n\n"
+            finally:
+                orchestrator.end_generation_for_user(user_id)
 
         return StreamingResponse(job_sse_stream(), media_type="text/event-stream")
 

@@ -95,6 +95,14 @@ if declare -F seiso_native_linux_nvidia >/dev/null 2>&1 && seiso_native_linux_nv
   else
     fail "Neither Ollama nor llama-swap is reachable — run: ollama serve (or configure llama-swap)"
   fi
+  if command -v systemctl >/dev/null 2>&1 && systemctl cat ollama >/dev/null 2>&1; then
+    ollama_unit="$(systemctl cat ollama 2>/dev/null || true)"
+    for key in OLLAMA_FLASH_ATTENTION OLLAMA_KV_CACHE_TYPE OLLAMA_NUM_PARALLEL OLLAMA_MAX_LOADED_MODELS; do
+      if ! grep -q "$key" <<<"$ollama_unit"; then
+        warn "ollama.service missing $key; Seiso may use a separate safe sidecar or you should add a systemd drop-in"
+      fi
+    done
+  fi
   if command -v llama-swap >/dev/null 2>&1; then
     ok "llama-swap fallback: $(command -v llama-swap)"
   else
