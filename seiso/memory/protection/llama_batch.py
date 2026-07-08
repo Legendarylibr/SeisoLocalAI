@@ -123,6 +123,8 @@ def clamp_llama_batch_pair(
     min_batch = _MIN_LLAMA_BATCH
     min_ubatch = _MIN_LLAMA_BATCH
     if native_linux_nvidia:
+        min_batch = _NATIVE_LINUX_COMPACT_BATCH_FLOOR
+        min_ubatch = _NATIVE_LINUX_COMPACT_UBATCH_FLOOR
         if load_tier == "compact":
             min_batch = _NATIVE_LINUX_COMPACT_BATCH_FLOOR
             min_ubatch = _NATIVE_LINUX_COMPACT_UBATCH_FLOOR

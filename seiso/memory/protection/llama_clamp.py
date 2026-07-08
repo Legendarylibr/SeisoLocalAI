@@ -19,6 +19,8 @@ from seiso.memory.protection.constants import (
     _MAX_LLAMA_CTX,
     _MIN_LLAMA_BATCH,
     _MIN_LLAMA_CTX,
+    _NATIVE_LINUX_COMPACT_BATCH_FLOOR,
+    _NATIVE_LINUX_COMPACT_UBATCH_FLOOR,
     _NATIVE_LINUX_CTX_BUCKETS,
     _NATIVE_LINUX_MMPROJ_RESERVE_MB,
 )
@@ -110,11 +112,15 @@ def clamp_llama_load_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
             native_linux_nvidia = seiso_platform.use_linux_nvidia_inference_guards()
     if native_linux_nvidia:
         default_batch, default_ubatch = native_linux_batch_defaults()
+        min_batch = _NATIVE_LINUX_COMPACT_BATCH_FLOOR
+        min_ubatch = _NATIVE_LINUX_COMPACT_UBATCH_FLOOR
     else:
         default_batch, default_ubatch = _MAX_LLAMA_BATCH, 1024
-    out["n_batch"] = max(_MIN_LLAMA_BATCH, int(out.get("n_batch") or default_batch))
+        min_batch = _MIN_LLAMA_BATCH
+        min_ubatch = _MIN_LLAMA_BATCH
+    out["n_batch"] = max(min_batch, int(out.get("n_batch") or default_batch))
     out["n_ubatch"] = max(
-        _MIN_LLAMA_BATCH,
+        min_ubatch,
         min(int(out.get("n_ubatch") or min(out["n_batch"], default_ubatch)), out["n_batch"]),
     )
 

@@ -790,6 +790,27 @@ def test_native_linux_batch_context_caps_step_down_for_long_contexts():
     assert cap_llama_batch_for_context(256, 64, 32768) == (32, 16)
 
 
+def test_clamp_llama_load_kwargs_native_linux_keeps_lower_fallback_batch(monkeypatch):
+    monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: True)
+    monkeypatch.setattr(
+        "seiso.memory.protection.discrete_gpu_total_mb",
+        lambda _profile=None: 24576,
+    )
+
+    kwargs = clamp_llama_load_kwargs(
+        {
+            "_native_linux_nvidia": True,
+            "n_ctx": 2048,
+            "n_batch": 64,
+            "n_ubatch": 32,
+            "n_gpu_layers": -1,
+        }
+    )
+
+    assert kwargs["n_batch"] == 64
+    assert kwargs["n_ubatch"] == 32
+
+
 def test_llama_oom_recovery_batch_never_exceeds_loaded_without_safe_metadata(
     monkeypatch,
 ):
