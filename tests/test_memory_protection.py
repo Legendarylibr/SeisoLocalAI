@@ -10,6 +10,7 @@ from seiso.memory.protection import (
     apply_rl_memory_guards,
     apply_training_memory_guards,
     assess_path_memory_fit,
+    cap_llama_batch_for_context,
     clamp_llama_cache_mb,
     clamp_llama_load_kwargs,
     clamp_llama_n_ctx,
@@ -681,6 +682,38 @@ def test_llama_load_profile_ladder_native_linux_uses_safe_caps_for_roomy_models(
     assert profiles[-1].get("flash_attn") is False
 
 
+def test_llama_load_profile_ladder_native_linux_long_context_caps_batches(
+    monkeypatch, tmp_path
+):
+    gguf = tmp_path / "small.gguf"
+    gguf.write_bytes(b"\x00" * 1024)
+    monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: True)
+    _mock_gpu_total(monkeypatch, 49152)
+    monkeypatch.setattr(
+        "seiso.memory.protection.estimate_path_vram_mb",
+        lambda _path: 1024,
+    )
+    monkeypatch.setattr(
+        "seiso.inference.backends.gguf_block_count",
+        lambda _path: 32,
+    )
+
+    profiles = llama_load_profile_ladder(
+        model_path=str(gguf),
+        n_ctx=16384,
+        n_gpu_layers=-1,
+        free_mb=49152,
+        base_batch=4096,
+        base_ubatch=1024,
+        tier="normal",
+    )
+
+    assert profiles[0]["n_batch"] <= 64
+    assert profiles[0]["n_ubatch"] <= 32
+    assert all(profile["n_batch"] <= 64 for profile in profiles)
+    assert all(profile["n_ubatch"] <= 32 for profile in profiles)
+
+
 def test_clamp_llama_load_kwargs_native_linux_roomy_uses_safe_batches(monkeypatch, tmp_path):
     gguf = tmp_path / "small.gguf"
     gguf.write_bytes(b"\x00" * 1024)
@@ -742,12 +775,19 @@ def test_gpu_batch_tier_caps_unknown_gpu_uses_safe_native_caps():
 
 
 def test_gpu_batch_tier_caps_native_recovery_tiers_step_down():
-    assert gpu_batch_tier_caps(24576, "normal") == (128, 128)
+    assert gpu_batch_tier_caps(24576, "normal") == (128, 32)
     assert gpu_batch_tier_caps(24576, "compact") == (64, 32)
     assert gpu_batch_tier_caps(24576, "minimal") == (32, 16)
-    assert gpu_batch_tier_caps(49152, "normal") == (256, 128)
-    assert gpu_batch_tier_caps(49152, "compact") == (128, 64)
+    assert gpu_batch_tier_caps(49152, "normal") == (256, 64)
+    assert gpu_batch_tier_caps(49152, "compact") == (128, 32)
     assert gpu_batch_tier_caps(49152, "minimal") == (64, 32)
+
+
+def test_native_linux_batch_context_caps_step_down_for_long_contexts():
+    assert cap_llama_batch_for_context(256, 64, 4096) == (256, 64)
+    assert cap_llama_batch_for_context(256, 64, 8192) == (128, 64)
+    assert cap_llama_batch_for_context(256, 64, 16384) == (64, 32)
+    assert cap_llama_batch_for_context(256, 64, 32768) == (32, 16)
 
 
 def test_llama_oom_recovery_batch_never_exceeds_loaded_without_safe_metadata(
@@ -939,10 +979,10 @@ def test_llama_prefill_guard_keeps_roomy_12b_after_load(monkeypatch, tmp_path):
         loaded_headroom_mb=15500,
     )
 
-    assert needs_reload is False
+    assert needs_reload is True
     expected_batch, expected_ubatch = _gpu_normal_caps(24576)
-    assert safe_batch >= expected_batch
-    assert safe_ubatch >= expected_ubatch
+    assert safe_batch <= expected_batch
+    assert safe_ubatch <= expected_ubatch
 
 
 def test_llama_prefill_guard_tight_gemma_27b_caps_safe_at_loaded_batch(monkeypatch, tmp_path):
@@ -974,9 +1014,9 @@ def test_llama_prefill_guard_tight_gemma_27b_caps_safe_at_loaded_batch(monkeypat
         loaded_headroom_mb=24576,
     )
 
-    assert needs_reload is False
+    assert needs_reload is True
     assert safe_batch <= 256
-    assert safe_ubatch <= 128
+    assert safe_ubatch <= 32
     assert safe_ubatch <= safe_batch
 
 
@@ -1406,7 +1446,7 @@ def test_qwen3_14b_roomy_4090_uses_normal_first_profile(monkeypatch, tmp_path):
     )
 
     assert profiles[0]["n_batch"] >= _gpu_normal_caps(24576)[0]
-    assert profiles[0]["n_ubatch"] >= 128
+    assert profiles[0]["n_ubatch"] <= 64
 
 
 def test_llama_load_profile_ladder_native_linux_fallbacks_step_down(monkeypatch, tmp_path):
@@ -1427,8 +1467,8 @@ def test_llama_load_profile_ladder_native_linux_fallbacks_step_down(monkeypatch,
         tier="normal",
     )
 
-    assert [profile["n_batch"] for profile in profiles[:3]] == [256, 128, 64]
-    assert [profile["n_ubatch"] for profile in profiles[:3]] == [128, 64, 32]
+    assert [profile["n_batch"] for profile in profiles[:3]] == [128, 128, 64]
+    assert [profile["n_ubatch"] for profile in profiles[:3]] == [64, 32, 32]
     assert profiles[1]["n_ctx"] == 4096
     assert profiles[2]["n_ctx"] == 2048
 

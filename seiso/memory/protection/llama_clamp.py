@@ -22,7 +22,11 @@ from seiso.memory.protection.constants import (
     _NATIVE_LINUX_CTX_BUCKETS,
     _NATIVE_LINUX_MMPROJ_RESERVE_MB,
 )
-from seiso.memory.protection.llama_batch import clamp_llama_batch_pair, native_linux_batch_defaults
+from seiso.memory.protection.llama_batch import (
+    cap_llama_batch_for_context,
+    clamp_llama_batch_pair,
+    native_linux_batch_defaults,
+)
 from seiso.memory.protection.llama_kv import _host_os_reserve_mb
 from seiso.memory.protection.llama_runtime import (
     llama_host_batch_headroom_mb,
@@ -115,6 +119,7 @@ def clamp_llama_load_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
     )
 
     n_gpu_layers = int(out.get("n_gpu_layers") or 0)
+    tight = False
     if model_path:
         free_mb = protection().headroom_mb()
         tight = protection().llama_model_is_tight_vram_fit(
@@ -160,6 +165,7 @@ def clamp_llama_load_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
             min(out["n_ubatch"], max_ubatch),
             native_linux_nvidia=native_linux_nvidia,
             tight=tight,
+            gpu_total_mb=free_mb if native_linux_nvidia else None,
         )
         if (
             native_linux_nvidia
@@ -197,6 +203,20 @@ def clamp_llama_load_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
     )
     if n_ctx > ctx_cap:
         out["n_ctx"] = ctx_cap
+        n_ctx = ctx_cap
+    if native_linux_nvidia:
+        out["n_batch"], out["n_ubatch"] = clamp_llama_batch_pair(
+            int(out.get("n_batch") or 0),
+            int(out.get("n_ubatch") or 0),
+            native_linux_nvidia=True,
+            tight=tight,
+            gpu_total_mb=protection().discrete_gpu_total_mb() or protection().headroom_mb(),
+        )
+        out["n_batch"], out["n_ubatch"] = cap_llama_batch_for_context(
+            int(out.get("n_batch") or 0),
+            int(out.get("n_ubatch") or 0),
+            n_ctx,
+        )
     return out
 
 

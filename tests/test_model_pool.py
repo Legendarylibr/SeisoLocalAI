@@ -1600,7 +1600,7 @@ def test_qwen3_14b_24gb_load_uses_full_gpu_kwargs(monkeypatch, tmp_path):
     assert first["n_gpu_layers"] == -1
     tier_batch, tier_ubatch = gpu_batch_tier_caps(24576, "normal")
     assert 128 <= first["n_batch"] <= tier_batch
-    assert 128 <= first["n_ubatch"] <= tier_ubatch
+    assert first["n_ubatch"] <= tier_ubatch
     assert "flash_attn" not in first
 
 

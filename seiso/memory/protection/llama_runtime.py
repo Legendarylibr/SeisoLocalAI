@@ -28,6 +28,7 @@ from seiso.memory.protection.constants import (
     LlamaLoadTier,
 )
 from seiso.memory.protection.llama_batch import (
+    cap_llama_batch_for_context,
     clamp_llama_batch_pair,
     gpu_batch_tier_caps,
     resolve_llama_batch_limits,
@@ -354,6 +355,8 @@ def resolve_llama_model_batches(
         load_tier=load_tier,
         tight=tight,
     )
+    if native_linux_nvidia:
+        batch, ubatch = cap_llama_batch_for_context(batch, ubatch, n_ctx)
     return batch, ubatch, tight
 
 
@@ -429,6 +432,8 @@ def llama_prefill_needs_reload(
         and not prefill_exceeds_safe
         and not vision_prefill
         and handle_within_tier
+        and loaded_batch <= safe_batch
+        and loaded_ubatch <= safe_ubatch
     )
     headroom_shrank = (
         loaded_headroom_mb is not None
@@ -523,6 +528,8 @@ def llama_load_profile_ladder(
     if native_linux_nvidia and tier != "normal":
         base_batch = min(base_batch, requested_batch)
         base_ubatch = min(base_ubatch, requested_ubatch, base_batch)
+    if native_linux_nvidia:
+        base_batch, base_ubatch = cap_llama_batch_for_context(base_batch, base_ubatch, n_ctx)
 
     steps: list[tuple[int, int, int | None, bool]] = []
     native_flash_ok = not native_linux_nvidia or env_bool("SEISO_LLAMA_UNSAFE_FLASH_ATTN", False)
@@ -549,8 +556,8 @@ def llama_load_profile_ladder(
             compact_batch, compact_ubatch = gpu_batch_tier_caps(gpu_total, "compact")
             minimal_batch, minimal_ubatch = gpu_batch_tier_caps(gpu_total, "minimal")
             fallback_steps = (
-                (compact_batch, compact_ubatch, min(n_ctx, 4096)),
-                (minimal_batch, minimal_ubatch, min(n_ctx, 2048)),
+                (*cap_llama_batch_for_context(compact_batch, compact_ubatch, 8192), min(n_ctx, 4096)),
+                (*cap_llama_batch_for_context(minimal_batch, minimal_ubatch, 16384), min(n_ctx, 2048)),
             )
         else:
             fallback_steps = (
