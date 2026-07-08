@@ -420,6 +420,23 @@ def test_native_linux_llama_context_defaults_to_stable_bucket(monkeypatch):
         default=4096,
     )
 
+    assert n_ctx == 2048
+
+
+def test_native_linux_llama_context_stable_bucket_requires_sticky_override(monkeypatch):
+    from seiso.inference.tuning import estimate_llama_n_ctx
+
+    monkeypatch.delenv("SEISO_LLAMA_DYNAMIC_CTX", raising=False)
+    monkeypatch.setenv("SEISO_LLAMA_NATIVE_STABLE_N_CTX", "4096")
+    monkeypatch.setenv("SEISO_LLAMA_UNSAFE_STICKY_CTX", "1")
+    monkeypatch.setattr("seiso.platform.use_linux_nvidia_inference_guards", lambda: True)
+
+    n_ctx = estimate_llama_n_ctx(
+        [{"role": "user", "content": "long prompt " * 4000}],
+        max_tokens=512,
+        default=4096,
+    )
+
     assert n_ctx == 4096
 
 
@@ -1981,6 +1998,57 @@ def test_warm_model_preloads_torch_speculative_pair(monkeypatch):
             {"load_in_4bit": True},
         )
     ]
+
+
+def test_warm_model_uses_chat_sized_llama_context(monkeypatch):
+    import seiso.inference.runner as runner_mod
+    from seiso.inference.runner import LocalInferenceRunner
+
+    runner = LocalInferenceRunner()
+    seen_ctx: list[int] = []
+    trim_ctxs: list[int] = []
+    estimates = iter([8192, 4096])
+
+    class FakeLlama:
+        _seiso_load_tier = "normal"
+        _seiso_n_batch = 128
+        _seiso_n_ubatch = 32
+        _seiso_n_gpu_layers = -1
+        _seiso_load_headroom_mb = 24576
+        _seiso_model_path = "/tmp/model.gguf"
+
+    monkeypatch.setattr(runner, "_resolve_route", lambda _payload, path: ("llama", path))
+    monkeypatch.setattr(
+        runner_mod,
+        "estimate_llama_n_ctx",
+        lambda *_a, **_k: next(estimates),
+    )
+    monkeypatch.setattr(
+        runner_mod,
+        "trim_llama_messages_to_context",
+        lambda messages, *, n_ctx, **_k: trim_ctxs.append(int(n_ctx)) or messages,
+    )
+    monkeypatch.setattr(
+        runner._pool,
+        "get_llama",
+        lambda _path, n_ctx=4096, *, tier="normal", max_tokens=512: seen_ctx.append(n_ctx)
+        or FakeLlama(),
+    )
+    monkeypatch.setattr(
+        "seiso.inference.runner.llama_prefill_needs_reload",
+        lambda **_kwargs: (False, 128, 32),
+    )
+
+    runner.warm_model(
+        {
+            "model_path": "/tmp/model.gguf",
+            "messages": [{"role": "user", "content": "long prompt"}],
+            "max_tokens": 128,
+        }
+    )
+
+    assert seen_ctx == [4096]
+    assert trim_ctxs[:2] == [8192, 4096]
 
 
 def test_warm_model_preloads_dflash_speculative_components(monkeypatch):

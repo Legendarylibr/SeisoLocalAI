@@ -140,6 +140,11 @@ def _trim_message_content_to_token_budget(content: Any, token_budget: int) -> An
                 out.append(part)
                 continue
             part_type = str(part.get("type", "text")).lower()
+            if part_type in {"image", "image_url"}:
+                if remaining >= _VISION_TOKENS_PER_IMAGE:
+                    out.append(part)
+                    remaining = max(0, remaining - _VISION_TOKENS_PER_IMAGE)
+                continue
             if part_type not in {"text", "input_text"}:
                 out.append(part)
                 continue

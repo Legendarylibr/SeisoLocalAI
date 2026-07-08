@@ -170,7 +170,7 @@ def estimate_llama_n_ctx(
     dynamic_ctx = env_bool("SEISO_LLAMA_DYNAMIC_CTX", not native_linux_nvidia)
     if not dynamic_ctx:
         if native_linux_nvidia:
-            default = env_int("SEISO_LLAMA_NATIVE_STABLE_N_CTX", default)
+            default = env_int("SEISO_LLAMA_NATIVE_STABLE_N_CTX", min(default, 2048))
         sized = bucket_llama_n_ctx(default, ceiling=ceiling)
         return clamp_llama_n_ctx(
             sized,
