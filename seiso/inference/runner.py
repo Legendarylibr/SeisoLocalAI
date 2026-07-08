@@ -456,13 +456,7 @@ class LocalInferenceRunner:
                     resolved_path, draft_path, load_in_4bit=True
                 )
         else:
-            messages = payload.get("messages") or []
-            n_ctx = payload.get("n_ctx") or estimate_llama_n_ctx(
-                messages,
-                max_tokens=int(payload.get("max_tokens", 1)),
-                model_path=resolved_path,
-                model_format=payload.get("model_format"),
-            )
+            messages, n_ctx = _prepare_llama_messages(payload, resolved_path)
             self._pool.acquire_llama_inference()
             try:
                 llm = self._pool.get_llama(
@@ -475,7 +469,7 @@ class LocalInferenceRunner:
                         llm,
                         messages,
                         n_ctx=n_ctx,
-                        max_tokens=int(payload.get("max_tokens", 1)),
+                        max_tokens=int(payload.get("max_tokens", 512)),
                     )
                     messages = budget.messages
                     llm = self._llama_guard_prefill(

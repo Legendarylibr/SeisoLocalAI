@@ -240,6 +240,26 @@ def test_trim_llama_messages_to_context_leaves_short_prompt_unchanged():
     assert trim_llama_messages_to_context(messages, n_ctx=4096, max_tokens=256) is messages
 
 
+def test_trim_llama_messages_to_context_drops_images_over_budget():
+    messages = [
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "describe"},
+                {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}},
+                {"type": "image_url", "image_url": {"url": "data:image/png;base64,BBBB"}},
+            ],
+        }
+    ]
+
+    trimmed = trim_llama_messages_to_context(messages, n_ctx=512, max_tokens=128)
+
+    content = trimmed[0]["content"]
+    assert isinstance(content, list)
+    assert [part.get("type") for part in content].count("image_url") == 0
+    assert any(part.get("type") == "text" for part in content)
+
+
 def test_clamp_llama_n_ctx_respects_headroom(monkeypatch):
     monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 3072)
     n_ctx = clamp_llama_n_ctx(
