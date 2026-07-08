@@ -122,6 +122,11 @@ export type InferenceModelOption = {
   status?: "ready" | "incomplete" | string;
   status_note?: string;
   context_ceiling?: number;
+  recommended_max_tokens?: number;
+  recommended_context_window?: "auto" | number;
+  safe_context_window_options?: number[];
+  safe_context_window_max?: number;
+  chat_safety_note?: string;
   architecture?: string | null;
   is_moe?: boolean;
   uses_swa?: boolean;
