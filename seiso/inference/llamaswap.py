@@ -310,6 +310,8 @@ def plan_sidecar_request(
     max_tokens = _sidecar_native_max_tokens(int(payload.get("max_tokens", 512)))
     ceiling = _sidecar_context_ceiling(payload, model_path)
     ceiling = sidecar_vram_context_cap(model_path, ceiling, max_tokens=max_tokens)
+    if payload.get("n_ctx"):
+        ceiling = min(ceiling, max(2048, int(payload["n_ctx"])))
     num_ctx = sidecar_num_ctx(messages, max_tokens=max_tokens, ceiling=ceiling)
     messages = trim_llama_messages_to_context(
         messages, n_ctx=num_ctx, max_tokens=max_tokens

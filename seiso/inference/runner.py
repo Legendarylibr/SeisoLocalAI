@@ -697,14 +697,10 @@ class LocalInferenceRunner:
 
     @staticmethod
     def _estimate_dflash_n_ctx(payload: dict[str, Any], draft_path: str) -> int:
-        return int(
-            payload.get("n_ctx")
-            or estimate_llama_n_ctx(
-                payload.get("messages") or [],
-                max_tokens=int(payload.get("max_tokens", 512)),
-                model_path=draft_path,
-                model_format="gguf",
-            )
+        return _llama_n_ctx_for_payload(
+            {**payload, "model_format": "gguf"},
+            payload.get("messages") or [],
+            model_path=draft_path,
         )
 
     def _iter_tokens(

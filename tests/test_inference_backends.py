@@ -1115,6 +1115,25 @@ def test_plan_sidecar_request_trims_only_at_model_ceiling():
     assert total_chars < len(huge["messages"][0]["content"])
 
 
+def test_plan_sidecar_request_treats_n_ctx_as_cap(monkeypatch):
+    from seiso.inference.llamaswap import plan_sidecar_request
+
+    monkeypatch.setenv("SEISO_SIDECAR_NUM_CTX", "32768")
+    payload = {
+        "messages": [{"role": "user", "content": "word " * 6000}],
+        "max_tokens": 512,
+        "n_ctx": 4096,
+    }
+
+    messages, num_ctx, max_tokens = plan_sidecar_request(payload, "/tmp/model.gguf")
+
+    assert num_ctx == 4096
+    assert max_tokens == 512
+    assert sum(len(str(m.get("content", ""))) for m in messages) < len(
+        payload["messages"][0]["content"]
+    )
+
+
 def test_ollama_request_body_uses_native_chat_options(monkeypatch):
     from seiso.inference.llamaswap import OllamaClient
 
@@ -2097,6 +2116,26 @@ def test_warm_model_preloads_dflash_speculative_components(monkeypatch):
     ]
 
 
+def test_dflash_explicit_context_is_clamped(monkeypatch):
+    from seiso.inference.runner import LocalInferenceRunner
+
+    monkeypatch.setattr(
+        "seiso.inference.context_limits.effective_context_ceiling",
+        lambda *_a, **_k: 4096,
+    )
+
+    n_ctx = LocalInferenceRunner._estimate_dflash_n_ctx(
+        {
+            "messages": [{"role": "user", "content": "hi"}],
+            "max_tokens": 128,
+            "n_ctx": 131072,
+        },
+        "/tmp/dflash.gguf",
+    )
+
+    assert n_ctx == 4096
+
+
 def test_dflash_speculative_stream_loads_draft_with_estimated_context(monkeypatch):
     import seiso.inference.runner as runner_mod
     from seiso.inference.runner import LocalInferenceRunner
@@ -2105,12 +2144,16 @@ def test_dflash_speculative_stream_loads_draft_with_estimated_context(monkeypatc
     runner = LocalInferenceRunner()
     calls: list[tuple[str, tuple, dict]] = []
 
+    class _Tokenizer:
+        def __call__(self, prompt, **_kwargs):
+            return {"input_ids": prompt.split()}
+
     monkeypatch.setattr(runner_mod, "configure_torch_inference", lambda: None)
     monkeypatch.setattr(runner_mod, "is_dflash_draft", lambda _path: True)
     monkeypatch.setattr(
         runner._pool,
         "get_torch",
-        lambda *_args, **_kwargs: (object(), object()),
+        lambda *_args, **_kwargs: (object(), _Tokenizer()),
     )
     monkeypatch.setattr(
         runner_mod.LocalInferenceRunner,
