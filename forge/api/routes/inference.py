@@ -8,7 +8,6 @@ import uuid
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
 from forge.api.deps import get_db, get_inference_orchestrator
@@ -16,7 +15,7 @@ from forge.api.routes._inference_common import (
     _assert_inference_gpu_available,
     _begin_generation_or_raise,
 )
-from forge.api.routes.models import _schedule_hf_cache_inventory_sync
+from forge.api.schemas.inference import ChatRequest, PreloadRequest, ThreadCreate
 from forge.config import ForgeSettings, get_settings
 from forge.db.store import Database
 from forge.orchestrators.inference import InferenceOrchestrator
@@ -24,6 +23,7 @@ from forge.security.auth import get_current_user_id
 from forge.services.chat_messages import build_trusted_messages
 from forge.services.download_progress import estimate_load_eta_seconds
 from forge.services.hardware import hardware_profile
+from forge.services.hf_cache_sync import schedule_hf_cache_inventory_sync
 from forge.services.inference_chat import (
     prepare_local_chat_target,
     resolve_draft_model,
@@ -40,46 +40,6 @@ from forge.services.model_router_client import ROUTER_MODEL_ID, fetch_router_sta
 from forge.tools.sanitize import normalize_text
 
 router = APIRouter(prefix="/inference", tags=["inference"])
-
-
-class ChatRequest(BaseModel):
-    thread_id: str | None = None
-    model_id: str | None = None
-    model_path: str | None = None
-    draft_model_id: str | None = None
-    draft_model_path: str | None = None
-    num_speculative_tokens: int | None = Field(default=None, ge=1, le=32)
-    inference_backend: str = Field(
-        default="auto", description="auto | llamacpp | llamaswap | mlx | torch"
-    )
-    messages: list[dict[str, str]] = Field(default_factory=list)
-    max_tokens: int = Field(default=2048, ge=1, le=8192)
-    n_ctx: int | None = Field(default=None, ge=2048, le=131072)
-    temperature: float = Field(default=0.7, ge=0, le=2)
-    top_p: float | None = Field(default=None, ge=0, le=1)
-    stream: bool = True
-    tools: bool = False
-    allow_code_exec: bool = False
-    provider_id: str | None = None
-    knowledge_base_id: str | None = None
-    router_model: str | None = Field(
-        default=None,
-        description="Optional explicit specialist model id for Smart Router",
-    )
-
-
-class ThreadCreate(BaseModel):
-    title: str = "New chat"
-    model_id: str | None = None
-
-
-class PreloadRequest(BaseModel):
-    model_id: str
-    inference_backend: str = Field(
-        default="auto", description="auto | llamacpp | llamaswap | mlx | torch"
-    )
-    max_tokens: int = Field(default=2048, ge=1, le=8192)
-    n_ctx: int | None = Field(default=None, ge=2048, le=131072)
 
 
 @router.post("/threads")
@@ -112,7 +72,7 @@ async def inference_models(
     """Unified model dropdown: HF Hub inventory, CLI paths, fine-tune/export outputs."""
     from forge.services.hardware import hardware_summary
 
-    await _schedule_hf_cache_inventory_sync(
+    await schedule_hf_cache_inventory_sync(
         db,
         user_id,
         data_dir=settings.data_dir,

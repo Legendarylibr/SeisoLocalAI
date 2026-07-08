@@ -2,48 +2,60 @@
 
 from __future__ import annotations
 
-import json
 import os
-import re
 import shutil
 import time
-import urllib.error
-import urllib.parse
-import urllib.request
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import partial
 from pathlib import Path
 from typing import Any, TypeVar
 
 from forge.services.download_progress import ProgressCallback, make_tqdm_class
+from forge.services.hf_hub_gguf_select import (
+    _complete_shard_group_for,
+    _gguf_artifact_likely_vision,
+    _inventory_name_for_files,
+    _pick_gguf_file,
+    _pick_gguf_files,
+    _pick_mmproj_file,
+)
+from forge.services.hf_hub_search import (
+    _first_repo_with_gguf,
+    _gguf_artifact_cache,
+    _gguf_repo_cache,
+    _list_repo_files,
+    get_gguf_file_size_bytes,
+    repo_has_gguf,
+    search_huggingface_datasets,
+    search_huggingface_gguf_repos,
+)
 from seiso.io.files import model_weight_size_bytes
 from seiso.models.catalog import CatalogEntry, get_by_repo
-from seiso.models.gguf_quant import rank_gguf_filenames
 from seiso.models.hub_errors import format_hub_error
 from seiso.models.trainable_snapshot import snapshot_has_trainable_weights
-from seiso.models.trusted_gguf import (
-    filter_trusted_gguf_search_results,
-    gguf_mirror_candidates,
-)
-from seiso.security import sanitize_filename
-from seiso.ttl_cache import TtlCache
+from seiso.models.trusted_gguf import gguf_mirror_candidates
 
-_HF_API = "https://huggingface.co/api"
-_gguf_artifact_cache: TtlCache[str, dict[str, Any]] = TtlCache(
-    ttl_s=86_400.0, max_entries=128
-)
-_gguf_repo_cache: TtlCache[str, str] = TtlCache(ttl_s=86_400.0, max_entries=256)
-_repo_gguf_cache: TtlCache[str, bool] = TtlCache(ttl_s=3_600.0, max_entries=512)
-_file_size_cache: TtlCache[str, int] = TtlCache(ttl_s=86_400.0, max_entries=512)
 _DOWNLOAD_RETRIES = 3
 _DOWNLOAD_RETRY_BACKOFF_S = 2.0
-_GGUF_SHARD_RE = re.compile(
-    r"^(?P<prefix>.+)-(?P<index>\d{5})-of-(?P<total>\d{5})\.gguf$",
-    re.I,
-)
 
 T = TypeVar("T")
+
+__all__ = [
+    "_complete_shard_group_for",
+    "_format_hub_download_error",
+    "_pick_gguf_file",
+    "_pick_gguf_files",
+    "download_gguf",
+    "download_training_snapshot",
+    "estimate_snapshot_download_bytes",
+    "get_gguf_file_size_bytes",
+    "link_inventory",
+    "repo_has_gguf",
+    "resolve_gguf_artifact",
+    "resolve_gguf_repo",
+    "search_huggingface_datasets",
+    "search_huggingface_gguf_repos",
+]
 
 
 def _snapshot_max_workers() -> int:
@@ -92,392 +104,6 @@ def _with_download_retries(fn: Callable[[], T], *, repo_id: str) -> T:
     raise ValueError(
         _format_hub_download_error(last_exc, repo_id=repo_id)
     ) from last_exc
-
-
-def _pick_gguf_file(
-    files: list[str],
-    *,
-    preferred_quant: str = "Q4_K_M",
-    repo_id: str = "",
-) -> str | None:
-    files = _pick_gguf_files(files, preferred_quant=preferred_quant, repo_id=repo_id)
-    return files[0] if files else None
-
-
-def _pick_mmproj_files(files: list[str]) -> list[str]:
-    return sorted(
-        f
-        for f in files
-        if f.lower().endswith(".gguf")
-        and ("mmproj" in f.lower() or f.lower().startswith("mmproj"))
-    )
-
-
-def _gguf_artifact_likely_vision(
-    catalog_repo_id: str,
-    *,
-    gguf_filename: str | None = None,
-    entry: CatalogEntry | None = None,
-) -> bool:
-    from seiso.inference.llama_vision import repo_likely_needs_mmproj
-
-    task = getattr(entry, "task", None)
-    task_value = task.value if hasattr(task, "value") else task
-    return repo_likely_needs_mmproj(
-        catalog_repo_id,
-        gguf_filename=gguf_filename,
-        tags=getattr(entry, "tags", None),
-        task=task_value,
-    )
-
-
-def _pick_mmproj_file(
-    files: list[str],
-    *,
-    preferred_quant: str = "Q8_0",
-) -> str | None:
-    mmprojs = _pick_mmproj_files(files)
-    if not mmprojs:
-        return None
-    preferred_quant = preferred_quant.upper()
-    for hint in (preferred_quant, "Q8_0", "Q6_K", "F16", "F32", "BF16"):
-        matched = [f for f in mmprojs if hint in f.upper()]
-        if matched:
-            return sorted(matched)[0]
-    return mmprojs[0]
-
-
-def _complete_shard_group_for(files: list[str], filename: str) -> list[str]:
-    """Return the full shard group for an explicit GGUF, or raise if incomplete."""
-    name = Path(filename).name
-    match = _GGUF_SHARD_RE.match(name)
-    if not match:
-        return [filename]
-    prefix = match.group("prefix")
-    total = match.group("total")
-    key_prefix = str(Path(filename).parent / prefix)
-    group: list[str] = []
-    indices: set[int] = set()
-    for item in files:
-        item_name = Path(item).name
-        item_match = _GGUF_SHARD_RE.match(item_name)
-        if not item_match:
-            continue
-        item_key = (
-            str(Path(item).parent / item_match.group("prefix")),
-            item_match.group("total"),
-        )
-        if item_key != (key_prefix, total):
-            continue
-        group.append(item)
-        try:
-            indices.add(int(item_match.group("index")))
-        except ValueError:
-            continue
-    try:
-        expected = int(total)
-    except ValueError as exc:
-        raise ValueError(f"Invalid GGUF shard total in {filename}") from exc
-    if len(group) != expected or indices != set(range(1, expected + 1)):
-        raise ValueError(
-            f"Incomplete GGUF shard group for {filename} "
-            f"(found {len(group)}/{expected} shards)"
-        )
-    return sorted(group)
-
-
-def _pick_gguf_files(
-    files: list[str],
-    *,
-    preferred_quant: str = "Q4_K_M",
-    repo_id: str = "",
-) -> list[str]:
-    ggufs = [
-        f
-        for f in files
-        if f.lower().endswith(".gguf")
-        and "mmproj" not in f.lower()
-        and not f.lower().startswith("mmproj")
-    ]
-    if not ggufs:
-        return []
-    preferred_quant = preferred_quant.upper()
-
-    def quant_matches(candidates: list[str]) -> list[str]:
-        normalized_preferred = preferred_quant.replace("-", "_")
-        exact = [
-            f
-            for f in candidates
-            if normalized_preferred in f.upper().replace("-", "_")
-        ]
-        if exact:
-            return exact
-        return rank_gguf_filenames(candidates, preferred=preferred_quant)
-
-    pool = quant_matches(ggufs)
-
-    moe_match = re.search(r"a(\d+(?:\.\d+)?)b", repo_id, re.I)
-    if moe_match:
-        active = moe_match.group(0).lower()
-        active_hits = [f for f in pool if active in f.lower().replace("_", "-")]
-        if active_hits:
-            pool = active_hits
-
-    shard_groups: dict[tuple[str, str], list[str]] = {}
-    for filename in pool:
-        name = Path(filename).name
-        match = _GGUF_SHARD_RE.match(name)
-        if not match:
-            continue
-        key = (str(Path(filename).parent / match.group("prefix")), match.group("total"))
-        shard_groups.setdefault(key, []).append(filename)
-    complete_groups: list[list[str]] = []
-    incomplete_shards = False
-    for (_prefix, total), group in shard_groups.items():
-        try:
-            expected = int(total)
-        except ValueError:
-            continue
-        indices: set[int] = set()
-        for filename in group:
-            match = _GGUF_SHARD_RE.match(Path(filename).name)
-            if not match:
-                continue
-            try:
-                indices.add(int(match.group("index")))
-            except ValueError:
-                continue
-        if len(group) == expected and indices == set(range(1, expected + 1)):
-            complete_groups.append(sorted(group))
-        elif group:
-            incomplete_shards = True
-    if incomplete_shards and not complete_groups:
-        return []
-    if complete_groups:
-        return sorted(
-            complete_groups, key=lambda group: (len(group), len(group[0]), group[0])
-        )[0]
-
-    non_sharded = [
-        filename for filename in pool if not _GGUF_SHARD_RE.match(Path(filename).name)
-    ]
-    if non_sharded:
-        return [sorted(non_sharded, key=len)[0]]
-    return []
-
-
-def _inventory_name(repo_id: str, filename: str) -> Path:
-    """Stable symlink path under user models inventory."""
-    safe_repo = sanitize_filename(repo_id.replace("/", "--"))
-    return Path(safe_repo) / sanitize_filename(Path(filename).name)
-
-
-def _inventory_name_for_files(repo_id: str, filenames: list[str]) -> Path:
-    if len(filenames) == 1:
-        return _inventory_name(repo_id, filenames[0])
-    first = Path(filenames[0])
-    match = _GGUF_SHARD_RE.match(first.name)
-    name = match.group("prefix") if match else first.stem
-    if first.parent != Path("."):
-        name = f"{first.parent.name}-{name}"
-    safe_repo = sanitize_filename(repo_id.replace("/", "--"))
-    return Path(safe_repo) / sanitize_filename(name)
-
-
-def _list_repo_files(repo_id: str, *, token: str | None, revision: str) -> list[str]:
-    from huggingface_hub import list_repo_files
-
-    return list_repo_files(repo_id, token=token, revision=revision)
-
-
-def repo_has_gguf(
-    repo_id: str, *, token: str | None = None, revision: str = "main"
-) -> bool:
-    cache_key = f"{repo_id}:{revision}"
-    cached = _repo_gguf_cache.get(cache_key)
-    if cached is not None:
-        return cached
-    try:
-        files = _list_repo_files(repo_id, token=token, revision=revision)
-        has_gguf = any(f.lower().endswith(".gguf") for f in files)
-    except Exception:
-        return False
-    _repo_gguf_cache.set(cache_key, has_gguf)
-    return has_gguf
-
-
-def search_huggingface_datasets(*, query: str, limit: int = 12) -> list[dict[str, Any]]:
-    """Search Hugging Face Hub for datasets (no token required)."""
-    q = query.strip()
-    if not q:
-        return []
-    params = urllib.parse.urlencode(
-        {
-            "search": q,
-            "limit": max(1, min(limit, 25)),
-            "full": "false",
-        }
-    )
-    url = f"{_HF_API}/datasets?{params}"
-    if not url.startswith("https://"):
-        return []
-    request = urllib.request.Request(url, headers={"User-Agent": "seiso-forge/1.0"})
-    try:
-        with urllib.request.urlopen(
-            request, timeout=15.0
-        ) as response:  # nosec B310: only https://huggingface.co URLs
-            payload = json.loads(response.read().decode("utf-8"))
-    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError):
-        return []
-    if not isinstance(payload, list):
-        return []
-    results: list[dict[str, Any]] = []
-    for row in payload:
-        if not isinstance(row, dict):
-            continue
-        dataset_id = row.get("id")
-        if not isinstance(dataset_id, str):
-            continue
-        tags = row.get("tags")
-        results.append(
-            {
-                "repo_id": dataset_id,
-                "name": dataset_id.split("/")[-1],
-                "downloads": (
-                    row.get("downloads")
-                    if isinstance(row.get("downloads"), int)
-                    else None
-                ),
-                "tags": (
-                    [t for t in tags if isinstance(t, str)][:4]
-                    if isinstance(tags, list)
-                    else []
-                ),
-            }
-        )
-    return results
-
-
-def search_huggingface_gguf_repos(
-    *,
-    query: str,
-    limit: int = 8,
-    base_repo_id: str | None = None,
-    trusted_only: bool = True,
-) -> list[dict[str, Any]]:
-    """Search Hugging Face Hub for GGUF repos (no token required)."""
-    q = query.strip()
-    if not q:
-        return []
-    fetch_limit = max(1, min(limit * 4 if trusted_only else limit, 50))
-    params = urllib.parse.urlencode(
-        {
-            "search": q,
-            "filter": "gguf",
-            "limit": fetch_limit,
-            "full": "false",
-        }
-    )
-    url = f"{_HF_API}/models?{params}"
-    if not url.startswith("https://"):
-        return []
-    request = urllib.request.Request(url, headers={"User-Agent": "seiso-forge/1.0"})
-    try:
-        with urllib.request.urlopen(
-            request, timeout=15.0
-        ) as response:  # nosec B310: only https://huggingface.co URLs
-            payload = json.loads(response.read().decode("utf-8"))
-    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError):
-        return []
-    if not isinstance(payload, list):
-        return []
-    results: list[dict[str, Any]] = []
-    for row in payload:
-        if not isinstance(row, dict):
-            continue
-        model_id = row.get("id") or row.get("modelId")
-        if not isinstance(model_id, str):
-            continue
-        results.append(
-            {
-                "repo_id": model_id,
-                "downloads": (
-                    row.get("downloads")
-                    if isinstance(row.get("downloads"), int)
-                    else None
-                ),
-                "likes": (
-                    row.get("likes") if isinstance(row.get("likes"), int) else None
-                ),
-            }
-        )
-    results = filter_trusted_gguf_search_results(results, base_repo_id=base_repo_id)
-    if not trusted_only:
-        results.sort(
-            key=lambda row: (
-                -int(row.get("downloads") or 0),
-                str(row.get("repo_id") or "").lower(),
-            )
-        )
-    return results[: max(1, min(limit, 25))]
-
-
-def _first_repo_with_gguf(
-    repo_ids: list[str],
-    *,
-    token: str | None = None,
-    revision: str = "main",
-    max_workers: int = 4,
-) -> str | None:
-    """Return the first repo id that contains GGUF files (checked in parallel)."""
-    if not repo_ids:
-        return None
-    if len(repo_ids) == 1:
-        return (
-            repo_ids[0]
-            if repo_has_gguf(repo_ids[0], token=token, revision=revision)
-            else None
-        )
-
-    workers = min(max_workers, len(repo_ids))
-    results: dict[str, bool] = {}
-    with ThreadPoolExecutor(max_workers=workers) as pool:
-        futures = {
-            pool.submit(repo_has_gguf, repo_id, token=token, revision=revision): repo_id
-            for repo_id in repo_ids
-        }
-        for future in as_completed(futures):
-            repo_id = futures[future]
-            try:
-                results[repo_id] = bool(future.result())
-            except Exception:
-                results[repo_id] = False
-    for repo_id in repo_ids:
-        if results.get(repo_id):
-            return repo_id
-    return None
-
-
-def get_gguf_file_size_bytes(
-    repo_id: str,
-    filename: str,
-    *,
-    token: str | None = None,
-    revision: str = "main",
-) -> int:
-    """Return on-disk byte size for a single Hub file (uses HF metadata API)."""
-    cache_key = f"{repo_id}:{filename}:{revision}"
-    cached = _file_size_cache.get(cache_key)
-    if cached is not None:
-        return cached
-
-    from huggingface_hub import get_hf_file_metadata, hf_hub_url
-
-    url = hf_hub_url(repo_id, filename, repo_type="model", revision=revision)
-    meta = get_hf_file_metadata(url, token=token)
-    size_bytes = int(meta.size or 0)
-    _file_size_cache.set(cache_key, size_bytes)
-    return size_bytes
 
 
 def resolve_gguf_artifact(

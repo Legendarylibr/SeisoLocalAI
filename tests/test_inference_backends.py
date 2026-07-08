@@ -1326,6 +1326,11 @@ def test_sidecar_ollama_num_gpu_uses_safer_default_vram_budget(monkeypatch):
     monkeypatch.delenv("SEISO_OLLAMA_NUM_GPU", raising=False)
     monkeypatch.delenv("SEISO_SIDECAR_VRAM_BUDGET_RATIO", raising=False)
     monkeypatch.setattr(llamaswap, "_sidecar_native_linux_nvidia", lambda: True)
+    monkeypatch.setattr(protection_mod, "discrete_gpu_total_mb", lambda: 24576)
+    monkeypatch.setattr(
+        "seiso.hardware.hardware_profile",
+        lambda: {"gpus": [{"name": "NVIDIA GeForce RTX 3090"}]},
+    )
     monkeypatch.setattr(protection_mod, "headroom_mb", lambda: 10_000)
     monkeypatch.setattr(protection_mod, "estimate_path_vram_mb", lambda p: 5000)
     monkeypatch.setattr(backends_mod, "gguf_total_layers", lambda p: 32)
@@ -1338,7 +1343,69 @@ def test_sidecar_ollama_num_gpu_uses_safer_default_vram_budget(monkeypatch):
 
     monkeypatch.setattr(kv_mod, "llama_offload_fits_headroom", _fits)
     assert llamaswap.sidecar_ollama_num_gpu("/tmp/model.gguf", num_ctx=4096) is None
-    assert seen[0] == 7500
+    assert seen[0] == 4880
+
+
+def test_sidecar_ollama_num_gpu_keeps_consumer_nvidia_budget_at_32gb(
+    monkeypatch,
+):
+    import seiso.inference.backends as backends_mod
+    import seiso.memory.protection as protection_mod
+    import seiso.memory.protection.llama_kv as kv_mod
+    from seiso.inference import llamaswap
+
+    monkeypatch.delenv("SEISO_OLLAMA_NUM_GPU", raising=False)
+    monkeypatch.delenv("SEISO_SIDECAR_VRAM_BUDGET_RATIO", raising=False)
+    monkeypatch.setattr(llamaswap, "_sidecar_native_linux_nvidia", lambda: True)
+    monkeypatch.setattr(protection_mod, "discrete_gpu_total_mb", lambda: 32768)
+    monkeypatch.setattr(
+        "seiso.hardware.hardware_profile",
+        lambda: {"gpus": [{"name": "NVIDIA GeForce RTX 5090"}]},
+    )
+    monkeypatch.setattr(protection_mod, "headroom_mb", lambda: 20_000)
+    monkeypatch.setattr(protection_mod, "estimate_path_vram_mb", lambda p: 5000)
+    monkeypatch.setattr(backends_mod, "gguf_total_layers", lambda p: 32)
+
+    seen: list[int] = []
+
+    def _fits(model_path, *, headroom_mb, n_gpu_layers, n_ctx, weight_mb, total_layers):
+        seen.append(headroom_mb)
+        return True
+
+    monkeypatch.setattr(kv_mod, "llama_offload_fits_headroom", _fits)
+    assert llamaswap.sidecar_ollama_num_gpu("/tmp/model.gguf", num_ctx=4096) is None
+    assert seen[0] == 12_000
+
+
+def test_sidecar_ollama_num_gpu_budget_ratio_scales_for_larger_nvidia(
+    monkeypatch,
+):
+    import seiso.inference.backends as backends_mod
+    import seiso.memory.protection as protection_mod
+    import seiso.memory.protection.llama_kv as kv_mod
+    from seiso.inference import llamaswap
+
+    monkeypatch.delenv("SEISO_OLLAMA_NUM_GPU", raising=False)
+    monkeypatch.delenv("SEISO_SIDECAR_VRAM_BUDGET_RATIO", raising=False)
+    monkeypatch.setattr(llamaswap, "_sidecar_native_linux_nvidia", lambda: True)
+    monkeypatch.setattr(protection_mod, "discrete_gpu_total_mb", lambda: 49152)
+    monkeypatch.setattr(
+        "seiso.hardware.hardware_profile",
+        lambda: {"gpus": [{"name": "NVIDIA RTX 6000 Ada Generation"}]},
+    )
+    monkeypatch.setattr(protection_mod, "headroom_mb", lambda: 20_000)
+    monkeypatch.setattr(protection_mod, "estimate_path_vram_mb", lambda p: 5000)
+    monkeypatch.setattr(backends_mod, "gguf_total_layers", lambda p: 32)
+
+    seen: list[int] = []
+
+    def _fits(model_path, *, headroom_mb, n_gpu_layers, n_ctx, weight_mb, total_layers):
+        seen.append(headroom_mb)
+        return True
+
+    monkeypatch.setattr(kv_mod, "llama_offload_fits_headroom", _fits)
+    assert llamaswap.sidecar_ollama_num_gpu("/tmp/model.gguf", num_ctx=4096) is None
+    assert seen[0] == 14_000
 
 
 def test_sidecar_ollama_num_gpu_budget_ratio_env_override(monkeypatch):
@@ -1349,6 +1416,7 @@ def test_sidecar_ollama_num_gpu_budget_ratio_env_override(monkeypatch):
 
     monkeypatch.delenv("SEISO_OLLAMA_NUM_GPU", raising=False)
     monkeypatch.setenv("SEISO_SIDECAR_VRAM_BUDGET_RATIO", "0.9")
+    monkeypatch.setenv("SEISO_SIDECAR_VRAM_RESERVE_MB", "0")
     monkeypatch.setattr(llamaswap, "_sidecar_native_linux_nvidia", lambda: True)
     monkeypatch.setattr(protection_mod, "headroom_mb", lambda: 10_000)
     monkeypatch.setattr(protection_mod, "estimate_path_vram_mb", lambda p: 5000)
@@ -1363,6 +1431,36 @@ def test_sidecar_ollama_num_gpu_budget_ratio_env_override(monkeypatch):
     monkeypatch.setattr(kv_mod, "llama_offload_fits_headroom", _fits)
     assert llamaswap.sidecar_ollama_num_gpu("/tmp/model.gguf", num_ctx=4096) is None
     assert seen[0] == 9000
+
+
+def test_sidecar_ollama_num_gpu_fixed_reserve_env_override(monkeypatch):
+    import seiso.inference.backends as backends_mod
+    import seiso.memory.protection as protection_mod
+    import seiso.memory.protection.llama_kv as kv_mod
+    from seiso.inference import llamaswap
+
+    monkeypatch.delenv("SEISO_OLLAMA_NUM_GPU", raising=False)
+    monkeypatch.delenv("SEISO_SIDECAR_VRAM_BUDGET_RATIO", raising=False)
+    monkeypatch.setenv("SEISO_SIDECAR_VRAM_RESERVE_MB", "7000")
+    monkeypatch.setattr(llamaswap, "_sidecar_native_linux_nvidia", lambda: True)
+    monkeypatch.setattr(protection_mod, "discrete_gpu_total_mb", lambda: 24576)
+    monkeypatch.setattr(
+        "seiso.hardware.hardware_profile",
+        lambda: {"gpus": [{"name": "NVIDIA GeForce RTX 4090"}]},
+    )
+    monkeypatch.setattr(protection_mod, "headroom_mb", lambda: 10_000)
+    monkeypatch.setattr(protection_mod, "estimate_path_vram_mb", lambda p: 5000)
+    monkeypatch.setattr(backends_mod, "gguf_total_layers", lambda p: 32)
+
+    seen: list[int] = []
+
+    def _fits(model_path, *, headroom_mb, n_gpu_layers, n_ctx, weight_mb, total_layers):
+        seen.append(headroom_mb)
+        return True
+
+    monkeypatch.setattr(kv_mod, "llama_offload_fits_headroom", _fits)
+    assert llamaswap.sidecar_ollama_num_gpu("/tmp/model.gguf", num_ctx=4096) is None
+    assert seen[0] == 3000
 
 
 class _FakeStreamResponse:

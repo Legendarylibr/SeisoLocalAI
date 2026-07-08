@@ -10,24 +10,9 @@ from typing import Any
 
 from forge.db.store import Database
 from forge.orchestrators.base import Orchestrator
-from forge.services.job_runtime import job_failure_message
+from forge.services.job_runtime import job_failure_message, spawn_background
 
 logger = logging.getLogger(__name__)
-
-
-def spawn_background(coro: Awaitable[Any]) -> asyncio.Task[Any]:
-    """Run a coroutine in the background; log failures instead of re-raising."""
-
-    async def _wrapper() -> Any:
-        try:
-            return await coro
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            logger.exception("Background job failed")
-            return None
-
-    return asyncio.create_task(_wrapper())
 
 
 async def job_log_event_gen(

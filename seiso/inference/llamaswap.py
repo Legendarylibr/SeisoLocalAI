@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import platform
+import re
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -108,7 +109,14 @@ _SIDECAR_CTX_MARGIN_TOKENS = 256
 # Fraction of *free* (not total) VRAM the sidecar may commit to weights + KV.
 # Leaves slack for the display/compositor and the engine's compute graph so a
 # display-attached consumer GPU cannot be driven into a driver-resetting hang.
-_SIDECAR_VRAM_BUDGET_RATIO = 0.75
+_SIDECAR_VRAM_BUDGET_RATIO = 0.60
+_SIDECAR_VRAM_BUDGET_RATIO_32GB = 0.65
+_SIDECAR_VRAM_BUDGET_RATIO_48GB = 0.70
+_SIDECAR_VRAM_BUDGET_RATIO_WORKSTATION = 0.80
+_SIDECAR_VRAM_RESERVE_MB = 4096
+_SIDECAR_CONSUMER_VRAM_RESERVE_MB = 5120
+_SIDECAR_CONSUMER_LARGE_VRAM_RESERVE_MB = 6144
+_CONSUMER_NVIDIA_RE = re.compile(r"\brtx\s*(?:20|30|40|50)[5-9]0\b", re.I)
 
 
 def _sidecar_native_linux_nvidia() -> bool:
@@ -126,14 +134,86 @@ def _sidecar_vram_clamp_enabled() -> bool:
     return env_bool("SEISO_SIDECAR_VRAM_CLAMP", True)
 
 
+def _sidecar_consumer_nvidia_gpu() -> bool:
+    """True for GeForce/GTX/TITAN and bare RTX xx50-xx90 consumer cards."""
+    try:
+        from seiso.hardware import hardware_profile
+
+        profile = hardware_profile()
+    except Exception:
+        return False
+    for gpu in profile.get("gpus") or []:
+        name = str(gpu.get("name") or "")
+        lowered = name.lower()
+        if not any(marker in lowered for marker in ("nvidia", "geforce", "rtx", "gtx")):
+            continue
+        if any(marker in lowered for marker in ("geforce", "gtx", "titan")):
+            return True
+        if _CONSUMER_NVIDIA_RE.search(name):
+            return True
+    return False
+
+
 def _sidecar_vram_budget_ratio() -> float:
+    """Adaptive native NVIDIA VRAM budget; env override remains authoritative."""
     raw = env_str("SEISO_SIDECAR_VRAM_BUDGET_RATIO", "").strip()
     if raw:
         try:
             return max(0.50, min(float(raw), 0.95))
         except ValueError:
             pass
-    return _SIDECAR_VRAM_BUDGET_RATIO
+    if _sidecar_consumer_nvidia_gpu():
+        return _SIDECAR_VRAM_BUDGET_RATIO
+    try:
+        from seiso.memory.protection import discrete_gpu_total_mb
+
+        total_mb = int(discrete_gpu_total_mb())
+    except Exception:
+        total_mb = 0
+    if total_mb <= 0:
+        return _SIDECAR_VRAM_BUDGET_RATIO
+    if total_mb <= 24 * 1024:
+        return _SIDECAR_VRAM_BUDGET_RATIO
+    if total_mb <= 32 * 1024:
+        return _SIDECAR_VRAM_BUDGET_RATIO_32GB
+    if total_mb <= 48 * 1024:
+        return _SIDECAR_VRAM_BUDGET_RATIO_48GB
+    return _SIDECAR_VRAM_BUDGET_RATIO_WORKSTATION
+
+
+def _sidecar_vram_reserve_mb(*, total_mb: int = 0, consumer: bool | None = None) -> int:
+    """Hard VRAM margin kept outside the sidecar budget."""
+    raw = env_str("SEISO_SIDECAR_VRAM_RESERVE_MB", "").strip()
+    if raw:
+        try:
+            return max(0, int(raw))
+        except ValueError:
+            pass
+    if consumer is None:
+        consumer = _sidecar_consumer_nvidia_gpu()
+    if consumer:
+        if total_mb > 24 * 1024:
+            return _SIDECAR_CONSUMER_LARGE_VRAM_RESERVE_MB
+        return _SIDECAR_CONSUMER_VRAM_RESERVE_MB
+    return _SIDECAR_VRAM_RESERVE_MB
+
+
+def _sidecar_vram_budget_mb(free_mb: int) -> int:
+    """Budget for sidecar weights + KV using both ratio and fixed reserve."""
+    free = max(0, int(free_mb))
+    if free <= 0:
+        return 0
+    try:
+        from seiso.memory.protection import discrete_gpu_total_mb
+
+        total_mb = int(discrete_gpu_total_mb())
+    except Exception:
+        total_mb = 0
+    consumer = _sidecar_consumer_nvidia_gpu()
+    ratio_budget = int(free * _sidecar_vram_budget_ratio())
+    reserve = _sidecar_vram_reserve_mb(total_mb=total_mb, consumer=consumer)
+    reserve_budget = max(0, free - reserve)
+    return min(ratio_budget, reserve_budget)
 
 
 def _sidecar_native_max_tokens(max_tokens: int) -> int:
@@ -234,7 +314,7 @@ def sidecar_ollama_num_gpu(model_path: str, *, num_ctx: int) -> int | None:
     free_mb = int(headroom_mb())
     if free_mb <= 0:
         return 0
-    budget = int(free_mb * _sidecar_vram_budget_ratio())
+    budget = _sidecar_vram_budget_mb(free_mb)
     try:
         weight_mb = int(estimate_path_vram_mb(model_path))
         total_layers = max(1, gguf_total_layers(model_path))

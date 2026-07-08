@@ -2,10 +2,29 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
 
 from forge.orchestrators.base import JobRecord, Orchestrator
+
+logger = logging.getLogger(__name__)
+
+
+def spawn_background(coro: Awaitable[Any]) -> asyncio.Task[Any]:
+    """Run a coroutine in the background; log failures instead of re-raising."""
+
+    async def _wrapper() -> Any:
+        try:
+            return await coro
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Background job failed")
+            return None
+
+    return asyncio.create_task(_wrapper())
 
 
 def job_failure_message(

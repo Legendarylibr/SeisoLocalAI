@@ -5,14 +5,11 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import time
 import uuid
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
 from forge.api.deps import get_db, get_training_orchestrator
@@ -21,6 +18,12 @@ from forge.api.routes._stream import (
     durable_job_events,
     job_failure_message,
     spawn_background,
+)
+from forge.api.schemas.training import (
+    CloudGpuCredentialCreate,
+    DatasetValidationRequest,
+    TrainingJobResponse,
+    TrainingStartRequest,
 )
 from forge.config import ForgeSettings, get_settings
 from forge.db.store import Database
@@ -31,6 +34,15 @@ from forge.services.hardware import hardware_profile
 from forge.services.hf_hub import search_huggingface_datasets
 from forge.services.jobs import assert_job_owner
 from forge.services.models import list_trainable_models, resolve_training_model_id
+from forge.services.training_service import (
+    cloud_credential_response,
+    cloud_gpu_provider_type,
+    dataset_analysis_token_matches,
+    format_training_job_row,
+    run_dataset_analysis,
+    serialize_metrics_payload,
+    store_dataset_analysis_token,
+)
 from forge.services.user_paths import (
     assert_user_training_config,
     resolve_training_dataset_path,
@@ -40,194 +52,26 @@ from seiso.models.hub_quant import native_quant_training_block_reason
 from seiso.models.trainable_snapshot import is_gguf_only_repo_id
 from seiso.security import SecurityError
 from seiso.training.config import DatasetFormat, TrainConfig
-from seiso.training.dataset_analysis import analyze_training_dataset
 from seiso.training.recommendations import recommend_training_config
 
 router = APIRouter(prefix="/training", tags=["training"])
 logger = logging.getLogger(__name__)
 
 
-class TrainingStartRequest(BaseModel):
-    config: dict
-    project_id: str | None = None
-    multi_gpu: bool = False
-    dataset_analysis_token: str | None = None
-    export_on_complete: dict | None = Field(
-        default=None,
-        description="Auto-export after training: formats, profile, gguf_quantizations, hub",
-    )
-
-
-class TrainingJobResponse(BaseModel):
-    job_id: str
-    status: str
-
-
-class CloudGpuCredentialCreate(BaseModel):
-    name: str = Field(min_length=1, max_length=80)
-    provider: str = Field(min_length=1, max_length=32)
-    auth_kind: str = Field(default="api_key", max_length=32)
-    api_key: str = Field(default="", max_length=4096)
-    access_key_id: str = Field(default="", max_length=512)
-    secret_access_key: str = Field(default="", max_length=4096)
-    session_token: str = Field(default="", max_length=8192)
-    ssh_username: str = Field(default="", max_length=128)
-    ssh_private_key: str = Field(default="", max_length=16384)
-    bootstrap_command: str = Field(default="", max_length=4096)
-    region: str = Field(default="", max_length=128)
-    project: str = Field(default="", max_length=128)
-
-
-_CLOUD_GPU_PROVIDER_TYPE = "cloud_gpu"
-_CLOUD_SECRET_FIELDS = frozenset(
-    {
-        "api_key",
-        "access_key_id",
-        "secret_access_key",
-        "session_token",
-        "ssh_private_key",
-        "bootstrap_command",
-    }
-)
-
-
-def _mask_cloud_credential_config(config: dict[str, Any]) -> dict[str, Any]:
-    masked: dict[str, Any] = {}
-    for key, value in config.items():
-        if key in _CLOUD_SECRET_FIELDS:
-            masked[f"{key}_configured"] = bool(value)
-            continue
-        masked[key] = value
-    return masked
-
-
-def _cloud_credential_response(row: dict[str, Any]) -> dict[str, Any]:
-    config = json.loads(row["config_json"]) if "config_json" in row else row["config"]
-    return {
-        "id": row["id"],
-        "name": row["name"],
-        "provider_type": row["provider_type"],
-        "created_at": row["created_at"],
-        "config": _mask_cloud_credential_config(config),
-    }
-
-
-_DATASET_ANALYSIS_TTL_S = 10 * 60.0
-
-
-@dataclass(frozen=True)
-class _DatasetAnalysisCacheEntry:
-    user_id: str
-    dataset: str
-    requested_format: str
-    resolved_format: str
-    valid: bool
-    created_at: float
-
-
-_dataset_analysis_cache: dict[str, _DatasetAnalysisCacheEntry] = {}
-
-
-def _store_dataset_analysis_token(
+def _resolve_dataset_for_user(
+    dataset: str,
     *,
     user_id: str,
-    dataset: str | Path,
-    requested_format: DatasetFormat,
-    resolved_format: str | None,
-    valid: bool,
-) -> str:
-    token = uuid.uuid4().hex
-    _dataset_analysis_cache[token] = _DatasetAnalysisCacheEntry(
-        user_id=user_id,
-        dataset=str(dataset),
-        requested_format=requested_format.value,
-        resolved_format=resolved_format or requested_format.value,
-        valid=valid,
-        created_at=time.monotonic(),
+    settings: ForgeSettings,
+) -> str | Path:
+    if not dataset or not isinstance(dataset, str):
+        return dataset
+    return resolve_training_dataset_path(
+        settings.data_dir,
+        user_id,
+        dataset,
+        install_root=Path(__file__).resolve().parents[3],
     )
-    return token
-
-
-def _dataset_analysis_token_matches(
-    token: str | None,
-    *,
-    user_id: str,
-    dataset: str | Path,
-    dataset_format: DatasetFormat,
-) -> bool:
-    if not token:
-        return False
-    entry = _dataset_analysis_cache.get(token)
-    now = time.monotonic()
-    if entry is None:
-        return False
-    if now - entry.created_at > _DATASET_ANALYSIS_TTL_S:
-        _dataset_analysis_cache.pop(token, None)
-        return False
-    return (
-        entry.user_id == user_id
-        and entry.dataset == str(dataset)
-        and dataset_format.value in {entry.requested_format, entry.resolved_format}
-        and entry.valid
-    )
-
-
-def _serialize_metrics_payload(
-    points: list[dict[str, Any]],
-    summary: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    from seiso.security.hardware_privacy import sanitize_system_metric_point
-
-    training = [p for p in points if p.get("type") in ("training", "eval")]
-    system = [
-        sanitize_system_metric_point(p) for p in points if p.get("type") == "system"
-    ]
-    return {
-        "summary": summary or {},
-        "training": training[-2000:],
-        "system": system[-500:],
-        "updated_at": summary.get("updated_at") if summary else None,
-    }
-
-
-def _effective_job_status(
-    db_status: str,
-    orchestrator: TrainingOrchestrator,
-    job_id: str,
-) -> str:
-    live = orchestrator.get_job(job_id)
-    if not live:
-        return db_status
-    live_status = live.status.value
-    if db_status == "pending" and live_status in (
-        "running",
-        "completed",
-        "failed",
-        "cancelled",
-    ):
-        return live_status
-    return db_status
-
-
-def _format_training_job_row(
-    row: dict[str, Any],
-    orchestrator: TrainingOrchestrator | None = None,
-) -> dict[str, Any]:
-    job_id = str(row.get("id", ""))
-    status = str(row.get("status", "unknown"))
-    if orchestrator is not None:
-        status = _effective_job_status(status, orchestrator, job_id)
-    return {
-        "id": job_id,
-        "status": status,
-        "config_json": row.get("config_json"),
-        "metrics_json": row.get("metrics_json"),
-        "error_text": row.get("error_text"),
-        "checkpoint_path": row.get("checkpoint_path"),
-        "created_at": row.get("created_at"),
-        "updated_at": row.get("updated_at"),
-        "project_id": row.get("project_id"),
-    }
 
 
 @router.get("/datasets")
@@ -276,40 +120,6 @@ async def training_recommendations(
     )
 
 
-class DatasetValidationRequest(BaseModel):
-    dataset: str
-    dataset_format: str = "auto"
-
-
-def _resolve_dataset_for_user(
-    dataset: str,
-    *,
-    user_id: str,
-    settings: ForgeSettings,
-) -> str | Path:
-    if not dataset or not isinstance(dataset, str):
-        return dataset
-    return resolve_training_dataset_path(
-        settings.data_dir,
-        user_id,
-        dataset,
-        install_root=Path(__file__).resolve().parents[3],
-    )
-
-
-def _run_dataset_analysis(
-    dataset: str | Path,
-    *,
-    dataset_format: DatasetFormat,
-    sandbox_root: Path,
-) -> dict[str, Any]:
-    return analyze_training_dataset(
-        dataset,
-        dataset_format=dataset_format,
-        sandbox_root=sandbox_root,
-    )
-
-
 @router.post("/analyze-dataset")
 async def analyze_dataset_endpoint(
     body: DatasetValidationRequest,
@@ -325,12 +135,12 @@ async def analyze_dataset_endpoint(
             else DatasetFormat.AUTO
         )
         analysis = await asyncio.to_thread(
-            _run_dataset_analysis,
+            run_dataset_analysis,
             ds,
             dataset_format=ds_fmt,
             sandbox_root=Path(settings.data_dir) / "uploads" / user_id,
         )
-        analysis["analysis_token"] = _store_dataset_analysis_token(
+        analysis["analysis_token"] = store_dataset_analysis_token(
             user_id=user_id,
             dataset=ds,
             requested_format=ds_fmt,
@@ -357,14 +167,14 @@ async def validate_dataset_endpoint(
             else DatasetFormat.AUTO
         )
         analysis = await asyncio.to_thread(
-            _run_dataset_analysis,
+            run_dataset_analysis,
             ds,
             dataset_format=ds_fmt,
             sandbox_root=Path(settings.data_dir) / "uploads" / user_id,
         )
         if not analysis.get("valid"):
             raise ValueError("No valid training samples after preprocessing")
-        analysis["analysis_token"] = _store_dataset_analysis_token(
+        analysis["analysis_token"] = store_dataset_analysis_token(
             user_id=user_id,
             dataset=ds,
             requested_format=ds_fmt,
@@ -383,9 +193,9 @@ async def list_cloud_gpu_credentials(
 ) -> list[dict[str, Any]]:
     rows = await db.list_providers(user_id)
     return [
-        _cloud_credential_response(row)
+        cloud_credential_response(row)
         for row in rows
-        if row["provider_type"] == _CLOUD_GPU_PROVIDER_TYPE
+        if row["provider_type"] == cloud_gpu_provider_type()
     ]
 
 
@@ -401,7 +211,7 @@ async def create_cloud_gpu_credential(
     row = await db.create_provider(
         user_id,
         body.name.strip(),
-        _CLOUD_GPU_PROVIDER_TYPE,
+        cloud_gpu_provider_type(),
         config,
     )
     audit_event(
@@ -410,7 +220,7 @@ async def create_cloud_gpu_credential(
         provider_id=row["id"],
         provider=provider,
     )
-    return _cloud_credential_response(row)
+    return cloud_credential_response(row)
 
 
 @router.delete("/cloud-credentials/{credential_id}")
@@ -420,7 +230,7 @@ async def delete_cloud_gpu_credential(
     db: Annotated[Database, Depends(get_db)],
 ) -> dict[str, str]:
     row = await db.get_provider(credential_id, user_id)
-    if not row or row["provider_type"] != _CLOUD_GPU_PROVIDER_TYPE:
+    if not row or row["provider_type"] != cloud_gpu_provider_type():
         raise HTTPException(404, "Cloud GPU credential not found")
     ok = await db.delete_provider(credential_id, user_id)
     if not ok:
@@ -440,7 +250,7 @@ async def list_jobs(
     orchestrator: Annotated[TrainingOrchestrator, Depends(get_training_orchestrator)],
 ) -> list[dict]:
     rows = await db.list_training_jobs(user_id)
-    return [_format_training_job_row(row, orchestrator) for row in rows]
+    return [format_training_job_row(row, orchestrator) for row in rows]
 
 
 @router.get("/jobs/{job_id}")
@@ -453,7 +263,7 @@ async def get_job(
     row = await db.get_training_job(job_id, user_id)
     if not row:
         raise HTTPException(404, "Job not found")
-    return _format_training_job_row(row, orchestrator)
+    return format_training_job_row(row, orchestrator)
 
 
 @router.post("/jobs", response_model=TrainingJobResponse)
@@ -486,7 +296,7 @@ async def start_training(
     cloud_credential_id = training_config.get("cloud_gpu_credential_id")
     if cloud_credential_id:
         credential = await db.get_provider(str(cloud_credential_id), user_id)
-        if not credential or credential["provider_type"] != _CLOUD_GPU_PROVIDER_TYPE:
+        if not credential or credential["provider_type"] != cloud_gpu_provider_type():
             raise HTTPException(400, "Cloud GPU credential not found")
 
     # Early dataset normalization check — fail fast with clear error *before* queuing the job
@@ -495,14 +305,14 @@ async def start_training(
     ds_fmt_str = training_config.get("dataset_format", "auto")
     try:
         ds_fmt = DatasetFormat(ds_fmt_str) if ds_fmt_str else DatasetFormat.AUTO
-        if not _dataset_analysis_token_matches(
+        if not dataset_analysis_token_matches(
             body.dataset_analysis_token,
             user_id=user_id,
             dataset=dataset_for_val,
             dataset_format=ds_fmt,
         ):
             analysis = await asyncio.to_thread(
-                _run_dataset_analysis,
+                run_dataset_analysis,
                 dataset_for_val,
                 dataset_format=ds_fmt,
                 sandbox_root=Path(settings.data_dir) / "uploads" / user_id,
@@ -578,7 +388,7 @@ async def start_training(
         summary: dict[str, Any],
     ) -> None:
         await db.update_training_metrics(
-            jid, _serialize_metrics_payload(points, summary), user_id=user_id
+            jid, serialize_metrics_payload(points, summary), user_id=user_id
         )
 
     orchestrator.set_metrics_persister(job_id, persist_metrics)
@@ -589,7 +399,7 @@ async def start_training(
             await orchestrator.start(job_id, payload)
             job = await orchestrator.wait_for(job_id)
             if job:
-                metrics_payload = _serialize_metrics_payload(
+                metrics_payload = serialize_metrics_payload(
                     orchestrator.get_metrics(job_id),
                     job.result.get("metrics_summary"),
                 )
@@ -710,13 +520,13 @@ async def get_training_metrics(
 
     live = orchestrator.get_metrics(job_id)
     if live:
-        return _serialize_metrics_payload(live)
+        return serialize_metrics_payload(live)
 
     durable_metrics = await db.list_job_events(
         job_id, user_id, event_types=("metric",), limit=5000
     )
     if durable_metrics:
-        return _serialize_metrics_payload(
+        return serialize_metrics_payload(
             [row.get("payload") or {} for row in durable_metrics]
         )
 

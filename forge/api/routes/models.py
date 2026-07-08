@@ -12,12 +12,11 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
 from forge.api.deps import get_db, get_inference_orchestrator
 from forge.api.http_errors import raise_forbidden
-from forge.api.routes._stream import spawn_background
+from forge.api.schemas.models import LocalModelCreate, ModelDownloadRequest, ModelScanRequest
 from forge.config import ForgeSettings, get_settings
 from forge.db.store import Database
 from forge.orchestrators.inference import InferenceOrchestrator
@@ -28,7 +27,7 @@ from forge.services.hardware import (
     hardware_summary,
 )
 from forge.services.hf_auth import resolve_hf_token_for_download
-from forge.services.hf_cache_inventory import sync_hf_cache_inventory
+from forge.services.hf_cache_sync import schedule_hf_cache_inventory_sync
 from forge.services.hf_hub import _format_hub_download_error
 from forge.services.model_download import perform_model_download
 from forge.services.publishable import PUSHABLE_SOURCES, is_pushable_model
@@ -44,76 +43,6 @@ from seiso.security import SecurityError, sanitize_filename
 
 router = APIRouter(prefix="/models", tags=["models"])
 logger = logging.getLogger(__name__)
-_MODEL_CACHE_BACKGROUND_SYNC_TTL_S = 120.0
-_model_cache_background_syncs: dict[str, float] = {}
-
-
-async def _sync_hf_cache_inventory_background(
-    db: Database,
-    user_id: str,
-    *,
-    data_dir: Path,
-    hf_cache_dir: Path,
-) -> None:
-    try:
-        await sync_hf_cache_inventory(
-            db,
-            user_id,
-            data_dir=data_dir,
-            hf_cache_dir=hf_cache_dir,
-        )
-    except Exception:
-        logger.exception("Background Hugging Face cache inventory sync failed")
-
-
-async def _schedule_hf_cache_inventory_sync(
-    db: Database,
-    user_id: str,
-    *,
-    data_dir: Path,
-    hf_cache_dir: Path,
-    sync_cache: bool,
-) -> None:
-    if sync_cache:
-        await sync_hf_cache_inventory(
-            db,
-            user_id,
-            data_dir=data_dir,
-            hf_cache_dir=hf_cache_dir,
-        )
-        return
-
-    cache_key = f"{user_id}:{hf_cache_dir}"
-    now = time.monotonic()
-    last_sync = _model_cache_background_syncs.get(cache_key, 0.0)
-    if now - last_sync >= _MODEL_CACHE_BACKGROUND_SYNC_TTL_S:
-        _model_cache_background_syncs[cache_key] = now
-        spawn_background(
-            _sync_hf_cache_inventory_background(
-                db,
-                user_id,
-                data_dir=data_dir,
-                hf_cache_dir=hf_cache_dir,
-            )
-        )
-
-
-class ModelScanRequest(BaseModel):
-    path: str
-
-
-class ModelDownloadRequest(BaseModel):
-    repo_id: str
-    filename: str | None = None
-    revision: str = "main"
-    variant: str = Field(default="auto", description="auto | safetensors | gguf")
-
-
-class LocalModelCreate(BaseModel):
-    name: str = Field(min_length=1, max_length=128)
-    path: str
-    source: str | None = None
-    format: str | None = None
 
 
 @router.get("/catalog")
@@ -226,7 +155,7 @@ async def list_models(
         description="Synchronously refresh Hugging Face cache inventory before returning.",
     ),
 ) -> list[dict]:
-    await _schedule_hf_cache_inventory_sync(
+    await schedule_hf_cache_inventory_sync(
         db,
         user_id,
         data_dir=settings.data_dir,
