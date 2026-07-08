@@ -29,6 +29,11 @@ function readByModelMap(): Record<string, ContextWindowSetting> {
   }
 }
 
+export function hasStoredContextWindowForModel(modelId: string | null | undefined): boolean {
+  if (!modelId) return false;
+  return Object.prototype.hasOwnProperty.call(readByModelMap(), modelId);
+}
+
 export function readStoredContextWindow(maxAllowed = 131072): ContextWindowSetting {
   try {
     const raw = localStorage.getItem(CHAT_CTX_STORAGE_KEY);
@@ -84,13 +89,24 @@ export function contextWindowOptionsFromStatus(
   status: ChatContextStatus | null | undefined,
   model?: InferenceModelOption | null,
 ): number[] {
+  const safeMax =
+    typeof model?.safe_context_window_max === "number" ? model.safe_context_window_max : undefined;
   const ceiling =
     status?.n_ctx_max ||
+    safeMax ||
     (typeof model?.context_ceiling === "number" ? model.context_ceiling : undefined);
-  const options = status?.context_window_options?.filter((n) => n >= 2048) ?? [];
+  let options =
+    status?.context_window_options?.filter((n) => n >= 2048) ??
+    model?.safe_context_window_options?.filter((n) => n >= 2048) ??
+    [];
+  if (safeMax && safeMax >= 2048) {
+    options = options.filter((n) => n <= safeMax);
+    if (!options.includes(safeMax)) options = [...options, safeMax].sort((a, b) => a - b);
+  }
   if (options.length) {
-    if (ceiling && ceiling >= 2048 && !options.includes(ceiling)) {
-      return [...options, ceiling].sort((a, b) => a - b);
+    const effectiveCeiling = safeMax || ceiling;
+    if (effectiveCeiling && effectiveCeiling >= 2048 && !options.includes(effectiveCeiling)) {
+      return [...options, effectiveCeiling].sort((a, b) => a - b);
     }
     return options;
   }

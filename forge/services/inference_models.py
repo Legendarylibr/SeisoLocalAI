@@ -140,6 +140,75 @@ def _enrich_model_runtime_meta(
         opt.setdefault("uses_swa", False)
 
 
+def _safe_chat_profile(opt: dict[str, Any]) -> dict[str, Any]:
+    """Model-aware UI defaults that mirror backend clamps instead of raw maxima."""
+    max_tokens = 1024
+    context_ceiling = int(opt.get("context_ceiling") or 8192)
+    safe_context_max = context_ceiling
+    note = "Auto uses the smallest safe context that fits the prompt and reply."
+    backend = opt.get("default_backend") or ""
+    model_path = opt.get("path")
+    model_format = opt.get("format")
+
+    if model_format == "gguf" and backend == BACKEND_LLAMASWAP and model_path:
+        try:
+            from seiso.inference.llamaswap import (
+                _sidecar_native_max_tokens,
+                sidecar_vram_context_cap,
+            )
+
+            max_tokens = int(_sidecar_native_max_tokens(max_tokens))
+            safe_context_max = int(
+                sidecar_vram_context_cap(
+                    str(model_path),
+                    context_ceiling,
+                    max_tokens=max_tokens,
+                )
+            )
+            note = (
+                "Recommended for Ollama sidecar: bounded reply and VRAM-safe "
+                "context to avoid GPU OOMs."
+            )
+        except Exception:
+            max_tokens = min(max_tokens, 512)
+            safe_context_max = min(context_ceiling, 4096)
+            note = "Recommended fallback: conservative sidecar settings."
+    elif model_format == "gguf":
+        try:
+            from seiso.memory.protection import clamp_llama_n_ctx
+
+            safe_context_max = int(
+                clamp_llama_n_ctx(
+                    context_ceiling,
+                    max_tokens=max_tokens,
+                    model_path=str(model_path) if model_path else None,
+                    model_format=model_format,
+                    model_name=opt.get("name"),
+                )
+            )
+        except Exception:
+            safe_context_max = min(context_ceiling, 4096)
+
+    try:
+        from seiso.inference.context_limits import context_window_presets
+
+        context_options = context_window_presets(safe_context_max)
+    except Exception:
+        context_options = [2048, 4096, 8192]
+        context_options = [value for value in context_options if value <= safe_context_max]
+    if not context_options:
+        context_options = [2048]
+
+    recommended_context = "auto"
+    return {
+        "recommended_max_tokens": max(1, min(int(max_tokens), 8192)),
+        "recommended_context_window": recommended_context,
+        "safe_context_window_options": context_options,
+        "safe_context_window_max": max(context_options),
+        "chat_safety_note": note,
+    }
+
+
 def _backend_labels_for(backends: list[str]) -> dict[str, str]:
     sidecar_engine = None
     if BACKEND_LLAMASWAP in backends:
@@ -227,6 +296,7 @@ def _build_local_option(
     )
     opt["variant_group"] = variant_group_key(opt)
     _enrich_model_runtime_meta(opt, metadata=metadata)
+    opt.update(_safe_chat_profile(opt))
     if not backends and (row.get("format") or "").lower() == "gguf":
         runtime = check_inference_runtime()
         opt["install_hints"] = [

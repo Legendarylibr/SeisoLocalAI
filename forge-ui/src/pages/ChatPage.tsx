@@ -18,6 +18,7 @@ import {
 import {
   ContextWindowSetting,
   contextWindowOptionsFromStatus,
+  hasStoredContextWindowForModel,
   normalizeContextWindow,
   readStoredContextWindowForModel,
   writeStoredContextWindowForModel,
@@ -25,7 +26,9 @@ import {
 import {
   ChatInferenceSettings,
   readChatInferenceSettings,
+  readStoredMaxTokensForModel,
   writeChatInferenceSettings,
+  writeStoredMaxTokensForModel,
 } from "@/lib/chatInferenceSettings";
 import type { ChatContextStatus } from "@/lib/api/types";
 import { ROUTER_MODEL_ID } from "@/lib/api/types";
@@ -233,6 +236,14 @@ export function ChatPage() {
     () => contextWindowOptionsFromStatus(contextStatus, selected),
     [contextStatus, selected],
   );
+  const maxTokenOptions = useMemo(() => {
+    const recommended = selected?.recommended_max_tokens ?? 2048;
+    const ceiling = Math.max(1, Math.min(8192, recommended));
+    const base = [256, 512, 768, 1024, 2048, 4096, 8192].filter((n) => n <= ceiling);
+    if (!base.includes(ceiling)) base.push(ceiling);
+    return Array.from(new Set(base)).sort((a, b) => a - b);
+  }, [selected?.recommended_max_tokens]);
+  const safeMaxTokens = maxTokenOptions[maxTokenOptions.length - 1] ?? 2048;
 
   const refreshVramStatus = useCallback(async () => {
     try {
@@ -274,13 +285,31 @@ export function ChatPage() {
     return r.models;
   }, [selection, hwProfile]);
 
-  const patchInferenceSettings = useCallback((partial: Partial<ChatInferenceSettings>) => {
+  const applyMaxTokens = useCallback((maxTokens: number) => {
     setInferenceSettings((prev) => {
-      const next = { ...prev, ...partial };
+      if (prev.maxTokens === maxTokens) return prev;
+      const next = { ...prev, maxTokens };
       writeChatInferenceSettings(next);
       return next;
     });
   }, []);
+
+  const patchInferenceSettings = useCallback((partial: Partial<ChatInferenceSettings>) => {
+    setInferenceSettings((prev) => {
+      const next = { ...prev, ...partial };
+      writeChatInferenceSettings(next);
+      if (typeof partial.maxTokens === "number") {
+        writeStoredMaxTokensForModel(selection, partial.maxTokens);
+      }
+      return next;
+    });
+  }, [selection]);
+
+  useEffect(() => {
+    if (inferenceSettings.maxTokens > safeMaxTokens) {
+      applyMaxTokens(safeMaxTokens);
+    }
+  }, [inferenceSettings.maxTokens, safeMaxTokens, applyMaxTokens]);
 
   useEffect(() => {
     if (!selection || providerId) {
@@ -320,12 +349,19 @@ export function ChatPage() {
     (modelId: string, list: InferenceModelOption[], ctxOverride?: ContextWindowSetting) => {
       const model = list.find((m) => m.id === modelId) ?? null;
       const options = contextWindowOptionsFromStatus(null, model);
+      const contextDefault = hasStoredContextWindowForModel(modelId)
+        ? readStoredContextWindowForModel(modelId, options[options.length - 1] ?? 131072)
+        : model?.recommended_context_window ?? "auto";
       const ctx = normalizeContextWindow(
-        ctxOverride ?? readStoredContextWindowForModel(modelId, options[options.length - 1] ?? 131072),
+        ctxOverride ?? contextDefault,
         options,
       );
+      const maxTokens =
+        readStoredMaxTokensForModel(modelId) ??
+        model?.recommended_max_tokens ??
+        inferenceSettings.maxTokens;
       return {
-        maxTokens: inferenceSettings.maxTokens,
+        maxTokens,
         nCtx: ctx === "auto" ? null : ctx,
         contextWindow: ctx,
       };
@@ -343,6 +379,7 @@ export function ChatPage() {
         throw new Error(modelMemoryBlockReason(next));
       }
       const preloadOpts = preloadInferenceOptions(modelId, list);
+      applyMaxTokens(preloadOpts.maxTokens);
       setContextWindow(preloadOpts.contextWindow);
       writeStoredContextWindowForModel(modelId, preloadOpts.contextWindow);
       setSelection(modelId);
@@ -369,7 +406,7 @@ export function ChatPage() {
       writeStoredModel(CHAT_BACKEND_STORAGE_KEY, loaded);
       return loaded;
     },
-    [providerId, hwProfile, inferenceBackend, preloadInferenceOptions],
+    [providerId, hwProfile, inferenceBackend, preloadInferenceOptions, applyMaxTokens],
   );
 
   const handleModelChange = async (modelId: string) => {
@@ -556,6 +593,7 @@ export function ChatPage() {
       setModels(result.models);
       if (!result.selectedId) return;
       const preloadOpts = preloadInferenceOptions(result.selectedId, result.models);
+      applyMaxTokens(preloadOpts.maxTokens);
       setContextWindow(preloadOpts.contextWindow);
       writeStoredContextWindowForModel(result.selectedId, preloadOpts.contextWindow);
       setSelection(result.selectedId);
@@ -1294,9 +1332,11 @@ export function ChatPage() {
           onOpenChange={handleInferencePanelOpenChange}
           settings={inferenceSettings}
           onSettingsChange={patchInferenceSettings}
+          maxTokenOptions={maxTokenOptions}
           contextWindow={contextWindow}
           onContextWindowChange={handleContextWindowChange}
           contextWindowOptions={contextWindowOptions}
+          safetyNote={selected?.chat_safety_note}
           variants={modelVariants}
           variantsLoading={variantsLoading}
           downloadingQuant={downloadingQuant}

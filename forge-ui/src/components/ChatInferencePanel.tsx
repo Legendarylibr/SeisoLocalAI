@@ -13,9 +13,11 @@ type ChatInferencePanelProps = {
   onOpenChange: (open: boolean) => void;
   settings: ChatInferenceSettings;
   onSettingsChange: (partial: Partial<ChatInferenceSettings>) => void;
+  maxTokenOptions: number[];
   contextWindow: ContextWindowSetting;
   onContextWindowChange: (value: ContextWindowSetting) => void;
   contextWindowOptions: number[];
+  safetyNote?: string | null;
   variants: ModelVariantsResponse | null;
   variantsLoading?: boolean;
   downloadingQuant: string | null;
@@ -25,7 +27,6 @@ type ChatInferencePanelProps = {
   onDownloadHubVariant: (repo: string, filename: string, quant: string) => void;
 };
 
-const MAX_TOKEN_OPTIONS = [512, 1024, 2048, 4096, 8192];
 const SPEC_TOKEN_OPTIONS = [2, 4, 6, 8, 12, 16, 24, 32];
 
 function formatMaxTokens(value: number): string {
@@ -38,9 +39,11 @@ export function ChatInferencePanel({
   onOpenChange,
   settings,
   onSettingsChange,
+  maxTokenOptions,
   contextWindow,
   onContextWindowChange,
   contextWindowOptions,
+  safetyNote,
   variants,
   variantsLoading = false,
   downloadingQuant,
@@ -52,6 +55,10 @@ export function ChatInferencePanel({
   const contextOptions = useMemo<ContextWindowSetting[]>(
     () => ["auto", ...contextWindowOptions],
     [contextWindowOptions],
+  );
+  const replyOptions = useMemo(
+    () => Array.from(new Set(maxTokenOptions)).sort((a, b) => a - b),
+    [maxTokenOptions],
   );
 
   const quantRows = useMemo(() => {
@@ -107,8 +114,8 @@ export function ChatInferencePanel({
   const showQuants = !providerActive && quantRows.length > 1;
 
   const summaryParts = [
-    formatContextLabel(contextWindow),
-    formatMaxTokens(settings.maxTokens),
+    contextWindow === "auto" ? "Safe auto ctx" : `${formatContextLabel(contextWindow)} ctx`,
+    `${formatMaxTokens(settings.maxTokens)} reply`,
     `temp ${settings.temperature.toFixed(1)}`,
   ];
   if (settings.specEnabled && settings.draftModelId) {
@@ -145,11 +152,11 @@ export function ChatInferencePanel({
                   const raw = e.target.value;
                   onContextWindowChange(raw === "auto" ? "auto" : Number(raw));
                 }}
-                title="Context size — Auto sizes to prompt + reply; max depends on model and free VRAM"
+                title="Safe auto is recommended. Manual choices are capped by model and VRAM safety limits."
               >
                 {contextOptions.map((opt) => (
                   <option key={String(opt)} value={String(opt)}>
-                    {formatContextLabel(opt)}
+                    {opt === "auto" ? "Safe auto (recommended)" : formatContextLabel(opt)}
                   </option>
                 ))}
               </select>
@@ -161,10 +168,13 @@ export function ChatInferencePanel({
                 value={settings.maxTokens}
                 disabled={disabled}
                 onChange={(e) => onSettingsChange({ maxTokens: Number(e.target.value) })}
+                title="Model-safe reply budget. Higher values are hidden when they can increase OOM risk."
               >
-                {MAX_TOKEN_OPTIONS.map((opt) => (
+                {replyOptions.map((opt) => (
                   <option key={opt} value={opt}>
-                    {formatMaxTokens(opt)}
+                    {opt === replyOptions[replyOptions.length - 1]
+                      ? `${formatMaxTokens(opt)} (recommended)`
+                      : formatMaxTokens(opt)}
                   </option>
                 ))}
               </select>
@@ -210,6 +220,10 @@ export function ChatInferencePanel({
               </div>
             </label>
           </div>
+
+          {safetyNote && (
+            <p className="chat-inference-note muted-text">{safetyNote}</p>
+          )}
 
           {showQuants && (
             <div className="chat-inference-section">
