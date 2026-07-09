@@ -1,4 +1,4 @@
-# Seiso Local AI--RUN AT OWN RISK CURRENTLY, NEEDS WORK, YOU WILL OOM
+# Seiso Local AI--Run with power limits during long inference on native linux. Batches were scaled way down across the board for stability. Inference now runs via a llama-swap sidecar on native linux. The goal is to have the inference engine out of in-process, so instability from pushing higher tok/s will not cause total crashing/ oom.
 
 [![CI](https://github.com/Legendarylibr/SeisoLocalAI/actions/workflows/ci.yml/badge.svg)](https://github.com/Legendarylibr/SeisoLocalAI/actions/workflows/ci.yml)
 
