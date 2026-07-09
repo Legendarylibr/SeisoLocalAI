@@ -10,7 +10,9 @@ import {
 } from "react";
 import { api, SystemMetrics } from "@/lib/api";
 
-const POLL_MS = 3000;
+const POLL_MS_ACTIVE = 3000;
+const POLL_MS_IDLE = 15000;
+const IDLE_AFTER_MS = 30000;
 
 type MetricsContextValue = {
   metrics: SystemMetrics | null;
@@ -23,6 +25,9 @@ export function MetricsProvider({ children }: { children: ReactNode }) {
   const [metrics, setMetrics] = useState<SystemMetrics | null>(null);
   const [watchers, setWatchers] = useState(0);
   const pollingRef = useRef(false);
+  const lastChangeRef = useRef(Date.now());
+  const lastPayloadRef = useRef<string>("");
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const watch = useCallback(() => {
     setWatchers((count) => count + 1);
@@ -33,27 +38,57 @@ export function MetricsProvider({ children }: { children: ReactNode }) {
     if (watchers <= 0) return;
     let cancelled = false;
 
+    const desiredIntervalMs = () =>
+      Date.now() - lastChangeRef.current > IDLE_AFTER_MS
+        ? POLL_MS_IDLE
+        : POLL_MS_ACTIVE;
+
+    const scheduleNext = () => {
+      if (cancelled) return;
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+      timeoutRef.current = setTimeout(() => {
+        void poll();
+      }, desiredIntervalMs());
+    };
+
     const poll = async () => {
-      if (document.hidden) return;
-      if (pollingRef.current) return;
+      if (cancelled) return;
+      if (document.hidden) {
+        scheduleNext();
+        return;
+      }
+      if (pollingRef.current) {
+        scheduleNext();
+        return;
+      }
       pollingRef.current = true;
       try {
         const next = await api.metrics();
-        if (!cancelled) setMetrics(next);
+        if (cancelled) return;
+        const fingerprint = JSON.stringify(next);
+        if (fingerprint !== lastPayloadRef.current) {
+          lastPayloadRef.current = fingerprint;
+          lastChangeRef.current = Date.now();
+        }
+        setMetrics(next);
       } catch {
         /* metrics are best-effort and local-only */
       } finally {
         pollingRef.current = false;
+        scheduleNext();
       }
     };
 
+    const onVisibility = () => {
+      if (!document.hidden) void poll();
+    };
+
     void poll();
-    const id = setInterval(poll, POLL_MS);
-    document.addEventListener("visibilitychange", poll);
+    document.addEventListener("visibilitychange", onVisibility);
     return () => {
       cancelled = true;
-      clearInterval(id);
-      document.removeEventListener("visibilitychange", poll);
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+      document.removeEventListener("visibilitychange", onVisibility);
     };
   }, [watchers]);
 

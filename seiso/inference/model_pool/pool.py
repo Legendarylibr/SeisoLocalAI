@@ -65,6 +65,7 @@ class ModelPool:
         self._inference_refs = 0
         self._unload_pending = False
         self._llama_infer_lock = threading.RLock()
+        self._idle_cond = threading.Condition(self._lock)
         self._release_notes: list[str] = []
         self._resident_gpu_resource_lock = False
 
@@ -117,11 +118,13 @@ class ModelPool:
     def end_inference(self) -> None:
         should_unload = False
         had_ref = False
-        with self._lock:
+        with self._idle_cond:
             had_ref = self._inference_refs > 0
             self._inference_refs = max(0, self._inference_refs - 1)
-            if self._inference_refs == 0 and self._unload_pending:
-                should_unload = True
+            if self._inference_refs == 0:
+                self._idle_cond.notify_all()
+                if self._unload_pending:
+                    should_unload = True
         if should_unload:
             self.unload_all()
         if had_ref:
@@ -168,19 +171,19 @@ class ModelPool:
         Returns True when idle. On timeout, does not force-clear refs.
         """
         deadline = time.time() + timeout_s
-        while time.time() < deadline:
-            with self._lock:
-                if self._inference_refs == 0:
-                    return True
-            time.sleep(0.05)
-        with self._lock:
-            still_busy = self._inference_refs > 0
-        if still_busy:
+        with self._idle_cond:
+            while self._inference_refs > 0:
+                remaining = deadline - time.time()
+                if remaining <= 0:
+                    break
+                self._idle_cond.wait(timeout=remaining)
+            idle = self._inference_refs == 0
+        if not idle:
             logger.warning(
                 "Inference still active after %.1fs — proceeding with forced unload",
                 timeout_s,
             )
-        return not still_busy
+        return idle
 
     def _release_handle(self, active: LoadedModel) -> None:
         """Close one pool handle and free GPU caches."""

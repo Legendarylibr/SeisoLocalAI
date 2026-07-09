@@ -62,7 +62,8 @@ _NATIVE_LINUX_PREFILL_RESERVE_PER_256TOK_MB = 256
 _NATIVE_LINUX_MMPROJ_RESERVE_MB = 512
 _TIGHT_VRAM_FIT_RATIO = 0.65
 _NATIVE_LINUX_TIGHT_VRAM_FIT_RATIO = 0.60
-_MAX_JSONL_LOAD_MB = 512
+# Prefer datasets mmap for any JSONL above this size (was 512; list-load expands heavily).
+_MAX_JSONL_LOAD_MB = 32
 _MODEL_WEIGHT_VRAM_SUFFIXES = frozenset({".gguf", ".safetensors", ".bin"})
 
 _VRAM_ESTIMATE_CACHE_MAX = 256

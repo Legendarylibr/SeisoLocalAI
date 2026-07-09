@@ -125,15 +125,9 @@ async def find_inventory_for_catalog_repo(
     existing = await db.get_model_by_source(user_id, f"hf:{catalog_repo}")
     if existing:
         return existing
-    for row in await db.list_models(user_id):
-        if row.get("source") == f"hf:{catalog_repo}":
-            return row
-        try:
-            metadata = json.loads(row.get("metadata_json") or "{}")
-        except json.JSONDecodeError:
-            metadata = {}
-        if metadata.get("repo_id") == catalog_repo:
-            return row
+    by_meta = await db.get_model_by_metadata_repo_id(user_id, catalog_repo)
+    if by_meta:
+        return by_meta
     return None
 
 
@@ -278,7 +272,7 @@ async def perform_model_download(
         try:
             artifacts = await loop.run_in_executor(
                 None,
-                lambda: sync_download_artifacts(
+                lambda: _sync_download_artifacts(
                     catalog_repo=repo_id,
                     data_dir=data_dir,
                     hf_cache_dir=hf_cache_dir,

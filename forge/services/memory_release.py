@@ -172,7 +172,8 @@ def release_after_task(
     task = None
     try:
         restore_kernel_patches()
-        release_cached_memory(sync=True)
+        # Avoid a full device synchronize on the happy path; OOM recovery syncs explicitly.
+        release_cached_memory(sync=False)
         _refresh_hardware_profile()
     finally:
         task = _unregister_gpu_task(resource_token=resource_token, job_id=job_id)

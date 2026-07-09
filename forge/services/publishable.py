@@ -59,19 +59,22 @@ async def assert_pushable_path(
     parent = await db.get_model_by_path(user_id, str(resolved.parent))
     if parent and is_pushable_model(parent):
         return resolved
-
-    models = await db.list_models(user_id)
-    for model in models:
-        if not is_pushable_model(model):
-            continue
-        model_path = Path(model["path"]).resolve()
+    # Walk parents for nested export artifacts under a registered model path.
+    cursor = resolved.parent
+    data_root = data_dir.resolve()
+    while True:
         try:
-            resolved.relative_to(model_path)
-            return resolved
+            cursor.relative_to(data_root)
         except ValueError:
-            pass
-        if model_path == resolved or model_path == resolved.parent:
+            break
+        if cursor == data_root:
+            break
+        row = await db.get_model_by_path(user_id, str(cursor))
+        if row and is_pushable_model(row):
             return resolved
+        if cursor.parent == cursor:
+            break
+        cursor = cursor.parent
 
     raise ValueError("Only Seiso export outputs can be published to Hugging Face")
 

@@ -203,6 +203,50 @@ def build_dataset_training_config(
     }
 
 
+# Process-local cleaned datasets from the most recent analysis (trainer can reuse).
+_CLEANED_DATASET_CACHE: dict[str, tuple[Any, dict[str, Any], DatasetFormat]] = {}
+_CLEANED_DATASET_CACHE_MAX = 8
+
+
+def cleaned_dataset_cache_key(
+    dataset: str | Path,
+    *,
+    dataset_format: DatasetFormat,
+    sandbox_root: Path | None,
+    deduplicate: bool,
+    min_chars: int,
+) -> str:
+    return "|".join(
+        [
+            str(dataset),
+            dataset_format.value,
+            str(sandbox_root or ""),
+            f"dedupe={int(deduplicate)}",
+            f"min_chars={int(min_chars)}",
+        ]
+    )
+
+
+def store_cleaned_dataset(
+    key: str,
+    cleaned: Any,
+    stats: dict[str, Any],
+    resolved_fmt: DatasetFormat,
+) -> None:
+    if len(_CLEANED_DATASET_CACHE) >= _CLEANED_DATASET_CACHE_MAX and key not in (
+        _CLEANED_DATASET_CACHE
+    ):
+        _CLEANED_DATASET_CACHE.pop(next(iter(_CLEANED_DATASET_CACHE)))
+    _CLEANED_DATASET_CACHE[key] = (cleaned, stats, resolved_fmt)
+
+
+def take_cleaned_dataset(
+    key: str,
+) -> tuple[Any, dict[str, Any], DatasetFormat] | None:
+    """Pop a cached cleaned dataset (one-shot reuse for the following train job)."""
+    return _CLEANED_DATASET_CACHE.pop(key, None)
+
+
 def analyze_training_dataset(
     dataset: str | Path,
     *,
@@ -229,14 +273,23 @@ def analyze_training_dataset(
         forced=dataset_format,
     )
 
+    effective_fmt = (
+        inferred_fmt if dataset_format == DatasetFormat.AUTO else dataset_format
+    )
     cleaned, stats, resolved_fmt = preprocess_training_dataset(
         raw,
-        dataset_format=(
-            inferred_fmt if dataset_format == DatasetFormat.AUTO else dataset_format
-        ),
+        dataset_format=effective_fmt,
         deduplicate=True,
         min_chars=1,
     )
+    cache_key = cleaned_dataset_cache_key(
+        dataset,
+        dataset_format=dataset_format,
+        sandbox_root=sandbox_root,
+        deduplicate=True,
+        min_chars=1,
+    )
+    store_cleaned_dataset(cache_key, cleaned, stats, resolved_fmt)
 
     domain, domain_label = _infer_domain(resolved_fmt, columns)
     length_sample_idx = _stratified_indices(len(cleaned), max_samples=512)
@@ -291,6 +344,8 @@ def analyze_training_dataset(
             ],
         ),
         "uses_full_dataset": True,
+        "cleaned_cache_key": cache_key,
+        "preprocess_defaults": {"deduplicate": True, "min_chars": 1},
     }
 
 

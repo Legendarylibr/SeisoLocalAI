@@ -33,6 +33,7 @@ def _random_matrix(
 class CategoricalHead:
     def __init__(self, input_dim: int, output_dim: int, rng: random.Random) -> None:
         self._native = None
+        self._params_dirty = False
         if native_flat_heads_available():
             self._native = _math_ext.FlatMatrixHead(output_dim, input_dim)
             weights = _random_matrix(output_dim, input_dim, rng)
@@ -44,6 +45,13 @@ class CategoricalHead:
             self._weights = _random_matrix(output_dim, input_dim, rng)
             self._bias = [0.0] * output_dim
 
+    def _sync_params_from_native(self) -> None:
+        if self._native is None or not self._params_dirty:
+            return
+        self._weights = [list(row) for row in self._native.get_weights()]
+        self._bias = list(self._native.get_bias())
+        self._params_dirty = False
+
     def __deepcopy__(self, memo: dict[int, object]) -> CategoricalHead:
         # Native pybind storage is not deepcopy-safe; clone via weight/bias props.
         clone = CategoricalHead.__new__(CategoricalHead)
@@ -51,6 +59,7 @@ class CategoricalHead:
         rows = len(self.weights)
         cols = len(self.weights[0]) if rows else 0
         clone._native = None
+        clone._params_dirty = False
         if native_flat_heads_available():
             clone._native = _math_ext.FlatMatrixHead(rows, cols)
         clone.weights = [list(row) for row in self.weights]
@@ -59,25 +68,25 @@ class CategoricalHead:
 
     @property
     def weights(self) -> list[list[float]]:
-        if self._native is not None:
-            self._weights = [list(row) for row in self._native.get_weights()]
+        self._sync_params_from_native()
         return self._weights
 
     @weights.setter
     def weights(self, value: list[list[float]]) -> None:
         self._weights = [list(row) for row in value]
+        self._params_dirty = False
         if self._native is not None:
             self._native.set_weights(self._weights)
 
     @property
     def bias(self) -> list[float]:
-        if self._native is not None:
-            self._bias = list(self._native.get_bias())
+        self._sync_params_from_native()
         return self._bias
 
     @bias.setter
     def bias(self, value: list[float]) -> None:
         self._bias = list(value)
+        self._params_dirty = False
         if self._native is not None:
             self._native.set_bias(self._bias)
 
@@ -117,6 +126,7 @@ class CategoricalHead:
                 advantage,
                 learning_rate,
             )
+            self._params_dirty = True
             return
         if categorical_update(
             self._weights,
@@ -143,6 +153,7 @@ class GaussianHead:
     ) -> None:
         self.stddev = stddev
         self._native = None
+        self._params_dirty = False
         if native_flat_heads_available():
             self._native = _math_ext.FlatMatrixHead(output_dim, input_dim)
             weights = _random_matrix(output_dim, input_dim, rng)
@@ -154,6 +165,13 @@ class GaussianHead:
             self._weights = _random_matrix(output_dim, input_dim, rng)
             self._bias = [0.0] * output_dim
 
+    def _sync_params_from_native(self) -> None:
+        if self._native is None or not self._params_dirty:
+            return
+        self._weights = [list(row) for row in self._native.get_weights()]
+        self._bias = list(self._native.get_bias())
+        self._params_dirty = False
+
     def __deepcopy__(self, memo: dict[int, object]) -> GaussianHead:
         clone = GaussianHead.__new__(GaussianHead)
         memo[id(self)] = clone
@@ -161,6 +179,7 @@ class GaussianHead:
         rows = len(self.weights)
         cols = len(self.weights[0]) if rows else 0
         clone._native = None
+        clone._params_dirty = False
         if native_flat_heads_available():
             clone._native = _math_ext.FlatMatrixHead(rows, cols)
         clone.weights = [list(row) for row in self.weights]
@@ -169,25 +188,25 @@ class GaussianHead:
 
     @property
     def weights(self) -> list[list[float]]:
-        if self._native is not None:
-            self._weights = [list(row) for row in self._native.get_weights()]
+        self._sync_params_from_native()
         return self._weights
 
     @weights.setter
     def weights(self, value: list[list[float]]) -> None:
         self._weights = [list(row) for row in value]
+        self._params_dirty = False
         if self._native is not None:
             self._native.set_weights(self._weights)
 
     @property
     def bias(self) -> list[float]:
-        if self._native is not None:
-            self._bias = list(self._native.get_bias())
+        self._sync_params_from_native()
         return self._bias
 
     @bias.setter
     def bias(self, value: list[float]) -> None:
         self._bias = list(value)
+        self._params_dirty = False
         if self._native is not None:
             self._native.set_bias(self._bias)
 
@@ -235,6 +254,7 @@ class GaussianHead:
                 learning_rate,
                 variance,
             )
+            self._params_dirty = True
             return
         if gaussian_update(
             self._weights,
@@ -261,6 +281,7 @@ class ValueHead:
         self, input_dim: int, rng: random.Random, *, zero_init: bool = False
     ) -> None:
         self._native = None
+        self._params_dirty = False
         weights = (
             [0.0 for _ in range(input_dim)]
             if zero_init
@@ -276,10 +297,18 @@ class ValueHead:
             self._weights = weights
             self._bias = 0.0
 
+    def _sync_params_from_native(self) -> None:
+        if self._native is None or not self._params_dirty:
+            return
+        self._weights = list(self._native.get_weights())
+        self._bias = float(self._native.get_bias())
+        self._params_dirty = False
+
     def __deepcopy__(self, memo: dict[int, object]) -> ValueHead:
         clone = ValueHead.__new__(ValueHead)
         memo[id(self)] = clone
         clone._native = None
+        clone._params_dirty = False
         if native_flat_heads_available():
             clone._native = _math_ext.FlatValueHead(len(self.weights))
         clone.weights = list(self.weights)
@@ -288,25 +317,25 @@ class ValueHead:
 
     @property
     def weights(self) -> list[float]:
-        if self._native is not None:
-            self._weights = list(self._native.get_weights())
+        self._sync_params_from_native()
         return self._weights
 
     @weights.setter
     def weights(self, value: list[float]) -> None:
         self._weights = list(value)
+        self._params_dirty = False
         if self._native is not None:
             self._native.set_weights(self._weights)
 
     @property
     def bias(self) -> float:
-        if self._native is not None:
-            self._bias = float(self._native.get_bias())
+        self._sync_params_from_native()
         return self._bias
 
     @bias.setter
     def bias(self, value: float) -> None:
         self._bias = float(value)
+        self._params_dirty = False
         if self._native is not None:
             self._native.set_bias(self._bias)
 
@@ -320,6 +349,7 @@ class ValueHead:
     ) -> None:
         if self._native is not None:
             self._native.update(state_vector, target, learning_rate)
+            self._params_dirty = True
             return
         prediction = self.predict(state_vector)
         error = target - prediction

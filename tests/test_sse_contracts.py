@@ -43,9 +43,26 @@ async def test_chat_stream_sends_token_message_done(app, auth_client, monkeypatc
     from unittest.mock import MagicMock
 
     from forge.api.deps import get_inference_orchestrator
+    from forge.services import hf_connectivity, inference_models
+
+    monkeypatch.setattr(
+        inference_models,
+        "_installed_backends",
+        lambda: {"llamacpp": True, "llamaswap": False, "mlx": False, "torch": False},
+    )
+    monkeypatch.setattr(
+        hf_connectivity,
+        "check_inference_runtime",
+        lambda: type(
+            "R",
+            (),
+            {"llamacpp": True, "llamaswap": False, "mlx": False, "torch": False},
+        )(),
+    )
 
     mock_runner = MagicMock()
     mock_runner.stream_updates = fake_stream_updates
+    mock_runner.pool.has_active_inference.return_value = False
     get_inference_orchestrator()._runner = mock_runner
 
     async with client.stream(

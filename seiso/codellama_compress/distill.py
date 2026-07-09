@@ -37,7 +37,7 @@ from .training_utils import (
     precision_kwargs,
     print_trust_remote_code_notice,
     rotate_checkpoints,
-    tokenize_text,
+    tokenize_texts,
 )
 
 
@@ -134,14 +134,18 @@ def run_distillation(
                 import time
 
                 step_t0 = time.time()
-            # Sample next text (loop if needed when streaming)
-            try:
-                text = next(data_iter)
-            except StopIteration:
-                data_iter = iter(iter_dataset_texts(dataset_cfg))
-                text = next(data_iter)
+            # Collect a micro-batch of texts (loop dataset when streaming ends).
+            micro_bs = max(1, int(getattr(cfg, "micro_batch_size", 1) or 1))
+            texts_batch: list[str] = []
+            while len(texts_batch) < micro_bs:
+                try:
+                    text = next(data_iter)
+                except StopIteration:
+                    data_iter = iter(iter_dataset_texts(dataset_cfg))
+                    text = next(data_iter)
+                texts_batch.append(text[: cfg.seq_len * 4])
 
-            batch = tokenize_text(tokenizer, text[: cfg.seq_len * 4], cfg.seq_len)
+            batch = tokenize_texts(tokenizer, texts_batch, cfg.seq_len)
             batch = {k: v.to(device) for k, v in batch.items()}
 
             with torch.no_grad():

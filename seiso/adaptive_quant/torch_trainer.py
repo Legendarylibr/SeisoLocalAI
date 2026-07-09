@@ -248,6 +248,9 @@ if torch is not None:
             return torch.optim.AdamW(self.policy.model.parameters(), **kwargs)
 
         def train(self) -> dict[str, float]:
+            from seiso.adaptive_quant.trainer import _warn_if_native_math_missing
+
+            _warn_if_native_math_missing()
             if self.config.continuous_training:
                 return self._train_continuous()
             return self._train_fixed()

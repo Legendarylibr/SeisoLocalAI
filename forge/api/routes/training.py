@@ -39,6 +39,7 @@ from forge.services.training_service import (
     cloud_gpu_provider_type,
     dataset_analysis_token_matches,
     format_training_job_row,
+    get_cached_dataset_analysis,
     run_dataset_analysis,
     serialize_metrics_payload,
     store_dataset_analysis_token,
@@ -120,6 +121,41 @@ async def training_recommendations(
     )
 
 
+async def _analyze_dataset_shared(
+    body: DatasetValidationRequest,
+    *,
+    user_id: str,
+    settings: ForgeSettings,
+    require_valid: bool,
+) -> dict:
+    """Shared analyze/validate path with content-addressed result cache."""
+    ds = _resolve_dataset_for_user(body.dataset, user_id=user_id, settings=settings)
+    ds_fmt = (
+        DatasetFormat(body.dataset_format)
+        if body.dataset_format
+        else DatasetFormat.AUTO
+    )
+    analysis = await asyncio.to_thread(
+        run_dataset_analysis,
+        ds,
+        dataset_format=ds_fmt,
+        sandbox_root=Path(settings.data_dir) / "uploads" / user_id,
+    )
+    if require_valid and not analysis.get("valid"):
+        raise ValueError("No valid training samples after preprocessing")
+    # Snapshot before attaching a per-request token (result cache must stay token-free).
+    analysis_snapshot = dict(analysis)
+    analysis["analysis_token"] = store_dataset_analysis_token(
+        user_id=user_id,
+        dataset=ds,
+        requested_format=ds_fmt,
+        resolved_format=analysis.get("resolved_format"),
+        valid=bool(analysis.get("valid")),
+        analysis=analysis_snapshot,
+    )
+    return analysis
+
+
 @router.post("/analyze-dataset")
 async def analyze_dataset_endpoint(
     body: DatasetValidationRequest,
@@ -127,27 +163,10 @@ async def analyze_dataset_endpoint(
     settings: Annotated[ForgeSettings, Depends(get_settings)],
 ) -> dict:
     """Research-grade dataset analysis: full-corpus schema detection and training hints."""
-    ds = _resolve_dataset_for_user(body.dataset, user_id=user_id, settings=settings)
     try:
-        ds_fmt = (
-            DatasetFormat(body.dataset_format)
-            if body.dataset_format
-            else DatasetFormat.AUTO
+        return await _analyze_dataset_shared(
+            body, user_id=user_id, settings=settings, require_valid=False
         )
-        analysis = await asyncio.to_thread(
-            run_dataset_analysis,
-            ds,
-            dataset_format=ds_fmt,
-            sandbox_root=Path(settings.data_dir) / "uploads" / user_id,
-        )
-        analysis["analysis_token"] = store_dataset_analysis_token(
-            user_id=user_id,
-            dataset=ds,
-            requested_format=ds_fmt,
-            resolved_format=analysis.get("resolved_format"),
-            valid=bool(analysis.get("valid")),
-        )
-        return analysis
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -158,28 +177,10 @@ async def validate_dataset_endpoint(
     user_id: Annotated[str, Depends(get_current_user_id)],
     settings: Annotated[ForgeSettings, Depends(get_settings)],
 ) -> dict:
-    """Preflight endpoint — scans the entire dataset before training starts."""
-    ds = _resolve_dataset_for_user(body.dataset, user_id=user_id, settings=settings)
+    """Preflight endpoint — reuses analyze cache when the corpus was just scanned."""
     try:
-        ds_fmt = (
-            DatasetFormat(body.dataset_format)
-            if body.dataset_format
-            else DatasetFormat.AUTO
-        )
-        analysis = await asyncio.to_thread(
-            run_dataset_analysis,
-            ds,
-            dataset_format=ds_fmt,
-            sandbox_root=Path(settings.data_dir) / "uploads" / user_id,
-        )
-        if not analysis.get("valid"):
-            raise ValueError("No valid training samples after preprocessing")
-        analysis["analysis_token"] = store_dataset_analysis_token(
-            user_id=user_id,
-            dataset=ds,
-            requested_format=ds_fmt,
-            resolved_format=analysis.get("resolved_format"),
-            valid=True,
+        analysis = await _analyze_dataset_shared(
+            body, user_id=user_id, settings=settings, require_valid=True
         )
         return {"valid": True, **analysis}
     except Exception as exc:
@@ -370,11 +371,23 @@ async def start_training(
         user_id, training_config, body.project_id, job_id=job_id
     )
     orchestrator.create_job(job_id=job_id, user_id=user_id)
+    extra = {**training_config.get("extra", {}), "user_id": user_id}
+    if body.dataset_analysis_token:
+        extra["dataset_analysis_token"] = body.dataset_analysis_token
+        cached = get_cached_dataset_analysis(
+            body.dataset_analysis_token,
+            user_id=user_id,
+            dataset=dataset_for_val,
+            dataset_format=ds_fmt,
+        )
+        if cached is not None:
+            # Pass analysis snapshot so the trainer can skip a third full scan.
+            extra["cached_dataset_analysis"] = cached
     payload = {
         "config": {
             **training_config,
             "sandbox_root": str(settings.data_dir / "uploads" / user_id),
-            "extra": {**training_config.get("extra", {}), "user_id": user_id},
+            "extra": extra,
         },
         "output_dir": str(settings.checkpoints_dir / user_id / job_id),
         "multi_gpu": body.multi_gpu,

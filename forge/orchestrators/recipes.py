@@ -126,8 +126,10 @@ class RecipeOrchestrator(Orchestrator):
             if not user_id:
                 raise PermissionError("user_id required for recipe import")
             path = assert_user_path(self.sandbox_root, user_id, config["path"])
+            from forge.services.executors import IO_EXECUTOR
+
             return await loop.run_in_executor(
-                None, self._import_file, path, config.get("format")
+                IO_EXECUTOR, self._import_file, path, config.get("format")
             )
 
         if ntype == "transform":

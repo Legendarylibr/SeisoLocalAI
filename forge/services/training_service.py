@@ -34,9 +34,13 @@ class DatasetAnalysisCacheEntry:
     resolved_format: str
     valid: bool
     created_at: float
+    analysis: dict[str, Any] | None = None
 
 
 _dataset_analysis_cache: dict[str, DatasetAnalysisCacheEntry] = {}
+# Content-addressed analysis results so validate/analyze don't rescans the same corpus.
+_dataset_analysis_results: dict[tuple[str, str, str], tuple[float, dict[str, Any]]] = {}
+_DATASET_RESULT_CACHE_MAX = 32
 
 
 def cloud_gpu_provider_type() -> str:
@@ -73,6 +77,7 @@ def store_dataset_analysis_token(
     requested_format: DatasetFormat,
     resolved_format: str | None,
     valid: bool,
+    analysis: dict[str, Any] | None = None,
 ) -> str:
     token = uuid.uuid4().hex
     _dataset_analysis_cache[token] = DatasetAnalysisCacheEntry(
@@ -82,6 +87,7 @@ def store_dataset_analysis_token(
         resolved_format=resolved_format or requested_format.value,
         valid=valid,
         created_at=time.monotonic(),
+        analysis=analysis,
     )
     return token
 
@@ -110,17 +116,52 @@ def dataset_analysis_token_matches(
     )
 
 
+def get_cached_dataset_analysis(
+    token: str | None,
+    *,
+    user_id: str,
+    dataset: str | Path,
+    dataset_format: DatasetFormat,
+) -> dict[str, Any] | None:
+    """Return cached analysis payload when the token is still valid."""
+    if not dataset_analysis_token_matches(
+        token,
+        user_id=user_id,
+        dataset=dataset,
+        dataset_format=dataset_format,
+    ):
+        return None
+    entry = _dataset_analysis_cache.get(token or "")
+    if entry is None or entry.analysis is None:
+        return None
+    return dict(entry.analysis)
+
+
 def run_dataset_analysis(
     dataset: str | Path,
     *,
     dataset_format: DatasetFormat,
     sandbox_root: Path,
 ) -> dict[str, Any]:
-    return analyze_training_dataset(
+    key = (str(dataset), dataset_format.value, str(sandbox_root))
+    now = time.monotonic()
+    cached = _dataset_analysis_results.get(key)
+    if cached is not None:
+        created, payload = cached
+        if now - created <= _DATASET_ANALYSIS_TTL_S:
+            return dict(payload)
+        _dataset_analysis_results.pop(key, None)
+
+    analysis = analyze_training_dataset(
         dataset,
         dataset_format=dataset_format,
         sandbox_root=sandbox_root,
     )
+    if len(_dataset_analysis_results) >= _DATASET_RESULT_CACHE_MAX:
+        oldest = min(_dataset_analysis_results.items(), key=lambda item: item[1][0])[0]
+        _dataset_analysis_results.pop(oldest, None)
+    _dataset_analysis_results[key] = (now, analysis)
+    return analysis
 
 
 def serialize_metrics_payload(

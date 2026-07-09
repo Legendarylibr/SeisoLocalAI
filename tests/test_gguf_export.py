@@ -74,9 +74,10 @@ def test_export_quants_reuses_single_f16_intermediate(monkeypatch, tmp_path: Pat
     )
 
     assert [call[0] for call in calls] == ["f16"]
-    assert [item[0] for item in quantized] == ["q4_k_m", "q5_k_m"]
+    # Quantize workers may finish out of order; results are recorded in request order.
+    assert {item[0] for item in quantized} == {"q4_k_m", "q5_k_m"}
     assert quantized[0][1] == quantized[1][1]
-    assert set(results) == {"gguf_q4_k_m", "gguf_q5_k_m"}
+    assert list(results) == ["gguf_q4_k_m", "gguf_q5_k_m"]
 
 
 def test_export_quants_reuses_requested_f16_for_later_k_quant(

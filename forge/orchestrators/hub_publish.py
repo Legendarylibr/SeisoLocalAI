@@ -22,8 +22,10 @@ class HubPublishOrchestrator(Orchestrator):
         def on_log(msg: str) -> None:
             loop.call_soon_threadsafe(self._emit_log, job_id, msg)
 
+        from forge.services.executors import IO_EXECUTOR
+
         return await loop.run_in_executor(
-            None, lambda: self._run_publish(payload, on_log)
+            IO_EXECUTOR, lambda: self._run_publish(payload, on_log)
         )
 
     def _run_publish(

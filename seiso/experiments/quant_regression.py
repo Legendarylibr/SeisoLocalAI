@@ -532,6 +532,7 @@ def run_quant_regression_study(
     max_eval_samples: int = 64,
     skip_training: bool = False,
     skip_rl: bool = False,
+    parallel_postprocess: int = 1,
     on_log: Callable[[str], None] | None = None,
 ) -> QuantRegressionReport:
     """Train one model at several quants, then measure deploy-quant regression."""
@@ -573,7 +574,7 @@ def run_quant_regression_study(
         if on_log:
             on_log(msg)
 
-    for quant_label in train_quants:
+    def _run_one_quant(quant_label: str) -> QuantRegressionRow:
         quant = QuantMode(quant_label)
         row = QuantRegressionRow(train_quant=quant_label, checkpoint="", backend=mode)
         train_out = root / f"train-{quant_label}"
@@ -605,9 +606,7 @@ def run_quant_regression_study(
             row.export_dir = str(export_dir)
 
             if skip_rl:
-                report.rows.append(row)
-                _persist_manifest(manifest_path, report, existing)
-                continue
+                return row
 
             metrics: dict[str, Any] = {}
             if mode in {"hf", "both"}:
@@ -695,9 +694,27 @@ def run_quant_regression_study(
         except Exception as exc:
             row.error = str(exc)
             log(f"quant={quant_label} failed: {exc}")
+        return row
 
-        report.rows.append(row)
-        _persist_manifest(manifest_path, report, existing)
+    # Training stays sequential (VRAM). When resuming with skip_training, post-process
+    # independent quants in parallel (export/eval only).
+    workers = max(1, int(parallel_postprocess or 1))
+    if skip_training and workers > 1 and len(train_quants) > 1:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        log(f"Parallel post-process workers={min(workers, len(train_quants))}")
+        with ThreadPoolExecutor(max_workers=min(workers, len(train_quants))) as pool:
+            futures = {pool.submit(_run_one_quant, q): q for q in train_quants}
+            for fut in as_completed(futures):
+                row = fut.result()
+                report.rows.append(row)
+                _persist_manifest(manifest_path, report, existing)
+        report.rows.sort(key=lambda r: list(train_quants).index(r.train_quant))
+    else:
+        for quant_label in train_quants:
+            row = _run_one_quant(quant_label)
+            report.rows.append(row)
+            _persist_manifest(manifest_path, report, existing)
 
     report_path = root / "quant_regression_report.json"
     report_path.write_text(json.dumps(report.to_dict(), indent=2), encoding="utf-8")

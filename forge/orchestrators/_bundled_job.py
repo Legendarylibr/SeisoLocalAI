@@ -109,8 +109,10 @@ async def run_bundled_job(
         loop.call_soon_threadsafe(orchestrator._emit_log, job_id, msg)
 
     try:
+        from forge.services.executors import GPU_EXECUTOR
+
         result = await loop.run_in_executor(
-            None,
+            GPU_EXECUTOR,
             lambda: runner(
                 job_id=job_id,
                 user_id=user_id,

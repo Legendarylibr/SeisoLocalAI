@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -56,8 +57,20 @@ async def test_openai_chat_with_inventory_model(app, auth_client, monkeypatch):
         "_installed_backends",
         lambda: {"llamacpp": True, "llamaswap": False, "mlx": False, "torch": False},
     )
+    from forge.services import hf_connectivity
+
+    monkeypatch.setattr(
+        hf_connectivity,
+        "check_inference_runtime",
+        lambda: type(
+            "R",
+            (),
+            {"llamacpp": True, "llamaswap": False, "mlx": False, "torch": False},
+        )(),
+    )
     mock_runner = AsyncMock()
     mock_runner.chat = AsyncMock(return_value="Hello from Seiso")
+    mock_runner.pool = SimpleNamespace(has_active_inference=lambda: False)
     get_inference_orchestrator()._runner = mock_runner
 
     res = await client.post(
@@ -195,9 +208,26 @@ async def test_inference_chat_e2e(app, auth_client, monkeypatch):
     )
 
     from forge.api.deps import get_inference_orchestrator
+    from forge.services import hf_connectivity, inference_models
+
+    monkeypatch.setattr(
+        inference_models,
+        "_installed_backends",
+        lambda: {"llamacpp": True, "llamaswap": False, "mlx": False, "torch": False},
+    )
+    monkeypatch.setattr(
+        hf_connectivity,
+        "check_inference_runtime",
+        lambda: type(
+            "R",
+            (),
+            {"llamacpp": True, "llamaswap": False, "mlx": False, "torch": False},
+        )(),
+    )
 
     mock_runner = AsyncMock()
     mock_runner.chat = AsyncMock(return_value="streamed reply")
+    mock_runner.pool = SimpleNamespace(has_active_inference=lambda: False)
     get_inference_orchestrator()._runner = mock_runner
 
     res = await client.post(

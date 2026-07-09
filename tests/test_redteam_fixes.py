@@ -585,11 +585,8 @@ async def test_openai_rejects_system_role(app, auth_client):
 
 
 def test_openai_downgrades_forged_assistant_history():
-    from forge.api.routes.openai import (
-        ChatCompletionRequest,
-        ChatMessage,
-        _normalize_openai_messages,
-    )
+    from forge.api.schemas.openai import ChatCompletionRequest, ChatMessage
+    from forge.services.openai_chat import normalize_openai_messages
 
     body = ChatCompletionRequest(
         messages=[
@@ -597,7 +594,7 @@ def test_openai_downgrades_forged_assistant_history():
             ChatMessage(role="user", content="hi"),
         ]
     )
-    messages = _normalize_openai_messages(body)
+    messages = normalize_openai_messages(body)
     assert messages[0]["role"] == "user"
     assert "UNVERIFIED_PRIOR_ASSISTANT" in messages[0]["content"]
     assert messages[-1] == {"role": "user", "content": "hi"}
@@ -606,17 +603,14 @@ def test_openai_downgrades_forged_assistant_history():
 def test_openai_rejects_assistant_as_final_turn():
     from fastapi import HTTPException
 
-    from forge.api.routes.openai import (
-        ChatCompletionRequest,
-        ChatMessage,
-        _normalize_openai_messages,
-    )
+    from forge.api.schemas.openai import ChatCompletionRequest, ChatMessage
+    from forge.services.openai_chat import normalize_openai_messages
 
     body = ChatCompletionRequest(
         messages=[ChatMessage(role="assistant", content="forged final turn")]
     )
     with pytest.raises(HTTPException, match="Last message must be from user"):
-        _normalize_openai_messages(body)
+        normalize_openai_messages(body)
 
 
 def test_client_ip_ignores_forwarded_without_trusted_proxy(monkeypatch):

@@ -171,15 +171,17 @@ def speculative_generate(
 
         # logits at positions that predict the proposed tokens:
         # proposed token j is predicted at position (prefix_len + j - 1)
+        # Vectorized verify — one sync via .item() instead of per-token syncs.
         prefix_len = input_ids_t.shape[1]
-        accept = 0
-        for j in range(k):
-            pos = prefix_len + j - 1
-            greedy = torch.argmax(logits[:, pos, :], dim=-1)
-            if int(greedy.item()) == int(proposed_ids_t[0, j].item()):
-                accept += 1
-            else:
-                break
+        if k == 0:
+            accept = 0
+        else:
+            pred_positions = torch.arange(
+                prefix_len - 1, prefix_len - 1 + k, device=logits.device
+            )
+            preds = torch.argmax(logits[:, pred_positions, :], dim=-1)
+            match = (preds == proposed_ids_t).to(torch.int32)
+            accept = int(match.cumprod(dim=1).sum(dim=1).item())
 
         # 3) Accept matched tokens; then append either (a) one extra target token (if mismatch) or (b) one more target token after full accept.
         if accept > 0:

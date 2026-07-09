@@ -28,14 +28,10 @@ logger = logging.getLogger(__name__)
 
 
 def _use_fused_cuda_kernels(x: Any) -> bool:
-    """Native CUDA fused ops lack autograd — use PyTorch paths when gradients are needed."""
-    import torch
-
+    """Use fused CUDA path on CUDA tensors (autograd wrappers handle training grads)."""
     if not getattr(x, "is_cuda", False):
         return False
-    if active_backend() != "cuda":
-        return False
-    return not (torch.is_grad_enabled() and getattr(x, "requires_grad", False))
+    return active_backend() == "cuda"
 
 
 _RMSNORM_CLASSES = frozenset(

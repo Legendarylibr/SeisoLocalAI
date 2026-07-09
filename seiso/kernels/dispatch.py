@@ -53,10 +53,12 @@ def fused_rms_norm(x, weight, eps: float = 1e-6, residual=None):
 
     backend = active_backend()
     if backend == "cuda":
-        if _needs_pytorch_autograd(x, weight, residual):
-            return _pytorch_rms_norm(x, weight, eps, residual)
         from seiso.kernels.cuda_ops import fused_rms_norm as cuda_rms
 
+        if _needs_pytorch_autograd(x, weight, residual):
+            from seiso.kernels.autograd_ops import fused_rms_norm_autograd
+
+            return fused_rms_norm_autograd(x, weight, eps, residual)
         return cuda_rms(x, weight, eps=eps, residual=residual)
 
     if backend == "triton":
@@ -77,14 +79,18 @@ def fused_swiglu(gate, up):
     if not getattr(gate, "is_cuda", False):
         return torch.nn.functional.silu(gate) * up
 
-    if _needs_pytorch_autograd(gate, up):
-        return torch.nn.functional.silu(gate) * up
-
     backend = active_backend()
     if backend == "cuda":
         from seiso.kernels.cuda_ops import fused_swiglu as cuda_swiglu
 
+        if _needs_pytorch_autograd(gate, up):
+            from seiso.kernels.autograd_ops import fused_swiglu_autograd
+
+            return fused_swiglu_autograd(gate, up)
         return cuda_swiglu(gate, up)
+
+    if _needs_pytorch_autograd(gate, up):
+        return torch.nn.functional.silu(gate) * up
 
     if backend == "triton":
         from seiso.kernels.triton_ops import fused_swiglu as triton_swiglu
