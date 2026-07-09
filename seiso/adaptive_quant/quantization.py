@@ -8,10 +8,14 @@ from seiso.adaptive_quant.kernel_rl import finalize_kernel_profile
 from seiso.adaptive_quant.math_utils import (
     clamp,
     dynamic_layer_bits,
+    expand_group_bits,
+    finalize_effective_layer_bits,
     learned_layer_bits,
     mean_variance,
     moe_swap_cost,
     moe_variant_summary,
+    nearest_allowed_bit_width,
+    pad_or_truncate,
     variance,
 )
 from seiso.adaptive_quant.types import EpisodeState, QuantizationDecision, QuantMode
@@ -29,21 +33,11 @@ def safe_fallback_decision(config: FrameworkConfig) -> QuantizationDecision:
 
 
 def _expand_group_bits(group_bits: list[int], num_layers: int) -> list[float]:
-    if not group_bits:
-        return []
-    layers_per_group = max(1, num_layers // len(group_bits))
-    expanded: list[float] = []
-    for bit_width in group_bits:
-        expanded.extend([float(bit_width)] * layers_per_group)
-    return _pad_or_truncate(expanded, num_layers, fill=float(group_bits[-1]))
+    return expand_group_bits(group_bits, num_layers)
 
 
 def _pad_or_truncate(values: list, length: int, *, fill) -> list:
-    if length <= 0:
-        return []
-    if len(values) >= length:
-        return values[:length]
-    return values + [fill] * (length - len(values))
+    return pad_or_truncate(values, length, fill=fill)
 
 
 def _nearest_allowed_bit_width(
@@ -52,10 +46,7 @@ def _nearest_allowed_bit_width(
     *,
     default: int,
 ) -> int:
-    if bit_width is None:
-        return default
-    return min(allowed, key=lambda candidate: abs(candidate - bit_width))
-
+    return nearest_allowed_bit_width(bit_width, allowed, default=default)
 
 def _allowed_bit_widths(config: FrameworkConfig) -> list[int]:
     return sorted(config.discrete_bit_widths)
@@ -132,12 +123,46 @@ def finalize_decision(
     min_bits = allowed[0] if allowed else int(config.safe_default_bits)
     max_bits = allowed[-1] if allowed else int(config.safe_default_bits)
 
-    if finalized.mode == QuantMode.DISCRETE:
+    native = finalize_effective_layer_bits(
+        mode=finalized.mode.value,
+        num_layers=config.num_layers,
+        base_bit_width=finalized.base_bit_width,
+        group_bit_widths=finalized.group_bit_widths,
+        layer_bit_widths=finalized.layer_bit_widths,
+        allowed=allowed,
+        default_bits=config.safe_default_bits,
+        layer_stats=state.sensitivity.layer_stats,
+        complexity=state.input_features.complexity_score,
+        precision_level=finalized.precision_level,
+        precision_bounds=config.precision_bounds,
+        precision_need=summarize_precision_needs(state.input_features, state.sensitivity),
+        scale_factor=finalized.scale_factor,
+        clipping_range=finalized.clipping_range,
+    )
+    if native is not None:
+        effective, average_bits, bit_variance, out_base, out_group, out_layer = native
+        finalized.effective_layer_bits = effective
+        if finalized.mode == QuantMode.DISCRETE:
+            finalized.base_bit_width = out_base
+        elif finalized.mode == QuantMode.GROUPED:
+            finalized.group_bit_widths = out_group
+        elif finalized.mode == QuantMode.PER_LAYER:
+            finalized.layer_bit_widths = out_layer
+        elif finalized.mode == QuantMode.DYNAMIC:
+            finalized.base_bit_width = out_base
+        finalized.metadata = dict(finalized.metadata)
+        finalized.metadata["average_bits"] = average_bits
+        finalized.metadata["bit_variance"] = bit_variance
+    elif finalized.mode == QuantMode.DISCRETE:
         bit_width = _normalize_bit_width(
             finalized.base_bit_width, allowed, default=config.safe_default_bits
         )
         finalized.base_bit_width = bit_width
         finalized.effective_layer_bits = [float(bit_width)] * config.num_layers
+        finalized.metadata = dict(finalized.metadata)
+        average_bits, bit_variance = mean_variance(finalized.effective_layer_bits)
+        finalized.metadata["average_bits"] = average_bits
+        finalized.metadata["bit_variance"] = bit_variance
     elif finalized.mode == QuantMode.GROUPED:
         normalized = [
             _normalize_bit_width(bit_width, allowed, default=config.safe_default_bits)
@@ -147,6 +172,10 @@ def finalize_decision(
         finalized.effective_layer_bits = _expand_group_bits(
             normalized, config.num_layers
         )
+        finalized.metadata = dict(finalized.metadata)
+        average_bits, bit_variance = mean_variance(finalized.effective_layer_bits)
+        finalized.metadata["average_bits"] = average_bits
+        finalized.metadata["bit_variance"] = bit_variance
     elif finalized.mode == QuantMode.PER_LAYER:
         if not finalized.layer_bit_widths:
             finalized.layer_bit_widths = [config.safe_default_bits] * config.num_layers
@@ -161,6 +190,10 @@ def finalize_decision(
         finalized.effective_layer_bits = [
             float(bit_width) for bit_width in finalized.layer_bit_widths
         ]
+        finalized.metadata = dict(finalized.metadata)
+        average_bits, bit_variance = mean_variance(finalized.effective_layer_bits)
+        finalized.metadata["average_bits"] = average_bits
+        finalized.metadata["bit_variance"] = bit_variance
     elif finalized.mode == QuantMode.DYNAMIC:
         bit_width = _normalize_bit_width(
             finalized.base_bit_width, allowed, default=config.safe_default_bits
@@ -169,17 +202,21 @@ def finalize_decision(
         finalized.effective_layer_bits = _dynamic_bits(
             bit_width, state, min_bits=min_bits, max_bits=max_bits
         )
+        finalized.metadata = dict(finalized.metadata)
+        average_bits, bit_variance = mean_variance(finalized.effective_layer_bits)
+        finalized.metadata["average_bits"] = average_bits
+        finalized.metadata["bit_variance"] = bit_variance
     elif finalized.mode == QuantMode.LEARNED:
         finalized.effective_layer_bits = _learned_bits(
             finalized, state, config, min_bits=min_bits, max_bits=max_bits
         )
+        finalized.metadata = dict(finalized.metadata)
+        average_bits, bit_variance = mean_variance(finalized.effective_layer_bits)
+        finalized.metadata["average_bits"] = average_bits
+        finalized.metadata["bit_variance"] = bit_variance
     else:
         raise ValueError(f"Unsupported decision mode: {finalized.mode}")
 
-    finalized.metadata = dict(finalized.metadata)
-    average_bits, bit_variance = mean_variance(finalized.effective_layer_bits)
-    finalized.metadata["average_bits"] = average_bits
-    finalized.metadata["bit_variance"] = bit_variance
     _finalize_moe_selection(finalized, state, config)
     finalize_kernel_profile(finalized, config)
 
@@ -200,7 +237,6 @@ def finalize_decision(
         return fallback
 
     return finalized
-
 
 def _finalize_moe_selection(
     decision: QuantizationDecision, state: EpisodeState, config: FrameworkConfig

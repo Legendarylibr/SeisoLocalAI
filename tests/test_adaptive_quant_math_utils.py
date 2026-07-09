@@ -177,6 +177,145 @@ def test_native_extension_exports_expected_hotpath_functions():
     assert native.softmax([0.0, 1.0])[1] > native.softmax([0.0, 1.0])[0]
     assert hasattr(native, "simulator_core_metrics")
     assert hasattr(native, "weighted_reward")
+    assert hasattr(native, "extract_input_features")
+    assert hasattr(native, "estimate_layer_sensitivity")
+    assert hasattr(native, "expand_group_bits")
+    assert hasattr(native, "finalize_effective_layer_bits")
+    assert hasattr(native, "matrix_vector_add_flat")
+    assert hasattr(native, "FlatMatrixHead")
+    assert hasattr(native, "FlatValueHead")
+
+
+def test_finalize_helpers_match_python_semantics():
+    assert math_utils.expand_group_bits([2, 4], 6) == pytest.approx(
+        [2.0, 2.0, 2.0, 4.0, 4.0, 4.0]
+    )
+    assert math_utils.pad_or_truncate([1, 2], 4, fill=9) == [1, 2, 9, 9]
+    assert math_utils.pad_or_truncate([1, 2, 3, 4], 2, fill=0) == [1, 2]
+    assert math_utils.nearest_allowed_bit_width(5, [2, 4, 8], default=4) == 4
+    assert math_utils.nearest_allowed_bit_width(None, [2, 4, 8], default=4) == 4
+
+
+def test_feature_extraction_helpers_are_stable():
+    from seiso.adaptive_quant.features import (
+        estimate_layer_sensitivity,
+        extract_input_features,
+        summarize_precision_needs,
+        tokenize,
+    )
+    from seiso.adaptive_quant.types import PromptSample
+
+    assert tokenize("Hello, World_1!") == ["hello", ",", "world_1", "!"]
+    prompt = PromptSample(
+        prompt_id="p1",
+        domain="code",
+        text="def add(a, b): return a + b",
+    )
+    features = extract_input_features(prompt)
+    assert features.prompt_length > 0
+    assert 0.0 <= features.token_entropy <= 1.0
+    sensitivity = estimate_layer_sensitivity(prompt, features, num_layers=4)
+    assert len(sensitivity.layer_stats) == 4
+    need = summarize_precision_needs(features, sensitivity)
+    assert 0.0 <= need <= 1.4
+
+
+@pytest.mark.skipif(
+    not math_utils.native_math_available(),
+    reason="pybind11 extension is not built in this environment",
+)
+def test_native_feature_extraction_matches_python_fallback(monkeypatch):
+    from seiso.adaptive_quant import features
+    from seiso.adaptive_quant.types import PromptSample
+
+    prompt = PromptSample(
+        prompt_id="native-parity",
+        domain="math",
+        text="Solve 2*x + 3 = 11 for x, please!",
+    )
+    native_features = features.extract_input_features(prompt)
+    native_sensitivity = features.estimate_layer_sensitivity(
+        prompt, native_features, num_layers=6
+    )
+    native_need = features.summarize_precision_needs(native_features, native_sensitivity)
+
+    monkeypatch.setattr(features, "_math_ext", None)
+    monkeypatch.setattr(math_utils, "_math_ext", None)
+    python_features = features.extract_input_features(prompt)
+    python_sensitivity = features.estimate_layer_sensitivity(
+        prompt, python_features, num_layers=6
+    )
+    python_need = features.summarize_precision_needs(python_features, python_sensitivity)
+
+    assert native_features.prompt_length == python_features.prompt_length
+    assert native_features.token_entropy == pytest.approx(python_features.token_entropy)
+    assert native_features.token_variance == pytest.approx(python_features.token_variance)
+    assert native_features.embedding_norm == pytest.approx(python_features.embedding_norm)
+    assert native_features.complexity_score == pytest.approx(
+        python_features.complexity_score
+    )
+    assert native_sensitivity.attention_sensitivity == pytest.approx(
+        python_sensitivity.attention_sensitivity
+    )
+    assert native_sensitivity.ffn_sensitivity == pytest.approx(
+        python_sensitivity.ffn_sensitivity
+    )
+    assert native_sensitivity.layer_stats == pytest.approx(
+        python_sensitivity.layer_stats
+    )
+    assert native_need == pytest.approx(python_need)
+
+
+@pytest.mark.skipif(
+    not math_utils.native_math_available(),
+    reason="pybind11 extension is not built in this environment",
+)
+def test_native_finalize_effective_layer_bits_matches_modes():
+    result = math_utils.finalize_effective_layer_bits(
+        mode="grouped",
+        num_layers=6,
+        base_bit_width=4,
+        group_bit_widths=[2, 8],
+        layer_bit_widths=[],
+        allowed=[2, 4, 8],
+        default_bits=4,
+        layer_stats=[0.5] * 6,
+        complexity=0.5,
+        precision_level=0.5,
+        precision_bounds=(0.0, 1.0),
+        precision_need=0.5,
+        scale_factor=1.0,
+        clipping_range=1.0,
+    )
+    assert result is not None
+    effective, avg, var, _base, group, _layer = result
+    assert group == [2, 8]
+    assert effective == pytest.approx([2.0, 2.0, 2.0, 8.0, 8.0, 8.0])
+    assert avg == pytest.approx(5.0)
+    assert var == pytest.approx(9.0)
+
+
+@pytest.mark.skipif(
+    not math_utils.native_math_available(),
+    reason="pybind11 extension is not built in this environment",
+)
+def test_native_flat_heads_match_list_semantics():
+    from seiso.adaptive_quant.policy_heads import CategoricalHead, ValueHead
+
+    rng = __import__("random").Random(7)
+    head = CategoricalHead(3, 2, rng)
+    state = [0.5, -1.0, 2.0]
+    logits = head.logits(state)
+    assert len(logits) == 2
+    probs = math_utils.softmax(logits)
+    head.update(state, 1, probs, advantage=0.5, learning_rate=0.01)
+    assert len(head.weights) == 2
+    assert len(head.bias) == 2
+
+    value = ValueHead(3, rng, zero_init=True)
+    assert value.predict(state) == pytest.approx(0.0)
+    value.update(state, target=1.0, learning_rate=0.1)
+    assert value.predict(state) != pytest.approx(0.0)
 
 
 @pytest.mark.skipif(

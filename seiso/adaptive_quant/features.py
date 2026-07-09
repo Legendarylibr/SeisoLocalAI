@@ -4,6 +4,7 @@ import math
 import re
 
 from seiso.adaptive_quant.math_utils import (
+    _math_ext,
     clamp,
     deterministic_float,
     mean,
@@ -19,6 +20,8 @@ COMPLEXITY_BASELINE_THRESHOLDS = (0.35, 0.85)
 
 
 def tokenize(text: str) -> list[str]:
+    if _math_ext is not None and hasattr(_math_ext, "tokenize"):
+        return list(_math_ext.tokenize(text))
     return TOKEN_PATTERN.findall(text.lower())
 
 
@@ -55,6 +58,18 @@ def _embedding_vector(tokens: list[str], dimensions: int = 8) -> list[float]:
 
 
 def extract_input_features(prompt: PromptSample) -> InputFeatures:
+    if _math_ext is not None and hasattr(_math_ext, "extract_input_features"):
+        length, entropy, token_var, emb_norm, complexity = _math_ext.extract_input_features(
+            prompt.text
+        )
+        return InputFeatures(
+            prompt_length=int(length),
+            token_entropy=float(entropy),
+            token_variance=float(token_var),
+            embedding_norm=float(emb_norm),
+            complexity_score=float(complexity),
+        )
+
     tokens = tokenize(prompt.text)
     if not tokens:
         return InputFeatures(0, 0.0, 0.0, 0.0, 0.0)
@@ -98,6 +113,22 @@ def extract_input_features(prompt: PromptSample) -> InputFeatures:
 def estimate_layer_sensitivity(
     prompt: PromptSample, input_features: InputFeatures, num_layers: int
 ) -> LayerSensitivity:
+    if _math_ext is not None and hasattr(_math_ext, "estimate_layer_sensitivity"):
+        attention, ffn, layer_stats = _math_ext.estimate_layer_sensitivity(
+            prompt.prompt_id,
+            prompt.domain,
+            input_features.token_entropy,
+            input_features.token_variance,
+            input_features.embedding_norm,
+            input_features.complexity_score,
+            num_layers,
+        )
+        return LayerSensitivity(
+            attention_sensitivity=float(attention),
+            ffn_sensitivity=float(ffn),
+            layer_stats=[float(value) for value in layer_stats],
+        )
+
     domain_bias = deterministic_float(f"domain:{prompt.domain}", -0.08, 0.08)
     attention = clamp(
         0.45
@@ -143,6 +174,17 @@ def estimate_layer_sensitivity(
 def summarize_precision_needs(
     input_features: InputFeatures, sensitivity: LayerSensitivity
 ) -> float:
+    if _math_ext is not None and hasattr(_math_ext, "summarize_precision_needs"):
+        return float(
+            _math_ext.summarize_precision_needs(
+                input_features.complexity_score,
+                input_features.token_entropy,
+                input_features.token_variance,
+                sensitivity.attention_sensitivity,
+                sensitivity.ffn_sensitivity,
+                sensitivity.layer_stats,
+            )
+        )
     combined = [
         input_features.complexity_score,
         input_features.token_entropy,
