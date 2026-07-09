@@ -163,6 +163,216 @@ def value_update(
     return True
 
 
+def expand_group_bits(group_bits: Sequence[int], num_layers: int) -> list[float]:
+    """Expand grouped bit widths across ``num_layers``."""
+    if _math_ext is not None and hasattr(_math_ext, "expand_group_bits"):
+        return [float(value) for value in _math_ext.expand_group_bits(list(group_bits), num_layers)]
+    if not group_bits:
+        return []
+    layers_per_group = max(1, num_layers // len(group_bits))
+    expanded: list[float] = []
+    for bit_width in group_bits:
+        expanded.extend([float(bit_width)] * layers_per_group)
+    return pad_or_truncate(expanded, num_layers, fill=float(group_bits[-1]))
+
+
+def pad_or_truncate(values: list, length: int, *, fill) -> list:
+    """Pad or truncate ``values`` to ``length`` using ``fill``."""
+    if _math_ext is not None and hasattr(_math_ext, "pad_or_truncate"):
+        return list(_math_ext.pad_or_truncate(values, length, fill))
+    if length <= 0:
+        return []
+    if len(values) >= length:
+        return values[:length]
+    return values + [fill] * (length - len(values))
+
+
+def nearest_allowed_bit_width(
+    bit_width: int | None,
+    allowed: Sequence[int],
+    *,
+    default: int,
+) -> int:
+    """Snap ``bit_width`` to the nearest entry in ``allowed``."""
+    if _math_ext is not None and hasattr(_math_ext, "nearest_allowed_bit_width"):
+        return int(_math_ext.nearest_allowed_bit_width(bit_width, list(allowed), default))
+    if bit_width is None:
+        return default
+    if not allowed:
+        return default
+    return min(allowed, key=lambda candidate: abs(candidate - bit_width))
+
+
+def finalize_effective_layer_bits(
+    *,
+    mode: str,
+    num_layers: int,
+    base_bit_width: int | None,
+    group_bit_widths: Sequence[int],
+    layer_bit_widths: Sequence[int],
+    allowed: Sequence[int],
+    default_bits: int,
+    layer_stats: Sequence[float],
+    complexity: float,
+    precision_level: float,
+    precision_bounds: tuple[float, float],
+    precision_need: float,
+    scale_factor: float,
+    clipping_range: float,
+) -> tuple[list[float], float, float, int, list[int], list[int]] | None:
+    """Native decision finalize kernel; returns ``None`` when unavailable."""
+    if _math_ext is None or not hasattr(_math_ext, "finalize_effective_layer_bits"):
+        return None
+    effective, avg, var, out_base, out_group, out_layer = _math_ext.finalize_effective_layer_bits(
+        mode,
+        num_layers,
+        base_bit_width,
+        list(group_bit_widths),
+        list(layer_bit_widths),
+        list(allowed),
+        default_bits,
+        list(layer_stats),
+        complexity,
+        precision_level,
+        precision_bounds[0],
+        precision_bounds[1],
+        precision_need,
+        scale_factor,
+        clipping_range,
+    )
+    return (
+        [float(value) for value in effective],
+        float(avg),
+        float(var),
+        int(out_base),
+        [int(value) for value in out_group],
+        [int(value) for value in out_layer],
+    )
+
+
+def matrix_vector_add_flat(
+    weights: Sequence[float],
+    bias: Sequence[float],
+    state_vector: Sequence[float],
+    *,
+    rows: int,
+    cols: int,
+) -> list[float] | None:
+    """Zero-copy flat matvec when the native extension is available."""
+    if _math_ext is None or not hasattr(_math_ext, "matrix_vector_add_flat"):
+        return None
+    return list(
+        _math_ext.matrix_vector_add_flat(
+            list(weights),
+            list(bias),
+            list(state_vector),
+            rows,
+            cols,
+        )
+    )
+
+
+def categorical_update_flat(
+    weights: list[float],
+    bias: list[float],
+    state_vector: Sequence[float],
+    *,
+    rows: int,
+    cols: int,
+    selected_index: int,
+    probabilities: Sequence[float],
+    advantage: float,
+    learning_rate: float,
+) -> bool:
+    """Native flat categorical update; returns True when accelerated."""
+    if _math_ext is None or not hasattr(_math_ext, "categorical_update_flat"):
+        return False
+    import numpy as np
+
+    weight_arr = np.asarray(weights, dtype=np.float64)
+    bias_arr = np.asarray(bias, dtype=np.float64)
+    _math_ext.categorical_update_flat(
+        weight_arr,
+        bias_arr,
+        np.asarray(state_vector, dtype=np.float64),
+        rows,
+        cols,
+        selected_index,
+        np.asarray(probabilities, dtype=np.float64),
+        advantage,
+        learning_rate,
+    )
+    weights[:] = weight_arr.tolist()
+    bias[:] = bias_arr.tolist()
+    return True
+
+
+def gaussian_update_flat(
+    weights: list[float],
+    bias: list[float],
+    state_vector: Sequence[float],
+    *,
+    rows: int,
+    cols: int,
+    raw_samples: Sequence[float],
+    raw_means: Sequence[float],
+    advantage: float,
+    learning_rate: float,
+    variance: float,
+) -> bool:
+    """Native flat Gaussian update; returns True when accelerated."""
+    if _math_ext is None or not hasattr(_math_ext, "gaussian_update_flat"):
+        return False
+    import numpy as np
+
+    weight_arr = np.asarray(weights, dtype=np.float64)
+    bias_arr = np.asarray(bias, dtype=np.float64)
+    _math_ext.gaussian_update_flat(
+        weight_arr,
+        bias_arr,
+        np.asarray(state_vector, dtype=np.float64),
+        rows,
+        cols,
+        np.asarray(raw_samples, dtype=np.float64),
+        np.asarray(raw_means, dtype=np.float64),
+        advantage,
+        learning_rate,
+        variance,
+    )
+    weights[:] = weight_arr.tolist()
+    bias[:] = bias_arr.tolist()
+    return True
+
+
+def value_update_flat(
+    weights: list[float],
+    state_vector: Sequence[float],
+    error: float,
+    learning_rate: float,
+) -> bool:
+    """Native flat value update; returns True when accelerated."""
+    if _math_ext is None or not hasattr(_math_ext, "value_update_flat"):
+        return False
+    import numpy as np
+
+    weight_arr = np.asarray(weights, dtype=np.float64)
+    _math_ext.value_update_flat(
+        weight_arr,
+        np.asarray(state_vector, dtype=np.float64),
+        error,
+        learning_rate,
+    )
+    weights[:] = weight_arr.tolist()
+    return True
+
+
+def native_flat_heads_available() -> bool:
+    return (
+        _math_ext is not None
+        and hasattr(_math_ext, "FlatMatrixHead")
+        and hasattr(_math_ext, "FlatValueHead")
+    )
+
 def simulator_core_metrics(
     *,
     mode: str,
@@ -422,6 +632,8 @@ def discrete_precision_level(
 
 
 def deterministic_float(key: str, lower: float = 0.0, upper: float = 1.0) -> float:
+    if _math_ext is not None and hasattr(_math_ext, "deterministic_float"):
+        return float(_math_ext.deterministic_float(key, lower, upper))
     digest = hashlib.sha256(key.encode("utf-8")).hexdigest()
     bucket = int(digest[:16], 16) / float(0xFFFFFFFFFFFFFFFF)
     return lower + (upper - lower) * bucket
