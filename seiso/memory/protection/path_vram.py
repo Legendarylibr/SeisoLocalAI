@@ -75,6 +75,14 @@ def _hub_model_vram_mb(path_str: str, *, mode: str) -> int | None:
     return int(est_gb * 1024)
 
 
+def _file_has_gguf_magic(p: Path) -> bool:
+    try:
+        with p.open("rb") as handle:
+            return handle.read(4) == b"GGUF"
+    except OSError:
+        return False
+
+
 def _estimate_path_vram_mb_uncached(p: Path, *, mode: str = "chat") -> int:
     name = p.name.lower()
     path_str = str(p)
@@ -85,15 +93,21 @@ def _estimate_path_vram_mb_uncached(p: Path, *, mode: str = "chat") -> int:
         if hub_est is not None:
             return hub_est
 
-    if p.is_file() and p.suffix.lower() in {
-        ".gguf",
-        ".bin",
-        ".safetensors",
-        ".pt",
-        ".pth",
-    }:
+    is_file = p.is_file()
+    suffix = p.suffix.lower()
+    file_has_gguf_magic = is_file and _file_has_gguf_magic(p)
+    if is_file and (
+        suffix in {
+            ".gguf",
+            ".bin",
+            ".safetensors",
+            ".pt",
+            ".pth",
+        }
+        or file_has_gguf_magic
+    ):
         file_mb = max(p.stat().st_size / (1024**2), 1)
-        if p.suffix.lower() == ".gguf":
+        if suffix == ".gguf" or file_has_gguf_magic:
             # GGUF weights map ~1:1 to VRAM when fully offloaded; add KV/activation headroom.
             est = int(file_mb + _INFERENCE_OVERHEAD_MB)
         else:

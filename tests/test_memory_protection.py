@@ -15,6 +15,7 @@ from seiso.memory.protection import (
     clamp_llama_load_kwargs,
     clamp_llama_n_ctx,
     ensure_load_fits,
+    estimate_path_vram_mb,
     gpu_batch_tier_caps,
     is_oom_error,
     llama_batch_limits_for_headroom,
@@ -31,6 +32,15 @@ from seiso.memory.protection import (
     sanitize_inference_payload,
     trim_llama_messages_to_context,
 )
+
+
+def test_estimate_path_vram_uses_size_for_extensionless_gguf_blob(tmp_path):
+    blob = tmp_path / "daebe40eeea7057c1cdf35ac56d13f507d8bf12171bbb7a6b6b0d3f05439159a"
+    blob.write_bytes(b"GGUF")
+    with blob.open("ab") as handle:
+        handle.truncate(20 * 1024 * 1024)
+
+    assert estimate_path_vram_mb(blob) == 276
 
 
 def test_llama_offload_fits_headroom_requires_weight_plus_kv(tmp_path):
