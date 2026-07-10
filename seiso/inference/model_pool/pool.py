@@ -643,10 +643,14 @@ class ModelPool:
                 active_norm = str(
                     active.meta.get("norm_path") or active.meta.get("path") or ""
                 )
-                if active_norm and self.normalize_path(active_norm) != norm:
-                    # Key may be llamaswap:/abs/path — also compare key suffix.
-                    if not active.key.endswith(f":{norm}") and active.key != norm:
-                        return None
+                # Key may be llamaswap:/abs/path — also compare key suffix.
+                if (
+                    active_norm
+                    and self.normalize_path(active_norm) != norm
+                    and not active.key.endswith(f":{norm}")
+                    and active.key != norm
+                ):
+                    return None
             return pinned
 
     def get_mlx(self, model_path: str) -> tuple[Any, Any]:
