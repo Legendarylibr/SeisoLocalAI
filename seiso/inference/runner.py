@@ -22,6 +22,7 @@ from seiso.inference.backends import (
     prepare_model_path,
     resolve_local_backend,
 )
+from seiso.inference.kv_policy import resolve_kv_cache_policy
 from seiso.inference.model_pool import get_dflash_draft, get_model_pool
 from seiso.inference.speculative import (
     DFlashDraftSpeculativeBundle,
@@ -37,6 +38,7 @@ from seiso.inference.tuning import (
     extract_mlx_token_text,
     generate_with_cache_fallback,
     llama_completion_kwargs,
+    maybe_compile_torch_decode,
     mlx_stream_kwargs,
     torch_generate_kwargs,
 )
@@ -93,10 +95,19 @@ def _torch_generate_with_oom_retry(
     gen_kwargs: dict[str, Any],
     *,
     retry_on_oom: bool = True,
+    can_retry_cache: Callable[[], bool] | None = None,
+    prepare_cache_retry: Callable[[], None] | None = None,
 ) -> Any:
     """Run torch generate once, halving max_new_tokens on OOM."""
     try:
-        return generate_with_cache_fallback(model, gen_kwargs)
+        if can_retry_cache is None and prepare_cache_retry is None:
+            return generate_with_cache_fallback(model, gen_kwargs)
+        return generate_with_cache_fallback(
+            model,
+            gen_kwargs,
+            can_retry=can_retry_cache,
+            prepare_retry=prepare_cache_retry,
+        )
     except Exception as exc:
         if not is_oom_error(exc) or not retry_on_oom:
             raise
@@ -447,11 +458,17 @@ class LocalInferenceRunner:
 
     def __init__(self) -> None:
         self._pool = get_model_pool()
+        self._last_inference_stats: dict[str, Any] = {}
 
     @property
     def pool(self):
         """Active model pool (public accessor for Forge services)."""
         return self._pool
+
+    @property
+    def last_inference_stats(self) -> dict[str, Any]:
+        """Additive cache/timing metadata for benchmarks and diagnostics."""
+        return dict(self._last_inference_stats)
 
     def warm_model(self, payload: dict[str, Any]) -> None:
         """Load a model into the pool without generating (preload / ping)."""
@@ -472,9 +489,7 @@ class LocalInferenceRunner:
                 try:
                     from seiso.inference.llamaswap import plan_sidecar_request
 
-                    _, planned_ctx, planned_max = plan_sidecar_request(
-                        payload, resolved_path
-                    )
+                    _, planned_ctx, planned_max = plan_sidecar_request(payload, resolved_path)
                     payload = {
                         **payload,
                         "sidecar_num_ctx": planned_ctx,
@@ -488,9 +503,7 @@ class LocalInferenceRunner:
                         resolved_path,
                         exc_info=True,
                     )
-            client = self._pool.get_llamaswap(
-                resolved_path, num_ctx=pinned_ctx_i
-            )
+            client = self._pool.get_llamaswap(resolved_path, num_ctx=pinned_ctx_i)
             # Eager Ollama registration so first chat is not blocked on `ollama create`.
             if getattr(client, "engine", None) == "ollama":
                 try:
@@ -499,15 +512,11 @@ class LocalInferenceRunner:
                         metadata_for_model_path,
                     )
 
-                    meta = metadata_for_model_path(
-                        resolved_path, payload.get("model_metadata")
-                    )
+                    meta = metadata_for_model_path(resolved_path, payload.get("model_metadata"))
                     ensure_model_registered(
                         resolved_path,
                         repo_id=(
-                            meta.get("repo_id")
-                            if isinstance(meta.get("repo_id"), str)
-                            else None
+                            meta.get("repo_id") if isinstance(meta.get("repo_id"), str) else None
                         ),
                         metadata=meta,
                         model_format=payload.get("model_format"),
@@ -524,21 +533,15 @@ class LocalInferenceRunner:
                 raise ValueError("draft_model_path required for speculative preload")
             if is_dflash_draft(draft_path):
                 self._pool.get_torch(resolved_path, load_in_4bit=True)
-                get_dflash_draft(
-                    draft_path, n_ctx=self._estimate_dflash_n_ctx(payload, draft_path)
-                )
-            elif not self._pool.torch_speculative_pair_fits(
-                resolved_path, draft_path
-            ):
+                get_dflash_draft(draft_path, n_ctx=self._estimate_dflash_n_ctx(payload, draft_path))
+            elif not self._pool.torch_speculative_pair_fits(resolved_path, draft_path):
                 logger.warning(
                     "Speculative target+draft pair does not fit current memory; "
                     "preloading target model only"
                 )
                 self._pool.get_torch(resolved_path, load_in_4bit=True)
             else:
-                self._pool.get_torch_speculative(
-                    resolved_path, draft_path, load_in_4bit=True
-                )
+                self._pool.get_torch_speculative(resolved_path, draft_path, load_in_4bit=True)
         else:
             messages, n_ctx = _prepare_llama_messages(payload, resolved_path)
             self._pool.acquire_llama_inference()
@@ -573,13 +576,9 @@ class LocalInferenceRunner:
             if not model_path:
                 raise ValueError("model_path or model_id required")
             route, resolved_path = self._resolve_route(payload, model_path)
-            payload = sanitize_inference_payload(
-                payload, isolated=route == "llamaswap"
-            )
+            payload = sanitize_inference_payload(payload, isolated=route == "llamaswap")
             if route not in {"llama", "llamaswap"}:
-                raise ValueError(
-                    "Tool calling is only supported with GGUF local backends"
-                )
+                raise ValueError("Tool calling is only supported with GGUF local backends")
             generation_id = self._pool.bump_generation()
             await self._ensure_model_switch(resolved_path, route=route)
             self._pool.begin_inference()
@@ -588,9 +587,7 @@ class LocalInferenceRunner:
                 if route == "llamaswap":
                     return await loop.run_in_executor(
                         executor,
-                        lambda: self._llamaswap_complete(
-                            payload, resolved_path, generation_id
-                        ),
+                        lambda: self._llamaswap_complete(payload, resolved_path, generation_id),
                     )
                 return await loop.run_in_executor(
                     executor,
@@ -618,9 +615,7 @@ class LocalInferenceRunner:
         async for update in self.stream_updates(payload):
             yield update.text
 
-    async def stream_updates(
-        self, payload: dict[str, Any]
-    ) -> AsyncIterator[StreamUpdate]:
+    async def stream_updates(self, payload: dict[str, Any]) -> AsyncIterator[StreamUpdate]:
         model_path = payload.get("model_path") or payload.get("model_id")
         if not model_path:
             raise ValueError("model_path or model_id required")
@@ -629,9 +624,7 @@ class LocalInferenceRunner:
         payload = sanitize_inference_payload(payload, isolated=route == "llamaswap")
         draft_path = payload.get("draft_model_path")
         generation_id = self._pool.bump_generation()
-        await self._ensure_model_switch(
-            resolved_path, draft_path=draft_path, route=route
-        )
+        await self._ensure_model_switch(resolved_path, draft_path=draft_path, route=route)
 
         loop = asyncio.get_running_loop()
         queue: asyncio.Queue[StreamUpdate | object] = asyncio.Queue()
@@ -644,14 +637,29 @@ class LocalInferenceRunner:
             buffered = 0
             output_tokens = 0
             flushed_once = False
+            producer_started = time.perf_counter()
+            first_token_at: float | None = None
             batch_chars = _stream_batch_chars()
+
+            def metadata() -> dict[str, Any]:
+                now = time.perf_counter()
+                if first_token_at is not None:
+                    elapsed = max(0.000001, now - first_token_at)
+                    self._last_inference_stats["decode_tokens_per_sec"] = round(
+                        output_tokens / elapsed, 3
+                    )
+                return dict(self._last_inference_stats)
+
             self._pool.begin_inference()
             try:
-                for part in self._iter_tokens(
-                    payload, resolved_path, route, should_stop
-                ):
+                for part in self._iter_tokens(payload, resolved_path, route, should_stop):
                     if should_stop():
                         break
+                    if first_token_at is None:
+                        first_token_at = time.perf_counter()
+                        self._last_inference_stats["ttft_ms"] = round(
+                            (first_token_at - producer_started) * 1000.0, 3
+                        )
                     output_tokens += part.new_tokens
                     buffer.append(part.text)
                     buffered += len(part.text)
@@ -659,7 +667,9 @@ class LocalInferenceRunner:
                         loop.call_soon_threadsafe(
                             queue.put_nowait,
                             StreamUpdate(
-                                text="".join(buffer), output_tokens=output_tokens
+                                text="".join(buffer),
+                                output_tokens=output_tokens,
+                                metadata=metadata(),
                             ),
                         )
                         buffer.clear()
@@ -669,7 +679,9 @@ class LocalInferenceRunner:
                         loop.call_soon_threadsafe(
                             queue.put_nowait,
                             StreamUpdate(
-                                text="".join(buffer), output_tokens=output_tokens
+                                text="".join(buffer),
+                                output_tokens=output_tokens,
+                                metadata=metadata(),
                             ),
                         )
                         buffer.clear()
@@ -677,13 +689,21 @@ class LocalInferenceRunner:
                 if buffer and not should_stop():
                     loop.call_soon_threadsafe(
                         queue.put_nowait,
-                        StreamUpdate(text="".join(buffer), output_tokens=output_tokens),
+                        StreamUpdate(
+                            text="".join(buffer),
+                            output_tokens=output_tokens,
+                            metadata=metadata(),
+                        ),
                     )
             except Exception as exc:
                 if buffer and not should_stop():
                     loop.call_soon_threadsafe(
                         queue.put_nowait,
-                        StreamUpdate(text="".join(buffer), output_tokens=output_tokens),
+                        StreamUpdate(
+                            text="".join(buffer),
+                            output_tokens=output_tokens,
+                            metadata=metadata(),
+                        ),
                     )
                 if not should_stop():
                     loop.call_soon_threadsafe(queue.put_nowait, _StreamError(exc))
@@ -710,7 +730,10 @@ class LocalInferenceRunner:
 
     async def cancel_generation(self) -> dict:
         """Stop active streams without unloading the warmed model."""
+        from seiso.inference.torch_stream import clear_torch_prefix_cache
+
         self._pool.bump_generation()
+        clear_torch_prefix_cache()
         return self._pool.status()
 
     async def _ensure_model_switch(
@@ -724,10 +747,8 @@ class LocalInferenceRunner:
             if (
                 active_path
                 and active_draft
-                and self._pool.normalize_path(active_path)
-                == self._pool.normalize_path(model_path)
-                and self._pool.normalize_path(active_draft)
-                == self._pool.normalize_path(draft_path)
+                and self._pool.normalize_path(active_path) == self._pool.normalize_path(model_path)
+                and self._pool.normalize_path(active_draft) == self._pool.normalize_path(draft_path)
             ):
                 return
             if not is_dflash_draft(draft_path):
@@ -757,9 +778,7 @@ class LocalInferenceRunner:
                 None, lambda: self._pool.prepare_for_load(model_path, backend)
             )
 
-    def _resolve_route(
-        self, payload: dict[str, Any], model_path: str
-    ) -> tuple[str, str]:
+    def _resolve_route(self, payload: dict[str, Any], model_path: str) -> tuple[str, str]:
         if payload.get("draft_model_path"):
             _raise_if_dflash_inprocess_blocked(payload.get("draft_model_path"))
             # dflash drafts are fast GGUF; we still run verification on torch target path for now
@@ -821,9 +840,7 @@ class LocalInferenceRunner:
                 def should_stop() -> bool:
                     return not self._pool.is_generation_active(generation_id)
 
-                for token in self._torch_speculative_stream(
-                    payload, model_path, should_stop
-                ):
+                for token in self._torch_speculative_stream(payload, model_path, should_stop):
                     if should_stop():
                         break
                     chunks.append(token.text)
@@ -860,9 +877,8 @@ class LocalInferenceRunner:
             )
             yield from self._torch_stream(payload, model_path, should_stop)
             return
-        if (
-            not is_dflash_draft(draft_path)
-            and not self._pool.torch_speculative_pair_fits(model_path, draft_path)
+        if not is_dflash_draft(draft_path) and not self._pool.torch_speculative_pair_fits(
+            model_path, draft_path
         ):
             logger.warning(
                 "Speculative target+draft pair does not fit current memory; "
@@ -875,9 +891,7 @@ class LocalInferenceRunner:
 
         if is_dflash_draft(draft_path):
             # dFlash speculative: fast GGUF dflash draft (llama.cpp) + target verifier (torch)
-            target_model, target_tok = self._pool.get_torch(
-                model_path, load_in_4bit=True
-            )
+            target_model, target_tok = self._pool.get_torch(model_path, load_in_4bit=True)
             draft_llm = get_dflash_draft(
                 draft_path, n_ctx=self._estimate_dflash_n_ctx(payload, draft_path)
             )
@@ -911,9 +925,7 @@ class LocalInferenceRunner:
             return
 
         # Original torch + torch speculative
-        torch_bundle = self._pool.get_torch_speculative(
-            model_path, draft_path, load_in_4bit=True
-        )
+        torch_bundle = self._pool.get_torch_speculative(model_path, draft_path, load_in_4bit=True)
         budget = _trim_torch_messages_to_context(
             payload.get("messages", []),
             model=torch_bundle.target_model,
@@ -947,9 +959,7 @@ class LocalInferenceRunner:
                 ) from exc
             release_cached_memory(sync=True)
             reduced = max(1, max_new_tokens // 2)
-            logger.warning(
-                "Speculative inference OOM — retrying with max_new_tokens=%s", reduced
-            )
+            logger.warning("Speculative inference OOM — retrying with max_new_tokens=%s", reduced)
             yield from iter_speculative_tokens(
                 bundle=torch_bundle,
                 prompt=prompt,
@@ -1082,7 +1092,31 @@ class LocalInferenceRunner:
             tokenizer,
             max_tokens=int(payload.get("max_tokens", 512)),
         )
-        payload = {**payload, "max_tokens": max_tokens}
+        policy = resolve_kv_cache_policy(
+            payload,
+            model=model,
+            input_tokens=int(inputs["input_ids"].shape[-1]),
+            max_tokens=max_tokens,
+            free_mb=headroom_mb(),
+        )
+        self._last_inference_stats = {
+            "backend": "torch",
+            "cache_mode": policy.cache_implementation,
+            "cache_fallback": policy.fallback_reason,
+            "estimated_cache_mb": policy.estimated_cache_mb,
+            "peak_headroom_mb": policy.headroom_mb,
+        }
+        self._last_inference_stats["decode_compiled"] = (
+            maybe_compile_torch_decode(model, inputs["input_ids"])
+            if policy.compile_decode
+            else False
+        )
+        payload = {
+            **payload,
+            "max_tokens": max_tokens,
+            "cache_implementation": policy.cache_implementation,
+            "kv_policy": policy.as_dict(),
+        }
         gen_kwargs = torch_generate_kwargs(
             payload,
             inputs,
@@ -1119,9 +1153,33 @@ class LocalInferenceRunner:
             tokenizer,
             max_tokens=int(payload.get("max_tokens", 512)),
         )
-        payload = {**payload, "max_tokens": max_tokens}
+        policy = resolve_kv_cache_policy(
+            payload,
+            model=model,
+            input_tokens=int(inputs["input_ids"].shape[-1]),
+            max_tokens=max_tokens,
+            free_mb=headroom_mb(),
+        )
+        self._last_inference_stats = {
+            "backend": "torch",
+            "cache_mode": policy.cache_implementation,
+            "cache_fallback": policy.fallback_reason,
+            "estimated_cache_mb": policy.estimated_cache_mb,
+            "peak_headroom_mb": policy.headroom_mb,
+        }
+        self._last_inference_stats["decode_compiled"] = (
+            maybe_compile_torch_decode(model, inputs["input_ids"])
+            if policy.compile_decode
+            else False
+        )
+        payload = {
+            **payload,
+            "max_tokens": max_tokens,
+            "cache_implementation": policy.cache_implementation,
+            "kv_policy": policy.as_dict(),
+        }
 
-        if use_manual_torch_kv_stream(payload):
+        if use_manual_torch_kv_stream(payload) and policy.manual_stream_compatible:
             emitted = False
             try:
                 for token in iter_torch_kv_tokens(
@@ -1130,14 +1188,14 @@ class LocalInferenceRunner:
                     input_ids=inputs["input_ids"],
                     max_new_tokens=int(payload.get("max_tokens", 512)),
                     temperature=float(payload.get("temperature", 0.0)),
-                    top_p=(
-                        float(payload["top_p"])
-                        if payload.get("top_p") is not None
-                        else None
-                    ),
+                    top_p=(float(payload["top_p"]) if payload.get("top_p") is not None else None),
                     pad_token_id=tokenizer.pad_token_id,
                     eos_token_id=getattr(tokenizer, "eos_token_id", None),
                     should_stop=should_stop,
+                    prefill_chunk_size=policy.prefill_chunk_size,
+                    cache_key=f"{self._pool.normalize_path(model_path)}:{id(model)}",
+                    prefix_cache=policy.prefix_cache,
+                    stats=self._last_inference_stats,
                 ):
                     emitted = True
                     yield token
@@ -1155,9 +1213,7 @@ class LocalInferenceRunner:
                     exc,
                 )
 
-        yield from self._torch_stream_generate(
-            model, tokenizer, inputs, payload, should_stop
-        )
+        yield from self._torch_stream_generate(model, tokenizer, inputs, payload, should_stop)
 
     def _torch_stream_generate(
         self,
@@ -1170,7 +1226,20 @@ class LocalInferenceRunner:
         """HF TextIteratorStreamer path (non-cooperative cancel)."""
         from transformers import TextIteratorStreamer
 
-        streamer = TextIteratorStreamer(
+        class _ReplaySafeStreamer(TextIteratorStreamer):
+            generated_puts = 0
+
+            def put(self, value: Any) -> None:
+                if not self.next_tokens_are_prompt:
+                    self.generated_puts += 1
+                super().put(value)
+
+            def reset_before_retry(self) -> None:
+                self.next_tokens_are_prompt = True
+                self.token_cache.clear()
+                self.print_len = 0
+
+        streamer = _ReplaySafeStreamer(
             tokenizer,
             skip_prompt=True,
             skip_special_tokens=True,
@@ -1192,7 +1261,11 @@ class LocalInferenceRunner:
                     # Retrying with the same streamer can duplicate text if an
                     # OOM occurs after partial output has been delivered.
                     _torch_generate_with_oom_retry(
-                        model, gen_kwargs, retry_on_oom=False
+                        model,
+                        gen_kwargs,
+                        retry_on_oom=False,
+                        can_retry_cache=lambda: streamer.generated_puts == 0,
+                        prepare_cache_retry=streamer.reset_before_retry,
                     )
                 except Exception as exc:
                     generation_errors.append(exc)
@@ -1287,7 +1360,9 @@ class LocalInferenceRunner:
             messages=messages,
             n_ctx=n_ctx,
             loaded_n_batch=int(getattr(llm, "_seiso_n_batch", fallback_batch) or fallback_batch),
-            loaded_n_ubatch=int(getattr(llm, "_seiso_n_ubatch", fallback_ubatch) or fallback_ubatch),
+            loaded_n_ubatch=int(
+                getattr(llm, "_seiso_n_ubatch", fallback_ubatch) or fallback_ubatch
+            ),
             loaded_n_gpu_layers=int(getattr(llm, "_seiso_n_gpu_layers", 0) or 0),
             load_tier=current_tier,
             loaded_headroom_mb=getattr(llm, "_seiso_load_headroom_mb", None),
@@ -1417,9 +1492,7 @@ class LocalInferenceRunner:
                 native_linux_nvidia = False
             if native_linux_nvidia:
                 adjusted = dict(payload)
-                adjusted["max_tokens"] = max(
-                    1, min(int(payload.get("max_tokens", 512)), 256)
-                )
+                adjusted["max_tokens"] = max(1, min(int(payload.get("max_tokens", 512)), 256))
                 safe_ctx = min(int(n_ctx), 2048)
                 messages = trim_llama_messages_to_context(
                     messages,
@@ -1442,9 +1515,8 @@ class LocalInferenceRunner:
 
         loaded_batch = int(getattr(llm, "_seiso_n_batch", 0) or 0)
         loaded_ubatch = int(getattr(llm, "_seiso_n_ubatch", 0) or 0)
-        needs_reload = (
-            loaded_batch > budget.n_batch
-            or (loaded_ubatch > 0 and loaded_ubatch > budget.n_ubatch)
+        needs_reload = loaded_batch > budget.n_batch or (
+            loaded_ubatch > 0 and loaded_ubatch > budget.n_ubatch
         )
         if not needs_reload:
             llm._seiso_last_safe_batch = budget.n_batch  # noqa: SLF001
@@ -1591,9 +1663,13 @@ class LocalInferenceRunner:
         generation_id: int,
     ) -> str:
         payload = self._llamaswap_payload(payload, model_path)
-        client = self._pool.get_llamaswap(
-            model_path, num_ctx=payload.get("sidecar_num_ctx")
-        )
+        client = self._pool.get_llamaswap(model_path, num_ctx=payload.get("sidecar_num_ctx"))
+        self._last_inference_stats = {
+            "backend": getattr(client, "engine", "llamaswap"),
+            "cache_mode": "provider-native",
+            "prefix_cache": True,
+            "sidecar_num_ctx": payload.get("sidecar_num_ctx"),
+        }
         text = client.complete(payload, model_path)
         if not self._pool.is_generation_active(generation_id):
             return ""
@@ -1606,9 +1682,13 @@ class LocalInferenceRunner:
         should_stop: Callable[[], bool],
     ) -> Iterator[StreamToken]:
         payload = self._llamaswap_payload(payload, model_path)
-        client = self._pool.get_llamaswap(
-            model_path, num_ctx=payload.get("sidecar_num_ctx")
-        )
+        client = self._pool.get_llamaswap(model_path, num_ctx=payload.get("sidecar_num_ctx"))
+        self._last_inference_stats = {
+            "backend": getattr(client, "engine", "llamaswap"),
+            "cache_mode": "provider-native",
+            "prefix_cache": True,
+            "sidecar_num_ctx": payload.get("sidecar_num_ctx"),
+        }
         yield from client.stream(payload, model_path, should_stop=should_stop)
 
     def _llama_stream(

@@ -45,6 +45,7 @@ class InferenceBenchResult:
     ms_per_token: float
     profile: str = "optimized"
     notes: list[str] = field(default_factory=list)
+    kv_metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -142,9 +143,7 @@ async def bench_inference(
     env_overrides: dict[str, str] | None = None,
 ) -> InferenceBenchResult:
     """Benchmark one inference profile; optionally warm the model pool first."""
-    payload = _build_payload(
-        model_path, prompt=prompt, max_tokens=max_tokens, backend=backend
-    )
+    payload = _build_payload(model_path, prompt=prompt, max_tokens=max_tokens, backend=backend)
     resolved_backend = payload["inference_backend"]
     notes: list[str] = []
     load_ms: float | None = None
@@ -161,22 +160,17 @@ async def bench_inference(
             load_ms = (time.perf_counter() - cold_t0) * 1000.0
             notes.append("warmup=16tok cold load")
 
-        output, _, ttft_ms, generate_ms, output_tokens = await _timed_stream(
-            payload, runner=runner
-        )
+        output, _, ttft_ms, generate_ms, output_tokens = await _timed_stream(payload, runner=runner)
+        kv_metadata = dict(getattr(runner, "last_inference_stats", {}))
 
     if output_tokens <= 0:
         output_tokens = _estimate_tokens(output)
     tokens_per_sec = (
-        output_tokens / (generate_ms / 1000.0)
-        if generate_ms > 0 and output_tokens > 0
-        else 0.0
+        output_tokens / (generate_ms / 1000.0) if generate_ms > 0 and output_tokens > 0 else 0.0
     )
     ms_per_token = generate_ms / output_tokens if output_tokens > 0 else 0.0
     total_ms = (
-        (load_ms or 0.0) + ttft_ms + generate_ms
-        if load_ms is not None
-        else ttft_ms + generate_ms
+        (load_ms or 0.0) + ttft_ms + generate_ms if load_ms is not None else ttft_ms + generate_ms
     )
 
     return InferenceBenchResult(
@@ -194,6 +188,7 @@ async def bench_inference(
         ms_per_token=round(ms_per_token, 2),
         profile=profile,
         notes=notes,
+        kv_metadata=kv_metadata,
     )
 
 
@@ -231,9 +226,7 @@ async def compare_inference_profiles(
     )
 
     speedup = (
-        optimized.tokens_per_sec / baseline.tokens_per_sec
-        if baseline.tokens_per_sec > 0
-        else 0.0
+        optimized.tokens_per_sec / baseline.tokens_per_sec if baseline.tokens_per_sec > 0 else 0.0
     )
     ttft_delta = baseline.ttft_ms - optimized.ttft_ms
 
@@ -245,9 +238,77 @@ async def compare_inference_profiles(
     }
 
 
+async def benchmark_kv_scenarios(
+    model_path: str,
+    *,
+    backend: str = "auto",
+    max_tokens: int = 64,
+    short_prompt: str = DEFAULT_PROMPT,
+    long_prompt: str | None = None,
+) -> dict[str, dict[str, Any]]:
+    """Measure short/long prefill and repeated-conversation prefix behavior."""
+    runner = LocalInferenceRunner()
+    pool = get_model_pool()
+    pool.cancel_and_unload()
+    long_prompt = long_prompt or "\n".join([DEFAULT_PROMPT] * 32)
+
+    async def run_scenario(payload: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+        output, _, ttft_ms, generate_ms, output_tokens = await _timed_stream(
+            payload, runner=runner
+        )
+        tokens_per_sec = (
+            output_tokens / (generate_ms / 1000.0)
+            if generate_ms > 0 and output_tokens > 0
+            else 0.0
+        )
+        return output, {
+            "ttft_ms": round(ttft_ms, 2),
+            "generate_ms": round(generate_ms, 2),
+            "output_tokens": output_tokens,
+            "tokens_per_sec": round(tokens_per_sec, 2),
+            "kv_metadata": runner.last_inference_stats,
+        }
+
+    short_payload = _build_payload(
+        model_path,
+        prompt=short_prompt,
+        max_tokens=max_tokens,
+        backend=backend,
+    )
+    long_payload = _build_payload(
+        model_path,
+        prompt=long_prompt,
+        max_tokens=max_tokens,
+        backend=backend,
+    )
+    _, short_result = await run_scenario(short_payload)
+    _, long_result = await run_scenario(long_payload)
+
+    first_output, repeated_first = await run_scenario(short_payload)
+    repeated_payload = {
+        **short_payload,
+        "messages": [
+            {"role": "user", "content": short_prompt},
+            {"role": "assistant", "content": first_output},
+            {"role": "user", "content": "Continue with one practical example."},
+        ],
+    }
+    _, repeated_second = await run_scenario(repeated_payload)
+    return {
+        "short": short_result,
+        "long": long_result,
+        "repeated_first": repeated_first,
+        "repeated_second": repeated_second,
+    }
+
+
 def run_bench_inference(**kwargs: Any) -> InferenceBenchResult:
     return asyncio.run(bench_inference(**kwargs))
 
 
 def run_compare_inference_profiles(**kwargs: Any) -> dict[str, Any]:
     return asyncio.run(compare_inference_profiles(**kwargs))
+
+
+def run_benchmark_kv_scenarios(**kwargs: Any) -> dict[str, dict[str, Any]]:
+    return asyncio.run(benchmark_kv_scenarios(**kwargs))
