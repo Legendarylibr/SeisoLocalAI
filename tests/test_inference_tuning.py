@@ -111,6 +111,37 @@ def test_generate_with_cache_fallback_keeps_unrelated_errors():
         generate_with_cache_fallback(_Model(), {"cache_implementation": "dynamic"})
 
 
+def test_prepare_torch_model_patches_before_compile_and_returns_wrapper(monkeypatch):
+    from types import SimpleNamespace
+
+    from seiso.inference import tuning
+
+    events: list[str] = []
+
+    class _Model:
+        config = SimpleNamespace(use_cache=False)
+
+        def eval(self):
+            events.append("eval")
+            return self
+
+    model = _Model()
+    compiled = object()
+    monkeypatch.setattr(tuning, "configure_torch_inference", lambda: events.append("configure"))
+    monkeypatch.setattr(
+        tuning, "apply_inference_kernels", lambda value: events.append(f"kernels:{value is model}")
+    )
+    monkeypatch.setattr(
+        tuning,
+        "maybe_compile_torch_model",
+        lambda value: events.append(f"compile:{value is model}") or compiled,
+    )
+
+    assert tuning.prepare_torch_model(model) is compiled
+    assert model.config.use_cache is True
+    assert events == ["configure", "eval", "kernels:True", "compile:True"]
+
+
 def test_estimate_llama_n_ctx_sizes_to_prompt(monkeypatch):
     monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 16384)
     monkeypatch.setattr(

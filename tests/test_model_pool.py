@@ -7,6 +7,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+import pytest
 from gguf_fixtures import write_arch_gguf as _write_arch_gguf
 
 from seiso.inference.model_pool import (
@@ -374,7 +375,7 @@ def test_torch_same_path_different_cache_key_invalidates_generation(tmp_path, mo
     assert pool.active_key == f"torch:{norm}"
 
 
-def test_torch_speculative_low_memory_preflight_is_advisory(tmp_path, monkeypatch, caplog):
+def test_torch_speculative_low_memory_preflight_blocks_pair_load(tmp_path, monkeypatch):
     pool = ModelPool()
     target = tmp_path / "target"
     draft = tmp_path / "draft"
@@ -386,17 +387,18 @@ def test_torch_speculative_low_memory_preflight_is_advisory(tmp_path, monkeypatc
     monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 100)
     monkeypatch.setattr("seiso.memory.protection.release_cached_memory", lambda **k: None)
 
+    loaded: list[str] = []
+
     def fake_load(path: str, *, load_in_4bit: bool = True):
+        loaded.append(path)
         return f"model:{Path(path).name}", f"tokenizer:{Path(path).name}"
 
     monkeypatch.setattr(pool, "_load_torch_pair", fake_load)
 
-    with caplog.at_level("WARNING"):
-        bundle = pool.get_torch_speculative(str(target), str(draft))
+    with pytest.raises(RuntimeError, match="Speculative pair exceeds free memory"):
+        pool.get_torch_speculative(str(target), str(draft))
 
-    assert bundle.target_model == "model:target"
-    assert bundle.draft_model == "model:draft"
-    assert "Speculative pair may exceed free memory" in caplog.text
+    assert loaded == []
 
 
 def test_llama_gpu_layers_optimal_uses_short_ttl_cache(monkeypatch, tmp_path):
