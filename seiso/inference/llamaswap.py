@@ -135,6 +135,14 @@ _SIDECAR_ROOMY_HEADROOM_MB = 16384
 _SIDECAR_NATIVE_OLLAMA_KEEP_ALIVE_LOW = "30s"
 _SIDECAR_NATIVE_OLLAMA_KEEP_ALIVE_MID = "1m"
 _SIDECAR_NATIVE_OLLAMA_KEEP_ALIVE = "2m"
+_SIDECAR_PERF_KEEP_ALIVE = "10m"
+_SIDECAR_PERF_VRAM_BUDGET_RATIO = 0.75
+_SIDECAR_PERF_VRAM_BUDGET_RATIO_CONSUMER = 0.70
+
+
+def _sidecar_perf_mode() -> bool:
+    """Opt-in higher GPU utilization for sidecar GGUF (default off = safe clamps)."""
+    return env_bool("SEISO_SIDECAR_PERF_MODE", False)
 
 
 def _sidecar_native_linux_nvidia() -> bool:
@@ -180,6 +188,10 @@ def _sidecar_vram_budget_ratio() -> float:
             return max(0.50, min(float(raw), 0.95))
         except ValueError:
             pass
+    if _sidecar_perf_mode():
+        if _sidecar_consumer_nvidia_gpu():
+            return _SIDECAR_PERF_VRAM_BUDGET_RATIO_CONSUMER
+        return _SIDECAR_PERF_VRAM_BUDGET_RATIO
     if _sidecar_consumer_nvidia_gpu():
         return _SIDECAR_VRAM_BUDGET_RATIO
     try:
@@ -468,6 +480,11 @@ def sidecar_ollama_num_batch() -> int | None:
             value = 0
         return max(1, value) if value > 0 else None
     if _sidecar_native_linux_nvidia():
+        if _sidecar_perf_mode():
+            free_mb = _sidecar_headroom_mb()
+            if 0 < free_mb < _SIDECAR_LOW_HEADROOM_MB:
+                return _SIDECAR_NATIVE_OLLAMA_NUM_BATCH
+            return _SIDECAR_NATIVE_OLLAMA_NUM_BATCH_ROOMY
         free_mb = _sidecar_headroom_mb()
         if 0 < free_mb < _SIDECAR_MID_HEADROOM_MB:
             return _SIDECAR_NATIVE_OLLAMA_NUM_BATCH_LOW
@@ -483,6 +500,11 @@ def sidecar_ollama_keep_alive() -> str | None:
     if override:
         return override
     if _sidecar_native_linux_nvidia():
+        if _sidecar_perf_mode():
+            free_mb = _sidecar_headroom_mb()
+            if 0 < free_mb < _SIDECAR_LOW_HEADROOM_MB:
+                return _SIDECAR_NATIVE_OLLAMA_KEEP_ALIVE_MID
+            return _SIDECAR_PERF_KEEP_ALIVE
         free_mb = _sidecar_headroom_mb()
         if 0 < free_mb < _SIDECAR_LOW_HEADROOM_MB:
             return _SIDECAR_NATIVE_OLLAMA_KEEP_ALIVE_LOW
@@ -840,7 +862,8 @@ class LlamaSwapClient:
     ) -> dict[str, Any]:
         # llama-server's context size is fixed at launch, so only the trim step
         # of the plan applies here; num_ctx cannot be resized per request.
-        messages, _num_ctx, max_tokens = plan_sidecar_request(payload, model_path)
+        # Still attach a non-authoritative hint some llama-swap builds accept.
+        messages, num_ctx, max_tokens = plan_sidecar_request(payload, model_path)
         body: dict[str, Any] = {
             "model": llamaswap_model_name(model_path),
             "messages": messages,
@@ -848,6 +871,8 @@ class LlamaSwapClient:
             "temperature": float(payload.get("temperature", 0.0)),
             "stream": stream,
         }
+        if env_bool("SEISO_LLAMASWAP_SEND_NUM_CTX", False):
+            body["n_ctx"] = num_ctx
         top_p = payload.get("top_p")
         if top_p is not None:
             body["top_p"] = float(top_p)

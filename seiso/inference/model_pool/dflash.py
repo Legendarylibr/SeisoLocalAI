@@ -15,18 +15,20 @@ logger = logging.getLogger(__name__)
 class DflashDraftHandle:
     """Thread-safe wrapper around a cached llama.cpp dflash/draft model."""
 
-    __slots__ = ("llm", "n_ctx", "_infer_lock")
+    __slots__ = ("llm", "n_ctx", "_infer_lock", "_last_prompt")
 
     def __init__(self, llm: Any, n_ctx: int = 0) -> None:
         self.llm = llm
         self.n_ctx = n_ctx
         self._infer_lock = threading.Lock()
+        self._last_prompt = ""
 
     def dispose(self) -> None:
         """Close the native handle only after in-flight infer finishes."""
         with self._infer_lock:
             llm = self.llm
             self.llm = None
+            self._last_prompt = ""
             if llm is None:
                 return
             try:
@@ -86,6 +88,25 @@ def get_dflash_draft(model_path: str, *, n_ctx: int = 4096) -> DflashDraftHandle
         return handle
 
 
+def _dflash_completion(
+    llm: Any,
+    current_text: str,
+    gen_kwargs: dict[str, Any],
+    *,
+    reuse_prefix: bool,
+) -> dict[str, Any]:
+    """Call llama.cpp completion, preferring prompt-cache reuse when extending a prefix."""
+    if reuse_prefix:
+        try:
+            return llm(current_text, cache_prompt=True, **gen_kwargs)
+        except TypeError:
+            # Older llama-cpp-python builds may not accept cache_prompt.
+            pass
+        except Exception:
+            logger.debug("dflash cache_prompt failed; retrying cold", exc_info=True)
+    return llm(current_text, **gen_kwargs)
+
+
 def dflash_draft_infer(
     draft: Any,
     current_text: str,
@@ -93,13 +114,20 @@ def dflash_draft_infer(
     max_tokens: int,
     temperature: float = 0.0,
 ) -> str:
-    """Run a single dflash draft completion under the per-handle inference lock."""
+    """Run a single dflash draft completion under the per-handle inference lock.
+
+    When ``draft`` is a :class:`DflashDraftHandle` and ``current_text`` extends the
+    previous prompt, llama.cpp ``cache_prompt`` is requested so the draft KV can
+    be reused across speculative rounds.
+    """
     if isinstance(draft, DflashDraftHandle):
         llm = draft.llm
         infer_lock = draft._infer_lock
+        handle: DflashDraftHandle | None = draft
     else:
         llm = draft
         infer_lock = None
+        handle = None
 
     gen_kwargs: dict[str, Any] = {
         "max_tokens": max_tokens,
@@ -109,16 +137,26 @@ def dflash_draft_infer(
     if not temperature or temperature <= 0:
         gen_kwargs["temperature"] = 0.0
 
+    def _run(active_llm: Any) -> str:
+        reuse = bool(
+            handle is not None
+            and handle._last_prompt
+            and current_text.startswith(handle._last_prompt)
+        )
+        out = _dflash_completion(
+            active_llm, current_text, gen_kwargs, reuse_prefix=reuse
+        )
+        if handle is not None:
+            handle._last_prompt = current_text
+        return out["choices"][0]["text"] if out.get("choices") else ""
+
     if infer_lock is not None:
         with infer_lock:
             llm = draft.llm
             if llm is None:
                 return ""
-            out = llm(current_text, **gen_kwargs)
-    else:
-        out = llm(current_text, **gen_kwargs)
-
-    return out["choices"][0]["text"] if out.get("choices") else ""
+            return _run(llm)
+    return _run(llm)
 
 
 def clear_dflash_draft_cache() -> None:

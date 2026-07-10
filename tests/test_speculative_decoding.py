@@ -496,6 +496,23 @@ def test_dflash_draft_infer_serializes_concurrent_calls():
     assert active["max"] == 1
 
 
+def test_dflash_draft_infer_reuses_cache_prompt_on_prefix_extension():
+    from seiso.inference.model_pool import DflashDraftHandle, dflash_draft_infer
+
+    calls: list[dict] = []
+
+    class _FakeDraftLlm:
+        def __call__(self, text, **kwargs):
+            calls.append({"text": text, **kwargs})
+            return {"choices": [{"text": " next"}]}
+
+    handle = DflashDraftHandle(_FakeDraftLlm())
+    assert dflash_draft_infer(handle, "hello", max_tokens=2) == " next"
+    assert dflash_draft_infer(handle, "hello world", max_tokens=2) == " next"
+    assert "cache_prompt" not in calls[0]
+    assert calls[1].get("cache_prompt") is True
+
+
 def test_unload_all_clears_dflash_draft_cache(monkeypatch, tmp_path):
     from seiso.inference import model_pool as mp
 

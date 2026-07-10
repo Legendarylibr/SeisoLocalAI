@@ -21,7 +21,7 @@ def test_stream_batch_chars_speed_default(monkeypatch):
     from seiso.inference.runner import _stream_batch_chars
 
     monkeypatch.delenv("SEISO_STREAM_BATCH_CHARS", raising=False)
-    assert _stream_batch_chars() == 16
+    assert _stream_batch_chars() == 4
 
 
 def test_extract_mlx_token_text_from_response_object():

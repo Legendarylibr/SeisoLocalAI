@@ -212,7 +212,7 @@ def test_platform_profile_linux_nvidia_uses_gpu_layers(monkeypatch):
     assert os.environ["SEISO_LLAMA_UBATCH"] == str(expected_ubatch)
     assert os.environ["SEISO_LLAMA_CACHE_MB"] == str(min(2048, expected_cache))
     assert os.environ.get("SEISO_LLAMA_FLASH_ATTN") == "false"
-    assert os.environ["SEISO_STREAM_BATCH_CHARS"] == "16"
+    assert os.environ["SEISO_STREAM_BATCH_CHARS"] == "4"
 
 
 def test_platform_profile_linux_nvidia_wsl_uses_non_native_batches(monkeypatch):

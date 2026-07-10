@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 from fastapi import HTTPException
@@ -23,6 +24,9 @@ from seiso.inference.backends import (
     BACKEND_TORCH,
 )
 
+_FIT_CACHE_TTL_S = 30.0
+_fit_cache: dict[tuple[str, str, str], tuple[float, dict[str, Any]]] = {}
+
 
 def assert_model_fits_for_load(
     path: str,
@@ -32,7 +36,18 @@ def assert_model_fits_for_load(
 ) -> None:
     from seiso.memory.protection import assess_path_memory_fit_for_load
 
-    fit = assess_path_memory_fit_for_load(path, mode=mode, backend=backend)
+    key = (str(path), mode, str(backend or ""))
+    now = time.monotonic()
+    cached = _fit_cache.get(key)
+    if cached is not None and (now - cached[0]) < _FIT_CACHE_TTL_S:
+        fit = cached[1]
+    else:
+        fit = assess_path_memory_fit_for_load(path, mode=mode, backend=backend)
+        _fit_cache[key] = (now, fit)
+        if len(_fit_cache) > 64:
+            # Drop oldest entries cheaply.
+            for stale in sorted(_fit_cache, key=lambda k: _fit_cache[k][0])[:16]:
+                _fit_cache.pop(stale, None)
     if mode != "chat" and fit.get("memory_load_blocked"):
         raise HTTPException(
             400,
@@ -349,6 +364,31 @@ async def resolve_preload_context(
         payload["n_ctx"] = target["n_ctx"]
     elif n_ctx is not None:
         payload["n_ctx"] = n_ctx
+
+    # Eager Ollama registration during preload so first chat skips `ollama create`.
+    if target["inference_backend"] == BACKEND_LLAMASWAP:
+        try:
+            from seiso.inference.llamaswap import preferred_sidecar_engine
+            from seiso.inference.ollama_registry import (
+                ensure_model_registered,
+                metadata_for_model_path,
+            )
+
+            if preferred_sidecar_engine() == "ollama":
+                meta = metadata_for_model_path(str(path), target.get("model_metadata"))
+                ensure_model_registered(
+                    str(path),
+                    repo_id=(
+                        meta.get("repo_id")
+                        if isinstance(meta.get("repo_id"), str)
+                        else None
+                    ),
+                    metadata=meta,
+                    model_format=target.get("model_format"),
+                )
+        except Exception:
+            # Soft-fail: chat path still registers lazily via OllamaClient.
+            pass
 
     return {
         "payload": payload,

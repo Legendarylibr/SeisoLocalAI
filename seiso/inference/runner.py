@@ -64,11 +64,28 @@ _STREAM_DONE = object()
 _MAX_LLAMA_OOM_RECOVERIES = 3
 _runner: LocalInferenceRunner | None = None
 _runner_lock = threading.Lock()
+_inference_executor: Any | None = None
+_inference_executor_lock = threading.Lock()
+
+
+def _get_inference_executor() -> Any:
+    """Dedicated single-worker pool for blocking inference (lazy, process-local)."""
+    global _inference_executor
+    if _inference_executor is not None:
+        return _inference_executor
+    with _inference_executor_lock:
+        if _inference_executor is None:
+            from concurrent.futures import ThreadPoolExecutor
+
+            _inference_executor = ThreadPoolExecutor(
+                max_workers=1, thread_name_prefix="seiso-infer"
+            )
+        return _inference_executor
 
 
 def _stream_batch_chars() -> int:
     """Chars to batch after the first token; lower = snappier UI, higher = fewer SSE events."""
-    return max(1, env_int("SEISO_STREAM_BATCH_CHARS", 16))
+    return max(1, env_int("SEISO_STREAM_BATCH_CHARS", 4))
 
 
 def _torch_generate_with_oom_retry(model: Any, gen_kwargs: dict[str, Any]) -> Any:
@@ -441,7 +458,34 @@ class LocalInferenceRunner:
         elif route == "torch":
             self._pool.get_torch(resolved_path)
         elif route == "llamaswap":
-            self._pool.get_llamaswap(resolved_path)
+            client = self._pool.get_llamaswap(resolved_path)
+            # Eager Ollama registration so first chat is not blocked on `ollama create`.
+            if getattr(client, "engine", None) == "ollama":
+                try:
+                    from seiso.inference.ollama_registry import (
+                        ensure_model_registered,
+                        metadata_for_model_path,
+                    )
+
+                    meta = metadata_for_model_path(
+                        resolved_path, payload.get("model_metadata")
+                    )
+                    ensure_model_registered(
+                        resolved_path,
+                        repo_id=(
+                            meta.get("repo_id")
+                            if isinstance(meta.get("repo_id"), str)
+                            else None
+                        ),
+                        metadata=meta,
+                        model_format=payload.get("model_format"),
+                    )
+                except Exception:
+                    logger.warning(
+                        "Ollama preload registration failed for %s",
+                        resolved_path,
+                        exc_info=True,
+                    )
         elif route == "speculative":
             draft_path = payload.get("draft_model_path")
             if not draft_path:
@@ -500,15 +544,16 @@ class LocalInferenceRunner:
             await self._ensure_model_switch(resolved_path, route=route)
             self._pool.begin_inference()
             try:
+                executor = _get_inference_executor()
                 if route == "llamaswap":
                     return await loop.run_in_executor(
-                        None,
+                        executor,
                         lambda: self._llamaswap_complete(
                             payload, resolved_path, generation_id
                         ),
                     )
                 return await loop.run_in_executor(
-                    None,
+                    executor,
                     lambda: self._llama_complete(payload, resolved_path, generation_id),
                 )
             finally:
@@ -525,7 +570,7 @@ class LocalInferenceRunner:
             resolved_path, draft_path=payload.get("draft_model_path"), route=route
         )
         return await loop.run_in_executor(
-            None,
+            _get_inference_executor(),
             lambda: self._complete(payload, resolved_path, route, generation_id),
         )
 
@@ -1143,6 +1188,69 @@ class LocalInferenceRunner:
             max_tokens=int(getattr(llm, "_seiso_max_tokens", 512) or 512),
         )
 
+    def _llama_prepare_for_generation(
+        self,
+        llm: Any,
+        payload: dict[str, Any],
+        *,
+        model_path: str,
+        messages: list[dict[str, Any]],
+        n_ctx: int,
+        stream: bool,
+    ) -> tuple[Any, dict[str, Any], list[dict[str, Any]], int]:
+        """Single fit → prefill guard → decode preflight pass (re-fit only after reload)."""
+        before_id = id(llm)
+        before_batch = int(getattr(llm, "_seiso_n_batch", 0) or 0)
+        before_ubatch = int(getattr(llm, "_seiso_n_ubatch", 0) or 0)
+        before_ctx = int(getattr(llm, "_seiso_n_ctx", n_ctx) or n_ctx)
+        before_tokens = int(payload.get("max_tokens", 512))
+
+        budget = _fit_llama_messages_to_context(
+            llm,
+            messages,
+            n_ctx=n_ctx,
+            max_tokens=before_tokens,
+        )
+        messages = budget.messages
+        if budget.max_tokens != before_tokens:
+            payload = dict(payload)
+            payload["max_tokens"] = budget.max_tokens
+        llm = self._llama_guard_prefill(
+            llm,
+            model_path=model_path,
+            messages=messages,
+            n_ctx=n_ctx,
+            prompt_tokens=budget.input_tokens,
+        )
+        llm, payload, messages, n_ctx = self._llama_preflight_decode(
+            llm,
+            payload,
+            model_path=model_path,
+            messages=messages,
+            n_ctx=n_ctx,
+            stream=stream,
+            prompt_tokens=budget.input_tokens,
+        )
+        reloaded = (
+            id(llm) != before_id
+            or int(getattr(llm, "_seiso_n_batch", 0) or 0) != before_batch
+            or int(getattr(llm, "_seiso_n_ubatch", 0) or 0) != before_ubatch
+            or int(getattr(llm, "_seiso_n_ctx", n_ctx) or n_ctx) != before_ctx
+            or int(payload.get("max_tokens", 512)) != before_tokens
+        )
+        if reloaded:
+            budget = _fit_llama_messages_to_context(
+                llm,
+                messages,
+                n_ctx=n_ctx,
+                max_tokens=int(payload.get("max_tokens", 512)),
+            )
+            messages = budget.messages
+            if budget.max_tokens != int(payload.get("max_tokens", 512)):
+                payload = dict(payload)
+                payload["max_tokens"] = budget.max_tokens
+        return llm, payload, messages, n_ctx
+
     def _llama_preflight_decode(
         self,
         llm: Any,
@@ -1270,42 +1378,14 @@ class LocalInferenceRunner:
             n_ctx=n_ctx,
             max_tokens=int(payload.get("max_tokens", 512)),
         )
-        budget = _fit_llama_messages_to_context(
-            llm,
-            messages,
-            n_ctx=n_ctx,
-            max_tokens=int(payload.get("max_tokens", 512)),
-        )
-        messages = budget.messages
-        if budget.max_tokens != int(payload.get("max_tokens", 512)):
-            payload = dict(payload)
-            payload["max_tokens"] = budget.max_tokens
-        llm = self._llama_guard_prefill(
-            llm,
-            model_path=model_path,
-            messages=messages,
-            n_ctx=n_ctx,
-            prompt_tokens=budget.input_tokens,
-        )
-        llm, payload, messages, n_ctx = self._llama_preflight_decode(
+        llm, payload, messages, n_ctx = self._llama_prepare_for_generation(
             llm,
             payload,
             model_path=model_path,
             messages=messages,
             n_ctx=n_ctx,
             stream=False,
-            prompt_tokens=budget.input_tokens,
         )
-        budget = _fit_llama_messages_to_context(
-            llm,
-            messages,
-            n_ctx=n_ctx,
-            max_tokens=int(payload.get("max_tokens", 512)),
-        )
-        messages = budget.messages
-        if budget.max_tokens != int(payload.get("max_tokens", 512)):
-            payload = dict(payload)
-            payload["max_tokens"] = budget.max_tokens
         kwargs = llama_completion_kwargs(payload)
         kwargs["stream"] = False
         tools = payload.get("tools_schemas")
@@ -1338,42 +1418,14 @@ class LocalInferenceRunner:
                         n_ctx=actual_ctx,
                         max_tokens=int(payload.get("max_tokens", 512)),
                     )
-                budget = _fit_llama_messages_to_context(
-                    llm,
-                    messages,
-                    n_ctx=n_ctx,
-                    max_tokens=int(payload.get("max_tokens", 512)),
-                )
-                messages = budget.messages
-                if budget.max_tokens != int(payload.get("max_tokens", 512)):
-                    payload = dict(payload)
-                    payload["max_tokens"] = budget.max_tokens
-                llm = self._llama_guard_prefill(
-                    llm,
-                    model_path=model_path,
-                    messages=messages,
-                    n_ctx=n_ctx,
-                    prompt_tokens=budget.input_tokens,
-                )
-                llm, payload, messages, n_ctx = self._llama_preflight_decode(
+                llm, payload, messages, n_ctx = self._llama_prepare_for_generation(
                     llm,
                     payload,
                     model_path=model_path,
                     messages=messages,
                     n_ctx=n_ctx,
                     stream=False,
-                    prompt_tokens=budget.input_tokens,
                 )
-                budget = _fit_llama_messages_to_context(
-                    llm,
-                    messages,
-                    n_ctx=n_ctx,
-                    max_tokens=int(payload.get("max_tokens", 512)),
-                )
-                messages = budget.messages
-                if budget.max_tokens != int(payload.get("max_tokens", 512)):
-                    payload = dict(payload)
-                    payload["max_tokens"] = budget.max_tokens
                 kwargs = llama_completion_kwargs(payload)
                 kwargs["stream"] = False
                 if tools:
@@ -1434,42 +1486,14 @@ class LocalInferenceRunner:
             )
         except ImportError as exc:
             raise RuntimeError("llama-cpp-python not installed") from exc
-        budget = _fit_llama_messages_to_context(
-            llm,
-            messages,
-            n_ctx=n_ctx,
-            max_tokens=int(payload.get("max_tokens", 512)),
-        )
-        messages = budget.messages
-        if budget.max_tokens != int(payload.get("max_tokens", 512)):
-            payload = dict(payload)
-            payload["max_tokens"] = budget.max_tokens
-        llm = self._llama_guard_prefill(
-            llm,
-            model_path=model_path,
-            messages=messages,
-            n_ctx=n_ctx,
-            prompt_tokens=budget.input_tokens,
-        )
-        llm, payload, messages, n_ctx = self._llama_preflight_decode(
+        llm, payload, messages, n_ctx = self._llama_prepare_for_generation(
             llm,
             payload,
             model_path=model_path,
             messages=messages,
             n_ctx=n_ctx,
             stream=True,
-            prompt_tokens=budget.input_tokens,
         )
-        budget = _fit_llama_messages_to_context(
-            llm,
-            messages,
-            n_ctx=n_ctx,
-            max_tokens=int(payload.get("max_tokens", 512)),
-        )
-        messages = budget.messages
-        if budget.max_tokens != int(payload.get("max_tokens", 512)):
-            payload = dict(payload)
-            payload["max_tokens"] = budget.max_tokens
 
         completion_kwargs = llama_completion_kwargs(payload)
         tools = payload.get("tools_schemas")
@@ -1529,42 +1553,14 @@ class LocalInferenceRunner:
                         n_ctx=actual_ctx,
                         max_tokens=int(payload.get("max_tokens", 512)),
                     )
-                budget = _fit_llama_messages_to_context(
-                    llm,
-                    messages,
-                    n_ctx=n_ctx,
-                    max_tokens=int(payload.get("max_tokens", 512)),
-                )
-                messages = budget.messages
-                if budget.max_tokens != int(payload.get("max_tokens", 512)):
-                    payload = dict(payload)
-                    payload["max_tokens"] = budget.max_tokens
-                llm = self._llama_guard_prefill(
-                    llm,
-                    model_path=model_path,
-                    messages=messages,
-                    n_ctx=n_ctx,
-                    prompt_tokens=budget.input_tokens,
-                )
-                llm, payload, messages, n_ctx = self._llama_preflight_decode(
+                llm, payload, messages, n_ctx = self._llama_prepare_for_generation(
                     llm,
                     payload,
                     model_path=model_path,
                     messages=messages,
                     n_ctx=n_ctx,
                     stream=True,
-                    prompt_tokens=budget.input_tokens,
                 )
-                budget = _fit_llama_messages_to_context(
-                    llm,
-                    messages,
-                    n_ctx=n_ctx,
-                    max_tokens=int(payload.get("max_tokens", 512)),
-                )
-                messages = budget.messages
-                if budget.max_tokens != int(payload.get("max_tokens", 512)):
-                    payload = dict(payload)
-                    payload["max_tokens"] = budget.max_tokens
                 completion_kwargs = llama_completion_kwargs(payload)
                 if tools:
                     completion_kwargs["tools"] = tools
