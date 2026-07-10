@@ -59,6 +59,37 @@ def test_resolve_inference_profile_fallback(monkeypatch):
     assert resolve_inference_profile() == "interactive"
 
 
+def test_pool_pinned_n_ctx_reused_by_llamaswap_payload(monkeypatch, tmp_path):
+    from seiso.inference.model_pool import ModelPool
+    from seiso.inference.runner import LocalInferenceRunner
+
+    model = tmp_path / "m.gguf"
+    model.write_bytes(b"GGUF")
+    pool = ModelPool()
+    pool._active = type(
+        "A",
+        (),
+        {
+            "key": f"llamaswap:{model.resolve()}",
+            "backend": type("B", (), {"value": "llamaswap"})(),
+            "handle": object(),
+            "meta": {
+                "path": str(model.resolve()),
+                "norm_path": str(model.resolve()),
+                "n_ctx": 8192,
+                "sidecar": True,
+            },
+        },
+    )()
+    runner = LocalInferenceRunner()
+    runner._pool = pool
+    out = runner._llamaswap_payload(
+        {"messages": [{"role": "user", "content": "hi"}], "max_tokens": 128},
+        str(model.resolve()),
+    )
+    assert out["sidecar_num_ctx"] == 8192
+
+
 def test_plan_sidecar_reuses_pinned_ctx(monkeypatch):
     from seiso.inference.llamaswap import plan_sidecar_request
 

@@ -405,10 +405,15 @@ export function ChatPage() {
         maxTokens: preloadOpts.maxTokens,
         nCtx: preloadOpts.nCtx,
       });
+      // Lock the UI to the pinned ctx so chat turns keep sending the same n_ctx.
+      if (loaded.nCtx != null) {
+        setContextWindow(loaded.nCtx);
+        writeStoredContextWindowForModel(modelId, loaded.nCtx);
+      }
       setLoadedModelId(modelId);
-      setLoadedBackend(loaded);
-      writeStoredModel(CHAT_BACKEND_STORAGE_KEY, loaded);
-      return loaded;
+      setLoadedBackend(loaded.backend);
+      writeStoredModel(CHAT_BACKEND_STORAGE_KEY, loaded.backend);
+      return loaded.backend;
     },
     [providerId, hwProfile, inferenceBackend, preloadInferenceOptions, applyMaxTokens],
   );
@@ -548,8 +553,12 @@ export function ChatPage() {
             undefined,
             { maxTokens: preloadOpts.maxTokens, nCtx: preloadOpts.nCtx },
           );
+          if (loaded.nCtx != null) {
+            setContextWindow(loaded.nCtx);
+            writeStoredContextWindowForModel(selection, loaded.nCtx);
+          }
           setLoadedModelId(selection);
-          setLoadedBackend(loaded);
+          setLoadedBackend(loaded.backend);
         } catch {
           setLoadedModelId(null);
           setLoadedBackend(null);
@@ -596,6 +605,7 @@ export function ChatPage() {
     }) => {
       setModels(result.models);
       if (!result.selectedId) return;
+      // Prefer per-model stored ctx (bootstrap preload may have just pinned it).
       const preloadOpts = preloadInferenceOptions(result.selectedId, result.models);
       applyMaxTokens(preloadOpts.maxTokens);
       setContextWindow(preloadOpts.contextWindow);
@@ -1084,8 +1094,14 @@ export function ChatPage() {
             maxTokens: inferenceSettings.maxTokens,
             nCtx: value === "auto" ? null : value,
           });
+          // After preload, pin UI to the engine's chosen ctx (even from Auto).
+          const pinned = loaded.nCtx ?? (value === "auto" ? null : value);
+          if (pinned != null) {
+            setContextWindow(pinned);
+            writeStoredContextWindowForModel(selection, pinned);
+          }
           setLoadedModelId(selection);
-          setLoadedBackend(loaded);
+          setLoadedBackend(loaded.backend);
         } catch (e) {
           setError(e instanceof Error ? e.message : "Failed to apply context window");
         } finally {
@@ -1244,9 +1260,13 @@ export function ChatPage() {
                       undefined,
                       { maxTokens: preloadOpts.maxTokens, nCtx: preloadOpts.nCtx },
                     );
+                    if (loaded.nCtx != null) {
+                      setContextWindow(loaded.nCtx);
+                      writeStoredContextWindowForModel(selection, loaded.nCtx);
+                    }
                     setLoadedModelId(selection);
-                    setLoadedBackend(loaded);
-                    writeStoredModel(CHAT_BACKEND_STORAGE_KEY, loaded);
+                    setLoadedBackend(loaded.backend);
+                    writeStoredModel(CHAT_BACKEND_STORAGE_KEY, loaded.backend);
                   } catch (e) {
                     setLoadedModelId(null);
                     setLoadedBackend(null);

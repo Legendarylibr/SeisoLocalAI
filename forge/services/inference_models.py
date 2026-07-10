@@ -199,7 +199,12 @@ def _safe_chat_profile(opt: dict[str, Any]) -> dict[str, Any]:
     if not context_options:
         context_options = [2048]
 
-    recommended_context = "auto"
+    # Prefer a fixed preset (not "auto") so preload pins one KV size and
+    # multi-turn chat does not re-bucket context every message.
+    recommended_context = next(
+        (value for value in reversed(context_options) if value <= 8192),
+        context_options[-1],
+    )
     return {
         "recommended_max_tokens": max(1, min(int(max_tokens), 8192)),
         "recommended_context_window": recommended_context,
