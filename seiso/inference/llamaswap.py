@@ -14,7 +14,7 @@ import urllib.parse
 import urllib.request
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 from seiso.env import env_bool, env_int, env_str
 from seiso.inference.kv_policy import resolve_sidecar_kv_policy
@@ -848,7 +848,7 @@ class OllamaClient:
             raise RuntimeError(
                 f"Ollama is unavailable at {self.url}. {sidecar_setup_hint(engine='ollama')}"
             ) from exc
-        return json.loads(raw)
+        return cast(dict[str, Any], json.loads(raw))
 
 
 class LlamaSwapClient:
@@ -1019,4 +1019,4 @@ class LlamaSwapClient:
                 f"llama-swap is unavailable at {self.url}. "
                 f"{sidecar_setup_hint(url=self.url, engine=self.engine)}"
             ) from exc
-        return json.loads(raw)
+        return cast(dict[str, Any], json.loads(raw))

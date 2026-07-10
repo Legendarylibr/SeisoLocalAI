@@ -10,7 +10,7 @@ import time
 from collections.abc import AsyncIterator, Callable, Iterator
 from dataclasses import dataclass
 from queue import Empty
-from typing import Any
+from typing import Any, cast
 
 from seiso.env import env_int
 from seiso.inference.backends import (
@@ -221,6 +221,8 @@ def _torch_context_limit(model: Any, tokenizer: Any) -> int:
         getattr(getattr(model, "config", None), "max_sequence_length", None),
         getattr(getattr(model, "config", None), "n_positions", None),
     ):
+        if raw is None:
+            continue
         with contextlib.suppress(TypeError, ValueError):
             value = int(raw)
             if 0 < value < 1_000_000:
@@ -809,7 +811,7 @@ class LocalInferenceRunner:
                 break
             if isinstance(item, _StreamError):
                 raise item.exc
-            yield item
+            yield cast(StreamUpdate, item)
 
     async def cancel_and_unload(self) -> dict:
         loop = asyncio.get_running_loop()
@@ -1808,7 +1810,7 @@ class LocalInferenceRunner:
         text = client.complete(payload, model_path)
         if not self._pool.is_generation_active(generation_id):
             return ""
-        return text
+        return cast(str, text)
 
     def _llamaswap_stream(
         self,
