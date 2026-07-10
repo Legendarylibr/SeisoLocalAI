@@ -90,6 +90,21 @@ def _looks_like_quantization_load_error(exc: BaseException) -> bool:
     )
 
 
+def _looks_like_attention_load_error(exc: BaseException) -> bool:
+    text = str(exc).lower()
+    return any(
+        marker in text
+        for marker in (
+            "attn_implementation",
+            "attention implementation",
+            "flash_attn",
+            "flash attention",
+            "scaled_dot_product_attention",
+            "sdpa",
+        )
+    )
+
+
 def load_torch(
     options: LoadOptions,
     backend: Backend = Backend.TORCH,
@@ -224,10 +239,42 @@ def load_torch(
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
+    def _load_with_attention_fallback(kwargs: dict[str, Any]) -> tuple[Any, str]:
+        attempted = str(kwargs.get("attn_implementation") or "eager")
+        fallbacks = [attempted]
+        if attempted.startswith("flash_attention"):
+            fallbacks.extend(["sdpa", "eager"])
+        elif attempted == "sdpa":
+            fallbacks.append("eager")
+        last_exc: BaseException | None = None
+        for implementation in dict.fromkeys(fallbacks):
+            attempt = dict(kwargs)
+            attempt["attn_implementation"] = implementation
+            try:
+                loaded = AutoModelForCausalLM.from_pretrained(
+                    options.model_id, **attempt
+                )  # nosec B615: revision pinned in model_kwargs
+                return loaded, implementation
+            except Exception as exc:
+                last_exc = exc
+                if (
+                    implementation == fallbacks[-1]
+                    or not _looks_like_attention_load_error(exc)
+                ):
+                    raise
+                from seiso.memory.protection import release_cached_memory
+
+                logger.warning(
+                    "%s attention load failed; retrying with fallback: %s",
+                    implementation,
+                    exc,
+                )
+                release_cached_memory(sync=True)
+        assert last_exc is not None
+        raise last_exc
+
     try:
-        model = AutoModelForCausalLM.from_pretrained(
-            options.model_id, **model_kwargs
-        )  # nosec B615: revision pinned in model_kwargs
+        model, actual_attention = _load_with_attention_fallback(model_kwargs)
     except Exception as exc:
         if not quantization_requested or not _looks_like_quantization_load_error(exc):
             raise
@@ -238,9 +285,9 @@ def load_torch(
             "quantization",
             exc,
         )
-        model = AutoModelForCausalLM.from_pretrained(
-            options.model_id, **retry_kwargs
-        )  # nosec B615: revision pinned in model_kwargs
+        model, actual_attention = _load_with_attention_fallback(retry_kwargs)
+
+    model._seiso_attention_implementation = actual_attention
 
     if len(tokenizer) != model.get_input_embeddings().weight.shape[0]:
         model.resize_token_embeddings(len(tokenizer))

@@ -18,8 +18,10 @@ The defaults preserve output behavior:
 
 | Variable | Default | Purpose |
 |---|---:|---|
+| `SEISO_TORCH_LOAD_PRECISION` | `auto` | Use BF16/FP16 only when weights plus runtime reserve fit; otherwise 4-bit |
+| `SEISO_TORCH_LOAD_RESERVE_MB` | `2048` | Minimum load-time VRAM reserve (also keeps 25% free) |
 | `SEISO_TORCH_PREFILL_CHUNK_THRESHOLD` | `2048` | Minimum prompt length for chunking |
-| `SEISO_TORCH_PREFILL_CHUNK_SIZE` | `1024` | Initial adaptive prefill chunk |
+| `SEISO_TORCH_PREFILL_CHUNK_SIZE` | automatic | Override the 512/1024/2048 headroom tiers |
 | `SEISO_TORCH_PREFIX_CACHE` | `true` on Linux | Enable exact-prefix reuse |
 | `SEISO_TORCH_PREFIX_CACHE_MAX_TOKENS` | `32768` | Bound retained token IDs and KV |
 | `SEISO_TORCH_CACHE_IMPLEMENTATION` | `dynamic` | `dynamic`, `static`, `offloaded`, or `quantized` |
@@ -35,11 +37,18 @@ Ollama manages prompt reuse internally; llama-swap receives `cache_prompt` only
 when that capability is advertised. KV precision for these servers is a
 server-launch setting and is intentionally not guessed per request.
 
+Preload performs a real one-token Torch kernel warmup. Ollama preload sends a
+native empty-prompt load request with the pinned context and active-session
+keep-alive, so first chat does not pay model-load latency. Interactive sessions
+retain Ollama residency for 15 minutes; explicit Free Memory still unloads it
+immediately.
+
 ## Rollback
 
 Set `SEISO_TORCH_KV_STREAM=0`, `SEISO_TORCH_PREFIX_CACHE=0`, and
 `SEISO_TORCH_CACHE_IMPLEMENTATION=dynamic` to use the established Transformers
-generation path with dynamic KV. Leave `SEISO_TORCH_DECODE_GRAPHS=0` and
+generation path with dynamic KV. Set `SEISO_TORCH_LOAD_PRECISION=4bit` to
+restore forced bitsandbytes loading. Leave `SEISO_TORCH_DECODE_GRAPHS=0` and
 `SEISO_TORCH_QUANTIZED_KV=0` for strict numerical compatibility.
 
 Generation updates expose additive metadata for cache mode, fallback reason,

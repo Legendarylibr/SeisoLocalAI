@@ -123,7 +123,7 @@ def test_sidecar_keep_alive_active_uses_profile(monkeypatch):
     monkeypatch.setattr(llamaswap, "_sidecar_native_linux_nvidia", lambda: True)
     monkeypatch.setattr(llamaswap, "_sidecar_perf_mode", lambda: False)
     monkeypatch.setattr(llamaswap, "_sidecar_headroom_mb", lambda: 20_000)
-    assert llamaswap.sidecar_ollama_keep_alive(active=True) == "5m"
+    assert llamaswap.sidecar_ollama_keep_alive(active=True) == "15m"
     assert llamaswap.sidecar_ollama_keep_alive(active=False) == "2m"
 
 

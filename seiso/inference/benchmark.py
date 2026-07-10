@@ -46,6 +46,7 @@ class InferenceBenchResult:
     profile: str = "optimized"
     notes: list[str] = field(default_factory=list)
     kv_metadata: dict[str, Any] = field(default_factory=dict)
+    warmup_ms: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -147,6 +148,8 @@ async def bench_inference(
     resolved_backend = payload["inference_backend"]
     notes: list[str] = []
     load_ms: float | None = None
+    warmup_ms: float | None = None
+    preload_metadata: dict[str, Any] = {}
 
     with _bench_env(env_overrides):
         runner = LocalInferenceRunner()
@@ -154,14 +157,29 @@ async def bench_inference(
 
         if warmup:
             pool.cancel_and_unload()
-            cold_payload = {**payload, "max_tokens": min(16, max_tokens)}
+            cold_payload = {**payload, "max_tokens": 1}
             cold_t0 = time.perf_counter()
-            await runner.chat(cold_payload)
-            load_ms = (time.perf_counter() - cold_t0) * 1000.0
-            notes.append("warmup=16tok cold load")
+            await asyncio.to_thread(runner.warm_model, cold_payload)
+            preload_elapsed_ms = (time.perf_counter() - cold_t0) * 1000.0
+            preload_metadata = dict(
+                getattr(runner, "last_inference_stats", {})
+            )
+            warmup_ms = (
+                float(preload_metadata["warmup_ms"])
+                if preload_metadata.get("warmup_ms") is not None
+                else None
+            )
+            load_ms = (
+                float(preload_metadata["load_ms"])
+                if preload_metadata.get("load_ms") is not None
+                else max(0.0, preload_elapsed_ms - (warmup_ms or 0.0))
+            )
+            notes.append("preload=weights+kernel warmup")
 
         output, _, ttft_ms, generate_ms, output_tokens = await _timed_stream(payload, runner=runner)
         kv_metadata = dict(getattr(runner, "last_inference_stats", {}))
+        if preload_metadata:
+            kv_metadata["preload"] = preload_metadata
 
     if output_tokens <= 0:
         output_tokens = _estimate_tokens(output)
@@ -170,7 +188,9 @@ async def bench_inference(
     )
     ms_per_token = generate_ms / output_tokens if output_tokens > 0 else 0.0
     total_ms = (
-        (load_ms or 0.0) + ttft_ms + generate_ms if load_ms is not None else ttft_ms + generate_ms
+        (load_ms or 0.0) + (warmup_ms or 0.0) + ttft_ms + generate_ms
+        if load_ms is not None
+        else ttft_ms + generate_ms
     )
 
     return InferenceBenchResult(
@@ -189,6 +209,7 @@ async def bench_inference(
         profile=profile,
         notes=notes,
         kv_metadata=kv_metadata,
+        warmup_ms=warmup_ms,
     )
 
 

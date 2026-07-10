@@ -242,3 +242,69 @@ def test_load_torch_retries_without_bitsandbytes_quantization(monkeypatch):
     assert "quantization_config" in model_calls[0]
     assert "quantization_config" not in model_calls[1]
     assert model_calls[1]["device_map"] == "auto"
+
+
+def test_load_torch_falls_back_from_flash_attention_to_sdpa(monkeypatch):
+    from seiso.models import torch_loader
+
+    model_calls: list[str] = []
+
+    class FakeAutoConfig:
+        @staticmethod
+        def from_pretrained(_model_id, **_kwargs):
+            return SimpleNamespace(quantization_config=None)
+
+    class FakeTokenizer:
+        pad_token = None
+        eos_token = "<eos>"
+
+        def __len__(self) -> int:
+            return 8
+
+    class FakeAutoTokenizer:
+        @staticmethod
+        def from_pretrained(_model_id, **_kwargs):
+            return FakeTokenizer()
+
+    class FakeModel:
+        def get_input_embeddings(self):
+            return SimpleNamespace(weight=SimpleNamespace(shape=(8, 4)))
+
+        def resize_token_embeddings(self, _size: int) -> None:
+            raise AssertionError("tokenizer and embeddings should match")
+
+    class FakeAutoModelForCausalLM:
+        @staticmethod
+        def from_pretrained(_model_id, **kwargs):
+            implementation = kwargs["attn_implementation"]
+            model_calls.append(implementation)
+            if implementation == "flash_attention_2":
+                raise RuntimeError("flash_attn is not supported for this model")
+            return FakeModel()
+
+    monkeypatch.setitem(
+        __import__("sys").modules,
+        "transformers",
+        SimpleNamespace(
+            AutoConfig=FakeAutoConfig,
+            AutoModelForCausalLM=FakeAutoModelForCausalLM,
+            AutoTokenizer=FakeAutoTokenizer,
+        ),
+    )
+    monkeypatch.setattr(torch_loader, "_cuda_available", lambda: True)
+    monkeypatch.setattr(
+        "seiso.kernels.attention.resolve_attention_implementation",
+        lambda prefer_fa3=True: "flash_attention_2",
+    )
+    monkeypatch.setattr("seiso.memory.protection.build_hf_max_memory", lambda: None)
+    monkeypatch.setattr(
+        "seiso.memory.protection.release_cached_memory", lambda **_kwargs: None
+    )
+
+    model, _tokenizer = torch_loader.load_torch(
+        LoadOptions(model_id="org/model"),
+        backend=Backend.TORCH,
+    )
+
+    assert model_calls == ["flash_attention_2", "sdpa"]
+    assert model._seiso_attention_implementation == "sdpa"

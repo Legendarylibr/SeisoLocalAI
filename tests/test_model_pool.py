@@ -1935,3 +1935,70 @@ def test_llama_layer_attempts_cpu_only_for_swa_on_linux(monkeypatch, tmp_path):
     attempts = mp._llama_layer_attempts(str(gguf), -1, 12000, n_ctx=4096, fitted=24)
 
     assert attempts == [0]
+
+
+def test_torch_native_load_oom_falls_back_to_4bit(monkeypatch):
+    import torch
+
+    from seiso.inference.kv_policy import TorchLoadPolicy
+    from seiso.inference.model_pool import ModelPool
+    from seiso.models import loader
+
+    calls = []
+    model = type("Model", (), {})()
+    tokenizer = object()
+
+    def fake_load(options):
+        calls.append(options)
+        if len(calls) == 1:
+            raise torch.OutOfMemoryError("synthetic native load pressure")
+        return model, tokenizer
+
+    monkeypatch.setattr(loader, "load_model", fake_load)
+    monkeypatch.setattr(
+        "seiso.inference.tuning.prepare_torch_model", lambda value: value
+    )
+    monkeypatch.setattr(
+        "seiso.memory.protection.release_cached_memory", lambda **_kwargs: None
+    )
+    policy = TorchLoadPolicy(
+        precision="bf16",
+        load_in_4bit=False,
+        dtype="bfloat16",
+        weight_mb=3000,
+        required_mb=6000,
+        headroom_mb=20_000,
+        reason="test",
+    )
+
+    loaded_model, loaded_tokenizer = ModelPool()._load_torch_pair(
+        "/tmp/model", load_policy=policy
+    )
+
+    assert (loaded_model, loaded_tokenizer) == (model, tokenizer)
+    assert calls[0].load_in_4bit is False
+    assert calls[1].load_in_4bit is True
+    assert model._seiso_load_precision == "4bit-fallback"
+
+
+def test_torch_auto_precision_stays_pinned_while_model_is_resident(monkeypatch):
+    from seiso.inference.model_pool import BackendKind, LoadedModel, ModelPool
+
+    model = object()
+    tokenizer = object()
+    pool = ModelPool()
+    norm = pool.normalize_path("/tmp/model")
+    pool._active = LoadedModel(
+        key=f"torch:{norm}:bf16",
+        backend=BackendKind.TORCH,
+        handle=(model, tokenizer),
+        meta={"path": "/tmp/model", "norm_path": norm, "load_precision": "bf16"},
+    )
+    monkeypatch.setenv("SEISO_TORCH_LOAD_PRECISION", "auto")
+    monkeypatch.setattr(
+        "seiso.memory.protection.headroom_mb",
+        lambda: 256,
+    )
+
+    assert pool.get_torch("/tmp/model") == (model, tokenizer)
+    assert pool.status()["load_precision"] == "bf16"

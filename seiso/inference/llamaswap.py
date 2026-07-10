@@ -86,12 +86,15 @@ class IsolatedGgufClient(Protocol):
 
     def complete(self, payload: dict[str, Any], model_path: str) -> str: ...
 
+    def warm_model(self, payload: dict[str, Any], model_path: str) -> bool: ...
+
     def stream(
         self,
         payload: dict[str, Any],
         model_path: str,
         *,
         should_stop,
+        runtime_stats: dict[str, Any] | None = None,
     ) -> Iterator[StreamToken]: ...
 
     def release_external_memory(self, model_path: str | None = None) -> tuple[bool, str | None]: ...
@@ -614,6 +617,7 @@ class OllamaClient:
     def __init__(self, *, url: str | None = None) -> None:
         self.url = (url or ollama_url()).rstrip("/")
         self.engine = "ollama"
+        self._pinned_load_plan: dict[str, Any] | None = None
 
     def ensure_ready(self) -> None:
         if not ollama_health_ok(url=self.url):
@@ -629,14 +633,63 @@ class OllamaClient:
             return ""
         return message_content_with_tool_calls(message)
 
+    def warm_model(self, payload: dict[str, Any], model_path: str) -> bool:
+        """Load weights and pin context without generating user-visible text."""
+        _messages, num_ctx, _max_tokens = plan_sidecar_request(payload, model_path)
+        options = self._load_options(model_path, num_ctx=num_ctx)
+        body: dict[str, Any] = {
+            "model": self._resolve_model(model_path, payload),
+            "prompt": "",
+            "stream": False,
+            "options": options,
+        }
+        keep_alive = sidecar_ollama_keep_alive(active=True)
+        if keep_alive:
+            body["keep_alive"] = keep_alive
+        data = self._post_json("/api/generate", body)
+        if isinstance(data, dict) and data.get("error"):
+            raise RuntimeError(f"Ollama warmup failed: {data['error']}")
+        return True
+
+    @property
+    def pinned_load_plan(self) -> dict[str, Any]:
+        """Immutable load-affecting options for the active Ollama runner."""
+        return dict(self._pinned_load_plan or {})
+
+    def _load_options(self, model_path: str, *, num_ctx: int) -> dict[str, Any]:
+        pinned = self._pinned_load_plan
+        if (
+            pinned is not None
+            and pinned.get("model_path") == model_path
+            and int(pinned.get("num_ctx") or 0) >= num_ctx
+        ):
+            return {
+                key: value
+                for key, value in pinned.items()
+                if key in {"num_ctx", "num_batch", "num_gpu"}
+            }
+
+        options: dict[str, Any] = {"num_ctx": num_ctx}
+        num_batch = sidecar_ollama_num_batch()
+        if num_batch is not None:
+            options["num_batch"] = num_batch
+        num_gpu = sidecar_ollama_num_gpu(model_path, num_ctx=num_ctx)
+        if num_gpu is not None:
+            options["num_gpu"] = num_gpu
+        self._pinned_load_plan = {"model_path": model_path, **options}
+        return dict(options)
+
     def stream(
         self,
         payload: dict[str, Any],
         model_path: str,
         *,
         should_stop,
+        runtime_stats: dict[str, Any] | None = None,
     ) -> Iterator[StreamToken]:
         body = self._request_body(payload, model_path, stream=True)
+        if runtime_stats is not None:
+            runtime_stats["sidecar_load_plan"] = self.pinned_load_plan
         req = self._build_request("/api/chat", body)
         tool_buffer = ToolCallDeltaBuffer()
         try:
@@ -672,6 +725,25 @@ class OllamaClient:
                             new_tokens=estimate_chunk_tokens(tool_text),
                         )
                     if chunk.get("done"):
+                        if runtime_stats is not None:
+                            for source, target in (
+                                ("load_duration", "sidecar_load_ms"),
+                                ("prompt_eval_duration", "prefill_ms"),
+                                ("eval_duration", "decode_ms"),
+                            ):
+                                raw_duration = int(chunk.get(source) or 0)
+                                if raw_duration > 0:
+                                    runtime_stats[target] = round(
+                                        raw_duration / 1_000_000.0, 3
+                                    )
+                            eval_count = int(chunk.get("eval_count") or 0)
+                            eval_duration = int(chunk.get("eval_duration") or 0)
+                            if eval_count > 0 and eval_duration > 0:
+                                runtime_stats["decode_tokens_per_sec"] = round(
+                                    eval_count / (eval_duration / 1_000_000_000.0),
+                                    3,
+                                )
+                            runtime_stats["sidecar_resident_confirmed"] = True
                         tool_text = tool_buffer.flush()
                         if tool_text and not should_stop():
                             yield StreamToken(
@@ -731,19 +803,10 @@ class OllamaClient:
     ) -> dict[str, Any]:
         messages, num_ctx, max_tokens = plan_sidecar_request(payload, model_path)
         options: dict[str, Any] = {
-            "num_ctx": num_ctx,
+            **self._load_options(model_path, num_ctx=num_ctx),
             "num_predict": max_tokens,
             "temperature": float(payload.get("temperature", 0.0)),
         }
-        num_batch = sidecar_ollama_num_batch()
-        if num_batch is not None:
-            # Bound prompt prefill bursts on display-attached GPUs.
-            options["num_batch"] = num_batch
-        num_gpu = sidecar_ollama_num_gpu(model_path, num_ctx=num_ctx)
-        if num_gpu is not None:
-            # Force partial CPU offload so weights + KV stay within free VRAM;
-            # prevents a display-attached GPU from OOM-hanging the machine.
-            options["num_gpu"] = num_gpu
         cache_policy = resolve_sidecar_kv_policy(payload, engine=self.engine)
         if cache_policy.num_keep is not None:
             options["num_keep"] = cache_policy.num_keep
@@ -812,13 +875,20 @@ class LlamaSwapClient:
         message = choices[0].get("message") or {}
         return message_content_with_tool_calls(message)
 
+    def warm_model(self, payload: dict[str, Any], model_path: str) -> bool:
+        """llama-swap has no portable load endpoint; health is not residency."""
+        del payload, model_path
+        return False
+
     def stream(
         self,
         payload: dict[str, Any],
         model_path: str,
         *,
         should_stop,
+        runtime_stats: dict[str, Any] | None = None,
     ) -> Iterator[StreamToken]:
+        del runtime_stats
         body = self._request_body(payload, model_path, stream=True)
         req = self._build_request("/v1/chat/completions", body)
         tool_buffer = ToolCallDeltaBuffer()

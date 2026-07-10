@@ -1175,6 +1175,10 @@ def test_ollama_request_body_uses_native_chat_options(monkeypatch):
     monkeypatch.setenv("SEISO_OLLAMA_NUM_BATCH", "256")
     monkeypatch.setenv("SEISO_OLLAMA_KEEP_ALIVE", "30s")
     monkeypatch.setattr(
+        "seiso.inference.llamaswap.sidecar_ollama_num_gpu",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
         client, "_resolve_model", lambda model_path, payload: "seiso/test-model"
     )
 

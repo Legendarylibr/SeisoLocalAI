@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from seiso.compat import StrEnum
-from seiso.env import env_int
+from seiso.env import env_int, env_str
 from seiso.inference.model_pool._facade import model_pool as _mp
 from seiso.inference.model_pool.dflash import clear_dflash_draft_cache
 from seiso.memory.gpu_resource_lock import (
@@ -458,6 +458,14 @@ class ModelPool:
                 layer_meta["n_ctx"] = int(
                     getattr(handle, "_seiso_n_ctx", requested_ctx) or requested_ctx or 0
                 )
+            elif backend == BackendKind.TORCH:
+                torch_model = handle[0] if isinstance(handle, tuple) and handle else handle
+                layer_meta["load_precision"] = str(
+                    getattr(torch_model, "_seiso_load_precision", "unknown")
+                )
+                load_policy = getattr(torch_model, "_seiso_load_policy", None)
+                if isinstance(load_policy, dict):
+                    layer_meta["load_policy"] = dict(load_policy)
             with self._lock:
                 if (
                     self._active
@@ -672,11 +680,48 @@ class ModelPool:
 
         return cast(tuple[Any, Any], self.switch(model_path, BackendKind.MLX, loader))
 
-    def get_torch(self, model_path: str, *, load_in_4bit: bool = True) -> tuple[Any, Any]:
-        def loader(path: str):
-            return self._load_torch_pair(path, load_in_4bit=load_in_4bit)
+    def get_torch(
+        self, model_path: str, *, load_in_4bit: bool | None = None
+    ) -> tuple[Any, Any]:
+        from seiso.inference.kv_policy import resolve_torch_load_policy
+        from seiso.memory.protection import headroom_mb
 
-        return cast(tuple[Any, Any], self.switch(model_path, BackendKind.TORCH, loader))
+        norm = self.normalize_path(model_path)
+        precision_override = env_str(
+            "SEISO_TORCH_LOAD_PRECISION", "auto"
+        ).strip().lower()
+        if load_in_4bit is None and precision_override == "auto":
+            with self._lock:
+                active = self._active
+                if (
+                    active is not None
+                    and active.backend == BackendKind.TORCH
+                    and str(active.meta.get("norm_path") or "") == norm
+                    and isinstance(active.handle, tuple)
+                ):
+                    # Do not re-plan from post-load headroom: doing so can
+                    # change BF16 to 4-bit and reload an already-resident model.
+                    return cast(tuple[Any, Any], active.handle)
+
+        policy = resolve_torch_load_policy(
+            model_path,
+            free_mb=int(headroom_mb()),
+            force_4bit=load_in_4bit,
+        )
+
+        def loader(path: str):
+            return self._load_torch_pair(path, load_policy=policy)
+
+        return cast(
+            tuple[Any, Any],
+            self.switch(
+                model_path,
+                BackendKind.TORCH,
+                loader,
+                cache_key=f"torch:{norm}:{policy.precision}",
+                meta={"requested_precision": policy.precision},
+            ),
+        )
 
     @staticmethod
     def torch_speculative_pair_fits(target_path: str, draft_path: str) -> bool:
@@ -689,18 +734,65 @@ class ModelPool:
         free_mb = int(headroom_mb())
         return target_mb > 0 and draft_mb > 0 and free_mb > 0 and needed_mb <= free_mb
 
-    def _load_torch_pair(self, model_path: str, *, load_in_4bit: bool = True) -> tuple[Any, Any]:
+    def _load_torch_pair(
+        self,
+        model_path: str,
+        *,
+        load_in_4bit: bool = True,
+        load_policy: Any | None = None,
+    ) -> tuple[Any, Any]:
         from seiso.inference.tuning import prepare_torch_model
+        from seiso.memory.protection import is_oom_error, release_cached_memory
         from seiso.models.loader import LoadOptions, ModelKind, load_model
 
-        model, tokenizer = load_model(
-            LoadOptions(
-                model_id=model_path,
-                kind=ModelKind.TEXT,
-                load_in_4bit=load_in_4bit,
-                device_map="auto",
-            )
+        use_4bit = (
+            bool(load_policy.load_in_4bit)
+            if load_policy is not None
+            else load_in_4bit
         )
+        dtype = load_policy.dtype if load_policy is not None else None
+
+        def load(*, quantized: bool, resolved_dtype: str | None):
+            return load_model(
+                LoadOptions(
+                    model_id=model_path,
+                    kind=ModelKind.TEXT,
+                    load_in_4bit=quantized,
+                    dtype=resolved_dtype,
+                    device_map="auto",
+                )
+            )
+        try:
+            model, tokenizer = load(quantized=use_4bit, resolved_dtype=dtype)
+            actual_precision = (
+                "4bit"
+                if use_4bit
+                else (
+                    load_policy.precision
+                    if load_policy is not None
+                    else (dtype or "native")
+                )
+            )
+        except Exception as exc:
+            text = str(exc).lower()
+            can_fallback = not use_4bit and (
+                is_oom_error(exc)
+                or "bfloat16" in text
+                or "float16" in text
+                or "dtype" in text
+            )
+            if not can_fallback:
+                raise
+            logger.warning(
+                "Native half-precision Torch load failed; retrying with 4-bit: %s",
+                exc,
+            )
+            release_cached_memory(sync=True)
+            model, tokenizer = load(quantized=True, resolved_dtype=None)
+            actual_precision = "4bit-fallback"
+        model._seiso_load_precision = actual_precision
+        if load_policy is not None:
+            model._seiso_load_policy = load_policy.as_dict()
         model = prepare_torch_model(model)
         return model, tokenizer
 
@@ -806,6 +898,10 @@ class ModelPool:
                 "path": active.meta.get("path") if active else None,
                 "draft_path": active.meta.get("draft_path") if active else None,
                 "n_ctx": n_ctx,
+                "load_precision": (
+                    active.meta.get("load_precision") if active else None
+                ),
+                "load_policy": active.meta.get("load_policy") if active else None,
                 "release_notes": list(self._release_notes),
             }
 
