@@ -7,7 +7,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from seiso.compat import StrEnum
 from seiso.env import env_int
@@ -664,13 +664,13 @@ class ModelPool:
 
             return load_mlx(LoadOptions(model_id=path, kind=ModelKind.TEXT))
 
-        return self.switch(model_path, BackendKind.MLX, loader)
+        return cast(tuple[Any, Any], self.switch(model_path, BackendKind.MLX, loader))
 
     def get_torch(self, model_path: str, *, load_in_4bit: bool = True) -> tuple[Any, Any]:
         def loader(path: str):
             return self._load_torch_pair(path, load_in_4bit=load_in_4bit)
 
-        return self.switch(model_path, BackendKind.TORCH, loader)
+        return cast(tuple[Any, Any], self.switch(model_path, BackendKind.TORCH, loader))
 
     @staticmethod
     def torch_speculative_pair_fits(target_path: str, draft_path: str) -> bool:
