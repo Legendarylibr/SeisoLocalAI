@@ -10,7 +10,7 @@ import time
 from collections.abc import AsyncIterator, Callable, Iterator
 from dataclasses import dataclass
 from queue import Empty
-from typing import Any
+from typing import Any, cast
 
 from seiso.env import env_int
 from seiso.inference.backends import (
@@ -22,7 +22,10 @@ from seiso.inference.backends import (
     prepare_model_path,
     resolve_local_backend,
 )
-from seiso.inference.kv_policy import resolve_kv_cache_policy
+from seiso.inference.kv_policy import (
+    resolve_kv_cache_policy,
+    resolve_sidecar_kv_policy,
+)
 from seiso.inference.model_pool import get_dflash_draft, get_model_pool
 from seiso.inference.speculative import (
     DFlashDraftSpeculativeBundle,
@@ -218,6 +221,8 @@ def _torch_context_limit(model: Any, tokenizer: Any) -> int:
         getattr(getattr(model, "config", None), "max_sequence_length", None),
         getattr(getattr(model, "config", None), "n_positions", None),
     ):
+        if raw is None:
+            continue
         with contextlib.suppress(TypeError, ValueError):
             value = int(raw)
             if 0 < value < 1_000_000:
@@ -472,13 +477,59 @@ class LocalInferenceRunner:
 
     def warm_model(self, payload: dict[str, Any]) -> None:
         """Load a model into the pool without generating (preload / ping)."""
+        self._last_inference_stats = {}
+        started = time.perf_counter()
         model_path = payload["model_path"]
         route, resolved_path = self._resolve_route(payload, model_path)
         payload = sanitize_inference_payload(payload, isolated=route == "llamaswap")
         if route == "mlx":
             self._pool.get_mlx(resolved_path)
         elif route == "torch":
-            self._pool.get_torch(resolved_path)
+            import torch
+
+            model, tokenizer = self._pool.get_torch(resolved_path)
+            loaded_at = time.perf_counter()
+            inputs, _input_len, _max_tokens = self._torch_prepare_inputs(
+                model,
+                payload.get("messages")
+                or [{"role": "user", "content": "."}],
+                tokenizer,
+                max_tokens=1,
+            )
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
+            warm_started = time.perf_counter()
+            with torch.inference_mode():
+                model(**inputs, use_cache=True)
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
+            policy = resolve_kv_cache_policy(
+                payload,
+                model=model,
+                input_tokens=int(inputs["input_ids"].shape[-1]),
+                max_tokens=1,
+                free_mb=headroom_mb(),
+            )
+            compiled = (
+                maybe_compile_torch_decode(model, inputs["input_ids"])
+                if policy.compile_decode
+                else False
+            )
+            self._last_inference_stats = {
+                "backend": "torch",
+                "load_ms": round((loaded_at - started) * 1000.0, 3),
+                "warmup_ms": round(
+                    (time.perf_counter() - warm_started) * 1000.0, 3
+                ),
+                "load_precision": str(
+                    getattr(model, "_seiso_load_precision", "unknown")
+                ),
+                "attention_implementation": str(
+                    getattr(model, "_seiso_attention_implementation", "unknown")
+                ),
+                "decode_compiled": compiled,
+                "resident_confirmed": True,
+            }
         elif route == "llamaswap":
             pinned_ctx = payload.get("sidecar_num_ctx") or payload.get("n_ctx")
             try:
@@ -527,6 +578,19 @@ class LocalInferenceRunner:
                         resolved_path,
                         exc_info=True,
                     )
+            warm = getattr(client, "warm_model", None)
+            resident_confirmed = (
+                bool(warm(payload, resolved_path)) if callable(warm) else False
+            )
+            self._last_inference_stats = {
+                "backend": getattr(client, "engine", "llamaswap"),
+                "load_ms": round((time.perf_counter() - started) * 1000.0, 3),
+                "resident_confirmed": resident_confirmed,
+                "sidecar_num_ctx": pinned_ctx_i,
+                "sidecar_load_plan": dict(
+                    getattr(client, "pinned_load_plan", {})
+                ),
+            }
         elif route == "speculative":
             draft_path = payload.get("draft_model_path")
             if not draft_path:
@@ -657,9 +721,18 @@ class LocalInferenceRunner:
                         break
                     if first_token_at is None:
                         first_token_at = time.perf_counter()
+                        ttft_ms = (first_token_at - producer_started) * 1000.0
                         self._last_inference_stats["ttft_ms"] = round(
-                            (first_token_at - producer_started) * 1000.0, 3
+                            ttft_ms, 3
                         )
+                        setup_ms = float(
+                            self._last_inference_stats.get("load_ms") or 0.0
+                        ) + float(
+                            self._last_inference_stats.get("tokenize_ms") or 0.0
+                        )
+                        self._last_inference_stats[
+                            "ready_to_first_token_ms"
+                        ] = round(max(0.0, ttft_ms - setup_ms), 3)
                     output_tokens += part.new_tokens
                     buffer.append(part.text)
                     buffered += len(part.text)
@@ -695,6 +768,23 @@ class LocalInferenceRunner:
                             metadata=metadata(),
                         ),
                     )
+                if (
+                    route == "llamaswap"
+                    and self._last_inference_stats.get(
+                        "sidecar_resident_confirmed"
+                    )
+                    and not should_stop()
+                ):
+                    # Ollama reports load/prefill/decode timings in its final
+                    # metadata-only frame, after the last text chunk.
+                    loop.call_soon_threadsafe(
+                        queue.put_nowait,
+                        StreamUpdate(
+                            text="",
+                            output_tokens=output_tokens,
+                            metadata=metadata(),
+                        ),
+                    )
             except Exception as exc:
                 if buffer and not should_stop():
                     loop.call_soon_threadsafe(
@@ -721,7 +811,7 @@ class LocalInferenceRunner:
                 break
             if isinstance(item, _StreamError):
                 raise item.exc
-            yield item
+            yield cast(StreamUpdate, item)
 
     async def cancel_and_unload(self) -> dict:
         loop = asyncio.get_running_loop()
@@ -1085,7 +1175,16 @@ class LocalInferenceRunner:
         import torch
 
         configure_torch_inference()
-        model, tokenizer = self._pool.get_torch(model_path, load_in_4bit=True)
+        status_before = self._pool.status()
+        resident_before = (
+            status_before.get("path") is not None
+            and self._pool.normalize_path(str(status_before["path"]))
+            == self._pool.normalize_path(model_path)
+            and str(status_before.get("backend") or "").lower() == "torch"
+        )
+        load_started = time.perf_counter()
+        model, tokenizer = self._pool.get_torch(model_path)
+        loaded_at = time.perf_counter()
         inputs, input_len, max_tokens = self._torch_prepare_inputs(
             model,
             payload.get("messages", []),
@@ -1105,6 +1204,15 @@ class LocalInferenceRunner:
             "cache_fallback": policy.fallback_reason,
             "estimated_cache_mb": policy.estimated_cache_mb,
             "peak_headroom_mb": policy.headroom_mb,
+            "resident_before": resident_before,
+            "load_ms": round((loaded_at - load_started) * 1000.0, 3),
+            "tokenize_ms": round((time.perf_counter() - loaded_at) * 1000.0, 3),
+            "load_precision": str(
+                getattr(model, "_seiso_load_precision", "unknown")
+            ),
+            "attention_implementation": str(
+                getattr(model, "_seiso_attention_implementation", "unknown")
+            ),
         }
         self._last_inference_stats["decode_compiled"] = (
             maybe_compile_torch_decode(model, inputs["input_ids"])
@@ -1145,7 +1253,16 @@ class LocalInferenceRunner:
         )
 
         configure_torch_inference()
-        model, tokenizer = self._pool.get_torch(model_path, load_in_4bit=True)
+        status_before = self._pool.status()
+        resident_before = (
+            status_before.get("path") is not None
+            and self._pool.normalize_path(str(status_before["path"]))
+            == self._pool.normalize_path(model_path)
+            and str(status_before.get("backend") or "").lower() == "torch"
+        )
+        load_started = time.perf_counter()
+        model, tokenizer = self._pool.get_torch(model_path)
+        loaded_at = time.perf_counter()
         messages = payload.get("messages", [])
         inputs, _input_len, max_tokens = self._torch_prepare_inputs(
             model,
@@ -1166,6 +1283,15 @@ class LocalInferenceRunner:
             "cache_fallback": policy.fallback_reason,
             "estimated_cache_mb": policy.estimated_cache_mb,
             "peak_headroom_mb": policy.headroom_mb,
+            "resident_before": resident_before,
+            "load_ms": round((loaded_at - load_started) * 1000.0, 3),
+            "tokenize_ms": round((time.perf_counter() - loaded_at) * 1000.0, 3),
+            "load_precision": str(
+                getattr(model, "_seiso_load_precision", "unknown")
+            ),
+            "attention_implementation": str(
+                getattr(model, "_seiso_attention_implementation", "unknown")
+            ),
         }
         self._last_inference_stats["decode_compiled"] = (
             maybe_compile_torch_decode(model, inputs["input_ids"])
@@ -1664,16 +1790,27 @@ class LocalInferenceRunner:
     ) -> str:
         payload = self._llamaswap_payload(payload, model_path)
         client = self._pool.get_llamaswap(model_path, num_ctx=payload.get("sidecar_num_ctx"))
+        engine = getattr(client, "engine", "llamaswap")
+        cache_policy = resolve_sidecar_kv_policy(payload, engine=engine)
+        prefix_requested = (
+            cache_policy.num_keep is not None
+            or cache_policy.cache_prompt is True
+        )
         self._last_inference_stats = {
-            "backend": getattr(client, "engine", "llamaswap"),
+            "backend": engine,
             "cache_mode": "provider-native",
-            "prefix_cache": True,
+            "prefix_cache": prefix_requested,
+            "prefix_cache_mode": (
+                "requested"
+                if prefix_requested
+                else ("provider-managed" if engine == "ollama" else "unconfirmed")
+            ),
             "sidecar_num_ctx": payload.get("sidecar_num_ctx"),
         }
         text = client.complete(payload, model_path)
         if not self._pool.is_generation_active(generation_id):
             return ""
-        return text
+        return cast(str, text)
 
     def _llamaswap_stream(
         self,
@@ -1683,13 +1820,30 @@ class LocalInferenceRunner:
     ) -> Iterator[StreamToken]:
         payload = self._llamaswap_payload(payload, model_path)
         client = self._pool.get_llamaswap(model_path, num_ctx=payload.get("sidecar_num_ctx"))
+        engine = getattr(client, "engine", "llamaswap")
+        cache_policy = resolve_sidecar_kv_policy(payload, engine=engine)
+        prefix_requested = (
+            cache_policy.num_keep is not None
+            or cache_policy.cache_prompt is True
+        )
         self._last_inference_stats = {
-            "backend": getattr(client, "engine", "llamaswap"),
+            "backend": engine,
             "cache_mode": "provider-native",
-            "prefix_cache": True,
+            "prefix_cache": prefix_requested,
+            "prefix_cache_mode": (
+                "requested"
+                if prefix_requested
+                else ("provider-managed" if engine == "ollama" else "unconfirmed")
+            ),
             "sidecar_num_ctx": payload.get("sidecar_num_ctx"),
+            "sidecar_resident_confirmed": False,
         }
-        yield from client.stream(payload, model_path, should_stop=should_stop)
+        yield from client.stream(
+            payload,
+            model_path,
+            should_stop=should_stop,
+            runtime_stats=self._last_inference_stats,
+        )
 
     def _llama_stream(
         self,

@@ -184,6 +184,45 @@ def test_policy_rejects_static_cache_without_headroom(monkeypatch):
     assert policy.fallback_reason
 
 
+def test_torch_load_policy_prefers_half_only_with_headroom(monkeypatch):
+    from seiso.inference import kv_policy
+
+    monkeypatch.setattr(kv_policy.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(kv_policy, "estimate_local_weight_mb", lambda _path: 1000)
+    monkeypatch.setenv("SEISO_TORCH_LOAD_PRECISION", "auto")
+
+    roomy = kv_policy.resolve_torch_load_policy("/tmp/model", free_mb=10_000)
+    tight = kv_policy.resolve_torch_load_policy("/tmp/model", free_mb=2_000)
+
+    assert roomy.load_in_4bit is False
+    assert roomy.precision in {"bf16", "fp16"}
+    assert tight.load_in_4bit is True
+    assert tight.precision == "4bit"
+
+
+def test_prefill_chunk_size_scales_with_headroom(monkeypatch):
+    from seiso.inference import kv_policy
+
+    monkeypatch.setattr(kv_policy.platform, "system", lambda: "Linux")
+    monkeypatch.delenv("SEISO_TORCH_PREFILL_CHUNK_SIZE", raising=False)
+    monkeypatch.setenv("SEISO_TORCH_KV_HEADROOM_MB", "0")
+    model = SimpleNamespace(config=SimpleNamespace())
+
+    roomy = kv_policy.resolve_kv_cache_policy(
+        {}, model=model, input_tokens=4096, max_tokens=32, free_mb=20_000
+    )
+    normal = kv_policy.resolve_kv_cache_policy(
+        {}, model=model, input_tokens=4096, max_tokens=32, free_mb=10_000
+    )
+    tight = kv_policy.resolve_kv_cache_policy(
+        {}, model=model, input_tokens=4096, max_tokens=32, free_mb=4_000
+    )
+
+    assert roomy.prefill_chunk_size == 2048
+    assert normal.prefill_chunk_size == 1024
+    assert tight.prefill_chunk_size == 512
+
+
 def test_quantized_cache_requires_opt_in(monkeypatch):
     from seiso.inference.kv_policy import resolve_kv_cache_policy
 
@@ -311,3 +350,141 @@ def test_sidecar_options_are_capability_gated(monkeypatch):
     )
     assert "cache_prompt" not in baseline_swap
     assert negotiated_swap["cache_prompt"] is True
+
+
+def test_ollama_warmup_loads_without_generating(monkeypatch):
+    from seiso.inference import llamaswap
+
+    monkeypatch.setattr(llamaswap, "plan_sidecar_request", lambda *_a: ([], 4096, 32))
+    monkeypatch.setattr(llamaswap, "sidecar_ollama_num_batch", lambda: 512)
+    monkeypatch.setattr(llamaswap, "sidecar_ollama_num_gpu", lambda *_a, **_k: 20)
+    monkeypatch.setattr(
+        llamaswap, "sidecar_ollama_keep_alive", lambda **_k: "15m"
+    )
+    client = llamaswap.OllamaClient()
+    monkeypatch.setattr(client, "_resolve_model", lambda *_a: "model")
+    calls: list[tuple[str, dict]] = []
+    monkeypatch.setattr(
+        client,
+        "_post_json",
+        lambda path, body: calls.append((path, body)) or {"done": True},
+    )
+
+    assert client.warm_model({}, "/tmp/model.gguf") is True
+    assert calls == [
+        (
+            "/api/generate",
+            {
+                "model": "model",
+                "prompt": "",
+                "stream": False,
+                "options": {"num_ctx": 4096, "num_batch": 512, "num_gpu": 20},
+                "keep_alive": "15m",
+            },
+        )
+    ]
+    monkeypatch.setattr(llamaswap, "sidecar_ollama_num_batch", lambda: 128)
+    monkeypatch.setattr(llamaswap, "sidecar_ollama_num_gpu", lambda *_a, **_k: 2)
+    chat_body = client._request_body(
+        {
+            "messages": [{"role": "user", "content": "hi"}],
+            "max_tokens": 8,
+        },
+        "/tmp/model.gguf",
+        stream=True,
+    )
+    assert chat_body["options"]["num_ctx"] == 4096
+    assert chat_body["options"]["num_batch"] == 512
+    assert chat_body["options"]["num_gpu"] == 20
+    assert client.pinned_load_plan == {
+        "model_path": "/tmp/model.gguf",
+        "num_ctx": 4096,
+        "num_batch": 512,
+        "num_gpu": 20,
+    }
+
+
+def test_torch_preload_runs_eager_kernel_warmup(monkeypatch):
+    import torch
+
+    from seiso.inference import runner as runner_module
+
+    calls: list[dict] = []
+
+    class FakeModel:
+        config = SimpleNamespace()
+        _seiso_load_precision = "bf16"
+        _seiso_attention_implementation = "sdpa"
+
+        def __call__(self, **kwargs):
+            calls.append(kwargs)
+            return SimpleNamespace(
+                logits=torch.zeros(1, 1, 4),
+                past_key_values=object(),
+            )
+
+    class FakePool:
+        def get_torch(self, _path):
+            return FakeModel(), object()
+
+    runner = runner_module.LocalInferenceRunner()
+    runner._pool = FakePool()
+    monkeypatch.setattr(
+        runner, "_resolve_route", lambda _payload, path: ("torch", path)
+    )
+    monkeypatch.setattr(
+        runner_module,
+        "sanitize_inference_payload",
+        lambda payload, **_kwargs: payload,
+    )
+    monkeypatch.setattr(
+        runner,
+        "_torch_prepare_inputs",
+        lambda *_args, **_kwargs: ({"input_ids": torch.tensor([[1]])}, 1, 1),
+    )
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+
+    runner.warm_model({"model_path": "/tmp/model", "max_tokens": 1})
+
+    assert len(calls) == 1
+    assert calls[0]["use_cache"] is True
+    assert runner.last_inference_stats["resident_confirmed"] is True
+    assert runner.last_inference_stats["load_precision"] == "bf16"
+
+
+def test_sidecar_metrics_do_not_claim_unconfirmed_prefix_cache(monkeypatch):
+    from seiso.inference import runner as runner_module
+
+    class FakeClient:
+        engine = "ollama"
+
+        def stream(self, *_args, **_kwargs):
+            return iter(())
+
+    class FakePool:
+        def get_llamaswap(self, *_args, **_kwargs):
+            return FakeClient()
+
+    runner = runner_module.LocalInferenceRunner()
+    runner._pool = FakePool()
+    monkeypatch.setattr(
+        runner,
+        "_llamaswap_payload",
+        lambda payload, _model_path: payload,
+    )
+
+    assert (
+        list(
+            runner._llamaswap_stream(
+                {"sidecar_num_ctx": 2048},
+                "/tmp/model.gguf",
+                lambda: False,
+            )
+        )
+        == []
+    )
+    assert runner.last_inference_stats["prefix_cache"] is False
+    assert (
+        runner.last_inference_stats["prefix_cache_mode"]
+        == "provider-managed"
+    )

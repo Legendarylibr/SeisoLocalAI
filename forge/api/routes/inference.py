@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
+from collections.abc import Callable
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -41,6 +42,17 @@ from forge.tools.sanitize import normalize_text
 from seiso.inference.backends import BACKEND_LLAMASWAP
 
 router = APIRouter(prefix="/inference", tags=["inference"])
+
+
+async def _run_preload_warmup(callable_: Callable[[], None]) -> None:
+    """Do not let request cancellation unload underneath a blocking model load."""
+    loop = asyncio.get_running_loop()
+    future = loop.run_in_executor(None, callable_)
+    try:
+        await asyncio.shield(future)
+    except asyncio.CancelledError:
+        await asyncio.shield(future)
+        raise
 
 
 @router.post("/threads")
@@ -308,21 +320,32 @@ async def preload_model(
         n_ctx=body.n_ctx,
     )
 
-    loop = asyncio.get_running_loop()
     _begin_generation_or_raise(orchestrator, user_id)
     try:
-        await loop.run_in_executor(None, lambda: orchestrator._runner.warm_model(ctx["payload"]))
+        await _run_preload_warmup(
+            lambda: orchestrator._runner.warm_model(ctx["payload"])
+        )
         status = orchestrator._runner.pool.status()
         pinned = ctx["payload"].get("sidecar_num_ctx") or ctx["payload"].get("n_ctx")
         if pinned is None:
             pinned = status.get("n_ctx")
+        runtime = orchestrator._runner.last_inference_stats
         return {
             "status": "loaded",
+            "resident_status": (
+                "loaded"
+                if runtime.get("resident_confirmed", True)
+                else "sidecar-ready"
+            ),
             "backend": ctx["backend"],
             "n_ctx": pinned,
             "sidecar_num_ctx": ctx["payload"].get("sidecar_num_ctx") or pinned,
+            "runtime": runtime,
             **status,
         }
+    except asyncio.CancelledError:
+        await orchestrator.cancel_and_unload_for_user(user_id)
+        raise
     finally:
         orchestrator.end_generation_for_user(user_id)
 
@@ -393,7 +416,7 @@ async def preload_model_stream(
                     }
                 ),
             }
-            await loop.run_in_executor(None, lambda: runner.warm_model(ctx["payload"]))
+            await _run_preload_warmup(lambda: runner.warm_model(ctx["payload"]))
         except asyncio.CancelledError:
             await orchestrator.cancel_and_unload_for_user(user_id)
             raise
@@ -407,12 +430,18 @@ async def preload_model_stream(
         pinned = ctx["payload"].get("sidecar_num_ctx") or ctx["payload"].get("n_ctx")
         if pinned is None:
             pinned = status.get("n_ctx")
+        runtime = runner.last_inference_stats
+        resident_confirmed = runtime.get("resident_confirmed", True)
         yield {
             "event": "progress",
             "data": json.dumps(
                 {
                     "phase": "ready",
-                    "label": f"{ctx['model_name']} is loaded into inference",
+                    "label": (
+                        f"{ctx['model_name']} is loaded into inference"
+                        if resident_confirmed
+                        else f"{ctx['model_name']} sidecar is ready"
+                    ),
                     "percent": 100,
                     "model_id": body.model_id,
                     "model_name": ctx["model_name"],
@@ -427,11 +456,15 @@ async def preload_model_stream(
             "data": json.dumps(
                 {
                     "status": "loaded",
+                    "resident_status": (
+                        "loaded" if resident_confirmed else "sidecar-ready"
+                    ),
                     "backend": ctx["backend"],
                     "model_id": body.model_id,
                     "model_name": ctx["model_name"],
                     "n_ctx": pinned,
                     "sidecar_num_ctx": ctx["payload"].get("sidecar_num_ctx") or pinned,
+                    "runtime": runtime,
                     **status,
                 }
             ),
@@ -604,7 +637,12 @@ async def chat(
                         raw_parts.append(update.text)
                         yield {
                             "event": "stats",
-                            "data": json.dumps({"output_tokens": update.output_tokens}),
+                            "data": json.dumps(
+                                {
+                                    "output_tokens": update.output_tokens,
+                                    **update.metadata,
+                                }
+                            ),
                         }
                         for chunk in sanitizer.feed(update.text):
                             streamed.append(chunk)

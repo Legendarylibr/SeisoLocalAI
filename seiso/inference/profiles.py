@@ -58,5 +58,5 @@ def profile_sidecar_keep_alive_override() -> str | None:
     if profile == "throughput":
         return "30m"
     if profile == "interactive":
-        return "5m"
+        return "15m"
     return None  # safe: use adaptive short residency

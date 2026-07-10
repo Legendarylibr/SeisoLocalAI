@@ -20,9 +20,9 @@ async def test_bench_inference_with_mocked_runner(monkeypatch):
         def __init__(self) -> None:
             self.calls = 0
 
-        async def chat(self, _payload):
+        def warm_model(self, _payload):
             self.calls += 1
-            return "warm"
+            self.last_inference_stats = {"load_ms": 3.0, "warmup_ms": 2.0}
 
         async def stream_updates(self, _payload):
             from seiso.inference.streaming import StreamUpdate
@@ -56,6 +56,8 @@ async def test_bench_inference_with_mocked_runner(monkeypatch):
     assert result.output_chars == len("Hello world")
     assert result.output_tokens == 2
     assert result.backend == "llamacpp"
+    assert result.load_ms == 3.0
+    assert result.warmup_ms == 2.0
     assert fake.calls == 1
 
 
