@@ -322,6 +322,32 @@ def test_apple_unified_headroom_uses_available_ram_minus_reserve(monkeypatch):
     assert round(vram_headroom_mb(profile) / 1024, 1) == 10.4
 
 
+def test_apple_mlx_stub_gpu_does_not_report_zero_headroom(monkeypatch):
+    """MLX probe adds an Apple GPU with null VRAM — must still use unified RAM."""
+    from seiso.hardware.tiers import vram_headroom_mb
+
+    class Memory:
+        available = int(11.37 * 1024**3)
+
+    monkeypatch.setattr("psutil.virtual_memory", lambda: Memory())
+    profile = {
+        "platform": "darwin",
+        "arch": "arm64",
+        "backend": "mlx",
+        "gpus": [
+            {
+                "index": 0,
+                "name": "Apple GPU (MLX)",
+                "vram_total_mb": None,
+                "vram_used_mb": None,
+            }
+        ],
+        "ram_gb": 24,
+    }
+
+    assert round(vram_headroom_mb(profile) / 1024, 1) == 10.4
+
+
 def test_cpu_only_headroom_uses_available_ram_minus_reserve(monkeypatch):
     from seiso.hardware.tiers import vram_headroom_mb
 

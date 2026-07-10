@@ -120,12 +120,15 @@ def fit_headroom_mb(profile: dict[str, Any]) -> int:
 
 
 def vram_headroom_mb(profile: dict[str, Any]) -> int:
-    """Free memory headroom for fit checks, using measured available memory."""
+    """Free memory headroom for fit checks, using measured available memory.
+
+    Discrete GPUs use free VRAM. Apple MLX stubs report no VRAM totals/usage, so
+    Apple unified / CPU-only profiles always use live available RAM (minus reserve).
+    """
     gpus = profile.get("gpus") or []
     discrete = _discrete_gpu_entries(gpus)
-    probe = discrete or gpus
-    if probe:
-        best = _vram_headroom_mb(probe)
+    if discrete:
+        best = _vram_headroom_mb(discrete)
         return max(0, best)
     tier = classify_tier(profile)
     if tier in (HardwareTier.APPLE_UNIFIED, HardwareTier.CPU_ONLY):
