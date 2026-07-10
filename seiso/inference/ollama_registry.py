@@ -46,7 +46,7 @@ def _normalize_key(model_path: str) -> str:
 
 
 def _slug(value: str, *, max_len: int = 48) -> str:
-    slug = _TAG_RE.sub("-", value.lower()).strip("-")
+    slug = _TAG_RE.sub("-", value.lower()).replace("_", "-").strip("-")
     return slug[:max_len] or "model"
 
 
@@ -73,7 +73,7 @@ def _quant_slug(metadata: dict[str, Any], model_path: str) -> str:
     if isinstance(gguf_file, str) and gguf_file.strip():
         return _slug(Path(gguf_file).stem)
     path = Path(model_path)
-    if path.is_file():
+    if path.is_file() or path.suffix.lower() == ".gguf":
         return _slug(path.stem)
     if path.is_dir():
         try:

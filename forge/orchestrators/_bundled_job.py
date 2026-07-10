@@ -29,6 +29,9 @@ class BundledJobContract:
     requires_manifest: bool = False
 
 
+_DEFAULT_CONTRACT = BundledJobContract()
+
+
 def _validate_artifact_value(
     sandbox_root: Path,
     user_id: str,
@@ -77,7 +80,7 @@ async def run_bundled_job(
     start_message: str,
     runner: Callable[..., dict[str, Any]],
     result_log: Callable[[dict[str, Any]], str],
-    contract: BundledJobContract = BundledJobContract(),
+    contract: BundledJobContract = _DEFAULT_CONTRACT,
 ) -> dict[str, Any]:
     from forge.services.memory_release import prepare_for_gpu_task, release_after_task
 
@@ -142,7 +145,7 @@ def bundled_orchestrator(
     start_message: str,
     runner: Callable[..., dict[str, Any]],
     result_log: Callable[[dict[str, Any]], str],
-    contract: BundledJobContract = BundledJobContract(),
+    contract: BundledJobContract = _DEFAULT_CONTRACT,
 ) -> type[Orchestrator]:
     """Build a thin Orchestrator subclass for a bundled pipeline runner."""
 

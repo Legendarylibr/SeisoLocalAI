@@ -226,8 +226,8 @@ def distill_rl_run(
     import uuid
 
     from forge.config import get_settings
-    from seiso.memory.gpu_task import gpu_task
     from seiso.distill_rl.runner import run_distill_rl_job
+    from seiso.memory.gpu_task import gpu_task
 
     settings = get_settings()
     job_id = f"cli-{uuid.uuid4().hex[:8]}"

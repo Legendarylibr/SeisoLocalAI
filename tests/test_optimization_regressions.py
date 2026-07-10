@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import importlib
 from pathlib import Path
 
 import pytest
@@ -174,8 +173,9 @@ def test_knowledge_retrieve_uses_inverted_index(tmp_path: Path):
 
 
 def test_policy_heads_dirty_flag_avoids_copy_each_read():
-    from seiso.adaptive_quant.policy_heads import CategoricalHead
     import random
+
+    from seiso.adaptive_quant.policy_heads import CategoricalHead
 
     head = CategoricalHead(4, 3, random.Random(0))
     w1 = head.weights

@@ -533,34 +533,18 @@ async def test_resolve_preload_context_uses_chat_sized_context(monkeypatch, tmp_
     model_path = tmp_path / "model.gguf"
     model_path.write_bytes(b"gguf")
 
-    async def fake_get_inference_option(*_args, **_kwargs):
+    async def fake_prepare(*_args, **kwargs):
         return {
-            "id": "m1",
-            "name": "Model",
-            "path": str(model_path),
-            "format": "gguf",
+            "model_path": str(model_path),
+            "model_format": "gguf",
+            "inference_backend": BACKEND_LLAMACPP,
+            "max_tokens": kwargs.get("max_tokens", 2048),
+            "n_ctx": kwargs.get("n_ctx"),
+            "model_name": "Model",
             "size_bytes": 123,
         }
 
-    monkeypatch.setattr(
-        inference_chat,
-        "get_inference_option",
-        fake_get_inference_option,
-    )
-    monkeypatch.setattr(
-        inference_chat,
-        "resolve_chat_target",
-        lambda selected, **_kwargs: {
-            "model_path": selected["path"],
-            "model_format": selected["format"],
-            "inference_backend": BACKEND_LLAMACPP,
-        },
-    )
-    monkeypatch.setattr(
-        inference_chat,
-        "assert_model_fits_for_load",
-        lambda *_args, **_kwargs: None,
-    )
+    monkeypatch.setattr(inference_chat, "prepare_local_chat_target", fake_prepare)
 
     ctx = await inference_chat.resolve_preload_context(
         object(),
@@ -830,33 +814,33 @@ def test_resolve_local_backend_rejects_incompatible_explicit_backend(tmp_path: P
 
 
 def test_llamaswap_engine_prefers_llamacpp_on_macos(monkeypatch):
-    from seiso.inference import llamaswap
+    from seiso.inference import llamaswap, sidecar_runtime
 
     monkeypatch.delenv("SEISO_LLAMASWAP_ENGINE", raising=False)
-    monkeypatch.setattr(llamaswap.platform, "system", lambda: "Darwin")
-    monkeypatch.setattr(llamaswap, "_nvidia_visible", lambda: True)
+    monkeypatch.setattr(sidecar_runtime.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(sidecar_runtime, "_nvidia_visible", lambda: True)
 
     assert llamaswap.preferred_llamaswap_engine() == "llamacpp"
 
 
 def test_llamaswap_engine_prefers_ollama_on_nvidia(monkeypatch):
-    from seiso.inference import llamaswap
+    from seiso.inference import llamaswap, sidecar_runtime
 
     monkeypatch.delenv("SEISO_LLAMASWAP_ENGINE", raising=False)
-    monkeypatch.setattr(llamaswap.platform, "system", lambda: "Linux")
-    monkeypatch.setattr(llamaswap, "_nvidia_visible", lambda: True)
-    monkeypatch.setattr(llamaswap, "ollama_health_ok", lambda *, url=None: True)
+    monkeypatch.setattr(sidecar_runtime.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(sidecar_runtime, "_nvidia_visible", lambda: True)
+    monkeypatch.setattr(sidecar_runtime, "ollama_health_ok", lambda *, url=None: True)
 
     assert llamaswap.preferred_llamaswap_engine() == "ollama"
 
 
 def test_llamaswap_engine_falls_back_to_llamacpp_when_ollama_unhealthy(monkeypatch):
-    from seiso.inference import llamaswap
+    from seiso.inference import llamaswap, sidecar_runtime
 
     monkeypatch.delenv("SEISO_LLAMASWAP_ENGINE", raising=False)
-    monkeypatch.setattr(llamaswap.platform, "system", lambda: "Linux")
-    monkeypatch.setattr(llamaswap, "_nvidia_visible", lambda: True)
-    monkeypatch.setattr(llamaswap, "ollama_health_ok", lambda *, url=None: False)
+    monkeypatch.setattr(sidecar_runtime.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(sidecar_runtime, "_nvidia_visible", lambda: True)
+    monkeypatch.setattr(sidecar_runtime, "ollama_health_ok", lambda *, url=None: False)
 
     assert llamaswap.preferred_llamaswap_engine() == "llamacpp"
 
@@ -870,9 +854,15 @@ def test_llamaswap_engine_override_skips_ollama_health(monkeypatch):
     assert llamaswap.preferred_llamaswap_engine() == "ollama"
 
 
-def test_llamaswap_can_be_selected_as_local_backend(tmp_path: Path):
+def test_llamaswap_can_be_selected_as_local_backend(tmp_path: Path, monkeypatch):
+    from seiso.inference import llamaswap, sidecar_runtime
+
     gguf = tmp_path / "model.gguf"
     gguf.write_bytes(b"gguf")
+    ready = sidecar_runtime.SidecarRuntime(
+        available=True, url="http://127.0.0.1:11434", engine="ollama"
+    )
+    monkeypatch.setattr(llamaswap, "llamaswap_status", lambda: ready)
 
     assert (
         resolve_local_backend(
@@ -886,11 +876,11 @@ def test_llamaswap_can_be_selected_as_local_backend(tmp_path: Path):
 
 
 def test_llamaswap_status_requires_reachable_sidecar(monkeypatch):
-    from seiso.inference import llamaswap
+    from seiso.inference import llamaswap, sidecar_runtime
 
     monkeypatch.setenv("SEISO_LLAMASWAP_ENABLED", "true")
-    monkeypatch.setattr(llamaswap, "ollama_health_ok", lambda *, url=None: False)
-    monkeypatch.setattr(llamaswap, "llamaswap_health_ok", lambda *, url=None: False)
+    monkeypatch.setattr(sidecar_runtime, "ollama_health_ok", lambda *, url=None: False)
+    monkeypatch.setattr(sidecar_runtime, "llamaswap_health_ok", lambda *, url=None: False)
 
     status = llamaswap.llamaswap_status()
 
@@ -901,12 +891,13 @@ def test_llamaswap_status_requires_reachable_sidecar(monkeypatch):
 
 
 def test_llamaswap_status_available_when_ollama_healthy(monkeypatch):
-    from seiso.inference import llamaswap
+    from seiso.inference import llamaswap, sidecar_runtime
 
     monkeypatch.setenv("SEISO_LLAMASWAP_ENABLED", "true")
-    monkeypatch.setattr(llamaswap, "ollama_health_ok", lambda *, url=None: True)
-    monkeypatch.setattr(llamaswap, "llamaswap_health_ok", lambda *, url=None: False)
-    monkeypatch.setattr(llamaswap, "_nvidia_visible", lambda: True)
+    monkeypatch.setattr(sidecar_runtime.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(sidecar_runtime, "ollama_health_ok", lambda *, url=None: True)
+    monkeypatch.setattr(sidecar_runtime, "llamaswap_health_ok", lambda *, url=None: False)
+    monkeypatch.setattr(sidecar_runtime, "_nvidia_visible", lambda: True)
 
     status = llamaswap.llamaswap_status()
 
@@ -918,12 +909,12 @@ def test_llamaswap_status_available_when_ollama_healthy(monkeypatch):
 def test_llamaswap_status_does_not_fallback_to_ollama_for_llamacpp_engine(
     monkeypatch,
 ):
-    from seiso.inference import llamaswap
+    from seiso.inference import llamaswap, sidecar_runtime
 
     monkeypatch.setenv("SEISO_LLAMASWAP_ENABLED", "true")
     monkeypatch.setenv("SEISO_LLAMASWAP_ENGINE", "llamacpp")
-    monkeypatch.setattr(llamaswap, "ollama_health_ok", lambda *, url=None: True)
-    monkeypatch.setattr(llamaswap, "llamaswap_health_ok", lambda *, url=None: False)
+    monkeypatch.setattr(sidecar_runtime, "ollama_health_ok", lambda *, url=None: True)
+    monkeypatch.setattr(sidecar_runtime, "llamaswap_health_ok", lambda *, url=None: False)
 
     status = llamaswap.llamaswap_status()
 
@@ -962,6 +953,7 @@ def test_sidecar_status_prefers_ollama_on_native_linux(monkeypatch):
     from seiso.inference import sidecar_runtime
 
     monkeypatch.setenv("SEISO_LLAMASWAP_ENABLED", "true")
+    monkeypatch.setattr(sidecar_runtime.platform, "system", lambda: "Linux")
     monkeypatch.setattr(sidecar_runtime, "_nvidia_visible", lambda: True)
     monkeypatch.setattr(sidecar_runtime, "ollama_health_ok", lambda *, url=None: True)
     monkeypatch.setattr(sidecar_runtime, "llamaswap_health_ok", lambda *, url=None: False)
@@ -972,11 +964,13 @@ def test_sidecar_status_prefers_ollama_on_native_linux(monkeypatch):
 
 
 def test_create_isolated_gguf_client_prefers_ollama(monkeypatch):
-    from seiso.inference import llamaswap
+    from seiso.inference import llamaswap, sidecar_runtime
     from seiso.inference.llamaswap import OllamaClient, create_isolated_gguf_client
 
+    monkeypatch.setattr(sidecar_runtime.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(sidecar_runtime, "ollama_health_ok", lambda *, url=None: True)
+    monkeypatch.setattr(sidecar_runtime, "_nvidia_visible", lambda: True)
     monkeypatch.setattr(llamaswap, "ollama_health_ok", lambda *, url=None: True)
-    monkeypatch.setattr(llamaswap, "_nvidia_visible", lambda: True)
 
     client = create_isolated_gguf_client()
     assert isinstance(client, OllamaClient)
@@ -1847,7 +1841,7 @@ async def test_openai_prepare_payload_passes_through_backend(monkeypatch, tmp_pa
 
     monkeypatch.setattr(inference_models, "list_inference_options", fake_list)
     monkeypatch.setattr(
-        "forge.api.routes.openai.prepare_local_chat_target", prepare_llamaswap
+        "forge.services.openai_chat.prepare_local_chat_target", prepare_llamaswap
     )
 
     payload = await _prepare_openai_chat_payload(
@@ -1881,7 +1875,7 @@ async def test_openai_prepare_payload_falls_back_to_llamacpp(monkeypatch, tmp_pa
 
     monkeypatch.setattr(inference_models, "list_inference_options", fake_list)
     monkeypatch.setattr(
-        "forge.api.routes.openai.prepare_local_chat_target", prepare_llamacpp
+        "forge.services.openai_chat.prepare_local_chat_target", prepare_llamacpp
     )
 
     payload = await _prepare_openai_chat_payload(
@@ -1931,6 +1925,19 @@ async def test_openai_default_model_resolution_reuses_inventory(tmp_path, monkey
         "check_inference_runtime",
         lambda: InferenceRuntimeStatus(llamacpp=True, mlx=False, torch=False),
     )
+    monkeypatch.setenv("SEISO_LLAMA_ALLOW_INPROCESS_NATIVE_LINUX", "1")
+    monkeypatch.setattr(
+        "seiso.inference.backends._native_linux_requires_isolated_gguf",
+        lambda: False,
+    )
+    monkeypatch.setattr(
+        "forge.services.inference_chat.assert_model_fits_for_load",
+        lambda *_a, **_k: None,
+    )
+    monkeypatch.setattr(
+        "forge.services.inference_chat.assert_backend_runtime_available",
+        lambda *_a, **_k: None,
+    )
 
     payload = await _prepare_openai_chat_payload(
         ChatCompletionRequest(
@@ -1971,6 +1978,19 @@ async def test_openai_named_model_resolution_uses_indexed_lookup(tmp_path, monke
         inference_models,
         "check_inference_runtime",
         lambda: InferenceRuntimeStatus(llamacpp=True, mlx=False, torch=False),
+    )
+    monkeypatch.setenv("SEISO_LLAMA_ALLOW_INPROCESS_NATIVE_LINUX", "1")
+    monkeypatch.setattr(
+        "seiso.inference.backends._native_linux_requires_isolated_gguf",
+        lambda: False,
+    )
+    monkeypatch.setattr(
+        "forge.services.inference_chat.assert_model_fits_for_load",
+        lambda *_a, **_k: None,
+    )
+    monkeypatch.setattr(
+        "forge.services.inference_chat.assert_backend_runtime_available",
+        lambda *_a, **_k: None,
     )
 
     payload = await _prepare_openai_chat_payload(
@@ -2455,8 +2475,10 @@ async def test_resolve_dflash_draft_rejected_on_native_linux_nvidia(
     async def fake_resolve_model_path(*_args, **_kwargs):
         return str(draft)
 
+    from forge.services import inference_chat_draft
+
     monkeypatch.setattr(
-        inference_chat,
+        inference_chat_draft,
         "resolve_model_path",
         fake_resolve_model_path,
     )
@@ -2541,8 +2563,11 @@ def test_torch_stream_propagates_generation_thread_errors(monkeypatch):
     class FakeTokenizer:
         pad_token_id = 0
 
-        def __call__(self, _prompt: str, return_tensors: str = "pt"):
-            return {"input_ids": torch.tensor([[1, 2, 3]])}
+        def __call__(self, _prompt: str, return_tensors: str = "pt", **_kwargs):
+            ids = [[1, 2, 3]]
+            if return_tensors == "pt" and "add_special_tokens" not in _kwargs:
+                return {"input_ids": torch.tensor(ids)}
+            return {"input_ids": ids}
 
     class FakeModel:
         device = torch.device("cpu")
@@ -2688,6 +2713,10 @@ async def test_list_inference_options_defaults_to_llamaswap_on_nvidia(
         lambda _repo, _filename: model_path.stat().st_size,
     )
     monkeypatch.setattr("seiso.inference.llamaswap.llamaswap_enabled", lambda: True)
+    monkeypatch.setattr(
+        "seiso.inference.backends._native_linux_requires_isolated_gguf",
+        lambda: True,
+    )
 
     options = await inference_models.list_inference_options(
         db,

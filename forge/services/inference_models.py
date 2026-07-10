@@ -17,7 +17,6 @@ from forge.services.hf_connectivity import check_inference_runtime
 from forge.services.hf_hub import get_gguf_file_size_bytes
 from seiso.inference.backends import (
     BACKEND_LABELS,
-    resolve_backend_label,
     BACKEND_LLAMACPP,
     BACKEND_LLAMASWAP,
     BACKEND_MLX,
@@ -25,6 +24,7 @@ from seiso.inference.backends import (
     BACKEND_TORCH,
     available_backends,
     recommend_backend,
+    resolve_backend_label,
 )
 
 logger = logging.getLogger(__name__)

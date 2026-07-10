@@ -46,7 +46,6 @@ from seiso.adaptive_quant.types import (
     QuantMode,
 )
 
-
 _median_prompt_cache: dict[int, object] = {}
 
 

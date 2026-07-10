@@ -26,10 +26,12 @@ class MaintenanceMixin:
                 "projects",
                 "users",
             ):
-                cur = await conn.execute(f"SELECT COUNT(*) AS c FROM {table}")
+                count_query = f"SELECT COUNT(*) AS c FROM {table}"  # nosec B608
+                cur = await conn.execute(count_query)
                 row = await cur.fetchone()
                 counts[table] = int(row["c"]) if row else 0
-                await conn.execute(f"DELETE FROM {table}")
+                delete_query = f"DELETE FROM {table}"  # nosec B608
+                await conn.execute(delete_query)
             await conn.commit()
         return counts
 

@@ -857,7 +857,8 @@ class SeisoTrainer:
     def _train_embedding(self) -> Path:
         import torch
         from sentence_transformers import InputExample, SentenceTransformer, losses
-        from torch.utils.data import DataLoader, Dataset as TorchDataset
+        from torch.utils.data import DataLoader
+        from torch.utils.data import Dataset as TorchDataset
 
         cfg = self.config
         apply_determinism(cfg.seed, deterministic=cfg.deterministic)

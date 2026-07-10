@@ -8,7 +8,7 @@ from typing import Any
 
 # model_id -> weakref to model (for validation) + list of modules patched
 _PATCH_REGISTRY: dict[int, list[Any]] = {}
-_ACTIVE_PATCH_SESSION: ContextVar["KernelPatchSession | None"] = ContextVar(
+_ACTIVE_PATCH_SESSION: ContextVar[KernelPatchSession | None] = ContextVar(
     "seiso_kernel_patch_session", default=None
 )
 
@@ -39,7 +39,7 @@ class KernelPatchSession:
         self._token: Token[KernelPatchSession | None] | None = None
         self._restored = False
 
-    def __enter__(self) -> "KernelPatchSession":
+    def __enter__(self) -> KernelPatchSession:
         self._token = _ACTIVE_PATCH_SESSION.set(self)
         return self
 

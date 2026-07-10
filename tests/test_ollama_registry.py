@@ -3,9 +3,6 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
-
-import pytest
 
 
 def test_default_ollama_tag_from_repo_id():
@@ -27,7 +24,7 @@ def test_default_ollama_tag_includes_quant_from_gguf_file():
 
 
 def test_registry_roundtrip(tmp_path, monkeypatch):
-    from forge.services import ollama_registry
+    from seiso.inference import ollama_registry
 
     registry_file = tmp_path / "ollama_registry.json"
     monkeypatch.setattr(ollama_registry, "registry_path", lambda: registry_file)
@@ -41,7 +38,7 @@ def test_registry_roundtrip(tmp_path, monkeypatch):
 
 
 def test_resolve_ollama_tag_uses_metadata(monkeypatch, tmp_path):
-    from forge.services import ollama_registry
+    from seiso.inference import ollama_registry
 
     monkeypatch.setattr(ollama_registry, "load_registry_entries", lambda: {})
     gguf = tmp_path / "model.gguf"
@@ -53,7 +50,7 @@ def test_resolve_ollama_tag_uses_metadata(monkeypatch, tmp_path):
 
 
 def test_register_gguf_persists_when_ollama_unavailable(tmp_path, monkeypatch):
-    from forge.services import ollama_registry
+    from seiso.inference import ollama_registry
 
     registry_file = tmp_path / "ollama_registry.json"
     monkeypatch.setattr(ollama_registry, "registry_path", lambda: registry_file)
@@ -73,7 +70,7 @@ def test_register_gguf_persists_when_ollama_unavailable(tmp_path, monkeypatch):
 
 
 def test_register_gguf_with_ollama_runs_create(tmp_path, monkeypatch):
-    from forge.services import ollama_registry
+    from seiso.inference import ollama_registry
 
     registry_file = tmp_path / "ollama_registry.json"
     monkeypatch.setattr(ollama_registry, "registry_path", lambda: registry_file)
@@ -103,7 +100,7 @@ def test_register_gguf_with_ollama_runs_create(tmp_path, monkeypatch):
 
 
 def test_register_reference_tag_for_safetensors(tmp_path, monkeypatch):
-    from forge.services import ollama_registry
+    from seiso.inference import ollama_registry
 
     registry_file = tmp_path / "ollama_registry.json"
     monkeypatch.setattr(ollama_registry, "registry_path", lambda: registry_file)
@@ -133,7 +130,7 @@ def test_ollama_subprocess_sets_cli_host(monkeypatch):
 
 
 def test_register_gguf_directory(tmp_path, monkeypatch):
-    from forge.services import ollama_registry
+    from seiso.inference import ollama_registry
 
     registry_file = tmp_path / "ollama_registry.json"
     monkeypatch.setattr(ollama_registry, "registry_path", lambda: registry_file)
@@ -165,7 +162,7 @@ def test_register_gguf_directory(tmp_path, monkeypatch):
 
 
 def test_register_gguf_retries_after_failed_create(tmp_path, monkeypatch):
-    from forge.services import ollama_registry
+    from seiso.inference import ollama_registry
 
     registry_file = tmp_path / "ollama_registry.json"
     monkeypatch.setattr(ollama_registry, "registry_path", lambda: registry_file)
@@ -200,7 +197,7 @@ def test_register_gguf_retries_after_failed_create(tmp_path, monkeypatch):
 
 
 def test_ensure_model_registered_uses_payload_metadata(tmp_path, monkeypatch):
-    from forge.services import ollama_registry
+    from seiso.inference import ollama_registry
 
     registry_file = tmp_path / "ollama_registry.json"
     monkeypatch.setattr(ollama_registry, "registry_path", lambda: registry_file)

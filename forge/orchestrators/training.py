@@ -297,14 +297,12 @@ class TrainingOrchestrator(Orchestrator):
                 self._schedule_metrics_persist(job_id, loop)
             else:
                 if text.startswith("MEMORY_POLICY "):
-                    try:
+                    with contextlib.suppress(json.JSONDecodeError):
                         self._emit_event(
                             job_id,
                             "memory_policy",
                             json.loads(text.removeprefix("MEMORY_POLICY ")),
                         )
-                    except json.JSONDecodeError:
-                        pass
                 self._emit_log(job_id, text)
 
         code = await proc.wait()

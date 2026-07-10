@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Iterator
 
 from seiso.memory.gpu_resource_lock import (
     acquire_gpu_resource_lock,
