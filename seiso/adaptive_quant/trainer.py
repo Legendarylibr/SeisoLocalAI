@@ -11,7 +11,7 @@ from seiso.adaptive_quant.checkpoint_integrity import (
 from seiso.adaptive_quant.configuration import FrameworkConfig
 from seiso.adaptive_quant.configuration.validation import MAX_EPISODE_COUNT
 from seiso.adaptive_quant.logging_utils import read_json, write_json
-from seiso.adaptive_quant.math_utils import mean
+from seiso.adaptive_quant.math_utils import mean, native_math_available
 from seiso.adaptive_quant.policy import PolicyTrace, UniversalQuantizationPolicy
 from seiso.adaptive_quant.rl_loop import record_training_row, run_rl_episode
 from seiso.adaptive_quant.trainer_utils import (
@@ -20,6 +20,20 @@ from seiso.adaptive_quant.trainer_utils import (
 )
 
 _PYTHON_CHECKPOINT_FORMAT = 1
+_NATIVE_MATH_WARNED = False
+
+
+def _warn_if_native_math_missing() -> None:
+    global _NATIVE_MATH_WARNED
+    if _NATIVE_MATH_WARNED or native_math_available():
+        return
+    _NATIVE_MATH_WARNED = True
+    print(
+        "WARNING: seiso.adaptive_quant native math_ext is not built; "
+        "RL feature/policy paths use slower Python fallbacks. "
+        "Build with: pip install -e '.[dev]' (requires pybind11).",
+        file=sys.stderr,
+    )
 
 
 class Trainer(TrainerBase):
@@ -33,6 +47,7 @@ class Trainer(TrainerBase):
             self.load_checkpoint(config.resume_from_checkpoint)
 
     def train(self) -> dict[str, float]:
+        _warn_if_native_math_missing()
         if self.config.continuous_training:
             return self._train_continuous()
         return self._train_fixed()
@@ -49,10 +64,9 @@ class Trainer(TrainerBase):
         return outcome.reward
 
     def _train_fixed(self) -> dict[str, float]:
-        rewards = [
-            self._run_training_episode(i)
-            for i in range(self.completed_episodes, self.config.training_episodes)
-        ]
+        rewards: list[float] = []
+        for i in range(self.completed_episodes, self.config.training_episodes):
+            rewards.append(self._run_training_episode(i))
         return reward_summary(rewards, updates=len(self.training_history))
 
     def _train_continuous(self) -> dict[str, float]:

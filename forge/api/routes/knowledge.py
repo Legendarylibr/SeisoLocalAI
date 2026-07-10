@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
 from pathlib import Path
 from typing import Annotated
@@ -37,41 +38,39 @@ class CreateBaseRequest(BaseModel):
     name: str = Field(default="", max_length=128)
 
 
-def _count_chunks(index_path: Path) -> int:
-    if not index_path.exists():
-        return 0
-    count = 0
-    with index_path.open() as f:
-        for line in f:
-            if line.strip():
-                count += 1
-    return count
-
-
 @router.get("/bases")
 async def list_bases(
     user_id: Annotated[str, Depends(get_current_user_id)],
     settings: Annotated[ForgeSettings, Depends(get_settings)],
 ) -> dict:
+    from forge.services.knowledge_context import count_knowledge_chunks
+
     try:
         kb_root = safe_join(settings.data_dir, "knowledge", user_id)
     except SecurityError as exc:
         raise HTTPException(400, str(exc)) from exc
 
-    bases: list[dict] = []
-    if kb_root.exists():
-        for entry in sorted(kb_root.iterdir()):
-            if not entry.is_dir():
-                continue
-            index_path = entry / "index.jsonl"
-            bases.append(
-                {
-                    "id": entry.name,
-                    "chunk_count": _count_chunks(index_path),
-                    "has_index": index_path.exists(),
-                }
-            )
-    return {"bases": bases}
+    def _scan() -> list[dict]:
+        bases: list[dict] = []
+        if kb_root.exists():
+            for entry in sorted(kb_root.iterdir()):
+                if not entry.is_dir():
+                    continue
+                index_path = entry / "index.jsonl"
+                bases.append(
+                    {
+                        "id": entry.name,
+                        "chunk_count": count_knowledge_chunks(
+                            settings.data_dir,
+                            user_id=user_id,
+                            knowledge_base_id=entry.name,
+                        ),
+                        "has_index": index_path.exists(),
+                    }
+                )
+        return bases
+
+    return {"bases": await asyncio.to_thread(_scan)}
 
 
 @router.post("/bases")
@@ -146,13 +145,22 @@ async def ingest(
 async def retrieve(
     body: RetrieveRequest,
     user_id: Annotated[str, Depends(get_current_user_id)],
-    orchestrator: Annotated[KnowledgeOrchestrator, Depends(get_knowledge_orchestrator)],
+    settings: Annotated[ForgeSettings, Depends(get_settings)],
 ) -> dict:
-    validate_kb_id(body.knowledge_base_id)
-    job_id = orchestrator.create_job(user_id=user_id)
-    payload = {"action": "retrieve", "user_id": user_id, **body.model_dump()}
-    await orchestrator.start(job_id, payload)
-    job = await orchestrator.wait_for(job_id)
-    if job and job.status.value == "failed":
-        raise HTTPException(400, job.error or "Retrieve failed")
-    return job.result if job else {"results": []}
+    """Fast-path keyword retrieve (no job orchestration overhead)."""
+    from forge.services.knowledge_context import retrieve_knowledge_chunks
+    from forge.tools.sanitize import wrap_tool_result
+
+    kb_id = validate_kb_id(body.knowledge_base_id)
+    chunks = await asyncio.to_thread(
+        retrieve_knowledge_chunks,
+        settings.data_dir,
+        user_id=user_id,
+        knowledge_base_id=kb_id,
+        query=body.query,
+        top_k=body.top_k,
+    )
+    results = [
+        {**c, "text": wrap_tool_result(f"kb:{kb_id}", c["text"])} for c in chunks
+    ]
+    return {"results": results}

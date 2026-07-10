@@ -125,19 +125,34 @@ class SeisoTrainer:
             cfg.model_dump(mode="json"),
         )
 
+        if cfg.method == TrainMethod.EMBEDDING:
+            # Embedding pairs use a light schema check inside _train_embedding.
+            out = self._train_embedding()
+            self._cleanup_gpu(None)
+            return out
+
         # Validate dataset *first* (before loading potentially huge model weights).
-        # This ensures errors about bad formatting are shown before expensive work.
+        # Reuse Forge-provided analysis when the UI already scanned the corpus.
         try:
-            analysis = analyze_training_dataset(
-                cfg.dataset,
-                dataset_format=cfg.dataset_format,
-                sandbox_root=cfg.sandbox_root,
-            )
+            cached = cfg.extra.get("cached_dataset_analysis")
+            if isinstance(cached, dict) and cached.get("valid"):
+                analysis = cached
+                reused = True
+            else:
+                analysis = analyze_training_dataset(
+                    cfg.dataset,
+                    dataset_format=cfg.dataset_format,
+                    sandbox_root=cfg.sandbox_root,
+                )
+                reused = False
             write_json(cfg.output_dir / "dataset_analysis.json", analysis)
+            prefix = "Reused" if reused else "Dataset analysis"
             self._log(
-                f"Dataset analysis: {analysis['kept']:,}/{analysis['initial_samples']:,} usable samples "
+                f"{prefix}: {analysis['kept']:,}/{analysis['initial_samples']:,} usable samples "
                 f"(format={analysis['resolved_format']}, domain={analysis['domain']})"
             )
+            # Stash for _prepare_datasets when preprocess params match analysis defaults.
+            self._cached_analysis = analysis
         except Exception as exc:
             raise ValueError(
                 f"Dataset cannot be normalized for training: {exc}"
@@ -158,11 +173,6 @@ class SeisoTrainer:
             cfg.quant.value,
             distributed_plan.world_size,
         )
-
-        if cfg.method == TrainMethod.EMBEDDING:
-            out = self._train_embedding()
-            self._cleanup_gpu(None)
-            return out
 
         if cfg.method not in (TrainMethod.LORA, TrainMethod.FULL):
             raise ValueError(f"Unsupported training method: {cfg.method.value}")
@@ -304,23 +314,56 @@ class SeisoTrainer:
             self._cleanup_gpu(None)
 
     def _prepare_datasets(self, tokenizer) -> PreparedTrainingDatasets:
+        from seiso.training.dataset_analysis import (
+            cleaned_dataset_cache_key,
+            take_cleaned_dataset,
+        )
+
         cfg = self.config
         ds_fmt = cfg.dataset_format
-        raw_ds = load_training_dataset(cfg.dataset, sandbox_root=cfg.sandbox_root)
         preprocess_stats: dict[str, Any] | None = None
+        raw_ds = None
 
         if cfg.preprocess_dataset:
-            raw_ds, preprocess_stats, ds_fmt = preprocess_training_dataset(
-                raw_ds,
-                dataset_format=ds_fmt,
-                deduplicate=cfg.deduplicate_dataset,
-                min_chars=cfg.min_sample_chars,
-                num_proc=resolve_map_workers(cfg),
+            analysis = getattr(self, "_cached_analysis", None)
+            reuse_ok = (
+                isinstance(analysis, dict)
+                and cfg.deduplicate_dataset is True
+                and int(cfg.min_sample_chars) <= 1
             )
-            self._log(
-                f"Preprocessed dataset: {preprocess_stats['kept']}/{preprocess_stats['initial_samples']} "
-                f"samples kept (format={preprocess_stats['resolved_format']})"
-            )
+            if reuse_ok:
+                key = analysis.get("cleaned_cache_key") or cleaned_dataset_cache_key(
+                    cfg.dataset,
+                    dataset_format=cfg.dataset_format,
+                    sandbox_root=cfg.sandbox_root,
+                    deduplicate=True,
+                    min_chars=1,
+                )
+                cached_clean = take_cleaned_dataset(str(key))
+                if cached_clean is not None:
+                    raw_ds, preprocess_stats, ds_fmt = cached_clean
+                    self._log(
+                        "Reusing cleaned dataset from prior analysis "
+                        f"({preprocess_stats['kept']}/{preprocess_stats['initial_samples']} samples)"
+                    )
+
+            if raw_ds is None:
+                raw_ds = load_training_dataset(
+                    cfg.dataset, sandbox_root=cfg.sandbox_root
+                )
+                raw_ds, preprocess_stats, ds_fmt = preprocess_training_dataset(
+                    raw_ds,
+                    dataset_format=ds_fmt,
+                    deduplicate=cfg.deduplicate_dataset,
+                    min_chars=cfg.min_sample_chars,
+                    num_proc=resolve_map_workers(cfg),
+                )
+                self._log(
+                    f"Preprocessed dataset: {preprocess_stats['kept']}/{preprocess_stats['initial_samples']} "
+                    f"samples kept (format={preprocess_stats['resolved_format']})"
+                )
+        else:
+            raw_ds = load_training_dataset(cfg.dataset, sandbox_root=cfg.sandbox_root)
 
         raw_ds = self._limit_training_samples(raw_ds)
         train_ds, eval_ds = self._split_train_eval(raw_ds)
@@ -815,18 +858,45 @@ class SeisoTrainer:
         import torch
         from sentence_transformers import InputExample, SentenceTransformer, losses
         from torch.utils.data import DataLoader
+        from torch.utils.data import Dataset as TorchDataset
 
         cfg = self.config
         apply_determinism(cfg.seed, deterministic=cfg.deterministic)
+        # Light schema check — skip full analyze_training_dataset for embedding pairs.
         raw = load_training_dataset(cfg.dataset, sandbox_root=cfg.sandbox_root)
-        examples = []
-        for row in raw:
-            anchor = row.get("anchor") or row.get("query") or row.get("text", "")
-            positive = row.get("positive") or row.get("answer") or row.get("output", "")
-            if anchor and positive:
-                examples.append(InputExample(texts=[anchor, positive]))
 
-        if not examples:
+        class _PairDataset(TorchDataset):
+            """Index into the HF dataset — avoids materializing all InputExamples."""
+
+            def __init__(self, rows):
+                self._rows = rows
+                self._indices: list[int] = []
+                for i in range(len(rows)):
+                    row = rows[i]
+                    anchor = (
+                        row.get("anchor") or row.get("query") or row.get("text", "")
+                    )
+                    positive = (
+                        row.get("positive")
+                        or row.get("answer")
+                        or row.get("output", "")
+                    )
+                    if anchor and positive:
+                        self._indices.append(i)
+
+            def __len__(self) -> int:
+                return len(self._indices)
+
+            def __getitem__(self, idx: int) -> InputExample:
+                row = self._rows[self._indices[idx]]
+                anchor = row.get("anchor") or row.get("query") or row.get("text", "")
+                positive = (
+                    row.get("positive") or row.get("answer") or row.get("output", "")
+                )
+                return InputExample(texts=[str(anchor), str(positive)])
+
+        pair_ds = _PairDataset(raw)
+        if len(pair_ds) == 0:
             raise ValueError(
                 "Embedding dataset needs anchor/query + positive/answer columns"
             )
@@ -849,7 +919,7 @@ class SeisoTrainer:
         }
         if prefetch_factor is not None:
             loader_kwargs["prefetch_factor"] = prefetch_factor
-        loader = DataLoader(examples, **loader_kwargs)
+        loader = DataLoader(pair_ds, **loader_kwargs)
         loss = losses.MultipleNegativesRankingLoss(model)
         out = (
             cfg.output_dir
@@ -915,7 +985,18 @@ class SeisoTrainer:
             with contextlib.suppress(OSError, ValueError):
                 dataset_hash = sha256_file(ds_path)
 
+        from seiso.research.provenance import manifest_common_fields
+
         manifest = {
+            **manifest_common_fields(
+                config_snapshot={
+                    "model_id": original_id,
+                    "method": cfg.method.value,
+                    "quant": cfg.quant.value,
+                    "dataset": dataset_path,
+                    "seed": cfg.seed,
+                }
+            ),
             "model_id": original_id,
             "original_model_id": original_id,
             "base_model_path": base_path,
@@ -976,6 +1057,5 @@ class SeisoTrainer:
             "cloud_gpu_credential_id": cfg.cloud_gpu_credential_id,
             "world_size": layout.world_size,
             "kernels": self._kernel_meta,
-            "created_at": datetime.now(timezone.utc).isoformat(),
         }
         write_json(out / "seiso_manifest.json", manifest)

@@ -5,9 +5,9 @@ from __future__ import annotations
 import tempfile
 import threading
 import time
+from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterator
 
 from seiso.env import env_int, env_str
 
@@ -65,7 +65,7 @@ def _acquire_file_lock(timeout_s: float):
                 handle.close()
                 raise TimeoutError(
                     "Timed out waiting for another Seiso GPU task to finish"
-                )
+                ) from None
             time.sleep(0.1)
 
 

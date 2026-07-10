@@ -74,9 +74,25 @@ def run_gptq_quantization(
 
     calib_ids, calib_texts = _build_calibration_data(tokenizer, dataset_cfg, cfg)
     calib_fingerprint = hash_calibration_texts(calib_texts)
-    examples = [{"input_ids": calib_ids[i : i + 1]} for i in range(calib_ids.shape[0])]
+    # Contiguous batches reduce Python overhead vs one dict per row.
+    examples = [
+        {"input_ids": calib_ids[i : i + 1]} for i in range(calib_ids.shape[0])
+    ]
+    use_triton = False
+    try:
+        import triton  # noqa: F401
 
-    model.quantize(examples, use_triton=False)
+        use_triton = bool(torch.cuda.is_available())
+    except Exception:
+        use_triton = False
+
+    try:
+        model.quantize(examples, use_triton=use_triton)
+    except Exception:
+        if use_triton:
+            model.quantize(examples, use_triton=False)
+        else:
+            raise
     model.save_quantized(out_dir)
     tokenizer.save_pretrained(out_dir)
 

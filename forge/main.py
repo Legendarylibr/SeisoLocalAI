@@ -11,22 +11,6 @@ from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from forge.api.deps import clear_dependency_caches, get_db
-from forge.api.routes import (
-    auth,
-    compress,
-    distill_rl,
-    export,
-    inference,
-    knowledge,
-    models,
-    openai,
-    providers,
-    recipes,
-    rl_quant,
-    system,
-    training,
-)
-from forge.api.routes import settings as settings_routes
 from forge.config import get_settings
 from forge.db.store import DatabaseCryptoError
 from forge.instance_lock import (
@@ -73,9 +57,11 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
+        from forge.services.executors import shutdown_executors
         from forge.services.model_router_client import close_router_client
 
         await close_router_client()
+        shutdown_executors(wait=False)
         if data_lock is not None:
             data_lock.release()
         await db.close()
@@ -142,6 +128,24 @@ def create_app() -> FastAPI:
             existing_csp=response.headers.get("content-security-policy"),
         )
         return response
+
+    # Defer route module imports until app construction (keeps import seiso/forge light).
+    from forge.api.routes import (
+        auth,
+        compress,
+        distill_rl,
+        export,
+        inference,
+        knowledge,
+        models,
+        openai,
+        providers,
+        recipes,
+        rl_quant,
+        system,
+        training,
+    )
+    from forge.api.routes import settings as settings_routes
 
     prefix = "/api"
     app.include_router(auth.router, prefix=prefix)

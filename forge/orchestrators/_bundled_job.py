@@ -29,6 +29,9 @@ class BundledJobContract:
     requires_manifest: bool = False
 
 
+_DEFAULT_CONTRACT = BundledJobContract()
+
+
 def _validate_artifact_value(
     sandbox_root: Path,
     user_id: str,
@@ -77,7 +80,7 @@ async def run_bundled_job(
     start_message: str,
     runner: Callable[..., dict[str, Any]],
     result_log: Callable[[dict[str, Any]], str],
-    contract: BundledJobContract = BundledJobContract(),
+    contract: BundledJobContract = _DEFAULT_CONTRACT,
 ) -> dict[str, Any]:
     from forge.services.memory_release import prepare_for_gpu_task, release_after_task
 
@@ -109,8 +112,10 @@ async def run_bundled_job(
         loop.call_soon_threadsafe(orchestrator._emit_log, job_id, msg)
 
     try:
+        from forge.services.executors import GPU_EXECUTOR
+
         result = await loop.run_in_executor(
-            None,
+            GPU_EXECUTOR,
             lambda: runner(
                 job_id=job_id,
                 user_id=user_id,
@@ -140,7 +145,7 @@ def bundled_orchestrator(
     start_message: str,
     runner: Callable[..., dict[str, Any]],
     result_log: Callable[[dict[str, Any]], str],
-    contract: BundledJobContract = BundledJobContract(),
+    contract: BundledJobContract = _DEFAULT_CONTRACT,
 ) -> type[Orchestrator]:
     """Build a thin Orchestrator subclass for a bundled pipeline runner."""
 

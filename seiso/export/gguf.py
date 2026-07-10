@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import tempfile
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
@@ -344,27 +345,50 @@ def _export_quants(
         results[f"gguf_{quant}"] = gguf_path
 
     try:
-        for quant in quantizations:
+        # Ensure shared F16 intermediate once when any quant needs it.
+        needs_f16 = any(
+            q == "f16"
+            or q in LLAMA_QUANTIZE_TYPES
+            or q not in DIRECT_CONVERT_OUTTYPES
+            for q in quantizations
+        )
+        f16_path = ensure_f16_source() if needs_f16 else None
+
+        def _export_one(quant: str) -> tuple[str, Path, Path] | None:
             quant_dir = output_root / quant
             quant_dir.mkdir(parents=True, exist_ok=True)
             gguf_path = quant_dir / f"model-{quant}.gguf"
 
             if quant == "f16":
-                source = ensure_f16_source()
-                if source == gguf_path and gguf_path.is_file():
-                    record_export(quant, quant_dir, gguf_path)
-                continue
+                if f16_path == gguf_path and gguf_path.is_file():
+                    return quant, quant_dir, gguf_path
+                return None
 
             if quant in LLAMA_QUANTIZE_TYPES or quant not in DIRECT_CONVERT_OUTTYPES:
-                source = ensure_f16_source()
-                if source is not None and quantize_gguf_file(
-                    source, gguf_path, quant, log
+                if f16_path is not None and quantize_gguf_file(
+                    f16_path, gguf_path, quant, log
                 ):
-                    record_export(quant, quant_dir, gguf_path)
-                continue
+                    return quant, quant_dir, gguf_path
+                return None
 
             if convert_hf_dir_to_gguf(merged, gguf_path, quant, log):
-                record_export(quant, quant_dir, gguf_path)
+                return quant, quant_dir, gguf_path
+            return None
+
+        # Parallelize independent llama-quantize / convert jobs (share one F16 source).
+        # Record in input order so callers/tests see stable quant ordering.
+        max_workers = min(4, max(1, len(quantizations)))
+        outcomes: dict[str, tuple[str, Path, Path] | None] = {}
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            futures = {pool.submit(_export_one, q): q for q in quantizations}
+            for fut in as_completed(futures):
+                quant = futures[fut]
+                outcomes[quant] = fut.result()
+        for quant in quantizations:
+            outcome = outcomes.get(quant)
+            if outcome is not None:
+                q, quant_dir, gguf_path = outcome
+                record_export(q, quant_dir, gguf_path)
     finally:
         if f16_temp is not None:
             f16_temp.cleanup()

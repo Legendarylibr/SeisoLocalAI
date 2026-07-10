@@ -84,8 +84,10 @@ class ExportOrchestrator(Orchestrator):
             for warning in plan.warnings:
                 self._emit_log(job_id, f"Warning: {warning}")
 
+            from forge.services.executors import GPU_EXECUTOR
+
             results = await loop.run_in_executor(
-                None,
+                GPU_EXECUTOR,
                 lambda: run_export_plan(
                     plan,
                     hub_token=payload.get("hub_token"),

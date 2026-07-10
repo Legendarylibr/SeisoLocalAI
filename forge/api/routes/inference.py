@@ -237,7 +237,8 @@ async def get_chat_context(
             if msg.get("role") == "user":
                 last_user = normalize_text(str(msg.get("content", ""))).strip()
                 break
-        chunks = retrieve_knowledge_chunks(
+        chunks = await asyncio.to_thread(
+            retrieve_knowledge_chunks,
             settings.data_dir,
             user_id=user_id,
             knowledge_base_id=kb_id,

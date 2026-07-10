@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from forge.services import hf_hub
+from forge.services import hf_hub, hf_hub_search
 
 
 def test_gguf_mirror_candidates_include_gguf_mirrors():
@@ -17,27 +17,28 @@ def test_resolve_gguf_repo_uses_explicit_gguf_repo(monkeypatch):
         gguf_repo = "mirror-org/Example-7B-GGUF"
         quant = "Q4_K_M"
 
-    monkeypatch.setattr(
-        hf_hub,
-        "repo_has_gguf",
-        lambda repo_id, **_: repo_id == "mirror-org/Example-7B-GGUF",
-    )
+    def has_gguf(repo_id, **_):
+        return repo_id == "mirror-org/Example-7B-GGUF"
+    monkeypatch.setattr(hf_hub, "repo_has_gguf", has_gguf)
+    monkeypatch.setattr(hf_hub_search, "repo_has_gguf", has_gguf)
     resolved = hf_hub.resolve_gguf_repo("acme/Example-7B", entry=Entry())
     assert resolved == "mirror-org/Example-7B-GGUF"
 
 
 def test_resolve_gguf_repo_falls_back_to_mirror(monkeypatch):
-    monkeypatch.setattr(
-        hf_hub, "repo_has_gguf", lambda repo_id, **_: repo_id.endswith("-GGUF")
-    )
+    def has_gguf(repo_id, **_):
+        return repo_id.endswith("-GGUF")
+    monkeypatch.setattr(hf_hub, "repo_has_gguf", has_gguf)
+    monkeypatch.setattr(hf_hub_search, "repo_has_gguf", has_gguf)
     resolved = hf_hub.resolve_gguf_repo("meta-llama/Llama-3.1-8B-Instruct")
     assert resolved.endswith("-GGUF")
 
 
 def test_resolve_gguf_repo_ignores_dflash_draft_candidates(monkeypatch):
-    monkeypatch.setattr(
-        hf_hub, "repo_has_gguf", lambda repo_id, **_: repo_id == "bartowski/Kimi-GGUF"
-    )
+    def has_gguf(repo_id, **_):
+        return repo_id == "bartowski/Kimi-GGUF"
+    monkeypatch.setattr(hf_hub, "repo_has_gguf", has_gguf)
+    monkeypatch.setattr(hf_hub_search, "repo_has_gguf", has_gguf)
     monkeypatch.setattr(
         hf_hub,
         "search_huggingface_gguf_repos",
@@ -46,7 +47,7 @@ def test_resolve_gguf_repo_ignores_dflash_draft_candidates(monkeypatch):
             {"repo_id": "bartowski/Kimi-GGUF"},
         ],
     )
-    hf_hub._gguf_repo_cache.clear()
+    hf_hub_search._gguf_repo_cache.clear()
 
     resolved = hf_hub.resolve_gguf_repo("org/Kimi")
 
@@ -75,7 +76,7 @@ def test_search_huggingface_datasets_parses_api_response(monkeypatch):
             return json.dumps(payload).encode("utf-8")
 
     monkeypatch.setattr(
-        hf_hub.urllib.request, "urlopen", lambda *_a, **_k: FakeResponse()
+        hf_hub_search.urllib.request, "urlopen", lambda *_a, **_k: FakeResponse()
     )
     rows = hf_hub.search_huggingface_datasets(query="no_robots", limit=5)
     assert rows == [
@@ -164,11 +165,10 @@ def test_pick_gguf_file_prefers_active_moe_quant():
 
 
 def test_resolve_gguf_repo_uses_top_hub_search_match(monkeypatch):
-    monkeypatch.setattr(
-        hf_hub,
-        "repo_has_gguf",
-        lambda repo_id, **_: repo_id == "random-user/Kimi-GGUF",
-    )
+    def has_gguf(repo_id, **_):
+        return repo_id == "random-user/Kimi-GGUF"
+    monkeypatch.setattr(hf_hub, "repo_has_gguf", has_gguf)
+    monkeypatch.setattr(hf_hub_search, "repo_has_gguf", has_gguf)
     monkeypatch.setattr(
         hf_hub,
         "search_huggingface_gguf_repos",
@@ -177,7 +177,7 @@ def test_resolve_gguf_repo_uses_top_hub_search_match(monkeypatch):
             {"repo_id": "org/Kimi-GGUF", "downloads": 10},
         ],
     )
-    hf_hub._gguf_repo_cache.clear()
+    hf_hub_search._gguf_repo_cache.clear()
 
     resolved = hf_hub.resolve_gguf_repo("org/Kimi-Base")
 
@@ -191,12 +191,11 @@ def test_resolve_gguf_repo_uses_catalog_entry_gguf_repo(monkeypatch):
         tags = ("gguf", "base_model:org/Model")
         repo_id = "random-user/Custom-GGUF"
 
-    monkeypatch.setattr(
-        hf_hub,
-        "repo_has_gguf",
-        lambda repo_id, **_: repo_id == "random-user/Custom-GGUF",
-    )
-    hf_hub._gguf_repo_cache.clear()
+    def has_gguf(repo_id, **_):
+        return repo_id == "random-user/Custom-GGUF"
+    monkeypatch.setattr(hf_hub, "repo_has_gguf", has_gguf)
+    monkeypatch.setattr(hf_hub_search, "repo_has_gguf", has_gguf)
+    hf_hub_search._gguf_repo_cache.clear()
 
     resolved = hf_hub.resolve_gguf_repo("org/Model", entry=Entry())
 
@@ -205,8 +204,9 @@ def test_resolve_gguf_repo_uses_catalog_entry_gguf_repo(monkeypatch):
 
 def test_resolve_gguf_repo_raises_when_missing(monkeypatch):
     monkeypatch.setattr(hf_hub, "repo_has_gguf", lambda *_a, **_k: False)
+    monkeypatch.setattr(hf_hub_search, "repo_has_gguf", lambda *_a, **_k: False)
     monkeypatch.setattr(hf_hub, "search_huggingface_gguf_repos", lambda **_k: [])
-    hf_hub._gguf_repo_cache.clear()
+    hf_hub_search._gguf_repo_cache.clear()
     try:
         hf_hub.resolve_gguf_repo("org/NoGgufModel")
         assert False, "expected ValueError"
@@ -215,7 +215,7 @@ def test_resolve_gguf_repo_raises_when_missing(monkeypatch):
 
 
 def test_resolve_gguf_repo_uses_cache(monkeypatch):
-    hf_hub._gguf_repo_cache.clear()
+    hf_hub_search._gguf_repo_cache.clear()
     calls = {"n": 0}
 
     def _has_gguf(repo_id, **_) -> bool:
@@ -223,6 +223,7 @@ def test_resolve_gguf_repo_uses_cache(monkeypatch):
         return repo_id == "meta-llama/Llama-3.1-8B-Instruct"
 
     monkeypatch.setattr(hf_hub, "repo_has_gguf", _has_gguf)
+    monkeypatch.setattr(hf_hub_search, "repo_has_gguf", _has_gguf)
     first = hf_hub.resolve_gguf_repo("meta-llama/Llama-3.1-8B-Instruct")
     second = hf_hub.resolve_gguf_repo("meta-llama/Llama-3.1-8B-Instruct")
     assert first == second == "meta-llama/Llama-3.1-8B-Instruct"
@@ -230,13 +231,11 @@ def test_resolve_gguf_repo_uses_cache(monkeypatch):
 
 
 def test_first_repo_with_gguf_preserves_candidate_order(monkeypatch):
-    monkeypatch.setattr(
-        hf_hub,
-        "repo_has_gguf",
-        lambda repo_id, **_: repo_id in {"second/repo", "third/repo"},
-    )
+    def has_gguf(repo_id, **_):
+        return repo_id in {"second/repo", "third/repo"}
+    monkeypatch.setattr(hf_hub_search, "repo_has_gguf", has_gguf)
 
-    resolved = hf_hub._first_repo_with_gguf(["first/repo", "second/repo", "third/repo"])
+    resolved = hf_hub_search._first_repo_with_gguf(["first/repo", "second/repo", "third/repo"])
 
     assert resolved == "second/repo"
 

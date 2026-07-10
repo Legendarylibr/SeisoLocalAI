@@ -2,30 +2,39 @@
 
 from __future__ import annotations
 
+import importlib
 from collections.abc import Callable
 from functools import lru_cache
+from typing import TYPE_CHECKING
 
 from forge.config import get_settings
 from forge.db.store import Database
-from forge.orchestrators.base import Orchestrator
-from forge.orchestrators.compress import CompressOrchestrator
-from forge.orchestrators.distill_rl import DistillRLOrchestrator
-from forge.orchestrators.export import ExportOrchestrator
-from forge.orchestrators.hub_publish import HubPublishOrchestrator
-from forge.orchestrators.inference import InferenceOrchestrator
-from forge.orchestrators.knowledge import KnowledgeOrchestrator
-from forge.orchestrators.recipes import RecipeOrchestrator
-from forge.orchestrators.rl_quant import RLQuantOrchestrator
-from forge.orchestrators.training import TrainingOrchestrator
+
+if TYPE_CHECKING:
+    from forge.orchestrators.base import Orchestrator
 
 _ORCHESTRATOR_GETTERS: list[Callable[[], Orchestrator]] = []
 
+_ORCHESTRATOR_SPECS: dict[str, tuple[str, str]] = {
+    "training": ("forge.orchestrators.training", "TrainingOrchestrator"),
+    "export": ("forge.orchestrators.export", "ExportOrchestrator"),
+    "hub_publish": ("forge.orchestrators.hub_publish", "HubPublishOrchestrator"),
+    "inference": ("forge.orchestrators.inference", "InferenceOrchestrator"),
+    "rl_quant": ("forge.orchestrators.rl_quant", "RLQuantOrchestrator"),
+    "compress": ("forge.orchestrators.compress", "CompressOrchestrator"),
+    "distill_rl": ("forge.orchestrators.distill_rl", "DistillRLOrchestrator"),
+    "recipes": ("forge.orchestrators.recipes", "RecipeOrchestrator"),
+    "knowledge": ("forge.orchestrators.knowledge", "KnowledgeOrchestrator"),
+}
 
-def _orchestrator_dep(cls: type[Orchestrator]) -> Callable[[], Orchestrator]:
+
+def _orchestrator_dep(module_path: str, cls_name: str) -> Callable[[], Orchestrator]:
     @lru_cache
     def _get() -> Orchestrator:
         from forge.services.job_events import DurableJobEventSink
 
+        mod = importlib.import_module(module_path)
+        cls = getattr(mod, cls_name)
         orchestrator = cls(get_settings().data_dir)
         orchestrator.set_event_sink(DurableJobEventSink(get_db()))
         return orchestrator
@@ -44,15 +53,15 @@ def get_db() -> Database:
     )
 
 
-get_training_orchestrator = _orchestrator_dep(TrainingOrchestrator)
-get_export_orchestrator = _orchestrator_dep(ExportOrchestrator)
-get_hub_publish_orchestrator = _orchestrator_dep(HubPublishOrchestrator)
-get_inference_orchestrator = _orchestrator_dep(InferenceOrchestrator)
-get_rl_quant_orchestrator = _orchestrator_dep(RLQuantOrchestrator)
-get_compress_orchestrator = _orchestrator_dep(CompressOrchestrator)
-get_distill_rl_orchestrator = _orchestrator_dep(DistillRLOrchestrator)
-get_recipe_orchestrator = _orchestrator_dep(RecipeOrchestrator)
-get_knowledge_orchestrator = _orchestrator_dep(KnowledgeOrchestrator)
+get_training_orchestrator = _orchestrator_dep(*_ORCHESTRATOR_SPECS["training"])
+get_export_orchestrator = _orchestrator_dep(*_ORCHESTRATOR_SPECS["export"])
+get_hub_publish_orchestrator = _orchestrator_dep(*_ORCHESTRATOR_SPECS["hub_publish"])
+get_inference_orchestrator = _orchestrator_dep(*_ORCHESTRATOR_SPECS["inference"])
+get_rl_quant_orchestrator = _orchestrator_dep(*_ORCHESTRATOR_SPECS["rl_quant"])
+get_compress_orchestrator = _orchestrator_dep(*_ORCHESTRATOR_SPECS["compress"])
+get_distill_rl_orchestrator = _orchestrator_dep(*_ORCHESTRATOR_SPECS["distill_rl"])
+get_recipe_orchestrator = _orchestrator_dep(*_ORCHESTRATOR_SPECS["recipes"])
+get_knowledge_orchestrator = _orchestrator_dep(*_ORCHESTRATOR_SPECS["knowledge"])
 
 
 def clear_dependency_caches() -> None:

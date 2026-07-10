@@ -34,6 +34,20 @@ def tokenize_text(tokenizer: Any, text: str, seq_len: int) -> dict[str, torch.Te
     return {k: v for k, v in enc.items()}
 
 
+def tokenize_texts(
+    tokenizer: Any, texts: list[str], seq_len: int
+) -> dict[str, torch.Tensor]:
+    """Batch-tokenize texts with dynamic padding up to ``seq_len``."""
+    enc = tokenizer(
+        texts,
+        return_tensors="pt",
+        truncation=True,
+        max_length=seq_len,
+        padding=True,
+    )
+    return {k: v for k, v in enc.items()}
+
+
 def print_trust_remote_code_notice(
     accelerator: Any, *, requested: bool, effective: bool
 ) -> None:

@@ -59,6 +59,27 @@ def write_json(path: Path, data: Any) -> None:
     path.write_text(json.dumps(data, indent=2, default=str), encoding="utf-8")
 
 
+def content_fingerprint(payload: Any) -> str:
+    """Stable SHA-256 fingerprint for JSON-serializable config snapshots."""
+    import hashlib
+
+    blob = json.dumps(payload, sort_keys=True, default=str, separators=(",", ":"))
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+
+def manifest_common_fields(*, config_snapshot: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Shared provenance fields for seiso_manifest / study manifests."""
+    from datetime import datetime, timezone
+
+    fields: dict[str, Any] = {
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "git_commit": git_commit_optional(),
+    }
+    if config_snapshot is not None:
+        fields["config_fingerprint"] = content_fingerprint(config_snapshot)
+    return fields
+
+
 def git_commit_optional() -> str | None:
     import subprocess
 

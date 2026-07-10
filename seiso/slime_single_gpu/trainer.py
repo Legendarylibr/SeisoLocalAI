@@ -323,13 +323,12 @@ def _collect_rollouts(
             completion = _force_completion_thinking_prefix(completions[idx], config)
             reward_sample = _reward_sample(sample, config)
             score = _score_completion(completion, reward_sample, config, reward_fn)
+            # Keep rollout tensors on device to avoid GPU↔CPU staging per sample.
             chunk_rollouts.append(
                 Rollout(
-                    input_ids=generated[idx].detach().cpu(),
-                    attention_mask=(generated[idx] != tokenizer.pad_token_id)
-                    .detach()
-                    .cpu(),
-                    response_mask=response_mask.detach().cpu(),
+                    input_ids=generated[idx].detach(),
+                    attention_mask=(generated[idx] != tokenizer.pad_token_id).detach(),
+                    response_mask=response_mask.detach(),
                     old_logprobs=None,
                     ref_logprobs=None,
                     reward=score["reward"],
@@ -375,9 +374,9 @@ def _collect_rollouts(
             chunk_rollouts, tokenizer.pad_token_id, config.device, torch
         )
         with torch.no_grad():
-            old_logprobs = _sequence_logprobs(model, padded, torch).detach().cpu()
+            old_logprobs = _sequence_logprobs(model, padded, torch).detach()
             ref_logprobs = (
-                _sequence_logprobs(ref_model, padded, torch).detach().cpu()
+                _sequence_logprobs(ref_model, padded, torch).detach()
                 if ref_model is not None
                 else None
             )
@@ -627,6 +626,21 @@ def _pad_rollouts(
     rollouts: list[Rollout], pad_token_id: int, device: str, torch
 ) -> dict[str, Any]:
     max_len = max(int(r.input_ids.numel()) for r in rollouts)
+    # Prefer stacking on-device tensors; fall back to per-row .to(device).
+    same_device = all(
+        getattr(r.input_ids, "device", None) is not None
+        and str(r.input_ids.device) == str(torch.device(device))
+        for r in rollouts
+    )
+    if same_device and all(int(r.input_ids.numel()) == max_len for r in rollouts):
+        return {
+            "input_ids": torch.stack([r.input_ids for r in rollouts], dim=0),
+            "attention_mask": torch.stack(
+                [r.attention_mask for r in rollouts], dim=0
+            ),
+            "response_mask": torch.stack([r.response_mask for r in rollouts], dim=0),
+        }
+
     input_ids = torch.full(
         (len(rollouts), max_len), pad_token_id, dtype=torch.long, device=device
     )

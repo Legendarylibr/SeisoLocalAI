@@ -108,12 +108,14 @@ def running_gpu_task_kinds(*, exclude_job_id: str | None = None) -> list[str]:
     active: list[str] = _active_tracked_gpu_task_kinds(exclude_job_id=exclude_job_id)
     for getter in getters:
         orch = getter()
-        if any(
-            job.status == JobStatus.RUNNING and job.id != exclude_job_id
-            for job in orch._jobs.values()
+        if (
+            any(
+                job.status == JobStatus.RUNNING and job.id != exclude_job_id
+                for job in orch._jobs.values()
+            )
+            and orch.kind not in active
         ):
-            if orch.kind not in active:
-                active.append(orch.kind)
+            active.append(orch.kind)
     return active
 
 
@@ -172,7 +174,8 @@ def release_after_task(
     task = None
     try:
         restore_kernel_patches()
-        release_cached_memory(sync=True)
+        # Avoid a full device synchronize on the happy path; OOM recovery syncs explicitly.
+        release_cached_memory(sync=False)
         _refresh_hardware_profile()
     finally:
         task = _unregister_gpu_task(resource_token=resource_token, job_id=job_id)

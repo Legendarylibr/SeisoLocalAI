@@ -159,8 +159,10 @@ class TrainingOrchestrator(Orchestrator):
                             pass
                     loop.call_soon_threadsafe(self._emit_log, job_id, line)
 
+                from forge.services.executors import GPU_EXECUTOR
+
                 training_future = loop.run_in_executor(
-                    None,
+                    GPU_EXECUTOR,
                     lambda: run_training(
                         config,
                         on_metric=on_metric,
@@ -295,14 +297,12 @@ class TrainingOrchestrator(Orchestrator):
                 self._schedule_metrics_persist(job_id, loop)
             else:
                 if text.startswith("MEMORY_POLICY "):
-                    try:
+                    with contextlib.suppress(json.JSONDecodeError):
                         self._emit_event(
                             job_id,
                             "memory_policy",
                             json.loads(text.removeprefix("MEMORY_POLICY ")),
                         )
-                    except json.JSONDecodeError:
-                        pass
                 self._emit_log(job_id, text)
 
         code = await proc.wait()

@@ -253,7 +253,7 @@ def job_lint(
             "seiso",
             "forge",
             "seiso_cli",
-            "--jobs=1",
+            "--jobs=0",
             "--disable=all",
             "--enable=E,F",
             "--disable=possibly-used-before-assignment",

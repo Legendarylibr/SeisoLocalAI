@@ -95,6 +95,22 @@ class ModelsMixin:
             row = await cur.fetchone()
             return dict(row) if row else None
 
+    async def get_model_by_metadata_repo_id(
+        self, user_id: str, repo_id: str
+    ) -> dict | None:
+        """Lookup by metadata_json.repo_id without scanning the full inventory."""
+        async with (
+            self._conn() as conn,
+            conn.execute(
+                "SELECT * FROM local_models WHERE user_id = ? "
+                "AND json_extract(metadata_json, '$.repo_id') = ? "
+                "ORDER BY created_at DESC LIMIT 1",
+                (user_id, repo_id),
+            ) as cur,
+        ):
+            row = await cur.fetchone()
+            return dict(row) if row else None
+
     async def upsert_model(self, user_id: str, source: str, **fields: Any) -> dict:
         mid = str(uuid.uuid4())
         now = now_iso()

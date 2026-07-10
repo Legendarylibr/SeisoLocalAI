@@ -258,7 +258,7 @@ def test_ready_for_gguf_chat_requires_sidecar_on_native_linux(monkeypatch):
             llamaswap=False,
         ),
     )
-    status = hf_connectivity.build_hf_status(probe=False)
+    status = hf_connectivity.build_hf_status(probe=True)
     assert status["ready_for_gguf_chat"] is False
 
     monkeypatch.setattr(
@@ -270,7 +270,7 @@ def test_ready_for_gguf_chat_requires_sidecar_on_native_linux(monkeypatch):
             ollama_ready=True,
         ),
     )
-    status = hf_connectivity.build_hf_status(probe=False)
+    status = hf_connectivity.build_hf_status(probe=True)
     assert status["ready_for_gguf_chat"] is True
 
 

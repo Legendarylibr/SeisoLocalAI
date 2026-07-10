@@ -194,6 +194,25 @@ def compute_eval_split_size(
     return max(0, eval_n)
 
 
+def _first_unique_indices(fingerprints) -> list[int]:
+    """Return sorted indices of first occurrences (numpy when available)."""
+    try:
+        import numpy as np
+
+        arr = np.asarray(fingerprints, dtype=object)
+        _, first_idx = np.unique(arr, return_index=True)
+        return np.sort(first_idx).tolist()
+    except Exception:
+        seen: set[str] = set()
+        keep: list[int] = []
+        for idx, key in enumerate(fingerprints):
+            if key in seen:
+                continue
+            seen.add(key)
+            keep.append(idx)
+        return keep
+
+
 def _datasets_map_kwargs(num_proc: int | None) -> dict[str, Any]:
     """Map/filter kwargs safe for Forge workers (no tqdm writes to closed pipes)."""
     from datasets.utils.logging import disable_progress_bar
@@ -246,8 +265,6 @@ def preprocess_training_dataset(
     stats["removed_invalid"] = before_filter - len(filtered)
 
     if deduplicate and len(filtered) > 0:
-        seen: set[str] = set()
-        keep_indices: list[int] = []
         try:
             fingerprints = filtered["_seiso_fingerprint"]
         except (KeyError, TypeError):
@@ -255,11 +272,7 @@ def preprocess_training_dataset(
                 str(filtered[idx].get("_seiso_fingerprint") or "")
                 for idx in range(len(filtered))
             ]
-        for idx, key in enumerate(fingerprints):
-            if key in seen:
-                continue
-            seen.add(key)
-            keep_indices.append(idx)
+        keep_indices = _first_unique_indices(fingerprints)
         if len(keep_indices) < len(filtered):
             stats["removed_duplicate"] = len(filtered) - len(keep_indices)
             filtered = filtered.select(keep_indices)

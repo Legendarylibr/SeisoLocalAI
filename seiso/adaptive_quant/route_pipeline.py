@@ -46,14 +46,24 @@ from seiso.adaptive_quant.types import (
     QuantMode,
 )
 
+_median_prompt_cache: dict[int, object] = {}
+
 
 def _median_complexity_prompt(library: PromptLibrary):
     from seiso.adaptive_quant.features import extract_input_features
 
+    cache_key = id(library)
+    cached = _median_prompt_cache.get(cache_key)
+    if cached is not None:
+        return cached
     ordered = sorted(
         library.prompts, key=lambda p: extract_input_features(p).complexity_score
     )
-    return ordered[len(ordered) // 2]
+    pivot = ordered[len(ordered) // 2]
+    _median_prompt_cache[cache_key] = pivot
+    if len(_median_prompt_cache) > 16:
+        _median_prompt_cache.pop(next(iter(_median_prompt_cache)))
+    return pivot
 
 
 # When a route's GGUF file would not fit the hardware memory budget, scale a heavy linear

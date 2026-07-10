@@ -90,8 +90,17 @@ async def test_prepare_sanitizes_n_ctx_and_max_tokens(monkeypatch, tmp_path):
     monkeypatch.setattr(inference_chat, "get_inference_option", option)
     monkeypatch.setattr(inference_chat, "assert_model_fits_for_load", lambda *_a, **_k: None)
     monkeypatch.setattr(
+        inference_chat,
+        "assert_backend_runtime_available",
+        lambda *_a, **_k: None,
+    )
+    monkeypatch.setattr(
         "seiso.memory.protection.sanitize_inference_payload",
-        lambda payload: {**payload, "max_tokens": 1024, "n_ctx": 4096},
+        lambda payload, isolated=False: {
+            **payload,
+            "max_tokens": 1024,
+            "n_ctx": 4096,
+        },
     )
 
     target = await inference_chat.prepare_local_chat_target(
@@ -132,6 +141,11 @@ async def test_resolve_preload_uses_shared_prepare(monkeypatch, tmp_path):
 
     monkeypatch.setattr(inference_chat, "get_inference_option", option)
     monkeypatch.setattr(inference_chat, "assert_model_fits_for_load", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        inference_chat,
+        "assert_backend_runtime_available",
+        lambda *_a, **_k: None,
+    )
 
     ctx = await inference_chat.resolve_preload_context(
         object(),

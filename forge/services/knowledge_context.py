@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import heapq
 import json
+import threading
+import time
 from pathlib import Path
 
 from forge.tools.sanitize import (
@@ -12,6 +14,125 @@ from forge.tools.sanitize import (
     wrap_tool_result,
 )
 from seiso.security import safe_join
+
+# Cache retrieved chunks for identical (user, kb, query) during chat typing polls.
+_RETRIEVE_TTL_S = 30.0
+_RETRIEVE_CACHE_MAX = 64
+_retrieve_cache: dict[tuple[str, str, str, int], tuple[float, list[dict]]] = {}
+_retrieve_lock = threading.Lock()
+
+# Inverted token → chunk indices, keyed by (user, kb, index mtime/size).
+_INDEX_TTL_S = 120.0
+_index_cache: dict[tuple[str, str, float, int], tuple[float, list[dict], dict[str, list[int]]]] = {}
+_index_lock = threading.Lock()
+
+
+def _cache_get(
+    cache: dict,
+    lock: threading.Lock,
+    key: tuple,
+    ttl: float,
+) -> object | None:
+    now = time.monotonic()
+    with lock:
+        entry = cache.get(key)
+        if entry is None:
+            return None
+        created, payload = entry[0], entry[1:]
+        if now - created > ttl:
+            cache.pop(key, None)
+            return None
+        return payload if len(payload) > 1 else payload[0]
+
+
+def _cache_put(
+    cache: dict,
+    lock: threading.Lock,
+    key: tuple,
+    *payload: object,
+    max_size: int,
+) -> None:
+    with lock:
+        if len(cache) >= max_size and key not in cache:
+            # Drop oldest entry.
+            oldest = min(cache.items(), key=lambda item: item[1][0])[0]
+            cache.pop(oldest, None)
+        cache[key] = (time.monotonic(), *payload)
+
+
+def _load_index_chunks(
+    data_dir: Path,
+    *,
+    user_id: str,
+    knowledge_base_id: str,
+) -> tuple[list[dict], dict[str, list[int]]]:
+    kb_dir = safe_join(data_dir, "knowledge", user_id, knowledge_base_id)
+    index_path = kb_dir / "index.jsonl"
+    if not index_path.is_file():
+        return [], {}
+
+    try:
+        st = index_path.stat()
+        mtime = st.st_mtime
+        size = st.st_size
+    except OSError:
+        return [], {}
+
+    cache_key = (user_id, knowledge_base_id, mtime, size)
+    cached = _cache_get(_index_cache, _index_lock, cache_key, _INDEX_TTL_S)
+    if cached is not None:
+        chunks, inverted = cached  # type: ignore[misc]
+        return chunks, inverted
+
+    chunks: list[dict] = []
+    inverted: dict[str, list[int]] = {}
+    with index_path.open(encoding="utf-8") as handle:
+        for line in handle:
+            line = line.strip()
+            if not line:
+                continue
+            chunk = json.loads(line)
+            text = str(chunk.get("text", ""))
+            if chunk.get("instruction_flagged") or is_instruction_like(text):
+                continue
+            idx = len(chunks)
+            chunks.append(chunk)
+            for token in set(text.lower().split()):
+                inverted.setdefault(token, []).append(idx)
+
+    _cache_put(
+        _index_cache,
+        _index_lock,
+        cache_key,
+        chunks,
+        inverted,
+        max_size=32,
+    )
+    return chunks, inverted
+
+
+def count_knowledge_chunks(
+    data_dir: Path,
+    *,
+    user_id: str,
+    knowledge_base_id: str,
+) -> int:
+    """Return chunk count without a full keyword scan (uses index cache when warm)."""
+    chunks, _ = _load_index_chunks(
+        data_dir, user_id=user_id, knowledge_base_id=knowledge_base_id
+    )
+    if chunks:
+        return len(chunks)
+    kb_dir = safe_join(data_dir, "knowledge", user_id, knowledge_base_id)
+    index_path = kb_dir / "index.jsonl"
+    if not index_path.is_file():
+        return 0
+    count = 0
+    with index_path.open(encoding="utf-8") as handle:
+        for line in handle:
+            if line.strip():
+                count += 1
+    return count
 
 
 def retrieve_knowledge_chunks(
@@ -26,39 +147,53 @@ def retrieve_knowledge_chunks(
     if top_k <= 0:
         return []
 
-    kb_dir = safe_join(data_dir, "knowledge", user_id, knowledge_base_id)
-    index_path = kb_dir / "index.jsonl"
-    if not index_path.is_file():
-        return []
-
     q_tokens = set(query.lower().split())
     if not q_tokens:
         return []
 
-    top: list[tuple[float, int, dict]] = []
-    with index_path.open(encoding="utf-8") as handle:
-        for index, line in enumerate(handle):
-            line = line.strip()
-            if not line:
-                continue
-            chunk = json.loads(line)
-            text = str(chunk.get("text", ""))
-            if chunk.get("instruction_flagged") or is_instruction_like(text):
-                continue
-            t_tokens = set(text.lower().split())
-            score = len(q_tokens & t_tokens) / max(len(q_tokens), 1)
-            if score <= 0:
-                continue
-            item = (score, -index, chunk)
-            if len(top) < top_k:
-                heapq.heappush(top, item)
-            else:
-                heapq.heappushpop(top, item)
+    retrieve_key = (user_id, knowledge_base_id, query.strip().lower(), top_k)
+    cached = _cache_get(_retrieve_cache, _retrieve_lock, retrieve_key, _RETRIEVE_TTL_S)
+    if cached is not None:
+        return list(cached)  # type: ignore[arg-type]
 
-    return [
+    chunks, inverted = _load_index_chunks(
+        data_dir, user_id=user_id, knowledge_base_id=knowledge_base_id
+    )
+    if not chunks:
+        return []
+
+    # Candidate set via inverted index (sub-linear when vocabulary is large).
+    candidate_scores: dict[int, int] = {}
+    for token in q_tokens:
+        for idx in inverted.get(token, ()):
+            candidate_scores[idx] = candidate_scores.get(idx, 0) + 1
+
+    top: list[tuple[float, int, dict]] = []
+    denom = max(len(q_tokens), 1)
+    for idx, overlap in candidate_scores.items():
+        score = overlap / denom
+        if score <= 0:
+            continue
+        item = (score, -idx, chunks[idx])
+        if len(top) < top_k:
+            heapq.heappush(top, item)
+        else:
+            heapq.heappushpop(top, item)
+
+    results = [
         chunk
-        for _score, _index, chunk in sorted(top, key=lambda item: (item[0], item[1]), reverse=True)
+        for _score, _index, chunk in sorted(
+            top, key=lambda item: (item[0], item[1]), reverse=True
+        )
     ]
+    _cache_put(
+        _retrieve_cache,
+        _retrieve_lock,
+        retrieve_key,
+        results,
+        max_size=_RETRIEVE_CACHE_MAX,
+    )
+    return list(results)
 
 
 def format_knowledge_context(chunks: list[dict], *, knowledge_base_id: str | None = None) -> str:

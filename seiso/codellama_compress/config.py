@@ -28,6 +28,7 @@ class DistillConfig:
     weight_decay: float = 0.01
     warmup_steps: int = 100
     grad_accum_steps: int = 8
+    micro_batch_size: int = 2
     max_grad_norm: float = 1.0
     precision: Literal["bf16", "fp16"] = "bf16"
     gradient_checkpointing: bool = True
