@@ -445,6 +445,19 @@ async def chat(
     payload["user_id"] = user_id
 
     knowledge_context: str | None = None
+    if body.knowledge_base_id:
+        # Resolve the latest user turn once for retrieval, then build messages
+        # with knowledge injected (avoids a full trusted-message rebuild).
+        last = body.messages[-1] if body.messages else {}
+        user_query = normalize_text(str(last.get("content") or "")).strip()
+        kb_id = validate_kb_id(body.knowledge_base_id)
+        chunks = retrieve_knowledge_chunks(
+            settings.data_dir,
+            user_id=user_id,
+            knowledge_base_id=kb_id,
+            query=user_query,
+        )
+        knowledge_context = format_knowledge_context(chunks, knowledge_base_id=kb_id) or None
     trusted_messages, _user_content = await build_trusted_messages(
         db,
         thread_id=body.thread_id,
@@ -456,27 +469,6 @@ async def chat(
         tools_enabled=body.tools,
         knowledge_context=knowledge_context,
     )
-    if body.knowledge_base_id:
-        kb_id = validate_kb_id(body.knowledge_base_id)
-        user_query = normalize_text(_user_content or "").strip()
-        chunks = retrieve_knowledge_chunks(
-            settings.data_dir,
-            user_id=user_id,
-            knowledge_base_id=kb_id,
-            query=user_query,
-        )
-        knowledge_context = format_knowledge_context(chunks, knowledge_base_id=kb_id) or None
-        trusted_messages, _user_content = await build_trusted_messages(
-            db,
-            thread_id=body.thread_id,
-            client_messages=body.messages,
-            persist_user=bool(body.thread_id),
-            user_id=user_id,
-            model_id=body.model_id,
-            model_path=body.model_path,
-            tools_enabled=body.tools,
-            knowledge_context=knowledge_context,
-        )
     payload["messages"] = trusted_messages
 
     if body.provider_id:

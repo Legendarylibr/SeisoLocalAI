@@ -215,7 +215,7 @@ def apply_platform_memory_profile(
                 os.environ.setdefault("SEISO_LLAMA_OP_OFFLOAD", "true")
                 os.environ.setdefault("SEISO_LLAMA_OFFLOAD_KQV", "true")
                 if tier == HardwareTier.WORKSTATION:
-                    os.environ.setdefault("SEISO_STREAM_BATCH_CHARS", "16")
+                    os.environ.setdefault("SEISO_STREAM_BATCH_CHARS", "4")
         elif caps.get("train_platform") == "cpu" or not caps.get("gpu_count"):
             os.environ.setdefault("SEISO_LLAMA_GPU_LAYERS", "0")
             if native_linux_nvidia:

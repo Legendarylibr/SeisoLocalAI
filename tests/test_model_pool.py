@@ -755,7 +755,7 @@ def test_llama_reuses_larger_preloaded_context(monkeypatch, tmp_path):
     assert load_paths == [str(model_path.absolute())]
 
 
-def test_native_linux_llama_does_not_reuse_larger_cached_context(monkeypatch, tmp_path):
+def test_native_linux_llama_reuses_larger_cached_context(monkeypatch, tmp_path):
     from seiso.inference import model_pool
 
     pool = ModelPool()
@@ -779,13 +779,14 @@ def test_native_linux_llama_does_not_reuse_larger_cached_context(monkeypatch, tm
     monkeypatch.setattr(model_pool, "_llama_cache_is_optimal", lambda *_a, **_k: True)
     monkeypatch.setattr(model_pool, "_llama_cache_headroom_ok", lambda *_a, **_k: True)
 
-    pool.get_llama(str(model_path), n_ctx=4096, max_tokens=512)
-    pool.get_llama(str(model_path), n_ctx=2048, max_tokens=512)
+    first = pool.get_llama(str(model_path), n_ctx=4096, max_tokens=512)
+    second = pool.get_llama(str(model_path), n_ctx=2048, max_tokens=512)
 
-    assert load_ctx == [4096, 2048]
+    assert load_ctx == [4096]
+    assert first is second
 
 
-def test_native_linux_llama_does_not_reuse_larger_cached_completion_budget(
+def test_native_linux_llama_reuses_larger_cached_completion_budget(
     monkeypatch, tmp_path
 ):
     from seiso.inference import model_pool
@@ -811,10 +812,11 @@ def test_native_linux_llama_does_not_reuse_larger_cached_completion_budget(
     monkeypatch.setattr(model_pool, "_llama_cache_is_optimal", lambda *_a, **_k: True)
     monkeypatch.setattr(model_pool, "_llama_cache_headroom_ok", lambda *_a, **_k: True)
 
-    pool.get_llama(str(model_path), n_ctx=4096, max_tokens=2048)
-    pool.get_llama(str(model_path), n_ctx=4096, max_tokens=512)
+    first = pool.get_llama(str(model_path), n_ctx=4096, max_tokens=2048)
+    second = pool.get_llama(str(model_path), n_ctx=4096, max_tokens=512)
 
-    assert load_tokens == [2048, 512]
+    assert load_tokens == [2048]
+    assert first is second
 
 
 def test_dflash_loader_reuses_vram_aware_llama_loader(monkeypatch, tmp_path):

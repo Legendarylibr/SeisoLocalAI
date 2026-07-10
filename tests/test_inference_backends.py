@@ -1062,6 +1062,23 @@ def test_llamaswap_complete_serializes_native_tool_calls(monkeypatch):
     )
 
 
+
+def test_sidecar_perf_mode_raises_batch_and_keep_alive(monkeypatch):
+    from seiso.inference import llamaswap
+
+    monkeypatch.setenv("SEISO_SIDECAR_PERF_MODE", "1")
+    monkeypatch.delenv("SEISO_OLLAMA_NUM_BATCH", raising=False)
+    monkeypatch.delenv("SEISO_OLLAMA_KEEP_ALIVE", raising=False)
+    monkeypatch.delenv("SEISO_SIDECAR_VRAM_BUDGET_RATIO", raising=False)
+    monkeypatch.setattr(llamaswap, "_sidecar_native_linux_nvidia", lambda: True)
+    monkeypatch.setattr(llamaswap, "_sidecar_consumer_nvidia_gpu", lambda: True)
+    monkeypatch.setattr(llamaswap, "_sidecar_headroom_mb", lambda: 20_000)
+
+    assert llamaswap.sidecar_ollama_num_batch() == 512
+    assert llamaswap.sidecar_ollama_keep_alive() == "10m"
+    assert llamaswap._sidecar_vram_budget_ratio() == 0.70
+
+
 def test_sidecar_num_ctx_buckets_to_prompt_and_generation():
     from seiso.inference.llamaswap import sidecar_num_ctx
 
