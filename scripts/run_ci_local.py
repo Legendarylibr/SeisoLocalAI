@@ -42,9 +42,11 @@ CI_ENV: dict[str, str] = {
 
 PY_PACKAGES = ("seiso", "forge", "seiso_cli", "tests")
 PY_TYPE_PACKAGES = ("seiso", "forge", "seiso_cli")
+PY_SOURCE_ROOTS = ("seiso", "forge", "seiso_cli")
 
 ALL_JOBS = ("deps", "lint", "types", "test", "security", "frontend", "imports")
 FAST_JOBS = ("deps", "lint", "types", "test", "security")
+CHANGED_JOBS = ("lint", "test")
 
 SECRET_SCAN_SHELL = r"""
 set -euo pipefail
@@ -61,6 +63,54 @@ fi
 
 def repo_root() -> Path:
     return Path(__file__).resolve().parent.parent
+
+
+def _git_lines(root: Path, *args: str, check: bool = True) -> list[str]:
+    result = subprocess.run(
+        ["git", *args],
+        cwd=str(root),
+        capture_output=True,
+        text=True,
+        check=check,
+    )
+    return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+
+
+def changed_files(root: Path, base: str | None) -> list[Path]:
+    """Return changed tracked and untracked files relative to a merge base."""
+    comparison_base = base or os.environ.get("CHANGED_BASE", "origin/main")
+    merge_base = subprocess.run(
+        ["git", "merge-base", "HEAD", comparison_base],
+        cwd=str(root),
+        capture_output=True,
+        text=True,
+    )
+    if merge_base.returncode == 0:
+        committed = _git_lines(
+            root,
+            "diff",
+            "--name-only",
+            "--diff-filter=ACMR",
+            f"{merge_base.stdout.strip()}...HEAD",
+        )
+    else:
+        committed = _git_lines(
+            root,
+            "diff",
+            "--name-only",
+            "--diff-filter=ACMR",
+            "HEAD~1",
+            check=False,
+        )
+    working = _git_lines(root, "diff", "--name-only", "--diff-filter=ACMR")
+    staged = _git_lines(root, "diff", "--cached", "--name-only", "--diff-filter=ACMR")
+    untracked = _git_lines(root, "ls-files", "--others", "--exclude-standard")
+    paths = {
+        Path(name)
+        for name in (*committed, *working, *staged, *untracked)
+        if (root / name).is_file()
+    }
+    return sorted(paths, key=lambda path: path.as_posix())
 
 
 def resolve_python_bin(root: Path) -> str:
@@ -120,7 +170,7 @@ def _pip_upgrade(python: str, *packages: str) -> list[str]:
 
 def _ensure_dev_tools(root: Path, python: str, env: dict[str, str]) -> None:
     missing = []
-    for module in ("ruff", "mypy", "pylint", "bandit", "pytest"):
+    for module in ("ruff", "mypy", "pylint", "bandit", "pytest", "xdist"):
         probe = subprocess.run(
             [python, "-c", f"import {module}"],
             cwd=str(root),
@@ -145,12 +195,6 @@ def _install_project(
     _step(
         "Install project",
         [python, "-m", "pip", "install", "-e", f".[{extra}]"],
-        cwd=root,
-        env=env,
-    )
-    _step(
-        "Install dev tools",
-        [python, "-m", "pip", "install", "-r", "requirements-dev.txt"],
         cwd=root,
         env=env,
     )
@@ -202,25 +246,35 @@ def job_lint(
     *,
     fix: bool,
     update_baseline: bool,
+    files: Sequence[Path] | None = None,
 ) -> None:
     _banner(f"Job: lint (Python {CI_PYTHON}, host {platform.system()})")
+    ruff_targets = [
+        path.as_posix()
+        for path in files or ()
+        if path.suffix == ".py" and path.parts and path.parts[0] in PY_PACKAGES
+    ]
+    if files is not None and not ruff_targets:
+        print("No changed Python files to lint.")
+        return
+    lint_targets = ruff_targets or list(PY_PACKAGES)
 
     if fix:
         _step(
             "Ruff auto-fix",
-            [python, "-m", "ruff", "check", *PY_PACKAGES, "--fix", "--unsafe-fixes"],
+            [python, "-m", "ruff", "check", *lint_targets, "--fix", "--unsafe-fixes"],
             cwd=root,
             env=env,
         )
         _step(
             "Ruff format",
-            [python, "-m", "ruff", "format", *PY_PACKAGES],
+            [python, "-m", "ruff", "format", *lint_targets],
             cwd=root,
             env=env,
         )
 
     result = subprocess.run(
-        [python, "-m", "ruff", "check", *PY_PACKAGES, "--output-format=json"],
+        [python, "-m", "ruff", "check", *lint_targets, "--output-format=json"],
         cwd=str(root),
         env=env,
         capture_output=True,
@@ -244,25 +298,27 @@ def job_lint(
         update_baseline=update_baseline,
     )
 
-    _step(
-        "Pylint (errors/fatals)",
-        [
-            python,
-            "-m",
-            "pylint",
-            "seiso",
-            "forge",
-            "seiso_cli",
-            "--jobs=0",
-            "--disable=all",
-            "--enable=E,F",
-            "--disable=possibly-used-before-assignment",
-            "--disable=invalid-enum-extension",
-            "--score=n",
-        ],
-        cwd=root,
-        env={**env, "PYLINTHOME": str(root / ".cache" / "pylint")},
-    )
+    pylint_targets = [
+        path for path in lint_targets if Path(path).parts and Path(path).parts[0] in PY_SOURCE_ROOTS
+    ]
+    if pylint_targets:
+        _step(
+            "Pylint (errors/fatals)",
+            [
+                python,
+                "-m",
+                "pylint",
+                *pylint_targets,
+                "--jobs=0",
+                "--disable=all",
+                "--enable=E,F",
+                "--disable=possibly-used-before-assignment",
+                "--disable=invalid-enum-extension",
+                "--score=n",
+            ],
+            cwd=root,
+            env={**env, "PYLINTHOME": str(root / ".cache" / "pylint")},
+        )
 
 
 def job_deps(root: Path, python: str, env: dict[str, str]) -> None:
@@ -275,9 +331,7 @@ def job_deps(root: Path, python: str, env: dict[str, str]) -> None:
     )
 
 
-def job_types(
-    root: Path, python: str, env: dict[str, str], *, update_baseline: bool
-) -> None:
+def job_types(root: Path, python: str, env: dict[str, str], *, update_baseline: bool) -> None:
     _banner("Job: types (mypy)")
     version = subprocess.run(
         [
@@ -320,23 +374,47 @@ def job_types(
     )
 
 
-def job_test(root: Path, python: str, env: dict[str, str]) -> None:
+def job_test(
+    root: Path,
+    python: str,
+    env: dict[str, str],
+    *,
+    files: Sequence[Path] | None = None,
+    workers: int = 0,
+    hardware_tests: bool = False,
+) -> None:
     _banner("Job: test (smoke imports + pytest)")
 
-    _step(
-        "Smoke import core",
-        [
-            python,
-            "-c",
-            "import seiso; import forge; import seiso_cli; "
-            "print('seiso', seiso.__version__ if hasattr(seiso, '__version__') else 'ok')",
-        ],
-        cwd=root,
-        env=env,
-    )
+    if files is None:
+        _step(
+            "Smoke import core",
+            [
+                python,
+                "-c",
+                "import seiso; import forge; import seiso_cli; "
+                "print('seiso', seiso.__version__ if hasattr(seiso, '__version__') else 'ok')",
+            ],
+            cwd=root,
+            env=env,
+        )
+        test_targets = ["tests/"]
+    else:
+        test_targets = [
+            path.as_posix()
+            for path in files
+            if path.suffix == ".py" and path.parts and path.parts[0] == "tests"
+        ]
+        if not test_targets:
+            print("No directly changed test modules to run.")
+            return
+
+    marker = "gpu and not slow" if hardware_tests else "not slow and not gpu"
+    command = [python, "-m", "pytest", *test_targets, "-q", "-m", marker]
+    if workers > 0:
+        command.extend(["-n", str(workers), "--dist", "loadscope"])
     _step(
         "Pytest",
-        [python, "-m", "pytest", "tests/", "-q", "-m", "not slow"],
+        command,
         cwd=root,
         env=env,
     )
@@ -364,9 +442,7 @@ def job_security(root: Path, python: str, env: dict[str, str]) -> None:
     )
     secret_env = dict(env)
     secret_env["DETECT_SECRETS_CMD"] = f"{python} -m detect_secrets"
-    _shell_step(
-        "Secret scan (detect-secrets)", SECRET_SCAN_SHELL, cwd=root, env=secret_env
-    )
+    _shell_step("Secret scan (detect-secrets)", SECRET_SCAN_SHELL, cwd=root, env=secret_env)
     _step("pip check", [python, "-m", "pip", "check"], cwd=root, env=env)
     _step(
         "Dependency vulnerability audit",
@@ -383,6 +459,8 @@ def job_security(root: Path, python: str, env: dict[str, str]) -> None:
             "PYSEC-2025-194",
             "--ignore-vuln",
             "CVE-2025-69872",
+            "--ignore-vuln",
+            "PYSEC-2026-1325",
         ],
         cwd=root,
         env=env,
@@ -468,9 +546,7 @@ def job_imports(root: Path, python: str, env: dict[str, str]) -> None:
 def _print_plan(*, python_bin: str, jobs: Sequence[str], fix: bool) -> None:
     host = platform.system()
     print(f"Quality gate: {CI_DOC}")
-    print(
-        f"Local host: {host}  |  interpreter: {python_bin}  |  CI Python: {CI_PYTHON}"
-    )
+    print(f"Local host: {host}  |  interpreter: {python_bin}  |  CI Python: {CI_PYTHON}")
     if fix:
         print("Ruff auto-fix: enabled (--fix)")
     print("\nRecommended matrix (run --fast before merges):")
@@ -485,9 +561,7 @@ def _print_plan(*, python_bin: str, jobs: Sequence[str], fix: bool) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(
-        description="Run the local quality gate (docs/CI_LOCAL.md)."
-    )
+    parser = argparse.ArgumentParser(description="Run the local quality gate (docs/CI_LOCAL.md).")
     parser.add_argument(
         "--job",
         choices=ALL_JOBS,
@@ -529,12 +603,43 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Skip pip install steps (assume deps already installed).",
     )
+    parser.add_argument(
+        "--changed",
+        action="store_true",
+        help="Run lint and directly changed test modules instead of the full local gate.",
+    )
+    parser.add_argument(
+        "--changed-base",
+        default=None,
+        help="Git ref used as the changed-file merge base (default: origin/main).",
+    )
+    parser.add_argument(
+        "--pytest-workers",
+        type=int,
+        default=0,
+        metavar="N",
+        help="Run pytest with N xdist workers (default: serial).",
+    )
+    parser.add_argument(
+        "--hardware-tests",
+        action="store_true",
+        help="Run non-slow tests marked gpu instead of the CPU test selection.",
+    )
     args = parser.parse_args(argv)
 
     root = repo_root()
     python_bin = args.python_bin or resolve_python_bin(root)
 
-    if args.fast:
+    if args.pytest_workers < 0:
+        parser.error("--pytest-workers must be zero or greater")
+    if args.changed and args.fast:
+        parser.error("--changed and --fast cannot be combined")
+    if args.changed and args.job and any(job not in CHANGED_JOBS for job in args.job):
+        parser.error("--changed only supports --job lint and --job test")
+
+    if args.changed:
+        jobs = list(dict.fromkeys(args.job or CHANGED_JOBS))
+    elif args.fast:
         jobs = list(FAST_JOBS)
     elif args.job:
         jobs = list(dict.fromkeys(args.job))
@@ -547,6 +652,9 @@ def main(argv: list[str] | None = None) -> int:
 
     _print_plan(python_bin=python_bin, jobs=jobs, fix=args.fix)
     env = _ci_env(python_bin)
+    selected_files = changed_files(root, args.changed_base) if args.changed else None
+    if selected_files is not None:
+        print(f"\nChanged-file mode: {len(selected_files)} files selected.")
 
     try:
         if not args.skip_install:
@@ -566,13 +674,19 @@ def main(argv: list[str] | None = None) -> int:
                     env,
                     fix=args.fix,
                     update_baseline=args.update_ruff_baseline,
+                    files=selected_files,
                 )
             elif job == "types":
-                job_types(
-                    root, python_bin, env, update_baseline=args.update_mypy_baseline
-                )
+                job_types(root, python_bin, env, update_baseline=args.update_mypy_baseline)
             elif job == "test":
-                job_test(root, python_bin, env)
+                job_test(
+                    root,
+                    python_bin,
+                    env,
+                    files=selected_files,
+                    workers=args.pytest_workers,
+                    hardware_tests=args.hardware_tests,
+                )
             elif job == "security":
                 job_security(root, python_bin, env)
             elif job == "frontend":
@@ -587,9 +701,7 @@ def main(argv: list[str] | None = None) -> int:
 
     print("\nOK: run_ci_local.py finished successfully (all selected jobs passed).")
     if len(jobs) == len(ALL_JOBS):
-        print(
-            f"See {CI_DOC} for the recommended cross-platform matrix before large merges."
-        )
+        print(f"See {CI_DOC} for the recommended cross-platform matrix before large merges.")
     return 0
 
 

@@ -7,11 +7,13 @@ Run the full local quality gate before opening PRs or cutting releases.
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -U pip
-pip install -e ".[forge,dev]"
-pip install -r requirements-dev.txt
+pip install -e ".[forge,train,dev]"
 
 make ci-fast      # daily loop: lint + types + test + security
 make ci           # full gate (+ frontend build + optional import smokes)
+make check-changed # changed Python files + directly changed test modules
+make test-parallel # CPU tests with two pytest-xdist workers
+make test-hardware # opt-in tests that require a working GPU/toolkit
 make ci-list      # show jobs and recommended matrix
 ```
 
@@ -62,9 +64,11 @@ python3 scripts/run_ci_local.py --job types --update-mypy-baseline --skip-instal
 
 ### Test detail
 
-- Installs `.[forge,dev]` unless `--skip-install`
+- Installs `.[forge,train,dev]` once unless `--skip-install`
 - `tests/test_docs_accuracy.py` — doc links, example configs, and training API references stay aligned with the codebase
-- Runs unit/integration tests excluding `@pytest.mark.slow`
+- Runs CPU unit/integration tests excluding `@pytest.mark.slow` and `@pytest.mark.gpu`
+- `--pytest-workers N` enables pytest-xdist with scope-aware distribution; CI uses two workers
+- `--hardware-tests` selects non-slow `@pytest.mark.gpu` tests on hosts with a matching runtime/toolkit
 - Slow tests: `pytest -m slow`
 
 ### Security detail
@@ -101,13 +105,38 @@ pre-commit install
 pre-commit run --all-files   # first-time baseline
 ```
 
-Hooks: detect-secrets, ruff (+ format), mypy, bandit, pytest (pre-push only).
+Hooks: detect-secrets and Ruff run on staged files. The pre-push hook runs the
+changed-file quality path. Full Mypy, security, and test coverage remain
+authoritative CI checks.
+
+## Changed-file checks
+
+For a quick local loop, compare against `origin/main`, lint changed Python
+files, and run directly changed test modules:
+
+```bash
+make check-changed
+python3 scripts/run_ci_local.py --changed --changed-base main --skip-install
+```
+
+This mode deliberately does not claim full transitive coverage. Run
+`make ci-fast` before merging when CI is unavailable.
+
+## GitHub Actions
+
+CI runs dependency locks, lint, Mypy, CPU tests, security, and frontend checks
+as independent parallel jobs. Each Python job installs its tailored dependency
+set once and calls the local runner with `--skip-install`. GitHub's pip and npm
+caches reuse downloaded packages; virtualenv artifacts are not shared because
+the training environment is large and environment paths are not portable. An
+aggregate `Quality gate` job preserves the single branch-protection check.
 
 ## Environment variables
 
 | Variable | Effect |
 |----------|--------|
 | `PYTHON_BIN` | Force interpreter (default: `.venv/bin/python` or `venv/bin/python`) |
+| `CHANGED_BASE` | Override the default `origin/main` base for `--changed` |
 
 ## Recommended matrix
 
@@ -125,6 +154,8 @@ make lint
 make deps
 make types
 make test
+make test-parallel
+make test-hardware
 make security
 make frontend
 make imports

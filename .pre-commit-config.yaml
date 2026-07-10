@@ -12,22 +12,11 @@ repos:
       - id: ruff
         args: ["--fix"]
       - id: ruff-format
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.15.0
-    hooks:
-      - id: mypy
-        additional_dependencies: [pydantic>=2.6, pydantic-settings>=2.2]
-        args: ["seiso", "forge", "seiso_cli"]
   - repo: local
     hooks:
-      - id: bandit
-        name: bandit
-        entry: bandit -r seiso forge seiso_cli -l -c pyproject.toml
-        language: system
-        pass_filenames: false
-      - id: pytest-fast
-        name: pytest (not slow)
-        entry: pytest tests/ -q -m "not slow"
+      - id: changed-quality
+        name: changed-file quality checks
+        entry: python scripts/run_ci_local.py --changed --skip-install
         language: system
         pass_filenames: false
         stages: [pre-push]

@@ -12,3 +12,4 @@ pip-audit>=2.7
 pre-commit>=3.7
 pytest>=8.2
 pytest-asyncio>=0.23
+pytest-xdist>=3.6
