@@ -243,6 +243,7 @@ def test_native_linux_flash_attn_family_policy(monkeypatch, tmp_path: Path):
         if key.startswith("SEISO_LLAMA_"):
             monkeypatch.delenv(key, raising=False)
     monkeypatch.delenv("SEISO_LLAMA_UNSAFE_FLASH_ATTN", raising=False)
+    monkeypatch.setenv("SEISO_LLAMA_GPU_LAYERS", "-1")
 
     # Default off even for dense families.
     monkeypatch.setenv("SEISO_LLAMA_FLASH_ATTN", "false")

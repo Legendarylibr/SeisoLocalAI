@@ -350,6 +350,10 @@ class ModelPool:
                 return None
             if backend != BackendKind.LLAMA:
                 return self._active.handle
+            if needed_ctx <= 0 and needed_tokens <= 0:
+                # Direct switch() callers have no llama context policy to
+                # re-evaluate. The matching active key is a complete cache hit.
+                return self._active.handle
             # Reuse a larger cached context/completion budget when headroom is OK.
             # Exact-match used to force reloads on every context-bucket step.
             cached_tokens = int(

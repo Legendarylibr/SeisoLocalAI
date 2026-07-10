@@ -488,6 +488,7 @@ def test_safetensors_inventory_exposes_torch_and_mlx_fallbacks(
     model_dir.mkdir()
     (model_dir / "model.safetensors").write_bytes(b"x")
     monkeypatch.setattr(backends, "detect_backend", lambda: Backend.MLX)
+    monkeypatch.setattr(backends.platform, "system", lambda: "Darwin")
 
     assert available_backends(model_path=str(model_dir), model_format="safetensors") == [
         BACKEND_MLX

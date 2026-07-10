@@ -514,8 +514,15 @@ def test_prepare_for_load_unloads_spec_bundle_for_same_torch_path(tmp_path, monk
     assert pool.active_key is None
 
 
-def test_switch_serializes_concurrent_loads_for_same_model(tmp_path):
+def test_switch_serializes_concurrent_loads_for_same_model(monkeypatch, tmp_path):
     pool = ModelPool()
+    monkeypatch.setattr(
+        "seiso.memory.protection.estimate_path_vram_mb", lambda _path: 0
+    )
+    monkeypatch.setattr(
+        "seiso.memory.protection.ensure_load_fits", lambda *_a, **_k: None
+    )
+    monkeypatch.setattr(pool, "_ensure_resident_gpu_resource_lock", lambda: None)
     model_path = tmp_path / "model.gguf"
     model_path.write_bytes(b"gguf")
     handle = object()
@@ -743,6 +750,8 @@ def test_llama_reuses_larger_preloaded_context(monkeypatch, tmp_path):
 
     monkeypatch.setattr(model_pool, "_native_linux_nvidia", lambda: False)
     monkeypatch.setattr(model_pool, "_load_llama_model", fake_load)
+    monkeypatch.setattr(model_pool, "_llama_cache_is_optimal", lambda *_a, **_k: True)
+    monkeypatch.setattr(model_pool, "_llama_cache_headroom_ok", lambda *_a, **_k: True)
     monkeypatch.setattr(
         "seiso.inference.tuning.attach_llama_prompt_cache",
         lambda _llm: None,
