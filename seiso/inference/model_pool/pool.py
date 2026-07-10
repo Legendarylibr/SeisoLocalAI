@@ -590,7 +590,9 @@ class ModelPool:
         """Backward-compatible alias for compact-tier reload."""
         return self.reload_llama(model_path, n_ctx, tier="compact")
 
-    def get_llamaswap(self, model_path: str) -> Any:
+    def get_llamaswap(
+        self, model_path: str, *, num_ctx: int | None = None
+    ) -> Any:
         def loader(_path: str):
             from seiso.inference.llamaswap import create_isolated_gguf_client
 
@@ -600,13 +602,22 @@ class ModelPool:
 
         norm = self.normalize_path(model_path)
         key = f"llamaswap:{norm}"
+        meta: dict[str, Any] = {"sidecar": True}
+        if num_ctx is not None and int(num_ctx) > 0:
+            meta["n_ctx"] = int(num_ctx)
         client = self.switch(
             model_path,
             BackendKind.LLAMASWAP,
             loader,
             cache_key=key,
-            meta={"sidecar": True},
+            meta=meta,
         )
+        # Refresh pinned ctx on cache hits so preload planning sticks.
+        if num_ctx is not None and int(num_ctx) > 0:
+            with self._lock:
+                if self._active and self._active.key == key:
+                    self._active.meta["n_ctx"] = int(num_ctx)
+                    self._active.meta["sidecar"] = True
         ensure_ready = getattr(client, "ensure_ready", None)
         if callable(ensure_ready):
             ensure_ready()

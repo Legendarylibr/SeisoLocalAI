@@ -2042,10 +2042,17 @@ async def test_runner_routes_tools_to_llamaswap(monkeypatch):
         "_resolve_route",
         lambda _payload, _model_path: ("llamaswap", "/tmp/model.gguf"),
     )
-    monkeypatch.setattr(runner._pool, "get_llamaswap", lambda _path: FakeClient())
+    monkeypatch.setattr(
+        runner._pool, "get_llamaswap", lambda _path, **_kw: FakeClient()
+    )
     monkeypatch.setattr(runner._pool, "bump_generation", lambda: 1)
     monkeypatch.setattr(runner._pool, "is_generation_active", lambda _gen: True)
     monkeypatch.setattr(runner, "_ensure_model_switch", AsyncMock())
+    monkeypatch.setattr(
+        runner,
+        "_llamaswap_payload",
+        lambda payload, _path: {**payload, "sidecar_active": True},
+    )
 
     result = await runner.chat(
         {

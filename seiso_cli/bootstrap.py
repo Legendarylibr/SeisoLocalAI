@@ -21,6 +21,12 @@ def bootstrap_runtime() -> None:
         from seiso.memory.platform_profile import apply_platform_memory_profile
 
         apply_platform_memory_profile()
+        try:
+            from seiso.inference.profiles import apply_inference_profile
+
+            apply_inference_profile()
+        except Exception:
+            pass
     except ImportError:
         pass
     _bootstrap_done = True

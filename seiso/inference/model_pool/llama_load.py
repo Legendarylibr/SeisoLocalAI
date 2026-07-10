@@ -513,6 +513,28 @@ def _llama_cache_headroom_ok(handle: Any, *, max_tokens: int = 512) -> bool:
     return True
 
 
+def _llama_prompt_lookup_draft() -> Any | None:
+    """Optional n-gram prompt-lookup draft for native llama.cpp speculative decode.
+
+    Opt-in via ``SEISO_LLAMA_PROMPT_LOOKUP=1``. Uses llama-cpp-python's
+    ``LlamaPromptLookupDecoding`` (no second GGUF). Safe to skip when the
+    package or class is unavailable.
+    """
+    if not env_bool("SEISO_LLAMA_PROMPT_LOOKUP", False):
+        return None
+    try:
+        from llama_cpp.llama_speculative import LlamaPromptLookupDecoding
+    except Exception:
+        logger.debug("llama prompt-lookup draft unavailable", exc_info=True)
+        return None
+    n_pred = max(1, env_int("SEISO_LLAMA_PROMPT_LOOKUP_TOKENS", 8))
+    try:
+        return LlamaPromptLookupDecoding(num_pred_tokens=n_pred)
+    except Exception:
+        logger.debug("Failed to construct LlamaPromptLookupDecoding", exc_info=True)
+        return None
+
+
 def llama_load_kwargs(
     n_ctx: int, *, model_path: str | None = None, max_tokens: int = 512
 ) -> dict[str, Any]:
@@ -708,8 +730,16 @@ def _load_llama_model(
         from seiso.inference.llama_vision import apply_llama_vision_load_kwargs
 
         load_kwargs = apply_llama_vision_load_kwargs(load_kwargs, path)
+        draft_model = _mp()._llama_prompt_lookup_draft()
+        if draft_model is not None:
+            load_kwargs["draft_model"] = draft_model
         try:
-            llm = Llama(model_path=path, **load_kwargs)
+            try:
+                llm = Llama(model_path=path, **load_kwargs)
+            except TypeError:
+                # Older llama-cpp-python without draft_model support.
+                load_kwargs.pop("draft_model", None)
+                llm = Llama(model_path=path, **load_kwargs)
             llm._seiso_n_gpu_layers = layers  # noqa: SLF001
             llm._seiso_load_tier = load_tier  # noqa: SLF001
             llm._seiso_n_batch = int(load_kwargs.get("n_batch") or 0)  # noqa: SLF001
@@ -718,6 +748,7 @@ def _load_llama_model(
             llm._seiso_model_path = path  # noqa: SLF001
             llm._seiso_max_tokens = max_tokens  # noqa: SLF001
             llm._seiso_load_headroom_mb = _prot().headroom_mb()  # noqa: SLF001
+            llm._seiso_prompt_lookup = bool(load_kwargs.get("draft_model"))  # noqa: SLF001
             if batch_override is not None:
                 llm._seiso_last_safe_batch = int(load_kwargs.get("n_batch") or 0)  # noqa: SLF001
                 llm._seiso_last_safe_ubatch = int(load_kwargs.get("n_ubatch") or 0)  # noqa: SLF001

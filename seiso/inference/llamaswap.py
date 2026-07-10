@@ -494,11 +494,27 @@ def sidecar_ollama_num_batch() -> int | None:
     return None
 
 
-def sidecar_ollama_keep_alive() -> str | None:
-    """Keep GPU residency short so idle models release VRAM promptly."""
+def sidecar_ollama_keep_alive(*, active: bool = False) -> str | None:
+    """Keep GPU residency short so idle models release VRAM promptly.
+
+    When ``active`` is True (in-flight chat / preload pin), prefer a longer
+    keep_alive so the sidecar does not unload mid-session. Explicit
+    ``SEISO_OLLAMA_KEEP_ALIVE`` always wins.
+    """
     override = env_str("SEISO_OLLAMA_KEEP_ALIVE", "").strip()
     if override:
         return override
+    if active:
+        try:
+            from seiso.inference.profiles import profile_sidecar_keep_alive_override
+
+            profile_ka = profile_sidecar_keep_alive_override()
+            if profile_ka:
+                return profile_ka
+        except Exception:
+            pass
+        if _sidecar_perf_mode() or _sidecar_native_linux_nvidia():
+            return _SIDECAR_PERF_KEEP_ALIVE
     if _sidecar_native_linux_nvidia():
         if _sidecar_perf_mode():
             free_mb = _sidecar_headroom_mb()
@@ -553,6 +569,9 @@ def plan_sidecar_request(
     marker) only when they exceed the model's native context ceiling, so the
     sidecar never silently truncates the prompt from the front and drops the
     system message.
+
+    When ``payload`` carries a pinned ``sidecar_num_ctx`` (from preload), that
+    value is reused so multi-turn chat does not resize the sidecar KV window.
     """
     from seiso.memory.protection.chat_guards import trim_llama_messages_to_context
 
@@ -562,7 +581,14 @@ def plan_sidecar_request(
     ceiling = sidecar_vram_context_cap(model_path, ceiling, max_tokens=max_tokens)
     if payload.get("n_ctx"):
         ceiling = min(ceiling, max(2048, int(payload["n_ctx"])))
-    num_ctx = sidecar_num_ctx(messages, max_tokens=max_tokens, ceiling=ceiling)
+    pinned = payload.get("sidecar_num_ctx")
+    if pinned is not None:
+        try:
+            num_ctx = max(2048, min(int(pinned), ceiling))
+        except (TypeError, ValueError):
+            num_ctx = sidecar_num_ctx(messages, max_tokens=max_tokens, ceiling=ceiling)
+    else:
+        num_ctx = sidecar_num_ctx(messages, max_tokens=max_tokens, ceiling=ceiling)
     messages = trim_llama_messages_to_context(
         messages, n_ctx=num_ctx, max_tokens=max_tokens
     )
@@ -741,7 +767,9 @@ class OllamaClient:
             "stream": stream,
             "options": options,
         }
-        keep_alive = sidecar_ollama_keep_alive()
+        # Chat/preload requests pin residency; idle probes use the short default.
+        active = bool(payload.get("sidecar_active", True))
+        keep_alive = sidecar_ollama_keep_alive(active=active)
         if keep_alive:
             body["keep_alive"] = keep_alive
         tools = payload.get("tools_schemas")
