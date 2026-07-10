@@ -123,7 +123,7 @@ export type InferenceModelOption = {
   status_note?: string;
   context_ceiling?: number;
   recommended_max_tokens?: number;
-  recommended_context_window?: "auto" | number;
+  recommended_context_window?: "auto" | number; // number preferred so preload pins a fixed KV size
   safe_context_window_options?: number[];
   safe_context_window_max?: number;
   chat_safety_note?: string;

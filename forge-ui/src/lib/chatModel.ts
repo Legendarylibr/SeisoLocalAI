@@ -4,7 +4,10 @@ import { bindAbort, throwIfAborted } from "@/lib/abort";
 import { inventoryHasRepo, inventoryMatchesRepo, streamHubModelDownload, ModelProgressHandler } from "@/lib/hubDownload";
 import { readStoredModel, writeStoredModel } from "@/lib/modelSelection";
 import { progressFromPreloadEvent } from "@/lib/modelProgress";
-import { readStoredContextWindowForModel } from "@/lib/chatContext";
+import {
+  readStoredContextWindowForModel,
+  writeStoredContextWindowForModel,
+} from "@/lib/chatContext";
 
 export const CHAT_MODEL_STORAGE_KEY = "chat";
 export const CHAT_BACKEND_STORAGE_KEY = "chat-backend";
@@ -171,13 +174,30 @@ export type PreloadInferenceOptions = {
   nCtx?: number | null;
 };
 
+export type PreloadResult = {
+  backend: string;
+  /** Pinned context from preload (sidecar/llama); null when unknown. */
+  nCtx: number | null;
+};
+
+function pinnedCtxFromPreload(data: Record<string, unknown>): number | null {
+  for (const key of ["sidecar_num_ctx", "n_ctx"] as const) {
+    const raw = data[key];
+    const num = typeof raw === "number" ? raw : Number(raw);
+    if (Number.isFinite(num) && num >= 2048 && num <= 131072) {
+      return Math.trunc(num);
+    }
+  }
+  return null;
+}
+
 export function preloadWithProgress(
   modelId: string,
   backend: string,
   onProgress?: ModelProgressHandler,
   signal?: AbortSignal,
   inference?: PreloadInferenceOptions,
-): Promise<string> {
+): Promise<PreloadResult> {
   throwIfAborted(signal);
   return new Promise((resolve, reject) => {
     const { promise, abort } = api.streamPreloadModel(
@@ -188,7 +208,10 @@ export function preloadWithProgress(
         onComplete: (data) => {
           const resolvedBackend =
             typeof data.backend === "string" && data.backend ? data.backend : backend;
-          resolve(resolvedBackend);
+          resolve({
+            backend: resolvedBackend,
+            nCtx: pinnedCtxFromPreload(data),
+          });
         },
         onError: (msg) => {
           onProgress?.(null);
@@ -293,15 +316,22 @@ export async function bootstrapChatSession(
       const stored = readStoredContextWindowForModel(selectedId, ceiling);
       nCtx = stored === "auto" ? null : stored;
     }
-    loadedBackend = await preloadWithProgress(
+    const preloaded = await preloadWithProgress(
       selectedId,
       backend,
       options.onProgress,
       options.signal,
       { maxTokens: options.maxTokens, nCtx },
     );
+    loadedBackend = preloaded.backend;
     writeStoredModel(CHAT_MODEL_STORAGE_KEY, selectedId);
     writeStoredModel(CHAT_BACKEND_STORAGE_KEY, loadedBackend);
+    // Lock UI to the pinned ctx so later turns keep sending the same n_ctx.
+    if (preloaded.nCtx != null) {
+      writeStoredContextWindowForModel(selectedId, preloaded.nCtx);
+    } else if (typeof nCtx === "number") {
+      writeStoredContextWindowForModel(selectedId, nCtx);
+    }
   }
 
   return { models, selectedId, backend: loadedBackend, selected };

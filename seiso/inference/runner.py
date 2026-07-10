@@ -1516,6 +1516,12 @@ class LocalInferenceRunner:
         out.setdefault("sidecar_active", True)
         if out.get("sidecar_num_ctx") is not None:
             return out
+        # Prefer the preload/pool pin so multi-turn history growth does not
+        # re-bucket num_ctx and force an Ollama KV reload.
+        pinned = self._pool.pinned_n_ctx(model_path)
+        if pinned is not None:
+            out["sidecar_num_ctx"] = pinned
+            return out
         try:
             from seiso.inference.llamaswap import plan_sidecar_request
 

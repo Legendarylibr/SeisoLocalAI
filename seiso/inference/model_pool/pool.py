@@ -623,6 +623,32 @@ class ModelPool:
             ensure_ready()
         return client
 
+    def pinned_n_ctx(self, model_path: str | None = None) -> int | None:
+        """Return the active handle's pinned context when it matches ``model_path``."""
+        with self._lock:
+            active = self._active
+            if active is None:
+                return None
+            raw = active.meta.get("n_ctx")
+            if raw is None:
+                return None
+            try:
+                pinned = int(raw)
+            except (TypeError, ValueError):
+                return None
+            if pinned <= 0:
+                return None
+            if model_path:
+                norm = self.normalize_path(model_path)
+                active_norm = str(
+                    active.meta.get("norm_path") or active.meta.get("path") or ""
+                )
+                if active_norm and self.normalize_path(active_norm) != norm:
+                    # Key may be llamaswap:/abs/path — also compare key suffix.
+                    if not active.key.endswith(f":{norm}") and active.key != norm:
+                        return None
+            return pinned
+
     def get_mlx(self, model_path: str) -> tuple[Any, Any]:
         def loader(path: str):
             from seiso.models.loader import LoadOptions, ModelKind
@@ -740,11 +766,20 @@ class ModelPool:
     def status(self) -> dict:
         with self._lock:
             active = self._active
+            n_ctx = None
+            if active is not None:
+                raw = active.meta.get("n_ctx")
+                if raw is not None:
+                    try:
+                        n_ctx = int(raw)
+                    except (TypeError, ValueError):
+                        n_ctx = None
             return {
                 "active_model": active.key if active else None,
                 "backend": active.backend.value if active else None,
                 "path": active.meta.get("path") if active else None,
                 "draft_path": active.meta.get("draft_path") if active else None,
+                "n_ctx": n_ctx,
                 "release_notes": list(self._release_notes),
             }
 

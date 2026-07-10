@@ -38,6 +38,7 @@ from forge.services.knowledge_paths import validate_kb_id
 from forge.services.llm_output import StreamingOutputSanitizer, sanitize_llm_output
 from forge.services.model_router_client import ROUTER_MODEL_ID, fetch_router_status
 from forge.tools.sanitize import normalize_text
+from seiso.inference.backends import BACKEND_LLAMASWAP
 
 router = APIRouter(prefix="/inference", tags=["inference"])
 
@@ -312,7 +313,16 @@ async def preload_model(
     try:
         await loop.run_in_executor(None, lambda: orchestrator._runner.warm_model(ctx["payload"]))
         status = orchestrator._runner.pool.status()
-        return {"status": "loaded", "backend": ctx["backend"], **status}
+        pinned = ctx["payload"].get("sidecar_num_ctx") or ctx["payload"].get("n_ctx")
+        if pinned is None:
+            pinned = status.get("n_ctx")
+        return {
+            "status": "loaded",
+            "backend": ctx["backend"],
+            "n_ctx": pinned,
+            "sidecar_num_ctx": ctx["payload"].get("sidecar_num_ctx") or pinned,
+            **status,
+        }
     finally:
         orchestrator.end_generation_for_user(user_id)
 
@@ -394,6 +404,9 @@ async def preload_model_stream(
             orchestrator.end_generation_for_user(user_id)
 
         status = pool.status()
+        pinned = ctx["payload"].get("sidecar_num_ctx") or ctx["payload"].get("n_ctx")
+        if pinned is None:
+            pinned = status.get("n_ctx")
         yield {
             "event": "progress",
             "data": json.dumps(
@@ -405,6 +418,7 @@ async def preload_model_stream(
                     "model_name": ctx["model_name"],
                     "backend": ctx["backend"],
                     "size_bytes": size_bytes,
+                    "n_ctx": pinned,
                 }
             ),
         }
@@ -416,6 +430,8 @@ async def preload_model_stream(
                     "backend": ctx["backend"],
                     "model_id": body.model_id,
                     "model_name": ctx["model_name"],
+                    "n_ctx": pinned,
+                    "sidecar_num_ctx": ctx["payload"].get("sidecar_num_ctx") or pinned,
                     **status,
                 }
             ),
@@ -510,6 +526,15 @@ async def chat(
         ):
             if key in model_updates and model_updates[key] is not None:
                 payload[key] = model_updates[key]
+        # Reuse preload-pinned sidecar KV size across turns (avoid re-bucket reload).
+        if (
+            payload.get("inference_backend") == BACKEND_LLAMASWAP
+            and payload.get("model_path")
+            and payload.get("sidecar_num_ctx") is None
+        ):
+            pinned = orchestrator._runner.pool.pinned_n_ctx(str(payload["model_path"]))
+            if pinned is not None:
+                payload["sidecar_num_ctx"] = pinned
         if model_updates.get("use_model_router"):
             payload["router_model"] = body.router_model
 
