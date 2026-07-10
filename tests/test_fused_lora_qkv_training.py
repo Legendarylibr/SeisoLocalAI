@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import pytest
 
-pytestmark = pytest.mark.skipif(
-    "not __import__('torch').cuda.is_available()",
-    reason="CUDA required",
-)
+pytestmark = [
+    pytest.mark.gpu,
+    pytest.mark.skipif(
+        "not __import__('torch').cuda.is_available()",
+        reason="CUDA required",
+    ),
+]
 
 
 def test_lora_qkv_uses_cublas_during_training():

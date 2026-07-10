@@ -402,6 +402,39 @@ def test_kv_cache_falls_back_when_past_key_values_missing(monkeypatch):
     assert chunks
 
 
+def test_kv_cache_failure_after_emission_does_not_replay(monkeypatch):
+    from seiso.inference import speculative
+
+    tok = _FakeTokenizer()
+    bundle = TorchSpeculativeBundle(
+        target_model=_FakeModel(4),
+        target_tokenizer=tok,
+        draft_model=_FakeModel(4),
+        draft_tokenizer=tok,
+    )
+
+    def _cached(**_kwargs):
+        yield speculative.StreamToken("prefix")
+        raise RuntimeError("cache failed")
+
+    monkeypatch.setattr(speculative, "_iter_speculative_tokens_cached", _cached)
+    monkeypatch.setattr(
+        speculative,
+        "_iter_speculative_tokens_naive",
+        lambda **_kwargs: pytest.fail("partial output must not be replayed"),
+    )
+
+    stream = iter_speculative_tokens(
+        bundle=bundle,
+        prompt="hello",
+        max_new_tokens=2,
+        num_speculative_tokens=2,
+    )
+    assert next(stream).text == "prefix"
+    with pytest.raises(RuntimeError, match="after streaming began"):
+        next(stream)
+
+
 @pytest.mark.asyncio
 async def test_runner_routes_to_speculative_stream(monkeypatch):
     from seiso.inference.runner import LocalInferenceRunner

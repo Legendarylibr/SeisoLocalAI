@@ -12,10 +12,13 @@ import pytest
 if TYPE_CHECKING:
     from seiso.training.config import TrainConfig
 
-pytestmark = pytest.mark.skipif(
-    "not __import__('torch').cuda.is_available()",
-    reason="CUDA required for GPU e2e training",
-)
+pytestmark = [
+    pytest.mark.gpu,
+    pytest.mark.skipif(
+        "not __import__('torch').cuda.is_available()",
+        reason="CUDA required for GPU e2e training",
+    ),
+]
 
 
 @pytest.fixture

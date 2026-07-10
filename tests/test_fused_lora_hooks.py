@@ -64,6 +64,7 @@ def test_residual_patches_only_fused_decoder_classes(monkeypatch):
     assert "Gemma2DecoderLayer" not in _FUSED_RESIDUAL_DECODER_CLASSES
 
 
+@pytest.mark.gpu
 @pytest.mark.skipif(
     "not __import__('torch').cuda.is_available()",
     reason="CUDA required",

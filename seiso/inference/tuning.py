@@ -51,12 +51,16 @@ def configure_torch_inference() -> None:
 
 
 def prepare_torch_model(model: Any) -> Any:
-    """Eval mode + KV cache + optional torch.compile for generation."""
+    """Configure kernels before returning the optionally compiled inference model."""
     configure_torch_inference()
     model.eval()
     config = getattr(model, "config", None)
     if config is not None and hasattr(config, "use_cache"):
         config.use_cache = True
+    # Kernel patching must happen before torch.compile captures the model graph.
+    # Callers must retain the returned object because torch.compile wraps rather
+    # than mutates the original module.
+    apply_inference_kernels(model)
     return maybe_compile_torch_model(model)
 
 

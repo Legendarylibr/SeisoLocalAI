@@ -218,6 +218,111 @@ def test_torch_kv_stream_greedy():
     assert "5" in text
 
 
+def test_torch_kv_stream_stops_when_pad_is_eos():
+    import torch
+
+    from seiso.inference.torch_stream import iter_torch_kv_tokens
+
+    class _Tok:
+        eos_token_id = 0
+        pad_token_id = 0
+
+        def decode(self, ids, skip_special_tokens=True):
+            return " ".join(str(int(x)) for x in ids)
+
+    class _Model:
+        def __init__(self):
+            self.calls = 0
+
+        def __call__(self, input_ids, **kwargs):
+            self.calls += 1
+            logits = torch.zeros(1, input_ids.shape[1], 4)
+            logits[..., 0] = 10.0
+            return type("Out", (), {"logits": logits, "past_key_values": object()})()
+
+    model = _Model()
+    chunks = list(
+        iter_torch_kv_tokens(
+            model=model,
+            tokenizer=_Tok(),
+            input_ids=torch.tensor([[1, 2, 3]]),
+            max_new_tokens=8,
+            temperature=0.0,
+        )
+    )
+
+    assert chunks == []
+    assert model.calls == 1
+
+
+def test_speculative_sampling_falls_back_to_target_only(monkeypatch):
+    from seiso.inference.runner import LocalInferenceRunner
+    from seiso.inference.streaming import StreamToken
+
+    runner = LocalInferenceRunner()
+    calls: list[str] = []
+
+    def _target_only(_payload, _model_path, _should_stop):
+        calls.append("target")
+        yield StreamToken("sampled")
+
+    monkeypatch.setattr(runner, "_torch_stream", _target_only)
+    monkeypatch.setattr(
+        runner._pool,
+        "get_torch_speculative",
+        lambda *_args, **_kwargs: pytest.fail("speculative pair should not load"),
+    )
+
+    chunks = list(
+        runner._torch_speculative_stream(
+            {
+                "draft_model_path": "/tmp/draft",
+                "temperature": 0.7,
+                "messages": [{"role": "user", "content": "hi"}],
+            },
+            "/tmp/target",
+            lambda: False,
+        )
+    )
+
+    assert calls == ["target"]
+    assert "".join(chunk.text for chunk in chunks) == "sampled"
+
+
+def test_speculative_low_memory_falls_back_to_target_only(monkeypatch):
+    from seiso.inference.runner import LocalInferenceRunner
+    from seiso.inference.streaming import StreamToken
+
+    runner = LocalInferenceRunner()
+    monkeypatch.setattr(
+        runner._pool, "torch_speculative_pair_fits", lambda *_args: False
+    )
+    monkeypatch.setattr(
+        runner,
+        "_torch_stream",
+        lambda *_args: iter([StreamToken("fallback")]),
+    )
+    monkeypatch.setattr(
+        runner._pool,
+        "get_torch_speculative",
+        lambda *_args, **_kwargs: pytest.fail("speculative pair should not load"),
+    )
+
+    chunks = list(
+        runner._torch_speculative_stream(
+            {
+                "draft_model_path": "/tmp/draft",
+                "temperature": 0,
+                "messages": [{"role": "user", "content": "hi"}],
+            },
+            "/tmp/target",
+            lambda: False,
+        )
+    )
+
+    assert "".join(chunk.text for chunk in chunks) == "fallback"
+
+
 @pytest.mark.asyncio
 async def test_prepare_attaches_generation_plan(monkeypatch, tmp_path):
     from types import SimpleNamespace

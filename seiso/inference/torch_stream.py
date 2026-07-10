@@ -39,7 +39,6 @@ def iter_torch_kv_tokens(
     import torch
 
     from seiso.inference.speculative import (
-        _decode_new_text,
         _kv_cache_usable,
         _model_forward,
     )
@@ -55,15 +54,16 @@ def iter_torch_kv_tokens(
         eos_ids = set()
 
     tokens_generated = 0
-    decoded_len = len(
-        tokenizer.decode(input_ids[0], skip_special_tokens=True)
-    )
-    seq = input_ids
+    # Keep the display sequence on CPU. Repeatedly torch.cat-ing the full
+    # sequence on GPU copies an ever-growing tensor every decode step and can
+    # fragment VRAM; the model itself only needs next_id after prefill.
+    token_ids = input_ids[0].detach().cpu().tolist()
+    decoded_len = len(tokenizer.decode(token_ids, skip_special_tokens=True))
     past = None
     do_sample = temperature is not None and float(temperature) > 0
 
     with torch.inference_mode():
-        out = _model_forward(model, seq)
+        out = _model_forward(model, input_ids)
         if not _kv_cache_usable(out):
             raise RuntimeError("model returned no past_key_values")
         past = out.past_key_values
@@ -92,18 +92,18 @@ def iter_torch_kv_tokens(
                 next_id = torch.argmax(logits, dim=-1, keepdim=True)
 
             token_int = int(next_id.item())
-            if pad_token_id is not None and token_int == int(pad_token_id):
-                # Skip pad; still advance generation budget conservatively.
-                tokens_generated += 1
-                continue
             if token_int in eos_ids:
                 break
 
-            seq = torch.cat([seq, next_id], dim=1)
+            token_ids.append(token_int)
             step = _model_forward(model, next_id, past_key_values=past)
             past = step.past_key_values
             logits = step.logits[:, -1, :]
             tokens_generated += 1
-            chunk, decoded_len = _decode_new_text(tokenizer, seq, decoded_len)
+            if pad_token_id is not None and token_int == int(pad_token_id):
+                # Advance the cache but do not expose padding as output.
+                continue
+            text = tokenizer.decode(token_ids, skip_special_tokens=True)
+            chunk, decoded_len = text[decoded_len:], len(text)
             if chunk:
                 yield StreamToken(chunk)

@@ -92,6 +92,7 @@ compress-eval = [
 dev = [
   "pytest>=8.2",
   "pytest-asyncio>=0.23",
+  "pytest-xdist>=3.6",
   "ruff>=0.4",
   "mypy==1.10.1",
   "types-PyYAML>=6.0",
@@ -139,7 +140,10 @@ ignore = ["E501"]  # line length; use `ruff format` instead
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
-markers = ["slow: long-running integration tests"]
+markers = [
+  "slow: long-running integration tests",
+  "gpu: requires a functional GPU and matching runtime/toolkit",
+]
 
 [tool.mypy]
 python_version = "3.10"
@@ -203,6 +207,9 @@ ignore-vulns = [
   # instead of diskcache's pickle-backed persistent cache. No fixed diskcache
   # release is advertised by pip-audit for this CVE yet.
   "CVE-2025-69872",
+  # pip-audit currently flags ecdsa 0.19.2 even though upstream identifies
+  # 0.19.2 as the patched release for malformed DER handling.
+  "PYSEC-2026-1325",
 ]
 
 [tool.pylint.messages_control]

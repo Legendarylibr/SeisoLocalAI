@@ -7,6 +7,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+import pytest
 from gguf_fixtures import write_arch_gguf as _write_arch_gguf
 
 from seiso.inference.model_pool import (
@@ -374,7 +375,7 @@ def test_torch_same_path_different_cache_key_invalidates_generation(tmp_path, mo
     assert pool.active_key == f"torch:{norm}"
 
 
-def test_torch_speculative_low_memory_preflight_is_advisory(tmp_path, monkeypatch, caplog):
+def test_torch_speculative_low_memory_preflight_blocks_pair_load(tmp_path, monkeypatch):
     pool = ModelPool()
     target = tmp_path / "target"
     draft = tmp_path / "draft"
@@ -386,17 +387,18 @@ def test_torch_speculative_low_memory_preflight_is_advisory(tmp_path, monkeypatc
     monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 100)
     monkeypatch.setattr("seiso.memory.protection.release_cached_memory", lambda **k: None)
 
+    loaded: list[str] = []
+
     def fake_load(path: str, *, load_in_4bit: bool = True):
+        loaded.append(path)
         return f"model:{Path(path).name}", f"tokenizer:{Path(path).name}"
 
     monkeypatch.setattr(pool, "_load_torch_pair", fake_load)
 
-    with caplog.at_level("WARNING"):
-        bundle = pool.get_torch_speculative(str(target), str(draft))
+    with pytest.raises(RuntimeError, match="Speculative pair exceeds free memory"):
+        pool.get_torch_speculative(str(target), str(draft))
 
-    assert bundle.target_model == "model:target"
-    assert bundle.draft_model == "model:draft"
-    assert "Speculative pair may exceed free memory" in caplog.text
+    assert loaded == []
 
 
 def test_llama_gpu_layers_optimal_uses_short_ttl_cache(monkeypatch, tmp_path):
@@ -512,8 +514,15 @@ def test_prepare_for_load_unloads_spec_bundle_for_same_torch_path(tmp_path, monk
     assert pool.active_key is None
 
 
-def test_switch_serializes_concurrent_loads_for_same_model(tmp_path):
+def test_switch_serializes_concurrent_loads_for_same_model(monkeypatch, tmp_path):
     pool = ModelPool()
+    monkeypatch.setattr(
+        "seiso.memory.protection.estimate_path_vram_mb", lambda _path: 0
+    )
+    monkeypatch.setattr(
+        "seiso.memory.protection.ensure_load_fits", lambda *_a, **_k: None
+    )
+    monkeypatch.setattr(pool, "_ensure_resident_gpu_resource_lock", lambda: None)
     model_path = tmp_path / "model.gguf"
     model_path.write_bytes(b"gguf")
     handle = object()
@@ -741,6 +750,8 @@ def test_llama_reuses_larger_preloaded_context(monkeypatch, tmp_path):
 
     monkeypatch.setattr(model_pool, "_native_linux_nvidia", lambda: False)
     monkeypatch.setattr(model_pool, "_load_llama_model", fake_load)
+    monkeypatch.setattr(model_pool, "_llama_cache_is_optimal", lambda *_a, **_k: True)
+    monkeypatch.setattr(model_pool, "_llama_cache_headroom_ok", lambda *_a, **_k: True)
     monkeypatch.setattr(
         "seiso.inference.tuning.attach_llama_prompt_cache",
         lambda _llm: None,

@@ -365,6 +365,28 @@ def test_torch_oom_retry_does_not_increase_clamped_generation(monkeypatch):
     assert seen == [5, 2]
 
 
+def test_torch_streaming_oom_does_not_retry_existing_streamer(monkeypatch):
+    from seiso.inference import runner
+
+    calls = 0
+
+    def fake_generate(_model, _gen_kwargs):
+        nonlocal calls
+        calls += 1
+        raise RuntimeError("CUDA out of memory")
+
+    monkeypatch.setattr(runner, "generate_with_cache_fallback", fake_generate)
+
+    with pytest.raises(RuntimeError, match="out of memory"):
+        runner._torch_generate_with_oom_retry(
+            None,
+            {"max_new_tokens": 5},
+            retry_on_oom=False,
+        )
+
+    assert calls == 1
+
+
 def test_llama_prompt_budget_uses_tokenizer_and_drops_old_turns():
     from seiso.inference.runner import _fit_llama_messages_to_context
 
@@ -466,6 +488,7 @@ def test_safetensors_inventory_exposes_torch_and_mlx_fallbacks(
     model_dir.mkdir()
     (model_dir / "model.safetensors").write_bytes(b"x")
     monkeypatch.setattr(backends, "detect_backend", lambda: Backend.MLX)
+    monkeypatch.setattr(backends.platform, "system", lambda: "Darwin")
 
     assert available_backends(model_path=str(model_dir), model_format="safetensors") == [
         BACKEND_MLX
@@ -2271,6 +2294,11 @@ def test_warm_model_preloads_torch_speculative_pair(monkeypatch):
     )
     monkeypatch.setattr(
         runner._pool,
+        "torch_speculative_pair_fits",
+        lambda *_args: True,
+    )
+    monkeypatch.setattr(
+        runner._pool,
         "get_torch_speculative",
         lambda *args, **kwargs: calls.append(("spec", args, kwargs)),
     )
@@ -2289,6 +2317,37 @@ def test_warm_model_preloads_torch_speculative_pair(monkeypatch):
             {"load_in_4bit": True},
         )
     ]
+
+
+def test_warm_model_low_memory_preloads_speculative_target_only(monkeypatch):
+    from seiso.inference.runner import LocalInferenceRunner
+
+    runner = LocalInferenceRunner()
+    calls: list[tuple[str, tuple, dict]] = []
+    monkeypatch.setattr(
+        runner,
+        "_resolve_route",
+        lambda _payload, _path: ("speculative", "/tmp/target"),
+    )
+    monkeypatch.setattr(
+        runner._pool,
+        "torch_speculative_pair_fits",
+        lambda *_args: False,
+    )
+    monkeypatch.setattr(
+        runner._pool,
+        "get_torch",
+        lambda *args, **kwargs: calls.append(("torch", args, kwargs)),
+    )
+    monkeypatch.setattr(
+        runner._pool,
+        "get_torch_speculative",
+        lambda *_args, **_kwargs: pytest.fail("speculative pair should not load"),
+    )
+
+    runner.warm_model({"model_path": "/tmp/target", "draft_model_path": "/tmp/draft"})
+
+    assert calls == [("torch", ("/tmp/target",), {"load_in_4bit": True})]
 
 
 def test_warm_model_uses_chat_sized_llama_context(monkeypatch):

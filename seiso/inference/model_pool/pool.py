@@ -7,7 +7,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from seiso.compat import StrEnum
 from seiso.env import env_int
@@ -350,6 +350,10 @@ class ModelPool:
                 return None
             if backend != BackendKind.LLAMA:
                 return self._active.handle
+            if needed_ctx <= 0 and needed_tokens <= 0:
+                # Direct switch() callers have no llama context policy to
+                # re-evaluate. The matching active key is a complete cache hit.
+                return self._active.handle
             # Reuse a larger cached context/completion budget when headroom is OK.
             # Exact-match used to force reloads on every context-bucket step.
             cached_tokens = int(
@@ -660,16 +664,27 @@ class ModelPool:
 
             return load_mlx(LoadOptions(model_id=path, kind=ModelKind.TEXT))
 
-        return self.switch(model_path, BackendKind.MLX, loader)
+        return cast(tuple[Any, Any], self.switch(model_path, BackendKind.MLX, loader))
 
     def get_torch(self, model_path: str, *, load_in_4bit: bool = True) -> tuple[Any, Any]:
         def loader(path: str):
             return self._load_torch_pair(path, load_in_4bit=load_in_4bit)
 
-        return self.switch(model_path, BackendKind.TORCH, loader)
+        return cast(tuple[Any, Any], self.switch(model_path, BackendKind.TORCH, loader))
+
+    @staticmethod
+    def torch_speculative_pair_fits(target_path: str, draft_path: str) -> bool:
+        """Return whether both Torch models fit current headroom together."""
+        from seiso.memory.protection import estimate_path_vram_mb, headroom_mb
+
+        target_mb = int(estimate_path_vram_mb(target_path, mode="chat"))
+        draft_mb = int(estimate_path_vram_mb(draft_path, mode="chat"))
+        needed_mb = target_mb + draft_mb
+        free_mb = int(headroom_mb())
+        return target_mb > 0 and draft_mb > 0 and free_mb > 0 and needed_mb <= free_mb
 
     def _load_torch_pair(self, model_path: str, *, load_in_4bit: bool = True) -> tuple[Any, Any]:
-        from seiso.inference.tuning import apply_inference_kernels, prepare_torch_model
+        from seiso.inference.tuning import prepare_torch_model
         from seiso.models.loader import LoadOptions, ModelKind, load_model
 
         model, tokenizer = load_model(
@@ -680,8 +695,7 @@ class ModelPool:
                 device_map="auto",
             )
         )
-        prepare_torch_model(model)
-        apply_inference_kernels(model)
+        model = prepare_torch_model(model)
         return model, tokenizer
 
     def get_torch_speculative(
@@ -705,14 +719,16 @@ class ModelPool:
             draft_mb = int(estimate_path_vram_mb(draft_path, mode="chat"))
             needed_mb = target_mb + draft_mb
             free_mb = headroom_mb()
+            if target_mb <= 0 or draft_mb <= 0 or free_mb <= 0:
+                raise RuntimeError(
+                    "Speculative pair memory could not be safely sized; "
+                    "use target-only generation"
+                )
             if needed_mb > free_mb:
-                logger.warning(
-                    "Speculative pair may exceed free memory: needs ~%dMB "
-                    "(target=%dMB + draft=%dMB), free=%dMB. Trying load anyway.",
-                    needed_mb,
-                    target_mb,
-                    draft_mb,
-                    free_mb,
+                raise RuntimeError(
+                    "Speculative pair exceeds free memory: "
+                    f"needs ~{needed_mb}MB (target={target_mb}MB + "
+                    f"draft={draft_mb}MB), free={free_mb}MB"
                 )
             ensure_load_fits(target_path, mode="chat", backend=BackendKind.TORCH.value)
             ensure_load_fits(draft_path, mode="chat", backend=BackendKind.TORCH.value)

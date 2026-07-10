@@ -1,4 +1,4 @@
-.PHONY: ci ci-fast ci-list precheck deps lint types test security frontend imports fix
+.PHONY: ci ci-fast ci-list precheck check-changed deps lint types test test-parallel test-hardware security frontend imports fix
 
 ci:
 	python3 scripts/run_ci_local.py
@@ -11,6 +11,9 @@ ci-list:
 
 precheck: ci-fast
 
+check-changed:
+	python3 scripts/run_ci_local.py --changed --skip-install
+
 deps:
 	python3 scripts/run_ci_local.py --job deps --skip-install
 
@@ -22,6 +25,12 @@ types:
 
 test:
 	python3 scripts/run_ci_local.py --job test --skip-install
+
+test-parallel:
+	python3 scripts/run_ci_local.py --job test --pytest-workers 2 --skip-install
+
+test-hardware:
+	python3 scripts/run_ci_local.py --job test --hardware-tests --skip-install
 
 security:
 	python3 scripts/run_ci_local.py --job security --skip-install

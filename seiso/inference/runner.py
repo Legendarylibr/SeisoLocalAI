@@ -88,12 +88,17 @@ def _stream_batch_chars() -> int:
     return max(1, env_int("SEISO_STREAM_BATCH_CHARS", 4))
 
 
-def _torch_generate_with_oom_retry(model: Any, gen_kwargs: dict[str, Any]) -> Any:
+def _torch_generate_with_oom_retry(
+    model: Any,
+    gen_kwargs: dict[str, Any],
+    *,
+    retry_on_oom: bool = True,
+) -> Any:
     """Run torch generate once, halving max_new_tokens on OOM."""
     try:
         return generate_with_cache_fallback(model, gen_kwargs)
     except Exception as exc:
-        if not is_oom_error(exc):
+        if not is_oom_error(exc) or not retry_on_oom:
             raise
         release_cached_memory(sync=True)
         reduced = dict(gen_kwargs)
@@ -522,6 +527,14 @@ class LocalInferenceRunner:
                 get_dflash_draft(
                     draft_path, n_ctx=self._estimate_dflash_n_ctx(payload, draft_path)
                 )
+            elif not self._pool.torch_speculative_pair_fits(
+                resolved_path, draft_path
+            ):
+                logger.warning(
+                    "Speculative target+draft pair does not fit current memory; "
+                    "preloading target model only"
+                )
+                self._pool.get_torch(resolved_path, load_in_4bit=True)
             else:
                 self._pool.get_torch_speculative(
                     resolved_path, draft_path, load_in_4bit=True
@@ -836,6 +849,28 @@ class LocalInferenceRunner:
             raise ValueError("draft_model_path required for speculative decoding")
         _raise_if_dflash_inprocess_blocked(draft_path)
 
+        temperature = float(payload.get("temperature", 0.0))
+        if temperature > 0:
+            # The custom verifier implements greedy acceptance only. Falling
+            # back preserves the requested sampling distribution instead of
+            # silently turning temperature sampling into deterministic argmax.
+            logger.info(
+                "Speculative decoding supports greedy generation only; "
+                "using target-only Torch sampling"
+            )
+            yield from self._torch_stream(payload, model_path, should_stop)
+            return
+        if (
+            not is_dflash_draft(draft_path)
+            and not self._pool.torch_speculative_pair_fits(model_path, draft_path)
+        ):
+            logger.warning(
+                "Speculative target+draft pair does not fit current memory; "
+                "using target-only Torch generation"
+            )
+            yield from self._torch_stream(payload, model_path, should_stop)
+            return
+
         configure_torch_inference()
 
         if is_dflash_draft(draft_path):
@@ -847,7 +882,7 @@ class LocalInferenceRunner:
                 draft_path, n_ctx=self._estimate_dflash_n_ctx(payload, draft_path)
             )
 
-            bundle = DFlashDraftSpeculativeBundle(
+            dflash_bundle = DFlashDraftSpeculativeBundle(
                 target_model=target_model,
                 target_tokenizer=target_tok,
                 draft_llm=draft_llm,
@@ -862,12 +897,11 @@ class LocalInferenceRunner:
             )
             messages = budget.messages
             prompt = format_messages_for_prompt(messages, target_tok)
-            temperature = float(payload.get("temperature", 0.0))
             max_new_tokens = budget.max_tokens
             num_speculative_tokens = default_num_speculative_tokens(payload)
 
             yield from iter_speculative_tokens_dflash(
-                bundle=bundle,
+                bundle=dflash_bundle,
                 prompt=prompt,
                 max_new_tokens=max_new_tokens,
                 num_speculative_tokens=num_speculative_tokens,
@@ -877,40 +911,47 @@ class LocalInferenceRunner:
             return
 
         # Original torch + torch speculative
-        bundle = self._pool.get_torch_speculative(
+        torch_bundle = self._pool.get_torch_speculative(
             model_path, draft_path, load_in_4bit=True
         )
         budget = _trim_torch_messages_to_context(
             payload.get("messages", []),
-            model=bundle.target_model,
-            tokenizer=bundle.target_tokenizer,
+            model=torch_bundle.target_model,
+            tokenizer=torch_bundle.target_tokenizer,
             max_tokens=int(payload.get("max_tokens", 512)),
         )
         messages = budget.messages
-        prompt = format_messages_for_prompt(messages, bundle.target_tokenizer)
-        temperature = float(payload.get("temperature", 0.0))
+        prompt = format_messages_for_prompt(messages, torch_bundle.target_tokenizer)
         max_new_tokens = budget.max_tokens
         num_speculative_tokens = default_num_speculative_tokens(payload)
 
+        emitted = False
         try:
-            yield from iter_speculative_tokens(
-                bundle=bundle,
+            for token in iter_speculative_tokens(
+                bundle=torch_bundle,
                 prompt=prompt,
                 max_new_tokens=max_new_tokens,
                 num_speculative_tokens=num_speculative_tokens,
                 temperature=temperature,
                 should_stop=should_stop,
-            )
+            ):
+                emitted = True
+                yield token
         except Exception as exc:
             if not is_oom_error(exc):
                 raise
+            if emitted:
+                raise RuntimeError(
+                    "Speculative inference OOM after streaming began — "
+                    "aborting instead of replaying partial output"
+                ) from exc
             release_cached_memory(sync=True)
-            reduced = max(32, max_new_tokens // 2)
+            reduced = max(1, max_new_tokens // 2)
             logger.warning(
                 "Speculative inference OOM — retrying with max_new_tokens=%s", reduced
             )
             yield from iter_speculative_tokens(
-                bundle=bundle,
+                bundle=torch_bundle,
                 prompt=prompt,
                 max_new_tokens=reduced,
                 num_speculative_tokens=max(1, num_speculative_tokens // 2),
@@ -1081,8 +1122,9 @@ class LocalInferenceRunner:
         payload = {**payload, "max_tokens": max_tokens}
 
         if use_manual_torch_kv_stream(payload):
+            emitted = False
             try:
-                yield from iter_torch_kv_tokens(
+                for token in iter_torch_kv_tokens(
                     model=model,
                     tokenizer=tokenizer,
                     input_ids=inputs["input_ids"],
@@ -1096,11 +1138,18 @@ class LocalInferenceRunner:
                     pad_token_id=tokenizer.pad_token_id,
                     eos_token_id=getattr(tokenizer, "eos_token_id", None),
                     should_stop=should_stop,
-                )
+                ):
+                    emitted = True
+                    yield token
                 return
             except Exception as exc:
                 if is_oom_error(exc):
                     raise
+                if emitted:
+                    raise RuntimeError(
+                        "Manual Torch KV stream failed after streaming began — "
+                        "aborting instead of replaying partial output"
+                    ) from exc
                 logger.debug(
                     "Manual torch KV stream unavailable — falling back to generate: %s",
                     exc,
@@ -1140,7 +1189,11 @@ class LocalInferenceRunner:
 
             with torch.inference_mode():
                 try:
-                    _torch_generate_with_oom_retry(model, gen_kwargs)
+                    # Retrying with the same streamer can duplicate text if an
+                    # OOM occurs after partial output has been delivered.
+                    _torch_generate_with_oom_retry(
+                        model, gen_kwargs, retry_on_oom=False
+                    )
                 except Exception as exc:
                     generation_errors.append(exc)
                     with contextlib.suppress(Exception):

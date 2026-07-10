@@ -363,17 +363,25 @@ def iter_speculative_tokens(
         raise ValueError("num_speculative_tokens must be >= 1")
 
     if _use_speculative_kv_cache():
+        emitted = False
         try:
-            yield from _iter_speculative_tokens_cached(
+            for token in _iter_speculative_tokens_cached(
                 bundle=bundle,
                 prompt=prompt,
                 max_new_tokens=max_new_tokens,
                 num_speculative_tokens=num_speculative_tokens,
                 temperature=temperature,
                 should_stop=should_stop,
-            )
+            ):
+                emitted = True
+                yield token
             return
         except _KV_CACHE_FALLBACK_ERRORS as exc:
+            if emitted:
+                raise RuntimeError(
+                    "Speculative KV cache failed after streaming began — "
+                    "aborting instead of replaying partial output"
+                ) from exc
             logger.debug("Speculative KV cache unavailable — falling back: %s", exc)
 
     yield from _iter_speculative_tokens_naive(
@@ -627,17 +635,25 @@ def iter_speculative_tokens_dflash(
         raise ValueError("num_speculative_tokens must be >= 1")
 
     if _use_speculative_kv_cache():
+        emitted = False
         try:
-            yield from _iter_speculative_tokens_dflash_cached(
+            for token in _iter_speculative_tokens_dflash_cached(
                 bundle=bundle,
                 prompt=prompt,
                 max_new_tokens=max_new_tokens,
                 num_speculative_tokens=num_speculative_tokens,
                 temperature=temperature,
                 should_stop=should_stop,
-            )
+            ):
+                emitted = True
+                yield token
             return
         except _KV_CACHE_FALLBACK_ERRORS as exc:
+            if emitted:
+                raise RuntimeError(
+                    "dFlash speculative KV cache failed after streaming began — "
+                    "aborting instead of replaying partial output"
+                ) from exc
             logger.debug(
                 "dFlash speculative KV cache unavailable — falling back: %s", exc
             )

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import pytest
 
+pytestmark = pytest.mark.gpu
+
 
 def test_mlp_forward_skips_fused_mlp_for_bitsandbytes_layers(monkeypatch):
     torch = pytest.importorskip("torch")
