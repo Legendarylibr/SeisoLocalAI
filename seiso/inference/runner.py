@@ -925,8 +925,8 @@ class LocalInferenceRunner:
         max_new_tokens = budget.max_tokens
         num_speculative_tokens = default_num_speculative_tokens(payload)
 
+        emitted = False
         try:
-            emitted = False
             for token in iter_speculative_tokens(
                 bundle=bundle,
                 prompt=prompt,
