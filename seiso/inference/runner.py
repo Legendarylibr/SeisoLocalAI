@@ -882,7 +882,7 @@ class LocalInferenceRunner:
                 draft_path, n_ctx=self._estimate_dflash_n_ctx(payload, draft_path)
             )
 
-            bundle = DFlashDraftSpeculativeBundle(
+            dflash_bundle = DFlashDraftSpeculativeBundle(
                 target_model=target_model,
                 target_tokenizer=target_tok,
                 draft_llm=draft_llm,
@@ -901,7 +901,7 @@ class LocalInferenceRunner:
             num_speculative_tokens = default_num_speculative_tokens(payload)
 
             yield from iter_speculative_tokens_dflash(
-                bundle=bundle,
+                bundle=dflash_bundle,
                 prompt=prompt,
                 max_new_tokens=max_new_tokens,
                 num_speculative_tokens=num_speculative_tokens,
@@ -911,24 +911,24 @@ class LocalInferenceRunner:
             return
 
         # Original torch + torch speculative
-        bundle = self._pool.get_torch_speculative(
+        torch_bundle = self._pool.get_torch_speculative(
             model_path, draft_path, load_in_4bit=True
         )
         budget = _trim_torch_messages_to_context(
             payload.get("messages", []),
-            model=bundle.target_model,
-            tokenizer=bundle.target_tokenizer,
+            model=torch_bundle.target_model,
+            tokenizer=torch_bundle.target_tokenizer,
             max_tokens=int(payload.get("max_tokens", 512)),
         )
         messages = budget.messages
-        prompt = format_messages_for_prompt(messages, bundle.target_tokenizer)
+        prompt = format_messages_for_prompt(messages, torch_bundle.target_tokenizer)
         max_new_tokens = budget.max_tokens
         num_speculative_tokens = default_num_speculative_tokens(payload)
 
         emitted = False
         try:
             for token in iter_speculative_tokens(
-                bundle=bundle,
+                bundle=torch_bundle,
                 prompt=prompt,
                 max_new_tokens=max_new_tokens,
                 num_speculative_tokens=num_speculative_tokens,
@@ -951,7 +951,7 @@ class LocalInferenceRunner:
                 "Speculative inference OOM — retrying with max_new_tokens=%s", reduced
             )
             yield from iter_speculative_tokens(
-                bundle=bundle,
+                bundle=torch_bundle,
                 prompt=prompt,
                 max_new_tokens=reduced,
                 num_speculative_tokens=max(1, num_speculative_tokens // 2),
