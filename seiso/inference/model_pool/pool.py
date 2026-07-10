@@ -157,7 +157,10 @@ class ModelPool:
 
     def cancel_and_unload(self) -> None:
         """Stop lagging streams and release VRAM/RAM."""
+        from seiso.inference.torch_stream import clear_torch_prefix_cache
+
         self.bump_generation()
+        clear_torch_prefix_cache()
         with self._lock:
             self._unload_pending = True
             if self._inference_refs > 0:
@@ -187,6 +190,8 @@ class ModelPool:
 
     def _release_handle(self, active: LoadedModel) -> None:
         """Close one pool handle and free GPU caches."""
+        from seiso.inference.torch_stream import clear_torch_prefix_cache
+
         backend = active.backend
         key = active.key
         handle = active.handle
@@ -237,6 +242,7 @@ class ModelPool:
         elif backend == BackendKind.MLX:
             del handle
 
+        clear_torch_prefix_cache()
         self._free_memory(sync=True)
         clear_dflash_draft_cache()
         self._release_resident_gpu_resource_lock()

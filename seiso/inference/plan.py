@@ -23,6 +23,7 @@ class GenerationPlan:
     model_name: str | None = None
     size_bytes: int = 0
     fit_ok: bool = True
+    kv_policy: dict[str, Any] | None = None
     extras: dict[str, Any] = field(default_factory=dict)
 
     def to_payload_updates(self) -> dict[str, Any]:
@@ -43,6 +44,8 @@ class GenerationPlan:
             out["model_name"] = self.model_name
         if self.size_bytes:
             out["size_bytes"] = self.size_bytes
+        if self.kv_policy is not None:
+            out["kv_policy"] = dict(self.kv_policy)
         if self.extras:
             out.update(self.extras)
         return out
@@ -70,11 +73,12 @@ def generation_plan_from_updates(updates: dict[str, Any]) -> GenerationPlan | No
             if isinstance(updates.get("model_metadata"), dict)
             else None
         ),
-        model_name=(
-            str(updates["model_name"]) if updates.get("model_name") is not None else None
-        ),
+        model_name=(str(updates["model_name"]) if updates.get("model_name") is not None else None),
         size_bytes=int(updates.get("size_bytes") or 0),
         fit_ok=bool(updates.get("fit_ok", True)),
+        kv_policy=(
+            dict(updates["kv_policy"]) if isinstance(updates.get("kv_policy"), dict) else None
+        ),
         extras={
             k: v
             for k, v in updates.items()
@@ -89,6 +93,7 @@ def generation_plan_from_updates(updates: dict[str, Any]) -> GenerationPlan | No
                 "model_name",
                 "size_bytes",
                 "fit_ok",
+                "kv_policy",
             }
         },
     )

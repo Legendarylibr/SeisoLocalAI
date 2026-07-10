@@ -60,6 +60,50 @@ async def test_bench_inference_with_mocked_runner(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_kv_benchmark_covers_short_long_and_repeated(monkeypatch):
+    from seiso.inference import benchmark as bench_mod
+
+    class FakeRunner:
+        def __init__(self) -> None:
+            self.payloads = []
+            self.last_inference_stats = {"prefill_chunks": 2, "prefix_hit": False}
+
+        async def stream_updates(self, payload):
+            from seiso.inference.streaming import StreamUpdate
+
+            self.payloads.append(payload)
+            self.last_inference_stats = {
+                "prefill_chunks": 2,
+                "prefix_hit": len(payload.get("messages", [])) > 1,
+            }
+            yield StreamUpdate(text="ok", output_tokens=1)
+
+    fake = FakeRunner()
+    monkeypatch.setattr(bench_mod, "LocalInferenceRunner", lambda: fake)
+    monkeypatch.setattr(
+        bench_mod, "resolve_local_backend", lambda **_kwargs: "torch"
+    )
+    monkeypatch.setattr(
+        bench_mod,
+        "get_model_pool",
+        lambda: type("Pool", (), {"cancel_and_unload": lambda self: None})(),
+    )
+
+    report = await bench_mod.benchmark_kv_scenarios(
+        "/tmp/model", short_prompt="short", long_prompt="long"
+    )
+
+    assert set(report) == {
+        "short",
+        "long",
+        "repeated_first",
+        "repeated_second",
+    }
+    assert report["repeated_second"]["kv_metadata"]["prefix_hit"] is True
+    assert len(fake.payloads[-1]["messages"]) == 3
+
+
+@pytest.mark.asyncio
 async def test_compare_profiles_runs_twice(monkeypatch):
     from seiso.inference import benchmark as bench_mod
 

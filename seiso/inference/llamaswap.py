@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from seiso.env import env_bool, env_int, env_str
+from seiso.inference.kv_policy import resolve_sidecar_kv_policy
 from seiso.inference.sidecar_runtime import (
     DEFAULT_LLAMASWAP_URL,
     DEFAULT_OLLAMA_URL,
@@ -93,9 +94,7 @@ class IsolatedGgufClient(Protocol):
         should_stop,
     ) -> Iterator[StreamToken]: ...
 
-    def release_external_memory(
-        self, model_path: str | None = None
-    ) -> tuple[bool, str | None]: ...
+    def release_external_memory(self, model_path: str | None = None) -> tuple[bool, str | None]: ...
 
 
 def llamaswap_model_name(model_path: str) -> str:
@@ -363,9 +362,7 @@ def _sidecar_context_ceiling(payload: dict[str, Any], model_path: str) -> int:
     )
 
 
-def sidecar_vram_context_cap(
-    model_path: str, ceiling: int, *, max_tokens: int = 512
-) -> int:
+def sidecar_vram_context_cap(model_path: str, ceiling: int, *, max_tokens: int = 512) -> int:
     """Bound the sidecar KV context to what free VRAM can hold on native Linux.
 
     Ollama sizes its KV cache to ``num_ctx`` and places it on the GPU, so an
@@ -551,9 +548,7 @@ def sidecar_num_ctx(
     if override > 0:
         return max(2048, min(override, ceiling))
 
-    needed = (
-        _estimate_prompt_tokens(messages) + max(1, max_tokens) + _SIDECAR_CTX_MARGIN_TOKENS
-    )
+    needed = _estimate_prompt_tokens(messages) + max(1, max_tokens) + _SIDECAR_CTX_MARGIN_TOKENS
     for preset in CONTEXT_WINDOW_PRESETS:
         if needed <= preset:
             return min(preset, ceiling)
@@ -589,9 +584,7 @@ def plan_sidecar_request(
             num_ctx = sidecar_num_ctx(messages, max_tokens=max_tokens, ceiling=ceiling)
     else:
         num_ctx = sidecar_num_ctx(messages, max_tokens=max_tokens, ceiling=ceiling)
-    messages = trim_llama_messages_to_context(
-        messages, n_ctx=num_ctx, max_tokens=max_tokens
-    )
+    messages = trim_llama_messages_to_context(messages, n_ctx=num_ctx, max_tokens=max_tokens)
     return messages, num_ctx, max_tokens
 
 
@@ -603,8 +596,7 @@ def create_isolated_gguf_client(
     if selected == "ollama":
         if not ollama_health_ok():
             raise RuntimeError(
-                f"Ollama is not reachable at {ollama_url()}. "
-                f"{sidecar_setup_hint(engine='ollama')}"
+                f"Ollama is not reachable at {ollama_url()}. {sidecar_setup_hint(engine='ollama')}"
             )
         return OllamaClient(url=url)
     return LlamaSwapClient(url=url, engine="llamacpp")
@@ -626,8 +618,7 @@ class OllamaClient:
     def ensure_ready(self) -> None:
         if not ollama_health_ok(url=self.url):
             raise RuntimeError(
-                f"Ollama is not reachable at {self.url}. "
-                f"{sidecar_setup_hint(engine='ollama')}"
+                f"Ollama is not reachable at {self.url}. {sidecar_setup_hint(engine='ollama')}"
             )
 
     def complete(self, payload: dict[str, Any], model_path: str) -> str:
@@ -690,13 +681,10 @@ class OllamaClient:
                         break
         except urllib.error.URLError as exc:
             raise RuntimeError(
-                f"Ollama is unavailable at {self.url}. "
-                f"{sidecar_setup_hint(engine='ollama')}"
+                f"Ollama is unavailable at {self.url}. {sidecar_setup_hint(engine='ollama')}"
             ) from exc
 
-    def release_external_memory(
-        self, model_path: str | None = None
-    ) -> tuple[bool, str | None]:
+    def release_external_memory(self, model_path: str | None = None) -> tuple[bool, str | None]:
         """Best-effort Ollama model unload via keep_alive=0."""
         if not model_path:
             return False, "Ollama unload requires a model path"
@@ -730,9 +718,7 @@ class OllamaClient:
             metadata_for_model_path,
         )
 
-        meta = metadata_for_model_path(
-            model_path, payload.get("model_metadata")
-        )
+        meta = metadata_for_model_path(model_path, payload.get("model_metadata"))
         return ensure_model_registered(
             model_path,
             repo_id=meta.get("repo_id") if isinstance(meta.get("repo_id"), str) else None,
@@ -758,6 +744,9 @@ class OllamaClient:
             # Force partial CPU offload so weights + KV stay within free VRAM;
             # prevents a display-attached GPU from OOM-hanging the machine.
             options["num_gpu"] = num_gpu
+        cache_policy = resolve_sidecar_kv_policy(payload, engine=self.engine)
+        if cache_policy.num_keep is not None:
+            options["num_keep"] = cache_policy.num_keep
         top_p = payload.get("top_p")
         if top_p is not None:
             options["top_p"] = float(top_p)
@@ -794,8 +783,7 @@ class OllamaClient:
                 raw = response.read().decode("utf-8", errors="replace")
         except urllib.error.URLError as exc:
             raise RuntimeError(
-                f"Ollama is unavailable at {self.url}. "
-                f"{sidecar_setup_hint(engine='ollama')}"
+                f"Ollama is unavailable at {self.url}. {sidecar_setup_hint(engine='ollama')}"
             ) from exc
         return json.loads(raw)
 
@@ -901,6 +889,9 @@ class LlamaSwapClient:
         }
         if env_bool("SEISO_LLAMASWAP_SEND_NUM_CTX", False):
             body["n_ctx"] = num_ctx
+        cache_policy = resolve_sidecar_kv_policy(payload, engine=self.engine)
+        if cache_policy.cache_prompt is not None:
+            body["cache_prompt"] = cache_policy.cache_prompt
         top_p = payload.get("top_p")
         if top_p is not None:
             body["top_p"] = float(top_p)
@@ -918,9 +909,7 @@ class LlamaSwapClient:
             headers["Authorization"] = f"Bearer {api_key}"
         return urllib.request.Request(target, data=data, headers=headers, method="POST")
 
-    def release_external_memory(
-        self, model_path: str | None = None
-    ) -> tuple[bool, str | None]:
+    def release_external_memory(self, model_path: str | None = None) -> tuple[bool, str | None]:
         """Best-effort unload of llama-swap managed processes."""
         scope = env_str("SEISO_LLAMASWAP_UNLOAD_SCOPE", "all").strip().lower()
         if scope in {"0", "false", "none", "disabled"}:

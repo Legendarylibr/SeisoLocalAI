@@ -33,9 +33,7 @@ def configure_torch_inference() -> None:
             torch.backends.cudnn.deterministic = False
             torch.backends.cuda.matmul.allow_tf32 = True
             torch.backends.cudnn.allow_tf32 = True
-            if hasattr(
-                torch.backends.cuda.matmul, "allow_fp16_reduced_precision_reduction"
-            ):
+            if hasattr(torch.backends.cuda.matmul, "allow_fp16_reduced_precision_reduction"):
                 torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = True
             if hasattr(torch.backends.cuda, "enable_flash_sdp"):
                 torch.backends.cuda.enable_flash_sdp(True)
@@ -86,6 +84,48 @@ def maybe_compile_torch_model(model: Any) -> Any:
     except Exception as exc:
         logger.debug("torch.compile skipped: %s", exc)
         return model
+
+
+def maybe_compile_torch_decode(model: Any, input_ids: Any) -> bool:
+    """Compile the token-step forward only after eager warmup succeeds."""
+    if not env_bool("SEISO_TORCH_DECODE_GRAPHS", False):
+        return False
+    if getattr(model, "_seiso_decode_compiled", False):
+        return True
+    if getattr(model, "is_quantized", False) or hasattr(model, "peft_config"):
+        return False
+    original_forward = getattr(model, "forward", None)
+    if not callable(original_forward):
+        return False
+    try:
+        import torch
+
+        if not torch.cuda.is_available() or not hasattr(torch, "compile"):
+            return False
+        token = input_ids[:, :1]
+        with torch.inference_mode():
+            warmup = model(input_ids=token, use_cache=True)
+        past = getattr(warmup, "past_key_values", None)
+        if past is None:
+            return False
+        compiled_forward = torch.compile(
+            original_forward,
+            mode=env_str("SEISO_TORCH_COMPILE_MODE", "reduce-overhead"),
+            dynamic=False,
+            fullgraph=False,
+        )
+        # Trigger graph capture before exposing the compiled path to generation.
+        with torch.inference_mode():
+            compiled_forward(input_ids=token, past_key_values=past, use_cache=True)
+        model.forward = compiled_forward
+        model._seiso_decode_compiled = True
+        logger.info("Guarded Torch decode compilation enabled after warmup")
+        return True
+    except Exception as exc:
+        model.forward = original_forward
+        model._seiso_decode_compile_failed = True
+        logger.debug("Guarded Torch decode compilation disabled: %s", exc)
+        return False
 
 
 def apply_inference_kernels(model: Any) -> None:
@@ -254,6 +294,9 @@ def torch_generate_kwargs(
     cache_impl = _torch_cache_implementation(payload)
     if cache_impl:
         kwargs["cache_implementation"] = cache_impl
+        policy = payload.get("kv_policy")
+        if cache_impl == "quantized" and isinstance(policy, dict):
+            kwargs["cache_config"] = {"nbits": int(policy.get("kv_bits", 8))}
 
     if temperature > 0:
         kwargs["do_sample"] = True
@@ -278,30 +321,50 @@ def _torch_cache_implementation(payload: dict[str, Any]) -> str | None:
     return text
 
 
-def generate_with_cache_fallback(model: Any, gen_kwargs: dict[str, Any]) -> Any:
-    """Run ``generate`` and retry without cache_implementation if the stack rejects it."""
+def generate_with_cache_fallback(
+    model: Any,
+    gen_kwargs: dict[str, Any],
+    *,
+    can_retry: Any | None = None,
+    prepare_retry: Any | None = None,
+) -> Any:
+    """Run ``generate`` and retry with the compatible dynamic cache when needed."""
     try:
         return model.generate(**gen_kwargs)
-    except (TypeError, ValueError) as exc:
-        if (
-            "cache_implementation" not in gen_kwargs
-            or not _looks_like_unsupported_kwarg(exc)
-        ):
+    except (TypeError, ValueError, RuntimeError) as exc:
+        from seiso.memory.protection import is_oom_error
+
+        if is_oom_error(exc):
+            raise
+        if "cache_implementation" not in gen_kwargs or not _looks_like_unsupported_kwarg(exc):
+            raise
+        if can_retry is not None and not can_retry():
             raise
         reduced = dict(gen_kwargs)
         reduced.pop("cache_implementation", None)
+        reduced.pop("cache_config", None)
+        if prepare_retry is not None:
+            prepare_retry()
         logger.debug("Retrying torch generate without cache_implementation: %s", exc)
         return model.generate(**reduced)
 
 
 def _looks_like_unsupported_kwarg(exc: BaseException) -> bool:
     text = str(exc).lower()
-    return "cache_implementation" in text and (
+    return (
+        "cache_implementation" in text
+        or "cache implementation" in text
+        or "quantizedcache" in text
+        or "staticcache" in text
+        or "offloadedcache" in text
+    ) and (
         "unexpected" in text
         or "unused" in text
         or "not used" in text
         or "not supported" in text
         or "invalid" in text
+        or "requires" in text
+        or "cannot" in text
     )
 
 
