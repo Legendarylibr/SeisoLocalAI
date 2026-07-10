@@ -39,6 +39,12 @@ async def lifespan(app: FastAPI):
     ensure_llamacpp_runtime()
     apply_platform_memory_profile()
     try:
+        from seiso.inference.profiles import apply_inference_profile
+
+        apply_inference_profile()
+    except Exception:
+        pass
+    try:
         from seiso.hardware.vram_processes import log_vram_contention_at_startup
 
         log_vram_contention_at_startup()

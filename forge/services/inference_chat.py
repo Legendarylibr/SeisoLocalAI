@@ -218,6 +218,11 @@ async def prepare_local_chat_target(
                     inference_backend=backend,
                 )
             )
+        from seiso.inference.plan import generation_plan_from_updates
+
+        plan = generation_plan_from_updates(updates)
+        if plan is not None:
+            updates["generation_plan"] = plan.as_dict()
         return updates
 
     if not model_id:
@@ -318,6 +323,11 @@ async def prepare_local_chat_target(
                 inference_backend=updates.get("inference_backend"),
             )
         )
+    from seiso.inference.plan import generation_plan_from_updates
+
+    plan = generation_plan_from_updates(updates)
+    if plan is not None:
+        updates["generation_plan"] = plan.as_dict()
     return updates
 
 
@@ -357,6 +367,7 @@ async def resolve_preload_context(
         "inference_backend": target["inference_backend"],
         "messages": [{"role": "user", "content": "ping"}],
         "max_tokens": target.get("max_tokens", max_tokens),
+        "sidecar_active": True,
     }
     if target.get("model_metadata"):
         payload["model_metadata"] = target["model_metadata"]
@@ -364,16 +375,25 @@ async def resolve_preload_context(
         payload["n_ctx"] = target["n_ctx"]
     elif n_ctx is not None:
         payload["n_ctx"] = n_ctx
+    if target.get("generation_plan"):
+        payload["generation_plan"] = target["generation_plan"]
 
     # Eager Ollama registration during preload so first chat skips `ollama create`.
     if target["inference_backend"] == BACKEND_LLAMASWAP:
         try:
-            from seiso.inference.llamaswap import preferred_sidecar_engine
+            from seiso.inference.llamaswap import (
+                plan_sidecar_request,
+                preferred_sidecar_engine,
+            )
             from seiso.inference.ollama_registry import (
                 ensure_model_registered,
                 metadata_for_model_path,
             )
 
+            # Pin sidecar num_ctx at preload so first chat reuses the same KV size.
+            _, planned_ctx, planned_max = plan_sidecar_request(payload, str(path))
+            payload["sidecar_num_ctx"] = planned_ctx
+            payload["max_tokens"] = planned_max
             if preferred_sidecar_engine() == "ollama":
                 meta = metadata_for_model_path(str(path), target.get("model_metadata"))
                 ensure_model_registered(

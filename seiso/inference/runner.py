@@ -458,7 +458,34 @@ class LocalInferenceRunner:
         elif route == "torch":
             self._pool.get_torch(resolved_path)
         elif route == "llamaswap":
-            client = self._pool.get_llamaswap(resolved_path)
+            pinned_ctx = payload.get("sidecar_num_ctx") or payload.get("n_ctx")
+            try:
+                pinned_ctx_i = int(pinned_ctx) if pinned_ctx is not None else None
+            except (TypeError, ValueError):
+                pinned_ctx_i = None
+            if pinned_ctx_i is None:
+                try:
+                    from seiso.inference.llamaswap import plan_sidecar_request
+
+                    _, planned_ctx, planned_max = plan_sidecar_request(
+                        payload, resolved_path
+                    )
+                    payload = {
+                        **payload,
+                        "sidecar_num_ctx": planned_ctx,
+                        "max_tokens": planned_max,
+                        "sidecar_active": True,
+                    }
+                    pinned_ctx_i = planned_ctx
+                except Exception:
+                    logger.debug(
+                        "Sidecar preload ctx planning failed for %s",
+                        resolved_path,
+                        exc_info=True,
+                    )
+            client = self._pool.get_llamaswap(
+                resolved_path, num_ctx=pinned_ctx_i
+            )
             # Eager Ollama registration so first chat is not blocked on `ollama create`.
             if getattr(client, "engine", None) == "ollama":
                 try:
@@ -1037,8 +1064,10 @@ class LocalInferenceRunner:
         model_path: str,
         should_stop: Callable[[], bool],
     ) -> Iterator[StreamToken]:
-        import torch
-        from transformers import TextIteratorStreamer
+        from seiso.inference.torch_stream import (
+            iter_torch_kv_tokens,
+            use_manual_torch_kv_stream,
+        )
 
         configure_torch_inference()
         model, tokenizer = self._pool.get_torch(model_path, load_in_4bit=True)
@@ -1050,6 +1079,47 @@ class LocalInferenceRunner:
             max_tokens=int(payload.get("max_tokens", 512)),
         )
         payload = {**payload, "max_tokens": max_tokens}
+
+        if use_manual_torch_kv_stream(payload):
+            try:
+                yield from iter_torch_kv_tokens(
+                    model=model,
+                    tokenizer=tokenizer,
+                    input_ids=inputs["input_ids"],
+                    max_new_tokens=int(payload.get("max_tokens", 512)),
+                    temperature=float(payload.get("temperature", 0.0)),
+                    top_p=(
+                        float(payload["top_p"])
+                        if payload.get("top_p") is not None
+                        else None
+                    ),
+                    pad_token_id=tokenizer.pad_token_id,
+                    eos_token_id=getattr(tokenizer, "eos_token_id", None),
+                    should_stop=should_stop,
+                )
+                return
+            except Exception as exc:
+                if is_oom_error(exc):
+                    raise
+                logger.debug(
+                    "Manual torch KV stream unavailable — falling back to generate: %s",
+                    exc,
+                )
+
+        yield from self._torch_stream_generate(
+            model, tokenizer, inputs, payload, should_stop
+        )
+
+    def _torch_stream_generate(
+        self,
+        model: Any,
+        tokenizer: Any,
+        inputs: dict[str, Any],
+        payload: dict[str, Any],
+        should_stop: Callable[[], bool],
+    ) -> Iterator[StreamToken]:
+        """HF TextIteratorStreamer path (non-cooperative cancel)."""
+        from transformers import TextIteratorStreamer
 
         streamer = TextIteratorStreamer(
             tokenizer,
@@ -1066,6 +1136,8 @@ class LocalInferenceRunner:
         generation_errors: list[BaseException] = []
 
         def _generate() -> None:
+            import torch
+
             with torch.inference_mode():
                 try:
                     _torch_generate_with_oom_retry(model, gen_kwargs)
@@ -1438,13 +1510,31 @@ class LocalInferenceRunner:
         message = choices[0].get("message") or {}
         return message_content_with_tool_calls(message)
 
+    def _llamaswap_payload(self, payload: dict[str, Any], model_path: str) -> dict[str, Any]:
+        """Ensure sidecar chat reuses a pinned num_ctx and active keep_alive."""
+        out = dict(payload)
+        out.setdefault("sidecar_active", True)
+        if out.get("sidecar_num_ctx") is not None:
+            return out
+        try:
+            from seiso.inference.llamaswap import plan_sidecar_request
+
+            _, planned_ctx, _planned_max = plan_sidecar_request(out, model_path)
+            out["sidecar_num_ctx"] = planned_ctx
+        except Exception:
+            logger.debug("Sidecar request planning failed", exc_info=True)
+        return out
+
     def _llamaswap_complete(
         self,
         payload: dict[str, Any],
         model_path: str,
         generation_id: int,
     ) -> str:
-        client = self._pool.get_llamaswap(model_path)
+        payload = self._llamaswap_payload(payload, model_path)
+        client = self._pool.get_llamaswap(
+            model_path, num_ctx=payload.get("sidecar_num_ctx")
+        )
         text = client.complete(payload, model_path)
         if not self._pool.is_generation_active(generation_id):
             return ""
@@ -1456,7 +1546,10 @@ class LocalInferenceRunner:
         model_path: str,
         should_stop: Callable[[], bool],
     ) -> Iterator[StreamToken]:
-        client = self._pool.get_llamaswap(model_path)
+        payload = self._llamaswap_payload(payload, model_path)
+        client = self._pool.get_llamaswap(
+            model_path, num_ctx=payload.get("sidecar_num_ctx")
+        )
         yield from client.stream(payload, model_path, should_stop=should_stop)
 
     def _llama_stream(
