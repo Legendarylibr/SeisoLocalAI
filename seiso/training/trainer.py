@@ -139,17 +139,25 @@ class SeisoTrainer:
                 analysis = cached
                 reused = True
             else:
+                # Sample-only scan — full preprocess runs once in _prepare_datasets
+                # (or reuses the cleaned cache when UI analysis already ran).
                 analysis = analyze_training_dataset(
                     cfg.dataset,
                     dataset_format=cfg.dataset_format,
                     sandbox_root=cfg.sandbox_root,
+                    full_scan=False,
                 )
                 reused = False
             write_json(cfg.output_dir / "dataset_analysis.json", analysis)
             prefix = "Reused" if reused else "Dataset analysis"
+            sample_note = (
+                ""
+                if analysis.get("uses_full_dataset", True)
+                else ", sample estimate"
+            )
             self._log(
                 f"{prefix}: {analysis['kept']:,}/{analysis['initial_samples']:,} usable samples "
-                f"(format={analysis['resolved_format']}, domain={analysis['domain']})"
+                f"(format={analysis['resolved_format']}, domain={analysis['domain']}{sample_note})"
             )
             # Stash for _prepare_datasets when preprocess params match analysis defaults.
             self._cached_analysis = analysis

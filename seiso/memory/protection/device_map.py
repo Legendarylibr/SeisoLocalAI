@@ -9,11 +9,13 @@ from seiso.memory.protection.constants import _MAX_JSONL_LOAD_MB
 
 
 def jsonl_load_safe(path: Path) -> bool:
-    """True when JSONL should use datasets loader instead of in-memory list."""
-    try:
-        return path.stat().st_size > _MAX_JSONL_LOAD_MB * 1024**2
-    except OSError:
-        return False
+    """True when JSONL should use the datasets mmap loader.
+
+    Always prefers mmap for local files (``load_training_dataset`` no longer
+    size-gates). Kept for API compatibility with older call sites and tests.
+    """
+    _ = path, _MAX_JSONL_LOAD_MB
+    return True
 
 
 def resolve_training_device_map(

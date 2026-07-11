@@ -492,13 +492,17 @@ def _llama_cache_is_optimal(
 
 
 def _llama_cache_headroom_ok(handle: Any, *, max_tokens: int = 512) -> bool:
-    """Native Linux cache hit guard for handles loaded before VRAM changed."""
+    """Native Linux cache hit guard for handles loaded before VRAM changed.
+
+    Uses the TTL-backed hardware metrics cache (not a forced nvidia-smi probe)
+    so warm multi-turn chat does not pay subprocess cost on every pool hit.
+    """
     if not _mp()._native_linux_nvidia():
         return True
     loaded_headroom = getattr(handle, "_seiso_load_headroom_mb", None)
     if not loaded_headroom:
         return True
-    _mp()._refresh_headroom_stats(force=True)
+    _mp()._refresh_headroom_stats(force=False)
     current = _prot().headroom_mb()
     if current < int(int(loaded_headroom) * 0.85):
         return False
@@ -623,9 +627,11 @@ def _load_llama_model(
 
     from seiso.inference.tuning import attach_llama_prompt_cache
 
-    _prot().release_cached_memory(sync=True)
+    # Best-effort free without CUDA sync — full sync only after failed attempts
+    # or when the pool already unloaded a previous resident model.
+    _prot().release_cached_memory(sync=False)
     _mp()._clear_optimal_layers_cache()
-    _mp()._refresh_headroom_stats(force=True)
+    _mp()._refresh_headroom_stats(force=False)
 
     est_mb = int(_prot().estimate_path_vram_mb(path))
     try:
@@ -692,6 +698,7 @@ def _load_llama_model(
         kv_quant: dict[str, Any],
         *,
         log_retry: bool,
+        force_headroom_refresh: bool = False,
     ) -> Any | None:
         nonlocal last_exc
         key = (layers, tuple(sorted(profile.items())), tuple(sorted(kv_quant.items())))
@@ -721,7 +728,8 @@ def _load_llama_model(
                     load_kwargs["offload_kqv"] = False
                 if not env_bool("SEISO_LLAMA_UNSAFE_OP_OFFLOAD", False):
                     load_kwargs.pop("op_offload", None)
-        _mp()._refresh_headroom_stats(force=True)
+        # Force-refresh only on retries after failure (VRAM may have changed).
+        _mp()._refresh_headroom_stats(force=force_headroom_refresh)
         load_kwargs["_model_path"] = path
         load_kwargs["_native_linux_nvidia"] = _mp()._native_linux_nvidia()
         load_kwargs["_max_tokens"] = max_tokens
@@ -765,6 +773,22 @@ def _load_llama_model(
                     )
             if use_prompt_cache:
                 attach_llama_prompt_cache(llm, model_path=path)
+            try:
+                from seiso.inference.llama_load_cache import (
+                    profile_from_load_kwargs,
+                    save_cached_load_profile,
+                )
+
+                save_cached_load_profile(
+                    path,
+                    n_ctx=int(load_kwargs.get("n_ctx") or effective_n_ctx),
+                    load_tier=load_tier,
+                    profile=profile_from_load_kwargs(
+                        load_kwargs, layers=layers, load_tier=load_tier
+                    ),
+                )
+            except Exception:
+                logger.debug("llama load profile cache write skipped", exc_info=True)
             return llm
         except Exception as exc:
             if not _llama_load_retryable(exc):
@@ -775,13 +799,62 @@ def _load_llama_model(
                 logger.warning("llama.cpp load failed at n_gpu_layers=%s — retrying", layers)
             return None
 
+    # Prefer a previously successful profile (same file/ctx/tier) before the ladder.
+    if batch_override is None:
+        try:
+            from seiso.inference.llama_load_cache import get_cached_load_profile
+
+            cached = get_cached_load_profile(
+                path, n_ctx=effective_n_ctx, load_tier=load_tier
+            )
+        except Exception:
+            cached = None
+        if cached is not None:
+            cached_layers = int(cached.get("n_gpu_layers", 0))
+            cached_profile = {
+                k: v
+                for k, v in cached.items()
+                if k
+                not in {
+                    "n_gpu_layers",
+                    "load_tier",
+                    "type_k",
+                    "type_v",
+                }
+            }
+            cached_kv: dict[str, Any] = {}
+            if "type_k" in cached and "type_v" in cached:
+                cached_kv = {"type_k": cached["type_k"], "type_v": cached["type_v"]}
+            llm = _try_load(
+                cached_layers,
+                cached_profile,
+                cached_kv,
+                log_retry=True,
+                force_headroom_refresh=False,
+            )
+            if llm is not None:
+                logger.info(
+                    "Loaded %s from cached profile (layers=%s n_batch=%s)",
+                    Path(path).name,
+                    cached_layers,
+                    cached.get("n_batch"),
+                )
+                return llm
+            _prot().release_cached_memory(sync=True)
+
     for layers in full_targets:
         for profile_idx, profile in enumerate(full_gpu_profiles):
             for kv_idx, kv_quant in enumerate(kv_options):
                 log_retry = (
                     profile_idx == len(full_gpu_profiles) - 1 and kv_idx == len(kv_options) - 1
                 )
-                llm = _try_load(layers, profile, kv_quant, log_retry=log_retry)
+                llm = _try_load(
+                    layers,
+                    profile,
+                    kv_quant,
+                    log_retry=log_retry,
+                    force_headroom_refresh=profile_idx > 0 or kv_idx > 0,
+                )
                 if llm is not None:
                     return llm
 
@@ -803,7 +876,13 @@ def _load_llama_model(
                     and kqv_idx == len(partial_kqv_options) - 1
                 )
                 log_retry = first_partial_attempt or final_partial_attempt
-                llm = _try_load(layers, profile, kqv_option, log_retry=log_retry)
+                llm = _try_load(
+                    layers,
+                    profile,
+                    kqv_option,
+                    log_retry=log_retry,
+                    force_headroom_refresh=not first_partial_attempt,
+                )
                 if llm is not None:
                     return llm
 

@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from seiso.training.config import DatasetFormat
 from seiso.training.dataset_analysis import (
     _infer_domain,
     _length_stats,
+    analyze_training_dataset,
     build_dataset_training_config,
     detect_format_consensus,
 )
@@ -89,3 +92,36 @@ def test_length_stats_percentiles():
     assert stats["chars_min"] == 10
     assert stats["chars_p50"] == 100
     assert stats["chars_max"] == 1000
+
+
+def test_analyze_full_scan_false_skips_full_preprocess(tmp_path: Path, monkeypatch):
+    """Train startup uses sample validation so preprocess is not run twice."""
+    dataset = tmp_path / "train.jsonl"
+    rows = [{"instruction": f"q{i}", "output": f"a{i}"} for i in range(20)]
+    dataset.write_text("\n".join(__import__("json").dumps(r) for r in rows) + "\n")
+
+    calls: list[str] = []
+
+    def _track_preprocess(*args, **kwargs):
+        calls.append("full")
+        from seiso.training.preprocess import preprocess_training_dataset as real
+
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(
+        "seiso.training.dataset_analysis.preprocess_training_dataset",
+        _track_preprocess,
+    )
+
+    sample = analyze_training_dataset(dataset, full_scan=False)
+    assert sample["uses_full_dataset"] is False
+    assert sample["valid"] is True
+    assert sample["kept"] >= 1
+    assert "cleaned_cache_key" not in sample
+    assert calls == []
+
+    full = analyze_training_dataset(dataset, full_scan=True)
+    assert full["uses_full_dataset"] is True
+    assert full["kept"] == 20
+    assert full.get("cleaned_cache_key")
+    assert calls == ["full"]
