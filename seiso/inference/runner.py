@@ -702,7 +702,8 @@ class LocalInferenceRunner:
 
     async def stream(self, payload: dict[str, Any]) -> AsyncIterator[str]:
         async for update in self.stream_updates(payload):
-            yield update.text
+            if update.text:
+                yield update.text
 
     async def stream_updates(self, payload: dict[str, Any]) -> AsyncIterator[StreamUpdate]:
         model_path = payload.get("model_path") or payload.get("model_id")
