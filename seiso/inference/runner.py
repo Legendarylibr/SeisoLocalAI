@@ -702,7 +702,8 @@ class LocalInferenceRunner:
 
     async def stream(self, payload: dict[str, Any]) -> AsyncIterator[str]:
         async for update in self.stream_updates(payload):
-            yield update.text
+            if update.text:
+                yield update.text
 
     async def stream_updates(self, payload: dict[str, Any]) -> AsyncIterator[StreamUpdate]:
         model_path = payload.get("model_path") or payload.get("model_id")
@@ -729,25 +730,34 @@ class LocalInferenceRunner:
             buffered = 0
             output_tokens = 0
             flushed_once = False
+            finish_reason: str | None = None
+            max_tokens = max(1, int(payload.get("max_tokens") or 512))
             producer_started = time.perf_counter()
             first_token_at: float | None = None
             batch_chars = _stream_batch_chars()
 
-            def metadata() -> dict[str, Any]:
+            def metadata(*, reason: str | None = None) -> dict[str, Any]:
                 now = time.perf_counter()
                 if first_token_at is not None:
                     elapsed = max(0.000001, now - first_token_at)
                     self._last_inference_stats["decode_tokens_per_sec"] = round(
                         output_tokens / elapsed, 3
                     )
-                return dict(self._last_inference_stats)
+                meta = dict(self._last_inference_stats)
+                if reason:
+                    meta["finish_reason"] = reason
+                return meta
 
             try:
                 with self._pool.inference_lease():
                     for part in self._iter_tokens(payload, resolved_path, route, should_stop):
                         if should_stop():
                             break
-                        if first_token_at is None:
+                        if part.finish_reason:
+                            finish_reason = part.finish_reason
+                        if not part.text and part.finish_reason:
+                            continue
+                        if first_token_at is None and part.text:
                             first_token_at = time.perf_counter()
                             ttft_ms = (first_token_at - producer_started) * 1000.0
                             self._last_inference_stats["ttft_ms"] = round(ttft_ms, 3)
@@ -781,18 +791,32 @@ class LocalInferenceRunner:
                             )
                             buffer.clear()
                             buffered = 0
+                if finish_reason is None and not should_stop():
+                    if output_tokens >= max(1, max_tokens - 1):
+                        finish_reason = "length"
+                    elif flushed_once or buffer:
+                        finish_reason = "stop"
                 if buffer and not should_stop():
                     bridge.publish(
                         StreamUpdate(
                             text="".join(buffer),
                             output_tokens=output_tokens,
-                            metadata=metadata(),
+                            metadata=metadata(reason=finish_reason),
+                        )
+                    )
+                elif finish_reason and not should_stop():
+                    bridge.publish(
+                        StreamUpdate(
+                            text="",
+                            output_tokens=output_tokens,
+                            metadata=metadata(reason=finish_reason),
                         )
                     )
                 if (
                     route == "llamaswap"
                     and self._last_inference_stats.get("sidecar_resident_confirmed")
                     and not should_stop()
+                    and not finish_reason
                 ):
                     # Ollama reports load/prefill/decode timings in its final
                     # metadata-only frame, after the last text chunk.
@@ -1869,10 +1893,15 @@ class LocalInferenceRunner:
                     messages=messages,
                     **completion_kwargs,
                 )
+                finish_reason: str | None = None
                 for chunk in stream:
                     if should_stop():
                         break
-                    delta = chunk["choices"][0].get("delta", {})
+                    choice = chunk["choices"][0]
+                    reason = choice.get("finish_reason")
+                    if reason:
+                        finish_reason = str(reason)
+                    delta = choice.get("delta", {}) or {}
                     content = delta.get("content")
                     if content:
                         emitted_text = True
@@ -1885,6 +1914,8 @@ class LocalInferenceRunner:
                 if tool_text and not should_stop():
                     emitted_text = True
                     yield StreamToken(tool_text)
+                if finish_reason and not should_stop():
+                    yield StreamToken("", new_tokens=0, finish_reason=finish_reason)
                 return
             except Exception as exc:
                 if not is_oom_error(exc):

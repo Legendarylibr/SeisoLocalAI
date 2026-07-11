@@ -4610,13 +4610,32 @@ th { color: var(--muted); font-weight: 500; font-size: 0.78rem; text-transform: 
   border-color: rgba(78, 205, 192, 0.2);
 }
 
+.chat-bubble-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  max-width: calc(100% - 2.5rem);
+  min-width: 0;
+}
+
 .chat-bubble-content {
   padding: 0.75rem 1rem;
   border-radius: var(--radius-lg);
   font-size: 0.9rem;
   line-height: 1.6;
-  max-width: calc(100% - 2.5rem);
   word-break: break-word;
+}
+
+/* Streaming bubble has no body wrapper — keep width aligned with final bubbles. */
+.chat-bubble-streaming > .chat-bubble-content {
+  max-width: calc(100% - 2.5rem);
+}
+
+.chat-reply-truncated {
+  margin: 0;
+  padding: 0 0.25rem;
+  font-size: 0.78rem;
+  line-height: 1.4;
 }
 
 .chat-bubble-assistant .chat-bubble-content {

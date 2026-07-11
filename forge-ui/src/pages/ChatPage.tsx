@@ -124,6 +124,8 @@ export function ChatPage() {
   const [streaming, setStreaming] = useState(false);
   const [streamTps, setStreamTps] = useState<number | null>(null);
   const [lastTps, setLastTps] = useState<number | null>(null);
+  /** Message ids whose reply still hit max length after auto-continue. */
+  const [truncatedMessageIds, setTruncatedMessageIds] = useState<Record<string, true>>({});
   const [error, setError] = useState<string | null>(null);
   const [threadSearch, setThreadSearch] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -894,26 +896,31 @@ export function ChatPage() {
     let assistantText = "";
     let progressText = "";
     let streamFailed = false;
+    let replyTruncated = false;
     streamThreadRef.current = threadId;
     genStartRef.current = null;
     outputTokensRef.current = 0;
     setStreamTps(null);
 
-    const commitAssistantMessage = (text: string) => {
+    const commitAssistantMessage = (text: string, truncated = false) => {
       const tid = streamThreadRef.current;
       if (!tid || !text.trim()) return;
+      const id = crypto.randomUUID();
       setMessagesByThread((prev) => ({
         ...prev,
         [tid]: [
           ...(prev[tid] ?? []),
           {
-            id: crypto.randomUUID(),
+            id,
             role: "assistant" as const,
             content: text,
             created_at: new Date().toISOString(),
           },
         ],
       }));
+      if (truncated) {
+        setTruncatedMessageIds((prev) => ({ ...prev, [id]: true }));
+      }
     };
 
     const flushTpsUpdate = (finalize = false) => {
@@ -1000,6 +1007,10 @@ export function ChatPage() {
               return;
             }
             if (event === "log") {
+              // Auto-continue logs are server status, not model output.
+              if (/Reply hit max length/i.test(data)) {
+                return;
+              }
               progressText = `${progressText}${progressText ? "\n" : ""}${data}`;
               if (!assistantText) {
                 streamDisplay.push(progressText);
@@ -1008,7 +1019,12 @@ export function ChatPage() {
             }
             if (event === "stats") {
               const stats = parseStreamStats(data);
-              if (stats) outputTokensRef.current = stats.output_tokens;
+              if (stats) {
+                outputTokensRef.current = stats.output_tokens;
+                if (typeof stats.truncated === "boolean") {
+                  replyTruncated = stats.truncated;
+                }
+              }
               scheduleTpsUpdate();
               return;
             }
@@ -1040,7 +1056,7 @@ export function ChatPage() {
         streamingElRef.current.textContent = "";
       }
       if (!streamFailed && assistantText.trim()) {
-        commitAssistantMessage(assistantText);
+        commitAssistantMessage(assistantText, replyTruncated);
       }
       if (assistantText.trim() && genStartRef.current !== null) {
         const tokenCount = resolveOutputTokenCount(outputTokensRef.current, assistantText);
@@ -1446,7 +1462,11 @@ export function ChatPage() {
           ) : (
             <div className="chat-messages">
               {messages.map((m) => (
-                <ChatBubble key={m.id} message={m} />
+                <ChatBubble
+                  key={m.id}
+                  message={m}
+                  truncated={Boolean(truncatedMessageIds[m.id])}
+                />
               ))}
               {streaming && <StreamingBubble contentRef={streamingElRef} />}
               <div ref={bottomRef} />

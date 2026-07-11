@@ -10,6 +10,13 @@ def test_stream_token_normalizes_non_positive_counts():
     assert token.new_tokens == 1
 
 
+def test_stream_token_allows_finish_marker_with_zero_tokens():
+    marker = StreamToken("", new_tokens=0, finish_reason="length")
+    assert marker.new_tokens == 0
+    assert marker.finish_reason == "length"
+    assert marker.text == ""
+
+
 @pytest.mark.asyncio
 async def test_runner_stream_updates_counts_decode_steps(monkeypatch):
     from seiso.inference.runner import LocalInferenceRunner

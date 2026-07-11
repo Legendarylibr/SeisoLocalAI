@@ -12,6 +12,16 @@ describe("streamSpeed", () => {
     expect(parseStreamStats('{"output_tokens": 42}')).toEqual({ output_tokens: 42 });
     expect(parseStreamStats("not-json")).toBeNull();
     expect(parseStreamStats('{"output_tokens": -1}')).toBeNull();
+    expect(
+      parseStreamStats(
+        '{"output_tokens": 100, "finish_reason": "length", "truncated": true, "auto_continues": 2}',
+      ),
+    ).toEqual({
+      output_tokens: 100,
+      finish_reason: "length",
+      truncated: true,
+      auto_continues: 2,
+    });
   });
 
   it("prefers measured token counts with text fallback", () => {

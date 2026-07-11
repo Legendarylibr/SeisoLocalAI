@@ -17,15 +17,19 @@ class StreamToken:
 
     text: str
     new_tokens: int = 1
+    finish_reason: str | None = None
 
     def __post_init__(self) -> None:
+        # Allow zero-token control markers that only carry finish_reason.
+        if self.finish_reason and not self.text and self.new_tokens == 0:
+            return
         if self.new_tokens < 1:
             object.__setattr__(self, "new_tokens", 1)
 
 
 @dataclass(frozen=True)
 class StreamUpdate:
-    """Batched text chunk with cumulative output token count."""
+    """Batched text chunk with cumulative output token count for this pass."""
 
     text: str
     output_tokens: int

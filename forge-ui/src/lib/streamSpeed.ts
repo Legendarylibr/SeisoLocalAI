@@ -1,16 +1,38 @@
 export type StreamStats = {
   output_tokens: number;
+  finish_reason?: string | null;
+  truncated?: boolean;
+  auto_continues?: number;
 };
 
 /** Parse server-reported stream stats (falls back to null on invalid payloads). */
 export function parseStreamStats(data: string): StreamStats | null {
   try {
-    const parsed = JSON.parse(data) as { output_tokens?: unknown };
+    const parsed = JSON.parse(data) as {
+      output_tokens?: unknown;
+      finish_reason?: unknown;
+      truncated?: unknown;
+      auto_continues?: unknown;
+    };
     const outputTokens = parsed.output_tokens;
     if (typeof outputTokens !== "number" || !Number.isFinite(outputTokens) || outputTokens < 0) {
       return null;
     }
-    return { output_tokens: Math.floor(outputTokens) };
+    const stats: StreamStats = { output_tokens: Math.floor(outputTokens) };
+    if (typeof parsed.finish_reason === "string" && parsed.finish_reason) {
+      stats.finish_reason = parsed.finish_reason;
+    }
+    if (typeof parsed.truncated === "boolean") {
+      stats.truncated = parsed.truncated;
+    }
+    if (
+      typeof parsed.auto_continues === "number" &&
+      Number.isFinite(parsed.auto_continues) &&
+      parsed.auto_continues >= 0
+    ) {
+      stats.auto_continues = Math.floor(parsed.auto_continues);
+    }
+    return stats;
   } catch {
     return null;
   }
