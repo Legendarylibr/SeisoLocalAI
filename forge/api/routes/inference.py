@@ -602,6 +602,15 @@ async def chat(
                 return
 
             if can_stream_local:
+                from forge.services.generation_continue import (
+                    build_continue_messages,
+                    hit_length_limit,
+                    max_auto_continues,
+                    resolve_finish_reason,
+                    should_auto_continue,
+                )
+                from seiso.memory.protection import sanitize_inference_payload
+
                 streamed: list[str] = []
                 raw_parts: list[str] = []
                 sanitizer = StreamingOutputSanitizer(strip_tool_calls=not body.tools)
@@ -611,30 +620,154 @@ async def chat(
                     else (payload.get("inference_backend") or "local")
                 )
                 cancelled = False
+                # Keep n_ctx fixed across auto-continues — never grow KV for long replies.
+                fixed_n_ctx = payload.get("n_ctx")
+                base_messages = list(payload.get("messages") or [])
+                isolated = (
+                    str(payload.get("inference_backend") or "").lower() == "llamaswap"
+                )
+                pass_payload = dict(payload)
+                if fixed_n_ctx is not None:
+                    pass_payload["n_ctx"] = fixed_n_ctx
+                effective = sanitize_inference_payload(
+                    pass_payload, isolated=isolated
+                )
+                pass_max_tokens = max(1, int(effective.get("max_tokens") or 2048))
+                pass_payload["max_tokens"] = pass_max_tokens
+                continues_used = 0
+                total_output_tokens = 0
+                last_pass_tokens = 0
+                finish_reason = "stop"
+                max_continues = max_auto_continues()
                 try:
-                    orchestrator.emit_log(job_id, f"Streaming inference ({backend_label})")
-                    async for update in orchestrator.stream_local_updates(payload):
-                        raw_parts.append(update.text)
-                        yield {
-                            "event": "stats",
-                            "data": json.dumps(
-                                {
-                                    "output_tokens": update.output_tokens,
-                                    **update.metadata,
+                    orchestrator.emit_log(
+                        job_id, f"Streaming inference ({backend_label})"
+                    )
+                    while True:
+                        pass_raw: list[str] = []
+                        pass_tokens = 0
+                        pass_finish: str | None = None
+                        last_meta: dict[str, Any] = {}
+                        async for update in orchestrator.stream_local_updates(
+                            pass_payload
+                        ):
+                            meta = dict(update.metadata or {})
+                            last_meta = meta
+                            reason = meta.get("finish_reason")
+                            if isinstance(reason, str) and reason:
+                                pass_finish = reason
+                            pass_tokens = max(pass_tokens, int(update.output_tokens))
+                            stats_payload = {
+                                "output_tokens": total_output_tokens + pass_tokens,
+                                "auto_continues": continues_used,
+                                **meta,
+                            }
+                            if not update.text:
+                                if pass_finish:
+                                    stats_payload["finish_reason"] = pass_finish
+                                yield {
+                                    "event": "stats",
+                                    "data": json.dumps(stats_payload),
                                 }
+                                continue
+                            pass_raw.append(update.text)
+                            raw_parts.append(update.text)
+                            yield {
+                                "event": "stats",
+                                "data": json.dumps(stats_payload),
+                            }
+                            for chunk in sanitizer.feed(update.text):
+                                streamed.append(chunk)
+                                yield {"event": "token", "data": chunk}
+
+                        total_output_tokens += pass_tokens
+                        last_pass_tokens = pass_tokens
+                        pass_text = "".join(pass_raw)
+                        hit_length = hit_length_limit(
+                            pass_tokens,
+                            pass_max_tokens,
+                            finish_reason=pass_finish,
+                        )
+                        finish_reason = resolve_finish_reason(
+                            hit_length=hit_length,
+                            explicit=pass_finish,
+                        )
+                        if not should_auto_continue(
+                            pass_output_tokens=pass_tokens,
+                            max_tokens=pass_max_tokens,
+                            pass_text=pass_text,
+                            continues_used=continues_used,
+                            max_continues=max_continues,
+                            finish_reason=pass_finish,
+                            cancelled=cancelled,
+                        ):
+                            break
+
+                        continues_used += 1
+                        partial = sanitize_llm_output(
+                            "".join(raw_parts), strip_tool_calls=not body.tools
+                        )
+                        orchestrator.emit_log(
+                            job_id,
+                            f"Auto-continuing truncated reply "
+                            f"(pass {continues_used + 1}, budget {pass_max_tokens} tok)",
+                        )
+                        yield {
+                            "event": "log",
+                            "data": (
+                                f"Reply hit max length — continuing "
+                                f"({continues_used}/{max_continues})…"
                             ),
                         }
-                        for chunk in sanitizer.feed(update.text):
-                            streamed.append(chunk)
-                            yield {"event": "token", "data": chunk}
+                        # Reuse same max_tokens + fixed n_ctx; sanitize may shrink budget
+                        # if the growing transcript leaves less free KV room.
+                        pass_payload = {
+                            **payload,
+                            "messages": build_continue_messages(
+                                base_messages, partial
+                            ),
+                            "max_tokens": pass_max_tokens,
+                        }
+                        if fixed_n_ctx is not None:
+                            pass_payload["n_ctx"] = fixed_n_ctx
+                        continued = sanitize_inference_payload(
+                            pass_payload, isolated=isolated
+                        )
+                        pass_max_tokens = max(
+                            1, int(continued.get("max_tokens") or pass_max_tokens)
+                        )
+                        pass_payload["max_tokens"] = pass_max_tokens
+                        if pass_max_tokens < 8:
+                            finish_reason = "length"
+                            break
+
                     for chunk in sanitizer.finish():
                         streamed.append(chunk)
                         yield {"event": "token", "data": chunk}
                     content = sanitize_llm_output(
                         "".join(raw_parts), strip_tool_calls=not body.tools
                     )
+                    still_truncated = hit_length_limit(
+                        last_pass_tokens,
+                        pass_max_tokens,
+                        finish_reason=finish_reason,
+                    )
                     if body.thread_id:
                         await db.add_message(body.thread_id, "assistant", content)
+                    final_stats = {
+                        "output_tokens": total_output_tokens,
+                        "finish_reason": finish_reason,
+                        "auto_continues": continues_used,
+                        "truncated": still_truncated,
+                        **last_meta,
+                    }
+                    final_stats["finish_reason"] = finish_reason
+                    final_stats["truncated"] = still_truncated
+                    final_stats["auto_continues"] = continues_used
+                    yield {
+                        "event": "stats",
+                        "data": json.dumps(final_stats),
+                    }
                     yield {"event": "message", "data": content}
                     yield {"event": "done", "data": job_id}
                 except asyncio.CancelledError:
