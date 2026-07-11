@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import threading
+
 import pytest
 
 
@@ -58,9 +60,7 @@ def test_prepare_for_gpu_task_blocks_other_running_jobs(monkeypatch):
     monkeypatch.setattr(
         memory_release,
         "running_gpu_task_kinds",
-        lambda exclude_job_id=None: (
-            [] if exclude_job_id in {"job-1", "job-2"} else ["training"]
-        ),
+        lambda exclude_job_id=None: [] if exclude_job_id in {"job-1", "job-2"} else ["training"],
     )
 
     result = memory_release.prepare_for_gpu_task(task="export", job_id="job-2")
@@ -153,3 +153,45 @@ def test_prepare_for_gpu_task_releases_lock_on_unload_failure(monkeypatch):
 
     assert lock_events == ["acquire", "release"]
     assert memory_release.running_gpu_task_kinds() == []
+
+
+def test_prepare_for_gpu_task_reservation_is_atomic(monkeypatch):
+    from forge.services import memory_release
+
+    memory_release._ACTIVE_GPU_TASKS.clear()
+    barrier = threading.Barrier(2)
+    monkeypatch.setattr(memory_release, "running_gpu_task_kinds", lambda **_kwargs: [])
+    monkeypatch.setattr(memory_release, "release_inference_memory", lambda **_kwargs: {})
+    monkeypatch.setattr(
+        "seiso.memory.gpu_resource_lock.acquire_gpu_resource_lock",
+        lambda: barrier.wait(timeout=2),
+    )
+    monkeypatch.setattr(
+        "seiso.memory.gpu_resource_lock.release_gpu_resource_lock",
+        lambda: None,
+    )
+    results: list[dict] = []
+    errors: list[BaseException] = []
+
+    def reserve(job_id: str) -> None:
+        try:
+            results.append(memory_release.prepare_for_gpu_task(task="training", job_id=job_id))
+        except BaseException as exc:  # test captures the competing thread
+            errors.append(exc)
+
+    threads = [
+        threading.Thread(target=reserve, args=("job-a",)),
+        threading.Thread(target=reserve, args=("job-b",)),
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=3)
+
+    assert len(results) == 1
+    assert len(errors) == 1
+    assert "Another GPU task" in str(errors[0])
+    memory_release.release_after_task(
+        reason="test complete",
+        resource_token=results[0]["resource_token"],
+    )

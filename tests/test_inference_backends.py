@@ -49,14 +49,10 @@ def test_gguf_recommends_llamacpp(monkeypatch, tmp_path: Path):
     gguf = tmp_path / "model-q4.gguf"
     gguf.write_bytes(b"gguf")
     monkeypatch.setattr("seiso.platform.use_linux_nvidia_inference_guards", lambda: False)
-    assert (
-        recommend_backend(model_path=str(gguf), model_format="gguf") == BACKEND_LLAMACPP
-    )
+    assert recommend_backend(model_path=str(gguf), model_format="gguf") == BACKEND_LLAMACPP
 
 
-def test_gguf_auto_prefers_llamaswap_on_native_linux_when_enabled(
-    monkeypatch, tmp_path: Path
-):
+def test_gguf_auto_prefers_llamaswap_on_native_linux_when_enabled(monkeypatch, tmp_path: Path):
     gguf = tmp_path / "model-q4.gguf"
     gguf.write_bytes(b"gguf")
     monkeypatch.setattr("seiso.platform.use_linux_nvidia_inference_guards", lambda: True)
@@ -65,9 +61,7 @@ def test_gguf_auto_prefers_llamaswap_on_native_linux_when_enabled(
         lambda: SimpleNamespace(available=True),
     )
 
-    assert (
-        recommend_backend(model_path=str(gguf), model_format="gguf") == BACKEND_LLAMASWAP
-    )
+    assert recommend_backend(model_path=str(gguf), model_format="gguf") == BACKEND_LLAMASWAP
     assert (
         resolve_local_backend(
             model_path=str(gguf),
@@ -87,13 +81,8 @@ def test_gguf_auto_requires_healthy_llamaswap_on_native_linux(monkeypatch, tmp_p
         lambda: SimpleNamespace(available=False, reason="sidecar down"),
     )
 
-    assert (
-        recommend_backend(model_path=str(gguf), model_format="gguf")
-        == BACKEND_LLAMASWAP
-    )
-    assert available_backends(model_path=str(gguf), model_format="gguf") == [
-        BACKEND_LLAMASWAP
-    ]
+    assert recommend_backend(model_path=str(gguf), model_format="gguf") == BACKEND_LLAMASWAP
+    assert available_backends(model_path=str(gguf), model_format="gguf") == [BACKEND_LLAMASWAP]
     with pytest.raises(RuntimeError, match="requires an isolated backend"):
         resolve_local_backend(
             model_path=str(gguf),
@@ -102,9 +91,7 @@ def test_gguf_auto_requires_healthy_llamaswap_on_native_linux(monkeypatch, tmp_p
         )
 
 
-def test_gguf_explicit_llamacpp_requires_unsafe_native_linux_override(
-    monkeypatch, tmp_path: Path
-):
+def test_gguf_explicit_llamacpp_requires_unsafe_native_linux_override(monkeypatch, tmp_path: Path):
     gguf = tmp_path / "model-q4.gguf"
     gguf.write_bytes(b"gguf")
     monkeypatch.setattr("seiso.platform.use_linux_nvidia_inference_guards", lambda: True)
@@ -131,22 +118,16 @@ def test_gguf_explicit_llamacpp_requires_unsafe_native_linux_override(
     )
 
 
-def test_recommend_backend_honors_unsafe_native_linux_override(
-    monkeypatch, tmp_path: Path
-):
+def test_recommend_backend_honors_unsafe_native_linux_override(monkeypatch, tmp_path: Path):
     gguf = tmp_path / "model-q4.gguf"
     gguf.write_bytes(b"gguf")
     monkeypatch.setattr("seiso.platform.use_linux_nvidia_inference_guards", lambda: True)
     monkeypatch.setenv("SEISO_LLAMA_ALLOW_INPROCESS_NATIVE_LINUX", "1")
 
-    assert (
-        recommend_backend(model_path=str(gguf), model_format="gguf") == BACKEND_LLAMACPP
-    )
+    assert recommend_backend(model_path=str(gguf), model_format="gguf") == BACKEND_LLAMACPP
 
 
-def test_gguf_explicit_llamacpp_uses_healthy_sidecar_on_native_linux(
-    monkeypatch, tmp_path: Path
-):
+def test_gguf_explicit_llamacpp_uses_healthy_sidecar_on_native_linux(monkeypatch, tmp_path: Path):
     gguf = tmp_path / "model-q4.gguf"
     gguf.write_bytes(b"gguf")
     monkeypatch.setattr("seiso.platform.use_linux_nvidia_inference_guards", lambda: True)
@@ -169,9 +150,7 @@ def _force_bare_metal_linux(monkeypatch, *, nvidia_smi: bool) -> None:
 
     monkeypatch.setattr(backends_mod.platform, "system", lambda: "Linux")
     monkeypatch.setattr("seiso.platform.detect_wsl2", lambda: False)
-    monkeypatch.setattr(
-        "seiso.security.nvidia_boundary.nvidia_smi_visible", lambda: nvidia_smi
-    )
+    monkeypatch.setattr("seiso.security.nvidia_boundary.nvidia_smi_visible", lambda: nvidia_smi)
     monkeypatch.delenv("SEISO_LLAMA_ALLOW_INPROCESS_NATIVE_LINUX", raising=False)
 
 
@@ -192,9 +171,7 @@ def test_isolation_required_when_only_nvidia_smi_detects_gpu(monkeypatch):
     """Profile-based detection missed the GPU; nvidia-smi fallback still isolates."""
     from seiso.inference.backends import _native_linux_requires_isolated_gguf
 
-    monkeypatch.setattr(
-        "seiso.platform.use_linux_nvidia_inference_guards", lambda: False
-    )
+    monkeypatch.setattr("seiso.platform.use_linux_nvidia_inference_guards", lambda: False)
     _force_bare_metal_linux(monkeypatch, nvidia_smi=True)
 
     assert _native_linux_requires_isolated_gguf() is True
@@ -204,24 +181,18 @@ def test_no_isolation_on_cpu_only_linux(monkeypatch):
     """CPU-only Linux (no nvidia-smi) keeps in-process llama.cpp available."""
     from seiso.inference.backends import _native_linux_requires_isolated_gguf
 
-    monkeypatch.setattr(
-        "seiso.platform.use_linux_nvidia_inference_guards", lambda: False
-    )
+    monkeypatch.setattr("seiso.platform.use_linux_nvidia_inference_guards", lambda: False)
     _force_bare_metal_linux(monkeypatch, nvidia_smi=False)
 
     assert _native_linux_requires_isolated_gguf() is False
 
 
-def test_resolve_local_backend_never_inprocess_gguf_via_nvidia_smi(
-    monkeypatch, tmp_path: Path
-):
+def test_resolve_local_backend_never_inprocess_gguf_via_nvidia_smi(monkeypatch, tmp_path: Path):
     """GGUF chat on a Linux+NVIDIA host raises instead of falling to CUDA."""
     gguf = tmp_path / "model-q4.gguf"
     gguf.write_bytes(b"gguf")
 
-    monkeypatch.setattr(
-        "seiso.platform.use_linux_nvidia_inference_guards", lambda: False
-    )
+    monkeypatch.setattr("seiso.platform.use_linux_nvidia_inference_guards", lambda: False)
     _force_bare_metal_linux(monkeypatch, nvidia_smi=True)
     monkeypatch.setattr(
         "seiso.inference.llamaswap.llamaswap_status",
@@ -229,10 +200,7 @@ def test_resolve_local_backend_never_inprocess_gguf_via_nvidia_smi(
     )
 
     # Recommended backend is the sidecar, never in-process llama.cpp.
-    assert (
-        recommend_backend(model_path=str(gguf), model_format="gguf")
-        == BACKEND_LLAMASWAP
-    )
+    assert recommend_backend(model_path=str(gguf), model_format="gguf") == BACKEND_LLAMASWAP
     # Dispatch refuses to run in-process on CUDA when the sidecar is down.
     with pytest.raises(RuntimeError, match="requires an isolated backend"):
         resolve_local_backend(
@@ -478,9 +446,7 @@ def test_safetensors_recommends_torch_or_mlx(tmp_path: Path):
     assert backend in {BACKEND_TORCH, "mlx"}
 
 
-def test_safetensors_inventory_exposes_torch_and_mlx_fallbacks(
-    monkeypatch, tmp_path: Path
-):
+def test_safetensors_inventory_exposes_torch_and_mlx_fallbacks(monkeypatch, tmp_path: Path):
     from seiso.inference import backends
     from seiso.models.loader import Backend
 
@@ -586,9 +552,7 @@ async def test_resolve_preload_context_uses_chat_sized_context(monkeypatch, tmp_
 
 
 @pytest.mark.asyncio
-async def test_resolve_explicit_model_path_checks_selected_backend(
-    monkeypatch, tmp_path
-):
+async def test_resolve_explicit_model_path_checks_selected_backend(monkeypatch, tmp_path):
     from forge.services import inference_chat
 
     model_path = tmp_path / "model.gguf"
@@ -637,9 +601,7 @@ async def test_resolve_explicit_model_path_checks_selected_backend(
 
 
 @pytest.mark.asyncio
-async def test_resolve_explicit_model_path_rejects_unavailable_backend(
-    monkeypatch, tmp_path
-):
+async def test_resolve_explicit_model_path_rejects_unavailable_backend(monkeypatch, tmp_path):
     from fastapi import HTTPException
 
     from forge.services import inference_chat
@@ -679,9 +641,7 @@ async def test_resolve_explicit_model_path_rejects_unavailable_backend(
 
 
 @pytest.mark.asyncio
-async def test_resolve_explicit_model_path_rejects_incompatible_backend(
-    monkeypatch, tmp_path
-):
+async def test_resolve_explicit_model_path_rejects_incompatible_backend(monkeypatch, tmp_path):
     from fastapi import HTTPException
 
     from forge.services import inference_chat
@@ -760,12 +720,7 @@ def test_resolve_gguf_file_preserves_symlink_path(tmp_path: Path):
     blob.parent.mkdir(parents=True)
     blob.write_bytes(b"gguf")
     snapshot = (
-        tmp_path
-        / "hf_cache"
-        / "models--org--Model-GGUF"
-        / "snapshots"
-        / "rev"
-        / "model-q4.gguf"
+        tmp_path / "hf_cache" / "models--org--Model-GGUF" / "snapshots" / "rev" / "model-q4.gguf"
     )
     snapshot.parent.mkdir(parents=True)
     snapshot.symlink_to("../../blobs/abc")
@@ -780,12 +735,7 @@ def test_model_pool_passes_preserved_path_to_loader(tmp_path: Path):
     blob.parent.mkdir(parents=True)
     blob.write_bytes(b"gguf")
     snapshot = (
-        tmp_path
-        / "hf_cache"
-        / "models--org--Model-GGUF"
-        / "snapshots"
-        / "rev"
-        / "model-q4.gguf"
+        tmp_path / "hf_cache" / "models--org--Model-GGUF" / "snapshots" / "rev" / "model-q4.gguf"
     )
     snapshot.parent.mkdir(parents=True)
     snapshot.symlink_to("../../blobs/abc")
@@ -1079,11 +1029,7 @@ def test_llamaswap_complete_serializes_native_tool_calls(monkeypatch):
         "/tmp/model.gguf",
     )
 
-    assert (
-        '<tool_call>{"name":"search","arguments":{"query":"linux"}}</tool_call>'
-        in text
-    )
-
+    assert '<tool_call>{"name":"search","arguments":{"query":"linux"}}</tool_call>' in text
 
 
 def test_sidecar_perf_mode_raises_batch_and_keep_alive(monkeypatch):
@@ -1178,9 +1124,7 @@ def test_ollama_request_body_uses_native_chat_options(monkeypatch):
         "seiso.inference.llamaswap.sidecar_ollama_num_gpu",
         lambda *_args, **_kwargs: None,
     )
-    monkeypatch.setattr(
-        client, "_resolve_model", lambda model_path, payload: "seiso/test-model"
-    )
+    monkeypatch.setattr(client, "_resolve_model", lambda model_path, payload: "seiso/test-model")
 
     body = client._request_body(
         {
@@ -1238,10 +1182,7 @@ def test_ollama_complete_serializes_native_tool_calls(monkeypatch):
         "/tmp/model.gguf",
     )
 
-    assert (
-        '<tool_call>{"name":"search","arguments":{"query":"linux"}}</tool_call>'
-        in text
-    )
+    assert '<tool_call>{"name":"search","arguments":{"query":"linux"}}</tool_call>' in text
 
 
 def test_sidecar_vram_context_cap_passthrough_off_native_linux(monkeypatch):
@@ -1283,12 +1224,7 @@ def test_sidecar_vram_context_cap_forwards_requested_completion(monkeypatch):
 
     monkeypatch.setattr(runtime_mod, "native_linux_llama_context_cap", fake_cap)
 
-    assert (
-        llamaswap.sidecar_vram_context_cap(
-            "/tmp/model.gguf", 131072, max_tokens=2048
-        )
-        == 4096
-    )
+    assert llamaswap.sidecar_vram_context_cap("/tmp/model.gguf", 131072, max_tokens=2048) == 4096
     assert seen["max_tokens"] == 2048
 
 
@@ -1884,9 +1820,7 @@ async def test_openai_prepare_payload_passes_through_backend(monkeypatch, tmp_pa
         }
 
     monkeypatch.setattr(inference_models, "list_inference_options", fake_list)
-    monkeypatch.setattr(
-        "forge.services.openai_chat.prepare_local_chat_target", prepare_llamaswap
-    )
+    monkeypatch.setattr("forge.services.openai_chat.prepare_local_chat_target", prepare_llamaswap)
 
     payload = await _prepare_openai_chat_payload(
         ChatCompletionRequest(
@@ -1918,9 +1852,7 @@ async def test_openai_prepare_payload_falls_back_to_llamacpp(monkeypatch, tmp_pa
         }
 
     monkeypatch.setattr(inference_models, "list_inference_options", fake_list)
-    monkeypatch.setattr(
-        "forge.services.openai_chat.prepare_local_chat_target", prepare_llamacpp
-    )
+    monkeypatch.setattr("forge.services.openai_chat.prepare_local_chat_target", prepare_llamacpp)
 
     payload = await _prepare_openai_chat_payload(
         ChatCompletionRequest(
@@ -1947,9 +1879,7 @@ async def test_openai_default_model_resolution_reuses_inventory(tmp_path, monkey
     fallback = tmp_path / "model.safetensors"
     fallback.write_bytes(b"weights")
 
-    db = Database(
-        tmp_path / "forge.db", encryption_key=generate_encryption_key(), ephemeral=True
-    )
+    db = Database(tmp_path / "forge.db", encryption_key=generate_encryption_key(), ephemeral=True)
     await db.add_model(
         user_id="u1",
         name="fallback",
@@ -2008,9 +1938,7 @@ async def test_openai_named_model_resolution_uses_indexed_lookup(tmp_path, monke
     model = tmp_path / "model.gguf"
     model.write_bytes(b"gguf")
 
-    db = Database(
-        tmp_path / "forge.db", encryption_key=generate_encryption_key(), ephemeral=True
-    )
+    db = Database(tmp_path / "forge.db", encryption_key=generate_encryption_key(), ephemeral=True)
     row = await db.add_model(
         user_id="u1",
         name="friendly",
@@ -2069,9 +1997,7 @@ async def test_runner_routes_tools_to_llamaswap(monkeypatch):
         "_resolve_route",
         lambda _payload, _model_path: ("llamaswap", "/tmp/model.gguf"),
     )
-    monkeypatch.setattr(
-        runner._pool, "get_llamaswap", lambda _path, **_kw: FakeClient()
-    )
+    monkeypatch.setattr(runner._pool, "get_llamaswap", lambda _path, **_kw: FakeClient())
     monkeypatch.setattr(runner._pool, "bump_generation", lambda: 1)
     monkeypatch.setattr(runner._pool, "is_generation_active", lambda _gen: True)
     monkeypatch.setattr(runner, "_ensure_model_switch", AsyncMock())
@@ -2097,7 +2023,6 @@ async def test_runner_routes_tools_to_llamaswap(monkeypatch):
 def test_get_inference_runner_is_singleton():
     import seiso.inference.runner as runner_mod
 
-    runner_mod._runner = None
     first = runner_mod.get_inference_runner()
     second = runner_mod.get_inference_runner()
     assert first is second
@@ -2109,10 +2034,23 @@ def test_inference_orchestrator_uses_shared_runner():
     import seiso.inference.runner as runner_mod
     from forge.orchestrators.inference import InferenceOrchestrator
 
-    runner_mod._runner = None
     shared = runner_mod.get_inference_runner()
     orchestrator = InferenceOrchestrator(Path("/tmp/seiso-sandbox"))
     assert orchestrator._runner is shared
+
+
+def test_reset_inference_runtime_creates_fresh_singletons():
+    import seiso.inference.runner as runner_mod
+
+    first = runner_mod.get_inference_runner()
+    first_pool = first.pool
+
+    runner_mod.reset_inference_runtime(wait=False)
+    second = runner_mod.get_inference_runner()
+
+    assert second is not first
+    assert second.pool is not first_pool
+    runner_mod.reset_inference_runtime(wait=False)
 
 
 @pytest.mark.asyncio
@@ -2385,8 +2323,9 @@ def test_warm_model_uses_chat_sized_llama_context(monkeypatch):
     monkeypatch.setattr(
         runner._pool,
         "get_llama",
-        lambda _path, n_ctx=4096, *, tier="normal", max_tokens=512: seen_ctx.append(n_ctx)
-        or FakeLlama(),
+        lambda _path, n_ctx=4096, *, tier="normal", max_tokens=512: (
+            seen_ctx.append(n_ctx) or FakeLlama()
+        ),
     )
     monkeypatch.setattr(
         "seiso.inference.runner.llama_prefill_needs_reload",
@@ -2436,14 +2375,10 @@ def test_warm_model_preloads_dflash_speculative_components(monkeypatch):
     monkeypatch.setattr(
         runner._pool,
         "get_torch_speculative",
-        lambda *_args, **_kwargs: pytest.fail(
-            "dflash preload should not load torch draft"
-        ),
+        lambda *_args, **_kwargs: pytest.fail("dflash preload should not load torch draft"),
     )
 
-    runner.warm_model(
-        {"model_path": "/tmp/target", "draft_model_path": "/tmp/dflash.gguf"}
-    )
+    runner.warm_model({"model_path": "/tmp/target", "draft_model_path": "/tmp/dflash.gguf"})
 
     assert calls == [
         ("torch", ("/tmp/target",), {"load_in_4bit": True}),
@@ -2485,6 +2420,7 @@ def test_dflash_speculative_stream_loads_draft_with_estimated_context(monkeypatc
 
     monkeypatch.setattr(runner_mod, "configure_torch_inference", lambda: None)
     monkeypatch.setattr(runner_mod, "is_dflash_draft", lambda _path: True)
+    monkeypatch.setattr(runner_mod, "_native_linux_requires_isolated_gguf", lambda: False)
     monkeypatch.setattr(
         runner._pool,
         "get_torch",
@@ -2549,9 +2485,7 @@ def test_dflash_speculative_blocked_on_native_linux_nvidia(monkeypatch, tmp_path
 
 
 @pytest.mark.asyncio
-async def test_resolve_dflash_draft_rejected_on_native_linux_nvidia(
-    monkeypatch, tmp_path: Path
-):
+async def test_resolve_dflash_draft_rejected_on_native_linux_nvidia(monkeypatch, tmp_path: Path):
     from fastapi import HTTPException
 
     from forge.services import inference_chat
@@ -2595,9 +2529,7 @@ def test_torch_input_device_prefers_sharded_gpu():
     class FakeModel:
         hf_device_map = {"embed": "cpu", "layers.0": "cuda:1", "lm_head": "cpu"}
 
-    assert LocalInferenceRunner._torch_input_device(FakeModel()) == torch.device(
-        "cuda:1"
-    )
+    assert LocalInferenceRunner._torch_input_device(FakeModel()) == torch.device("cuda:1")
 
 
 def test_torch_input_device_handles_integer_device_map_entries():
@@ -2608,9 +2540,7 @@ def test_torch_input_device_handles_integer_device_map_entries():
     class FakeModel:
         hf_device_map = {"embed": "cpu", "layers.0": 0, "lm_head": "disk"}
 
-    assert LocalInferenceRunner._torch_input_device(FakeModel()) == torch.device(
-        "cuda:0"
-    )
+    assert LocalInferenceRunner._torch_input_device(FakeModel()) == torch.device("cuda:0")
 
 
 def test_torch_input_device_skips_offload_entries_and_falls_back_to_model_device():
@@ -2718,9 +2648,7 @@ async def test_cancel_generation_keeps_loaded_model(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_list_inference_options_filters_to_installed_backends(
-    monkeypatch, tmp_path
-):
+async def test_list_inference_options_filters_to_installed_backends(monkeypatch, tmp_path):
     from forge.db.crypto import generate_encryption_key
     from forge.db.store import Database
     from forge.services import inference_models
@@ -2729,9 +2657,7 @@ async def test_list_inference_options_filters_to_installed_backends(
     model_path = tmp_path / "model-q4.gguf"
     model_path.write_bytes(b"gguf")
 
-    db = Database(
-        tmp_path / "forge.db", encryption_key=generate_encryption_key(), ephemeral=True
-    )
+    db = Database(tmp_path / "forge.db", encryption_key=generate_encryption_key(), ephemeral=True)
     await db.add_model(
         user_id="u1",
         name="Model Q4",
@@ -2753,9 +2679,7 @@ async def test_list_inference_options_filters_to_installed_backends(
         lambda _repo, _filename: model_path.stat().st_size,
     )
 
-    options = await inference_models.list_inference_options(
-        db, "u1", hardware_aware=False
-    )
+    options = await inference_models.list_inference_options(db, "u1", hardware_aware=False)
 
     assert options[0]["id"]
     assert options[0]["backends"] == [BACKEND_LLAMACPP]
@@ -2763,9 +2687,7 @@ async def test_list_inference_options_filters_to_installed_backends(
 
 
 @pytest.mark.asyncio
-async def test_list_inference_options_defaults_to_llamaswap_on_nvidia(
-    monkeypatch, tmp_path
-):
+async def test_list_inference_options_defaults_to_llamaswap_on_nvidia(monkeypatch, tmp_path):
     from forge.db.crypto import generate_encryption_key
     from forge.db.store import Database
     from forge.services import inference_models
@@ -2774,9 +2696,7 @@ async def test_list_inference_options_defaults_to_llamaswap_on_nvidia(
     model_path = tmp_path / "model-q4.gguf"
     model_path.write_bytes(b"gguf")
 
-    db = Database(
-        tmp_path / "forge.db", encryption_key=generate_encryption_key(), ephemeral=True
-    )
+    db = Database(tmp_path / "forge.db", encryption_key=generate_encryption_key(), ephemeral=True)
     await db.add_model(
         user_id="u1",
         name="Model Q4",
@@ -2790,9 +2710,7 @@ async def test_list_inference_options_defaults_to_llamaswap_on_nvidia(
     monkeypatch.setattr(
         inference_models,
         "check_inference_runtime",
-        lambda: InferenceRuntimeStatus(
-            llamacpp=True, llamaswap=True, mlx=False, torch=False
-        ),
+        lambda: InferenceRuntimeStatus(llamacpp=True, llamaswap=True, mlx=False, torch=False),
     )
     monkeypatch.setattr(
         inference_models,
@@ -2820,9 +2738,7 @@ async def test_list_inference_options_defaults_to_llamaswap_on_nvidia(
 
 
 @pytest.mark.asyncio
-async def test_list_inference_options_does_not_fallback_to_missing_backend(
-    monkeypatch, tmp_path
-):
+async def test_list_inference_options_does_not_fallback_to_missing_backend(monkeypatch, tmp_path):
     from forge.db.crypto import generate_encryption_key
     from forge.db.store import Database
     from forge.services import inference_models
@@ -2831,9 +2747,7 @@ async def test_list_inference_options_does_not_fallback_to_missing_backend(
     model_path = tmp_path / "model-q4.gguf"
     model_path.write_bytes(b"gguf")
 
-    db = Database(
-        tmp_path / "forge.db", encryption_key=generate_encryption_key(), ephemeral=True
-    )
+    db = Database(tmp_path / "forge.db", encryption_key=generate_encryption_key(), ephemeral=True)
     await db.add_model(
         user_id="u1",
         name="Model Q4",
@@ -2855,9 +2769,7 @@ async def test_list_inference_options_does_not_fallback_to_missing_backend(
         lambda _repo, _filename: model_path.stat().st_size,
     )
 
-    options = await inference_models.list_inference_options(
-        db, "u1", hardware_aware=False
-    )
+    options = await inference_models.list_inference_options(db, "u1", hardware_aware=False)
 
     assert options[0]["backends"] == []
     assert options[0]["default_backend"] == ""
@@ -2873,9 +2785,7 @@ async def test_list_inference_options_skips_partial_hf_gguf(monkeypatch, tmp_pat
     model_path = tmp_path / "model-Q4_K_M.gguf"
     model_path.write_bytes(b"partial")
 
-    db = Database(
-        tmp_path / "forge.db", encryption_key=generate_encryption_key(), ephemeral=True
-    )
+    db = Database(tmp_path / "forge.db", encryption_key=generate_encryption_key(), ephemeral=True)
     await db.add_model(
         user_id="u1",
         name="Model Q4",
@@ -2896,9 +2806,7 @@ async def test_list_inference_options_skips_partial_hf_gguf(monkeypatch, tmp_pat
         lambda: InferenceRuntimeStatus(llamacpp=True, mlx=False, torch=False),
     )
 
-    options = await inference_models.list_inference_options(
-        db, "u1", hardware_aware=False
-    )
+    options = await inference_models.list_inference_options(db, "u1", hardware_aware=False)
 
     assert len(options) == 1
     assert options[0]["selectable"] is False
@@ -2906,9 +2814,7 @@ async def test_list_inference_options_skips_partial_hf_gguf(monkeypatch, tmp_pat
 
 
 @pytest.mark.asyncio
-async def test_list_inference_options_skips_hf_gguf_without_metadata(
-    monkeypatch, tmp_path
-):
+async def test_list_inference_options_skips_hf_gguf_without_metadata(monkeypatch, tmp_path):
     from forge.db.crypto import generate_encryption_key
     from forge.db.store import Database
     from forge.services import inference_models
@@ -2917,9 +2823,7 @@ async def test_list_inference_options_skips_hf_gguf_without_metadata(
     model_path = tmp_path / "model-Q4_K_M.gguf"
     _write_arch_gguf(model_path, "llama")
 
-    db = Database(
-        tmp_path / "forge.db", encryption_key=generate_encryption_key(), ephemeral=True
-    )
+    db = Database(tmp_path / "forge.db", encryption_key=generate_encryption_key(), ephemeral=True)
     await db.add_model(
         user_id="u1",
         name="Model Q4",
@@ -2936,9 +2840,7 @@ async def test_list_inference_options_skips_hf_gguf_without_metadata(
         lambda: InferenceRuntimeStatus(llamacpp=True, mlx=False, torch=False),
     )
 
-    options = await inference_models.list_inference_options(
-        db, "u1", hardware_aware=False
-    )
+    options = await inference_models.list_inference_options(db, "u1", hardware_aware=False)
 
     assert len(options) == 1
     assert options[0]["selectable"] is False
@@ -2974,9 +2876,7 @@ def test_llama_complete_retries_after_inference_oom(monkeypatch):
     monkeypatch.setattr(runner._pool, "get_llama", get_llama)
     monkeypatch.setattr(runner._pool, "reload_llama", reload_llama)
     monkeypatch.setattr(runner._pool, "is_generation_active", lambda _gid: True)
-    monkeypatch.setattr(
-        "seiso.inference.runner.release_cached_memory", lambda sync=False: None
-    )
+    monkeypatch.setattr("seiso.inference.runner.release_cached_memory", lambda sync=False: None)
     monkeypatch.setattr(
         "seiso.inference.runner.llama_prefill_needs_reload",
         lambda **_kwargs: (False, 512, 128),
@@ -3025,9 +2925,7 @@ def test_llama_complete_oom_recovery_passes_batch_override(monkeypatch):
 
     monkeypatch.setattr(runner._pool, "reload_llama", reload_llama)
     monkeypatch.setattr(runner._pool, "is_generation_active", lambda _gid: True)
-    monkeypatch.setattr(
-        "seiso.inference.runner.release_cached_memory", lambda sync=False: None
-    )
+    monkeypatch.setattr("seiso.inference.runner.release_cached_memory", lambda sync=False: None)
     monkeypatch.setattr(
         "seiso.inference.runner.llama_prefill_needs_reload",
         lambda **_kwargs: (False, 512, 128),
@@ -3082,9 +2980,7 @@ def test_llama_complete_prefill_guard_reloads_before_native_linux_segfault(
     monkeypatch.setattr(runner._pool, "get_llama", get_llama)
     monkeypatch.setattr(runner._pool, "reload_llama", reload_llama)
     monkeypatch.setattr(runner._pool, "is_generation_active", lambda _gid: True)
-    monkeypatch.setattr(
-        "seiso.inference.runner.release_cached_memory", lambda sync=False: None
-    )
+    monkeypatch.setattr("seiso.inference.runner.release_cached_memory", lambda sync=False: None)
     monkeypatch.setattr(
         "seiso.inference.runner.llama_prefill_needs_reload",
         lambda **_kwargs: (True, 512, 128),
@@ -3236,8 +3132,9 @@ def test_llama_complete_retrims_after_context_recompute(monkeypatch):
     monkeypatch.setattr(
         runner._pool,
         "get_llama",
-        lambda _path, n_ctx=4096, *, tier="normal", max_tokens=512: seen_ctx.append(n_ctx)
-        or FakeLlama(),
+        lambda _path, n_ctx=4096, *, tier="normal", max_tokens=512: (
+            seen_ctx.append(n_ctx) or FakeLlama()
+        ),
     )
     monkeypatch.setattr(runner._pool, "is_generation_active", lambda _gid: True)
     monkeypatch.setattr(
@@ -3277,9 +3174,7 @@ def test_llama_complete_retrims_after_oom_recovery_smaller_context(monkeypatch):
             self._seiso_last_safe_ubatch = 128
 
         def create_chat_completion(self, **kwargs):
-            seen_lengths.append(
-                sum(len(str(m.get("content", ""))) for m in kwargs["messages"])
-            )
+            seen_lengths.append(sum(len(str(m.get("content", ""))) for m in kwargs["messages"]))
             if first["fail"]:
                 first["fail"] = False
                 raise RuntimeError("CUDA out of memory. Tried to allocate 2.00 GiB")
@@ -3296,9 +3191,7 @@ def test_llama_complete_retrims_after_oom_recovery_smaller_context(monkeypatch):
         lambda *_a, **_k: FakeLlama(tier="compact", actual_ctx=2048),
     )
     monkeypatch.setattr(runner._pool, "is_generation_active", lambda _gid: True)
-    monkeypatch.setattr(
-        "seiso.inference.runner.release_cached_memory", lambda sync=False: None
-    )
+    monkeypatch.setattr("seiso.inference.runner.release_cached_memory", lambda sync=False: None)
     monkeypatch.setattr(
         "seiso.inference.runner.llama_prefill_needs_reload",
         lambda **_kwargs: (False, 512, 128),

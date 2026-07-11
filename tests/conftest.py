@@ -13,6 +13,7 @@ from forge.api.deps import clear_dependency_caches, close_dependency_caches, get
 from forge.main import create_app
 from forge.security.auth import create_access_token, hash_password
 from forge.security.token_revocation import clear_revocations_for_tests
+from seiso.inference.runner import reset_inference_runtime
 
 pytest_plugins = ("gguf_fixtures",)
 
@@ -36,11 +37,14 @@ async def _reset_caches(monkeypatch, tmp_path):
     monkeypatch.setenv("SEISO_SKIP_MLX_PROBE", "true")
     clear_revocations_for_tests()
     clear_dependency_caches()
+    reset_inference_runtime(wait=False)
     yield
     with contextlib.suppress(Exception):
-        await close_dependency_caches()
-        # Let aiosqlite worker threads publish their close result before pytest closes the loop.
-        await asyncio.sleep(0.2)
+        had_database = await close_dependency_caches()
+        if had_database:
+            # Let aiosqlite publish its close result before the loop closes.
+            await asyncio.sleep(0.2)
+        reset_inference_runtime(wait=False)
 
 
 @pytest.fixture

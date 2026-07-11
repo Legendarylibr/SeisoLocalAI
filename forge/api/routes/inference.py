@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
-from collections.abc import Callable
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -42,17 +41,6 @@ from forge.tools.sanitize import normalize_text
 from seiso.inference.backends import BACKEND_LLAMASWAP
 
 router = APIRouter(prefix="/inference", tags=["inference"])
-
-
-async def _run_preload_warmup(callable_: Callable[[], None]) -> None:
-    """Do not let request cancellation unload underneath a blocking model load."""
-    loop = asyncio.get_running_loop()
-    future = loop.run_in_executor(None, callable_)
-    try:
-        await asyncio.shield(future)
-    except asyncio.CancelledError:
-        await asyncio.shield(future)
-        raise
 
 
 @router.post("/threads")
@@ -322,20 +310,16 @@ async def preload_model(
 
     _begin_generation_or_raise(orchestrator, user_id)
     try:
-        await _run_preload_warmup(
-            lambda: orchestrator._runner.warm_model(ctx["payload"])
-        )
-        status = orchestrator._runner.pool.status()
+        await orchestrator.preload_model(ctx["payload"])
+        status = orchestrator.inference_status()
         pinned = ctx["payload"].get("sidecar_num_ctx") or ctx["payload"].get("n_ctx")
         if pinned is None:
             pinned = status.get("n_ctx")
-        runtime = orchestrator._runner.last_inference_stats
+        runtime = orchestrator.inference_runtime_stats()
         return {
             "status": "loaded",
             "resident_status": (
-                "loaded"
-                if runtime.get("resident_confirmed", True)
-                else "sidecar-ready"
+                "loaded" if runtime.get("resident_confirmed", True) else "sidecar-ready"
             ),
             "backend": ctx["backend"],
             "n_ctx": pinned,
@@ -373,17 +357,14 @@ async def preload_model_stream(
         n_ctx=body.n_ctx,
     )
 
-    runner = orchestrator._runner
-    pool = runner.pool
     target_path = ctx["payload"]["model_path"]
     size_bytes = ctx.get("size_bytes", 0)
     eta = estimate_load_eta_seconds(size_bytes)
-    loop = asyncio.get_running_loop()
 
     async def event_gen():
         try:
             _begin_generation_or_raise(orchestrator, user_id)
-            switching = runner.pool.would_switch_model(target_path, ctx["backend"])
+            switching = orchestrator.would_switch_model(target_path, ctx["backend"])
             if switching:
                 yield {
                     "event": "progress",
@@ -396,10 +377,7 @@ async def preload_model_stream(
                         }
                     ),
                 }
-                await loop.run_in_executor(
-                    None,
-                    lambda: runner.pool.prepare_for_load(target_path, ctx["backend"]),
-                )
+                await orchestrator.prepare_model_for_load(target_path, ctx["backend"])
 
             yield {
                 "event": "progress",
@@ -416,7 +394,7 @@ async def preload_model_stream(
                     }
                 ),
             }
-            await _run_preload_warmup(lambda: runner.warm_model(ctx["payload"]))
+            await orchestrator.preload_model(ctx["payload"])
         except asyncio.CancelledError:
             await orchestrator.cancel_and_unload_for_user(user_id)
             raise
@@ -426,11 +404,11 @@ async def preload_model_stream(
         finally:
             orchestrator.end_generation_for_user(user_id)
 
-        status = pool.status()
+        status = orchestrator.inference_status()
         pinned = ctx["payload"].get("sidecar_num_ctx") or ctx["payload"].get("n_ctx")
         if pinned is None:
             pinned = status.get("n_ctx")
-        runtime = runner.last_inference_stats
+        runtime = orchestrator.inference_runtime_stats()
         resident_confirmed = runtime.get("resident_confirmed", True)
         yield {
             "event": "progress",
@@ -456,9 +434,7 @@ async def preload_model_stream(
             "data": json.dumps(
                 {
                     "status": "loaded",
-                    "resident_status": (
-                        "loaded" if resident_confirmed else "sidecar-ready"
-                    ),
+                    "resident_status": ("loaded" if resident_confirmed else "sidecar-ready"),
                     "backend": ctx["backend"],
                     "model_id": body.model_id,
                     "model_name": ctx["model_name"],
@@ -565,7 +541,7 @@ async def chat(
             and payload.get("model_path")
             and payload.get("sidecar_num_ctx") is None
         ):
-            pinned = orchestrator._runner.pool.pinned_n_ctx(str(payload["model_path"]))
+            pinned = orchestrator.pinned_inference_context(str(payload["model_path"]))
             if pinned is not None:
                 payload["sidecar_num_ctx"] = pinned
         if model_updates.get("use_model_router"):
@@ -589,7 +565,11 @@ async def chat(
         use_router = bool(payload.get("use_model_router"))
         can_stream_router = use_router and not body.tools and not body.provider_id
         can_stream_local = not body.tools and not body.provider_id and not use_router
-        job_id = str(uuid.uuid4()) if (can_stream_router or can_stream_local) else orchestrator.create_job(user_id=user_id)
+        job_id = (
+            str(uuid.uuid4())
+            if (can_stream_router or can_stream_local)
+            else orchestrator.create_job(user_id=user_id)
+        )
         _begin_generation_or_raise(orchestrator, user_id)
 
         async def event_gen():
@@ -597,7 +577,7 @@ async def chat(
                 parts: list[str] = []
                 output_tokens = 0
                 try:
-                    orchestrator._emit_log(job_id, "Streaming inference (smart router)")
+                    orchestrator.emit_log(job_id, "Streaming inference (smart router)")
                     async for token in orchestrator.stream_router(payload):
                         parts.append(token)
                         output_tokens += 1
@@ -632,7 +612,7 @@ async def chat(
                 )
                 cancelled = False
                 try:
-                    orchestrator._emit_log(job_id, f"Streaming inference ({backend_label})")
+                    orchestrator.emit_log(job_id, f"Streaming inference ({backend_label})")
                     async for update in orchestrator.stream_local_updates(payload):
                         raw_parts.append(update.text)
                         yield {

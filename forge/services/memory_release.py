@@ -39,9 +39,7 @@ def _refresh_hardware_profile() -> None:
         pass
 
 
-def _gpu_resource_token(
-    *, task: str, job_id: str | None = None, user_id: str | None = None
-) -> str:
+def _gpu_resource_token(*, task: str, job_id: str | None = None, user_id: str | None = None) -> str:
     if job_id:
         return str(job_id)
     return f"{task}:{user_id or 'global'}:{uuid.uuid4().hex}"
@@ -63,6 +61,36 @@ def _register_gpu_task(
             _GPU_RESOURCE_LOCK_HELD: "1" if gpu_resource_lock_held else None,
         }
     return token
+
+
+def _register_gpu_task_if_available(
+    *,
+    task: str,
+    job_id: str | None = None,
+    user_id: str | None = None,
+    gpu_resource_lock_held: bool = False,
+) -> str:
+    """Atomically reject tracked conflicts and reserve this process task."""
+    with _GPU_TASK_LOCK:
+        blocking = {
+            str(active.get("task") or "gpu")
+            for active in _ACTIVE_GPU_TASKS.values()
+            if not job_id or active.get("job_id") != str(job_id)
+        }
+        if blocking:
+            raise RuntimeError(
+                "Another GPU task is still running "
+                f"({', '.join(sorted(blocking))}). "
+                "Finish or cancel it before starting a new one."
+            )
+        token = _gpu_resource_token(task=task, job_id=job_id, user_id=user_id)
+        _ACTIVE_GPU_TASKS[token] = {
+            "task": task,
+            "job_id": str(job_id) if job_id else None,
+            "user_id": str(user_id) if user_id else None,
+            _GPU_RESOURCE_LOCK_HELD: "1" if gpu_resource_lock_held else None,
+        }
+        return token
 
 
 def _unregister_gpu_task(
@@ -218,12 +246,18 @@ def prepare_for_gpu_task(
     from seiso.memory.gpu_resource_lock import acquire_gpu_resource_lock
 
     acquire_gpu_resource_lock()
-    resource_token = _register_gpu_task(
-        task=task,
-        job_id=job_id,
-        user_id=user_id,
-        gpu_resource_lock_held=True,
-    )
+    try:
+        resource_token = _register_gpu_task_if_available(
+            task=task,
+            job_id=job_id,
+            user_id=user_id,
+            gpu_resource_lock_held=True,
+        )
+    except Exception:
+        from seiso.memory.gpu_resource_lock import release_gpu_resource_lock
+
+        release_gpu_resource_lock()
+        raise
     try:
         result = release_inference_memory(reason=task, log=log)
     except Exception:
@@ -234,8 +268,7 @@ def prepare_for_gpu_task(
         raise
     release_notes = [str(note) for note in result.get("release_notes") or []]
     sidecar_unload_uncertain = any(
-        "Could not confirm llama-swap external model unload" in note
-        or "Ollama unload" in note
+        "Could not confirm llama-swap external model unload" in note or "Ollama unload" in note
         for note in release_notes
     )
     if sidecar_unload_uncertain:

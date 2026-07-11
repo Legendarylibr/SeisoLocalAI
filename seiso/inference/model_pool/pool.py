@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
@@ -77,6 +79,20 @@ class ModelPool:
                     cls._instance = cls()
         return cls._instance
 
+    @classmethod
+    def reset_instance(cls, *, timeout_s: float = 30.0) -> None:
+        """Unload and forget the process-wide pool (shutdown/tests)."""
+        with cls._lock:
+            instance = cls._instance
+        if instance is None:
+            return
+        instance.cancel_and_unload()
+        instance._wait_for_inference_idle(timeout_s=timeout_s)
+        instance.unload_all()
+        with cls._lock:
+            if cls._instance is instance:
+                cls._instance = None
+
     @property
     def active_key(self) -> str | None:
         with self._lock:
@@ -114,6 +130,15 @@ class ModelPool:
         acquire_gpu_resource_lock()
         with self._lock:
             self._inference_refs += 1
+
+    @contextmanager
+    def inference_lease(self) -> Iterator[None]:
+        """Hold the pool busy until a load/generation operation fully exits."""
+        self.begin_inference()
+        try:
+            yield
+        finally:
+            self.end_inference()
 
     def end_inference(self) -> None:
         should_unload = False
@@ -154,6 +179,15 @@ class ModelPool:
 
     def release_llama_inference(self) -> None:
         self._llama_infer_lock.release()
+
+    @contextmanager
+    def llama_inference_lease(self) -> Iterator[None]:
+        """Serialize access to a shared llama.cpp context."""
+        self.acquire_llama_inference()
+        try:
+            yield
+        finally:
+            self.release_llama_inference()
 
     def cancel_and_unload(self) -> None:
         """Stop lagging streams and release VRAM/RAM."""
@@ -215,9 +249,8 @@ class ModelPool:
                     note = "Released llama-swap managed model processes"
                     logger.info(note)
                 else:
-                    note = (
-                        "Could not confirm llama-swap external model unload"
-                        + (f": {reason}" if reason else "")
+                    note = "Could not confirm llama-swap external model unload" + (
+                        f": {reason}" if reason else ""
                     )
                     logger.warning(note)
                 with self._lock:
@@ -362,9 +395,7 @@ class ModelPool:
                 return self._active.handle
             # Reuse a larger cached context/completion budget when headroom is OK.
             # Exact-match used to force reloads on every context-bucket step.
-            cached_tokens = int(
-                getattr(self._active.handle, "_seiso_max_tokens", 512) or 512
-            )
+            cached_tokens = int(getattr(self._active.handle, "_seiso_max_tokens", 512) or 512)
             if needed_tokens > 0 and cached_tokens < needed_tokens:
                 return None
             cached_layers = int(self._active.meta.get("n_gpu_layers", -1))
@@ -543,9 +574,7 @@ class ModelPool:
                         requested_layers,
                         n_ctx=n_ctx,
                     )
-                    and _mp()._llama_cache_headroom_ok(
-                        self._active.handle, max_tokens=max_tokens
-                    )
+                    and _mp()._llama_cache_headroom_ok(self._active.handle, max_tokens=max_tokens)
                 ):
                     return self._active.handle
 
@@ -593,8 +622,7 @@ class ModelPool:
 
         norm = self.normalize_path(model_path)
         key = (
-            f"llama:{norm}:{tier}:batch:{batch_override[0]}:{batch_override[1]}"
-            f":tokens:{max_tokens}"
+            f"llama:{norm}:{tier}:batch:{batch_override[0]}:{batch_override[1]}:tokens:{max_tokens}"
         )
         return self.switch(
             model_path,
@@ -608,9 +636,7 @@ class ModelPool:
         """Backward-compatible alias for compact-tier reload."""
         return self.reload_llama(model_path, n_ctx, tier="compact")
 
-    def get_llamaswap(
-        self, model_path: str, *, num_ctx: int | None = None
-    ) -> Any:
+    def get_llamaswap(self, model_path: str, *, num_ctx: int | None = None) -> Any:
         def loader(_path: str):
             from seiso.inference.llamaswap import create_isolated_gguf_client
 
@@ -634,7 +660,8 @@ class ModelPool:
         if num_ctx is not None and int(num_ctx) > 0:
             with self._lock:
                 if self._active and self._active.key == key:
-                    self._active.meta["n_ctx"] = int(num_ctx)
+                    existing = int(self._active.meta.get("n_ctx") or 0)
+                    self._active.meta["n_ctx"] = max(existing, int(num_ctx))
                     self._active.meta["sidecar"] = True
         ensure_ready = getattr(client, "ensure_ready", None)
         if callable(ensure_ready):
@@ -658,9 +685,7 @@ class ModelPool:
                 return None
             if model_path:
                 norm = self.normalize_path(model_path)
-                active_norm = str(
-                    active.meta.get("norm_path") or active.meta.get("path") or ""
-                )
+                active_norm = str(active.meta.get("norm_path") or active.meta.get("path") or "")
                 # Key may be llamaswap:/abs/path — also compare key suffix.
                 if (
                     active_norm
@@ -680,16 +705,12 @@ class ModelPool:
 
         return cast(tuple[Any, Any], self.switch(model_path, BackendKind.MLX, loader))
 
-    def get_torch(
-        self, model_path: str, *, load_in_4bit: bool | None = None
-    ) -> tuple[Any, Any]:
-        from seiso.inference.kv_policy import resolve_torch_load_policy
+    def get_torch(self, model_path: str, *, load_in_4bit: bool | None = None) -> tuple[Any, Any]:
+        from seiso.inference.torch_load_policy import resolve_torch_load_policy
         from seiso.memory.protection import headroom_mb
 
         norm = self.normalize_path(model_path)
-        precision_override = env_str(
-            "SEISO_TORCH_LOAD_PRECISION", "auto"
-        ).strip().lower()
+        precision_override = env_str("SEISO_TORCH_LOAD_PRECISION", "auto").strip().lower()
         if load_in_4bit is None and precision_override == "auto":
             with self._lock:
                 active = self._active
@@ -745,11 +766,7 @@ class ModelPool:
         from seiso.memory.protection import is_oom_error, release_cached_memory
         from seiso.models.loader import LoadOptions, ModelKind, load_model
 
-        use_4bit = (
-            bool(load_policy.load_in_4bit)
-            if load_policy is not None
-            else load_in_4bit
-        )
+        use_4bit = bool(load_policy.load_in_4bit) if load_policy is not None else load_in_4bit
         dtype = load_policy.dtype if load_policy is not None else None
 
         def load(*, quantized: bool, resolved_dtype: str | None):
@@ -762,24 +779,18 @@ class ModelPool:
                     device_map="auto",
                 )
             )
+
         try:
             model, tokenizer = load(quantized=use_4bit, resolved_dtype=dtype)
             actual_precision = (
                 "4bit"
                 if use_4bit
-                else (
-                    load_policy.precision
-                    if load_policy is not None
-                    else (dtype or "native")
-                )
+                else (load_policy.precision if load_policy is not None else (dtype or "native"))
             )
         except Exception as exc:
             text = str(exc).lower()
             can_fallback = not use_4bit and (
-                is_oom_error(exc)
-                or "bfloat16" in text
-                or "float16" in text
-                or "dtype" in text
+                is_oom_error(exc) or "bfloat16" in text or "float16" in text or "dtype" in text
             )
             if not can_fallback:
                 raise
@@ -819,8 +830,7 @@ class ModelPool:
             free_mb = headroom_mb()
             if target_mb <= 0 or draft_mb <= 0 or free_mb <= 0:
                 raise RuntimeError(
-                    "Speculative pair memory could not be safely sized; "
-                    "use target-only generation"
+                    "Speculative pair memory could not be safely sized; use target-only generation"
                 )
             if needed_mb > free_mb:
                 raise RuntimeError(
@@ -898,9 +908,7 @@ class ModelPool:
                 "path": active.meta.get("path") if active else None,
                 "draft_path": active.meta.get("draft_path") if active else None,
                 "n_ctx": n_ctx,
-                "load_precision": (
-                    active.meta.get("load_precision") if active else None
-                ),
+                "load_precision": (active.meta.get("load_precision") if active else None),
                 "load_policy": active.meta.get("load_policy") if active else None,
                 "release_notes": list(self._release_notes),
             }
@@ -908,4 +916,3 @@ class ModelPool:
 
 def get_model_pool() -> ModelPool:
     return ModelPool.get()
-

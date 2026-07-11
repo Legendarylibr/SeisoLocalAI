@@ -59,6 +59,10 @@ async def test_chat_stream_sends_token_message_done(app, auth_client, monkeypatc
             {"llamacpp": True, "llamaswap": False, "mlx": False, "torch": False},
         )(),
     )
+    monkeypatch.setattr(
+        "seiso.inference.backends._native_linux_requires_isolated_gguf",
+        lambda: False,
+    )
 
     mock_runner = MagicMock()
     mock_runner.stream_updates = fake_stream_updates
@@ -76,7 +80,7 @@ async def test_chat_stream_sends_token_message_done(app, auth_client, monkeypatc
             "stream": True,
         },
     ) as res:
-        assert res.status_code == 200
+        assert res.status_code == 200, await res.aread()
         events = _sse_events(await res.aread())
 
     token_text = "".join(data for event, data in events if event == "token")
