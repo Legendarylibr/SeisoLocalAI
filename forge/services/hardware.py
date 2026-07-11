@@ -116,10 +116,7 @@ def enrich_catalog_models(
 
         if candidates:
             with ThreadPoolExecutor(max_workers=workers) as pool:
-                futures = {
-                    pool.submit(fetch_info, m["repo_id"]): m["repo_id"]
-                    for m in candidates
-                }
+                futures = {pool.submit(fetch_info, m["repo_id"]): m["repo_id"] for m in candidates}
                 for future in as_completed(futures):
                     repo_id, info, error = future.result()
                     if info:
@@ -266,9 +263,7 @@ def enrich_trainable_catalog_models(
     return enriched
 
 
-def recommended_catalog_repo(
-    profile: dict[str, Any], *, task: str = "chat"
-) -> str | None:
+def recommended_catalog_repo(profile: dict[str, Any], *, task: str = "chat") -> str | None:
     from seiso.models.catalog import HubSearchError, search_catalog
 
     tier = classify_tier(profile)
@@ -309,7 +304,7 @@ def build_vram_status(orchestrator: Any) -> dict[str, Any]:
     profile = hardware_profile(force_refresh=False)
     tier = classify_tier(profile)
     headroom = vram_headroom_mb(profile)
-    local = orchestrator._runner._pool.status()
+    local = orchestrator.inference_status()
     try:
         from seiso.hardware.vram_processes import vram_contention_summary
 

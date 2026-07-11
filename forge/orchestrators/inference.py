@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
 from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 from typing import Any
@@ -14,6 +16,8 @@ from forge.tools.registry import build_default_registry
 from seiso.inference.backends import BACKEND_ROUTER
 from seiso.inference.runner import get_inference_runner
 
+logger = logging.getLogger(__name__)
+
 
 class InferenceOrchestrator(Orchestrator):
     kind = "inference"
@@ -22,16 +26,68 @@ class InferenceOrchestrator(Orchestrator):
         super().__init__(sandbox_root)
         self._runner = get_inference_runner()
         self._active_generation_user_id: str | None = None
+        self._preload_future: asyncio.Future[None] | None = None
+        self._local_inference_lock = asyncio.Lock()
+
+    def inference_status(self) -> dict[str, Any]:
+        return self._runner.pool.status()
+
+    def inference_runtime_stats(self) -> dict[str, Any]:
+        return self._runner.last_inference_stats
+
+    def pinned_inference_context(self, model_path: str) -> int | None:
+        return self._runner.pool.pinned_n_ctx(model_path)
+
+    def would_switch_model(self, model_path: str, backend: str) -> bool:
+        return self._runner.pool.would_switch_model(model_path, backend)
+
+    async def prepare_model_for_load(self, model_path: str, backend: str) -> None:
+        await asyncio.to_thread(
+            self._runner.pool.prepare_for_load,
+            model_path,
+            backend,
+        )
+
+    async def preload_model(self, payload: dict[str, Any]) -> None:
+        """Run blocking preload while retaining a trackable cancellation boundary."""
+        async with self._local_inference_lock:
+            future = asyncio.get_running_loop().run_in_executor(
+                None,
+                self._runner.warm_model,
+                payload,
+            )
+            self._preload_future = future
+            try:
+                await asyncio.shield(future)
+            except asyncio.CancelledError:
+                try:
+                    await asyncio.shield(future)
+                except Exception:
+                    logger.exception("Preload failed while request cancellation was pending")
+                raise
+            finally:
+                if self._preload_future is future:
+                    self._preload_future = None
+
+    async def _wait_for_preload(self) -> bool:
+        future = self._preload_future
+        if future is not None and not future.done():
+            try:
+                await asyncio.shield(future)
+            except Exception:
+                logger.exception("Preload failed while waiting for memory release")
+            return True
+        return False
+
+    def emit_log(self, job_id: str, message: str) -> None:
+        self._emit_log(job_id, message)
 
     def _normalize_generation_user(self, user_id: str | None) -> str | None:
         return str(user_id) if user_id else None
 
     def _generation_owned_by_other(self, user_id: str | None) -> bool:
         owner = self._normalize_generation_user(user_id)
-        return bool(
-            self._active_generation_user_id
-            and self._active_generation_user_id != owner
-        )
+        return bool(self._active_generation_user_id and self._active_generation_user_id != owner)
 
     def assert_generation_available_for_user(self, user_id: str | None) -> None:
         if self._generation_owned_by_other(user_id):
@@ -78,6 +134,8 @@ class InferenceOrchestrator(Orchestrator):
         self.assert_generation_available_for_user(user_id)
         await self._cancel_running_jobs_for_user(user_id)
         await self._runner.cancel_and_unload()
+        if await self._wait_for_preload():
+            await self._runner.cancel_and_unload()
         self.end_generation_for_user(user_id)
         from seiso.memory.protection import release_cached_memory
 
@@ -119,9 +177,7 @@ class InferenceOrchestrator(Orchestrator):
             self.begin_generation_for_user(user_id)
         try:
             if provider:
-                reply = await self._provider_chat(
-                    provider, payload, messages, user_id=user_id
-                )
+                reply = await self._provider_chat(provider, payload, messages, user_id=user_id)
                 backend = f"provider:{provider.get('provider_type', 'unknown')}"
             elif payload.get("use_model_router"):
                 reply, router_meta = await self._router_chat(payload, messages)
@@ -214,8 +270,9 @@ class InferenceOrchestrator(Orchestrator):
         if not self._active_generation_user_id:
             self.begin_generation_for_user(user_id)
         try:
-            async for update in self._runner.stream_updates(payload):
-                yield update
+            async with self._local_inference_lock:
+                async for update in self._runner.stream_updates(payload):
+                    yield update
         finally:
             self.end_generation_for_user(user_id)
 
@@ -244,9 +301,7 @@ class InferenceOrchestrator(Orchestrator):
             return await self._local_chat(p)
 
         model_key = (
-            payload.get("model_id")
-            or payload.get("model_path")
-            or payload.get("model_name")
+            payload.get("model_id") or payload.get("model_path") or payload.get("model_name")
         )
         return await run_agent_loop_async(
             generate,
@@ -279,4 +334,5 @@ class InferenceOrchestrator(Orchestrator):
         )
 
     async def _local_chat(self, payload: dict[str, Any]) -> str:
-        return await self._runner.chat(payload)
+        async with self._local_inference_lock:
+            return await self._runner.chat(payload)

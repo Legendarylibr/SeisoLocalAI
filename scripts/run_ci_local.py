@@ -22,9 +22,11 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import collections
 import json
 import os
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -39,6 +41,7 @@ CI_ENV: dict[str, str] = {
     "PYTHONUTF8": "1",
     "PYTHONIOENCODING": "utf-8",
 }
+_DIAGNOSTIC_LOCATION_RE = re.compile(r"^(?P<path>.+?):\d+(?::\d+)?:\s*(?P<message>.+)$")
 
 PY_PACKAGES = ("seiso", "forge", "seiso_cli", "tests")
 PY_TYPE_PACKAGES = ("seiso", "forge", "seiso_cli")
@@ -220,10 +223,25 @@ def _baseline_check(
             f"Missing {baseline_path}. Run with --update-{label}-baseline to create it."
         )
 
-    baseline_set = set(baseline_path.read_text(encoding="utf-8").splitlines())
-    current_set = set(current_lines)
-    new_items = sorted(current_set - baseline_set)
-    fixed_items = sorted(baseline_set - current_set)
+    def fingerprint(line: str) -> str:
+        match = _DIAGNOSTIC_LOCATION_RE.match(line.strip())
+        if match is None:
+            return line.strip().replace("\\", "/")
+        path = match.group("path").replace("\\", "/")
+        return f"{path}: {match.group('message').strip()}"
+
+    baseline_counter = collections.Counter(
+        fingerprint(line)
+        for line in baseline_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    )
+    current_counter = collections.Counter(
+        fingerprint(line) for line in current_lines if line.strip()
+    )
+    new_counter = current_counter - baseline_counter
+    fixed_counter = baseline_counter - current_counter
+    new_items = sorted(new_counter.elements())
+    fixed_items = sorted(fixed_counter.elements())
 
     if new_items:
         print(f"\n--- New {label} issues (not in baseline) ---", file=sys.stderr)
@@ -366,6 +384,8 @@ def job_types(root: Path, python: str, env: dict[str, str], *, update_baseline: 
     print(combined, end="")
 
     errors = sorted(line for line in combined.splitlines() if ": error:" in line)
+    if result.returncode not in {0, 1} or (result.returncode and not errors):
+        raise subprocess.CalledProcessError(result.returncode or 1, "mypy")
     _baseline_check(
         label="mypy",
         baseline_path=baseline_path,
@@ -399,13 +419,19 @@ def job_test(
         )
         test_targets = ["tests/"]
     else:
+        production_changed = any(
+            path.suffix == ".py" and path.parts and path.parts[0] in PY_SOURCE_ROOTS
+            for path in files
+        )
         test_targets = [
             path.as_posix()
             for path in files
             if path.suffix == ".py" and path.parts and path.parts[0] == "tests"
         ]
-        if not test_targets:
-            print("No directly changed test modules to run.")
+        if production_changed:
+            test_targets = ["tests/"]
+        elif not test_targets:
+            print("No production or test Python changes to test.")
             return
 
     marker = "gpu and not slow" if hardware_tests else "not slow and not gpu"

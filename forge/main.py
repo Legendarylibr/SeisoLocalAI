@@ -57,16 +57,16 @@ async def lifespan(app: FastAPI):
     if stale:
         import logging
 
-        logging.getLogger(__name__).info(
-            "Marked %d stale job(s) as failed after restart", stale
-        )
+        logging.getLogger(__name__).info("Marked %d stale job(s) as failed after restart", stale)
     try:
         yield
     finally:
         from forge.services.executors import shutdown_executors
         from forge.services.model_router_client import close_router_client
+        from seiso.inference.runner import reset_inference_runtime
 
         await close_router_client()
+        reset_inference_runtime(wait=False)
         shutdown_executors(wait=False)
         if data_lock is not None:
             data_lock.release()
@@ -95,9 +95,7 @@ def create_app() -> FastAPI:
 
     @app.exception_handler(DatabaseCryptoError)
     async def database_crypto_error(_request: Request, _exc: DatabaseCryptoError):
-        return JSONResponse(
-            {"detail": "Encrypted local data could not be read"}, status_code=500
-        )
+        return JSONResponse({"detail": "Encrypted local data could not be read"}, status_code=500)
 
     @app.middleware("http")
     async def security_headers(request: Request, call_next):
@@ -120,9 +118,7 @@ def create_app() -> FastAPI:
                 try:
                     app.state.rate_limiter.check(client)
                 except HTTPException as exc:
-                    return JSONResponse(
-                        {"detail": exc.detail}, status_code=exc.status_code
-                    )
+                    return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
         if not validate_csrf(request):
             return JSONResponse({"detail": "CSRF validation failed"}, status_code=403)
         response: Response = await call_next(request)
@@ -167,9 +163,7 @@ def create_app() -> FastAPI:
     app.include_router(providers.router, prefix=prefix)
     app.include_router(system.router, prefix=prefix)
     app.include_router(settings_routes.router, prefix=prefix)
-    app.include_router(
-        openai.router
-    )  # /v1/chat/completions — no /api prefix (OpenAI compat)
+    app.include_router(openai.router)  # /v1/chat/completions — no /api prefix (OpenAI compat)
 
     @app.get("/health")
     async def root_health():

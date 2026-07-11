@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 from types import SimpleNamespace
 
 import pytest
@@ -185,14 +186,14 @@ def test_policy_rejects_static_cache_without_headroom(monkeypatch):
 
 
 def test_torch_load_policy_prefers_half_only_with_headroom(monkeypatch):
-    from seiso.inference import kv_policy
+    from seiso.inference import torch_load_policy
 
-    monkeypatch.setattr(kv_policy.platform, "system", lambda: "Linux")
-    monkeypatch.setattr(kv_policy, "estimate_local_weight_mb", lambda _path: 1000)
+    monkeypatch.setattr(torch_load_policy.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(torch_load_policy, "estimate_local_weight_mb", lambda _path: 1000)
     monkeypatch.setenv("SEISO_TORCH_LOAD_PRECISION", "auto")
 
-    roomy = kv_policy.resolve_torch_load_policy("/tmp/model", free_mb=10_000)
-    tight = kv_policy.resolve_torch_load_policy("/tmp/model", free_mb=2_000)
+    roomy = torch_load_policy.resolve_torch_load_policy("/tmp/model", free_mb=10_000)
+    tight = torch_load_policy.resolve_torch_load_policy("/tmp/model", free_mb=2_000)
 
     assert roomy.load_in_4bit is False
     assert roomy.precision in {"bf16", "fp16"}
@@ -358,9 +359,7 @@ def test_ollama_warmup_loads_without_generating(monkeypatch):
     monkeypatch.setattr(llamaswap, "plan_sidecar_request", lambda *_a: ([], 4096, 32))
     monkeypatch.setattr(llamaswap, "sidecar_ollama_num_batch", lambda: 512)
     monkeypatch.setattr(llamaswap, "sidecar_ollama_num_gpu", lambda *_a, **_k: 20)
-    monkeypatch.setattr(
-        llamaswap, "sidecar_ollama_keep_alive", lambda **_k: "15m"
-    )
+    monkeypatch.setattr(llamaswap, "sidecar_ollama_keep_alive", lambda **_k: "15m")
     client = llamaswap.OllamaClient()
     monkeypatch.setattr(client, "_resolve_model", lambda *_a: "model")
     calls: list[tuple[str, dict]] = []
@@ -424,14 +423,15 @@ def test_torch_preload_runs_eager_kernel_warmup(monkeypatch):
             )
 
     class FakePool:
+        def inference_lease(self):
+            return contextlib.nullcontext()
+
         def get_torch(self, _path):
             return FakeModel(), object()
 
     runner = runner_module.LocalInferenceRunner()
     runner._pool = FakePool()
-    monkeypatch.setattr(
-        runner, "_resolve_route", lambda _payload, path: ("torch", path)
-    )
+    monkeypatch.setattr(runner, "_resolve_route", lambda _payload, path: ("torch", path))
     monkeypatch.setattr(
         runner_module,
         "sanitize_inference_payload",
@@ -450,6 +450,48 @@ def test_torch_preload_runs_eager_kernel_warmup(monkeypatch):
     assert calls[0]["use_cache"] is True
     assert runner.last_inference_stats["resident_confirmed"] is True
     assert runner.last_inference_stats["load_precision"] == "bf16"
+
+
+def test_torch_preload_keeps_loaded_model_when_warmup_is_unsupported(
+    monkeypatch,
+):
+    import torch
+
+    from seiso.inference import runner as runner_module
+
+    class FakeModel:
+        config = SimpleNamespace()
+
+        def __call__(self, **_kwargs):
+            raise TypeError("forward() got an unexpected keyword 'use_cache'")
+
+    class FakePool:
+        def inference_lease(self):
+            return contextlib.nullcontext()
+
+        def get_torch(self, _path):
+            return FakeModel(), object()
+
+    runner = runner_module.LocalInferenceRunner()
+    runner._pool = FakePool()
+    monkeypatch.setattr(runner, "_resolve_route", lambda _payload, path: ("torch", path))
+    monkeypatch.setattr(
+        runner_module,
+        "sanitize_inference_payload",
+        lambda payload, **_kwargs: payload,
+    )
+    monkeypatch.setattr(
+        runner,
+        "_torch_prepare_inputs",
+        lambda *_args, **_kwargs: ({"input_ids": torch.tensor([[1]])}, 1, 1),
+    )
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+
+    runner.warm_model({"model_path": "/tmp/model", "max_tokens": 1})
+
+    assert runner.last_inference_stats["resident_confirmed"] is True
+    assert runner.last_inference_stats["warmup_confirmed"] is False
+    assert "use_cache" in runner.last_inference_stats["warmup_fallback_reason"]
 
 
 def test_sidecar_metrics_do_not_claim_unconfirmed_prefix_cache(monkeypatch):
@@ -484,7 +526,34 @@ def test_sidecar_metrics_do_not_claim_unconfirmed_prefix_cache(monkeypatch):
         == []
     )
     assert runner.last_inference_stats["prefix_cache"] is False
-    assert (
-        runner.last_inference_stats["prefix_cache_mode"]
-        == "provider-managed"
+    assert runner.last_inference_stats["prefix_cache_mode"] == "provider-managed"
+
+
+def test_sidecar_json_decoder_rejects_non_objects():
+    from seiso.inference.llamaswap import _decode_json_object
+
+    with pytest.raises(RuntimeError, match="non-object"):
+        _decode_json_object("[]", engine="test", endpoint="/api/test")
+    with pytest.raises(RuntimeError, match="malformed"):
+        _decode_json_object("{", engine="test", endpoint="/api/test")
+
+
+def test_ollama_stream_timeout_has_backend_context(monkeypatch):
+    from seiso.inference import llamaswap
+
+    client = llamaswap.OllamaClient()
+    monkeypatch.setattr(client, "_request_body", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(
+        llamaswap.urllib.request,
+        "urlopen",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(TimeoutError("stalled")),
     )
+
+    with pytest.raises(RuntimeError, match="Ollama stream failed or timed out"):
+        list(
+            client.stream(
+                {},
+                "/tmp/model.gguf",
+                should_stop=lambda: False,
+            )
+        )

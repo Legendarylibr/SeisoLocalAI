@@ -516,12 +516,8 @@ def test_prepare_for_load_unloads_spec_bundle_for_same_torch_path(tmp_path, monk
 
 def test_switch_serializes_concurrent_loads_for_same_model(monkeypatch, tmp_path):
     pool = ModelPool()
-    monkeypatch.setattr(
-        "seiso.memory.protection.estimate_path_vram_mb", lambda _path: 0
-    )
-    monkeypatch.setattr(
-        "seiso.memory.protection.ensure_load_fits", lambda *_a, **_k: None
-    )
+    monkeypatch.setattr("seiso.memory.protection.estimate_path_vram_mb", lambda _path: 0)
+    monkeypatch.setattr("seiso.memory.protection.ensure_load_fits", lambda *_a, **_k: None)
     monkeypatch.setattr(pool, "_ensure_resident_gpu_resource_lock", lambda: None)
     model_path = tmp_path / "model.gguf"
     model_path.write_bytes(b"gguf")
@@ -797,9 +793,7 @@ def test_native_linux_llama_reuses_larger_cached_context(monkeypatch, tmp_path):
     assert first is second
 
 
-def test_native_linux_llama_reuses_larger_cached_completion_budget(
-    monkeypatch, tmp_path
-):
+def test_native_linux_llama_reuses_larger_cached_completion_budget(monkeypatch, tmp_path):
     from seiso.inference import model_pool
 
     pool = ModelPool()
@@ -1955,12 +1949,8 @@ def test_torch_native_load_oom_falls_back_to_4bit(monkeypatch):
         return model, tokenizer
 
     monkeypatch.setattr(loader, "load_model", fake_load)
-    monkeypatch.setattr(
-        "seiso.inference.tuning.prepare_torch_model", lambda value: value
-    )
-    monkeypatch.setattr(
-        "seiso.memory.protection.release_cached_memory", lambda **_kwargs: None
-    )
+    monkeypatch.setattr("seiso.inference.tuning.prepare_torch_model", lambda value: value)
+    monkeypatch.setattr("seiso.memory.protection.release_cached_memory", lambda **_kwargs: None)
     policy = TorchLoadPolicy(
         precision="bf16",
         load_in_4bit=False,
@@ -1971,9 +1961,7 @@ def test_torch_native_load_oom_falls_back_to_4bit(monkeypatch):
         reason="test",
     )
 
-    loaded_model, loaded_tokenizer = ModelPool()._load_torch_pair(
-        "/tmp/model", load_policy=policy
-    )
+    loaded_model, loaded_tokenizer = ModelPool()._load_torch_pair("/tmp/model", load_policy=policy)
 
     assert (loaded_model, loaded_tokenizer) == (model, tokenizer)
     assert calls[0].load_in_4bit is False
@@ -2002,3 +1990,26 @@ def test_torch_auto_precision_stays_pinned_while_model_is_resident(monkeypatch):
 
     assert pool.get_torch("/tmp/model") == (model, tokenizer)
     assert pool.status()["load_precision"] == "bf16"
+
+
+def test_llamaswap_keeps_largest_pinned_context(monkeypatch):
+    from seiso.inference.model_pool import BackendKind, LoadedModel, ModelPool
+
+    class FakeClient:
+        def ensure_ready(self) -> None:
+            return None
+
+    pool = ModelPool()
+    path = "/tmp/model.gguf"
+    norm = pool.normalize_path(path)
+    client = FakeClient()
+    pool._active = LoadedModel(
+        key=f"llamaswap:{norm}",
+        backend=BackendKind.LLAMASWAP,
+        handle=client,
+        meta={"path": path, "norm_path": norm, "n_ctx": 8192},
+    )
+    monkeypatch.setattr(pool, "switch", lambda *_args, **_kwargs: client)
+
+    assert pool.get_llamaswap(path, num_ctx=2048) is client
+    assert pool.pinned_n_ctx(path) == 8192

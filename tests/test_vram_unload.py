@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
+import threading
+
 import pytest
 
 
@@ -16,9 +19,7 @@ async def test_release_all_inference_memory_unloads_local(monkeypatch, tmp_path)
         calls.append("local")
         return {"active_model": None, "path": None}
 
-    monkeypatch.setattr(
-        orchestrator._runner, "cancel_and_unload", fake_cancel_and_unload
-    )
+    monkeypatch.setattr(orchestrator._runner, "cancel_and_unload", fake_cancel_and_unload)
     monkeypatch.setattr(
         "seiso.memory.protection.release_cached_memory",
         lambda sync=False: calls.append(f"cache:{sync}"),
@@ -71,9 +72,7 @@ async def test_release_all_inference_memory_refreshes_headroom(monkeypatch, tmp_
         return {"active_model": None}
 
     monkeypatch.setattr(orchestrator._runner, "cancel_and_unload", noop_unload)
-    monkeypatch.setattr(
-        "seiso.memory.protection.release_cached_memory", lambda sync=False: None
-    )
+    monkeypatch.setattr("seiso.memory.protection.release_cached_memory", lambda sync=False: None)
 
     def fake_hw(force_refresh=False):
         refresh_calls.append(force_refresh)
@@ -106,16 +105,12 @@ def test_build_vram_status_shape(monkeypatch, tmp_path):
     monkeypatch.setattr(
         "seiso.hardware.tiers.classify_tier",
         lambda _p: (
-            __import__(
-                "seiso.hardware.tiers", fromlist=["HardwareTier"]
-            ).HardwareTier.APPLE_UNIFIED
+            __import__("seiso.hardware.tiers", fromlist=["HardwareTier"]).HardwareTier.APPLE_UNIFIED
         ),
     )
     monkeypatch.setattr("seiso.hardware.tiers.vram_headroom_mb", lambda _p: 10240)
     monkeypatch.setattr("seiso.hardware.memory_headroom_label", lambda _p: "RAM")
-    monkeypatch.setattr(
-        "seiso.memory.platform_profile.memory_profile_label", lambda _p: "low"
-    )
+    monkeypatch.setattr("seiso.memory.platform_profile.memory_profile_label", lambda _p: "low")
     monkeypatch.setattr(
         orchestrator._runner._pool,
         "status",
@@ -124,6 +119,10 @@ def test_build_vram_status_shape(monkeypatch, tmp_path):
     monkeypatch.setattr(
         "forge.services.hardware.recommended_catalog_repo",
         lambda _p, task="chat": "microsoft/Phi-4-mini-instruct",
+    )
+    monkeypatch.setattr(
+        "seiso.hardware.vram_processes.vram_contention_summary",
+        lambda: {"external_vram_mb": 0, "contended": False, "processes": []},
     )
 
     status = build_vram_status(orchestrator)
@@ -136,3 +135,58 @@ def test_build_vram_status_shape(monkeypatch, tmp_path):
     assert status["active_model"] == "model-a"
     assert "vram_contention" in status
     assert status["vram_contention"]["external_vram_mb"] == 0
+
+
+@pytest.mark.asyncio
+async def test_preload_cancellation_waits_for_blocking_worker(monkeypatch, tmp_path):
+    from forge.orchestrators.inference import InferenceOrchestrator
+
+    orchestrator = InferenceOrchestrator(tmp_path)
+    started = threading.Event()
+    release = threading.Event()
+
+    def blocking_warm(_payload):
+        started.set()
+        release.wait(timeout=2)
+
+    monkeypatch.setattr(orchestrator._runner, "warm_model", blocking_warm)
+    task = asyncio.create_task(orchestrator.preload_model({"model_path": "x"}))
+    await asyncio.to_thread(started.wait, 1)
+    task.cancel()
+    await asyncio.sleep(0)
+
+    assert not task.done()
+    release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert orchestrator._preload_future is None
+
+
+@pytest.mark.asyncio
+async def test_preload_excludes_local_chat(monkeypatch, tmp_path):
+    from forge.orchestrators.inference import InferenceOrchestrator
+
+    orchestrator = InferenceOrchestrator(tmp_path)
+    started = threading.Event()
+    release = threading.Event()
+
+    def blocking_warm(_payload):
+        started.set()
+        release.wait(timeout=2)
+
+    async def fake_chat(_payload):
+        return "ok"
+
+    monkeypatch.setattr(orchestrator._runner, "warm_model", blocking_warm)
+    monkeypatch.setattr(orchestrator._runner, "chat", fake_chat)
+    preload = asyncio.create_task(
+        orchestrator.preload_model({"model_path": "x"})
+    )
+    await asyncio.to_thread(started.wait, 1)
+    chat = asyncio.create_task(orchestrator._local_chat({"model_path": "x"}))
+    await asyncio.sleep(0)
+
+    assert not chat.done()
+    release.set()
+    await preload
+    assert await chat == "ok"

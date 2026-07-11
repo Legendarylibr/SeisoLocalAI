@@ -14,7 +14,7 @@ import urllib.parse
 import urllib.request
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, Protocol, cast
+from typing import Any, Protocol
 
 from seiso.env import env_bool, env_int, env_str
 from seiso.inference.kv_policy import resolve_sidecar_kv_policy
@@ -108,6 +108,16 @@ def llamaswap_model_name(model_path: str) -> str:
     return str(Path(model_path).expanduser())
 
 
+def _decode_json_object(raw: str, *, engine: str, endpoint: str) -> dict[str, Any]:
+    try:
+        decoded = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"{engine} returned malformed JSON from {endpoint}") from exc
+    if not isinstance(decoded, dict):
+        raise RuntimeError(f"{engine} returned a non-object JSON response from {endpoint}")
+    return decoded
+
+
 # Headroom kept free between prompt + generation and the context edge.
 _SIDECAR_CTX_MARGIN_TOKENS = 256
 
@@ -140,6 +150,11 @@ _SIDECAR_NATIVE_OLLAMA_KEEP_ALIVE = "2m"
 _SIDECAR_PERF_KEEP_ALIVE = "10m"
 _SIDECAR_PERF_VRAM_BUDGET_RATIO = 0.75
 _SIDECAR_PERF_VRAM_BUDGET_RATIO_CONSUMER = 0.70
+
+
+def sidecar_stream_timeout_s() -> int:
+    """Maximum silence between sidecar stream reads."""
+    return max(30, env_int("SEISO_SIDECAR_STREAM_TIMEOUT_S", 300))
 
 
 def _sidecar_perf_mode() -> bool:
@@ -693,7 +708,7 @@ class OllamaClient:
         req = self._build_request("/api/chat", body)
         tool_buffer = ToolCallDeltaBuffer()
         try:
-            with urllib.request.urlopen(req, timeout=None) as response:
+            with urllib.request.urlopen(req, timeout=sidecar_stream_timeout_s()) as response:
                 # Native API streams one JSON object per line (not SSE).
                 for raw in response:
                     if should_stop():
@@ -733,9 +748,7 @@ class OllamaClient:
                             ):
                                 raw_duration = int(chunk.get(source) or 0)
                                 if raw_duration > 0:
-                                    runtime_stats[target] = round(
-                                        raw_duration / 1_000_000.0, 3
-                                    )
+                                    runtime_stats[target] = round(raw_duration / 1_000_000.0, 3)
                             eval_count = int(chunk.get("eval_count") or 0)
                             eval_duration = int(chunk.get("eval_duration") or 0)
                             if eval_count > 0 and eval_duration > 0:
@@ -751,9 +764,10 @@ class OllamaClient:
                                 new_tokens=estimate_chunk_tokens(tool_text),
                             )
                         break
-        except urllib.error.URLError as exc:
+        except (OSError, TimeoutError, urllib.error.URLError) as exc:
             raise RuntimeError(
-                f"Ollama is unavailable at {self.url}. {sidecar_setup_hint(engine='ollama')}"
+                f"Ollama stream failed or timed out at {self.url}. "
+                f"{sidecar_setup_hint(engine='ollama')}"
             ) from exc
 
     def release_external_memory(self, model_path: str | None = None) -> tuple[bool, str | None]:
@@ -848,7 +862,7 @@ class OllamaClient:
             raise RuntimeError(
                 f"Ollama is unavailable at {self.url}. {sidecar_setup_hint(engine='ollama')}"
             ) from exc
-        return cast(dict[str, Any], json.loads(raw))
+        return _decode_json_object(raw, engine="Ollama", endpoint=path)
 
 
 class LlamaSwapClient:
@@ -893,7 +907,7 @@ class LlamaSwapClient:
         req = self._build_request("/v1/chat/completions", body)
         tool_buffer = ToolCallDeltaBuffer()
         try:
-            with urllib.request.urlopen(req, timeout=None) as response:
+            with urllib.request.urlopen(req, timeout=sidecar_stream_timeout_s()) as response:
                 for raw in response:
                     if should_stop():
                         break
@@ -937,9 +951,9 @@ class LlamaSwapClient:
                                 tool_text,
                                 new_tokens=estimate_chunk_tokens(tool_text),
                             )
-        except urllib.error.URLError as exc:
+        except (OSError, TimeoutError, urllib.error.URLError) as exc:
             raise RuntimeError(
-                f"llama-swap is unavailable at {self.url}. "
+                f"llama-swap stream failed or timed out at {self.url}. "
                 f"{sidecar_setup_hint(url=self.url, engine=self.engine)}"
             ) from exc
 
@@ -1019,4 +1033,4 @@ class LlamaSwapClient:
                 f"llama-swap is unavailable at {self.url}. "
                 f"{sidecar_setup_hint(url=self.url, engine=self.engine)}"
             ) from exc
-        return cast(dict[str, Any], json.loads(raw))
+        return _decode_json_object(raw, engine="llama-swap", endpoint=path)

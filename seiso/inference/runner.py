@@ -23,15 +23,21 @@ from seiso.inference.backends import (
     resolve_local_backend,
 )
 from seiso.inference.kv_policy import (
+    KVCachePolicy,
     resolve_kv_cache_policy,
     resolve_sidecar_kv_policy,
 )
-from seiso.inference.model_pool import get_dflash_draft, get_model_pool
+from seiso.inference.model_pool import ModelPool, get_dflash_draft, get_model_pool
 from seiso.inference.speculative import (
     DFlashDraftSpeculativeBundle,
     default_num_speculative_tokens,
     iter_speculative_tokens,
     iter_speculative_tokens_dflash,
+)
+from seiso.inference.stream_bridge import (
+    StreamBridgeDone,
+    StreamBridgeError,
+    ThreadStreamBridge,
 )
 from seiso.inference.streaming import StreamToken, StreamUpdate
 from seiso.inference.tool_calls import ToolCallDeltaBuffer, message_content_with_tool_calls
@@ -65,7 +71,6 @@ from seiso.models.chat_format import format_messages_for_prompt
 
 logger = logging.getLogger(__name__)
 
-_STREAM_DONE = object()
 _MAX_LLAMA_OOM_RECOVERIES = 3
 _runner: LocalInferenceRunner | None = None
 _runner_lock = threading.Lock()
@@ -451,11 +456,15 @@ def _trim_torch_messages_to_context(
     )
 
 
-class _StreamError:
-    __slots__ = ("exc",)
-
-    def __init__(self, exc: BaseException) -> None:
-        self.exc = exc
+@dataclass(slots=True)
+class _TorchGenerationContext:
+    model: Any
+    tokenizer: Any
+    inputs: dict[str, Any]
+    input_len: int
+    max_tokens: int
+    policy: KVCachePolicy
+    payload: dict[str, Any]
 
 
 class LocalInferenceRunner:
@@ -466,7 +475,7 @@ class LocalInferenceRunner:
         self._last_inference_stats: dict[str, Any] = {}
 
     @property
-    def pool(self):
+    def pool(self) -> ModelPool:
         """Active model pool (public accessor for Forge services)."""
         return self._pool
 
@@ -476,7 +485,12 @@ class LocalInferenceRunner:
         return dict(self._last_inference_stats)
 
     def warm_model(self, payload: dict[str, Any]) -> None:
-        """Load a model into the pool without generating (preload / ping)."""
+        """Load and warm a model while preventing concurrent unload."""
+        with self._pool.inference_lease():
+            self._warm_model_impl(payload)
+
+    def _warm_model_impl(self, payload: dict[str, Any]) -> None:
+        """Load a model into the pool without generating user-visible text."""
         self._last_inference_stats = {}
         started = time.perf_counter()
         model_path = payload["model_path"]
@@ -491,18 +505,38 @@ class LocalInferenceRunner:
             loaded_at = time.perf_counter()
             inputs, _input_len, _max_tokens = self._torch_prepare_inputs(
                 model,
-                payload.get("messages")
-                or [{"role": "user", "content": "."}],
+                payload.get("messages") or [{"role": "user", "content": "."}],
                 tokenizer,
                 max_tokens=1,
             )
             if torch.cuda.is_available():
                 torch.cuda.synchronize()
             warm_started = time.perf_counter()
-            with torch.inference_mode():
-                model(**inputs, use_cache=True)
-            if torch.cuda.is_available():
-                torch.cuda.synchronize()
+            warmup_confirmed = True
+            warmup_reason: str | None = None
+            try:
+                with torch.inference_mode():
+                    model(**inputs, use_cache=True)
+                if torch.cuda.is_available():
+                    torch.cuda.synchronize()
+            except Exception as exc:
+                text = str(exc).lower()
+                unsupported = isinstance(exc, TypeError) and any(
+                    marker in text
+                    for marker in (
+                        "unexpected keyword",
+                        "use_cache",
+                        "forward",
+                    )
+                )
+                if is_oom_error(exc) or not unsupported:
+                    raise
+                warmup_confirmed = False
+                warmup_reason = str(exc)
+                logger.warning(
+                    "Torch model loaded but eager warmup is unsupported: %s",
+                    exc,
+                )
             policy = resolve_kv_cache_policy(
                 payload,
                 model=model,
@@ -512,23 +546,21 @@ class LocalInferenceRunner:
             )
             compiled = (
                 maybe_compile_torch_decode(model, inputs["input_ids"])
-                if policy.compile_decode
+                if policy.compile_decode and warmup_confirmed
                 else False
             )
             self._last_inference_stats = {
                 "backend": "torch",
                 "load_ms": round((loaded_at - started) * 1000.0, 3),
-                "warmup_ms": round(
-                    (time.perf_counter() - warm_started) * 1000.0, 3
-                ),
-                "load_precision": str(
-                    getattr(model, "_seiso_load_precision", "unknown")
-                ),
+                "warmup_ms": round((time.perf_counter() - warm_started) * 1000.0, 3),
+                "load_precision": str(getattr(model, "_seiso_load_precision", "unknown")),
                 "attention_implementation": str(
                     getattr(model, "_seiso_attention_implementation", "unknown")
                 ),
                 "decode_compiled": compiled,
                 "resident_confirmed": True,
+                "warmup_confirmed": warmup_confirmed,
+                "warmup_fallback_reason": warmup_reason,
             }
         elif route == "llamaswap":
             pinned_ctx = payload.get("sidecar_num_ctx") or payload.get("n_ctx")
@@ -579,17 +611,13 @@ class LocalInferenceRunner:
                         exc_info=True,
                     )
             warm = getattr(client, "warm_model", None)
-            resident_confirmed = (
-                bool(warm(payload, resolved_path)) if callable(warm) else False
-            )
+            resident_confirmed = bool(warm(payload, resolved_path)) if callable(warm) else False
             self._last_inference_stats = {
                 "backend": getattr(client, "engine", "llamaswap"),
                 "load_ms": round((time.perf_counter() - started) * 1000.0, 3),
                 "resident_confirmed": resident_confirmed,
                 "sidecar_num_ctx": pinned_ctx_i,
-                "sidecar_load_plan": dict(
-                    getattr(client, "pinned_load_plan", {})
-                ),
+                "sidecar_load_plan": dict(getattr(client, "pinned_load_plan", {})),
             }
         elif route == "speculative":
             draft_path = payload.get("draft_model_path")
@@ -608,8 +636,7 @@ class LocalInferenceRunner:
                 self._pool.get_torch_speculative(resolved_path, draft_path, load_in_4bit=True)
         else:
             messages, n_ctx = _prepare_llama_messages(payload, resolved_path)
-            self._pool.acquire_llama_inference()
-            try:
+            with self._pool.llama_inference_lease():
                 llm = self._pool.get_llama(
                     resolved_path,
                     n_ctx=n_ctx,
@@ -630,8 +657,6 @@ class LocalInferenceRunner:
                         n_ctx=n_ctx,
                         prompt_tokens=budget.input_tokens,
                     )
-            finally:
-                self._pool.release_llama_inference()
 
     async def chat(self, payload: dict[str, Any]) -> str:
         loop = asyncio.get_running_loop()
@@ -691,10 +716,13 @@ class LocalInferenceRunner:
         await self._ensure_model_switch(resolved_path, draft_path=draft_path, route=route)
 
         loop = asyncio.get_running_loop()
-        queue: asyncio.Queue[StreamUpdate | object] = asyncio.Queue()
+        bridge = ThreadStreamBridge(
+            loop,
+            maxsize=max(1, env_int("SEISO_STREAM_QUEUE_SIZE", 32)),
+        )
 
         def should_stop() -> bool:
-            return not self._pool.is_generation_active(generation_id)
+            return bridge.cancelled or not self._pool.is_generation_active(generation_id)
 
         def producer() -> None:
             buffer: list[str] = []
@@ -714,104 +742,98 @@ class LocalInferenceRunner:
                     )
                 return dict(self._last_inference_stats)
 
-            self._pool.begin_inference()
             try:
-                for part in self._iter_tokens(payload, resolved_path, route, should_stop):
-                    if should_stop():
-                        break
-                    if first_token_at is None:
-                        first_token_at = time.perf_counter()
-                        ttft_ms = (first_token_at - producer_started) * 1000.0
-                        self._last_inference_stats["ttft_ms"] = round(
-                            ttft_ms, 3
-                        )
-                        setup_ms = float(
-                            self._last_inference_stats.get("load_ms") or 0.0
-                        ) + float(
-                            self._last_inference_stats.get("tokenize_ms") or 0.0
-                        )
-                        self._last_inference_stats[
-                            "ready_to_first_token_ms"
-                        ] = round(max(0.0, ttft_ms - setup_ms), 3)
-                    output_tokens += part.new_tokens
-                    buffer.append(part.text)
-                    buffered += len(part.text)
-                    if not flushed_once:
-                        loop.call_soon_threadsafe(
-                            queue.put_nowait,
-                            StreamUpdate(
-                                text="".join(buffer),
-                                output_tokens=output_tokens,
-                                metadata=metadata(),
-                            ),
-                        )
-                        buffer.clear()
-                        buffered = 0
-                        flushed_once = True
-                    elif buffered >= batch_chars:
-                        loop.call_soon_threadsafe(
-                            queue.put_nowait,
-                            StreamUpdate(
-                                text="".join(buffer),
-                                output_tokens=output_tokens,
-                                metadata=metadata(),
-                            ),
-                        )
-                        buffer.clear()
-                        buffered = 0
+                with self._pool.inference_lease():
+                    for part in self._iter_tokens(payload, resolved_path, route, should_stop):
+                        if should_stop():
+                            break
+                        if first_token_at is None:
+                            first_token_at = time.perf_counter()
+                            ttft_ms = (first_token_at - producer_started) * 1000.0
+                            self._last_inference_stats["ttft_ms"] = round(ttft_ms, 3)
+                            setup_ms = float(
+                                self._last_inference_stats.get("load_ms") or 0.0
+                            ) + float(self._last_inference_stats.get("tokenize_ms") or 0.0)
+                            self._last_inference_stats["ready_to_first_token_ms"] = round(
+                                max(0.0, ttft_ms - setup_ms), 3
+                            )
+                        output_tokens += part.new_tokens
+                        buffer.append(part.text)
+                        buffered += len(part.text)
+                        if not flushed_once:
+                            bridge.publish(
+                                StreamUpdate(
+                                    text="".join(buffer),
+                                    output_tokens=output_tokens,
+                                    metadata=metadata(),
+                                )
+                            )
+                            buffer.clear()
+                            buffered = 0
+                            flushed_once = True
+                        elif buffered >= batch_chars:
+                            bridge.publish(
+                                StreamUpdate(
+                                    text="".join(buffer),
+                                    output_tokens=output_tokens,
+                                    metadata=metadata(),
+                                )
+                            )
+                            buffer.clear()
+                            buffered = 0
                 if buffer and not should_stop():
-                    loop.call_soon_threadsafe(
-                        queue.put_nowait,
+                    bridge.publish(
                         StreamUpdate(
                             text="".join(buffer),
                             output_tokens=output_tokens,
                             metadata=metadata(),
-                        ),
+                        )
                     )
                 if (
                     route == "llamaswap"
-                    and self._last_inference_stats.get(
-                        "sidecar_resident_confirmed"
-                    )
+                    and self._last_inference_stats.get("sidecar_resident_confirmed")
                     and not should_stop()
                 ):
                     # Ollama reports load/prefill/decode timings in its final
                     # metadata-only frame, after the last text chunk.
-                    loop.call_soon_threadsafe(
-                        queue.put_nowait,
+                    bridge.publish(
                         StreamUpdate(
                             text="",
                             output_tokens=output_tokens,
                             metadata=metadata(),
-                        ),
+                        )
                     )
             except Exception as exc:
                 if buffer and not should_stop():
-                    loop.call_soon_threadsafe(
-                        queue.put_nowait,
+                    bridge.publish(
                         StreamUpdate(
                             text="".join(buffer),
                             output_tokens=output_tokens,
                             metadata=metadata(),
-                        ),
+                        )
                     )
                 if not should_stop():
-                    loop.call_soon_threadsafe(queue.put_nowait, _StreamError(exc))
+                    bridge.publish(StreamBridgeError(exc))
             finally:
-                self._pool.end_inference()
-                loop.call_soon_threadsafe(queue.put_nowait, _STREAM_DONE)
+                bridge.producer_finished()
 
         threading.Thread(target=producer, daemon=True).start()
 
-        while True:
-            if should_stop():
-                break
-            item = await queue.get()
-            if item is _STREAM_DONE:
-                break
-            if isinstance(item, _StreamError):
-                raise item.exc
-            yield cast(StreamUpdate, item)
+        try:
+            while True:
+                if should_stop():
+                    break
+                item = await bridge.next()
+                if isinstance(item, StreamBridgeDone):
+                    break
+                if isinstance(item, StreamBridgeError):
+                    raise item.exc
+                yield item
+        finally:
+            bridge.cancel()
+            await bridge.wait_for_producer(
+                max(0.0, env_int("SEISO_STREAM_STOP_WAIT_MS", 1000) / 1000.0)
+            )
 
     async def cancel_and_unload(self) -> dict:
         loop = asyncio.get_running_loop()
@@ -922,8 +944,7 @@ class LocalInferenceRunner:
         route: str,
         generation_id: int,
     ) -> str:
-        self._pool.begin_inference()
-        try:
+        with self._pool.inference_lease():
             if route == "speculative":
                 chunks: list[str] = []
 
@@ -942,8 +963,6 @@ class LocalInferenceRunner:
             if route == "llamaswap":
                 return self._llamaswap_complete(payload, model_path, generation_id)
             return self._llama_complete(payload, model_path, generation_id)
-        finally:
-            self._pool.end_inference()
 
     def _torch_speculative_stream(
         self,
@@ -1166,14 +1185,11 @@ class LocalInferenceRunner:
             logger.debug("Ignoring unrecognized torch device map entry: %r", raw_device)
             return None
 
-    def _torch_complete(
+    def _prepare_torch_generation(
         self,
         payload: dict[str, Any],
         model_path: str,
-        generation_id: int,
-    ) -> str:
-        import torch
-
+    ) -> _TorchGenerationContext:
         configure_torch_inference()
         status_before = self._pool.status()
         resident_before = (
@@ -1207,9 +1223,7 @@ class LocalInferenceRunner:
             "resident_before": resident_before,
             "load_ms": round((loaded_at - load_started) * 1000.0, 3),
             "tokenize_ms": round((time.perf_counter() - loaded_at) * 1000.0, 3),
-            "load_precision": str(
-                getattr(model, "_seiso_load_precision", "unknown")
-            ),
+            "load_precision": str(getattr(model, "_seiso_load_precision", "unknown")),
             "attention_implementation": str(
                 getattr(model, "_seiso_attention_implementation", "unknown")
             ),
@@ -1219,27 +1233,46 @@ class LocalInferenceRunner:
             if policy.compile_decode
             else False
         )
-        payload = {
+        resolved_payload = {
             **payload,
             "max_tokens": max_tokens,
             "cache_implementation": policy.cache_implementation,
             "kv_policy": policy.as_dict(),
         }
+        return _TorchGenerationContext(
+            model=model,
+            tokenizer=tokenizer,
+            inputs=inputs,
+            input_len=input_len,
+            max_tokens=max_tokens,
+            policy=policy,
+            payload=resolved_payload,
+        )
+
+    def _torch_complete(
+        self,
+        payload: dict[str, Any],
+        model_path: str,
+        generation_id: int,
+    ) -> str:
+        import torch
+
+        context = self._prepare_torch_generation(payload, model_path)
         gen_kwargs = torch_generate_kwargs(
-            payload,
-            inputs,
+            context.payload,
+            context.inputs,
             streamer=None,
-            pad_token_id=tokenizer.pad_token_id,
+            pad_token_id=context.tokenizer.pad_token_id,
         )
         gen_kwargs.pop("streamer", None)
 
         with torch.inference_mode():
-            generated = _torch_generate_with_oom_retry(model, gen_kwargs)
+            generated = _torch_generate_with_oom_retry(context.model, gen_kwargs)
 
         if not self._pool.is_generation_active(generation_id):
             return ""
-        output_ids = generated[0][input_len:]
-        return str(tokenizer.decode(output_ids, skip_special_tokens=True))
+        output_ids = generated[0][context.input_len :]
+        return str(context.tokenizer.decode(output_ids, skip_special_tokens=True))
 
     def _torch_stream(
         self,
@@ -1252,58 +1285,12 @@ class LocalInferenceRunner:
             use_manual_torch_kv_stream,
         )
 
-        configure_torch_inference()
-        status_before = self._pool.status()
-        resident_before = (
-            status_before.get("path") is not None
-            and self._pool.normalize_path(str(status_before["path"]))
-            == self._pool.normalize_path(model_path)
-            and str(status_before.get("backend") or "").lower() == "torch"
-        )
-        load_started = time.perf_counter()
-        model, tokenizer = self._pool.get_torch(model_path)
-        loaded_at = time.perf_counter()
-        messages = payload.get("messages", [])
-        inputs, _input_len, max_tokens = self._torch_prepare_inputs(
-            model,
-            messages,
-            tokenizer,
-            max_tokens=int(payload.get("max_tokens", 512)),
-        )
-        policy = resolve_kv_cache_policy(
-            payload,
-            model=model,
-            input_tokens=int(inputs["input_ids"].shape[-1]),
-            max_tokens=max_tokens,
-            free_mb=headroom_mb(),
-        )
-        self._last_inference_stats = {
-            "backend": "torch",
-            "cache_mode": policy.cache_implementation,
-            "cache_fallback": policy.fallback_reason,
-            "estimated_cache_mb": policy.estimated_cache_mb,
-            "peak_headroom_mb": policy.headroom_mb,
-            "resident_before": resident_before,
-            "load_ms": round((loaded_at - load_started) * 1000.0, 3),
-            "tokenize_ms": round((time.perf_counter() - loaded_at) * 1000.0, 3),
-            "load_precision": str(
-                getattr(model, "_seiso_load_precision", "unknown")
-            ),
-            "attention_implementation": str(
-                getattr(model, "_seiso_attention_implementation", "unknown")
-            ),
-        }
-        self._last_inference_stats["decode_compiled"] = (
-            maybe_compile_torch_decode(model, inputs["input_ids"])
-            if policy.compile_decode
-            else False
-        )
-        payload = {
-            **payload,
-            "max_tokens": max_tokens,
-            "cache_implementation": policy.cache_implementation,
-            "kv_policy": policy.as_dict(),
-        }
+        context = self._prepare_torch_generation(payload, model_path)
+        model = context.model
+        tokenizer = context.tokenizer
+        inputs = context.inputs
+        payload = context.payload
+        policy = context.policy
 
         if use_manual_torch_kv_stream(payload) and policy.manual_stream_compatible:
             emitted = False
@@ -1683,11 +1670,8 @@ class LocalInferenceRunner:
         model_path: str,
         generation_id: int,
     ) -> str:
-        self._pool.acquire_llama_inference()
-        try:
+        with self._pool.llama_inference_lease():
             return self._llama_complete_locked(payload, model_path, generation_id)
-        finally:
-            self._pool.release_llama_inference()
 
     def _llama_complete_locked(
         self,
@@ -1792,10 +1776,7 @@ class LocalInferenceRunner:
         client = self._pool.get_llamaswap(model_path, num_ctx=payload.get("sidecar_num_ctx"))
         engine = getattr(client, "engine", "llamaswap")
         cache_policy = resolve_sidecar_kv_policy(payload, engine=engine)
-        prefix_requested = (
-            cache_policy.num_keep is not None
-            or cache_policy.cache_prompt is True
-        )
+        prefix_requested = cache_policy.num_keep is not None or cache_policy.cache_prompt is True
         self._last_inference_stats = {
             "backend": engine,
             "cache_mode": "provider-native",
@@ -1822,10 +1803,7 @@ class LocalInferenceRunner:
         client = self._pool.get_llamaswap(model_path, num_ctx=payload.get("sidecar_num_ctx"))
         engine = getattr(client, "engine", "llamaswap")
         cache_policy = resolve_sidecar_kv_policy(payload, engine=engine)
-        prefix_requested = (
-            cache_policy.num_keep is not None
-            or cache_policy.cache_prompt is True
-        )
+        prefix_requested = cache_policy.num_keep is not None or cache_policy.cache_prompt is True
         self._last_inference_stats = {
             "backend": engine,
             "cache_mode": "provider-native",
@@ -1851,11 +1829,8 @@ class LocalInferenceRunner:
         model_path: str,
         should_stop: Callable[[], bool],
     ) -> Iterator[StreamToken]:
-        self._pool.acquire_llama_inference()
-        try:
+        with self._pool.llama_inference_lease():
             yield from self._llama_stream_locked(payload, model_path, should_stop)
-        finally:
-            self._pool.release_llama_inference()
 
     def _llama_stream_locked(
         self,
@@ -1960,6 +1935,29 @@ def get_inference_runner() -> LocalInferenceRunner:
             if _runner is None:
                 _runner = LocalInferenceRunner()
     return _runner
+
+
+def reset_inference_runtime(*, wait: bool = True) -> None:
+    """Close process-wide inference state for shutdown and test isolation."""
+    global _runner, _inference_executor  # pylint: disable=global-statement
+    with _runner_lock:
+        runner = _runner
+        _runner = None
+    if runner is not None:
+        runner.pool.cancel_and_unload()
+
+    with _inference_executor_lock:
+        executor = _inference_executor
+        _inference_executor = None
+    if executor is not None:
+        executor.shutdown(wait=wait, cancel_futures=True)
+
+    from seiso.inference.model_pool import clear_dflash_draft_cache
+    from seiso.inference.torch_stream import clear_torch_prefix_cache
+
+    clear_torch_prefix_cache()
+    clear_dflash_draft_cache()
+    ModelPool.reset_instance(timeout_s=30.0 if wait else 0.0)
 
 
 async def run_chat(payload: dict[str, Any]) -> str:

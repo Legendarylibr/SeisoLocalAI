@@ -72,9 +72,11 @@ def clear_dependency_caches() -> None:
         getter.cache_clear()
 
 
-async def close_dependency_caches() -> None:
+async def close_dependency_caches() -> bool:
     """Close async resources before resetting cached singletons."""
-    if get_db.cache_info().currsize:
+    had_database = bool(get_db.cache_info().currsize)
+    if had_database:
         db = get_db()
         await db.close()
     clear_dependency_caches()
+    return had_database
