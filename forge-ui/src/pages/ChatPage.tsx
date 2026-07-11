@@ -1,10 +1,9 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { api, ChatMessage, ChatThread, CatalogModel, InferenceModelOption, ModelVariantsResponse, streamChat, VramStatus } from "@/lib/api";
+import { api, ChatMessage, ChatThread, CatalogModel, InferenceModelOption, streamChat, VramStatus } from "@/lib/api";
 import { usePlatformSettings } from "@/context/PlatformSettingsContext";
 import { bootstrapChatSession, CHAT_BACKEND_STORAGE_KEY, CHAT_MODEL_STORAGE_KEY, hasChatNavTarget, initializeChatSession, isChatModelReady, modelMemoryBlocked, modelMemoryBlockReason, needsHubDownload, preloadWithProgress, resolveInferenceBackend } from "@/lib/chatModel";
 import { hasLoadedInferenceMemory } from "@/lib/hubHardware";
-import { streamHubModelDownload } from "@/lib/hubDownload";
 import { invalidateApiCache } from "@/lib/api/getCache";
 import { useHardwareProfile } from "@/hooks/useHardware";
 import { writeStoredModel } from "@/lib/modelSelection";
@@ -15,28 +14,12 @@ import {
   parseStreamStats,
   resolveOutputTokenCount,
 } from "@/lib/streamSpeed";
-import {
-  ContextWindowSetting,
-  contextWindowOptionsFromStatus,
-  hasStoredContextWindowForModel,
-  normalizeContextWindow,
-  readStoredContextWindowForModel,
-  writeStoredContextWindowForModel,
-} from "@/lib/chatContext";
-import {
-  ChatInferenceSettings,
-  readChatInferenceSettings,
-  readStoredMaxTokensForModel,
-  writeChatInferenceSettings,
-  writeStoredMaxTokensForModel,
-} from "@/lib/chatInferenceSettings";
 import type { ChatContextStatus } from "@/lib/api/types";
 import { ROUTER_MODEL_ID } from "@/lib/api/types";
 import { ModelProgressState, initialDownloadProgress, initialLoadProgress } from "@/lib/modelProgress";
 import { ChatBubble } from "@/components/ChatBubble";
 import { ChatModelPicker } from "@/components/ChatModelPicker";
 import { ChatContextBar } from "@/components/ChatContextBar";
-import { ChatInferencePanel } from "@/components/ChatInferencePanel";
 import { HardwareFitBadge } from "@/components/HardwareFitBadge";
 import { ModelLoadProgress } from "@/components/ModelLoadProgress";
 import {
@@ -133,13 +116,8 @@ export function ChatPage() {
   const [allowCodeExec, setAllowCodeExec] = useState(false);
   const [knowledgeBases, setKnowledgeBases] = useState<Array<{ id: string; chunk_count: number; has_index: boolean }>>([]);
   const [knowledgeBaseId, setKnowledgeBaseId] = useState("");
-  const [inferenceSettings, setInferenceSettings] = useState<ChatInferenceSettings>(() => readChatInferenceSettings());
-  const [contextWindow, setContextWindow] = useState<ContextWindowSetting>("auto");
   const [contextStatus, setContextStatus] = useState<ChatContextStatus | null>(null);
   const [contextLoading, setContextLoading] = useState(false);
-  const [modelVariants, setModelVariants] = useState<ModelVariantsResponse | null>(null);
-  const [variantsLoading, setVariantsLoading] = useState(false);
-  const [downloadingQuant, setDownloadingQuant] = useState<string | null>(null);
   const [providerId, setProviderId] = useState("");
   const [selection, setSelection] = useState("");
   const [inferenceBackend, setInferenceBackend] = useState("auto");
@@ -186,23 +164,15 @@ export function ChatPage() {
     () => resolveInferenceBackend(selected, hwProfile, inferenceBackend),
     [selected, hwProfile, inferenceBackend],
   );
-  const chatBackend = useMemo(() => {
-    if (providerId) return "auto";
-    if (
-      inferenceSettings.specEnabled &&
-      inferenceSettings.draftModelId &&
-      modelVariants?.supports_speculative
-    ) {
-      return "torch";
-    }
-    return effectiveBackend;
-  }, [
-    providerId,
-    inferenceSettings.specEnabled,
-    inferenceSettings.draftModelId,
-    modelVariants?.supports_speculative,
-    effectiveBackend,
-  ]);
+  // Backend auto-selects context + completion budget (no UI inference presets).
+  const chatBackend = useMemo(
+    () => (providerId ? "auto" : effectiveBackend),
+    [providerId, effectiveBackend],
+  );
+  const autoMaxTokens = useMemo(() => {
+    const recommended = selected?.recommended_max_tokens ?? 2048;
+    return Math.max(1, Math.min(8192, recommended));
+  }, [selected?.recommended_max_tokens]);
   const isRouterMode = selected?.kind === "router" || selection === ROUTER_MODEL_ID;
   const modelReady = useMemo(
     () => isChatModelReady(selection, chatBackend, loadedModelId, loadedBackend, selected?.kind),
@@ -233,19 +203,6 @@ export function ChatPage() {
   );
 
   const modelBlockReason = memoryBlockHint(selected);
-
-  const contextWindowOptions = useMemo(
-    () => contextWindowOptionsFromStatus(contextStatus, selected),
-    [contextStatus, selected],
-  );
-  const maxTokenOptions = useMemo(() => {
-    const recommended = selected?.recommended_max_tokens ?? 2048;
-    const ceiling = Math.max(1, Math.min(8192, recommended));
-    const base = [256, 512, 768, 1024, 2048, 4096, 8192].filter((n) => n <= ceiling);
-    if (!base.includes(ceiling)) base.push(ceiling);
-    return Array.from(new Set(base)).sort((a, b) => a - b);
-  }, [selected?.recommended_max_tokens]);
-  const safeMaxTokens = maxTokenOptions[maxTokenOptions.length - 1] ?? 2048;
 
   const refreshVramStatus = useCallback(async () => {
     try {
@@ -287,57 +244,6 @@ export function ChatPage() {
     return r.models;
   }, [selection, hwProfile]);
 
-  const applyMaxTokens = useCallback((maxTokens: number) => {
-    setInferenceSettings((prev) => {
-      if (prev.maxTokens === maxTokens) return prev;
-      const next = { ...prev, maxTokens };
-      writeChatInferenceSettings(next);
-      return next;
-    });
-  }, []);
-
-  const patchInferenceSettings = useCallback((partial: Partial<ChatInferenceSettings>) => {
-    setInferenceSettings((prev) => {
-      const next = { ...prev, ...partial };
-      writeChatInferenceSettings(next);
-      if (typeof partial.maxTokens === "number") {
-        writeStoredMaxTokensForModel(selection, partial.maxTokens);
-      }
-      return next;
-    });
-  }, [selection]);
-
-  useEffect(() => {
-    if (inferenceSettings.maxTokens > safeMaxTokens) {
-      applyMaxTokens(safeMaxTokens);
-    }
-  }, [inferenceSettings.maxTokens, safeMaxTokens, applyMaxTokens]);
-
-  useEffect(() => {
-    if (!selection || providerId) {
-      setModelVariants(null);
-      return;
-    }
-
-    let cancelled = false;
-    setVariantsLoading(true);
-    void api
-      .getModelVariants(selection)
-      .then((variants) => {
-        if (!cancelled) setModelVariants(variants);
-      })
-      .catch(() => {
-        if (!cancelled) setModelVariants(null);
-      })
-      .finally(() => {
-        if (!cancelled) setVariantsLoading(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [selection, providerId, models]);
-
   const releaseInferenceMemory = useCallback(async () => {
     const status = await api.freeMemory();
     setVramStatus(status);
@@ -348,31 +254,13 @@ export function ChatPage() {
   }, [refreshHwProfile, refreshModels]);
 
   const preloadInferenceOptions = useCallback(
-    (modelId: string, list: InferenceModelOption[], ctxOverride?: ContextWindowSetting) => {
+    (modelId: string, list: InferenceModelOption[]) => {
       const model = list.find((m) => m.id === modelId) ?? null;
-      const options = contextWindowOptionsFromStatus(null, model);
-      const contextDefault = hasStoredContextWindowForModel(modelId)
-        ? readStoredContextWindowForModel(modelId, options[options.length - 1] ?? 131072)
-        : model?.recommended_context_window ?? "auto";
-      const ctx = normalizeContextWindow(
-        ctxOverride ?? contextDefault,
-        options,
-      );
-      const safeMax = Math.max(1, Math.min(8192, model?.recommended_max_tokens ?? 2048));
-      const maxTokens =
-        Math.min(
-          readStoredMaxTokensForModel(modelId) ??
-            model?.recommended_max_tokens ??
-            inferenceSettings.maxTokens,
-          safeMax,
-        );
-      return {
-        maxTokens,
-        nCtx: ctx === "auto" ? null : ctx,
-        contextWindow: ctx,
-      };
+      const maxTokens = Math.max(1, Math.min(8192, model?.recommended_max_tokens ?? 2048));
+      // Always auto-context: backend sizes + pins KV after preload (no UI presets).
+      return { maxTokens, nCtx: null as number | null };
     },
-    [inferenceSettings.maxTokens],
+    [],
   );
 
   const activateModel = useCallback(
@@ -385,9 +273,6 @@ export function ChatPage() {
         throw new Error(modelMemoryBlockReason(next));
       }
       const preloadOpts = preloadInferenceOptions(modelId, list);
-      applyMaxTokens(preloadOpts.maxTokens);
-      setContextWindow(preloadOpts.contextWindow);
-      writeStoredContextWindowForModel(modelId, preloadOpts.contextWindow);
       setSelection(modelId);
       writeStoredModel(CHAT_MODEL_STORAGE_KEY, modelId);
       const backend =
@@ -407,17 +292,12 @@ export function ChatPage() {
         maxTokens: preloadOpts.maxTokens,
         nCtx: preloadOpts.nCtx,
       });
-      // Lock the UI to the pinned ctx so chat turns keep sending the same n_ctx.
-      if (loaded.nCtx != null) {
-        setContextWindow(loaded.nCtx);
-        writeStoredContextWindowForModel(modelId, loaded.nCtx);
-      }
       setLoadedModelId(modelId);
       setLoadedBackend(loaded.backend);
       writeStoredModel(CHAT_BACKEND_STORAGE_KEY, loaded.backend);
       return loaded.backend;
     },
-    [providerId, hwProfile, inferenceBackend, preloadInferenceOptions, applyMaxTokens],
+    [providerId, hwProfile, inferenceBackend, preloadInferenceOptions],
   );
 
   const handleModelChange = async (modelId: string) => {
@@ -455,26 +335,6 @@ export function ChatPage() {
       setError(e instanceof Error ? e.message : "Failed to load model into inference engine");
     } finally {
       setSwitchingModel(false);
-      setLoadProgress(null);
-    }
-  };
-
-  const handleDownloadHubVariant = async (repo: string, filename: string, quant: string) => {
-    if (providerId || switchingModel || downloadingQuant) return;
-    setDownloadingQuant(quant);
-    setError(null);
-    try {
-      const modelId = await streamHubModelDownload(repo, "gguf", setLoadProgress, { filename });
-      invalidateApiCache(`/inference/models/${modelId}/variants`);
-      await refreshModels();
-      await handleModelChange(modelId);
-      void api.getModelVariants(modelId).then(setModelVariants).catch(() => setModelVariants(null));
-    } catch (e) {
-      if (!(e instanceof DOMException && e.name === "AbortError")) {
-        setError(e instanceof Error ? e.message : "Quant download failed");
-      }
-    } finally {
-      setDownloadingQuant(null);
       setLoadProgress(null);
     }
   };
@@ -555,10 +415,6 @@ export function ChatPage() {
             undefined,
             { maxTokens: preloadOpts.maxTokens, nCtx: preloadOpts.nCtx },
           );
-          if (loaded.nCtx != null) {
-            setContextWindow(loaded.nCtx);
-            writeStoredContextWindowForModel(selection, loaded.nCtx);
-          }
           setLoadedModelId(selection);
           setLoadedBackend(loaded.backend);
         } catch {
@@ -607,11 +463,6 @@ export function ChatPage() {
     }) => {
       setModels(result.models);
       if (!result.selectedId) return;
-      // Prefer per-model stored ctx (bootstrap preload may have just pinned it).
-      const preloadOpts = preloadInferenceOptions(result.selectedId, result.models);
-      applyMaxTokens(preloadOpts.maxTokens);
-      setContextWindow(preloadOpts.contextWindow);
-      writeStoredContextWindowForModel(result.selectedId, preloadOpts.contextWindow);
       setSelection(result.selectedId);
       setInferenceBackend(result.backend);
       if (!providerId) {
@@ -639,7 +490,7 @@ export function ChatPage() {
           initialModels,
           hwProfile,
           signal: controller.signal,
-          maxTokens: inferenceSettings.maxTokens,
+          maxTokens: autoMaxTokens,
         };
 
         if (pendingRepo) {
@@ -745,8 +596,8 @@ export function ChatPage() {
         try {
           const status = await api.getContextStatus({
             thread_id: active,
-            max_tokens: inferenceSettings.maxTokens,
-            n_ctx: contextWindow === "auto" ? null : contextWindow,
+            max_tokens: autoMaxTokens,
+            n_ctx: null,
             tools: useTools && toolsAvailable,
             knowledge_base_id: knowledgeBaseId || null,
             model_id: providerId ? null : selection || null,
@@ -771,22 +622,13 @@ export function ChatPage() {
     messageCount,
     input,
     streaming,
-    inferenceSettings.maxTokens,
-    contextWindow,
+    autoMaxTokens,
     knowledgeBaseId,
     selection,
     providerId,
     useTools,
     toolsAvailable,
   ]);
-
-  useEffect(() => {
-    const normalized = normalizeContextWindow(contextWindow, contextWindowOptions);
-    if (normalized !== contextWindow) {
-      setContextWindow(normalized);
-      writeStoredContextWindowForModel(selection, normalized);
-    }
-  }, [contextWindow, contextWindowOptions, selection]);
 
   const openThread = (t: ChatThread) => {
     setActive(t.id);
@@ -983,20 +825,9 @@ export function ChatPage() {
           provider_id: providerId || null,
           model_id: providerId ? null : selection || null,
           inference_backend: providerId ? "auto" : chatBackend,
-          max_tokens: inferenceSettings.maxTokens,
-          temperature: inferenceSettings.temperature,
-          ...(inferenceSettings.topPEnabled && inferenceSettings.temperature > 0
-            ? { top_p: inferenceSettings.topP }
-            : {}),
-          ...(contextWindow !== "auto" ? { n_ctx: contextWindow } : {}),
-          ...(inferenceSettings.specEnabled &&
-          inferenceSettings.draftModelId &&
-          modelVariants?.supports_speculative
-            ? {
-                draft_model_id: inferenceSettings.draftModelId,
-                num_speculative_tokens: inferenceSettings.numSpeculativeTokens,
-              }
-            : {}),
+          // max_tokens / n_ctx: backend auto-clamps and auto-continues length stops.
+          max_tokens: autoMaxTokens,
+          temperature: 0.7,
           knowledge_base_id: knowledgeBaseId || null,
         },
         {
@@ -1092,45 +923,6 @@ export function ChatPage() {
   };
 
   const displayedTps = streaming ? streamTps : lastTps;
-
-  const handleContextWindowChange = (value: ContextWindowSetting) => {
-    setContextWindow(value);
-    writeStoredContextWindowForModel(selection, value);
-    if (!providerId && selection && loadedModelId === selection && !streaming) {
-      const model = models.find((m) => m.id === selection);
-      const backend =
-        inferenceBackend ||
-        resolveInferenceBackend(model ?? null, hwProfile, inferenceBackend);
-      if (!backend || model?.kind === "router") return;
-      void (async () => {
-        try {
-          setSwitchingModel(true);
-          setLoadProgress(initialLoadProgress(model?.name || "model", model?.size_bytes ?? 0));
-          const loaded = await preloadWithProgress(selection, backend, setLoadProgress, undefined, {
-            maxTokens: inferenceSettings.maxTokens,
-            nCtx: value === "auto" ? null : value,
-          });
-          // After preload, pin UI to the engine's chosen ctx (even from Auto).
-          const pinned = loaded.nCtx ?? (value === "auto" ? null : value);
-          if (pinned != null) {
-            setContextWindow(pinned);
-            writeStoredContextWindowForModel(selection, pinned);
-          }
-          setLoadedModelId(selection);
-          setLoadedBackend(loaded.backend);
-        } catch (e) {
-          setError(e instanceof Error ? e.message : "Failed to apply context window");
-        } finally {
-          setSwitchingModel(false);
-          setLoadProgress(null);
-        }
-      })();
-    }
-  };
-
-  const handleInferencePanelOpenChange = (open: boolean) => {
-    patchInferenceSettings({ panelOpen: open });
-  };
 
   return (
     <div className={`chat-app${sidebarOpen ? " chat-sidebar-open" : ""}`}>
@@ -1276,10 +1068,6 @@ export function ChatPage() {
                       undefined,
                       { maxTokens: preloadOpts.maxTokens, nCtx: preloadOpts.nCtx },
                     );
-                    if (loaded.nCtx != null) {
-                      setContextWindow(loaded.nCtx);
-                      writeStoredContextWindowForModel(selection, loaded.nCtx);
-                    }
                     setLoadedModelId(selection);
                     setLoadedBackend(loaded.backend);
                     writeStoredModel(CHAT_BACKEND_STORAGE_KEY, loaded.backend);
@@ -1365,27 +1153,6 @@ export function ChatPage() {
         <ChatContextBar
           status={contextStatus}
           loading={contextLoading}
-        />
-
-        <ChatInferencePanel
-          open={inferenceSettings.panelOpen}
-          onOpenChange={handleInferencePanelOpenChange}
-          settings={inferenceSettings}
-          onSettingsChange={patchInferenceSettings}
-          maxTokenOptions={maxTokenOptions}
-          contextWindow={contextWindow}
-          onContextWindowChange={handleContextWindowChange}
-          contextWindowOptions={contextWindowOptions}
-          safetyNote={selected?.chat_safety_note}
-          variants={modelVariants}
-          variantsLoading={variantsLoading}
-          downloadingQuant={downloadingQuant}
-          disabled={streaming}
-          providerActive={!!providerId}
-          onSelectLocalVariant={(modelId) => void handleModelChange(modelId)}
-          onDownloadHubVariant={(repo, filename, quant) =>
-            void handleDownloadHubVariant(repo, filename, quant)
-          }
         />
 
         {showModelStatus && (

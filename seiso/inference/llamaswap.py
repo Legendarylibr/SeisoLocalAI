@@ -938,6 +938,14 @@ class OllamaClient:
                                 tool_text,
                                 new_tokens=estimate_chunk_tokens(tool_text),
                             )
+                        # Ollama done_reason: stop | length | load | …
+                        # Surface length so auto-continue can finish truncated replies.
+                        done_reason = str(chunk.get("done_reason") or "").strip().lower()
+                        if done_reason and not should_stop():
+                            reason = "length" if done_reason in {"length", "max_tokens"} else (
+                                "stop" if done_reason == "stop" else done_reason
+                            )
+                            yield StreamToken("", new_tokens=0, finish_reason=reason)
                         break
         except (OSError, TimeoutError, urllib.error.URLError) as exc:
             raise RuntimeError(
@@ -1119,13 +1127,18 @@ class LlamaSwapClient:
                             tool_text,
                             new_tokens=estimate_chunk_tokens(tool_text),
                         )
-                    if choices[0].get("finish_reason") == "tool_calls":
+                    finish_reason = choices[0].get("finish_reason")
+                    if finish_reason == "tool_calls":
                         tool_text = tool_buffer.flush()
                         if tool_text:
                             yield StreamToken(
                                 tool_text,
                                 new_tokens=estimate_chunk_tokens(tool_text),
                             )
+                    elif finish_reason and not should_stop():
+                        # Propagate length/stop so chat auto-continue can complete replies.
+                        reason = str(finish_reason).strip().lower()
+                        yield StreamToken("", new_tokens=0, finish_reason=reason)
         except (OSError, TimeoutError, urllib.error.URLError) as exc:
             raise RuntimeError(
                 f"llama-swap stream failed or timed out at {self.url}. "

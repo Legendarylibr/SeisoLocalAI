@@ -13,13 +13,22 @@ CONTINUE_USER_PROMPT = (
 )
 
 # Cap auto-continues: each pass reuses the loaded model/n_ctx (no KV resize).
-_DEFAULT_MAX_CONTINUES = 2
-_HARD_MAX_CONTINUES = 4
+# Default high enough that long replies finish without user "Continue" clicks;
+# per-pass max_tokens stays OOM-safe (native Linux often ~512–768).
+_DEFAULT_MAX_CONTINUES = 8
+_HARD_MAX_CONTINUES = 12
+# Stop continuing once the full reply has grown this large (absolute ceiling).
+_DEFAULT_TOTAL_REPLY_TOKENS = 8192
 
 
 def max_auto_continues() -> int:
     """Max extra generation passes after a length stop (0 disables)."""
     return max(0, min(_HARD_MAX_CONTINUES, env_int("SEISO_CHAT_AUTO_CONTINUE_MAX", _DEFAULT_MAX_CONTINUES)))
+
+
+def total_reply_token_budget() -> int:
+    """Max cumulative output tokens across all auto-continue passes."""
+    return max(256, min(8192, env_int("SEISO_CHAT_AUTO_CONTINUE_TOTAL_TOKENS", _DEFAULT_TOTAL_REPLY_TOKENS)))
 
 
 def hit_length_limit(
@@ -46,6 +55,8 @@ def should_auto_continue(
     max_continues: int | None = None,
     finish_reason: str | None = None,
     cancelled: bool = False,
+    total_output_tokens: int = 0,
+    total_budget: int | None = None,
 ) -> bool:
     """Whether another short generation pass is warranted and safe to attempt."""
     if cancelled:
@@ -53,6 +64,11 @@ def should_auto_continue(
     if max_continues is None:
         max_continues = max_auto_continues()
     if continues_used >= max(0, int(max_continues)):
+        return False
+    if total_budget is None:
+        total_budget = total_reply_token_budget()
+    # Leave room for at least a short next pass before spending another continue.
+    if int(total_output_tokens) >= max(1, int(total_budget) - 8):
         return False
     if not str(pass_text or "").strip():
         return False

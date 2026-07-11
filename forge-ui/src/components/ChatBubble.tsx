@@ -23,7 +23,7 @@ export const ChatBubble = memo(function ChatBubble({
         <div className="chat-bubble-content">{message.content}</div>
         {truncated && message.role === "assistant" && (
           <p className="chat-reply-truncated muted-text">
-            Stopped at max reply length. Raise Max reply in Inference settings, or send “Continue”.
+            Reply reached the automatic length limit for this model.
           </p>
         )}
       </div>

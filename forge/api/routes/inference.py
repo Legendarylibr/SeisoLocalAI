@@ -608,6 +608,7 @@ async def chat(
                     max_auto_continues,
                     resolve_finish_reason,
                     should_auto_continue,
+                    total_reply_token_budget,
                 )
                 from seiso.memory.protection import sanitize_inference_payload
 
@@ -633,12 +634,22 @@ async def chat(
                     pass_payload, isolated=isolated
                 )
                 pass_max_tokens = max(1, int(effective.get("max_tokens") or 2048))
+                # Sidecar applies its own native completion cap; mirror it here so
+                # length detection / auto-continue match what Ollama actually generates.
+                if isolated:
+                    try:
+                        from seiso.inference.llamaswap import sidecar_max_tokens
+
+                        pass_max_tokens = max(1, int(sidecar_max_tokens(pass_max_tokens)))
+                    except Exception:
+                        pass
                 pass_payload["max_tokens"] = pass_max_tokens
                 continues_used = 0
                 total_output_tokens = 0
                 last_pass_tokens = 0
                 finish_reason = "stop"
                 max_continues = max_auto_continues()
+                total_budget = total_reply_token_budget()
                 try:
                     orchestrator.emit_log(
                         job_id, f"Streaming inference ({backend_label})"
@@ -700,6 +711,8 @@ async def chat(
                             max_continues=max_continues,
                             finish_reason=pass_finish,
                             cancelled=cancelled,
+                            total_output_tokens=total_output_tokens,
+                            total_budget=total_budget,
                         ):
                             break
 
