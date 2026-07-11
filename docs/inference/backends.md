@@ -53,6 +53,23 @@ NVIDIA. To accept that risk explicitly, set:
 export SEISO_LLAMA_ALLOW_INPROCESS_NATIVE_LINUX=1
 ```
 
+### Native Linux throughput (Ollama planner)
+
+On consumer NVIDIA (GeForce / RTX), the sidecar planner aims for **full GPU
+offload** when residual VRAM after weights + KV is still ≥ ~4 GB (display /
+activation slack). Prefill `num_batch` scales with free VRAM: 128 when tight,
+256 mid, **512 when ≥16 GB free** (consumer and workstation). Hard VRAM
+reserves and the context clamp remain in place to avoid driver hangs.
+
+| Knob | Safe default behavior | Opt-in higher util |
+|------|----------------------|--------------------|
+| Layer offload | Full when residual ≥4 GB; footprint throttle only when residual is tight | `SEISO_OLLAMA_NUM_GPU=-1` or `SEISO_OLLAMA_GPU_LAYER_RATIO=1` |
+| Prefill batch | 128 / 256 / 512 by free VRAM | `SEISO_OLLAMA_NUM_BATCH=512` or `SEISO_SIDECAR_PERF_MODE=1` |
+| Free-VRAM ratio | ~0.62 of free (plus hard reserve) | `SEISO_SIDECAR_PERF_MODE=1` (~0.70) or `SEISO_SIDECAR_VRAM_BUDGET_RATIO` |
+| Profile | `SEISO_INFERENCE_PROFILE=interactive` | `throughput` (perf mode + longer keep-alive) |
+
+Do **not** disable `SEISO_SIDECAR_VRAM_CLAMP` on a display-attached GPU.
+
 ## MLX setup (macOS)
 
 ```bash

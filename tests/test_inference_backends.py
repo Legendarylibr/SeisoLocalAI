@@ -1254,6 +1254,16 @@ def test_sidecar_ollama_num_batch_defaults_on_native_linux(monkeypatch):
     assert llamaswap.sidecar_ollama_num_batch() == 256
 
 
+def test_sidecar_ollama_num_batch_roomy_includes_consumer_gpus(monkeypatch):
+    from seiso.inference import llamaswap
+
+    monkeypatch.delenv("SEISO_OLLAMA_NUM_BATCH", raising=False)
+    monkeypatch.setattr(llamaswap, "_sidecar_native_linux_nvidia", lambda: True)
+    monkeypatch.setattr(llamaswap, "_sidecar_consumer_nvidia_gpu", lambda: True)
+    monkeypatch.setattr(llamaswap, "_sidecar_headroom_mb", lambda: 20_000)
+    assert llamaswap.sidecar_ollama_num_batch() == 512
+
+
 def test_sidecar_ollama_num_batch_reduces_when_headroom_low(monkeypatch):
     from seiso.inference import llamaswap
 
@@ -1289,7 +1299,8 @@ def test_sidecar_ollama_num_gpu_none_off_native_linux(monkeypatch):
     assert llamaswap.sidecar_ollama_num_gpu("/tmp/model.gguf", num_ctx=4096) is None
 
 
-def test_sidecar_ollama_num_gpu_throttles_small_consumer_full_fit(monkeypatch):
+def test_sidecar_ollama_num_gpu_full_offload_when_consumer_residual_ample(monkeypatch):
+    """Small models that leave ≥4 GB residual after full offload are not throttled."""
     import seiso.inference.backends as backends_mod
     import seiso.memory.protection as protection_mod
     import seiso.memory.protection.llama_kv as kv_mod
@@ -1314,10 +1325,11 @@ def test_sidecar_ollama_num_gpu_throttles_small_consumer_full_fit(monkeypatch):
         lambda model_path, *, headroom_mb, n_gpu_layers, n_ctx, weight_mb, total_layers: True,
     )
 
-    assert llamaswap.sidecar_ollama_num_gpu("/tmp/model.gguf", num_ctx=4096) == 16
+    # budget ≈ 0.55 * 24000 = 13200; need = 4000; residual ≈ 9200 ≥ 4096.
+    assert llamaswap.sidecar_ollama_num_gpu("/tmp/model.gguf", num_ctx=4096) is None
 
 
-def test_sidecar_ollama_num_gpu_allows_more_layers_for_medium_footprint(monkeypatch):
+def test_sidecar_ollama_num_gpu_full_offload_medium_when_residual_ample(monkeypatch):
     import seiso.inference.backends as backends_mod
     import seiso.memory.protection as protection_mod
     import seiso.memory.protection.llama_kv as kv_mod
@@ -1342,7 +1354,39 @@ def test_sidecar_ollama_num_gpu_allows_more_layers_for_medium_footprint(monkeypa
         lambda model_path, *, headroom_mb, n_gpu_layers, n_ctx, weight_mb, total_layers: True,
     )
 
-    assert llamaswap.sidecar_ollama_num_gpu("/tmp/model.gguf", num_ctx=4096) == 20
+    # budget ≈ 13200; need = 6000; residual ≈ 7200 ≥ 4096 → full offload.
+    assert llamaswap.sidecar_ollama_num_gpu("/tmp/model.gguf", num_ctx=4096) is None
+
+
+def test_sidecar_ollama_num_gpu_throttles_when_consumer_residual_tight(monkeypatch):
+    """When full offload leaves <4 GB residual, footprint layer caps still apply."""
+    import seiso.inference.backends as backends_mod
+    import seiso.memory.protection as protection_mod
+    import seiso.memory.protection.llama_kv as kv_mod
+    from seiso.inference import llamaswap
+
+    monkeypatch.delenv("SEISO_OLLAMA_NUM_GPU", raising=False)
+    monkeypatch.delenv("SEISO_OLLAMA_GPU_LAYER_RATIO", raising=False)
+    monkeypatch.setattr(llamaswap, "_sidecar_native_linux_nvidia", lambda: True)
+    monkeypatch.setattr(llamaswap, "_sidecar_consumer_nvidia_gpu", lambda: True)
+    # free 10000 → budget = min(5500, 4880) = 4880; need = 1700; residual = 3180 < 4096.
+    monkeypatch.setattr(protection_mod, "headroom_mb", lambda: 10_000)
+    monkeypatch.setattr(protection_mod, "discrete_gpu_total_mb", lambda: 24_576)
+    monkeypatch.setattr(protection_mod, "estimate_path_vram_mb", lambda p: 1200)
+    monkeypatch.setattr(backends_mod, "gguf_total_layers", lambda p: 32)
+    monkeypatch.setattr(
+        kv_mod,
+        "llama_kv_cache_reserve_mb",
+        lambda *args, **kwargs: 500,
+    )
+    monkeypatch.setattr(
+        kv_mod,
+        "llama_offload_fits_headroom",
+        lambda model_path, *, headroom_mb, n_gpu_layers, n_ctx, weight_mb, total_layers: True,
+    )
+
+    # footprint 1700/4880 ≈ 0.35 → small tier → 50% of 32 layers.
+    assert llamaswap.sidecar_ollama_num_gpu("/tmp/model.gguf", num_ctx=4096) == 16
 
 
 def test_sidecar_ollama_gpu_layer_ratio_override_disables_dynamic_cap(monkeypatch):
@@ -1475,7 +1519,8 @@ def test_sidecar_ollama_num_gpu_keeps_consumer_nvidia_budget_at_32gb(
 
     monkeypatch.setattr(kv_mod, "llama_offload_fits_headroom", _fits)
     assert llamaswap.sidecar_ollama_num_gpu("/tmp/model.gguf", num_ctx=4096) is None
-    assert seen[0] == 11_000
+    # consumer ratio 0.62 * 20000 free = 12400 (reserve does not bind at 32 GB).
+    assert seen[0] == 12_400
 
 
 def test_sidecar_ollama_num_gpu_budget_ratio_scales_for_larger_nvidia(
@@ -1507,7 +1552,8 @@ def test_sidecar_ollama_num_gpu_budget_ratio_scales_for_larger_nvidia(
 
     monkeypatch.setattr(kv_mod, "llama_offload_fits_headroom", _fits)
     assert llamaswap.sidecar_ollama_num_gpu("/tmp/model.gguf", num_ctx=4096) is None
-    assert seen[0] == 14_000
+    # 48 GB workstation ratio 0.72 * 20000 free = 14400.
+    assert seen[0] == 14_400
 
 
 def test_sidecar_ollama_num_gpu_budget_ratio_env_override(monkeypatch):
