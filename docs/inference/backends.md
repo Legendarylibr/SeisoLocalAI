@@ -61,11 +61,18 @@ activation slack). Prefill `num_batch` scales with free VRAM: 128 when tight,
 256 mid, **512 when ≥16 GB free** (consumer and workstation). Hard VRAM
 reserves and the context clamp remain in place to avoid driver hangs.
 
+**Near-max weight files** (e.g. 12B BF16 GGUF ≈ 23 GB on a 24 GB card) cannot
+full-offload. For small contexts (≤4k) the planner automatically **packs more
+layers** onto the GPU (higher free-VRAM fraction, lower fixed reserve) and caps
+`num_batch` at 256 so compute scratch does not OOM. Smaller models keep the
+safe default clamps unchanged. Optional overrides:
+`SEISO_SIDECAR_LARGE_WEIGHT_PACK_RATIO`, `SEISO_SIDECAR_LARGE_WEIGHT_PACK_RESERVE_MB`.
+
 | Knob | Safe default behavior | Opt-in higher util |
 |------|----------------------|--------------------|
-| Layer offload | Full when residual ≥4 GB; footprint throttle only when residual is tight | `SEISO_OLLAMA_NUM_GPU=-1` or `SEISO_OLLAMA_GPU_LAYER_RATIO=1` |
-| Prefill batch | 128 / 256 / 512 by free VRAM | `SEISO_OLLAMA_NUM_BATCH=512` or `SEISO_SIDECAR_PERF_MODE=1` |
-| Free-VRAM ratio | ~0.62 of free (plus hard reserve) | `SEISO_SIDECAR_PERF_MODE=1` (~0.70) or `SEISO_SIDECAR_VRAM_BUDGET_RATIO` |
+| Layer offload | Full when residual ≥4 GB; footprint throttle only when residual is tight; auto pack for near-max BF16 at ≤4k ctx | `SEISO_OLLAMA_NUM_GPU=-1` or `SEISO_OLLAMA_GPU_LAYER_RATIO=1` |
+| Prefill batch | 128 / 256 / 512 by free VRAM (256 cap on large-weight pack) | `SEISO_OLLAMA_NUM_BATCH=512` or `SEISO_SIDECAR_PERF_MODE=1` |
+| Free-VRAM ratio | ~0.62 of free (plus hard reserve); ~0.94 when packing near-max weights | `SEISO_SIDECAR_PERF_MODE=1` (~0.70) or `SEISO_SIDECAR_VRAM_BUDGET_RATIO` |
 | Profile | `SEISO_INFERENCE_PROFILE=interactive` | `throughput` (perf mode + longer keep-alive) |
 
 Do **not** disable `SEISO_SIDECAR_VRAM_CLAMP` on a display-attached GPU.

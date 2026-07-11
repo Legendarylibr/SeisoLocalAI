@@ -1299,6 +1299,103 @@ def test_sidecar_ollama_num_gpu_none_off_native_linux(monkeypatch):
     assert llamaswap.sidecar_ollama_num_gpu("/tmp/model.gguf", num_ctx=4096) is None
 
 
+def test_sidecar_large_weight_pack_raises_layers_for_near_max_bf16(monkeypatch):
+    """Gemma-class BF16 (~23 GB on 24 GB) must pack far more than the default ~60% cap."""
+    import seiso.inference.backends as backends_mod
+    import seiso.memory.protection as protection_mod
+    import seiso.memory.protection.llama_kv as kv_mod
+    from seiso.inference import llamaswap
+
+    monkeypatch.delenv("SEISO_OLLAMA_NUM_GPU", raising=False)
+    monkeypatch.delenv("SEISO_OLLAMA_GPU_LAYER_RATIO", raising=False)
+    monkeypatch.delenv("SEISO_SIDECAR_VRAM_BUDGET_RATIO", raising=False)
+    monkeypatch.delenv("SEISO_SIDECAR_VRAM_RESERVE_MB", raising=False)
+    monkeypatch.delenv("SEISO_SIDECAR_PERF_MODE", raising=False)
+    monkeypatch.delenv("SEISO_SIDECAR_LARGE_WEIGHT_PACK_RATIO", raising=False)
+    monkeypatch.delenv("SEISO_SIDECAR_LARGE_WEIGHT_PACK_RESERVE_MB", raising=False)
+    monkeypatch.setattr(llamaswap, "_sidecar_native_linux_nvidia", lambda: True)
+    monkeypatch.setattr(llamaswap, "_sidecar_consumer_nvidia_gpu", lambda: True)
+    # Empty-ish card with display-only usage.
+    monkeypatch.setattr(protection_mod, "headroom_mb", lambda: 24_000)
+    monkeypatch.setattr(protection_mod, "discrete_gpu_total_mb", lambda: 24_576)
+    monkeypatch.setattr(protection_mod, "estimate_path_vram_mb", lambda p: 22_984)
+    monkeypatch.setattr(backends_mod, "gguf_total_layers", lambda p: 48)
+    monkeypatch.setattr(
+        kv_mod,
+        "llama_kv_cache_reserve_mb",
+        lambda *args, **kwargs: 800,
+    )
+
+    # Real fit geometry: weight fraction + KV must fit budget.
+    def _fits(model_path, *, headroom_mb, n_gpu_layers, n_ctx, weight_mb, total_layers):
+        if n_gpu_layers == 0:
+            return True
+        if n_gpu_layers < 0:
+            gpu_w = weight_mb
+        else:
+            gpu_w = int(weight_mb * (n_gpu_layers / max(1, total_layers))) + 256
+        return gpu_w + 800 <= headroom_mb
+
+    monkeypatch.setattr(kv_mod, "llama_offload_fits_headroom", _fits)
+
+    layers = llamaswap.sidecar_ollama_num_gpu("/tmp/gemma-4-12b-it-BF16.gguf", num_ctx=2048)
+    # Default clamps historically returned ~29; packing must clear 40+.
+    assert layers is not None
+    assert layers >= 40
+    assert layers < 48  # full 48 OOMs on 24 GB; planner must leave compute slack
+
+
+def test_sidecar_plan_free_reclaims_when_large_model_already_resident(monkeypatch):
+    import seiso.memory.protection as protection_mod
+    from seiso.inference import llamaswap
+
+    monkeypatch.setattr(protection_mod, "discrete_gpu_total_mb", lambda: 24_576)
+    # Only ~8 GB free because the BF16 model is already on the GPU.
+    reclaimed = llamaswap._sidecar_plan_free_mb(free_mb=8_000, weight_mb=22_984)
+    assert reclaimed >= 22_000
+
+
+def test_sidecar_large_weight_pack_does_not_change_small_model_budget(monkeypatch):
+    import seiso.memory.protection as protection_mod
+    from seiso.inference import llamaswap
+
+    monkeypatch.delenv("SEISO_SIDECAR_VRAM_BUDGET_RATIO", raising=False)
+    monkeypatch.delenv("SEISO_SIDECAR_VRAM_RESERVE_MB", raising=False)
+    monkeypatch.delenv("SEISO_SIDECAR_PERF_MODE", raising=False)
+    monkeypatch.setattr(llamaswap, "_sidecar_consumer_nvidia_gpu", lambda: True)
+    monkeypatch.setattr(protection_mod, "discrete_gpu_total_mb", lambda: 24_576)
+    free = 24_000
+    normal = llamaswap._sidecar_vram_budget_mb(free)
+    packed = llamaswap._sidecar_large_weight_pack_budget_mb(
+        free,
+        weight_mb=4_000,  # small Q5-class file
+        num_ctx=2048,
+        normal_budget_mb=normal,
+    )
+    assert packed == normal
+
+
+def test_sidecar_large_weight_caps_num_batch(monkeypatch):
+    import seiso.memory.protection as protection_mod
+    from seiso.inference import llamaswap
+
+    monkeypatch.delenv("SEISO_OLLAMA_NUM_BATCH", raising=False)
+    monkeypatch.delenv("SEISO_SIDECAR_PERF_MODE", raising=False)
+    monkeypatch.setattr(llamaswap, "_sidecar_native_linux_nvidia", lambda: True)
+    monkeypatch.setattr(llamaswap, "_sidecar_consumer_nvidia_gpu", lambda: True)
+    monkeypatch.setattr(llamaswap, "_sidecar_headroom_mb", lambda: 24_000)
+    monkeypatch.setattr(protection_mod, "headroom_mb", lambda: 24_000)
+    monkeypatch.setattr(protection_mod, "discrete_gpu_total_mb", lambda: 24_576)
+    monkeypatch.setattr(protection_mod, "estimate_path_vram_mb", lambda p: 22_984)
+
+    assert (
+        llamaswap.sidecar_ollama_num_batch(
+            model_path="/tmp/gemma-4-12b-it-BF16.gguf", num_ctx=2048
+        )
+        == 256
+    )
+
+
 def test_sidecar_ollama_num_gpu_full_offload_when_consumer_residual_ample(monkeypatch):
     """Small models that leave ≥4 GB residual after full offload are not throttled."""
     import seiso.inference.backends as backends_mod
