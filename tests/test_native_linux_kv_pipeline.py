@@ -329,7 +329,7 @@ def test_sidecar_options_are_capability_gated(monkeypatch):
     from seiso.inference import llamaswap
 
     monkeypatch.setattr(llamaswap, "plan_sidecar_request", lambda *_a: ([], 4096, 32))
-    monkeypatch.setattr(llamaswap, "sidecar_ollama_num_batch", lambda: None)
+    monkeypatch.setattr(llamaswap, "sidecar_ollama_num_batch", lambda **_k: None)
     monkeypatch.setattr(llamaswap, "sidecar_ollama_num_gpu", lambda *_a, **_k: None)
     monkeypatch.setattr(llamaswap, "sidecar_ollama_keep_alive", lambda **_k: None)
     ollama = llamaswap.OllamaClient()
@@ -357,7 +357,7 @@ def test_ollama_warmup_loads_without_generating(monkeypatch):
     from seiso.inference import llamaswap
 
     monkeypatch.setattr(llamaswap, "plan_sidecar_request", lambda *_a: ([], 4096, 32))
-    monkeypatch.setattr(llamaswap, "sidecar_ollama_num_batch", lambda: 512)
+    monkeypatch.setattr(llamaswap, "sidecar_ollama_num_batch", lambda **_k: 512)
     monkeypatch.setattr(llamaswap, "sidecar_ollama_num_gpu", lambda *_a, **_k: 20)
     monkeypatch.setattr(llamaswap, "sidecar_ollama_keep_alive", lambda **_k: "15m")
     client = llamaswap.OllamaClient()
@@ -382,7 +382,7 @@ def test_ollama_warmup_loads_without_generating(monkeypatch):
             },
         )
     ]
-    monkeypatch.setattr(llamaswap, "sidecar_ollama_num_batch", lambda: 128)
+    monkeypatch.setattr(llamaswap, "sidecar_ollama_num_batch", lambda **_k: 128)
     monkeypatch.setattr(llamaswap, "sidecar_ollama_num_gpu", lambda *_a, **_k: 2)
     chat_body = client._request_body(
         {

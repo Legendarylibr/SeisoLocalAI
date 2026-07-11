@@ -163,6 +163,7 @@ _SIDECAR_PERF_VRAM_BUDGET_RATIO_CONSUMER = 0.70
 # and tank tok/s. For small contexts, pack more weight layers while keeping a
 # fixed display/activation floor. Measured: ngl 29→5 t/s vs ngl 45→16 t/s; ngl 48 OOM.
 _SIDECAR_LARGE_WEIGHT_PACK_CTX_MAX = 4096
+_SIDECAR_LARGE_WEIGHT_PACK_MIN_FREE_RATIO = 0.85
 _SIDECAR_LARGE_WEIGHT_PACK_RATIO = 0.94
 _SIDECAR_LARGE_WEIGHT_PACK_RATIO_PERF = 0.95
 _SIDECAR_LARGE_WEIGHT_PACK_RESERVE_MB = 1280
@@ -334,8 +335,10 @@ def _sidecar_large_weight_pack_budget_mb(
     normal = max(0, int(normal_budget_mb))
     if free <= 0 or weight <= 0:
         return normal
-    # Normal budget already covers the weights comfortably → keep safe clamps.
-    if weight <= int(normal * 0.90):
+    if weight < int(free * _SIDECAR_LARGE_WEIGHT_PACK_MIN_FREE_RATIO):
+        return normal
+    # Normal budget already covers at least 90% of the weights → keep safe clamps.
+    if normal >= int(weight * 0.90):
         return normal
     if _sidecar_perf_mode():
         ratio = _SIDECAR_LARGE_WEIGHT_PACK_RATIO_PERF
@@ -362,10 +365,13 @@ def _sidecar_is_large_weight_pack(
     if int(num_ctx) > _SIDECAR_LARGE_WEIGHT_PACK_CTX_MAX:
         return False
     weight = max(0, int(weight_mb))
+    free = max(0, int(free_mb))
     normal = max(0, int(normal_budget_mb))
-    if weight <= 0 or normal <= 0:
+    if weight <= 0 or free <= 0 or normal <= 0:
         return False
-    return weight > int(normal * 0.90)
+    if weight < int(free * _SIDECAR_LARGE_WEIGHT_PACK_MIN_FREE_RATIO):
+        return False
+    return normal < int(weight * 0.90)
 
 
 def _sidecar_ollama_manual_layer_ratio() -> float | None:
