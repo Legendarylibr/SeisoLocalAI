@@ -712,6 +712,9 @@ class LocalInferenceRunner:
 
         route, resolved_path = self._resolve_route(payload, model_path)
         payload = sanitize_inference_payload(payload, isolated=route == "llamaswap")
+        if route == "llamaswap":
+            # Align max_tokens with sidecar num_predict before length detection.
+            payload = self._llamaswap_payload(payload, resolved_path)
         draft_path = payload.get("draft_model_path")
         generation_id = self._pool.bump_generation()
         await self._ensure_model_switch(resolved_path, draft_path=draft_path, route=route)
@@ -1770,22 +1773,30 @@ class LocalInferenceRunner:
         return message_content_with_tool_calls(message)
 
     def _llamaswap_payload(self, payload: dict[str, Any], model_path: str) -> dict[str, Any]:
-        """Ensure sidecar chat reuses a pinned num_ctx and active keep_alive."""
+        """Ensure sidecar chat reuses a pinned num_ctx and active keep_alive.
+
+        Always write the *actual* completion budget back onto the payload so
+        stream finish_reason detection (length vs stop) matches num_predict /
+        max_tokens the sidecar will honor — not the larger UI request value.
+        """
         out = dict(payload)
         out.setdefault("sidecar_active", True)
-        if out.get("sidecar_num_ctx") is not None:
-            return out
-        # Prefer the preload/pool pin so multi-turn history growth does not
-        # re-bucket num_ctx and force an Ollama KV reload.
-        pinned = self._pool.pinned_n_ctx(model_path)
-        if pinned is not None:
-            out["sidecar_num_ctx"] = pinned
-            return out
         try:
-            from seiso.inference.llamaswap import plan_sidecar_request
+            from seiso.inference.llamaswap import plan_sidecar_request, sidecar_max_tokens
 
-            _, planned_ctx, _planned_max = plan_sidecar_request(out, model_path)
-            out["sidecar_num_ctx"] = planned_ctx
+            # Prefer the preload/pool pin so multi-turn history growth does not
+            # re-bucket num_ctx and force an Ollama KV reload.
+            if out.get("sidecar_num_ctx") is None:
+                pinned = self._pool.pinned_n_ctx(model_path)
+                if pinned is not None:
+                    out["sidecar_num_ctx"] = pinned
+                else:
+                    _, planned_ctx, planned_max = plan_sidecar_request(out, model_path)
+                    out["sidecar_num_ctx"] = planned_ctx
+                    out["max_tokens"] = planned_max
+                    return out
+            # Ctx already pinned: still clamp max_tokens to sidecar policy.
+            out["max_tokens"] = sidecar_max_tokens(int(out.get("max_tokens") or 512))
         except Exception:
             logger.debug("Sidecar request planning failed", exc_info=True)
         return out

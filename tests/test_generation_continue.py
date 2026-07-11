@@ -81,9 +81,34 @@ def test_build_continue_messages_appends_partial_and_cue():
 
 def test_max_auto_continues_clamped(monkeypatch):
     monkeypatch.setenv("SEISO_CHAT_AUTO_CONTINUE_MAX", "99")
-    assert max_auto_continues() == 4
+    assert max_auto_continues() == 12
     monkeypatch.setenv("SEISO_CHAT_AUTO_CONTINUE_MAX", "0")
     assert max_auto_continues() == 0
+
+
+def test_should_auto_continue_respects_total_budget():
+    assert (
+        should_auto_continue(
+            pass_output_tokens=512,
+            max_tokens=512,
+            pass_text="partial answer that was cut",
+            continues_used=0,
+            total_output_tokens=8190,
+            total_budget=8192,
+        )
+        is False
+    )
+    assert (
+        should_auto_continue(
+            pass_output_tokens=512,
+            max_tokens=512,
+            pass_text="partial answer that was cut",
+            continues_used=0,
+            total_output_tokens=1000,
+            total_budget=8192,
+        )
+        is True
+    )
 
 
 def test_resolve_finish_reason():
