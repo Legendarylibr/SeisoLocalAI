@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import math
 import random
@@ -12,7 +14,7 @@ from typing import Any
 from seiso.training.config import DatasetFormat
 from seiso.training.datasets import detect_format, load_training_dataset
 from seiso.training.practices import warmup_ratio_for_corpus
-from seiso.training.preprocess import preprocess_training_dataset
+from seiso.training.preprocess import normalize_sample, preprocess_training_dataset
 
 logger = logging.getLogger(__name__)
 
@@ -247,6 +249,149 @@ def take_cleaned_dataset(
     return _CLEANED_DATASET_CACHE.pop(key, None)
 
 
+def _analysis_payload(
+    *,
+    dataset: str | Path,
+    split: str,
+    columns: list[str],
+    initial_samples: int,
+    kept: int,
+    removed_invalid: int,
+    removed_duplicate: int,
+    resolved_fmt: DatasetFormat,
+    confidence: float,
+    vote_meta: dict[str, Any],
+    domain: str,
+    domain_label: str,
+    length_stats: dict[str, Any],
+    notes: list[str],
+    sample_preview: list[dict[str, Any]],
+    uses_full_dataset: bool,
+    cleaned_cache_key: str | None = None,
+) -> dict[str, Any]:
+    utilization = round(100.0 * kept / max(1, initial_samples), 2)
+    recommended = build_dataset_training_config(
+        resolved_format=resolved_fmt,
+        domain=domain,
+        kept=kept,
+        length_stats=length_stats,
+    )
+    payload: dict[str, Any] = {
+        "valid": kept > 0,
+        "dataset": str(dataset),
+        "split": split,
+        "columns": columns,
+        "initial_samples": initial_samples,
+        "kept": kept,
+        "removed_invalid": removed_invalid,
+        "removed_duplicate": removed_duplicate,
+        "utilization_pct": utilization,
+        "resolved_format": resolved_fmt.value,
+        "format_confidence": round(confidence, 4),
+        "format_detection": vote_meta,
+        "domain": domain,
+        "domain_label": domain_label,
+        "length_stats": length_stats,
+        "recommended_config": recommended,
+        "notes": notes,
+        "sample_preview": sample_preview,
+        "uses_full_dataset": uses_full_dataset,
+        "preprocess_defaults": {"deduplicate": True, "min_chars": 1},
+    }
+    if cleaned_cache_key is not None:
+        payload["cleaned_cache_key"] = cleaned_cache_key
+    return payload
+
+
+def _analyze_sampled(
+    *,
+    dataset: str | Path,
+    split: str,
+    initial: int,
+    columns: list[str],
+    schema_samples: list[dict[str, Any]],
+    inferred_fmt: DatasetFormat,
+    confidence: float,
+    vote_meta: dict[str, Any],
+    dataset_format: DatasetFormat,
+) -> dict[str, Any]:
+    """Cheap validation path: normalize stratified samples only (no full map)."""
+    fmt = inferred_fmt if dataset_format == DatasetFormat.AUTO else dataset_format
+    cleaned_rows: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    removed_invalid = 0
+    removed_duplicate = 0
+    for sample in schema_samples:
+        row = normalize_sample(sample, fmt)
+        if row is None:
+            removed_invalid += 1
+            continue
+        payload = json.dumps(row, sort_keys=True, ensure_ascii=False, default=str)
+        fingerprint = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+        if fingerprint in seen:
+            removed_duplicate += 1
+            continue
+        seen.add(fingerprint)
+        cleaned_rows.append(row)
+
+    if not cleaned_rows:
+        raise ValueError(
+            "Dataset sample has no trainable rows after normalization "
+            f"(format={fmt.value})"
+        )
+
+    sample_n = max(1, len(schema_samples))
+    kept_ratio = len(cleaned_rows) / sample_n
+    estimated_kept = max(1, min(initial, int(round(kept_ratio * initial))))
+    estimated_invalid = max(
+        0, min(initial - estimated_kept, int(round(removed_invalid / sample_n * initial)))
+    )
+    estimated_duplicate = max(
+        0,
+        min(
+            initial - estimated_kept - estimated_invalid,
+            int(round(removed_duplicate / sample_n * initial)),
+        ),
+    )
+
+    domain, domain_label = _infer_domain(fmt, columns)
+    length_stats = _length_stats(cleaned_rows)
+    notes = [
+        f"Sampled {sample_n:,}/{initial:,} rows for quick validation — "
+        f"estimated ~{estimated_kept:,} trainable after normalization "
+        f"({round(100.0 * estimated_kept / max(1, initial), 2)}% retained).",
+        f"Detected {fmt.value} schema ({confidence:.0%} vote confidence across stratified samples).",
+        f"Domain: {domain_label}.",
+        "Full preprocess/dedupe runs once during training (not duplicated here).",
+        "Training settings below are derived from this dataset sample (not chat/inference context).",
+    ]
+    if removed_invalid:
+        notes.append(
+            f"Sample dropped {removed_invalid:,} rows with empty or unparseable supervision targets."
+        )
+    if removed_duplicate:
+        notes.append(f"Sample removed {removed_duplicate:,} exact duplicate rows.")
+
+    return _analysis_payload(
+        dataset=dataset,
+        split=split,
+        columns=columns,
+        initial_samples=initial,
+        kept=estimated_kept,
+        removed_invalid=estimated_invalid,
+        removed_duplicate=estimated_duplicate,
+        resolved_fmt=fmt,
+        confidence=confidence,
+        vote_meta=vote_meta,
+        domain=domain,
+        domain_label=domain_label,
+        length_stats=length_stats,
+        notes=notes,
+        sample_preview=_preview_rows(cleaned_rows),
+        uses_full_dataset=False,
+    )
+
+
 def analyze_training_dataset(
     dataset: str | Path,
     *,
@@ -254,11 +399,17 @@ def analyze_training_dataset(
     sandbox_root: Path | None = None,
     split: str = "train",
     sample_rows_for_schema: int = 48,
+    full_scan: bool = True,
 ) -> dict[str, Any]:
-    """Analyze the full dataset schema, normalize every row, and recommend training settings.
+    """Analyze dataset schema and recommend training settings.
 
-    Unlike chat/inference context, this inspects the actual training corpus end-to-end so
-    preprocessing stats and hyperparameter hints reflect the entire dataset.
+    When ``full_scan`` is True (default, used by the UI analyze endpoint), every
+    row is normalized and deduplicated so stats reflect the full corpus. The
+    cleaned dataset is stashed for one-shot reuse by the following train job.
+
+    When ``full_scan`` is False (used at train startup without a prior UI
+    analysis), only stratified samples are validated so the expensive full
+    preprocess is not repeated before ``_prepare_datasets`` runs it once.
     """
     raw = load_training_dataset(str(dataset), split=split, sandbox_root=sandbox_root)
     initial = len(raw)
@@ -272,6 +423,19 @@ def analyze_training_dataset(
         schema_samples,
         forced=dataset_format,
     )
+
+    if not full_scan:
+        return _analyze_sampled(
+            dataset=dataset,
+            split=split,
+            initial=initial,
+            columns=columns,
+            schema_samples=schema_samples,
+            inferred_fmt=inferred_fmt,
+            confidence=confidence,
+            vote_meta=vote_meta,
+            dataset_format=dataset_format,
+        )
 
     effective_fmt = (
         inferred_fmt if dataset_format == DatasetFormat.AUTO else dataset_format
@@ -298,16 +462,10 @@ def analyze_training_dataset(
         for i in length_sample_idx
     ]
     length_stats = _length_stats(length_rows)
-    recommended = build_dataset_training_config(
-        resolved_format=resolved_fmt,
-        domain=domain,
-        kept=stats["kept"],
-        length_stats=length_stats,
-    )
 
-    utilization = round(100.0 * stats["kept"] / max(1, stats["initial_samples"]), 2)
     notes = [
-        f"Scanned all {stats['initial_samples']:,} rows — {stats['kept']:,} trainable after normalization ({utilization}% retained).",
+        f"Scanned all {stats['initial_samples']:,} rows — {stats['kept']:,} trainable after normalization "
+        f"({round(100.0 * stats['kept'] / max(1, stats['initial_samples']), 2)}% retained).",
         f"Detected {resolved_fmt.value} schema ({confidence:.0%} vote confidence across stratified samples).",
         f"Domain: {domain_label}.",
         "Training settings below are derived from this dataset only (not chat/inference context).",
@@ -319,34 +477,30 @@ def analyze_training_dataset(
     if stats["removed_duplicate"]:
         notes.append(f"Removed {stats['removed_duplicate']:,} exact duplicate rows.")
 
-    return {
-        "valid": stats["kept"] > 0,
-        "dataset": str(dataset),
-        "split": split,
-        "columns": columns,
-        "initial_samples": stats["initial_samples"],
-        "kept": stats["kept"],
-        "removed_invalid": stats["removed_invalid"],
-        "removed_duplicate": stats["removed_duplicate"],
-        "utilization_pct": utilization,
-        "resolved_format": resolved_fmt.value,
-        "format_confidence": round(confidence, 4),
-        "format_detection": vote_meta,
-        "domain": domain,
-        "domain_label": domain_label,
-        "length_stats": length_stats,
-        "recommended_config": recommended,
-        "notes": notes,
-        "sample_preview": _preview_rows(
+    return _analysis_payload(
+        dataset=dataset,
+        split=split,
+        columns=columns,
+        initial_samples=stats["initial_samples"],
+        kept=stats["kept"],
+        removed_invalid=stats["removed_invalid"],
+        removed_duplicate=stats["removed_duplicate"],
+        resolved_fmt=resolved_fmt,
+        confidence=confidence,
+        vote_meta=vote_meta,
+        domain=domain,
+        domain_label=domain_label,
+        length_stats=length_stats,
+        notes=notes,
+        sample_preview=_preview_rows(
             [
                 {k: v for k, v in cleaned[i].items() if not str(k).startswith("_")}
                 for i in range(min(3, len(cleaned)))
             ],
         ),
-        "uses_full_dataset": True,
-        "cleaned_cache_key": cache_key,
-        "preprocess_defaults": {"deduplicate": True, "min_chars": 1},
-    }
+        uses_full_dataset=True,
+        cleaned_cache_key=cache_key,
+    )
 
 
 def analysis_notes_for_recommendations(analysis: dict[str, Any]) -> list[str]:

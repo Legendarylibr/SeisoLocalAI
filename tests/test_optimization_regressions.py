@@ -89,6 +89,20 @@ def test_analyze_stores_cleaned_cache(tmp_path: Path):
     assert fmt == DatasetFormat.CHAT
 
 
+def test_analyze_sample_mode_does_not_store_cleaned_cache(tmp_path: Path):
+    from seiso.training.dataset_analysis import analyze_training_dataset
+
+    ds = tmp_path / "train.jsonl"
+    ds.write_text(
+        '{"messages":[{"role":"user","content":"hi"},{"role":"assistant","content":"hello"}]}\n'
+    )
+    analysis = analyze_training_dataset(
+        ds, dataset_format=DatasetFormat.CHAT, full_scan=False
+    )
+    assert analysis["uses_full_dataset"] is False
+    assert "cleaned_cache_key" not in analysis
+
+
 def test_dataset_analysis_result_cache_hits(tmp_path: Path, monkeypatch):
     from forge.services import training_service as ts
 

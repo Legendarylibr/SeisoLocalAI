@@ -24,6 +24,43 @@ def test_pool_singleton():
     assert a is b
 
 
+def test_llama_cache_headroom_ok_does_not_force_refresh(monkeypatch):
+    """Warm cache hits must not force a full hardware_profile refresh."""
+    from seiso.inference.model_pool import llama_load as llama_load_mod
+
+    calls: list[bool] = []
+
+    monkeypatch.setattr(llama_load_mod, "_native_linux_nvidia", lambda: True)
+    monkeypatch.setattr(
+        llama_load_mod,
+        "_refresh_headroom_stats",
+        lambda force=False: calls.append(bool(force)),
+    )
+
+    class _Prot:
+        @staticmethod
+        def headroom_mb():
+            return 10_000
+
+        @staticmethod
+        def discrete_gpu_total_mb():
+            return 24_000
+
+        @staticmethod
+        def llama_decode_reserve_mb(**_k):
+            return 256
+
+    monkeypatch.setattr(llama_load_mod, "_prot", lambda: _Prot())
+    monkeypatch.setattr(llama_load_mod, "_mp", lambda: llama_load_mod)
+
+    class Handle:
+        _seiso_load_headroom_mb = 8_000
+        _seiso_model_path = "/tmp/model.gguf"
+
+    assert llama_load_mod._llama_cache_headroom_ok(Handle()) is True
+    assert calls == [False]
+
+
 def test_unload_clears_active():
     pool = ModelPool.get()
     pool.unload_all()
