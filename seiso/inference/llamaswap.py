@@ -6,6 +6,7 @@ lives in ``ollama_registry``.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import platform
 import re
@@ -344,16 +345,12 @@ def _sidecar_large_weight_pack_budget_mb(
         reserve = _SIDECAR_LARGE_WEIGHT_PACK_RESERVE_MB
     raw = env_str("SEISO_SIDECAR_LARGE_WEIGHT_PACK_RATIO", "").strip()
     if raw:
-        try:
+        with contextlib.suppress(ValueError):
             ratio = max(0.70, min(float(raw), 0.97))
-        except ValueError:
-            pass
     raw_reserve = env_str("SEISO_SIDECAR_LARGE_WEIGHT_PACK_RESERVE_MB", "").strip()
     if raw_reserve:
-        try:
+        with contextlib.suppress(ValueError):
             reserve = max(512, int(raw_reserve))
-        except ValueError:
-            pass
     packed = min(int(free * ratio), max(0, free - reserve))
     return max(normal, packed)
 
