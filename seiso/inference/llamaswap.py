@@ -124,9 +124,10 @@ _SIDECAR_CTX_MARGIN_TOKENS = 256
 # Fraction of *free* (not total) VRAM the sidecar may commit to weights + KV.
 # Leaves slack for the display/compositor and the engine's compute graph so a
 # display-attached consumer GPU cannot be driven into a driver-resetting hang.
-_SIDECAR_VRAM_BUDGET_RATIO = 0.55
-_SIDECAR_VRAM_BUDGET_RATIO_32GB = 0.65
-_SIDECAR_VRAM_BUDGET_RATIO_48GB = 0.70
+# Hard reserve (``_SIDECAR_*_VRAM_RESERVE_MB``) is an additional floor.
+_SIDECAR_VRAM_BUDGET_RATIO = 0.62
+_SIDECAR_VRAM_BUDGET_RATIO_32GB = 0.68
+_SIDECAR_VRAM_BUDGET_RATIO_48GB = 0.72
 _SIDECAR_VRAM_BUDGET_RATIO_WORKSTATION = 0.80
 _SIDECAR_VRAM_RESERVE_MB = 4096
 _SIDECAR_CONSUMER_VRAM_RESERVE_MB = 5120
@@ -135,9 +136,15 @@ _CONSUMER_NVIDIA_RE = re.compile(r"\brtx\s*(?:20|30|40|50)[5-9]0\b", re.I)
 _SIDECAR_CONSUMER_SMALL_FOOTPRINT_RATIO = 0.35
 _SIDECAR_CONSUMER_MEDIUM_FOOTPRINT_RATIO = 0.55
 _SIDECAR_CONSUMER_LARGE_FOOTPRINT_RATIO = 0.75
+# Layer caps only apply when residual VRAM after full offload is below the
+# display slack. Values stay conservative for that tight-residual path.
 _SIDECAR_CONSUMER_SMALL_LAYER_RATIO = 0.50
 _SIDECAR_CONSUMER_MEDIUM_LAYER_RATIO = 0.65
 _SIDECAR_CONSUMER_LARGE_LAYER_RATIO = 0.80
+# Full GPU offload is allowed when residual (budget - weight - KV) still leaves
+# this much free for display/compositor + activation spikes. Below this, partial
+# offload throttles layers to avoid driver hangs on display-attached cards.
+_SIDECAR_CONSUMER_DISPLAY_SLACK_MB = 4096
 _SIDECAR_NATIVE_OLLAMA_NUM_BATCH_LOW = 128
 _SIDECAR_NATIVE_OLLAMA_NUM_BATCH = 256
 _SIDECAR_NATIVE_OLLAMA_NUM_BATCH_ROOMY = 512
@@ -290,7 +297,14 @@ def _sidecar_ollama_dynamic_layer_cap(
     total_layers: int,
     num_ctx: int,
 ) -> int | None:
-    """Consumer NVIDIA offload target based on model footprint and live VRAM budget."""
+    """Consumer NVIDIA offload target based on residual VRAM after full offload.
+
+    Small models that fit with ample residual headroom get full GPU offload
+    (``None``) — forced partial offload was the dominant native-Linux tok/s
+    bottleneck while providing no OOM benefit. When residual VRAM after a full
+    offload would leave less than the display slack, footprint-based layer
+    ratios still throttle layers so activations + compositor stay safe.
+    """
     if _sidecar_ollama_manual_layer_ratio() is not None:
         return _sidecar_ollama_manual_layer_cap(total_layers)
     manual_cap = _sidecar_ollama_manual_layer_cap(total_layers)
@@ -318,6 +332,13 @@ def _sidecar_ollama_dynamic_layer_cap(
         return manual_cap
 
     full_need_mb = max(1, int(weight_mb) + full_kv_mb)
+    residual_mb = budget - full_need_mb
+    # Full offload still leaves display/compute slack → no forced partial offload.
+    if residual_mb >= _SIDECAR_CONSUMER_DISPLAY_SLACK_MB:
+        return manual_cap
+
+    # Residual is tight: throttle layers by footprint so activations +
+    # compositor still fit on a display-attached consumer GPU.
     footprint_ratio = full_need_mb / max(1, budget)
     if footprint_ratio <= _SIDECAR_CONSUMER_SMALL_FOOTPRINT_RATIO:
         ratio = _SIDECAR_CONSUMER_SMALL_LAYER_RATIO
@@ -486,7 +507,12 @@ def sidecar_ollama_num_gpu(model_path: str, *, num_ctx: int) -> int | None:
 
 
 def sidecar_ollama_num_batch() -> int | None:
-    """Bound Ollama prompt prefill bursts on native NVIDIA hosts."""
+    """Bound Ollama prompt prefill bursts on native NVIDIA hosts.
+
+    Larger ``num_batch`` improves prefill and tok/s when free VRAM is roomy.
+    Consumer GPUs now share the roomy tier (≥16 GB free) — the VRAM budget
+    clamp and residual-gated layer planner still prevent driver hangs.
+    """
     override = env_str("SEISO_OLLAMA_NUM_BATCH", "").strip()
     if override:
         try:
@@ -503,7 +529,7 @@ def sidecar_ollama_num_batch() -> int | None:
         free_mb = _sidecar_headroom_mb()
         if 0 < free_mb < _SIDECAR_MID_HEADROOM_MB:
             return _SIDECAR_NATIVE_OLLAMA_NUM_BATCH_LOW
-        if free_mb >= _SIDECAR_ROOMY_HEADROOM_MB and not _sidecar_consumer_nvidia_gpu():
+        if free_mb >= _SIDECAR_ROOMY_HEADROOM_MB:
             return _SIDECAR_NATIVE_OLLAMA_NUM_BATCH_ROOMY
         return _SIDECAR_NATIVE_OLLAMA_NUM_BATCH
     return None
