@@ -6,6 +6,7 @@ lives in ``ollama_registry``.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import platform
 import re
@@ -157,6 +158,20 @@ _SIDECAR_NATIVE_OLLAMA_KEEP_ALIVE = "2m"
 _SIDECAR_PERF_KEEP_ALIVE = "10m"
 _SIDECAR_PERF_VRAM_BUDGET_RATIO = 0.75
 _SIDECAR_PERF_VRAM_BUDGET_RATIO_CONSUMER = 0.70
+# Near-max BF16/F16 GGUFs (e.g. Gemma 4 12B BF16 ≈ 23 GB on a 24 GB card) cannot
+# full-offload, but the default 0.62/5 GB clamps leave only ~60% of layers on GPU
+# and tank tok/s. For small contexts, pack more weight layers while keeping a
+# fixed display/activation floor. Measured: ngl 29→5 t/s vs ngl 45→16 t/s; ngl 48 OOM.
+_SIDECAR_LARGE_WEIGHT_PACK_CTX_MAX = 4096
+_SIDECAR_LARGE_WEIGHT_PACK_MIN_FREE_RATIO = 0.85
+_SIDECAR_LARGE_WEIGHT_PACK_RATIO = 0.94
+_SIDECAR_LARGE_WEIGHT_PACK_RATIO_PERF = 0.95
+_SIDECAR_LARGE_WEIGHT_PACK_RESERVE_MB = 1280
+_SIDECAR_LARGE_WEIGHT_PACK_RESERVE_PERF_MB = 1024
+# When free VRAM collapses because this model is already resident, reclaim up to
+# total − floor so reloads are not planned against leftover scraps.
+_SIDECAR_RECLAIM_DISPLAY_FLOOR_MB = 1024
+_SIDECAR_LARGE_WEIGHT_BATCH_CAP = 256
 
 
 def sidecar_stream_timeout_s() -> int:
@@ -268,6 +283,95 @@ def _sidecar_vram_budget_mb(free_mb: int) -> int:
     reserve = _sidecar_vram_reserve_mb(total_mb=total_mb, consumer=consumer)
     reserve_budget = max(0, free - reserve)
     return min(ratio_budget, reserve_budget)
+
+
+def _sidecar_plan_free_mb(*, free_mb: int, weight_mb: int) -> int:
+    """Effective free VRAM for offload planning.
+
+    When a near-max GGUF is already resident, ``nvidia-smi`` free collapses and a
+    naive replan would schedule only a handful of layers. If used memory is a
+    large fraction of the candidate weight file, treat most of the card as
+    reclaimable on reload (Ollama reloads replace the runner).
+    """
+    free = max(0, int(free_mb))
+    weight = max(0, int(weight_mb))
+    if weight <= 0:
+        return free
+    try:
+        from seiso.memory.protection import discrete_gpu_total_mb
+
+        total_mb = int(discrete_gpu_total_mb())
+    except Exception:
+        total_mb = 0
+    if total_mb <= 0:
+        return free
+    used_mb = max(0, total_mb - free)
+    # Resident footprint looks like this (or another large) model → reclaim.
+    # Do this before the "ample free" short-circuit: a partially loaded BF16 can
+    # still leave 6–10 GB free while most of the card is already weights.
+    if used_mb >= int(weight * 0.35) and free < int(weight * 0.55):
+        reclaimable = max(0, total_mb - _SIDECAR_RECLAIM_DISPLAY_FLOOR_MB)
+        return max(free, reclaimable)
+    return free
+
+
+def _sidecar_large_weight_pack_budget_mb(
+    free_mb: int,
+    *,
+    weight_mb: int,
+    num_ctx: int,
+    normal_budget_mb: int,
+) -> int:
+    """Raise the offload budget only for near-max weight files at small context.
+
+    Leaves smaller models on the safe default clamps. Only expands budget when
+    the normal path cannot hold ~90% of the weight file (forced heavy CPU
+    offload).
+    """
+    if int(num_ctx) > _SIDECAR_LARGE_WEIGHT_PACK_CTX_MAX:
+        return int(normal_budget_mb)
+    free = max(0, int(free_mb))
+    weight = max(0, int(weight_mb))
+    normal = max(0, int(normal_budget_mb))
+    if free <= 0 or weight <= 0:
+        return normal
+    if weight < int(free * _SIDECAR_LARGE_WEIGHT_PACK_MIN_FREE_RATIO):
+        return normal
+    # Normal budget already covers at least 90% of the weights → keep safe clamps.
+    if normal >= int(weight * 0.90):
+        return normal
+    if _sidecar_perf_mode():
+        ratio = _SIDECAR_LARGE_WEIGHT_PACK_RATIO_PERF
+        reserve = _SIDECAR_LARGE_WEIGHT_PACK_RESERVE_PERF_MB
+    else:
+        ratio = _SIDECAR_LARGE_WEIGHT_PACK_RATIO
+        reserve = _SIDECAR_LARGE_WEIGHT_PACK_RESERVE_MB
+    raw = env_str("SEISO_SIDECAR_LARGE_WEIGHT_PACK_RATIO", "").strip()
+    if raw:
+        with contextlib.suppress(ValueError):
+            ratio = max(0.70, min(float(raw), 0.97))
+    raw_reserve = env_str("SEISO_SIDECAR_LARGE_WEIGHT_PACK_RESERVE_MB", "").strip()
+    if raw_reserve:
+        with contextlib.suppress(ValueError):
+            reserve = max(512, int(raw_reserve))
+    packed = min(int(free * ratio), max(0, free - reserve))
+    return max(normal, packed)
+
+
+def _sidecar_is_large_weight_pack(
+    *, weight_mb: int, free_mb: int, num_ctx: int, normal_budget_mb: int
+) -> bool:
+    """True when packing budget is active for this request."""
+    if int(num_ctx) > _SIDECAR_LARGE_WEIGHT_PACK_CTX_MAX:
+        return False
+    weight = max(0, int(weight_mb))
+    free = max(0, int(free_mb))
+    normal = max(0, int(normal_budget_mb))
+    if weight <= 0 or free <= 0 or normal <= 0:
+        return False
+    if weight < int(free * _SIDECAR_LARGE_WEIGHT_PACK_MIN_FREE_RATIO):
+        return False
+    return normal < int(weight * 0.90)
 
 
 def _sidecar_ollama_manual_layer_ratio() -> float | None:
@@ -465,10 +569,21 @@ def sidecar_ollama_num_gpu(model_path: str, *, num_ctx: int) -> int | None:
 
     free_mb = int(headroom_mb())
     if free_mb <= 0:
-        return 0
-    budget = _sidecar_vram_budget_mb(free_mb)
+        # Still try weight-aware reclaim below; only hard-fail when truly empty
+        # and no reclaim path is available.
+        pass
     try:
         weight_mb = int(estimate_path_vram_mb(model_path))
+        free_mb = _sidecar_plan_free_mb(free_mb=free_mb, weight_mb=weight_mb)
+        if free_mb <= 0:
+            return 0
+        normal_budget = _sidecar_vram_budget_mb(free_mb)
+        budget = _sidecar_large_weight_pack_budget_mb(
+            free_mb,
+            weight_mb=weight_mb,
+            num_ctx=num_ctx,
+            normal_budget_mb=normal_budget,
+        )
         total_layers = max(1, gguf_total_layers(model_path))
         layer_cap = _sidecar_ollama_dynamic_layer_cap(
             model_path,
@@ -489,6 +604,12 @@ def sidecar_ollama_num_gpu(model_path: str, *, num_ctx: int) -> int | None:
                 return layer_cap
             return None
         start_layers = total_layers if layer_cap is None else min(total_layers, layer_cap)
+        packing = _sidecar_is_large_weight_pack(
+            weight_mb=weight_mb,
+            free_mb=free_mb,
+            num_ctx=num_ctx,
+            normal_budget_mb=normal_budget,
+        )
         for layers in range(start_layers, -1, -1):
             if llama_offload_fits_headroom(
                 model_path,
@@ -498,6 +619,10 @@ def sidecar_ollama_num_gpu(model_path: str, *, num_ctx: int) -> int | None:
                 weight_mb=weight_mb,
                 total_layers=total_layers,
             ):
+                # Near-max BF16: full layer count OOMs on compute scratch even when
+                # weight math fits (measured: Gemma 4 12B BF16 ngl 48 OOM, 47 ok).
+                if packing and layers >= total_layers:
+                    return max(0, total_layers - 1)
                 return layers
     except Exception:
         if _sidecar_native_linux_nvidia():
@@ -506,12 +631,15 @@ def sidecar_ollama_num_gpu(model_path: str, *, num_ctx: int) -> int | None:
     return 0
 
 
-def sidecar_ollama_num_batch() -> int | None:
+def sidecar_ollama_num_batch(*, model_path: str | None = None, num_ctx: int = 2048) -> int | None:
     """Bound Ollama prompt prefill bursts on native NVIDIA hosts.
 
     Larger ``num_batch`` improves prefill and tok/s when free VRAM is roomy.
     Consumer GPUs now share the roomy tier (≥16 GB free) — the VRAM budget
     clamp and residual-gated layer planner still prevent driver hangs.
+
+    Near-max weight files (large BF16 GGUF packing path) cap prefill batch so
+    compute scratch buffers do not OOM the last few hundred MB of VRAM.
     """
     override = env_str("SEISO_OLLAMA_NUM_BATCH", "").strip()
     if override:
@@ -521,17 +649,38 @@ def sidecar_ollama_num_batch() -> int | None:
             value = 0
         return max(1, value) if value > 0 else None
     if _sidecar_native_linux_nvidia():
-        if _sidecar_perf_mode():
-            free_mb = _sidecar_headroom_mb()
-            if 0 < free_mb < _SIDECAR_LOW_HEADROOM_MB:
-                return _SIDECAR_NATIVE_OLLAMA_NUM_BATCH
-            return _SIDECAR_NATIVE_OLLAMA_NUM_BATCH_ROOMY
         free_mb = _sidecar_headroom_mb()
-        if 0 < free_mb < _SIDECAR_MID_HEADROOM_MB:
-            return _SIDECAR_NATIVE_OLLAMA_NUM_BATCH_LOW
-        if free_mb >= _SIDECAR_ROOMY_HEADROOM_MB:
-            return _SIDECAR_NATIVE_OLLAMA_NUM_BATCH_ROOMY
-        return _SIDECAR_NATIVE_OLLAMA_NUM_BATCH
+        pack_cap = False
+        if model_path:
+            try:
+                from seiso.memory.protection import estimate_path_vram_mb
+
+                weight_mb = int(estimate_path_vram_mb(model_path))
+                free_for_plan = _sidecar_plan_free_mb(free_mb=free_mb, weight_mb=weight_mb)
+                normal = _sidecar_vram_budget_mb(free_for_plan)
+                pack_cap = _sidecar_is_large_weight_pack(
+                    weight_mb=weight_mb,
+                    free_mb=free_for_plan,
+                    num_ctx=num_ctx,
+                    normal_budget_mb=normal,
+                )
+                free_mb = free_for_plan
+            except Exception:
+                pack_cap = False
+        if _sidecar_perf_mode():
+            if 0 < free_mb < _SIDECAR_LOW_HEADROOM_MB:
+                batch = _SIDECAR_NATIVE_OLLAMA_NUM_BATCH
+            else:
+                batch = _SIDECAR_NATIVE_OLLAMA_NUM_BATCH_ROOMY
+        elif 0 < free_mb < _SIDECAR_MID_HEADROOM_MB:
+            batch = _SIDECAR_NATIVE_OLLAMA_NUM_BATCH_LOW
+        elif free_mb >= _SIDECAR_ROOMY_HEADROOM_MB:
+            batch = _SIDECAR_NATIVE_OLLAMA_NUM_BATCH_ROOMY
+        else:
+            batch = _SIDECAR_NATIVE_OLLAMA_NUM_BATCH
+        if pack_cap:
+            batch = min(batch, _SIDECAR_LARGE_WEIGHT_BATCH_CAP)
+        return batch
     return None
 
 
@@ -711,7 +860,7 @@ class OllamaClient:
             }
 
         options: dict[str, Any] = {"num_ctx": num_ctx}
-        num_batch = sidecar_ollama_num_batch()
+        num_batch = sidecar_ollama_num_batch(model_path=model_path, num_ctx=num_ctx)
         if num_batch is not None:
             options["num_batch"] = num_batch
         num_gpu = sidecar_ollama_num_gpu(model_path, num_ctx=num_ctx)
