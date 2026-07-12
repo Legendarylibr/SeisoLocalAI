@@ -86,8 +86,15 @@ def should_auto_continue(
 def build_continue_messages(
     base_messages: list[dict[str, Any]],
     assistant_so_far: str,
+    *,
+    n_ctx: int | None = None,
+    max_tokens: int | None = None,
 ) -> list[dict[str, Any]]:
-    """Messages for a continuation pass: history + partial assistant + continue cue."""
+    """Messages for a continuation pass: history + partial assistant + continue cue.
+
+    When ``n_ctx`` is provided, trim to that fixed window so multi-pass continues
+    never grow KV beyond the original load (OOM-safe).
+    """
     messages: list[dict[str, Any]] = []
     for item in base_messages:
         if not isinstance(item, dict):
@@ -99,6 +106,15 @@ def build_continue_messages(
         messages.append({"role": role, "content": "" if content is None else str(content)})
     messages.append({"role": "assistant", "content": str(assistant_so_far)})
     messages.append({"role": "user", "content": CONTINUE_USER_PROMPT})
+    if n_ctx is not None:
+        from seiso.memory.protection.chat_guards import trim_llama_messages_to_context
+
+        reply_budget = max(1, int(max_tokens or 512))
+        messages = trim_llama_messages_to_context(
+            messages,
+            n_ctx=max(1, int(n_ctx)),
+            max_tokens=reply_budget,
+        )
     return messages
 
 

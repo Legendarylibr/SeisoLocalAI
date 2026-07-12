@@ -630,6 +630,7 @@ async def chat(
                 pass_payload = dict(payload)
                 if fixed_n_ctx is not None:
                     pass_payload["n_ctx"] = fixed_n_ctx
+                    pass_payload["pin_n_ctx"] = True
                 effective = sanitize_inference_payload(
                     pass_payload, isolated=isolated
                 )
@@ -644,12 +645,18 @@ async def chat(
                     except Exception:
                         pass
                 pass_payload["max_tokens"] = pass_max_tokens
+                if fixed_n_ctx is not None:
+                    # Re-apply pin after sanitize (pin flag is consumed there).
+                    pass_payload["n_ctx"] = fixed_n_ctx
+                    pass_payload["pin_n_ctx"] = True
                 continues_used = 0
                 total_output_tokens = 0
                 last_pass_tokens = 0
                 finish_reason = "stop"
                 max_continues = max_auto_continues()
                 total_budget = total_reply_token_budget()
+                # Capture the OOM-safe per-pass budget once; continues must not grow it.
+                base_pass_max_tokens = pass_max_tokens
                 try:
                     orchestrator.emit_log(
                         job_id, f"Streaming inference ({backend_label})"
@@ -723,7 +730,7 @@ async def chat(
                         orchestrator.emit_log(
                             job_id,
                             f"Auto-continuing truncated reply "
-                            f"(pass {continues_used + 1}, budget {pass_max_tokens} tok)",
+                            f"(pass {continues_used + 1}, budget {base_pass_max_tokens} tok)",
                         )
                         yield {
                             "event": "log",
@@ -732,24 +739,36 @@ async def chat(
                                 f"({continues_used}/{max_continues})…"
                             ),
                         }
-                        # Reuse same max_tokens + fixed n_ctx; sanitize may shrink budget
-                        # if the growing transcript leaves less free KV room.
+                        # Reuse same max_tokens + fixed n_ctx. Trim the growing
+                        # transcript into that window instead of raising n_ctx (OOM).
                         pass_payload = {
                             **payload,
                             "messages": build_continue_messages(
-                                base_messages, partial
+                                base_messages,
+                                partial,
+                                n_ctx=int(fixed_n_ctx) if fixed_n_ctx is not None else None,
+                                max_tokens=base_pass_max_tokens,
                             ),
-                            "max_tokens": pass_max_tokens,
+                            "max_tokens": base_pass_max_tokens,
                         }
                         if fixed_n_ctx is not None:
                             pass_payload["n_ctx"] = fixed_n_ctx
+                            pass_payload["pin_n_ctx"] = True
                         continued = sanitize_inference_payload(
                             pass_payload, isolated=isolated
                         )
+                        # Never raise the per-pass budget above the first-pass OOM-safe cap.
                         pass_max_tokens = max(
-                            1, int(continued.get("max_tokens") or pass_max_tokens)
+                            1,
+                            min(
+                                base_pass_max_tokens,
+                                int(continued.get("max_tokens") or base_pass_max_tokens),
+                            ),
                         )
                         pass_payload["max_tokens"] = pass_max_tokens
+                        if fixed_n_ctx is not None:
+                            pass_payload["n_ctx"] = fixed_n_ctx
+                            pass_payload["pin_n_ctx"] = True
                         if pass_max_tokens < 8:
                             finish_reason = "length"
                             break

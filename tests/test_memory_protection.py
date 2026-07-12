@@ -225,6 +225,28 @@ def test_sanitize_inference_payload_allows_native_linux_long_completion_override
     assert out["max_tokens"] == 2048
 
 
+def test_sanitize_inference_payload_pin_n_ctx_does_not_rebucket(monkeypatch):
+    """Auto-continue multi-pass must keep the preloaded n_ctx (no KV growth)."""
+    monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 4096)
+    monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: True)
+
+    huge = "word " * 4000
+    out = sanitize_inference_payload(
+        {
+            "messages": [
+                {"role": "user", "content": "start"},
+                {"role": "assistant", "content": huge},
+            ],
+            "max_tokens": 512,
+            "n_ctx": 8192,
+            "pin_n_ctx": True,
+        }
+    )
+
+    assert out["n_ctx"] == 8192
+    assert "pin_n_ctx" not in out
+
+
 def test_trim_llama_messages_to_context_drops_old_history_before_prefill():
     messages = [
         {"role": "system", "content": "You are concise."},
