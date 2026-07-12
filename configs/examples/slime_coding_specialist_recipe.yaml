@@ -1,0 +1,200 @@
+# Specialist coding RL recipe (YAML-driven phases).
+#
+# Used by:
+#   python scripts/slime_coding_train_until_good.py --mode specialist \
+#     --recipe configs/examples/slime_coding_specialist_recipe.yaml \
+#     --data-root data/elite_coding
+#
+# Path resolution:
+#   - Relative paths are resolved against --data-root (unless absolute).
+#   - specialists/* is created by prepare_elite_coding_mix + specialist shard helper,
+#     or place equivalent JSONL under data-root/specialists/.
+#
+# Each phase:
+#   phase: name for logging / phase-best tracking
+#   dataset: train JSONL
+#   bench_dataset: held-out JSONL for checkpoint selection
+#   select_reward: optional filter (assert_tests|unit_tests|codebase_tests)
+#   reward: multi|unit_tests|codebase_tests|assert_tests
+#   + any slime train overrides (lr, max tokens, extra.max_steps, ...)
+
+version: 1
+name: warm-function-contest-package
+description: >
+  Beat-base recipe: dense function signal first, then contest I/O specialist,
+  then multi-file package specialist. Resume from phase-best adapters.
+
+defaults:
+  rollouts_per_prompt: 4
+  rollout_batch_size: 4
+  policy_micro_batch_size: 1
+  train_batch_size: 1
+  gradient_accumulation_steps: 4
+  max_grad_norm: 1.0
+  epochs: 1
+  top_p: 0.95
+  max_vram_gb: 22.5
+  auto_stop: true
+  auto_stop_metric: reward_mean
+  auto_stop_ema_alpha: 0.25
+  save_steps: 5
+  logging_steps: 1
+  process_reward_weight: 0.0
+  missing_thinking_penalty: 0.0
+  require_thinking_trace: false
+  sequential_rollouts: true
+  stop_on_nonfinite: true
+
+phases:
+  - phase: warmup
+    dataset: specialists/warmup.jsonl
+    bench_dataset: specialists/bench_all.jsonl
+    select_reward: null
+    reward: multi
+    max_samples_per_epoch: 240
+    max_prompt_tokens: 1280
+    max_new_tokens: 768
+    learning_rate: 6.0e-6
+    kl_coef: 0.0
+    temperature: 1.1
+    auto_stop_patience: 10
+    auto_stop_min_delta: 0.015
+    auto_stop_warmup_steps: 5
+    thinking_instruction: >
+      Elite coding assistant. Emit runnable Python only.
+      Functions: full ```python with defs.
+      Packages: ```python path=... per file.
+      Contest: ```python stdin/stdout.
+    extra:
+      max_steps: 20
+      sequential_rollouts: true
+
+  - phase: function
+    dataset: specialists/function_easy.jsonl
+    bench_dataset: specialists/bench_function.jsonl
+    select_reward: assert_tests
+    reward: assert_tests
+    max_samples_per_epoch: 320
+    max_prompt_tokens: 1280
+    max_new_tokens: 768
+    learning_rate: 5.0e-6
+    kl_coef: 0.0
+    temperature: 1.05
+    auto_stop_patience: 12
+    auto_stop_min_delta: 0.01
+    auto_stop_warmup_steps: 6
+    thinking_instruction: >
+      Implement the Python function(s). Output one complete ```python code block
+      with full definitions.
+    extra:
+      max_steps: 40
+      sequential_rollouts: true
+
+  - phase: function
+    dataset: specialists/function_medium.jsonl
+    bench_dataset: specialists/bench_function.jsonl
+    select_reward: assert_tests
+    reward: assert_tests
+    max_samples_per_epoch: 360
+    max_prompt_tokens: 1408
+    max_new_tokens: 896
+    learning_rate: 3.0e-6
+    kl_coef: 0.01
+    temperature: 0.95
+    auto_stop_patience: 12
+    auto_stop_min_delta: 0.008
+    auto_stop_warmup_steps: 6
+    thinking_instruction: >
+      Implement the Python function(s). Output one complete ```python code block
+      with full definitions.
+    extra:
+      max_steps: 45
+      sequential_rollouts: true
+
+  - phase: contest
+    dataset: specialists/contest_easy.jsonl
+    bench_dataset: specialists/bench_contest.jsonl
+    select_reward: unit_tests
+    reward: unit_tests
+    max_samples_per_epoch: 320
+    max_prompt_tokens: 1024
+    max_new_tokens: 640
+    learning_rate: 4.0e-6
+    kl_coef: 0.0
+    temperature: 1.05
+    auto_stop_patience: 14
+    auto_stop_min_delta: 0.01
+    auto_stop_warmup_steps: 8
+    thinking_instruction: >
+      Provide the final Python solution in a single ```python block that reads
+      from stdin and writes to stdout.
+    extra:
+      max_steps: 45
+      sequential_rollouts: true
+
+  - phase: contest
+    dataset: specialists/contest_medium.jsonl
+    bench_dataset: specialists/bench_contest.jsonl
+    select_reward: unit_tests
+    reward: unit_tests
+    max_samples_per_epoch: 380
+    max_prompt_tokens: 1152
+    max_new_tokens: 768
+    learning_rate: 2.5e-6
+    kl_coef: 0.01
+    temperature: 0.95
+    auto_stop_patience: 12
+    auto_stop_min_delta: 0.008
+    auto_stop_warmup_steps: 6
+    thinking_instruction: >
+      Provide the final Python solution in a single ```python block that reads
+      from stdin and writes to stdout.
+    extra:
+      max_steps: 50
+      sequential_rollouts: true
+
+  - phase: codebase
+    dataset: specialists/codebase_easy.jsonl
+    bench_dataset: specialists/bench_codebase.jsonl
+    select_reward: codebase_tests
+    reward: codebase_tests
+    max_samples_per_epoch: 280
+    max_prompt_tokens: 1536
+    max_new_tokens: 1024
+    learning_rate: 3.5e-6
+    kl_coef: 0.01
+    temperature: 1.0
+    auto_stop_patience: 12
+    auto_stop_min_delta: 0.01
+    auto_stop_warmup_steps: 6
+    thinking_instruction: >
+      Implement the multi-file package. For each target file emit:
+      ```python path=relative/path.py
+      # full file
+      ```
+    extra:
+      max_steps: 40
+      sequential_rollouts: true
+
+  - phase: codebase
+    dataset: specialists/codebase_medium.jsonl
+    bench_dataset: specialists/bench_codebase.jsonl
+    select_reward: codebase_tests
+    reward: codebase_tests
+    max_samples_per_epoch: 300
+    max_prompt_tokens: 1792
+    max_new_tokens: 1152
+    learning_rate: 2.0e-6
+    kl_coef: 0.02
+    temperature: 0.9
+    auto_stop_patience: 12
+    auto_stop_min_delta: 0.008
+    auto_stop_warmup_steps: 6
+    thinking_instruction: >
+      Implement the multi-file package. For each target file emit:
+      ```python path=relative/path.py
+      # full file
+      ```
+    extra:
+      max_steps: 45
+      sequential_rollouts: true

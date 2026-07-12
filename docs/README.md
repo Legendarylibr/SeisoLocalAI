@@ -24,6 +24,7 @@ Start with **[getting-started.md](getting-started.md)** — a step-by-step walkt
 | Fine-tune with QLoRA / LoRA | [training/quickstart.md](training/quickstart.md) |
 | Run each training pipeline step by step | [training/pipelines.md](training/pipelines.md) |
 | Single-GPU slime post-training | [training/quickstart.md § Slime Post-Training](training/quickstart.md#slime-post-training) |
+| Multi-reward coding RL (contest + packages + functions) | [training/multi_reward_coding.md](training/multi_reward_coding.md) |
 | RL quant from CLI | [cli.md § seiso rl-quant](cli.md#seiso-rl-quant) · [compression.md](compression.md) |
 | Use Cursor / Continue with local models | [getting-started.md § Connect external tools](getting-started.md#connect-external-tools-cursor-continue-etc) |
 | Export to GGUF or Hugging Face Hub | [getting-started.md § Step 6](getting-started.md#step-6--export-and-deploy) · [cli.md](cli.md) |

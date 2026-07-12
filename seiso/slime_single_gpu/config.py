@@ -51,6 +51,8 @@ class SingleGpuSlimeConfig:
     device: str = "cuda"
     gradient_checkpointing: bool = True
     use_lora: bool = False
+    # Continue from an existing PEFT adapter (multi-round RL).
+    adapter_path: str | None = None
     lora_r: int = 16
     lora_alpha: int = 32
     lora_dropout: float = 0.05
@@ -67,10 +69,15 @@ class SingleGpuSlimeConfig:
     auto_stop_patience: int = 20
     auto_stop_min_delta: float = 1e-4
     auto_stop_warmup_steps: int = 10
+    # EMA for best-checkpoint selection. 0 = use raw batch metric (legacy).
+    # Sparse coding rewards spike to 1.0 on easy batches; EMA avoids that trap.
+    auto_stop_ema_alpha: float = 0.0
     stop_on_nonfinite: bool = True
     write_verifier_data: bool = True
     verifier_data_file: str = "slime_verifier_data.jsonl"
     verifier_max_text_chars: int = 2048
+    # Generate each group member separately to cap peak KV-cache VRAM.
+    sequential_rollouts: bool = True
 
     @classmethod
     def from_yaml(cls, path: Path) -> SingleGpuSlimeConfig:
@@ -144,6 +151,8 @@ class SingleGpuSlimeConfig:
             raise ValueError("auto_stop_min_delta must be non-negative")
         if self.auto_stop_warmup_steps < 0:
             raise ValueError("auto_stop_warmup_steps must be non-negative")
+        if self.auto_stop_ema_alpha < 0 or self.auto_stop_ema_alpha > 1:
+            raise ValueError("auto_stop_ema_alpha must be in [0, 1]")
         if self.verifier_max_text_chars < 0:
             raise ValueError("verifier_max_text_chars must be non-negative")
         if not self.best_checkpoint_dir:

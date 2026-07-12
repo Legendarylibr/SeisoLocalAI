@@ -255,6 +255,12 @@ def test_sample_batches_stream_with_bounded_shuffle(tmp_path: Path):
 
 
 def test_reward_helpers():
+    from seiso.slime_single_gpu.rewards import (
+        infer_reward_name,
+        math_reward,
+        multi_reward,
+    )
+
     sample = {"answer": "42"}
 
     assert exact_match_reward("42", sample) == 1.0
@@ -262,6 +268,19 @@ def test_reward_helpers():
     assert contains_answer_reward("The answer is 42.", sample) == 1.0
     assert numeric_reward("x = 42.00001", sample) == 1.0
     assert resolve_reward("numeric") is numeric_reward
+    assert math_reward("reasoning\n\\boxed{42}", sample) == 1.0
+    assert math_reward("#### 42", {"answer": "#### 42"}) == 1.0
+    assert infer_reward_name({"unit_tests": {"inputs": ["1"], "outputs": ["1"]}}) == "unit_tests"
+    assert infer_reward_name({"answer": "42", "domain": "math"}) == "math"
+    assert infer_reward_name({"reward_name": "numeric", "answer": "7"}) == "numeric"
+    # multi dispatches to unit_tests when tests present
+    code_sample = {
+        "reward_name": "unit_tests",
+        "unit_tests": {"inputs": ["1\n"], "outputs": ["2\n"]},
+    }
+    assert multi_reward("```python\nprint(int(input())+1)\n```", code_sample) >= 0.05
+    assert resolve_reward("multi") is multi_reward
+    assert resolve_reward("auto") is multi_reward
 
 
 def test_unknown_reward_names_are_rejected():
@@ -540,6 +559,29 @@ def test_auto_stop_controller_tracks_best_reward_and_plateau():
     assert third.reason == "auto_stop:reward_mean_plateau"
     assert controller.best_value == 1.0
     assert controller.best_step == 0
+
+
+def test_auto_stop_controller_uses_ema_to_ignore_single_spike():
+    controller = _AutoStopController(
+        enabled=True,
+        metric="reward_mean",
+        patience=5,
+        min_delta=0.05,
+        warmup_steps=0,
+        ema_alpha=0.2,
+    )
+
+    # Slow climb then a single perfect batch should not immediately become "best"
+    # at 1.0 — EMA keeps the score closer to recent average.
+    controller.update(0, {"reward_mean": 0.2})
+    controller.update(1, {"reward_mean": 0.25})
+    controller.update(2, {"reward_mean": 0.3})
+    before = controller.best_value
+    controller.update(3, {"reward_mean": 1.0})
+    assert controller.best_value is not None
+    assert before is not None
+    assert controller.best_value < 0.55
+    assert controller.best_value > before
 
 
 def test_auto_stop_controller_minimizes_loss_metric():

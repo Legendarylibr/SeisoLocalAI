@@ -221,10 +221,12 @@ class TrainConfig(BaseModel):
     auto_stop_patience: int = Field(default=20, ge=1)
     auto_stop_min_delta: float = Field(default=1e-4, ge=0)
     auto_stop_warmup_steps: int = Field(default=10, ge=0)
+    auto_stop_ema_alpha: float = Field(default=0.0, ge=0, le=1)
     stop_on_nonfinite: bool = True
     write_verifier_data: bool = True
     verifier_data_file: str = Field(default="slime_verifier_data.jsonl", min_length=1)
     verifier_max_text_chars: int = Field(default=2048, ge=0)
+    sequential_rollouts: bool = True
     extra: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator(
@@ -287,6 +289,11 @@ class TrainConfig(BaseModel):
         extra: dict[str, Any] = getattr(self, "extra", {})
         policy_batch = self.policy_micro_batch_size or self.batch_size
         train_batch = self.train_batch_size or self.batch_size
+        adapter_path = None
+        if self.resume_from is not None:
+            adapter_path = str(self.resume_from)
+        elif extra.get("adapter_path"):
+            adapter_path = str(extra["adapter_path"])
         return SingleGpuSlimeConfig(
             model_id=self.model_id,
             dataset=Path(self.dataset),
@@ -325,6 +332,7 @@ class TrainConfig(BaseModel):
             device=self.device,
             gradient_checkpointing=self.gradient_checkpointing,
             use_lora=self.slime_use_lora,
+            adapter_path=adapter_path,
             lora_r=self.lora_r,
             lora_alpha=self.lora_alpha,
             lora_dropout=self.lora_dropout,
@@ -341,10 +349,14 @@ class TrainConfig(BaseModel):
             auto_stop_patience=self.auto_stop_patience,
             auto_stop_min_delta=self.auto_stop_min_delta,
             auto_stop_warmup_steps=self.auto_stop_warmup_steps,
+            auto_stop_ema_alpha=self.auto_stop_ema_alpha,
             stop_on_nonfinite=self.stop_on_nonfinite,
             write_verifier_data=self.write_verifier_data,
             verifier_data_file=self.verifier_data_file,
             verifier_max_text_chars=self.verifier_max_text_chars,
+            sequential_rollouts=bool(
+                extra.get("sequential_rollouts", self.sequential_rollouts)
+            ),
         )
 
 

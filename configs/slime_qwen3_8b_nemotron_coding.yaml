@@ -1,0 +1,66 @@
+model_id: /home/c/models/Qwen3-8B
+dataset: data/nemotron_competitive_coding_slime.jsonl
+output_dir: outputs/slime-qwen3-8b-nemotron-coding
+method: slime
+quant: 16bit
+dtype: bfloat16
+device: cuda
+training_methodology: seiso_release_post_training
+prompt_field: prompt
+answer_field: answer
+reward: unit_tests
+max_vram_gb: 22.5
+# Slightly longer gens than v5 (incomplete solutions were common); still VRAM-safe
+# with sequential rollouts + micro-batch 1 on 24GB.
+max_prompt_tokens: 896
+max_new_tokens: 576
+rollouts_per_prompt: 4
+rollout_batch_size: 4
+policy_micro_batch_size: 1
+batch_size: 1
+train_batch_size: 1
+shuffle_buffer_size: 256
+max_samples_per_epoch: null
+gradient_accumulation_steps: 4
+learning_rate: 6.0e-06
+max_grad_norm: 1.0
+epochs: 1
+kl_coef: 0.0
+clip_ratio: 0.2
+temperature: 1.1
+top_p: 0.95
+# Coding RL: chat template + no long thinking so unit-test rewards see code.
+require_thinking_trace: false
+thinking_instruction: Provide the final Python solution in a single ```python code
+  block that reads from stdin and writes to stdout.
+outcome_reward_weight: 1.0
+process_reward_weight: 0.0
+missing_thinking_penalty: 0.0
+min_thinking_tokens: 0
+gradient_checkpointing: true
+slime_use_lora: true
+lora_r: 16
+lora_alpha: 32
+lora_dropout: 0.05
+use_8bit_optimizer: true
+trust_remote_code: true
+# Dense saves so held-out selection can catch the true peak (v5 best mid-run).
+save_steps: 5
+logging_steps: 1
+best_checkpoint_dir: checkpoint-best
+auto_stop: true
+auto_stop_metric: reward_mean
+# Tighter plateau stop — v5 peak ~step 35; training past peak regressed bench.
+auto_stop_patience: 16
+auto_stop_min_delta: 0.012
+auto_stop_warmup_steps: 8
+auto_stop_ema_alpha: 0.25
+sequential_rollouts: true
+stop_on_nonfinite: true
+write_verifier_data: true
+verifier_data_file: slime_verifier_data.jsonl
+verifier_max_text_chars: 4096
+seed: 17
+extra:
+  max_steps: 40
+  sequential_rollouts: true

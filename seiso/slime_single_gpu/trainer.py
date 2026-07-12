@@ -56,9 +56,11 @@ class _AutoStopController:
     patience: int
     min_delta: float
     warmup_steps: int
+    ema_alpha: float = 0.0
     best_value: float | None = None
     best_step: int | None = None
     stale_steps: int = 0
+    ema_value: float | None = None
 
     @classmethod
     def from_config(cls, config: SingleGpuSlimeConfig) -> _AutoStopController:
@@ -68,6 +70,7 @@ class _AutoStopController:
             patience=config.auto_stop_patience,
             min_delta=config.auto_stop_min_delta,
             warmup_steps=config.auto_stop_warmup_steps,
+            ema_alpha=float(getattr(config, "auto_stop_ema_alpha", 0.0) or 0.0),
         )
 
     def update(self, step: int, stats: dict[str, float]) -> _AutoStopDecision:
@@ -75,9 +78,11 @@ class _AutoStopController:
         if value is None or not math.isfinite(value):
             return _AutoStopDecision()
 
-        improved = self._is_better(value)
+        score = self._smoothed(float(value))
+        stats["metric_smooth"] = score
+        improved = self._is_better(score)
         if improved:
-            self.best_value = value
+            self.best_value = score
             self.best_step = step
             self.stale_steps = 0
             return _AutoStopDecision(improved=True)
@@ -92,6 +97,16 @@ class _AutoStopController:
                 reason=f"auto_stop:{self.metric}_plateau",
             )
         return _AutoStopDecision()
+
+    def _smoothed(self, value: float) -> float:
+        if self.ema_alpha <= 0.0:
+            return value
+        if self.ema_value is None:
+            self.ema_value = value
+        else:
+            a = self.ema_alpha
+            self.ema_value = a * value + (1.0 - a) * self.ema_value
+        return float(self.ema_value)
 
     def _is_better(self, value: float) -> bool:
         if self.best_value is None:
@@ -131,7 +146,9 @@ def train_single_gpu_slime(config: SingleGpuSlimeConfig) -> Path:
     )
     model.config.use_cache = False
     _freeze_multimodal_backbones(model)
-    if config.use_lora:
+    if config.adapter_path:
+        model = _load_existing_adapter(model, config)
+    elif config.use_lora:
         model = _apply_lora(model, config)
     elif config.gradient_checkpointing and hasattr(model, "gradient_checkpointing_enable"):
         model.gradient_checkpointing_enable(
@@ -283,7 +300,9 @@ def _collect_rollouts(
     rollouts: list[Rollout] = []
     for sample_chunk in _chunked(samples, prompt_batch_size):
         prompt_chunk = [
-            _format_rollout_prompt(str(sample[config.prompt_field]), config)
+            _format_rollout_prompt(
+                str(sample[config.prompt_field]), config, tokenizer=tokenizer
+            )
             for sample in sample_chunk
         ]
         encoded = tokenizer(
@@ -295,16 +314,12 @@ def _collect_rollouts(
         ).to(config.device)
         prompt_width = int(encoded["input_ids"].shape[1])
         with torch.no_grad():
-            generated = model.generate(
-                **encoded,
-                do_sample=True,
-                temperature=config.temperature,
-                top_p=config.top_p,
-                max_new_tokens=config.max_new_tokens,
-                pad_token_id=tokenizer.pad_token_id,
-                eos_token_id=tokenizer.eos_token_id,
-                use_cache=True,
-                num_return_sequences=config.rollouts_per_prompt,
+            generated = _generate_rollout_sequences(
+                model=model,
+                encoded=encoded,
+                tokenizer=tokenizer,
+                config=config,
+                torch=torch,
             )
 
         completions = tokenizer.batch_decode(
@@ -350,7 +365,7 @@ def _collect_rollouts(
                         "outcome_reward": score["outcome_reward"],
                         "process_reward": score["process_reward"],
                         "thinking_penalty": score["thinking_penalty"],
-                        "reward_name": config.reward,
+                        "reward_name": score.get("reward_name", config.reward),
                         "prompt": _truncate_text(
                             prompt_chunk[sample_idx], config.verifier_max_text_chars
                         ),
@@ -370,37 +385,133 @@ def _collect_rollouts(
                     }
                 )
 
-        padded = _pad_rollouts(
-            chunk_rollouts, tokenizer.pad_token_id, config.device, torch
-        )
+        # Score log-probs one rollout at a time. Batching 4 long sequences and
+        # materializing vocab log_softmax is a common 24GB OOM on 8B models.
         with torch.no_grad():
-            old_logprobs = _sequence_logprobs(model, padded, torch).detach()
-            ref_logprobs = (
-                _sequence_logprobs(ref_model, padded, torch).detach()
-                if ref_model is not None
-                else None
-            )
-        for idx, rollout in enumerate(chunk_rollouts):
-            rollout.old_logprobs = old_logprobs[idx]
-            rollout.ref_logprobs = (
-                ref_logprobs[idx] if ref_logprobs is not None else None
-            )
+            for rollout in chunk_rollouts:
+                single = _pad_rollouts(
+                    [rollout], tokenizer.pad_token_id, config.device, torch
+                )
+                rollout.old_logprobs = _sequence_logprobs(model, single, torch)[
+                    0
+                ].detach()
+                if ref_model is not None:
+                    rollout.ref_logprobs = _sequence_logprobs(
+                        ref_model, single, torch
+                    )[0].detach()
+                else:
+                    rollout.ref_logprobs = None
+                del single
+                if config.device == "cuda":
+                    torch.cuda.empty_cache()
         if verifier_records:
             _append_jsonl_records(verifier_path, verifier_records)
         rollouts.extend(chunk_rollouts)
-        del encoded, generated, padded
+        del encoded, generated
+        if config.device == "cuda":
+            gc.collect()
+            torch.cuda.empty_cache()
 
     _assign_grouped_advantages(rollouts, config.rollouts_per_prompt)
     model.train()
     return rollouts
 
 
-def _format_rollout_prompt(prompt: str, config: SingleGpuSlimeConfig) -> str:
+def _generate_rollout_sequences(
+    *,
+    model,
+    encoded,
+    tokenizer,
+    config: SingleGpuSlimeConfig,
+    torch,
+):
+    """Sample group rollouts, optionally one at a time to reduce peak VRAM."""
+    gen_kwargs = {
+        "do_sample": True,
+        "temperature": max(float(config.temperature), 1e-5),
+        "top_p": config.top_p,
+        "max_new_tokens": config.max_new_tokens,
+        "pad_token_id": tokenizer.pad_token_id,
+        "eos_token_id": tokenizer.eos_token_id,
+        "use_cache": True,
+    }
+    n = int(config.rollouts_per_prompt)
+    if n <= 1 or not getattr(config, "sequential_rollouts", True):
+        return model.generate(
+            **encoded,
+            num_return_sequences=n,
+            **gen_kwargs,
+        )
+
+    # Sequential path: generate one full group member per call, then interleave
+    # so layout matches HF num_return_sequences (p0r0, p0r1, ..., p1r0, ...).
+    batch_size = int(encoded["input_ids"].shape[0])
+    per_return: list[Any] = []
+    for _ in range(n):
+        gen = model.generate(
+            **encoded,
+            num_return_sequences=1,
+            **gen_kwargs,
+        )
+        per_return.append(gen)
+        if config.device == "cuda":
+            torch.cuda.empty_cache()
+
+    max_len = max(int(g.shape[1]) for g in per_return)
+    pad_id = int(tokenizer.pad_token_id)
+    # Left-pad prompts already; pad generation on the right to max_len.
+    padded_returns = []
+    for gen in per_return:
+        if int(gen.shape[1]) == max_len:
+            padded_returns.append(gen)
+            continue
+        pad = torch.full(
+            (gen.shape[0], max_len - int(gen.shape[1])),
+            pad_id,
+            dtype=gen.dtype,
+            device=gen.device,
+        )
+        padded_returns.append(torch.cat([gen, pad], dim=1))
+
+    # Stack returns then reorder: [r0_b0, r0_b1, ...] -> [b0_r0, b0_r1, ...]
+    stacked = torch.stack(padded_returns, dim=1)  # [B, R, L]
+    interleaved = stacked.reshape(batch_size * n, max_len)
+    return interleaved
+
+
+def _format_rollout_prompt(
+    prompt: str,
+    config: SingleGpuSlimeConfig,
+    tokenizer=None,
+) -> str:
+    """Build a generation prompt; use chat template when the tokenizer provides one.
+
+    Qwen3-style models need ``apply_chat_template`` (and optional
+    ``enable_thinking``) or they free-run without structured answers/code.
+    """
+    text = str(prompt)
+    if tokenizer is not None and getattr(tokenizer, "chat_template", None):
+        messages = [{"role": "user", "content": text}]
+        kwargs: dict[str, Any] = {
+            "tokenize": False,
+            "add_generation_prompt": True,
+        }
+        # When we require a thinking trace, leave thinking enabled; otherwise
+        # disable it so coding models emit the final solution sooner.
+        try:
+            return tokenizer.apply_chat_template(
+                messages,
+                enable_thinking=bool(config.require_thinking_trace),
+                **kwargs,
+            )
+        except TypeError:
+            return tokenizer.apply_chat_template(messages, **kwargs)
+
     if not config.require_thinking_trace:
-        return prompt
-    if "<think>" in prompt.lower():
-        return prompt
-    return f"{prompt.rstrip()}\n\n{config.thinking_instruction}\n<think>"
+        return text
+    if "<think>" in text.lower():
+        return text
+    return f"{text.rstrip()}\n\n{config.thinking_instruction}\n<think>"
 
 
 def _force_completion_thinking_prefix(
@@ -409,7 +520,8 @@ def _force_completion_thinking_prefix(
 ) -> str:
     if not config.require_thinking_trace:
         return completion
-    if completion.lstrip().lower().startswith("<think>"):
+    lower = completion.lower()
+    if "<think>" in lower or "</think>" in lower:
         return completion
     return f"<think>{completion}"
 
@@ -420,9 +532,23 @@ def _score_completion(
     config: SingleGpuSlimeConfig,
     reward_fn,
 ) -> dict[str, float | str]:
+    from seiso.slime_single_gpu.rewards import (
+        infer_reward_name,
+        uses_unit_tests_scoring,
+    )
+
     thinking_trace, final_answer, has_trace = _split_thinking_trace(completion)
     answer_for_outcome = final_answer if config.require_thinking_trace else completion
-    outcome = float(reward_fn(answer_for_outcome, sample))
+    # For code unit tests, accept a fenced solution anywhere in the completion.
+    # multi/auto also uses this path when the sample itself is coding.
+    if uses_unit_tests_scoring(sample, config.reward):
+        outcome = max(
+            float(reward_fn(answer_for_outcome, sample)),
+            float(reward_fn(completion, sample)),
+            float(reward_fn(final_answer, sample)) if final_answer else 0.0,
+        )
+    else:
+        outcome = float(reward_fn(answer_for_outcome, sample))
     process = (
         _process_reward(thinking_trace, final_answer, config)
         if config.require_thinking_trace
@@ -438,6 +564,11 @@ def _score_completion(
         + config.process_reward_weight * process
         - penalty
     )
+    reward_name = (
+        infer_reward_name(sample)
+        if config.reward in {"multi", "auto", "mixed"}
+        else config.reward
+    )
     return {
         "reward": float(reward),
         "outcome_reward": outcome,
@@ -445,6 +576,7 @@ def _score_completion(
         "thinking_penalty": float(penalty),
         "thinking_trace": thinking_trace,
         "final_answer": final_answer,
+        "reward_name": reward_name,
     }
 
 
@@ -518,12 +650,17 @@ def _backprop_policy_step(
 ):
     total = len(rollouts)
     stats = _empty_stats()
+    # Spread must be measured on full groups, not policy microbatches of size 1.
+    group_spread = _group_reward_spread_mean(rollouts, config.rollouts_per_prompt)
+    nonzero_adv = sum(1 for r in rollouts if abs(r.advantage) > 1e-8)
     for chunk in _chunked(rollouts, config.policy_micro_batch_size):
         loss, chunk_stats = _policy_loss(model, chunk, pad_token_id, config, torch)
         weighted = len(chunk) / total
         (loss * weighted * loss_scale).backward()
         _merge_stats(stats, chunk_stats, weight=weighted)
         del loss
+    stats["group_reward_spread_mean"] = float(group_spread)
+    stats["advantage_nonzero_frac"] = float(nonzero_adv / max(total, 1))
     return stats
 
 
@@ -563,9 +700,8 @@ def _policy_loss(
         "outcome_reward_mean": _mean(r.outcome_reward for r in rollouts),
         "process_reward_mean": _mean(r.process_reward for r in rollouts),
         "thinking_penalty_mean": _mean(r.thinking_penalty for r in rollouts),
-        "group_reward_spread_mean": _group_reward_spread_mean(
-            rollouts, config.rollouts_per_prompt
-        ),
+        # Placeholder; overwritten in _backprop_policy_step with full-group value.
+        "group_reward_spread_mean": 0.0,
     }
 
 
@@ -580,6 +716,7 @@ def _empty_stats() -> dict[str, float]:
         "process_reward_mean": 0.0,
         "thinking_penalty_mean": 0.0,
         "group_reward_spread_mean": 0.0,
+        "advantage_nonzero_frac": 0.0,
     }
 
 
@@ -604,22 +741,36 @@ def _merge_stats(
 
 
 def _sequence_logprobs(model, batch: dict[str, Any], torch):
-    outputs = model(
-        input_ids=batch["input_ids"], attention_mask=batch["attention_mask"]
-    )
-    logits = outputs.logits[:, :-1, :]
-    labels = batch["input_ids"][:, 1:]
-    mask = batch["response_mask"][:, 1:].float()
-    token_logprobs = (
-        torch.log_softmax(logits.float(), dim=-1)
-        .gather(
-            -1,
-            labels.unsqueeze(-1),
+    """Mean response log-prob per sequence (memory-conscious).
+
+    Avoids casting the full [B, T, V] logits tensor to float32 (which OOMs on
+    8B + long coding completions). Processes oversized batches row-by-row.
+    """
+    input_ids = batch["input_ids"]
+    attention_mask = batch["attention_mask"]
+    response_mask = batch["response_mask"]
+    batch_size = int(input_ids.shape[0])
+
+    # Keep micro-batches tiny: full-vocab log_softmax dominates VRAM.
+    micro = 1 if batch_size > 1 else batch_size
+    scores = []
+    for start in range(0, batch_size, max(micro, 1)):
+        end = min(start + max(micro, 1), batch_size)
+        outputs = model(
+            input_ids=input_ids[start:end],
+            attention_mask=attention_mask[start:end],
         )
-        .squeeze(-1)
-    )
-    denom = mask.sum(dim=1).clamp_min(1.0)
-    return (token_logprobs * mask).sum(dim=1) / denom
+        # Stay in model dtype (bf16/fp16); float32 log_softmax blows up memory.
+        logits = outputs.logits[:, :-1, :]
+        labels = input_ids[start:end, 1:]
+        mask = response_mask[start:end, 1:].to(dtype=logits.dtype)
+        token_logprobs = torch.log_softmax(logits, dim=-1).gather(
+            -1, labels.unsqueeze(-1)
+        ).squeeze(-1)
+        denom = mask.sum(dim=1).clamp_min(1.0)
+        scores.append((token_logprobs * mask).sum(dim=1) / denom)
+        del outputs, logits, token_logprobs
+    return torch.cat(scores, dim=0)
 
 
 def _pad_rollouts(
@@ -663,14 +814,39 @@ def _pad_rollouts(
 
 
 def _assign_grouped_advantages(rollouts: list[Rollout], group_size: int) -> None:
+    """Group-relative advantages (GRPO-style).
+
+    Uses leave-one-out mean when group_size >= 3 for lower-bias estimates; for
+    pairs falls back to standard mean centering. Zero-variance groups get
+    advantage 0 (no fictitious signal).
+    """
     for start in range(0, len(rollouts), group_size):
         group = rollouts[start : start + group_size]
         rewards = [r.reward for r in group]
-        mean = sum(rewards) / len(rewards)
-        variance = sum((reward - mean) ** 2 for reward in rewards) / len(rewards)
-        std = math.sqrt(variance) or 1.0
+        if len(rewards) < 2:
+            for rollout in group:
+                rollout.advantage = 0.0
+            continue
+        if max(rewards) - min(rewards) < 1e-12:
+            for rollout in group:
+                rollout.advantage = 0.0
+            continue
+        if len(rewards) >= 3:
+            total = sum(rewards)
+            for rollout, reward in zip(group, rewards, strict=False):
+                loo_mean = (total - reward) / (len(rewards) - 1)
+                rollout.advantage = reward - loo_mean
+        else:
+            mean = sum(rewards) / len(rewards)
+            for rollout, reward in zip(group, rewards, strict=False):
+                rollout.advantage = reward - mean
+        # Normalize within group for stable policy gradients.
+        advs = [r.advantage for r in group]
+        mean_a = sum(advs) / len(advs)
+        var_a = sum((a - mean_a) ** 2 for a in advs) / len(advs)
+        std_a = math.sqrt(var_a) or 1.0
         for rollout in group:
-            rollout.advantage = (rollout.reward - mean) / std
+            rollout.advantage = (rollout.advantage - mean_a) / std_a
 
 
 def _mean(values: Iterable[float]) -> float:
@@ -751,12 +927,49 @@ def _apply_lora(model, config: SingleGpuSlimeConfig):
         target_modules=target_modules,
     )
     model = get_peft_model(model, lora_config)
+    return _enable_lora_training_hooks(model, config)
+
+
+def _load_existing_adapter(model, config: SingleGpuSlimeConfig):
+    """Resume multi-round RL from a saved PEFT adapter directory."""
+    try:
+        from peft import PeftModel, prepare_model_for_kbit_training
+    except ImportError as exc:
+        raise RuntimeError(
+            "adapter_path requires PEFT. Install training extras with "
+            "`pip install -e '.[train]'`."
+        ) from exc
+
+    adapter = Path(config.adapter_path or "")
+    if not adapter.exists():
+        raise FileNotFoundError(f"adapter_path not found: {adapter}")
+
+    if _model_loaded_in_kbit(model):
+        try:
+            model = prepare_model_for_kbit_training(
+                model,
+                use_gradient_checkpointing=False,
+            )
+        except TypeError:
+            model = prepare_model_for_kbit_training(model)
+
+    model = PeftModel.from_pretrained(model, str(adapter), is_trainable=True)
+    return _enable_lora_training_hooks(model, config)
+
+
+def _enable_lora_training_hooks(model, config: SingleGpuSlimeConfig):
     if config.gradient_checkpointing and hasattr(model, "gradient_checkpointing_enable"):
         model.gradient_checkpointing_enable(
             gradient_checkpointing_kwargs=_GRADIENT_CHECKPOINTING_KWARGS
         )
     if config.gradient_checkpointing and hasattr(model, "enable_input_require_grads"):
         model.enable_input_require_grads()
+    # Ensure adapter weights are trainable after load.
+    if hasattr(model, "train"):
+        model.train()
+    for name, param in model.named_parameters():
+        if "lora_" in name:
+            param.requires_grad_(True)
     return model
 
 
@@ -976,6 +1189,8 @@ def _auto_stop_stats(
         "best_step": controller.best_step,
         "auto_stop_metric": controller.metric,
         "stale_steps": controller.stale_steps,
+        "metric_ema": controller.ema_value,
+        "auto_stop_ema_alpha": controller.ema_alpha,
     }
 
 
