@@ -603,6 +603,7 @@ async def chat(
 
             if can_stream_local:
                 from forge.services.generation_continue import (
+                    authoritative_pass_tokens,
                     build_continue_messages,
                     hit_length_limit,
                     max_auto_continues,
@@ -653,10 +654,12 @@ async def chat(
                 total_output_tokens = 0
                 last_pass_tokens = 0
                 finish_reason = "stop"
-                max_continues = max_auto_continues()
                 total_budget = total_reply_token_budget()
                 # Capture the OOM-safe per-pass budget once; continues must not grow it.
+                # Derive max continues from that size so native 512–768 caps never
+                # starve long replies (fixed n_ctx + trim keeps VRAM flat).
                 base_pass_max_tokens = pass_max_tokens
+                max_continues = max_auto_continues(pass_max_tokens=base_pass_max_tokens)
                 try:
                     orchestrator.emit_log(
                         job_id, f"Streaming inference ({backend_label})"
@@ -675,6 +678,8 @@ async def chat(
                             if isinstance(reason, str) and reason:
                                 pass_finish = reason
                             pass_tokens = max(pass_tokens, int(update.output_tokens))
+                            # Prefer Ollama eval_count / similar over stream estimates.
+                            pass_tokens = authoritative_pass_tokens(pass_tokens, meta)
                             stats_payload = {
                                 "output_tokens": total_output_tokens + pass_tokens,
                                 "auto_continues": continues_used,
@@ -698,6 +703,7 @@ async def chat(
                                 streamed.append(chunk)
                                 yield {"event": "token", "data": chunk}
 
+                        pass_tokens = authoritative_pass_tokens(pass_tokens, last_meta)
                         total_output_tokens += pass_tokens
                         last_pass_tokens = pass_tokens
                         pass_text = "".join(pass_raw)

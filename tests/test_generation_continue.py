@@ -4,11 +4,13 @@ from __future__ import annotations
 
 from forge.services.generation_continue import (
     CONTINUE_USER_PROMPT,
+    authoritative_pass_tokens,
     build_continue_messages,
     hit_length_limit,
     max_auto_continues,
     resolve_finish_reason,
     should_auto_continue,
+    total_reply_token_budget,
 )
 
 
@@ -94,11 +96,30 @@ def test_build_continue_messages_trims_to_fixed_n_ctx():
     assert total_chars < len(huge)
 
 
-def test_max_auto_continues_clamped(monkeypatch):
+def test_max_auto_continues_explicit_and_clamped(monkeypatch):
     monkeypatch.setenv("SEISO_CHAT_AUTO_CONTINUE_MAX", "99")
-    assert max_auto_continues() == 12
+    assert max_auto_continues() == 99
+    monkeypatch.setenv("SEISO_CHAT_AUTO_CONTINUE_MAX", "999")
+    assert max_auto_continues() == 256
     monkeypatch.setenv("SEISO_CHAT_AUTO_CONTINUE_MAX", "0")
     assert max_auto_continues() == 0
+
+
+def test_max_auto_continues_derives_from_budget_and_pass_size(monkeypatch):
+    """Native 512-token passes must not hard-stop long replies at 8 continues."""
+    monkeypatch.delenv("SEISO_CHAT_AUTO_CONTINUE_MAX", raising=False)
+    monkeypatch.setenv("SEISO_CHAT_AUTO_CONTINUE_TOTAL_TOKENS", "32768")
+    # 32768 / 512 = 64 passes → 63 continues.
+    assert max_auto_continues(pass_max_tokens=512) == 63
+    # Larger per-pass needs fewer continues.
+    assert max_auto_continues(pass_max_tokens=2048) == 15
+
+
+def test_total_reply_token_budget_default_and_clamp(monkeypatch):
+    monkeypatch.delenv("SEISO_CHAT_AUTO_CONTINUE_TOTAL_TOKENS", raising=False)
+    assert total_reply_token_budget() == 32768
+    monkeypatch.setenv("SEISO_CHAT_AUTO_CONTINUE_TOTAL_TOKENS", "999999")
+    assert total_reply_token_budget() == 131072
 
 
 def test_should_auto_continue_respects_total_budget():
@@ -124,6 +145,30 @@ def test_should_auto_continue_respects_total_budget():
         )
         is True
     )
+
+
+def test_should_auto_continue_allows_many_passes_within_budget(monkeypatch):
+    """After 8 continues (old hard cap), still continue if budget remains."""
+    monkeypatch.delenv("SEISO_CHAT_AUTO_CONTINUE_MAX", raising=False)
+    monkeypatch.setenv("SEISO_CHAT_AUTO_CONTINUE_TOTAL_TOKENS", "32768")
+    assert (
+        should_auto_continue(
+            pass_output_tokens=512,
+            max_tokens=512,
+            pass_text="partial answer still going",
+            continues_used=8,
+            finish_reason="length",
+            total_output_tokens=9 * 512,
+            total_budget=32768,
+        )
+        is True
+    )
+
+
+def test_authoritative_pass_tokens_prefers_eval_count():
+    assert authoritative_pass_tokens(400, {"eval_count": 512}) == 512
+    assert authoritative_pass_tokens(600, {"eval_count": 512}) == 600
+    assert authoritative_pass_tokens(100, None) == 100
 
 
 def test_resolve_finish_reason():

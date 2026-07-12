@@ -12,23 +12,58 @@ CONTINUE_USER_PROMPT = (
     "Do not restart, rephrase, or repeat earlier text. Do not add a preamble."
 )
 
-# Cap auto-continues: each pass reuses the loaded model/n_ctx (no KV resize).
-# Default high enough that long replies finish without user "Continue" clicks;
-# per-pass max_tokens stays OOM-safe (native Linux often ~512–768).
-_DEFAULT_MAX_CONTINUES = 8
-_HARD_MAX_CONTINUES = 12
-# Stop continuing once the full reply has grown this large (absolute ceiling).
-_DEFAULT_TOTAL_REPLY_TOKENS = 8192
-
-
-def max_auto_continues() -> int:
-    """Max extra generation passes after a length stop (0 disables)."""
-    return max(0, min(_HARD_MAX_CONTINUES, env_int("SEISO_CHAT_AUTO_CONTINUE_MAX", _DEFAULT_MAX_CONTINUES)))
+# OOM safety is *not* enforced by limiting how many times we continue.
+# It comes from:
+#   - fixed n_ctx across passes (no KV growth)
+#   - trim_llama_messages_to_context on the continue prompt
+#   - per-pass max_tokens staying at the first-pass OOM-safe cap (often 512–768
+#     on native Linux NVIDIA)
+#
+# These continue/total ceilings only guard against runaway generation loops.
+# Default total is high enough that long essays finish without a mid-reply stop.
+_DEFAULT_TOTAL_REPLY_TOKENS = 32768
+# Host RAM for ~100k tokens of text is still tiny vs model VRAM; hard ceiling
+# is runaway protection only.
+_HARD_MAX_TOTAL_REPLY_TOKENS = 131072
+# Absolute pass count ceiling when env forces a value or budget is huge.
+_HARD_MAX_CONTINUES = 256
+# When SEISO_CHAT_AUTO_CONTINUE_MAX is unset, derive pass count from the total
+# budget and the OOM-safe per-pass size so small native caps never starve long
+# replies (e.g. 32768 / 512 ≈ 64 continues).
+_AUTO_CONTINUE_SENTINEL = -1
 
 
 def total_reply_token_budget() -> int:
     """Max cumulative output tokens across all auto-continue passes."""
-    return max(256, min(8192, env_int("SEISO_CHAT_AUTO_CONTINUE_TOTAL_TOKENS", _DEFAULT_TOTAL_REPLY_TOKENS)))
+    return max(
+        256,
+        min(
+            _HARD_MAX_TOTAL_REPLY_TOKENS,
+            env_int(
+                "SEISO_CHAT_AUTO_CONTINUE_TOTAL_TOKENS",
+                _DEFAULT_TOTAL_REPLY_TOKENS,
+            ),
+        ),
+    )
+
+
+def max_auto_continues(*, pass_max_tokens: int | None = None) -> int:
+    """Max extra generation passes after a length stop (0 disables).
+
+    When ``SEISO_CHAT_AUTO_CONTINUE_MAX`` is unset (or set to -1), the count is
+    derived so the total reply budget can be reached at the given per-pass size.
+    Explicit non-negative env values are honored up to ``_HARD_MAX_CONTINUES``.
+    """
+    raw = env_int("SEISO_CHAT_AUTO_CONTINUE_MAX", _AUTO_CONTINUE_SENTINEL)
+    if raw >= 0:
+        return max(0, min(_HARD_MAX_CONTINUES, int(raw)))
+
+    per = max(1, int(pass_max_tokens or 512))
+    budget = total_reply_token_budget()
+    # First generation + N continues must cover the full budget.
+    needed_passes = max(1, (budget + per - 1) // per)
+    continues = max(0, needed_passes - 1)
+    return min(_HARD_MAX_CONTINUES, continues)
 
 
 def hit_length_limit(
@@ -62,7 +97,7 @@ def should_auto_continue(
     if cancelled:
         return False
     if max_continues is None:
-        max_continues = max_auto_continues()
+        max_continues = max_auto_continues(pass_max_tokens=max_tokens)
     if continues_used >= max(0, int(max_continues)):
         return False
     if total_budget is None:
@@ -129,3 +164,24 @@ def resolve_finish_reason(
     if explicit:
         return explicit
     return "length" if hit_length else "stop"
+
+
+def authoritative_pass_tokens(
+    metered_tokens: int,
+    metadata: dict[str, Any] | None,
+) -> int:
+    """Prefer backend-reported eval/completion counts over stream estimates."""
+    tokens = max(0, int(metered_tokens))
+    if not metadata:
+        return tokens
+    for key in ("eval_count", "completion_tokens", "output_tokens"):
+        raw = metadata.get(key)
+        if raw is None:
+            continue
+        try:
+            reported = int(raw)
+        except (TypeError, ValueError):
+            continue
+        if reported > 0:
+            tokens = max(tokens, reported)
+    return tokens
