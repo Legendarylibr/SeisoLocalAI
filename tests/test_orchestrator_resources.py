@@ -144,3 +144,66 @@ def test_begin_generation_blocks_while_backend_refs_active(tmp_path: Path):
             orchestrator.begin_generation_for_user("user-a")
     finally:
         pool.end_inference()
+
+
+@pytest.mark.asyncio
+async def test_stream_local_updates_keeps_outer_generation_hold(tmp_path: Path, monkeypatch):
+    """Auto-continue multi-pass must not release the route-level generation hold.
+
+    Releasing between passes re-enters begin_generation and can raise
+    'backend is still stopping' when pool refs have not drained yet — aborting
+    long replies mid-stream.
+    """
+    from forge.orchestrators.inference import InferenceOrchestrator
+    from seiso.inference.streaming import StreamUpdate
+
+    orchestrator = InferenceOrchestrator(tmp_path)
+    orchestrator.begin_generation_for_user("user-a")
+
+    async def fake_stream_updates(_payload):
+        yield StreamUpdate(text="chunk", output_tokens=1, metadata={})
+
+    monkeypatch.setattr(orchestrator._runner, "stream_updates", fake_stream_updates)
+
+    tokens = [
+        update.text
+        async for update in orchestrator.stream_local_updates(
+            {"user_id": "user-a", "max_tokens": 8}
+        )
+    ]
+    assert tokens == ["chunk"]
+    # Outer reservation must still be held after the first pass.
+    assert orchestrator._active_generation_user_id == "user-a"
+
+    # A second continue pass must also leave the hold in place.
+    tokens2 = [
+        update.text
+        async for update in orchestrator.stream_local_updates(
+            {"user_id": "user-a", "max_tokens": 8}
+        )
+    ]
+    assert tokens2 == ["chunk"]
+    assert orchestrator._active_generation_user_id == "user-a"
+    orchestrator.end_generation_for_user("user-a")
+
+
+@pytest.mark.asyncio
+async def test_stream_local_updates_releases_when_it_began(tmp_path: Path, monkeypatch):
+    from forge.orchestrators.inference import InferenceOrchestrator
+    from seiso.inference.streaming import StreamUpdate
+
+    orchestrator = InferenceOrchestrator(tmp_path)
+
+    async def fake_stream_updates(_payload):
+        yield StreamUpdate(text="solo", output_tokens=1, metadata={})
+
+    monkeypatch.setattr(orchestrator._runner, "stream_updates", fake_stream_updates)
+
+    tokens = [
+        update.text
+        async for update in orchestrator.stream_local_updates(
+            {"user_id": "user-b", "max_tokens": 8}
+        )
+    ]
+    assert tokens == ["solo"]
+    assert orchestrator._active_generation_user_id is None

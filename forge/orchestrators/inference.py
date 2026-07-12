@@ -227,7 +227,10 @@ class InferenceOrchestrator(Orchestrator):
 
         messages = list(payload.get("messages", []))
         user_id = payload.get("user_id")
-        if not self._active_generation_user_id:
+        # Only release ownership if this call reserved it. Callers that already
+        # began generation (chat multi-pass auto-continue) keep the hold.
+        started_here = self._active_generation_user_id is None
+        if started_here:
             self.begin_generation_for_user(user_id)
         try:
             async for token in router_stream_chat(
@@ -239,7 +242,8 @@ class InferenceOrchestrator(Orchestrator):
             ):
                 yield token
         finally:
-            self.end_generation_for_user(user_id)
+            if started_here:
+                self.end_generation_for_user(user_id)
 
     async def _router_chat(
         self,
@@ -265,16 +269,24 @@ class InferenceOrchestrator(Orchestrator):
             yield update.text
 
     async def stream_local_updates(self, payload: dict[str, Any]) -> AsyncIterator[Any]:
-        """Stream local inference with cumulative output token counts."""
+        """Stream local inference with cumulative output token counts.
+
+        When the chat route already holds the per-user generation reservation
+        (auto-continue multi-pass), this method must **not** release it between
+        passes — re-beginning would hit assert_backend_idle / busy races and
+        abort long replies mid-stream.
+        """
         user_id = payload.get("user_id")
-        if not self._active_generation_user_id:
+        started_here = self._active_generation_user_id is None
+        if started_here:
             self.begin_generation_for_user(user_id)
         try:
             async with self._local_inference_lock:
                 async for update in self._runner.stream_updates(payload):
                     yield update
         finally:
-            self.end_generation_for_user(user_id)
+            if started_here:
+                self.end_generation_for_user(user_id)
 
     def _active_backend(self, payload: dict[str, Any]) -> str:
         explicit = (payload.get("inference_backend") or "").lower()

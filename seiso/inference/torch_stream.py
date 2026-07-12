@@ -181,6 +181,7 @@ def iter_torch_kv_tokens(
             metrics["prefill_ms"] = round((time.perf_counter() - prefill_started) * 1000.0, 3)
             metrics["prefill_chunk_size"] = chunk_size
 
+            hit_eos = False
             while tokens_generated < max_new_tokens:
                 if stop():
                     break
@@ -205,6 +206,7 @@ def iter_torch_kv_tokens(
 
                 token_int = int(next_id.item())
                 if token_int in eos_ids:
+                    hit_eos = True
                     completed = True
                     break
 
@@ -220,7 +222,17 @@ def iter_torch_kv_tokens(
                 if chunk:
                     yield StreamToken(chunk)
             else:
+                # Exhausted max_new_tokens without EOS.
                 completed = True
+
+            if not stop() and completed:
+                if hit_eos:
+                    yield StreamToken("", new_tokens=0, finish_reason="stop")
+                elif tokens_generated >= max(1, int(max_new_tokens) - 1):
+                    # Length stop so chat auto-continue can finish long replies.
+                    yield StreamToken("", new_tokens=0, finish_reason="length")
+                elif tokens_generated > 0:
+                    yield StreamToken("", new_tokens=0, finish_reason="stop")
     except Exception:
         clear_torch_prefix_cache(cache_key)
         raise

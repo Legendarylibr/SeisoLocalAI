@@ -252,16 +252,30 @@ def sanitize_inference_payload(
         max_tokens = min(max_tokens, max(1, native_cap))
     out["max_tokens"] = max_tokens
 
+    # Multi-pass auto-continue pins n_ctx so we never re-bucket / grow KV mid-reply.
+    pin_n_ctx = bool(out.pop("pin_n_ctx", False))
     if out.get("n_ctx") is not None:
-        from seiso.memory.protection.llama_clamp import clamp_llama_n_ctx
+        if pin_n_ctx:
+            # Keep the preloaded context size; only enforce absolute floors/ceilings.
+            from seiso.inference.context_limits import effective_context_ceiling
+            from seiso.memory.protection.constants import _MIN_LLAMA_CTX
 
-        out["n_ctx"] = clamp_llama_n_ctx(
-            int(out["n_ctx"]),
-            messages=messages,
-            max_tokens=max_tokens,
-            model_path=out.get("model_path"),
-            model_format=out.get("model_format"),
-        )
+            ceiling = effective_context_ceiling(
+                out.get("model_path"),
+                model_format=out.get("model_format"),
+                model_name=out.get("model_name"),
+            )
+            out["n_ctx"] = max(_MIN_LLAMA_CTX, min(int(out["n_ctx"]), int(ceiling)))
+        else:
+            from seiso.memory.protection.llama_clamp import clamp_llama_n_ctx
+
+            out["n_ctx"] = clamp_llama_n_ctx(
+                int(out["n_ctx"]),
+                messages=messages,
+                max_tokens=max_tokens,
+                model_path=out.get("model_path"),
+                model_format=out.get("model_format"),
+            )
     return out
 
 

@@ -79,6 +79,21 @@ def test_build_continue_messages_appends_partial_and_cue():
     assert msgs[-1] == {"role": "user", "content": CONTINUE_USER_PROMPT}
 
 
+def test_build_continue_messages_trims_to_fixed_n_ctx():
+    """Growing assistant text must fit the pinned window (no n_ctx growth)."""
+    base = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "write a long essay"},
+    ]
+    huge = "word " * 8000
+    msgs = build_continue_messages(base, huge, n_ctx=2048, max_tokens=512)
+    # Still ends with continue cue; total content is bounded by the fixed window.
+    assert msgs[-1]["content"] == CONTINUE_USER_PROMPT
+    total_chars = sum(len(str(m.get("content") or "")) for m in msgs)
+    # 2048 ctx − 512 gen leaves ~1500 tokens ≈ ~4800 chars; allow generous headroom.
+    assert total_chars < len(huge)
+
+
 def test_max_auto_continues_clamped(monkeypatch):
     monkeypatch.setenv("SEISO_CHAT_AUTO_CONTINUE_MAX", "99")
     assert max_auto_continues() == 12

@@ -115,7 +115,10 @@ def test_prefill_pressure_halves_chunk_without_replay():
         stats=stats,
     )
 
-    assert len(chunks) == 1
+    text_chunks = [part for part in chunks if part.text]
+    finish_chunks = [part for part in chunks if part.finish_reason]
+    assert len(text_chunks) == 1
+    assert finish_chunks and finish_chunks[-1].finish_reason == "length"
     assert stats["prefill_backoffs"] == 2
     assert stats["prefill_chunk_size"] == 2
 

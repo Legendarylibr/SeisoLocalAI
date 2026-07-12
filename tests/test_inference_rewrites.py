@@ -251,7 +251,9 @@ def test_torch_kv_stream_stops_when_pad_is_eos():
         )
     )
 
-    assert chunks == []
+    # Immediate EOS (pad == eos) yields no text, only a stop marker for auto-continue.
+    assert all(not part.text for part in chunks)
+    assert chunks and chunks[-1].finish_reason == "stop"
     assert model.calls == 1
 
 

@@ -127,7 +127,7 @@ async def test_chat_stream_auto_continues_on_length_limit(app, auth_client, monk
     """When a pass hits max_tokens, server continues once and concatenates tokens."""
     monkeypatch.setenv("SEISO_CHAT_AUTO_CONTINUE_MAX", "2")
     client, _token, headers, data_dir = auth_client
-    from forge.api.deps import get_db
+    from forge.api.deps import get_db, get_inference_orchestrator
 
     db = get_db()
     user = await db.get_user_by_display_name("Admin")
@@ -140,9 +140,13 @@ async def test_chat_stream_auto_continues_on_length_limit(app, auth_client, monk
     from seiso.inference.streaming import StreamUpdate
 
     calls: list[dict] = []
+    owner_during_passes: list[str | None] = []
+    orchestrator = get_inference_orchestrator()
 
     async def fake_stream_updates(payload):
         calls.append(payload)
+        # Generation reservation must stay held across continue passes.
+        owner_during_passes.append(orchestrator._active_generation_user_id)
         if len(calls) == 1:
             yield StreamUpdate(
                 text="Part one ",
@@ -172,6 +176,7 @@ async def test_chat_stream_auto_continues_on_length_limit(app, auth_client, monk
             "inference_backend": "llamacpp",
             "messages": [{"role": "user", "content": "write a long answer"}],
             "max_tokens": 8,
+            "n_ctx": 4096,
             "stream": True,
         },
     ) as res:
@@ -180,6 +185,12 @@ async def test_chat_stream_auto_continues_on_length_limit(app, auth_client, monk
 
     assert len(calls) == 2
     assert calls[1].get("max_tokens") == 8
+    # Fixed window pin must survive into the continue pass (no n_ctx growth).
+    assert calls[0].get("n_ctx") is not None
+    assert calls[1].get("n_ctx") == calls[0].get("n_ctx")
+    assert calls[0].get("pin_n_ctx") is True
+    assert calls[1].get("pin_n_ctx") is True
+    assert all(owner is not None for owner in owner_during_passes)
     token_text = "".join(data for event, data in events if event == "token")
     assert token_text == "Part one and part two."
     assert ("message", "Part one and part two.") in events

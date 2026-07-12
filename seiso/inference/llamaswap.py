@@ -915,6 +915,7 @@ class OllamaClient:
                             new_tokens=estimate_chunk_tokens(tool_text),
                         )
                     if chunk.get("done"):
+                        eval_count = int(chunk.get("eval_count") or 0)
                         if runtime_stats is not None:
                             for source, target in (
                                 ("load_duration", "sidecar_load_ms"),
@@ -924,13 +925,14 @@ class OllamaClient:
                                 raw_duration = int(chunk.get(source) or 0)
                                 if raw_duration > 0:
                                     runtime_stats[target] = round(raw_duration / 1_000_000.0, 3)
-                            eval_count = int(chunk.get("eval_count") or 0)
                             eval_duration = int(chunk.get("eval_duration") or 0)
                             if eval_count > 0 and eval_duration > 0:
                                 runtime_stats["decode_tokens_per_sec"] = round(
                                     eval_count / (eval_duration / 1_000_000_000.0),
                                     3,
                                 )
+                            if eval_count > 0:
+                                runtime_stats["eval_count"] = eval_count
                             runtime_stats["sidecar_resident_confirmed"] = True
                         tool_text = tool_buffer.flush()
                         if tool_text and not should_stop():
@@ -940,12 +942,33 @@ class OllamaClient:
                             )
                         # Ollama done_reason: stop | length | load | …
                         # Surface length so auto-continue can finish truncated replies.
+                        # Some builds omit done_reason on num_predict hits — use eval_count.
                         done_reason = str(chunk.get("done_reason") or "").strip().lower()
-                        if done_reason and not should_stop():
-                            reason = "length" if done_reason in {"length", "max_tokens"} else (
-                                "stop" if done_reason == "stop" else done_reason
+                        if not should_stop():
+                            num_predict = 0
+                            try:
+                                num_predict = int(
+                                    (body.get("options") or {}).get("num_predict") or 0
+                                )
+                            except (TypeError, ValueError):
+                                num_predict = 0
+                            hit_length = done_reason in {"length", "max_tokens"} or (
+                                num_predict > 0
+                                and eval_count > 0
+                                and eval_count >= max(1, num_predict - 1)
                             )
-                            yield StreamToken("", new_tokens=0, finish_reason=reason)
+                            if hit_length:
+                                reason = "length"
+                            elif done_reason == "stop":
+                                reason = "stop"
+                            elif done_reason:
+                                reason = done_reason
+                            elif eval_count > 0:
+                                reason = "stop"
+                            else:
+                                reason = None
+                            if reason:
+                                yield StreamToken("", new_tokens=0, finish_reason=reason)
                         break
         except (OSError, TimeoutError, urllib.error.URLError) as exc:
             raise RuntimeError(
