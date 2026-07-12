@@ -46,7 +46,8 @@ export function TrainPage() {
   const [jobs, setJobs] = useState<TrainingJob[]>([]);
   const { models: localModels, refresh: refreshLocalModels } = useTrainingModels();
   const [modelId, setModelId] = useState("");
-  const [dataset, setDataset] = useState("./data/sample.jsonl");
+  // Empty until the user picks a path/hub id — avoids full-corpus analysis on tab open.
+  const [dataset, setDataset] = useState("");
   const [method, setMethod] = useState("lora");
   const [quant, setQuant] = useState("4bit");
   const [datasetFormat, setDatasetFormat] = useState("auto");
@@ -197,15 +198,12 @@ export function TrainPage() {
   }, [pendingModel]);
 
   useEffect(() => {
+    // Restore a prior user choice only — never auto-pick the first local model on tab open
+    // (that would kick off recommendations / analysis before any selection).
     if (pendingModel || modelId) return;
     const stored = readStoredModel("train:model");
-    if (stored) {
-      setModelId(stored);
-      return;
-    }
-    const firstLocal = localModels.find((m) => m.repo_id)?.repo_id;
-    if (firstLocal) setModelId(firstLocal);
-  }, [localModels, pendingModel, modelId]);
+    if (stored) setModelId(stored);
+  }, [pendingModel, modelId]);
 
   useEffect(() => {
     if (!pendingModel || !pendingDownload) return;
@@ -267,8 +265,10 @@ export function TrainPage() {
   }, [method]);
 
   useEffect(() => {
-    if (!modelId && !dataset) {
+    // Wait for an explicit model or dataset choice — do not run recs/analysis on bare tab open.
+    if (!modelId.trim() && !dataset.trim()) {
       setRecommendations(null);
+      setRecLoading(false);
       return;
     }
     let cancelled = false;
@@ -289,8 +289,16 @@ export function TrainPage() {
     };
   }, [modelId, dataset]);
 
-  // Analyze the full dataset schema when selection changes (dataset-specialized training)
+  // Analyze the full dataset schema only after the user selects a dataset (not on tab open).
   useEffect(() => {
+    if (!dataset.trim()) {
+      lastDatasetAnalysisRef.current = null;
+      setDatasetValid(true);
+      setDatasetError(null);
+      setDatasetAnalysis(null);
+      setAnalyzingDataset(false);
+      return;
+    }
     const last = lastDatasetAnalysisRef.current;
     if (
       last?.dataset === dataset &&
@@ -752,6 +760,11 @@ export function TrainPage() {
           <div className="form-field">
             <label>Dataset</label>
             <HfDatasetPicker value={dataset} onChange={(v) => { setDataset(v); setConfigCustomized(false); }} />
+            {!dataset.trim() && (
+              <p className="muted-text studio-field-hint studio-field-hint-compact">
+                Select a dataset to analyze schema and prepare training settings. Nothing runs until you pick one.
+              </p>
+            )}
           </div>
           <div className="form-field">
             <label>Dataset format</label>
