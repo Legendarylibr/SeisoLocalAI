@@ -276,7 +276,14 @@ export type KnowledgeChunk = {
 };
 
 export type ChatThread = { id: string; title: string; model_id: string | null; created_at: string };
-export type ChatMessage = { id: string; role: string; content: string; created_at: string };
+export type ChatMessage = {
+  id: string;
+  role: string;
+  content: string;
+  created_at: string;
+  /** Optional model-provided thinking trace, stored encrypted with the message. */
+  reasoning?: string;
+};
 
 export type ChatContextStatus = {
   char_budget: number;

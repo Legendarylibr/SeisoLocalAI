@@ -2582,7 +2582,7 @@ def test_dflash_speculative_stream_loads_draft_with_estimated_context(monkeypatc
     monkeypatch.setattr(
         runner_mod,
         "format_messages_for_prompt",
-        lambda _messages, _tokenizer: "prompt",
+        lambda _messages, _tokenizer, **_kwargs: "prompt",
     )
     monkeypatch.setattr(
         runner_mod,

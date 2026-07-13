@@ -134,6 +134,11 @@ _SIDECAR_VRAM_RESERVE_MB = 4096
 _SIDECAR_CONSUMER_VRAM_RESERVE_MB = 5120
 _SIDECAR_CONSUMER_LARGE_VRAM_RESERVE_MB = 6144
 _CONSUMER_NVIDIA_RE = re.compile(r"\brtx\s*(?:20|30|40|50)[5-9]0\b", re.I)
+_OLLAMA_THINKING_MODEL_RE = re.compile(
+    r"(?:qwen3|deepseek[-_]?r1|qwq|gpt[-_]?oss|magistral|"
+    r"phi[-_]?4[-_]?reason|nemotron.*reason|olmo.*think)",
+    re.I,
+)
 _SIDECAR_CONSUMER_SMALL_FOOTPRINT_RATIO = 0.35
 _SIDECAR_CONSUMER_MEDIUM_FOOTPRINT_RATIO = 0.55
 _SIDECAR_CONSUMER_LARGE_FOOTPRINT_RATIO = 0.75
@@ -720,6 +725,20 @@ def sidecar_ollama_keep_alive(*, active: bool = False) -> str | None:
     return None
 
 
+def ollama_thinking_enabled(payload: dict[str, Any], model_path: str) -> bool:
+    """Request Ollama thinking only for models known to support its ``think`` flag."""
+    if not payload.get("reasoning", True):
+        return False
+    metadata = payload.get("model_metadata")
+    candidates = [
+        model_path,
+        str(payload.get("model_id") or ""),
+        str(payload.get("model_name") or ""),
+        json.dumps(metadata, sort_keys=True) if isinstance(metadata, dict) else "",
+    ]
+    return bool(_OLLAMA_THINKING_MODEL_RE.search(" ".join(candidates)))
+
+
 def sidecar_num_ctx(
     messages: list[dict[str, Any]],
     *,
@@ -901,6 +920,14 @@ class OllamaClient:
                     if error:
                         raise RuntimeError(f"Ollama error: {error}")
                     message = chunk.get("message") or {}
+                    reasoning = message.get("thinking") or message.get("reasoning")
+                    if reasoning:
+                        reasoning_content = str(reasoning)
+                        yield StreamToken(
+                            "",
+                            new_tokens=estimate_chunk_tokens(reasoning_content),
+                            reasoning=reasoning_content,
+                        )
                     content = message.get("content")
                     if content:
                         text_content = str(content)
@@ -1039,6 +1066,10 @@ class OllamaClient:
             "stream": stream,
             "options": options,
         }
+        if ollama_thinking_enabled(payload, model_path):
+            # Ollama enables supported thinking models (Qwen3, DeepSeek-R1, etc.)
+            # with this top-level flag. Do not send it to unsupported models.
+            body["think"] = True
         # Chat/preload requests pin residency; idle probes use the short default.
         active = bool(payload.get("sidecar_active", True))
         keep_alive = sidecar_ollama_keep_alive(active=active)
@@ -1137,6 +1168,14 @@ class LlamaSwapClient:
                     if not choices:
                         continue
                     delta = choices[0].get("delta") or {}
+                    reasoning = delta.get("reasoning_content") or delta.get("reasoning")
+                    if reasoning:
+                        reasoning_content = str(reasoning)
+                        yield StreamToken(
+                            "",
+                            new_tokens=estimate_chunk_tokens(reasoning_content),
+                            reasoning=reasoning_content,
+                        )
                     content = delta.get("content")
                     if content:
                         text_content = str(content)

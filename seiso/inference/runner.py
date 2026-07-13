@@ -730,6 +730,7 @@ class LocalInferenceRunner:
 
         def producer() -> None:
             buffer: list[str] = []
+            reasoning_buffer: list[str] = []
             buffered = 0
             output_tokens = 0
             flushed_once = False
@@ -758,9 +759,9 @@ class LocalInferenceRunner:
                             break
                         if part.finish_reason:
                             finish_reason = part.finish_reason
-                        if not part.text and part.finish_reason:
+                        if not part.text and not part.reasoning and part.finish_reason:
                             continue
-                        if first_token_at is None and part.text:
+                        if first_token_at is None and (part.text or part.reasoning):
                             first_token_at = time.perf_counter()
                             ttft_ms = (first_token_at - producer_started) * 1000.0
                             self._last_inference_stats["ttft_ms"] = round(ttft_ms, 3)
@@ -772,16 +773,19 @@ class LocalInferenceRunner:
                             )
                         output_tokens += part.new_tokens
                         buffer.append(part.text)
-                        buffered += len(part.text)
+                        reasoning_buffer.append(part.reasoning)
+                        buffered += len(part.text) + len(part.reasoning)
                         if not flushed_once:
                             bridge.publish(
                                 StreamUpdate(
                                     text="".join(buffer),
                                     output_tokens=output_tokens,
                                     metadata=metadata(),
+                                    reasoning="".join(reasoning_buffer),
                                 )
                             )
                             buffer.clear()
+                            reasoning_buffer.clear()
                             buffered = 0
                             flushed_once = True
                         elif buffered >= batch_chars:
@@ -790,21 +794,24 @@ class LocalInferenceRunner:
                                     text="".join(buffer),
                                     output_tokens=output_tokens,
                                     metadata=metadata(),
+                                    reasoning="".join(reasoning_buffer),
                                 )
                             )
                             buffer.clear()
+                            reasoning_buffer.clear()
                             buffered = 0
                 if finish_reason is None and not should_stop():
                     if output_tokens >= max(1, max_tokens - 1):
                         finish_reason = "length"
-                    elif flushed_once or buffer:
+                    elif flushed_once or buffer or reasoning_buffer:
                         finish_reason = "stop"
-                if buffer and not should_stop():
+                if (buffer or reasoning_buffer) and not should_stop():
                     bridge.publish(
                         StreamUpdate(
                             text="".join(buffer),
                             output_tokens=output_tokens,
                             metadata=metadata(reason=finish_reason),
+                            reasoning="".join(reasoning_buffer),
                         )
                     )
                 elif finish_reason and not should_stop():
@@ -831,12 +838,13 @@ class LocalInferenceRunner:
                         )
                     )
             except Exception as exc:
-                if buffer and not should_stop():
+                if (buffer or reasoning_buffer) and not should_stop():
                     bridge.publish(
                         StreamUpdate(
                             text="".join(buffer),
                             output_tokens=output_tokens,
                             metadata=metadata(),
+                            reasoning="".join(reasoning_buffer),
                         )
                     )
                 if not should_stop():
@@ -1046,7 +1054,11 @@ class LocalInferenceRunner:
                 max_tokens=int(payload.get("max_tokens", 512)),
             )
             messages = budget.messages
-            prompt = format_messages_for_prompt(messages, target_tok)
+            prompt = format_messages_for_prompt(
+                messages,
+                target_tok,
+                enable_thinking=bool(payload.get("reasoning", True)),
+            )
             max_new_tokens = budget.max_tokens
             num_speculative_tokens = default_num_speculative_tokens(payload)
 
@@ -1069,7 +1081,11 @@ class LocalInferenceRunner:
             max_tokens=int(payload.get("max_tokens", 512)),
         )
         messages = budget.messages
-        prompt = format_messages_for_prompt(messages, torch_bundle.target_tokenizer)
+        prompt = format_messages_for_prompt(
+            messages,
+            torch_bundle.target_tokenizer,
+            enable_thinking=bool(payload.get("reasoning", True)),
+        )
         max_new_tokens = budget.max_tokens
         num_speculative_tokens = default_num_speculative_tokens(payload)
 
@@ -1117,7 +1133,11 @@ class LocalInferenceRunner:
             raise RuntimeError("MLX not available — install mlx-lm on macOS") from exc
 
         model, tokenizer = self._pool.get_mlx(model_path)
-        prompt = format_messages_for_prompt(payload.get("messages", []), tokenizer)
+        prompt = format_messages_for_prompt(
+            payload.get("messages", []),
+            tokenizer,
+            enable_thinking=bool(payload.get("reasoning", True)),
+        )
         gen_kwargs = {"prompt": prompt, **mlx_stream_kwargs(payload)}
 
         try:
@@ -1148,7 +1168,11 @@ class LocalInferenceRunner:
             raise RuntimeError("MLX not available — install mlx-lm on macOS") from exc
 
         model, tokenizer = self._pool.get_mlx(model_path)
-        prompt = format_messages_for_prompt(payload.get("messages", []), tokenizer)
+        prompt = format_messages_for_prompt(
+            payload.get("messages", []),
+            tokenizer,
+            enable_thinking=bool(payload.get("reasoning", True)),
+        )
         text = generate(model, tokenizer, prompt=prompt, **mlx_stream_kwargs(payload))
         if not self._pool.is_generation_active(generation_id):
             return ""
@@ -1161,6 +1185,7 @@ class LocalInferenceRunner:
         tokenizer: Any,
         *,
         max_tokens: int,
+        enable_thinking: bool = False,
     ) -> tuple[dict[str, Any], int, int]:
         budget = _trim_torch_messages_to_context(
             messages,
@@ -1169,7 +1194,11 @@ class LocalInferenceRunner:
             max_tokens=max_tokens,
         )
         messages = budget.messages
-        prompt = format_messages_for_prompt(messages, tokenizer)
+        prompt = format_messages_for_prompt(
+            messages,
+            tokenizer,
+            enable_thinking=enable_thinking,
+        )
         inputs = tokenizer(prompt, return_tensors="pt")
         device = LocalInferenceRunner._torch_input_device(model)
         moved = {
@@ -1233,6 +1262,7 @@ class LocalInferenceRunner:
             payload.get("messages", []),
             tokenizer,
             max_tokens=int(payload.get("max_tokens", 512)),
+            enable_thinking=bool(payload.get("reasoning", True)),
         )
         policy = resolve_kv_cache_policy(
             payload,

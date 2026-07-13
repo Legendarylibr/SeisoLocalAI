@@ -37,10 +37,27 @@ from forge.services.knowledge_context import (
 from forge.services.knowledge_paths import validate_kb_id
 from forge.services.llm_output import StreamingOutputSanitizer, sanitize_llm_output
 from forge.services.model_router_client import ROUTER_MODEL_ID, fetch_router_status
+from forge.services.reasoning import ReasoningStreamParser, split_reasoning_text
 from forge.tools.sanitize import normalize_text
 from seiso.inference.backends import BACKEND_LLAMASWAP
 
 router = APIRouter(prefix="/inference", tags=["inference"])
+
+
+def _message_with_reasoning(message: dict[str, Any]) -> dict[str, Any]:
+    """Expose encrypted message metadata as an optional stable API field."""
+    result = dict(message)
+    metadata = result.get("metadata_json")
+    if isinstance(metadata, str):
+        try:
+            metadata = json.loads(metadata)
+        except json.JSONDecodeError:
+            metadata = {}
+    if isinstance(metadata, dict) and isinstance(metadata.get("reasoning"), str):
+        reasoning = metadata["reasoning"].strip()
+        if reasoning:
+            result["reasoning"] = reasoning
+    return result
 
 
 @router.post("/threads")
@@ -170,7 +187,7 @@ async def get_thread_messages(
 ) -> list[dict]:
     if not await db.get_thread_for_user(thread_id, user_id):
         raise HTTPException(404, "Thread not found")
-    return await db.get_messages(thread_id)
+    return [_message_with_reasoning(message) for message in await db.get_messages(thread_id)]
 
 
 @router.get("/context")
@@ -575,20 +592,42 @@ async def chat(
         async def event_gen():
             if can_stream_router:
                 parts: list[str] = []
+                router_reasoning_parts: list[str] = []
+                reasoning_parser = ReasoningStreamParser()
                 output_tokens = 0
                 try:
                     orchestrator.emit_log(job_id, "Streaming inference (smart router)")
                     async for token in orchestrator.stream_router(payload):
-                        parts.append(token)
                         output_tokens += 1
                         yield {
                             "event": "stats",
                             "data": json.dumps({"output_tokens": output_tokens}),
                         }
-                        yield {"event": "token", "data": token}
+                        for kind, value in reasoning_parser.feed(token):
+                            if kind == "reasoning":
+                                router_reasoning_parts.append(value)
+                                yield {"event": "reasoning", "data": value}
+                            else:
+                                parts.append(value)
+                                yield {"event": "token", "data": value}
+                    for kind, value in reasoning_parser.finish():
+                        if kind == "reasoning":
+                            router_reasoning_parts.append(value)
+                            yield {"event": "reasoning", "data": value}
+                        else:
+                            parts.append(value)
+                            yield {"event": "token", "data": value}
                     content = "".join(parts)
+                    reasoning = "".join(router_reasoning_parts).strip()
                     if body.thread_id:
-                        await db.add_message(body.thread_id, "assistant", content)
+                        await db.add_message(
+                            body.thread_id,
+                            "assistant",
+                            content,
+                            metadata={"reasoning": reasoning} if reasoning else None,
+                        )
+                    if reasoning:
+                        yield {"event": "reasoning_message", "data": reasoning}
                     yield {"event": "message", "data": content}
                     yield {"event": "done", "data": job_id}
                 except asyncio.CancelledError:
@@ -615,6 +654,9 @@ async def chat(
 
                 streamed: list[str] = []
                 raw_parts: list[str] = []
+                continuation_parts: list[str] = []
+                reasoning_parts: list[str] = []
+                reasoning_parser = ReasoningStreamParser()
                 sanitizer = StreamingOutputSanitizer(strip_tool_calls=not body.tools)
                 backend_label = (
                     "speculative"
@@ -686,6 +728,10 @@ async def chat(
                                 **meta,
                             }
                             if not update.text:
+                                if update.reasoning:
+                                    reasoning_parts.append(update.reasoning)
+                                    continuation_parts.append(f"<think>{update.reasoning}</think>")
+                                    yield {"event": "reasoning", "data": update.reasoning}
                                 if pass_finish:
                                     stats_payload["finish_reason"] = pass_finish
                                 yield {
@@ -694,14 +740,24 @@ async def chat(
                                 }
                                 continue
                             pass_raw.append(update.text)
-                            raw_parts.append(update.text)
+                            continuation_parts.append(update.text)
                             yield {
                                 "event": "stats",
                                 "data": json.dumps(stats_payload),
                             }
-                            for chunk in sanitizer.feed(update.text):
-                                streamed.append(chunk)
-                                yield {"event": "token", "data": chunk}
+                            if update.reasoning:
+                                reasoning_parts.append(update.reasoning)
+                                continuation_parts.append(f"<think>{update.reasoning}</think>")
+                                yield {"event": "reasoning", "data": update.reasoning}
+                            for kind, value in reasoning_parser.feed(update.text):
+                                if kind == "reasoning":
+                                    reasoning_parts.append(value)
+                                    yield {"event": "reasoning", "data": value}
+                                    continue
+                                raw_parts.append(value)
+                                for chunk in sanitizer.feed(value):
+                                    streamed.append(chunk)
+                                    yield {"event": "token", "data": chunk}
 
                         pass_tokens = authoritative_pass_tokens(pass_tokens, last_meta)
                         total_output_tokens += pass_tokens
@@ -731,7 +787,7 @@ async def chat(
 
                         continues_used += 1
                         partial = sanitize_llm_output(
-                            "".join(raw_parts), strip_tool_calls=not body.tools
+                            "".join(continuation_parts), strip_tool_calls=not body.tools
                         )
                         orchestrator.emit_log(
                             job_id,
@@ -779,19 +835,34 @@ async def chat(
                             finish_reason = "length"
                             break
 
+                    for kind, value in reasoning_parser.finish():
+                        if kind == "reasoning":
+                            reasoning_parts.append(value)
+                            yield {"event": "reasoning", "data": value}
+                        else:
+                            raw_parts.append(value)
+                            for chunk in sanitizer.feed(value):
+                                streamed.append(chunk)
+                                yield {"event": "token", "data": chunk}
                     for chunk in sanitizer.finish():
                         streamed.append(chunk)
                         yield {"event": "token", "data": chunk}
                     content = sanitize_llm_output(
                         "".join(raw_parts), strip_tool_calls=not body.tools
                     )
+                    reasoning = "".join(reasoning_parts).strip()
                     still_truncated = hit_length_limit(
                         last_pass_tokens,
                         pass_max_tokens,
                         finish_reason=finish_reason,
                     )
                     if body.thread_id:
-                        await db.add_message(body.thread_id, "assistant", content)
+                        await db.add_message(
+                            body.thread_id,
+                            "assistant",
+                            content,
+                            metadata={"reasoning": reasoning} if reasoning else None,
+                        )
                     final_stats = {
                         "output_tokens": total_output_tokens,
                         "finish_reason": finish_reason,
@@ -806,6 +877,8 @@ async def chat(
                         "event": "stats",
                         "data": json.dumps(final_stats),
                     }
+                    if reasoning:
+                        yield {"event": "reasoning_message", "data": reasoning}
                     yield {"event": "message", "data": content}
                     yield {"event": "done", "data": job_id}
                 except asyncio.CancelledError:
@@ -829,12 +902,21 @@ async def chat(
                 if job and job.status.value == "failed":
                     yield {"event": "error", "data": job.error or "Inference failed"}
                 elif job and job.result.get("content"):
-                    content = sanitize_llm_output(
+                    raw_content = sanitize_llm_output(
                         job.result["content"],
                         strip_tool_calls=not body.tools,
                     )
+                    content, reasoning = split_reasoning_text(raw_content)
                     if body.thread_id:
-                        await db.add_message(body.thread_id, "assistant", content)
+                        await db.add_message(
+                            body.thread_id,
+                            "assistant",
+                            content,
+                            metadata={"reasoning": reasoning} if reasoning else None,
+                        )
+                    if reasoning:
+                        yield {"event": "reasoning", "data": reasoning}
+                        yield {"event": "reasoning_message", "data": reasoning}
                     yield {"event": "message", "data": content}
                 yield {"event": "done", "data": job_id}
             except asyncio.CancelledError:
@@ -858,10 +940,21 @@ async def chat(
         raise HTTPException(500, "Job lost")
     if job.status.value == "failed":
         raise HTTPException(500, job.error or "Inference failed")
-    if body.thread_id and job.result.get("content"):
-        content = sanitize_llm_output(job.result["content"], strip_tool_calls=not body.tools)
-        await db.add_message(body.thread_id, "assistant", content)
     result = dict(job.result)
-    if result.get("content") and not body.tools:
-        result["content"] = sanitize_llm_output(result["content"], strip_tool_calls=True)
+    if result.get("content"):
+        raw_content = sanitize_llm_output(
+            result["content"],
+            strip_tool_calls=not body.tools,
+        )
+        content, reasoning = split_reasoning_text(raw_content)
+        result["content"] = content
+        if reasoning:
+            result["reasoning"] = reasoning
+        if body.thread_id:
+            await db.add_message(
+                body.thread_id,
+                "assistant",
+                content,
+                metadata={"reasoning": reasoning} if reasoning else None,
+            )
     return {"job_id": job_id, **result}
