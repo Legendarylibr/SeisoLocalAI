@@ -592,7 +592,7 @@ async def chat(
         async def event_gen():
             if can_stream_router:
                 parts: list[str] = []
-                reasoning_parts: list[str] = []
+                router_reasoning_parts: list[str] = []
                 reasoning_parser = ReasoningStreamParser()
                 output_tokens = 0
                 try:
@@ -605,20 +605,20 @@ async def chat(
                         }
                         for kind, value in reasoning_parser.feed(token):
                             if kind == "reasoning":
-                                reasoning_parts.append(value)
+                                router_reasoning_parts.append(value)
                                 yield {"event": "reasoning", "data": value}
                             else:
                                 parts.append(value)
                                 yield {"event": "token", "data": value}
                     for kind, value in reasoning_parser.finish():
                         if kind == "reasoning":
-                            reasoning_parts.append(value)
+                            router_reasoning_parts.append(value)
                             yield {"event": "reasoning", "data": value}
                         else:
                             parts.append(value)
                             yield {"event": "token", "data": value}
                     content = "".join(parts)
-                    reasoning = "".join(reasoning_parts).strip()
+                    reasoning = "".join(router_reasoning_parts).strip()
                     if body.thread_id:
                         await db.add_message(
                             body.thread_id,
