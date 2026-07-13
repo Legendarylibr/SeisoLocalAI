@@ -1,4 +1,4 @@
-# Seiso Local AI--Run with power limits during long inference on native linux.
+# Seiso Local AI
 
 [![CI](https://github.com/Legendarylibr/SeisoLocalAI/actions/workflows/ci.yml/badge.svg)](https://github.com/Legendarylibr/SeisoLocalAI/actions/workflows/ci.yml)
 
