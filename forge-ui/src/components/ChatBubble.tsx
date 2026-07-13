@@ -20,15 +20,7 @@ export const ChatBubble = memo(function ChatBubble({
         )}
       </div>
       <div className="chat-bubble-body">
-        {message.role === "assistant" && message.reasoning && (
-          <details className="chat-reasoning">
-            <summary>Reasoning</summary>
-            <div className="chat-reasoning-content">{message.reasoning}</div>
-          </details>
-        )}
-        {(message.content || message.role !== "assistant") && (
-          <div className="chat-bubble-content">{message.content}</div>
-        )}
+        <div className="chat-bubble-content">{message.content}</div>
         {truncated && message.role === "assistant" && (
           <p className="chat-reply-truncated muted-text">
             Reply reached the automatic length limit for this model.

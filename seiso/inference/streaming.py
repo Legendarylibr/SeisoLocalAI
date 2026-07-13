@@ -18,11 +18,10 @@ class StreamToken:
     text: str
     new_tokens: int = 1
     finish_reason: str | None = None
-    reasoning: str = ""
 
     def __post_init__(self) -> None:
         # Allow zero-token control markers that only carry finish_reason.
-        if self.finish_reason and not self.text and not self.reasoning and self.new_tokens == 0:
+        if self.finish_reason and not self.text and self.new_tokens == 0:
             return
         if self.new_tokens < 1:
             object.__setattr__(self, "new_tokens", 1)
@@ -35,4 +34,3 @@ class StreamUpdate:
     text: str
     output_tokens: int
     metadata: dict[str, Any] = field(default_factory=dict)
-    reasoning: str = ""

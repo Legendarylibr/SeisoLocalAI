@@ -62,37 +62,21 @@ function showStreamingText(el: HTMLElement, text: string) {
   el.textContent = text;
 }
 
-function showStreamingReasoning(container: HTMLDetailsElement, el: HTMLElement, text: string) {
-  container.hidden = false;
-  container.open = true;
-  el.textContent = text;
-}
-
 /** Isolated from ChatPage re-renders so imperative stream text is not wiped. */
 const StreamingBubble = memo(function StreamingBubble({
   contentRef,
-  reasoningRef,
-  reasoningContainerRef,
 }: {
   contentRef: React.RefObject<HTMLDivElement | null>;
-  reasoningRef: React.RefObject<HTMLDivElement | null>;
-  reasoningContainerRef: React.RefObject<HTMLDetailsElement | null>;
 }) {
   return (
     <div className="chat-bubble chat-bubble-assistant chat-bubble-streaming">
       <div className="chat-avatar">
         <IconAssistant size={14} />
       </div>
-      <div className="chat-bubble-body">
-        <details className="chat-reasoning" ref={reasoningContainerRef} hidden>
-          <summary>Reasoning</summary>
-          <div className="chat-reasoning-content" ref={reasoningRef} />
-        </details>
-        <div className="chat-bubble-content chat-typing" ref={contentRef}>
-          <span />
-          <span />
-          <span />
-        </div>
+      <div className="chat-bubble-content chat-typing" ref={contentRef}>
+        <span />
+        <span />
+        <span />
       </div>
     </div>
   );
@@ -154,8 +138,6 @@ export function ChatPage() {
   const scrollFrameRef = useRef<number | null>(null);
   const streamAbortRef = useRef<(() => void) | null>(null);
   const streamingElRef = useRef<HTMLDivElement>(null);
-  const streamingReasoningRef = useRef<HTMLDivElement>(null);
-  const streamingReasoningContainerRef = useRef<HTMLDetailsElement>(null);
   const streamDisplayRef = useRef<ReturnType<typeof createStreamDisplaySink> | null>(null);
   const streamThreadRef = useRef<string | null>(null);
   const genStartRef = useRef<number | null>(null);
@@ -754,7 +736,6 @@ export function ChatPage() {
     const latestUserMessage = [{ role: "user", content }];
 
     let assistantText = "";
-    let assistantReasoning = "";
     let progressText = "";
     let streamFailed = false;
     let replyTruncated = false;
@@ -763,9 +744,9 @@ export function ChatPage() {
     outputTokensRef.current = 0;
     setStreamTps(null);
 
-    const commitAssistantMessage = (text: string, reasoning: string, truncated = false) => {
+    const commitAssistantMessage = (text: string, truncated = false) => {
       const tid = streamThreadRef.current;
-      if (!tid || (!text.trim() && !reasoning.trim())) return;
+      if (!tid || !text.trim()) return;
       const id = crypto.randomUUID();
       setMessagesByThread((prev) => ({
         ...prev,
@@ -775,7 +756,6 @@ export function ChatPage() {
             id,
             role: "assistant" as const,
             content: text,
-            reasoning: reasoning.trim() || undefined,
             created_at: new Date().toISOString(),
           },
         ],
@@ -840,7 +820,6 @@ export function ChatPage() {
           thread_id: threadId,
           messages: latestUserMessage,
           stream: true,
-          reasoning: true,
           tools: useTools && toolsAvailable,
           allow_code_exec: allowCodeExec && codeExecAvailable,
           provider_id: providerId || null,
@@ -884,17 +863,6 @@ export function ChatPage() {
               scheduleTpsUpdate(true);
               return;
             }
-            if (event === "reasoning" || event === "reasoning_message") {
-              if (event === "reasoning_message") assistantReasoning = data;
-              else assistantReasoning += data;
-              const container = streamingReasoningContainerRef.current;
-              const el = streamingReasoningRef.current;
-              if (container && el) {
-                showStreamingReasoning(container, el, assistantReasoning);
-                scrollToBottom("auto");
-              }
-              return;
-            }
             if (event === "token" || event === "message") {
               if (event === "message") assistantText = data;
               else assistantText += data;
@@ -918,14 +886,8 @@ export function ChatPage() {
       if (streamingElRef.current) {
         streamingElRef.current.textContent = "";
       }
-      if (streamingReasoningRef.current) {
-        streamingReasoningRef.current.textContent = "";
-      }
-      if (streamingReasoningContainerRef.current) {
-        streamingReasoningContainerRef.current.hidden = true;
-      }
-      if (!streamFailed && (assistantText.trim() || assistantReasoning.trim())) {
-        commitAssistantMessage(assistantText, assistantReasoning, replyTruncated);
+      if (!streamFailed && assistantText.trim()) {
+        commitAssistantMessage(assistantText, replyTruncated);
       }
       if (assistantText.trim() && genStartRef.current !== null) {
         const tokenCount = resolveOutputTokenCount(outputTokensRef.current, assistantText);
@@ -1273,13 +1235,7 @@ export function ChatPage() {
                   truncated={Boolean(truncatedMessageIds[m.id])}
                 />
               ))}
-              {streaming && (
-                <StreamingBubble
-                  contentRef={streamingElRef}
-                  reasoningRef={streamingReasoningRef}
-                  reasoningContainerRef={streamingReasoningContainerRef}
-                />
-              )}
+              {streaming && <StreamingBubble contentRef={streamingElRef} />}
               <div ref={bottomRef} />
             </div>
           )}
