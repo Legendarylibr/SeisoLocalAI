@@ -4626,32 +4626,9 @@ th { color: var(--muted); font-weight: 500; font-size: 0.78rem; text-transform: 
   word-break: break-word;
 }
 
-.chat-reasoning {
-  max-width: min(46rem, 100%);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--surface) 78%, transparent);
-  color: var(--text-muted);
-}
-
-.chat-reasoning[hidden] {
-  display: none;
-}
-
-.chat-reasoning summary {
-  cursor: pointer;
-  padding: 0.5rem 0.75rem;
-  font-size: 0.78rem;
-  font-weight: 600;
-  user-select: none;
-}
-
-.chat-reasoning-content {
-  padding: 0 0.75rem 0.7rem;
-  font-size: 0.82rem;
-  line-height: 1.55;
-  white-space: pre-wrap;
-  word-break: break-word;
+/* Streaming bubble has no body wrapper — keep width aligned with final bubbles. */
+.chat-bubble-streaming > .chat-bubble-content {
+  max-width: calc(100% - 2.5rem);
 }
 
 .chat-reply-truncated {

@@ -21,10 +21,6 @@ class ChatRequest(BaseModel):
     temperature: float = Field(default=0.7, ge=0, le=2)
     top_p: float | None = Field(default=None, ge=0, le=1)
     stream: bool = True
-    reasoning: bool = Field(
-        default=True,
-        description="Enable the model/runtime's native thinking mode when supported",
-    )
     tools: bool = False
     allow_code_exec: bool = False
     provider_id: str | None = None
