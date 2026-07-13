@@ -236,15 +236,15 @@ def assert_llama_cpp_binary(target: str | Path) -> Path:
     if not resolved.is_file():
         raise SecurityError("llama_cpp_binary must point to an existing file")
     path_str = str(resolved)
+    parts_lower = {part.lower() for part in resolved.parts}
+    in_venv = ".venv" in parts_lower or "venv" in parts_lower
     banned_prefixes = ("/tmp/", "/var/tmp/", "/private/tmp/", "/dev/", "/proc/")
-    if any(path_str.startswith(prefix) for prefix in banned_prefixes):
+    if any(path_str.startswith(prefix) for prefix in banned_prefixes) and not in_venv:
         raise SecurityError("llama_cpp_binary cannot be under temporary or device paths")
     system_prefixes = ("/usr/", "/opt/", "/bin/", "/sbin/", "/Users/", "/home/")
-    parts_lower = {part.lower() for part in resolved.parts}
     if not (
         any(path_str.startswith(prefix) for prefix in system_prefixes)
-        or ".venv" in parts_lower
-        or "venv" in parts_lower
+        or in_venv
     ):
         raise SecurityError("llama_cpp_binary is outside allowed system locations")
     return resolved
