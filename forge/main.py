@@ -90,7 +90,12 @@ def create_app() -> FastAPI:
         allow_origins=cfg.cors_origin_list,
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-        allow_headers=["Authorization", "Content-Type", "X-CSRF-Token"],
+        allow_headers=[
+            "Authorization",
+            "Content-Type",
+            "X-CSRF-Token",
+            "X-Request-ID",
+        ],
     )
 
     @app.exception_handler(DatabaseCryptoError)
@@ -99,37 +104,65 @@ def create_app() -> FastAPI:
 
     @app.middleware("http")
     async def security_headers(request: Request, call_next):
+        import uuid
+
         from forge.security.auth import RateLimiter
         from forge.security.client_ip import client_ip
         from forge.security.csp import apply_response_security_headers
         from forge.security.csrf import validate_csrf
+        from forge.security.request_context import (
+            REQUEST_ID_HEADER,
+            reset_request_id,
+            set_request_id,
+        )
 
         settings = get_settings()
-        if settings.rate_limit_enabled:
-            if not hasattr(app.state, "rate_limiter"):
-                app.state.rate_limiter = RateLimiter(settings.rate_limit_per_minute)
-            client = client_ip(request)
-            if request.url.path not in (
-                "/health",
-                "/api/health",
-                "/auth/status",
-                "/api/auth/status",
-            ):
-                try:
-                    app.state.rate_limiter.check(client)
-                except HTTPException as exc:
-                    return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
-        if not validate_csrf(request):
-            return JSONResponse({"detail": "CSRF validation failed"}, status_code=403)
-        response: Response = await call_next(request)
-        apply_response_security_headers(
-            path=request.url.path,
-            response_headers=response.headers,
-            local_only=not settings.allow_remote,
-            debug=settings.debug,
-            existing_csp=response.headers.get("content-security-policy"),
-        )
-        return response
+        incoming = (request.headers.get(REQUEST_ID_HEADER) or "").strip()
+        if incoming and len(incoming) <= 128 and all(
+            c.isalnum() or c in "-_" for c in incoming
+        ):
+            request_id = incoming
+        else:
+            request_id = uuid.uuid4().hex
+        request.state.request_id = request_id
+        token = set_request_id(request_id)
+        try:
+            if settings.rate_limit_enabled:
+                if not hasattr(app.state, "rate_limiter"):
+                    app.state.rate_limiter = RateLimiter(settings.rate_limit_per_minute)
+                client = client_ip(request)
+                if request.url.path not in (
+                    "/health",
+                    "/api/health",
+                    "/auth/status",
+                    "/api/auth/status",
+                ):
+                    try:
+                        app.state.rate_limiter.check(client)
+                    except HTTPException as exc:
+                        return JSONResponse(
+                            {"detail": exc.detail},
+                            status_code=exc.status_code,
+                            headers={REQUEST_ID_HEADER: request_id},
+                        )
+            if not validate_csrf(request):
+                return JSONResponse(
+                    {"detail": "CSRF validation failed"},
+                    status_code=403,
+                    headers={REQUEST_ID_HEADER: request_id},
+                )
+            response: Response = await call_next(request)
+            apply_response_security_headers(
+                path=request.url.path,
+                response_headers=response.headers,
+                local_only=not settings.allow_remote,
+                debug=settings.debug,
+                existing_csp=response.headers.get("content-security-policy"),
+            )
+            response.headers[REQUEST_ID_HEADER] = request_id
+            return response
+        finally:
+            reset_request_id(token)
 
     # Defer route module imports until app construction (keeps import seiso/forge light).
     from forge.api.routes import (

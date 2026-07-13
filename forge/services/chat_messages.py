@@ -154,16 +154,18 @@ def prepare_chat_context(
     prior_model_key: str | None = None,
     knowledge_context: str | None = None,
 ) -> list[dict[str, str]]:
-    """Apply decay trimming, model system prompt, and mid-thread model-switch bridge."""
+    """Apply decay trimming, model system prompt, and mid-thread model-switch bridge.
+
+    Knowledge context is injected as a non-system ``user`` turn (never ``system``)
+    immediately before the latest user message so retrieval cannot claim instruction
+    authority at the chat-template layer.
+    """
     trimmed = trim_messages_to_context(history)
     out: list[dict[str, str]] = []
 
     system = chat_system_prompt(model_key, tools_enabled=tools_enabled)
     if system:
         out.append({"role": "system", "content": system})
-
-    if knowledge_context:
-        out.append({"role": "system", "content": knowledge_context})
 
     if (
         prior_model_key
@@ -178,7 +180,18 @@ def prepare_chat_context(
             }
         )
 
-    out.extend(_strip_message_metadata(m) for m in trimmed)
+    body = [_strip_message_metadata(m) for m in trimmed]
+    if knowledge_context:
+        kb_msg = {"role": "user", "content": knowledge_context}
+        if body and body[-1].get("role") == "user":
+            out.extend(body[:-1])
+            out.append(kb_msg)
+            out.append(body[-1])
+        else:
+            out.extend(body)
+            out.append(kb_msg)
+    else:
+        out.extend(body)
     return out
 
 

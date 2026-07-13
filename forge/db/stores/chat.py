@@ -150,15 +150,26 @@ class ChatMixin:
             "created_at": now,
         }
 
-    async def get_messages(self, thread_id: str) -> list[dict]:
-        async with (
-            self._conn() as conn,
-            conn.execute(
-                "SELECT * FROM chat_messages WHERE thread_id = ? ORDER BY created_at ASC",
-                (thread_id,),
-            ) as cur,
-        ):
-            return [
-                self._decrypt_row("chat_messages", dict(r))
-                for r in await cur.fetchall()
-            ]
+    async def get_messages(self, thread_id: str, user_id: str | None = None) -> list[dict]:
+        """Return messages for a thread.
+
+        When ``user_id`` is provided, requires the thread to belong to that user
+        (defense-in-depth against callers that skip ``get_thread_for_user``).
+        """
+        async with self._conn() as conn:
+            if user_id is not None:
+                async with conn.execute(
+                    """SELECT m.* FROM chat_messages m
+                       INNER JOIN chat_threads t ON t.id = m.thread_id
+                       WHERE m.thread_id = ? AND t.user_id = ?
+                       ORDER BY m.created_at ASC""",
+                    (thread_id, user_id),
+                ) as cur:
+                    rows = await cur.fetchall()
+            else:
+                async with conn.execute(
+                    "SELECT * FROM chat_messages WHERE thread_id = ? ORDER BY created_at ASC",
+                    (thread_id,),
+                ) as cur:
+                    rows = await cur.fetchall()
+            return [self._decrypt_row("chat_messages", dict(r)) for r in rows]

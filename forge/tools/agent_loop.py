@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from collections.abc import Awaitable, Callable
 
-from forge.security.audit import audit_event
+from forge.security.audit import audit_event, hash_audit_payload
 from forge.tools.registry import (
     TOOL_CALL_PATTERN,
     ToolRegistry,
@@ -54,7 +54,12 @@ async def run_agent_loop_async(
             args = call.get("arguments", {})
             if on_log:
                 on_log(f"  → {name}({json.dumps(args)[:120]})")
-            audit_event("tool_call", user_id=user_id, tool=name)
+            audit_event(
+                "tool_call",
+                user_id=user_id,
+                tool=name,
+                args_sha256=hash_audit_payload(args),
+            )
             result = await registry.execute_async(name, args)
             history.append({"role": "tool", "name": name, "content": result})
 

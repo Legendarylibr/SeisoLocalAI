@@ -170,7 +170,7 @@ async def get_thread_messages(
 ) -> list[dict]:
     if not await db.get_thread_for_user(thread_id, user_id):
         raise HTTPException(404, "Thread not found")
-    return await db.get_messages(thread_id)
+    return await db.get_messages(thread_id, user_id)
 
 
 @router.get("/context")
@@ -197,7 +197,7 @@ async def get_chat_context(
     if thread_id:
         if not await db.get_thread_for_user(thread_id, user_id):
             raise HTTPException(404, "Thread not found")
-        history = await db.get_messages(thread_id)
+        history = await db.get_messages(thread_id, user_id)
     draft_content = normalize_text(draft_message or "").strip()
     if draft_content:
         draft_matches_last = (

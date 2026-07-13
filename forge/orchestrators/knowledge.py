@@ -11,7 +11,7 @@ from forge.orchestrators.base import Orchestrator
 from forge.security.audit import audit_event
 from forge.services.knowledge_context import retrieve_knowledge_chunks
 from forge.services.knowledge_paths import assert_ingest_source
-from forge.tools.sanitize import prepare_kb_chunk_text, wrap_tool_result
+from forge.tools.sanitize import prepare_kb_chunk_text, wrap_kb_reference
 from seiso.security import safe_join
 from seiso.security.deps import sha256_file
 
@@ -102,7 +102,7 @@ class KnowledgeOrchestrator(Orchestrator):
             query=query,
             top_k=top_k,
         )
-        results = [{**c, "text": wrap_tool_result(f"kb:{kb_id}", c["text"])} for c in chunks]
+        results = [{**c, "text": wrap_kb_reference(f"kb:{kb_id}", c["text"])} for c in chunks]
         self._emit_log(job_id, f"Retrieved {len(results)} chunks for query")
         return {"results": results}
 

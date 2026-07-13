@@ -126,3 +126,17 @@ def test_assert_llama_cpp_binary_allows_venv_path(tmp_path: Path):
 
     resolved = assert_llama_cpp_binary(binary)
     assert resolved == binary.resolve()
+
+
+def test_assert_llama_cpp_binary_rejects_tmp():
+    import os
+
+    from seiso.security import SecurityError
+
+    binary = Path("/tmp") / f"seiso_llama_test_{os.getpid()}"
+    binary.write_bytes(b"fake-binary")
+    try:
+        with pytest.raises(SecurityError, match="temporary"):
+            assert_llama_cpp_binary(binary)
+    finally:
+        binary.unlink(missing_ok=True)
