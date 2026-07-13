@@ -686,6 +686,13 @@ Seiso’s local chat builds on these inference projects:
 | [**llama.cpp**](https://github.com/ggml-org/llama.cpp) | Default GGUF chat backend (`llama-cpp-python`) |
 | [**vLLM**](https://github.com/vllm-project/vllm) | Optional provider endpoint for OpenAI-compatible local serving |
 
+@inproceedings{kwon2023efficient,
+  title={Efficient Memory Management for Large Language Model Serving with PagedAttention},
+  author={Woosuk Kwon and Zhuohan Li and Siyuan Zhuang and Ying Sheng and Lianmin Zheng and Cody Hao Yu and Joseph E. Gonzalez and Hao Zhang and Ion Stoica},
+  booktitle={Proceedings of the ACM SIGOPS 29th Symposium on Operating Systems Principles},
+  year={2023}
+}
+
 ## Distributed Training
 
 Distributed training integrates https://github.com/huggingface/accelerate to extend training configurations to multi-gpu distributed training.
