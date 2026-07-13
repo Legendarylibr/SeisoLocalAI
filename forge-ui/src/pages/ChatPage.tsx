@@ -840,6 +840,7 @@ export function ChatPage() {
           thread_id: threadId,
           messages: latestUserMessage,
           stream: true,
+          reasoning: true,
           tools: useTools && toolsAvailable,
           allow_code_exec: allowCodeExec && codeExecAvailable,
           provider_id: providerId || null,

@@ -1054,7 +1054,11 @@ class LocalInferenceRunner:
                 max_tokens=int(payload.get("max_tokens", 512)),
             )
             messages = budget.messages
-            prompt = format_messages_for_prompt(messages, target_tok)
+            prompt = format_messages_for_prompt(
+                messages,
+                target_tok,
+                enable_thinking=bool(payload.get("reasoning", True)),
+            )
             max_new_tokens = budget.max_tokens
             num_speculative_tokens = default_num_speculative_tokens(payload)
 
@@ -1077,7 +1081,11 @@ class LocalInferenceRunner:
             max_tokens=int(payload.get("max_tokens", 512)),
         )
         messages = budget.messages
-        prompt = format_messages_for_prompt(messages, torch_bundle.target_tokenizer)
+        prompt = format_messages_for_prompt(
+            messages,
+            torch_bundle.target_tokenizer,
+            enable_thinking=bool(payload.get("reasoning", True)),
+        )
         max_new_tokens = budget.max_tokens
         num_speculative_tokens = default_num_speculative_tokens(payload)
 
@@ -1125,7 +1133,11 @@ class LocalInferenceRunner:
             raise RuntimeError("MLX not available — install mlx-lm on macOS") from exc
 
         model, tokenizer = self._pool.get_mlx(model_path)
-        prompt = format_messages_for_prompt(payload.get("messages", []), tokenizer)
+        prompt = format_messages_for_prompt(
+            payload.get("messages", []),
+            tokenizer,
+            enable_thinking=bool(payload.get("reasoning", True)),
+        )
         gen_kwargs = {"prompt": prompt, **mlx_stream_kwargs(payload)}
 
         try:
@@ -1156,7 +1168,11 @@ class LocalInferenceRunner:
             raise RuntimeError("MLX not available — install mlx-lm on macOS") from exc
 
         model, tokenizer = self._pool.get_mlx(model_path)
-        prompt = format_messages_for_prompt(payload.get("messages", []), tokenizer)
+        prompt = format_messages_for_prompt(
+            payload.get("messages", []),
+            tokenizer,
+            enable_thinking=bool(payload.get("reasoning", True)),
+        )
         text = generate(model, tokenizer, prompt=prompt, **mlx_stream_kwargs(payload))
         if not self._pool.is_generation_active(generation_id):
             return ""
@@ -1169,6 +1185,7 @@ class LocalInferenceRunner:
         tokenizer: Any,
         *,
         max_tokens: int,
+        enable_thinking: bool = False,
     ) -> tuple[dict[str, Any], int, int]:
         budget = _trim_torch_messages_to_context(
             messages,
@@ -1177,7 +1194,11 @@ class LocalInferenceRunner:
             max_tokens=max_tokens,
         )
         messages = budget.messages
-        prompt = format_messages_for_prompt(messages, tokenizer)
+        prompt = format_messages_for_prompt(
+            messages,
+            tokenizer,
+            enable_thinking=enable_thinking,
+        )
         inputs = tokenizer(prompt, return_tensors="pt")
         device = LocalInferenceRunner._torch_input_device(model)
         moved = {
@@ -1241,6 +1262,7 @@ class LocalInferenceRunner:
             payload.get("messages", []),
             tokenizer,
             max_tokens=int(payload.get("max_tokens", 512)),
+            enable_thinking=bool(payload.get("reasoning", True)),
         )
         policy = resolve_kv_cache_policy(
             payload,

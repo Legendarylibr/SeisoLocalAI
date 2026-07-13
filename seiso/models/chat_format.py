@@ -10,16 +10,25 @@ def format_messages_for_prompt(
     tokenizer,
     *,
     add_generation_prompt: bool = True,
+    enable_thinking: bool | None = None,
 ) -> str:
     """Render chat messages to a single prompt string."""
     if hasattr(tokenizer, "apply_chat_template"):
+        kwargs: dict[str, Any] = {
+            "tokenize": False,
+            "add_generation_prompt": add_generation_prompt,
+        }
+        if enable_thinking is not None:
+            kwargs["enable_thinking"] = enable_thinking
+        try:
+            rendered = tokenizer.apply_chat_template(messages, **kwargs)
+        except TypeError:
+            # Older and non-reasoning tokenizers do not accept enable_thinking.
+            kwargs.pop("enable_thinking", None)
+            rendered = tokenizer.apply_chat_template(messages, **kwargs)
         return cast(
             str,
-            tokenizer.apply_chat_template(
-                messages,
-                tokenize=False,
-                add_generation_prompt=add_generation_prompt,
-            ),
+            rendered,
         )
     parts = [
         f"{m.get('role', 'user').upper()}: {m.get('content', '')}" for m in messages
