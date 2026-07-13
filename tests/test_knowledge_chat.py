@@ -35,9 +35,11 @@ def test_format_knowledge_context_includes_sources():
     )
     assert "a.txt" in text
     assert "Alpha beta" in text
-    assert "[TOOL_DATA source=kb:docs]" in text
-    assert "[/TOOL_DATA]" in text
-    assert "untrusted reference data" in text
+    assert "[KB_REFERENCE id=" in text
+    assert "source=kb:docs]" in text
+    assert "[/KB_REFERENCE id=" in text
+    assert "untrusted document data" in text
+    assert "[TOOL_DATA" not in text
 
 
 def test_retrieve_knowledge_chunks_skips_instruction_like(tmp_path: Path):
@@ -76,3 +78,11 @@ def test_format_knowledge_context_flags_instruction_like_chunks():
         knowledge_base_id="kb1",
     )
     assert "instruction-like" in text
+
+
+def test_format_knowledge_context_uses_unique_nonce_per_call():
+    chunk = [{"text": "Alpha beta", "source": "a.txt"}]
+    a = format_knowledge_context(chunk, knowledge_base_id="docs")
+    b = format_knowledge_context(chunk, knowledge_base_id="docs")
+    assert a != b
+    assert "[KB_REFERENCE id=" in a and "[KB_REFERENCE id=" in b

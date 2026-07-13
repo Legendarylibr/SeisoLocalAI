@@ -191,8 +191,16 @@ def test_prepare_chat_context_includes_knowledge_block():
         knowledge_context="Reference: Seiso runs locally.",
     )
     assert messages[0]["role"] == "system"
-    assert messages[1]["role"] == "system"
-    assert "Reference: Seiso runs locally." in messages[1]["content"]
+    assert "KB_REFERENCE" in messages[0]["content"] or "untrusted" in messages[0]["content"].lower()
+    # Knowledge must not be elevated to system — inject as user before the question.
+    kb_and_user = [m for m in messages if m["role"] == "user"]
+    assert len(kb_and_user) == 2
+    assert kb_and_user[0]["content"] == "Reference: Seiso runs locally."
+    assert kb_and_user[1]["content"] == "What does the doc say?"
+    assert not any(
+        m["role"] == "system" and "Reference: Seiso runs locally." in m["content"]
+        for m in messages
+    )
 
 
 def test_prepare_chat_context_skips_system_prompt_when_tools_enabled():
