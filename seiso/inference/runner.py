@@ -730,6 +730,7 @@ class LocalInferenceRunner:
 
         def producer() -> None:
             buffer: list[str] = []
+            reasoning_buffer: list[str] = []
             buffered = 0
             output_tokens = 0
             flushed_once = False
@@ -758,9 +759,9 @@ class LocalInferenceRunner:
                             break
                         if part.finish_reason:
                             finish_reason = part.finish_reason
-                        if not part.text and part.finish_reason:
+                        if not part.text and not part.reasoning and part.finish_reason:
                             continue
-                        if first_token_at is None and part.text:
+                        if first_token_at is None and (part.text or part.reasoning):
                             first_token_at = time.perf_counter()
                             ttft_ms = (first_token_at - producer_started) * 1000.0
                             self._last_inference_stats["ttft_ms"] = round(ttft_ms, 3)
@@ -772,16 +773,19 @@ class LocalInferenceRunner:
                             )
                         output_tokens += part.new_tokens
                         buffer.append(part.text)
-                        buffered += len(part.text)
+                        reasoning_buffer.append(part.reasoning)
+                        buffered += len(part.text) + len(part.reasoning)
                         if not flushed_once:
                             bridge.publish(
                                 StreamUpdate(
                                     text="".join(buffer),
                                     output_tokens=output_tokens,
                                     metadata=metadata(),
+                                    reasoning="".join(reasoning_buffer),
                                 )
                             )
                             buffer.clear()
+                            reasoning_buffer.clear()
                             buffered = 0
                             flushed_once = True
                         elif buffered >= batch_chars:
@@ -790,21 +794,24 @@ class LocalInferenceRunner:
                                     text="".join(buffer),
                                     output_tokens=output_tokens,
                                     metadata=metadata(),
+                                    reasoning="".join(reasoning_buffer),
                                 )
                             )
                             buffer.clear()
+                            reasoning_buffer.clear()
                             buffered = 0
                 if finish_reason is None and not should_stop():
                     if output_tokens >= max(1, max_tokens - 1):
                         finish_reason = "length"
-                    elif flushed_once or buffer:
+                    elif flushed_once or buffer or reasoning_buffer:
                         finish_reason = "stop"
-                if buffer and not should_stop():
+                if (buffer or reasoning_buffer) and not should_stop():
                     bridge.publish(
                         StreamUpdate(
                             text="".join(buffer),
                             output_tokens=output_tokens,
                             metadata=metadata(reason=finish_reason),
+                            reasoning="".join(reasoning_buffer),
                         )
                     )
                 elif finish_reason and not should_stop():
@@ -831,12 +838,13 @@ class LocalInferenceRunner:
                         )
                     )
             except Exception as exc:
-                if buffer and not should_stop():
+                if (buffer or reasoning_buffer) and not should_stop():
                     bridge.publish(
                         StreamUpdate(
                             text="".join(buffer),
                             output_tokens=output_tokens,
                             metadata=metadata(),
+                            reasoning="".join(reasoning_buffer),
                         )
                     )
                 if not should_stop():

@@ -901,6 +901,14 @@ class OllamaClient:
                     if error:
                         raise RuntimeError(f"Ollama error: {error}")
                     message = chunk.get("message") or {}
+                    reasoning = message.get("thinking") or message.get("reasoning")
+                    if reasoning:
+                        reasoning_content = str(reasoning)
+                        yield StreamToken(
+                            "",
+                            new_tokens=estimate_chunk_tokens(reasoning_content),
+                            reasoning=reasoning_content,
+                        )
                     content = message.get("content")
                     if content:
                         text_content = str(content)
@@ -1137,6 +1145,14 @@ class LlamaSwapClient:
                     if not choices:
                         continue
                     delta = choices[0].get("delta") or {}
+                    reasoning = delta.get("reasoning_content") or delta.get("reasoning")
+                    if reasoning:
+                        reasoning_content = str(reasoning)
+                        yield StreamToken(
+                            "",
+                            new_tokens=estimate_chunk_tokens(reasoning_content),
+                            reasoning=reasoning_content,
+                        )
                     content = delta.get("content")
                     if content:
                         text_content = str(content)

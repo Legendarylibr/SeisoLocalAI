@@ -37,7 +37,11 @@ async def test_chat_stream_sends_token_message_done(app, auth_client, monkeypatc
     from seiso.inference.streaming import StreamUpdate
 
     async def fake_stream_updates(_payload):
-        yield StreamUpdate(text="hello ", output_tokens=1)
+        yield StreamUpdate(
+            text="hello ",
+            output_tokens=1,
+            reasoning="I should answer with a friendly greeting.",
+        )
         yield StreamUpdate(
             text="world",
             output_tokens=2,
@@ -73,11 +77,20 @@ async def test_chat_stream_sends_token_message_done(app, auth_client, monkeypatc
     mock_runner.pool.has_active_inference.return_value = False
     get_inference_orchestrator()._runner = mock_runner
 
+    thread_res = await client.post(
+        "/api/inference/threads",
+        headers=headers,
+        json={"title": "Reasoning test"},
+    )
+    assert thread_res.status_code == 200
+    thread_id = thread_res.json()["id"]
+
     async with client.stream(
         "POST",
         "/api/inference/chat",
         headers=headers,
         json={
+            "thread_id": thread_id,
             "model_id": model["id"],
             "inference_backend": "llamacpp",
             "messages": [{"role": "user", "content": "hi"}],
@@ -89,12 +102,26 @@ async def test_chat_stream_sends_token_message_done(app, auth_client, monkeypatc
 
     token_text = "".join(data for event, data in events if event == "token")
     assert token_text == "hello world"
+    assert (
+        "reasoning",
+        "I should answer with a friendly greeting.",
+    ) in events
+    assert (
+        "reasoning_message",
+        "I should answer with a friendly greeting.",
+    ) in events
     assert ("message", "hello world") in events
     assert any(event == "done" for event, _data in events)
     stats = [data for event, data in events if event == "stats"]
     assert stats
     assert '"output_tokens": 2' in stats[-1]
     assert '"truncated": false' in stats[-1]
+
+    message_res = await client.get(f"/api/inference/threads/{thread_id}/messages")
+    assert message_res.status_code == 200
+    assistant = message_res.json()[-1]
+    assert assistant["content"] == "hello world"
+    assert assistant["reasoning"] == "I should answer with a friendly greeting."
 
 
 def _install_chat_stream_mocks(monkeypatch, mock_runner):
