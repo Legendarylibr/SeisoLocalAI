@@ -20,21 +20,26 @@ from seiso.slime_single_gpu.rewards import (
 from seiso.slime_single_gpu.trainer import (
     Rollout,
     _append_jsonl_records,
+    _append_metrics,
     _apply_lora,
     _assign_grouped_advantages,
     _AutoStopController,
     _check_training_health,
     _chunked,
+    _DistributedSlimeContext,
     _empty_stats,
     _final_output_dir,
     _force_completion_thinking_prefix,
     _format_rollout_prompt,
     _freeze_multimodal_backbones,
     _group_reward_spread_mean,
+    _iter_distributed_sample_batches,
     _iter_sample_batches,
     _load_samples,
     _merge_stats,
+    _metric_record,
     _process_reward,
+    _rank_verifier_path,
     _score_completion,
     _split_thinking_trace,
     _truncate_text,
@@ -249,9 +254,7 @@ def test_sample_batches_stream_with_bounded_shuffle(tmp_path: Path):
 
     assert [len(batch) for batch in batches] == [2, 1]
     assert sum(len(batch) for batch in batches) == 3
-    assert all(
-        {"prompt", "answer"} <= set(sample) for batch in batches for sample in batch
-    )
+    assert all({"prompt", "answer"} <= set(sample) for batch in batches for sample in batch)
 
 
 def test_reward_helpers():
@@ -448,9 +451,7 @@ def test_lora_target_inference_honors_configured_modules():
     ]
 
 
-def test_apply_lora_reports_training_extra_when_peft_is_missing(
-    monkeypatch, tmp_path: Path
-):
+def test_apply_lora_reports_training_extra_when_peft_is_missing(monkeypatch, tmp_path: Path):
     real_import = __import__
 
     def fake_import(name, *args, **kwargs):
@@ -581,9 +582,7 @@ def test_verifier_jsonl_helpers_bound_text(tmp_path: Path):
         [{"prompt": _truncate_text("abcdef", 3)}, {"prompt": _truncate_text("x", 0)}],
     )
 
-    records = [
-        json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()
-    ]
+    records = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
     assert records == [{"prompt": "abc"}, {"prompt": ""}]
 
 
@@ -600,6 +599,81 @@ def test_final_output_dir_can_be_nested(tmp_path: Path):
 
 def test_chunked_splits_work_for_single_gpu_microbatches():
     assert list(_chunked([1, 2, 3, 4, 5], 2)) == [[1, 2], [3, 4], [5]]
+
+
+def test_distributed_slime_shards_batches_evenly(tmp_path: Path):
+    data = tmp_path / "data.jsonl"
+    data.write_text(
+        "\n".join(json.dumps({"prompt": f"p{i}", "answer": str(i)}) for i in range(8)),
+        encoding="utf-8",
+    )
+    cfg = SingleGpuSlimeConfig(
+        model_id="test/model",
+        dataset=data,
+        output_dir=tmp_path / "out",
+        train_batch_size=2,
+    )
+
+    class _FakeTorch:
+        long = "long"
+
+        @staticmethod
+        def tensor(values, **_kwargs):
+            return _FakeTensor(values[0])
+
+        class distributed:
+            class ReduceOp:
+                MIN = "min"
+
+            @staticmethod
+            def all_reduce(_tensor, **_kwargs):
+                return None
+
+    class _FakeTensor:
+        def __init__(self, value):
+            self._value = value
+
+        def item(self):
+            return self._value
+
+    rank0 = _DistributedSlimeContext(enabled=True, world_size=2, rank=0)
+    rank1 = _DistributedSlimeContext(enabled=True, world_size=2, rank=1)
+
+    batches0 = list(_iter_distributed_sample_batches(cfg, random.Random(1), rank0, _FakeTorch))
+    batches1 = list(_iter_distributed_sample_batches(cfg, random.Random(1), rank1, _FakeTorch))
+
+    assert len(batches0) == len(batches1) == 2
+    assert {row["prompt"] for batch in batches0 for row in batch} == {"p0", "p2", "p4", "p6"}
+    assert {row["prompt"] for batch in batches1 for row in batch} == {"p1", "p3", "p5", "p7"}
+
+
+def test_distributed_verifier_path_is_rank_scoped(tmp_path: Path):
+    cfg = SingleGpuSlimeConfig(
+        model_id="test/model",
+        dataset=tmp_path / "data.jsonl",
+        output_dir=tmp_path / "out",
+        verifier_data_file="slime_verifier_data.jsonl",
+    )
+
+    path = _rank_verifier_path(
+        cfg,
+        _DistributedSlimeContext(enabled=True, world_size=4, rank=2),
+    )
+
+    assert path == tmp_path / "out" / "slime_verifier_data.rank2.jsonl"
+
+
+def test_slime_metrics_emit_training_reward_shape(tmp_path: Path, capsys, monkeypatch):
+    monkeypatch.setenv("SEISO_EMIT_METRICS_STDOUT", "1")
+    path = tmp_path / "metrics.jsonl"
+
+    _append_metrics(path, {"step": 3, "loss": 0.5, "reward_mean": 1.25})
+
+    record = json.loads(path.read_text(encoding="utf-8"))
+    assert record["type"] == "training"
+    assert record["reward"] == 1.25
+    assert _metric_record({"reward_mean": 2.0})["reward"] == 2.0
+    assert "SEISO_METRIC:" in capsys.readouterr().out
 
 
 def test_merge_stats_weighted_by_microbatch_size():

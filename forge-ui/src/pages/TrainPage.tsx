@@ -61,6 +61,12 @@ export function TrainPage() {
   const [loraR, setLoraR] = useState(16);
   const [loraAlpha, setLoraAlpha] = useState(32);
   const [gradAccum, setGradAccum] = useState(4);
+  const [slimeReward, setSlimeReward] = useState("contains_answer");
+  const [slimeRolloutsPerPrompt, setSlimeRolloutsPerPrompt] = useState(4);
+  const [slimeRolloutBatchSize, setSlimeRolloutBatchSize] = useState(4);
+  const [slimeMaxPromptTokens, setSlimeMaxPromptTokens] = useState(512);
+  const [slimeMaxNewTokens, setSlimeMaxNewTokens] = useState(256);
+  const [slimeAutoStop, setSlimeAutoStop] = useState(true);
   const [multiGpu, setMultiGpu] = useState(false);
   const [activeTab, setActiveTab] = useState<TrainStudioTab>("setup");
   const [distributedStrategy, setDistributedStrategy] = useState("auto");
@@ -261,7 +267,7 @@ export function TrainPage() {
 
   useEffect(() => {
     if (method === "full") setExportProfile("full_bundle");
-    else if (method === "lora") setExportProfile("lora_bundle");
+    else if (method === "lora" || method === "slime") setExportProfile("lora_bundle");
   }, [method]);
 
   useEffect(() => {
@@ -534,6 +540,18 @@ export function TrainPage() {
         packing,
         output_dir: "./outputs",
       };
+      const slimeTrainingConfig =
+        method === "slime"
+          ? {
+              reward: slimeReward,
+              rollouts_per_prompt: slimeRolloutsPerPrompt,
+              rollout_batch_size: Math.max(slimeRolloutBatchSize, slimeRolloutsPerPrompt),
+              max_prompt_tokens: slimeMaxPromptTokens,
+              max_new_tokens: slimeMaxNewTokens,
+              auto_stop: slimeAutoStop,
+              slime_use_lora: true,
+            }
+          : {};
 
       const distributedTrainingOverrides =
         distributedEnabled && distributedOverridesEnabled
@@ -552,6 +570,7 @@ export function TrainPage() {
       const res = await api.startTraining(
         {
           ...baseTrainingConfig,
+          ...slimeTrainingConfig,
           ...distributedTrainingOverrides,
           multi_gpu: distributedEnabled,
           distributed_strategy: distributedStrategy,
@@ -855,6 +874,7 @@ export function TrainPage() {
                 <option value="lora">LoRA / QLoRA</option>
                 <option value="full">Full fine-tune</option>
                 <option value="embedding">Embedding</option>
+                <option value="slime">SLIME RL</option>
               </select>
             </div>
             <div className="form-field">
@@ -889,7 +909,7 @@ export function TrainPage() {
             </div>
           </div>
 
-          {method === "lora" && (
+          {(method === "lora" || method === "slime") && (
             <FormSection title="LoRA settings" hint="Rank, alpha, and gradient accumulation." collapsible defaultOpen={false}>
               <div className="studio-slider-grid">
                 <div className="slider-row">
@@ -904,6 +924,74 @@ export function TrainPage() {
               <div className="slider-row">
                 <label>Grad accumulation: {gradAccum}</label>
                 <input type="range" min={1} max={32} value={gradAccum} onChange={(e) => { setGradAccum(+e.target.value); setConfigCustomized(true); }} />
+              </div>
+            </FormSection>
+          )}
+          {method === "slime" && (
+            <FormSection title="SLIME RL" hint="Rollout and reward controls for policy optimization." collapsible defaultOpen>
+              <div className="option-grid">
+                <div className="form-field">
+                  <label>Reward</label>
+                  <select value={slimeReward} onChange={(e) => setSlimeReward(e.target.value)}>
+                    <option value="contains_answer">Contains answer</option>
+                    <option value="exact_match">Exact match</option>
+                    <option value="field">Dataset reward field</option>
+                  </select>
+                </div>
+                <label className="studio-checkbox-item studio-checkbox-item-standalone">
+                  <input
+                    type="checkbox"
+                    checked={slimeAutoStop}
+                    onChange={(e) => setSlimeAutoStop(e.target.checked)}
+                  />
+                  Auto-stop on reward plateau
+                </label>
+              </div>
+              <div className="option-grid">
+                <div className="form-field">
+                  <label>Rollouts per prompt</label>
+                  <input
+                    type="number"
+                    min={2}
+                    max={32}
+                    value={slimeRolloutsPerPrompt}
+                    onChange={(e) => setSlimeRolloutsPerPrompt(Math.max(2, Number(e.target.value) || 2))}
+                  />
+                </div>
+                <div className="form-field">
+                  <label>Rollout batch</label>
+                  <input
+                    type="number"
+                    min={2}
+                    max={128}
+                    value={slimeRolloutBatchSize}
+                    onChange={(e) => setSlimeRolloutBatchSize(Math.max(2, Number(e.target.value) || 2))}
+                  />
+                </div>
+              </div>
+              <div className="option-grid">
+                <div className="form-field">
+                  <label>Prompt tokens</label>
+                  <input
+                    type="number"
+                    min={64}
+                    max={8192}
+                    step={64}
+                    value={slimeMaxPromptTokens}
+                    onChange={(e) => setSlimeMaxPromptTokens(Math.max(64, Number(e.target.value) || 64))}
+                  />
+                </div>
+                <div className="form-field">
+                  <label>New tokens</label>
+                  <input
+                    type="number"
+                    min={16}
+                    max={4096}
+                    step={16}
+                    value={slimeMaxNewTokens}
+                    onChange={(e) => setSlimeMaxNewTokens(Math.max(16, Number(e.target.value) || 16))}
+                  />
+                </div>
               </div>
             </FormSection>
           )}
@@ -1378,7 +1466,7 @@ export function TrainPage() {
                 <div className="status-callout-body">
                   <strong className="status-callout-title">Single-GPU fallback</strong>
                   <div className="status-callout-text">
-                    Choose “Disable distributed launch” or leave local multi-GPU off to run the existing single-GPU trainer unchanged.
+                    Choose “Disable distributed launch” or leave local multi-GPU off to run a single-process trainer.
                   </div>
                 </div>
               </div>

@@ -187,6 +187,8 @@ class TrainingOrchestrator(Orchestrator):
                     raise asyncio.CancelledError()
 
             metrics_path = config.output_dir / "metrics.jsonl"
+            if not metrics_path.exists():
+                metrics_path = config.output_dir / "slime_single_gpu_metrics.jsonl"
             if metrics_path.exists():
                 metrics_summary = self._load_metrics_summary(metrics_path)
             else:
@@ -321,18 +323,26 @@ class TrainingOrchestrator(Orchestrator):
     def _load_metrics_summary(metrics_path: Path) -> dict[str, Any]:
         losses: list[float] = []
         eval_losses: list[float] = []
+        rewards: list[float] = []
         steps = 0
+        points = 0
         try:
             with metrics_path.open(encoding="utf-8") as handle:
                 for line in handle:
                     if not line.strip():
                         continue
+                    points += 1
                     point = json.loads(line)
                     steps = max(steps, int(point.get("step", 0)))
                     if point.get("loss") is not None:
                         losses.append(float(point["loss"]))
                     if point.get("eval_loss") is not None:
                         eval_losses.append(float(point["eval_loss"]))
+                    reward = point.get("reward")
+                    if reward is None:
+                        reward = point.get("reward_mean")
+                    if reward is not None:
+                        rewards.append(float(reward))
         except (OSError, json.JSONDecodeError, ValueError):
             return {}
         return {
@@ -340,7 +350,9 @@ class TrainingOrchestrator(Orchestrator):
             "final_loss": losses[-1] if losses else None,
             "best_eval_loss": min(eval_losses) if eval_losses else None,
             "final_eval_loss": eval_losses[-1] if eval_losses else None,
-            "points": len(losses) + len(eval_losses),
+            "final_reward": rewards[-1] if rewards else None,
+            "best_reward": max(rewards) if rewards else None,
+            "points": points,
             "updated_at": time.time(),
         }
 
@@ -354,11 +366,14 @@ class TrainingOrchestrator(Orchestrator):
         eval_losses = [
             float(m["eval_loss"]) for m in training if m.get("eval_loss") is not None
         ]
+        rewards = [float(m["reward"]) for m in training if m.get("reward") is not None]
         return {
             "total_steps": max((int(m.get("step", 0)) for m in training), default=0),
             "final_loss": losses[-1] if losses else None,
             "best_eval_loss": min(eval_losses) if eval_losses else None,
             "final_eval_loss": eval_losses[-1] if eval_losses else None,
+            "final_reward": rewards[-1] if rewards else None,
+            "best_reward": max(rewards) if rewards else None,
             "points": len(training),
             "updated_at": time.time(),
         }
