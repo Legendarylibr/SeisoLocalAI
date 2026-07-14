@@ -185,6 +185,7 @@ class TrainConfig(BaseModel):
     )
     prompt_field: str = "prompt"
     answer_field: str = "answer"
+    metadata_field: str | None = "metadata"
     reward: str = "exact_match"
     reward_field: str = "reward"
     max_vram_gb: float | None = Field(default=None, gt=0)
@@ -192,8 +193,12 @@ class TrainConfig(BaseModel):
     max_new_tokens: int = Field(default=256, ge=1)
     rollouts_per_prompt: int = Field(default=4, ge=2)
     rollout_batch_size: int = Field(default=4, ge=1)
+    over_sampling_batch_size: int | None = Field(default=None, ge=1)
+    dynamic_sampling_filter: str = "none"
+    dynamic_sampling_min_reward_std: float = Field(default=1e-6, ge=0)
     policy_micro_batch_size: int | None = Field(default=None, ge=1)
     train_batch_size: int | None = Field(default=None, ge=1)
+    balance_data: bool = False
     shuffle_buffer_size: int = Field(default=2048, ge=1)
     max_samples_per_epoch: int | None = Field(default=None, ge=1)
     kl_coef: float = Field(default=0.0, ge=0)
@@ -260,6 +265,15 @@ class TrainConfig(BaseModel):
             )
         return v
 
+    @field_validator("dynamic_sampling_filter")
+    @classmethod
+    def _validate_dynamic_sampling_filter(cls, v: str) -> str:
+        if v not in {"none", "reward_nonzero_std"}:
+            raise ValueError(
+                "dynamic_sampling_filter must be one of: none, reward_nonzero_std"
+            )
+        return v
+
     @model_validator(mode="after")
     def _validate_cloud_gpu_config(self) -> TrainConfig:
         if not self.cloud_gpu_enabled:
@@ -293,6 +307,7 @@ class TrainConfig(BaseModel):
             output_dir=self.output_dir,
             prompt_field=self.prompt_field,
             answer_field=self.answer_field,
+            metadata_field=self.metadata_field,
             reward=self.reward,
             reward_field=self.reward_field,
             max_vram_gb=self.max_vram_gb,
@@ -300,8 +315,12 @@ class TrainConfig(BaseModel):
             max_new_tokens=self.max_new_tokens,
             rollouts_per_prompt=self.rollouts_per_prompt,
             rollout_batch_size=self.rollout_batch_size,
+            over_sampling_batch_size=self.over_sampling_batch_size,
+            dynamic_sampling_filter=self.dynamic_sampling_filter,
+            dynamic_sampling_min_reward_std=self.dynamic_sampling_min_reward_std,
             policy_micro_batch_size=policy_batch,
             train_batch_size=train_batch,
+            balance_data=self.balance_data,
             shuffle_buffer_size=self.shuffle_buffer_size,
             max_samples_per_epoch=self.max_samples_per_epoch,
             gradient_accumulation_steps=self.gradient_accumulation_steps,
@@ -410,12 +429,16 @@ def _write_slime_manifest(config: TrainConfig, output_dir: Path) -> None:
         "gradient_accumulation_steps": config.gradient_accumulation_steps,
         "max_vram_gb": config.max_vram_gb,
         "reward": config.reward,
+        "metadata_field": config.metadata_field,
         "require_thinking_trace": config.require_thinking_trace,
         "outcome_reward_weight": config.outcome_reward_weight,
         "process_reward_weight": config.process_reward_weight,
         "missing_thinking_penalty": config.missing_thinking_penalty,
         "min_thinking_tokens": config.min_thinking_tokens,
         "rollouts_per_prompt": config.rollouts_per_prompt,
+        "over_sampling_batch_size": config.over_sampling_batch_size,
+        "dynamic_sampling_filter": config.dynamic_sampling_filter,
+        "balance_data": config.balance_data,
         "auto_stop": config.auto_stop,
         "auto_stop_metric": config.auto_stop_metric,
         "auto_stop_patience": config.auto_stop_patience,

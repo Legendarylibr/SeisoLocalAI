@@ -17,6 +17,7 @@ class SingleGpuSlimeConfig:
     output_dir: Path
     prompt_field: str = "prompt"
     answer_field: str = "answer"
+    metadata_field: str | None = "metadata"
     reward: str = "exact_match"
     reward_field: str = "reward"
     max_vram_gb: float | None = None
@@ -24,8 +25,12 @@ class SingleGpuSlimeConfig:
     max_new_tokens: int = 256
     rollouts_per_prompt: int = 4
     rollout_batch_size: int = 4
+    over_sampling_batch_size: int | None = None
+    dynamic_sampling_filter: str = "none"
+    dynamic_sampling_min_reward_std: float = 1e-6
     policy_micro_batch_size: int = 4
     train_batch_size: int = 1
+    balance_data: bool = False
     shuffle_buffer_size: int = 2048
     max_samples_per_epoch: int | None = None
     gradient_accumulation_steps: int = 8
@@ -91,10 +96,25 @@ class SingleGpuSlimeConfig:
             )
         if self.train_batch_size < 1:
             raise ValueError("train_batch_size must be positive")
+        if self.metadata_field is not None and not self.metadata_field:
+            raise ValueError("metadata_field must not be empty")
         if self.rollout_batch_size < 1:
             raise ValueError("rollout_batch_size must be positive")
         if self.rollout_batch_size < self.rollouts_per_prompt:
             raise ValueError("rollout_batch_size must be at least rollouts_per_prompt")
+        if (
+            self.over_sampling_batch_size is not None
+            and self.over_sampling_batch_size < self.rollouts_per_prompt
+        ):
+            raise ValueError(
+                "over_sampling_batch_size must be at least rollouts_per_prompt"
+            )
+        if self.dynamic_sampling_filter not in {"none", "reward_nonzero_std"}:
+            raise ValueError(
+                "dynamic_sampling_filter must be one of: none, reward_nonzero_std"
+            )
+        if self.dynamic_sampling_min_reward_std < 0:
+            raise ValueError("dynamic_sampling_min_reward_std must be non-negative")
         if self.policy_micro_batch_size < 1:
             raise ValueError("policy_micro_batch_size must be positive")
         if self.shuffle_buffer_size < 1:

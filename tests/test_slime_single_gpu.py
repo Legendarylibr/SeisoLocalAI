@@ -24,10 +24,14 @@ from seiso.slime_single_gpu.trainer import (
     _apply_lora,
     _assign_grouped_advantages,
     _AutoStopController,
+    _balanced_rank_samples,
+    _bounded_verifier_metadata,
     _check_training_health,
     _chunked,
+    _collect_training_rollout_batch,
     _DistributedSlimeContext,
     _empty_stats,
+    _filter_rollout_groups,
     _final_output_dir,
     _force_completion_thinking_prefix,
     _format_rollout_prompt,
@@ -40,6 +44,9 @@ from seiso.slime_single_gpu.trainer import (
     _metric_record,
     _process_reward,
     _rank_verifier_path,
+    _reward_sample,
+    _sample_metadata,
+    _sampling_batch_size,
     _score_completion,
     _split_thinking_trace,
     _truncate_text,
@@ -74,6 +81,7 @@ def test_single_gpu_slime_config_from_yaml(tmp_path: Path):
     assert cfg.require_thinking_trace is True
     assert cfg.outcome_reward_weight == 1.0
     assert cfg.process_reward_weight == 0.25
+    assert cfg.metadata_field == "metadata"
     assert cfg.use_lora is False
 
 
@@ -228,6 +236,18 @@ def test_single_gpu_slime_config_requires_rollout_batch_to_cover_group(tmp_path:
         cfg.validate()
 
 
+def test_single_gpu_slime_config_rejects_empty_metadata_field(tmp_path: Path):
+    cfg = SingleGpuSlimeConfig(
+        model_id="test/model",
+        dataset=tmp_path / "data.jsonl",
+        output_dir=tmp_path / "out",
+        metadata_field="",
+    )
+
+    with pytest.raises(ValueError, match="metadata_field"):
+        cfg.validate()
+
+
 def test_sample_batches_stream_with_bounded_shuffle(tmp_path: Path):
     path = tmp_path / "data.jsonl"
     path.write_text(
@@ -270,6 +290,53 @@ def test_reward_helpers():
 def test_unknown_reward_names_are_rejected():
     with pytest.raises(ValueError, match="unknown reward"):
         resolve_reward("remote_code")
+
+
+def test_reward_sample_maps_upstream_style_metadata_key(tmp_path: Path):
+    cfg = SingleGpuSlimeConfig(
+        model_id="test/model",
+        dataset=tmp_path / "data.jsonl",
+        output_dir=tmp_path / "out",
+        answer_field="label",
+        reward="field",
+        reward_field="score",
+        metadata_field="context",
+    )
+    sample = {
+        "prompt": "p",
+        "label": "42",
+        "score": "0.75",
+        "context": '{"session_id":"s1","tool_code":"search"}',
+    }
+
+    mapped = _reward_sample(sample, cfg)
+
+    assert mapped["answer"] == "42"
+    assert mapped["reward"] == "0.75"
+    assert mapped["metadata"] == {"session_id": "s1", "tool_code": "search"}
+
+
+def test_sample_metadata_accepts_structured_or_plain_values(tmp_path: Path):
+    cfg = SingleGpuSlimeConfig(
+        model_id="test/model",
+        dataset=tmp_path / "data.jsonl",
+        output_dir=tmp_path / "out",
+    )
+
+    assert _sample_metadata({"metadata": {"turn": 1}}, cfg) == {"turn": 1}
+    assert _sample_metadata({"metadata": "not json"}, cfg) == "not json"
+    assert _sample_metadata({"metadata": ""}, cfg) is None
+    assert _sample_metadata({"other": "x"}, cfg) is None
+
+
+def test_bounded_verifier_metadata_preserves_small_metadata_and_truncates_large():
+    assert _bounded_verifier_metadata({"turn": 1}, 100) == {"turn": 1}
+
+    bounded = _bounded_verifier_metadata({"blob": "x" * 50}, 16)
+
+    assert isinstance(bounded, dict)
+    assert set(bounded) == {"_truncated"}
+    assert len(bounded["_truncated"]) == 16
 
 
 def test_thinking_prompt_and_completion_are_forced(tmp_path: Path):
@@ -601,6 +668,159 @@ def test_chunked_splits_work_for_single_gpu_microbatches():
     assert list(_chunked([1, 2, 3, 4, 5], 2)) == [[1, 2], [3, 4], [5]]
 
 
+def test_dynamic_sampling_filter_keeps_reward_diverse_groups(tmp_path: Path):
+    cfg = SingleGpuSlimeConfig(
+        model_id="test/model",
+        dataset=tmp_path / "data.jsonl",
+        output_dir=tmp_path / "out",
+        rollouts_per_prompt=2,
+        dynamic_sampling_filter="reward_nonzero_std",
+        over_sampling_batch_size=4,
+    )
+    rollouts = [
+        Rollout(None, None, None, None, None, reward=1.0),
+        Rollout(None, None, None, None, None, reward=1.0),
+        Rollout(None, None, None, None, None, reward=0.0),
+        Rollout(None, None, None, None, None, reward=1.0),
+    ]
+
+    kept, kept_groups, rejected = _filter_rollout_groups(rollouts, cfg)
+
+    assert kept == rollouts[2:]
+    assert kept_groups == {1}
+    assert rejected == 1
+    assert _sampling_batch_size(cfg) == 4
+
+
+def test_over_sampling_is_ignored_without_dynamic_filter(tmp_path: Path):
+    cfg = SingleGpuSlimeConfig(
+        model_id="test/model",
+        dataset=tmp_path / "data.jsonl",
+        output_dir=tmp_path / "out",
+        train_batch_size=2,
+        over_sampling_batch_size=8,
+    )
+
+    assert _sampling_batch_size(cfg) == 2
+
+
+def test_dynamic_sampling_refills_until_training_group_target(tmp_path: Path, monkeypatch):
+    cfg = SingleGpuSlimeConfig(
+        model_id="test/model",
+        dataset=tmp_path / "data.jsonl",
+        output_dir=tmp_path / "out",
+        train_batch_size=2,
+        rollouts_per_prompt=2,
+        dynamic_sampling_filter="reward_nonzero_std",
+        over_sampling_batch_size=2,
+    )
+
+    def fake_collect_rollouts(**kwargs):
+        prompt = kwargs["samples"][0]["prompt"]
+        if prompt == "discarded":
+            return types.SimpleNamespace(
+                rollouts=[],
+                stats={
+                    "rollout_groups_total": 1.0,
+                    "rollout_groups_kept": 0.0,
+                    "dynamic_filtered_groups": 1.0,
+                },
+            )
+        return types.SimpleNamespace(
+            rollouts=[
+                Rollout(None, None, None, None, None, reward=0.0),
+                Rollout(None, None, None, None, None, reward=1.0),
+            ],
+            stats={
+                "rollout_groups_total": 1.0,
+                "rollout_groups_kept": 1.0,
+                "dynamic_filtered_groups": 0.0,
+            },
+        )
+
+    monkeypatch.setattr(
+        "seiso.slime_single_gpu.trainer._collect_rollouts",
+        fake_collect_rollouts,
+    )
+    rollout_batch = _collect_training_rollout_batch(
+        model=None,
+        ref_model=None,
+        tokenizer=None,
+        sample_batches=iter(
+            [[{"prompt": "kept-1"}], [{"prompt": "kept-2"}]]
+        ),
+        samples=[{"prompt": "discarded"}],
+        config=cfg,
+        reward_fn=None,
+        torch=None,
+        epoch=0,
+        global_step=0,
+        verifier_path=None,
+        dist_ctx=_DistributedSlimeContext(enabled=False),
+    )
+
+    assert len(rollout_batch.rollouts) == 4
+    assert rollout_batch.stats["rollout_groups_total"] == 3.0
+    assert rollout_batch.stats["rollout_groups_kept"] == 2.0
+    assert rollout_batch.stats["dynamic_filtered_groups"] == 1.0
+    assert rollout_batch.stats["dynamic_refill_rounds"] == 2.0
+    assert rollout_batch.stats["rollout_groups_target"] == 2.0
+
+
+def test_dynamic_sampling_truncates_oversampled_groups_to_training_target(
+    tmp_path: Path, monkeypatch
+):
+    cfg = SingleGpuSlimeConfig(
+        model_id="test/model",
+        dataset=tmp_path / "data.jsonl",
+        output_dir=tmp_path / "out",
+        train_batch_size=2,
+        rollouts_per_prompt=2,
+        dynamic_sampling_filter="reward_nonzero_std",
+        over_sampling_batch_size=3,
+    )
+
+    def fake_collect_rollouts(**_kwargs):
+        return types.SimpleNamespace(
+            rollouts=[
+                Rollout(None, None, None, None, None, reward=0.0),
+                Rollout(None, None, None, None, None, reward=1.0),
+                Rollout(None, None, None, None, None, reward=0.0),
+                Rollout(None, None, None, None, None, reward=1.0),
+                Rollout(None, None, None, None, None, reward=0.0),
+                Rollout(None, None, None, None, None, reward=1.0),
+            ],
+            stats={
+                "rollout_groups_total": 3.0,
+                "rollout_groups_kept": 3.0,
+                "dynamic_filtered_groups": 0.0,
+            },
+        )
+
+    monkeypatch.setattr(
+        "seiso.slime_single_gpu.trainer._collect_rollouts",
+        fake_collect_rollouts,
+    )
+    rollout_batch = _collect_training_rollout_batch(
+        model=None,
+        ref_model=None,
+        tokenizer=None,
+        sample_batches=iter([]),
+        samples=[{"prompt": "p"}],
+        config=cfg,
+        reward_fn=None,
+        torch=None,
+        epoch=0,
+        global_step=0,
+        verifier_path=None,
+        dist_ctx=_DistributedSlimeContext(enabled=False),
+    )
+
+    assert len(rollout_batch.rollouts) == 4
+    assert rollout_batch.stats["rollout_groups_kept"] == 3.0
+    assert rollout_batch.stats["rollout_groups_target"] == 2.0
+
+
 def test_distributed_slime_shards_batches_evenly(tmp_path: Path):
     data = tmp_path / "data.jsonl"
     data.write_text(
@@ -645,6 +865,32 @@ def test_distributed_slime_shards_batches_evenly(tmp_path: Path):
     assert len(batches0) == len(batches1) == 2
     assert {row["prompt"] for batch in batches0 for row in batch} == {"p0", "p2", "p4", "p6"}
     assert {row["prompt"] for batch in batches1 for row in batch} == {"p1", "p3", "p5", "p7"}
+
+
+def test_balanced_rank_samples_spreads_prompt_work(tmp_path: Path):
+    data = tmp_path / "data.jsonl"
+    prompts = ["x" * 100, "x" * 90, "x" * 20, "x" * 10]
+    data.write_text(
+        "\n".join(json.dumps({"prompt": prompt, "answer": "a"}) for prompt in prompts),
+        encoding="utf-8",
+    )
+    cfg = SingleGpuSlimeConfig(
+        model_id="test/model",
+        dataset=data,
+        output_dir=tmp_path / "out",
+        train_batch_size=1,
+        balance_data=True,
+    )
+
+    rank0 = _DistributedSlimeContext(enabled=True, world_size=2, rank=0)
+    rank1 = _DistributedSlimeContext(enabled=True, world_size=2, rank=1)
+    samples0 = _balanced_rank_samples(cfg, rank0, random.Random(1))
+    samples1 = _balanced_rank_samples(cfg, rank1, random.Random(1))
+
+    load0 = sum(len(sample["prompt"]) for sample in samples0)
+    load1 = sum(len(sample["prompt"]) for sample in samples1)
+    assert abs(load0 - load1) <= 20
+    assert {sample["prompt"] for sample in samples0 + samples1} == set(prompts)
 
 
 def test_distributed_verifier_path_is_rank_scoped(tmp_path: Path):
