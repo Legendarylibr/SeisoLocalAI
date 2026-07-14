@@ -1,6 +1,6 @@
 # Training quickstart
 
-Fine-tune open models with QLoRA, LoRA, full fine-tuning, or single-GPU slime-style post-training using Forge Training Studio or the CLI.
+Fine-tune open models with QLoRA, LoRA, full fine-tuning, or slime-style post-training using Forge Training Studio or the CLI.
 
 **Prerequisites:** Seiso installed with `[train]` extra. See [install.md](../install.md).
 
@@ -147,7 +147,7 @@ Modern training defaults (bf16 compute on CUDA when supported, paged AdamW 8-bit
 
 ## Slime Post-Training
 
-Use `method: slime` for single-GPU GRPO-style post-training when you want rollout generation, reward/verifier traces, checkpointing, and automatic stopping around one local causal LM. This path is optimized to keep CPU work bounded while the GPU does rollout and policy updates.
+Use `method: slime` for GRPO-style post-training when you want rollout generation, reward/verifier traces, checkpointing, and automatic stopping around one local causal LM. Single-process runs keep CPU work bounded while the GPU does rollout and policy updates; distributed runs use the same Accelerate launch settings as supervised training and shard prompt groups across ranks.
 
 Start from `configs/example_training_slime.yaml`:
 
@@ -159,6 +159,8 @@ reward: contains_answer
 max_vram_gb: 16
 rollouts_per_prompt: 4
 rollout_batch_size: 4
+dynamic_sampling_filter: none
+balance_data: false
 policy_micro_batch_size: 2
 batch_size: 1
 learning_rate: 0.000005
@@ -177,6 +179,7 @@ Important fields:
 |-------|-------------|
 | `max_vram_gb` | Upper VRAM cap used to fail before out-of-memory conditions |
 | `prompt_field`, `answer_field` | Dataset columns for prompts and target answers |
+| `metadata_field` | Optional upstream-style metadata column, default `metadata`; JSON strings are parsed and carried into reward samples and bounded verifier records |
 | `reward` | Built-in reward name: `exact_match`, `contains_answer`, `numeric`, or `field` |
 | `reward_field` | Dataset reward column when `reward: field` |
 | `require_thinking_trace` | Forces rollouts through `<think>...</think>` format before the final answer |
@@ -186,6 +189,10 @@ Important fields:
 | `min_thinking_tokens` | Minimum trace length used by the simple process reward |
 | `rollouts_per_prompt` | Number of sampled completions per prompt for grouped advantages |
 | `rollout_batch_size` | Generation batch size; keep at least `rollouts_per_prompt` |
+| `dynamic_sampling_filter` | Optional upstream-style dynamic sampling filter; set `reward_nonzero_std` to drop prompt groups whose reward standard deviation is at or below `dynamic_sampling_min_reward_std` |
+| `over_sampling_batch_size` | Prompt sampling batch size used when dynamic filtering is enabled; keep larger than `batch_size` so strict filters can refill from additional oversampled prompt batches until the training target is met or epoch data is exhausted |
+| `calculate_per_token_loss` | Optional upstream-style loss normalization; defaults to per-sample loss and switches to token-weighted loss when enabled |
+| `balance_data` | For distributed SLIME, greedily shards prompts by estimated prompt length so each rank receives similar rollout work |
 | `policy_micro_batch_size` | Policy update microbatch size to control VRAM |
 | `shuffle_buffer_size` | Bounded CPU shuffle buffer for long datasets |
 | `max_samples_per_epoch` | Optional per-epoch cap for smoke runs or data-efficient loops |
@@ -195,9 +202,7 @@ Important fields:
 | `write_verifier_data` | Writes prompt/answer/completion/reward plus outcome/process breakdown JSONL for verifier or reward-model data |
 | `verifier_max_text_chars` | Per-field text cap to keep verifier JSONL bounded |
 
-Slime checkpoints are exportable like other Seiso checkpoints. LoRA slime runs are treated as adapter checkpoints; non-LoRA slime runs are treated like full checkpoints.
-
-Current scope: slime training is single-GPU. For distributed supervised fine-tuning, keep using `method: lora` or `method: full` with `multi_gpu: true`.
+Slime checkpoints are exportable like other Seiso checkpoints. LoRA slime runs are treated as adapter checkpoints; non-LoRA slime runs are treated like full checkpoints. In distributed SLIME runs, rank 0 writes shared checkpoints and metrics, while verifier JSONL is rank-scoped to avoid concurrent writes.
 
 ---
 

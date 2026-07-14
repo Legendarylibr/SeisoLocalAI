@@ -9,7 +9,7 @@ import math
 import os
 import random
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, TypeVar
@@ -37,12 +37,20 @@ class Rollout:
     old_logprobs: Any
     ref_logprobs: Any | None
     reward: float
+    old_token_logprobs: Any | None = None
+    ref_token_logprobs: Any | None = None
     outcome_reward: float = 0.0
     process_reward: float = 0.0
     thinking_penalty: float = 0.0
     final_answer: str = ""
     thinking_trace: str = ""
     advantage: float = 0.0
+
+
+@dataclass(frozen=True)
+class _RolloutBatch:
+    rollouts: list[Rollout]
+    stats: dict[str, float]
 
 
 @dataclass(frozen=True)
@@ -195,12 +203,14 @@ def train_single_gpu_slime(config: SingleGpuSlimeConfig) -> Path:
     rng = random.Random(config.seed)
 
     for epoch in range(config.epochs):
-        for batch_samples in _iter_sample_batches(config, rng, dist_ctx, torch):
+        sample_batches = iter(_iter_sample_batches(config, rng, dist_ctx, torch))
+        for batch_samples in sample_batches:
             saw_sample = True
-            rollouts = _collect_rollouts(
+            rollout_batch = _collect_training_rollout_batch(
                 model=model,
                 ref_model=ref_model,
                 tokenizer=tokenizer,
+                sample_batches=sample_batches,
                 samples=batch_samples,
                 config=config,
                 reward_fn=reward_fn,
@@ -208,9 +218,35 @@ def train_single_gpu_slime(config: SingleGpuSlimeConfig) -> Path:
                 epoch=epoch,
                 global_step=global_step,
                 verifier_path=verifier_path,
+                dist_ctx=dist_ctx,
             )
+            rollouts = rollout_batch.rollouts
+            if config.dynamic_sampling_filter != "none" and dist_ctx.enabled:
+                target_groups = _distributed_min_int(
+                    len(rollouts) // config.rollouts_per_prompt,
+                    torch,
+                    dist_ctx,
+                )
+                rollouts = _truncate_rollout_groups(
+                    rollouts, config.rollouts_per_prompt, target_groups
+                )
+                rollout_batch = _RolloutBatch(
+                    rollouts=rollouts,
+                    stats={
+                        **rollout_batch.stats,
+                        "distributed_kept_groups_min": float(target_groups),
+                    },
+                )
             if not rollouts:
                 continue
+            trained_groups = len(rollouts) // config.rollouts_per_prompt
+            rollout_batch = _RolloutBatch(
+                rollouts=rollouts,
+                stats={
+                    **rollout_batch.stats,
+                    "rollout_groups_trained": float(trained_groups),
+                },
+            )
             stats = _backprop_policy_step(
                 model,
                 rollouts,
@@ -219,6 +255,7 @@ def train_single_gpu_slime(config: SingleGpuSlimeConfig) -> Path:
                 torch,
                 loss_scale=1.0 / config.gradient_accumulation_steps,
             )
+            stats.update(rollout_batch.stats)
             stats = _reduce_stats(stats, torch, dist_ctx)
             pending_accumulation_steps += 1
 
@@ -291,6 +328,100 @@ def train_single_gpu_slime(config: SingleGpuSlimeConfig) -> Path:
     return final_output_dir
 
 
+def _collect_training_rollout_batch(
+    *,
+    model,
+    ref_model,
+    tokenizer,
+    sample_batches: Iterator[list[dict[str, Any]]],
+    samples: list[dict[str, Any]],
+    config: SingleGpuSlimeConfig,
+    reward_fn,
+    torch,
+    epoch: int,
+    global_step: int,
+    verifier_path: Path | None,
+    dist_ctx: _DistributedSlimeContext,
+) -> _RolloutBatch:
+    rollout_batch = _collect_rollouts(
+        model=model,
+        ref_model=ref_model,
+        tokenizer=tokenizer,
+        samples=samples,
+        config=config,
+        reward_fn=reward_fn,
+        torch=torch,
+        epoch=epoch,
+        global_step=global_step,
+        verifier_path=verifier_path,
+    )
+    if config.dynamic_sampling_filter == "none":
+        return rollout_batch
+
+    stats = dict(rollout_batch.stats)
+    rollouts = list(rollout_batch.rollouts)
+    target_groups = config.train_batch_size
+    refill_rounds = 0
+    while (
+        _refill_visible_group_count(rollouts, config, torch, dist_ctx)
+        < target_groups
+    ):
+        try:
+            refill_samples = next(sample_batches)
+            has_refill = 1
+        except StopIteration:
+            refill_samples = []
+            has_refill = 0
+        if dist_ctx.enabled:
+            has_refill = _distributed_min_int(has_refill, torch, dist_ctx)
+        if not has_refill:
+            break
+        refill_rounds += 1
+        refill_batch = _collect_rollouts(
+            model=model,
+            ref_model=ref_model,
+            tokenizer=tokenizer,
+            samples=refill_samples,
+            config=config,
+            reward_fn=reward_fn,
+            torch=torch,
+            epoch=epoch,
+            global_step=global_step,
+            verifier_path=verifier_path,
+        )
+        rollouts.extend(refill_batch.rollouts)
+        _merge_rollout_collection_stats(stats, refill_batch.stats)
+
+    kept_groups = len(rollouts) // config.rollouts_per_prompt
+    if kept_groups > target_groups:
+        rollouts = _truncate_rollout_groups(
+            rollouts, config.rollouts_per_prompt, target_groups
+        )
+    stats["dynamic_refill_rounds"] = float(refill_rounds)
+    stats["rollout_groups_target"] = float(target_groups)
+    return _RolloutBatch(rollouts=rollouts, stats=stats)
+
+
+def _refill_visible_group_count(
+    rollouts: list[Rollout],
+    config: SingleGpuSlimeConfig,
+    torch,
+    dist_ctx: _DistributedSlimeContext,
+) -> int:
+    local_groups = len(rollouts) // config.rollouts_per_prompt
+    if not dist_ctx.enabled:
+        return local_groups
+    return _distributed_min_int(local_groups, torch, dist_ctx)
+
+
+def _merge_rollout_collection_stats(
+    target: dict[str, float],
+    update: dict[str, float],
+) -> None:
+    for key, value in update.items():
+        target[key] = float(target.get(key, 0.0)) + float(value)
+
+
 def _collect_rollouts(
     *,
     model,
@@ -303,10 +434,15 @@ def _collect_rollouts(
     epoch: int,
     global_step: int,
     verifier_path: Path | None,
-) -> list[Rollout]:
+) -> _RolloutBatch:
     model.eval()
     prompt_batch_size = max(1, config.rollout_batch_size // config.rollouts_per_prompt)
     rollouts: list[Rollout] = []
+    filter_stats = {
+        "rollout_groups_total": 0.0,
+        "rollout_groups_kept": 0.0,
+        "dynamic_filtered_groups": 0.0,
+    }
     for sample_chunk in _chunked(samples, prompt_batch_size):
         prompt_chunk = [
             _format_rollout_prompt(str(sample[config.prompt_field]), config)
@@ -346,6 +482,7 @@ def _collect_rollouts(
             response_mask[prompt_width:] = generated[idx, prompt_width:] != tokenizer.pad_token_id
             completion = _force_completion_thinking_prefix(completions[idx], config)
             reward_sample = _reward_sample(sample, config)
+            metadata = _sample_metadata(sample, config)
             score = _score_completion(completion, reward_sample, config, reward_fn)
             # Keep rollout tensors on device to avoid GPU↔CPU staging per sample.
             chunk_rollouts.append(
@@ -375,6 +512,9 @@ def _collect_rollouts(
                         "process_reward": score["process_reward"],
                         "thinking_penalty": score["thinking_penalty"],
                         "reward_name": config.reward,
+                        "metadata": _bounded_verifier_metadata(
+                            metadata, config.verifier_max_text_chars
+                        ),
                         "prompt": _truncate_text(
                             prompt_chunk[sample_idx], config.verifier_max_text_chars
                         ),
@@ -392,25 +532,60 @@ def _collect_rollouts(
                     }
                 )
 
-        padded = _pad_rollouts(chunk_rollouts, tokenizer.pad_token_id, config.device, torch)
+        filter_stats["rollout_groups_total"] += len(sample_chunk)
+        kept_rollouts, kept_group_indexes, rejected_groups = _filter_rollout_groups(
+            chunk_rollouts,
+            config,
+        )
+        filter_stats["rollout_groups_kept"] += len(kept_group_indexes)
+        filter_stats["dynamic_filtered_groups"] += rejected_groups
+        if not kept_rollouts:
+            del encoded, generated
+            continue
+        verifier_records = [
+            record
+            for record in verifier_records
+            if int(record["sample_index"]) in kept_group_indexes
+        ]
+
+        padded = _pad_rollouts(kept_rollouts, tokenizer.pad_token_id, config.device, torch)
         with torch.no_grad():
-            old_logprobs = _sequence_logprobs(model, padded, torch).detach()
-            ref_logprobs = (
-                _sequence_logprobs(ref_model, padded, torch).detach()
+            old_token_logprobs = _sequence_token_logprobs(model, padded, torch).detach()
+            old_logprobs = _masked_sequence_logprobs(
+                old_token_logprobs,
+                padded["response_mask"][:, 1:].float(),
+            ).detach()
+            ref_token_logprobs = (
+                _sequence_token_logprobs(ref_model, padded, torch).detach()
                 if ref_model is not None
                 else None
             )
-        for idx, rollout in enumerate(chunk_rollouts):
+            ref_logprobs = (
+                _masked_sequence_logprobs(
+                    ref_token_logprobs,
+                    padded["response_mask"][:, 1:].float(),
+                ).detach()
+                if ref_token_logprobs is not None
+                else None
+            )
+        for idx, rollout in enumerate(kept_rollouts):
+            token_length = max(0, int(rollout.input_ids.numel()) - 1)
             rollout.old_logprobs = old_logprobs[idx]
             rollout.ref_logprobs = ref_logprobs[idx] if ref_logprobs is not None else None
+            rollout.old_token_logprobs = old_token_logprobs[idx, :token_length]
+            rollout.ref_token_logprobs = (
+                ref_token_logprobs[idx, :token_length]
+                if ref_token_logprobs is not None
+                else None
+            )
         if verifier_records:
             _append_jsonl_records(verifier_path, verifier_records)
-        rollouts.extend(chunk_rollouts)
+        rollouts.extend(kept_rollouts)
         del encoded, generated, padded
 
     _assign_grouped_advantages(rollouts, config.rollouts_per_prompt)
     model.train()
-    return rollouts
+    return _RolloutBatch(rollouts=rollouts, stats=filter_stats)
 
 
 def _format_rollout_prompt(prompt: str, config: SingleGpuSlimeConfig) -> str:
@@ -549,19 +724,54 @@ def _policy_loss(
     torch,
 ):
     padded = _pad_rollouts(rollouts, pad_token_id, config.device, torch)
-    new_logprobs = _sequence_logprobs(model, padded, torch)
     old_logprobs = torch.stack([r.old_logprobs for r in rollouts]).to(config.device)
     advantages = torch.tensor([r.advantage for r in rollouts], device=config.device)
+    response_mask = padded["response_mask"][:, 1:].float()
+    response_token_counts = response_mask.sum(dim=1)
 
-    ratio = torch.exp(new_logprobs - old_logprobs)
-    unclipped = ratio * advantages
-    clipped = torch.clamp(ratio, 1.0 - config.clip_ratio, 1.0 + config.clip_ratio) * advantages
-    policy_loss = -torch.minimum(unclipped, clipped).mean()
+    new_token_logprobs = _sequence_token_logprobs(model, padded, torch)
+    new_logprobs = _masked_sequence_logprobs(new_token_logprobs, response_mask)
+    if config.calculate_per_token_loss:
+        old_token_logprobs = _pad_rollout_token_logprobs(
+            rollouts,
+            "old_token_logprobs",
+            int(new_token_logprobs.shape[1]),
+            config.device,
+            torch,
+        )
+        policy_loss = _clipped_policy_loss(
+            new_token_logprobs,
+            old_token_logprobs,
+            advantages[:, None],
+            response_mask,
+            config.clip_ratio,
+            torch,
+        )
+    else:
+        policy_loss = _clipped_policy_loss(
+            new_logprobs,
+            old_logprobs,
+            advantages,
+            torch.ones_like(new_logprobs),
+            config.clip_ratio,
+            torch,
+        )
 
     kl_loss = torch.zeros((), device=config.device)
     if config.kl_coef > 0 and rollouts[0].ref_logprobs is not None:
-        ref_logprobs = torch.stack([r.ref_logprobs for r in rollouts]).to(config.device)
-        kl_loss = (new_logprobs - ref_logprobs).mean()
+        if config.calculate_per_token_loss:
+            ref_token_logprobs = _pad_rollout_token_logprobs(
+                rollouts,
+                "ref_token_logprobs",
+                int(new_token_logprobs.shape[1]),
+                config.device,
+                torch,
+            )
+            kl_loss = ((new_token_logprobs - ref_token_logprobs) * response_mask).sum()
+            kl_loss = kl_loss / response_mask.sum().clamp_min(1.0)
+        else:
+            ref_logprobs = torch.stack([r.ref_logprobs for r in rollouts]).to(config.device)
+            kl_loss = (new_logprobs - ref_logprobs).mean()
 
     rewards = [r.reward for r in rollouts]
     loss = policy_loss + config.kl_coef * kl_loss
@@ -575,6 +785,7 @@ def _policy_loss(
         "process_reward_mean": _mean(r.process_reward for r in rollouts),
         "thinking_penalty_mean": _mean(r.thinking_penalty for r in rollouts),
         "group_reward_spread_mean": _group_reward_spread_mean(rollouts, config.rollouts_per_prompt),
+        "response_tokens_mean": float(response_token_counts.mean().detach().cpu()),
     }
 
 
@@ -589,6 +800,7 @@ def _empty_stats() -> dict[str, float]:
         "process_reward_mean": 0.0,
         "thinking_penalty_mean": 0.0,
         "group_reward_spread_mean": 0.0,
+        "response_tokens_mean": 0.0,
     }
 
 
@@ -607,17 +819,23 @@ def _merge_stats(
         "process_reward_mean",
         "thinking_penalty_mean",
         "group_reward_spread_mean",
+        "response_tokens_mean",
     ):
         stats[key] += chunk_stats.get(key, 0.0) * weight
     stats["reward_max"] = max(stats["reward_max"], chunk_stats.get("reward_max", 0.0))
 
 
 def _sequence_logprobs(model, batch: dict[str, Any], torch):
+    token_logprobs = _sequence_token_logprobs(model, batch, torch)
+    mask = batch["response_mask"][:, 1:].float()
+    return _masked_sequence_logprobs(token_logprobs, mask)
+
+
+def _sequence_token_logprobs(model, batch: dict[str, Any], torch):
     outputs = model(input_ids=batch["input_ids"], attention_mask=batch["attention_mask"])
     logits = outputs.logits[:, :-1, :]
     labels = batch["input_ids"][:, 1:]
-    mask = batch["response_mask"][:, 1:].float()
-    token_logprobs = (
+    return (
         torch.log_softmax(logits.float(), dim=-1)
         .gather(
             -1,
@@ -625,8 +843,36 @@ def _sequence_logprobs(model, batch: dict[str, Any], torch):
         )
         .squeeze(-1)
     )
+
+
+def _masked_sequence_logprobs(token_logprobs, mask):
     denom = mask.sum(dim=1).clamp_min(1.0)
     return (token_logprobs * mask).sum(dim=1) / denom
+
+
+def _clipped_policy_loss(new_logprobs, old_logprobs, advantages, mask, clip_ratio: float, torch):
+    ratio = torch.exp(new_logprobs - old_logprobs)
+    unclipped = ratio * advantages
+    clipped = torch.clamp(ratio, 1.0 - clip_ratio, 1.0 + clip_ratio) * advantages
+    objective = torch.minimum(unclipped, clipped)
+    return -((objective * mask).sum() / mask.sum().clamp_min(1.0))
+
+
+def _pad_rollout_token_logprobs(
+    rollouts: list[Rollout],
+    field_name: str,
+    width: int,
+    device: str,
+    torch,
+):
+    values = torch.zeros((len(rollouts), width), dtype=torch.float32, device=device)
+    for idx, rollout in enumerate(rollouts):
+        token_values = getattr(rollout, field_name)
+        if token_values is None:
+            raise ValueError(f"rollout missing {field_name}")
+        length = min(int(token_values.numel()), width)
+        values[idx, :length] = token_values[:length].to(device)
+    return values
 
 
 def _pad_rollouts(rollouts: list[Rollout], pad_token_id: int, device: str, torch) -> dict[str, Any]:
@@ -668,6 +914,51 @@ def _assign_grouped_advantages(rollouts: list[Rollout], group_size: int) -> None
         std = math.sqrt(variance) or 1.0
         for rollout in group:
             rollout.advantage = (rollout.reward - mean) / std
+
+
+def _filter_rollout_groups(
+    rollouts: list[Rollout],
+    config: SingleGpuSlimeConfig,
+) -> tuple[list[Rollout], set[int], int]:
+    if config.dynamic_sampling_filter == "none":
+        group_count = math.ceil(len(rollouts) / config.rollouts_per_prompt)
+        return rollouts, set(range(group_count)), 0
+
+    kept: list[Rollout] = []
+    kept_group_indexes: set[int] = set()
+    rejected = 0
+    for group_index, start in enumerate(range(0, len(rollouts), config.rollouts_per_prompt)):
+        group = rollouts[start : start + config.rollouts_per_prompt]
+        if _keep_rollout_group(group, config):
+            kept.extend(group)
+            kept_group_indexes.add(group_index)
+        else:
+            rejected += 1
+    return kept, kept_group_indexes, rejected
+
+
+def _keep_rollout_group(
+    group: list[Rollout],
+    config: SingleGpuSlimeConfig,
+) -> bool:
+    if config.dynamic_sampling_filter == "reward_nonzero_std":
+        rewards = [rollout.reward for rollout in group]
+        if len(rewards) < 2:
+            return False
+        mean = sum(rewards) / len(rewards)
+        variance = sum((reward - mean) ** 2 for reward in rewards) / len(rewards)
+        return math.sqrt(variance) > config.dynamic_sampling_min_reward_std
+    return True
+
+
+def _truncate_rollout_groups(
+    rollouts: list[Rollout],
+    group_size: int,
+    max_groups: int,
+) -> list[Rollout]:
+    if max_groups <= 0:
+        return []
+    return rollouts[: max_groups * group_size]
 
 
 def _mean(values: Iterable[float]) -> float:
@@ -810,7 +1101,7 @@ def _iter_sample_batches(
             torch = torch_mod
         yield from _iter_distributed_sample_batches(config, rng, dist_ctx, torch)
         return
-    yield from _batched_records(_iter_shuffled_samples(config, rng), config.train_batch_size)
+    yield from _batched_records(_iter_shuffled_samples(config, rng), _sampling_batch_size(config))
 
 
 def _iter_distributed_sample_batches(
@@ -819,19 +1110,65 @@ def _iter_distributed_sample_batches(
     dist_ctx: _DistributedSlimeContext,
     torch,
 ) -> Iterable[list[dict[str, Any]]]:
+    sample_batch_size = _sampling_batch_size(config)
+    if config.balance_data:
+        rank_samples = _balanced_rank_samples(config, dist_ctx, rng)
+        local_batches = len(rank_samples) // sample_batch_size
+        min_batches = _distributed_min_int(local_batches, torch, dist_ctx)
+        if min_batches < 1:
+            raise ValueError(
+                "not enough balanced samples for distributed slime; "
+                "need at least one sampling batch per rank"
+            )
+        yield from _batched_records(
+            rank_samples[: min_batches * sample_batch_size], sample_batch_size
+        )
+        return
+
     local_count = _count_rank_samples(config, dist_ctx)
-    local_batches = local_count // config.train_batch_size
+    local_batches = local_count // sample_batch_size
     min_batches = _distributed_min_int(local_batches, torch, dist_ctx)
     if min_batches < 1:
         raise ValueError(
             "not enough sharded samples for distributed slime; "
-            "need at least train_batch_size samples per rank"
+            "need at least one sampling batch per rank"
         )
-    target_samples = min_batches * config.train_batch_size
+    target_samples = min_batches * sample_batch_size
     yield from _batched_records(
         _iter_shuffled_samples(config, rng, dist_ctx, target_samples),
-        config.train_batch_size,
+        sample_batch_size,
     )
+
+
+def _sampling_batch_size(config: SingleGpuSlimeConfig) -> int:
+    if config.dynamic_sampling_filter == "none":
+        return config.train_batch_size
+    return max(config.train_batch_size, config.over_sampling_batch_size or config.train_batch_size)
+
+
+def _balanced_rank_samples(
+    config: SingleGpuSlimeConfig,
+    dist_ctx: _DistributedSlimeContext,
+    rng: random.Random,
+) -> list[dict[str, Any]]:
+    samples = list(_limited_samples(config))
+    rng.shuffle(samples)
+    rank_loads = [0] * dist_ctx.world_size
+    rank_samples: list[list[dict[str, Any]]] = [[] for _ in range(dist_ctx.world_size)]
+    for sample in sorted(
+        samples,
+        key=lambda item: _sample_work_estimate(item, config),
+        reverse=True,
+    ):
+        rank = min(range(dist_ctx.world_size), key=lambda idx: rank_loads[idx])
+        rank_samples[rank].append(sample)
+        rank_loads[rank] += _sample_work_estimate(sample, config)
+    return rank_samples[dist_ctx.rank]
+
+
+def _sample_work_estimate(sample: dict[str, Any], config: SingleGpuSlimeConfig) -> int:
+    prompt = sample.get(config.prompt_field, "")
+    return max(1, len(str(prompt)))
 
 
 def _iter_shuffled_samples(
@@ -888,15 +1225,42 @@ def _limited_samples(config: SingleGpuSlimeConfig) -> Iterable[dict[str, Any]]:
 
 
 def _reward_sample(sample: dict[str, Any], config: SingleGpuSlimeConfig) -> dict[str, Any]:
-    if config.reward == "field":
-        merged = dict(sample)
-        merged["reward"] = sample.get(config.reward_field, 0.0)
-        return merged
-    if config.answer_field == "answer":
-        return sample
     merged = dict(sample)
-    merged["answer"] = sample.get(config.answer_field, "")
+    if config.reward == "field":
+        merged["reward"] = sample.get(config.reward_field, 0.0)
+    if config.answer_field != "answer":
+        merged["answer"] = sample.get(config.answer_field, "")
+    metadata = _sample_metadata(sample, config)
+    if metadata is not None:
+        merged["metadata"] = metadata
     return merged
+
+
+def _sample_metadata(sample: dict[str, Any], config: SingleGpuSlimeConfig) -> Any | None:
+    if config.metadata_field is None or config.metadata_field not in sample:
+        return None
+    value = sample[config.metadata_field]
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return None
+        try:
+            return json.loads(stripped)
+        except json.JSONDecodeError:
+            return value
+    return value
+
+
+def _bounded_verifier_metadata(metadata: Any | None, max_chars: int) -> Any | None:
+    if metadata is None:
+        return None
+    try:
+        encoded = json.dumps(metadata, sort_keys=True)
+    except (TypeError, ValueError):
+        encoded = str(metadata)
+    if len(encoded) <= max_chars:
+        return metadata
+    return {"_truncated": _truncate_text(encoded, max_chars)}
 
 
 def _resolve_dtype(torch, dtype: str):
@@ -1163,7 +1527,13 @@ def _reduce_stats(
     if not dist_ctx.enabled:
         return stats
     reduced = dict(stats)
-    mean_keys = [key for key in reduced if key != "reward_max"]
+    sum_keys = {
+        "rollout_groups_total",
+        "rollout_groups_kept",
+        "rollout_groups_trained",
+        "dynamic_filtered_groups",
+    }
+    mean_keys = [key for key in reduced if key not in {"reward_max", *sum_keys}]
     if mean_keys:
         values = torch.tensor(
             [float(reduced[key]) for key in mean_keys],
@@ -1173,6 +1543,15 @@ def _reduce_stats(
         torch.distributed.all_reduce(values, op=torch.distributed.ReduceOp.SUM)
         values /= dist_ctx.world_size
         for key, value in zip(mean_keys, values.tolist(), strict=False):
+            reduced[key] = float(value)
+    if active_sum_keys := [key for key in sum_keys if key in reduced]:
+        values = torch.tensor(
+            [float(reduced[key]) for key in active_sum_keys],
+            device=dist_ctx.device,
+            dtype=torch.float64,
+        )
+        torch.distributed.all_reduce(values, op=torch.distributed.ReduceOp.SUM)
+        for key, value in zip(active_sum_keys, values.tolist(), strict=False):
             reduced[key] = float(value)
     max_tensor = torch.tensor(
         [float(reduced.get("reward_max", float("-inf")))],
