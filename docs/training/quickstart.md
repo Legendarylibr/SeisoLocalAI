@@ -191,6 +191,7 @@ Important fields:
 | `rollout_batch_size` | Generation batch size; keep at least `rollouts_per_prompt` |
 | `dynamic_sampling_filter` | Optional upstream-style dynamic sampling filter; set `reward_nonzero_std` to drop prompt groups whose reward standard deviation is at or below `dynamic_sampling_min_reward_std` |
 | `over_sampling_batch_size` | Prompt sampling batch size used when dynamic filtering is enabled; keep larger than `batch_size` so strict filters can refill from additional oversampled prompt batches until the training target is met or epoch data is exhausted |
+| `calculate_per_token_loss` | Optional upstream-style loss normalization; defaults to per-sample loss and switches to token-weighted loss when enabled |
 | `balance_data` | For distributed SLIME, greedily shards prompts by estimated prompt length so each rank receives similar rollout work |
 | `policy_micro_batch_size` | Policy update microbatch size to control VRAM |
 | `shuffle_buffer_size` | Bounded CPU shuffle buffer for long datasets |
@@ -198,7 +199,7 @@ Important fields:
 | `slime_use_lora` | Train LoRA adapters instead of full model weights |
 | `auto_stop_*` | Plateau detection; defaults monitor `reward_mean` |
 | `best_checkpoint_dir` | Directory under `output_dir` for the best observed metric checkpoint |
-| `write_verifier_data` | Writes prompt/answer/completion/reward plus outcome/process breakdown JSONL for verifier or reward-model data |
+| `write_verifier_data` | Writes prompt/answer/completion/reward/status plus outcome/process breakdown JSONL for verifier or reward-model data |
 | `verifier_max_text_chars` | Per-field text cap to keep verifier JSONL bounded |
 
 Slime checkpoints are exportable like other Seiso checkpoints. LoRA slime runs are treated as adapter checkpoints; non-LoRA slime runs are treated like full checkpoints. In distributed SLIME runs, rank 0 writes shared checkpoints and metrics, while verifier JSONL is rank-scoped to avoid concurrent writes.

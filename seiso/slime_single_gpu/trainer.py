@@ -37,11 +37,14 @@ class Rollout:
     old_logprobs: Any
     ref_logprobs: Any | None
     reward: float
+    old_token_logprobs: Any | None = None
+    ref_token_logprobs: Any | None = None
     outcome_reward: float = 0.0
     process_reward: float = 0.0
     thinking_penalty: float = 0.0
     final_answer: str = ""
     thinking_trace: str = ""
+    status: str = "unknown"
     advantage: float = 0.0
 
 
@@ -478,6 +481,7 @@ def _collect_rollouts(
             sample = sample_chunk[sample_idx]
             response_mask = torch.zeros_like(generated[idx], dtype=torch.bool)
             response_mask[prompt_width:] = generated[idx, prompt_width:] != tokenizer.pad_token_id
+            status = _rollout_status(generated[idx, prompt_width:], tokenizer.eos_token_id)
             completion = _force_completion_thinking_prefix(completions[idx], config)
             reward_sample = _reward_sample(sample, config)
             metadata = _sample_metadata(sample, config)
@@ -496,6 +500,7 @@ def _collect_rollouts(
                     thinking_penalty=score["thinking_penalty"],
                     final_answer=score["final_answer"],
                     thinking_trace=score["thinking_trace"],
+                    status=status,
                 )
             )
             if verifier_path is not None:
@@ -510,6 +515,7 @@ def _collect_rollouts(
                         "process_reward": score["process_reward"],
                         "thinking_penalty": score["thinking_penalty"],
                         "reward_name": config.reward,
+                        "status": status,
                         "metadata": _bounded_verifier_metadata(
                             metadata, config.verifier_max_text_chars
                         ),
@@ -548,15 +554,34 @@ def _collect_rollouts(
 
         padded = _pad_rollouts(kept_rollouts, tokenizer.pad_token_id, config.device, torch)
         with torch.no_grad():
-            old_logprobs = _sequence_logprobs(model, padded, torch).detach()
-            ref_logprobs = (
-                _sequence_logprobs(ref_model, padded, torch).detach()
+            old_token_logprobs = _sequence_token_logprobs(model, padded, torch).detach()
+            old_logprobs = _masked_sequence_logprobs(
+                old_token_logprobs,
+                padded["response_mask"][:, 1:].float(),
+            ).detach()
+            ref_token_logprobs = (
+                _sequence_token_logprobs(ref_model, padded, torch).detach()
                 if ref_model is not None
                 else None
             )
+            ref_logprobs = (
+                _masked_sequence_logprobs(
+                    ref_token_logprobs,
+                    padded["response_mask"][:, 1:].float(),
+                ).detach()
+                if ref_token_logprobs is not None
+                else None
+            )
         for idx, rollout in enumerate(kept_rollouts):
+            token_length = max(0, int(rollout.input_ids.numel()) - 1)
             rollout.old_logprobs = old_logprobs[idx]
             rollout.ref_logprobs = ref_logprobs[idx] if ref_logprobs is not None else None
+            rollout.old_token_logprobs = old_token_logprobs[idx, :token_length]
+            rollout.ref_token_logprobs = (
+                ref_token_logprobs[idx, :token_length]
+                if ref_token_logprobs is not None
+                else None
+            )
         if verifier_records:
             _append_jsonl_records(verifier_path, verifier_records)
         rollouts.extend(kept_rollouts)
@@ -703,19 +728,54 @@ def _policy_loss(
     torch,
 ):
     padded = _pad_rollouts(rollouts, pad_token_id, config.device, torch)
-    new_logprobs = _sequence_logprobs(model, padded, torch)
     old_logprobs = torch.stack([r.old_logprobs for r in rollouts]).to(config.device)
     advantages = torch.tensor([r.advantage for r in rollouts], device=config.device)
+    response_mask = padded["response_mask"][:, 1:].float()
+    response_token_counts = response_mask.sum(dim=1)
 
-    ratio = torch.exp(new_logprobs - old_logprobs)
-    unclipped = ratio * advantages
-    clipped = torch.clamp(ratio, 1.0 - config.clip_ratio, 1.0 + config.clip_ratio) * advantages
-    policy_loss = -torch.minimum(unclipped, clipped).mean()
+    new_token_logprobs = _sequence_token_logprobs(model, padded, torch)
+    new_logprobs = _masked_sequence_logprobs(new_token_logprobs, response_mask)
+    if config.calculate_per_token_loss:
+        old_token_logprobs = _pad_rollout_token_logprobs(
+            rollouts,
+            "old_token_logprobs",
+            int(new_token_logprobs.shape[1]),
+            config.device,
+            torch,
+        )
+        policy_loss = _clipped_policy_loss(
+            new_token_logprobs,
+            old_token_logprobs,
+            advantages[:, None],
+            response_mask,
+            config.clip_ratio,
+            torch,
+        )
+    else:
+        policy_loss = _clipped_policy_loss(
+            new_logprobs,
+            old_logprobs,
+            advantages,
+            torch.ones_like(new_logprobs),
+            config.clip_ratio,
+            torch,
+        )
 
     kl_loss = torch.zeros((), device=config.device)
     if config.kl_coef > 0 and rollouts[0].ref_logprobs is not None:
-        ref_logprobs = torch.stack([r.ref_logprobs for r in rollouts]).to(config.device)
-        kl_loss = (new_logprobs - ref_logprobs).mean()
+        if config.calculate_per_token_loss:
+            ref_token_logprobs = _pad_rollout_token_logprobs(
+                rollouts,
+                "ref_token_logprobs",
+                int(new_token_logprobs.shape[1]),
+                config.device,
+                torch,
+            )
+            kl_loss = ((new_token_logprobs - ref_token_logprobs) * response_mask).sum()
+            kl_loss = kl_loss / response_mask.sum().clamp_min(1.0)
+        else:
+            ref_logprobs = torch.stack([r.ref_logprobs for r in rollouts]).to(config.device)
+            kl_loss = (new_logprobs - ref_logprobs).mean()
 
     rewards = [r.reward for r in rollouts]
     loss = policy_loss + config.kl_coef * kl_loss
@@ -729,6 +789,8 @@ def _policy_loss(
         "process_reward_mean": _mean(r.process_reward for r in rollouts),
         "thinking_penalty_mean": _mean(r.thinking_penalty for r in rollouts),
         "group_reward_spread_mean": _group_reward_spread_mean(rollouts, config.rollouts_per_prompt),
+        "response_tokens_mean": float(response_token_counts.mean().detach().cpu()),
+        **_rollout_status_stats(rollouts),
     }
 
 
@@ -743,6 +805,10 @@ def _empty_stats() -> dict[str, float]:
         "process_reward_mean": 0.0,
         "thinking_penalty_mean": 0.0,
         "group_reward_spread_mean": 0.0,
+        "response_tokens_mean": 0.0,
+        "rollout_status_stop": 0.0,
+        "rollout_status_length": 0.0,
+        "rollout_status_empty": 0.0,
     }
 
 
@@ -761,17 +827,25 @@ def _merge_stats(
         "process_reward_mean",
         "thinking_penalty_mean",
         "group_reward_spread_mean",
+        "response_tokens_mean",
     ):
         stats[key] += chunk_stats.get(key, 0.0) * weight
+    for key in ("rollout_status_stop", "rollout_status_length", "rollout_status_empty"):
+        stats[key] += chunk_stats.get(key, 0.0)
     stats["reward_max"] = max(stats["reward_max"], chunk_stats.get("reward_max", 0.0))
 
 
 def _sequence_logprobs(model, batch: dict[str, Any], torch):
+    token_logprobs = _sequence_token_logprobs(model, batch, torch)
+    mask = batch["response_mask"][:, 1:].float()
+    return _masked_sequence_logprobs(token_logprobs, mask)
+
+
+def _sequence_token_logprobs(model, batch: dict[str, Any], torch):
     outputs = model(input_ids=batch["input_ids"], attention_mask=batch["attention_mask"])
     logits = outputs.logits[:, :-1, :]
     labels = batch["input_ids"][:, 1:]
-    mask = batch["response_mask"][:, 1:].float()
-    token_logprobs = (
+    return (
         torch.log_softmax(logits.float(), dim=-1)
         .gather(
             -1,
@@ -779,8 +853,36 @@ def _sequence_logprobs(model, batch: dict[str, Any], torch):
         )
         .squeeze(-1)
     )
+
+
+def _masked_sequence_logprobs(token_logprobs, mask):
     denom = mask.sum(dim=1).clamp_min(1.0)
     return (token_logprobs * mask).sum(dim=1) / denom
+
+
+def _clipped_policy_loss(new_logprobs, old_logprobs, advantages, mask, clip_ratio: float, torch):
+    ratio = torch.exp(new_logprobs - old_logprobs)
+    unclipped = ratio * advantages
+    clipped = torch.clamp(ratio, 1.0 - clip_ratio, 1.0 + clip_ratio) * advantages
+    objective = torch.minimum(unclipped, clipped)
+    return -((objective * mask).sum() / mask.sum().clamp_min(1.0))
+
+
+def _pad_rollout_token_logprobs(
+    rollouts: list[Rollout],
+    field_name: str,
+    width: int,
+    device: str,
+    torch,
+):
+    values = torch.zeros((len(rollouts), width), dtype=torch.float32, device=device)
+    for idx, rollout in enumerate(rollouts):
+        token_values = getattr(rollout, field_name)
+        if token_values is None:
+            raise ValueError(f"rollout missing {field_name}")
+        length = min(int(token_values.numel()), width)
+        values[idx, :length] = token_values[:length].to(device)
+    return values
 
 
 def _pad_rollouts(rollouts: list[Rollout], pad_token_id: int, device: str, torch) -> dict[str, Any]:
@@ -867,6 +969,27 @@ def _truncate_rollout_groups(
     if max_groups <= 0:
         return []
     return rollouts[: max_groups * group_size]
+
+
+def _rollout_status(response_tokens, eos_token_id: int | None) -> str:
+    if int(response_tokens.numel()) == 0:
+        return "empty"
+    if eos_token_id is not None and bool((response_tokens == eos_token_id).any().item()):
+        return "stop"
+    return "length"
+
+
+def _rollout_status_stats(rollouts: list[Rollout]) -> dict[str, float]:
+    counts = {
+        "rollout_status_stop": 0.0,
+        "rollout_status_length": 0.0,
+        "rollout_status_empty": 0.0,
+    }
+    for rollout in rollouts:
+        key = f"rollout_status_{rollout.status}"
+        if key in counts:
+            counts[key] += 1.0
+    return counts
 
 
 def _mean(values: Iterable[float]) -> float:
@@ -1440,6 +1563,9 @@ def _reduce_stats(
         "rollout_groups_kept",
         "rollout_groups_trained",
         "dynamic_filtered_groups",
+        "rollout_status_stop",
+        "rollout_status_length",
+        "rollout_status_empty",
     }
     mean_keys = [key for key in reduced if key not in {"reward_max", *sum_keys}]
     if mean_keys:

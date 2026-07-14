@@ -41,6 +41,7 @@ class SingleGpuSlimeConfig:
     max_steps: int | None = None
     kl_coef: float = 0.0
     clip_ratio: float = 0.2
+    calculate_per_token_loss: bool = False
     temperature: float = 0.9
     top_p: float = 0.95
     require_thinking_trace: bool = True

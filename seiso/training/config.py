@@ -203,6 +203,7 @@ class TrainConfig(BaseModel):
     max_samples_per_epoch: int | None = Field(default=None, ge=1)
     kl_coef: float = Field(default=0.0, ge=0)
     clip_ratio: float = Field(default=0.2, gt=0)
+    calculate_per_token_loss: bool = False
     temperature: float = Field(default=0.9, gt=0)
     top_p: float = Field(default=0.95, gt=0, le=1)
     require_thinking_trace: bool = True
@@ -331,6 +332,7 @@ class TrainConfig(BaseModel):
             max_steps=extra.get("max_steps"),
             kl_coef=self.kl_coef,
             clip_ratio=self.clip_ratio,
+            calculate_per_token_loss=self.calculate_per_token_loss,
             temperature=self.temperature,
             top_p=self.top_p,
             require_thinking_trace=self.require_thinking_trace,
@@ -438,6 +440,7 @@ def _write_slime_manifest(config: TrainConfig, output_dir: Path) -> None:
         "rollouts_per_prompt": config.rollouts_per_prompt,
         "over_sampling_batch_size": config.over_sampling_batch_size,
         "dynamic_sampling_filter": config.dynamic_sampling_filter,
+        "calculate_per_token_loss": config.calculate_per_token_loss,
         "balance_data": config.balance_data,
         "auto_stop": config.auto_stop,
         "auto_stop_metric": config.auto_stop_metric,
