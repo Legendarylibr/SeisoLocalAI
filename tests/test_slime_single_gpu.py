@@ -28,6 +28,7 @@ from seiso.slime_single_gpu.trainer import (
     _bounded_verifier_metadata,
     _check_training_health,
     _chunked,
+    _clipped_policy_loss,
     _collect_training_rollout_batch,
     _DistributedSlimeContext,
     _empty_stats,
@@ -45,6 +46,8 @@ from seiso.slime_single_gpu.trainer import (
     _process_reward,
     _rank_verifier_path,
     _reward_sample,
+    _rollout_status,
+    _rollout_status_stats,
     _sample_metadata,
     _sampling_batch_size,
     _score_completion,
@@ -337,6 +340,53 @@ def test_bounded_verifier_metadata_preserves_small_metadata_and_truncates_large(
     assert isinstance(bounded, dict)
     assert set(bounded) == {"_truncated"}
     assert len(bounded["_truncated"]) == 16
+
+
+def test_clipped_policy_loss_supports_per_token_normalization():
+    import torch
+
+    new_logprobs = torch.zeros((2, 3))
+    old_logprobs = torch.zeros((2, 3))
+    advantages = torch.tensor([[1.0], [3.0]])
+    mask = torch.tensor([[1.0, 1.0, 1.0], [1.0, 0.0, 0.0]])
+
+    per_token_loss = _clipped_policy_loss(
+        new_logprobs, old_logprobs, advantages, mask, 0.2, torch
+    )
+    per_sample_loss = _clipped_policy_loss(
+        torch.zeros(2),
+        torch.zeros(2),
+        torch.tensor([1.0, 3.0]),
+        torch.ones(2),
+        0.2,
+        torch,
+    )
+
+    assert per_token_loss.item() == -1.5
+    assert per_sample_loss.item() == -2.0
+
+
+def test_rollout_status_detects_stop_length_and_empty():
+    import torch
+
+    assert _rollout_status(torch.tensor([], dtype=torch.long), eos_token_id=2) == "empty"
+    assert _rollout_status(torch.tensor([7, 2, 9]), eos_token_id=2) == "stop"
+    assert _rollout_status(torch.tensor([7, 8, 9]), eos_token_id=2) == "length"
+
+
+def test_rollout_status_stats_counts_known_statuses():
+    rollouts = [
+        Rollout(None, None, None, None, None, reward=0.0, status="stop"),
+        Rollout(None, None, None, None, None, reward=0.0, status="length"),
+        Rollout(None, None, None, None, None, reward=0.0, status="length"),
+        Rollout(None, None, None, None, None, reward=0.0, status="ignored"),
+    ]
+
+    assert _rollout_status_stats(rollouts) == {
+        "rollout_status_stop": 1.0,
+        "rollout_status_length": 2.0,
+        "rollout_status_empty": 0.0,
+    }
 
 
 def test_thinking_prompt_and_completion_are_forced(tmp_path: Path):

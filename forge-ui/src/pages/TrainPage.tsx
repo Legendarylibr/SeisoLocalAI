@@ -68,6 +68,7 @@ export function TrainPage() {
   const [slimeDynamicSampling, setSlimeDynamicSampling] = useState(false);
   const [slimeOverSamplingBatchSize, setSlimeOverSamplingBatchSize] = useState(8);
   const [slimeBalanceData, setSlimeBalanceData] = useState(false);
+  const [slimePerTokenLoss, setSlimePerTokenLoss] = useState(false);
   const [slimeMaxPromptTokens, setSlimeMaxPromptTokens] = useState(512);
   const [slimeMaxNewTokens, setSlimeMaxNewTokens] = useState(256);
   const [slimeAutoStop, setSlimeAutoStop] = useState(true);
@@ -553,6 +554,7 @@ export function TrainPage() {
               rollout_batch_size: Math.max(slimeRolloutBatchSize, slimeRolloutsPerPrompt),
               dynamic_sampling_filter: slimeDynamicSampling ? "reward_nonzero_std" : "none",
               balance_data: slimeBalanceData,
+              calculate_per_token_loss: slimePerTokenLoss,
               over_sampling_batch_size: slimeDynamicSampling
                 ? Math.max(slimeOverSamplingBatchSize, slimeRolloutsPerPrompt)
                 : undefined,
@@ -979,6 +981,14 @@ export function TrainPage() {
                     onChange={(e) => setSlimeBalanceData(e.target.checked)}
                   />
                   Balance prompt lengths
+                </label>
+                <label className="studio-checkbox-item studio-checkbox-item-standalone">
+                  <input
+                    type="checkbox"
+                    checked={slimePerTokenLoss}
+                    onChange={(e) => setSlimePerTokenLoss(e.target.checked)}
+                  />
+                  Per-token loss
                 </label>
               </div>
               <div className="option-grid">
