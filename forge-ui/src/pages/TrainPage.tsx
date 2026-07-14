@@ -62,8 +62,12 @@ export function TrainPage() {
   const [loraAlpha, setLoraAlpha] = useState(32);
   const [gradAccum, setGradAccum] = useState(4);
   const [slimeReward, setSlimeReward] = useState("contains_answer");
+  const [slimeMetadataField, setSlimeMetadataField] = useState("metadata");
   const [slimeRolloutsPerPrompt, setSlimeRolloutsPerPrompt] = useState(4);
   const [slimeRolloutBatchSize, setSlimeRolloutBatchSize] = useState(4);
+  const [slimeDynamicSampling, setSlimeDynamicSampling] = useState(false);
+  const [slimeOverSamplingBatchSize, setSlimeOverSamplingBatchSize] = useState(8);
+  const [slimeBalanceData, setSlimeBalanceData] = useState(false);
   const [slimeMaxPromptTokens, setSlimeMaxPromptTokens] = useState(512);
   const [slimeMaxNewTokens, setSlimeMaxNewTokens] = useState(256);
   const [slimeAutoStop, setSlimeAutoStop] = useState(true);
@@ -544,8 +548,14 @@ export function TrainPage() {
         method === "slime"
           ? {
               reward: slimeReward,
+              metadata_field: slimeMetadataField.trim() || "metadata",
               rollouts_per_prompt: slimeRolloutsPerPrompt,
               rollout_batch_size: Math.max(slimeRolloutBatchSize, slimeRolloutsPerPrompt),
+              dynamic_sampling_filter: slimeDynamicSampling ? "reward_nonzero_std" : "none",
+              balance_data: slimeBalanceData,
+              over_sampling_batch_size: slimeDynamicSampling
+                ? Math.max(slimeOverSamplingBatchSize, slimeRolloutsPerPrompt)
+                : undefined,
               max_prompt_tokens: slimeMaxPromptTokens,
               max_new_tokens: slimeMaxNewTokens,
               auto_stop: slimeAutoStop,
@@ -938,6 +948,14 @@ export function TrainPage() {
                     <option value="field">Dataset reward field</option>
                   </select>
                 </div>
+                <div className="form-field">
+                  <label>Metadata field</label>
+                  <input
+                    type="text"
+                    value={slimeMetadataField}
+                    onChange={(e) => setSlimeMetadataField(e.target.value)}
+                  />
+                </div>
                 <label className="studio-checkbox-item studio-checkbox-item-standalone">
                   <input
                     type="checkbox"
@@ -945,6 +963,22 @@ export function TrainPage() {
                     onChange={(e) => setSlimeAutoStop(e.target.checked)}
                   />
                   Auto-stop on reward plateau
+                </label>
+                <label className="studio-checkbox-item studio-checkbox-item-standalone">
+                  <input
+                    type="checkbox"
+                    checked={slimeDynamicSampling}
+                    onChange={(e) => setSlimeDynamicSampling(e.target.checked)}
+                  />
+                  Keep reward-diverse groups
+                </label>
+                <label className="studio-checkbox-item studio-checkbox-item-standalone">
+                  <input
+                    type="checkbox"
+                    checked={slimeBalanceData}
+                    onChange={(e) => setSlimeBalanceData(e.target.checked)}
+                  />
+                  Balance prompt lengths
                 </label>
               </div>
               <div className="option-grid">
@@ -969,6 +1003,20 @@ export function TrainPage() {
                   />
                 </div>
               </div>
+              {slimeDynamicSampling && (
+                <div className="option-grid">
+                  <div className="form-field">
+                    <label>Oversampling prompts</label>
+                    <input
+                      type="number"
+                      min={2}
+                      max={256}
+                      value={slimeOverSamplingBatchSize}
+                      onChange={(e) => setSlimeOverSamplingBatchSize(Math.max(2, Number(e.target.value) || 2))}
+                    />
+                  </div>
+                </div>
+              )}
               <div className="option-grid">
                 <div className="form-field">
                   <label>Prompt tokens</label>

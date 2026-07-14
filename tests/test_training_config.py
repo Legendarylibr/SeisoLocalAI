@@ -41,12 +41,17 @@ def test_train_config_projects_to_single_gpu_slime_config(tmp_path):
             "dataset": tmp_path / "slime.jsonl",
             "output_dir": tmp_path / "out",
             "method": "slime",
+            "metadata_field": "context",
             "reward": "field",
             "reward_field": "score",
             "batch_size": 1,
             "policy_micro_batch_size": 2,
             "rollouts_per_prompt": 3,
             "rollout_batch_size": 6,
+            "over_sampling_batch_size": 9,
+            "dynamic_sampling_filter": "reward_nonzero_std",
+            "dynamic_sampling_min_reward_std": 0.01,
+            "balance_data": True,
             "learning_rate": 5e-6,
             "require_thinking_trace": True,
             "process_reward_weight": 0.4,
@@ -68,11 +73,16 @@ def test_train_config_projects_to_single_gpu_slime_config(tmp_path):
     assert slime.dataset == tmp_path / "slime.jsonl"
     assert slime.output_dir == tmp_path / "out"
     assert slime.reward == "field"
+    assert slime.metadata_field == "context"
     assert slime.reward_field == "score"
     assert slime.train_batch_size == 1
     assert slime.policy_micro_batch_size == 2
     assert slime.rollouts_per_prompt == 3
     assert slime.rollout_batch_size == 6
+    assert slime.over_sampling_batch_size == 9
+    assert slime.dynamic_sampling_filter == "reward_nonzero_std"
+    assert slime.dynamic_sampling_min_reward_std == 0.01
+    assert slime.balance_data is True
     assert slime.learning_rate == 5e-6
     assert slime.require_thinking_trace is True
     assert slime.process_reward_weight == 0.4
