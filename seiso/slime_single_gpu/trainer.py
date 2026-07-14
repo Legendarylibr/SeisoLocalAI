@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import gc
+import itertools
 import json
 import math
+import os
 import random
 import re
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, TypeVar
 
@@ -20,6 +22,7 @@ from seiso.models.lora_targets import (
 from seiso.research.provenance import apply_determinism
 from seiso.slime_single_gpu.config import SingleGpuSlimeConfig
 from seiso.slime_single_gpu.rewards import resolve_reward
+from seiso.training.metrics import METRIC_STDOUT_PREFIX
 
 _GRADIENT_CHECKPOINTING_KWARGS = {"use_reentrant": False}
 
@@ -40,6 +43,19 @@ class Rollout:
     final_answer: str = ""
     thinking_trace: str = ""
     advantage: float = 0.0
+
+
+@dataclass(frozen=True)
+class _DistributedSlimeContext:
+    enabled: bool
+    world_size: int = 1
+    rank: int = 0
+    local_rank: int = 0
+    device: str = "cuda"
+
+    @property
+    def is_main(self) -> bool:
+        return self.rank == 0
 
 
 @dataclass
@@ -102,14 +118,22 @@ class _AutoStopController:
 
 
 def train_single_gpu_slime(config: SingleGpuSlimeConfig) -> Path:
-    """Run a compact slime-style rollout/reward/update loop on one GPU."""
+    """Run a compact slime-style rollout/reward/update loop.
+
+    When launched under Accelerate with WORLD_SIZE > 1, this keeps the original
+    local SLIME algorithm but shards prompts by rank and synchronizes policy
+    updates with PyTorch DDP so multi-node jobs behave as one training run.
+    """
 
     config.validate()
-    _require_single_gpu(config)
-    _set_seed(config.seed)
 
     import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer
+
+    dist_ctx = _distributed_context(torch, config)
+    config = replace(config, device=dist_ctx.device)
+    _require_single_gpu(config)
+    _set_seed(config.seed + dist_ctx.rank)
 
     _configure_vram_cap(torch, config.max_vram_gb, config.device)
     dtype = _resolve_dtype(torch, config.dtype)
@@ -151,17 +175,16 @@ def train_single_gpu_slime(config: SingleGpuSlimeConfig) -> Path:
         for param in ref_model.parameters():
             param.requires_grad_(False)
 
+    model = _maybe_wrap_ddp(model, torch, dist_ctx, config)
     _assert_vram_fit(torch, config.max_vram_gb, config.device)
     optimizer = _build_optimizer(model, config)
     reward_fn = resolve_reward(config.reward)
 
-    config.output_dir.mkdir(parents=True, exist_ok=True)
+    if dist_ctx.is_main:
+        config.output_dir.mkdir(parents=True, exist_ok=True)
+    _distributed_barrier(dist_ctx)
     metrics_path = config.output_dir / "slime_single_gpu_metrics.jsonl"
-    verifier_path = (
-        config.output_dir / config.verifier_data_file
-        if config.write_verifier_data
-        else None
-    )
+    verifier_path = _rank_verifier_path(config, dist_ctx) if config.write_verifier_data else None
     final_output_dir = _final_output_dir(config)
     best_checkpoint_dir = config.output_dir / config.best_checkpoint_dir
     auto_stop = _AutoStopController.from_config(config)
@@ -172,7 +195,7 @@ def train_single_gpu_slime(config: SingleGpuSlimeConfig) -> Path:
     rng = random.Random(config.seed)
 
     for epoch in range(config.epochs):
-        for batch_samples in _iter_sample_batches(config, rng):
+        for batch_samples in _iter_sample_batches(config, rng, dist_ctx, torch):
             saw_sample = True
             rollouts = _collect_rollouts(
                 model=model,
@@ -196,12 +219,13 @@ def train_single_gpu_slime(config: SingleGpuSlimeConfig) -> Path:
                 torch,
                 loss_scale=1.0 / config.gradient_accumulation_steps,
             )
+            stats = _reduce_stats(stats, torch, dist_ctx)
             pending_accumulation_steps += 1
 
             health_reason = _check_training_health(stats, config)
             if health_reason:
                 optimizer.zero_grad(set_to_none=True)
-                if global_step % config.log_every_steps == 0:
+                if dist_ctx.is_main and global_step % config.log_every_steps == 0:
                     _append_metrics(
                         metrics_path,
                         {
@@ -213,8 +237,8 @@ def train_single_gpu_slime(config: SingleGpuSlimeConfig) -> Path:
                         },
                     )
                 global_step += 1
-                _write_training_state(config, global_step, health_reason, auto_stop)
-                _save(model, tokenizer, final_output_dir)
+                _write_training_state(config, global_step, health_reason, auto_stop, dist_ctx)
+                _save_distributed(model, tokenizer, final_output_dir, dist_ctx)
                 return final_output_dir
 
             if pending_accumulation_steps >= config.gradient_accumulation_steps:
@@ -223,9 +247,9 @@ def train_single_gpu_slime(config: SingleGpuSlimeConfig) -> Path:
 
             decision = auto_stop.update(global_step, stats)
             if decision.improved:
-                _save(model, tokenizer, best_checkpoint_dir)
+                _save_distributed(model, tokenizer, best_checkpoint_dir, dist_ctx)
 
-            if global_step % config.log_every_steps == 0:
+            if dist_ctx.is_main and global_step % config.log_every_steps == 0:
                 _append_metrics(
                     metrics_path,
                     {
@@ -241,27 +265,29 @@ def train_single_gpu_slime(config: SingleGpuSlimeConfig) -> Path:
                 and global_step
                 and global_step % config.save_every_steps == 0
             ):
-                _save(model, tokenizer, config.output_dir / f"checkpoint-{global_step}")
+                _save_distributed(
+                    model, tokenizer, config.output_dir / f"checkpoint-{global_step}", dist_ctx
+                )
 
             global_step += 1
             if decision.should_stop:
                 optimizer.zero_grad(set_to_none=True)
-                _write_training_state(config, global_step, decision.reason, auto_stop)
-                _save(model, tokenizer, final_output_dir)
+                _write_training_state(config, global_step, decision.reason, auto_stop, dist_ctx)
+                _save_distributed(model, tokenizer, final_output_dir, dist_ctx)
                 return final_output_dir
             if config.max_steps is not None and global_step >= config.max_steps:
                 if pending_accumulation_steps:
                     _optimizer_step(model, optimizer, torch, config)
-                _write_training_state(config, global_step, "max_steps", auto_stop)
-                _save(model, tokenizer, final_output_dir)
+                _write_training_state(config, global_step, "max_steps", auto_stop, dist_ctx)
+                _save_distributed(model, tokenizer, final_output_dir, dist_ctx)
                 return final_output_dir
 
     if not saw_sample:
         raise ValueError(f"no samples found in {config.dataset}")
     if pending_accumulation_steps:
         _optimizer_step(model, optimizer, torch, config)
-    _write_training_state(config, global_step, "complete", auto_stop)
-    _save(model, tokenizer, final_output_dir)
+    _write_training_state(config, global_step, "complete", auto_stop, dist_ctx)
+    _save_distributed(model, tokenizer, final_output_dir, dist_ctx)
     return final_output_dir
 
 
@@ -295,7 +321,7 @@ def _collect_rollouts(
         ).to(config.device)
         prompt_width = int(encoded["input_ids"].shape[1])
         with torch.no_grad():
-            generated = model.generate(
+            generated = _generation_model(model).generate(
                 **encoded,
                 do_sample=True,
                 temperature=config.temperature,
@@ -317,9 +343,7 @@ def _collect_rollouts(
             sample_idx = idx // config.rollouts_per_prompt
             sample = sample_chunk[sample_idx]
             response_mask = torch.zeros_like(generated[idx], dtype=torch.bool)
-            response_mask[prompt_width:] = (
-                generated[idx, prompt_width:] != tokenizer.pad_token_id
-            )
+            response_mask[prompt_width:] = generated[idx, prompt_width:] != tokenizer.pad_token_id
             completion = _force_completion_thinking_prefix(completions[idx], config)
             reward_sample = _reward_sample(sample, config)
             score = _score_completion(completion, reward_sample, config, reward_fn)
@@ -358,9 +382,7 @@ def _collect_rollouts(
                             reward_sample.get("answer", ""),
                             config.verifier_max_text_chars,
                         ),
-                        "completion": _truncate_text(
-                            completion, config.verifier_max_text_chars
-                        ),
+                        "completion": _truncate_text(completion, config.verifier_max_text_chars),
                         "thinking_trace": _truncate_text(
                             score["thinking_trace"], config.verifier_max_text_chars
                         ),
@@ -370,9 +392,7 @@ def _collect_rollouts(
                     }
                 )
 
-        padded = _pad_rollouts(
-            chunk_rollouts, tokenizer.pad_token_id, config.device, torch
-        )
+        padded = _pad_rollouts(chunk_rollouts, tokenizer.pad_token_id, config.device, torch)
         with torch.no_grad():
             old_logprobs = _sequence_logprobs(model, padded, torch).detach()
             ref_logprobs = (
@@ -382,9 +402,7 @@ def _collect_rollouts(
             )
         for idx, rollout in enumerate(chunk_rollouts):
             rollout.old_logprobs = old_logprobs[idx]
-            rollout.ref_logprobs = (
-                ref_logprobs[idx] if ref_logprobs is not None else None
-            )
+            rollout.ref_logprobs = ref_logprobs[idx] if ref_logprobs is not None else None
         if verifier_records:
             _append_jsonl_records(verifier_path, verifier_records)
         rollouts.extend(chunk_rollouts)
@@ -429,14 +447,10 @@ def _score_completion(
         else 0.0
     )
     penalty = (
-        config.missing_thinking_penalty
-        if config.require_thinking_trace and not has_trace
-        else 0.0
+        config.missing_thinking_penalty if config.require_thinking_trace and not has_trace else 0.0
     )
     reward = (
-        config.outcome_reward_weight * outcome
-        + config.process_reward_weight * process
-        - penalty
+        config.outcome_reward_weight * outcome + config.process_reward_weight * process - penalty
     )
     return {
         "reward": float(reward),
@@ -541,10 +555,7 @@ def _policy_loss(
 
     ratio = torch.exp(new_logprobs - old_logprobs)
     unclipped = ratio * advantages
-    clipped = (
-        torch.clamp(ratio, 1.0 - config.clip_ratio, 1.0 + config.clip_ratio)
-        * advantages
-    )
+    clipped = torch.clamp(ratio, 1.0 - config.clip_ratio, 1.0 + config.clip_ratio) * advantages
     policy_loss = -torch.minimum(unclipped, clipped).mean()
 
     kl_loss = torch.zeros((), device=config.device)
@@ -563,9 +574,7 @@ def _policy_loss(
         "outcome_reward_mean": _mean(r.outcome_reward for r in rollouts),
         "process_reward_mean": _mean(r.process_reward for r in rollouts),
         "thinking_penalty_mean": _mean(r.thinking_penalty for r in rollouts),
-        "group_reward_spread_mean": _group_reward_spread_mean(
-            rollouts, config.rollouts_per_prompt
-        ),
+        "group_reward_spread_mean": _group_reward_spread_mean(rollouts, config.rollouts_per_prompt),
     }
 
 
@@ -604,9 +613,7 @@ def _merge_stats(
 
 
 def _sequence_logprobs(model, batch: dict[str, Any], torch):
-    outputs = model(
-        input_ids=batch["input_ids"], attention_mask=batch["attention_mask"]
-    )
+    outputs = model(input_ids=batch["input_ids"], attention_mask=batch["attention_mask"])
     logits = outputs.logits[:, :-1, :]
     labels = batch["input_ids"][:, 1:]
     mask = batch["response_mask"][:, 1:].float()
@@ -622,9 +629,7 @@ def _sequence_logprobs(model, batch: dict[str, Any], torch):
     return (token_logprobs * mask).sum(dim=1) / denom
 
 
-def _pad_rollouts(
-    rollouts: list[Rollout], pad_token_id: int, device: str, torch
-) -> dict[str, Any]:
+def _pad_rollouts(rollouts: list[Rollout], pad_token_id: int, device: str, torch) -> dict[str, Any]:
     max_len = max(int(r.input_ids.numel()) for r in rollouts)
     # Prefer stacking on-device tensors; fall back to per-row .to(device).
     same_device = all(
@@ -635,21 +640,13 @@ def _pad_rollouts(
     if same_device and all(int(r.input_ids.numel()) == max_len for r in rollouts):
         return {
             "input_ids": torch.stack([r.input_ids for r in rollouts], dim=0),
-            "attention_mask": torch.stack(
-                [r.attention_mask for r in rollouts], dim=0
-            ),
+            "attention_mask": torch.stack([r.attention_mask for r in rollouts], dim=0),
             "response_mask": torch.stack([r.response_mask for r in rollouts], dim=0),
         }
 
-    input_ids = torch.full(
-        (len(rollouts), max_len), pad_token_id, dtype=torch.long, device=device
-    )
-    attention_mask = torch.zeros(
-        (len(rollouts), max_len), dtype=torch.long, device=device
-    )
-    response_mask = torch.zeros(
-        (len(rollouts), max_len), dtype=torch.bool, device=device
-    )
+    input_ids = torch.full((len(rollouts), max_len), pad_token_id, dtype=torch.long, device=device)
+    attention_mask = torch.zeros((len(rollouts), max_len), dtype=torch.long, device=device)
+    response_mask = torch.zeros((len(rollouts), max_len), dtype=torch.bool, device=device)
     for idx, rollout in enumerate(rollouts):
         length = int(rollout.input_ids.numel())
         input_ids[idx, :length] = rollout.input_ids.to(device)
@@ -710,7 +707,7 @@ def _build_optimizer(model, config: SingleGpuSlimeConfig):
         trainable_params,
         lr=config.learning_rate,
         weight_decay=config.weight_decay,
-        fused=config.device == "cuda",
+        fused=_is_cuda_device(config.device),
     )
 
 
@@ -724,8 +721,7 @@ def _apply_lora(model, config: SingleGpuSlimeConfig):
         )
     except ImportError as exc:
         raise RuntimeError(
-            "use_lora requires PEFT. Install training extras with "
-            "`pip install -e '.[train]'`."
+            "use_lora requires PEFT. Install training extras with `pip install -e '.[train]'`."
         ) from exc
 
     if _model_loaded_in_kbit(model):
@@ -804,34 +800,77 @@ def _optimizer_step(model, optimizer, torch, config: SingleGpuSlimeConfig) -> No
 def _iter_sample_batches(
     config: SingleGpuSlimeConfig,
     rng: random.Random,
+    dist_ctx: _DistributedSlimeContext | None = None,
+    torch=None,
 ) -> Iterable[list[dict[str, Any]]]:
+    if dist_ctx and dist_ctx.enabled:
+        if torch is None:
+            import torch as torch_mod
+
+            torch = torch_mod
+        yield from _iter_distributed_sample_batches(config, rng, dist_ctx, torch)
+        return
+    yield from _batched_records(_iter_shuffled_samples(config, rng), config.train_batch_size)
+
+
+def _iter_distributed_sample_batches(
+    config: SingleGpuSlimeConfig,
+    rng: random.Random,
+    dist_ctx: _DistributedSlimeContext,
+    torch,
+) -> Iterable[list[dict[str, Any]]]:
+    local_count = _count_rank_samples(config, dist_ctx)
+    local_batches = local_count // config.train_batch_size
+    min_batches = _distributed_min_int(local_batches, torch, dist_ctx)
+    if min_batches < 1:
+        raise ValueError(
+            "not enough sharded samples for distributed slime; "
+            "need at least train_batch_size samples per rank"
+        )
+    target_samples = min_batches * config.train_batch_size
     yield from _batched_records(
-        _iter_shuffled_samples(config, rng), config.train_batch_size
+        _iter_shuffled_samples(config, rng, dist_ctx, target_samples),
+        config.train_batch_size,
     )
 
 
 def _iter_shuffled_samples(
     config: SingleGpuSlimeConfig,
     rng: random.Random,
+    dist_ctx: _DistributedSlimeContext | None = None,
+    target_samples: int | None = None,
 ) -> Iterable[dict[str, Any]]:
     buffer: list[dict[str, Any]] = []
-    read = 0
-    for sample in _load_samples(config):
+    yielded = 0
+    for sample_index, sample in enumerate(_limited_samples(config)):
+        if dist_ctx and dist_ctx.enabled and sample_index % dist_ctx.world_size != dist_ctx.rank:
+            continue
         buffer.append(sample)
-        read += 1
-        if (
-            config.max_samples_per_epoch is not None
-            and read >= config.max_samples_per_epoch
-        ):
-            break
         if len(buffer) < config.shuffle_buffer_size:
             continue
         idx = rng.randrange(len(buffer))
         yield buffer.pop(idx)
+        yielded += 1
+        if target_samples is not None and yielded >= target_samples:
+            return
 
     while buffer:
         idx = rng.randrange(len(buffer))
         yield buffer.pop(idx)
+        yielded += 1
+        if target_samples is not None and yielded >= target_samples:
+            return
+
+
+def _count_rank_samples(
+    config: SingleGpuSlimeConfig,
+    dist_ctx: _DistributedSlimeContext,
+) -> int:
+    count = 0
+    for sample_index, _sample in enumerate(_limited_samples(config)):
+        if sample_index % dist_ctx.world_size == dist_ctx.rank:
+            count += 1
+    return count
 
 
 def _load_samples(config: SingleGpuSlimeConfig) -> Iterable[dict[str, Any]]:
@@ -841,9 +880,14 @@ def _load_samples(config: SingleGpuSlimeConfig) -> Iterable[dict[str, Any]]:
         yield sample
 
 
-def _reward_sample(
-    sample: dict[str, Any], config: SingleGpuSlimeConfig
-) -> dict[str, Any]:
+def _limited_samples(config: SingleGpuSlimeConfig) -> Iterable[dict[str, Any]]:
+    samples = _load_samples(config)
+    if config.max_samples_per_epoch is None:
+        return samples
+    return itertools.islice(samples, config.max_samples_per_epoch)
+
+
+def _reward_sample(sample: dict[str, Any], config: SingleGpuSlimeConfig) -> dict[str, Any]:
     if config.reward == "field":
         merged = dict(sample)
         merged["reward"] = sample.get(config.reward_field, 0.0)
@@ -873,33 +917,33 @@ def _resolve_dtype(torch, dtype: str):
 
 
 def _require_single_gpu(config: SingleGpuSlimeConfig) -> None:
-    if config.device != "cuda":
+    if not _is_cuda_device(config.device):
         return
     import torch
 
     if not torch.cuda.is_available():
         raise RuntimeError("single-GPU slime training requires CUDA when device='cuda'")
-    if torch.cuda.device_count() > 1:
-        torch.cuda.set_device(0)
+    torch.cuda.set_device(_cuda_device_index(config.device))
 
 
 def _configure_vram_cap(torch, max_vram_gb: float | None, device: str) -> None:
-    if max_vram_gb is None or device != "cuda":
+    if max_vram_gb is None or not _is_cuda_device(device):
         return
-    total_gb = torch.cuda.get_device_properties(0).total_memory / 1024**3
+    device_index = _cuda_device_index(device)
+    total_gb = torch.cuda.get_device_properties(device_index).total_memory / 1024**3
     if max_vram_gb > total_gb:
         raise RuntimeError(
             f"VRAM cap {max_vram_gb:.2f} GiB exceeds device capacity {total_gb:.2f} GiB"
         )
     fraction = max_vram_gb / total_gb
-    torch.cuda.set_per_process_memory_fraction(fraction, device=0)
+    torch.cuda.set_per_process_memory_fraction(fraction, device=device_index)
 
 
 def _assert_vram_fit(torch, max_vram_gb: float | None, device: str) -> None:
-    if max_vram_gb is None or device != "cuda":
+    if max_vram_gb is None or not _is_cuda_device(device):
         return
     torch.cuda.synchronize()
-    used_gb = torch.cuda.memory_allocated() / 1024**3
+    used_gb = torch.cuda.memory_allocated(_cuda_device_index(device)) / 1024**3
     if used_gb > max_vram_gb:
         gc.collect()
         torch.cuda.empty_cache()
@@ -932,8 +976,20 @@ def _chunked(items: list[T], chunk_size: int) -> Iterable[list[T]]:
 
 
 def _append_metrics(path: Path, record: dict[str, Any]) -> None:
+    metric = _metric_record(record)
     with path.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(record, sort_keys=True) + "\n")
+        handle.write(json.dumps(metric, sort_keys=True) + "\n")
+    if os.environ.get("SEISO_EMIT_METRICS_STDOUT") == "1":
+        print(f"{METRIC_STDOUT_PREFIX}{json.dumps(metric)}", flush=True)
+
+
+def _metric_record(record: dict[str, Any]) -> dict[str, Any]:
+    metric = {
+        "type": "training",
+        "reward": record.get("reward_mean"),
+        **record,
+    }
+    return {k: v for k, v in metric.items() if v is not None}
 
 
 def _append_jsonl_records(path: Path, records: list[dict[str, Any]]) -> None:
@@ -990,7 +1046,11 @@ def _write_training_state(
     global_step: int,
     stop_reason: str | None,
     controller: _AutoStopController,
+    dist_ctx: _DistributedSlimeContext | None = None,
 ) -> None:
+    if dist_ctx and not dist_ctx.is_main:
+        _distributed_barrier(dist_ctx)
+        return
     state = {
         "global_step": global_step,
         "stop_reason": stop_reason,
@@ -998,13 +1058,166 @@ def _write_training_state(
         "final_checkpoint_dir": str(_final_output_dir(config)),
         **_auto_stop_stats(controller),
     }
+    if dist_ctx and dist_ctx.enabled:
+        state.update(
+            {
+                "distributed": True,
+                "world_size": dist_ctx.world_size,
+                "rank_zero_only_artifacts": True,
+            }
+        )
     (config.output_dir / "slime_training_state.json").write_text(
         json.dumps(state, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
+    _distributed_barrier(dist_ctx)
 
 
 def _save(model, tokenizer, output_dir: Path) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
+    model = _unwrap_model(model)
     model.save_pretrained(output_dir)
     tokenizer.save_pretrained(output_dir)
+
+
+def _save_distributed(
+    model,
+    tokenizer,
+    output_dir: Path,
+    dist_ctx: _DistributedSlimeContext,
+) -> None:
+    if dist_ctx.is_main:
+        _save(model, tokenizer, output_dir)
+    _distributed_barrier(dist_ctx)
+
+
+def _distributed_context(torch, config: SingleGpuSlimeConfig) -> _DistributedSlimeContext:
+    world_size = int(os.environ.get("WORLD_SIZE", "1") or 1)
+    rank = int(os.environ.get("RANK", os.environ.get("LOCAL_RANK", "0")) or 0)
+    local_rank = int(os.environ.get("LOCAL_RANK", "0") or 0)
+    if world_size <= 1:
+        return _DistributedSlimeContext(
+            enabled=False,
+            world_size=1,
+            rank=0,
+            local_rank=0,
+            device=config.device,
+        )
+    if not _is_cuda_device(config.device):
+        device = config.device
+        backend = "gloo"
+    else:
+        if not torch.cuda.is_available():
+            raise RuntimeError("distributed slime requires CUDA when device='cuda'")
+        torch.cuda.set_device(local_rank)
+        device = f"cuda:{local_rank}"
+        backend = "nccl"
+    dist = torch.distributed
+    if not dist.is_available():
+        raise RuntimeError("distributed slime requires torch.distributed")
+    if not dist.is_initialized():
+        dist.init_process_group(backend=backend, init_method="env://")
+    return _DistributedSlimeContext(
+        enabled=True,
+        world_size=world_size,
+        rank=rank,
+        local_rank=local_rank,
+        device=device,
+    )
+
+
+def _maybe_wrap_ddp(
+    model,
+    torch,
+    dist_ctx: _DistributedSlimeContext,
+    config: SingleGpuSlimeConfig,
+):
+    if not dist_ctx.enabled:
+        return model
+    from torch.nn.parallel import DistributedDataParallel
+
+    kwargs: dict[str, Any] = {"find_unused_parameters": False}
+    if _is_cuda_device(config.device):
+        kwargs["device_ids"] = [dist_ctx.local_rank]
+        kwargs["output_device"] = dist_ctx.local_rank
+    return DistributedDataParallel(model, **kwargs)
+
+
+def _distributed_min_int(
+    value: int,
+    torch,
+    dist_ctx: _DistributedSlimeContext,
+) -> int:
+    if not dist_ctx.enabled:
+        return value
+    tensor = torch.tensor([int(value)], device=dist_ctx.device, dtype=torch.long)
+    torch.distributed.all_reduce(tensor, op=torch.distributed.ReduceOp.MIN)
+    return int(tensor.item())
+
+
+def _reduce_stats(
+    stats: dict[str, float],
+    torch,
+    dist_ctx: _DistributedSlimeContext,
+) -> dict[str, float]:
+    if not dist_ctx.enabled:
+        return stats
+    reduced = dict(stats)
+    mean_keys = [key for key in reduced if key != "reward_max"]
+    if mean_keys:
+        values = torch.tensor(
+            [float(reduced[key]) for key in mean_keys],
+            device=dist_ctx.device,
+            dtype=torch.float64,
+        )
+        torch.distributed.all_reduce(values, op=torch.distributed.ReduceOp.SUM)
+        values /= dist_ctx.world_size
+        for key, value in zip(mean_keys, values.tolist(), strict=False):
+            reduced[key] = float(value)
+    max_tensor = torch.tensor(
+        [float(reduced.get("reward_max", float("-inf")))],
+        device=dist_ctx.device,
+        dtype=torch.float64,
+    )
+    torch.distributed.all_reduce(max_tensor, op=torch.distributed.ReduceOp.MAX)
+    reduced["reward_max"] = float(max_tensor.item())
+    return reduced
+
+
+def _distributed_barrier(dist_ctx: _DistributedSlimeContext | None) -> None:
+    if not dist_ctx or not dist_ctx.enabled:
+        return
+    import torch
+
+    torch.distributed.barrier()
+
+
+def _rank_verifier_path(
+    config: SingleGpuSlimeConfig,
+    dist_ctx: _DistributedSlimeContext,
+) -> Path:
+    base = config.output_dir / config.verifier_data_file
+    if not dist_ctx.enabled:
+        return base
+    return base.with_name(f"{base.stem}.rank{dist_ctx.rank}{base.suffix}")
+
+
+def _unwrap_model(model):
+    return getattr(model, "module", model)
+
+
+def _generation_model(model):
+    return _unwrap_model(model)
+
+
+def _is_cuda_device(device: str) -> bool:
+    return device == "cuda" or device.startswith("cuda:")
+
+
+def _cuda_device_index(device: str) -> int:
+    if ":" not in device:
+        return 0
+    try:
+        return int(device.split(":", 1)[1])
+    except ValueError as exc:
+        raise ValueError(f"unsupported CUDA device {device!r}") from exc

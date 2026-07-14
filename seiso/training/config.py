@@ -378,13 +378,19 @@ def run_training(
 
         slime_config = config.to_single_gpu_slime_config()
         out = train_single_gpu_slime(slime_config)
-        _write_slime_manifest(config, out)
+        if _is_main_process():
+            _write_slime_manifest(config, out)
         return out
     trainer = SeisoTrainer(config, on_metric=on_metric, on_log=on_log, job_id=job_id)
     return trainer.run()
 
 
 def _write_slime_manifest(config: TrainConfig, output_dir: Path) -> None:
+    distributed = bool(
+        config.multi_gpu
+        or config.distributed_strategy == DistributedStrategy.DDP
+        or config.distributed_num_nodes > 1
+    )
     payload = {
         "model_id": config.model_id,
         "original_model_id": str(
@@ -392,7 +398,9 @@ def _write_slime_manifest(config: TrainConfig, output_dir: Path) -> None:
         ),
         "method": TrainMethod.SLIME.value,
         "methodology": config.training_methodology,
-        "post_training_algorithm": "single_gpu_slime_grpo",
+        "post_training_algorithm": (
+            "distributed_slime_grpo" if distributed else "single_gpu_slime_grpo"
+        ),
         "adapter": "lora" if config.slime_use_lora else "full",
         "quant": config.quant.value,
         "dataset": str(config.dataset),
@@ -417,6 +425,11 @@ def _write_slime_manifest(config: TrainConfig, output_dir: Path) -> None:
             if config.write_verifier_data
             else None
         ),
+        "distributed": distributed,
+        "distributed_strategy": config.distributed_strategy.value,
+        "distributed_nproc_per_node": config.distributed_nproc_per_node,
+        "distributed_num_nodes": config.distributed_num_nodes,
+        "distributed_node_rank": config.distributed_node_rank,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -424,3 +437,7 @@ def _write_slime_manifest(config: TrainConfig, output_dir: Path) -> None:
         json.dumps(payload, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
+
+
+def _is_main_process() -> bool:
+    return int(os.environ.get("RANK", os.environ.get("LOCAL_RANK", "0")) or 0) == 0
