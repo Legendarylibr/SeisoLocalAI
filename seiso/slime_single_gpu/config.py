@@ -49,7 +49,10 @@ class SingleGpuSlimeConfig:
         "Show your reasoning in <think>...</think>, then give the final answer."
     )
     outcome_reward_weight: float = 1.0
-    process_reward_weight: float = 0.25
+    # Format is a small binary bonus for closed <think>...</think> on raw tokens.
+    format_reward_weight: float = 0.1
+    # Lexical process shaping is experimental; leave at 0 for verifiable outcome-first RL.
+    process_reward_weight: float = 0.0
     missing_thinking_penalty: float = 0.5
     min_thinking_tokens: int = 8
     seed: int = 17
@@ -136,6 +139,8 @@ class SingleGpuSlimeConfig:
             raise ValueError("thinking_instruction must not be empty")
         if self.outcome_reward_weight < 0:
             raise ValueError("outcome_reward_weight must be non-negative")
+        if self.format_reward_weight < 0:
+            raise ValueError("format_reward_weight must be non-negative")
         if self.process_reward_weight < 0:
             raise ValueError("process_reward_weight must be non-negative")
         if self.missing_thinking_penalty < 0:

@@ -55,7 +55,8 @@ def test_train_config_projects_to_single_gpu_slime_config(tmp_path):
             "balance_data": True,
             "learning_rate": 5e-6,
             "require_thinking_trace": True,
-            "process_reward_weight": 0.4,
+            "format_reward_weight": 0.2,
+            "process_reward_weight": 0.0,
             "missing_thinking_penalty": 0.2,
             "min_thinking_tokens": 6,
             "save_steps": 25,
@@ -87,7 +88,8 @@ def test_train_config_projects_to_single_gpu_slime_config(tmp_path):
     assert slime.balance_data is True
     assert slime.learning_rate == 5e-6
     assert slime.require_thinking_trace is True
-    assert slime.process_reward_weight == 0.4
+    assert slime.format_reward_weight == 0.2
+    assert slime.process_reward_weight == 0.0
     assert slime.missing_thinking_penalty == 0.2
     assert slime.min_thinking_tokens == 6
     assert slime.save_every_steps == 25
@@ -103,6 +105,8 @@ def test_example_training_slime_config_loads():
     slime = cfg.to_single_gpu_slime_config()
 
     assert cfg.method == TrainMethod.SLIME
-    assert slime.reward == "contains_answer"
+    assert slime.reward == "numeric"
+    assert slime.process_reward_weight == 0.0
+    assert slime.format_reward_weight == 0.1
     assert slime.use_lora is True
     assert slime.auto_stop is True

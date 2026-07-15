@@ -212,7 +212,16 @@ class TrainConfig(BaseModel):
         min_length=1,
     )
     outcome_reward_weight: float = Field(default=1.0, ge=0)
-    process_reward_weight: float = Field(default=0.25, ge=0)
+    format_reward_weight: float = Field(
+        default=0.1,
+        ge=0,
+        description="Weight for closed <think>...</think> format on generated tokens only.",
+    )
+    process_reward_weight: float = Field(
+        default=0.0,
+        ge=0,
+        description="Experimental lexical process score; keep 0 for verifiable outcome-first RL.",
+    )
     missing_thinking_penalty: float = Field(default=0.5, ge=0)
     min_thinking_tokens: int = Field(default=8, ge=0)
     dtype: str = "auto"
@@ -338,6 +347,7 @@ class TrainConfig(BaseModel):
             require_thinking_trace=self.require_thinking_trace,
             thinking_instruction=self.thinking_instruction,
             outcome_reward_weight=self.outcome_reward_weight,
+            format_reward_weight=self.format_reward_weight,
             process_reward_weight=self.process_reward_weight,
             missing_thinking_penalty=self.missing_thinking_penalty,
             min_thinking_tokens=self.min_thinking_tokens,
@@ -434,6 +444,7 @@ def _write_slime_manifest(config: TrainConfig, output_dir: Path) -> None:
         "metadata_field": config.metadata_field,
         "require_thinking_trace": config.require_thinking_trace,
         "outcome_reward_weight": config.outcome_reward_weight,
+        "format_reward_weight": config.format_reward_weight,
         "process_reward_weight": config.process_reward_weight,
         "missing_thinking_penalty": config.missing_thinking_penalty,
         "min_thinking_tokens": config.min_thinking_tokens,

@@ -155,7 +155,7 @@ Start from `configs/example_training_slime.yaml`:
 method: slime
 model_id: Qwen/Qwen2.5-0.5B-Instruct
 dataset: data/slime_sample.jsonl
-reward: contains_answer
+reward: numeric
 max_vram_gb: 16
 rollouts_per_prompt: 4
 rollout_batch_size: 4
@@ -165,7 +165,8 @@ policy_micro_batch_size: 2
 batch_size: 1
 learning_rate: 0.000005
 require_thinking_trace: true
-process_reward_weight: 0.25
+format_reward_weight: 0.1
+process_reward_weight: 0.0
 missing_thinking_penalty: 0.5
 slime_use_lora: true
 auto_stop: true
@@ -180,13 +181,14 @@ Important fields:
 | `max_vram_gb` | Upper VRAM cap used to fail before out-of-memory conditions |
 | `prompt_field`, `answer_field` | Dataset columns for prompts and target answers |
 | `metadata_field` | Optional upstream-style metadata column, default `metadata`; JSON strings are parsed and carried into reward samples and bounded verifier records |
-| `reward` | Built-in reward name: `exact_match`, `contains_answer`, `numeric`, or `field` |
+| `reward` | Verifier checker: `exact_match`, `numeric`, `choice`, `contains_answer`, `field`, or `auto` |
 | `reward_field` | Dataset reward column when `reward: field` |
-| `require_thinking_trace` | Forces rollouts through `<think>...</think>` format before the final answer |
-| `outcome_reward_weight` | Weight for the correctness reward; built-in rewards score the final answer portion |
-| `process_reward_weight` | Weight for the rule-based reasoning trace score |
-| `missing_thinking_penalty` | Penalty when a rollout jumps to the final answer or leaves the trace unfinished |
-| `min_thinking_tokens` | Minimum trace length used by the simple process reward |
+| `require_thinking_trace` | Prompt asks for `<think>...</think>`; format reward checks **generated** tokens only |
+| `outcome_reward_weight` | Weight for hard outcome (correctness) from the shared verifier |
+| `format_reward_weight` | Small bonus when the completion contains a closed thinking block |
+| `process_reward_weight` | Experimental lexical process score; keep `0` for verifiable outcome-first RL |
+| `missing_thinking_penalty` | Penalty when format is required but the model omits a closed think block |
+| `min_thinking_tokens` | Only used when `process_reward_weight > 0` |
 | `rollouts_per_prompt` | Number of sampled completions per prompt for grouped advantages |
 | `rollout_batch_size` | Generation batch size; keep at least `rollouts_per_prompt` |
 | `dynamic_sampling_filter` | Optional upstream-style dynamic sampling filter; set `reward_nonzero_std` to drop prompt groups whose reward standard deviation is at or below `dynamic_sampling_min_reward_std` |
@@ -197,9 +199,9 @@ Important fields:
 | `shuffle_buffer_size` | Bounded CPU shuffle buffer for long datasets |
 | `max_samples_per_epoch` | Optional per-epoch cap for smoke runs or data-efficient loops |
 | `slime_use_lora` | Train LoRA adapters instead of full model weights |
-| `auto_stop_*` | Plateau detection; defaults monitor `reward_mean` |
+| `auto_stop_*` | Plateau detection; defaults monitor `reward_mean` (also logs `group_pass_rate`) |
 | `best_checkpoint_dir` | Directory under `output_dir` for the best observed metric checkpoint |
-| `write_verifier_data` | Writes prompt/answer/completion/reward/status plus outcome/process breakdown JSONL for verifier or reward-model data |
+| `write_verifier_data` | Writes JSONL with outcome, format, checker, extracted answer, and status per rollout |
 | `verifier_max_text_chars` | Per-field text cap to keep verifier JSONL bounded |
 
 Slime checkpoints are exportable like other Seiso checkpoints. LoRA slime runs are treated as adapter checkpoints; non-LoRA slime runs are treated like full checkpoints. In distributed SLIME runs, rank 0 writes shared checkpoints and metrics, while verifier JSONL is rank-scoped to avoid concurrent writes.

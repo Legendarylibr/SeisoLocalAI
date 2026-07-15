@@ -20,6 +20,8 @@ from seiso.models.lora_targets import (
     resolve_lora_target_modules,
 )
 from seiso.research.provenance import apply_determinism
+from seiso.rl_verify import score_completion as verify_score_completion
+from seiso.rl_verify.extract import split_thinking_trace
 from seiso.slime_single_gpu.config import SingleGpuSlimeConfig
 from seiso.slime_single_gpu.rewards import resolve_reward
 from seiso.training.metrics import METRIC_STDOUT_PREFIX
@@ -40,12 +42,16 @@ class Rollout:
     old_token_logprobs: Any | None = None
     ref_token_logprobs: Any | None = None
     outcome_reward: float = 0.0
+    format_reward: float = 0.0
     process_reward: float = 0.0
     thinking_penalty: float = 0.0
     final_answer: str = ""
     thinking_trace: str = ""
     status: str = "unknown"
     advantage: float = 0.0
+    outcome_passed: bool = False
+    format_ok: bool = True
+    checker: str = ""
 
 
 @dataclass(frozen=True)
@@ -482,7 +488,8 @@ def _collect_rollouts(
             response_mask = torch.zeros_like(generated[idx], dtype=torch.bool)
             response_mask[prompt_width:] = generated[idx, prompt_width:] != tokenizer.pad_token_id
             status = _rollout_status(generated[idx, prompt_width:], tokenizer.eos_token_id)
-            completion = _force_completion_thinking_prefix(completions[idx], config)
+            # Score the raw model completion only — never rewrite tags for reward.
+            completion = completions[idx]
             reward_sample = _reward_sample(sample, config)
             metadata = _sample_metadata(sample, config)
             score = _score_completion(completion, reward_sample, config, reward_fn)
@@ -496,11 +503,15 @@ def _collect_rollouts(
                     ref_logprobs=None,
                     reward=score["reward"],
                     outcome_reward=score["outcome_reward"],
+                    format_reward=score["format_reward"],
                     process_reward=score["process_reward"],
                     thinking_penalty=score["thinking_penalty"],
                     final_answer=score["final_answer"],
                     thinking_trace=score["thinking_trace"],
                     status=status,
+                    outcome_passed=bool(score["outcome_passed"]),
+                    format_ok=bool(score["format_ok"]),
+                    checker=str(score["checker"]),
                 )
             )
             if verifier_path is not None:
@@ -512,8 +523,17 @@ def _collect_rollouts(
                         "rollout_index": idx % config.rollouts_per_prompt,
                         "reward": score["reward"],
                         "outcome_reward": score["outcome_reward"],
+                        "format_reward": score["format_reward"],
                         "process_reward": score["process_reward"],
                         "thinking_penalty": score["thinking_penalty"],
+                        "outcome_passed": score["outcome_passed"],
+                        "format_ok": score["format_ok"],
+                        "checker": score["checker"],
+                        "extracted_answer": _truncate_text(
+                            score.get("extracted_answer", ""),
+                            config.verifier_max_text_chars,
+                        ),
+                        "detail": score.get("detail"),
                         "reward_name": config.reward,
                         "status": status,
                         "metadata": _bounded_verifier_metadata(
@@ -600,65 +620,48 @@ def _format_rollout_prompt(prompt: str, config: SingleGpuSlimeConfig) -> str:
     return f"{prompt.rstrip()}\n\n{config.thinking_instruction}\n<think>"
 
 
-def _force_completion_thinking_prefix(
-    completion: str,
-    config: SingleGpuSlimeConfig,
-) -> str:
-    if not config.require_thinking_trace:
-        return completion
-    if completion.lstrip().lower().startswith("<think>"):
-        return completion
-    return f"<think>{completion}"
-
-
 def _score_completion(
     completion: str,
     sample: dict[str, Any],
     config: SingleGpuSlimeConfig,
     reward_fn,
-) -> dict[str, float | str]:
-    thinking_trace, final_answer, has_trace = _split_thinking_trace(completion)
-    answer_for_outcome = final_answer if config.require_thinking_trace else completion
-    outcome = float(reward_fn(answer_for_outcome, sample))
-    process = (
-        _process_reward(thinking_trace, final_answer, config)
-        if config.require_thinking_trace
-        else 0.0
+) -> dict[str, float | str | bool | None]:
+    """Score raw generated text via the shared verifier (no synthetic tags)."""
+    del reward_fn  # Outcome path is selected by config.reward checker name.
+    result = verify_score_completion(
+        completion,
+        sample,
+        checker=config.reward,
+        require_thinking_trace=config.require_thinking_trace,
+        outcome_weight=config.outcome_reward_weight,
+        format_weight=config.format_reward_weight,
+        process_weight=config.process_reward_weight,
+        missing_format_penalty=config.missing_thinking_penalty,
+        min_thinking_tokens=config.min_thinking_tokens,
     )
     penalty = (
-        config.missing_thinking_penalty if config.require_thinking_trace and not has_trace else 0.0
-    )
-    reward = (
-        config.outcome_reward_weight * outcome + config.process_reward_weight * process - penalty
+        config.missing_thinking_penalty
+        if config.require_thinking_trace and not result.format_ok
+        else 0.0
     )
     return {
-        "reward": float(reward),
-        "outcome_reward": outcome,
-        "process_reward": float(process),
+        "reward": float(result.reward),
+        "outcome_reward": float(result.outcome),
+        "format_reward": float(result.format_score),
+        "process_reward": float(result.process_score),
         "thinking_penalty": float(penalty),
-        "thinking_trace": thinking_trace,
-        "final_answer": final_answer,
+        "thinking_trace": result.thinking_trace,
+        "final_answer": result.final_answer,
+        "extracted_answer": result.extracted_answer,
+        "outcome_passed": result.passed,
+        "format_ok": result.format_ok,
+        "checker": result.checker,
+        "detail": result.detail,
     }
 
 
 def _split_thinking_trace(completion: str) -> tuple[str, str, bool]:
-    match = re.search(
-        r"<think>(?P<trace>.*?)</think>(?P<final>.*)",
-        completion,
-        flags=re.IGNORECASE | re.DOTALL,
-    )
-    if match is None:
-        open_match = re.search(
-            r"<think>(?P<trace>.*)",
-            completion,
-            flags=re.IGNORECASE | re.DOTALL,
-        )
-        if open_match is not None:
-            return open_match.group("trace").strip(), "", False
-        return "", completion.strip(), False
-    trace = match.group("trace").strip()
-    final = match.group("final").strip()
-    return trace, final, True
+    return split_thinking_trace(completion)
 
 
 def _process_reward(
@@ -666,38 +669,14 @@ def _process_reward(
     final_answer: str,
     config: SingleGpuSlimeConfig,
 ) -> float:
-    tokens = re.findall(r"\w+", thinking_trace)
-    if not tokens:
-        return 0.0
+    """Deprecated lexical process helper — prefer ``process_reward_weight=0``."""
+    from seiso.rl_verify.verify import experimental_process_reward
 
-    score = 0.0
-    if len(tokens) >= config.min_thinking_tokens:
-        score += 0.35
-    else:
-        score += 0.35 * (len(tokens) / max(config.min_thinking_tokens, 1))
-
-    lower = thinking_trace.lower()
-    transition_hits = sum(
-        marker in lower
-        for marker in (
-            "because",
-            "therefore",
-            "so",
-            "first",
-            "next",
-            "then",
-            "check",
-            "verify",
-        )
+    return experimental_process_reward(
+        thinking_trace,
+        final_answer,
+        min_thinking_tokens=config.min_thinking_tokens,
     )
-    score += min(0.35, 0.07 * transition_hits)
-
-    if re.search(r"\b(wait|actually|however|but|correct|revise)\b", lower):
-        score += 0.15
-    if final_answer.strip():
-        score += 0.15
-
-    return min(1.0, score)
 
 
 def _backprop_policy_step(
@@ -779,6 +758,7 @@ def _policy_loss(
 
     rewards = [r.reward for r in rollouts]
     loss = policy_loss + config.kl_coef * kl_loss
+    group_stats = _group_verifier_stats(rollouts, config.rollouts_per_prompt)
     return loss, {
         "loss": float(loss.detach().cpu()),
         "policy_loss": float(policy_loss.detach().cpu()),
@@ -786,9 +766,14 @@ def _policy_loss(
         "reward_mean": float(sum(rewards) / len(rewards)),
         "reward_max": float(max(rewards)),
         "outcome_reward_mean": _mean(r.outcome_reward for r in rollouts),
+        "format_reward_mean": _mean(r.format_reward for r in rollouts),
         "process_reward_mean": _mean(r.process_reward for r in rollouts),
         "thinking_penalty_mean": _mean(r.thinking_penalty for r in rollouts),
-        "group_reward_spread_mean": _group_reward_spread_mean(rollouts, config.rollouts_per_prompt),
+        "outcome_pass_rate": _mean(1.0 if r.outcome_passed else 0.0 for r in rollouts),
+        "format_ok_rate": _mean(1.0 if r.format_ok else 0.0 for r in rollouts),
+        "group_reward_spread_mean": group_stats["group_reward_spread_mean"],
+        "group_pass_rate": group_stats["group_pass_rate"],
+        "group_nonzero_spread_frac": group_stats["group_nonzero_spread_frac"],
         "response_tokens_mean": float(response_token_counts.mean().detach().cpu()),
         **_rollout_status_stats(rollouts),
     }
@@ -802,9 +787,14 @@ def _empty_stats() -> dict[str, float]:
         "reward_mean": 0.0,
         "reward_max": float("-inf"),
         "outcome_reward_mean": 0.0,
+        "format_reward_mean": 0.0,
         "process_reward_mean": 0.0,
         "thinking_penalty_mean": 0.0,
+        "outcome_pass_rate": 0.0,
+        "format_ok_rate": 0.0,
         "group_reward_spread_mean": 0.0,
+        "group_pass_rate": 0.0,
+        "group_nonzero_spread_frac": 0.0,
         "response_tokens_mean": 0.0,
         "rollout_status_stop": 0.0,
         "rollout_status_length": 0.0,
@@ -824,9 +814,14 @@ def _merge_stats(
         "kl",
         "reward_mean",
         "outcome_reward_mean",
+        "format_reward_mean",
         "process_reward_mean",
         "thinking_penalty_mean",
+        "outcome_pass_rate",
+        "format_ok_rate",
         "group_reward_spread_mean",
+        "group_pass_rate",
+        "group_nonzero_spread_frac",
         "response_tokens_mean",
     ):
         stats[key] += chunk_stats.get(key, 0.0) * weight
@@ -856,8 +851,8 @@ def _sequence_token_logprobs(model, batch: dict[str, Any], torch):
 
 
 def _masked_sequence_logprobs(token_logprobs, mask):
-    denom = mask.sum(dim=1).clamp_min(1.0)
-    return (token_logprobs * mask).sum(dim=1) / denom
+    """Sum response-token log-probs (GRPO/PPO sequence likelihood, not mean)."""
+    return (token_logprobs * mask).sum(dim=1)
 
 
 def _clipped_policy_loss(new_logprobs, old_logprobs, advantages, mask, clip_ratio: float, torch):
@@ -1000,13 +995,30 @@ def _mean(values: Iterable[float]) -> float:
 
 
 def _group_reward_spread_mean(rollouts: list[Rollout], group_size: int) -> float:
+    return _group_verifier_stats(rollouts, group_size)["group_reward_spread_mean"]
+
+
+def _group_verifier_stats(
+    rollouts: list[Rollout], group_size: int
+) -> dict[str, float]:
+    """Per-prompt group diagnostics for collapse / verifier pass monitoring."""
     spreads: list[float] = []
+    group_passes: list[float] = []
+    nonzero_spread: list[float] = []
     for start in range(0, len(rollouts), group_size):
         group = rollouts[start : start + group_size]
+        if not group:
+            continue
         rewards = [r.reward for r in group]
-        if rewards:
-            spreads.append(max(rewards) - min(rewards))
-    return _mean(spreads)
+        spread = max(rewards) - min(rewards)
+        spreads.append(spread)
+        nonzero_spread.append(1.0 if spread > 1e-8 else 0.0)
+        group_passes.append(1.0 if any(r.outcome_passed for r in group) else 0.0)
+    return {
+        "group_reward_spread_mean": _mean(spreads),
+        "group_pass_rate": _mean(group_passes),
+        "group_nonzero_spread_frac": _mean(nonzero_spread),
+    }
 
 
 def _build_optimizer(model, config: SingleGpuSlimeConfig):

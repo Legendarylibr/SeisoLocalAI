@@ -34,10 +34,10 @@ from seiso.slime_single_gpu.trainer import (
     _empty_stats,
     _filter_rollout_groups,
     _final_output_dir,
-    _force_completion_thinking_prefix,
     _format_rollout_prompt,
     _freeze_multimodal_backbones,
     _group_reward_spread_mean,
+    _group_verifier_stats,
     _iter_distributed_sample_batches,
     _iter_sample_batches,
     _load_samples,
@@ -83,7 +83,8 @@ def test_single_gpu_slime_config_from_yaml(tmp_path: Path):
     assert cfg.shuffle_buffer_size == 2048
     assert cfg.require_thinking_trace is True
     assert cfg.outcome_reward_weight == 1.0
-    assert cfg.process_reward_weight == 0.25
+    assert cfg.format_reward_weight == 0.1
+    assert cfg.process_reward_weight == 0.0
     assert cfg.metadata_field == "metadata"
     assert cfg.use_lora is False
 
@@ -109,6 +110,8 @@ def test_example_single_gpu_slime_config_loads_samples():
     assert cfg.shuffle_buffer_size == 128
     assert cfg.use_lora is True
     assert cfg.lora_r == 16
+    assert cfg.reward == "numeric"
+    assert cfg.process_reward_weight == 0.0
     assert samples
     assert {"prompt", "answer"} <= set(samples[0])
 
@@ -146,6 +149,7 @@ def test_single_gpu_slime_config_rejects_invalid_vram_cap(tmp_path: Path):
         ("max_samples_per_epoch", 0),
         ("max_grad_norm", 0),
         ("outcome_reward_weight", -0.1),
+        ("format_reward_weight", -0.1),
         ("process_reward_weight", -0.1),
         ("missing_thinking_penalty", -0.1),
         ("min_thinking_tokens", -1),
@@ -389,7 +393,7 @@ def test_rollout_status_stats_counts_known_statuses():
     }
 
 
-def test_thinking_prompt_and_completion_are_forced(tmp_path: Path):
+def test_thinking_prompt_is_appended_but_completion_is_not_rewritten(tmp_path: Path):
     cfg = SingleGpuSlimeConfig(
         model_id="test/model",
         dataset=tmp_path / "data.jsonl",
@@ -400,21 +404,30 @@ def test_thinking_prompt_and_completion_are_forced(tmp_path: Path):
 
     assert cfg.thinking_instruction in prompt
     assert prompt.endswith("<think>")
-    assert _force_completion_thinking_prefix(" reasoning", cfg).startswith("<think>")
+    # Scoring path uses raw completions; synthetic tags must not be injected.
+    jumped = _score_completion(
+        " reasoning without tags",
+        {"answer": "42"},
+        cfg,
+        contains_answer_reward,
+    )
+    assert jumped["format_ok"] is False
+    assert jumped["thinking_penalty"] == cfg.missing_thinking_penalty
 
 
-def test_completion_scoring_combines_outcome_and_process(tmp_path: Path):
+def test_completion_scoring_is_outcome_first_with_format_bonus(tmp_path: Path):
     cfg = SingleGpuSlimeConfig(
         model_id="test/model",
         dataset=tmp_path / "data.jsonl",
         output_dir=tmp_path / "out",
-        process_reward_weight=0.5,
+        reward="numeric",
+        format_reward_weight=0.1,
+        process_reward_weight=0.0,
         missing_thinking_penalty=0.25,
-        min_thinking_tokens=4,
     )
 
     score = _score_completion(
-        "<think>First check the arithmetic because it matters. Therefore 40+2.</think>42",
+        "<think>First check the arithmetic.</think>42",
         {"answer": "42"},
         cfg,
         contains_answer_reward,
@@ -422,19 +435,22 @@ def test_completion_scoring_combines_outcome_and_process(tmp_path: Path):
     jumped = _score_completion("42", {"answer": "42"}, cfg, contains_answer_reward)
 
     assert score["outcome_reward"] == 1.0
-    assert score["process_reward"] > 0.5
+    assert score["format_reward"] == 1.0
+    assert score["process_reward"] == 0.0
     assert score["thinking_penalty"] == 0.0
-    assert score["reward"] > 1.0
+    assert score["outcome_passed"] is True
+    assert score["reward"] == pytest.approx(1.1)
     assert jumped["outcome_reward"] == 1.0
-    assert jumped["process_reward"] == 0.0
+    assert jumped["format_ok"] is False
     assert jumped["thinking_penalty"] == 0.25
 
 
-def test_thinking_trace_split_and_process_reward(tmp_path: Path):
+def test_experimental_process_reward_only_when_weighted(tmp_path: Path):
     cfg = SingleGpuSlimeConfig(
         model_id="test/model",
         dataset=tmp_path / "data.jsonl",
         output_dir=tmp_path / "out",
+        process_reward_weight=0.5,
         min_thinking_tokens=4,
     )
 
@@ -446,20 +462,30 @@ def test_thinking_trace_split_and_process_reward(tmp_path: Path):
     assert final == "The answer is 7."
     assert complete is True
     assert _process_reward(trace, final, cfg) > 0.5
+    scored = _score_completion(
+        "<think>First check. Actually revise.</think>7",
+        {"answer": "7"},
+        cfg,
+        contains_answer_reward,
+    )
+    assert scored["process_reward"] > 0.5
 
 
 def test_grouped_advantages_are_normalized():
     rollouts = [
-        Rollout(None, None, None, None, None, 0.0),
-        Rollout(None, None, None, None, None, 1.0),
-        Rollout(None, None, None, None, None, 2.0),
-        Rollout(None, None, None, None, None, 4.0),
+        Rollout(None, None, None, None, None, 0.0, outcome_passed=False),
+        Rollout(None, None, None, None, None, 1.0, outcome_passed=True),
+        Rollout(None, None, None, None, None, 2.0, outcome_passed=True),
+        Rollout(None, None, None, None, None, 4.0, outcome_passed=True),
     ]
 
     _assign_grouped_advantages(rollouts, group_size=2)
 
     assert [r.advantage for r in rollouts] == [-1.0, 1.0, -1.0, 1.0]
     assert _group_reward_spread_mean(rollouts, group_size=2) == 1.5
+    stats = _group_verifier_stats(rollouts, group_size=2)
+    assert stats["group_pass_rate"] == 1.0
+    assert stats["group_nonzero_spread_frac"] == 1.0
 
 
 class Linear:

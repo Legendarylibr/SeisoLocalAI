@@ -7,11 +7,7 @@ from typing import Any
 
 import torch
 
-from seiso.distill_rl.outcome import (
-    ensure_thinking_completion,
-    format_thinking_prompt,
-    outcome_reward,
-)
+from seiso.distill_rl.outcome import format_thinking_prompt, outcome_reward
 from seiso.distill_rl.prompts import RolloutPrompt
 
 
@@ -287,15 +283,11 @@ def generate_completion_groups(
             prompt_outputs: list[str] = []
             for row in generated:
                 new_tokens = row[input_len:]
+                # Score and store raw generations only — do not inject synthetic tags.
                 completion = tokenizer.decode(
                     new_tokens, skip_special_tokens=True
                 ).strip()
-                prompt_outputs.append(
-                    ensure_thinking_completion(
-                        completion,
-                        enabled=require_thinking_trace,
-                    )
-                )
+                prompt_outputs.append(completion)
             outputs.append(prompt_outputs)
     finally:
         release_causal_lm(model)
