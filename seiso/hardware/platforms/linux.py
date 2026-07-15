@@ -19,7 +19,12 @@ def ram_gb() -> float:
 
 
 def cpu_brand() -> str:
+    # Prefer real model strings. On native Linux without py-cpuinfo,
+    # platform.processor() is often just "x86_64" — use /proc/cpuinfo.
     brand = common.cpu_brand_from_cpuinfo()
+    if brand:
+        return brand
+    brand = common.cpu_brand_from_proc_cpuinfo()
     if brand:
         return brand
     return common.cpu_brand_from_platform(platform.processor(), platform.machine())

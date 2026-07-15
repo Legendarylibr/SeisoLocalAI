@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=61", "wheel", "pybind11>=2.13"]
+requires = ["setuptools>=83", "wheel", "pybind11>=2.13"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -90,6 +90,8 @@ compress-eval = [
   "lm-eval[hf]>=0.4.12",
 ]
 dev = [
+  # Keep setuptools on a fixed release for pip-audit (PYSEC-2026-3447).
+  "setuptools>=83",
   "pytest>=8.2",
   "pytest-asyncio>=0.23",
   "pytest-xdist>=3.6",
