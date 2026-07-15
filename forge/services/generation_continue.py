@@ -194,19 +194,81 @@ def resolve_auto_continue_limits(
     return max_continues, total
 
 
+def estimate_tokens_from_text(text: str) -> int:
+    """Rough token floor from text when backends under-count stream tokens."""
+    body = str(text or "").strip()
+    if not body:
+        return 0
+    # English-ish: ~4 chars/token, ~1.3 tokens/word — take the higher floor.
+    by_chars = max(1, len(body) // 4)
+    words = body.split()
+    by_words = max(1, int(len(words) * 1.3)) if words else 1
+    return max(by_chars, by_words)
+
+
+def effective_pass_tokens(
+    metered_tokens: int,
+    *,
+    pass_text: str = "",
+    metadata: dict[str, Any] | None = None,
+) -> int:
+    """Best available token count for length-stop decisions."""
+    tokens = authoritative_pass_tokens(metered_tokens, metadata)
+    return max(tokens, estimate_tokens_from_text(pass_text))
+
+
 def hit_length_limit(
     output_tokens: int,
     max_tokens: int,
     *,
     finish_reason: str | None = None,
+    pass_text: str = "",
+    metadata: dict[str, Any] | None = None,
 ) -> bool:
-    """True when generation stopped because the reply budget was exhausted."""
+    """True when this pass stopped because the per-pass completion budget ran out.
+
+    Uses metered tokens, backend eval counts, and a text estimate so under-counted
+    streams still trigger auto-continue instead of a false early stop.
+    """
+    limit = max(1, int(max_tokens))
+    tokens = effective_pass_tokens(
+        output_tokens, pass_text=pass_text, metadata=metadata
+    )
+    # Allow ±1 for off-by-one token metering across backends.
+    near_cap = tokens >= max(1, limit - 1)
+    # "Most of the pass" — catches slight under-counts without treating short
+    # natural answers as length stops.
+    substantial = tokens >= max(16, (limit * 2) // 3)
+
     reason = (finish_reason or "").strip().lower()
     if reason in {"length", "max_tokens"}:
-        return True
-    limit = max(1, int(max_tokens))
-    # Allow ±1 for off-by-one token metering across backends.
-    return int(output_tokens) >= max(1, limit - 1)
+        # Trust explicit length stops when the pass produced real content.
+        # (Spurious empty length frames are filtered by should_auto_continue.)
+        return near_cap or substantial or tokens >= 8
+    if reason in {"stop", "eos", "end", "end_turn", "completed"}:
+        # Some runtimes mislabel num_predict hits as stop — trust the meter.
+        return near_cap
+    return near_cap
+
+
+def can_schedule_another_continue(
+    *,
+    continues_used: int,
+    max_continues: int | None = None,
+    total_output_tokens: int = 0,
+    total_budget: int | None = None,
+    pass_max_tokens: int | None = None,
+) -> bool:
+    """True when multi-pass budget still allows another OOM-safe chunk."""
+    if max_continues is None:
+        max_continues = max_auto_continues(pass_max_tokens=pass_max_tokens)
+    if continues_used >= max(0, int(max_continues)):
+        return False
+    if total_budget is None:
+        total_budget = total_reply_token_budget()
+    # Need room for a meaningful next chunk (not a 1-token stub).
+    remaining = max(0, int(total_budget) - int(total_output_tokens))
+    return remaining >= 8
 
 
 def should_auto_continue(
@@ -220,30 +282,90 @@ def should_auto_continue(
     cancelled: bool = False,
     total_output_tokens: int = 0,
     total_budget: int | None = None,
+    metadata: dict[str, Any] | None = None,
 ) -> bool:
     """Whether another short generation pass is warranted and safe to attempt."""
     if cancelled:
         return False
-    if max_continues is None:
-        max_continues = max_auto_continues(pass_max_tokens=max_tokens)
-    if continues_used >= max(0, int(max_continues)):
-        return False
-    if total_budget is None:
-        total_budget = total_reply_token_budget()
-    # Leave room for at least a short next pass before spending another continue.
-    if int(total_output_tokens) >= max(1, int(total_budget) - 8):
+    if not can_schedule_another_continue(
+        continues_used=continues_used,
+        max_continues=max_continues,
+        total_output_tokens=total_output_tokens,
+        total_budget=total_budget,
+        pass_max_tokens=max_tokens,
+    ):
         return False
     if not str(pass_text or "").strip():
         return False
-    # Avoid continue loops when the pass produced almost nothing useful.
-    if int(pass_output_tokens) < 8 and (finish_reason or "").lower() not in {
-        "length",
-        "max_tokens",
-    }:
-        return False
-    return hit_length_limit(
-        pass_output_tokens, max_tokens, finish_reason=finish_reason
+
+    tokens = effective_pass_tokens(
+        pass_output_tokens, pass_text=pass_text, metadata=metadata
     )
+    # Avoid continue loops when the pass produced almost nothing useful.
+    reason = (finish_reason or "").lower()
+    if tokens < 8 and reason not in {"length", "max_tokens"}:
+        return False
+
+    return hit_length_limit(
+        tokens,
+        max_tokens,
+        finish_reason=finish_reason,
+        pass_text=pass_text,
+        metadata=metadata,
+    )
+
+
+def reply_still_truncated(
+    *,
+    last_pass_tokens: int,
+    pass_max_tokens: int,
+    finish_reason: str | None,
+    total_output_tokens: int,
+    total_budget: int,
+    continues_used: int,
+    max_continues: int,
+    pass_text: str = "",
+    metadata: dict[str, Any] | None = None,
+    cancelled: bool = False,
+) -> bool:
+    """True only when the last pass hit length *and* no further continue is possible.
+
+    Avoids the false UI banner when a single OOM-safe chunk ends but multi-pass
+    budget remains (or when the model naturally stopped mid-way).
+    """
+    if cancelled:
+        return False
+    hit = hit_length_limit(
+        last_pass_tokens,
+        pass_max_tokens,
+        finish_reason=finish_reason,
+        pass_text=pass_text,
+        metadata=metadata,
+    )
+    if not hit:
+        return False
+    # Length-hit is only "truncated" if we could not schedule another chunk.
+    return not can_schedule_another_continue(
+        continues_used=continues_used,
+        max_continues=max_continues,
+        total_output_tokens=total_output_tokens,
+        total_budget=total_budget,
+        pass_max_tokens=pass_max_tokens,
+    )
+
+
+def next_pass_max_tokens(
+    *,
+    base_pass_max_tokens: int,
+    total_output_tokens: int,
+    total_budget: int,
+) -> int:
+    """OOM-safe per-pass size, also clamped to remaining multi-pass budget."""
+    base = max(1, int(base_pass_max_tokens))
+    remaining = max(0, int(total_budget) - int(total_output_tokens))
+    if remaining <= 0:
+        return 0
+    return max(1, min(base, remaining))
 
 
 def build_continue_messages(

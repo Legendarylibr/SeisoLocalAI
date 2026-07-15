@@ -605,7 +605,10 @@ async def chat(
                 from forge.services.generation_continue import (
                     authoritative_pass_tokens,
                     build_continue_messages,
+                    effective_pass_tokens,
                     hit_length_limit,
+                    next_pass_max_tokens,
+                    reply_still_truncated,
                     resolve_auto_continue_limits,
                     resolve_finish_reason,
                     should_auto_continue,
@@ -656,6 +659,7 @@ async def chat(
                 continues_used = 0
                 total_output_tokens = 0
                 last_pass_tokens = 0
+                last_pass_text = ""
                 finish_reason = "stop"
                 headroom_mb: float | None = None
                 try:
@@ -676,7 +680,10 @@ async def chat(
                 )
                 try:
                     orchestrator.emit_log(
-                        job_id, f"Streaming inference ({backend_label})"
+                        job_id,
+                        f"Streaming inference ({backend_label}; "
+                        f"pass≤{base_pass_max_tokens} tok, total≤{total_budget} tok, "
+                        f"continues≤{max_continues})",
                     )
                     while True:
                         pass_raw: list[str] = []
@@ -717,29 +724,42 @@ async def chat(
                                 streamed.append(chunk)
                                 yield {"event": "token", "data": chunk}
 
-                        pass_tokens = authoritative_pass_tokens(pass_tokens, last_meta)
+                        pass_text = "".join(pass_raw)
+                        last_pass_text = pass_text
+                        pass_tokens = effective_pass_tokens(
+                            pass_tokens,
+                            pass_text=pass_text,
+                            metadata=last_meta,
+                        )
                         total_output_tokens += pass_tokens
                         last_pass_tokens = pass_tokens
-                        pass_text = "".join(pass_raw)
                         hit_length = hit_length_limit(
                             pass_tokens,
                             pass_max_tokens,
                             finish_reason=pass_finish,
+                            pass_text=pass_text,
+                            metadata=last_meta,
                         )
-                        finish_reason = resolve_finish_reason(
-                            hit_length=hit_length,
-                            explicit=pass_finish,
-                        )
+                        # Prefer "length" when the pass is full so auto-continue
+                        # fires even if the backend mislabels the stop reason.
+                        if hit_length:
+                            finish_reason = "length"
+                        else:
+                            finish_reason = resolve_finish_reason(
+                                hit_length=False,
+                                explicit=pass_finish,
+                            )
                         if not should_auto_continue(
                             pass_output_tokens=pass_tokens,
                             max_tokens=pass_max_tokens,
                             pass_text=pass_text,
                             continues_used=continues_used,
                             max_continues=max_continues,
-                            finish_reason=pass_finish,
+                            finish_reason=finish_reason,
                             cancelled=cancelled,
                             total_output_tokens=total_output_tokens,
                             total_budget=total_budget,
+                            metadata=last_meta,
                         ):
                             break
 
@@ -747,10 +767,20 @@ async def chat(
                         partial = sanitize_llm_output(
                             "".join(raw_parts), strip_tool_calls=not body.tools
                         )
+                        # Next chunk: never exceed remaining multi-pass budget.
+                        chunk_tokens = next_pass_max_tokens(
+                            base_pass_max_tokens=base_pass_max_tokens,
+                            total_output_tokens=total_output_tokens,
+                            total_budget=total_budget,
+                        )
+                        if chunk_tokens < 8:
+                            finish_reason = "length"
+                            break
                         orchestrator.emit_log(
                             job_id,
                             f"Auto-continuing truncated reply "
-                            f"(pass {continues_used + 1}, budget {base_pass_max_tokens} tok)",
+                            f"(pass {continues_used + 1}, budget {chunk_tokens} tok, "
+                            f"total {total_output_tokens}/{total_budget})",
                         )
                         yield {
                             "event": "log",
@@ -759,17 +789,17 @@ async def chat(
                                 f"({continues_used}/{max_continues})…"
                             ),
                         }
-                        # Reuse same max_tokens + fixed n_ctx. Trim the growing
-                        # transcript into that window instead of raising n_ctx (OOM).
+                        # Reuse fixed n_ctx. Trim the growing transcript into that
+                        # window instead of raising n_ctx (OOM).
                         pass_payload = {
                             **payload,
                             "messages": build_continue_messages(
                                 base_messages,
                                 partial,
                                 n_ctx=int(fixed_n_ctx) if fixed_n_ctx is not None else None,
-                                max_tokens=base_pass_max_tokens,
+                                max_tokens=chunk_tokens,
                             ),
-                            "max_tokens": base_pass_max_tokens,
+                            "max_tokens": chunk_tokens,
                         }
                         if fixed_n_ctx is not None:
                             pass_payload["n_ctx"] = fixed_n_ctx
@@ -777,12 +807,14 @@ async def chat(
                         continued = sanitize_inference_payload(
                             pass_payload, isolated=isolated
                         )
-                        # Never raise the per-pass budget above the first-pass OOM-safe cap.
+                        # Never raise the per-pass budget above the first-pass OOM-safe
+                        # cap or the remaining multi-pass allowance.
                         pass_max_tokens = max(
                             1,
                             min(
+                                chunk_tokens,
                                 base_pass_max_tokens,
-                                int(continued.get("max_tokens") or base_pass_max_tokens),
+                                int(continued.get("max_tokens") or chunk_tokens),
                             ),
                         )
                         pass_payload["max_tokens"] = pass_max_tokens
@@ -799,11 +831,20 @@ async def chat(
                     content = sanitize_llm_output(
                         "".join(raw_parts), strip_tool_calls=not body.tools
                     )
-                    still_truncated = hit_length_limit(
-                        last_pass_tokens,
-                        pass_max_tokens,
+                    still_truncated = reply_still_truncated(
+                        last_pass_tokens=last_pass_tokens,
+                        pass_max_tokens=pass_max_tokens,
                         finish_reason=finish_reason,
+                        total_output_tokens=total_output_tokens,
+                        total_budget=total_budget,
+                        continues_used=continues_used,
+                        max_continues=max_continues,
+                        pass_text=last_pass_text,
+                        metadata=last_meta,
+                        cancelled=cancelled,
                     )
+                    if still_truncated:
+                        finish_reason = "length"
                     if body.thread_id:
                         await db.add_message(body.thread_id, "assistant", content)
                     final_stats = {
@@ -811,6 +852,7 @@ async def chat(
                         "finish_reason": finish_reason,
                         "auto_continues": continues_used,
                         "truncated": still_truncated,
+                        "total_budget": total_budget,
                         **last_meta,
                     }
                     final_stats["finish_reason"] = finish_reason

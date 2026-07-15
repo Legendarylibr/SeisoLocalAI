@@ -6,9 +6,12 @@ from forge.services.generation_continue import (
     CONTINUE_USER_PROMPT,
     authoritative_pass_tokens,
     build_continue_messages,
+    estimate_tokens_from_text,
     hit_length_limit,
     looks_long_form,
     max_auto_continues,
+    next_pass_max_tokens,
+    reply_still_truncated,
     resolve_auto_continue_limits,
     resolve_finish_reason,
     should_auto_continue,
@@ -25,6 +28,95 @@ def test_hit_length_limit_by_token_budget():
 def test_hit_length_limit_by_finish_reason():
     assert hit_length_limit(12, 2048, finish_reason="length") is True
     assert hit_length_limit(12, 2048, finish_reason="stop") is False
+
+
+def test_hit_length_limit_uses_text_estimate_when_meter_undercounts():
+    # ~768 tokens of text but backend reported only 40.
+    long_text = "word " * 800
+    assert estimate_tokens_from_text(long_text) >= 500
+    assert (
+        hit_length_limit(
+            40,
+            512,
+            finish_reason="stop",
+            pass_text=long_text,
+        )
+        is True
+    )
+
+
+def test_reply_still_truncated_only_when_budget_exhausted():
+    # Length-hit but multi-pass budget remains → do not show truncated banner.
+    assert (
+        reply_still_truncated(
+            last_pass_tokens=512,
+            pass_max_tokens=512,
+            finish_reason="length",
+            total_output_tokens=512,
+            total_budget=32768,
+            continues_used=0,
+            max_continues=40,
+        )
+        is False
+    )
+    # Continues exhausted → truncated.
+    assert (
+        reply_still_truncated(
+            last_pass_tokens=512,
+            pass_max_tokens=512,
+            finish_reason="length",
+            total_output_tokens=512,
+            total_budget=32768,
+            continues_used=40,
+            max_continues=40,
+        )
+        is True
+    )
+    # Total budget exhausted (less than one more 8-token chunk) → truncated.
+    assert (
+        reply_still_truncated(
+            last_pass_tokens=512,
+            pass_max_tokens=512,
+            finish_reason="length",
+            total_output_tokens=32761,
+            total_budget=32768,
+            continues_used=5,
+            max_continues=40,
+        )
+        is True
+    )
+    # Natural stop → not truncated.
+    assert (
+        reply_still_truncated(
+            last_pass_tokens=40,
+            pass_max_tokens=512,
+            finish_reason="stop",
+            total_output_tokens=40,
+            total_budget=32768,
+            continues_used=0,
+            max_continues=40,
+        )
+        is False
+    )
+
+
+def test_next_pass_max_tokens_respects_remaining_budget():
+    assert (
+        next_pass_max_tokens(
+            base_pass_max_tokens=768,
+            total_output_tokens=32000,
+            total_budget=32768,
+        )
+        == 768
+    )
+    assert (
+        next_pass_max_tokens(
+            base_pass_max_tokens=768,
+            total_output_tokens=32700,
+            total_budget=32768,
+        )
+        == 68
+    )
 
 
 def test_should_auto_continue_respects_cap_and_cancel(monkeypatch):
