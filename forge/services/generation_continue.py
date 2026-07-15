@@ -303,18 +303,23 @@ def looks_incomplete_reply(text: str) -> bool:
         if last_line and _INCOMPLETE_TRAIL_RE.search(last_line):
             return True
         # Unbalanced markdown emphasis / section markers.
-        if body.count("*(") > body.count(")*") or body.count("**") % 2 == 1:
-            return True
-        return False
+        return body.count("*(") > body.count(")*") or body.count("**") % 2 == 1
     # No terminal punctuation on the whole ending → mid-sentence cut.
     if _INCOMPLETE_TRAIL_RE.search(body):
         return True
     last_line = next((ln.strip() for ln in reversed(body.splitlines()) if ln.strip()), "")
     if not last_line:
         return False
-    if last_line[-1].isalnum() or last_line[-1] in {"*", "_", "—", "–", "-", ",", ";", ":"}:
-        return True
-    return False
+    return last_line[-1].isalnum() or last_line[-1] in {
+        "*",
+        "_",
+        "—",
+        "–",
+        "-",
+        ",",
+        ";",
+        ":",
+    }
 
 
 def should_auto_continue(
@@ -363,9 +368,7 @@ def should_auto_continue(
 
     # Model emitted stop/EOS mid-sentence under the per-pass cap (common on
     # small instruct models for songs/essays). Keep going while budget remains.
-    if tokens >= 48 and looks_incomplete_reply(pass_text):
-        return True
-    return False
+    return tokens >= 48 and looks_incomplete_reply(pass_text)
 
 
 def reply_still_truncated(
@@ -576,7 +579,7 @@ def pack_continue_messages_linear_decay(
     while _est(packed) > prompt_budget and drop_idx < last_keep:
         role = str(packed[drop_idx].get("role") or "").lower()
         # Never drop the in-progress assistant draft or the continue cue.
-        if drop_idx == assistant_idx or drop_idx == last_keep:
+        if drop_idx in (assistant_idx, last_keep):
             drop_idx += 1
             continue
         if role in {"user", "assistant", "tool"}:

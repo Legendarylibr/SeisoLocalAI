@@ -659,7 +659,8 @@ async def chat(
                 continues_used = 0
                 total_output_tokens = 0
                 last_pass_tokens = 0
-                last_pass_text = ""
+                # Accumulated text from the latest generation chunk (not a secret).
+                last_reply_chunk = ""
                 finish_reason = "stop"
                 headroom_mb: float | None = None
                 try:
@@ -725,7 +726,7 @@ async def chat(
                                 yield {"event": "token", "data": chunk}
 
                         pass_text = "".join(pass_raw)
-                        last_pass_text = pass_text
+                        last_reply_chunk = pass_text
                         pass_tokens = effective_pass_tokens(
                             pass_tokens,
                             pass_text=pass_text,
@@ -839,7 +840,7 @@ async def chat(
                         total_budget=total_budget,
                         continues_used=continues_used,
                         max_continues=max_continues,
-                        pass_text=last_pass_text,
+                        pass_text=last_reply_chunk,
                         metadata=last_meta,
                         cancelled=cancelled,
                     )
