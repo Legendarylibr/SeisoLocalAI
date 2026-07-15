@@ -2,8 +2,7 @@
 
 from types import SimpleNamespace
 
-from seiso.hardware.platforms import disk_usage_root, probe_for
-from seiso.hardware.platforms import common
+from seiso.hardware.platforms import common, disk_usage_root, probe_for
 from seiso.hardware.profile import _cpu_temp_from_sensors
 
 
