@@ -190,6 +190,44 @@ def test_build_continue_messages_trims_to_fixed_n_ctx():
     assert total_chars < len(huge)
 
 
+def test_linear_decay_keeps_recent_assistant_tail():
+    from forge.services.generation_continue import (
+        decay_assistant_draft,
+        linear_decay_fill_ratio,
+        pack_continue_messages_linear_decay,
+    )
+
+    # More free headroom as the draft grows relative to n_ctx.
+    assert linear_decay_fill_ratio(assistant_tokens=100, n_ctx=8192) > linear_decay_fill_ratio(
+        assistant_tokens=6000, n_ctx=8192
+    )
+
+    head = "TITLE AND INTRO " * 40
+    middle = "MIDDLE SECTION " * 400
+    tail = "RECENT CLAUSE where generation stopped uniquely."
+    draft = head + middle + tail
+    shrunk = decay_assistant_draft(draft, token_budget=200)
+    assert "RECENT CLAUSE where generation stopped uniquely." in shrunk
+    assert len(shrunk) < len(draft)
+    assert "omitted" in shrunk or shrunk.endswith("uniquely.")
+
+    base = [
+        {"role": "system", "content": "You are helpful."},
+        {"role": "user", "content": "write a long research paper on fusion energy"},
+        {"role": "assistant", "content": draft},
+        {"role": "user", "content": CONTINUE_USER_PROMPT},
+    ]
+    packed = pack_continue_messages_linear_decay(base, n_ctx=2048, max_tokens=512)
+    assert packed[-1]["content"] == CONTINUE_USER_PROMPT
+    # Recent tail of the in-progress reply must survive packing.
+    assistant_msgs = [m for m in packed if m["role"] == "assistant"]
+    assert assistant_msgs
+    assert "RECENT CLAUSE where generation stopped uniquely." in assistant_msgs[-1]["content"]
+    # Never pack near the full hard budget (linear free headroom).
+    total_chars = sum(len(str(m.get("content") or "")) for m in packed)
+    assert total_chars < len(draft)
+
+
 def test_max_auto_continues_explicit_and_clamped(monkeypatch):
     monkeypatch.setenv("SEISO_CHAT_AUTO_CONTINUE_MAX", "99")
     assert max_auto_continues() == 99

@@ -368,6 +368,243 @@ def next_pass_max_tokens(
     return max(1, min(base, remaining))
 
 
+# Marker when we drop the middle of a long in-progress assistant draft.
+_ASSISTANT_DECAY_MARKER = "\n[...earlier part of this reply omitted...]\n"
+# Never pack the fixed n_ctx to the brim — leave free headroom for prefill.
+_CONTINUE_MIN_FREE_RATIO = 0.12
+_CONTINUE_MAX_FREE_RATIO = 0.30
+
+
+def _text_token_estimate(text: str) -> int:
+    return max(0, estimate_tokens_from_text(text))
+
+
+def _keep_text_tail(text: str, token_budget: int) -> str:
+    """Keep the most recent portion of *text* within *token_budget* tokens."""
+    body = str(text or "")
+    if token_budget <= 0 or not body:
+        return ""
+    if _text_token_estimate(body) <= token_budget:
+        return body
+    # char≈3.2/token matches chat_guards; keep the tail.
+    char_budget = max(1, int(token_budget * 3.2))
+    if len(body) <= char_budget:
+        return body
+    return body[-char_budget:]
+
+
+def _keep_text_head(text: str, token_budget: int) -> str:
+    body = str(text or "")
+    if token_budget <= 0 or not body:
+        return ""
+    if _text_token_estimate(body) <= token_budget:
+        return body
+    char_budget = max(1, int(token_budget * 3.2))
+    if len(body) <= char_budget:
+        return body
+    return body[:char_budget]
+
+
+def linear_decay_fill_ratio(*, assistant_tokens: int, n_ctx: int) -> float:
+    """How full the prompt window may be (rest is free headroom).
+
+    Linear decay: as the in-progress reply grows relative to ``n_ctx``, pack
+    *less* of the window so prefill never sits at the context edge (OOM /
+    quality cliff). Starts ~88% full, decays toward ~70% full.
+    """
+    ctx = max(1, int(n_ctx))
+    ratio = min(1.0, max(0.0, float(assistant_tokens) / float(ctx)))
+    # fill = 0.88 - 0.18 * (assistant/n_ctx)
+    fill = 0.88 - 0.18 * ratio
+    return max(1.0 - _CONTINUE_MAX_FREE_RATIO, min(1.0 - _CONTINUE_MIN_FREE_RATIO, fill))
+
+
+def decay_assistant_draft(text: str, token_budget: int) -> str:
+    """Keep head + recent tail of the draft; drop the middle with linear head decay.
+
+    Older middle content is discarded first so the model always sees the latest
+    sentences (where generation stopped) plus a shrinking topic opener.
+    """
+    body = str(text or "")
+    budget = max(0, int(token_budget))
+    if budget <= 0 or not body.strip():
+        return ""
+    total = _text_token_estimate(body)
+    if total <= budget:
+        return body
+
+    # Overflow ratio in [0, 1]: how much we exceed the budget.
+    overflow = min(1.0, (total - budget) / max(1.0, float(total)))
+    # Head share decays linearly from ~30% → ~8% as overflow grows.
+    head_frac = max(0.08, 0.30 - 0.22 * overflow)
+    head_budget = max(24, int(budget * head_frac))
+    tail_budget = max(48, budget - head_budget - _text_token_estimate(_ASSISTANT_DECAY_MARKER))
+    if tail_budget < 32:
+        # Extreme pressure: recent tail only.
+        return _keep_text_tail(body, budget)
+
+    head = _keep_text_head(body, head_budget)
+    tail = _keep_text_tail(body, tail_budget)
+    if not head:
+        return tail
+    if not tail:
+        return head
+    # Avoid duplicating when head/tail overlap on short strings.
+    if tail in head or head in tail:
+        return _keep_text_tail(body, budget)
+    return f"{head}{_ASSISTANT_DECAY_MARKER}{tail}"
+
+
+def pack_continue_messages_linear_decay(
+    messages: list[dict[str, Any]],
+    *,
+    n_ctx: int,
+    max_tokens: int,
+) -> list[dict[str, Any]]:
+    """Fit continue turns into fixed ``n_ctx`` with free headroom + recent-first decay.
+
+    Priority (high → low):
+      1. continue cue (last user)
+      2. recent tail of in-progress assistant draft
+      3. latest original user task
+      4. system messages
+      5. older history (dropped first)
+    """
+    if not messages:
+        return []
+
+    ctx = max(1, int(n_ctx))
+    gen = max(1, int(max_tokens))
+    # Hard ceiling for prompt tokens (same reserve idea as chat_guards).
+    hard_prompt_budget = max(256, ctx - gen - 128)
+
+    # Locate the in-progress assistant draft (second-to-last when structure is
+    # history + assistant + continue cue).
+    assistant_idx = None
+    for i in range(len(messages) - 1, -1, -1):
+        if str(messages[i].get("role") or "").lower() == "assistant":
+            assistant_idx = i
+            break
+    assistant_text = ""
+    if assistant_idx is not None:
+        assistant_text = str(messages[assistant_idx].get("content") or "")
+    assist_tokens = _text_token_estimate(assistant_text)
+
+    fill = linear_decay_fill_ratio(assistant_tokens=assist_tokens, n_ctx=ctx)
+    prompt_budget = max(128, int(hard_prompt_budget * fill))
+
+    packed = [dict(m) for m in messages]
+
+    # 1) Always keep the continue cue short and intact.
+    if packed and str(packed[-1].get("role") or "").lower() == "user":
+        cue = str(packed[-1].get("content") or CONTINUE_USER_PROMPT)
+        if _text_token_estimate(cue) > 64:
+            packed[-1]["content"] = _keep_text_tail(cue, 64)
+
+    # 2) Linear-decay the growing assistant draft (head shrinks, tail preserved).
+    if assistant_idx is not None:
+        # Give the draft the majority of the prompt window; leave room for task/system.
+        draft_share = max(96, int(prompt_budget * 0.58))
+        packed[assistant_idx]["content"] = decay_assistant_draft(
+            str(packed[assistant_idx].get("content") or ""),
+            draft_share,
+        )
+
+    # 3) Drop oldest conversational turns until under budget (keep system + last cue).
+    def _est(msgs: list[dict[str, Any]]) -> int:
+        total = 0
+        for m in msgs:
+            total += max(1, _text_token_estimate(str(m.get("content") or "")))
+        return max(64, total)
+
+    # Indices that are safe to drop: user/assistant before the draft (not system).
+    drop_idx = 0
+    last_keep = len(packed) - 1  # continue cue
+    while _est(packed) > prompt_budget and drop_idx < last_keep:
+        role = str(packed[drop_idx].get("role") or "").lower()
+        # Never drop the in-progress assistant draft or the continue cue.
+        if drop_idx == assistant_idx or drop_idx == last_keep:
+            drop_idx += 1
+            continue
+        if role in {"user", "assistant", "tool"}:
+            packed.pop(drop_idx)
+            if assistant_idx is not None and drop_idx < assistant_idx:
+                assistant_idx -= 1
+            last_keep = len(packed) - 1
+            continue
+        drop_idx += 1
+
+    # 4) If still over budget, shrink system / remaining history from the front,
+    #    then further compress the assistant draft (tail-heavy).
+    guard = 0
+    while _est(packed) > prompt_budget and guard < 32:
+        guard += 1
+        overflow = _est(packed) - prompt_budget
+        # Prefer shrinking the longest non-cue message that isn't pure system-first.
+        candidates = []
+        for i, m in enumerate(packed):
+            if i == last_keep:
+                continue
+            content = str(m.get("content") or "")
+            tok = _text_token_estimate(content)
+            if tok <= 32:
+                continue
+            role = str(m.get("role") or "").lower()
+            # Prefer trimming older / longer content; protect draft tail via decay.
+            priority = tok
+            if role == "system":
+                priority -= 50
+            if i == assistant_idx:
+                priority += 100  # trim draft via decay helper, not last
+            candidates.append((priority, i, tok))
+        if not candidates:
+            break
+        candidates.sort(reverse=True)
+        _, idx, tok = candidates[0]
+        target = max(32, tok - overflow - 8)
+        if idx == assistant_idx:
+            packed[idx]["content"] = decay_assistant_draft(
+                str(packed[idx].get("content") or ""),
+                target,
+            )
+        else:
+            packed[idx]["content"] = _keep_text_tail(str(packed[idx].get("content") or ""), target)
+
+    # 5) Final safety: if still over hard budget, force tail-only draft + cue + one user.
+    if _est(packed) > hard_prompt_budget:
+        cue_content = CONTINUE_USER_PROMPT
+        if packed and str(packed[-1].get("role") or "").lower() == "user":
+            cue_content = str(packed[-1].get("content") or CONTINUE_USER_PROMPT)
+        draft = ""
+        if assistant_idx is not None and 0 <= assistant_idx < len(packed):
+            draft = str(packed[assistant_idx].get("content") or "")
+        # Recover original user task if present (not the continue cue).
+        user_task = ""
+        last_i = len(packed) - 1
+        for i, m in enumerate(packed):
+            if i == last_i:
+                continue
+            if str(m.get("role") or "").lower() == "user":
+                user_task = str(m.get("content") or "")
+                break
+        room = max(128, hard_prompt_budget - 80)
+        draft_room = max(64, int(room * 0.7))
+        task_room = max(32, room - draft_room)
+        rebuilt: list[dict[str, Any]] = []
+        if user_task:
+            rebuilt.append({"role": "user", "content": _keep_text_tail(user_task, task_room)})
+        rebuilt.append(
+            {
+                "role": "assistant",
+                "content": decay_assistant_draft(draft or assistant_text, draft_room),
+            }
+        )
+        rebuilt.append({"role": "user", "content": cue_content})
+        packed = rebuilt
+
+    return packed
+
+
 def build_continue_messages(
     base_messages: list[dict[str, Any]],
     assistant_so_far: str,
@@ -377,8 +614,10 @@ def build_continue_messages(
 ) -> list[dict[str, Any]]:
     """Messages for a continuation pass: history + partial assistant + continue cue.
 
-    When ``n_ctx`` is provided, trim to that fixed window so multi-pass continues
-    never grow KV beyond the original load (OOM-safe).
+    When ``n_ctx`` is provided, pack with **linear decay**: free headroom grows as
+    the draft grows, older middle content is dropped first, and the recent tail
+    of the in-progress reply is always preserved. Fixed ``n_ctx`` is never grown
+    (OOM-safe multi-pass).
     """
     messages: list[dict[str, Any]] = []
     for item in base_messages:
@@ -392,10 +631,8 @@ def build_continue_messages(
     messages.append({"role": "assistant", "content": str(assistant_so_far)})
     messages.append({"role": "user", "content": CONTINUE_USER_PROMPT})
     if n_ctx is not None:
-        from seiso.memory.protection.chat_guards import trim_llama_messages_to_context
-
         reply_budget = max(1, int(max_tokens or 512))
-        messages = trim_llama_messages_to_context(
+        messages = pack_continue_messages_linear_decay(
             messages,
             n_ctx=max(1, int(n_ctx)),
             max_tokens=reply_budget,
