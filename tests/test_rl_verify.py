@@ -26,10 +26,14 @@ def test_closed_thinking_trace_detection():
     assert has_closed_thinking_trace("<think>x</think>42") is True
     assert has_closed_thinking_trace("<think>x") is False
     assert has_closed_thinking_trace("42") is False
+    # Prompt already opened <think>; model continues and closes.
+    assert has_closed_thinking_trace("step by step\n</think>\n42") is True
+    assert has_closed_thinking_trace("</think>42") is True
 
 
 def test_final_answer_text_after_think():
     assert final_answer_text("<think>reason</think> 42") == "42"
+    assert final_answer_text("reason\n</think>\n42") == "42"
 
 
 def test_numeric_and_choice_outcome():
@@ -54,6 +58,17 @@ def test_score_completion_outcome_first():
         process_weight=0.0,
         missing_format_penalty=0.5,
     )
+    # Prompt ended with open <think>; model only continues + closes.
+    continued = score_completion(
+        "because arithmetic\n</think>\n42",
+        {"answer": "42"},
+        checker="numeric",
+        require_thinking_trace=True,
+        outcome_weight=1.0,
+        format_weight=0.1,
+        process_weight=0.0,
+        missing_format_penalty=0.5,
+    )
     bad_format = score_completion(
         "42",
         {"answer": "42"},
@@ -69,6 +84,10 @@ def test_score_completion_outcome_first():
     assert good.format_ok is True
     assert good.reward == 1.1
     assert good.process_score == 0.0
+    assert continued.passed is True
+    assert continued.format_ok is True
+    assert continued.reward == 1.1
+    assert continued.final_answer == "42"
     assert bad_format.passed is True
     assert bad_format.format_ok is False
     assert bad_format.reward == 0.5  # 1.0 outcome - 0.5 penalty

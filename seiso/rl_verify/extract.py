@@ -13,6 +13,13 @@ _THINK_OPEN_RE = re.compile(
     r"<think>(?P<trace>.*)",
     flags=re.IGNORECASE | re.DOTALL,
 )
+# Prompt builders often end with an open ``<think>``; the model then continues
+# the body and emits only ``</think>`` plus the final answer.
+_THINK_CONTINUATION_RE = re.compile(
+    r"^(?P<trace>.*?)</think>(?P<final>.*)$",
+    flags=re.IGNORECASE | re.DOTALL,
+)
+_THINK_CLOSE_RE = re.compile(r"</think>", flags=re.IGNORECASE)
 _NUMBER_RE = re.compile(r"[-+]?(?:\d*\.\d+|\d+)")
 _CHOICE_RE = re.compile(r"\b([a-d])\b", flags=re.IGNORECASE)
 
@@ -27,12 +34,23 @@ def format_thinking_prompt(prompt: str, instruction: str) -> str:
 def split_thinking_trace(completion: str) -> tuple[str, str, bool]:
     """Split completion into (thinking_trace, final_answer, has_closed_trace).
 
-    Only a closed ``</think>`` counts as a complete format. Open tags return
-    ``has_closed_trace=False`` so format rewards never invent structure.
+    Closed format is accepted when either:
+    - the completion contains a full ``<think>...</think>`` block, or
+    - the completion continues a prompt-opened think and contains ``</think>``
+      (trace before the close, final answer after).
+
+    An open ``<think>`` without a close still yields ``has_closed_trace=False``.
     """
     match = _THINK_SPLIT_RE.search(completion)
     if match is not None:
         return match.group("trace").strip(), match.group("final").strip(), True
+
+    # Continuation of a prompt that already emitted ``<think>``.
+    cont = _THINK_CONTINUATION_RE.match(completion)
+    if cont is not None and _THINK_CLOSE_RE.search(completion):
+        # Reject pure open-tag-only false positives: require an actual close tag.
+        return cont.group("trace").strip(), cont.group("final").strip(), True
+
     open_match = _THINK_OPEN_RE.search(completion)
     if open_match is not None:
         return open_match.group("trace").strip(), "", False
@@ -40,12 +58,17 @@ def split_thinking_trace(completion: str) -> tuple[str, str, bool]:
 
 
 def has_closed_thinking_trace(completion: str) -> bool:
-    """True when the generated text contains a closed ``<think>...</think>`` block."""
-    return _THINK_SPLIT_RE.search(completion) is not None
+    """True when thinking is closed in the *generated* text.
+
+    Accepts either a full ``<think>...</think>`` block or a prompt-continuation
+    close (``</think>`` after reasoning, without re-opening the tag).
+    """
+    _, _, closed = split_thinking_trace(completion)
+    return closed
 
 
 def final_answer_text(completion: str) -> str:
-    """Text after the last closed thinking block, else tag-stripped completion."""
+    """Text after the last ``</think>``, else tag-stripped completion."""
     match = re.search(
         r"</think>(?P<final>.*)$",
         completion,

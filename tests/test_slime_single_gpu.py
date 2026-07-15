@@ -432,6 +432,13 @@ def test_completion_scoring_is_outcome_first_with_format_bonus(tmp_path: Path):
         cfg,
         contains_answer_reward,
     )
+    # Prompt already opened <think>; model continues body and closes.
+    continued = _score_completion(
+        "First check the arithmetic.\n</think>\n42",
+        {"answer": "42"},
+        cfg,
+        contains_answer_reward,
+    )
     jumped = _score_completion("42", {"answer": "42"}, cfg, contains_answer_reward)
 
     assert score["outcome_reward"] == 1.0
@@ -440,6 +447,11 @@ def test_completion_scoring_is_outcome_first_with_format_bonus(tmp_path: Path):
     assert score["thinking_penalty"] == 0.0
     assert score["outcome_passed"] is True
     assert score["reward"] == pytest.approx(1.1)
+    assert continued["format_ok"] is True
+    assert continued["format_reward"] == 1.0
+    assert continued["thinking_penalty"] == 0.0
+    assert continued["final_answer"] == "42"
+    assert continued["reward"] == pytest.approx(1.1)
     assert jumped["outcome_reward"] == 1.0
     assert jumped["format_ok"] is False
     assert jumped["thinking_penalty"] == 0.25

@@ -183,7 +183,7 @@ Important fields:
 | `metadata_field` | Optional upstream-style metadata column, default `metadata`; JSON strings are parsed and carried into reward samples and bounded verifier records |
 | `reward` | Verifier checker: `exact_match`, `numeric`, `choice`, `contains_answer`, `field`, `code`, or `auto` |
 | `reward_field` | Dataset reward column when `reward: field` |
-| `require_thinking_trace` | Prompt asks for `<think>...</think>`; format reward checks **generated** tokens only |
+| `require_thinking_trace` | When true, rollout prompts may end with open `<think>`. Format is OK if the **generation** closes thinking: either a full `<think>...</think>` block or a continuation that only emits `</think>` then the answer |
 | `outcome_reward_weight` | Weight for hard outcome (correctness) from the shared verifier |
 | `format_reward_weight` | Small bonus when the completion contains a closed thinking block |
 | `process_reward_weight` | Experimental lexical process score; keep `0` for verifiable outcome-first RL |
