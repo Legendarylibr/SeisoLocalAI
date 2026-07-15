@@ -26,6 +26,31 @@ _metrics_cache: dict[str, Any] | None = None
 _metrics_cache_ts: float = 0.0
 _cpu_percent_primed = False
 
+# Ordered preference for package/CPU die sensors across vendors.
+# Intel: coretemp; AMD Zen: k10temp (Tctl) / zenpower; ARM SBCs: cpu_thermal;
+# ACPI acpitz is a last-resort zone (often motherboard, not die).
+_CPU_TEMP_SENSOR_KEYS = (
+    "coretemp",
+    "k10temp",
+    "zenpower",
+    "cpu_thermal",
+    "cpu-thermal",
+    "TC0P",
+    "TH0x",
+    "acpitz",
+)
+# Prefer package-level labels over individual cores when available.
+_CPU_TEMP_PREFERRED_LABELS = (
+    "tctl",
+    "tdie",
+    "package id 0",
+    "package id 1",
+    "package",
+    "tccd1",
+    "cpu",
+    "soc",
+)
+
 
 def _platform_probe():
     return probe_for(platform.system())
@@ -46,6 +71,49 @@ def _cpu_brand() -> str:
 
 def _cpu_cores() -> int:
     return _platform_probe().cpu_cores()
+
+
+def _cpu_temp_from_sensors(temps: dict[str, Any] | None) -> float | None:
+    """Pick a plausible package/CPU temperature from psutil sensors.
+
+    Native Linux AMD boxes expose ``k10temp`` (not ``coretemp``). Using only
+    Intel/Apple keys left ``cpu_temp_c`` null on Ryzen/Threadripper systems.
+    """
+    if not temps:
+        return None
+
+    def _plausible(value: float | None) -> float | None:
+        if value is None:
+            return None
+        try:
+            current = float(value)
+        except (TypeError, ValueError):
+            return None
+        # Reject unplugged / bogus hwmon zeros and sensor error spikes.
+        if current <= 1.0 or current >= 125.0:
+            return None
+        return round(current, 1)
+
+    for key in _CPU_TEMP_SENSOR_KEYS:
+        entries = temps.get(key) or ()
+        if not entries:
+            continue
+        # Prefer well-known package labels (Tctl on AMD, Package id 0 on Intel).
+        for pref in _CPU_TEMP_PREFERRED_LABELS:
+            for entry in entries:
+                label = (getattr(entry, "label", None) or "").strip().lower()
+                if not label:
+                    continue
+                if label == pref or pref in label:
+                    picked = _plausible(getattr(entry, "current", None))
+                    if picked is not None:
+                        return picked
+        # Fall back to first plausible reading on this sensor chip.
+        for entry in entries:
+            picked = _plausible(getattr(entry, "current", None))
+            if picked is not None:
+                return picked
+    return None
 
 
 # Back-compat alias for tests and monkeypatching.
@@ -87,10 +155,7 @@ def live_metrics() -> dict[str, Any]:
         ram_used_pct = round(psutil.virtual_memory().percent, 1)
         sensors_temperatures = getattr(psutil, "sensors_temperatures", None)
         temps = sensors_temperatures() if sensors_temperatures else {}
-        for key in ("coretemp", "cpu_thermal", "TC0P", "TH0x"):
-            if key in temps and temps[key]:
-                cpu_temp = round(temps[key][0].current, 1)
-                break
+        cpu_temp = _cpu_temp_from_sensors(temps)
     except (ImportError, AttributeError):
         pass
 
