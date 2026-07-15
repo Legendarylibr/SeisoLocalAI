@@ -666,6 +666,13 @@ async def chat(
                 finish_reason = "stop"
                 # One free retry when a continue pass returns empty after a cut-off.
                 empty_continue_retries = 0
+                # Incomplete-only continues (mid-sentence EOS) without a length hit.
+                # Cap progress-free streaks so a model that always ends mid-line
+                # cannot spin until the full multi-pass budget is wasted.
+                incomplete_only_streak = 0
+                low_progress_streak = 0
+                _MAX_INCOMPLETE_ONLY_STREAK = 16
+                _MAX_LOW_PROGRESS_STREAK = 2
                 headroom_mb: float | None = None
                 try:
                     from seiso.memory.protection import headroom_mb as _headroom_mb
@@ -795,6 +802,22 @@ async def chat(
                                 incomplete and not pass_text.strip()
                             ),
                         )
+                        # Safety rails for incomplete-only continues (no length hit):
+                        # stop after many incomplete passes or tiny progress repeats.
+                        if want_continue and incomplete and not hit_length and not force_retry_empty:
+                            incomplete_only_streak += 1
+                            if pass_tokens < 16 and continues_used > 0:
+                                low_progress_streak += 1
+                            else:
+                                low_progress_streak = 0
+                            if (
+                                incomplete_only_streak > _MAX_INCOMPLETE_ONLY_STREAK
+                                or low_progress_streak >= _MAX_LOW_PROGRESS_STREAK
+                            ):
+                                want_continue = False
+                        elif hit_length:
+                            incomplete_only_streak = 0
+                            low_progress_streak = 0
                         if not want_continue:
                             break
 
@@ -893,7 +916,17 @@ async def chat(
                     if still_truncated:
                         finish_reason = "length"
                     if body.thread_id:
-                        await db.add_message(body.thread_id, "assistant", content)
+                        await db.add_message(
+                            body.thread_id,
+                            "assistant",
+                            content,
+                            metadata={
+                                "truncated": still_truncated,
+                                "auto_continues": continues_used,
+                                "finish_reason": finish_reason,
+                                "output_tokens": total_output_tokens,
+                            },
+                        )
                     final_stats = {
                         "output_tokens": total_output_tokens,
                         "finish_reason": finish_reason,
@@ -902,6 +935,7 @@ async def chat(
                         "total_budget": total_budget,
                         **last_meta,
                     }
+
                     final_stats["finish_reason"] = finish_reason
                     final_stats["truncated"] = still_truncated
                     final_stats["auto_continues"] = continues_used

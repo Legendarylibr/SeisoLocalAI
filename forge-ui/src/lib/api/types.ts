@@ -276,7 +276,15 @@ export type KnowledgeChunk = {
 };
 
 export type ChatThread = { id: string; title: string; model_id: string | null; created_at: string };
-export type ChatMessage = { id: string; role: string; content: string; created_at: string };
+export type ChatMessage = {
+  id: string;
+  role: string;
+  content: string;
+  created_at: string;
+  /** Optional server metadata (e.g. truncated multi-pass reply). */
+  metadata?: Record<string, unknown> | null;
+};
+
 
 export type ChatContextStatus = {
   char_budget: number;

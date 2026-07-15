@@ -37,7 +37,9 @@ class ChatMixin:
                 (thread_id,),
             ) as cur:
                 messages = [
-                    self._decrypt_row("chat_messages", dict(r))
+                    self._message_with_metadata(
+                        self._decrypt_row("chat_messages", dict(r))
+                    )
                     for r in await cur.fetchall()
                 ]
             return dict(thread_row), messages
@@ -147,8 +149,25 @@ class ChatMixin:
             "thread_id": thread_id,
             "role": role,
             "content": content,
+            "metadata": dict(metadata or {}),
             "created_at": now,
         }
+
+    @staticmethod
+    def _message_with_metadata(row: dict) -> dict:
+        """Expose parsed ``metadata`` alongside decrypted ``metadata_json``."""
+        out = dict(row)
+        raw = out.get("metadata_json")
+        parsed: dict = {}
+        if isinstance(raw, str) and raw.strip():
+            try:
+                loaded = json.loads(raw)
+                if isinstance(loaded, dict):
+                    parsed = loaded
+            except (TypeError, ValueError, json.JSONDecodeError):
+                parsed = {}
+        out["metadata"] = parsed
+        return out
 
     async def get_messages(self, thread_id: str, user_id: str | None = None) -> list[dict]:
         """Return messages for a thread.
@@ -172,4 +191,7 @@ class ChatMixin:
                     (thread_id,),
                 ) as cur:
                     rows = await cur.fetchall()
-            return [self._decrypt_row("chat_messages", dict(r)) for r in rows]
+            return [
+                self._message_with_metadata(self._decrypt_row("chat_messages", dict(r)))
+                for r in rows
+            ]
