@@ -23,7 +23,8 @@ export const ChatBubble = memo(function ChatBubble({
         <div className="chat-bubble-content">{message.content}</div>
         {truncated && message.role === "assistant" && (
           <p className="chat-reply-truncated muted-text">
-            Reply reached the automatic length limit for this model.
+            Reply stopped at Seiso&apos;s multi-pass length budget (generation was still
+            mid-answer). Ask to continue, or raise the budget if you need more.
           </p>
         )}
       </div>

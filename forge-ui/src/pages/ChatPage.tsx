@@ -51,15 +51,22 @@ function resolveBackendLabel(
 
 function showStreamingTyping(el: HTMLElement) {
   el.classList.add("chat-typing");
+  el.classList.remove("chat-streaming-live", "chat-streaming-continue");
   el.replaceChildren();
   for (let i = 0; i < 3; i += 1) {
     el.appendChild(document.createElement("span"));
   }
 }
 
-function showStreamingText(el: HTMLElement, text: string) {
+function showStreamingText(el: HTMLElement, text: string, continuing = false) {
   el.classList.remove("chat-typing");
-  el.textContent = text;
+  el.classList.add("chat-streaming-live");
+  el.classList.toggle("chat-streaming-continue", continuing);
+  // Prefer append-friendly updates: full textContent is still cheapest for plain
+  // text bubbles and avoids React reconciliation of multi-pass drafts.
+  if (el.textContent !== text) {
+    el.textContent = text;
+  }
 }
 
 /** Isolated from ChatPage re-renders so imperative stream text is not wiped. */
@@ -170,8 +177,9 @@ export function ChatPage() {
     [providerId, effectiveBackend],
   );
   const autoMaxTokens = useMemo(() => {
+    // Desired overall reply length (backend OOM-clamps each chunk and auto-continues).
     const recommended = selected?.recommended_max_tokens ?? 2048;
-    return Math.max(1, Math.min(8192, recommended));
+    return Math.max(1, Math.min(131072, recommended));
   }, [selected?.recommended_max_tokens]);
   const isRouterMode = selected?.kind === "router" || selection === ROUTER_MODEL_ID;
   const modelReady = useMemo(
@@ -256,7 +264,7 @@ export function ChatPage() {
   const preloadInferenceOptions = useCallback(
     (modelId: string, list: InferenceModelOption[]) => {
       const model = list.find((m) => m.id === modelId) ?? null;
-      const maxTokens = Math.max(1, Math.min(8192, model?.recommended_max_tokens ?? 2048));
+      const maxTokens = Math.max(1, Math.min(131072, model?.recommended_max_tokens ?? 2048));
       // Always auto-context: backend sizes + pins KV after preload (no UI presets).
       return { maxTokens, nCtx: null as number | null };
     },
@@ -800,10 +808,10 @@ export function ChatPage() {
     };
 
     const streamDisplay = createStreamDisplaySink(
-      (text) => {
+      (text, state) => {
         const el = streamingElRef.current;
         if (!el) return;
-        if (text) showStreamingText(el, text);
+        if (text) showStreamingText(el, text, Boolean(state?.continuing));
         else showStreamingTyping(el);
       },
       () => scrollToBottom("auto"),
@@ -838,10 +846,12 @@ export function ChatPage() {
               return;
             }
             if (event === "log") {
-              // Auto-continue logs are server status, not model output.
-              if (/Reply hit max length/i.test(data)) {
+              // Multi-pass continue: keep draft on screen, show continuing cue.
+              if (/Reply hit max length|continuing\s*\(/i.test(data)) {
+                streamDisplay.noteContinue();
                 return;
               }
+              // Other server logs only before first token (load/preload status).
               progressText = `${progressText}${progressText ? "\n" : ""}${data}`;
               if (!assistantText) {
                 streamDisplay.push(progressText);

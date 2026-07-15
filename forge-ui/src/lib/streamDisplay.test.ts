@@ -15,33 +15,62 @@ describe("createStreamDisplaySink", () => {
     expect(paints).toEqual(["hello"]);
   });
 
-  it("coalesces follow-up updates into a single rAF paint", async () => {
-    const paints: string[] = [];
-    const rafCb = { current: null as FrameRequestCallback | null };
+  it("coalesces follow-up updates into smooth catch-up frames", async () => {
+    const paints: Array<{ text: string; continuing?: boolean }> = [];
+    const rafQueue: FrameRequestCallback[] = [];
     vi.spyOn(window, "requestAnimationFrame").mockImplementation((cb: FrameRequestCallback) => {
-      rafCb.current = cb;
-      return 1;
+      rafQueue.push(cb);
+      return rafQueue.length;
     });
 
-    const sink = createStreamDisplaySink((text) => paints.push(text));
+    const sink = createStreamDisplaySink((text, state) => {
+      paints.push({ text, continuing: state?.continuing });
+    });
     sink.push("a");
     await Promise.resolve();
-    expect(paints).toEqual(["a"]);
+    expect(paints[0]?.text).toBe("a");
 
-    sink.push("ab");
-    sink.push("abc");
-    expect(paints).toEqual(["a"]);
-    expect(rafCb.current).not.toBeNull();
-    rafCb.current?.(0);
-    expect(paints).toEqual(["a", "abc"]);
+    // Large multi-pass resume batch — should not dump entire string in one paint.
+    sink.push("a" + "x".repeat(200));
+    expect(rafQueue.length).toBeGreaterThan(0);
+    rafQueue.shift()?.(0);
+    const afterFirstCatchup = paints[paints.length - 1]?.text ?? "";
+    expect(afterFirstCatchup.length).toBeGreaterThan(1);
+    expect(afterFirstCatchup.length).toBeLessThan(201);
+
+    // Drain frames until caught up.
+    let guard = 0;
+    while (rafQueue.length && guard < 40) {
+      rafQueue.shift()?.(0);
+      guard += 1;
+    }
+    expect(paints[paints.length - 1]?.text).toBe("a" + "x".repeat(200));
   });
 
-  it("flush forces the latest draft through", () => {
+  it("noteContinue keeps text and signals continuing state", async () => {
+    const paints: Array<{ text: string; continuing?: boolean }> = [];
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((cb: FrameRequestCallback) => {
+      cb(0);
+      return 1;
+    });
+    const sink = createStreamDisplaySink((text, state) => {
+      paints.push({ text, continuing: state?.continuing });
+    });
+    sink.push("Part one");
+    await Promise.resolve();
+    sink.noteContinue();
+    const last = paints[paints.length - 1];
+    expect(last?.text).toBe("Part one");
+    expect(last?.continuing).toBe(true);
+  });
+
+  it("flush forces the full server draft through", () => {
     const paints: string[] = [];
     vi.spyOn(window, "requestAnimationFrame").mockReturnValue(1);
     const sink = createStreamDisplaySink((text) => paints.push(text));
     sink.push("one");
+    sink.push("one two three");
     sink.flush();
-    expect(paints).toEqual(["one"]);
+    expect(paints[paints.length - 1]).toBe("one two three");
   });
 });
