@@ -605,8 +605,10 @@ async def chat(
                 from forge.services.generation_continue import (
                     authoritative_pass_tokens,
                     build_continue_messages,
+                    can_schedule_another_continue,
                     effective_pass_tokens,
                     hit_length_limit,
+                    looks_incomplete_reply,
                     next_pass_max_tokens,
                     reply_still_truncated,
                     resolve_auto_continue_limits,
@@ -662,6 +664,8 @@ async def chat(
                 # Accumulated text from the latest generation chunk (not a secret).
                 last_reply_chunk = ""
                 finish_reason = "stop"
+                # One free retry when a continue pass returns empty after a cut-off.
+                empty_continue_retries = 0
                 headroom_mb: float | None = None
                 try:
                     from seiso.memory.protection import headroom_mb as _headroom_mb
@@ -734,12 +738,18 @@ async def chat(
                         )
                         total_output_tokens += pass_tokens
                         last_pass_tokens = pass_tokens
+                        draft_so_far = sanitize_llm_output(
+                            "".join(raw_parts), strip_tool_calls=not body.tools
+                        )
                         hit_length = hit_length_limit(
                             pass_tokens,
                             pass_max_tokens,
                             finish_reason=pass_finish,
                             pass_text=pass_text,
                             metadata=last_meta,
+                        )
+                        incomplete = looks_incomplete_reply(
+                            pass_text if pass_text.strip() else draft_so_far
                         )
                         # Prefer "length" when the pass is full so auto-continue
                         # fires even if the backend mislabels the stop reason.
@@ -750,10 +760,30 @@ async def chat(
                                 hit_length=False,
                                 explicit=pass_finish,
                             )
-                        if not should_auto_continue(
+
+                        # Empty continue pass after a cut-off: retry once with a
+                        # stronger continue cue (live Qwen songs often EOS empty).
+                        force_retry_empty = False
+                        if (
+                            not pass_text.strip()
+                            and continues_used > 0
+                            and empty_continue_retries < 1
+                            and looks_incomplete_reply(draft_so_far)
+                            and can_schedule_another_continue(
+                                continues_used=continues_used,
+                                max_continues=max_continues,
+                                total_output_tokens=total_output_tokens,
+                                total_budget=total_budget,
+                                pass_max_tokens=base_pass_max_tokens,
+                            )
+                        ):
+                            force_retry_empty = True
+                            empty_continue_retries += 1
+
+                        want_continue = force_retry_empty or should_auto_continue(
                             pass_output_tokens=pass_tokens,
                             max_tokens=pass_max_tokens,
-                            pass_text=pass_text,
+                            pass_text=pass_text if pass_text.strip() else draft_so_far,
                             continues_used=continues_used,
                             max_continues=max_continues,
                             finish_reason=finish_reason,
@@ -761,13 +791,15 @@ async def chat(
                             total_output_tokens=total_output_tokens,
                             total_budget=total_budget,
                             metadata=last_meta,
-                        ):
+                            force_incomplete=force_retry_empty or (
+                                incomplete and not pass_text.strip()
+                            ),
+                        )
+                        if not want_continue:
                             break
 
                         continues_used += 1
-                        partial = sanitize_llm_output(
-                            "".join(raw_parts), strip_tool_calls=not body.tools
-                        )
+                        partial = draft_so_far
                         # Next chunk: never exceed remaining multi-pass budget.
                         chunk_tokens = next_pass_max_tokens(
                             base_pass_max_tokens=base_pass_max_tokens,
@@ -777,16 +809,29 @@ async def chat(
                         if chunk_tokens < 8:
                             finish_reason = "length"
                             break
+                        use_strong = (
+                            force_retry_empty
+                            or incomplete
+                            or hit_length
+                            or empty_continue_retries > 0
+                        )
+                        reason_label = (
+                            "empty-retry"
+                            if force_retry_empty
+                            else "incomplete"
+                            if incomplete and not hit_length
+                            else "length"
+                        )
                         orchestrator.emit_log(
                             job_id,
-                            f"Auto-continuing truncated reply "
+                            f"Auto-continuing {reason_label} reply "
                             f"(pass {continues_used + 1}, budget {chunk_tokens} tok, "
                             f"total {total_output_tokens}/{total_budget})",
                         )
                         yield {
                             "event": "log",
                             "data": (
-                                f"Reply hit max length — continuing "
+                                f"Reply incomplete — continuing "
                                 f"({continues_used}/{max_continues})…"
                             ),
                         }
@@ -799,6 +844,7 @@ async def chat(
                                 partial,
                                 n_ctx=int(fixed_n_ctx) if fixed_n_ctx is not None else None,
                                 max_tokens=chunk_tokens,
+                                strong=use_strong,
                             ),
                             "max_tokens": chunk_tokens,
                         }

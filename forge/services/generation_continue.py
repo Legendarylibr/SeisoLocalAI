@@ -19,6 +19,12 @@ CONTINUE_USER_PROMPT = (
     "Continue the previous assistant reply from exactly where it stopped. "
     "Do not restart, rephrase, or repeat earlier text. Do not add a preamble."
 )
+# Used after an empty continue pass or a clear mid-sentence cut.
+CONTINUE_USER_PROMPT_STRONG = (
+    "Your previous assistant message was cut off mid-sentence. "
+    "Continue EXACTLY from the final character with no restart, no new title, "
+    "and no preamble. Finish all remaining sections completely."
+)
 
 # OOM safety is *not* enforced by limiting how many times we continue.
 # It comes from:
@@ -59,19 +65,27 @@ _LONG_FORM_PATTERNS = (
         re.I,
     ),
     re.compile(r"\b(book\s+chapter|literature\s+review|technical\s+spec)\b", re.I),
-    # Follow-ups that ask to extend the previous long reply.
-    re.compile(r"^\s*(longer|longer\s+please|make\s+it\s+longer|more|continue|keep\s+going|expand|extend)\s*[.!]?\s*$", re.I),
+    # Follow-ups that ask to extend / redo the previous long reply.
+    re.compile(
+        r"^\s*("
+        r"longer|longer\s+please|make\s+it\s+longer|more|more\s+please|"
+        r"continue|keep\s+going|expand|extend|again|once\s+more|one\s+more|"
+        r"retry|rewrite|another|go\s+on|finish\s+it|complete\s+it"
+        r")\s*[.!]?\s*$",
+        re.I,
+    ),
     re.compile(r"\b(write\s+a\s+song|song\s+lyrics)\b", re.I),
 )
 
-# Terminal punctuation that usually means a finished sentence/paragraph.
-_SENTENCE_END_RE = re.compile(r'[.!?…」』"\')\]]\s*$')
+# Strong end-of-reply punctuation (last line).
+_LAST_LINE_DONE_RE = re.compile(r'[.!?…]\s*[\"\'»”’)\]\*]*\s*$')
+# Mid-thought endings that should always trigger another pass.
 _INCOMPLETE_TRAIL_RE = re.compile(
     r"(?:"
     r"[,;:—–\-]\s*$|"  # mid-clause punctuation
-    r"\b(the|a|an|and|or|but|to|of|in|on|for|with|as|at|by|from|into|than|that|which|who|i'm|i|we|they|you|not|just)\s*$|"
-    r"\*{1,2}[^*]+\s*$|"  # unclosed emphasis run
-    r"\(\*[^*]*$|"  # unclosed section marker like *(Outro
+    r"\b(the|a|an|and|or|but|to|of|in|on|for|with|as|at|by|from|into|"
+    r"than|that|which|who|i'm|i|we|they|you|not|just|so|let|explore)\s*$|"
+    r"\*{0,2}\([A-Za-z][^)\n]{0,40}$|"  # broken section marker *(Coda / *(Outro
     r"—\s*$"
     r")",
     re.I,
@@ -152,9 +166,10 @@ def looks_long_form(messages: list[dict[str, Any]] | None) -> bool:
         else:
             text = str(content or "")
         break
-    if not text or len(text) < 12:
+    if not text or not text.strip():
         return False
     sample = text[:4000]
+    # Short follow-ups ("again", "more") are intentional long-form signals.
     return any(pat.search(sample) for pat in _LONG_FORM_PATTERNS)
 
 
@@ -287,29 +302,45 @@ def can_schedule_another_continue(
     return remaining >= 8
 
 
+def _last_nonempty_line(text: str) -> str:
+    for line in reversed(str(text or "").splitlines()):
+        stripped = line.strip()
+        if stripped:
+            return stripped
+    return ""
+
+
+def _has_broken_markup(text: str) -> bool:
+    body = str(text or "")
+    if body.count("*(") > body.count(")*"):
+        return True
+    if body.count("**") % 2 == 1:
+        return True
+    # Unclosed italic section headers like *(Coda without closing.
+    return bool(re.search(r"\*\([A-Za-z][^)\n]{0,40}$", body.rstrip()))
+
+
 def looks_incomplete_reply(text: str) -> bool:
     """Heuristic: model stopped mid-thought even though finish_reason was stop.
 
-    Live chats (e.g. song extensions) often end mid-line with EOS while still
-    under the per-pass token cap — length-based auto-continue never fires.
+    Live chats (songs / “again” / “longer”) often end mid-line with EOS while
+    still under the per-pass token cap — length-based auto-continue never fires.
     """
     body = str(text or "").rstrip()
-    if len(body) < 48:
+    if len(body) < 24:
         return False
-    # Balanced, clearly finished responses.
-    if _SENTENCE_END_RE.search(body):
-        # Still incomplete if the last non-empty line looks cut (e.g. section open).
-        last_line = next((ln.strip() for ln in reversed(body.splitlines()) if ln.strip()), "")
-        if last_line and _INCOMPLETE_TRAIL_RE.search(last_line):
-            return True
-        # Unbalanced markdown emphasis / section markers.
-        return body.count("*(") > body.count(")*") or body.count("**") % 2 == 1
-    # No terminal punctuation on the whole ending → mid-sentence cut.
-    if _INCOMPLETE_TRAIL_RE.search(body):
-        return True
-    last_line = next((ln.strip() for ln in reversed(body.splitlines()) if ln.strip()), "")
+    last_line = _last_nonempty_line(body)
     if not last_line:
         return False
+
+    if _has_broken_markup(body) or _has_broken_markup(last_line):
+        return True
+    if _INCOMPLETE_TRAIL_RE.search(last_line):
+        return True
+    # Clean finish: last line ends with real sentence punctuation.
+    if _LAST_LINE_DONE_RE.search(last_line):
+        return False
+    # Otherwise treat as mid-thought (word / clause cut-off).
     return last_line[-1].isalnum() or last_line[-1] in {
         "*",
         "_",
@@ -319,6 +350,9 @@ def looks_incomplete_reply(text: str) -> bool:
         ",",
         ";",
         ":",
+        "(",
+        "[",
+        "{",
     }
 
 
@@ -334,6 +368,7 @@ def should_auto_continue(
     total_output_tokens: int = 0,
     total_budget: int | None = None,
     metadata: dict[str, Any] | None = None,
+    force_incomplete: bool = False,
 ) -> bool:
     """Whether another short generation pass is warranted and safe to attempt."""
     if cancelled:
@@ -346,7 +381,8 @@ def should_auto_continue(
         pass_max_tokens=max_tokens,
     ):
         return False
-    if not str(pass_text or "").strip():
+    text = str(pass_text or "").strip()
+    if not text and not force_incomplete:
         return False
 
     tokens = effective_pass_tokens(
@@ -354,7 +390,7 @@ def should_auto_continue(
     )
     # Avoid continue loops when the pass produced almost nothing useful.
     reason = (finish_reason or "").lower()
-    if tokens < 8 and reason not in {"length", "max_tokens"}:
+    if tokens < 8 and reason not in {"length", "max_tokens"} and not force_incomplete:
         return False
 
     if hit_length_limit(
@@ -368,7 +404,10 @@ def should_auto_continue(
 
     # Model emitted stop/EOS mid-sentence under the per-pass cap (common on
     # small instruct models for songs/essays). Keep going while budget remains.
-    return tokens >= 48 and looks_incomplete_reply(pass_text)
+    if force_incomplete:
+        return True
+    # Low bar: any clear incomplete draft past a short stub.
+    return tokens >= 24 and looks_incomplete_reply(pass_text)
 
 
 def reply_still_truncated(
@@ -667,6 +706,7 @@ def build_continue_messages(
     *,
     n_ctx: int | None = None,
     max_tokens: int | None = None,
+    strong: bool = False,
 ) -> list[dict[str, Any]]:
     """Messages for a continuation pass: history + partial assistant + continue cue.
 
@@ -674,6 +714,8 @@ def build_continue_messages(
     the draft grows, older middle content is dropped first, and the recent tail
     of the in-progress reply is always preserved. Fixed ``n_ctx`` is never grown
     (OOM-safe multi-pass).
+
+    ``strong=True`` uses a firmer continue cue after empty/incomplete cuts.
     """
     messages: list[dict[str, Any]] = []
     for item in base_messages:
@@ -685,7 +727,8 @@ def build_continue_messages(
             continue
         messages.append({"role": role, "content": "" if content is None else str(content)})
     messages.append({"role": "assistant", "content": str(assistant_so_far)})
-    messages.append({"role": "user", "content": CONTINUE_USER_PROMPT})
+    cue = CONTINUE_USER_PROMPT_STRONG if strong else CONTINUE_USER_PROMPT
+    messages.append({"role": "user", "content": cue})
     if n_ctx is not None:
         reply_budget = max(1, int(max_tokens or 512))
         messages = pack_continue_messages_linear_decay(

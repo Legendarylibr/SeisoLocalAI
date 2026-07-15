@@ -166,7 +166,7 @@ def test_should_not_continue_on_natural_stop():
 
 def test_should_continue_on_incomplete_mid_sentence_stop():
     """Live bug: model EOS mid-line under pass cap — must still auto-continue."""
-    from forge.services.generation_continue import looks_incomplete_reply
+    from forge.services.generation_continue import looks_incomplete_reply, looks_long_form
 
     incomplete = (
         "**Title: Rise Again**\n\n"
@@ -180,6 +180,15 @@ def test_should_continue_on_incomplete_mid_sentence_stop():
     )
     assert looks_incomplete_reply(incomplete) is True
     assert looks_incomplete_reply("Hello! How can I assist you today?") is False
+    # Live cut: broken coda + trailing unfinished line.
+    live_cut = (
+        "The echoes of the sky will always be met.\n\n"
+        "Let me know if you'd like to tweak the mood, add a melody, or explore a*(Coda)*\n"
+        "So let the winds fade"
+    )
+    assert looks_incomplete_reply(live_cut) is True
+    assert looks_long_form([{"role": "user", "content": "again"}]) is True
+    assert looks_long_form([{"role": "user", "content": "longer"}]) is True
     assert (
         should_auto_continue(
             pass_output_tokens=200,
@@ -188,6 +197,18 @@ def test_should_continue_on_incomplete_mid_sentence_stop():
             continues_used=0,
             finish_reason="stop",
             total_output_tokens=200,
+            total_budget=32768,
+        )
+        is True
+    )
+    assert (
+        should_auto_continue(
+            pass_output_tokens=405,
+            max_tokens=768,
+            pass_text=live_cut,
+            continues_used=0,
+            finish_reason="stop",
+            total_output_tokens=405,
             total_budget=32768,
         )
         is True
