@@ -179,7 +179,7 @@ async def get_chat_context(
     db: Annotated[Database, Depends(get_db)],
     settings: Annotated[ForgeSettings, Depends(get_settings)],
     thread_id: str | None = None,
-    max_tokens: int = Query(default=2048, ge=1, le=8192),
+    max_tokens: int = Query(default=2048, ge=1, le=131072),
     n_ctx: int | None = Query(default=None, ge=2048, le=131072),
     tools: bool = False,
     knowledge_base_id: str | None = None,
@@ -606,10 +606,9 @@ async def chat(
                     authoritative_pass_tokens,
                     build_continue_messages,
                     hit_length_limit,
-                    max_auto_continues,
+                    resolve_auto_continue_limits,
                     resolve_finish_reason,
                     should_auto_continue,
-                    total_reply_token_budget,
                 )
                 from seiso.memory.protection import sanitize_inference_payload
 
@@ -628,6 +627,10 @@ async def chat(
                 isolated = (
                     str(payload.get("inference_backend") or "").lower() == "llamaswap"
                 )
+                # Client max_tokens is the desired overall reply length; per-pass
+                # generation is clamped separately for OOM safety and chunked via
+                # auto-continue until this total (or a dynamic long-form budget) is met.
+                requested_max_tokens = max(1, int(body.max_tokens or 2048))
                 pass_payload = dict(payload)
                 if fixed_n_ctx is not None:
                     pass_payload["n_ctx"] = fixed_n_ctx
@@ -654,12 +657,23 @@ async def chat(
                 total_output_tokens = 0
                 last_pass_tokens = 0
                 finish_reason = "stop"
-                total_budget = total_reply_token_budget()
+                headroom_mb: float | None = None
+                try:
+                    from seiso.memory.protection import headroom_mb as _headroom_mb
+
+                    headroom_mb = float(_headroom_mb())
+                except Exception:
+                    headroom_mb = None
                 # Capture the OOM-safe per-pass budget once; continues must not grow it.
-                # Derive max continues from that size so native 512–768 caps never
-                # starve long replies (fixed n_ctx + trim keeps VRAM flat).
+                # Total/continues scale with request + long-form intent; VRAM stays flat
+                # via fixed n_ctx + prompt trim.
                 base_pass_max_tokens = pass_max_tokens
-                max_continues = max_auto_continues(pass_max_tokens=base_pass_max_tokens)
+                max_continues, total_budget = resolve_auto_continue_limits(
+                    requested_max_tokens=requested_max_tokens,
+                    pass_max_tokens=base_pass_max_tokens,
+                    messages=base_messages,
+                    headroom_mb=headroom_mb,
+                )
                 try:
                     orchestrator.emit_log(
                         job_id, f"Streaming inference ({backend_label})"

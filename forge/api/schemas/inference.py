@@ -16,7 +16,9 @@ class ChatRequest(BaseModel):
         default="auto", description="auto | llamacpp | llamaswap | mlx | torch"
     )
     messages: list[dict[str, str]] = Field(default_factory=list)
-    max_tokens: int = Field(default=2048, ge=1, le=8192)
+    # Desired overall reply length. Per-pass generation is still OOM-clamped;
+    # auto-continue delivers longer totals in safe chunks when needed.
+    max_tokens: int = Field(default=2048, ge=1, le=131072)
     n_ctx: int | None = Field(default=None, ge=2048, le=131072)
     temperature: float = Field(default=0.7, ge=0, le=2)
     top_p: float | None = Field(default=None, ge=0, le=1)
@@ -41,5 +43,5 @@ class PreloadRequest(BaseModel):
     inference_backend: str = Field(
         default="auto", description="auto | llamacpp | llamaswap | mlx | torch"
     )
-    max_tokens: int = Field(default=2048, ge=1, le=8192)
+    max_tokens: int = Field(default=2048, ge=1, le=131072)
     n_ctx: int | None = Field(default=None, ge=2048, le=131072)

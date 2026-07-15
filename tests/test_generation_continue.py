@@ -7,7 +7,9 @@ from forge.services.generation_continue import (
     authoritative_pass_tokens,
     build_continue_messages,
     hit_length_limit,
+    looks_long_form,
     max_auto_continues,
+    resolve_auto_continue_limits,
     resolve_finish_reason,
     should_auto_continue,
     total_reply_token_budget,
@@ -176,3 +178,60 @@ def test_resolve_finish_reason():
     assert resolve_finish_reason(hit_length=False) == "stop"
     assert resolve_finish_reason(hit_length=False, cancelled=True) == "cancelled"
     assert resolve_finish_reason(hit_length=False, explicit="length") == "length"
+
+
+def test_looks_long_form_detects_paper_and_song():
+    assert looks_long_form([{"role": "user", "content": "Write a research paper on fusion"}])
+    assert looks_long_form([{"role": "user", "content": "Compose a full song with lyrics"}])
+    assert not looks_long_form([{"role": "user", "content": "What is 2+2?"}])
+
+
+def test_resolve_limits_scales_with_request_and_pass_size(monkeypatch):
+    monkeypatch.delenv("SEISO_CHAT_AUTO_CONTINUE_MAX", raising=False)
+    monkeypatch.delenv("SEISO_CHAT_AUTO_CONTINUE_TOTAL_TOKENS", raising=False)
+    max_cont, total = resolve_auto_continue_limits(
+        requested_max_tokens=48000,
+        pass_max_tokens=768,
+        messages=[{"role": "user", "content": "hi"}],
+        headroom_mb=20000,
+    )
+    assert total >= 48000
+    assert max_cont >= (total // 768) - 1
+    assert max_cont <= 256
+
+
+def test_resolve_limits_long_form_boosts_total(monkeypatch):
+    monkeypatch.delenv("SEISO_CHAT_AUTO_CONTINUE_MAX", raising=False)
+    monkeypatch.delenv("SEISO_CHAT_AUTO_CONTINUE_TOTAL_TOKENS", raising=False)
+    _max_cont, total = resolve_auto_continue_limits(
+        requested_max_tokens=2048,
+        pass_max_tokens=512,
+        messages=[{"role": "user", "content": "Write a detailed research paper on RLHF"}],
+        headroom_mb=20000,
+    )
+    assert total >= 65536
+
+
+def test_resolve_limits_low_headroom_caps_total(monkeypatch):
+    monkeypatch.delenv("SEISO_CHAT_AUTO_CONTINUE_MAX", raising=False)
+    monkeypatch.delenv("SEISO_CHAT_AUTO_CONTINUE_TOTAL_TOKENS", raising=False)
+    _max_cont, total = resolve_auto_continue_limits(
+        requested_max_tokens=2048,
+        pass_max_tokens=512,
+        messages=[{"role": "user", "content": "Write a research paper on RLHF"}],
+        headroom_mb=1000,
+    )
+    assert total <= 4096
+
+
+def test_resolve_limits_env_override_wins(monkeypatch):
+    monkeypatch.setenv("SEISO_CHAT_AUTO_CONTINUE_MAX", "3")
+    monkeypatch.setenv("SEISO_CHAT_AUTO_CONTINUE_TOTAL_TOKENS", "4096")
+    max_cont, total = resolve_auto_continue_limits(
+        requested_max_tokens=30000,
+        pass_max_tokens=512,
+        messages=[{"role": "user", "content": "Write a research paper"}],
+        headroom_mb=30000,
+    )
+    assert max_cont == 3
+    assert total == 4096

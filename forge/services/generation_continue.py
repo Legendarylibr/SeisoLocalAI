@@ -1,7 +1,15 @@
-"""Safe multi-pass continuation when a reply hits max_tokens (no n_ctx growth)."""
+"""Safe multi-pass continuation when a reply hits max_tokens (no n_ctx growth).
+
+Per-pass ``max_tokens`` stays OOM-clamped by memory guards (often 512–768 on
+native Linux NVIDIA). Long replies (research, papers, songs, etc.) finish by
+running more fixed-size generation chunks under a dynamic total budget — never
+by raising the single-pass completion size into OOM territory.
+"""
 
 from __future__ import annotations
 
+import os
+import re
 from typing import Any
 
 from seiso.env import env_int
@@ -31,10 +39,42 @@ _HARD_MAX_CONTINUES = 256
 # budget and the OOM-safe per-pass size so small native caps never starve long
 # replies (e.g. 32768 / 512 ≈ 64 continues).
 _AUTO_CONTINUE_SENTINEL = -1
+# Long-form prompts (paper / song / research) get at least this total when
+# free memory allows — still delivered in OOM-safe chunks.
+_LONG_FORM_TOTAL_FLOOR = 65536
+
+_LONG_FORM_PATTERNS = (
+    re.compile(r"\b(research\s+paper|white\s*paper|thesis|dissertation)\b", re.I),
+    re.compile(
+        r"\b(write|draft|compose|generate)\b.{0,40}\b(paper|essay|article|report)\b",
+        re.I,
+    ),
+    re.compile(
+        r"\b(write|draft|compose|generate)\b.{0,40}\b(song|lyrics|poem|screenplay|script)\b",
+        re.I,
+    ),
+    re.compile(r"\b(full\s+song|song\s+lyrics|chapter|novel|long[- ]form)\b", re.I),
+    re.compile(
+        r"\b(in[- ]depth|comprehensive)\b.{0,40}\b(analysis|guide|review|report)\b",
+        re.I,
+    ),
+    re.compile(r"\b(book\s+chapter|literature\s+review|technical\s+spec)\b", re.I),
+)
+
+
+def _env_int_override(name: str) -> int | None:
+    """Return an explicit env int when set; ``None`` when unset/invalid."""
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return None
+    try:
+        return int(raw)
+    except ValueError:
+        return None
 
 
 def total_reply_token_budget() -> int:
-    """Max cumulative output tokens across all auto-continue passes."""
+    """Max cumulative output tokens across all auto-continue passes (env default)."""
     return max(
         256,
         min(
@@ -47,7 +87,11 @@ def total_reply_token_budget() -> int:
     )
 
 
-def max_auto_continues(*, pass_max_tokens: int | None = None) -> int:
+def max_auto_continues(
+    *,
+    pass_max_tokens: int | None = None,
+    total_budget: int | None = None,
+) -> int:
     """Max extra generation passes after a length stop (0 disables).
 
     When ``SEISO_CHAT_AUTO_CONTINUE_MAX`` is unset (or set to -1), the count is
@@ -59,11 +103,95 @@ def max_auto_continues(*, pass_max_tokens: int | None = None) -> int:
         return max(0, min(_HARD_MAX_CONTINUES, int(raw)))
 
     per = max(1, int(pass_max_tokens or 512))
-    budget = total_reply_token_budget()
+    budget = (
+        max(256, min(_HARD_MAX_TOTAL_REPLY_TOKENS, int(total_budget)))
+        if total_budget is not None
+        else total_reply_token_budget()
+    )
     # First generation + N continues must cover the full budget.
     needed_passes = max(1, (budget + per - 1) // per)
     continues = max(0, needed_passes - 1)
     return min(_HARD_MAX_CONTINUES, continues)
+
+
+def looks_long_form(messages: list[dict[str, Any]] | None) -> bool:
+    """True when the latest user turn looks like a long-form generation ask."""
+    if not messages:
+        return False
+    text = ""
+    for item in reversed(messages):
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("role") or "").lower() != "user":
+            continue
+        content = item.get("content")
+        if isinstance(content, list):
+            parts: list[str] = []
+            for part in content:
+                if isinstance(part, dict):
+                    parts.append(str(part.get("text") or part.get("content") or ""))
+                else:
+                    parts.append(str(part))
+            text = " ".join(parts)
+        else:
+            text = str(content or "")
+        break
+    if not text or len(text) < 12:
+        return False
+    sample = text[:4000]
+    return any(pat.search(sample) for pat in _LONG_FORM_PATTERNS)
+
+
+def resolve_auto_continue_limits(
+    *,
+    requested_max_tokens: int | None,
+    pass_max_tokens: int,
+    messages: list[dict[str, Any]] | None = None,
+    headroom_mb: float | int | None = None,
+) -> tuple[int, int]:
+    """Compute ``(max_continues, total_token_budget)`` for multi-pass chat.
+
+    * ``pass_max_tokens`` — OOM-safe per-pass clamp (already sanitized).
+    * ``requested_max_tokens`` — client desire *before* per-pass clamp; used as
+      a floor for cumulative output so short chunk size does not truncate papers.
+    * Continues only fire on length stops; natural ``stop`` still ends early.
+    """
+    env_total = _env_int_override("SEISO_CHAT_AUTO_CONTINUE_TOTAL_TOKENS")
+    pass_sz = max(1, int(pass_max_tokens or 1))
+    requested = max(0, int(requested_max_tokens or 0))
+
+    if env_total is not None:
+        total = max(256, min(_HARD_MAX_TOTAL_REPLY_TOKENS, env_total))
+    else:
+        total = _DEFAULT_TOTAL_REPLY_TOKENS
+        # Client max_tokens is the desired overall reply length signal.
+        if requested > 0:
+            total = max(total, min(_HARD_MAX_TOTAL_REPLY_TOKENS, requested))
+        if looks_long_form(messages):
+            total = max(total, min(_HARD_MAX_TOTAL_REPLY_TOKENS, _LONG_FORM_TOTAL_FLOOR))
+            if requested > 0:
+                total = max(total, min(_HARD_MAX_TOTAL_REPLY_TOKENS, requested))
+
+        # Headroom only *caps* how far we inflate — never forces long rambles.
+        if headroom_mb is not None:
+            try:
+                free = float(headroom_mb)
+            except (TypeError, ValueError):
+                free = 0.0
+            if free < 1536:
+                total = min(total, max(requested or 0, 4096, pass_sz * 2))
+            elif free < 3072:
+                total = min(total, max(requested or 0, 8192, pass_sz * 4))
+            elif free < 6144:
+                total = min(total, max(requested or 0, 16384, _DEFAULT_TOTAL_REPLY_TOKENS))
+
+        total = max(256, min(_HARD_MAX_TOTAL_REPLY_TOKENS, total))
+
+    max_continues = max_auto_continues(
+        pass_max_tokens=pass_sz,
+        total_budget=total,
+    )
+    return max_continues, total
 
 
 def hit_length_limit(

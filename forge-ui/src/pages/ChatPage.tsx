@@ -170,8 +170,9 @@ export function ChatPage() {
     [providerId, effectiveBackend],
   );
   const autoMaxTokens = useMemo(() => {
+    // Desired overall reply length (backend OOM-clamps each chunk and auto-continues).
     const recommended = selected?.recommended_max_tokens ?? 2048;
-    return Math.max(1, Math.min(8192, recommended));
+    return Math.max(1, Math.min(131072, recommended));
   }, [selected?.recommended_max_tokens]);
   const isRouterMode = selected?.kind === "router" || selection === ROUTER_MODEL_ID;
   const modelReady = useMemo(
@@ -256,7 +257,7 @@ export function ChatPage() {
   const preloadInferenceOptions = useCallback(
     (modelId: string, list: InferenceModelOption[]) => {
       const model = list.find((m) => m.id === modelId) ?? null;
-      const maxTokens = Math.max(1, Math.min(8192, model?.recommended_max_tokens ?? 2048));
+      const maxTokens = Math.max(1, Math.min(131072, model?.recommended_max_tokens ?? 2048));
       // Always auto-context: backend sizes + pins KV after preload (no UI presets).
       return { maxTokens, nCtx: null as number | null };
     },
