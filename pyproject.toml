@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "seiso"
 version = "0.1.0"
-description = "Seiso — local AI platform for running, training, and fine-tuning open models"
+description = "Local-first AI lab: chat, fine-tune, quantize, compress, and deploy open models on your hardware (Forge UI + CLI)"
 readme = "README.md"
 license = { text = "GPL-3.0-only" }
 requires-python = ">=3.10"
