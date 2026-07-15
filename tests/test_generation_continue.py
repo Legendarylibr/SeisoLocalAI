@@ -164,6 +164,36 @@ def test_should_not_continue_on_natural_stop():
     )
 
 
+def test_should_continue_on_incomplete_mid_sentence_stop():
+    """Live bug: model EOS mid-line under pass cap — must still auto-continue."""
+    from forge.services.generation_continue import looks_incomplete_reply
+
+    incomplete = (
+        "**Title: Rise Again**\n\n"
+        "*(Outro)*\n"
+        "When the world is silent, and the stars are gone,\n"
+        "I’ll be the echo, the flame, the song.\n"
+        "No more running from the fire—\n"
+        "I’m the spark that turns the night to dawn.\n"
+        "The road is long, but I’ve found my way—\n"
+        "I’m not just rising,"
+    )
+    assert looks_incomplete_reply(incomplete) is True
+    assert looks_incomplete_reply("Hello! How can I assist you today?") is False
+    assert (
+        should_auto_continue(
+            pass_output_tokens=200,
+            max_tokens=768,
+            pass_text=incomplete,
+            continues_used=0,
+            finish_reason="stop",
+            total_output_tokens=200,
+            total_budget=32768,
+        )
+        is True
+    )
+
+
 def test_build_continue_messages_appends_partial_and_cue():
     base = [
         {"role": "system", "content": "sys"},

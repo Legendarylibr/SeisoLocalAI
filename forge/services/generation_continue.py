@@ -59,6 +59,22 @@ _LONG_FORM_PATTERNS = (
         re.I,
     ),
     re.compile(r"\b(book\s+chapter|literature\s+review|technical\s+spec)\b", re.I),
+    # Follow-ups that ask to extend the previous long reply.
+    re.compile(r"^\s*(longer|longer\s+please|make\s+it\s+longer|more|continue|keep\s+going|expand|extend)\s*[.!]?\s*$", re.I),
+    re.compile(r"\b(write\s+a\s+song|song\s+lyrics)\b", re.I),
+)
+
+# Terminal punctuation that usually means a finished sentence/paragraph.
+_SENTENCE_END_RE = re.compile(r'[.!?…」』"\')\]]\s*$')
+_INCOMPLETE_TRAIL_RE = re.compile(
+    r"(?:"
+    r"[,;:—–\-]\s*$|"  # mid-clause punctuation
+    r"\b(the|a|an|and|or|but|to|of|in|on|for|with|as|at|by|from|into|than|that|which|who|i'm|i|we|they|you|not|just)\s*$|"
+    r"\*{1,2}[^*]+\s*$|"  # unclosed emphasis run
+    r"\(\*[^*]*$|"  # unclosed section marker like *(Outro
+    r"—\s*$"
+    r")",
+    re.I,
 )
 
 
@@ -271,6 +287,36 @@ def can_schedule_another_continue(
     return remaining >= 8
 
 
+def looks_incomplete_reply(text: str) -> bool:
+    """Heuristic: model stopped mid-thought even though finish_reason was stop.
+
+    Live chats (e.g. song extensions) often end mid-line with EOS while still
+    under the per-pass token cap — length-based auto-continue never fires.
+    """
+    body = str(text or "").rstrip()
+    if len(body) < 48:
+        return False
+    # Balanced, clearly finished responses.
+    if _SENTENCE_END_RE.search(body):
+        # Still incomplete if the last non-empty line looks cut (e.g. section open).
+        last_line = next((ln.strip() for ln in reversed(body.splitlines()) if ln.strip()), "")
+        if last_line and _INCOMPLETE_TRAIL_RE.search(last_line):
+            return True
+        # Unbalanced markdown emphasis / section markers.
+        if body.count("*(") > body.count(")*") or body.count("**") % 2 == 1:
+            return True
+        return False
+    # No terminal punctuation on the whole ending → mid-sentence cut.
+    if _INCOMPLETE_TRAIL_RE.search(body):
+        return True
+    last_line = next((ln.strip() for ln in reversed(body.splitlines()) if ln.strip()), "")
+    if not last_line:
+        return False
+    if last_line[-1].isalnum() or last_line[-1] in {"*", "_", "—", "–", "-", ",", ";", ":"}:
+        return True
+    return False
+
+
 def should_auto_continue(
     *,
     pass_output_tokens: int,
@@ -306,13 +352,20 @@ def should_auto_continue(
     if tokens < 8 and reason not in {"length", "max_tokens"}:
         return False
 
-    return hit_length_limit(
+    if hit_length_limit(
         tokens,
         max_tokens,
         finish_reason=finish_reason,
         pass_text=pass_text,
         metadata=metadata,
-    )
+    ):
+        return True
+
+    # Model emitted stop/EOS mid-sentence under the per-pass cap (common on
+    # small instruct models for songs/essays). Keep going while budget remains.
+    if tokens >= 48 and looks_incomplete_reply(pass_text):
+        return True
+    return False
 
 
 def reply_still_truncated(
@@ -328,10 +381,9 @@ def reply_still_truncated(
     metadata: dict[str, Any] | None = None,
     cancelled: bool = False,
 ) -> bool:
-    """True only when the last pass hit length *and* no further continue is possible.
+    """True when the reply is incomplete and no further continue is possible.
 
-    Avoids the false UI banner when a single OOM-safe chunk ends but multi-pass
-    budget remains (or when the model naturally stopped mid-way).
+    Covers both hard length-stops and mid-sentence EOS under the pass cap.
     """
     if cancelled:
         return False
@@ -342,9 +394,10 @@ def reply_still_truncated(
         pass_text=pass_text,
         metadata=metadata,
     )
-    if not hit:
+    incomplete = looks_incomplete_reply(pass_text)
+    if not hit and not incomplete:
         return False
-    # Length-hit is only "truncated" if we could not schedule another chunk.
+    # Incomplete/length-hit only surfaces as truncated if we cannot continue.
     return not can_schedule_another_continue(
         continues_used=continues_used,
         max_continues=max_continues,
