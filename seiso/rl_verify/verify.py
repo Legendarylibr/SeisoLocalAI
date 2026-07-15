@@ -45,6 +45,10 @@ class VerifierResult:
     final_answer: str
     checker: str
     detail: str | None = None
+    # Optional checkable-proof channel (e.g. sandboxed code tests).
+    proof_passed: bool | None = None
+    proof_score: float | None = None
+    proof_detail: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -68,6 +72,11 @@ def resolve_checker(
             "choice": "choice",
             "multiple_choice": "choice",
             "field": "field",
+            "code": "code",
+            "python": "code",
+            "code_exec": "code",
+            "code_proof": "code",
+            "humaneval": "code",
             "auto": "auto",
         }
         if key in aliases:
@@ -81,6 +90,8 @@ def resolve_checker(
         return "numeric"
     if bench in {"gpqa", "multiple_choice", "choice"}:
         return "choice"
+    if bench in {"humaneval", "mbpp", "code", "python", "code_exec"}:
+        return "code"
     return "auto"
 
 
@@ -92,6 +103,7 @@ def verify_outcome(
     benchmark: str | None = None,
     field_reward: float | None = None,
     prefer_final_answer: bool = True,
+    sample: dict[str, Any] | None = None,
 ) -> tuple[float, str, str]:
     """Return ``(outcome_0_1, checker_used, extracted_answer)``."""
     if checker == "field":
@@ -102,21 +114,39 @@ def verify_outcome(
         except (TypeError, ValueError):
             return 0.0, "field", ""
 
-    if answer is None or not str(answer).strip():
-        return 0.0, checker if checker != "auto" else "exact_match", ""
-
     if checker == "auto":
-        resolved = resolve_checker(benchmark=benchmark)
-        if resolved == "auto":
-            text_probe = (
-                final_answer_text(completion) if prefer_final_answer else completion
-            )
-            if last_number(str(answer)) is not None and last_number(text_probe) is not None:
-                resolved = "numeric"
-            else:
-                resolved = "exact_match"
+        if sample is not None and (
+            sample.get("tests") is not None or sample.get("test") is not None
+        ):
+            resolved = "code"
+        else:
+            resolved = resolve_checker(benchmark=benchmark)
+            if resolved == "auto":
+                if answer is None or not str(answer).strip():
+                    return 0.0, "exact_match", ""
+                text_probe = (
+                    final_answer_text(completion) if prefer_final_answer else completion
+                )
+                if last_number(str(answer)) is not None and last_number(
+                    text_probe
+                ) is not None:
+                    resolved = "numeric"
+                else:
+                    resolved = "exact_match"
     else:
         resolved = resolve_checker(checker, benchmark=benchmark)
+
+    if resolved == "code":
+        from seiso.rl_verify.code_proof import code_outcome_score
+
+        payload = dict(sample or {})
+        if answer is not None and "tests" not in payload and "test" not in payload:
+            # Allow answer-as-tests for compact rows.
+            payload.setdefault("tests", answer)
+        return code_outcome_score(completion, payload)
+
+    if answer is None or not str(answer).strip():
+        return 0.0, resolved if resolved != "auto" else "exact_match", ""
 
     text_for_outcome = (
         final_answer_text(completion) if prefer_final_answer else completion
@@ -216,15 +246,41 @@ def score_completion(
     answer = sample.get("answer")
     field_value = sample.get("reward")
     bench = sample.get("benchmark")
-    outcome, used_checker, extracted = verify_outcome(
-        completion,
-        None if answer is None else str(answer),
-        checker=checker,
-        benchmark=bench if isinstance(bench, str) else None,
-        field_reward=None if field_value is None else field_value,
-        # When format is required, score the post-think final answer region.
-        prefer_final_answer=require_thinking_trace,
+    resolved_name = (
+        resolve_checker(checker, benchmark=bench if isinstance(bench, str) else None)
+        if checker != "auto"
+        else "auto"
     )
+    # Prefer code proof when sample carries tests or checker is code.
+    use_code = resolved_name == "code" or (
+        checker in {"auto", "code", "python", "code_exec", "code_proof", "humaneval"}
+        and (sample.get("tests") is not None or sample.get("test") is not None)
+    )
+
+    proof_passed: bool | None = None
+    proof_score: float | None = None
+    proof_detail: str | None = None
+
+    if use_code:
+        from seiso.rl_verify.code_proof import verify_code_proof
+
+        proof = verify_code_proof(completion, sample)
+        outcome = float(proof.score)
+        used_checker = "code"
+        extracted = proof.extracted_code
+        proof_passed = proof.passed
+        proof_score = float(proof.score)
+        proof_detail = proof.detail
+    else:
+        outcome, used_checker, extracted = verify_outcome(
+            completion,
+            None if answer is None else str(answer),
+            checker=checker,
+            benchmark=bench if isinstance(bench, str) else None,
+            field_reward=None if field_value is None else field_value,
+            prefer_final_answer=require_thinking_trace,
+            sample=sample,
+        )
 
     process = 0.0
     if process_weight > 0 and require_thinking_trace and has_closed:
@@ -247,7 +303,9 @@ def score_completion(
     )
     passed = outcome > 0.5
     detail = None
-    if require_thinking_trace and not format_ok:
+    if use_code and proof_detail is not None:
+        detail = proof_detail
+    elif require_thinking_trace and not format_ok:
         detail = "missing_closed_think_trace"
     elif not passed and answer is not None:
         detail = "outcome_mismatch"
@@ -264,6 +322,9 @@ def score_completion(
         final_answer=final_answer if require_thinking_trace else completion.strip(),
         checker=used_checker,
         detail=detail,
+        proof_passed=proof_passed,
+        proof_score=proof_score,
+        proof_detail=proof_detail,
     )
 
 

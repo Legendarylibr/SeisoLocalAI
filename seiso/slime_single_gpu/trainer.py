@@ -52,6 +52,9 @@ class Rollout:
     outcome_passed: bool = False
     format_ok: bool = True
     checker: str = ""
+    proof_passed: bool | None = None
+    proof_score: float | None = None
+    proof_detail: str | None = None
 
 
 @dataclass(frozen=True)
@@ -512,6 +515,17 @@ def _collect_rollouts(
                     outcome_passed=bool(score["outcome_passed"]),
                     format_ok=bool(score["format_ok"]),
                     checker=str(score["checker"]),
+                    proof_passed=score.get("proof_passed"),
+                    proof_score=(
+                        float(score["proof_score"])
+                        if score.get("proof_score") is not None
+                        else None
+                    ),
+                    proof_detail=(
+                        str(score["proof_detail"])
+                        if score.get("proof_detail") is not None
+                        else None
+                    ),
                 )
             )
             if verifier_path is not None:
@@ -529,6 +543,9 @@ def _collect_rollouts(
                         "outcome_passed": score["outcome_passed"],
                         "format_ok": score["format_ok"],
                         "checker": score["checker"],
+                        "proof_passed": score.get("proof_passed"),
+                        "proof_score": score.get("proof_score"),
+                        "proof_detail": score.get("proof_detail"),
                         "extracted_answer": _truncate_text(
                             score.get("extracted_answer", ""),
                             config.verifier_max_text_chars,
@@ -657,6 +674,9 @@ def _score_completion(
         "format_ok": result.format_ok,
         "checker": result.checker,
         "detail": result.detail,
+        "proof_passed": result.proof_passed,
+        "proof_score": result.proof_score,
+        "proof_detail": result.proof_detail,
     }
 
 
@@ -771,6 +791,16 @@ def _policy_loss(
         "thinking_penalty_mean": _mean(r.thinking_penalty for r in rollouts),
         "outcome_pass_rate": _mean(1.0 if r.outcome_passed else 0.0 for r in rollouts),
         "format_ok_rate": _mean(1.0 if r.format_ok else 0.0 for r in rollouts),
+        "proof_pass_rate": _mean(
+            1.0 if r.proof_passed else 0.0
+            for r in rollouts
+            if r.proof_passed is not None
+        ),
+        "proof_score_mean": _mean(
+            float(r.proof_score)
+            for r in rollouts
+            if r.proof_score is not None
+        ),
         "group_reward_spread_mean": group_stats["group_reward_spread_mean"],
         "group_pass_rate": group_stats["group_pass_rate"],
         "group_nonzero_spread_frac": group_stats["group_nonzero_spread_frac"],
@@ -792,6 +822,8 @@ def _empty_stats() -> dict[str, float]:
         "thinking_penalty_mean": 0.0,
         "outcome_pass_rate": 0.0,
         "format_ok_rate": 0.0,
+        "proof_pass_rate": 0.0,
+        "proof_score_mean": 0.0,
         "group_reward_spread_mean": 0.0,
         "group_pass_rate": 0.0,
         "group_nonzero_spread_frac": 0.0,
@@ -819,6 +851,8 @@ def _merge_stats(
         "thinking_penalty_mean",
         "outcome_pass_rate",
         "format_ok_rate",
+        "proof_pass_rate",
+        "proof_score_mean",
         "group_reward_spread_mean",
         "group_pass_rate",
         "group_nonzero_spread_frac",

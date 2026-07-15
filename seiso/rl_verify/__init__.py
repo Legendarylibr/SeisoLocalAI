@@ -1,11 +1,17 @@
 """Shared verifiable rewards for slime GRPO and distill-RL.
 
-Outcome scores come from hard checks (exact, numeric, choice). Format rewards
-inspect the *generated* completion only — never post-hoc rewritten strings.
+Outcome scores come from hard checks (exact, numeric, choice, sandboxed code).
+Format rewards inspect the *generated* completion only — never post-hoc rewritten
+strings. Code proofs run unit tests in a restricted subprocess.
 """
 
 from __future__ import annotations
 
+from seiso.rl_verify.code_proof import (
+    CodeProofResult,
+    extract_python_code,
+    verify_code_proof,
+)
 from seiso.rl_verify.extract import (
     extract_choice,
     final_answer_text,
@@ -25,8 +31,10 @@ from seiso.rl_verify.verify import (
 )
 
 __all__ = [
+    "CodeProofResult",
     "VerifierResult",
     "extract_choice",
+    "extract_python_code",
     "final_answer_text",
     "format_reward",
     "format_thinking_prompt",
@@ -37,5 +45,6 @@ __all__ = [
     "resolve_checker",
     "score_completion",
     "split_thinking_trace",
+    "verify_code_proof",
     "verify_outcome",
 ]

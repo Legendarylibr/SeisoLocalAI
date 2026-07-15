@@ -1,0 +1,4 @@
+{"prompt":"Write a Python function `add(a, b)` that returns the sum of two numbers.","tests":["assert add(1, 2) == 3","assert add(0, 0) == 0","assert add(-1, 1) == 0"],"benchmark":"code"}
+{"prompt":"Write a Python function `is_even(n)` that returns True when n is even.","tests":["assert is_even(2) is True","assert is_even(3) is False","assert is_even(0) is True"],"benchmark":"code"}
+{"prompt":"Write a Python function `factorial(n)` for non-negative integers (0! = 1).","prompt_code":"","tests":["assert factorial(0) == 1","assert factorial(1) == 1","assert factorial(5) == 120"],"timeout_s":3,"benchmark":"code"}
+{"prompt":"Complete the function so it reverses a string.","prompt_code":"def reverse_string(s: str) -> str:\n","tests":["assert reverse_string('ab') == 'ba'","assert reverse_string('') == ''","assert reverse_string('xyz') == 'zyx"],"benchmark":"code"}

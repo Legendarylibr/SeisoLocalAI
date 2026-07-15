@@ -181,7 +181,7 @@ Important fields:
 | `max_vram_gb` | Upper VRAM cap used to fail before out-of-memory conditions |
 | `prompt_field`, `answer_field` | Dataset columns for prompts and target answers |
 | `metadata_field` | Optional upstream-style metadata column, default `metadata`; JSON strings are parsed and carried into reward samples and bounded verifier records |
-| `reward` | Verifier checker: `exact_match`, `numeric`, `choice`, `contains_answer`, `field`, or `auto` |
+| `reward` | Verifier checker: `exact_match`, `numeric`, `choice`, `contains_answer`, `field`, `code`, or `auto` |
 | `reward_field` | Dataset reward column when `reward: field` |
 | `require_thinking_trace` | Prompt asks for `<think>...</think>`; format reward checks **generated** tokens only |
 | `outcome_reward_weight` | Weight for hard outcome (correctness) from the shared verifier |
@@ -201,8 +201,35 @@ Important fields:
 | `slime_use_lora` | Train LoRA adapters instead of full model weights |
 | `auto_stop_*` | Plateau detection; defaults monitor `reward_mean` (also logs `group_pass_rate`) |
 | `best_checkpoint_dir` | Directory under `output_dir` for the best observed metric checkpoint |
-| `write_verifier_data` | Writes JSONL with outcome, format, checker, extracted answer, and status per rollout |
+| `write_verifier_data` | Writes JSONL with outcome, format, checker, extracted answer, proof fields, and status per rollout |
 | `verifier_max_text_chars` | Per-field text cap to keep verifier JSONL bounded |
+
+### Code rewards (sandboxed proofs)
+
+Use `reward: code` with dataset rows that include unit tests. The shared verifier
+extracts Python from the completion (fenced blocks preferred) and runs tests in a
+restricted subprocess (`seiso.codellama_compress.code_exec`). Outcome score is the
+**pass fraction** of tests (1.0 only if all pass).
+
+Example config: `configs/example_slime_code.yaml` with `data/slime_code_sample.jsonl`.
+
+```json
+{
+  "prompt": "Write add(a, b).",
+  "tests": ["assert add(1, 2) == 3", "assert add(0, 0) == 0"],
+  "prompt_code": "",
+  "timeout_s": 3,
+  "benchmark": "code"
+}
+```
+
+- `tests` / `test`: assert lines (list or string) or a full check harness  
+- `prompt_code` / `code_prefix`: optional HumanEval-style prefix prepended before the solution  
+- `setup`: optional imports/helpers before the solution  
+- `timeout_s`: wall budget for the sample (split across test units)
+
+This is a **checkable proof**, not lexical process reward. Do not run untrusted
+code on sensitive hosts; the sandbox is best-effort, not a full VM.
 
 Slime checkpoints are exportable like other Seiso checkpoints. LoRA slime runs are treated as adapter checkpoints; non-LoRA slime runs are treated like full checkpoints. In distributed SLIME runs, rank 0 writes shared checkpoints and metrics, while verifier JSONL is rank-scoped to avoid concurrent writes.
 

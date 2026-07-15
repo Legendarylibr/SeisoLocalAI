@@ -51,6 +51,18 @@ def field_reward(completion: str, sample: dict[str, Any]) -> float:
     return score
 
 
+def code_reward(completion: str, sample: dict[str, Any]) -> float:
+    """Sandboxed unit-test pass fraction (checkable code proof)."""
+    score, _, _ = verify_outcome(
+        completion,
+        sample.get("answer"),
+        checker="code",
+        prefer_final_answer=False,
+        sample=sample,
+    )
+    return score
+
+
 def resolve_reward(name: str) -> RewardFn:
     """Resolve a named outcome checker used for outcome-only scoring."""
     rewards: dict[str, RewardFn] = {
@@ -58,6 +70,7 @@ def resolve_reward(name: str) -> RewardFn:
         "contains_answer": contains_answer_reward,
         "numeric": numeric_reward,
         "field": field_reward,
+        "code": code_reward,
         "choice": lambda completion, sample: verify_outcome(
             completion,
             sample.get("answer"),
@@ -72,6 +85,7 @@ def resolve_reward(name: str) -> RewardFn:
             if isinstance(sample.get("benchmark"), str)
             else None,
             prefer_final_answer=False,
+            sample=sample,
         )[0],
     }
     try:
