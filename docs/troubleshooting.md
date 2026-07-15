@@ -248,6 +248,24 @@ seiso forge
 
 Full guide: [deployment/reverse-proxy.md](deployment/reverse-proxy.md)
 
+## Chat reply stops early or says “continuing (N/M)”
+
+**Symptom:** Songs, essays, or “longer” / “again” replies cut off mid-line, or the UI briefly shows a continue cue.
+
+**Cause:** On native Linux NVIDIA (and other OOM-safe profiles), each generation pass is capped (often ~512–768 tokens). Seiso finishes long replies with **multi-pass auto-continue** (fixed `n_ctx`, linear-decay packing). A short pause with “continuing…” is expected.
+
+**If a reply still ends incomplete:**
+1. Ask **`continue`**, **`longer`**, or **`again`** — those are treated as long-form follow-ups.
+2. Prefer a stronger instruct/chat model if small models keep emitting EOS mid-sentence.
+3. Optional env (restart Forge after setting):
+   ```bash
+   # Cumulative output ceiling across auto-continue passes (default 32768, max 131072)
+   export SEISO_CHAT_AUTO_CONTINUE_TOTAL_TOKENS=65536
+   # Extra passes: -1 = auto from budget / per-pass size (0 disables continues)
+   export SEISO_CHAT_AUTO_CONTINUE_MAX=-1
+   ```
+4. Do **not** set `SEISO_LLAMA_UNSAFE_LONG_COMPLETIONS=1` unless you accept higher OOM risk for single-pass size.
+
 ## Check hardware detection
 
 ```bash

@@ -442,6 +442,14 @@ export function ChatPage() {
   const loadMessages = useCallback(async (threadId: string) => {
     const msgs = await api.getMessages(threadId);
     setMessagesByThread((prev) => ({ ...prev, [threadId]: msgs }));
+    // Restore multi-pass truncation banners after reload.
+    const truncated: Record<string, true> = {};
+    for (const m of msgs) {
+      if (m.role === "assistant" && m.metadata?.truncated === true) {
+        truncated[m.id] = true;
+      }
+    }
+    setTruncatedMessageIds((prev) => ({ ...prev, ...truncated }));
   }, []);
 
   useEffect(() => {

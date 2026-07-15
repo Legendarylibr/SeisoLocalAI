@@ -215,6 +215,27 @@ def test_should_continue_on_incomplete_mid_sentence_stop():
     )
 
 
+def test_build_continue_messages_strong_cue():
+    from forge.services.generation_continue import (
+        CONTINUE_USER_PROMPT,
+        CONTINUE_USER_PROMPT_STRONG,
+        build_continue_messages,
+    )
+
+    soft = build_continue_messages(
+        [{"role": "user", "content": "write a song"}],
+        "partial draft",
+        strong=False,
+    )
+    hard = build_continue_messages(
+        [{"role": "user", "content": "write a song"}],
+        "partial draft",
+        strong=True,
+    )
+    assert soft[-1]["content"] == CONTINUE_USER_PROMPT
+    assert hard[-1]["content"] == CONTINUE_USER_PROMPT_STRONG
+
+
 def test_build_continue_messages_appends_partial_and_cue():
     base = [
         {"role": "system", "content": "sys"},
