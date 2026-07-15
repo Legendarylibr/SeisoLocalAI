@@ -15,6 +15,11 @@ class RolloutPrompt:
     text: str
     answer: str | None = None
     benchmark: str | None = None
+    # Optional code-proof fields (unit tests as verifier).
+    tests: list[str] | str | None = None
+    prompt_code: str | None = None
+    setup: str | None = None
+    timeout_s: float | None = None
 
 
 def load_rollout_prompts(path: Path | None, *, limit: int) -> list[RolloutPrompt]:
@@ -99,9 +104,51 @@ def _normalize_prompt_row(row: object, *, fallback_id: str) -> RolloutPrompt:
     prompt_id = str(row.get("prompt_id") or row.get("id") or fallback_id)
     answer = row.get("answer")
     benchmark = row.get("benchmark") or row.get("dataset") or row.get("task")
+    tests = row.get("tests", row.get("test"))
+    timeout_raw = row.get("timeout_s", row.get("timeout"))
+    timeout_s: float | None
+    try:
+        timeout_s = float(timeout_raw) if timeout_raw is not None else None
+    except (TypeError, ValueError):
+        timeout_s = None
+    prompt_code = row.get("prompt_code") or row.get("code_prefix")
+    setup = row.get("setup")
     return RolloutPrompt(
         prompt_id=prompt_id,
         text=text,
         answer=str(answer) if answer is not None else None,
         benchmark=str(benchmark).lower() if benchmark is not None else None,
+        tests=tests if tests is not None else None,
+        prompt_code=str(prompt_code) if prompt_code is not None else None,
+        setup=str(setup) if setup is not None else None,
+        timeout_s=timeout_s,
     )
+
+
+def prompt_to_verifier_sample(prompt: RolloutPrompt) -> dict:
+    """Map a rollout prompt into the sample dict expected by ``seiso.rl_verify``."""
+    sample: dict = {}
+    if prompt.answer is not None:
+        sample["answer"] = prompt.answer
+    if prompt.benchmark is not None:
+        sample["benchmark"] = prompt.benchmark
+    if prompt.tests is not None:
+        sample["tests"] = prompt.tests
+    if prompt.prompt_code is not None:
+        sample["prompt_code"] = prompt.prompt_code
+    if prompt.setup is not None:
+        sample["setup"] = prompt.setup
+    if prompt.timeout_s is not None:
+        sample["timeout_s"] = prompt.timeout_s
+    return sample
+
+
+def is_verifiable_prompt(prompt: RolloutPrompt) -> bool:
+    """True when the prompt has an answer and/or unit tests for scoring."""
+    if prompt.answer is not None and str(prompt.answer).strip():
+        return True
+    if prompt.tests is None:
+        return False
+    if isinstance(prompt.tests, list):
+        return any(str(t).strip() for t in prompt.tests)
+    return bool(str(prompt.tests).strip())

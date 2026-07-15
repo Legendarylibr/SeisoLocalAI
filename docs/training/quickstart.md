@@ -231,6 +231,17 @@ Example config: `configs/example_slime_code.yaml` with `data/slime_code_sample.j
 This is a **checkable proof**, not lexical process reward. Do not run untrusted
 code on sensitive hosts; the sandbox is best-effort, not a full VM.
 
+**Hard negatives (DPO / distill-RL):** when a group of rollouts for the same prompt
+contains both a unit-test pass and fails, Distill-RL keeps:
+
+- `chosen` = a completion that **passes** all tests  
+- `rejected` = a **fail** with extractable code (prefer near-miss / partial pass)
+
+Empty/syntax-only fails are weaker negatives and only used if no coded fail exists.
+Pairs with no pass in the group are dropped. This is appropriate for **offline
+preference** learning; online slime GRPO already demotes fails via group rewards
+and does not need a separate hard-negative loss.
+
 Slime checkpoints are exportable like other Seiso checkpoints. LoRA slime runs are treated as adapter checkpoints; non-LoRA slime runs are treated like full checkpoints. In distributed SLIME runs, rank 0 writes shared checkpoints and metrics, while verifier JSONL is rank-scoped to avoid concurrent writes.
 
 ---
