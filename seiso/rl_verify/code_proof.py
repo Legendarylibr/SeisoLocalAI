@@ -100,9 +100,7 @@ def is_checkable_test_body(value: object) -> bool:
         return True
     if re.search(r"\bcheck\s*\(", text):
         return True
-    if re.search(r"\bdef\s+check\b", text):
-        return True
-    return False
+    return bool(re.search(r"\bdef\s+check\b", text))
 
 
 def _normalize_tests(sample: dict[str, Any]) -> list[str]:

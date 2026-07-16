@@ -143,11 +143,15 @@ def verify_outcome(
         )
 
         payload = dict(sample or {})
-        if answer is not None and "tests" not in payload and "test" not in payload:
-            # Only promote answer → tests when it is a real assert/check harness.
-            # Bare answers like "42" would otherwise execute as always-true expressions.
-            if is_checkable_test_body(answer):
-                payload.setdefault("tests", answer)
+        # Only promote answer → tests when it is a real assert/check harness.
+        # Bare answers like "42" would otherwise execute as always-true expressions.
+        if (
+            answer is not None
+            and "tests" not in payload
+            and "test" not in payload
+            and is_checkable_test_body(answer)
+        ):
+            payload.setdefault("tests", answer)
         return code_outcome_score(completion, payload)
 
     if answer is None or not str(answer).strip():

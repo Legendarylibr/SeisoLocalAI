@@ -7,6 +7,11 @@ strings. Code proofs run unit tests in a restricted subprocess.
 
 from __future__ import annotations
 
+from seiso.rl_verify.code_corpus import (
+    corpus_stats,
+    generate_code_corpus,
+    generate_grounded_task,
+)
 from seiso.rl_verify.code_proof import (
     CodeProofResult,
     extract_python_code,
@@ -27,11 +32,6 @@ from seiso.rl_verify.preferences import (
     preference_row_from_pair,
     score_code_completion,
     select_preference_pair,
-)
-from seiso.rl_verify.code_corpus import (
-    corpus_stats,
-    generate_code_corpus,
-    generate_grounded_task,
 )
 from seiso.rl_verify.synth_code import (
     CodeTask,
