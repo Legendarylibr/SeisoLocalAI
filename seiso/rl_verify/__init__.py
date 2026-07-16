@@ -28,6 +28,11 @@ from seiso.rl_verify.preferences import (
     score_code_completion,
     select_preference_pair,
 )
+from seiso.rl_verify.code_corpus import (
+    corpus_stats,
+    generate_code_corpus,
+    generate_grounded_task,
+)
 from seiso.rl_verify.synth_code import (
     CodeTask,
     SynthBundle,
@@ -53,12 +58,15 @@ __all__ = [
     "SynthBundle",
     "VerifierResult",
     "build_preference",
+    "corpus_stats",
     "emit_standard_artifacts",
     "extract_choice",
     "extract_python_code",
     "final_answer_text",
     "format_reward",
     "format_thinking_prompt",
+    "generate_code_corpus",
+    "generate_grounded_task",
     "has_closed_thinking_trace",
     "last_number",
     "normalize_answer",

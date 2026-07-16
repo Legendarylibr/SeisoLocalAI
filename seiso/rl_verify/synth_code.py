@@ -100,6 +100,13 @@ class CodeTask:
             return self.solution
         return self.fenced_solution()
 
+    def difficulty(self) -> str:
+        """Complexity tier when tagged (easy|medium|hard), else unknown."""
+        for tier in ("easy", "medium", "hard"):
+            if tier in self.tags:
+                return tier
+        return "unknown"
+
     def to_dataset_row(self) -> dict[str, Any]:
         """JSONL row for slime / distill prompt libraries."""
         row: dict[str, Any] = {
@@ -112,7 +119,8 @@ class CodeTask:
             "timeout_s": self.timeout_s,
             "benchmark": "code",
             "synth": True,
-            "synth_version": 1,
+            "synth_version": 2,
+            "difficulty": self.difficulty(),
         }
         if self.prompt_code:
             row["prompt_code"] = self.prompt_code
@@ -819,25 +827,53 @@ def synthesize_code_bundle(
     build_preferences: bool = True,
     limit: int | None = None,
     verify: bool = True,
+    # Large unit-test-grounded corpus (solution-first, tests from execution).
+    corpus_count: int = 0,
+    corpus_mix: str | dict[str, float] | None = None,
+    include_hand_catalog: bool = True,
 ) -> SynthBundle:
-    """Build the full deterministic catalog (optionally expanded + prefs)."""
-    tasks = list(_base_catalog())
-    if include_variants:
-        tasks.extend(expand_scaled_variants(tasks, seed=seed))
-    # Stable order: base order first, then variants sorted by task_id.
-    base_ids = {t.task_id for t in _base_catalog()}
-    base = [t for t in tasks if t.task_id in base_ids]
-    variants = sorted(
-        [t for t in tasks if t.task_id not in base_ids],
-        key=lambda t: t.task_id,
-    )
-    # Re-assert base order from catalog definition.
-    base_order = {t.task_id: i for i, t in enumerate(_base_catalog())}
-    base.sort(key=lambda t: base_order[t.task_id])
-    ordered = base + variants
+    """Build code tasks + optional hard-negative preferences.
+
+    Modes (can combine):
+
+    - **Hand catalog** (default): small fail-closed smoke set + I/O variants.
+    - **Corpus** (``corpus_count > 0``): large programmatic generator across
+      easy/medium/hard families. Golden solutions are executed to **ground**
+      unit tests, then re-checked in the sandbox.
+    """
+    ordered: list[CodeTask] = []
+
+    if include_hand_catalog and corpus_count <= 0:
+        # Classic small catalog path (CI smoke / backward compatible).
+        tasks = list(_base_catalog())
+        if include_variants:
+            tasks.extend(expand_scaled_variants(tasks, seed=seed))
+        base_ids = {t.task_id for t in _base_catalog()}
+        base = [t for t in tasks if t.task_id in base_ids]
+        variants = sorted(
+            [t for t in tasks if t.task_id not in base_ids],
+            key=lambda t: t.task_id,
+        )
+        base_order = {t.task_id: i for i, t in enumerate(_base_catalog())}
+        base.sort(key=lambda t: base_order[t.task_id])
+        ordered = base + variants
+    elif corpus_count > 0:
+        from seiso.rl_verify.code_corpus import generate_code_corpus
+
+        ordered = generate_code_corpus(
+            seed=seed,
+            count=corpus_count,
+            mix=corpus_mix,
+            verify=verify,
+            include_hand_catalog=include_hand_catalog,
+        )
+    else:
+        ordered = []
+
     if limit is not None:
         ordered = ordered[: max(0, limit)]
-    if verify:
+    if verify and ordered and corpus_count <= 0:
+        # Corpus path already verified per-task when verify=True.
         ordered = validate_catalog(ordered)
 
     prefs: list[SyntheticPreference] = []
@@ -864,34 +900,61 @@ def emit_standard_artifacts(
     data_dir: Path,
     seed: int = 0,
     verify: bool = True,
-) -> dict[str, int]:
-    """Write slime code sample + distill prompts + synthetic preference JSONL."""
+    corpus_count: int = 0,
+    corpus_mix: str | dict[str, float] | None = None,
+    include_hand_catalog: bool = True,
+    include_variants: bool = True,
+    build_preferences: bool = True,
+    limit: int | None = None,
+    slime_name: str = "slime_code_sample.jsonl",
+    distill_name: str = "distill_code_synth.jsonl",
+    prefs_name: str = "synthetic_code_preferences.jsonl",
+) -> dict[str, Any]:
+    """Write slime code sample + distill prompts + synthetic preference JSONL.
+
+    For large coding corpora set ``corpus_count`` (e.g. 2000). Smoke defaults
+    keep the small hand catalog when ``corpus_count=0``.
+    """
     bundle = synthesize_code_bundle(
         seed=seed,
-        include_variants=True,
-        build_preferences=True,
+        include_variants=include_variants,
+        build_preferences=build_preferences,
+        limit=limit,
         verify=verify,
+        corpus_count=corpus_count,
+        corpus_mix=corpus_mix,
+        include_hand_catalog=include_hand_catalog,
     )
-    slime_path = data_dir / "slime_code_sample.jsonl"
-    distill_code_path = data_dir / "distill_code_synth.jsonl"
-    pref_path = data_dir / "synthetic_code_preferences.jsonl"
+    slime_path = data_dir / slime_name
+    distill_code_path = data_dir / distill_name
+    pref_path = data_dir / prefs_name
 
     # Slime rows: prompt/tests/solution (model never sees solution at reward time).
     n_slime = write_jsonl(slime_path, bundle.dataset_rows())
     n_distill = write_jsonl(distill_code_path, bundle.dataset_rows())
     n_pref = write_jsonl(pref_path, bundle.preference_rows())
-    return {
+    stats: dict[str, Any] = {
         "tasks": len(bundle.tasks),
         "preferences": len(bundle.preferences),
         "slime_code_sample": n_slime,
         "distill_code_synth": n_distill,
         "synthetic_code_preferences": n_pref,
+        "corpus_count": corpus_count,
+        "seed": seed,
     }
+    if corpus_count > 0:
+        from seiso.rl_verify.code_corpus import corpus_stats
+
+        stats["corpus"] = corpus_stats(bundle.tasks)
+    return stats
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Deterministically synthesize code tasks that pass unit tests."
+        description=(
+            "Synthesize unit-test-grounded coding tasks (solution-first). "
+            "Use --count for large multi-complexity corpora."
+        )
     )
     parser.add_argument(
         "--data-dir",
@@ -899,12 +962,37 @@ def main(argv: Sequence[str] | None = None) -> int:
         default=Path("data"),
         help="Directory for JSONL artifacts (default: data/)",
     )
-    parser.add_argument("--seed", type=int, default=0, help="Catalog expansion seed")
+    parser.add_argument("--seed", type=int, default=0, help="Catalog / corpus seed")
     parser.add_argument(
         "--limit",
         type=int,
         default=None,
-        help="Optional cap on number of tasks",
+        help="Optional cap on number of tasks after generation",
+    )
+    parser.add_argument(
+        "--count",
+        type=int,
+        default=0,
+        help=(
+            "Generate this many corpus tasks across complexity tiers "
+            "(0 = small hand catalog + variants only)"
+        ),
+    )
+    parser.add_argument(
+        "--mix",
+        type=str,
+        default="easy:0.4,medium:0.4,hard:0.2",
+        help="Complexity mix for --count, e.g. easy:0.3,medium:0.4,hard:0.3",
+    )
+    parser.add_argument(
+        "--no-hand-catalog",
+        action="store_true",
+        help="When using --count, do not prepend the hand-authored smoke catalog",
+    )
+    parser.add_argument(
+        "--no-preferences",
+        action="store_true",
+        help="Skip hard-negative preference pair generation",
     )
     parser.add_argument(
         "--no-verify",
@@ -916,15 +1004,33 @@ def main(argv: Sequence[str] | None = None) -> int:
         action="store_true",
         help="Print task JSONL to stdout instead of writing standard artifacts",
     )
+    parser.add_argument(
+        "--slime-name",
+        type=str,
+        default="slime_code_sample.jsonl",
+        help="Output filename for slime prompts (under --data-dir)",
+    )
+    parser.add_argument(
+        "--prefs-name",
+        type=str,
+        default="synthetic_code_preferences.jsonl",
+        help="Output filename for preference pairs",
+    )
     args = parser.parse_args(list(argv) if argv is not None else None)
+
+    corpus_count = max(0, int(args.count))
+    include_hand = not args.no_hand_catalog
 
     if args.stdout_tasks:
         bundle = synthesize_code_bundle(
             seed=args.seed,
-            include_variants=True,
+            include_variants=corpus_count == 0,
             build_preferences=False,
             limit=args.limit,
             verify=not args.no_verify,
+            corpus_count=corpus_count,
+            corpus_mix=args.mix,
+            include_hand_catalog=include_hand if corpus_count > 0 else True,
         )
         for row in bundle.dataset_rows():
             print(json.dumps(row, ensure_ascii=False, sort_keys=True))
@@ -934,6 +1040,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         data_dir=args.data_dir,
         seed=args.seed,
         verify=not args.no_verify,
+        corpus_count=corpus_count,
+        corpus_mix=args.mix,
+        include_hand_catalog=include_hand if corpus_count > 0 else True,
+        include_variants=corpus_count == 0,
+        build_preferences=not args.no_preferences,
+        limit=args.limit,
+        slime_name=args.slime_name,
+        prefs_name=args.prefs_name,
     )
     print(json.dumps(stats, indent=2, sort_keys=True))
     return 0

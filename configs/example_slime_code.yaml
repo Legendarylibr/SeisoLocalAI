@@ -21,6 +21,8 @@ epochs: 1
 # 0 = no frozen ref (lower VRAM). Use ~0.02–0.05 for longer runs to limit drift.
 kl_coef: 0.0
 clip_ratio: 0.2
+clip_ratio_high: 0.28
+grpo_std_normalization: true
 temperature: 0.9
 top_p: 0.95
 # Code proofs do not need thinking format by default.

@@ -147,7 +147,7 @@ Modern training defaults (bf16 compute on CUDA when supported, paged AdamW 8-bit
 
 ## Slime Post-Training
 
-Use `method: slime` for GRPO-style post-training when you want rollout generation, reward/verifier traces, checkpointing, and automatic stopping around one local causal LM. Single-process runs keep CPU work bounded while the GPU does rollout and policy updates; distributed runs use the same Accelerate launch settings as supervised training and shard prompt groups across ranks.
+Use `method: slime` for **slime-style GRPO** post-training (Hugging Face generate + policy update, not the full THUDM/slime Megatron+SGLang Ray stack) when you want rollout generation, reward/verifier traces, checkpointing, and automatic stopping around one local causal LM. Single-process runs keep CPU work bounded while the GPU does rollout and policy updates; multi-GPU runs use **data-parallel DDP** (Accelerate) and shard prompt groups across ranks — see `configs/example_training_slime_ddp.yaml`.
 
 Start from `configs/example_training_slime.yaml`:
 
@@ -201,12 +201,15 @@ Important fields:
 | `missing_thinking_penalty` | Penalty when format is required but the model omits a closed think block |
 | `min_thinking_tokens` | Only used when `process_reward_weight > 0` |
 | `kl_coef` | Coefficient on KL to a frozen reference model; `0` skips loading the ref (lower VRAM). Prefer `0.01`–`0.05` for longer post-training runs |
-| `rollouts_per_prompt` | Number of sampled completions per prompt for grouped advantages |
-| `rollout_batch_size` | Generation batch size; keep at least `rollouts_per_prompt` |
+| `rollouts_per_prompt` | Number of sampled completions per prompt for grouped advantages (slime `n_samples_per_prompt`) |
+| `rollout_batch_size` | Generation batch size in **sequences** (not prompt count); keep at least `rollouts_per_prompt`. Upstream slime names `rollout_batch_size` as prompt count — Seiso’s prompt-group training size is `train_batch_size` / `batch_size` |
+| `train_batch_size` / `batch_size` | Prompt groups per policy step after dynamic filtering (slime prompt `rollout_batch_size` analogue) |
 | `dynamic_sampling_filter` | Default `reward_nonzero_std` (alias `outcome_nonzero_std`) drops prompt groups with zero **outcome_reward** spread so format-only shaping cannot keep all-fail groups. Set `none` only for debugging. If every group is filtered, training fails with `stop_reason: no_trainable_groups` instead of a silent complete |
-| `over_sampling_batch_size` | Prompt sampling batch size used when dynamic filtering is enabled; keep larger than `batch_size` so strict filters can refill from additional oversampled prompt batches until the training target is met or epoch data is exhausted |
+| `over_sampling_batch_size` | Prompt-group sampling batch when dynamic filtering is on (same units as `train_batch_size`, **not** sequences / `rollouts_per_prompt`). When set, must be **≥ `train_batch_size`/`batch_size`**. `null`/omit means no oversample headroom (sample the train target only — fine for debug, weak under strict filters). Prefer larger than the train target so filters can refill |
+| `clip_ratio` / `clip_ratio_high` | PPO/GRPO clip bounds (slime `eps_clip` / `eps_clip_high`). High defaults to low when omitted; examples use `0.2` / `0.28` |
+| `grpo_std_normalization` | When true (default), group advantages are `(r - mean) / (unbiased_std + 1e-6)` matching THUDM/slime; set false for mean-centering only (Dr.GRPO-style scale) |
 | `calculate_per_token_loss` | Optional upstream-style loss normalization; defaults to per-sample loss and switches to token-weighted loss when enabled. When `kl_coef > 0` without per-token loss, KL is length-normalized because sequence log-probs are sums |
-| `balance_data` | For distributed SLIME, greedily shards prompts by estimated prompt length so each rank receives similar rollout work |
+| `balance_data` | For distributed slime-style GRPO, greedily shards prompts by estimated prompt length so each rank receives similar rollout work |
 | `policy_micro_batch_size` | Policy update microbatch size to control VRAM |
 | `shuffle_buffer_size` | Bounded CPU shuffle buffer for long datasets |
 | `max_samples_per_epoch` | Optional per-epoch cap for smoke runs or data-efficient loops |

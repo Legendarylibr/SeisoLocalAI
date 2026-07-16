@@ -676,7 +676,11 @@ def _collect_rollouts(
         rollouts.extend(kept_rollouts)
         del encoded, generated, padded
 
-    _assign_grouped_advantages(rollouts, config.rollouts_per_prompt)
+    _assign_grouped_advantages(
+        rollouts,
+        config.rollouts_per_prompt,
+        grpo_std_normalization=config.grpo_std_normalization,
+    )
     model.train()
     return _RolloutBatch(rollouts=rollouts, stats=filter_stats)
 
@@ -803,6 +807,7 @@ def _policy_loss(
             response_mask,
             config.clip_ratio,
             torch,
+            clip_ratio_high=config.clip_ratio_high,
         )
     else:
         policy_loss = _clipped_policy_loss(
@@ -812,6 +817,7 @@ def _policy_loss(
             torch.ones_like(new_logprobs),
             config.clip_ratio,
             torch,
+            clip_ratio_high=config.clip_ratio_high,
         )
 
     kl_loss = torch.zeros((), device=config.device)
@@ -956,10 +962,25 @@ def _masked_sequence_logprobs(token_logprobs, mask):
     return (token_logprobs * mask).sum(dim=1)
 
 
-def _clipped_policy_loss(new_logprobs, old_logprobs, advantages, mask, clip_ratio: float, torch):
+def _clipped_policy_loss(
+    new_logprobs,
+    old_logprobs,
+    advantages,
+    mask,
+    clip_ratio: float,
+    torch,
+    *,
+    clip_ratio_high: float | None = None,
+):
+    """PPO/GRPO clipped surrogate (slime ``compute_policy_loss`` without dual-clip-c).
+
+    ``clip_ratio`` / ``clip_ratio_high`` map to slime ``eps_clip`` / ``eps_clip_high``.
+    When ``clip_ratio_high`` is None, the high bound equals the low bound.
+    """
+    high = clip_ratio if clip_ratio_high is None else clip_ratio_high
     ratio = torch.exp(new_logprobs - old_logprobs)
     unclipped = ratio * advantages
-    clipped = torch.clamp(ratio, 1.0 - clip_ratio, 1.0 + clip_ratio) * advantages
+    clipped = torch.clamp(ratio, 1.0 - clip_ratio, 1.0 + high) * advantages
     objective = torch.minimum(unclipped, clipped)
     return -((objective * mask).sum() / mask.sum().clamp_min(1.0))
 
@@ -1011,15 +1032,33 @@ def _pad_rollouts(rollouts: list[Rollout], pad_token_id: int, device: str, torch
     }
 
 
-def _assign_grouped_advantages(rollouts: list[Rollout], group_size: int) -> None:
+def _assign_grouped_advantages(
+    rollouts: list[Rollout],
+    group_size: int,
+    *,
+    grpo_std_normalization: bool = True,
+) -> None:
+    """GRPO group-relative advantages matching THUDM/slime ``_post_process_rewards``.
+
+    For each prompt group: subtract the group mean, then optionally divide by
+    unbiased sample std + 1e-6 (slime ``grpo_std_normalization`` / Dr.GRPO toggle).
+    """
     for start in range(0, len(rollouts), group_size):
         group = rollouts[start : start + group_size]
-        rewards = [r.reward for r in group]
-        mean = sum(rewards) / len(rewards)
-        variance = sum((reward - mean) ** 2 for reward in rewards) / len(rewards)
-        std = math.sqrt(variance) or 1.0
-        for rollout in group:
-            rollout.advantage = (rollout.reward - mean) / std
+        rewards = [float(r.reward) for r in group]
+        n = len(rewards)
+        mean = sum(rewards) / n
+        centered = [reward - mean for reward in rewards]
+        if grpo_std_normalization and n > 1:
+            # torch.std default is unbiased (divide by n-1); slime uses std + 1e-6.
+            variance = sum(value * value for value in centered) / (n - 1)
+            std = math.sqrt(variance)
+            scale = std + 1e-6
+            for rollout, value in zip(group, centered, strict=True):
+                rollout.advantage = value / scale
+        else:
+            for rollout, value in zip(group, centered, strict=True):
+                rollout.advantage = value
 
 
 def _filter_rollout_groups(

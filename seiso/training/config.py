@@ -203,6 +203,15 @@ class TrainConfig(BaseModel):
     max_samples_per_epoch: int | None = Field(default=None, ge=1)
     kl_coef: float = Field(default=0.0, ge=0)
     clip_ratio: float = Field(default=0.2, gt=0)
+    clip_ratio_high: float | None = Field(
+        default=None,
+        gt=0,
+        description="Upper PPO clip bound (slime eps_clip_high); None uses clip_ratio.",
+    )
+    grpo_std_normalization: bool = Field(
+        default=True,
+        description="Group-relative / unbiased-std advantages (slime grpo_std_normalization).",
+    )
     calculate_per_token_loss: bool = False
     temperature: float = Field(default=0.9, gt=0)
     top_p: float = Field(default=0.95, gt=0, le=1)
@@ -299,6 +308,25 @@ class TrainConfig(BaseModel):
             )
         return self
 
+    @model_validator(mode="after")
+    def _validate_slime_batch_and_clip(self) -> TrainConfig:
+        if self.method != TrainMethod.SLIME:
+            return self
+        from seiso.slime_single_gpu.config import validate_oversample_vs_train_batch
+
+        train_batch = self.train_batch_size or self.batch_size
+        validate_oversample_vs_train_batch(
+            dynamic_sampling_filter=self.dynamic_sampling_filter,
+            over_sampling_batch_size=self.over_sampling_batch_size,
+            train_batch_size=train_batch,
+        )
+        if (
+            self.clip_ratio_high is not None
+            and self.clip_ratio_high < self.clip_ratio
+        ):
+            raise ValueError("clip_ratio_high must be >= clip_ratio")
+        return self
+
     @classmethod
     def from_yaml(cls, path: str | Path) -> TrainConfig:
         with open(path) as f:
@@ -342,6 +370,8 @@ class TrainConfig(BaseModel):
             max_steps=extra.get("max_steps"),
             kl_coef=self.kl_coef,
             clip_ratio=self.clip_ratio,
+            clip_ratio_high=self.clip_ratio_high,
+            grpo_std_normalization=self.grpo_std_normalization,
             calculate_per_token_loss=self.calculate_per_token_loss,
             temperature=self.temperature,
             top_p=self.top_p,
@@ -452,6 +482,9 @@ def _write_slime_manifest(config: TrainConfig, output_dir: Path) -> None:
         "rollouts_per_prompt": config.rollouts_per_prompt,
         "over_sampling_batch_size": config.over_sampling_batch_size,
         "dynamic_sampling_filter": config.dynamic_sampling_filter,
+        "clip_ratio": config.clip_ratio,
+        "clip_ratio_high": config.clip_ratio_high,
+        "grpo_std_normalization": config.grpo_std_normalization,
         "calculate_per_token_loss": config.calculate_per_token_loss,
         "balance_data": config.balance_data,
         "auto_stop": config.auto_stop,

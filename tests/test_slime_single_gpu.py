@@ -246,6 +246,51 @@ def test_single_gpu_slime_config_requires_rollout_batch_to_cover_group(tmp_path:
         cfg.validate()
 
 
+def test_single_gpu_slime_config_requires_oversample_ge_train_batch(tmp_path: Path):
+    # Oversample is in prompt groups: rpp=4 must not block oversample=4 < train=8.
+    cfg = SingleGpuSlimeConfig(
+        model_id="test/model",
+        dataset=tmp_path / "data.jsonl",
+        output_dir=tmp_path / "out",
+        rollouts_per_prompt=4,
+        rollout_batch_size=4,
+        train_batch_size=8,
+        over_sampling_batch_size=4,
+        dynamic_sampling_filter="reward_nonzero_std",
+    )
+    with pytest.raises(ValueError, match="over_sampling_batch_size must be >= train_batch_size"):
+        cfg.validate()
+
+
+def test_single_gpu_slime_config_allows_oversample_between_train_and_rpp(
+    tmp_path: Path,
+):
+    """Prompt-group oversample may be < rollouts_per_prompt when >= train batch."""
+    cfg = SingleGpuSlimeConfig(
+        model_id="test/model",
+        dataset=tmp_path / "data.jsonl",
+        output_dir=tmp_path / "out",
+        rollouts_per_prompt=4,
+        rollout_batch_size=4,
+        train_batch_size=1,
+        over_sampling_batch_size=2,
+        dynamic_sampling_filter="reward_nonzero_std",
+    )
+    cfg.validate()
+
+
+def test_single_gpu_slime_config_rejects_clip_ratio_high_below_low(tmp_path: Path):
+    cfg = SingleGpuSlimeConfig(
+        model_id="test/model",
+        dataset=tmp_path / "data.jsonl",
+        output_dir=tmp_path / "out",
+        clip_ratio=0.2,
+        clip_ratio_high=0.1,
+    )
+    with pytest.raises(ValueError, match="clip_ratio_high"):
+        cfg.validate()
+
+
 def test_single_gpu_slime_config_rejects_empty_metadata_field(tmp_path: Path):
     cfg = SingleGpuSlimeConfig(
         model_id="test/model",
@@ -373,6 +418,33 @@ def test_clipped_policy_loss_supports_per_token_normalization():
     assert per_sample_loss.item() == -2.0
 
 
+def test_clipped_policy_loss_supports_asymmetric_clip_high():
+    import torch
+
+    # ratio = exp(log(1.5)) = 1.5; low clip 0.2 → max 1.2, high 0.28 → max 1.28
+    new_logprobs = torch.tensor([math.log(1.5)])
+    old_logprobs = torch.zeros(1)
+    advantages = torch.tensor([1.0])
+    mask = torch.ones(1)
+
+    loss_sym = _clipped_policy_loss(
+        new_logprobs, old_logprobs, advantages, mask, 0.2, torch
+    )
+    loss_asym = _clipped_policy_loss(
+        new_logprobs,
+        old_logprobs,
+        advantages,
+        mask,
+        0.2,
+        torch,
+        clip_ratio_high=0.28,
+    )
+    # min(1.5, 1.2) = 1.2 vs min(1.5, 1.28) = 1.28 → more negative loss for higher high-clip
+    assert loss_sym.item() == pytest.approx(-1.2)
+    assert loss_asym.item() == pytest.approx(-1.28)
+    assert loss_asym.item() < loss_sym.item()
+
+
 def test_rollout_status_detects_stop_length_and_empty():
     import torch
 
@@ -487,6 +559,9 @@ def test_experimental_process_reward_only_when_weighted(tmp_path: Path):
 
 
 def test_grouped_advantages_are_normalized():
+    """Match THUDM/slime: (r - mean) / (unbiased_std + 1e-6)."""
+    import math
+
     rollouts = [
         Rollout(
             None, None, None, None, None, 0.0,
@@ -508,13 +583,43 @@ def test_grouped_advantages_are_normalized():
 
     _assign_grouped_advantages(rollouts, group_size=2)
 
-    assert [r.advantage for r in rollouts] == [-1.0, 1.0, -1.0, 1.0]
+    # Group [0, 1]: mean 0.5, unbiased std = sqrt(0.5)
+    scale01 = math.sqrt(0.5) + 1e-6
+    # Group [2, 4]: mean 3.0, unbiased std = sqrt(2)
+    scale24 = math.sqrt(2.0) + 1e-6
+    expected = [
+        -0.5 / scale01,
+        0.5 / scale01,
+        -1.0 / scale24,
+        1.0 / scale24,
+    ]
+    assert [r.advantage for r in rollouts] == pytest.approx(expected)
     assert _group_reward_spread_mean(rollouts, group_size=2) == 1.5
     stats = _group_verifier_stats(rollouts, group_size=2)
     assert stats["group_pass_rate"] == 1.0
     assert stats["group_nonzero_spread_frac"] == 1.0
     assert stats["group_nonzero_outcome_spread_frac"] == 1.0
     assert stats["group_outcome_spread_mean"] == 1.5
+
+
+def test_grouped_advantages_can_disable_std_normalization():
+    rollouts = [
+        Rollout(None, None, None, None, None, 0.0),
+        Rollout(None, None, None, None, None, 2.0),
+    ]
+    _assign_grouped_advantages(rollouts, group_size=2, grpo_std_normalization=False)
+    assert [r.advantage for r in rollouts] == pytest.approx([-1.0, 1.0])
+
+
+def test_grouped_advantages_zero_when_rewards_identical():
+    rollouts = [
+        Rollout(None, None, None, None, None, 1.0),
+        Rollout(None, None, None, None, None, 1.0),
+        Rollout(None, None, None, None, None, 1.0),
+        Rollout(None, None, None, None, None, 1.0),
+    ]
+    _assign_grouped_advantages(rollouts, group_size=4)
+    assert all(r.advantage == 0.0 for r in rollouts)
 
 
 class Linear:

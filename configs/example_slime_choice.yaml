@@ -22,6 +22,8 @@ epochs: 1
 # 0 saves VRAM (no ref model). Prefer 0.02–0.05 for multi-epoch / production runs.
 kl_coef: 0.0
 clip_ratio: 0.2
+clip_ratio_high: 0.28
+grpo_std_normalization: true
 temperature: 0.9
 top_p: 0.95
 require_thinking_trace: true
