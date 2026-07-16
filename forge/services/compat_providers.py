@@ -87,6 +87,10 @@ async def resolve_compat_provider(
     2. Alias match on provider config.model / name **only when** that string is
        not already a local inventory model id/name
     """
+    # Built-in aliases always use local inventory resolution.
+    if model in {"default", "seiso"}:
+        return None
+
     allowed = allowed_chat_provider_types()
     rows = await db.list_providers(user_id)
     by_id = {r["id"]: r for r in rows if r["provider_type"].lower() in allowed}
@@ -100,8 +104,6 @@ async def resolve_compat_provider(
 
     # Do not steal local inventory ids.
     if local_model_ids and model in local_model_ids:
-        return None
-    if model in {"default", "seiso"}:
         return None
 
     model_l = model.strip().lower()

@@ -1950,6 +1950,10 @@ async def test_compat_prepare_payload_passes_through_backend(monkeypatch, tmp_pa
     from forge.api.routes.compat import ChatCompletionRequest, _prepare_compat_chat_payload
     from forge.services import inference_models
 
+    class _FakeDb:
+        async def list_models(self, _user_id: str):
+            return []
+
     async def fake_list(*_args, **_kwargs):
         return [{"id": "m1", "selectable": True, "format": "gguf", "kind": "local"}]
 
@@ -1971,7 +1975,7 @@ async def test_compat_prepare_payload_passes_through_backend(monkeypatch, tmp_pa
             messages=[{"role": "user", "content": "hi"}],
         ),
         "u1",
-        object(),
+        _FakeDb(),
         SimpleNamespace(data_dir=tmp_path),
     )
     assert payload["inference_backend"] == BACKEND_LLAMASWAP
@@ -1981,6 +1985,10 @@ async def test_compat_prepare_payload_passes_through_backend(monkeypatch, tmp_pa
 async def test_compat_prepare_payload_falls_back_to_llamacpp(monkeypatch, tmp_path):
     from forge.api.routes.compat import ChatCompletionRequest, _prepare_compat_chat_payload
     from forge.services import inference_models
+
+    class _FakeDb:
+        async def list_models(self, _user_id: str):
+            return []
 
     async def fake_list(*_args, **_kwargs):
         return [{"id": "m1", "selectable": True, "format": "gguf", "kind": "local"}]
@@ -2003,7 +2011,7 @@ async def test_compat_prepare_payload_falls_back_to_llamacpp(monkeypatch, tmp_pa
             messages=[{"role": "user", "content": "hi"}],
         ),
         "u1",
-        object(),
+        _FakeDb(),
         SimpleNamespace(data_dir=tmp_path),
     )
     assert payload["inference_backend"] == BACKEND_LLAMACPP
