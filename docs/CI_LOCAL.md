@@ -67,7 +67,7 @@ python3 scripts/run_ci_local.py --job types --update-mypy-baseline --skip-instal
 - Installs `.[forge,train,dev]` once unless `--skip-install`
 - `tests/test_docs_accuracy.py` — doc links, example configs, and training API references stay aligned with the codebase
 - Runs CPU unit/integration tests excluding `@pytest.mark.slow` and `@pytest.mark.gpu`
-- `--pytest-workers N` enables pytest-xdist with scope-aware distribution; CI uses two workers
+- `--pytest-workers N|auto|logical` enables pytest-xdist; GitHub CI uses `auto` with `--pytest-dist worksteal`
 - `--hardware-tests` selects non-slow `@pytest.mark.gpu` tests on hosts with a matching runtime/toolkit
 - Slow tests: `pytest -m slow`
 
@@ -125,11 +125,13 @@ This mode deliberately does not claim full transitive coverage. Run
 ## GitHub Actions
 
 CI runs dependency locks, lint, Mypy, CPU tests, security, and frontend checks
-as independent parallel jobs. Each Python job installs its tailored dependency
-set once and calls the local runner with `--skip-install`. GitHub's pip and npm
-caches reuse downloaded packages; virtualenv artifacts are not shared because
-the training environment is large and environment paths are not portable. An
-aggregate `Quality gate` job preserves the single branch-protection check.
+as independent parallel jobs. Python jobs install via `uv` with
+`UV_TORCH_BACKEND=cpu` so runners skip multi-gigabyte CUDA wheels that CPU CI
+never exercises. Each job calls the local runner with `--skip-install`. Pull
+requests use path filters so frontend-only or Python-only changes skip the
+irrelevant jobs; push/schedule still run the full matrix. An aggregate
+`Quality gate` job preserves the single branch-protection check and treats
+intentionally skipped path-filtered jobs as success.
 
 ## Environment variables
 
