@@ -28,6 +28,14 @@ from seiso.rl_verify.preferences import (
     score_code_completion,
     select_preference_pair,
 )
+from seiso.rl_verify.synth_code import (
+    CodeTask,
+    SynthBundle,
+    build_preference,
+    emit_standard_artifacts,
+    synthesize_code_bundle,
+    validate_task,
+)
 from seiso.rl_verify.verify import (
     VerifierResult,
     format_reward,
@@ -39,9 +47,13 @@ from seiso.rl_verify.verify import (
 
 __all__ = [
     "CodeProofResult",
+    "CodeTask",
     "PreferencePair",
     "ScoredCompletion",
+    "SynthBundle",
     "VerifierResult",
+    "build_preference",
+    "emit_standard_artifacts",
     "extract_choice",
     "extract_python_code",
     "final_answer_text",
@@ -57,6 +69,8 @@ __all__ = [
     "score_completion",
     "select_preference_pair",
     "split_thinking_trace",
+    "synthesize_code_bundle",
+    "validate_task",
     "verify_code_proof",
     "verify_outcome",
 ]

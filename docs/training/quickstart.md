@@ -229,19 +229,47 @@ Example config: `configs/example_slime_code.yaml` with `data/slime_code_sample.j
 {
   "prompt": "Write add(a, b).",
   "tests": ["assert add(1, 2) == 3", "assert add(0, 0) == 0"],
-  "prompt_code": "",
+  "solution": "def add(a, b):\n    return a + b\n",
   "timeout_s": 3,
-  "benchmark": "code"
+  "benchmark": "code",
+  "synth": true
 }
 ```
 
 - `tests` / `test`: assert lines (list or string) or a full check harness  
+- `solution`: optional known-good program (for SFT / synthetic DPO; **ignored by the slime reward**, which only scores model completions)  
 - `prompt_code` / `code_prefix`: optional HumanEval-style prefix prepended before the solution  
 - `setup`: optional imports/helpers before the solution  
 - `timeout_s`: wall budget for the sample (split across test units)
 
 This is a **checkable proof**, not lexical process reward. Do not run untrusted
 code on sensitive hosts; the sandbox is best-effort, not a full VM.
+
+#### Deterministic synthetic code (guaranteed passers)
+
+Do **not** rely on an LLM to invent solutions for the dataset. Seiso synthesizes
+code tasks **deterministically** so every row has a solution that already passes
+its unit tests (fail-closed via the same sandbox verifier):
+
+1. Hand-authored pure-function catalog + seeded I/O variants  
+2. **Tests derived** from I/O cases (same source of truth as the solution)  
+3. Sandbox check: drop any task whose golden solution fails  
+4. **Hard negatives** = deterministic mutants of the golden (must fail ≥1 test)
+
+```bash
+# Rewrite data/slime_code_sample.jsonl, data/distill_code_synth.jsonl,
+# and data/synthetic_code_preferences.jsonl
+python -m seiso.rl_verify --data-dir data --seed 0
+```
+
+| Artifact | Use |
+|----------|-----|
+| `data/slime_code_sample.jsonl` | Slime `reward: code` prompts + tests (+ `solution` metadata) |
+| `data/distill_code_synth.jsonl` | Distill prompt library for verifiable code rollouts |
+| `data/synthetic_code_preferences.jsonl` | Offline DPO pairs (golden chosen, mutant rejected) — no model rollouts required |
+
+Same `--seed` ⇒ same catalog order and mutants. Online slime GRPO still samples
+the policy; the golden `solution` is not injected into the reward path.
 
 **Hard negatives (DPO / distill-RL):** when a group of rollouts for the same prompt
 contains both a verifier pass and fails, Distill-RL keeps:
