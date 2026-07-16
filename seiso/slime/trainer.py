@@ -563,9 +563,11 @@ def _collect_rollouts(
             sample = sample_chunk[sample_idx]
             completion = completions[idx]
             if use_hf_sequences:
+                # HF generate returns a tensor; keep getitem for pylint E1136 on Optional[Any].
                 assert generated is not None
-                input_ids = generated[idx].detach()
-                attention_mask = (generated[idx] != tokenizer.pad_token_id).detach()
+                row = generated.__getitem__(idx)
+                input_ids = row.detach()
+                attention_mask = (row != tokenizer.pad_token_id).detach()
                 response_mask = _response_mask_for_sequence(
                     input_ids,
                     prompt_width=prompt_width,
@@ -573,7 +575,10 @@ def _collect_rollouts(
                     eos_token_id=tokenizer.eos_token_id,
                     torch=torch,
                 )
-                status = _rollout_status(generated[idx, prompt_width:], tokenizer.eos_token_id)
+                status = _rollout_status(
+                    generated.__getitem__((idx, slice(prompt_width, None))),
+                    tokenizer.eos_token_id,
+                )
             else:
                 assert seq_rows is not None
                 row = seq_rows[idx]
