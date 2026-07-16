@@ -102,6 +102,26 @@ class _AutoStopDecision:
     reason: str | None = None
 
 
+class _PushbackIterator:
+    """Iterator that can re-queue a value so DDP refill does not drop batches."""
+
+    def __init__(self, source: Iterator[list[dict[str, Any]]]) -> None:
+        self._source = source
+        self._buf: list[list[dict[str, Any]]] = []
+
+    def __iter__(self) -> _PushbackIterator:
+        return self
+
+    def __next__(self) -> list[dict[str, Any]]:
+        if self._buf:
+            return self._buf.pop()
+        return next(self._source)
+
+    def push(self, item: list[dict[str, Any]]) -> None:
+        if item:
+            self._buf.append(item)
+
+
 @dataclass
 class _AutoStopController:
     enabled: bool
@@ -220,7 +240,8 @@ def train_single_gpu_slime(config: SingleGpuSlimeConfig) -> Path:
     model = _maybe_wrap_ddp(model, torch, dist_ctx, config)
     _assert_vram_fit(torch, config.max_vram_gb, config.device)
     optimizer = _build_optimizer(model, config)
-    reward_fn = resolve_reward(config.reward)
+    # Validate reward checker name early (scoring uses config.reward directly).
+    resolve_reward(config.reward)
 
     if dist_ctx.is_main:
         config.output_dir.mkdir(parents=True, exist_ok=True)
@@ -252,7 +273,7 @@ def train_single_gpu_slime(config: SingleGpuSlimeConfig) -> Path:
     )
 
     for epoch in range(config.epochs):
-        sample_batches = iter(_iter_sample_batches(config, rng, dist_ctx, torch))
+        sample_batches = _PushbackIterator(iter(_iter_sample_batches(config, rng, dist_ctx, torch)))
         for batch_samples in sample_batches:
             saw_sample = True
             rollout_batch = _collect_training_rollout_batch(
@@ -262,7 +283,6 @@ def train_single_gpu_slime(config: SingleGpuSlimeConfig) -> Path:
                 sample_batches=sample_batches,
                 samples=batch_samples,
                 config=config,
-                reward_fn=reward_fn,
                 torch=torch,
                 epoch=epoch,
                 global_step=global_step,
@@ -454,7 +474,6 @@ def _collect_training_rollout_batch(
     sample_batches: Iterator[list[dict[str, Any]]],
     samples: list[dict[str, Any]],
     config: SingleGpuSlimeConfig,
-    reward_fn,
     torch,
     epoch: int,
     global_step: int,
@@ -467,7 +486,6 @@ def _collect_training_rollout_batch(
         tokenizer=tokenizer,
         samples=samples,
         config=config,
-        reward_fn=reward_fn,
         torch=torch,
         epoch=epoch,
         global_step=global_step,
@@ -483,10 +501,7 @@ def _collect_training_rollout_batch(
     rollouts = list(rollout_batch.rollouts)
     target_groups = effective_train_batch_size(config)
     refill_rounds = 0
-    while (
-        _refill_visible_group_count(rollouts, config, torch, dist_ctx)
-        < target_groups
-    ):
+    while _refill_visible_group_count(rollouts, config, torch, dist_ctx) < target_groups:
         try:
             refill_samples = next(sample_batches)
             has_refill = 1
@@ -496,6 +511,10 @@ def _collect_training_rollout_batch(
         if dist_ctx.enabled:
             has_refill = _distributed_min_int(has_refill, torch, dist_ctx)
         if not has_refill:
+            # Re-queue any samples taken on ranks that still had data so the
+            # next step (or epoch) does not permanently drop them.
+            if refill_samples and isinstance(sample_batches, _PushbackIterator):
+                sample_batches.push(refill_samples)
             break
         refill_rounds += 1
         refill_batch = _collect_rollouts(
@@ -504,7 +523,6 @@ def _collect_training_rollout_batch(
             tokenizer=tokenizer,
             samples=refill_samples,
             config=config,
-            reward_fn=reward_fn,
             torch=torch,
             epoch=epoch,
             global_step=global_step,
@@ -516,9 +534,7 @@ def _collect_training_rollout_batch(
 
     kept_groups = len(rollouts) // config.rollouts_per_prompt
     if kept_groups > target_groups:
-        rollouts = _truncate_rollout_groups(
-            rollouts, config.rollouts_per_prompt, target_groups
-        )
+        rollouts = _truncate_rollout_groups(rollouts, config.rollouts_per_prompt, target_groups)
     stats["dynamic_refill_rounds"] = float(refill_rounds)
     stats["rollout_groups_target"] = float(target_groups)
     return _RolloutBatch(rollouts=rollouts, stats=stats)
@@ -551,7 +567,6 @@ def _collect_rollouts(
     tokenizer,
     samples: list[dict[str, Any]],
     config: SingleGpuSlimeConfig,
-    reward_fn,
     torch,
     epoch: int,
     global_step: int,
@@ -600,6 +615,7 @@ def _collect_rollouts(
                 config=config,
                 torch=torch,
                 device=config.device,
+                completion_token_ids=getattr(gen, "completion_token_ids", None),
             )
             completions = gen.completions
             use_hf_sequences = False
@@ -629,16 +645,16 @@ def _collect_rollouts(
             completion = completions[idx]
             if use_hf_sequences:
                 assert generated is not None
-                response_mask = torch.zeros_like(generated[idx], dtype=torch.bool)
-                response_mask[prompt_width:] = (
-                    generated[idx, prompt_width:] != tokenizer.pad_token_id
-                )
-                status = _rollout_status(
-                    generated[idx, prompt_width:], tokenizer.eos_token_id
-                )
                 input_ids = generated[idx].detach()
                 attention_mask = (generated[idx] != tokenizer.pad_token_id).detach()
-                response_mask = response_mask.detach()
+                response_mask = _response_mask_for_sequence(
+                    input_ids,
+                    prompt_width=prompt_width,
+                    pad_token_id=tokenizer.pad_token_id,
+                    eos_token_id=tokenizer.eos_token_id,
+                    torch=torch,
+                )
+                status = _rollout_status(generated[idx, prompt_width:], tokenizer.eos_token_id)
             else:
                 assert seq_rows is not None
                 row = seq_rows[idx]
@@ -652,7 +668,7 @@ def _collect_rollouts(
             # Score the raw model completion only — never rewrite tags for reward.
             reward_sample = _reward_sample(sample, config)
             metadata = _sample_metadata(sample, config)
-            score = _score_completion(completion, reward_sample, config, reward_fn)
+            score = _score_completion(completion, reward_sample, config)
             chunk_rollouts.append(
                 Rollout(
                     input_ids=input_ids,
@@ -678,9 +694,7 @@ def _collect_rollouts(
             )
             if verifier_path is not None:
                 prompt_text = (
-                    prompt_chunk[sample_idx]
-                    if sample_idx < len(prompt_chunk)
-                    else gen.prompts[idx]
+                    prompt_chunk[sample_idx] if sample_idx < len(prompt_chunk) else gen.prompts[idx]
                 )
                 verifier_records.append(
                     {
@@ -710,16 +724,12 @@ def _collect_rollouts(
                         "metadata": _bounded_verifier_metadata(
                             metadata, config.verifier_max_text_chars
                         ),
-                        "prompt": _truncate_text(
-                            prompt_text, config.verifier_max_text_chars
-                        ),
+                        "prompt": _truncate_text(prompt_text, config.verifier_max_text_chars),
                         "answer": _truncate_text(
                             reward_sample.get("answer", ""),
                             config.verifier_max_text_chars,
                         ),
-                        "completion": _truncate_text(
-                            completion, config.verifier_max_text_chars
-                        ),
+                        "completion": _truncate_text(completion, config.verifier_max_text_chars),
                         "thinking_trace": _truncate_text(
                             score["thinking_trace"], config.verifier_max_text_chars
                         ),
@@ -773,9 +783,7 @@ def _collect_rollouts(
             rollout.ref_logprobs = ref_logprobs[idx] if ref_logprobs is not None else None
             rollout.old_token_logprobs = old_token_logprobs[idx, :token_length]
             rollout.ref_token_logprobs = (
-                ref_token_logprobs[idx, :token_length]
-                if ref_token_logprobs is not None
-                else None
+                ref_token_logprobs[idx, :token_length] if ref_token_logprobs is not None else None
             )
         if verifier_records:
             _append_jsonl_records(verifier_path, verifier_records)
@@ -806,10 +814,8 @@ def _score_completion(
     completion: str,
     sample: dict[str, Any],
     config: SingleGpuSlimeConfig,
-    reward_fn,
 ) -> _CompletionScore:
     """Score raw generated text via the shared verifier (no synthetic tags)."""
-    del reward_fn  # Outcome path is selected by config.reward checker name.
     result = verify_score_completion(
         completion,
         sample,
@@ -840,9 +846,7 @@ def _score_completion(
         "checker": str(result.checker),
         "detail": result.detail,
         "proof_passed": result.proof_passed,
-        "proof_score": (
-            float(result.proof_score) if result.proof_score is not None else None
-        ),
+        "proof_score": (float(result.proof_score) if result.proof_score is not None else None),
         "proof_detail": result.proof_detail,
     }
 
@@ -965,22 +969,16 @@ def _policy_loss(
         "outcome_pass_rate": _mean(1.0 if r.outcome_passed else 0.0 for r in rollouts),
         "format_ok_rate": _mean(1.0 if r.format_ok else 0.0 for r in rollouts),
         "proof_pass_rate": _mean(
-            1.0 if r.proof_passed else 0.0
-            for r in rollouts
-            if r.proof_passed is not None
+            1.0 if r.proof_passed else 0.0 for r in rollouts if r.proof_passed is not None
         ),
         "proof_score_mean": _mean(
-            float(r.proof_score)
-            for r in rollouts
-            if r.proof_score is not None
+            float(r.proof_score) for r in rollouts if r.proof_score is not None
         ),
         "group_reward_spread_mean": group_stats["group_reward_spread_mean"],
         "group_outcome_spread_mean": group_stats["group_outcome_spread_mean"],
         "group_pass_rate": group_stats["group_pass_rate"],
         "group_nonzero_spread_frac": group_stats["group_nonzero_spread_frac"],
-        "group_nonzero_outcome_spread_frac": group_stats[
-            "group_nonzero_outcome_spread_frac"
-        ],
+        "group_nonzero_outcome_spread_frac": group_stats["group_nonzero_outcome_spread_frac"],
         "response_tokens_mean": float(response_token_counts.mean().detach().cpu()),
         **_rollout_status_stats(rollouts),
     }
@@ -1232,6 +1230,36 @@ def _rollout_status(response_tokens, eos_token_id: int | None) -> str:
     return "length"
 
 
+def _response_mask_for_sequence(
+    input_ids,
+    *,
+    prompt_width: int,
+    pad_token_id: int | None,
+    eos_token_id: int | None,
+    torch,
+):
+    """Build response mask; keep EOS when pad_token_id == eos_token_id.
+
+    Hugging Face often sets pad=eos. Naively masking ``!= pad`` drops the EOS
+    token from the likelihood, slightly biasing sequence log-probs.
+    """
+    mask = torch.zeros_like(input_ids, dtype=torch.bool)
+    if prompt_width >= int(input_ids.numel()):
+        return mask
+    resp = input_ids[prompt_width:]
+    resp_mask = torch.ones_like(resp, dtype=torch.bool)
+    if pad_token_id is not None and eos_token_id is not None and pad_token_id == eos_token_id:
+        eos_hits = (resp == eos_token_id).nonzero(as_tuple=False)
+        if eos_hits.numel() > 0:
+            first = int(eos_hits[0].item())
+            # Keep through first EOS; drop trailing pad/eos after that.
+            resp_mask[first + 1 :] = False
+    elif pad_token_id is not None:
+        resp_mask = resp != pad_token_id
+    mask[prompt_width:] = resp_mask
+    return mask
+
+
 def _rollout_status_stats(rollouts: list[Rollout]) -> dict[str, float]:
     counts = {
         "rollout_status_stop": 0.0,
@@ -1256,9 +1284,7 @@ def _group_reward_spread_mean(rollouts: list[Rollout], group_size: int) -> float
     return _group_verifier_stats(rollouts, group_size)["group_reward_spread_mean"]
 
 
-def _group_verifier_stats(
-    rollouts: list[Rollout], group_size: int
-) -> dict[str, float]:
+def _group_verifier_stats(rollouts: list[Rollout], group_size: int) -> dict[str, float]:
     """Per-prompt group diagnostics for collapse / verifier pass monitoring."""
     spreads: list[float] = []
     outcome_spreads: list[float] = []
@@ -1868,9 +1894,7 @@ def _sync_rollout_engine_weights(
             # Rank0 has the detailed message; others get a generic abort.
             if error_msg:
                 raise RuntimeError(error_msg)
-            raise RuntimeError(
-                f"SGLang weight sync failed at step={step} on another rank"
-            )
+            raise RuntimeError(f"SGLang weight sync failed at step={step} on another rank")
         return
 
     if error_msg:
@@ -1895,11 +1919,7 @@ def _maybe_materialize_data_gen(
             out_path,
             DataGenConfig(
                 count=count,
-                seed=(
-                    config.data_gen_seed
-                    if config.data_gen_seed is not None
-                    else config.seed
-                ),
+                seed=(config.data_gen_seed if config.data_gen_seed is not None else config.seed),
                 mix=config.data_gen_mix,
                 difficulty=config.data_gen_difficulty,
                 require_thinking_trace=config.require_thinking_trace,
@@ -1925,9 +1945,7 @@ def _maybe_materialize_data_gen(
         )
     _distributed_barrier(dist_ctx)
     if not out_path.is_file():
-        raise RuntimeError(
-            f"data_gen did not produce {out_path}; rank0 materialization failed"
-        )
+        raise RuntimeError(f"data_gen did not produce {out_path}; rank0 materialization failed")
     return replace(config, dataset=out_path)
 
 

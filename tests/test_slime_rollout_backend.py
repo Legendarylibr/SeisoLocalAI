@@ -95,6 +95,71 @@ def test_sglang_client_complete_parses_text(tmp_path: Path):
         assert client.complete("prompt") == " 42 "
 
 
+def test_sglang_client_complete_with_tokens_reads_output_ids(tmp_path: Path):
+    cfg = _cfg(
+        tmp_path,
+        rollout_backend="sglang",
+        sglang_base_url="http://127.0.0.1:30000",
+        sglang_model="served-model",
+    )
+    client = SGLangRolloutClient.from_config(cfg)
+    payload = {
+        "choices": [
+            {
+                "text": "answer",
+                "meta_info": {"output_token_ids": [7, 8, 9]},
+            }
+        ]
+    }
+
+    class _Resp:
+        def read(self):
+            return json.dumps(payload).encode("utf-8")
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    with patch(
+        "seiso.slime_single_gpu.rollout_backend.urllib.request.urlopen",
+        return_value=_Resp(),
+    ):
+        text, tids = client.complete_with_tokens("prompt")
+    assert text == "answer"
+    assert tids == [7, 8, 9]
+
+
+def test_build_sequence_tensors_prefers_server_token_ids(tmp_path: Path):
+    import torch
+
+    from seiso.slime_single_gpu.rollout_backend import build_sequence_tensors
+
+    class _Tok:
+        pad_token_id = 0
+        eos_token_id = 2
+
+        def __call__(self, text, **kwargs):
+            # Distinct encoding so server ids are observable if used.
+            ids = [1, 1] if text == "P" else [99, 99, 99]
+            return {"input_ids": torch.tensor([ids])}
+
+    cfg = _cfg(tmp_path, max_prompt_tokens=16, max_new_tokens=8)
+    rows = build_sequence_tensors(
+        tokenizer=_Tok(),
+        prompts=["P"],
+        completions=["ignored"],
+        config=cfg,
+        torch=torch,
+        device="cpu",
+        completion_token_ids=[[10, 11, 2]],
+    )
+    assert rows[0]["input_ids"].tolist() == [1, 1, 10, 11, 2]
+    # Keep EOS when pad != eos; all response tokens active.
+    assert rows[0]["response_mask"].tolist() == [False, False, True, True, True]
+
+
 def test_sglang_update_weights_from_disk(tmp_path: Path):
     cfg = _cfg(
         tmp_path,

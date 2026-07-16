@@ -43,13 +43,9 @@ def resolve_rollout_backend(
     * ``sglang`` — OpenAI-compatible SGLang HTTP
     * ``auto`` — SGLang when ``sglang_base_url`` is set and ``world_size > 1``
     """
-    name = _normalize_backend_name(
-        getattr(config, "rollout_backend", "hf") or "hf"
-    )
+    name = _normalize_backend_name(getattr(config, "rollout_backend", "hf") or "hf")
     if name not in {"hf", "sglang", "auto"}:
-        raise ValueError(
-            f"rollout_backend must be one of: hf, sglang, auto (got {name!r})"
-        )
+        raise ValueError(f"rollout_backend must be one of: hf, sglang, auto (got {name!r})")
     if name == "auto":
         base = str(getattr(config, "sglang_base_url", "") or "").strip()
         if base and world_size > 1:
@@ -59,19 +55,14 @@ def resolve_rollout_backend(
 
 
 def validate_rollout_backend_config(config: SingleGpuSlimeConfig) -> None:
-    name = _normalize_backend_name(
-        getattr(config, "rollout_backend", "hf") or "hf"
-    )
+    name = _normalize_backend_name(getattr(config, "rollout_backend", "hf") or "hf")
     if name not in {"hf", "sglang", "auto"}:
-        raise ValueError(
-            f"rollout_backend must be one of: hf, sglang, auto (got {name!r})"
-        )
+        raise ValueError(f"rollout_backend must be one of: hf, sglang, auto (got {name!r})")
     if name == "sglang":
         base = str(getattr(config, "sglang_base_url", "") or "").strip()
         if not base:
             raise ValueError(
-                "rollout_backend=sglang requires sglang_base_url "
-                "(e.g. http://127.0.0.1:30000)"
+                "rollout_backend=sglang requires sglang_base_url (e.g. http://127.0.0.1:30000)"
             )
     timeout = float(getattr(config, "sglang_timeout_s", 120.0) or 120.0)
     if timeout <= 0:
@@ -87,9 +78,11 @@ class GeneratedChunk:
 
     prompts: list[str]
     completions: list[str]
-    # When set (data_gen), full sequences from HF generate; else None → re-tokenize.
+    # When set (HF generate), full sequences; else None → re-tokenize or use token ids.
     sequences: Any | None = None
     prompt_width: int | None = None
+    # Optional per-completion token ids from SGLang when the server provides them.
+    completion_token_ids: list[list[int] | None] | None = None
 
 
 def _as_chat_messages(prompt: str | list[Any]) -> list[dict[str, str]]:
@@ -120,9 +113,7 @@ def format_generation_prompt(
         if "<think>" not in content.lower():
             last = {
                 **last,
-                "content": (
-                    f"{content.rstrip()}\n\n{config.thinking_instruction}\n<think>"
-                ),
+                "content": (f"{content.rstrip()}\n\n{config.thinking_instruction}\n<think>"),
             }
             messages = [*messages[:-1], last]
 
@@ -194,6 +185,7 @@ def generate_sglang_chunk(
     config: SingleGpuSlimeConfig,
 ) -> GeneratedChunk:
     """Generate ``rollouts_per_prompt`` completions per prompt via SGLang HTTP."""
+    del tokenizer  # prompts are already formatted strings
     n = config.rollouts_per_prompt
     client = SGLangRolloutClient.from_config(config)
     # Expand to one request per (prompt, sample) for broad API compatibility.
@@ -202,28 +194,56 @@ def generate_sglang_chunk(
         for _ in range(n):
             jobs.append((p_idx, prompt))
 
-    results: list[str | None] = [None] * len(jobs)
+    results: list[tuple[str, list[int] | None] | None] = [None] * len(jobs)
     max_workers = min(
         int(getattr(config, "sglang_max_workers", 8) or 8),
         max(1, len(jobs)),
     )
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         futures = {
-            pool.submit(client.complete, prompt): idx
+            pool.submit(client.complete_with_tokens, prompt): idx
             for idx, (_p_idx, prompt) in enumerate(jobs)
         }
         for fut in as_completed(futures):
             idx = futures[fut]
             results[idx] = fut.result()
 
-    completions = [text if text is not None else "" for text in results]
+    completions: list[str] = []
+    token_id_lists: list[list[int] | None] = []
+    for item in results:
+        if item is None:
+            completions.append("")
+            token_id_lists.append(None)
+        else:
+            text, tids = item
+            completions.append(text)
+            token_id_lists.append(tids)
     expanded_prompts = [prompt for _p_idx, prompt in jobs]
     return GeneratedChunk(
         prompts=expanded_prompts,
         completions=completions,
         sequences=None,
         prompt_width=None,
+        completion_token_ids=token_id_lists,
     )
+
+
+def _extract_completion_token_ids(
+    choice: dict[str, Any],
+    payload: dict[str, Any],
+) -> list[int] | None:
+    """Best-effort parse of token ids from OpenAI/SGLang completion payloads."""
+    for key in ("token_ids", "output_ids", "output_token_ids", "tokens"):
+        value = choice.get(key)
+        if isinstance(value, list) and value and all(isinstance(x, int) for x in value):
+            return [int(x) for x in value]
+    meta = choice.get("meta_info") or payload.get("meta_info") or {}
+    if isinstance(meta, dict):
+        for key in ("output_token_ids", "output_ids", "token_ids"):
+            value = meta.get(key)
+            if isinstance(value, list) and value and all(isinstance(x, int) for x in value):
+                return [int(x) for x in value]
+    return None
 
 
 def build_sequence_tensors(
@@ -234,20 +254,20 @@ def build_sequence_tensors(
     config: SingleGpuSlimeConfig,
     torch,
     device: str,
+    completion_token_ids: list[list[int] | None] | None = None,
 ) -> list[dict[str, Any]]:
     """Tokenize prompt+completion pairs into per-row rollout tensors.
 
-    Note: external SGLang generation is text-level; retokenizing completions can
-    diverge slightly from the engine's BPE. Prefer HF ``generate`` sequences for
-    exact on-policy tokens. We tokenize the *same prompt string* the server saw
-    and append completion tokens without special tokens on the response.
+    Prefer server-provided ``completion_token_ids`` when present (avoids BPE
+    mismatch). Otherwise retokenize text with the same prompt string the
+    server saw (``add_special_tokens=False``).
     """
     rows: list[dict[str, Any]] = []
     pad_id = tokenizer.pad_token_id
+    eos_id = tokenizer.eos_token_id
     if pad_id is None:
-        pad_id = tokenizer.eos_token_id
-    for prompt, completion in zip(prompts, completions, strict=True):
-        # Match the prompt bytes already sent to SGLang (already chat-templated).
+        pad_id = eos_id
+    for idx, (prompt, completion) in enumerate(zip(prompts, completions, strict=True)):
         prompt_ids = tokenizer(
             prompt,
             add_special_tokens=False,
@@ -255,7 +275,12 @@ def build_sequence_tensors(
             max_length=config.max_prompt_tokens,
             return_tensors="pt",
         )["input_ids"][0]
-        if completion:
+        server_ids = None
+        if completion_token_ids is not None and idx < len(completion_token_ids):
+            server_ids = completion_token_ids[idx]
+        if server_ids is not None and len(server_ids) > 0:
+            comp_ids = torch.tensor(server_ids[: config.max_new_tokens], dtype=torch.long)
+        elif completion:
             comp_ids = tokenizer(
                 completion,
                 add_special_tokens=False,
@@ -267,11 +292,19 @@ def build_sequence_tensors(
             comp_ids = torch.zeros(0, dtype=torch.long)
         input_ids = torch.cat([prompt_ids, comp_ids], dim=0).to(device)
         attention_mask = torch.ones_like(input_ids, device=device)
-        response_mask = torch.zeros_like(input_ids, dtype=torch.bool, device=device)
         prompt_len = int(prompt_ids.numel())
-        response_mask[prompt_len:] = True
-        if pad_id is not None:
-            response_mask = response_mask & (input_ids != pad_id)
+        response_mask = torch.zeros_like(input_ids, dtype=torch.bool, device=device)
+        if prompt_len < int(input_ids.numel()):
+            resp = input_ids[prompt_len:]
+            resp_mask = torch.ones_like(resp, dtype=torch.bool)
+            if pad_id is not None and eos_id is not None and pad_id == eos_id:
+                eos_hits = (resp == eos_id).nonzero(as_tuple=False)
+                if eos_hits.numel() > 0:
+                    first = int(eos_hits[0].item())
+                    resp_mask[first + 1 :] = False
+            elif pad_id is not None:
+                resp_mask = resp != pad_id
+            response_mask[prompt_len:] = resp_mask
         rows.append(
             {
                 "input_ids": input_ids,
@@ -325,6 +358,11 @@ class SGLangRolloutClient:
         )
 
     def complete(self, prompt: str) -> str:
+        text, _token_ids = self.complete_with_tokens(prompt)
+        return text
+
+    def complete_with_tokens(self, prompt: str) -> tuple[str, list[int] | None]:
+        """Return (text, optional engine token ids when the server provides them)."""
         payload = {
             "model": self.model,
             "prompt": prompt,
@@ -342,12 +380,13 @@ class SGLangRolloutClient:
             raise RuntimeError("SGLang choice payload is invalid")
         text = first.get("text")
         if not isinstance(text, str):
-            # Some servers put chat-style content here.
             message = first.get("message")
             if isinstance(message, dict) and isinstance(message.get("content"), str):
-                return message["content"]
-            raise RuntimeError("SGLang choice missing text")
-        return text
+                text = message["content"]
+            else:
+                raise RuntimeError("SGLang choice missing text")
+        token_ids = _extract_completion_token_ids(first, data)
+        return text, token_ids
 
     def update_weights_from_disk(
         self,
@@ -448,9 +487,7 @@ def _validate_sglang_url(url: str) -> None:
     """Reject non-HTTP(S) schemes (basic SSRF hardening for config-controlled URLs)."""
     lowered = url.lower()
     if not (lowered.startswith("http://") or lowered.startswith("https://")):
-        raise ValueError(
-            f"sglang URL must use http:// or https:// scheme, got {url!r}"
-        )
+        raise ValueError(f"sglang URL must use http:// or https:// scheme, got {url!r}")
 
 
 def export_actor_checkpoint(model, tokenizer, output_dir: Any) -> str:
@@ -609,9 +646,7 @@ def _broadcast_weights_to_engines(
         except RuntimeError as exc:
             errors.append(f"{base}: {exc}")
     if errors:
-        raise RuntimeError(
-            "SGLang weight sync failed on one or more engines: " + "; ".join(errors)
-        )
+        raise RuntimeError("SGLang weight sync failed on one or more engines: " + "; ".join(errors))
 
 
 def sync_sglang_weights_from_actor(
@@ -699,9 +734,7 @@ def sync_sglang_weights_from_actor(
 
     # ---- full HF checkpoint (default + delta fallback) ----
     used_path = export_actor_checkpoint(model, tokenizer, ckpt_path)
-    _broadcast_weights_to_engines(
-        config, model_path=used_path, weight_version=version
-    )
+    _broadcast_weights_to_engines(config, model_path=used_path, weight_version=version)
     # Keep CPU snapshot only for future delta diffs (not for full-only runs).
     if mode == "delta":
         state.prev_state = _actor_state_cpu(model)

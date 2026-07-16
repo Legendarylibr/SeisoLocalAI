@@ -82,9 +82,7 @@ class DataGenResult:
             "stream_counts": dict(self.stream_counts),
             "difficulty_counts": dict(self.difficulty_counts),
             "unique_noncode_answers": unique_answers,
-            "answer_diversity": (
-                unique_answers / max(1, len(answers)) if answers else 0.0
-            ),
+            "answer_diversity": (unique_answers / max(1, len(answers)) if answers else 0.0),
         }
 
 
@@ -111,9 +109,7 @@ def parse_weight_mix(
             raw[key.strip().lower()] = float(weight)
     unknown = set(raw) - set(allowed)
     if unknown:
-        raise ValueError(
-            f"unknown mix keys {sorted(unknown)}; allowed: {sorted(allowed)}"
-        )
+        raise ValueError(f"unknown mix keys {sorted(unknown)}; allowed: {sorted(allowed)}")
     if not raw:
         raw = dict(default)
     total = sum(raw.values())
@@ -280,8 +276,7 @@ def _numeric_hard(rng: random.Random, index: int) -> tuple[str, str]:
     rate = rng.randint(15, 45)
     ans = hours * rate
     return (
-        f"A car travels at {rate} miles per hour for {hours} hours. "
-        f"How many miles does it travel?",
+        f"A car travels at {rate} miles per hour for {hours} hours. How many miles does it travel?",
         str(ans),
     )
 
@@ -502,17 +497,20 @@ def generate_rl_corpus(config: DataGenConfig | None = None) -> DataGenResult:
     cfg = config or DataGenConfig()
     if cfg.count < 1:
         raise ValueError("count must be at least 1 for meaningful RL data gen")
-    stream_mix = parse_weight_mix(
-        cfg.mix, allowed=_STREAMS, default=_DEFAULT_STREAM_MIX
-    )
+    stream_mix = parse_weight_mix(cfg.mix, allowed=_STREAMS, default=_DEFAULT_STREAM_MIX)
     diff_mix = parse_weight_mix(
         cfg.difficulty, allowed=_DIFFICULTIES, default=_DEFAULT_DIFFICULTY_MIX
     )
 
-    plan_rng = _stable_rng("plan", str(cfg.seed), str(cfg.count), json.dumps(stream_mix, sort_keys=True))
+    plan_rng = _stable_rng(
+        "plan", str(cfg.seed), str(cfg.count), json.dumps(stream_mix, sort_keys=True)
+    )
     rows: list[dict[str, Any]] = []
     stream_counts: dict[str, int] = {s: 0 for s in stream_mix}
     difficulty_counts: dict[str, int] = {d: 0 for d in diff_mix}
+    skip_reasons: dict[str, int] = {}
+    code_attempts = 0
+    code_verify_rejects = 0
 
     # Per-stream index counters for stable sub-seeds.
     stream_index = {s: 0 for s in _STREAMS}
@@ -527,43 +525,48 @@ def generate_rl_corpus(config: DataGenConfig | None = None) -> DataGenResult:
         stream_index[stream] = idx + 1
         try:
             if stream == "numeric":
-                row = generate_numeric_row(
-                    seed=cfg.seed, index=idx, difficulty=difficulty, cfg=cfg
-                )
+                row = generate_numeric_row(seed=cfg.seed, index=idx, difficulty=difficulty, cfg=cfg)
             elif stream == "choice":
-                row = generate_choice_row(
-                    seed=cfg.seed, index=idx, difficulty=difficulty, cfg=cfg
-                )
+                row = generate_choice_row(seed=cfg.seed, index=idx, difficulty=difficulty, cfg=cfg)
             else:
-                row = generate_code_row(
-                    seed=cfg.seed, index=idx, difficulty=difficulty, cfg=cfg
-                )
+                code_attempts += 1
+                row = generate_code_row(seed=cfg.seed, index=idx, difficulty=difficulty, cfg=cfg)
                 if cfg.verify_code:
                     from seiso.rl_verify.code_proof import verify_code_proof
 
                     solution = str(row.get("solution") or "")
                     proof = verify_code_proof(
-                        solution
-                        if "```" in solution
-                        else f"```python\n{solution}\n```",
+                        solution if "```" in solution else f"```python\n{solution}\n```",
                         row,
                     )
                     if not proof.passed:
+                        code_verify_rejects += 1
+                        skip_reasons["code_verify_fail"] = (
+                            skip_reasons.get("code_verify_fail", 0) + 1
+                        )
                         continue
-        except Exception:
-            # Skip flaky/invalid generator draws; fail closed on that item only.
+        except (ValueError, RuntimeError, OSError, TimeoutError, TypeError) as exc:
+            # Expected per-draw failures (bad draw / sandbox). Do not swallow bugs.
+            key = type(exc).__name__
+            skip_reasons[key] = skip_reasons.get(key, 0) + 1
             continue
 
         if "prompt" not in row:
+            skip_reasons["missing_prompt"] = skip_reasons.get("missing_prompt", 0) + 1
             continue
         rows.append(row)
         stream_counts[stream] = stream_counts.get(stream, 0) + 1
         difficulty_counts[difficulty] = difficulty_counts.get(difficulty, 0) + 1
 
+    if code_attempts > 0 and code_verify_rejects / code_attempts > 0.5:
+        raise RuntimeError(
+            f"data_gen code verify rejected {code_verify_rejects}/{code_attempts} "
+            f"draws (>{50}%); check sandbox/code_corpus. skips={skip_reasons}"
+        )
     if len(rows) < max(1, cfg.count // 2):
         raise RuntimeError(
             f"data_gen produced only {len(rows)}/{cfg.count} rows after "
-            f"{attempts} attempts; check mix/difficulty settings"
+            f"{attempts} attempts; skips={skip_reasons}"
         )
 
     return DataGenResult(

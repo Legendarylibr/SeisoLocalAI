@@ -55,9 +55,7 @@ def test_generate_rl_corpus_is_deterministic_and_diverse(tmp_path: Path):
     assert a.stream_counts.get("numeric", 0) > 0
     assert a.stream_counts.get("choice", 0) > 0
     # Thinking instruction present for outcome-first slime defaults.
-    contents = " ".join(
-        m["content"] for r in a.rows for m in r["prompt"] if isinstance(m, dict)
-    )
+    contents = " ".join(m["content"] for r in a.rows for m in r["prompt"] if isinstance(m, dict))
     assert "think" in contents.lower()
 
 
@@ -139,3 +137,36 @@ def test_maybe_materialize_data_gen_rewrites_dataset(tmp_path: Path):
     assert updated.dataset.is_file()
     n = sum(1 for _ in updated.dataset.open(encoding="utf-8"))
     assert n == 24
+
+
+def test_data_gen_fails_when_code_verify_rejects_majority(monkeypatch):
+    """Narrow skip tracking must fail closed if code stream is broken."""
+    from seiso.rl_verify import data_gen as dg
+
+    def _always_fail_code(**kwargs):
+        return {
+            "prompt": [{"role": "user", "content": "x"}],
+            "label": "pass",
+            "solution": "def f():\n    return 1\n",
+            "metadata": {"rm_type": "code", "task_id": "t"},
+            "cases": (("f()", "0"),),
+        }
+
+    class _FailProof:
+        passed = False
+
+    monkeypatch.setattr(dg, "generate_code_row", _always_fail_code)
+    monkeypatch.setattr(
+        "seiso.rl_verify.code_proof.verify_code_proof",
+        lambda *a, **k: _FailProof(),
+    )
+    with pytest.raises(RuntimeError, match="code verify rejected"):
+        generate_rl_corpus(
+            DataGenConfig(
+                count=10,
+                seed=1,
+                mix="code:1.0",
+                verify_code=True,
+                require_thinking_trace=False,
+            )
+        )

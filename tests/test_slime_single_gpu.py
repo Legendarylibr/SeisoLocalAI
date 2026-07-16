@@ -44,7 +44,9 @@ from seiso.slime_single_gpu.trainer import (
     _merge_stats,
     _metric_record,
     _process_reward,
+    _PushbackIterator,
     _rank_verifier_path,
+    _response_mask_for_sequence,
     _reward_sample,
     _rollout_status,
     _rollout_status_stats,
@@ -405,9 +407,7 @@ def test_clipped_policy_loss_supports_per_token_normalization():
     advantages = torch.tensor([[1.0], [3.0]])
     mask = torch.tensor([[1.0, 1.0, 1.0], [1.0, 0.0, 0.0]])
 
-    per_token_loss = _clipped_policy_loss(
-        new_logprobs, old_logprobs, advantages, mask, 0.2, torch
-    )
+    per_token_loss = _clipped_policy_loss(new_logprobs, old_logprobs, advantages, mask, 0.2, torch)
     per_sample_loss = _clipped_policy_loss(
         torch.zeros(2),
         torch.zeros(2),
@@ -430,9 +430,7 @@ def test_clipped_policy_loss_supports_asymmetric_clip_high():
     advantages = torch.tensor([1.0])
     mask = torch.ones(1)
 
-    loss_sym = _clipped_policy_loss(
-        new_logprobs, old_logprobs, advantages, mask, 0.2, torch
-    )
+    loss_sym = _clipped_policy_loss(new_logprobs, old_logprobs, advantages, mask, 0.2, torch)
     loss_asym = _clipped_policy_loss(
         new_logprobs,
         old_logprobs,
@@ -487,7 +485,6 @@ def test_thinking_prompt_is_appended_but_completion_is_not_rewritten(tmp_path: P
         " reasoning without tags",
         {"answer": "42"},
         cfg,
-        contains_answer_reward,
     )
     assert jumped["format_ok"] is False
     assert jumped["thinking_penalty"] == cfg.missing_thinking_penalty
@@ -508,16 +505,14 @@ def test_completion_scoring_is_outcome_first_with_format_bonus(tmp_path: Path):
         "<think>First check the arithmetic.</think>42",
         {"answer": "42"},
         cfg,
-        contains_answer_reward,
     )
     # Prompt already opened <think>; model continues body and closes.
     continued = _score_completion(
         "First check the arithmetic.\n</think>\n42",
         {"answer": "42"},
         cfg,
-        contains_answer_reward,
     )
-    jumped = _score_completion("42", {"answer": "42"}, cfg, contains_answer_reward)
+    jumped = _score_completion("42", {"answer": "42"}, cfg)
 
     assert score["outcome_reward"] == 1.0
     assert score["format_reward"] == 1.0
@@ -556,7 +551,6 @@ def test_experimental_process_reward_only_when_weighted(tmp_path: Path):
         "<think>First check. Actually revise.</think>7",
         {"answer": "7"},
         cfg,
-        contains_answer_reward,
     )
     assert scored["process_reward"] > 0.5
 
@@ -567,20 +561,44 @@ def test_grouped_advantages_are_normalized():
 
     rollouts = [
         Rollout(
-            None, None, None, None, None, 0.0,
-            outcome_reward=0.0, outcome_passed=False,
+            None,
+            None,
+            None,
+            None,
+            None,
+            0.0,
+            outcome_reward=0.0,
+            outcome_passed=False,
         ),
         Rollout(
-            None, None, None, None, None, 1.0,
-            outcome_reward=1.0, outcome_passed=True,
+            None,
+            None,
+            None,
+            None,
+            None,
+            1.0,
+            outcome_reward=1.0,
+            outcome_passed=True,
         ),
         Rollout(
-            None, None, None, None, None, 2.0,
-            outcome_reward=2.0, outcome_passed=True,
+            None,
+            None,
+            None,
+            None,
+            None,
+            2.0,
+            outcome_reward=2.0,
+            outcome_passed=True,
         ),
         Rollout(
-            None, None, None, None, None, 4.0,
-            outcome_reward=4.0, outcome_passed=True,
+            None,
+            None,
+            None,
+            None,
+            None,
+            4.0,
+            outcome_reward=4.0,
+            outcome_passed=True,
         ),
     ]
 
@@ -893,20 +911,44 @@ def test_dynamic_sampling_filter_keeps_reward_diverse_groups(tmp_path: Path):
     # Filter keys off *outcome_reward*, not composite reward (format-only spread).
     rollouts = [
         Rollout(
-            None, None, None, None, None, reward=1.0,
-            outcome_reward=1.0, outcome_passed=True,
+            None,
+            None,
+            None,
+            None,
+            None,
+            reward=1.0,
+            outcome_reward=1.0,
+            outcome_passed=True,
         ),
         Rollout(
-            None, None, None, None, None, reward=1.0,
-            outcome_reward=1.0, outcome_passed=True,
+            None,
+            None,
+            None,
+            None,
+            None,
+            reward=1.0,
+            outcome_reward=1.0,
+            outcome_passed=True,
         ),
         Rollout(
-            None, None, None, None, None, reward=0.0,
-            outcome_reward=0.0, outcome_passed=False,
+            None,
+            None,
+            None,
+            None,
+            None,
+            reward=0.0,
+            outcome_reward=0.0,
+            outcome_passed=False,
         ),
         Rollout(
-            None, None, None, None, None, reward=1.0,
-            outcome_reward=1.0, outcome_passed=True,
+            None,
+            None,
+            None,
+            None,
+            None,
+            reward=1.0,
+            outcome_reward=1.0,
+            outcome_passed=True,
         ),
     ]
 
@@ -930,12 +972,26 @@ def test_dynamic_sampling_drops_format_only_spread(tmp_path: Path):
     rollouts = [
         # All outcomes 0; format shaping makes composite rewards differ.
         Rollout(
-            None, None, None, None, None, reward=0.1,
-            outcome_reward=0.0, outcome_passed=False, format_ok=True,
+            None,
+            None,
+            None,
+            None,
+            None,
+            reward=0.1,
+            outcome_reward=0.0,
+            outcome_passed=False,
+            format_ok=True,
         ),
         Rollout(
-            None, None, None, None, None, reward=-0.5,
-            outcome_reward=0.0, outcome_passed=False, format_ok=False,
+            None,
+            None,
+            None,
+            None,
+            None,
+            reward=-0.5,
+            outcome_reward=0.0,
+            outcome_passed=False,
+            format_ok=False,
         ),
     ]
     kept, kept_groups, rejected = _filter_rollout_groups(rollouts, cfg)
@@ -999,12 +1055,9 @@ def test_dynamic_sampling_refills_until_training_group_target(tmp_path: Path, mo
         model=None,
         ref_model=None,
         tokenizer=None,
-        sample_batches=iter(
-            [[{"prompt": "kept-1"}], [{"prompt": "kept-2"}]]
-        ),
+        sample_batches=iter([[{"prompt": "kept-1"}], [{"prompt": "kept-2"}]]),
         samples=[{"prompt": "discarded"}],
         config=cfg,
-        reward_fn=None,
         torch=None,
         epoch=0,
         global_step=0,
@@ -1061,7 +1114,6 @@ def test_dynamic_sampling_truncates_oversampled_groups_to_training_target(
         sample_batches=iter([]),
         samples=[{"prompt": "p"}],
         config=cfg,
-        reward_fn=None,
         torch=None,
         epoch=0,
         global_step=0,
@@ -1215,3 +1267,43 @@ def test_slime_cli_is_registered():
 
     names = {command.name for command in app.registered_commands}
     assert "slime" in names
+
+
+def test_pushback_iterator_requeues_without_dropping():
+    source = iter([[{"a": 1}], [{"b": 2}], [{"c": 3}]])
+    it = _PushbackIterator(source)
+    first = next(it)
+    assert first == [{"a": 1}]
+    it.push([{"refilled": True}])
+    assert next(it) == [{"refilled": True}]
+    assert next(it) == [{"b": 2}]
+    assert next(it) == [{"c": 3}]
+    with pytest.raises(StopIteration):
+        next(it)
+
+
+def test_response_mask_keeps_eos_when_pad_equals_eos():
+    torch = pytest.importorskip("torch")
+    # prompt=[1,1], response=[10, 2(eos/pad), 2, 2]
+    ids = torch.tensor([1, 1, 10, 2, 2, 2])
+    mask = _response_mask_for_sequence(
+        ids,
+        prompt_width=2,
+        pad_token_id=2,
+        eos_token_id=2,
+        torch=torch,
+    )
+    assert mask.tolist() == [False, False, True, True, False, False]
+
+
+def test_response_mask_drops_pad_when_pad_differs_from_eos():
+    torch = pytest.importorskip("torch")
+    ids = torch.tensor([1, 1, 10, 2, 0, 0])
+    mask = _response_mask_for_sequence(
+        ids,
+        prompt_width=2,
+        pad_token_id=0,
+        eos_token_id=2,
+        torch=torch,
+    )
+    assert mask.tolist() == [False, False, True, True, False, False]
