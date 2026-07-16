@@ -79,6 +79,32 @@ def _looks_like_python(text: str) -> bool:
     return any(lowered.startswith(m) or f"\n{m}" in f"\n{lowered}" for m in markers)
 
 
+def is_checkable_test_body(value: object) -> bool:
+    """True when ``value`` looks like real unit tests, not a free-form answer.
+
+    Prevents misconfigured ``reward: code`` rows from treating a numeric or
+    short string answer (e.g. ``\"42\"``) as a test that always “passes”.
+    """
+    if value is None:
+        return False
+    if isinstance(value, list):
+        items = [str(item).strip() for item in value if str(item).strip()]
+        if not items:
+            return False
+        return all(is_checkable_test_body(item) for item in items)
+    text = str(value).strip()
+    if not text:
+        return False
+    # Explicit asserts or HumanEval-style ``check(...)`` harness.
+    if _ASSERT_LINE_RE.search(text):
+        return True
+    if re.search(r"\bcheck\s*\(", text):
+        return True
+    if re.search(r"\bdef\s+check\b", text):
+        return True
+    return False
+
+
 def _normalize_tests(sample: dict[str, Any]) -> list[str]:
     """Return individual test units (assert lines or full harness strings)."""
     raw = sample.get("tests", sample.get("test"))
@@ -86,9 +112,13 @@ def _normalize_tests(sample: dict[str, Any]) -> list[str]:
         return []
     if isinstance(raw, list):
         items = [str(item).strip() for item in raw if str(item).strip()]
-        return items[:_MAX_TESTS]
+        # Drop hollow list entries that are not asserts/check harnesses.
+        checkable = [item for item in items if is_checkable_test_body(item)]
+        return checkable[:_MAX_TESTS]
     text = str(raw).strip()
     if not text:
+        return []
+    if not is_checkable_test_body(text):
         return []
     # Split multi-assert bodies into per-assert units when they are simple lines.
     lines = [ln.rstrip() for ln in text.splitlines() if ln.strip()]

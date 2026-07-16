@@ -668,22 +668,49 @@ def expand_scaled_variants(
     return out
 
 
+def _unique_case_calls(cases: Sequence[tuple[str, str]]) -> int:
+    """Count distinct call expressions (I/O diversity proxy)."""
+    return len({call for call, _ in cases})
+
+
+def _require_diverse_cases(
+    task_id: str,
+    cases: tuple[tuple[str, str], ...],
+    *,
+    min_unique: int = 3,
+) -> tuple[tuple[str, str], ...]:
+    """Fail closed if a synthetic variant lacks distinct I/O triples."""
+    if _unique_case_calls(cases) < min_unique:
+        raise ValueError(
+            f"synthetic variant {task_id!r} has only "
+            f"{_unique_case_calls(cases)} unique call(s); need >= {min_unique}"
+        )
+    return cases
+
+
 def _expand_add_family(*, seed: int) -> list[CodeTask]:
     rng = _stable_rng("add-family", str(seed))
-    pairs = [(1, 2), (10, 20), (7, 8), (100, 1), (-3, 9), (0, 5), (12, 13), (4, 4)]
+    # Prefer a != b so commutative pairs still yield two distinct calls.
+    pairs = [(1, 2), (10, 20), (7, 8), (100, 1), (-3, 9), (0, 5), (12, 13), (4, 5)]
     rng.shuffle(pairs)
     tasks: list[CodeTask] = []
     for idx, (a, b) in enumerate(pairs):
+        # Always include an interior off-diagonal case so near-miss mutants matter.
+        c = a + 1
+        cases = _require_diverse_cases(
+            f"add_v{idx}",
+            (
+                (f"add({a}, {b})", str(a + b)),
+                (f"add({b}, {a})", str(a + b)),
+                (f"add({c}, 0)", str(c)),
+            ),
+        )
         tasks.append(
             CodeTask(
                 task_id=f"add_v{idx}",
                 prompt="Write a Python function `add(a, b)` that returns the sum of two numbers.",
                 solution="def add(a, b):\n    return a + b\n",
-                cases=(
-                    (f"add({a}, {b})", str(a + b)),
-                    (f"add({b}, {a})", str(a + b)),
-                    ("add(0, 0)", "0"),
-                ),
+                cases=cases,
                 tags=("arith", "variant"),
             )
         )
@@ -692,20 +719,25 @@ def _expand_add_family(*, seed: int) -> list[CodeTask]:
 
 def _expand_mul_family(*, seed: int) -> list[CodeTask]:
     rng = _stable_rng("mul-family", str(seed))
-    pairs = [(2, 3), (4, 5), (6, 7), (8, 0), (-2, 4), (9, 9)]
+    pairs = [(2, 3), (4, 5), (6, 7), (8, 0), (-2, 4), (9, 1)]
     rng.shuffle(pairs)
     tasks: list[CodeTask] = []
     for idx, (a, b) in enumerate(pairs):
+        c = a + 1 if a != 0 else 2
+        cases = _require_diverse_cases(
+            f"mul_v{idx}",
+            (
+                (f"mul({a}, {b})", str(a * b)),
+                (f"mul({b}, {a})", str(a * b)),
+                (f"mul({c}, 1)", str(c)),
+            ),
+        )
         tasks.append(
             CodeTask(
                 task_id=f"mul_v{idx}",
                 prompt="Write a Python function `mul(a, b)` that returns the product of two numbers.",
                 solution="def mul(a, b):\n    return a * b\n",
-                cases=(
-                    (f"mul({a}, {b})", str(a * b)),
-                    (f"mul({b}, {a})", str(a * b)),
-                    ("mul(1, 1)", "1"),
-                ),
+                cases=cases,
                 tags=("arith", "variant"),
             )
         )
@@ -714,11 +746,39 @@ def _expand_mul_family(*, seed: int) -> list[CodeTask]:
 
 def _expand_clamp_family(*, seed: int) -> list[CodeTask]:
     rng = _stable_rng("clamp-family", str(seed))
-    triples = [(5, 0, 10), (-1, 0, 10), (99, 0, 10), (3, 3, 3), (7, 1, 5), (-5, -3, 3)]
+    # Each triple spans lo < mid < hi with a distinct interior/exterior probe.
+    triples = [
+        (5, 0, 10),
+        (-1, 0, 10),
+        (99, 0, 10),
+        (4, 1, 7),
+        (7, 1, 5),
+        (-5, -3, 3),
+    ]
     rng.shuffle(triples)
     tasks: list[CodeTask] = []
     for idx, (x, lo, hi) in enumerate(triples):
-        expected = lo if x < lo else hi if x > hi else x
+        if lo > hi:
+            lo, hi = hi, lo
+        mid = lo if lo == hi else lo + (hi - lo) // 2
+        if mid == lo and hi > lo:
+            mid = lo + 1
+        expected_x = lo if x < lo else hi if x > hi else x
+        # Three distinct probes: primary x, low exterior/edge, high exterior/edge.
+        low_probe = lo - 1
+        high_probe = hi + 1
+        cases = _require_diverse_cases(
+            f"clamp_v{idx}",
+            (
+                (f"clamp({x}, {lo}, {hi})", str(expected_x)),
+                (f"clamp({low_probe}, {lo}, {hi})", str(lo)),
+                (f"clamp({high_probe}, {lo}, {hi})", str(hi)),
+                (f"clamp({mid}, {lo}, {hi})", str(mid)),
+            ),
+            min_unique=3,
+        )
+        # Keep three units for scoring density (drop mid if needed for length).
+        cases = cases[:3] if _unique_case_calls(cases[:3]) >= 3 else cases
         tasks.append(
             CodeTask(
                 task_id=f"clamp_v{idx}",
@@ -731,11 +791,7 @@ def _expand_clamp_family(*, seed: int) -> list[CodeTask]:
                     "        return hi\n"
                     "    return x\n"
                 ),
-                cases=(
-                    (f"clamp({x}, {lo}, {hi})", str(expected)),
-                    (f"clamp({lo}, {lo}, {hi})", str(lo)),
-                    (f"clamp({hi}, {lo}, {hi})", str(hi)),
-                ),
+                cases=cases,
                 tags=("arith", "variant"),
             )
         )

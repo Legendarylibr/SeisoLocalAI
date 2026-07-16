@@ -137,12 +137,17 @@ def verify_outcome(
         resolved = resolve_checker(checker, benchmark=benchmark)
 
     if resolved == "code":
-        from seiso.rl_verify.code_proof import code_outcome_score
+        from seiso.rl_verify.code_proof import (
+            code_outcome_score,
+            is_checkable_test_body,
+        )
 
         payload = dict(sample or {})
         if answer is not None and "tests" not in payload and "test" not in payload:
-            # Allow answer-as-tests for compact rows.
-            payload.setdefault("tests", answer)
+            # Only promote answer → tests when it is a real assert/check harness.
+            # Bare answers like "42" would otherwise execute as always-true expressions.
+            if is_checkable_test_body(answer):
+                payload.setdefault("tests", answer)
         return code_outcome_score(completion, payload)
 
     if answer is None or not str(answer).strip():

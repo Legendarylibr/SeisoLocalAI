@@ -228,6 +228,9 @@ def train_single_gpu_slime(config: SingleGpuSlimeConfig) -> Path:
     global_step = 0
     pending_accumulation_steps = 0
     saw_sample = False
+    total_groups_seen = 0.0
+    total_groups_kept = 0.0
+    empty_trainable_batches = 0
     optimizer.zero_grad(set_to_none=True)
     rng = random.Random(config.seed)
 
@@ -250,6 +253,8 @@ def train_single_gpu_slime(config: SingleGpuSlimeConfig) -> Path:
                 dist_ctx=dist_ctx,
             )
             rollouts = rollout_batch.rollouts
+            total_groups_seen += float(rollout_batch.stats.get("rollout_groups_total", 0.0))
+            total_groups_kept += float(rollout_batch.stats.get("rollout_groups_kept", 0.0))
             if config.dynamic_sampling_filter != "none" and dist_ctx.enabled:
                 target_groups = _distributed_min_int(
                     len(rollouts) // config.rollouts_per_prompt,
@@ -267,6 +272,19 @@ def train_single_gpu_slime(config: SingleGpuSlimeConfig) -> Path:
                     },
                 )
             if not rollouts:
+                empty_trainable_batches += 1
+                if dist_ctx.is_main and empty_trainable_batches == 1:
+                    _append_metrics(
+                        metrics_path,
+                        {
+                            "step": global_step,
+                            "epoch": epoch,
+                            **rollout_batch.stats,
+                            "stop_reason": "awaiting_trainable_groups",
+                            "rollout_groups_seen_total": total_groups_seen,
+                            "rollout_groups_kept_total": total_groups_kept,
+                        },
+                    )
                 continue
             trained_groups = len(rollouts) // config.rollouts_per_prompt
             rollout_batch = _RolloutBatch(
@@ -350,6 +368,29 @@ def train_single_gpu_slime(config: SingleGpuSlimeConfig) -> Path:
 
     if not saw_sample:
         raise ValueError(f"no samples found in {config.dataset}")
+    if global_step == 0:
+        # All oversampled groups were filtered — do not report a silent "complete".
+        reason = "no_trainable_groups"
+        if dist_ctx.is_main:
+            _append_metrics(
+                metrics_path,
+                {
+                    "step": 0,
+                    "epoch": max(0, config.epochs - 1),
+                    "rollout_groups_seen_total": total_groups_seen,
+                    "rollout_groups_kept_total": total_groups_kept,
+                    "empty_trainable_batches": float(empty_trainable_batches),
+                    "stop_reason": reason,
+                },
+            )
+        _write_training_state(config, global_step, reason, auto_stop, dist_ctx)
+        raise RuntimeError(
+            "no trainable rollout groups after dynamic sampling "
+            f"(seen={total_groups_seen:.0f}, kept={total_groups_kept:.0f}). "
+            "Outcome rewards may be uniform (all fail or all pass). "
+            "Inspect outcome_pass_rate / group_pass_rate, ease the dataset, "
+            "or set dynamic_sampling_filter: none only for debugging."
+        )
     if pending_accumulation_steps:
         _optimizer_step(model, optimizer, torch, config)
     _write_training_state(config, global_step, "complete", auto_stop, dist_ctx)
@@ -786,8 +827,12 @@ def _policy_loss(
             kl_loss = ((new_token_logprobs - ref_token_logprobs) * response_mask).sum()
             kl_loss = kl_loss / response_mask.sum().clamp_min(1.0)
         else:
+            # Sequence log-probs are sums (not means). Normalize by response
+            # length so KL does not grow with generation length and fight long
+            # correct traces when calculate_per_token_loss is False.
             ref_logprobs = torch.stack([r.ref_logprobs for r in rollouts]).to(config.device)
-            kl_loss = (new_logprobs - ref_logprobs).mean()
+            lengths = response_token_counts.clamp_min(1.0)
+            kl_loss = ((new_logprobs - ref_logprobs) / lengths).mean()
 
     rewards = [r.reward for r in rollouts]
     loss = policy_loss + config.kl_coef * kl_loss
@@ -815,8 +860,12 @@ def _policy_loss(
             if r.proof_score is not None
         ),
         "group_reward_spread_mean": group_stats["group_reward_spread_mean"],
+        "group_outcome_spread_mean": group_stats["group_outcome_spread_mean"],
         "group_pass_rate": group_stats["group_pass_rate"],
         "group_nonzero_spread_frac": group_stats["group_nonzero_spread_frac"],
+        "group_nonzero_outcome_spread_frac": group_stats[
+            "group_nonzero_outcome_spread_frac"
+        ],
         "response_tokens_mean": float(response_token_counts.mean().detach().cpu()),
         **_rollout_status_stats(rollouts),
     }
@@ -839,8 +888,10 @@ def _empty_stats() -> dict[str, float]:
         "proof_pass_rate": 0.0,  # nosec B105
         "proof_score_mean": 0.0,
         "group_reward_spread_mean": 0.0,
+        "group_outcome_spread_mean": 0.0,
         "group_pass_rate": 0.0,  # nosec B105
         "group_nonzero_spread_frac": 0.0,
+        "group_nonzero_outcome_spread_frac": 0.0,
         "response_tokens_mean": 0.0,
         "rollout_status_stop": 0.0,
         "rollout_status_length": 0.0,
@@ -868,8 +919,10 @@ def _merge_stats(
         "proof_pass_rate",
         "proof_score_mean",
         "group_reward_spread_mean",
+        "group_outcome_spread_mean",
         "group_pass_rate",
         "group_nonzero_spread_frac",
+        "group_nonzero_outcome_spread_frac",
         "response_tokens_mean",
     ):
         stats[key] += chunk_stats.get(key, 0.0) * weight
@@ -994,12 +1047,21 @@ def _keep_rollout_group(
     group: list[Rollout],
     config: SingleGpuSlimeConfig,
 ) -> bool:
-    if config.dynamic_sampling_filter == "reward_nonzero_std":
-        rewards = [rollout.reward for rollout in group]
-        if len(rewards) < 2:
+    """Keep groups that have nonzero *outcome* spread for GRPO.
+
+    ``reward_nonzero_std`` / ``outcome_nonzero_std`` intentionally ignore pure
+    format-shaping spread on the composite ``reward``. Format remains a small
+    shaping term *after* a group already has outcome diversity.
+    """
+    if config.dynamic_sampling_filter in {
+        "reward_nonzero_std",
+        "outcome_nonzero_std",
+    }:
+        outcomes = [float(rollout.outcome_reward) for rollout in group]
+        if len(outcomes) < 2:
             return False
-        mean = sum(rewards) / len(rewards)
-        variance = sum((reward - mean) ** 2 for reward in rewards) / len(rewards)
+        mean = sum(outcomes) / len(outcomes)
+        variance = sum((value - mean) ** 2 for value in outcomes) / len(outcomes)
         return math.sqrt(variance) > config.dynamic_sampling_min_reward_std
     return True
 
@@ -1051,21 +1113,30 @@ def _group_verifier_stats(
 ) -> dict[str, float]:
     """Per-prompt group diagnostics for collapse / verifier pass monitoring."""
     spreads: list[float] = []
+    outcome_spreads: list[float] = []
     group_passes: list[float] = []
     nonzero_spread: list[float] = []
+    nonzero_outcome_spread: list[float] = []
     for start in range(0, len(rollouts), group_size):
         group = rollouts[start : start + group_size]
         if not group:
             continue
         rewards = [r.reward for r in group]
+        outcomes = [float(r.outcome_reward) for r in group]
         spread = max(rewards) - min(rewards)
+        outcome_spread = max(outcomes) - min(outcomes)
         spreads.append(spread)
-        nonzero_spread.append(1.0 if spread > 1e-8 else 0.0)
+        outcome_spreads.append(outcome_spread)
+        # Primary health metric: outcome diversity (matches dynamic sampling).
+        nonzero_spread.append(1.0 if outcome_spread > 1e-8 else 0.0)
+        nonzero_outcome_spread.append(1.0 if outcome_spread > 1e-8 else 0.0)
         group_passes.append(1.0 if any(r.outcome_passed for r in group) else 0.0)
     return {
         "group_reward_spread_mean": _mean(spreads),
+        "group_outcome_spread_mean": _mean(outcome_spreads),
         "group_pass_rate": _mean(group_passes),
         "group_nonzero_spread_frac": _mean(nonzero_spread),
+        "group_nonzero_outcome_spread_frac": _mean(nonzero_outcome_spread),
     }
 
 

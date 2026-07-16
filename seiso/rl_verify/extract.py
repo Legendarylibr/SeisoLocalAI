@@ -22,6 +22,45 @@ _THINK_CONTINUATION_RE = re.compile(
 _THINK_CLOSE_RE = re.compile(r"</think>", flags=re.IGNORECASE)
 _NUMBER_RE = re.compile(r"[-+]?(?:\d*\.\d+|\d+)")
 _CHOICE_RE = re.compile(r"\b([a-d])\b", flags=re.IGNORECASE)
+# Explicit final-answer letter patterns (preferred over first free-form letter).
+_CHOICE_ANSWER_MARKERS = (
+    re.compile(
+        r"(?:final\s+answer|answer|choice|option|select(?:ed)?)\s*(?:is|:|=)?\s*"
+        r"[\(\[]?\s*([a-d])\s*[\)\].:]?",
+        flags=re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?:^|\n)\s*[\(\[]?\s*([a-d])\s*[\)\]\.\:]\s*(?:\n|$)",
+        flags=re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?:^|\n)\s*([a-d])\s*$",
+        flags=re.IGNORECASE,
+    ),
+)
+# Prefer numbers after explicit answer markers / boxed / final line.
+_NUMBER_ANSWER_MARKERS = (
+    re.compile(
+        r"(?:final\s+answer|answer|result|equals?)\s*(?:is|:|=)?\s*"
+        r"([-+]?(?:\d*\.\d+|\d+))",
+        flags=re.IGNORECASE,
+    ),
+    re.compile(
+        r"\\boxed\{\s*([-+]?(?:\d*\.\d+|\d+))\s*\}",
+        flags=re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?:^|\n)\s*([-+]?(?:\d*\.\d+|\d+))\s*$",
+    ),
+)
+# Trailing confidence / count phrases often pollute last-number extraction.
+_NOISE_NUMBER_CONTEXT_RE = re.compile(
+    r"(?:confidence|certainty|percent|%|cases?|steps?|times?)\s*"
+    r"[-+]?(?:\d*\.\d+|\d+)"
+    r"|"
+    r"[-+]?(?:\d*\.\d+|\d+)\s*(?:%|percent|cases?|steps?|times?)",
+    flags=re.IGNORECASE,
+)
 
 
 def format_thinking_prompt(prompt: str, instruction: str) -> str:
@@ -80,7 +119,31 @@ def final_answer_text(completion: str) -> str:
 
 
 def last_number(text: str) -> float | None:
-    matches = _NUMBER_RE.findall(text.replace(",", ""))
+    """Extract the most likely final numeric answer from free-form text.
+
+    Preference order:
+    1. Numbers after explicit answer markers / ``\\boxed{}`` / final-line only.
+    2. Last number in the text after stripping confidence/count noise phrases.
+    3. Last raw number as a last resort.
+    """
+    cleaned = text.replace(",", "")
+    for pattern in _NUMBER_ANSWER_MARKERS:
+        matches = pattern.findall(cleaned)
+        if matches:
+            try:
+                return float(matches[-1])
+            except ValueError:
+                continue
+
+    denoised = _NOISE_NUMBER_CONTEXT_RE.sub(" ", cleaned)
+    matches = _NUMBER_RE.findall(denoised)
+    if matches:
+        try:
+            return float(matches[-1])
+        except ValueError:
+            pass
+
+    matches = _NUMBER_RE.findall(cleaned)
     if not matches:
         return None
     try:
@@ -90,8 +153,34 @@ def last_number(text: str) -> float | None:
 
 
 def extract_choice(text: str) -> str | None:
-    match = _CHOICE_RE.search(text)
-    return match.group(1).lower() if match else None
+    """Extract a multiple-choice letter ``a``–``d`` from free-form text.
+
+    Prefers explicit answer markers and the last letter in the final-answer
+    span over the first free-form ``\\b[a-d]\\b`` match (avoids “A is wrong… B”).
+    """
+    if not text or not str(text).strip():
+        return None
+    source = str(text)
+
+    # Collect all marker hits and take the rightmost (final) answer cue.
+    marker_hits: list[tuple[int, str]] = []
+    for pattern in _CHOICE_ANSWER_MARKERS:
+        for match in pattern.finditer(source):
+            marker_hits.append((match.start(), match.group(1).lower()))
+    if marker_hits:
+        marker_hits.sort(key=lambda item: item[0])
+        return marker_hits[-1][1]
+
+    # Unique letter in the whole span — unambiguous.
+    all_letters = [m.group(1).lower() for m in _CHOICE_RE.finditer(source)]
+    if not all_letters:
+        return None
+    unique = list(dict.fromkeys(all_letters))
+    if len(unique) == 1:
+        return unique[0]
+
+    # Multiple free-form letters: take the last one (usually the final pick).
+    return all_letters[-1]
 
 
 def normalize_answer(text: str) -> str:

@@ -278,9 +278,10 @@ class TrainConfig(BaseModel):
     @field_validator("dynamic_sampling_filter")
     @classmethod
     def _validate_dynamic_sampling_filter(cls, v: str) -> str:
-        if v not in {"none", "reward_nonzero_std"}:
+        if v not in {"none", "reward_nonzero_std", "outcome_nonzero_std"}:
             raise ValueError(
-                "dynamic_sampling_filter must be one of: none, reward_nonzero_std"
+                "dynamic_sampling_filter must be one of: "
+                "none, reward_nonzero_std, outcome_nonzero_std"
             )
         return v
 

@@ -107,6 +107,37 @@ def test_missing_tests_scores_zero():
     assert "missing_tests" in result.detail
 
 
+def test_bare_answer_not_promoted_to_code_tests():
+    """Misconfigured code rows must not treat '42' as a always-passing test."""
+    completion = "def solve():\n    return 42\n"
+    score, checker, _ = verify_outcome(
+        completion,
+        "42",
+        checker="code",
+        sample={},
+    )
+    assert checker == "code"
+    assert score == 0.0
+
+    # Explicit asserts still work via answer-as-tests compact form.
+    score_ok, _, _ = verify_outcome(
+        completion,
+        "assert solve() == 42",
+        checker="code",
+        sample={},
+    )
+    assert score_ok == 1.0
+
+
+def test_non_assert_tests_list_is_rejected():
+    result = verify_code_proof(
+        "def f():\n    return 1\n",
+        {"tests": ["42", "hello"]},
+    )
+    assert result.score == 0.0
+    assert "missing_tests" in result.detail
+
+
 def test_example_code_dataset_rows_are_loadable():
     from pathlib import Path
 

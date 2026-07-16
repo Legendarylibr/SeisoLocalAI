@@ -203,9 +203,9 @@ Important fields:
 | `kl_coef` | Coefficient on KL to a frozen reference model; `0` skips loading the ref (lower VRAM). Prefer `0.01`–`0.05` for longer post-training runs |
 | `rollouts_per_prompt` | Number of sampled completions per prompt for grouped advantages |
 | `rollout_batch_size` | Generation batch size; keep at least `rollouts_per_prompt` |
-| `dynamic_sampling_filter` | Default `reward_nonzero_std` drops prompt groups with zero reward spread (no GRPO signal). Set `none` only for debugging |
+| `dynamic_sampling_filter` | Default `reward_nonzero_std` (alias `outcome_nonzero_std`) drops prompt groups with zero **outcome_reward** spread so format-only shaping cannot keep all-fail groups. Set `none` only for debugging. If every group is filtered, training fails with `stop_reason: no_trainable_groups` instead of a silent complete |
 | `over_sampling_batch_size` | Prompt sampling batch size used when dynamic filtering is enabled; keep larger than `batch_size` so strict filters can refill from additional oversampled prompt batches until the training target is met or epoch data is exhausted |
-| `calculate_per_token_loss` | Optional upstream-style loss normalization; defaults to per-sample loss and switches to token-weighted loss when enabled |
+| `calculate_per_token_loss` | Optional upstream-style loss normalization; defaults to per-sample loss and switches to token-weighted loss when enabled. When `kl_coef > 0` without per-token loss, KL is length-normalized because sequence log-probs are sums |
 | `balance_data` | For distributed SLIME, greedily shards prompts by estimated prompt length so each rank receives similar rollout work |
 | `policy_micro_batch_size` | Policy update microbatch size to control VRAM |
 | `shuffle_buffer_size` | Bounded CPU shuffle buffer for long datasets |

@@ -26,7 +26,9 @@ class SingleGpuSlimeConfig:
     rollouts_per_prompt: int = 4
     rollout_batch_size: int = 4
     over_sampling_batch_size: int | None = None
-    # Drop zero-signal prompt groups (all rewards equal) — standard for sparse verifiable RL.
+    # Drop zero-signal prompt groups — standard for sparse verifiable RL.
+    # ``reward_nonzero_std`` uses *outcome_reward* spread (not composite reward) so
+    # format-only shaping cannot keep all-fail groups alive for GRPO.
     dynamic_sampling_filter: str = "reward_nonzero_std"
     dynamic_sampling_min_reward_std: float = 1e-6
     policy_micro_batch_size: int = 4
@@ -115,9 +117,14 @@ class SingleGpuSlimeConfig:
             raise ValueError(
                 "over_sampling_batch_size must be at least rollouts_per_prompt"
             )
-        if self.dynamic_sampling_filter not in {"none", "reward_nonzero_std"}:
+        if self.dynamic_sampling_filter not in {
+            "none",
+            "reward_nonzero_std",
+            "outcome_nonzero_std",
+        }:
             raise ValueError(
-                "dynamic_sampling_filter must be one of: none, reward_nonzero_std"
+                "dynamic_sampling_filter must be one of: "
+                "none, reward_nonzero_std, outcome_nonzero_std"
             )
         if self.dynamic_sampling_min_reward_std < 0:
             raise ValueError("dynamic_sampling_min_reward_std must be non-negative")

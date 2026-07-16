@@ -45,6 +45,18 @@ def test_different_seeds_change_variant_case_order():
     assert cases_a != cases_b
 
 
+def test_variants_have_diverse_io_cases():
+    bundle = synthesize_code_bundle(
+        seed=0, include_variants=True, build_preferences=False, verify=True
+    )
+    variants = [t for t in bundle.tasks if "_v" in t.task_id]
+    assert variants
+    for task in variants:
+        calls = {call for call, _ in task.cases}
+        assert len(calls) >= 3, (task.task_id, task.cases)
+        assert len(task.cases) >= 3
+
+
 def test_preference_hard_negative_fails_verifier():
     bundle = synthesize_code_bundle(
         seed=0,

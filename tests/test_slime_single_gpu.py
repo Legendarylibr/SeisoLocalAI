@@ -488,10 +488,22 @@ def test_experimental_process_reward_only_when_weighted(tmp_path: Path):
 
 def test_grouped_advantages_are_normalized():
     rollouts = [
-        Rollout(None, None, None, None, None, 0.0, outcome_passed=False),
-        Rollout(None, None, None, None, None, 1.0, outcome_passed=True),
-        Rollout(None, None, None, None, None, 2.0, outcome_passed=True),
-        Rollout(None, None, None, None, None, 4.0, outcome_passed=True),
+        Rollout(
+            None, None, None, None, None, 0.0,
+            outcome_reward=0.0, outcome_passed=False,
+        ),
+        Rollout(
+            None, None, None, None, None, 1.0,
+            outcome_reward=1.0, outcome_passed=True,
+        ),
+        Rollout(
+            None, None, None, None, None, 2.0,
+            outcome_reward=2.0, outcome_passed=True,
+        ),
+        Rollout(
+            None, None, None, None, None, 4.0,
+            outcome_reward=4.0, outcome_passed=True,
+        ),
     ]
 
     _assign_grouped_advantages(rollouts, group_size=2)
@@ -501,6 +513,8 @@ def test_grouped_advantages_are_normalized():
     stats = _group_verifier_stats(rollouts, group_size=2)
     assert stats["group_pass_rate"] == 1.0
     assert stats["group_nonzero_spread_frac"] == 1.0
+    assert stats["group_nonzero_outcome_spread_frac"] == 1.0
+    assert stats["group_outcome_spread_mean"] == 1.5
 
 
 class Linear:
@@ -768,11 +782,24 @@ def test_dynamic_sampling_filter_keeps_reward_diverse_groups(tmp_path: Path):
         dynamic_sampling_filter="reward_nonzero_std",
         over_sampling_batch_size=4,
     )
+    # Filter keys off *outcome_reward*, not composite reward (format-only spread).
     rollouts = [
-        Rollout(None, None, None, None, None, reward=1.0),
-        Rollout(None, None, None, None, None, reward=1.0),
-        Rollout(None, None, None, None, None, reward=0.0),
-        Rollout(None, None, None, None, None, reward=1.0),
+        Rollout(
+            None, None, None, None, None, reward=1.0,
+            outcome_reward=1.0, outcome_passed=True,
+        ),
+        Rollout(
+            None, None, None, None, None, reward=1.0,
+            outcome_reward=1.0, outcome_passed=True,
+        ),
+        Rollout(
+            None, None, None, None, None, reward=0.0,
+            outcome_reward=0.0, outcome_passed=False,
+        ),
+        Rollout(
+            None, None, None, None, None, reward=1.0,
+            outcome_reward=1.0, outcome_passed=True,
+        ),
     ]
 
     kept, kept_groups, rejected = _filter_rollout_groups(rollouts, cfg)
@@ -781,6 +808,32 @@ def test_dynamic_sampling_filter_keeps_reward_diverse_groups(tmp_path: Path):
     assert kept_groups == {1}
     assert rejected == 1
     assert _sampling_batch_size(cfg) == 4
+
+
+def test_dynamic_sampling_drops_format_only_spread(tmp_path: Path):
+    """Composite reward may differ from format alone; outcomes equal → drop."""
+    cfg = SingleGpuSlimeConfig(
+        model_id="test/model",
+        dataset=tmp_path / "data.jsonl",
+        output_dir=tmp_path / "out",
+        rollouts_per_prompt=2,
+        dynamic_sampling_filter="reward_nonzero_std",
+    )
+    rollouts = [
+        # All outcomes 0; format shaping makes composite rewards differ.
+        Rollout(
+            None, None, None, None, None, reward=0.1,
+            outcome_reward=0.0, outcome_passed=False, format_ok=True,
+        ),
+        Rollout(
+            None, None, None, None, None, reward=-0.5,
+            outcome_reward=0.0, outcome_passed=False, format_ok=False,
+        ),
+    ]
+    kept, kept_groups, rejected = _filter_rollout_groups(rollouts, cfg)
+    assert kept == []
+    assert kept_groups == set()
+    assert rejected == 1
 
 
 def test_over_sampling_is_ignored_without_dynamic_filter(tmp_path: Path):

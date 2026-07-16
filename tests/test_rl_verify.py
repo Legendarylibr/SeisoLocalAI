@@ -42,6 +42,34 @@ def test_numeric_and_choice_outcome():
     assert verify_outcome("nope", "42", checker="numeric")[0] == 0.0
 
 
+def test_extract_choice_prefers_final_letter():
+    from seiso.rl_verify.extract import extract_choice
+
+    # First letter is a distractor; final pick is B.
+    assert extract_choice("A is wrong; the answer is B") == "b"
+    assert extract_choice("a better option is B") == "b"
+    assert extract_choice("select a better option is B") == "b"
+    assert extract_choice("Answer: C") == "c"
+    assert extract_choice("I pick D.") == "d"
+    # Unique free-form letter still works.
+    assert extract_choice("Definitely B only.") == "b"
+    assert verify_outcome(
+        "A is wrong; the answer is B", "B", checker="choice"
+    )[0] == 1.0
+
+
+def test_last_number_ignores_confidence_noise():
+    from seiso.rl_verify.extract import last_number
+
+    assert last_number("The answer is 42, confidence 100") == 42.0
+    assert last_number("answer 42 after checking 3 cases") == 42.0
+    assert last_number("Final answer: 7") == 7.0
+    assert last_number("\\boxed{99}") == 99.0
+    assert verify_outcome(
+        "The answer is 42, confidence 100", "42", checker="numeric"
+    )[0] == 1.0
+
+
 def test_outcome_reward_distill_api():
     assert outcome_reward("<think>x</think>7", "7", benchmark="gsm8k") == 1.0
     assert outcome_reward("<think>x</think>C", "C", benchmark="gpqa") == 1.0
