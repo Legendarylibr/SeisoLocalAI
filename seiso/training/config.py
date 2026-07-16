@@ -194,7 +194,7 @@ class TrainConfig(BaseModel):
     rollouts_per_prompt: int = Field(default=4, ge=2)
     rollout_batch_size: int = Field(default=4, ge=1)
     over_sampling_batch_size: int | None = Field(default=None, ge=1)
-    dynamic_sampling_filter: str = "none"
+    dynamic_sampling_filter: str = "reward_nonzero_std"
     dynamic_sampling_min_reward_std: float = Field(default=1e-6, ge=0)
     policy_micro_batch_size: int | None = Field(default=None, ge=1)
     train_batch_size: int | None = Field(default=None, ge=1)

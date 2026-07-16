@@ -1,53 +1,45 @@
 model_id: Qwen/Qwen2.5-0.5B-Instruct
-dataset: data/slime_sample.jsonl
-output_dir: outputs/slime-train-method
-method: slime
-quant: 4bit
-training_methodology: seiso_release_post_training
+dataset: data/slime_choice_sample.jsonl
+output_dir: outputs/slime-choice
 prompt_field: prompt
 answer_field: answer
-reward: numeric
+reward: choice
 max_vram_gb: 16
 max_prompt_tokens: 512
 max_new_tokens: 128
 rollouts_per_prompt: 4
 rollout_batch_size: 4
+# Drop all-correct / all-wrong groups so GRPO gets nonzero advantages.
 dynamic_sampling_filter: reward_nonzero_std
 over_sampling_batch_size: 8
 policy_micro_batch_size: 2
-batch_size: 1
+train_batch_size: 1
 shuffle_buffer_size: 128
 gradient_accumulation_steps: 8
 learning_rate: 0.000005
 max_grad_norm: 1.0
 epochs: 1
-# 0 = no frozen ref (lower VRAM). Use ~0.02–0.05 for longer runs to limit drift.
+# 0 saves VRAM (no ref model). Prefer 0.02–0.05 for multi-epoch / production runs.
 kl_coef: 0.0
 clip_ratio: 0.2
 temperature: 0.9
 top_p: 0.95
 require_thinking_trace: true
-thinking_instruction: "Show your reasoning in <think>...</think>, then give the final answer."
+thinking_instruction: "Show your reasoning in <think>...</think>, then give the final answer letter."
 outcome_reward_weight: 1.0
 format_reward_weight: 0.1
 process_reward_weight: 0.0
 missing_thinking_penalty: 0.5
-min_thinking_tokens: 8
 gradient_checkpointing: true
-slime_use_lora: true
+use_lora: true
 lora_r: 16
 lora_alpha: 32
 lora_dropout: 0.05
-use_8bit_optimizer: false
-save_steps: 100
-logging_steps: 1
+save_every_steps: 100
+log_every_steps: 1
 best_checkpoint_dir: checkpoint-best
 auto_stop: true
 auto_stop_metric: reward_mean
 auto_stop_patience: 20
-auto_stop_min_delta: 0.0001
-auto_stop_warmup_steps: 10
-stop_on_nonfinite: true
 write_verifier_data: true
 verifier_data_file: slime_verifier_data.jsonl
-verifier_max_text_chars: 2048

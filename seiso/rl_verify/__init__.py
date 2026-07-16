@@ -12,13 +12,6 @@ from seiso.rl_verify.code_proof import (
     extract_python_code,
     verify_code_proof,
 )
-from seiso.rl_verify.preferences import (
-    PreferencePair,
-    ScoredCompletion,
-    preference_row_from_pair,
-    score_code_completion,
-    select_preference_pair,
-)
 from seiso.rl_verify.extract import (
     extract_choice,
     final_answer_text,
@@ -27,6 +20,13 @@ from seiso.rl_verify.extract import (
     last_number,
     normalize_answer,
     split_thinking_trace,
+)
+from seiso.rl_verify.preferences import (
+    PreferencePair,
+    ScoredCompletion,
+    preference_row_from_pair,
+    score_code_completion,
+    select_preference_pair,
 )
 from seiso.rl_verify.verify import (
     VerifierResult,

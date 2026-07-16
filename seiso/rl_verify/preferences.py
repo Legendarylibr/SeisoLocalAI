@@ -91,16 +91,24 @@ def select_preference_pair(
         return None
 
     if hard_negatives:
-        # Hard: failing + extracted code + highest residual score (near miss).
+        # Hard: failing + extractable structure + highest residual score (near miss).
         hard_fails = [c for c in worse if (not c.passed) and c.has_code]
+        soft_fails = [c for c in worse if not c.passed]
         if hard_fails:
             rejected = max(
                 hard_fails,
                 key=lambda c: (c.score, c.tests_passed, len(c.completion)),
             )
             kind = "hard_negative"
+        elif soft_fails:
+            # Math/choice: prefer the strongest incorrect candidate as rejected.
+            rejected = max(
+                soft_fails,
+                key=lambda c: (c.score, len(c.completion.strip())),
+            )
+            kind = "hard_negative"
         else:
-            # Soft fallback: any lower-scoring completion (may be empty/syntax).
+            # Soft fallback: any lower-scoring completion (all may have passed).
             rejected = max(worse, key=lambda c: (c.score, c.has_code, len(c.completion)))
             kind = "score_gap"
     else:
@@ -123,9 +131,15 @@ def preference_row_from_pair(
     generation_seed: int | None = None,
     group_size: int | None = None,
     group_rewards: list[float] | None = None,
+    reward_source: str | None = None,
 ) -> dict[str, Any]:
     """Serialize a DPO-style preference row with verifier provenance."""
     sample = sample or {}
+    if reward_source is None:
+        if sample.get("tests") is not None or sample.get("test") is not None:
+            reward_source = "code_unit_tests"
+        else:
+            reward_source = "verifiable_outcome"
     row: dict[str, Any] = {
         "prompt_id": prompt_id,
         "prompt": prompt,
@@ -136,7 +150,7 @@ def preference_row_from_pair(
         "chosen_passed": pair.chosen.passed,
         "rejected_passed": pair.rejected.passed,
         "pair_kind": pair.pair_kind,
-        "reward_source": "code_unit_tests",
+        "reward_source": reward_source,
         "hard_negative": pair.pair_kind == "hard_negative",
         "chosen_detail": pair.chosen.detail,
         "rejected_detail": pair.rejected.detail,

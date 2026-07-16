@@ -159,11 +159,14 @@ reward: numeric
 max_vram_gb: 16
 rollouts_per_prompt: 4
 rollout_batch_size: 4
-dynamic_sampling_filter: none
+dynamic_sampling_filter: reward_nonzero_std
+over_sampling_batch_size: 8
 balance_data: false
 policy_micro_batch_size: 2
 batch_size: 1
 learning_rate: 0.000005
+# 0 saves VRAM; use ~0.02–0.05 for multi-epoch runs (loads a frozen ref model).
+kl_coef: 0.0
 require_thinking_trace: true
 format_reward_weight: 0.1
 process_reward_weight: 0.0
@@ -174,6 +177,14 @@ auto_stop_metric: reward_mean
 write_verifier_data: true
 ```
 
+Bundled smoke datasets (expand for real training):
+
+| Dataset | Checker | Config |
+|---------|---------|--------|
+| `data/slime_sample.jsonl` | `numeric` | `configs/example_slime_single_gpu.yaml`, `configs/example_training_slime.yaml` |
+| `data/slime_code_sample.jsonl` | `code` (unit-test pass fraction) | `configs/example_slime_code.yaml` |
+| `data/slime_choice_sample.jsonl` | `choice` | `configs/example_slime_choice.yaml` |
+
 Important fields:
 
 | Field | Description |
@@ -181,17 +192,18 @@ Important fields:
 | `max_vram_gb` | Upper VRAM cap used to fail before out-of-memory conditions |
 | `prompt_field`, `answer_field` | Dataset columns for prompts and target answers |
 | `metadata_field` | Optional upstream-style metadata column, default `metadata`; JSON strings are parsed and carried into reward samples and bounded verifier records |
-| `reward` | Verifier checker: `exact_match`, `numeric`, `choice`, `contains_answer`, `field`, `code`, or `auto` |
+| `reward` | Verifier checker: `exact_match`, `numeric`, `choice`, `contains_answer`, `field`, `code` (unit-test pass fraction; 1.0 = all tests pass), or `auto` |
 | `reward_field` | Dataset reward column when `reward: field` |
 | `require_thinking_trace` | When true, rollout prompts may end with open `<think>`. Format is OK if the **generation** closes thinking: either a full `<think>...</think>` block or a continuation that only emits `</think>` then the answer |
 | `outcome_reward_weight` | Weight for hard outcome (correctness) from the shared verifier |
-| `format_reward_weight` | Small bonus when the completion contains a closed thinking block |
+| `format_reward_weight` | Small bonus when the completion contains a closed thinking block (side channel; keep below outcome weight) |
 | `process_reward_weight` | Experimental lexical process score; keep `0` for verifiable outcome-first RL |
 | `missing_thinking_penalty` | Penalty when format is required but the model omits a closed think block |
 | `min_thinking_tokens` | Only used when `process_reward_weight > 0` |
+| `kl_coef` | Coefficient on KL to a frozen reference model; `0` skips loading the ref (lower VRAM). Prefer `0.01`–`0.05` for longer post-training runs |
 | `rollouts_per_prompt` | Number of sampled completions per prompt for grouped advantages |
 | `rollout_batch_size` | Generation batch size; keep at least `rollouts_per_prompt` |
-| `dynamic_sampling_filter` | Optional upstream-style dynamic sampling filter; set `reward_nonzero_std` to drop prompt groups whose reward standard deviation is at or below `dynamic_sampling_min_reward_std` |
+| `dynamic_sampling_filter` | Default `reward_nonzero_std` drops prompt groups with zero reward spread (no GRPO signal). Set `none` only for debugging |
 | `over_sampling_batch_size` | Prompt sampling batch size used when dynamic filtering is enabled; keep larger than `batch_size` so strict filters can refill from additional oversampled prompt batches until the training target is met or epoch data is exhausted |
 | `calculate_per_token_loss` | Optional upstream-style loss normalization; defaults to per-sample loss and switches to token-weighted loss when enabled |
 | `balance_data` | For distributed SLIME, greedily shards prompts by estimated prompt length so each rank receives similar rollout work |
@@ -232,15 +244,19 @@ This is a **checkable proof**, not lexical process reward. Do not run untrusted
 code on sensitive hosts; the sandbox is best-effort, not a full VM.
 
 **Hard negatives (DPO / distill-RL):** when a group of rollouts for the same prompt
-contains both a unit-test pass and fails, Distill-RL keeps:
+contains both a verifier pass and fails, Distill-RL keeps:
 
-- `chosen` = a completion that **passes** all tests  
-- `rejected` = a **fail** with extractable code (prefer near-miss / partial pass)
+- `chosen` = a completion that **passes** (all unit tests for `code`; outcome score > 0.5 for math/choice)  
+- `rejected` = a **fail**, preferring near-miss / partial pass (hard negative)
 
-Empty/syntax-only fails are weaker negatives and only used if no coded fail exists.
+Empty/syntax-only fails are weaker negatives and only used if no stronger fail exists.
 Pairs with no pass in the group are dropped. This is appropriate for **offline
 preference** learning; online slime GRPO already demotes fails via group rewards
 and does not need a separate hard-negative loss.
+
+For Distill-RL preference rollouts on verifiable tasks, start from
+`data/distill_verifiable_prompts.jsonl` (math + choice + code) rather than the
+alignment-style post-train library.
 
 Slime checkpoints are exportable like other Seiso checkpoints. LoRA slime runs are treated as adapter checkpoints; non-LoRA slime runs are treated like full checkpoints. In distributed SLIME runs, rank 0 writes shared checkpoints and metrics, while verifier JSONL is rank-scoped to avoid concurrent writes.
 

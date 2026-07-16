@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-from seiso.distill_rl.prompts import is_verifiable_prompt, prompt_to_verifier_sample
-from seiso.distill_rl.prompts import RolloutPrompt
+from seiso.distill_rl.prompts import RolloutPrompt, is_verifiable_prompt, prompt_to_verifier_sample
 from seiso.rl_verify.preferences import (
     ScoredCompletion,
     preference_row_from_pair,

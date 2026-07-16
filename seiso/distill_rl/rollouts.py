@@ -14,6 +14,7 @@ from seiso.distill_rl.prompts import (
     prompt_to_verifier_sample,
 )
 from seiso.rl_verify.preferences import (
+    ScoredCompletion,
     preference_row_from_pair,
     score_code_completion,
     select_preference_pair,
@@ -188,40 +189,42 @@ def generate_outcome_preference_rows(
             )
             continue
 
-        scored_generic = [
-            {
-                "completion": completion,
-                "reward": outcome_reward(
-                    completion, prompt.answer, benchmark=prompt.benchmark
-                ),
-            }
-            for completion in completions
-        ]
-        ranked = sorted(
-            scored_generic, key=lambda item: float(item["reward"]), reverse=True
+        # Same policy as code: chosen must pass the verifier; rejected prefers
+        # a hard fail (strongest incorrect) rather than arbitrary best/worst.
+        scored_generic: list[ScoredCompletion] = []
+        group_rewards: list[float] = []
+        for completion in completions:
+            reward = float(
+                outcome_reward(completion, prompt.answer, benchmark=prompt.benchmark)
+            )
+            group_rewards.append(reward)
+            scored_generic.append(
+                ScoredCompletion(
+                    completion=completion,
+                    score=reward,
+                    passed=reward > 0.5,
+                    detail="outcome",
+                    has_code=False,
+                )
+            )
+        pair = select_preference_pair(
+            scored_generic,
+            hard_negatives=hard_negatives,
+            require_chosen_pass=True,
         )
-        chosen_r = float(ranked[0]["reward"])
-        rejected_r = float(ranked[-1]["reward"])
-        if chosen_r <= rejected_r:
-            continue
-        if str(ranked[0]["completion"]).strip() == str(ranked[-1]["completion"]).strip():
+        if pair is None:
             continue
         rows.append(
-            {
-                "prompt_id": prompt.prompt_id,
-                "prompt": prompt.text,
-                "answer": prompt.answer,
-                "benchmark": prompt.benchmark,
-                "chosen": str(ranked[0]["completion"]),
-                "rejected": str(ranked[-1]["completion"]),
-                "chosen_reward": chosen_r,
-                "rejected_reward": rejected_r,
-                "group_rewards": [float(item["reward"]) for item in scored_generic],
-                "grpo_group_size": len(scored_generic),
-                "reward_source": "verifiable_outcome",
-                "hard_negative": False,
-                "generation_seed": _prompt_seed(seed, prompt.prompt_id),
-            }
+            preference_row_from_pair(
+                prompt_id=prompt.prompt_id,
+                prompt=prompt.text,
+                pair=pair,
+                sample=sample,
+                generation_seed=_prompt_seed(seed, prompt.prompt_id),
+                group_size=len(scored_generic),
+                group_rewards=group_rewards,
+                reward_source="verifiable_outcome",
+            )
         )
     return rows
 

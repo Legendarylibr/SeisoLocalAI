@@ -26,7 +26,8 @@ class SingleGpuSlimeConfig:
     rollouts_per_prompt: int = 4
     rollout_batch_size: int = 4
     over_sampling_batch_size: int | None = None
-    dynamic_sampling_filter: str = "none"
+    # Drop zero-signal prompt groups (all rewards equal) — standard for sparse verifiable RL.
+    dynamic_sampling_filter: str = "reward_nonzero_std"
     dynamic_sampling_min_reward_std: float = 1e-6
     policy_micro_batch_size: int = 4
     train_batch_size: int = 1
@@ -39,6 +40,7 @@ class SingleGpuSlimeConfig:
     max_grad_norm: float = 1.0
     epochs: int = 1
     max_steps: int | None = None
+    # 0 = no frozen ref (lower VRAM). Use ~0.01–0.05 for longer runs to limit drift.
     kl_coef: float = 0.0
     clip_ratio: float = 0.2
     calculate_per_token_loss: bool = False

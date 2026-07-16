@@ -98,6 +98,8 @@ def test_single_gpu_slime_defaults_do_not_load_reference_model_or_lora(tmp_path:
 
     assert cfg.kl_coef == 0.0
     assert cfg.use_lora is False
+    assert cfg.dynamic_sampling_filter == "reward_nonzero_std"
+    assert cfg.process_reward_weight == 0.0
 
 
 def test_example_single_gpu_slime_config_loads_samples():
@@ -106,13 +108,14 @@ def test_example_single_gpu_slime_config_loads_samples():
 
     assert cfg.dataset == Path("data/slime_sample.jsonl")
     assert cfg.kl_coef == 0.0
+    assert cfg.dynamic_sampling_filter == "reward_nonzero_std"
     assert cfg.policy_micro_batch_size == 2
     assert cfg.shuffle_buffer_size == 128
     assert cfg.use_lora is True
     assert cfg.lora_r == 16
     assert cfg.reward == "numeric"
     assert cfg.process_reward_weight == 0.0
-    assert samples
+    assert len(samples) >= 16
     assert {"prompt", "answer"} <= set(samples[0])
 
 
@@ -787,6 +790,7 @@ def test_over_sampling_is_ignored_without_dynamic_filter(tmp_path: Path):
         output_dir=tmp_path / "out",
         train_batch_size=2,
         over_sampling_batch_size=8,
+        dynamic_sampling_filter="none",
     )
 
     assert _sampling_batch_size(cfg) == 2

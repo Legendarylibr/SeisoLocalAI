@@ -1,0 +1,12 @@
+{"prompt":"Which planet is known as the Red Planet?\nA) Venus\nB) Mars\nC) Jupiter\nD) Mercury\nAnswer with the letter only.","answer":"B","benchmark":"gpqa"}
+{"prompt":"What is the chemical symbol for water?\nA) H2O\nB) CO2\nC) O2\nD) NaCl\nAnswer with the letter only.","answer":"A","benchmark":"gpqa"}
+{"prompt":"How many sides does a triangle have?\nA) 2\nB) 3\nC) 4\nD) 5\nAnswer with the letter only.","answer":"B","benchmark":"gpqa"}
+{"prompt":"Which gas do plants primarily absorb for photosynthesis?\nA) Oxygen\nB) Nitrogen\nC) Carbon dioxide\nD) Hydrogen\nAnswer with the letter only.","answer":"C","benchmark":"gpqa"}
+{"prompt":"What is 2 + 2?\nA) 3\nB) 4\nC) 5\nD) 22\nAnswer with the letter only.","answer":"B","benchmark":"gpqa"}
+{"prompt":"Which ocean is the largest?\nA) Atlantic\nB) Indian\nC) Arctic\nD) Pacific\nAnswer with the letter only.","answer":"D","benchmark":"gpqa"}
+{"prompt":"What is the freezing point of water in Celsius?\nA) 0\nB) 32\nC) 100\nD) -10\nAnswer with the letter only.","answer":"A","benchmark":"gpqa"}
+{"prompt":"Which data structure uses FIFO order?\nA) Stack\nB) Queue\nC) Tree\nD) Graph\nAnswer with the letter only.","answer":"B","benchmark":"gpqa"}
+{"prompt":"In binary, what is 1 + 1?\nA) 1\nB) 2\nC) 10\nD) 11\nAnswer with the letter only.","answer":"C","benchmark":"gpqa"}
+{"prompt":"Which keyword defines a function in Python?\nA) func\nB) def\nC) function\nD) lambda_only\nAnswer with the letter only.","answer":"B","benchmark":"gpqa"}
+{"prompt":"What is the capital of France?\nA) Berlin\nB) Madrid\nC) Paris\nD) Rome\nAnswer with the letter only.","answer":"C","benchmark":"gpqa"}
+{"prompt":"Which force keeps planets in orbit around the Sun?\nA) Magnetism\nB) Gravity\nC) Friction\nD) Buoyancy\nAnswer with the letter only.","answer":"B","benchmark":"gpqa"}

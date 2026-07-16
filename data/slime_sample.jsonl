@@ -1,4 +1,32 @@
-{"prompt":"What is 6 times 7?","answer":"42"}
-{"prompt":"What is 2 + 2?","answer":"4"}
-{"prompt":"A box has 12 pencils. Sam removes 5. How many remain?","answer":"7"}
-{"prompt":"What is 15 squared?","answer":"225"}
+{"prompt":"What is 6 times 7?","answer":"42","benchmark":"gsm8k"}
+{"prompt":"What is 2 + 2?","answer":"4","benchmark":"gsm8k"}
+{"prompt":"A box has 12 pencils. Sam removes 5. How many remain?","answer":"7","benchmark":"gsm8k"}
+{"prompt":"What is 15 squared?","answer":"225","benchmark":"gsm8k"}
+{"prompt":"What is 9 times 8?","answer":"72","benchmark":"gsm8k"}
+{"prompt":"What is 100 minus 37?","answer":"63","benchmark":"gsm8k"}
+{"prompt":"What is 3 to the power of 4?","answer":"81","benchmark":"gsm8k"}
+{"prompt":"A train has 48 seats. 19 are taken. How many seats are free?","answer":"29","benchmark":"gsm8k"}
+{"prompt":"What is 144 divided by 12?","answer":"12","benchmark":"gsm8k"}
+{"prompt":"Maria has 25 apples and buys 17 more. How many does she have?","answer":"42","benchmark":"gsm8k"}
+{"prompt":"What is 7 times 11?","answer":"77","benchmark":"gsm8k"}
+{"prompt":"What is the sum of 13 and 28?","answer":"41","benchmark":"gsm8k"}
+{"prompt":"A rectangle is 8 units long and 5 units wide. What is its area?","answer":"40","benchmark":"gsm8k"}
+{"prompt":"What is 50% of 90?","answer":"45","benchmark":"gsm8k"}
+{"prompt":"What is 5 factorial (5!)?","answer":"120","benchmark":"gsm8k"}
+{"prompt":"If x = 3 and y = 4, what is x squared plus y squared?","answer":"25","benchmark":"gsm8k"}
+{"prompt":"A store sells pens for $2 each. How much do 9 pens cost?","answer":"18","benchmark":"gsm8k"}
+{"prompt":"What is 360 divided by 15?","answer":"24","benchmark":"gsm8k"}
+{"prompt":"There are 60 minutes in an hour. How many minutes are in 3 hours?","answer":"180","benchmark":"gsm8k"}
+{"prompt":"What is 16 times 4?","answer":"64","benchmark":"gsm8k"}
+{"prompt":"A class has 30 students. Half are girls. How many girls are there?","answer":"15","benchmark":"gsm8k"}
+{"prompt":"What is 99 plus 1?","answer":"100","benchmark":"gsm8k"}
+{"prompt":"What is the positive square root of 81?","answer":"9","benchmark":"gsm8k"}
+{"prompt":"Tom runs 4 km each day for 6 days. How many km total?","answer":"24","benchmark":"gsm8k"}
+{"prompt":"What is 2 cubed?","answer":"8","benchmark":"gsm8k"}
+{"prompt":"A baker makes 36 cookies and packs them 6 per bag. How many bags?","answer":"6","benchmark":"gsm8k"}
+{"prompt":"What is 45 minus 18?","answer":"27","benchmark":"gsm8k"}
+{"prompt":"What is 11 times 11?","answer":"121","benchmark":"gsm8k"}
+{"prompt":"A rope is 100 cm long. You cut off 35 cm. How much remains?","answer":"65","benchmark":"gsm8k"}
+{"prompt":"What is 1 plus 2 plus 3 plus 4 plus 5?","answer":"15","benchmark":"gsm8k"}
+{"prompt":"What is 200 divided by 8?","answer":"25","benchmark":"gsm8k"}
+{"prompt":"A farm has 14 cows and 9 sheep. How many animals in total?","answer":"23","benchmark":"gsm8k"}

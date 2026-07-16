@@ -108,5 +108,6 @@ def test_example_training_slime_config_loads():
     assert slime.reward == "numeric"
     assert slime.process_reward_weight == 0.0
     assert slime.format_reward_weight == 0.1
+    assert slime.dynamic_sampling_filter == "reward_nonzero_std"
     assert slime.use_lora is True
     assert slime.auto_stop is True

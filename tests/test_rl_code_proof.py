@@ -113,5 +113,22 @@ def test_example_code_dataset_rows_are_loadable():
     from seiso.io.jsonl import iter_jsonl
 
     rows = list(iter_jsonl(Path("data/slime_code_sample.jsonl")))
-    assert len(rows) >= 3
+    assert len(rows) >= 12
     assert all("tests" in row for row in rows)
+
+
+def test_example_math_and_choice_datasets_are_loadable():
+    from pathlib import Path
+
+    from seiso.io.jsonl import iter_jsonl
+
+    math_rows = list(iter_jsonl(Path("data/slime_sample.jsonl")))
+    choice_rows = list(iter_jsonl(Path("data/slime_choice_sample.jsonl")))
+    distill_rows = list(iter_jsonl(Path("data/distill_verifiable_prompts.jsonl")))
+    assert len(math_rows) >= 16
+    assert all("answer" in row for row in math_rows)
+    assert len(choice_rows) >= 8
+    assert all(row.get("benchmark") == "gpqa" for row in choice_rows)
+    assert len(distill_rows) >= 16
+    assert any(row.get("tests") for row in distill_rows)
+    assert any(row.get("benchmark") == "gsm8k" for row in distill_rows)

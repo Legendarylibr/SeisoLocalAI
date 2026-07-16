@@ -126,17 +126,28 @@ Requires `.[train]` for GPU distillation/finetune stages. Optional `.[compress-q
 
 ## Distill-RL (teacher → DPO)
 
-Teacher KL distillation into a smaller student, preference rollouts (teacher completions preferred over student), DPO alignment, and evaluation. Produces hash-chained manifests and optional multi-seed aggregation.
+Teacher KL distillation into a smaller student, preference construction, DPO
+alignment, and evaluation. Produces hash-chained manifests and optional multi-seed
+aggregation.
 
-Reasoning-focused runs can append a thinking instruction to prompts by leaving
+There are **two preference regimes** (do not conflate them):
+
+1. **Verifiable outcome (preferred for alignment claims).** Default when
+   `verifiable_outcome_rewards: true` and prompts carry `answer` / `tests` /
+   `benchmark` (`gsm8k`, `gpqa`, `aime`, `code`). Distill-RL group-samples the
+   **student** with `grpo_group_size`, scores with the shared verifier
+   (`seiso.rl_verify`), and keeps pairs only when **chosen passes** (outcome
+   score > 0.5, or all unit tests for code). Rejected prefers a hard fail
+   (near-miss). Use `data/distill_verifiable_prompts.jsonl` as a starter library.
+2. **Teacher ≻ student bootstrap (not outcome RL).** For non-verifiable prompts,
+   pairs are `chosen = teacher` and `rejected = student` with no correctness
+   check. Useful as imitation-shaped bootstrap data when labels are missing —
+   **not** a substitute for verifiable preference RL.
+
+Reasoning-focused runs can append a thinking instruction by leaving
 `require_thinking_trace: true`. Completions are scored as generated (no synthetic
-`<think>` tags). For verifiable math/code-style prompts that include an `answer`
-and optional `benchmark` field (`gsm8k`, `gpqa`, or `aime`), Distill-RL uses the
-shared verifier (`seiso.rl_verify`) for pure outcome rewards: group-sample
-multiple student traces with `grpo_group_size`, score final-answer correctness,
-and use best/worst traces as the preference pair. Evaluation writes
-`verifiable_benchmarks.json` with GSM8K/GPQA/AIME accuracy and the jump versus
-the baseline checkpoint.
+`<think>` tags). Evaluation writes `verifiable_benchmarks.json` with
+GSM8K/GPQA/AIME accuracy and the jump versus the baseline checkpoint.
 
 **Auto-sweep (default on):** Before the final DPO stage, runs a compact grid search over DPO hyperparameters (`dpo_beta`, `dpo_learning_rate`, preset-dependent). Disable with `--no-auto-sweep` (CLI) or `auto_sweep: false` (API). Custom grids via `sweep_config` path or `sweep_grid` in JSON config.
 

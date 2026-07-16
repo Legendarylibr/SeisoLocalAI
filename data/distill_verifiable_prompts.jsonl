@@ -1,0 +1,22 @@
+{"prompt_id":"math_001","text":"What is 6 times 7?","answer":"42","benchmark":"gsm8k"}
+{"prompt_id":"math_002","text":"What is 2 + 2?","answer":"4","benchmark":"gsm8k"}
+{"prompt_id":"math_003","text":"A box has 12 pencils. Sam removes 5. How many remain?","answer":"7","benchmark":"gsm8k"}
+{"prompt_id":"math_004","text":"What is 15 squared?","answer":"225","benchmark":"gsm8k"}
+{"prompt_id":"math_005","text":"What is 9 times 8?","answer":"72","benchmark":"gsm8k"}
+{"prompt_id":"math_006","text":"What is 100 minus 37?","answer":"63","benchmark":"gsm8k"}
+{"prompt_id":"math_007","text":"What is 144 divided by 12?","answer":"12","benchmark":"gsm8k"}
+{"prompt_id":"math_008","text":"Maria has 25 apples and buys 17 more. How many does she have?","answer":"42","benchmark":"gsm8k"}
+{"prompt_id":"math_009","text":"What is 50% of 90?","answer":"45","benchmark":"gsm8k"}
+{"prompt_id":"math_010","text":"What is 5 factorial (5!)?","answer":"120","benchmark":"gsm8k"}
+{"prompt_id":"math_011","text":"If x = 3 and y = 4, what is x squared plus y squared?","answer":"25","benchmark":"gsm8k"}
+{"prompt_id":"math_012","text":"What is the positive square root of 81?","answer":"9","benchmark":"gsm8k"}
+{"prompt_id":"choice_001","text":"Which planet is known as the Red Planet?\nA) Venus\nB) Mars\nC) Jupiter\nD) Mercury\nAnswer with the letter only.","answer":"B","benchmark":"gpqa"}
+{"prompt_id":"choice_002","text":"What is the chemical symbol for water?\nA) H2O\nB) CO2\nC) O2\nD) NaCl\nAnswer with the letter only.","answer":"A","benchmark":"gpqa"}
+{"prompt_id":"choice_003","text":"How many sides does a triangle have?\nA) 2\nB) 3\nC) 4\nD) 5\nAnswer with the letter only.","answer":"B","benchmark":"gpqa"}
+{"prompt_id":"choice_004","text":"Which data structure uses FIFO order?\nA) Stack\nB) Queue\nC) Tree\nD) Graph\nAnswer with the letter only.","answer":"B","benchmark":"gpqa"}
+{"prompt_id":"code_001","text":"Write a Python function `add(a, b)` that returns the sum of two numbers.","tests":["assert add(1, 2) == 3","assert add(0, 0) == 0","assert add(-1, 1) == 0"],"benchmark":"code"}
+{"prompt_id":"code_002","text":"Write a Python function `is_even(n)` that returns True when n is even.","tests":["assert is_even(2) is True","assert is_even(3) is False","assert is_even(0) is True"],"benchmark":"code"}
+{"prompt_id":"code_003","text":"Write a Python function `factorial(n)` for non-negative integers (0! = 1).","tests":["assert factorial(0) == 1","assert factorial(1) == 1","assert factorial(5) == 120"],"timeout_s":3,"benchmark":"code"}
+{"prompt_id":"code_004","text":"Write a Python function `sum_list(nums)` that returns the sum of a list of numbers.","tests":["assert sum_list([1, 2, 3]) == 6","assert sum_list([]) == 0"],"benchmark":"code"}
+{"prompt_id":"code_005","text":"Write a Python function `is_palindrome(s)` that returns True if s equals its reverse.","tests":["assert is_palindrome('racecar') is True","assert is_palindrome('hello') is False"],"benchmark":"code"}
+{"prompt_id":"code_006","text":"Write a Python function `clamp(x, lo, hi)` that clamps x into [lo, hi].","tests":["assert clamp(5, 0, 10) == 5","assert clamp(-1, 0, 10) == 0","assert clamp(99, 0, 10) == 10"],"benchmark":"code"}
