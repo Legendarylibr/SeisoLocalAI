@@ -1636,6 +1636,7 @@ class LocalInferenceRunner:
 
                 native_linux_nvidia = use_linux_nvidia_inference_guards()
             except Exception:
+                logger.debug("Native Linux NVIDIA probe failed", exc_info=True)
                 native_linux_nvidia = False
             if native_linux_nvidia:
                 adjusted = dict(payload)

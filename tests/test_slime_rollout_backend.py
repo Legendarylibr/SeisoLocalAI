@@ -8,8 +8,8 @@ from unittest.mock import patch
 
 import pytest
 
-from seiso.slime_single_gpu.config import SingleGpuSlimeConfig
-from seiso.slime_single_gpu.rollout_backend import (
+from seiso.slime.config import SingleGpuSlimeConfig
+from seiso.slime.rollout_backend import (
     SGLangRolloutClient,
     VLLMRolloutClient,
     format_generation_prompt,
@@ -72,7 +72,7 @@ def test_sglang_requires_base_url(tmp_path: Path):
 def test_vllm_requires_base_url(tmp_path: Path, monkeypatch):
     monkeypatch.delenv("SEISO_MANAGED_VLLM_PORT", raising=False)
     with patch(
-        "seiso.slime_single_gpu.rollout_backend.resolve_vllm_base_url",
+        "seiso.slime.rollout_backend.resolve_vllm_base_url",
         return_value="",
     ):
         cfg = _cfg(tmp_path, rollout_backend="vllm", vllm_base_url="")
@@ -122,7 +122,7 @@ def test_sglang_client_complete_parses_text(tmp_path: Path):
             return False
 
     with patch(
-        "seiso.slime_single_gpu.rollout_backend.urllib.request.urlopen",
+        "seiso.slime.rollout_http.urllib.request.urlopen",
         return_value=_Resp(),
     ):
         assert client.complete("prompt") == " 42 "
@@ -156,7 +156,7 @@ def test_sglang_client_complete_with_tokens_reads_output_ids(tmp_path: Path):
             return False
 
     with patch(
-        "seiso.slime_single_gpu.rollout_backend.urllib.request.urlopen",
+        "seiso.slime.rollout_http.urllib.request.urlopen",
         return_value=_Resp(),
     ):
         text, tids = client.complete_with_tokens("prompt")
@@ -167,7 +167,7 @@ def test_sglang_client_complete_with_tokens_reads_output_ids(tmp_path: Path):
 def test_build_sequence_tensors_prefers_server_token_ids(tmp_path: Path):
     import torch
 
-    from seiso.slime_single_gpu.rollout_backend import build_sequence_tensors
+    from seiso.slime.rollout_backend import build_sequence_tensors
 
     class _Tok:
         pad_token_id = 0
@@ -219,7 +219,7 @@ def test_sglang_update_weights_from_disk(tmp_path: Path):
         return _Resp()
 
     with patch(
-        "seiso.slime_single_gpu.rollout_backend.urllib.request.urlopen",
+        "seiso.slime.rollout_http.urllib.request.urlopen",
         side_effect=_urlopen,
     ):
         out = client.update_weights_from_disk("/tmp/weights", weight_version="v3")
@@ -232,7 +232,7 @@ def test_sglang_update_weights_from_disk(tmp_path: Path):
 
 
 def test_sync_sglang_weights_noop_for_hf_backend(tmp_path: Path):
-    from seiso.slime_single_gpu.rollout_backend import sync_sglang_weights_from_actor
+    from seiso.slime.rollout_backend import sync_sglang_weights_from_actor
 
     cfg = _cfg(tmp_path, rollout_backend="hf", output_dir=tmp_path / "out")
     path = sync_sglang_weights_from_actor(
@@ -246,7 +246,7 @@ def test_sync_sglang_weights_noop_for_hf_backend(tmp_path: Path):
 
 
 def test_sync_vllm_weights_noop_for_hf_backend(tmp_path: Path):
-    from seiso.slime_single_gpu.rollout_backend import sync_vllm_weights_from_actor
+    from seiso.slime.rollout_backend import sync_vllm_weights_from_actor
 
     cfg = _cfg(tmp_path, rollout_backend="hf", output_dir=tmp_path / "out")
     path = sync_vllm_weights_from_actor(
@@ -297,7 +297,7 @@ def test_vllm_client_strips_v1_suffix_and_loads_lora(tmp_path: Path):
         return _Resp(b'{"choices":[{"text":"ok"}]}')
 
     with patch(
-        "seiso.slime_single_gpu.rollout_backend.urllib.request.urlopen",
+        "seiso.slime.rollout_http.urllib.request.urlopen",
         side_effect=_urlopen,
     ):
         client.load_lora_adapter("/tmp/adapter", lora_name="policy_lora")
@@ -316,7 +316,7 @@ def test_vllm_client_strips_v1_suffix_and_loads_lora(tmp_path: Path):
 
 
 def test_sglang_engine_urls_dedupes_comma_and_list(tmp_path: Path):
-    from seiso.slime_single_gpu.rollout_backend import sglang_engine_urls
+    from seiso.slime.rollout_backend import sglang_engine_urls
 
     cfg = _cfg(
         tmp_path,
@@ -333,7 +333,7 @@ def test_sglang_engine_urls_dedupes_comma_and_list(tmp_path: Path):
 
 
 def test_prune_weight_versions_keeps_last_n(tmp_path: Path):
-    from seiso.slime_single_gpu.rollout_backend import _prune_weight_versions
+    from seiso.slime.rollout_backend import _prune_weight_versions
 
     root = tmp_path / "weights"
     for name in (
@@ -405,7 +405,7 @@ def test_example_single_gpu_keeps_hf_backend():
 
 
 def test_vllm_engine_urls_strip_v1_and_dedupe(tmp_path: Path):
-    from seiso.slime_single_gpu.rollout_backend import vllm_engine_urls
+    from seiso.slime.rollout_backend import vllm_engine_urls
 
     cfg = _cfg(
         tmp_path,

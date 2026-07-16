@@ -185,9 +185,7 @@ def release_inference_memory(*, reason: str, log: LogFn = None) -> dict[str, Any
         from forge.services.managed_vllm import stop_managed_if_running
 
         settings = get_settings()
-        managed = stop_managed_if_running(
-            data_dir=settings.data_dir, reason=reason
-        )
+        managed = stop_managed_if_running(data_dir=settings.data_dir, reason=reason)
         managed_stopped = bool(managed.get("stopped"))
         if managed_stopped:
             note = "Stopped managed multi-GPU vLLM to free GPU memory"
@@ -354,4 +352,8 @@ def assert_gpu_available_for_inference() -> None:
     except RuntimeError:
         raise
     except Exception:
-        pass
+        import logging
+
+        logging.getLogger(__name__).debug(
+            "Managed vLLM status check skipped during GPU gate", exc_info=True
+        )

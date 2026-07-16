@@ -31,42 +31,60 @@ jobs:
       python: ${{ steps.select.outputs.python }}
       frontend: ${{ steps.select.outputs.frontend }}
     steps:
+      # Prefer git path detection over dorny/paths-filter: the latter calls the
+      # GitHub API and can fail with unicorn/5xx pages, skipping the whole matrix.
       - uses: actions/checkout@v4
         if: github.event_name == 'pull_request'
-      - uses: dorny/paths-filter@v3
-        id: filter
-        if: github.event_name == 'pull_request'
         with:
-          filters: |
-            python:
-              - 'seiso/**'
-              - 'forge/**'
-              - 'seiso_cli/**'
-              - 'tests/**'
-              - 'configs/**'
-              - 'scripts/**'
-              - 'docs/**'
-              - 'locks/**'
-              - 'pyproject.toml'
-              - 'requirements*.txt'
-              - 'Makefile'
-              - '*.md'
-              - '.secrets.baseline'
-              - '.github/workflows/ci.yml'
-            frontend:
-              - 'forge-ui/**'
-              - '.github/workflows/ci.yml'
+          fetch-depth: 0
       - id: select
         run: |
+          set -euo pipefail
           if [ "${{ github.event_name }}" != "pull_request" ]; then
             echo "python=true" >> "$GITHUB_OUTPUT"
             echo "frontend=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          python="${{ steps.filter.outputs.python }}"
-          frontend="${{ steps.filter.outputs.frontend }}"
-          echo "python=${python:-false}" >> "$GITHUB_OUTPUT"
-          echo "frontend=${frontend:-false}" >> "$GITHUB_OUTPUT"
+          base="${{ github.event.pull_request.base.sha }}"
+          head="${{ github.event.pull_request.head.sha }}"
+          if ! files=$(git diff --name-only "${base}...${head}" 2>/dev/null); then
+            echo "git diff failed; running full matrix" >&2
+            echo "python=true" >> "$GITHUB_OUTPUT"
+            echo "frontend=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          python=false
+          frontend=false
+          while IFS= read -r path; do
+            [ -z "$path" ] && continue
+            case "$path" in
+              seiso/*|forge/*|seiso_cli/*|tests/*|configs/*|scripts/*|docs/*|locks/*|pyproject.toml|Makefile|.secrets.baseline|.github/workflows/ci.yml)
+                python=true
+                ;;
+              requirements*.txt|*.md)
+                python=true
+                ;;
+            esac
+            # Nested markdown / requirements (bash case * does not cross '/').
+            case "$path" in
+              */*.md|*/*/*.md|*/requirements*.txt)
+                python=true
+                ;;
+            esac
+            case "$path" in
+              forge-ui/*|.github/workflows/ci.yml)
+                frontend=true
+                ;;
+            esac
+          done <<< "$files"
+          # Empty or unreadable diffs still run Python jobs so quality gate cannot soft-skip.
+          if [ -z "$files" ]; then
+            python=true
+          fi
+          echo "python=${python}" >> "$GITHUB_OUTPUT"
+          echo "frontend=${frontend}" >> "$GITHUB_OUTPUT"
+          echo "Changed files (truncated):" >&2
+          echo "$files" | head -40 >&2
 
   deps:
     name: Dependency locks

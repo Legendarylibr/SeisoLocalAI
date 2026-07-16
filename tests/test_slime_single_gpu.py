@@ -10,14 +10,14 @@ from pathlib import Path
 import pytest
 
 from seiso.models.lora_targets import resolve_lora_target_modules
-from seiso.slime_single_gpu.config import SingleGpuSlimeConfig
-from seiso.slime_single_gpu.rewards import (
+from seiso.slime.config import SingleGpuSlimeConfig
+from seiso.slime.rewards import (
     contains_answer_reward,
     exact_match_reward,
     numeric_reward,
     resolve_reward,
 )
-from seiso.slime_single_gpu.trainer import (
+from seiso.slime.trainer import (
     Rollout,
     _append_jsonl_records,
     _append_metrics,
@@ -1048,7 +1048,7 @@ def test_dynamic_sampling_refills_until_training_group_target(tmp_path: Path, mo
         )
 
     monkeypatch.setattr(
-        "seiso.slime_single_gpu.trainer._collect_rollouts",
+        "seiso.slime.trainer._collect_rollouts",
         fake_collect_rollouts,
     )
     rollout_batch = _collect_training_rollout_batch(
@@ -1104,7 +1104,7 @@ def test_dynamic_sampling_truncates_oversampled_groups_to_training_target(
         )
 
     monkeypatch.setattr(
-        "seiso.slime_single_gpu.trainer._collect_rollouts",
+        "seiso.slime.trainer._collect_rollouts",
         fake_collect_rollouts,
     )
     rollout_batch = _collect_training_rollout_batch(
