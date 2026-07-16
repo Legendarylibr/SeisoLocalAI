@@ -23,6 +23,9 @@ def test_moe_recommendations_are_router_safe_and_report_both_sizes():
     assert result["total_params_b"] == 30.0
     assert result["active_params_b"] == 3.0
     assert result["config"]["batch_size"] == 1
+    # Hardware caps must key off resident totals (~30B), not active (~3B).
+    assert result["config"]["gradient_accumulation_steps"] >= 32
+    assert result["config"]["max_seq_length"] <= 1024
     assert result["config"]["gradient_checkpointing"] is True
     assert any("router" in note.lower() for note in result["notes"])
 

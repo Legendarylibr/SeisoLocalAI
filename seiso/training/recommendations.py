@@ -201,13 +201,10 @@ def recommend_training_config(
         "early_stopping": ds.get("early_stopping", True),
         "early_stopping_patience": ds.get("early_stopping_patience", 3),
     }
+    # MoE caps must use resident totals (params_b), not active-per-token size.
     config = _apply_hardware_caps(
         base_cfg,
-        (
-            moe_sizing.active_params_b
-            if moe_sizing and moe_sizing.is_moe
-            else params_b
-        ),
+        params_b,
         hardware_max_seq=int(defaults["max_seq_length"]),
     )
     if moe_sizing and moe_sizing.is_moe:

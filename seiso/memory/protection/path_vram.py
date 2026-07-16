@@ -70,12 +70,20 @@ def _hub_model_vram_mb(path_str: str, *, mode: str) -> int | None:
     native = is_native_hub_quant_model(path_str, config=config, peek=False)
     quant = "mxfp4" if native and mode == "train" else ("Q8_0" if native else "4bit")
     sizing = infer_moe_sizing(path_str, config=config)
-    if mode == "chat" and sizing.is_moe and sizing.total_params_b is not None:
-        est_gb = estimate_moe_resident_vram_gb(
-            f"{sizing.total_params_b:g}B",
-            quant=quant,
-            repo_id=path_str,
-        )
+    if sizing.is_moe and sizing.total_params_b is not None:
+        # MoE loads every expert into memory; use resident totals for both chat
+        # and train preflight (not active-params compute sizing).
+        label = f"{sizing.total_params_b:g}B"
+        if mode == "chat":
+            est_gb = estimate_moe_resident_vram_gb(
+                label,
+                quant=quant,
+                repo_id=path_str,
+            )
+        else:
+            # Clear repo_id so training estimate does not re-apply the MoE
+            # active-params shrink heuristic on top of the total label.
+            est_gb = estimate_training_vram_gb(label, quant=quant, repo_id="")
         return int(est_gb * 1024)
     est_gb = (
         estimate_training_vram_gb(label, quant=quant, repo_id=path_str)
