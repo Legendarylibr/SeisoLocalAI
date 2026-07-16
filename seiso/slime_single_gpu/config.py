@@ -90,7 +90,7 @@ class SingleGpuSlimeConfig:
     calculate_per_token_loss: bool = False
     temperature: float = 0.9
     top_p: float = 0.95
-    # Online generate: hf (colocated, default) | sglang | auto
+    # Online generate: hf (colocated, default) | sglang | vllm | auto
     # "data_gen" is accepted as an alias of "hf".
     rollout_backend: str = "hf"
     # slime: --apply-chat-template
@@ -110,6 +110,19 @@ class SingleGpuSlimeConfig:
     sglang_weight_keep: int = 2
     # Extra engines (comma list or YAML list); sglang_base_url may also be comma-separated
     sglang_engine_urls: list[str] | str | None = None
+    # Multi-GPU rollouts via OpenAI-compatible vLLM (managed multi-GPU or external).
+    vllm_base_url: str = ""
+    vllm_model: str = ""
+    vllm_api_key: str = "EMPTY"
+    vllm_timeout_s: float = 120.0
+    vllm_max_workers: int = 8
+    vllm_sync_weights: bool = True
+    vllm_weight_dir: str = "vllm_weight_sync"
+    # auto = LoRA when use_lora/PEFT else full; lora = /v1/load_lora_adapter; full = disk reload
+    vllm_weight_mode: str = "auto"
+    vllm_weight_keep: int = 2
+    vllm_engine_urls: list[str] | str | None = None
+    vllm_lora_name: str = "seiso_slime_policy"
     require_thinking_trace: bool = True
     thinking_instruction: str = (
         "Show your reasoning in <think>...</think>, then give the final answer."
@@ -280,3 +293,10 @@ class SingleGpuSlimeConfig:
             raise ValueError("sglang_weight_mode must be 'full' or 'delta'")
         if self.sglang_weight_keep < 1:
             raise ValueError("sglang_weight_keep must be >= 1")
+        vmode = str(self.vllm_weight_mode or "auto").lower()
+        if vmode not in {"auto", "lora", "full"}:
+            raise ValueError("vllm_weight_mode must be one of: auto, lora, full")
+        if self.vllm_weight_keep < 1:
+            raise ValueError("vllm_weight_keep must be >= 1")
+        if not str(self.vllm_lora_name or "").strip():
+            raise ValueError("vllm_lora_name must not be empty")

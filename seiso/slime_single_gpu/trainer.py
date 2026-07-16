@@ -578,6 +578,7 @@ def _collect_rollouts(
         format_generation_prompt,
         generate_data_gen_chunk,
         generate_sglang_chunk,
+        generate_vllm_chunk,
         resolve_rollout_backend,
     )
 
@@ -592,6 +593,7 @@ def _collect_rollouts(
         "rollout_groups_kept": 0.0,
         "dynamic_filtered_groups": 0.0,
         "rollout_backend_is_sglang": 1.0 if backend == "sglang" else 0.0,
+        "rollout_backend_is_vllm": 1.0 if backend == "vllm" else 0.0,
     }
     for sample_chunk in _chunked(samples, prompt_batch_size):
         prompt_chunk = [
@@ -602,12 +604,19 @@ def _collect_rollouts(
             )
             for sample in sample_chunk
         ]
-        if backend == "sglang":
-            gen = generate_sglang_chunk(
-                tokenizer=tokenizer,
-                prompts=prompt_chunk,
-                config=config,
-            )
+        if backend in {"sglang", "vllm"}:
+            if backend == "vllm":
+                gen = generate_vllm_chunk(
+                    tokenizer=tokenizer,
+                    prompts=prompt_chunk,
+                    config=config,
+                )
+            else:
+                gen = generate_sglang_chunk(
+                    tokenizer=tokenizer,
+                    prompts=prompt_chunk,
+                    config=config,
+                )
             seq_rows = build_sequence_tensors(
                 tokenizer=tokenizer,
                 prompts=gen.prompts,
@@ -635,7 +644,6 @@ def _collect_rollouts(
             completions = gen.completions
             seq_rows = None
             use_hf_sequences = True
-
         chunk_rollouts: list[Rollout] = []
         verifier_records: list[dict[str, Any]] = []
         total = len(completions)
@@ -1834,31 +1842,59 @@ def _sync_rollout_engine_weights(
     step: int,
     sync_state: Any | None = None,
 ) -> None:
-    """Push actor weights to SGLang (initial + post-step; single- + multi-GPU).
+    """Push actor weights to SGLang/vLLM (initial + post-step; single- + multi-GPU).
 
-    Uses slime disk transport: full HF checkpoint and/or delta + multi-engine
-    ``update_weights_from_disk`` / ``pull_weights``. No-op for ``rollout_backend=hf``.
+    * SGLang — slime disk transport: full HF checkpoint and/or delta + multi-engine
+      ``update_weights_from_disk`` / ``pull_weights``
+    * vLLM — PEFT adapter via ``/v1/load_lora_adapter`` (preferred) or best-effort
+      full disk reload endpoints
 
-    On failure, all ranks raise after a barrier so DDP does not hang.
+    No-op for ``rollout_backend=hf``. On failure, all ranks raise after a barrier
+    so DDP does not hang.
     """
     import torch
 
     from seiso.slime_single_gpu.rollout_backend import (
         resolve_rollout_backend,
         sync_sglang_weights_from_actor,
+        sync_vllm_weights_from_actor,
     )
 
     backend = resolve_rollout_backend(config, world_size=dist_ctx.world_size)
-    if backend != "sglang":
+    if backend not in {"sglang", "vllm"}:
         return
-    if not bool(getattr(config, "sglang_sync_weights", True)):
+    sync_enabled = (
+        bool(getattr(config, "sglang_sync_weights", True))
+        if backend == "sglang"
+        else bool(getattr(config, "vllm_sync_weights", True))
+    )
+    if not sync_enabled:
         _distributed_barrier(dist_ctx)
         return
 
     error_msg = ""
     path: str | None = None
+    if backend == "vllm":
+        label = "vllm_weight_sync"
+        weight_dir = getattr(config, "vllm_weight_dir", "vllm_weight_sync")
+        disable_hint = "Set vllm_sync_weights: false only for debugging."
+        engine_hint = (
+            "Ensure each vLLM engine has --enable-lora (for LoRA mode) or "
+            "exposes a disk weight reload endpoint (full mode) and can read "
+            f"{config.output_dir / weight_dir}."
+        )
+        sync_fn = sync_vllm_weights_from_actor
+    else:
+        label = "sglang_weight_sync"
+        weight_dir = config.sglang_weight_dir
+        disable_hint = "Set sglang_sync_weights: false only for debugging."
+        engine_hint = (
+            "Ensure each engine exposes /update_weights_from_disk and can read "
+            f"{config.output_dir / weight_dir}."
+        )
+        sync_fn = sync_sglang_weights_from_actor
     try:
-        path = sync_sglang_weights_from_actor(
+        path = sync_fn(
             model=model,
             tokenizer=tokenizer,
             config=config,
@@ -1870,17 +1906,14 @@ def _sync_rollout_engine_weights(
         if dist_ctx.is_main and path is not None and config.log_every_steps:
             mode = getattr(sync_state, "last_mode", None) if sync_state else None
             print(
-                f"sglang_weight_sync step={step} mode={mode} path={path}",
+                f"{label} step={step} mode={mode} path={path}",
                 flush=True,
             )
     except Exception as exc:
         error_msg = (
-            f"SGLang weight sync failed at step={step}: {exc}. "
-            "Ensure each engine exposes /update_weights_from_disk and can read "
-            f"{config.output_dir / config.sglang_weight_dir}. "
-            "Set sglang_sync_weights: false only for debugging."
+            f"{backend} weight sync failed at step={step}: {exc}. "
+            f"{engine_hint} {disable_hint}"
         )
-
     if dist_ctx.enabled:
         # Broadcast failure so every rank raises after the barrier.
         flag = torch.tensor(
@@ -1894,7 +1927,9 @@ def _sync_rollout_engine_weights(
             # Rank0 has the detailed message; others get a generic abort.
             if error_msg:
                 raise RuntimeError(error_msg)
-            raise RuntimeError(f"SGLang weight sync failed at step={step} on another rank")
+            raise RuntimeError(
+                f"{backend} weight sync failed at step={step} on another rank"
+            )
         return
 
     if error_msg:

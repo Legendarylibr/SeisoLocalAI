@@ -262,3 +262,17 @@ def test_suggest_tensor_parallel():
     assert suggest_tensor_parallel(2) == 2
     assert suggest_tensor_parallel(3) == 2
     assert suggest_tensor_parallel(8) == 8
+
+
+def test_managed_vllm_enable_lora_flag(monkeypatch):
+    """Optional LoRA flag for multi-GPU slime RL adapter hot-reload."""
+    from seiso.inference import managed_vllm as mv
+
+    monkeypatch.setenv("SEISO_MANAGED_VLLM_ENABLE_LORA", "true")
+    with patch.object(
+        mv,
+        "resolve_vllm_command",
+        return_value=["python3", "-m", "vllm.entrypoints.openai.api_server"],
+    ):
+        launch = mv.build_launch_command(model="org/model", tensor_parallel_size=2)
+    assert "--enable-lora" in launch["command"]

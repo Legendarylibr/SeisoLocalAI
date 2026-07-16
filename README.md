@@ -37,6 +37,7 @@ Seiso combines a **web workspace (Forge)** and a **Python core (CLI + library)**
 | Download & chat with open models | Model Hub, Chat | `seiso chat` |
 | QLoRA / LoRA / full fine-tune | Training Studio | `seiso train` |
 | Single-GPU slime post-training | CLI | `seiso train --config configs/example_training_slime.yaml` |
+| Multi-GPU slime (vLLM rollouts) | CLI | `scripts/run_slime_vllm_ddp.sh 2 configs/example_training_slime_vllm.yaml` |
 | Merge, GGUF, Hub publish | Export | `seiso export` |
 | LLM distill → prune → quant | Compress | `seiso compress run` |
 | Teacher distill + DPO alignment | Distill-RL | `seiso distill-rl run` |
@@ -467,7 +468,7 @@ Training stack: **TRL `SFTTrainer`** + **PEFT** (LoRA/QLoRA) + optional **fused 
 - **Optimizations:** gradient checkpointing, packing, RSLoRA, train-on-responses-only
 - **Multi-GPU:** `torchrun` distributed workers; rank-0 checkpoint writes ([multi-gpu](docs/training/multi-gpu.md))
 - **Fused kernels:** RMSNorm, SwiGLU MLP, cross-entropy, fused LoRA delta ([kernels](docs/training/kernels.md))
-- **Release-style post-training:** `method: slime` adds rollout rewards, verifier data, best/final checkpoints, and plateau auto-stop on one GPU ([training](docs/training/quickstart.md#slime-post-training))
+- **Release-style post-training:** `method: slime` adds rollout rewards, verifier data, best/final checkpoints, and plateau auto-stop; multi-GPU rollouts can use **vLLM** (`rollout_backend: vllm`) or SGLang ([training](docs/training/quickstart.md#slime-post-training))
 
 ### Inference
 
@@ -675,7 +676,7 @@ Seiso is licensed under the **GNU General Public License v3.0 (GPL-3.0)**. See [
 ---
 ## RL Stack
 
-The single-GPU slime rl run is built on top of slime (https://github.com/THUDM/slime).
+The slime RL path is built on top of slime (https://github.com/THUDM/slime). Single-GPU uses colocated HF generate; multi-GPU can drive rollouts through **vLLM** (`rollout_backend: vllm`, including Seiso managed multi-GPU) or SGLang.
 
 ## Inference Stack
 

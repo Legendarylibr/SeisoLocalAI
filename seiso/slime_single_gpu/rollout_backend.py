@@ -1,8 +1,9 @@
 """Online rollout backends for slime-style GRPO.
 
-* ``data_gen`` — colocated Hugging Face ``generate`` (default; single-GPU path)
+* ``hf`` / ``data_gen`` — colocated Hugging Face ``generate`` (default; single-GPU)
 * ``sglang`` — OpenAI-compatible HTTP generation against a running SGLang server
-  (preferred for multi-GPU / high-throughput generation)
+* ``vllm`` — OpenAI-compatible HTTP generation against a running vLLM server
+  (multi-GPU tensor-parallel rollouts; pairs with managed multi-GPU vLLM)
 
 Completions are always produced online. Prompt corpora (labels/tests) come from
 JSONL or high-level ``data_gen`` corpus materialization — never from stored
@@ -21,8 +22,9 @@ from typing import Any
 
 from seiso.slime_single_gpu.config import SingleGpuSlimeConfig
 
-# Canonical: hf | sglang | auto. "data_gen" is a legacy alias of "hf".
-_ROLLOUT_BACKENDS = frozenset({"hf", "sglang", "auto", "data_gen"})
+# Canonical: hf | sglang | vllm | auto. "data_gen" is a legacy alias of "hf".
+_ROLLOUT_BACKENDS = frozenset({"hf", "sglang", "vllm", "auto", "data_gen"})
+_HTTP_ROLLOUT_BACKENDS = frozenset({"sglang", "vllm"})
 
 
 def _normalize_backend_name(name: str) -> str:
@@ -41,28 +43,45 @@ def resolve_rollout_backend(
 
     * ``hf`` (default; alias ``data_gen``) — colocated Hugging Face generate
     * ``sglang`` — OpenAI-compatible SGLang HTTP
-    * ``auto`` — SGLang when ``sglang_base_url`` is set and ``world_size > 1``
+    * ``vllm`` — OpenAI-compatible vLLM HTTP (multi-GPU TP server)
+    * ``auto`` — prefer vLLM then SGLang when a base URL is set and
+      ``world_size > 1``; otherwise HF
     """
     name = _normalize_backend_name(getattr(config, "rollout_backend", "hf") or "hf")
-    if name not in {"hf", "sglang", "auto"}:
-        raise ValueError(f"rollout_backend must be one of: hf, sglang, auto (got {name!r})")
+    if name not in {"hf", "sglang", "vllm", "auto"}:
+        raise ValueError(
+            f"rollout_backend must be one of: hf, sglang, vllm, auto (got {name!r})"
+        )
     if name == "auto":
-        base = str(getattr(config, "sglang_base_url", "") or "").strip()
-        if base and world_size > 1:
-            return "sglang"
+        if world_size > 1:
+            if resolve_vllm_base_url(config):
+                return "vllm"
+            if str(getattr(config, "sglang_base_url", "") or "").strip():
+                return "sglang"
         return "hf"
     return name
 
 
 def validate_rollout_backend_config(config: SingleGpuSlimeConfig) -> None:
     name = _normalize_backend_name(getattr(config, "rollout_backend", "hf") or "hf")
-    if name not in {"hf", "sglang", "auto"}:
-        raise ValueError(f"rollout_backend must be one of: hf, sglang, auto (got {name!r})")
+    if name not in {"hf", "sglang", "vllm", "auto"}:
+        raise ValueError(
+            f"rollout_backend must be one of: hf, sglang, vllm, auto (got {name!r})"
+        )
     if name == "sglang":
         base = str(getattr(config, "sglang_base_url", "") or "").strip()
         if not base:
             raise ValueError(
-                "rollout_backend=sglang requires sglang_base_url (e.g. http://127.0.0.1:30000)"
+                "rollout_backend=sglang requires sglang_base_url "
+                "(e.g. http://127.0.0.1:30000)"
+            )
+    if name == "vllm":
+        base = resolve_vllm_base_url(config)
+        if not base:
+            raise ValueError(
+                "rollout_backend=vllm requires vllm_base_url "
+                "(e.g. http://127.0.0.1:8000), or a running managed multi-GPU "
+                "vLLM server (SEISO_MANAGED_VLLM_ENABLED=true)"
             )
     timeout = float(getattr(config, "sglang_timeout_s", 120.0) or 120.0)
     if timeout <= 0:
@@ -70,7 +89,17 @@ def validate_rollout_backend_config(config: SingleGpuSlimeConfig) -> None:
     max_workers = int(getattr(config, "sglang_max_workers", 8) or 8)
     if max_workers < 1:
         raise ValueError("sglang_max_workers must be positive")
-
+    vllm_timeout = float(getattr(config, "vllm_timeout_s", 120.0) or 120.0)
+    if vllm_timeout <= 0:
+        raise ValueError("vllm_timeout_s must be positive")
+    vllm_workers = int(getattr(config, "vllm_max_workers", 8) or 8)
+    if vllm_workers < 1:
+        raise ValueError("vllm_max_workers must be positive")
+    mode = str(getattr(config, "vllm_weight_mode", "auto") or "auto").lower()
+    if mode not in {"auto", "lora", "full"}:
+        raise ValueError("vllm_weight_mode must be one of: auto, lora, full")
+    if int(getattr(config, "vllm_weight_keep", 2) or 2) < 1:
+        raise ValueError("vllm_weight_keep must be >= 1")
 
 @dataclass(frozen=True)
 class GeneratedChunk:
@@ -186,20 +215,49 @@ def generate_sglang_chunk(
 ) -> GeneratedChunk:
     """Generate ``rollouts_per_prompt`` completions per prompt via SGLang HTTP."""
     del tokenizer  # prompts are already formatted strings
-    n = config.rollouts_per_prompt
     client = SGLangRolloutClient.from_config(config)
-    # Expand to one request per (prompt, sample) for broad API compatibility.
+    return _generate_http_chunk(
+        client=client,
+        prompts=prompts,
+        rollouts_per_prompt=config.rollouts_per_prompt,
+        max_workers=int(getattr(config, "sglang_max_workers", 8) or 8),
+    )
+
+
+def generate_vllm_chunk(
+    *,
+    tokenizer,
+    prompts: list[str],
+    config: SingleGpuSlimeConfig,
+) -> GeneratedChunk:
+    """Generate ``rollouts_per_prompt`` completions per prompt via vLLM HTTP."""
+    del tokenizer  # prompts are already formatted strings
+    client = VLLMRolloutClient.from_config(config)
+    return _generate_http_chunk(
+        client=client,
+        prompts=prompts,
+        rollouts_per_prompt=config.rollouts_per_prompt,
+        max_workers=int(getattr(config, "vllm_max_workers", 8) or 8),
+    )
+
+
+def _generate_http_chunk(
+    *,
+    client: Any,
+    prompts: list[str],
+    rollouts_per_prompt: int,
+    max_workers: int,
+) -> GeneratedChunk:
+    """Shared OpenAI ``/v1/completions`` fan-out for SGLang and vLLM."""
+    n = int(rollouts_per_prompt)
     jobs: list[tuple[int, str]] = []
     for p_idx, prompt in enumerate(prompts):
         for _ in range(n):
             jobs.append((p_idx, prompt))
 
     results: list[tuple[str, list[int] | None] | None] = [None] * len(jobs)
-    max_workers = min(
-        int(getattr(config, "sglang_max_workers", 8) or 8),
-        max(1, len(jobs)),
-    )
-    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+    workers = min(max(1, int(max_workers)), max(1, len(jobs)))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
         futures = {
             pool.submit(client.complete_with_tokens, prompt): idx
             for idx, (_p_idx, prompt) in enumerate(jobs)
@@ -226,7 +284,6 @@ def generate_sglang_chunk(
         prompt_width=None,
         completion_token_ids=token_id_lists,
     )
-
 
 def _extract_completion_token_ids(
     choice: dict[str, Any],
@@ -437,28 +494,220 @@ class SGLangRolloutClient:
         path: str,
         body: dict[str, Any] | None,
     ) -> dict[str, Any]:
-        url = f"{self.base_url}{path}"
-        data = None if body is None else json.dumps(body).encode("utf-8")
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-        }
-        request = urllib.request.Request(url, data=data, headers=headers, method=method)
-        try:
-            with urllib.request.urlopen(request, timeout=self.timeout_s) as response:
-                raw = response.read().decode("utf-8")
-        except urllib.error.HTTPError as exc:
-            detail = exc.read().decode("utf-8", errors="replace")[:500]
-            raise RuntimeError(f"SGLang HTTP {exc.code}: {detail}") from exc
-        except urllib.error.URLError as exc:
-            raise RuntimeError(f"SGLang request failed: {exc}") from exc
-        if not raw.strip():
-            return {}
-        parsed = json.loads(raw)
-        if isinstance(parsed, dict):
-            return parsed
-        return {"result": parsed}
+        return _http_json_request(
+            base_url=self.base_url,
+            path=path,
+            method=method,
+            body=body,
+            api_key=self.api_key,
+            timeout_s=self.timeout_s,
+            label="SGLang",
+        )
 
+
+class VLLMRolloutClient:
+    """OpenAI-compatible client for vLLM multi-GPU rollouts + weight hot-reload."""
+
+    def __init__(
+        self,
+        *,
+        base_url: str,
+        model: str,
+        api_key: str = "EMPTY",
+        timeout_s: float = 120.0,
+        temperature: float = 0.9,
+        top_p: float = 0.95,
+        max_tokens: int = 256,
+        lora_name: str = "seiso_slime_policy",
+    ) -> None:
+        self.base_url = _strip_openai_v1_suffix(base_url.rstrip("/"))
+        self.model = model
+        self.api_key = api_key
+        self.timeout_s = timeout_s
+        self.temperature = temperature
+        self.top_p = top_p
+        self.max_tokens = max_tokens
+        self.lora_name = lora_name
+        self._active_model = model
+
+    @classmethod
+    def from_config(cls, config: SingleGpuSlimeConfig) -> VLLMRolloutClient:
+        engines = vllm_engine_urls(config, allow_empty_primary=True)
+        base = engines[0] if engines else resolve_vllm_base_url(config)
+        if not base:
+            raise ValueError("vllm_base_url is required for vLLM rollout")
+        _validate_http_engine_url(base, label="vllm")
+        model = str(getattr(config, "vllm_model", "") or "").strip() or config.model_id
+        lora_name = str(
+            getattr(config, "vllm_lora_name", "") or "seiso_slime_policy"
+        ).strip() or "seiso_slime_policy"
+        client = cls(
+            base_url=base,
+            model=model,
+            api_key=str(getattr(config, "vllm_api_key", "EMPTY") or "EMPTY"),
+            timeout_s=float(getattr(config, "vllm_timeout_s", 120.0) or 120.0),
+            temperature=float(config.temperature),
+            top_p=float(config.top_p),
+            max_tokens=int(config.max_new_tokens),
+            lora_name=lora_name,
+        )
+        # After LoRA weight sync, the engine serves under the dynamic adapter name.
+        mode = str(getattr(config, "vllm_weight_mode", "auto") or "auto").lower()
+        if bool(getattr(config, "vllm_sync_weights", True)) and (
+            mode == "lora"
+            or (mode == "auto" and bool(getattr(config, "use_lora", False)))
+        ):
+            client.use_lora_model(True)
+        return client
+    def complete(self, prompt: str) -> str:
+        text, _token_ids = self.complete_with_tokens(prompt)
+        return text
+
+    def complete_with_tokens(self, prompt: str) -> tuple[str, list[int] | None]:
+        """Return (text, optional engine token ids when the server provides them)."""
+        payload = {
+            "model": self._active_model,
+            "prompt": prompt,
+            "max_tokens": self.max_tokens,
+            "temperature": self.temperature,
+            "top_p": self.top_p,
+            "n": 1,
+        }
+        data = self._post_json("/v1/completions", payload)
+        choices = data.get("choices")
+        if not isinstance(choices, list) or not choices:
+            raise RuntimeError("vLLM /v1/completions returned no choices")
+        first = choices[0]
+        if not isinstance(first, dict):
+            raise RuntimeError("vLLM choice payload is invalid")
+        text = first.get("text")
+        if not isinstance(text, str):
+            message = first.get("message")
+            if isinstance(message, dict) and isinstance(message.get("content"), str):
+                text = message["content"]
+            else:
+                raise RuntimeError("vLLM choice missing text")
+        token_ids = _extract_completion_token_ids(first, data)
+        return text, token_ids
+
+    def use_lora_model(self, enabled: bool = True) -> None:
+        """Route completions to the dynamic LoRA name after a successful load."""
+        self._active_model = self.lora_name if enabled else self.model
+
+    def load_lora_adapter(self, lora_path: str, *, lora_name: str | None = None) -> dict[str, Any]:
+        """Hot-load a PEFT adapter via vLLM ``/v1/load_lora_adapter``."""
+        name = (lora_name or self.lora_name).strip() or self.lora_name
+        # Unload first so reloads replace the previous step's adapter.
+        with contextlib.suppress(RuntimeError):
+            self.unload_lora_adapter(lora_name=name)
+        result = self._post_json(
+            "/v1/load_lora_adapter",
+            {"lora_name": name, "lora_path": lora_path},
+        )
+        self.lora_name = name
+        self.use_lora_model(True)
+        return result
+
+    def unload_lora_adapter(self, *, lora_name: str | None = None) -> dict[str, Any]:
+        name = (lora_name or self.lora_name).strip() or self.lora_name
+        result = self._post_json(
+            "/v1/unload_lora_adapter",
+            {"lora_name": name},
+        )
+        if self._active_model == name:
+            self.use_lora_model(False)
+        return result
+
+    def update_weights_from_disk(
+        self,
+        model_path: str,
+        *,
+        weight_version: str | None = None,
+    ) -> dict[str, Any]:
+        """Best-effort full weight reload (SGLang-compatible or custom endpoint)."""
+        payload: dict[str, Any] = {"model_path": model_path}
+        if weight_version is not None:
+            payload["weight_version"] = weight_version
+        # Prefer documented-ish paths; first success wins.
+        errors: list[str] = []
+        for path in (
+            "/update_weights_from_disk",
+            "/v1/update_weights_from_disk",
+            "/reload_weights",
+        ):
+            try:
+                return self._post_json(path, payload)
+            except RuntimeError as exc:
+                errors.append(f"{path}: {exc}")
+        raise RuntimeError(
+            "vLLM full weight reload failed on all endpoints: " + "; ".join(errors)
+        )
+
+    def pause(self) -> dict[str, Any] | None:
+        with contextlib.suppress(RuntimeError):
+            return self._post_json("/pause", {})
+        return None
+
+    def resume(self) -> dict[str, Any] | None:
+        with contextlib.suppress(RuntimeError):
+            return self._post_json("/resume", {})
+        return None
+
+    def _post_json(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._request("POST", path, body=payload)
+
+    def _request(
+        self,
+        method: str,
+        path: str,
+        body: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        return _http_json_request(
+            base_url=self.base_url,
+            path=path,
+            method=method,
+            body=body,
+            api_key=self.api_key,
+            timeout_s=self.timeout_s,
+            label="vLLM",
+        )
+
+
+def _http_json_request(
+    *,
+    base_url: str,
+    path: str,
+    method: str,
+    body: dict[str, Any] | None,
+    api_key: str,
+    timeout_s: float,
+    label: str,
+) -> dict[str, Any]:
+    url = f"{base_url.rstrip('/')}{path}"
+    data = None if body is None else json.dumps(body).encode("utf-8")
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    request = urllib.request.Request(url, data=data, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(request, timeout=timeout_s) as response:
+            raw = response.read().decode("utf-8")
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")[:500]
+        raise RuntimeError(f"{label} HTTP {exc.code}: {detail}") from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"{label} request failed: {exc}") from exc
+    if not raw.strip():
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        # vLLM LoRA endpoints may return plain text "Success: ..."
+        return {"result": raw.strip()}
+    if isinstance(parsed, dict):
+        return parsed
+    return {"result": parsed}
 
 def sglang_engine_urls(config: SingleGpuSlimeConfig) -> list[str]:
     """Resolve one or more SGLang engine base URLs (comma-separated or multi field)."""
@@ -485,10 +734,76 @@ def sglang_engine_urls(config: SingleGpuSlimeConfig) -> list[str]:
 
 def _validate_sglang_url(url: str) -> None:
     """Reject non-HTTP(S) schemes (basic SSRF hardening for config-controlled URLs)."""
+    _validate_http_engine_url(url, label="sglang")
+
+
+def _validate_http_engine_url(url: str, *, label: str = "engine") -> None:
+    """Reject non-HTTP(S) schemes (basic SSRF hardening for config-controlled URLs)."""
     lowered = url.lower()
     if not (lowered.startswith("http://") or lowered.startswith("https://")):
-        raise ValueError(f"sglang URL must use http:// or https:// scheme, got {url!r}")
+        raise ValueError(f"{label} URL must use http:// or https:// scheme, got {url!r}")
 
+
+def _strip_openai_v1_suffix(url: str) -> str:
+    """Normalize ``.../v1`` base URLs used by managed vLLM to engine host roots."""
+    cleaned = url.rstrip("/")
+    if cleaned.lower().endswith("/v1"):
+        return cleaned[:-3]
+    return cleaned
+
+
+def resolve_vllm_base_url(config: SingleGpuSlimeConfig) -> str:
+    """Resolve vLLM engine URL from config, managed multi-GPU state, or env."""
+    engines = vllm_engine_urls(config, allow_empty_primary=True)
+    if engines:
+        return engines[0]
+    # Adopt Seiso-managed multi-GPU vLLM when it is already running.
+    try:
+        from seiso.inference.managed_vllm import get_status
+
+        status = get_status()
+        if status.get("running") and status.get("base_url"):
+            return _strip_openai_v1_suffix(str(status["base_url"]))
+    except Exception:
+        pass
+    try:
+        from seiso.env import env_int, env_str
+
+        host = (env_str("SEISO_MANAGED_VLLM_HOST", "127.0.0.1") or "127.0.0.1").strip()
+        port = int(env_int("SEISO_MANAGED_VLLM_PORT", 0) or 0)
+        if port > 0:
+            return f"http://{host}:{port}"
+    except Exception:
+        pass
+    return ""
+
+
+def vllm_engine_urls(
+    config: SingleGpuSlimeConfig,
+    *,
+    allow_empty_primary: bool = False,
+) -> list[str]:
+    """Resolve one or more vLLM engine base URLs (comma-separated or multi field)."""
+    urls: list[str] = []
+    primary = str(getattr(config, "vllm_base_url", "") or "").strip()
+    if primary:
+        urls.extend(part.strip() for part in primary.split(",") if part.strip())
+    extra = getattr(config, "vllm_engine_urls", None) or []
+    if isinstance(extra, str):
+        urls.extend(part.strip() for part in extra.split(",") if part.strip())
+    elif isinstance(extra, (list, tuple)):
+        urls.extend(str(u).strip() for u in extra if str(u).strip())
+    seen: set[str] = set()
+    out: list[str] = []
+    for url in urls:
+        key = _strip_openai_v1_suffix(url)
+        _validate_http_engine_url(key, label="vllm")
+        if key not in seen:
+            seen.add(key)
+            out.append(key)
+    if not out and not allow_empty_primary:
+        raise ValueError("vllm_base_url is required for vLLM rollout")
+    return out
 
 def export_actor_checkpoint(model, tokenizer, output_dir: Any) -> str:
     """Write a full HF checkpoint suitable for SGLang disk weight reload.
@@ -523,6 +838,52 @@ def export_actor_checkpoint(model, tokenizer, output_dir: Any) -> str:
     partial.rename(final)
     return str(final.resolve())
 
+
+def export_actor_lora_adapter(model, tokenizer, output_dir: Any) -> str:
+    """Write PEFT/LoRA adapter weights for vLLM dynamic ``load_lora_adapter``.
+
+    Does **not** merge adapters. Atomic ``*.partial`` rename like full export.
+    """
+    from pathlib import Path
+
+    final = Path(output_dir)
+    partial = final.parent / f"{final.name}.partial"
+    if partial.exists():
+        _rm_tree(partial)
+    partial.mkdir(parents=True, exist_ok=True)
+    unwrapped = getattr(model, "module", model)
+    # Prefer PEFT adapter export; fall back to full save for non-PEFT actors.
+    if hasattr(unwrapped, "save_pretrained") and (
+        hasattr(unwrapped, "peft_config")
+        or hasattr(unwrapped, "get_base_model")
+        or hasattr(unwrapped, "merge_adapter")
+    ):
+        unwrapped.save_pretrained(partial)
+    else:
+        unwrapped.save_pretrained(partial)
+    tokenizer.save_pretrained(partial)
+    if final.exists():
+        _rm_tree(final)
+    partial.rename(final)
+    return str(final.resolve())
+
+
+def _model_has_lora_adapters(model) -> bool:
+    unwrapped = getattr(model, "module", model)
+    return bool(
+        hasattr(unwrapped, "peft_config")
+        or hasattr(unwrapped, "get_base_model")
+        or hasattr(unwrapped, "merge_adapter")
+    )
+
+
+def _resolve_vllm_weight_mode(config: SingleGpuSlimeConfig, model) -> str:
+    mode = str(getattr(config, "vllm_weight_mode", "auto") or "auto").lower()
+    if mode == "auto":
+        if bool(getattr(config, "use_lora", False)) or _model_has_lora_adapters(model):
+            return "lora"
+        return "full"
+    return mode
 
 def _rm_tree(path: Any) -> None:
     from pathlib import Path
@@ -745,3 +1106,136 @@ def sync_sglang_weights_from_actor(
     state.last_changed = 0
     _prune_weight_versions(weight_root, keep)
     return used_path
+
+
+def _broadcast_vllm_lora(
+    config: SingleGpuSlimeConfig,
+    *,
+    lora_path: str,
+    lora_name: str,
+) -> None:
+    engines = vllm_engine_urls(config, allow_empty_primary=True)
+    if not engines:
+        base = resolve_vllm_base_url(config)
+        engines = [base] if base else []
+    if not engines:
+        raise ValueError("vllm_base_url is required for vLLM weight sync")
+    errors: list[str] = []
+    for base in engines:
+        client = VLLMRolloutClient.from_config(config)
+        client.base_url = base
+        try:
+            client.load_lora_adapter(lora_path, lora_name=lora_name)
+        except RuntimeError as exc:
+            errors.append(f"{base}: {exc}")
+    if errors:
+        raise RuntimeError(
+            "vLLM LoRA weight sync failed on one or more engines: " + "; ".join(errors)
+        )
+
+
+def _broadcast_vllm_full(
+    config: SingleGpuSlimeConfig,
+    *,
+    model_path: str,
+    weight_version: str,
+) -> None:
+    engines = vllm_engine_urls(config, allow_empty_primary=True)
+    if not engines:
+        base = resolve_vllm_base_url(config)
+        engines = [base] if base else []
+    if not engines:
+        raise ValueError("vllm_base_url is required for vLLM weight sync")
+    errors: list[str] = []
+    for base in engines:
+        client = VLLMRolloutClient.from_config(config)
+        client.base_url = base
+        try:
+            client.pause()
+            client.update_weights_from_disk(model_path, weight_version=weight_version)
+            client.resume()
+        except RuntimeError as exc:
+            errors.append(f"{base}: {exc}")
+    if errors:
+        raise RuntimeError(
+            "vLLM full weight sync failed on one or more engines: " + "; ".join(errors)
+            + ". Prefer slime_use_lora + vllm_weight_mode=lora (dynamic "
+            "/v1/load_lora_adapter), or restart the vLLM server from the exported "
+            "checkpoint path."
+        )
+
+
+def sync_vllm_weights_from_actor(
+    *,
+    model,
+    tokenizer,
+    config: SingleGpuSlimeConfig,
+    step: int,
+    is_main: bool,
+    active_backend: str | None = None,
+    sync_state: WeightSyncState | None = None,
+) -> str | None:
+    """Rank-0 export + multi-engine vLLM hot-reload for multi-GPU slime rollouts.
+
+    Modes (``vllm_weight_mode``):
+    * ``auto`` — LoRA when the actor has PEFT adapters, else full
+    * ``lora`` — export PEFT adapter + ``/v1/load_lora_adapter`` (preferred)
+    * ``full`` — export merged HF checkpoint + best-effort disk reload endpoints
+
+    Returns the checkpoint/adapter path when a sync ran on this process, else None.
+    Non-main ranks return None (caller must barrier).
+    """
+    if not bool(getattr(config, "vllm_sync_weights", True)):
+        return None
+    backend = active_backend or resolve_rollout_backend(config, world_size=1)
+    if backend != "vllm":
+        return None
+    if not is_main:
+        return None
+
+    mode = _resolve_vllm_weight_mode(config, model)
+    weight_root = config.output_dir / str(
+        getattr(config, "vllm_weight_dir", "vllm_weight_sync") or "vllm_weight_sync"
+    )
+    weight_root.mkdir(parents=True, exist_ok=True)
+    version = f"v{int(step)}"
+    keep = int(getattr(config, "vllm_weight_keep", 2) or 2)
+    state = sync_state or WeightSyncState()
+    lora_name = str(
+        getattr(config, "vllm_lora_name", "") or "seiso_slime_policy"
+    ).strip() or "seiso_slime_policy"
+
+    if mode == "lora":
+        adapter_path = weight_root / f"lora_v{int(step):06d}"
+        used_path = export_actor_lora_adapter(model, tokenizer, adapter_path)
+        _broadcast_vllm_lora(config, lora_path=used_path, lora_name=lora_name)
+        state.last_full_path = used_path
+        state.last_mode = "lora"
+        state.last_changed = 0
+        # Prune both lora_v* and weight_v* trees under the same root.
+        _prune_weight_versions(weight_root, keep)
+        _prune_named_versions(weight_root, prefix="lora_v", keep=keep)
+        return used_path
+
+    ckpt_path = weight_root / f"weight_v{int(step):06d}"
+    used_path = export_actor_checkpoint(model, tokenizer, ckpt_path)
+    _broadcast_vllm_full(config, model_path=used_path, weight_version=version)
+    state.last_full_path = used_path
+    state.last_mode = "full"
+    state.last_changed = 0
+    _prune_weight_versions(weight_root, keep)
+    return used_path
+
+
+def _prune_named_versions(weight_root: Any, *, prefix: str, keep: int) -> None:
+    from pathlib import Path
+
+    root = Path(weight_root)
+    if not root.is_dir() or keep < 1:
+        return
+    versions = sorted(
+        [p for p in root.iterdir() if p.is_dir() and p.name.startswith(prefix)],
+        key=lambda p: p.name,
+    )
+    for old in versions[:-keep]:
+        _rm_tree(old)

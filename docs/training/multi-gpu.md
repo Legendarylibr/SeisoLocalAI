@@ -49,6 +49,21 @@ ddp_find_unused_parameters: false
 Single-GPU training is unchanged outside distributed mode. Leave `multi_gpu: false`
 or set `distributed_strategy: none` to run the existing single-process trainer.
 
+## Slime multi-GPU rollouts (vLLM or SGLang)
+
+`method: slime` can keep **policy updates on Accelerate DDP** while sending
+**generation** to a multi-GPU inference server:
+
+| Backend | Config | Launch helper |
+|---------|--------|---------------|
+| **vLLM** (tensor parallel) | `rollout_backend: vllm` + `configs/example_training_slime_vllm.yaml` | `scripts/run_slime_vllm_ddp.sh` |
+| **SGLang** | `rollout_backend: sglang` + `configs/example_training_slime_ddp.yaml` | `scripts/run_slime_ddp.sh` |
+
+vLLM weight sync defaults to dynamic LoRA (`/v1/load_lora_adapter`) when
+`slime_use_lora: true`. Start the server with `--enable-lora`, or set
+`SEISO_MANAGED_VLLM_ENABLE_LORA=true` for Seiso-managed multi-GPU. Single-GPU
+`rollout_backend: hf` and existing LoRA/SFT multi-GPU paths are unchanged.
+
 ## Behavior
 
 - Rank 0 writes checkpoint and manifest
