@@ -10,6 +10,7 @@ from fastapi import HTTPException
 from forge.api.schemas.compat import ChatCompletionRequest, ChatMessage
 from forge.config import ForgeSettings
 from forge.db.store import Database
+from forge.services.compat_providers import resolve_compat_provider
 from forge.services.inference_chat import prepare_local_chat_target
 from forge.services.user_paths import is_local_filesystem_path
 from forge.tools.sanitize import normalize_text
@@ -69,9 +70,41 @@ async def prepare_compat_chat_payload(
     db: Database,
     settings: ForgeSettings,
 ) -> dict[str, Any]:
-    """Resolve and sanitize via the shared local-chat path."""
+    """Resolve local inventory first; multi-GPU providers only when selected.
+
+    Provider models (managed local vLLM / cloud multi-GPU) are available to
+    external agents via ``provider:<id>`` or a non-colliding config model alias.
+    ``default`` / ``seiso`` and local inventory paths are unchanged.
+    """
     messages = normalize_compat_messages(body)
     max_tokens = body.max_tokens or 512
+
+    # Collect local inventory ids so provider aliases never override them.
+    local_models = await db.list_models(user_id)
+    local_ids: set[str] = set()
+    for m in local_models:
+        if m.get("id"):
+            local_ids.add(str(m["id"]))
+        if m.get("name"):
+            local_ids.add(str(m["name"]))
+
+    provider = await resolve_compat_provider(
+        db, user_id, body.model, local_model_ids=local_ids
+    )
+    if provider is not None:
+        # External agents / multi-GPU: no local weights required.
+        return {
+            "messages": messages,
+            "max_tokens": max_tokens,
+            "temperature": body.temperature,
+            "tools": bool(body.tools),
+            "provider": {
+                "provider_type": provider["provider_type"],
+                "config": provider["config"],
+            },
+            "provider_id": provider.get("provider_id"),
+            "compat_model": body.model,
+        }
 
     if body.model in ("default", "seiso"):
         from forge.services.inference_models import list_inference_options

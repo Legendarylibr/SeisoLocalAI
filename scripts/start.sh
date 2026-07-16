@@ -250,6 +250,20 @@ main() {
     seiso_verify_sidecar_stack
   fi
 
+  # Optional multi-GPU path (off by default). When enabled, Forge may autostart
+  # managed vLLM after boot — never replaces Ollama/llama-swap GGUF sidecars.
+  if [[ "${SEISO_MANAGED_VLLM_ENABLED:-0}" == "1" || "${SEISO_MANAGED_VLLM_ENABLED:-}" == "true" ]]; then
+    if [[ "${SEISO_MANAGED_VLLM_AUTOSTART:-0}" == "1" || "${SEISO_MANAGED_VLLM_AUTOSTART:-}" == "true" ]]; then
+      if [[ -n "${SEISO_MANAGED_VLLM_MODEL:-}" ]]; then
+        log "Optional managed multi-GPU vLLM autostart enabled (model=${SEISO_MANAGED_VLLM_MODEL})"
+      else
+        log "SEISO_MANAGED_VLLM_AUTOSTART set but SEISO_MANAGED_VLLM_MODEL empty — skipping"
+      fi
+    else
+      log "Managed multi-GPU vLLM enabled (start from Integrations or API; not auto-started)"
+    fi
+  fi
+
   forge_url="$(seiso_forge_url)"
   open_flag=""
   if [[ "${SEISO_NO_OPEN:-0}" != "1" ]]; then

@@ -10,7 +10,7 @@ from typing import Any
 
 from forge.config import get_settings
 from forge.orchestrators.base import JobStatus, Orchestrator
-from forge.providers.router import chat_completion
+from forge.providers.router import chat_completion, stream_chat_completion
 from forge.security.audit import audit_event
 from forge.tools.registry import build_default_registry
 from seiso.inference.backends import BACKEND_ROUTER
@@ -338,12 +338,44 @@ class InferenceOrchestrator(Orchestrator):
             provider_type=provider.get("provider_type"),
             base_url=provider.get("config", {}).get("base_url", ""),
         )
+        temperature = payload.get("temperature")
         return await chat_completion(
             provider["provider_type"],
             provider.get("config", {}),
             messages,
             max_tokens=payload.get("max_tokens", 512),
+            temperature=float(temperature) if temperature is not None else None,
         )
+
+    async def stream_provider(self, payload: dict[str, Any]) -> AsyncIterator[str]:
+        """Stream tokens from a multi-GPU / OpenAI-compatible provider (for Compat API)."""
+        provider = payload.get("provider")
+        if not provider:
+            raise RuntimeError("stream_provider requires payload['provider']")
+        messages = list(payload.get("messages", []))
+        user_id = payload.get("user_id")
+        started_here = self._active_generation_user_id is None
+        if started_here:
+            self.begin_generation_for_user(user_id)
+        try:
+            audit_event(
+                "provider_chat_stream",
+                user_id=user_id,
+                provider_type=provider.get("provider_type"),
+                base_url=provider.get("config", {}).get("base_url", ""),
+            )
+            temperature = payload.get("temperature")
+            async for token in stream_chat_completion(
+                provider["provider_type"],
+                provider.get("config", {}),
+                messages,
+                max_tokens=payload.get("max_tokens", 512),
+                temperature=float(temperature) if temperature is not None else None,
+            ):
+                yield token
+        finally:
+            if started_here:
+                self.end_generation_for_user(user_id)
 
     async def _local_chat(self, payload: dict[str, Any]) -> str:
         async with self._local_inference_lock:

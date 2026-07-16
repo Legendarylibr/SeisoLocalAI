@@ -500,10 +500,10 @@ async def chat(
         prov = await db.get_provider(body.provider_id, user_id)
         if not prov:
             raise HTTPException(404, "Provider not found")
-        from forge.providers.router import LOCAL_PROVIDER_TYPES
+        from forge.providers.router import is_chat_provider_type
 
         ptype = prov["provider_type"].lower()
-        if ptype not in LOCAL_PROVIDER_TYPES:
+        if not is_chat_provider_type(ptype):
             raise HTTPException(
                 400, f"Unsupported chat provider type: {prov['provider_type']}"
             )

@@ -54,3 +54,16 @@ async def test_frontier_providers_rejected(authed_client):
             },
         )
         assert res.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_list_providers_excludes_cloud_gpu_credentials(authed_client):
+    """Training cloud_gpu credential rows must not appear as chat providers."""
+    from forge.services.training_service import cloud_gpu_provider_type
+
+    listing = await authed_client.get("/api/providers")
+    assert listing.status_code == 200
+    allowed = {"local_chat", "remote_chat", "vllm", "vllm_cloud"}
+    for row in listing.json():
+        assert row["provider_type"] != cloud_gpu_provider_type()
+        assert row["provider_type"] in allowed
