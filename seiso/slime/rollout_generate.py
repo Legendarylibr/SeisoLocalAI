@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 from typing import Any
 
 from seiso.slime.config import SingleGpuSlimeConfig
@@ -12,6 +13,7 @@ from seiso.slime.rollout_clients import (
 )
 
 
+@dataclass(frozen=True)
 class GeneratedChunk:
     """One generation chunk: parallel lists aligned as prompt_idx * n + k."""
 
