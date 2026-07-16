@@ -227,6 +227,8 @@ class TrainConfig(BaseModel):
     sglang_api_key: str = "EMPTY"
     sglang_timeout_s: float = Field(default=120.0, gt=0)
     sglang_max_workers: int = Field(default=8, ge=1)
+    sglang_sync_weights: bool = True
+    sglang_weight_dir: str = "sglang_weight_sync"
     require_thinking_trace: bool = True
     thinking_instruction: str = Field(
         default="Show your reasoning in <think>...</think>, then give the final answer.",
@@ -403,6 +405,8 @@ class TrainConfig(BaseModel):
             sglang_api_key=self.sglang_api_key,
             sglang_timeout_s=self.sglang_timeout_s,
             sglang_max_workers=self.sglang_max_workers,
+            sglang_sync_weights=self.sglang_sync_weights,
+            sglang_weight_dir=self.sglang_weight_dir,
             require_thinking_trace=self.require_thinking_trace,
             thinking_instruction=self.thinking_instruction,
             outcome_reward_weight=self.outcome_reward_weight,

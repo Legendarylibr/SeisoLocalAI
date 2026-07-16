@@ -340,18 +340,41 @@ class SGLangRolloutClient:
             raise RuntimeError("SGLang choice missing text")
         return text
 
+    def update_weights_from_disk(
+        self,
+        model_path: str,
+        *,
+        weight_version: str | None = None,
+    ) -> dict[str, Any]:
+        """Hot-reload HF weights (slime / SGLang ``update_weights_from_disk``)."""
+        payload: dict[str, Any] = {"model_path": model_path}
+        if weight_version is not None:
+            payload["weight_version"] = weight_version
+        return self._post_json("/update_weights_from_disk", payload)
+
+    def flush_cache(self) -> dict[str, Any] | None:
+        """Best-effort KV cache flush after a weight update."""
+        try:
+            return self._request("GET", "/flush_cache", body=None)
+        except RuntimeError:
+            return None
+
     def _post_json(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._request("POST", path, body=payload)
+
+    def _request(
+        self,
+        method: str,
+        path: str,
+        body: dict[str, Any] | None,
+    ) -> dict[str, Any]:
         url = f"{self.base_url}{path}"
-        body = json.dumps(payload).encode("utf-8")
-        request = urllib.request.Request(
-            url,
-            data=body,
-            headers={
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json",
-            },
-            method="POST",
-        )
+        data = None if body is None else json.dumps(body).encode("utf-8")
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+        request = urllib.request.Request(url, data=data, headers=headers, method=method)
         try:
             with urllib.request.urlopen(request, timeout=self.timeout_s) as response:
                 raw = response.read().decode("utf-8")
@@ -360,7 +383,73 @@ class SGLangRolloutClient:
             raise RuntimeError(f"SGLang HTTP {exc.code}: {detail}") from exc
         except urllib.error.URLError as exc:
             raise RuntimeError(f"SGLang request failed: {exc}") from exc
+        if not raw.strip():
+            return {}
         parsed = json.loads(raw)
-        if not isinstance(parsed, dict):
-            raise RuntimeError("SGLang returned non-object JSON")
-        return parsed
+        if isinstance(parsed, dict):
+            return parsed
+        return {"result": parsed}
+
+
+def export_actor_checkpoint(model, tokenizer, output_dir: Any) -> str:
+    """Write a full HF checkpoint suitable for SGLang disk weight reload.
+
+    For PEFT/LoRA actors, merges adapters into the base weights for export only
+    (``merge_adapter`` / ``unmerge_adapter`` when available so training continues).
+    """
+    from pathlib import Path
+
+    path = Path(output_dir)
+    path.mkdir(parents=True, exist_ok=True)
+    unwrapped = getattr(model, "module", model)
+
+    merged = False
+    if hasattr(unwrapped, "merge_adapter"):
+        unwrapped.merge_adapter()
+        merged = True
+    try:
+        to_save = unwrapped
+        if hasattr(unwrapped, "get_base_model"):
+            to_save = unwrapped.get_base_model()
+        to_save.save_pretrained(path)
+        tokenizer.save_pretrained(path)
+    finally:
+        if merged and hasattr(unwrapped, "unmerge_adapter"):
+            unwrapped.unmerge_adapter()
+    return str(path.resolve())
+
+
+def sync_sglang_weights_from_actor(
+    *,
+    model,
+    tokenizer,
+    config: SingleGpuSlimeConfig,
+    step: int,
+    is_main: bool,
+    active_backend: str | None = None,
+) -> str | None:
+    """Rank-0 export + SGLang hot-reload (slime disk transport).
+
+    Returns the checkpoint path when a sync ran on this process, else None.
+    Non-main ranks return None (caller must barrier).
+    """
+    if not bool(getattr(config, "sglang_sync_weights", True)):
+        return None
+    backend = active_backend or resolve_rollout_backend(config, world_size=1)
+    if backend != "sglang":
+        return None
+    if not is_main:
+        return None
+
+    weight_root = config.output_dir / str(
+        getattr(config, "sglang_weight_dir", "sglang_weight_sync") or "sglang_weight_sync"
+    )
+    ckpt_path = weight_root / f"weight_v{int(step):06d}"
+    export_actor_checkpoint(model, tokenizer, ckpt_path)
+    client = SGLangRolloutClient.from_config(config)
+    client.update_weights_from_disk(
+        str(ckpt_path.resolve()),
+        weight_version=f"v{int(step)}",
+    )
+    client.flush_cache()
+    return str(ckpt_path.resolve())

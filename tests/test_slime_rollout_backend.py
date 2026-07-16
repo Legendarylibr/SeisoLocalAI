@@ -95,6 +95,58 @@ def test_sglang_client_complete_parses_text(tmp_path: Path):
         assert client.complete("prompt") == " 42 "
 
 
+def test_sglang_update_weights_from_disk(tmp_path: Path):
+    cfg = _cfg(
+        tmp_path,
+        rollout_backend="sglang",
+        sglang_base_url="http://127.0.0.1:30000",
+    )
+    client = SGLangRolloutClient.from_config(cfg)
+    seen: dict[str, object] = {}
+
+    class _Resp:
+        def read(self):
+            return json.dumps({"success": True}).encode("utf-8")
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    def _urlopen(req, timeout=0):
+        seen["url"] = req.full_url
+        seen["method"] = req.get_method()
+        seen["body"] = req.data
+        return _Resp()
+
+    with patch(
+        "seiso.slime_single_gpu.rollout_backend.urllib.request.urlopen",
+        side_effect=_urlopen,
+    ):
+        out = client.update_weights_from_disk("/tmp/weights", weight_version="v3")
+    assert out["success"] is True
+    assert seen["url"] == "http://127.0.0.1:30000/update_weights_from_disk"
+    assert seen["method"] == "POST"
+    body = json.loads(seen["body"].decode("utf-8"))
+    assert body["model_path"] == "/tmp/weights"
+    assert body["weight_version"] == "v3"
+
+
+def test_sync_sglang_weights_noop_for_hf_backend(tmp_path: Path):
+    from seiso.slime_single_gpu.rollout_backend import sync_sglang_weights_from_actor
+
+    cfg = _cfg(tmp_path, rollout_backend="hf", output_dir=tmp_path / "out")
+    path = sync_sglang_weights_from_actor(
+        model=object(),
+        tokenizer=object(),
+        config=cfg,
+        step=1,
+        is_main=True,
+    )
+    assert path is None
+
+
 def test_example_ddp_config_requests_sglang():
     from seiso.training.config import TrainConfig
 

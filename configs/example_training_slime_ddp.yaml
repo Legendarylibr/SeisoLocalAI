@@ -39,6 +39,9 @@ sglang_model: ""
 sglang_api_key: "EMPTY"
 sglang_timeout_s: 120
 sglang_max_workers: 8
+# After each optimizer step: write HF weights + POST /update_weights_from_disk
+sglang_sync_weights: true
+sglang_weight_dir: sglang_weight_sync
 apply_chat_template: true
 require_thinking_trace: true
 thinking_instruction: "Show your reasoning in <think>...</think>, then give the final answer."

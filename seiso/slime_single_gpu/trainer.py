@@ -290,6 +290,8 @@ def train_single_gpu_slime(config: SingleGpuSlimeConfig) -> Path:
                             "rollout_groups_kept_total": total_groups_kept,
                         },
                     )
+                # Keep multi-GPU ranks aligned when every rank drops the batch.
+                _distributed_barrier(dist_ctx)
                 continue
             trained_groups = len(rollouts) // config.rollouts_per_prompt
             rollout_batch = _RolloutBatch(
@@ -333,6 +335,15 @@ def train_single_gpu_slime(config: SingleGpuSlimeConfig) -> Path:
             if pending_accumulation_steps >= config.gradient_accumulation_steps:
                 _optimizer_step(model, optimizer, torch, config)
                 pending_accumulation_steps = 0
+                # slime-style: push actor weights to SGLang after the optimizer step
+                # so the next multi-GPU rollout is (near) on-policy.
+                _sync_rollout_engine_weights(
+                    model=model,
+                    tokenizer=tokenizer,
+                    config=config,
+                    dist_ctx=dist_ctx,
+                    step=global_step + 1,
+                )
 
             decision = auto_stop.update(global_step, stats)
             if decision.improved:
@@ -367,6 +378,13 @@ def train_single_gpu_slime(config: SingleGpuSlimeConfig) -> Path:
             if config.max_steps is not None and global_step >= config.max_steps:
                 if pending_accumulation_steps:
                     _optimizer_step(model, optimizer, torch, config)
+                    _sync_rollout_engine_weights(
+                        model=model,
+                        tokenizer=tokenizer,
+                        config=config,
+                        dist_ctx=dist_ctx,
+                        step=global_step + 1,
+                    )
                 _write_training_state(config, global_step, "max_steps", auto_stop, dist_ctx)
                 _save_distributed(model, tokenizer, final_output_dir, dist_ctx)
                 return final_output_dir
@@ -398,6 +416,13 @@ def train_single_gpu_slime(config: SingleGpuSlimeConfig) -> Path:
         )
     if pending_accumulation_steps:
         _optimizer_step(model, optimizer, torch, config)
+        _sync_rollout_engine_weights(
+            model=model,
+            tokenizer=tokenizer,
+            config=config,
+            dist_ctx=dist_ctx,
+            step=global_step,
+        )
     _write_training_state(config, global_step, "complete", auto_stop, dist_ctx)
     _save_distributed(model, tokenizer, final_output_dir, dist_ctx)
     return final_output_dir
@@ -1753,6 +1778,53 @@ def _save_distributed(
 ) -> None:
     if dist_ctx.is_main:
         _save(model, tokenizer, output_dir)
+    _distributed_barrier(dist_ctx)
+
+
+def _sync_rollout_engine_weights(
+    *,
+    model,
+    tokenizer,
+    config: SingleGpuSlimeConfig,
+    dist_ctx: _DistributedSlimeContext,
+    step: int,
+) -> None:
+    """Push actor weights to SGLang after optimizer steps (multi-GPU + single-GPU sglang).
+
+    Uses slime's disk transport: write HF checkpoint, then
+    ``POST /update_weights_from_disk``. No-op for ``rollout_backend=hf``.
+    """
+    from seiso.slime_single_gpu.rollout_backend import (
+        resolve_rollout_backend,
+        sync_sglang_weights_from_actor,
+    )
+
+    backend = resolve_rollout_backend(config, world_size=dist_ctx.world_size)
+    if backend != "sglang":
+        return
+    if not bool(getattr(config, "sglang_sync_weights", True)):
+        _distributed_barrier(dist_ctx)
+        return
+    try:
+        path = sync_sglang_weights_from_actor(
+            model=model,
+            tokenizer=tokenizer,
+            config=config,
+            step=step,
+            is_main=dist_ctx.is_main,
+            active_backend=backend,
+        )
+        if dist_ctx.is_main and path is not None and config.log_every_steps:
+            # Lightweight stdout for operators; metrics JSONL stays numeric-only.
+            print(f"sglang_weight_sync step={step} path={path}", flush=True)
+    except Exception as exc:
+        # Fail closed: multi-GPU SGLang without weight sync is off-policy garbage.
+        raise RuntimeError(
+            f"SGLang weight sync failed at step={step}: {exc}. "
+            "Ensure the server exposes /update_weights_from_disk and can read "
+            f"{config.output_dir / config.sglang_weight_dir}. "
+            "Set sglang_sync_weights: false only for debugging."
+        ) from exc
     _distributed_barrier(dist_ctx)
 
 

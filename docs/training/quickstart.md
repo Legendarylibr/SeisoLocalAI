@@ -183,7 +183,8 @@ materializes `output_dir/slime_generated.jsonl` automatically:
 | `rollout_backend` | `hf` (default, colocated generate) \| `sglang` \| `auto` |
 | `sglang_base_url` | Required for `sglang` (e.g. `http://127.0.0.1:30000`) |
 
-**Single-GPU:** `rollout_backend: hf`. **Multi-GPU example:** `sglang` + DDP policy. Logprobs always recomputed on the actor.
+**Single-GPU:** `rollout_backend: hf` (colocated generate — always on-policy).  
+**Multi-GPU:** `rollout_backend: sglang` + Accelerate DDP. After each optimizer step, rank0 exports HF weights and calls SGLang `POST /update_weights_from_disk` (`sglang_sync_weights: true`, slime disk transport). Logprobs are recomputed on the actor.
 
 Streams:
 

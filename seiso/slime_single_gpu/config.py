@@ -100,6 +100,10 @@ class SingleGpuSlimeConfig:
     sglang_api_key: str = "EMPTY"
     sglang_timeout_s: float = 120.0
     sglang_max_workers: int = 8
+    # After each optimizer step, rank0 writes HF weights and calls SGLang
+    # update_weights_from_disk (slime disk transport). Keep true for on-policy multi-GPU.
+    sglang_sync_weights: bool = True
+    sglang_weight_dir: str = "sglang_weight_sync"
     require_thinking_trace: bool = True
     thinking_instruction: str = (
         "Show your reasoning in <think>...</think>, then give the final answer."
