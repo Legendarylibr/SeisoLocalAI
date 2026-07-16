@@ -177,13 +177,36 @@ def release_inference_memory(*, reason: str, log: LogFn = None) -> dict[str, Any
             log(note)
         else:
             logger.info(note)
-    release_cached_memory(sync=had_active)
+
+    # Optional managed multi-GPU vLLM holds external VRAM — stop on Free memory.
+    managed_stopped = False
+    try:
+        from forge.config import get_settings
+        from forge.services.managed_vllm import stop_managed_if_running
+
+        settings = get_settings()
+        managed = stop_managed_if_running(
+            data_dir=settings.data_dir, reason=reason
+        )
+        managed_stopped = bool(managed.get("stopped"))
+        if managed_stopped:
+            note = "Stopped managed multi-GPU vLLM to free GPU memory"
+            release_notes.append(note)
+            if log:
+                log(note)
+            else:
+                logger.info(note)
+    except Exception:
+        logger.debug("Managed vLLM stop during memory release skipped", exc_info=True)
+
+    release_cached_memory(sync=had_active or managed_stopped)
     _refresh_hardware_profile()
     return {
         "unloaded_inference": unloaded,
         "previous_model": status_before.get("active_model"),
         "previous_path": status_before.get("path"),
         "release_notes": release_notes,
+        "managed_vllm_stopped": managed_stopped,
     }
 
 
@@ -317,3 +340,18 @@ def assert_gpu_available_for_inference() -> None:
             "Cannot load chat models while another Seiso GPU task is running. "
             "Wait for the task to finish before starting inference."
         )
+    # Managed multi-GPU vLLM owns local GPUs; local in-process loads would OOM.
+    try:
+        from seiso.inference.managed_vllm import get_status
+
+        status = get_status()
+        if status.get("running") and status.get("managed"):
+            raise RuntimeError(
+                "Cannot load local chat models while managed multi-GPU vLLM is running. "
+                "Use the Compat API model provider:<id> / Chat provider selector, "
+                "or Free memory to stop managed vLLM."
+            )
+    except RuntimeError:
+        raise
+    except Exception:
+        pass

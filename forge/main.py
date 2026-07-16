@@ -58,13 +58,33 @@ async def lifespan(app: FastAPI):
         import logging
 
         logging.getLogger(__name__).info("Marked %d stale job(s) as failed after restart", stale)
+    # Optional path only: SEISO_MANAGED_VLLM_ENABLED + SEISO_MANAGED_VLLM_AUTOSTART + model.
+    try:
+        from forge.services.managed_vllm import maybe_autostart_from_env
+
+        maybe_autostart_from_env(data_dir=settings.data_dir)
+    except Exception:
+        import logging
+
+        logging.getLogger(__name__).debug(
+            "Optional managed multi-GPU vLLM autostart skipped", exc_info=True
+        )
     try:
         yield
     finally:
         from forge.services.executors import shutdown_executors
+        from forge.services.managed_vllm import stop_managed_vllm
         from forge.services.model_router_client import close_router_client
         from seiso.inference.runner import reset_inference_runtime
 
+        try:
+            stop_managed_vllm(data_dir=settings.data_dir, force=True)
+        except Exception:
+            import logging as _logging
+
+            _logging.getLogger(__name__).debug(
+                "Managed vLLM stop on shutdown failed", exc_info=True
+            )
         await close_router_client()
         reset_inference_runtime(wait=False)
         shutdown_executors(wait=False)

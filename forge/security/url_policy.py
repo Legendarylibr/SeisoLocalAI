@@ -18,7 +18,14 @@ _BLOCKED_HOSTS = frozenset(
 )
 
 _LOCAL_HTTP_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
-_LOCAL_DEFAULT_PORTS = {"vllm": {8000, 8001}}
+# Local chat servers (loopback HTTP allowed). Canonical + legacy alias.
+_LOCAL_CHAT_TYPES = frozenset({"local_chat", "vllm"})
+_LOCAL_DEFAULT_PORTS = {
+    "local_chat": {8000, 8001},
+    "vllm": {8000, 8001},
+}
+# Remote multi-GPU chat servers (HTTPS only, no loopback). Canonical + legacy alias.
+_REMOTE_CHAT_TYPES = frozenset({"remote_chat", "vllm_cloud"})
 
 
 def _literal_ip(host: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address | None:
@@ -73,13 +80,17 @@ def _resolve_host(host: str) -> list[str]:
         raise SecurityError(f"base_url host could not be resolved: {host}") from exc
 
 
-def validate_provider_base_url(url: str, *, provider_type: str = "vllm") -> str:
+def validate_provider_base_url(url: str, *, provider_type: str = "local_chat") -> str:
     """Return normalized base URL or raise SecurityError."""
     raw = (url or "").strip()
+    ptype = provider_type.lower()
     if not raw:
-        ptype = provider_type.lower()
-        if ptype == "vllm":
+        if ptype in _LOCAL_CHAT_TYPES:
             return "http://127.0.0.1:8000"
+        if ptype in _REMOTE_CHAT_TYPES:
+            raise SecurityError(
+                "remote_chat base_url is required (HTTPS remote chat server)"
+            )
         raise SecurityError(f"Unsupported provider_type: {provider_type}")
 
     parsed = urlparse(raw)
@@ -96,8 +107,14 @@ def validate_provider_base_url(url: str, *, provider_type: str = "vllm") -> str:
         raise SecurityError("base_url host is not allowed")
 
     scheme = parsed.scheme.lower()
-    ptype = provider_type.lower()
-    local_ok = ptype == "vllm" and _is_local_host(host)
+    local_ok = ptype in _LOCAL_CHAT_TYPES and _is_local_host(host)
+    remote_chat = ptype in _REMOTE_CHAT_TYPES
+
+    if remote_chat and _is_local_host(host):
+        raise SecurityError(
+            "remote_chat base_url must be a remote HTTPS host "
+            "(use type local_chat for loopback multi-GPU servers)"
+        )
 
     literal = _literal_ip(host)
     if literal is not None and not local_ok and _is_blocked_ip(str(literal)):
@@ -105,17 +122,19 @@ def validate_provider_base_url(url: str, *, provider_type: str = "vllm") -> str:
 
     if scheme == "http" and not local_ok:
         raise SecurityError(
-            "base_url must use HTTPS (http allowed only for local vllm)"
+            "base_url must use HTTPS (http allowed only for local chat servers)"
         )
     if scheme not in ("http", "https"):
         raise SecurityError("base_url scheme must be http or https")
+    if remote_chat and scheme != "https":
+        raise SecurityError("remote_chat base_url must use HTTPS")
 
     if local_ok:
         port = parsed.port or 8000
-        allowed = _LOCAL_DEFAULT_PORTS.get(ptype, set())
+        allowed = _LOCAL_DEFAULT_PORTS.get(ptype) or _LOCAL_DEFAULT_PORTS["local_chat"]
         if port not in allowed:
             raise SecurityError(
-                f"Local {ptype} base_url must use port {sorted(allowed)}"
+                f"Local chat server base_url must use port {sorted(allowed)}"
             )
     else:
         for addr in _resolve_host(host):
@@ -140,7 +159,7 @@ class PinnedEndpoint:
 
 
 def resolve_pinned_endpoint(
-    raw_url: str, *, provider_type: str = "vllm"
+    raw_url: str, *, provider_type: str = "local_chat"
 ) -> PinnedEndpoint:
     """Validate URL, resolve DNS, and return an endpoint pinned to the resolved IP."""
     base = validate_provider_base_url(raw_url, provider_type=provider_type).rstrip("/")
@@ -149,7 +168,7 @@ def resolve_pinned_endpoint(
     scheme = parsed.scheme.lower()
     port = parsed.port or (443 if scheme == "https" else 80)
     ptype = provider_type.lower()
-    local_ok = ptype == "vllm" and _is_local_host(host)
+    local_ok = ptype in _LOCAL_CHAT_TYPES and _is_local_host(host)
 
     if local_ok:
         return PinnedEndpoint(

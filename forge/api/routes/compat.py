@@ -1,4 +1,14 @@
-"""Compat API for local inference (standard chat-completions wire protocol)."""
+"""Compat API for local + multi-GPU provider inference (chat-completions wire protocol).
+
+External agents (Cursor, Continue, custom clients) use:
+
+  Base URL: http://127.0.0.1:8765/v1
+  Auth:     Bearer <SEISO_DATA_DIR/.inference_api_key>
+
+Local inventory models keep working. Multi-GPU (managed local vLLM or cloud)
+appears as additional ``/v1/models`` entries (``provider:<id>`` and optional
+upstream model alias) and routes through the same completions endpoint.
+"""
 
 from __future__ import annotations
 
@@ -27,6 +37,7 @@ from forge.services.compat_chat import (
     prepare_compat_chat_payload,
     prompt_token_estimate,
 )
+from forge.services.compat_providers import list_compat_provider_models
 from forge.services.llm_output import StreamingOutputSanitizer, sanitize_llm_output
 
 _prepare_compat_chat_payload = prepare_compat_chat_payload
@@ -42,17 +53,25 @@ async def list_models(
 ) -> dict:
     models = await db.list_models(user_id)
     created = int(time.time())
+    data = [
+        {
+            "id": m["id"],
+            "object": "model",
+            "created": created,
+            "owned_by": "seiso",
+        }
+        for m in models
+    ]
+    # Additive: multi-GPU / provider targets for external agents.
+    provider_models = await list_compat_provider_models(db, user_id)
+    seen = {d["id"] for d in data}
+    for entry in provider_models:
+        if entry["id"] not in seen:
+            data.append(entry)
+            seen.add(entry["id"])
     return {
         "object": "list",
-        "data": [
-            {
-                "id": m["id"],
-                "object": "model",
-                "created": created,
-                "owned_by": "seiso",
-            }
-            for m in models
-        ],
+        "data": data,
     }
 
 
@@ -68,14 +87,19 @@ async def chat_completions(
     if body.tools and not settings.allow_compat_tools:
         raise HTTPException(403, "Tool calling is disabled on the Compat API")
 
-    _assert_inference_gpu_available()
-
     payload = await prepare_compat_chat_payload(body, user_id, db, settings)
     payload["user_id"] = user_id
     completion_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
     created = int(time.time())
+    use_provider = bool(payload.get("provider"))
 
-    use_local_stream = body.stream and not body.tools
+    # Local loads need free GPU; multi-GPU provider (local managed or cloud) does not
+    # use the in-process model pool.
+    if not use_provider:
+        _assert_inference_gpu_available()
+
+    use_local_stream = body.stream and not body.tools and not use_provider
+    use_provider_stream = body.stream and not body.tools and use_provider
 
     if use_local_stream:
         _begin_generation_or_raise(orchestrator, user_id)
@@ -143,6 +167,71 @@ async def chat_completions(
                 orchestrator.end_generation_for_user(user_id)
 
         return StreamingResponse(sse_stream(), media_type="text/event-stream")
+
+    if use_provider_stream:
+        _begin_generation_or_raise(orchestrator, user_id)
+
+        async def provider_sse_stream():
+            sanitizer = StreamingOutputSanitizer(strip_tool_calls=not body.tools)
+            try:
+                async for token in orchestrator.stream_provider(payload):
+                    for chunk in sanitizer.feed(token):
+                        chunk_payload = {
+                            "id": completion_id,
+                            "object": "chat.completion.chunk",
+                            "created": created,
+                            "model": body.model,
+                            "choices": [
+                                {
+                                    "index": 0,
+                                    "delta": {"content": chunk},
+                                    "finish_reason": None,
+                                }
+                            ],
+                        }
+                        yield f"data: {json.dumps(chunk_payload)}\n\n"
+                for chunk in sanitizer.finish():
+                    chunk_payload = {
+                        "id": completion_id,
+                        "object": "chat.completion.chunk",
+                        "created": created,
+                        "model": body.model,
+                        "choices": [
+                            {
+                                "index": 0,
+                                "delta": {"content": chunk},
+                                "finish_reason": None,
+                            }
+                        ],
+                    }
+                    yield f"data: {json.dumps(chunk_payload)}\n\n"
+                final = {
+                    "id": completion_id,
+                    "object": "chat.completion.chunk",
+                    "created": created,
+                    "model": body.model,
+                    "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+                }
+                yield f"data: {json.dumps(final)}\n\n"
+                yield "data: [DONE]\n\n"
+            except asyncio.CancelledError:
+                await orchestrator.cancel_generation_for_user(user_id)
+                raise
+            except Exception as exc:
+                logger.exception("Compat API provider stream failed")
+                await orchestrator.cancel_generation_for_user(user_id)
+                err = {
+                    "error": {
+                        "message": str(exc) or "Provider stream failed",
+                        "type": "server_error",
+                    }
+                }
+                yield f"data: {json.dumps(err)}\n\n"
+                yield "data: [DONE]\n\n"
+            finally:
+                orchestrator.end_generation_for_user(user_id)
+
+        return StreamingResponse(provider_sse_stream(), media_type="text/event-stream")
 
     job_id = orchestrator.create_job(user_id=user_id)
     _begin_generation_or_raise(orchestrator, user_id)

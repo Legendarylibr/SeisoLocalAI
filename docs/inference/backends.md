@@ -87,11 +87,29 @@ Models must be MLX-compatible (or converted). Chat route `mlx` in inference API.
 
 ## Compat API endpoint
 
-With Forge running (`seiso forge`), external tools can call:
+With Forge running (`seiso forge`), external tools and coding agents can call:
 
 ```text
+GET  http://127.0.0.1:8765/v1/models
 POST http://127.0.0.1:8765/v1/chat/completions
 ```
+
+Auth: `Authorization: Bearer` with the key in `{SEISO_DATA_DIR}/.inference_api_key`.
+
+Local inventory models are listed as today (`default` / `seiso` pick a local GGUF).
+**Multi-GPU providers are additive** — they appear as `provider:<id>` (and optional
+upstream model alias) after you configure them under **Integrations**:
+
+| Path | How to enable | Compat model id |
+|------|----------------|-----------------|
+| Local chat server (loopback) | Integrations → **local_chat**, or managed multi-GPU | `provider:<id>` |
+| Remote chat server (HTTPS multi-GPU) | `SEISO_ALLOW_CLOUD_MULTIGPU=true` + type **remote_chat** | `provider:<id>` |
+
+Types are **vendor-neutral** (any standard chat-completions HTTP server). Legacy aliases
+`vllm` → `local_chat` and `vllm_cloud` → `remote_chat` still work.
+
+Managed multi-GPU is **opt-in** and never replaces Ollama/llama-swap GGUF sidecars.
+Free memory stops a Seiso-managed multi-GPU process.
 
 Set `SEISO_ALLOW_COMPAT_TOOLS=true` to enable tool calling on this endpoint (legacy alias: `SEISO_ALLOW_OPENAI_TOOLS`). See [forge.md](../forge.md).
 
