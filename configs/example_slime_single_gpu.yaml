@@ -1,42 +1,46 @@
+# Single-GPU slime-style GRPO (mirrors THUDM/slime colocate path with HF generate).
+# Batch units match slime: rollout_batch_size = prompts, rollouts_per_prompt = n samples.
 model_id: Qwen/Qwen2.5-0.5B-Instruct
-# Placeholder only — high-level data_gen materializes a real corpus under output_dir.
+# Placeholder; data_gen materializes a slime-format corpus under output_dir.
 dataset: data/slime_sample.jsonl
 output_dir: outputs/slime-single-gpu
+# slime --input-key / --label-key / --metadata-key
 prompt_field: prompt
-answer_field: answer
-# auto: use per-row reward/benchmark from generated data (numeric/choice/code mix)
+answer_field: label
+metadata_field: metadata
+# slime --rm-type (per-row metadata.rm_type when auto)
 reward: auto
 max_vram_gb: 16
 max_prompt_tokens: 512
 max_new_tokens: 128
+# slime --n-samples-per-prompt
 rollouts_per_prompt: 4
-rollout_batch_size: 4
-# Drop zero-signal groups (all rewards equal). Set none only for debugging.
+# slime --rollout-batch-size (prompts)
+rollout_batch_size: 2
+# slime --over-sampling-batch-size (>= rollout_batch_size)
+over_sampling_batch_size: 4
 dynamic_sampling_filter: reward_nonzero_std
-# Prompt-group oversample; must be >= train_batch_size when dynamic filter is on.
-over_sampling_batch_size: 8
 policy_micro_batch_size: 2
-train_batch_size: 1
+# null → same as rollout_batch_size
+train_batch_size: null
 shuffle_buffer_size: 128
 gradient_accumulation_steps: 8
 learning_rate: 0.000005
 max_grad_norm: 1.0
 epochs: 1
-# 0 = no frozen ref (lower VRAM). Use ~0.02–0.05 for longer runs to limit drift.
 kl_coef: 0.0
-# slime eps_clip / eps_clip_high (asymmetric high bound optional)
 clip_ratio: 0.2
 clip_ratio_high: 0.28
 grpo_std_normalization: true
 temperature: 0.9
 top_p: 0.95
-# Single-GPU: colocated HF generate (online completions on the training model).
-rollout_backend: data_gen
-apply_chat_template: false
+# colocated HF generate (slime --colocate analogue)
+rollout_backend: hf
+# slime --apply-chat-template
+apply_chat_template: true
 require_thinking_trace: true
 thinking_instruction: "Show your reasoning in <think>...</think>, then give the final answer."
 outcome_reward_weight: 1.0
-# Format is a small side channel; outcome weight stays primary. Keep process at 0.
 format_reward_weight: 0.1
 process_reward_weight: 0.0
 missing_thinking_penalty: 0.5
@@ -59,8 +63,7 @@ stop_on_nonfinite: true
 write_verifier_data: true
 verifier_data_file: slime_verifier_data.jsonl
 verifier_max_text_chars: 2048
-# High-level data gen: build a large verifiable prompt corpus (not smoke JSONL).
-# Completions are produced by the online HF rollout, then scored by the verifier.
+# High-level prompt corpus (prompt/label/metadata slime JSONL)
 data_gen: true
 data_gen_count: 400
 data_gen_seed: 17

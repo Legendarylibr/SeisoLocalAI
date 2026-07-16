@@ -80,7 +80,8 @@ def test_train_config_projects_to_single_gpu_slime_config(tmp_path):
     assert slime.reward == "field"
     assert slime.metadata_field == "context"
     assert slime.reward_field == "score"
-    assert slime.train_batch_size == 1
+    # train_batch_size not set → None (effective = rollout_batch_size)
+    assert slime.train_batch_size is None
     assert slime.policy_micro_batch_size == 2
     assert slime.rollouts_per_prompt == 3
     assert slime.rollout_batch_size == 6
@@ -112,6 +113,8 @@ def test_example_training_slime_config_loads():
 
     assert cfg.method == TrainMethod.SLIME
     assert slime.reward == "auto"
+    assert slime.answer_field == "label"
+    assert slime.rollout_backend == "hf"
     assert slime.data_gen is True
     assert slime.data_gen_count >= 200
     assert slime.process_reward_weight == 0.0
@@ -138,7 +141,7 @@ def test_example_training_slime_ddp_config_loads():
     assert slime.grpo_std_normalization is True
 
 
-def test_train_config_rejects_slime_oversample_below_train_batch(tmp_path):
+def test_train_config_rejects_slime_oversample_below_rollout_batch(tmp_path):
     import pytest
     from pydantic import ValidationError
 
@@ -149,8 +152,7 @@ def test_train_config_rejects_slime_oversample_below_train_batch(tmp_path):
                 "dataset": tmp_path / "slime.jsonl",
                 "output_dir": tmp_path / "out",
                 "method": "slime",
-                "batch_size": 8,
-                "train_batch_size": 8,
+                "rollout_batch_size": 8,
                 "over_sampling_batch_size": 4,
                 "dynamic_sampling_filter": "reward_nonzero_std",
             }

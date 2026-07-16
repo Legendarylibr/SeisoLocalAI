@@ -184,19 +184,21 @@ class TrainConfig(BaseModel):
         description="Stable methodology label written into manifests and snapshots.",
     )
     prompt_field: str = "prompt"
-    answer_field: str = "answer"
+    answer_field: str = "label"
     metadata_field: str | None = "metadata"
-    reward: str = "exact_match"
+    reward: str = "auto"
     reward_field: str = "reward"
     max_vram_gb: float | None = Field(default=None, gt=0)
     max_prompt_tokens: int = Field(default=512, ge=1)
     max_new_tokens: int = Field(default=256, ge=1)
     rollouts_per_prompt: int = Field(default=4, ge=2)
-    rollout_batch_size: int = Field(default=4, ge=1)
+    # slime --rollout-batch-size (prompts)
+    rollout_batch_size: int = Field(default=1, ge=1)
     over_sampling_batch_size: int | None = Field(default=None, ge=1)
     dynamic_sampling_filter: str = "reward_nonzero_std"
     dynamic_sampling_min_reward_std: float = Field(default=1e-6, ge=0)
     policy_micro_batch_size: int | None = Field(default=None, ge=1)
+    # None → same as rollout_batch_size (slime)
     train_batch_size: int | None = Field(default=None, ge=1)
     balance_data: bool = False
     shuffle_buffer_size: int = Field(default=2048, ge=1)
@@ -215,12 +217,11 @@ class TrainConfig(BaseModel):
     calculate_per_token_loss: bool = False
     temperature: float = Field(default=0.9, gt=0)
     top_p: float = Field(default=0.95, gt=0, le=1)
-    # Online completion backend for slime only (default preserves HF generate).
     rollout_backend: str = Field(
-        default="data_gen",
-        description="slime rollout backend: data_gen | sglang | auto",
+        default="hf",
+        description="slime online generate: hf | sglang | auto (data_gen aliases hf)",
     )
-    apply_chat_template: bool = False
+    apply_chat_template: bool = True
     sglang_base_url: str = ""
     sglang_model: str = ""
     sglang_api_key: str = "EMPTY"
@@ -332,11 +333,12 @@ class TrainConfig(BaseModel):
             return self
         from seiso.slime_single_gpu.config import validate_oversample_vs_train_batch
 
-        train_batch = self.train_batch_size or self.batch_size
+        train_batch = self.train_batch_size or self.rollout_batch_size or self.batch_size
         validate_oversample_vs_train_batch(
             dynamic_sampling_filter=self.dynamic_sampling_filter,
             over_sampling_batch_size=self.over_sampling_batch_size,
             train_batch_size=train_batch,
+            rollout_batch_size=self.rollout_batch_size,
         )
         if (
             self.clip_ratio_high is not None
@@ -357,7 +359,8 @@ class TrainConfig(BaseModel):
 
         extra: dict[str, Any] = getattr(self, "extra", {})
         policy_batch = self.policy_micro_batch_size or self.batch_size
-        train_batch = self.train_batch_size or self.batch_size
+        # slime: train target defaults to rollout_batch_size (prompts)
+        train_batch = self.train_batch_size
         return SingleGpuSlimeConfig(
             model_id=self.model_id,
             dataset=Path(self.dataset),

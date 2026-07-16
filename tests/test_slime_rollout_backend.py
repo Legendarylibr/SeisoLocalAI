@@ -29,11 +29,16 @@ def _cfg(tmp_path: Path, **kwargs) -> SingleGpuSlimeConfig:
     return SingleGpuSlimeConfig(**base)
 
 
-def test_default_backend_is_data_gen(tmp_path: Path):
+def test_default_backend_is_hf(tmp_path: Path):
     cfg = _cfg(tmp_path)
-    assert resolve_rollout_backend(cfg, world_size=1) == "data_gen"
-    assert resolve_rollout_backend(cfg, world_size=4) == "data_gen"
+    assert resolve_rollout_backend(cfg, world_size=1) == "hf"
+    assert resolve_rollout_backend(cfg, world_size=4) == "hf"
     cfg.validate()
+
+
+def test_data_gen_alias_maps_to_hf(tmp_path: Path):
+    cfg = _cfg(tmp_path, rollout_backend="data_gen")
+    assert resolve_rollout_backend(cfg, world_size=1) == "hf"
 
 
 def test_auto_uses_sglang_only_when_url_and_multi_process(tmp_path: Path):
@@ -42,7 +47,7 @@ def test_auto_uses_sglang_only_when_url_and_multi_process(tmp_path: Path):
         rollout_backend="auto",
         sglang_base_url="http://127.0.0.1:30000",
     )
-    assert resolve_rollout_backend(cfg, world_size=1) == "data_gen"
+    assert resolve_rollout_backend(cfg, world_size=1) == "hf"
     assert resolve_rollout_backend(cfg, world_size=2) == "sglang"
 
 
@@ -100,7 +105,7 @@ def test_example_ddp_config_requests_sglang():
     slime.validate()
 
 
-def test_example_single_gpu_keeps_data_gen_backend():
+def test_example_single_gpu_keeps_hf_backend():
     cfg = SingleGpuSlimeConfig.from_yaml(Path("configs/example_slime_single_gpu.yaml"))
-    assert cfg.rollout_backend == "data_gen"
+    assert cfg.rollout_backend == "hf"
     cfg.validate()

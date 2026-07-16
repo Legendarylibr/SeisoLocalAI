@@ -8,17 +8,23 @@ from pathlib import Path
 import yaml
 
 
+def effective_train_batch_size(config: SingleGpuSlimeConfig) -> int:
+    """Prompt groups per step after filtering (slime rollout_batch_size target)."""
+    if config.train_batch_size is not None:
+        return int(config.train_batch_size)
+    return int(config.rollout_batch_size)
+
+
 def validate_oversample_vs_train_batch(
     *,
     dynamic_sampling_filter: str,
     over_sampling_batch_size: int | None,
     train_batch_size: int,
+    rollout_batch_size: int | None = None,
 ) -> None:
-    """Shared oversample rule for SingleGpuSlimeConfig and TrainConfig.
+    """Shared oversample rule (slime: over_sampling_batch_size >= rollout_batch_size).
 
-    ``over_sampling_batch_size`` is measured in *prompt groups* (same units as
-    ``train_batch_size``), not sequences / ``rollouts_per_prompt``.
-    ``None`` is allowed and means no oversample headroom (sample train_batch only).
+    Units are **prompts**, not sequences. ``None`` oversample = no extra headroom.
     """
     if dynamic_sampling_filter == "none":
         return
@@ -26,11 +32,13 @@ def validate_oversample_vs_train_batch(
         return
     if over_sampling_batch_size < 1:
         raise ValueError("over_sampling_batch_size must be positive")
-    if over_sampling_batch_size < train_batch_size:
+    # Prefer comparing to rollout_batch_size (slime); fall back to train target.
+    floor = int(rollout_batch_size if rollout_batch_size is not None else train_batch_size)
+    if over_sampling_batch_size < floor:
         raise ValueError(
-            "over_sampling_batch_size must be >= train_batch_size when "
+            "over_sampling_batch_size must be >= rollout_batch_size when "
             "dynamic_sampling_filter is enabled (slime oversample ≥ rollout batch; "
-            "units are prompt groups, not sequences)"
+            "units are prompts)"
         )
 
 
@@ -41,31 +49,28 @@ class SingleGpuSlimeConfig:
     model_id: str
     dataset: Path
     output_dir: Path
+    # slime: --input-key / --label-key / --metadata-key
     prompt_field: str = "prompt"
-    answer_field: str = "answer"
+    answer_field: str = "label"
     metadata_field: str | None = "metadata"
-    reward: str = "exact_match"
+    # slime: --rm-type (or per-row metadata.rm_type with reward=auto)
+    reward: str = "auto"
     reward_field: str = "reward"
     max_vram_gb: float | None = None
     max_prompt_tokens: int = 512
     max_new_tokens: int = 256
+    # slime: --n-samples-per-prompt
     rollouts_per_prompt: int = 4
-    # Generation batch size in *sequences* (prompt groups × rollouts_per_prompt),
-    # not prompt count. Upstream slime uses rollout_batch_size as prompt count.
-    rollout_batch_size: int = 4
-    # Prompt-group oversample size when dynamic filtering is on (slime analogue of
-    # over_sampling_batch_size ≥ rollout_batch_size). Units are prompt groups, same
-    # as train_batch_size — not sequences. When set under a non-none filter, must
-    # be >= train_batch_size. None means no extra headroom (sample train_batch only).
+    # slime: --rollout-batch-size (number of *prompts*, not sequences)
+    rollout_batch_size: int = 1
+    # slime: --over-sampling-batch-size (>= rollout_batch_size when filtering)
     over_sampling_batch_size: int | None = None
-    # Drop zero-signal prompt groups — standard for sparse verifiable RL.
-    # ``reward_nonzero_std`` uses *outcome_reward* spread (not composite reward) so
-    # format-only shaping cannot keep all-fail groups alive for GRPO.
+    # Drop zero-signal groups (slime check_reward_nonzero_std on *outcome*).
     dynamic_sampling_filter: str = "reward_nonzero_std"
     dynamic_sampling_min_reward_std: float = 1e-6
     policy_micro_batch_size: int = 4
-    # Prompt groups consumed per policy step (slime rollout_batch_size analogue).
-    train_batch_size: int = 1
+    # Target prompt groups per policy step after filtering (defaults to rollout_batch_size).
+    train_batch_size: int | None = None
     balance_data: bool = False
     shuffle_buffer_size: int = 2048
     max_samples_per_epoch: int | None = None
@@ -77,18 +82,19 @@ class SingleGpuSlimeConfig:
     max_steps: int | None = None
     # 0 = no frozen ref (lower VRAM). Use ~0.01–0.05 for longer runs to limit drift.
     kl_coef: float = 0.0
-    # PPO/GRPO clip bounds (slime: eps_clip / eps_clip_high). High defaults to low.
+    # slime: --eps-clip / --eps-clip-high
     clip_ratio: float = 0.2
     clip_ratio_high: float | None = None
-    # Match THUDM/slime grpo_std_normalization (mean-center then / unbiased std).
+    # slime: grpo_std_normalization (mean-center then / unbiased std)
     grpo_std_normalization: bool = True
     calculate_per_token_loss: bool = False
     temperature: float = 0.9
     top_p: float = 0.95
-    # Online completion backend: data_gen (HF generate, default) | sglang | auto.
-    # auto → sglang when sglang_base_url set and multi-process, else data_gen.
-    rollout_backend: str = "data_gen"
-    apply_chat_template: bool = False
+    # Online generate: hf (colocated, default) | sglang | auto
+    # "data_gen" is accepted as an alias of "hf".
+    rollout_backend: str = "hf"
+    # slime: --apply-chat-template
+    apply_chat_template: bool = True
     sglang_base_url: str = ""
     sglang_model: str = ""
     sglang_api_key: str = "EMPTY"
@@ -157,14 +163,12 @@ class SingleGpuSlimeConfig:
             raise ValueError(
                 "rollouts_per_prompt must be at least 2 for grouped advantages"
             )
-        if self.train_batch_size < 1:
+        if self.train_batch_size is not None and self.train_batch_size < 1:
             raise ValueError("train_batch_size must be positive")
         if self.metadata_field is not None and not self.metadata_field:
             raise ValueError("metadata_field must not be empty")
         if self.rollout_batch_size < 1:
-            raise ValueError("rollout_batch_size must be positive")
-        if self.rollout_batch_size < self.rollouts_per_prompt:
-            raise ValueError("rollout_batch_size must be at least rollouts_per_prompt")
+            raise ValueError("rollout_batch_size must be positive (slime: prompt count)")
         if self.dynamic_sampling_filter not in {
             "none",
             "reward_nonzero_std",
@@ -177,7 +181,8 @@ class SingleGpuSlimeConfig:
         validate_oversample_vs_train_batch(
             dynamic_sampling_filter=self.dynamic_sampling_filter,
             over_sampling_batch_size=self.over_sampling_batch_size,
-            train_batch_size=self.train_batch_size,
+            train_batch_size=effective_train_batch_size(self),
+            rollout_batch_size=self.rollout_batch_size,
         )
         if self.dynamic_sampling_min_reward_std < 0:
             raise ValueError("dynamic_sampling_min_reward_std must be non-negative")

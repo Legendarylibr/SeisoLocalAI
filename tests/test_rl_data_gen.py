@@ -45,12 +45,20 @@ def test_generate_rl_corpus_is_deterministic_and_diverse(tmp_path: Path):
     a = generate_rl_corpus(cfg)
     b = generate_rl_corpus(cfg)
     assert a.count == 60
-    assert [r["task_id"] for r in a.rows] == [r["task_id"] for r in b.rows]
+    # slime-native prompt/label
+    assert isinstance(a.rows[0]["prompt"], list)
+    assert "label" in a.rows[0]
+    ids_a = [r["metadata"]["task_id"] for r in a.rows]
+    ids_b = [r["metadata"]["task_id"] for r in b.rows]
+    assert ids_a == ids_b
     assert a.summary()["answer_diversity"] > 0.3
     assert a.stream_counts.get("numeric", 0) > 0
     assert a.stream_counts.get("choice", 0) > 0
     # Thinking instruction present for outcome-first slime defaults.
-    assert all("<think>" in r["prompt"].lower() or "think" in r["prompt"].lower() for r in a.rows)
+    contents = " ".join(
+        m["content"] for r in a.rows for m in r["prompt"] if isinstance(m, dict)
+    )
+    assert "think" in contents.lower()
 
 
 def test_numeric_rows_verify_with_correct_answer():
@@ -63,12 +71,12 @@ def test_numeric_rows_verify_with_correct_answer():
     )
     result = generate_rl_corpus(cfg)
     for row in result.rows:
-        answer = str(row["answer"])
+        answer = str(row["label"])
         # Simulate a model that emits the gold answer after a closed think block.
         completion = f"<think>calc</think>\n{answer}"
         scored = score_completion(
             completion,
-            row,
+            {"answer": answer, **row},
             checker="numeric",
             require_thinking_trace=False,
             process_weight=0.0,

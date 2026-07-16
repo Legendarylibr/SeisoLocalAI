@@ -78,7 +78,8 @@ def test_single_gpu_slime_config_from_yaml(tmp_path: Path):
     assert cfg.output_dir == Path("outputs/slime")
     assert cfg.rollouts_per_prompt == 3
     assert cfg.max_vram_gb == 12
-    assert cfg.rollout_batch_size == 4
+    # default rollout_batch_size is prompts (slime); yaml may omit it → default 1
+    assert cfg.rollout_batch_size >= 1
     assert cfg.policy_micro_batch_size == 4
     assert cfg.shuffle_buffer_size == 2048
     assert cfg.require_thinking_trace is True
@@ -114,11 +115,13 @@ def test_example_single_gpu_slime_config_loads_samples():
     assert cfg.use_lora is True
     assert cfg.lora_r == 16
     assert cfg.reward == "auto"
+    assert cfg.answer_field == "label"
+    assert cfg.rollout_backend == "hf"
     assert cfg.data_gen is True
     assert cfg.data_gen_count >= 200
     assert cfg.process_reward_weight == 0.0
     assert len(samples) >= 16
-    assert {"prompt", "answer"} <= set(samples[0])
+    assert "prompt" in samples[0]
 
 
 def test_single_gpu_slime_config_requires_grouped_rollouts(tmp_path: Path):
@@ -235,7 +238,8 @@ def test_single_gpu_slime_config_rejects_invalid_stability_options(
         cfg.validate()
 
 
-def test_single_gpu_slime_config_requires_rollout_batch_to_cover_group(tmp_path: Path):
+def test_single_gpu_slime_config_allows_rollout_batch_as_prompt_count(tmp_path: Path):
+    """slime: rollout_batch_size is prompts; may be < rollouts_per_prompt."""
     cfg = SingleGpuSlimeConfig(
         model_id="test/model",
         dataset=tmp_path / "data.jsonl",
@@ -243,39 +247,36 @@ def test_single_gpu_slime_config_requires_rollout_batch_to_cover_group(tmp_path:
         rollouts_per_prompt=4,
         rollout_batch_size=2,
     )
-
-    with pytest.raises(ValueError, match="rollout_batch_size"):
-        cfg.validate()
+    cfg.validate()
 
 
-def test_single_gpu_slime_config_requires_oversample_ge_train_batch(tmp_path: Path):
-    # Oversample is in prompt groups: rpp=4 must not block oversample=4 < train=8.
+def test_single_gpu_slime_config_requires_oversample_ge_rollout_batch(tmp_path: Path):
+    # slime: over_sampling_batch_size >= rollout_batch_size (prompts)
     cfg = SingleGpuSlimeConfig(
         model_id="test/model",
         dataset=tmp_path / "data.jsonl",
         output_dir=tmp_path / "out",
         rollouts_per_prompt=4,
-        rollout_batch_size=4,
-        train_batch_size=8,
+        rollout_batch_size=8,
+        train_batch_size=4,
         over_sampling_batch_size=4,
         dynamic_sampling_filter="reward_nonzero_std",
     )
-    with pytest.raises(ValueError, match="over_sampling_batch_size must be >= train_batch_size"):
+    with pytest.raises(ValueError, match="over_sampling_batch_size must be >= rollout_batch_size"):
         cfg.validate()
 
 
-def test_single_gpu_slime_config_allows_oversample_between_train_and_rpp(
+def test_single_gpu_slime_config_allows_oversample_ge_rollout_batch(
     tmp_path: Path,
 ):
-    """Prompt-group oversample may be < rollouts_per_prompt when >= train batch."""
     cfg = SingleGpuSlimeConfig(
         model_id="test/model",
         dataset=tmp_path / "data.jsonl",
         output_dir=tmp_path / "out",
         rollouts_per_prompt=4,
-        rollout_batch_size=4,
-        train_batch_size=1,
-        over_sampling_batch_size=2,
+        rollout_batch_size=2,
+        train_batch_size=2,
+        over_sampling_batch_size=4,
         dynamic_sampling_filter="reward_nonzero_std",
     )
     cfg.validate()

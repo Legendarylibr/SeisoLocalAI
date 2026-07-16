@@ -434,9 +434,11 @@ def _collect_training_rollout_batch(
     if config.dynamic_sampling_filter == "none":
         return rollout_batch
 
+    from seiso.slime_single_gpu.config import effective_train_batch_size
+
     stats = dict(rollout_batch.stats)
     rollouts = list(rollout_batch.rollouts)
-    target_groups = config.train_batch_size
+    target_groups = effective_train_batch_size(config)
     refill_rounds = 0
     while (
         _refill_visible_group_count(rollouts, config, torch, dist_ctx)
@@ -524,20 +526,20 @@ def _collect_rollouts(
     model.eval()
     world_size = dist_ctx.world_size if dist_ctx is not None else 1
     backend = resolve_rollout_backend(config, world_size=world_size)
-    prompt_batch_size = max(1, config.rollout_batch_size // config.rollouts_per_prompt)
+    # slime: rollout_batch_size is number of prompts
+    prompt_batch_size = max(1, int(config.rollout_batch_size))
     rollouts: list[Rollout] = []
     filter_stats = {
         "rollout_groups_total": 0.0,
         "rollout_groups_kept": 0.0,
         "dynamic_filtered_groups": 0.0,
-        "rollout_backend": 0.0,  # placeholder; string logged via verifier/metrics
+        "rollout_backend_is_sglang": 1.0 if backend == "sglang" else 0.0,
     }
-    filter_stats["rollout_backend_is_sglang"] = 1.0 if backend == "sglang" else 0.0
     for sample_chunk in _chunked(samples, prompt_batch_size):
         prompt_chunk = [
             format_generation_prompt(
                 tokenizer,
-                str(sample[config.prompt_field]),
+                _sample_prompt_value(sample, config),
                 config,
             )
             for sample in sample_chunk
@@ -561,6 +563,7 @@ def _collect_rollouts(
             generated = None
             prompt_width = 0
         else:
+            # hf (colocated generate) — slime single-GPU colocate analogue
             gen = generate_data_gen_chunk(
                 generation_model=_generation_model(model),
                 tokenizer=tokenizer,
@@ -1405,9 +1408,13 @@ def _iter_distributed_sample_batches(
 
 
 def _sampling_batch_size(config: SingleGpuSlimeConfig) -> int:
+    from seiso.slime_single_gpu.config import effective_train_batch_size
+
+    # slime: sample over_sampling_batch_size prompts, keep until rollout_batch_size
+    train = effective_train_batch_size(config)
     if config.dynamic_sampling_filter == "none":
-        return config.train_batch_size
-    return max(config.train_batch_size, config.over_sampling_batch_size or config.train_batch_size)
+        return train
+    return max(train, config.over_sampling_batch_size or train)
 
 
 def _balanced_rank_samples(
@@ -1481,6 +1488,14 @@ def _load_samples(config: SingleGpuSlimeConfig) -> Iterable[dict[str, Any]]:
         yield sample
 
 
+def _sample_prompt_value(sample: dict[str, Any], config: SingleGpuSlimeConfig) -> Any:
+    """Return raw prompt (string or slime chat-message list)."""
+    value = sample.get(config.prompt_field)
+    if value is None:
+        raise ValueError(f"sample missing prompt field {config.prompt_field!r}")
+    return value
+
+
 def _limited_samples(config: SingleGpuSlimeConfig) -> Iterable[dict[str, Any]]:
     samples = _load_samples(config)
     if config.max_samples_per_epoch is None:
@@ -1489,13 +1504,35 @@ def _limited_samples(config: SingleGpuSlimeConfig) -> Iterable[dict[str, Any]]:
 
 
 def _reward_sample(sample: dict[str, Any], config: SingleGpuSlimeConfig) -> dict[str, Any]:
+    """Normalize a JSONL row into the shared verifier sample dict.
+
+    Supports slime fields (``label``, ``metadata.rm_type``, chat ``prompt``)
+    and Seiso aliases (``answer``, top-level ``tests``).
+    """
     merged = dict(sample)
     if config.reward == "field":
         merged["reward"] = sample.get(config.reward_field, 0.0)
-    if config.answer_field != "answer":
-        merged["answer"] = sample.get(config.answer_field, "")
+    # slime label / Seiso answer
+    label = sample.get(config.answer_field)
+    if label is None:
+        label = sample.get("label", sample.get("answer", ""))
+    merged["answer"] = label
     metadata = _sample_metadata(sample, config)
-    if metadata is not None:
+    if isinstance(metadata, dict):
+        merged["metadata"] = metadata
+        # Flatten slime metadata into verifier fields
+        if "tests" in metadata and "tests" not in merged:
+            merged["tests"] = metadata["tests"]
+        if "test" in metadata and "test" not in merged:
+            merged["test"] = metadata["test"]
+        if "timeout_s" in metadata and "timeout_s" not in merged:
+            merged["timeout_s"] = metadata["timeout_s"]
+        if "setup" in metadata and "setup" not in merged:
+            merged["setup"] = metadata["setup"]
+        rm_type = metadata.get("rm_type") or metadata.get("benchmark")
+        if rm_type and not merged.get("benchmark"):
+            merged["benchmark"] = rm_type
+    elif metadata is not None:
         merged["metadata"] = metadata
     return merged
 

@@ -71,9 +71,9 @@ class DataGenResult:
 
     def summary(self) -> dict[str, Any]:
         answers = [
-            str(r.get("answer", ""))
+            str(r.get("label", r.get("answer", "")))
             for r in self.rows
-            if r.get("benchmark") != "code"
+            if (r.get("metadata") or {}).get("rm_type", r.get("reward")) != "code"
         ]
         unique_answers = len(set(answers))
         return {
@@ -136,6 +136,41 @@ def _thinking_suffix(cfg: DataGenConfig) -> str:
     if not cfg.require_thinking_trace:
         return ""
     return f"\n\n{cfg.thinking_instruction}"
+
+
+def to_slime_prompt_row(
+    content: str,
+    label: str,
+    *,
+    rm_type: str,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build a THUDM/slime-compatible JSONL row.
+
+    Slime loads ``prompt`` (optionally chat messages) + ``label`` and optional
+    ``metadata``. Seiso also keeps ``answer`` as an alias of ``label`` so local
+    trainers can use either field name.
+    """
+    meta = dict(metadata or {})
+    meta.setdefault("rm_type", rm_type)
+    meta.setdefault("source_name", "seiso.data_gen")
+    row: dict[str, Any] = {
+        # slime-native chat form (use with apply_chat_template)
+        "prompt": [{"role": "user", "content": content}],
+        "label": label,
+        "answer": label,  # Seiso alias
+        "metadata": meta,
+    }
+    # Top-level checker hints for Seiso verifier (also mirrored in metadata).
+    row["reward"] = rm_type
+    row["benchmark"] = meta.get("benchmark", rm_type)
+    if "tests" in meta:
+        row["tests"] = meta["tests"]
+    if "solution" in meta:
+        row["solution"] = meta["solution"]
+    if "timeout_s" in meta:
+        row["timeout_s"] = meta["timeout_s"]
+    return row
 
 
 def _numeric_easy(rng: random.Random, index: int) -> tuple[str, str]:
@@ -265,22 +300,21 @@ def generate_numeric_row(
         prompt, answer = _numeric_hard(rng, index)
     else:
         prompt, answer = _numeric_medium(rng, index)
-    return {
-        "prompt": prompt + _thinking_suffix(cfg),
-        "answer": answer,
-        "benchmark": "gsm8k",
-        "reward": "numeric",
-        "difficulty": difficulty,
-        "stream": "numeric",
-        "task_id": f"numeric_{difficulty}_{seed}_{index}",
-        "metadata": {
+    text = prompt + _thinking_suffix(cfg)
+    return to_slime_prompt_row(
+        text,
+        answer,
+        rm_type="numeric",
+        metadata={
+            "benchmark": "gsm8k",
             "stream": "numeric",
             "difficulty": difficulty,
+            "task_id": f"numeric_{difficulty}_{seed}_{index}",
             "generator": "seiso.rl_verify.data_gen",
             "seed": seed,
             "index": index,
         },
-    }
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -380,25 +414,23 @@ def generate_choice_row(
     for lab, text in zip(["A", "B", "C", "D"], opts, strict=True):
         lines.append(f"{lab}) {text}")
     lines.append("Reply with the letter of the correct choice only after reasoning.")
-    prompt = "\n".join(lines) + _thinking_suffix(cfg)
-    return {
-        "prompt": prompt,
-        "answer": letter,
-        "benchmark": "choice",
-        "reward": "choice",
-        "difficulty": difficulty,
-        "stream": "choice",
-        "task_id": f"choice_{difficulty}_{seed}_{index}",
-        "metadata": {
+    text = "\n".join(lines) + _thinking_suffix(cfg)
+    return to_slime_prompt_row(
+        text,
+        letter,
+        rm_type="choice",
+        metadata={
+            "benchmark": "choice",
             "stream": "choice",
             "difficulty": difficulty,
             "topic": topic,
             "options": opts,
+            "task_id": f"choice_{difficulty}_{seed}_{index}",
             "generator": "seiso.rl_verify.data_gen",
             "seed": seed,
             "index": index,
         },
-    }
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -420,23 +452,28 @@ def generate_code_row(
         index=index,
         tier=difficulty,
     )
-    row = task.to_dataset_row()
-    if cfg.require_thinking_trace and "<think>" not in str(row["prompt"]).lower():
-        row["prompt"] = str(row["prompt"]).rstrip() + _thinking_suffix(cfg)
-    row["reward"] = "code"
-    row["benchmark"] = "code"
-    row["difficulty"] = difficulty
-    row["stream"] = "code"
-    row["task_id"] = task.task_id
-    row["metadata"] = {
-        "stream": "code",
-        "difficulty": difficulty,
-        "generator": "seiso.rl_verify.data_gen",
-        "seed": seed,
-        "index": index,
-        "tags": list(task.tags),
-    }
-    return row
+    content = task.prompt
+    if cfg.require_thinking_trace and "<think>" not in content.lower():
+        content = content.rstrip() + _thinking_suffix(cfg)
+    tests = task.tests()
+    return to_slime_prompt_row(
+        content,
+        "",  # code tasks are verified via unit tests, not a scalar label
+        rm_type="code",
+        metadata={
+            "benchmark": "code",
+            "stream": "code",
+            "difficulty": difficulty,
+            "task_id": task.task_id,
+            "tests": tests,
+            "solution": task.full_source(),
+            "timeout_s": task.timeout_s,
+            "tags": list(task.tags),
+            "generator": "seiso.rl_verify.data_gen",
+            "seed": seed,
+            "index": index,
+        },
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -517,10 +554,8 @@ def generate_rl_corpus(config: DataGenConfig | None = None) -> DataGenResult:
             # Skip flaky/invalid generator draws; fail closed on that item only.
             continue
 
-        # Final row hygiene for slime trainer.
-        if "prompt" not in row or not str(row["prompt"]).strip():
+        if "prompt" not in row:
             continue
-        row.setdefault("reward", stream if stream != "numeric" else "numeric")
         rows.append(row)
         stream_counts[stream] = stream_counts.get(stream, 0) + 1
         difficulty_counts[difficulty] = difficulty_counts.get(difficulty, 0) + 1

@@ -20,7 +20,15 @@ from typing import Any
 
 from seiso.slime_single_gpu.config import SingleGpuSlimeConfig
 
-_ROLLOUT_BACKENDS = frozenset({"data_gen", "sglang", "auto"})
+# Canonical: hf | sglang | auto. "data_gen" is a legacy alias of "hf".
+_ROLLOUT_BACKENDS = frozenset({"hf", "sglang", "auto", "data_gen"})
+
+
+def _normalize_backend_name(name: str) -> str:
+    key = str(name or "hf").lower().strip()
+    if key == "data_gen":
+        return "hf"
+    return key
 
 
 def resolve_rollout_backend(
@@ -28,31 +36,34 @@ def resolve_rollout_backend(
     *,
     world_size: int = 1,
 ) -> str:
-    """Resolve effective backend without changing implicit single-GPU behavior.
+    """Resolve effective backend.
 
-    * ``data_gen`` (default) — always HF generate
-    * ``sglang`` — always SGLang HTTP
-    * ``auto`` — SGLang when ``sglang_base_url`` is set and ``world_size > 1``,
-      else ``data_gen``
+    * ``hf`` (default; alias ``data_gen``) — colocated Hugging Face generate
+    * ``sglang`` — OpenAI-compatible SGLang HTTP
+    * ``auto`` — SGLang when ``sglang_base_url`` is set and ``world_size > 1``
     """
-    name = str(getattr(config, "rollout_backend", "data_gen") or "data_gen").lower()
-    if name not in _ROLLOUT_BACKENDS:
+    name = _normalize_backend_name(
+        getattr(config, "rollout_backend", "hf") or "hf"
+    )
+    if name not in {"hf", "sglang", "auto"}:
         raise ValueError(
-            f"rollout_backend must be one of {sorted(_ROLLOUT_BACKENDS)}, got {name!r}"
+            f"rollout_backend must be one of: hf, sglang, auto (got {name!r})"
         )
     if name == "auto":
         base = str(getattr(config, "sglang_base_url", "") or "").strip()
         if base and world_size > 1:
             return "sglang"
-        return "data_gen"
+        return "hf"
     return name
 
 
 def validate_rollout_backend_config(config: SingleGpuSlimeConfig) -> None:
-    name = str(getattr(config, "rollout_backend", "data_gen") or "data_gen").lower()
-    if name not in _ROLLOUT_BACKENDS:
+    name = _normalize_backend_name(
+        getattr(config, "rollout_backend", "hf") or "hf"
+    )
+    if name not in {"hf", "sglang", "auto"}:
         raise ValueError(
-            f"rollout_backend must be one of {sorted(_ROLLOUT_BACKENDS)}, got {name!r}"
+            f"rollout_backend must be one of: hf, sglang, auto (got {name!r})"
         )
     if name == "sglang":
         base = str(getattr(config, "sglang_base_url", "") or "").strip()
@@ -80,31 +91,54 @@ class GeneratedChunk:
     prompt_width: int | None = None
 
 
+def _as_chat_messages(prompt: str | list[Any]) -> list[dict[str, str]]:
+    """Normalize slime chat prompts or plain strings to OpenAI-style messages."""
+    if isinstance(prompt, list):
+        messages: list[dict[str, str]] = []
+        for item in prompt:
+            if isinstance(item, dict) and "content" in item:
+                role = str(item.get("role") or "user")
+                messages.append({"role": role, "content": str(item["content"])})
+            else:
+                messages.append({"role": "user", "content": str(item)})
+        return messages or [{"role": "user", "content": ""}]
+    return [{"role": "user", "content": str(prompt)}]
+
+
 def format_generation_prompt(
     tokenizer,
-    prompt: str,
+    prompt: str | list[Any],
     config: SingleGpuSlimeConfig,
 ) -> str:
-    """Apply optional chat template, then slime thinking-open suffix."""
-    text = str(prompt)
-    use_chat = bool(getattr(config, "apply_chat_template", False))
+    """Apply optional chat template (slime --apply-chat-template), then thinking open."""
+    messages = _as_chat_messages(prompt)
+    # Optional thinking instruction on the last user turn only.
+    if config.require_thinking_trace:
+        last = messages[-1]
+        content = last["content"]
+        if "<think>" not in content.lower():
+            last = {
+                **last,
+                "content": (
+                    f"{content.rstrip()}\n\n{config.thinking_instruction}\n<think>"
+                ),
+            }
+            messages = [*messages[:-1], last]
+
+    use_chat = bool(getattr(config, "apply_chat_template", True))
     if use_chat and hasattr(tokenizer, "apply_chat_template"):
         try:
-            text = str(
+            return str(
                 tokenizer.apply_chat_template(
-                    [{"role": "user", "content": text}],
+                    messages,
                     tokenize=False,
                     add_generation_prompt=True,
                 )
             )
         except Exception:
-            # Fall back to raw prompt — do not fail training for template quirks.
-            text = str(prompt)
-    if not config.require_thinking_trace:
-        return text
-    if "<think>" in text.lower():
-        return text
-    return f"{text.rstrip()}\n\n{config.thinking_instruction}\n<think>"
+            pass
+    # Fallback: concatenate message contents (no template).
+    return "\n".join(m["content"] for m in messages)
 
 
 def generate_data_gen_chunk(

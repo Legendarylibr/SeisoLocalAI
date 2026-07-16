@@ -180,11 +180,10 @@ materializes `output_dir/slime_generated.jsonl` automatically:
 | `data_gen_difficulty` | `easy` / `medium` / `hard` weights |
 | `data_gen_seed` | Deterministic seed (same seed ⇒ same corpus) |
 | `reward: auto` | Per-row checker from generated `reward` / `benchmark` fields |
-| `rollout_backend` | Online completion path: `data_gen` (HF generate, default) or `sglang` (HTTP). `auto` uses SGLang when `sglang_base_url` is set **and** multi-process |
-| `sglang_base_url` | SGLang OpenAI server root, e.g. `http://127.0.0.1:30000` (required for `rollout_backend: sglang`) |
+| `rollout_backend` | `hf` (default, colocated generate) \| `sglang` \| `auto` |
+| `sglang_base_url` | Required for `sglang` (e.g. `http://127.0.0.1:30000`) |
 
-**Single-GPU** examples use `rollout_backend: data_gen` (colocated HF generate).  
-**Multi-GPU** example (`example_training_slime_ddp.yaml`) uses `rollout_backend: sglang` — launch SGLang separately, then Accelerate DDP for policy updates. Logprobs are always recomputed on the training model.
+**Single-GPU:** `rollout_backend: hf`. **Multi-GPU example:** `sglang` + DDP policy. Logprobs always recomputed on the actor.
 
 Streams:
 
@@ -247,15 +246,18 @@ Important fields:
 | `missing_thinking_penalty` | Penalty when format is required but the model omits a closed think block |
 | `min_thinking_tokens` | Only used when `process_reward_weight > 0` |
 | `kl_coef` | Coefficient on KL to a frozen reference model; `0` skips loading the ref (lower VRAM). Prefer `0.01`–`0.05` for longer post-training runs |
-| `rollouts_per_prompt` | Number of sampled completions per prompt for grouped advantages (slime `n_samples_per_prompt`) |
-| `rollout_batch_size` | Generation batch size in **sequences** (not prompt count); keep at least `rollouts_per_prompt`. Upstream slime names `rollout_batch_size` as prompt count — Seiso’s prompt-group training size is `train_batch_size` / `batch_size` |
-| `train_batch_size` / `batch_size` | Prompt groups per policy step after dynamic filtering (slime prompt `rollout_batch_size` analogue) |
-| `dynamic_sampling_filter` | Default `reward_nonzero_std` (alias `outcome_nonzero_std`) drops prompt groups with zero **outcome_reward** spread so format-only shaping cannot keep all-fail groups. Set `none` only for debugging. If every group is filtered, training fails with `stop_reason: no_trainable_groups` instead of a silent complete |
-| `over_sampling_batch_size` | Prompt-group sampling batch when dynamic filtering is on (same units as `train_batch_size`, **not** sequences / `rollouts_per_prompt`). When set, must be **≥ `train_batch_size`/`batch_size`**. `null`/omit means no oversample headroom (sample the train target only — fine for debug, weak under strict filters). Prefer larger than the train target so filters can refill |
-| `clip_ratio` / `clip_ratio_high` | PPO/GRPO clip bounds (slime `eps_clip` / `eps_clip_high`). High defaults to low when omitted; examples use `0.2` / `0.28` |
-| `grpo_std_normalization` | When true (default), group advantages are `(r - mean) / (unbiased_std + 1e-6)` matching THUDM/slime; set false for mean-centering only (Dr.GRPO-style scale) |
-| `calculate_per_token_loss` | Optional upstream-style loss normalization; defaults to per-sample loss and switches to token-weighted loss when enabled. When `kl_coef > 0` without per-token loss, KL is length-normalized because sequence log-probs are sums |
-| `balance_data` | For distributed slime-style GRPO, greedily shards prompts by estimated prompt length so each rank receives similar rollout work |
+| `rollouts_per_prompt` | slime `--n-samples-per-prompt` |
+| `rollout_batch_size` | slime `--rollout-batch-size` (**prompts**, not sequences) |
+| `train_batch_size` | Target prompts after dynamic filter; `null` → same as `rollout_batch_size` |
+| `over_sampling_batch_size` | slime oversample; when set under filtering must be **≥ `rollout_batch_size`** (prompts) |
+| `answer_field` | slime `--label-key` (default `label`; also accepts `answer`) |
+| `apply_chat_template` | slime `--apply-chat-template` (default true) |
+| `rollout_backend` | `hf` (colocated generate) \| `sglang` \| `auto` (`data_gen` is an alias of `hf`) |
+| `dynamic_sampling_filter` | slime-style nonzero-std filter on **outcome** reward |
+| `clip_ratio` / `clip_ratio_high` | slime `eps_clip` / `eps_clip_high` |
+| `grpo_std_normalization` | slime group mean/std advantages |
+| `calculate_per_token_loss` | slime per-token vs per-sample loss |
+| `balance_data` | Distributed prompt-length balancing |
 | `policy_micro_batch_size` | Policy update microbatch size to control VRAM |
 | `shuffle_buffer_size` | Bounded CPU shuffle buffer for long datasets |
 | `max_samples_per_epoch` | Optional per-epoch cap for smoke runs or data-efficient loops |
