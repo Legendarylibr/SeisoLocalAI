@@ -507,6 +507,44 @@ async def test_sync_hf_cache_inventory_registers_any_cached_gguf(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_sync_hf_cache_inventory_registers_all_gguf_quants(tmp_path, monkeypatch):
+    snapshot = (
+        tmp_path / "hf_cache" / "models--org--Model-GGUF" / "snapshots" / "abc"
+    )
+    snapshot.mkdir(parents=True)
+    (snapshot / "model-Q4_K_M.gguf").write_bytes(b"gguf-q4")
+    (snapshot / "model-Q8_0.gguf").write_bytes(b"gguf-q8")
+
+    monkeypatch.setattr(
+        "forge.services.hf_cache_inventory._catalog_entry_for_cached_repo",
+        lambda _repo: None,
+    )
+    monkeypatch.setattr(
+        "forge.services.hf_cache_inventory.gguf_files_complete_with_hub",
+        lambda **_kwargs: True,
+    )
+
+    db = Database(
+        tmp_path / "forge.db", encryption_key=generate_encryption_key(), ephemeral=True
+    )
+    count = await sync_hf_cache_inventory(
+        db,
+        "u1",
+        data_dir=tmp_path,
+        hf_cache_dir=tmp_path / "hf_cache",
+    )
+
+    rows = await db.list_models("u1")
+    assert count == 2
+    sources = {r["source"] for r in rows}
+    assert "hf:org/Model-GGUF" in sources
+    assert any(s.startswith("hf:org/Model-GGUF:") for s in sources)
+    names = {r["name"] for r in rows}
+    assert "model-Q4_K_M.gguf" in names
+    assert "model-Q8_0.gguf" in names
+
+
+@pytest.mark.asyncio
 async def test_sync_hf_cache_inventory_registers_cached_gguf(tmp_path):
     snapshot = (
         tmp_path / "hf_cache" / "models--bartowski--Model-GGUF" / "snapshots" / "abc"

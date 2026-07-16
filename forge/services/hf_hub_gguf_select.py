@@ -107,43 +107,18 @@ def _complete_shard_group_for(files: list[str], filename: str) -> list[str]:
     return sorted(group)
 
 
-def _pick_gguf_files(
-    files: list[str],
-    *,
-    preferred_quant: str = "Q4_K_M",
-    repo_id: str = "",
-) -> list[str]:
-    ggufs = [
+def _gguf_weight_files(files: list[str]) -> list[str]:
+    return [
         f
         for f in files
         if f.lower().endswith(".gguf")
         and "mmproj" not in f.lower()
         and not f.lower().startswith("mmproj")
     ]
-    if not ggufs:
-        return []
-    preferred_quant = preferred_quant.upper()
 
-    def quant_matches(candidates: list[str]) -> list[str]:
-        normalized_preferred = preferred_quant.replace("-", "_")
-        exact = [
-            f
-            for f in candidates
-            if normalized_preferred in f.upper().replace("-", "_")
-        ]
-        if exact:
-            return exact
-        return rank_gguf_filenames(candidates, preferred=preferred_quant)
 
-    pool = quant_matches(ggufs)
-
-    moe_match = re.search(r"a(\d+(?:\.\d+)?)b", repo_id, re.I)
-    if moe_match:
-        active = moe_match.group(0).lower()
-        active_hits = [f for f in pool if active in f.lower().replace("_", "-")]
-        if active_hits:
-            pool = active_hits
-
+def _complete_shard_groups(pool: list[str]) -> tuple[list[list[str]], bool]:
+    """Return complete shard groups from *pool* and whether any incomplete group exists."""
     shard_groups: dict[tuple[str, str], list[str]] = {}
     for filename in pool:
         name = Path(filename).name
@@ -172,6 +147,63 @@ def _pick_gguf_files(
             complete_groups.append(sorted(group))
         elif group:
             incomplete_shards = True
+    return complete_groups, incomplete_shards
+
+
+def list_complete_gguf_file_groups(files: list[str]) -> list[list[str]]:
+    """Every complete GGUF artifact present in *files* (one list per quant/shard set).
+
+    Does not prefer a quant — reflects whatever is on disk / listed on Hub.
+    Incomplete shard groups are skipped; complete siblings remain.
+    """
+    ggufs = _gguf_weight_files(files)
+    if not ggufs:
+        return []
+
+    complete_groups, _incomplete = _complete_shard_groups(ggufs)
+    groups: list[list[str]] = list(complete_groups)
+    for filename in ggufs:
+        if _GGUF_SHARD_RE.match(Path(filename).name):
+            continue
+        groups.append([filename])
+
+    # Stable order by first filename for deterministic inventory registration.
+    groups.sort(key=lambda group: (group[0].lower(), len(group)))
+    return groups
+
+
+def _pick_gguf_files(
+    files: list[str],
+    *,
+    preferred_quant: str = "Q4_K_M",
+    repo_id: str = "",
+) -> list[str]:
+    ggufs = _gguf_weight_files(files)
+    if not ggufs:
+        return []
+    preferred_quant = preferred_quant.upper()
+
+    def quant_matches(candidates: list[str]) -> list[str]:
+        normalized_preferred = preferred_quant.replace("-", "_")
+        exact = [
+            f
+            for f in candidates
+            if normalized_preferred in f.upper().replace("-", "_")
+        ]
+        if exact:
+            return exact
+        return rank_gguf_filenames(candidates, preferred=preferred_quant)
+
+    pool = quant_matches(ggufs)
+
+    moe_match = re.search(r"a(\d+(?:\.\d+)?)b", repo_id, re.I)
+    if moe_match:
+        active = moe_match.group(0).lower()
+        active_hits = [f for f in pool if active in f.lower().replace("_", "-")]
+        if active_hits:
+            pool = active_hits
+
+    complete_groups, incomplete_shards = _complete_shard_groups(pool)
     if incomplete_shards and not complete_groups:
         return []
     if complete_groups:

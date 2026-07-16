@@ -119,7 +119,8 @@ export function inventoryMatchesRepo(
   repo: string,
 ): boolean {
   const source = model.source || "";
-  if (source === `hf:${repo}`) return true;
+  // Canonical hf:org/model plus multi-quant siblings hf:org/model:file.gguf
+  if (source === `hf:${repo}` || source.startsWith(`hf:${repo}:`)) return true;
   const metaRepo = typeof model.metadata?.repo_id === "string" ? model.metadata.repo_id : null;
   return metaRepo === repo;
 }

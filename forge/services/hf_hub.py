@@ -18,6 +18,7 @@ from forge.services.hf_hub_gguf_select import (
     _pick_gguf_file,
     _pick_gguf_files,
     _pick_mmproj_file,
+    list_complete_gguf_file_groups,
 )
 from forge.services.hf_hub_search import (
     _first_repo_with_gguf,
@@ -50,6 +51,7 @@ __all__ = [
     "estimate_snapshot_download_bytes",
     "get_gguf_file_size_bytes",
     "link_inventory",
+    "list_complete_gguf_file_groups",
     "repo_has_gguf",
     "resolve_gguf_artifact",
     "resolve_gguf_repo",

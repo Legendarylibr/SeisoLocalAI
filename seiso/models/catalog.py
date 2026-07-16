@@ -18,18 +18,6 @@ _DEFAULT_LIMIT = 50
 _MAX_LIMIT = 100
 _HUB_API_MODELS = "https://huggingface.co/api/models"
 
-_SKIP_PIPELINE_TAGS = frozenset(
-    {
-        "text-to-speech",
-        "text-to-audio",
-        "automatic-speech-recognition",
-        "image-to-video",
-        "video-classification",
-        "object-detection",
-        "depth-estimation",
-    }
-)
-
 
 class HubSearchError(Exception):
     """Hub model search failed (network, rate limit, auth, etc.)."""
@@ -243,11 +231,11 @@ def _query_hub_page(
             cursor=cursor,
             token=token,
         )
-    # Empty browse: popular text-generation by downloads.
-    # Typed search: any Hub model matching the string (no pipeline straitjacket).
-    pipeline = None if (query or "").strip() else "text-generation"
+    # Reflect Hugging Face Hub as-is (sorted by downloads). Optional UI task
+    # filters are applied after mapping rows — do not constrain the Hub query
+    # with a pipeline tag except for the embedding task above.
     return _fetch_hub_page(
-        pipeline_tag=pipeline,
+        pipeline_tag=None,
         search=hf_search,
         limit=limit,
         cursor=cursor,
@@ -428,6 +416,7 @@ def _hub_row_to_entry(
     force_task: ModelTask | None = None,
     skip_pipeline_filter: bool = False,
 ) -> CatalogEntry | None:
+    del skip_pipeline_filter  # kept for call-site compatibility; never drop Hub rows
     repo_id = row.get("id") or row.get("modelId")
     if not isinstance(repo_id, str) or not repo_id.strip():
         return None
@@ -443,8 +432,6 @@ def _hub_row_to_entry(
     pipeline_tag = (
         row.get("pipeline_tag") if isinstance(row.get("pipeline_tag"), str) else None
     )
-    if not skip_pipeline_filter and pipeline_tag in _SKIP_PIPELINE_TAGS:
-        return None
 
     task = force_task or _infer_task(repo_id, pipeline_tag, tags)
     is_gguf = _is_gguf_hub_repo(repo_id, tags)
@@ -497,10 +484,9 @@ def _hub_row_to_trainable_entry(
     pipeline_tag = (
         row.get("pipeline_tag") if isinstance(row.get("pipeline_tag"), str) else None
     )
-    if pipeline_tag in _SKIP_PIPELINE_TAGS:
-        return None
 
     task = force_task or _infer_task(repo_id, pipeline_tag, tags)
+    # Trainable catalog still excludes embeddings/vision (LoRA/SFT path only).
     if task == ModelTask.EMBEDDING and force_task != ModelTask.EMBEDDING:
         return None
     if task == ModelTask.VISION:
@@ -603,7 +589,7 @@ def search_catalog(
     cursor: str | None = None,
     token: str | None = None,
 ) -> CatalogSearchResult:
-    """Query Hugging Face Hub live via huggingface_hub; popular models rank first."""
+    """Query Hugging Face Hub live; preserve Hub hits and rank by downloads."""
     limit = max(1, min(limit, _MAX_LIMIT))
     searching = bool(query.strip())
     rows, next_cursor = _query_hub_page(
@@ -619,11 +605,7 @@ def search_catalog(
     entries: list[CatalogEntry] = []
     seen: set[str] = set()
     for row in rows:
-        entry = _hub_row_to_entry(
-            row,
-            force_task=force_task,
-            skip_pipeline_filter=searching,
-        )
+        entry = _hub_row_to_entry(row, force_task=force_task)
         if entry is None or entry.repo_id in seen:
             continue
         seen.add(entry.repo_id)
@@ -631,9 +613,10 @@ def search_catalog(
 
     scored: list[tuple[float, dict]] = []
     for entry in entries:
+        # Typed search keeps every Hub hit (family/task ride in the Hub query).
+        # Browse applies optional UI family/task filters only.
         if family and not searching and entry.family.value != family.lower():
             continue
-        # Browse filters by task; typed search returns any Hub hit (boost ranks matches).
         if task and not searching and not _matches_task(entry, task):
             continue
         if max_params and _parse_param_size(entry.params) > _parse_param_size(
