@@ -4,11 +4,19 @@ on:
   push:
     branches: [main, cleanup]
   pull_request:
+  # Manual recovery when a stuck re-run holds the PR concurrency slot.
+  workflow_dispatch:
   schedule:
     - cron: "17 6 * * 1"
 
+# Include the head SHA for pull_request / workflow_dispatch so a limbo re-run of
+# an older commit cannot block CI for newer commits on the same PR ref.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: >-
+    ci-${{ github.workflow }}-${{
+      github.event.pull_request.number
+      || github.ref
+    }}-${{ github.sha }}
   cancel-in-progress: true
 
 env:
