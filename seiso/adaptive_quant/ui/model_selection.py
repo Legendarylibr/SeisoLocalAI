@@ -81,11 +81,7 @@ def load_selected_model_id(repo: Path) -> str | None:
     if not isinstance(payload, dict):
         return None
     selected = payload.get("selected_model_id")
-    return (
-        str(selected).strip()
-        if isinstance(selected, str) and selected.strip()
-        else None
-    )
+    return str(selected).strip() if isinstance(selected, str) and selected.strip() else None
 
 
 def save_selected_model_id(repo: Path, model_id: str | None) -> None:
@@ -139,9 +135,7 @@ def discover_llama_cpp_binary(*, repo: Path) -> str | None:
         if not isinstance(payload, dict):
             continue
         binary_raw = payload.get("llama_cpp_binary")
-        if not isinstance(binary_raw, str) and isinstance(
-            payload.get("llama_cpp"), dict
-        ):
+        if not isinstance(binary_raw, str) and isinstance(payload.get("llama_cpp"), dict):
             binary_raw = payload["llama_cpp"].get("binary")
         if isinstance(binary_raw, str) and binary_raw.strip():
             resolved = _resolve_file(binary_raw.strip())
@@ -223,9 +217,7 @@ def list_model_choices(*, repo: Path) -> list[ModelChoice]:
         if not isinstance(payload, dict):
             continue
         model_raw = payload.get("llama_cpp_model")
-        if not isinstance(model_raw, str) and isinstance(
-            payload.get("llama_cpp"), dict
-        ):
+        if not isinstance(model_raw, str) and isinstance(payload.get("llama_cpp"), dict):
             model_raw = payload["llama_cpp"].get("model")
         if isinstance(model_raw, str) and model_raw.strip():
             resolved = _resolve_file(model_raw.strip())
@@ -275,9 +267,7 @@ def list_model_choices(*, repo: Path) -> list[ModelChoice]:
             size_mb=route.size_mb,
         )
 
-    return sorted(
-        choices.values(), key=lambda item: (not item.ready, item.label.lower())
-    )
+    return sorted(choices.values(), key=lambda item: (not item.ready, item.label.lower()))
 
 
 def resolve_model_choice(*, repo: Path, model_id: str | None) -> ModelChoice | None:
@@ -290,9 +280,7 @@ def resolve_model_choice(*, repo: Path, model_id: str | None) -> ModelChoice | N
     return None
 
 
-def search_huggingface_gguf_repos(
-    *, query: str, limit: int = 12
-) -> list[dict[str, Any]]:
+def search_huggingface_gguf_repos(*, query: str, limit: int = 12) -> list[dict[str, Any]]:
     """Search Hugging Face Hub for GGUF model repos (stdlib HTTP, no token required)."""
     q = query.strip()
     if not q:
@@ -306,9 +294,7 @@ def search_huggingface_gguf_repos(
         }
     )
     url = f"{_HF_API}/models?{params}"
-    request = urllib.request.Request(
-        url, headers={"User-Agent": "adaptive-rl-quant-launcher/1.0"}
-    )
+    request = urllib.request.Request(url, headers={"User-Agent": "adaptive-rl-quant-launcher/1.0"})
     try:
         with urllib.request.urlopen(request, timeout=15.0) as response:
             payload = json.loads(response.read().decode("utf-8"))

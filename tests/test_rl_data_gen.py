@@ -14,8 +14,8 @@ from seiso.rl_verify.data_gen import (
     parse_weight_mix,
 )
 from seiso.rl_verify.verify import score_completion
-from seiso.slime_single_gpu.config import SingleGpuSlimeConfig
-from seiso.slime_single_gpu.trainer import _maybe_materialize_data_gen
+from seiso.slime.config import SingleGpuSlimeConfig
+from seiso.slime.trainer import _maybe_materialize_data_gen
 
 
 def test_parse_weight_mix_normalizes_and_rejects_unknown():
@@ -117,7 +117,7 @@ def test_slime_config_data_gen_validation():
 
 
 def test_maybe_materialize_data_gen_rewrites_dataset(tmp_path: Path):
-    from seiso.slime_single_gpu.trainer import _DistributedSlimeContext
+    from seiso.slime.trainer import _DistributedSlimeContext
 
     cfg = SingleGpuSlimeConfig(
         model_id="m",

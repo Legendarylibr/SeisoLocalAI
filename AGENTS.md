@@ -71,12 +71,16 @@ See also `docs/troubleshooting.md`, `docs/install.md`, and `docs/forge.md` (for 
 
 ```
 seiso/                 # core (runners, kernels, training, export, compress, rl, ...)
+seiso/slime/           # slime RL (HF / multi-GPU DDP / SGLang / vLLM rollouts)
+seiso/chat/            # shared chat prompts + output sanitize (CLI + Forge)
+seiso/slime_single_gpu/# compat shim → seiso.slime (do not add new code here)
 seiso_cli/main.py      # CLI
 forge/                 # FastAPI (orchestrators, routes, services, security, db)
 forge-ui/              # React sources + built dist/
-seiso/codellama_compress/    # bundled LLM compression implementation
-seiso/adaptive_quant/        # bundled adaptive RL quant implementation
-seiso/analysis/        # bundled RL quant analysis CLI/helpers
+seiso/codellama_compress/    # bundled LLM compression (research)
+seiso/adaptive_quant/        # bundled adaptive RL quant (research)
+seiso/analysis/        # bundled RL quant analysis CLI/helpers (research)
+seiso/research/        # provenance / determinism helpers
 configs/               # example + smoke YAML/JSON
 scripts/               # install, doctor, run_ci_local, ...
 tests/                 # broad pytest coverage

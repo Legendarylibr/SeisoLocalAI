@@ -8,7 +8,7 @@ from seiso.rl_verify import (
     verify_code_proof,
     verify_outcome,
 )
-from seiso.slime_single_gpu.rewards import code_reward, resolve_reward
+from seiso.slime.rewards import code_reward, resolve_reward
 
 
 def test_extract_python_from_fence():

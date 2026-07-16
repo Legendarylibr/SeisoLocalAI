@@ -186,6 +186,8 @@ materializes `output_dir/slime_generated.jsonl` automatically:
 
 **Single-GPU:** `scripts/run_slime_single_gpu.sh` — `rollout_backend: hf` (colocated, on-policy).
 
+Python package: `seiso.slime` (legacy import path `seiso.slime_single_gpu` remains a shim).
+
 **Multi-GPU (SGLang):** `scripts/run_slime_ddp.sh [nproc] [config]` — SGLang generate + DDP policy. After each optimizer step rank0 exports weights and hot-reloads **all** engines:
 
 | Field | Meaning |

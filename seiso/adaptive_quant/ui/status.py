@@ -132,9 +132,7 @@ def _nvidia_status() -> dict[str, Any]:
         "boundary": report,
         "approved_tier": approved[0] if approved else None,
         "needs_ack_for_gpu_training": bool(
-            report.get("linux_nvidia_host")
-            and not report.get("in_ci")
-            and approved is None
+            report.get("linux_nvidia_host") and not report.get("in_ci") and approved is None
         ),
     }
 
@@ -145,9 +143,7 @@ def _rust_status() -> dict[str, Any]:
         from seiso.adaptive_quant.rust_cli import rust_cli_status
 
         return dict(
-            rust_cli_status(
-                FrameworkConfig(run_name="ui_status", detect_host_hardware=False)
-            )
+            rust_cli_status(FrameworkConfig(run_name="ui_status", detect_host_hardware=False))
         )
     except Exception as exc:
         return {"available": False, "error": str(exc)}
@@ -199,14 +195,10 @@ def dashboard_status(*, repo: Path | None = None) -> dict[str, Any]:
         "configs": {
             "files": list_config_files(root),
             "smoke": (
-                "config.e2e_smoke.json"
-                if (root / "config.e2e_smoke.json").is_file()
-                else None
+                "config.e2e_smoke.json" if (root / "config.e2e_smoke.json").is_file() else None
             ),
             "example": (
-                "config.example.json"
-                if (root / "config.example.json").is_file()
-                else None
+                "config.example.json" if (root / "config.example.json").is_file() else None
             ),
         },
     }

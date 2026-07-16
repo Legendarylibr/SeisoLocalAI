@@ -3,9 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 # Shared workflow sets
-_RUN_WORKFLOWS = frozenset(
-    {"research", "moe", "pytorch", "online", "continuous", "frontier"}
-)
+_RUN_WORKFLOWS = frozenset({"research", "moe", "pytorch", "online", "continuous", "frontier"})
 _TRAIN_WORKFLOWS = frozenset({"research", "moe", "pytorch", "frontier"})
 
 _REWARD_WEIGHT_FIELDS: list[dict[str, Any]] = [

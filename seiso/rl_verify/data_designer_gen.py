@@ -26,7 +26,7 @@ from seiso.rl_verify.data_gen import (
     to_slime_prompt_row,
     write_jsonl,
 )
-from seiso.slime_single_gpu.config import SingleGpuSlimeConfig
+from seiso.slime.config import SingleGpuSlimeConfig
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +83,7 @@ def is_multigpu_vllm_run(
     world_size: int = 1,
 ) -> bool:
     """True when slime is driving multi-GPU vLLM rollouts (DDP and/or TP)."""
-    from seiso.slime_single_gpu.rollout_backend import resolve_rollout_backend
+    from seiso.slime.rollout_backend import resolve_rollout_backend
 
     backend = resolve_rollout_backend(config, world_size=world_size)
     if backend != "vllm":
@@ -514,7 +514,7 @@ def materialize_for_slime_config(
     world_size: int = 1,
 ) -> DataGenResult:
     """Build DataDesignerGenConfig from slime config and materialize."""
-    from seiso.slime_single_gpu.rollout_backend import resolve_vllm_base_url
+    from seiso.slime.rollout_backend import resolve_vllm_base_url
 
     base = resolve_vllm_base_url(config) or str(
         getattr(config, "vllm_base_url", "") or ""

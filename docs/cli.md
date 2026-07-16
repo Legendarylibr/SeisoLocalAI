@@ -72,7 +72,7 @@ Use `method: slime` for local rollout/reward policy updates with LoRA adapters, 
 
 Forge Training Studio runs the same training stack but adds full-dataset analysis, live recommendations, and SSE job streaming via `/api/training/*` (see [training/quickstart.md](training/quickstart.md)).
 
-**Checkpoints (CLI):** written under the YAML `output_dir` (example: `./outputs/lora-run/checkpoint-<timestamp>/` for SFT, or `./outputs/slime-train-method/` for slime), including `seiso_manifest.json`. SFT runs also write `dataset_analysis.json`; slime runs write `slime_single_gpu_metrics.jsonl`, `slime_training_state.json`, and optional `slime_verifier_data.jsonl`.
+**Checkpoints (CLI):** written under the YAML `output_dir` (example: `./outputs/lora-run/checkpoint-<timestamp>/` for SFT, or `./outputs/slime-train-method/` for slime), including `seiso_manifest.json`. SFT runs also write `dataset_analysis.json`; slime runs write `slime_single_gpu_metrics.jsonl` (stable filename), `slime_training_state.json`, and optional `slime_verifier_data.jsonl`. Implementation lives in `seiso.slime` (legacy import path `seiso.slime_single_gpu` still works).
 
 **Checkpoints (Forge UI):** `{SEISO_DATA_DIR}/checkpoints/{user_id}/{job_id}/`
 

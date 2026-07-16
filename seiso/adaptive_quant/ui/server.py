@@ -34,9 +34,7 @@ from seiso.adaptive_quant.ui.status import dashboard_status
 _STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 
-def build_catalog_response(
-    *, repo: Path, launcher_token: str | None = None
-) -> dict[str, Any]:
+def build_catalog_response(*, repo: Path, launcher_token: str | None = None) -> dict[str, Any]:
     """JSON payload for GET /api/catalog (testable without a live HTTP server)."""
     status = dashboard_status(repo=repo)
     catalog = launcher_catalog(repo=repo, status=status)
@@ -100,9 +98,7 @@ class LauncherRequestHandler(BaseHTTPRequestHandler):
     def log_message(self, format: str, *args: Any) -> None:
         return
 
-    def _send_json(
-        self, payload: dict[str, Any] | list[Any], *, status: int = 200
-    ) -> None:
+    def _send_json(self, payload: dict[str, Any] | list[Any], *, status: int = 200) -> None:
         body = json.dumps(payload, indent=2).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -258,9 +254,7 @@ class LauncherRequestHandler(BaseHTTPRequestHandler):
                 raise ValueError("request body must be a JSON object")
             from seiso.adaptive_quant.ui.chat import build_models_response
 
-            self._send_json(
-                build_models_response(repo=self.server.repo, body=body or {})
-            )
+            self._send_json(build_models_response(repo=self.server.repo, body=body or {}))
         except json.JSONDecodeError:
             self._send_json({"error": "invalid JSON"}, status=400)
         except ValueError as exc:

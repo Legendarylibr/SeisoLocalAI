@@ -43,7 +43,9 @@ async def lifespan(app: FastAPI):
 
         apply_inference_profile()
     except Exception:
-        pass
+        import logging
+
+        logging.getLogger(__name__).debug("Optional inference profile apply skipped", exc_info=True)
     try:
         from seiso.hardware.vram_processes import log_vram_contention_at_startup
 
@@ -138,9 +140,7 @@ def create_app() -> FastAPI:
 
         settings = get_settings()
         incoming = (request.headers.get(REQUEST_ID_HEADER) or "").strip()
-        if incoming and len(incoming) <= 128 and all(
-            c.isalnum() or c in "-_" for c in incoming
-        ):
+        if incoming and len(incoming) <= 128 and all(c.isalnum() or c in "-_" for c in incoming):
             request_id = incoming
         else:
             request_id = uuid.uuid4().hex

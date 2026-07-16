@@ -165,18 +165,12 @@ class TrainConfig(BaseModel):
         description="Pad batch sequences to this multiple for tensor cores (None = 8 on CUDA)",
     )
     # ── Performance optimizations (auto-tuned when left at defaults) ──
-    dataloader_num_workers: int = (
-        0  # 0 = auto-detect (min(4, cpu_count//2) on CUDA, 0 on CPU)
-    )
+    dataloader_num_workers: int = 0  # 0 = auto-detect (min(4, cpu_count//2) on CUDA, 0 on CPU)
     dataloader_persistent_workers: bool = True
-    dataloader_prefetch_factor: int | None = (
-        None  # None = auto 2 when CUDA workers are enabled
-    )
+    dataloader_prefetch_factor: int | None = None  # None = auto 2 when CUDA workers are enabled
     group_by_length: bool = True  # batch similar-length sequences → less padding waste
     padding_free: bool = False  # use flash-attention padding-free packing (CUDA only)
-    neftune_noise_alpha: float | None = (
-        5.0  # NEFTune instruction-tuning noise (None to disable)
-    )
+    neftune_noise_alpha: float | None = 5.0  # NEFTune instruction-tuning noise (None to disable)
     torch_compile: bool = False  # torch.compile the training model (CUDA only, opt-in)
     save_safetensors: bool = True
     training_methodology: str = Field(
@@ -286,9 +280,7 @@ class TrainConfig(BaseModel):
     data_gen_filename: str = "slime_generated.jsonl"
     data_designer: str = Field(
         default="auto",
-        description=(
-            "NVIDIA NeMo Data Designer synth: auto (multi-GPU vLLM only) | on | off"
-        ),
+        description=("NVIDIA NeMo Data Designer synth: auto (multi-GPU vLLM only) | on | off"),
     )
     vllm_tensor_parallel: int = Field(
         default=0,
@@ -303,9 +295,7 @@ class TrainConfig(BaseModel):
         ),
     )
 
-    @field_validator(
-        "output_dir", "dataset", "resume_from", "sandbox_root", mode="before"
-    )
+    @field_validator("output_dir", "dataset", "resume_from", "sandbox_root", mode="before")
     @classmethod
     def _expand_path(cls, v: Any) -> Any:
         if v is None:
@@ -327,9 +317,7 @@ class TrainConfig(BaseModel):
         forbidden = ("token", "secret", "password", "apikey", "api_key", "://")
         if any(marker in lowered for marker in forbidden):
             raise ValueError("runtime labels cannot contain secrets, URLs, or tokens")
-        allowed = set(
-            "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-:/ "
-        )
+        allowed = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-:/ ")
         if any(ch not in allowed for ch in v):
             raise ValueError(
                 "runtime labels may only use letters, numbers, spaces, '.', '_', '-', ':', '/'"
@@ -351,20 +339,16 @@ class TrainConfig(BaseModel):
         if not self.cloud_gpu_enabled:
             return self
         if self.cloud_gpu_provider == CloudGpuProvider.NONE:
-            raise ValueError(
-                "cloud_gpu_provider is required when cloud_gpu_enabled is true"
-            )
+            raise ValueError("cloud_gpu_provider is required when cloud_gpu_enabled is true")
         if not self.cloud_gpu_instance_type.strip():
-            raise ValueError(
-                "cloud_gpu_instance_type is required when cloud_gpu_enabled is true"
-            )
+            raise ValueError("cloud_gpu_instance_type is required when cloud_gpu_enabled is true")
         return self
 
     @model_validator(mode="after")
     def _validate_slime_batch_and_clip(self) -> TrainConfig:
         if self.method != TrainMethod.SLIME:
             return self
-        from seiso.slime_single_gpu.config import validate_oversample_vs_train_batch
+        from seiso.slime.config import validate_oversample_vs_train_batch
 
         train_batch = self.train_batch_size or self.rollout_batch_size or self.batch_size
         validate_oversample_vs_train_batch(
@@ -373,10 +357,7 @@ class TrainConfig(BaseModel):
             train_batch_size=train_batch,
             rollout_batch_size=self.rollout_batch_size,
         )
-        if (
-            self.clip_ratio_high is not None
-            and self.clip_ratio_high < self.clip_ratio
-        ):
+        if self.clip_ratio_high is not None and self.clip_ratio_high < self.clip_ratio:
             raise ValueError("clip_ratio_high must be >= clip_ratio")
         return self
 
@@ -388,7 +369,7 @@ class TrainConfig(BaseModel):
 
     def to_single_gpu_slime_config(self):
         """Project a general training config into the release-grade slime runner."""
-        from seiso.slime_single_gpu.config import SingleGpuSlimeConfig
+        from seiso.slime.config import SingleGpuSlimeConfig
 
         extra: dict[str, Any] = getattr(self, "extra", {})
         policy_batch = self.policy_micro_batch_size or self.batch_size
@@ -521,10 +502,10 @@ def run_training(
         gradient_checkpointing=config.gradient_checkpointing,
     )
     if config.method == TrainMethod.SLIME:
-        from seiso.slime_single_gpu.trainer import train_single_gpu_slime
+        from seiso.slime.trainer import train_slime
 
         slime_config = config.to_single_gpu_slime_config()
-        out = train_single_gpu_slime(slime_config)
+        out = train_slime(slime_config)
         if _is_main_process():
             _write_slime_manifest(config, out)
         return out
@@ -540,9 +521,7 @@ def _write_slime_manifest(config: TrainConfig, output_dir: Path) -> None:
     )
     payload = {
         "model_id": config.model_id,
-        "original_model_id": str(
-            config.extra.get("original_model_id") or config.model_id
-        ),
+        "original_model_id": str(config.extra.get("original_model_id") or config.model_id),
         "method": TrainMethod.SLIME.value,
         "methodology": config.training_methodology,
         "post_training_algorithm": (
