@@ -201,7 +201,7 @@ export SEISO_TRUSTED_PROXY_IPS=127.0.0.1,::1
 export SEISO_REMOTE_DANGEROUS_ACK=1
 ```
 
-## OpenAI `/v1` returns 401
+## Compat `/v1` returns 401
 
 Use the inference-scoped key (not your admin password):
 

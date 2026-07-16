@@ -32,6 +32,7 @@ async def list_providers(
     user_id: Annotated[str, Depends(get_current_user_id)],
     db: Annotated[Database, Depends(get_db)],
 ) -> list[dict]:
+    """List chat providers only — never cloud_gpu credential rows."""
     rows = await db.list_providers(user_id)
     return [
         {
@@ -39,7 +40,7 @@ async def list_providers(
             "config": mask_config(json.loads(r["config_json"])),
         }
         for r in rows
-        if r["provider_type"].lower() not in _REMOVED_FRONTIER_TYPES
+        if r["provider_type"].lower() in LOCAL_PROVIDER_TYPES
     ]
 
 

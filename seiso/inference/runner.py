@@ -14,6 +14,7 @@ from typing import Any, cast
 
 from seiso.env import env_int
 from seiso.inference.backends import (
+    BACKEND_LLAMACPP,
     BACKEND_LLAMASWAP,
     BACKEND_MLX,
     BACKEND_TORCH,
@@ -668,8 +669,8 @@ class LocalInferenceRunner:
             payload = sanitize_inference_payload(payload, isolated=route == "llamaswap")
             if route not in {"llama", "llamaswap"}:
                 raise ValueError("Tool calling is only supported with GGUF local backends")
-            generation_id = self._pool.bump_generation()
             await self._ensure_model_switch(resolved_path, route=route)
+            generation_id = self._pool.bump_generation()
             self._pool.begin_inference()
             try:
                 executor = _get_inference_executor()
@@ -691,10 +692,10 @@ class LocalInferenceRunner:
 
         route, resolved_path = self._resolve_route(payload, model_path)
         payload = sanitize_inference_payload(payload, isolated=route == "llamaswap")
-        generation_id = self._pool.bump_generation()
         await self._ensure_model_switch(
             resolved_path, draft_path=payload.get("draft_model_path"), route=route
         )
+        generation_id = self._pool.bump_generation()
         return await loop.run_in_executor(
             _get_inference_executor(),
             lambda: self._complete(payload, resolved_path, route, generation_id),
@@ -716,8 +717,8 @@ class LocalInferenceRunner:
             # Align max_tokens with sidecar num_predict before length detection.
             payload = self._llamaswap_payload(payload, resolved_path)
         draft_path = payload.get("draft_model_path")
-        generation_id = self._pool.bump_generation()
         await self._ensure_model_switch(resolved_path, draft_path=draft_path, route=route)
+        generation_id = self._pool.bump_generation()
 
         loop = asyncio.get_running_loop()
         bridge = ThreadStreamBridge(
@@ -911,7 +912,13 @@ class LocalInferenceRunner:
             await loop.run_in_executor(None, lambda: self._pool.prepare_for_load())
             return
 
-        backend = BACKEND_LLAMASWAP if route == "llamaswap" else None
+        backend = (
+            BACKEND_LLAMASWAP
+            if route == "llamaswap"
+            else BACKEND_LLAMACPP
+            if route == "llama"
+            else None
+        )
         if self._pool.would_switch_model(model_path, backend):
             await loop.run_in_executor(
                 None, lambda: self._pool.prepare_for_load(model_path, backend)

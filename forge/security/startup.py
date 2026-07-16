@@ -75,7 +75,7 @@ def validate_security_settings(settings: ForgeSettings) -> None:
         dangerous = (
             settings.allow_tools
             or settings.allow_code_exec
-            or settings.allow_openai_tools
+            or settings.allow_compat_tools
         )
         if dangerous and not _env_enabled(_REMOTE_DANGEROUS_ACK_ENV):
             raise RuntimeError(

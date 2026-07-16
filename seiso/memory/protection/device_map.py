@@ -24,7 +24,7 @@ def resolve_training_device_map(
     """Single-device placement for DDP; auto only for single-process CUDA."""
     world_size = int(os.environ.get("WORLD_SIZE", "1"))
     if world_size > 1:
-        local_rank = int(os.environ.get("LOCAL_RANK", os.environ.get("RANK", "0")))
+        local_rank = int(os.environ.get("LOCAL_RANK", "0"))
         return {"": f"cuda:{local_rank}"}
 
     if device == "mps":

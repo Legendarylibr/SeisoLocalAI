@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -114,7 +115,7 @@ async def run_bundled_job(
     try:
         from forge.services.executors import GPU_EXECUTOR
 
-        result = await loop.run_in_executor(
+        future = loop.run_in_executor(
             GPU_EXECUTOR,
             lambda: runner(
                 job_id=job_id,
@@ -124,6 +125,12 @@ async def run_bundled_job(
                 on_log=on_log,
             ),
         )
+        try:
+            result = await future
+        except asyncio.CancelledError:
+            with contextlib.suppress(asyncio.TimeoutError, Exception):
+                await asyncio.wait_for(asyncio.shield(future), timeout=600)
+            raise
     finally:
         release_after_task(
             reason=f"{orchestrator.kind} complete",

@@ -16,7 +16,26 @@ export function bindAbort<T>(
     abort();
     return Promise.reject(new DOMException("Aborted", "AbortError"));
   }
-  const onAbort = () => abort();
-  signal.addEventListener("abort", onAbort, { once: true });
-  return promise.finally(() => signal.removeEventListener("abort", onAbort));
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => {
+      abort();
+      reject(new DOMException("Aborted", "AbortError"));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort);
+        // If abort won the race, keep the rejection.
+        if (signal.aborted) {
+          reject(new DOMException("Aborted", "AbortError"));
+          return;
+        }
+        resolve(value);
+      },
+      (err) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(err);
+      },
+    );
+  });
 }

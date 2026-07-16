@@ -47,7 +47,7 @@ class ForgeSettings(BaseSettings):
     rate_limit: int = Field(default=120, ge=1)
     session_hours: int = Field(default=24, ge=1, le=168)
     debug: bool = False
-    allow_openai_tools: bool = False
+    allow_compat_tools: bool = False
     allow_tools: bool = False
     allow_code_exec: bool = False
     inference_api_key: str = ""
@@ -56,6 +56,15 @@ class ForgeSettings(BaseSettings):
     model_router_enabled: bool = False
     model_router_url: str = "http://127.0.0.1:8780"
     model_router_api_key: str = ""
+
+    @field_validator("allow_compat_tools", mode="before")
+    @classmethod
+    def _legacy_allow_openai_tools_env(cls, value: object) -> object:
+        """Accept SEISO_ALLOW_OPENAI_TOOLS when SEISO_ALLOW_COMPAT_TOOLS is unset."""
+        if "SEISO_ALLOW_COMPAT_TOOLS" in os.environ:
+            return value
+        legacy = os.environ.get("SEISO_ALLOW_OPENAI_TOOLS")
+        return legacy if legacy is not None else value
 
     @field_validator("data_dir", mode="before")
     @classmethod

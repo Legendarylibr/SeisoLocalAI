@@ -1,4 +1,4 @@
-"""OpenAI-compatible API request schemas."""
+"""Compat API request schemas (standard chat-completions wire protocol)."""
 
 from __future__ import annotations
 

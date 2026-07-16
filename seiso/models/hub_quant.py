@@ -176,5 +176,11 @@ def needs_tight_vram_training(
         return True
     if headroom_mb > 0 and est_train_mb > int(headroom_mb * 0.97):
         return True
+    from seiso.models.moe_sizing import total_params_from_name
+
+    # MoE must key off resident totals (Qwen 30B-A3B active≈3B would skip this).
+    resident = total_params_from_name(str(model_id))
+    if resident is not None:
+        return resident >= 14.0
     params_b = infer_active_params_b(model_id, trust_remote_code=trust_remote_code)
     return params_b >= 14.0

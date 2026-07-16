@@ -59,7 +59,7 @@ Start with **[getting-started.md](getting-started.md)** — a step-by-step walkt
 | **From a clone** | `start` (starts by default) or `SEISO_START=0 start` | Build UI + `seiso forge` ([platforms/windows.md](platforms/windows.md)) |
 | **Forge (UI dev)** | Terminal 1: `seiso forge` · Terminal 2: `cd forge-ui && npm run dev` | Same |
 | **CLI training** | `seiso train --config configs/example_lora.yaml` | `seiso train --config configs\example_lora.yaml` |
-| **OpenAI-compatible API** | `seiso forge` then POST `/v1/chat/completions` | Same |
+| **Compat API** | `seiso forge` then POST `/v1/chat/completions` | Same |
 
 First launch opens onboarding — create your local admin password. Copy `.env.example` to `.env` to override host, port, or data directory.
 
@@ -210,7 +210,7 @@ Seiso/
 │   └── security/       # NVIDIA boundary gates
 ├── seiso_cli/          # CLI entrypoints
 ├── forge/              # FastAPI backend
-│   ├── api/routes/     # REST + OpenAI-compatible endpoints
+│   ├── api/routes/     # REST + Compat API (`/v1`) endpoints
 │   ├── orchestrators/  # Job workers (train, export, compress, …)
 │   └── security/       # Auth, CSRF, path sandbox
 ├── forge-ui/           # React + TypeScript + Vite (GPL-3.0)

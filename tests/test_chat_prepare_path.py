@@ -268,10 +268,10 @@ def test_resolve_chat_target_missing_option_raises():
         resolve_chat_target(None, model_id="stale", inference_backend="auto")
 
 
-def test_dead_openai_helpers_removed():
-    import forge.api.routes.openai as openai_routes
+def test_dead_compat_helpers_removed():
+    import forge.api.routes.compat as compat_routes
 
-    assert not hasattr(openai_routes, "_resolve_openai_model_path")
-    assert not hasattr(openai_routes, "_resolve_payload")
-    assert not hasattr(openai_routes, "_default_openai_gguf_backend")
-    assert hasattr(openai_routes, "_prepare_openai_chat_payload")
+    assert not hasattr(compat_routes, "_resolve_openai_model_path")
+    assert not hasattr(compat_routes, "_resolve_payload")
+    assert not hasattr(compat_routes, "_default_openai_gguf_backend")
+    assert hasattr(compat_routes, "_prepare_compat_chat_payload")

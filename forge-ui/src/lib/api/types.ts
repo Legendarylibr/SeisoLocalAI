@@ -3,7 +3,7 @@ export type AuthUser = { id: string; email: string; display_name: string | null 
 export type SecurityPosture = {
   allow_tools: boolean;
   allow_code_exec: boolean;
-  allow_openai_tools: boolean;
+  allow_compat_tools: boolean;
   allow_remote: boolean;
   bind_localhost: boolean;
   db_encrypted: boolean;

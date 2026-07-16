@@ -167,13 +167,13 @@ def create_app() -> FastAPI:
     # Defer route module imports until app construction (keeps import seiso/forge light).
     from forge.api.routes import (
         auth,
+        compat,
         compress,
         distill_rl,
         export,
         inference,
         knowledge,
         models,
-        openai,
         providers,
         recipes,
         rl_quant,
@@ -196,7 +196,7 @@ def create_app() -> FastAPI:
     app.include_router(providers.router, prefix=prefix)
     app.include_router(system.router, prefix=prefix)
     app.include_router(settings_routes.router, prefix=prefix)
-    app.include_router(openai.router)  # /v1/chat/completions — no /api prefix (OpenAI compat)
+    app.include_router(compat.router)  # /v1/chat/completions — no /api prefix (Compat API)
 
     @app.get("/health")
     async def root_health():

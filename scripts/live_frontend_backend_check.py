@@ -275,10 +275,10 @@ def check_other_pages(
         report.add(label, ok, f"status={r.status_code}")
 
 
-def check_openai_route(client: httpx.Client, report: Report) -> None:
+def check_compat_route(client: httpx.Client, report: Report) -> None:
     key_path = Path.home() / ".seiso" / ".inference_api_key"
     if not key_path.is_file():
-        report.add("OpenAI /v1/models", False, "missing inference API key")
+        report.add("Compat /v1/models", False, "missing inference API key")
         return
     key = key_path.read_text(encoding="utf-8").strip()
     r = client.get(
@@ -309,7 +309,7 @@ def main() -> int:
         check_static_ui(client, report)
         check_other_pages(client, headers, report)
         check_training_flow(client, headers, report)
-        check_openai_route(client, report)
+        check_compat_route(client, report)
 
     print()
     print(f"Summary: {report.passed} passed, {report.failed} failed")

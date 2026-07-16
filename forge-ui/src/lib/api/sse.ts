@@ -143,6 +143,8 @@ export function subscribeSSE(
 }
 
 /** Stream chat completions via SSE (cookie session + CSRF). Returns abort handle. */
+let _cancelGenerationChain: Promise<void> = Promise.resolve();
+
 export function streamChat(
   body: Record<string, unknown>,
   handlers: {
@@ -152,6 +154,8 @@ export function streamChat(
 ): { promise: Promise<void>; abort: () => void } {
   const controller = new AbortController();
   const promise = (async () => {
+    // Wait for any in-flight cancel-generation so Stop cannot kill the next reply.
+    await _cancelGenerationChain;
     const headers: Record<string, string> = { "Content-Type": "application/json" };
     const csrf = getCsrfToken();
     if (csrf) headers["X-CSRF-Token"] = csrf;
@@ -189,7 +193,12 @@ export function streamChat(
     promise,
     abort: () => {
       controller.abort();
-      request<{ active_model: string | null }>("/inference/cancel-generation", { method: "POST" }).catch(() => {});
+      const cancel = request<{ active_model: string | null }>("/inference/cancel-generation", {
+        method: "POST",
+      })
+        .then(() => undefined)
+        .catch(() => undefined);
+      _cancelGenerationChain = _cancelGenerationChain.then(() => cancel);
     },
   };
 }

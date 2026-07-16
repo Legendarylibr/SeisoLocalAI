@@ -169,7 +169,7 @@ async def prepare_local_chat_target(
 ) -> dict[str, Any]:
     """Canonical resolve path for inventory/explicit local chat models.
 
-    Used by Forge chat, preload, context, and OpenAI-compatible routes.
+    Used by Forge chat, preload, context, and Compat API routes.
     """
     if model_id and model_path:
         raise HTTPException(403, "Provide model_id or model_path, not both")

@@ -15,10 +15,29 @@ from seiso.models.moe_sizing import (
 _UNKNOWN_PARAMS_B = 7.0
 
 _PARAM_RE = re.compile(r"(\d+(?:\.\d+)?)\s*b", re.I)
+
+
 def guess_params_from_name(name: str) -> float | None:
-    """Extract parameter count (billions) from a model name or path."""
-    m = _PARAM_RE.search(name)
+    """Extract parameter count (billions) from a model name or path.
+
+    Prefers MoE resident totals (e.g. Mixtral-8x7B → 46.7B) over the first
+    ``\\d+B`` token, which would incorrectly treat Mixtral as 7B dense.
+    """
+    total = total_params_from_name(str(name))
+    if total is not None:
+        return total
+    m = _PARAM_RE.search(str(name))
     return float(m.group(1)) if m else None
+
+
+def _resident_params_b(
+    params: str, tags: tuple[str, ...] | list[str], repo_id: str = ""
+) -> float:
+    """Parameter count for disk/VRAM residency (MoE = all experts)."""
+    text = f"{params} {repo_id}"
+    if is_moe_model(text) or "moe" in {t.lower() for t in tags}:
+        return total_params_from_name(text) or _UNKNOWN_PARAMS_B
+    return _active_params_b(params, tags, repo_id)
 
 
 def _active_params_b(
@@ -87,7 +106,7 @@ def estimate_safetensors_download_bytes(
     repo_id: str = "",
 ) -> int:
     """Estimate on-disk safetensors size from parameter count (bf16-ish)."""
-    params_b = _active_params_b(params, tags, repo_id)
+    params_b = _resident_params_b(params, tags, repo_id)
     gb = params_b * 2.0 + 0.5
     gb = min(max(gb, 0.2), 10_000.0)
     return int(gb * 1024**3)
@@ -101,7 +120,7 @@ def estimate_training_vram_gb(
     repo_id: str = "",
 ) -> float:
     """Rough QLoRA/LoRA training VRAM for fit labels."""
-    params_b = _active_params_b(params, tags, repo_id)
+    params_b = _resident_params_b(params, tags, repo_id)
     quant_u = quant.lower()
     if quant_u in {"mxfp4", "fp8"}:
         # Native hub quant (~8-bit effective weights).

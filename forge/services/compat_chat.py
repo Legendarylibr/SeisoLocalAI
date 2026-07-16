@@ -1,4 +1,4 @@
-"""OpenAI-compatible chat payload preparation."""
+"""Compat API chat payload preparation."""
 
 from __future__ import annotations
 
@@ -7,18 +7,18 @@ from typing import Any
 
 from fastapi import HTTPException
 
-from forge.api.schemas.openai import ChatCompletionRequest, ChatMessage
+from forge.api.schemas.compat import ChatCompletionRequest, ChatMessage
 from forge.config import ForgeSettings
 from forge.db.store import Database
 from forge.services.inference_chat import prepare_local_chat_target
 from forge.services.user_paths import is_local_filesystem_path
 from forge.tools.sanitize import normalize_text
 
-_UNTRUSTED_OPENAI_ROLES = frozenset({"tool", "function", "system", "developer"})
+_UNTRUSTED_COMPAT_ROLES = frozenset({"tool", "function", "system", "developer"})
 _UNVERIFIED_ASSISTANT_PREFIX = "[UNVERIFIED_PRIOR_ASSISTANT]\n"
 
 
-def normalize_openai_messages(body: ChatCompletionRequest) -> list[dict[str, str]]:
+def normalize_compat_messages(body: ChatCompletionRequest) -> list[dict[str, str]]:
     """Reject privileged roles; downgrade client assistant turns to unverified user data."""
     if not body.messages:
         raise HTTPException(400, "At least one user message is required")
@@ -28,7 +28,7 @@ def normalize_openai_messages(body: ChatCompletionRequest) -> list[dict[str, str
     messages: list[dict[str, str]] = []
     for m in body.messages:
         role = m.role.lower()
-        if role in _UNTRUSTED_OPENAI_ROLES:
+        if role in _UNTRUSTED_COMPAT_ROLES:
             raise HTTPException(400, f"Untrusted message role: {m.role}")
         content = normalize_text(m.content if isinstance(m.content, str) else json.dumps(m.content))
         if role == "assistant":
@@ -63,14 +63,14 @@ def prompt_token_estimate(messages: list[ChatMessage]) -> int:
     )
 
 
-async def prepare_openai_chat_payload(
+async def prepare_compat_chat_payload(
     body: ChatCompletionRequest,
     user_id: str,
     db: Database,
     settings: ForgeSettings,
 ) -> dict[str, Any]:
     """Resolve and sanitize via the shared local-chat path."""
-    messages = normalize_openai_messages(body)
+    messages = normalize_compat_messages(body)
     max_tokens = body.max_tokens or 512
 
     if body.model in ("default", "seiso"):

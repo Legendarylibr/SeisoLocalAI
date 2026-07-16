@@ -1946,8 +1946,8 @@ def test_llamaswap_release_external_memory_uses_management_api(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_openai_prepare_payload_passes_through_backend(monkeypatch, tmp_path):
-    from forge.api.routes.openai import ChatCompletionRequest, _prepare_openai_chat_payload
+async def test_compat_prepare_payload_passes_through_backend(monkeypatch, tmp_path):
+    from forge.api.routes.compat import ChatCompletionRequest, _prepare_compat_chat_payload
     from forge.services import inference_models
 
     async def fake_list(*_args, **_kwargs):
@@ -1963,9 +1963,9 @@ async def test_openai_prepare_payload_passes_through_backend(monkeypatch, tmp_pa
         }
 
     monkeypatch.setattr(inference_models, "list_inference_options", fake_list)
-    monkeypatch.setattr("forge.services.openai_chat.prepare_local_chat_target", prepare_llamaswap)
+    monkeypatch.setattr("forge.services.compat_chat.prepare_local_chat_target", prepare_llamaswap)
 
-    payload = await _prepare_openai_chat_payload(
+    payload = await _prepare_compat_chat_payload(
         ChatCompletionRequest(
             model="default",
             messages=[{"role": "user", "content": "hi"}],
@@ -1978,8 +1978,8 @@ async def test_openai_prepare_payload_passes_through_backend(monkeypatch, tmp_pa
 
 
 @pytest.mark.asyncio
-async def test_openai_prepare_payload_falls_back_to_llamacpp(monkeypatch, tmp_path):
-    from forge.api.routes.openai import ChatCompletionRequest, _prepare_openai_chat_payload
+async def test_compat_prepare_payload_falls_back_to_llamacpp(monkeypatch, tmp_path):
+    from forge.api.routes.compat import ChatCompletionRequest, _prepare_compat_chat_payload
     from forge.services import inference_models
 
     async def fake_list(*_args, **_kwargs):
@@ -1995,9 +1995,9 @@ async def test_openai_prepare_payload_falls_back_to_llamacpp(monkeypatch, tmp_pa
         }
 
     monkeypatch.setattr(inference_models, "list_inference_options", fake_list)
-    monkeypatch.setattr("forge.services.openai_chat.prepare_local_chat_target", prepare_llamacpp)
+    monkeypatch.setattr("forge.services.compat_chat.prepare_local_chat_target", prepare_llamacpp)
 
-    payload = await _prepare_openai_chat_payload(
+    payload = await _prepare_compat_chat_payload(
         ChatCompletionRequest(
             model="default",
             messages=[{"role": "user", "content": "hi"}],
@@ -2010,8 +2010,8 @@ async def test_openai_prepare_payload_falls_back_to_llamacpp(monkeypatch, tmp_pa
 
 
 @pytest.mark.asyncio
-async def test_openai_default_model_resolution_reuses_inventory(tmp_path, monkeypatch):
-    from forge.api.routes.openai import ChatCompletionRequest, _prepare_openai_chat_payload
+async def test_compat_default_model_resolution_reuses_inventory(tmp_path, monkeypatch):
+    from forge.api.routes.compat import ChatCompletionRequest, _prepare_compat_chat_payload
     from forge.db.crypto import generate_encryption_key
     from forge.db.store import Database
     from forge.services import inference_models
@@ -2056,7 +2056,7 @@ async def test_openai_default_model_resolution_reuses_inventory(tmp_path, monkey
         lambda *_a, **_k: None,
     )
 
-    payload = await _prepare_openai_chat_payload(
+    payload = await _prepare_compat_chat_payload(
         ChatCompletionRequest(
             model="default",
             messages=[{"role": "user", "content": "hi"}],
@@ -2071,8 +2071,8 @@ async def test_openai_default_model_resolution_reuses_inventory(tmp_path, monkey
 
 
 @pytest.mark.asyncio
-async def test_openai_named_model_resolution_uses_indexed_lookup(tmp_path, monkeypatch):
-    from forge.api.routes.openai import ChatCompletionRequest, _prepare_openai_chat_payload
+async def test_compat_named_model_resolution_uses_indexed_lookup(tmp_path, monkeypatch):
+    from forge.api.routes.compat import ChatCompletionRequest, _prepare_compat_chat_payload
     from forge.db.crypto import generate_encryption_key
     from forge.db.store import Database
     from forge.services import inference_models
@@ -2108,7 +2108,7 @@ async def test_openai_named_model_resolution_uses_indexed_lookup(tmp_path, monke
         lambda *_a, **_k: None,
     )
 
-    payload = await _prepare_openai_chat_payload(
+    payload = await _prepare_compat_chat_payload(
         ChatCompletionRequest(
             model=row["id"],
             messages=[{"role": "user", "content": "hi"}],

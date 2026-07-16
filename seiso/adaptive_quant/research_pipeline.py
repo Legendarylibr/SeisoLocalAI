@@ -152,9 +152,7 @@ class ResearchPipeline:
                 if trainer is None:
                     trainer = self._build_trainer(config)
                 recommendation_summary = self._recommend_quantization(config, trainer)
-            if self._runs("gguf_export") or (
-                self.enabled_stages is None and config.llama_cpp_gguf_export_enabled
-            ):
+            if config.llama_cpp_gguf_export_enabled:
                 from seiso.adaptive_quant.pipeline.gguf_export import maybe_export_gguf
 
                 gguf_export_summary = maybe_export_gguf(config, recommendation_summary)

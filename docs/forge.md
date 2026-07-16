@@ -1,6 +1,6 @@
 # Forge (web UI + API)
 
-Forge is Seiso's local web server: React UI, REST API under `/api`, and an OpenAI-compatible endpoint at `/v1/chat/completions`.
+Forge is Seiso's local web server: React UI, REST API under `/api`, and a Compat API endpoint at `/v1/chat/completions`.
 
 ## Start Forge
 
@@ -124,7 +124,7 @@ Knowledge-base ingest and retrieve are also available via API (`/api/knowledge/.
 | `/api/system` | Hardware detection, metrics |
 | `/api/settings` | App settings, HF token, security posture |
 | `/health` | Liveness check |
-| `/v1/chat/completions` | OpenAI-compatible chat (no `/api` prefix) |
+| `/v1/chat/completions` | Compat API chat (no `/api` prefix) |
 
 Set `SEISO_DEBUG=true` to expose interactive API docs at `/api/docs`.
 
@@ -184,7 +184,7 @@ Copy `.env.example` to `.env` in the repo root. Key settings:
 | `SEISO_DB_EPHEMERAL` | `true` | In-memory SQLite (wiped on restart) |
 | `SEISO_ALLOW_TOOLS` | `false` | Web search, artifacts |
 | `SEISO_ALLOW_CODE_EXEC` | `false` | Sandboxed `execute_code` tool |
-| `SEISO_ALLOW_OPENAI_TOOLS` | `false` | Tool calling on `/v1/chat/completions` |
+| `SEISO_ALLOW_COMPAT_TOOLS` | `false` | Tool calling on `/v1/chat/completions` (alias: `SEISO_ALLOW_OPENAI_TOOLS`) |
 | `SEISO_RATE_LIMIT` | `120` | Requests/minute per IP (≥240 on localhost) |
 | `SEISO_SESSION_HOURS` | `24` | Signed session lifetime |
 | `SEISO_MEMORY_PROFILE` | — | Set to `low` for lean RAM / llama.cpp tuning (see `.env.example`) |
