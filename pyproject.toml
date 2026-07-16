@@ -89,6 +89,10 @@ compress-quant = [
 compress-eval = [
   "lm-eval[hf]>=0.4.12",
 ]
+# Optional — multi-GPU vLLM slime synth data via NVIDIA NeMo Data Designer.
+data-designer = [
+  "data-designer>=0.8.0",
+]
 dev = [
   # Keep setuptools on a fixed release for pip-audit (PYSEC-2026-3447).
   "setuptools>=83",
@@ -180,6 +184,7 @@ extension-pkg-allow-list = ["pydantic"]
 ignored-modules = [
   "accelerate",
   "awq",
+  "data_designer",
   "datasets",
   "llama_cpp",
   "peft",

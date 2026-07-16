@@ -180,12 +180,13 @@ materializes `output_dir/slime_generated.jsonl` automatically:
 | `data_gen_difficulty` | `easy` / `medium` / `hard` weights |
 | `data_gen_seed` | Deterministic seed (same seed ⇒ same corpus) |
 | `reward: auto` | Per-row checker from generated `reward` / `benchmark` fields |
-| `rollout_backend` | `hf` (default, colocated generate) \| `sglang` \| `auto` |
+| `rollout_backend` | `hf` (default, colocated generate) \| `sglang` \| `vllm` \| `auto` |
 | `sglang_base_url` | Required for `sglang` (e.g. `http://127.0.0.1:30000`) |
+| `vllm_base_url` | Required for `vllm` (e.g. `http://127.0.0.1:8000`), or adopt a running managed multi-GPU vLLM server |
 
 **Single-GPU:** `scripts/run_slime_single_gpu.sh` — `rollout_backend: hf` (colocated, on-policy).
 
-**Multi-GPU:** `scripts/run_slime_ddp.sh [nproc] [config]` — SGLang generate + DDP policy. After each optimizer step rank0 exports weights and hot-reloads **all** engines:
+**Multi-GPU (SGLang):** `scripts/run_slime_ddp.sh [nproc] [config]` — SGLang generate + DDP policy. After each optimizer step rank0 exports weights and hot-reloads **all** engines:
 
 | Field | Meaning |
 |-------|---------|
@@ -202,9 +203,39 @@ python -m sglang.launch_server --model-path Qwen/Qwen2.5-0.5B-Instruct --port 30
 scripts/run_slime_ddp.sh 2 configs/example_training_slime_ddp.yaml
 ```
 
-SGLang must read `output_dir/sglang_weight_sync/` (shared FS on multi-node).  
-Not included (use upstream slime): Megatron TP/PP, Ray placement, NCCL tensor broadcast.
+SGLang must read `output_dir/sglang_weight_sync/` (shared FS on multi-node).
 
+**Multi-GPU (vLLM):** `scripts/run_slime_vllm_ddp.sh [nproc] [config]` — tensor-parallel vLLM generate + DDP policy. Preferred weight sync is **LoRA** via `/v1/load_lora_adapter` (start vLLM with `--enable-lora`, keep `slime_use_lora: true`). Full-weight disk reload is best-effort only.
+
+| Field | Meaning |
+|-------|---------|
+| `vllm_sync_weights` | Enable post-step hot-reload (default true) |
+| `vllm_weight_mode` | `auto` (LoRA when PEFT, else full) \| `lora` \| `full` |
+| `vllm_weight_keep` | Keep last N `lora_v*` / `weight_v*` dirs |
+| `vllm_base_url` | One URL or comma-separated multi-engine list (also accepts `.../v1`) |
+| `vllm_engine_urls` | Optional extra engine list |
+| `vllm_lora_name` | Dynamic adapter name on the server (default `seiso_slime_policy`) |
+
+```bash
+# terminal A — multi-GPU rollouts through vLLM
+python -m vllm.entrypoints.openai.api_server \
+  --model Qwen/Qwen2.5-0.5B-Instruct --port 8000 \
+  --tensor-parallel-size 2 --enable-lora
+# terminal B — DDP policy workers
+scripts/run_slime_vllm_ddp.sh 2 configs/example_training_slime_vllm.yaml
+```
+
+vLLM must read `output_dir/vllm_weight_sync/` (shared FS on multi-node).  
+Managed multi-GPU: set `SEISO_MANAGED_VLLM_ENABLED=true` and `SEISO_MANAGED_VLLM_ENABLE_LORA=true`, then point `vllm_base_url` at the managed server (or leave empty to adopt a running managed endpoint).
+
+**Synth data (multi-GPU vLLM only):** when `data_gen: true` and `data_designer: auto` (default), multi-GPU vLLM runs materialize numeric/choice prompts with [NVIDIA NeMo Data Designer](https://github.com/NVIDIA-NeMo/DataDesigner) against the same local vLLM OpenAI endpoint. Code-stream rows stay Seiso unit-test grounded. Install optional extra: `pip install -e '.[data-designer]'`. HF and SGLang slime paths keep the deterministic Seiso generator.
+
+| Field | Meaning |
+|-------|---------|
+| `data_designer` | `auto` (multi-GPU vLLM only) \| `on` \| `off` |
+| `vllm_tensor_parallel` | Optional TP hint when `WORLD_SIZE=1` but vLLM uses multiple GPUs |
+
+Not included (use upstream slime): Megatron TP/PP, Ray placement, NCCL tensor broadcast.
 Streams:
 
 - **numeric** — multi-step arithmetic / word problems with exact answers  
@@ -272,7 +303,7 @@ Important fields:
 | `over_sampling_batch_size` | slime oversample; when set under filtering must be **≥ `rollout_batch_size`** (prompts) |
 | `answer_field` | slime `--label-key` (default `label`; also accepts `answer`) |
 | `apply_chat_template` | slime `--apply-chat-template` (default true) |
-| `rollout_backend` | `hf` (colocated generate) \| `sglang` \| `auto` (`data_gen` is an alias of `hf`) |
+| `rollout_backend` | `hf` (colocated generate) \| `sglang` \| `vllm` \| `auto` (`data_gen` is an alias of `hf`) |
 | `dynamic_sampling_filter` | slime-style nonzero-std filter on **outcome** reward |
 | `clip_ratio` / `clip_ratio_high` | slime `eps_clip` / `eps_clip_high` |
 | `grpo_std_normalization` | slime group mean/std advantages |

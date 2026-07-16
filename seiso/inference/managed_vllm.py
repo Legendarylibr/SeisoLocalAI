@@ -141,10 +141,14 @@ def build_launch_command(
     if extra_args:
         cmd.extend(str(a) for a in extra_args if str(a).strip())
 
+    # Optional LoRA hot-reload for multi-GPU slime RL (dynamic /v1/load_lora_adapter).
+    enable_lora = env_bool("SEISO_MANAGED_VLLM_ENABLE_LORA", False)
+    if enable_lora and "--enable-lora" not in cmd:
+        cmd.append("--enable-lora")
+
     env: dict[str, str] = {}
     if cuda_visible_devices:
         env["CUDA_VISIBLE_DEVICES"] = str(cuda_visible_devices).strip()
-
     return {
         "command": cmd,
         "env": env,

@@ -1,4 +1,4 @@
-"""Tests for slime online rollout backends (data_gen / sglang)."""
+"""Tests for slime online rollout backends (hf / sglang / vllm)."""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ import pytest
 from seiso.slime_single_gpu.config import SingleGpuSlimeConfig
 from seiso.slime_single_gpu.rollout_backend import (
     SGLangRolloutClient,
+    VLLMRolloutClient,
     format_generation_prompt,
     resolve_rollout_backend,
     validate_rollout_backend_config,
@@ -51,10 +52,42 @@ def test_auto_uses_sglang_only_when_url_and_multi_process(tmp_path: Path):
     assert resolve_rollout_backend(cfg, world_size=2) == "sglang"
 
 
+def test_auto_prefers_vllm_over_sglang_when_both_set(tmp_path: Path):
+    cfg = _cfg(
+        tmp_path,
+        rollout_backend="auto",
+        sglang_base_url="http://127.0.0.1:30000",
+        vllm_base_url="http://127.0.0.1:8000",
+    )
+    assert resolve_rollout_backend(cfg, world_size=1) == "hf"
+    assert resolve_rollout_backend(cfg, world_size=2) == "vllm"
+
+
 def test_sglang_requires_base_url(tmp_path: Path):
     cfg = _cfg(tmp_path, rollout_backend="sglang", sglang_base_url="")
     with pytest.raises(ValueError, match="sglang_base_url"):
         validate_rollout_backend_config(cfg)
+
+
+def test_vllm_requires_base_url(tmp_path: Path, monkeypatch):
+    monkeypatch.delenv("SEISO_MANAGED_VLLM_PORT", raising=False)
+    with patch(
+        "seiso.slime_single_gpu.rollout_backend.resolve_vllm_base_url",
+        return_value="",
+    ):
+        cfg = _cfg(tmp_path, rollout_backend="vllm", vllm_base_url="")
+        with pytest.raises(ValueError, match="vllm_base_url"):
+            validate_rollout_backend_config(cfg)
+
+
+def test_vllm_accepts_base_url(tmp_path: Path):
+    cfg = _cfg(
+        tmp_path,
+        rollout_backend="vllm",
+        vllm_base_url="http://127.0.0.1:8000",
+    )
+    cfg.validate()
+    assert resolve_rollout_backend(cfg, world_size=2) == "vllm"
 
 
 def test_format_generation_prompt_thinking_open(tmp_path: Path):
@@ -212,6 +245,76 @@ def test_sync_sglang_weights_noop_for_hf_backend(tmp_path: Path):
     assert path is None
 
 
+def test_sync_vllm_weights_noop_for_hf_backend(tmp_path: Path):
+    from seiso.slime_single_gpu.rollout_backend import sync_vllm_weights_from_actor
+
+    cfg = _cfg(tmp_path, rollout_backend="hf", output_dir=tmp_path / "out")
+    path = sync_vllm_weights_from_actor(
+        model=object(),
+        tokenizer=object(),
+        config=cfg,
+        step=1,
+        is_main=True,
+    )
+    assert path is None
+
+
+def test_vllm_client_strips_v1_suffix_and_loads_lora(tmp_path: Path):
+    cfg = _cfg(
+        tmp_path,
+        rollout_backend="vllm",
+        vllm_base_url="http://127.0.0.1:8000/v1",
+        vllm_model="base-model",
+        vllm_lora_name="policy_lora",
+        use_lora=True,
+    )
+    client = VLLMRolloutClient.from_config(cfg)
+    assert client.base_url == "http://127.0.0.1:8000"
+    assert client._active_model == "policy_lora"
+
+    seen: list[dict[str, object]] = []
+
+    class _Resp:
+        def __init__(self, body: bytes):
+            self._body = body
+
+        def read(self):
+            return self._body
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    def _urlopen(req, timeout=0):
+        body = req.data.decode("utf-8") if req.data else ""
+        seen.append({"url": req.full_url, "method": req.get_method(), "body": body})
+        if "unload_lora_adapter" in req.full_url:
+            return _Resp(b'{"ok": true}')
+        if "load_lora_adapter" in req.full_url:
+            return _Resp(b"Success: LoRA adapter 'policy_lora' added successfully")
+        return _Resp(b'{"choices":[{"text":"ok"}]}')
+
+    with patch(
+        "seiso.slime_single_gpu.rollout_backend.urllib.request.urlopen",
+        side_effect=_urlopen,
+    ):
+        client.load_lora_adapter("/tmp/adapter", lora_name="policy_lora")
+        assert client.complete("hi") == "ok"
+
+    urls = [s["url"] for s in seen]
+    assert any(u.endswith("/v1/load_lora_adapter") for u in urls)
+    assert any(u.endswith("/v1/completions") for u in urls)
+    load_bodies = [
+        json.loads(s["body"])
+        for s in seen
+        if s["url"].endswith("/v1/load_lora_adapter")
+    ]
+    assert load_bodies[0]["lora_name"] == "policy_lora"
+    assert load_bodies[0]["lora_path"] == "/tmp/adapter"
+
+
 def test_sglang_engine_urls_dedupes_comma_and_list(tmp_path: Path):
     from seiso.slime_single_gpu.rollout_backend import sglang_engine_urls
 
@@ -284,7 +387,35 @@ def test_example_ddp_config_requests_sglang():
     slime.validate()
 
 
+def test_example_vllm_ddp_config_requests_vllm():
+    from seiso.training.config import TrainConfig
+
+    cfg = TrainConfig.from_yaml("configs/example_training_slime_vllm.yaml")
+    slime = cfg.to_single_gpu_slime_config()
+    assert slime.rollout_backend == "vllm"
+    assert slime.vllm_base_url.startswith("http")
+    assert slime.use_lora is True
+    slime.validate()
+
+
 def test_example_single_gpu_keeps_hf_backend():
     cfg = SingleGpuSlimeConfig.from_yaml(Path("configs/example_slime_single_gpu.yaml"))
     assert cfg.rollout_backend == "hf"
     cfg.validate()
+
+
+def test_vllm_engine_urls_strip_v1_and_dedupe(tmp_path: Path):
+    from seiso.slime_single_gpu.rollout_backend import vllm_engine_urls
+
+    cfg = _cfg(
+        tmp_path,
+        rollout_backend="vllm",
+        vllm_base_url="http://127.0.0.1:8000/v1,http://127.0.0.1:8001",
+        vllm_engine_urls=["http://127.0.0.1:8001/v1", "http://127.0.0.1:8002"],
+    )
+    urls = vllm_engine_urls(cfg)
+    assert urls == [
+        "http://127.0.0.1:8000",
+        "http://127.0.0.1:8001",
+        "http://127.0.0.1:8002",
+    ]

@@ -90,7 +90,7 @@ class SingleGpuSlimeConfig:
     calculate_per_token_loss: bool = False
     temperature: float = 0.9
     top_p: float = 0.95
-    # Online generate: hf (colocated, default) | sglang | auto
+    # Online generate: hf (colocated, default) | sglang | vllm | auto
     # "data_gen" is accepted as an alias of "hf".
     rollout_backend: str = "hf"
     # slime: --apply-chat-template
@@ -110,6 +110,19 @@ class SingleGpuSlimeConfig:
     sglang_weight_keep: int = 2
     # Extra engines (comma list or YAML list); sglang_base_url may also be comma-separated
     sglang_engine_urls: list[str] | str | None = None
+    # Multi-GPU rollouts via OpenAI-compatible vLLM (managed multi-GPU or external).
+    vllm_base_url: str = ""
+    vllm_model: str = ""
+    vllm_api_key: str = "EMPTY"
+    vllm_timeout_s: float = 120.0
+    vllm_max_workers: int = 8
+    vllm_sync_weights: bool = True
+    vllm_weight_dir: str = "vllm_weight_sync"
+    # auto = LoRA when use_lora/PEFT else full; lora = /v1/load_lora_adapter; full = disk reload
+    vllm_weight_mode: str = "auto"
+    vllm_weight_keep: int = 2
+    vllm_engine_urls: list[str] | str | None = None
+    vllm_lora_name: str = "seiso_slime_policy"
     require_thinking_trace: bool = True
     thinking_instruction: str = (
         "Show your reasoning in <think>...</think>, then give the final answer."
@@ -155,6 +168,11 @@ class SingleGpuSlimeConfig:
     data_gen_mix: str = "numeric:0.5,choice:0.2,code:0.3"
     data_gen_difficulty: str = "easy:0.35,medium:0.45,hard:0.20"
     data_gen_filename: str = "slime_generated.jsonl"
+    # NVIDIA NeMo Data Designer for synth prompts. auto = only multi-GPU vLLM runs.
+    # on/off force; never used for hf/sglang backends.
+    data_designer: str = "auto"
+    # Optional TP hint for gate when WORLD_SIZE==1 but vLLM uses multiple GPUs.
+    vllm_tensor_parallel: int = 0
 
     @classmethod
     def from_yaml(cls, path: Path) -> SingleGpuSlimeConfig:
@@ -270,6 +288,28 @@ class SingleGpuSlimeConfig:
             raise ValueError("data_gen_mix must not be empty")
         if not self.data_gen_difficulty:
             raise ValueError("data_gen_difficulty must not be empty")
+        mode = str(self.data_designer or "auto").lower().strip()
+        if mode not in {
+            "auto",
+            "on",
+            "off",
+            "true",
+            "false",
+            "1",
+            "0",
+            "yes",
+            "no",
+            "force",
+            "always",
+            "disable",
+            "disabled",
+        }:
+            raise ValueError(
+                "data_designer must be one of: auto, on, off "
+                f"(got {self.data_designer!r})"
+            )
+        if int(self.vllm_tensor_parallel or 0) < 0:
+            raise ValueError("vllm_tensor_parallel must be non-negative")
         from seiso.slime_single_gpu.rollout_backend import (
             validate_rollout_backend_config,
         )
@@ -280,3 +320,10 @@ class SingleGpuSlimeConfig:
             raise ValueError("sglang_weight_mode must be 'full' or 'delta'")
         if self.sglang_weight_keep < 1:
             raise ValueError("sglang_weight_keep must be >= 1")
+        vmode = str(self.vllm_weight_mode or "auto").lower()
+        if vmode not in {"auto", "lora", "full"}:
+            raise ValueError("vllm_weight_mode must be one of: auto, lora, full")
+        if self.vllm_weight_keep < 1:
+            raise ValueError("vllm_weight_keep must be >= 1")
+        if not str(self.vllm_lora_name or "").strip():
+            raise ValueError("vllm_lora_name must not be empty")

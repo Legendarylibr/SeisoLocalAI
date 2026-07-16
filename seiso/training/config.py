@@ -219,7 +219,7 @@ class TrainConfig(BaseModel):
     top_p: float = Field(default=0.95, gt=0, le=1)
     rollout_backend: str = Field(
         default="hf",
-        description="slime online generate: hf | sglang | auto (data_gen aliases hf)",
+        description="slime online generate: hf | sglang | vllm | auto (data_gen aliases hf)",
     )
     apply_chat_template: bool = True
     sglang_base_url: str = ""
@@ -232,6 +232,17 @@ class TrainConfig(BaseModel):
     sglang_weight_mode: str = "full"
     sglang_weight_keep: int = Field(default=2, ge=1)
     sglang_engine_urls: list[str] | str | None = None
+    vllm_base_url: str = ""
+    vllm_model: str = ""
+    vllm_api_key: str = "EMPTY"
+    vllm_timeout_s: float = Field(default=120.0, gt=0)
+    vllm_max_workers: int = Field(default=8, ge=1)
+    vllm_sync_weights: bool = True
+    vllm_weight_dir: str = "vllm_weight_sync"
+    vllm_weight_mode: str = "auto"
+    vllm_weight_keep: int = Field(default=2, ge=1)
+    vllm_engine_urls: list[str] | str | None = None
+    vllm_lora_name: str = "seiso_slime_policy"
     require_thinking_trace: bool = True
     thinking_instruction: str = Field(
         default="Show your reasoning in <think>...</think>, then give the final answer.",
@@ -273,6 +284,17 @@ class TrainConfig(BaseModel):
     data_gen_mix: str = "numeric:0.5,choice:0.2,code:0.3"
     data_gen_difficulty: str = "easy:0.35,medium:0.45,hard:0.20"
     data_gen_filename: str = "slime_generated.jsonl"
+    data_designer: str = Field(
+        default="auto",
+        description=(
+            "NVIDIA NeMo Data Designer synth: auto (multi-GPU vLLM only) | on | off"
+        ),
+    )
+    vllm_tensor_parallel: int = Field(
+        default=0,
+        ge=0,
+        description="Optional vLLM TP size hint for multi-GPU Data Designer gate",
+    )
     extra: dict[str, Any] = Field(
         default_factory=dict,
         description=(
@@ -419,6 +441,17 @@ class TrainConfig(BaseModel):
             sglang_weight_mode=self.sglang_weight_mode,
             sglang_weight_keep=self.sglang_weight_keep,
             sglang_engine_urls=self.sglang_engine_urls,
+            vllm_base_url=self.vllm_base_url,
+            vllm_model=self.vllm_model,
+            vllm_api_key=self.vllm_api_key,
+            vllm_timeout_s=self.vllm_timeout_s,
+            vllm_max_workers=self.vllm_max_workers,
+            vllm_sync_weights=self.vllm_sync_weights,
+            vllm_weight_dir=self.vllm_weight_dir,
+            vllm_weight_mode=self.vllm_weight_mode,
+            vllm_weight_keep=self.vllm_weight_keep,
+            vllm_engine_urls=self.vllm_engine_urls,
+            vllm_lora_name=self.vllm_lora_name,
             require_thinking_trace=self.require_thinking_trace,
             thinking_instruction=self.thinking_instruction,
             outcome_reward_weight=self.outcome_reward_weight,
@@ -457,6 +490,8 @@ class TrainConfig(BaseModel):
             data_gen_mix=self.data_gen_mix,
             data_gen_difficulty=self.data_gen_difficulty,
             data_gen_filename=self.data_gen_filename,
+            data_designer=self.data_designer,
+            vllm_tensor_parallel=self.vllm_tensor_parallel,
         )
 
 
