@@ -11,7 +11,7 @@ import random
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import Any, TypedDict, TypeVar
 
 from seiso.io.jsonl import iter_jsonl
 from seiso.models.lora_targets import (
@@ -28,6 +28,26 @@ from seiso.training.metrics import METRIC_STDOUT_PREFIX
 _GRADIENT_CHECKPOINTING_KWARGS = {"use_reentrant": False}
 
 T = TypeVar("T")
+
+
+class _CompletionScore(TypedDict):
+    """Per-rollout verifier breakdown (key types for mypy, not a free-form dict)."""
+
+    reward: float
+    outcome_reward: float
+    format_reward: float
+    process_reward: float
+    thinking_penalty: float
+    thinking_trace: str
+    final_answer: str
+    extracted_answer: str
+    outcome_passed: bool
+    format_ok: bool
+    checker: str
+    detail: str | None
+    proof_passed: bool | None
+    proof_score: float | None
+    proof_detail: str | None
 
 
 @dataclass
@@ -511,20 +531,12 @@ def _collect_rollouts(
                     final_answer=score["final_answer"],
                     thinking_trace=score["thinking_trace"],
                     status=status,
-                    outcome_passed=bool(score["outcome_passed"]),
-                    format_ok=bool(score["format_ok"]),
-                    checker=str(score["checker"]),
-                    proof_passed=score.get("proof_passed"),
-                    proof_score=(
-                        float(score["proof_score"])
-                        if score.get("proof_score") is not None
-                        else None
-                    ),
-                    proof_detail=(
-                        str(score["proof_detail"])
-                        if score.get("proof_detail") is not None
-                        else None
-                    ),
+                    outcome_passed=score["outcome_passed"],
+                    format_ok=score["format_ok"],
+                    checker=score["checker"],
+                    proof_passed=score["proof_passed"],
+                    proof_score=score["proof_score"],
+                    proof_detail=score["proof_detail"],
                 )
             )
             if verifier_path is not None:
@@ -641,7 +653,7 @@ def _score_completion(
     sample: dict[str, Any],
     config: SingleGpuSlimeConfig,
     reward_fn,
-) -> dict[str, float | str | bool | None]:
+) -> _CompletionScore:
     """Score raw generated text via the shared verifier (no synthetic tags)."""
     del reward_fn  # Outcome path is selected by config.reward checker name.
     result = verify_score_completion(
@@ -669,12 +681,14 @@ def _score_completion(
         "thinking_trace": result.thinking_trace,
         "final_answer": result.final_answer,
         "extracted_answer": result.extracted_answer,
-        "outcome_passed": result.passed,
-        "format_ok": result.format_ok,
-        "checker": result.checker,
+        "outcome_passed": bool(result.passed),
+        "format_ok": bool(result.format_ok),
+        "checker": str(result.checker),
         "detail": result.detail,
         "proof_passed": result.proof_passed,
-        "proof_score": result.proof_score,
+        "proof_score": (
+            float(result.proof_score) if result.proof_score is not None else None
+        ),
         "proof_detail": result.proof_detail,
     }
 
