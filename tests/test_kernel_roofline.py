@@ -9,8 +9,8 @@ import sys
 import pytest
 
 from seiso.kernels.roofline import (
-    REFERENCE_RIDGE_FLOP_PER_BYTE,
     _SOT_ELIGIBLE_OPS,
+    REFERENCE_RIDGE_FLOP_PER_BYTE,
     classify_bound,
     dtype_nbytes,
     estimate_cross_entropy,
@@ -39,11 +39,11 @@ def test_reference_ridge_is_300():
 
 
 def test_sot_eligible_ops():
-    assert _SOT_ELIGIBLE_OPS == {
+    assert {
         "fused_mlp_swiglu",
         "lora_delta",
         "lora_qkv_delta",
-    }
+    } == _SOT_ELIGIBLE_OPS
 
 
 def test_classify_bound_sot_only_at_300_plus_gemm_fp16():
@@ -69,9 +69,7 @@ def test_float32_never_sot_even_at_high_intensity():
         intensity_flop_per_byte=1000.0,
         dtype="float32",
     )
-    bound, conf, sot, note = classify_bound(
-        1000.0, op="fused_mlp_swiglu", dtype="float32"
-    )
+    bound, conf, sot, note = classify_bound(1000.0, op="fused_mlp_swiglu", dtype="float32")
     assert sot is False and conf == "heuristic"
     assert "FP16/BF16" in note
 
@@ -100,9 +98,7 @@ def test_gemm_flops_bytes_classic():
 def test_fused_mlp_closed_form():
     r, h, mid = 128, 256, 1024
     elem = 2
-    est = estimate_fused_mlp_swiglu(
-        rows=r, hidden=h, intermediate=mid, dtype="bfloat16"
-    )
+    est = estimate_fused_mlp_swiglu(rows=r, hidden=h, intermediate=mid, dtype="bfloat16")
     f1, b1 = gemm_flops_bytes(m=r, n=mid, k=h, elem_bytes=elem)
     f2, b2 = gemm_flops_bytes(m=r, n=mid, k=h, elem_bytes=elem)
     expect_flops = f1 + f2 + 6.0 * r * mid
@@ -133,9 +129,7 @@ def test_elementwise_ops_are_heuristic_bandwidth():
 
 
 def test_fat_mlp_is_performance_sot_compute():
-    mlp = estimate_fused_mlp_swiglu(
-        rows=4096, hidden=4096, intermediate=16384, dtype="bfloat16"
-    )
+    mlp = estimate_fused_mlp_swiglu(rows=4096, hidden=4096, intermediate=16384, dtype="bfloat16")
     assert mlp.intensity_flop_per_byte >= REFERENCE_RIDGE_FLOP_PER_BYTE
     assert mlp.performance_truth is True
     assert mlp.confidence == "source_of_truth"
@@ -143,17 +137,13 @@ def test_fat_mlp_is_performance_sot_compute():
 
 
 def test_fat_mlp_float32_not_sot():
-    mlp = estimate_fused_mlp_swiglu(
-        rows=4096, hidden=4096, intermediate=16384, dtype="float32"
-    )
+    mlp = estimate_fused_mlp_swiglu(rows=4096, hidden=4096, intermediate=16384, dtype="float32")
     assert mlp.performance_truth is False
     assert mlp.confidence == "heuristic"
 
 
 def test_tiny_mlp_not_sot():
-    mlp = estimate_fused_mlp_swiglu(
-        rows=1, hidden=4096, intermediate=16384, dtype="bfloat16"
-    )
+    mlp = estimate_fused_mlp_swiglu(rows=1, hidden=4096, intermediate=16384, dtype="bfloat16")
     assert mlp.intensity_flop_per_byte < REFERENCE_RIDGE_FLOP_PER_BYTE
     assert mlp.performance_truth is False
 
@@ -176,9 +166,7 @@ def test_ce_never_sot():
 
 def test_summary_non_gemm_high_i_message():
     # Synthetic: classify non-GEMM at high I
-    _bound, _conf, sot, note = classify_bound(
-        500.0, op="swiglu_elementwise", dtype="bfloat16"
-    )
+    _bound, _conf, sot, note = classify_bound(500.0, op="swiglu_elementwise", dtype="bfloat16")
     assert sot is False
     assert "not GEMM-family" in note
 

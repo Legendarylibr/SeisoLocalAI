@@ -158,9 +158,7 @@ def run_roofline_report(
                         "never blocks training"
                     ),
                     "estimates": [e.to_dict() for e in estimates],
-                    "source_of_truth_ops": [
-                        e.op for e in estimates if e.performance_truth
-                    ],
+                    "source_of_truth_ops": [e.op for e in estimates if e.performance_truth],
                 },
                 indent=2,
                 sort_keys=True,
@@ -187,9 +185,7 @@ def main() -> None:
         )
     )
     parser.add_argument("--rows", type=int, default=4096, help="Token rows (batch*seq)")
-    parser.add_argument(
-        "--hidden", type=int, default=4096, help="Hidden / intermediate base dim"
-    )
+    parser.add_argument("--hidden", type=int, default=4096, help="Hidden / intermediate base dim")
     parser.add_argument("--vocab", type=int, default=32000, help="Vocab size for CE")
     parser.add_argument(
         "--intermediate",
@@ -206,9 +202,7 @@ def main() -> None:
         default=16,
         help="LoRA rank for roofline LoRA estimates",
     )
-    parser.add_argument(
-        "--dtype", choices=["float16", "bfloat16", "float32"], default="bfloat16"
-    )
+    parser.add_argument("--dtype", choices=["float16", "bfloat16", "float32"], default="bfloat16")
     parser.add_argument(
         "--op",
         choices=["all", "rms", "swiglu", "ce"],

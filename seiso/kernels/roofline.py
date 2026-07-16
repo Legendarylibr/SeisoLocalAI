@@ -256,9 +256,7 @@ def _pack(
     bytes_moved = float(max(bytes_moved, 1.0))
     intensity = flops / bytes_moved
     dtype = str(shape.get("dtype") or "bfloat16")
-    bound, confidence, performance_truth, note = classify_bound(
-        intensity, op=op, dtype=dtype
-    )
+    bound, confidence, performance_truth, note = classify_bound(intensity, op=op, dtype=dtype)
     if extra_note:
         note = f"{extra_note} {note}"
     return IntensityEstimate(
@@ -401,9 +399,7 @@ def estimate_lora_qkv_delta(
     credited so SoT is not granted from optimistic shared-input traffic.
     """
     r, h, k = int(rows), int(hidden), int(rank)
-    one = estimate_lora_delta(
-        rows=r, in_features=h, out_features=h, rank=k, dtype=dtype
-    )
+    one = estimate_lora_delta(rows=r, in_features=h, out_features=h, rank=k, dtype=dtype)
     return _pack(
         op="lora_qkv_delta",
         shape={"rows": r, "hidden": h, "rank": k, "dtype": dtype},
@@ -452,9 +448,7 @@ def estimate_seiso_fused_ops(
     return [
         estimate_rms_norm(rows=rows, hidden=hidden, dtype=dtype, residual=True),
         estimate_swiglu(rows=rows, intermediate=inter, dtype=dtype),
-        estimate_fused_mlp_swiglu(
-            rows=rows, hidden=hidden, intermediate=inter, dtype=dtype
-        ),
+        estimate_fused_mlp_swiglu(rows=rows, hidden=hidden, intermediate=inter, dtype=dtype),
         estimate_lora_delta(
             rows=rows,
             in_features=hidden,
@@ -462,9 +456,7 @@ def estimate_seiso_fused_ops(
             rank=lora_rank,
             dtype=dtype,
         ),
-        estimate_lora_qkv_delta(
-            rows=rows, hidden=hidden, rank=lora_rank, dtype=dtype
-        ),
+        estimate_lora_qkv_delta(rows=rows, hidden=hidden, rank=lora_rank, dtype=dtype),
         estimate_cross_entropy(rows=rows, vocab=vocab, dtype=dtype),
     ]
 
@@ -494,9 +486,7 @@ def format_roofline_report(estimates: list[IntensityEstimate]) -> str:
     if sot:
         lines.append(f"Shape-math SoT compute-bound candidates ({len(sot)}):")
         for est in sot:
-            lines.append(
-                f"  - {est.op}: I={est.intensity_flop_per_byte:.1f} FLOP/byte"
-            )
+            lines.append(f"  - {est.op}: I={est.intensity_flop_per_byte:.1f} FLOP/byte")
     else:
         lines.append(
             f"No op met the SoT bar (FP16/BF16 GEMM with I ≥ {ridge:.0f}). "
