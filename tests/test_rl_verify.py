@@ -1,0 +1,122 @@
+"""Tests for the shared RL verifier."""
+
+from __future__ import annotations
+
+from seiso.distill_rl.outcome import ensure_thinking_completion, outcome_reward
+from seiso.rl_verify import (
+    final_answer_text,
+    format_thinking_prompt,
+    has_closed_thinking_trace,
+    score_completion,
+    verify_outcome,
+)
+
+
+def test_format_thinking_prompt_appends_instruction():
+    text = format_thinking_prompt("Solve.", "Show work.")
+    assert "Show work." in text
+    assert text.endswith("<think>")
+
+
+def test_ensure_thinking_completion_is_noop():
+    assert ensure_thinking_completion("answer", enabled=True) == "answer"
+
+
+def test_closed_thinking_trace_detection():
+    assert has_closed_thinking_trace("<think>x</think>42") is True
+    assert has_closed_thinking_trace("<think>x") is False
+    assert has_closed_thinking_trace("42") is False
+    # Prompt already opened <think>; model continues and closes.
+    assert has_closed_thinking_trace("step by step\n</think>\n42") is True
+    assert has_closed_thinking_trace("</think>42") is True
+
+
+def test_final_answer_text_after_think():
+    assert final_answer_text("<think>reason</think> 42") == "42"
+    assert final_answer_text("reason\n</think>\n42") == "42"
+
+
+def test_numeric_and_choice_outcome():
+    assert verify_outcome("The answer is 42.", "42", checker="numeric")[0] == 1.0
+    assert verify_outcome("I pick B.", "B", checker="choice")[0] == 1.0
+    assert verify_outcome("nope", "42", checker="numeric")[0] == 0.0
+
+
+def test_extract_choice_prefers_final_letter():
+    from seiso.rl_verify.extract import extract_choice
+
+    # First letter is a distractor; final pick is B.
+    assert extract_choice("A is wrong; the answer is B") == "b"
+    assert extract_choice("a better option is B") == "b"
+    assert extract_choice("select a better option is B") == "b"
+    assert extract_choice("Answer: C") == "c"
+    assert extract_choice("I pick D.") == "d"
+    # Unique free-form letter still works.
+    assert extract_choice("Definitely B only.") == "b"
+    assert verify_outcome(
+        "A is wrong; the answer is B", "B", checker="choice"
+    )[0] == 1.0
+
+
+def test_last_number_ignores_confidence_noise():
+    from seiso.rl_verify.extract import last_number
+
+    assert last_number("The answer is 42, confidence 100") == 42.0
+    assert last_number("answer 42 after checking 3 cases") == 42.0
+    assert last_number("Final answer: 7") == 7.0
+    assert last_number("\\boxed{99}") == 99.0
+    assert verify_outcome(
+        "The answer is 42, confidence 100", "42", checker="numeric"
+    )[0] == 1.0
+
+
+def test_outcome_reward_distill_api():
+    assert outcome_reward("<think>x</think>7", "7", benchmark="gsm8k") == 1.0
+    assert outcome_reward("<think>x</think>C", "C", benchmark="gpqa") == 1.0
+
+
+def test_score_completion_outcome_first():
+    good = score_completion(
+        "<think>because</think>42",
+        {"answer": "42"},
+        checker="numeric",
+        require_thinking_trace=True,
+        outcome_weight=1.0,
+        format_weight=0.1,
+        process_weight=0.0,
+        missing_format_penalty=0.5,
+    )
+    # Prompt ended with open <think>; model only continues + closes.
+    continued = score_completion(
+        "because arithmetic\n</think>\n42",
+        {"answer": "42"},
+        checker="numeric",
+        require_thinking_trace=True,
+        outcome_weight=1.0,
+        format_weight=0.1,
+        process_weight=0.0,
+        missing_format_penalty=0.5,
+    )
+    bad_format = score_completion(
+        "42",
+        {"answer": "42"},
+        checker="numeric",
+        require_thinking_trace=True,
+        outcome_weight=1.0,
+        format_weight=0.1,
+        process_weight=0.0,
+        missing_format_penalty=0.5,
+    )
+
+    assert good.passed is True
+    assert good.format_ok is True
+    assert good.reward == 1.1
+    assert good.process_score == 0.0
+    assert continued.passed is True
+    assert continued.format_ok is True
+    assert continued.reward == 1.1
+    assert continued.final_answer == "42"
+    assert bad_format.passed is True
+    assert bad_format.format_ok is False
+    assert bad_format.reward == 0.5  # 1.0 outcome - 0.5 penalty
+    assert bad_format.detail == "missing_closed_think_trace"

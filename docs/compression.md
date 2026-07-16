@@ -126,16 +126,32 @@ Requires `.[train]` for GPU distillation/finetune stages. Optional `.[compress-q
 
 ## Distill-RL (teacher → DPO)
 
-Teacher KL distillation into a smaller student, preference rollouts (teacher completions preferred over student), DPO alignment, and evaluation. Produces hash-chained manifests and optional multi-seed aggregation.
+Teacher KL distillation into a smaller student, preference construction, DPO
+alignment, and evaluation. Produces hash-chained manifests and optional multi-seed
+aggregation.
 
-Reasoning-focused runs can force rollout and prompt text through
-`<think>...</think>` by leaving `require_thinking_trace: true`. For verifiable
-math/code-style prompts that include an `answer` and optional `benchmark` field
-(`gsm8k`, `gpqa`, or `aime`), Distill-RL switches to pure outcome rewards:
-group-sample multiple student reasoning traces with `grpo_group_size`, score
-only final-answer correctness, and use the best/worst traces as the preference
-pair. Evaluation writes `verifiable_benchmarks.json` with GSM8K/GPQA/AIME
-accuracy and the jump versus the baseline checkpoint.
+There are **two preference regimes** (do not conflate them):
+
+1. **Verifiable outcome (preferred for alignment claims).** Default when
+   `verifiable_outcome_rewards: true` and prompts carry `answer` / `tests` /
+   `benchmark` (`gsm8k`, `gpqa`, `aime`, `code`). Distill-RL group-samples the
+   **student** with `grpo_group_size`, scores with the shared verifier
+   (`seiso.rl_verify`), and keeps pairs only when **chosen passes** (outcome
+   score > 0.5, or all unit tests for code). Rejected prefers a hard fail
+   (near-miss). Starter libraries:
+   - `data/distill_verifiable_prompts.jsonl` (math/choice/code mix)
+   - `data/distill_code_synth.jsonl` (deterministic code tasks with known passers)
+   - `data/synthetic_code_preferences.jsonl` (offline golden-vs-mutant DPO pairs;
+     regenerate with `python -m seiso.rl_verify --data-dir data --seed 0`)
+2. **Teacher ≻ student bootstrap (not outcome RL).** For non-verifiable prompts,
+   pairs are `chosen = teacher` and `rejected = student` with no correctness
+   check. Useful as imitation-shaped bootstrap data when labels are missing —
+   **not** a substitute for verifiable preference RL.
+
+Reasoning-focused runs can append a thinking instruction by leaving
+`require_thinking_trace: true`. Completions are scored as generated (no synthetic
+`<think>` tags). Evaluation writes `verifiable_benchmarks.json` with
+GSM8K/GPQA/AIME accuracy and the jump versus the baseline checkpoint.
 
 **Auto-sweep (default on):** Before the final DPO stage, runs a compact grid search over DPO hyperparameters (`dpo_beta`, `dpo_learning_rate`, preset-dependent). Disable with `--no-auto-sweep` (CLI) or `auto_sweep: false` (API). Custom grids via `sweep_config` path or `sweep_grid` in JSON config.
 

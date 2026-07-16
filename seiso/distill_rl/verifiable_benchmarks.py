@@ -179,10 +179,7 @@ def _generate_gguf_outputs(
 ) -> list[str]:
     from llama_cpp import Llama
 
-    from seiso.distill_rl.outcome import (
-        ensure_thinking_completion,
-        format_thinking_prompt,
-    )
+    from seiso.distill_rl.outcome import format_thinking_prompt
 
     last_error: Exception | None = None
     llm = None
@@ -215,7 +212,7 @@ def _generate_gguf_outputs(
             stop=["</s>", "<|eot_id|>"],
         )
         text = str(response["choices"][0]["text"]).strip()
-        outputs.append(ensure_thinking_completion(text, enabled=require_thinking_trace))
+        outputs.append(text)
     return outputs
 
 

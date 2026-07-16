@@ -248,9 +248,41 @@ def test_outcome_group_sampling_prefers_best_candidate(monkeypatch):
 
     assert rows[0]["chosen"] == "<think>compute</think>42"
     assert rows[0]["chosen_reward"] == 1.0
+    assert rows[0]["chosen_passed"] is True
     assert rows[0]["rejected_reward"] == 0.0
+    assert rows[0]["rejected_passed"] is False
     assert rows[0]["reward_source"] == "verifiable_outcome"
+    assert rows[0]["hard_negative"] is True
     assert rows[0]["grpo_group_size"] == 3
+
+
+def test_outcome_group_sampling_skips_when_no_pass(monkeypatch):
+    from seiso.distill_rl.rollouts import generate_outcome_preference_rows
+
+    prompts = [
+        RolloutPrompt(
+            prompt_id="gsm",
+            text="What is 40 + 2?",
+            answer="42",
+            benchmark="gsm8k",
+        )
+    ]
+
+    monkeypatch.setattr(
+        "seiso.distill_rl.rollouts.generate_completion_groups",
+        lambda *_args, **_kwargs: [["41", "40", "wrong"]],
+    )
+
+    rows = generate_outcome_preference_rows(
+        student_model="student",
+        prompts=prompts,
+        max_new_tokens=8,
+        temperature=0.7,
+        seed=13,
+        use_chat_template=False,
+        grpo_group_size=3,
+    )
+    assert rows == []
 
 
 def test_load_causal_lm_applies_trust_remote_code_and_max_memory(monkeypatch):

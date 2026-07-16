@@ -15,6 +15,7 @@ from seiso.distill_rl.prompts import (
 )
 from seiso.distill_rl.rollouts import generate_preference_rows
 from seiso.io.jsonl import write_jsonl
+from seiso.rl_verify.synth_code import synthesize_code_bundle
 
 
 @dataclass(frozen=True)
@@ -200,3 +201,74 @@ def _prompt_library_hash(path: Path | None) -> str | None:
     if not source.is_file():
         return None
     return hashlib.sha256(source.read_bytes()).hexdigest()
+
+
+def build_synthetic_code_preference_bundle(
+    *,
+    output_dir: Path,
+    seed: int = 0,
+    train_fraction: float = 0.8,
+    limit: int | None = None,
+    include_variants: bool = True,
+    on_log=None,
+) -> PreferenceBundle:
+    """Build DPO preference JSONL from deterministic golden/mutant code pairs.
+
+    No teacher/student model rollouts — every ``chosen`` is a sandbox-verified
+    solution and every ``rejected`` is a mutant that fails unit tests.
+    """
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    def _log(msg: str) -> None:
+        if on_log:
+            on_log(msg)
+
+    bundle = synthesize_code_bundle(
+        seed=seed,
+        include_variants=include_variants,
+        build_preferences=True,
+        limit=limit,
+        verify=True,
+    )
+    rows = [pref.to_row() for pref in bundle.preferences]
+    _log(f"Synthetic code preferences: {len(rows)} pairs (seed={seed})")
+
+    # Deterministic train/val split by stable prompt_id order.
+    rows_sorted = sorted(rows, key=lambda r: str(r.get("prompt_id", "")))
+    if not 0.0 < train_fraction < 1.0:
+        raise ValueError("train_fraction must be between 0 and 1")
+    split_at = max(1, int(len(rows_sorted) * train_fraction))
+    if split_at >= len(rows_sorted):
+        split_at = max(1, len(rows_sorted) - 1)
+    train_rows = rows_sorted[:split_at]
+    val_rows = rows_sorted[split_at:]
+
+    train_path = output_dir / "preferences_train.jsonl"
+    val_path = output_dir / "preferences_val.jsonl"
+    write_jsonl(train_rows, train_path)
+    write_jsonl(val_rows, val_path)
+
+    manifest = {
+        "source": "synthetic_code_unit_tests",
+        "seed": seed,
+        "train_fraction": train_fraction,
+        "include_variants": include_variants,
+        "task_count": len(bundle.tasks),
+        "train_count": len(train_rows),
+        "val_count": len(val_rows),
+        "filtered_degenerate": 0,
+        "train_sha256": _file_hash(train_path),
+        "val_sha256": _file_hash(val_path),
+    }
+    manifest_path = output_dir / "preferences_manifest.json"
+    manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    legacy_path = output_dir / "preferences.jsonl"
+    legacy_path.write_text(train_path.read_text(encoding="utf-8"), encoding="utf-8")
+    return PreferenceBundle(
+        train_path=train_path,
+        val_path=val_path,
+        manifest_path=manifest_path,
+        train_count=len(train_rows),
+        val_count=len(val_rows),
+        filtered_count=0,
+    )

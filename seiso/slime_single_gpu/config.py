@@ -8,6 +8,40 @@ from pathlib import Path
 import yaml
 
 
+def effective_train_batch_size(config: SingleGpuSlimeConfig) -> int:
+    """Prompt groups per step after filtering (slime rollout_batch_size target)."""
+    if config.train_batch_size is not None:
+        return int(config.train_batch_size)
+    return int(config.rollout_batch_size)
+
+
+def validate_oversample_vs_train_batch(
+    *,
+    dynamic_sampling_filter: str,
+    over_sampling_batch_size: int | None,
+    train_batch_size: int,
+    rollout_batch_size: int | None = None,
+) -> None:
+    """Shared oversample rule (slime: over_sampling_batch_size >= rollout_batch_size).
+
+    Units are **prompts**, not sequences. ``None`` oversample = no extra headroom.
+    """
+    if dynamic_sampling_filter == "none":
+        return
+    if over_sampling_batch_size is None:
+        return
+    if over_sampling_batch_size < 1:
+        raise ValueError("over_sampling_batch_size must be positive")
+    # Prefer comparing to rollout_batch_size (slime); fall back to train target.
+    floor = int(rollout_batch_size if rollout_batch_size is not None else train_batch_size)
+    if over_sampling_batch_size < floor:
+        raise ValueError(
+            "over_sampling_batch_size must be >= rollout_batch_size when "
+            "dynamic_sampling_filter is enabled (slime oversample ≥ rollout batch; "
+            "units are prompts)"
+        )
+
+
 @dataclass(frozen=True)
 class SingleGpuSlimeConfig:
     """Small, explicit config for local GRPO-style training."""
@@ -15,21 +49,28 @@ class SingleGpuSlimeConfig:
     model_id: str
     dataset: Path
     output_dir: Path
+    # slime: --input-key / --label-key / --metadata-key
     prompt_field: str = "prompt"
-    answer_field: str = "answer"
+    answer_field: str = "label"
     metadata_field: str | None = "metadata"
-    reward: str = "exact_match"
+    # slime: --rm-type (or per-row metadata.rm_type with reward=auto)
+    reward: str = "auto"
     reward_field: str = "reward"
     max_vram_gb: float | None = None
     max_prompt_tokens: int = 512
     max_new_tokens: int = 256
+    # slime: --n-samples-per-prompt
     rollouts_per_prompt: int = 4
-    rollout_batch_size: int = 4
+    # slime: --rollout-batch-size (number of *prompts*, not sequences)
+    rollout_batch_size: int = 1
+    # slime: --over-sampling-batch-size (>= rollout_batch_size when filtering)
     over_sampling_batch_size: int | None = None
-    dynamic_sampling_filter: str = "none"
+    # Drop zero-signal groups (slime check_reward_nonzero_std on *outcome*).
+    dynamic_sampling_filter: str = "reward_nonzero_std"
     dynamic_sampling_min_reward_std: float = 1e-6
     policy_micro_batch_size: int = 4
-    train_batch_size: int = 1
+    # Target prompt groups per policy step after filtering (defaults to rollout_batch_size).
+    train_batch_size: int | None = None
     balance_data: bool = False
     shuffle_buffer_size: int = 2048
     max_samples_per_epoch: int | None = None
@@ -39,17 +80,45 @@ class SingleGpuSlimeConfig:
     max_grad_norm: float = 1.0
     epochs: int = 1
     max_steps: int | None = None
+    # 0 = no frozen ref (lower VRAM). Use ~0.01–0.05 for longer runs to limit drift.
     kl_coef: float = 0.0
+    # slime: --eps-clip / --eps-clip-high
     clip_ratio: float = 0.2
+    clip_ratio_high: float | None = None
+    # slime: grpo_std_normalization (mean-center then / unbiased std)
+    grpo_std_normalization: bool = True
     calculate_per_token_loss: bool = False
     temperature: float = 0.9
     top_p: float = 0.95
+    # Online generate: hf (colocated, default) | sglang | auto
+    # "data_gen" is accepted as an alias of "hf".
+    rollout_backend: str = "hf"
+    # slime: --apply-chat-template
+    apply_chat_template: bool = True
+    sglang_base_url: str = ""
+    sglang_model: str = ""
+    sglang_api_key: str = "EMPTY"
+    sglang_timeout_s: float = 120.0
+    sglang_max_workers: int = 8
+    # After each optimizer step, rank0 writes HF weights and hot-reloads SGLang
+    # (slime disk transport). Keep true for on-policy multi-GPU rollouts.
+    sglang_sync_weights: bool = True
+    sglang_weight_dir: str = "sglang_weight_sync"
+    # full = always complete HF ckpt; delta = skip if unchanged, try /pull_weights then full
+    sglang_weight_mode: str = "full"
+    # Keep last N weight_v* directories under sglang_weight_dir
+    sglang_weight_keep: int = 2
+    # Extra engines (comma list or YAML list); sglang_base_url may also be comma-separated
+    sglang_engine_urls: list[str] | str | None = None
     require_thinking_trace: bool = True
     thinking_instruction: str = (
         "Show your reasoning in <think>...</think>, then give the final answer."
     )
     outcome_reward_weight: float = 1.0
-    process_reward_weight: float = 0.25
+    # Format is a small binary bonus for closed <think>...</think> on raw tokens.
+    format_reward_weight: float = 0.1
+    # Lexical process shaping is experimental; leave at 0 for verifiable outcome-first RL.
+    process_reward_weight: float = 0.0
     missing_thinking_penalty: float = 0.5
     min_thinking_tokens: int = 8
     seed: int = 17
@@ -77,6 +146,15 @@ class SingleGpuSlimeConfig:
     write_verifier_data: bool = True
     verifier_data_file: str = "slime_verifier_data.jsonl"
     verifier_max_text_chars: int = 2048
+    # High-level data generation: when enabled (or count > 0), materialize a
+    # verifiable prompt corpus before training instead of relying on tiny
+    # hardcoded smoke JSONL. Completions still come from online rollouts.
+    data_gen: bool = False
+    data_gen_count: int = 0
+    data_gen_seed: int = 0
+    data_gen_mix: str = "numeric:0.5,choice:0.2,code:0.3"
+    data_gen_difficulty: str = "easy:0.35,medium:0.45,hard:0.20"
+    data_gen_filename: str = "slime_generated.jsonl"
 
     @classmethod
     def from_yaml(cls, path: Path) -> SingleGpuSlimeConfig:
@@ -95,25 +173,27 @@ class SingleGpuSlimeConfig:
             raise ValueError(
                 "rollouts_per_prompt must be at least 2 for grouped advantages"
             )
-        if self.train_batch_size < 1:
+        if self.train_batch_size is not None and self.train_batch_size < 1:
             raise ValueError("train_batch_size must be positive")
         if self.metadata_field is not None and not self.metadata_field:
             raise ValueError("metadata_field must not be empty")
         if self.rollout_batch_size < 1:
-            raise ValueError("rollout_batch_size must be positive")
-        if self.rollout_batch_size < self.rollouts_per_prompt:
-            raise ValueError("rollout_batch_size must be at least rollouts_per_prompt")
-        if (
-            self.over_sampling_batch_size is not None
-            and self.over_sampling_batch_size < self.rollouts_per_prompt
-        ):
+            raise ValueError("rollout_batch_size must be positive (slime: prompt count)")
+        if self.dynamic_sampling_filter not in {
+            "none",
+            "reward_nonzero_std",
+            "outcome_nonzero_std",
+        }:
             raise ValueError(
-                "over_sampling_batch_size must be at least rollouts_per_prompt"
+                "dynamic_sampling_filter must be one of: "
+                "none, reward_nonzero_std, outcome_nonzero_std"
             )
-        if self.dynamic_sampling_filter not in {"none", "reward_nonzero_std"}:
-            raise ValueError(
-                "dynamic_sampling_filter must be one of: none, reward_nonzero_std"
-            )
+        validate_oversample_vs_train_batch(
+            dynamic_sampling_filter=self.dynamic_sampling_filter,
+            over_sampling_batch_size=self.over_sampling_batch_size,
+            train_batch_size=effective_train_batch_size(self),
+            rollout_batch_size=self.rollout_batch_size,
+        )
         if self.dynamic_sampling_min_reward_std < 0:
             raise ValueError("dynamic_sampling_min_reward_std must be non-negative")
         if self.policy_micro_batch_size < 1:
@@ -132,10 +212,16 @@ class SingleGpuSlimeConfig:
             raise ValueError("kl_coef must be non-negative")
         if self.clip_ratio <= 0:
             raise ValueError("clip_ratio must be positive")
+        if self.clip_ratio_high is not None and self.clip_ratio_high < self.clip_ratio:
+            raise ValueError(
+                "clip_ratio_high must be >= clip_ratio (slime eps_clip_high >= eps_clip)"
+            )
         if not self.thinking_instruction:
             raise ValueError("thinking_instruction must not be empty")
         if self.outcome_reward_weight < 0:
             raise ValueError("outcome_reward_weight must be non-negative")
+        if self.format_reward_weight < 0:
+            raise ValueError("format_reward_weight must be non-negative")
         if self.process_reward_weight < 0:
             raise ValueError("process_reward_weight must be non-negative")
         if self.missing_thinking_penalty < 0:
@@ -171,3 +257,26 @@ class SingleGpuSlimeConfig:
             raise ValueError("best_checkpoint_dir must not be empty")
         if self.write_verifier_data and not self.verifier_data_file:
             raise ValueError("verifier_data_file must not be empty")
+        if self.data_gen_count < 0:
+            raise ValueError("data_gen_count must be non-negative")
+        if self.data_gen and self.data_gen_count < 1:
+            raise ValueError(
+                "data_gen requires data_gen_count >= 1 "
+                "(prefer 200+ for meaningful GRPO outcome diversity)"
+            )
+        if not self.data_gen_filename:
+            raise ValueError("data_gen_filename must not be empty")
+        if not self.data_gen_mix:
+            raise ValueError("data_gen_mix must not be empty")
+        if not self.data_gen_difficulty:
+            raise ValueError("data_gen_difficulty must not be empty")
+        from seiso.slime_single_gpu.rollout_backend import (
+            validate_rollout_backend_config,
+        )
+
+        validate_rollout_backend_config(self)
+        mode = str(self.sglang_weight_mode or "full").lower()
+        if mode not in {"full", "delta"}:
+            raise ValueError("sglang_weight_mode must be 'full' or 'delta'")
+        if self.sglang_weight_keep < 1:
+            raise ValueError("sglang_weight_keep must be >= 1")

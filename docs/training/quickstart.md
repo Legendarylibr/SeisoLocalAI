@@ -147,31 +147,108 @@ Modern training defaults (bf16 compute on CUDA when supported, paged AdamW 8-bit
 
 ## Slime Post-Training
 
-Use `method: slime` for GRPO-style post-training when you want rollout generation, reward/verifier traces, checkpointing, and automatic stopping around one local causal LM. Single-process runs keep CPU work bounded while the GPU does rollout and policy updates; distributed runs use the same Accelerate launch settings as supervised training and shard prompt groups across ranks.
+Use `method: slime` for **slime-style GRPO** post-training (Hugging Face generate + policy update, not the full THUDM/slime Megatron+SGLang Ray stack) when you want rollout generation, reward/verifier traces, checkpointing, and automatic stopping around one local causal LM. Single-process runs keep CPU work bounded while the GPU does rollout and policy updates; multi-GPU runs use **data-parallel DDP** (Accelerate) and shard prompt groups across ranks — see `configs/example_training_slime_ddp.yaml`.
+
+### High-level data generation (required for meaningful signal)
+
+Tiny hand-written smoke JSONL (tens of easy arithmetic items) does **not**
+produce useful GRPO: outcome rewards are nearly uniform, dynamic sampling drops
+all groups, and training ends with `no_trainable_groups`.
+
+Seiso ships a **high-level data generator** that builds large, deterministic,
+checkable prompt corpora (**prompts + labels/tests only** — completions always
+come from online rollouts):
+
+```bash
+# Standalone (inspect before training)
+python -m seiso.rl_verify.data_gen \
+  --out data/slime_generated.jsonl \
+  --count 500 \
+  --mix numeric:0.5,choice:0.2,code:0.3 \
+  --difficulty easy:0.35,medium:0.45,hard:0.20 \
+  --seed 17 --print-summary
+```
+
+Or enable generation inside the slime config (`data_gen: true`) so training
+materializes `output_dir/slime_generated.jsonl` automatically:
+
+| Field | Meaning |
+|-------|---------|
+| `data_gen` | Turn on high-level corpus generation before the first rollout |
+| `data_gen_count` | Prompt count (prefer **200+**; 400–2000 for real runs) |
+| `data_gen_mix` | Stream mix: `numeric` / `choice` / `code` |
+| `data_gen_difficulty` | `easy` / `medium` / `hard` weights |
+| `data_gen_seed` | Deterministic seed (same seed ⇒ same corpus) |
+| `reward: auto` | Per-row checker from generated `reward` / `benchmark` fields |
+| `rollout_backend` | `hf` (default, colocated generate) \| `sglang` \| `auto` |
+| `sglang_base_url` | Required for `sglang` (e.g. `http://127.0.0.1:30000`) |
+
+**Single-GPU:** `scripts/run_slime_single_gpu.sh` — `rollout_backend: hf` (colocated, on-policy).
+
+**Multi-GPU:** `scripts/run_slime_ddp.sh [nproc] [config]` — SGLang generate + DDP policy. After each optimizer step rank0 exports weights and hot-reloads **all** engines:
+
+| Field | Meaning |
+|-------|---------|
+| `sglang_sync_weights` | Enable post-step hot-reload (default true) |
+| `sglang_weight_mode` | `full` (always HF ckpt) or `delta` (skip if unchanged; try slime `/pull_weights`, else full) |
+| `sglang_weight_keep` | Keep last N `weight_v*` dirs |
+| `sglang_base_url` | One URL or comma-separated multi-engine list |
+| `sglang_engine_urls` | Optional extra engine list |
+
+```bash
+# terminal A
+python -m sglang.launch_server --model-path Qwen/Qwen2.5-0.5B-Instruct --port 30000
+# terminal B
+scripts/run_slime_ddp.sh 2 configs/example_training_slime_ddp.yaml
+```
+
+SGLang must read `output_dir/sglang_weight_sync/` (shared FS on multi-node).  
+Not included (use upstream slime): Megatron TP/PP, Ray placement, NCCL tensor broadcast.
+
+Streams:
+
+- **numeric** — multi-step arithmetic / word problems with exact answers  
+- **choice** — multiple-choice with letter labels  
+- **code** — unit-test-grounded programs (sandbox-verified goldens)
 
 Start from `configs/example_training_slime.yaml`:
 
 ```yaml
 method: slime
 model_id: Qwen/Qwen2.5-0.5B-Instruct
-dataset: data/slime_sample.jsonl
-reward: contains_answer
+dataset: data/slime_sample.jsonl   # placeholder when data_gen is true
+reward: auto
 max_vram_gb: 16
 rollouts_per_prompt: 4
 rollout_batch_size: 4
-dynamic_sampling_filter: none
+dynamic_sampling_filter: reward_nonzero_std
+over_sampling_batch_size: 8
 balance_data: false
 policy_micro_batch_size: 2
 batch_size: 1
 learning_rate: 0.000005
+# 0 saves VRAM; use ~0.02–0.05 for multi-epoch runs (loads a frozen ref model).
+kl_coef: 0.0
 require_thinking_trace: true
-process_reward_weight: 0.25
+format_reward_weight: 0.1
+process_reward_weight: 0.0
 missing_thinking_penalty: 0.5
 slime_use_lora: true
 auto_stop: true
 auto_stop_metric: reward_mean
 write_verifier_data: true
+data_gen: true
+data_gen_count: 400
+data_gen_mix: "numeric:0.55,choice:0.15,code:0.30"
 ```
+
+Bundled smoke datasets (expand for real training):
+
+| Dataset | Checker | Config |
+|---------|---------|--------|
+| `data/slime_sample.jsonl` | `numeric` | `configs/example_slime_single_gpu.yaml`, `configs/example_training_slime.yaml` |
+| `data/slime_code_sample.jsonl` | `code` (unit-test pass fraction) | `configs/example_slime_code.yaml` |
+| `data/slime_choice_sample.jsonl` | `choice` | `configs/example_slime_choice.yaml` |
 
 Important fields:
 
@@ -180,27 +257,105 @@ Important fields:
 | `max_vram_gb` | Upper VRAM cap used to fail before out-of-memory conditions |
 | `prompt_field`, `answer_field` | Dataset columns for prompts and target answers |
 | `metadata_field` | Optional upstream-style metadata column, default `metadata`; JSON strings are parsed and carried into reward samples and bounded verifier records |
-| `reward` | Built-in reward name: `exact_match`, `contains_answer`, `numeric`, or `field` |
+| `reward` | Verifier checker: `exact_match`, `numeric`, `choice`, `contains_answer`, `field`, `code` (unit-test pass fraction; 1.0 = all tests pass), or `auto` |
 | `reward_field` | Dataset reward column when `reward: field` |
-| `require_thinking_trace` | Forces rollouts through `<think>...</think>` format before the final answer |
-| `outcome_reward_weight` | Weight for the correctness reward; built-in rewards score the final answer portion |
-| `process_reward_weight` | Weight for the rule-based reasoning trace score |
-| `missing_thinking_penalty` | Penalty when a rollout jumps to the final answer or leaves the trace unfinished |
-| `min_thinking_tokens` | Minimum trace length used by the simple process reward |
-| `rollouts_per_prompt` | Number of sampled completions per prompt for grouped advantages |
-| `rollout_batch_size` | Generation batch size; keep at least `rollouts_per_prompt` |
-| `dynamic_sampling_filter` | Optional upstream-style dynamic sampling filter; set `reward_nonzero_std` to drop prompt groups whose reward standard deviation is at or below `dynamic_sampling_min_reward_std` |
-| `over_sampling_batch_size` | Prompt sampling batch size used when dynamic filtering is enabled; keep larger than `batch_size` so strict filters can refill from additional oversampled prompt batches until the training target is met or epoch data is exhausted |
-| `calculate_per_token_loss` | Optional upstream-style loss normalization; defaults to per-sample loss and switches to token-weighted loss when enabled |
-| `balance_data` | For distributed SLIME, greedily shards prompts by estimated prompt length so each rank receives similar rollout work |
+| `require_thinking_trace` | When true, rollout prompts may end with open `<think>`. Format is OK if the **generation** closes thinking: either a full `<think>...</think>` block or a continuation that only emits `</think>` then the answer |
+| `outcome_reward_weight` | Weight for hard outcome (correctness) from the shared verifier |
+| `format_reward_weight` | Small bonus when the completion contains a closed thinking block (side channel; keep below outcome weight) |
+| `process_reward_weight` | Experimental lexical process score; keep `0` for verifiable outcome-first RL |
+| `missing_thinking_penalty` | Penalty when format is required but the model omits a closed think block |
+| `min_thinking_tokens` | Only used when `process_reward_weight > 0` |
+| `kl_coef` | Coefficient on KL to a frozen reference model; `0` skips loading the ref (lower VRAM). Prefer `0.01`–`0.05` for longer post-training runs |
+| `rollouts_per_prompt` | slime `--n-samples-per-prompt` |
+| `rollout_batch_size` | slime `--rollout-batch-size` (**prompts**, not sequences) |
+| `train_batch_size` | Target prompts after dynamic filter; `null` → same as `rollout_batch_size` |
+| `over_sampling_batch_size` | slime oversample; when set under filtering must be **≥ `rollout_batch_size`** (prompts) |
+| `answer_field` | slime `--label-key` (default `label`; also accepts `answer`) |
+| `apply_chat_template` | slime `--apply-chat-template` (default true) |
+| `rollout_backend` | `hf` (colocated generate) \| `sglang` \| `auto` (`data_gen` is an alias of `hf`) |
+| `dynamic_sampling_filter` | slime-style nonzero-std filter on **outcome** reward |
+| `clip_ratio` / `clip_ratio_high` | slime `eps_clip` / `eps_clip_high` |
+| `grpo_std_normalization` | slime group mean/std advantages |
+| `calculate_per_token_loss` | slime per-token vs per-sample loss |
+| `balance_data` | Distributed prompt-length balancing |
 | `policy_micro_batch_size` | Policy update microbatch size to control VRAM |
 | `shuffle_buffer_size` | Bounded CPU shuffle buffer for long datasets |
 | `max_samples_per_epoch` | Optional per-epoch cap for smoke runs or data-efficient loops |
 | `slime_use_lora` | Train LoRA adapters instead of full model weights |
-| `auto_stop_*` | Plateau detection; defaults monitor `reward_mean` |
+| `auto_stop_*` | Plateau detection; defaults monitor `reward_mean` (also logs `group_pass_rate`) |
 | `best_checkpoint_dir` | Directory under `output_dir` for the best observed metric checkpoint |
-| `write_verifier_data` | Writes prompt/answer/completion/reward/status plus outcome/process breakdown JSONL for verifier or reward-model data |
+| `write_verifier_data` | Writes JSONL with outcome, format, checker, extracted answer, proof fields, and status per rollout |
 | `verifier_max_text_chars` | Per-field text cap to keep verifier JSONL bounded |
+
+### Code rewards (sandboxed proofs)
+
+Use `reward: code` with dataset rows that include unit tests. The shared verifier
+extracts Python from the completion (fenced blocks preferred) and runs tests in a
+restricted subprocess (`seiso.codellama_compress.code_exec`). Outcome score is the
+**pass fraction** of tests (1.0 only if all pass).
+
+Example config: `configs/example_slime_code.yaml` with `data/slime_code_sample.jsonl`.
+
+```json
+{
+  "prompt": "Write add(a, b).",
+  "tests": ["assert add(1, 2) == 3", "assert add(0, 0) == 0"],
+  "solution": "def add(a, b):\n    return a + b\n",
+  "timeout_s": 3,
+  "benchmark": "code",
+  "synth": true
+}
+```
+
+- `tests` / `test`: assert lines (list or string) or a full check harness  
+- `solution`: optional known-good program (for SFT / synthetic DPO; **ignored by the slime reward**, which only scores model completions)  
+- `prompt_code` / `code_prefix`: optional HumanEval-style prefix prepended before the solution  
+- `setup`: optional imports/helpers before the solution  
+- `timeout_s`: wall budget for the sample (split across test units)
+
+This is a **checkable proof**, not lexical process reward. Do not run untrusted
+code on sensitive hosts; the sandbox is best-effort, not a full VM.
+
+#### Deterministic synthetic code (guaranteed passers)
+
+Do **not** rely on an LLM to invent solutions for the dataset. Seiso synthesizes
+code tasks **deterministically** so every row has a solution that already passes
+its unit tests (fail-closed via the same sandbox verifier):
+
+1. Hand-authored pure-function catalog + seeded I/O variants  
+2. **Tests derived** from I/O cases (same source of truth as the solution)  
+3. Sandbox check: drop any task whose golden solution fails  
+4. **Hard negatives** = deterministic mutants of the golden (must fail ≥1 test)
+
+```bash
+# Rewrite data/slime_code_sample.jsonl, data/distill_code_synth.jsonl,
+# and data/synthetic_code_preferences.jsonl
+python -m seiso.rl_verify --data-dir data --seed 0
+```
+
+| Artifact | Use |
+|----------|-----|
+| `data/slime_code_sample.jsonl` | Slime `reward: code` prompts + tests (+ `solution` metadata) |
+| `data/distill_code_synth.jsonl` | Distill prompt library for verifiable code rollouts |
+| `data/synthetic_code_preferences.jsonl` | Offline DPO pairs (golden chosen, mutant rejected) — no model rollouts required |
+
+Same `--seed` ⇒ same catalog order and mutants. Online slime GRPO still samples
+the policy; the golden `solution` is not injected into the reward path.
+
+**Hard negatives (DPO / distill-RL):** when a group of rollouts for the same prompt
+contains both a verifier pass and fails, Distill-RL keeps:
+
+- `chosen` = a completion that **passes** (all unit tests for `code`; outcome score > 0.5 for math/choice)  
+- `rejected` = a **fail**, preferring near-miss / partial pass (hard negative)
+
+Empty/syntax-only fails are weaker negatives and only used if no stronger fail exists.
+Pairs with no pass in the group are dropped. This is appropriate for **offline
+preference** learning; online slime GRPO already demotes fails via group rewards
+and does not need a separate hard-negative loss.
+
+For Distill-RL preference rollouts on verifiable tasks, start from
+`data/distill_verifiable_prompts.jsonl` (math + choice + code) rather than the
+alignment-style post-train library.
 
 Slime checkpoints are exportable like other Seiso checkpoints. LoRA slime runs are treated as adapter checkpoints; non-LoRA slime runs are treated like full checkpoints. In distributed SLIME runs, rank 0 writes shared checkpoints and metrics, while verifier JSONL is rank-scoped to avoid concurrent writes.
 

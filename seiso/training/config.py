@@ -184,35 +184,70 @@ class TrainConfig(BaseModel):
         description="Stable methodology label written into manifests and snapshots.",
     )
     prompt_field: str = "prompt"
-    answer_field: str = "answer"
+    answer_field: str = "label"
     metadata_field: str | None = "metadata"
-    reward: str = "exact_match"
+    reward: str = "auto"
     reward_field: str = "reward"
     max_vram_gb: float | None = Field(default=None, gt=0)
     max_prompt_tokens: int = Field(default=512, ge=1)
     max_new_tokens: int = Field(default=256, ge=1)
     rollouts_per_prompt: int = Field(default=4, ge=2)
-    rollout_batch_size: int = Field(default=4, ge=1)
+    # slime --rollout-batch-size (prompts)
+    rollout_batch_size: int = Field(default=1, ge=1)
     over_sampling_batch_size: int | None = Field(default=None, ge=1)
-    dynamic_sampling_filter: str = "none"
+    dynamic_sampling_filter: str = "reward_nonzero_std"
     dynamic_sampling_min_reward_std: float = Field(default=1e-6, ge=0)
     policy_micro_batch_size: int | None = Field(default=None, ge=1)
+    # None → same as rollout_batch_size (slime)
     train_batch_size: int | None = Field(default=None, ge=1)
     balance_data: bool = False
     shuffle_buffer_size: int = Field(default=2048, ge=1)
     max_samples_per_epoch: int | None = Field(default=None, ge=1)
     kl_coef: float = Field(default=0.0, ge=0)
     clip_ratio: float = Field(default=0.2, gt=0)
+    clip_ratio_high: float | None = Field(
+        default=None,
+        gt=0,
+        description="Upper PPO clip bound (slime eps_clip_high); None uses clip_ratio.",
+    )
+    grpo_std_normalization: bool = Field(
+        default=True,
+        description="Group-relative / unbiased-std advantages (slime grpo_std_normalization).",
+    )
     calculate_per_token_loss: bool = False
     temperature: float = Field(default=0.9, gt=0)
     top_p: float = Field(default=0.95, gt=0, le=1)
+    rollout_backend: str = Field(
+        default="hf",
+        description="slime online generate: hf | sglang | auto (data_gen aliases hf)",
+    )
+    apply_chat_template: bool = True
+    sglang_base_url: str = ""
+    sglang_model: str = ""
+    sglang_api_key: str = "EMPTY"
+    sglang_timeout_s: float = Field(default=120.0, gt=0)
+    sglang_max_workers: int = Field(default=8, ge=1)
+    sglang_sync_weights: bool = True
+    sglang_weight_dir: str = "sglang_weight_sync"
+    sglang_weight_mode: str = "full"
+    sglang_weight_keep: int = Field(default=2, ge=1)
+    sglang_engine_urls: list[str] | str | None = None
     require_thinking_trace: bool = True
     thinking_instruction: str = Field(
         default="Show your reasoning in <think>...</think>, then give the final answer.",
         min_length=1,
     )
     outcome_reward_weight: float = Field(default=1.0, ge=0)
-    process_reward_weight: float = Field(default=0.25, ge=0)
+    format_reward_weight: float = Field(
+        default=0.1,
+        ge=0,
+        description="Weight for closed <think>...</think> format on generated tokens only.",
+    )
+    process_reward_weight: float = Field(
+        default=0.0,
+        ge=0,
+        description="Experimental lexical process score; keep 0 for verifiable outcome-first RL.",
+    )
     missing_thinking_penalty: float = Field(default=0.5, ge=0)
     min_thinking_tokens: int = Field(default=8, ge=0)
     dtype: str = "auto"
@@ -231,6 +266,13 @@ class TrainConfig(BaseModel):
     write_verifier_data: bool = True
     verifier_data_file: str = Field(default="slime_verifier_data.jsonl", min_length=1)
     verifier_max_text_chars: int = Field(default=2048, ge=0)
+    # High-level verifiable prompt generation (see seiso.rl_verify.data_gen).
+    data_gen: bool = False
+    data_gen_count: int = Field(default=0, ge=0)
+    data_gen_seed: int = 0
+    data_gen_mix: str = "numeric:0.5,choice:0.2,code:0.3"
+    data_gen_difficulty: str = "easy:0.35,medium:0.45,hard:0.20"
+    data_gen_filename: str = "slime_generated.jsonl"
     extra: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator(
@@ -269,9 +311,10 @@ class TrainConfig(BaseModel):
     @field_validator("dynamic_sampling_filter")
     @classmethod
     def _validate_dynamic_sampling_filter(cls, v: str) -> str:
-        if v not in {"none", "reward_nonzero_std"}:
+        if v not in {"none", "reward_nonzero_std", "outcome_nonzero_std"}:
             raise ValueError(
-                "dynamic_sampling_filter must be one of: none, reward_nonzero_std"
+                "dynamic_sampling_filter must be one of: "
+                "none, reward_nonzero_std, outcome_nonzero_std"
             )
         return v
 
@@ -289,6 +332,26 @@ class TrainConfig(BaseModel):
             )
         return self
 
+    @model_validator(mode="after")
+    def _validate_slime_batch_and_clip(self) -> TrainConfig:
+        if self.method != TrainMethod.SLIME:
+            return self
+        from seiso.slime_single_gpu.config import validate_oversample_vs_train_batch
+
+        train_batch = self.train_batch_size or self.rollout_batch_size or self.batch_size
+        validate_oversample_vs_train_batch(
+            dynamic_sampling_filter=self.dynamic_sampling_filter,
+            over_sampling_batch_size=self.over_sampling_batch_size,
+            train_batch_size=train_batch,
+            rollout_batch_size=self.rollout_batch_size,
+        )
+        if (
+            self.clip_ratio_high is not None
+            and self.clip_ratio_high < self.clip_ratio
+        ):
+            raise ValueError("clip_ratio_high must be >= clip_ratio")
+        return self
+
     @classmethod
     def from_yaml(cls, path: str | Path) -> TrainConfig:
         with open(path) as f:
@@ -301,7 +364,8 @@ class TrainConfig(BaseModel):
 
         extra: dict[str, Any] = getattr(self, "extra", {})
         policy_batch = self.policy_micro_batch_size or self.batch_size
-        train_batch = self.train_batch_size or self.batch_size
+        # slime: train target defaults to rollout_batch_size (prompts)
+        train_batch = self.train_batch_size
         return SingleGpuSlimeConfig(
             model_id=self.model_id,
             dataset=Path(self.dataset),
@@ -332,12 +396,27 @@ class TrainConfig(BaseModel):
             max_steps=extra.get("max_steps"),
             kl_coef=self.kl_coef,
             clip_ratio=self.clip_ratio,
+            clip_ratio_high=self.clip_ratio_high,
+            grpo_std_normalization=self.grpo_std_normalization,
             calculate_per_token_loss=self.calculate_per_token_loss,
             temperature=self.temperature,
             top_p=self.top_p,
+            rollout_backend=self.rollout_backend,
+            apply_chat_template=self.apply_chat_template,
+            sglang_base_url=self.sglang_base_url,
+            sglang_model=self.sglang_model,
+            sglang_api_key=self.sglang_api_key,
+            sglang_timeout_s=self.sglang_timeout_s,
+            sglang_max_workers=self.sglang_max_workers,
+            sglang_sync_weights=self.sglang_sync_weights,
+            sglang_weight_dir=self.sglang_weight_dir,
+            sglang_weight_mode=self.sglang_weight_mode,
+            sglang_weight_keep=self.sglang_weight_keep,
+            sglang_engine_urls=self.sglang_engine_urls,
             require_thinking_trace=self.require_thinking_trace,
             thinking_instruction=self.thinking_instruction,
             outcome_reward_weight=self.outcome_reward_weight,
+            format_reward_weight=self.format_reward_weight,
             process_reward_weight=self.process_reward_weight,
             missing_thinking_penalty=self.missing_thinking_penalty,
             min_thinking_tokens=self.min_thinking_tokens,
@@ -366,6 +445,12 @@ class TrainConfig(BaseModel):
             write_verifier_data=self.write_verifier_data,
             verifier_data_file=self.verifier_data_file,
             verifier_max_text_chars=self.verifier_max_text_chars,
+            data_gen=self.data_gen,
+            data_gen_count=self.data_gen_count,
+            data_gen_seed=self.data_gen_seed,
+            data_gen_mix=self.data_gen_mix,
+            data_gen_difficulty=self.data_gen_difficulty,
+            data_gen_filename=self.data_gen_filename,
         )
 
 
@@ -434,12 +519,16 @@ def _write_slime_manifest(config: TrainConfig, output_dir: Path) -> None:
         "metadata_field": config.metadata_field,
         "require_thinking_trace": config.require_thinking_trace,
         "outcome_reward_weight": config.outcome_reward_weight,
+        "format_reward_weight": config.format_reward_weight,
         "process_reward_weight": config.process_reward_weight,
         "missing_thinking_penalty": config.missing_thinking_penalty,
         "min_thinking_tokens": config.min_thinking_tokens,
         "rollouts_per_prompt": config.rollouts_per_prompt,
         "over_sampling_batch_size": config.over_sampling_batch_size,
         "dynamic_sampling_filter": config.dynamic_sampling_filter,
+        "clip_ratio": config.clip_ratio,
+        "clip_ratio_high": config.clip_ratio_high,
+        "grpo_std_normalization": config.grpo_std_normalization,
         "calculate_per_token_loss": config.calculate_per_token_loss,
         "balance_data": config.balance_data,
         "auto_stop": config.auto_stop,

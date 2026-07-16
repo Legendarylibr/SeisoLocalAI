@@ -34,17 +34,19 @@ from seiso.slime_single_gpu.trainer import (
     _empty_stats,
     _filter_rollout_groups,
     _final_output_dir,
-    _force_completion_thinking_prefix,
     _format_rollout_prompt,
     _freeze_multimodal_backbones,
     _group_reward_spread_mean,
+    _group_verifier_stats,
     _iter_distributed_sample_batches,
     _iter_sample_batches,
     _load_samples,
     _merge_stats,
     _metric_record,
     _process_reward,
+    _PushbackIterator,
     _rank_verifier_path,
+    _response_mask_for_sequence,
     _reward_sample,
     _rollout_status,
     _rollout_status_stats,
@@ -78,12 +80,14 @@ def test_single_gpu_slime_config_from_yaml(tmp_path: Path):
     assert cfg.output_dir == Path("outputs/slime")
     assert cfg.rollouts_per_prompt == 3
     assert cfg.max_vram_gb == 12
-    assert cfg.rollout_batch_size == 4
+    # default rollout_batch_size is prompts (slime); yaml may omit it → default 1
+    assert cfg.rollout_batch_size >= 1
     assert cfg.policy_micro_batch_size == 4
     assert cfg.shuffle_buffer_size == 2048
     assert cfg.require_thinking_trace is True
     assert cfg.outcome_reward_weight == 1.0
-    assert cfg.process_reward_weight == 0.25
+    assert cfg.format_reward_weight == 0.1
+    assert cfg.process_reward_weight == 0.0
     assert cfg.metadata_field == "metadata"
     assert cfg.use_lora is False
 
@@ -97,6 +101,8 @@ def test_single_gpu_slime_defaults_do_not_load_reference_model_or_lora(tmp_path:
 
     assert cfg.kl_coef == 0.0
     assert cfg.use_lora is False
+    assert cfg.dynamic_sampling_filter == "reward_nonzero_std"
+    assert cfg.process_reward_weight == 0.0
 
 
 def test_example_single_gpu_slime_config_loads_samples():
@@ -105,12 +111,19 @@ def test_example_single_gpu_slime_config_loads_samples():
 
     assert cfg.dataset == Path("data/slime_sample.jsonl")
     assert cfg.kl_coef == 0.0
+    assert cfg.dynamic_sampling_filter == "reward_nonzero_std"
     assert cfg.policy_micro_batch_size == 2
     assert cfg.shuffle_buffer_size == 128
     assert cfg.use_lora is True
     assert cfg.lora_r == 16
-    assert samples
-    assert {"prompt", "answer"} <= set(samples[0])
+    assert cfg.reward == "auto"
+    assert cfg.answer_field == "label"
+    assert cfg.rollout_backend == "hf"
+    assert cfg.data_gen is True
+    assert cfg.data_gen_count >= 200
+    assert cfg.process_reward_weight == 0.0
+    assert len(samples) >= 16
+    assert "prompt" in samples[0]
 
 
 def test_single_gpu_slime_config_requires_grouped_rollouts(tmp_path: Path):
@@ -146,6 +159,7 @@ def test_single_gpu_slime_config_rejects_invalid_vram_cap(tmp_path: Path):
         ("max_samples_per_epoch", 0),
         ("max_grad_norm", 0),
         ("outcome_reward_weight", -0.1),
+        ("format_reward_weight", -0.1),
         ("process_reward_weight", -0.1),
         ("missing_thinking_penalty", -0.1),
         ("min_thinking_tokens", -1),
@@ -226,7 +240,8 @@ def test_single_gpu_slime_config_rejects_invalid_stability_options(
         cfg.validate()
 
 
-def test_single_gpu_slime_config_requires_rollout_batch_to_cover_group(tmp_path: Path):
+def test_single_gpu_slime_config_allows_rollout_batch_as_prompt_count(tmp_path: Path):
+    """slime: rollout_batch_size is prompts; may be < rollouts_per_prompt."""
     cfg = SingleGpuSlimeConfig(
         model_id="test/model",
         dataset=tmp_path / "data.jsonl",
@@ -234,8 +249,50 @@ def test_single_gpu_slime_config_requires_rollout_batch_to_cover_group(tmp_path:
         rollouts_per_prompt=4,
         rollout_batch_size=2,
     )
+    cfg.validate()
 
-    with pytest.raises(ValueError, match="rollout_batch_size"):
+
+def test_single_gpu_slime_config_requires_oversample_ge_rollout_batch(tmp_path: Path):
+    # slime: over_sampling_batch_size >= rollout_batch_size (prompts)
+    cfg = SingleGpuSlimeConfig(
+        model_id="test/model",
+        dataset=tmp_path / "data.jsonl",
+        output_dir=tmp_path / "out",
+        rollouts_per_prompt=4,
+        rollout_batch_size=8,
+        train_batch_size=4,
+        over_sampling_batch_size=4,
+        dynamic_sampling_filter="reward_nonzero_std",
+    )
+    with pytest.raises(ValueError, match="over_sampling_batch_size must be >= rollout_batch_size"):
+        cfg.validate()
+
+
+def test_single_gpu_slime_config_allows_oversample_ge_rollout_batch(
+    tmp_path: Path,
+):
+    cfg = SingleGpuSlimeConfig(
+        model_id="test/model",
+        dataset=tmp_path / "data.jsonl",
+        output_dir=tmp_path / "out",
+        rollouts_per_prompt=4,
+        rollout_batch_size=2,
+        train_batch_size=2,
+        over_sampling_batch_size=4,
+        dynamic_sampling_filter="reward_nonzero_std",
+    )
+    cfg.validate()
+
+
+def test_single_gpu_slime_config_rejects_clip_ratio_high_below_low(tmp_path: Path):
+    cfg = SingleGpuSlimeConfig(
+        model_id="test/model",
+        dataset=tmp_path / "data.jsonl",
+        output_dir=tmp_path / "out",
+        clip_ratio=0.2,
+        clip_ratio_high=0.1,
+    )
+    with pytest.raises(ValueError, match="clip_ratio_high"):
         cfg.validate()
 
 
@@ -350,9 +407,7 @@ def test_clipped_policy_loss_supports_per_token_normalization():
     advantages = torch.tensor([[1.0], [3.0]])
     mask = torch.tensor([[1.0, 1.0, 1.0], [1.0, 0.0, 0.0]])
 
-    per_token_loss = _clipped_policy_loss(
-        new_logprobs, old_logprobs, advantages, mask, 0.2, torch
-    )
+    per_token_loss = _clipped_policy_loss(new_logprobs, old_logprobs, advantages, mask, 0.2, torch)
     per_sample_loss = _clipped_policy_loss(
         torch.zeros(2),
         torch.zeros(2),
@@ -364,6 +419,31 @@ def test_clipped_policy_loss_supports_per_token_normalization():
 
     assert per_token_loss.item() == -1.5
     assert per_sample_loss.item() == -2.0
+
+
+def test_clipped_policy_loss_supports_asymmetric_clip_high():
+    import torch
+
+    # ratio = exp(log(1.5)) = 1.5; low clip 0.2 → max 1.2, high 0.28 → max 1.28
+    new_logprobs = torch.tensor([math.log(1.5)])
+    old_logprobs = torch.zeros(1)
+    advantages = torch.tensor([1.0])
+    mask = torch.ones(1)
+
+    loss_sym = _clipped_policy_loss(new_logprobs, old_logprobs, advantages, mask, 0.2, torch)
+    loss_asym = _clipped_policy_loss(
+        new_logprobs,
+        old_logprobs,
+        advantages,
+        mask,
+        0.2,
+        torch,
+        clip_ratio_high=0.28,
+    )
+    # min(1.5, 1.2) = 1.2 vs min(1.5, 1.28) = 1.28 → more negative loss for higher high-clip
+    assert loss_sym.item() == pytest.approx(-1.2)
+    assert loss_asym.item() == pytest.approx(-1.28)
+    assert loss_asym.item() < loss_sym.item()
 
 
 def test_rollout_status_detects_stop_length_and_empty():
@@ -389,7 +469,7 @@ def test_rollout_status_stats_counts_known_statuses():
     }
 
 
-def test_thinking_prompt_and_completion_are_forced(tmp_path: Path):
+def test_thinking_prompt_is_appended_but_completion_is_not_rewritten(tmp_path: Path):
     cfg = SingleGpuSlimeConfig(
         model_id="test/model",
         dataset=tmp_path / "data.jsonl",
@@ -400,41 +480,62 @@ def test_thinking_prompt_and_completion_are_forced(tmp_path: Path):
 
     assert cfg.thinking_instruction in prompt
     assert prompt.endswith("<think>")
-    assert _force_completion_thinking_prefix(" reasoning", cfg).startswith("<think>")
+    # Scoring path uses raw completions; synthetic tags must not be injected.
+    jumped = _score_completion(
+        " reasoning without tags",
+        {"answer": "42"},
+        cfg,
+    )
+    assert jumped["format_ok"] is False
+    assert jumped["thinking_penalty"] == cfg.missing_thinking_penalty
 
 
-def test_completion_scoring_combines_outcome_and_process(tmp_path: Path):
+def test_completion_scoring_is_outcome_first_with_format_bonus(tmp_path: Path):
+    cfg = SingleGpuSlimeConfig(
+        model_id="test/model",
+        dataset=tmp_path / "data.jsonl",
+        output_dir=tmp_path / "out",
+        reward="numeric",
+        format_reward_weight=0.1,
+        process_reward_weight=0.0,
+        missing_thinking_penalty=0.25,
+    )
+
+    score = _score_completion(
+        "<think>First check the arithmetic.</think>42",
+        {"answer": "42"},
+        cfg,
+    )
+    # Prompt already opened <think>; model continues body and closes.
+    continued = _score_completion(
+        "First check the arithmetic.\n</think>\n42",
+        {"answer": "42"},
+        cfg,
+    )
+    jumped = _score_completion("42", {"answer": "42"}, cfg)
+
+    assert score["outcome_reward"] == 1.0
+    assert score["format_reward"] == 1.0
+    assert score["process_reward"] == 0.0
+    assert score["thinking_penalty"] == 0.0
+    assert score["outcome_passed"] is True
+    assert score["reward"] == pytest.approx(1.1)
+    assert continued["format_ok"] is True
+    assert continued["format_reward"] == 1.0
+    assert continued["thinking_penalty"] == 0.0
+    assert continued["final_answer"] == "42"
+    assert continued["reward"] == pytest.approx(1.1)
+    assert jumped["outcome_reward"] == 1.0
+    assert jumped["format_ok"] is False
+    assert jumped["thinking_penalty"] == 0.25
+
+
+def test_experimental_process_reward_only_when_weighted(tmp_path: Path):
     cfg = SingleGpuSlimeConfig(
         model_id="test/model",
         dataset=tmp_path / "data.jsonl",
         output_dir=tmp_path / "out",
         process_reward_weight=0.5,
-        missing_thinking_penalty=0.25,
-        min_thinking_tokens=4,
-    )
-
-    score = _score_completion(
-        "<think>First check the arithmetic because it matters. Therefore 40+2.</think>42",
-        {"answer": "42"},
-        cfg,
-        contains_answer_reward,
-    )
-    jumped = _score_completion("42", {"answer": "42"}, cfg, contains_answer_reward)
-
-    assert score["outcome_reward"] == 1.0
-    assert score["process_reward"] > 0.5
-    assert score["thinking_penalty"] == 0.0
-    assert score["reward"] > 1.0
-    assert jumped["outcome_reward"] == 1.0
-    assert jumped["process_reward"] == 0.0
-    assert jumped["thinking_penalty"] == 0.25
-
-
-def test_thinking_trace_split_and_process_reward(tmp_path: Path):
-    cfg = SingleGpuSlimeConfig(
-        model_id="test/model",
-        dataset=tmp_path / "data.jsonl",
-        output_dir=tmp_path / "out",
         min_thinking_tokens=4,
     )
 
@@ -446,20 +547,100 @@ def test_thinking_trace_split_and_process_reward(tmp_path: Path):
     assert final == "The answer is 7."
     assert complete is True
     assert _process_reward(trace, final, cfg) > 0.5
+    scored = _score_completion(
+        "<think>First check. Actually revise.</think>7",
+        {"answer": "7"},
+        cfg,
+    )
+    assert scored["process_reward"] > 0.5
 
 
 def test_grouped_advantages_are_normalized():
+    """Match THUDM/slime: (r - mean) / (unbiased_std + 1e-6)."""
+    import math
+
     rollouts = [
-        Rollout(None, None, None, None, None, 0.0),
-        Rollout(None, None, None, None, None, 1.0),
-        Rollout(None, None, None, None, None, 2.0),
-        Rollout(None, None, None, None, None, 4.0),
+        Rollout(
+            None,
+            None,
+            None,
+            None,
+            None,
+            0.0,
+            outcome_reward=0.0,
+            outcome_passed=False,
+        ),
+        Rollout(
+            None,
+            None,
+            None,
+            None,
+            None,
+            1.0,
+            outcome_reward=1.0,
+            outcome_passed=True,
+        ),
+        Rollout(
+            None,
+            None,
+            None,
+            None,
+            None,
+            2.0,
+            outcome_reward=2.0,
+            outcome_passed=True,
+        ),
+        Rollout(
+            None,
+            None,
+            None,
+            None,
+            None,
+            4.0,
+            outcome_reward=4.0,
+            outcome_passed=True,
+        ),
     ]
 
     _assign_grouped_advantages(rollouts, group_size=2)
 
-    assert [r.advantage for r in rollouts] == [-1.0, 1.0, -1.0, 1.0]
+    # Group [0, 1]: mean 0.5, unbiased std = sqrt(0.5)
+    scale01 = math.sqrt(0.5) + 1e-6
+    # Group [2, 4]: mean 3.0, unbiased std = sqrt(2)
+    scale24 = math.sqrt(2.0) + 1e-6
+    expected = [
+        -0.5 / scale01,
+        0.5 / scale01,
+        -1.0 / scale24,
+        1.0 / scale24,
+    ]
+    assert [r.advantage for r in rollouts] == pytest.approx(expected)
     assert _group_reward_spread_mean(rollouts, group_size=2) == 1.5
+    stats = _group_verifier_stats(rollouts, group_size=2)
+    assert stats["group_pass_rate"] == 1.0
+    assert stats["group_nonzero_spread_frac"] == 1.0
+    assert stats["group_nonzero_outcome_spread_frac"] == 1.0
+    assert stats["group_outcome_spread_mean"] == 1.5
+
+
+def test_grouped_advantages_can_disable_std_normalization():
+    rollouts = [
+        Rollout(None, None, None, None, None, 0.0),
+        Rollout(None, None, None, None, None, 2.0),
+    ]
+    _assign_grouped_advantages(rollouts, group_size=2, grpo_std_normalization=False)
+    assert [r.advantage for r in rollouts] == pytest.approx([-1.0, 1.0])
+
+
+def test_grouped_advantages_zero_when_rewards_identical():
+    rollouts = [
+        Rollout(None, None, None, None, None, 1.0),
+        Rollout(None, None, None, None, None, 1.0),
+        Rollout(None, None, None, None, None, 1.0),
+        Rollout(None, None, None, None, None, 1.0),
+    ]
+    _assign_grouped_advantages(rollouts, group_size=4)
+    assert all(r.advantage == 0.0 for r in rollouts)
 
 
 class Linear:
@@ -727,11 +908,48 @@ def test_dynamic_sampling_filter_keeps_reward_diverse_groups(tmp_path: Path):
         dynamic_sampling_filter="reward_nonzero_std",
         over_sampling_batch_size=4,
     )
+    # Filter keys off *outcome_reward*, not composite reward (format-only spread).
     rollouts = [
-        Rollout(None, None, None, None, None, reward=1.0),
-        Rollout(None, None, None, None, None, reward=1.0),
-        Rollout(None, None, None, None, None, reward=0.0),
-        Rollout(None, None, None, None, None, reward=1.0),
+        Rollout(
+            None,
+            None,
+            None,
+            None,
+            None,
+            reward=1.0,
+            outcome_reward=1.0,
+            outcome_passed=True,
+        ),
+        Rollout(
+            None,
+            None,
+            None,
+            None,
+            None,
+            reward=1.0,
+            outcome_reward=1.0,
+            outcome_passed=True,
+        ),
+        Rollout(
+            None,
+            None,
+            None,
+            None,
+            None,
+            reward=0.0,
+            outcome_reward=0.0,
+            outcome_passed=False,
+        ),
+        Rollout(
+            None,
+            None,
+            None,
+            None,
+            None,
+            reward=1.0,
+            outcome_reward=1.0,
+            outcome_passed=True,
+        ),
     ]
 
     kept, kept_groups, rejected = _filter_rollout_groups(rollouts, cfg)
@@ -742,6 +960,46 @@ def test_dynamic_sampling_filter_keeps_reward_diverse_groups(tmp_path: Path):
     assert _sampling_batch_size(cfg) == 4
 
 
+def test_dynamic_sampling_drops_format_only_spread(tmp_path: Path):
+    """Composite reward may differ from format alone; outcomes equal → drop."""
+    cfg = SingleGpuSlimeConfig(
+        model_id="test/model",
+        dataset=tmp_path / "data.jsonl",
+        output_dir=tmp_path / "out",
+        rollouts_per_prompt=2,
+        dynamic_sampling_filter="reward_nonzero_std",
+    )
+    rollouts = [
+        # All outcomes 0; format shaping makes composite rewards differ.
+        Rollout(
+            None,
+            None,
+            None,
+            None,
+            None,
+            reward=0.1,
+            outcome_reward=0.0,
+            outcome_passed=False,
+            format_ok=True,
+        ),
+        Rollout(
+            None,
+            None,
+            None,
+            None,
+            None,
+            reward=-0.5,
+            outcome_reward=0.0,
+            outcome_passed=False,
+            format_ok=False,
+        ),
+    ]
+    kept, kept_groups, rejected = _filter_rollout_groups(rollouts, cfg)
+    assert kept == []
+    assert kept_groups == set()
+    assert rejected == 1
+
+
 def test_over_sampling_is_ignored_without_dynamic_filter(tmp_path: Path):
     cfg = SingleGpuSlimeConfig(
         model_id="test/model",
@@ -749,6 +1007,7 @@ def test_over_sampling_is_ignored_without_dynamic_filter(tmp_path: Path):
         output_dir=tmp_path / "out",
         train_batch_size=2,
         over_sampling_batch_size=8,
+        dynamic_sampling_filter="none",
     )
 
     assert _sampling_batch_size(cfg) == 2
@@ -796,12 +1055,9 @@ def test_dynamic_sampling_refills_until_training_group_target(tmp_path: Path, mo
         model=None,
         ref_model=None,
         tokenizer=None,
-        sample_batches=iter(
-            [[{"prompt": "kept-1"}], [{"prompt": "kept-2"}]]
-        ),
+        sample_batches=iter([[{"prompt": "kept-1"}], [{"prompt": "kept-2"}]]),
         samples=[{"prompt": "discarded"}],
         config=cfg,
-        reward_fn=None,
         torch=None,
         epoch=0,
         global_step=0,
@@ -858,7 +1114,6 @@ def test_dynamic_sampling_truncates_oversampled_groups_to_training_target(
         sample_batches=iter([]),
         samples=[{"prompt": "p"}],
         config=cfg,
-        reward_fn=None,
         torch=None,
         epoch=0,
         global_step=0,
@@ -1012,3 +1267,43 @@ def test_slime_cli_is_registered():
 
     names = {command.name for command in app.registered_commands}
     assert "slime" in names
+
+
+def test_pushback_iterator_requeues_without_dropping():
+    source = iter([[{"a": 1}], [{"b": 2}], [{"c": 3}]])
+    it = _PushbackIterator(source)
+    first = next(it)
+    assert first == [{"a": 1}]
+    it.push([{"refilled": True}])
+    assert next(it) == [{"refilled": True}]
+    assert next(it) == [{"b": 2}]
+    assert next(it) == [{"c": 3}]
+    with pytest.raises(StopIteration):
+        next(it)
+
+
+def test_response_mask_keeps_eos_when_pad_equals_eos():
+    torch = pytest.importorskip("torch")
+    # prompt=[1,1], response=[10, 2(eos/pad), 2, 2]
+    ids = torch.tensor([1, 1, 10, 2, 2, 2])
+    mask = _response_mask_for_sequence(
+        ids,
+        prompt_width=2,
+        pad_token_id=2,
+        eos_token_id=2,
+        torch=torch,
+    )
+    assert mask.tolist() == [False, False, True, True, False, False]
+
+
+def test_response_mask_drops_pad_when_pad_differs_from_eos():
+    torch = pytest.importorskip("torch")
+    ids = torch.tensor([1, 1, 10, 2, 0, 0])
+    mask = _response_mask_for_sequence(
+        ids,
+        prompt_width=2,
+        pad_token_id=0,
+        eos_token_id=2,
+        torch=torch,
+    )
+    assert mask.tolist() == [False, False, True, True, False, False]

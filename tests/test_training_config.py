@@ -51,11 +51,15 @@ def test_train_config_projects_to_single_gpu_slime_config(tmp_path):
             "over_sampling_batch_size": 9,
             "dynamic_sampling_filter": "reward_nonzero_std",
             "dynamic_sampling_min_reward_std": 0.01,
+            "clip_ratio": 0.2,
+            "clip_ratio_high": 0.28,
+            "grpo_std_normalization": True,
             "calculate_per_token_loss": True,
             "balance_data": True,
             "learning_rate": 5e-6,
             "require_thinking_trace": True,
-            "process_reward_weight": 0.4,
+            "format_reward_weight": 0.2,
+            "process_reward_weight": 0.0,
             "missing_thinking_penalty": 0.2,
             "min_thinking_tokens": 6,
             "save_steps": 25,
@@ -76,18 +80,23 @@ def test_train_config_projects_to_single_gpu_slime_config(tmp_path):
     assert slime.reward == "field"
     assert slime.metadata_field == "context"
     assert slime.reward_field == "score"
-    assert slime.train_batch_size == 1
+    # train_batch_size not set → None (effective = rollout_batch_size)
+    assert slime.train_batch_size is None
     assert slime.policy_micro_batch_size == 2
     assert slime.rollouts_per_prompt == 3
     assert slime.rollout_batch_size == 6
     assert slime.over_sampling_batch_size == 9
     assert slime.dynamic_sampling_filter == "reward_nonzero_std"
     assert slime.dynamic_sampling_min_reward_std == 0.01
+    assert slime.clip_ratio == 0.2
+    assert slime.clip_ratio_high == 0.28
+    assert slime.grpo_std_normalization is True
     assert slime.calculate_per_token_loss is True
     assert slime.balance_data is True
     assert slime.learning_rate == 5e-6
     assert slime.require_thinking_trace is True
-    assert slime.process_reward_weight == 0.4
+    assert slime.format_reward_weight == 0.2
+    assert slime.process_reward_weight == 0.0
     assert slime.missing_thinking_penalty == 0.2
     assert slime.min_thinking_tokens == 6
     assert slime.save_every_steps == 25
@@ -103,6 +112,48 @@ def test_example_training_slime_config_loads():
     slime = cfg.to_single_gpu_slime_config()
 
     assert cfg.method == TrainMethod.SLIME
-    assert slime.reward == "contains_answer"
+    assert slime.reward == "auto"
+    assert slime.answer_field == "label"
+    assert slime.rollout_backend == "hf"
+    assert slime.data_gen is True
+    assert slime.data_gen_count >= 200
+    assert slime.process_reward_weight == 0.0
+    assert slime.format_reward_weight == 0.1
+    assert slime.dynamic_sampling_filter == "reward_nonzero_std"
+    assert slime.clip_ratio_high == 0.28
+    assert slime.grpo_std_normalization is True
     assert slime.use_lora is True
     assert slime.auto_stop is True
+
+
+def test_example_training_slime_ddp_config_loads():
+    cfg = TrainConfig.from_yaml("configs/example_training_slime_ddp.yaml")
+    slime = cfg.to_single_gpu_slime_config()
+
+    assert cfg.method == TrainMethod.SLIME
+    assert cfg.multi_gpu is True
+    assert cfg.distributed_strategy.value == "ddp"
+    assert cfg.balance_data is True
+    assert slime.balance_data is True
+    assert slime.data_gen is True
+    assert slime.data_gen_count >= 200
+    assert slime.clip_ratio_high == 0.28
+    assert slime.grpo_std_normalization is True
+
+
+def test_train_config_rejects_slime_oversample_below_rollout_batch(tmp_path):
+    import pytest
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="over_sampling_batch_size"):
+        TrainConfig.model_validate(
+            {
+                "model_id": "test/model",
+                "dataset": tmp_path / "slime.jsonl",
+                "output_dir": tmp_path / "out",
+                "method": "slime",
+                "rollout_batch_size": 8,
+                "over_sampling_batch_size": 4,
+                "dynamic_sampling_filter": "reward_nonzero_std",
+            }
+        )

@@ -1,16 +1,28 @@
+# Single-GPU slime-style GRPO (mirrors THUDM/slime colocate path with HF generate).
+# Batch units match slime: rollout_batch_size = prompts, rollouts_per_prompt = n samples.
 model_id: Qwen/Qwen2.5-0.5B-Instruct
+# Placeholder; data_gen materializes a slime-format corpus under output_dir.
 dataset: data/slime_sample.jsonl
 output_dir: outputs/slime-single-gpu
+# slime --input-key / --label-key / --metadata-key
 prompt_field: prompt
-answer_field: answer
-reward: contains_answer
+answer_field: label
+metadata_field: metadata
+# slime --rm-type (per-row metadata.rm_type when auto)
+reward: auto
 max_vram_gb: 16
 max_prompt_tokens: 512
 max_new_tokens: 128
+# slime --n-samples-per-prompt
 rollouts_per_prompt: 4
-rollout_batch_size: 4
+# slime --rollout-batch-size (prompts)
+rollout_batch_size: 2
+# slime --over-sampling-batch-size (>= rollout_batch_size)
+over_sampling_batch_size: 4
+dynamic_sampling_filter: reward_nonzero_std
 policy_micro_batch_size: 2
-train_batch_size: 1
+# null → same as rollout_batch_size
+train_batch_size: null
 shuffle_buffer_size: 128
 gradient_accumulation_steps: 8
 learning_rate: 0.000005
@@ -18,12 +30,19 @@ max_grad_norm: 1.0
 epochs: 1
 kl_coef: 0.0
 clip_ratio: 0.2
+clip_ratio_high: 0.28
+grpo_std_normalization: true
 temperature: 0.9
 top_p: 0.95
+# colocated HF generate (slime --colocate analogue)
+rollout_backend: hf
+# slime --apply-chat-template
+apply_chat_template: true
 require_thinking_trace: true
 thinking_instruction: "Show your reasoning in <think>...</think>, then give the final answer."
 outcome_reward_weight: 1.0
-process_reward_weight: 0.25
+format_reward_weight: 0.1
+process_reward_weight: 0.0
 missing_thinking_penalty: 0.5
 min_thinking_tokens: 8
 gradient_checkpointing: true
@@ -44,3 +63,10 @@ stop_on_nonfinite: true
 write_verifier_data: true
 verifier_data_file: slime_verifier_data.jsonl
 verifier_max_text_chars: 2048
+# High-level prompt corpus (prompt/label/metadata slime JSONL)
+data_gen: true
+data_gen_count: 400
+data_gen_seed: 17
+data_gen_mix: "numeric:0.55,choice:0.15,code:0.30"
+data_gen_difficulty: "easy:0.35,medium:0.45,hard:0.20"
+data_gen_filename: slime_generated.jsonl

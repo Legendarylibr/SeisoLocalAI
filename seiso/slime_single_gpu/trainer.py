@@ -8,11 +8,10 @@ import json
 import math
 import os
 import random
-import re
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import Any, TypedDict, TypeVar
 
 from seiso.io.jsonl import iter_jsonl
 from seiso.models.lora_targets import (
@@ -20,6 +19,8 @@ from seiso.models.lora_targets import (
     resolve_lora_target_modules,
 )
 from seiso.research.provenance import apply_determinism
+from seiso.rl_verify import score_completion as verify_score_completion
+from seiso.rl_verify.extract import split_thinking_trace
 from seiso.slime_single_gpu.config import SingleGpuSlimeConfig
 from seiso.slime_single_gpu.rewards import resolve_reward
 from seiso.training.metrics import METRIC_STDOUT_PREFIX
@@ -27,6 +28,26 @@ from seiso.training.metrics import METRIC_STDOUT_PREFIX
 _GRADIENT_CHECKPOINTING_KWARGS = {"use_reentrant": False}
 
 T = TypeVar("T")
+
+
+class _CompletionScore(TypedDict):
+    """Per-rollout verifier breakdown (key types for mypy, not a free-form dict)."""
+
+    reward: float
+    outcome_reward: float
+    format_reward: float
+    process_reward: float
+    thinking_penalty: float
+    thinking_trace: str
+    final_answer: str
+    extracted_answer: str
+    outcome_passed: bool
+    format_ok: bool
+    checker: str
+    detail: str | None
+    proof_passed: bool | None
+    proof_score: float | None
+    proof_detail: str | None
 
 
 @dataclass
@@ -40,12 +61,19 @@ class Rollout:
     old_token_logprobs: Any | None = None
     ref_token_logprobs: Any | None = None
     outcome_reward: float = 0.0
+    format_reward: float = 0.0
     process_reward: float = 0.0
     thinking_penalty: float = 0.0
     final_answer: str = ""
     thinking_trace: str = ""
     status: str = "unknown"
     advantage: float = 0.0
+    outcome_passed: bool = False
+    format_ok: bool = True
+    checker: str = ""
+    proof_passed: bool | None = None
+    proof_score: float | None = None
+    proof_detail: str | None = None
 
 
 @dataclass(frozen=True)
@@ -72,6 +100,26 @@ class _AutoStopDecision:
     improved: bool = False
     should_stop: bool = False
     reason: str | None = None
+
+
+class _PushbackIterator:
+    """Iterator that can re-queue a value so DDP refill does not drop batches."""
+
+    def __init__(self, source: Iterator[list[dict[str, Any]]]) -> None:
+        self._source = source
+        self._buf: list[list[dict[str, Any]]] = []
+
+    def __iter__(self) -> _PushbackIterator:
+        return self
+
+    def __next__(self) -> list[dict[str, Any]]:
+        if self._buf:
+            return self._buf.pop()
+        return next(self._source)
+
+    def push(self, item: list[dict[str, Any]]) -> None:
+        if item:
+            self._buf.append(item)
 
 
 @dataclass
@@ -132,6 +180,10 @@ def train_single_gpu_slime(config: SingleGpuSlimeConfig) -> Path:
     When launched under Accelerate with WORLD_SIZE > 1, this keeps the original
     local SLIME algorithm but shards prompts by rank and synchronizes policy
     updates with PyTorch DDP so multi-node jobs behave as one training run.
+
+    When ``data_gen`` / ``data_gen_count`` is set, a high-level verifiable
+    prompt corpus is materialized first (numeric / choice / code). Rewards
+    always score *online model completions*, never stored answers as outputs.
     """
 
     config.validate()
@@ -140,6 +192,7 @@ def train_single_gpu_slime(config: SingleGpuSlimeConfig) -> Path:
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
     dist_ctx = _distributed_context(torch, config)
+    config = _maybe_materialize_data_gen(config, dist_ctx)
     config = replace(config, device=dist_ctx.device)
     _require_single_gpu(config)
     _set_seed(config.seed + dist_ctx.rank)
@@ -187,7 +240,8 @@ def train_single_gpu_slime(config: SingleGpuSlimeConfig) -> Path:
     model = _maybe_wrap_ddp(model, torch, dist_ctx, config)
     _assert_vram_fit(torch, config.max_vram_gb, config.device)
     optimizer = _build_optimizer(model, config)
-    reward_fn = resolve_reward(config.reward)
+    # Validate reward checker name early (scoring uses config.reward directly).
+    resolve_reward(config.reward)
 
     if dist_ctx.is_main:
         config.output_dir.mkdir(parents=True, exist_ok=True)
@@ -200,11 +254,26 @@ def train_single_gpu_slime(config: SingleGpuSlimeConfig) -> Path:
     global_step = 0
     pending_accumulation_steps = 0
     saw_sample = False
+    total_groups_seen = 0.0
+    total_groups_kept = 0.0
+    empty_trainable_batches = 0
     optimizer.zero_grad(set_to_none=True)
     rng = random.Random(config.seed)
+    from seiso.slime_single_gpu.rollout_backend import WeightSyncState
+
+    weight_sync_state = WeightSyncState()
+    # slime: push actor → SGLang before the first rollout (critical with LoRA).
+    _sync_rollout_engine_weights(
+        model=model,
+        tokenizer=tokenizer,
+        config=config,
+        dist_ctx=dist_ctx,
+        step=0,
+        sync_state=weight_sync_state,
+    )
 
     for epoch in range(config.epochs):
-        sample_batches = iter(_iter_sample_batches(config, rng, dist_ctx, torch))
+        sample_batches = _PushbackIterator(iter(_iter_sample_batches(config, rng, dist_ctx, torch)))
         for batch_samples in sample_batches:
             saw_sample = True
             rollout_batch = _collect_training_rollout_batch(
@@ -214,7 +283,6 @@ def train_single_gpu_slime(config: SingleGpuSlimeConfig) -> Path:
                 sample_batches=sample_batches,
                 samples=batch_samples,
                 config=config,
-                reward_fn=reward_fn,
                 torch=torch,
                 epoch=epoch,
                 global_step=global_step,
@@ -222,6 +290,8 @@ def train_single_gpu_slime(config: SingleGpuSlimeConfig) -> Path:
                 dist_ctx=dist_ctx,
             )
             rollouts = rollout_batch.rollouts
+            total_groups_seen += float(rollout_batch.stats.get("rollout_groups_total", 0.0))
+            total_groups_kept += float(rollout_batch.stats.get("rollout_groups_kept", 0.0))
             if config.dynamic_sampling_filter != "none" and dist_ctx.enabled:
                 target_groups = _distributed_min_int(
                     len(rollouts) // config.rollouts_per_prompt,
@@ -238,7 +308,25 @@ def train_single_gpu_slime(config: SingleGpuSlimeConfig) -> Path:
                         "distributed_kept_groups_min": float(target_groups),
                     },
                 )
-            if not rollouts:
+            # DDP: all ranks must agree on whether this step has trainable data.
+            has_local = 1 if rollouts else 0
+            if dist_ctx.enabled:
+                has_local = _distributed_min_int(has_local, torch, dist_ctx)
+            if not has_local:
+                empty_trainable_batches += 1
+                if dist_ctx.is_main and empty_trainable_batches == 1:
+                    _append_metrics(
+                        metrics_path,
+                        {
+                            "step": global_step,
+                            "epoch": epoch,
+                            **rollout_batch.stats,
+                            "stop_reason": "awaiting_trainable_groups",
+                            "rollout_groups_seen_total": total_groups_seen,
+                            "rollout_groups_kept_total": total_groups_kept,
+                        },
+                    )
+                _distributed_barrier(dist_ctx)
                 continue
             trained_groups = len(rollouts) // config.rollouts_per_prompt
             rollout_batch = _RolloutBatch(
@@ -282,6 +370,16 @@ def train_single_gpu_slime(config: SingleGpuSlimeConfig) -> Path:
             if pending_accumulation_steps >= config.gradient_accumulation_steps:
                 _optimizer_step(model, optimizer, torch, config)
                 pending_accumulation_steps = 0
+                # slime-style: push actor weights to SGLang after the optimizer step
+                # so the next multi-GPU rollout is (near) on-policy.
+                _sync_rollout_engine_weights(
+                    model=model,
+                    tokenizer=tokenizer,
+                    config=config,
+                    dist_ctx=dist_ctx,
+                    step=global_step + 1,
+                    sync_state=weight_sync_state,
+                )
 
             decision = auto_stop.update(global_step, stats)
             if decision.improved:
@@ -316,14 +414,53 @@ def train_single_gpu_slime(config: SingleGpuSlimeConfig) -> Path:
             if config.max_steps is not None and global_step >= config.max_steps:
                 if pending_accumulation_steps:
                     _optimizer_step(model, optimizer, torch, config)
+                    _sync_rollout_engine_weights(
+                        model=model,
+                        tokenizer=tokenizer,
+                        config=config,
+                        dist_ctx=dist_ctx,
+                        step=global_step + 1,
+                        sync_state=weight_sync_state,
+                    )
                 _write_training_state(config, global_step, "max_steps", auto_stop, dist_ctx)
                 _save_distributed(model, tokenizer, final_output_dir, dist_ctx)
                 return final_output_dir
 
     if not saw_sample:
         raise ValueError(f"no samples found in {config.dataset}")
+    if global_step == 0:
+        # All oversampled groups were filtered — do not report a silent "complete".
+        reason = "no_trainable_groups"
+        if dist_ctx.is_main:
+            _append_metrics(
+                metrics_path,
+                {
+                    "step": 0,
+                    "epoch": max(0, config.epochs - 1),
+                    "rollout_groups_seen_total": total_groups_seen,
+                    "rollout_groups_kept_total": total_groups_kept,
+                    "empty_trainable_batches": float(empty_trainable_batches),
+                    "stop_reason": reason,
+                },
+            )
+        _write_training_state(config, global_step, reason, auto_stop, dist_ctx)
+        raise RuntimeError(
+            "no trainable rollout groups after dynamic sampling "
+            f"(seen={total_groups_seen:.0f}, kept={total_groups_kept:.0f}). "
+            "Outcome rewards may be uniform (all fail or all pass). "
+            "Inspect outcome_pass_rate / group_pass_rate, ease the dataset, "
+            "or set dynamic_sampling_filter: none only for debugging."
+        )
     if pending_accumulation_steps:
         _optimizer_step(model, optimizer, torch, config)
+        _sync_rollout_engine_weights(
+            model=model,
+            tokenizer=tokenizer,
+            config=config,
+            dist_ctx=dist_ctx,
+            step=global_step,
+            sync_state=weight_sync_state,
+        )
     _write_training_state(config, global_step, "complete", auto_stop, dist_ctx)
     _save_distributed(model, tokenizer, final_output_dir, dist_ctx)
     return final_output_dir
@@ -337,7 +474,6 @@ def _collect_training_rollout_batch(
     sample_batches: Iterator[list[dict[str, Any]]],
     samples: list[dict[str, Any]],
     config: SingleGpuSlimeConfig,
-    reward_fn,
     torch,
     epoch: int,
     global_step: int,
@@ -350,23 +486,22 @@ def _collect_training_rollout_batch(
         tokenizer=tokenizer,
         samples=samples,
         config=config,
-        reward_fn=reward_fn,
         torch=torch,
         epoch=epoch,
         global_step=global_step,
         verifier_path=verifier_path,
+        dist_ctx=dist_ctx,
     )
     if config.dynamic_sampling_filter == "none":
         return rollout_batch
 
+    from seiso.slime_single_gpu.config import effective_train_batch_size
+
     stats = dict(rollout_batch.stats)
     rollouts = list(rollout_batch.rollouts)
-    target_groups = config.train_batch_size
+    target_groups = effective_train_batch_size(config)
     refill_rounds = 0
-    while (
-        _refill_visible_group_count(rollouts, config, torch, dist_ctx)
-        < target_groups
-    ):
+    while _refill_visible_group_count(rollouts, config, torch, dist_ctx) < target_groups:
         try:
             refill_samples = next(sample_batches)
             has_refill = 1
@@ -376,6 +511,10 @@ def _collect_training_rollout_batch(
         if dist_ctx.enabled:
             has_refill = _distributed_min_int(has_refill, torch, dist_ctx)
         if not has_refill:
+            # Re-queue any samples taken on ranks that still had data so the
+            # next step (or epoch) does not permanently drop them.
+            if refill_samples and isinstance(sample_batches, _PushbackIterator):
+                sample_batches.push(refill_samples)
             break
         refill_rounds += 1
         refill_batch = _collect_rollouts(
@@ -384,20 +523,18 @@ def _collect_training_rollout_batch(
             tokenizer=tokenizer,
             samples=refill_samples,
             config=config,
-            reward_fn=reward_fn,
             torch=torch,
             epoch=epoch,
             global_step=global_step,
             verifier_path=verifier_path,
+            dist_ctx=dist_ctx,
         )
         rollouts.extend(refill_batch.rollouts)
         _merge_rollout_collection_stats(stats, refill_batch.stats)
 
     kept_groups = len(rollouts) // config.rollouts_per_prompt
     if kept_groups > target_groups:
-        rollouts = _truncate_rollout_groups(
-            rollouts, config.rollouts_per_prompt, target_groups
-        )
+        rollouts = _truncate_rollout_groups(rollouts, config.rollouts_per_prompt, target_groups)
     stats["dynamic_refill_rounds"] = float(refill_rounds)
     stats["rollout_groups_target"] = float(target_groups)
     return _RolloutBatch(rollouts=rollouts, stats=stats)
@@ -430,80 +567,135 @@ def _collect_rollouts(
     tokenizer,
     samples: list[dict[str, Any]],
     config: SingleGpuSlimeConfig,
-    reward_fn,
     torch,
     epoch: int,
     global_step: int,
     verifier_path: Path | None,
+    dist_ctx: _DistributedSlimeContext | None = None,
 ) -> _RolloutBatch:
+    from seiso.slime_single_gpu.rollout_backend import (
+        build_sequence_tensors,
+        format_generation_prompt,
+        generate_data_gen_chunk,
+        generate_sglang_chunk,
+        resolve_rollout_backend,
+    )
+
     model.eval()
-    prompt_batch_size = max(1, config.rollout_batch_size // config.rollouts_per_prompt)
+    world_size = dist_ctx.world_size if dist_ctx is not None else 1
+    backend = resolve_rollout_backend(config, world_size=world_size)
+    # slime: rollout_batch_size is number of prompts
+    prompt_batch_size = max(1, int(config.rollout_batch_size))
     rollouts: list[Rollout] = []
     filter_stats = {
         "rollout_groups_total": 0.0,
         "rollout_groups_kept": 0.0,
         "dynamic_filtered_groups": 0.0,
+        "rollout_backend_is_sglang": 1.0 if backend == "sglang" else 0.0,
     }
     for sample_chunk in _chunked(samples, prompt_batch_size):
         prompt_chunk = [
-            _format_rollout_prompt(str(sample[config.prompt_field]), config)
+            format_generation_prompt(
+                tokenizer,
+                _sample_prompt_value(sample, config),
+                config,
+            )
             for sample in sample_chunk
         ]
-        encoded = tokenizer(
-            prompt_chunk,
-            return_tensors="pt",
-            padding=True,
-            truncation=True,
-            max_length=config.max_prompt_tokens,
-        ).to(config.device)
-        prompt_width = int(encoded["input_ids"].shape[1])
-        with torch.no_grad():
-            generated = _generation_model(model).generate(
-                **encoded,
-                do_sample=True,
-                temperature=config.temperature,
-                top_p=config.top_p,
-                max_new_tokens=config.max_new_tokens,
-                pad_token_id=tokenizer.pad_token_id,
-                eos_token_id=tokenizer.eos_token_id,
-                use_cache=True,
-                num_return_sequences=config.rollouts_per_prompt,
+        if backend == "sglang":
+            gen = generate_sglang_chunk(
+                tokenizer=tokenizer,
+                prompts=prompt_chunk,
+                config=config,
             )
+            seq_rows = build_sequence_tensors(
+                tokenizer=tokenizer,
+                prompts=gen.prompts,
+                completions=gen.completions,
+                config=config,
+                torch=torch,
+                device=config.device,
+                completion_token_ids=getattr(gen, "completion_token_ids", None),
+            )
+            completions = gen.completions
+            use_hf_sequences = False
+            generated = None
+            prompt_width = 0
+        else:
+            # hf (colocated generate) — slime single-GPU colocate analogue
+            gen = generate_data_gen_chunk(
+                generation_model=_generation_model(model),
+                tokenizer=tokenizer,
+                prompts=prompt_chunk,
+                config=config,
+                torch=torch,
+            )
+            generated = gen.sequences
+            prompt_width = int(gen.prompt_width or 0)
+            completions = gen.completions
+            seq_rows = None
+            use_hf_sequences = True
 
-        completions = tokenizer.batch_decode(
-            generated[:, prompt_width:],
-            skip_special_tokens=True,
-        )
         chunk_rollouts: list[Rollout] = []
         verifier_records: list[dict[str, Any]] = []
-        for idx in range(int(generated.shape[0])):
+        total = len(completions)
+        for idx in range(total):
             sample_idx = idx // config.rollouts_per_prompt
             sample = sample_chunk[sample_idx]
-            response_mask = torch.zeros_like(generated[idx], dtype=torch.bool)
-            response_mask[prompt_width:] = generated[idx, prompt_width:] != tokenizer.pad_token_id
-            status = _rollout_status(generated[idx, prompt_width:], tokenizer.eos_token_id)
-            completion = _force_completion_thinking_prefix(completions[idx], config)
+            completion = completions[idx]
+            if use_hf_sequences:
+                assert generated is not None
+                input_ids = generated[idx].detach()
+                attention_mask = (generated[idx] != tokenizer.pad_token_id).detach()
+                response_mask = _response_mask_for_sequence(
+                    input_ids,
+                    prompt_width=prompt_width,
+                    pad_token_id=tokenizer.pad_token_id,
+                    eos_token_id=tokenizer.eos_token_id,
+                    torch=torch,
+                )
+                status = _rollout_status(generated[idx, prompt_width:], tokenizer.eos_token_id)
+            else:
+                assert seq_rows is not None
+                row = seq_rows[idx]
+                input_ids = row["input_ids"]
+                attention_mask = row["attention_mask"]
+                response_mask = row["response_mask"]
+                status = _rollout_status(
+                    input_ids[int(row["prompt_len"]) :],
+                    tokenizer.eos_token_id,
+                )
+            # Score the raw model completion only — never rewrite tags for reward.
             reward_sample = _reward_sample(sample, config)
             metadata = _sample_metadata(sample, config)
-            score = _score_completion(completion, reward_sample, config, reward_fn)
-            # Keep rollout tensors on device to avoid GPU↔CPU staging per sample.
+            score = _score_completion(completion, reward_sample, config)
             chunk_rollouts.append(
                 Rollout(
-                    input_ids=generated[idx].detach(),
-                    attention_mask=(generated[idx] != tokenizer.pad_token_id).detach(),
-                    response_mask=response_mask.detach(),
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                    response_mask=response_mask,
                     old_logprobs=None,
                     ref_logprobs=None,
                     reward=score["reward"],
                     outcome_reward=score["outcome_reward"],
+                    format_reward=score["format_reward"],
                     process_reward=score["process_reward"],
                     thinking_penalty=score["thinking_penalty"],
                     final_answer=score["final_answer"],
                     thinking_trace=score["thinking_trace"],
                     status=status,
+                    outcome_passed=score["outcome_passed"],
+                    format_ok=score["format_ok"],
+                    checker=score["checker"],
+                    proof_passed=score["proof_passed"],
+                    proof_score=score["proof_score"],
+                    proof_detail=score["proof_detail"],
                 )
             )
             if verifier_path is not None:
+                prompt_text = (
+                    prompt_chunk[sample_idx] if sample_idx < len(prompt_chunk) else gen.prompts[idx]
+                )
                 verifier_records.append(
                     {
                         "step": global_step,
@@ -512,16 +704,27 @@ def _collect_rollouts(
                         "rollout_index": idx % config.rollouts_per_prompt,
                         "reward": score["reward"],
                         "outcome_reward": score["outcome_reward"],
+                        "format_reward": score["format_reward"],
                         "process_reward": score["process_reward"],
                         "thinking_penalty": score["thinking_penalty"],
+                        "outcome_passed": score["outcome_passed"],
+                        "format_ok": score["format_ok"],
+                        "checker": score["checker"],
+                        "proof_passed": score.get("proof_passed"),
+                        "proof_score": score.get("proof_score"),
+                        "proof_detail": score.get("proof_detail"),
+                        "extracted_answer": _truncate_text(
+                            score.get("extracted_answer", ""),
+                            config.verifier_max_text_chars,
+                        ),
+                        "detail": score.get("detail"),
                         "reward_name": config.reward,
+                        "rollout_backend": backend,
                         "status": status,
                         "metadata": _bounded_verifier_metadata(
                             metadata, config.verifier_max_text_chars
                         ),
-                        "prompt": _truncate_text(
-                            prompt_chunk[sample_idx], config.verifier_max_text_chars
-                        ),
+                        "prompt": _truncate_text(prompt_text, config.verifier_max_text_chars),
                         "answer": _truncate_text(
                             reward_sample.get("answer", ""),
                             config.verifier_max_text_chars,
@@ -544,7 +747,9 @@ def _collect_rollouts(
         filter_stats["rollout_groups_kept"] += len(kept_group_indexes)
         filter_stats["dynamic_filtered_groups"] += rejected_groups
         if not kept_rollouts:
-            del encoded, generated
+            del gen
+            if generated is not None:
+                del generated
             continue
         verifier_records = [
             record
@@ -578,21 +783,26 @@ def _collect_rollouts(
             rollout.ref_logprobs = ref_logprobs[idx] if ref_logprobs is not None else None
             rollout.old_token_logprobs = old_token_logprobs[idx, :token_length]
             rollout.ref_token_logprobs = (
-                ref_token_logprobs[idx, :token_length]
-                if ref_token_logprobs is not None
-                else None
+                ref_token_logprobs[idx, :token_length] if ref_token_logprobs is not None else None
             )
         if verifier_records:
             _append_jsonl_records(verifier_path, verifier_records)
         rollouts.extend(kept_rollouts)
-        del encoded, generated, padded
+        del gen, padded
+        if generated is not None:
+            del generated
 
-    _assign_grouped_advantages(rollouts, config.rollouts_per_prompt)
+    _assign_grouped_advantages(
+        rollouts,
+        config.rollouts_per_prompt,
+        grpo_std_normalization=config.grpo_std_normalization,
+    )
     model.train()
     return _RolloutBatch(rollouts=rollouts, stats=filter_stats)
 
 
 def _format_rollout_prompt(prompt: str, config: SingleGpuSlimeConfig) -> str:
+    """Legacy prompt formatter (thinking open-tag only; no chat template)."""
     if not config.require_thinking_trace:
         return prompt
     if "<think>" in prompt.lower():
@@ -600,65 +810,49 @@ def _format_rollout_prompt(prompt: str, config: SingleGpuSlimeConfig) -> str:
     return f"{prompt.rstrip()}\n\n{config.thinking_instruction}\n<think>"
 
 
-def _force_completion_thinking_prefix(
-    completion: str,
-    config: SingleGpuSlimeConfig,
-) -> str:
-    if not config.require_thinking_trace:
-        return completion
-    if completion.lstrip().lower().startswith("<think>"):
-        return completion
-    return f"<think>{completion}"
-
-
 def _score_completion(
     completion: str,
     sample: dict[str, Any],
     config: SingleGpuSlimeConfig,
-    reward_fn,
-) -> dict[str, float | str]:
-    thinking_trace, final_answer, has_trace = _split_thinking_trace(completion)
-    answer_for_outcome = final_answer if config.require_thinking_trace else completion
-    outcome = float(reward_fn(answer_for_outcome, sample))
-    process = (
-        _process_reward(thinking_trace, final_answer, config)
-        if config.require_thinking_trace
-        else 0.0
+) -> _CompletionScore:
+    """Score raw generated text via the shared verifier (no synthetic tags)."""
+    result = verify_score_completion(
+        completion,
+        sample,
+        checker=config.reward,
+        require_thinking_trace=config.require_thinking_trace,
+        outcome_weight=config.outcome_reward_weight,
+        format_weight=config.format_reward_weight,
+        process_weight=config.process_reward_weight,
+        missing_format_penalty=config.missing_thinking_penalty,
+        min_thinking_tokens=config.min_thinking_tokens,
     )
     penalty = (
-        config.missing_thinking_penalty if config.require_thinking_trace and not has_trace else 0.0
-    )
-    reward = (
-        config.outcome_reward_weight * outcome + config.process_reward_weight * process - penalty
+        config.missing_thinking_penalty
+        if config.require_thinking_trace and not result.format_ok
+        else 0.0
     )
     return {
-        "reward": float(reward),
-        "outcome_reward": outcome,
-        "process_reward": float(process),
+        "reward": float(result.reward),
+        "outcome_reward": float(result.outcome),
+        "format_reward": float(result.format_score),
+        "process_reward": float(result.process_score),
         "thinking_penalty": float(penalty),
-        "thinking_trace": thinking_trace,
-        "final_answer": final_answer,
+        "thinking_trace": result.thinking_trace,
+        "final_answer": result.final_answer,
+        "extracted_answer": result.extracted_answer,
+        "outcome_passed": bool(result.passed),
+        "format_ok": bool(result.format_ok),
+        "checker": str(result.checker),
+        "detail": result.detail,
+        "proof_passed": result.proof_passed,
+        "proof_score": (float(result.proof_score) if result.proof_score is not None else None),
+        "proof_detail": result.proof_detail,
     }
 
 
 def _split_thinking_trace(completion: str) -> tuple[str, str, bool]:
-    match = re.search(
-        r"<think>(?P<trace>.*?)</think>(?P<final>.*)",
-        completion,
-        flags=re.IGNORECASE | re.DOTALL,
-    )
-    if match is None:
-        open_match = re.search(
-            r"<think>(?P<trace>.*)",
-            completion,
-            flags=re.IGNORECASE | re.DOTALL,
-        )
-        if open_match is not None:
-            return open_match.group("trace").strip(), "", False
-        return "", completion.strip(), False
-    trace = match.group("trace").strip()
-    final = match.group("final").strip()
-    return trace, final, True
+    return split_thinking_trace(completion)
 
 
 def _process_reward(
@@ -666,38 +860,14 @@ def _process_reward(
     final_answer: str,
     config: SingleGpuSlimeConfig,
 ) -> float:
-    tokens = re.findall(r"\w+", thinking_trace)
-    if not tokens:
-        return 0.0
+    """Deprecated lexical process helper — prefer ``process_reward_weight=0``."""
+    from seiso.rl_verify.verify import experimental_process_reward
 
-    score = 0.0
-    if len(tokens) >= config.min_thinking_tokens:
-        score += 0.35
-    else:
-        score += 0.35 * (len(tokens) / max(config.min_thinking_tokens, 1))
-
-    lower = thinking_trace.lower()
-    transition_hits = sum(
-        marker in lower
-        for marker in (
-            "because",
-            "therefore",
-            "so",
-            "first",
-            "next",
-            "then",
-            "check",
-            "verify",
-        )
+    return experimental_process_reward(
+        thinking_trace,
+        final_answer,
+        min_thinking_tokens=config.min_thinking_tokens,
     )
-    score += min(0.35, 0.07 * transition_hits)
-
-    if re.search(r"\b(wait|actually|however|but|correct|revise)\b", lower):
-        score += 0.15
-    if final_answer.strip():
-        score += 0.15
-
-    return min(1.0, score)
 
 
 def _backprop_policy_step(
@@ -750,6 +920,7 @@ def _policy_loss(
             response_mask,
             config.clip_ratio,
             torch,
+            clip_ratio_high=config.clip_ratio_high,
         )
     else:
         policy_loss = _clipped_policy_loss(
@@ -759,6 +930,7 @@ def _policy_loss(
             torch.ones_like(new_logprobs),
             config.clip_ratio,
             torch,
+            clip_ratio_high=config.clip_ratio_high,
         )
 
     kl_loss = torch.zeros((), device=config.device)
@@ -774,11 +946,16 @@ def _policy_loss(
             kl_loss = ((new_token_logprobs - ref_token_logprobs) * response_mask).sum()
             kl_loss = kl_loss / response_mask.sum().clamp_min(1.0)
         else:
+            # Sequence log-probs are sums (not means). Normalize by response
+            # length so KL does not grow with generation length and fight long
+            # correct traces when calculate_per_token_loss is False.
             ref_logprobs = torch.stack([r.ref_logprobs for r in rollouts]).to(config.device)
-            kl_loss = (new_logprobs - ref_logprobs).mean()
+            lengths = response_token_counts.clamp_min(1.0)
+            kl_loss = ((new_logprobs - ref_logprobs) / lengths).mean()
 
     rewards = [r.reward for r in rollouts]
     loss = policy_loss + config.kl_coef * kl_loss
+    group_stats = _group_verifier_stats(rollouts, config.rollouts_per_prompt)
     return loss, {
         "loss": float(loss.detach().cpu()),
         "policy_loss": float(policy_loss.detach().cpu()),
@@ -786,9 +963,22 @@ def _policy_loss(
         "reward_mean": float(sum(rewards) / len(rewards)),
         "reward_max": float(max(rewards)),
         "outcome_reward_mean": _mean(r.outcome_reward for r in rollouts),
+        "format_reward_mean": _mean(r.format_reward for r in rollouts),
         "process_reward_mean": _mean(r.process_reward for r in rollouts),
         "thinking_penalty_mean": _mean(r.thinking_penalty for r in rollouts),
-        "group_reward_spread_mean": _group_reward_spread_mean(rollouts, config.rollouts_per_prompt),
+        "outcome_pass_rate": _mean(1.0 if r.outcome_passed else 0.0 for r in rollouts),
+        "format_ok_rate": _mean(1.0 if r.format_ok else 0.0 for r in rollouts),
+        "proof_pass_rate": _mean(
+            1.0 if r.proof_passed else 0.0 for r in rollouts if r.proof_passed is not None
+        ),
+        "proof_score_mean": _mean(
+            float(r.proof_score) for r in rollouts if r.proof_score is not None
+        ),
+        "group_reward_spread_mean": group_stats["group_reward_spread_mean"],
+        "group_outcome_spread_mean": group_stats["group_outcome_spread_mean"],
+        "group_pass_rate": group_stats["group_pass_rate"],
+        "group_nonzero_spread_frac": group_stats["group_nonzero_spread_frac"],
+        "group_nonzero_outcome_spread_frac": group_stats["group_nonzero_outcome_spread_frac"],
         "response_tokens_mean": float(response_token_counts.mean().detach().cpu()),
         **_rollout_status_stats(rollouts),
     }
@@ -802,9 +992,19 @@ def _empty_stats() -> dict[str, float]:
         "reward_mean": 0.0,
         "reward_max": float("-inf"),
         "outcome_reward_mean": 0.0,
+        "format_reward_mean": 0.0,
         "process_reward_mean": 0.0,
         "thinking_penalty_mean": 0.0,
+        # Metric rates (not secrets); names trip bandit B105 on "*pass*".
+        "outcome_pass_rate": 0.0,  # nosec B105
+        "format_ok_rate": 0.0,
+        "proof_pass_rate": 0.0,  # nosec B105
+        "proof_score_mean": 0.0,
         "group_reward_spread_mean": 0.0,
+        "group_outcome_spread_mean": 0.0,
+        "group_pass_rate": 0.0,  # nosec B105
+        "group_nonzero_spread_frac": 0.0,
+        "group_nonzero_outcome_spread_frac": 0.0,
         "response_tokens_mean": 0.0,
         "rollout_status_stop": 0.0,
         "rollout_status_length": 0.0,
@@ -824,9 +1024,18 @@ def _merge_stats(
         "kl",
         "reward_mean",
         "outcome_reward_mean",
+        "format_reward_mean",
         "process_reward_mean",
         "thinking_penalty_mean",
+        "outcome_pass_rate",
+        "format_ok_rate",
+        "proof_pass_rate",
+        "proof_score_mean",
         "group_reward_spread_mean",
+        "group_outcome_spread_mean",
+        "group_pass_rate",
+        "group_nonzero_spread_frac",
+        "group_nonzero_outcome_spread_frac",
         "response_tokens_mean",
     ):
         stats[key] += chunk_stats.get(key, 0.0) * weight
@@ -856,14 +1065,29 @@ def _sequence_token_logprobs(model, batch: dict[str, Any], torch):
 
 
 def _masked_sequence_logprobs(token_logprobs, mask):
-    denom = mask.sum(dim=1).clamp_min(1.0)
-    return (token_logprobs * mask).sum(dim=1) / denom
+    """Sum response-token log-probs (GRPO/PPO sequence likelihood, not mean)."""
+    return (token_logprobs * mask).sum(dim=1)
 
 
-def _clipped_policy_loss(new_logprobs, old_logprobs, advantages, mask, clip_ratio: float, torch):
+def _clipped_policy_loss(
+    new_logprobs,
+    old_logprobs,
+    advantages,
+    mask,
+    clip_ratio: float,
+    torch,
+    *,
+    clip_ratio_high: float | None = None,
+):
+    """PPO/GRPO clipped surrogate (slime ``compute_policy_loss`` without dual-clip-c).
+
+    ``clip_ratio`` / ``clip_ratio_high`` map to slime ``eps_clip`` / ``eps_clip_high``.
+    When ``clip_ratio_high`` is None, the high bound equals the low bound.
+    """
+    high = clip_ratio if clip_ratio_high is None else clip_ratio_high
     ratio = torch.exp(new_logprobs - old_logprobs)
     unclipped = ratio * advantages
-    clipped = torch.clamp(ratio, 1.0 - clip_ratio, 1.0 + clip_ratio) * advantages
+    clipped = torch.clamp(ratio, 1.0 - clip_ratio, 1.0 + high) * advantages
     objective = torch.minimum(unclipped, clipped)
     return -((objective * mask).sum() / mask.sum().clamp_min(1.0))
 
@@ -915,15 +1139,33 @@ def _pad_rollouts(rollouts: list[Rollout], pad_token_id: int, device: str, torch
     }
 
 
-def _assign_grouped_advantages(rollouts: list[Rollout], group_size: int) -> None:
+def _assign_grouped_advantages(
+    rollouts: list[Rollout],
+    group_size: int,
+    *,
+    grpo_std_normalization: bool = True,
+) -> None:
+    """GRPO group-relative advantages matching THUDM/slime ``_post_process_rewards``.
+
+    For each prompt group: subtract the group mean, then optionally divide by
+    unbiased sample std + 1e-6 (slime ``grpo_std_normalization`` / Dr.GRPO toggle).
+    """
     for start in range(0, len(rollouts), group_size):
         group = rollouts[start : start + group_size]
-        rewards = [r.reward for r in group]
-        mean = sum(rewards) / len(rewards)
-        variance = sum((reward - mean) ** 2 for reward in rewards) / len(rewards)
-        std = math.sqrt(variance) or 1.0
-        for rollout in group:
-            rollout.advantage = (rollout.reward - mean) / std
+        rewards = [float(r.reward) for r in group]
+        n = len(rewards)
+        mean = sum(rewards) / n
+        centered = [reward - mean for reward in rewards]
+        if grpo_std_normalization and n > 1:
+            # torch.std default is unbiased (divide by n-1); slime uses std + 1e-6.
+            variance = sum(value * value for value in centered) / (n - 1)
+            std = math.sqrt(variance)
+            scale = std + 1e-6
+            for rollout, value in zip(group, centered, strict=True):
+                rollout.advantage = value / scale
+        else:
+            for rollout, value in zip(group, centered, strict=True):
+                rollout.advantage = value
 
 
 def _filter_rollout_groups(
@@ -951,12 +1193,21 @@ def _keep_rollout_group(
     group: list[Rollout],
     config: SingleGpuSlimeConfig,
 ) -> bool:
-    if config.dynamic_sampling_filter == "reward_nonzero_std":
-        rewards = [rollout.reward for rollout in group]
-        if len(rewards) < 2:
+    """Keep groups that have nonzero *outcome* spread for GRPO.
+
+    ``reward_nonzero_std`` / ``outcome_nonzero_std`` intentionally ignore pure
+    format-shaping spread on the composite ``reward``. Format remains a small
+    shaping term *after* a group already has outcome diversity.
+    """
+    if config.dynamic_sampling_filter in {
+        "reward_nonzero_std",
+        "outcome_nonzero_std",
+    }:
+        outcomes = [float(rollout.outcome_reward) for rollout in group]
+        if len(outcomes) < 2:
             return False
-        mean = sum(rewards) / len(rewards)
-        variance = sum((reward - mean) ** 2 for reward in rewards) / len(rewards)
+        mean = sum(outcomes) / len(outcomes)
+        variance = sum((value - mean) ** 2 for value in outcomes) / len(outcomes)
         return math.sqrt(variance) > config.dynamic_sampling_min_reward_std
     return True
 
@@ -977,6 +1228,36 @@ def _rollout_status(response_tokens, eos_token_id: int | None) -> str:
     if eos_token_id is not None and bool((response_tokens == eos_token_id).any().item()):
         return "stop"
     return "length"
+
+
+def _response_mask_for_sequence(
+    input_ids,
+    *,
+    prompt_width: int,
+    pad_token_id: int | None,
+    eos_token_id: int | None,
+    torch,
+):
+    """Build response mask; keep EOS when pad_token_id == eos_token_id.
+
+    Hugging Face often sets pad=eos. Naively masking ``!= pad`` drops the EOS
+    token from the likelihood, slightly biasing sequence log-probs.
+    """
+    mask = torch.zeros_like(input_ids, dtype=torch.bool)
+    if prompt_width >= int(input_ids.numel()):
+        return mask
+    resp = input_ids[prompt_width:]
+    resp_mask = torch.ones_like(resp, dtype=torch.bool)
+    if pad_token_id is not None and eos_token_id is not None and pad_token_id == eos_token_id:
+        eos_hits = (resp == eos_token_id).nonzero(as_tuple=False)
+        if eos_hits.numel() > 0:
+            first = int(eos_hits[0].item())
+            # Keep through first EOS; drop trailing pad/eos after that.
+            resp_mask[first + 1 :] = False
+    elif pad_token_id is not None:
+        resp_mask = resp != pad_token_id
+    mask[prompt_width:] = resp_mask
+    return mask
 
 
 def _rollout_status_stats(rollouts: list[Rollout]) -> dict[str, float]:
@@ -1000,13 +1281,37 @@ def _mean(values: Iterable[float]) -> float:
 
 
 def _group_reward_spread_mean(rollouts: list[Rollout], group_size: int) -> float:
+    return _group_verifier_stats(rollouts, group_size)["group_reward_spread_mean"]
+
+
+def _group_verifier_stats(rollouts: list[Rollout], group_size: int) -> dict[str, float]:
+    """Per-prompt group diagnostics for collapse / verifier pass monitoring."""
     spreads: list[float] = []
+    outcome_spreads: list[float] = []
+    group_passes: list[float] = []
+    nonzero_spread: list[float] = []
+    nonzero_outcome_spread: list[float] = []
     for start in range(0, len(rollouts), group_size):
         group = rollouts[start : start + group_size]
+        if not group:
+            continue
         rewards = [r.reward for r in group]
-        if rewards:
-            spreads.append(max(rewards) - min(rewards))
-    return _mean(spreads)
+        outcomes = [float(r.outcome_reward) for r in group]
+        spread = max(rewards) - min(rewards)
+        outcome_spread = max(outcomes) - min(outcomes)
+        spreads.append(spread)
+        outcome_spreads.append(outcome_spread)
+        # Primary health metric: outcome diversity (matches dynamic sampling).
+        nonzero_spread.append(1.0 if outcome_spread > 1e-8 else 0.0)
+        nonzero_outcome_spread.append(1.0 if outcome_spread > 1e-8 else 0.0)
+        group_passes.append(1.0 if any(r.outcome_passed for r in group) else 0.0)
+    return {
+        "group_reward_spread_mean": _mean(spreads),
+        "group_outcome_spread_mean": _mean(outcome_spreads),
+        "group_pass_rate": _mean(group_passes),
+        "group_nonzero_spread_frac": _mean(nonzero_spread),
+        "group_nonzero_outcome_spread_frac": _mean(nonzero_outcome_spread),
+    }
 
 
 def _build_optimizer(model, config: SingleGpuSlimeConfig):
@@ -1172,9 +1477,13 @@ def _iter_distributed_sample_batches(
 
 
 def _sampling_batch_size(config: SingleGpuSlimeConfig) -> int:
+    from seiso.slime_single_gpu.config import effective_train_batch_size
+
+    # slime: sample over_sampling_batch_size prompts, keep until rollout_batch_size
+    train = effective_train_batch_size(config)
     if config.dynamic_sampling_filter == "none":
-        return config.train_batch_size
-    return max(config.train_batch_size, config.over_sampling_batch_size or config.train_batch_size)
+        return train
+    return max(train, config.over_sampling_batch_size or train)
 
 
 def _balanced_rank_samples(
@@ -1248,6 +1557,14 @@ def _load_samples(config: SingleGpuSlimeConfig) -> Iterable[dict[str, Any]]:
         yield sample
 
 
+def _sample_prompt_value(sample: dict[str, Any], config: SingleGpuSlimeConfig) -> Any:
+    """Return raw prompt (string or slime chat-message list)."""
+    value = sample.get(config.prompt_field)
+    if value is None:
+        raise ValueError(f"sample missing prompt field {config.prompt_field!r}")
+    return value
+
+
 def _limited_samples(config: SingleGpuSlimeConfig) -> Iterable[dict[str, Any]]:
     samples = _load_samples(config)
     if config.max_samples_per_epoch is None:
@@ -1256,13 +1573,35 @@ def _limited_samples(config: SingleGpuSlimeConfig) -> Iterable[dict[str, Any]]:
 
 
 def _reward_sample(sample: dict[str, Any], config: SingleGpuSlimeConfig) -> dict[str, Any]:
+    """Normalize a JSONL row into the shared verifier sample dict.
+
+    Supports slime fields (``label``, ``metadata.rm_type``, chat ``prompt``)
+    and Seiso aliases (``answer``, top-level ``tests``).
+    """
     merged = dict(sample)
     if config.reward == "field":
         merged["reward"] = sample.get(config.reward_field, 0.0)
-    if config.answer_field != "answer":
-        merged["answer"] = sample.get(config.answer_field, "")
+    # slime label / Seiso answer
+    label = sample.get(config.answer_field)
+    if label is None:
+        label = sample.get("label", sample.get("answer", ""))
+    merged["answer"] = label
     metadata = _sample_metadata(sample, config)
-    if metadata is not None:
+    if isinstance(metadata, dict):
+        merged["metadata"] = metadata
+        # Flatten slime metadata into verifier fields
+        if "tests" in metadata and "tests" not in merged:
+            merged["tests"] = metadata["tests"]
+        if "test" in metadata and "test" not in merged:
+            merged["test"] = metadata["test"]
+        if "timeout_s" in metadata and "timeout_s" not in merged:
+            merged["timeout_s"] = metadata["timeout_s"]
+        if "setup" in metadata and "setup" not in merged:
+            merged["setup"] = metadata["setup"]
+        rm_type = metadata.get("rm_type") or metadata.get("benchmark")
+        if rm_type and not merged.get("benchmark"):
+            merged["benchmark"] = rm_type
+    elif metadata is not None:
         merged["metadata"] = metadata
     return merged
 
@@ -1484,6 +1823,130 @@ def _save_distributed(
     if dist_ctx.is_main:
         _save(model, tokenizer, output_dir)
     _distributed_barrier(dist_ctx)
+
+
+def _sync_rollout_engine_weights(
+    *,
+    model,
+    tokenizer,
+    config: SingleGpuSlimeConfig,
+    dist_ctx: _DistributedSlimeContext,
+    step: int,
+    sync_state: Any | None = None,
+) -> None:
+    """Push actor weights to SGLang (initial + post-step; single- + multi-GPU).
+
+    Uses slime disk transport: full HF checkpoint and/or delta + multi-engine
+    ``update_weights_from_disk`` / ``pull_weights``. No-op for ``rollout_backend=hf``.
+
+    On failure, all ranks raise after a barrier so DDP does not hang.
+    """
+    import torch
+
+    from seiso.slime_single_gpu.rollout_backend import (
+        resolve_rollout_backend,
+        sync_sglang_weights_from_actor,
+    )
+
+    backend = resolve_rollout_backend(config, world_size=dist_ctx.world_size)
+    if backend != "sglang":
+        return
+    if not bool(getattr(config, "sglang_sync_weights", True)):
+        _distributed_barrier(dist_ctx)
+        return
+
+    error_msg = ""
+    path: str | None = None
+    try:
+        path = sync_sglang_weights_from_actor(
+            model=model,
+            tokenizer=tokenizer,
+            config=config,
+            step=step,
+            is_main=dist_ctx.is_main,
+            active_backend=backend,
+            sync_state=sync_state,
+        )
+        if dist_ctx.is_main and path is not None and config.log_every_steps:
+            mode = getattr(sync_state, "last_mode", None) if sync_state else None
+            print(
+                f"sglang_weight_sync step={step} mode={mode} path={path}",
+                flush=True,
+            )
+    except Exception as exc:
+        error_msg = (
+            f"SGLang weight sync failed at step={step}: {exc}. "
+            "Ensure each engine exposes /update_weights_from_disk and can read "
+            f"{config.output_dir / config.sglang_weight_dir}. "
+            "Set sglang_sync_weights: false only for debugging."
+        )
+
+    if dist_ctx.enabled:
+        # Broadcast failure so every rank raises after the barrier.
+        flag = torch.tensor(
+            [0 if error_msg else 1],
+            device=dist_ctx.device,
+            dtype=torch.long,
+        )
+        torch.distributed.all_reduce(flag, op=torch.distributed.ReduceOp.MIN)
+        _distributed_barrier(dist_ctx)
+        if int(flag.item()) == 0:
+            # Rank0 has the detailed message; others get a generic abort.
+            if error_msg:
+                raise RuntimeError(error_msg)
+            raise RuntimeError(f"SGLang weight sync failed at step={step} on another rank")
+        return
+
+    if error_msg:
+        raise RuntimeError(error_msg)
+
+
+def _maybe_materialize_data_gen(
+    config: SingleGpuSlimeConfig,
+    dist_ctx: _DistributedSlimeContext,
+) -> SingleGpuSlimeConfig:
+    """Build a verifiable prompt corpus when high-level data_gen is requested."""
+    enabled = config.data_gen or config.data_gen_count > 0
+    if not enabled:
+        return config
+    count = config.data_gen_count if config.data_gen_count > 0 else 500
+    out_path = config.output_dir / config.data_gen_filename
+    if dist_ctx.is_main:
+        config.output_dir.mkdir(parents=True, exist_ok=True)
+        from seiso.rl_verify.data_gen import DataGenConfig, materialize_rl_corpus
+
+        result = materialize_rl_corpus(
+            out_path,
+            DataGenConfig(
+                count=count,
+                seed=(config.data_gen_seed if config.data_gen_seed is not None else config.seed),
+                mix=config.data_gen_mix,
+                difficulty=config.data_gen_difficulty,
+                require_thinking_trace=config.require_thinking_trace,
+                thinking_instruction=config.thinking_instruction,
+            ),
+        )
+        summary = result.summary()
+        (config.output_dir / "slime_data_gen_summary.json").write_text(
+            json.dumps(
+                {
+                    **summary,
+                    "path": str(out_path),
+                    "note": (
+                        "Prompts+labels only; completions come from online "
+                        "rollouts (HF data_gen or SGLang), not this file."
+                    ),
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+    _distributed_barrier(dist_ctx)
+    if not out_path.is_file():
+        raise RuntimeError(f"data_gen did not produce {out_path}; rank0 materialization failed")
+    return replace(config, dataset=out_path)
 
 
 def _distributed_context(torch, config: SingleGpuSlimeConfig) -> _DistributedSlimeContext:
