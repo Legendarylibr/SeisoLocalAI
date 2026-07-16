@@ -57,6 +57,25 @@ print(kernel_metadata())
 seiso-bench-kernels --op all --rows 4096 --hidden 4096 --vocab 32000
 ```
 
+### Roofline-style intensity (optional diagnostics)
+
+**Shape → FLOP/byte** for **Seiso fused ops only**. Never blocks training.
+
+**Shape-math SoT bar:** FP16/BF16 **GEMM-family** ops with **I ≥ 300 FLOP/byte** → `performance_truth=true` (strong compute-bound *candidate* under efficient dense GEMM; **not** a measured roofline). Elementwise/CE and float32 stay heuristic. Default MLP intermediate is `4×hidden`; pass `--intermediate` for real SwiGLU widths (~8/3×hidden).
+
+```bash
+# CPU-ok
+seiso-bench-kernels --roofline-only --rows 4096 --hidden 4096 --vocab 32000
+
+# JSON only (no timed benches mixed on stdout)
+seiso-bench-kernels --roofline-only --json
+
+# Text roofline, then timed CUDA benches (omit --json)
+seiso-bench-kernels --roofline --op all --rows 4096 --hidden 4096
+```
+
+See [kernel-shape.md](kernel-shape.md) and [cli.md](../cli.md#seiso-bench-kernels).
+
 ## Compile requirements (NVIDIA native)
 
 - Linux or Windows
