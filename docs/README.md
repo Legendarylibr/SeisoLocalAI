@@ -32,6 +32,7 @@ Start with **[getting-started.md](getting-started.md)** — a step-by-step walkt
 | Quant regression study (train → export → eval) | [cli.md § seiso experiment](cli.md#seiso-experiment) |
 | Build a local RAG corpus | [forge.md](forge.md) · `/knowledge` |
 | Enable fused GPU kernels | [training/kernels.md](training/kernels.md) |
+| Read kernel shape / intensity estimates | [training/kernel-shape.md](training/kernel-shape.md) · `seiso-bench-kernels --roofline-only` |
 | Train on multiple GPUs | [training/multi-gpu.md](training/multi-gpu.md) |
 | Deploy with HTTPS | [deployment/reverse-proxy.md](deployment/reverse-proxy.md) |
 | Fix a problem | [troubleshooting.md](troubleshooting.md) |

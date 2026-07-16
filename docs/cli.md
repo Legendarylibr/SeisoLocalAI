@@ -266,12 +266,27 @@ Expected endpoint: `http://127.0.0.1:8780/v1/chat/completions`.
 
 ## `seiso-bench-kernels`
 
-Benchmark fused training kernels (NVIDIA CUDA or AMD Triton).
+Benchmark fused training kernels (NVIDIA CUDA or AMD Triton), or print
+shape → FLOP/byte intensity estimates for those kernels.
 
 ```bash
+# Timed CUDA/ROCm benches (requires GPU)
 seiso-bench-kernels --op all --rows 4096 --hidden 4096 --vocab 32000
 seiso-bench-kernels --op rms --dtype bfloat16
+
+# Shape-math intensity (CPU-ok; never gates training)
+seiso-bench-kernels --roofline-only --rows 4096 --hidden 4096 --vocab 32000
+seiso-bench-kernels --roofline-only --json
+# Optional: text roofline then timed benches (no --json)
+seiso-bench-kernels --roofline --op all --rows 4096 --hidden 4096
 ```
+
+**Roofline / SoT bar:** for FP16/BF16 **GEMM-family** ops only, intensity
+**I ≥ 300 FLOP/byte** is marked `performance_truth=true` (H100-class dense
+TC/HBM reference ridge as a shape-math bar for a strong compute-bound
+*candidate* — not a measured device roofline). Elementwise/CE and float32 stay
+heuristic. Pass `--intermediate` for real SwiGLU widths (~8/3×hidden often);
+default intermediate is `4×hidden`. See [training/kernel-shape.md](training/kernel-shape.md).
 
 ## Distributed training (`seiso-train-worker`)
 
