@@ -284,6 +284,17 @@ class TrainConfig(BaseModel):
     data_gen_mix: str = "numeric:0.5,choice:0.2,code:0.3"
     data_gen_difficulty: str = "easy:0.35,medium:0.45,hard:0.20"
     data_gen_filename: str = "slime_generated.jsonl"
+    data_designer: str = Field(
+        default="auto",
+        description=(
+            "NVIDIA NeMo Data Designer synth: auto (multi-GPU vLLM only) | on | off"
+        ),
+    )
+    vllm_tensor_parallel: int = Field(
+        default=0,
+        ge=0,
+        description="Optional vLLM TP size hint for multi-GPU Data Designer gate",
+    )
     extra: dict[str, Any] = Field(
         default_factory=dict,
         description=(
@@ -479,6 +490,8 @@ class TrainConfig(BaseModel):
             data_gen_mix=self.data_gen_mix,
             data_gen_difficulty=self.data_gen_difficulty,
             data_gen_filename=self.data_gen_filename,
+            data_designer=self.data_designer,
+            vllm_tensor_parallel=self.vllm_tensor_parallel,
         )
 
 

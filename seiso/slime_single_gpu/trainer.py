@@ -1940,7 +1940,11 @@ def _maybe_materialize_data_gen(
     config: SingleGpuSlimeConfig,
     dist_ctx: _DistributedSlimeContext,
 ) -> SingleGpuSlimeConfig:
-    """Build a verifiable prompt corpus when high-level data_gen is requested."""
+    """Build a verifiable prompt corpus when high-level data_gen is requested.
+
+    Multi-GPU vLLM runs use NVIDIA NeMo Data Designer (local vLLM provider) for
+    numeric/choice synth; other backends keep Seiso's deterministic generator.
+    """
     enabled = config.data_gen or config.data_gen_count > 0
     if not enabled:
         return config
@@ -1948,28 +1952,70 @@ def _maybe_materialize_data_gen(
     out_path = config.output_dir / config.data_gen_filename
     if dist_ctx.is_main:
         config.output_dir.mkdir(parents=True, exist_ok=True)
+        from seiso.rl_verify.data_designer_gen import (
+            materialize_for_slime_config,
+            should_use_data_designer,
+        )
         from seiso.rl_verify.data_gen import DataGenConfig, materialize_rl_corpus
 
-        result = materialize_rl_corpus(
-            out_path,
-            DataGenConfig(
-                count=count,
-                seed=(config.data_gen_seed if config.data_gen_seed is not None else config.seed),
-                mix=config.data_gen_mix,
-                difficulty=config.data_gen_difficulty,
-                require_thinking_trace=config.require_thinking_trace,
-                thinking_instruction=config.thinking_instruction,
-            ),
-        )
+        use_dd = should_use_data_designer(config, world_size=dist_ctx.world_size)
+        generator = "seiso.rl_verify.data_gen"
+        if use_dd:
+            try:
+                result = materialize_for_slime_config(
+                    config,
+                    out_path=out_path,
+                    count=count,
+                    world_size=dist_ctx.world_size,
+                )
+                generator = "nvidia.nemo.data_designer"
+            except ImportError as exc:
+                print(
+                    f"Data Designer unavailable ({exc}); falling back to Seiso data_gen",
+                    flush=True,
+                )
+                result = materialize_rl_corpus(
+                    out_path,
+                    DataGenConfig(
+                        count=count,
+                        seed=(
+                            config.data_gen_seed
+                            if config.data_gen_seed is not None
+                            else config.seed
+                        ),
+                        mix=config.data_gen_mix,
+                        difficulty=config.data_gen_difficulty,
+                        require_thinking_trace=config.require_thinking_trace,
+                        thinking_instruction=config.thinking_instruction,
+                    ),
+                )
+        else:
+            result = materialize_rl_corpus(
+                out_path,
+                DataGenConfig(
+                    count=count,
+                    seed=(
+                        config.data_gen_seed
+                        if config.data_gen_seed is not None
+                        else config.seed
+                    ),
+                    mix=config.data_gen_mix,
+                    difficulty=config.data_gen_difficulty,
+                    require_thinking_trace=config.require_thinking_trace,
+                    thinking_instruction=config.thinking_instruction,
+                ),
+            )
         summary = result.summary()
         (config.output_dir / "slime_data_gen_summary.json").write_text(
             json.dumps(
                 {
                     **summary,
                     "path": str(out_path),
+                    "generator": generator,
+                    "data_designer": use_dd,
                     "note": (
                         "Prompts+labels only; completions come from online "
-                        "rollouts (HF data_gen or SGLang), not this file."
+                        "rollouts (HF / SGLang / vLLM), not this file."
                     ),
                 },
                 indent=2,

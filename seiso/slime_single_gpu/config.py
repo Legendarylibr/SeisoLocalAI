@@ -168,6 +168,11 @@ class SingleGpuSlimeConfig:
     data_gen_mix: str = "numeric:0.5,choice:0.2,code:0.3"
     data_gen_difficulty: str = "easy:0.35,medium:0.45,hard:0.20"
     data_gen_filename: str = "slime_generated.jsonl"
+    # NVIDIA NeMo Data Designer for synth prompts. auto = only multi-GPU vLLM runs.
+    # on/off force; never used for hf/sglang backends.
+    data_designer: str = "auto"
+    # Optional TP hint for gate when WORLD_SIZE==1 but vLLM uses multiple GPUs.
+    vllm_tensor_parallel: int = 0
 
     @classmethod
     def from_yaml(cls, path: Path) -> SingleGpuSlimeConfig:
@@ -283,6 +288,28 @@ class SingleGpuSlimeConfig:
             raise ValueError("data_gen_mix must not be empty")
         if not self.data_gen_difficulty:
             raise ValueError("data_gen_difficulty must not be empty")
+        mode = str(self.data_designer or "auto").lower().strip()
+        if mode not in {
+            "auto",
+            "on",
+            "off",
+            "true",
+            "false",
+            "1",
+            "0",
+            "yes",
+            "no",
+            "force",
+            "always",
+            "disable",
+            "disabled",
+        }:
+            raise ValueError(
+                "data_designer must be one of: auto, on, off "
+                f"(got {self.data_designer!r})"
+            )
+        if int(self.vllm_tensor_parallel or 0) < 0:
+            raise ValueError("vllm_tensor_parallel must be non-negative")
         from seiso.slime_single_gpu.rollout_backend import (
             validate_rollout_backend_config,
         )

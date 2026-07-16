@@ -86,3 +86,9 @@ data_gen_count: 800
 data_gen_seed: 17
 data_gen_mix: "numeric:0.55,choice:0.15,code:0.30"
 data_gen_difficulty: "easy:0.3,medium:0.45,hard:0.25"
+# NVIDIA NeMo Data Designer for numeric/choice synth (multi-GPU vLLM only).
+# Requires: pip install -e '.[data-designer]'  and a live vLLM server.
+# auto = on for multi-GPU vLLM (DDP world_size>1 or TP>1); off for hf/sglang.
+data_designer: auto
+# Optional TP size hint when training is single-process but vLLM uses multi-GPU:
+# vllm_tensor_parallel: 2

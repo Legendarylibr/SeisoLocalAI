@@ -228,6 +228,13 @@ scripts/run_slime_vllm_ddp.sh 2 configs/example_training_slime_vllm.yaml
 vLLM must read `output_dir/vllm_weight_sync/` (shared FS on multi-node).  
 Managed multi-GPU: set `SEISO_MANAGED_VLLM_ENABLED=true` and `SEISO_MANAGED_VLLM_ENABLE_LORA=true`, then point `vllm_base_url` at the managed server (or leave empty to adopt a running managed endpoint).
 
+**Synth data (multi-GPU vLLM only):** when `data_gen: true` and `data_designer: auto` (default), multi-GPU vLLM runs materialize numeric/choice prompts with [NVIDIA NeMo Data Designer](https://github.com/NVIDIA-NeMo/DataDesigner) against the same local vLLM OpenAI endpoint. Code-stream rows stay Seiso unit-test grounded. Install optional extra: `pip install -e '.[data-designer]'`. HF and SGLang slime paths keep the deterministic Seiso generator.
+
+| Field | Meaning |
+|-------|---------|
+| `data_designer` | `auto` (multi-GPU vLLM only) \| `on` \| `off` |
+| `vllm_tensor_parallel` | Optional TP hint when `WORLD_SIZE=1` but vLLM uses multiple GPUs |
+
 Not included (use upstream slime): Megatron TP/PP, Ray placement, NCCL tensor broadcast.
 Streams:
 

@@ -12,6 +12,10 @@
 #      Or Seiso managed multi-GPU:
 #        SEISO_MANAGED_VLLM_ENABLED=true SEISO_MANAGED_VLLM_ENABLE_LORA=true \
 #        SEISO_MANAGED_VLLM_MODEL=Qwen/Qwen2.5-0.5B-Instruct
+#   3) Optional synth data via NVIDIA NeMo Data Designer (multi-GPU vLLM only):
+#        pip install -e '.[data-designer]'
+#      With data_gen: true and data_designer: auto, rank0 materializes numeric/choice
+#      prompts through Data Designer → local vLLM before DDP training starts.
 #
 # Usage:
 #   scripts/run_slime_vllm_ddp.sh [num_processes] [config_yaml]
