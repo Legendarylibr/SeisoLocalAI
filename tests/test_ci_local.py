@@ -146,3 +146,19 @@ def test_changed_docs_skip_tests(monkeypatch, tmp_path):
     )
 
     assert calls == []
+
+
+def test_pytest_worker_args_support_auto_and_worksteal():
+    assert run_ci_local._pytest_worker_args(0, "loadscope") == []
+    assert run_ci_local._pytest_worker_args("auto", "worksteal") == [
+        "-n",
+        "auto",
+        "--dist",
+        "worksteal",
+    ]
+    assert run_ci_local._pytest_worker_args(4, "loadfile") == [
+        "-n",
+        "4",
+        "--dist",
+        "loadfile",
+    ]

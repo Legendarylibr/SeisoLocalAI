@@ -394,13 +394,26 @@ def job_types(root: Path, python: str, env: dict[str, str], *, update_baseline: 
     )
 
 
+def _pytest_worker_args(workers: str | int, dist: str) -> list[str]:
+    """Return pytest-xdist args, or [] when workers is disabled."""
+    value = str(workers).strip().lower()
+    if value in {"", "0", "false", "no", "off"}:
+        return []
+    if value in {"auto", "logical"} or value.isdigit():
+        return ["-n", value, "--dist", dist]
+    raise SystemExit(
+        f"Invalid --pytest-workers={workers!r}; use 0, N, auto, or logical."
+    )
+
+
 def job_test(
     root: Path,
     python: str,
     env: dict[str, str],
     *,
     files: Sequence[Path] | None = None,
-    workers: int = 0,
+    workers: str | int = "0",
+    dist: str = "loadscope",
     hardware_tests: bool = False,
 ) -> None:
     _banner("Job: test (smoke imports + pytest)")
@@ -435,9 +448,16 @@ def job_test(
             return
 
     marker = "gpu and not slow" if hardware_tests else "not slow and not gpu"
-    command = [python, "-m", "pytest", *test_targets, "-q", "-m", marker]
-    if workers > 0:
-        command.extend(["-n", str(workers), "--dist", "loadscope"])
+    command = [
+        python,
+        "-m",
+        "pytest",
+        *test_targets,
+        "-q",
+        "-m",
+        marker,
+        *_pytest_worker_args(workers, dist),
+    ]
     _step(
         "Pytest",
         command,
@@ -641,10 +661,15 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--pytest-workers",
-        type=int,
-        default=0,
+        default="0",
         metavar="N",
-        help="Run pytest with N xdist workers (default: serial).",
+        help="Run pytest with N xdist workers, or 'auto'/'logical' (default: serial).",
+    )
+    parser.add_argument(
+        "--pytest-dist",
+        default="loadscope",
+        choices=("load", "loadscope", "loadfile", "loadgroup", "worksteal", "no"),
+        help="pytest-xdist distribution mode when workers are enabled (default: loadscope).",
     )
     parser.add_argument(
         "--hardware-tests",
@@ -656,8 +681,11 @@ def main(argv: list[str] | None = None) -> int:
     root = repo_root()
     python_bin = args.python_bin or resolve_python_bin(root)
 
-    if args.pytest_workers < 0:
+    workers = str(args.pytest_workers).strip()
+    if workers.isdigit() and int(workers) < 0:
         parser.error("--pytest-workers must be zero or greater")
+    if workers.lower() not in {"0", "auto", "logical"} and not workers.isdigit():
+        parser.error("--pytest-workers must be 0, N, auto, or logical")
     if args.changed and args.fast:
         parser.error("--changed and --fast cannot be combined")
     if args.changed and args.job and any(job not in CHANGED_JOBS for job in args.job):
@@ -710,7 +738,8 @@ def main(argv: list[str] | None = None) -> int:
                     python_bin,
                     env,
                     files=selected_files,
-                    workers=args.pytest_workers,
+                    workers=workers,
+                    dist=args.pytest_dist,
                     hardware_tests=args.hardware_tests,
                 )
             elif job == "security":
