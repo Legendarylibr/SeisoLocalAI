@@ -1,4 +1,4 @@
-"""OpenAI-compatible API for local inference."""
+"""Compat API for local inference (standard chat-completions wire protocol)."""
 
 from __future__ import annotations
 
@@ -17,27 +17,27 @@ from forge.api.routes._inference_common import (
     _assert_inference_gpu_available,
     _begin_generation_or_raise,
 )
-from forge.api.schemas.openai import ChatCompletionRequest
+from forge.api.schemas.compat import ChatCompletionRequest
 from forge.config import ForgeSettings, get_settings
 from forge.db.store import Database
 from forge.orchestrators.inference import InferenceOrchestrator
-from forge.security.openai_auth import get_openai_user_id
-from forge.services.llm_output import StreamingOutputSanitizer, sanitize_llm_output
-from forge.services.openai_chat import (
+from forge.security.compat_auth import get_compat_user_id
+from forge.services.compat_chat import (
     estimate_token_count,
-    prepare_openai_chat_payload,
+    prepare_compat_chat_payload,
     prompt_token_estimate,
 )
+from forge.services.llm_output import StreamingOutputSanitizer, sanitize_llm_output
 
-_prepare_openai_chat_payload = prepare_openai_chat_payload
+_prepare_compat_chat_payload = prepare_compat_chat_payload
 
-router = APIRouter(tags=["openai"])
+router = APIRouter(tags=["compat"])
 logger = logging.getLogger(__name__)
 
 
 @router.get("/v1/models")
 async def list_models(
-    user_id: Annotated[str, Depends(get_openai_user_id)],
+    user_id: Annotated[str, Depends(get_compat_user_id)],
     db: Annotated[Database, Depends(get_db)],
 ) -> dict:
     models = await db.list_models(user_id)
@@ -59,18 +59,18 @@ async def list_models(
 @router.post("/v1/chat/completions")
 async def chat_completions(
     body: ChatCompletionRequest,
-    user_id: Annotated[str, Depends(get_openai_user_id)],
+    user_id: Annotated[str, Depends(get_compat_user_id)],
     db: Annotated[Database, Depends(get_db)],
     orchestrator: Annotated[InferenceOrchestrator, Depends(get_inference_orchestrator)],
     settings: Annotated[ForgeSettings, Depends(get_settings)],
 ):
-    """OpenAI-compatible chat endpoint for Cursor, Continue, and other clients."""
-    if body.tools and not settings.allow_openai_tools:
-        raise HTTPException(403, "Tool calling is disabled on the OpenAI-compatible API")
+    """Compat chat endpoint for Cursor, Continue, and other clients."""
+    if body.tools and not settings.allow_compat_tools:
+        raise HTTPException(403, "Tool calling is disabled on the Compat API")
 
     _assert_inference_gpu_available()
 
-    payload = await prepare_openai_chat_payload(body, user_id, db, settings)
+    payload = await prepare_compat_chat_payload(body, user_id, db, settings)
     payload["user_id"] = user_id
     completion_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
     created = int(time.time())
@@ -129,7 +129,7 @@ async def chat_completions(
                 await orchestrator.cancel_generation_for_user(user_id)
                 raise
             except Exception as exc:
-                logger.exception("OpenAI-compatible inference stream failed")
+                logger.exception("Compat API inference stream failed")
                 await orchestrator.cancel_generation_for_user(user_id)
                 err = {
                     "error": {
@@ -163,7 +163,7 @@ async def chat_completions(
                 if job and job.status.value == "failed":
                     yield f"data: {json.dumps({'error': job.error or 'Inference failed'})}\n\n"
                 elif content:
-                    content = sanitize_llm_output(content, strip_tool_calls=bool(body.tools))
+                    content = sanitize_llm_output(content, strip_tool_calls=not body.tools)
                     chunk = {
                         "id": completion_id,
                         "object": "chat.completion.chunk",
@@ -199,7 +199,7 @@ async def chat_completions(
     if not job or job.status.value == "failed":
         raise HTTPException(500, job.error if job else "Inference failed")
 
-    content = sanitize_llm_output(job.result.get("content", ""), strip_tool_calls=bool(body.tools))
+    content = sanitize_llm_output(job.result.get("content", ""), strip_tool_calls=not body.tools)
     prompt_tokens = prompt_token_estimate(body.messages)
     completion_tokens = estimate_token_count(content)
     return JSONResponse(

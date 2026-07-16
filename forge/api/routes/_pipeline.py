@@ -93,8 +93,16 @@ def register_formatted_job_routes(
                 yield event
             if row and row.get("error_text"):
                 yield {"event": "error", "data": row["error_text"]}
-            if row and row.get("stage_results_json"):
-                yield {"event": "result", "data": row["stage_results_json"]}
+            # Default schema stores stage_results_json='{}' — only emit a real
+            # result for successful terminal jobs with non-empty payloads.
+            stage_json = (row or {}).get("stage_results_json") or ""
+            status = str((row or {}).get("status") or "").lower()
+            if (
+                status in {"completed", "succeeded", "success"}
+                and stage_json.strip()
+                and stage_json.strip() not in {"{}", "null", "None"}
+            ):
+                yield {"event": "result", "data": stage_json}
 
         return EventSourceResponse(db_event_gen())
 

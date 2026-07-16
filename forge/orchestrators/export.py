@@ -86,7 +86,7 @@ class ExportOrchestrator(Orchestrator):
 
             from forge.services.executors import GPU_EXECUTOR
 
-            results = await loop.run_in_executor(
+            export_future = loop.run_in_executor(
                 GPU_EXECUTOR,
                 lambda: run_export_plan(
                     plan,
@@ -95,6 +95,14 @@ class ExportOrchestrator(Orchestrator):
                     on_log=on_log,
                 ),
             )
+            try:
+                results = await export_future
+            except asyncio.CancelledError:
+                import contextlib
+
+                with contextlib.suppress(asyncio.TimeoutError, Exception):
+                    await asyncio.wait_for(asyncio.shield(export_future), timeout=600)
+                raise
         finally:
             release_after_task(
                 reason="export complete",

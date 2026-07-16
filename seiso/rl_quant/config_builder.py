@@ -81,7 +81,10 @@ def build_framework_config(
         overrides["reward_weights"] = reward
 
     if checkpoint := payload.get("checkpoint_path"):
-        overrides["external_quality_path"] = str(checkpoint)
+        # Model/policy checkpoint — not a quality sidecar JSON.
+        overrides["resume_from_checkpoint"] = str(checkpoint)
+    if quality := payload.get("external_quality_path") or payload.get("quality_sidecar"):
+        overrides["external_quality_path"] = str(quality)
 
     if gguf := payload.get("gguf_path"):
         overrides["llama_cpp_model"] = str(gguf)

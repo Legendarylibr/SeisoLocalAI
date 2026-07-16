@@ -202,19 +202,18 @@ class Orchestrator(ABC):
     async def stream_logs(
         self, job_id: str, *, replay_buffer: bool = True
     ) -> AsyncIterator[str]:
-        """SSE-compatible log stream for a job."""
+        """SSE-compatible log stream for a job.
+
+        Live lines are yielded from the subscriber queue (not deque indices) so a
+        maxlen buffer wrap cannot starve subscribers after ``MAX_LOG_LINES``.
+        """
         queue: asyncio.Queue[str | None] = asyncio.Queue()
         subscribers = self._subscribers[job_id]
-        tail = 0
         subscribers.add(queue)
         try:
-            buf = self._log_buffers.get(job_id, deque())
             if replay_buffer:
-                while tail < len(buf):
-                    yield buf[tail]
-                    tail += 1
-            else:
-                tail = len(buf)
+                for line in list(self._log_buffers.get(job_id, ())):
+                    yield line
             job = self.get_job(job_id)
             if job and job.status in (
                 JobStatus.COMPLETED,
@@ -223,10 +222,6 @@ class Orchestrator(ABC):
             ):
                 return
             while True:
-                buf = self._log_buffers.get(job_id, deque())
-                while tail < len(buf):
-                    yield buf[tail]
-                    tail += 1
                 try:
                     msg = await asyncio.wait_for(queue.get(), timeout=0.05)
                 except asyncio.TimeoutError:
@@ -240,6 +235,7 @@ class Orchestrator(ABC):
                     continue
                 if msg is None:
                     break
+                yield msg
         finally:
             subscribers.discard(queue)
 

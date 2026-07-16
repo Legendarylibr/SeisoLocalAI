@@ -35,7 +35,8 @@ def _use_fused_cuda_kernels(x: Any) -> bool:
 
 
 _RMSNORM_CLASSES = frozenset(
-    {"LlamaRMSNorm", "Qwen2RMSNorm", "GemmaRMSNorm", "RMSNorm"}
+    # GemmaRMSNorm uses (1+weight) — do not patch with Llama-style rms*weight.
+    {"LlamaRMSNorm", "Qwen2RMSNorm", "RMSNorm"}
 )
 _MLP_CLASSES = frozenset(
     {
@@ -43,9 +44,8 @@ _MLP_CLASSES = frozenset(
         "MistralMLP",
         "Qwen2MLP",
         "Qwen3MLP",
-        "Phi3MLP",
-        "GemmaMLP",
-        "Gemma2MLP",
+        # Phi3MLP uses fused gate_up_proj — not gate_proj/up_proj.
+        # GemmaMLP / Gemma2MLP use GELU — not SwiGLU/SiLU.
         "MixtralMLP",
     }
 )
@@ -55,9 +55,7 @@ _DECODER_LAYER_CLASSES = frozenset(
         "MistralDecoderLayer",
         "Qwen2DecoderLayer",
         "Qwen3DecoderLayer",
-        "GemmaDecoderLayer",
-        "Gemma2DecoderLayer",
-        "Phi3DecoderLayer",
+        # Gemma / Phi-3 use different norm/MLP contracts — leave unpatched.
     }
 )
 _FUSED_RESIDUAL_DECODER_CLASSES = frozenset(
@@ -66,8 +64,6 @@ _FUSED_RESIDUAL_DECODER_CLASSES = frozenset(
         "MistralDecoderLayer",
         "Qwen2DecoderLayer",
         "Qwen3DecoderLayer",
-        "GemmaDecoderLayer",
-        "Phi3DecoderLayer",
     }
 )
 _QKV_PROJECTION_SUFFIXES = (".q_proj", ".k_proj", ".v_proj")
@@ -103,8 +99,7 @@ def _patch_forward(model: Any, module: Any, forward_fn: Callable) -> None:
 
 
 def _is_swiglu_mlp(module: Any) -> bool:
-    if type(module).__name__ in _MLP_CLASSES:
-        return True
+    """True only for SwiGLU MLPs with separate gate_proj / up_proj / down_proj."""
     if not all(hasattr(module, a) for a in ("gate_proj", "up_proj", "down_proj")):
         return False
     cls = type(module).__name__
@@ -112,7 +107,8 @@ def _is_swiglu_mlp(module: Any) -> bool:
         return False
     act = getattr(module, "act_fn", None)
     if act is None:
-        return True
+        # Known SwiGLU class names are a hint only when attrs already matched.
+        return cls in _MLP_CLASSES
     act_name = type(act).__name__.lower()
     return "silu" in act_name or "swish" in act_name
 

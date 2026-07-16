@@ -54,9 +54,20 @@ async def run_orchestrated_job(
             await on_started()
         await orchestrator.start(job_id, payload)
         job = await orchestrator.wait_for(job_id)
-        if job is not None:
-            await on_finished(job)
-            return
-        await on_failed("Job disappeared before completion")
     except Exception as exc:
         await on_failed(job_failure_message(orchestrator, job_id, exc))
+        return
+
+    if job is None:
+        await on_failed("Job disappeared before completion")
+        return
+    try:
+        await on_finished(job)
+    except Exception:
+        # Never rewrite a terminal in-memory success/cancel as failed because
+        # durable persistence threw — artifacts already exist.
+        logger.exception(
+            "Failed to persist terminal state for job %s (status=%s)",
+            job_id,
+            getattr(job.status, "value", job.status),
+        )

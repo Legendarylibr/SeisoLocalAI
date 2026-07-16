@@ -21,7 +21,7 @@ Seiso is a **mature, ambitious local-first AI workspace** (GPL-3.0) that combine
 - QLoRA / LoRA / full fine-tuning with live metrics/SSE.
 - Export (LoRA merge, GGUF multi-quant, Hub publish + model cards).
 - Advanced research pipelines: LLM compression (distill + optional prune + FT + quant), Distill-RL (KL + DPO), RL quantization (adaptive + optional kernel policy co-training).
-- RAG/knowledge bases, visual recipe graphs, provider routing, OpenAI-compatible API (`/v1`).
+- RAG/knowledge bases, visual recipe graphs, provider routing, Compat API (`/v1`).
 
 **Strengths:**
 - Excellent hardware awareness and memory protection (guards, headroom, unload, low-VRAM modes).
@@ -50,7 +50,7 @@ User
 ```
 
 - **Core** (`seiso/`): Training, inference, export, kernels, compress, distill_rl, rl_quant, experiments, models, hardware, memory, platform, security helpers, bundled package wrappers.
-- **Forge** (`forge/`): Web server, job orchestration + SSE streaming, persistence, auth/onboarding, security middleware, model registry/inventory, OpenAI compat.
+- **Forge** (`forge/`): Web server, job orchestration + SSE streaming, persistence, auth/onboarding, security middleware, model registry/inventory, Compat API.
 - **UI** (`forge-ui/`): React + TS + Vite + xyflow (recipes). Talks REST + SSE. Built assets served by Forge SPA fallback.
 - **Bundled packages**: `seiso.codellama_compress`, `seiso.adaptive_quant`, and `analysis` are part of this repository and are bootstrapped at runtime (no separate pip package). Seiso provides config translation, job wrapping, UI/CLI surfaces, kernel bridge, and manifests.
 
@@ -88,7 +88,7 @@ Entry points: `start` script, `seiso` CLI (`forge`, `train`, `chat`, `export`, `
 - `seiso/inference/{runner,backends,model_pool,speculative,tuning}.py`
 - Forge: `forge/api/routes/inference.py`, services (inference_models, model_pool, llamacpp_runtime).
 - UI: ChatPage.tsx (model picker, context bar, streaming, router status, memory free).
-- OpenAI compat lives at root `/v1/...` (no /api prefix).
+- Compat API lives at root `/v1/...` (no /api prefix).
 - External router mode (`__seiso_router__`) for intelligent model selection through a separately running router service.
 
 ### Training Studio (QLoRA / LoRA / full)

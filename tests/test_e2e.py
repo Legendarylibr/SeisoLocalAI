@@ -15,7 +15,7 @@ from tests.conftest import user_path
 
 
 @pytest.mark.asyncio
-async def test_openai_rejects_path_outside_sandbox(app, auth_client):
+async def test_compat_rejects_path_outside_sandbox(app, auth_client):
     client, _token, headers, tmp_path = auth_client
     outside = tmp_path.parent / "outside-model.gguf"
     outside.write_text("fake")
@@ -33,7 +33,7 @@ async def test_openai_rejects_path_outside_sandbox(app, auth_client):
 
 
 @pytest.mark.asyncio
-async def test_openai_chat_with_inventory_model(app, auth_client, monkeypatch):
+async def test_compat_chat_with_inventory_model(app, auth_client, monkeypatch):
     client, _token, headers, tmp_path = auth_client
     from forge.api.deps import get_db
 

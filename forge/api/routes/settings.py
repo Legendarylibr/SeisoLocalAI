@@ -25,7 +25,7 @@ class SecurityPosture(BaseModel):
 
     allow_tools: bool
     allow_code_exec: bool
-    allow_openai_tools: bool
+    allow_compat_tools: bool
     allow_remote: bool
     bind_localhost: bool
     db_encrypted: bool
@@ -111,7 +111,7 @@ async def get_app_settings(
         security=SecurityPosture(
             allow_tools=settings.allow_tools,
             allow_code_exec=settings.allow_code_exec,
-            allow_openai_tools=settings.allow_openai_tools,
+            allow_compat_tools=settings.allow_compat_tools,
             allow_remote=settings.allow_remote,
             bind_localhost=not settings.allow_remote,
             db_encrypted=True,

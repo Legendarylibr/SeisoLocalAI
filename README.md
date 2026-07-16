@@ -20,7 +20,7 @@
 - [Platform support](#platform-support)
 - [Features in depth](#features-in-depth)
 - [Data & storage](#data--storage)
-- [OpenAI-compatible API](#openai-compatible-api)
+- [Compat API](#compat-api)
 - [Development](#development)
 - [Security](#security)
 - [Documentation index](#documentation-index)
@@ -543,9 +543,9 @@ Database defaults to **ephemeral in-memory SQLite** — chat history and job met
 
 ---
 
-## OpenAI-compatible API
+## Compat API
 
-Point Cursor, Continue, or any OpenAI client at Forge while it is running:
+Point Cursor, Continue, or any chat-completions client at Forge while it is running:
 
 ```text
 Base URL: http://127.0.0.1:8765/v1
@@ -575,7 +575,7 @@ curl.exe http://127.0.0.1:8765/v1/chat/completions `
   -d '{"model":"meta-llama/Llama-3.2-3B-Instruct","messages":[{"role":"user","content":"Explain QLoRA in one paragraph."}],"stream":true}'
 ```
 
-Set `SEISO_ALLOW_OPENAI_TOOLS=true` for tool calling on this endpoint.
+Set `SEISO_ALLOW_COMPAT_TOOLS=true` for tool calling on this endpoint (legacy alias: `SEISO_ALLOW_OPENAI_TOOLS`).
 
 ---
 
@@ -604,7 +604,7 @@ Seiso is **secure by default** for single-user localhost use. Review every flag 
 | `SEISO_ALLOW_REMOTE=false` | off | Binds Forge to `127.0.0.1` only |
 | `SEISO_ALLOW_REMOTE=true` | — | Allows LAN/WAN binding; requires `SEISO_REMOTE_ACK=1` |
 | `SEISO_REMOTE_ACK=1` | — | Required acknowledgement to bind beyond localhost |
-| `SEISO_REMOTE_DANGEROUS_ACK=1` | — | Required for remote + tools/code-exec/openai-tools |
+| `SEISO_REMOTE_DANGEROUS_ACK=1` | — | Required for remote + tools/code-exec/compat-tools |
 | `SEISO_TRUST_PROXY=true` | — | Honor `X-Forwarded-*` only from `SEISO_TRUSTED_PROXY_IPS` |
 | `SEISO_TRUSTED_PROXY_IPS` | — | Comma-separated proxy IPs/CIDRs (e.g. `127.0.0.1,::1`) |
 | `SEISO_SECURE_COOKIES=true` | — | Secure cookies when TLS is terminated upstream |
@@ -617,7 +617,7 @@ Deploy configs: [`deploy/`](deploy/) · Guide: [docs/deployment/reverse-proxy.md
 |----------|---------|
 | `SEISO_ALLOW_TOOLS=true` | Web search, artifact writes |
 | `SEISO_ALLOW_CODE_EXEC=true` | Sandboxed `execute_code` tool |
-| `SEISO_ALLOW_OPENAI_TOOLS=true` | Tool calling on `/v1/chat/completions` |
+| `SEISO_ALLOW_COMPAT_TOOLS=true` | Tool calling on Compat API `/v1/chat/completions` |
 
 ### Path sandbox & tenant isolation
 
@@ -640,7 +640,7 @@ Outbound provider calls block private/metadata hosts, require HTTPS for remote e
 export SEISO_ALLOW_REMOTE=false
 export SEISO_ALLOW_TOOLS=false
 export SEISO_ALLOW_CODE_EXEC=false
-export SEISO_ALLOW_OPENAI_TOOLS=false
+export SEISO_ALLOW_COMPAT_TOOLS=false
 export SEISO_SECRET_KEY="$(openssl rand -hex 32)"
 ```
 

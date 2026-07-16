@@ -225,7 +225,7 @@ export function preloadWithProgress(
     );
     bindAbort(signal, abort, promise).catch((err) => {
       onProgress?.(null);
-      if (!(err instanceof DOMException && err.name === "AbortError")) reject(err);
+      reject(err);
     });
   });
 }

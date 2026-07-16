@@ -60,12 +60,23 @@ class KernelPatchSession:
         for module in reversed(self._modules):
             if hasattr(module, "_seiso_orig_forward"):
                 module.forward = module._seiso_orig_forward  # type: ignore[method-assign]
-                delattr(module, "_seiso_orig_forward")
                 restored += 1
+            _clear_patch_markers(module)
             _unregister_module(module)
         self._modules.clear()
         self._restored = True
         return restored
+
+
+def _clear_patch_markers(module: Any) -> None:
+    for attr in (
+        "_seiso_orig_forward",
+        "_seiso_residual_norm_forward",
+        "_seiso_residual_decoder_forward",
+        "_seiso_residual",
+    ):
+        if hasattr(module, attr):
+            delattr(module, attr)
 
 
 def restore_kernel_patches(model: Any | None = None) -> int:
@@ -87,8 +98,8 @@ def restore_kernel_patches(model: Any | None = None) -> int:
         for module in modules:
             if hasattr(module, "_seiso_orig_forward"):
                 module.forward = module._seiso_orig_forward  # type: ignore[method-assign]
-                delattr(module, "_seiso_orig_forward")
                 restored += 1
+            _clear_patch_markers(module)
         # PeftModel / compile wrappers use a different id than register_patch.
         if _PATCH_REGISTRY:
             restored += restore_kernel_patches()
@@ -98,8 +109,8 @@ def restore_kernel_patches(model: Any | None = None) -> int:
         for module in modules:
             if hasattr(module, "_seiso_orig_forward"):
                 module.forward = module._seiso_orig_forward  # type: ignore[method-assign]
-                delattr(module, "_seiso_orig_forward")
                 restored += 1
+            _clear_patch_markers(module)
     _PATCH_REGISTRY.clear()
     return restored
 

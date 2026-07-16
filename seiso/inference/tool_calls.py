@@ -83,17 +83,19 @@ class ToolCallDeltaBuffer:
                     target["name"] = name
                 arguments = function.get("arguments")
                 if arguments is not None:
-                    if isinstance(arguments, dict) and not target.get("arguments"):
+                    if isinstance(arguments, dict):
+                        # Full argument objects replace (providers often resend
+                        # the complete dict); never stringify+concat.
                         target["arguments"] = arguments
-                    else:
+                    elif isinstance(arguments, str):
                         current_arguments = target.get("arguments") or ""
                         if isinstance(current_arguments, dict):
                             current_arguments = json.dumps(
                                 current_arguments, separators=(",", ":")
                             )
-                        if isinstance(arguments, dict):
-                            arguments = json.dumps(arguments, separators=(",", ":"))
-                        target["arguments"] = str(current_arguments) + str(arguments)
+                        target["arguments"] = str(current_arguments) + arguments
+                    else:
+                        target["arguments"] = arguments
             elif normalize_tool_call(raw) is not None:
                 immediate.append(raw)
         return tool_calls_to_text(immediate)

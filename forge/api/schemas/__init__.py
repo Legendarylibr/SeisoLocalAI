@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from forge.api.schemas.compat import ChatCompletionRequest, ChatMessage
 from forge.api.schemas.export import (
     ExportStartRequest,
     HubPrecheckRequest,
@@ -9,7 +10,6 @@ from forge.api.schemas.export import (
 )
 from forge.api.schemas.inference import ChatRequest, PreloadRequest, ThreadCreate
 from forge.api.schemas.models import LocalModelCreate, ModelDownloadRequest, ModelScanRequest
-from forge.api.schemas.openai import ChatCompletionRequest, ChatMessage
 from forge.api.schemas.training import (
     CloudGpuCredentialCreate,
     DatasetValidationRequest,

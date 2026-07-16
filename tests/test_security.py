@@ -52,6 +52,17 @@ def test_safe_join_prefix_bypass_blocked(tmp_path: Path):
         safe_join(base, "..", "sandbox-evil", "file.txt")
 
 
+def test_safe_join_embedded_traversal_blocked(tmp_path: Path):
+    """A single segment must not smuggle ../ past safe_join."""
+    base = tmp_path / "sandbox"
+    (base / "uploads" / "attacker").mkdir(parents=True)
+    (base / "knowledge" / "victim").mkdir(parents=True)
+    with pytest.raises(SecurityError):
+        safe_join(base, "uploads", "attacker/../../knowledge/victim")
+    with pytest.raises(SecurityError):
+        safe_join(base, "alice/../bob")
+
+
 def test_sanitize_filename():
     assert "evil" in sanitize_filename("../../evil")
     assert sanitize_filename("") == "unnamed"

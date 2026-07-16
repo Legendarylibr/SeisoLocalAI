@@ -1,7 +1,7 @@
 """Shared guards for inference generation routes.
 
 Used by both the native chat routes (``inference.py``) and the
-OpenAI-compatible routes (``openai.py``) so the GPU-availability check and the
+Compat API routes (``compat.py``) so the GPU-availability check and the
 per-user generation gate stay in a single place.
 """
 

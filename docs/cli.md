@@ -39,7 +39,7 @@ seiso forge --port 8766       # custom port
 
 Requires `forge-ui/dist` — build with `cd forge-ui && npm run build` or use `start`.
 
-Open **http://127.0.0.1:8765**. OpenAI-compatible chat: **http://127.0.0.1:8765/v1/chat/completions** (no `/api` prefix).
+Open **http://127.0.0.1:8765**. Compat API chat: **http://127.0.0.1:8765/v1/chat/completions** (no `/api` prefix).
 
 ## `seiso doctor`
 

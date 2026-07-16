@@ -1,4 +1,4 @@
-"""Scoped authentication for OpenAI-compatible /v1 endpoints."""
+"""Scoped authentication for Compat API /v1 endpoints."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from forge.security.auth import InvalidTokenError, bearer_scheme, decode_token
 _INFERENCE_KEY_PREFIX = "seiso_sk_"
 
 
-async def get_openai_user_id(
+async def get_compat_user_id(
     request: Request,
     creds: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
     settings: Annotated[ForgeSettings, Depends(get_settings)],

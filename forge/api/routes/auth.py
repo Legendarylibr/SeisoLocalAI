@@ -37,12 +37,13 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 class RegisterRequest(BaseModel):
-    password: str = Field(min_length=8, max_length=128)
+    # bcrypt truncates / rejects above 72 bytes — keep schema aligned.
+    password: str = Field(min_length=8, max_length=72)
     storage_mode: str | None = Field(default=None, pattern="^(persistent|ephemeral)$")
 
 
 class LoginRequest(BaseModel):
-    password: str = Field(min_length=1, max_length=128)
+    password: str = Field(min_length=1, max_length=72)
 
 
 class ResetSessionRequest(BaseModel):

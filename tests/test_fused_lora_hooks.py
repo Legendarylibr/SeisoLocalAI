@@ -60,7 +60,9 @@ def test_residual_patches_only_fused_decoder_classes(monkeypatch):
     assert patched_decoders == ["LlamaDecoderLayer"]
     assert meta["fused_residual_norm_patched"] == 1
     assert meta["fused_residual_decoder_patched"] == 1
-    assert "Gemma2DecoderLayer" in _DECODER_LAYER_CLASSES
+    # Gemma norm/MLP contracts differ from Llama-style fused kernels; the
+    # class must be excluded from both patch sets entirely.
+    assert "Gemma2DecoderLayer" not in _DECODER_LAYER_CLASSES
     assert "Gemma2DecoderLayer" not in _FUSED_RESIDUAL_DECODER_CLASSES
 
 

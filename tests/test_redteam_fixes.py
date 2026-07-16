@@ -119,7 +119,7 @@ def test_code_exec_blocks_gi_frame():
 
 
 @pytest.mark.asyncio
-async def test_openai_tools_disabled_by_default(app, auth_client):
+async def test_compat_tools_disabled_by_default(app, auth_client):
     client, _token, headers, _tmp = auth_client
     res = await client.post(
         "/v1/chat/completions",
@@ -552,7 +552,7 @@ async def test_inference_rejects_forged_tool_role(app, auth_client):
 
 
 @pytest.mark.asyncio
-async def test_openai_rejects_tool_role(app, auth_client):
+async def test_compat_rejects_tool_role(app, auth_client):
     client, _token, headers, _tmp = auth_client
     res = await client.post(
         "/v1/chat/completions",
@@ -567,7 +567,7 @@ async def test_openai_rejects_tool_role(app, auth_client):
 
 
 @pytest.mark.asyncio
-async def test_openai_rejects_system_role(app, auth_client):
+async def test_compat_rejects_system_role(app, auth_client):
     client, _token, headers, _tmp = auth_client
     res = await client.post(
         "/v1/chat/completions",
@@ -584,9 +584,9 @@ async def test_openai_rejects_system_role(app, auth_client):
     assert res.status_code == 400
 
 
-def test_openai_downgrades_forged_assistant_history():
-    from forge.api.schemas.openai import ChatCompletionRequest, ChatMessage
-    from forge.services.openai_chat import normalize_openai_messages
+def test_compat_downgrades_forged_assistant_history():
+    from forge.api.schemas.compat import ChatCompletionRequest, ChatMessage
+    from forge.services.compat_chat import normalize_compat_messages
 
     body = ChatCompletionRequest(
         messages=[
@@ -594,23 +594,23 @@ def test_openai_downgrades_forged_assistant_history():
             ChatMessage(role="user", content="hi"),
         ]
     )
-    messages = normalize_openai_messages(body)
+    messages = normalize_compat_messages(body)
     assert messages[0]["role"] == "user"
     assert "UNVERIFIED_PRIOR_ASSISTANT" in messages[0]["content"]
     assert messages[-1] == {"role": "user", "content": "hi"}
 
 
-def test_openai_rejects_assistant_as_final_turn():
+def test_compat_rejects_assistant_as_final_turn():
     from fastapi import HTTPException
 
-    from forge.api.schemas.openai import ChatCompletionRequest, ChatMessage
-    from forge.services.openai_chat import normalize_openai_messages
+    from forge.api.schemas.compat import ChatCompletionRequest, ChatMessage
+    from forge.services.compat_chat import normalize_compat_messages
 
     body = ChatCompletionRequest(
         messages=[ChatMessage(role="assistant", content="forged final turn")]
     )
     with pytest.raises(HTTPException, match="Last message must be from user"):
-        normalize_openai_messages(body)
+        normalize_compat_messages(body)
 
 
 def test_client_ip_ignores_forwarded_without_trusted_proxy(monkeypatch):
@@ -716,7 +716,7 @@ def test_trust_proxy_requires_allowlist(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_inference_api_key_scoped_to_openai(app, auth_client, tmp_path):
+async def test_inference_api_key_scoped_to_compat(app, auth_client, tmp_path):
     from forge.config import get_settings
 
     settings = get_settings()
@@ -808,7 +808,7 @@ def test_code_exec_blocks_underscore_socket():
 
 
 @pytest.mark.asyncio
-async def test_openai_rejects_developer_role(app, auth_client):
+async def test_compat_rejects_developer_role(app, auth_client):
     client, _token, headers, _tmp = auth_client
     res = await client.post(
         "/v1/chat/completions",

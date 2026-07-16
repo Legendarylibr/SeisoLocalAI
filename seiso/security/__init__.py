@@ -46,8 +46,12 @@ def safe_join(base: Path, *parts: str) -> Path:
     for part in parts:
         if not part or part in (".", ".."):
             raise SecurityError(f"Invalid path segment: {part!r}")
-        if _UNSAFE_SEGMENT.search(part):
+        # Reject separators / parent refs inside a single segment so callers cannot
+        # smuggle ``alice/../bob`` past the exact ``"."`` / ``".."`` checks.
+        if "/" in part or "\\" in part or _UNSAFE_SEGMENT.search(part):
             raise SecurityError(f"Unsafe characters in segment: {part!r}")
+        if ".." in Path(part).parts:
+            raise SecurityError(f"Invalid path segment: {part!r}")
         candidate = (candidate / part).resolve()
         if not _is_within(base, candidate):
             raise SecurityError("Path traversal detected")

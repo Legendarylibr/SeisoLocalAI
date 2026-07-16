@@ -50,7 +50,7 @@ def detect_training_layout() -> GpuLayout:
             world_size=1, local_rank=0, device="cpu", use_ddp=False, device_count=0
         )
 
-    local_rank = int(os.environ.get("LOCAL_RANK", os.environ.get("RANK", "0")))
+    local_rank = int(os.environ.get("LOCAL_RANK", "0"))
     world_size = int(os.environ.get("WORLD_SIZE", "1"))
     use_ddp = world_size > 1
     device = f"cuda:{local_rank}" if use_ddp else "cuda"
@@ -172,6 +172,12 @@ def configure_distributed_training_args(
         args["ddp_find_unused_parameters"] = bool(
             getattr(config, "ddp_find_unused_parameters", False)
         )
+        # Expert LoRA leaves unused params each step — force find_unused for MoE.
+        if getattr(config, "moe_finetune", False) or getattr(config, "is_moe", False):
+            args["ddp_find_unused_parameters"] = True
+        model_id = str(getattr(config, "model_id", "") or "")
+        if "moe" in model_id.lower() or "mixtral" in model_id.lower():
+            args["ddp_find_unused_parameters"] = True
     return args
 
 

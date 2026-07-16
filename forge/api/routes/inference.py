@@ -500,8 +500,13 @@ async def chat(
         prov = await db.get_provider(body.provider_id, user_id)
         if not prov:
             raise HTTPException(404, "Provider not found")
-        if prov["provider_type"].lower() in {"openai", "anthropic"}:
-            raise HTTPException(400, "Frontier cloud providers are not supported")
+        from forge.providers.router import LOCAL_PROVIDER_TYPES
+
+        ptype = prov["provider_type"].lower()
+        if ptype not in LOCAL_PROVIDER_TYPES:
+            raise HTTPException(
+                400, f"Unsupported chat provider type: {prov['provider_type']}"
+            )
         payload["provider"] = {
             "provider_type": prov["provider_type"],
             "config": json.loads(prov["config_json"]),

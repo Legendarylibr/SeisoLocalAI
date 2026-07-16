@@ -129,7 +129,7 @@ Details: [inference/backends.md](inference/backends.md).
 
 ### Connect external tools (Cursor, Continue, etc.)
 
-With Forge running, point any OpenAI-compatible client at:
+With Forge running, point any chat-completions client at:
 
 ```text
 Base URL: http://127.0.0.1:8765/v1

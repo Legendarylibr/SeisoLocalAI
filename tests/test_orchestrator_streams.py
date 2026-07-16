@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 
 import pytest
@@ -100,6 +101,27 @@ def test_metric_buffer_is_capped_without_manual_eviction(tmp_path):
     assert list(orchestrator._metric_buffers[job_id]) == [
         {"step": idx} for idx in range(2, MAX_METRIC_POINTS + 2)
     ]
+
+
+@pytest.mark.asyncio
+async def test_live_log_stream_survives_buffer_wrap(tmp_path):
+    """Subscribers must keep receiving lines after maxlen deque wraps."""
+    orchestrator = DummyOrchestrator(tmp_path)
+    job_id = orchestrator.create_job(user_id="u1")
+
+    async def _produce():
+        await asyncio.sleep(0.01)
+        for idx in range(MAX_LOG_LINES + 5):
+            orchestrator._emit_log(job_id, f"line {idx}")
+            await asyncio.sleep(0)
+        orchestrator.get_job(job_id).status = JobStatus.COMPLETED  # type: ignore[union-attr]
+        orchestrator._finish_logs(job_id)
+
+    producer = asyncio.create_task(_produce())
+    lines = [line async for line in orchestrator.stream_logs(job_id, replay_buffer=False)]
+    await producer
+    assert f"line {MAX_LOG_LINES + 4}" in lines
+    assert len(lines) >= 5
 
 
 @pytest.mark.asyncio
