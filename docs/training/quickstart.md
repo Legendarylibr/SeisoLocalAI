@@ -183,8 +183,27 @@ materializes `output_dir/slime_generated.jsonl` automatically:
 | `rollout_backend` | `hf` (default, colocated generate) \| `sglang` \| `auto` |
 | `sglang_base_url` | Required for `sglang` (e.g. `http://127.0.0.1:30000`) |
 
-**Single-GPU:** `rollout_backend: hf` (colocated generate — always on-policy).  
-**Multi-GPU:** `rollout_backend: sglang` + Accelerate DDP. After each optimizer step, rank0 exports HF weights and calls SGLang `POST /update_weights_from_disk` (`sglang_sync_weights: true`, slime disk transport). Logprobs are recomputed on the actor.
+**Single-GPU:** `scripts/run_slime_single_gpu.sh` — `rollout_backend: hf` (colocated, on-policy).
+
+**Multi-GPU:** `scripts/run_slime_ddp.sh [nproc] [config]` — SGLang generate + DDP policy. After each optimizer step rank0 exports weights and hot-reloads **all** engines:
+
+| Field | Meaning |
+|-------|---------|
+| `sglang_sync_weights` | Enable post-step hot-reload (default true) |
+| `sglang_weight_mode` | `full` (always HF ckpt) or `delta` (skip if unchanged; try slime `/pull_weights`, else full) |
+| `sglang_weight_keep` | Keep last N `weight_v*` dirs |
+| `sglang_base_url` | One URL or comma-separated multi-engine list |
+| `sglang_engine_urls` | Optional extra engine list |
+
+```bash
+# terminal A
+python -m sglang.launch_server --model-path Qwen/Qwen2.5-0.5B-Instruct --port 30000
+# terminal B
+scripts/run_slime_ddp.sh 2 configs/example_training_slime_ddp.yaml
+```
+
+SGLang must read `output_dir/sglang_weight_sync/` (shared FS on multi-node).  
+Not included (use upstream slime): Megatron TP/PP, Ray placement, NCCL tensor broadcast.
 
 Streams:
 

@@ -229,6 +229,9 @@ class TrainConfig(BaseModel):
     sglang_max_workers: int = Field(default=8, ge=1)
     sglang_sync_weights: bool = True
     sglang_weight_dir: str = "sglang_weight_sync"
+    sglang_weight_mode: str = "full"
+    sglang_weight_keep: int = Field(default=2, ge=1)
+    sglang_engine_urls: list[str] | str | None = None
     require_thinking_trace: bool = True
     thinking_instruction: str = Field(
         default="Show your reasoning in <think>...</think>, then give the final answer.",
@@ -407,6 +410,9 @@ class TrainConfig(BaseModel):
             sglang_max_workers=self.sglang_max_workers,
             sglang_sync_weights=self.sglang_sync_weights,
             sglang_weight_dir=self.sglang_weight_dir,
+            sglang_weight_mode=self.sglang_weight_mode,
+            sglang_weight_keep=self.sglang_weight_keep,
+            sglang_engine_urls=self.sglang_engine_urls,
             require_thinking_trace=self.require_thinking_trace,
             thinking_instruction=self.thinking_instruction,
             outcome_reward_weight=self.outcome_reward_weight,

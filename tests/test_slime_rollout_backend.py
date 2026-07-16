@@ -147,6 +147,36 @@ def test_sync_sglang_weights_noop_for_hf_backend(tmp_path: Path):
     assert path is None
 
 
+def test_sglang_engine_urls_dedupes_comma_and_list(tmp_path: Path):
+    from seiso.slime_single_gpu.rollout_backend import sglang_engine_urls
+
+    cfg = _cfg(
+        tmp_path,
+        rollout_backend="sglang",
+        sglang_base_url="http://127.0.0.1:30000,http://127.0.0.1:30001/",
+        sglang_engine_urls=["http://127.0.0.1:30001", "http://127.0.0.1:30002"],
+    )
+    urls = sglang_engine_urls(cfg)
+    assert urls == [
+        "http://127.0.0.1:30000",
+        "http://127.0.0.1:30001",
+        "http://127.0.0.1:30002",
+    ]
+
+
+def test_prune_weight_versions_keeps_last_n(tmp_path: Path):
+    from seiso.slime_single_gpu.rollout_backend import _prune_weight_versions
+
+    root = tmp_path / "weights"
+    for name in ("weight_v000001", "weight_v000002", "weight_v000003"):
+        d = root / name
+        d.mkdir(parents=True)
+        (d / "x.txt").write_text("ok", encoding="utf-8")
+    _prune_weight_versions(root, keep=2)
+    left = sorted(p.name for p in root.iterdir())
+    assert left == ["weight_v000002", "weight_v000003"]
+
+
 def test_example_ddp_config_requests_sglang():
     from seiso.training.config import TrainConfig
 

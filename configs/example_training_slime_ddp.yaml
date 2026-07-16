@@ -39,9 +39,13 @@ sglang_model: ""
 sglang_api_key: "EMPTY"
 sglang_timeout_s: 120
 sglang_max_workers: 8
-# After each optimizer step: write HF weights + POST /update_weights_from_disk
+# After each optimizer step: write HF weights + hot-reload all engines
 sglang_sync_weights: true
 sglang_weight_dir: sglang_weight_sync
+sglang_weight_mode: full   # full | delta (delta tries /pull_weights, else full)
+sglang_weight_keep: 2
+# Optional extra engines (or comma-separate sglang_base_url):
+# sglang_engine_urls: ["http://127.0.0.1:30001"]
 apply_chat_template: true
 require_thinking_trace: true
 thinking_instruction: "Show your reasoning in <think>...</think>, then give the final answer."

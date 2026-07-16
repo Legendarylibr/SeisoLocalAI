@@ -100,10 +100,16 @@ class SingleGpuSlimeConfig:
     sglang_api_key: str = "EMPTY"
     sglang_timeout_s: float = 120.0
     sglang_max_workers: int = 8
-    # After each optimizer step, rank0 writes HF weights and calls SGLang
-    # update_weights_from_disk (slime disk transport). Keep true for on-policy multi-GPU.
+    # After each optimizer step, rank0 writes HF weights and hot-reloads SGLang
+    # (slime disk transport). Keep true for on-policy multi-GPU rollouts.
     sglang_sync_weights: bool = True
     sglang_weight_dir: str = "sglang_weight_sync"
+    # full = always complete HF ckpt; delta = skip if unchanged, try /pull_weights then full
+    sglang_weight_mode: str = "full"
+    # Keep last N weight_v* directories under sglang_weight_dir
+    sglang_weight_keep: int = 2
+    # Extra engines (comma list or YAML list); sglang_base_url may also be comma-separated
+    sglang_engine_urls: list[str] | str | None = None
     require_thinking_trace: bool = True
     thinking_instruction: str = (
         "Show your reasoning in <think>...</think>, then give the final answer."
@@ -269,3 +275,8 @@ class SingleGpuSlimeConfig:
         )
 
         validate_rollout_backend_config(self)
+        mode = str(self.sglang_weight_mode or "full").lower()
+        if mode not in {"full", "delta"}:
+            raise ValueError("sglang_weight_mode must be 'full' or 'delta'")
+        if self.sglang_weight_keep < 1:
+            raise ValueError("sglang_weight_keep must be >= 1")

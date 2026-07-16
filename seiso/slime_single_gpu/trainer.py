@@ -238,6 +238,9 @@ def train_single_gpu_slime(config: SingleGpuSlimeConfig) -> Path:
     empty_trainable_batches = 0
     optimizer.zero_grad(set_to_none=True)
     rng = random.Random(config.seed)
+    from seiso.slime_single_gpu.rollout_backend import WeightSyncState
+
+    weight_sync_state = WeightSyncState()
 
     for epoch in range(config.epochs):
         sample_batches = iter(_iter_sample_batches(config, rng, dist_ctx, torch))
@@ -343,6 +346,7 @@ def train_single_gpu_slime(config: SingleGpuSlimeConfig) -> Path:
                     config=config,
                     dist_ctx=dist_ctx,
                     step=global_step + 1,
+                    sync_state=weight_sync_state,
                 )
 
             decision = auto_stop.update(global_step, stats)
@@ -384,6 +388,7 @@ def train_single_gpu_slime(config: SingleGpuSlimeConfig) -> Path:
                         config=config,
                         dist_ctx=dist_ctx,
                         step=global_step + 1,
+                        sync_state=weight_sync_state,
                     )
                 _write_training_state(config, global_step, "max_steps", auto_stop, dist_ctx)
                 _save_distributed(model, tokenizer, final_output_dir, dist_ctx)
@@ -422,6 +427,7 @@ def train_single_gpu_slime(config: SingleGpuSlimeConfig) -> Path:
             config=config,
             dist_ctx=dist_ctx,
             step=global_step,
+            sync_state=weight_sync_state,
         )
     _write_training_state(config, global_step, "complete", auto_stop, dist_ctx)
     _save_distributed(model, tokenizer, final_output_dir, dist_ctx)
@@ -1788,11 +1794,12 @@ def _sync_rollout_engine_weights(
     config: SingleGpuSlimeConfig,
     dist_ctx: _DistributedSlimeContext,
     step: int,
+    sync_state: Any | None = None,
 ) -> None:
-    """Push actor weights to SGLang after optimizer steps (multi-GPU + single-GPU sglang).
+    """Push actor weights to SGLang after optimizer steps (single- + multi-GPU).
 
-    Uses slime's disk transport: write HF checkpoint, then
-    ``POST /update_weights_from_disk``. No-op for ``rollout_backend=hf``.
+    Uses slime disk transport: full HF checkpoint and/or delta + multi-engine
+    ``update_weights_from_disk`` / ``pull_weights``. No-op for ``rollout_backend=hf``.
     """
     from seiso.slime_single_gpu.rollout_backend import (
         resolve_rollout_backend,
@@ -1813,15 +1820,19 @@ def _sync_rollout_engine_weights(
             step=step,
             is_main=dist_ctx.is_main,
             active_backend=backend,
+            sync_state=sync_state,
         )
         if dist_ctx.is_main and path is not None and config.log_every_steps:
-            # Lightweight stdout for operators; metrics JSONL stays numeric-only.
-            print(f"sglang_weight_sync step={step} path={path}", flush=True)
+            mode = getattr(sync_state, "last_mode", None) if sync_state else None
+            print(
+                f"sglang_weight_sync step={step} mode={mode} path={path}",
+                flush=True,
+            )
     except Exception as exc:
         # Fail closed: multi-GPU SGLang without weight sync is off-policy garbage.
         raise RuntimeError(
             f"SGLang weight sync failed at step={step}: {exc}. "
-            "Ensure the server exposes /update_weights_from_disk and can read "
+            "Ensure each engine exposes /update_weights_from_disk and can read "
             f"{config.output_dir / config.sglang_weight_dir}. "
             "Set sglang_sync_weights: false only for debugging."
         ) from exc

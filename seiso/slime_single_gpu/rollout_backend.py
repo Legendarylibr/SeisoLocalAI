@@ -11,6 +11,7 @@ model outputs.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import urllib.error
 import urllib.request
@@ -352,6 +353,27 @@ class SGLangRolloutClient:
             payload["weight_version"] = weight_version
         return self._post_json("/update_weights_from_disk", payload)
 
+    def pull_weights(
+        self,
+        *,
+        local_checkpoint_dir: str,
+        source_dir: str,
+        target_version: int,
+    ) -> dict[str, Any]:
+        """Slime-patched engines: apply disk delta then local reload.
+
+        Vanilla SGLang does not implement this endpoint — callers must fall back
+        to ``update_weights_from_disk`` with a full HF checkpoint.
+        """
+        return self._post_json(
+            "/pull_weights",
+            {
+                "local_checkpoint_dir": local_checkpoint_dir,
+                "source_dir": source_dir,
+                "target_version": int(target_version),
+            },
+        )
+
     def flush_cache(self) -> dict[str, Any] | None:
         """Best-effort KV cache flush after a weight update."""
         try:
@@ -391,6 +413,28 @@ class SGLangRolloutClient:
         return {"result": parsed}
 
 
+def sglang_engine_urls(config: SingleGpuSlimeConfig) -> list[str]:
+    """Resolve one or more SGLang engine base URLs (comma-separated or multi field)."""
+    urls: list[str] = []
+    primary = str(getattr(config, "sglang_base_url", "") or "").strip()
+    if primary:
+        urls.extend(part.strip() for part in primary.split(",") if part.strip())
+    extra = getattr(config, "sglang_engine_urls", None) or []
+    if isinstance(extra, str):
+        urls.extend(part.strip() for part in extra.split(",") if part.strip())
+    elif isinstance(extra, (list, tuple)):
+        urls.extend(str(u).strip() for u in extra if str(u).strip())
+    # de-dupe, preserve order
+    seen: set[str] = set()
+    out: list[str] = []
+    for url in urls:
+        key = url.rstrip("/")
+        if key not in seen:
+            seen.add(key)
+            out.append(key)
+    return out
+
+
 def export_actor_checkpoint(model, tokenizer, output_dir: Any) -> str:
     """Write a full HF checkpoint suitable for SGLang disk weight reload.
 
@@ -419,6 +463,128 @@ def export_actor_checkpoint(model, tokenizer, output_dir: Any) -> str:
     return str(path.resolve())
 
 
+def _actor_state_cpu(model) -> dict[str, Any]:
+    """CPU snapshot of actor weights (merged view for PEFT when possible)."""
+    unwrapped = getattr(model, "module", model)
+    merged = False
+    if hasattr(unwrapped, "merge_adapter"):
+        unwrapped.merge_adapter()
+        merged = True
+    try:
+        target = unwrapped
+        if hasattr(unwrapped, "get_base_model"):
+            target = unwrapped.get_base_model()
+        state = {
+            name: tensor.detach().float().cpu().clone()
+            for name, tensor in target.state_dict().items()
+        }
+    finally:
+        if merged and hasattr(unwrapped, "unmerge_adapter"):
+            unwrapped.unmerge_adapter()
+    return state
+
+
+def _write_delta_payload(
+    *,
+    prev: dict[str, Any],
+    curr: dict[str, Any],
+    out_dir: Any,
+    step: int,
+) -> tuple[str, int, int]:
+    """Write changed tensors as safetensors delta (slime-style disk delta)."""
+    from pathlib import Path
+
+    path = Path(out_dir)
+    path.mkdir(parents=True, exist_ok=True)
+    changed: dict[str, Any] = {}
+    for name, tensor in curr.items():
+        old = prev.get(name)
+        if old is None or old.shape != tensor.shape or not bool((old == tensor).all().item()):
+            changed[name] = tensor
+    # New params only in curr
+    for name, tensor in curr.items():
+        if name not in prev:
+            changed[name] = tensor
+
+    meta = {
+        "format": "seiso_sglang_delta_v1",
+        "step": int(step),
+        "num_tensors_total": len(curr),
+        "num_tensors_changed": len(changed),
+        "tensor_names": sorted(changed),
+    }
+    (path / "delta_meta.json").write_text(
+        json.dumps(meta, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    if changed:
+        try:
+            from safetensors.torch import save_file
+
+            save_file(changed, str(path / "delta.safetensors"))
+        except Exception:
+            # Fallback without safetensors dependency shape
+            import torch
+
+            torch.save(changed, path / "delta.pt")
+    return str(path.resolve()), len(changed), len(curr)
+
+
+def _prune_weight_versions(weight_root: Any, keep: int) -> None:
+    from pathlib import Path
+
+    root = Path(weight_root)
+    if not root.is_dir() or keep < 1:
+        return
+    versions = sorted(
+        [p for p in root.iterdir() if p.is_dir() and p.name.startswith("weight_v")],
+        key=lambda p: p.name,
+    )
+    for old in versions[:-keep]:
+        # best-effort recursive delete
+        for child in sorted(old.rglob("*"), reverse=True):
+            with contextlib.suppress(OSError):
+                if child.is_file() or child.is_symlink():
+                    child.unlink()
+                elif child.is_dir():
+                    child.rmdir()
+        with contextlib.suppress(OSError):
+            old.rmdir()
+
+
+class WeightSyncState:
+    """Mutable rank0 state for full/delta SGLang weight transport."""
+
+    def __init__(self) -> None:
+        self.prev_state: dict[str, Any] | None = None
+        self.last_full_path: str | None = None
+        self.last_mode: str | None = None
+        self.last_changed: int = 0
+
+
+def _broadcast_weights_to_engines(
+    config: SingleGpuSlimeConfig,
+    *,
+    model_path: str,
+    weight_version: str,
+) -> None:
+    engines = sglang_engine_urls(config)
+    if not engines:
+        raise ValueError("sglang_base_url is required for SGLang weight sync")
+    errors: list[str] = []
+    for base in engines:
+        client = SGLangRolloutClient.from_config(config)
+        client.base_url = base
+        try:
+            client.update_weights_from_disk(model_path, weight_version=weight_version)
+            client.flush_cache()
+        except RuntimeError as exc:
+            errors.append(f"{base}: {exc}")
+    if errors:
+        raise RuntimeError(
+            "SGLang weight sync failed on one or more engines: " + "; ".join(errors)
+        )
+
+
 def sync_sglang_weights_from_actor(
     *,
     model,
@@ -427,8 +593,14 @@ def sync_sglang_weights_from_actor(
     step: int,
     is_main: bool,
     active_backend: str | None = None,
+    sync_state: WeightSyncState | None = None,
 ) -> str | None:
-    """Rank-0 export + SGLang hot-reload (slime disk transport).
+    """Rank-0 export + multi-engine SGLang hot-reload (slime disk transport).
+
+    Modes (``sglang_weight_mode``):
+    * ``full`` — always write a complete HF checkpoint + ``update_weights_from_disk``
+    * ``delta`` — skip if no tensors changed; else try slime ``/pull_weights`` with a
+      safetensors delta, falling back to full disk reload on vanilla SGLang
 
     Returns the checkpoint path when a sync ran on this process, else None.
     Non-main ranks return None (caller must barrier).
@@ -441,15 +613,70 @@ def sync_sglang_weights_from_actor(
     if not is_main:
         return None
 
+    mode = str(getattr(config, "sglang_weight_mode", "full") or "full").lower()
+    if mode not in {"full", "delta"}:
+        raise ValueError("sglang_weight_mode must be 'full' or 'delta'")
+
     weight_root = config.output_dir / str(
         getattr(config, "sglang_weight_dir", "sglang_weight_sync") or "sglang_weight_sync"
     )
+    weight_root.mkdir(parents=True, exist_ok=True)
+    version = f"v{int(step)}"
     ckpt_path = weight_root / f"weight_v{int(step):06d}"
-    export_actor_checkpoint(model, tokenizer, ckpt_path)
-    client = SGLangRolloutClient.from_config(config)
-    client.update_weights_from_disk(
-        str(ckpt_path.resolve()),
-        weight_version=f"v{int(step)}",
+    state = sync_state or WeightSyncState()
+    keep = int(getattr(config, "sglang_weight_keep", 2) or 2)
+
+    curr = _actor_state_cpu(model)
+
+    # ---- delta: no-op when weights unchanged ----
+    if mode == "delta" and state.prev_state is not None:
+        delta_dir = weight_root / f"delta_v{int(step):06d}"
+        delta_path, n_changed, n_total = _write_delta_payload(
+            prev=state.prev_state,
+            curr=curr,
+            out_dir=delta_dir,
+            step=step,
+        )
+        state.last_changed = n_changed
+        if n_changed == 0:
+            state.last_mode = "delta_skip"
+            return state.last_full_path or delta_path
+
+        # Try slime-patched /pull_weights on each engine (apply delta → local full).
+        if state.last_full_path:
+            pull_ok = True
+            for base in sglang_engine_urls(config):
+                client = SGLangRolloutClient.from_config(config)
+                client.base_url = base
+                try:
+                    client.pull_weights(
+                        local_checkpoint_dir=state.last_full_path,
+                        source_dir=delta_path,
+                        target_version=int(step),
+                    )
+                except RuntimeError:
+                    pull_ok = False
+                    break
+            if pull_ok:
+                # Patched engines already reloaded; still poke flush on each.
+                for base in sglang_engine_urls(config):
+                    client = SGLangRolloutClient.from_config(config)
+                    client.base_url = base
+                    client.flush_cache()
+                state.prev_state = curr
+                state.last_mode = "delta"
+                _prune_weight_versions(weight_root, keep)
+                return delta_path
+        # Vanilla SGLang: fall through to full checkpoint.
+
+    # ---- full HF checkpoint (default + delta fallback) ----
+    used_path = export_actor_checkpoint(model, tokenizer, ckpt_path)
+    _broadcast_weights_to_engines(
+        config, model_path=used_path, weight_version=version
     )
-    client.flush_cache()
-    return str(ckpt_path.resolve())
+    state.prev_state = curr
+    state.last_full_path = used_path
+    state.last_mode = "full"
+    state.last_changed = 0
+    _prune_weight_versions(weight_root, keep)
+    return used_path
