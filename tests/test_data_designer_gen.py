@@ -144,13 +144,11 @@ def test_materialize_for_slime_config_uses_designer(tmp_path: Path):
 
 def test_trainer_uses_data_designer_only_for_multigpu_vllm(tmp_path: Path):
     """_maybe_materialize_data_gen routes multigpu vLLM to Data Designer."""
-    from dataclasses import replace
-
+    from seiso.rl_verify.data_gen import DataGenResult
     from seiso.slime_single_gpu.trainer import (
         _DistributedSlimeContext,
         _maybe_materialize_data_gen,
     )
-    from seiso.rl_verify.data_gen import DataGenResult
 
     cfg = _cfg(
         tmp_path,
@@ -207,11 +205,11 @@ def test_trainer_uses_data_designer_only_for_multigpu_vllm(tmp_path: Path):
 
 
 def test_trainer_keeps_seiso_data_gen_for_hf(tmp_path: Path):
+    from seiso.rl_verify.data_gen import DataGenResult
     from seiso.slime_single_gpu.trainer import (
         _DistributedSlimeContext,
         _maybe_materialize_data_gen,
     )
-    from seiso.rl_verify.data_gen import DataGenResult
 
     cfg = _cfg(
         tmp_path,

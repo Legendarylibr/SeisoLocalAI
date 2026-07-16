@@ -113,10 +113,8 @@ def should_use_data_designer(
     mode = normalize_data_designer_mode(getattr(config, "data_designer", "auto"))
     if mode == "off":
         return False
-    if not is_multigpu_vllm_run(config, world_size=world_size):
-        return False
-    # mode is auto or on — both require the multigpu vllm gate above.
-    return True
+    # mode is auto or on — both require the multigpu vllm gate.
+    return is_multigpu_vllm_run(config, world_size=world_size)
 
 
 def ensure_openai_v1_endpoint(base_url: str) -> str:
@@ -395,7 +393,7 @@ def generate_with_data_designer(cfg: DataDesignerGenConfig) -> DataGenResult:
         try:
             from data_designer.config.run_config import RunConfig
 
-            designer.set_run_config(RunConfig())  # type: ignore[arg-type]
+            designer.set_run_config(RunConfig())
         except Exception:
             pass
 
