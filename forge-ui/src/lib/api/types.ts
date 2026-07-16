@@ -129,6 +129,10 @@ export type InferenceModelOption = {
   chat_safety_note?: string;
   architecture?: string | null;
   is_moe?: boolean;
+  total_params_b?: number | null;
+  active_params_b?: number | null;
+  moe_load_note?: string | null;
+  moe_architecture?: "sparse" | "dense";
   uses_swa?: boolean;
   hardware_fit?: "ideal" | "good" | "tight" | "unlikely";
   hardware_fit_label?: string;
@@ -170,6 +174,11 @@ export type CatalogModel = {
   est_vram_mb?: number;
   memory_load_blocked?: boolean;
   memory_load_blocked_reason?: string | null;
+  is_moe?: boolean;
+  total_params_b?: number | null;
+  active_params_b?: number | null;
+  moe_load_note?: string | null;
+  moe_architecture?: "sparse" | "dense";
 };
 
 export type TrainingDefaults = {
@@ -438,6 +447,9 @@ export type TrainingRecommendations = {
   model_params?: string | null;
   est_training_vram_gb?: number | null;
   hardware_tier?: string;
+  is_moe?: boolean;
+  total_params_b?: number | null;
+  active_params_b?: number | null;
   dataset_analysis?: DatasetAnalysis;
 };
 

@@ -8,6 +8,7 @@ from typing import Any, Literal
 
 from seiso.models.loader import LoadOptions, ModelKind, load_model
 from seiso.models.lora_targets import resolve_lora_target_modules
+from seiso.models.moe_sizing import is_moe_model
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +75,7 @@ class SeisoModel:
         use_gradient_checkpointing: bool = True,
         use_rslora: bool = False,
         model_id: str = "",
+        freeze_moe_router: bool = True,
     ) -> Any:
         """Apply LoRA adapters via PEFT."""
         from peft import LoraConfig, TaskType, get_peft_model
@@ -93,6 +95,20 @@ class SeisoModel:
             if hasattr(model.config, "use_cache"):
                 model.config.use_cache = False
 
+        moe_model = is_moe_model(model_id, model)
+        lora_kwargs: dict[str, Any] = {}
+        if moe_model and freeze_moe_router:
+            lora_kwargs["exclude_modules"] = [
+                "gate",
+                "router",
+                "wgate",
+                "coefficient",
+            ]
+            for name, parameter in model.named_parameters():
+                tail = name.rsplit(".", 2)[-2:]
+                if any(part in {"gate", "router", "wgate", "coefficient"} for part in tail):
+                    parameter.requires_grad_(False)
+
         lora_config = LoraConfig(
             r=r,
             lora_alpha=lora_alpha or r * 2,
@@ -101,6 +117,7 @@ class SeisoModel:
             bias=bias,
             task_type=TaskType.CAUSAL_LM,
             use_rslora=use_rslora,
+            **lora_kwargs,
         )
         return get_peft_model(model, lora_config)
 

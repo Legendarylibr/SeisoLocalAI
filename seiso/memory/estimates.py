@@ -6,13 +6,15 @@ import math
 import re
 
 from seiso.models.catalog import _parse_param_size
+from seiso.models.moe_sizing import (
+    active_params_from_name,
+    is_moe_model,
+    total_params_from_name,
+)
 
 _UNKNOWN_PARAMS_B = 7.0
 
 _PARAM_RE = re.compile(r"(\d+(?:\.\d+)?)\s*b", re.I)
-_ACTIVE_MOE_RE = re.compile(r"a(\d+(?:\.\d+)?)b", re.I)
-
-
 def guess_params_from_name(name: str) -> float | None:
     """Extract parameter count (billions) from a model name or path."""
     m = _PARAM_RE.search(name)
@@ -24,9 +26,9 @@ def _active_params_b(
 ) -> float:
     """Effective parameter count for VRAM estimates (MoE / active experts)."""
     text = f"{params} {repo_id}".lower()
-    moe_match = _ACTIVE_MOE_RE.search(text)
-    if moe_match:
-        return float(moe_match.group(1))
+    named_active = active_params_from_name(text)
+    if named_active is not None:
+        return named_active
     try:
         raw = _parse_param_size(params)
     except ValueError:
@@ -60,6 +62,22 @@ def estimate_chat_vram_gb(
     """Rough GGUF chat VRAM — conservative, for fit labels only."""
     params_b = _active_params_b(params, tags, repo_id)
     return round(params_b * _quant_bytes_per_param_b(quant) + 1.2, 2)
+
+
+def estimate_moe_resident_vram_gb(
+    params: str,
+    *,
+    quant: str = "Q4_K_M",
+    repo_id: str = "",
+    size_bytes: int = 0,
+) -> float:
+    """Estimate memory required to keep every MoE expert resident."""
+    if size_bytes > 0:
+        return round(size_bytes / 1024**3 + 0.8, 2)
+    total_params_b = total_params_from_name(f"{params} {repo_id}")
+    if total_params_b is None:
+        total_params_b = _UNKNOWN_PARAMS_B
+    return round(total_params_b * _quant_bytes_per_param_b(quant) + 1.2, 2)
 
 
 def estimate_safetensors_download_bytes(
@@ -104,8 +122,11 @@ def estimate_gguf_download_bytes(
     tags: tuple[str, ...] | list[str] = (),
     repo_id: str = "",
 ) -> int:
-    """Estimate on-disk GGUF size from active params and quant."""
-    params_b = _active_params_b(params, tags, repo_id)
+    """Estimate on-disk GGUF size; MoE artifacts contain every expert."""
+    if is_moe_model(f"{params} {repo_id}") or "moe" in tags:
+        params_b = total_params_from_name(f"{params} {repo_id}") or _UNKNOWN_PARAMS_B
+    else:
+        params_b = _active_params_b(params, tags, repo_id)
     gb = params_b * _quant_bytes_per_param_b(quant) + 0.4
     gb = min(max(gb, 0.25), 10_000.0)
     return int(gb * 1024**3)

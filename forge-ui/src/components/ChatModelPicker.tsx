@@ -18,6 +18,14 @@ type ChatModelPickerProps = {
   onSelectCatalog: (model: CatalogModel) => void | Promise<void>;
 };
 
+function moeLabel(model: InferenceModelOption | CatalogModel): string | null {
+  if (!model.is_moe) return null;
+  if (model.total_params_b && model.active_params_b) {
+    return `MoE · ${model.total_params_b}B total / ${model.active_params_b}B active`;
+  }
+  return model.moe_load_note || "MoE · full model resident";
+}
+
 export function ChatModelPicker({
   models,
   selection,
@@ -140,7 +148,7 @@ export function ChatModelPicker({
                   >
                     <span className="chat-model-picker-option-name">{modelLabel(m)}</span>
                     <span className="chat-model-picker-option-meta">
-                      {note || m.source_label}
+                      {note || moeLabel(m) || m.source_label}
                     </span>
                   </button>
                   );
@@ -172,7 +180,7 @@ export function ChatModelPicker({
                       {blocked
                         ? modelMemoryBlockReason(m)
                         : <>
-                          {m.repo_id}
+                          {moeLabel(m) || m.repo_id}
                           {m.download_bytes
                             ? ` · ${m.download_bytes_estimated ? "~" : ""}${formatBytes(m.download_bytes)} download`
                             : m.params

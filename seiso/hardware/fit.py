@@ -11,7 +11,12 @@ from seiso.hardware.tiers import (
     fit_headroom_mb,
     vram_headroom_mb,
 )
-from seiso.memory.estimates import estimate_chat_vram_gb, guess_params_from_name
+from seiso.memory.estimates import (
+    estimate_chat_vram_gb,
+    estimate_moe_resident_vram_gb,
+    guess_params_from_name,
+)
+from seiso.models.moe_sizing import is_moe_model, sizing_from_reference
 
 _LOAD_RESERVE_RATIO = 0.02
 _LOAD_MIN_RESERVE_MB = 256
@@ -111,21 +116,20 @@ def assess_catalog_fit(
 ) -> dict[str, Any]:
     tags = tuple(model.get("tags") or ())
     download_bytes = int(model.get("download_bytes") or 0)
+    repo_id = str(model.get("repo_id") or "")
+    params = str(model.get("params") or "")
+    is_moe = "moe" in tags or is_moe_model(f"{repo_id} {params}")
+    sizing = sizing_from_reference(
+        f"{params} {repo_id}{' moe' if is_moe else ''}",
+        size_bytes=download_bytes,
+    )
     if download_bytes > 0:
         est_gb = round(download_bytes / (1024**3) + 0.8, 2)
-    elif "moe" in tags:
-        from seiso.memory.estimates import estimate_gguf_download_bytes
-
-        est_gb = round(
-            estimate_gguf_download_bytes(
-                model["params"],
-                quant=model.get("quant", "Q4_K_M"),
-                tags=tags,
-                repo_id=model.get("repo_id", ""),
-            )
-            / (1024**3)
-            + 0.8,
-            2,
+    elif is_moe:
+        est_gb = estimate_moe_resident_vram_gb(
+            params,
+            quant=model.get("quant", "Q4_K_M"),
+            repo_id=repo_id,
         )
     else:
         est_gb = estimate_chat_vram_gb(
@@ -136,9 +140,22 @@ def assess_catalog_fit(
         )
     mode = "train" if model.get("task") in ("base",) else "chat"
     result = assess_hardware_fit(est_gb, profile, mode=mode)
-    if "moe" in tags and download_bytes <= 0:
+    if is_moe:
+        result.update(
+            {
+                "is_moe": True,
+                "total_params_b": sizing.total_params_b,
+                "active_params_b": sizing.active_params_b,
+                "moe_architecture": "sparse",
+                "moe_load_note": sizing.compute_note,
+            }
+        )
         note = result.get("hardware_note") or ""
-        moe_hint = "MoE — load needs full GGUF in RAM (mmap); active experts are smaller at runtime."
+        moe_hint = (
+            f"MoE — {sizing.compute_note}; full GGUF must be resident"
+            if sizing.compute_note
+            else "MoE — full GGUF must be resident; only selected experts run per token"
+        )
         result["hardware_note"] = f"{note} · {moe_hint}" if note else moe_hint
     return result
 
@@ -148,12 +165,34 @@ def assess_inference_option_fit(
 ) -> dict[str, Any]:
     size_bytes = int(option.get("size_bytes") or 0)
     name = option.get("name") or ""
+    is_moe = bool(option.get("is_moe")) or is_moe_model(name)
+    sizing = sizing_from_reference(
+        f"{name}{' moe' if is_moe else ''}",
+        size_bytes=size_bytes,
+    )
     if size_bytes > 0:
         est_gb = round(size_bytes / (1024**3) + 0.8, 2)
+    elif is_moe:
+        est_gb = estimate_moe_resident_vram_gb(name, repo_id=name)
     else:
         guessed = guess_params_from_name(name)
         est_gb = estimate_chat_vram_gb(f"{guessed}B") if guessed else 6.0
-    return assess_hardware_fit(est_gb, profile)
+    result = assess_hardware_fit(est_gb, profile)
+    if is_moe:
+        result.update(
+            {
+                "is_moe": True,
+                "total_params_b": sizing.total_params_b,
+                "active_params_b": sizing.active_params_b,
+                "moe_architecture": "sparse",
+                "moe_load_note": sizing.compute_note,
+            }
+        )
+        if sizing.compute_note:
+            result["hardware_note"] = (
+                f"{result['hardware_note']} · MoE: {sizing.compute_note}"
+            )
+    return result
 
 
 def format_catalog_note(

@@ -56,6 +56,20 @@ def _looks_like_moe_family(model_path: str, architecture: str) -> bool:
     return bool(_MOE_HINT_RE.search(_model_hint_text(model_path, architecture)))
 
 
+def moe_load_tightness(model_path: str, *, free_mb: int, weight_mb: int) -> float:
+    """Increase context conservatism when resident MoE weights consume headroom."""
+    if policy_for_gguf(model_path).kind != "moe" or weight_mb <= 0 or free_mb <= 0:
+        return 1.0
+    residual_ratio = max(0.0, (free_mb - weight_mb) / max(weight_mb, 1))
+    if residual_ratio < 0.1:
+        return 1.5
+    if residual_ratio < 0.25:
+        return 1.3
+    if residual_ratio < 0.5:
+        return 1.15
+    return 1.0
+
+
 def policy_for_gguf(model_path: str) -> InferenceFamilyPolicy:
     """Return family policy from GGUF metadata, falling back conservatively."""
     try:

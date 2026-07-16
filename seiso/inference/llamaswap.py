@@ -520,16 +520,26 @@ def sidecar_vram_context_cap(model_path: str, ceiling: int, *, max_tokens: int =
     if not _sidecar_native_linux_nvidia():
         return ceiling
     try:
-        from seiso.memory.protection import headroom_mb
+        from seiso.memory.protection import estimate_path_vram_mb, headroom_mb
         from seiso.memory.protection.llama_runtime import (
             native_linux_llama_context_cap,
         )
 
+        free_mb = int(headroom_mb())
+        weight_mb = int(estimate_path_vram_mb(model_path))
+        from seiso.inference.family_policy import moe_load_tightness
+
+        load_tightness = moe_load_tightness(
+            model_path,
+            free_mb=free_mb,
+            weight_mb=weight_mb,
+        )
+        adjusted_ceiling = max(2048, int(ceiling / load_tightness))
         cap = native_linux_llama_context_cap(
             model_path,
-            free_mb=int(headroom_mb()),
+            free_mb=free_mb,
             n_gpu_layers=-1,
-            ceiling=ceiling,
+            ceiling=adjusted_ceiling,
             max_tokens=max_tokens,
         )
     except Exception:

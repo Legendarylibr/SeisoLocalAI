@@ -61,6 +61,8 @@ _FAMILY_TARGETS: dict[ModelFamily, list[str]] = {
 # Architectures whose module names differ from the llama-style default.
 _ARCHITECTURE_TARGETS: dict[str, list[str] | str] = {
     "mixtral": ["q_proj", "k_proj", "v_proj", "o_proj", "w1", "w2", "w3"],
+    "qwen2_moe": _LLAMA_STYLE_TARGETS,
+    "qwen3_moe": _LLAMA_STYLE_TARGETS,
     "phi": ["q_proj", "k_proj", "v_proj", "dense", "fc1", "fc2"],
     "phi3": ["qkv_proj", "o_proj", "gate_up_proj", "down_proj"],
     "falcon": ["query_key_value", "dense", "dense_h_to_4h", "dense_4h_to_h"],

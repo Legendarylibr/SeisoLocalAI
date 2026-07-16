@@ -1157,6 +1157,12 @@ export function ChatPage() {
           {selected && selectedFit && !providerId && (
             <HardwareFitBadge fit={selectedFit} label={selected.hardware_fit_label} />
           )}
+          {selected?.is_moe && !providerId && (
+            <span className="chat-vram-hint" title={selected.moe_load_note || undefined}>
+              MoE · {selected.total_params_b ? `${selected.total_params_b}B total` : "full model resident"}
+              {selected.active_params_b ? ` / ${selected.active_params_b}B active` : ""}
+            </span>
+          )}
           {hwProfile?.tier_label && !providerId && (
             <span className="chat-hw-tier muted-text" title={hwProfile.privacy}>{hwProfile.tier_label}</span>
           )}
@@ -1172,6 +1178,17 @@ export function ChatPage() {
           status={contextStatus}
           loading={contextLoading}
         />
+
+        {selected?.is_moe && !providerId && (
+          <details className="chat-model-status">
+            <summary>Dense vs sparse MoE guidance</summary>
+            <p className="muted-text">
+              Sparse MoE runs selected experts per token, but the full model must remain in
+              memory. Prefer dense models for limited RAM and predictable batch-1 latency;
+              choose MoE when the resident model fits and lower active compute is valuable.
+            </p>
+          </details>
+        )}
 
         {showModelStatus && (
           <div className="chat-model-status">

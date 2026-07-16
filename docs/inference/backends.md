@@ -108,6 +108,17 @@ Training **never** uses MLX — `load_model(..., for_training=True)` forces PyTo
 - **API:** `GET /api/models/vram` · `POST /api/models/vram/unload` (alias: `POST /api/inference/cancel`)
 - **Stream abort only:** `POST /api/inference/cancel-generation` stops generation without unloading.
 
+### MoE load and compute
+
+Sparse mixture-of-experts models have two relevant sizes. The **total parameter
+count** (or GGUF file size) determines RAM/VRAM residency because every expert
+must remain available. The **active parameter count** estimates per-token
+compute because the router runs only selected experts. Forge therefore uses
+resident size plus current free memory for fit and offload guidance, while
+showing active parameters as a speed/compute hint. A name such as `30B-A3B`
+means roughly 30B resident and 3B active per token; it does not fit like a
+dense 3B model.
+
 ### Mac RAM tiers (Apple Silicon + Intel)
 
 Sizing uses installed RAM + free headroom, not chip model. Loads are estimated as **GGUF file size + ~0.8 GB**.
