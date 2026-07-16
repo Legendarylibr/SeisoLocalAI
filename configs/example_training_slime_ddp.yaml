@@ -5,7 +5,8 @@ model_id: Qwen/Qwen2.5-0.5B-Instruct
 dataset: data/slime_sample.jsonl
 output_dir: outputs/slime-train-ddp
 method: slime
-quant: 4bit
+# slime path loads full-precision (+ optional LoRA); quant is ignored by this trainer
+quant: none
 training_methodology: seiso_release_post_training
 prompt_field: prompt
 answer_field: label

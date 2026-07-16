@@ -168,13 +168,45 @@ def test_prune_weight_versions_keeps_last_n(tmp_path: Path):
     from seiso.slime_single_gpu.rollout_backend import _prune_weight_versions
 
     root = tmp_path / "weights"
-    for name in ("weight_v000001", "weight_v000002", "weight_v000003"):
+    for name in (
+        "weight_v000001",
+        "weight_v000002",
+        "weight_v000003",
+        "delta_v000001",
+        "delta_v000002",
+        "delta_v000003",
+    ):
         d = root / name
         d.mkdir(parents=True)
         (d / "x.txt").write_text("ok", encoding="utf-8")
     _prune_weight_versions(root, keep=2)
     left = sorted(p.name for p in root.iterdir())
-    assert left == ["weight_v000002", "weight_v000003"]
+    assert left == [
+        "delta_v000002",
+        "delta_v000003",
+        "weight_v000002",
+        "weight_v000003",
+    ]
+
+
+def test_from_config_uses_first_engine_url(tmp_path: Path):
+    cfg = _cfg(
+        tmp_path,
+        rollout_backend="sglang",
+        sglang_base_url="http://127.0.0.1:30000,http://127.0.0.1:30001",
+    )
+    client = SGLangRolloutClient.from_config(cfg)
+    assert client.base_url == "http://127.0.0.1:30000"
+
+
+def test_sglang_url_rejects_non_http(tmp_path: Path):
+    cfg = _cfg(
+        tmp_path,
+        rollout_backend="sglang",
+        sglang_base_url="file:///etc/passwd",
+    )
+    with pytest.raises(ValueError, match="http"):
+        SGLangRolloutClient.from_config(cfg)
 
 
 def test_example_ddp_config_requests_sglang():

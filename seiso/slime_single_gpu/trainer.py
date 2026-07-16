@@ -241,6 +241,15 @@ def train_single_gpu_slime(config: SingleGpuSlimeConfig) -> Path:
     from seiso.slime_single_gpu.rollout_backend import WeightSyncState
 
     weight_sync_state = WeightSyncState()
+    # slime: push actor → SGLang before the first rollout (critical with LoRA).
+    _sync_rollout_engine_weights(
+        model=model,
+        tokenizer=tokenizer,
+        config=config,
+        dist_ctx=dist_ctx,
+        step=0,
+        sync_state=weight_sync_state,
+    )
 
     for epoch in range(config.epochs):
         sample_batches = iter(_iter_sample_batches(config, rng, dist_ctx, torch))
@@ -279,7 +288,11 @@ def train_single_gpu_slime(config: SingleGpuSlimeConfig) -> Path:
                         "distributed_kept_groups_min": float(target_groups),
                     },
                 )
-            if not rollouts:
+            # DDP: all ranks must agree on whether this step has trainable data.
+            has_local = 1 if rollouts else 0
+            if dist_ctx.enabled:
+                has_local = _distributed_min_int(has_local, torch, dist_ctx)
+            if not has_local:
                 empty_trainable_batches += 1
                 if dist_ctx.is_main and empty_trainable_batches == 1:
                     _append_metrics(
@@ -293,7 +306,6 @@ def train_single_gpu_slime(config: SingleGpuSlimeConfig) -> Path:
                             "rollout_groups_kept_total": total_groups_kept,
                         },
                     )
-                # Keep multi-GPU ranks aligned when every rank drops the batch.
                 _distributed_barrier(dist_ctx)
                 continue
             trained_groups = len(rollouts) // config.rollouts_per_prompt
@@ -1796,11 +1808,15 @@ def _sync_rollout_engine_weights(
     step: int,
     sync_state: Any | None = None,
 ) -> None:
-    """Push actor weights to SGLang after optimizer steps (single- + multi-GPU).
+    """Push actor weights to SGLang (initial + post-step; single- + multi-GPU).
 
     Uses slime disk transport: full HF checkpoint and/or delta + multi-engine
     ``update_weights_from_disk`` / ``pull_weights``. No-op for ``rollout_backend=hf``.
+
+    On failure, all ranks raise after a barrier so DDP does not hang.
     """
+    import torch
+
     from seiso.slime_single_gpu.rollout_backend import (
         resolve_rollout_backend,
         sync_sglang_weights_from_actor,
@@ -1812,6 +1828,9 @@ def _sync_rollout_engine_weights(
     if not bool(getattr(config, "sglang_sync_weights", True)):
         _distributed_barrier(dist_ctx)
         return
+
+    error_msg = ""
+    path: str | None = None
     try:
         path = sync_sglang_weights_from_actor(
             model=model,
@@ -1829,14 +1848,33 @@ def _sync_rollout_engine_weights(
                 flush=True,
             )
     except Exception as exc:
-        # Fail closed: multi-GPU SGLang without weight sync is off-policy garbage.
-        raise RuntimeError(
+        error_msg = (
             f"SGLang weight sync failed at step={step}: {exc}. "
             "Ensure each engine exposes /update_weights_from_disk and can read "
             f"{config.output_dir / config.sglang_weight_dir}. "
             "Set sglang_sync_weights: false only for debugging."
-        ) from exc
-    _distributed_barrier(dist_ctx)
+        )
+
+    if dist_ctx.enabled:
+        # Broadcast failure so every rank raises after the barrier.
+        flag = torch.tensor(
+            [0 if error_msg else 1],
+            device=dist_ctx.device,
+            dtype=torch.long,
+        )
+        torch.distributed.all_reduce(flag, op=torch.distributed.ReduceOp.MIN)
+        _distributed_barrier(dist_ctx)
+        if int(flag.item()) == 0:
+            # Rank0 has the detailed message; others get a generic abort.
+            if error_msg:
+                raise RuntimeError(error_msg)
+            raise RuntimeError(
+                f"SGLang weight sync failed at step={step} on another rank"
+            )
+        return
+
+    if error_msg:
+        raise RuntimeError(error_msg)
 
 
 def _maybe_materialize_data_gen(
@@ -1857,7 +1895,11 @@ def _maybe_materialize_data_gen(
             out_path,
             DataGenConfig(
                 count=count,
-                seed=config.data_gen_seed if config.data_gen_seed else config.seed,
+                seed=(
+                    config.data_gen_seed
+                    if config.data_gen_seed is not None
+                    else config.seed
+                ),
                 mix=config.data_gen_mix,
                 difficulty=config.data_gen_difficulty,
                 require_thinking_trace=config.require_thinking_trace,

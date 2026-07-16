@@ -235,20 +235,26 @@ def build_sequence_tensors(
     torch,
     device: str,
 ) -> list[dict[str, Any]]:
-    """Tokenize prompt+completion pairs into per-row rollout tensors."""
+    """Tokenize prompt+completion pairs into per-row rollout tensors.
+
+    Note: external SGLang generation is text-level; retokenizing completions can
+    diverge slightly from the engine's BPE. Prefer HF ``generate`` sequences for
+    exact on-policy tokens. We tokenize the *same prompt string* the server saw
+    and append completion tokens without special tokens on the response.
+    """
     rows: list[dict[str, Any]] = []
     pad_id = tokenizer.pad_token_id
     if pad_id is None:
         pad_id = tokenizer.eos_token_id
     for prompt, completion in zip(prompts, completions, strict=True):
+        # Match the prompt bytes already sent to SGLang (already chat-templated).
         prompt_ids = tokenizer(
             prompt,
-            add_special_tokens=True,
+            add_special_tokens=False,
             truncation=True,
             max_length=config.max_prompt_tokens,
             return_tensors="pt",
         )["input_ids"][0]
-        # Completions are model text; do not add special tokens.
         if completion:
             comp_ids = tokenizer(
                 completion,
@@ -264,7 +270,6 @@ def build_sequence_tensors(
         response_mask = torch.zeros_like(input_ids, dtype=torch.bool, device=device)
         prompt_len = int(prompt_ids.numel())
         response_mask[prompt_len:] = True
-        # Drop pad positions in the response (should be none without padding).
         if pad_id is not None:
             response_mask = response_mask & (input_ids != pad_id)
         rows.append(
@@ -302,9 +307,12 @@ class SGLangRolloutClient:
 
     @classmethod
     def from_config(cls, config: SingleGpuSlimeConfig) -> SGLangRolloutClient:
-        base = str(getattr(config, "sglang_base_url", "") or "").strip()
-        if not base:
+        engines = sglang_engine_urls(config)
+        if not engines:
             raise ValueError("sglang_base_url is required for SGLang rollout")
+        # Generation uses the first engine; weight sync fans out to all URLs.
+        base = engines[0]
+        _validate_sglang_url(base)
         model = str(getattr(config, "sglang_model", "") or "").strip() or config.model_id
         return cls(
             base_url=base,
@@ -429,22 +437,35 @@ def sglang_engine_urls(config: SingleGpuSlimeConfig) -> list[str]:
     out: list[str] = []
     for url in urls:
         key = url.rstrip("/")
+        _validate_sglang_url(key)
         if key not in seen:
             seen.add(key)
             out.append(key)
     return out
 
 
+def _validate_sglang_url(url: str) -> None:
+    """Reject non-HTTP(S) schemes (basic SSRF hardening for config-controlled URLs)."""
+    lowered = url.lower()
+    if not (lowered.startswith("http://") or lowered.startswith("https://")):
+        raise ValueError(
+            f"sglang URL must use http:// or https:// scheme, got {url!r}"
+        )
+
+
 def export_actor_checkpoint(model, tokenizer, output_dir: Any) -> str:
     """Write a full HF checkpoint suitable for SGLang disk weight reload.
 
-    For PEFT/LoRA actors, merges adapters into the base weights for export only
-    (``merge_adapter`` / ``unmerge_adapter`` when available so training continues).
+    Writes to ``*.partial`` then atomically renames so engines never load a
+    half-written tree. For PEFT/LoRA, merges adapters for export only.
     """
     from pathlib import Path
 
-    path = Path(output_dir)
-    path.mkdir(parents=True, exist_ok=True)
+    final = Path(output_dir)
+    partial = final.parent / f"{final.name}.partial"
+    if partial.exists():
+        _rm_tree(partial)
+    partial.mkdir(parents=True, exist_ok=True)
     unwrapped = getattr(model, "module", model)
 
     merged = False
@@ -455,12 +476,31 @@ def export_actor_checkpoint(model, tokenizer, output_dir: Any) -> str:
         to_save = unwrapped
         if hasattr(unwrapped, "get_base_model"):
             to_save = unwrapped.get_base_model()
-        to_save.save_pretrained(path)
-        tokenizer.save_pretrained(path)
+        to_save.save_pretrained(partial)
+        tokenizer.save_pretrained(partial)
     finally:
         if merged and hasattr(unwrapped, "unmerge_adapter"):
             unwrapped.unmerge_adapter()
-    return str(path.resolve())
+    if final.exists():
+        _rm_tree(final)
+    partial.rename(final)
+    return str(final.resolve())
+
+
+def _rm_tree(path: Any) -> None:
+    from pathlib import Path
+
+    root = Path(path)
+    if not root.exists():
+        return
+    for child in sorted(root.rglob("*"), reverse=True):
+        with contextlib.suppress(OSError):
+            if child.is_file() or child.is_symlink():
+                child.unlink()
+            elif child.is_dir():
+                child.rmdir()
+    with contextlib.suppress(OSError):
+        root.rmdir()
 
 
 def _actor_state_cpu(model) -> dict[str, Any]:
@@ -501,11 +541,6 @@ def _write_delta_payload(
         old = prev.get(name)
         if old is None or old.shape != tensor.shape or not bool((old == tensor).all().item()):
             changed[name] = tensor
-    # New params only in curr
-    for name, tensor in curr.items():
-        if name not in prev:
-            changed[name] = tensor
-
     meta = {
         "format": "seiso_sglang_delta_v1",
         "step": int(step),
@@ -530,25 +565,19 @@ def _write_delta_payload(
 
 
 def _prune_weight_versions(weight_root: Any, keep: int) -> None:
+    """Prune both full ``weight_v*`` and delta ``delta_v*`` version dirs."""
     from pathlib import Path
 
     root = Path(weight_root)
     if not root.is_dir() or keep < 1:
         return
-    versions = sorted(
-        [p for p in root.iterdir() if p.is_dir() and p.name.startswith("weight_v")],
-        key=lambda p: p.name,
-    )
-    for old in versions[:-keep]:
-        # best-effort recursive delete
-        for child in sorted(old.rglob("*"), reverse=True):
-            with contextlib.suppress(OSError):
-                if child.is_file() or child.is_symlink():
-                    child.unlink()
-                elif child.is_dir():
-                    child.rmdir()
-        with contextlib.suppress(OSError):
-            old.rmdir()
+    for prefix in ("weight_v", "delta_v"):
+        versions = sorted(
+            [p for p in root.iterdir() if p.is_dir() and p.name.startswith(prefix)],
+            key=lambda p: p.name,
+        )
+        for old in versions[:-keep]:
+            _rm_tree(old)
 
 
 class WeightSyncState:
@@ -626,12 +655,11 @@ def sync_sglang_weights_from_actor(
     state = sync_state or WeightSyncState()
     keep = int(getattr(config, "sglang_weight_keep", 2) or 2)
 
-    curr = _actor_state_cpu(model)
-
-    # ---- delta: no-op when weights unchanged ----
+    # ---- delta: snapshot only when needed (avoid full float clone on full mode) ----
     if mode == "delta" and state.prev_state is not None:
+        curr = _actor_state_cpu(model)
         delta_dir = weight_root / f"delta_v{int(step):06d}"
-        delta_path, n_changed, n_total = _write_delta_payload(
+        delta_path, n_changed, _n_total = _write_delta_payload(
             prev=state.prev_state,
             curr=curr,
             out_dir=delta_dir,
@@ -640,6 +668,7 @@ def sync_sglang_weights_from_actor(
         state.last_changed = n_changed
         if n_changed == 0:
             state.last_mode = "delta_skip"
+            _prune_weight_versions(weight_root, keep)
             return state.last_full_path or delta_path
 
         # Try slime-patched /pull_weights on each engine (apply delta → local full).
@@ -658,7 +687,6 @@ def sync_sglang_weights_from_actor(
                     pull_ok = False
                     break
             if pull_ok:
-                # Patched engines already reloaded; still poke flush on each.
                 for base in sglang_engine_urls(config):
                     client = SGLangRolloutClient.from_config(config)
                     client.base_url = base
@@ -674,7 +702,11 @@ def sync_sglang_weights_from_actor(
     _broadcast_weights_to_engines(
         config, model_path=used_path, weight_version=version
     )
-    state.prev_state = curr
+    # Keep CPU snapshot only for future delta diffs (not for full-only runs).
+    if mode == "delta":
+        state.prev_state = _actor_state_cpu(model)
+    else:
+        state.prev_state = None
     state.last_full_path = used_path
     state.last_mode = "full"
     state.last_changed = 0
