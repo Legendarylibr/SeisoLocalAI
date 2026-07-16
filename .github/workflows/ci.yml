@@ -58,7 +58,16 @@ jobs:
           while IFS= read -r path; do
             [ -z "$path" ] && continue
             case "$path" in
-              seiso/*|forge/*|seiso_cli/*|tests/*|configs/*|scripts/*|docs/*|locks/*|pyproject.toml|requirements*.txt|Makefile|*.md|.secrets.baseline|.github/workflows/ci.yml)
+              seiso/*|forge/*|seiso_cli/*|tests/*|configs/*|scripts/*|docs/*|locks/*|pyproject.toml|Makefile|.secrets.baseline|.github/workflows/ci.yml)
+                python=true
+                ;;
+              requirements*.txt|*.md)
+                python=true
+                ;;
+            esac
+            # Nested markdown / requirements (bash case * does not cross '/').
+            case "$path" in
+              */*.md|*/*/*.md|*/requirements*.txt)
                 python=true
                 ;;
             esac
