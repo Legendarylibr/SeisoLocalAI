@@ -113,7 +113,9 @@ def test_example_single_gpu_slime_config_loads_samples():
     assert cfg.shuffle_buffer_size == 128
     assert cfg.use_lora is True
     assert cfg.lora_r == 16
-    assert cfg.reward == "numeric"
+    assert cfg.reward == "auto"
+    assert cfg.data_gen is True
+    assert cfg.data_gen_count >= 200
     assert cfg.process_reward_weight == 0.0
     assert len(samples) >= 16
     assert {"prompt", "answer"} <= set(samples[0])

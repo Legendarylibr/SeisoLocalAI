@@ -85,6 +85,15 @@ class SingleGpuSlimeConfig:
     calculate_per_token_loss: bool = False
     temperature: float = 0.9
     top_p: float = 0.95
+    # Online completion backend: data_gen (HF generate, default) | sglang | auto.
+    # auto → sglang when sglang_base_url set and multi-process, else data_gen.
+    rollout_backend: str = "data_gen"
+    apply_chat_template: bool = False
+    sglang_base_url: str = ""
+    sglang_model: str = ""
+    sglang_api_key: str = "EMPTY"
+    sglang_timeout_s: float = 120.0
+    sglang_max_workers: int = 8
     require_thinking_trace: bool = True
     thinking_instruction: str = (
         "Show your reasoning in <think>...</think>, then give the final answer."
@@ -121,6 +130,15 @@ class SingleGpuSlimeConfig:
     write_verifier_data: bool = True
     verifier_data_file: str = "slime_verifier_data.jsonl"
     verifier_max_text_chars: int = 2048
+    # High-level data generation: when enabled (or count > 0), materialize a
+    # verifiable prompt corpus before training instead of relying on tiny
+    # hardcoded smoke JSONL. Completions still come from online rollouts.
+    data_gen: bool = False
+    data_gen_count: int = 0
+    data_gen_seed: int = 0
+    data_gen_mix: str = "numeric:0.5,choice:0.2,code:0.3"
+    data_gen_difficulty: str = "easy:0.35,medium:0.45,hard:0.20"
+    data_gen_filename: str = "slime_generated.jsonl"
 
     @classmethod
     def from_yaml(cls, path: Path) -> SingleGpuSlimeConfig:
@@ -224,3 +242,21 @@ class SingleGpuSlimeConfig:
             raise ValueError("best_checkpoint_dir must not be empty")
         if self.write_verifier_data and not self.verifier_data_file:
             raise ValueError("verifier_data_file must not be empty")
+        if self.data_gen_count < 0:
+            raise ValueError("data_gen_count must be non-negative")
+        if self.data_gen and self.data_gen_count < 1:
+            raise ValueError(
+                "data_gen requires data_gen_count >= 1 "
+                "(prefer 200+ for meaningful GRPO outcome diversity)"
+            )
+        if not self.data_gen_filename:
+            raise ValueError("data_gen_filename must not be empty")
+        if not self.data_gen_mix:
+            raise ValueError("data_gen_mix must not be empty")
+        if not self.data_gen_difficulty:
+            raise ValueError("data_gen_difficulty must not be empty")
+        from seiso.slime_single_gpu.rollout_backend import (
+            validate_rollout_backend_config,
+        )
+
+        validate_rollout_backend_config(self)

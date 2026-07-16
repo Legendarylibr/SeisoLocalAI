@@ -160,6 +160,10 @@ def train_single_gpu_slime(config: SingleGpuSlimeConfig) -> Path:
     When launched under Accelerate with WORLD_SIZE > 1, this keeps the original
     local SLIME algorithm but shards prompts by rank and synchronizes policy
     updates with PyTorch DDP so multi-node jobs behave as one training run.
+
+    When ``data_gen`` / ``data_gen_count`` is set, a high-level verifiable
+    prompt corpus is materialized first (numeric / choice / code). Rewards
+    always score *online model completions*, never stored answers as outputs.
     """
 
     config.validate()
@@ -168,6 +172,7 @@ def train_single_gpu_slime(config: SingleGpuSlimeConfig) -> Path:
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
     dist_ctx = _distributed_context(torch, config)
+    config = _maybe_materialize_data_gen(config, dist_ctx)
     config = replace(config, device=dist_ctx.device)
     _require_single_gpu(config)
     _set_seed(config.seed + dist_ctx.rank)
@@ -424,6 +429,7 @@ def _collect_training_rollout_batch(
         epoch=epoch,
         global_step=global_step,
         verifier_path=verifier_path,
+        dist_ctx=dist_ctx,
     )
     if config.dynamic_sampling_filter == "none":
         return rollout_batch
@@ -458,6 +464,7 @@ def _collect_training_rollout_batch(
             epoch=epoch,
             global_step=global_step,
             verifier_path=verifier_path,
+            dist_ctx=dist_ctx,
         )
         rollouts.extend(refill_batch.rollouts)
         _merge_rollout_collection_stats(stats, refill_batch.stats)
@@ -504,64 +511,107 @@ def _collect_rollouts(
     epoch: int,
     global_step: int,
     verifier_path: Path | None,
+    dist_ctx: _DistributedSlimeContext | None = None,
 ) -> _RolloutBatch:
+    from seiso.slime_single_gpu.rollout_backend import (
+        build_sequence_tensors,
+        format_generation_prompt,
+        generate_data_gen_chunk,
+        generate_sglang_chunk,
+        resolve_rollout_backend,
+    )
+
     model.eval()
+    world_size = dist_ctx.world_size if dist_ctx is not None else 1
+    backend = resolve_rollout_backend(config, world_size=world_size)
     prompt_batch_size = max(1, config.rollout_batch_size // config.rollouts_per_prompt)
     rollouts: list[Rollout] = []
     filter_stats = {
         "rollout_groups_total": 0.0,
         "rollout_groups_kept": 0.0,
         "dynamic_filtered_groups": 0.0,
+        "rollout_backend": 0.0,  # placeholder; string logged via verifier/metrics
     }
+    filter_stats["rollout_backend_is_sglang"] = 1.0 if backend == "sglang" else 0.0
     for sample_chunk in _chunked(samples, prompt_batch_size):
         prompt_chunk = [
-            _format_rollout_prompt(str(sample[config.prompt_field]), config)
+            format_generation_prompt(
+                tokenizer,
+                str(sample[config.prompt_field]),
+                config,
+            )
             for sample in sample_chunk
         ]
-        encoded = tokenizer(
-            prompt_chunk,
-            return_tensors="pt",
-            padding=True,
-            truncation=True,
-            max_length=config.max_prompt_tokens,
-        ).to(config.device)
-        prompt_width = int(encoded["input_ids"].shape[1])
-        with torch.no_grad():
-            generated = _generation_model(model).generate(
-                **encoded,
-                do_sample=True,
-                temperature=config.temperature,
-                top_p=config.top_p,
-                max_new_tokens=config.max_new_tokens,
-                pad_token_id=tokenizer.pad_token_id,
-                eos_token_id=tokenizer.eos_token_id,
-                use_cache=True,
-                num_return_sequences=config.rollouts_per_prompt,
+        if backend == "sglang":
+            gen = generate_sglang_chunk(
+                tokenizer=tokenizer,
+                prompts=prompt_chunk,
+                config=config,
             )
+            seq_rows = build_sequence_tensors(
+                tokenizer=tokenizer,
+                prompts=gen.prompts,
+                completions=gen.completions,
+                config=config,
+                torch=torch,
+                device=config.device,
+            )
+            completions = gen.completions
+            use_hf_sequences = False
+            generated = None
+            prompt_width = 0
+        else:
+            gen = generate_data_gen_chunk(
+                generation_model=_generation_model(model),
+                tokenizer=tokenizer,
+                prompts=prompt_chunk,
+                config=config,
+                torch=torch,
+            )
+            generated = gen.sequences
+            prompt_width = int(gen.prompt_width or 0)
+            completions = gen.completions
+            seq_rows = None
+            use_hf_sequences = True
 
-        completions = tokenizer.batch_decode(
-            generated[:, prompt_width:],
-            skip_special_tokens=True,
-        )
         chunk_rollouts: list[Rollout] = []
         verifier_records: list[dict[str, Any]] = []
-        for idx in range(int(generated.shape[0])):
+        total = len(completions)
+        for idx in range(total):
             sample_idx = idx // config.rollouts_per_prompt
             sample = sample_chunk[sample_idx]
-            response_mask = torch.zeros_like(generated[idx], dtype=torch.bool)
-            response_mask[prompt_width:] = generated[idx, prompt_width:] != tokenizer.pad_token_id
-            status = _rollout_status(generated[idx, prompt_width:], tokenizer.eos_token_id)
-            # Score the raw model completion only — never rewrite tags for reward.
             completion = completions[idx]
+            if use_hf_sequences:
+                assert generated is not None
+                response_mask = torch.zeros_like(generated[idx], dtype=torch.bool)
+                response_mask[prompt_width:] = (
+                    generated[idx, prompt_width:] != tokenizer.pad_token_id
+                )
+                status = _rollout_status(
+                    generated[idx, prompt_width:], tokenizer.eos_token_id
+                )
+                input_ids = generated[idx].detach()
+                attention_mask = (generated[idx] != tokenizer.pad_token_id).detach()
+                response_mask = response_mask.detach()
+            else:
+                assert seq_rows is not None
+                row = seq_rows[idx]
+                input_ids = row["input_ids"]
+                attention_mask = row["attention_mask"]
+                response_mask = row["response_mask"]
+                status = _rollout_status(
+                    input_ids[int(row["prompt_len"]) :],
+                    tokenizer.eos_token_id,
+                )
+            # Score the raw model completion only — never rewrite tags for reward.
             reward_sample = _reward_sample(sample, config)
             metadata = _sample_metadata(sample, config)
             score = _score_completion(completion, reward_sample, config, reward_fn)
-            # Keep rollout tensors on device to avoid GPU↔CPU staging per sample.
             chunk_rollouts.append(
                 Rollout(
-                    input_ids=generated[idx].detach(),
-                    attention_mask=(generated[idx] != tokenizer.pad_token_id).detach(),
-                    response_mask=response_mask.detach(),
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                    response_mask=response_mask,
                     old_logprobs=None,
                     ref_logprobs=None,
                     reward=score["reward"],
@@ -581,6 +631,11 @@ def _collect_rollouts(
                 )
             )
             if verifier_path is not None:
+                prompt_text = (
+                    prompt_chunk[sample_idx]
+                    if sample_idx < len(prompt_chunk)
+                    else gen.prompts[idx]
+                )
                 verifier_records.append(
                     {
                         "step": global_step,
@@ -604,18 +659,21 @@ def _collect_rollouts(
                         ),
                         "detail": score.get("detail"),
                         "reward_name": config.reward,
+                        "rollout_backend": backend,
                         "status": status,
                         "metadata": _bounded_verifier_metadata(
                             metadata, config.verifier_max_text_chars
                         ),
                         "prompt": _truncate_text(
-                            prompt_chunk[sample_idx], config.verifier_max_text_chars
+                            prompt_text, config.verifier_max_text_chars
                         ),
                         "answer": _truncate_text(
                             reward_sample.get("answer", ""),
                             config.verifier_max_text_chars,
                         ),
-                        "completion": _truncate_text(completion, config.verifier_max_text_chars),
+                        "completion": _truncate_text(
+                            completion, config.verifier_max_text_chars
+                        ),
                         "thinking_trace": _truncate_text(
                             score["thinking_trace"], config.verifier_max_text_chars
                         ),
@@ -633,7 +691,9 @@ def _collect_rollouts(
         filter_stats["rollout_groups_kept"] += len(kept_group_indexes)
         filter_stats["dynamic_filtered_groups"] += rejected_groups
         if not kept_rollouts:
-            del encoded, generated
+            del gen
+            if generated is not None:
+                del generated
             continue
         verifier_records = [
             record
@@ -674,7 +734,9 @@ def _collect_rollouts(
         if verifier_records:
             _append_jsonl_records(verifier_path, verifier_records)
         rollouts.extend(kept_rollouts)
-        del encoded, generated, padded
+        del gen, padded
+        if generated is not None:
+            del generated
 
     _assign_grouped_advantages(
         rollouts,
@@ -686,6 +748,7 @@ def _collect_rollouts(
 
 
 def _format_rollout_prompt(prompt: str, config: SingleGpuSlimeConfig) -> str:
+    """Legacy prompt formatter (thinking open-tag only; no chat template)."""
     if not config.require_thinking_trace:
         return prompt
     if "<think>" in prompt.lower():
@@ -1654,6 +1717,56 @@ def _save_distributed(
     if dist_ctx.is_main:
         _save(model, tokenizer, output_dir)
     _distributed_barrier(dist_ctx)
+
+
+def _maybe_materialize_data_gen(
+    config: SingleGpuSlimeConfig,
+    dist_ctx: _DistributedSlimeContext,
+) -> SingleGpuSlimeConfig:
+    """Build a verifiable prompt corpus when high-level data_gen is requested."""
+    enabled = config.data_gen or config.data_gen_count > 0
+    if not enabled:
+        return config
+    count = config.data_gen_count if config.data_gen_count > 0 else 500
+    out_path = config.output_dir / config.data_gen_filename
+    if dist_ctx.is_main:
+        config.output_dir.mkdir(parents=True, exist_ok=True)
+        from seiso.rl_verify.data_gen import DataGenConfig, materialize_rl_corpus
+
+        result = materialize_rl_corpus(
+            out_path,
+            DataGenConfig(
+                count=count,
+                seed=config.data_gen_seed if config.data_gen_seed else config.seed,
+                mix=config.data_gen_mix,
+                difficulty=config.data_gen_difficulty,
+                require_thinking_trace=config.require_thinking_trace,
+                thinking_instruction=config.thinking_instruction,
+            ),
+        )
+        summary = result.summary()
+        (config.output_dir / "slime_data_gen_summary.json").write_text(
+            json.dumps(
+                {
+                    **summary,
+                    "path": str(out_path),
+                    "note": (
+                        "Prompts+labels only; completions come from online "
+                        "rollouts (HF data_gen or SGLang), not this file."
+                    ),
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+    _distributed_barrier(dist_ctx)
+    if not out_path.is_file():
+        raise RuntimeError(
+            f"data_gen did not produce {out_path}; rank0 materialization failed"
+        )
+    return replace(config, dataset=out_path)
 
 
 def _distributed_context(torch, config: SingleGpuSlimeConfig) -> _DistributedSlimeContext:

@@ -111,7 +111,9 @@ def test_example_training_slime_config_loads():
     slime = cfg.to_single_gpu_slime_config()
 
     assert cfg.method == TrainMethod.SLIME
-    assert slime.reward == "numeric"
+    assert slime.reward == "auto"
+    assert slime.data_gen is True
+    assert slime.data_gen_count >= 200
     assert slime.process_reward_weight == 0.0
     assert slime.format_reward_weight == 0.1
     assert slime.dynamic_sampling_filter == "reward_nonzero_std"
@@ -130,6 +132,8 @@ def test_example_training_slime_ddp_config_loads():
     assert cfg.distributed_strategy.value == "ddp"
     assert cfg.balance_data is True
     assert slime.balance_data is True
+    assert slime.data_gen is True
+    assert slime.data_gen_count >= 200
     assert slime.clip_ratio_high == 0.28
     assert slime.grpo_std_normalization is True
 

@@ -215,6 +215,17 @@ class TrainConfig(BaseModel):
     calculate_per_token_loss: bool = False
     temperature: float = Field(default=0.9, gt=0)
     top_p: float = Field(default=0.95, gt=0, le=1)
+    # Online completion backend for slime only (default preserves HF generate).
+    rollout_backend: str = Field(
+        default="data_gen",
+        description="slime rollout backend: data_gen | sglang | auto",
+    )
+    apply_chat_template: bool = False
+    sglang_base_url: str = ""
+    sglang_model: str = ""
+    sglang_api_key: str = "EMPTY"
+    sglang_timeout_s: float = Field(default=120.0, gt=0)
+    sglang_max_workers: int = Field(default=8, ge=1)
     require_thinking_trace: bool = True
     thinking_instruction: str = Field(
         default="Show your reasoning in <think>...</think>, then give the final answer.",
@@ -249,6 +260,13 @@ class TrainConfig(BaseModel):
     write_verifier_data: bool = True
     verifier_data_file: str = Field(default="slime_verifier_data.jsonl", min_length=1)
     verifier_max_text_chars: int = Field(default=2048, ge=0)
+    # High-level verifiable prompt generation (see seiso.rl_verify.data_gen).
+    data_gen: bool = False
+    data_gen_count: int = Field(default=0, ge=0)
+    data_gen_seed: int = 0
+    data_gen_mix: str = "numeric:0.5,choice:0.2,code:0.3"
+    data_gen_difficulty: str = "easy:0.35,medium:0.45,hard:0.20"
+    data_gen_filename: str = "slime_generated.jsonl"
     extra: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator(
@@ -375,6 +393,13 @@ class TrainConfig(BaseModel):
             calculate_per_token_loss=self.calculate_per_token_loss,
             temperature=self.temperature,
             top_p=self.top_p,
+            rollout_backend=self.rollout_backend,
+            apply_chat_template=self.apply_chat_template,
+            sglang_base_url=self.sglang_base_url,
+            sglang_model=self.sglang_model,
+            sglang_api_key=self.sglang_api_key,
+            sglang_timeout_s=self.sglang_timeout_s,
+            sglang_max_workers=self.sglang_max_workers,
             require_thinking_trace=self.require_thinking_trace,
             thinking_instruction=self.thinking_instruction,
             outcome_reward_weight=self.outcome_reward_weight,
@@ -407,6 +432,12 @@ class TrainConfig(BaseModel):
             write_verifier_data=self.write_verifier_data,
             verifier_data_file=self.verifier_data_file,
             verifier_max_text_chars=self.verifier_max_text_chars,
+            data_gen=self.data_gen,
+            data_gen_count=self.data_gen_count,
+            data_gen_seed=self.data_gen_seed,
+            data_gen_mix=self.data_gen_mix,
+            data_gen_difficulty=self.data_gen_difficulty,
+            data_gen_filename=self.data_gen_filename,
         )
 
 

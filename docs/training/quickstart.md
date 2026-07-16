@@ -149,13 +149,56 @@ Modern training defaults (bf16 compute on CUDA when supported, paged AdamW 8-bit
 
 Use `method: slime` for **slime-style GRPO** post-training (Hugging Face generate + policy update, not the full THUDM/slime Megatron+SGLang Ray stack) when you want rollout generation, reward/verifier traces, checkpointing, and automatic stopping around one local causal LM. Single-process runs keep CPU work bounded while the GPU does rollout and policy updates; multi-GPU runs use **data-parallel DDP** (Accelerate) and shard prompt groups across ranks — see `configs/example_training_slime_ddp.yaml`.
 
+### High-level data generation (required for meaningful signal)
+
+Tiny hand-written smoke JSONL (tens of easy arithmetic items) does **not**
+produce useful GRPO: outcome rewards are nearly uniform, dynamic sampling drops
+all groups, and training ends with `no_trainable_groups`.
+
+Seiso ships a **high-level data generator** that builds large, deterministic,
+checkable prompt corpora (**prompts + labels/tests only** — completions always
+come from online rollouts):
+
+```bash
+# Standalone (inspect before training)
+python -m seiso.rl_verify.data_gen \
+  --out data/slime_generated.jsonl \
+  --count 500 \
+  --mix numeric:0.5,choice:0.2,code:0.3 \
+  --difficulty easy:0.35,medium:0.45,hard:0.20 \
+  --seed 17 --print-summary
+```
+
+Or enable generation inside the slime config (`data_gen: true`) so training
+materializes `output_dir/slime_generated.jsonl` automatically:
+
+| Field | Meaning |
+|-------|---------|
+| `data_gen` | Turn on high-level corpus generation before the first rollout |
+| `data_gen_count` | Prompt count (prefer **200+**; 400–2000 for real runs) |
+| `data_gen_mix` | Stream mix: `numeric` / `choice` / `code` |
+| `data_gen_difficulty` | `easy` / `medium` / `hard` weights |
+| `data_gen_seed` | Deterministic seed (same seed ⇒ same corpus) |
+| `reward: auto` | Per-row checker from generated `reward` / `benchmark` fields |
+| `rollout_backend` | Online completion path: `data_gen` (HF generate, default) or `sglang` (HTTP). `auto` uses SGLang when `sglang_base_url` is set **and** multi-process |
+| `sglang_base_url` | SGLang OpenAI server root, e.g. `http://127.0.0.1:30000` (required for `rollout_backend: sglang`) |
+
+**Single-GPU** examples use `rollout_backend: data_gen` (colocated HF generate).  
+**Multi-GPU** example (`example_training_slime_ddp.yaml`) uses `rollout_backend: sglang` — launch SGLang separately, then Accelerate DDP for policy updates. Logprobs are always recomputed on the training model.
+
+Streams:
+
+- **numeric** — multi-step arithmetic / word problems with exact answers  
+- **choice** — multiple-choice with letter labels  
+- **code** — unit-test-grounded programs (sandbox-verified goldens)
+
 Start from `configs/example_training_slime.yaml`:
 
 ```yaml
 method: slime
 model_id: Qwen/Qwen2.5-0.5B-Instruct
-dataset: data/slime_sample.jsonl
-reward: numeric
+dataset: data/slime_sample.jsonl   # placeholder when data_gen is true
+reward: auto
 max_vram_gb: 16
 rollouts_per_prompt: 4
 rollout_batch_size: 4
@@ -175,6 +218,9 @@ slime_use_lora: true
 auto_stop: true
 auto_stop_metric: reward_mean
 write_verifier_data: true
+data_gen: true
+data_gen_count: 400
+data_gen_mix: "numeric:0.55,choice:0.15,code:0.30"
 ```
 
 Bundled smoke datasets (expand for real training):
