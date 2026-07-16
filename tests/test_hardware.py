@@ -244,7 +244,8 @@ def test_format_catalog_note_shows_download_and_runtime():
     moe_est = estimate_gguf_download_bytes(
         "35B", tags=("moe",), repo_id="Qwen/Qwen3.6-35B-A3B"
     )
-    assert 1.5 * 1024**3 < moe_est < 3.5 * 1024**3
+    # MoE artifacts contain every expert even though only A3B runs per token.
+    assert 15 * 1024**3 < moe_est < 25 * 1024**3
 
 
 def test_hardware_profile_includes_backend_labels():
@@ -438,6 +439,33 @@ def test_assess_hardware_fit_marks_unlikely_without_blocking_chat(monkeypatch):
     assert fit["memory_load_blocked_reason"] is None
     assert fit["memory_load_budget_exceeded"] is True
     assert fit["hardware_fit"] == "unlikely"
+
+
+def test_moe_fit_uses_resident_size_and_reports_active_compute(monkeypatch):
+    profile = {
+        "backend": "cuda",
+        "gpus": [{"vram_total_mb": 24576, "vram_used_mb": 0}],
+        "ram_gb": 32,
+    }
+    monkeypatch.setattr("seiso.hardware.fit.fit_headroom_mb", lambda _p: 20480)
+    monkeypatch.setattr("seiso.hardware.fit.vram_headroom_mb", lambda _p: 12288)
+
+    fit = assess_catalog_fit(
+        {
+            "params": "30B",
+            "quant": "Q4_K_M",
+            "tags": ["moe"],
+            "repo_id": "Qwen/Qwen3-30B-A3B",
+            "task": "chat",
+        },
+        profile,
+    )
+
+    assert fit["is_moe"] is True
+    assert fit["total_params_b"] == 30.0
+    assert fit["active_params_b"] == 3.0
+    assert fit["est_vram_mb"] > 15 * 1024
+    assert fit["memory_load_budget_exceeded"] is True
 
 
 def test_assess_hardware_fit_allows_when_est_within_headroom(monkeypatch):

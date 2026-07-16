@@ -1,0 +1,33 @@
+# Minimal MoE-aware LoRA smoke test.
+model_id: hf-internal-testing/tiny-random-MixtralForCausalLM
+dataset: ./data/sample.jsonl
+output_dir: ./.test_outputs/train-moe-smoke
+method: lora
+quant: 16bit
+dataset_format: chat
+epochs: 1
+batch_size: 1
+learning_rate: 0.0001
+max_seq_length: 128
+lora_r: 4
+lora_alpha: 8
+lora_dropout: 0
+gradient_accumulation_steps: 1
+gradient_checkpointing: false
+train_on_responses_only: true
+use_triton: false
+use_fused_ce: false
+use_fused_lora: false
+dataloader_num_workers: 0
+dataloader_persistent_workers: false
+group_by_length: false
+neftune_noise_alpha: null
+save_safetensors: true
+eval_split_ratio: 0
+save_steps: 10
+logging_steps: 1
+seed: 42
+deterministic: true
+extra:
+  moe_finetune: true
+  freeze_moe_router: true

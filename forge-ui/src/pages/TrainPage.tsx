@@ -115,6 +115,8 @@ export function TrainPage() {
   const [trainResponsesOnly, setTrainResponsesOnly] = useState(true);
   const [useRsLora, setUseRsLora] = useState(false);
   const [packing, setPacking] = useState(false);
+  const [moeFinetune, setMoeFinetune] = useState(false);
+  const [freezeMoeRouter, setFreezeMoeRouter] = useState(true);
   const [exportOnComplete, setExportOnComplete] = useState(true);
   const [exportProfile, setExportProfile] = useState("lora_bundle");
   const [exportQuants, setExportQuants] = useState<string[]>(["q4_k_m", "q8_0", "f16"]);
@@ -334,6 +336,10 @@ export function TrainPage() {
     }
   }, [recommendations, configCustomized, datasetAnalysis]);
 
+  useEffect(() => {
+    if (!recommendations?.is_moe) setMoeFinetune(false);
+  }, [recommendations?.is_moe]);
+
   const applyRecommendations = useCallback(() => {
     const rec = recommendations?.config;
     if (!rec) return;
@@ -543,6 +549,12 @@ export function TrainPage() {
         train_on_responses_only: trainResponsesOnly,
         use_rslora: useRsLora,
         packing,
+        extra: moeFinetune
+          ? {
+              moe_finetune: true,
+              freeze_moe_router: freezeMoeRouter,
+            }
+          : {},
         output_dir: "./outputs",
       };
       const slimeTrainingConfig =
@@ -937,6 +949,39 @@ export function TrainPage() {
                 <label>Grad accumulation: {gradAccum}</label>
                 <input type="range" min={1} max={32} value={gradAccum} onChange={(e) => { setGradAccum(+e.target.value); setConfigCustomized(true); }} />
               </div>
+            </FormSection>
+          )}
+          {method === "lora" && recommendations?.is_moe && (
+            <FormSection
+              title="MoE fine-tune"
+              hint="Optional router-safe LoRA for sparse expert models."
+              collapsible
+              defaultOpen={false}
+            >
+              <p className="muted-text">
+                This model keeps about {recommendations.total_params_b ?? "all"}B parameters
+                resident while activating about {recommendations.active_params_b ?? "a subset"}B
+                per token. Dense models are simpler to tune; MoE offers lower active compute when
+                the full model fits in memory.
+              </p>
+              <label className="studio-checkbox-item studio-checkbox-item-standalone">
+                <input
+                  type="checkbox"
+                  checked={moeFinetune}
+                  onChange={(e) => setMoeFinetune(e.target.checked)}
+                />
+                Enable MoE-aware LoRA
+              </label>
+              {moeFinetune && (
+                <label className="studio-checkbox-item studio-checkbox-item-standalone">
+                  <input
+                    type="checkbox"
+                    checked={freezeMoeRouter}
+                    onChange={(e) => setFreezeMoeRouter(e.target.checked)}
+                  />
+                  Freeze expert router (recommended)
+                </label>
+              )}
             </FormSection>
           )}
           {method === "slime" && (

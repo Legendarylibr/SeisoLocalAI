@@ -139,6 +139,24 @@ def _enrich_model_runtime_meta(
         opt.setdefault("is_moe", False)
         opt.setdefault("uses_swa", False)
 
+    if opt.get("is_moe"):
+        from seiso.models.moe_sizing import sizing_from_reference
+
+        reference = f"{model_name or ''} {model_path or ''} moe"
+        sizing = sizing_from_reference(
+            reference,
+            size_bytes=int(opt.get("size_bytes") or 0),
+        )
+        opt.update(
+            {
+                "total_params_b": sizing.total_params_b,
+                "active_params_b": sizing.active_params_b,
+                "moe_load_note": sizing.compute_note
+                or "Full model resident; selected experts run per token",
+                "moe_architecture": "sparse",
+            }
+        )
+
 
 def _safe_chat_profile(opt: dict[str, Any]) -> dict[str, Any]:
     """Model-aware UI defaults that mirror backend clamps instead of raw maxima."""

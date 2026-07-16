@@ -7,6 +7,7 @@ from pathlib import Path
 from seiso.io.files import iter_matching_files
 from seiso.memory.estimates import (
     estimate_chat_vram_gb,
+    estimate_moe_resident_vram_gb,
     estimate_training_vram_gb,
     guess_params_from_name,
 )
@@ -54,6 +55,7 @@ def _hub_model_vram_mb(path_str: str, *, mode: str) -> int | None:
     """VRAM estimate for HuggingFace repo ids (not local paths)."""
     from seiso.models.hub_quant import (
         infer_active_params_b,
+        infer_moe_sizing,
         is_hub_model_id,
         is_native_hub_quant_model,
         peek_hub_config,
@@ -67,6 +69,14 @@ def _hub_model_vram_mb(path_str: str, *, mode: str) -> int | None:
     label = f"{params_b:g}B"
     native = is_native_hub_quant_model(path_str, config=config, peek=False)
     quant = "mxfp4" if native and mode == "train" else ("Q8_0" if native else "4bit")
+    sizing = infer_moe_sizing(path_str, config=config)
+    if mode == "chat" and sizing.is_moe and sizing.total_params_b is not None:
+        est_gb = estimate_moe_resident_vram_gb(
+            f"{sizing.total_params_b:g}B",
+            quant=quant,
+            repo_id=path_str,
+        )
+        return int(est_gb * 1024)
     est_gb = (
         estimate_training_vram_gb(label, quant=quant, repo_id=path_str)
         if mode == "train"

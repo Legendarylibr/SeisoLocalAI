@@ -675,15 +675,26 @@ class SeisoTrainer:
 
     def _apply_lora(self, model):
         cfg = self.config
+        moe_finetune = bool(cfg.extra.get("moe_finetune", False))
+        target_override = cfg.extra.get("lora_target_modules")
+        configured_targets = target_override if isinstance(target_override, list) else None
         model = SeisoModel.attach_lora(
             model,
             r=cfg.lora_r,
+            target_modules=configured_targets,
             lora_alpha=cfg.lora_alpha,
             lora_dropout=cfg.lora_dropout,
             use_gradient_checkpointing=cfg.gradient_checkpointing,
             use_rslora=cfg.use_rslora,
             model_id=self._resolve_load_model_id(),
+            freeze_moe_router=moe_finetune
+            and bool(cfg.extra.get("freeze_moe_router", True)),
         )
+        if moe_finetune:
+            logger.info(
+                "MoE-aware LoRA enabled (router frozen: %s)",
+                bool(cfg.extra.get("freeze_moe_router", True)),
+            )
         if self._loaded:
             self._loaded.model = model
         return model

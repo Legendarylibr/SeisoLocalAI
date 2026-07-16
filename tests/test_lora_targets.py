@@ -153,6 +153,24 @@ def test_resolve_lora_targets_for_llama_models():
     ]
 
 
+def test_resolve_lora_targets_for_qwen_moe_keeps_expert_ffn_targets():
+    model = _FakeModel(
+        [
+            "model.layers.0.self_attn.q_proj.weight",
+            "model.layers.0.mlp.gate.weight",
+            "model.layers.0.mlp.experts.0.gate_proj.weight",
+            "model.layers.0.mlp.experts.0.up_proj.weight",
+            "model.layers.0.mlp.experts.0.down_proj.weight",
+        ],
+        model_type="qwen2_moe",
+    )
+
+    targets = resolve_lora_target_modules("Qwen/Qwen2-MoE", model)
+
+    assert "gate" not in targets
+    assert targets == ["q_proj", "gate_proj", "up_proj", "down_proj"]
+
+
 def test_resolve_lora_targets_falls_back_to_linear_module_names():
     model = _FakeModel(
         [],

@@ -273,7 +273,13 @@ class TrainConfig(BaseModel):
     data_gen_mix: str = "numeric:0.5,choice:0.2,code:0.3"
     data_gen_difficulty: str = "easy:0.35,medium:0.45,hard:0.20"
     data_gen_filename: str = "slime_generated.jsonl"
-    extra: dict[str, Any] = Field(default_factory=dict)
+    extra: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Advanced overrides, including moe_finetune, freeze_moe_router, "
+            "and lora_target_modules."
+        ),
+    )
 
     @field_validator(
         "output_dir", "dataset", "resume_from", "sandbox_root", mode="before"

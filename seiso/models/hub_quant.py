@@ -7,6 +7,7 @@ from functools import lru_cache
 from typing import Any
 
 from seiso.memory.estimates import _active_params_b, guess_params_from_name
+from seiso.models.moe_sizing import MoESizing, sizing_from_reference
 
 logger = logging.getLogger(__name__)
 
@@ -115,47 +116,26 @@ def native_quant_training_block_reason(
 
 def active_params_from_config(config: Any) -> float | None:
     """Best-effort active parameter count (billions) from model config."""
-    for attr in ("active_parameter_count", "num_active_parameters"):
-        value = getattr(config, attr, None)
-        if value is not None:
-            try:
-                count = float(value)
-            except (TypeError, ValueError):
-                continue
-            if count > 1_000:
-                return count / 1e9
-            if count > 0:
-                return count
-
-    total_params = getattr(config, "num_parameters", None)
-    num_experts = getattr(config, "num_local_experts", None) or getattr(
-        config, "num_experts", None
-    )
-    experts_per_tok = (
-        getattr(config, "num_experts_per_tok", None)
-        or getattr(config, "num_selected_experts", None)
-        or getattr(config, "num_activated_experts", None)
-    )
-    if total_params and num_experts and experts_per_tok:
-        try:
-            active = float(total_params) / float(num_experts) * float(experts_per_tok)
-            if active > 0:
-                return active / 1e9
-        except (TypeError, ValueError, ZeroDivisionError):
-            pass
-
-    model_type = str(getattr(config, "model_type", "") or "").lower()
-    tags: tuple[str, ...] = ("moe",) if "moe" in model_type else ()
     label = str(
         getattr(config, "name_or_path", "")
         or getattr(config, "_name_or_path", "")
         or ""
     )
-    if not label:
-        label = f"{getattr(config, 'hidden_size', '')}-{model_type}".strip("-")
-    if label:
-        return _active_params_b(label, tags, repo_id=label)
-    return None
+    sizing = sizing_from_reference(label, config=config)
+    return sizing.active_params_b
+
+
+def infer_moe_sizing(
+    model_id: str,
+    *,
+    config: Any | None = None,
+    trust_remote_code: bool = False,
+    size_bytes: int = 0,
+) -> MoESizing:
+    """Return shared total/resident and active-per-token model sizing."""
+    if config is None and is_hub_model_id(model_id):
+        config = peek_hub_config(model_id, trust_remote_code=trust_remote_code)
+    return sizing_from_reference(model_id, config=config, size_bytes=size_bytes)
 
 
 def infer_active_params_b(
@@ -165,12 +145,13 @@ def infer_active_params_b(
     trust_remote_code: bool = False,
 ) -> float:
     """Best-effort active parameter count (billions) for VRAM and regression estimates."""
-    if config is None and is_hub_model_id(model_id):
-        config = peek_hub_config(model_id, trust_remote_code=trust_remote_code)
-    if config is not None:
-        from_config = active_params_from_config(config)
-        if from_config is not None:
-            return from_config
+    sizing = infer_moe_sizing(
+        model_id,
+        config=config,
+        trust_remote_code=trust_remote_code,
+    )
+    if sizing.active_params_b is not None:
+        return sizing.active_params_b
 
     guessed = guess_params_from_name(model_id)
     label = f"{guessed}B" if guessed is not None else str(model_id).split("/")[-1]

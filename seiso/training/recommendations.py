@@ -9,7 +9,10 @@ from typing import Any
 from seiso.hardware.training import training_defaults
 from seiso.memory.estimates import estimate_training_vram_gb, guess_params_from_name
 from seiso.models.catalog import _parse_param_size
-from seiso.models.hub_quant import native_quant_training_block_reason
+from seiso.models.hub_quant import (
+    infer_moe_sizing,
+    native_quant_training_block_reason,
+)
 from seiso.models.trainable_snapshot import GGUF_ONLY_REPO_MESSAGE, is_gguf_only_repo_id
 from seiso.training.config import DatasetFormat, TrainMethod
 from seiso.training.dataset_analysis import (
@@ -147,6 +150,9 @@ def recommend_training_config(
     """Return suggested training knobs for the current hardware, model, and dataset."""
     defaults = training_defaults(profile)
     params_b = _model_params_b(model_id)
+    moe_sizing = infer_moe_sizing(model_id) if model_id else None
+    if moe_sizing and moe_sizing.total_params_b is not None:
+        params_b = moe_sizing.total_params_b
     analysis = _try_analyze_dataset(dataset, sandbox_root=sandbox_root)
     ds = (
         analysis.get("recommended_config", {})
@@ -197,9 +203,26 @@ def recommend_training_config(
     }
     config = _apply_hardware_caps(
         base_cfg,
-        params_b,
+        (
+            moe_sizing.active_params_b
+            if moe_sizing and moe_sizing.is_moe
+            else params_b
+        ),
         hardware_max_seq=int(defaults["max_seq_length"]),
     )
+    if moe_sizing and moe_sizing.is_moe:
+        config.update(
+            {
+                "batch_size": min(int(config["batch_size"]), 1),
+                "lora_r": min(int(config["lora_r"]), 16),
+                "lora_alpha": min(int(config["lora_alpha"]), 32),
+                "gradient_checkpointing": True,
+            }
+        )
+        notes.append(
+            "MoE fine-tune is optional: enable MoE-aware LoRA to freeze the router "
+            "by default and reduce routing instability."
+        )
 
     if params_b is not None:
         max_rec = defaults.get("max_recommended_params", "7B")
@@ -226,7 +249,7 @@ def recommend_training_config(
         est_vram_gb = estimate_training_vram_gb(
             f"{params_b}B",
             quant=str(config["quant"]),
-            repo_id=model_id,
+            repo_id="" if moe_sizing and moe_sizing.is_moe else model_id,
         )
 
     payload: dict[str, Any] = {
@@ -237,6 +260,9 @@ def recommend_training_config(
         "model_params": f"{params_b:g}B" if params_b is not None else None,
         "est_training_vram_gb": est_vram_gb,
         "hardware_tier": profile.get("tier_label") or profile.get("tier"),
+        "is_moe": bool(moe_sizing and moe_sizing.is_moe),
+        "total_params_b": moe_sizing.total_params_b if moe_sizing else None,
+        "active_params_b": moe_sizing.active_params_b if moe_sizing else None,
     }
     if analysis:
         payload["dataset_analysis"] = analysis

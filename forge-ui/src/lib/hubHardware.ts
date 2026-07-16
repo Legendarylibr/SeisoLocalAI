@@ -11,7 +11,7 @@ export function hubRamTierHint(hw: HardwareSummary | null, vram: VramStatus | nu
     if (ram <= 16) return `${Math.round(ram)} GB Mac — up to ~9B Q4 comfortably (Phi-4 Mini, Gemma 3 4B)`;
     if (ram <= 24) return `${Math.round(ram)} GB Mac — up to ~24B Q4 with free memory first`;
     if (ram <= 32) return `${Math.round(ram)} GB Mac — 27B class models fit with headroom`;
-    return `${Math.round(ram)} GB Mac — large models OK; MoE still needs full GGUF in RAM`;
+    return `${Math.round(ram)} GB Mac — large models OK; MoE needs full GGUF resident while speed tracks active parameters`;
   }
 
   if (ram > 0 && ram <= 16) return `${Math.round(ram)} GB RAM — prefer ≤7B Q4 for comfortable chat`;
