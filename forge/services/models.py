@@ -77,7 +77,11 @@ def _inventory_repo_id(row: dict[str, Any]) -> str | None:
         return str(repo_id)
     source = row.get("source")
     if isinstance(source, str) and source.startswith("hf:"):
-        return source[3:]
+        rest = source[3:]
+        # Multi-quant siblings use hf:org/model:file.gguf
+        if ":" in rest and "/" in rest.split(":", 1)[0]:
+            rest = rest.split(":", 1)[0]
+        return rest
     return None
 
 

@@ -190,6 +190,7 @@ def _mock_hub_search(request, monkeypatch):
         "test_hub_search_raises_on_rate_limit",
         "test_query_hub_page_omits_pipeline_tag_when_searching",
         "test_search_catalog_keeps_non_text_generation_when_querying",
+        "test_search_catalog_browse_keeps_hub_rows_without_task_filter",
         "test_search_catalog_browse_still_filters_task",
     }:
         yield
@@ -426,7 +427,8 @@ def test_query_hub_page_omits_pipeline_tag_when_searching(monkeypatch):
 
     captured.clear()
     _query_hub_page(query="", limit=50)
-    assert captured[0].get("pipeline_tag") == "text-generation"
+    # Browse mirrors Hub downloads ranking — no pipeline filter.
+    assert captured[0].get("pipeline_tag") is None
 
 
 def test_search_catalog_keeps_non_text_generation_when_querying(monkeypatch):
@@ -451,6 +453,32 @@ def test_search_catalog_keeps_non_text_generation_when_querying(monkeypatch):
     repos = {m["repo_id"] for m in results}
     assert "org/whisper-large" in repos
     assert "org/chat-model" in repos
+
+
+def test_search_catalog_browse_keeps_hub_rows_without_task_filter(monkeypatch):
+    def _query_page(**kwargs):
+        return [
+            {
+                "id": "org/whisper-large",
+                "downloads": 90_000,
+                "pipeline_tag": "automatic-speech-recognition",
+                "tags": ["asr"],
+            },
+            {
+                "id": "org/chat-model",
+                "downloads": 50_000,
+                "pipeline_tag": "text-generation",
+                "tags": ["text-generation"],
+            },
+        ], None
+
+    monkeypatch.setattr("seiso.models.catalog._query_hub_page", _query_page)
+    # Empty browse reflects Hub downloads — no pipeline/task drop.
+    results = search_catalog().models
+    repos = {m["repo_id"] for m in results}
+    assert "org/whisper-large" in repos
+    assert "org/chat-model" in repos
+    assert results[0]["repo_id"] == "org/whisper-large"
 
 
 def test_search_catalog_browse_still_filters_task(monkeypatch):

@@ -13,14 +13,16 @@ from typing import Any
 from forge.db.store import Database
 from forge.services.artifact_integrity import gguf_files_complete_with_hub
 from forge.services.hf_hub import (
-    _inventory_name_for_files,
-    _pick_gguf_files,
     estimate_snapshot_download_bytes,
     link_inventory,
 )
+from forge.services.hf_hub_gguf_select import (
+    _inventory_name_for_files,
+    list_complete_gguf_file_groups,
+)
 from forge.services.user_paths import user_dir
-from seiso.inference.backends import gguf_is_supported_by_llamacpp
 from seiso.models.catalog import CatalogEntry, get_by_gguf_mirror, get_by_repo
+from seiso.models.gguf_quant import extract_quant_label_from_text
 from seiso.security import sanitize_filename
 
 
@@ -135,7 +137,14 @@ def _latest_snapshot_dirs(repo_cache_dir: Path) -> list[Path]:
     ]
 
 
-def _gguf_record_from_snapshot(
+def _gguf_inventory_source(inventory_repo: str, filenames: list[str], *, canonical: bool) -> str:
+    """Unique inventory source key. Canonical preferred quant keeps ``hf:repo``."""
+    if canonical:
+        return f"hf:{inventory_repo}"
+    return f"hf:{inventory_repo}:{Path(filenames[0]).name}"
+
+
+def _gguf_records_from_snapshot(
     *,
     repo_id: str,
     snapshot_dir: Path,
@@ -143,59 +152,79 @@ def _gguf_record_from_snapshot(
     data_dir: Path,
     user_id: str,
     hf_cache_dir: Path,
-) -> dict[str, Any] | None:
+) -> list[dict[str, Any]]:
+    """Register every complete GGUF quant present in the cache snapshot."""
     rel_files = inventory.gguf_files
     if not rel_files:
-        return None
+        return []
 
     entry = _catalog_entry_for_cached_repo(repo_id)
-
     inventory_repo = entry.repo_id if entry else repo_id
-    quant = entry.quant if entry else "Q4_K_M"
-    filenames = _pick_gguf_files(
-        rel_files, preferred_quant=quant, repo_id=inventory_repo
-    )
-    if not filenames:
-        return None
+    preferred = (entry.quant if entry else None) or "Q4_K_M"
+    groups = list_complete_gguf_file_groups(rel_files)
+    if not groups:
+        return []
 
-    paths = [snapshot_dir / filename for filename in filenames]
-    if not gguf_files_complete_with_hub(
-        repo_id=repo_id,
-        filenames=filenames,
-        paths=paths,
-        entry=entry,
-    ):
-        return None
-    if not gguf_is_supported_by_llamacpp(str(paths[0])):
-        return None
+    def _group_rank(filenames: list[str]) -> tuple[int, str]:
+        label = (extract_quant_label_from_text(filenames[0]) or "").upper()
+        preferred_u = preferred.upper().replace("-", "_")
+        exact = 0 if preferred_u and preferred_u in label.replace("-", "_") else 1
+        return (exact, filenames[0].lower())
 
-    target = paths[0] if len(paths) == 1 else paths[0].parent
+    groups = sorted(groups, key=_group_rank)
+
     inventory_dir = user_dir(data_dir, user_id, "models")
-    link = link_inventory(
-        inventory_dir,
-        str(_inventory_name_for_files(inventory_repo, filenames)),
-        target,
-    )
-    size_bytes = sum(path.stat().st_size for path in paths)
-    metadata: dict[str, Any] = {
-        "repo_id": inventory_repo,
-        "cache_dir": str(hf_cache_dir),
-        "gguf_file": filenames[0],
-        "gguf_files": filenames,
-    }
-    if repo_id != inventory_repo:
-        metadata["gguf_repo"] = repo_id
+    records: list[dict[str, Any]] = []
+    for index, filenames in enumerate(groups):
+        paths = [snapshot_dir / filename for filename in filenames]
+        if not gguf_files_complete_with_hub(
+            repo_id=repo_id,
+            filenames=filenames,
+            paths=paths,
+            entry=entry,
+        ):
+            continue
 
-    return {
-        "source": f"hf:{inventory_repo}",
-        "name": (
-            target.name if target.is_file() else _display_name_for_shards(filenames[0])
-        ),
-        "path": str(link.absolute()),
-        "format": "gguf",
-        "size_bytes": size_bytes,
-        "metadata": metadata,
-    }
+        target = paths[0] if len(paths) == 1 else paths[0].parent
+        link = link_inventory(
+            inventory_dir,
+            str(_inventory_name_for_files(inventory_repo, filenames)),
+            target,
+        )
+        size_bytes = sum(path.stat().st_size for path in paths)
+        quant = extract_quant_label_from_text(filenames[0]) or (
+            entry.quant if entry else None
+        )
+        metadata: dict[str, Any] = {
+            "repo_id": inventory_repo,
+            "cache_dir": str(hf_cache_dir),
+            "gguf_file": filenames[0],
+            "gguf_files": filenames,
+        }
+        if quant:
+            metadata["quant"] = quant
+        if repo_id != inventory_repo:
+            metadata["gguf_repo"] = repo_id
+
+        # First complete group (preferred quant when present) keeps the
+        # historical hf:repo source so download/cache lookups stay stable.
+        records.append(
+            {
+                "source": _gguf_inventory_source(
+                    inventory_repo, filenames, canonical=index == 0
+                ),
+                "name": (
+                    target.name
+                    if target.is_file()
+                    else _display_name_for_shards(filenames[0])
+                ),
+                "path": str(link.absolute()),
+                "format": "gguf",
+                "size_bytes": size_bytes,
+                "metadata": metadata,
+            }
+        )
+    return records
 
 
 def _snapshot_record(
@@ -263,14 +292,18 @@ def _scan_hf_cache_records(
             continue
         for snapshot_dir in _latest_snapshot_dirs(repo_cache_dir):
             inventory = _snapshot_inventory(snapshot_dir)
-            record = _gguf_record_from_snapshot(
+            gguf_records = _gguf_records_from_snapshot(
                 repo_id=repo_id,
                 snapshot_dir=snapshot_dir,
                 inventory=inventory,
                 data_dir=data_dir,
                 user_id=user_id,
                 hf_cache_dir=hf_cache_dir,
-            ) or _snapshot_record(
+            )
+            if gguf_records:
+                records.extend(gguf_records)
+                break
+            record = _snapshot_record(
                 repo_id=repo_id,
                 snapshot_dir=snapshot_dir,
                 inventory=inventory,

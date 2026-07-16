@@ -15,6 +15,25 @@ def test_pick_gguf_prefers_quant():
     assert _pick_gguf_file(files, preferred_quant="Q4_K_M") == "model-Q4_K_M.gguf"
 
 
+def test_list_complete_gguf_file_groups_returns_all_quants():
+    from forge.services.hf_hub_gguf_select import list_complete_gguf_file_groups
+
+    files = [
+        "model-Q5_K_M.gguf",
+        "model-Q4_K_M.gguf",
+        "mmproj-f16.gguf",
+        "model-Q8_0.gguf",
+    ]
+    groups = list_complete_gguf_file_groups(files)
+    flat = {g[0] for g in groups}
+    assert flat == {
+        "model-Q4_K_M.gguf",
+        "model-Q5_K_M.gguf",
+        "model-Q8_0.gguf",
+    }
+    assert all(len(g) == 1 for g in groups)
+
+
 def test_pick_gguf_prefers_novel_quant():
     files = ["model-Q8_0.gguf", "model-Q4_K_XL.gguf", "model-Q5_K_M.gguf"]
     assert _pick_gguf_file(files, preferred_quant="Q4_K_XL") == "model-Q4_K_XL.gguf"

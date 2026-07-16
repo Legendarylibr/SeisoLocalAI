@@ -40,7 +40,11 @@ def variant_group_key(opt: dict[str, Any]) -> str:
             return value.strip().lower()
     source = opt.get("source") or ""
     if isinstance(source, str) and source.startswith("hf:"):
-        return source[3:].lower()
+        # Strip multi-quant suffix (hf:org/model:file.gguf → org/model).
+        rest = source[3:]
+        if ":" in rest and "/" in rest.split(":", 1)[0]:
+            rest = rest.split(":", 1)[0]
+        return rest.lower()
     name = str(opt.get("name") or "").lower()
     stripped = re.sub(
         r"[-_.]?(q\d+[_a-z0-9]*|iq\d+[_a-z0-9]*|f16|bf16).*$", "", name, flags=re.I
