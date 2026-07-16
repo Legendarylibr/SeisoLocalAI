@@ -8,7 +8,6 @@ import json
 import math
 import os
 import random
-import re
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -820,12 +819,13 @@ def _empty_stats() -> dict[str, float]:
         "format_reward_mean": 0.0,
         "process_reward_mean": 0.0,
         "thinking_penalty_mean": 0.0,
-        "outcome_pass_rate": 0.0,
+        # Metric rates (not secrets); names trip bandit B105 on "*pass*".
+        "outcome_pass_rate": 0.0,  # nosec B105
         "format_ok_rate": 0.0,
-        "proof_pass_rate": 0.0,
+        "proof_pass_rate": 0.0,  # nosec B105
         "proof_score_mean": 0.0,
         "group_reward_spread_mean": 0.0,
-        "group_pass_rate": 0.0,
+        "group_pass_rate": 0.0,  # nosec B105
         "group_nonzero_spread_frac": 0.0,
         "response_tokens_mean": 0.0,
         "rollout_status_stop": 0.0,
