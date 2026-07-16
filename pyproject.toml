@@ -184,6 +184,7 @@ extension-pkg-allow-list = ["pydantic"]
 ignored-modules = [
   "accelerate",
   "awq",
+  "data_designer",
   "datasets",
   "llama_cpp",
   "peft",
