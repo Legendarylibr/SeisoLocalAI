@@ -36,22 +36,28 @@ _THINK_BLOCK_RE = re.compile(
 )
 
 
-def strip_leaked_reasoning(content: str) -> str:
-    """Remove model reasoning blocks from plain chat replies."""
+def strip_leaked_reasoning(content: str, *, preserve_trailing: bool = False) -> str:
+    """Remove model reasoning blocks from plain chat replies.
+
+    When ``preserve_trailing`` is set (streaming path), only leading whitespace
+    after a reasoning close-tag is trimmed so mid-stream chunk boundaries keep
+    their trailing spaces.
+    """
     if not content:
         return content
+    edge = str.lstrip if preserve_trailing else str.strip
     match = re.search(
         r"</(?:redacted_thinking|think)>(?P<final>.*)$",
         content,
         flags=re.IGNORECASE | re.DOTALL,
     )
     if match is not None:
-        return match.group("final").strip()
+        return edge(match.group("final"))
     cleaned = _THINK_BLOCK_RE.sub("", content)
     open_match = _THINKING_OPEN_RE.search(cleaned)
     if open_match is not None:
         cleaned = cleaned[: open_match.start()]
-    return cleaned.strip()
+    return edge(cleaned)
 
 
 def strip_spurious_tool_syntax(content: str) -> str:
@@ -154,7 +160,7 @@ class StreamingOutputSanitizer:
             self._in_tool_call = True
 
     def _emit_visible_delta(self) -> list[str]:
-        sanitized = strip_leaked_reasoning(self._visible)
+        sanitized = strip_leaked_reasoning(self._visible, preserve_trailing=True)
         if len(sanitized) <= self._sanitized_emitted_len:
             return []
         delta = sanitized[self._sanitized_emitted_len :]
