@@ -27,6 +27,21 @@ def test_sanitize_llm_output_strips_when_requested():
     assert sanitize_llm_output(raw, strip_tool_calls=True) == "Hi"
 
 
+def test_sanitize_llm_output_strips_redacted_thinking():
+    raw = (
+        "<think> Okay, the user said hey. </think> "
+        "Hey! How can I help you today?"
+    )
+    assert sanitize_llm_output(raw, strip_tool_calls=True) == "Hey! How can I help you today?"
+
+
+def test_sanitize_llm_output_strips_think_tags():
+    open_tag = "<" + "think" + ">"
+    close_tag = "</" + "think" + ">"
+    raw = f"{open_tag}internal reasoning{close_tag}Hello there!"
+    assert sanitize_llm_output(raw, strip_tool_calls=True) == "Hello there!"
+
+
 def test_sanitize_llm_output_preserves_answer_label_text():
     raw = "The final answer is: The user has just asked a question."
     assert sanitize_llm_output(raw, strip_tool_calls=True) == raw
@@ -68,6 +83,13 @@ def test_streaming_output_sanitizer_strips_tool_calls():
     assert guard.feed("Hello ") == ["Hello "]
     assert guard.feed('<tool_call>{"name":"x"}</tool_call>') == []
     assert guard.feed(" done") == [" done"]
+    assert guard.finish() == []
+
+
+def test_streaming_output_sanitizer_strips_redacted_thinking():
+    guard = StreamingOutputSanitizer(strip_tool_calls=True)
+    assert guard.feed("<think>reasoning</think>") == []
+    assert guard.feed(" Hey!") == ["Hey!"]
     assert guard.finish() == []
 
 
