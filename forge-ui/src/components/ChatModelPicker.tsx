@@ -48,7 +48,8 @@ export function ChatModelPicker({
     api
       .catalog(q, undefined, q.trim() ? undefined : "chat", false)
       .then((r) => setCatalog(r.models))
-      .catch(() => setCatalog([]))
+      // Keep last Hub names on transient failures so the picker stays usable.
+      .catch(() => {})
       .finally(() => setCatalogLoading(false));
   }, []);
 

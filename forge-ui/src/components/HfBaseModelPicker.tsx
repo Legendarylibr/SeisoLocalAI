@@ -72,7 +72,8 @@ export function HfBaseModelPicker({
       api
         .catalog(q.trim(), undefined, undefined, false, null, 50, trainableOnly ? "train" : "chat")
         .then((r) => setResults(r.models))
-        .catch(() => setResults([]))
+        // Keep last Hub names on transient failures so the picker stays usable.
+        .catch(() => {})
         .finally(() => setLoading(false));
     },
     [trainableOnly],

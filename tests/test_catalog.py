@@ -427,8 +427,8 @@ def test_query_hub_page_omits_pipeline_tag_when_searching(monkeypatch):
 
     captured.clear()
     _query_hub_page(query="", limit=50)
-    # Browse mirrors Hub downloads ranking — no pipeline filter.
-    assert captured[0].get("pipeline_tag") is None
+    # Empty browse uses text-generation so Hub/Chat show LLM model names.
+    assert captured[0].get("pipeline_tag") == "text-generation"
 
 
 def test_search_catalog_keeps_non_text_generation_when_querying(monkeypatch):
@@ -473,7 +473,7 @@ def test_search_catalog_browse_keeps_hub_rows_without_task_filter(monkeypatch):
         ], None
 
     monkeypatch.setattr("seiso.models.catalog._query_hub_page", _query_page)
-    # Empty browse reflects Hub downloads — no pipeline/task drop.
+    # Without a task filter, mapped Hub rows are kept (pipeline is applied upstream).
     results = search_catalog().models
     repos = {m["repo_id"] for m in results}
     assert "org/whisper-large" in repos

@@ -37,7 +37,16 @@ def test_resolve_trainable_hub_id_does_not_mirror_on_transient_error(monkeypatch
 
 
 def test_is_gated_hub_error_detects_403_message():
-    from seiso.models.hub_errors import is_gated_hub_error
+    from seiso.models.hub_errors import format_hub_error, is_gated_hub_error
 
     assert is_gated_hub_error(OSError("403 Forbidden: gated"))
     assert not is_gated_hub_error(TimeoutError("connection timed out"))
+
+    try:
+        import httpx
+    except ImportError:
+        return
+    proxy_exc = httpx.ProxyError("403 Forbidden")
+    assert not is_gated_hub_error(proxy_exc)
+    assert "proxy" in format_hub_error(proxy_exc, context="search").lower()
+    assert "token" not in format_hub_error(proxy_exc, context="search").lower()
