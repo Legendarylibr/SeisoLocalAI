@@ -106,7 +106,7 @@ export function HubPage() {
         .catch((err: unknown) => {
           const message = err instanceof Error ? err.message : "Hugging Face Hub search failed";
           setCatalogSearchError(message);
-          if (!append) setCatalog([]);
+          // Keep last good model names visible when Hub blips — don't wipe the grid.
         })
         .finally(() => {
           setCatalogLoading(false);

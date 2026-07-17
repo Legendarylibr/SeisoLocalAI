@@ -7,12 +7,35 @@ from typing import Literal
 HubErrorContext = Literal["search", "download", "probe"]
 
 
+def is_hub_transport_error(exc: BaseException) -> bool:
+    """True for network/proxy/DNS failures — not Hub HTTP 4xx/5xx (HfHubHTTPError)."""
+    if isinstance(exc, OSError):
+        return True
+    name = exc.__class__.__name__.lower()
+    if "proxy" in name:
+        return True
+    module = exc.__class__.__module__
+    if module.startswith(("httpx", "httpcore", "urllib3")):
+        return True
+    return module == "requests.exceptions"
+
+
 def is_gated_hub_error(exc: BaseException) -> bool:
     """True when Hub denied access (gated repo, missing/invalid token for private model)."""
     code = getattr(getattr(exc, "response", None), "status_code", None)
     if code in (401, 403):
         return True
     msg = str(exc).strip().lower()
+    # Proxy/network failures often include "403 Forbidden" but are not Hub auth.
+    if is_hub_transport_error(exc):
+        return any(
+            token in msg
+            for token in (
+                "gated",
+                "authorized list",
+                "not in the authorized",
+            )
+        )
     return any(
         token in msg
         for token in (
@@ -26,16 +49,6 @@ def is_gated_hub_error(exc: BaseException) -> bool:
     )
 
 
-def is_hub_transport_error(exc: BaseException) -> bool:
-    """True for network/proxy/DNS failures — not Hub HTTP 4xx/5xx (HfHubHTTPError)."""
-    if isinstance(exc, OSError):
-        return True
-    module = exc.__class__.__module__
-    if module.startswith(("httpx", "httpcore", "urllib3")):
-        return True
-    return module == "requests.exceptions"
-
-
 def format_hub_error(
     exc: Exception,
     *,
@@ -47,6 +60,36 @@ def format_hub_error(
     msg = str(exc).strip() or exc.__class__.__name__
     lowered = msg.lower()
     code = status_code or getattr(getattr(exc, "response", None), "status_code", None)
+    transport = is_hub_transport_error(exc)
+
+    # Transport/proxy first — httpx.ProxyError messages often contain "403 Forbidden"
+    # and must not be misread as gated-repo auth failures (which empty the catalog).
+    if transport or "proxy" in lowered:
+        if "proxy" in lowered or "proxy" in exc.__class__.__name__.lower():
+            return (
+                "Network proxy blocked Hugging Face Hub. "
+                "Check proxy settings and try again."
+            )
+        if "timeout" in lowered or "timed out" in lowered:
+            if context == "download" and repo_id:
+                return (
+                    f"Download timed out for {repo_id}. "
+                    "Retry or set HF_HUB_DOWNLOAD_TIMEOUT higher."
+                )
+            if context == "search":
+                return "Hugging Face Hub search timed out. Try again in a moment."
+            return (
+                "Hugging Face Hub timed out — try again or increase "
+                f"HF_HUB_DOWNLOAD_TIMEOUT. ({msg})"
+            )
+        if context == "download" and repo_id:
+            return (
+                f"Cannot reach huggingface.co while downloading {repo_id}. "
+                "Check your network."
+            )
+        if context == "search":
+            return "Cannot reach huggingface.co. Check your network and try again."
+        return f"Cannot reach huggingface.co — check your network connection. ({msg})"
 
     if (
         code == 401
@@ -95,9 +138,6 @@ def format_hub_error(
         if context == "search":
             return "Hugging Face Hub search endpoint not found."
         return msg
-
-    if "proxy" in lowered:
-        return "Network proxy blocked Hugging Face Hub. Check proxy settings and try again."
 
     if "connection" in lowered or "network" in lowered or "resolve" in lowered:
         if context == "download" and repo_id:

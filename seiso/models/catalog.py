@@ -231,11 +231,11 @@ def _query_hub_page(
             cursor=cursor,
             token=token,
         )
-    # Reflect Hugging Face Hub as-is (sorted by downloads). Optional UI task
-    # filters are applied after mapping rows — do not constrain the Hub query
-    # with a pipeline tag except for the embedding task above.
+    # Empty browse: popular text-generation by downloads (LLM names for Hub/Chat).
+    # Typed search: any Hub model matching the string (no pipeline straitjacket).
+    pipeline = None if (query or "").strip() else "text-generation"
     return _fetch_hub_page(
-        pipeline_tag=None,
+        pipeline_tag=pipeline,
         search=hf_search,
         limit=limit,
         cursor=cursor,
@@ -336,10 +336,15 @@ def _infer_family(repo_id: str, tags: list[str]) -> ModelFamily:
 def _infer_task(repo_id: str, pipeline_tag: str | None, tags: list[str]) -> ModelTask:
     tag_set = {t.lower() for t in tags}
     hay = f"{repo_id} {' '.join(tags)}".lower()
-    if pipeline_tag == "feature-extraction" or "embedding" in tag_set:
+    pipeline = (pipeline_tag or "").lower()
+    if (
+        pipeline in {"feature-extraction", "sentence-similarity", "text-ranking"}
+        or "embedding" in tag_set
+        or "sentence-transformers" in tag_set
+    ):
         return ModelTask.EMBEDDING
     if (
-        pipeline_tag == "image-text-to-text"
+        pipeline == "image-text-to-text"
         or "vision" in tag_set
         or "multimodal" in tag_set
     ):

@@ -199,6 +199,35 @@ def test_probe_hf_hub_invalid_token_falls_back_to_anonymous(monkeypatch):
     assert result.warning
 
 
+def test_probe_hf_hub_whoami_transport_falls_back_to_anonymous(monkeypatch):
+    class FakeApi:
+        def whoami(self, token=None):
+            raise TimeoutError("whoami timed out")
+
+        def model_info(self, repo_id, timeout=None):
+            assert repo_id == "gpt2"
+            return {"id": repo_id}
+
+    class FakeHfHubHTTPError(Exception):
+        response = None
+
+    import types
+
+    hub_mod = types.ModuleType("huggingface_hub")
+    hub_mod.HfApi = FakeApi
+    utils_mod = types.ModuleType("huggingface_hub.utils")
+    utils_mod.HfHubHTTPError = FakeHfHubHTTPError
+    monkeypatch.setitem(__import__("sys").modules, "huggingface_hub", hub_mod)
+    monkeypatch.setitem(__import__("sys").modules, "huggingface_hub.utils", utils_mod)
+
+    result = hf_connectivity.probe_hf_hub(token="hf_flaky")
+    assert result.reachable
+    assert result.anonymous_ok
+    assert not result.token_valid
+    assert result.error is None
+    assert result.warning
+
+
 def test_assert_hub_ready_allows_invalid_token_when_anonymous_ok(monkeypatch):
     monkeypatch.setattr(
         hf_connectivity,

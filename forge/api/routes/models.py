@@ -26,7 +26,7 @@ from forge.services.hardware import (
     hardware_profile,
     hardware_summary,
 )
-from forge.services.hf_auth import resolve_hf_token_for_download
+from forge.services.hf_auth import resolve_hf_token
 from forge.services.hf_cache_sync import schedule_hf_cache_inventory_sync
 from forge.services.hf_hub import _format_hub_download_error
 from forge.services.model_download import perform_model_download
@@ -64,7 +64,9 @@ async def model_catalog(
     limit: int = Query(50, ge=1, le=100),
     cursor: str | None = Query(None, description="Hugging Face Hub pagination cursor"),
 ) -> dict:
-    hf_token, _ = resolve_hf_token_for_download(
+    # Listing must not probe whoami — a flaky token check would empty Hub names.
+    # Public catalog works anonymously; pass a token only when one is configured.
+    hf_token, _ = resolve_hf_token(
         user_id=user_id,
         data_dir=settings.data_dir,
         encryption_key=settings.hf_token_encryption_key,

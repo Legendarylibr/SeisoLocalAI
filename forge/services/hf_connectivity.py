@@ -220,21 +220,20 @@ def probe_hf_hub(
                     "but gated models need a valid token in Settings or `hf auth login`."
                 )
             else:
-                return HfConnectivityResult(
-                    reachable=False,
-                    latency_ms=int((time.monotonic() - started) * 1000),
-                    error=format_hub_error(exc, context="probe"),
-                )
+                # Hub HTTP 5xx / other whoami failures — still try anonymous public access
+                # so catalog model names keep working without a valid token probe.
+                warning_message = format_hub_error(exc, context="probe")
         except Exception as exc:
-            return HfConnectivityResult(
-                reachable=False, error=format_hub_error(exc, context="probe")
-            )
+            # Transport / unexpected whoami failures — fall through to anonymous gpt2.
+            warning_message = format_hub_error(exc, context="probe")
 
     anon = _probe_hf_hub_anonymous(api, timeout=timeout, started=started)
     if token_invalid:
         anon.token_invalid = True
+    if warning_message:
         anon.warning = warning_message
         if anon.reachable and anon.anonymous_ok:
+            # Public Hub works — keep catalog/downloads available despite whoami issues.
             anon.error = None
     return anon
 
