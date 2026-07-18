@@ -219,9 +219,7 @@ def fused_swiglu(gate, up):
     return torch.nn.functional.silu(gate) * up
 
 
-def fused_lora_delta(
-    x, lora_A, lora_B, base=None, scale: float = 1.0, *, inplace: bool = False
-):
+def fused_lora_delta(x, lora_A, lora_B, base=None, scale: float = 1.0, *, inplace: bool = False):
     """Fused low-rank delta: ``base + scale * B @ (A @ x)`` for 1D or 2D inputs."""
 
     if not x.is_cuda:
@@ -263,9 +261,7 @@ def cross_entropy_backward(
     ext = _load_extension()
     if ext is None:
         raise RuntimeError("CUDA cross_entropy_backward requires native extension")
-    return ext.cross_entropy_backward(
-        logits, labels, row_max, row_lse, ignore_index, grad_scale
-    )
+    return ext.cross_entropy_backward(logits, labels, row_max, row_lse, ignore_index, grad_scale)
 
 
 def fused_lora_qkv_delta(
@@ -313,8 +309,6 @@ def fused_mlp_swiglu(x, W_gate, W_up):
     competitive and must not be the default.
     """
     import os
-
-    import torch
 
     allow_naive = os.environ.get("SEISO_KERNEL_ALLOW_NAIVE_MLP", "").strip().lower() in {
         "1",

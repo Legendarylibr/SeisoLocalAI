@@ -161,9 +161,7 @@ def _cached_live_benchmark(
 
         from seiso.kernels.dispatch import fused_rms_norm, fused_swiglu
     except ImportError:
-        speedup = analytic_kernel_speedup(
-            profile_id, hidden_dim=hidden_dim, batch_rows=batch_rows
-        )
+        speedup = analytic_kernel_speedup(profile_id, hidden_dim=hidden_dim, batch_rows=batch_rows)
         return KernelBenchmarkResult(
             profile_id=profile_id,
             profile_name=str(profile["name"]),
@@ -174,9 +172,7 @@ def _cached_live_benchmark(
         )
 
     if not torch.cuda.is_available():
-        speedup = analytic_kernel_speedup(
-            profile_id, hidden_dim=hidden_dim, batch_rows=batch_rows
-        )
+        speedup = analytic_kernel_speedup(profile_id, hidden_dim=hidden_dim, batch_rows=batch_rows)
         return KernelBenchmarkResult(
             profile_id=profile_id,
             profile_name=str(profile["name"]),
@@ -242,9 +238,7 @@ def _cached_live_benchmark(
                 torch.cuda.synchronize()
         except Exception:
             pass
-        speedup = analytic_kernel_speedup(
-            profile_id, hidden_dim=hidden_dim, batch_rows=batch_rows
-        )
+        speedup = analytic_kernel_speedup(profile_id, hidden_dim=hidden_dim, batch_rows=batch_rows)
         return KernelBenchmarkResult(
             profile_id=profile_id,
             profile_name=str(profile["name"]),
@@ -265,9 +259,7 @@ def benchmark_kernel_profile(
 ) -> KernelBenchmarkResult:
     """Benchmark a kernel profile; uses LRU cache for training throughput."""
     if not live:
-        speedup = analytic_kernel_speedup(
-            profile_id, hidden_dim=hidden_dim, batch_rows=batch_rows
-        )
+        speedup = analytic_kernel_speedup(profile_id, hidden_dim=hidden_dim, batch_rows=batch_rows)
         profile = kernel_profile_by_id(profile_id)
         return KernelBenchmarkResult(
             profile_id=profile_id,

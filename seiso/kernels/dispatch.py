@@ -360,18 +360,17 @@ def kernel_metadata() -> dict:
         "device_label": (
             "nvidia_gpu"
             if platform.vendor.value == "nvidia"
-            else "amd_gpu" if platform.vendor.value == "amd" else "cpu"
+            else "amd_gpu"
+            if platform.vendor.value == "amd"
+            else "cpu"
         ),
         "device_count": platform.device_count,
         "kernel_backend": backend,
         "native_cuda": platform.supports_native_cuda and backend == "cuda",
-        "optimized_cuda_path": platform.uses_optimized_cuda_kernels
-        and backend == "cuda",
+        "optimized_cuda_path": platform.uses_optimized_cuda_kernels and backend == "cuda",
         "wsl2": platform.is_wsl2,
         "cuda_compute_capability": (
-            list(platform.cuda_compute_capability)
-            if platform.cuda_compute_capability
-            else None
+            list(platform.cuda_compute_capability) if platform.cuda_compute_capability else None
         ),
         "triton": platform.supports_triton,
         "nvidia_boundary": boundary,
@@ -380,9 +379,7 @@ def kernel_metadata() -> dict:
     }
 
 
-def estimate_vram_savings_pct(
-    use_fused: bool, use_4bit: bool, *, low_vram: bool = False
-) -> float:
+def estimate_vram_savings_pct(use_fused: bool, use_4bit: bool, *, low_vram: bool = False) -> float:
     savings = 0.0
     if use_4bit:
         savings += 55.0
