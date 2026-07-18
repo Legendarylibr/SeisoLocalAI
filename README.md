@@ -23,6 +23,7 @@
 - [Compat API](#compat-api)
 - [Development](#development)
 - [Security](#security)
+- [Reporting vulnerabilities](SECURITY.md)
 - [Documentation index](#documentation-index)
 - [Inference stack](#inference-stack)
 
