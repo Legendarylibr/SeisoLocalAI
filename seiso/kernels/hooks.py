@@ -190,22 +190,25 @@ def apply_training_kernels(
                 continue
 
             def _mlp_forward(self, hidden_states):
-                if (
-                    _use_fused_cuda_kernels(hidden_states)
-                    and not _is_peft_lora_linear(self.gate_proj)
-                    and not _is_peft_lora_linear(self.up_proj)
-                    # bitsandbytes / quantized weights are packed; fused MLP needs FP weights.
-                    and _supports_einsum_batch((self.gate_proj, self.up_proj))
-                ):
-                    flat = hidden_states.reshape(-1, hidden_states.shape[-1])
-                    inter = fused_mlp_swiglu(
-                        flat,
-                        self.gate_proj.weight,
-                        self.up_proj.weight,
-                    )
-                    inter = inter.reshape(*hidden_states.shape[:-1], inter.shape[-1])
-                    return self.down_proj(inter)
-                if hidden_states.is_cuda:
+                # Production MLP: module linears (cuBLAS) + fused SwiGLU epilogue.
+                # fused_mlp_swiglu also uses torch GEMM + fused_swiglu — same quality;
+                # prefer gate_proj/up_proj so LoRA/quant wrappers stay correct.
+                if hidden_states.is_cuda and _use_fused_cuda_kernels(hidden_states):
+                    if (
+                        not _is_peft_lora_linear(self.gate_proj)
+                        and not _is_peft_lora_linear(self.up_proj)
+                        and _supports_einsum_batch((self.gate_proj, self.up_proj))
+                    ):
+                        flat = hidden_states.reshape(-1, hidden_states.shape[-1])
+                        inter = fused_mlp_swiglu(
+                            flat,
+                            self.gate_proj.weight,
+                            self.up_proj.weight,
+                        )
+                        inter = inter.reshape(
+                            *hidden_states.shape[:-1], inter.shape[-1]
+                        )
+                        return self.down_proj(inter)
                     gate = self.gate_proj(hidden_states)
                     up = self.up_proj(hidden_states)
                     return self.down_proj(fused_swiglu(gate, up))

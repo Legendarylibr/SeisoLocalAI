@@ -52,6 +52,7 @@ inline bool arch_has_cp_async() {
 #endif
 }
 
+// Hardware can do WMMA, but Seiso LoRA/MLP paths do not launch WMMA kernels.
 inline bool arch_has_wmma() {
 #if __CUDA_ARCH__ >= 700
   return true;
@@ -83,7 +84,7 @@ inline ArchLaunchDefaults arch_launch_defaults(GpuArchFamily fam, int lora_tile_
   d.mlp_tile = 256;
   d.qkv_warps = 8;
   d.use_persistent = true;
-  d.use_wmma = true;
+  d.use_wmma = false;  // not wired into LoRA/MLP launches
 
   switch (fam) {
     case GpuArchFamily::BLACKWELL:

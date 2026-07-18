@@ -7,10 +7,13 @@ Seiso patches compatible model layers during training for lower memory bandwidth
 | Operation | Patch target | NVIDIA | AMD ROCm |
 |-----------|--------------|--------|----------|
 | RMSNorm | `LlamaRMSNorm`, `Qwen2RMSNorm`, … | CUDA stripe | Triton |
-| SwiGLU MLP | `LlamaMLP`, `Qwen2MLP`, … | CUDA | Triton |
-| LoRA delta | PEFT `Linear` adapters (rank ≤ 64) | CUDA | PyTorch |
-| LoRA QKV | Attention `q_proj` / `k_proj` / `v_proj` adapters (rank ≤ 64) | CUDA (cuBLAS at training scale) | PyTorch |
+| SwiGLU MLP | `LlamaMLP`, `Qwen2MLP`, … | cuBLAS GEMM + fused SwiGLU | Triton / PyTorch |
+| LoRA delta | PEFT `Linear` adapters | cuBLAS/torch skinny GEMMs | PyTorch |
+| LoRA QKV | Attention `q_proj` / `k_proj` / `v_proj` adapters | cuBLAS (shared-`x` when ranks match) | PyTorch |
 | Cross-entropy | `FusedSFTTrainer.compute_loss` | CUDA | Triton |
+
+GEMM-heavy work uses library matmuls (Tensor Cores). Custom CUDA covers
+bandwidth-bound elementwise/norm/CE — not hand-rolled dense GEMMs.
 
 ## Enable
 
@@ -61,7 +64,7 @@ seiso-bench-kernels --op all --rows 4096 --hidden 4096 --vocab 32000
 
 **Shape → FLOP/byte** for **Seiso fused ops only**. Never blocks training.
 
-**Shape-math SoT bar:** FP16/BF16 **GEMM-family** ops with **I ≥ 300 FLOP/byte** → `performance_truth=true` (strong compute-bound *candidate* under efficient dense GEMM; **not** a measured roofline). Elementwise/CE and float32 stay heuristic. Default MLP intermediate is `4×hidden`; pass `--intermediate` for real SwiGLU widths (~8/3×hidden).
+**Shape-math SoT bar:** FP16/BF16 **GEMM-family** ops with **I ≥ 300 FLOP/byte** → `performance_truth=true` (strong compute-bound *candidate* under efficient dense GEMM / cuBLAS — which is the production MLP/LoRA path). Elementwise/CE and float32 stay heuristic. Default MLP intermediate is `4×hidden`; pass `--intermediate` for real SwiGLU widths (~8/3×hidden).
 
 ```bash
 # CPU-ok

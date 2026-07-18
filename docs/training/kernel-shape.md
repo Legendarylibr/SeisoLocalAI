@@ -105,12 +105,14 @@ Real kernels can still move more bytes (temps, multi-pass, autograd). Treat I as
 
 Without a roofline UI or training gates:
 
-- **Fuse** low-intensity work (RMSNorm, SwiGLU, CE, in-place LoRA)
-- Prefer **cuBLAS** for training-scale LoRA QKV GEMMs
-- Use **WMMA / custom paths** carefully for small-rank LoRA
+- **Fuse** low-intensity work (RMSNorm, SwiGLU, CE)
+- **MLP** = torch/cuBLAS gate+up GEMMs + fused SwiGLU epilogue (default)
+- **LoRA** = torch/cuBLAS skinny GEMMs by default (shared-`x` cat for QKV)
 - Enable **TF32 / fast matmul** knobs on inference when safe
 
 `seiso-bench-kernels --roofline` only **explains** shapes; it does not change training.
+Naive scalar CUDA matmul/LoRA kernels are opt-in experiments only
+(`SEISO_KERNEL_ALLOW_NAIVE_MLP`, `SEISO_KERNEL_ALLOW_NAIVE_LORA`).
 
 ---
 

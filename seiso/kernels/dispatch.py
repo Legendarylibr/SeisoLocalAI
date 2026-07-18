@@ -106,29 +106,21 @@ def fused_cross_entropy_loss(logits, labels, *, ignore_index: int = -100):
     return _fused_ce(logits, labels, ignore_index=ignore_index)
 
 
-def fused_mlp_swiglu(x, W_gate, W_up):
-    """``silu(x @ W_gate^T) * (x @ W_up^T)`` via native CUDA when available."""
-    import torch
-
-    if not getattr(x, "is_cuda", False):
-        gate = x @ W_gate.t()
-        up = x @ W_up.t()
-        return torch.nn.functional.silu(gate) * up
-
-    if _needs_pytorch_autograd(x, W_gate, W_up):
-        gate = x @ W_gate.t()
-        up = x @ W_up.t()
-        return torch.nn.functional.silu(gate) * up
-
-    backend = active_backend()
-    if backend == "cuda":
-        from seiso.kernels.cuda_ops import fused_mlp_swiglu as cuda_mlp
-
-        return cuda_mlp(x, W_gate, W_up)
-
+def _mlp_gemm_swiglu(x, W_gate, W_up):
+    """cuBLAS/torch GEMMs for gate/up + fused SwiGLU epilogue (production path)."""
     gate = x @ W_gate.t()
     up = x @ W_up.t()
-    return torch.nn.functional.silu(gate) * up
+    return fused_swiglu(gate, up)
+
+
+def fused_mlp_swiglu(x, W_gate, W_up):
+    """``silu(x @ W_gate^T) * (x @ W_up^T)``.
+
+    Production path always uses torch/cuBLAS matmuls for the two projections and
+    the fused SwiGLU elementwise kernel for the epilogue. The historical scalar
+    CUDA matmul kernel is not used here — it cannot compete with Tensor Cores.
+    """
+    return _mlp_gemm_swiglu(x, W_gate, W_up)
 
 
 def _fused_lora_qkv_delta_torch(
@@ -170,15 +162,35 @@ def _fused_lora_qkv_delta_torch(
     out_v.add_((scale_v * (h_v @ lora_B_v.t())).to(out_v.dtype))
 
 
-def _prefer_cublas_lora_qkv(x) -> bool:
-    """Naive CUDA QKV kernel serializes A@x; cuBLAS wins on training-scale tensors."""
+def _prefer_cublas_lora(x) -> bool:
+    """Prefer torch/cuBLAS LoRA GEMMs over the scalar custom CUDA path.
+
+    The native LoRA kernels serialize ``A@x`` on a single thread per block, so
+    they only win on tiny micro-shapes. Production always uses cuBLAS unless
+    ``SEISO_KERNEL_ALLOW_NAIVE_LORA=1`` and the shape is tiny (for experiments).
+    """
+    import os
+
     import torch
 
     if torch.is_grad_enabled():
         return True
-    rows = x.numel() // x.shape[-1]
-    in_dim = x.shape[-1]
-    return rows * in_dim > 64 * 512
+    allow_naive = os.environ.get("SEISO_KERNEL_ALLOW_NAIVE_LORA", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    if not allow_naive:
+        return True
+    rows = max(1, x.numel() // x.shape[-1])
+    in_dim = int(x.shape[-1])
+    # Only allow naive kernel for very small no-grad microbenches.
+    return rows * in_dim > 32 * 128
+
+
+# Backward-compatible alias
+_prefer_cublas_lora_qkv = _prefer_cublas_lora
 
 
 def fused_lora_qkv_delta(
@@ -197,20 +209,25 @@ def fused_lora_qkv_delta(
     scale_k: float = 1.0,
     scale_v: float = 1.0,
 ):
-    """In-place fused LoRA deltas for Q/K/V projections."""
+    """In-place fused LoRA deltas for Q/K/V projections (cuBLAS by default)."""
     if not getattr(x, "is_cuda", False):
+        return _fused_lora_qkv_delta_torch(
+            x,
+            out_q,
+            out_k,
+            out_v,
+            lora_A_q,
+            lora_B_q,
+            lora_A_k,
+            lora_B_k,
+            lora_A_v,
+            lora_B_v,
+            scale_q=scale_q,
+            scale_k=scale_k,
+            scale_v=scale_v,
+        )
 
-        for out, a, b, scale in (
-            (out_q, lora_A_q, lora_B_q, scale_q),
-            (out_k, lora_A_k, lora_B_k, scale_k),
-            (out_v, lora_A_v, lora_B_v, scale_v),
-        ):
-            hidden = x @ a.t()
-            delta = scale * (hidden @ b.t())
-            out.add_(delta.to(out.dtype))
-        return
-
-    if _prefer_cublas_lora_qkv(x):
+    if _prefer_cublas_lora(x):
         return _fused_lora_qkv_delta_torch(
             x,
             out_q,
@@ -267,6 +284,17 @@ def fused_lora_qkv_delta(
     )
 
 
+def _lora_delta_torch(x, lora_A, lora_B, base=None, scale: float = 1.0, *, inplace: bool = False):
+    hidden = x @ lora_A.t()
+    delta = scale * (hidden @ lora_B.t())
+    if base is None:
+        return delta
+    if inplace:
+        base.add_(delta.to(base.dtype))
+        return base
+    return base + delta
+
+
 def fused_lora_delta(
     x,
     lora_A,
@@ -276,28 +304,15 @@ def fused_lora_delta(
     *,
     inplace: bool = False,
 ):
-    """Fused low-rank delta when native CUDA is available."""
+    """Low-rank delta ``base + scale * B @ (A @ x)`` — cuBLAS/torch by default."""
 
     if not getattr(x, "is_cuda", False):
-        hidden = x @ lora_A.t()
-        delta = scale * (hidden @ lora_B.t())
-        if base is None:
-            return delta
-        if inplace:
-            base.add_(delta.to(base.dtype))
-            return base
-        return base + delta
+        return _lora_delta_torch(x, lora_A, lora_B, base=base, scale=scale, inplace=inplace)
 
-    import torch
+    if _prefer_cublas_lora(x):
+        return _lora_delta_torch(x, lora_A, lora_B, base=base, scale=scale, inplace=inplace)
 
-    rows = x.numel() // x.shape[-1]
-    in_dim = x.shape[-1]
-    use_cuda = (
-        active_backend() == "cuda"
-        and not torch.is_grad_enabled()
-        and rows * in_dim <= 64 * 512
-    )
-    if use_cuda:
+    if active_backend() == "cuda":
         try:
             from seiso.kernels.cuda_ops import fused_lora_delta as cuda_lora
 
@@ -305,14 +320,7 @@ def fused_lora_delta(
         except (RuntimeError, ImportError):
             pass
 
-    hidden = x @ lora_A.t()
-    delta = scale * (hidden @ lora_B.t())
-    if base is None:
-        return delta
-    if inplace:
-        base.add_(delta.to(base.dtype))
-        return base
-    return base + delta
+    return _lora_delta_torch(x, lora_A, lora_B, base=base, scale=scale, inplace=inplace)
 
 
 def kernel_metadata() -> dict:

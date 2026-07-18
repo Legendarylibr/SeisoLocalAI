@@ -15,18 +15,19 @@ logger = logging.getLogger(__name__)
 KERNEL_PROFILES: tuple[dict[str, Any], ...] = (
     {"id": 0, "name": "auto", "rms_mode": 0, "swiglu_vec": 0, "lora_tile": 0},
     {"id": 1, "name": "stripe", "rms_mode": 1, "swiglu_vec": 8, "lora_tile": 128},
+    # Name kept for RL/API compatibility; rms_mode 2 is a no-op alias of stripe.
     {"id": 2, "name": "parallax", "rms_mode": 2, "swiglu_vec": 8, "lora_tile": 512},
     {"id": 3, "name": "narrow_opt", "rms_mode": 1, "swiglu_vec": 4, "lora_tile": 128},
     {
         "id": 4,
         "name": "wide_throughput",
-        "rms_mode": 2,
+        "rms_mode": 1,
         "swiglu_vec": 8,
         "lora_tile": 512,
     },
     {"id": 5, "name": "balanced", "rms_mode": 0, "swiglu_vec": 8, "lora_tile": 256},
-    {"id": 6, "name": "hopper_fa3", "rms_mode": 2, "swiglu_vec": 8, "lora_tile": 384},
-    {"id": 7, "name": "blackwell", "rms_mode": 2, "swiglu_vec": 8, "lora_tile": 512},
+    {"id": 6, "name": "hopper_fa3", "rms_mode": 1, "swiglu_vec": 8, "lora_tile": 384},
+    {"id": 7, "name": "blackwell", "rms_mode": 1, "swiglu_vec": 8, "lora_tile": 512},
 )
 
 _ACTIVE_PROFILE_ID = 0
@@ -105,10 +106,8 @@ def analytic_kernel_speedup(
     swiglu_vec = int(profile["swiglu_vec"])
 
     speedup = 1.0
-    if rms_mode == 1:  # stripe
+    if rms_mode in (1, 2):  # stripe (2 = legacy parallax alias)
         speedup *= 1.06 if not wide else 0.94
-    elif rms_mode == 2:  # parallax
-        speedup *= 0.95 if not wide else 1.14
     elif rms_mode == 0:  # auto
         speedup *= 1.08 if wide else 1.03
 

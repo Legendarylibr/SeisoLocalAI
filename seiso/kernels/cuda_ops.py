@@ -306,12 +306,27 @@ def fused_lora_qkv_delta(
 
 
 def fused_mlp_swiglu(x, W_gate, W_up):
-    """Fused gate/up projection + SwiGLU: silu(x @ W_gate^T) * (x @ W_up^T)."""
-    ext = _load_extension()
-    if ext is None:
-        import torch
+    """Gate/up projection + SwiGLU via torch GEMM + fused elementwise epilogue.
 
-        gate = x @ W_gate.t()
-        up = x @ W_up.t()
-        return torch.nn.functional.silu(gate) * up
-    return ext.fused_mlp_swiglu(x, W_gate, W_up)
+    The scalar-accum CUDA matmul in ``fused_mlp.cu`` is opt-in only
+    (``SEISO_KERNEL_ALLOW_NAIVE_MLP=1``) for experiments — it is not TC/cuBLAS
+    competitive and must not be the default.
+    """
+    import os
+
+    import torch
+
+    allow_naive = os.environ.get("SEISO_KERNEL_ALLOW_NAIVE_MLP", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    if allow_naive:
+        ext = _load_extension()
+        if ext is not None:
+            return ext.fused_mlp_swiglu(x, W_gate, W_up)
+
+    gate = x @ W_gate.t()
+    up = x @ W_up.t()
+    return fused_swiglu(gate, up)
