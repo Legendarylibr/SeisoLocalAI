@@ -52,9 +52,7 @@ def guess_hidden_dim(model_id: str) -> int:
     return 4096
 
 
-def resolve_cuda_training_mode(
-    *, headroom_mb: int, est_train_mb: int = 0
-) -> CudaTrainingMode:
+def resolve_cuda_training_mode(*, headroom_mb: int, est_train_mb: int = 0) -> CudaTrainingMode:
     if headroom_mb > 0 and headroom_mb < _HEADROOM_LEAN_MB:
         return CudaTrainingMode.LEAN
     if headroom_mb >= _HEADROOM_SPEED_MB and (
@@ -153,9 +151,7 @@ def prepare_cuda_training_profile(
 
     Returns a dict merged into TrainConfig by ``apply_training_memory_guards``.
     """
-    mode = resolve_cuda_training_mode(
-        headroom_mb=headroom_mb, est_train_mb=est_train_mb
-    )
+    mode = resolve_cuda_training_mode(headroom_mb=headroom_mb, est_train_mb=est_train_mb)
     low_vram = mode == CudaTrainingMode.LEAN
     hidden_dim = guess_hidden_dim(model_id)
     batch_rows = max(64, int(batch_size) * int(max_seq_length))
@@ -188,9 +184,7 @@ def prepare_cuda_training_profile(
     elif mode == CudaTrainingMode.LEAN:
         gradient_checkpointing = True
     else:
-        gradient_checkpointing = (
-            est_train_mb > int(headroom_mb * 0.65) if headroom_mb > 0 else True
-        )
+        gradient_checkpointing = est_train_mb > int(headroom_mb * 0.65) if headroom_mb > 0 else True
 
     caps_fused = True
     try:
@@ -201,16 +195,37 @@ def prepare_cuda_training_profile(
     except ImportError:
         pass
 
+    # Prefer FA/SDPA backends before training matmuls dominate.
+    try:
+        from seiso.kernels.attention import enable_torch_sdpa_backends
+
+        enable_torch_sdpa_backends(deterministic=False)
+    except ImportError:
+        pass
+
+    flash_ok = False
+    try:
+        from seiso.kernels.attention import resolve_attention_implementation
+
+        flash_ok = str(resolve_attention_implementation()).startswith("flash_attention")
+    except ImportError:
+        pass
+
     result: dict[str, Any] = {
         "cuda_training_mode": mode.value,
         "kernel_profile_id": profile_id,
         "kernel_low_vram": low_vram,
         "gradient_checkpointing": gradient_checkpointing,
-        "use_fused_ce": caps_fused,
+        "use_fused_ce": caps_fused,  # default on whenever fused stack exists
         "use_triton": caps_fused,
         "use_fused_lora": caps_fused and native_cuda_kernels_available(),
         "use_fused_lora_qkv": caps_fused and native_cuda_kernels_available(),
-        "use_cuda_graphs": mode != CudaTrainingMode.LEAN,
+        # Fixed-shape training steps only; disabled in lean (shape/OOM churn).
+        "use_cuda_graphs": mode == CudaTrainingMode.SPEED
+        or (mode == CudaTrainingMode.BALANCED and not low_vram),
+        # Packing reduces pad waste; padding-free needs FA-class attention.
+        "packing": caps_fused and mode != CudaTrainingMode.LEAN,
+        "padding_free": caps_fused and flash_ok and mode != CudaTrainingMode.LEAN,
     }
 
     if mode == CudaTrainingMode.LEAN and max_seq_length > 1024 and headroom_mb < 6144:

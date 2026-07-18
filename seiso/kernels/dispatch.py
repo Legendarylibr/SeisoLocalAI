@@ -107,7 +107,26 @@ def fused_cross_entropy_loss(logits, labels, *, ignore_index: int = -100):
 
 
 def _mlp_gemm_swiglu(x, W_gate, W_up):
-    """cuBLAS/torch GEMMs for gate/up + fused SwiGLU epilogue (production path)."""
+    """cuBLAS/torch GEMMs for gate/up + fused SwiGLU epilogue (production path).
+
+    When gate/up weights share shape/dtype/device, use a single stacked GEMM
+    (``W = cat(W_gate, W_up)``) then split — same FLOPs, fewer launches.
+    """
+    import torch
+
+    if (
+        W_gate.shape == W_up.shape
+        and W_gate.dtype == W_up.dtype
+        and W_gate.device == W_up.device
+        and W_gate.is_floating_point()
+    ):
+        mid = int(W_gate.shape[0])
+        stacked = torch.cat((W_gate, W_up), dim=0)
+        hidden = x @ stacked.t()
+        gate, up = hidden.split(mid, dim=-1)
+        # split() views are non-contiguous; CUDA SwiGLU requires contiguous rows.
+        return fused_swiglu(gate.contiguous(), up.contiguous())
+
     gate = x @ W_gate.t()
     up = x @ W_up.t()
     return fused_swiglu(gate, up)
@@ -116,9 +135,9 @@ def _mlp_gemm_swiglu(x, W_gate, W_up):
 def fused_mlp_swiglu(x, W_gate, W_up):
     """``silu(x @ W_gate^T) * (x @ W_up^T)``.
 
-    Production path always uses torch/cuBLAS matmuls for the two projections and
-    the fused SwiGLU elementwise kernel for the epilogue. The historical scalar
-    CUDA matmul kernel is not used here — it cannot compete with Tensor Cores.
+    Production path always uses torch/cuBLAS matmuls (prefer one stacked GEMM)
+    plus the fused SwiGLU elementwise kernel. Naive scalar CUDA matmul is not
+    used here — it cannot compete with Tensor Cores.
     """
     return _mlp_gemm_swiglu(x, W_gate, W_up)
 
@@ -139,7 +158,7 @@ def _fused_lora_qkv_delta_torch(
     scale_k: float = 1.0,
     scale_v: float = 1.0,
 ) -> None:
-    """cuBLAS-backed LoRA Q/K/V deltas — one A@x read when ranks match."""
+    """cuBLAS-backed LoRA Q/K/V deltas — shared-x A GEMM; batched B when aligned."""
     import torch
 
     rank_q = lora_A_q.size(0)
@@ -156,6 +175,21 @@ def _fused_lora_qkv_delta_torch(
         h_q = x @ lora_A_q.t()
         h_k = x @ lora_A_k.t()
         h_v = x @ lora_A_v.t()
+
+    # Batched B@h when out dims, ranks, dtypes, and scales match (one bmm).
+    if (
+        lora_B_q.shape == lora_B_k.shape == lora_B_v.shape
+        and lora_B_q.dtype == lora_B_k.dtype == lora_B_v.dtype
+        and float(scale_q) == float(scale_k) == float(scale_v)
+        and h_q.shape == h_k.shape == h_v.shape
+    ):
+        h = torch.stack((h_q, h_k, h_v), dim=0)  # [3, rows, rank]
+        b = torch.stack((lora_B_q, lora_B_k, lora_B_v), dim=0)  # [3, out, rank]
+        deltas = torch.bmm(h, b.transpose(1, 2)).mul_(float(scale_q))  # [3, rows, out]
+        out_q.add_(deltas[0].to(dtype=out_q.dtype))
+        out_k.add_(deltas[1].to(dtype=out_k.dtype))
+        out_v.add_(deltas[2].to(dtype=out_v.dtype))
+        return
 
     out_q.add_((scale_q * (h_q @ lora_B_q.t())).to(out_q.dtype))
     out_k.add_((scale_k * (h_k @ lora_B_k.t())).to(out_k.dtype))
@@ -354,6 +388,14 @@ def kernel_metadata() -> dict:
         }
     except ImportError:
         pass
+    attn_meta: dict = {}
+    try:
+        from seiso.kernels.attention import attention_metadata, enable_torch_sdpa_backends
+
+        enable_torch_sdpa_backends()
+        attn_meta = attention_metadata()
+    except ImportError:
+        pass
 
     return {
         "vendor": platform.vendor.value,
@@ -376,6 +418,7 @@ def kernel_metadata() -> dict:
         "nvidia_boundary": boundary,
         "kernel_low_vram": low_vram,
         **arch_meta,
+        **attn_meta,
     }
 
 

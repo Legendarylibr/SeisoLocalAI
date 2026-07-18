@@ -81,13 +81,22 @@ def training_defaults(profile: dict[str, Any]) -> dict[str, Any]:
         batch, accum, max_seq, max_params = 1, 16, 1024, "1B"
 
     quant = caps["recommended_quant"]
-    note = (
-        f"Tuned for {TIER_LABELS[tier]} ({ram:.0f} GB RAM, ~{headroom // 1024} GB free)"
-    )
+    note = f"Tuned for {TIER_LABELS[tier]} ({ram:.0f} GB RAM, ~{headroom // 1024} GB free)"
     if not caps["supports_qlora"]:
         note += " — use 16-bit LoRA on macOS (no bitsandbytes)"
     if caps["fused_kernels_available"]:
         note += f" — fused kernels via {caps['kernel_backend']}"
+    low_vram = headroom > 0 and headroom < 8192
+    if low_vram:
+        note += " — lean / low-VRAM mode recommended (<8 GB free)"
+    attn = str(caps.get("attn_implementation") or "sdpa")
+    if caps.get("flash_attn_available"):
+        note += f" — attention {attn}"
+    elif caps.get("sdpa_available"):
+        note += " — attention SDPA (install flash-attn for longer context)"
+
+    packing = bool(caps.get("recommend_sequence_packing"))
+    padding_free = packing and bool(caps.get("flash_attn_available"))
 
     return {
         "batch_size": batch,
@@ -99,8 +108,12 @@ def training_defaults(profile: dict[str, Any]) -> dict[str, Any]:
         "max_recommended_params": max_params,
         "use_fused_kernels": caps["fused_kernels_available"],
         "use_fused_ce": caps["fused_ce_available"],
-        "kernel_low_vram": False,
+        "kernel_low_vram": low_vram,
         "kernel_backend": caps["kernel_backend"],
+        "attn_implementation": attn,
+        "flash_attn_available": bool(caps.get("flash_attn_available")),
+        "packing": packing,
+        "padding_free": padding_free,
         "train_platform": caps["train_platform"],
         "multi_gpu_available": caps["multi_gpu_available"],
         "note": note,

@@ -140,6 +140,12 @@ def apply_inference_kernels(model: Any) -> None:
     except ImportError:
         return
     try:
+        from seiso.kernels.attention import enable_torch_sdpa_backends
+
+        enable_torch_sdpa_backends(deterministic=False)
+    except Exception:
+        pass
+    try:
         from seiso.kernels.hooks import apply_training_kernels
 
         apply_training_kernels(model, use_cuda=True, use_triton=True, patch_mlp=True)

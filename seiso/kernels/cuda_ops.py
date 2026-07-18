@@ -321,6 +321,16 @@ def fused_mlp_swiglu(x, W_gate, W_up):
         if ext is not None:
             return ext.fused_mlp_swiglu(x, W_gate, W_up)
 
+    # Match dispatch: single stacked GEMM when shapes align.
+    if W_gate.shape == W_up.shape and W_gate.dtype == W_up.dtype and W_gate.device == W_up.device:
+        import torch
+
+        mid = int(W_gate.shape[0])
+        stacked = torch.cat((W_gate, W_up), dim=0)
+        hidden = x @ stacked.t()
+        gate, up = hidden.split(mid, dim=-1)
+        return fused_swiglu(gate.contiguous(), up.contiguous())
+
     gate = x @ W_gate.t()
     up = x @ W_up.t()
     return fused_swiglu(gate, up)

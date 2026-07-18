@@ -191,6 +191,11 @@ export type TrainingDefaults = {
   max_recommended_params: string;
   use_fused_kernels?: boolean;
   use_fused_ce?: boolean;
+  kernel_low_vram?: boolean;
+  packing?: boolean;
+  padding_free?: boolean;
+  attn_implementation?: string;
+  flash_attn_available?: boolean;
   kernel_backend?: string;
   train_platform?: string;
   multi_gpu_available?: boolean;
@@ -434,6 +439,7 @@ export type TrainingRecommendations = {
     train_on_responses_only: boolean;
     use_rslora: boolean;
     packing: boolean;
+    padding_free?: boolean;
     dataset_format: string;
     preprocess_dataset?: boolean;
     deduplicate_dataset?: boolean;

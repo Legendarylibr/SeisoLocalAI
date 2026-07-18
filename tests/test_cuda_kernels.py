@@ -265,3 +265,76 @@ def test_lora_defaults_to_cublas_path(monkeypatch):
         assert d._prefer_cublas_lora(x) is True
     # Grad mode always forces cuBLAS even with the opt-in env.
     assert d._prefer_cublas_lora(tiny) is True
+
+
+def test_stacked_mlp_matches_two_gemm_reference():
+    """Stacked cat(W_gate,W_up) GEMM must match separate gate/up matmuls."""
+    torch = pytest.importorskip("torch")
+    if not torch.cuda.is_available():
+        pytest.skip("CUDA required")
+
+    from seiso.kernels.dispatch import fused_mlp_swiglu
+
+    torch.manual_seed(3)
+    rows, hin, hout = 32, 128, 256
+    # float32: stacked vs dual GEMM can diverge in bf16 accumulation order.
+    x = torch.randn(rows, hin, device="cuda", dtype=torch.float32)
+    wg = torch.randn(hout, hin, device="cuda", dtype=torch.float32)
+    wu = torch.randn(hout, hin, device="cuda", dtype=torch.float32)
+    y = fused_mlp_swiglu(x, wg, wu)
+    ref = torch.nn.functional.silu(x @ wg.t()) * (x @ wu.t())
+    assert torch.allclose(y, ref, atol=1e-4, rtol=1e-4)
+
+
+def test_lora_qkv_batched_b_matches_independent():
+    """Equal-rank equal-scale QKV should match independent LoRA pairs."""
+    torch = pytest.importorskip("torch")
+    if not torch.cuda.is_available():
+        pytest.skip("CUDA required")
+
+    from seiso.kernels.dispatch import fused_lora_qkv_delta
+
+    torch.manual_seed(4)
+    rows, in_dim, out_dim, rank = 16, 64, 48, 8
+    dtype = torch.bfloat16
+    x = torch.randn(rows, in_dim, device="cuda", dtype=dtype)
+    a = torch.randn(rank, in_dim, device="cuda", dtype=dtype) * 0.02
+    b = torch.randn(out_dim, rank, device="cuda", dtype=dtype) * 0.02
+    # Shared A/B shapes (independent weights with same layout).
+    a_q, a_k, a_v = a.clone(), a.clone() + 0.001, a.clone() - 0.001
+    b_q, b_k, b_v = b.clone(), b.clone() + 0.001, b.clone() - 0.001
+
+    out_q = torch.zeros(rows, out_dim, device="cuda", dtype=dtype)
+    out_k = torch.zeros_like(out_q)
+    out_v = torch.zeros_like(out_q)
+    fused_lora_qkv_delta(
+        x, out_q, out_k, out_v, a_q, b_q, a_k, b_k, a_v, b_v, scale_q=0.5, scale_k=0.5, scale_v=0.5
+    )
+
+    def _ref(out, aa, bb, scale):
+        h = x @ aa.t()
+        out.add_((scale * (h @ bb.t())).to(out.dtype))
+
+    rq = torch.zeros_like(out_q)
+    rk = torch.zeros_like(out_k)
+    rv = torch.zeros_like(out_v)
+    _ref(rq, a_q, b_q, 0.5)
+    _ref(rk, a_k, b_k, 0.5)
+    _ref(rv, a_v, b_v, 0.5)
+    assert torch.allclose(out_q, rq, atol=5e-2, rtol=5e-2)
+    assert torch.allclose(out_k, rk, atol=5e-2, rtol=5e-2)
+    assert torch.allclose(out_v, rv, atol=5e-2, rtol=5e-2)
+
+
+def test_attention_resolve_never_empty():
+    from seiso.kernels.attention import attention_metadata, resolve_attention_implementation
+
+    impl = resolve_attention_implementation()
+    assert impl in {
+        "flash_attention_3",
+        "flash_attention_2",
+        "sdpa",
+        "eager",
+    }
+    meta = attention_metadata()
+    assert meta["attn_implementation"] == impl

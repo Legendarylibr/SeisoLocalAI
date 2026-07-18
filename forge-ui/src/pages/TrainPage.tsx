@@ -269,6 +269,7 @@ export function TrainPage() {
     setGradCkpt(d.gradient_checkpointing);
     if (d.use_fused_kernels != null) setUseFusedKernels(d.use_fused_kernels);
     if (d.use_fused_ce != null) setUseFusedCe(d.use_fused_ce);
+    if (d.packing != null) setPacking(Boolean(d.packing));
     setHwApplied(true);
   }, [hw, hwApplied, pendingModel]);
 
@@ -1136,10 +1137,31 @@ export function TrainPage() {
                 <input type="checkbox" checked={useRsLora} onChange={(e) => { setUseRsLora(e.target.checked); setConfigCustomized(true); }} />
                 Rank-stabilized LoRA (rsLoRA)
               </label>
-              <label className="studio-checkbox-item">
+              <label
+                className="studio-checkbox-item"
+                title={
+                  hw?.training_defaults?.packing
+                    ? "Recommended on CUDA: less padding waste"
+                    : undefined
+                }
+              >
                 <input type="checkbox" checked={packing} onChange={(e) => { setPacking(e.target.checked); setConfigCustomized(true); }} />
                 Sequence packing
+                {hw?.training_defaults?.packing ? " (recommended)" : ""}
               </label>
+              {hw?.training_defaults?.kernel_low_vram ? (
+                <p className="studio-field-hint" role="status">
+                  Low VRAM mode (&lt;8&nbsp;GB free): lean kernels, fused CE, gradient checkpointing preferred.
+                </p>
+              ) : null}
+              {hw?.training_defaults?.attn_implementation ? (
+                <p className="studio-field-hint" role="status">
+                  Attention: {String(hw.training_defaults.attn_implementation)}
+                  {!hw.training_defaults.flash_attn_available
+                    ? " — install flash-attn for longer context"
+                    : ""}
+                </p>
+              ) : null}
               <label className="studio-checkbox-item">
                 <input type="checkbox" checked={distributedEnabled} readOnly />
                 Distributed configured

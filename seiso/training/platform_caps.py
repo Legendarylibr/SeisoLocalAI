@@ -60,15 +60,23 @@ def training_capabilities() -> dict[str, Any]:
     fused_kernels = has_cuda_gpu or (has_rocm_gpu and triton_ok)
     kernel_backend = "none"
     if has_cuda_gpu:
-        kernel_backend = (
-            "cuda" if cuda_ext_ok else ("triton" if triton_ok else "pytorch")
-        )
+        kernel_backend = "cuda" if cuda_ext_ok else ("triton" if triton_ok else "pytorch")
 
     elif has_rocm_gpu and triton_ok:
         kernel_backend = "triton"
 
     wsl2 = gpu.is_wsl2
     fused_lora_available = has_cuda_gpu and cuda_ext_ok
+
+    attn_impl = "sdpa"
+    flash_attn_available = False
+    try:
+        from seiso.kernels.attention import resolve_attention_implementation
+
+        attn_impl = resolve_attention_implementation()
+        flash_attn_available = str(attn_impl).startswith("flash_attention")
+    except ImportError:
+        pass
 
     mps_ok = False
     try:
@@ -112,6 +120,10 @@ def training_capabilities() -> dict[str, Any]:
         "fused_ce_available": fused_kernels,
         "fused_lora_available": fused_lora_available,
         "kernel_backend": kernel_backend,
+        "attn_implementation": attn_impl,
+        "flash_attn_available": flash_attn_available,
+        "sdpa_available": has_cuda_gpu or has_rocm_gpu or mps_ok,
+        "recommend_sequence_packing": has_cuda_gpu and fused_kernels,
         "wsl2": wsl2,
         "optimized_cuda_path": has_cuda_gpu and cuda_ext_ok,
         "multi_gpu_available": has_cuda_gpu and gpu.device_count > 1,

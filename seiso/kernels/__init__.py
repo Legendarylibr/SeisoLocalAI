@@ -1,5 +1,11 @@
 """Fused GPU kernels — NVIDIA CUDA, AMD Triton, leak-safe lifecycle."""
 
+from seiso.kernels.attention import (
+    attention_doctor_lines,
+    attention_metadata,
+    enable_torch_sdpa_backends,
+    resolve_attention_implementation,
+)
 from seiso.kernels.dispatch import (
     active_backend,
     estimate_vram_savings_pct,
@@ -36,9 +42,12 @@ __all__ = [
     "active_backend",
     "apply_fused_lora_kernels",
     "apply_training_kernels",
+    "attention_doctor_lines",
+    "attention_metadata",
     "clear_kernel_patches",
     "CudaTrainingMode",
     "detect_gpu",
+    "enable_torch_sdpa_backends",
     "estimate_vram_savings_pct",
     "fused_cross_entropy_loss",
     "fused_lora_delta",
@@ -54,5 +63,6 @@ __all__ = [
     "last_cuda_training_profile",
     "prepare_cuda_training_profile",
     "release_training_memory",
+    "resolve_attention_implementation",
     "restore_kernel_patches",
 ]
