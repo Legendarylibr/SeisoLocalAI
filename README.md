@@ -598,6 +598,8 @@ UI dev workflow: **[docs/forge.md](docs/forge.md)**
 
 Seiso is **secure by default** for single-user localhost use. Review every flag before remote or multi-user deployment.
 
+Found a vulnerability? Report it privately via [GitHub private vulnerability reporting](https://github.com/Legendarylibr/SeisoLocalAI/security/advisories/new) — see [SECURITY.md](SECURITY.md). Please don't open public issues for security problems.
+
 ### Network binding
 
 | Setting | Default | Purpose |
@@ -671,6 +673,7 @@ Seiso is licensed under the **GNU General Public License v3.0 (GPL-3.0)**. See [
 | HTTPS deployment | [docs/deployment/reverse-proxy.md](docs/deployment/reverse-proxy.md) |
 | Troubleshooting | [docs/troubleshooting.md](docs/troubleshooting.md) |
 | Local CI | [docs/CI_LOCAL.md](docs/CI_LOCAL.md) |
+| Security policy / reporting | [SECURITY.md](SECURITY.md) |
 | External Smart Router | [Legendarylibr/SeisoModelRouter](https://github.com/Legendarylibr/SeisoModelRouter) |
 
 ---

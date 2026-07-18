@@ -104,6 +104,7 @@ See [install.md](install.md) and [forge.md](forge.md) for full details.
 1. [deployment/reverse-proxy.md](deployment/reverse-proxy.md) — Caddy/nginx TLS
 2. [deploy/README.md](../deploy/README.md) — systemd, env templates
 3. [README.md § Security](../README.md#security) — hardening checklist
+4. [SECURITY.md](../SECURITY.md) — vulnerability reporting (GitHub private advisories)
 
 ---
 
