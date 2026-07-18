@@ -900,6 +900,8 @@ async def chat(
                         # Does not raise n_ctx or per-pass max_tokens.
                         if force_retry_empty and not partial.strip():
                             pass_payload["think"] = False
+                            pass_payload["think_max_tokens"] = 0
+                            pass_payload.pop("_thinking_policy_applied", None)
                         continued = sanitize_inference_payload(
                             pass_payload, isolated=isolated
                         )

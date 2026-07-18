@@ -496,90 +496,11 @@ def sidecar_max_tokens(max_tokens: int) -> int:
     return _sidecar_native_max_tokens(max_tokens)
 
 
-# Hard ceiling on *extra* thinking tokens reserved beyond the content budget.
-# Keeps num_predict expansion modest so n_ctx / VRAM stay flat.
-_OLLAMA_THINK_MAX_TOKENS_HARD = 256
-_OLLAMA_THINK_MAX_TOKENS_DEFAULT = 96
-_OLLAMA_THINK_BUDGET_RATIO_DEFAULT = 0.15
-
-
 def ollama_think_max_tokens(content_max_tokens: int) -> int:
-    """Max internal-thinking tokens before we abort and switch to content-only.
+    """Back-compat wrapper — unified policy lives in ``seiso.chat.thinking``."""
+    from seiso.chat.thinking import thinking_max_tokens
 
-    Does **not** raise n_ctx. Optional ``num_predict`` expansion is at most this
-    many extra decode tokens (still bounded by the existing context window).
-
-    * ``SEISO_OLLAMA_THINK_MAX_TOKENS`` — absolute cap (default 96; ``0`` = no
-      mid-stream thinking cap / no expansion).
-    * ``SEISO_OLLAMA_THINK_BUDGET_RATIO`` — fraction of the content budget
-      (default 0.15).
-    """
-    content = max(1, int(content_max_tokens or 1))
-    raw_cap = env_int("SEISO_OLLAMA_THINK_MAX_TOKENS", _OLLAMA_THINK_MAX_TOKENS_DEFAULT)
-    if raw_cap <= 0:
-        return 0
-    try:
-        ratio = float(
-            env_str(
-                "SEISO_OLLAMA_THINK_BUDGET_RATIO",
-                str(_OLLAMA_THINK_BUDGET_RATIO_DEFAULT),
-            )
-        )
-    except ValueError:
-        ratio = _OLLAMA_THINK_BUDGET_RATIO_DEFAULT
-    ratio = max(0.0, min(1.0, ratio))
-    by_ratio = int(content * ratio) if ratio > 0 else 0
-    if by_ratio <= 0:
-        return 0
-    # Honor explicit low caps (tests / tight budgets); floor only via defaults.
-    return max(1, min(int(raw_cap), by_ratio, _OLLAMA_THINK_MAX_TOKENS_HARD, content))
-
-
-def _ollama_think_setting(payload: dict[str, Any]) -> bool | str | None:
-    """Resolve Ollama ``think`` for chat requests.
-
-    Returns:
-      * ``False`` by default — content uses the full OOM-safe ``num_predict``.
-      * Explicit ``payload["think"]`` when set (bool or level string).
-      * ``True`` / level when ``SEISO_OLLAMA_THINK`` is set (``1``/``true``/``low``/…).
-      * ``None`` only if callers set ``payload["think"]`` to ``None`` to omit
-        the field and use Ollama's built-in default.
-    """
-    level_values = {"low", "medium", "high", "max"}
-    if "think" in payload:
-        raw = payload.get("think")
-        if raw is None:
-            return None
-        if isinstance(raw, str):
-            text = raw.strip().lower()
-            if text in level_values:
-                return text
-            if text in {"0", "false", "no", "off"}:
-                return False
-            return text in {"1", "true", "yes", "on"}
-        return bool(raw)
-    # Default off: Qwen3 can spend the whole completion on thinking. Opt in via
-    # SEISO_OLLAMA_THINK; stream still hard-caps thinking tokens when enabled.
-    env_raw = env_str("SEISO_OLLAMA_THINK", "").strip().lower()
-    if not env_raw:
-        return False
-    if env_raw in level_values:
-        return env_raw
-    if env_raw in {"0", "false", "no", "off"}:
-        return False
-    if env_raw in {"1", "true", "yes", "on"}:
-        return True
-    return False
-
-
-def _ollama_thinking_enabled(think: bool | str | None) -> bool:
-    if think is None or think is False:
-        return False
-    if think is True:
-        return True
-    if isinstance(think, str):
-        return think.strip().lower() not in {"", "0", "false", "no", "off"}
-    return bool(think)
+    return thinking_max_tokens(content_max_tokens, task="general")
 
 
 def _sidecar_context_ceiling(payload: dict[str, Any], model_path: str) -> int:
@@ -974,20 +895,27 @@ class OllamaClient:
         should_stop,
         runtime_stats: dict[str, Any] | None = None,
     ) -> Iterator[StreamToken]:
+        from seiso.chat.thinking import ThinkingStreamGuard
+
         body = self._request_body(payload, model_path, stream=True)
         # Internal planning fields — strip before the wire request.
         content_max = int(body.pop("_seiso_content_max_tokens", 0) or 0)
         think_cap = int(body.pop("_seiso_think_max_tokens", 0) or 0)
+        think_mode = body.pop("_seiso_thinking_mode", None)
+        think_reason = body.pop("_seiso_thinking_reason", None)
+        guard = ThinkingStreamGuard(think_max_tokens=think_cap)
         if runtime_stats is not None:
             runtime_stats["sidecar_load_plan"] = self.pinned_load_plan
             if think_cap > 0:
                 runtime_stats["think_max_tokens"] = think_cap
             if content_max > 0:
                 runtime_stats["content_max_tokens"] = content_max
+            if think_mode:
+                runtime_stats["thinking_mode"] = think_mode
+            if think_reason:
+                runtime_stats["thinking_reason"] = think_reason
         req = self._build_request("/api/chat", body)
         tool_buffer = ToolCallDeltaBuffer()
-        thinking_tokens = 0
-        saw_content = False
         try:
             with urllib.request.urlopen(req, timeout=sidecar_stream_timeout_s()) as response:
                 # Native API streams one JSON object per line (not SSE).
@@ -1007,41 +935,42 @@ class OllamaClient:
                     if error:
                         raise RuntimeError(f"Ollama error: {error}")
                     message = chunk.get("message") or {}
-                    # Internal reasoning is separate from content; cap it so it
-                    # cannot consume the whole num_predict budget.
+                    # Shared thinking budget (field form) — abort before content
+                    # budget is burned so multi-pass recovery can finish the reply.
                     thinking = message.get("thinking")
-                    if thinking and not saw_content:
-                        piece = str(thinking)
-                        if piece:
-                            thinking_tokens += estimate_chunk_tokens(piece)
-                            if runtime_stats is not None:
-                                runtime_stats["thinking_tokens"] = thinking_tokens
-                            if think_cap > 0 and thinking_tokens >= think_cap:
-                                if runtime_stats is not None:
-                                    runtime_stats["thinking_capped"] = True
-                                    runtime_stats["eval_count"] = max(
-                                        int(runtime_stats.get("eval_count") or 0),
-                                        thinking_tokens,
-                                    )
-                                    runtime_stats["sidecar_resident_confirmed"] = True
-                                # Abort the HTTP stream — Ollama stops generating.
-                                # Empty content + length triggers OOM-safe continue
-                                # with think=false (content-only retry).
-                                if not should_stop():
-                                    yield StreamToken(
-                                        "",
-                                        new_tokens=0,
-                                        finish_reason="length",
-                                    )
-                                break
+                    if thinking and guard.feed_thinking_field(str(thinking)):
+                        if runtime_stats is not None:
+                            runtime_stats.update(guard.stats())
+                            runtime_stats["eval_count"] = max(
+                                int(runtime_stats.get("eval_count") or 0),
+                                guard.thinking_tokens,
+                            )
+                            runtime_stats["sidecar_resident_confirmed"] = True
+                        if not should_stop():
+                            yield StreamToken("", new_tokens=0, finish_reason="length")
+                        break
                     content = message.get("content")
                     if content:
-                        saw_content = True
-                        text_content = str(content)
-                        yield StreamToken(
-                            text_content,
-                            new_tokens=estimate_chunk_tokens(text_content),
-                        )
+                        # Also guard inline <think> tags if a model mixes styles.
+                        emit, abort = guard.feed_text(str(content))
+                        if emit:
+                            yield StreamToken(
+                                emit,
+                                new_tokens=estimate_chunk_tokens(emit),
+                            )
+                        if abort:
+                            if runtime_stats is not None:
+                                runtime_stats.update(guard.stats())
+                                runtime_stats["eval_count"] = max(
+                                    int(runtime_stats.get("eval_count") or 0),
+                                    guard.thinking_tokens,
+                                )
+                                runtime_stats["sidecar_resident_confirmed"] = True
+                            if not should_stop():
+                                yield StreamToken(
+                                    "", new_tokens=0, finish_reason="length"
+                                )
+                            break
                     tool_text = tool_buffer.add(message.get("tool_calls"))
                     if tool_text:
                         yield StreamToken(
@@ -1067,12 +996,10 @@ class OllamaClient:
                                 )
                             if eval_count > 0:
                                 runtime_stats["eval_count"] = eval_count
-                            if thinking_tokens > 0:
-                                runtime_stats["thinking_tokens"] = thinking_tokens
-                            # Empty length stop after thinking: still a budget burn.
+                            runtime_stats.update(guard.stats())
                             if (
-                                not saw_content
-                                and thinking_tokens > 0
+                                not guard.saw_visible_content
+                                and guard.thinking_tokens > 0
                                 and eval_count > 0
                             ):
                                 runtime_stats.setdefault("thinking_capped", True)
@@ -1101,8 +1028,16 @@ class OllamaClient:
                                 and eval_count >= max(1, num_predict - 1)
                             )
                             # Thinking ate the whole pass with no content.
-                            if not saw_content and thinking_tokens > 0 and (
-                                hit_length or eval_count >= max(1, think_cap)
+                            if (
+                                not guard.saw_visible_content
+                                and guard.thinking_tokens > 0
+                                and (
+                                    hit_length
+                                    or (
+                                        think_cap > 0
+                                        and eval_count >= max(1, think_cap)
+                                    )
+                                )
                             ):
                                 hit_length = True
                             if hit_length:
@@ -1169,53 +1104,59 @@ class OllamaClient:
     def _request_body(
         self, payload: dict[str, Any], model_path: str, *, stream: bool
     ) -> dict[str, Any]:
-        messages, num_ctx, max_tokens = plan_sidecar_request(payload, model_path)
+        from seiso.chat.thinking import apply_thinking_policy, resolve_thinking_policy
+
+        # Quality-first thinking plan (same module as llama.cpp / Torch).
+        planned = apply_thinking_policy(dict(payload))
+        messages, num_ctx, max_tokens = plan_sidecar_request(planned, model_path)
         content_max = max(1, int(max_tokens))
-        think = _ollama_think_setting(payload)
-        think_cap = (
-            ollama_think_max_tokens(content_max)
-            if _ollama_thinking_enabled(think)
-            else 0
+        policy = resolve_thinking_policy(
+            content_max_tokens=content_max,
+            messages=planned.get("messages")
+            if isinstance(planned.get("messages"), list)
+            else None,
+            model_key=str(
+                planned.get("model_name")
+                or planned.get("model_id")
+                or planned.get("model_path")
+                or model_path
+            ),
+            payload=planned,
+            n_ctx=int(num_ctx),
         )
-        # When thinking is on, reserve a small *extra* decode budget so internal
-        # reasoning does not steal the whole content allotment. Still bounded by
-        # n_ctx headroom (never grow context / model load).
-        predict = content_max
-        if think_cap > 0:
-            room = max(0, int(num_ctx) - 64)
-            predict = min(content_max + think_cap, max(content_max, room))
+        think_cap = policy.think_max_tokens if policy.enabled else 0
+        predict = policy.decode_max_tokens if policy.enabled else content_max
         options: dict[str, Any] = {
             **self._load_options(model_path, num_ctx=num_ctx),
             "num_predict": predict,
-            "temperature": float(payload.get("temperature", 0.0)),
+            "temperature": float(planned.get("temperature", payload.get("temperature", 0.0))),
         }
-        cache_policy = resolve_sidecar_kv_policy(payload, engine=self.engine)
+        cache_policy = resolve_sidecar_kv_policy(planned, engine=self.engine)
         if cache_policy.num_keep is not None:
             options["num_keep"] = cache_policy.num_keep
-        top_p = payload.get("top_p")
+        top_p = planned.get("top_p", payload.get("top_p"))
         if top_p is not None:
             options["top_p"] = float(top_p)
         body: dict[str, Any] = {
-            "model": self._resolve_model(model_path, payload),
+            "model": self._resolve_model(model_path, planned),
             "messages": messages,
             "stream": stream,
             "options": options,
         }
         # Chat/preload requests pin residency; idle probes use the short default.
-        active = bool(payload.get("sidecar_active", True))
+        active = bool(planned.get("sidecar_active", True))
         keep_alive = sidecar_ollama_keep_alive(active=active)
         if keep_alive:
             body["keep_alive"] = keep_alive
-        tools = payload.get("tools_schemas")
+        tools = planned.get("tools_schemas")
         if tools:
             body["tools"] = tools
-        # Default think=false. When enabled, stream() hard-caps thinking tokens
-        # (see ollama_think_max_tokens) so reasoning cannot empty the reply.
-        if think is not None:
-            body["think"] = think
+        body["think"] = policy.api_value
         # Stash for stream() without changing the wire JSON.
         body["_seiso_content_max_tokens"] = content_max
         body["_seiso_think_max_tokens"] = think_cap
+        body["_seiso_thinking_mode"] = policy.mode
+        body["_seiso_thinking_reason"] = policy.reason
         return body
 
     def _build_request(self, path: str, body: dict[str, Any]) -> urllib.request.Request:
