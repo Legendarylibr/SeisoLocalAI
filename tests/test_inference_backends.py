@@ -1120,6 +1120,7 @@ def test_ollama_request_body_uses_native_chat_options(monkeypatch):
     client = OllamaClient(url="http://127.0.0.1:11434")
     monkeypatch.setenv("SEISO_OLLAMA_NUM_BATCH", "256")
     monkeypatch.setenv("SEISO_OLLAMA_KEEP_ALIVE", "30s")
+    monkeypatch.delenv("SEISO_OLLAMA_THINK", raising=False)
     monkeypatch.setattr(
         "seiso.inference.llamaswap.sidecar_ollama_num_gpu",
         lambda *_args, **_kwargs: None,
@@ -1138,25 +1139,40 @@ def test_ollama_request_body_uses_native_chat_options(monkeypatch):
         stream=True,
     )
 
-    assert body == {
-        "model": "seiso/test-model",
-        "messages": [{"role": "user", "content": "hi"}],
-        "stream": True,
-        "options": {
-            "num_ctx": 2048,
-            "num_predict": 700,
-            "temperature": 0.25,
-            "num_batch": 256,
-            "top_p": 0.9,
-        },
-        "keep_alive": "30s",
-        "tools": [{"type": "function", "function": {"name": "search"}}],
-        # Default off: keep num_predict for visible content (no n_ctx growth).
-        "think": False,
+    assert body["model"] == "seiso/test-model"
+    assert body["messages"] == [{"role": "user", "content": "hi"}]
+    assert body["stream"] is True
+    assert body["options"] == {
+        "num_ctx": 2048,
+        "num_predict": 700,
+        "temperature": 0.25,
+        "num_batch": 256,
+        "top_p": 0.9,
     }
+    assert body["keep_alive"] == "30s"
+    assert body["tools"] == [{"type": "function", "function": {"name": "search"}}]
+    # Default off: keep num_predict for visible content (no n_ctx growth).
+    assert body["think"] is False
+    assert body["_seiso_think_max_tokens"] == 0
+    assert body["_seiso_content_max_tokens"] == 700
 
 
-def test_ollama_request_body_think_override(monkeypatch):
+def test_ollama_think_max_tokens_budget(monkeypatch):
+    from seiso.inference.llamaswap import ollama_think_max_tokens
+
+    monkeypatch.delenv("SEISO_OLLAMA_THINK_MAX_TOKENS", raising=False)
+    monkeypatch.delenv("SEISO_OLLAMA_THINK_BUDGET_RATIO", raising=False)
+    # Default: min(96, 15% of content, hard 256).
+    assert ollama_think_max_tokens(768) == 96  # 15% of 768 = 115 → capped at 96
+    assert ollama_think_max_tokens(200) == 30  # 15% of 200
+    monkeypatch.setenv("SEISO_OLLAMA_THINK_MAX_TOKENS", "0")
+    assert ollama_think_max_tokens(768) == 0
+    monkeypatch.setenv("SEISO_OLLAMA_THINK_MAX_TOKENS", "48")
+    monkeypatch.setenv("SEISO_OLLAMA_THINK_BUDGET_RATIO", "0.5")
+    assert ollama_think_max_tokens(768) == 48
+
+
+def test_ollama_request_body_think_reserves_content_budget(monkeypatch):
     from seiso.inference.llamaswap import OllamaClient
 
     client = OllamaClient(url="http://127.0.0.1:11434")
@@ -1165,21 +1181,91 @@ def test_ollama_request_body_think_override(monkeypatch):
         lambda *_args, **_kwargs: None,
     )
     monkeypatch.setattr(client, "_resolve_model", lambda model_path, payload: "seiso/test-model")
+    monkeypatch.setenv("SEISO_OLLAMA_THINK_MAX_TOKENS", "64")
+    monkeypatch.setenv("SEISO_OLLAMA_THINK_BUDGET_RATIO", "0.25")
 
     on_body = client._request_body(
-        {"messages": [{"role": "user", "content": "hi"}], "think": True, "max_tokens": 64},
+        {"messages": [{"role": "user", "content": "hi"}], "think": True, "max_tokens": 256},
         "/tmp/model.gguf",
         stream=False,
     )
     assert on_body["think"] is True
+    # Content 256 + think cap 64 (min of 64 and 25% of 256).
+    assert on_body["options"]["num_predict"] == 256 + 64
+    assert on_body["_seiso_content_max_tokens"] == 256
+    assert on_body["_seiso_think_max_tokens"] == 64
 
-    monkeypatch.setenv("SEISO_OLLAMA_THINK", "1")
+    monkeypatch.setenv("SEISO_OLLAMA_THINK", "low")
     env_body = client._request_body(
-        {"messages": [{"role": "user", "content": "hi"}], "max_tokens": 64},
+        {"messages": [{"role": "user", "content": "hi"}], "max_tokens": 256},
         "/tmp/model.gguf",
         stream=False,
     )
-    assert env_body["think"] is True
+    assert env_body["think"] == "low"
+    assert env_body["options"]["num_predict"] == 256 + 64
+
+
+def test_ollama_stream_caps_thinking_budget(monkeypatch):
+    """Mid-stream thinking cap aborts before content budget is exhausted."""
+    import io
+    import json
+
+    from seiso.inference.llamaswap import OllamaClient
+
+    client = OllamaClient(url="http://127.0.0.1:11434")
+    monkeypatch.setattr(
+        "seiso.inference.llamaswap.sidecar_ollama_num_gpu",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(client, "_resolve_model", lambda model_path, payload: "seiso/test-model")
+    monkeypatch.setenv("SEISO_OLLAMA_THINK_MAX_TOKENS", "8")
+    monkeypatch.setenv("SEISO_OLLAMA_THINK_BUDGET_RATIO", "1.0")
+
+    # estimate_chunk_tokens ≈ ceil(utf8_len/4); long chunks hit the cap mid-stream.
+    lines = [
+        json.dumps({"message": {"role": "assistant", "thinking": "w" * 16}}),  # 4 tok
+        json.dumps({"message": {"role": "assistant", "thinking": "x" * 16}}),  # 4 tok → 8
+        json.dumps(
+            {
+                "message": {"role": "assistant", "thinking": "should-not-reach"},
+                "done": True,
+                "done_reason": "length",
+                "eval_count": 99,
+            }
+        ),
+    ]
+    raw = ("\n".join(lines) + "\n").encode("utf-8")
+
+    class _Resp(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    monkeypatch.setattr(
+        "seiso.inference.llamaswap.urllib.request.urlopen",
+        lambda *_a, **_k: _Resp(raw),
+    )
+
+    stats: dict = {}
+    tokens = list(
+        client.stream(
+            {
+                "messages": [{"role": "user", "content": "hi"}],
+                "think": True,
+                "max_tokens": 128,
+            },
+            "/tmp/model.gguf",
+            should_stop=lambda: False,
+            runtime_stats=stats,
+        )
+    )
+    assert any(t.finish_reason == "length" for t in tokens)
+    assert not any(t.text for t in tokens)
+    assert stats.get("thinking_capped") is True
+    assert int(stats.get("thinking_tokens") or 0) >= 8
+    assert int(stats.get("eval_count") or 0) >= 8
 
 
 def test_ollama_complete_serializes_native_tool_calls(monkeypatch):
