@@ -1151,7 +1151,35 @@ def test_ollama_request_body_uses_native_chat_options(monkeypatch):
         },
         "keep_alive": "30s",
         "tools": [{"type": "function", "function": {"name": "search"}}],
+        # Default off: keep num_predict for visible content (no n_ctx growth).
+        "think": False,
     }
+
+
+def test_ollama_request_body_think_override(monkeypatch):
+    from seiso.inference.llamaswap import OllamaClient
+
+    client = OllamaClient(url="http://127.0.0.1:11434")
+    monkeypatch.setattr(
+        "seiso.inference.llamaswap.sidecar_ollama_num_gpu",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(client, "_resolve_model", lambda model_path, payload: "seiso/test-model")
+
+    on_body = client._request_body(
+        {"messages": [{"role": "user", "content": "hi"}], "think": True, "max_tokens": 64},
+        "/tmp/model.gguf",
+        stream=False,
+    )
+    assert on_body["think"] is True
+
+    monkeypatch.setenv("SEISO_OLLAMA_THINK", "1")
+    env_body = client._request_body(
+        {"messages": [{"role": "user", "content": "hi"}], "max_tokens": 64},
+        "/tmp/model.gguf",
+        stream=False,
+    )
+    assert env_body["think"] is True
 
 
 def test_ollama_complete_serializes_native_tool_calls(monkeypatch):

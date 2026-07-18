@@ -495,6 +495,33 @@ def sidecar_max_tokens(max_tokens: int) -> int:
     return _sidecar_native_max_tokens(max_tokens)
 
 
+def _ollama_think_setting(payload: dict[str, Any]) -> bool | None:
+    """Resolve Ollama ``think`` for chat requests.
+
+    Returns:
+      * ``False`` by default — keep the per-pass ``num_predict`` budget for
+        visible content (avoids empty Qwen3 replies without raising n_ctx /
+        max_tokens).
+      * Explicit ``payload["think"]`` when set.
+      * ``True`` when ``SEISO_OLLAMA_THINK=1`` (opt back into model thinking).
+      * ``None`` only if callers set ``payload["think"]`` to ``None`` to omit
+        the field and use Ollama's built-in default.
+    """
+    if "think" in payload:
+        raw = payload.get("think")
+        if raw is None:
+            return None
+        if isinstance(raw, str):
+            return raw.strip().lower() in {"1", "true", "yes", "on"}
+        return bool(raw)
+    # Opt-in only: thinking can consume the full completion budget with no
+    # visible tokens. Multi-pass continues recover empty burns; default off
+    # prevents the burn without increasing memory pressure.
+    if env_bool("SEISO_OLLAMA_THINK", False):
+        return True
+    return False
+
+
 def _sidecar_context_ceiling(payload: dict[str, Any], model_path: str) -> int:
     from seiso.inference.context_limits import effective_context_ceiling
 
@@ -1057,6 +1084,12 @@ class OllamaClient:
         tools = payload.get("tools_schemas")
         if tools:
             body["tools"] = tools
+        # Qwen3-class models may burn num_predict on internal "thinking" and return
+        # empty content. Default think=false so the OOM-safe completion budget is
+        # spent on visible tokens. Override with payload["think"] or SEISO_OLLAMA_THINK.
+        think = _ollama_think_setting(payload)
+        if think is not None:
+            body["think"] = think
         return body
 
     def _build_request(self, path: str, body: dict[str, Any]) -> urllib.request.Request:

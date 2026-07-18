@@ -25,6 +25,15 @@ CONTINUE_USER_PROMPT_STRONG = (
     "Continue EXACTLY from the final character with no restart, no new title, "
     "and no preamble. Finish all remaining sections completely."
 )
+# First-pass (or mid-continue) burn with zero visible text — e.g. Ollama Qwen3
+# spent the full num_predict on internal thinking. Re-ask for a visible answer
+# without growing n_ctx or per-pass max_tokens (OOM-safe multi-pass only).
+CONTINUE_USER_PROMPT_EMPTY_OUTPUT = (
+    "Your previous assistant turn produced no visible reply (the generation "
+    "budget was spent before any answer text). Answer the user's last request "
+    "now with the full visible response only. No planning preamble and no "
+    "restart commentary."
+)
 
 # OOM safety is *not* enforced by limiting how many times we continue.
 # It comes from:
@@ -356,6 +365,38 @@ def looks_incomplete_reply(text: str) -> bool:
     }
 
 
+def is_empty_length_budget_burn(
+    *,
+    pass_text: str,
+    pass_output_tokens: int,
+    max_tokens: int,
+    finish_reason: str | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> bool:
+    """True when a pass hit the completion cap with zero visible text.
+
+    Typical live failure: reasoning models (Qwen3 via Ollama) spend all
+    ``num_predict`` tokens on internal thinking; ``content`` is empty while
+    ``eval_count`` / ``finish_reason=length`` show a full pass. Recovery is a
+    fixed-size continue pass — never a larger ``max_tokens`` or ``n_ctx``.
+    """
+    if str(pass_text or "").strip():
+        return False
+    tokens = effective_pass_tokens(
+        pass_output_tokens, pass_text=pass_text, metadata=metadata
+    )
+    # Require a real metered burn (not a zero-token glitch).
+    if tokens < 8:
+        return False
+    return hit_length_limit(
+        tokens,
+        max_tokens,
+        finish_reason=finish_reason,
+        pass_text=pass_text,
+        metadata=metadata,
+    )
+
+
 def should_auto_continue(
     *,
     pass_output_tokens: int,
@@ -382,7 +423,14 @@ def should_auto_continue(
     ):
         return False
     text = str(pass_text or "").strip()
-    if not text and not force_incomplete:
+    empty_burn = is_empty_length_budget_burn(
+        pass_text=pass_text,
+        pass_output_tokens=pass_output_tokens,
+        max_tokens=max_tokens,
+        finish_reason=finish_reason,
+        metadata=metadata,
+    )
+    if not text and not force_incomplete and not empty_burn:
         return False
 
     tokens = effective_pass_tokens(
@@ -392,6 +440,9 @@ def should_auto_continue(
     reason = (finish_reason or "").lower()
     if tokens < 8 and reason not in {"length", "max_tokens"} and not force_incomplete:
         return False
+
+    if empty_burn:
+        return True
 
     if hit_length_limit(
         tokens,
@@ -707,6 +758,7 @@ def build_continue_messages(
     n_ctx: int | None = None,
     max_tokens: int | None = None,
     strong: bool = False,
+    empty_output: bool = False,
 ) -> list[dict[str, Any]]:
     """Messages for a continuation pass: history + partial assistant + continue cue.
 
@@ -716,6 +768,7 @@ def build_continue_messages(
     (OOM-safe multi-pass).
 
     ``strong=True`` uses a firmer continue cue after empty/incomplete cuts.
+    ``empty_output=True`` re-asks for a visible answer (no empty assistant stub).
     """
     messages: list[dict[str, Any]] = []
     for item in base_messages:
@@ -726,9 +779,15 @@ def build_continue_messages(
         if role not in {"system", "user", "assistant", "tool"}:
             continue
         messages.append({"role": role, "content": "" if content is None else str(content)})
-    messages.append({"role": "assistant", "content": str(assistant_so_far)})
-    cue = CONTINUE_USER_PROMPT_STRONG if strong else CONTINUE_USER_PROMPT
-    messages.append({"role": "user", "content": cue})
+    draft = str(assistant_so_far or "")
+    no_visible = empty_output or not draft.strip()
+    if no_visible and (empty_output or strong):
+        # Do not inject an empty assistant turn — re-prompt for content only.
+        messages.append({"role": "user", "content": CONTINUE_USER_PROMPT_EMPTY_OUTPUT})
+    else:
+        messages.append({"role": "assistant", "content": draft})
+        cue = CONTINUE_USER_PROMPT_STRONG if strong else CONTINUE_USER_PROMPT
+        messages.append({"role": "user", "content": cue})
     if n_ctx is not None:
         reply_budget = max(1, int(max_tokens or 512))
         messages = pack_continue_messages_linear_decay(
