@@ -436,14 +436,10 @@ export type TrainingRecommendations = {
     gradient_checkpointing: boolean;
     use_triton: boolean;
     use_fused_ce: boolean;
-    kernel_low_vram?: boolean;
-    packing?: boolean;
-    padding_free?: boolean;
-    attn_implementation?: string;
-    flash_attn_available?: boolean;
     train_on_responses_only: boolean;
     use_rslora: boolean;
     packing: boolean;
+    padding_free?: boolean;
     dataset_format: string;
     preprocess_dataset?: boolean;
     deduplicate_dataset?: boolean;
