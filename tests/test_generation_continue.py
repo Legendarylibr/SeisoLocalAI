@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from forge.services.generation_continue import (
     CONTINUE_USER_PROMPT,
+    CONTINUE_USER_PROMPT_EMPTY_OUTPUT,
     authoritative_pass_tokens,
     build_continue_messages,
     estimate_tokens_from_text,
     hit_length_limit,
+    is_empty_length_budget_burn,
     looks_long_form,
     max_auto_continues,
     next_pass_max_tokens,
@@ -161,6 +163,89 @@ def test_should_not_continue_on_natural_stop():
             finish_reason="stop",
         )
         is False
+    )
+
+
+def test_empty_length_budget_burn_detected():
+    """Live bug: Ollama Qwen3 burns num_predict on thinking, content empty."""
+    assert (
+        is_empty_length_budget_burn(
+            pass_text="",
+            pass_output_tokens=768,
+            max_tokens=768,
+            finish_reason="length",
+            metadata={"eval_count": 768},
+        )
+        is True
+    )
+    # True empty EOS (no tokens) is not a budget burn.
+    assert (
+        is_empty_length_budget_burn(
+            pass_text="",
+            pass_output_tokens=0,
+            max_tokens=768,
+            finish_reason="stop",
+        )
+        is False
+    )
+    # Visible text is never an empty burn.
+    assert (
+        is_empty_length_budget_burn(
+            pass_text="hello",
+            pass_output_tokens=768,
+            max_tokens=768,
+            finish_reason="length",
+        )
+        is False
+    )
+
+
+def test_should_auto_continue_empty_first_pass_length_burn():
+    """Must continue on first empty length-stop without raising max_tokens/n_ctx."""
+    assert (
+        should_auto_continue(
+            pass_output_tokens=768,
+            max_tokens=768,
+            pass_text="",
+            continues_used=0,
+            finish_reason="length",
+            total_output_tokens=768,
+            total_budget=32768,
+            metadata={"eval_count": 768},
+        )
+        is True
+    )
+    # Still respects multi-pass budget (need ≥8 tokens remaining for another pass).
+    assert (
+        should_auto_continue(
+            pass_output_tokens=768,
+            max_tokens=768,
+            pass_text="",
+            continues_used=0,
+            finish_reason="length",
+            total_output_tokens=32762,
+            total_budget=32768,
+            metadata={"eval_count": 768},
+        )
+        is False
+    )
+
+
+def test_build_continue_messages_empty_output_reprompts():
+    msgs = build_continue_messages(
+        [{"role": "user", "content": "it should rhyme better"}],
+        "",
+        strong=True,
+        empty_output=True,
+    )
+    assert msgs[-1] == {
+        "role": "user",
+        "content": CONTINUE_USER_PROMPT_EMPTY_OUTPUT,
+    }
+    # No empty assistant stub — re-ask only.
+    assert not any(
+        m.get("role") == "assistant" and not str(m.get("content") or "").strip()
+        for m in msgs
     )
 
 

@@ -613,6 +613,7 @@ async def chat(
                     can_schedule_another_continue,
                     effective_pass_tokens,
                     hit_length_limit,
+                    is_empty_length_budget_burn,
                     looks_incomplete_reply,
                     next_pass_max_tokens,
                     reply_still_truncated,
@@ -773,20 +774,34 @@ async def chat(
                                 explicit=pass_finish,
                             )
 
-                        # Empty continue pass after a cut-off: retry once with a
-                        # stronger continue cue (live Qwen songs often EOS empty).
+                        # Empty pass after a length burn (first pass or mid-continue):
+                        # retry once with a content-only cue. Live Qwen3/Ollama often
+                        # spends the full num_predict on thinking with content="".
+                        # Never raise max_tokens/n_ctx — only another fixed-size pass.
                         force_retry_empty = False
+                        empty_burn = is_empty_length_budget_burn(
+                            pass_text=pass_text,
+                            pass_output_tokens=pass_tokens,
+                            max_tokens=pass_max_tokens,
+                            finish_reason=finish_reason,
+                            metadata=last_meta,
+                        )
                         if (
                             not pass_text.strip()
-                            and continues_used > 0
                             and empty_continue_retries < 1
-                            and looks_incomplete_reply(draft_so_far)
                             and can_schedule_another_continue(
                                 continues_used=continues_used,
                                 max_continues=max_continues,
                                 total_output_tokens=total_output_tokens,
                                 total_budget=total_budget,
                                 pass_max_tokens=base_pass_max_tokens,
+                            )
+                            and (
+                                empty_burn
+                                or (
+                                    continues_used > 0
+                                    and looks_incomplete_reply(draft_so_far)
+                                )
                             )
                         ):
                             force_retry_empty = True
@@ -873,12 +888,20 @@ async def chat(
                                 n_ctx=int(fixed_n_ctx) if fixed_n_ctx is not None else None,
                                 max_tokens=chunk_tokens,
                                 strong=use_strong,
+                                empty_output=force_retry_empty and not partial.strip(),
                             ),
                             "max_tokens": chunk_tokens,
                         }
                         if fixed_n_ctx is not None:
                             pass_payload["n_ctx"] = fixed_n_ctx
                             pass_payload["pin_n_ctx"] = True
+                        # Empty-burn recovery: force content-only decoding on the
+                        # retry so thinking cannot re-consume the same pass budget.
+                        # Does not raise n_ctx or per-pass max_tokens.
+                        if force_retry_empty and not partial.strip():
+                            pass_payload["think"] = False
+                            pass_payload["think_max_tokens"] = 0
+                            pass_payload.pop("_thinking_policy_applied", None)
                         continued = sanitize_inference_payload(
                             pass_payload, isolated=isolated
                         )

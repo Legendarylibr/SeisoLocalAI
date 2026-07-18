@@ -63,6 +63,7 @@ __all__ = [
     "llamaswap_url",
     "ollama_cli_host",
     "ollama_health_ok",
+    "ollama_think_max_tokens",
     "ollama_url",
     "plan_sidecar_request",
     "preferred_llamaswap_engine",
@@ -495,6 +496,13 @@ def sidecar_max_tokens(max_tokens: int) -> int:
     return _sidecar_native_max_tokens(max_tokens)
 
 
+def ollama_think_max_tokens(content_max_tokens: int) -> int:
+    """Back-compat wrapper — unified policy lives in ``seiso.chat.thinking``."""
+    from seiso.chat.thinking import thinking_max_tokens
+
+    return thinking_max_tokens(content_max_tokens, task="general")
+
+
 def _sidecar_context_ceiling(payload: dict[str, Any], model_path: str) -> int:
     from seiso.inference.context_limits import effective_context_ceiling
 
@@ -887,9 +895,25 @@ class OllamaClient:
         should_stop,
         runtime_stats: dict[str, Any] | None = None,
     ) -> Iterator[StreamToken]:
+        from seiso.chat.thinking import ThinkingStreamGuard
+
         body = self._request_body(payload, model_path, stream=True)
+        # Internal planning fields — strip before the wire request.
+        content_max = int(body.pop("_seiso_content_max_tokens", 0) or 0)
+        think_cap = int(body.pop("_seiso_think_max_tokens", 0) or 0)
+        think_mode = body.pop("_seiso_thinking_mode", None)
+        think_reason = body.pop("_seiso_thinking_reason", None)
+        guard = ThinkingStreamGuard(think_max_tokens=think_cap)
         if runtime_stats is not None:
             runtime_stats["sidecar_load_plan"] = self.pinned_load_plan
+            if think_cap > 0:
+                runtime_stats["think_max_tokens"] = think_cap
+            if content_max > 0:
+                runtime_stats["content_max_tokens"] = content_max
+            if think_mode:
+                runtime_stats["thinking_mode"] = think_mode
+            if think_reason:
+                runtime_stats["thinking_reason"] = think_reason
         req = self._build_request("/api/chat", body)
         tool_buffer = ToolCallDeltaBuffer()
         try:
@@ -911,13 +935,42 @@ class OllamaClient:
                     if error:
                         raise RuntimeError(f"Ollama error: {error}")
                     message = chunk.get("message") or {}
+                    # Shared thinking budget (field form) — abort before content
+                    # budget is burned so multi-pass recovery can finish the reply.
+                    thinking = message.get("thinking")
+                    if thinking and guard.feed_thinking_field(str(thinking)):
+                        if runtime_stats is not None:
+                            runtime_stats.update(guard.stats())
+                            runtime_stats["eval_count"] = max(
+                                int(runtime_stats.get("eval_count") or 0),
+                                guard.thinking_tokens,
+                            )
+                            runtime_stats["sidecar_resident_confirmed"] = True
+                        if not should_stop():
+                            yield StreamToken("", new_tokens=0, finish_reason="length")
+                        break
                     content = message.get("content")
                     if content:
-                        text_content = str(content)
-                        yield StreamToken(
-                            text_content,
-                            new_tokens=estimate_chunk_tokens(text_content),
-                        )
+                        # Also guard inline <think> tags if a model mixes styles.
+                        emit, abort = guard.feed_text(str(content))
+                        if emit:
+                            yield StreamToken(
+                                emit,
+                                new_tokens=estimate_chunk_tokens(emit),
+                            )
+                        if abort:
+                            if runtime_stats is not None:
+                                runtime_stats.update(guard.stats())
+                                runtime_stats["eval_count"] = max(
+                                    int(runtime_stats.get("eval_count") or 0),
+                                    guard.thinking_tokens,
+                                )
+                                runtime_stats["sidecar_resident_confirmed"] = True
+                            if not should_stop():
+                                yield StreamToken(
+                                    "", new_tokens=0, finish_reason="length"
+                                )
+                            break
                     tool_text = tool_buffer.add(message.get("tool_calls"))
                     if tool_text:
                         yield StreamToken(
@@ -943,6 +996,13 @@ class OllamaClient:
                                 )
                             if eval_count > 0:
                                 runtime_stats["eval_count"] = eval_count
+                            runtime_stats.update(guard.stats())
+                            if (
+                                not guard.saw_visible_content
+                                and guard.thinking_tokens > 0
+                                and eval_count > 0
+                            ):
+                                runtime_stats.setdefault("thinking_capped", True)
                             runtime_stats["sidecar_resident_confirmed"] = True
                         tool_text = tool_buffer.flush()
                         if tool_text and not should_stop():
@@ -967,6 +1027,19 @@ class OllamaClient:
                                 and eval_count > 0
                                 and eval_count >= max(1, num_predict - 1)
                             )
+                            # Thinking ate the whole pass with no content.
+                            if (
+                                not guard.saw_visible_content
+                                and guard.thinking_tokens > 0
+                                and (
+                                    hit_length
+                                    or (
+                                        think_cap > 0
+                                        and eval_count >= max(1, think_cap)
+                                    )
+                                )
+                            ):
+                                hit_length = True
                             if hit_length:
                                 reason = "length"
                             elif done_reason == "stop":
@@ -1031,37 +1104,71 @@ class OllamaClient:
     def _request_body(
         self, payload: dict[str, Any], model_path: str, *, stream: bool
     ) -> dict[str, Any]:
-        messages, num_ctx, max_tokens = plan_sidecar_request(payload, model_path)
+        from seiso.chat.thinking import apply_thinking_policy, resolve_thinking_policy
+
+        # Quality-first thinking plan (same module as llama.cpp / Torch).
+        planned = apply_thinking_policy(dict(payload))
+        messages, num_ctx, max_tokens = plan_sidecar_request(planned, model_path)
+        content_max = max(1, int(max_tokens))
+        policy = resolve_thinking_policy(
+            content_max_tokens=content_max,
+            messages=planned.get("messages")
+            if isinstance(planned.get("messages"), list)
+            else None,
+            model_key=str(
+                planned.get("model_name")
+                or planned.get("model_id")
+                or planned.get("model_path")
+                or model_path
+            ),
+            payload=planned,
+            n_ctx=int(num_ctx),
+        )
+        think_cap = policy.think_max_tokens if policy.enabled else 0
+        predict = policy.decode_max_tokens if policy.enabled else content_max
         options: dict[str, Any] = {
             **self._load_options(model_path, num_ctx=num_ctx),
-            "num_predict": max_tokens,
-            "temperature": float(payload.get("temperature", 0.0)),
+            "num_predict": predict,
+            "temperature": float(planned.get("temperature", payload.get("temperature", 0.0))),
         }
-        cache_policy = resolve_sidecar_kv_policy(payload, engine=self.engine)
+        cache_policy = resolve_sidecar_kv_policy(planned, engine=self.engine)
         if cache_policy.num_keep is not None:
             options["num_keep"] = cache_policy.num_keep
-        top_p = payload.get("top_p")
+        top_p = planned.get("top_p", payload.get("top_p"))
         if top_p is not None:
             options["top_p"] = float(top_p)
         body: dict[str, Any] = {
-            "model": self._resolve_model(model_path, payload),
+            "model": self._resolve_model(model_path, planned),
             "messages": messages,
             "stream": stream,
             "options": options,
         }
         # Chat/preload requests pin residency; idle probes use the short default.
-        active = bool(payload.get("sidecar_active", True))
+        active = bool(planned.get("sidecar_active", True))
         keep_alive = sidecar_ollama_keep_alive(active=active)
         if keep_alive:
             body["keep_alive"] = keep_alive
-        tools = payload.get("tools_schemas")
+        tools = planned.get("tools_schemas")
         if tools:
             body["tools"] = tools
+        body["think"] = policy.api_value
+        # Stash for stream() without changing the wire JSON.
+        body["_seiso_content_max_tokens"] = content_max
+        body["_seiso_think_max_tokens"] = think_cap
+        body["_seiso_thinking_mode"] = policy.mode
+        body["_seiso_thinking_reason"] = policy.reason
         return body
 
     def _build_request(self, path: str, body: dict[str, Any]) -> urllib.request.Request:
         target = urllib.parse.urljoin(f"{self.url}/", path.lstrip("/"))
-        data = json.dumps(body).encode("utf-8")
+        # Drop Seiso-only planning keys; Ollama rejects unknown top-level fields
+        # on some builds and they must never hit the wire.
+        wire = {
+            key: value
+            for key, value in body.items()
+            if not str(key).startswith("_seiso_")
+        }
+        data = json.dumps(wire).encode("utf-8")
         return urllib.request.Request(
             target,
             data=data,

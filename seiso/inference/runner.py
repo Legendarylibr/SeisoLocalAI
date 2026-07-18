@@ -712,6 +712,10 @@ class LocalInferenceRunner:
             raise ValueError("model_path or model_id required")
 
         route, resolved_path = self._resolve_route(payload, model_path)
+        # Unified quality-first thinking plan (all backends / model types).
+        from seiso.chat.thinking import apply_thinking_policy
+
+        payload = apply_thinking_policy(dict(payload))
         payload = sanitize_inference_payload(payload, isolated=route == "llamaswap")
         if route == "llamaswap":
             # Align max_tokens with sidecar num_predict before length detection.
@@ -1327,6 +1331,11 @@ class LocalInferenceRunner:
         policy = context.policy
 
         if use_manual_torch_kv_stream(payload) and policy.manual_stream_compatible:
+            from seiso.chat.thinking import ThinkingStreamGuard
+
+            guard = ThinkingStreamGuard(
+                think_max_tokens=int(payload.get("think_max_tokens") or 0)
+            )
             emitted = False
             try:
                 for token in iter_torch_kv_tokens(
@@ -1344,8 +1353,26 @@ class LocalInferenceRunner:
                     prefix_cache=policy.prefix_cache,
                     stats=self._last_inference_stats,
                 ):
-                    emitted = True
-                    yield token
+                    text = getattr(token, "text", None)
+                    if text is None:
+                        emitted = True
+                        yield token
+                        continue
+                    emit, abort = guard.feed_text(str(text))
+                    if emit:
+                        emitted = True
+                        yield StreamToken(
+                            emit,
+                            new_tokens=int(getattr(token, "new_tokens", 1) or 1),
+                            finish_reason=getattr(token, "finish_reason", None),
+                        )
+                    if abort:
+                        self._last_inference_stats.update(guard.stats())
+                        if not should_stop():
+                            yield StreamToken("", new_tokens=0, finish_reason="length")
+                        return
+                if guard.thinking_tokens:
+                    self._last_inference_stats.update(guard.stats())
                 return
             except Exception as exc:
                 if is_oom_error(exc):
@@ -1906,6 +1933,10 @@ class LocalInferenceRunner:
         tool_buffer = ToolCallDeltaBuffer()
         emitted_text = False
         recoveries = 0
+        from seiso.chat.thinking import ThinkingStreamGuard
+
+        think_cap = int(payload.get("think_max_tokens") or 0)
+        guard = ThinkingStreamGuard(think_max_tokens=think_cap)
         while True:
             try:
                 stream = llm.create_chat_completion(
@@ -1923,8 +1954,19 @@ class LocalInferenceRunner:
                     delta = choice.get("delta", {}) or {}
                     content = delta.get("content")
                     if content:
-                        emitted_text = True
-                        yield StreamToken(content)
+                        emit, abort = guard.feed_text(str(content))
+                        if emit:
+                            emitted_text = True
+                            yield StreamToken(emit)
+                        if abort:
+                            # Thinking budget exhausted before visible content —
+                            # same recovery path as Ollama empty length burns.
+                            self._last_inference_stats.update(guard.stats())
+                            if not should_stop():
+                                yield StreamToken(
+                                    "", new_tokens=0, finish_reason="length"
+                                )
+                            return
                     tool_text = tool_buffer.add(delta.get("tool_calls"))
                     if tool_text:
                         emitted_text = True
@@ -1933,6 +1975,14 @@ class LocalInferenceRunner:
                 if tool_text and not should_stop():
                     emitted_text = True
                     yield StreamToken(tool_text)
+                if guard.thinking_tokens:
+                    self._last_inference_stats.update(guard.stats())
+                if (
+                    not guard.saw_visible_content
+                    and guard.thinking_tokens > 0
+                    and not finish_reason
+                ):
+                    finish_reason = "length"
                 if finish_reason and not should_stop():
                     yield StreamToken("", new_tokens=0, finish_reason=finish_reason)
                 return
