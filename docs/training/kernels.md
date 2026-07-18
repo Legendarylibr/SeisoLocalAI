@@ -15,17 +15,30 @@ Seiso patches compatible model layers during training for lower memory bandwidth
 GEMM-heavy work uses library matmuls (Tensor Cores). Custom CUDA covers
 bandwidth-bound elementwise/norm/CE — not hand-rolled dense GEMMs.
 
+**MLP:** one stacked gate/up GEMM (`cat(W_gate,W_up)`) + fused SwiGLU when shapes match.
+**LoRA QKV:** shared-`x` A matmul when ranks match; batched `bmm` for B when out dims and scales match.
+
 ## Enable
 
 **YAML:**
 
 ```yaml
 use_triton: true    # master switch for fused RMSNorm + MLP
-use_fused_ce: true
-use_fused_lora: true   # CUDA / WSL2 only; fused low-rank delta
+use_fused_ce: true  # default on when CUDA fused stack is available
+use_fused_lora: true   # cuBLAS skinny LoRA GEMMs
+packing: true          # auto-recommended on CUDA (less pad waste)
+padding_free: false    # true when flash-attn is installed (set by CUDA profile)
 extra:
-  use_fused_lora_qkv: true   # batched Q/K/V LoRA deltas (CUDA; default follows use_fused_lora)
+  use_fused_lora_qkv: true   # batched Q/K/V LoRA (cuBLAS; default follows use_fused_lora)
+  use_cuda_graphs: true      # fixed-shape train steps; off with gradient checkpointing
 ```
+
+**Attention (train load):** FA3 → FA2 → SDPA (never require eager). Override with
+`SEISO_ATTN_IMPLEMENTATION=sdpa|flash_attention_2|eager`. Install FlashAttention via
+`./scripts/install_flash_attn.sh`.
+
+**Low VRAM:** free VRAM under 8 GB → lean profile (`SEISO_KERNEL_LOW_VRAM=1`, narrow
+tiles, fused CE, gradient checkpointing). Forge Train tab shows a low-VRAM hint.
 
 **Python:**
 
