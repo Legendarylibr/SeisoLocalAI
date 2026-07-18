@@ -26,6 +26,7 @@ class ArchTuningProfile:
     lora_tile: int
     use_cuda_graphs: bool
     use_stream_overlap: bool
+    # Reserved: no LoRA path wires WMMA today (dropped stub header in P2 cleanup).
     use_wmma: bool
     use_persistent_kernels: bool
     prefer_flash_attn: str  # fa3, fa2, sdpa
@@ -89,12 +90,12 @@ def detect_arch_tuning() -> ArchTuningProfile:
         return ArchTuningProfile(
             family=family,
             sm=sm,
-            rms_mode=2,  # parallax + cp.async
+            rms_mode=1,  # stripe (legacy parallax path removed)
             swiglu_vec=8,
             lora_tile=512,
             use_cuda_graphs=True,
             use_stream_overlap=True,
-            use_wmma=True,
+            use_wmma=False,
             use_persistent_kernels=True,
             prefer_flash_attn="fa3",
         )
@@ -102,12 +103,12 @@ def detect_arch_tuning() -> ArchTuningProfile:
         return ArchTuningProfile(
             family=family,
             sm=sm,
-            rms_mode=2,
+            rms_mode=1,
             swiglu_vec=8,
             lora_tile=384,
             use_cuda_graphs=True,
             use_stream_overlap=True,
-            use_wmma=True,
+            use_wmma=False,
             use_persistent_kernels=True,
             prefer_flash_attn="fa3",
         )
@@ -115,12 +116,12 @@ def detect_arch_tuning() -> ArchTuningProfile:
         return ArchTuningProfile(
             family=family,
             sm=sm,
-            rms_mode=2,
+            rms_mode=1,
             swiglu_vec=8,
             lora_tile=256,
             use_cuda_graphs=True,
             use_stream_overlap=True,
-            use_wmma=True,
+            use_wmma=False,
             use_persistent_kernels=True,
             prefer_flash_attn="fa2",
         )
@@ -128,12 +129,12 @@ def detect_arch_tuning() -> ArchTuningProfile:
         return ArchTuningProfile(
             family=family,
             sm=sm,
-            rms_mode=1,  # stripe — lower smem on 80-class
+            rms_mode=1,  # stripe
             swiglu_vec=8,
             lora_tile=256,
             use_cuda_graphs=True,
             use_stream_overlap=True,
-            use_wmma=True,
+            use_wmma=False,
             use_persistent_kernels=True,
             prefer_flash_attn="fa2",
         )

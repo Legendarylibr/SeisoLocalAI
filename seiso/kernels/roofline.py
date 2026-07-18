@@ -19,6 +19,21 @@ training gate.
 
 Below that bar (or for elementwise/CE/float32), labels are **heuristic only**.
 
+Real backends vs shape math
+---------------------------
+These numbers assume *efficient* dense GEMM (cuBLAS / Tensor Cores). Production
+routing matches that for GEMM-family ops:
+
+* **fused_mlp_swiglu** — torch/cuBLAS ``x@W.T`` for gate/up + fused SwiGLU
+  epilogue. Scalar CUDA matmul is opt-in only (``SEISO_KERNEL_ALLOW_NAIVE_MLP``).
+* **lora_qkv_delta / lora_delta** — torch/cuBLAS by default. Naive custom CUDA
+  only with ``SEISO_KERNEL_ALLOW_NAIVE_LORA`` on tiny no-grad shapes.
+* **rms_norm / swiglu_elementwise / fused_cross_entropy** — custom elementwise
+  or vocab kernels; intensity is heuristic bandwidth-class (never SoT).
+
+SoT is a *shape* claim about FLOP/byte under efficient dense GEMM — which is
+what production routing uses for MLP/LoRA.
+
 Traffic accounting
 ------------------
 * Elementwise / CE: lower-bound stream counts (heuristic only; never SoT).
@@ -352,7 +367,8 @@ def estimate_fused_mlp_swiglu(
         traffic_model="classic_gemm_per_matmul",
         extra_note=(
             "Two dense GEMMs (full classic traffic each) + fused silu×mul. "
-            "Default intermediate=4×hidden; real SwiGLU often ~8/3×hidden."
+            "Default intermediate=4×hidden; real SwiGLU often ~8/3×hidden. "
+            "Production uses cuBLAS GEMMs + fused SwiGLU epilogue."
         ),
     )
 

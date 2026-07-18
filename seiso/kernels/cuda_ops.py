@@ -219,9 +219,7 @@ def fused_swiglu(gate, up):
     return torch.nn.functional.silu(gate) * up
 
 
-def fused_lora_delta(
-    x, lora_A, lora_B, base=None, scale: float = 1.0, *, inplace: bool = False
-):
+def fused_lora_delta(x, lora_A, lora_B, base=None, scale: float = 1.0, *, inplace: bool = False):
     """Fused low-rank delta: ``base + scale * B @ (A @ x)`` for 1D or 2D inputs."""
 
     if not x.is_cuda:
@@ -263,9 +261,7 @@ def cross_entropy_backward(
     ext = _load_extension()
     if ext is None:
         raise RuntimeError("CUDA cross_entropy_backward requires native extension")
-    return ext.cross_entropy_backward(
-        logits, labels, row_max, row_lse, ignore_index, grad_scale
-    )
+    return ext.cross_entropy_backward(logits, labels, row_max, row_lse, ignore_index, grad_scale)
 
 
 def fused_lora_qkv_delta(
@@ -306,12 +302,25 @@ def fused_lora_qkv_delta(
 
 
 def fused_mlp_swiglu(x, W_gate, W_up):
-    """Fused gate/up projection + SwiGLU: silu(x @ W_gate^T) * (x @ W_up^T)."""
-    ext = _load_extension()
-    if ext is None:
-        import torch
+    """Gate/up projection + SwiGLU via torch GEMM + fused elementwise epilogue.
 
-        gate = x @ W_gate.t()
-        up = x @ W_up.t()
-        return torch.nn.functional.silu(gate) * up
-    return ext.fused_mlp_swiglu(x, W_gate, W_up)
+    The scalar-accum CUDA matmul in ``fused_mlp.cu`` is opt-in only
+    (``SEISO_KERNEL_ALLOW_NAIVE_MLP=1``) for experiments — it is not TC/cuBLAS
+    competitive and must not be the default.
+    """
+    import os
+
+    allow_naive = os.environ.get("SEISO_KERNEL_ALLOW_NAIVE_MLP", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    if allow_naive:
+        ext = _load_extension()
+        if ext is not None:
+            return ext.fused_mlp_swiglu(x, W_gate, W_up)
+
+    gate = x @ W_gate.t()
+    up = x @ W_up.t()
+    return fused_swiglu(gate, up)

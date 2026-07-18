@@ -1,10 +1,11 @@
 /**
- * Fused MLP: gate/up linear projections + SwiGLU in one kernel pass.
+ * Experimental fused MLP: gate/up linear + SwiGLU in one kernel pass.
  *
  *   out = silu(x @ W_gate^T) * (x @ W_up^T)
  *
- * Minimizes global memory traffic by reading x once and vectorizing half2/bf16.
- * cp.async prefetch on sm_80+ for wide hidden dimensions.
+ * Naive per-output-channel scalar matmul (no Tensor Cores / cuBLAS).
+ * Production code must NOT call this by default — use torch GEMM + fused
+ * SwiGLU via dispatch. Opt-in: SEISO_KERNEL_ALLOW_NAIVE_MLP=1.
  */
 
 #include "arch_tuning.cuh"

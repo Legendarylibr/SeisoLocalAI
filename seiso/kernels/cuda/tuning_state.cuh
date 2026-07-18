@@ -5,6 +5,7 @@ namespace seiso {
 enum RmsLaunchMode : int {
   RMS_AUTO = 0,
   RMS_STRIPE = 1,
+  // Legacy alias: cp.async parallax path was removed; maps to stripe at launch.
   RMS_PARALLAX = 2,
 };
 

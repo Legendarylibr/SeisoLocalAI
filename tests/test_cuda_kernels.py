@@ -164,3 +164,104 @@ def test_fused_cross_entropy_all_ignored_labels():
     loss2 = fused_cross_entropy_loss(shift_logits, shift_labels)
     loss2.backward()
     assert float(loss2) == 0.0
+
+
+def test_fused_rms_norm_matches_pytorch():
+    """Stripe RMSNorm must match reference (full-row sum of squares)."""
+    torch = pytest.importorskip("torch")
+    from seiso.kernels import cuda_ops as co
+    from seiso.kernels.fallback_ops import pytorch_rms_norm
+
+    co._EXT = None
+    co._EXT_ERROR = None
+    co.is_cuda_available.cache_clear()
+    assert co.is_cuda_available(), co._EXT_ERROR or co.cuda_kernel_status()
+
+    torch.manual_seed(0)
+    x = torch.randn(4, 4096, device="cuda", dtype=torch.bfloat16)
+    w = torch.randn(4096, device="cuda", dtype=torch.bfloat16)
+    y = co.fused_rms_norm(x, w, eps=1e-6)
+    ref = pytorch_rms_norm(x, w, 1e-6, None)
+    assert torch.allclose(y.float(), ref.float(), atol=2e-2, rtol=2e-2)
+
+
+def test_fused_cross_entropy_matches_pytorch():
+    """Vectorized CE forward/backward must match F.cross_entropy."""
+    torch = pytest.importorskip("torch")
+    import torch.nn.functional as F
+
+    from seiso.kernels import cuda_ops as co
+    from seiso.kernels.loss import fused_cross_entropy_loss
+
+    co._EXT = None
+    co._EXT_ERROR = None
+    co.is_cuda_available.cache_clear()
+    assert co.is_cuda_available(), co._EXT_ERROR or co.cuda_kernel_status()
+
+    torch.manual_seed(1)
+    rows, vocab = 8, 320  # not a multiple of 8 — exercises scalar tail
+    logits = torch.randn(rows, vocab, device="cuda", dtype=torch.float32, requires_grad=True)
+    labels = torch.randint(0, vocab, (rows,), device="cuda")
+    labels[0] = -100
+
+    loss = fused_cross_entropy_loss(logits, labels, ignore_index=-100)
+    ref = F.cross_entropy(logits, labels, ignore_index=-100)
+    assert torch.allclose(loss, ref, atol=1e-5, rtol=1e-5)
+
+    loss.backward()
+    grad_fused = logits.grad.detach().clone()
+    logits.grad = None
+    ref.backward()
+    assert torch.allclose(grad_fused, logits.grad, atol=1e-5, rtol=1e-5)
+
+
+def test_fused_mlp_uses_gemm_epilogue_not_naive_default(monkeypatch):
+    """Default MLP path is torch GEMM + fused_swiglu (never scalar CUDA matmul)."""
+    torch = pytest.importorskip("torch")
+    if not torch.cuda.is_available():
+        pytest.skip("CUDA required")
+
+    from seiso.kernels import cuda_ops as co
+    from seiso.kernels.dispatch import fused_mlp_swiglu
+
+    monkeypatch.delenv("SEISO_KERNEL_ALLOW_NAIVE_MLP", raising=False)
+    co._EXT = None
+    co._EXT_ERROR = None
+    co.is_cuda_available.cache_clear()
+
+    torch.manual_seed(2)
+    rows, hin, hout = 16, 64, 128
+    x = torch.randn(rows, hin, device="cuda", dtype=torch.bfloat16)
+    wg = torch.randn(hout, hin, device="cuda", dtype=torch.bfloat16)
+    wu = torch.randn(hout, hin, device="cuda", dtype=torch.bfloat16)
+
+    y = fused_mlp_swiglu(x, wg, wu)
+    ref = torch.nn.functional.silu(x @ wg.t()) * (x @ wu.t())
+    assert y.shape == ref.shape
+    assert torch.allclose(y.float(), ref.float(), atol=5e-2, rtol=5e-2)
+
+    # Direct cuda_ops entrypoint must also default to GEMM+epilogue.
+    y2 = co.fused_mlp_swiglu(x, wg, wu)
+    assert torch.allclose(y2.float(), ref.float(), atol=5e-2, rtol=5e-2)
+
+
+def test_lora_defaults_to_cublas_path(monkeypatch):
+    """Production LoRA must not use the serial A@x CUDA kernel by default."""
+    torch = pytest.importorskip("torch")
+    if not torch.cuda.is_available():
+        pytest.skip("CUDA required")
+
+    from seiso.kernels import dispatch as d
+
+    monkeypatch.delenv("SEISO_KERNEL_ALLOW_NAIVE_LORA", raising=False)
+    x = torch.randn(128, 512, device="cuda", dtype=torch.bfloat16)
+    assert d._prefer_cublas_lora(x) is True
+
+    # Opt-in naive only for tiny no-grad microbenches.
+    monkeypatch.setenv("SEISO_KERNEL_ALLOW_NAIVE_LORA", "1")
+    tiny = torch.randn(2, 32, device="cuda", dtype=torch.bfloat16)
+    with torch.no_grad():
+        assert d._prefer_cublas_lora(tiny) is False
+        assert d._prefer_cublas_lora(x) is True
+    # Grad mode always forces cuBLAS even with the opt-in env.
+    assert d._prefer_cublas_lora(tiny) is True

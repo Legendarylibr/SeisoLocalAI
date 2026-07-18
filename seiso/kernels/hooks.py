@@ -190,22 +190,23 @@ def apply_training_kernels(
                 continue
 
             def _mlp_forward(self, hidden_states):
-                if (
-                    _use_fused_cuda_kernels(hidden_states)
-                    and not _is_peft_lora_linear(self.gate_proj)
-                    and not _is_peft_lora_linear(self.up_proj)
-                    # bitsandbytes / quantized weights are packed; fused MLP needs FP weights.
-                    and _supports_einsum_batch((self.gate_proj, self.up_proj))
-                ):
-                    flat = hidden_states.reshape(-1, hidden_states.shape[-1])
-                    inter = fused_mlp_swiglu(
-                        flat,
-                        self.gate_proj.weight,
-                        self.up_proj.weight,
-                    )
-                    inter = inter.reshape(*hidden_states.shape[:-1], inter.shape[-1])
-                    return self.down_proj(inter)
-                if hidden_states.is_cuda:
+                # Production MLP: module linears (cuBLAS) + fused SwiGLU epilogue.
+                # fused_mlp_swiglu also uses torch GEMM + fused_swiglu — same quality;
+                # prefer gate_proj/up_proj so LoRA/quant wrappers stay correct.
+                if hidden_states.is_cuda and _use_fused_cuda_kernels(hidden_states):
+                    if (
+                        not _is_peft_lora_linear(self.gate_proj)
+                        and not _is_peft_lora_linear(self.up_proj)
+                        and _supports_einsum_batch((self.gate_proj, self.up_proj))
+                    ):
+                        flat = hidden_states.reshape(-1, hidden_states.shape[-1])
+                        inter = fused_mlp_swiglu(
+                            flat,
+                            self.gate_proj.weight,
+                            self.up_proj.weight,
+                        )
+                        inter = inter.reshape(*hidden_states.shape[:-1], inter.shape[-1])
+                        return self.down_proj(inter)
                     gate = self.gate_proj(hidden_states)
                     up = self.up_proj(hidden_states)
                     return self.down_proj(fused_swiglu(gate, up))
@@ -387,10 +388,7 @@ def _supports_einsum_batch(layers: tuple[Any, ...]) -> bool:
     """Quantized (bitsandbytes) base layers must use their own forward."""
     for layer in layers:
         cls = type(layer).__name__.lower()
-        if any(
-            token in cls
-            for token in ("bnb", "bitsandbytes", "linear4bit", "linear8bit")
-        ):
+        if any(token in cls for token in ("bnb", "bitsandbytes", "linear4bit", "linear8bit")):
             return False
         weight = getattr(layer, "weight", None)
         if weight is not None and hasattr(weight, "quant_state"):
@@ -436,9 +434,7 @@ def _batched_base_qkv_forward(
     )
 
 
-def _get_active_lora_weights(
-    module: Any, adapter: str
-) -> tuple[Any, Any, float] | None:
+def _get_active_lora_weights(module: Any, adapter: str) -> tuple[Any, Any, float] | None:
     if adapter not in module.lora_A or adapter not in module.lora_B:
         return None
     return (
@@ -498,9 +494,7 @@ def _patch_fused_qkv_projections(
                     continue
                 x_mod = x
                 if hasattr(self, "_cast_input_dtype"):
-                    x_mod = self._cast_input_dtype(
-                        x_mod, self.lora_A[adapter].weight.dtype
-                    )
+                    x_mod = self._cast_input_dtype(x_mod, self.lora_A[adapter].weight.dtype)
                 dropout_p = _lora_dropout_p(self.lora_dropout[adapter])
                 if dropout_p > 0 and self.training:
                     x_mod = F.dropout(x_mod, p=dropout_p)
@@ -508,14 +502,13 @@ def _patch_fused_qkv_projections(
                 w = _get_active_lora_weights(self, adapter)
                 if w and w[0].size(0) <= max_rank:
                     delta = fused_lora_delta(flat_x, w[0], w[1], scale=w[2])
-                    result = result + delta.reshape(
-                        *x_mod.shape[:-1], delta.shape[-1]
-                    ).to(result.dtype)
+                    result = result + delta.reshape(*x_mod.shape[:-1], delta.shape[-1]).to(
+                        result.dtype
+                    )
                 else:
                     result = (
                         result
-                        + self.lora_B[adapter](self.lora_A[adapter](x_mod))
-                        * self.scaling[adapter]
+                        + self.lora_B[adapter](self.lora_A[adapter](x_mod)) * self.scaling[adapter]
                     )
             return result
 
@@ -556,9 +549,7 @@ def _patch_fused_qkv_projections(
                     attn_module.v_proj,
                 )
                 try:
-                    if not _apply_adapter_qkv_delta(
-                        flat_x, out_q, out_k, out_v, adapter
-                    ):
+                    if not _apply_adapter_qkv_delta(flat_x, out_q, out_k, out_v, adapter):
                         return _fallback_projection(self, x, *args, **kwargs)
                     cache["outs"] = (out_q, out_k, out_v)
                     cache["key"] = cache_key
@@ -610,10 +601,7 @@ def apply_fused_lora_qkv_kernels(
             continue
         if not all(hasattr(module, p) for p in ("q_proj", "k_proj", "v_proj")):
             continue
-        if not all(
-            _is_peft_lora_linear(m)
-            for m in (module.q_proj, module.k_proj, module.v_proj)
-        ):
+        if not all(_is_peft_lora_linear(m) for m in (module.q_proj, module.k_proj, module.v_proj)):
             continue
         if _patch_fused_qkv_projections(model, module, max_rank=max_rank):
             patched += 1
@@ -633,9 +621,7 @@ def _patch_post_attention_residual_norm(model: Any, decoder: Any) -> bool:
 
     fallback = norm.forward
 
-    def _residual_norm_forward(
-        self_norm, hidden_states, _parent=decoder, _fallback=fallback
-    ):
+    def _residual_norm_forward(self_norm, hidden_states, _parent=decoder, _fallback=fallback):
         if _use_fused_cuda_kernels(hidden_states):
             residual = getattr(_parent, "_seiso_residual", None)
             if (
@@ -647,9 +633,7 @@ def _patch_post_attention_residual_norm(model: Any, decoder: Any) -> bool:
                 out = fused_rms_norm(
                     hidden_states,
                     self_norm.weight,
-                    eps=getattr(
-                        self_norm, "variance_epsilon", getattr(self_norm, "eps", 1e-6)
-                    ),
+                    eps=getattr(self_norm, "variance_epsilon", getattr(self_norm, "eps", 1e-6)),
                     residual=residual,
                 )
                 _parent._seiso_residual = None
@@ -708,9 +692,7 @@ def _patch_fused_residual_decoder_forward(model: Any, decoder: Any) -> bool:
         hidden_states = attn_out[0] if isinstance(attn_out, tuple) else attn_out
 
         attn_hidden = attn_out[0] if isinstance(attn_out, tuple) else attn_out
-        attn_for_norm = (
-            attn_dropout(attn_hidden) if attn_dropout is not None else attn_hidden
-        )
+        attn_for_norm = attn_dropout(attn_hidden) if attn_dropout is not None else attn_hidden
         post_attn_skip = residual + attn_for_norm
 
         if _use_fused_cuda_kernels(attn_for_norm):
