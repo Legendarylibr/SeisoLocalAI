@@ -500,8 +500,6 @@ def job_security(root: Path, python: str, env: dict[str, str]) -> None:
             str(root / ".cache" / "pip-audit"),
             "--progress-spinner=off",
             "--ignore-vuln",
-            "CVE-2025-3000",
-            "--ignore-vuln",
             "PYSEC-2025-194",
             "--ignore-vuln",
             "CVE-2025-69872",

@@ -35,7 +35,8 @@ dependencies = [
 
 [project.optional-dependencies]
 train = [
-  "torch>=2.12",
+  # torch>=2.13 required: CVE-2025-3000 (torch.jit.script memory corruption) fixed in 2.13.0
+  "torch>=2.13",
   "transformers>=5.10",
   "datasets>=5.0",
   "peft>=0.19",
@@ -53,10 +54,10 @@ cuda = [
   "triton>=2.2; platform_system == 'Linux'",
   "ninja>=1.11",
   "cuda-cccl>=1.0; platform_system == 'Linux'",
-  # llama-cpp-python CUDA wheels link libcudart.so.12; PyTorch 2.12 ships cu13 only.
+  # llama-cpp-python CUDA wheels link libcudart.so.12; PyTorch 2.12+ ships cu13 only.
   "nvidia-cuda-runtime-cu12; platform_system == 'Linux'",
   "nvidia-cublas-cu12; platform_system == 'Linux'",
-  # cuda-toolkit comes via torch==13.0.2; install.sh upgrades to >=13.1.0 when ptxas is too old.
+  # cuda-toolkit comes via torch (13.0.x); install.sh upgrades to >=13.1.0 when ptxas is too old.
 ]
 # Optional — build from source on Linux NVIDIA; not pulled in by [cuda] (see scripts/install_flash_attn.sh).
 flash-attn = [
@@ -82,7 +83,7 @@ llamacpp = [
 ]
 compress-quant = [
   # torch must be present before auto-gptq builds its CUDA extension
-  "torch>=2.12",
+  "torch>=2.13",
   "auto-gptq>=0.7.1",
   "autoawq>=0.2.9",
 ]
@@ -209,7 +210,6 @@ ignored-modules = [
 
 [tool.pip-audit]
 ignore-vulns = [
-  "CVE-2025-3000",
   # llama-cpp-python depends on diskcache, but Seiso attaches LlamaRAMCache
   # instead of diskcache's pickle-backed persistent cache. No fixed diskcache
   # release is advertised by pip-audit for this CVE yet.
