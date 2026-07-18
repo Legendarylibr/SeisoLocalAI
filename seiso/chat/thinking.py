@@ -223,8 +223,8 @@ def resolve_thinking_policy(
 
     # Explicit request wins.
     if "think" in payload:
-        api = _parse_api_value(payload.get("think"))
-        if api is None:
+        parsed = _parse_api_value(payload.get("think"))
+        if parsed is None:
             # Omit field: treat as off for budgeting (host default elsewhere).
             return ThinkingPolicy(
                 enabled=False,
@@ -235,12 +235,13 @@ def resolve_thinking_policy(
                 mode="forced",
                 reason="payload_omit",
             )
-        enabled = api is not False and api != 0
+        forced_api: bool | str = parsed
+        enabled = forced_api is not False
         think_max = thinking_max_tokens(content, task=task) if enabled else 0
         decode = _decode_budget(content, think_max, n_ctx=n_ctx)
         return ThinkingPolicy(
             enabled=enabled,
-            api_value=api if enabled else False,
+            api_value=forced_api if enabled else False,
             think_max_tokens=think_max,
             content_max_tokens=content,
             decode_max_tokens=decode,
@@ -298,9 +299,9 @@ def resolve_thinking_policy(
     reasoning_model = is_reasoning_prone_model(model)
     if task == "complex" or reasoning_model:
         # Prefer a low API level when possible (GPT-OSS / newer Ollama).
-        api: bool | str = "low" if reasoning_model else True
+        auto_api: bool | str = "low" if reasoning_model else True
         if task == "complex" and reasoning_model:
-            api = "medium"
+            auto_api = "medium"
         think_max = thinking_max_tokens(
             content,
             task="complex" if task == "complex" else "general",
@@ -317,7 +318,7 @@ def resolve_thinking_policy(
             )
         return ThinkingPolicy(
             enabled=True,
-            api_value=api,
+            api_value=auto_api,
             think_max_tokens=think_max,
             content_max_tokens=content,
             decode_max_tokens=_decode_budget(content, think_max, n_ctx=n_ctx),
