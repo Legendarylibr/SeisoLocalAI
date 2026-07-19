@@ -19,18 +19,6 @@ except ImportError:
     SFTConfig = None  # type: ignore[misc, assignment]
 
 
-def _fused_compute_loss(
-    trainer, model, inputs, return_outputs=False, num_items_in_batch=None
-):
-    return _compute_fused_or_delegate_loss(
-        trainer._seiso_super_compute_loss,
-        model,
-        inputs,
-        return_outputs=return_outputs,
-        num_items_in_batch=num_items_in_batch,
-    )
-
-
 def _compute_fused_or_delegate_loss(
     delegate,
     model,
@@ -102,8 +90,8 @@ if _SFTTrainer is not None:
                     return_outputs=return_outputs,
                     num_items_in_batch=num_items_in_batch,
                 )
-            return _fused_compute_loss(
-                self,
+            return _compute_fused_or_delegate_loss(
+                self._seiso_super_compute_loss,
                 model,
                 inputs,
                 return_outputs=return_outputs,
@@ -171,16 +159,17 @@ def build_sft_trainer(
                 cfg_kwargs[key] = value
 
     args = SFTConfig(**cfg_kwargs)
-    trainer_cls = FusedSFTTrainer if use_fused_ce else _SFTTrainer
+    # FusedSFTTrainer owns seiso-only kwargs; plain TRL SFTTrainer rejects them.
+    use_fused_cls = bool(FusedSFTTrainer is not None and (use_fused_ce or use_cuda_graphs))
+    trainer_cls = FusedSFTTrainer if use_fused_cls else _SFTTrainer
     kwargs: dict[str, Any] = {
         "model": model,
         "args": args,
         "train_dataset": train_ds,
     }
-    if use_fused_ce:
-        kwargs["use_fused_ce"] = True
-    if use_cuda_graphs:
-        kwargs["use_cuda_graphs"] = True
+    if use_fused_cls:
+        kwargs["use_fused_ce"] = bool(use_fused_ce)
+        kwargs["use_cuda_graphs"] = bool(use_cuda_graphs)
     if eval_ds is not None:
         kwargs["eval_dataset"] = eval_ds
     if data_collator is not None:
@@ -200,8 +189,13 @@ def build_sft_trainer(
         kwargs["processing_class"] = tokenizer
         return trainer_cls(**kwargs)
     except TypeError:
+        # Older TRL uses tokenizer= instead of processing_class=.
+        # Keep seiso-only kwargs on FusedSFTTrainer (defaults would flip fused_ce on).
         kwargs.pop("processing_class", None)
         kwargs["tokenizer"] = tokenizer
+        if not use_fused_cls:
+            kwargs.pop("use_fused_ce", None)
+            kwargs.pop("use_cuda_graphs", None)
         return trainer_cls(**kwargs)
 
 

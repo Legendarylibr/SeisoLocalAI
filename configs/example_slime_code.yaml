@@ -1,4 +1,7 @@
 model_id: Qwen/Qwen2.5-0.5B-Instruct
+method: slime
+# slime path uses full-precision (+ optional LoRA); quant ignored by slime runner
+quant: none
 dataset: data/slime_code_sample.jsonl
 output_dir: outputs/slime-code
 prompt_field: prompt

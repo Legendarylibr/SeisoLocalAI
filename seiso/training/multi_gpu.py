@@ -132,31 +132,6 @@ def resolve_distributed_plan(
     )
 
 
-def configure_training_args(
-    base_args: dict, layout: GpuLayout, multi_gpu: bool
-) -> dict:
-    """Merge DDP settings into HuggingFace TrainingArguments dict."""
-    from seiso.memory.protection import training_pin_memory
-
-    args = dict(base_args)
-    if multi_gpu and layout.use_ddp:
-        args.update(
-            {
-                "local_rank": layout.local_rank,
-                "ddp_find_unused_parameters": False,
-                "dataloader_pin_memory": training_pin_memory(),
-            }
-        )
-        logger.info(
-            "Multi-GPU DDP enabled: world_size=%d rank=%d",
-            layout.world_size,
-            layout.local_rank,
-        )
-    else:
-        args["dataloader_pin_memory"] = training_pin_memory()
-    return args
-
-
 def configure_distributed_training_args(
     base_args: dict,
     layout: GpuLayout,
@@ -164,20 +139,34 @@ def configure_distributed_training_args(
     enabled: bool,
 ) -> dict:
     """Merge configured DDP settings into HuggingFace TrainingArguments."""
-    args = configure_training_args(base_args, layout, enabled)
-    if enabled and layout.use_ddp:
-        ddp_backend = getattr(config, "ddp_backend", None)
-        if ddp_backend:
-            args["ddp_backend"] = str(ddp_backend)
-        args["ddp_find_unused_parameters"] = bool(
-            getattr(config, "ddp_find_unused_parameters", False)
-        )
-        # Expert LoRA leaves unused params each step — force find_unused for MoE.
-        if getattr(config, "moe_finetune", False) or getattr(config, "is_moe", False):
-            args["ddp_find_unused_parameters"] = True
-        model_id = str(getattr(config, "model_id", "") or "")
-        if "moe" in model_id.lower() or "mixtral" in model_id.lower():
-            args["ddp_find_unused_parameters"] = True
+    from seiso.memory.protection import training_pin_memory
+
+    args = dict(base_args)
+    args["dataloader_pin_memory"] = training_pin_memory()
+    if not (enabled and layout.use_ddp):
+        return args
+
+    args["local_rank"] = layout.local_rank
+    args["ddp_find_unused_parameters"] = bool(
+        getattr(config, "ddp_find_unused_parameters", False)
+    )
+    ddp_backend = getattr(config, "ddp_backend", None)
+    if ddp_backend:
+        args["ddp_backend"] = str(ddp_backend)
+    # Expert LoRA / MoE leave unused params each step.
+    model_id = str(getattr(config, "model_id", "") or "")
+    if (
+        getattr(config, "moe_finetune", False)
+        or getattr(config, "is_moe", False)
+        or "moe" in model_id.lower()
+        or "mixtral" in model_id.lower()
+    ):
+        args["ddp_find_unused_parameters"] = True
+    logger.info(
+        "Multi-GPU DDP enabled: world_size=%d rank=%d",
+        layout.world_size,
+        layout.local_rank,
+    )
     return args
 
 
@@ -216,9 +205,7 @@ def launch_worker_command(
             config_path,
         ]
     )
-    return [
-        *cmd,
-    ]
+    return cmd
 
 
 def gpu_stats() -> list[dict]:
