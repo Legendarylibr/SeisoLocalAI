@@ -18,7 +18,8 @@ _METRICS_FLUSH_INTERVAL = 10
 
 
 def is_main_process() -> bool:
-    return int(os.environ.get("LOCAL_RANK", os.environ.get("RANK", "0"))) == 0
+    """True on global rank 0 (RANK preferred over LOCAL_RANK for multi-node)."""
+    return int(os.environ.get("RANK", os.environ.get("LOCAL_RANK", "0")) or 0) == 0
 
 
 def normalize_training_log(state, logs: dict[str, Any]) -> dict[str, Any]:

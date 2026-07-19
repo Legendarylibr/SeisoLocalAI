@@ -126,6 +126,33 @@ def test_example_training_slime_config_loads():
     assert slime.auto_stop is True
 
 
+def test_example_slime_yaml_loads_via_train_config_with_aliases():
+    """example_slime_* uses slime field names; TrainConfig.from_yaml maps them."""
+    cfg = TrainConfig.from_yaml("configs/example_slime_single_gpu.yaml")
+    slime = cfg.to_single_gpu_slime_config()
+
+    assert cfg.method == TrainMethod.SLIME
+    assert cfg.slime_use_lora is True
+    assert cfg.save_steps == 100
+    assert cfg.logging_steps == 1
+    assert slime.use_lora is True
+    assert slime.save_every_steps == 100
+    assert slime.log_every_steps == 1
+    assert slime.rollout_backend == "hf"
+
+
+def test_smoke_and_example_lora_yaml_fields_consumed():
+    """Advertised smoke/example LoRA keys round-trip through TrainConfig."""
+    for path in ("configs/smoke_train_cpu.yaml", "configs/example_lora.yaml"):
+        cfg = TrainConfig.from_yaml(path)
+        assert cfg.method == TrainMethod.LORA
+        assert cfg.train_on_responses_only is True
+        assert cfg.preprocess_dataset is True
+        assert cfg.dataset_format.value in ("chat", "auto")
+        assert cfg.model_id
+        assert str(cfg.dataset)
+
+
 def test_example_training_slime_ddp_config_loads():
     cfg = TrainConfig.from_yaml("configs/example_training_slime_ddp.yaml")
     slime = cfg.to_single_gpu_slime_config()

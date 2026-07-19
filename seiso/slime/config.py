@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from pathlib import Path
 
 import yaml
@@ -183,12 +183,26 @@ class SingleGpuSlimeConfig:
         data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
         if not isinstance(data, dict):
             raise ValueError("slime config must be a mapping")
-        return cls(
-            **{
-                key: Path(value) if key in {"dataset", "output_dir"} else value
-                for key, value in data.items()
-            }
-        )
+        # Accept TrainConfig field names so shared example YAMLs work with
+        # both `seiso slime` and `seiso train -c ... method: slime`.
+        aliases = {
+            "save_steps": "save_every_steps",
+            "logging_steps": "log_every_steps",
+            "slime_use_lora": "use_lora",
+        }
+        for src, dest in aliases.items():
+            if src in data and dest not in data:
+                data[dest] = data.pop(src)
+            elif src in data:
+                data.pop(src)
+        known = {f.name for f in fields(cls)}
+        # Filter unknown keys (e.g. method/quant from TrainConfig-oriented YAMLs).
+        payload = {
+            key: Path(value) if key in {"dataset", "output_dir"} else value
+            for key, value in data.items()
+            if key in known
+        }
+        return cls(**payload)
 
     def validate(self) -> None:
         if self.rollouts_per_prompt < 2:

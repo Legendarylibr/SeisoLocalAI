@@ -365,6 +365,20 @@ class TrainConfig(BaseModel):
     def from_yaml(cls, path: str | Path) -> TrainConfig:
         with open(path) as f:
             data = yaml.safe_load(f) or {}
+        if not isinstance(data, dict):
+            raise ValueError("training config must be a mapping")
+        # Accept slime / SingleGpuSlimeConfig field names so example YAMLs
+        # work with both `seiso train` and `seiso slime`.
+        aliases = {
+            "save_every_steps": "save_steps",
+            "log_every_steps": "logging_steps",
+            "use_lora": "slime_use_lora",
+        }
+        for src, dest in aliases.items():
+            if src in data and dest not in data:
+                data[dest] = data.pop(src)
+            elif src in data:
+                data.pop(src)
         return cls.model_validate(data)
 
     def to_single_gpu_slime_config(self):
@@ -503,10 +517,11 @@ def run_training(
     )
     if config.method == TrainMethod.SLIME:
         from seiso.slime.trainer import train_slime
+        from seiso.training.metrics import is_main_process
 
         slime_config = config.to_single_gpu_slime_config()
         out = train_slime(slime_config)
-        if _is_main_process():
+        if is_main_process():
             _write_slime_manifest(config, out)
         return out
     trainer = SeisoTrainer(config, on_metric=on_metric, on_log=on_log, job_id=job_id)
@@ -572,7 +587,3 @@ def _write_slime_manifest(config: TrainConfig, output_dir: Path) -> None:
         json.dumps(payload, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
-
-
-def _is_main_process() -> bool:
-    return int(os.environ.get("RANK", os.environ.get("LOCAL_RANK", "0")) or 0) == 0

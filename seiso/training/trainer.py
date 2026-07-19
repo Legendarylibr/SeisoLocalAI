@@ -280,8 +280,9 @@ class SeisoTrainer:
             else:
                 self._train_with_oom_recovery(trainer, rebuild_trainer=build_current_trainer)
 
-            is_main = int(os.environ.get("LOCAL_RANK", os.environ.get("RANK", "0"))) == 0
-            if not is_main:
+            from seiso.training.metrics import is_main_process
+
+            if not is_main_process():
                 logger.info("Non-main rank finished training (no checkpoint write)")
                 return cfg.output_dir
 

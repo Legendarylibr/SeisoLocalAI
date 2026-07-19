@@ -6,11 +6,10 @@ import hashlib
 import json
 import logging
 import re
-from pathlib import Path
 from typing import Any
 
 from seiso.training.config import DatasetFormat
-from seiso.training.datasets import detect_format, load_training_dataset
+from seiso.training.datasets import detect_format
 
 logger = logging.getLogger(__name__)
 
@@ -302,66 +301,3 @@ def preprocess_training_dataset(
         stats["resolved_format"] = resolved_fmt.value
 
     return final, stats, resolved_fmt
-
-
-def validate_training_dataset(
-    dataset: str | Path,
-    *,
-    dataset_format: DatasetFormat = DatasetFormat.AUTO,
-    sandbox_root: Path | None = None,
-    max_check_samples: int | None = 4096,
-) -> dict[str, Any]:
-    """Preflight validation: ensure the dataset can be normalized into trainable examples.
-
-    Loads the dataset (or a prefix for very large ones), runs full preprocessing/normalization,
-    and raises a clear error if zero usable samples result.
-
-    This allows showing errors *before* starting heavy model download or training.
-
-    Returns a summary dict on success.
-    """
-    raw = load_training_dataset(str(dataset), sandbox_root=sandbox_root)
-    initial = len(raw)
-
-    if max_check_samples is not None and initial > max_check_samples > 0:
-        raw = raw.select(range(max_check_samples))
-        logger.info(
-            "Dataset validation: sampling first %d rows out of %d for preflight check",
-            max_check_samples,
-            initial,
-        )
-
-    if initial == 0 or len(raw) == 0:
-        raise ValueError("Dataset contains no rows")
-
-    try:
-        _, stats, resolved_fmt = preprocess_training_dataset(
-            raw,
-            dataset_format=dataset_format,
-            deduplicate=True,
-            min_chars=1,
-        )
-    except Exception as e:
-        # normalize the message
-        raise ValueError(str(e)) from e
-
-    if stats["kept"] == 0:
-        raise ValueError(
-            f"No valid training samples after preprocessing "
-            f"({stats['removed_invalid']} invalid/empty rows, "
-            f"{stats['removed_duplicate']} duplicates removed). "
-            f"Detected format: {resolved_fmt.value}. "
-            "Ensure the dataset contains chat messages with assistant turns, "
-            "instruction/output pairs, or plain text. "
-            "Check a few rows match the expected schema."
-        )
-
-    return {
-        "initial_samples": stats["initial_samples"],
-        "kept": stats["kept"],
-        "resolved_format": resolved_fmt.value,
-        "removed_invalid": stats["removed_invalid"],
-        "removed_duplicate": stats["removed_duplicate"],
-        "sampled_for_validation": max_check_samples is not None
-        and stats["initial_samples"] < initial,
-    }

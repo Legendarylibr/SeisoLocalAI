@@ -1,6 +1,9 @@
 # Single-GPU slime-style GRPO (mirrors THUDM/slime colocate path with HF generate).
 # Batch units match slime: rollout_batch_size = prompts, rollouts_per_prompt = n samples.
 model_id: Qwen/Qwen2.5-0.5B-Instruct
+method: slime
+# slime path uses full-precision (+ optional LoRA); quant ignored by slime runner
+quant: none
 # Placeholder; data_gen materializes a slime-format corpus under output_dir.
 dataset: data/slime_sample.jsonl
 output_dir: outputs/slime-single-gpu
