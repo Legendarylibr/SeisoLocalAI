@@ -32,15 +32,6 @@ def is_gguf_only_repo_id(
     )
 
 
-def trainable_weight_files(root: Path) -> list[Path]:
-    """Return weight files under *root* that transformers can load for training."""
-    path = root.expanduser()
-    if path.is_file():
-        return [path] if path.suffix.lower() in _TRAINABLE_WEIGHT_SUFFIXES else []
-
-    return list(iter_matching_files(path, suffixes=_TRAINABLE_WEIGHT_SUFFIXES))
-
-
 def snapshot_has_trainable_weights(root: Path) -> bool:
     """True when *root* contains at least one safetensors/bin weight file."""
     path = root.expanduser()

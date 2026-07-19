@@ -1,21 +1,8 @@
-"""Training device map and dataset helpers."""
+"""Training device map helpers."""
 
 from __future__ import annotations
 
 import os
-from pathlib import Path
-
-from seiso.memory.protection.constants import _MAX_JSONL_LOAD_MB
-
-
-def jsonl_load_safe(path: Path) -> bool:
-    """True when JSONL should use the datasets mmap loader.
-
-    Always prefers mmap for local files (``load_training_dataset`` no longer
-    size-gates). Kept for API compatibility with older call sites and tests.
-    """
-    _ = path, _MAX_JSONL_LOAD_MB
-    return True
 
 
 def resolve_training_device_map(

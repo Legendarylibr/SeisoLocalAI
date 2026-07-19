@@ -497,10 +497,10 @@ def sidecar_max_tokens(max_tokens: int) -> int:
 
 
 def ollama_think_max_tokens(content_max_tokens: int) -> int:
-    """Back-compat wrapper — unified policy lives in ``seiso.chat.thinking``."""
-    from seiso.chat.thinking import thinking_max_tokens
+    """Back-compat — single policy in ``seiso.chat.thinking``."""
+    from seiso.chat.thinking import ollama_think_max_tokens as _policy
 
-    return thinking_max_tokens(content_max_tokens, task="general")
+    return _policy(content_max_tokens)
 
 
 def _sidecar_context_ceiling(payload: dict[str, Any], model_path: str) -> int:

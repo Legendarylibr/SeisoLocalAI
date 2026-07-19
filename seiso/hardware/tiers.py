@@ -153,11 +153,6 @@ def performance_headroom_mb(profile: dict[str, Any]) -> int:
     return vram_headroom_mb(profile)
 
 
-def ui_headroom_mb(profile: dict[str, Any]) -> int:
-    """Alias for performance_headroom_mb (Forge UI + platform tuning)."""
-    return performance_headroom_mb(profile)
-
-
 def memory_headroom_label(profile: dict[str, Any]) -> str:
     """Human label for free memory (RAM on Apple/CPU, VRAM on discrete GPU)."""
     tier = classify_tier(profile)

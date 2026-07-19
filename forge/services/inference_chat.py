@@ -418,37 +418,6 @@ async def resolve_preload_context(
     }
 
 
-async def resolve_inventory_model_path(
-    db: Database,
-    user_id: str,
-    settings: ForgeSettings,
-    *,
-    model_id: str,
-    model_path: str | None,
-    inference_backend: str,
-    model_router_enabled: bool,
-    max_tokens: int | None = None,
-    n_ctx: int | None = None,
-    messages: list[dict[str, Any]] | None = None,
-    sanitize: bool = False,
-) -> dict[str, Any]:
-    """Resolve model_id to payload fields (path, backend, router flags)."""
-    return await prepare_local_chat_target(
-        db,
-        user_id,
-        settings,
-        model_id=model_id,
-        model_path=model_path,
-        inference_backend=inference_backend,
-        model_router_enabled=model_router_enabled,
-        max_tokens=max_tokens,
-        n_ctx=n_ctx,
-        messages=messages,
-        check_memory=True,
-        sanitize=sanitize,
-    )
-
-
 async def resolve_explicit_model_path(
     db: Database,
     user_id: str,

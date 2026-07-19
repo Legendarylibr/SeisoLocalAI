@@ -329,7 +329,3 @@ def run_bench_inference(**kwargs: Any) -> InferenceBenchResult:
 
 def run_compare_inference_profiles(**kwargs: Any) -> dict[str, Any]:
     return asyncio.run(compare_inference_profiles(**kwargs))
-
-
-def run_benchmark_kv_scenarios(**kwargs: Any) -> dict[str, dict[str, Any]]:
-    return asyncio.run(benchmark_kv_scenarios(**kwargs))

@@ -59,11 +59,6 @@ def model_suggests_vision(model_path: str | Path) -> bool:
     return any(token in arch for token in ("vision", "clip", "mmproj", "vl"))
 
 
-def gguf_filename_suggests_vision(filename: str | None) -> bool:
-    """True when a GGUF filename or repo id likely denotes a vision chat model."""
-    return _name_suggests_vision(filename or "")
-
-
 def repo_likely_needs_mmproj(
     catalog_repo_id: str,
     *,

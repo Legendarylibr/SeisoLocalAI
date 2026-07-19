@@ -385,20 +385,6 @@ def apply_thinking_policy(payload: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
-def reasoning_quality_system_suffix(*, thinking_enabled: bool) -> str:
-    """Short system addendum for better final-answer quality."""
-    if thinking_enabled:
-        return (
-            "Keep any internal reasoning brief and focused. "
-            "Always finish with a complete, high-quality visible answer; "
-            "do not let planning consume the whole reply."
-        )
-    return (
-        "Answer directly with a complete, high-quality response. "
-        "Avoid long hidden planning; put substance in the visible answer."
-    )
-
-
 @dataclass
 class ThinkingStreamGuard:
     """Backend-agnostic mid-stream thinking budget enforcer.
