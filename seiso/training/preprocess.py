@@ -131,7 +131,7 @@ def normalize_sample(
             or sample.get("chosen_response")
             or sample.get("accepted")
         )
-        messages = parse_human_assistant_dialog(chosen)
+        messages: list[dict[str, str]] = parse_human_assistant_dialog(chosen)
         if not messages:
             prompt = _strip_text(sample.get("prompt"))
             response = _strip_text(
@@ -152,7 +152,7 @@ def normalize_sample(
         return {"messages": messages}
 
     if fmt == DatasetFormat.CHAT or "messages" in sample:
-        messages: list[dict[str, str]] = []
+        messages = []
         for turn in sample.get("messages") or []:
             content = _strip_text(turn.get("content"))
             if not content:
