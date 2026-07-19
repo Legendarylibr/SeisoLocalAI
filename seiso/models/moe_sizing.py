@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 _PARAM_RE = re.compile(r"(?<![a-z])(\d+(?:\.\d+)?)\s*b", re.I)
@@ -189,10 +188,3 @@ def sizing_from_reference(
         active_params_b=active,
         load_vram_mb=load_vram_mb,
     )
-
-
-def sizing_for_local_file(path: str | Path) -> MoESizing:
-    """Use exact file bytes for resident load sizing."""
-    file_path = Path(path).expanduser()
-    size_bytes = file_path.stat().st_size if file_path.is_file() else 0
-    return sizing_from_reference(str(path), size_bytes=size_bytes)

@@ -45,24 +45,6 @@ def _gpu_resource_token(*, task: str, job_id: str | None = None, user_id: str | 
     return f"{task}:{user_id or 'global'}:{uuid.uuid4().hex}"
 
 
-def _register_gpu_task(
-    *,
-    task: str,
-    job_id: str | None = None,
-    user_id: str | None = None,
-    gpu_resource_lock_held: bool = False,
-) -> str:
-    token = _gpu_resource_token(task=task, job_id=job_id, user_id=user_id)
-    with _GPU_TASK_LOCK:
-        _ACTIVE_GPU_TASKS[token] = {
-            "task": task,
-            "job_id": str(job_id) if job_id else None,
-            "user_id": str(user_id) if user_id else None,
-            _GPU_RESOURCE_LOCK_HELD: "1" if gpu_resource_lock_held else None,
-        }
-    return token
-
-
 def _register_gpu_task_if_available(
     *,
     task: str,

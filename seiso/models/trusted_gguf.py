@@ -6,10 +6,6 @@ import re
 from typing import Any
 
 
-def gguf_repo_owner(repo_id: str) -> str:
-    return repo_id.split("/", 1)[0]
-
-
 def is_supported_gguf_repo_candidate(repo_id: str) -> bool:
     repo = repo_id.strip()
     return bool(repo) and "/" in repo
@@ -33,11 +29,6 @@ def is_trusted_gguf_repo(
     """Return True for any valid Hugging Face model repo id."""
     del base_repo_id, allow_catalog_mirrors
     return is_supported_gguf_repo_candidate(repo_id)
-
-
-def gguf_repo_trust_rank(repo_id: str, *, base_repo_id: str | None = None) -> int:
-    del base_repo_id
-    return 0 if is_supported_gguf_repo_candidate(repo_id) else -1
 
 
 def rank_trusted_gguf_repos(
