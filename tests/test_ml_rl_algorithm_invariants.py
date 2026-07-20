@@ -13,8 +13,7 @@ from seiso.slime.policy import (
     _kl_k3_from_log_ratio,
 )
 from seiso.slime.types import Rollout
-from seiso.training.config import DatasetFormat, TrainConfig, TrainMethod
-from seiso.training.datasets import should_disable_packing_for_response_mask
+from seiso.training.config import TrainConfig, TrainMethod
 
 
 def test_kl_k3_non_negative_and_zero_at_identity():
@@ -182,13 +181,17 @@ def test_train_config_rejects_packing_with_response_mask_chat(tmp_path):
         )
 
 
-def test_packing_disabled_helper_for_chat_response_mask():
-    assert should_disable_packing_for_response_mask(
-        True, True, DatasetFormat.CHAT
+def test_train_config_allows_packing_with_response_mask_on_text(tmp_path):
+    cfg = TrainConfig.model_validate(
+        {
+            "model_id": "test/model",
+            "dataset": tmp_path / "text.jsonl",
+            "dataset_format": "text",
+            "packing": True,
+            "train_on_responses_only": True,
+        }
     )
-    assert not should_disable_packing_for_response_mask(
-        True, True, DatasetFormat.TEXT
-    )
+    assert cfg.packing is True
 
 
 def test_train_config_slime_projection_defaults_per_token(tmp_path):
