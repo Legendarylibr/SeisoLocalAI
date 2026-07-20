@@ -91,7 +91,8 @@ class SingleGpuSlimeConfig:
     clip_ratio_high: float | None = None
     # slime: grpo_std_normalization (mean-center then / unbiased std)
     grpo_std_normalization: bool = True
-    calculate_per_token_loss: bool = False
+    # Per-token importance ratios are length-stable vs exp(ΣΔlogπ) on full sequences.
+    calculate_per_token_loss: bool = True
     temperature: float = 0.9
     top_p: float = 0.95
     # Online generate: hf (colocated, default) | sglang | vllm | auto
@@ -252,12 +253,21 @@ class SingleGpuSlimeConfig:
             )
         if not self.thinking_instruction:
             raise ValueError("thinking_instruction must not be empty")
-        if self.outcome_reward_weight < 0:
-            raise ValueError("outcome_reward_weight must be non-negative")
+        if self.outcome_reward_weight <= 0:
+            raise ValueError(
+                "outcome_reward_weight must be > 0 for meaningful GRPO "
+                "(verifiable outcome signal required)"
+            )
         if self.format_reward_weight < 0:
             raise ValueError("format_reward_weight must be non-negative")
         if self.process_reward_weight < 0:
             raise ValueError("process_reward_weight must be non-negative")
+        shaping = self.format_reward_weight + self.process_reward_weight
+        if shaping > self.outcome_reward_weight:
+            raise ValueError(
+                "format_reward_weight + process_reward_weight must not exceed "
+                "outcome_reward_weight (outcome must dominate for meaningful GRPO)"
+            )
         if self.missing_thinking_penalty < 0:
             raise ValueError("missing_thinking_penalty must be non-negative")
         if self.min_thinking_tokens < 0:

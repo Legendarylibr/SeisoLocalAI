@@ -24,12 +24,22 @@ start
 7. Click **Start training** — logs stream over SSE in real time
 8. Checkpoints appear under `{SEISO_DATA_DIR}/checkpoints/{user_id}/{job_id}/`
 
+### Which algorithm for which data
+
+| Data / signal | Use | Avoid |
+|---------------|-----|--------|
+| Chat / alpaca / sharegpt / text | SFT (`method: lora` / `full`) with `train_on_responses_only` for chat-style rows | Packing + response-only together on chat formats |
+| Verifiable prompts (numeric / choice / code tests) | `method: slime` (GRPO) with outcome rewards | Format-only shaping; `dynamic_sampling_filter: none` for real runs |
+| Preference pairs (`chosen` / `rejected`) | Distill-RL / DPO (`seiso distill-rl`) | Training Studio SFT unless `preference_as_sft: true` (chosen-only; not DPO) |
+
+See [Algorithms & Meaningful Objectives](../ANALYSIS.md#algorithms--meaningful-objectives) in the project analysis for loss identities and defaults.
+
 ### Dataset analysis (Training Studio)
 
 When you select a dataset, Forge calls `POST /api/training/analyze-dataset`. The report includes:
 
 - Detected **format** (`auto`, `chat`, `alpaca`, `sharegpt`, `preference`, `text`)
-- **Domain** label (instruction tuning, Q&A, conversational, code corpus, plain text, …)
+- **Domain** label (instruction tuning, Q&A, conversational, preference pairs → DPO, code corpus, plain text, …)
 - Row retention after normalization and deduplication
 - Suggested `max_seq_length`, `epochs`, `warmup_ratio`, and response-only loss
 - Preview of normalized rows
@@ -113,6 +123,7 @@ save_steps: 50
 | `model_id` | Hugging Face model ID or local safetensors path |
 | `dataset` | Hub ID, JSONL/JSON path, or directory |
 | `dataset_format` | `auto`, `chat`, `alpaca`, `sharegpt`, `preference`, or `text` |
+| `preference_as_sft` | Opt-in chosen-only SFT for preference rows (default `false` refuses — use Distill-RL/DPO for real alignment) |
 | `method` | `lora`, `full`, `embedding`, or `slime` |
 | `quant` | `4bit`, `8bit`, `16bit`, or `none` |
 | `preprocess_dataset` | Normalize and clean rows before training |
@@ -298,7 +309,7 @@ Important fields:
 | `process_reward_weight` | Experimental lexical process score; keep `0` for verifiable outcome-first RL |
 | `missing_thinking_penalty` | Penalty when format is required but the model omits a closed think block |
 | `min_thinking_tokens` | Only used when `process_reward_weight > 0` |
-| `kl_coef` | Coefficient on KL to a frozen reference model; `0` skips loading the ref (lower VRAM). Prefer `0.01`–`0.05` for longer post-training runs |
+| `kl_coef` | Coefficient on non-negative KL (Schulman k3) to a frozen reference; `0` skips loading the ref (lower VRAM). Prefer `0.02`–`0.05` for multi-epoch runs (signed k1 is logged as `kl_k1` only) |
 | `rollouts_per_prompt` | slime `--n-samples-per-prompt` |
 | `rollout_batch_size` | slime `--rollout-batch-size` (**prompts**, not sequences) |
 | `train_batch_size` | Target prompts after dynamic filter; `null` → same as `rollout_batch_size` |
@@ -309,7 +320,9 @@ Important fields:
 | `dynamic_sampling_filter` | slime-style nonzero-std filter on **outcome** reward |
 | `clip_ratio` / `clip_ratio_high` | slime `eps_clip` / `eps_clip_high` |
 | `grpo_std_normalization` | slime group mean/std advantages |
-| `calculate_per_token_loss` | slime per-token vs per-sample loss |
+| `calculate_per_token_loss` | Default `true` — per-token clipped surrogate (length-stable). When `false`, sequence log-probs are length-normalized before the importance ratio |
+| `outcome_reward_weight` / `format_reward_weight` / `process_reward_weight` | Outcome must dominate (`format + process ≤ outcome`); process stays `0` for verifiable outcome-first GRPO |
+| `group_nonzero_outcome_spread_frac` | Metric: fraction of groups with nonzero outcome spread — near `0` means vacuous GRPO |
 | `balance_data` | Distributed prompt-length balancing |
 | `policy_micro_batch_size` | Policy update microbatch size to control VRAM |
 | `shuffle_buffer_size` | Bounded CPU shuffle buffer for long datasets |

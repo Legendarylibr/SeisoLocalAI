@@ -10,6 +10,20 @@ from seiso.slime.config import SingleGpuSlimeConfig
 from seiso.slime.types import Rollout
 
 
+def _kl_k3_from_log_ratio(log_ratio, torch, *, mask=None):
+    """Schulman k3 estimator: ``exp(δ) - δ - 1`` (non-negative).
+
+    ``δ = log π − log π_ref``. Unlike the signed k1 mean of ``δ``, k3 cannot
+    reward divergence when used as a penalty term.
+    """
+    clamped = log_ratio.clamp(-20.0, 20.0)
+    k3 = torch.exp(clamped) - clamped - 1.0
+    if mask is None:
+        return k3.mean()
+    weight = mask.sum().clamp_min(1.0)
+    return (k3 * mask).sum() / weight
+
+
 def _policy_loss(
     model,
     rollouts: list[Rollout],
@@ -43,9 +57,12 @@ def _policy_loss(
             clip_ratio_high=config.clip_ratio_high,
         )
     else:
+        # Length-normalize sequence log-probs before the importance ratio so
+        # variable response lengths do not dominate exp(ΣΔlogπ).
+        lengths = response_token_counts.clamp_min(1.0)
         policy_loss = _clipped_policy_loss(
-            new_logprobs,
-            old_logprobs,
+            new_logprobs / lengths,
+            old_logprobs / lengths,
             advantages,
             torch.ones_like(new_logprobs),
             config.clip_ratio,
@@ -54,6 +71,7 @@ def _policy_loss(
         )
 
     kl_loss = torch.zeros((), device=config.device)
+    kl_k1 = torch.zeros((), device=config.device)
     if config.kl_coef > 0 and rollouts[0].ref_logprobs is not None:
         if config.calculate_per_token_loss:
             ref_token_logprobs = _pad_rollout_token_logprobs(
@@ -63,15 +81,17 @@ def _policy_loss(
                 config.device,
                 torch,
             )
-            kl_loss = ((new_token_logprobs - ref_token_logprobs) * response_mask).sum()
-            kl_loss = kl_loss / response_mask.sum().clamp_min(1.0)
+            log_ratio = new_token_logprobs - ref_token_logprobs
+            kl_k1 = (log_ratio * response_mask).sum() / response_mask.sum().clamp_min(1.0)
+            kl_loss = _kl_k3_from_log_ratio(log_ratio, torch, mask=response_mask)
         else:
-            # Sequence log-probs are sums (not means). Normalize by response
-            # length so KL does not grow with generation length and fight long
-            # correct traces when calculate_per_token_loss is False.
+            # Sequence log-probs are sums. Normalize by response length so KL
+            # scale matches per-token practice when calculate_per_token_loss is False.
             ref_logprobs = torch.stack([r.ref_logprobs for r in rollouts]).to(config.device)
             lengths = response_token_counts.clamp_min(1.0)
-            kl_loss = ((new_logprobs - ref_logprobs) / lengths).mean()
+            log_ratio = (new_logprobs - ref_logprobs) / lengths
+            kl_k1 = log_ratio.mean()
+            kl_loss = _kl_k3_from_log_ratio(log_ratio, torch)
 
     rewards = [r.reward for r in rollouts]
     loss = policy_loss + config.kl_coef * kl_loss
@@ -80,6 +100,7 @@ def _policy_loss(
         "loss": float(loss.detach().cpu()),
         "policy_loss": float(policy_loss.detach().cpu()),
         "kl": float(kl_loss.detach().cpu()),
+        "kl_k1": float(kl_k1.detach().cpu()),
         "reward_mean": float(sum(rewards) / len(rewards)),
         "reward_max": float(max(rewards)),
         "outcome_reward_mean": _mean(r.outcome_reward for r in rollouts),
@@ -109,6 +130,7 @@ def _empty_stats() -> dict[str, float]:
         "loss": 0.0,
         "policy_loss": 0.0,
         "kl": 0.0,
+        "kl_k1": 0.0,
         "reward_mean": 0.0,
         "reward_max": float("-inf"),
         "outcome_reward_mean": 0.0,
@@ -142,6 +164,7 @@ def _merge_stats(
         "loss",
         "policy_loss",
         "kl",
+        "kl_k1",
         "reward_mean",
         "outcome_reward_mean",
         "format_reward_mean",
@@ -269,7 +292,17 @@ def _assign_grouped_advantages(
 
     For each prompt group: subtract the group mean, then optionally divide by
     unbiased sample std + 1e-6 (slime ``grpo_std_normalization`` / Dr.GRPO toggle).
+
+    Incomplete trailing groups are invalid (advantages would not be mean-zero over
+    a full sample set) and raise ``ValueError``.
     """
+    if group_size < 2:
+        raise ValueError("group_size must be at least 2 for GRPO advantages")
+    if len(rollouts) % group_size != 0:
+        raise ValueError(
+            f"rollout count {len(rollouts)} is not divisible by group_size "
+            f"{group_size}; incomplete GRPO groups are invalid"
+        )
     for start in range(0, len(rollouts), group_size):
         group = rollouts[start : start + group_size]
         rewards = [float(r.reward) for r in group]

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from seiso.training.config import DatasetFormat
 from seiso.training.datasets import detect_format
 from seiso.training.preprocess import (
@@ -133,7 +135,20 @@ def test_normalize_preference_uses_chosen_turns():
     assert row["messages"][-1]["role"] == "assistant"
 
 
-def test_preprocess_preference_resolves_to_chat():
+def test_preprocess_preference_refuses_without_opt_in():
+    ds = _Rows(
+        [
+            {
+                "chosen": "\n\nHuman: Hi\n\nAssistant: Hello there.",
+                "rejected": "\n\nHuman: Hi\n\nAssistant: Go away.",
+            },
+        ]
+    )
+    with pytest.raises(ValueError, match="Preference datasets"):
+        preprocess_training_dataset(ds, dataset_format=DatasetFormat.AUTO)
+
+
+def test_preprocess_preference_resolves_to_chat_with_opt_in():
     ds = _Rows(
         [
             {
@@ -147,9 +162,12 @@ def test_preprocess_preference_resolves_to_chat():
         ]
     )
     cleaned, stats, fmt = preprocess_training_dataset(
-        ds, dataset_format=DatasetFormat.AUTO
+        ds,
+        dataset_format=DatasetFormat.AUTO,
+        preference_as_sft=True,
     )
     assert fmt == DatasetFormat.CHAT
     assert len(cleaned) == 2
     assert stats["kept"] == 2
+    assert stats["preference_as_sft"] is True
     assert "messages" in cleaned[0]

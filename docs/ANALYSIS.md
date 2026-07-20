@@ -198,6 +198,33 @@ All three changes are **correct and minimal**:
 
 ---
 
+## Algorithms & Meaningful Objectives
+
+Seiso maps learning **signals** to proper algorithms (not proxies that look related but train the wrong objective):
+
+| Signal | Proper algorithm | Path | Not meaningful |
+|--------|------------------|------|----------------|
+| Instruction / chat labels | Response-masked SFT (CE) | `method: lora/full` + TRL SFT | Full-sequence CE on chat; packing + response masks together |
+| Verifiable tasks (math/code/choice) | Online GRPO (group-relative advantages + PPO clip) | `method: slime` + `rl_verify` | Format/process-dominated rewards; zero-spread groups |
+| Preference pairs (chosen/rejected) | Offline DPO (Rafailov) | Distill-RL / `compute_dpo_loss` | Silent chosen-only SFT labeled “alignment” |
+| Quantization policy | PPO/VPG/AWR on discrete actions | `rl_quant` / `adaptive_quant` | Simulator-only metrics claimed as deploy quality |
+
+**SFT:** `preference_as_sft` defaults **false** — preference datasets refuse train unless explicitly opted in (chosen-only SFT; rejected discarded). Packing is incompatible with `train_on_responses_only` on chat-style formats (validator + runtime disable).
+
+**Slime GRPO math** ([`seiso/slime/policy.py`](../seiso/slime/policy.py)):
+- Advantages: group mean-center, optional unbiased std + `1e-6` (`grpo_std_normalization`); incomplete groups raise.
+- Policy: PPO clipped surrogate; default `calculate_per_token_loss=true` (length-stable). Sequence mode length-normalizes log-probs before `exp(Δ)`.
+- KL: Schulman **k3** `exp(δ)−δ−1` (non-negative) when `kl_coef > 0`; signed k1 logged as `kl_k1`. Default `kl_coef=0` saves VRAM — prefer `0.02`–`0.05` for multi-epoch.
+- Rewards: outcome must dominate (`outcome_reward_weight > format + process`); process weight default `0`. Dynamic sampling filters on **outcome** spread; watch `group_nonzero_outcome_spread_frac`.
+
+**DPO:** Rafailov β-sigmoid on sum completion log-probs (`average_log_prob=false` by default).
+
+**RL quant:** Research contract embeds `evidence_level`; simulator runs set `deploy_quality_claimable=false`.
+
+**Physics / numerics framing:** group advantages are zero-sum within a prompt; length normalization is scale invariance of the importance ratio; non-negative KL is a valid information penalty; VRAM guards are hard resource bounds (logged as-run when they rewrite batch/seq/quant).
+
+---
+
 ## Platform & Dependencies
 
 **Best experience**: Linux + NVIDIA (full kernels, QLoRA 4-bit, flash-attn opt, live RL/kernel benches).

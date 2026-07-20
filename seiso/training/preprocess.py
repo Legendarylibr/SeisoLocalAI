@@ -230,12 +230,25 @@ def preprocess_training_dataset(
     deduplicate: bool = True,
     min_chars: int = 1,
     num_proc: int | None = None,
+    preference_as_sft: bool = False,
 ) -> tuple[Any, dict[str, Any], DatasetFormat]:
-    """Normalize rows, drop invalid/empty samples, and optionally deduplicate."""
+    """Normalize rows, drop invalid/empty samples, and optionally deduplicate.
+
+    Preference (chosen/rejected) rows require ``preference_as_sft=True`` to continue
+    as chosen-only chat SFT. Otherwise raise — real preference learning is Distill-RL/DPO.
+    """
     initial = len(dataset)
     resolved_fmt = dataset_format
     if resolved_fmt == DatasetFormat.AUTO and initial > 0:
         resolved_fmt = detect_format(dataset[0])
+
+    if resolved_fmt == DatasetFormat.PREFERENCE and not preference_as_sft:
+        raise ValueError(
+            "Preference datasets (chosen/rejected) are not SFT alignment. "
+            "Use Distill-RL/DPO (`seiso distill-rl`) for real preference learning, "
+            "or set preference_as_sft=true to train supervised on chosen responses "
+            "only (rejected pairs are discarded)."
+        )
 
     stats: dict[str, Any] = {
         "initial_samples": initial,
@@ -243,6 +256,9 @@ def preprocess_training_dataset(
         "removed_invalid": 0,
         "removed_duplicate": 0,
         "kept": 0,
+        "preference_as_sft": bool(
+            preference_as_sft and resolved_fmt == DatasetFormat.PREFERENCE
+        ),
     }
 
     def transform(sample: dict[str, Any]) -> dict[str, Any]:
@@ -297,7 +313,9 @@ def preprocess_training_dataset(
         )
 
     if resolved_fmt == DatasetFormat.PREFERENCE:
+        # Explicit opt-in: chosen-only SFT (rejected discarded). Not DPO/ORPO.
         resolved_fmt = DatasetFormat.CHAT
         stats["resolved_format"] = resolved_fmt.value
+        stats["preference_as_sft"] = True
 
     return final, stats, resolved_fmt

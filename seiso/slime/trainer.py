@@ -11,6 +11,7 @@ import gc
 import importlib
 import itertools
 import json
+import logging
 import math
 import os
 import random
@@ -80,6 +81,8 @@ from seiso.slime.types import (  # noqa: F401
 )
 from seiso.training.metrics import METRIC_STDOUT_PREFIX
 
+logger = logging.getLogger(__name__)
+
 _GRADIENT_CHECKPOINTING_KWARGS = {"use_reentrant": False}
 
 
@@ -98,6 +101,18 @@ def train_slime(config: SingleGpuSlimeConfig) -> Path:
     """
 
     config.validate()
+    if config.kl_coef == 0.0 and config.epochs > 1:
+        logger.warning(
+            "kl_coef=0 with epochs=%s skips the frozen reference KL term (VRAM-saving). "
+            "For multi-epoch GRPO prefer kl_coef in [0.02, 0.05] to limit policy drift.",
+            config.epochs,
+        )
+    if config.dynamic_sampling_filter == "none":
+        logger.warning(
+            "dynamic_sampling_filter=none keeps zero-spread groups; GRPO advantages "
+            "are then vacuous. Prefer reward_nonzero_std / outcome_nonzero_std and "
+            "monitor group_nonzero_outcome_spread_frac."
+        )
 
     import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer

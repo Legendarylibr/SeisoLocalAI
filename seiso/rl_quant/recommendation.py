@@ -18,8 +18,37 @@ _BIT_TO_SEISO = {
 }
 
 
+def recommendation_evidence(recommendation: dict[str, Any]) -> dict[str, Any]:
+    """Evidence / claim-boundary labels for an RL-quant recommendation payload."""
+    evidence = recommendation.get("evidence_level")
+    if not isinstance(evidence, str) or not evidence:
+        research = recommendation.get("research")
+        if isinstance(research, dict):
+            evidence = research.get("evidence_level")
+    if not isinstance(evidence, str) or not evidence:
+        evidence = "unknown"
+    claimable = recommendation.get("deploy_quality_claimable")
+    if claimable is None:
+        claimable = evidence not in {"simulator", "unknown"}
+    note = recommendation.get("deploy_quality_note")
+    if not note and evidence == "simulator":
+        note = (
+            "Simulator evidence only — not deploy-grounded without llama_cpp / "
+            "external quality sidecar."
+        )
+    return {
+        "evidence_level": evidence,
+        "deploy_quality_claimable": bool(claimable),
+        "deploy_quality_note": note,
+    }
+
+
 def recommendation_to_gguf_quants(recommendation: dict[str, Any]) -> list[str]:
-    """Extract Seiso gguf_quantizations list from an RL recommendation payload."""
+    """Extract Seiso gguf_quantizations list from an RL recommendation payload.
+
+    Quant labels are always returned for export wiring; callers must consult
+    ``recommendation_evidence`` before treating them as deploy quality.
+    """
     if not recommendation:
         return ["q4_k_m"]
 
