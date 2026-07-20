@@ -478,7 +478,7 @@ Training stack: **TRL `SFTTrainer`** + **PEFT** (LoRA/QLoRA) + optional **fused 
 - **Tool calling:** web search, sandboxed code execution, artifact writes (opt-in)
 - **Providers:** OpenAI, Anthropic, vLLM with SSRF hardening
 
-#### External Smart Router
+#### External Smart Router (Just to keep open source after removing it, no longer intend on serving inference). Feel free to use other external routers
 
 Run [SeisoModelRouter](https://github.com/Legendarylibr/SeisoModelRouter) or a compatible local router service separately, then enable it in Forge (`.env` or environment) so Chat shows **Smart Router (auto-route)**:
 
