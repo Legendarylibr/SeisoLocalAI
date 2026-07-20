@@ -71,6 +71,17 @@ def detect_format(sample: dict) -> DatasetFormat:
     return DatasetFormat.TEXT
 
 
+def should_disable_packing_for_response_mask(
+    packing: bool,
+    train_on_responses_only: bool,
+    fmt: DatasetFormat,
+) -> bool:
+    """Packing is for large text corpora; response-only chat needs Seiso masks."""
+    return bool(
+        packing and train_on_responses_only and fmt != DatasetFormat.TEXT
+    )
+
+
 def format_sample(sample: dict, fmt: DatasetFormat, tokenizer) -> str:
     """Format a single sample into training text using chat template when available."""
     if fmt == DatasetFormat.TEXT:
@@ -106,13 +117,20 @@ def _tokenizer_supports_assistant_mask(tokenizer) -> bool:
         return False
 
 
-def _chat_template_token_ids(
+def _eos_token_id(tokenizer) -> int | None:
+    eos_id = getattr(tokenizer, "eos_token_id", None)
+    if isinstance(eos_id, int) and eos_id >= 0:
+        return eos_id
+    return None
+
+
+def _encode_chat_ids(
     tokenizer,
     messages: list[dict[str, Any]],
     *,
     add_generation_prompt: bool,
-    max_length: int,
 ) -> list[int] | None:
+    """Tokenize messages via chat template only (no max-length clip)."""
     apply = getattr(tokenizer, "apply_chat_template", None)
     if apply is None:
         return None
@@ -138,59 +156,273 @@ def _chat_template_token_ids(
         return None
     if isinstance(ids[0], list):
         ids = ids[0]
-    return ids[:max_length]
+    return list(ids)
 
 
-def _tokenize_with_assistant_mask(
-    rows: list[dict[str, Any]],
+def _labels_from_assistant_mask(
+    ids: list[int], mask: list[Any]
+) -> list[int] | None:
+    if not ids or mask is None:
+        return None
+    mask_list = list(mask)[: len(ids)]
+    if len(mask_list) < len(ids):
+        mask_list = mask_list + [0] * (len(ids) - len(mask_list))
+    labels = [tok if m else -100 for tok, m in zip(ids, mask_list, strict=False)]
+    if all(label == -100 for label in labels):
+        return None
+    return labels
+
+
+def _labels_from_assistant_spans(
+    tokenizer,
+    messages: list[dict[str, Any]],
+    full_ids: list[int],
+) -> list[int] | None:
+    """Unmask every assistant turn using template-tokenized turn boundaries."""
+    labels = [-100] * len(full_ids)
+    found = False
+    for i, msg in enumerate(messages):
+        if msg.get("role") != "assistant":
+            continue
+        prefix_ids = _encode_chat_ids(
+            tokenizer, messages[:i], add_generation_prompt=True
+        )
+        with_asst = _encode_chat_ids(
+            tokenizer, messages[: i + 1], add_generation_prompt=False
+        )
+        if prefix_ids is None or with_asst is None:
+            logger.debug(
+                "Assistant span encode failed at turn %d; trying last-turn fallback",
+                i,
+            )
+            return None
+        start, end = len(prefix_ids), len(with_asst)
+        if start > end or end > len(full_ids):
+            logger.debug(
+                "Assistant span out of range at turn %d (start=%d end=%d full=%d)",
+                i,
+                start,
+                end,
+                len(full_ids),
+            )
+            return None
+        # Prefix of with_asst must match full conversation encoding.
+        if with_asst != full_ids[:end]:
+            logger.debug(
+                "Assistant span not prefix-consistent at turn %d; last-turn fallback",
+                i,
+            )
+            return None
+        for j in range(start, end):
+            labels[j] = full_ids[j]
+        found = True
+    if not found or all(label == -100 for label in labels):
+        return None
+    return labels
+
+
+def _labels_last_assistant_turn(
+    tokenizer,
+    messages: list[dict[str, Any]],
+    full_ids: list[int],
+) -> list[int] | None:
+    """Fallback: supervise only the final assistant turn via template lengths."""
+    if not messages or messages[-1].get("role") != "assistant":
+        return None
+    prompt_ids = _encode_chat_ids(
+        tokenizer, messages[:-1], add_generation_prompt=True
+    )
+    if prompt_ids is None:
+        return None
+    labels = _build_labels(full_ids, len(prompt_ids))
+    if all(label == -100 for label in labels):
+        return None
+    return labels
+
+
+def _truncate_keep_end(
+    ids: list[int],
+    labels: list[int],
+    attention: list[int],
+    max_len: int,
+) -> tuple[list[int], list[int], list[int]]:
+    if max_len <= 0 or len(ids) <= max_len:
+        return ids, labels, attention
+    return ids[-max_len:], labels[-max_len:], attention[-max_len:]
+
+
+def _truncate_keep_start(
+    ids: list[int],
+    labels: list[int],
+    attention: list[int],
+    max_len: int,
+) -> tuple[list[int], list[int], list[int]]:
+    if max_len <= 0 or len(ids) <= max_len:
+        return ids, labels, attention
+    return ids[:max_len], labels[:max_len], attention[:max_len]
+
+
+def _ensure_eos(
+    ids: list[int],
+    labels: list[int],
+    attention: list[int],
+    eos_id: int | None,
+    *,
+    max_len: int,
+) -> tuple[list[int], list[int], list[int]]:
+    if eos_id is None or not ids:
+        return ids, labels, attention
+    if ids[-1] == eos_id:
+        return ids, labels, attention
+    if len(ids) < max_len:
+        ids = ids + [eos_id]
+        # Supervise EOS when the prior token was supervised; else still teach stop.
+        labels = labels + [eos_id]
+        attention = attention + [1]
+        return ids, labels, attention
+    # At budget: replace last token with EOS and supervise it.
+    ids = list(ids)
+    labels = list(labels)
+    attention = list(attention)
+    ids[-1] = eos_id
+    labels[-1] = eos_id
+    attention[-1] = 1
+    return ids, labels, attention
+
+
+def _encode_with_assistant_mask_api(
+    tokenizer, messages: list[dict[str, Any]]
+) -> tuple[list[int], list[int]] | None:
+    apply = getattr(tokenizer, "apply_chat_template", None)
+    if apply is None or not _tokenizer_supports_assistant_mask(tokenizer):
+        return None
+    try:
+        encoded = apply(
+            messages,
+            tokenize=True,
+            add_generation_prompt=False,
+            return_dict=True,
+            return_assistant_tokens_mask=True,
+        )
+    except Exception:
+        return None
+    ids = encoded.get("input_ids")
+    mask = encoded.get("assistant_masks") or encoded.get("assistant_mask")
+    if ids is None or mask is None:
+        return None
+    if isinstance(ids[0], list):
+        ids = ids[0]
+        mask = mask[0]
+    ids_list = list(ids)
+    labels = _labels_from_assistant_mask(ids_list, list(mask))
+    if labels is None:
+        return None
+    return ids_list, labels
+
+
+def _tokenize_string_row(
+    text: str,
+    tokenizer,
+    max_seq_length: int,
+    *,
+    keep_end: bool,
+) -> dict[str, list[int]]:
+    # Avoid dual truncation args; clip ourselves for keep_end vs keep_start.
+    encoded = tokenizer(text, truncation=False, padding=False)
+    ids = list(encoded["input_ids"])
+    attention = list(encoded.get("attention_mask") or [1] * len(ids))
+    labels = list(ids)
+    if keep_end:
+        ids, labels, attention = _truncate_keep_end(
+            ids, labels, attention, max_seq_length
+        )
+    else:
+        ids, labels, attention = _truncate_keep_start(
+            ids, labels, attention, max_seq_length
+        )
+    ids, labels, attention = _ensure_eos(
+        ids, labels, attention, _eos_token_id(tokenizer), max_len=max_seq_length
+    )
+    return {
+        "input_ids": ids,
+        "attention_mask": attention,
+        "labels": labels,
+    }
+
+
+def _tokenize_chat_row(
+    sample: dict[str, Any],
     fmt: DatasetFormat,
     tokenizer,
     max_seq_length: int,
-) -> dict[str, list[Any]] | None:
-    """Single chat-template pass with assistant token masks when the tokenizer supports it."""
-    input_ids_batch: list[list[int]] = []
-    attention_batch: list[list[int]] = []
-    labels_batch: list[list[int]] = []
-    apply = tokenizer.apply_chat_template
+    *,
+    mask_assistant_only: bool,
+) -> dict[str, list[int]]:
+    """Encode one chat/alpaca/sharegpt/preference row via chat template when possible."""
+    messages = extract_messages(sample, fmt)
+    eos_id = _eos_token_id(tokenizer)
 
-    for sample in rows:
-        messages = extract_messages(sample, fmt)
-        if not messages or messages[-1].get("role") != "assistant":
-            return None
-        try:
-            encoded = apply(
-                messages,
-                tokenize=True,
-                add_generation_prompt=False,
-                return_dict=True,
-                return_assistant_tokens_mask=True,
+    if not messages:
+        text = format_sample(sample, fmt, tokenizer)
+        return _tokenize_string_row(
+            text, tokenizer, max_seq_length, keep_end=mask_assistant_only
+        )
+
+    # Prefer a single template encode for input_ids.
+    full_ids: list[int] | None = None
+    labels: list[int] | None = None
+
+    if mask_assistant_only:
+        masked = _encode_with_assistant_mask_api(tokenizer, messages)
+        if masked is not None:
+            full_ids, labels = masked
+        if full_ids is None:
+            full_ids = _encode_chat_ids(
+                tokenizer, messages, add_generation_prompt=False
             )
-        except Exception:
-            return None
-        ids = encoded.get("input_ids")
-        mask = encoded.get("assistant_masks") or encoded.get("assistant_mask")
-        if ids is None or mask is None:
-            return None
-        if isinstance(ids[0], list):
-            ids = ids[0]
-            mask = mask[0]
-        ids = list(ids)[:max_seq_length]
-        mask = list(mask)[: len(ids)]
-        if len(mask) < len(ids):
-            mask = mask + [0] * (len(ids) - len(mask))
-        labels = [tok if m else -100 for tok, m in zip(ids, mask, strict=False)]
-        # Truncation can leave only prompt tokens; fall back if no assistant labels remain.
-        if all(label == -100 for label in labels):
-            return None
-        input_ids_batch.append(ids)
-        attention_batch.append([1] * len(ids))
-        labels_batch.append(labels)
+        if full_ids is not None and labels is None:
+            labels = _labels_from_assistant_spans(tokenizer, messages, full_ids)
+        if full_ids is not None and labels is None:
+            labels = _labels_last_assistant_turn(tokenizer, messages, full_ids)
+    else:
+        full_ids = _encode_chat_ids(tokenizer, messages, add_generation_prompt=False)
+        if full_ids is not None:
+            labels = list(full_ids)
 
+    if full_ids is None or labels is None:
+        # No chat template (or encode failure): string path.
+        text = format_sample(sample, fmt, tokenizer)
+        return _tokenize_string_row(
+            text, tokenizer, max_seq_length, keep_end=mask_assistant_only
+        )
+
+    attention = [1] * len(full_ids)
+    if mask_assistant_only:
+        full_ids, labels, attention = _truncate_keep_end(
+            full_ids, labels, attention, max_seq_length
+        )
+    else:
+        full_ids, labels, attention = _truncate_keep_start(
+            full_ids, labels, attention, max_seq_length
+        )
+
+    full_ids, labels, attention = _ensure_eos(
+        full_ids, labels, attention, eos_id, max_len=max_seq_length
+    )
     return {
-        "input_ids": input_ids_batch,
-        "attention_mask": attention_batch,
-        "labels": labels_batch,
+        "input_ids": full_ids,
+        "attention_mask": attention,
+        "labels": labels,
     }
+
+
+def _tokenize_text_row(
+    sample: dict[str, Any],
+    tokenizer,
+    max_seq_length: int,
+) -> dict[str, list[int]]:
+    text = sample.get("text") or sample.get("content") or str(sample)
+    return _tokenize_string_row(text, tokenizer, max_seq_length, keep_end=False)
 
 
 def prepare_tokenized_dataset(
@@ -212,72 +444,46 @@ def prepare_tokenized_dataset(
 
     def tokenize_batch(batch):
         rows = _rows_from_batch(batch)
-        texts = [format_sample(row, fmt, tokenizer) for row in rows]
-        encoded = tokenizer(
-            texts, truncation=True, max_length=max_seq_length, padding=False
-        )
-        encoded["labels"] = [list(ids) for ids in encoded["input_ids"]]
-        return encoded
+        out: dict[str, list[Any]] = {
+            "input_ids": [],
+            "attention_mask": [],
+            "labels": [],
+        }
+        for row in rows:
+            if fmt == DatasetFormat.TEXT:
+                encoded = _tokenize_text_row(row, tokenizer, max_seq_length)
+            else:
+                encoded = _tokenize_chat_row(
+                    row,
+                    fmt,
+                    tokenizer,
+                    max_seq_length,
+                    mask_assistant_only=False,
+                )
+            out["input_ids"].append(encoded["input_ids"])
+            out["attention_mask"].append(encoded["attention_mask"])
+            out["labels"].append(encoded["labels"])
+        return out
 
     def tokenize_masked_batch(batch):
         rows = _rows_from_batch(batch)
-        # Prefer a single apply_chat_template pass with assistant masks when supported.
-        if _tokenizer_supports_assistant_mask(tokenizer):
-            encoded = _tokenize_with_assistant_mask(
-                rows, fmt, tokenizer, max_seq_length
-            )
-            if encoded is not None:
-                return encoded
-
-        full_texts: list[str] = []
-        prompt_message_lists: list[list[dict[str, Any]] | None] = []
-
-        for sample in rows:
-            messages = extract_messages(sample, fmt)
-            if messages and messages[-1].get("role") == "assistant":
-                full_texts.append(
-                    format_messages_for_prompt(
-                        messages, tokenizer, add_generation_prompt=False
-                    )
-                )
-                prompt_message_lists.append(messages[:-1])
-            else:
-                full_texts.append(format_sample(sample, fmt, tokenizer))
-                prompt_message_lists.append(None)
-
-        full = tokenizer(
-            full_texts, truncation=True, max_length=max_seq_length, padding=False
-        )
-        # Prompt lengths via tokenize=True chat template (avoids string→re-encode).
-        prompt_lengths: dict[int, int] = {}
-        for idx, prompt_messages in enumerate(prompt_message_lists):
-            if prompt_messages is None:
-                continue
-            prompt_ids = _chat_template_token_ids(
+        out: dict[str, list[Any]] = {
+            "input_ids": [],
+            "attention_mask": [],
+            "labels": [],
+        }
+        for row in rows:
+            encoded = _tokenize_chat_row(
+                row,
+                fmt,
                 tokenizer,
-                prompt_messages,
-                add_generation_prompt=True,
-                max_length=max_seq_length,
+                max_seq_length,
+                mask_assistant_only=True,
             )
-            if prompt_ids is not None:
-                prompt_lengths[idx] = len(prompt_ids)
-            else:
-                prompt_text = format_messages_for_prompt(
-                    prompt_messages, tokenizer, add_generation_prompt=True
-                )
-                prompt_lengths[idx] = len(
-                    tokenizer(
-                        prompt_text,
-                        truncation=True,
-                        max_length=max_seq_length,
-                        padding=False,
-                    )["input_ids"]
-                )
-        full["labels"] = [
-            _build_labels(ids, prompt_lengths.get(idx, 0))
-            for idx, ids in enumerate(full["input_ids"])
-        ]
-        return full
+            out["input_ids"].append(encoded["input_ids"])
+            out["attention_mask"].append(encoded["attention_mask"])
+            out["labels"].append(encoded["labels"])
+        return out
 
     map_kwargs: dict[str, Any] = {"remove_columns": dataset.column_names}
     if num_proc and num_proc > 1:

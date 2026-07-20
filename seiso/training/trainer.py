@@ -40,9 +40,11 @@ from seiso.security.deps import sha256_file
 from seiso.training.config import DatasetFormat, QuantMode, TrainConfig, TrainMethod
 from seiso.training.dataset_analysis import analyze_training_dataset
 from seiso.training.datasets import (
+    detect_format,
     format_dataset_text,
     load_training_dataset,
     prepare_tokenized_dataset,
+    should_disable_packing_for_response_mask,
 )
 from seiso.training.multi_gpu import (
     configure_distributed_training_args,
@@ -410,10 +412,23 @@ class SeisoTrainer:
         data_collator = None
         dataset_text_field = None
 
-        if cfg.packing and cfg.train_on_responses_only:
-            logger.warning("Sequence packing disables train-on-responses-only masking")
+        resolved_fmt = ds_fmt
+        if resolved_fmt == DatasetFormat.AUTO and len(train_ds) > 0:
+            resolved_fmt = detect_format(train_ds[0])
 
-        if cfg.packing:
+        use_packing = bool(cfg.packing)
+        if should_disable_packing_for_response_mask(
+            use_packing, cfg.train_on_responses_only, resolved_fmt
+        ):
+            logger.warning(
+                "Disabling sequence packing: train_on_responses_only requires "
+                "Seiso chat-template masking (format=%s). Packing remains for "
+                "large plain-text corpora.",
+                resolved_fmt.value,
+            )
+            use_packing = False
+
+        if use_packing:
             train_ds, detected_fmt = format_dataset_text(
                 train_ds,
                 tokenizer,
