@@ -415,6 +415,7 @@ export type DatasetAnalysis = {
     early_stopping: boolean;
     early_stopping_patience: number;
     packing: boolean;
+    preference_as_sft?: boolean;
   };
   notes: string[];
   sample_preview: Record<string, string>[];
@@ -443,6 +444,7 @@ export type TrainingRecommendations = {
     dataset_format: string;
     preprocess_dataset?: boolean;
     deduplicate_dataset?: boolean;
+    preference_as_sft?: boolean;
     max_eval_samples?: number;
     early_stopping?: boolean;
     early_stopping_patience?: number;

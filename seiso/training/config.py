@@ -152,6 +152,13 @@ class TrainConfig(BaseModel):
     use_rslora: bool = False
     train_on_responses_only: bool = True
     packing: bool = False
+    preference_as_sft: bool = Field(
+        default=False,
+        description=(
+            "When true, preference (chosen/rejected) rows train SFT on chosen only. "
+            "Default false refuses preference data — use Distill-RL/DPO for real alignment."
+        ),
+    )
     assistant_only_loss: bool | None = Field(
         default=None,
         description="TRL assistant-only loss when the trainer tokenizes chat rows (None = auto)",
@@ -208,7 +215,13 @@ class TrainConfig(BaseModel):
         default=True,
         description="Group-relative / unbiased-std advantages (slime grpo_std_normalization).",
     )
-    calculate_per_token_loss: bool = False
+    calculate_per_token_loss: bool = Field(
+        default=True,
+        description=(
+            "Slime GRPO: per-token clipped surrogate (length-stable). "
+            "When false, sequence log-probs are length-normalized before the ratio."
+        ),
+    )
     temperature: float = Field(default=0.9, gt=0)
     top_p: float = Field(default=0.95, gt=0, le=1)
     rollout_backend: str = Field(
@@ -345,6 +358,41 @@ class TrainConfig(BaseModel):
         return self
 
     @model_validator(mode="after")
+    def _validate_meaningful_algorithms(self) -> TrainConfig:
+        chat_formats = {
+            DatasetFormat.CHAT,
+            DatasetFormat.SHAREGPT,
+            DatasetFormat.ALPACA,
+            DatasetFormat.PREFERENCE,
+        }
+        if (
+            self.packing
+            and self.train_on_responses_only
+            and self.dataset_format in chat_formats
+        ):
+            raise ValueError(
+                "packing cannot be combined with train_on_responses_only for "
+                f"{self.dataset_format.value} datasets; use packing only for plain "
+                "text or disable train_on_responses_only"
+            )
+        if self.dataset_format == DatasetFormat.PREFERENCE:
+            if self.method == TrainMethod.SLIME:
+                raise ValueError(
+                    "Preference datasets are incompatible with method=slime "
+                    "(GRPO needs verifiable prompt/answer rows). "
+                    "Use Distill-RL/DPO for preference pairs, or LoRA/full with "
+                    "preference_as_sft=true for chosen-only SFT."
+                )
+            if not self.preference_as_sft:
+                raise ValueError(
+                    "Preference datasets (chosen/rejected) are not SFT alignment. "
+                    "Use Distill-RL/DPO (`seiso distill-rl`) for real preference learning, "
+                    "or set preference_as_sft=true to train supervised on chosen responses "
+                    "only (rejected pairs are discarded)."
+                )
+        return self
+
+    @model_validator(mode="after")
     def _validate_slime_batch_and_clip(self) -> TrainConfig:
         if self.method != TrainMethod.SLIME:
             return self
@@ -359,6 +407,17 @@ class TrainConfig(BaseModel):
         )
         if self.clip_ratio_high is not None and self.clip_ratio_high < self.clip_ratio:
             raise ValueError("clip_ratio_high must be >= clip_ratio")
+        if self.outcome_reward_weight <= 0:
+            raise ValueError(
+                "outcome_reward_weight must be > 0 for meaningful GRPO "
+                "(verifiable outcome signal required)"
+            )
+        shaping = self.format_reward_weight + self.process_reward_weight
+        if shaping > self.outcome_reward_weight:
+            raise ValueError(
+                "format_reward_weight + process_reward_weight must not exceed "
+                "outcome_reward_weight (outcome must dominate for meaningful GRPO)"
+            )
         return self
 
     @classmethod

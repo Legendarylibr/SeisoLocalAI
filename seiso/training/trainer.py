@@ -354,6 +354,7 @@ class SeisoTrainer:
                     deduplicate=cfg.deduplicate_dataset,
                     min_chars=cfg.min_sample_chars,
                     num_proc=resolve_map_workers(cfg),
+                    preference_as_sft=cfg.preference_as_sft,
                 )
                 self._log(
                     f"Preprocessed dataset: {preprocess_stats['kept']}/{preprocess_stats['initial_samples']} "

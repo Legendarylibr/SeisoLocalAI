@@ -61,6 +61,20 @@ def recommend_quantization(trainer, config: FrameworkConfig) -> dict[str, object
     )
 
     payload["decision"] = recommendation_decision_block(payload)
+    from seiso.adaptive_quant.pipeline.research_contract import (
+        EVIDENCE_SIMULATOR,
+        infer_evidence_level,
+    )
+
+    evidence = infer_evidence_level(config)
+    payload["evidence_level"] = evidence
+    payload["deploy_quality_claimable"] = evidence != EVIDENCE_SIMULATOR
+    if evidence == EVIDENCE_SIMULATOR:
+        payload["deploy_quality_note"] = (
+            "Simulator evidence only — not deploy-grounded. Escalate to "
+            "backend=llama_cpp (and optional external_quality_path) before "
+            "treating quant recommendations as production quality."
+        )
     return payload
 
 

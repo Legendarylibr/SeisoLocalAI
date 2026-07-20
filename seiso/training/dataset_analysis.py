@@ -21,7 +21,16 @@ logger = logging.getLogger(__name__)
 _DOMAIN_LABELS: dict[str, str] = {
     "instruction_tuning": "Instruction tuning (prompt → completion pairs)",
     "conversational": "Multi-turn conversational supervision",
-    "preference_alignment": "Preference / chosen-response alignment",
+    "preference_pairs": (
+        "Preference pairs (use Distill-RL DPO; not SFT unless preference_as_sft)"
+    ),
+    "preference_chosen_sft": (
+        "Chosen-response SFT (explicit preference_as_sft; rejected discarded — not DPO)"
+    ),
+    # Legacy alias kept for older analysis payloads / tests.
+    "preference_alignment": (
+        "Preference pairs (use Distill-RL DPO; not SFT unless preference_as_sft)"
+    ),
     "causal_lm": "Causal language modeling (plain text)",
     "code_pretraining": "Code / technical corpus pretraining",
     "qa": "Question-answer supervision",
@@ -95,7 +104,7 @@ def _infer_domain(fmt: DatasetFormat, columns: list[str]) -> tuple[str, str]:
     if fmt == DatasetFormat.TEXT and colset & _CODE_COLUMNS:
         return "code_pretraining", _DOMAIN_LABELS["code_pretraining"]
     if fmt == DatasetFormat.PREFERENCE:
-        return "preference_alignment", _DOMAIN_LABELS["preference_alignment"]
+        return "preference_pairs", _DOMAIN_LABELS["preference_pairs"]
     if fmt in (DatasetFormat.CHAT, DatasetFormat.SHAREGPT):
         return "conversational", _DOMAIN_LABELS["conversational"]
     if fmt == DatasetFormat.ALPACA:
@@ -191,7 +200,10 @@ def build_dataset_training_config(
     max_seq = _recommend_max_seq(length_stats)
     epochs = _recommend_epochs(kept, domain)
     train_on_responses_only = _recommend_train_on_responses(resolved_format, domain)
-    return {
+    packing = resolved_format == DatasetFormat.TEXT and kept >= 10_000
+    if packing and train_on_responses_only:
+        packing = False
+    cfg: dict[str, Any] = {
         "dataset_format": resolved_format.value,
         "train_on_responses_only": train_on_responses_only,
         "preprocess_dataset": True,
@@ -201,8 +213,16 @@ def build_dataset_training_config(
         "warmup_ratio": warmup_ratio_for_corpus(kept),
         "early_stopping": kept >= 200,
         "early_stopping_patience": 3,
-        "packing": resolved_format == DatasetFormat.TEXT and kept >= 10_000,
+        "packing": packing,
+        "preference_as_sft": False,
     }
+    if domain in {"preference_pairs", "preference_alignment"} or (
+        resolved_format == DatasetFormat.PREFERENCE
+    ):
+        cfg["dataset_format"] = DatasetFormat.PREFERENCE.value
+        cfg["preference_as_sft"] = False
+        cfg["packing"] = False
+    return cfg
 
 
 # Process-local cleaned datasets from the most recent analysis (trainer can reuse).
@@ -365,6 +385,11 @@ def _analyze_sampled(
         "Full preprocess/dedupe runs once during training (not duplicated here).",
         "Training settings below are derived from this dataset sample (not chat/inference context).",
     ]
+    if fmt == DatasetFormat.PREFERENCE:
+        notes.append(
+            "Preference pairs require Distill-RL/DPO (`seiso distill-rl`) for real "
+            "alignment. SFT refuses this dataset unless preference_as_sft=true."
+        )
     if removed_invalid:
         notes.append(
             f"Sample dropped {removed_invalid:,} rows with empty or unparseable supervision targets."
@@ -440,11 +465,16 @@ def analyze_training_dataset(
     effective_fmt = (
         inferred_fmt if dataset_format == DatasetFormat.AUTO else dataset_format
     )
+    # Preference pairs: analyze chosen-side structure with an explicit opt-in for
+    # stats only. Do not cache cleaned rows — SFT train must refuse without
+    # preference_as_sft (real alignment is Distill-RL/DPO).
+    preference_stats_only = effective_fmt == DatasetFormat.PREFERENCE
     cleaned, stats, resolved_fmt = preprocess_training_dataset(
         raw,
         dataset_format=effective_fmt,
         deduplicate=True,
         min_chars=1,
+        preference_as_sft=preference_stats_only,
     )
     cache_key = cleaned_dataset_cache_key(
         dataset,
@@ -453,9 +483,11 @@ def analyze_training_dataset(
         deduplicate=True,
         min_chars=1,
     )
-    store_cleaned_dataset(cache_key, cleaned, stats, resolved_fmt)
+    if not preference_stats_only:
+        store_cleaned_dataset(cache_key, cleaned, stats, resolved_fmt)
 
-    domain, domain_label = _infer_domain(resolved_fmt, columns)
+    domain_fmt = DatasetFormat.PREFERENCE if preference_stats_only else resolved_fmt
+    domain, domain_label = _infer_domain(domain_fmt, columns)
     length_sample_idx = _stratified_indices(len(cleaned), max_samples=512)
     length_rows = [
         {k: v for k, v in cleaned[i].items() if not str(k).startswith("_")}
@@ -466,10 +498,16 @@ def analyze_training_dataset(
     notes = [
         f"Scanned all {stats['initial_samples']:,} rows — {stats['kept']:,} trainable after normalization "
         f"({round(100.0 * stats['kept'] / max(1, stats['initial_samples']), 2)}% retained).",
-        f"Detected {resolved_fmt.value} schema ({confidence:.0%} vote confidence across stratified samples).",
+        f"Detected {domain_fmt.value} schema ({confidence:.0%} vote confidence across stratified samples).",
         f"Domain: {domain_label}.",
         "Training settings below are derived from this dataset only (not chat/inference context).",
     ]
+    if preference_stats_only:
+        notes.append(
+            "Preference pairs require Distill-RL/DPO (`seiso distill-rl`) for real "
+            "alignment. Training Studio SFT refuses this dataset unless "
+            "preference_as_sft=true (chosen-only SFT; rejected discarded)."
+        )
     if stats["removed_invalid"]:
         notes.append(
             f"Dropped {stats['removed_invalid']:,} rows with empty or unparseable supervision targets."
@@ -485,7 +523,7 @@ def analyze_training_dataset(
         kept=stats["kept"],
         removed_invalid=stats["removed_invalid"],
         removed_duplicate=stats["removed_duplicate"],
-        resolved_fmt=resolved_fmt,
+        resolved_fmt=domain_fmt,
         confidence=confidence,
         vote_meta=vote_meta,
         domain=domain,
@@ -499,7 +537,7 @@ def analyze_training_dataset(
             ],
         ),
         uses_full_dataset=True,
-        cleaned_cache_key=cache_key,
+        cleaned_cache_key=None if preference_stats_only else cache_key,
     )
 
 

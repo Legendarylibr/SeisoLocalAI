@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import {
   api,
   CloudGpuCredential,
@@ -14,6 +14,11 @@ import { invalidateApiCache } from "@/lib/api/getCache";
 import { appendBoundedLog } from "@/lib/api/sse";
 import { initialDownloadProgress, ModelProgressState } from "@/lib/modelProgress";
 import { ensureTrainHubModel, isTrainModelCached } from "@/lib/trainModel";
+import {
+  getTrainingConfigBlockers,
+  packingAllowedForFormat,
+  resolveEffectiveDatasetFormat,
+} from "@/lib/trainingConfigGuards";
 
 import { useTrainingModels } from "@/context/TrainingModelsContext";
 import { readStoredModel, writeStoredModel } from "@/lib/modelSelection";
@@ -65,10 +70,11 @@ export function TrainPage() {
   const [slimeMetadataField, setSlimeMetadataField] = useState("metadata");
   const [slimeRolloutsPerPrompt, setSlimeRolloutsPerPrompt] = useState(4);
   const [slimeRolloutBatchSize, setSlimeRolloutBatchSize] = useState(4);
-  const [slimeDynamicSampling, setSlimeDynamicSampling] = useState(false);
+  const [slimeDynamicSampling, setSlimeDynamicSampling] = useState(true);
   const [slimeOverSamplingBatchSize, setSlimeOverSamplingBatchSize] = useState(8);
   const [slimeBalanceData, setSlimeBalanceData] = useState(false);
-  const [slimePerTokenLoss, setSlimePerTokenLoss] = useState(false);
+  const [slimePerTokenLoss, setSlimePerTokenLoss] = useState(true);
+  const [preferenceAsSft, setPreferenceAsSft] = useState(false);
   const [slimeMaxPromptTokens, setSlimeMaxPromptTokens] = useState(512);
   const [slimeMaxNewTokens, setSlimeMaxNewTokens] = useState(256);
   const [slimeAutoStop, setSlimeAutoStop] = useState(true);
@@ -181,6 +187,10 @@ export function TrainPage() {
         }
         if (rec?.preprocess_dataset != null) setPreprocessDataset(rec.preprocess_dataset);
         if (rec?.packing != null) setPacking(rec.packing);
+        if (rec?.preference_as_sft != null) setPreferenceAsSft(Boolean(rec.preference_as_sft));
+        else if (rec?.dataset_format === "preference" || res.resolved_format === "preference") {
+          setPreferenceAsSft(false);
+        }
       } else {
         setDatasetValid(false);
         setDatasetError(res.error || "Dataset cannot be normalized for training");
@@ -365,15 +375,60 @@ export function TrainPage() {
     if (rec.dataset_format && rec.dataset_format !== "auto") {
       setDatasetFormat(rec.dataset_format);
     }
+    if (rec.preference_as_sft != null) {
+      setPreferenceAsSft(Boolean(rec.preference_as_sft));
+    } else if (rec.dataset_format === "preference") {
+      setPreferenceAsSft(false);
+    }
     setConfigCustomized(false);
   }, [recommendations]);
+
+  const effectiveDatasetFormat = useMemo(
+    () =>
+      resolveEffectiveDatasetFormat(
+        datasetFormat,
+        datasetAnalysis?.resolved_format,
+      ),
+    [datasetFormat, datasetAnalysis?.resolved_format],
+  );
+  const packingAllowed = packingAllowedForFormat(
+    effectiveDatasetFormat,
+    trainResponsesOnly,
+  );
+  const configBlockers = useMemo(
+    () =>
+      getTrainingConfigBlockers({
+        method,
+        datasetFormat,
+        resolvedFormat: datasetAnalysis?.resolved_format,
+        packing,
+        trainOnResponsesOnly: trainResponsesOnly,
+        preferenceAsSft,
+        slimeDynamicSampling,
+      }),
+    [
+      method,
+      datasetFormat,
+      datasetAnalysis?.resolved_format,
+      packing,
+      trainResponsesOnly,
+      preferenceAsSft,
+      slimeDynamicSampling,
+    ],
+  );
+  const isPreferenceDataset = effectiveDatasetFormat === "preference";
+
+  useEffect(() => {
+    if (packing && !packingAllowed) setPacking(false);
+  }, [packing, packingAllowed]);
 
   const modelBlocked = Boolean(modelId && recommendations?.trainable === false);
   const canStart =
     Boolean(modelId.trim() && dataset.trim()) &&
     !modelBlocked &&
     datasetValid &&
-    !analyzingDataset;
+    !analyzingDataset &&
+    configBlockers.length === 0;
 
   useEffect(() => {
     if (!exportProfiles.length) return;
@@ -505,6 +560,10 @@ export function TrainPage() {
       setDownloadError(datasetError || "Dataset cannot be normalized for training");
       return;
     }
+    if (configBlockers.length > 0) {
+      setDownloadError(configBlockers.map((b) => b.message).join(" "));
+      return;
+    }
     if (!cloudConfigValid) {
       setDownloadError("Select a saved cloud access credential and keep cloud target labels free of URLs or secret-looking text.");
       setActiveTab("cloud");
@@ -549,7 +608,8 @@ export function TrainPage() {
         use_fused_ce: useFusedCe,
         train_on_responses_only: trainResponsesOnly,
         use_rslora: useRsLora,
-        packing,
+        packing: packingAllowed ? packing : false,
+        preference_as_sft: preferenceAsSft,
         extra: moeFinetune
           ? {
               moe_finetune: true,
@@ -815,7 +875,9 @@ export function TrainPage() {
             <select
               value={datasetFormat}
               onChange={(e) => {
-                setDatasetFormat(e.target.value);
+                const next = e.target.value;
+                setDatasetFormat(next);
+                if (next === "preference") setPreferenceAsSft(false);
                 setConfigCustomized(true);
               }}
             >
@@ -833,6 +895,33 @@ export function TrainPage() {
                   Recommended: {recommendations.config.dataset_format} — apply suggested settings to use it.
                 </p>
               )}
+            {isPreferenceDataset && (
+              <div className="status-callout status-callout-warn" style={{ marginTop: 8 }}>
+                <div className="status-callout-body">
+                  <strong className="status-callout-title">Preference pairs are not SFT alignment</strong>
+                  <div className="status-callout-text">
+                    Use{" "}
+                    <Link to="/distill-rl">Distill-RL</Link> for real DPO on chosen/rejected pairs.
+                    {method === "slime"
+                      ? " SLIME GRPO cannot train on preference pairs — switch method to LoRA/full or open Distill-RL."
+                      : " Training Studio only continues if you opt into chosen-only SFT (rejected discarded)."}
+                  </div>
+                  {method !== "slime" && (
+                    <label className="studio-checkbox-item" style={{ marginTop: 8 }}>
+                      <input
+                        type="checkbox"
+                        checked={preferenceAsSft}
+                        onChange={(e) => {
+                          setPreferenceAsSft(e.target.checked);
+                          setConfigCustomized(true);
+                        }}
+                      />
+                      Train on chosen only (not DPO) — rejected pairs discarded
+                    </label>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
 
           {(analyzingDataset || !datasetValid || datasetError) && (
@@ -867,9 +956,14 @@ export function TrainPage() {
                 <div className="muted-text studio-field-hint studio-field-hint-compact">
                   Columns: {datasetAnalysis.columns.join(", ")} · p95 ~{datasetAnalysis.length_stats.estimated_tokens_p95} tokens
                 </div>
-                {datasetAnalysis.notes[0] && (
-                  <div className="muted-text studio-field-hint studio-field-hint-compact">{datasetAnalysis.notes[0]}</div>
-                )}
+                {datasetAnalysis.notes.slice(0, 3).map((note) => (
+                  <div
+                    key={note.slice(0, 48)}
+                    className="muted-text studio-field-hint studio-field-hint-compact"
+                  >
+                    {note}
+                  </div>
+                ))}
                 {datasetAnalysis.sample_preview.length > 0 && (
                   <details className="train-dataset-preview" style={{ marginTop: 8 }}>
                     <summary className="muted-text">Preview normalized rows</summary>
@@ -1012,13 +1106,19 @@ export function TrainPage() {
                   />
                   Auto-stop on reward plateau
                 </label>
-                <label className="studio-checkbox-item studio-checkbox-item-standalone">
+                <label
+                  className="studio-checkbox-item studio-checkbox-item-standalone"
+                  title="Required for meaningful GRPO — zero-spread groups yield no learning signal"
+                >
                   <input
                     type="checkbox"
                     checked={slimeDynamicSampling}
-                    onChange={(e) => setSlimeDynamicSampling(e.target.checked)}
+                    onChange={(e) => {
+                      setSlimeDynamicSampling(e.target.checked);
+                      setConfigCustomized(true);
+                    }}
                   />
-                  Keep reward-diverse groups
+                  Keep reward-diverse groups (required)
                 </label>
                 <label className="studio-checkbox-item studio-checkbox-item-standalone">
                   <input
@@ -1028,13 +1128,19 @@ export function TrainPage() {
                   />
                   Balance prompt lengths
                 </label>
-                <label className="studio-checkbox-item studio-checkbox-item-standalone">
+                <label
+                  className="studio-checkbox-item studio-checkbox-item-standalone"
+                  title="Length-stable clipped surrogate (recommended)"
+                >
                   <input
                     type="checkbox"
                     checked={slimePerTokenLoss}
-                    onChange={(e) => setSlimePerTokenLoss(e.target.checked)}
+                    onChange={(e) => {
+                      setSlimePerTokenLoss(e.target.checked);
+                      setConfigCustomized(true);
+                    }}
                   />
-                  Per-token loss
+                  Per-token loss (recommended)
                 </label>
               </div>
               <div className="option-grid">
@@ -1130,7 +1236,22 @@ export function TrainPage() {
                 Gradient checkpointing
               </label>
               <label className="studio-checkbox-item">
-                <input type="checkbox" checked={trainResponsesOnly} onChange={(e) => { setTrainResponsesOnly(e.target.checked); setConfigCustomized(true); }} />
+                <input
+                  type="checkbox"
+                  checked={trainResponsesOnly}
+                  onChange={(e) => {
+                    const next = e.target.checked;
+                    setTrainResponsesOnly(next);
+                    if (
+                      next &&
+                      packing &&
+                      !packingAllowedForFormat(effectiveDatasetFormat, true)
+                    ) {
+                      setPacking(false);
+                    }
+                    setConfigCustomized(true);
+                  }}
+                />
                 Train on responses only
               </label>
               <label className="studio-checkbox-item">
@@ -1140,14 +1261,25 @@ export function TrainPage() {
               <label
                 className="studio-checkbox-item"
                 title={
-                  hw?.training_defaults?.packing
-                    ? "Recommended on CUDA: less padding waste"
-                    : undefined
+                  !packingAllowed
+                    ? "Incompatible with train-on-responses-only for chat-style datasets"
+                    : hw?.training_defaults?.packing
+                      ? "Recommended on CUDA: less padding waste"
+                      : undefined
                 }
               >
-                <input type="checkbox" checked={packing} onChange={(e) => { setPacking(e.target.checked); setConfigCustomized(true); }} />
+                <input
+                  type="checkbox"
+                  checked={packing && packingAllowed}
+                  disabled={!packingAllowed}
+                  onChange={(e) => {
+                    setPacking(e.target.checked);
+                    setConfigCustomized(true);
+                  }}
+                />
                 Sequence packing
-                {hw?.training_defaults?.packing ? " (recommended)" : ""}
+                {hw?.training_defaults?.packing && packingAllowed ? " (recommended)" : ""}
+                {!packingAllowed ? " (blocked for this format)" : ""}
               </label>
               {hw?.training_defaults?.kernel_low_vram ? (
                 <p className="studio-field-hint" role="status">
@@ -1259,6 +1391,23 @@ export function TrainPage() {
           )}
 
           </StudioCardBody>
+          {configBlockers.length > 0 && (
+            <div className="status-callout status-callout-error studio-error-callout" style={{ margin: "0 1rem 0.75rem" }}>
+              <div className="status-callout-body">
+                <strong className="status-callout-title">Fix config before training</strong>
+                <ul className="status-callout-text" style={{ margin: "0.35rem 0 0", paddingLeft: "1.1rem" }}>
+                  {configBlockers.map((blocker) => (
+                    <li key={blocker.code}>{blocker.message}</li>
+                  ))}
+                </ul>
+                {isPreferenceDataset && !preferenceAsSft && (
+                  <p className="muted-text studio-field-hint" style={{ marginTop: 8 }}>
+                    Open <Link to="/distill-rl">Distill-RL</Link> for DPO, or enable chosen-only SFT above.
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
           <div className="studio-action-bar studio-action-bar-flush">
             <button
               className="btn btn-primary btn-lg"
@@ -1271,7 +1420,9 @@ export function TrainPage() {
                   ? "Downloading model…"
                   : !modelId.trim() || !dataset.trim()
                     ? "Select model and dataset"
-                    : "Start training"}
+                    : configBlockers.length > 0
+                      ? "Resolve config conflicts"
+                      : "Start training"}
             </button>
             {activeJob && (
               <button type="button" className="btn" onClick={() => setMetricsOpen(true)}>

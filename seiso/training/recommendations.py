@@ -32,6 +32,7 @@ def _default_dataset_config() -> dict[str, Any]:
         "preprocess_dataset": True,
         "deduplicate_dataset": True,
         "packing": False,
+        "preference_as_sft": False,
         "early_stopping": True,
         "early_stopping_patience": 3,
     }
@@ -197,6 +198,7 @@ def recommend_training_config(
         "dataset_format": ds.get("dataset_format", "auto"),
         "preprocess_dataset": ds.get("preprocess_dataset", True),
         "deduplicate_dataset": ds.get("deduplicate_dataset", True),
+        "preference_as_sft": ds.get("preference_as_sft", False),
         "max_eval_samples": 128,
         "early_stopping": ds.get("early_stopping", True),
         "early_stopping_patience": ds.get("early_stopping_patience", 3),
@@ -207,6 +209,19 @@ def recommend_training_config(
         params_b,
         hardware_max_seq=int(defaults["max_seq_length"]),
     )
+    if (
+        config["packing"]
+        and config["train_on_responses_only"]
+        and str(config.get("dataset_format", "auto")) != "text"
+    ):
+        config["packing"] = False
+    if str(config.get("dataset_format", "")) == "preference":
+        config["preference_as_sft"] = False
+        config["packing"] = False
+        warnings.append(
+            "Preference pairs are not SFT alignment — use Distill-RL/DPO "
+            "(`seiso distill-rl`), or set preference_as_sft=true for chosen-only SFT."
+        )
     if moe_sizing and moe_sizing.is_moe:
         config.update(
             {
