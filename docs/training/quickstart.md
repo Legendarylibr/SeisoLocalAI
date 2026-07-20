@@ -117,7 +117,7 @@ save_steps: 50
 | `quant` | `4bit`, `8bit`, `16bit`, or `none` |
 | `preprocess_dataset` | Normalize and clean rows before training |
 | `deduplicate_dataset` | Drop exact duplicate rows after normalization |
-| `train_on_responses_only` | Mask loss to assistant/output tokens (non-text formats) |
+| `train_on_responses_only` | Mask loss to assistant/output tokens via chat-template tokenization (assistant masks, or multi-turn template spans). Truncates with `keep_end` so the completion survives. Non-text formats only. |
 | `assistant_only_loss` | TRL-native masking when the trainer tokenizes chat rows (`null` = auto) |
 | `dataset_num_proc` | Parallel workers for dataset map (`null` = auto, `0` = off) |
 | `pad_to_multiple_of` | Batch padding multiple for tensor cores (`null` = 8 on CUDA) |
@@ -131,7 +131,7 @@ save_steps: 50
 | `deterministic` | Reproducible seeds and CUDA settings (`false` enables TF32 + cuDNN benchmark on CUDA) |
 | `torch_compile` | Opt-in `torch.compile` on CUDA |
 | `extra` | Extension dict — e.g. `use_fused_lora_qkv: true` for batched attention LoRA (see [kernels.md](kernels.md)) |
-| `packing` | Sequence packing (large plain-text corpora) |
+| `packing` | Sequence packing for large plain-text corpora. Incompatible with `train_on_responses_only` on chat/alpaca/sharegpt/preference — Seiso auto-disables packing in that case so response masks stay correct. |
 | `padding_free` | Padding-free packing with flash attention (CUDA + packing) |
 | `multi_gpu` | Enable distributed training (or Forge checkbox) |
 | `distributed_strategy` | `auto`, `none`, or `ddp` high-level launch policy |
