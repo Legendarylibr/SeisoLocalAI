@@ -216,6 +216,12 @@ def build_dataset_training_config(
         "packing": packing,
         "preference_as_sft": False,
     }
+    # Continued pretraining / causal LM: lower LoRA LR than instruction SFT; no NEFTune.
+    if domain in {"code_pretraining", "causal_lm"} or (
+        resolved_format == DatasetFormat.TEXT and not train_on_responses_only
+    ):
+        cfg["learning_rate"] = 1e-4
+        cfg["neftune_noise_alpha"] = None
     if domain in {"preference_pairs", "preference_alignment"} or (
         resolved_format == DatasetFormat.PREFERENCE
     ):
@@ -238,6 +244,8 @@ def cleaned_dataset_cache_key(
     deduplicate: bool,
     min_chars: int,
 ) -> str:
+    from seiso.training.preprocess import PREPROCESS_NORM_VERSION
+
     return "|".join(
         [
             str(dataset),
@@ -245,6 +253,7 @@ def cleaned_dataset_cache_key(
             str(sandbox_root or ""),
             f"dedupe={int(deduplicate)}",
             f"min_chars={int(min_chars)}",
+            f"norm={PREPROCESS_NORM_VERSION}",
         ]
     )
 

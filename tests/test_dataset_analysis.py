@@ -83,6 +83,21 @@ def test_build_dataset_training_config_text_domain():
     assert cfg["train_on_responses_only"] is False
     assert cfg["packing"] is True
     assert cfg["max_seq_length"] >= 512
+    assert cfg["learning_rate"] == 1e-4
+    assert cfg["neftune_noise_alpha"] is None
+
+
+def test_build_dataset_training_config_code_pretraining():
+    cfg = build_dataset_training_config(
+        resolved_format=DatasetFormat.TEXT,
+        domain="code_pretraining",
+        kept=5_000,
+        length_stats={"estimated_tokens_p95": 1200},
+    )
+    assert cfg["train_on_responses_only"] is False
+    assert cfg["learning_rate"] == 1e-4
+    assert cfg["neftune_noise_alpha"] is None
+    assert cfg["packing"] is False  # below large-corpus packing threshold
 
 
 def test_length_stats_percentiles():

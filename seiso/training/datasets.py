@@ -45,6 +45,16 @@ def load_training_dataset(
     )  # nosec B615: revision pinned
 
 
+# Causal-LM / code-corpus body fields (order = preference when several present).
+TEXT_BODY_KEYS: tuple[str, ...] = (
+    "text",
+    "content",
+    "code",
+    "raw_content",
+    "file_content",
+)
+
+
 def detect_format(sample: dict) -> DatasetFormat:
     if ("chosen" in sample and "rejected" in sample) or (
         "chosen" in sample and "prompt" in sample
@@ -66,7 +76,7 @@ def detect_format(sample: dict) -> DatasetFormat:
         "instruction" in sample and "response" in sample
     ):
         return DatasetFormat.ALPACA
-    if "text" in sample or "content" in sample or "code" in sample:
+    if any(key in sample for key in TEXT_BODY_KEYS):
         return DatasetFormat.TEXT
     return DatasetFormat.TEXT
 
