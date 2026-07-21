@@ -211,6 +211,28 @@ async def test_job_events_append_tail_and_prune(db: Database):
 
 
 @pytest.mark.asyncio
+async def test_job_events_concurrent_append_sequences(db: Database):
+    """Shared-connection BEGIN IMMEDIATE must not nest under concurrent emitters."""
+    import asyncio
+
+    user = await db.create_user("hashed", "Concurrent", email="concurrent@local.dev")
+
+    async def _emit(i: int) -> None:
+        await db.append_job_event(
+            job_id="job-concurrent",
+            user_id=user["id"],
+            kind="export",
+            event_type="log",
+            payload={"line": f"line-{i}"},
+        )
+
+    await asyncio.gather(*(_emit(i) for i in range(40)))
+    rows = await db.list_job_events("job-concurrent", user["id"])
+    sequences = [row["sequence"] for row in rows]
+    assert sequences == list(range(1, 41))
+
+
+@pytest.mark.asyncio
 async def test_model_path_lookup_index_exists(db: Database):
     conn = await db._ensure_conn()
     async with conn.execute("PRAGMA index_list(local_models)") as cur:

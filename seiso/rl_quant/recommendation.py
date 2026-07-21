@@ -30,6 +30,9 @@ def recommendation_evidence(recommendation: dict[str, Any]) -> dict[str, Any]:
     claimable = recommendation.get("deploy_quality_claimable")
     if claimable is None:
         claimable = evidence not in {"simulator", "unknown"}
+    # Simulator/unknown must never be claimable even if a payload sets the flag.
+    if evidence in {"simulator", "unknown"}:
+        claimable = False
     note = recommendation.get("deploy_quality_note")
     if not note and evidence == "simulator":
         note = (

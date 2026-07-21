@@ -100,8 +100,10 @@ class ExportOrchestrator(Orchestrator):
             except asyncio.CancelledError:
                 import contextlib
 
-                with contextlib.suppress(asyncio.TimeoutError, Exception):
-                    await asyncio.wait_for(asyncio.shield(export_future), timeout=600)
+                # Wait for the executor work to finish before releasing GPU —
+                # a timed wait left the future running during release_after_task.
+                with contextlib.suppress(Exception):
+                    await asyncio.shield(export_future)
                 raise
         finally:
             release_after_task(

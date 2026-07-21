@@ -253,7 +253,26 @@ dataset: /path/to/verifiable_train.jsonl
 eval_dataset: /path/to/verifiable_eval.jsonl
 require_held_out_eval: true
 reward: auto
-# Or opt-in: data_gen: true / data_gen_source: data_designer / data_designer: on
+max_vram_gb: 16
+rollouts_per_prompt: 4
+rollout_batch_size: 4
+dynamic_sampling_filter: reward_nonzero_std
+over_sampling_batch_size: 8
+balance_data: false
+policy_micro_batch_size: 2
+batch_size: 1
+learning_rate: 0.000005
+# 0 saves VRAM for single-epoch; epochs>1 auto-applies 0.02 unless SEISO_SLIME_ALLOW_ZERO_KL=1.
+kl_coef: 0.0
+require_thinking_trace: true
+format_reward_weight: 0.1
+process_reward_weight: 0.0
+missing_thinking_penalty: 0.0
+slime_use_lora: true
+auto_stop: true
+auto_stop_metric: reward_mean
+write_verifier_data: true
+# Opt-in materialize (default off): data_gen: true / data_gen_source: dataset|data_designer
 ```
 
 CI fixture JSONLs (not for training):
@@ -287,7 +306,7 @@ Important fields:
 | `process_reward_weight` | Experimental lexical process score; keep `0` for verifiable outcome-first RL |
 | `missing_thinking_penalty` | Optional subtractive penalty when format is required but missing; default `0` (use format bonus instead). Set a modest value (e.g. `0.2`) only if format compliance stalls; must stay `≤ outcome − (format + process)` |
 | `min_thinking_tokens` | Only used when `process_reward_weight > 0` |
-| `kl_coef` | Coefficient on non-negative KL (Schulman k3) to a frozen reference; `0` skips loading the ref (lower VRAM). Prefer `0.02`–`0.05` for multi-epoch runs (signed k1 is logged as `kl_k1` only) |
+| `kl_coef` | Coefficient on non-negative KL (Schulman k3) to a frozen reference; `0` skips loading the ref (lower VRAM). For `epochs>1`, Seiso auto-sets `0.02` unless `SEISO_SLIME_ALLOW_ZERO_KL=1` (signed k1 is logged as `kl_k1` only) |
 | `rollouts_per_prompt` | slime `--n-samples-per-prompt` |
 | `rollout_batch_size` | slime `--rollout-batch-size` (**prompts**, not sequences) |
 | `train_batch_size` | Target prompts after dynamic filter; `null` → same as `rollout_batch_size` |

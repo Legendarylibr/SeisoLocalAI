@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
 from collections.abc import AsyncIterator
@@ -42,6 +43,9 @@ class DatabaseCore:
         self._ephemeral = ephemeral
         self._initialized = False
         self._conn_holder: aiosqlite.Connection | None = None
+        # Single shared aiosqlite connection: serialize concurrent users so
+        # BEGIN IMMEDIATE / commit pairs cannot nest across fire-and-forget tasks.
+        self._conn_lock = asyncio.Lock()
         if ephemeral:
             self._dsn = f"file:seiso_{uuid.uuid4().hex}?mode=memory&cache=shared"
         else:
@@ -133,7 +137,8 @@ class DatabaseCore:
 
     @asynccontextmanager
     async def _conn(self) -> AsyncIterator[aiosqlite.Connection]:
-        yield await self._ensure_conn()
+        async with self._conn_lock:
+            yield await self._ensure_conn()
 
     async def _create_config_job(
         self, table: str, user_id: str, config: dict, job_id: str | None = None

@@ -50,8 +50,10 @@ def validate_csrf(request: Request) -> bool:
     if path in CSRF_EXEMPT_PATHS:
         return True
     # Bearer-authenticated API clients are not vulnerable to browser CSRF.
+    # Require a non-empty credential so "Authorization: Bearer " cannot skip CSRF
+    # while cookie session auth still succeeds.
     auth = request.headers.get("authorization", "")
-    if auth.lower().startswith("bearer "):
+    if auth.lower().startswith("bearer ") and auth[7:].strip():
         return True
     if not (path.startswith("/api") or path.startswith("/v1")):
         return True

@@ -42,17 +42,14 @@ def strip_leaked_reasoning(content: str, *, preserve_trailing: bool = False) -> 
     When ``preserve_trailing`` is set (streaming path), only leading whitespace
     after a reasoning close-tag is trimmed so mid-stream chunk boundaries keep
     their trailing spaces.
+
+    Only strips balanced ``<think>…</think>`` (or redacted_thinking) blocks, or
+    an unclosed open tag. A lone ``</think>`` in prose/docs is left intact so
+    real answers are not destroyed.
     """
     if not content:
         return content
     edge = str.lstrip if preserve_trailing else str.strip
-    match = re.search(
-        r"</(?:redacted_thinking|think)>(?P<final>.*)$",
-        content,
-        flags=re.IGNORECASE | re.DOTALL,
-    )
-    if match is not None:
-        return edge(match.group("final"))
     cleaned = _THINK_BLOCK_RE.sub("", content)
     open_match = _THINKING_OPEN_RE.search(cleaned)
     if open_match is not None:
@@ -66,7 +63,10 @@ def strip_spurious_tool_syntax(content: str) -> str:
         return content
     cleaned = TOOL_CALL_PATTERN.sub("", content)
     cleaned = _XML_FUNCTION_TOOL_PATTERN.sub("", cleaned)
-    cleaned = _FUNCTION_JSON_PATTERN.sub("", cleaned)
+    # Bare {"name","arguments"} JSON appears in docs/code; only strip when
+    # accompanied by explicit tool-call markers.
+    if re.search(r"\[TOOL_CALLS?\]|<\|tool_call\|>", cleaned, flags=re.I):
+        cleaned = _FUNCTION_JSON_PATTERN.sub("", cleaned)
     cleaned = re.sub(r"\[TOOL_CALLS?\]", "", cleaned, flags=re.I)
     cleaned = re.sub(r"<\|tool_call\|>.*?(?:<\|/tool_call\|>|$)", "", cleaned, flags=re.DOTALL)
     return cleaned.strip()
