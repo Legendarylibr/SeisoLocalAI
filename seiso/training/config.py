@@ -281,6 +281,19 @@ class TrainConfig(BaseModel):
             "dense (pass fraction), or auto (dense until a group has a full passer)."
         ),
     )
+    slime_eval_dataset: Path | None = Field(
+        default=None,
+        description=(
+            "Frozen held-out JSONL for slime unit-test eval (must differ from dataset)."
+        ),
+    )
+    slime_eval_every_steps: int = Field(
+        default=0,
+        ge=0,
+        description="Held-out eval cadence; 0 means only at end when slime_eval_on_complete.",
+    )
+    slime_eval_max_prompts: int | None = Field(default=None, ge=1)
+    slime_eval_on_complete: bool = True
     min_thinking_tokens: int = Field(default=8, ge=0)
     dtype: str = "auto"
     device: str = "cuda"
@@ -467,6 +480,10 @@ class TrainConfig(BaseModel):
             "save_every_steps": "save_steps",
             "log_every_steps": "logging_steps",
             "use_lora": "slime_use_lora",
+            "eval_dataset": "slime_eval_dataset",
+            "eval_every_steps": "slime_eval_every_steps",
+            "eval_max_prompts": "slime_eval_max_prompts",
+            "eval_on_complete": "slime_eval_on_complete",
         }
         for src, dest in aliases.items():
             if src in data and dest not in data:
@@ -487,6 +504,14 @@ class TrainConfig(BaseModel):
             model_id=self.model_id,
             dataset=Path(self.dataset),
             output_dir=self.output_dir,
+            eval_dataset=(
+                Path(self.slime_eval_dataset)
+                if self.slime_eval_dataset is not None
+                else None
+            ),
+            eval_every_steps=self.slime_eval_every_steps,
+            eval_max_prompts=self.slime_eval_max_prompts,
+            eval_on_complete=self.slime_eval_on_complete,
             prompt_field=self.prompt_field,
             answer_field=self.answer_field,
             metadata_field=self.metadata_field,
@@ -653,6 +678,12 @@ def _write_slime_manifest(config: TrainConfig, output_dir: Path) -> None:
         "process_reward_weight": config.process_reward_weight,
         "missing_thinking_penalty": config.missing_thinking_penalty,
         "code_reward_mode": config.code_reward_mode,
+        "slime_eval_dataset": (
+            str(config.slime_eval_dataset) if config.slime_eval_dataset else None
+        ),
+        "slime_eval_every_steps": config.slime_eval_every_steps,
+        "slime_eval_max_prompts": config.slime_eval_max_prompts,
+        "slime_eval_on_complete": config.slime_eval_on_complete,
         "min_thinking_tokens": config.min_thinking_tokens,
         "rollouts_per_prompt": config.rollouts_per_prompt,
         "over_sampling_batch_size": config.over_sampling_batch_size,

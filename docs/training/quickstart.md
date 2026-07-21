@@ -292,6 +292,7 @@ Bundled smoke datasets (expand for real training):
 |---------|---------|--------|
 | `data/slime_sample.jsonl` | `numeric` | `configs/example_slime_single_gpu.yaml`, `configs/example_training_slime.yaml` |
 | `data/slime_code_sample.jsonl` | `code` (all unit tests must pass) | `configs/example_slime_code.yaml` |
+| `data/slime_code_eval.jsonl` | held-out code eval (unit tests; never train) | `eval_dataset` in slime code configs |
 | `data/slime_choice_sample.jsonl` | `choice` | `configs/example_slime_choice.yaml` |
 
 Important fields:
@@ -303,6 +304,10 @@ Important fields:
 | `metadata_field` | Optional upstream-style metadata column, default `metadata`; JSON strings are parsed and carried into reward samples and bounded verifier records |
 | `reward` | Verifier checker: `exact_match`, `numeric`, `choice`, `contains_answer`, `field`, `code`, or `auto` |
 | `code_reward_mode` | Code GRPO outcome: `binary` (default, all tests pass), `dense` (pass fraction), or `auto` (dense until a group has a full passer) |
+| `eval_dataset` | Frozen held-out JSONL for unit-test pass-rate eval (must differ from `dataset`) |
+| `eval_every_steps` | Held-out eval cadence; `0` = only at end when `eval_on_complete` |
+| `eval_on_complete` | Run held-out eval when training finishes (default true) |
+| `eval_max_prompts` | Optional cap on held-out prompts |
 | `reward_field` | Dataset reward column when `reward: field` |
 | `require_thinking_trace` | When true, rollout prompts may end with open `<think>`. Format is OK if the **generation** closes thinking: either a full `<think>...</think>` block or a continuation that only emits `</think>` then the answer |
 | `outcome_reward_weight` | Weight for hard outcome (correctness) from the shared verifier |
@@ -343,7 +348,9 @@ tests pass.** Use `dense` for pass-fraction credit, or `auto` for dense signal
 until a same-prompt group gets a full passer (then binary). Pass fraction is
 always logged as `proof_score` for diagnostics / hard-negative ranking.
 
-Example config: `configs/example_slime_code.yaml` with `data/slime_code_sample.jsonl`.
+Example config: `configs/example_slime_code.yaml` with `data/slime_code_sample.jsonl`
+and held-out `eval_dataset: data/slime_code_eval.jsonl` (unit-test pass rate at
+end of run; not used for GRPO rollouts).
 
 ```json
 {
@@ -376,14 +383,14 @@ tests (fail-closed via the same sandbox verifier):
 4. **Hard negatives** = mutants that fail ≥1 test (offline DPO) / online fails
 
 ```bash
-# Rewrite data/slime_code_sample.jsonl, data/distill_code_synth.jsonl,
-# and data/synthetic_code_preferences.jsonl
-python -m seiso.rl_verify --data-dir data --seed 0
+# Rewrite train artifacts + a disjoint held-out eval suite
+python -m seiso.rl_verify --data-dir data --seed 0 --eval-count 32
 ```
 
 | Artifact | Use |
 |----------|-----|
 | `data/slime_code_sample.jsonl` | Slime `reward: code` prompts + tests (+ `solution` metadata) |
+| `data/slime_code_eval.jsonl` | Frozen held-out unit-test eval (disjoint ids; never train) |
 | `data/distill_code_synth.jsonl` | Distill prompt library for verifiable code rollouts |
 | `data/synthetic_code_preferences.jsonl` | Offline DPO pairs (golden chosen, mutant rejected) — no model rollouts required |
 

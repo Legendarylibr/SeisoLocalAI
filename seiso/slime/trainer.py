@@ -330,10 +330,30 @@ def train_slime(config: SingleGpuSlimeConfig) -> Path:
                 _save_distributed(
                     model, tokenizer, config.output_dir / f"checkpoint-{global_step}", dist_ctx
                 )
+            _maybe_run_held_out_eval(
+                model=model,
+                tokenizer=tokenizer,
+                config=config,
+                torch=torch,
+                dist_ctx=dist_ctx,
+                step=global_step,
+                metrics_path=metrics_path,
+                force=False,
+            )
 
             global_step += 1
             if decision.should_stop:
                 optimizer.zero_grad(set_to_none=True)
+                _maybe_run_held_out_eval(
+                    model=model,
+                    tokenizer=tokenizer,
+                    config=config,
+                    torch=torch,
+                    dist_ctx=dist_ctx,
+                    step=global_step,
+                    metrics_path=metrics_path,
+                    force=True,
+                )
                 _write_training_state(config, global_step, decision.reason, auto_stop, dist_ctx)
                 _save_distributed(model, tokenizer, final_output_dir, dist_ctx)
                 return final_output_dir
@@ -348,6 +368,16 @@ def train_slime(config: SingleGpuSlimeConfig) -> Path:
                         step=global_step + 1,
                         sync_state=weight_sync_state,
                     )
+                _maybe_run_held_out_eval(
+                    model=model,
+                    tokenizer=tokenizer,
+                    config=config,
+                    torch=torch,
+                    dist_ctx=dist_ctx,
+                    step=global_step,
+                    metrics_path=metrics_path,
+                    force=True,
+                )
                 _write_training_state(config, global_step, "max_steps", auto_stop, dist_ctx)
                 _save_distributed(model, tokenizer, final_output_dir, dist_ctx)
                 return final_output_dir
@@ -387,9 +417,51 @@ def train_slime(config: SingleGpuSlimeConfig) -> Path:
             step=global_step,
             sync_state=weight_sync_state,
         )
+    _maybe_run_held_out_eval(
+        model=model,
+        tokenizer=tokenizer,
+        config=config,
+        torch=torch,
+        dist_ctx=dist_ctx,
+        step=global_step,
+        metrics_path=metrics_path,
+        force=True,
+    )
     _write_training_state(config, global_step, "complete", auto_stop, dist_ctx)
     _save_distributed(model, tokenizer, final_output_dir, dist_ctx)
     return final_output_dir
+
+
+def _maybe_run_held_out_eval(
+    *,
+    model,
+    tokenizer,
+    config: SingleGpuSlimeConfig,
+    torch,
+    dist_ctx: _DistributedSlimeContext,
+    step: int,
+    metrics_path: Path,
+    force: bool,
+) -> None:
+    """Run frozen held-out unit-test eval on the main rank when configured."""
+    if config.eval_dataset is None or not dist_ctx.is_main:
+        return
+    if force:
+        if not config.eval_on_complete:
+            return
+    elif not config.eval_every_steps or not step or step % config.eval_every_steps != 0:
+        return
+    from seiso.slime.eval import run_held_out_eval
+
+    metrics = run_held_out_eval(
+        model=model,
+        tokenizer=tokenizer,
+        config=config,
+        torch=torch,
+        step=step,
+    )
+    if metrics:
+        _append_metrics(metrics_path, {"step": step, **metrics})
 
 
 def _collect_training_rollout_batch(

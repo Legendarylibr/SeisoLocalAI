@@ -207,7 +207,7 @@ def build_synthetic_code_preference_bundle(
     *,
     output_dir: Path,
     seed: int = 0,
-    train_fraction: float = 0.8,
+    train_fraction: float = 0.85,
     limit: int | None = None,
     include_variants: bool = True,
     on_log=None,

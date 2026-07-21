@@ -8,6 +8,7 @@ from pathlib import Path
 from seiso.rl_verify.code_proof import verify_code_proof
 from seiso.rl_verify.synth_code import (
     build_preference,
+    emit_held_out_eval_jsonl,
     emit_standard_artifacts,
     synthesize_code_bundle,
     validate_task,
@@ -137,3 +138,70 @@ def test_distill_synthetic_code_preference_bundle(tmp_path: Path):
     assert row["chosen_passed"] is True
     assert row["rejected_passed"] is False
     assert row["reward_source"] == "synthetic_code_unit_tests"
+
+
+def test_emit_held_out_eval_disjoint_from_train(tmp_path: Path):
+    train = synthesize_code_bundle(
+        seed=0,
+        include_variants=False,
+        build_preferences=False,
+        verify=True,
+        corpus_count=8,
+        include_hand_catalog=False,
+    )
+    train_ids = {str(t.task_id) for t in train.tasks}
+    n, eval_seed = emit_held_out_eval_jsonl(
+        data_dir=tmp_path,
+        count=8,
+        seed=0,
+        train_seed=0,
+        verify=True,
+        train_prompt_ids=train_ids,
+    )
+    assert n == 8
+    assert eval_seed == 10_007
+    rows = [
+        json.loads(line)
+        for line in (tmp_path / "slime_code_eval.jsonl").read_text().splitlines()
+        if line.strip()
+    ]
+    assert len(rows) == 8
+    for row in rows:
+        assert row["held_out"] is True
+        assert str(row["prompt_id"]).startswith("eval_")
+        bare = str(row["prompt_id"]).removeprefix("eval_")
+        assert bare not in train_ids
+        assert verify_code_proof(
+            f"```python\n{row['solution']}```",
+            {"tests": row["tests"], "timeout_s": row.get("timeout_s", 3)},
+        ).passed
+
+
+def test_emit_standard_artifacts_with_eval(tmp_path: Path):
+    stats = emit_standard_artifacts(
+        data_dir=tmp_path,
+        seed=0,
+        verify=True,
+        corpus_count=4,
+        include_hand_catalog=False,
+        include_variants=False,
+        build_preferences=False,
+        eval_count=4,
+    )
+    assert stats["slime_code_eval"] == 4
+    assert stats["eval_seed"] == 10_007
+    assert (tmp_path / "slime_code_eval.jsonl").is_file()
+
+
+def test_distill_synthetic_default_train_fraction_holds_out_val(tmp_path: Path):
+    from seiso.distill_rl.preferences import build_synthetic_code_preference_bundle
+
+    out = build_synthetic_code_preference_bundle(
+        output_dir=tmp_path / "prefs",
+        seed=1,
+        limit=40,
+        include_variants=False,
+    )
+    assert out.train_count > out.val_count >= 1
+    frac = out.train_count / (out.train_count + out.val_count)
+    assert 0.8 <= frac <= 0.9
