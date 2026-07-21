@@ -14,7 +14,7 @@ from forge.services.user_paths import (
     user_dir,
 )
 from seiso.models.hf_env import resolve_hf_cache_dir
-from seiso.security import SecurityError
+from seiso.security import USER_SCOPED_DATA_ROOTS, SecurityError
 
 
 def test_data_dir_layout_matches_docs(tmp_path: Path, monkeypatch):
@@ -50,6 +50,15 @@ def test_data_dir_layout_matches_docs(tmp_path: Path, monkeypatch):
     assert model_dir == settings.data_dir / "models" / uid
     model_dir.mkdir(parents=True, exist_ok=True)
     assert model_dir.is_dir()
+
+
+def test_user_dir_uses_shared_scoped_roots(tmp_path: Path):
+    """Forge must not maintain a divergent root set (S1-003)."""
+    for category in USER_SCOPED_DATA_ROOTS:
+        path = user_dir(tmp_path, "user-1", category)
+        assert path == tmp_path / category / "user-1"
+    with pytest.raises(SecurityError, match="Unknown user path category"):
+        user_dir(tmp_path, "user-1", "hf_cache")
 
 
 def test_assert_user_path_allows_inventory_symlink(tmp_path: Path):

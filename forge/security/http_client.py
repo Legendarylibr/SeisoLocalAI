@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import socket
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -11,34 +10,57 @@ import httpx
 from forge.security.url_policy import PinnedEndpoint
 
 
-class _PinnedGetaddrinfo:
-    """Force socket resolution for one hostname to a pre-validated IP."""
+def _normalize_host(host: str) -> str:
+    return (host or "").lower().rstrip(".")
 
-    def __init__(self, host: str, ip: str) -> None:
-        self._host = host.lower().rstrip(".")
-        self._ip = ip
-        self._real = socket.getaddrinfo
 
-    def __enter__(self) -> None:
-        host = self._host
-        ip = self._ip
-        real = self._real
+def pin_request_to_ip(
+    request: httpx.Request, *, host: str, pinned_ip: str
+) -> httpx.Request:
+    """Rewrite a request to connect via ``pinned_ip`` without global DNS patches.
 
-        def patched(name: str, *args: Any, **kwargs: Any) -> Any:
-            if (name or "").lower().rstrip(".") == host:
-                return real(ip, *args, **kwargs)
-            return real(name, *args, **kwargs)
+    Preserves the original hostname in the ``Host`` header and TLS SNI so
+    certificate verification still targets the validated hostname while the TCP
+    connect address stays on the pre-resolved IP (SSRF DNS-rebinding defense).
+    """
+    expected = _normalize_host(host)
+    req_host = _normalize_host(request.url.host or "")
+    if not expected or req_host != expected:
+        return request
 
-        socket.getaddrinfo = patched  # type: ignore[method-assign]
+    headers = request.headers.copy()
+    headers["host"] = expected
+    extensions = dict(request.extensions)
+    extensions["sni_hostname"] = expected
+    return httpx.Request(
+        method=request.method,
+        url=request.url.copy_with(host=pinned_ip),
+        headers=headers,
+        stream=request.stream,
+        extensions=extensions,
+    )
 
-    def __exit__(self, *_: object) -> None:
-        socket.getaddrinfo = self._real  # type: ignore[method-assign]
+
+class _PinnedIPTransport(httpx.AsyncHTTPTransport):
+    """httpx transport that connects via a pre-validated IP for one hostname."""
+
+    def __init__(self, host: str, pinned_ip: str, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._host = _normalize_host(host)
+        self._pinned_ip = pinned_ip
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        pinned = pin_request_to_ip(
+            request, host=self._host, pinned_ip=self._pinned_ip
+        )
+        return await super().handle_async_request(pinned)
 
 
 @asynccontextmanager
 async def pinned_async_client(endpoint: PinnedEndpoint, *, timeout: float = 120.0):
     """Yield an httpx client that connects only to endpoint.pinned_ip (when set)."""
     if endpoint.pinned_ip:
+<<<<<<< Updated upstream
         resolver = _PinnedGetaddrinfo(endpoint.host, endpoint.pinned_ip)
         resolver.__enter__()
         try:
@@ -51,6 +73,19 @@ async def pinned_async_client(endpoint: PinnedEndpoint, *, timeout: float = 120.
     else:
         async with httpx.AsyncClient(
             timeout=timeout, follow_redirects=False
+=======
+        transport = _PinnedIPTransport(endpoint.host, endpoint.pinned_ip)
+        async with httpx.AsyncClient(
+            transport=transport,
+            timeout=timeout,
+            follow_redirects=False,
+        ) as client:
+            yield client
+    else:
+        async with httpx.AsyncClient(
+            timeout=timeout,
+            follow_redirects=False,
+>>>>>>> Stashed changes
         ) as client:
             yield client
 

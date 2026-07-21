@@ -4,7 +4,14 @@ from pathlib import Path
 
 import pytest
 
-from seiso.security import SecurityError, assert_within, safe_join, sanitize_filename
+from seiso.security import (
+    USER_SCOPED_DATA_ROOTS,
+    SecurityError,
+    assert_user_scoped_path,
+    assert_within,
+    safe_join,
+    sanitize_filename,
+)
 
 
 def test_safe_join_blocks_traversal(tmp_path: Path):
@@ -67,3 +74,46 @@ def test_sanitize_filename():
     assert "evil" in sanitize_filename("../../evil")
     assert sanitize_filename("") == "unnamed"
     assert sanitize_filename("My Model v1.safetensors") == "My Model v1.safetensors"
+
+
+def test_user_scoped_data_roots_cover_tenant_categories():
+    """Canonical set used by CLI + Forge; keep categories explicit."""
+    expected = {
+        "uploads",
+        "knowledge",
+        "artifacts",
+        "sandbox",
+        "models",
+        "checkpoints",
+        "exports",
+        "compress",
+        "distill_rl",
+        "rl_quant",
+    }
+    assert USER_SCOPED_DATA_ROOTS == expected
+    assert "hf_cache" not in USER_SCOPED_DATA_ROOTS
+
+
+def test_assert_user_scoped_path_allows_owner_tree(tmp_path: Path):
+    user_id = "user-1"
+    target = tmp_path / "uploads" / user_id / "data.jsonl"
+    target.parent.mkdir(parents=True)
+    target.write_text("{}", encoding="utf-8")
+    assert assert_user_scoped_path(tmp_path, user_id, target) == target.resolve()
+
+
+def test_assert_user_scoped_path_rejects_cross_user(tmp_path: Path):
+    target = tmp_path / "models" / "other" / "m.gguf"
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"x")
+    with pytest.raises(SecurityError, match="Path must be under"):
+        assert_user_scoped_path(tmp_path, "user-1", target)
+
+
+def test_assert_user_scoped_path_rejects_hf_cache_direct(tmp_path: Path):
+    """Shared cache is not a user-scoped root (Forge inventory links handle access)."""
+    cache = tmp_path / "hf_cache" / "blob.bin"
+    cache.parent.mkdir(parents=True)
+    cache.write_bytes(b"x")
+    with pytest.raises(SecurityError, match="Access denied to path root"):
+        assert_user_scoped_path(tmp_path, "user-1", cache)

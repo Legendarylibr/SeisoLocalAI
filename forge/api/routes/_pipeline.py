@@ -98,7 +98,7 @@ def register_formatted_job_routes(
             stage_json = (row or {}).get("stage_results_json") or ""
             status = str((row or {}).get("status") or "").lower()
             if (
-                status in {"completed", "succeeded", "success"}
+                status == "completed"
                 and stage_json.strip()
                 and stage_json.strip() not in {"{}", "null", "None"}
             ):

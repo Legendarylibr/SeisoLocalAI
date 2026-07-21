@@ -80,6 +80,9 @@ class DatabaseCore:
             await conn.execute("PRAGMA mmap_size = 268435456")
 
     async def _migrate_schema(self, conn: aiosqlite.Connection) -> None:
+        # Drop schema-only leftovers that never had writers (F4-03/04/05).
+        for dead_table in ("recipe_jobs", "knowledge_bases", "projects"):
+            await conn.execute(f"DROP TABLE IF EXISTS {dead_table}")  # nosec B608
         for table in _JOB_ERROR_TABLES:
             async with conn.execute(f"PRAGMA table_info({table})") as cur:
                 cols = {row[1] for row in await cur.fetchall()}

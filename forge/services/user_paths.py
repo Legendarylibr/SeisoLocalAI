@@ -1,9 +1,15 @@
-"""Per-user filesystem path policy — tenant isolation under shared data_dir."""
+"""Per-user filesystem path policy — tenant isolation under shared data_dir.
+
+Scoped root names come from ``seiso.security.USER_SCOPED_DATA_ROOTS``. This
+module is the Forge wrapper that adds inventory→hf_cache symlink allowance
+(``assert_user_path``) on top of the shared root set.
+"""
 
 from __future__ import annotations
 
 from pathlib import Path
 
+<<<<<<< Updated upstream
 from seiso.security import SecurityError, assert_within, safe_join
 
 _USER_SCOPED_ROOTS = frozenset(
@@ -20,7 +26,16 @@ _USER_SCOPED_ROOTS = frozenset(
         "rl_quant",
         "recipes",
     }
+=======
+from seiso.security import (
+    USER_SCOPED_DATA_ROOTS,
+    SecurityError,
+    assert_within,
+    safe_join,
+>>>>>>> Stashed changes
 )
+
+# Shared HF cache is not user-scoped; reachable only via models/<user_id>/ inventory links.
 _SHARED_CACHE_ROOTS = frozenset({"hf_cache"})
 
 
@@ -34,7 +49,7 @@ def _logical_path(source: Path) -> Path:
 
 def user_dir(sandbox_root: Path, user_id: str, category: str) -> Path:
     """Return (and does not create) a user-owned directory under category."""
-    if category not in _USER_SCOPED_ROOTS:
+    if category not in USER_SCOPED_DATA_ROOTS:
         raise SecurityError(f"Unknown user path category: {category}")
     return safe_join(sandbox_root, category, user_id)
 
@@ -120,7 +135,7 @@ def _assert_resolved_scope(
         raise SecurityError("Invalid path")
 
     root = rel.parts[0]
-    if root in _USER_SCOPED_ROOTS:
+    if root in USER_SCOPED_DATA_ROOTS:
         if len(rel.parts) >= 2 and rel.parts[1] == user_id:
             return
         raise SecurityError(f"Path must be under {root}/{user_id}/")
@@ -158,7 +173,7 @@ def assert_user_path(sandbox_root: Path, user_id: str, target: str | Path) -> Pa
     if not log_rel.parts:
         raise SecurityError("Invalid path")
     log_root = log_rel.parts[0]
-    if log_root not in _USER_SCOPED_ROOTS:
+    if log_root not in USER_SCOPED_DATA_ROOTS:
         raise SecurityError(f"Access denied to path root: {log_root!r}")
     if len(log_rel.parts) < 2 or log_rel.parts[1] != user_id:
         raise SecurityError(f"Path must be under {log_root}/{user_id}/")
