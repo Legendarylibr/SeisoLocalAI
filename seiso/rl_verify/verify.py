@@ -10,7 +10,6 @@ from typing import Any
 from seiso.rl_verify.extract import (
     extract_choice,
     final_answer_text,
-    has_closed_thinking_trace,
     last_number,
     normalize_answer,
     split_thinking_trace,
@@ -198,12 +197,30 @@ def format_reward(
     completion: str,
     *,
     require_thinking_trace: bool,
+    min_thinking_tokens: int = 0,
 ) -> tuple[bool, float]:
-    """Binary format score on *raw* generated tokens only."""
+    """Format score on *raw* generated tokens only.
+
+    - ``format_score`` is soft in ``[0, 1]``: empty/short traces do not earn
+      full format bonus (blocks ``<think></think>`` reward hacking).
+    - A closed trace with no final-answer text is capped at half credit.
+    - ``format_ok`` is True only at full credit so ``missing_thinking_penalty``
+      also covers empty/short shells (not only missing close tags).
+    """
     if not require_thinking_trace:
         return True, 0.0
-    ok = has_closed_thinking_trace(completion)
-    return ok, (1.0 if ok else 0.0)
+    thinking_trace, final_answer, closed = split_thinking_trace(completion)
+    if not closed:
+        return False, 0.0
+    tokens = re.findall(r"\w+", thinking_trace)
+    if min_thinking_tokens > 0:
+        score = min(1.0, len(tokens) / float(min_thinking_tokens))
+    else:
+        score = 1.0 if tokens else 0.0
+    if not final_answer.strip():
+        score *= 0.5
+    score = float(score)
+    return score >= 1.0 - 1e-9, score
 
 
 def experimental_process_reward(
@@ -212,7 +229,11 @@ def experimental_process_reward(
     *,
     min_thinking_tokens: int = 8,
 ) -> float:
-    """Lexical process heuristic — keep weight 0 unless explicitly experimenting."""
+    """Lexical process heuristic — keep weight 0 unless explicitly experimenting.
+
+    Transition markers are counted uniquely so keyword stuffing cannot max out
+    the process channel.
+    """
     tokens = re.findall(r"\w+", thinking_trace)
     if not tokens:
         return 0.0
@@ -222,8 +243,8 @@ def experimental_process_reward(
     else:
         score += 0.35 * (len(tokens) / max(min_thinking_tokens, 1))
     lower = thinking_trace.lower()
-    transition_hits = sum(marker in lower for marker in _TRANSITION_MARKERS)
-    score += min(0.35, 0.07 * transition_hits)
+    unique_transitions = sum(1 for marker in _TRANSITION_MARKERS if marker in lower)
+    score += min(0.35, 0.07 * unique_transitions)
     if _REVISION_RE.search(lower):
         score += 0.15
     if final_answer.strip():
@@ -287,7 +308,9 @@ def score_completion(
     """
     thinking_trace, final_answer, has_closed = split_thinking_trace(completion)
     format_ok, format_score = format_reward(
-        completion, require_thinking_trace=require_thinking_trace
+        completion,
+        require_thinking_trace=require_thinking_trace,
+        min_thinking_tokens=min_thinking_tokens,
     )
 
     answer = sample.get("answer")
@@ -368,7 +391,11 @@ def score_completion(
     if use_code and proof_detail is not None:
         detail = proof_detail
     elif require_thinking_trace and not format_ok:
-        detail = "missing_closed_think_trace"
+        detail = (
+            "missing_closed_think_trace"
+            if not has_closed
+            else "thinking_format_incomplete"
+        )
     elif not passed and answer is not None:
         detail = "outcome_mismatch"
 

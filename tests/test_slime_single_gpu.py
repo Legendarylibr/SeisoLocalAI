@@ -515,16 +515,18 @@ def test_completion_scoring_is_outcome_first_with_format_bonus(tmp_path: Path):
     jumped = _score_completion("42", {"answer": "42"}, cfg)
 
     assert score["outcome_reward"] == 1.0
-    assert score["format_reward"] == 1.0
+    # "First check the arithmetic" = 4 tokens vs min_thinking_tokens=8 → 0.5
+    assert score["format_reward"] == pytest.approx(0.5)
     assert score["process_reward"] == 0.0
-    assert score["thinking_penalty"] == 0.0
+    assert score["format_ok"] is False
+    assert score["thinking_penalty"] == pytest.approx(0.25)
     assert score["outcome_passed"] is True
-    assert score["reward"] == pytest.approx(1.1)
-    assert continued["format_ok"] is True
-    assert continued["format_reward"] == 1.0
-    assert continued["thinking_penalty"] == 0.0
+    assert score["reward"] == pytest.approx(1.0 + 0.1 * 0.5 - 0.25)
+    assert continued["format_ok"] is False
+    assert continued["format_reward"] == pytest.approx(0.5)
+    assert continued["thinking_penalty"] == pytest.approx(0.25)
     assert continued["final_answer"] == "42"
-    assert continued["reward"] == pytest.approx(1.1)
+    assert continued["reward"] == pytest.approx(1.0 + 0.1 * 0.5 - 0.25)
     assert jumped["outcome_reward"] == 1.0
     assert jumped["format_ok"] is False
     assert jumped["thinking_penalty"] == 0.25

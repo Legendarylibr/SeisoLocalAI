@@ -220,6 +220,7 @@ def test_build_preference_bundle_forwards_trust_remote_code(
 
 
 def test_outcome_group_sampling_prefers_best_candidate(monkeypatch):
+    from seiso.distill_rl.outcome import format_thinking_prompt
     from seiso.distill_rl.rollouts import generate_outcome_preference_rows
 
     prompts = [
@@ -230,6 +231,7 @@ def test_outcome_group_sampling_prefers_best_candidate(monkeypatch):
             benchmark="gsm8k",
         )
     ]
+    instruction = "Show your reasoning in <think>...</think>, then give the final answer."
 
     monkeypatch.setattr(
         "seiso.distill_rl.rollouts.generate_completion_groups",
@@ -244,9 +246,12 @@ def test_outcome_group_sampling_prefers_best_candidate(monkeypatch):
         seed=13,
         use_chat_template=False,
         grpo_group_size=3,
+        require_thinking_trace=True,
+        thinking_instruction=instruction,
     )
 
     assert rows[0]["chosen"] == "<think>compute</think>42"
+    assert rows[0]["prompt"] == format_thinking_prompt(prompts[0].text, instruction)
     assert rows[0]["chosen_reward"] == 1.0
     assert rows[0]["chosen_passed"] is True
     assert rows[0]["rejected_reward"] == 0.0
@@ -316,7 +321,57 @@ def test_verifiable_prompts_never_use_teacher_as_chosen(monkeypatch):
         verifiable_outcome_rewards=True,
     )
     assert called_outcome["n"] == 1
-    assert {r["prompt_id"] for r in rows_on} == {"gsm", "chat"}
+    # Outcome-only mode skips open prompts (no teacher≻student dilution).
+    assert {r["prompt_id"] for r in rows_on} == {"gsm"}
+    # No additional teacher/student generate beyond the rows_off path above.
+    assert called_generate["n"] == 2
+
+
+def test_outcome_only_rejects_open_prompt_library(monkeypatch):
+    from seiso.distill_rl.rollouts import generate_preference_rows
+
+    monkeypatch.setattr(
+        "seiso.distill_rl.rollouts.generate_completions",
+        lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("no teacher path")),
+    )
+    with pytest.raises(ValueError, match="no prompts have answers/tests"):
+        generate_preference_rows(
+            teacher_model="teacher",
+            student_model="student",
+            prompts=[RolloutPrompt(prompt_id="chat", text="Say hello")],
+            max_new_tokens=8,
+            temperature=0.0,
+            seed=1,
+            use_chat_template=False,
+            verifiable_outcome_rewards=True,
+        )
+
+
+def test_outcome_only_fails_loud_when_no_pairs(monkeypatch):
+    from seiso.distill_rl.rollouts import generate_preference_rows
+
+    monkeypatch.setattr(
+        "seiso.distill_rl.rollouts.generate_outcome_preference_rows",
+        lambda **_k: [],
+    )
+    with pytest.raises(ValueError, match="produced no preference pairs"):
+        generate_preference_rows(
+            teacher_model="teacher",
+            student_model="student",
+            prompts=[
+                RolloutPrompt(
+                    prompt_id="gsm",
+                    text="What is 40 + 2?",
+                    answer="42",
+                    benchmark="gsm8k",
+                )
+            ],
+            max_new_tokens=8,
+            temperature=0.0,
+            seed=1,
+            use_chat_template=False,
+            verifiable_outcome_rewards=True,
+        )
 
 
 def test_outcome_group_sampling_skips_when_no_pass(monkeypatch):

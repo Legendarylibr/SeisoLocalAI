@@ -432,6 +432,15 @@ class SeisoTrainer:
         if resolved_fmt == DatasetFormat.AUTO and len(train_ds) > 0:
             resolved_fmt = detect_format(train_ds[0])
 
+        # Preference gate must hold even when preprocess_dataset=false.
+        if resolved_fmt == DatasetFormat.PREFERENCE and not cfg.preference_as_sft:
+            raise ValueError(
+                "Preference datasets (chosen/rejected) are not SFT alignment. "
+                "Use Distill-RL/DPO (`seiso distill-rl`) for real preference learning, "
+                "or set preference_as_sft=true to train supervised on chosen responses "
+                "only (rejected pairs are discarded)."
+            )
+
         use_packing = bool(cfg.packing)
         if should_disable_packing_for_response_mask(
             use_packing, cfg.train_on_responses_only, resolved_fmt
@@ -894,14 +903,11 @@ class SeisoTrainer:
             base["dataloader_prefetch_factor"] = prefetch_factor
         if grad_ckpt_kwargs is not None:
             base["gradient_checkpointing_kwargs"] = grad_ckpt_kwargs
-        # NEFTune is an instruction-tuning regularizer — skip for causal LM / CPT.
+        # NEFTune is an instruction-tuning regularizer — skip for plain-text CPT.
         use_neftune = (
             cfg.neftune_noise_alpha is not None
             and not use_cpu
-            and not (
-                dataset_format == DatasetFormat.TEXT
-                and not cfg.train_on_responses_only
-            )
+            and dataset_format != DatasetFormat.TEXT
         )
         if use_neftune:
             base["neftune_noise_alpha"] = cfg.neftune_noise_alpha

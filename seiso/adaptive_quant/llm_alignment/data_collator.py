@@ -48,29 +48,55 @@ class DPODataCollator:
         )
 
     def _tokenize_pair(self, prompt: str, completion: str) -> dict[str, list[int]]:
-        """Tokenize ``prompt + completion`` and build label mask."""
+        """Tokenize ``prompt + completion`` jointly and build label mask.
+
+        Joint encoding avoids BPE boundary artifacts from concatenating separately
+        tokenized prompt/completion id lists.
+        """
         prompt_text = self._format_prompt(prompt)
-        prompt_ids = self.tokenizer(
-            prompt_text,
-            add_special_tokens=not self.use_chat_template,
-            truncation=True,
-            max_length=self.max_prompt_length,
-        )["input_ids"]
-        completion_ids = self.tokenizer(
-            completion,
-            add_special_tokens=False,
-            truncation=True,
-            max_length=max(1, self.max_length - len(prompt_ids)),
-        )["input_ids"]
+        add_special = not self.use_chat_template
+        prompt_ids = list(
+            self.tokenizer(
+                prompt_text,
+                add_special_tokens=add_special,
+                truncation=True,
+                max_length=self.max_prompt_length,
+            )["input_ids"]
+        )
+        full_ids = list(
+            self.tokenizer(
+                prompt_text + completion,
+                add_special_tokens=add_special,
+                truncation=True,
+                max_length=self.max_length,
+            )["input_ids"]
+        )
+        # Longest common prefix with prompt-only ids = supervised start boundary.
+        prompt_len = 0
+        for left, right in zip(prompt_ids, full_ids, strict=False):
+            if left != right:
+                break
+            prompt_len += 1
+        if prompt_len == 0 and prompt_ids and full_ids:
+            # Completely divergent encodings — fall back to separate concat.
+            completion_ids = list(
+                self.tokenizer(
+                    completion,
+                    add_special_tokens=False,
+                    truncation=True,
+                    max_length=max(1, self.max_length - len(prompt_ids)),
+                )["input_ids"]
+            )
+            full_ids = (prompt_ids + completion_ids)[: self.max_length]
+            prompt_len = min(len(prompt_ids), len(full_ids))
 
-        input_ids = (prompt_ids + completion_ids)[: self.max_length]
-        prompt_len = min(len(prompt_ids), len(input_ids))
-
-        # Prompt positions are masked (-100); only completion tokens contribute to logps.
-        labels = input_ids.copy()
+        labels = list(full_ids)
         labels[:prompt_len] = [self.label_pad_token_id] * prompt_len
-
-        return {"input_ids": input_ids, "labels": labels, "prompt_length": prompt_len}
+        return {
+            "input_ids": full_ids,
+            "labels": labels,
+            "prompt_length": prompt_len,
+        }
 
     def _pad_sequences(
         self,
