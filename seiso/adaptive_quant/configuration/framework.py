@@ -542,9 +542,6 @@ class FrameworkConfig:
     def final_checkpoint_path(self) -> str:
         return f"{self.checkpoint_dir}/{self.run_name}_final.pt"
 
-    def report_path(self) -> str:
-        return f"{self.report_dir}/{self.run_name}_report.md"
-
     def gguf_export_path(self, *, quant_type: str) -> str:
         safe_type = quant_type.replace("/", "_").replace("\\", "_")
         return f"{self.gguf_export_dir}/{self.run_name}_{safe_type}.gguf"

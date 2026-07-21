@@ -287,81 +287,6 @@ def build_claims_validation(
     }
 
 
-def research_contract_report_lines(contract: Mapping[str, Any]) -> list[str]:
-    """Markdown bullets for the Research scope section in reports."""
-    learning = contract.get("learning_target")
-    evidence = contract.get("evidence")
-    measurement = contract.get("measurement")
-    lines: list[str] = []
-    if isinstance(learning, dict):
-        artifacts = learning.get("trained_artifacts")
-        if isinstance(artifacts, list) and len(artifacts) > 1:
-            primary = ", ".join(f"`{x}`" for x in artifacts)
-            lines.append(f"- **Trained artifacts:** {primary}")
-        else:
-            lines.append(
-                f"- **Learning target:** `{learning.get('object')}` "
-                f"(checkpoint: `{learning.get('trained_artifact')}`)"
-            )
-        if learning.get("gguf_export_enabled"):
-            lines.append("- **GGUF export:** enabled (`llama_cpp_gguf_export_enabled`)")
-        does_not = learning.get("does_not_train")
-        if isinstance(does_not, list) and does_not:
-            lines.append(
-                f"- **Does not train:** {', '.join(f'`{x}`' for x in does_not)}"
-            )
-    if isinstance(evidence, dict):
-        lines.append(f"- **Evidence level:** `{evidence.get('level')}`")
-        sources = evidence.get("metric_sources")
-        if isinstance(sources, dict):
-            perf = sources.get("latency_ms", "?")
-            quality = sources.get("perplexity", "?")
-            lines.append(
-                f"- **Metric sources:** latency/throughput `{perf}`; quality `{quality}`"
-            )
-        boundary = evidence.get("claim_boundary")
-        if isinstance(boundary, dict):
-            valid = boundary.get("valid_claims")
-            if isinstance(valid, list) and valid:
-                lines.append(f"- **Valid claims:** {valid[0]}")
-    if isinstance(measurement, dict):
-        lines.append(
-            f"- **Measurement backend:** `{measurement.get('backend')}` "
-            f"(training `{measurement.get('training_backend')}`)"
-        )
-        if measurement.get("router_enabled"):
-            lines.append(
-                f"- **Router:** `{measurement.get('router_route_count')}` pre-built GGUF route(s)"
-            )
-        rust_cli = measurement.get("rust_cli")
-        if isinstance(rust_cli, dict) and rust_cli.get("enabled"):
-            avail = (
-                "available"
-                if rust_cli.get("available")
-                else "binary missing (Python fallback)"
-            )
-            lines.append(f"- **Rust simulator CLI:** {avail}")
-    return lines
-
-
-def artifact_index_report_lines(artifact_index: Mapping[str, Any] | None) -> list[str]:
-    if not isinstance(artifact_index, dict):
-        return []
-    lines: list[str] = []
-    for key in (
-        "summary_json",
-        "checkpoint",
-        "recommendation_json",
-        "exported_gguf",
-        "paper_bundle_dir",
-        "analysis_dir",
-    ):
-        path = artifact_index.get(key)
-        if path:
-            lines.append(f"- `{key}`: `{path}`")
-    return lines or ["- (artifact paths recorded in summary JSON)"]
-
-
 __all__ = [
     "EVIDENCE_LOCAL_LLAMA_CPP",
     "EVIDENCE_MULTISEED",
@@ -370,10 +295,8 @@ __all__ = [
     "LEARNING_TARGET_GGUF_EXPORT",
     "LEARNING_TARGET_POLICY",
     "SCHEMA_VERSION",
-    "artifact_index_report_lines",
     "build_claims_validation",
     "build_research_contract",
     "infer_evidence_level",
     "metric_sources_for_config",
-    "research_contract_report_lines",
 ]

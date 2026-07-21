@@ -1,4 +1,4 @@
-"""Headline metrics and report helpers — keep ``*_summary.json`` and reports readable."""
+"""Headline metrics helpers — keep ``*_summary.json`` readable."""
 
 from __future__ import annotations
 
@@ -72,115 +72,6 @@ def slim_analysis_for_summary(
         entry["artifacts_dir"] = str(root / subdir)
         slim[name] = entry
     return slim
-
-
-def analysis_takeaway_lines(analysis: dict[str, object]) -> list[str]:
-    lines: list[str] = []
-    hardware = analysis.get("hardware")
-    if isinstance(hardware, dict):
-        gap = hardware.get("generalization_gap")
-        if gap is not None:
-            lines.append(
-                f"- Hardware generalization gap (reward spread): **{_fmt(gap)}** "
-                "(lower is more uniform across hardware modes)"
-            )
-        rewards = hardware.get("reward_by_hardware")
-        if isinstance(rewards, dict) and rewards:
-            best = max(rewards.items(), key=lambda item: float(item[1]))
-            worst = min(rewards.items(), key=lambda item: float(item[1]))
-            lines.append(
-                f"- Best hardware mode for reward: `{best[0]}` ({_fmt(best[1])}); "
-                f"weakest: `{worst[0]}` ({_fmt(worst[1])})"
-            )
-
-    inputs = analysis.get("input")
-    if isinstance(inputs, dict):
-        by_c = inputs.get("by_complexity")
-        if isinstance(by_c, dict) and by_c:
-            bits = {
-                bucket: float((metrics or {}).get("average_bits", 0.0))
-                for bucket, metrics in by_c.items()
-                if isinstance(metrics, dict)
-            }
-            if bits:
-                low, high = (
-                    min(bits.items(), key=lambda x: x[1]),
-                    max(bits.items(), key=lambda x: x[1]),
-                )
-                lines.append(
-                    f"- Input complexity vs precision: `{low[0]}` → {_fmt(low[1])} bits, "
-                    f"`{high[0]}` → {_fmt(high[1])} bits"
-                )
-
-    training = analysis.get("training_dynamics")
-    if isinstance(training, dict) and training.get("mean_reward") is not None:
-        lines.append(
-            f"- Training dynamics mean step reward: **{_fmt(training.get('mean_reward'))}**"
-        )
-
-    moe_cache = analysis.get("moe_cache")
-    if (
-        isinstance(moe_cache, dict)
-        and moe_cache.get("mean_cache_miss_count") is not None
-    ):
-        lines.append(
-            f"- MoE cache: mean misses **{_fmt(moe_cache.get('mean_cache_miss_count'))}**, "
-            f"swap cost **{_fmt(moe_cache.get('mean_swap_cost_ms'))} ms**"
-        )
-
-    return lines or ["- (no analysis takeaways — check logs under `outputs/analysis/`)"]
-
-
-def benchmark_metric_rows(
-    benchmark_summary: dict[str, object],
-) -> list[list[str]]:
-    """Flatten head-to-head benchmark eval metrics into table rows."""
-    rows: list[list[str]] = []
-    sections = (
-        ("static_vs_dynamic", ("static", "dynamic")),
-        ("discrete_vs_learned", ("discrete", "learned")),
-    )
-    metrics = (
-        "mean_reward",
-        "mean_latency_ms",
-        "mean_throughput_tps",
-        "mean_stability_penalty",
-    )
-    for section_name, variants in sections:
-        section = benchmark_summary.get(section_name)
-        if not isinstance(section, dict):
-            continue
-        evaluation = section.get("evaluation")
-        if not isinstance(evaluation, dict):
-            continue
-        for metric in metrics:
-            cells = [f"{section_name}.{metric}"]
-            for variant in variants:
-                bucket = evaluation.get(variant)
-                if isinstance(bucket, dict):
-                    cells.append(_fmt(bucket.get(metric)))
-                else:
-                    cells.append("—")
-            if len(cells) == 3:
-                rows.append(cells)
-        for delta_name, delta_value in section.items():
-            if delta_name in {"train", "evaluation"}:
-                continue
-            rows.append([f"{section_name}.{delta_name}", _fmt(delta_value), "—", "—"])
-    single = benchmark_summary.get("single_vs_multi")
-    if (
-        isinstance(single, dict)
-        and single.get("generalization_gap_improvement") is not None
-    ):
-        rows.append(
-            [
-                "single_vs_multi.gap_improvement",
-                _fmt(single.get("generalization_gap_improvement")),
-                "—",
-                "—",
-            ]
-        )
-    return rows
 
 
 def experiment_config_summary(config: FrameworkConfig) -> dict[str, object]:
@@ -265,34 +156,6 @@ def slim_online_analysis_for_summary(
     return slim
 
 
-def online_analysis_takeaway_lines(online_analysis: dict[str, object]) -> list[str]:
-    lines: list[str] = []
-    if online_analysis.get("mean_served_reward") is not None:
-        lines.append(
-            f"- Mean served reward: **{_fmt(online_analysis.get('mean_served_reward'))}**"
-        )
-    if online_analysis.get("candidate_accept_rate") is not None:
-        lines.append(
-            f"- Candidate accept rate: **{_fmt(online_analysis.get('candidate_accept_rate'))}**"
-        )
-    if online_analysis.get("online_update_rate") is not None:
-        lines.append(
-            f"- Online update rate: **{_fmt(online_analysis.get('online_update_rate'))}**"
-        )
-    rollback = online_analysis.get("rollback_count")
-    if rollback is not None:
-        lines.append(f"- Rollbacks: **{int(rollback)}**")
-    rewards = online_analysis.get("reward_by_hardware")
-    if isinstance(rewards, dict) and rewards:
-        best = max(rewards.items(), key=lambda item: float(item[1]))
-        lines.append(
-            f"- Best hardware for served reward: `{best[0]}` ({_fmt(best[1])})"
-        )
-    return lines or [
-        "- (no online analysis takeaways — check `outputs/analysis/<run>/online/`)"
-    ]
-
-
 def recommendation_decision_block(payload: dict[str, object]) -> dict[str, object]:
     adaptive = payload.get("adaptive_policy")
     recommended = payload.get("recommended_quant")
@@ -342,7 +205,7 @@ def build_research_artifact_index(
     config: FrameworkConfig,
     artifacts: Mapping[str, Any],
 ) -> dict[str, str | None]:
-    """Stable artifact map for research-grade navigation in summaries and reports."""
+    """Stable artifact map for summary navigation."""
     paper_bundle = artifacts.get("paper_bundle")
     bundle_dir: str | None = None
     if isinstance(paper_bundle, Mapping):
@@ -374,31 +237,10 @@ def _artifact_path(artifacts: Mapping[str, Any], key: str) -> str | None:
     return str(value)
 
 
-def gguf_export_report_lines(gguf_export: Mapping[str, Any] | None) -> list[str]:
-    if not isinstance(gguf_export, dict):
-        return ["- GGUF export disabled."]
-    if not gguf_export.get("enabled"):
-        return ["- GGUF export disabled (`llama_cpp_gguf_export_enabled=false`)."]
-    if gguf_export.get("error"):
-        return [f"- GGUF export failed: `{gguf_export.get('error')}`"]
-    output_path = gguf_export.get("output_path")
-    if output_path:
-        return [
-            f"- exported GGUF: `{output_path}`",
-            f"- quant type: `{gguf_export.get('quant_type')}`",
-            f"- source: `{gguf_export.get('source_path')}`",
-        ]
-    return ["- GGUF export did not produce an output path."]
-
-
 __all__ = [
-    "analysis_takeaway_lines",
-    "benchmark_metric_rows",
     "build_research_artifact_index",
     "experiment_config_summary",
-    "gguf_export_report_lines",
     "headline_summary_for_metrics",
-    "online_analysis_takeaway_lines",
     "recommendation_decision_block",
     "resolve_analysis_log_path",
     "slim_analysis_for_summary",

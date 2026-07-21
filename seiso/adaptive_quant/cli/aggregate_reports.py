@@ -175,7 +175,7 @@ def build_multiseed_report(
         notes_section(
             [
                 "These statistics summarize the metrics produced by the pipeline (simulator by default unless you switch backends in the preset config).",
-                "For deeper inspection, open a per-seed `outputs/reports/*_report.md` and the per-seed figures under `outputs/analysis/<run_name>/...`.",
+                "For deeper inspection, open per-seed `*_summary.json` files and figures under `outputs/analysis/<run_name>/...`.",
             ]
         )
     )
@@ -261,7 +261,7 @@ def build_sweep_report(
             [
                 "Trials are ranked by the mean objective across seeds when `--seeds` / sweep `seeds` is set.",
                 "Use `--resume` to skip pipeline runs whose summary JSON already exists.",
-                "Open per-trial `outputs/reports/*_report.md` files for full benchmark and analysis artifacts.",
+                "Open per-trial `*_summary.json` files and `outputs/analysis/<run_name>/` for full benchmark and analysis artifacts.",
             ]
         )
     )
