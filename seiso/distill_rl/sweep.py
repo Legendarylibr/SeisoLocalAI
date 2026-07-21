@@ -9,7 +9,7 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from seiso.distill_rl.config import DistillRLConfig
 
@@ -119,7 +119,7 @@ def apply_best_sweep_overrides(
         return config
     data = config.model_dump()
     data.update(best_overrides)
-    return cast(DistillRLConfig, DistillRLConfig.model_validate(data))
+    return DistillRLConfig.model_validate(data)
 
 
 def extract_metric(payload: dict[str, Any], objective: str) -> float | None:

@@ -21,7 +21,13 @@ STAGE_ORDER = ("distill", "rollout", "dpo", "evaluate")
 
 # Preference construction modes for Distill-RL rollout → DPO.
 # Product sources only (no code_corpus / synthetic_code training path).
-PREFERENCE_SOURCES = (
+PreferenceSource = Literal[
+    "dataset",
+    "data_designer",
+    "grounded_library",
+    "teacher_style",
+]
+PREFERENCE_SOURCES: tuple[PreferenceSource, ...] = (
     "dataset",
     "data_designer",
     "grounded_library",
@@ -161,12 +167,7 @@ class DistillRLConfig(BaseModel):
     )
 
     # dataset (research default) | data_designer (opt-in) | grounded_library | teacher_style
-    preference_source: Literal[
-        "dataset",
-        "data_designer",
-        "grounded_library",
-        "teacher_style",
-    ] = "dataset"
+    preference_source: PreferenceSource = "dataset"
     # Prompt count for synth / HF materialization.
     data_gen_count: int = DATA_GEN_FLOOR_SMOKE
     # Deprecated alias of data_gen_count (accepted in payloads).
@@ -366,7 +367,7 @@ def resolve_preference_source(
     preset: dict[str, Any],
     *,
     prompt_path: Path | None,
-) -> str:
+) -> PreferenceSource:
     """Resolve preference_source with safe defaults for meaningful Distill-RL."""
     raw = merged.get("preference_source", preset.get("preference_source"))
     if raw is not None and str(raw).strip():
@@ -401,7 +402,7 @@ def resolve_preference_source(
         raise ValueError(
             f"preference_source must be one of {PREFERENCE_SOURCES}; got {source!r}"
         )
-    return source
+    return cast(PreferenceSource, source)
 
 
 def merge_distill_rl_payload(payload: dict[str, Any]) -> dict[str, Any]:

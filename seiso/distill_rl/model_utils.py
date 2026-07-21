@@ -58,7 +58,7 @@ def load_causal_lm(
 
     model = AutoModelForCausalLM.from_pretrained(model_path, **model_kwargs)
     if not torch.cuda.is_available():
-        model = model.to(device="cpu")
+        model = model.to(device="cpu")  # type: ignore[call-arg]
     model.eval()
     device = getattr(model, "device", next(model.parameters()).device)
     return model, tokenizer, device
