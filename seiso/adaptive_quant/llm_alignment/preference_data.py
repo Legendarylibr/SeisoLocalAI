@@ -55,8 +55,20 @@ def _normalize_preference_row(row: Any, *, label: str | Path) -> dict[str, str]:
     missing = [key for key in ("prompt", "chosen", "rejected") if key not in row]
     if missing:
         raise ValueError(f"Preference row in {label} missing fields: {missing}")
+    prompt = str(row["prompt"]).strip()
+    chosen = str(row["chosen"]).strip()
+    rejected = str(row["rejected"]).strip()
+    if not prompt:
+        raise ValueError(f"Preference row in {label} has empty prompt")
+    if not chosen or not rejected:
+        raise ValueError(f"Preference row in {label} has empty chosen/rejected")
+    if chosen == rejected:
+        raise ValueError(
+            f"Preference row in {label} has identical chosen/rejected "
+            "(ties dilute DPO with zero log-ratio logits)"
+        )
     return {
-        "prompt": str(row["prompt"]),
-        "chosen": str(row["chosen"]),
-        "rejected": str(row["rejected"]),
+        "prompt": prompt,
+        "chosen": chosen,
+        "rejected": rejected,
     }

@@ -205,7 +205,7 @@ class TrainConfig(BaseModel):
     shuffle_buffer_size: int = Field(default=2048, ge=1)
     max_samples_per_epoch: int | None = Field(default=None, ge=1)
     kl_coef: float = Field(default=0.0, ge=0)
-    clip_ratio: float = Field(default=0.2, gt=0)
+    clip_ratio: float = Field(default=0.2, gt=0, lt=1)
     clip_ratio_high: float | None = Field(
         default=None,
         gt=0,
@@ -230,8 +230,8 @@ class TrainConfig(BaseModel):
             "slime online generate: hf | sglang | vllm | auto. "
             "hf is colocated/on-policy. sglang/vllm sample remotely; Seiso then "
             "recomputes old_logprobs on the local actor (engine sampling logprobs "
-            "are not used), so the GRPO ratio is slightly off-policy unless weights "
-            "stay in sync."
+            "are not used). Weight sync is required for HTTP backends so engines "
+            "cannot drift and bias GRPO importance ratios."
         ),
     )
     apply_chat_template: bool = True
@@ -309,7 +309,7 @@ class TrainConfig(BaseModel):
     best_checkpoint_dir: str = Field(default="checkpoint-best", min_length=1)
     final_checkpoint_dir: str = ""
     auto_stop: bool = True
-    auto_stop_metric: str = "reward_mean"
+    auto_stop_metric: str = "outcome_reward_mean"
     auto_stop_patience: int = Field(default=20, ge=1)
     auto_stop_min_delta: float = Field(default=1e-4, ge=0)
     auto_stop_warmup_steps: int = Field(default=10, ge=0)
@@ -504,21 +504,22 @@ class TrainConfig(BaseModel):
                 "(verifiable outcome signal required)"
             )
         shaping = self.format_reward_weight + self.process_reward_weight
-        if shaping > self.outcome_reward_weight:
+        if shaping >= self.outcome_reward_weight:
             raise ValueError(
-                "format_reward_weight + process_reward_weight must not exceed "
-                "outcome_reward_weight (outcome must dominate for meaningful GRPO)"
+                "format_reward_weight + process_reward_weight must be strictly "
+                "less than outcome_reward_weight (outcome must dominate; ties "
+                "allow format bias)"
             )
         if self.require_thinking_trace:
             headroom = self.outcome_reward_weight - (
                 self.format_reward_weight + self.process_reward_weight
             )
-            if self.missing_thinking_penalty > headroom:
+            if self.missing_thinking_penalty >= headroom:
                 raise ValueError(
-                    "missing_thinking_penalty must be <= outcome_reward_weight - "
+                    "missing_thinking_penalty must be < outcome_reward_weight - "
                     "(format_reward_weight + process_reward_weight) so "
-                    "correct-but-unformatted completions are not outranked by "
-                    "wrong-but-formatted ones"
+                    "correct-but-unformatted completions strictly outrank "
+                    "wrong-but-formatted ones (ties allow format bias)"
                 )
         from seiso.rl_verify.verify import resolve_code_reward_mode
 

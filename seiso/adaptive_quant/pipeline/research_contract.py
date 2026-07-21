@@ -98,6 +98,10 @@ def _claim_boundary(config: FrameworkConfig, evidence_level: str) -> dict[str, o
         )
         invalid.append("real_hardware_latency_claims")
         invalid.append("real_inference_quality_claims_without_external_sidecar")
+        # Simulator may still write a GGUF; that is not deploy-grounded evidence.
+        if _gguf_export_enabled(config):
+            invalid.append("exported_gguf_from_recommendation_quant_type")
+            invalid.append("single_machine_gguf_export_provenance")
     elif base_level == EVIDENCE_LOCAL_LLAMA_CPP:
         valid.extend(
             [
@@ -110,9 +114,9 @@ def _claim_boundary(config: FrameworkConfig, evidence_level: str) -> dict[str, o
             valid.append("external_quality_on_configured_sidecar")
         else:
             invalid.append("real_perplexity_claims_without_external_sidecar")
-    if _gguf_export_enabled(config):
-        valid.append("exported_gguf_from_recommendation_quant_type")
-        valid.append("single_machine_gguf_export_provenance")
+        if _gguf_export_enabled(config):
+            valid.append("exported_gguf_from_recommendation_quant_type")
+            valid.append("single_machine_gguf_export_provenance")
     return {"valid_claims": valid, "invalid_claims": invalid}
 
 

@@ -18,6 +18,10 @@ def allow_tiny_rl() -> bool:
     }
 
 
+def _env_flag(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in {"1", "true", "yes"}
+
+
 def effective_train_batch_size(config: SingleGpuSlimeConfig) -> int:
     """Prompt groups per step after filtering (slime rollout_batch_size target)."""
     if config.train_batch_size is not None:
@@ -191,7 +195,8 @@ class SingleGpuSlimeConfig:
     best_checkpoint_dir: str = "checkpoint-best"
     final_checkpoint_dir: str = ""
     auto_stop: bool = True
-    auto_stop_metric: str = "reward_mean"
+    # Prefer outcome over composite reward_mean (format shaping can inflate the latter).
+    auto_stop_metric: str = "outcome_reward_mean"
     auto_stop_patience: int = 20
     auto_stop_min_delta: float = 1e-4
     auto_stop_warmup_steps: int = 10
@@ -281,12 +286,36 @@ class SingleGpuSlimeConfig:
                 "dynamic_sampling_filter must be one of: "
                 "none, reward_nonzero_std, outcome_nonzero_std"
             )
+        if self.dynamic_sampling_filter == "none" and not (
+            allow_tiny_rl() or _env_flag("SEISO_SLIME_ALLOW_ZERO_SPREAD_GROUPS")
+        ):
+            raise ValueError(
+                "dynamic_sampling_filter=none keeps zero-spread groups and biases "
+                "GRPO toward vacuous updates; use reward_nonzero_std / "
+                "outcome_nonzero_std, or set SEISO_SLIME_ALLOW_ZERO_SPREAD_GROUPS=1 "
+                "(CI/smoke: SEISO_ALLOW_TINY_RL=1)"
+            )
         validate_oversample_vs_train_batch(
             dynamic_sampling_filter=self.dynamic_sampling_filter,
             over_sampling_batch_size=self.over_sampling_batch_size,
             train_batch_size=effective_train_batch_size(self),
             rollout_batch_size=self.rollout_batch_size,
         )
+        reward_key = str(self.reward or "auto").strip().lower()
+        if reward_key == "field" and not _env_flag("SEISO_SLIME_ALLOW_FIELD_REWARD"):
+            raise ValueError(
+                "reward=field scores a dataset column and ignores the completion "
+                "(reward hacking). Prefer reward=auto / numeric / contains_answer / "
+                "code, or set SEISO_SLIME_ALLOW_FIELD_REWARD=1 only for debugging"
+            )
+        if self.temperature <= 0:
+            raise ValueError(
+                "temperature must be > 0 so GRPO groups have sampling diversity"
+            )
+        if self.temperature > 2.0:
+            raise ValueError("temperature must be <= 2.0 (degenerate sampling)")
+        if not (0.0 < self.top_p <= 1.0):
+            raise ValueError("top_p must be in (0, 1]")
         if self.dynamic_sampling_min_reward_std < 0:
             raise ValueError("dynamic_sampling_min_reward_std must be non-negative")
         if self.policy_micro_batch_size < 1:
@@ -322,12 +351,22 @@ class SingleGpuSlimeConfig:
                     self.epochs,
                 )
                 object.__setattr__(self, "kl_coef", 0.02)
-        if self.clip_ratio <= 0:
-            raise ValueError("clip_ratio must be positive")
-        if self.clip_ratio_high is not None and self.clip_ratio_high < self.clip_ratio:
+        if self.clip_ratio <= 0 or self.clip_ratio >= 1.0:
             raise ValueError(
-                "clip_ratio_high must be >= clip_ratio (slime eps_clip_high >= eps_clip)"
+                "clip_ratio must be in (0, 1) so the PPO/GRPO trust region lower "
+                "bound stays positive (1 - clip_ratio > 0)"
             )
+        if self.clip_ratio_high is not None:
+            if self.clip_ratio_high < self.clip_ratio:
+                raise ValueError(
+                    "clip_ratio_high must be >= clip_ratio "
+                    "(slime eps_clip_high >= eps_clip)"
+                )
+            if self.clip_ratio_high > 2.0:
+                raise ValueError(
+                    "clip_ratio_high must be <= 2.0 (unbounded high clip disables "
+                    "the trust region)"
+                )
         if not self.thinking_instruction:
             raise ValueError("thinking_instruction must not be empty")
         if self.outcome_reward_weight <= 0:
@@ -339,11 +378,22 @@ class SingleGpuSlimeConfig:
             raise ValueError("format_reward_weight must be non-negative")
         if self.process_reward_weight < 0:
             raise ValueError("process_reward_weight must be non-negative")
-        shaping = self.format_reward_weight + self.process_reward_weight
-        if shaping > self.outcome_reward_weight:
+        if self.process_reward_weight > 0 and not _env_flag(
+            "SEISO_SLIME_ALLOW_PROCESS_REWARD"
+        ):
             raise ValueError(
-                "format_reward_weight + process_reward_weight must not exceed "
-                "outcome_reward_weight (outcome must dominate for meaningful GRPO)"
+                "process_reward_weight > 0 enables experimental lexical process "
+                "shaping (gameable); leave at 0 for outcome-first GRPO, or set "
+                "SEISO_SLIME_ALLOW_PROCESS_REWARD=1 to opt in"
+            )
+        shaping = self.format_reward_weight + self.process_reward_weight
+        # Strict dominance: equality lets wrong+formatted tie correct+bare and
+        # dilutes the verifiable outcome signal (reward hacking / format bias).
+        if shaping >= self.outcome_reward_weight:
+            raise ValueError(
+                "format_reward_weight + process_reward_weight must be strictly "
+                "less than outcome_reward_weight (outcome must dominate; ties "
+                "allow format bias)"
             )
         if self.missing_thinking_penalty < 0:
             raise ValueError("missing_thinking_penalty must be non-negative")
@@ -357,22 +407,36 @@ class SingleGpuSlimeConfig:
             )
         except ValueError as exc:
             raise ValueError(str(exc)) from exc
-        # Correct-unformatted reward is outcome - penalty; wrong-formatted is at
-        # most format + process. Require outcome - penalty >= format + process
-        # (equivalently penalty <= outcome - shaping) so ranking cannot invert.
+        # Correct-unformatted = outcome - penalty; wrong-formatted ≤ format + process.
+        # Require a strict gap so ranking cannot invert or tie on format alone.
         if self.require_thinking_trace:
             headroom = self.outcome_reward_weight - (
                 self.format_reward_weight + self.process_reward_weight
             )
-            if self.missing_thinking_penalty > headroom:
+            if self.missing_thinking_penalty >= headroom:
                 raise ValueError(
-                    "missing_thinking_penalty must be <= outcome_reward_weight - "
+                    "missing_thinking_penalty must be < outcome_reward_weight - "
                     "(format_reward_weight + process_reward_weight) so "
-                    "correct-but-unformatted completions are not outranked by "
-                    "wrong-but-formatted ones"
+                    "correct-but-unformatted completions strictly outrank "
+                    "wrong-but-formatted ones (ties allow format bias)"
                 )
         if self.min_thinking_tokens < 0:
             raise ValueError("min_thinking_tokens must be non-negative")
+        # Composite reward_mean can plateau on format inflation; prefer outcome.
+        if (
+            self.auto_stop
+            and str(self.auto_stop_metric or "").strip() == "reward_mean"
+            and shaping > 0
+            and not _env_flag("SEISO_SLIME_ALLOW_COMPOSITE_AUTOSTOP")
+        ):
+            import logging
+
+            logging.getLogger(__name__).info(
+                "auto_stop_metric=reward_mean with format/process shaping: "
+                "using outcome_reward_mean to avoid format-biased early stop "
+                "(set SEISO_SLIME_ALLOW_COMPOSITE_AUTOSTOP=1 to keep reward_mean)"
+            )
+            object.__setattr__(self, "auto_stop_metric", "outcome_reward_mean")
         if self.max_vram_gb is not None and self.max_vram_gb <= 0:
             raise ValueError("max_vram_gb must be positive")
         if self.save_every_steps < 0:

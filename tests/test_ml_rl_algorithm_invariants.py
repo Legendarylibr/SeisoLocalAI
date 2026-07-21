@@ -152,7 +152,9 @@ def test_slime_defaults_per_token_and_outcome_dominant(tmp_path):
     assert cfg.process_reward_weight == 0.0
     # Prefer format bonus over subtractive thinking penalty.
     assert cfg.missing_thinking_penalty == 0.0
+    assert cfg.auto_stop_metric == "outcome_reward_mean"
     cfg.validate()
+    assert cfg.auto_stop_metric == "outcome_reward_mean"
 
 
 def test_slime_rejects_format_dominated_rewards(tmp_path):
@@ -165,6 +167,20 @@ def test_slime_rejects_format_dominated_rewards(tmp_path):
         process_reward_weight=0.0,
     )
     with pytest.raises(ValueError, match="outcome must dominate"):
+        cfg.validate()
+
+
+def test_slime_rejects_format_outcome_tie_as_bias(tmp_path):
+    """Equal shaping vs outcome lets wrong+pretty tie correct+bare."""
+    cfg = SingleGpuSlimeConfig(
+        model_id="test/model",
+        dataset=tmp_path / "data.jsonl",
+        output_dir=tmp_path / "out",
+        outcome_reward_weight=0.5,
+        format_reward_weight=0.5,
+        process_reward_weight=0.0,
+    )
+    with pytest.raises(ValueError, match="format bias"):
         cfg.validate()
 
 
@@ -310,6 +326,22 @@ def test_slime_rejects_penalty_that_loses_to_format_shaping(tmp_path):
         missing_thinking_penalty=0.6,
     )
     with pytest.raises(ValueError, match="missing_thinking_penalty"):
+        cfg.validate()
+
+
+def test_slime_rejects_penalty_tie_as_format_bias(tmp_path):
+    """penalty == headroom ties correct-bare with wrong-formatted — refuse."""
+    cfg = SingleGpuSlimeConfig(
+        model_id="test/model",
+        dataset=tmp_path / "data.jsonl",
+        output_dir=tmp_path / "out",
+        require_thinking_trace=True,
+        outcome_reward_weight=1.0,
+        format_reward_weight=0.5,
+        process_reward_weight=0.0,
+        missing_thinking_penalty=0.5,
+    )
+    with pytest.raises(ValueError, match="format bias"):
         cfg.validate()
 
 
@@ -525,3 +557,307 @@ def test_recommendation_evidence_reads_nested_research_level():
     )
     assert meta["evidence_level"] == "simulator"
     assert meta["deploy_quality_claimable"] is False
+
+
+def test_slime_http_rollout_refuses_disabled_weight_sync(tmp_path, monkeypatch):
+    """Stale remote engines bias actor-recomputed old_logprobs / IS ratios."""
+    monkeypatch.delenv("SEISO_SLIME_ALLOW_STALE_ROLLOUT_WEIGHTS", raising=False)
+    sglang = SingleGpuSlimeConfig(
+        model_id="test/model",
+        dataset=tmp_path / "data.jsonl",
+        output_dir=tmp_path / "out",
+        rollout_backend="sglang",
+        sglang_base_url="http://127.0.0.1:30000",
+        sglang_sync_weights=False,
+        require_held_out_eval=False,
+    )
+    with pytest.raises(ValueError, match="sglang_sync_weights"):
+        sglang.validate()
+
+    vllm = SingleGpuSlimeConfig(
+        model_id="test/model",
+        dataset=tmp_path / "data.jsonl",
+        output_dir=tmp_path / "out",
+        rollout_backend="vllm",
+        vllm_base_url="http://127.0.0.1:8000",
+        vllm_sync_weights=False,
+        require_held_out_eval=False,
+    )
+    with pytest.raises(ValueError, match="vllm_sync_weights"):
+        vllm.validate()
+
+
+def test_slime_http_rollout_defaults_require_weight_sync(tmp_path):
+    cfg = SingleGpuSlimeConfig(
+        model_id="test/model",
+        dataset=tmp_path / "data.jsonl",
+        output_dir=tmp_path / "out",
+        rollout_backend="vllm",
+        vllm_base_url="http://127.0.0.1:8000",
+        require_held_out_eval=False,
+    )
+    assert cfg.vllm_sync_weights is True
+    assert cfg.sglang_sync_weights is True
+    cfg.validate()
+
+
+def test_verifier_correct_ugly_outranks_wrong_pretty():
+    """Outcome-first: correct bare answer beats wrong answer with full think format."""
+    from seiso.rl_verify.verify import score_completion
+
+    correct_ugly = score_completion(
+        "42",
+        {"answer": "42"},
+        checker="numeric",
+        require_thinking_trace=True,
+        outcome_weight=1.0,
+        format_weight=0.1,
+        process_weight=0.0,
+        missing_format_penalty=0.0,
+        min_thinking_tokens=8,
+    )
+    wrong_pretty = score_completion(
+        "<think>first compute carefully then verify the product again</think>\n99",
+        {"answer": "42"},
+        checker="numeric",
+        require_thinking_trace=True,
+        outcome_weight=1.0,
+        format_weight=0.1,
+        process_weight=0.0,
+        missing_format_penalty=0.0,
+        min_thinking_tokens=8,
+    )
+    assert correct_ugly.outcome == pytest.approx(1.0)
+    assert wrong_pretty.outcome == pytest.approx(0.0)
+    assert correct_ugly.reward > wrong_pretty.reward
+    assert correct_ugly.passed is True
+    assert wrong_pretty.passed is False
+
+
+def test_recommendation_evidence_rejects_aggregate_deploy_claim():
+    from seiso.rl_quant.recommendation import recommendation_evidence
+
+    meta = recommendation_evidence(
+        {
+            "evidence_level": "multiseed_aggregate",
+            "deploy_quality_claimable": True,
+            "external_quality": True,
+        }
+    )
+    assert meta["deploy_quality_claimable"] is False
+    assert meta["deploy_quality_note"]
+
+
+def test_claims_validation_multiseed_inherits_simulator_invalids():
+    from seiso.adaptive_quant.configuration import FrameworkConfig
+    from seiso.adaptive_quant.pipeline.research_contract import (
+        EVIDENCE_MULTISEED,
+        build_claims_validation,
+    )
+
+    claims = build_claims_validation(
+        config=FrameworkConfig(backend="simulator"),
+        summary={},
+        metrics={},
+        evidence_level=EVIDENCE_MULTISEED,
+    )
+    assert claims["evidence_level"] == EVIDENCE_MULTISEED
+    assert claims["deployment_grade"] is False
+    assert "seed_or_trial_aggregate_statistics" in claims["valid_claims"]
+    assert "policy_learning_dynamics" in claims["valid_claims"]
+    assert "real_hardware_latency_claims" in claims["invalid_claims"]
+    assert "llm_weight_updates" in claims["invalid_claims"]
+
+
+def test_slime_refuses_field_reward_without_opt_in(tmp_path, monkeypatch):
+    monkeypatch.delenv("SEISO_SLIME_ALLOW_FIELD_REWARD", raising=False)
+    cfg = SingleGpuSlimeConfig(
+        model_id="test/model",
+        dataset=tmp_path / "data.jsonl",
+        output_dir=tmp_path / "out",
+        reward="field",
+        require_held_out_eval=False,
+    )
+    with pytest.raises(ValueError, match="reward=field"):
+        cfg.validate()
+
+
+def test_slime_refuses_zero_temperature(tmp_path):
+    cfg = SingleGpuSlimeConfig(
+        model_id="test/model",
+        dataset=tmp_path / "data.jsonl",
+        output_dir=tmp_path / "out",
+        temperature=0.0,
+        require_held_out_eval=False,
+    )
+    with pytest.raises(ValueError, match="temperature"):
+        cfg.validate()
+
+
+def test_slime_refuses_invalid_top_p_and_clip(tmp_path):
+    bad_top = SingleGpuSlimeConfig(
+        model_id="test/model",
+        dataset=tmp_path / "data.jsonl",
+        output_dir=tmp_path / "out",
+        top_p=1.5,
+        require_held_out_eval=False,
+    )
+    with pytest.raises(ValueError, match="top_p"):
+        bad_top.validate()
+
+    bad_clip = SingleGpuSlimeConfig(
+        model_id="test/model",
+        dataset=tmp_path / "data.jsonl",
+        output_dir=tmp_path / "out",
+        clip_ratio=1.0,
+        require_held_out_eval=False,
+    )
+    with pytest.raises(ValueError, match="clip_ratio"):
+        bad_clip.validate()
+
+
+def test_slime_refuses_zero_spread_filter_without_opt_in(tmp_path, monkeypatch):
+    monkeypatch.delenv("SEISO_ALLOW_TINY_RL", raising=False)
+    monkeypatch.delenv("SEISO_SLIME_ALLOW_ZERO_SPREAD_GROUPS", raising=False)
+    cfg = SingleGpuSlimeConfig(
+        model_id="test/model",
+        dataset=tmp_path / "data.jsonl",
+        output_dir=tmp_path / "out",
+        dynamic_sampling_filter="none",
+        require_held_out_eval=False,
+    )
+    with pytest.raises(ValueError, match="zero-spread"):
+        cfg.validate()
+
+
+def test_slime_refuses_process_reward_without_opt_in(tmp_path, monkeypatch):
+    monkeypatch.delenv("SEISO_SLIME_ALLOW_PROCESS_REWARD", raising=False)
+    cfg = SingleGpuSlimeConfig(
+        model_id="test/model",
+        dataset=tmp_path / "data.jsonl",
+        output_dir=tmp_path / "out",
+        process_reward_weight=0.05,
+        require_held_out_eval=False,
+    )
+    with pytest.raises(ValueError, match="process_reward_weight"):
+        cfg.validate()
+
+
+def test_slime_coerces_composite_autostop_to_outcome(tmp_path, monkeypatch):
+    monkeypatch.delenv("SEISO_SLIME_ALLOW_COMPOSITE_AUTOSTOP", raising=False)
+    cfg = SingleGpuSlimeConfig(
+        model_id="test/model",
+        dataset=tmp_path / "data.jsonl",
+        output_dir=tmp_path / "out",
+        format_reward_weight=0.1,
+        auto_stop_metric="reward_mean",
+        require_held_out_eval=False,
+    )
+    cfg.validate()
+    assert cfg.auto_stop_metric == "outcome_reward_mean"
+
+
+def test_auto_code_reward_skips_empty_rollouts():
+    from seiso.slime.trainer import _finalize_auto_code_rewards
+
+    cfg = SingleGpuSlimeConfig(
+        model_id="test/model",
+        dataset="unused.jsonl",
+        output_dir="unused",
+        code_reward_mode="auto",
+        rollouts_per_prompt=2,
+        outcome_reward_weight=1.0,
+        format_reward_weight=0.0,
+        process_reward_weight=0.0,
+        require_thinking_trace=False,
+    )
+    group = [
+        Rollout(
+            None,
+            None,
+            None,
+            None,
+            None,
+            0.0,
+            outcome_reward=0.0,
+            proof_score=1.0,
+            proof_passed=True,
+            status="empty",
+        ),
+        Rollout(
+            None,
+            None,
+            None,
+            None,
+            None,
+            0.5,
+            outcome_reward=0.5,
+            proof_score=0.5,
+            proof_passed=False,
+            status="ok",
+        ),
+    ]
+    _finalize_auto_code_rewards(group, cfg)
+    assert group[0].reward == 0.0
+    assert group[1].outcome_reward == pytest.approx(0.5)
+
+
+def test_dpo_rejects_identical_chosen_rejected():
+    from seiso.adaptive_quant.llm_alignment.preference_data import _normalize_preference_row
+
+    with pytest.raises(ValueError, match="identical chosen/rejected"):
+        _normalize_preference_row(
+            {"prompt": "q", "chosen": "same", "rejected": "same"},
+            label="test",
+        )
+
+
+def test_dpo_beta_must_be_positive():
+    from seiso.adaptive_quant.llm_alignment.config import DPOSettings
+    from seiso.distill_rl.config import DistillRLConfig
+
+    with pytest.raises(ValueError, match="beta must be > 0"):
+        DPOSettings(beta=0.0).validate()
+
+    with pytest.raises(ValueError, match="dpo_beta"):
+        DistillRLConfig.model_validate(
+            {
+                "job_id": "j1",
+                "user_id": "u1",
+                "teacher_model": "test/teacher",
+                "student_model": "test/student",
+                "output_root": "/tmp/distill-out",
+                "preference_source": "teacher_style",
+                "dpo_beta": 0.0,
+                "stages": ["dpo"],
+            }
+        )
+
+
+def test_claims_validation_simulator_export_not_valid_claim():
+    from seiso.adaptive_quant.configuration import FrameworkConfig
+    from seiso.adaptive_quant.pipeline.research_contract import _claim_boundary
+
+    cfg = FrameworkConfig(backend="simulator")
+    object.__setattr__(cfg, "llama_cpp_gguf_export_enabled", True)
+    boundary = _claim_boundary(cfg, "simulator")
+    assert "exported_gguf_from_recommendation_quant_type" not in boundary["valid_claims"]
+    assert "exported_gguf_from_recommendation_quant_type" in boundary["invalid_claims"]
+
+
+def test_clipped_policy_loss_respects_asymmetric_bounds():
+    import torch
+
+    advantages = torch.tensor([1.0])
+    # ratio = exp(2) ≈ 7.39 → clamped to 1 + high = 1.3
+    loss = _clipped_policy_loss(
+        torch.tensor([2.0]),
+        torch.tensor([0.0]),
+        advantages,
+        torch.ones(1),
+        0.2,
+        torch,
+        clip_ratio_high=0.3,
+    )
+    expected = -min(math.exp(2.0), 1.3) * 1.0
+    assert float(loss.item()) == pytest.approx(expected, rel=1e-5)

@@ -47,7 +47,7 @@ save_every_steps: 100
 log_every_steps: 1
 best_checkpoint_dir: checkpoint-best
 auto_stop: true
-auto_stop_metric: reward_mean
+auto_stop_metric: outcome_reward_mean
 auto_stop_patience: 20
 write_verifier_data: true
 verifier_data_file: slime_verifier_data.jsonl

@@ -188,7 +188,7 @@ no silent localhost). There is no local toy arithmetic/choice corpus generator.
 
 **Single-GPU:** `scripts/run_slime_single_gpu.sh` — `rollout_backend: hf` (colocated, on-policy).
 
-**Off-policy logprob caveat (vLLM / SGLang):** with `rollout_backend: sglang` or `vllm`, tokens are sampled by the remote engine, but Seiso recomputes `old_logprobs` on the local actor for the GRPO ratio (engine sampling logprobs are not used). Keep `*_sync_weights` enabled so engines stay close to the actor; residual sampler/kernel mismatch still makes the ratio slightly off-policy versus colocated `hf`.
+**Off-policy logprob caveat (vLLM / SGLang):** with `rollout_backend: sglang` or `vllm`, tokens are sampled by the remote engine, but Seiso recomputes `old_logprobs` on the local actor for the GRPO ratio (engine sampling logprobs are not used). Config validate **requires** `*_sync_weights: true` so engines cannot silently drift and bias importance ratios (`SEISO_SLIME_ALLOW_STALE_ROLLOUT_WEIGHTS=1` is debug-only). Residual sampler/kernel mismatch can still make the ratio slightly off-policy versus colocated `hf`.
 
 Python package: `seiso.slime` (legacy import path `seiso.slime_single_gpu` remains a shim).
 
@@ -196,7 +196,7 @@ Python package: `seiso.slime` (legacy import path `seiso.slime_single_gpu` remai
 
 | Field | Meaning |
 |-------|---------|
-| `sglang_sync_weights` | Enable post-step hot-reload (default true) |
+| `sglang_sync_weights` | Required true for `rollout_backend=sglang` (post-step hot-reload) |
 | `sglang_weight_mode` | `full` (always HF ckpt) or `delta` (skip if unchanged; try slime `/pull_weights`, else full) |
 | `sglang_weight_keep` | Keep last N `weight_v*` dirs |
 | `sglang_base_url` | One URL or comma-separated multi-engine list |
@@ -215,7 +215,7 @@ SGLang must read `output_dir/sglang_weight_sync/` (shared FS on multi-node).
 
 | Field | Meaning |
 |-------|---------|
-| `vllm_sync_weights` | Enable post-step hot-reload (default true) |
+| `vllm_sync_weights` | Required true for `rollout_backend=vllm` (post-step hot-reload) |
 | `vllm_weight_mode` | `auto` (LoRA when PEFT, else full) \| `lora` \| `full` |
 | `vllm_weight_keep` | Keep last N `lora_v*` / `weight_v*` dirs |
 | `vllm_base_url` | One URL or comma-separated multi-engine list (also accepts `.../v1`) |
@@ -272,7 +272,7 @@ process_reward_weight: 0.0
 missing_thinking_penalty: 0.0
 slime_use_lora: true
 auto_stop: true
-auto_stop_metric: reward_mean
+auto_stop_metric: outcome_reward_mean
 write_verifier_data: true
 # Opt-in materialize (default off): data_gen: true / data_gen_source: dataset|data_designer
 ```
@@ -327,7 +327,7 @@ Important fields:
 | `shuffle_buffer_size` | Bounded CPU shuffle buffer for long datasets |
 | `max_samples_per_epoch` | Optional per-epoch cap for smoke runs or data-efficient loops |
 | `slime_use_lora` | Train LoRA adapters instead of full model weights |
-| `auto_stop_*` | Plateau detection; defaults monitor `reward_mean` (also logs `group_pass_rate`) |
+| `auto_stop_*` | Plateau detection; defaults monitor `outcome_reward_mean` (also logs `group_pass_rate`) |
 | `best_checkpoint_dir` | Directory under `output_dir` for the best observed metric checkpoint |
 | `write_verifier_data` | Writes JSONL with outcome, format, checker, extracted answer, proof fields, and status per rollout |
 | `verifier_max_text_chars` | Per-field text cap to keep verifier JSONL bounded |
