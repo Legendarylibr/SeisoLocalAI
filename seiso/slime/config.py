@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, fields
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -238,7 +239,7 @@ class SingleGpuSlimeConfig:
         known = {f.name for f in fields(cls)}
         # Filter unknown keys (e.g. method/quant from TrainConfig-oriented YAMLs).
         path_keys = {"dataset", "output_dir", "eval_dataset"}
-        payload = {}
+        payload: dict[str, Any] = {}
         for key, value in data.items():
             if key not in known:
                 continue

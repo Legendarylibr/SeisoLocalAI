@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -115,7 +116,8 @@ def _normalize_prompt_row(row: object, *, fallback_id: str) -> RolloutPrompt:
     if not isinstance(row, dict):
         raise ValueError(f"Prompt row must be a string or object, got {type(row)!r}")
     text = _extract_prompt_text(row)
-    meta = row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
+    raw_meta = row.get("metadata")
+    meta: dict[str, Any] = raw_meta if isinstance(raw_meta, dict) else {}
     prompt_id = str(
         row.get("prompt_id")
         or row.get("id")
