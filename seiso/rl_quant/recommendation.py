@@ -21,23 +21,38 @@ _BIT_TO_SEISO = {
 def recommendation_evidence(recommendation: dict[str, Any]) -> dict[str, Any]:
     """Evidence / claim-boundary labels for an RL-quant recommendation payload."""
     evidence = recommendation.get("evidence_level")
-    if not isinstance(evidence, str) or not evidence:
-        research = recommendation.get("research")
-        if isinstance(research, dict):
-            evidence = research.get("evidence_level")
+    research = recommendation.get("research")
+    if (not isinstance(evidence, str) or not evidence) and isinstance(research, dict):
+        evidence = research.get("evidence_level")
+        if not isinstance(evidence, str) or not evidence:
+            nested = research.get("evidence")
+            if isinstance(nested, dict):
+                evidence = nested.get("level")
     if not isinstance(evidence, str) or not evidence:
         evidence = "unknown"
+    has_external = bool(recommendation.get("external_quality"))
+    if not has_external and isinstance(research, dict):
+        measurement = research.get("measurement")
+        if isinstance(measurement, dict):
+            has_external = bool(measurement.get("external_quality"))
     claimable = recommendation.get("deploy_quality_claimable")
     if claimable is None:
-        claimable = evidence not in {"simulator", "unknown"}
-    # Simulator/unknown must never be claimable even if a payload sets the flag.
-    if evidence in {"simulator", "unknown"}:
+        claimable = evidence == "local_llama_cpp" and has_external
+    # Simulator/unknown, or llama.cpp without quality sidecar, are not claimable.
+    if evidence in {"simulator", "unknown"} or (
+        evidence == "local_llama_cpp" and not has_external
+    ):
         claimable = False
     note = recommendation.get("deploy_quality_note")
     if not note and evidence == "simulator":
         note = (
             "Simulator evidence only — not deploy-grounded without llama_cpp / "
             "external quality sidecar."
+        )
+    elif not note and evidence == "local_llama_cpp" and not has_external:
+        note = (
+            "llama.cpp measurements without external_quality_path are not "
+            "deploy-claimable (perplexity remains simulator-derived)."
         )
     return {
         "evidence_level": evidence,
