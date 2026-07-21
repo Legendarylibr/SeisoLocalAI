@@ -283,6 +283,19 @@ def test_train_config_rejects_packing_with_response_mask_chat(tmp_path):
         )
 
 
+def test_train_config_rejects_packing_with_response_mask_auto(tmp_path):
+    with pytest.raises(ValueError, match="packing cannot be combined"):
+        TrainConfig.model_validate(
+            {
+                "model_id": "test/model",
+                "dataset": tmp_path / "auto.jsonl",
+                "dataset_format": "auto",
+                "packing": True,
+                "train_on_responses_only": True,
+            }
+        )
+
+
 def test_train_config_allows_packing_with_response_mask_on_text(tmp_path):
     cfg = TrainConfig.model_validate(
         {
@@ -296,16 +309,30 @@ def test_train_config_allows_packing_with_response_mask_on_text(tmp_path):
     assert cfg.packing is True
 
 
+def test_train_config_rejects_full_with_int4(tmp_path):
+    with pytest.raises(ValueError, match="method=full cannot use quant"):
+        TrainConfig.model_validate(
+            {
+                "model_id": "test/model",
+                "dataset": tmp_path / "data.jsonl",
+                "method": "full",
+                "quant": "4bit",
+            }
+        )
+
+
 def test_train_config_slime_projection_defaults_per_token(tmp_path):
     cfg = TrainConfig.model_validate(
         {
             "model_id": "test/model",
             "dataset": tmp_path / "slime.jsonl",
             "method": "slime",
+            "epochs": 1,
         }
     )
     assert cfg.calculate_per_token_loss is True
     assert cfg.method == TrainMethod.SLIME
+    assert cfg.kl_coef == 0.0
     slime = cfg.to_single_gpu_slime_config()
     assert slime.calculate_per_token_loss is True
     assert slime.outcome_reward_weight > 0
@@ -315,11 +342,27 @@ def test_train_config_slime_projection_defaults_per_token(tmp_path):
     )
 
 
+def test_train_config_slime_multi_epoch_applies_kl_coef(tmp_path, monkeypatch):
+    monkeypatch.delenv("SEISO_SLIME_ALLOW_ZERO_KL", raising=False)
+    cfg = TrainConfig.model_validate(
+        {
+            "model_id": "test/model",
+            "dataset": tmp_path / "slime.jsonl",
+            "method": "slime",
+            "epochs": 3,
+            "kl_coef": 0.0,
+        }
+    )
+    assert cfg.kl_coef == pytest.approx(0.02)
+
+
 def test_dpo_uses_sum_logps_by_default():
     from seiso.adaptive_quant.llm_alignment.config import DPOSettings
+    from seiso.distill_rl.config import DistillRLConfig
 
     settings = DPOSettings()
     assert settings.average_log_prob is False
+    assert DistillRLConfig.model_fields["dpo_average_log_prob"].default is False
 
 
 def test_recommendation_evidence_simulator_not_deploy_claimable():

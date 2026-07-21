@@ -691,6 +691,17 @@ def _collect_rollouts(
             reward_sample = _reward_sample(sample, config)
             metadata = _sample_metadata(sample, config)
             score = _score_completion(completion, reward_sample, config)
+            # Truncated (hit max_new_tokens without EOS): do not credit outcome —
+            # incomplete answers bias GRPO toward short/cut-off completions.
+            if status == "length":
+                score = {
+                    **score,
+                    "reward": 0.0,
+                    "outcome_reward": 0.0,
+                    "outcome_passed": False,
+                    "format_reward": 0.0,
+                    "process_reward": 0.0,
+                }
             chunk_rollouts.append(
                 Rollout(
                     input_ids=input_ids,

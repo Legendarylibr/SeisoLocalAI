@@ -267,7 +267,22 @@ def preprocess_training_dataset(
     initial = len(dataset)
     resolved_fmt = dataset_format
     if resolved_fmt == DatasetFormat.AUTO and initial > 0:
-        resolved_fmt = detect_format(dataset[0])
+        # Prefer multi-row consensus (matches UI analysis) over first-row heuristics.
+        sample_n = min(32, initial)
+        try:
+            from seiso.training.dataset_analysis import detect_format_consensus
+
+            probe = [dataset[i] for i in range(sample_n)]
+            resolved_fmt, confidence, vote_meta = detect_format_consensus(probe)
+            logger.info(
+                "Format consensus: %s (confidence=%.2f, votes=%s)",
+                resolved_fmt.value,
+                confidence,
+                vote_meta.get("votes"),
+            )
+        except Exception:
+            resolved_fmt = detect_format(dataset[0])
+            logger.debug("Format consensus failed; using first-row detect", exc_info=True)
 
     if resolved_fmt == DatasetFormat.PREFERENCE and not preference_as_sft:
         raise ValueError(

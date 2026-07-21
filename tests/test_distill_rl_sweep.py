@@ -84,7 +84,7 @@ def test_distill_rl_defaults_use_stable_dpo_values(tmp_path: Path):
     )
     assert cfg.dpo_learning_rate == pytest.approx(5e-6)
     assert cfg.dpo_gradient_accumulation_steps == 8
-    assert cfg.dpo_average_log_prob is True
+    assert cfg.dpo_average_log_prob is False
     assert cfg.dpo_warmup_ratio == pytest.approx(0.1)
 
 

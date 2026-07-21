@@ -8,6 +8,7 @@ import pytest
 
 from seiso.training.config import DatasetFormat
 from seiso.training.datasets import (
+    ResponseMaskError,
     format_dataset_text,
     prepare_tokenized_dataset,
     should_disable_packing_for_response_mask,
@@ -311,3 +312,56 @@ def test_should_disable_packing_for_response_mask(
         should_disable_packing_for_response_mask(packing, responses_only, fmt)
         is expected
     )
+
+
+class _PlainTokenizer:
+    """Tokenizer without chat template — forces response-mask failure."""
+
+    eos_token = "<eos>"
+    eos_token_id = 99
+
+    def __call__(self, text, truncation=False, padding=False):
+        ids = [ord(c) % 40 + 1 for c in str(text)] or [1]
+        return {"input_ids": ids, "attention_mask": [1] * len(ids)}
+
+
+def test_response_only_fails_loud_without_chat_template():
+    ds = _Rows(
+        [
+            {
+                "messages": [
+                    {"role": "user", "content": "hi"},
+                    {"role": "assistant", "content": "yo"},
+                ]
+            }
+        ]
+    )
+    with pytest.raises(ResponseMaskError, match="train_on_responses_only"):
+        prepare_tokenized_dataset(
+            ds,
+            _PlainTokenizer(),
+            max_seq_length=128,
+            dataset_format=DatasetFormat.CHAT,
+            train_on_inputs=False,
+        )
+
+
+def test_train_on_inputs_allows_string_fallback_without_chat_template():
+    ds = _Rows(
+        [
+            {
+                "messages": [
+                    {"role": "user", "content": "hi"},
+                    {"role": "assistant", "content": "yo"},
+                ]
+            }
+        ]
+    )
+    tokenized, _ = prepare_tokenized_dataset(
+        ds,
+        _PlainTokenizer(),
+        max_seq_length=128,
+        dataset_format=DatasetFormat.CHAT,
+        train_on_inputs=True,
+    )
+    assert tokenized[0]["labels"] == tokenized[0]["input_ids"]

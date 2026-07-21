@@ -123,7 +123,8 @@ class DistillRLConfig(BaseModel):
     dpo_save_steps: int = 200
     dpo_use_lora: bool = True
     dpo_use_qlora: bool = False
-    dpo_average_log_prob: bool = True
+    # False = sum token log-probs (Rafailov / DPOSettings default); True = mean (length-normalized).
+    dpo_average_log_prob: bool = False
     dpo_warmup_ratio: float = 0.1
     dpo_weight_decay: float = 0.01
     dpo_max_grad_norm: float = 0.3
@@ -337,7 +338,7 @@ def build_distill_rl_config(
         dpo_use_lora=bool(merged.get("dpo_use_lora", True)),
         dpo_use_qlora=bool(merged.get("dpo_use_qlora", False)),
         dpo_average_log_prob=bool(
-            merged.get("dpo_average_log_prob", preset.get("dpo_average_log_prob", True))
+            merged.get("dpo_average_log_prob", preset.get("dpo_average_log_prob", False))
         ),
         dpo_warmup_ratio=float(
             merged.get("dpo_warmup_ratio", preset.get("dpo_warmup_ratio", 0.1))

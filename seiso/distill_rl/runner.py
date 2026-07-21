@@ -285,7 +285,10 @@ def _run_shared_stages(
 
     if "rollout" in config.stages:
         if on_log:
-            on_log("Phase: rollout (teacher chosen, student rejected)")
+            on_log(
+                "Phase: rollout (verifiable student groups and/or "
+                "teacher≻student for open prompts)"
+            )
         from seiso.distill_rl.preferences import build_preference_bundle
 
         bundle = build_preference_bundle(

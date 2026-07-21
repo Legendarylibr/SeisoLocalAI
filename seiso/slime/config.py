@@ -262,6 +262,25 @@ class SingleGpuSlimeConfig:
             raise ValueError("token limits must be positive")
         if self.kl_coef < 0:
             raise ValueError("kl_coef must be non-negative")
+        # Multi-epoch online GRPO without a trust region drifts; apply a small
+        # default KL unless the operator opts into zero-KL (VRAM) via env.
+        if self.epochs > 1 and self.kl_coef == 0.0:
+            import os
+
+            allow_zero = os.environ.get("SEISO_SLIME_ALLOW_ZERO_KL", "").strip().lower() in {
+                "1",
+                "true",
+                "yes",
+            }
+            if not allow_zero:
+                import logging
+
+                logging.getLogger(__name__).info(
+                    "epochs=%s with kl_coef=0: applying kl_coef=0.02 for multi-epoch "
+                    "trust region (set SEISO_SLIME_ALLOW_ZERO_KL=1 to keep kl_coef=0)",
+                    self.epochs,
+                )
+                object.__setattr__(self, "kl_coef", 0.02)
         if self.clip_ratio <= 0:
             raise ValueError("clip_ratio must be positive")
         if self.clip_ratio_high is not None and self.clip_ratio_high < self.clip_ratio:

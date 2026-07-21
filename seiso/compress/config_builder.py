@@ -91,13 +91,14 @@ def build_pipeline_config(
 
     preset_name, preset = resolve_preset(PRESETS, str(payload.get("preset", "smoke")))
 
+    config_blob: dict[str, Any] = {}
     if path := resolve_config_file_path(
         payload.get("config_file"), bundle_root=bundle_root()
     ):
         from seiso.codellama_compress.config import load_config_file
 
-        blob = load_config_file(path)
-        preset.update(blob.get("pipeline", {}))
+        config_blob = load_config_file(path)
+        preset.update(config_blob.get("pipeline", {}))
 
     stages = list(
         payload.get("stages") or preset.get("stages") or PRESETS["smoke"]["stages"]
@@ -107,42 +108,59 @@ def build_pipeline_config(
     output_root = job_output_root(data_dir, "compress", user_id, job_id)
 
     seed = int(payload.get("seed", 42))
-    det = merge_dataclass(
-        DeterminismConfig(),
+    det_overrides = dict(config_blob.get("determinism") or {})
+    det_overrides.update(
         {
             "seed": seed,
             "deterministic": bool(payload.get("deterministic", True)),
             "hash_run_id": bool(payload.get("hash_run_id", True)),
-        },
+        }
     )
-    ds_cfg = merge_dataclass(
-        DatasetConfig(),
-        {
-            "seed": seed,
-            "max_train_samples": payload.get(
-                "max_train_samples", preset.get("max_train_samples")
-            ),
-        },
-    )
+    det = merge_dataclass(DeterminismConfig(), det_overrides)
+    ds_overrides = dict(config_blob.get("dataset") or {})
+    ds_overrides.setdefault("seed", seed)
+    if "max_train_samples" not in ds_overrides:
+        ds_overrides["max_train_samples"] = payload.get(
+            "max_train_samples", preset.get("max_train_samples")
+        )
+    ds_cfg = merge_dataclass(DatasetConfig(), ds_overrides)
     model_defaults = get_compress_model_defaults()
-    distill_cfg = merge_dataclass(
-        DistillConfig(),
-        {
-            "teacher_model": str(
-                payload.get("teacher_model") or model_defaults["teacher_model"]
-            ),
-            "student_model": str(
-                payload.get("student_model") or model_defaults["student_model"]
-            ),
-            "steps": int(payload.get("distill_steps", preset.get("distill_steps", 2))),
-            "trust_remote_code": bool(payload.get("trust_remote_code", False)),
-        },
-    )
+    distill_file = dict(config_blob.get("distill") or {})
+    distill_overrides = {
+        "teacher_model": str(
+            payload.get("teacher_model")
+            or distill_file.get("teacher_model")
+            or model_defaults["teacher_model"]
+        ),
+        "student_model": str(
+            payload.get("student_model")
+            or distill_file.get("student_model")
+            or model_defaults["student_model"]
+        ),
+        "steps": int(
+            payload.get(
+                "distill_steps",
+                distill_file.get("steps", preset.get("distill_steps", 2)),
+            )
+        ),
+        "trust_remote_code": bool(payload.get("trust_remote_code", False)),
+    }
+    for key in ("temperature", "alpha", "lr", "seq_len", "warmup_steps", "weight_decay"):
+        if key in distill_file and key not in payload:
+            distill_overrides[key] = distill_file[key]
+    for key in ("temperature", "alpha"):
+        if key in payload:
+            distill_overrides[key] = payload[key]
+    distill_cfg = merge_dataclass(DistillConfig(), distill_overrides)
+    finetune_file = dict(config_blob.get("finetune") or {})
     finetune_cfg = merge_dataclass(
         DistillConfig(teacher_model="", alpha=0.0, temperature=1.0),
         {
             "steps": int(
-                payload.get("finetune_steps", preset.get("finetune_steps", 2))
+                payload.get(
+                    "finetune_steps",
+                    finetune_file.get("steps", preset.get("finetune_steps", 2)),
+                )
             ),
             "trust_remote_code": bool(payload.get("trust_remote_code", False)),
         },
