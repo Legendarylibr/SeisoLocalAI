@@ -5,7 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-_TEXT_COLUMNS = ("text", "content", "code", "raw_content", "file_content")
+from seiso.training.datasets import TEXT_BODY_KEYS
+from seiso.training.preprocess import _normalize_text, text_body_from_sample
+
 _LANG_COLUMNS = ("language", "lang", "programming_language")
 _PATH_COLUMNS = ("rel_path", "path", "file_path", "filename")
 
@@ -20,7 +22,7 @@ class NormalizedCodeSample:
         return {"text": self.text}
 
 
-def _first_str(row: dict[str, Any], keys: tuple[str, ...]) -> str | None:
+def _first_meta_str(row: dict[str, Any], keys: tuple[str, ...]) -> str | None:
     for key in keys:
         value = row.get(key)
         if value is None:
@@ -35,12 +37,12 @@ def normalize_code_row(
     row: dict[str, Any], *, source: str | None = None
 ) -> NormalizedCodeSample | None:
     """Convert a code-hub row into a single training text field."""
-    body = _first_str(row, _TEXT_COLUMNS)
+    body = text_body_from_sample(row)
     if not body:
         return None
 
-    language = _first_str(row, _LANG_COLUMNS)
-    rel_path = _first_str(row, _PATH_COLUMNS)
+    language = _first_meta_str(row, _LANG_COLUMNS)
+    rel_path = _first_meta_str(row, _PATH_COLUMNS)
     repo = str(row.get("repo") or row.get("repository") or "").strip() or None
 
     parts: list[str] = []
@@ -50,8 +52,8 @@ def normalize_code_row(
         parts.append(f"# path: {repo}/{rel_path}")
     elif rel_path:
         parts.append(f"# path: {rel_path}")
-    parts.append(body.rstrip())
-    text = "\n".join(parts).strip()
+    parts.append(body)
+    text = _normalize_text("\n".join(parts))
     if len(text) < 32:
         return None
     if len(text) > 256_000:
@@ -107,5 +109,8 @@ def recommend_pretraining_epochs(
 def is_metadata_only_row(row: dict[str, Any]) -> bool:
     """True when a row has file metadata but no trainable text body."""
     has_meta = any(row.get(key) for key in ("repo", "rel_path", "commit_id", "commit"))
-    has_body = _first_str(row, _TEXT_COLUMNS) is not None
+    has_body = any(
+        key in row and row.get(key) is not None and str(row.get(key)).strip()
+        for key in TEXT_BODY_KEYS
+    )
     return bool(has_meta and not has_body)

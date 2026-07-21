@@ -9,28 +9,50 @@ import re
 from typing import Any
 
 from seiso.training.config import DatasetFormat
-from seiso.training.datasets import detect_format
+from seiso.training.datasets import TEXT_BODY_KEYS, detect_format
 
 logger = logging.getLogger(__name__)
 
-_WHITESPACE_RE = re.compile(r"\s+")
+# Bump when ``_normalize_text`` / ``normalize_sample`` semantics change so
+# analysis→train cleaned-dataset cache keys cannot reuse stale rows.
+PREPROCESS_NORM_VERSION = "preserve_ws_v4"
+
+# After the role colon, only skip same-line horizontal space. Using ``\s*``
+# would also consume the following newline and the next line's indentation,
+# destroying code structure in preference Human/Assistant transcripts.
 _HUMAN_ASSISTANT_TURN_RE = re.compile(
-    r"(?:^|\n)\s*(Human|Assistant)\s*:\s*",
+    r"(?:^|\n)\s*(Human|Assistant)\s*:[ \t]*",
     re.IGNORECASE | re.MULTILINE,
 )
 
 
-def _normalize_dialog_text(text: Any) -> str:
-    """Normalize line endings without collapsing turn boundaries."""
-    if text is None:
+def _normalize_text(value: Any) -> str:
+    """Normalize training text without destroying code structure.
+
+    - Unify line endings to ``\\n``
+    - Strip trailing whitespace on each line
+    - Drop leading/trailing blank lines
+    - Single-line fields: trim leading/trailing spaces (chat/instruction prose)
+    - Multi-line fields: preserve indentation, including on the first line
+    """
+    if value is None:
         return ""
-    normalized = str(text).replace("\r\n", "\n").replace("\r", "\n").strip()
-    return normalized
+    text = str(value).replace("\r\n", "\n").replace("\r", "\n")
+    lines = [line.rstrip() for line in text.split("\n")]
+    while lines and lines[0] == "":
+        lines.pop(0)
+    while lines and lines[-1] == "":
+        lines.pop()
+    if not lines:
+        return ""
+    if len(lines) == 1:
+        return lines[0].strip()
+    return "\n".join(lines)
 
 
 def parse_human_assistant_dialog(text: Any) -> list[dict[str, str]]:
     """Parse Human/Assistant dialog transcripts into chat messages."""
-    raw = _normalize_dialog_text(text)
+    raw = _normalize_text(text)
     if not raw:
         return []
 
@@ -44,18 +66,10 @@ def parse_human_assistant_dialog(text: Any) -> list[dict[str, str]]:
         role = "user" if role_raw == "human" else "assistant"
         start = match.end()
         end = matches[idx + 1].start() if idx + 1 < len(matches) else len(raw)
-        content = raw[start:end].strip()
-        content = _WHITESPACE_RE.sub(" ", content).strip()
+        content = _normalize_text(raw[start:end])
         if content:
             messages.append({"role": role, "content": content})
     return messages
-
-
-def _strip_text(value: Any) -> str:
-    if value is None:
-        return ""
-    text = str(value).replace("\r\n", "\n").replace("\r", "\n")
-    return _WHITESPACE_RE.sub(" ", text).strip()
 
 
 def _normalize_role(role: str) -> str:
@@ -69,38 +83,51 @@ def _normalize_role(role: str) -> str:
     return "user"
 
 
+def text_body_from_sample(sample: dict[str, Any]) -> str:
+    """Extract a causal-LM text body from common corpus column names."""
+    for key in TEXT_BODY_KEYS:
+        if key not in sample or sample.get(key) is None:
+            continue
+        text = _normalize_text(sample.get(key))
+        if text:
+            return text
+    return ""
+
+
 def normalize_sample(
     sample: dict[str, Any], fmt: DatasetFormat
 ) -> dict[str, Any] | None:
     """Map a raw row to a canonical schema, or None if it has no trainable content."""
     if fmt == DatasetFormat.TEXT:
-        text = _strip_text(sample.get("text") or sample.get("content"))
+        text = text_body_from_sample(sample)
         if len(text) < 1:
             return None
         return {"text": text}
 
     if fmt == DatasetFormat.ALPACA:
         if "query" in sample and "response" in sample:
-            query = _strip_text(sample.get("query"))
-            response = _strip_text(sample.get("response"))
+            query = _normalize_text(sample.get("query"))
+            response = _normalize_text(sample.get("response"))
             if not response:
                 return None
             return {"query": query, "response": response}
         if "question" in sample and "answer" in sample:
-            question = _strip_text(sample.get("question"))
-            answer = _strip_text(sample.get("answer"))
+            question = _normalize_text(sample.get("question"))
+            answer = _normalize_text(sample.get("answer"))
             if not answer:
                 return None
             return {"question": question, "answer": answer}
         if "prompt" in sample and ("completion" in sample or "response" in sample):
-            prompt = _strip_text(sample.get("prompt"))
-            completion = _strip_text(sample.get("completion") or sample.get("response"))
+            prompt = _normalize_text(sample.get("prompt"))
+            completion = _normalize_text(
+                sample.get("completion") or sample.get("response")
+            )
             if not completion:
                 return None
             return {"instruction": prompt, "output": completion}
-        instruction = _strip_text(sample.get("instruction"))
-        inp = _strip_text(sample.get("input"))
-        output = _strip_text(sample.get("output") or sample.get("response"))
+        instruction = _normalize_text(sample.get("instruction"))
+        inp = _normalize_text(sample.get("input"))
+        output = _normalize_text(sample.get("output") or sample.get("response"))
         if not output:
             return None
         if not instruction and not inp:
@@ -113,7 +140,7 @@ def normalize_sample(
     if fmt == DatasetFormat.SHAREGPT and "conversations" in sample:
         turns: list[dict[str, str]] = []
         for turn in sample["conversations"]:
-            content = _strip_text(turn.get("value") or turn.get("content"))
+            content = _normalize_text(turn.get("value") or turn.get("content"))
             if not content:
                 continue
             role = _normalize_role(str(turn.get("from") or turn.get("role") or "user"))
@@ -133,8 +160,8 @@ def normalize_sample(
         )
         messages: list[dict[str, str]] = parse_human_assistant_dialog(chosen)
         if not messages:
-            prompt = _strip_text(sample.get("prompt"))
-            response = _strip_text(
+            prompt = _normalize_text(sample.get("prompt"))
+            response = _normalize_text(
                 sample.get("chosen") or sample.get("chosen_response")
             )
             if (
@@ -154,7 +181,7 @@ def normalize_sample(
     if fmt == DatasetFormat.CHAT or "messages" in sample:
         messages = []
         for turn in sample.get("messages") or []:
-            content = _strip_text(turn.get("content"))
+            content = _normalize_text(turn.get("content"))
             if not content:
                 continue
             messages.append(
@@ -167,7 +194,7 @@ def normalize_sample(
             return None
         return {"messages": messages}
 
-    text = _strip_text(sample.get("text") or sample.get("content") or "")
+    text = text_body_from_sample(sample)
     if not text:
         return None
     return {"text": text}

@@ -383,6 +383,9 @@ class SeisoTrainer:
     def _limit_training_samples(self, raw_ds):
         max_samples = self.config.extra.get("max_samples")
         if isinstance(max_samples, int) and max_samples > 0 and len(raw_ds) > max_samples:
+            # Shuffle before taking a subset so ordered corpora are not prefix-biased.
+            if hasattr(raw_ds, "shuffle"):
+                raw_ds = raw_ds.shuffle(seed=self.config.seed)
             raw_ds = raw_ds.select(range(max_samples))
             logger.info("Limited dataset to %d samples (max_samples)", max_samples)
         return raw_ds
@@ -817,7 +820,16 @@ class SeisoTrainer:
             base["dataloader_prefetch_factor"] = prefetch_factor
         if grad_ckpt_kwargs is not None:
             base["gradient_checkpointing_kwargs"] = grad_ckpt_kwargs
-        if cfg.neftune_noise_alpha is not None and not use_cpu:
+        # NEFTune is an instruction-tuning regularizer — skip for causal LM / CPT.
+        use_neftune = (
+            cfg.neftune_noise_alpha is not None
+            and not use_cpu
+            and not (
+                dataset_format == DatasetFormat.TEXT
+                and not cfg.train_on_responses_only
+            )
+        )
+        if use_neftune:
             base["neftune_noise_alpha"] = cfg.neftune_noise_alpha
         if padding_free:
             base["padding_free"] = True

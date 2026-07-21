@@ -60,6 +60,81 @@ def test_normalize_alpaca_strips_and_requires_output():
     )
 
 
+def test_normalize_preserves_newlines_and_indentation():
+    code = "def add(a, b):\n    return a + b\n"
+    row = normalize_sample(
+        {
+            "messages": [
+                {"role": "user", "content": "Write add\r\n"},
+                {"role": "assistant", "content": code},
+            ]
+        },
+        DatasetFormat.CHAT,
+    )
+    assert row is not None
+    assert row["messages"][-1]["content"] == "def add(a, b):\n    return a + b"
+
+    text_row = normalize_sample({"text": "line1\n    indented\n"}, DatasetFormat.TEXT)
+    assert text_row == {"text": "line1\n    indented"}
+
+
+def test_normalize_preserves_first_line_indent_on_multiline():
+    """Overall strip() would eat leading indent on line 1 — must not."""
+    indented = "    def add(a, b):\n        return a + b\n"
+    row = normalize_sample({"text": indented}, DatasetFormat.TEXT)
+    assert row == {"text": "    def add(a, b):\n        return a + b"}
+
+
+def test_normalize_text_accepts_code_columns():
+    indented = "    def add(a, b):\n        return a + b\n"
+    for key in ("code", "raw_content", "file_content"):
+        row = normalize_sample({key: indented}, DatasetFormat.TEXT)
+        assert row == {"text": "    def add(a, b):\n        return a + b"}, key
+    # Prefer text over code when both present.
+    row = normalize_sample(
+        {"text": "plain", "code": "should_not_win"},
+        DatasetFormat.TEXT,
+    )
+    assert row == {"text": "plain"}
+
+
+def test_normalize_trims_single_line_prose_only():
+    row = normalize_sample(
+        {
+            "messages": [
+                {"role": "user", "content": "  hi  "},
+                {"role": "assistant", "content": "  hello  "},
+            ]
+        },
+        DatasetFormat.CHAT,
+    )
+    assert row is not None
+    assert row["messages"][0]["content"] == "hi"
+    assert row["messages"][1]["content"] == "hello"
+
+
+def test_parse_human_assistant_preserves_code_blocks():
+    text = (
+        "Human: Fix this\n\n"
+        "Assistant:\n"
+        "```python\n"
+        "def add(a, b):\n"
+        "    return a + b\n"
+        "```"
+    )
+    messages = parse_human_assistant_dialog(text)
+    assert messages[-1]["role"] == "assistant"
+    assert "def add(a, b):\n    return a + b" in messages[-1]["content"]
+
+
+def test_parse_human_assistant_preserves_indented_first_line():
+    """Role delimiter must not consume the next line's indentation."""
+    text = "Human: x\n\nAssistant:\n    def f():\n        return 1"
+    messages = parse_human_assistant_dialog(text)
+    assert messages[-1]["role"] == "assistant"
+    assert messages[-1]["content"] == "    def f():\n        return 1"
+
+
 def test_normalize_chat_requires_assistant():
     ok = normalize_sample(
         {

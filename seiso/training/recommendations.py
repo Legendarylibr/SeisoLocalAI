@@ -181,7 +181,10 @@ def recommend_training_config(
         "batch_size": defaults["batch_size"],
         "gradient_accumulation_steps": defaults["gradient_accumulation_steps"],
         "max_seq_length": ds.get("max_seq_length", defaults["max_seq_length"]),
-        "learning_rate": learning_rate_for_method(TrainMethod(defaults["method"])),
+        "learning_rate": ds.get(
+            "learning_rate",
+            learning_rate_for_method(TrainMethod(defaults["method"])),
+        ),
         "warmup_ratio": ds.get(
             "warmup_ratio",
             warmup_ratio_for_corpus(int(analysis.get("kept", 0)) if analysis else 0),
@@ -199,6 +202,7 @@ def recommend_training_config(
         "preprocess_dataset": ds.get("preprocess_dataset", True),
         "deduplicate_dataset": ds.get("deduplicate_dataset", True),
         "preference_as_sft": ds.get("preference_as_sft", False),
+        "neftune_noise_alpha": ds.get("neftune_noise_alpha", 5.0),
         "max_eval_samples": 128,
         "early_stopping": ds.get("early_stopping", True),
         "early_stopping_patience": ds.get("early_stopping_patience", 3),
