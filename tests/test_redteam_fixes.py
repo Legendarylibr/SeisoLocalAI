@@ -716,6 +716,58 @@ def test_remote_access_requires_ack(monkeypatch, tmp_path):
         ForgeSettings()
 
 
+def test_remote_code_exec_requires_dedicated_ack(monkeypatch):
+    """Remote + code-exec fail-closed unless SEISO_REMOTE_CODE_EXEC_ACK=1."""
+    from types import SimpleNamespace
+
+    from forge.security.startup import validate_security_settings
+
+    monkeypatch.setenv("SEISO_REMOTE_ACK", "1")
+    monkeypatch.delenv("SEISO_REMOTE_CODE_EXEC_ACK", raising=False)
+    # Shared tools ack alone must not re-enable remote code-exec.
+    monkeypatch.setenv("SEISO_REMOTE_DANGEROUS_ACK", "1")
+
+    settings = SimpleNamespace(
+        allow_remote=True,
+        allow_code_exec=True,
+        allow_tools=False,
+        allow_compat_tools=False,
+        trust_proxy=False,
+        trusted_proxy_ips="",
+        debug=False,
+    )
+    with pytest.raises(RuntimeError, match="SEISO_REMOTE_CODE_EXEC_ACK"):
+        validate_security_settings(settings)
+
+    monkeypatch.setenv("SEISO_REMOTE_CODE_EXEC_ACK", "1")
+    validate_security_settings(settings)
+
+
+def test_remote_tools_still_use_dangerous_ack(monkeypatch):
+    from types import SimpleNamespace
+
+    from forge.security.startup import validate_security_settings
+
+    monkeypatch.setenv("SEISO_REMOTE_ACK", "1")
+    monkeypatch.delenv("SEISO_REMOTE_DANGEROUS_ACK", raising=False)
+    monkeypatch.delenv("SEISO_REMOTE_CODE_EXEC_ACK", raising=False)
+
+    settings = SimpleNamespace(
+        allow_remote=True,
+        allow_code_exec=False,
+        allow_tools=True,
+        allow_compat_tools=False,
+        trust_proxy=False,
+        trusted_proxy_ips="",
+        debug=False,
+    )
+    with pytest.raises(RuntimeError, match="SEISO_REMOTE_DANGEROUS_ACK"):
+        validate_security_settings(settings)
+
+    monkeypatch.setenv("SEISO_REMOTE_DANGEROUS_ACK", "1")
+    validate_security_settings(settings)
+
+
 def test_trust_proxy_requires_allowlist(monkeypatch, tmp_path):
     monkeypatch.setenv("SEISO_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("SEISO_SECRET_KEY", "test-secret-key-for-jwt-signing-32b")
