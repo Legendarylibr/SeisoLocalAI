@@ -91,7 +91,7 @@ def test_user_scoped_data_roots_cover_tenant_categories():
         "rl_quant",
         "recipes",
     }
-    assert USER_SCOPED_DATA_ROOTS == expected
+    assert expected == USER_SCOPED_DATA_ROOTS
     assert "hf_cache" not in USER_SCOPED_DATA_ROOTS
 
 
