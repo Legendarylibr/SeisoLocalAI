@@ -26,8 +26,12 @@ async def get_compat_user_id(
     try:
         if creds and creds.credentials:
             token = creds.credentials.strip()
-            if settings.inference_api_key and secrets.compare_digest(
-                token, settings.inference_api_key
+            expected_key = settings.inference_api_key or ""
+            # compare_digest raises on length mismatch — only compare equal lengths.
+            if (
+                expected_key
+                and len(token) == len(expected_key)
+                and secrets.compare_digest(token, expected_key)
             ):
                 user = await db.get_sole_user()
                 if not user:

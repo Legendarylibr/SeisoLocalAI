@@ -101,6 +101,17 @@ async def test_job_start_is_single_use(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_cancel_pending_job_before_start(tmp_path: Path):
+    orchestrator = _GpuOrchestratorB(tmp_path)
+    job_id = orchestrator.create_job(user_id="user-a")
+    assert orchestrator.get_job(job_id).status == JobStatus.PENDING
+    assert await orchestrator.cancel(job_id) is True
+    assert orchestrator.get_job(job_id).status == JobStatus.CANCELLED
+    with pytest.raises(RuntimeError, match="already cancelled"):
+        await orchestrator.start(job_id, {})
+
+
+@pytest.mark.asyncio
 async def test_cancel_terminates_registered_process_group(monkeypatch, tmp_path: Path):
     orchestrator = _GpuOrchestratorB(tmp_path)
     job_id = orchestrator.create_job(user_id="user-a")

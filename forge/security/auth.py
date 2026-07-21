@@ -125,14 +125,15 @@ class RateLimiter:
 
     def check(self, client_ip: str) -> None:
         now = time.monotonic()
-        window = self._hits[client_ip]
         cutoff = now - 60.0
-        self._hits[client_ip] = [t for t in window if t > cutoff]
-        if len(self._hits[client_ip]) >= self.max_per_minute:
+        pruned = [t for t in self._hits.get(client_ip, []) if t > cutoff]
+        if len(pruned) >= self.max_per_minute:
+            self._hits[client_ip] = pruned
             raise HTTPException(
                 status.HTTP_429_TOO_MANY_REQUESTS, "Rate limit exceeded"
             )
-        self._hits[client_ip].append(now)
+        pruned.append(now)
+        self._hits[client_ip] = pruned
 
 
 class LoginRateLimiter(RateLimiter):

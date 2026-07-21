@@ -1,4 +1,9 @@
-"""Sandboxed Python code execution — AST-validated, restricted builtins."""
+"""Best-effort restricted Python execution — AST deny-list + resource limits.
+
+This is **not** a full OS sandbox (no network/FS namespace isolation). Prefer
+keeping ``allow_code_exec`` off, especially with ``allow_remote``. Limits are
+best-effort and may be unavailable on some hosts.
+"""
 
 from __future__ import annotations
 
