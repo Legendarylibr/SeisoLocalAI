@@ -443,25 +443,36 @@ def _maybe_run_held_out_eval(
     metrics_path: Path,
     force: bool,
 ) -> None:
-    """Run frozen held-out unit-test eval on the main rank when configured."""
-    if config.eval_dataset is None or not dist_ctx.is_main:
+    """Run frozen held-out unit-test eval on the main rank when configured.
+
+    All ranks share the same schedule decision and barrier around the main-rank
+    generate/score path so DDP peers do not enter the next collective early.
+    """
+    if config.eval_dataset is None:
         return
     if force:
         if not config.eval_on_complete:
             return
     elif not config.eval_every_steps or not step or step % config.eval_every_steps != 0:
         return
-    from seiso.slime.eval import run_held_out_eval
 
-    metrics = run_held_out_eval(
-        model=model,
-        tokenizer=tokenizer,
-        config=config,
-        torch=torch,
-        step=step,
-    )
-    if metrics:
-        _append_metrics(metrics_path, {"step": step, **metrics})
+    # Match _save_distributed: sync → main-only work → sync.
+    _distributed_barrier(dist_ctx)
+    try:
+        if dist_ctx.is_main:
+            from seiso.slime.eval import run_held_out_eval
+
+            metrics = run_held_out_eval(
+                model=model,
+                tokenizer=tokenizer,
+                config=config,
+                torch=torch,
+                step=step,
+            )
+            if metrics:
+                _append_metrics(metrics_path, {"step": step, **metrics})
+    finally:
+        _distributed_barrier(dist_ctx)
 
 
 def _collect_training_rollout_batch(

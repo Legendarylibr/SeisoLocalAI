@@ -114,27 +114,36 @@ def run_held_out_eval(
         )
         for sample in samples
     ]
-    gen = generate_data_gen_chunk(
-        generation_model=_generation_model(model),
-        tokenizer=tokenizer,
-        prompts=prompts,
-        config=eval_config,
-        torch=torch,
-    )
-    metrics = score_held_out_completions(
-        completions=list(gen.completions),
-        samples=samples,
-        config=config,
-    )
-    metrics["eval_step"] = float(step)
-    _write_eval_report(config, metrics, step=step)
-    logger.info(
-        "held-out eval step=%s prompts=%s outcome_pass_rate=%.3f",
-        step,
-        int(metrics["eval_prompt_count"]),
-        metrics["eval_outcome_pass_rate"],
-    )
-    return metrics
+    # Rollout collection restores train(); eval must disable dropout for stable
+    # pass-rate reports, then restore the caller's mode.
+    was_training = bool(getattr(model, "training", False))
+    if hasattr(model, "eval"):
+        model.eval()
+    try:
+        gen = generate_data_gen_chunk(
+            generation_model=_generation_model(model),
+            tokenizer=tokenizer,
+            prompts=prompts,
+            config=eval_config,
+            torch=torch,
+        )
+        metrics = score_held_out_completions(
+            completions=list(gen.completions),
+            samples=samples,
+            config=config,
+        )
+        metrics["eval_step"] = float(step)
+        _write_eval_report(config, metrics, step=step)
+        logger.info(
+            "held-out eval step=%s prompts=%s outcome_pass_rate=%.3f",
+            step,
+            int(metrics["eval_prompt_count"]),
+            metrics["eval_outcome_pass_rate"],
+        )
+        return metrics
+    finally:
+        if was_training and hasattr(model, "train"):
+            model.train()
 
 
 def _eval_reward_sample(
