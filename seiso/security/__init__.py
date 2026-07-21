@@ -67,6 +67,48 @@ def assert_within(base: Path, target: Path) -> Path:
     return target_r
 
 
+# Mirrors forge.services.user_paths user-scoped roots (keep in sync).
+USER_SCOPED_DATA_ROOTS = frozenset(
+    {
+        "uploads",
+        "knowledge",
+        "artifacts",
+        "sandbox",
+        "models",
+        "checkpoints",
+        "exports",
+        "compress",
+        "distill_rl",
+        "rl_quant",
+    }
+)
+
+
+def assert_user_scoped_path(
+    data_dir: Path,
+    user_id: str,
+    target: Path | str,
+) -> Path:
+    """Require *target* under ``data_dir/<scoped_root>/<user_id>/...``."""
+    if not user_id or "/" in user_id or "\\" in user_id or user_id in {".", ".."}:
+        raise SecurityError(f"Invalid user_id: {user_id!r}")
+    base = Path(data_dir).expanduser().resolve()
+    source = Path(target).expanduser()
+    target_r = assert_within(base, source if source.is_absolute() else source.resolve())
+    try:
+        rel = target_r.relative_to(base)
+    except ValueError as exc:
+        raise SecurityError(f"Path {target_r} is outside sandbox {base}") from exc
+    if len(rel.parts) < 2:
+        raise SecurityError(f"Path must be under a user-scoped root for {user_id}")
+    root, owner = rel.parts[0], rel.parts[1]
+    if root not in USER_SCOPED_DATA_ROOTS:
+        raise SecurityError(f"Access denied to path root: {root!r}")
+    if owner != user_id:
+        raise SecurityError(f"Path must be under {root}/{user_id}/")
+    return target_r
+
+
 def sanitize_filename(name: str, max_len: int = 255) -> str:
     """Produce a safe filename from user input."""
     cleaned = re.sub(r"[^\w.\- ]", "_", name.strip())

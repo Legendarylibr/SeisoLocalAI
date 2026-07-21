@@ -1,0 +1,6 @@
+{"prompt":"Which element has the chemical symbol O?\nA) Gold\nB) Oxygen\nC) Osmium\nD) Ozone\nAnswer with the letter only.","answer":"B","benchmark":"gpqa","split":"eval"}
+{"prompt":"How many continents are commonly recognized?\nA) 5\nB) 6\nC) 7\nD) 8\nAnswer with the letter only.","answer":"C","benchmark":"gpqa","split":"eval"}
+{"prompt":"What is the boiling point of water at standard pressure?\nA) 0 C\nB) 50 C\nC) 100 C\nD) 212 C\nAnswer with the letter only.","answer":"C","benchmark":"gpqa","split":"eval"}
+{"prompt":"Which animal is a mammal?\nA) Shark\nB) Frog\nC) Whale\nD) Eagle\nAnswer with the letter only.","answer":"C","benchmark":"gpqa","split":"eval"}
+{"prompt":"What is 9 + 1?\nA) 8\nB) 9\nC) 10\nD) 11\nAnswer with the letter only.","answer":"C","benchmark":"gpqa","split":"eval"}
+{"prompt":"Which direction does the sun rise?\nA) North\nB) South\nC) East\nD) West\nAnswer with the letter only.","answer":"C","benchmark":"gpqa","split":"eval"}

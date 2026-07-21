@@ -1,17 +1,15 @@
-"""High-level verifiable RL data generation for slime / distill-RL.
+"""Legacy deterministic RL corpus helpers (shared row types + offline tools).
 
-Hardcoded 30-line smoke JSONL does not produce meaningful GRPO signal:
-models either pass everything or fail uniformly, dynamic sampling drops all
-groups, and training aborts with ``no_trainable_groups``.
+**Not a training default.** Product slime / Distill-RL paths use operator or HF
+verifiable JSONL; synth is opt-in via ``data_gen_source=hf_dataset`` or
+``data_designer`` (:mod:`seiso.rl_verify.synth_materialize`,
+:mod:`seiso.rl_verify.data_designer_gen`). Unit-test code rows use
+:mod:`seiso.rl_verify.code_corpus` directly.
 
-This module builds **large, deterministic, checkable** prompt corpora:
-
-* **numeric** — arithmetic + multi-step word problems with exact answers
-* **choice** — multiple-choice facts/logic with letter labels
-* **code** — unit-test-grounded programs (via :mod:`seiso.rl_verify.code_corpus`)
-
-Each row is slime-ready: ``prompt``, ``answer`` / ``tests``, ``benchmark``,
-and difficulty tags. Same ``seed`` ⇒ same corpus.
+This module still exposes ``DataGenResult``, ``to_slime_prompt_row``,
+``parse_weight_mix``, and ``write_jsonl`` for shared formatting, plus optional
+offline ``generate_rl_corpus`` for experiments — not wired into slime or
+Distill-RL product defaults.
 """
 
 from __future__ import annotations

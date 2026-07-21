@@ -120,16 +120,16 @@ def test_score_completion_outcome_first():
     )
 
     assert good.passed is True
-    # Short traces are not format_ok — penalty applies alongside soft format score.
-    assert good.format_ok is False
+    # Closed think → format_ok; short body only softens format_score (no penalty).
+    assert good.format_ok is True
     assert good.format_score == pytest.approx(1.0 / 8.0)
-    assert good.reward == pytest.approx(1.0 + 0.1 * (1.0 / 8.0) - 0.5)
-    assert good.detail == "thinking_format_incomplete"
+    assert good.reward == pytest.approx(1.0 + 0.1 * (1.0 / 8.0))
+    assert good.detail is None
     assert good.process_score == 0.0
     assert continued.passed is True
-    assert continued.format_ok is False
+    assert continued.format_ok is True
     assert continued.format_score == pytest.approx(2.0 / 8.0)
-    assert continued.reward == pytest.approx(1.0 + 0.1 * (2.0 / 8.0) - 0.5)
+    assert continued.reward == pytest.approx(1.0 + 0.1 * (2.0 / 8.0))
     assert continued.final_answer == "42"
     assert bad_format.passed is True
     assert bad_format.format_ok is False
@@ -163,10 +163,10 @@ def test_empty_think_block_earns_no_format_bonus():
         missing_format_penalty=0.25,
         min_thinking_tokens=8,
     )
-    assert empty.format_ok is False
+    assert empty.format_ok is True
     assert empty.format_score == 0.0
-    assert empty.reward == pytest.approx(0.75)  # 1.0 - 0.25 penalty
-    assert empty.detail == "thinking_format_incomplete"
+    assert empty.reward == pytest.approx(1.0)  # closed; soft score 0, no penalty
+    assert empty.detail is None
 
     no_final = score_completion(
         "<think>step one then step two then check verify</think>",
@@ -177,11 +177,11 @@ def test_empty_think_block_earns_no_format_bonus():
         format_weight=0.1,
         min_thinking_tokens=8,
     )
-    assert no_final.format_ok is False
+    assert no_final.format_ok is True
     # 8 tokens → full length credit, then ×0.5 for missing final answer.
     assert no_final.format_score == pytest.approx(0.5)
     assert no_final.outcome == 0.0
-    assert no_final.detail == "thinking_format_incomplete"
+    assert no_final.detail == "outcome_mismatch"
 
 
 def test_score_completion_prefers_final_answer_even_without_thinking_requirement():

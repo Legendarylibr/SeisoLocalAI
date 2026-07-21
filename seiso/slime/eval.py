@@ -172,7 +172,8 @@ def _write_eval_report(
     *,
     step: int,
 ) -> None:
-    path = Path(config.output_dir) / "slime_held_out_eval.jsonl"
+    # Distinct from auto-split prompt corpus (slime_held_out_prompts.jsonl).
+    path = Path(config.output_dir) / "slime_held_out_eval_metrics.jsonl"
     path.parent.mkdir(parents=True, exist_ok=True)
     record = {"step": step, **metrics}
     with path.open("a", encoding="utf-8") as handle:

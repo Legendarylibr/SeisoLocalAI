@@ -111,12 +111,14 @@ def test_slime_config_data_gen_validation():
         output_dir=Path("out"),
         data_gen=True,
         data_gen_count=0,
+        require_held_out_eval=False,
     )
     with pytest.raises(ValueError, match="data_gen_count"):
         cfg.validate()
 
 
-def test_maybe_materialize_data_gen_rewrites_dataset(tmp_path: Path):
+def test_maybe_materialize_data_gen_rewrites_dataset(tmp_path: Path, monkeypatch):
+    from seiso.rl_verify.data_gen import DataGenResult
     from seiso.slime.trainer import _DistributedSlimeContext
 
     cfg = SingleGpuSlimeConfig(
@@ -129,14 +131,49 @@ def test_maybe_materialize_data_gen_rewrites_dataset(tmp_path: Path):
         data_gen_mix="numeric:0.8,choice:0.2,code:0.0",
         data_gen_filename="gen.jsonl",
         require_thinking_trace=False,
+        data_gen_source="data_designer",
+        data_designer="on",
+        vllm_base_url="http://127.0.0.1:8000",
+        require_held_out_eval=False,
     )
     cfg.validate()
     dist = _DistributedSlimeContext(enabled=False, world_size=1, rank=0, local_rank=0, device="cpu")
+    fake = DataGenResult(
+        rows=[{"prompt": "x", "label": "1"} for _ in range(24)],
+        stream_counts={"numeric": 24},
+        difficulty_counts={},
+        seed=0,
+    )
+
+    def _materialize(config, *, out_path, count, world_size=1):
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(
+            "\n".join(json.dumps(r) for r in fake.rows) + "\n",
+            encoding="utf-8",
+        )
+        return fake
+
+    monkeypatch.setattr(
+        "seiso.rl_verify.data_designer_gen.data_designer_available",
+        lambda: True,
+    )
+    monkeypatch.setattr(
+        "seiso.rl_verify.data_designer_gen.should_use_data_designer",
+        lambda *_a, **_k: True,
+    )
+    monkeypatch.setattr(
+        "seiso.rl_verify.data_designer_gen.materialize_for_slime_config",
+        _materialize,
+    )
     updated = _maybe_materialize_data_gen(cfg, dist)
     assert updated.dataset == tmp_path / "run" / "gen.jsonl"
     assert updated.dataset.is_file()
     n = sum(1 for _ in updated.dataset.open(encoding="utf-8"))
     assert n == 24
+    summary = json.loads(
+        (tmp_path / "run" / "slime_data_gen_summary.json").read_text(encoding="utf-8")
+    )
+    assert summary["generator"] == "nvidia.nemo.data_designer"
 
 
 def test_data_gen_fails_when_code_verify_rejects_majority(monkeypatch):

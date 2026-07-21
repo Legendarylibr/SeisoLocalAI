@@ -82,6 +82,7 @@ async def run_bundled_job(
     runner: Callable[..., dict[str, Any]],
     result_log: Callable[[dict[str, Any]], str],
     contract: BundledJobContract = _DEFAULT_CONTRACT,
+    local_path_keys: tuple[str, ...] = (),
 ) -> dict[str, Any]:
     from forge.services.memory_release import prepare_for_gpu_task, release_after_task
 
@@ -93,6 +94,14 @@ async def run_bundled_job(
         if path := payload.get(key):
             try:
                 assert_user_path(orchestrator.sandbox_root, user_id, path)
+            except SecurityError as exc:
+                raise PermissionError(str(exc)) from exc
+    # Hub ids / remote refs allowed; local filesystem refs must be user-scoped.
+    for key in local_path_keys:
+        value = payload.get(key)
+        if value and is_local_filesystem_path(value):
+            try:
+                assert_user_path(orchestrator.sandbox_root, user_id, value)
             except SecurityError as exc:
                 raise PermissionError(str(exc)) from exc
 
@@ -153,6 +162,7 @@ def bundled_orchestrator(
     runner: Callable[..., dict[str, Any]],
     result_log: Callable[[dict[str, Any]], str],
     contract: BundledJobContract = _DEFAULT_CONTRACT,
+    local_path_keys: tuple[str, ...] = (),
 ) -> type[Orchestrator]:
     """Build a thin Orchestrator subclass for a bundled pipeline runner."""
 
@@ -170,6 +180,7 @@ def bundled_orchestrator(
                 runner=runner,
                 result_log=result_log,
                 contract=contract,
+                local_path_keys=local_path_keys,
             )
 
     _BundledOrchestrator.kind = kind

@@ -115,10 +115,12 @@ def test_example_training_slime_config_loads():
 
     assert cfg.method == TrainMethod.SLIME
     assert slime.reward == "auto"
-    assert slime.answer_field == "label"
+    assert slime.answer_field == "answer"
     assert slime.rollout_backend == "hf"
-    assert slime.data_gen is True
-    assert slime.data_gen_count >= 200
+    assert slime.data_gen is False
+    assert slime.data_gen_source == "off"
+    assert slime.eval_dataset is not None
+    assert slime.require_held_out_eval is True
     assert slime.process_reward_weight == 0.0
     assert slime.format_reward_weight == 0.1
     assert slime.dynamic_sampling_filter == "reward_nonzero_std"
@@ -175,8 +177,9 @@ def test_example_training_slime_ddp_config_loads():
     assert cfg.distributed_strategy.value == "ddp"
     assert cfg.balance_data is True
     assert slime.balance_data is True
-    assert slime.data_gen is True
-    assert slime.data_gen_count >= 200
+    assert slime.data_gen is False
+    assert slime.data_gen_source == "off"
+    assert slime.eval_dataset is not None
     assert slime.clip_ratio_high == 0.28
     assert slime.grpo_std_normalization is True
 

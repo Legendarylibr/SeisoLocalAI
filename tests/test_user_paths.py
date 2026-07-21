@@ -119,6 +119,21 @@ def test_resolve_training_dataset_path_seeds_sample_jsonl(tmp_path: Path):
     assert expected.read_text(encoding="utf-8") == '{"messages":[]}\n'
 
 
+def test_is_local_filesystem_path_matches_dataset_helper():
+    from forge.services.user_paths import is_local_filesystem_path
+    from seiso.training.datasets import looks_like_local_dataset_path
+
+    cases = [
+        "/abs/path.jsonl",
+        "uploads/u/x.jsonl",
+        "org/hub-dataset",
+        "./relative.jsonl",
+        "plain-name",
+    ]
+    for case in cases:
+        assert is_local_filesystem_path(case) == looks_like_local_dataset_path(case)
+
+
 def test_assert_llama_cpp_binary_allows_venv_path(tmp_path: Path):
     binary = tmp_path / ".venv" / "bin" / "llama-cli"
     binary.parent.mkdir(parents=True)

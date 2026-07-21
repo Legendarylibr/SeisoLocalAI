@@ -315,12 +315,44 @@ class TrainConfig(BaseModel):
     data_gen: bool = False
     data_gen_count: int = Field(default=0, ge=0)
     data_gen_seed: int = 0
-    data_gen_mix: str = "numeric:0.5,choice:0.2,code:0.3"
+    data_gen_mix: str = "numeric:0.7,choice:0.3"
     data_gen_difficulty: str = "easy:0.35,medium:0.45,hard:0.20"
     data_gen_filename: str = "slime_generated.jsonl"
+    data_gen_source: str = Field(
+        default="off",
+        description="Synth source: off | hf_dataset | data_designer | auto",
+    )
+    hf_dataset: str | None = Field(
+        default=None,
+        description="HF hub id / path when data_gen_source=hf_dataset",
+    )
+    dataset_split: str = "train"
     data_designer: str = Field(
-        default="auto",
-        description=("NVIDIA NeMo Data Designer synth: auto (multi-GPU vLLM only) | on | off"),
+        default="off",
+        description='NVIDIA NeMo Data Designer: off | on | auto (quote "on"/"off" in YAML)',
+    )
+
+    @field_validator("data_designer", mode="before")
+    @classmethod
+    def _coerce_data_designer(cls, value: Any) -> str:
+        # YAML 1.1 parses bare `on`/`off` as booleans.
+        if value is True:
+            return "on"
+        if value is False:
+            return "off"
+        return str(value if value is not None else "off")
+
+    @field_validator("data_gen_source", mode="before")
+    @classmethod
+    def _coerce_data_gen_source(cls, value: Any) -> str:
+        if value is True:
+            return "auto"
+        if value is False:
+            return "off"
+        return str(value if value is not None else "off")
+    require_held_out_eval: bool = Field(
+        default=True,
+        description="Require disjoint eval_dataset for product slime runs",
     )
     vllm_tensor_parallel: int = Field(
         default=0,
@@ -526,6 +558,7 @@ class TrainConfig(BaseModel):
             model_id=self.model_id,
             dataset=Path(self.dataset),
             output_dir=self.output_dir,
+            sandbox_root=self.sandbox_root,
             eval_dataset=(
                 Path(self.slime_eval_dataset)
                 if self.slime_eval_dataset is not None
@@ -627,7 +660,11 @@ class TrainConfig(BaseModel):
             data_gen_mix=self.data_gen_mix,
             data_gen_difficulty=self.data_gen_difficulty,
             data_gen_filename=self.data_gen_filename,
+            data_gen_source=self.data_gen_source,
+            hf_dataset=self.hf_dataset,
+            dataset_split=self.dataset_split,
             data_designer=self.data_designer,
+            require_held_out_eval=self.require_held_out_eval,
             vllm_tensor_parallel=self.vllm_tensor_parallel,
         )
 

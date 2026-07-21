@@ -1,9 +1,12 @@
 {
   "preset": "smoke",
+  "preference_source": "grounded_library",
+  "prompt_library": "data/distill_verifiable_prompts.jsonl",
+  "data_gen_count": 32,
   "teacher_model": "openai-community/gpt2",
   "student_model": "openai-community/gpt2",
   "distill_steps": 2,
-  "rollout_max_prompts": 4,
+  "rollout_max_prompts": 32,
   "dpo_epochs": 1,
   "train_val_fraction": 0.75,
   "eval_max_prompts": 4,
@@ -13,5 +16,6 @@
   "benchmark_verifiable": true,
   "benchmark_tasks": ["gsm8k", "gpqa", "aime"],
   "align_distill_with_prompts": true,
-  "stages": ["distill", "rollout", "dpo", "evaluate"]
+  "stages": ["distill", "rollout", "dpo", "evaluate"],
+  "_comment": "CI fixture only — not a meaningful Distill-RL training preset. Uses SEISO_ALLOW_TINY_RL via preset=smoke."
 }

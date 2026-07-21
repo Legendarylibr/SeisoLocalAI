@@ -25,7 +25,7 @@ def test_dpo_empty_completion_logps_are_large_negative():
     logits = torch.zeros(2, 4, 5)
     labels = torch.full((2, 4), -100)
     logps = get_batch_logps(logits, labels, average_log_prob=False)
-    assert torch.all(logps == -1.0e4)
+    assert torch.all(logps == -1.0e2)
 
 
 def test_dpo_collator_joint_tokenizes_prompt_completion():

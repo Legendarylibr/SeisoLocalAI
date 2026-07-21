@@ -1525,75 +1525,207 @@ def _maybe_materialize_data_gen(
 ) -> SingleGpuSlimeConfig:
     """Build a verifiable prompt corpus when high-level data_gen is requested.
 
-    Multi-GPU vLLM runs use NVIDIA NeMo Data Designer (local vLLM provider) for
-    numeric/choice synth; other backends keep Seiso's deterministic generator.
+    Product sources (only when ``data_gen`` / ``data_gen_count`` is enabled):
+    * ``data_gen_source=hf_dataset`` (+ ``hf_dataset`` / hub id)
+    * ``data_gen_source=data_designer`` (package + real endpoint; no localhost)
+
+    ``data_gen_source=auto`` selects ``hf_dataset`` when ``hf_dataset`` is set,
+    else Data Designer only when ``data_designer=on``; otherwise fails loud.
+    ``off`` / ``none`` never select a synth source.
+    Setting ``hf_dataset`` alone does not rewrite ``dataset``.
     """
-    enabled = config.data_gen or config.data_gen_count > 0
+    enabled = bool(config.data_gen or config.data_gen_count > 0)
     if not enabled:
         return config
+
+    hf_ref = (getattr(config, "hf_dataset", None) or "").strip() or None
+    source = str(getattr(config, "data_gen_source", "off") or "off").lower().strip()
+    if source in {"off", "none"}:
+        raise RuntimeError(
+            "data_gen is enabled but data_gen_source is off. Set "
+            "data_gen_source=hf_dataset|data_designer|auto, or disable data_gen "
+            "and point dataset at a grounded JSONL."
+        )
+
     count = config.data_gen_count if config.data_gen_count > 0 else 500
     out_path = config.output_dir / config.data_gen_filename
     if dist_ctx.is_main:
         config.output_dir.mkdir(parents=True, exist_ok=True)
         from seiso.rl_verify.data_designer_gen import (
+            data_designer_available,
             materialize_for_slime_config,
+            normalize_data_designer_mode,
             should_use_data_designer,
         )
-        from seiso.rl_verify.data_gen import DataGenConfig, materialize_rl_corpus
+        from seiso.rl_verify.synth_materialize import (
+            SynthRequest,
+            materialize_grounded_corpus,
+            resolve_endpoint,
+        )
+        from seiso.slime.config import allow_tiny_rl
+        from seiso.slime.rollout_backend import resolve_vllm_base_url
 
+        mode = normalize_data_designer_mode(getattr(config, "data_designer", "auto"))
         use_dd = should_use_data_designer(config, world_size=dist_ctx.world_size)
-        generator = "seiso.rl_verify.data_gen"
-        if use_dd:
-            try:
-                result = materialize_for_slime_config(
-                    config,
-                    out_path=out_path,
-                    count=count,
-                    world_size=dist_ctx.world_size,
+        # Explicit hf_dataset source, or auto + hf_dataset ref (not hf_ref alone
+        # without data_gen — gated by enabled above).
+        want_hf = source == "hf_dataset" or (
+            source in {"auto", ""} and bool(hf_ref)
+        )
+        want_dd = source == "data_designer" or (
+            source in {"auto", ""} and not want_hf and use_dd
+        )
+
+        if want_hf:
+            ref = hf_ref or str(config.dataset)
+            if Path(ref).expanduser().is_file() and not hf_ref:
+                raise RuntimeError(
+                    "data_gen_source=hf_dataset requires hf_dataset (HF hub id) "
+                    "or a non-file dataset ref; local JSONL should be set as "
+                    "dataset without data_gen."
                 )
-                generator = "nvidia.nemo.data_designer"
-            except ImportError as exc:
-                print(
-                    f"Data Designer unavailable ({exc}); falling back to Seiso data_gen",
-                    flush=True,
-                )
-                result = materialize_rl_corpus(
-                    out_path,
-                    DataGenConfig(
-                        count=count,
-                        seed=(
-                            config.data_gen_seed
-                            if config.data_gen_seed is not None
-                            else config.seed
-                        ),
-                        mix=config.data_gen_mix,
-                        difficulty=config.data_gen_difficulty,
-                        require_thinking_trace=config.require_thinking_trace,
-                        thinking_instruction=config.thinking_instruction,
-                    ),
-                )
-        else:
-            result = materialize_rl_corpus(
+            tiny = allow_tiny_rl()
+            # Slime default answer_field is "label" (native JSONL). For Hub scans
+            # treat that as auto so answer/output are not shadowed by a class label.
+            raw_answer = str(getattr(config, "answer_field", "") or "").strip()
+            hf_answer_field = None if raw_answer in {"", "label"} else raw_answer
+            raw_prompt = str(getattr(config, "prompt_field", "") or "").strip()
+            hf_prompt_field = None if raw_prompt in {"", "prompt"} else raw_prompt
+            result = materialize_grounded_corpus(
                 out_path,
-                DataGenConfig(
+                SynthRequest(
+                    source="hf_dataset",
                     count=count,
-                    seed=(
-                        config.data_gen_seed if config.data_gen_seed is not None else config.seed
+                    seed=int(
+                        config.data_gen_seed
+                        if config.data_gen_seed is not None
+                        else config.seed
                     ),
-                    mix=config.data_gen_mix,
-                    difficulty=config.data_gen_difficulty,
+                    dataset_ref=ref,
+                    split=str(getattr(config, "dataset_split", "train") or "train"),
+                    prompt_field=hf_prompt_field,
+                    answer_field=hf_answer_field,
                     require_thinking_trace=config.require_thinking_trace,
                     thinking_instruction=config.thinking_instruction,
+                    sandbox_root=getattr(config, "sandbox_root", None),
+                    allow_tiny=tiny,
+                    min_verifiable=1 if tiny else None,
+                    max_rows=count,
                 ),
             )
-        summary = result.summary()
+            summary = result.summary()
+            generator = "seiso.rl_verify.synth_materialize.hf_dataset"
+        elif want_dd:
+            if mode == "off":
+                raise RuntimeError(
+                    "data_gen_source=data_designer but data_designer=off. Set "
+                    "data_designer=on|auto with a vLLM/OpenAI endpoint, or use "
+                    "data_gen_source=hf_dataset / an operator JSONL dataset."
+                )
+            if not data_designer_available():
+                raise RuntimeError(
+                    "data_gen_source=data_designer requires NVIDIA NeMo Data Designer. "
+                    "Install with: pip install -e '.[data-designer]', set "
+                    "vllm_base_url (no silent localhost), or use "
+                    "data_gen_source=hf_dataset / grounded dataset JSONL."
+                )
+            endpoint = resolve_endpoint(
+                resolve_vllm_base_url(config),
+                getattr(config, "vllm_base_url", None),
+            )
+            if not endpoint:
+                raise RuntimeError(
+                    "data_designer requires an OpenAI-compatible endpoint "
+                    "(vllm_base_url, managed vLLM, or SEISO_DATA_DESIGNER_BASE_URL / "
+                    "SEISO_VLLM_BASE_URL). No silent localhost default."
+                )
+            dg = materialize_for_slime_config(
+                config,
+                out_path=out_path,
+                count=count,
+                world_size=dist_ctx.world_size,
+            )
+            summary = dg.summary()
+            generator = "nvidia.nemo.data_designer"
+        else:
+            raise RuntimeError(
+                "data_gen is enabled but no real synth source is available. "
+                "Set data_gen_source=hf_dataset (with hf_dataset=...) or "
+                "data_gen_source=data_designer (pip install -e '.[data-designer]' "
+                "+ endpoint), or disable data_gen and point dataset at a grounded "
+                "JSONL with answer/tests."
+            )
+
+        # Last resort: split materialized train when product eval is missing.
+        # Prefer an explicit frozen eval_dataset (OpenR1-style) over this cut.
+        # Prompt corpus only — metrics append to slime_held_out_eval_metrics.jsonl.
+        held_path = config.output_dir / "slime_held_out_prompts.jsonl"
+        if config.eval_dataset is None and config.require_held_out_eval:
+            import logging
+            import random
+
+            from seiso.rl_verify.synth_materialize import GROUNDED_FLOOR_DEFAULT
+
+            rows = [
+                json.loads(line)
+                for line in out_path.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            if len(rows) < 4:
+                raise RuntimeError(
+                    f"held-out eval required but materialized corpus has only "
+                    f"{len(rows)} rows (need >= 4 to split). Set eval_dataset to a "
+                    "frozen disjoint JSONL (recommended) or raise data_gen_count."
+                )
+            split_seed = int(
+                config.data_gen_seed
+                if config.data_gen_seed is not None
+                else config.seed
+            )
+            rng = random.Random(split_seed)
+            rows = list(rows)
+            rng.shuffle(rows)
+            n_eval = max(1, len(rows) // 10)
+            logging.getLogger(__name__).warning(
+                "No eval_dataset set; using shuffled 10%% of materialized train as "
+                "held-out (%s rows, seed=%s). Prefer an explicit frozen eval_dataset.",
+                n_eval,
+                split_seed,
+            )
+            train_rows, eval_rows = rows[:-n_eval], rows[-n_eval:]
+            # Floor applies to the training JSONL after the cut, not pre-split.
+            train_floor = 1 if allow_tiny_rl() else GROUNDED_FLOOR_DEFAULT
+            if len(train_rows) < train_floor:
+                need = train_floor
+                while need - max(1, need // 10) < train_floor:
+                    need += 1
+                raise RuntimeError(
+                    f"held-out auto-split left {len(train_rows)} train rows "
+                    f"(need >= {train_floor}). Raise data_gen_count to at least "
+                    f"{need}, or set an explicit frozen eval_dataset."
+                )
+            out_path.write_text(
+                "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in train_rows),
+                encoding="utf-8",
+            )
+            held_path.write_text(
+                "".join(
+                    json.dumps({**r, "held_out": True}, ensure_ascii=False) + "\n"
+                    for r in eval_rows
+                ),
+                encoding="utf-8",
+            )
+        elif held_path.is_file():
+            # Do not reuse a prior run's held-out against a freshly materialized train.
+            held_path.unlink(missing_ok=True)
+
         (config.output_dir / "slime_data_gen_summary.json").write_text(
             json.dumps(
                 {
                     **summary,
                     "path": str(out_path),
                     "generator": generator,
-                    "data_designer": use_dd,
+                    "data_gen_source": source,
                     "note": (
                         "Prompts+labels only; completions come from online "
                         "rollouts (HF / SGLang / vLLM), not this file."
@@ -1607,8 +1739,19 @@ def _maybe_materialize_data_gen(
         )
     _distributed_barrier(dist_ctx)
     if not out_path.is_file():
-        raise RuntimeError(f"data_gen did not produce {out_path}; rank0 materialization failed")
-    return replace(config, dataset=out_path)
+        raise RuntimeError(
+            f"data_gen did not produce {out_path}; rank0 materialization failed"
+        )
+    updates: dict[str, object] = {"dataset": out_path}
+    held = config.output_dir / "slime_held_out_prompts.jsonl"
+    # Only attach held-out created for this materialize (require_held_out + split).
+    if (
+        config.eval_dataset is None
+        and config.require_held_out_eval
+        and held.is_file()
+    ):
+        updates["eval_dataset"] = held
+    return replace(config, **updates)  # type: ignore[arg-type]
 
 
 # Compatibility alias (historical name; supports multi-GPU / remote backends).

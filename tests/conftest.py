@@ -29,12 +29,17 @@ def pytest_configure(config):
 
 
 @pytest.fixture(autouse=True)
-async def _reset_caches(monkeypatch, tmp_path):
+async def _reset_caches(request, monkeypatch, tmp_path):
     monkeypatch.setenv("SEISO_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("SEISO_SECRET_KEY", "test-secret-key-for-jwt-signing-32b")
     monkeypatch.setenv("SEISO_DB_ENCRYPTION_KEY", "01" * 32)
     monkeypatch.setenv("SEISO_DB_EPHEMERAL", "false")
     monkeypatch.setenv("SEISO_SKIP_MLX_PROBE", "true")
+    # Product slime defaults require held-out eval. Opt unit tests into tiny RL
+    # except suites that assert real-path / Distill floor gates.
+    nodeid = getattr(request.node, "nodeid", "") or ""
+    if "test_rl_real_paths" not in nodeid and "test_distill_rl" not in nodeid:
+        monkeypatch.setenv("SEISO_ALLOW_TINY_RL", "1")
     clear_revocations_for_tests()
     clear_dependency_caches()
     reset_inference_runtime(wait=False)

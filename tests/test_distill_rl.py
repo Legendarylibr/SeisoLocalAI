@@ -39,6 +39,10 @@ def test_build_distill_rl_config_smoke_defaults(tmp_path: Path):
     assert cfg.trust_remote_code is False
     assert cfg.require_thinking_trace is True
     assert cfg.verifiable_outcome_rewards is True
+    assert cfg.preference_source == "grounded_library"
+    assert cfg.prompt_library_path is not None
+    assert cfg.prompt_library_path.name == "distill_verifiable_prompts.jsonl"
+    assert cfg.data_gen_count == 32
     assert cfg.grpo_group_size == 4
     assert cfg.benchmark_tasks == ["gsm8k", "gpqa", "aime"]
 
@@ -54,6 +58,7 @@ def test_build_distill_rl_config_accepts_trust_remote_code(tmp_path: Path):
 
 
 def test_build_distill_rl_config_reproducible_seeds(tmp_path: Path):
+    fixture = Path("data/distill_verifiable_prompts.jsonl").resolve()
     cfg = build_distill_rl_config(
         job_id="job-2",
         user_id="user-1",
@@ -61,9 +66,12 @@ def test_build_distill_rl_config_reproducible_seeds(tmp_path: Path):
         payload={
             "preset": "reproducible",
             "config_file": "distill_rl_reproducible.json",
+            "hf_dataset": str(fixture),
+            "SEISO_ALLOW_TINY_RL": "1",  # ignored; use env in other tests
         },
     )
     assert cfg.preset == "reproducible"
+    assert cfg.preference_source == "hf_dataset"
     assert cfg.teacher_revision == "main"
 
 
@@ -102,14 +110,29 @@ def test_distill_texts_add_thinking_tokens(tmp_path: Path):
 
     path = tmp_path / "prompts.json"
     path.write_text(
-        json.dumps({"prompts": [{"prompt_id": "p", "text": "Solve 1+1."}]}),
+        json.dumps(
+            {
+                "prompts": [
+                    {
+                        "prompt_id": "p",
+                        "text": "Solve 1+1.",
+                        "answer": "2",
+                        "benchmark": "gsm8k",
+                    }
+                ]
+            }
+        ),
         encoding="utf-8",
     )
     cfg = build_distill_rl_config(
         job_id="job-1",
         user_id="user-1",
         data_dir=tmp_path,
-        payload={"preset": "smoke", "prompt_library": str(path)},
+        payload={
+            "preset": "smoke",
+            "preference_source": "grounded_library",
+            "prompt_library": str(path),
+        },
     )
 
     texts = _distill_texts(cfg)
@@ -132,6 +155,11 @@ def test_build_preference_bundle_filters_degenerate_pairs(tmp_path: Path, monkey
         RolloutPrompt(prompt_id="p1", text="one"),
         RolloutPrompt(prompt_id="p2", text="two"),
     ]
+    lib = tmp_path / "lib.json"
+    lib.write_text(
+        json.dumps({"prompts": [{"prompt_id": "p1", "text": "one"}, {"prompt_id": "p2", "text": "two"}]}),
+        encoding="utf-8",
+    )
 
     def fake_rows(**kwargs):
         rows = kwargs["prompts"]
@@ -158,13 +186,14 @@ def test_build_preference_bundle_filters_degenerate_pairs(tmp_path: Path, monkey
         teacher_model="teacher",
         student_model="student",
         output_dir=tmp_path / "prefs",
-        prompt_library_path=None,
+        prompt_library_path=lib,
         max_prompts=2,
         max_new_tokens=8,
         temperature=0.0,
         seed=13,
         train_fraction=0.5,
         use_chat_template=False,
+        verifiable_outcome_rewards=False,
     )
     train_rows = [
         json.loads(line) for line in bundle.train_path.read_text().splitlines() if line
@@ -178,6 +207,11 @@ def test_build_preference_bundle_forwards_trust_remote_code(
     tmp_path: Path, monkeypatch
 ):
     prompts = [RolloutPrompt(prompt_id="p1", text="one")]
+    lib = tmp_path / "lib.json"
+    lib.write_text(
+        json.dumps({"prompts": [{"prompt_id": "p1", "text": "one"}]}),
+        encoding="utf-8",
+    )
     seen: list[bool] = []
 
     def fake_rows(**kwargs):
@@ -204,7 +238,7 @@ def test_build_preference_bundle_forwards_trust_remote_code(
         teacher_model="teacher",
         student_model="student",
         output_dir=tmp_path / "prefs",
-        prompt_library_path=None,
+        prompt_library_path=lib,
         max_prompts=1,
         max_new_tokens=8,
         temperature=0.0,
@@ -212,6 +246,7 @@ def test_build_preference_bundle_forwards_trust_remote_code(
         train_fraction=0.5,
         use_chat_template=False,
         trust_remote_code=True,
+        verifiable_outcome_rewards=False,
     )
 
     manifest = json.loads(bundle.manifest_path.read_text(encoding="utf-8"))
@@ -675,6 +710,10 @@ def test_run_distill_rl_job_orchestrates_stages(tmp_path: Path):
         patch("seiso.distill_rl.runner.verify_run_manifest", return_value={"ok": True}),
         patch("seiso.distill_rl.runner.append_artifact"),
         patch("seiso.distill_rl.runner._run_distill", return_value=distilled),
+        patch(
+            "seiso.distill_rl.grounded_data.materialize_distill_grounded_prompts",
+            return_value=train,
+        ),
         patch(
             "seiso.distill_rl.preferences.build_preference_bundle", return_value=bundle
         ),

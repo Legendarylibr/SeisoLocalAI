@@ -140,6 +140,33 @@ def test_sandbox_blocks_outside_path(tmp_path: Path):
         load_training_dataset(outside, sandbox_root=sandbox)
 
 
+def test_sandbox_blocks_missing_absolute_local_ref(tmp_path: Path):
+    """Non-existent absolute paths must not fall through to Hub load."""
+    from seiso.security import SecurityError
+    from seiso.training.datasets import load_training_dataset
+
+    sandbox = tmp_path / "sandbox"
+    sandbox.mkdir()
+    missing = tmp_path / "does_not_exist.jsonl"
+    with pytest.raises(SecurityError):
+        load_training_dataset(str(missing), sandbox_root=sandbox)
+
+
+def test_sandbox_user_id_blocks_cross_tenant_local_ref(tmp_path: Path):
+    from seiso.security import SecurityError
+    from seiso.training.datasets import load_training_dataset
+
+    victim = tmp_path / "uploads" / "user-b" / "ds.jsonl"
+    victim.parent.mkdir(parents=True)
+    victim.write_text('{"text":"secret"}\n', encoding="utf-8")
+    with pytest.raises(SecurityError, match="user-a"):
+        load_training_dataset(
+            str(victim),
+            sandbox_root=tmp_path,
+            sandbox_user_id="user-a",
+        )
+
+
 def test_single_turn_masks_prompt_and_supervises_assistant_plus_eos():
     ds = _Rows(
         [

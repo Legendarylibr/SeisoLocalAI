@@ -64,17 +64,17 @@ vLLM weight sync defaults to dynamic LoRA (`/v1/load_lora_adapter`) when
 `SEISO_MANAGED_VLLM_ENABLE_LORA=true` for Seiso-managed multi-GPU. Single-GPU
 `rollout_backend: hf` and existing LoRA/SFT multi-GPU paths are unchanged.
 
-### Synthetic data (vLLM path only)
+### Data (RLVR defaults)
 
-Multi-GPU vLLM slime runs with `data_gen: true` and `data_designer: auto` use
-[NVIDIA NeMo Data Designer](https://github.com/NVIDIA-NeMo/DataDesigner) for
-numeric/choice prompt synthesis via the same OpenAI-compatible vLLM endpoint.
-Code prompts still come from Seiso's verifiable generators. Other backends
-(HF colocated, SGLang) never invoke Data Designer.
+Prefer a grounded `dataset` + frozen `eval_dataset`. Synth is opt-in only
+(`data_gen_source` defaults to `off`). For Data Designer set `data_gen: true`,
+`data_gen_source: data_designer`, `data_designer: "on"`, and an explicit
+`vllm_base_url` ([NVIDIA NeMo Data Designer](https://github.com/NVIDIA-NeMo/DataDesigner)).
+No silent localhost / package auto-select. Code RL uses HF/operator JSONL.
 
 ```bash
 pip install -e '.[data-designer]'
-# then run scripts/run_slime_vllm_ddp.sh as above
+# then run with data_gen_source=data_designer and a live vLLM endpoint
 ```
 
 ## Behavior

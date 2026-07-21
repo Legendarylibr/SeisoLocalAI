@@ -190,8 +190,11 @@ def distill_rl_run(
     verifiable_outcome_rewards: bool = typer.Option(
         True,
         "--outcome-rewards/--teacher-preferences",
-        help="Use pure final-answer rewards for prompts with answers.",
-    ),
+        help=(
+            "Grounded sources require outcome rewards (default). "
+            "Use --teacher-preferences only with preference_source=teacher_style."
+        ),
+    )
     grpo_group_size: int = typer.Option(
         4,
         help="Number of sampled reasoning traces per verifiable prompt.",

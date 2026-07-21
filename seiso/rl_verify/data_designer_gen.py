@@ -1,12 +1,11 @@
-"""NVIDIA NeMo Data Designer synth data for multi-GPU vLLM slime runs.
+"""NVIDIA NeMo Data Designer synth data for slime / Distill-RL.
 
 Uses `data-designer` (https://github.com/NVIDIA-NeMo/DataDesigner) with a local
-OpenAI-compatible vLLM endpoint as the model provider. Gated so only multi-GPU
-vLLM slime rollouts take this path; single-GPU HF and SGLang keep the deterministic
-`seiso.rl_verify.data_gen` corpus.
+OpenAI-compatible endpoint (typically vLLM) as the model provider.
 
-Code-stream rows still come from Seiso's verifiable code generators (unit-test
-grounded). Numeric/choice streams are paraphrased/authored via Data Designer + vLLM.
+Opt-in synth path only (``data_gen_source=data_designer`` / ``data_designer=on``).
+Numeric/choice streams are authored via Data Designer + local LLM.
+Code training rows belong in HF/operator corpora — not ``code_corpus`` padding.
 """
 
 from __future__ import annotations
@@ -20,7 +19,6 @@ from pathlib import Path
 from typing import Any
 
 from seiso.rl_verify.data_gen import (
-    DataGenConfig,
     DataGenResult,
     parse_weight_mix,
     to_slime_prompt_row,
@@ -109,12 +107,17 @@ def should_use_data_designer(
     *,
     world_size: int = 1,
 ) -> bool:
-    """Gate: Data Designer synth only on multi-GPU vLLM runs (unless forced off)."""
-    mode = normalize_data_designer_mode(getattr(config, "data_designer", "auto"))
-    if mode == "off":
-        return False
-    # mode is auto or on — both require the multigpu vllm gate.
-    return is_multigpu_vllm_run(config, world_size=world_size)
+    """Gate: Data Designer only when explicitly enabled (``data_designer=on``).
+
+    ``auto`` no longer silently selects DD when the package is installed — pair
+    with ``data_gen_source=data_designer`` or ``data_designer=on``. ``world_size``
+    is retained for callers.
+    """
+    del world_size
+    mode = normalize_data_designer_mode(getattr(config, "data_designer", "off"))
+    if mode == "on":
+        return True
+    return False
 
 
 def ensure_openai_v1_endpoint(base_url: str) -> str:
@@ -131,9 +134,10 @@ def ensure_openai_v1_endpoint(base_url: str) -> str:
 
 
 def _thinking_suffix(cfg: DataDesignerGenConfig) -> str:
-    if not cfg.require_thinking_trace:
-        return ""
-    return f"\n\n{cfg.thinking_instruction}"
+    # Generation-time formatters append instruction + open <think>; baking the
+    # default instruction (contains <think>) here suppresses that priming.
+    del cfg
+    return ""
 
 
 def _category_values_weights(
@@ -172,8 +176,22 @@ def build_data_designer_columns(
     """Column configs for stream/difficulty sampling + structured problem/answer."""
     import data_designer.config as dd
 
-    # LLM only authors numeric/choice; code is blended in post from Seiso generators.
-    llm_streams = {k: v for k, v in stream_mix.items() if k in {"numeric", "choice"} and v > 0}
+    # LLM authors numeric/choice only. Code weight is redistributed (no code_corpus).
+    llm_streams = {
+        k: v for k, v in stream_mix.items() if k in {"numeric", "choice"} and v > 0
+    }
+    code_w = float(stream_mix.get("code", 0) or 0)
+    if code_w > 0:
+        logger.warning(
+            "data_designer mix includes code=%.3f; redistributing to numeric/choice "
+            "(code training data must come from hf_dataset / operator JSONL)",
+            code_w,
+        )
+        if llm_streams:
+            bump = code_w / len(llm_streams)
+            llm_streams = {k: v + bump for k, v in llm_streams.items()}
+        else:
+            llm_streams = {"numeric": 0.7 * (1 + code_w), "choice": 0.3 * (1 + code_w)}
     if not llm_streams:
         llm_streams = {"numeric": 0.7, "choice": 0.3}
     total = sum(llm_streams.values()) or 1.0
@@ -239,10 +257,9 @@ def records_to_slime_rows(
     source_name: str = "nvidia.data_designer",
 ) -> list[dict[str, Any]]:
     """Map Data Designer records into slime-compatible prompt rows."""
+    del require_thinking_trace, thinking_instruction  # applied at generation time
     rows: list[dict[str, Any]] = []
     suffix = ""
-    if require_thinking_trace and thinking_instruction:
-        suffix = f"\n\n{thinking_instruction}"
     for rec in records:
         problem, answer = _extract_item(rec)
         if not problem or not answer:
@@ -271,61 +288,13 @@ def records_to_slime_rows(
     return rows
 
 
-def _allocate_counts(total: int, mix: Mapping[str, float]) -> dict[str, int]:
-    if total <= 0:
-        return {k: 0 for k in mix}
-    keys = list(mix)
-    raw = [mix[k] * total for k in keys]
-    counts = {k: int(v) for k, v in zip(keys, raw, strict=True)}
-    # Distribute remainder by largest fractional part.
-    frac = sorted(
-        ((raw[i] - counts[keys[i]], keys[i]) for i in range(len(keys))),
-        reverse=True,
-    )
-    left = total - sum(counts.values())
-    for i in range(left):
-        counts[frac[i % len(frac)][1]] += 1
-    return counts
-
-
-def _code_rows(
-    *,
-    count: int,
-    seed: int,
-    require_thinking_trace: bool,
-    thinking_instruction: str,
-    difficulty_mix: Mapping[str, float],
-) -> list[dict[str, Any]]:
-    if count <= 0:
-        return []
-    from seiso.rl_verify.data_gen import DataGenConfig, generate_rl_corpus
-
-    # Reuse Seiso code stream only by setting mix code:1.0.
-    cfg = DataGenConfig(
-        count=count,
-        seed=seed + 17,
-        mix="code:1.0",
-        difficulty=dict(difficulty_mix),
-        require_thinking_trace=require_thinking_trace,
-        thinking_instruction=thinking_instruction,
-        verify_code=True,
-    )
-    result = generate_rl_corpus(cfg)
-    for row in result.rows:
-        meta = dict(row.get("metadata") or {})
-        meta["source_name"] = "seiso.data_gen+code"
-        meta["generator"] = "seiso.rl_verify.data_gen.code"
-        row["metadata"] = meta
-    return list(result.rows)
-
-
 def _import_data_designer():
     try:
         import data_designer.config as dd
         from data_designer.interface import DataDesigner
     except ImportError as exc:
         raise ImportError(
-            "NVIDIA NeMo Data Designer is required for multi-GPU vLLM synth data. "
+            "NVIDIA NeMo Data Designer is required for data_designer synth. "
             "Install with: pip install 'data-designer>=0.8.0' "
             "(or pip install -e '.[data-designer]')."
         ) from exc
@@ -346,9 +315,7 @@ def generate_with_data_designer(cfg: DataDesignerGenConfig) -> DataGenResult:
         allowed=_DIFFICULTIES,
         default={"easy": 0.35, "medium": 0.45, "hard": 0.20},
     )
-    counts = _allocate_counts(cfg.count, stream_mix)
-    n_code = int(counts.get("code", 0))
-    n_llm = max(0, cfg.count - n_code)
+    n_llm = max(0, int(cfg.count))
 
     rows: list[dict[str, Any]] = []
     if n_llm > 0:
@@ -398,7 +365,7 @@ def generate_with_data_designer(cfg: DataDesignerGenConfig) -> DataGenResult:
             pass
 
         logger.info(
-            "Data Designer synth: %s LLM rows via vLLM endpoint %s model=%s",
+            "Data Designer synth: %s LLM rows via endpoint %s model=%s",
             n_llm,
             endpoint,
             cfg.vllm_model,
@@ -429,36 +396,14 @@ def generate_with_data_designer(cfg: DataDesignerGenConfig) -> DataGenResult:
             )
         )
 
-    rows.extend(
-        _code_rows(
-            count=n_code,
-            seed=cfg.seed,
-            require_thinking_trace=cfg.require_thinking_trace,
-            thinking_instruction=cfg.thinking_instruction,
-            difficulty_mix=difficulty_mix,
-        )
-    )
-
     rng = random.Random(cfg.seed)
     rng.shuffle(rows)
-    # Pad if LLM dropped invalid rows.
     if len(rows) < cfg.count:
-        logger.warning(
-            "Data Designer produced %s/%s usable rows; padding with Seiso numeric stream",
-            len(rows),
-            cfg.count,
+        raise RuntimeError(
+            f"Data Designer produced {len(rows)}/{cfg.count} usable verifiable rows "
+            "(no code_corpus padding). Check the endpoint/model or lower count; "
+            "for code RL use hf_dataset / operator JSONL with unit tests."
         )
-        pad = DataGenConfig(
-            count=cfg.count - len(rows),
-            seed=cfg.seed + 91,
-            mix="numeric:1.0",
-            difficulty=dict(difficulty_mix),
-            require_thinking_trace=cfg.require_thinking_trace,
-            thinking_instruction=cfg.thinking_instruction,
-        )
-        from seiso.rl_verify.data_gen import generate_rl_corpus
-
-        rows.extend(generate_rl_corpus(pad).rows)
     rows = rows[: cfg.count]
 
     stream_counts: dict[str, int] = {}
@@ -514,11 +459,19 @@ def materialize_for_slime_config(
     world_size: int = 1,
 ) -> DataGenResult:
     """Build DataDesignerGenConfig from slime config and materialize."""
+    from seiso.rl_verify.synth_materialize import resolve_endpoint
     from seiso.slime.rollout_backend import resolve_vllm_base_url
 
-    base = resolve_vllm_base_url(config) or str(
-        getattr(config, "vllm_base_url", "") or ""
+    base = resolve_endpoint(
+        resolve_vllm_base_url(config),
+        str(getattr(config, "vllm_base_url", "") or "") or None,
     )
+    if not base:
+        raise RuntimeError(
+            "data_designer requires an OpenAI-compatible endpoint "
+            "(vllm_base_url or SEISO_DATA_DESIGNER_BASE_URL / SEISO_VLLM_BASE_URL). "
+            "No silent localhost default."
+        )
     model = str(getattr(config, "vllm_model", "") or "").strip() or config.model_id
     api_key = str(getattr(config, "vllm_api_key", "EMPTY") or "EMPTY")
     seed = int(

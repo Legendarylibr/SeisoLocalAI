@@ -25,6 +25,7 @@ def _cfg(tmp_path: Path, **kwargs) -> SingleGpuSlimeConfig:
         output_dir=tmp_path / "out",
         rollouts_per_prompt=2,
         rollout_batch_size=2,
+        require_held_out_eval=False,
     )
     base.update(kwargs)
     return SingleGpuSlimeConfig(**base)
