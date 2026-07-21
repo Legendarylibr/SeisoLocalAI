@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from forge.security.http_client import _PinnedGetaddrinfo
+from forge.security.http_client import pin_request_to_ip
 from forge.security.token_revocation import (
     clear_revocations_for_tests,
     is_jti_revoked,
@@ -55,17 +55,32 @@ def test_resolve_pinned_endpoint_pins_remote_host(monkeypatch):
     assert endpoint.base_url == "https://example.com/v1"
 
 
-def test_pinned_getaddrinfo_forces_validated_ip():
+def test_pin_request_to_ip_preserves_host_and_sni_without_getaddrinfo_patch():
     import socket
 
-    resolver = _PinnedGetaddrinfo("example.com", "93.184.216.34")
-    resolver.__enter__()
-    try:
-        infos = socket.getaddrinfo("example.com", 443, type=socket.SOCK_STREAM)
-        assert infos
-        assert all(info[4][0] == "93.184.216.34" for info in infos)
-    finally:
-        resolver.__exit__()
+    import httpx
+
+    real_getaddrinfo = socket.getaddrinfo
+    request = httpx.Request("POST", "https://example.com/v1/chat/completions", json={})
+    pinned = pin_request_to_ip(
+        request, host="example.com", pinned_ip="93.184.216.34"
+    )
+
+    assert pinned.url.host == "93.184.216.34"
+    assert pinned.headers.get("host") == "example.com"
+    assert pinned.extensions.get("sni_hostname") == "example.com"
+    assert socket.getaddrinfo is real_getaddrinfo
+
+
+def test_pin_request_to_ip_ignores_unrelated_hosts():
+    import httpx
+
+    request = httpx.Request("GET", "https://other.example/v1")
+    pinned = pin_request_to_ip(
+        request, host="example.com", pinned_ip="93.184.216.34"
+    )
+    assert pinned is request
+    assert pinned.url.host == "other.example"
 
 
 def test_tool_result_envelope():

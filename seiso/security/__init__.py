@@ -67,7 +67,9 @@ def assert_within(base: Path, target: Path) -> Path:
     return target_r
 
 
-# Mirrors forge.services.user_paths user-scoped roots (keep in sync).
+# Single source of truth for per-user data roots under SEISO_DATA_DIR.
+# Forge (forge.services.user_paths) and CLI helpers must import this set —
+# do not redefine a parallel frozenset elsewhere.
 USER_SCOPED_DATA_ROOTS = frozenset(
     {
         "uploads",
@@ -90,7 +92,11 @@ def assert_user_scoped_path(
     user_id: str,
     target: Path | str,
 ) -> Path:
-    """Require *target* under ``data_dir/<scoped_root>/<user_id>/...``."""
+    """Require *target* under ``data_dir/<scoped_root>/<user_id>/...``.
+
+    Does not allow inventory→hf_cache symlinks; Forge HTTP paths use
+    ``forge.services.user_paths.assert_user_path`` for that allowance.
+    """
     if not user_id or "/" in user_id or "\\" in user_id or user_id in {".", ".."}:
         raise SecurityError(f"Invalid user_id: {user_id!r}")
     base = Path(data_dir).expanduser().resolve()
