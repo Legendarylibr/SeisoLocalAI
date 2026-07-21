@@ -24,16 +24,25 @@ class HubPublishOrchestrator(Orchestrator):
 
         from forge.services.executors import IO_EXECUTOR
 
+        rec = self.get_job(job_id)
+        user_id = str(payload.get("user_id") or (rec.user_id if rec else "") or "")
         return await loop.run_in_executor(
-            IO_EXECUTOR, lambda: self._run_publish(payload, on_log)
+            IO_EXECUTOR, lambda: self._run_publish(payload, on_log, user_id=user_id)
         )
 
     def _run_publish(
         self,
         payload: dict[str, Any],
         on_log: Any,
+        *,
+        user_id: str,
     ) -> dict[str, str]:
+        from forge.services.user_paths import assert_user_path
+
         folder = Path(payload["folder"])
+        if not user_id:
+            raise ValueError("user_id is required for hub publish")
+        assert_user_path(self.sandbox_root, user_id, folder)
         repo_id = payload["repo_id"]
         token = payload["token"]
         meta_raw = payload.get("metadata") or {}

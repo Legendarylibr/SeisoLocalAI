@@ -80,6 +80,7 @@ USER_SCOPED_DATA_ROOTS = frozenset(
         "compress",
         "distill_rl",
         "rl_quant",
+        "recipes",
     }
 )
 

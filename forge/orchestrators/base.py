@@ -361,6 +361,23 @@ class Orchestrator(ABC):
         proc.kill()
 
     async def cancel(self, job_id: str) -> bool:
+        rec = self._jobs.get(job_id)
+        if rec is None:
+            return False
+        # PENDING jobs usually have no task yet (spawn races create_job → start).
+        # Mark cancelled so a late start() refuses to run.
+        if (
+            rec.status == JobStatus.PENDING
+            and job_id not in self._tasks
+            and job_id not in self._subprocesses
+        ):
+            rec.status = JobStatus.CANCELLED
+            self._emit_log(job_id, "Job cancelled before start")
+            self._emit_event(
+                job_id, "status", {"status": JobStatus.CANCELLED.value}
+            )
+            self._finish_logs(job_id)
+            return True
         proc = self._subprocesses.get(job_id)
         if proc and proc.returncode is None:
             self._terminate_subprocess(job_id, proc)
