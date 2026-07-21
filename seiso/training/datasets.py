@@ -360,6 +360,10 @@ def _tokenize_string_row(
     }
 
 
+class ResponseMaskError(ValueError):
+    """Raised when response-only masking cannot be built for a chat sample."""
+
+
 def _tokenize_chat_row(
     sample: dict[str, Any],
     fmt: DatasetFormat,
@@ -373,9 +377,16 @@ def _tokenize_chat_row(
     eos_id = _eos_token_id(tokenizer)
 
     if not messages:
+        if mask_assistant_only:
+            raise ResponseMaskError(
+                "train_on_responses_only requires chat messages with assistant "
+                "turns, but this sample has none (or could not be parsed). "
+                "Fix the dataset format, set train_on_responses_only=false, "
+                "or use dataset_format=text for continued pretraining."
+            )
         text = format_sample(sample, fmt, tokenizer)
         return _tokenize_string_row(
-            text, tokenizer, max_seq_length, keep_end=mask_assistant_only
+            text, tokenizer, max_seq_length, keep_end=False
         )
 
     # Prefer a single template encode for input_ids.
@@ -400,10 +411,19 @@ def _tokenize_chat_row(
             labels = list(full_ids)
 
     if full_ids is None or labels is None:
-        # No chat template (or encode failure): string path.
+        if mask_assistant_only:
+            # Never silently supervise prompt tokens under response-only SFT.
+            raise ResponseMaskError(
+                "train_on_responses_only requires chat-template assistant masks, "
+                "but masking failed for a sample (missing or broken "
+                "apply_chat_template / assistant span encoding). "
+                "Use a tokenizer with a working chat template, set "
+                "train_on_responses_only=false, or switch to dataset_format=text."
+            )
+        # Full-sequence supervision path (train_on_inputs / responses-only off).
         text = format_sample(sample, fmt, tokenizer)
         return _tokenize_string_row(
-            text, tokenizer, max_seq_length, keep_end=mask_assistant_only
+            text, tokenizer, max_seq_length, keep_end=False
         )
 
     attention = [1] * len(full_ids)

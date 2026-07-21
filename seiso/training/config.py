@@ -386,7 +386,10 @@ class TrainConfig(BaseModel):
 
     @model_validator(mode="after")
     def _validate_meaningful_algorithms(self) -> TrainConfig:
-        chat_formats = {
+        # AUTO is treated like chat: packing + response-only masks are incompatible
+        # until the format is known to be plain TEXT (set dataset_format=text for CPT).
+        packing_blocked_formats = {
+            DatasetFormat.AUTO,
             DatasetFormat.CHAT,
             DatasetFormat.SHAREGPT,
             DatasetFormat.ALPACA,
@@ -395,12 +398,12 @@ class TrainConfig(BaseModel):
         if (
             self.packing
             and self.train_on_responses_only
-            and self.dataset_format in chat_formats
+            and self.dataset_format in packing_blocked_formats
         ):
             raise ValueError(
                 "packing cannot be combined with train_on_responses_only for "
                 f"{self.dataset_format.value} datasets; use packing only for plain "
-                "text or disable train_on_responses_only"
+                "text (dataset_format=text) or disable train_on_responses_only"
             )
         if self.dataset_format == DatasetFormat.PREFERENCE:
             if self.method == TrainMethod.SLIME:
@@ -417,6 +420,14 @@ class TrainConfig(BaseModel):
                     "or set preference_as_sft=true to train supervised on chosen responses "
                     "only (rejected pairs are discarded)."
                 )
+        if self.method == TrainMethod.FULL and self.quant in (
+            QuantMode.INT4,
+            QuantMode.INT8,
+        ):
+            raise ValueError(
+                f"method=full cannot use quant={self.quant.value}; use method=lora "
+                "(QLoRA) or quant=none/16bit for full fine-tuning"
+            )
         return self
 
     @model_validator(mode="after")
@@ -432,6 +443,17 @@ class TrainConfig(BaseModel):
             train_batch_size=train_batch,
             rollout_batch_size=self.rollout_batch_size,
         )
+        # Mirror SingleGpuSlimeConfig: multi-epoch needs a small KL trust region.
+        if self.epochs > 1 and self.kl_coef == 0.0:
+            import os
+
+            allow_zero = os.environ.get("SEISO_SLIME_ALLOW_ZERO_KL", "").strip().lower() in {
+                "1",
+                "true",
+                "yes",
+            }
+            if not allow_zero:
+                object.__setattr__(self, "kl_coef", 0.02)
         if self.clip_ratio_high is not None and self.clip_ratio_high < self.clip_ratio:
             raise ValueError("clip_ratio_high must be >= clip_ratio")
         if self.outcome_reward_weight <= 0:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -16,6 +17,8 @@ from seiso.distill_rl.prompts import (
 from seiso.distill_rl.rollouts import generate_preference_rows
 from seiso.io.jsonl import write_jsonl
 from seiso.rl_verify.synth_code import synthesize_code_bundle
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -96,6 +99,24 @@ def build_preference_bundle(
         verifiable_outcome_rewards=verifiable_outcome_rewards,
         grpo_group_size=grpo_group_size,
     )
+
+    all_rows = train_rows + val_rows
+    if all_rows:
+        verifiable_n = sum(
+            1
+            for row in all_rows
+            if str(row.get("reward_source", "")).startswith("verifiable")
+        )
+        teacher_style_n = len(all_rows) - verifiable_n
+        if teacher_style_n > verifiable_n:
+            msg = (
+                f"Preference set is dominated by teacher≻student pairs "
+                f"({teacher_style_n}/{len(all_rows)}); these encode style, not "
+                "verifiable correctness. Prefer prompts with answer/tests and "
+                "verifiable_outcome_rewards=true for meaningful Distill-RL."
+            )
+            logger.warning(msg)
+            _log(msg)
 
     train_path = output_dir / "preferences_train.jsonl"
     val_path = output_dir / "preferences_val.jsonl"

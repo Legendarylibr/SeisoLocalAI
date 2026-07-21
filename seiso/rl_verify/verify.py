@@ -110,7 +110,8 @@ def verify_outcome(
         if field_reward is None:
             return 0.0, "field", ""
         try:
-            return float(field_reward), "field", ""
+            # Bound dataset-supplied floats so they cannot dominate GRPO advantages.
+            return max(0.0, min(1.0, float(field_reward))), "field", ""
         except (TypeError, ValueError):
             return 0.0, "field", ""
 

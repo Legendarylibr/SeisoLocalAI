@@ -60,6 +60,29 @@ def test_build_pipeline_config_propagates_trust_remote_code(tmp_path: Path):
     assert _trust_remote_code(cfg) is True
 
 
+def test_build_pipeline_config_merges_top_level_distill_knobs(tmp_path: Path):
+    require_codellama_compress()
+    cfg_path = tmp_path / "compress.json"
+    cfg_path.write_text(
+        """
+{
+  "pipeline": {"stages": ["distill", "evaluate"], "distill_steps": 7},
+  "distill": {"temperature": 3.5, "alpha": 0.75, "steps": 7}
+}
+""".strip(),
+        encoding="utf-8",
+    )
+    cfg = build_pipeline_config(
+        job_id="job-distill",
+        user_id="user-1",
+        data_dir=tmp_path,
+        payload={"preset": "smoke", "config_file": str(cfg_path)},
+    )
+    assert cfg["distill"].temperature == pytest.approx(3.5)
+    assert cfg["distill"].alpha == pytest.approx(0.75)
+    assert cfg["distill"].steps == 7
+
+
 def test_presets_have_stages():
     for name, preset in PRESETS.items():
         assert preset.get("stages"), f"preset {name} missing stages"

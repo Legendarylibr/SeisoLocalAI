@@ -45,6 +45,12 @@ def test_numeric_and_choice_outcome():
     assert verify_outcome("nope", "42", checker="numeric")[0] == 0.0
 
 
+def test_field_reward_is_clamped_to_unit_interval():
+    assert verify_outcome("", None, checker="field", field_reward=2.5)[0] == 1.0
+    assert verify_outcome("", None, checker="field", field_reward=-1.0)[0] == 0.0
+    assert verify_outcome("", None, checker="field", field_reward=0.4)[0] == 0.4
+
+
 def test_extract_choice_prefers_final_letter():
     from seiso.rl_verify.extract import extract_choice
 

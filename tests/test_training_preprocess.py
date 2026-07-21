@@ -246,3 +246,24 @@ def test_preprocess_preference_resolves_to_chat_with_opt_in():
     assert stats["kept"] == 2
     assert stats["preference_as_sft"] is True
     assert "messages" in cleaned[0]
+
+
+def test_preprocess_uses_format_consensus_not_first_row_only():
+    # First row looks like free text; majority are chat messages.
+    rows = [{"text": "orphan preamble that is not the corpus"}]
+    for i in range(10):
+        rows.append(
+            {
+                "messages": [
+                    {"role": "user", "content": f"q{i}"},
+                    {"role": "assistant", "content": f"a{i}"},
+                ]
+            }
+        )
+    cleaned, stats, fmt = preprocess_training_dataset(
+        _Rows(rows),
+        dataset_format=DatasetFormat.AUTO,
+    )
+    assert fmt == DatasetFormat.CHAT
+    assert stats["resolved_format"] == "chat"
+    assert stats["kept"] >= 10

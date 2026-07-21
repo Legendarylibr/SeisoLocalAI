@@ -77,6 +77,7 @@ class PreparedTrainingDatasets:
     data_collator: Any | None
     dataset_text_field: str | None
     preprocess_stats: dict[str, Any] | None
+    use_packing: bool = False
 
 
 class SeisoTrainer:
@@ -224,8 +225,10 @@ class SeisoTrainer:
                 QuantMode.INT4,
                 QuantMode.INT8,
             ):
-                logger.warning(
-                    "Full fine-tune with quantization — consider LoRA for memory efficiency"
+                raise ValueError(
+                    f"method=full cannot use quant={cfg.quant.value}: quantized "
+                    "full fine-tunes lack prepare_model_for_kbit_training and freeze "
+                    "most weights incorrectly. Use method=lora (QLoRA) or quant=none/16bit."
                 )
 
             SeisoModel.for_training(model)
@@ -268,6 +271,7 @@ class SeisoTrainer:
                     data_collator=prepared.data_collator,
                     dataset_text_field=prepared.dataset_text_field,
                     dataset_format=prepared.detected_format,
+                    use_packing=prepared.use_packing,
                     callbacks=trainer_callbacks,
                 )
 
@@ -367,7 +371,7 @@ class SeisoTrainer:
 
         raw_ds = self._limit_training_samples(raw_ds)
         train_ds, eval_ds = self._split_train_eval(raw_ds)
-        detected_fmt, train_ds, eval_ds, dataset_text_field, data_collator = (
+        detected_fmt, train_ds, eval_ds, dataset_text_field, data_collator, use_packing = (
             self._format_or_tokenize_datasets(train_ds, eval_ds, tokenizer, ds_fmt)
         )
 
@@ -378,6 +382,7 @@ class SeisoTrainer:
             data_collator=data_collator,
             dataset_text_field=dataset_text_field,
             preprocess_stats=preprocess_stats,
+            use_packing=use_packing,
         )
 
     def _limit_training_samples(self, raw_ds):
@@ -393,12 +398,17 @@ class SeisoTrainer:
     def _split_train_eval(self, raw_ds):
         cfg = self.config
         eval_n = 0
-        if len(raw_ds) > 10 and (cfg.early_stopping or cfg.eval_split_ratio > 0):
-            split_ratio = cfg.eval_split_ratio if cfg.eval_split_ratio > 0 else 0.02
+        # Honor eval_split_ratio=0 strictly — do not invent a holdout for early stopping.
+        if len(raw_ds) > 10 and cfg.eval_split_ratio > 0:
             eval_n = compute_eval_split_size(
                 len(raw_ds),
-                split_ratio,
+                cfg.eval_split_ratio,
                 cfg.max_eval_samples,
+            )
+        elif cfg.early_stopping and cfg.eval_split_ratio <= 0 and len(raw_ds) > 10:
+            self._log(
+                "early_stopping enabled but eval_split_ratio=0: skipping holdout "
+                "(set eval_split_ratio>0 to enable eval/early stopping)"
             )
         if eval_n <= 0:
             return raw_ds, None
@@ -431,6 +441,12 @@ class SeisoTrainer:
                 resolved_fmt.value,
             )
             use_packing = False
+            # Keep TrainConfig in sync so TRL/SFTConfig never packs masked rows.
+            if cfg.packing or cfg.padding_free:
+                self.config = cfg.model_copy(
+                    update={"packing": False, "padding_free": False}
+                )
+                cfg = self.config
 
         if use_packing:
             train_ds, detected_fmt = format_dataset_text(
@@ -447,7 +463,14 @@ class SeisoTrainer:
                     detected_fmt,
                     num_proc=map_workers,
                 )
-            return detected_fmt, train_ds, eval_ds, dataset_text_field, data_collator
+            return (
+                detected_fmt,
+                train_ds,
+                eval_ds,
+                dataset_text_field,
+                data_collator,
+                True,
+            )
 
         train_ds, detected_fmt = prepare_tokenized_dataset(
             train_ds,
@@ -473,7 +496,14 @@ class SeisoTrainer:
             cuda_available=torch.cuda.is_available(),
         )
         data_collator = self._make_collator(tokenizer, pad_to_multiple_of=pad_multiple)
-        return detected_fmt, train_ds, eval_ds, dataset_text_field, data_collator
+        return (
+            detected_fmt,
+            train_ds,
+            eval_ds,
+            dataset_text_field,
+            data_collator,
+            False,
+        )
 
     def _apply_cuda_training_profile(self) -> None:
         cfg = self.config
@@ -501,9 +531,15 @@ class SeisoTrainer:
                 if key in profile and getattr(cfg, key, None) != profile[key]
             }
             # Opt-in packing upgrades only (never force-disable user packing=true).
-            if profile.get("packing") and not cfg.packing:
+            # Never auto-enable packing when response-only chat masking is required —
+            # packing + Seiso assistant masks are incompatible (TEXT CPT is OK).
+            packing_ok = (
+                not cfg.train_on_responses_only
+                or cfg.dataset_format == DatasetFormat.TEXT
+            )
+            if profile.get("packing") and not cfg.packing and packing_ok:
                 updates["packing"] = True
-            if profile.get("padding_free") and (
+            if profile.get("padding_free") and packing_ok and (
                 updates.get("packing", cfg.packing) and not cfg.padding_free
             ):
                 updates["padding_free"] = True
@@ -550,6 +586,24 @@ class SeisoTrainer:
             )
         return callbacks
 
+    @staticmethod
+    def _latest_checkpoint_dir(output_dir: Path) -> Path | None:
+        """Return newest HuggingFace ``checkpoint-<step>`` under ``output_dir``."""
+        root = Path(output_dir)
+        if not root.is_dir():
+            return None
+        candidates: list[tuple[int, Path]] = []
+        for path in root.iterdir():
+            if not path.is_dir() or not path.name.startswith("checkpoint-"):
+                continue
+            suffix = path.name.split("checkpoint-", 1)[-1]
+            if suffix.isdigit():
+                candidates.append((int(suffix), path))
+        if not candidates:
+            return None
+        candidates.sort(key=lambda item: item[0])
+        return candidates[-1][1]
+
     def _train_with_oom_recovery(
         self,
         trainer,
@@ -583,7 +637,21 @@ class SeisoTrainer:
                     trainer.args.per_device_train_batch_size = cfg.batch_size
                     trainer.args.per_device_eval_batch_size = cfg.batch_size
                     trainer.args.gradient_accumulation_steps = cfg.gradient_accumulation_steps
-                resume_from_checkpoint = None
+                # Keep resume pointing at the latest HF checkpoint under output_dir
+                # when possible so OOM rebuild does not restart from step 0.
+                if resume_from_checkpoint:
+                    latest = self._latest_checkpoint_dir(cfg.output_dir)
+                    if latest is not None:
+                        resume_from_checkpoint = str(latest)
+                        self._log(
+                            f"OOM recovery: resuming from latest checkpoint {latest}"
+                        )
+                    else:
+                        self._log(
+                            "OOM recovery: no checkpoint found under output_dir; "
+                            "continuing without resume"
+                        )
+                        resume_from_checkpoint = None
 
     def _resolve_load_model_id(self) -> str:
         """Prefer cached local snapshot path for offline merge/export after training."""
@@ -730,6 +798,7 @@ class SeisoTrainer:
         data_collator=None,
         dataset_text_field: str | None = None,
         dataset_format: DatasetFormat = DatasetFormat.AUTO,
+        use_packing: bool | None = None,
         callbacks=None,
     ) -> Any:
         cfg = self.config
@@ -765,11 +834,14 @@ class SeisoTrainer:
         if cfg.gradient_checkpointing:
             grad_ckpt_kwargs = {"use_reentrant": False}
 
+        # Effective packing must match the tokenize/format path (not stale cfg.packing).
+        packing_enabled = bool(cfg.packing if use_packing is None else use_packing)
+
         # ── Padding-free packing: eliminates padding waste entirely on CUDA ──
         # Requires flash-attention (sdpa also works on recent transformers).  When
         # enabled, sequences are concatenated with position_ids and cu_seqlens,
         # so every token is a real token — no padding compute waste at all.
-        padding_free = cfg.padding_free and cuda_available and cfg.packing
+        padding_free = cfg.padding_free and cuda_available and packing_enabled
 
         # ── Check which TrainingArguments params are actually available ──
         # (transformers 5.x removed group_by_length; guard with hasattr)
@@ -876,7 +948,7 @@ class SeisoTrainer:
             eval_ds,
             training_args_dict=args_dict,
             max_seq_length=cfg.max_seq_length,
-            packing=cfg.packing,
+            packing=packing_enabled,
             dataset_text_field=dataset_text_field,
             data_collator=data_collator,
             use_fused_ce=cfg.use_fused_ce,

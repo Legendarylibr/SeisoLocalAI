@@ -41,6 +41,50 @@ from .training_utils import (
 )
 
 
+def assert_compatible_teacher_student(teacher, student) -> None:
+    """Refuse cross-vocab distillation (student tokenizer feeds both models)."""
+    t_vocab = int(getattr(teacher.config, "vocab_size", 0) or 0)
+    s_vocab = int(getattr(student.config, "vocab_size", 0) or 0)
+    if t_vocab <= 0 or s_vocab <= 0:
+        raise ValueError(
+            "teacher and student must expose positive config.vocab_size for distillation"
+        )
+    if t_vocab != s_vocab:
+        raise ValueError(
+            f"teacher vocab_size={t_vocab} != student vocab_size={s_vocab}; "
+            "distillation tokenizes with the student tokenizer and requires a "
+            "matching vocabulary (same model family)."
+        )
+
+
+def shifted_masked_kl_div(
+    student_logits: torch.Tensor,
+    teacher_logits: torch.Tensor,
+    attention_mask: torch.Tensor | None,
+    *,
+    temperature: float,
+) -> torch.Tensor:
+    """Next-token KL(student ‖ teacher) with pad masking, scaled by T².
+
+    Aligns soft labels with causal LM CE: compare logits at t predicting token t+1.
+    """
+    t = max(float(temperature), 1e-5)
+    # Shift: predict token t+1 from position t (matches HF CausalLM labels shift).
+    s_shift = student_logits[..., :-1, :].contiguous()
+    t_shift = teacher_logits[..., :-1, :].contiguous()
+    soft_teacher = F.softmax(t_shift / t, dim=-1)
+    soft_student = F.log_softmax(s_shift / t, dim=-1)
+    # Per-token KL; ignore padded positions (and the dropped last logit column).
+    token_kl = F.kl_div(soft_student, soft_teacher, reduction="none").sum(dim=-1)
+    if attention_mask is not None:
+        # attention_mask[t] corresponds to input token t; label at t is token t+1,
+        # so the valid prediction positions are attention_mask[..., 1:].
+        mask = attention_mask[..., 1:].to(dtype=token_kl.dtype)
+        denom = mask.sum().clamp_min(1.0)
+        return (token_kl * mask).sum() / denom * (t * t)
+    return token_kl.mean() * (t * t)
+
+
 def run_distillation(
     *,
     run_dir: Path,
@@ -93,6 +137,7 @@ def run_distillation(
         device_map=None,  # let accelerate place
         trust_remote_code=trust_rc,
     )
+    assert_compatible_teacher_student(teacher, student)
     if cfg.gradient_checkpointing:
         student.gradient_checkpointing_enable()
         student.config.use_cache = False
@@ -156,13 +201,12 @@ def run_distillation(
             s_logits = s_out.logits
             hard_loss = s_out.loss
 
-            # KL on last dimension; shift handled implicitly by labels loss, but for distill we align logits.
-            T = cfg.temperature
-            soft_teacher = F.softmax(t_logits / T, dim=-1)
-            soft_student = F.log_softmax(s_logits / T, dim=-1)
-            distill_loss = F.kl_div(
-                soft_student, soft_teacher, reduction="batchmean"
-            ) * (T * T)
+            distill_loss = shifted_masked_kl_div(
+                s_logits,
+                t_logits,
+                batch.get("attention_mask"),
+                temperature=cfg.temperature,
+            )
 
             loss = cfg.alpha * distill_loss + (1.0 - cfg.alpha) * hard_loss
             loss = loss / cfg.grad_accum_steps
