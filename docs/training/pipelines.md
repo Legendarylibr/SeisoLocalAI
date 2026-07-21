@@ -57,7 +57,8 @@ Compression flows use the shared job/orchestrator pattern and should be tested
 with a small local model first:
 
 ```bash
-seiso compress --config configs/example_compress.json
+seiso compress run --preset smoke
+# or: seiso compress run --config configs/example_compress.json
 ```
 
 For Forge behavior, verify logs stream and artifacts resolve under the active

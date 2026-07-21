@@ -17,8 +17,10 @@ describe("trainingConfigGuards", () => {
     expect(packingConflictsWithResponseMask(true, true, "chat")).toBe(true);
     expect(packingConflictsWithResponseMask(true, true, "text")).toBe(false);
     expect(packingConflictsWithResponseMask(true, false, "chat")).toBe(false);
+    expect(packingConflictsWithResponseMask(true, true, "auto")).toBe(true);
     expect(packingAllowedForFormat("preference", true)).toBe(false);
     expect(packingAllowedForFormat("text", true)).toBe(true);
+    expect(packingAllowedForFormat("auto", true)).toBe(false);
   });
 
   it("requires preference opt-in", () => {
