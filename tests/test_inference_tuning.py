@@ -142,6 +142,128 @@ def test_prepare_torch_model_patches_before_compile_and_returns_wrapper(monkeypa
     assert events == ["configure", "eval", "kernels:True", "compile:True"]
 
 
+def test_prepare_torch_model_restores_kernels_when_compile_raises(monkeypatch):
+    from types import SimpleNamespace
+
+    import pytest
+
+    from seiso.inference import tuning
+
+    class _Model:
+        config = SimpleNamespace(use_cache=False)
+
+        def eval(self):
+            return self
+
+    model = _Model()
+    restored: list[object] = []
+    monkeypatch.setattr(tuning, "configure_torch_inference", lambda: None)
+    monkeypatch.setattr(tuning, "apply_inference_kernels", lambda value: None)
+    monkeypatch.setattr(
+        tuning,
+        "maybe_compile_torch_model",
+        lambda value: (_ for _ in ()).throw(RuntimeError("compile failed")),
+    )
+    monkeypatch.setattr(
+        "seiso.kernels.lifecycle.restore_kernel_patches",
+        lambda value=None: restored.append(value) or 0,
+    )
+
+    with pytest.raises(RuntimeError, match="compile failed"):
+        tuning.prepare_torch_model(model)
+    assert restored == [model]
+
+
+def test_apply_inference_kernels_commits_session_on_success(monkeypatch):
+    from types import SimpleNamespace
+
+    from seiso.inference import tuning
+    from seiso.kernels.lifecycle import KernelPatchSession, _ACTIVE_PATCH_SESSION
+
+    model = SimpleNamespace()
+    events: list[str] = []
+    commits: list[KernelPatchSession] = []
+    original_commit = KernelPatchSession.commit
+
+    def _commit(self):
+        commits.append(self)
+        return original_commit(self)
+
+    def _fake_apply(m, **_kwargs):
+        events.append("apply")
+        assert _ACTIVE_PATCH_SESSION.get() is not None
+        assert m is model
+
+    class _Cuda:
+        @staticmethod
+        def is_available():
+            return True
+
+    fake_torch = SimpleNamespace(cuda=_Cuda())
+    monkeypatch.setattr(
+        tuning,
+        "env_bool",
+        lambda name, default=False: (
+            True if name == "SEISO_INFERENCE_FUSED_KERNELS" else default
+        ),
+    )
+    monkeypatch.setitem(__import__("sys").modules, "torch", fake_torch)
+    monkeypatch.setattr(
+        "seiso.kernels.attention.enable_torch_sdpa_backends",
+        lambda **_k: None,
+    )
+    monkeypatch.setattr("seiso.kernels.hooks.apply_training_kernels", _fake_apply)
+    monkeypatch.setattr(KernelPatchSession, "commit", _commit)
+
+    tuning.apply_inference_kernels(model)
+    assert events == ["apply"]
+    assert len(commits) == 1
+    assert _ACTIVE_PATCH_SESSION.get() is None
+
+
+def test_apply_inference_kernels_restores_session_on_apply_failure(monkeypatch):
+    from types import SimpleNamespace
+
+    from seiso.inference import tuning
+    from seiso.kernels.lifecycle import KernelPatchSession, _ACTIVE_PATCH_SESSION
+
+    model = SimpleNamespace()
+    restores: list[KernelPatchSession] = []
+    original_restore = KernelPatchSession.restore
+
+    def _restore(self):
+        restores.append(self)
+        return original_restore(self)
+
+    class _Cuda:
+        @staticmethod
+        def is_available():
+            return True
+
+    fake_torch = SimpleNamespace(cuda=_Cuda())
+    monkeypatch.setattr(
+        tuning,
+        "env_bool",
+        lambda name, default=False: (
+            True if name == "SEISO_INFERENCE_FUSED_KERNELS" else default
+        ),
+    )
+    monkeypatch.setitem(__import__("sys").modules, "torch", fake_torch)
+    monkeypatch.setattr(
+        "seiso.kernels.attention.enable_torch_sdpa_backends",
+        lambda **_k: None,
+    )
+    monkeypatch.setattr(
+        "seiso.kernels.hooks.apply_training_kernels",
+        lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("patch failed")),
+    )
+    monkeypatch.setattr(KernelPatchSession, "restore", _restore)
+
+    tuning.apply_inference_kernels(model)
+    assert len(restores) == 1
+    assert _ACTIVE_PATCH_SESSION.get() is None
+
+
 def test_estimate_llama_n_ctx_sizes_to_prompt(monkeypatch):
     monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 16384)
     monkeypatch.setattr(
