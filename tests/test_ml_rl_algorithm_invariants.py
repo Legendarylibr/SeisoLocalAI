@@ -144,6 +144,38 @@ def test_slime_rejects_format_penalty_dominating_outcome(tmp_path):
         cfg.validate()
 
 
+def test_slime_rejects_penalty_that_loses_to_format_shaping(tmp_path):
+    """penalty > outcome - format allows wrong+formatted to beat correct+unformatted."""
+    cfg = SingleGpuSlimeConfig(
+        model_id="test/model",
+        dataset=tmp_path / "data.jsonl",
+        output_dir=tmp_path / "out",
+        require_thinking_trace=True,
+        outcome_reward_weight=1.0,
+        format_reward_weight=0.5,
+        process_reward_weight=0.0,
+        missing_thinking_penalty=0.6,
+    )
+    with pytest.raises(ValueError, match="missing_thinking_penalty"):
+        cfg.validate()
+
+
+def test_train_config_rejects_penalty_that_loses_to_format_shaping(tmp_path):
+    with pytest.raises(ValueError, match="missing_thinking_penalty"):
+        TrainConfig.model_validate(
+            {
+                "model_id": "test/model",
+                "dataset": tmp_path / "prefs.jsonl",
+                "method": "slime",
+                "require_thinking_trace": True,
+                "outcome_reward_weight": 1.0,
+                "format_reward_weight": 0.5,
+                "process_reward_weight": 0.0,
+                "missing_thinking_penalty": 0.6,
+            }
+        )
+
+
 def test_train_config_refuses_preference_without_opt_in(tmp_path):
     with pytest.raises(ValueError, match="Preference datasets"):
         TrainConfig.model_validate(

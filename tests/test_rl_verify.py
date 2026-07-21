@@ -151,6 +151,15 @@ def test_contains_answer_rejects_substring_traps():
     assert verify_outcome("new york city", "new york", checker="contains_answer")[0] == 1.0
 
 
+def test_contains_answer_preserves_signed_and_plus_golds():
+    # Must not collapse ``c++`` → ``c`` or ``-3`` → ``3``.
+    assert verify_outcome("select option c", "c++", checker="contains_answer")[0] == 0.0
+    assert verify_outcome("use c++ please", "c++", checker="contains_answer")[0] == 1.0
+    assert verify_outcome("version 3", "-3", checker="contains_answer")[0] == 0.0
+    assert verify_outcome("answer is -3", "-3", checker="contains_answer")[0] == 1.0
+    assert verify_outcome("I got +5 points", "+5", checker="contains_answer")[0] == 1.0
+
+
 def test_code_partial_credit_does_not_mark_passed():
     sample = {"tests": ["assert add(1,2)==3", "assert add(2,2)==4", "assert add(0,0)==0"]}
     partial = "def add(a,b):\n    return 3 if a==1 else (4 if a==2 else 9)\n"

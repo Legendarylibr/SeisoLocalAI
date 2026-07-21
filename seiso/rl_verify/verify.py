@@ -357,7 +357,11 @@ def _exact_match(actual: str, expected: str) -> tuple[float, str]:
 
 
 def _contains_answer(actual: str, expected: str) -> tuple[float, str]:
-    """Token-boundary containment — rejects substring traps like ``42`` in ``420``."""
+    """Token-boundary containment — rejects substring traps like ``42`` in ``420``.
+
+    Preserves signed / ``+``-suffixed golds (``-3``, ``c++``). Only trailing
+    sentence ``.`` is stripped so ``42.`` still matches gold ``42``.
+    """
     extracted = actual.strip()
     expected_norm = normalize_answer(expected)
     if not expected_norm:
@@ -367,9 +371,9 @@ def _contains_answer(actual: str, expected: str) -> tuple[float, str]:
         return 0.0, extracted
 
     def _tokens(text: str) -> list[str]:
-        # normalize_answer keeps ``.``/``+``/``-``; strip them from token edges
-        # so ``42.`` still matches gold ``42`` without matching ``420``.
-        return [tok.strip(".-+") for tok in text.split() if tok.strip(".-+")]
+        # Strip trailing sentence periods only — never +/- (would collapse
+        # gold ``c++`` → ``c`` or ``-3`` → ``3``).
+        return [tok.rstrip(".") for tok in text.split() if tok.rstrip(".")]
 
     actual_tokens = _tokens(actual_norm)
     expected_tokens = _tokens(expected_norm)

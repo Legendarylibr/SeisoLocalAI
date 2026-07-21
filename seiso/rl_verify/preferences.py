@@ -73,14 +73,25 @@ def select_preference_pair(
     if len(usable) < 2:
         return None
 
-    # Chosen: passers first, then score, then has_code.
+    # Chosen: passers first, then score / has_code; shorter wins ties (no padding).
     passers = [c for c in usable if c.passed]
     if require_chosen_pass:
         if not passers:
             return None
-        chosen = max(passers, key=lambda c: (c.score, c.has_code, len(c.completion)))
+        chosen = max(
+            passers,
+            key=lambda c: (c.score, c.has_code, -len(c.completion.strip())),
+        )
     else:
-        chosen = max(usable, key=lambda c: (c.score, c.passed, c.has_code, len(c.completion)))
+        chosen = max(
+            usable,
+            key=lambda c: (
+                c.score,
+                c.passed,
+                c.has_code,
+                -len(c.completion.strip()),
+            ),
+        )
 
     worse = [
         c
@@ -92,28 +103,36 @@ def select_preference_pair(
 
     if hard_negatives:
         # Hard: failing + extractable structure + highest residual score (near miss).
+        # Length ties prefer shorter text so padding cannot win.
         hard_fails = [c for c in worse if (not c.passed) and c.has_code]
         soft_fails = [c for c in worse if not c.passed]
         if hard_fails:
             rejected = max(
                 hard_fails,
-                key=lambda c: (c.score, c.tests_passed, len(c.completion)),
+                key=lambda c: (
+                    c.score,
+                    c.tests_passed,
+                    -len(c.completion.strip()),
+                ),
             )
             kind = "hard_negative"
         elif soft_fails:
-            # Math/choice: highest residual score, then shorter text (avoid
-            # length-padding "hard" negatives when all fails score 0).
             rejected = max(
                 soft_fails,
                 key=lambda c: (c.score, -len(c.completion.strip())),
             )
             kind = "hard_negative"
         else:
-            # Soft fallback: any lower-scoring completion (all may have passed).
-            rejected = max(worse, key=lambda c: (c.score, c.has_code, len(c.completion)))
+            rejected = max(
+                worse,
+                key=lambda c: (c.score, c.has_code, -len(c.completion.strip())),
+            )
             kind = "score_gap"
     else:
-        rejected = min(worse, key=lambda c: (c.score, c.has_code, len(c.completion)))
+        rejected = min(
+            worse,
+            key=lambda c: (c.score, c.has_code, len(c.completion.strip())),
+        )
         kind = "score_gap"
 
     if chosen.score <= rejected.score + min_score_gap:

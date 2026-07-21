@@ -42,7 +42,8 @@ def generate_preference_rows(
 ) -> list[dict[str, Any]]:
     """Generate preference rows with deterministic per-prompt seeds.
 
-    Verifiable prompts (answer/tests/benchmark) are never teacher≻student labeled:
+    Verifiable prompts (non-empty ``answer`` and/or ``tests``) are never
+    teacher≻student labeled — ``benchmark`` alone is not enough to score:
     - ``verifiable_outcome_rewards=True`` → score student groups and keep pass/fail pairs
     - ``verifiable_outcome_rewards=False`` → skip them (do not treat teacher as gold)
     Teacher≻student applies only to non-verifiable prompts.

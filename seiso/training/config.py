@@ -418,14 +418,17 @@ class TrainConfig(BaseModel):
                 "format_reward_weight + process_reward_weight must not exceed "
                 "outcome_reward_weight (outcome must dominate for meaningful GRPO)"
             )
-        if (
-            self.require_thinking_trace
-            and self.missing_thinking_penalty >= self.outcome_reward_weight
-        ):
-            raise ValueError(
-                "missing_thinking_penalty must be < outcome_reward_weight so "
-                "correct-but-unformatted completions outrank wrong-but-formatted ones"
+        if self.require_thinking_trace:
+            headroom = self.outcome_reward_weight - (
+                self.format_reward_weight + self.process_reward_weight
             )
+            if self.missing_thinking_penalty > headroom:
+                raise ValueError(
+                    "missing_thinking_penalty must be <= outcome_reward_weight - "
+                    "(format_reward_weight + process_reward_weight) so "
+                    "correct-but-unformatted completions are not outranked by "
+                    "wrong-but-formatted ones"
+                )
         return self
 
     @classmethod
