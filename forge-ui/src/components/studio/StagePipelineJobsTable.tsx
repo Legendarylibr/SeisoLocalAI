@@ -6,6 +6,7 @@ type StageJobRow = {
   status: string;
   stages?: string[];
   model_dir?: string | null;
+  error_text?: string | null;
   created_at?: string;
 };
 
@@ -42,6 +43,20 @@ export function StagePipelineJobsTable({ jobs, emptyMessage }: StagePipelineJobs
             key: "status",
             header: "Status",
             render: (j) => <span className={`badge badge-${j.status}`}>{j.status}</span>,
+          },
+          {
+            key: "error_text",
+            header: "Error",
+            render: (j) =>
+              j.error_text ? (
+                <span className="text-danger" title={j.error_text}>
+                  {j.error_text.length > 48
+                    ? `${j.error_text.slice(0, 48)}…`
+                    : j.error_text}
+                </span>
+              ) : (
+                "—"
+              ),
           },
           {
             key: "stages",
