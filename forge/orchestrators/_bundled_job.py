@@ -128,8 +128,9 @@ async def run_bundled_job(
         try:
             result = await future
         except asyncio.CancelledError:
-            with contextlib.suppress(asyncio.TimeoutError, Exception):
-                await asyncio.wait_for(asyncio.shield(future), timeout=600)
+            # Finish executor work before release_after_task frees the GPU.
+            with contextlib.suppress(Exception):
+                await asyncio.shield(future)
             raise
     finally:
         release_after_task(

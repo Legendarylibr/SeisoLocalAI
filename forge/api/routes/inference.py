@@ -308,7 +308,7 @@ async def preload_model(
         n_ctx=body.n_ctx,
     )
 
-    _begin_generation_or_raise(orchestrator, user_id)
+    gen_epoch = _begin_generation_or_raise(orchestrator, user_id)
     try:
         await orchestrator.preload_model(ctx["payload"])
         status = orchestrator.inference_status()
@@ -331,7 +331,7 @@ async def preload_model(
         await orchestrator.cancel_and_unload_for_user(user_id)
         raise
     finally:
-        orchestrator.end_generation_for_user(user_id)
+        orchestrator.end_generation_for_user(user_id, epoch=gen_epoch)
 
 
 @router.post("/preload/stream")
@@ -362,8 +362,9 @@ async def preload_model_stream(
     eta = estimate_load_eta_seconds(size_bytes)
 
     async def event_gen():
+        gen_epoch = None
         try:
-            _begin_generation_or_raise(orchestrator, user_id)
+            gen_epoch = _begin_generation_or_raise(orchestrator, user_id)
             switching = orchestrator.would_switch_model(target_path, ctx["backend"])
             if switching:
                 yield {
@@ -402,7 +403,8 @@ async def preload_model_stream(
             yield {"event": "error", "data": str(exc)}
             return
         finally:
-            orchestrator.end_generation_for_user(user_id)
+            if gen_epoch is not None:
+                orchestrator.end_generation_for_user(user_id, epoch=gen_epoch)
 
         status = orchestrator.inference_status()
         pinned = ctx["payload"].get("sidecar_num_ctx") or ctx["payload"].get("n_ctx")
@@ -575,7 +577,7 @@ async def chat(
             if (can_stream_router or can_stream_local)
             else orchestrator.create_job(user_id=user_id)
         )
-        _begin_generation_or_raise(orchestrator, user_id)
+        gen_epoch = _begin_generation_or_raise(orchestrator, user_id)
 
         async def event_gen():
             if can_stream_router:
@@ -603,7 +605,7 @@ async def chat(
                     await orchestrator.cancel_generation_for_user(user_id)
                     yield {"event": "error", "data": str(exc)}
                 finally:
-                    orchestrator.end_generation_for_user(user_id)
+                    orchestrator.end_generation_for_user(user_id, epoch=gen_epoch)
                 return
 
             if can_stream_local:
@@ -649,6 +651,16 @@ async def chat(
                 effective = sanitize_inference_payload(
                     pass_payload, isolated=isolated
                 )
+                # Lock KV size for auto-continues when client omitted n_ctx.
+                if fixed_n_ctx is None:
+                    fixed_n_ctx = effective.get("n_ctx")
+                    if fixed_n_ctx is None and payload.get("model_path"):
+                        fixed_n_ctx = orchestrator.pinned_inference_context(
+                            str(payload["model_path"])
+                        )
+                if fixed_n_ctx is not None:
+                    pass_payload["n_ctx"] = fixed_n_ctx
+                    pass_payload["pin_n_ctx"] = True
                 pass_max_tokens = max(1, int(effective.get("max_tokens") or 2048))
                 # Sidecar applies its own native completion cap; mirror it here so
                 # length detection / auto-continue match what Ollama actually generates.
@@ -983,7 +995,7 @@ async def chat(
                     if cancelled:
                         await orchestrator.cancel_generation_for_user(user_id)
                     else:
-                        orchestrator.end_generation_for_user(user_id)
+                        orchestrator.end_generation_for_user(user_id, epoch=gen_epoch)
                 return
 
             try:
@@ -1016,6 +1028,9 @@ async def chat(
     try:
         await orchestrator.start(job_id, payload)
         job = await orchestrator.wait_for(job_id)
+    except asyncio.CancelledError:
+        await orchestrator.cancel_generation_for_user(user_id)
+        raise
     except Exception:
         await orchestrator.cancel_generation_for_user(user_id)
         raise

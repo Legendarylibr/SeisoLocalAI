@@ -176,10 +176,9 @@ class TrainingOrchestrator(Orchestrator):
                     from seiso.training.cancel import request
 
                     request(job_id)
-                    with contextlib.suppress(asyncio.TimeoutError, Exception):
-                        await asyncio.wait_for(
-                            asyncio.shield(training_future), timeout=600
-                        )
+                    # Await completion before GPU release in finally (no timeout).
+                    with contextlib.suppress(Exception):
+                        await asyncio.shield(training_future)
                     raise
                 from seiso.training.cancel import is_requested
 

@@ -429,7 +429,7 @@ def export_gguf(
             release_cached_memory()
         except Exception as exc:
             log(f"Merge failed: {exc}")
-            return []
+            raise RuntimeError(f"GGUF merge failed: {exc}") from exc
 
         paths = _export_quants(
             merged,

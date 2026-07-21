@@ -47,6 +47,16 @@ def test_sanitize_llm_output_preserves_answer_label_text():
     assert sanitize_llm_output(raw, strip_tool_calls=True) == raw
 
 
+def test_sanitize_preserves_lone_think_close_in_prose():
+    raw = "Document the </think> tag carefully in your notes."
+    assert sanitize_llm_output(raw, strip_tool_calls=True) == raw
+
+
+def test_sanitize_preserves_name_arguments_json_without_tool_markers():
+    raw = 'Example schema: {"name": "web_search", "arguments": {"query": "x"}}'
+    assert sanitize_llm_output(raw, strip_tool_calls=True) == raw
+
+
 def test_chunk_sanitized_output_chunks_without_modifying():
     chunks = list(chunk_sanitized_output("abcdefgh", chunk_size=3))
     assert chunks == ["abc", "def", "gh"]

@@ -326,8 +326,8 @@ class Orchestrator(ABC):
             )
         except Exception as exc:
             rec.status = JobStatus.FAILED
-            rec.error = str(exc)
-            self._emit_log(job_id, f"ERROR: {exc}")
+            rec.error = str(exc) or type(exc).__name__
+            self._emit_log(job_id, f"ERROR: {rec.error}")
             self._emit_event(
                 job_id,
                 "status",

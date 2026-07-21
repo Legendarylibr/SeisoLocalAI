@@ -29,9 +29,29 @@ def _trust_remote_code(cfg: dict[str, Any]) -> bool:
     )
 
 
+def _assert_full_model_dir(path: Path, stage: str) -> None:
+    """Refuse LoRA-only / empty dirs when skipping distill into prune/finetune."""
+    if not path.is_dir():
+        raise FileNotFoundError(f"Expected model directory for {stage}: {path}")
+    has_config = (path / "config.json").is_file()
+    has_adapter = (path / "adapter_config.json").is_file()
+    if has_adapter and not has_config:
+        raise ValueError(
+            f"model_dir for stage {stage!r} is a LoRA adapter only; "
+            "merge to a full HF checkpoint (with config.json) first, or run distill."
+        )
+    if not has_config:
+        raise ValueError(
+            f"model_dir for stage {stage!r} must contain config.json "
+            "(full Hugging Face model directory)."
+        )
+
+
 def _resolve_model_dir(cfg: dict[str, Any], run_dir: Path, stage: str) -> Path:
     if cfg.get("model_dir") and stage == cfg["stages"][0]:
-        return Path(cfg["model_dir"])
+        path = Path(cfg["model_dir"])
+        _assert_full_model_dir(path, stage)
+        return path
     stage_inputs = {
         "distill": None,
         "prune": run_dir / "distilled",

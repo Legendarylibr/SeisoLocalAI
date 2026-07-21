@@ -40,11 +40,19 @@ async def get_compat_user_id(
                     status.HTTP_401_UNAUTHORIZED,
                     "Invalid inference API key",
                 )
-            return decode_token(token, settings)
-
-        cookie = request.cookies.get("seiso_token")
-        if cookie:
-            return decode_token(cookie, settings)
+            user_id = decode_token(token, settings)
+        else:
+            cookie = request.cookies.get("seiso_token")
+            if not cookie:
+                raise HTTPException(
+                    status.HTTP_401_UNAUTHORIZED, "Authentication required"
+                )
+            user_id = decode_token(cookie, settings)
     except InvalidTokenError as exc:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, str(exc)) from exc
-    raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Authentication required")
+
+    # Mirror /api auth: reject JWTs for deleted/wiped users (ghost tokens).
+    user = await db.get_user_by_id(user_id)
+    if not user:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Authentication required")
+    return user_id

@@ -24,9 +24,9 @@ def _assert_inference_gpu_available() -> None:
 def _begin_generation_or_raise(
     orchestrator: InferenceOrchestrator,
     user_id: str | None,
-) -> None:
+) -> int:
     try:
-        orchestrator.begin_generation_for_user(user_id)
+        return orchestrator.begin_generation_for_user(user_id)
     except PermissionError as exc:
         raise HTTPException(403, str(exc)) from exc
     except RuntimeError as exc:
