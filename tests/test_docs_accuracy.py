@@ -153,6 +153,36 @@ def test_cli_docs_cover_experiment_command():
     assert "seiso experiment" in readme and "quant-regression" in readme
 
 
+def test_cli_docs_cover_compress_run():
+    """docs/cli.md must document the real `seiso compress run` subcommand."""
+    cli_doc = _read("docs/cli.md")
+    compression = _read("docs/compression.md")
+    assert "seiso compress run" in cli_doc
+    assert "seiso compress run --preset smoke" in cli_doc
+    assert "seiso compress manifest-verify" in cli_doc
+    assert "seiso compress run" in compression
+    assert (REPO_ROOT / "configs/example_compress.json").is_file()
+    # Wrong historical form: bare `seiso compress --config` without `run`.
+    assert "seiso compress --config" not in cli_doc
+
+
+def test_cli_docs_cover_slime_training():
+    """Slime post-training must be documented with a real example config + CLI path."""
+    cli_doc = _read("docs/cli.md")
+    quickstart = _read("docs/training/quickstart.md")
+    example = "configs/example_training_slime.yaml"
+    assert example in cli_doc
+    assert (REPO_ROOT / example).is_file()
+    assert "method: slime" in cli_doc or "method: slime" in quickstart
+    assert "rollout_backend" in quickstart
+    # Dedicated CLI exists; docs may say `seiso slime` and/or `seiso train -c …`.
+    assert "seiso slime" in cli_doc or "seiso train --config configs/example_training_slime.yaml" in cli_doc
+    from seiso_cli.main import app
+
+    registered = {cmd.name for cmd in app.registered_commands}
+    assert "slime" in registered
+
+
 def test_docs_do_not_reference_nonexistent_rl_quant_extra():
     """pyproject.toml has no [rl-quant] optional extra — docs must not claim one."""
     for rel in ("docs/compression.md", "docs/install.md"):

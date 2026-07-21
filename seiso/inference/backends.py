@@ -558,13 +558,36 @@ def available_backends(
 ) -> list[BackendName]:
     """Local backends exposed for this model.
 
+    Preferred/default engine is first (same as ``recommend_backend``). Additional
+    policy-viable engines follow so the Chat UI can offer a picker; installed
+    filtering happens at the inventory layer.
+
     Keep this deterministic. Complex model selection belongs to the optional
     external router, not the local backend resolver.
     """
     fmt = (model_format or "").lower()
     if fmt == "gguf" and not gguf_is_supported_by_llamacpp(model_path):
         return []
-    return [recommend_backend(model_path=model_path, model_format=model_format)]
+
+    preferred = recommend_backend(model_path=model_path, model_format=model_format)
+
+    if _is_gguf_model(model_path, model_format):
+        if _native_linux_requires_isolated_gguf():
+            # In-process llama.cpp is blocked on this host.
+            return [BACKEND_LLAMASWAP]
+        backends: list[BackendName] = [preferred]
+        for candidate in (BACKEND_LLAMACPP, BACKEND_LLAMASWAP):
+            if candidate not in backends:
+                backends.append(candidate)
+        return backends
+
+    path = Path(model_path)
+    if fmt in {"safetensors", "bin"} or path.is_dir():
+        if preferred == BACKEND_MLX:
+            return [BACKEND_MLX, BACKEND_TORCH]
+        return [BACKEND_TORCH]
+
+    return [preferred]
 
 
 def resolve_local_backend(
