@@ -27,7 +27,10 @@ export function packingConflictsWithResponseMask(
   trainOnResponsesOnly: boolean,
   format: string,
 ): boolean {
-  return Boolean(packing && trainOnResponsesOnly && isChatStyleFormat(format));
+  // Treat unresolved "auto" like chat-style — server rejects packing+response-mask
+  // for auto until format resolves (mirrors TrainConfig packing_blocked_formats).
+  const chatLike = isChatStyleFormat(format) || format === "auto";
+  return Boolean(packing && trainOnResponsesOnly && chatLike);
 }
 
 export function preferenceRequiresOptIn(
@@ -127,5 +130,6 @@ export function packingAllowedForFormat(
   trainOnResponsesOnly: boolean,
 ): boolean {
   if (!trainOnResponsesOnly) return true;
+  if (format === "auto") return false;
   return !isChatStyleFormat(format);
 }

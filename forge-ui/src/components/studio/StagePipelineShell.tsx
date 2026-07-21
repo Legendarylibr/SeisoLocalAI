@@ -11,6 +11,7 @@ type StageJobRow = {
   status: string;
   stages?: string[];
   model_dir?: string | null;
+  error_text?: string | null;
   created_at?: string;
 };
 

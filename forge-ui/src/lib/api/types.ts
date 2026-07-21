@@ -38,6 +38,7 @@ export type ExportJob = {
   status: string;
   config_json: string;
   output_paths_json?: string;
+  error_text?: string | null;
   created_at: string;
 };
 
@@ -378,6 +379,7 @@ export type TrainingJob = {
   status: string;
   config_json: string;
   metrics_json?: string;
+  error_text?: string | null;
   created_at: string;
 };
 
@@ -518,6 +520,7 @@ export type RLQuantJob = {
   output_dir: string | null;
   recommendation_path: string | null;
   gguf_quants: string[];
+  error_text?: string | null;
   created_at: string;
 };
 
@@ -538,6 +541,7 @@ export type CompressJob = {
   model_dir: string | null;
   stages: string[];
   stage_results: Record<string, unknown>;
+  error_text?: string | null;
   created_at: string;
 };
 
@@ -556,6 +560,7 @@ export type DistillRLJob = {
   model_dir: string | null;
   stages: string[];
   stage_results: Record<string, unknown>;
+  error_text?: string | null;
   created_at: string;
 };
 

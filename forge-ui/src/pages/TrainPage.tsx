@@ -144,6 +144,8 @@ export function TrainPage() {
   const [recommendations, setRecommendations] = useState<TrainingRecommendations | null>(null);
   const [recLoading, setRecLoading] = useState(false);
   const [configCustomized, setConfigCustomized] = useState(false);
+  const configCustomizedRef = useRef(configCustomized);
+  configCustomizedRef.current = configCustomized;
   const [datasetValid, setDatasetValid] = useState(true);
   const [datasetError, setDatasetError] = useState<string | null>(null);
   const [analyzingDataset, setAnalyzingDataset] = useState(false);
@@ -173,6 +175,10 @@ export function TrainPage() {
           requestedFormat: fmt,
           resolvedFormat: res.resolved_format,
         };
+        // Do not overwrite knobs the user already customized.
+        if (configCustomizedRef.current) {
+          return;
+        }
         const rec = res.recommended_config;
         if (rec?.dataset_format && rec.dataset_format !== "auto") {
           setDatasetFormat(rec.dataset_format);
