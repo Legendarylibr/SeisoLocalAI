@@ -106,14 +106,17 @@ def run_held_out_eval(
         temperature=0.0,
         top_p=1.0,
     )
-    prompts = [
-        format_generation_prompt(
-            tokenizer,
-            sample.get(config.prompt_field),
-            eval_config,
+    prompts: list[str] = []
+    for sample in samples:
+        raw_prompt = sample[config.prompt_field]
+        if not isinstance(raw_prompt, (str, list)):
+            raise ValueError(
+                f"eval sample prompt field {config.prompt_field!r} must be "
+                f"str or list, got {type(raw_prompt).__name__}"
+            )
+        prompts.append(
+            format_generation_prompt(tokenizer, raw_prompt, eval_config)
         )
-        for sample in samples
-    ]
     # Rollout collection restores train(); eval must disable dropout for stable
     # pass-rate reports, then restore the caller's mode.
     was_training = bool(getattr(model, "training", False))
