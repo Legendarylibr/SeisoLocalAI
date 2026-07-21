@@ -122,8 +122,8 @@ def test_kernel_patch_session_commit_keeps_patches(monkeypatch):
 
     from seiso.kernels.hooks import apply_training_kernels
     from seiso.kernels.lifecycle import (
-        KernelPatchSession,
         _ACTIVE_PATCH_SESSION,
+        KernelPatchSession,
         restore_kernel_patches,
     )
 

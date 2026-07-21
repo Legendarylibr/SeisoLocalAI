@@ -178,7 +178,7 @@ def test_apply_inference_kernels_commits_session_on_success(monkeypatch):
     from types import SimpleNamespace
 
     from seiso.inference import tuning
-    from seiso.kernels.lifecycle import KernelPatchSession, _ACTIVE_PATCH_SESSION
+    from seiso.kernels.lifecycle import _ACTIVE_PATCH_SESSION, KernelPatchSession
 
     model = SimpleNamespace()
     events: list[str] = []
@@ -225,7 +225,7 @@ def test_apply_inference_kernels_restores_session_on_apply_failure(monkeypatch):
     from types import SimpleNamespace
 
     from seiso.inference import tuning
-    from seiso.kernels.lifecycle import KernelPatchSession, _ACTIVE_PATCH_SESSION
+    from seiso.kernels.lifecycle import _ACTIVE_PATCH_SESSION, KernelPatchSession
 
     model = SimpleNamespace()
     restores: list[KernelPatchSession] = []
