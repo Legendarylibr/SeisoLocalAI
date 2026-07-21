@@ -163,6 +163,10 @@ class FrameworkConfig:
         raise AttributeError(f"{type(self).__name__!r} has no attribute {name!r}")
 
     def __post_init__(self) -> None:
+        # Product surfaces historically used "stdlib"; canonical token is "python".
+        backend = str(self.training_backend or "python").strip().lower()
+        if backend in {"stdlib", "standard", "std"}:
+            object.__setattr__(self, "training_backend", "python")
         v.validate_run_name(self.run_name)
         v.validate_discrete_bit_widths(self.discrete_bit_widths)
         v.validate_artifact_dir("outputs_dir", self.outputs_dir)

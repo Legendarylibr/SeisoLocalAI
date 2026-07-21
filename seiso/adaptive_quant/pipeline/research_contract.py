@@ -68,6 +68,13 @@ def metric_sources_for_config(config: FrameworkConfig) -> dict[str, str]:
     }
 
 
+def _base_measurement_level(config: FrameworkConfig, evidence_level: str) -> str:
+    """Map aggregate tiers back to the underlying measurement backend."""
+    if evidence_level in {EVIDENCE_MULTISEED, EVIDENCE_SWEEP}:
+        return infer_evidence_level(config)
+    return evidence_level
+
+
 def _claim_boundary(config: FrameworkConfig, evidence_level: str) -> dict[str, object]:
     valid: list[str] = []
     invalid: list[str] = [
@@ -77,7 +84,10 @@ def _claim_boundary(config: FrameworkConfig, evidence_level: str) -> dict[str, o
     ]
     if not _gguf_export_enabled(config):
         invalid.append("automatic_gguf_requantization")
-    if evidence_level == EVIDENCE_SIMULATOR:
+    base_level = _base_measurement_level(config, evidence_level)
+    if evidence_level in {EVIDENCE_MULTISEED, EVIDENCE_SWEEP}:
+        valid.append("seed_or_trial_aggregate_statistics")
+    if base_level == EVIDENCE_SIMULATOR:
         valid.extend(
             [
                 "policy_learning_dynamics",
@@ -88,7 +98,7 @@ def _claim_boundary(config: FrameworkConfig, evidence_level: str) -> dict[str, o
         )
         invalid.append("real_hardware_latency_claims")
         invalid.append("real_inference_quality_claims_without_external_sidecar")
-    elif evidence_level == EVIDENCE_LOCAL_LLAMA_CPP:
+    elif base_level == EVIDENCE_LOCAL_LLAMA_CPP:
         valid.extend(
             [
                 "single_machine_llama_cpp_latency_throughput",
@@ -108,7 +118,8 @@ def _claim_boundary(config: FrameworkConfig, evidence_level: str) -> dict[str, o
 
 def _escalation_path(config: FrameworkConfig, evidence_level: str) -> list[str]:
     hints: list[str] = []
-    if evidence_level == EVIDENCE_SIMULATOR:
+    base_level = _base_measurement_level(config, evidence_level)
+    if base_level == EVIDENCE_SIMULATOR:
         hints.append(
             "Escalate to local llama.cpp: set backend='llama_cpp', llama_cpp_binary, "
             "llama_cpp_model, and pre-built GGUF routes (see docs/LOCAL_RESEARCH.md)."
@@ -241,9 +252,10 @@ def build_claims_validation(
 ) -> dict[str, Any]:
     """Paper-bundle claims block (aligned with ``research`` contract)."""
     level = evidence_level or infer_evidence_level(config)
+    base_level = _base_measurement_level(config, level)
     warnings: list[str] = []
     has_external_quality = bool(config.external_quality_path)
-    if level == EVIDENCE_LOCAL_LLAMA_CPP:
+    if base_level == EVIDENCE_LOCAL_LLAMA_CPP:
         if has_external_quality:
             warnings.append(
                 "Latency/throughput are locally measured and quality uses an external sidecar, "
