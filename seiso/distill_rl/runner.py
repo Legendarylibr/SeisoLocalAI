@@ -291,10 +291,9 @@ def _run_shared_stages(
         )
 
     if "rollout" in config.stages:
+        from seiso.distill_rl.config import allow_tiny_rl
         from seiso.distill_rl.grounded_data import materialize_distill_grounded_prompts
         from seiso.distill_rl.preferences import build_preference_bundle
-
-        from seiso.distill_rl.config import allow_tiny_rl
 
         source = str(config.preference_source)
         if source == "teacher_style":
@@ -478,7 +477,10 @@ def _checkpoint_step(path: Path) -> int:
 
 
 def _latest_checkpoint(run_dir: Path) -> Path | None:
-    return max(run_dir.glob("checkpoint-*"), key=_checkpoint_step, default=None)
+    checkpoints = [path for path in run_dir.glob("checkpoint-*") if path.is_dir()]
+    if not checkpoints:
+        return None
+    return max(checkpoints, key=_checkpoint_step)
 
 
 def _run_dpo(

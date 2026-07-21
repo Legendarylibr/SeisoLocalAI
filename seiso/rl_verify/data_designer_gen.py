@@ -115,9 +115,7 @@ def should_use_data_designer(
     """
     del world_size
     mode = normalize_data_designer_mode(getattr(config, "data_designer", "off"))
-    if mode == "on":
-        return True
-    return False
+    return mode == "on"
 
 
 def ensure_openai_v1_endpoint(base_url: str) -> str:

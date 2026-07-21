@@ -266,29 +266,29 @@ class DistillRLConfig(BaseModel):
                 )
             if count < 1:
                 raise ValueError("data_gen_count must be positive")
-        if source == "grounded_library":
-            if self.prompt_library_path is None:
-                raise ValueError(
-                    "preference_source=grounded_library requires prompt_library "
-                    "(JSON/JSONL with answer and/or tests on each prompt)"
-                )
-        if source == "dataset":
-            if not (self.dataset_ref or self.prompt_library_path):
-                raise ValueError(
-                    "preference_source=dataset requires dataset_ref or "
-                    "prompt_library (HF hub id or local path with answer/tests)"
-                )
+        if source == "grounded_library" and self.prompt_library_path is None:
+            raise ValueError(
+                "preference_source=grounded_library requires prompt_library "
+                "(JSON/JSONL with answer and/or tests on each prompt)"
+            )
+        if source == "dataset" and not (self.dataset_ref or self.prompt_library_path):
+            raise ValueError(
+                "preference_source=dataset requires dataset_ref or "
+                "prompt_library (HF hub id or local path with answer/tests)"
+            )
         # Single source of truth: outcome mode follows preference_source.
         if source == "teacher_style":
             # Open-style DPO; default request flag is True — normalize off.
             object.__setattr__(self, "verifiable_outcome_rewards", False)
-        elif source in {"dataset", "data_designer", "grounded_library"}:
-            if not self.verifiable_outcome_rewards:
-                raise ValueError(
-                    f"preference_source={source!r} requires "
-                    "verifiable_outcome_rewards=true (outcome RL). "
-                    "Use preference_source=teacher_style for teacher≻student style DPO."
-                )
+        elif (
+            source in {"dataset", "data_designer", "grounded_library"}
+            and not self.verifiable_outcome_rewards
+        ):
+            raise ValueError(
+                f"preference_source={source!r} requires "
+                "verifiable_outcome_rewards=true (outcome RL). "
+                "Use preference_source=teacher_style for teacher≻student style DPO."
+            )
 
         # Held-out preference split required for product runs.
         frac = float(self.train_val_fraction)

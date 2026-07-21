@@ -63,10 +63,7 @@ def _grounded_fingerprint(config: DistillRLConfig) -> dict[str, Any]:
     )
     ref = (config.dataset_ref or "").strip() or None
     dataset_identity: dict[str, Any] | str | None
-    if ref and Path(ref).expanduser().exists():
-        dataset_identity = _local_path_identity(ref)
-    else:
-        dataset_identity = ref
+    dataset_identity = _local_path_identity(ref) if ref and Path(ref).expanduser().exists() else ref
     tiny = allow_tiny_rl(preset=config.preset)
     return {
         "preference_source": source,
@@ -102,7 +99,7 @@ def _fingerprint_matches(config: DistillRLConfig) -> bool:
         saved = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return False
-    return saved == _grounded_fingerprint(config)
+    return bool(saved == _grounded_fingerprint(config))
 
 
 def _write_fingerprint(config: DistillRLConfig) -> None:

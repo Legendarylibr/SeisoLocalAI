@@ -6,6 +6,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
+
 @dataclass(frozen=True)
 class RolloutPrompt:
     prompt_id: str

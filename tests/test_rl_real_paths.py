@@ -839,7 +839,6 @@ def test_distill_grounded_cache_invalidates_when_tiny_allow_flips(
 
 
 def test_slime_hf_materialize_auto_answer_field_not_default_label(tmp_path: Path):
-    from seiso.rl_verify.synth_materialize import SynthRequest
     from seiso.slime.trainer import (
         _DistributedSlimeContext,
         _maybe_materialize_data_gen,
