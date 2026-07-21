@@ -314,10 +314,11 @@ def score_completion(
     )
     # Code: full unit-test pass only. Dense pass-fraction stays in ``outcome``.
     # Text/math: binary (or dense field) threshold.
-    if use_code and proof_passed is not None:
-        passed = bool(proof_passed)
-    else:
-        passed = outcome > 0.5
+    passed = (
+        bool(proof_passed)
+        if use_code and proof_passed is not None
+        else outcome > 0.5
+    )
     detail = None
     if use_code and proof_detail is not None:
         detail = proof_detail
