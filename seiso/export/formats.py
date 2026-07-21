@@ -57,6 +57,8 @@ class _HubUploadLogWriter:
 
 class ExportFormat(StrEnum):
     MERGED = "merged"
+    # Deprecated alias of FULL (same copytree behavior, different dest dir).
+    # Prefer FULL; BASE remains for backward-compatible configs.
     BASE = "base"
     FULL = "full"
     LORA = "lora"
