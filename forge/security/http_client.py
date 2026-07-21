@@ -60,20 +60,6 @@ class _PinnedIPTransport(httpx.AsyncHTTPTransport):
 async def pinned_async_client(endpoint: PinnedEndpoint, *, timeout: float = 120.0):
     """Yield an httpx client that connects only to endpoint.pinned_ip (when set)."""
     if endpoint.pinned_ip:
-<<<<<<< Updated upstream
-        resolver = _PinnedGetaddrinfo(endpoint.host, endpoint.pinned_ip)
-        resolver.__enter__()
-        try:
-            async with httpx.AsyncClient(
-                timeout=timeout, follow_redirects=False
-            ) as client:
-                yield client
-        finally:
-            resolver.__exit__()
-    else:
-        async with httpx.AsyncClient(
-            timeout=timeout, follow_redirects=False
-=======
         transport = _PinnedIPTransport(endpoint.host, endpoint.pinned_ip)
         async with httpx.AsyncClient(
             transport=transport,
@@ -85,7 +71,6 @@ async def pinned_async_client(endpoint: PinnedEndpoint, *, timeout: float = 120.
         async with httpx.AsyncClient(
             timeout=timeout,
             follow_redirects=False,
->>>>>>> Stashed changes
         ) as client:
             yield client
 

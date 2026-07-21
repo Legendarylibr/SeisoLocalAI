@@ -15,12 +15,15 @@ class MaintenanceMixin:
                 "chat_messages",
                 "chat_threads",
                 "providers",
+                "knowledge_bases",
+                "recipe_jobs",
                 "distill_rl_jobs",
                 "compress_jobs",
                 "rl_quant_jobs",
                 "export_jobs",
                 "training_jobs",
                 "local_models",
+                "projects",
                 "users",
             ):
                 count_query = f"SELECT COUNT(*) AS c FROM {table}"  # nosec B608

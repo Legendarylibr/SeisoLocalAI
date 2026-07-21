@@ -9,30 +9,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-<<<<<<< Updated upstream
-from seiso.security import SecurityError, assert_within, safe_join
-
-_USER_SCOPED_ROOTS = frozenset(
-    {
-        "uploads",
-        "knowledge",
-        "artifacts",
-        "sandbox",
-        "models",
-        "checkpoints",
-        "exports",
-        "compress",
-        "distill_rl",
-        "rl_quant",
-        "recipes",
-    }
-=======
 from seiso.security import (
     USER_SCOPED_DATA_ROOTS,
     SecurityError,
     assert_within,
     safe_join,
->>>>>>> Stashed changes
 )
 
 # Shared HF cache is not user-scoped; reachable only via models/<user_id>/ inventory links.
