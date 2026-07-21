@@ -488,3 +488,40 @@ def test_recommendation_evidence_ignores_false_simulator_claimable_flag():
         }
     )
     assert meta["deploy_quality_claimable"] is False
+
+
+def test_recommendation_evidence_llama_cpp_needs_external_quality():
+    from seiso.rl_quant.recommendation import recommendation_evidence
+
+    meta = recommendation_evidence(
+        {
+            "evidence_level": "local_llama_cpp",
+            "deploy_quality_claimable": True,
+        }
+    )
+    assert meta["deploy_quality_claimable"] is False
+    assert meta["deploy_quality_note"]
+
+    meta_ok = recommendation_evidence(
+        {
+            "evidence_level": "local_llama_cpp",
+            "deploy_quality_claimable": True,
+            "external_quality": True,
+        }
+    )
+    assert meta_ok["deploy_quality_claimable"] is True
+
+
+def test_recommendation_evidence_reads_nested_research_level():
+    from seiso.rl_quant.recommendation import recommendation_evidence
+
+    meta = recommendation_evidence(
+        {
+            "research": {
+                "evidence": {"level": "simulator"},
+                "measurement": {"external_quality": False},
+            }
+        }
+    )
+    assert meta["evidence_level"] == "simulator"
+    assert meta["deploy_quality_claimable"] is False
