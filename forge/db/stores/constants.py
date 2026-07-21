@@ -16,14 +16,6 @@ CREATE TABLE IF NOT EXISTS users (
     created_at TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS projects (
-    id TEXT PRIMARY KEY,
-    user_id TEXT NOT NULL,
-    name TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    FOREIGN KEY (user_id) REFERENCES users(id)
-);
-
 CREATE TABLE IF NOT EXISTS local_models (
     id TEXT PRIMARY KEY,
     user_id TEXT,
@@ -124,26 +116,6 @@ CREATE TABLE IF NOT EXISTS chat_messages (
     FOREIGN KEY (thread_id) REFERENCES chat_threads(id)
 );
 
-CREATE TABLE IF NOT EXISTS knowledge_bases (
-    id TEXT PRIMARY KEY,
-    user_id TEXT NOT NULL,
-    name TEXT NOT NULL,
-    path TEXT NOT NULL,
-    chunk_count INTEGER DEFAULT 0,
-    created_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS recipe_jobs (
-    id TEXT PRIMARY KEY,
-    user_id TEXT NOT NULL,
-    name TEXT NOT NULL,
-    status TEXT NOT NULL,
-    recipe_json TEXT NOT NULL,
-    output_path TEXT,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-);
-
 CREATE TABLE IF NOT EXISTS providers (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,
@@ -181,10 +153,8 @@ CREATE INDEX IF NOT EXISTS idx_distill_rl_jobs_user ON distill_rl_jobs(user_id);
 CREATE INDEX IF NOT EXISTS idx_distill_rl_jobs_user_created ON distill_rl_jobs(user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_rl_quant_jobs_user ON rl_quant_jobs(user_id);
 CREATE INDEX IF NOT EXISTS idx_rl_quant_jobs_user_created ON rl_quant_jobs(user_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_recipe_jobs_user ON recipe_jobs(user_id);
 CREATE INDEX IF NOT EXISTS idx_providers_user ON providers(user_id);
 CREATE INDEX IF NOT EXISTS idx_providers_user_created ON providers(user_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_knowledge_bases_user ON knowledge_bases(user_id);
 CREATE INDEX IF NOT EXISTS idx_job_events_job_sequence ON job_events(job_id, sequence ASC);
 CREATE INDEX IF NOT EXISTS idx_job_events_user_created ON job_events(user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_job_events_kind ON job_events(kind, job_id);
