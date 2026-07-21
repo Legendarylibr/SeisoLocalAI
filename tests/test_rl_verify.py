@@ -94,6 +94,7 @@ def test_score_completion_outcome_first():
         format_weight=0.1,
         process_weight=0.0,
         missing_format_penalty=0.5,
+        min_thinking_tokens=8,
     )
     # Prompt ended with open <think>; model only continues + closes.
     continued = score_completion(
@@ -105,6 +106,7 @@ def test_score_completion_outcome_first():
         format_weight=0.1,
         process_weight=0.0,
         missing_format_penalty=0.5,
+        min_thinking_tokens=8,
     )
     bad_format = score_completion(
         "42",
@@ -118,17 +120,68 @@ def test_score_completion_outcome_first():
     )
 
     assert good.passed is True
-    assert good.format_ok is True
-    assert good.reward == 1.1
+    # Short traces are not format_ok — penalty applies alongside soft format score.
+    assert good.format_ok is False
+    assert good.format_score == pytest.approx(1.0 / 8.0)
+    assert good.reward == pytest.approx(1.0 + 0.1 * (1.0 / 8.0) - 0.5)
+    assert good.detail == "thinking_format_incomplete"
     assert good.process_score == 0.0
     assert continued.passed is True
-    assert continued.format_ok is True
-    assert continued.reward == 1.1
+    assert continued.format_ok is False
+    assert continued.format_score == pytest.approx(2.0 / 8.0)
+    assert continued.reward == pytest.approx(1.0 + 0.1 * (2.0 / 8.0) - 0.5)
     assert continued.final_answer == "42"
     assert bad_format.passed is True
     assert bad_format.format_ok is False
     assert bad_format.reward == 0.5  # 1.0 outcome - 0.5 penalty
     assert bad_format.detail == "missing_closed_think_trace"
+
+    full = score_completion(
+        "<think>first compute carefully then verify the product again</think>\n42",
+        {"answer": "42"},
+        checker="numeric",
+        require_thinking_trace=True,
+        outcome_weight=1.0,
+        format_weight=0.1,
+        process_weight=0.0,
+        missing_format_penalty=0.5,
+        min_thinking_tokens=8,
+    )
+    assert full.format_ok is True
+    assert full.format_score == pytest.approx(1.0)
+    assert full.reward == pytest.approx(1.1)
+
+
+def test_empty_think_block_earns_no_format_bonus():
+    empty = score_completion(
+        "<think></think>42",
+        {"answer": "42"},
+        checker="numeric",
+        require_thinking_trace=True,
+        outcome_weight=1.0,
+        format_weight=0.1,
+        missing_format_penalty=0.25,
+        min_thinking_tokens=8,
+    )
+    assert empty.format_ok is False
+    assert empty.format_score == 0.0
+    assert empty.reward == pytest.approx(0.75)  # 1.0 - 0.25 penalty
+    assert empty.detail == "thinking_format_incomplete"
+
+    no_final = score_completion(
+        "<think>step one then step two then check verify</think>",
+        {"answer": "42"},
+        checker="numeric",
+        require_thinking_trace=True,
+        outcome_weight=1.0,
+        format_weight=0.1,
+        min_thinking_tokens=8,
+    )
+    assert no_final.format_ok is False
+    # 8 tokens → full length credit, then ×0.5 for missing final answer.
+    assert no_final.format_score == pytest.approx(0.5)
+    assert no_final.outcome == 0.0
+    assert no_final.detail == "thinking_format_incomplete"
 
 
 def test_score_completion_prefers_final_answer_even_without_thinking_requirement():

@@ -44,53 +44,49 @@ def generate_preference_rows(
 
     Verifiable prompts (non-empty ``answer`` and/or ``tests``) are never
     teacher≻student labeled — ``benchmark`` alone is not enough to score:
-    - ``verifiable_outcome_rewards=True`` → score student groups and keep pass/fail pairs
-    - ``verifiable_outcome_rewards=False`` → skip them (do not treat teacher as gold)
-    Teacher≻student applies only to non-verifiable prompts.
+    - ``verifiable_outcome_rewards=True`` → grounded pass/fail pairs only; open
+      prompts are skipped and empty results raise (no teacher≻student fallback)
+    - ``verifiable_outcome_rewards=False`` → skip verifiable prompts; teacher≻student
+      applies only to non-verifiable open prompts
     """
     verifiable_prompts = [prompt for prompt in prompts if is_verifiable_prompt(prompt)]
-    remaining_prompts = [
-        prompt for prompt in prompts if not is_verifiable_prompt(prompt)
-    ]
-    if verifiable_prompts:
-        outcome_rows: list[dict[str, Any]] = []
-        if verifiable_outcome_rewards:
-            outcome_rows = generate_outcome_preference_rows(
-                student_model=student_model,
-                prompts=verifiable_prompts,
-                max_new_tokens=max_new_tokens,
-                temperature=temperature,
-                seed=seed + 10_000,
-                use_chat_template=use_chat_template,
-                revision=student_revision,
-                trust_remote_code=trust_remote_code,
-                require_thinking_trace=require_thinking_trace,
-                thinking_instruction=thinking_instruction,
-                grpo_group_size=grpo_group_size,
+    open_prompts = [prompt for prompt in prompts if not is_verifiable_prompt(prompt)]
+
+    if verifiable_outcome_rewards:
+        if not verifiable_prompts:
+            raise ValueError(
+                "verifiable_outcome_rewards=true but no prompts have answers/tests; "
+                "refusing teacher≻student fallback. Provide grounded prompts or set "
+                "verifiable_outcome_rewards=false."
             )
-        if not remaining_prompts:
-            return outcome_rows
-        teacher_rows = generate_preference_rows(
-            teacher_model=teacher_model,
+        outcome_rows = generate_outcome_preference_rows(
             student_model=student_model,
-            prompts=remaining_prompts,
+            prompts=verifiable_prompts,
             max_new_tokens=max_new_tokens,
             temperature=temperature,
-            seed=seed,
+            seed=seed + 10_000,
             use_chat_template=use_chat_template,
-            teacher_revision=teacher_revision,
-            student_revision=student_revision,
+            revision=student_revision,
             trust_remote_code=trust_remote_code,
             require_thinking_trace=require_thinking_trace,
             thinking_instruction=thinking_instruction,
-            verifiable_outcome_rewards=False,
             grpo_group_size=grpo_group_size,
         )
-        return outcome_rows + teacher_rows
+        if not outcome_rows:
+            raise ValueError(
+                "verifiable_outcome_rewards=true produced no preference pairs from "
+                f"{len(verifiable_prompts)} verifiable prompt(s); need at least one "
+                "same-prompt group with both a pass and a fail."
+            )
+        return outcome_rows
+
+    # Style path: never treat verifiable golds as teacher≻student.
+    if not open_prompts:
+        return []
 
     teacher_outputs = generate_completions(
         teacher_model,
-        prompts,
+        open_prompts,
         max_new_tokens,
         temperature,
         seed=seed,
@@ -102,7 +98,7 @@ def generate_preference_rows(
     )
     student_outputs = generate_completions(
         student_model,
-        prompts,
+        open_prompts,
         max_new_tokens,
         temperature,
         seed=seed + 10_000,
@@ -114,12 +110,17 @@ def generate_preference_rows(
     )
     rows: list[dict[str, Any]] = []
     for prompt, chosen, rejected in zip(
-        prompts, teacher_outputs, student_outputs, strict=True
+        open_prompts, teacher_outputs, student_outputs, strict=True
     ):
         rows.append(
             {
                 "prompt_id": prompt.prompt_id,
-                "prompt": prompt.text,
+                # Match the string fed into chat-template generation (thinking prefix).
+                "prompt": _dpo_prompt_text(
+                    prompt,
+                    require_thinking_trace=require_thinking_trace,
+                    thinking_instruction=thinking_instruction,
+                ),
                 "chosen": chosen,
                 "rejected": rejected,
                 "generation_seed": _prompt_seed(seed, prompt.prompt_id),
@@ -190,7 +191,11 @@ def generate_outcome_preference_rows(
             rows.append(
                 preference_row_from_pair(
                     prompt_id=prompt.prompt_id,
-                    prompt=prompt.text,
+                    prompt=_dpo_prompt_text(
+                        prompt,
+                        require_thinking_trace=require_thinking_trace,
+                        thinking_instruction=thinking_instruction,
+                    ),
                     pair=pair,
                     sample=sample,
                     generation_seed=_prompt_seed(seed, prompt.prompt_id),
@@ -228,7 +233,11 @@ def generate_outcome_preference_rows(
         rows.append(
             preference_row_from_pair(
                 prompt_id=prompt.prompt_id,
-                prompt=prompt.text,
+                prompt=_dpo_prompt_text(
+                    prompt,
+                    require_thinking_trace=require_thinking_trace,
+                    thinking_instruction=thinking_instruction,
+                ),
                 pair=pair,
                 sample=sample,
                 generation_seed=_prompt_seed(seed, prompt.prompt_id),
@@ -238,6 +247,18 @@ def generate_outcome_preference_rows(
             )
         )
     return rows
+
+
+def _dpo_prompt_text(
+    prompt: RolloutPrompt,
+    *,
+    require_thinking_trace: bool,
+    thinking_instruction: str,
+) -> str:
+    """User content stored for DPO — must match generation before chat template."""
+    if require_thinking_trace:
+        return format_thinking_prompt(prompt.text, thinking_instruction)
+    return prompt.text
 
 
 def _prompt_seed(base_seed: int, prompt_id: str) -> int:

@@ -244,6 +244,9 @@ def _labels_last_assistant_turn(
     )
     if prompt_ids is None:
         return None
+    # Refuse inconsistent templates (same guard as multi-turn spans).
+    if len(prompt_ids) > len(full_ids) or prompt_ids != full_ids[: len(prompt_ids)]:
+        return None
     labels = _build_labels(full_ids, len(prompt_ids))
     if all(label == -100 for label in labels):
         return None
@@ -283,6 +286,10 @@ def _ensure_eos(
     if eos_id is None or not ids:
         return ids, labels, attention
     if ids[-1] == eos_id:
+        # Template may already end in EOS with assistant-mask ignore; still teach stop.
+        if labels[-1] == -100 and any(lab != -100 for lab in labels):
+            labels = list(labels)
+            labels[-1] = eos_id
         return ids, labels, attention
     if len(ids) < max_len:
         ids = ids + [eos_id]

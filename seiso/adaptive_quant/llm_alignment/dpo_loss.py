@@ -52,12 +52,16 @@ def get_batch_logps(
     ).squeeze(-1)
 
     per_token_logps = per_token_logps * loss_mask.to(per_token_logps.dtype)
-
+    token_counts = loss_mask.sum(dim=-1)
+    empty = token_counts == 0
     if average_log_prob:
-        token_counts = loss_mask.sum(dim=-1).clamp(min=1)
-        return per_token_logps.sum(dim=-1) / token_counts
-
-    return per_token_logps.sum(dim=-1)
+        summed = per_token_logps.sum(dim=-1) / token_counts.clamp(min=1)
+    else:
+        summed = per_token_logps.sum(dim=-1)
+    # Empty/over-truncated completions must not look like perfect (0) logps.
+    if bool(empty.any()):
+        summed = torch.where(empty, torch.full_like(summed, -1.0e4), summed)
+    return summed
 
 
 @dataclass

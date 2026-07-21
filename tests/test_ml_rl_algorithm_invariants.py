@@ -16,6 +16,52 @@ from seiso.slime.types import Rollout
 from seiso.training.config import TrainConfig, TrainMethod
 
 
+def test_dpo_empty_completion_logps_are_large_negative():
+    import torch
+
+    from seiso.adaptive_quant.llm_alignment.dpo_loss import get_batch_logps
+
+    # All labels masked → no completion tokens after causal shift.
+    logits = torch.zeros(2, 4, 5)
+    labels = torch.full((2, 4), -100)
+    logps = get_batch_logps(logits, labels, average_log_prob=False)
+    assert torch.all(logps == -1.0e4)
+
+
+def test_dpo_collator_joint_tokenizes_prompt_completion():
+    from seiso.adaptive_quant.llm_alignment.data_collator import DPODataCollator
+
+    class _Tok:
+        pad_token_id = 0
+        eos_token_id = 1
+
+        def __call__(self, text, add_special_tokens=True, truncation=True, max_length=64):
+            # Character-level encode so joint vs concat diverge on BPE-like merges.
+            ids = [ord(c) % 40 + 2 for c in str(text)]
+            if add_special_tokens:
+                ids = [1] + ids
+            return {"input_ids": ids[:max_length]}
+
+    collator = DPODataCollator(tokenizer=_Tok(), max_prompt_length=32, max_length=64)
+    encoded = collator._tokenize_pair("ab", "cd")
+    joint = _Tok()("abcd", add_special_tokens=True, truncation=True, max_length=64)[
+        "input_ids"
+    ]
+    assert encoded["input_ids"] == joint
+    assert encoded["prompt_length"] > 0
+    assert all(lab == -100 for lab in encoded["labels"][: encoded["prompt_length"]])
+    assert any(lab != -100 for lab in encoded["labels"][encoded["prompt_length"] :])
+
+
+def test_grounded_reward_source_includes_code():
+    from seiso.distill_rl.preferences import _is_grounded_reward_source
+
+    assert _is_grounded_reward_source("verifiable_outcome")
+    assert _is_grounded_reward_source("code_proof")
+    assert _is_grounded_reward_source("synthetic_code_v1")
+    assert not _is_grounded_reward_source("teacher_student")
+
+
 def test_kl_k3_non_negative_and_zero_at_identity():
     import torch
 
@@ -186,6 +232,56 @@ def test_auto_code_reward_promotes_to_binary_when_group_has_passer():
     assert mixed[1].outcome_reward == 1.0
     assert mixed[0].reward == 0.0
     assert mixed[1].reward == 1.0
+
+
+def test_auto_code_reward_skips_length_truncated_rollouts():
+    from seiso.slime.config import SingleGpuSlimeConfig
+    from seiso.slime.trainer import _finalize_auto_code_rewards
+    from seiso.slime.types import Rollout
+
+    cfg = SingleGpuSlimeConfig(
+        model_id="test/model",
+        dataset="unused.jsonl",
+        output_dir="unused",
+        code_reward_mode="auto",
+        rollouts_per_prompt=2,
+        outcome_reward_weight=1.0,
+        format_reward_weight=0.0,
+        process_reward_weight=0.0,
+        require_thinking_trace=False,
+    )
+    # Length "passer" must not flip the group to binary; sibling keeps dense score.
+    group = [
+        Rollout(
+            None,
+            None,
+            None,
+            None,
+            None,
+            0.0,
+            outcome_reward=0.0,
+            proof_score=1.0,
+            proof_passed=True,
+            status="length",
+        ),
+        Rollout(
+            None,
+            None,
+            None,
+            None,
+            None,
+            0.5,
+            outcome_reward=0.5,
+            proof_score=0.5,
+            proof_passed=False,
+            status="ok",
+        ),
+    ]
+    _finalize_auto_code_rewards(group, cfg)
+    assert group[0].reward == 0.0
+    assert group[0].outcome_reward == 0.0
+    assert group[1].outcome_reward == pytest.approx(0.5)
+    assert group[1].reward == pytest.approx(0.5)
 
 
 def test_slime_rejects_format_penalty_dominating_outcome(tmp_path):

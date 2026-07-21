@@ -365,3 +365,34 @@ def test_train_on_inputs_allows_string_fallback_without_chat_template():
         train_on_inputs=True,
     )
     assert tokenized[0]["labels"] == tokenized[0]["input_ids"]
+
+
+def test_labels_last_assistant_refuses_inconsistent_prefix():
+    from seiso.training.datasets import _labels_last_assistant_turn
+
+    class _InconsistentTok(_ChatTokenizer):
+        def apply_chat_template(self, messages, **kwargs):
+            # Full conversation gets normal ids; prompt-only gets a divergent prefix.
+            if kwargs.get("add_generation_prompt"):
+                return [7, 7, 7]
+            return super().apply_chat_template(messages, **kwargs)
+
+    messages = [
+        {"role": "user", "content": "hi"},
+        {"role": "assistant", "content": "yo"},
+    ]
+    tok = _InconsistentTok()
+    full_ids = tok.apply_chat_template(messages, tokenize=True)
+    assert _labels_last_assistant_turn(tok, messages, full_ids) is None
+
+
+def test_ensure_eos_supervises_template_eos_when_mask_ignored_it():
+    from seiso.training.datasets import _ensure_eos
+
+    ids = [1, 2, 99]
+    labels = [-100, 2, -100]
+    attention = [1, 1, 1]
+    out_ids, out_labels, _ = _ensure_eos(ids, labels, attention, 99, max_len=8)
+    assert out_ids == ids
+    assert out_labels[-1] == 99
+    assert out_labels[0] == -100

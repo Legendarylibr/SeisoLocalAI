@@ -139,8 +139,9 @@ class SingleGpuSlimeConfig:
         "Show your reasoning in <think>...</think>, then give the final answer."
     )
     outcome_reward_weight: float = 1.0
-    # Format is a small binary bonus for closed <think>...</think> on raw tokens.
-    # Prefer this over missing_thinking_penalty so correct answers are not punished.
+    # Format is a small soft bonus for closed <think>...</think> on raw tokens
+    # (scaled by min_thinking_tokens; empty traces earn ~0). Prefer this over
+    # missing_thinking_penalty so correct answers are not punished.
     format_reward_weight: float = 0.1
     # Lexical process shaping is experimental; leave at 0 for verifiable outcome-first RL.
     process_reward_weight: float = 0.0

@@ -21,6 +21,16 @@ from seiso.rl_verify.synth_code import synthesize_code_bundle
 logger = logging.getLogger(__name__)
 
 
+def _is_grounded_reward_source(source: object) -> bool:
+    """True when preference chosen/rejected came from a verifiable scorer."""
+    text = str(source or "")
+    return bool(
+        text.startswith("verifiable")
+        or text.startswith("code_")
+        or text.startswith("synthetic_code")
+    )
+
+
 @dataclass(frozen=True)
 class PreferenceBundle:
     train_path: Path
@@ -105,7 +115,7 @@ def build_preference_bundle(
         verifiable_n = sum(
             1
             for row in all_rows
-            if str(row.get("reward_source", "")).startswith("verifiable")
+            if _is_grounded_reward_source(row.get("reward_source"))
         )
         teacher_style_n = len(all_rows) - verifiable_n
         if teacher_style_n > verifiable_n:

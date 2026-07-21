@@ -701,6 +701,7 @@ def _collect_rollouts(
                     "outcome_passed": False,
                     "format_reward": 0.0,
                     "process_reward": 0.0,
+                    "thinking_penalty": 0.0,
                 }
             chunk_rollouts.append(
                 Rollout(
@@ -908,8 +909,14 @@ def _finalize_auto_code_rewards(
         code = [rollout for rollout in group if rollout.proof_score is not None]
         if not code:
             continue
-        use_binary = any(bool(rollout.proof_passed) for rollout in code)
+        # Length-truncated rows stay wiped; do not let them flip the group to binary.
+        use_binary = any(
+            bool(rollout.proof_passed) and rollout.status != "length" for rollout in code
+        )
         for rollout in code:
+            # Do not re-credit length-truncated rollouts after the scoring wipe.
+            if rollout.status == "length":
+                continue
             outcome = (
                 (1.0 if rollout.proof_passed else 0.0)
                 if use_binary
