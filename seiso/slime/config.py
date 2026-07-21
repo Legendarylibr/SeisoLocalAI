@@ -118,10 +118,14 @@ class SingleGpuSlimeConfig:
     # slime: --eps-clip / --eps-clip-high
     clip_ratio: float = 0.2
     clip_ratio_high: float | None = None
+    # OpenRLHF / verl / slime dual-clip for negative advantages (None disables).
+    clip_ratio_c: float | None = 3.0
     # slime: grpo_std_normalization (mean-center then / unbiased std)
     grpo_std_normalization: bool = True
     # Per-token importance ratios are length-stable vs exp(ΣΔlogπ) on full sequences.
     calculate_per_token_loss: bool = True
+    # DeepSeekMath seq-mean (default) vs global token-mean (length-biased).
+    loss_aggregation: str = "seq_mean"
     temperature: float = 0.9
     top_p: float = 0.95
     # Online generate: hf (colocated/on-policy, default) | sglang | vllm | auto.
@@ -367,6 +371,23 @@ class SingleGpuSlimeConfig:
                     "clip_ratio_high must be <= 2.0 (unbounded high clip disables "
                     "the trust region)"
                 )
+        if self.clip_ratio_c is not None and float(self.clip_ratio_c) <= 1.0:
+            raise ValueError(
+                "clip_ratio_c must be > 1.0 for dual-clip (OpenRLHF/verl), or None "
+                "to disable"
+            )
+        agg = str(self.loss_aggregation or "seq_mean").strip().lower()
+        if agg not in {"seq_mean", "token_mean"}:
+            raise ValueError("loss_aggregation must be 'seq_mean' or 'token_mean'")
+        object.__setattr__(self, "loss_aggregation", agg)
+        if (
+            self.policy_micro_batch_size % self.rollouts_per_prompt != 0
+            and not allow_tiny_rl()
+        ):
+            raise ValueError(
+                "policy_micro_batch_size must be a multiple of rollouts_per_prompt "
+                "so microbatches keep intact GRPO groups (CI: SEISO_ALLOW_TINY_RL=1)"
+            )
         if not self.thinking_instruction:
             raise ValueError("thinking_instruction must not be empty")
         if self.outcome_reward_weight <= 0:

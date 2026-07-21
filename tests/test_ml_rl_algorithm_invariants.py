@@ -16,7 +16,7 @@ from seiso.slime.types import Rollout
 from seiso.training.config import TrainConfig, TrainMethod
 
 
-def test_dpo_empty_completion_logps_are_large_negative():
+def test_dpo_empty_completion_logps_are_refused():
     import torch
 
     from seiso.adaptive_quant.llm_alignment.dpo_loss import get_batch_logps
@@ -24,7 +24,20 @@ def test_dpo_empty_completion_logps_are_large_negative():
     # All labels masked → no completion tokens after causal shift.
     logits = torch.zeros(2, 4, 5)
     labels = torch.full((2, 4), -100)
-    logps = get_batch_logps(logits, labels, average_log_prob=False)
+    with pytest.raises(ValueError, match="empty completion"):
+        get_batch_logps(logits, labels, average_log_prob=False)
+
+
+def test_dpo_empty_completion_sentinel_opt_in():
+    import torch
+
+    from seiso.adaptive_quant.llm_alignment.dpo_loss import get_batch_logps
+
+    logits = torch.zeros(2, 4, 5)
+    labels = torch.full((2, 4), -100)
+    logps = get_batch_logps(
+        logits, labels, average_log_prob=False, allow_empty_completions=True
+    )
     assert torch.all(logps == -1.0e2)
 
 
@@ -849,7 +862,7 @@ def test_clipped_policy_loss_respects_asymmetric_bounds():
     import torch
 
     advantages = torch.tensor([1.0])
-    # ratio = exp(2) ≈ 7.39 → clamped to 1 + high = 1.3
+    # log-ratio clamped to 20 before exp; here δ=2 → ratio≈7.39 → clip high 1.3
     loss = _clipped_policy_loss(
         torch.tensor([2.0]),
         torch.tensor([0.0]),
@@ -858,6 +871,163 @@ def test_clipped_policy_loss_respects_asymmetric_bounds():
         0.2,
         torch,
         clip_ratio_high=0.3,
+        clip_ratio_c=None,
     )
     expected = -min(math.exp(2.0), 1.3) * 1.0
     assert float(loss.item()) == pytest.approx(expected, rel=1e-5)
+
+
+def test_clipped_policy_loss_dual_clip_bounds_negative_advantage():
+    """OpenRLHF/verl dual-clip: large ratios with A<0 cannot unboundedly hurt."""
+    import torch
+
+    # ratio = exp(3) ≈ 20; A = -1 → unclipped = -20; PPO clip low gives -0.8;
+    # dual-clip c=3 → max(min(-20,-0.8), -3) = max(-0.8, -3) = -0.8
+    # Without dual-clip same; use ratio that exceeds c*|A| path:
+    # ratio=0.1 (decrease), A=-1 → unclipped=-0.1; clipped at 0.8 → -0.8;
+    # min(-0.1,-0.8)=-0.8; dual max(-0.8, -3)=-0.8
+    # Better case: ratio >> 1 with A<0: unclipped very negative.
+    new = torch.tensor([math.log(10.0)])
+    old = torch.zeros(1)
+    adv = torch.tensor([-1.0])
+    mask = torch.ones(1)
+    with_dual = _clipped_policy_loss(
+        new, old, adv, mask, 0.2, torch, clip_ratio_c=3.0
+    )
+    without = _clipped_policy_loss(
+        new, old, adv, mask, 0.2, torch, clip_ratio_c=None
+    )
+    # With dual-clip objective ≥ c*A = -3 → loss ≤ 3
+    assert float(with_dual.item()) == pytest.approx(3.0, rel=1e-5)
+    # Without dual-clip, min(10*(-1), 1.2*(-1)) = -1.2 → loss = 1.2
+    # Wait: clamp ratio to [0.8, 1.2], so clipped = -1.2, unclipped = -10,
+    # min(-10, -1.2) = -10 → loss = 10 without dual. With dual max(-10, -3) = -3 → loss 3.
+    assert float(without.item()) == pytest.approx(10.0, rel=1e-5)
+    assert float(with_dual.item()) < float(without.item())
+
+
+def test_clipped_policy_loss_seq_mean_equalizes_short_and_long():
+    import torch
+
+    # Same per-token objective; short (1 tok) vs long (4 tok) must match under seq_mean.
+    adv = torch.tensor([[1.0], [1.0]])
+    short_new = torch.tensor([[0.0]])
+    short_old = torch.zeros(1, 1)
+    short_mask = torch.ones(1, 1)
+    long_new = torch.zeros(1, 4)
+    long_old = torch.zeros(1, 4)
+    long_mask = torch.ones(1, 4)
+    # Batch them
+    new = torch.zeros(2, 4)
+    old = torch.zeros(2, 4)
+    mask = torch.zeros(2, 4)
+    mask[0, 0] = 1.0
+    mask[1, :] = 1.0
+    adv2 = torch.tensor([[1.0], [1.0]])
+    seq = _clipped_policy_loss(
+        new, old, adv2, mask, 0.2, torch, aggregation="seq_mean", clip_ratio_c=None
+    )
+    tok = _clipped_policy_loss(
+        new, old, adv2, mask, 0.2, torch, aggregation="token_mean", clip_ratio_c=None
+    )
+    # seq_mean: mean(1, 1) = 1 → loss -1; token_mean: 5/5 = 1 → also -1 here
+    # Differ when advantages differ:
+    adv_mixed = torch.tensor([[1.0], [3.0]])
+    seq_m = _clipped_policy_loss(
+        new, old, adv_mixed, mask, 0.2, torch, aggregation="seq_mean", clip_ratio_c=None
+    )
+    tok_m = _clipped_policy_loss(
+        new, old, adv_mixed, mask, 0.2, torch, aggregation="token_mean", clip_ratio_c=None
+    )
+    assert float(seq_m.item()) == pytest.approx(-2.0)  # mean(1,3)
+    assert float(tok_m.item()) == pytest.approx(-13.0 / 5.0)  # (1 + 3*4)/5
+    assert float(seq.item()) == pytest.approx(-1.0)
+    assert float(tok.item()) == pytest.approx(-1.0)
+    del short_new, short_old, short_mask, long_new, long_old, long_mask
+
+
+def test_length_status_excluded_from_group_advantage_baseline():
+    rollouts = [
+        Rollout(None, None, None, None, None, 0.0, status="length"),
+        Rollout(None, None, None, None, None, 2.0, status="ok"),
+        Rollout(None, None, None, None, None, 0.0, status="ok"),
+        Rollout(None, None, None, None, None, 4.0, status="ok"),
+    ]
+    # Group size 2: first group has only one valid → advantages 0
+    _assign_grouped_advantages(rollouts[:2], group_size=2, grpo_std_normalization=False)
+    assert rollouts[0].advantage == 0.0
+    assert rollouts[1].advantage == 0.0
+    # Second group: both ok, mean 2, centered -2 and +2
+    _assign_grouped_advantages(rollouts[2:], group_size=2, grpo_std_normalization=False)
+    assert rollouts[2].advantage == pytest.approx(-2.0)
+    assert rollouts[3].advantage == pytest.approx(2.0)
+
+
+def test_dpo_loss_identity_equals_log2():
+    import torch
+
+    from seiso.adaptive_quant.llm_alignment.dpo_loss import compute_dpo_loss
+
+    zeros = torch.zeros(4)
+    loss, metrics = compute_dpo_loss(zeros, zeros, zeros, zeros, beta=0.1)
+    assert float(loss.item()) == pytest.approx(math.log(2.0), rel=1e-5)
+    assert metrics.reward_margin == pytest.approx(0.0, abs=1e-6)
+
+
+def test_dpo_reward_margin_matches_beta_times_logits():
+    import torch
+
+    from seiso.adaptive_quant.llm_alignment.dpo_loss import compute_dpo_loss
+
+    pc = torch.tensor([1.0, 0.5])
+    pr = torch.tensor([0.0, 0.25])
+    rc = torch.tensor([0.5, 0.0])
+    rr = torch.tensor([0.25, 0.5])
+    beta = 0.2
+    loss, metrics = compute_dpo_loss(pc, pr, rc, rr, beta=beta)
+    logits = (pc - pr) - (rc - rr)
+    expected_margin = float((beta * logits).mean().item())
+    assert metrics.reward_margin == pytest.approx(expected_margin, rel=1e-5)
+    assert float(loss.item()) > 0.0
+
+
+def test_distill_rl_refuses_zero_temperature_and_tiny_grpo_group():
+    from seiso.distill_rl.config import DistillRLConfig
+
+    with pytest.raises(ValueError, match="rollout_temperature"):
+        DistillRLConfig.model_validate(
+            {
+                "job_id": "j1",
+                "user_id": "u1",
+                "teacher_model": "t",
+                "student_model": "s",
+                "output_root": "/tmp/d",
+                "preference_source": "teacher_style",
+                "rollout_temperature": 0.0,
+                "stages": ["dpo"],
+            }
+        )
+    with pytest.raises(ValueError, match="grpo_group_size"):
+        DistillRLConfig.model_validate(
+            {
+                "job_id": "j1",
+                "user_id": "u1",
+                "teacher_model": "t",
+                "student_model": "s",
+                "output_root": "/tmp/d",
+                "preference_source": "teacher_style",
+                "grpo_group_size": 1,
+                "stages": ["dpo"],
+            }
+        )
+
+
+def test_slime_defaults_dual_clip_and_seq_mean(tmp_path):
+    cfg = SingleGpuSlimeConfig(
+        model_id="test/model",
+        dataset=tmp_path / "data.jsonl",
+        output_dir=tmp_path / "out",
+    )
+    assert cfg.clip_ratio_c == pytest.approx(3.0)
+    assert cfg.loss_aggregation == "seq_mean"
+    cfg.validate()

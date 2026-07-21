@@ -211,6 +211,13 @@ class TrainConfig(BaseModel):
         gt=0,
         description="Upper PPO clip bound (slime eps_clip_high); None uses clip_ratio.",
     )
+    clip_ratio_c: float | None = Field(
+        default=3.0,
+        description=(
+            "Dual-clip constant for negative advantages (OpenRLHF/verl/slime); "
+            "None disables. Must be > 1 when set."
+        ),
+    )
     grpo_std_normalization: bool = Field(
         default=True,
         description="Group-relative / unbiased-std advantages (slime grpo_std_normalization).",
@@ -220,6 +227,12 @@ class TrainConfig(BaseModel):
         description=(
             "Slime GRPO: per-token clipped surrogate (length-stable). "
             "When false, sequence log-probs are length-normalized before the ratio."
+        ),
+    )
+    loss_aggregation: str = Field(
+        default="seq_mean",
+        description=(
+            "GRPO loss reduction: seq_mean (DeepSeekMath) or token_mean (length-biased)."
         ),
     )
     temperature: float = Field(default=0.9, gt=0)
@@ -568,7 +581,11 @@ class TrainConfig(BaseModel):
         from seiso.slime.config import SingleGpuSlimeConfig
 
         extra: dict[str, Any] = getattr(self, "extra", {})
-        policy_batch = self.policy_micro_batch_size or self.batch_size
+        # Keep GRPO groups intact in microbatches (OpenRLHF/verl practice).
+        # Do not fall back to batch_size=1 when rollouts_per_prompt > 1.
+        policy_batch = self.policy_micro_batch_size
+        if policy_batch is None:
+            policy_batch = int(self.rollouts_per_prompt)
         # slime: train target defaults to rollout_batch_size (prompts)
         train_batch = self.train_batch_size
         return SingleGpuSlimeConfig(
@@ -611,8 +628,10 @@ class TrainConfig(BaseModel):
             kl_coef=self.kl_coef,
             clip_ratio=self.clip_ratio,
             clip_ratio_high=self.clip_ratio_high,
+            clip_ratio_c=self.clip_ratio_c,
             grpo_std_normalization=self.grpo_std_normalization,
             calculate_per_token_loss=self.calculate_per_token_loss,
+            loss_aggregation=self.loss_aggregation,
             temperature=self.temperature,
             top_p=self.top_p,
             rollout_backend=self.rollout_backend,

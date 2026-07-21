@@ -703,6 +703,8 @@ def _collect_rollouts(
                     "process_reward": 0.0,
                     "thinking_penalty": 0.0,
                 }
+                # DAPO / OpenRLHF: no policy gradient on incomplete tokens.
+                response_mask = response_mask.new_zeros(response_mask.shape)
             chunk_rollouts.append(
                 Rollout(
                     input_ids=input_ids,

@@ -318,6 +318,8 @@ Important fields:
 | `rollout_backend` | `hf` (colocated generate) \| `sglang` \| `vllm` \| `auto` |
 | `dynamic_sampling_filter` | slime-style nonzero-std filter on **outcome** reward |
 | `clip_ratio` / `clip_ratio_high` | slime `eps_clip` / `eps_clip_high` |
+| `clip_ratio_c` | Dual-clip for negative advantages (OpenRLHF/verl; default `3.0`, `null` disables) |
+| `loss_aggregation` | `seq_mean` (DeepSeekMath default) or `token_mean` (length-biased) |
 | `grpo_std_normalization` | slime group mean/std advantages |
 | `calculate_per_token_loss` | Default `true` — per-token clipped surrogate (length-stable). When `false`, sequence log-probs are length-normalized before the importance ratio |
 | `outcome_reward_weight` / `format_reward_weight` / `process_reward_weight` | Outcome must dominate (`format + process ≤ outcome`); process stays `0` for verifiable outcome-first GRPO |

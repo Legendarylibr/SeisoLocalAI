@@ -55,6 +55,8 @@ def _policy_loss(
             config.clip_ratio,
             torch,
             clip_ratio_high=config.clip_ratio_high,
+            clip_ratio_c=config.clip_ratio_c,
+            aggregation=config.loss_aggregation,
         )
     else:
         # Length-normalize sequence log-probs before the importance ratio so
@@ -68,6 +70,8 @@ def _policy_loss(
             config.clip_ratio,
             torch,
             clip_ratio_high=config.clip_ratio_high,
+            clip_ratio_c=config.clip_ratio_c,
+            aggregation=config.loss_aggregation,
         )
 
     kl_loss = torch.zeros((), device=config.device)
@@ -221,18 +225,42 @@ def _clipped_policy_loss(
     torch,
     *,
     clip_ratio_high: float | None = None,
+    clip_ratio_c: float | None = 3.0,
+    aggregation: str = "seq_mean",
 ):
-    """PPO/GRPO clipped surrogate (slime ``compute_policy_loss`` without dual-clip-c).
+    """PPO/GRPO clipped surrogate (DeepSeek / slime / OpenRLHF dual-clip).
 
     ``clip_ratio`` / ``clip_ratio_high`` map to slime ``eps_clip`` / ``eps_clip_high``.
-    When ``clip_ratio_high`` is None, the high bound equals the low bound.
+    ``clip_ratio_c`` (>1) is OpenRLHF/verl dual-clip for negative advantages.
+    ``aggregation``:
+      * ``seq_mean`` — DeepSeekMath: mean over sequences of (masked token mean)
+      * ``token_mean`` — global masked token mean (length-biased)
     """
     high = clip_ratio if clip_ratio_high is None else clip_ratio_high
-    ratio = torch.exp(new_logprobs - old_logprobs)
+    # Clamp log-ratio before exp (verl/OpenRLHF) to avoid IS overflow.
+    log_ratio = (new_logprobs - old_logprobs).clamp(-20.0, 20.0)
+    ratio = torch.exp(log_ratio)
     unclipped = ratio * advantages
     clipped = torch.clamp(ratio, 1.0 - clip_ratio, 1.0 + high) * advantages
     objective = torch.minimum(unclipped, clipped)
-    return -((objective * mask).sum() / mask.sum().clamp_min(1.0))
+    if clip_ratio_c is not None and float(clip_ratio_c) > 1.0:
+        dual = float(clip_ratio_c) * advantages
+        objective = torch.where(advantages < 0, torch.maximum(objective, dual), objective)
+
+    mode = str(aggregation or "seq_mean").strip().lower()
+    if mode == "token_mean":
+        return -((objective * mask).sum() / mask.sum().clamp_min(1.0))
+    if mode != "seq_mean":
+        raise ValueError("aggregation must be 'seq_mean' or 'token_mean'")
+    # DeepSeek GRPO: (1/G) Σ_i (1/|o_i|) Σ_t L_{i,t}
+    if mask.ndim == 1:
+        return -(objective * mask).sum() / mask.sum().clamp_min(1.0)
+    token_counts = mask.sum(dim=-1).clamp_min(1.0)
+    per_seq = (objective * mask).sum(dim=-1) / token_counts
+    valid = mask.sum(dim=-1) > 0
+    if bool(valid.any()):
+        return -per_seq[valid].mean()
+    return -per_seq.mean()
 
 
 def _pad_rollout_token_logprobs(
@@ -282,6 +310,9 @@ def _pad_rollouts(rollouts: list[Rollout], pad_token_id: int, device: str, torch
     }
 
 
+_INVALID_ADVANTAGE_STATUS = frozenset({"length", "empty"})
+
+
 def _assign_grouped_advantages(
     rollouts: list[Rollout],
     group_size: int,
@@ -292,6 +323,9 @@ def _assign_grouped_advantages(
 
     For each prompt group: subtract the group mean, then optionally divide by
     unbiased sample std + 1e-6 (slime ``grpo_std_normalization`` / Dr.GRPO toggle).
+
+    Truncated/empty rollouts (DAPO / OpenRLHF overlong practice) are excluded from
+    the baseline and receive advantage 0 so wiped zeros cannot pull the group mean.
 
     Incomplete trailing groups are invalid (advantages would not be mean-zero over
     a full sample set) and raise ``ValueError``.
@@ -305,7 +339,12 @@ def _assign_grouped_advantages(
         )
     for start in range(0, len(rollouts), group_size):
         group = rollouts[start : start + group_size]
-        rewards = [float(r.reward) for r in group]
+        valid = [r for r in group if r.status not in _INVALID_ADVANTAGE_STATUS]
+        if len(valid) < 2:
+            for rollout in group:
+                rollout.advantage = 0.0
+            continue
+        rewards = [float(r.reward) for r in valid]
         n = len(rewards)
         mean = sum(rewards) / n
         centered = [reward - mean for reward in rewards]
@@ -314,11 +353,17 @@ def _assign_grouped_advantages(
             variance = sum(value * value for value in centered) / (n - 1)
             std = math.sqrt(variance)
             scale = std + 1e-6
-            for rollout, value in zip(group, centered, strict=True):
-                rollout.advantage = value / scale
+            adv_by_id = {
+                id(rollout): value / scale
+                for rollout, value in zip(valid, centered, strict=True)
+            }
         else:
-            for rollout, value in zip(group, centered, strict=True):
-                rollout.advantage = value
+            adv_by_id = {
+                id(rollout): value
+                for rollout, value in zip(valid, centered, strict=True)
+            }
+        for rollout in group:
+            rollout.advantage = float(adv_by_id.get(id(rollout), 0.0))
 
 
 def _filter_rollout_groups(
