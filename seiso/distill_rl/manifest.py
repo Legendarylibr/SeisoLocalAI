@@ -12,7 +12,7 @@ from seiso.distill_rl.config import DistillRLConfig
 
 
 def pipeline_fingerprint(config: DistillRLConfig) -> dict[str, Any]:
-    return config.model_dump(mode="json")
+    return cast(dict[str, Any], config.model_dump(mode="json"))
 
 
 def init_run_manifest(config: DistillRLConfig) -> dict[str, Any]:

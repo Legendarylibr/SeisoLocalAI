@@ -7,7 +7,7 @@ import os
 from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import yaml
 from pydantic import AliasChoices, BaseModel, Field, field_validator, model_validator
@@ -554,7 +554,7 @@ class TrainConfig(BaseModel):
                 data[dest] = data.pop(src)
             elif src in data:
                 data.pop(src)
-        return cls.model_validate(data)
+        return cast("TrainConfig", cls.model_validate(data))
 
     def to_single_gpu_slime_config(self):
         """Project a general training config into the release-grade slime runner."""

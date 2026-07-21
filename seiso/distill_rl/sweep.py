@@ -9,7 +9,7 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from seiso.distill_rl.config import DistillRLConfig
 
@@ -62,7 +62,7 @@ def auto_sweep_enabled(payload: dict[str, Any]) -> bool:
         return False
     if payload.get("auto_sweep") is True or payload.get("sweep") is True:
         return True
-    return payload.get("auto_sweep", True)
+    return bool(payload.get("auto_sweep", True))
 
 
 def default_sweep_grid(payload: dict[str, Any]) -> dict[str, tuple[Any, ...]]:
@@ -119,7 +119,7 @@ def apply_best_sweep_overrides(
         return config
     data = config.model_dump()
     data.update(best_overrides)
-    return DistillRLConfig.model_validate(data)
+    return cast(DistillRLConfig, DistillRLConfig.model_validate(data))
 
 
 def extract_metric(payload: dict[str, Any], objective: str) -> float | None:

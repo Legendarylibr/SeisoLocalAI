@@ -826,7 +826,7 @@ def _collect_rollouts(
             rollout.ref_token_logprobs = (
                 ref_token_logprobs[idx, :token_length] if ref_token_logprobs is not None else None
             )
-        if verifier_records:
+        if verifier_records and verifier_path is not None:
             _append_jsonl_records(verifier_path, verifier_records)
         rollouts.extend(kept_rollouts)
         del gen, padded

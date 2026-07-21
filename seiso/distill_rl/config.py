@@ -572,7 +572,7 @@ def build_distill_rl_config(
                 "Show your reasoning in <think>...</think>, then give the final answer.",
             )
         ),
-        preference_source=preference_source,  # type: ignore[arg-type]
+        preference_source=preference_source,
         data_gen_count=data_gen_count,
         prompt_library_path=prompt_path,
         dataset_ref=(
