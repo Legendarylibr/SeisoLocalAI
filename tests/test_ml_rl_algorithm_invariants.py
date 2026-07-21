@@ -909,29 +909,20 @@ def test_clipped_policy_loss_dual_clip_bounds_negative_advantage():
 def test_clipped_policy_loss_seq_mean_equalizes_short_and_long():
     import torch
 
-    # Same per-token objective; short (1 tok) vs long (4 tok) must match under seq_mean.
-    adv = torch.tensor([[1.0], [1.0]])
-    short_new = torch.tensor([[0.0]])
-    short_old = torch.zeros(1, 1)
-    short_mask = torch.ones(1, 1)
-    long_new = torch.zeros(1, 4)
-    long_old = torch.zeros(1, 4)
-    long_mask = torch.ones(1, 4)
-    # Batch them
+    # Short (1 tok) vs long (4 tok) in one batch; seq_mean vs token_mean diverge
+    # when per-sequence advantages differ.
     new = torch.zeros(2, 4)
     old = torch.zeros(2, 4)
     mask = torch.zeros(2, 4)
     mask[0, 0] = 1.0
     mask[1, :] = 1.0
-    adv2 = torch.tensor([[1.0], [1.0]])
+    adv_equal = torch.tensor([[1.0], [1.0]])
     seq = _clipped_policy_loss(
-        new, old, adv2, mask, 0.2, torch, aggregation="seq_mean", clip_ratio_c=None
+        new, old, adv_equal, mask, 0.2, torch, aggregation="seq_mean", clip_ratio_c=None
     )
     tok = _clipped_policy_loss(
-        new, old, adv2, mask, 0.2, torch, aggregation="token_mean", clip_ratio_c=None
+        new, old, adv_equal, mask, 0.2, torch, aggregation="token_mean", clip_ratio_c=None
     )
-    # seq_mean: mean(1, 1) = 1 → loss -1; token_mean: 5/5 = 1 → also -1 here
-    # Differ when advantages differ:
     adv_mixed = torch.tensor([[1.0], [3.0]])
     seq_m = _clipped_policy_loss(
         new, old, adv_mixed, mask, 0.2, torch, aggregation="seq_mean", clip_ratio_c=None
@@ -943,7 +934,6 @@ def test_clipped_policy_loss_seq_mean_equalizes_short_and_long():
     assert float(tok_m.item()) == pytest.approx(-13.0 / 5.0)  # (1 + 3*4)/5
     assert float(seq.item()) == pytest.approx(-1.0)
     assert float(tok.item()) == pytest.approx(-1.0)
-    del short_new, short_old, short_mask, long_new, long_old, long_mask
 
 
 def test_length_status_excluded_from_group_advantage_baseline():
