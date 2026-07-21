@@ -301,7 +301,8 @@ Important fields:
 | `max_vram_gb` | Upper VRAM cap used to fail before out-of-memory conditions |
 | `prompt_field`, `answer_field` | Dataset columns for prompts and target answers |
 | `metadata_field` | Optional upstream-style metadata column, default `metadata`; JSON strings are parsed and carried into reward samples and bounded verifier records |
-| `reward` | Verifier checker: `exact_match`, `numeric`, `choice`, `contains_answer`, `field`, `code` (1.0 only if all unit tests pass), or `auto` |
+| `reward` | Verifier checker: `exact_match`, `numeric`, `choice`, `contains_answer`, `field`, `code`, or `auto` |
+| `code_reward_mode` | Code GRPO outcome: `binary` (default, all tests pass), `dense` (pass fraction), or `auto` (dense until a group has a full passer) |
 | `reward_field` | Dataset reward column when `reward: field` |
 | `require_thinking_trace` | When true, rollout prompts may end with open `<think>`. Format is OK if the **generation** closes thinking: either a full `<think>...</think>` block or a continuation that only emits `</think>` then the answer |
 | `outcome_reward_weight` | Weight for hard outcome (correctness) from the shared verifier |
@@ -337,9 +338,10 @@ Important fields:
 
 Use `reward: code` with dataset rows that include unit tests. The shared verifier
 extracts Python from the completion (fenced blocks preferred) and runs tests in a
-restricted subprocess (`seiso.codellama_compress.code_exec`). **Outcome / GRPO
-reward is binary: 1.0 only when all unit tests pass** (partial pass fraction is
-logged as `proof_score` for diagnostics / hard-negative ranking only).
+restricted subprocess (`seiso.codellama_compress.code_exec`). **Default GRPO outcome (`code_reward_mode: binary`) is 1.0 only when all unit
+tests pass.** Use `dense` for pass-fraction credit, or `auto` for dense signal
+until a same-prompt group gets a full passer (then binary). Pass fraction is
+always logged as `proof_score` for diagnostics / hard-negative ranking.
 
 Example config: `configs/example_slime_code.yaml` with `data/slime_code_sample.jsonl`.
 

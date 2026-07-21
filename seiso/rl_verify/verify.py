@@ -230,6 +230,46 @@ def experimental_process_reward(
     return min(1.0, score)
 
 
+def resolve_code_reward_mode(mode: str | None) -> str:
+    """Normalize code reward mode: ``binary`` (default), ``dense``, or ``auto``."""
+    key = (mode or "binary").strip().lower()
+    aliases = {
+        "binary": "binary",
+        "all_pass": "binary",
+        "pass": "binary",
+        "dense": "dense",
+        "fraction": "dense",
+        "pass_fraction": "dense",
+        "auto": "auto",
+        "curriculum": "auto",
+    }
+    if key not in aliases:
+        raise ValueError(
+            f"unknown code_reward_mode {mode!r}; expected one of: "
+            "binary, dense, auto"
+        )
+    return aliases[key]
+
+
+def code_outcome_value(
+    *,
+    proof_passed: bool,
+    proof_score: float,
+    mode: str = "binary",
+) -> float:
+    """Map a code proof to a GRPO outcome under ``code_reward_mode``.
+
+    - ``binary``: 1.0 iff all tests pass (correctness default)
+    - ``dense``: pass fraction in [0, 1] (early-training signal)
+    - ``auto``: provisional dense; callers should promote to binary once a
+      same-prompt group contains any full pass
+    """
+    resolved = resolve_code_reward_mode(mode)
+    if resolved == "dense" or resolved == "auto":
+        return float(proof_score)
+    return 1.0 if proof_passed else 0.0
+
+
 def score_completion(
     completion: str,
     sample: dict[str, Any],
@@ -241,10 +281,12 @@ def score_completion(
     process_weight: float = 0.0,
     missing_format_penalty: float = 0.0,
     min_thinking_tokens: int = 8,
+    code_reward_mode: str = "binary",
 ) -> VerifierResult:
     """Combine outcome + format (+ optional experimental process) into one decision.
 
     ``completion`` must be the model-generated string — do not prepend synthetic tags.
+    For code, ``code_reward_mode`` selects binary / dense / auto outcome mapping.
     """
     thinking_trace, final_answer, has_closed = split_thinking_trace(completion)
     format_ok, format_score = format_reward(
@@ -273,14 +315,18 @@ def score_completion(
         from seiso.rl_verify.code_proof import verify_code_proof
 
         proof = verify_code_proof(completion, sample)
-        # GRPO / outcome: all unit tests must pass. Keep pass-fraction on
-        # proof_score for logs and preference hard-negative ranking.
-        outcome = 1.0 if proof.passed else 0.0
-        used_checker = "code"
-        extracted = proof.extracted_code
         proof_passed = proof.passed
         proof_score = float(proof.score)
         proof_detail = proof.detail
+        # Keep pass-fraction on proof_score for logs / hard negatives.
+        # Outcome follows code_reward_mode (default binary = all tests pass).
+        outcome = code_outcome_value(
+            proof_passed=bool(proof_passed),
+            proof_score=float(proof_score),
+            mode=code_reward_mode,
+        )
+        used_checker = "code"
+        extracted = proof.extracted_code
     else:
         outcome, used_checker, extracted = verify_outcome(
             completion,

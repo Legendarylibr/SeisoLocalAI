@@ -43,9 +43,11 @@ from seiso.rl_verify.synth_code import (
 )
 from seiso.rl_verify.verify import (
     VerifierResult,
+    code_outcome_value,
     format_reward,
     outcome_reward,
     resolve_checker,
+    resolve_code_reward_mode,
     score_completion,
     verify_outcome,
 )
@@ -58,6 +60,7 @@ __all__ = [
     "SynthBundle",
     "VerifierResult",
     "build_preference",
+    "code_outcome_value",
     "corpus_stats",
     "emit_standard_artifacts",
     "extract_choice",
@@ -73,6 +76,7 @@ __all__ = [
     "outcome_reward",
     "preference_row_from_pair",
     "resolve_checker",
+    "resolve_code_reward_mode",
     "score_code_completion",
     "score_completion",
     "select_preference_pair",

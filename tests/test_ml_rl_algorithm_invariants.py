@@ -133,6 +133,61 @@ def test_slime_rejects_zero_outcome_weight(tmp_path):
         cfg.validate()
 
 
+def test_slime_code_reward_mode_defaults_binary_and_rejects_unknown(tmp_path):
+    cfg = SingleGpuSlimeConfig(
+        model_id="test/model",
+        dataset=tmp_path / "data.jsonl",
+        output_dir=tmp_path / "out",
+    )
+    assert cfg.code_reward_mode == "binary"
+    cfg.validate()
+
+    bad = SingleGpuSlimeConfig(
+        model_id="test/model",
+        dataset=tmp_path / "data.jsonl",
+        output_dir=tmp_path / "out",
+        code_reward_mode="soft",
+    )
+    with pytest.raises(ValueError, match="code_reward_mode"):
+        bad.validate()
+
+
+def test_auto_code_reward_promotes_to_binary_when_group_has_passer():
+    from seiso.slime.config import SingleGpuSlimeConfig
+    from seiso.slime.trainer import _finalize_auto_code_rewards
+    from seiso.slime.types import Rollout
+
+    cfg = SingleGpuSlimeConfig(
+        model_id="test/model",
+        dataset="unused.jsonl",
+        output_dir="unused",
+        code_reward_mode="auto",
+        rollouts_per_prompt=2,
+        outcome_reward_weight=1.0,
+        format_reward_weight=0.0,
+        process_reward_weight=0.0,
+        require_thinking_trace=False,
+    )
+    # No full passer yet → keep dense.
+    dense_group = [
+        Rollout(None, None, None, None, None, 0.5, outcome_reward=0.5, proof_score=0.5, proof_passed=False),
+        Rollout(None, None, None, None, None, 0.0, outcome_reward=0.0, proof_score=0.0, proof_passed=False),
+    ]
+    _finalize_auto_code_rewards(dense_group, cfg)
+    assert dense_group[0].outcome_reward == pytest.approx(0.5)
+
+    # Full passer present → binary for the whole group.
+    mixed = [
+        Rollout(None, None, None, None, None, 0.5, outcome_reward=0.5, proof_score=0.5, proof_passed=False),
+        Rollout(None, None, None, None, None, 1.0, outcome_reward=1.0, proof_score=1.0, proof_passed=True),
+    ]
+    _finalize_auto_code_rewards(mixed, cfg)
+    assert mixed[0].outcome_reward == 0.0
+    assert mixed[1].outcome_reward == 1.0
+    assert mixed[0].reward == 0.0
+    assert mixed[1].reward == 1.0
+
+
 def test_slime_rejects_format_penalty_dominating_outcome(tmp_path):
     cfg = SingleGpuSlimeConfig(
         model_id="test/model",

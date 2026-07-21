@@ -141,6 +141,9 @@ class SingleGpuSlimeConfig:
     # Optional subtractive push for missing think tags. Default 0 — use the format
     # bonus alone; set a modest value (e.g. 0.2) only if format compliance stalls.
     missing_thinking_penalty: float = 0.0
+    # Code GRPO outcome: binary (all tests pass, default) | dense (pass fraction)
+    # | auto (dense until a same-prompt group has a full passer, then binary).
+    code_reward_mode: str = "binary"
     min_thinking_tokens: int = 8
     seed: int = 17
     dtype: str = "auto"
@@ -273,6 +276,16 @@ class SingleGpuSlimeConfig:
             )
         if self.missing_thinking_penalty < 0:
             raise ValueError("missing_thinking_penalty must be non-negative")
+        from seiso.rl_verify.verify import resolve_code_reward_mode
+
+        try:
+            object.__setattr__(
+                self,
+                "code_reward_mode",
+                resolve_code_reward_mode(self.code_reward_mode),
+            )
+        except ValueError as exc:
+            raise ValueError(str(exc)) from exc
         # Correct-unformatted reward is outcome - penalty; wrong-formatted is at
         # most format + process. Require outcome - penalty >= format + process
         # (equivalently penalty <= outcome - shaping) so ranking cannot invert.

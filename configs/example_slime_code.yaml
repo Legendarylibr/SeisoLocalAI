@@ -7,6 +7,9 @@ output_dir: outputs/slime-code
 prompt_field: prompt
 answer_field: answer
 reward: code
+# binary = all unit tests must pass (default). dense = pass fraction.
+# auto = dense until a same-prompt group has a full passer, then binary.
+code_reward_mode: binary
 max_vram_gb: 16
 max_prompt_tokens: 512
 max_new_tokens: 256

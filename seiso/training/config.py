@@ -274,6 +274,13 @@ class TrainConfig(BaseModel):
             "missing. Prefer format_reward_weight for shaping; keep 0 by default."
         ),
     )
+    code_reward_mode: str = Field(
+        default="binary",
+        description=(
+            "Code GRPO outcome mapping: binary (all unit tests pass, default), "
+            "dense (pass fraction), or auto (dense until a group has a full passer)."
+        ),
+    )
     min_thinking_tokens: int = Field(default=8, ge=0)
     dtype: str = "auto"
     device: str = "cuda"
@@ -436,6 +443,16 @@ class TrainConfig(BaseModel):
                     "correct-but-unformatted completions are not outranked by "
                     "wrong-but-formatted ones"
                 )
+        from seiso.rl_verify.verify import resolve_code_reward_mode
+
+        try:
+            object.__setattr__(
+                self,
+                "code_reward_mode",
+                resolve_code_reward_mode(self.code_reward_mode),
+            )
+        except ValueError as exc:
+            raise ValueError(str(exc)) from exc
         return self
 
     @classmethod
@@ -530,6 +547,7 @@ class TrainConfig(BaseModel):
             format_reward_weight=self.format_reward_weight,
             process_reward_weight=self.process_reward_weight,
             missing_thinking_penalty=self.missing_thinking_penalty,
+            code_reward_mode=self.code_reward_mode,
             min_thinking_tokens=self.min_thinking_tokens,
             seed=self.seed,
             dtype=self.dtype,
@@ -634,6 +652,7 @@ def _write_slime_manifest(config: TrainConfig, output_dir: Path) -> None:
         "format_reward_weight": config.format_reward_weight,
         "process_reward_weight": config.process_reward_weight,
         "missing_thinking_penalty": config.missing_thinking_penalty,
+        "code_reward_mode": config.code_reward_mode,
         "min_thinking_tokens": config.min_thinking_tokens,
         "rollouts_per_prompt": config.rollouts_per_prompt,
         "over_sampling_batch_size": config.over_sampling_batch_size,
