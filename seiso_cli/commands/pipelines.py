@@ -194,7 +194,7 @@ def distill_rl_run(
             "Grounded sources require outcome rewards (default). "
             "Use --teacher-preferences only with preference_source=teacher_style."
         ),
-    )
+    ),
     grpo_group_size: int = typer.Option(
         4,
         help="Number of sampled reasoning traces per verifiable prompt.",

@@ -66,13 +66,30 @@ def test_build_distill_rl_config_reproducible_seeds(tmp_path: Path):
         payload={
             "preset": "reproducible",
             "config_file": "distill_rl_reproducible.json",
-            "hf_dataset": str(fixture),
-            "SEISO_ALLOW_TINY_RL": "1",  # ignored; use env in other tests
+            "dataset_ref": str(fixture),
         },
     )
     assert cfg.preset == "reproducible"
-    assert cfg.preference_source == "hf_dataset"
+    assert cfg.preference_source == "dataset"
     assert cfg.teacher_revision == "main"
+
+
+def test_build_distill_rl_config_legacy_hf_dataset_aliases(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("SEISO_ALLOW_TINY_RL", "1")
+    fixture = Path("data/distill_verifiable_prompts.jsonl").resolve()
+    cfg = build_distill_rl_config(
+        job_id="job-legacy",
+        user_id="user-1",
+        data_dir=tmp_path,
+        payload={
+            "preset": "reproducible",
+            "preference_source": "hf_dataset",
+            "hf_dataset": str(fixture),
+            "data_gen_count": 8,
+        },
+    )
+    assert cfg.preference_source == "dataset"
+    assert cfg.dataset_ref == str(fixture)
 
 
 def test_validate_stage_sequence_rejects_out_of_order():

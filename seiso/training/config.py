@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import AliasChoices, BaseModel, Field, field_validator, model_validator
 
 from seiso.compat import StrEnum
 
@@ -226,7 +226,7 @@ class TrainConfig(BaseModel):
     top_p: float = Field(default=0.95, gt=0, le=1)
     rollout_backend: str = Field(
         default="hf",
-        description="slime online generate: hf | sglang | vllm | auto (data_gen aliases hf)",
+        description="slime online generate: hf | sglang | vllm | auto",
     )
     apply_chat_template: bool = True
     sglang_base_url: str = ""
@@ -311,7 +311,7 @@ class TrainConfig(BaseModel):
     write_verifier_data: bool = True
     verifier_data_file: str = Field(default="slime_verifier_data.jsonl", min_length=1)
     verifier_max_text_chars: int = Field(default=2048, ge=0)
-    # High-level verifiable prompt generation (see seiso.rl_verify.data_gen).
+    # Opt-in grounded corpus materialize (dataset / data_designer).
     data_gen: bool = False
     data_gen_count: int = Field(default=0, ge=0)
     data_gen_seed: int = 0
@@ -320,11 +320,12 @@ class TrainConfig(BaseModel):
     data_gen_filename: str = "slime_generated.jsonl"
     data_gen_source: str = Field(
         default="off",
-        description="Synth source: off | hf_dataset | data_designer | auto",
+        description="Materialize source: off | dataset | data_designer | auto",
     )
-    hf_dataset: str | None = Field(
+    dataset_ref: str | None = Field(
         default=None,
-        description="HF hub id / path when data_gen_source=hf_dataset",
+        validation_alias=AliasChoices("dataset_ref", "hf_dataset"),
+        description="HF hub id / path when data_gen_source=dataset",
     )
     dataset_split: str = "train"
     data_designer: str = Field(
@@ -349,7 +350,10 @@ class TrainConfig(BaseModel):
             return "auto"
         if value is False:
             return "off"
-        return str(value if value is not None else "off")
+        text = str(value if value is not None else "off")
+        if text.strip().lower() == "hf_dataset":
+            return "dataset"
+        return text
     require_held_out_eval: bool = Field(
         default=True,
         description="Require disjoint eval_dataset for product slime runs",
@@ -661,7 +665,7 @@ class TrainConfig(BaseModel):
             data_gen_difficulty=self.data_gen_difficulty,
             data_gen_filename=self.data_gen_filename,
             data_gen_source=self.data_gen_source,
-            hf_dataset=self.hf_dataset,
+            dataset_ref=self.dataset_ref,
             dataset_split=self.dataset_split,
             data_designer=self.data_designer,
             require_held_out_eval=self.require_held_out_eval,

@@ -168,17 +168,16 @@ all groups, and training ends with `no_trainable_groups`.
 
 Product slime defaults are **operator/HF verifiable JSONL** plus a frozen
 `eval_dataset` (`data_gen` / `data_gen_source` / `data_designer` default **off**).
-Opt-in synth materializes `output_dir/slime_generated.jsonl` via
-`data_gen: true` + `data_gen_source: hf_dataset|data_designer` (Data Designer
+Opt-in **materialize** writes `output_dir/slime_generated.jsonl` via
+`data_gen: true` + `data_gen_source: dataset|data_designer` (Data Designer
 needs `pip install -e '.[data-designer]'` and a live OpenAI-compatible endpoint —
-no silent localhost). The legacy `python -m seiso.rl_verify.data_gen` CLI remains
-for offline experiments only.
+no silent localhost). There is no local toy arithmetic/choice corpus generator.
 
 | Field | Meaning |
 |-------|---------|
 | `data_gen` | Opt-in: materialize a grounded corpus before the first rollout |
-| `data_gen_source` | `off` (default) \| `hf_dataset` \| `data_designer` \| `auto` |
-| `data_gen_count` | Prompt count when synth is on (prefer **≥256**; 1k–10k+ for real runs) |
+| `data_gen_source` | `off` (default) \| `dataset` \| `data_designer` \| `auto` |
+| `data_gen_count` | Prompt count when materialize is on (prefer **≥256**; 1k–10k+ for real runs) |
 | `data_gen_mix` | Stream mix for Data Designer: `numeric` / `choice` (code via HF/JSONL) |
 | `data_gen_difficulty` | `easy` / `medium` / `hard` weights |
 | `data_gen_seed` | Deterministic seed (same seed ⇒ same corpus) |
@@ -233,12 +232,12 @@ scripts/run_slime_vllm_ddp.sh 2 configs/example_training_slime_vllm.yaml
 vLLM must read `output_dir/vllm_weight_sync/` (shared FS on multi-node).  
 Managed multi-GPU: set `SEISO_MANAGED_VLLM_ENABLED=true` and `SEISO_MANAGED_VLLM_ENABLE_LORA=true`, then point `vllm_base_url` at the managed server (or leave empty to adopt a running managed endpoint).
 
-**Data (RLVR):** default is operator/HF verifiable JSONL + a **frozen** `eval_dataset` (OpenR1-style). Floors (`>=256`) are anti-toy gates; real GRPO runs want ≫1k–10k+. Suggested Hub starting points (map `answer` / verify fields): [`open-r1/OpenR1-Math-220k`](https://huggingface.co/datasets/open-r1/OpenR1-Math-220k), code sets with unit tests. Opt-in synth only: `data_gen: true` + `data_gen_source: hf_dataset|data_designer` (DD needs `pip install -e '.[data-designer]'` + a live `vllm_base_url` — not auto-started). Tiny `data/slime_*.jsonl` files are **CI fixtures**.
+**Data (RLVR):** default is operator/HF verifiable JSONL + a **frozen** `eval_dataset` (OpenR1-style). Floors (`>=256`) are anti-toy gates; real GRPO runs want ≫1k–10k+. Suggested Hub starting points (map `answer` / verify fields): [`open-r1/OpenR1-Math-220k`](https://huggingface.co/datasets/open-r1/OpenR1-Math-220k), code sets with unit tests. Opt-in materialize: `data_gen: true` + `data_gen_source: dataset|data_designer` (DD needs `pip install -e '.[data-designer]'` + a live `vllm_base_url` — not auto-started). Tiny `data/slime_*.jsonl` files are **CI fixtures** only.
 
 | Field | Meaning |
 |-------|---------|
-| `data_gen_source` | `off` (default) \| `hf_dataset` \| `data_designer` \| `auto` |
-| `hf_dataset` | Hub id / path when materializing via prep |
+| `data_gen_source` | `off` (default) \| `dataset` \| `data_designer` \| `auto` |
+| `dataset_ref` | Hub id / path when materializing via prep |
 | `data_designer` | `off` (default) \| `on` (opt-in) \| `auto` |
 | `eval_dataset` | Frozen held-out verifiable JSONL (must ≠ `dataset`; preferred over auto-split) |
 | `vllm_tensor_parallel` | Optional TP hint when `WORLD_SIZE=1` but vLLM uses multiple GPUs |
@@ -295,7 +294,7 @@ Important fields:
 | `over_sampling_batch_size` | slime oversample; when set under filtering must be **≥ `rollout_batch_size`** (prompts) |
 | `answer_field` | slime `--label-key` (default `label`; also accepts `answer`) |
 | `apply_chat_template` | slime `--apply-chat-template` (default true) |
-| `rollout_backend` | `hf` (colocated generate) \| `sglang` \| `vllm` \| `auto` (`data_gen` is an alias of `hf`) |
+| `rollout_backend` | `hf` (colocated generate) \| `sglang` \| `vllm` \| `auto` |
 | `dynamic_sampling_filter` | slime-style nonzero-std filter on **outcome** reward |
 | `clip_ratio` / `clip_ratio_high` | slime `eps_clip` / `eps_clip_high` |
 | `grpo_std_normalization` | slime group mean/std advantages |
@@ -374,8 +373,8 @@ Pairs with no pass in the group are dropped. This is appropriate for **offline
 preference** learning; online slime GRPO already demotes fails via group rewards
 and does not need a separate hard-negative loss.
 
-For Distill-RL, default `preference_source=hf_dataset` (curated verifiable Hub
-set + prep). Optional `data_designer` synth needs the package + endpoint.
+For Distill-RL, default `preference_source=dataset` (curated verifiable Hub
+set + prep). Optional `data_designer` materialize needs the package + endpoint.
 Operator JSONL: `grounded_library` (`>=256` verifiable rows). Tiny checked-in
 JSONLs under `data/` are CI fixtures only (`preset=smoke` / `SEISO_ALLOW_TINY_RL=1`).
 

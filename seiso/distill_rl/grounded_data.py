@@ -61,16 +61,16 @@ def _grounded_fingerprint(config: DistillRLConfig) -> dict[str, Any]:
         if config.prompt_library_path is not None
         else None
     )
-    hf_ref = (config.hf_dataset or "").strip() or None
-    hf_identity: dict[str, Any] | str | None
-    if hf_ref and Path(hf_ref).expanduser().exists():
-        hf_identity = _local_path_identity(hf_ref)
+    ref = (config.dataset_ref or "").strip() or None
+    dataset_identity: dict[str, Any] | str | None
+    if ref and Path(ref).expanduser().exists():
+        dataset_identity = _local_path_identity(ref)
     else:
-        hf_identity = hf_ref
+        dataset_identity = ref
     tiny = allow_tiny_rl(preset=config.preset)
     return {
         "preference_source": source,
-        "hf_dataset": hf_identity,
+        "dataset_ref": dataset_identity,
         "prompt_library": lib,
         "data_gen_count": int(config.data_gen_count),
         "seed": int(config.seed),
@@ -167,17 +167,17 @@ def materialize_distill_grounded_prompts(
             min_verifiable=1 if tiny else None,
             allow_tiny=tiny,
         )
-    elif source == "hf_dataset":
-        ref = config.hf_dataset or (
+    elif source == "dataset":
+        ref = config.dataset_ref or (
             str(config.prompt_library_path) if config.prompt_library_path else None
         )
         if not ref:
             raise ValueError(
-                "preference_source=hf_dataset requires hf_dataset or prompt_library "
+                "preference_source=dataset requires dataset_ref or prompt_library "
                 "(HF hub id or local path)"
             )
         req = SynthRequest(
-            source="hf_dataset",
+            source="dataset",
             count=max(1, int(config.data_gen_count)),
             seed=int(config.seed),
             dataset_ref=ref,

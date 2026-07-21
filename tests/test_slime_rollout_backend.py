@@ -38,9 +38,10 @@ def test_default_backend_is_hf(tmp_path: Path):
     cfg.validate()
 
 
-def test_data_gen_alias_maps_to_hf(tmp_path: Path):
+def test_data_gen_alias_raises(tmp_path: Path):
     cfg = _cfg(tmp_path, rollout_backend="data_gen")
-    assert resolve_rollout_backend(cfg, world_size=1) == "hf"
+    with pytest.raises(ValueError, match="rollout_backend=data_gen"):
+        resolve_rollout_backend(cfg, world_size=1)
 
 
 def test_auto_uses_sglang_only_when_url_and_multi_process(tmp_path: Path):

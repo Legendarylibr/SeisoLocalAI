@@ -3,7 +3,7 @@
 Uses `data-designer` (https://github.com/NVIDIA-NeMo/DataDesigner) with a local
 OpenAI-compatible endpoint (typically vLLM) as the model provider.
 
-Opt-in synth path only (``data_gen_source=data_designer`` / ``data_designer=on``).
+Opt-in materialize path only (``data_gen_source=data_designer`` / ``data_designer=on``).
 Numeric/choice streams are authored via Data Designer + local LLM.
 Code training rows belong in HF/operator corpora — not ``code_corpus`` padding.
 """
@@ -184,7 +184,7 @@ def build_data_designer_columns(
     if code_w > 0:
         logger.warning(
             "data_designer mix includes code=%.3f; redistributing to numeric/choice "
-            "(code training data must come from hf_dataset / operator JSONL)",
+            "(code training data must come from dataset / operator JSONL)",
             code_w,
         )
         if llm_streams:
@@ -402,7 +402,7 @@ def generate_with_data_designer(cfg: DataDesignerGenConfig) -> DataGenResult:
         raise RuntimeError(
             f"Data Designer produced {len(rows)}/{cfg.count} usable verifiable rows "
             "(no code_corpus padding). Check the endpoint/model or lower count; "
-            "for code RL use hf_dataset / operator JSONL with unit tests."
+            "for code RL use dataset / operator JSONL with unit tests."
         )
     rows = rows[: cfg.count]
 

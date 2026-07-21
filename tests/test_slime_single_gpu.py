@@ -117,10 +117,10 @@ def test_example_single_gpu_slime_config_loads_samples():
     assert cfg.use_lora is True
     assert cfg.lora_r == 16
     assert cfg.reward == "auto"
-    assert cfg.answer_field == "label"
+    assert cfg.answer_field == "answer"
     assert cfg.rollout_backend == "hf"
-    assert cfg.data_gen is True
-    assert cfg.data_gen_count >= 200
+    assert cfg.data_gen is False
+    assert cfg.data_gen_source == "off"
     assert cfg.process_reward_weight == 0.0
     assert len(samples) >= 16
     assert "prompt" in samples[0]

@@ -23,13 +23,13 @@ def load_rollout_prompts(path: Path | None, *, limit: int) -> list[RolloutPrompt
     """Return prompt records from an explicit JSON/JSONL library.
 
     Distill-RL no longer falls back to the open post-train chat library (no
-    answers/tests). Pass a grounded path, or use ``preference_source=hf_dataset`` /
+    answers/tests). Pass a grounded path, or use ``preference_source=dataset`` /
     ``data_designer``.
     """
     if path is None:
         raise ValueError(
             "prompt_library path is required for grounded_library / teacher_style. "
-            "For meaningful Distill-RL defaults use preference_source=hf_dataset "
+            "For meaningful Distill-RL defaults use preference_source=dataset "
             "(curated verifiable Hub set), optional data_designer, or a JSON/JSONL "
             "with answer and/or tests."
         )

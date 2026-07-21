@@ -1526,24 +1526,28 @@ def _maybe_materialize_data_gen(
     """Build a verifiable prompt corpus when high-level data_gen is requested.
 
     Product sources (only when ``data_gen`` / ``data_gen_count`` is enabled):
-    * ``data_gen_source=hf_dataset`` (+ ``hf_dataset`` / hub id)
+    * ``data_gen_source=dataset`` (+ ``dataset_ref`` / hub id)
     * ``data_gen_source=data_designer`` (package + real endpoint; no localhost)
 
-    ``data_gen_source=auto`` selects ``hf_dataset`` when ``hf_dataset`` is set,
+    ``data_gen_source=auto`` selects ``dataset`` when ``dataset_ref`` is set,
     else Data Designer only when ``data_designer=on``; otherwise fails loud.
-    ``off`` / ``none`` never select a synth source.
-    Setting ``hf_dataset`` alone does not rewrite ``dataset``.
+    ``off`` / ``none`` never select a materialize source.
+    Setting ``dataset_ref`` alone does not rewrite ``dataset``.
     """
     enabled = bool(config.data_gen or config.data_gen_count > 0)
     if not enabled:
         return config
 
-    hf_ref = (getattr(config, "hf_dataset", None) or "").strip() or None
-    source = str(getattr(config, "data_gen_source", "off") or "off").lower().strip()
+    from seiso.slime.config import _normalize_data_gen_source
+
+    ref = (getattr(config, "dataset_ref", None) or "").strip() or None
+    source = _normalize_data_gen_source(
+        str(getattr(config, "data_gen_source", "off") or "off")
+    )
     if source in {"off", "none"}:
         raise RuntimeError(
             "data_gen is enabled but data_gen_source is off. Set "
-            "data_gen_source=hf_dataset|data_designer|auto, or disable data_gen "
+            "data_gen_source=dataset|data_designer|auto, or disable data_gen "
             "and point dataset at a grounded JSONL."
         )
 
@@ -1567,20 +1571,20 @@ def _maybe_materialize_data_gen(
 
         mode = normalize_data_designer_mode(getattr(config, "data_designer", "auto"))
         use_dd = should_use_data_designer(config, world_size=dist_ctx.world_size)
-        # Explicit hf_dataset source, or auto + hf_dataset ref (not hf_ref alone
+        # Explicit dataset source, or auto + dataset_ref (not ref alone
         # without data_gen — gated by enabled above).
-        want_hf = source == "hf_dataset" or (
-            source in {"auto", ""} and bool(hf_ref)
+        want_dataset = source == "dataset" or (
+            source in {"auto", ""} and bool(ref)
         )
         want_dd = source == "data_designer" or (
-            source in {"auto", ""} and not want_hf and use_dd
+            source in {"auto", ""} and not want_dataset and use_dd
         )
 
-        if want_hf:
-            ref = hf_ref or str(config.dataset)
-            if Path(ref).expanduser().is_file() and not hf_ref:
+        if want_dataset:
+            dataset_ref = ref or str(config.dataset)
+            if Path(dataset_ref).expanduser().is_file() and not ref:
                 raise RuntimeError(
-                    "data_gen_source=hf_dataset requires hf_dataset (HF hub id) "
+                    "data_gen_source=dataset requires dataset_ref (HF hub id) "
                     "or a non-file dataset ref; local JSONL should be set as "
                     "dataset without data_gen."
                 )
@@ -1594,14 +1598,14 @@ def _maybe_materialize_data_gen(
             result = materialize_grounded_corpus(
                 out_path,
                 SynthRequest(
-                    source="hf_dataset",
+                    source="dataset",
                     count=count,
                     seed=int(
                         config.data_gen_seed
                         if config.data_gen_seed is not None
                         else config.seed
                     ),
-                    dataset_ref=ref,
+                    dataset_ref=dataset_ref,
                     split=str(getattr(config, "dataset_split", "train") or "train"),
                     prompt_field=hf_prompt_field,
                     answer_field=hf_answer_field,
@@ -1614,20 +1618,20 @@ def _maybe_materialize_data_gen(
                 ),
             )
             summary = result.summary()
-            generator = "seiso.rl_verify.synth_materialize.hf_dataset"
+            generator = "seiso.rl_verify.synth_materialize.dataset"
         elif want_dd:
             if mode == "off":
                 raise RuntimeError(
                     "data_gen_source=data_designer but data_designer=off. Set "
                     "data_designer=on|auto with a vLLM/OpenAI endpoint, or use "
-                    "data_gen_source=hf_dataset / an operator JSONL dataset."
+                    "data_gen_source=dataset / an operator JSONL dataset."
                 )
             if not data_designer_available():
                 raise RuntimeError(
                     "data_gen_source=data_designer requires NVIDIA NeMo Data Designer. "
                     "Install with: pip install -e '.[data-designer]', set "
                     "vllm_base_url (no silent localhost), or use "
-                    "data_gen_source=hf_dataset / grounded dataset JSONL."
+                    "data_gen_source=dataset / grounded dataset JSONL."
                 )
             endpoint = resolve_endpoint(
                 resolve_vllm_base_url(config),
@@ -1649,8 +1653,8 @@ def _maybe_materialize_data_gen(
             generator = "nvidia.nemo.data_designer"
         else:
             raise RuntimeError(
-                "data_gen is enabled but no real synth source is available. "
-                "Set data_gen_source=hf_dataset (with hf_dataset=...) or "
+                "data_gen is enabled but no materialize source is available. "
+                "Set data_gen_source=dataset (with dataset_ref=...) or "
                 "data_gen_source=data_designer (pip install -e '.[data-designer]' "
                 "+ endpoint), or disable data_gen and point dataset at a grounded "
                 "JSONL with answer/tests."

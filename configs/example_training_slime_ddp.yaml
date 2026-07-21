@@ -79,7 +79,7 @@ verifier_max_text_chars: 2048
 data_gen: false
 data_gen_source: "off"
 data_designer: "off"
-# Opt-in: data_gen_source=hf_dataset|data_designer (explicit; DD needs a live endpoint).
+# Opt-in: data_gen_source=dataset|data_designer (explicit; DD needs a live endpoint).
 multi_gpu: true
 distributed_strategy: ddp
 distributed_nproc_per_node: null

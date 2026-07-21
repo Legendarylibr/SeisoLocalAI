@@ -200,3 +200,28 @@ def test_train_config_rejects_slime_oversample_below_rollout_batch(tmp_path):
                 "dynamic_sampling_filter": "reward_nonzero_std",
             }
         )
+
+
+def test_train_config_accepts_legacy_hf_dataset_field_alias(tmp_path: Path):
+    cfg = TrainConfig.model_validate(
+        {
+            "model_id": "test/model",
+            "dataset": tmp_path / "slime.jsonl",
+            "output_dir": tmp_path / "out",
+            "method": "slime",
+            "hf_dataset": "org/math",
+            "data_gen_source": "hf_dataset",
+        }
+    )
+    assert cfg.dataset_ref == "org/math"
+    assert cfg.data_gen_source == "dataset"
+    slime = cfg.to_single_gpu_slime_config()
+    assert slime.dataset_ref == "org/math"
+    assert slime.data_gen_source == "dataset"
+
+
+def test_materialize_source_hf_dataset_alias(tmp_path: Path):
+    from seiso.rl_verify.synth_materialize import normalize_materialize_source
+
+    assert normalize_materialize_source("hf_dataset") == "dataset"
+    assert normalize_materialize_source("dataset") == "dataset"

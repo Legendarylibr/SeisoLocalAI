@@ -73,13 +73,13 @@ class DistillRLStartRequest(BaseModel):
     sweep_config: str | None = None
 
 
-def _assert_local_hf_dataset(data_dir, user_id: str, config: dict[str, Any]) -> None:
-    """Sandbox local ``hf_dataset`` refs (Hub ids are left alone)."""
-    hf_ref = config.get("hf_dataset")
-    if not hf_ref or not is_local_filesystem_path(hf_ref):
+def _assert_local_dataset_ref(data_dir, user_id: str, config: dict[str, Any]) -> None:
+    """Sandbox local ``dataset_ref`` refs (Hub ids are left alone)."""
+    ref = config.get("dataset_ref") or config.get("hf_dataset")
+    if not ref or not is_local_filesystem_path(ref):
         return
     try:
-        assert_user_path(data_dir, user_id, hf_ref)
+        assert_user_path(data_dir, user_id, ref)
     except SecurityError as exc:
         raise_forbidden(exc)
 
@@ -112,7 +112,7 @@ async def _prepare_distill_rl_config(
         path_keys=_DISTILL_PATH_KEYS,
     )
     # Merge file contents before further path checks so config_file cannot
-    # smuggle a cross-tenant hf_dataset / prompt_library past the gate.
+    # smuggle a cross-tenant dataset_ref / prompt_library past the gate.
     config = merge_distill_rl_payload(config)
     validate_pipeline_paths(
         settings.data_dir,
@@ -120,7 +120,7 @@ async def _prepare_distill_rl_config(
         config,
         path_keys=_DISTILL_PATH_KEYS,
     )
-    _assert_local_hf_dataset(settings.data_dir, user_id, config)
+    _assert_local_dataset_ref(settings.data_dir, user_id, config)
 
     return config
 

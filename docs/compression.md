@@ -132,7 +132,7 @@ aggregation.
 
 Product preference sources (`preference_source`) — RLVR-aligned:
 
-1. **`hf_dataset` (research default).** Curated Hub/local set via Seiso training
+1. **`dataset` (research default).** Curated Hub/local set via Seiso training
    prep; keep rows with `answer` and/or `tests`; floors reproducible `>=256`,
    full `>=2048` (real runs want ≫1k–10k+). Prefer OpenR1-style sets such as
    `open-r1/OpenR1-Math-220k` (map answer fields) or code corpora with unit tests.
@@ -147,8 +147,8 @@ Product preference sources (`preference_source`) — RLVR-aligned:
    style bootstrap, **not** outcome RL. Forces `verifiable_outcome_rewards=false`.
 
 `verifiable_outcome_rewards` is derived from `preference_source`: grounded sources
-(`hf_dataset` / `data_designer` / `grounded_library`) require it `true`; setting
-`false` there is an error. Local `hf_dataset` paths must sit under the user tree
+(`dataset` / `data_designer` / `grounded_library`) require it `true`; setting
+`false` there is an error. Local `dataset_ref` paths must sit under the user tree
 (`uploads/<user_id>/…` or other scoped roots).
 
 CI `preset=smoke` uses fixture `data/distill_verifiable_prompts.jsonl` (not a
@@ -166,8 +166,8 @@ GSM8K/GPQA/AIME accuracy and the jump versus the baseline checkpoint.
 | Preset | Default models | Purpose |
 |--------|----------------|---------|
 | `smoke` | `openai-community/gpt2` | CI fixture only (`grounded_library` + tiny allow) |
-| `reproducible` | `openai-community/gpt2` | Multi-seed; `hf_dataset` + `data_gen_count>=256` |
-| `full` | CodeLlama 13B → 7B | Production-scale; `hf_dataset` + `>=2048` |
+| `reproducible` | `openai-community/gpt2` | Multi-seed; `dataset` + `data_gen_count>=256` |
+| `full` | CodeLlama 13B → 7B | Production-scale; `dataset` + `>=2048` |
 
 Stages: `distill`, `rollout`, `dpo`, `evaluate`.
 

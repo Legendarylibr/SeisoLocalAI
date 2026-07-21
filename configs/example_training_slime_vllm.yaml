@@ -87,6 +87,6 @@ verifier_max_text_chars: 2048
 data_gen: false
 data_gen_source: "off"
 data_designer: "off"
-# Opt-in synth: data_gen_source=hf_dataset|data_designer (DD needs package + live endpoint).
+# Opt-in synth: data_gen_source=dataset|data_designer (DD needs package + live endpoint).
 # Optional TP size hint when training is single-process but vLLM uses multi-GPU:
 # vllm_tensor_parallel: 2

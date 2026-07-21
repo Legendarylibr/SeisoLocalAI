@@ -2,7 +2,7 @@
 
 Product sources (RLVR-aligned; no silent localhost / toy generators):
 
-* ``hf_dataset`` — HF hub / local via training loaders + prep → verifiable JSONL
+* ``dataset`` — HF hub / local via training loaders + prep → verifiable JSONL
 * ``data_designer`` — NVIDIA NeMo Data Designer (package + endpoint required)
 * ``grounded_library`` — already-normalized local JSON/JSONL
 
@@ -29,11 +29,19 @@ logger = logging.getLogger(__name__)
 # Product / Distill-RL / slime materialize sources.
 SYNTH_SOURCES = (
     "data_designer",
-    "hf_dataset",
+    "dataset",
     "grounded_library",
 )
 
-SynthSource = Literal["data_designer", "hf_dataset", "grounded_library"]
+SynthSource = Literal["data_designer", "dataset", "grounded_library"]
+
+
+def normalize_materialize_source(source: str) -> str:
+    """Normalize product materialize source names (legacy ``hf_dataset`` → ``dataset``)."""
+    key = str(source or "").strip().lower()
+    if key == "hf_dataset":
+        return "dataset"
+    return key
 
 GROUNDED_FLOOR_DEFAULT = 256
 GROUNDED_FLOOR_SMOKE = 32
@@ -55,7 +63,7 @@ class SynthRequest:
         "Show your reasoning in <think>...</think>, then give the final answer."
     )
     artifact_dir: Path | None = None
-    # hf_dataset / grounded_library
+    # dataset / grounded_library
     dataset_ref: str | Path | None = None
     split: str = "train"
     prompt_field: str | None = None
@@ -125,11 +133,11 @@ def materialize_grounded_corpus(
     write: bool = True,
 ) -> SynthResult:
     """Materialize a grounded corpus and optionally write JSONL to ``out_path``."""
-    source = str(request.source).strip().lower()
+    source = normalize_materialize_source(str(request.source))
     if source in {"code_corpus", "synthetic_code"}:
         raise ValueError(
             f"source={source!r} is not a product training path (toy programmatic "
-            "generator). Use hf_dataset, data_designer, or grounded_library. "
+            "generator). Use dataset, data_designer, or grounded_library. "
             "CI fixtures: preference_source=grounded_library + SEISO_ALLOW_TINY_RL=1."
         )
     if source not in SYNTH_SOURCES:
@@ -138,8 +146,8 @@ def materialize_grounded_corpus(
         )
     if source == "data_designer":
         result = _from_data_designer(request)
-    elif source == "hf_dataset":
-        result = _from_hf_dataset(request)
+    elif source == "dataset":
+        result = _from_dataset(request)
     else:
         result = _from_grounded_library(request)
 
@@ -197,7 +205,7 @@ def _from_data_designer(request: SynthRequest) -> SynthResult:
         raise RuntimeError(
             "source=data_designer requires NVIDIA NeMo Data Designer. "
             "Install with: pip install -e '.[data-designer]'. "
-            "Or use source=hf_dataset or grounded_library."
+            "Or use source=dataset or grounded_library."
         )
     endpoint = resolve_endpoint(request.endpoint)
     if not endpoint:
@@ -270,7 +278,7 @@ def _from_grounded_library(request: SynthRequest) -> SynthResult:
     )
 
 
-def _from_hf_dataset(request: SynthRequest) -> SynthResult:
+def _from_dataset(request: SynthRequest) -> SynthResult:
     from seiso.models.hf_env import configure_hf_hub_auth
     from seiso.training.config import DatasetFormat
     from seiso.training.datasets import load_training_dataset
@@ -278,7 +286,7 @@ def _from_hf_dataset(request: SynthRequest) -> SynthResult:
 
     if request.dataset_ref is None or not str(request.dataset_ref).strip():
         raise ValueError(
-            "source=hf_dataset requires dataset_ref (HF hub id or local path)"
+            "source=dataset requires dataset_ref (HF hub id or local path)"
         )
     ref = str(request.dataset_ref).strip()
     local = Path(ref).expanduser()
@@ -345,7 +353,7 @@ def _from_hf_dataset(request: SynthRequest) -> SynthResult:
 
     if not rows and preference_only > 0 and preference_only == scanned:
         raise ValueError(
-            f"source=hf_dataset ref={request.dataset_ref!r} looks like a "
+            f"source=dataset ref={request.dataset_ref!r} looks like a "
             f"preference-only corpus ({preference_only} chosen/rejected rows without "
             f"answer/tests after scanning {scanned}). Outcome RL needs verifiable "
             "labels; use a math/code Hub set, or preference_source=teacher_style "
@@ -355,7 +363,7 @@ def _from_hf_dataset(request: SynthRequest) -> SynthResult:
         drop_rate = dropped / float(scanned)
         if drop_rate >= 0.5:
             logger.warning(
-                "hf_dataset %s dropped %.0f%% of scanned rows (%s/%s) lacking "
+                "dataset %s dropped %.0f%% of scanned rows (%s/%s) lacking "
                 "answer/tests; check field mapping or use a verifiable corpus",
                 request.dataset_ref,
                 100.0 * drop_rate,
@@ -365,7 +373,7 @@ def _from_hf_dataset(request: SynthRequest) -> SynthResult:
 
     return SynthResult(
         rows=rows,
-        source="hf_dataset",
+        source="dataset",
         stream_counts=_stream_counts(rows),
         meta={
             "dataset_ref": str(request.dataset_ref),
@@ -444,8 +452,8 @@ def _map_sample_to_slime_row(
         "benchmark": rm_type,
         "stream": rm_type,
         "task_id": str(sample.get("id") or sample.get("prompt_id") or f"hf_{index}"),
-        "source_name": "hf_dataset",
-        "generator": "seiso.rl_verify.synth_materialize.hf_dataset",
+        "source_name": "dataset",
+        "generator": "seiso.rl_verify.synth_materialize.dataset",
         "dataset_format": getattr(fmt, "value", str(fmt)),
     }
     if has_tests:

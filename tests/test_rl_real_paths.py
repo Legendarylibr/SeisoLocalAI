@@ -151,7 +151,7 @@ def test_hf_dataset_prep_keeps_verifiable_only(tmp_path: Path, monkeypatch):
     result = materialize_grounded_corpus(
         tmp_path / "out.jsonl",
         SynthRequest(
-            source="hf_dataset",
+            source="dataset",
             dataset_ref="local/fake",
             count=10,
             allow_tiny=True,
@@ -176,7 +176,7 @@ def test_distill_smoke_uses_fixture_grounded_library(tmp_path: Path):
 
 
 def test_distill_reproducible_requires_hf_dataset(tmp_path: Path):
-    with pytest.raises(ValueError, match="hf_dataset"):
+    with pytest.raises(ValueError, match="dataset_ref"):
         build_distill_rl_config(
             job_id="job-repro",
             user_id="user-1",
@@ -277,7 +277,7 @@ def test_slime_hf_dataset_alone_does_not_rewrite_dataset(tmp_path: Path):
         model_id="m",
         dataset=train,
         output_dir=tmp_path / "out",
-        hf_dataset="some/hub-id",
+        dataset_ref="some/hub-id",
         data_gen=False,
         require_held_out_eval=False,
         rollouts_per_prompt=2,
@@ -299,7 +299,7 @@ def test_slime_hf_dataset_alone_does_not_skip_held_out_gate(
         model_id="m",
         dataset=train,
         output_dir=tmp_path / "out",
-        hf_dataset="org/ds",
+        dataset_ref="org/ds",
         data_gen=False,
         require_held_out_eval=True,
         rollouts_per_prompt=2,
@@ -366,7 +366,7 @@ def test_distill_rollout_min_grounded_honors_allow_tiny_env(
         data_dir=tmp_path,
         payload={
             "preset": "reproducible",
-            "hf_dataset": str(fixture),
+            "dataset_ref": str(fixture),
             "data_gen_count": 8,
             "stages": ["rollout"],
             "distilled_path": str(distilled),
@@ -432,7 +432,7 @@ def test_hf_dataset_rejects_preference_only_corpus(tmp_path: Path, monkeypatch):
         materialize_grounded_corpus(
             tmp_path / "out.jsonl",
             SynthRequest(
-                source="hf_dataset",
+                source="dataset",
                 dataset_ref="local/prefs",
                 count=10,
                 allow_tiny=True,
@@ -464,7 +464,7 @@ def test_hf_dataset_scans_past_preference_head(tmp_path: Path, monkeypatch):
     result = materialize_grounded_corpus(
         tmp_path / "out.jsonl",
         SynthRequest(
-            source="hf_dataset",
+            source="dataset",
             dataset_ref="org/mixed-prefs-then-math",
             count=1,
             allow_tiny=True,
@@ -504,7 +504,7 @@ def test_hf_auth_skipped_for_local_path(tmp_path: Path, monkeypatch):
     result = materialize_grounded_corpus(
         tmp_path / "out.jsonl",
         SynthRequest(
-            source="hf_dataset",
+            source="dataset",
             dataset_ref=str(local),
             count=1,
             allow_tiny=True,
@@ -540,7 +540,7 @@ def test_hf_auth_called_for_hub_id(tmp_path: Path, monkeypatch):
     result = materialize_grounded_corpus(
         tmp_path / "out.jsonl",
         SynthRequest(
-            source="hf_dataset",
+            source="dataset",
             dataset_ref="org/public-math",
             count=1,
             allow_tiny=True,
@@ -568,8 +568,8 @@ def test_slime_held_out_split_keeps_train_floor(tmp_path: Path, monkeypatch):
         output_dir=tmp_path / "run",
         data_gen=True,
         data_gen_count=256,
-        data_gen_source="hf_dataset",
-        hf_dataset="org/math",
+        data_gen_source="dataset",
+        dataset_ref="org/math",
         data_gen_filename="gen.jsonl",
         require_held_out_eval=True,
         rollouts_per_prompt=2,
@@ -594,7 +594,7 @@ def test_slime_held_out_split_keeps_train_floor(tmp_path: Path, monkeypatch):
             "".join(json.dumps(r) + "\n" for r in rows),
             encoding="utf-8",
         )
-        return SynthResult(rows=rows, source="hf_dataset", path=out_path)
+        return SynthResult(rows=rows, source="dataset", path=out_path)
 
     with (
         patch(
@@ -628,8 +628,8 @@ def test_slime_does_not_attach_stale_held_out(tmp_path: Path, monkeypatch):
         output_dir=run,
         data_gen=True,
         data_gen_count=8,
-        data_gen_source="hf_dataset",
-        hf_dataset="org/math",
+        data_gen_source="dataset",
+        dataset_ref="org/math",
         data_gen_filename="gen.jsonl",
         require_held_out_eval=False,
         rollouts_per_prompt=2,
@@ -654,7 +654,7 @@ def test_slime_does_not_attach_stale_held_out(tmp_path: Path, monkeypatch):
             "".join(json.dumps(r) + "\n" for r in rows),
             encoding="utf-8",
         )
-        return SynthResult(rows=rows, source="hf_dataset", path=out_path)
+        return SynthResult(rows=rows, source="dataset", path=out_path)
 
     with (
         patch(
@@ -698,7 +698,7 @@ def test_distill_grounded_cache_respects_fingerprint(tmp_path: Path, monkeypatch
         data_dir=tmp_path,
         payload={
             "preset": "reproducible",
-            "hf_dataset": str(fixture),
+            "dataset_ref": str(fixture),
             "data_gen_count": 8,
             "stages": ["rollout"],
             "seeds": [13],
@@ -795,7 +795,7 @@ def test_distill_grounded_cache_invalidates_when_tiny_allow_flips(
         data_dir=tmp_path,
         payload={
             "preset": "reproducible",
-            "hf_dataset": str(fixture),
+            "dataset_ref": str(fixture),
             "data_gen_count": 256,
             "stages": ["rollout", "evaluate"],
             "seeds": [13],
@@ -823,7 +823,7 @@ def test_distill_grounded_cache_invalidates_when_tiny_allow_flips(
         data_dir=tmp_path,
         payload={
             "preset": "reproducible",
-            "hf_dataset": str(fixture),
+            "dataset_ref": str(fixture),
             "data_gen_count": 256,
             "stages": ["rollout", "evaluate"],
             "seeds": [13],
@@ -851,8 +851,8 @@ def test_slime_hf_materialize_auto_answer_field_not_default_label(tmp_path: Path
         output_dir=tmp_path / "run",
         data_gen=True,
         data_gen_count=4,
-        data_gen_source="hf_dataset",
-        hf_dataset="org/math",
+        data_gen_source="dataset",
+        dataset_ref="org/math",
         answer_field="label",  # slime default
         data_gen_filename="gen.jsonl",
         require_held_out_eval=False,
@@ -942,7 +942,7 @@ async def test_forge_distill_rejects_cross_user_hf_dataset_in_config_file(
             {
                 "preset": "smoke",
                 "hf_dataset": str(victim_file),
-                "preference_source": "hf_dataset",
+                "preference_source": "dataset",
                 "data_gen_count": 8,
             }
         ),
@@ -983,8 +983,8 @@ def test_distill_rejects_outcome_false_for_grounded_sources(tmp_path: Path, monk
             payload={
                 "preset": "smoke",
                 "stages": ["rollout"],
-                "preference_source": "hf_dataset",
-                "hf_dataset": str(fixture),
+                "preference_source": "dataset",
+                "dataset_ref": str(fixture),
                 "data_gen_count": 1,
                 "verifiable_outcome_rewards": False,
             },
@@ -1020,8 +1020,8 @@ def test_distill_runner_passes_config_outcome_rewards(tmp_path: Path, monkeypatc
         payload={
             "preset": "smoke",
             "stages": ["rollout"],
-            "preference_source": "hf_dataset",
-            "hf_dataset": str(fixture),
+            "preference_source": "dataset",
+            "dataset_ref": str(fixture),
             "distilled_path": str(distilled),
             "data_gen_count": 1,
             "rollout_max_prompts": 1,
@@ -1083,7 +1083,7 @@ def test_hf_dataset_rejects_cross_user_local_path(tmp_path: Path, monkeypatch):
         materialize_grounded_corpus(
             tmp_path / "out.jsonl",
             SynthRequest(
-                source="hf_dataset",
+                source="dataset",
                 dataset_ref=str(victim),
                 count=1,
                 allow_tiny=True,

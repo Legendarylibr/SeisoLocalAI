@@ -71,6 +71,6 @@ verifier_max_text_chars: 2048
 data_gen: false
 data_gen_source: "off"
 data_designer: "off"
-# Opt-in HF materialize: data_gen=true, data_gen_source=hf_dataset, hf_dataset=...
+# Opt-in dataset materialize: data_gen=true, data_gen_source=dataset, dataset_ref=...
 # Opt-in Data Designer: data_gen=true, data_gen_source=data_designer, data_designer="on",
 #   vllm_base_url=http://127.0.0.1:8000 (running endpoint; not auto-started).

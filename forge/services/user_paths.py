@@ -96,9 +96,9 @@ def assert_user_training_config(sandbox_root: Path, user_id: str, config: dict) 
     dataset = config.get("dataset")
     if dataset and is_local_filesystem_path(dataset):
         assert_user_path(sandbox_root, user_id, dataset)
-    hf_dataset = config.get("hf_dataset")
-    if hf_dataset and is_local_filesystem_path(hf_dataset):
-        assert_user_path(sandbox_root, user_id, hf_dataset)
+    dataset_ref = config.get("dataset_ref") or config.get("hf_dataset")
+    if dataset_ref and is_local_filesystem_path(dataset_ref):
+        assert_user_path(sandbox_root, user_id, dataset_ref)
     resume = config.get("resume_from")
     if resume:
         assert_user_path(sandbox_root, user_id, resume)

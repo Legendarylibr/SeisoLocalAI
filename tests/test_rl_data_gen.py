@@ -1,4 +1,4 @@
-"""Tests for high-level verifiable RL data generation."""
+"""Tests for grounded RL materialize helpers (no toy corpus generator)."""
 
 from __future__ import annotations
 
@@ -7,13 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from seiso.rl_verify.data_gen import (
-    DataGenConfig,
-    generate_rl_corpus,
-    materialize_rl_corpus,
-    parse_weight_mix,
-)
-from seiso.rl_verify.verify import score_completion
+from seiso.rl_verify.data_gen import parse_weight_mix, to_slime_prompt_row, write_jsonl
 from seiso.slime.config import SingleGpuSlimeConfig
 from seiso.slime.trainer import _maybe_materialize_data_gen
 
@@ -33,75 +27,33 @@ def test_parse_weight_mix_normalizes_and_rejects_unknown():
         )
 
 
-def test_generate_rl_corpus_is_deterministic_and_diverse(tmp_path: Path):
-    cfg = DataGenConfig(
-        count=60,
-        seed=7,
-        mix="numeric:0.6,choice:0.4,code:0.0",
-        difficulty="easy:0.4,medium:0.4,hard:0.2",
-        require_thinking_trace=True,
-        verify_code=False,
+def test_to_slime_prompt_row_shape():
+    row = to_slime_prompt_row(
+        "What is 2+2?",
+        "4",
+        rm_type="numeric",
+        metadata={"task_id": "n0"},
     )
-    a = generate_rl_corpus(cfg)
-    b = generate_rl_corpus(cfg)
-    assert a.count == 60
-    # slime-native prompt/label
-    assert isinstance(a.rows[0]["prompt"], list)
-    assert "label" in a.rows[0]
-    ids_a = [r["metadata"]["task_id"] for r in a.rows]
-    ids_b = [r["metadata"]["task_id"] for r in b.rows]
-    assert ids_a == ids_b
-    assert a.summary()["answer_diversity"] > 0.3
-    assert a.stream_counts.get("numeric", 0) > 0
-    assert a.stream_counts.get("choice", 0) > 0
-    # Thinking instruction present for outcome-first slime defaults.
-    contents = " ".join(m["content"] for r in a.rows for m in r["prompt"] if isinstance(m, dict))
-    assert "think" in contents.lower()
+    assert row["label"] == "4"
+    assert row["answer"] == "4"
+    assert row["reward"] == "numeric"
+    assert isinstance(row["prompt"], list)
+    assert row["prompt"][0]["content"] == "What is 2+2?"
 
 
-def test_numeric_rows_verify_with_correct_answer():
-    cfg = DataGenConfig(
-        count=20,
-        seed=3,
-        mix="numeric:1.0",
-        difficulty="easy:0.5,medium:0.5,hard:0.0",
-        require_thinking_trace=False,
+def test_write_jsonl(tmp_path: Path):
+    path = tmp_path / "rows.jsonl"
+    n = write_jsonl(
+        path,
+        [
+            to_slime_prompt_row("q", "1", rm_type="numeric"),
+            to_slime_prompt_row("q2", "2", rm_type="numeric"),
+        ],
     )
-    result = generate_rl_corpus(cfg)
-    for row in result.rows:
-        answer = str(row["label"])
-        # Simulate a model that emits the gold answer after a closed think block.
-        completion = f"<think>calc</think>\n{answer}"
-        scored = score_completion(
-            completion,
-            {"answer": answer, **row},
-            checker="numeric",
-            require_thinking_trace=False,
-            process_weight=0.0,
-        )
-        assert scored.passed, (row["prompt"], answer, scored)
-
-
-def test_materialize_writes_jsonl_and_manifest(tmp_path: Path):
-    out = tmp_path / "corpus.jsonl"
-    result = materialize_rl_corpus(
-        out,
-        DataGenConfig(
-            count=30,
-            seed=1,
-            mix="numeric:0.7,choice:0.3,code:0.0",
-            verify_code=False,
-            require_thinking_trace=False,
-        ),
-    )
-    assert out.is_file()
-    lines = out.read_text(encoding="utf-8").strip().splitlines()
-    assert len(lines) == result.count == 30
-    assert json.loads(lines[0])["prompt"]
-    manifest = tmp_path / "corpus.manifest.json"
-    assert manifest.is_file()
-    payload = json.loads(manifest.read_text(encoding="utf-8"))
-    assert payload["count"] == 30
+    assert n == 2
+    lines = path.read_text(encoding="utf-8").strip().splitlines()
+    assert len(lines) == 2
+    assert json.loads(lines[0])["label"] == "1"
 
 
 def test_slime_config_data_gen_validation():
@@ -137,7 +89,9 @@ def test_maybe_materialize_data_gen_rewrites_dataset(tmp_path: Path, monkeypatch
         require_held_out_eval=False,
     )
     cfg.validate()
-    dist = _DistributedSlimeContext(enabled=False, world_size=1, rank=0, local_rank=0, device="cpu")
+    dist = _DistributedSlimeContext(
+        enabled=False, world_size=1, rank=0, local_rank=0, device="cpu"
+    )
     fake = DataGenResult(
         rows=[{"prompt": "x", "label": "1"} for _ in range(24)],
         stream_counts={"numeric": 24},
@@ -176,34 +130,9 @@ def test_maybe_materialize_data_gen_rewrites_dataset(tmp_path: Path, monkeypatch
     assert summary["generator"] == "nvidia.nemo.data_designer"
 
 
-def test_data_gen_fails_when_code_verify_rejects_majority(monkeypatch):
-    """Narrow skip tracking must fail closed if code stream is broken."""
-    from seiso.rl_verify import data_gen as dg
+def test_toy_generator_api_removed():
+    import seiso.rl_verify.data_gen as dg
 
-    def _always_fail_code(**kwargs):
-        return {
-            "prompt": [{"role": "user", "content": "x"}],
-            "label": "pass",
-            "solution": "def f():\n    return 1\n",
-            "metadata": {"rm_type": "code", "task_id": "t"},
-            "cases": (("f()", "0"),),
-        }
-
-    class _FailProof:
-        passed = False
-
-    monkeypatch.setattr(dg, "generate_code_row", _always_fail_code)
-    monkeypatch.setattr(
-        "seiso.rl_verify.code_proof.verify_code_proof",
-        lambda *a, **k: _FailProof(),
-    )
-    with pytest.raises(RuntimeError, match="code verify rejected"):
-        generate_rl_corpus(
-            DataGenConfig(
-                count=10,
-                seed=1,
-                mix="code:1.0",
-                verify_code=True,
-                require_thinking_trace=False,
-            )
-        )
+    assert not hasattr(dg, "generate_rl_corpus")
+    assert not hasattr(dg, "materialize_rl_corpus")
+    assert not hasattr(dg, "DataGenConfig")

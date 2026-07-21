@@ -86,7 +86,7 @@ def build_preference_bundle(
             raise ValueError(
                 f"grounded_library has {len(grounded)} verifiable prompts "
                 f"(need >= {floor} with answer/tests). Refusing tiny/open libraries. "
-                "Use preference_source=hf_dataset (curated verifiable Hub set), "
+                "Use preference_source=dataset (curated verifiable Hub set), "
                 "data_designer (opt-in), or a larger operator JSONL. "
                 "CI fixtures: SEISO_ALLOW_TINY_RL=1 / preset=smoke."
             )

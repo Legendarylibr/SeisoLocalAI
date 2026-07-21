@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Literal, cast
 
 import yaml
-from pydantic import BaseModel, Field, model_validator
+from pydantic import AliasChoices, BaseModel, Field, field_validator, model_validator
 
 from seiso.bundled.config_builder import (
     job_output_root,
@@ -22,7 +22,7 @@ STAGE_ORDER = ("distill", "rollout", "dpo", "evaluate")
 # Preference construction modes for Distill-RL rollout → DPO.
 # Product sources only (no code_corpus / synthetic_code training path).
 PREFERENCE_SOURCES = (
-    "hf_dataset",
+    "dataset",
     "data_designer",
     "grounded_library",
     "teacher_style",
@@ -92,7 +92,7 @@ PRESETS: dict[str, dict[str, Any]] = {
         "student_revision": "main",
         "distill_steps": 50,
         "max_train_samples": 32,
-        "preference_source": "hf_dataset",
+        "preference_source": "dataset",
         "data_gen_count": DATA_GEN_FLOOR_REPRODUCIBLE,
         "rollout_max_prompts": DATA_GEN_FLOOR_REPRODUCIBLE,
         "rollout_max_new_tokens": 128,
@@ -113,7 +113,7 @@ PRESETS: dict[str, dict[str, Any]] = {
         "student_model": "codellama/CodeLlama-7b-hf",
         "distill_steps": 500,
         "max_train_samples": None,
-        "preference_source": "hf_dataset",
+        "preference_source": "dataset",
         "data_gen_count": DATA_GEN_FLOOR_FULL,
         "rollout_max_prompts": DATA_GEN_FLOOR_FULL,
         "rollout_max_new_tokens": 256,
@@ -144,7 +144,7 @@ class DistillRLConfig(BaseModel):
     teacher_revision: str | None = None
     student_revision: str | None = None
     distilled_path: Path | None = None
-    # User data root for local hf_dataset / prompt_library sandbox checks.
+    # User data root for local dataset_ref / prompt_library sandbox checks.
     sandbox_root: Path | None = None
     seed: int = 42
     deterministic: bool = True
@@ -160,20 +160,23 @@ class DistillRLConfig(BaseModel):
         "Show your reasoning in <think>...</think>, then give the final answer."
     )
 
-    # hf_dataset (research default) | data_designer (opt-in) | grounded_library | teacher_style
+    # dataset (research default) | data_designer (opt-in) | grounded_library | teacher_style
     preference_source: Literal[
-        "hf_dataset",
+        "dataset",
         "data_designer",
         "grounded_library",
         "teacher_style",
-    ] = "hf_dataset"
+    ] = "dataset"
     # Prompt count for synth / HF materialization.
     data_gen_count: int = DATA_GEN_FLOOR_SMOKE
     # Deprecated alias of data_gen_count (accepted in payloads).
     corpus_count: int | None = None
     prompt_library_path: Path | None = None
-    # HF hub id or local path when preference_source=hf_dataset.
-    hf_dataset: str | None = None
+    # HF hub id or local path when preference_source=dataset.
+    dataset_ref: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("dataset_ref", "hf_dataset"),
+    )
     dataset_split: str = "train"
     dataset_revision: str = "main"
     prompt_field: str | None = None
@@ -220,13 +223,23 @@ class DistillRLConfig(BaseModel):
         default_factory=lambda: ["gsm8k", "gpqa", "aime"]
     )
 
+    @field_validator("preference_source", mode="before")
+    @classmethod
+    def _normalize_preference_source(cls, value: Any) -> Any:
+        if value is None:
+            return value
+        text = str(value).strip().lower()
+        if text == "hf_dataset":
+            return "dataset"
+        return text
+
     @model_validator(mode="after")
     def _validate_grounded_floors(self) -> DistillRLConfig:
         source = str(self.preference_source).strip().lower()
         if source in {"code_corpus", "synthetic_code"}:
             raise ValueError(
                 f"preference_source={source!r} is not a product training path. "
-                "Use hf_dataset, data_designer, grounded_library, or teacher_style. "
+                "Use dataset, data_designer, grounded_library, or teacher_style. "
                 "CI: preference_source=grounded_library + fixture + SEISO_ALLOW_TINY_RL=1 "
                 "(preset=smoke wires the fixture automatically)."
             )
@@ -244,7 +257,7 @@ class DistillRLConfig(BaseModel):
 
         tiny = allow_tiny_rl(preset=self.preset)
         floor = _data_gen_floor_for_preset(self.preset)
-        if source in {"data_designer", "hf_dataset"}:
+        if source in {"data_designer", "dataset"}:
             if count < floor and not tiny:
                 raise ValueError(
                     f"data_gen_count={count} below floor {floor} for "
@@ -259,17 +272,17 @@ class DistillRLConfig(BaseModel):
                     "preference_source=grounded_library requires prompt_library "
                     "(JSON/JSONL with answer and/or tests on each prompt)"
                 )
-        if source == "hf_dataset":
-            if not (self.hf_dataset or self.prompt_library_path):
+        if source == "dataset":
+            if not (self.dataset_ref or self.prompt_library_path):
                 raise ValueError(
-                    "preference_source=hf_dataset requires hf_dataset or "
+                    "preference_source=dataset requires dataset_ref or "
                     "prompt_library (HF hub id or local path with answer/tests)"
                 )
         # Single source of truth: outcome mode follows preference_source.
         if source == "teacher_style":
             # Open-style DPO; default request flag is True — normalize off.
             object.__setattr__(self, "verifiable_outcome_rewards", False)
-        elif source in {"hf_dataset", "data_designer", "grounded_library"}:
+        elif source in {"dataset", "data_designer", "grounded_library"}:
             if not self.verifiable_outcome_rewards:
                 raise ValueError(
                     f"preference_source={source!r} requires "
@@ -358,12 +371,14 @@ def resolve_preference_source(
     raw = merged.get("preference_source", preset.get("preference_source"))
     if raw is not None and str(raw).strip():
         source = str(raw).strip().lower()
-    elif merged.get("hf_dataset") or (
+        if source == "hf_dataset":
+            source = "dataset"
+    elif merged.get("dataset_ref") or merged.get("hf_dataset") or (
         prompt_path is None
         and merged.get("prompt_library")
         and not Path(str(merged.get("prompt_library"))).expanduser().is_file()
     ):
-        source = "hf_dataset"
+        source = "dataset"
     elif prompt_path is not None and not bool(
         merged.get(
             "verifiable_outcome_rewards",
@@ -374,11 +389,13 @@ def resolve_preference_source(
     elif prompt_path is not None:
         source = "grounded_library"
     else:
-        source = str(preset.get("preference_source") or "hf_dataset").strip().lower()
+        source = str(preset.get("preference_source") or "dataset").strip().lower()
+        if source == "hf_dataset":
+            source = "dataset"
     if source in {"code_corpus", "synthetic_code"}:
         raise ValueError(
             f"preference_source={source!r} is not a product training path. "
-            "Use hf_dataset, data_designer, grounded_library, or teacher_style."
+            "Use dataset, data_designer, grounded_library, or teacher_style."
         )
     if source not in PREFERENCE_SOURCES:
         raise ValueError(
@@ -558,8 +575,9 @@ def build_distill_rl_config(
         preference_source=preference_source,  # type: ignore[arg-type]
         data_gen_count=data_gen_count,
         prompt_library_path=prompt_path,
-        hf_dataset=(
-            str(merged["hf_dataset"]).strip() if merged.get("hf_dataset") else None
+        dataset_ref=(
+            str(merged.get("dataset_ref") or merged.get("hf_dataset") or "").strip()
+            or None
         ),
         dataset_split=str(merged.get("dataset_split", "train")),
         dataset_revision=str(merged.get("dataset_revision", "main")),
