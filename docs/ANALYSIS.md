@@ -1,10 +1,12 @@
 # SeisoLocalAI Project Analysis
 
-**Date:** 2026-06-25  
+**Date:** 2026-06-25 (executive refresh 2026-07-20)  
 **Source:** Local clone — [github.com/Legendarylibr/SeisoLocalAI](https://github.com/Legendarylibr/SeisoLocalAI)  
 **Analyst context:** Full source tree + populated `~/.seiso`, prior usage artifacts, successful UI build + partial CI runs on RTX 4090 Linux host.
 
 This document provides a software engineering analysis: architecture, features, code health, security, platform notes, WIP status, and actionable recommendations.
+
+**July 2026 full-tree review:** See [reports/codebase-review-2026-07.md](reports/codebase-review-2026-07.md) for phased findings (safety, product surfaces, research claims, Forge/UI/docs), keep/deprecate/delete decisions, and remediations landed in that pass. Top residual risks: global DNS-pin concurrency (S1-001), AST-only code-exec under remote (F4-01), dual RL-quant preset registries (RP-05), multi-backend chat picker (INF-01).
 
 ---
 
@@ -219,7 +221,7 @@ Seiso maps learning **signals** to proper algorithms (not proxies that look rela
 
 **DPO:** Rafailov β-sigmoid on sum completion log-probs (`average_log_prob=false` by default).
 
-**RL quant:** Research contract embeds `evidence_level`; simulator runs set `deploy_quality_claimable=false`.
+**RL quant:** Research contract embeds `evidence_level`; `deploy_quality_claimable` requires `backend=llama_cpp` **and** `external_quality_path` (simulator or llama.cpp-without-sidecar stay non-claimable).
 
 **Physics / numerics framing:** group advantages are zero-sum within a prompt; length normalization is scale invariance of the importance ratio; non-negative KL is a valid information penalty; VRAM guards are hard resource bounds (logged as-run when they rewrite batch/seq/quant).
 
