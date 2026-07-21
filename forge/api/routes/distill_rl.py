@@ -4,9 +4,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from fastapi import HTTPException
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, ValidationError
 
 from forge.api.deps import get_distill_rl_orchestrator
+from forge.api.http_errors import raise_forbidden
 from forge.api.routes._jobs import (
     enrich_stage_results,
     resolve_linked_training_job,
@@ -18,7 +20,14 @@ from forge.api.routes._pipeline import (
 )
 from forge.config import ForgeSettings
 from forge.db.store import Database
-from seiso.distill_rl.config import PRESETS, STAGE_ORDER
+from forge.services.user_paths import assert_user_path, is_local_filesystem_path
+from seiso.distill_rl.config import (
+    PRESETS,
+    STAGE_ORDER,
+    build_distill_rl_config,
+    merge_distill_rl_payload,
+)
+from seiso.security import SecurityError
 
 STAGE_HELP = {
     "distill": "Teacher logits → student KL distillation",
@@ -26,6 +35,8 @@ STAGE_HELP = {
     "dpo": "Direct preference optimization on distilled student",
     "evaluate": "Perplexity + validation preference accuracy",
 }
+
+_DISTILL_PATH_KEYS = ("distilled_path", "prompt_library")
 
 
 class DistillRLStartRequest(BaseModel):
@@ -41,9 +52,27 @@ class DistillRLStartRequest(BaseModel):
     rollout_max_prompts: int | None = None
     dpo_epochs: int | None = None
     prompt_library: str | None = None
+    preference_source: str | None = Field(
+        default=None,
+        description=(
+            "dataset | data_designer | grounded_library | teacher_style "
+            "(hf_dataset aliases to dataset)"
+        ),
+    )
+    dataset_ref: str | None = Field(
+        default=None,
+        description="HF hub id or local JSONL when preference_source=dataset",
+        validation_alias=AliasChoices("dataset_ref", "hf_dataset"),
+    )
     require_thinking_trace: bool = True
     thinking_instruction: str | None = None
-    verifiable_outcome_rewards: bool = True
+    verifiable_outcome_rewards: bool = Field(
+        default=True,
+        description=(
+            "Outcome RL for grounded sources (required true). "
+            "Ignored for preference_source=teacher_style (always false)."
+        ),
+    )
     grpo_group_size: int = Field(default=4, ge=2)
     benchmark_verifiable: bool = True
     benchmark_tasks: list[str] = Field(
@@ -60,6 +89,17 @@ class DistillRLStartRequest(BaseModel):
         description="Grid-search DPO hyperparameters before the full alignment run.",
     )
     sweep_config: str | None = None
+
+
+def _assert_local_dataset_ref(data_dir, user_id: str, config: dict[str, Any]) -> None:
+    """Sandbox local ``dataset_ref`` refs (Hub ids are left alone)."""
+    ref = config.get("dataset_ref") or config.get("hf_dataset")
+    if not ref or not is_local_filesystem_path(ref):
+        return
+    try:
+        assert_user_path(data_dir, user_id, ref)
+    except SecurityError as exc:
+        raise_forbidden(exc)
 
 
 async def _prepare_distill_rl_config(
@@ -81,13 +121,38 @@ async def _prepare_distill_rl_config(
             path_key="distilled_path",
         )
 
+    # Validate config_file location + body paths first.
     validate_pipeline_paths(
         settings.data_dir,
         user_id,
         config,
         config_file=req.config_file,
-        path_keys=("distilled_path", "prompt_library"),
+        path_keys=_DISTILL_PATH_KEYS,
     )
+    # Merge file contents before further path checks so config_file cannot
+    # smuggle a cross-tenant dataset_ref / prompt_library past the gate.
+    config = merge_distill_rl_payload(config)
+    validate_pipeline_paths(
+        settings.data_dir,
+        user_id,
+        config,
+        path_keys=_DISTILL_PATH_KEYS,
+    )
+    _assert_local_dataset_ref(settings.data_dir, user_id, config)
+
+    # Fail loud before the job is queued — same gates the runner uses.
+    try:
+        build_distill_rl_config(
+            job_id="__validate__",
+            user_id=user_id,
+            data_dir=settings.data_dir,
+            payload=config,
+        )
+    except (ValidationError, ValueError) as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid distill-RL configuration: {exc}",
+        ) from exc
 
     return config
 

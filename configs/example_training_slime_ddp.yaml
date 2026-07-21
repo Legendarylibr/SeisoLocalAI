@@ -2,14 +2,17 @@
 # Launch SGLang first:
 #   python -m sglang.launch_server --model-path Qwen/Qwen2.5-0.5B-Instruct --port 30000
 model_id: Qwen/Qwen2.5-0.5B-Instruct
+# Replace fixtures with curated verifiable train/eval (OpenR1-style / operator JSONL).
 dataset: data/slime_sample.jsonl
+eval_dataset: data/slime_numeric_eval.jsonl
+require_held_out_eval: true
 output_dir: outputs/slime-train-ddp
 method: slime
 # slime path loads full-precision (+ optional LoRA); quant is ignored by this trainer
 quant: none
 training_methodology: seiso_release_post_training
 prompt_field: prompt
-answer_field: label
+answer_field: answer
 metadata_field: metadata
 reward: auto
 max_vram_gb: 16
@@ -73,12 +76,10 @@ stop_on_nonfinite: true
 write_verifier_data: true
 verifier_data_file: slime_verifier_data.jsonl
 verifier_max_text_chars: 2048
-data_gen: true
-data_gen_count: 800
-data_gen_seed: 17
-data_gen_mix: "numeric:0.55,choice:0.15,code:0.30"
-data_gen_difficulty: "easy:0.3,medium:0.45,hard:0.25"
-data_gen_filename: slime_generated.jsonl
+data_gen: false
+data_gen_source: "off"
+data_designer: "off"
+# Opt-in: data_gen_source=dataset|data_designer (explicit; DD needs a live endpoint).
 multi_gpu: true
 distributed_strategy: ddp
 distributed_nproc_per_node: null

@@ -130,27 +130,29 @@ Teacher KL distillation into a smaller student, preference construction, DPO
 alignment, and evaluation. Produces hash-chained manifests and optional multi-seed
 aggregation.
 
-There are **two preference regimes** (do not conflate them):
+Product preference sources (`preference_source`) — RLVR-aligned:
 
-1. **Verifiable outcome (preferred for alignment claims).** Default when
-   `verifiable_outcome_rewards: true` and prompts carry a non-empty `answer`
-   and/or `tests` (optional `benchmark` like `gsm8k` / `gpqa` / `aime` / `code`
-   only selects the checker — it does not make a prompt verifiable by itself).
-   Distill-RL group-samples the **student** with `grpo_group_size`, scores with
-   the shared verifier (`seiso.rl_verify`), and keeps pairs only when **chosen
-   passes** (outcome score > 0.5, or all unit tests for code). Rejected prefers
-   a hard fail (near-miss). Starter libraries:
-   - `data/distill_verifiable_prompts.jsonl` (math/choice/code mix)
-   - `data/distill_code_synth.jsonl` (deterministic code tasks with known passers)
-   - `data/synthetic_code_preferences.jsonl` (offline golden-vs-mutant DPO pairs
-     from the unit-test-grounded ``code_corpus``; regenerate with
-     `python -m seiso.rl_verify --data-dir data --seed 0 --count 64`)
-2. **Teacher ≻ student bootstrap (not outcome RL).** For **non-verifiable**
-   prompts only, pairs are `chosen = teacher` and `rejected = student` with no
-   correctness check. Prompts that carry `answer` / `tests` are never labeled
-   this way: with `verifiable_outcome_rewards: true` they use the verifier; with
-   the flag off they are skipped. Useful as imitation-shaped bootstrap when
-   labels are missing — **not** a substitute for verifiable preference RL.
+1. **`dataset` (research default).** Curated Hub/local set via Seiso training
+   prep; keep rows with `answer` and/or `tests`; floors reproducible `>=256`,
+   full `>=2048` (real runs want ≫1k–10k+). Prefer OpenR1-style sets such as
+   `open-r1/OpenR1-Math-220k` (map answer fields) or code corpora with unit tests.
+   Preference-only Hub sets (chosen/rejected, no answers/tests) are rejected for
+   outcome RL — use `teacher_style` only for style bootstrap.
+2. **`data_designer` (opt-in).** [NVIDIA NeMo Data Designer](https://github.com/NVIDIA-NeMo/DataDesigner)
+   (`pip install -e '.[data-designer]'` + real `data_designer_base_url` — no
+   silent localhost). Numeric/choice only; code RL stays on HF/operator JSONL.
+3. **`grounded_library`.** Operator JSON/JSONL with `answer` and/or `tests`
+   (`>=256` verifiable prompts).
+4. **`teacher_style` (explicit only).** Teacher≻student pairs for open prompts —
+   style bootstrap, **not** outcome RL. Forces `verifiable_outcome_rewards=false`.
+
+`verifiable_outcome_rewards` is derived from `preference_source`: grounded sources
+(`dataset` / `data_designer` / `grounded_library`) require it `true`; setting
+`false` there is an error. Local `dataset_ref` paths must sit under the user tree
+(`uploads/<user_id>/…` or other scoped roots).
+
+CI `preset=smoke` uses fixture `data/distill_verifiable_prompts.jsonl` (not a
+training path). Product runs require a held-out preference split and `evaluate`.
 
 Reasoning-focused runs can append a thinking instruction by leaving
 `require_thinking_trace: true`. Completions are scored as generated (no synthetic
@@ -163,9 +165,9 @@ GSM8K/GPQA/AIME accuracy and the jump versus the baseline checkpoint.
 
 | Preset | Default models | Purpose |
 |--------|----------------|---------|
-| `smoke` | `openai-community/gpt2` | Fast CI-style run (2 distill steps, tiny prompts) |
-| `reproducible` | `openai-community/gpt2` | Multi-seed (`13, 42, 99`) research preset |
-| `full` | CodeLlama 13B → 7B | Production-scale code alignment |
+| `smoke` | `openai-community/gpt2` | CI fixture only (`grounded_library` + tiny allow) |
+| `reproducible` | `openai-community/gpt2` | Multi-seed; `dataset` + `data_gen_count>=256` |
+| `full` | CodeLlama 13B → 7B | Production-scale; `dataset` + `>=2048` |
 
 Stages: `distill`, `rollout`, `dpo`, `evaluate`.
 

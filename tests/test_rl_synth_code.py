@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from seiso.rl_verify.code_proof import verify_code_proof
 from seiso.rl_verify.synth_code import (
     build_preference,
@@ -120,24 +122,24 @@ def test_build_preference_none_when_no_mutant(monkeypatch):
     assert build_preference(task, seed=0) is None
 
 
-def test_distill_synthetic_code_preference_bundle(tmp_path: Path):
-    from seiso.distill_rl.preferences import build_synthetic_code_preference_bundle
+def test_distill_data_designer_fails_without_endpoint(tmp_path: Path, monkeypatch):
+    from seiso.distill_rl.preferences import materialize_data_designer_prompt_library
 
-    out = build_synthetic_code_preference_bundle(
-        output_dir=tmp_path / "prefs",
-        seed=0,
-        train_fraction=0.75,
-        limit=12,
-        include_variants=False,
+    monkeypatch.setattr(
+        "seiso.rl_verify.data_designer_gen.data_designer_available",
+        lambda: True,
     )
-    assert out.train_count >= 1
-    assert out.val_count >= 1
-    assert out.train_path.is_file()
-    train_line = out.train_path.read_text(encoding="utf-8").splitlines()[0]
-    row = json.loads(train_line)
-    assert row["chosen_passed"] is True
-    assert row["rejected_passed"] is False
-    assert row["reward_source"] == "synthetic_code_unit_tests"
+    with pytest.raises(RuntimeError, match="No silent localhost"):
+        materialize_data_designer_prompt_library(
+            output_dir=tmp_path / "prefs",
+            count=8,
+            seed=0,
+            require_thinking_trace=True,
+            thinking_instruction="Show your reasoning in <think>...</think>.",
+            base_url=None,
+            model=None,
+            preset="smoke",
+        )
 
 
 def test_emit_held_out_eval_disjoint_from_train(tmp_path: Path):
@@ -193,15 +195,23 @@ def test_emit_standard_artifacts_with_eval(tmp_path: Path):
     assert (tmp_path / "slime_code_eval.jsonl").is_file()
 
 
-def test_distill_synthetic_default_train_fraction_holds_out_val(tmp_path: Path):
-    from seiso.distill_rl.preferences import build_synthetic_code_preference_bundle
+def test_distill_data_designer_requires_package_outside_smoke(
+    tmp_path: Path, monkeypatch
+):
+    from seiso.distill_rl.preferences import materialize_data_designer_prompt_library
 
-    out = build_synthetic_code_preference_bundle(
-        output_dir=tmp_path / "prefs",
-        seed=1,
-        limit=40,
-        include_variants=False,
+    monkeypatch.setattr(
+        "seiso.rl_verify.data_designer_gen.data_designer_available",
+        lambda: False,
     )
-    assert out.train_count > out.val_count >= 1
-    frac = out.train_count / (out.train_count + out.val_count)
-    assert 0.8 <= frac <= 0.9
+    with pytest.raises(RuntimeError, match="Data Designer"):
+        materialize_data_designer_prompt_library(
+            output_dir=tmp_path / "prefs",
+            count=8,
+            seed=0,
+            require_thinking_trace=False,
+            thinking_instruction="",
+            base_url=None,
+            model=None,
+            preset="reproducible",
+        )

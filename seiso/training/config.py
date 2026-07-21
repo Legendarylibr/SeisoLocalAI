@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import AliasChoices, BaseModel, Field, field_validator, model_validator
 
 from seiso.compat import StrEnum
 
@@ -226,7 +226,7 @@ class TrainConfig(BaseModel):
     top_p: float = Field(default=0.95, gt=0, le=1)
     rollout_backend: str = Field(
         default="hf",
-        description="slime online generate: hf | sglang | vllm | auto (data_gen aliases hf)",
+        description="slime online generate: hf | sglang | vllm | auto",
     )
     apply_chat_template: bool = True
     sglang_base_url: str = ""
@@ -311,16 +311,52 @@ class TrainConfig(BaseModel):
     write_verifier_data: bool = True
     verifier_data_file: str = Field(default="slime_verifier_data.jsonl", min_length=1)
     verifier_max_text_chars: int = Field(default=2048, ge=0)
-    # High-level verifiable prompt generation (see seiso.rl_verify.data_gen).
+    # Opt-in grounded corpus materialize (dataset / data_designer).
     data_gen: bool = False
     data_gen_count: int = Field(default=0, ge=0)
     data_gen_seed: int = 0
-    data_gen_mix: str = "numeric:0.5,choice:0.2,code:0.3"
+    data_gen_mix: str = "numeric:0.7,choice:0.3"
     data_gen_difficulty: str = "easy:0.35,medium:0.45,hard:0.20"
     data_gen_filename: str = "slime_generated.jsonl"
+    data_gen_source: str = Field(
+        default="off",
+        description="Materialize source: off | dataset | data_designer | auto",
+    )
+    dataset_ref: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("dataset_ref", "hf_dataset"),
+        description="HF hub id / path when data_gen_source=dataset",
+    )
+    dataset_split: str = "train"
     data_designer: str = Field(
-        default="auto",
-        description=("NVIDIA NeMo Data Designer synth: auto (multi-GPU vLLM only) | on | off"),
+        default="off",
+        description='NVIDIA NeMo Data Designer: off | on | auto (quote "on"/"off" in YAML)',
+    )
+
+    @field_validator("data_designer", mode="before")
+    @classmethod
+    def _coerce_data_designer(cls, value: Any) -> str:
+        # YAML 1.1 parses bare `on`/`off` as booleans.
+        if value is True:
+            return "on"
+        if value is False:
+            return "off"
+        return str(value if value is not None else "off")
+
+    @field_validator("data_gen_source", mode="before")
+    @classmethod
+    def _coerce_data_gen_source(cls, value: Any) -> str:
+        if value is True:
+            return "auto"
+        if value is False:
+            return "off"
+        text = str(value if value is not None else "off")
+        if text.strip().lower() == "hf_dataset":
+            return "dataset"
+        return text
+    require_held_out_eval: bool = Field(
+        default=True,
+        description="Require disjoint eval_dataset for product slime runs",
     )
     vllm_tensor_parallel: int = Field(
         default=0,
@@ -488,6 +524,12 @@ class TrainConfig(BaseModel):
             )
         except ValueError as exc:
             raise ValueError(str(exc)) from exc
+        # Fail loud at TrainConfig validation (Forge/API start) — not after
+        # the job is queued — when held-out eval / slime invariants are missing.
+        try:
+            self.to_single_gpu_slime_config().validate()
+        except ValueError as exc:
+            raise ValueError(str(exc)) from exc
         return self
 
     @classmethod
@@ -526,6 +568,7 @@ class TrainConfig(BaseModel):
             model_id=self.model_id,
             dataset=Path(self.dataset),
             output_dir=self.output_dir,
+            sandbox_root=self.sandbox_root,
             eval_dataset=(
                 Path(self.slime_eval_dataset)
                 if self.slime_eval_dataset is not None
@@ -627,7 +670,11 @@ class TrainConfig(BaseModel):
             data_gen_mix=self.data_gen_mix,
             data_gen_difficulty=self.data_gen_difficulty,
             data_gen_filename=self.data_gen_filename,
+            data_gen_source=self.data_gen_source,
+            dataset_ref=self.dataset_ref,
+            dataset_split=self.dataset_split,
             data_designer=self.data_designer,
+            require_held_out_eval=self.require_held_out_eval,
             vllm_tensor_parallel=self.vllm_tensor_parallel,
         )
 

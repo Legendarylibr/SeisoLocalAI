@@ -62,7 +62,7 @@ def auto_sweep_enabled(payload: dict[str, Any]) -> bool:
         return False
     if payload.get("auto_sweep") is True or payload.get("sweep") is True:
         return True
-    return payload.get("auto_sweep", True)
+    return bool(payload.get("auto_sweep", True))
 
 
 def default_sweep_grid(payload: dict[str, Any]) -> dict[str, tuple[Any, ...]]:

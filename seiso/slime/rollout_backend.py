@@ -4,7 +4,7 @@ Facade module: implementation lives in ``rollout_resolve``, ``rollout_generate``
 ``rollout_clients``, ``rollout_http``, and ``rollout_sync``. Import from here for
 stability (tests and trainers patch ``seiso.slime.rollout_backend.*``).
 
-* ``hf`` / ``data_gen`` — colocated Hugging Face ``generate`` (default; single-GPU)
+* ``hf`` — colocated Hugging Face ``generate`` (default; single-GPU)
 * ``sglang`` — OpenAI-compatible HTTP generation against a running SGLang server
 * ``vllm`` — OpenAI-compatible HTTP generation against a running vLLM server
 """

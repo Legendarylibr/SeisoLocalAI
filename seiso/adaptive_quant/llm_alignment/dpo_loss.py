@@ -59,8 +59,9 @@ def get_batch_logps(
     else:
         summed = per_token_logps.sum(dim=-1)
     # Empty/over-truncated completions must not look like perfect (0) logps.
+    # Mild sentinel avoids saturating DPO margins on a single empty row.
     if bool(empty.any()):
-        summed = torch.where(empty, torch.full_like(summed, -1.0e4), summed)
+        summed = torch.where(empty, torch.full_like(summed, -1.0e2), summed)
     return summed
 
 

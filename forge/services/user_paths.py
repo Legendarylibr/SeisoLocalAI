@@ -39,14 +39,14 @@ def user_dir(sandbox_root: Path, user_id: str, category: str) -> Path:
 
 
 def is_local_filesystem_path(target: str | Path) -> bool:
-    """True when *target* refers to a host path rather than a HF hub ID."""
-    p = Path(target).expanduser()
-    if p.is_absolute():
-        return True
-    if p.exists():
-        return True
-    s = str(target)
-    return s.startswith(("./", "../", "~/"))
+    """True when *target* refers to a host path rather than a HF hub ID.
+
+    Kept in sync with ``seiso.training.datasets.looks_like_local_dataset_path``
+    so Forge gates and materialize sandbox checks agree on relative ``*.jsonl``.
+    """
+    from seiso.training.datasets import looks_like_local_dataset_path
+
+    return looks_like_local_dataset_path(target)
 
 
 def assert_user_config_file(sandbox_root: Path, user_id: str, config_file: str) -> None:
@@ -96,6 +96,12 @@ def assert_user_training_config(sandbox_root: Path, user_id: str, config: dict) 
     dataset = config.get("dataset")
     if dataset and is_local_filesystem_path(dataset):
         assert_user_path(sandbox_root, user_id, dataset)
+    eval_ds = config.get("slime_eval_dataset") or config.get("eval_dataset")
+    if eval_ds and is_local_filesystem_path(eval_ds):
+        assert_user_path(sandbox_root, user_id, eval_ds)
+    dataset_ref = config.get("dataset_ref") or config.get("hf_dataset")
+    if dataset_ref and is_local_filesystem_path(dataset_ref):
+        assert_user_path(sandbox_root, user_id, dataset_ref)
     resume = config.get("resume_from")
     if resume:
         assert_user_path(sandbox_root, user_id, resume)

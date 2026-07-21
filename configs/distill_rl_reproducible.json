@@ -1,7 +1,10 @@
 {
   "preset": "reproducible",
+  "preference_source": "dataset",
+  "data_gen_count": 256,
   "seeds": [13, 42, 99],
   "align_distill_with_prompts": true,
   "train_val_fraction": 0.85,
-  "stages": ["distill", "rollout", "dpo", "evaluate"]
+  "stages": ["distill", "rollout", "dpo", "evaluate"],
+  "_comment": "Set dataset_ref to a curated verifiable Hub id (answer/tests). Optional: preference_source=data_designer with data_designer_base_url."
 }

@@ -77,8 +77,19 @@ class DPODataCollator:
             if left != right:
                 break
             prompt_len += 1
-        if prompt_len == 0 and prompt_ids and full_ids:
-            # Completely divergent encodings — fall back to separate concat.
+        # Fall back when LCP is empty or only a trivial prefix (e.g. shared BOS).
+        trivial_lcp = (
+            prompt_ids
+            and full_ids
+            and (
+                prompt_len == 0
+                or (
+                    len(prompt_ids) > 2
+                    and prompt_len < max(2, int(0.5 * len(prompt_ids)))
+                )
+            )
+        )
+        if trivial_lcp:
             completion_ids = list(
                 self.tokenizer(
                     completion,

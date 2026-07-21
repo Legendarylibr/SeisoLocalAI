@@ -1,0 +1,8 @@
+{"prompt":"What is 17 plus 19?","answer":"36","benchmark":"gsm8k","split":"eval"}
+{"prompt":"What is 13 times 4?","answer":"52","benchmark":"gsm8k","split":"eval"}
+{"prompt":"A jar has 40 marbles. You give away 11. How many remain?","answer":"29","benchmark":"gsm8k","split":"eval"}
+{"prompt":"What is 81 divided by 9?","answer":"9","benchmark":"gsm8k","split":"eval"}
+{"prompt":"What is 5 cubed?","answer":"125","benchmark":"gsm8k","split":"eval"}
+{"prompt":"A train has 8 cars with 12 seats each. How many seats total?","answer":"96","benchmark":"gsm8k","split":"eval"}
+{"prompt":"What is 50 minus 23?","answer":"27","benchmark":"gsm8k","split":"eval"}
+{"prompt":"What is 14 times 3?","answer":"42","benchmark":"gsm8k","split":"eval"}

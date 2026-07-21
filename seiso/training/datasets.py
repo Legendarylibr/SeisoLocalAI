@@ -13,17 +13,41 @@ from seiso.training.config import DatasetFormat
 logger = logging.getLogger(__name__)
 
 
+def looks_like_local_dataset_path(path: str | Path) -> bool:
+    """True for host paths; False for typical HF hub ids (``org/name``)."""
+    p = Path(path).expanduser()
+    if p.is_absolute() or p.exists():
+        return True
+    s = str(path)
+    if s.startswith(("~/", "./", "../")):
+        return True
+    return p.suffix.lower() in {".jsonl", ".json", ".parquet", ".csv", ".arrow"}
+
+
 def load_training_dataset(
-    path: str | Path, split: str = "train", *, sandbox_root: Path | None = None
+    path: str | Path,
+    split: str = "train",
+    *,
+    sandbox_root: Path | None = None,
+    sandbox_user_id: str | None = None,
+    revision: str = "main",
 ):
     """Load dataset from HF hub ID, JSON/JSONL file, or directory."""
-    from seiso.security import assert_within
+    from seiso.security import assert_user_scoped_path, assert_within
 
     p = Path(path).expanduser()
-    if p.exists() and sandbox_root is not None:
-        assert_within(sandbox_root, p)
+    # Enforce sandbox for local-looking refs even when the path does not exist
+    # yet (avoids treating ``/escape/path`` as a Hub id).
+    if sandbox_root is not None and looks_like_local_dataset_path(path):
+        target = p if p.is_absolute() else p.resolve()
+        if sandbox_user_id:
+            assert_user_scoped_path(sandbox_root, sandbox_user_id, target)
+        else:
+            assert_within(sandbox_root, target)
 
     from datasets import Dataset, load_dataset
+
+    hub_revision = str(revision or "main").strip() or "main"
 
     if p.exists():
         if p.suffix == ".jsonl":
@@ -38,11 +62,11 @@ def load_training_dataset(
                 return Dataset.from_list(data if isinstance(data, list) else [data])
         if p.is_dir():
             return load_dataset(
-                str(p), split=split, revision="main"
-            )  # nosec B615: local path, revision pinned for hub fallback
+                str(p), split=split, revision=hub_revision
+            )  # nosec B615: local path; revision for hub-style dirs
     return load_dataset(
-        str(path), split=split, revision="main"
-    )  # nosec B615: revision pinned
+        str(path), split=split, revision=hub_revision
+    )  # nosec B615: revision from caller (default main)
 
 
 # Causal-LM / code-corpus body fields (order = preference when several present).

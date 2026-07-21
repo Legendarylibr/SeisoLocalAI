@@ -2,9 +2,11 @@ model_id: Qwen/Qwen2.5-0.5B-Instruct
 method: slime
 # slime path uses full-precision (+ optional LoRA); quant ignored by slime runner
 quant: none
+# data/slime_*.jsonl files are CI fixtures — replace with a real verifiable corpus.
 dataset: data/slime_code_sample.jsonl
 # Frozen held-out unit-test suite (not used for GRPO rollouts).
 eval_dataset: data/slime_code_eval.jsonl
+require_held_out_eval: true
 eval_on_complete: true
 eval_every_steps: 0
 eval_max_prompts: null

@@ -5,8 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
-
-from seiso.rl_quant.bootstrap import bundle_root
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -23,8 +22,20 @@ class RolloutPrompt:
 
 
 def load_rollout_prompts(path: Path | None, *, limit: int) -> list[RolloutPrompt]:
-    """Return prompt records from JSON, JSONL, or the bundled post-train library."""
-    source = path or (bundle_root() / "prompts" / "post_train_library.json")
+    """Return prompt records from an explicit JSON/JSONL library.
+
+    Distill-RL no longer falls back to the open post-train chat library (no
+    answers/tests). Pass a grounded path, or use ``preference_source=dataset`` /
+    ``data_designer``.
+    """
+    if path is None:
+        raise ValueError(
+            "prompt_library path is required for grounded_library / teacher_style. "
+            "For meaningful Distill-RL defaults use preference_source=dataset "
+            "(curated verifiable Hub set), optional data_designer, or a JSON/JSONL "
+            "with answer and/or tests."
+        )
+    source = Path(path).expanduser()
     if not source.is_file():
         raise FileNotFoundError(f"Prompt library not found: {source}")
 
@@ -36,7 +47,7 @@ def load_rollout_prompts(path: Path | None, *, limit: int) -> list[RolloutPrompt
 
     if not prompts:
         raise ValueError(f"No prompts found in {source}")
-    return prompts[:limit]
+    return prompts[:limit] if limit > 0 else prompts
 
 
 def prompt_texts(prompts: list[RolloutPrompt]) -> list[str]:
@@ -51,14 +62,18 @@ def split_train_val(
 ) -> tuple[list[RolloutPrompt], list[RolloutPrompt]]:
     import random
 
-    if not 0.0 < train_fraction < 1.0:
-        raise ValueError("train_fraction must be between 0 and 1")
+    if not 0.0 < train_fraction <= 1.0:
+        raise ValueError("train_fraction must be in (0, 1]")
     rng = random.Random(seed)  # nosec B311 — deterministic split, not cryptography
     shuffled = list(prompts)
     rng.shuffle(shuffled)
+    if len(shuffled) < 2:
+        # Tiny/single-prompt libraries: all train, empty val.
+        return shuffled, []
+    # Keep ≥1 val row when possible (including train_fraction=1.0 under tiny/smoke).
     split_at = max(1, int(len(shuffled) * train_fraction))
     if split_at >= len(shuffled):
-        split_at = max(1, len(shuffled) - 1)
+        split_at = len(shuffled) - 1
     return shuffled[:split_at], shuffled[split_at:]
 
 
@@ -100,29 +115,63 @@ def _normalize_prompt_row(row: object, *, fallback_id: str) -> RolloutPrompt:
         return RolloutPrompt(prompt_id=fallback_id, text=row)
     if not isinstance(row, dict):
         raise ValueError(f"Prompt row must be a string or object, got {type(row)!r}")
-    text = str(row.get("prompt") or row.get("text") or row.get("instruction") or "")
-    prompt_id = str(row.get("prompt_id") or row.get("id") or fallback_id)
-    answer = row.get("answer")
-    benchmark = row.get("benchmark") or row.get("dataset") or row.get("task")
-    tests = row.get("tests", row.get("test"))
-    timeout_raw = row.get("timeout_s", row.get("timeout"))
+    text = _extract_prompt_text(row)
+    raw_meta = row.get("metadata")
+    meta: dict[str, Any] = raw_meta if isinstance(raw_meta, dict) else {}
+    prompt_id = str(
+        row.get("prompt_id")
+        or row.get("id")
+        or meta.get("prompt_id")
+        or meta.get("task_id")
+        or fallback_id
+    )
+    answer = row.get("answer", row.get("label"))
+    if answer is None or (isinstance(answer, str) and not answer.strip()):
+        answer = meta.get("answer") or meta.get("label")
+    benchmark = (
+        row.get("benchmark")
+        or row.get("dataset")
+        or row.get("task")
+        or row.get("reward")
+        or meta.get("benchmark")
+        or meta.get("rm_type")
+    )
+    tests = row.get("tests", row.get("test", meta.get("tests")))
+    timeout_raw = row.get("timeout_s", row.get("timeout", meta.get("timeout_s")))
     timeout_s: float | None
     try:
         timeout_s = float(timeout_raw) if timeout_raw is not None else None
     except (TypeError, ValueError):
         timeout_s = None
-    prompt_code = row.get("prompt_code") or row.get("code_prefix")
-    setup = row.get("setup")
+    prompt_code = row.get("prompt_code") or row.get("code_prefix") or meta.get("prompt_code")
+    setup = row.get("setup", meta.get("setup"))
     return RolloutPrompt(
         prompt_id=prompt_id,
         text=text,
-        answer=str(answer) if answer is not None else None,
+        answer=str(answer) if answer is not None and str(answer).strip() else None,
         benchmark=str(benchmark).lower() if benchmark is not None else None,
         tests=tests if tests is not None else None,
         prompt_code=str(prompt_code) if prompt_code is not None else None,
         setup=str(setup) if setup is not None else None,
         timeout_s=timeout_s,
     )
+
+
+def _extract_prompt_text(row: dict) -> str:
+    """Support Distill JSONL strings and slime/Data Designer chat prompts."""
+    raw = row.get("prompt")
+    if isinstance(raw, list):
+        parts: list[str] = []
+        for msg in raw:
+            if isinstance(msg, dict) and msg.get("content") is not None:
+                parts.append(str(msg["content"]))
+            elif isinstance(msg, str):
+                parts.append(msg)
+        return "\n".join(parts).strip()
+    if isinstance(raw, str) and raw.strip():
+        return raw.strip()
+    text = row.get("text") or row.get("instruction")
+    return str(text or "").strip()
 
 
 def prompt_to_verifier_sample(prompt: RolloutPrompt) -> dict:

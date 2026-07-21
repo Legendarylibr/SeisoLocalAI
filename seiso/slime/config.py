@@ -2,10 +2,20 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, fields
 from pathlib import Path
+from typing import Any
 
 import yaml
+
+
+def allow_tiny_rl() -> bool:
+    return os.environ.get("SEISO_ALLOW_TINY_RL", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }
 
 
 def effective_train_batch_size(config: SingleGpuSlimeConfig) -> int:
@@ -42,6 +52,13 @@ def validate_oversample_vs_train_batch(
         )
 
 
+def _normalize_data_gen_source(value: str) -> str:
+    key = str(value or "off").lower().strip()
+    if key == "hf_dataset":
+        return "dataset"
+    return key
+
+
 @dataclass(frozen=True)
 class SingleGpuSlimeConfig:
     """Small, explicit config for local GRPO-style training.
@@ -53,6 +70,8 @@ class SingleGpuSlimeConfig:
     model_id: str
     dataset: Path
     output_dir: Path
+    # Optional user-data root; local dataset_ref paths must stay inside it.
+    sandbox_root: Path | None = None
     # Frozen held-out prompts (not used for GRPO rollouts). Prefer a disjoint
     # unit-test JSONL such as data/slime_code_eval.jsonl.
     eval_dataset: Path | None = None
@@ -102,7 +121,6 @@ class SingleGpuSlimeConfig:
     temperature: float = 0.9
     top_p: float = 0.95
     # Online generate: hf (colocated, default) | sglang | vllm | auto
-    # "data_gen" is accepted as an alias of "hf".
     rollout_backend: str = "hf"
     # slime: --apply-chat-template
     apply_chat_template: bool = True
@@ -178,19 +196,27 @@ class SingleGpuSlimeConfig:
     verifier_data_file: str = "slime_verifier_data.jsonl"
     verifier_max_text_chars: int = 2048
     # High-level data generation: when enabled (or count > 0), materialize a
-    # verifiable prompt corpus before training instead of relying on tiny
-    # hardcoded smoke JSONL. Completions still come from online rollouts.
+    # verifiable prompt corpus before training. Completions still come from
+    # online rollouts. Prefer operator/HF ``dataset`` without data_gen.
     data_gen: bool = False
     data_gen_count: int = 0
     data_gen_seed: int = 0
-    data_gen_mix: str = "numeric:0.5,choice:0.2,code:0.3"
+    data_gen_mix: str = "numeric:0.7,choice:0.3"
     data_gen_difficulty: str = "easy:0.35,medium:0.45,hard:0.20"
     data_gen_filename: str = "slime_generated.jsonl"
-    # NVIDIA NeMo Data Designer for synth prompts. auto = only multi-GPU vLLM runs.
-    # on/off force; never used for hf/sglang backends.
-    data_designer: str = "auto"
+    # Materialize source: off (default) | dataset | data_designer | auto.
+    data_gen_source: str = "off"
+    # HF hub id / path when data_gen is on and data_gen_source=dataset|auto.
+    dataset_ref: str | None = None
+    dataset_split: str = "train"
+    # NVIDIA NeMo Data Designer: on = force; off = never; auto = no silent select
+    # (pair with data_gen_source=data_designer for opt-in materialize).
+    data_designer: str = "off"
     # Optional TP hint for gate when WORLD_SIZE==1 but vLLM uses multiple GPUs.
     vllm_tensor_parallel: int = 0
+    # Product default: require a disjoint held-out eval JSONL.
+    # data_gen may auto-split as a last resort (warning). CI: SEISO_ALLOW_TINY_RL=1.
+    require_held_out_eval: bool = True
 
     @classmethod
     def from_yaml(cls, path: Path) -> SingleGpuSlimeConfig:
@@ -203,6 +229,7 @@ class SingleGpuSlimeConfig:
             "save_steps": "save_every_steps",
             "logging_steps": "log_every_steps",
             "slime_use_lora": "use_lora",
+            "hf_dataset": "dataset_ref",
         }
         for src, dest in aliases.items():
             if src in data and dest not in data:
@@ -212,15 +239,24 @@ class SingleGpuSlimeConfig:
         known = {f.name for f in fields(cls)}
         # Filter unknown keys (e.g. method/quant from TrainConfig-oriented YAMLs).
         path_keys = {"dataset", "output_dir", "eval_dataset"}
-        payload = {
-            key: (
-                Path(value)
-                if key in path_keys and value is not None
-                else value
+        payload: dict[str, Any] = {}
+        for key, value in data.items():
+            if key not in known:
+                continue
+            if key in path_keys and value is not None:
+                payload[key] = Path(value)
+            elif key in {"data_designer", "data_gen_source"} and isinstance(value, bool):
+                # YAML 1.1 parses bare on/off as booleans.
+                if key == "data_designer":
+                    payload[key] = "on" if value else "off"
+                else:
+                    payload[key] = "auto" if value else "off"
+            else:
+                payload[key] = value
+        if "data_gen_source" in payload:
+            payload["data_gen_source"] = _normalize_data_gen_source(
+                str(payload["data_gen_source"])
             )
-            for key, value in data.items()
-            if key in known
-        }
         return cls(**payload)
 
     def validate(self) -> None:
@@ -348,6 +384,40 @@ class SingleGpuSlimeConfig:
                 "eval_dataset must differ from dataset (held-out eval cannot "
                 "reuse the training JSONL)"
             )
+        # Only paths that can actually materialize may auto-split held-out.
+        # Bare dataset_ref, source=off, or auto without ref/DD=on do not.
+        src_for_split = _normalize_data_gen_source(str(self.data_gen_source or "off"))
+        materialize_enabled = bool(self.data_gen or self.data_gen_count > 0)
+        ref = (self.dataset_ref or "").strip()
+        dd_mode = str(self.data_designer or "off").lower().strip()
+        dd_on = dd_mode in {"on", "true", "1", "yes", "force", "always"}
+        dd_off = dd_mode in {"off", "false", "0", "no", "disable", "disabled"}
+        dataset_as_hub = bool(
+            self.dataset and not Path(self.dataset).expanduser().is_file()
+        )
+        if not materialize_enabled or src_for_split in {"off", "none"}:
+            materialize_will_split = False
+        elif src_for_split == "dataset":
+            materialize_will_split = bool(ref) or dataset_as_hub
+        elif src_for_split == "data_designer":
+            # Trainer proceeds when mode is not off (on|auto).
+            materialize_will_split = not dd_off
+        elif src_for_split in {"auto", ""}:
+            # Matches trainer want_dataset / want_dd selection.
+            materialize_will_split = bool(ref) or dd_on
+        else:
+            materialize_will_split = False
+        if (
+            self.require_held_out_eval
+            and self.eval_dataset is None
+            and not allow_tiny_rl()
+            and not materialize_will_split
+        ):
+            raise ValueError(
+                "eval_dataset is required for product slime runs (held-out "
+                "verifiable eval, distinct from dataset). CI fixtures may set "
+                "require_held_out_eval=false or SEISO_ALLOW_TINY_RL=1."
+            )
         if self.use_lora:
             if self.lora_r < 1:
                 raise ValueError("lora_r must be positive")
@@ -384,6 +454,29 @@ class SingleGpuSlimeConfig:
             raise ValueError("data_gen_mix must not be empty")
         if not self.data_gen_difficulty:
             raise ValueError("data_gen_difficulty must not be empty")
+        src = _normalize_data_gen_source(str(self.data_gen_source or "off"))
+        if src not in {
+            "auto",
+            "data_designer",
+            "dataset",
+            "off",
+            "none",
+            "",
+        }:
+            raise ValueError(
+                "data_gen_source must be one of: off, auto, data_designer, "
+                f"dataset (got {self.data_gen_source!r})"
+            )
+        if src == "dataset" and (self.data_gen or self.data_gen_count > 0):
+            ref = (self.dataset_ref or "").strip()
+            dataset_as_hub = bool(
+                self.dataset and not Path(self.dataset).expanduser().is_file()
+            )
+            if not ref and not dataset_as_hub:
+                raise ValueError(
+                    "data_gen_source=dataset requires dataset_ref (HF hub id) "
+                    "or a non-file dataset ref"
+                )
         mode = str(self.data_designer or "auto").lower().strip()
         if mode not in {
             "auto",

@@ -201,11 +201,9 @@ def format_reward(
 ) -> tuple[bool, float]:
     """Format score on *raw* generated tokens only.
 
-    - ``format_score`` is soft in ``[0, 1]``: empty/short traces do not earn
-      full format bonus (blocks ``<think></think>`` reward hacking).
-    - A closed trace with no final-answer text is capped at half credit.
-    - ``format_ok`` is True only at full credit so ``missing_thinking_penalty``
-      also covers empty/short shells (not only missing close tags).
+    - ``format_ok`` is True when a think block is closed (penalty key only).
+    - ``format_score`` is soft in ``[0, 1]``: empty/short/no-final traces do not
+      earn full format bonus (blocks ``<think></think>`` reward hacking).
     """
     if not require_thinking_trace:
         return True, 0.0
@@ -219,8 +217,7 @@ def format_reward(
         score = 1.0 if tokens else 0.0
     if not final_answer.strip():
         score *= 0.5
-    score = float(score)
-    return score >= 1.0 - 1e-9, score
+    return True, float(score)
 
 
 def experimental_process_reward(
@@ -362,7 +359,8 @@ def score_completion(
         )
 
     process = 0.0
-    if process_weight > 0 and require_thinking_trace and has_closed:
+    # Process shaping only when format is closed (format_ok); do not reward shells.
+    if process_weight > 0 and require_thinking_trace and format_ok:
         process = experimental_process_reward(
             thinking_trace,
             final_answer,
@@ -391,11 +389,7 @@ def score_completion(
     if use_code and proof_detail is not None:
         detail = proof_detail
     elif require_thinking_trace and not format_ok:
-        detail = (
-            "missing_closed_think_trace"
-            if not has_closed
-            else "thinking_format_incomplete"
-        )
+        detail = "missing_closed_think_trace"
     elif not passed and answer is not None:
         detail = "outcome_mismatch"
 

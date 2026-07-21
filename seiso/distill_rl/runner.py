@@ -188,11 +188,18 @@ def _run_single_job(
         val_path = config.preferences_val_path
         if not val_path.is_file():
             val_path = config.preferences_dir / "preferences_val.jsonl"
+        eval_library = config.prompt_library_path
+        if eval_library is None:
+            from seiso.distill_rl.grounded_data import grounded_prompts_path
+
+            grounded = grounded_prompts_path(config)
+            if grounded.is_file():
+                eval_library = grounded
         evaluation = evaluate_pipeline(
             output_dir=config.evaluation_dir,
             checkpoints=checkpoints,
             val_preferences_path=val_path,
-            prompt_library_path=config.prompt_library_path,
+            prompt_library_path=eval_library,
             eval_max_prompts=config.eval_max_prompts,
             trust_remote_code=config.trust_remote_code,
             benchmark_verifiable=config.benchmark_verifiable,
@@ -284,18 +291,34 @@ def _run_shared_stages(
         )
 
     if "rollout" in config.stages:
-        if on_log:
-            on_log(
-                "Phase: rollout (verifiable student groups and/or "
-                "teacher≻student for open prompts)"
-            )
+        from seiso.distill_rl.config import allow_tiny_rl
+        from seiso.distill_rl.grounded_data import materialize_distill_grounded_prompts
         from seiso.distill_rl.preferences import build_preference_bundle
 
+        source = str(config.preference_source)
+        if source == "teacher_style":
+            library_path = config.prompt_library_path
+            if library_path is None:
+                raise ValueError(
+                    "preference_source=teacher_style requires prompt_library"
+                )
+            if on_log:
+                on_log(f"Phase: rollout (teacher_style; library={library_path})")
+            min_grounded = None
+        else:
+            if on_log:
+                on_log(
+                    f"Phase: rollout (preference_source={source}; "
+                    f"data_gen_count={config.data_gen_count})"
+                )
+            library_path = materialize_distill_grounded_prompts(config, on_log=on_log)
+            # Match materialize floors: smoke preset and SEISO_ALLOW_TINY_RL.
+            min_grounded = 1 if allow_tiny_rl(preset=config.preset) else None
         bundle = build_preference_bundle(
             teacher_model=config.teacher_model,
             student_model=str(distilled_dir),
             output_dir=config.preferences_dir,
-            prompt_library_path=config.prompt_library_path,
+            prompt_library_path=library_path,
             max_prompts=config.rollout_max_prompts,
             max_new_tokens=config.rollout_max_new_tokens,
             temperature=config.rollout_temperature,
@@ -307,8 +330,10 @@ def _run_shared_stages(
             trust_remote_code=config.trust_remote_code,
             require_thinking_trace=config.require_thinking_trace,
             thinking_instruction=config.thinking_instruction,
-            verifiable_outcome_rewards=config.verifiable_outcome_rewards,
+            # Normalized on DistillRLConfig from preference_source.
+            verifiable_outcome_rewards=bool(config.verifiable_outcome_rewards),
             grpo_group_size=config.grpo_group_size,
+            min_grounded_prompts=min_grounded,
             on_log=on_log,
         )
         stage_results["preferences_train"] = str(bundle.train_path)
@@ -362,17 +387,27 @@ def _write_effective_config(config: DistillRLConfig) -> None:
 
 
 def _distill_texts(config: DistillRLConfig) -> list[str]:
+    from seiso.distill_rl.grounded_data import materialize_distill_grounded_prompts
     from seiso.distill_rl.outcome import format_thinking_prompt
     from seiso.distill_rl.prompts import load_rollout_prompts, prompt_texts
 
     limit = config.max_train_samples or config.rollout_max_prompts
-    prompts = load_rollout_prompts(config.prompt_library_path, limit=limit)
+    source = str(config.preference_source)
+    if source == "teacher_style" and config.prompt_library_path is not None:
+        prompts = load_rollout_prompts(config.prompt_library_path, limit=limit or 0)
+    elif source == "grounded_library" and config.prompt_library_path is not None:
+        # Prefer shared materialize (copies/normalizes) so distill==rollout corpus.
+        library = materialize_distill_grounded_prompts(config)
+        prompts = load_rollout_prompts(library, limit=limit or 0)
+    else:
+        library = materialize_distill_grounded_prompts(config)
+        prompts = load_rollout_prompts(library, limit=limit or 0)
+    texts = prompt_texts(prompts)
     if config.require_thinking_trace:
         return [
-            format_thinking_prompt(text, config.thinking_instruction)
-            for text in prompt_texts(prompts)
+            format_thinking_prompt(text, config.thinking_instruction) for text in texts
         ]
-    return prompt_texts(prompts)
+    return texts
 
 
 def _run_distill(
@@ -442,7 +477,10 @@ def _checkpoint_step(path: Path) -> int:
 
 
 def _latest_checkpoint(run_dir: Path) -> Path | None:
-    return max(run_dir.glob("checkpoint-*"), key=_checkpoint_step, default=None)
+    checkpoints = [path for path in run_dir.glob("checkpoint-*") if path.is_dir()]
+    if not checkpoints:
+        return None
+    return max(checkpoints, key=_checkpoint_step)
 
 
 def _run_dpo(

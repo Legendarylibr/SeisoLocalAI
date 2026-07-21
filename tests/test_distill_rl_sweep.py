@@ -50,6 +50,7 @@ def test_sweep_dpo_max_steps_uses_train_size_when_uncapped():
         data_dir=Path("/tmp"),
         payload={
             "preset": "full",
+            "dataset_ref": "org/example-math",
             "dpo_batch_size": 1,
             "dpo_gradient_accumulation_steps": 8,
         },
@@ -80,7 +81,7 @@ def test_distill_rl_defaults_use_stable_dpo_values(tmp_path: Path):
         job_id="job-1",
         user_id="user-1",
         data_dir=tmp_path,
-        payload={"preset": "reproducible"},
+        payload={"preset": "reproducible", "dataset_ref": "org/example-math"},
     )
     assert cfg.dpo_learning_rate == pytest.approx(5e-6)
     assert cfg.dpo_gradient_accumulation_steps == 8

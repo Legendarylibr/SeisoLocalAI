@@ -27,6 +27,7 @@ def test_train_config_accepts_slime_method():
             "reward": "contains_answer",
             "max_vram_gb": 12,
             "logging_steps": 1,
+            "require_held_out_eval": False,
         }
     )
 
@@ -37,10 +38,13 @@ def test_train_config_accepts_slime_method():
 
 
 def test_train_config_projects_to_single_gpu_slime_config(tmp_path):
+    eval_path = tmp_path / "slime_eval.jsonl"
+    eval_path.write_text("{}\n", encoding="utf-8")
     cfg = TrainConfig.model_validate(
         {
             "model_id": "test/model",
             "dataset": tmp_path / "slime.jsonl",
+            "slime_eval_dataset": eval_path,
             "output_dir": tmp_path / "out",
             "method": "slime",
             "metadata_field": "context",
@@ -115,10 +119,12 @@ def test_example_training_slime_config_loads():
 
     assert cfg.method == TrainMethod.SLIME
     assert slime.reward == "auto"
-    assert slime.answer_field == "label"
+    assert slime.answer_field == "answer"
     assert slime.rollout_backend == "hf"
-    assert slime.data_gen is True
-    assert slime.data_gen_count >= 200
+    assert slime.data_gen is False
+    assert slime.data_gen_source == "off"
+    assert slime.eval_dataset is not None
+    assert slime.require_held_out_eval is True
     assert slime.process_reward_weight == 0.0
     assert slime.format_reward_weight == 0.1
     assert slime.dynamic_sampling_filter == "reward_nonzero_std"
@@ -175,8 +181,9 @@ def test_example_training_slime_ddp_config_loads():
     assert cfg.distributed_strategy.value == "ddp"
     assert cfg.balance_data is True
     assert slime.balance_data is True
-    assert slime.data_gen is True
-    assert slime.data_gen_count >= 200
+    assert slime.data_gen is False
+    assert slime.data_gen_source == "off"
+    assert slime.eval_dataset is not None
     assert slime.clip_ratio_high == 0.28
     assert slime.grpo_std_normalization is True
 
@@ -195,5 +202,51 @@ def test_train_config_rejects_slime_oversample_below_rollout_batch(tmp_path):
                 "rollout_batch_size": 8,
                 "over_sampling_batch_size": 4,
                 "dynamic_sampling_filter": "reward_nonzero_std",
+                "require_held_out_eval": False,
             }
         )
+
+
+def test_train_config_rejects_slime_without_held_out_eval(
+    tmp_path: Path, monkeypatch
+):
+    import pytest
+    from pydantic import ValidationError
+
+    monkeypatch.delenv("SEISO_ALLOW_TINY_RL", raising=False)
+    with pytest.raises(ValidationError, match="eval_dataset is required"):
+        TrainConfig.model_validate(
+            {
+                "model_id": "test/model",
+                "dataset": tmp_path / "slime.jsonl",
+                "output_dir": tmp_path / "out",
+                "method": "slime",
+                "require_held_out_eval": True,
+            }
+        )
+
+
+def test_train_config_accepts_legacy_hf_dataset_field_alias(tmp_path: Path):
+    cfg = TrainConfig.model_validate(
+        {
+            "model_id": "test/model",
+            "dataset": tmp_path / "slime.jsonl",
+            "output_dir": tmp_path / "out",
+            "method": "slime",
+            "hf_dataset": "org/math",
+            "data_gen_source": "hf_dataset",
+            "require_held_out_eval": False,
+        }
+    )
+    assert cfg.dataset_ref == "org/math"
+    assert cfg.data_gen_source == "dataset"
+    slime = cfg.to_single_gpu_slime_config()
+    assert slime.dataset_ref == "org/math"
+    assert slime.data_gen_source == "dataset"
+
+
+def test_materialize_source_hf_dataset_alias(tmp_path: Path):
+    from seiso.rl_verify.synth_materialize import normalize_materialize_source
+
+    assert normalize_materialize_source("hf_dataset") == "dataset"
+    assert normalize_materialize_source("dataset") == "dataset"

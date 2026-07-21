@@ -1,8 +1,13 @@
+# CI fixture only — not for meaningful GRPO training (tiny JSONL + SEISO_ALLOW_TINY_RL).
 # Tiny CPU smoke for slime GRPO + verifier rewards (no CUDA required).
 model_id: hf-internal-testing/tiny-random-LlamaForCausalLM
 method: slime
 quant: none
 dataset: data/slime_sample.jsonl
+# Disjoint from train; eval_on_complete left false for speed.
+eval_dataset: data/slime_numeric_eval.jsonl
+# CI fixture — opt out of product held-out gate (also covered by SEISO_ALLOW_TINY_RL).
+require_held_out_eval: false
 output_dir: ./.test_outputs/slime-smoke
 prompt_field: prompt
 answer_field: answer

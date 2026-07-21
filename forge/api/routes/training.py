@@ -276,14 +276,35 @@ async def start_training(
     settings: Annotated[ForgeSettings, Depends(get_settings)],
 ) -> TrainingJobResponse:
     training_config = dict(body.config)
+    install_root = Path(__file__).resolve().parents[3]
     dataset = training_config.get("dataset")
     if isinstance(dataset, str):
         training_config["dataset"] = resolve_training_dataset_path(
             settings.data_dir,
             user_id,
             dataset,
-            install_root=Path(__file__).resolve().parents[3],
+            install_root=install_root,
         )
+    # Alias + resolve held-out eval the same way as train dataset.
+    eval_key = (
+        "slime_eval_dataset"
+        if training_config.get("slime_eval_dataset")
+        else "eval_dataset"
+        if training_config.get("eval_dataset")
+        else None
+    )
+    if eval_key is not None:
+        eval_raw = training_config.get(eval_key)
+        if isinstance(eval_raw, str):
+            resolved_eval = resolve_training_dataset_path(
+                settings.data_dir,
+                user_id,
+                eval_raw,
+                install_root=install_root,
+            )
+            training_config["slime_eval_dataset"] = resolved_eval
+            if eval_key == "eval_dataset":
+                training_config.pop("eval_dataset", None)
 
     try:
         assert_user_training_config(settings.data_dir, user_id, training_config)

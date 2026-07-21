@@ -4,12 +4,14 @@ model_id: Qwen/Qwen2.5-0.5B-Instruct
 method: slime
 # slime path uses full-precision (+ optional LoRA); quant ignored by slime runner
 quant: none
-# Placeholder; data_gen materializes a slime-format corpus under output_dir.
+# CI fixtures — replace with a curated verifiable train/eval pair for real runs.
 dataset: data/slime_sample.jsonl
+eval_dataset: data/slime_numeric_eval.jsonl
+require_held_out_eval: true
 output_dir: outputs/slime-single-gpu
 # slime --input-key / --label-key / --metadata-key
 prompt_field: prompt
-answer_field: label
+answer_field: answer
 metadata_field: metadata
 # slime --rm-type (per-row metadata.rm_type when auto)
 reward: auto
@@ -66,10 +68,9 @@ stop_on_nonfinite: true
 write_verifier_data: true
 verifier_data_file: slime_verifier_data.jsonl
 verifier_max_text_chars: 2048
-# High-level prompt corpus (prompt/label/metadata slime JSONL)
-data_gen: true
-data_gen_count: 400
-data_gen_seed: 17
-data_gen_mix: "numeric:0.55,choice:0.15,code:0.30"
-data_gen_difficulty: "easy:0.35,medium:0.45,hard:0.20"
-data_gen_filename: slime_generated.jsonl
+data_gen: false
+data_gen_source: "off"
+data_designer: "off"
+# Opt-in dataset materialize: data_gen=true, data_gen_source=dataset, dataset_ref=...
+# Opt-in Data Designer: data_gen=true, data_gen_source=data_designer, data_designer="on",
+#   vllm_base_url=http://127.0.0.1:8000 (running endpoint; not auto-started).

@@ -117,10 +117,10 @@ def test_example_single_gpu_slime_config_loads_samples():
     assert cfg.use_lora is True
     assert cfg.lora_r == 16
     assert cfg.reward == "auto"
-    assert cfg.answer_field == "label"
+    assert cfg.answer_field == "answer"
     assert cfg.rollout_backend == "hf"
-    assert cfg.data_gen is True
-    assert cfg.data_gen_count >= 200
+    assert cfg.data_gen is False
+    assert cfg.data_gen_source == "off"
     assert cfg.process_reward_weight == 0.0
     assert len(samples) >= 16
     assert "prompt" in samples[0]
@@ -518,15 +518,15 @@ def test_completion_scoring_is_outcome_first_with_format_bonus(tmp_path: Path):
     # "First check the arithmetic" = 4 tokens vs min_thinking_tokens=8 → 0.5
     assert score["format_reward"] == pytest.approx(0.5)
     assert score["process_reward"] == 0.0
-    assert score["format_ok"] is False
-    assert score["thinking_penalty"] == pytest.approx(0.25)
+    assert score["format_ok"] is True
+    assert score["thinking_penalty"] == pytest.approx(0.0)
     assert score["outcome_passed"] is True
-    assert score["reward"] == pytest.approx(1.0 + 0.1 * 0.5 - 0.25)
-    assert continued["format_ok"] is False
+    assert score["reward"] == pytest.approx(1.0 + 0.1 * 0.5)
+    assert continued["format_ok"] is True
     assert continued["format_reward"] == pytest.approx(0.5)
-    assert continued["thinking_penalty"] == pytest.approx(0.25)
+    assert continued["thinking_penalty"] == pytest.approx(0.0)
     assert continued["final_answer"] == "42"
-    assert continued["reward"] == pytest.approx(1.0 + 0.1 * 0.5 - 0.25)
+    assert continued["reward"] == pytest.approx(1.0 + 0.1 * 0.5)
     assert jumped["outcome_reward"] == 1.0
     assert jumped["format_ok"] is False
     assert jumped["thinking_penalty"] == 0.25

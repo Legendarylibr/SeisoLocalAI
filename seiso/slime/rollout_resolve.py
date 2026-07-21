@@ -5,14 +5,17 @@ from __future__ import annotations
 from seiso.slime.config import SingleGpuSlimeConfig
 from seiso.slime.rollout_http import resolve_vllm_base_url
 
-_ROLLOUT_BACKENDS = frozenset({"hf", "sglang", "vllm", "auto", "data_gen"})
+_ROLLOUT_BACKENDS = frozenset({"hf", "sglang", "vllm", "auto"})
 _HTTP_ROLLOUT_BACKENDS = frozenset({"sglang", "vllm"})
 
 
 def _normalize_backend_name(name: str) -> str:
     key = str(name or "hf").lower().strip()
     if key == "data_gen":
-        return "hf"
+        raise ValueError(
+            "rollout_backend=data_gen is no longer supported; use rollout_backend=hf "
+            "for colocated Hugging Face generate"
+        )
     return key
 
 
@@ -23,7 +26,7 @@ def resolve_rollout_backend(
 ) -> str:
     """Resolve effective backend.
 
-    * ``hf`` (default; alias ``data_gen``) — colocated Hugging Face generate
+    * ``hf`` (default) — colocated Hugging Face generate
     * ``sglang`` — OpenAI-compatible SGLang HTTP
     * ``vllm`` — OpenAI-compatible vLLM HTTP (multi-GPU TP server)
     * ``auto`` — prefer vLLM then SGLang when a base URL is set and

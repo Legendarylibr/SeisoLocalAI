@@ -30,8 +30,24 @@ def evaluate_pipeline(
 ) -> dict[str, Any]:
     """Evaluate named checkpoints: perplexity, val preference accuracy, samples."""
     output_dir.mkdir(parents=True, exist_ok=True)
-    eval_prompts = load_rollout_prompts(prompt_library_path, limit=eval_max_prompts)
-    eval_texts = [prompt.text for prompt in eval_prompts]
+    if prompt_library_path is not None:
+        eval_prompts = load_rollout_prompts(prompt_library_path, limit=eval_max_prompts)
+        eval_texts = [prompt.text for prompt in eval_prompts]
+    else:
+        # Prefer prompts embedded in val preferences when no library is configured
+        # (data_designer Distill-RL default).
+        val_probe = _load_jsonl(val_preferences_path)
+        eval_texts = []
+        for row in val_probe:
+            prompt = str(row.get("prompt") or "").strip()
+            if prompt and prompt not in eval_texts:
+                eval_texts.append(prompt)
+            if len(eval_texts) >= max(1, eval_max_prompts):
+                break
+        eval_prompts = [
+            RolloutPrompt(prompt_id=f"pref_{idx}", text=text)
+            for idx, text in enumerate(eval_texts)
+        ]
 
     results: dict[str, Any] = {
         "checkpoints": {},

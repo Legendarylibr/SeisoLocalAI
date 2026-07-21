@@ -36,12 +36,26 @@ describe("trainingConfigGuards", () => {
       trainOnResponsesOnly: true,
       preferenceAsSft: false,
       slimeDynamicSampling: false,
+      slimeEvalDataset: "data/eval.jsonl",
     });
     expect(blockers.map((b) => b.code)).toEqual([
       "preference_not_for_slime",
       "packing_response_mask_conflict",
       "slime_needs_dynamic_sampling",
     ]);
+  });
+
+  it("blocks slime without held-out eval", () => {
+    const blockers = getTrainingConfigBlockers({
+      method: "slime",
+      datasetFormat: "chat",
+      packing: false,
+      trainOnResponsesOnly: true,
+      preferenceAsSft: false,
+      slimeDynamicSampling: true,
+      slimeEvalDataset: "",
+    });
+    expect(blockers.map((b) => b.code)).toEqual(["slime_needs_held_out_eval"]);
   });
 
   it("blocks preference without opt-in for LoRA", () => {

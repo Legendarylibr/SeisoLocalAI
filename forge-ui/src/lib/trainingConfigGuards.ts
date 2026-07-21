@@ -45,6 +45,10 @@ export type TrainingStudioGuardInput = {
   trainOnResponsesOnly: boolean;
   preferenceAsSft: boolean;
   slimeDynamicSampling?: boolean;
+  /** Held-out verifiable eval JSONL (required for product slime). */
+  slimeEvalDataset?: string;
+  /** When true, materialize may auto-split held-out (data_gen + source). */
+  slimeMaterializeSplitsEval?: boolean;
 };
 
 export type TrainingConfigBlocker = {
@@ -52,7 +56,8 @@ export type TrainingConfigBlocker = {
     | "preference_needs_dpo_or_opt_in"
     | "preference_not_for_slime"
     | "packing_response_mask_conflict"
-    | "slime_needs_dynamic_sampling";
+    | "slime_needs_dynamic_sampling"
+    | "slime_needs_held_out_eval";
   message: string;
 };
 
@@ -99,6 +104,18 @@ export function getTrainingConfigBlockers(
       code: "slime_needs_dynamic_sampling",
       message:
         "SLIME GRPO needs reward-diverse groups (dynamic sampling). Turning it off makes advantages vacuous.",
+    });
+  }
+
+  if (
+    input.method === "slime" &&
+    !input.slimeMaterializeSplitsEval &&
+    !(input.slimeEvalDataset || "").trim()
+  ) {
+    blockers.push({
+      code: "slime_needs_held_out_eval",
+      message:
+        "SLIME product runs need a held-out eval JSONL (distinct from train) for verifiable metrics.",
     });
   }
 

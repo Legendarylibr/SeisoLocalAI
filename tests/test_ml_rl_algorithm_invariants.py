@@ -25,7 +25,7 @@ def test_dpo_empty_completion_logps_are_large_negative():
     logits = torch.zeros(2, 4, 5)
     labels = torch.full((2, 4), -100)
     logps = get_batch_logps(logits, labels, average_log_prob=False)
-    assert torch.all(logps == -1.0e4)
+    assert torch.all(logps == -1.0e2)
 
 
 def test_dpo_collator_joint_tokenizes_prompt_completion():
@@ -325,6 +325,7 @@ def test_train_config_rejects_penalty_that_loses_to_format_shaping(tmp_path):
                 "format_reward_weight": 0.5,
                 "process_reward_weight": 0.0,
                 "missing_thinking_penalty": 0.6,
+                "require_held_out_eval": False,
             }
         )
 
@@ -424,6 +425,7 @@ def test_train_config_slime_projection_defaults_per_token(tmp_path):
             "dataset": tmp_path / "slime.jsonl",
             "method": "slime",
             "epochs": 1,
+            "require_held_out_eval": False,
         }
     )
     assert cfg.calculate_per_token_loss is True
@@ -447,6 +449,7 @@ def test_train_config_slime_multi_epoch_applies_kl_coef(tmp_path, monkeypatch):
             "method": "slime",
             "epochs": 3,
             "kl_coef": 0.0,
+            "require_held_out_eval": False,
         }
     )
     assert cfg.kl_coef == pytest.approx(0.02)

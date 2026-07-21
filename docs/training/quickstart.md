@@ -166,28 +166,19 @@ Tiny hand-written smoke JSONL (tens of easy arithmetic items) does **not**
 produce useful GRPO: outcome rewards are nearly uniform, dynamic sampling drops
 all groups, and training ends with `no_trainable_groups`.
 
-Seiso ships a **high-level data generator** that builds large, deterministic,
-checkable prompt corpora (**prompts + labels/tests only** — completions always
-come from online rollouts):
-
-```bash
-# Standalone (inspect before training)
-python -m seiso.rl_verify.data_gen \
-  --out data/slime_generated.jsonl \
-  --count 500 \
-  --mix numeric:0.5,choice:0.2,code:0.3 \
-  --difficulty easy:0.35,medium:0.45,hard:0.20 \
-  --seed 17 --print-summary
-```
-
-Or enable generation inside the slime config (`data_gen: true`) so training
-materializes `output_dir/slime_generated.jsonl` automatically:
+Product slime defaults are **operator/HF verifiable JSONL** plus a frozen
+`eval_dataset` (`data_gen` / `data_gen_source` / `data_designer` default **off**).
+Opt-in **materialize** writes `output_dir/slime_generated.jsonl` via
+`data_gen: true` + `data_gen_source: dataset|data_designer` (Data Designer
+needs `pip install -e '.[data-designer]'` and a live OpenAI-compatible endpoint —
+no silent localhost). There is no local toy arithmetic/choice corpus generator.
 
 | Field | Meaning |
 |-------|---------|
-| `data_gen` | Turn on high-level corpus generation before the first rollout |
-| `data_gen_count` | Prompt count (prefer **200+**; 400–2000 for real runs) |
-| `data_gen_mix` | Stream mix: `numeric` / `choice` / `code` |
+| `data_gen` | Opt-in: materialize a grounded corpus before the first rollout |
+| `data_gen_source` | `off` (default) \| `dataset` \| `data_designer` \| `auto` |
+| `data_gen_count` | Prompt count when materialize is on (prefer **≥256**; 1k–10k+ for real runs) |
+| `data_gen_mix` | Stream mix for Data Designer: `numeric` / `choice` (code via HF/JSONL) |
 | `data_gen_difficulty` | `easy` / `medium` / `hard` weights |
 | `data_gen_seed` | Deterministic seed (same seed ⇒ same corpus) |
 | `reward: auto` | Per-row checker from generated `reward` / `benchmark` fields |
@@ -241,26 +232,26 @@ scripts/run_slime_vllm_ddp.sh 2 configs/example_training_slime_vllm.yaml
 vLLM must read `output_dir/vllm_weight_sync/` (shared FS on multi-node).  
 Managed multi-GPU: set `SEISO_MANAGED_VLLM_ENABLED=true` and `SEISO_MANAGED_VLLM_ENABLE_LORA=true`, then point `vllm_base_url` at the managed server (or leave empty to adopt a running managed endpoint).
 
-**Synth data (multi-GPU vLLM only):** when `data_gen: true` and `data_designer: auto` (default), multi-GPU vLLM runs materialize numeric/choice prompts with [NVIDIA NeMo Data Designer](https://github.com/NVIDIA-NeMo/DataDesigner) against the same local vLLM OpenAI endpoint. Code-stream rows stay Seiso unit-test grounded. Install optional extra: `pip install -e '.[data-designer]'`. HF and SGLang slime paths keep the deterministic Seiso generator.
+**Data (RLVR):** default is operator/HF verifiable JSONL + a **frozen** `eval_dataset` (OpenR1-style). Floors (`>=256`) are anti-toy gates; real GRPO runs want ≫1k–10k+. Suggested Hub starting points (map `answer` / verify fields): [`open-r1/OpenR1-Math-220k`](https://huggingface.co/datasets/open-r1/OpenR1-Math-220k), code sets with unit tests. Opt-in materialize: `data_gen: true` + `data_gen_source: dataset|data_designer` (DD needs `pip install -e '.[data-designer]'` + a live `vllm_base_url` — not auto-started). Tiny `data/slime_*.jsonl` files are **CI fixtures** only.
 
 | Field | Meaning |
 |-------|---------|
-| `data_designer` | `auto` (multi-GPU vLLM only) \| `on` \| `off` |
+| `data_gen_source` | `off` (default) \| `dataset` \| `data_designer` \| `auto` |
+| `dataset_ref` | Hub id / path when materializing via prep |
+| `data_designer` | `off` (default) \| `on` (opt-in) \| `auto` |
+| `eval_dataset` | Frozen held-out verifiable JSONL (must ≠ `dataset`; preferred over auto-split) |
 | `vllm_tensor_parallel` | Optional TP hint when `WORLD_SIZE=1` but vLLM uses multiple GPUs |
 
 Not included (use upstream slime): Megatron TP/PP, Ray placement, NCCL tensor broadcast.
-Streams:
 
-- **numeric** — multi-step arithmetic / word problems with exact answers  
-- **choice** — multiple-choice with letter labels  
-- **code** — unit-test-grounded programs (sandbox-verified goldens)
-
-Start from `configs/example_training_slime.yaml`:
+Start from `configs/example_training_slime.yaml` (set a real dataset or Data Designer endpoint):
 
 ```yaml
 method: slime
 model_id: Qwen/Qwen2.5-0.5B-Instruct
-dataset: data/slime_sample.jsonl   # placeholder when data_gen is true
+dataset: /path/to/verifiable_train.jsonl
+eval_dataset: /path/to/verifiable_eval.jsonl
+require_held_out_eval: true
 reward: auto
 max_vram_gb: 16
 rollouts_per_prompt: 4
@@ -281,19 +272,19 @@ slime_use_lora: true
 auto_stop: true
 auto_stop_metric: reward_mean
 write_verifier_data: true
-data_gen: true
-data_gen_count: 400
-data_gen_mix: "numeric:0.55,choice:0.15,code:0.30"
+# Opt-in materialize (default off): data_gen: true / data_gen_source: dataset|data_designer
 ```
 
-Bundled smoke datasets (expand for real training):
+CI fixture JSONLs (not for training):
 
 | Dataset | Checker | Config |
 |---------|---------|--------|
-| `data/slime_sample.jsonl` | `numeric` | `configs/example_slime_single_gpu.yaml`, `configs/example_training_slime.yaml` |
-| `data/slime_code_sample.jsonl` | `code` (all unit tests must pass) | `configs/example_slime_code.yaml` |
-| `data/slime_code_eval.jsonl` | held-out code eval (unit tests; never train) | `eval_dataset` in slime code configs |
-| `data/slime_choice_sample.jsonl` | `choice` | `configs/example_slime_choice.yaml` |
+| `data/slime_sample.jsonl` | `numeric` | smoke / demo configs only |
+| `data/slime_numeric_eval.jsonl` | held-out numeric eval | `eval_dataset` for numeric slime demos |
+| `data/slime_code_sample.jsonl` | `code` | `configs/example_slime_code.yaml` (replace for real runs) |
+| `data/slime_code_eval.jsonl` | held-out code eval | `eval_dataset` in slime code configs |
+| `data/slime_choice_sample.jsonl` | `choice` | demo / CI only |
+| `data/slime_choice_eval.jsonl` | held-out choice eval | `eval_dataset` for choice slime demos |
 
 Important fields:
 
@@ -322,7 +313,7 @@ Important fields:
 | `over_sampling_batch_size` | slime oversample; when set under filtering must be **≥ `rollout_batch_size`** (prompts) |
 | `answer_field` | slime `--label-key` (default `label`; also accepts `answer`) |
 | `apply_chat_template` | slime `--apply-chat-template` (default true) |
-| `rollout_backend` | `hf` (colocated generate) \| `sglang` \| `vllm` \| `auto` (`data_gen` is an alias of `hf`) |
+| `rollout_backend` | `hf` (colocated generate) \| `sglang` \| `vllm` \| `auto` |
 | `dynamic_sampling_filter` | slime-style nonzero-std filter on **outcome** reward |
 | `clip_ratio` / `clip_ratio_high` | slime `eps_clip` / `eps_clip_high` |
 | `grpo_std_normalization` | slime group mean/std advantages |
@@ -373,29 +364,22 @@ code on sensitive hosts; the sandbox is best-effort, not a full VM.
 
 #### Deterministic code corpus (unit-test grounded)
 
-Do **not** rely on an LLM or the small hand smoke catalog for training data.
-Seiso builds coding tasks with ``code_corpus`` so every row is grounded in unit
-tests (fail-closed via the same sandbox verifier):
-
-1. Programmatic task families (easy/medium/hard) with golden solutions  
-2. **Tests derived** by executing the golden (same source of truth)  
-3. Sandbox check: drop any task whose golden solution fails any test  
-4. **Hard negatives** = mutants that fail ≥1 test (offline DPO) / online fails
+Do **not** treat `code_corpus` or tiny `data/slime_*.jsonl` fixtures as product
+training data. For real code RL, use a curated HF/operator corpus with unit
+tests. The programmatic ``code_corpus`` generator remains for **verifier unit
+tests** and optional CI artifact refresh only:
 
 ```bash
-# Rewrite train artifacts + a disjoint held-out eval suite
+# Rewrite CI fixture artifacts + a disjoint held-out eval suite (not training)
 python -m seiso.rl_verify --data-dir data --seed 0 --eval-count 32
 ```
 
 | Artifact | Use |
 |----------|-----|
-| `data/slime_code_sample.jsonl` | Slime `reward: code` prompts + tests (+ `solution` metadata) |
-| `data/slime_code_eval.jsonl` | Frozen held-out unit-test eval (disjoint ids; never train) |
-| `data/distill_code_synth.jsonl` | Distill prompt library for verifiable code rollouts |
-| `data/synthetic_code_preferences.jsonl` | Offline DPO pairs (golden chosen, mutant rejected) — no model rollouts required |
-
-Same `--seed` ⇒ same catalog order and mutants. Online slime GRPO still samples
-the policy; the golden `solution` is not injected into the reward path.
+| `data/slime_code_sample.jsonl` | CI fixture for `reward: code` |
+| `data/slime_code_eval.jsonl` | CI held-out unit-test eval (never train) |
+| `data/distill_verifiable_prompts.jsonl` | Distill-RL smoke fixture |
+| `data/synthetic_code_preferences.jsonl` | Offline DPO fixture pairs |
 
 **Hard negatives (DPO / distill-RL):** when a group of rollouts for the same prompt
 contains both a verifier pass and fails, Distill-RL keeps:
@@ -408,9 +392,10 @@ Pairs with no pass in the group are dropped. This is appropriate for **offline
 preference** learning; online slime GRPO already demotes fails via group rewards
 and does not need a separate hard-negative loss.
 
-For Distill-RL preference rollouts on verifiable tasks, start from
-`data/distill_verifiable_prompts.jsonl` (math + choice + code) rather than the
-alignment-style post-train library.
+For Distill-RL, default `preference_source=dataset` (curated verifiable Hub
+set + prep). Optional `data_designer` materialize needs the package + endpoint.
+Operator JSONL: `grounded_library` (`>=256` verifiable rows). Tiny checked-in
+JSONLs under `data/` are CI fixtures only (`preset=smoke` / `SEISO_ALLOW_TINY_RL=1`).
 
 Slime checkpoints are exportable like other Seiso checkpoints. LoRA slime runs are treated as adapter checkpoints; non-LoRA slime runs are treated like full checkpoints. In distributed SLIME runs, rank 0 writes shared checkpoints and metrics, while verifier JSONL is rank-scoped to avoid concurrent writes.
 
