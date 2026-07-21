@@ -66,8 +66,9 @@ export function TrainPage() {
   const [loraR, setLoraR] = useState(16);
   const [loraAlpha, setLoraAlpha] = useState(32);
   const [gradAccum, setGradAccum] = useState(4);
-  const [slimeReward, setSlimeReward] = useState("contains_answer");
+  const [slimeReward, setSlimeReward] = useState("auto");
   const [slimeMetadataField, setSlimeMetadataField] = useState("metadata");
+  const [slimeEvalDataset, setSlimeEvalDataset] = useState("");
   const [slimeRolloutsPerPrompt, setSlimeRolloutsPerPrompt] = useState(4);
   const [slimeRolloutBatchSize, setSlimeRolloutBatchSize] = useState(4);
   const [slimeDynamicSampling, setSlimeDynamicSampling] = useState(true);
@@ -405,6 +406,7 @@ export function TrainPage() {
         trainOnResponsesOnly: trainResponsesOnly,
         preferenceAsSft,
         slimeDynamicSampling,
+        slimeEvalDataset,
       }),
     [
       method,
@@ -414,6 +416,7 @@ export function TrainPage() {
       trainResponsesOnly,
       preferenceAsSft,
       slimeDynamicSampling,
+      slimeEvalDataset,
     ],
   );
   const isPreferenceDataset = effectiveDatasetFormat === "preference";
@@ -623,6 +626,9 @@ export function TrainPage() {
           ? {
               reward: slimeReward,
               metadata_field: slimeMetadataField.trim() || "metadata",
+              slime_eval_dataset: slimeEvalDataset.trim() || undefined,
+              slime_eval_on_complete: Boolean(slimeEvalDataset.trim()),
+              require_held_out_eval: true,
               rollouts_per_prompt: slimeRolloutsPerPrompt,
               rollout_batch_size: Math.max(slimeRolloutBatchSize, slimeRolloutsPerPrompt),
               dynamic_sampling_filter: slimeDynamicSampling ? "reward_nonzero_std" : "none",
@@ -1084,7 +1090,17 @@ export function TrainPage() {
               <div className="option-grid">
                 <div className="form-field">
                   <label>Reward</label>
-                  <select value={slimeReward} onChange={(e) => setSlimeReward(e.target.value)}>
+                  <select
+                    value={slimeReward}
+                    onChange={(e) => {
+                      setSlimeReward(e.target.value);
+                      setConfigCustomized(true);
+                    }}
+                  >
+                    <option value="auto">Auto (per-row / answer type)</option>
+                    <option value="numeric">Numeric</option>
+                    <option value="choice">Multiple choice</option>
+                    <option value="code">Code (unit tests)</option>
                     <option value="contains_answer">Contains answer</option>
                     <option value="exact_match">Exact match</option>
                     <option value="field">Dataset reward field</option>
@@ -1096,6 +1112,18 @@ export function TrainPage() {
                     type="text"
                     value={slimeMetadataField}
                     onChange={(e) => setSlimeMetadataField(e.target.value)}
+                  />
+                </div>
+                <div className="form-field">
+                  <label>Held-out eval JSONL</label>
+                  <input
+                    type="text"
+                    value={slimeEvalDataset}
+                    onChange={(e) => {
+                      setSlimeEvalDataset(e.target.value);
+                      setConfigCustomized(true);
+                    }}
+                    placeholder="Distinct from train — verifiable prompts"
                   />
                 </div>
                 <label className="studio-checkbox-item studio-checkbox-item-standalone">

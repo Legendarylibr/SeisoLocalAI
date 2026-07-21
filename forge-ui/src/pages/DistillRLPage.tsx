@@ -42,6 +42,8 @@ export function DistillRLPage() {
   const [studentModel, setStudentModel] = useState("");
   const [distilledPath, setDistilledPath] = useState("");
   const [promptLibrary, setPromptLibrary] = useState("");
+  const [preferenceSource, setPreferenceSource] = useState("dataset");
+  const [datasetRef, setDatasetRef] = useState("");
   const [distillSteps, setDistillSteps] = useState<number | "">("");
   const [rolloutPrompts, setRolloutPrompts] = useState<number | "">("");
   const [dpoEpochs, setDpoEpochs] = useState<number | "">("");
@@ -56,6 +58,17 @@ export function DistillRLPage() {
   const [linkTrainingJob, setLinkTrainingJob] = useState("");
 
   useEffect(() => {
+    // Align source defaults with presets: smoke = CI fixture; research = curated HF.
+    if (preset === "smoke") {
+      setPreferenceSource("grounded_library");
+    } else if (preferenceSource === "grounded_library" && !promptLibrary.trim()) {
+      setPreferenceSource("dataset");
+    }
+    // Only react to preset changes; do not fight manual source edits mid-form.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [preset]);
+
+  useEffect(() => {
     if (!modelsReady) return;
     const localRepos = localModels
       .map((m) => m.repo_id)
@@ -64,12 +77,27 @@ export function DistillRLPage() {
     setStudentModel(resolveModelChoice("distill-rl:student", defaults.student_model, localRepos));
   }, [modelsReady, localModels, defaults.teacher_model, defaults.student_model]);
 
+  const needsDatasetRef =
+    preferenceSource === "dataset" && !datasetRef.trim() && !promptLibrary.trim();
+  const needsPromptLibrary =
+    preferenceSource === "grounded_library" && !promptLibrary.trim() && preset !== "smoke";
+  const dataReady = !needsDatasetRef && !needsPromptLibrary;
+
   const start = async () => {
     setConfigError("");
+    if (!dataReady) {
+      setConfigError(
+        needsDatasetRef
+          ? "Set dataset_ref to a curated verifiable Hub id (or local JSONL with answer/tests)."
+          : "grounded_library requires a prompt library JSON/JSONL with answer/tests.",
+      );
+      return;
+    }
     const body: Record<string, unknown> = {
       preset,
       teacher_model: teacherModel,
       student_model: studentModel,
+      preference_source: preferenceSource,
       seed,
       deterministic,
       evaluate_teacher: evaluateTeacher,
@@ -78,6 +106,7 @@ export function DistillRLPage() {
     if (selectedStages.length) body.stages = selectedStages;
     if (distilledPath) body.distilled_path = distilledPath;
     if (promptLibrary) body.prompt_library = promptLibrary;
+    if (datasetRef.trim()) body.dataset_ref = datasetRef.trim();
     if (configFile) body.config_file = configFile;
     if (distillSteps !== "") body.distill_steps = distillSteps;
     if (rolloutPrompts !== "") body.rollout_max_prompts = rolloutPrompts;
@@ -104,12 +133,16 @@ export function DistillRLPage() {
   return (
     <StagePipelineShell
       title="Distill-RL"
-      subtitle="Teacher → student distillation, preference rollouts (teacher chosen / student rejected), and DPO fine-tuning with research artifacts and multi-seed aggregation."
+      subtitle="Teacher → student distillation, verifiable preference rollouts (pass≻fail), and DPO with research artifacts. Smoke is CI-only; research presets need a real Hub/JSONL corpus."
       cardIcon="⚗"
       cardDesc="Presets, stages, models, and DPO parameters"
       preset={preset}
       setPreset={setPreset}
-      presetList={presetList}
+      presetList={presetList.map((p) =>
+        p.id === "smoke"
+          ? { ...p, label: "Smoke (CI fixture — not meaningful training)" }
+          : p,
+      )}
       presetsLoading={presetsLoading}
       allStages={allStages}
       stageHelp={stageHelp}
@@ -120,7 +153,9 @@ export function DistillRLPage() {
       activeJob={activeJob}
       jobs={jobs}
       jobsEmptyMessage="No distill-RL jobs yet."
-      canStart={presetsReady && modelsReady && !!teacherModel && !!studentModel}
+      canStart={
+        presetsReady && modelsReady && !!teacherModel && !!studentModel && dataReady
+      }
       starting={starting}
       onStart={start}
       startLabel="Run distill-RL pipeline"
@@ -172,7 +207,34 @@ export function DistillRLPage() {
         </div>
 
         <div className="studio-config-block">
-          <FormSection title="Rollouts & DPO" hint="Preference dataset size and DPO training." collapsible defaultOpen={false}>
+          <FormSection
+            title="Data & DPO"
+            hint="Curated verifiable Hub/JSONL first; Data Designer is opt-in. Smoke uses the CI fixture."
+            collapsible
+            defaultOpen
+          >
+            <div className="form-field">
+              <label>Preference source</label>
+              <select
+                value={preferenceSource}
+                onChange={(e) => setPreferenceSource(e.target.value)}
+              >
+                <option value="dataset">Dataset (HF hub / local verifiable)</option>
+                <option value="grounded_library">Grounded library (operator JSONL)</option>
+                <option value="data_designer">Data Designer (opt-in synth)</option>
+                <option value="teacher_style">Teacher≻student (style DPO, not outcome RL)</option>
+              </select>
+            </div>
+            {preferenceSource === "dataset" && (
+              <div className="form-field">
+                <label>Dataset ref (Hub id or local JSONL)</label>
+                <input
+                  value={datasetRef}
+                  onChange={(e) => setDatasetRef(e.target.value)}
+                  placeholder="e.g. open-r1/OpenR1-Math-220k or ~/.seiso/…/prompts.jsonl"
+                />
+              </div>
+            )}
             <div className="option-grid">
               <div className="form-field">
                 <label>Distill steps</label>
@@ -210,9 +272,20 @@ export function DistillRLPage() {
               <input
                 value={promptLibrary}
                 onChange={(e) => setPromptLibrary(e.target.value)}
-                placeholder="Optional custom rollout prompts"
+                placeholder={
+                  preferenceSource === "grounded_library"
+                    ? "Required for grounded_library (answer/tests per row)"
+                    : "Optional local prompts; Hub id goes in dataset ref"
+                }
               />
             </div>
+            {configError && <p className="field-error">{configError}</p>}
+            {preset === "smoke" && (
+              <p className="muted-text studio-field-hint">
+                Smoke is a CI fixture only — switch to reproducible/full + a real dataset_ref for
+                meaningful Distill-RL.
+              </p>
+            )}
           </FormSection>
         </div>
 

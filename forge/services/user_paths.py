@@ -96,6 +96,9 @@ def assert_user_training_config(sandbox_root: Path, user_id: str, config: dict) 
     dataset = config.get("dataset")
     if dataset and is_local_filesystem_path(dataset):
         assert_user_path(sandbox_root, user_id, dataset)
+    eval_ds = config.get("slime_eval_dataset") or config.get("eval_dataset")
+    if eval_ds and is_local_filesystem_path(eval_ds):
+        assert_user_path(sandbox_root, user_id, eval_ds)
     dataset_ref = config.get("dataset_ref") or config.get("hf_dataset")
     if dataset_ref and is_local_filesystem_path(dataset_ref):
         assert_user_path(sandbox_root, user_id, dataset_ref)

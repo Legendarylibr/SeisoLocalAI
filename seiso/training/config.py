@@ -524,6 +524,12 @@ class TrainConfig(BaseModel):
             )
         except ValueError as exc:
             raise ValueError(str(exc)) from exc
+        # Fail loud at TrainConfig validation (Forge/API start) — not after
+        # the job is queued — when held-out eval / slime invariants are missing.
+        try:
+            self.to_single_gpu_slime_config().validate()
+        except ValueError as exc:
+            raise ValueError(str(exc)) from exc
         return self
 
     @classmethod

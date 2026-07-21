@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from fastapi import HTTPException
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, ValidationError
 
 from forge.api.deps import get_distill_rl_orchestrator
 from forge.api.http_errors import raise_forbidden
@@ -20,7 +21,12 @@ from forge.api.routes._pipeline import (
 from forge.config import ForgeSettings
 from forge.db.store import Database
 from forge.services.user_paths import assert_user_path, is_local_filesystem_path
-from seiso.distill_rl.config import PRESETS, STAGE_ORDER, merge_distill_rl_payload
+from seiso.distill_rl.config import (
+    PRESETS,
+    STAGE_ORDER,
+    build_distill_rl_config,
+    merge_distill_rl_payload,
+)
 from seiso.security import SecurityError
 
 STAGE_HELP = {
@@ -46,6 +52,18 @@ class DistillRLStartRequest(BaseModel):
     rollout_max_prompts: int | None = None
     dpo_epochs: int | None = None
     prompt_library: str | None = None
+    preference_source: str | None = Field(
+        default=None,
+        description=(
+            "dataset | data_designer | grounded_library | teacher_style "
+            "(hf_dataset aliases to dataset)"
+        ),
+    )
+    dataset_ref: str | None = Field(
+        default=None,
+        description="HF hub id or local JSONL when preference_source=dataset",
+        validation_alias=AliasChoices("dataset_ref", "hf_dataset"),
+    )
     require_thinking_trace: bool = True
     thinking_instruction: str | None = None
     verifiable_outcome_rewards: bool = Field(
@@ -121,6 +139,20 @@ async def _prepare_distill_rl_config(
         path_keys=_DISTILL_PATH_KEYS,
     )
     _assert_local_dataset_ref(settings.data_dir, user_id, config)
+
+    # Fail loud before the job is queued — same gates the runner uses.
+    try:
+        build_distill_rl_config(
+            job_id="__validate__",
+            user_id=user_id,
+            data_dir=settings.data_dir,
+            payload=config,
+        )
+    except (ValidationError, ValueError) as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid distill-RL configuration: {exc}",
+        ) from exc
 
     return config
 

@@ -92,6 +92,32 @@ def test_build_distill_rl_config_legacy_hf_dataset_aliases(tmp_path: Path, monke
     assert cfg.dataset_ref == str(fixture)
 
 
+@pytest.mark.asyncio
+async def test_forge_prepare_rejects_reproducible_without_dataset(tmp_path: Path):
+    """API must fail before queuing when research presets lack a real corpus."""
+    from fastapi import HTTPException
+
+    from forge.api.routes.distill_rl import DistillRLStartRequest, _prepare_distill_rl_config
+    from forge.config import ForgeSettings
+
+    settings = ForgeSettings(
+        data_dir=tmp_path,
+        secret_key="test-secret-key-for-jwt-signing-32b",
+        db_encryption_key="01" * 32,
+    )
+    body = DistillRLStartRequest(
+        preset="reproducible",
+        teacher_model="openai-community/gpt2",
+        student_model="openai-community/gpt2",
+    )
+    with pytest.raises(HTTPException) as exc:
+        await _prepare_distill_rl_config(body, db=None, user_id="user-1", settings=settings)  # type: ignore[arg-type]
+    assert exc.value.status_code == 400
+    assert "dataset_ref" in str(exc.value.detail).lower() or "prompt_library" in str(
+        exc.value.detail
+    ).lower()
+
+
 def test_validate_stage_sequence_rejects_out_of_order():
     with pytest.raises(ValueError, match="must follow order"):
         validate_stage_sequence(["evaluate", "rollout"])
