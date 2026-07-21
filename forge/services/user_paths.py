@@ -18,6 +18,7 @@ _USER_SCOPED_ROOTS = frozenset(
         "compress",
         "distill_rl",
         "rl_quant",
+        "recipes",
     }
 )
 _SHARED_CACHE_ROOTS = frozenset({"hf_cache"})

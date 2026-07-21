@@ -42,12 +42,16 @@ async def pinned_async_client(endpoint: PinnedEndpoint, *, timeout: float = 120.
         resolver = _PinnedGetaddrinfo(endpoint.host, endpoint.pinned_ip)
         resolver.__enter__()
         try:
-            async with httpx.AsyncClient(timeout=timeout) as client:
+            async with httpx.AsyncClient(
+                timeout=timeout, follow_redirects=False
+            ) as client:
                 yield client
         finally:
             resolver.__exit__()
     else:
-        async with httpx.AsyncClient(timeout=timeout) as client:
+        async with httpx.AsyncClient(
+            timeout=timeout, follow_redirects=False
+        ) as client:
             yield client
 
 
