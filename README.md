@@ -371,6 +371,7 @@ Forge details: **[docs/forge.md](docs/forge.md)**
 | `seiso forge` | Launch Forge web server |
 | `seiso doctor` | Diagnose install / HF / GPU stack |
 | `seiso train` | Train from YAML config |
+| `seiso slime` | Single-process slime GRPO post-train (also `seiso train -c … method: slime`) |
 | `seiso chat` | Terminal chat with local models |
 | `seiso export` | Export merged / GGUF / LoRA + Hub push |
 | `seiso compress run` | LLM compression pipeline |

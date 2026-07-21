@@ -604,8 +604,6 @@ def resolve_local_backend(
         if choice in {BACKEND_LLAMACPP, BACKEND_LLAMASWAP}:
             raise ValueError(f"Backend {choice!r} requires a GGUF model")
 
-    if choice in {BACKEND_LLAMACPP, BACKEND_LLAMASWAP, BACKEND_MLX, BACKEND_TORCH}:
-        return choice
     raise ValueError(f"Unsupported inference backend: {requested}")
 
 

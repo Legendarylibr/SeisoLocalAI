@@ -70,7 +70,15 @@ seiso train --config configs/example_training_slime.yaml
 
 Use `method: slime` for local rollout/reward policy updates with LoRA adapters, verifier JSONL, best/final checkpoints, and plateau auto-stop. See [training/quickstart.md § Slime Post-Training](training/quickstart.md#slime-post-training).
 
-Forge Training Studio runs the same training stack but adds full-dataset analysis, live recommendations, and SSE job streaming via `/api/training/*` (see [training/quickstart.md](training/quickstart.md)).
+## `seiso slime`
+
+Dedicated single-process slime CLI (same core as `seiso train -c … method: slime`):
+
+```bash
+seiso slime --config configs/example_training_slime.yaml
+```
+
+For multi-GPU / vLLM / SGLang rollouts, prefer `seiso train` with a slime YAML (or `scripts/run_slime_vllm_ddp.sh`). Forge Training Studio runs the same training stack with full-dataset analysis, live recommendations, and SSE job streaming via `/api/training/*` (see [training/quickstart.md](training/quickstart.md)).
 
 **Checkpoints (CLI):** written under the YAML `output_dir` (example: `./outputs/lora-run/checkpoint-<timestamp>/` for SFT, or `./outputs/slime-train-method/` for slime), including `seiso_manifest.json`. SFT runs also write `dataset_analysis.json`; slime runs write `slime_single_gpu_metrics.jsonl` (stable filename), `slime_training_state.json`, and optional `slime_verifier_data.jsonl`. Implementation lives in `seiso.slime` (legacy import path `seiso.slime_single_gpu` still works).
 

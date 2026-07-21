@@ -345,7 +345,10 @@ async def publish_to_hub(
     db: Annotated[Database, Depends(get_db)],
     settings: Annotated[ForgeSettings, Depends(get_settings)],
 ) -> dict[str, str]:
-    """Publish synchronously — prefer POST /export/publish/jobs for large GGUF files."""
+    """Publish synchronously.
+
+    Deprecated for UI/large GGUF: prefer POST /export/publish/jobs.
+    """
     token = resolve_hub_publish_token(settings, user_id, body.hub)
     if not token:
         raise HTTPException(
