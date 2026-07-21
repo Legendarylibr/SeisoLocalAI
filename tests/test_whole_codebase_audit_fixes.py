@@ -50,8 +50,9 @@ def test_compress_refuses_lora_only_model_dir(tmp_path: Path):
 
 
 def test_csrf_empty_bearer_helper():
-    from forge.security.csrf import validate_csrf
     from starlette.requests import Request
+
+    from forge.security.csrf import validate_csrf
 
     scope = {
         "type": "http",

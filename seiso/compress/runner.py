@@ -61,12 +61,12 @@ def _resolve_model_dir(cfg: dict[str, Any], run_dir: Path, stage: str) -> Path:
         "quantize_gptq": _latest_model_dir(run_dir),
         "quantize_awq": _latest_model_dir(run_dir),
     }
-    path = stage_inputs.get(stage)
-    if path is None:
+    resolved = stage_inputs.get(stage)
+    if resolved is None:
         raise ValueError(f"No input model for stage {stage}")
-    if not path.is_dir():
-        raise FileNotFoundError(f"Expected model directory for {stage}: {path}")
-    return path
+    if not resolved.is_dir():
+        raise FileNotFoundError(f"Expected model directory for {stage}: {resolved}")
+    return resolved
 
 
 def _latest_model_dir(run_dir: Path) -> Path:
