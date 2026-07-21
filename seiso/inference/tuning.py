@@ -58,8 +58,17 @@ def prepare_torch_model(model: Any) -> Any:
     # Kernel patching must happen before torch.compile captures the model graph.
     # Callers must retain the returned object because torch.compile wraps rather
     # than mutates the original module.
-    apply_inference_kernels(model)
-    return maybe_compile_torch_model(model)
+    try:
+        apply_inference_kernels(model)
+        return maybe_compile_torch_model(model)
+    except Exception:
+        # Load/setup failure after a partial patch must not leave monkey-patched
+        # forwards pinning the model graph.
+        with contextlib.suppress(Exception):
+            from seiso.kernels.lifecycle import restore_kernel_patches
+
+            restore_kernel_patches(model)
+        raise
 
 
 def maybe_compile_torch_model(model: Any) -> Any:
@@ -129,7 +138,12 @@ def maybe_compile_torch_decode(model: Any, input_ids: Any) -> bool:
 
 
 def apply_inference_kernels(model: Any) -> None:
-    """Patch CUDA weights with fused RMSNorm/SwiGLU when enabled."""
+    """Patch CUDA weights with fused RMSNorm/SwiGLU when enabled.
+
+    Patches are tracked in a :class:`~seiso.kernels.lifecycle.KernelPatchSession`.
+    On success the session is committed (patches stay until unload/restore); on
+    failure the session restores any partial monkey-patches.
+    """
     if not env_bool("SEISO_INFERENCE_FUSED_KERNELS", True):
         return
     try:
@@ -147,8 +161,11 @@ def apply_inference_kernels(model: Any) -> None:
         pass
     try:
         from seiso.kernels.hooks import apply_training_kernels
+        from seiso.kernels.lifecycle import KernelPatchSession
 
-        apply_training_kernels(model, use_cuda=True, use_triton=True, patch_mlp=True)
+        with KernelPatchSession(model) as session:
+            apply_training_kernels(model, use_cuda=True, use_triton=True, patch_mlp=True)
+            session.commit()
     except Exception as exc:
         logger.debug("Inference fused kernels skipped: %s", exc)
 

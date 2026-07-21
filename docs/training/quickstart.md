@@ -188,6 +188,8 @@ no silent localhost). There is no local toy arithmetic/choice corpus generator.
 
 **Single-GPU:** `scripts/run_slime_single_gpu.sh` — `rollout_backend: hf` (colocated, on-policy).
 
+**Off-policy logprob caveat (vLLM / SGLang):** with `rollout_backend: sglang` or `vllm`, tokens are sampled by the remote engine, but Seiso recomputes `old_logprobs` on the local actor for the GRPO ratio (engine sampling logprobs are not used). Keep `*_sync_weights` enabled so engines stay close to the actor; residual sampler/kernel mismatch still makes the ratio slightly off-policy versus colocated `hf`.
+
 Python package: `seiso.slime` (legacy import path `seiso.slime_single_gpu` remains a shim).
 
 **Multi-GPU (SGLang):** `scripts/run_slime_ddp.sh [nproc] [config]` — SGLang generate + DDP policy. After each optimizer step rank0 exports weights and hot-reloads **all** engines:

@@ -55,6 +55,19 @@ class KernelPatchSession:
         if module not in self._modules:
             self._modules.append(module)
 
+    def commit(self) -> None:
+        """Keep patches applied; end the active session without restoring.
+
+        Used by long-lived inference loads where patched forwards must remain
+        until an explicit ``restore_kernel_patches`` / unload path runs.
+        """
+        if self._token is not None:
+            _ACTIVE_PATCH_SESSION.reset(self._token)
+            self._token = None
+        # Drop session-local tracking; modules stay in ``_PATCH_REGISTRY``.
+        self._modules.clear()
+        self._restored = True
+
     def restore(self) -> int:
         if self._restored:
             return 0

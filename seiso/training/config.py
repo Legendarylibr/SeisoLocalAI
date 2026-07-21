@@ -226,7 +226,13 @@ class TrainConfig(BaseModel):
     top_p: float = Field(default=0.95, gt=0, le=1)
     rollout_backend: str = Field(
         default="hf",
-        description="slime online generate: hf | sglang | vllm | auto",
+        description=(
+            "slime online generate: hf | sglang | vllm | auto. "
+            "hf is colocated/on-policy. sglang/vllm sample remotely; Seiso then "
+            "recomputes old_logprobs on the local actor (engine sampling logprobs "
+            "are not used), so the GRPO ratio is slightly off-policy unless weights "
+            "stay in sync."
+        ),
     )
     apply_chat_template: bool = True
     sglang_base_url: str = ""
