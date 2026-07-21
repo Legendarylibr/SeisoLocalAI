@@ -38,16 +38,20 @@ def recommendation_evidence(recommendation: dict[str, Any]) -> dict[str, Any]:
     claimable = recommendation.get("deploy_quality_claimable")
     if claimable is None:
         claimable = evidence == "local_llama_cpp" and has_external
-    # Simulator/unknown, or llama.cpp without quality sidecar, are not claimable.
-    if evidence in {"simulator", "unknown"} or (
-        evidence == "local_llama_cpp" and not has_external
-    ):
+    # Only exact local llama.cpp + external quality may claim deploy quality.
+    # Aggregates / simulator / unknown must not inherit a biased claimable flag.
+    if evidence != "local_llama_cpp" or not has_external:
         claimable = False
     note = recommendation.get("deploy_quality_note")
     if not note and evidence == "simulator":
         note = (
             "Simulator evidence only — not deploy-grounded without llama_cpp / "
             "external quality sidecar."
+        )
+    elif not note and evidence in {"multiseed_aggregate", "sweep_aggregate"}:
+        note = (
+            "Aggregate evidence does not make deploy quality claimable; "
+            "require evidence_level=local_llama_cpp with external_quality."
         )
     elif not note and evidence == "local_llama_cpp" and not has_external:
         note = (

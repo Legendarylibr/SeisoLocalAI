@@ -691,9 +691,9 @@ def _collect_rollouts(
             reward_sample = _reward_sample(sample, config)
             metadata = _sample_metadata(sample, config)
             score = _score_completion(completion, reward_sample, config)
-            # Truncated (hit max_new_tokens without EOS): do not credit outcome —
-            # incomplete answers bias GRPO toward short/cut-off completions.
-            if status == "length":
+            # Truncated or empty responses: do not credit outcome / format —
+            # incomplete answers bias GRPO toward cut-off or blank completions.
+            if status in {"length", "empty"}:
                 score = {
                     **score,
                     "reward": 0.0,
@@ -703,6 +703,8 @@ def _collect_rollouts(
                     "process_reward": 0.0,
                     "thinking_penalty": 0.0,
                 }
+                # DAPO / OpenRLHF: no policy gradient on incomplete tokens.
+                response_mask = response_mask.new_zeros(response_mask.shape)
             chunk_rollouts.append(
                 Rollout(
                     input_ids=input_ids,
@@ -909,13 +911,14 @@ def _finalize_auto_code_rewards(
         code = [rollout for rollout in group if rollout.proof_score is not None]
         if not code:
             continue
-        # Length-truncated rows stay wiped; do not let them flip the group to binary.
+        # Length/empty rows stay wiped; do not let them flip the group to binary.
         use_binary = any(
-            bool(rollout.proof_passed) and rollout.status != "length" for rollout in code
+            bool(rollout.proof_passed) and rollout.status not in {"length", "empty"}
+            for rollout in code
         )
         for rollout in code:
-            # Do not re-credit length-truncated rollouts after the scoring wipe.
-            if rollout.status == "length":
+            # Do not re-credit wiped rollouts after the scoring wipe.
+            if rollout.status in {"length", "empty"}:
                 continue
             outcome = (
                 (1.0 if rollout.proof_passed else 0.0)
@@ -1463,7 +1466,10 @@ def _sync_rollout_engine_weights(
     if backend == "vllm":
         label = "vllm_weight_sync"
         weight_dir = getattr(config, "vllm_weight_dir", "vllm_weight_sync")
-        disable_hint = "Set vllm_sync_weights: false only for debugging."
+        disable_hint = (
+            "Disabling sync is refused at config validate (biases GRPO ratios); "
+            "SEISO_SLIME_ALLOW_STALE_ROLLOUT_WEIGHTS=1 is debug-only."
+        )
         engine_hint = (
             "Ensure each vLLM engine has --enable-lora (for LoRA mode) or "
             "exposes a disk weight reload endpoint (full mode) and can read "
@@ -1473,7 +1479,10 @@ def _sync_rollout_engine_weights(
     else:
         label = "sglang_weight_sync"
         weight_dir = config.sglang_weight_dir
-        disable_hint = "Set sglang_sync_weights: false only for debugging."
+        disable_hint = (
+            "Disabling sync is refused at config validate (biases GRPO ratios); "
+            "SEISO_SLIME_ALLOW_STALE_ROLLOUT_WEIGHTS=1 is debug-only."
+        )
         engine_hint = (
             "Ensure each engine exposes /update_weights_from_disk and can read "
             f"{config.output_dir / weight_dir}."

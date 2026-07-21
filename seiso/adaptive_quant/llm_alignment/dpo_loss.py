@@ -13,6 +13,7 @@ def get_batch_logps(
     labels: torch.Tensor,
     *,
     average_log_prob: bool = False,
+    allow_empty_completions: bool = False,
 ) -> torch.Tensor:
     """Extract summed log-probabilities of completion tokens from causal-LM logits.
 
@@ -58,9 +59,16 @@ def get_batch_logps(
         summed = per_token_logps.sum(dim=-1) / token_counts.clamp(min=1)
     else:
         summed = per_token_logps.sum(dim=-1)
-    # Empty/over-truncated completions must not look like perfect (0) logps.
-    # Mild sentinel avoids saturating DPO margins on a single empty row.
+    # Empty/over-truncated completions (TRL/OpenRLHF): refuse by default —
+    # a silent −1e2 sentinel can dominate the batch preference signal.
     if bool(empty.any()):
+        if not allow_empty_completions:
+            raise ValueError(
+                "DPO batch contains empty completion token spans (prompt ate "
+                "max_length or labels fully masked). Truncate prompts, raise "
+                "max_length, or pass allow_empty_completions=True only for "
+                "diagnostics."
+            )
         summed = torch.where(empty, torch.full_like(summed, -1.0e2), summed)
     return summed
 

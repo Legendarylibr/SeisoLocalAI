@@ -57,6 +57,7 @@ class DPOTrainer:
         tokenizer: Any | None = None,
         reference_uses_adapter_disable: bool = False,
     ) -> None:
+        settings.validate()
         self.settings = settings
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 

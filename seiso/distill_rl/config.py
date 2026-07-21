@@ -308,6 +308,24 @@ class DistillRLConfig(BaseModel):
                 )
         elif frac <= 0.0 or frac > 1.0:
             raise ValueError("train_val_fraction must be in (0, 1]")
+        if float(self.dpo_beta) <= 0:
+            raise ValueError(
+                "dpo_beta must be > 0 (β≤0 zeros or flips the DPO preference direction)"
+            )
+        if float(self.dpo_beta) > 1.0:
+            raise ValueError(
+                "dpo_beta must be <= 1.0 (very large β approaches hard preferences)"
+            )
+        if float(self.rollout_temperature) <= 0:
+            raise ValueError(
+                "rollout_temperature must be > 0 so GRPO preference mining has "
+                "sampling diversity"
+            )
+        if int(self.grpo_group_size) < 2:
+            raise ValueError(
+                "grpo_group_size must be >= 2 (DeepSeek GRPO needs a group of "
+                "samples per prompt)"
+            )
         return self
 
     @property

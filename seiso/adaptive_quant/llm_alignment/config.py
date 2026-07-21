@@ -17,6 +17,21 @@ class DPOSettings:
     beta: float = 0.1
     average_log_prob: bool = False
 
+    def validate(self) -> None:
+        if self.beta <= 0:
+            raise ValueError(
+                "beta must be > 0 (β≤0 zeros or flips the DPO preference direction)"
+            )
+        if self.beta > 1.0:
+            raise ValueError(
+                "beta must be <= 1.0 (very large β approaches hard preferences "
+                "and can destabilize training)"
+            )
+        if self.max_prompt_length < 1 or self.max_length < 1:
+            raise ValueError("max_prompt_length and max_length must be positive")
+        if self.max_length <= self.max_prompt_length:
+            raise ValueError("max_length must be greater than max_prompt_length")
+
     # Optimization
     learning_rate: float = 5e-7
     num_epochs: int = 1

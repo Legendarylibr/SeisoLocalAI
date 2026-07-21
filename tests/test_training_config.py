@@ -48,7 +48,7 @@ def test_train_config_projects_to_single_gpu_slime_config(tmp_path):
             "output_dir": tmp_path / "out",
             "method": "slime",
             "metadata_field": "context",
-            "reward": "field",
+            "reward": "numeric",
             "reward_field": "score",
             "batch_size": 1,
             "policy_micro_batch_size": 2,
@@ -83,7 +83,7 @@ def test_train_config_projects_to_single_gpu_slime_config(tmp_path):
     assert slime.model_id == "test/model"
     assert slime.dataset == tmp_path / "slime.jsonl"
     assert slime.output_dir == tmp_path / "out"
-    assert slime.reward == "field"
+    assert slime.reward == "numeric"
     assert slime.metadata_field == "context"
     assert slime.reward_field == "score"
     # train_batch_size not set → None (effective = rollout_batch_size)

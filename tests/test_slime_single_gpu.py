@@ -407,7 +407,17 @@ def test_clipped_policy_loss_supports_per_token_normalization():
     advantages = torch.tensor([[1.0], [3.0]])
     mask = torch.tensor([[1.0, 1.0, 1.0], [1.0, 0.0, 0.0]])
 
+    # DeepSeek seq-mean: mean([1, 3]) = 2 (not global token-mean 1.5).
     per_token_loss = _clipped_policy_loss(new_logprobs, old_logprobs, advantages, mask, 0.2, torch)
+    token_mean_loss = _clipped_policy_loss(
+        new_logprobs,
+        old_logprobs,
+        advantages,
+        mask,
+        0.2,
+        torch,
+        aggregation="token_mean",
+    )
     per_sample_loss = _clipped_policy_loss(
         torch.zeros(2),
         torch.zeros(2),
@@ -417,7 +427,8 @@ def test_clipped_policy_loss_supports_per_token_normalization():
         torch,
     )
 
-    assert per_token_loss.item() == -1.5
+    assert per_token_loss.item() == pytest.approx(-2.0)
+    assert token_mean_loss.item() == pytest.approx(-1.5)
     assert per_sample_loss.item() == -2.0
 
 

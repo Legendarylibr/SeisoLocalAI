@@ -205,11 +205,18 @@ class TrainConfig(BaseModel):
     shuffle_buffer_size: int = Field(default=2048, ge=1)
     max_samples_per_epoch: int | None = Field(default=None, ge=1)
     kl_coef: float = Field(default=0.0, ge=0)
-    clip_ratio: float = Field(default=0.2, gt=0)
+    clip_ratio: float = Field(default=0.2, gt=0, lt=1)
     clip_ratio_high: float | None = Field(
         default=None,
         gt=0,
         description="Upper PPO clip bound (slime eps_clip_high); None uses clip_ratio.",
+    )
+    clip_ratio_c: float | None = Field(
+        default=3.0,
+        description=(
+            "Dual-clip constant for negative advantages (OpenRLHF/verl/slime); "
+            "None disables. Must be > 1 when set."
+        ),
     )
     grpo_std_normalization: bool = Field(
         default=True,
@@ -222,6 +229,12 @@ class TrainConfig(BaseModel):
             "When false, sequence log-probs are length-normalized before the ratio."
         ),
     )
+    loss_aggregation: str = Field(
+        default="seq_mean",
+        description=(
+            "GRPO loss reduction: seq_mean (DeepSeekMath) or token_mean (length-biased)."
+        ),
+    )
     temperature: float = Field(default=0.9, gt=0)
     top_p: float = Field(default=0.95, gt=0, le=1)
     rollout_backend: str = Field(
@@ -230,8 +243,8 @@ class TrainConfig(BaseModel):
             "slime online generate: hf | sglang | vllm | auto. "
             "hf is colocated/on-policy. sglang/vllm sample remotely; Seiso then "
             "recomputes old_logprobs on the local actor (engine sampling logprobs "
-            "are not used), so the GRPO ratio is slightly off-policy unless weights "
-            "stay in sync."
+            "are not used). Weight sync is required for HTTP backends so engines "
+            "cannot drift and bias GRPO importance ratios."
         ),
     )
     apply_chat_template: bool = True
@@ -309,7 +322,7 @@ class TrainConfig(BaseModel):
     best_checkpoint_dir: str = Field(default="checkpoint-best", min_length=1)
     final_checkpoint_dir: str = ""
     auto_stop: bool = True
-    auto_stop_metric: str = "reward_mean"
+    auto_stop_metric: str = "outcome_reward_mean"
     auto_stop_patience: int = Field(default=20, ge=1)
     auto_stop_min_delta: float = Field(default=1e-4, ge=0)
     auto_stop_warmup_steps: int = Field(default=10, ge=0)
@@ -504,21 +517,22 @@ class TrainConfig(BaseModel):
                 "(verifiable outcome signal required)"
             )
         shaping = self.format_reward_weight + self.process_reward_weight
-        if shaping > self.outcome_reward_weight:
+        if shaping >= self.outcome_reward_weight:
             raise ValueError(
-                "format_reward_weight + process_reward_weight must not exceed "
-                "outcome_reward_weight (outcome must dominate for meaningful GRPO)"
+                "format_reward_weight + process_reward_weight must be strictly "
+                "less than outcome_reward_weight (outcome must dominate; ties "
+                "allow format bias)"
             )
         if self.require_thinking_trace:
             headroom = self.outcome_reward_weight - (
                 self.format_reward_weight + self.process_reward_weight
             )
-            if self.missing_thinking_penalty > headroom:
+            if self.missing_thinking_penalty >= headroom:
                 raise ValueError(
-                    "missing_thinking_penalty must be <= outcome_reward_weight - "
+                    "missing_thinking_penalty must be < outcome_reward_weight - "
                     "(format_reward_weight + process_reward_weight) so "
-                    "correct-but-unformatted completions are not outranked by "
-                    "wrong-but-formatted ones"
+                    "correct-but-unformatted completions strictly outrank "
+                    "wrong-but-formatted ones (ties allow format bias)"
                 )
         from seiso.rl_verify.verify import resolve_code_reward_mode
 
@@ -567,7 +581,11 @@ class TrainConfig(BaseModel):
         from seiso.slime.config import SingleGpuSlimeConfig
 
         extra: dict[str, Any] = getattr(self, "extra", {})
-        policy_batch = self.policy_micro_batch_size or self.batch_size
+        # Keep GRPO groups intact in microbatches (OpenRLHF/verl practice).
+        # Do not fall back to batch_size=1 when rollouts_per_prompt > 1.
+        policy_batch = self.policy_micro_batch_size
+        if policy_batch is None:
+            policy_batch = int(self.rollouts_per_prompt)
         # slime: train target defaults to rollout_batch_size (prompts)
         train_batch = self.train_batch_size
         return SingleGpuSlimeConfig(
@@ -610,8 +628,10 @@ class TrainConfig(BaseModel):
             kl_coef=self.kl_coef,
             clip_ratio=self.clip_ratio,
             clip_ratio_high=self.clip_ratio_high,
+            clip_ratio_c=self.clip_ratio_c,
             grpo_std_normalization=self.grpo_std_normalization,
             calculate_per_token_loss=self.calculate_per_token_loss,
+            loss_aggregation=self.loss_aggregation,
             temperature=self.temperature,
             top_p=self.top_p,
             rollout_backend=self.rollout_backend,
