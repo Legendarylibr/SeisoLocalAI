@@ -142,8 +142,9 @@ There are **two preference regimes** (do not conflate them):
    a hard fail (near-miss). Starter libraries:
    - `data/distill_verifiable_prompts.jsonl` (math/choice/code mix)
    - `data/distill_code_synth.jsonl` (deterministic code tasks with known passers)
-   - `data/synthetic_code_preferences.jsonl` (offline golden-vs-mutant DPO pairs;
-     regenerate with `python -m seiso.rl_verify --data-dir data --seed 0`)
+   - `data/synthetic_code_preferences.jsonl` (offline golden-vs-mutant DPO pairs
+     from the unit-test-grounded ``code_corpus``; regenerate with
+     `python -m seiso.rl_verify --data-dir data --seed 0 --count 64`)
 2. **Teacher ≻ student bootstrap (not outcome RL).** For **non-verifiable**
    prompts only, pairs are `chosen = teacher` and `rejected = student` with no
    correctness check. Prompts that carry `answer` / `tests` are never labeled

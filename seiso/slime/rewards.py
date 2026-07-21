@@ -52,7 +52,7 @@ def field_reward(completion: str, sample: dict[str, Any]) -> float:
 
 
 def code_reward(completion: str, sample: dict[str, Any]) -> float:
-    """Sandboxed unit-test pass fraction (checkable code proof)."""
+    """Sandboxed unit-test outcome: ``1.0`` only if all tests pass."""
     score, _, _ = verify_outcome(
         completion,
         sample.get("answer"),

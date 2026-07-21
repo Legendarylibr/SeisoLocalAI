@@ -164,9 +164,12 @@ def test_code_partial_credit_does_not_mark_passed():
     sample = {"tests": ["assert add(1,2)==3", "assert add(2,2)==4", "assert add(0,0)==0"]}
     partial = "def add(a,b):\n    return 3 if a==1 else (4 if a==2 else 9)\n"
     result = score_completion(partial, sample, checker="code")
-    assert result.outcome == pytest.approx(2.0 / 3.0)
+    # GRPO outcome is binary all-tests-pass; fraction stays on proof_score.
+    assert result.outcome == 0.0
+    assert result.proof_score == pytest.approx(2.0 / 3.0)
     assert result.proof_passed is False
     assert result.passed is False
+    assert result.reward == 0.0
 
 
 def test_slime_named_rewards_prefer_final_answer():

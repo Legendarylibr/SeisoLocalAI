@@ -291,7 +291,7 @@ Bundled smoke datasets (expand for real training):
 | Dataset | Checker | Config |
 |---------|---------|--------|
 | `data/slime_sample.jsonl` | `numeric` | `configs/example_slime_single_gpu.yaml`, `configs/example_training_slime.yaml` |
-| `data/slime_code_sample.jsonl` | `code` (unit-test pass fraction) | `configs/example_slime_code.yaml` |
+| `data/slime_code_sample.jsonl` | `code` (all unit tests must pass) | `configs/example_slime_code.yaml` |
 | `data/slime_choice_sample.jsonl` | `choice` | `configs/example_slime_choice.yaml` |
 
 Important fields:
@@ -301,7 +301,7 @@ Important fields:
 | `max_vram_gb` | Upper VRAM cap used to fail before out-of-memory conditions |
 | `prompt_field`, `answer_field` | Dataset columns for prompts and target answers |
 | `metadata_field` | Optional upstream-style metadata column, default `metadata`; JSON strings are parsed and carried into reward samples and bounded verifier records |
-| `reward` | Verifier checker: `exact_match`, `numeric`, `choice`, `contains_answer`, `field`, `code` (unit-test pass fraction; 1.0 = all tests pass), or `auto` |
+| `reward` | Verifier checker: `exact_match`, `numeric`, `choice`, `contains_answer`, `field`, `code` (1.0 only if all unit tests pass), or `auto` |
 | `reward_field` | Dataset reward column when `reward: field` |
 | `require_thinking_trace` | When true, rollout prompts may end with open `<think>`. Format is OK if the **generation** closes thinking: either a full `<think>...</think>` block or a continuation that only emits `</think>` then the answer |
 | `outcome_reward_weight` | Weight for hard outcome (correctness) from the shared verifier |
@@ -337,8 +337,9 @@ Important fields:
 
 Use `reward: code` with dataset rows that include unit tests. The shared verifier
 extracts Python from the completion (fenced blocks preferred) and runs tests in a
-restricted subprocess (`seiso.codellama_compress.code_exec`). Outcome score is the
-**pass fraction** of tests (1.0 only if all pass).
+restricted subprocess (`seiso.codellama_compress.code_exec`). **Outcome / GRPO
+reward is binary: 1.0 only when all unit tests pass** (partial pass fraction is
+logged as `proof_score` for diagnostics / hard-negative ranking only).
 
 Example config: `configs/example_slime_code.yaml` with `data/slime_code_sample.jsonl`.
 
@@ -348,13 +349,12 @@ Example config: `configs/example_slime_code.yaml` with `data/slime_code_sample.j
   "tests": ["assert add(1, 2) == 3", "assert add(0, 0) == 0"],
   "solution": "def add(a, b):\n    return a + b\n",
   "timeout_s": 3,
-  "benchmark": "code",
-  "synth": true
+  "benchmark": "code"
 }
 ```
 
 - `tests` / `test`: assert lines (list or string) or a full check harness  
-- `solution`: optional known-good program (for SFT / synthetic DPO; **ignored by the slime reward**, which only scores model completions)  
+- `solution`: optional known-good program (for SFT / synthetic DPO; **ignored by the slime reward**, which only scores model completions against unit tests)  
 - `prompt_code` / `code_prefix`: optional HumanEval-style prefix prepended before the solution  
 - `setup`: optional imports/helpers before the solution  
 - `timeout_s`: wall budget for the sample (split across test units)
@@ -362,16 +362,16 @@ Example config: `configs/example_slime_code.yaml` with `data/slime_code_sample.j
 This is a **checkable proof**, not lexical process reward. Do not run untrusted
 code on sensitive hosts; the sandbox is best-effort, not a full VM.
 
-#### Deterministic synthetic code (guaranteed passers)
+#### Deterministic code corpus (unit-test grounded)
 
-Do **not** rely on an LLM to invent solutions for the dataset. Seiso synthesizes
-code tasks **deterministically** so every row has a solution that already passes
-its unit tests (fail-closed via the same sandbox verifier):
+Do **not** rely on an LLM or the small hand smoke catalog for training data.
+Seiso builds coding tasks with ``code_corpus`` so every row is grounded in unit
+tests (fail-closed via the same sandbox verifier):
 
-1. Hand-authored pure-function catalog + seeded I/O variants  
-2. **Tests derived** from I/O cases (same source of truth as the solution)  
-3. Sandbox check: drop any task whose golden solution fails  
-4. **Hard negatives** = deterministic mutants of the golden (must fail ≥1 test)
+1. Programmatic task families (easy/medium/hard) with golden solutions  
+2. **Tests derived** by executing the golden (same source of truth)  
+3. Sandbox check: drop any task whose golden solution fails any test  
+4. **Hard negatives** = mutants that fail ≥1 test (offline DPO) / online fails
 
 ```bash
 # Rewrite data/slime_code_sample.jsonl, data/distill_code_synth.jsonl,

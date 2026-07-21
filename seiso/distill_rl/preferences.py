@@ -223,12 +223,18 @@ def build_synthetic_code_preference_bundle(
         if on_log:
             on_log(msg)
 
+    # Unit-test-grounded corpus only — not the small hand smoke catalog.
+    # ``include_variants`` applies to the hand catalog path; ignored here.
+    _ = include_variants
+    corpus_count = max(32, int(limit) if limit is not None else 64)
     bundle = synthesize_code_bundle(
         seed=seed,
-        include_variants=include_variants,
+        include_variants=False,
         build_preferences=True,
         limit=limit,
         verify=True,
+        corpus_count=corpus_count,
+        include_hand_catalog=False,
     )
     rows = [pref.to_row() for pref in bundle.preferences]
     _log(f"Synthetic code preferences: {len(rows)} pairs (seed={seed})")

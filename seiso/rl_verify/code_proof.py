@@ -254,6 +254,11 @@ def verify_code_proof(
 
 
 def code_outcome_score(completion: str, sample: dict[str, Any]) -> tuple[float, str, str]:
-    """Adapter for verify_outcome: ``(score, checker, extracted_code)``."""
+    """Adapter for verify_outcome: ``(score, checker, extracted_code)``.
+
+    Score is binary: ``1.0`` only when **all** unit tests pass. Partial credit
+    lives on ``CodeProofResult.score`` / verifier ``proof_score`` for diagnostics
+    and hard-negative ranking — not on the GRPO outcome.
+    """
     result = verify_code_proof(completion, sample)
-    return result.score, "code", result.extracted_code
+    return (1.0 if result.passed else 0.0), "code", result.extracted_code

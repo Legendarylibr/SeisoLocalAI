@@ -273,7 +273,9 @@ def score_completion(
         from seiso.rl_verify.code_proof import verify_code_proof
 
         proof = verify_code_proof(completion, sample)
-        outcome = float(proof.score)
+        # GRPO / outcome: all unit tests must pass. Keep pass-fraction on
+        # proof_score for logs and preference hard-negative ranking.
+        outcome = 1.0 if proof.passed else 0.0
         used_checker = "code"
         extracted = proof.extracted_code
         proof_passed = proof.passed
@@ -312,7 +314,7 @@ def score_completion(
         + process_weight * process
         - penalty
     )
-    # Code: full unit-test pass only. Dense pass-fraction stays in ``outcome``.
+    # Code: passed iff all unit tests pass (outcome already binary).
     # Text/math: binary (or dense field) threshold.
     passed = (
         bool(proof_passed)

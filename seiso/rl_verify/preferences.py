@@ -37,7 +37,11 @@ class PreferencePair:
 
 
 def score_code_completion(completion: str, sample: dict[str, Any]) -> ScoredCompletion:
-    """Score one completion with the sandboxed code verifier."""
+    """Score one completion with the sandboxed code verifier.
+
+    ``passed`` is all-tests-pass. ``score`` keeps the pass fraction so hard
+    negatives can prefer near-miss fails; GRPO outcome uses binary pass only.
+    """
     from seiso.rl_verify.code_proof import extract_python_code, verify_code_proof
 
     result = verify_code_proof(completion, sample)

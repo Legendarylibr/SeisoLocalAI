@@ -147,8 +147,9 @@ def generate_outcome_preference_rows(
 ) -> list[dict[str, Any]]:
     """Generate grouped candidates; keep only verified preference pairs.
 
-    Code rows (with ``tests``) use unit-test pass fraction. Failed solutions
-    become hard negatives when a same-group candidate passes tests.
+    Code rows (with ``tests``) require all unit tests to pass for chosen.
+    Failed solutions become hard negatives (near-miss by pass fraction) when a
+    same-group candidate passes tests.
     """
     verifiable_prompts = [prompt for prompt in prompts if is_verifiable_prompt(prompt)]
     if not verifiable_prompts:
