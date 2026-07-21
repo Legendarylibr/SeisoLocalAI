@@ -89,6 +89,7 @@ def test_user_scoped_data_roots_cover_tenant_categories():
         "compress",
         "distill_rl",
         "rl_quant",
+        "recipes",
     }
     assert USER_SCOPED_DATA_ROOTS == expected
     assert "hf_cache" not in USER_SCOPED_DATA_ROOTS
