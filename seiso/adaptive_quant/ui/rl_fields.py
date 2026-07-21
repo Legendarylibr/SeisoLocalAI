@@ -113,12 +113,6 @@ RL_FIELD_GROUPS: list[dict[str, Any]] = [
                 "min": 1,
                 "placeholder": "96",
             },
-            {
-                "name": "write_research_report",
-                "label": "Write research report",
-                "type": "checkbox",
-                "help": "Emit markdown report under outputs/ after the pipeline completes.",
-            },
         ],
     },
     {

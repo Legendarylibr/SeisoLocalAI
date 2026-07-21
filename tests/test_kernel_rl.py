@@ -147,7 +147,6 @@ def test_run_smoke_pipeline_with_kernel_rl(tmp_path):
             "training_episodes": 20,
             "evaluation_episodes": 6,
             "kernel_rl_enabled": True,
-            "write_research_report": False,
             "auto_sweep": False,
         },
         on_log=lambda _m: None,

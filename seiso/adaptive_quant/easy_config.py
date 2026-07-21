@@ -93,6 +93,8 @@ def config_from_dict(
     """
     base_obj = base.clone() if base is not None else FrameworkConfig()
     d = dict(data)
+    # Removed knobs: accept and discard so older configs keep loading.
+    d.pop("write_research_report", None)
     rw_raw = d.pop("reward_weights", None)
     nested_raw = {
         k: d.pop(k)

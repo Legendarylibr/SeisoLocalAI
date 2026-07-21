@@ -51,9 +51,6 @@ def build_framework_config(
         base = named_preset(str(payload.get("preset", "reproducible")))
 
     preset = str(payload.get("preset", "")).lower()
-    write_report = payload.get("write_research_report")
-    if write_report is None:
-        write_report = preset not in {"minimal", "smoke"}
 
     overrides: dict[str, Any] = {
         **_artifact_paths(output_root, run_name),
@@ -66,7 +63,6 @@ def build_framework_config(
         "seed": int(payload.get("seed", base.seed)),
         "backend": str(payload.get("backend", base.backend)),
         "training_backend": str(payload.get("training_backend", base.training_backend)),
-        "write_research_report": bool(write_report),
         "llama_cpp_gguf_export_enabled": bool(payload.get("gguf_export", False)),
     }
 

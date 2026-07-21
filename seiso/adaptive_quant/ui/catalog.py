@@ -118,7 +118,6 @@ _WORKFLOW_DEFINITIONS: list[dict[str, Any]] = [
                     "training_episodes": 16,
                     "evaluation_episodes": 4,
                     "env_sampling_mode": "sequential",
-                    "write_research_report": True,
                 },
             },
             {"label": "Full baseline", "options": {}},
@@ -262,7 +261,6 @@ _WORKFLOW_DEFINITIONS: list[dict[str, Any]] = [
                     "continuous_task_stream_mode": "reward_adaptive",
                     "prompt_library_path": "prompts/diversity_library.json",
                     "continuous_max_tasks": 256,
-                    "write_research_report": True,
                 },
             },
             {
