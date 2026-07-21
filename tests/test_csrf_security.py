@@ -74,6 +74,26 @@ async def test_bearer_auth_bypasses_csrf(app):
 
 
 @pytest.mark.asyncio
+async def test_empty_bearer_does_not_bypass_csrf(app):
+    """Empty Authorization: Bearer must not skip CSRF while cookie auth works."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        reg = await client.post(
+            "/api/auth/register",
+            json={"password": "securepass1"},
+        )
+        assert reg.status_code == 201
+
+        res = await client.post(
+            "/api/inference/threads",
+            json={"title": "empty-bearer"},
+            headers={"Authorization": "Bearer "},
+        )
+        assert res.status_code == 403
+        assert "CSRF" in res.json()["detail"]
+
+
+@pytest.mark.asyncio
 async def test_csrf_blocks_v1_without_header(app):
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:

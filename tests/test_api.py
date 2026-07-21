@@ -120,6 +120,10 @@ async def test_reset_session_returns_instance_to_onboarding(app):
         old_me = await client.get("/api/auth/me", headers=headers)
         assert old_me.status_code in {401, 404}
 
+        # Compat /v1 must also reject ghost JWTs after wipe.
+        old_v1 = await client.get("/v1/models", headers=headers)
+        assert old_v1.status_code == 401
+
         reg2 = await client.post(
             "/api/auth/register",
             json={"password": "securepass2"},

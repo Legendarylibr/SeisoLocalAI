@@ -26,6 +26,8 @@ class InferenceOrchestrator(Orchestrator):
         super().__init__(sandbox_root)
         self._runner = get_inference_runner()
         self._active_generation_user_id: str | None = None
+        self._active_generation_epoch: int = 0
+        self._generation_epoch: int = 0
         self._preload_future: asyncio.Future[None] | None = None
         self._local_inference_lock = asyncio.Lock()
 
@@ -99,17 +101,28 @@ class InferenceOrchestrator(Orchestrator):
                 "Inference backend is still stopping; retry after the current generation releases GPU memory"
             )
 
-    def begin_generation_for_user(self, user_id: str | None) -> None:
-        """Reserve the singleton inference runner for a request before work starts."""
+    def begin_generation_for_user(self, user_id: str | None) -> int:
+        """Reserve the singleton inference runner for a request before work starts.
+
+        Returns a generation epoch; pass it to ``end_generation_for_user`` so a
+        stale stream ``finally`` cannot clear a newer reservation.
+        """
         owner = self._normalize_generation_user(user_id)
         if self._active_generation_user_id:
             if self._active_generation_user_id == owner:
                 raise RuntimeError("Inference is already running for this user")
             raise PermissionError("Another user has active inference")
         self.assert_backend_idle()
+        self._generation_epoch += 1
+        self._active_generation_epoch = self._generation_epoch
         self._active_generation_user_id = owner
+        return self._active_generation_epoch
 
-    def end_generation_for_user(self, user_id: str | None) -> None:
+    def end_generation_for_user(
+        self, user_id: str | None, *, epoch: int | None = None
+    ) -> None:
+        if epoch is not None and epoch != self._active_generation_epoch:
+            return
         owner = self._normalize_generation_user(user_id)
         if self._active_generation_user_id == owner:
             self._active_generation_user_id = None
@@ -164,9 +177,14 @@ class InferenceOrchestrator(Orchestrator):
         user_id = payload.get("user_id") or (job.user_id if job else None)
         settings = get_settings()
 
+        provider_label = "local"
+        if isinstance(provider, dict):
+            provider_label = str(provider.get("provider_type") or "provider")
+        elif provider:
+            provider_label = "provider"
         self._emit_log(
             job_id,
-            f"Messages: {len(messages)}, tools={use_tools}, provider={provider or 'local'}",
+            f"Messages: {len(messages)}, tools={use_tools}, provider={provider_label}",
         )
 
         def on_log(msg: str) -> None:

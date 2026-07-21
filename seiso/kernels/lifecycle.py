@@ -44,10 +44,12 @@ class KernelPatchSession:
         return self
 
     def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
-        self.restore()
-        if self._token is not None:
-            _ACTIVE_PATCH_SESSION.reset(self._token)
-            self._token = None
+        try:
+            self.restore()
+        finally:
+            if self._token is not None:
+                _ACTIVE_PATCH_SESSION.reset(self._token)
+                self._token = None
 
     def record(self, module: Any) -> None:
         if module not in self._modules:

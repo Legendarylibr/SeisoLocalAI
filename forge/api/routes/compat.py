@@ -102,7 +102,7 @@ async def chat_completions(
     use_provider_stream = body.stream and not body.tools and use_provider
 
     if use_local_stream:
-        _begin_generation_or_raise(orchestrator, user_id)
+        gen_epoch = _begin_generation_or_raise(orchestrator, user_id)
 
         async def sse_stream():
             sanitizer = StreamingOutputSanitizer(strip_tool_calls=not body.tools)
@@ -164,12 +164,12 @@ async def chat_completions(
                 yield f"data: {json.dumps(err)}\n\n"
                 yield "data: [DONE]\n\n"
             finally:
-                orchestrator.end_generation_for_user(user_id)
+                orchestrator.end_generation_for_user(user_id, epoch=gen_epoch)
 
         return StreamingResponse(sse_stream(), media_type="text/event-stream")
 
     if use_provider_stream:
-        _begin_generation_or_raise(orchestrator, user_id)
+        gen_epoch = _begin_generation_or_raise(orchestrator, user_id)
 
         async def provider_sse_stream():
             sanitizer = StreamingOutputSanitizer(strip_tool_calls=not body.tools)
@@ -229,14 +229,17 @@ async def chat_completions(
                 yield f"data: {json.dumps(err)}\n\n"
                 yield "data: [DONE]\n\n"
             finally:
-                orchestrator.end_generation_for_user(user_id)
+                orchestrator.end_generation_for_user(user_id, epoch=gen_epoch)
 
         return StreamingResponse(provider_sse_stream(), media_type="text/event-stream")
 
     job_id = orchestrator.create_job(user_id=user_id)
-    _begin_generation_or_raise(orchestrator, user_id)
+    gen_epoch = _begin_generation_or_raise(orchestrator, user_id)
     try:
         await orchestrator.start(job_id, payload)
+    except asyncio.CancelledError:
+        await orchestrator.cancel_generation_for_user(user_id)
+        raise
     except Exception:
         await orchestrator.cancel_generation_for_user(user_id)
         raise
@@ -276,12 +279,15 @@ async def chat_completions(
                 yield f"data: {json.dumps({'error': str(exc) or 'Inference failed'})}\n\n"
                 yield "data: [DONE]\n\n"
             finally:
-                orchestrator.end_generation_for_user(user_id)
+                orchestrator.end_generation_for_user(user_id, epoch=gen_epoch)
 
         return StreamingResponse(job_sse_stream(), media_type="text/event-stream")
 
     try:
         job = await orchestrator.wait_for(job_id)
+    except asyncio.CancelledError:
+        await orchestrator.cancel_generation_for_user(user_id)
+        raise
     except Exception:
         await orchestrator.cancel_generation_for_user(user_id)
         raise

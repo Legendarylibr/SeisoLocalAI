@@ -138,14 +138,24 @@ def export_checkpoint(
         elif fmt == ExportFormat.GGUF:
             from seiso.export.gguf import export_gguf_from_checkpoint
 
-            merged = results.get(ExportFormat.MERGED.value) or results.get(
-                ExportFormat.FULL.value
-            )
+            # Prefer a real merge. FULL/BASE may be a raw LoRA copytree — never
+            # feed adapter-only dirs into GGUF conversion.
+            merged = results.get(ExportFormat.MERGED.value)
+            full = results.get(ExportFormat.FULL.value)
+            if (
+                full is not None
+                and full.exists()
+                and (full / "adapter_config.json").is_file()
+            ):
+                full = None
+            merged_dir = merged if merged and merged.exists() else None
+            if merged_dir is None and full is not None and full.exists():
+                merged_dir = full
             gguf_paths = export_gguf_from_checkpoint(
                 ckpt,
                 out_root,
                 options.gguf_quantizations,
-                merged_dir=merged if merged and merged.exists() else None,
+                merged_dir=merged_dir,
                 on_log=log,
             )
             results.update(gguf_paths)
@@ -269,7 +279,13 @@ def _select_hub_folder(out_root: Path, formats: list[ExportFormat]) -> Path:
                 child.name in {"q4_k_m", "q8_0", "f16"}
                 or child.name.startswith("gguf-")
             ):
-                return child
+                ggufs = [
+                    p
+                    for p in child.glob("*.gguf")
+                    if p.is_file() and p.stat().st_size > 0
+                ]
+                if ggufs:
+                    return child
     return out_root
 
 

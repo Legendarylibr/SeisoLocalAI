@@ -313,10 +313,12 @@ class SeisoTrainer:
             logger.info("Training complete: %s", out)
             return out
         finally:
-            if patch_session is not None:
-                patch_session.__exit__(None, None, None)
-            release_training_memory(model)
-            self._cleanup_gpu(None)
+            try:
+                if patch_session is not None:
+                    patch_session.__exit__(None, None, None)
+            finally:
+                release_training_memory(model)
+                self._cleanup_gpu(None)
 
     def _prepare_datasets(self, tokenizer) -> PreparedTrainingDatasets:
         from seiso.training.dataset_analysis import (

@@ -377,3 +377,15 @@ def test_recommendation_evidence_simulator_not_deploy_claimable():
     assert meta["evidence_level"] == "simulator"
     assert meta["deploy_quality_claimable"] is False
     assert meta["deploy_quality_note"]
+
+
+def test_recommendation_evidence_ignores_false_simulator_claimable_flag():
+    from seiso.rl_quant.recommendation import recommendation_evidence
+
+    meta = recommendation_evidence(
+        {
+            "evidence_level": "simulator",
+            "deploy_quality_claimable": True,
+        }
+    )
+    assert meta["deploy_quality_claimable"] is False

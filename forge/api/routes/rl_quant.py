@@ -30,7 +30,10 @@ from forge.services.job_runtime import run_orchestrated_job
 from forge.services.model_registry import register_export_outputs
 from seiso.bundled.config_builder import validate_stages
 from seiso.rl_quant.presets import STAGE_ORDER, rl_quant_presets_response
-from seiso.rl_quant.recommendation import recommendation_to_gguf_quants
+from seiso.rl_quant.recommendation import (
+    recommendation_evidence,
+    recommendation_to_gguf_quants,
+)
 
 router = APIRouter(prefix="/rl-quant", tags=["rl-quant"])
 
@@ -123,7 +126,13 @@ async def start_rl_quant(
 
     async def _finished(job) -> None:
         rec = (job.result or {}).get("recommendation")
-        gguf_quants = recommendation_to_gguf_quants(rec or {})
+        evidence = recommendation_evidence(rec or {})
+        # Do not advertise export quants from simulator-only evidence.
+        gguf_quants = (
+            recommendation_to_gguf_quants(rec or {})
+            if evidence["deploy_quality_claimable"]
+            else []
+        )
         await db.update_rl_quant_job_status(
             job_id,
             job.status.value,

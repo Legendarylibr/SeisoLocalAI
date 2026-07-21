@@ -518,16 +518,14 @@ async def test_export_with_profile_lora(tmp_path, app, auth_client):
     assert res.status_code == 200
     job_id = res.json()["job_id"]
 
-    from forge.api.deps import get_export_orchestrator
-
-    orch = get_export_orchestrator()
+    job = None
     for _ in range(100):
-        job_rec = orch.get_job(job_id)
-        if job_rec and job_rec.status.value in ("completed", "failed"):
+        job = await db.get_export_job(job_id, user["id"])
+        if job and job["status"] in ("completed", "failed"):
             break
         await __import__("asyncio").sleep(0.05)
 
-    job = await db.get_export_job(job_id, user["id"])
+    assert job is not None
     assert job["status"] == "completed"
     outputs = json.loads(job.get("output_paths_json") or "{}")
     assert "lora" in outputs
