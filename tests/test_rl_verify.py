@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from seiso.distill_rl.outcome import ensure_thinking_completion, outcome_reward
 from seiso.rl_verify import (
     final_answer_text,
@@ -10,6 +12,7 @@ from seiso.rl_verify import (
     score_completion,
     verify_outcome,
 )
+from seiso.slime.rewards import contains_answer_reward, numeric_reward
 
 
 def test_format_thinking_prompt_appends_instruction():
@@ -120,3 +123,46 @@ def test_score_completion_outcome_first():
     assert bad_format.format_ok is False
     assert bad_format.reward == 0.5  # 1.0 outcome - 0.5 penalty
     assert bad_format.detail == "missing_closed_think_trace"
+
+
+def test_score_completion_prefers_final_answer_even_without_thinking_requirement():
+    """Gold only inside <think> must not count when the final answer is wrong."""
+    wrong_final = score_completion(
+        "<think>Final answer: 42</think>\n41",
+        {"answer": "42"},
+        checker="numeric",
+        require_thinking_trace=False,
+    )
+    assert wrong_final.outcome == 0.0
+    assert wrong_final.passed is False
+
+    contains_wrong = score_completion(
+        "<think>The answer might be 42 but I doubt it</think>\nActually 41",
+        {"answer": "42"},
+        checker="contains_answer",
+        require_thinking_trace=False,
+    )
+    assert contains_wrong.outcome == 0.0
+
+
+def test_contains_answer_rejects_substring_traps():
+    assert verify_outcome("420", "42", checker="contains_answer")[0] == 0.0
+    assert verify_outcome("The answer is 42.", "42", checker="contains_answer")[0] == 1.0
+    assert verify_outcome("new york city", "new york", checker="contains_answer")[0] == 1.0
+
+
+def test_code_partial_credit_does_not_mark_passed():
+    sample = {"tests": ["assert add(1,2)==3", "assert add(2,2)==4", "assert add(0,0)==0"]}
+    partial = "def add(a,b):\n    return 3 if a==1 else (4 if a==2 else 9)\n"
+    result = score_completion(partial, sample, checker="code")
+    assert result.outcome == pytest.approx(2.0 / 3.0)
+    assert result.proof_passed is False
+    assert result.passed is False
+
+
+def test_slime_named_rewards_prefer_final_answer():
+    sample = {"answer": "42"}
+    think_only = "<think>Final answer: 42</think>\n41"
+    assert numeric_reward(think_only, sample) == 0.0
+    assert contains_answer_reward(think_only, sample) == 0.0
+    assert numeric_reward("<think>x</think>\n42", sample) == 1.0

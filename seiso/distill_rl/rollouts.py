@@ -40,24 +40,33 @@ def generate_preference_rows(
     verifiable_outcome_rewards: bool = False,
     grpo_group_size: int = 1,
 ) -> list[dict[str, Any]]:
-    """Generate preference rows with deterministic per-prompt seeds."""
-    if verifiable_outcome_rewards and any(is_verifiable_prompt(p) for p in prompts):
-        outcome_rows = generate_outcome_preference_rows(
-            student_model=student_model,
-            prompts=[prompt for prompt in prompts if is_verifiable_prompt(prompt)],
-            max_new_tokens=max_new_tokens,
-            temperature=temperature,
-            seed=seed + 10_000,
-            use_chat_template=use_chat_template,
-            revision=student_revision,
-            trust_remote_code=trust_remote_code,
-            require_thinking_trace=require_thinking_trace,
-            thinking_instruction=thinking_instruction,
-            grpo_group_size=grpo_group_size,
-        )
-        remaining_prompts = [
-            prompt for prompt in prompts if not is_verifiable_prompt(prompt)
-        ]
+    """Generate preference rows with deterministic per-prompt seeds.
+
+    Verifiable prompts (answer/tests/benchmark) are never teacher≻student labeled:
+    - ``verifiable_outcome_rewards=True`` → score student groups and keep pass/fail pairs
+    - ``verifiable_outcome_rewards=False`` → skip them (do not treat teacher as gold)
+    Teacher≻student applies only to non-verifiable prompts.
+    """
+    verifiable_prompts = [prompt for prompt in prompts if is_verifiable_prompt(prompt)]
+    remaining_prompts = [
+        prompt for prompt in prompts if not is_verifiable_prompt(prompt)
+    ]
+    if verifiable_prompts:
+        outcome_rows: list[dict[str, Any]] = []
+        if verifiable_outcome_rewards:
+            outcome_rows = generate_outcome_preference_rows(
+                student_model=student_model,
+                prompts=verifiable_prompts,
+                max_new_tokens=max_new_tokens,
+                temperature=temperature,
+                seed=seed + 10_000,
+                use_chat_template=use_chat_template,
+                revision=student_revision,
+                trust_remote_code=trust_remote_code,
+                require_thinking_trace=require_thinking_trace,
+                thinking_instruction=thinking_instruction,
+                grpo_group_size=grpo_group_size,
+            )
         if not remaining_prompts:
             return outcome_rows
         teacher_rows = generate_preference_rows(

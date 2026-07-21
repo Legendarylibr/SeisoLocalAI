@@ -169,9 +169,8 @@ def verify_outcome(
         score, extracted = _choice_match(text_for_outcome, expected)
         return score, "choice", extracted
     if resolved == "contains_answer":
-        extracted = text_for_outcome.strip()
-        ok = expected.lower() in extracted.lower()
-        return (1.0 if ok else 0.0), "contains_answer", extracted
+        score, extracted = _contains_answer(text_for_outcome, expected)
+        return score, "contains_answer", extracted
     score, extracted = _exact_match(text_for_outcome, expected)
     return score, "exact_match", extracted
 
@@ -287,7 +286,10 @@ def score_completion(
             checker=checker,
             benchmark=bench if isinstance(bench, str) else None,
             field_reward=None if field_value is None else field_value,
-            prefer_final_answer=require_thinking_trace,
+            # Always score the final-answer span for text checkers. Thinking
+            # format is orthogonal — models may emit <think> even when the
+            # trainer does not require it.
+            prefer_final_answer=True,
             sample=sample,
         )
 
@@ -310,7 +312,12 @@ def score_completion(
         + process_weight * process
         - penalty
     )
-    passed = outcome > 0.5
+    # Code: full unit-test pass only. Dense pass-fraction stays in ``outcome``.
+    # Text/math: binary (or dense field) threshold.
+    if use_code and proof_passed is not None:
+        passed = bool(proof_passed)
+    else:
+        passed = outcome > 0.5
     detail = None
     if use_code and proof_detail is not None:
         detail = proof_detail
@@ -347,6 +354,32 @@ def _exact_match(actual: str, expected: str) -> tuple[float, str]:
     if actual.strip() == expected.strip():
         return 1.0, actual.strip()
     return 0.0, actual.strip()
+
+
+def _contains_answer(actual: str, expected: str) -> tuple[float, str]:
+    """Token-boundary containment — rejects substring traps like ``42`` in ``420``."""
+    extracted = actual.strip()
+    expected_norm = normalize_answer(expected)
+    if not expected_norm:
+        return 0.0, extracted
+    actual_norm = normalize_answer(actual)
+    if not actual_norm:
+        return 0.0, extracted
+
+    def _tokens(text: str) -> list[str]:
+        # normalize_answer keeps ``.``/``+``/``-``; strip them from token edges
+        # so ``42.`` still matches gold ``42`` without matching ``420``.
+        return [tok.strip(".-+") for tok in text.split() if tok.strip(".-+")]
+
+    actual_tokens = _tokens(actual_norm)
+    expected_tokens = _tokens(expected_norm)
+    if not expected_tokens:
+        return 0.0, extracted
+    width = len(expected_tokens)
+    for start in range(0, len(actual_tokens) - width + 1):
+        if actual_tokens[start : start + width] == expected_tokens:
+            return 1.0, extracted
+    return 0.0, extracted
 
 
 def _numeric_match(actual: str, expected: str) -> tuple[float, str]:

@@ -143,10 +143,12 @@ There are **two preference regimes** (do not conflate them):
    - `data/distill_code_synth.jsonl` (deterministic code tasks with known passers)
    - `data/synthetic_code_preferences.jsonl` (offline golden-vs-mutant DPO pairs;
      regenerate with `python -m seiso.rl_verify --data-dir data --seed 0`)
-2. **Teacher ≻ student bootstrap (not outcome RL).** For non-verifiable prompts,
-   pairs are `chosen = teacher` and `rejected = student` with no correctness
-   check. Useful as imitation-shaped bootstrap data when labels are missing —
-   **not** a substitute for verifiable preference RL.
+2. **Teacher ≻ student bootstrap (not outcome RL).** For **non-verifiable**
+   prompts only, pairs are `chosen = teacher` and `rejected = student` with no
+   correctness check. Prompts that carry `answer` / `tests` are never labeled
+   this way: with `verifiable_outcome_rewards: true` they use the verifier; with
+   the flag off they are skipped. Useful as imitation-shaped bootstrap when
+   labels are missing — **not** a substitute for verifiable preference RL.
 
 Reasoning-focused runs can append a thinking instruction by leaving
 `require_thinking_trace: true`. Completions are scored as generated (no synthetic

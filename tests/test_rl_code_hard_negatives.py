@@ -59,6 +59,24 @@ def test_select_pair_prefers_near_miss_among_fails():
     assert pair.rejected.completion == "near"
 
 
+def test_select_pair_soft_fail_prefers_shorter_equal_score():
+    chosen = ScoredCompletion(completion="ok", score=1.0, passed=True, has_code=False)
+    short_wrong = ScoredCompletion(
+        completion="41", score=0.0, passed=False, has_code=False
+    )
+    long_wrong = ScoredCompletion(
+        completion="definitely not forty one padded " * 3,
+        score=0.0,
+        passed=False,
+        has_code=False,
+    )
+    pair = select_preference_pair(
+        [long_wrong, short_wrong, chosen], hard_negatives=True
+    )
+    assert pair is not None
+    assert pair.rejected.completion == "41"
+
+
 def test_select_pair_skips_when_no_pass():
     a = ScoredCompletion(completion="a", score=0.0, passed=False, has_code=True)
     b = ScoredCompletion(completion="b", score=0.0, passed=False, has_code=True)

@@ -101,10 +101,11 @@ def select_preference_pair(
             )
             kind = "hard_negative"
         elif soft_fails:
-            # Math/choice: prefer the strongest incorrect candidate as rejected.
+            # Math/choice: highest residual score, then shorter text (avoid
+            # length-padding "hard" negatives when all fails score 0).
             rejected = max(
                 soft_fails,
-                key=lambda c: (c.score, len(c.completion.strip())),
+                key=lambda c: (c.score, -len(c.completion.strip())),
             )
             kind = "hard_negative"
         else:

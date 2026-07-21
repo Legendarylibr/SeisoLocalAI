@@ -270,6 +270,14 @@ class SingleGpuSlimeConfig:
             )
         if self.missing_thinking_penalty < 0:
             raise ValueError("missing_thinking_penalty must be non-negative")
+        if (
+            self.require_thinking_trace
+            and self.missing_thinking_penalty >= self.outcome_reward_weight
+        ):
+            raise ValueError(
+                "missing_thinking_penalty must be < outcome_reward_weight so "
+                "correct-but-unformatted completions outrank wrong-but-formatted ones"
+            )
         if self.min_thinking_tokens < 0:
             raise ValueError("min_thinking_tokens must be non-negative")
         if self.max_vram_gb is not None and self.max_vram_gb <= 0:

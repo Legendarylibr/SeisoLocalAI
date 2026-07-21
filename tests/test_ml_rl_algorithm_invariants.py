@@ -131,6 +131,19 @@ def test_slime_rejects_zero_outcome_weight(tmp_path):
         cfg.validate()
 
 
+def test_slime_rejects_format_penalty_dominating_outcome(tmp_path):
+    cfg = SingleGpuSlimeConfig(
+        model_id="test/model",
+        dataset=tmp_path / "data.jsonl",
+        output_dir=tmp_path / "out",
+        require_thinking_trace=True,
+        outcome_reward_weight=1.0,
+        missing_thinking_penalty=1.0,
+    )
+    with pytest.raises(ValueError, match="missing_thinking_penalty"):
+        cfg.validate()
+
+
 def test_train_config_refuses_preference_without_opt_in(tmp_path):
     with pytest.raises(ValueError, match="Preference datasets"):
         TrainConfig.model_validate(
