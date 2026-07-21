@@ -22,13 +22,12 @@ def recommendation_evidence(recommendation: dict[str, Any]) -> dict[str, Any]:
     """Evidence / claim-boundary labels for an RL-quant recommendation payload."""
     evidence = recommendation.get("evidence_level")
     research = recommendation.get("research")
-    if not isinstance(evidence, str) or not evidence:
-        if isinstance(research, dict):
-            evidence = research.get("evidence_level")
-            if not isinstance(evidence, str) or not evidence:
-                nested = research.get("evidence")
-                if isinstance(nested, dict):
-                    evidence = nested.get("level")
+    if (not isinstance(evidence, str) or not evidence) and isinstance(research, dict):
+        evidence = research.get("evidence_level")
+        if not isinstance(evidence, str) or not evidence:
+            nested = research.get("evidence")
+            if isinstance(nested, dict):
+                evidence = nested.get("level")
     if not isinstance(evidence, str) or not evidence:
         evidence = "unknown"
     has_external = bool(recommendation.get("external_quality"))
@@ -39,11 +38,10 @@ def recommendation_evidence(recommendation: dict[str, Any]) -> dict[str, Any]:
     claimable = recommendation.get("deploy_quality_claimable")
     if claimable is None:
         claimable = evidence == "local_llama_cpp" and has_external
-    # Simulator/unknown must never be claimable even if a payload sets the flag.
-    if evidence in {"simulator", "unknown"}:
-        claimable = False
-    # llama.cpp without quality sidecar is not deploy-claimable.
-    elif evidence == "local_llama_cpp" and not has_external:
+    # Simulator/unknown, or llama.cpp without quality sidecar, are not claimable.
+    if evidence in {"simulator", "unknown"} or (
+        evidence == "local_llama_cpp" and not has_external
+    ):
         claimable = False
     note = recommendation.get("deploy_quality_note")
     if not note and evidence == "simulator":
