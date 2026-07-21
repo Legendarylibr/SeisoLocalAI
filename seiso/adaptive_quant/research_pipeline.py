@@ -6,7 +6,6 @@ from seiso.adaptive_quant.configuration import FrameworkConfig, config_to_flat_d
 from seiso.adaptive_quant.logging_utils import write_json
 from seiso.adaptive_quant.paper_bundle import create_pipeline_paper_bundle
 from seiso.adaptive_quant.pipeline.benchmark_warn import warn_if_benchmarks_are_large
-from seiso.adaptive_quant.pipeline.report_markdown import write_research_report_markdown
 from seiso.adaptive_quant.pipeline.research_contract import build_research_contract
 from seiso.adaptive_quant.pipeline.vcs import git_commit_hash
 from seiso.adaptive_quant.replay_trace import finalize_replay_artifacts
@@ -198,7 +197,6 @@ class ResearchPipeline:
             "recommendation",
             "benchmark",
             "analysis",
-            "report",
             "paper_bundle",
         ]
         if frontier_summary is not None:
@@ -215,7 +213,6 @@ class ResearchPipeline:
             "training_history": history_path,
             "final_checkpoint": checkpoint_path,
             "recommendation": recommendation_path,
-            "report": None,
             "replay_manifest": (replay_report or {}).get("manifest_path"),
         }
         exported_gguf = gguf_export_summary.get("output_path")
@@ -237,27 +234,6 @@ class ResearchPipeline:
             slim_analysis_for_summary,
         )
 
-        provisional_index = build_research_artifact_index(config, artifact_payload)
-        report_path = None
-        if self._runs("report"):
-            report_path = write_research_report_markdown(
-                config,
-                git_commit=commit,
-                train_summary=train_summary,
-                eval_summary=eval_summary,
-                benchmark_summary=benchmark_summary,
-                gpu_profile_report=gpu_profile_report,
-                preflight_report=preflight_report,
-                vram_report=vram_report,
-                analysis=analysis,
-                history_path=history_path,
-                checkpoint_path=checkpoint_path,
-                recommendation_summary=recommendation_summary,
-                gguf_export_summary=gguf_export_summary,
-                research=research,
-                artifact_index=provisional_index,
-            )
-            artifact_payload["report"] = report_path
         summary = {
             "config": config_to_flat_dict(config),
             "git_commit": commit,

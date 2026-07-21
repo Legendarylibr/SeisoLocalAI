@@ -195,7 +195,6 @@ def run_auto_hyperparameter_sweep(
         run_name=sweep_run_name,
         training_episodes=sweep_train,
         evaluation_episodes=sweep_eval,
-        write_research_report=False,
     )
 
     results: list[SweepTrialResult] = []

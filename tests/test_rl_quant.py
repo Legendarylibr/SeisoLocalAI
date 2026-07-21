@@ -78,7 +78,6 @@ def test_run_smoke_pipeline(tmp_path: Path):
             "preset": "minimal",
             "training_episodes": 24,
             "evaluation_episodes": 6,
-            "write_research_report": False,
             "auto_sweep": False,
         },
         on_log=lambda _m: None,

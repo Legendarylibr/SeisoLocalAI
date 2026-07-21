@@ -350,7 +350,6 @@ def artifact_index_report_lines(artifact_index: Mapping[str, Any] | None) -> lis
     lines: list[str] = []
     for key in (
         "summary_json",
-        "report_md",
         "checkpoint",
         "recommendation_json",
         "exported_gguf",

@@ -43,7 +43,6 @@ def rl_quant_run(
     kernel_batch_rows: int = typer.Option(
         4096, help="Token rows for kernel bench shapes"
     ),
-    write_report: bool = typer.Option(False, help="Write research markdown report"),
     auto_sweep: bool = typer.Option(
         True,
         "--auto-sweep/--no-auto-sweep",
@@ -75,7 +74,6 @@ def rl_quant_run(
         "seed": seed,
         "gguf_export": gguf_export,
         "moe_enabled": moe_enabled,
-        "write_research_report": write_report,
         "auto_sweep": auto_sweep,
     }
     if sweep_config:

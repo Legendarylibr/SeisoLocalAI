@@ -240,7 +240,6 @@ class TrainingSettings:
     jsonl_buffered: bool = False
     jsonl_flush_every: int = 1
     write_training_history: bool = True
-    write_research_report: bool = True
     resume_from_checkpoint: str | None = None
     prompt_split_enabled: bool = False
     prompt_split_seed: int = 2027

@@ -32,7 +32,6 @@ MANIFEST_SCHEMA = "seiso.adaptive_quant.replay_manifest/v1"
 _CONFIG_FINGERPRINT_EXCLUDE = frozenset(
     {
         "resume_from_checkpoint",
-        "write_research_report",
         "write_training_history",
         "replay_verify_after_run",
         "replay_manifest_enabled",

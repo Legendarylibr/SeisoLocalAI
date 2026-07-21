@@ -101,9 +101,6 @@ def print_pipeline_footer(
                 "on" if resolve_rust_cli_binary(config) else "binary missing",
             )
         )
-    rp = art.get("report")
-    if rp:
-        rows.append(("report_md", str(rp)))
     rows.append(("analysis_dir", f"{config.analysis_dir}/{config.run_name}/"))
 
     th = art.get("training_history")
@@ -263,9 +260,6 @@ def print_online_footer(
     checkpoint_path = artifact_map.get("final_checkpoint")
     if checkpoint_path:
         rows.append(("checkpoint", str(checkpoint_path)))
-    report_path = artifact_map.get("report")
-    if report_path:
-        rows.append(("report_md", str(report_path)))
     print_cli_block("Online run complete", rows)
 
 
@@ -313,9 +307,6 @@ def print_continuous_footer(
     checkpoint_path = artifact_map.get("final_checkpoint")
     if checkpoint_path:
         rows.append(("checkpoint", str(checkpoint_path)))
-    report_path = artifact_map.get("report")
-    if report_path:
-        rows.append(("report_md", str(report_path)))
     print_cli_block("Continuous learning run complete", rows)
 
 

@@ -11,7 +11,6 @@ STAGE_ORDER = (
     "recommend",
     "benchmark",
     "analysis",
-    "report",
     "paper_bundle",
 )
 
@@ -22,7 +21,6 @@ STAGE_HELP: dict[str, str] = {
     "recommend": "Write deployable quantization recommendations",
     "benchmark": "Run simulator or llama.cpp benchmark suite",
     "analysis": "Generate analysis artifacts from logs and traces",
-    "report": "Write the markdown research report",
     "paper_bundle": "Package reproducibility metadata and artifacts",
 }
 
@@ -39,7 +37,6 @@ RL_QUANT_PRESETS: list[dict[str, Any]] = [
             "recommend",
             "benchmark",
             "analysis",
-            "report",
             "paper_bundle",
         ],
     },
@@ -62,7 +59,6 @@ RL_QUANT_PRESETS: list[dict[str, Any]] = [
             "recommend",
             "benchmark",
             "analysis",
-            "report",
             "paper_bundle",
         ],
     },

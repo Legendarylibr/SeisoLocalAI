@@ -350,7 +350,6 @@ def build_research_artifact_index(
         bundle_dir = str(raw) if raw else None
     return {
         "summary_json": config.summary_path(),
-        "report_md": _artifact_path(artifacts, "report"),
         "checkpoint": _artifact_path(artifacts, "final_checkpoint"),
         "recommendation_json": _artifact_path(artifacts, "recommendation"),
         "training_history": _artifact_path(artifacts, "training_history"),

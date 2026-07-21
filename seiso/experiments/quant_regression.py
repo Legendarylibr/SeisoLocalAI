@@ -433,7 +433,6 @@ def run_route_regression_eval(
         "hardware_modes": hardware,
         "route_hf_allowed_repos": [route_repo_id],
         "auto_sweep": False,
-        "write_research_report": False,
     }
     if primary:
         payload["gguf_path"] = str(primary)
