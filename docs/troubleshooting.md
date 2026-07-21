@@ -194,11 +194,19 @@ export SEISO_REMOTE_ACK=1
 export SEISO_TRUSTED_PROXY_IPS=127.0.0.1,::1
 ```
 
-**Symptom:** Remote + tools/code-exec blocked at startup
+**Symptom:** Remote + tools blocked at startup
 
 **Fix:** Do not combine unless you accept the risk, then:
 ```bash
 export SEISO_REMOTE_DANGEROUS_ACK=1
+```
+
+**Symptom:** Remote + code-exec blocked at startup
+
+**Fix:** Code execution is AST deny-list only (not a full OS sandbox). Prefer
+keeping it disabled with remote access. To override deliberately:
+```bash
+export SEISO_REMOTE_CODE_EXEC_ACK=1
 ```
 
 ## Compat `/v1` returns 401
