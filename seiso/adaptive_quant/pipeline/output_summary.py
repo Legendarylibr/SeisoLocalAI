@@ -178,15 +178,17 @@ def recommendation_decision_block(payload: dict[str, object]) -> dict[str, objec
         delta = fixed_reward - adaptive_reward
         use_adaptive = fixed_reward <= adaptive_reward
 
+    claimable = bool(payload.get("deploy_quality_claimable"))
+    prefer_verb = "Deploy" if claimable else "Prefer"
     if use_adaptive:
         rationale = (
-            "Use the trained adaptive policy on the target hardware "
+            f"{prefer_verb} the trained adaptive policy on the target hardware "
             "(fixed candidate did not beat adaptive on mean reward)."
         )
         deploy = "adaptive_policy"
     else:
         rationale = (
-            f"Deploy fixed quant `{signature}` — mean reward {_fmt(fixed_reward)} "
+            f"{prefer_verb} fixed quant `{signature}` — mean reward {_fmt(fixed_reward)} "
             f"vs adaptive {_fmt(adaptive_reward)} (Δ {_fmt(delta)})."
         )
         deploy = signature or "fixed_quant"

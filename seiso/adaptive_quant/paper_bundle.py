@@ -160,10 +160,19 @@ def create_multiseed_paper_bundle(
         ],
         rows,
     )
+    from seiso.adaptive_quant.pipeline.research_contract import (
+        EVIDENCE_MULTISEED,
+        EVIDENCE_SWEEP,
+    )
+
+    aggregate_level = (
+        EVIDENCE_SWEEP if "leaderboard" in aggregate_payload else EVIDENCE_MULTISEED
+    )
     claims = build_claims_validation(
         config=config,
         summary=aggregate_payload,
         metrics={k: v.get("mean", 0.0) for k, v in aggregate_stats.items()},
+        evidence_level=aggregate_level,
     )
     write_json(claims_json_path, claims)
     write_text_file(claims_md_path, _claims_markdown(claims))

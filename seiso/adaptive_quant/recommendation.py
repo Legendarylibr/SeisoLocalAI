@@ -47,6 +47,20 @@ def recommend_quantization(trainer, config: FrameworkConfig) -> dict[str, object
     evaluated_candidates.sort(key=_evaluation_sort_key)
 
     best_fixed = evaluated_candidates[0] if evaluated_candidates else None
+    from seiso.adaptive_quant.pipeline.output_summary import (
+        recommendation_decision_block,
+    )
+    from seiso.adaptive_quant.pipeline.research_contract import (
+        EVIDENCE_LOCAL_LLAMA_CPP,
+        EVIDENCE_SIMULATOR,
+        infer_evidence_level,
+    )
+
+    evidence = infer_evidence_level(config)
+    has_external_quality = bool(config.external_quality_path)
+    # Deploy claims require local llama.cpp measurements AND an external quality
+    # sidecar. llama.cpp alone still uses simulator perplexity without sidecar.
+    claimable = evidence == EVIDENCE_LOCAL_LLAMA_CPP and has_external_quality
     payload: dict[str, object] = {
         "detected_hardware": detected.to_metadata() if detected is not None else None,
         "target_hardware": target_hardware.value,
@@ -55,26 +69,21 @@ def recommend_quantization(trainer, config: FrameworkConfig) -> dict[str, object
         "candidate_count": len(evaluated_candidates),
         "recommended_quant": best_fixed,
         "candidates": evaluated_candidates,
+        "evidence_level": evidence,
+        "deploy_quality_claimable": claimable,
     }
-    from seiso.adaptive_quant.pipeline.output_summary import (
-        recommendation_decision_block,
-    )
-
-    payload["decision"] = recommendation_decision_block(payload)
-    from seiso.adaptive_quant.pipeline.research_contract import (
-        EVIDENCE_SIMULATOR,
-        infer_evidence_level,
-    )
-
-    evidence = infer_evidence_level(config)
-    payload["evidence_level"] = evidence
-    payload["deploy_quality_claimable"] = evidence != EVIDENCE_SIMULATOR
     if evidence == EVIDENCE_SIMULATOR:
         payload["deploy_quality_note"] = (
             "Simulator evidence only — not deploy-grounded. Escalate to "
-            "backend=llama_cpp (and optional external_quality_path) before "
-            "treating quant recommendations as production quality."
+            "backend=llama_cpp with external_quality_path before treating "
+            "quant recommendations as production quality."
         )
+    elif evidence == EVIDENCE_LOCAL_LLAMA_CPP and not has_external_quality:
+        payload["deploy_quality_note"] = (
+            "llama.cpp latency/throughput are local, but perplexity remains "
+            "simulator-derived without external_quality_path — not deploy-claimable."
+        )
+    payload["decision"] = recommendation_decision_block(payload)
     return payload
 
 
