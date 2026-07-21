@@ -239,7 +239,7 @@ def score_completion(
     outcome_weight: float = 1.0,
     format_weight: float = 0.1,
     process_weight: float = 0.0,
-    missing_format_penalty: float = 0.5,
+    missing_format_penalty: float = 0.0,
     min_thinking_tokens: int = 8,
 ) -> VerifierResult:
     """Combine outcome + format (+ optional experimental process) into one decision.

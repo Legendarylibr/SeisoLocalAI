@@ -104,6 +104,8 @@ def test_slime_defaults_per_token_and_outcome_dominant(tmp_path):
     assert cfg.outcome_reward_weight == 1.0
     assert cfg.format_reward_weight == 0.1
     assert cfg.process_reward_weight == 0.0
+    # Prefer format bonus over subtractive thinking penalty.
+    assert cfg.missing_thinking_penalty == 0.0
     cfg.validate()
 
 

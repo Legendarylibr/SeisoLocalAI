@@ -276,7 +276,7 @@ kl_coef: 0.0
 require_thinking_trace: true
 format_reward_weight: 0.1
 process_reward_weight: 0.0
-missing_thinking_penalty: 0.5
+missing_thinking_penalty: 0.0
 slime_use_lora: true
 auto_stop: true
 auto_stop_metric: reward_mean
@@ -305,9 +305,9 @@ Important fields:
 | `reward_field` | Dataset reward column when `reward: field` |
 | `require_thinking_trace` | When true, rollout prompts may end with open `<think>`. Format is OK if the **generation** closes thinking: either a full `<think>...</think>` block or a continuation that only emits `</think>` then the answer |
 | `outcome_reward_weight` | Weight for hard outcome (correctness) from the shared verifier |
-| `format_reward_weight` | Small bonus when the completion contains a closed thinking block (side channel; keep below outcome weight) |
+| `format_reward_weight` | Small bonus when the completion contains a closed thinking block (preferred shaping signal; keep below outcome weight) |
 | `process_reward_weight` | Experimental lexical process score; keep `0` for verifiable outcome-first RL |
-| `missing_thinking_penalty` | Penalty when format is required but the model omits a closed think block |
+| `missing_thinking_penalty` | Optional subtractive penalty when format is required but missing; default `0` (use format bonus instead). Set a modest value (e.g. `0.2`) only if format compliance stalls; must stay `≤ outcome − (format + process)` |
 | `min_thinking_tokens` | Only used when `process_reward_weight > 0` |
 | `kl_coef` | Coefficient on non-negative KL (Schulman k3) to a frozen reference; `0` skips loading the ref (lower VRAM). Prefer `0.02`–`0.05` for multi-epoch runs (signed k1 is logged as `kl_k1` only) |
 | `rollouts_per_prompt` | slime `--n-samples-per-prompt` |

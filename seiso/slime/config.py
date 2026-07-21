@@ -134,10 +134,13 @@ class SingleGpuSlimeConfig:
     )
     outcome_reward_weight: float = 1.0
     # Format is a small binary bonus for closed <think>...</think> on raw tokens.
+    # Prefer this over missing_thinking_penalty so correct answers are not punished.
     format_reward_weight: float = 0.1
     # Lexical process shaping is experimental; leave at 0 for verifiable outcome-first RL.
     process_reward_weight: float = 0.0
-    missing_thinking_penalty: float = 0.5
+    # Optional subtractive push for missing think tags. Default 0 — use the format
+    # bonus alone; set a modest value (e.g. 0.2) only if format compliance stalls.
+    missing_thinking_penalty: float = 0.0
     min_thinking_tokens: int = 8
     seed: int = 17
     dtype: str = "auto"

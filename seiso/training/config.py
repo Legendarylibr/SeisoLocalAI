@@ -266,7 +266,14 @@ class TrainConfig(BaseModel):
         ge=0,
         description="Experimental lexical process score; keep 0 for verifiable outcome-first RL.",
     )
-    missing_thinking_penalty: float = Field(default=0.5, ge=0)
+    missing_thinking_penalty: float = Field(
+        default=0.0,
+        ge=0,
+        description=(
+            "Optional subtractive penalty when thinking format is required but "
+            "missing. Prefer format_reward_weight for shaping; keep 0 by default."
+        ),
+    )
     min_thinking_tokens: int = Field(default=8, ge=0)
     dtype: str = "auto"
     device: str = "cuda"
