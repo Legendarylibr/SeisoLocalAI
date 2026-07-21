@@ -64,6 +64,10 @@ vLLM weight sync defaults to dynamic LoRA (`/v1/load_lora_adapter`) when
 `SEISO_MANAGED_VLLM_ENABLE_LORA=true` for Seiso-managed multi-GPU. Single-GPU
 `rollout_backend: hf` and existing LoRA/SFT multi-GPU paths are unchanged.
 
+**Logprobs:** remote engines sample tokens; Seiso recomputes `old_logprobs` on the
+local actor for GRPO (engine sampling logprobs unused). Keep weight sync on to
+limit off-policyness — see [quickstart § Slime](quickstart.md#slime-post-training).
+
 ### Data (RLVR defaults)
 
 Prefer a grounded `dataset` + frozen `eval_dataset`. Synth is opt-in only
