@@ -330,10 +330,30 @@ def train_slime(config: SingleGpuSlimeConfig) -> Path:
                 _save_distributed(
                     model, tokenizer, config.output_dir / f"checkpoint-{global_step}", dist_ctx
                 )
+            _maybe_run_held_out_eval(
+                model=model,
+                tokenizer=tokenizer,
+                config=config,
+                torch=torch,
+                dist_ctx=dist_ctx,
+                step=global_step,
+                metrics_path=metrics_path,
+                force=False,
+            )
 
             global_step += 1
             if decision.should_stop:
                 optimizer.zero_grad(set_to_none=True)
+                _maybe_run_held_out_eval(
+                    model=model,
+                    tokenizer=tokenizer,
+                    config=config,
+                    torch=torch,
+                    dist_ctx=dist_ctx,
+                    step=global_step,
+                    metrics_path=metrics_path,
+                    force=True,
+                )
                 _write_training_state(config, global_step, decision.reason, auto_stop, dist_ctx)
                 _save_distributed(model, tokenizer, final_output_dir, dist_ctx)
                 return final_output_dir
@@ -348,6 +368,16 @@ def train_slime(config: SingleGpuSlimeConfig) -> Path:
                         step=global_step + 1,
                         sync_state=weight_sync_state,
                     )
+                _maybe_run_held_out_eval(
+                    model=model,
+                    tokenizer=tokenizer,
+                    config=config,
+                    torch=torch,
+                    dist_ctx=dist_ctx,
+                    step=global_step,
+                    metrics_path=metrics_path,
+                    force=True,
+                )
                 _write_training_state(config, global_step, "max_steps", auto_stop, dist_ctx)
                 _save_distributed(model, tokenizer, final_output_dir, dist_ctx)
                 return final_output_dir
@@ -387,9 +417,62 @@ def train_slime(config: SingleGpuSlimeConfig) -> Path:
             step=global_step,
             sync_state=weight_sync_state,
         )
+    _maybe_run_held_out_eval(
+        model=model,
+        tokenizer=tokenizer,
+        config=config,
+        torch=torch,
+        dist_ctx=dist_ctx,
+        step=global_step,
+        metrics_path=metrics_path,
+        force=True,
+    )
     _write_training_state(config, global_step, "complete", auto_stop, dist_ctx)
     _save_distributed(model, tokenizer, final_output_dir, dist_ctx)
     return final_output_dir
+
+
+def _maybe_run_held_out_eval(
+    *,
+    model,
+    tokenizer,
+    config: SingleGpuSlimeConfig,
+    torch,
+    dist_ctx: _DistributedSlimeContext,
+    step: int,
+    metrics_path: Path,
+    force: bool,
+) -> None:
+    """Run frozen held-out unit-test eval on the main rank when configured.
+
+    All ranks share the same schedule decision and barrier around the main-rank
+    generate/score path so DDP peers do not enter the next collective early.
+    """
+    if config.eval_dataset is None:
+        return
+    if force:
+        if not config.eval_on_complete:
+            return
+    elif not config.eval_every_steps or not step or step % config.eval_every_steps != 0:
+        return
+
+    # Match _save_distributed: sync → main-only work → sync.
+    _distributed_barrier(dist_ctx)
+    try:
+        if dist_ctx.is_main:
+            from seiso.slime.eval import run_held_out_eval
+
+            metrics = run_held_out_eval(
+                model=model,
+                tokenizer=tokenizer,
+                config=config,
+                torch=torch,
+                step=step,
+            )
+            if metrics:
+                _append_metrics(metrics_path, {"step": step, **metrics})
+    finally:
+        _distributed_barrier(dist_ctx)
 
 
 def _collect_training_rollout_batch(
@@ -629,8 +712,8 @@ def _collect_rollouts(
                     proof_passed=score["proof_passed"],
                     proof_score=score["proof_score"],
                     proof_detail=score["proof_detail"],
+                    )
                 )
-            )
             if verifier_path is not None:
                 prompt_text = (
                     prompt_chunk[sample_idx] if sample_idx < len(prompt_chunk) else gen.prompts[idx]
@@ -652,6 +735,7 @@ def _collect_rollouts(
                         "proof_passed": score.get("proof_passed"),
                         "proof_score": score.get("proof_score"),
                         "proof_detail": score.get("proof_detail"),
+                        "code_reward_mode": config.code_reward_mode,
                         "extracted_answer": _truncate_text(
                             score.get("extracted_answer", ""),
                             config.verifier_max_text_chars,
@@ -677,6 +761,12 @@ def _collect_rollouts(
                         ),
                     }
                 )
+
+        _finalize_auto_code_rewards(chunk_rollouts, config)
+        if verifier_records:
+            _sync_verifier_records_with_rollouts(
+                verifier_records, chunk_rollouts, config.rollouts_per_prompt
+            )
 
         filter_stats["rollout_groups_total"] += len(sample_chunk)
         kept_rollouts, kept_group_indexes, rejected_groups = _filter_rollout_groups(
@@ -765,6 +855,7 @@ def _score_completion(
         process_weight=config.process_reward_weight,
         missing_format_penalty=config.missing_thinking_penalty,
         min_thinking_tokens=config.min_thinking_tokens,
+        code_reward_mode=config.code_reward_mode,
     )
     penalty = (
         config.missing_thinking_penalty
@@ -788,6 +879,54 @@ def _score_completion(
         "proof_score": (float(result.proof_score) if result.proof_score is not None else None),
         "proof_detail": result.proof_detail,
     }
+
+
+def _finalize_auto_code_rewards(
+    rollouts: list[Rollout],
+    config: SingleGpuSlimeConfig,
+) -> None:
+    """For ``code_reward_mode=auto``, promote to binary once a group has a full passer.
+
+    Until then, keep dense pass-fraction outcomes so early GRPO still has signal.
+    """
+    if config.code_reward_mode != "auto":
+        return
+    group_size = config.rollouts_per_prompt
+    for start in range(0, len(rollouts), group_size):
+        group = rollouts[start : start + group_size]
+        code = [rollout for rollout in group if rollout.proof_score is not None]
+        if not code:
+            continue
+        use_binary = any(bool(rollout.proof_passed) for rollout in code)
+        for rollout in code:
+            outcome = (
+                (1.0 if rollout.proof_passed else 0.0)
+                if use_binary
+                else float(rollout.proof_score or 0.0)
+            )
+            rollout.outcome_reward = outcome
+            rollout.outcome_passed = bool(rollout.proof_passed)
+            rollout.reward = (
+                config.outcome_reward_weight * outcome
+                + config.format_reward_weight * float(rollout.format_reward)
+                + config.process_reward_weight * float(rollout.process_reward)
+                - float(rollout.thinking_penalty)
+            )
+
+
+def _sync_verifier_records_with_rollouts(
+    records: list[dict[str, Any]],
+    rollouts: list[Rollout],
+    group_size: int,
+) -> None:
+    """Refresh verifier JSONL fields after auto code-reward finalization."""
+    del group_size
+    if len(records) != len(rollouts):
+        return
+    for record, rollout in zip(records, rollouts, strict=True):
+        record["reward"] = float(rollout.reward)
+        record["outcome_reward"] = float(rollout.outcome_reward)
+        record["outcome_passed"] = bool(rollout.outcome_passed)
 
 
 def _split_thinking_trace(completion: str) -> tuple[str, str, bool]:

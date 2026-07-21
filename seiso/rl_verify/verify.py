@@ -169,9 +169,8 @@ def verify_outcome(
         score, extracted = _choice_match(text_for_outcome, expected)
         return score, "choice", extracted
     if resolved == "contains_answer":
-        extracted = text_for_outcome.strip()
-        ok = expected.lower() in extracted.lower()
-        return (1.0 if ok else 0.0), "contains_answer", extracted
+        score, extracted = _contains_answer(text_for_outcome, expected)
+        return score, "contains_answer", extracted
     score, extracted = _exact_match(text_for_outcome, expected)
     return score, "exact_match", extracted
 
@@ -231,6 +230,42 @@ def experimental_process_reward(
     return min(1.0, score)
 
 
+def resolve_code_reward_mode(mode: str | None) -> str:
+    """Normalize code reward mode: ``binary`` (default), ``dense``, or ``auto``."""
+    # Use membership checks (not a value dict) so bandit B105 does not treat
+    # mode tokens like ``binary`` / ``dense`` as hardcoded passwords.
+    key = str(mode or "binary").strip().lower()
+    if key in {"binary", "all_pass", "pass"}:
+        return "binary"
+    if key in {"dense", "fraction", "pass_fraction"}:
+        return "dense"
+    if key in {"auto", "curriculum"}:
+        return "auto"
+    raise ValueError(
+        f"unknown code_reward_mode {mode!r}; expected one of: "
+        "binary, dense, auto"
+    )
+
+
+def code_outcome_value(
+    *,
+    proof_passed: bool,
+    proof_score: float,
+    mode: str = "binary",
+) -> float:
+    """Map a code proof to a GRPO outcome under ``code_reward_mode``.
+
+    - ``binary``: 1.0 iff all tests pass (correctness default)
+    - ``dense``: pass fraction in [0, 1] (early-training signal)
+    - ``auto``: provisional dense; callers should promote to binary once a
+      same-prompt group contains any full pass
+    """
+    resolved = resolve_code_reward_mode(mode)
+    if resolved == "dense" or resolved == "auto":
+        return float(proof_score)
+    return 1.0 if proof_passed else 0.0
+
+
 def score_completion(
     completion: str,
     sample: dict[str, Any],
@@ -240,12 +275,14 @@ def score_completion(
     outcome_weight: float = 1.0,
     format_weight: float = 0.1,
     process_weight: float = 0.0,
-    missing_format_penalty: float = 0.5,
+    missing_format_penalty: float = 0.0,
     min_thinking_tokens: int = 8,
+    code_reward_mode: str = "binary",
 ) -> VerifierResult:
     """Combine outcome + format (+ optional experimental process) into one decision.
 
     ``completion`` must be the model-generated string — do not prepend synthetic tags.
+    For code, ``code_reward_mode`` selects binary / dense / auto outcome mapping.
     """
     thinking_trace, final_answer, has_closed = split_thinking_trace(completion)
     format_ok, format_score = format_reward(
@@ -274,12 +311,18 @@ def score_completion(
         from seiso.rl_verify.code_proof import verify_code_proof
 
         proof = verify_code_proof(completion, sample)
-        outcome = float(proof.score)
-        used_checker = "code"
-        extracted = proof.extracted_code
         proof_passed = proof.passed
         proof_score = float(proof.score)
         proof_detail = proof.detail
+        # Keep pass-fraction on proof_score for logs / hard negatives.
+        # Outcome follows code_reward_mode (default binary = all tests pass).
+        outcome = code_outcome_value(
+            proof_passed=bool(proof_passed),
+            proof_score=float(proof_score),
+            mode=code_reward_mode,
+        )
+        used_checker = "code"
+        extracted = proof.extracted_code
     else:
         outcome, used_checker, extracted = verify_outcome(
             completion,
@@ -287,7 +330,10 @@ def score_completion(
             checker=checker,
             benchmark=bench if isinstance(bench, str) else None,
             field_reward=None if field_value is None else field_value,
-            prefer_final_answer=require_thinking_trace,
+            # Always score the final-answer span for text checkers. Thinking
+            # format is orthogonal — models may emit <think> even when the
+            # trainer does not require it.
+            prefer_final_answer=True,
             sample=sample,
         )
 
@@ -310,7 +356,13 @@ def score_completion(
         + process_weight * process
         - penalty
     )
-    passed = outcome > 0.5
+    # Code: passed iff all unit tests pass (outcome already binary).
+    # Text/math: binary (or dense field) threshold.
+    passed = (
+        bool(proof_passed)
+        if use_code and proof_passed is not None
+        else outcome > 0.5
+    )
     detail = None
     if use_code and proof_detail is not None:
         detail = proof_detail
@@ -347,6 +399,36 @@ def _exact_match(actual: str, expected: str) -> tuple[float, str]:
     if actual.strip() == expected.strip():
         return 1.0, actual.strip()
     return 0.0, actual.strip()
+
+
+def _contains_answer(actual: str, expected: str) -> tuple[float, str]:
+    """Token-boundary containment — rejects substring traps like ``42`` in ``420``.
+
+    Preserves signed / ``+``-suffixed golds (``-3``, ``c++``). Only trailing
+    sentence ``.`` is stripped so ``42.`` still matches gold ``42``.
+    """
+    extracted = actual.strip()
+    expected_norm = normalize_answer(expected)
+    if not expected_norm:
+        return 0.0, extracted
+    actual_norm = normalize_answer(actual)
+    if not actual_norm:
+        return 0.0, extracted
+
+    def _tokens(text: str) -> list[str]:
+        # Strip trailing sentence periods only — never +/- (would collapse
+        # gold ``c++`` → ``c`` or ``-3`` → ``3``).
+        return [tok.rstrip(".") for tok in text.split() if tok.rstrip(".")]
+
+    actual_tokens = _tokens(actual_norm)
+    expected_tokens = _tokens(expected_norm)
+    if not expected_tokens:
+        return 0.0, extracted
+    width = len(expected_tokens)
+    for start in range(0, len(actual_tokens) - width + 1):
+        if actual_tokens[start : start + width] == expected_tokens:
+            return 1.0, extracted
+    return 0.0, extracted
 
 
 def _numeric_match(actual: str, expected: str) -> tuple[float, str]:

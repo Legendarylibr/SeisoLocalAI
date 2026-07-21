@@ -15,7 +15,7 @@ def exact_match_reward(completion: str, sample: dict[str, Any]) -> float:
         completion,
         sample.get("answer"),
         checker="exact_match",
-        prefer_final_answer=False,
+        prefer_final_answer=True,
     )
     return score
 
@@ -25,7 +25,7 @@ def contains_answer_reward(completion: str, sample: dict[str, Any]) -> float:
         completion,
         sample.get("answer"),
         checker="contains_answer",
-        prefer_final_answer=False,
+        prefer_final_answer=True,
     )
     return score
 
@@ -35,7 +35,7 @@ def numeric_reward(completion: str, sample: dict[str, Any]) -> float:
         completion,
         sample.get("answer"),
         checker="numeric",
-        prefer_final_answer=False,
+        prefer_final_answer=True,
     )
     return score
 
@@ -52,12 +52,12 @@ def field_reward(completion: str, sample: dict[str, Any]) -> float:
 
 
 def code_reward(completion: str, sample: dict[str, Any]) -> float:
-    """Sandboxed unit-test pass fraction (checkable code proof)."""
+    """Sandboxed unit-test outcome: ``1.0`` only if all tests pass."""
     score, _, _ = verify_outcome(
         completion,
         sample.get("answer"),
         checker="code",
-        prefer_final_answer=False,
+        prefer_final_answer=True,
         sample=sample,
     )
     return score
@@ -75,14 +75,14 @@ def resolve_reward(name: str) -> RewardFn:
             completion,
             sample.get("answer"),
             checker="choice",
-            prefer_final_answer=False,
+            prefer_final_answer=True,
         )[0],
         "auto": lambda completion, sample: verify_outcome(
             completion,
             sample.get("answer"),
             checker="auto",
             benchmark=sample.get("benchmark") if isinstance(sample.get("benchmark"), str) else None,
-            prefer_final_answer=False,
+            prefer_final_answer=True,
             sample=sample,
         )[0],
     }

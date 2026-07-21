@@ -256,6 +256,69 @@ def test_outcome_group_sampling_prefers_best_candidate(monkeypatch):
     assert rows[0]["grpo_group_size"] == 3
 
 
+def test_verifiable_prompts_never_use_teacher_as_chosen(monkeypatch):
+    """Even with verifiable_outcome_rewards=False, do not teacher≻student label golds."""
+    from seiso.distill_rl.rollouts import generate_preference_rows
+
+    prompts = [
+        RolloutPrompt(
+            prompt_id="gsm",
+            text="What is 40 + 2?",
+            answer="42",
+            benchmark="gsm8k",
+        ),
+        RolloutPrompt(prompt_id="chat", text="Say hello"),
+    ]
+    called_outcome = {"n": 0}
+    called_generate = {"n": 0}
+
+    def fake_outcome(**_kwargs):
+        called_outcome["n"] += 1
+        return [{"prompt_id": "gsm", "chosen": "42", "rejected": "41"}]
+
+    def fake_generate(model, prompts_arg, *_args, **_kwargs):
+        called_generate["n"] += 1
+        # Only non-verifiable prompts should reach teacher/student generate.
+        assert all(p.prompt_id == "chat" for p in prompts_arg)
+        return ["teacher-hi" if "teacher" in model else "student-hi"]
+
+    monkeypatch.setattr(
+        "seiso.distill_rl.rollouts.generate_outcome_preference_rows",
+        fake_outcome,
+    )
+    monkeypatch.setattr(
+        "seiso.distill_rl.rollouts.generate_completions",
+        fake_generate,
+    )
+
+    rows_off = generate_preference_rows(
+        teacher_model="teacher",
+        student_model="student",
+        prompts=prompts,
+        max_new_tokens=8,
+        temperature=0.0,
+        seed=1,
+        use_chat_template=False,
+        verifiable_outcome_rewards=False,
+    )
+    assert called_outcome["n"] == 0
+    assert [r["prompt_id"] for r in rows_off] == ["chat"]
+    assert rows_off[0]["chosen"] == "teacher-hi"
+
+    rows_on = generate_preference_rows(
+        teacher_model="teacher",
+        student_model="student",
+        prompts=prompts,
+        max_new_tokens=8,
+        temperature=0.0,
+        seed=1,
+        use_chat_template=False,
+        verifiable_outcome_rewards=True,
+    )
+    assert called_outcome["n"] == 1
+    assert {r["prompt_id"] for r in rows_on} == {"gsm", "chat"}
+
+
 def test_outcome_group_sampling_skips_when_no_pass(monkeypatch):
     from seiso.distill_rl.rollouts import generate_outcome_preference_rows
 

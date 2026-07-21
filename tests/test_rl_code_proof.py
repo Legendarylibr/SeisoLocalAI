@@ -41,6 +41,15 @@ def test_code_proof_partial_score():
     assert result.passed is False
     assert result.score == 0.5
     assert result.tests_passed == 1
+    # Outcome adapters are binary — partial fraction is not GRPO credit.
+    score, checker, _ = verify_outcome(
+        completion, None, checker="code", sample=sample
+    )
+    assert checker == "code"
+    assert score == 0.0
+    scored = score_completion(completion, sample, checker="code")
+    assert scored.outcome == 0.0
+    assert scored.proof_score == 0.5
 
 
 def test_code_proof_wrong_solution_zero():

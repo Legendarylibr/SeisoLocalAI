@@ -53,6 +53,12 @@ class SingleGpuSlimeConfig:
     model_id: str
     dataset: Path
     output_dir: Path
+    # Frozen held-out prompts (not used for GRPO rollouts). Prefer a disjoint
+    # unit-test JSONL such as data/slime_code_eval.jsonl.
+    eval_dataset: Path | None = None
+    eval_every_steps: int = 0  # 0 = only at end when eval_on_complete
+    eval_max_prompts: int | None = None
+    eval_on_complete: bool = True
     # slime: --input-key / --label-key / --metadata-key
     prompt_field: str = "prompt"
     answer_field: str = "label"
@@ -134,10 +140,16 @@ class SingleGpuSlimeConfig:
     )
     outcome_reward_weight: float = 1.0
     # Format is a small binary bonus for closed <think>...</think> on raw tokens.
+    # Prefer this over missing_thinking_penalty so correct answers are not punished.
     format_reward_weight: float = 0.1
     # Lexical process shaping is experimental; leave at 0 for verifiable outcome-first RL.
     process_reward_weight: float = 0.0
-    missing_thinking_penalty: float = 0.5
+    # Optional subtractive push for missing think tags. Default 0 — use the format
+    # bonus alone; set a modest value (e.g. 0.2) only if format compliance stalls.
+    missing_thinking_penalty: float = 0.0
+    # Code GRPO outcome: binary (all tests pass, default) | dense (pass fraction)
+    # | auto (dense until a same-prompt group has a full passer, then binary).
+    code_reward_mode: str = "binary"
     min_thinking_tokens: int = 8
     seed: int = 17
     dtype: str = "auto"
@@ -198,8 +210,13 @@ class SingleGpuSlimeConfig:
                 data.pop(src)
         known = {f.name for f in fields(cls)}
         # Filter unknown keys (e.g. method/quant from TrainConfig-oriented YAMLs).
+        path_keys = {"dataset", "output_dir", "eval_dataset"}
         payload = {
-            key: Path(value) if key in {"dataset", "output_dir"} else value
+            key: (
+                Path(value)
+                if key in path_keys and value is not None
+                else value
+            )
             for key, value in data.items()
             if key in known
         }
@@ -270,6 +287,30 @@ class SingleGpuSlimeConfig:
             )
         if self.missing_thinking_penalty < 0:
             raise ValueError("missing_thinking_penalty must be non-negative")
+        from seiso.rl_verify.verify import resolve_code_reward_mode
+
+        try:
+            object.__setattr__(
+                self,
+                "code_reward_mode",
+                resolve_code_reward_mode(self.code_reward_mode),
+            )
+        except ValueError as exc:
+            raise ValueError(str(exc)) from exc
+        # Correct-unformatted reward is outcome - penalty; wrong-formatted is at
+        # most format + process. Require outcome - penalty >= format + process
+        # (equivalently penalty <= outcome - shaping) so ranking cannot invert.
+        if self.require_thinking_trace:
+            headroom = self.outcome_reward_weight - (
+                self.format_reward_weight + self.process_reward_weight
+            )
+            if self.missing_thinking_penalty > headroom:
+                raise ValueError(
+                    "missing_thinking_penalty must be <= outcome_reward_weight - "
+                    "(format_reward_weight + process_reward_weight) so "
+                    "correct-but-unformatted completions are not outranked by "
+                    "wrong-but-formatted ones"
+                )
         if self.min_thinking_tokens < 0:
             raise ValueError("min_thinking_tokens must be non-negative")
         if self.max_vram_gb is not None and self.max_vram_gb <= 0:
@@ -278,6 +319,15 @@ class SingleGpuSlimeConfig:
             raise ValueError("save_every_steps must be non-negative")
         if self.log_every_steps < 1:
             raise ValueError("log_every_steps must be positive")
+        if self.eval_every_steps < 0:
+            raise ValueError("eval_every_steps must be non-negative")
+        if self.eval_max_prompts is not None and self.eval_max_prompts < 1:
+            raise ValueError("eval_max_prompts must be positive when set")
+        if self.eval_dataset is not None and self.eval_dataset == self.dataset:
+            raise ValueError(
+                "eval_dataset must differ from dataset (held-out eval cannot "
+                "reuse the training JSONL)"
+            )
         if self.use_lora:
             if self.lora_r < 1:
                 raise ValueError("lora_r must be positive")

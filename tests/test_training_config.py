@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from seiso.training.config import QuantMode, TrainConfig, TrainMethod
 
 
@@ -139,6 +141,17 @@ def test_example_slime_yaml_loads_via_train_config_with_aliases():
     assert slime.save_every_steps == 100
     assert slime.log_every_steps == 1
     assert slime.rollout_backend == "hf"
+
+
+def test_example_slime_code_yaml_maps_held_out_eval_aliases():
+    cfg = TrainConfig.from_yaml("configs/example_slime_code.yaml")
+    slime = cfg.to_single_gpu_slime_config()
+
+    assert cfg.slime_eval_dataset == Path("data/slime_code_eval.jsonl")
+    assert cfg.slime_eval_on_complete is True
+    assert slime.eval_dataset == Path("data/slime_code_eval.jsonl")
+    assert slime.eval_on_complete is True
+    assert slime.eval_dataset != slime.dataset
 
 
 def test_smoke_and_example_lora_yaml_fields_consumed():

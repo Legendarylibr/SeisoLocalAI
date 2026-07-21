@@ -276,7 +276,7 @@ kl_coef: 0.0
 require_thinking_trace: true
 format_reward_weight: 0.1
 process_reward_weight: 0.0
-missing_thinking_penalty: 0.5
+missing_thinking_penalty: 0.0
 slime_use_lora: true
 auto_stop: true
 auto_stop_metric: reward_mean
@@ -291,7 +291,8 @@ Bundled smoke datasets (expand for real training):
 | Dataset | Checker | Config |
 |---------|---------|--------|
 | `data/slime_sample.jsonl` | `numeric` | `configs/example_slime_single_gpu.yaml`, `configs/example_training_slime.yaml` |
-| `data/slime_code_sample.jsonl` | `code` (unit-test pass fraction) | `configs/example_slime_code.yaml` |
+| `data/slime_code_sample.jsonl` | `code` (all unit tests must pass) | `configs/example_slime_code.yaml` |
+| `data/slime_code_eval.jsonl` | held-out code eval (unit tests; never train) | `eval_dataset` in slime code configs |
 | `data/slime_choice_sample.jsonl` | `choice` | `configs/example_slime_choice.yaml` |
 
 Important fields:
@@ -301,13 +302,18 @@ Important fields:
 | `max_vram_gb` | Upper VRAM cap used to fail before out-of-memory conditions |
 | `prompt_field`, `answer_field` | Dataset columns for prompts and target answers |
 | `metadata_field` | Optional upstream-style metadata column, default `metadata`; JSON strings are parsed and carried into reward samples and bounded verifier records |
-| `reward` | Verifier checker: `exact_match`, `numeric`, `choice`, `contains_answer`, `field`, `code` (unit-test pass fraction; 1.0 = all tests pass), or `auto` |
+| `reward` | Verifier checker: `exact_match`, `numeric`, `choice`, `contains_answer`, `field`, `code`, or `auto` |
+| `code_reward_mode` | Code GRPO outcome: `binary` (default, all tests pass), `dense` (pass fraction), or `auto` (dense until a group has a full passer) |
+| `eval_dataset` | Frozen held-out JSONL for unit-test pass-rate eval (must differ from `dataset`) |
+| `eval_every_steps` | Held-out eval cadence; `0` = only at end when `eval_on_complete` |
+| `eval_on_complete` | Run held-out eval when training finishes (default true) |
+| `eval_max_prompts` | Optional cap on held-out prompts |
 | `reward_field` | Dataset reward column when `reward: field` |
 | `require_thinking_trace` | When true, rollout prompts may end with open `<think>`. Format is OK if the **generation** closes thinking: either a full `<think>...</think>` block or a continuation that only emits `</think>` then the answer |
 | `outcome_reward_weight` | Weight for hard outcome (correctness) from the shared verifier |
-| `format_reward_weight` | Small bonus when the completion contains a closed thinking block (side channel; keep below outcome weight) |
+| `format_reward_weight` | Small bonus when the completion contains a closed thinking block (preferred shaping signal; keep below outcome weight) |
 | `process_reward_weight` | Experimental lexical process score; keep `0` for verifiable outcome-first RL |
-| `missing_thinking_penalty` | Penalty when format is required but the model omits a closed think block |
+| `missing_thinking_penalty` | Optional subtractive penalty when format is required but missing; default `0` (use format bonus instead). Set a modest value (e.g. `0.2`) only if format compliance stalls; must stay `≤ outcome − (format + process)` |
 | `min_thinking_tokens` | Only used when `process_reward_weight > 0` |
 | `kl_coef` | Coefficient on non-negative KL (Schulman k3) to a frozen reference; `0` skips loading the ref (lower VRAM). Prefer `0.02`–`0.05` for multi-epoch runs (signed k1 is logged as `kl_k1` only) |
 | `rollouts_per_prompt` | slime `--n-samples-per-prompt` |
@@ -337,10 +343,14 @@ Important fields:
 
 Use `reward: code` with dataset rows that include unit tests. The shared verifier
 extracts Python from the completion (fenced blocks preferred) and runs tests in a
-restricted subprocess (`seiso.codellama_compress.code_exec`). Outcome score is the
-**pass fraction** of tests (1.0 only if all pass).
+restricted subprocess (`seiso.codellama_compress.code_exec`). **Default GRPO outcome (`code_reward_mode: binary`) is 1.0 only when all unit
+tests pass.** Use `dense` for pass-fraction credit, or `auto` for dense signal
+until a same-prompt group gets a full passer (then binary). Pass fraction is
+always logged as `proof_score` for diagnostics / hard-negative ranking.
 
-Example config: `configs/example_slime_code.yaml` with `data/slime_code_sample.jsonl`.
+Example config: `configs/example_slime_code.yaml` with `data/slime_code_sample.jsonl`
+and held-out `eval_dataset: data/slime_code_eval.jsonl` (unit-test pass rate at
+end of run; not used for GRPO rollouts).
 
 ```json
 {
@@ -348,13 +358,12 @@ Example config: `configs/example_slime_code.yaml` with `data/slime_code_sample.j
   "tests": ["assert add(1, 2) == 3", "assert add(0, 0) == 0"],
   "solution": "def add(a, b):\n    return a + b\n",
   "timeout_s": 3,
-  "benchmark": "code",
-  "synth": true
+  "benchmark": "code"
 }
 ```
 
 - `tests` / `test`: assert lines (list or string) or a full check harness  
-- `solution`: optional known-good program (for SFT / synthetic DPO; **ignored by the slime reward**, which only scores model completions)  
+- `solution`: optional known-good program (for SFT / synthetic DPO; **ignored by the slime reward**, which only scores model completions against unit tests)  
 - `prompt_code` / `code_prefix`: optional HumanEval-style prefix prepended before the solution  
 - `setup`: optional imports/helpers before the solution  
 - `timeout_s`: wall budget for the sample (split across test units)
@@ -362,26 +371,26 @@ Example config: `configs/example_slime_code.yaml` with `data/slime_code_sample.j
 This is a **checkable proof**, not lexical process reward. Do not run untrusted
 code on sensitive hosts; the sandbox is best-effort, not a full VM.
 
-#### Deterministic synthetic code (guaranteed passers)
+#### Deterministic code corpus (unit-test grounded)
 
-Do **not** rely on an LLM to invent solutions for the dataset. Seiso synthesizes
-code tasks **deterministically** so every row has a solution that already passes
-its unit tests (fail-closed via the same sandbox verifier):
+Do **not** rely on an LLM or the small hand smoke catalog for training data.
+Seiso builds coding tasks with ``code_corpus`` so every row is grounded in unit
+tests (fail-closed via the same sandbox verifier):
 
-1. Hand-authored pure-function catalog + seeded I/O variants  
-2. **Tests derived** from I/O cases (same source of truth as the solution)  
-3. Sandbox check: drop any task whose golden solution fails  
-4. **Hard negatives** = deterministic mutants of the golden (must fail ≥1 test)
+1. Programmatic task families (easy/medium/hard) with golden solutions  
+2. **Tests derived** by executing the golden (same source of truth)  
+3. Sandbox check: drop any task whose golden solution fails any test  
+4. **Hard negatives** = mutants that fail ≥1 test (offline DPO) / online fails
 
 ```bash
-# Rewrite data/slime_code_sample.jsonl, data/distill_code_synth.jsonl,
-# and data/synthetic_code_preferences.jsonl
-python -m seiso.rl_verify --data-dir data --seed 0
+# Rewrite train artifacts + a disjoint held-out eval suite
+python -m seiso.rl_verify --data-dir data --seed 0 --eval-count 32
 ```
 
 | Artifact | Use |
 |----------|-----|
 | `data/slime_code_sample.jsonl` | Slime `reward: code` prompts + tests (+ `solution` metadata) |
+| `data/slime_code_eval.jsonl` | Frozen held-out unit-test eval (disjoint ids; never train) |
 | `data/distill_code_synth.jsonl` | Distill prompt library for verifiable code rollouts |
 | `data/synthetic_code_preferences.jsonl` | Offline DPO pairs (golden chosen, mutant rejected) — no model rollouts required |
 

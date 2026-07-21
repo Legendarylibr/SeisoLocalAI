@@ -909,11 +909,18 @@ def emit_standard_artifacts(
     slime_name: str = "slime_code_sample.jsonl",
     distill_name: str = "distill_code_synth.jsonl",
     prefs_name: str = "synthetic_code_preferences.jsonl",
+    eval_count: int = 0,
+    eval_seed: int | None = None,
+    eval_name: str = "slime_code_eval.jsonl",
 ) -> dict[str, Any]:
     """Write slime code sample + distill prompts + synthetic preference JSONL.
 
     For large coding corpora set ``corpus_count`` (e.g. 2000). Smoke defaults
     keep the small hand catalog when ``corpus_count=0``.
+
+    When ``eval_count > 0``, also write a **disjoint** held-out eval JSONL from
+    ``code_corpus`` (different seed / ``eval_`` prompt ids) — never used as
+    ``dataset`` for training.
     """
     bundle = synthesize_code_bundle(
         seed=seed,
@@ -946,7 +953,87 @@ def emit_standard_artifacts(
         from seiso.rl_verify.code_corpus import corpus_stats
 
         stats["corpus"] = corpus_stats(bundle.tasks)
+    if eval_count > 0:
+        n_eval, used_eval_seed = emit_held_out_eval_jsonl(
+            data_dir=data_dir,
+            count=eval_count,
+            seed=seed if eval_seed is None else int(eval_seed),
+            train_seed=seed,
+            mix=corpus_mix,
+            verify=verify,
+            eval_name=eval_name,
+            train_prompt_ids={str(t.task_id) for t in bundle.tasks},
+        )
+        stats["slime_code_eval"] = n_eval
+        stats["eval_count"] = eval_count
+        stats["eval_seed"] = used_eval_seed
     return stats
+
+
+def emit_held_out_eval_jsonl(
+    *,
+    data_dir: Path,
+    count: int,
+    seed: int,
+    train_seed: int,
+    mix: str | dict[str, float] | None = None,
+    verify: bool = True,
+    eval_name: str = "slime_code_eval.jsonl",
+    train_prompt_ids: set[str] | None = None,
+) -> tuple[int, int]:
+    """Write a frozen unit-test-grounded eval JSONL disjoint from training tasks.
+
+    Returns ``(rows_written, eval_seed_used)``.
+    """
+    from seiso.rl_verify.code_corpus import generate_code_corpus
+
+    # Offset seed so eval never collides with train corpus draws.
+    eval_seed = int(seed) if seed != train_seed else int(train_seed) + 10_007
+    tasks = generate_code_corpus(
+        seed=eval_seed,
+        count=count,
+        mix=mix,
+        verify=verify,
+        include_hand_catalog=False,
+    )
+    train_ids = train_prompt_ids or set()
+    rows: list[dict[str, Any]] = []
+    for task in tasks:
+        if str(task.task_id) in train_ids:
+            continue
+        row = task.to_dataset_row()
+        row["prompt_id"] = f"eval_{task.task_id}"
+        row["held_out"] = True
+        row["eval_seed"] = eval_seed
+        rows.append(row)
+    if len(rows) < count:
+        # Fill remaining from additional seed draws if ID collision filtered some.
+        extra = generate_code_corpus(
+            seed=eval_seed + 97,
+            count=count - len(rows) + 8,
+            mix=mix,
+            verify=verify,
+            include_hand_catalog=False,
+        )
+        seen = {str(r["prompt_id"]) for r in rows} | {
+            f"eval_{tid}" for tid in train_ids
+        }
+        for task in extra:
+            pid = f"eval_{task.task_id}"
+            if pid in seen or str(task.task_id) in train_ids:
+                continue
+            row = task.to_dataset_row()
+            row["prompt_id"] = pid
+            row["held_out"] = True
+            row["eval_seed"] = eval_seed + 97
+            rows.append(row)
+            seen.add(pid)
+            if len(rows) >= count:
+                break
+    rows = rows[:count]
+    if not rows:
+        raise RuntimeError("failed to emit held-out eval rows")
+    return write_jsonl(data_dir / eval_name, rows), eval_seed
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -1016,6 +1103,27 @@ def main(argv: Sequence[str] | None = None) -> int:
         default="synthetic_code_preferences.jsonl",
         help="Output filename for preference pairs",
     )
+    parser.add_argument(
+        "--eval-count",
+        type=int,
+        default=0,
+        help=(
+            "Also write a disjoint held-out eval JSONL with this many "
+            "unit-test-grounded tasks (data/slime_code_eval.jsonl)"
+        ),
+    )
+    parser.add_argument(
+        "--eval-seed",
+        type=int,
+        default=None,
+        help="Seed for held-out eval corpus (default: train seed + 10007)",
+    )
+    parser.add_argument(
+        "--eval-name",
+        type=str,
+        default="slime_code_eval.jsonl",
+        help="Output filename for held-out eval prompts",
+    )
     args = parser.parse_args(list(argv) if argv is not None else None)
 
     corpus_count = max(0, int(args.count))
@@ -1048,6 +1156,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         limit=args.limit,
         slime_name=args.slime_name,
         prefs_name=args.prefs_name,
+        eval_count=max(0, int(args.eval_count)),
+        eval_seed=args.eval_seed,
+        eval_name=args.eval_name,
     )
     print(json.dumps(stats, indent=2, sort_keys=True))
     return 0
