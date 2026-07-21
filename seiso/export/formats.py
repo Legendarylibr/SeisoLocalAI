@@ -126,6 +126,12 @@ def export_checkpoint(
             results[fmt.value] = dest
 
         elif fmt in (ExportFormat.BASE, ExportFormat.FULL):
+            if kind == "lora":
+                raise ValueError(
+                    f"Cannot export LoRA-only checkpoint as {fmt.value!r}; "
+                    "use formats 'lora' and/or 'merged' instead "
+                    f"(checkpoint={ckpt})"
+                )
             dest = out_root / ("full" if fmt == ExportFormat.FULL else "base")
             if ckpt.exists():
                 shutil.copytree(ckpt, dest, dirs_exist_ok=True)
