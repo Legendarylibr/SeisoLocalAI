@@ -52,6 +52,21 @@ def test_gguf_recommends_llamacpp(monkeypatch, tmp_path: Path):
     assert recommend_backend(model_path=str(gguf), model_format="gguf") == BACKEND_LLAMACPP
 
 
+def test_gguf_available_backends_lists_llamacpp_and_llamaswap(monkeypatch, tmp_path: Path):
+    gguf = tmp_path / "model-q4.gguf"
+    gguf.write_bytes(b"gguf")
+    monkeypatch.setattr("seiso.platform.use_linux_nvidia_inference_guards", lambda: False)
+    monkeypatch.setattr(
+        "seiso.inference.backends._native_linux_requires_isolated_gguf",
+        lambda: False,
+    )
+
+    assert available_backends(model_path=str(gguf), model_format="gguf") == [
+        BACKEND_LLAMACPP,
+        BACKEND_LLAMASWAP,
+    ]
+
+
 def test_gguf_auto_prefers_llamaswap_on_native_linux_when_enabled(monkeypatch, tmp_path: Path):
     gguf = tmp_path / "model-q4.gguf"
     gguf.write_bytes(b"gguf")
@@ -457,7 +472,8 @@ def test_safetensors_inventory_exposes_torch_and_mlx_fallbacks(monkeypatch, tmp_
     monkeypatch.setattr(backends.platform, "system", lambda: "Darwin")
 
     assert available_backends(model_path=str(model_dir), model_format="safetensors") == [
-        BACKEND_MLX
+        BACKEND_MLX,
+        BACKEND_TORCH,
     ]
 
 
