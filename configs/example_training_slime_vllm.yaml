@@ -43,7 +43,10 @@ clip_ratio_high: 0.28
 grpo_std_normalization: true
 temperature: 0.9
 top_p: 0.95
-# Multi-GPU rollouts through the vLLM OpenAI-compatible server
+# Multi-GPU rollouts through the vLLM OpenAI-compatible server.
+# Note: vLLM samples tokens; Seiso recomputes old_logprobs on the local actor
+# (engine logprobs unused) — slightly off-policy unless vllm_sync_weights keeps
+# the server aligned (see docs/training/quickstart.md).
 rollout_backend: vllm
 vllm_base_url: "http://127.0.0.1:8000"
 vllm_model: ""

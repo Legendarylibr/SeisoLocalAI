@@ -120,7 +120,11 @@ class SingleGpuSlimeConfig:
     calculate_per_token_loss: bool = True
     temperature: float = 0.9
     top_p: float = 0.95
-    # Online generate: hf (colocated, default) | sglang | vllm | auto
+    # Online generate: hf (colocated/on-policy, default) | sglang | vllm | auto.
+    # For sglang/vllm, completions are sampled remotely; old_logprobs are then
+    # recomputed on the local actor (engine token logprobs are not consumed), so
+    # the GRPO importance ratio is slightly off-policy unless weight sync keeps
+    # the engines aligned with the actor.
     rollout_backend: str = "hf"
     # slime: --apply-chat-template
     apply_chat_template: bool = True
