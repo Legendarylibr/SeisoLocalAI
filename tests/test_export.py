@@ -257,6 +257,44 @@ def test_export_full_finetune(tmp_path: Path):
     assert sidecar["checkpoint_kind"] == "full"
 
 
+def test_export_full_refuses_lora_only_checkpoint(tmp_path: Path):
+    sandbox = tmp_path / "data"
+    ckpt = sandbox / "checkpoints" / "lora-run"
+    ckpt.mkdir(parents=True)
+    (ckpt / "adapter_config.json").write_text('{"r": 16}')
+    (ckpt / "adapter_model.safetensors").write_text("weights")
+
+    out = sandbox / "exports" / "bad-full"
+    with pytest.raises(ValueError, match="LoRA-only checkpoint"):
+        export_checkpoint(
+            ExportOptions(
+                checkpoint=ckpt,
+                output_dir=out,
+                formats=[ExportFormat.FULL],
+                sandbox_root=sandbox,
+            )
+        )
+
+
+def test_export_base_refuses_lora_only_checkpoint(tmp_path: Path):
+    sandbox = tmp_path / "data"
+    ckpt = sandbox / "checkpoints" / "lora-run"
+    ckpt.mkdir(parents=True)
+    (ckpt / "adapter_config.json").write_text('{"r": 8}')
+    (ckpt / "adapter_model.safetensors").write_text("weights")
+
+    out = sandbox / "exports" / "bad-base"
+    with pytest.raises(ValueError, match="LoRA-only checkpoint"):
+        export_checkpoint(
+            ExportOptions(
+                checkpoint=ckpt,
+                output_dir=out,
+                formats=[ExportFormat.BASE],
+                sandbox_root=sandbox,
+            )
+        )
+
+
 @patch("seiso.export.formats._push_hub")
 @patch("seiso.export.formats.merge_lora_checkpoint")
 def test_export_skips_hub_precheck_when_disabled(mock_merge, mock_push, tmp_path: Path):
