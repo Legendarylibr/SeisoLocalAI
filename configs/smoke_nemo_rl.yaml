@@ -1,0 +1,26 @@
+# Dry-run smoke for NeMo RL wiring (no GPU / no NeMo checkout required when
+# SEISO_NEMO_RL_ROOT points at a stub tree — see tests/test_nemo_rl.py).
+#
+#   seiso train --config configs/smoke_nemo_rl.yaml
+#
+# For a real NeMo smoke after cloning NVIDIA-NeMo/RL:
+#   nemo_rl_dry_run: false
+#   nemo_rl_recipe: smoke
+
+model_id: Qwen/Qwen3-0.6B
+dataset: data/slime_sample.jsonl
+output_dir: outputs/nemo-rl-smoke
+method: nemo_rl
+quant: none
+learning_rate: 0.000005
+seed: 13
+rollouts_per_prompt: 4
+rollout_batch_size: 2
+nemo_rl_recipe: smoke
+nemo_rl_gpus_per_node: 1
+nemo_rl_num_nodes: 1
+nemo_rl_max_steps: 10
+nemo_rl_use_lora: false
+nemo_rl_dry_run: true
+nemo_rl_extra_overrides:
+  - logger.wandb_enabled=False

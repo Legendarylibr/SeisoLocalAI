@@ -207,8 +207,8 @@ Seiso maps learning **signals** to proper algorithms (not proxies that look rela
 | Signal | Proper algorithm | Path | Not meaningful |
 |--------|------------------|------|----------------|
 | Instruction / chat labels | Response-masked SFT (CE) | `method: lora/full` + TRL SFT | Full-sequence CE on chat; packing + response masks together |
-| Verifiable tasks (math/code/choice) | Online GRPO (group-relative advantages + PPO clip) | `method: slime` + `rl_verify` | Format/process-dominated rewards; zero-spread groups |
-| Preference pairs (chosen/rejected) | Offline DPO (Rafailov) | Distill-RL / `compute_dpo_loss` | Silent chosen-only SFT labeled “alignment” |
+| Verifiable tasks (math/code/choice) | Online GRPO (group-relative advantages + PPO clip) | `method: slime` + `rl_verify`, or `method: nemo_rl` (external [NVIDIA-NeMo/RL](https://github.com/NVIDIA-NeMo/RL)) | Format/process-dominated rewards; zero-spread groups |
+| Preference pairs (chosen/rejected) | Offline DPO (Rafailov) | Distill-RL / `compute_dpo_loss`, or `method: nemo_rl` + `nemo_rl_recipe: dpo` | Silent chosen-only SFT labeled “alignment” |
 | Quantization policy | PPO/VPG/AWR on discrete actions | `rl_quant` / `adaptive_quant` | Simulator-only metrics claimed as deploy quality |
 
 **SFT:** `preference_as_sft` defaults **false** — preference datasets refuse train unless explicitly opted in (chosen-only SFT; rejected discarded). Packing is incompatible with `train_on_responses_only` on chat-style formats (validator + runtime disable).

@@ -76,6 +76,8 @@ def detect_checkpoint_kind(checkpoint: Path) -> str:
             return "full"
         if method == "slime":
             return "lora" if manifest.get("adapter") == "lora" else "full"
+        if method == "nemo_rl":
+            return "lora" if manifest.get("adapter") == "lora" else "full"
     return "unknown"
 
 

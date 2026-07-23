@@ -52,12 +52,15 @@ export type TrainingStudioGuardInput = {
   slimeEvalDataset?: string;
   /** When true, materialize may auto-split held-out (data_gen + source). */
   slimeMaterializeSplitsEval?: boolean;
+  /** NeMo RL recipe when method=nemo_rl (grpo | dpo | distillation | smoke). */
+  nemoRlRecipe?: string;
 };
 
 export type TrainingConfigBlocker = {
   code:
     | "preference_needs_dpo_or_opt_in"
     | "preference_not_for_slime"
+    | "preference_not_for_nemo_rl_grpo"
     | "packing_response_mask_conflict"
     | "slime_needs_dynamic_sampling"
     | "slime_needs_held_out_eval";
@@ -73,6 +76,7 @@ export function getTrainingConfigBlockers(
     input.resolvedFormat,
   );
   const blockers: TrainingConfigBlocker[] = [];
+  const nemoRecipe = (input.nemoRlRecipe || "grpo").toLowerCase();
 
   if (format === "preference" && input.method === "slime") {
     blockers.push({
@@ -80,6 +84,22 @@ export function getTrainingConfigBlockers(
       message:
         "SLIME GRPO needs verifiable prompt/answer rows, not preference pairs. Use Distill-RL for DPO, or LoRA/full with chosen-only SFT.",
     });
+  } else if (
+    format === "preference" &&
+    input.method === "nemo_rl" &&
+    nemoRecipe !== "dpo"
+  ) {
+    blockers.push({
+      code: "preference_not_for_nemo_rl_grpo",
+      message:
+        "NeMo RL GRPO/smoke need verifiable prompts. Switch recipe to DPO, open Distill-RL, or use chosen-only SFT.",
+    });
+  } else if (
+    format === "preference" &&
+    input.method === "nemo_rl" &&
+    nemoRecipe === "dpo"
+  ) {
+    // NeMo RL DPO consumes preference pairs — no Seiso preference_as_sft opt-in.
   } else if (preferenceRequiresOptIn(format, input.preferenceAsSft)) {
     blockers.push({
       code: "preference_needs_dpo_or_opt_in",

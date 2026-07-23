@@ -23,6 +23,7 @@ _GPU_TASK_KINDS = frozenset(
         "experiment",
         "inference",
         "slime",
+        "nemo_rl",
     }
 )
 _GPU_TASK_LOCK = threading.RLock()

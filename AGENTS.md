@@ -45,6 +45,7 @@ Do not relax sandbox or crypto defaults without a very strong documented reason 
 - **New training preset / recs**: `seiso/training/recommendations.py`, `seiso/training/dataset_analysis.py`, `seiso/training/practices.py`, `platform_caps.py`, example YAML in `configs/`. Update TrainPage + `docs/training/quickstart.md` if new knobs appear. Run `pytest tests/test_docs_accuracy.py`.
 - **New kernel op**: Add to `seiso/kernels/cuda/` + `cuda_ops.py` + dispatch + hooks + tests. Update low-VRAM profile logic.
 - **New pipeline stage (compress/distill/rl)**: Update the stage router / config builder + manifest + the corresponding orchestrator + page.
+- **NeMo RL** (`method: nemo_rl`): external launcher in `seiso/nemo_rl/` — requires `SEISO_NEMO_RL_ROOT` pointing at a [NVIDIA-NeMo/RL](https://github.com/NVIDIA-NeMo/RL) checkout + `uv`. Do not vendor NeMo RL into this repo.
 - **New inference backend**: `seiso/inference/backends.py` + model pool + runner + UI picker.
 - **Export format**: `seiso/export/formats.py` + gguf helpers + profiles.
 - **API surface**: Add route in `forge/api/routes/`, register in `forge/main.py`, add typed client in `forge-ui/src/lib/api/`, add page or component.

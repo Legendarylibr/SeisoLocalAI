@@ -20,6 +20,7 @@ class TrainMethod(StrEnum):
     FULL = "full"
     EMBEDDING = "embedding"
     SLIME = "slime"
+    NEMO_RL = "nemo_rl"
 
 
 class QuantMode(StrEnum):
@@ -382,6 +383,31 @@ class TrainConfig(BaseModel):
         ge=0,
         description="Optional vLLM TP size hint for multi-GPU Data Designer gate",
     )
+    # ── NVIDIA NeMo RL (external; requires SEISO_NEMO_RL_ROOT) ──
+    nemo_rl_root: Path | None = Field(
+        default=None,
+        description="Path to a NVIDIA-NeMo/RL checkout (else SEISO_NEMO_RL_ROOT).",
+    )
+    nemo_rl_recipe: str = Field(
+        default="grpo",
+        description="NeMo RL recipe: grpo | dpo | distillation | smoke",
+    )
+    nemo_rl_base_config: str | None = Field(
+        default=None,
+        description="Optional NeMo RL YAML relative to nemo_rl_root (recipe default).",
+    )
+    nemo_rl_gpus_per_node: int = Field(default=1, ge=1)
+    nemo_rl_num_nodes: int = Field(default=1, ge=1)
+    nemo_rl_max_steps: int | None = Field(default=None, ge=1)
+    nemo_rl_use_lora: bool = False
+    nemo_rl_extra_overrides: list[str] = Field(
+        default_factory=list,
+        description="Extra Hydra overrides passed to NeMo RL (e.g. logger.wandb_enabled=False).",
+    )
+    nemo_rl_dry_run: bool = Field(
+        default=False,
+        description="Write launch sidecar + manifest without executing uv/NeMo RL.",
+    )
     extra: dict[str, Any] = Field(
         default_factory=dict,
         description=(
@@ -390,7 +416,14 @@ class TrainConfig(BaseModel):
         ),
     )
 
-    @field_validator("output_dir", "dataset", "resume_from", "sandbox_root", mode="before")
+    @field_validator(
+        "output_dir",
+        "dataset",
+        "resume_from",
+        "sandbox_root",
+        "nemo_rl_root",
+        mode="before",
+    )
     @classmethod
     def _expand_path(cls, v: Any) -> Any:
         if v is None:
@@ -468,10 +501,22 @@ class TrainConfig(BaseModel):
                     "Use Distill-RL/DPO for preference pairs, or LoRA/full with "
                     "preference_as_sft=true for chosen-only SFT."
                 )
-            if not self.preference_as_sft:
+            if self.method == TrainMethod.NEMO_RL and self.nemo_rl_recipe not in {
+                "dpo",
+            }:
+                raise ValueError(
+                    "Preference datasets with method=nemo_rl require "
+                    "nemo_rl_recipe=dpo (GRPO/smoke use verifiable prompts). "
+                    "Or use Distill-RL/DPO, or preference_as_sft=true for SFT."
+                )
+            nemo_rl_dpo = (
+                self.method == TrainMethod.NEMO_RL and self.nemo_rl_recipe == "dpo"
+            )
+            if not nemo_rl_dpo and not self.preference_as_sft:
                 raise ValueError(
                     "Preference datasets (chosen/rejected) are not SFT alignment. "
-                    "Use Distill-RL/DPO (`seiso distill-rl`) for real preference learning, "
+                    "Use Distill-RL/DPO (`seiso distill-rl`) or method=nemo_rl with "
+                    "nemo_rl_recipe=dpo for real preference learning, "
                     "or set preference_as_sft=true to train supervised on chosen responses "
                     "only (rejected pairs are discarded)."
                 )
@@ -548,6 +593,16 @@ class TrainConfig(BaseModel):
         # the job is queued — when held-out eval / slime invariants are missing.
         try:
             self.to_single_gpu_slime_config().validate()
+        except ValueError as exc:
+            raise ValueError(str(exc)) from exc
+        return self
+
+    @model_validator(mode="after")
+    def _validate_nemo_rl(self) -> TrainConfig:
+        if self.method != TrainMethod.NEMO_RL:
+            return self
+        try:
+            self.to_nemo_rl_config().validate()
         except ValueError as exc:
             raise ValueError(str(exc)) from exc
         return self
@@ -704,6 +759,32 @@ class TrainConfig(BaseModel):
             vllm_tensor_parallel=self.vllm_tensor_parallel,
         )
 
+    def to_nemo_rl_config(self):
+        """Project training config into the NeMo RL external launcher."""
+        from seiso.nemo_rl.config import NeMoRLConfig
+
+        return NeMoRLConfig.from_mapping(
+            {
+                "model_id": self.model_id,
+                "output_dir": self.output_dir,
+                "recipe": self.nemo_rl_recipe,
+                "nemo_rl_root": self.nemo_rl_root,
+                "base_config": self.nemo_rl_base_config,
+                "gpus_per_node": self.nemo_rl_gpus_per_node,
+                "num_nodes": self.nemo_rl_num_nodes,
+                "max_steps": self.nemo_rl_max_steps,
+                "learning_rate": self.learning_rate,
+                "rollouts_per_prompt": self.rollouts_per_prompt,
+                "num_prompts_per_step": self.rollout_batch_size,
+                "seed": self.seed,
+                "use_lora": self.nemo_rl_use_lora,
+                "extra_overrides": tuple(self.nemo_rl_extra_overrides or ()),
+                "dry_run": self.nemo_rl_dry_run,
+                "sandbox_root": self.sandbox_root,
+                "extra": dict(self.extra or {}),
+            }
+        )
+
 
 def run_training(
     config: TrainConfig,
@@ -738,6 +819,22 @@ def run_training(
         out = train_slime(slime_config)
         if is_main_process():
             _write_slime_manifest(config, out)
+        return out
+    if config.method == TrainMethod.NEMO_RL:
+        from seiso.nemo_rl.runner import train_nemo_rl
+        from seiso.training.metrics import is_main_process
+
+        if on_log:
+            on_log(
+                "NeMo RL: launching external NVIDIA-NeMo/RL via uv "
+                "(set SEISO_NEMO_RL_ROOT if the checkout is not auto-discovered)."
+            )
+        out = train_nemo_rl(config.to_nemo_rl_config())
+        if is_main_process():
+            # Manifest is written by the NeMo RL runner; ensure path exists.
+            manifest = out / "seiso_manifest.json"
+            if not manifest.is_file():
+                _write_nemo_rl_manifest(config, out)
         return out
     trainer = SeisoTrainer(config, on_metric=on_metric, on_log=on_log, job_id=job_id)
     return trainer.run()
@@ -802,6 +899,33 @@ def _write_slime_manifest(config: TrainConfig, output_dir: Path) -> None:
         "distributed_nproc_per_node": config.distributed_nproc_per_node,
         "distributed_num_nodes": config.distributed_num_nodes,
         "distributed_node_rank": config.distributed_node_rank,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    output_dir.mkdir(parents=True, exist_ok=True)
+    (output_dir / "seiso_manifest.json").write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _write_nemo_rl_manifest(config: TrainConfig, output_dir: Path) -> None:
+    payload = {
+        "model_id": config.model_id,
+        "original_model_id": str(config.extra.get("original_model_id") or config.model_id),
+        "method": TrainMethod.NEMO_RL.value,
+        "methodology": config.training_methodology,
+        "framework": "nemo_rl",
+        "upstream": "https://github.com/NVIDIA-NeMo/RL",
+        "post_training_algorithm": f"nemo_rl_{config.nemo_rl_recipe}",
+        "recipe": config.nemo_rl_recipe,
+        "adapter": "lora" if config.nemo_rl_use_lora else "full",
+        "quant": config.quant.value,
+        "dataset": str(config.dataset),
+        "learning_rate": config.learning_rate,
+        "gpus_per_node": config.nemo_rl_gpus_per_node,
+        "num_nodes": config.nemo_rl_num_nodes,
+        "max_steps": config.nemo_rl_max_steps,
+        "rollouts_per_prompt": config.rollouts_per_prompt,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     output_dir.mkdir(parents=True, exist_ok=True)

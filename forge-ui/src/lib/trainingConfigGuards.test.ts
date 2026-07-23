@@ -73,6 +73,32 @@ describe("trainingConfigGuards", () => {
     ]);
   });
 
+  it("blocks preference + nemo_rl grpo", () => {
+    const blockers = getTrainingConfigBlockers({
+      method: "nemo_rl",
+      datasetFormat: "preference",
+      packing: false,
+      trainOnResponsesOnly: true,
+      preferenceAsSft: false,
+      nemoRlRecipe: "grpo",
+    });
+    expect(blockers.map((b) => b.code)).toEqual([
+      "preference_not_for_nemo_rl_grpo",
+    ]);
+  });
+
+  it("allows preference + nemo_rl dpo", () => {
+    const blockers = getTrainingConfigBlockers({
+      method: "nemo_rl",
+      datasetFormat: "preference",
+      packing: false,
+      trainOnResponsesOnly: true,
+      preferenceAsSft: false,
+      nemoRlRecipe: "dpo",
+    });
+    expect(blockers.map((b) => b.code)).toEqual([]);
+  });
+
   it("allows chosen-only SFT when opted in", () => {
     const blockers = getTrainingConfigBlockers({
       method: "lora",
