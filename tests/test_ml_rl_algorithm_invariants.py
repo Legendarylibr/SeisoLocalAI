@@ -953,6 +953,117 @@ def test_length_status_excluded_from_group_advantage_baseline():
     assert rollouts[3].advantage == pytest.approx(2.0)
 
 
+def test_filter_drops_groups_without_grpo_baseline(tmp_path, monkeypatch):
+    from seiso.slime.policy import _filter_rollout_groups
+
+    monkeypatch.setenv("SEISO_SLIME_ALLOW_ZERO_SPREAD_GROUPS", "1")
+    cfg = SingleGpuSlimeConfig(
+        model_id="m",
+        dataset=tmp_path / "d.jsonl",
+        output_dir=tmp_path / "o",
+        rollouts_per_prompt=2,
+        dynamic_sampling_filter="none",
+        require_held_out_eval=False,
+    )
+    rollouts = [
+        Rollout(None, None, None, None, None, 1.0, status="length", outcome_reward=1.0),
+        Rollout(None, None, None, None, None, 0.0, status="stop", outcome_reward=0.0),
+        Rollout(None, None, None, None, None, 1.0, status="stop", outcome_reward=1.0),
+        Rollout(None, None, None, None, None, 0.0, status="stop", outcome_reward=0.0),
+    ]
+    kept, kept_groups, rejected = _filter_rollout_groups(rollouts, cfg)
+    assert rejected == 1
+    assert kept_groups == {1}
+    assert kept == rollouts[2:]
+
+
+def test_backprop_uses_no_sync_until_final_microbatch(tmp_path):
+    import contextlib
+    from unittest.mock import MagicMock, patch
+
+    import torch
+
+    from seiso.slime.trainer import _backprop_policy_step
+
+    class _FakeDDP:
+        def __init__(self) -> None:
+            self.no_sync_calls = 0
+
+        def no_sync(self):
+            self.no_sync_calls += 1
+
+            @contextlib.contextmanager
+            def _ctx():
+                yield
+
+            return _ctx()
+
+    model = _FakeDDP()
+    cfg = SingleGpuSlimeConfig(
+        model_id="m",
+        dataset=tmp_path / "d.jsonl",
+        output_dir=tmp_path / "o",
+        rollouts_per_prompt=2,
+        policy_micro_batch_size=2,
+        require_held_out_eval=False,
+    )
+    rollouts = [
+        Rollout(None, None, None, None, None, float(i), advantage=0.1)
+        for i in range(4)
+    ]
+    empty = {
+        "loss": 0.0,
+        "policy_loss": 0.0,
+        "kl": 0.0,
+        "kl_k1": 0.0,
+        "reward_mean": 0.0,
+        "reward_max": 0.0,
+        "outcome_reward_mean": 0.0,
+        "format_reward_mean": 0.0,
+        "process_reward_mean": 0.0,
+        "thinking_penalty_mean": 0.0,
+        "outcome_pass_rate": 0.0,
+        "format_ok_rate": 0.0,
+        "proof_pass_rate": 0.0,
+        "proof_score_mean": 0.0,
+        "group_reward_spread_mean": 0.0,
+        "group_outcome_spread_mean": 0.0,
+        "group_pass_rate": 0.0,
+        "group_nonzero_spread_frac": 0.0,
+        "group_nonzero_outcome_spread_frac": 0.0,
+        "response_tokens_mean": 0.0,
+        "rollout_status_stop": 0.0,
+        "rollout_status_length": 0.0,
+        "rollout_status_empty": 0.0,
+    }
+    with patch("seiso.slime.trainer._policy_loss") as mock_loss:
+        loss = MagicMock()
+        loss.__mul__ = MagicMock(return_value=loss)
+        loss.backward = MagicMock()
+        mock_loss.return_value = (loss, empty)
+        _backprop_policy_step(
+            model,
+            rollouts,
+            pad_token_id=0,
+            config=cfg,
+            torch=torch,
+            loss_scale=0.5,
+            sync_gradients=False,
+        )
+        assert model.no_sync_calls == 2
+        model.no_sync_calls = 0
+        _backprop_policy_step(
+            model,
+            rollouts,
+            pad_token_id=0,
+            config=cfg,
+            torch=torch,
+            loss_scale=0.5,
+            sync_gradients=True,
+        )
+        assert model.no_sync_calls == 1
+
+
 def test_dpo_loss_identity_equals_log2():
     import torch
 

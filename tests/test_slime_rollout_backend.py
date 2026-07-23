@@ -421,3 +421,39 @@ def test_vllm_engine_urls_strip_v1_and_dedupe(tmp_path: Path):
         "http://127.0.0.1:8001",
         "http://127.0.0.1:8002",
     ]
+
+
+def test_http_generate_round_robins_engine_urls(tmp_path: Path):
+    from seiso.slime.rollout_generate import _generate_http_chunk
+
+    seen: list[str] = []
+
+    class _Client:
+        base_url = "http://primary"
+
+        def complete_with_tokens(self, prompt: str):
+            seen.append(self.base_url)
+            return f"out:{prompt}", [1, 2]
+
+    chunk = _generate_http_chunk(
+        client=_Client(),
+        prompts=["a", "b"],
+        rollouts_per_prompt=2,
+        max_workers=4,
+        engine_urls=["http://e0", "http://e1"],
+    )
+    assert chunk.completions == ["out:a", "out:a", "out:b", "out:b"]
+    assert seen == ["http://e0", "http://e1", "http://e0", "http://e1"]
+
+
+def test_vllm_full_with_lora_refused(tmp_path: Path, monkeypatch):
+    monkeypatch.delenv("SEISO_SLIME_ALLOW_VLLM_FULL_WITH_LORA", raising=False)
+    cfg = _cfg(
+        tmp_path,
+        rollout_backend="vllm",
+        vllm_base_url="http://127.0.0.1:8000",
+        vllm_weight_mode="full",
+        use_lora=True,
+    )
+    with pytest.raises(ValueError, match="vllm_weight_mode=full"):
+        validate_rollout_backend_config(cfg)

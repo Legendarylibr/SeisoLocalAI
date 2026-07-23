@@ -61,8 +61,13 @@ or set `distributed_strategy: none` to run the existing single-process trainer.
 
 vLLM weight sync defaults to dynamic LoRA (`/v1/load_lora_adapter`) when
 `slime_use_lora: true`. Start the server with `--enable-lora`, or set
-`SEISO_MANAGED_VLLM_ENABLE_LORA=true` for Seiso-managed multi-GPU. Single-GPU
-`rollout_backend: hf` and existing LoRA/SFT multi-GPU paths are unchanged.
+`SEISO_MANAGED_VLLM_ENABLE_LORA=true` for Seiso-managed multi-GPU. Prefer
+`vllm_weight_mode: auto` (or `lora`); `full` with LoRA is refused unless
+`SEISO_SLIME_ALLOW_VLLM_FULL_WITH_LORA=1`. Single-GPU `rollout_backend: hf`
+and existing LoRA/SFT multi-GPU paths are unchanged.
+
+Multiple engine URLs (`vllm_base_url` comma-separated or `vllm_engine_urls`)
+round-robin **generation** and fan-out **weight sync** to every engine.
 
 **Logprobs:** remote engines sample tokens; Seiso recomputes `old_logprobs` on the
 local actor for GRPO (engine sampling logprobs unused). Keep weight sync on to
@@ -112,6 +117,17 @@ cloud_gpu_credential_id: <encrypted-credential-id>
 Keep cloud API keys, SSH material, and bootstrap commands in the **Cloud access**
 tab. They are never echoed back to the UI after save, and they are not copied into
 training job history.
+
+**Important:** `cloud_gpu_*` is provisioning metadata only. It does **not** start
+a remote vLLM server. For slime on cloud multi-GPU:
+
+1. Provision the instance (or use your orchestrator / bootstrap command)
+2. Start vLLM with tensor parallel + `--enable-lora` on that host
+3. Set `rollout_backend: vllm` and `vllm_base_url: http://<host>:8000`
+4. Launch policy training (`scripts/run_slime_vllm_ddp.sh` or Accelerate)
+
+Configs that enable `cloud_gpu` with `method: slime` and `rollout_backend: vllm`
+must still provide `vllm_base_url`.
 
 ## macOS / single GPU
 

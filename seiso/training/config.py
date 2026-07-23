@@ -470,6 +470,18 @@ class TrainConfig(BaseModel):
             raise ValueError("cloud_gpu_provider is required when cloud_gpu_enabled is true")
         if not self.cloud_gpu_instance_type.strip():
             raise ValueError("cloud_gpu_instance_type is required when cloud_gpu_enabled is true")
+        # Cloud GPU fields are provisioning metadata only — they do not launch
+        # vLLM. Slime + vLLM still needs an explicit reachable engine URL.
+        backend = str(self.rollout_backend or "hf").strip().lower()
+        if self.method == TrainMethod.SLIME and backend in {"vllm", "auto"}:
+            has_url = bool(str(self.vllm_base_url or "").strip())
+            if backend == "vllm" and not has_url:
+                raise ValueError(
+                    "cloud_gpu_enabled with method=slime and rollout_backend=vllm "
+                    "requires vllm_base_url pointing at a running multi-GPU vLLM "
+                    "server (cloud_gpu_* does not auto-start the engine; see "
+                    "docs/training/multi-gpu.md)"
+                )
         return self
 
     @model_validator(mode="after")
