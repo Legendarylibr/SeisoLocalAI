@@ -18,6 +18,30 @@ def allow_tiny_rl() -> bool:
     }
 
 
+# Committed toys under data/ — CI / smoke only (SEISO_ALLOW_TINY_RL=1).
+_SLIME_CI_FIXTURE_NAMES = frozenset(
+    {
+        "slime_sample.jsonl",
+        "slime_numeric_eval.jsonl",
+        "slime_code_sample.jsonl",
+        "slime_code_eval.jsonl",
+        "slime_choice_sample.jsonl",
+        "slime_choice_eval.jsonl",
+    }
+)
+
+
+def is_slime_ci_fixture_path(path: Path | str | None) -> bool:
+    """True when ``path`` names a committed slime CI fixture JSONL."""
+    if path is None:
+        return False
+    try:
+        name = Path(str(path)).name
+    except (TypeError, ValueError):
+        return False
+    return name in _SLIME_CI_FIXTURE_NAMES
+
+
 def _env_flag(name: str) -> bool:
     return os.environ.get(name, "").strip().lower() in {"1", "true", "yes"}
 
@@ -507,6 +531,27 @@ class SingleGpuSlimeConfig:
                 "verifiable eval, distinct from dataset). CI fixtures may set "
                 "require_held_out_eval=false or SEISO_ALLOW_TINY_RL=1."
             )
+        # Product runs must not train/eval on committed CI toys. Smoke may use
+        # them with SEISO_ALLOW_TINY_RL=1. data_gen may still list a fixture as
+        # a temporary dataset placeholder only when materialize will replace it.
+        if not allow_tiny_rl():
+            if is_slime_ci_fixture_path(self.eval_dataset):
+                raise ValueError(
+                    f"eval_dataset={self.eval_dataset} is a slime CI fixture "
+                    "(data/slime_*.jsonl). Use a frozen operator/HF held-out "
+                    "JSONL, or omit eval_dataset when data_gen materialize will "
+                    "auto-split. Smoke/CI: SEISO_ALLOW_TINY_RL=1."
+                )
+            if is_slime_ci_fixture_path(self.dataset) and not materialize_will_split:
+                raise ValueError(
+                    f"dataset={self.dataset} is a slime CI fixture "
+                    "(data/slime_*.jsonl) — not a training corpus. Point "
+                    "dataset at a verifiable operator JSONL, or enable "
+                    "data_gen with data_gen_source=dataset and "
+                    "dataset_ref=<HF hub id> (e.g. open-r1/OpenR1-Math-220k). "
+                    "Smoke/CI: configs/smoke_slime_cpu.yaml + "
+                    "SEISO_ALLOW_TINY_RL=1."
+                )
         if self.use_lora:
             if self.lora_r < 1:
                 raise ValueError("lora_r must be positive")

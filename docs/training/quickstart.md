@@ -271,7 +271,7 @@ scripts/run_slime_vllm_ddp.sh 2 configs/example_training_slime_vllm.yaml
 vLLM must read `output_dir/vllm_weight_sync/` (shared FS on multi-node).  
 Managed multi-GPU: set `SEISO_MANAGED_VLLM_ENABLED=true` and `SEISO_MANAGED_VLLM_ENABLE_LORA=true`, then point `vllm_base_url` at the managed server (or leave empty to adopt a running managed endpoint).
 
-**Data (RLVR):** default is operator/HF verifiable JSONL + a **frozen** `eval_dataset` (OpenR1-style). Floors (`>=256`) are anti-toy gates; real GRPO runs want ≫1k–10k+. Suggested Hub starting points (map `answer` / verify fields): [`open-r1/OpenR1-Math-220k`](https://huggingface.co/datasets/open-r1/OpenR1-Math-220k), code sets with unit tests. Opt-in materialize: `data_gen: true` + `data_gen_source: dataset|data_designer` (DD needs `pip install -e '.[data-designer]'` + a live `vllm_base_url` — not auto-started). Tiny `data/slime_*.jsonl` files are **CI fixtures** only.
+**Data (RLVR):** product math examples (`configs/example_training_slime*.yaml`, `example_slime_single_gpu.yaml`) default to Hub materialize (`data_gen: true`, `dataset_ref: open-r1/OpenR1-Math-220k`) and auto-split held-out when `eval_dataset` is omitted. Code/choice examples point at operator JSONL placeholders (`data/operator_*`) — replace before training. Floors (`>=256`) are anti-toy gates; real GRPO runs want ≫1k–10k+. Optional Data Designer: `data_gen_source: data_designer` (needs `pip install -e '.[data-designer]'` + a live `vllm_base_url` — not auto-started). Tiny `data/slime_*.jsonl` files are **CI fixtures** only (`SEISO_ALLOW_TINY_RL=1`); product mode refuses them.
 
 | Field | Meaning |
 |-------|---------|
@@ -283,13 +283,13 @@ Managed multi-GPU: set `SEISO_MANAGED_VLLM_ENABLED=true` and `SEISO_MANAGED_VLLM
 
 Not included (use upstream slime): Megatron TP/PP, Ray placement, NCCL tensor broadcast.
 
-Start from `configs/example_training_slime.yaml` (set a real dataset or Data Designer endpoint):
+Start from `configs/example_training_slime.yaml` (Hub materialize by default):
 
 ```yaml
 method: slime
 model_id: Qwen/Qwen2.5-0.5B-Instruct
-dataset: /path/to/verifiable_train.jsonl
-eval_dataset: /path/to/verifiable_eval.jsonl
+dataset: open-r1/OpenR1-Math-220k
+# omit eval_dataset — materialize auto-splits held-out
 require_held_out_eval: true
 reward: auto
 max_vram_gb: 16
@@ -298,7 +298,7 @@ rollout_batch_size: 4
 dynamic_sampling_filter: reward_nonzero_std
 over_sampling_batch_size: 8
 balance_data: false
-policy_micro_batch_size: 2
+policy_micro_batch_size: 4
 batch_size: 1
 learning_rate: 0.000005
 # 0 saves VRAM for single-epoch; epochs>1 auto-applies 0.02 unless SEISO_SLIME_ALLOW_ZERO_KL=1.
@@ -311,19 +311,24 @@ slime_use_lora: true
 auto_stop: true
 auto_stop_metric: outcome_reward_mean
 write_verifier_data: true
-# Opt-in materialize (default off): data_gen: true / data_gen_source: dataset|data_designer
+data_gen: true
+data_gen_source: dataset
+dataset_ref: open-r1/OpenR1-Math-220k
+data_gen_count: 2048
+# Or operator JSONL: dataset + eval_dataset paths, data_gen: false
+# Or Data Designer: data_gen_source: data_designer + data_designer: on + vllm_base_url
 ```
 
-CI fixture JSONLs (not for training):
+CI fixture JSONLs (smoke/tests only — product mode refuses these paths):
 
 | Dataset | Checker | Config |
 |---------|---------|--------|
-| `data/slime_sample.jsonl` | `numeric` | smoke / demo configs only |
-| `data/slime_numeric_eval.jsonl` | held-out numeric eval | `eval_dataset` for numeric slime demos |
-| `data/slime_code_sample.jsonl` | `code` | `configs/example_slime_code.yaml` (replace for real runs) |
-| `data/slime_code_eval.jsonl` | held-out code eval | `eval_dataset` in slime code configs |
-| `data/slime_choice_sample.jsonl` | `choice` | demo / CI only |
-| `data/slime_choice_eval.jsonl` | held-out choice eval | `eval_dataset` for choice slime demos |
+| `data/slime_sample.jsonl` | `numeric` | `configs/smoke_slime_cpu.yaml` + `SEISO_ALLOW_TINY_RL=1` |
+| `data/slime_numeric_eval.jsonl` | held-out numeric eval | smoke / pytest only |
+| `data/slime_code_sample.jsonl` | `code` | smoke / pytest only |
+| `data/slime_code_eval.jsonl` | held-out code eval | smoke / pytest only |
+| `data/slime_choice_sample.jsonl` | `choice` | smoke / pytest only |
+| `data/slime_choice_eval.jsonl` | held-out choice eval | smoke / pytest only |
 
 Important fields:
 
@@ -380,9 +385,10 @@ tests pass.** Use `dense` for pass-fraction credit, or `auto` for dense signal
 until a same-prompt group gets a full passer (then binary). Pass fraction is
 always logged as `proof_score` for diagnostics / hard-negative ranking.
 
-Example config: `configs/example_slime_code.yaml` with `data/slime_code_sample.jsonl`
-and held-out `eval_dataset: data/slime_code_eval.jsonl` (unit-test pass rate at
-end of run; not used for GRPO rollouts).
+Example config: `configs/example_slime_code.yaml` — replace
+`data/operator_code_{train,eval}.jsonl` with your verifiable code JSONL
+(held-out `eval_dataset` for unit-test pass rate at end of run; not used for
+GRPO rollouts). CI toys remain under `data/slime_code_*.jsonl` for smoke/tests.
 
 ```json
 {

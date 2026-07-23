@@ -1,11 +1,13 @@
+# Product slime code GRPO — operator JSONL with unit tests (not CI fixtures).
+# Shape reference only until you point dataset/eval at real verifiable code rows.
+# CI toys: data/slime_code_*.jsonl via SEISO_ALLOW_TINY_RL=1 (tests / local smoke).
 model_id: Qwen/Qwen2.5-0.5B-Instruct
 method: slime
 # slime path uses full-precision (+ optional LoRA); quant ignored by slime runner
 quant: none
-# data/slime_*.jsonl files are CI fixtures — replace with a real verifiable corpus.
-dataset: data/slime_code_sample.jsonl
-# Frozen held-out unit-test suite (not used for GRPO rollouts).
-eval_dataset: data/slime_code_eval.jsonl
+# REQUIRED: replace with your train/eval JSONL (prompt + answer + tests metadata).
+dataset: ./data/operator_code_train.jsonl
+eval_dataset: ./data/operator_code_eval.jsonl
 require_held_out_eval: true
 eval_on_complete: true
 eval_every_steps: 0
@@ -24,7 +26,8 @@ rollouts_per_prompt: 4
 rollout_batch_size: 4
 dynamic_sampling_filter: reward_nonzero_std
 over_sampling_batch_size: 8
-policy_micro_batch_size: 2
+# Keep intact GRPO groups: must be a multiple of rollouts_per_prompt.
+policy_micro_batch_size: 4
 train_batch_size: 1
 shuffle_buffer_size: 128
 gradient_accumulation_steps: 8
@@ -57,3 +60,6 @@ auto_stop_metric: outcome_reward_mean
 auto_stop_patience: 20
 write_verifier_data: true
 verifier_data_file: slime_verifier_data.jsonl
+data_gen: false
+data_gen_source: "off"
+data_designer: "off"

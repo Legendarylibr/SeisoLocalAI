@@ -105,23 +105,41 @@ def test_single_gpu_slime_defaults_do_not_load_reference_model_or_lora(tmp_path:
     assert cfg.process_reward_weight == 0.0
 
 
-def test_example_single_gpu_slime_config_loads_samples():
+def test_example_single_gpu_slime_config_uses_hub_materialize():
     cfg = SingleGpuSlimeConfig.from_yaml(Path("configs/example_slime_single_gpu.yaml"))
-    samples = list(_load_samples(cfg))
+    cfg.validate()
 
-    assert cfg.dataset == Path("data/slime_sample.jsonl")
     assert cfg.kl_coef == 0.0
     assert cfg.dynamic_sampling_filter == "reward_nonzero_std"
-    assert cfg.policy_micro_batch_size == 2
+    assert cfg.policy_micro_batch_size == 4
     assert cfg.shuffle_buffer_size == 128
     assert cfg.use_lora is True
     assert cfg.lora_r == 16
     assert cfg.reward == "auto"
     assert cfg.answer_field == "answer"
     assert cfg.rollout_backend == "hf"
-    assert cfg.data_gen is False
-    assert cfg.data_gen_source == "off"
+    assert cfg.data_gen is True
+    assert cfg.data_gen_source == "dataset"
+    assert cfg.dataset_ref == "open-r1/OpenR1-Math-220k"
+    assert cfg.data_gen_count >= 256
     assert cfg.process_reward_weight == 0.0
+
+
+def test_ci_fixture_jsonl_loads_for_smoke_sample_path():
+    """Committed data/slime_*.jsonl toys remain available for smoke/tests."""
+    cfg = SingleGpuSlimeConfig(
+        model_id="test/model",
+        dataset=Path("data/slime_sample.jsonl"),
+        output_dir=Path("./.test_outputs/fixture-load"),
+        eval_dataset=Path("data/slime_numeric_eval.jsonl"),
+        require_held_out_eval=False,
+        reward="numeric",
+        answer_field="answer",
+        rollouts_per_prompt=2,
+        policy_micro_batch_size=2,
+        data_gen=False,
+    )
+    samples = list(_load_samples(cfg))
     assert len(samples) >= 16
     assert "prompt" in samples[0]
 

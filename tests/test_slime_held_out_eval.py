@@ -14,17 +14,31 @@ from seiso.slime.eval import load_eval_samples, run_held_out_eval, score_held_ou
 from seiso.slime.types import _DistributedSlimeContext
 
 
-def test_example_slime_code_config_has_disjoint_eval_dataset():
-    cfg = SingleGpuSlimeConfig.from_yaml(Path("configs/example_slime_code.yaml"))
+def test_ci_fixture_code_eval_is_disjoint_from_train_fixture():
+    """Committed code fixtures stay valid for smoke/tests (not product examples)."""
+    train = Path("data/slime_code_sample.jsonl")
+    eval_path = Path("data/slime_code_eval.jsonl")
+    cfg = SingleGpuSlimeConfig(
+        model_id="test/model",
+        dataset=train,
+        output_dir=Path("./.test_outputs/code-eval"),
+        eval_dataset=eval_path,
+        require_held_out_eval=False,
+        reward="code",
+        answer_field="answer",
+        eval_on_complete=True,
+        rollouts_per_prompt=2,
+        policy_micro_batch_size=2,
+    )
     cfg.validate()
-    assert cfg.eval_dataset == Path("data/slime_code_eval.jsonl")
+    assert cfg.eval_dataset == eval_path
     assert cfg.eval_dataset != cfg.dataset
     assert cfg.eval_on_complete is True
     samples = load_eval_samples(cfg.eval_dataset)
     assert len(samples) >= 8
     train_ids = {
         json.loads(line).get("prompt_id")
-        for line in Path(cfg.dataset).read_text(encoding="utf-8").splitlines()
+        for line in train.read_text(encoding="utf-8").splitlines()
         if line.strip()
     }
     for sample in samples:
