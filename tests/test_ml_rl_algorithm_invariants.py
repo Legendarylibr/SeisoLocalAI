@@ -977,6 +977,48 @@ def test_filter_drops_groups_without_grpo_baseline(tmp_path, monkeypatch):
     assert kept == rollouts[2:]
 
 
+def test_filter_ignores_truncated_zeros_for_outcome_spread(tmp_path):
+    """Wiped truncated outcomes must not fake diversity among identical passers."""
+    from seiso.slime.policy import _filter_rollout_groups
+
+    cfg = SingleGpuSlimeConfig(
+        model_id="m",
+        dataset=tmp_path / "d.jsonl",
+        output_dir=tmp_path / "o",
+        rollouts_per_prompt=4,
+        dynamic_sampling_filter="reward_nonzero_std",
+        require_held_out_eval=False,
+    )
+    # Two identical valid passers + two truncated zeros → old bug kept the group.
+    rollouts = [
+        Rollout(
+            None, None, None, None, None, 1.0, status="stop", outcome_reward=1.0
+        ),
+        Rollout(
+            None, None, None, None, None, 1.0, status="stop", outcome_reward=1.0
+        ),
+        Rollout(
+            None, None, None, None, None, 0.0, status="length", outcome_reward=0.0
+        ),
+        Rollout(
+            None, None, None, None, None, 0.0, status="empty", outcome_reward=0.0
+        ),
+    ]
+    kept, kept_groups, rejected = _filter_rollout_groups(rollouts, cfg)
+    assert rejected == 1
+    assert kept_groups == set()
+    assert kept == []
+
+    # Same shape but valid outcomes differ → keep.
+    rollouts[1] = Rollout(
+        None, None, None, None, None, 0.0, status="stop", outcome_reward=0.0
+    )
+    kept, kept_groups, rejected = _filter_rollout_groups(rollouts, cfg)
+    assert rejected == 0
+    assert kept_groups == {0}
+    assert len(kept) == 4
+
+
 def test_backprop_uses_no_sync_until_final_microbatch(tmp_path):
     import contextlib
     from unittest.mock import MagicMock, patch

@@ -280,7 +280,9 @@ def train_slime(config: SingleGpuSlimeConfig) -> Path:
 
             health_reason = _check_training_health(stats, config)
             if health_reason:
+                # Non-finite stats: discard the window (do not step on bad grads).
                 optimizer.zero_grad(set_to_none=True)
+                pending_accumulation_steps = 0
                 if dist_ctx.is_main and global_step % config.log_every_steps == 0:
                     _append_metrics(
                         metrics_path,
@@ -347,7 +349,22 @@ def train_slime(config: SingleGpuSlimeConfig) -> Path:
 
             global_step += 1
             if decision.should_stop:
-                optimizer.zero_grad(set_to_none=True)
+                # Apply any partial accumulation window before exiting so early
+                # stop does not silently drop healthy grads (DDP-safe flush).
+                if pending_accumulation_steps:
+                    _flush_accumulated_gradients(model, dist_ctx, torch)
+                    _optimizer_step(model, optimizer, torch, config)
+                    pending_accumulation_steps = 0
+                    _sync_rollout_engine_weights(
+                        model=model,
+                        tokenizer=tokenizer,
+                        config=config,
+                        dist_ctx=dist_ctx,
+                        step=global_step,
+                        sync_state=weight_sync_state,
+                    )
+                else:
+                    optimizer.zero_grad(set_to_none=True)
                 _maybe_run_held_out_eval(
                     model=model,
                     tokenizer=tokenizer,
@@ -365,6 +382,7 @@ def train_slime(config: SingleGpuSlimeConfig) -> Path:
                 if pending_accumulation_steps:
                     _flush_accumulated_gradients(model, dist_ctx, torch)
                     _optimizer_step(model, optimizer, torch, config)
+                    pending_accumulation_steps = 0
                     _sync_rollout_engine_weights(
                         model=model,
                         tokenizer=tokenizer,
@@ -415,6 +433,7 @@ def train_slime(config: SingleGpuSlimeConfig) -> Path:
     if pending_accumulation_steps:
         _flush_accumulated_gradients(model, dist_ctx, torch)
         _optimizer_step(model, optimizer, torch, config)
+        pending_accumulation_steps = 0
         _sync_rollout_engine_weights(
             model=model,
             tokenizer=tokenizer,

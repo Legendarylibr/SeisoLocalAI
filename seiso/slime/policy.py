@@ -392,7 +392,8 @@ def _keep_rollout_group(
     Always requires ≥2 non-truncated/non-empty rollouts — otherwise advantages
     are forced to 0 and the step is vacuous. ``reward_nonzero_std`` /
     ``outcome_nonzero_std`` additionally require nonzero *outcome* spread
-    (format-only composite spread is ignored).
+    among those valid rollouts (wiped truncated zeros must not fake diversity;
+    format-only composite spread is ignored).
     """
     valid = [rollout for rollout in group if rollout.status not in _INVALID_ADVANTAGE_STATUS]
     if len(valid) < 2:
@@ -401,9 +402,7 @@ def _keep_rollout_group(
         "reward_nonzero_std",
         "outcome_nonzero_std",
     }:
-        outcomes = [float(rollout.outcome_reward) for rollout in group]
-        if len(outcomes) < 2:
-            return False
+        outcomes = [float(rollout.outcome_reward) for rollout in valid]
         mean = sum(outcomes) / len(outcomes)
         variance = sum((value - mean) ** 2 for value in outcomes) / len(outcomes)
         return math.sqrt(variance) > config.dynamic_sampling_min_reward_std
