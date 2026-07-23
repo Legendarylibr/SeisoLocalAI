@@ -298,7 +298,7 @@ rollout_batch_size: 4
 dynamic_sampling_filter: reward_nonzero_std
 over_sampling_batch_size: 8
 balance_data: false
-policy_micro_batch_size: 2
+policy_micro_batch_size: 4
 batch_size: 1
 learning_rate: 0.000005
 # 0 saves VRAM for single-epoch; epochs>1 auto-applies 0.02 unless SEISO_SLIME_ALLOW_ZERO_KL=1.

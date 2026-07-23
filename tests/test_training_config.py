@@ -132,6 +132,25 @@ def test_example_training_slime_config_loads():
     assert slime.grpo_std_normalization is True
     assert slime.use_lora is True
     assert slime.auto_stop is True
+    assert slime.policy_micro_batch_size % slime.rollouts_per_prompt == 0
+
+
+def test_product_slime_examples_load_without_tiny_rl(monkeypatch):
+    """Advertised slime YAMLs must validate for operators (no SEISO_ALLOW_TINY_RL)."""
+    monkeypatch.delenv("SEISO_ALLOW_TINY_RL", raising=False)
+    paths = (
+        "configs/example_training_slime.yaml",
+        "configs/example_slime_single_gpu.yaml",
+        "configs/example_slime_code.yaml",
+        "configs/example_slime_choice.yaml",
+        "configs/example_training_slime_ddp.yaml",
+        "configs/example_training_slime_vllm.yaml",
+    )
+    for path in paths:
+        cfg = TrainConfig.from_yaml(path)
+        slime = cfg.to_single_gpu_slime_config()
+        slime.validate()
+        assert slime.policy_micro_batch_size % slime.rollouts_per_prompt == 0, path
 
 
 def test_example_slime_yaml_loads_via_train_config_with_aliases():

@@ -25,7 +25,8 @@ rollout_batch_size: 2
 # slime --over-sampling-batch-size (>= rollout_batch_size)
 over_sampling_batch_size: 4
 dynamic_sampling_filter: reward_nonzero_std
-policy_micro_batch_size: 2
+# Keep intact GRPO groups: must be a multiple of rollouts_per_prompt.
+policy_micro_batch_size: 4
 # null → same as rollout_batch_size
 train_batch_size: null
 shuffle_buffer_size: 128

@@ -112,7 +112,7 @@ def test_example_single_gpu_slime_config_loads_samples():
     assert cfg.dataset == Path("data/slime_sample.jsonl")
     assert cfg.kl_coef == 0.0
     assert cfg.dynamic_sampling_filter == "reward_nonzero_std"
-    assert cfg.policy_micro_batch_size == 2
+    assert cfg.policy_micro_batch_size == 4
     assert cfg.shuffle_buffer_size == 128
     assert cfg.use_lora is True
     assert cfg.lora_r == 16

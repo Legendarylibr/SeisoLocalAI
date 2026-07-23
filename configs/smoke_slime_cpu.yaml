@@ -20,7 +20,8 @@ rollouts_per_prompt: 2
 rollout_batch_size: 1
 over_sampling_batch_size: null
 dynamic_sampling_filter: none
-policy_micro_batch_size: 1
+# Multiple of rollouts_per_prompt (intact GRPO groups); still needs SEISO_ALLOW_TINY_RL for floors.
+policy_micro_batch_size: 2
 train_batch_size: 1
 shuffle_buffer_size: 8
 gradient_accumulation_steps: 1

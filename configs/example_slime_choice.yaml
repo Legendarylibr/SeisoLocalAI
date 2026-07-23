@@ -18,7 +18,8 @@ rollout_batch_size: 4
 # Drop all-correct / all-wrong groups so GRPO gets nonzero advantages.
 dynamic_sampling_filter: reward_nonzero_std
 over_sampling_batch_size: 8
-policy_micro_batch_size: 2
+# Keep intact GRPO groups: must be a multiple of rollouts_per_prompt.
+policy_micro_batch_size: 4
 train_batch_size: 1
 shuffle_buffer_size: 128
 gradient_accumulation_steps: 8
