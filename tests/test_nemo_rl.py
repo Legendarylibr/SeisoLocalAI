@@ -153,7 +153,7 @@ def test_smoke_yaml_loads(tmp_path, monkeypatch):
     # Copy minimal fields from repo smoke config shape.
     smoke = {
         "model_id": "Qwen/Qwen3-0.6B",
-        "dataset": "data/slime_sample.jsonl",
+        "dataset": "open-r1/OpenR1-Math-220k",
         "output_dir": "outputs/nemo-rl-smoke",
         "method": "nemo_rl",
         "quant": "none",
@@ -166,6 +166,37 @@ def test_smoke_yaml_loads(tmp_path, monkeypatch):
     cfg = TrainConfig.from_yaml(path)
     assert cfg.method == TrainMethod.NEMO_RL
     assert cfg.nemo_rl_dry_run is True
+
+
+def test_example_nemo_rl_yaml_loads_without_tiny_rl(monkeypatch):
+    monkeypatch.delenv("SEISO_ALLOW_TINY_RL", raising=False)
+    cfg = TrainConfig.from_yaml("configs/example_training_nemo_rl.yaml")
+    assert cfg.method == TrainMethod.NEMO_RL
+    assert cfg.rollouts_per_prompt >= 2
+    from seiso.slime.config import is_slime_ci_fixture_path
+
+    assert not is_slime_ci_fixture_path(cfg.dataset)
+
+
+def test_nemo_rl_grpo_refuses_single_rollout(tmp_path):
+    with pytest.raises(ValueError, match="rollouts_per_prompt must be >= 2"):
+        NeMoRLConfig(
+            model_id="m",
+            output_dir=tmp_path / "o",
+            recipe=NeMoRLRecipe.GRPO,
+            rollouts_per_prompt=1,
+        ).validate()
+
+
+def test_nemo_rl_builder_defaults_rollouts_when_unset(tmp_path):
+    cfg = NeMoRLConfig(
+        model_id="m",
+        output_dir=tmp_path / "o",
+        recipe=NeMoRLRecipe.SMOKE,
+        rollouts_per_prompt=None,
+    )
+    overrides = build_hydra_overrides(cfg)
+    assert "grpo.num_generations_per_prompt=4" in overrides
 
 
 def test_preference_requires_dpo_recipe(tmp_path):

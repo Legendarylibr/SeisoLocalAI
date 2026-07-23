@@ -385,10 +385,12 @@ tests pass.** Use `dense` for pass-fraction credit, or `auto` for dense signal
 until a same-prompt group gets a full passer (then binary). Pass fraction is
 always logged as `proof_score` for diagnostics / hard-negative ranking.
 
-Example config: `configs/example_slime_code.yaml` — replace
-`data/operator_code_{train,eval}.jsonl` with your verifiable code JSONL
-(held-out `eval_dataset` for unit-test pass rate at end of run; not used for
-GRPO rollouts). CI toys remain under `data/slime_code_*.jsonl` for smoke/tests.
+Example config: `configs/example_slime_code.yaml` — shape template. Create
+`data/operator_code_{train,eval}.jsonl` (or retarget those keys) before
+`seiso train`; validate refuses missing local JSONL unless
+`SEISO_ALLOW_TEMPLATE_SLIME=1`. Held-out `eval_dataset` is for unit-test pass
+rate at end of run (not GRPO rollouts). CI toys: `data/slime_code_*.jsonl` +
+`SEISO_ALLOW_TINY_RL=1`.
 
 ```json
 {

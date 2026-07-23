@@ -80,8 +80,6 @@ class NeMoRLConfig:
             raise ValueError("max_steps must be >= 1 when set")
         if self.learning_rate is not None and self.learning_rate <= 0:
             raise ValueError("learning_rate must be > 0 when set")
-        if self.rollouts_per_prompt is not None and self.rollouts_per_prompt < 1:
-            raise ValueError("rollouts_per_prompt must be >= 1 when set")
         if self.num_prompts_per_step is not None and self.num_prompts_per_step < 1:
             raise ValueError("num_prompts_per_step must be >= 1 when set")
         recipe = self.recipe.value if isinstance(self.recipe, NeMoRLRecipe) else str(self.recipe)
@@ -90,6 +88,16 @@ class NeMoRLConfig:
                 f"nemo_rl recipe must be one of: {', '.join(sorted(_RECIPE_SCRIPTS))} "
                 f"(got {recipe!r})"
             )
+        # Align with slime GRPO: grouped advantages need >=2 rollouts/prompt.
+        # None → builder defaults to 4 (never leave upstream recipe at 1).
+        if recipe in {NeMoRLRecipe.GRPO.value, NeMoRLRecipe.SMOKE.value}:
+            if self.rollouts_per_prompt is not None and self.rollouts_per_prompt < 2:
+                raise ValueError(
+                    "rollouts_per_prompt must be >= 2 for NeMo RL GRPO/smoke "
+                    f"(got {self.rollouts_per_prompt})"
+                )
+        elif self.rollouts_per_prompt is not None and self.rollouts_per_prompt < 1:
+            raise ValueError("rollouts_per_prompt must be >= 1 when set")
         for ov in self.extra_overrides:
             if not str(ov).strip():
                 raise ValueError("extra_overrides entries must be non-empty")
@@ -167,7 +175,12 @@ class NeMoRLConfig:
             rollouts_per_prompt=(
                 int(raw["rollouts_per_prompt"])
                 if raw.get("rollouts_per_prompt") is not None
-                else None
+                else (
+                    4
+                    if recipe
+                    in {NeMoRLRecipe.GRPO, NeMoRLRecipe.SMOKE}
+                    else None
+                )
             ),
             num_prompts_per_step=(
                 int(raw["num_prompts_per_step"])

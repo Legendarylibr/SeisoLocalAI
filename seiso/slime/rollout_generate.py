@@ -91,18 +91,24 @@ def generate_data_gen_chunk(
         max_length=config.max_prompt_tokens,
     ).to(config.device)
     prompt_width = int(encoded["input_ids"].shape[1])
+    # Held-out eval uses temperature=0 for greedy pass-rate reports. Sampling
+    # at temp 0 is undefined across transformers versions — use do_sample=False.
+    greedy = float(config.temperature) <= 0.0
+    gen_kwargs: dict[str, Any] = {
+        "max_new_tokens": config.max_new_tokens,
+        "pad_token_id": tokenizer.pad_token_id,
+        "eos_token_id": tokenizer.eos_token_id,
+        "use_cache": True,
+        "num_return_sequences": config.rollouts_per_prompt,
+    }
+    if greedy:
+        gen_kwargs["do_sample"] = False
+    else:
+        gen_kwargs["do_sample"] = True
+        gen_kwargs["temperature"] = config.temperature
+        gen_kwargs["top_p"] = config.top_p
     with torch.no_grad():
-        generated = generation_model.generate(
-            **encoded,
-            do_sample=True,
-            temperature=config.temperature,
-            top_p=config.top_p,
-            max_new_tokens=config.max_new_tokens,
-            pad_token_id=tokenizer.pad_token_id,
-            eos_token_id=tokenizer.eos_token_id,
-            use_cache=True,
-            num_return_sequences=config.rollouts_per_prompt,
-        )
+        generated = generation_model.generate(**encoded, **gen_kwargs)
     completions = tokenizer.batch_decode(
         generated[:, prompt_width:],
         skip_special_tokens=True,

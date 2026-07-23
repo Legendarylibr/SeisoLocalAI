@@ -138,13 +138,12 @@ def test_example_training_slime_config_loads():
 
 
 def test_product_slime_examples_load_without_tiny_rl(monkeypatch):
-    """Advertised slime YAMLs must validate for operators (no SEISO_ALLOW_TINY_RL)."""
+    """Ready-to-run slime YAMLs must validate for operators (no TINY_RL)."""
     monkeypatch.delenv("SEISO_ALLOW_TINY_RL", raising=False)
+    monkeypatch.delenv("SEISO_ALLOW_TEMPLATE_SLIME", raising=False)
     paths = (
         "configs/example_training_slime.yaml",
         "configs/example_slime_single_gpu.yaml",
-        "configs/example_slime_code.yaml",
-        "configs/example_slime_choice.yaml",
         "configs/example_training_slime_ddp.yaml",
         "configs/example_training_slime_vllm.yaml",
     )
@@ -153,10 +152,67 @@ def test_product_slime_examples_load_without_tiny_rl(monkeypatch):
         slime = cfg.to_single_gpu_slime_config()
         slime.validate()
         assert slime.policy_micro_batch_size % slime.rollouts_per_prompt == 0, path
+        assert slime.data_gen_count >= 256, path
         from seiso.slime.config import is_slime_ci_fixture_path
 
         assert not is_slime_ci_fixture_path(slime.dataset), path
         assert not is_slime_ci_fixture_path(slime.eval_dataset), path
+
+
+def test_product_slime_shape_templates_refuse_missing_paths(monkeypatch):
+    """Code/choice examples are shape templates until operator JSONL exists."""
+    import pytest
+    from pydantic import ValidationError
+
+    monkeypatch.delenv("SEISO_ALLOW_TINY_RL", raising=False)
+    monkeypatch.delenv("SEISO_ALLOW_TEMPLATE_SLIME", raising=False)
+    for path in (
+        "configs/example_slime_code.yaml",
+        "configs/example_slime_choice.yaml",
+    ):
+        with pytest.raises(ValidationError, match="missing on disk"):
+            TrainConfig.from_yaml(path)
+
+
+def test_product_slime_shape_templates_load_with_template_escape(monkeypatch):
+    monkeypatch.delenv("SEISO_ALLOW_TINY_RL", raising=False)
+    monkeypatch.setenv("SEISO_ALLOW_TEMPLATE_SLIME", "1")
+    for path in (
+        "configs/example_slime_code.yaml",
+        "configs/example_slime_choice.yaml",
+    ):
+        cfg = TrainConfig.from_yaml(path)
+        slime = cfg.to_single_gpu_slime_config()
+        slime.validate()
+        assert slime.policy_micro_batch_size % slime.rollouts_per_prompt == 0
+
+
+def test_product_training_configs_load_without_tiny_rl(monkeypatch):
+    """All advertised example_*.yaml TrainConfigs load without TINY_RL."""
+    monkeypatch.delenv("SEISO_ALLOW_TINY_RL", raising=False)
+    monkeypatch.delenv("SEISO_ALLOW_TEMPLATE_SLIME", raising=False)
+    # Shape templates need operator files or TEMPLATE escape — covered separately.
+    paths = (
+        "configs/example_lora.yaml",
+        "configs/example_training_slime.yaml",
+        "configs/example_slime_single_gpu.yaml",
+        "configs/example_training_slime_ddp.yaml",
+        "configs/example_training_slime_vllm.yaml",
+        "configs/example_training_nemo_rl.yaml",
+        "configs/example_training_deterministic.yaml",
+    )
+    for path in paths:
+        cfg = TrainConfig.from_yaml(path)
+        from seiso.slime.config import is_slime_ci_fixture_path
+
+        assert not is_slime_ci_fixture_path(cfg.dataset), path
+        if cfg.method == TrainMethod.SLIME:
+            slime = cfg.to_single_gpu_slime_config()
+            assert slime.policy_micro_batch_size % slime.rollouts_per_prompt == 0
+            if slime.data_gen or slime.data_gen_count > 0:
+                assert slime.data_gen_count >= 256, path
+        if cfg.method == TrainMethod.NEMO_RL:
+            assert cfg.rollouts_per_prompt >= 2
 
 
 def test_product_slime_refuses_ci_fixture_dataset(tmp_path, monkeypatch):
@@ -178,6 +234,81 @@ def test_product_slime_refuses_ci_fixture_dataset(tmp_path, monkeypatch):
         )
 
 
+def test_product_slime_refuses_sub_floor_data_gen_count(tmp_path, monkeypatch):
+    monkeypatch.delenv("SEISO_ALLOW_TINY_RL", raising=False)
+    import pytest
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="grounded floor"):
+        TrainConfig.model_validate(
+            {
+                "model_id": "test/model",
+                "dataset": "open-r1/OpenR1-Math-220k",
+                "output_dir": tmp_path / "out",
+                "method": "slime",
+                "require_held_out_eval": True,
+                "data_gen": True,
+                "data_gen_source": "dataset",
+                "dataset_ref": "open-r1/OpenR1-Math-220k",
+                "data_gen_count": 8,
+            }
+        )
+
+
+def test_product_slime_refuses_data_gen_count_that_fails_held_out_split(
+    tmp_path, monkeypatch
+):
+    """256 validates as the corpus floor but fails after 10% auto-split."""
+    monkeypatch.delenv("SEISO_ALLOW_TINY_RL", raising=False)
+    import pytest
+    from pydantic import ValidationError
+
+    from seiso.slime.config import min_data_gen_count_for_held_out_split
+
+    need = min_data_gen_count_for_held_out_split()
+    assert need > 256
+    with pytest.raises(ValidationError, match="held-out auto-split|grounded floor"):
+        TrainConfig.model_validate(
+            {
+                "model_id": "test/model",
+                "dataset": "open-r1/OpenR1-Math-220k",
+                "output_dir": tmp_path / "out",
+                "method": "slime",
+                "require_held_out_eval": True,
+                "data_gen": True,
+                "data_gen_source": "dataset",
+                "dataset_ref": "open-r1/OpenR1-Math-220k",
+                "data_gen_count": 256,
+            }
+        )
+
+
+def test_product_slime_refuses_data_gen_source_off(tmp_path, monkeypatch):
+    monkeypatch.delenv("SEISO_ALLOW_TINY_RL", raising=False)
+    import pytest
+
+    from seiso.slime.config import SingleGpuSlimeConfig
+
+    train_path = tmp_path / "train.jsonl"
+    eval_path = tmp_path / "eval.jsonl"
+    train_path.write_text('{"prompt":"x","answer":"1"}\n', encoding="utf-8")
+    eval_path.write_text('{"prompt":"y","answer":"2"}\n', encoding="utf-8")
+    cfg = SingleGpuSlimeConfig(
+        model_id="test/model",
+        dataset=train_path,
+        eval_dataset=eval_path,
+        output_dir=tmp_path / "out",
+        require_held_out_eval=True,
+        data_gen=True,
+        data_gen_count=300,
+        data_gen_source="off",
+        rollouts_per_prompt=2,
+        policy_micro_batch_size=2,
+    )
+    with pytest.raises(ValueError, match="data_gen_source is off"):
+        cfg.validate()
+
+
 def test_example_slime_yaml_loads_via_train_config_with_aliases():
     """example_slime_* uses slime field names; TrainConfig.from_yaml maps them."""
     cfg = TrainConfig.from_yaml("configs/example_slime_single_gpu.yaml")
@@ -193,13 +324,14 @@ def test_example_slime_yaml_loads_via_train_config_with_aliases():
     assert slime.rollout_backend == "hf"
 
 
-def test_example_slime_code_yaml_maps_held_out_eval_aliases():
+def test_example_slime_code_yaml_maps_held_out_eval_aliases(monkeypatch):
+    monkeypatch.setenv("SEISO_ALLOW_TEMPLATE_SLIME", "1")
     cfg = TrainConfig.from_yaml("configs/example_slime_code.yaml")
     slime = cfg.to_single_gpu_slime_config()
 
-    assert cfg.slime_eval_dataset == Path("data/operator_code_eval.jsonl")
+    assert "operator_code_eval" in str(cfg.slime_eval_dataset)
     assert cfg.slime_eval_on_complete is True
-    assert slime.eval_dataset == Path("data/operator_code_eval.jsonl")
+    assert "operator_code_eval" in str(slime.eval_dataset)
     assert slime.eval_on_complete is True
     assert slime.eval_dataset != slime.dataset
     assert "operator_code" in str(slime.dataset)

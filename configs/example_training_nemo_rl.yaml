@@ -13,7 +13,8 @@
 # For a 10-step install smoke, set nemo_rl_recipe: smoke
 
 model_id: Qwen/Qwen2.5-1.5B
-dataset: data/slime_sample.jsonl  # Seiso metadata; NeMo RL uses its recipe dataset by default
+# Seiso TrainConfig requires dataset; NeMo recipes use their own corpora by default.
+dataset: open-r1/OpenR1-Math-220k
 output_dir: outputs/nemo-rl-grpo
 method: nemo_rl
 quant: none
