@@ -18,6 +18,15 @@ def allow_tiny_rl() -> bool:
     }
 
 
+def allow_template_slime() -> bool:
+    """Shape-only YAMLs may omit real JSONL until the operator replaces paths."""
+    return os.environ.get("SEISO_ALLOW_TEMPLATE_SLIME", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+
+
 # Committed toys under data/ — CI / smoke only (SEISO_ALLOW_TINY_RL=1).
 _SLIME_CI_FIXTURE_NAMES = frozenset(
     {
@@ -29,6 +38,23 @@ _SLIME_CI_FIXTURE_NAMES = frozenset(
         "slime_choice_eval.jsonl",
     }
 )
+
+# Product grounded floor — matches Distill-RL / materialize (synth_materialize).
+PRODUCT_DATA_GEN_FLOOR = 256
+
+
+def min_data_gen_count_for_held_out_split(
+    train_floor: int = PRODUCT_DATA_GEN_FLOOR,
+) -> int:
+    """Minimum ``data_gen_count`` so a 10% held-out cut still leaves ``train_floor``.
+
+    Mirrors ``seiso.slime.trainer`` auto-split:
+    ``n_eval = max(1, n // 10)``, train = ``n - n_eval``.
+    """
+    need = int(train_floor)
+    while need - max(1, need // 10) < train_floor:
+        need += 1
+    return need
 
 
 def is_slime_ci_fixture_path(path: Path | str | None) -> bool:
@@ -42,9 +68,30 @@ def is_slime_ci_fixture_path(path: Path | str | None) -> bool:
     return name in _SLIME_CI_FIXTURE_NAMES
 
 
+def looks_like_local_jsonl(path: Path | str | None) -> bool:
+    """True for paths that look like local JSON/JSONL corpora (not Hub ids)."""
+    if path is None:
+        return False
+    try:
+        name = Path(str(path)).name
+    except (TypeError, ValueError):
+        return False
+    lower = name.lower()
+    return lower.endswith(".jsonl") or lower.endswith(".json")
+
+
+def unresolved_local_jsonl(path: Path | str | None) -> bool:
+    """True when path looks local but the file is missing on disk."""
+    if not looks_like_local_jsonl(path):
+        return False
+    try:
+        return not Path(str(path)).expanduser().is_file()
+    except (TypeError, ValueError, OSError):
+        return True
+
+
 def _env_flag(name: str) -> bool:
     return os.environ.get(name, "").strip().lower() in {"1", "true", "yes"}
-
 
 def effective_train_batch_size(config: SingleGpuSlimeConfig) -> int:
     """Prompt groups per step after filtering (slime rollout_batch_size target)."""
@@ -513,10 +560,11 @@ class SingleGpuSlimeConfig:
         elif src_for_split == "dataset":
             materialize_will_split = bool(ref) or dataset_as_hub
         elif src_for_split == "data_designer":
-            # Trainer proceeds when mode is not off (on|auto).
-            materialize_will_split = not dd_off
+            # Only credit auto-split when DD is explicitly on (auto still needs
+            # package + endpoint at runtime — do not skip held-out gate).
+            materialize_will_split = dd_on
         elif src_for_split in {"auto", ""}:
-            # Matches trainer want_dataset / want_dd selection.
+            # Matches trainer want_dataset / want_dd selection (dd requires on).
             materialize_will_split = bool(ref) or dd_on
         else:
             materialize_will_split = False
@@ -552,6 +600,27 @@ class SingleGpuSlimeConfig:
                     "Smoke/CI: configs/smoke_slime_cpu.yaml + "
                     "SEISO_ALLOW_TINY_RL=1."
                 )
+            # Local JSONL must exist (or be replaced by materialize). Shape-only
+            # templates (operator_*.jsonl placeholders) need
+            # SEISO_ALLOW_TEMPLATE_SLIME=1 until paths point at real files.
+            if not allow_template_slime():
+                if unresolved_local_jsonl(self.eval_dataset):
+                    raise ValueError(
+                        f"eval_dataset={self.eval_dataset} is missing on disk. "
+                        "Point it at a frozen held-out JSONL, omit it when "
+                        "data_gen materialize will auto-split, or set "
+                        "SEISO_ALLOW_TEMPLATE_SLIME=1 for shape-only YAMLs."
+                    )
+                if (
+                    unresolved_local_jsonl(self.dataset)
+                    and not materialize_will_split
+                ):
+                    raise ValueError(
+                        f"dataset={self.dataset} is missing on disk. Point "
+                        "dataset at a verifiable JSONL, enable data_gen + "
+                        "dataset_ref for Hub materialize, or set "
+                        "SEISO_ALLOW_TEMPLATE_SLIME=1 for shape-only YAMLs."
+                    )
         if self.use_lora:
             if self.lora_r < 1:
                 raise ValueError("lora_r must be positive")
@@ -582,13 +651,64 @@ class SingleGpuSlimeConfig:
                 "data_gen requires data_gen_count >= 1 "
                 "(prefer 200+ for meaningful GRPO outcome diversity)"
             )
+        # Product floors / source readiness — fail at validate, not mid-job.
+        materialize_requested = bool(self.data_gen or self.data_gen_count > 0)
+        src = _normalize_data_gen_source(str(self.data_gen_source or "off"))
+        if materialize_requested and src in {"off", "none"}:
+            raise ValueError(
+                "data_gen is enabled but data_gen_source is off. Set "
+                "data_gen_source=dataset|data_designer|auto, or disable data_gen "
+                "and point dataset at a grounded JSONL."
+            )
+        if materialize_requested and src in {"auto", ""}:
+            ref_ready = bool((self.dataset_ref or "").strip()) or dataset_as_hub
+            if not ref_ready and not dd_on:
+                raise ValueError(
+                    "data_gen_source=auto needs dataset_ref (or a Hub dataset "
+                    "id) or data_designer=on before train. Otherwise disable "
+                    "data_gen and set dataset + eval_dataset JSONL paths."
+                )
+        if src == "dataset" and materialize_requested:
+            ref = (self.dataset_ref or "").strip()
+            if not ref and not dataset_as_hub:
+                raise ValueError(
+                    "data_gen_source=dataset requires dataset_ref (HF hub id) "
+                    "or a non-file dataset ref"
+                )
+        if src == "data_designer" and materialize_requested and dd_off:
+            raise ValueError(
+                "data_gen_source=data_designer but data_designer=off. Set "
+                "data_designer=on with a vLLM/OpenAI endpoint, or use "
+                "data_gen_source=dataset / an operator JSONL dataset."
+            )
+        if materialize_requested and not allow_tiny_rl():
+            floor = PRODUCT_DATA_GEN_FLOOR
+            if (
+                self.require_held_out_eval
+                and self.eval_dataset is None
+                and materialize_will_split
+            ):
+                floor = min_data_gen_count_for_held_out_split(PRODUCT_DATA_GEN_FLOOR)
+            if self.data_gen_count < floor:
+                raise ValueError(
+                    f"data_gen_count={self.data_gen_count} is below the product "
+                    f"grounded floor ({floor}"
+                    + (
+                        f"; need >= {floor} when held-out auto-splits 10% "
+                        f"from materialize so train keeps "
+                        f"{PRODUCT_DATA_GEN_FLOOR}"
+                        if floor > PRODUCT_DATA_GEN_FLOOR
+                        else ""
+                    )
+                    + "). Raise data_gen_count, set an explicit frozen "
+                    "eval_dataset, or set SEISO_ALLOW_TINY_RL=1 for smoke/CI."
+                )
         if not self.data_gen_filename:
             raise ValueError("data_gen_filename must not be empty")
         if not self.data_gen_mix:
             raise ValueError("data_gen_mix must not be empty")
         if not self.data_gen_difficulty:
             raise ValueError("data_gen_difficulty must not be empty")
-        src = _normalize_data_gen_source(str(self.data_gen_source or "off"))
         if src not in {
             "auto",
             "data_designer",
@@ -601,16 +721,6 @@ class SingleGpuSlimeConfig:
                 "data_gen_source must be one of: off, auto, data_designer, "
                 f"dataset (got {self.data_gen_source!r})"
             )
-        if src == "dataset" and (self.data_gen or self.data_gen_count > 0):
-            ref = (self.dataset_ref or "").strip()
-            dataset_as_hub = bool(
-                self.dataset and not Path(self.dataset).expanduser().is_file()
-            )
-            if not ref and not dataset_as_hub:
-                raise ValueError(
-                    "data_gen_source=dataset requires dataset_ref (HF hub id) "
-                    "or a non-file dataset ref"
-                )
         mode = str(self.data_designer or "auto").lower().strip()
         if mode not in {
             "auto",

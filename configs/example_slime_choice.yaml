@@ -1,10 +1,11 @@
-# Product slime choice GRPO — operator JSONL (not CI fixtures under data/slime_*.jsonl).
-# CI toys: data/slime_choice_*.jsonl via SEISO_ALLOW_TINY_RL=1 (tests / local smoke).
+# Product slime choice GRPO — shape template (paths must exist before train).
+# Validate fails until files exist (or SEISO_ALLOW_TEMPLATE_SLIME=1).
+# CI toys: data/slime_choice_*.jsonl via SEISO_ALLOW_TINY_RL=1.
 model_id: Qwen/Qwen2.5-0.5B-Instruct
 method: slime
 # slime path uses full-precision (+ optional LoRA); quant ignored by slime runner
 quant: none
-# REQUIRED: replace with your train/eval multiple-choice JSONL.
+# REQUIRED: create these (or point at your train/eval multiple-choice JSONL).
 dataset: ./data/operator_choice_train.jsonl
 eval_dataset: ./data/operator_choice_eval.jsonl
 require_held_out_eval: true

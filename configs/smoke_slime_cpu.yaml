@@ -52,7 +52,8 @@ lora_r: 4
 lora_alpha: 8
 lora_dropout: 0.0
 use_8bit_optimizer: false
-save_every_steps: 0
+# 0 is allowed by seiso slime; TrainConfig/seiso train requires >= 1.
+save_every_steps: 1
 log_every_steps: 1
 auto_stop: false
 stop_on_nonfinite: true

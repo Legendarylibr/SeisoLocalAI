@@ -27,10 +27,19 @@ def build_hydra_overrides(config: NeMoRLConfig) -> list[str]:
     if recipe in {NeMoRLRecipe.GRPO, NeMoRLRecipe.SMOKE}:
         if config.max_steps is not None:
             overrides.append(f"grpo.max_num_steps={int(config.max_steps)}")
-        if config.rollouts_per_prompt is not None:
-            overrides.append(
-                f"grpo.num_generations_per_prompt={int(config.rollouts_per_prompt)}"
+        # Always override generations/prompt so upstream recipe defaults of 1
+        # cannot silently disable grouped GRPO advantages.
+        rpp = (
+            int(config.rollouts_per_prompt)
+            if config.rollouts_per_prompt is not None
+            else 4
+        )
+        if rpp < 2:
+            raise ValueError(
+                "rollouts_per_prompt must be >= 2 for NeMo RL GRPO/smoke "
+                f"(got {rpp})"
             )
+        overrides.append(f"grpo.num_generations_per_prompt={rpp}")
         if config.num_prompts_per_step is not None:
             overrides.append(
                 f"grpo.num_prompts_per_step={int(config.num_prompts_per_step)}"

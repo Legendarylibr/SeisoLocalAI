@@ -601,6 +601,17 @@ class TrainConfig(BaseModel):
     def _validate_nemo_rl(self) -> TrainConfig:
         if self.method != TrainMethod.NEMO_RL:
             return self
+        from seiso.slime.config import allow_tiny_rl, is_slime_ci_fixture_path
+
+        # NeMo recipes use their own corpora; Seiso still requires dataset for
+        # TrainConfig. Do not advertise CI toys as the product dataset field.
+        if not allow_tiny_rl() and is_slime_ci_fixture_path(self.dataset):
+            raise ValueError(
+                f"dataset={self.dataset} is a slime CI fixture "
+                "(data/slime_*.jsonl). For NeMo RL examples use a Hub id "
+                "placeholder (recipes ship their own data) or a real JSONL. "
+                "Smoke/CI: SEISO_ALLOW_TINY_RL=1."
+            )
         try:
             self.to_nemo_rl_config().validate()
         except ValueError as exc:

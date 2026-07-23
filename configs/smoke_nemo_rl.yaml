@@ -8,7 +8,8 @@
 #   nemo_rl_recipe: smoke
 
 model_id: Qwen/Qwen3-0.6B
-dataset: data/slime_sample.jsonl
+# Placeholder for TrainConfig only; NeMo smoke recipe uses GSM8K internally.
+dataset: open-r1/OpenR1-Math-220k
 output_dir: outputs/nemo-rl-smoke
 method: nemo_rl
 quant: none

@@ -1,11 +1,12 @@
-# Product slime code GRPO — operator JSONL with unit tests (not CI fixtures).
-# Shape reference only until you point dataset/eval at real verifiable code rows.
-# CI toys: data/slime_code_*.jsonl via SEISO_ALLOW_TINY_RL=1 (tests / local smoke).
+# Product slime code GRPO — shape template (paths must exist before train).
+# Replace dataset/eval with real verifiable code JSONL (prompt + tests).
+# Validate fails until files exist (or SEISO_ALLOW_TEMPLATE_SLIME=1).
+# CI toys: data/slime_code_*.jsonl via SEISO_ALLOW_TINY_RL=1.
 model_id: Qwen/Qwen2.5-0.5B-Instruct
 method: slime
 # slime path uses full-precision (+ optional LoRA); quant ignored by slime runner
 quant: none
-# REQUIRED: replace with your train/eval JSONL (prompt + answer + tests metadata).
+# REQUIRED: create these (or point at your train/eval JSONL).
 dataset: ./data/operator_code_train.jsonl
 eval_dataset: ./data/operator_code_eval.jsonl
 require_held_out_eval: true
