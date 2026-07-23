@@ -183,6 +183,23 @@ def test_cli_docs_cover_slime_training():
     assert "slime" in registered
 
 
+def test_cli_docs_cover_nemo_rl_training():
+    """NeMo RL must be documented with example config + CLI path."""
+    cli_doc = _read("docs/cli.md")
+    quickstart = _read("docs/training/quickstart.md")
+    example = "configs/example_training_nemo_rl.yaml"
+    assert example in cli_doc
+    assert (REPO_ROOT / example).is_file()
+    assert (REPO_ROOT / "configs/smoke_nemo_rl.yaml").is_file()
+    assert "method: nemo_rl" in cli_doc or "method: nemo_rl" in quickstart
+    assert "SEISO_NEMO_RL_ROOT" in cli_doc or "SEISO_NEMO_RL_ROOT" in quickstart
+    assert "seiso nemo-rl" in cli_doc
+    from seiso_cli.main import app
+
+    registered = {cmd.name for cmd in app.registered_commands}
+    assert "nemo-rl" in registered
+
+
 def test_docs_do_not_reference_nonexistent_rl_quant_extra():
     """pyproject.toml has no [rl-quant] optional extra — docs must not claim one."""
     for rel in ("docs/compression.md", "docs/install.md"):

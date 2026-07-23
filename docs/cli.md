@@ -70,6 +70,15 @@ seiso train --config configs/example_training_slime.yaml
 
 Use `method: slime` for local rollout/reward policy updates with LoRA adapters, verifier JSONL, best/final checkpoints, and plateau auto-stop. See [training/quickstart.md § Slime Post-Training](training/quickstart.md#slime-post-training).
 
+NVIDIA [NeMo RL](https://github.com/NVIDIA-NeMo/RL) is a separate first-class method that shells out to an external checkout:
+
+```bash
+export SEISO_NEMO_RL_ROOT=~/nemo-rl   # git clone --recursive https://github.com/NVIDIA-NeMo/RL.git
+seiso train --config configs/example_training_nemo_rl.yaml
+```
+
+Use `method: nemo_rl` with `nemo_rl_recipe: grpo|dpo|distillation|smoke`. Dry-run preview: `configs/smoke_nemo_rl.yaml` (`nemo_rl_dry_run: true`). See [training/quickstart.md § NeMo RL](training/quickstart.md#nemo-rl).
+
 ## `seiso slime`
 
 Dedicated single-process slime CLI (same core as `seiso train -c … method: slime`):
@@ -78,9 +87,17 @@ Dedicated single-process slime CLI (same core as `seiso train -c … method: sli
 seiso slime --config configs/example_training_slime.yaml
 ```
 
+## `seiso nemo-rl`
+
+Dedicated NeMo RL launcher (same core as `seiso train -c … method: nemo_rl`):
+
+```bash
+seiso nemo-rl --config configs/example_training_nemo_rl.yaml
+```
+
 For multi-GPU / vLLM / SGLang rollouts, prefer `seiso train` with a slime YAML (or `scripts/run_slime_vllm_ddp.sh`). Forge Training Studio runs the same training stack with full-dataset analysis, live recommendations, and SSE job streaming via `/api/training/*` (see [training/quickstart.md](training/quickstart.md)).
 
-**Checkpoints (CLI):** written under the YAML `output_dir` (example: `./outputs/lora-run/checkpoint-<timestamp>/` for SFT, or `./outputs/slime-train-method/` for slime), including `seiso_manifest.json`. SFT runs also write `dataset_analysis.json`; slime runs write `slime_single_gpu_metrics.jsonl` (stable filename), `slime_training_state.json`, and optional `slime_verifier_data.jsonl`. Implementation lives in `seiso.slime` (legacy import path `seiso.slime_single_gpu` still works).
+**Checkpoints (CLI):** written under the YAML `output_dir` (example: `./outputs/lora-run/checkpoint-<timestamp>/` for SFT, or `./outputs/slime-train-method/` for slime), including `seiso_manifest.json`. SFT runs also write `dataset_analysis.json`; slime runs write `slime_single_gpu_metrics.jsonl` (stable filename), `slime_training_state.json`, and optional `slime_verifier_data.jsonl`. Implementation lives in `seiso.slime` (legacy import path `seiso.slime_single_gpu` still works). NeMo RL runs write `nemo_rl_launch.yaml` plus `seiso_manifest.json` under `output_dir` (checkpoints themselves land in NeMo RL’s `checkpointing.checkpoint_dir`).
 
 **Checkpoints (Forge UI):** `{SEISO_DATA_DIR}/checkpoints/{user_id}/{job_id}/`
 

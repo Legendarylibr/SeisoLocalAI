@@ -12,7 +12,7 @@ from typing import Any
 from seiso.io.jsonl import read_json_file
 
 _FINETUNE_TYPES = frozenset(
-    {"lora", "qlora", "full", "embedding", "slime", "rl_quant", "compress"}
+    {"lora", "qlora", "full", "embedding", "slime", "nemo_rl", "rl_quant", "compress"}
 )
 
 
@@ -195,6 +195,8 @@ def metadata_from_manifest(
         meta.library_name = "sentence-transformers"
     elif method == "slime":
         meta.finetune_type = "slime"
+    elif method == "nemo_rl":
+        meta.finetune_type = "nemo_rl"
 
     if not meta.base_model:
         meta.base_model = manifest.get("model_id")

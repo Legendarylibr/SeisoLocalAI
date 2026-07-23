@@ -95,6 +95,8 @@ def learning_rate_for_method(
         return 2e-5
     if method == TrainMethod.SLIME:
         return 5e-6
+    if method == TrainMethod.NEMO_RL:
+        return 5e-6
     return 2e-4
 
 

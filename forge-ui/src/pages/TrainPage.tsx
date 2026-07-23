@@ -79,6 +79,11 @@ export function TrainPage() {
   const [slimeMaxPromptTokens, setSlimeMaxPromptTokens] = useState(512);
   const [slimeMaxNewTokens, setSlimeMaxNewTokens] = useState(256);
   const [slimeAutoStop, setSlimeAutoStop] = useState(true);
+  const [nemoRlRecipe, setNemoRlRecipe] = useState("grpo");
+  const [nemoRlGpusPerNode, setNemoRlGpusPerNode] = useState(1);
+  const [nemoRlMaxSteps, setNemoRlMaxSteps] = useState(50);
+  const [nemoRlUseLora, setNemoRlUseLora] = useState(false);
+  const [nemoRlDryRun, setNemoRlDryRun] = useState(false);
   const [multiGpu, setMultiGpu] = useState(false);
   const [activeTab, setActiveTab] = useState<TrainStudioTab>("setup");
   const [distributedStrategy, setDistributedStrategy] = useState("auto");
@@ -292,7 +297,9 @@ export function TrainPage() {
 
   useEffect(() => {
     if (method === "full") setExportProfile("full_bundle");
-    else if (method === "lora" || method === "slime") setExportProfile("lora_bundle");
+    else if (method === "lora" || method === "slime" || method === "nemo_rl") {
+      setExportProfile("lora_bundle");
+    }
   }, [method]);
 
   useEffect(() => {
@@ -413,6 +420,7 @@ export function TrainPage() {
         preferenceAsSft,
         slimeDynamicSampling,
         slimeEvalDataset,
+        nemoRlRecipe,
       }),
     [
       method,
@@ -423,6 +431,7 @@ export function TrainPage() {
       preferenceAsSft,
       slimeDynamicSampling,
       slimeEvalDataset,
+      nemoRlRecipe,
     ],
   );
   const isPreferenceDataset = effectiveDatasetFormat === "preference";
@@ -649,6 +658,21 @@ export function TrainPage() {
               slime_use_lora: true,
             }
           : {};
+      const nemoRlTrainingConfig =
+        method === "nemo_rl"
+          ? {
+              quant: "none",
+              nemo_rl_recipe: nemoRlRecipe,
+              nemo_rl_gpus_per_node: Math.max(1, nemoRlGpusPerNode),
+              nemo_rl_num_nodes: 1,
+              nemo_rl_max_steps: Math.max(1, nemoRlMaxSteps),
+              nemo_rl_use_lora: nemoRlUseLora,
+              nemo_rl_dry_run: nemoRlDryRun,
+              rollouts_per_prompt: slimeRolloutsPerPrompt,
+              rollout_batch_size: Math.max(slimeRolloutBatchSize, 1),
+              nemo_rl_extra_overrides: ["logger.wandb_enabled=False"],
+            }
+          : {};
 
       const distributedTrainingOverrides =
         distributedEnabled && distributedOverridesEnabled
@@ -668,6 +692,7 @@ export function TrainPage() {
         {
           ...baseTrainingConfig,
           ...slimeTrainingConfig,
+          ...nemoRlTrainingConfig,
           ...distributedTrainingOverrides,
           multi_gpu: distributedEnabled,
           distributed_strategy: distributedStrategy,
@@ -916,9 +941,13 @@ export function TrainPage() {
                     <Link to="/distill-rl">Distill-RL</Link> for real DPO on chosen/rejected pairs.
                     {method === "slime"
                       ? " SLIME GRPO cannot train on preference pairs — switch method to LoRA/full or open Distill-RL."
+                      : method === "nemo_rl" && nemoRlRecipe !== "dpo"
+                        ? " NeMo RL GRPO/smoke cannot use preference pairs — switch recipe to DPO or open Distill-RL."
+                        : method === "nemo_rl" && nemoRlRecipe === "dpo"
+                          ? " NeMo RL DPO will consume preference pairs via the upstream recipe."
                       : " Training Studio only continues if you opt into chosen-only SFT (rejected discarded)."}
                   </div>
-                  {method !== "slime" && (
+                  {method !== "slime" && !(method === "nemo_rl" && nemoRlRecipe === "dpo") && (
                     <label className="studio-checkbox-item" style={{ marginTop: 8 }}>
                       <input
                         type="checkbox"
@@ -1006,6 +1035,7 @@ export function TrainPage() {
                 <option value="full">Full fine-tune</option>
                 <option value="embedding">Embedding</option>
                 <option value="slime">SLIME RL</option>
+                <option value="nemo_rl">NeMo RL</option>
               </select>
             </div>
             <div className="form-field">
@@ -1040,7 +1070,7 @@ export function TrainPage() {
             </div>
           </div>
 
-          {(method === "lora" || method === "slime") && (
+          {(method === "lora" || method === "slime" || (method === "nemo_rl" && nemoRlUseLora)) && (
             <FormSection title="LoRA settings" hint="Rank, alpha, and gradient accumulation." collapsible defaultOpen={false}>
               <div className="studio-slider-grid">
                 <div className="slider-row">
@@ -1237,6 +1267,89 @@ export function TrainPage() {
                   />
                 </div>
               </div>
+            </FormSection>
+          )}
+          {method === "nemo_rl" && (
+            <FormSection
+              title="NeMo RL"
+              hint="External NVIDIA-NeMo/RL launch (requires SEISO_NEMO_RL_ROOT + uv)."
+              collapsible
+              defaultOpen
+            >
+              <p className="muted-text studio-field-hint">
+                Seiso shells out to{" "}
+                <a href="https://github.com/NVIDIA-NeMo/RL" target="_blank" rel="noreferrer">
+                  NVIDIA NeMo RL
+                </a>{" "}
+                via <code>uv run</code>. Clone the repo recursively and set{" "}
+                <code>SEISO_NEMO_RL_ROOT</code>. Recipe datasets come from NeMo RL YAML defaults
+                unless you pass extra Hydra overrides.
+              </p>
+              <div className="option-grid">
+                <div className="form-field">
+                  <label>Recipe</label>
+                  <select
+                    value={nemoRlRecipe}
+                    onChange={(e) => {
+                      setNemoRlRecipe(e.target.value);
+                      setConfigCustomized(true);
+                    }}
+                  >
+                    <option value="grpo">GRPO</option>
+                    <option value="dpo">DPO</option>
+                    <option value="distillation">On-policy distillation</option>
+                    <option value="smoke">Smoke (10-step GRPO)</option>
+                  </select>
+                </div>
+                <div className="form-field">
+                  <label>GPUs per node</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={8}
+                    value={nemoRlGpusPerNode}
+                    onChange={(e) => {
+                      setNemoRlGpusPerNode(Math.max(1, Number(e.target.value) || 1));
+                      setConfigCustomized(true);
+                    }}
+                  />
+                </div>
+                <div className="form-field">
+                  <label>Max steps</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={1000000}
+                    value={nemoRlMaxSteps}
+                    onChange={(e) => {
+                      setNemoRlMaxSteps(Math.max(1, Number(e.target.value) || 1));
+                      setConfigCustomized(true);
+                    }}
+                  />
+                </div>
+              </div>
+              <label className="studio-checkbox-item studio-checkbox-item-standalone">
+                <input
+                  type="checkbox"
+                  checked={nemoRlUseLora}
+                  onChange={(e) => {
+                    setNemoRlUseLora(e.target.checked);
+                    setConfigCustomized(true);
+                  }}
+                />
+                Enable NeMo RL LoRA
+              </label>
+              <label className="studio-checkbox-item studio-checkbox-item-standalone">
+                <input
+                  type="checkbox"
+                  checked={nemoRlDryRun}
+                  onChange={(e) => {
+                    setNemoRlDryRun(e.target.checked);
+                    setConfigCustomized(true);
+                  }}
+                />
+                Dry-run (write launch sidecar only)
+              </label>
             </FormSection>
           )}
           </StudioCardBody>

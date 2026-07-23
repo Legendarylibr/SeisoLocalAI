@@ -1,0 +1,35 @@
+# NVIDIA NeMo RL via Seiso (external checkout).
+#
+# Prerequisites:
+#   1. git clone --recursive https://github.com/NVIDIA-NeMo/RL.git ~/nemo-rl
+#   2. export SEISO_NEMO_RL_ROOT=~/nemo-rl
+#   3. Install uv (https://docs.astral.sh/uv/) — NeMo RL launches with `uv run`
+#
+# Launch:
+#   seiso train --config configs/example_training_nemo_rl.yaml
+#   # or
+#   seiso nemo-rl --config configs/example_training_nemo_rl.yaml
+#
+# For a 10-step install smoke, set nemo_rl_recipe: smoke
+
+model_id: Qwen/Qwen2.5-1.5B
+dataset: data/slime_sample.jsonl  # Seiso metadata; NeMo RL uses its recipe dataset by default
+output_dir: outputs/nemo-rl-grpo
+method: nemo_rl
+quant: none
+learning_rate: 0.000005
+seed: 42
+rollouts_per_prompt: 4
+rollout_batch_size: 2
+nemo_rl_recipe: grpo
+# nemo_rl_root: ~/nemo-rl   # or set SEISO_NEMO_RL_ROOT
+nemo_rl_gpus_per_node: 1
+nemo_rl_num_nodes: 1
+# Cap steps for a short run (omit for full recipe length):
+nemo_rl_max_steps: 50
+nemo_rl_use_lora: false
+# Extra Hydra overrides passed through to NeMo RL:
+nemo_rl_extra_overrides:
+  - logger.wandb_enabled=False
+# Preview launch files without executing NeMo RL:
+# nemo_rl_dry_run: true

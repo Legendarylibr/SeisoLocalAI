@@ -1,6 +1,6 @@
 # Training quickstart
 
-Fine-tune open models with QLoRA, LoRA, full fine-tuning, or slime-style post-training using Forge Training Studio or the CLI.
+Fine-tune open models with QLoRA, LoRA, full fine-tuning, slime-style post-training, or external NVIDIA NeMo RL using Forge Training Studio or the CLI.
 
 **Prerequisites:** Seiso installed with `[train]` extra. See [install.md](../install.md).
 
@@ -29,8 +29,8 @@ start
 | Data / signal | Use | Avoid |
 |---------------|-----|--------|
 | Chat / alpaca / sharegpt / text | SFT (`method: lora` / `full`) with `train_on_responses_only` for chat-style rows | Packing + response-only together on chat formats |
-| Verifiable prompts (numeric / choice / code tests) | `method: slime` (GRPO) with outcome rewards | Format-only shaping; `dynamic_sampling_filter: none` for real runs |
-| Preference pairs (`chosen` / `rejected`) | Distill-RL / DPO (`seiso distill-rl`) | Training Studio SFT unless `preference_as_sft: true` (chosen-only; not DPO) |
+| Verifiable prompts (numeric / choice / code tests) | `method: slime` (GRPO) with outcome rewards, or `method: nemo_rl` | Format-only shaping; `dynamic_sampling_filter: none` for real runs |
+| Preference pairs (`chosen` / `rejected`) | Distill-RL / DPO (`seiso distill-rl`), or `method: nemo_rl` + `nemo_rl_recipe: dpo` | Training Studio SFT unless `preference_as_sft: true` (chosen-only; not DPO) |
 
 See [Algorithms & Meaningful Objectives](../ANALYSIS.md#algorithms--meaningful-objectives) in the project analysis for loss identities and defaults.
 
@@ -124,7 +124,7 @@ save_steps: 50
 | `dataset` | Hub ID, JSONL/JSON path, or directory |
 | `dataset_format` | `auto`, `chat`, `alpaca`, `sharegpt`, `preference`, or `text` |
 | `preference_as_sft` | Opt-in chosen-only SFT for preference rows (default `false` refuses — use Distill-RL/DPO for real alignment) |
-| `method` | `lora`, `full`, `embedding`, or `slime` |
+| `method` | `lora`, `full`, `embedding`, `slime`, or `nemo_rl` |
 | `quant` | `4bit`, `8bit`, `16bit`, or `none` |
 | `preprocess_dataset` | Normalize and clean rows before training |
 | `deduplicate_dataset` | Drop exact duplicate rows after normalization |
@@ -153,6 +153,43 @@ save_steps: 50
 | `ddp_backend` | Optional DDP backend (`null`, `nccl`, `gloo`, etc.) |
 
 Modern training defaults (bf16 compute on CUDA when supported, paged AdamW 8-bit for 4/8-bit quant, non-reentrant gradient checkpointing, cosine LR schedule) are applied automatically in `seiso/training/practices.py`.
+
+---
+
+## NeMo RL
+
+Use `method: nemo_rl` to launch **[NVIDIA NeMo RL](https://github.com/NVIDIA-NeMo/RL)** as an external post-training stack (Ray + DTensor/Megatron + vLLM/SGLang). Seiso does **not** vendor NeMo RL — it projects a small Seiso config into Hydra overrides and runs `uv run python examples/run_*.py` inside your checkout.
+
+**Prerequisites**
+
+```bash
+git clone --recursive https://github.com/NVIDIA-NeMo/RL.git ~/nemo-rl
+export SEISO_NEMO_RL_ROOT=~/nemo-rl
+# uv required: https://docs.astral.sh/uv/
+```
+
+**Launch**
+
+```bash
+seiso train --config configs/example_training_nemo_rl.yaml
+# or
+seiso nemo-rl --config configs/example_training_nemo_rl.yaml
+```
+
+| Field | Description |
+|-------|-------------|
+| `nemo_rl_recipe` | `grpo` (default), `dpo`, `distillation`, or `smoke` (10-step GRPO install check) |
+| `nemo_rl_root` | Checkout path (else `SEISO_NEMO_RL_ROOT` / sibling discovery) |
+| `nemo_rl_base_config` | Optional YAML relative to the checkout (recipe default otherwise) |
+| `nemo_rl_gpus_per_node` / `nemo_rl_num_nodes` | Cluster size passed to NeMo RL |
+| `nemo_rl_max_steps` | Caps `grpo.max_num_steps` when set |
+| `nemo_rl_use_lora` | Sets `policy.lora_cfg.enabled=true` |
+| `nemo_rl_extra_overrides` | Extra Hydra overrides (list of `key=value` strings) |
+| `nemo_rl_dry_run` | Write `nemo_rl_launch.yaml` + manifest without executing |
+
+Dry-run smoke (no GPU / no checkout required): `configs/smoke_nemo_rl.yaml`.
+
+Prefer **slime** when you want Seiso-native GRPO with `rl_verify` and Forge SSE metrics. Prefer **NeMo RL** when you need NeMo’s Ray scale, Megatron path, DAPO/GDPO recipes, or NeMo-Gym environments.
 
 ---
 
