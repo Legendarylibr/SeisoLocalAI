@@ -248,14 +248,15 @@ def test_trainer_fails_without_data_designer(tmp_path: Path):
         _maybe_materialize_data_gen(cfg, dist)
 
 
-def test_example_vllm_config_defaults_operator_path():
+def test_example_vllm_config_defaults_hub_materialize():
     from seiso.training.config import TrainConfig
 
     cfg = TrainConfig.from_yaml("configs/example_training_slime_vllm.yaml")
     slime = cfg.to_single_gpu_slime_config()
-    assert slime.data_gen is False
-    assert slime.data_gen_source == "off"
+    assert slime.data_gen is True
+    assert slime.data_gen_source == "dataset"
+    assert slime.dataset_ref == "open-r1/OpenR1-Math-220k"
     assert slime.data_designer == "off"
-    assert slime.eval_dataset is not None
+    assert slime.eval_dataset is None  # materialize auto-splits held-out
     assert slime.require_held_out_eval is True
     slime.validate()

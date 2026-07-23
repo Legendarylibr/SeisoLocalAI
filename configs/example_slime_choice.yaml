@@ -1,10 +1,12 @@
+# Product slime choice GRPO — operator JSONL (not CI fixtures under data/slime_*.jsonl).
+# CI toys: data/slime_choice_*.jsonl via SEISO_ALLOW_TINY_RL=1 (tests / local smoke).
 model_id: Qwen/Qwen2.5-0.5B-Instruct
 method: slime
 # slime path uses full-precision (+ optional LoRA); quant ignored by slime runner
 quant: none
-# data/slime_*.jsonl files are CI fixtures, not training corpora.
-dataset: data/slime_choice_sample.jsonl
-eval_dataset: data/slime_choice_eval.jsonl
+# REQUIRED: replace with your train/eval multiple-choice JSONL.
+dataset: ./data/operator_choice_train.jsonl
+eval_dataset: ./data/operator_choice_eval.jsonl
 require_held_out_eval: true
 output_dir: outputs/slime-choice
 prompt_field: prompt
@@ -52,3 +54,6 @@ auto_stop_metric: outcome_reward_mean
 auto_stop_patience: 20
 write_verifier_data: true
 verifier_data_file: slime_verifier_data.jsonl
+data_gen: false
+data_gen_source: "off"
+data_designer: "off"

@@ -1,4 +1,6 @@
-# CI fixture only — not for meaningful GRPO training (tiny JSONL + SEISO_ALLOW_TINY_RL).
+# CI / agent smoke only — uses committed data/slime_*.jsonl toys.
+# Not for meaningful GRPO. Requires SEISO_ALLOW_TINY_RL=1 (pytest conftest sets it).
+# Product recipes: configs/example_training_slime.yaml (Hub materialize).
 # Tiny CPU smoke for slime GRPO + verifier rewards (no CUDA required).
 model_id: hf-internal-testing/tiny-random-LlamaForCausalLM
 method: slime

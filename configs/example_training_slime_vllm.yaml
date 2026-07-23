@@ -8,9 +8,8 @@
 #   SEISO_MANAGED_VLLM_MODEL=Qwen/Qwen2.5-0.5B-Instruct seiso forge
 #   then set vllm_base_url to the managed base (http://127.0.0.1:8000).
 model_id: Qwen/Qwen2.5-0.5B-Instruct
-# Replace fixtures with curated verifiable train/eval (OpenR1-style / operator JSONL).
-dataset: data/slime_sample.jsonl
-eval_dataset: data/slime_numeric_eval.jsonl
+# Product Hub materialize (not data/slime_*.jsonl CI fixtures).
+dataset: open-r1/OpenR1-Math-220k
 require_held_out_eval: true
 output_dir: outputs/slime-train-vllm
 method: slime
@@ -88,9 +87,11 @@ stop_on_nonfinite: true
 write_verifier_data: true
 verifier_data_file: slime_verifier_data.jsonl
 verifier_max_text_chars: 2048
-data_gen: false
-data_gen_source: "off"
+data_gen: true
+data_gen_source: dataset
+dataset_ref: open-r1/OpenR1-Math-220k
+data_gen_count: 2048
+data_gen_filename: slime_generated.jsonl
 data_designer: "off"
-# Opt-in synth: data_gen_source=dataset|data_designer (DD needs package + live endpoint).
 # Optional TP size hint when training is single-process but vLLM uses multi-GPU:
 # vllm_tensor_parallel: 2

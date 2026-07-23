@@ -121,9 +121,11 @@ def test_example_training_slime_config_loads():
     assert slime.reward == "auto"
     assert slime.answer_field == "answer"
     assert slime.rollout_backend == "hf"
-    assert slime.data_gen is False
-    assert slime.data_gen_source == "off"
-    assert slime.eval_dataset is not None
+    assert slime.data_gen is True
+    assert slime.data_gen_source == "dataset"
+    assert slime.dataset_ref == "open-r1/OpenR1-Math-220k"
+    assert slime.data_gen_count >= 256
+    assert slime.eval_dataset is None  # materialize auto-splits held-out
     assert slime.require_held_out_eval is True
     assert slime.process_reward_weight == 0.0
     assert slime.format_reward_weight == 0.1
@@ -151,6 +153,29 @@ def test_product_slime_examples_load_without_tiny_rl(monkeypatch):
         slime = cfg.to_single_gpu_slime_config()
         slime.validate()
         assert slime.policy_micro_batch_size % slime.rollouts_per_prompt == 0, path
+        from seiso.slime.config import is_slime_ci_fixture_path
+
+        assert not is_slime_ci_fixture_path(slime.dataset), path
+        assert not is_slime_ci_fixture_path(slime.eval_dataset), path
+
+
+def test_product_slime_refuses_ci_fixture_dataset(tmp_path, monkeypatch):
+    monkeypatch.delenv("SEISO_ALLOW_TINY_RL", raising=False)
+    import pytest
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="CI fixture"):
+        TrainConfig.model_validate(
+            {
+                "model_id": "test/model",
+                "dataset": "data/slime_sample.jsonl",
+                "eval_dataset": "data/slime_numeric_eval.jsonl",
+                "output_dir": tmp_path / "out",
+                "method": "slime",
+                "require_held_out_eval": True,
+                "data_gen": False,
+            }
+        )
 
 
 def test_example_slime_yaml_loads_via_train_config_with_aliases():
@@ -172,11 +197,12 @@ def test_example_slime_code_yaml_maps_held_out_eval_aliases():
     cfg = TrainConfig.from_yaml("configs/example_slime_code.yaml")
     slime = cfg.to_single_gpu_slime_config()
 
-    assert cfg.slime_eval_dataset == Path("data/slime_code_eval.jsonl")
+    assert cfg.slime_eval_dataset == Path("data/operator_code_eval.jsonl")
     assert cfg.slime_eval_on_complete is True
-    assert slime.eval_dataset == Path("data/slime_code_eval.jsonl")
+    assert slime.eval_dataset == Path("data/operator_code_eval.jsonl")
     assert slime.eval_on_complete is True
     assert slime.eval_dataset != slime.dataset
+    assert "operator_code" in str(slime.dataset)
 
 
 def test_smoke_and_example_lora_yaml_fields_consumed():
@@ -200,9 +226,10 @@ def test_example_training_slime_ddp_config_loads():
     assert cfg.distributed_strategy.value == "ddp"
     assert cfg.balance_data is True
     assert slime.balance_data is True
-    assert slime.data_gen is False
-    assert slime.data_gen_source == "off"
-    assert slime.eval_dataset is not None
+    assert slime.data_gen is True
+    assert slime.data_gen_source == "dataset"
+    assert slime.dataset_ref == "open-r1/OpenR1-Math-220k"
+    assert slime.eval_dataset is None
     assert slime.clip_ratio_high == 0.28
     assert slime.grpo_std_normalization is True
 
