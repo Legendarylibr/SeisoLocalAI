@@ -1,12 +1,12 @@
 # SeisoLocalAI Project Analysis
 
-**Date:** 2026-06-25 (executive refresh 2026-07-20)  
+**Date:** 2026-06-25 (executive refresh 2026-07-23 / v0.4.0)  
 **Source:** Local clone — [github.com/Legendarylibr/SeisoLocalAI](https://github.com/Legendarylibr/SeisoLocalAI)  
 **Analyst context:** Full source tree + populated `~/.seiso`, prior usage artifacts, successful UI build + partial CI runs on RTX 4090 Linux host.
 
 This document provides a software engineering analysis: architecture, features, code health, security, platform notes, WIP status, and actionable recommendations.
 
-**July 2026 full-tree review:** See [reports/codebase-review-2026-07.md](reports/codebase-review-2026-07.md) for phased findings (safety, product surfaces, research claims, Forge/UI/docs), keep/deprecate/delete decisions, and remediations landed in that pass. Top residual risks: global DNS-pin concurrency (S1-001), dual RL-quant preset registries (RP-05), multi-backend chat picker (INF-01). Remote + code-exec is hard-refused (AST sandbox is not OS isolation).
+**July 2026 full-tree review:** See [reports/codebase-review-2026-07.md](reports/codebase-review-2026-07.md) for phased findings and remediations. **Landed since that pass (through v0.4.0+):** DNS-pin httpx transport (S1-001), multi-backend chat picker (INF-01), shared `USER_SCOPED_DATA_ROOTS` (S1-003), drop unused DB tables (F4-03–05), LoRA-only FULL/BASE export refuse (EXP-02), slime off-policy logprob docs + sync-weight guards (SLM-01), NeMo RL external method, training-config / GRPO invariants, Forge red-team hardening (tools system policy, KB quarantine, Compat key chat-only, remote+code-exec hard refuse), single RL-quant product preset registry (RP-05). **Top residual risks:** remaining path/sandbox consolidation edges; AST code-exec is still not OS isolation (localhost-only).
 
 ---
 
@@ -19,9 +19,10 @@ Seiso is a **mature, ambitious local-first AI workspace** (GPL-3.0) that combine
 - Strong emphasis on **privacy, hardware optimization, reproducibility, and security sandboxing**.
 
 **Core workflows supported end-to-end:**
-- Model discovery (HF Hub GGUF catalog) + download + chat (llama-swap / llama.cpp / MLX / PyTorch).
+- Model discovery (HF Hub GGUF catalog) + download + chat (llama-swap / llama.cpp / MLX / PyTorch; multi-backend picker when several engines are viable).
 - QLoRA / LoRA / full fine-tuning with live metrics/SSE.
-- Export (LoRA merge, GGUF multi-quant, Hub publish + model cards).
+- Post-training: Seiso-native slime GRPO (`method: slime`, HF / DDP / vLLM / SGLang rollouts) and external NVIDIA NeMo RL (`method: nemo_rl`, no vendoring).
+- Export (LoRA merge, GGUF multi-quant, Hub publish + model cards; LoRA-only checkpoints refuse FULL/BASE).
 - Advanced research pipelines: LLM compression (distill + optional prune + FT + quant), Distill-RL (KL + DPO), RL quantization (adaptive + optional kernel policy co-training).
 - RAG/knowledge bases, visual recipe graphs, provider routing, Compat API (`/v1`).
 
@@ -79,7 +80,7 @@ User
 - **Repro**: Manifests (hash chained via bundled replay), provenance, seeds, snapshots.
 - **Inference**: Model pool with unload, native Linux sidecar isolation, backends auto-select, speculative, context limits, external router client mode.
 
-Entry points: `start` script, `seiso` CLI (`forge`, `train`, `chat`, `export`, `compress`, `distill-rl`, `rl-quant`, `experiment`, …), `forge.main:create_app`, `seiso-train-worker`, `seiso-bench-kernels`.
+Entry points: `start` script, `seiso` CLI (`forge`, `train`, `slime`, `nemo-rl`, `chat`, `export`, `compress`, `distill-rl`, `rl-quant`, `experiment`, …), `forge.main:create_app`, `seiso-train-worker`, `seiso-bench-kernels`.
 
 ---
 
@@ -93,16 +94,17 @@ Entry points: `start` script, `seiso` CLI (`forge`, `train`, `chat`, `export`, `
 - Compat API lives at root `/v1/...` (no /api prefix).
 - External router mode (`__seiso_router__`) for intelligent model selection through a separately running router service.
 
-### Training Studio (QLoRA / LoRA / full)
+### Training Studio (QLoRA / LoRA / full / slime / NeMo RL)
 - `seiso/training/{config.py,trainer.py,sft.py,datasets.py,preprocess.py,metrics.py,recommendations.py,multi_gpu.py,worker.py}`
 - Uses TRL SFTTrainer (+ optional fused CE). PEFT for LoRA.
+- Slime GRPO: `seiso/slime/` (policy, rollouts, trainer; DDP `no_sync` + engine weight sync).
+- NeMo RL: `seiso/nemo_rl/` external launcher (`SEISO_NEMO_RL_ROOT` + `uv run`).
 - Orchestrator + route: `forge/orchestrators/training.py`, `forge/api/routes/training.py`.
-- UI: TrainPage.tsx (rich form + recs + SSE logs + metrics).
+- UI: TrainPage.tsx (rich form + recs + SSE logs + metrics; method picker includes slime / NeMo RL).
 - Distributed fine-tuning via Hugging Face Accelerate + worker.
 - Auto-export hook after success.
 - Fused kernels applied inside trainer.
-
-**Recent local edit**: Training route now propagates `job.error` as `error_text` (consistent with exception path).
+- Job completion propagates `job.error` as `error_text`.
 
 ### Export / GGUF / Hub
 - `seiso/export/{pipeline.py,formats.py,gguf.py,profiles.py,hub_precheck.py,model_card.py}`
@@ -124,7 +126,8 @@ Entry points: `start` script, `seiso` CLI (`forge`, `train`, `chat`, `export`, `
 - Adaptive RL for GGUF quant policy (per-tensor/layer).
 - Optional `--kernel-rl` co-trains discrete CUDA kernel profiles.
 - `seiso/rl_quant/{runner.py,config_builder.py,sweep.py,kernel_integration.py}`
-- Heavy use of bundled adaptive RL quant internals.
+- Product presets (`minimal` / `reproducible` / `post_train`) live in one registry: `seiso/rl_quant/presets.py` (API metadata, aliases, defaults, sweep grids).
+- Heavy use of bundled adaptive RL quant internals via `named_preset`.
 
 ### Quant regression experiments
 - `seiso experiment quant-regression` — multi-quant QLoRA training, GGUF export, HF + llama.cpp deploy-quant regression.
@@ -189,14 +192,16 @@ All three changes are **correct and minimal**:
 - **Default posture**: Bind localhost, encrypted sensitive DB columns (chat content, provider configs, tokens), per-user isolation.
 - Auth: Local JWT + first-run onboarding (username/password stored hashed).
 - CSRF + rate limiting middleware (configurable).
-- Path sandbox + `assert_within` everywhere artifacts are written/read.
+- Path sandbox + `assert_within` / shared `USER_SCOPED_DATA_ROOTS` for artifact paths.
 - HF tokens: stored encrypted; CLI `hf` also visible.
 - NVIDIA boundary / GPU reporting (no exfil).
-- SSRF guards on provider URLs + http client.
+- SSRF guards on provider URLs; DNS-pinned httpx transport (no process-global `getaddrinfo` race).
 - CSP nonce for served UI; tool/code-exec opt-in.
-- Audit logging hooks present.
+- Compat `/v1` inference API key is **chat-only**; `SEISO_ALLOW_COMPAT_TOOLS` requires a session JWT.
+- Remote + `SEISO_ALLOW_CODE_EXEC` is **hard-refused** (no ack override); AST policy ≠ OS sandbox.
+- Chat/tools keep security system policy when tools are on; instruction-like KB chunks are quarantined; redacted audit hashes for chat/tool turns.
 
-**Strong for a local tool.** Risks mainly around: bundled research code execution surface, external llama.cpp binaries, optional remote providers, and any future "allow_remote" toggles.
+**Strong for a local tool.** Residual risk: opt-in tools/code-exec on localhost, bundled research surfaces, external llama.cpp / NeMo RL / vLLM processes, and any intentional `allow_remote` deployment.
 
 ---
 
@@ -280,7 +285,7 @@ External: llama.cpp (convert/quantize binaries managed by scripts), nvcc for CUD
 - Continued improvements to bundled research packages (manifests, DPO, kernel RL).
 - macOS / AMD kernel story (Triton training limitations noted).
 - Full multi-user / project isolation polish.
-- Optional vLLM / other backends via providers.
+- Optional OS-level sandbox for localhost code-exec beyond AST deny-list.
 
 ### For Contributors
 - Always `make ci-fast` before PR.

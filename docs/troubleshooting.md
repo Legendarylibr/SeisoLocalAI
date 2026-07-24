@@ -229,6 +229,8 @@ Use header: `Authorization: Bearer seiso_sk_...`
 
 Or log in via Forge and use the session JWT.
 
+**Tool calling on `/v1`:** even with `SEISO_ALLOW_COMPAT_TOOLS=true`, the inference API key stays chat-only. Use a Forge session JWT for Compat tools.
+
 ## Port in use / Forge already running
 
 Forge binds exclusively to `127.0.0.1:8765` by default. A second `seiso forge` prints:

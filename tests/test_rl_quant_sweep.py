@@ -35,6 +35,10 @@ def test_default_sweep_grid_by_preset():
     assert "learning_rate" in reproducible
     assert "value_learning_rate" in reproducible
 
+    post_train = default_sweep_grid({"preset": "post_train"})
+    assert "reward_weights.beta_throughput" in post_train
+    assert default_sweep_grid({"preset": "posttrain"}) == post_train
+
 
 def test_sweep_episode_budget_scales_down():
     train, eval_eps = sweep_episode_budget(
